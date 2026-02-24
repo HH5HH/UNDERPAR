@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MinTools Trace</title>
+    <link rel="stylesheet" href="mincloud-devtools-panel.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <strong>MinTools REST V2 + MVPD Trace</strong>
+        <span id="tab-label" class="muted"></span>
+      </div>
+      <div class="toolbar-right">
+        <label class="toolbar-check"><input id="autoscroll" type="checkbox" checked /> Auto-scroll</label>
+        <label class="toolbar-check"><input id="toggle-extension-checkbox" type="checkbox" /> Show Extension Rows</label>
+        <button id="clear-btn" type="button">Clear</button>
+        <button id="copy-btn" type="button">Copy JSON</button>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="events-wrap">
+        <div class="pane-head">
+          <strong id="left-title">Flow • 0 event(s)</strong>
+          <span id="status" class="muted"></span>
+        </div>
+        <div class="events-table-head" aria-hidden="true">
+          <span class="event-col-seq">#</span>
+          <span class="event-col-time">Time</span>
+          <span class="event-col-source">Source</span>
+          <span class="event-col-phase">Phase</span>
+          <span class="event-col-status">Status</span>
+        </div>
+        <div id="events" class="events"></div>
+      </section>
+      <section class="details-wrap">
+        <div class="pane-head">
+          <strong>Selected Event</strong>
+        </div>
+        <div id="details" class="details">
+          <p class="details-empty">Select an event to view details.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="mincloud-devtools-panel.js"></script>
+  </body>
+</html>

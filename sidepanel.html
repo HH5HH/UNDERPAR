@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MinCloudLogin</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div class="brand">
+          <h1>MinCloudLogin</h1>
+          <p id="build-info" class="build-info">Build --</p>
+        </div>
+        <button id="auth-btn" type="button" class="auth-btn">Sign In</button>
+      </header>
+
+      <section id="avatar-menu" class="avatar-menu" hidden>
+        <div class="avatar-menu-header">
+          <div id="avatar-menu-image" class="avatar-menu-image" aria-hidden="true"></div>
+          <div class="avatar-menu-identity">
+            <p id="avatar-menu-name" class="avatar-menu-name"></p>
+            <p id="avatar-menu-email" class="avatar-menu-email"></p>
+            <p id="avatar-menu-org" class="avatar-menu-org"></p>
+          </div>
+        </div>
+        <div id="avatar-menu-details" class="avatar-menu-details"></div>
+        <hr class="avatar-menu-divider" />
+        <button id="sign-out-btn" type="button" class="sign-out-btn">Sign Out</button>
+      </section>
+
+      <p id="status" class="status" aria-live="polite" hidden></p>
+
+      <section id="restricted-view" class="restricted-view" hidden>
+        <p>For @AdobePass only</p>
+      </section>
+
+      <section id="workflow" class="workflow" hidden>
+        <div class="field">
+          <label for="media-company-select">Select a Media Company</label>
+          <select id="media-company-select" disabled>
+            <option value="">-- Please login first --</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="requestor-select">Content Provider (RequestorId)</label>
+          <select id="requestor-select" disabled>
+            <option value="">-- Select a Media Company first --</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="mvpd-select">MVPD</label>
+          <select id="mvpd-select" disabled>
+            <option value="">-- Select Requestor first --</option>
+          </select>
+        </div>
+
+        <div id="premium-services-container" class="premium-services-container">
+          <p class="metadata-empty">No premium scoped applications loaded yet.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

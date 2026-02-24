@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MinCloudLogin</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div class="brand">
+          <h1>MinCloudLogin</h1>
+          <p id="build-info" class="build-info">Build --</p>
+        </div>
+        <button id="auth-btn" type="button" class="auth-btn">Sign In</button>
+      </header>
+
+      <section id="avatar-menu" class="avatar-menu" hidden>
+        <div class="avatar-menu-header">
+          <div id="avatar-menu-image" class="avatar-menu-image" aria-hidden="true"></div>
+          <div class="avatar-menu-identity">
+            <p id="avatar-menu-name" class="avatar-menu-name"></p>
+            <p id="avatar-menu-email" class="avatar-menu-email"></p>
+            <p id="avatar-menu-org" class="avatar-menu-org"></p>
+          </div>
+        </div>
+        <div id="avatar-menu-details" class="avatar-menu-details"></div>
+        <hr class="avatar-menu-divider" />
+        <button id="sign-out-btn" type="button" class="sign-out-btn">Sign Out</button>
+      </section>
+
+      <p id="status" class="status" aria-live="polite" hidden></p>
+
+      <section id="restricted-view" class="restricted-view" hidden>
+        <div class="restricted-view-card">
+          <p class="restricted-view-title">For @AdobePass only</p>
+          <p class="restricted-view-copy">
+            Mincloud auto-attempts a switch to @AdobePass. If access is still denied, switch manually below.
+          </p>
+
+          <div class="restricted-view-context">
+            <p id="restricted-login-state" class="restricted-view-context-line"></p>
+            <p id="restricted-org-state" class="restricted-view-context-line"></p>
+            <p id="restricted-recovery-state" class="restricted-view-context-line"></p>
+          </div>
+
+          <div class="field restricted-org-field">
+            <label for="restricted-org-select">Adobe Org Profile</label>
+            <select id="restricted-org-select" disabled>
+              <option value="">-- No organizations available --</option>
+            </select>
+          </div>
+
+          <p id="restricted-org-hint" class="restricted-view-hint"></p>
+
+          <div class="restricted-view-actions">
+            <button id="restricted-org-switch-btn" type="button" class="restricted-action-btn" disabled>
+              Switch Org
+            </button>
+            <button
+              id="restricted-sign-in-btn"
+              type="button"
+              class="restricted-action-btn restricted-action-btn-secondary"
+            >
+              Sign In Again
+            </button>
+            <button
+              id="restricted-sign-out-btn"
+              type="button"
+              class="restricted-action-btn restricted-action-btn-secondary"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" class="workflow" hidden>
+        <div class="field">
+          <label for="media-company-select">Select a Media Company</label>
+          <select id="media-company-select" disabled>
+            <option value="">-- Please login first --</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="requestor-select">Content Provider (RequestorId)</label>
+          <select id="requestor-select" disabled>
+            <option value="">-- Select a Media Company first --</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="mvpd-select">MVPD</label>
+          <select id="mvpd-select" disabled>
+            <option value="">-- Select Requestor first --</option>
+          </select>
+        </div>
+
+        <div id="premium-services-container" class="premium-services-container">
+          <p class="metadata-empty">No premium scoped applications loaded yet.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
