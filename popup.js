@@ -103,6 +103,11 @@ const IMS_PROFILE_CLIENT_IDS = [IMS_CLIENT_ID, "AdobePass1"];
 const AVATAR_CACHE_STORAGE_PREFIX = "underpar_avatar_cache_v2:";
 const LEGACY_AVATAR_CACHE_STORAGE_PREFIX = "mincloudlogin_avatar_cache_v2:";
 const AVATAR_MAX_LOCALSTORAGE_DATAURL_BYTES = 220000;
+const AVATAR_PERSIST_STORAGE_PREFIX = "underpar_avatar_persist_v1:";
+const LEGACY_AVATAR_PERSIST_STORAGE_PREFIX = "mincloudlogin_avatar_persist_v1:";
+const AVATAR_PERSIST_GLOBAL_KEY = `${AVATAR_PERSIST_STORAGE_PREFIX}last`;
+const LEGACY_AVATAR_PERSIST_GLOBAL_KEY = `${LEGACY_AVATAR_PERSIST_STORAGE_PREFIX}last`;
+const AVATAR_PERSIST_TTL_SECONDS = 30 * 24 * 60 * 60;
 const IMS_LOGOUT_URLS = [
   `https://ims-na1.adobelogin.com/ims/logout/v1?client_id=${encodeURIComponent(IMS_CLIENT_ID)}&locale=en_US`,
   "https://ims-na1.adobelogin.com/ims/logout/v1?client_id=AdobePass1&locale=en_US",
@@ -5698,7 +5703,6 @@ function decompBuildShellHtml() {
       <div class="decomp-tree-head">
         <div class="decomp-tree-title">decomp</div>
         <div class="decomp-tree-actions">
-          <button type="button" class="decomp-open-workspace-btn">OPEN WORKSPACE</button>
           <button type="button" class="decomp-expand-btn">Expand</button>
           <button type="button" class="decomp-collapse-btn">Collapse</button>
           <span class="decomp-tree-stats"></span>
@@ -6082,16 +6086,6 @@ function wireDecompInteractions(decompState, requestToken) {
     decompExpandCollapseAll(decompState, false);
   });
 
-  decompState.openWorkspaceButton?.addEventListener("click", () => {
-    void decompEnsureWorkspaceTab({ activate: true, windowId: decompState.controllerWindowId })
-      .then(() => {
-        decompBroadcastControllerState(decompState);
-      })
-      .catch((error) => {
-        setStatus(`Unable to open decomp workspace: ${error instanceof Error ? error.message : String(error)}`, "error");
-      });
-  });
-
   decompState.requestorSelect?.addEventListener("change", () => {
     clickEsmHandleRequestorChange(decompState, requestToken);
     decompBroadcastControllerState(decompState);
@@ -6424,7 +6418,6 @@ async function loadDecompService(programmer, appInfo, section, contentElement, r
       resetButton: contentElement.querySelector(".decomp-reset-btn"),
       expandAllButton: contentElement.querySelector(".decomp-expand-btn"),
       collapseAllButton: contentElement.querySelector(".decomp-collapse-btn"),
-      openWorkspaceButton: contentElement.querySelector(".decomp-open-workspace-btn"),
       treeStatsElement: contentElement.querySelector(".decomp-tree-stats"),
       treeRootElement: contentElement.querySelector(".decomp-tree-root"),
       requestorSelect: contentElement.querySelector(".decomp-requestor-select"),
@@ -6810,7 +6803,8 @@ function isAuthFlowUrl(url) {
     value.includes("adobelogin.com") ||
     value.includes("experience.adobe.com") ||
     value.includes("console.auth.adobe.com") ||
-    value.includes("login.aepdebugger.adobe.com")
+    value.includes("login.aepdebugger.adobe.com") ||
+    value.includes("pps.services.adobe.com")
   );
 }
 
@@ -6847,12 +6841,140 @@ function getDebuggerEventUrl(method, params) {
   return "";
 }
 
-async function attachAuthDebugger(tabId) {
+function isAuthAvatarCaptureCandidate(url) {
+  const normalized = normalizeAvatarCandidate(url);
+  if (!normalized) {
+    return false;
+  }
+  return (
+    isPpsProfileImageUrl(normalized) ||
+    isImsAvatarDownloadUrl(normalized) ||
+    /\/ims\/avatar\//i.test(normalized) ||
+    /\/api\/profile\/[^/]+\/image(\/|$)/i.test(normalized)
+  );
+}
+
+function scoreAuthAvatarCaptureCandidate(url, response = {}) {
+  const normalized = normalizeAvatarCandidate(url);
+  if (!normalized) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  let score = 0;
+  if (isPpsProfileImageUrl(normalized)) {
+    score += 1200;
+  } else if (isImsAvatarDownloadUrl(normalized)) {
+    score += 760;
+  } else if (/\/ims\/avatar\//i.test(normalized)) {
+    score += 620;
+  } else if (/\/avatar/i.test(normalized)) {
+    score += 280;
+  }
+
+  const mimeType = String(response?.mimeType || "").toLowerCase();
+  const resourceType = String(response?.type || "").toLowerCase();
+  const status = Number(response?.status || 0);
+  if (mimeType.startsWith("image/")) {
+    score += 180;
+  }
+  if (resourceType === "image") {
+    score += 90;
+  }
+  if (status >= 200 && status < 300) {
+    score += 50;
+  }
+  if (normalized.includes("/100")) {
+    score += 18;
+  }
+  if (/avatar|profile|picture|photo|image/i.test(normalized)) {
+    score += 14;
+  }
+
+  return score;
+}
+
+function applyCapturedAvatarToProfile(profilePayload, avatarCandidate) {
+  const normalizedAvatar = normalizeAvatarCandidate(avatarCandidate) || normalizeInlineAvatarData(avatarCandidate);
+  if (!normalizedAvatar) {
+    return profilePayload && typeof profilePayload === "object" ? profilePayload : null;
+  }
+
+  const baseProfile = profilePayload && typeof profilePayload === "object" ? { ...profilePayload } : {};
+  const additionalInfo =
+    baseProfile.additional_info && typeof baseProfile.additional_info === "object"
+      ? { ...baseProfile.additional_info }
+      : {};
+
+  const existingBest = getBestNonSyntheticProfileAvatarCandidate(baseProfile) || extractProfileImageUrl(baseProfile);
+  const identity = getProfileIdentityValue(baseProfile);
+  const existingIsSyntheticIdentity = existingBest ? isImsAvatarForIdentity(existingBest, identity) : false;
+  const shouldPreferCaptured = !existingBest || existingIsSyntheticIdentity || isPpsProfileImageUrl(normalizedAvatar);
+
+  if (shouldPreferCaptured) {
+    baseProfile.user_image_url = normalizedAvatar;
+    baseProfile.userImageUrl = normalizedAvatar;
+    baseProfile.avatarUrl = normalizedAvatar;
+    baseProfile.avatar = normalizedAvatar;
+    baseProfile.avatar_url = normalizedAvatar;
+  } else {
+    if (!baseProfile.user_image_url) {
+      baseProfile.user_image_url = normalizedAvatar;
+    }
+    if (!baseProfile.userImageUrl) {
+      baseProfile.userImageUrl = normalizedAvatar;
+    }
+    if (!baseProfile.avatarUrl && !baseProfile.avatar && !baseProfile.avatar_url) {
+      baseProfile.avatarUrl = normalizedAvatar;
+    }
+  }
+
+  if (!additionalInfo.user_image_url || shouldPreferCaptured) {
+    additionalInfo.user_image_url = normalizedAvatar;
+  }
+  if (!additionalInfo.userImageUrl || shouldPreferCaptured) {
+    additionalInfo.userImageUrl = normalizedAvatar;
+  }
+  if ((!additionalInfo.avatar && !additionalInfo.avatarUrl && !additionalInfo.avatar_url) || shouldPreferCaptured) {
+    additionalInfo.avatarUrl = normalizedAvatar;
+  }
+
+  baseProfile.additional_info = additionalInfo;
+  return normalizeProfileAvatarFields(baseProfile);
+}
+
+async function attachAuthDebugger(tabId, options = {}) {
   if (!chrome.debugger || !tabId) {
     return null;
   }
 
   const target = { tabId };
+  const captureProfileAvatar = options?.captureProfileAvatar === true;
+  let capturedAvatarCandidate = "";
+  let capturedAvatarScore = Number.NEGATIVE_INFINITY;
+  const responseByRequestId = new Map();
+
+  const setCapturedAvatarCandidate = (candidate, response = {}) => {
+    if (!captureProfileAvatar) {
+      return;
+    }
+
+    const normalized = normalizeAvatarCandidate(candidate) || normalizeInlineAvatarData(candidate);
+    if (!normalized || !isAuthAvatarCaptureCandidate(normalized)) {
+      return;
+    }
+
+    const score = scoreAuthAvatarCaptureCandidate(normalized, response);
+    if (score > capturedAvatarScore) {
+      capturedAvatarScore = score;
+      capturedAvatarCandidate = normalized;
+      log("Auth debugger captured avatar candidate", {
+        score,
+        status: response?.status,
+        url: summarizeUrl(normalized),
+      });
+    }
+  };
+
   const onEvent = (source, method, params) => {
     if (source.tabId !== tabId) {
       return;
@@ -6861,10 +6983,59 @@ async function attachAuthDebugger(tabId) {
     if (
       method !== "Network.requestWillBeSent" &&
       method !== "Network.responseReceived" &&
+      method !== "Network.loadingFinished" &&
       method !== "Network.loadingFailed" &&
       method !== "Page.frameNavigated"
     ) {
       return;
+    }
+
+    if (captureProfileAvatar && method === "Network.requestWillBeSent") {
+      const requestId = String(params?.requestId || "");
+      const requestUrl = params?.request?.url || "";
+      if (requestId && requestUrl) {
+        responseByRequestId.set(requestId, {
+          url: requestUrl,
+          status: 0,
+          mimeType: "",
+          type: "",
+        });
+        setCapturedAvatarCandidate(requestUrl, {
+          status: 0,
+          mimeType: "",
+          type: String(params?.type || ""),
+        });
+      }
+    }
+
+    if (captureProfileAvatar && method === "Network.responseReceived") {
+      const requestId = String(params?.requestId || "");
+      const responseUrl = params?.response?.url || "";
+      const metadata = {
+        status: Number(params?.response?.status || 0),
+        mimeType: String(params?.response?.mimeType || ""),
+        type: String(params?.type || ""),
+      };
+
+      if (requestId && responseUrl) {
+        responseByRequestId.set(requestId, {
+          url: responseUrl,
+          ...metadata,
+        });
+      }
+
+      setCapturedAvatarCandidate(responseUrl, metadata);
+    }
+
+    if (captureProfileAvatar && method === "Network.loadingFinished") {
+      const requestId = String(params?.requestId || "");
+      const responseMeta = requestId ? responseByRequestId.get(requestId) : null;
+      if (responseMeta?.url) {
+        setCapturedAvatarCandidate(responseMeta.url, responseMeta);
+      }
+      if (requestId) {
+        responseByRequestId.delete(requestId);
+      }
     }
 
     const eventUrl = getDebuggerEventUrl(method, params);
@@ -6918,9 +7089,13 @@ async function attachAuthDebugger(tabId) {
   }
 
   return {
+    getCapturedAvatarCandidate() {
+      return normalizeAvatarCandidate(capturedAvatarCandidate) || normalizeInlineAvatarData(capturedAvatarCandidate);
+    },
     async detach() {
       chrome.debugger.onEvent.removeListener(onEvent);
       chrome.debugger.onDetach.removeListener(onDetach);
+      responseByRequestId.clear();
       try {
         await chrome.debugger.detach(target);
       } catch {
@@ -7082,6 +7257,7 @@ async function runLoginHelperFlow(requestState, extraParams = {}) {
     let completed = false;
     let helperWindowId = 0;
     let helperTabId = 0;
+    let debuggerSession = null;
     let timeoutId = null;
     let pollId = null;
 
@@ -7099,6 +7275,24 @@ async function runLoginHelperFlow(requestState, extraParams = {}) {
       }
       chrome.runtime.onMessage.removeListener(onRuntimeMessage);
       chrome.tabs.onRemoved.removeListener(onTabRemoved);
+
+      let capturedAvatarCandidate = "";
+      if (debuggerSession?.getCapturedAvatarCandidate) {
+        try {
+          capturedAvatarCandidate = debuggerSession.getCapturedAvatarCandidate() || "";
+        } catch {
+          capturedAvatarCandidate = "";
+        }
+      }
+
+      if (debuggerSession) {
+        try {
+          await debuggerSession.detach();
+        } catch {
+          // Ignore debugger detach failures.
+        }
+        debuggerSession = null;
+      }
 
       await clearLoginHelperResult(helperRequestId);
 
@@ -7122,10 +7316,29 @@ async function runLoginHelperFlow(requestState, extraParams = {}) {
       }
 
       const expiresAt = Number(payload?.expiresAt || 0);
+      const capturedAvatarUrl = normalizeAvatarCandidate(
+        firstNonEmptyString([payload?.capturedAvatarUrl, payload?.imageUrl, capturedAvatarCandidate])
+      );
+      const helperProfile = payload?.profile && typeof payload.profile === "object" ? payload.profile : null;
+      const mergedProfile = applyCapturedAvatarToProfile(helperProfile, capturedAvatarUrl);
+      const resolvedImageUrl =
+        normalizeAvatarCandidate(
+          firstNonEmptyString([
+            payload?.imageUrl,
+            capturedAvatarUrl,
+            resolveLoginImageUrl({
+              profile: mergedProfile,
+              imageUrl: capturedAvatarUrl,
+            }),
+          ])
+        ) || "";
+
       resolve({
         accessToken,
         expiresAt: Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : Date.now() + 60 * 60 * 1000,
-        profile: payload?.profile && typeof payload.profile === "object" ? payload.profile : null,
+        profile: mergedProfile,
+        imageUrl: resolvedImageUrl,
+        capturedAvatarUrl,
         organizations: payload?.organizations && typeof payload.organizations === "object" ? payload.organizations : null,
       });
     };
@@ -7196,7 +7409,10 @@ async function runLoginHelperFlow(requestState, extraParams = {}) {
       helperTabId = Number(helperWindow?.tabs?.[0]?.id || 0);
       if (!helperTabId) {
         await finalize(null, new Error("Unable to open login window."));
+        return;
       }
+
+      debuggerSession = await attachAuthDebugger(helperTabId, { captureProfileAvatar: true });
     } catch (error) {
       await finalize(null, error instanceof Error ? error : new Error(String(error)));
     }
@@ -7243,13 +7459,19 @@ async function runAuthInPopupWindow(authUrl, redirectUri) {
         return;
       }
       completed = true;
+      const capturedAvatarUrl = debuggerSession?.getCapturedAvatarCandidate
+        ? normalizeAvatarCandidate(debuggerSession.getCapturedAvatarCandidate())
+        : "";
       cleanup();
       void closeAuthWindow();
 
       if (error) {
         reject(error);
       } else {
-        resolve(result);
+        resolve({
+          responseUrl: String(result || ""),
+          capturedAvatarUrl,
+        });
       }
     };
 
@@ -7297,7 +7519,7 @@ async function runAuthInPopupWindow(authUrl, redirectUri) {
         return;
       }
 
-      debuggerSession = await attachAuthDebugger(authTabId);
+      debuggerSession = await attachAuthDebugger(authTabId, { captureProfileAvatar: true });
 
       pollId = setInterval(async () => {
         if (!authTabId || completed) {
@@ -7335,8 +7557,16 @@ async function runIdentityWebAuthFlow(requestState, extraParams = {}, interactiv
 
 async function runLegacyAuthWindowFlow(requestState, extraParams = {}) {
   const authUrl = buildAuthorizeUrl(IMS_LEGACY_REDIRECT_URI, requestState, extraParams);
-  const responseUrl = await runAuthInPopupWindow(authUrl, IMS_LEGACY_REDIRECT_URI);
-  return parseAuthResponse(responseUrl, requestState);
+  const authWindowResult = await runAuthInPopupWindow(authUrl, IMS_LEGACY_REDIRECT_URI);
+  const responseUrl = String(authWindowResult?.responseUrl || "");
+  const parsed = parseAuthResponse(responseUrl, requestState);
+  const capturedAvatarUrl = normalizeAvatarCandidate(authWindowResult?.capturedAvatarUrl || "");
+  return capturedAvatarUrl
+    ? {
+        ...parsed,
+        capturedAvatarUrl,
+      }
+    : parsed;
 }
 
 async function startLogin(options = {}) {
@@ -7588,15 +7818,19 @@ async function fetchProfile(accessToken) {
 }
 
 async function resolveProfileAfterLogin(authData) {
+  const capturedAvatarUrl = normalizeAvatarCandidate(
+    firstNonEmptyString([authData?.capturedAvatarUrl, authData?.imageUrl])
+  );
   const hasInlineProfile = Boolean(authData && Object.prototype.hasOwnProperty.call(authData, "profile"));
   if (hasInlineProfile) {
     if (authData?.profile && typeof authData.profile === "object") {
-      return normalizeProfileAvatarFields(authData.profile);
+      return applyCapturedAvatarToProfile(normalizeProfileAvatarFields(authData.profile), capturedAvatarUrl);
     }
-    return {};
+    return applyCapturedAvatarToProfile({}, capturedAvatarUrl) || {};
   }
 
-  return fetchProfile(authData?.accessToken || "");
+  const fetchedProfile = await fetchProfile(authData?.accessToken || "");
+  return applyCapturedAvatarToProfile(fetchedProfile, capturedAvatarUrl) || fetchedProfile;
 }
 
 function mergeProfilePayloads(baseProfile, updateProfile) {
@@ -8805,6 +9039,11 @@ function getAvatarCandidates(loginData) {
     candidates.push(explicitLoginImageUrl);
   }
 
+  const persistedAvatar = readPersistedAvatarCandidate(loginData);
+  if (persistedAvatar) {
+    candidates.push(persistedAvatar);
+  }
+
   const loginProfile = resolveLoginProfile(loginData);
   const profileCandidates = getProfileAvatarCandidates(loginProfile);
   const discoveredProfileCandidates = collectAvatarCandidatesFromProfileShape(loginProfile);
@@ -9106,6 +9345,130 @@ function getAvatarCacheIdentity(loginData) {
   ]);
 }
 
+function getAvatarPersistIdentityCandidates(loginData) {
+  const profile = resolveLoginProfile(loginData) || {};
+  const tokenFingerprint = loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "";
+  const candidates = [
+    profile?.userId,
+    profile?.user_id,
+    profile?.sub,
+    profile?.id,
+    profile?.email,
+    profile?.user_email,
+    profile?.additional_info?.email,
+    loginData?.adobePassOrg?.userId,
+    tokenFingerprint ? `token:${tokenFingerprint}` : "",
+  ];
+
+  return [...new Set(candidates.map((value) => String(value || "").trim()).filter(Boolean))].slice(0, 12);
+}
+
+function getAvatarPersistStorageKeys(loginData) {
+  const identities = getAvatarPersistIdentityCandidates(loginData);
+  const keys = [];
+  for (const identity of identities) {
+    const encodedIdentity = encodeURIComponent(identity);
+    keys.push(`${AVATAR_PERSIST_STORAGE_PREFIX}${encodedIdentity}`);
+    keys.push(`${LEGACY_AVATAR_PERSIST_STORAGE_PREFIX}${encodedIdentity}`);
+  }
+  return [...new Set(keys)];
+}
+
+function readPersistedAvatarCandidate(loginData) {
+  const keys = [...getAvatarPersistStorageKeys(loginData), AVATAR_PERSIST_GLOBAL_KEY, LEGACY_AVATAR_PERSIST_GLOBAL_KEY];
+  if (keys.length === 0) {
+    return "";
+  }
+
+  let bestCandidate = "";
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const key of keys) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) {
+        continue;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        localStorage.removeItem(key);
+        continue;
+      }
+
+      const expiresAt = Number(parsed.expiresAt || 0);
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        localStorage.removeItem(key);
+        continue;
+      }
+
+      const candidate = normalizeInlineAvatarData(parsed.dataUrl || "") || normalizeAvatarCandidate(parsed.url || "");
+      if (!candidate) {
+        localStorage.removeItem(key);
+        continue;
+      }
+
+      const score = scoreAvatarCandidatePriority(candidate);
+      if (score > bestScore) {
+        bestScore = score;
+        bestCandidate = candidate;
+      }
+    } catch {
+      // Ignore malformed local avatar persistence entries.
+    }
+  }
+
+  return bestCandidate;
+}
+
+function writePersistedAvatarCandidate(loginData, payload) {
+  const keys = [
+    ...getAvatarPersistStorageKeys(loginData).filter((key) => key.startsWith(AVATAR_PERSIST_STORAGE_PREFIX)),
+    AVATAR_PERSIST_GLOBAL_KEY,
+  ];
+  if (keys.length === 0) {
+    return;
+  }
+
+  const normalizedResolved = normalizeInlineAvatarData(payload?.resolvedUrl || "") || normalizeAvatarCandidate(payload?.resolvedUrl || "");
+  const normalizedDataUrl = normalizeInlineAvatarData(payload?.dataUrl || payload?.resolvedUrl || "");
+  const normalizedSource = normalizeAvatarCandidate(payload?.sourceUrl || "");
+  const preferredCandidate = normalizedDataUrl || normalizedResolved || normalizedSource;
+  if (!preferredCandidate || scoreAvatarCandidatePriority(preferredCandidate) <= -150) {
+    return;
+  }
+
+  const persistDataUrl =
+    normalizedDataUrl && normalizedDataUrl.length <= AVATAR_MAX_LOCALSTORAGE_DATAURL_BYTES ? normalizedDataUrl : "";
+  const persistUrl = normalizeAvatarCandidate(
+    firstNonEmptyString([
+      normalizedSource,
+      normalizedResolved.startsWith("https://") ? normalizedResolved : "",
+    ])
+  );
+
+  if (!persistDataUrl && !persistUrl) {
+    return;
+  }
+
+  const ttlSeconds = Number(payload?.ttlSeconds || AVATAR_PERSIST_TTL_SECONDS);
+  const expiresAt = Date.now() + Math.max(1, ttlSeconds) * 1000;
+  const record = JSON.stringify({
+    expiresAt,
+    url: persistUrl,
+    dataUrl: persistDataUrl,
+    updatedAt: Date.now(),
+  });
+
+  try {
+    for (const key of keys) {
+      localStorage.setItem(key, record);
+    }
+  } catch {
+    // Ignore localStorage quota failures.
+  }
+}
+
 function getAvatarCacheKey(loginData, url, size = 0) {
   const identity = getAvatarCacheIdentity(loginData);
   const normalizedUrl = normalizeAvatarCandidate(url);
@@ -9242,7 +9605,12 @@ function purgeAvatarCaches() {
       const key = localStorage.key(index);
       if (
         typeof key === "string" &&
-        (key.startsWith(AVATAR_CACHE_STORAGE_PREFIX) || key.startsWith(LEGACY_AVATAR_CACHE_STORAGE_PREFIX))
+        (
+          key.startsWith(AVATAR_CACHE_STORAGE_PREFIX) ||
+          key.startsWith(LEGACY_AVATAR_CACHE_STORAGE_PREFIX) ||
+          key.startsWith(AVATAR_PERSIST_STORAGE_PREFIX) ||
+          key.startsWith(LEGACY_AVATAR_PERSIST_STORAGE_PREFIX)
+        )
       ) {
         keysToRemove.push(key);
       }
@@ -9332,6 +9700,7 @@ function makeAvatarResolveKey(loginData) {
   };
 
   const tokenFingerprint = loginData?.accessToken ? String(loginData.accessToken).slice(-16) : "";
+  const persistedAvatar = compactAvatarValue(readPersistedAvatarCandidate(loginData));
   const orgAvatar = compactAvatarValue(loginData?.adobePassOrg?.avatarUrl || "");
   const explicitLoginImageUrl = compactAvatarValue(resolveLoginImageUrl(loginData));
   const loginProfile = resolveLoginProfile(loginData) || {};
@@ -9341,6 +9710,7 @@ function makeAvatarResolveKey(loginData) {
   );
   return JSON.stringify({
     tokenFingerprint,
+    persistedAvatar,
     orgAvatar,
     explicitLoginImageUrl,
     profileCandidates,
@@ -9769,6 +10139,13 @@ async function ensureResolvedAvatarUrl() {
   state.avatarResolveKey = resolveKey;
 
   try {
+    const persistResolvedAvatar = (payload) => {
+      if (!state.loginData) {
+        return;
+      }
+      writePersistedAvatarCandidate(state.loginData, payload || {});
+    };
+
     const tryResolveCandidates = async (candidateList) => {
       for (const candidate of candidateList) {
         const normalized = normalizeAvatarCandidate(candidate);
@@ -9780,6 +10157,11 @@ async function ensureResolvedAvatarUrl() {
           const inlineUsable = await canUseDirectAvatarLoad(normalized);
           if (inlineUsable) {
             setResolvedAvatarUrl(normalized, false);
+            persistResolvedAvatar({
+              sourceUrl: normalized,
+              resolvedUrl: normalized,
+              dataUrl: normalized,
+            });
             render();
             return true;
           }
@@ -9794,6 +10176,11 @@ async function ensureResolvedAvatarUrl() {
 
           if (cachedUsable) {
             setResolvedAvatarUrl(cachedResolved, cachedResolved.startsWith("blob:"));
+            persistResolvedAvatar({
+              sourceUrl: cached.sourceUrl || normalized,
+              resolvedUrl: cachedResolved,
+              dataUrl: cachedResolved.startsWith("data:image/") ? cachedResolved : "",
+            });
             render();
             return true;
           }
@@ -9810,6 +10197,11 @@ async function ensureResolvedAvatarUrl() {
           const backgroundFirstDataUrl = await fetchAvatarDataUrlViaBackground(normalized);
           if (backgroundFirstDataUrl) {
             setResolvedAvatarUrl(backgroundFirstDataUrl, false);
+            persistResolvedAvatar({
+              sourceUrl: normalized,
+              resolvedUrl: backgroundFirstDataUrl,
+              dataUrl: backgroundFirstDataUrl,
+            });
             writeAvatarCache(cacheKey, {
               sourceUrl: normalized,
               resolvedUrl: backgroundFirstDataUrl,
@@ -9824,6 +10216,10 @@ async function ensureResolvedAvatarUrl() {
         const directOk = await canUseDirectAvatarLoad(normalized);
         if (directOk) {
           setResolvedAvatarUrl(normalized, normalized.startsWith("blob:"));
+          persistResolvedAvatar({
+            sourceUrl: normalized,
+            resolvedUrl: normalized,
+          });
           writeAvatarCache(cacheKey, {
             sourceUrl: normalized,
             resolvedUrl: normalized,
@@ -9836,6 +10232,11 @@ async function ensureResolvedAvatarUrl() {
         const blobResult = await fetchAvatarBlobUrl(normalized);
         if (blobResult?.objectUrl) {
           setResolvedAvatarUrl(blobResult.objectUrl, true);
+          persistResolvedAvatar({
+            sourceUrl: normalized,
+            resolvedUrl: blobResult.objectUrl,
+            dataUrl: blobResult.dataUrl || "",
+          });
           writeAvatarCache(cacheKey, {
             sourceUrl: normalized,
             resolvedUrl: blobResult.objectUrl,
@@ -10610,6 +11011,10 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   };
 
   state.loginData = resolvedLoginData;
+  writePersistedAvatarCandidate(resolvedLoginData, {
+    sourceUrl: resolvedLoginData.imageUrl || "",
+    resolvedUrl: resolvedLoginData.imageUrl || "",
+  });
   state.restricted = false;
   clearRestrictedOrgOptions();
   state.sessionReady = true;
@@ -13009,7 +13414,7 @@ function render() {
   els.authBtn.classList.toggle("avatar-loading", state.avatarResolving);
   els.authBtn.classList.toggle("avatar-ready", !state.avatarResolving);
   els.authBtn.style.backgroundImage = `url("${avatarUrl}"), url("${FALLBACK_AVATAR}")`;
-  els.authBtn.textContent = "Account";
+  els.authBtn.textContent = "";
   els.authBtn.setAttribute("aria-label", `${getProfileDisplayName(resolveLoginProfile(state.loginData) || {})} account menu`);
   if (!state.busy) {
     els.authBtn.title = "Account menu";

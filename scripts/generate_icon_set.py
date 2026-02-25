@@ -72,7 +72,19 @@ def make_ico(output_path: Path, png_paths: list[Path]) -> None:
 def resized(image: np.ndarray, size: int) -> np.ndarray:
     if image.shape[0] == size and image.shape[1] == size:
         return image
-    return cv2.resize(image, (size, size), interpolation=cv2.INTER_AREA)
+
+    interpolation = cv2.INTER_AREA if size <= image.shape[0] else cv2.INTER_LANCZOS4
+    out = cv2.resize(image, (size, size), interpolation=interpolation)
+
+    # Keep toolbar-scale icons punchy and readable.
+    if size <= 64:
+        rgb = out[:, :, :3].astype(np.float32)
+        blur = cv2.GaussianBlur(rgb, (0, 0), sigmaX=max(0.4, size * 0.012), sigmaY=max(0.4, size * 0.012))
+        rgb = np.clip(cv2.addWeighted(rgb, 1.20, blur, -0.20, 0), 0, 255)
+        rgb = np.clip((rgb - 128.0) * 1.10 + 128.0, 0, 255)
+        out[:, :, :3] = rgb.astype(np.uint8)
+
+    return out
 
 
 def create_superellipse_mask(size: int, exponent: float = 5.3, inset: int = 0, supersample: int = 2) -> np.ndarray:
@@ -153,21 +165,21 @@ def render_top_panel(canvas: np.ndarray, y_split: int) -> None:
     size = canvas.shape[0]
     top_h = max(1, y_split)
 
-    grad = lerp_vertical(top_h, top_bgr=(68, 58, 50), bottom_bgr=(26, 23, 20))
+    grad = lerp_vertical(top_h, top_bgr=(74, 66, 58), bottom_bgr=(24, 22, 20))
     canvas[:top_h, :, :] = grad
 
-    # Dark stainless body tint.
+    # Dark glass body tint.
     blend_tint(
         canvas,
         make_ellipse_mask(
             size,
-            center=(int(size * 0.62), int(size * 0.28)),
-            axes=(int(size * 0.86), int(size * 0.54)),
+            center=(int(size * 0.60), int(size * 0.30)),
+            axes=(int(size * 0.84), int(size * 0.50)),
             angle=2,
             blur_sigma=max(6.0, size * 0.045),
         ) * (np.arange(size)[:, None] < y_split).astype(np.float32),
-        color_bgr=(58, 46, 40),
-        opacity=0.42,
+        color_bgr=(66, 56, 46),
+        opacity=0.32,
     )
 
     # Gentle center lift.
@@ -175,52 +187,52 @@ def render_top_panel(canvas: np.ndarray, y_split: int) -> None:
         canvas,
         make_ellipse_mask(
             size,
-            center=(int(size * 0.46), int(size * 0.33)),
-            axes=(int(size * 0.58), int(size * 0.30)),
-            angle=-10,
+            center=(int(size * 0.46), int(size * 0.31)),
+            axes=(int(size * 0.56), int(size * 0.27)),
+            angle=-8,
             blur_sigma=max(6.0, size * 0.030),
         ) * (np.arange(size)[:, None] < y_split).astype(np.float32),
-        color_bgr=(112, 106, 100),
-        opacity=0.12,
+        color_bgr=(128, 121, 114),
+        opacity=0.11,
     )
 
-    # Subtle bottom vignette for panel depth.
+    # Bottom vignette for panel depth.
     multiply_tone(
         canvas,
         make_ellipse_mask(
             size,
-            center=(int(size * 0.50), int(size * 0.63)),
-            axes=(int(size * 0.86), int(size * 0.26)),
+            center=(int(size * 0.50), int(size * 0.62)),
+            axes=(int(size * 0.90), int(size * 0.28)),
             angle=0,
             blur_sigma=max(8.0, size * 0.040),
         ) * (np.arange(size)[:, None] < y_split).astype(np.float32),
-        factor=0.72,
+        factor=0.76,
     )
 
-    # Refractive dome sheen.
+    # Controlled top sheen (keep logo legible at small sizes).
     blend_tint(
         canvas,
         make_ellipse_mask(
             size,
-            center=(int(size * 0.23), int(size * 0.16)),
-            axes=(int(size * 0.43), int(size * 0.24)),
-            angle=-25,
+            center=(int(size * 0.20), int(size * 0.14)),
+            axes=(int(size * 0.31), int(size * 0.18)),
+            angle=-24,
             blur_sigma=max(4.0, size * 0.016),
         ),
         color_bgr=(246, 246, 246),
-        opacity=0.58,
+        opacity=0.34,
     )
     sweep = np.zeros((size, size), dtype=np.uint8)
     cv2.line(
         sweep,
-        (int(size * -0.08), int(size * 0.40)),
-        (int(size * 1.08), int(size * 0.07)),
+        (int(size * -0.02), int(size * 0.34)),
+        (int(size * 1.02), int(size * 0.11)),
         color=255,
-        thickness=max(2, int(round(size * 0.065))),
+        thickness=max(2, int(round(size * 0.045))),
         lineType=cv2.LINE_AA,
     )
     sweep = cv2.GaussianBlur(sweep, (0, 0), sigmaX=max(4.0, size * 0.022), sigmaY=max(4.0, size * 0.022))
-    blend_tint(canvas, sweep.astype(np.float32) / 255.0, color_bgr=(232, 233, 236), opacity=0.22)
+    blend_tint(canvas, sweep.astype(np.float32) / 255.0, color_bgr=(235, 237, 241), opacity=0.12)
 
 
 def render_hazard_band(canvas: np.ndarray, y_split: int) -> None:
@@ -231,7 +243,7 @@ def render_hazard_band(canvas: np.ndarray, y_split: int) -> None:
 
     y_grid = np.arange(band_h, dtype=np.float32)[:, None]
     x_grid = np.arange(size, dtype=np.float32)[None, :]
-    period = max(12, int(round(size * 0.125)))
+    period = max(12, int(round(size * 0.118)))
     stripes = ((x_grid + y_grid * 0.92) // period).astype(np.int32) % 2
 
     # Smooth stainless separator edge.
@@ -253,8 +265,8 @@ def render_hazard_band(canvas: np.ndarray, y_split: int) -> None:
     )
 
     # Prebuild vertical ramps for stripe materials.
-    gold_ramp = lerp_vertical(band_h, top_bgr=(58, 236, 255), bottom_bgr=(6, 170, 245)).reshape(band_h, 1, 3)
-    dark_ramp = lerp_vertical(band_h, top_bgr=(26, 28, 32), bottom_bgr=(8, 9, 12)).reshape(band_h, 1, 3)
+    gold_ramp = lerp_vertical(band_h, top_bgr=(58, 236, 255), bottom_bgr=(10, 176, 248)).reshape(band_h, 1, 3)
+    dark_ramp = lerp_vertical(band_h, top_bgr=(36, 38, 46), bottom_bgr=(10, 12, 16)).reshape(band_h, 1, 3)
 
     band = np.zeros((band_h, size, 3), dtype=np.float32)
     band[stripes == 0] = gold_ramp.repeat(size, axis=1)[stripes == 0]
@@ -268,7 +280,7 @@ def render_hazard_band(canvas: np.ndarray, y_split: int) -> None:
         angle=-16,
         blur_sigma=max(5.0, size * 0.024),
     )[y_split:, :][:, :, None]
-    band = band * (1.0 - gloss * 0.24) + np.array([242.0, 246.0, 250.0], dtype=np.float32).reshape(1, 1, 3) * gloss * 0.24
+    band = band * (1.0 - gloss * 0.12) + np.array([242.0, 246.0, 250.0], dtype=np.float32).reshape(1, 1, 3) * gloss * 0.12
 
     # Extra clear line near top of stripe band.
     line_y = max(1, int(round(band_h * 0.03)))
@@ -288,19 +300,19 @@ def build_up_text_mask(size: int) -> np.ndarray:
     font = cv2.FONT_HERSHEY_SIMPLEX
     text = "UP"
 
-    desired_width = int(round(size * 0.64))
-    desired_height = int(round(size * 0.30))
+    desired_width = int(round(size * 0.70))
+    desired_height = int(round(size * 0.34))
     base_size, _ = cv2.getTextSize(text, font, 1.0, 1)
     font_scale = min(desired_width / max(1, base_size[0]), desired_height / max(1, base_size[1]))
-    thickness = max(2, int(round(size * 0.046)))
+    thickness = max(2, int(round(size * 0.053)))
 
     text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
     x = (size - text_size[0]) // 2
-    y = int(round(size * 0.50))
+    y = int(round(size * 0.54))
 
     mask = np.zeros((size, size), dtype=np.uint8)
     cv2.putText(mask, text, (x, y), font, font_scale, 255, thickness=thickness, lineType=cv2.LINE_AA)
-    mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=max(0.8, size * 0.0014), sigmaY=max(0.8, size * 0.0014))
+    mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=max(0.6, size * 0.0010), sigmaY=max(0.6, size * 0.0010))
     return mask
 
 
@@ -315,8 +327,8 @@ def render_stainless_up(canvas: np.ndarray, y_split: int) -> None:
     text_mask_u8 = np.clip(text_mask * 255.0, 0, 255).astype(np.uint8)
 
     # Soft depth shadow.
-    shadow = cv2.GaussianBlur(text_mask_u8, (0, 0), sigmaX=max(2.0, size * 0.010), sigmaY=max(2.0, size * 0.010))
-    shift = int(round(size * 0.006))
+    shadow = cv2.GaussianBlur(text_mask_u8, (0, 0), sigmaX=max(1.5, size * 0.008), sigmaY=max(1.5, size * 0.008))
+    shift = int(round(size * 0.004))
     shadow = cv2.warpAffine(
         shadow.astype(np.float32) / 255.0,
         np.float32([[1, 0, shift], [0, 1, shift]]),
@@ -325,14 +337,14 @@ def render_stainless_up(canvas: np.ndarray, y_split: int) -> None:
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=0,
     )
-    multiply_tone(canvas, shadow, factor=0.50)
+    multiply_tone(canvas, shadow, factor=0.58)
 
     # Dark halo stroke around letters for contrast.
-    k_outer = max(3, int(round(size * 0.008)))
+    k_outer = max(3, int(round(size * 0.010)))
     kernel_outer = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_outer, k_outer))
     dilated = cv2.dilate(text_mask_u8, kernel_outer)
     outer = np.clip((dilated.astype(np.float32) - text_mask_u8.astype(np.float32)) / 255.0, 0.0, 1.0)
-    blend_tint(canvas, outer * top_region, color_bgr=(26, 26, 30), opacity=0.52)
+    blend_tint(canvas, outer * top_region, color_bgr=(10, 12, 16), opacity=0.72)
 
     # Stainless fill (smooth, no texture) with stronger separation.
     ys, _ = np.where(text_mask_u8 > 0)
@@ -344,10 +356,10 @@ def render_stainless_up(canvas: np.ndarray, y_split: int) -> None:
     y_local = (np.arange(size, dtype=np.float32).reshape(size, 1, 1) - float(y0)) / float(span)
     y_local = np.clip(y_local, 0.0, 1.0)
 
-    top = np.array([254.0, 254.0, 254.0], dtype=np.float32).reshape(1, 1, 3)
-    mid_hi = np.array([230.0, 233.0, 238.0], dtype=np.float32).reshape(1, 1, 3)
-    mid_lo = np.array([178.0, 186.0, 196.0], dtype=np.float32).reshape(1, 1, 3)
-    low = np.array([126.0, 136.0, 148.0], dtype=np.float32).reshape(1, 1, 3)
+    top = np.array([255.0, 255.0, 255.0], dtype=np.float32).reshape(1, 1, 3)
+    mid_hi = np.array([242.0, 245.0, 250.0], dtype=np.float32).reshape(1, 1, 3)
+    mid_lo = np.array([210.0, 216.0, 226.0], dtype=np.float32).reshape(1, 1, 3)
+    low = np.array([156.0, 166.0, 178.0], dtype=np.float32).reshape(1, 1, 3)
 
     grad = np.where(
         y_local < 0.24,
@@ -372,11 +384,11 @@ def render_stainless_up(canvas: np.ndarray, y_split: int) -> None:
     bevel_bright = np.clip(0.92 - 0.65 * x - 0.95 * yy, 0.0, 1.0)
     bevel_dark = np.clip(0.20 + 0.80 * x + 1.00 * yy, 0.0, 1.0)
 
-    blend_tint(canvas, inner_mask * bevel_bright, color_bgr=(255, 255, 255), opacity=0.18)
-    multiply_tone(canvas, inner_mask * bevel_dark, factor=0.84)
+    blend_tint(canvas, inner_mask * bevel_bright, color_bgr=(255, 255, 255), opacity=0.24)
+    multiply_tone(canvas, inner_mask * bevel_dark, factor=0.80)
 
     # Bevel rim.
-    blend_tint(canvas, rim, color_bgr=(255, 255, 255), opacity=0.55)
+    blend_tint(canvas, rim, color_bgr=(255, 255, 255), opacity=0.68)
 
     # Edge shadow on lower-right.
     rim_shadow = cv2.GaussianBlur(rim.astype(np.float32), (0, 0), sigmaX=max(1.2, size * 0.0035), sigmaY=max(1.2, size * 0.0035))
@@ -388,7 +400,7 @@ def render_stainless_up(canvas: np.ndarray, y_split: int) -> None:
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=0,
     )
-    multiply_tone(canvas, rim_shadow * text_mask, factor=0.72)
+    multiply_tone(canvas, rim_shadow * text_mask, factor=0.68)
 
     # Vertical steel reflection lane.
     lane = make_ellipse_mask(
@@ -398,17 +410,17 @@ def render_stainless_up(canvas: np.ndarray, y_split: int) -> None:
         angle=-5,
         blur_sigma=max(2.0, size * 0.010),
     )
-    blend_tint(canvas, lane * text_mask, color_bgr=(255, 255, 255), opacity=0.22)
+    blend_tint(canvas, lane * text_mask, color_bgr=(255, 255, 255), opacity=0.14)
 
     # Specular streak across letters.
     spec = make_ellipse_mask(
         size,
-        center=(int(size * 0.43), int(size * 0.21)),
-        axes=(int(size * 0.40), int(size * 0.13)),
+        center=(int(size * 0.45), int(size * 0.20)),
+        axes=(int(size * 0.34), int(size * 0.10)),
         angle=-15,
         blur_sigma=max(3.0, size * 0.015),
     )
-    blend_tint(canvas, spec * text_mask, color_bgr=(255, 255, 255), opacity=0.50)
+    blend_tint(canvas, spec * text_mask, color_bgr=(255, 255, 255), opacity=0.36)
 
 
 def render_clearcoat(canvas: np.ndarray) -> None:
@@ -419,34 +431,34 @@ def render_clearcoat(canvas: np.ndarray) -> None:
         canvas,
         make_ellipse_mask(
             size,
-            center=(int(size * 0.14), int(size * 0.14)),
-            axes=(int(size * 0.35), int(size * 0.24)),
-            angle=-28,
+            center=(int(size * 0.16), int(size * 0.14)),
+            axes=(int(size * 0.27), int(size * 0.16)),
+            angle=-24,
             blur_sigma=max(5.0, size * 0.022),
         ),
         color_bgr=(255, 255, 255),
-        opacity=0.42,
+        opacity=0.24,
     )
 
     # Secondary curved reflection.
     curved = make_ellipse_mask(
         size,
-        center=(int(size * 0.90), int(size * 0.12)),
-        axes=(int(size * 0.42), int(size * 0.18)),
+        center=(int(size * 0.88), int(size * 0.12)),
+        axes=(int(size * 0.34), int(size * 0.14)),
         angle=-14,
         blur_sigma=max(4.0, size * 0.020),
     )
-    blend_tint(canvas, curved, color_bgr=(246, 248, 252), opacity=0.18)
+    blend_tint(canvas, curved, color_bgr=(246, 248, 252), opacity=0.10)
 
     # Bottom glass lip.
     lip = make_ellipse_mask(
         size,
-        center=(int(size * 0.52), int(size * 0.96)),
-        axes=(int(size * 0.54), int(size * 0.08)),
+        center=(int(size * 0.52), int(size * 0.95)),
+        axes=(int(size * 0.52), int(size * 0.07)),
         angle=0,
         blur_sigma=max(3.0, size * 0.012),
     )
-    blend_tint(canvas, lip, color_bgr=(228, 235, 242), opacity=0.24)
+    blend_tint(canvas, lip, color_bgr=(228, 235, 242), opacity=0.14)
 
 
 def apply_body_rim(canvas: np.ndarray, body_mask: np.ndarray) -> None:
@@ -473,7 +485,7 @@ def compose_master_square(render_size: int) -> np.ndarray:
     body_mask = create_superellipse_mask(size=render_size, exponent=5.3, inset=0, supersample=2)
     canvas = np.zeros((render_size, render_size, 3), dtype=np.float32)
 
-    y_split = int(round(render_size * 0.605))
+    y_split = int(round(render_size * 0.67))
     render_top_panel(canvas, y_split)
     render_hazard_band(canvas, y_split)
     render_stainless_up(canvas, y_split)

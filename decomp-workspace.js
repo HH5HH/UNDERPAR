@@ -24,6 +24,7 @@ const ESM_METRIC_COLUMNS = new Set([
 ]);
 const ESM_DATE_PARTS = ["year", "month", "day", "hour", "minute"];
 const ESM_NODE_BASE_URL = "https://mgmt.auth.adobe.com/esm/v3/media-company/";
+const WORKSPACE_TABLE_VISIBLE_ROW_CAP = 10;
 
 const state = {
   windowId: 0,
@@ -297,6 +298,27 @@ function renderTableBody(tableState) {
   });
 }
 
+function updateTableWrapperViewport(tableState) {
+  const wrapper = tableState?.wrapper;
+  const table = tableState?.table;
+  if (!wrapper || !table) {
+    return;
+  }
+
+  const totalRows = Array.isArray(tableState.data) ? tableState.data.length : 0;
+  const visibleRows = totalRows > 0 ? Math.min(WORKSPACE_TABLE_VISIBLE_ROW_CAP, totalRows) : 1;
+  const sampleRow = table.querySelector("tbody tr");
+  const headerRow = table.querySelector("thead tr");
+  const footerRow = table.querySelector("tfoot tr");
+
+  const rowHeight = sampleRow ? sampleRow.getBoundingClientRect().height : 36;
+  const headerHeight = headerRow ? headerRow.getBoundingClientRect().height : 42;
+  const footerHeight = footerRow ? footerRow.getBoundingClientRect().height : 40;
+  const viewportHeight = Math.ceil(headerHeight + footerHeight + rowHeight * visibleRows + 2);
+
+  wrapper.style.maxHeight = `${viewportHeight}px`;
+}
+
 function getCardPayload(cardState) {
   return {
     cardId: cardState.cardId,
@@ -537,6 +559,7 @@ function renderCardTable(cardState, rows, lastModified) {
   `;
 
   const table = cardState.bodyElement.querySelector(".esm-table");
+  const tableWrapper = cardState.bodyElement.querySelector(".esm-table-wrapper");
   const thead = table.querySelector("thead");
   const tbody = table.querySelector("tbody");
   const footerCell = cardState.bodyElement.querySelector(".esm-footer-cell");
@@ -545,6 +568,8 @@ function renderCardTable(cardState, rows, lastModified) {
   const closeButton = cardState.bodyElement.querySelector(".esm-close");
 
   const tableState = {
+    wrapper: tableWrapper,
+    table,
     thead,
     tbody,
     data: rows,
@@ -591,6 +616,7 @@ function renderCardTable(cardState, rows, lastModified) {
       }
       tableState.data = sortRows(tableState.data, tableState.sortStack, tableState.context);
       renderTableBody(tableState);
+      updateTableWrapperViewport(tableState);
       refreshHeaderStates(tableState);
       cardState.sortStack = tableState.sortStack;
     });
@@ -642,6 +668,7 @@ function renderCardTable(cardState, rows, lastModified) {
   wireCardRerunUrl(cardState);
   tableState.data = sortRows(tableState.data, tableState.sortStack, tableState.context);
   renderTableBody(tableState);
+  updateTableWrapperViewport(tableState);
   refreshHeaderStates(tableState);
   cardState.sortStack = tableState.sortStack;
 }

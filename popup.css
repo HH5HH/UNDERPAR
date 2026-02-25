@@ -62,7 +62,7 @@ body {
   transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
 }
 
-.auth-btn:hover:not(:disabled) {
+.auth-btn:hover:not(:disabled):not(.avatar) {
   transform: translateY(-1px);
   box-shadow: 0 8px 18px rgba(29, 78, 216, 0.25);
   background: #1e40af;
@@ -94,6 +94,11 @@ body {
 
 .auth-btn.avatar.avatar-ready {
   opacity: 1;
+}
+
+.auth-btn.avatar:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.24);
 }
 
 .avatar-menu {
@@ -1008,7 +1013,6 @@ select:disabled {
   flex-wrap: wrap;
 }
 
-.decomp-open-workspace-btn,
 .decomp-expand-btn,
 .decomp-collapse-btn {
   height: 24px;
@@ -1022,12 +1026,6 @@ select:disabled {
   padding: 0 8px;
 }
 
-.decomp-open-workspace-btn {
-  border-color: #2563eb;
-  color: #1d4ed8;
-}
-
-.decomp-open-workspace-btn:hover,
 .decomp-expand-btn:hover,
 .decomp-collapse-btn:hover {
   background: #fafafa;
