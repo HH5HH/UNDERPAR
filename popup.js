@@ -5222,8 +5222,8 @@ function decompCreateTreemapTile(decompState, nodeEntry, requestToken) {
     const runLink = document.createElement("a");
     runLink.href = "#";
     runLink.className = "decomp-map-run-link";
-    runLink.textContent = "run endpoint";
-    runLink.title = "Run this endpoint in Workspace";
+    runLink.textContent = "Get ESM";
+    runLink.title = "Get ESM in Workspace";
     runLink.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -5258,7 +5258,13 @@ function decompRenderTreemap(decompState, endpointIndexes, options = {}) {
       .filter((value) => Number.isInteger(value) && value >= 0)
   )];
   const model = decompBuildTreemapModel(decompState.catalog, endpointList);
-  const nodeEntries = decompFlattenTreemapNodes(model);
+  const onlyRunnable = options.onlyRunnable === true;
+  const nodeEntries = decompFlattenTreemapNodes(model).filter((nodeEntry) => {
+    if (!onlyRunnable) {
+      return true;
+    }
+    return Number.isInteger(nodeEntry?.endpointIndex) && nodeEntry.endpointIndex >= 0;
+  });
   treemapRoot.innerHTML = "";
 
   if (!model || nodeEntries.length === 0) {
@@ -5338,6 +5344,7 @@ function decompApplyTreeFilters(decompState, options = {}) {
     .toUpperCase();
   const term = clickEsmNormalizeSearchTerm(options.term ?? decompState.searchInput?.value ?? "");
   const searchMode = Boolean(term);
+  const filteredMode = Boolean(searchMode || zoomFilter);
   const doHighlight = Boolean(options.highlight && term);
   const highlightPattern = doHighlight ? new RegExp(clickEsmEscapeRegExp(term), "gi") : null;
   let visibleEndpoints = 0;
@@ -5429,6 +5436,7 @@ function decompApplyTreeFilters(decompState, options = {}) {
 
   decompRenderTreemap(decompState, visibleEndpointIndexes, {
     zoomFilter,
+    onlyRunnable: filteredMode,
     requestToken: options.requestToken || decompState?.requestToken || state.premiumPanelRequestToken || 0,
   });
   decompSyncTreeToggleButton(decompState);
