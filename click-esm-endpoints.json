@@ -5918,7 +5918,9 @@
       "url": "https://mgmt.auth.adobe.com/esm/v3/media-company/year/month/day/requestor-id/proxy/mvpd/platform/nsdk/nsdk-version/os-family/browser-family",
       "zoomClass": "zmDAY",
       "zoomKey": "DAY",
-      "columns": []
+      "columns": [
+        "No report columns"
+      ]
     },
     {
       "url": "https://mgmt.auth.adobe.com/esm/v3/media-company/year/month/day/requestor-id/proxy/mvpd/platform/nsdk/nsdk-version/os-family/dc",
