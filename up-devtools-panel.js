@@ -35,6 +35,12 @@ let selectedSeq = 0;
 let showExtensionEvents = querySource === "esm-decomp-recording" || querySource === "cm-recording";
 let flowListKeyboardActive = false;
 const eventRowsBySeq = new Map();
+const EVENT_SERVICE_LABELS = Object.freeze({
+  "rest-v2": "REST V2",
+  esm: "ESM",
+  cm: "CM",
+  degradation: "DEGRADATION",
+});
 
 const port = chrome.runtime.connect({ name: "underpardebug-devtools" });
 
@@ -64,16 +70,76 @@ function getVisibleEventBySeq(seq) {
 
 function flowHasCmExtensionEvents(items = []) {
   return (Array.isArray(items) ? items : []).some((event) => {
-    if (!event || !isExtensionEvent(event)) {
-      return false;
-    }
-    const service = String(event?.service || "").trim().toLowerCase();
-    if (service === "cm") {
-      return true;
-    }
-    const phase = String(event?.phase || "").trim().toLowerCase();
-    return phase.startsWith("cm-");
+    return Boolean(event && isExtensionEvent(event) && classifyEventService(event) === "cm");
   });
+}
+
+function normalizeEventServiceKey(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return "";
+  }
+  if (raw === "cm" || raw.includes("cm")) {
+    return "cm";
+  }
+  if (raw === "esm" || raw.includes("esm")) {
+    return "esm";
+  }
+  if (raw.includes("degrad")) {
+    return "degradation";
+  }
+  if (raw.includes("restv2") || raw.includes("rest-v2") || raw.includes("rest")) {
+    return "rest-v2";
+  }
+  return "";
+}
+
+function classifyEventService(event) {
+  const direct = normalizeEventServiceKey(event?.service);
+  if (direct) {
+    return direct;
+  }
+
+  const requestScope = String(event?.requestScope || "").trim().toLowerCase();
+  if (requestScope.includes("degrad") || requestScope === "decisions:owner") {
+    return "degradation";
+  }
+  if (requestScope.includes("cm")) {
+    return "cm";
+  }
+  if (requestScope.includes("esm")) {
+    return "esm";
+  }
+  if (requestScope.includes("rest")) {
+    return "rest-v2";
+  }
+
+  const phase = String(event?.phase || "").trim().toLowerCase();
+  if (phase.startsWith("cm-") || phase.includes("cmu")) {
+    return "cm";
+  }
+  if (phase.includes("esm") || phase.includes("decomp") || phase.includes("clickesm")) {
+    return "esm";
+  }
+  if (phase.includes("degrad")) {
+    return "degradation";
+  }
+  if (phase.startsWith("restv2-") || phase.startsWith("profiles-check") || phase.startsWith("token-")) {
+    return "rest-v2";
+  }
+
+  const urlHints = [event?.url, event?.endpointUrl, event?.loginUrl]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+  if (/(cm-reports|config)\.adobeprimetime\.com|streams-stage\.adobeprimetime\.com|\/cmu?\//i.test(urlHints)) {
+    return "cm";
+  }
+  if (urlHints.includes("/api/v2/") || urlHints.includes("api.auth.adobe.com")) {
+    return "rest-v2";
+  }
+
+  return "unknown";
 }
 
 function setFlowSummary(currentFlow = flow) {
@@ -450,6 +516,7 @@ function renderEventRow(event) {
   const row = document.createElement("article");
   row.className = "event-row";
   row.dataset.seq = String(event.seq || "");
+  row.dataset.service = classifyEventService(event);
   if (event.seq === selectedSeq) {
     row.classList.add("selected");
   }
@@ -458,7 +525,15 @@ function renderEventRow(event) {
   head.className = "event-head";
   const seq = createElementWithClass("span", "event-col-seq", `#${String(event.seq || "")}`);
   const time = createElementWithClass("span", "event-col-time", formatTime(event.timestamp));
-  const source = createElementWithClass("span", "event-col-source", String(event.source || ""));
+  const source = createElementWithClass("span", "event-col-source");
+  const sourceLabel = createElementWithClass("span", "event-col-source-label", String(event.source || ""));
+  source.appendChild(sourceLabel);
+  const serviceKey = String(row.dataset.service || "unknown");
+  const serviceLabel = EVENT_SERVICE_LABELS[serviceKey] || "";
+  if (serviceLabel) {
+    const badge = createElementWithClass("span", `event-service-badge service-${serviceKey}`, serviceLabel);
+    source.appendChild(badge);
+  }
   const phase = createElementWithClass("span", "event-col-phase", String(event.phase || ""));
   const status = createElementWithClass("span", "event-col-status", pickEventLabel(event));
   head.appendChild(seq);

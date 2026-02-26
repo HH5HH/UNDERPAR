@@ -6824,7 +6824,6 @@ async function loadDecompService(programmer, appInfo, section, contentElement, r
 
     ensureDecompRuntimeListener();
     ensureDecompWorkspaceTabWatcher();
-    await decompEnsureWorkspaceTab({ activate: false, windowId: decompState.controllerWindowId });
     decompBroadcastControllerState(decompState);
   } catch (error) {
     if (!isEsmServiceRequestActive(section, requestToken, programmer.programmerId)) {
@@ -7401,12 +7400,78 @@ function cmBuildWorkspaceRecordsFromBundles(bundles) {
   return output;
 }
 
-function cmBuildGroupListHtml(groupLabel, records) {
+function cmFormatRecordKindLabel(kind) {
+  const normalized = String(kind || "").trim().toLowerCase();
+  const labels = {
+    tenant: "Tenant",
+    applications: "Application",
+    policies: "Policy",
+    usage: "Usage",
+    correlation: "Correlation",
+    credential: "Credential",
+    "cmv2-op": "CM V2 API",
+    "group-list": "List",
+  };
+  if (labels[normalized]) {
+    return labels[normalized];
+  }
+  if (!normalized) {
+    return "CM";
+  }
+  return normalized.replace(/[-_]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function cmBuildGroupWorkspaceRecord(groupKey, groupLabel, records, programmer = null, index = 0) {
+  const programmerId = String(programmer?.programmerId || "cm").trim() || "cm";
+  const programmerName = String(programmer?.programmerName || programmer?.mediaCompanyName || programmerId).trim() || programmerId;
+  const normalizedGroupKey = String(groupKey || groupLabel || `group-${index + 1}`)
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\-.:]+/g, "_");
+  const normalizedGroupLabel = String(groupLabel || normalizedGroupKey || "CM Group").trim() || "CM Group";
+  const listRows = (Array.isArray(records) ? records : []).map((record) => {
+    const endpoint = String(record?.requestUrl || record?.endpointUrl || "").trim();
+    return {
+      VIEW: "VIEW",
+      Name: String(record?.title || "").trim(),
+      Type: cmFormatRecordKindLabel(record?.kind),
+      Tenant: String(record?.tenantName || record?.tenantId || "").trim(),
+      Summary: String(record?.subtitle || "").trim(),
+      Endpoint: endpoint,
+      __cmViewRecordId: String(record?.cardId || "").trim(),
+    };
+  });
+  const payload = {
+    items: listRows,
+  };
+  return {
+    cardId: cmBuildRecordId("group-list", programmerId, normalizedGroupKey, index),
+    kind: "group-list",
+    title: `${normalizedGroupLabel} List`,
+    subtitle: `${listRows.length} item${listRows.length === 1 ? "" : "s"} | ${programmerName}`,
+    endpointUrl: "",
+    requestUrl: "",
+    payload,
+    columns: ["VIEW", "Name", "Type", "Tenant", "Summary", "Endpoint"],
+    tenantId: programmerId,
+    tenantName: programmerName,
+    lastModified: "",
+  };
+}
+
+function cmBuildGroupListHtml(groupLabel, records, groupRecordId = "") {
   const rows = Array.isArray(records) ? records : [];
+  const recordId = String(groupRecordId || "").trim();
+  const clickableHeaderMarkup = `
+    <button type="button" class="cm-group-title cm-group-link" data-record-id="${escapeHtml(recordId)}">
+      <span class="cm-group-title-text">${escapeHtml(groupLabel)}</span>
+      <span class="cm-group-title-count">${rows.length}</span>
+    </button>
+  `;
   if (rows.length === 0) {
     return `
       <section class="cm-group">
-        <h4 class="cm-group-title">${escapeHtml(groupLabel)}</h4>
+        ${clickableHeaderMarkup}
         <p class="cm-group-empty">No ${escapeHtml(groupLabel.toLowerCase())} detected for this tenant set.</p>
       </section>
     `;
@@ -7427,7 +7492,7 @@ function cmBuildGroupListHtml(groupLabel, records) {
 
   return `
     <section class="cm-group">
-      <h4 class="cm-group-title">${escapeHtml(groupLabel)}</h4>
+      ${clickableHeaderMarkup}
       <ul class="cm-group-list">${items}</ul>
     </section>
   `;
@@ -7977,6 +8042,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
 
   if (action === "run-card") {
     const card = message?.card && typeof message.card === "object" ? message.card : {};
+    const shouldForceRefetch = message?.forceRefetch !== false;
     const matchedRecord = cmFindRecordByCard(cmState, card);
     if (!matchedRecord) {
       const fallbackUrl = String(card?.requestUrl || card?.endpointUrl || "").trim();
@@ -7999,7 +8065,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
         requestToken,
         {
           emitStart: true,
-          forceRefetch: true,
+          forceRefetch: shouldForceRefetch,
           cardId: String(card.cardId || generateRequestId()),
           targetWindowId: senderWindowId || Number(cmState.controllerWindowId || 0),
         }
@@ -8009,7 +8075,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
 
     await cmRunRecordToWorkspace(cmState, matchedRecord, requestToken, {
       emitStart: true,
-      forceRefetch: true,
+      forceRefetch: shouldForceRefetch,
       cardId: String(card?.cardId || matchedRecord.cardId || generateRequestId()),
       targetWindowId: senderWindowId || Number(cmState.controllerWindowId || 0),
     });
@@ -8046,6 +8112,36 @@ async function handleCmWorkspaceAction(message, sender = null) {
       targetWindowId: senderWindowId || Number(cmState.controllerWindowId || 0),
     });
     return { ok: true };
+  }
+
+  if (action === "download-csv") {
+    const card = message?.card && typeof message.card === "object" ? message.card : {};
+    const sortRule = decompNormalizeSortRule(message?.sortRule);
+    const matchedRecord = cmFindRecordByCard(cmState, card);
+    const fallbackUrl = String(card?.requestUrl || card?.endpointUrl || "").trim();
+    const fallbackRecord = {
+      cardId: String(card?.cardId || generateRequestId()),
+      kind: "cm",
+      title: "CM item",
+      subtitle: "",
+      endpointUrl: fallbackUrl,
+      requestUrl: fallbackUrl,
+      payload: null,
+      columns: Array.isArray(card?.columns) ? card.columns.map((value) => String(value || "")).filter(Boolean) : [],
+      lastModified: "",
+      tenantId: String(cmState?.programmer?.programmerId || "cm"),
+      tenantName: String(cmState?.programmer?.programmerName || cmState?.programmer?.programmerId || "CM"),
+    };
+    const record = matchedRecord || fallbackRecord;
+    if (!matchedRecord && !fallbackUrl && (!Array.isArray(card?.rows) || card.rows.length === 0)) {
+      return { ok: false, error: "CM card request URL is missing." };
+    }
+
+    const csvResult = await cmDownloadCsvForCard(cmState, record, card, sortRule, requestToken);
+    if (!csvResult?.ok) {
+      return { ok: false, error: csvResult?.error || "Unable to download CM CSV." };
+    }
+    return { ok: true, fileName: csvResult.fileName || "" };
   }
 
   if (action === "rerun-all") {
@@ -8146,6 +8242,25 @@ function ensureCmWorkspaceTabWatcher() {
   state.cmWorkspaceTabWatcherBound = true;
 }
 
+async function cmOpenRecordInWorkspace(cmState, record, requestToken, options = {}) {
+  if (!cmState || !record) {
+    return;
+  }
+  const workspaceTab = await cmEnsureWorkspaceTab({
+    activate: options.activate !== false,
+    windowId: Number(cmState.controllerWindowId || 0) || undefined,
+  });
+  cmBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  const targetWindowId = Number(workspaceTab?.windowId || cmState.controllerWindowId || 0);
+  cmBroadcastControllerState(cmState, targetWindowId);
+  await cmRunRecordToWorkspace(cmState, record, requestToken, {
+    emitStart: options.emitStart !== false,
+    forceRefetch: options.forceRefetch === true,
+    cardId: String(options.cardId || record.cardId || generateRequestId()),
+    targetWindowId,
+  });
+}
+
 async function loadCmService(programmer, cmService, section, contentElement, refreshButton, requestToken) {
   if (!contentElement) {
     return;
@@ -8179,7 +8294,6 @@ async function loadCmService(programmer, cmService, section, contentElement, ref
     const credentialRecords = cmBuildCredentialHintRecords(credentialHints, programmer);
     const apiOperationRecords = cmBuildCmV2OperationRecords(programmer, credentialHints);
     const records = [...correlationRecords, ...bundleRecords, ...credentialRecords, ...apiOperationRecords];
-    const recordsById = new Map(records.map((record) => [record.cardId, record]));
     const correlationCardRecords = records.filter((record) => record.kind === "correlation");
     const tenantRecords = records.filter((record) => record.kind === "tenant");
     const applicationRecords = records.filter((record) => record.kind === "applications");
@@ -8187,7 +8301,61 @@ async function loadCmService(programmer, cmService, section, contentElement, ref
     const policyRecords = records.filter((record) => record.kind === "policies");
     const usageRecords = records.filter((record) => record.kind === "usage");
     const operationRecords = records.filter((record) => record.kind === "cmv2-op");
+    const groupDefinitions = [
+      {
+        key: "correlation",
+        label: "REST V2 Correlation",
+        records: correlationCardRecords,
+      },
+      {
+        key: "tenants",
+        label: "CM Tenants",
+        records: tenantRecords,
+      },
+      {
+        key: "applications",
+        label: "CM Applications",
+        records: applicationRecords,
+      },
+      {
+        key: "credentials",
+        label: "CM Credential Hints",
+        records: credentialHintRecords,
+      },
+      {
+        key: "policies",
+        label: "CM Policies",
+        records: policyRecords,
+      },
+      {
+        key: "usage",
+        label: "CM Usage (CMU)",
+        records: usageRecords,
+      },
+      {
+        key: "control-api",
+        label: "CM V2 Control API",
+        records: operationRecords,
+      },
+    ];
+    // Keep tenant groups in internal records for fast CM mapping/debug workflows,
+    // but hide the broad CM tenant list from sidepanel UI.
+    const hiddenCmGroupKeys = new Set(["tenants"]);
+    const groupRecordsByKey = new Map();
+    groupDefinitions.forEach((group, index) => {
+      const groupRecord = cmBuildGroupWorkspaceRecord(group.key, group.label, group.records, programmer, index);
+      records.push(groupRecord);
+      groupRecordsByKey.set(group.key, groupRecord);
+    });
+    const recordsById = new Map(records.map((record) => [record.cardId, record]));
     const sourceLabel = String(cmService?.sourceUrl || "").trim() || "CM API discovery";
+    const groupMarkup = groupDefinitions
+      .filter((group) => !hiddenCmGroupKeys.has(group.key))
+      .map((group) => {
+        const groupRecord = groupRecordsByKey.get(group.key);
+        return cmBuildGroupListHtml(group.label, group.records, groupRecord?.cardId || "");
+      })
+      .join("");
 
     contentElement.innerHTML = `
       <div class="cm-shell">
@@ -8197,15 +8365,7 @@ async function loadCmService(programmer, cmService, section, contentElement, ref
           </p>
           <button type="button" class="cm-open-workspace-btn">Open CM Workspace</button>
         </div>
-        <div class="cm-sidepanel">
-          ${cmBuildGroupListHtml("REST V2 Correlation", correlationCardRecords)}
-          ${cmBuildGroupListHtml("CM Tenants", tenantRecords)}
-          ${cmBuildGroupListHtml("CM Applications", applicationRecords)}
-          ${cmBuildGroupListHtml("CM Credential Hints", credentialHintRecords)}
-          ${cmBuildGroupListHtml("CM Policies", policyRecords)}
-          ${cmBuildGroupListHtml("CM Usage (CMU)", usageRecords)}
-          ${cmBuildGroupListHtml("CM V2 Control API", operationRecords)}
-        </div>
+        <div class="cm-sidepanel">${groupMarkup}</div>
       </div>
     `;
 
@@ -8247,24 +8407,37 @@ async function loadCmService(programmer, cmService, section, contentElement, ref
         if (!record) {
           return;
         }
-        const workspaceTab = await cmEnsureWorkspaceTab({
+        await cmOpenRecordInWorkspace(cmState, record, requestToken, {
           activate: true,
-          windowId: Number(cmState.controllerWindowId || 0) || undefined,
-        });
-        cmBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
-        cmBroadcastControllerState(cmState, Number(workspaceTab?.windowId || cmState.controllerWindowId || 0));
-        await cmRunRecordToWorkspace(cmState, record, requestToken, {
           emitStart: true,
           forceRefetch: false,
           cardId: record.cardId,
-          targetWindowId: Number(workspaceTab?.windowId || cmState.controllerWindowId || 0),
+        });
+      });
+    });
+
+    contentElement.querySelectorAll(".cm-group-link").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const recordId = String(button.getAttribute("data-record-id") || "").trim();
+        if (!recordId) {
+          return;
+        }
+        const groupRecord = cmState.recordsById.get(recordId);
+        if (!groupRecord) {
+          return;
+        }
+        await cmOpenRecordInWorkspace(cmState, groupRecord, requestToken, {
+          activate: true,
+          emitStart: true,
+          forceRefetch: false,
+          cardId: groupRecord.cardId,
         });
       });
     });
 
     ensureCmRuntimeListener();
     ensureCmWorkspaceTabWatcher();
-    await cmEnsureWorkspaceTab({ activate: false, windowId: cmState.controllerWindowId });
     cmBroadcastControllerState(cmState);
   } catch (error) {
     if (!isCmServiceRequestActive(section, requestToken, programmer.programmerId)) {
@@ -11267,6 +11440,23 @@ function getAvatarPersistStorageKeys(loginData, options = {}) {
   return [...new Set(keys)];
 }
 
+function normalizeAvatarPersistIdentityValues(values) {
+  const source = Array.isArray(values) ? values : [values];
+  const normalized = source
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+  return [...new Set(normalized)].slice(0, 24);
+}
+
+function avatarPersistIdentitiesOverlap(leftValues, rightValues) {
+  const left = normalizeAvatarPersistIdentityValues(leftValues);
+  const right = new Set(normalizeAvatarPersistIdentityValues(rightValues));
+  if (left.length === 0 || right.size === 0) {
+    return false;
+  }
+  return left.some((value) => right.has(value));
+}
+
 function getAvatarPersistKeyScopeWeight(key, identityKeySet) {
   if (identityKeySet.has(key)) {
     if (key.startsWith(AVATAR_PERSIST_STORAGE_PREFIX)) {
@@ -11293,9 +11483,10 @@ function readPersistedAvatarCandidate(loginData) {
     includeTokenFingerprint: !hasProfileIdentity,
   });
   const identityKeySet = new Set(identityKeys);
-  const keys = hasProfileIdentity
-    ? [...identityKeys]
-    : [...identityKeys, AVATAR_PERSIST_GLOBAL_KEY, LEGACY_AVATAR_PERSIST_GLOBAL_KEY];
+  const activeIdentityHints = normalizeAvatarPersistIdentityValues(
+    getAvatarPersistIdentityCandidates(loginData, { includeTokenFingerprint: false })
+  );
+  const keys = [...new Set([...identityKeys, AVATAR_PERSIST_GLOBAL_KEY, LEGACY_AVATAR_PERSIST_GLOBAL_KEY])];
   if (keys.length === 0) {
     return "";
   }
@@ -11315,6 +11506,17 @@ function readPersistedAvatarCandidate(loginData) {
       if (!parsed || typeof parsed !== "object") {
         localStorage.removeItem(key);
         continue;
+      }
+
+      if (key === AVATAR_PERSIST_GLOBAL_KEY || key === LEGACY_AVATAR_PERSIST_GLOBAL_KEY) {
+        const recordIdentityHints = normalizeAvatarPersistIdentityValues(parsed.identities || parsed.identityHints || []);
+        if (
+          activeIdentityHints.length > 0 &&
+          recordIdentityHints.length > 0 &&
+          !avatarPersistIdentitiesOverlap(activeIdentityHints, recordIdentityHints)
+        ) {
+          continue;
+        }
       }
 
       const expiresAt = Number(parsed.expiresAt || 0);
@@ -11380,10 +11582,14 @@ function writePersistedAvatarCandidate(loginData, payload) {
 
   const ttlSeconds = Number(payload?.ttlSeconds || AVATAR_PERSIST_TTL_SECONDS);
   const expiresAt = Date.now() + Math.max(1, ttlSeconds) * 1000;
+  const identityHints = normalizeAvatarPersistIdentityValues(
+    getAvatarPersistIdentityCandidates(loginData, { includeTokenFingerprint: false })
+  );
   const record = JSON.stringify({
     expiresAt,
     url: persistUrl,
     dataUrl: persistDataUrl,
+    identities: identityHints,
     updatedAt: Date.now(),
   });
 
@@ -15977,7 +16183,176 @@ function cmColumnsFromPayload(payload) {
   if (rows.length === 0) {
     return [];
   }
-  return uniqueSorted(Object.keys(rows[0] || {}).map((key) => String(key || "").trim()).filter(Boolean));
+  return uniqueSorted(
+    Object.keys(rows[0] || {})
+      .map((key) => String(key || "").trim())
+      .filter((key) => key && !key.startsWith("__"))
+  );
+}
+
+function cmColumnsFromRows(rows, preferredColumns = []) {
+  const output = [];
+  const seen = new Set();
+  const pushColumn = (value) => {
+    const key = String(value || "").trim();
+    if (!key || key.startsWith("__") || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    output.push(key);
+  };
+
+  (Array.isArray(preferredColumns) ? preferredColumns : []).forEach((column) => {
+    pushColumn(column);
+  });
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    if (!row || typeof row !== "object") {
+      return;
+    }
+    Object.keys(row).forEach((column) => {
+      pushColumn(column);
+    });
+  });
+  return output;
+}
+
+function cmNormalizeCsvCellValue(value) {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function cmGetSortableValue(row, column) {
+  const value = row?.[column];
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && String(value).trim() !== "") {
+    return numeric;
+  }
+  return String(value == null ? "" : value).toLowerCase();
+}
+
+function cmSortRowsForCsv(rows, sortRule = null, columns = []) {
+  const normalizedSort = decompNormalizeSortRule(sortRule);
+  const fallbackColumn = Array.isArray(columns) && columns.length > 0 ? String(columns[0] || "").trim() : "";
+  const sortColumn = String(normalizedSort?.col || fallbackColumn || "").trim();
+  if (!sortColumn) {
+    return [...rows];
+  }
+  const direction = String(normalizedSort?.dir || "DESC").toUpperCase() === "ASC" ? 1 : -1;
+  return [...rows].sort((left, right) => {
+    const leftValue = cmGetSortableValue(left, sortColumn);
+    const rightValue = cmGetSortableValue(right, sortColumn);
+    if (leftValue < rightValue) {
+      return -1 * direction;
+    }
+    if (leftValue > rightValue) {
+      return 1 * direction;
+    }
+    return 0;
+  });
+}
+
+function cmBuildCsvFileName(cmState, record = null, fallbackCard = null) {
+  const programmerSegment = sanitizeHarFileSegment(cmState?.programmer?.programmerId, "cm");
+  const tenantSegment = sanitizeHarFileSegment(record?.tenantId || record?.tenantName, "tenant");
+  const kindSegment = sanitizeHarFileSegment(record?.kind || fallbackCard?.zoomKey, "report");
+  const entitySegment = sanitizeHarFileSegment(record?.title || fallbackCard?.cardId, "dataset");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `cm_${programmerSegment}_${tenantSegment}_${kindSegment}_${entitySegment}_${stamp}.csv`;
+}
+
+function cmDownloadRowsAsCsv(rows, options = {}) {
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .filter((row) => row && typeof row === "object")
+    .map((row) => ({ ...row }));
+  if (normalizedRows.length === 0) {
+    return false;
+  }
+
+  const columns = cmColumnsFromRows(normalizedRows, options.columns);
+  if (columns.length === 0) {
+    return false;
+  }
+  const sortedRows = cmSortRowsForCsv(normalizedRows, options.sortRule, columns);
+  const lines = [
+    columns.map((column) => `"${String(column || "").replace(/"/g, '""')}"`).join(","),
+    ...sortedRows.map((row) =>
+      columns.map((column) => `"${cmNormalizeCsvCellValue(row[column]).replace(/"/g, '""')}"`).join(",")
+    ),
+  ];
+
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const blobUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = blobUrl;
+  anchor.download = String(options.fileName || "cm-report.csv");
+  anchor.click();
+  URL.revokeObjectURL(blobUrl);
+  return true;
+}
+
+async function cmDownloadCsvForCard(cmState, record, card, sortRule, requestToken) {
+  const normalizedCard = card && typeof card === "object" ? card : {};
+  let rows = Array.isArray(normalizedCard.rows) ? normalizedCard.rows : [];
+  let columns = Array.isArray(normalizedCard.columns) ? normalizedCard.columns : [];
+
+  if (rows.length === 0 && record?.payload != null) {
+    rows = cmRowsFromPayload(record.payload);
+    columns = Array.isArray(record?.columns) && record.columns.length > 0 ? record.columns : cmColumnsFromPayload(record.payload);
+  }
+
+  if (rows.length === 0 && record && String(record?.kind || "").toLowerCase() !== "cmv2-op") {
+    const requestUrl = String(record.requestUrl || record.endpointUrl || "").trim();
+    if (requestUrl) {
+      const response = await fetchCmJsonWithAuthVariants([requestUrl], `CM ${record.kind || "report"} CSV`, {
+        debugMeta: {
+          scope: `cm-csv-${String(record.kind || "report")}`,
+          endpointUrl: requestUrl,
+          cardId: String(normalizedCard?.cardId || record?.cardId || ""),
+          programmerId: String(cmState?.programmer?.programmerId || ""),
+          requestorId: String(state.selectedRequestorId || ""),
+          mvpd: String(state.selectedMvpdId || ""),
+        },
+      });
+      if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
+        return { ok: false, skipped: true, error: "CM controller is no longer active for the selected media company." };
+      }
+      record.payload = response.parsed;
+      record.lastModified = String(response.lastModified || record.lastModified || "");
+      rows = cmRowsFromPayload(record.payload);
+      columns = cmColumnsFromPayload(record.payload);
+      record.columns = columns;
+    }
+  }
+
+  if (rows.length === 0) {
+    return { ok: false, error: "No CM rows are available to export as CSV." };
+  }
+
+  const fileName = cmBuildCsvFileName(cmState, record, normalizedCard);
+  const started = cmDownloadRowsAsCsv(rows, {
+    columns,
+    sortRule,
+    fileName,
+  });
+  if (!started) {
+    return { ok: false, error: "Unable to build CM CSV from the current report rows." };
+  }
+  return { ok: true, fileName };
 }
 
 function normalizeRestV2MvpdCollection(payload) {

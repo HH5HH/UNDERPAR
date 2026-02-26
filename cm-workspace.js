@@ -200,6 +200,44 @@ function createCell(value) {
   return cell;
 }
 
+function createActionCell(row, header) {
+  const actionKey = String(header || "").trim().toUpperCase();
+  if (actionKey !== "VIEW") {
+    return createCell(row?.[header] ?? "");
+  }
+
+  const targetRecordId = String(row?.__cmViewRecordId || "").trim();
+  if (!targetRecordId) {
+    return createCell(row?.[header] ?? "");
+  }
+
+  const cell = document.createElement("td");
+  const actionLink = document.createElement("a");
+  actionLink.href = "#";
+  actionLink.className = "cm-view-link";
+  actionLink.textContent = String(row?.[header] || "VIEW");
+  actionLink.title = "Load details in CM Workspace";
+  actionLink.addEventListener("click", async (event) => {
+    event.preventDefault();
+    if (!ensureWorkspaceUnlocked()) {
+      return;
+    }
+    const result = await sendWorkspaceAction("run-card", {
+      card: {
+        cardId: targetRecordId,
+      },
+      forceRefetch: false,
+    });
+    if (!result?.ok) {
+      setStatus(result?.error || "Unable to load CM detail report.", "error");
+    } else {
+      setStatus("CM detail report loaded.");
+    }
+  });
+  cell.appendChild(actionLink);
+  return cell;
+}
+
 function refreshHeaderStates(tableState) {
   if (!tableState?.thead) {
     return;
@@ -216,7 +254,7 @@ function renderTableBody(tableState) {
   tableState.data.forEach((row) => {
     const tr = document.createElement("tr");
     tableState.headers.forEach((header) => {
-      tr.appendChild(createCell(row?.[header] ?? ""));
+      tr.appendChild(createActionCell(row, header));
     });
     tableState.tbody.appendChild(tr);
   });
@@ -639,7 +677,10 @@ function renderCardTable(cardState, rows, lastModified) {
       ...(Array.isArray(cardState.columns) ? cardState.columns : []),
       ...Object.keys(normalizedRows[0] || {}),
     ])
-  ).filter(Boolean);
+  ).filter((header) => {
+    const normalizedHeader = String(header || "").trim();
+    return normalizedHeader && !normalizedHeader.startsWith("__");
+  });
 
   cardState.bodyElement.innerHTML = `
     <div class="esm-table-wrapper">
@@ -650,7 +691,7 @@ function renderCardTable(cardState, rows, lastModified) {
           <tr>
             <td class="esm-footer-cell">
               <div class="esm-footer">
-                <a href="#" class="cm-rerun-link">RERUN</a>
+                <a href="#" class="cm-csv-link">CSV</a>
                 <span class="esm-last-modified"></span>
                 <span class="esm-close" title="Close table"> x </span>
               </div>
@@ -668,7 +709,7 @@ function renderCardTable(cardState, rows, lastModified) {
   const tbody = table.querySelector("tbody");
   const footerCell = cardState.bodyElement.querySelector(".esm-footer-cell");
   const lastModifiedLabel = cardState.bodyElement.querySelector(".esm-last-modified");
-  const rerunLink = cardState.bodyElement.querySelector(".cm-rerun-link");
+  const csvLink = cardState.bodyElement.querySelector(".cm-csv-link");
   const closeButton = cardState.bodyElement.querySelector(".esm-close");
 
   const tableState = {
@@ -729,10 +770,24 @@ function renderCardTable(cardState, rows, lastModified) {
       : "Last-Modified: (real-time)";
   }
 
-  if (rerunLink) {
-    rerunLink.addEventListener("click", (event) => {
+  if (csvLink) {
+    csvLink.addEventListener("click", async (event) => {
       event.preventDefault();
-      void rerunCard(cardState);
+      if (!ensureWorkspaceUnlocked()) {
+        return;
+      }
+      const result = await sendWorkspaceAction("download-csv", {
+        card: {
+          ...getCardPayload(cardState),
+          rows: Array.isArray(cardState.rows) ? cardState.rows : [],
+        },
+        sortRule: cardState.sortStack?.[0] || tableState.sortStack?.[0] || null,
+      });
+      if (!result?.ok) {
+        setStatus(result?.error || "Unable to download CM CSV.", "error");
+      } else {
+        setStatus("CM CSV download started.");
+      }
     });
   }
 
