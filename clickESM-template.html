@@ -183,6 +183,14 @@ a:hover{color:var(--accent-strong);text-decoration:underline}
 
 .search-container-top button:not(.theme-toggle){
   padding:0 12px;
+  height:var(--control-height);
+  min-height:var(--control-height);
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  line-height:1;
+  white-space:nowrap;
+  flex:0 0 auto;
 }
 
 .search-right select{
@@ -367,9 +375,7 @@ tbody tr:hover{background:var(--row-hover)}
 th.active-sort{
   font-weight:600;
   color:var(--table-click-active);
-  text-decoration:underline;
-  text-decoration-thickness:2px;
-  text-underline-offset:2px;
+  text-decoration:none;
   box-shadow:inset 0 -2px 0 var(--table-click-active);
 }
 

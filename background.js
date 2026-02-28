@@ -44,6 +44,7 @@ const BUILD_FINGERPRINT_FILES = [
   "decomp-workspace.html",
   "decomp-workspace.css",
   "decomp-workspace.js",
+  "clickesmws-runtime.js",
   "clickESM-template.html",
   "cm-workspace.html",
   "cm-workspace.css",

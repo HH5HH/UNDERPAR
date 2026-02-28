@@ -26,7 +26,10 @@ const ESM_DATE_PARTS = ["year", "month", "day", "hour", "minute"];
 const ESM_DEPRECATED_COLUMN_KEYS = new Set(["clientless-failures", "clientless-tokens"]);
 const ESM_NODE_BASE_URL = "https://mgmt.auth.adobe.com/esm/v3/media-company/";
 const ESM_NODE_BASE_PATH = "esm/v3/media-company/";
+const WORKSPACE_EXPORT_FILE_SYSTEM_QUERY_KEYS = new Set(["format", "limit"]);
 const WORKSPACE_TABLE_VISIBLE_ROW_CAP = 10;
+const WORKSPACE_TEARSHEET_RUNTIME_PATH = "clickesmws-runtime.js";
+const WORKSPACE_TEARSHEET_TEMPLATE_PATH = "decomp-workspace.html";
 const PASS_CONSOLE_PROGRAMMER_APPLICATIONS_URL =
   "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production/programmers";
 const WORKSPACE_LOCK_MESSAGE_SUFFIX =
@@ -60,10 +63,15 @@ const els = {
   lockBanner: document.getElementById("workspace-lock-banner"),
   lockMessage: document.getElementById("workspace-lock-message"),
   makeClickEsmButton: document.getElementById("workspace-make-clickesm"),
+  makeClickEsmWorkspaceButton: document.getElementById("workspace-make-clickesmws"),
   rerunAllButton: document.getElementById("workspace-rerun-all"),
   clearButton: document.getElementById("workspace-clear-all"),
   cardsHost: document.getElementById("workspace-cards"),
 };
+
+let workspaceStylesheetTextCache = "";
+let workspaceTearsheetRuntimeTextCache = "";
+let workspaceTearsheetTemplateTextCache = "";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -105,6 +113,408 @@ function normalizeEsmColumns(columns) {
   return output;
 }
 
+function firstNonEmptyString(values) {
+  for (const value of Array.isArray(values) ? values : []) {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
+function sanitizeDownloadFileSegment(value, fallback = "download") {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+function truncateDownloadFileSegment(value, maxLength = 48) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (!Number.isFinite(maxLength) || maxLength <= 0) {
+    return normalized;
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return normalized.slice(0, maxLength);
+}
+
+function getWorkspaceExportQueryEntries(urlValue) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return [];
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return [];
+  }
+  const entries = [];
+  parsed.searchParams.forEach((value, key) => {
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    if (!normalizedKey || WORKSPACE_EXPORT_FILE_SYSTEM_QUERY_KEYS.has(normalizedKey)) {
+      return;
+    }
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    entries.push({ key: normalizedKey, value: normalizedValue });
+  });
+  return entries;
+}
+
+function areStringSetsEqual(leftSet, rightSet) {
+  if (!(leftSet instanceof Set) || !(rightSet instanceof Set)) {
+    return false;
+  }
+  if (leftSet.size !== rightSet.size) {
+    return false;
+  }
+  for (const value of leftSet) {
+    if (!rightSet.has(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function compactWorkspaceExportContextValue(value, maxLength = 16) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/^\d{4}-\d{2}(-\d{2})?(T\d{2}:\d{2}(:\d{2})?Z)?$/i.test(raw)) {
+    const digits = raw.replace(/\D+/g, "");
+    return truncateDownloadFileSegment(digits, Math.max(8, maxLength));
+  }
+  return truncateDownloadFileSegment(sanitizeDownloadFileSegment(raw, ""), maxLength);
+}
+
+function buildWorkspaceExportFileStamp() {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  return sanitizeDownloadFileSegment(stamp, "snapshot");
+}
+
+function buildWorkspaceExportGlobalContext(snapshot = {}) {
+  const cards = Array.isArray(snapshot?.cards) ? snapshot.cards : [];
+  if (cards.length === 0) {
+    return "ctx";
+  }
+
+  const cardMaps = cards.map((cardSnapshot) => {
+    const map = new Map();
+    const requestUrl = String(cardSnapshot?.requestUrl || cardSnapshot?.endpointUrl || "").trim();
+    getWorkspaceExportQueryEntries(requestUrl).forEach(({ key, value }) => {
+      if (!map.has(key)) {
+        map.set(key, new Set());
+      }
+      map.get(key).add(value);
+    });
+    return map;
+  });
+
+  const firstMap = cardMaps[0] instanceof Map ? cardMaps[0] : new Map();
+  const sharedEntries = [];
+  firstMap.forEach((valueSet, key) => {
+    const isShared = cardMaps.every((map) => map.has(key) && areStringSetsEqual(valueSet, map.get(key)));
+    if (isShared) {
+      sharedEntries.push([key, valueSet]);
+    }
+  });
+  if (sharedEntries.length === 0) {
+    return "ctx";
+  }
+
+  const aliasByKey = {
+    "requestor-id": "rq",
+    mvpd: "mv",
+    start: "st",
+    end: "en",
+  };
+  const visibleEntries = sharedEntries
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .slice(0, 3)
+    .map(([key, valueSet]) => {
+      const alias =
+        aliasByKey[key] || truncateDownloadFileSegment(sanitizeDownloadFileSegment(String(key || ""), "q"), 4);
+      const values = [...valueSet].sort();
+      if (values.length === 0) {
+        return alias;
+      }
+      if (values.length > 1) {
+        return `${alias}${values.length}`;
+      }
+      const compactValue = compactWorkspaceExportContextValue(values[0], 14);
+      return compactValue ? `${alias}-${compactValue}` : alias;
+    });
+  const remainder = sharedEntries.length - visibleEntries.length;
+  if (remainder > 0) {
+    visibleEntries.push(`k${remainder}`);
+  }
+  return truncateDownloadFileSegment(
+    sanitizeDownloadFileSegment(visibleEntries.join("_"), "ctx"),
+    44
+  );
+}
+
+function getOrderedCardStates() {
+  const cardsById = state.cardsById instanceof Map ? state.cardsById : new Map();
+  const ordered = [];
+  if (els.cardsHost) {
+    els.cardsHost.querySelectorAll(".report-card[data-card-id]").forEach((element) => {
+      const cardId = String(element.getAttribute("data-card-id") || "").trim();
+      if (!cardId || !cardsById.has(cardId)) {
+        return;
+      }
+      ordered.push(cardsById.get(cardId));
+    });
+  }
+  if (ordered.length > 0) {
+    return ordered;
+  }
+  return [...cardsById.values()];
+}
+
+function cloneWorkspaceRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      return {};
+    }
+    return { ...row };
+  });
+}
+
+function buildWorkspaceExportSnapshot() {
+  const cards = getOrderedCardStates().map((cardState) => ({
+    cardId: String(cardState?.cardId || ""),
+    endpointUrl: String(cardState?.endpointUrl || ""),
+    requestUrl: String(cardState?.requestUrl || cardState?.endpointUrl || ""),
+    zoomKey: String(cardState?.zoomKey || ""),
+    columns: normalizeEsmColumns(cardState?.columns),
+    rows: cloneWorkspaceRows(cardState?.rows),
+    sortStack:
+      Array.isArray(cardState?.sortStack) && cardState.sortStack.length > 0
+        ? cardState.sortStack
+            .map((entry) => ({
+              col: String(entry?.col || "").trim(),
+              dir: String(entry?.dir || "").trim().toUpperCase() === "ASC" ? "ASC" : "DESC",
+            }))
+            .filter((entry) => entry.col)
+        : [{ col: "DATE", dir: "DESC" }],
+    lastModified: String(cardState?.lastModified || ""),
+  }));
+  const generatedAt = new Date();
+  return {
+    title: `${getProgrammerLabel()} clickESM Workspace`,
+    controllerStateText: String(els.controllerState?.textContent || "").trim(),
+    filterStateText: String(els.filterState?.textContent || "").trim(),
+    exportMetaText: "",
+    programmerId: String(state.programmerId || ""),
+    programmerName: String(state.programmerName || ""),
+    requestorIds: Array.isArray(state.requestorIds) ? state.requestorIds.slice(0, 24) : [],
+    mvpdIds: Array.isArray(state.mvpdIds) ? state.mvpdIds.slice(0, 24) : [],
+    generatedAt: generatedAt.toISOString(),
+    clientTimeZone: CLIENT_TIMEZONE,
+    cards,
+  };
+}
+
+function buildClickEsmWorkspaceFileName(snapshot = {}) {
+  const mediaCompany = truncateDownloadFileSegment(
+    sanitizeDownloadFileSegment(
+      firstNonEmptyString([snapshot?.programmerName, snapshot?.programmerId, "MediaCompany"]),
+      "MediaCompany"
+    ),
+    48
+  );
+  const tableCount = Math.max(0, Number(Array.isArray(snapshot?.cards) ? snapshot.cards.length : 0));
+  const tableCountHint = `t${tableCount}`;
+  const globalContextHint = buildWorkspaceExportGlobalContext(snapshot);
+  const stamp = buildWorkspaceExportFileStamp();
+  return `${mediaCompany}_clickESMWS_${tableCountHint}_${globalContextHint}_${stamp}.html`;
+}
+
+async function loadWorkspaceStylesheetText() {
+  if (typeof workspaceStylesheetTextCache === "string" && workspaceStylesheetTextCache.trim().length > 0) {
+    return workspaceStylesheetTextCache;
+  }
+  const stylesheetUrl = String(els.stylesheet?.href || "").trim();
+  if (!stylesheetUrl) {
+    throw new Error("Workspace stylesheet URL is unavailable.");
+  }
+  const response = await fetch(stylesheetUrl, {
+    method: "GET",
+    credentials: "omit",
+    cache: "no-cache",
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load workspace stylesheet (${response.status}).`);
+  }
+  const stylesheetText = await response.text();
+  if (typeof stylesheetText !== "string" || stylesheetText.trim().length === 0) {
+    throw new Error("Workspace stylesheet is empty.");
+  }
+  workspaceStylesheetTextCache = stylesheetText;
+  return workspaceStylesheetTextCache;
+}
+
+async function loadWorkspaceTearsheetRuntimeText() {
+  if (typeof workspaceTearsheetRuntimeTextCache === "string" && workspaceTearsheetRuntimeTextCache.trim().length > 0) {
+    return workspaceTearsheetRuntimeTextCache;
+  }
+  const runtimeUrl = chrome.runtime.getURL(WORKSPACE_TEARSHEET_RUNTIME_PATH);
+  const response = await fetch(runtimeUrl, {
+    method: "GET",
+    credentials: "omit",
+    cache: "no-cache",
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load clickESMWS runtime (${response.status}).`);
+  }
+  const runtimeText = await response.text();
+  if (typeof runtimeText !== "string" || runtimeText.trim().length === 0) {
+    throw new Error("clickESMWS runtime is empty.");
+  }
+  workspaceTearsheetRuntimeTextCache = runtimeText;
+  return workspaceTearsheetRuntimeTextCache;
+}
+
+async function loadWorkspaceTearsheetTemplateText() {
+  if (typeof workspaceTearsheetTemplateTextCache === "string" && workspaceTearsheetTemplateTextCache.trim().length > 0) {
+    return workspaceTearsheetTemplateTextCache;
+  }
+  const templateUrl = chrome.runtime.getURL(WORKSPACE_TEARSHEET_TEMPLATE_PATH);
+  const response = await fetch(templateUrl, {
+    method: "GET",
+    credentials: "omit",
+    cache: "no-cache",
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load clickESMWS template (${response.status}).`);
+  }
+  const templateText = await response.text();
+  if (typeof templateText !== "string" || templateText.trim().length === 0) {
+    throw new Error("clickESMWS template is empty.");
+  }
+  workspaceTearsheetTemplateTextCache = templateText;
+  return workspaceTearsheetTemplateTextCache;
+}
+
+function upsertBodyHiddenInput(doc, name, value) {
+  if (!doc || !doc.body) {
+    return;
+  }
+  const normalizedName = String(name || "").trim();
+  if (!normalizedName) {
+    return;
+  }
+  const selector = `input[name="${normalizedName}"]`;
+  let input = doc.body.querySelector(selector);
+  if (!input) {
+    input = doc.createElement("input");
+    input.type = "hidden";
+    input.name = normalizedName;
+    doc.body.insertBefore(input, doc.body.firstChild);
+  }
+  input.value = String(value || "");
+}
+
+function buildWorkspaceTearsheetHtml(snapshot, templateHtml, stylesheetText, runtimeScriptText, authContext = {}) {
+  const templateText = String(templateHtml || "");
+  if (!templateText.trim()) {
+    throw new Error("clickESMWS template is empty.");
+  }
+
+  const payloadJson = JSON.stringify(snapshot || {}).replace(/</g, "\\u003c");
+  const runtimeScript = String(runtimeScriptText || "").replace(/<\/script/gi, "<\\/script");
+  if (!runtimeScript.trim()) {
+    throw new Error("clickESMWS runtime script is empty.");
+  }
+  const safeStyles = String(stylesheetText || "").replace(/<\/style/gi, "<\\/style");
+  if (!safeStyles.trim()) {
+    throw new Error("clickESMWS stylesheet is empty.");
+  }
+
+  const doc = new DOMParser().parseFromString(templateText, "text/html");
+  if (!doc?.documentElement || !doc?.head || !doc?.body) {
+    throw new Error("clickESMWS template is invalid.");
+  }
+
+  const titleText = String(snapshot?.title || "clickESM Workspace Tearsheet").trim() || "clickESM Workspace Tearsheet";
+  doc.title = titleText;
+
+  const styleNode = doc.createElement("style");
+  styleNode.id = "workspace-style-inline";
+  styleNode.textContent = safeStyles;
+  const existingStyleLink = doc.getElementById("workspace-style-link");
+  if (existingStyleLink?.parentNode) {
+    existingStyleLink.parentNode.replaceChild(styleNode, existingStyleLink);
+  } else {
+    doc.head.append(styleNode);
+  }
+
+  doc.querySelectorAll("script[src]").forEach((node) => {
+    node.remove();
+  });
+
+  const genericClickEsmButton = doc.getElementById("workspace-make-clickesm");
+  if (genericClickEsmButton) {
+    genericClickEsmButton.remove();
+  }
+
+  const workspaceClickEsmButton = doc.getElementById("workspace-make-clickesmws");
+  if (workspaceClickEsmButton) {
+    workspaceClickEsmButton.remove();
+  }
+  const workspaceClearAllButton = doc.getElementById("workspace-clear-all");
+  if (workspaceClearAllButton) {
+    workspaceClearAllButton.remove();
+  }
+  const workspaceExportMeta = doc.getElementById("workspace-export-meta");
+  if (workspaceExportMeta) {
+    workspaceExportMeta.remove();
+  }
+
+  upsertBodyHiddenInput(doc, "cid", authContext?.clientId);
+  upsertBodyHiddenInput(doc, "csc", authContext?.clientSecret);
+  upsertBodyHiddenInput(doc, "access_token", authContext?.accessToken);
+
+  const payloadNode = doc.createElement("script");
+  payloadNode.id = "clickesmws-payload";
+  payloadNode.type = "application/json";
+  payloadNode.textContent = payloadJson;
+  doc.body.append(payloadNode);
+
+  const runtimeNode = doc.createElement("script");
+  runtimeNode.textContent = runtimeScript;
+  doc.body.append(runtimeNode);
+
+  return `<!doctype html>\n${doc.documentElement.outerHTML}`;
+}
+
+function downloadHtmlFile(htmlText, fileName) {
+  const blob = new Blob([String(htmlText || "")], { type: "text/html;charset=utf-8" });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = String(fileName || "clickESMWS.html");
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 1500);
+}
+
 function setStatus(message = "", type = "info") {
   const text = String(message || "").trim();
   els.status.textContent = text;
@@ -119,6 +529,9 @@ function setActionButtonsDisabled(disabled) {
   if (els.makeClickEsmButton) {
     els.makeClickEsmButton.disabled = isDisabled || state.esmAvailable !== true;
   }
+  if (els.makeClickEsmWorkspaceButton) {
+    els.makeClickEsmWorkspaceButton.disabled = isDisabled || state.esmAvailable !== true;
+  }
   if (els.rerunAllButton) {
     els.rerunAllButton.disabled = isDisabled;
   }
@@ -131,12 +544,14 @@ function syncActionButtonsDisabled() {
   setActionButtonsDisabled(state.batchRunning || state.workspaceLocked);
 }
 
-function syncMakeClickEsmVisibility() {
-  if (!els.makeClickEsmButton) {
-    return;
-  }
+function syncTearsheetButtonsVisibility() {
   const isVisible = state.esmAvailable === true;
-  els.makeClickEsmButton.hidden = !isVisible;
+  if (els.makeClickEsmButton) {
+    els.makeClickEsmButton.hidden = !isVisible;
+  }
+  if (els.makeClickEsmWorkspaceButton) {
+    els.makeClickEsmWorkspaceButton.hidden = !isVisible;
+  }
 }
 
 function getProgrammerLabel() {
@@ -719,12 +1134,42 @@ function buildCardHeaderContextMarkup(urlValue, endpointUrl = "") {
   `;
 }
 
+function getWorkspaceEndpointKey(urlValue) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    const normalizedPath = parsed.pathname.replace(/\/+$/, "");
+    return `${parsed.origin}${normalizedPath}`.toLowerCase();
+  } catch {
+    return raw.split(/[?#]/, 1)[0].replace(/\/+$/, "").toLowerCase();
+  }
+}
+
 async function runCardFromPathNode(cardState, endpointUrl, sourceRequestUrl) {
   const targetEndpointUrl = String(endpointUrl || "").trim();
   if (!targetEndpointUrl) {
     return;
   }
   const inheritedRequestUrl = buildInheritedRequestUrl(targetEndpointUrl, sourceRequestUrl || cardState?.requestUrl);
+  const targetEndpointKey = getWorkspaceEndpointKey(targetEndpointUrl);
+  const currentEndpointKey = getWorkspaceEndpointKey(String(cardState?.endpointUrl || cardState?.requestUrl || ""));
+  if (targetEndpointKey && currentEndpointKey && targetEndpointKey === currentEndpointKey) {
+    const result = await sendWorkspaceAction("run-card", {
+      requestSource: "workspace-path-link",
+      card: {
+        ...getCardPayload(cardState),
+        endpointUrl: targetEndpointUrl,
+        requestUrl: inheritedRequestUrl || targetEndpointUrl,
+      },
+    });
+    if (!result?.ok) {
+      setStatus(result?.error || "Unable to re-run ESM node report.", "error");
+    }
+    return;
+  }
   const nextCardPayload = {
     cardId: buildWorkspaceCardId("path"),
     endpointUrl: targetEndpointUrl,
@@ -1169,7 +1614,7 @@ function applyControllerState(payload) {
       : state.profileHarvest
         ? [{ ...state.profileHarvest }]
         : [];
-  syncMakeClickEsmVisibility();
+  syncTearsheetButtonsVisibility();
   updateWorkspaceLockState();
   updateControllerBanner();
 }
@@ -1266,14 +1711,61 @@ async function makeClickEsmDownload() {
     return;
   }
 
-  setStatus("Generating clickESM file...");
+  setStatus("Generating static clickESM reference file...");
   const result = await sendWorkspaceAction("make-clickesm");
   if (!result?.ok) {
     setStatus(result?.error || "Unable to generate clickESM file.", "error");
     return;
   }
   const fileName = String(result?.fileName || "clickESM.html");
-  setStatus(`Downloaded ${fileName}.`);
+  setStatus(`Downloaded static reference ${fileName}.`);
+}
+
+async function makeClickEsmWorkspaceDownload() {
+  if (!ensureWorkspaceUnlocked()) {
+    return;
+  }
+  if (state.esmAvailable !== true) {
+    setStatus("clickESMWS_TEARSHEET generation is only available for media companies with ESM.", "error");
+    return;
+  }
+  const cards = getOrderedCardStates();
+  if (cards.length === 0) {
+    setStatus("Open at least one workspace report before generating clickESMWS_TEARSHEET.", "error");
+    return;
+  }
+
+  if (els.makeClickEsmWorkspaceButton) {
+    els.makeClickEsmWorkspaceButton.disabled = true;
+  }
+  setStatus("Generating clickESMWS_TEARSHEET file...");
+  try {
+    const snapshot = buildWorkspaceExportSnapshot();
+    const authResult = await sendWorkspaceAction("resolve-clickesmws-auth");
+    if (!authResult?.ok) {
+      throw new Error(authResult?.error || "Unable to resolve clickESM workspace credentials.");
+    }
+    const [templateHtml, runtimeScriptText, stylesheetText] = await Promise.all([
+      loadWorkspaceTearsheetTemplateText(),
+      loadWorkspaceTearsheetRuntimeText(),
+      loadWorkspaceStylesheetText(),
+    ]);
+    const outputHtml = buildWorkspaceTearsheetHtml(snapshot, templateHtml, stylesheetText, runtimeScriptText, {
+      clientId: String(authResult?.clientId || ""),
+      clientSecret: String(authResult?.clientSecret || ""),
+      accessToken: String(authResult?.accessToken || ""),
+    });
+    const fileName = buildClickEsmWorkspaceFileName(snapshot);
+    downloadHtmlFile(outputHtml, fileName);
+    setStatus(`Downloaded ${fileName}.`);
+  } catch (error) {
+    setStatus(
+      `Unable to generate clickESMWS_TEARSHEET: ${error instanceof Error ? error.message : String(error)}`,
+      "error"
+    );
+  } finally {
+    syncActionButtonsDisabled();
+  }
 }
 
 function clearWorkspace() {
@@ -1287,6 +1779,11 @@ function registerEventHandlers() {
   if (els.makeClickEsmButton) {
     els.makeClickEsmButton.addEventListener("click", () => {
       void makeClickEsmDownload();
+    });
+  }
+  if (els.makeClickEsmWorkspaceButton) {
+    els.makeClickEsmWorkspaceButton.addEventListener("click", () => {
+      void makeClickEsmWorkspaceDownload();
     });
   }
 
@@ -1323,7 +1820,7 @@ async function init() {
     state.windowId = 0;
   }
   registerEventHandlers();
-  syncMakeClickEsmVisibility();
+  syncTearsheetButtonsVisibility();
   updateWorkspaceLockState();
   updateControllerBanner();
   const result = await sendWorkspaceAction("workspace-ready");

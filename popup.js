@@ -35,7 +35,7 @@ const PREMIUM_SERVICE_SCOPE_BY_KEY = {
 const REST_V2_SCOPE = PREMIUM_SERVICE_SCOPE_BY_KEY.restV2;
 const PREMIUM_SERVICE_TITLE_BY_KEY = {
   cm: "Concurrency Monitoring",
-  degradation: "Degradation",
+  degradation: "DEGRADATION",
   decompTree: "ESM",
   restV2: "REST V2",
 };
@@ -70,6 +70,7 @@ const REST_V2_PROFILE_HARVEST_BUCKET_MAX = 120;
 const REST_V2_PREAUTHORIZE_HISTORY_MAX = 120;
 const REST_V2_PROFILE_PREAUTHZ_CHECK_MAX = 120;
 const REST_V2_DEFAULT_RESOURCE_ID_INPUT = "";
+const REST_V2_ACTIVE_PROFILE_CHECK_COOLDOWN_MS = 15 * 1000;
 const DEBUG_TEXT_PREVIEW_LIMIT = 12000;
 const DEBUG_REDACT_SENSITIVE = false;
 const UP_TRACE_VIEW_PATH = "up-devtools-panel.html";
@@ -277,6 +278,8 @@ const state = {
   restV2PreparedLoginBySelectionKey: new Map(),
   restV2PreparePromiseBySelectionKey: new Map(),
   restV2PrepareErrorBySelectionKey: new Map(),
+  restV2ActiveProfileWindowBySelectionKey: new Map(),
+  restV2ActiveProfileWindowPromiseBySelectionKey: new Map(),
   restV2ProfileHarvestBySelectionKey: new Map(),
   restV2ProfileHarvestByProgrammerId: new Map(),
   restV2ProfileHarvestBucketByProgrammerId: new Map(),
@@ -1063,11 +1066,13 @@ function setRestV2LoginPanelStatus(section, message, type = "") {
     return;
   }
 
+  const text = String(message || "").trim();
   statusElement.classList.remove("success", "error");
   if (type === "success" || type === "error") {
     statusElement.classList.add(type);
   }
-  statusElement.textContent = String(message || "");
+  statusElement.hidden = text.length === 0;
+  statusElement.textContent = text;
 }
 
 function stringifyJsonForDisplay(value) {
@@ -1687,6 +1692,7 @@ function getRestV2SectionState(section) {
       expandedHarvestKey: "",
       hasProfileExpansionChoice: false,
       resourceInput: REST_V2_DEFAULT_RESOURCE_ID_INPUT,
+      resourceInputHarvestKey: "",
       entitlementBusy: false,
       lastEntitlementResult: null,
     };
@@ -1697,6 +1703,7 @@ function getRestV2SectionState(section) {
       expandedHarvestKey: "",
       hasProfileExpansionChoice: false,
       resourceInput: REST_V2_DEFAULT_RESOURCE_ID_INPUT,
+      resourceInputHarvestKey: "",
       entitlementBusy: false,
       lastEntitlementResult: null,
     };
@@ -1712,6 +1719,9 @@ function getRestV2SectionState(section) {
   }
   if (typeof section.__underparRestV2State.resourceInput !== "string") {
     section.__underparRestV2State.resourceInput = REST_V2_DEFAULT_RESOURCE_ID_INPUT;
+  }
+  if (typeof section.__underparRestV2State.resourceInputHarvestKey !== "string") {
+    section.__underparRestV2State.resourceInputHarvestKey = "";
   }
   if (typeof section.__underparRestV2State.entitlementBusy !== "boolean") {
     section.__underparRestV2State.entitlementBusy = false;
@@ -1787,6 +1797,10 @@ function buildRestV2ContextFromHarvest(harvest = null) {
   const requestorId = String(harvest.requestorId || harvest.serviceProviderId || "").trim();
   const serviceProviderId = String(harvest.serviceProviderId || harvest.requestorId || "").trim();
   const mvpd = String(harvest.mvpd || "").trim();
+  const harvestMvpdName = String(harvest.mvpdName || "").trim();
+  const cachedMvpdMeta =
+    requestorId && state.mvpdCacheByRequestor.has(requestorId) ? state.mvpdCacheByRequestor.get(requestorId)?.get(mvpd) || null : null;
+  const mvpdMeta = cachedMvpdMeta || (harvestMvpdName ? { id: mvpd, name: harvestMvpdName } : null);
   const appInfo = resolveRestV2AppInfoForHarvest(harvest);
   if (!programmerId || !requestorId || !serviceProviderId || !mvpd || !appInfo?.guid) {
     return null;
@@ -1798,6 +1812,7 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     requestorId,
     serviceProviderId,
     mvpd,
+    mvpdMeta,
     appInfo,
     restV2AppCandidates: [appInfo],
   };
@@ -2189,22 +2204,40 @@ function renderRestV2ProfileHistoryTool(section, harvestList = []) {
   const sectionState = getRestV2SectionState(section);
   const records = (Array.isArray(harvestList) ? harvestList : [])
     .filter((item) => item && typeof item === "object")
-    .map((harvest, index) => ({
-      harvest,
-      key: getRestV2HarvestRecordKey(harvest, index),
-      capturedAtLabel: formatTimestampLabel(harvest?.harvestedAt),
-      title: `${String(harvest?.requestorId || "").trim() || "requestor"} x ${String(harvest?.mvpd || "").trim() || "mvpd"}`,
-      subtitle: firstNonEmptyString([
-        String(harvest?.subject || "").trim(),
-        String(harvest?.upstreamUserId || "").trim(),
-        String(harvest?.userId || "").trim(),
-        "No subject",
-      ]),
-      statusLabel: String(harvest?.profileCheckOutcome || "").trim() || "unknown",
-    }));
+    .map((harvest, index) => {
+      const requestorId = String(harvest?.requestorId || "").trim();
+      const mvpdId = String(harvest?.mvpd || "").trim();
+      const mvpdMeta =
+        String(harvest?.mvpdName || "").trim() && mvpdId
+          ? {
+              id: mvpdId,
+              name: String(harvest.mvpdName || "").trim(),
+            }
+          : null;
+      const requestorMvpdLabel = formatRestV2RequestorMvpdDisplay(requestorId, mvpdId, mvpdMeta);
+      return {
+        harvest,
+        key: getRestV2HarvestRecordKey(harvest, index),
+        capturedAtLabel: formatTimestampLabel(harvest?.harvestedAt),
+        requestorId,
+        mvpdId,
+        mvpdMeta,
+        requestorMvpdLabel,
+        mvpdLabel: getRestV2MvpdPickerLabel(requestorId, mvpdId, mvpdMeta),
+        title: requestorMvpdLabel,
+        subtitle: firstNonEmptyString([
+          String(harvest?.upstreamUserId || "").trim(),
+          String(harvest?.userId || "").trim(),
+          String(harvest?.subject || "").trim(),
+          "No subject",
+        ]),
+        statusLabel: String(harvest?.profileCheckOutcome || "").trim() || "unknown",
+      };
+    });
 
   if (records.length === 0) {
     tool.hidden = true;
+    tool.classList.remove("has-selected-profile");
     countElement.textContent = "0";
     if (exportButton) {
       exportButton.disabled = true;
@@ -2223,6 +2256,7 @@ function renderRestV2ProfileHistoryTool(section, harvestList = []) {
   }
   let selected = records.find((item) => item.key === sectionState.selectedHarvestKey) || records[0];
   sectionState.selectedHarvestKey = selected.key;
+  tool.classList.toggle("has-selected-profile", Boolean(selected));
   let expandedHarvestKey = String(sectionState.expandedHarvestKey || "").trim();
   if (expandedHarvestKey && !records.some((item) => item.key === expandedHarvestKey)) {
     expandedHarvestKey = "";
@@ -2257,7 +2291,7 @@ function renderRestV2ProfileHistoryTool(section, harvestList = []) {
         const factRows = [
           ["Requestor", String(selectedHarvest?.requestorId || "").trim() || "N/A"],
           ["Service Provider", String(selectedHarvest?.serviceProviderId || "").trim() || "N/A"],
-          ["MVPD", String(selectedHarvest?.mvpd || "").trim() || "N/A"],
+          ["MVPD", String(record?.mvpdLabel || "").trim() || "N/A"],
           [
             "Subject",
             firstNonEmptyString([String(selectedHarvest?.subject || "").trim(), String(record.subtitle || "").trim(), "N/A"]),
@@ -2266,7 +2300,7 @@ function renderRestV2ProfileHistoryTool(section, harvestList = []) {
           ["Profiles Returned", String(profileCount)],
           ["Profile TTL", profileTtlText],
           ["Profile Check", profileStatusText || "N/A"],
-          ["Next Action", "Ready for Can I watch? and CM inputs"],
+          ["Next Action", "Can I watch? is shown only when an active MVPD profile session is detected."],
         ];
         const factCards = factRows
           .map(
@@ -2378,9 +2412,10 @@ function renderRestV2ProfileHistoryTool(section, harvestList = []) {
   return selected.harvest;
 }
 
-function renderRestV2EntitlementTool(section, programmerId, selectedHarvest = null) {
+function renderRestV2EntitlementTool(section, programmerId, selectedHarvest = null, options = {}) {
   const tool = section?.querySelector(".rest-v2-entitlement-tool");
   const contextElement = section?.querySelector(".rest-v2-entitlement-context");
+  const copyUpstreamButton = section?.querySelector(".rest-v2-entitlement-copy-upstream-btn");
   const inputElement = section?.querySelector(".rest-v2-resource-input");
   const buttonElement = section?.querySelector(".rest-v2-entitlement-go-btn");
   const statusElement = section?.querySelector(".rest-v2-entitlement-status");
@@ -2390,30 +2425,51 @@ function renderRestV2EntitlementTool(section, programmerId, selectedHarvest = nu
   }
 
   const sectionState = getRestV2SectionState(section);
+  const activeSession = options?.activeSession === true;
   if (!selectedHarvest || typeof selectedHarvest !== "object") {
     tool.hidden = true;
+    contextElement.textContent = "";
+    if (copyUpstreamButton) {
+      copyUpstreamButton.hidden = true;
+      copyUpstreamButton.disabled = true;
+      copyUpstreamButton.dataset.copyValue = "";
+    }
+    statusElement.hidden = true;
+    statusElement.classList.remove("success", "error");
+    statusElement.textContent = "";
+    summaryElement.hidden = true;
+    summaryElement.innerHTML = "";
+    inputElement.disabled = true;
+    buttonElement.disabled = true;
     return;
   }
 
   tool.hidden = false;
-  contextElement.textContent = `Using MVPD profile ${String(selectedHarvest.requestorId || "").trim() || "requestor"} x ${
-    String(selectedHarvest.mvpd || "").trim() || "mvpd"
-  } | subject=${formatRestV2CompactValue(firstNonEmptyString([
-    String(selectedHarvest.subject || "").trim(),
-    String(selectedHarvest.upstreamUserId || "").trim(),
-    String(selectedHarvest.userId || "").trim(),
-    "no subject",
-  ]), 42)}.`;
-
-  if (document.activeElement !== inputElement) {
-    sectionState.resourceInput = "";
-    inputElement.value = "";
+  const selectedRequestorId = String(selectedHarvest?.requestorId || "").trim();
+  const selectedMvpdId = String(selectedHarvest?.mvpd || "").trim();
+  const selectedMvpdMeta =
+    String(selectedHarvest?.mvpdName || "").trim() && selectedMvpdId
+      ? {
+          id: selectedMvpdId,
+          name: String(selectedHarvest.mvpdName || "").trim(),
+        }
+      : null;
+  const selectedRequestorMvpdLabel = formatRestV2RequestorMvpdDisplay(selectedRequestorId, selectedMvpdId, selectedMvpdMeta);
+  const selectedUpstreamUserId = String(selectedHarvest?.upstreamUserId || "").trim();
+  const selectedUpstreamChunk = `upstreamUserID=${selectedUpstreamUserId || "N/A"}`;
+  contextElement.innerHTML = `Using selected profile <strong class="rest-v2-entitlement-upstream">${escapeHtml(
+    selectedUpstreamChunk
+  )}</strong> | ${escapeHtml(selectedRequestorMvpdLabel)}.`;
+  if (copyUpstreamButton) {
+    const canCopyUpstreamUserId = Boolean(selectedUpstreamUserId);
+    copyUpstreamButton.hidden = !canCopyUpstreamUserId;
+    copyUpstreamButton.disabled = !canCopyUpstreamUserId;
+    copyUpstreamButton.dataset.copyValue = canCopyUpstreamUserId ? `upstreamUserID=${selectedUpstreamUserId}` : "";
+    copyUpstreamButton.classList.remove("copied");
+    const copyLabel = "Copy upstreamUserID to clipboard";
+    copyUpstreamButton.title = copyLabel;
+    copyUpstreamButton.setAttribute("aria-label", copyLabel);
   }
-
-  const busy = sectionState.entitlementBusy === true;
-  inputElement.disabled = busy;
-  buttonElement.disabled = busy;
-  buttonElement.textContent = busy ? "GO..." : "GO";
 
   const harvestKey = getRestV2HarvestRecordKey(selectedHarvest);
   const history = getRestV2PreauthorizeHistoryForProgrammer(programmerId);
@@ -2430,6 +2486,23 @@ function renderRestV2EntitlementTool(section, programmerId, selectedHarvest = nu
     (profileCheckResult && Number(profileCheckResult?.checkedAt || 0) >= Number(historyResult?.checkedAt || 0)
       ? profileCheckResult
       : historyResult);
+  const suggestedResourceInput = Array.isArray(currentResult?.resourceIds)
+    ? currentResult.resourceIds.map((item) => String(item || "").trim()).filter(Boolean).join(", ")
+    : "";
+
+  const busy = sectionState.entitlementBusy === true;
+  if (!busy && document.activeElement !== inputElement) {
+    const inputBoundToSelectedHarvest = sectionState.resourceInputHarvestKey === harvestKey;
+    const hasTypedInput = String(sectionState.resourceInput || "").trim().length > 0;
+    const nextInput = inputBoundToSelectedHarvest && hasTypedInput ? sectionState.resourceInput : suggestedResourceInput;
+    sectionState.resourceInput = nextInput;
+    sectionState.resourceInputHarvestKey = harvestKey;
+    inputElement.value = nextInput;
+  }
+  const interactive = busy ? false : activeSession;
+  inputElement.disabled = !interactive;
+  buttonElement.disabled = !interactive;
+  buttonElement.textContent = busy ? "GO..." : "GO";
 
   if (currentResult && typeof currentResult === "object" && !busy) {
     sectionState.lastEntitlementResult = currentResult;
@@ -2438,24 +2511,29 @@ function renderRestV2EntitlementTool(section, programmerId, selectedHarvest = nu
         ? `Auth: DCR bearer (${String(currentResult.appName || currentResult.appGuid || "REST V2 app").trim() || "REST V2 app"})`
         : "Auth: unknown";
     statusElement.classList.remove("success", "error");
-    const hasResultError = currentResult.error && !currentResult.ok;
-    if (hasResultError) {
+    if (!activeSession) {
       statusElement.hidden = false;
       statusElement.classList.add("error");
-      statusElement.textContent = `Can I watch? NO (${currentResult.error})`;
+      statusElement.textContent =
+        "Can I watch? is available only while an MVPD profile session is active. Click LOGIN to begin a fresh MVPD login test.";
     } else {
-      statusElement.hidden = true;
-      statusElement.textContent = "";
+      const hasResultError = currentResult.error && !currentResult.ok;
+      if (hasResultError) {
+        statusElement.hidden = false;
+        statusElement.classList.add("error");
+        statusElement.textContent = `Can I watch? NO (${currentResult.error})`;
+      } else {
+        statusElement.hidden = true;
+        statusElement.textContent = "";
+      }
     }
 
     summaryElement.hidden = false;
     const decisionRows = Array.isArray(currentResult.decisionRows) ? currentResult.decisionRows : [];
-    const hasAuthenticatedProfileMissing =
-      String(currentResult.error || "").toLowerCase().includes("authenticated_profile_missing") ||
-      decisionRows.some((row) => String(row?.errorCode || "").trim().toLowerCase() === "authenticated_profile_missing");
+    const hasAuthenticatedProfileMissing = hasRestV2AuthenticatedProfileMissingSignal(currentResult);
     const summaryItems = renderRestV2EntitlementDecisionItems(decisionRows);
     const guidanceMarkup = hasAuthenticatedProfileMissing
-      ? `<p class="rest-v2-entitlement-guidance">Profile is no longer active for this MVPD session. Run START RECORDING MVPD login again, then retry Can I watch?.</p>`
+      ? `<p class="rest-v2-entitlement-guidance">Profile is no longer active for this MVPD session. Run LOGIN again for this MVPD profile, then retry Can I watch?.</p>`
       : "";
     summaryElement.innerHTML = `
       <p class="rest-v2-entitlement-summary-head">
@@ -2475,9 +2553,15 @@ function renderRestV2EntitlementTool(section, programmerId, selectedHarvest = nu
 
   statusElement.hidden = false;
   statusElement.classList.remove("success", "error");
-  statusElement.textContent = busy
-    ? "Running entitlement check against REST V2 Decisions..."
-    : "Enter resourceIds, then press Enter or GO to check authorization.";
+  if (!activeSession) {
+    statusElement.classList.add("error");
+    statusElement.textContent =
+      "Can I watch? is available only while an MVPD profile session is active. Click LOGIN to begin a fresh MVPD login test.";
+  } else {
+    statusElement.textContent = busy
+      ? "Running entitlement check against REST V2 Decisions..."
+      : "Enter resourceIds, then press Enter or GO to check authorization.";
+  }
   summaryElement.hidden = true;
   summaryElement.innerHTML = "";
 }
@@ -2505,7 +2589,11 @@ function syncRestV2ProfileAndEntitlementPanels(section, programmer, appInfo) {
 
   const harvestList = getRestV2ProfileHarvestBucketForProgrammer(programmerId);
   const selectedHarvest = renderRestV2ProfileHistoryTool(section, harvestList);
-  renderRestV2EntitlementTool(section, programmerId, selectedHarvest);
+  const selectedHarvestContext = buildRestV2ContextFromHarvest(selectedHarvest);
+  const activeWindowEntry = selectedHarvestContext ? getRestV2ActiveProfileWindowEntryForContext(selectedHarvestContext) : null;
+  renderRestV2EntitlementTool(section, programmerId, selectedHarvest, {
+    activeSession: activeWindowEntry?.active === true,
+  });
 }
 
 async function runRestV2EntitlementCheck(section, programmer, appInfo) {
@@ -2517,10 +2605,7 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
     return;
   }
 
-  const context = buildCurrentRestV2SelectionContext(programmer, appInfo);
-  const programmerId = context?.ok
-    ? String(context.programmerId || "").trim()
-    : String(programmer?.programmerId || resolveSelectedProgrammer()?.programmerId || "").trim();
+  const programmerId = String(programmer?.programmerId || resolveSelectedProgrammer()?.programmerId || "").trim();
   if (!programmerId) {
     setStatus("Select a media company before running entitlement checks.", "error");
     return;
@@ -2535,6 +2620,65 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
   let selectedHarvest =
     harvestList.find((item, index) => getRestV2HarvestRecordKey(item, index) === sectionState.selectedHarvestKey) || harvestList[0];
   sectionState.selectedHarvestKey = getRestV2HarvestRecordKey(selectedHarvest, 0);
+  sectionState.resourceInputHarvestKey = sectionState.selectedHarvestKey;
+  const selectedHarvestContext = buildRestV2ContextFromHarvest(selectedHarvest);
+  if (!selectedHarvestContext?.ok) {
+    sectionState.lastEntitlementResult = {
+      checkedAt: Date.now(),
+      ok: false,
+      status: 0,
+      statusText: "",
+      endpointUrl: "",
+      serviceProviderId: String(selectedHarvest?.serviceProviderId || selectedHarvest?.requestorId || "").trim(),
+      requestorId: String(selectedHarvest?.requestorId || "").trim(),
+      mvpd: String(selectedHarvest?.mvpd || "").trim(),
+      harvestKey: sectionState.selectedHarvestKey,
+      resourceIds: [],
+      decisionRows: [],
+      permitCount: 0,
+      denyCount: 0,
+      unknownCount: 0,
+      allRequestedPermitted: false,
+      responsePayload: {},
+      error: "Selected MVPD profile is missing REST V2 context. Re-run LOGIN for this MVPD profile and try again.",
+      programmerId,
+    };
+    syncRestV2ProfileAndEntitlementPanels(section, programmer, appInfo);
+    return;
+  }
+  const context = selectedHarvestContext;
+  let activeWindowEntry = getRestV2ActiveProfileWindowEntryForContext(context);
+  if (activeWindowEntry?.active !== true) {
+    activeWindowEntry = await ensureRestV2ActiveProfileWindowForContext(section, programmer, appInfo, {
+      context,
+      force: true,
+    });
+    if (activeWindowEntry?.active !== true) {
+      sectionState.lastEntitlementResult = {
+        checkedAt: Date.now(),
+        ok: false,
+        status: 0,
+        statusText: "",
+        endpointUrl: "",
+        serviceProviderId: String(selectedHarvest?.serviceProviderId || selectedHarvest?.requestorId || "").trim(),
+        requestorId: String(selectedHarvest?.requestorId || "").trim(),
+        mvpd: String(selectedHarvest?.mvpd || "").trim(),
+        harvestKey: sectionState.selectedHarvestKey,
+        resourceIds: [],
+        decisionRows: [],
+        permitCount: 0,
+        denyCount: 0,
+        unknownCount: 0,
+        allRequestedPermitted: false,
+        responsePayload: {},
+        error:
+          "Can I watch? is available only while an authenticated MVPD profile session is active. Run LOGIN first.",
+        programmerId,
+      };
+      syncRestV2ProfileAndEntitlementPanels(section, programmer, appInfo);
+      return;
+    }
+  }
 
   const inputElement = section.querySelector(".rest-v2-resource-input");
   if (inputElement && document.activeElement === inputElement) {
@@ -2562,10 +2706,12 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
       error: "Enter at least one resourceId (comma-delimited supported).",
       programmerId,
     };
-    setStatus("Enter at least one resourceId (comma-delimited supported).", "error");
+    sectionState.resourceInputHarvestKey = sectionState.selectedHarvestKey;
     syncRestV2ProfileAndEntitlementPanels(section, programmer, appInfo);
     return;
   }
+  sectionState.resourceInput = resourceIds.join(", ");
+  sectionState.resourceInputHarvestKey = sectionState.selectedHarvestKey;
 
   sectionState.entitlementBusy = true;
   sectionState.lastEntitlementResult = null;
@@ -2583,11 +2729,7 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
       "profiles-preauthorize-preflight"
     );
     if (preflight?.harvestedProfile && isUsableRestV2ProfileHarvest(preflight.harvestedProfile)) {
-      const refreshedHarvest = storeRestV2ProfileHarvest(preflightContext, preflight, preflightFlowId);
-      if (refreshedHarvest && isUsableRestV2ProfileHarvest(refreshedHarvest)) {
-        selectedHarvest = refreshedHarvest;
-        sectionState.selectedHarvestKey = getRestV2HarvestRecordKey(selectedHarvest);
-      }
+      storeRestV2ProfileHarvest(preflightContext, preflight, preflightFlowId);
     }
     if (!preflight?.ok || Number(preflight?.profileCount || 0) <= 0) {
       const preflightPayload = preflight?.responsePayload && typeof preflight.responsePayload === "object" ? preflight.responsePayload : {};
@@ -2607,7 +2749,7 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
           "The authenticated profile associated with this request is missing or expired.",
         ]) || "The authenticated profile associated with this request is missing or expired."
       ).trim();
-      const guidance = "Re-run START RECORDING MVPD login to refresh the profile, then retry Can I watch?.";
+      const guidance = "Re-run LOGIN for this MVPD profile to refresh the session, then retry Can I watch?.";
       const preflightResult = {
         checkedAt: Date.now(),
         ok: false,
@@ -2657,14 +2799,39 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
         responsePayload: preflightPayload,
         error: `${preflightCode}: ${preflightMessage}. ${guidance}`,
       };
+      setRestV2ActiveProfileWindowState(context, false, {
+        checkedAt: Date.now(),
+        profileCount: Number(preflight?.profileCount || 0),
+        status: Number(preflight?.status || 0),
+        statusText: String(preflight?.statusText || "").trim(),
+        error: preflightResult.error,
+        source: "preauthorize-preflight",
+      });
+      clearRestV2ProfileHarvestForContext(context);
       throw Object.assign(new Error(preflightResult.error), { underparResult: preflightResult });
     }
+    setRestV2ActiveProfileWindowState(context, true, {
+      checkedAt: Date.now(),
+      profileCount: Number(preflight?.profileCount || 0),
+      status: Number(preflight?.status || 0),
+      statusText: String(preflight?.statusText || "").trim(),
+      error: "",
+      source: "preauthorize-preflight",
+    });
 
     const result = await fetchRestV2PreauthorizeDecisions(selectedHarvest, resourceIds);
     const enrichedResult = {
       ...result,
       programmerId,
     };
+    setRestV2ActiveProfileWindowState(context, true, {
+      checkedAt: Number(enrichedResult?.checkedAt || Date.now()),
+      profileCount: Number(preflight?.profileCount || 0),
+      status: Number(preflight?.status || 0),
+      statusText: String(preflight?.statusText || "").trim(),
+      error: "",
+      source: "preauthorize",
+    });
     sectionState.lastEntitlementResult = enrichedResult;
     storeRestV2PreauthorizeHistoryEntry(programmerId, enrichedResult);
     const updatedHarvest = storeRestV2ProfilePreauthzCheckEntry(
@@ -2672,19 +2839,9 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
       String(enrichedResult?.harvestKey || "").trim(),
       enrichedResult
     );
-    if (updatedHarvest) {
-      const updatedHarvestKey = getRestV2HarvestRecordKey(updatedHarvest);
-      sectionState.selectedHarvestKey = updatedHarvestKey;
-      sectionState.expandedHarvestKey = updatedHarvestKey;
+    if (updatedHarvest && sectionState.expandedHarvestKey === "") {
+      sectionState.expandedHarvestKey = sectionState.selectedHarvestKey;
       sectionState.hasProfileExpansionChoice = true;
-    }
-    if (result.allRequestedPermitted) {
-      setStatus(`Can I watch? YES for ${resourceIds.join(", ")} (${result.requestorId} x ${result.mvpd}).`, "success");
-    } else {
-      setStatus(
-        `Can I watch? NO for ${resourceIds.join(", ")} (${result.requestorId} x ${result.mvpd}) (${result.permitCount} permit / ${result.denyCount} deny / ${result.unknownCount} unknown).`,
-        "error"
-      );
     }
   } catch (error) {
     const resultFromError = error?.underparResult && typeof error.underparResult === "object" ? error.underparResult : null;
@@ -2693,6 +2850,17 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
         ...resultFromError,
         programmerId,
       };
+      if (hasRestV2AuthenticatedProfileMissingSignal(enrichedResult)) {
+        setRestV2ActiveProfileWindowState(context, false, {
+          checkedAt: Number(enrichedResult?.checkedAt || Date.now()),
+          profileCount: 0,
+          status: Number(enrichedResult?.status || 0),
+          statusText: String(enrichedResult?.statusText || "").trim(),
+          error: String(enrichedResult?.error || "").trim(),
+          source: "preauthorize-authenticated-profile-missing",
+        });
+        clearRestV2ProfileHarvestForContext(context);
+      }
       sectionState.lastEntitlementResult = enrichedResult;
       storeRestV2PreauthorizeHistoryEntry(programmerId, enrichedResult);
       const updatedHarvest = storeRestV2ProfilePreauthzCheckEntry(
@@ -2700,21 +2868,36 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
         String(enrichedResult?.harvestKey || "").trim(),
         enrichedResult
       );
-      if (updatedHarvest) {
-        const updatedHarvestKey = getRestV2HarvestRecordKey(updatedHarvest);
-        sectionState.selectedHarvestKey = updatedHarvestKey;
-        sectionState.expandedHarvestKey = updatedHarvestKey;
+      if (updatedHarvest && sectionState.expandedHarvestKey === "") {
+        sectionState.expandedHarvestKey = sectionState.selectedHarvestKey;
         sectionState.hasProfileExpansionChoice = true;
       }
     }
-    const displayError = resultFromError?.error || (error instanceof Error ? error.message : String(error));
-    setStatus(displayError, "error");
+    if (!resultFromError) {
+      sectionState.lastEntitlementResult = {
+        checkedAt: Date.now(),
+        ok: false,
+        status: 0,
+        statusText: "",
+        endpointUrl: "",
+        serviceProviderId: String(selectedHarvest?.serviceProviderId || selectedHarvest?.requestorId || "").trim(),
+        requestorId: String(selectedHarvest?.requestorId || "").trim(),
+        mvpd: String(selectedHarvest?.mvpd || "").trim(),
+        harvestKey: sectionState.selectedHarvestKey,
+        resourceIds: resourceIds.slice(),
+        decisionRows: [],
+        permitCount: 0,
+        denyCount: 0,
+        unknownCount: 0,
+        allRequestedPermitted: false,
+        responsePayload: {},
+        error: error instanceof Error ? error.message : String(error),
+        programmerId,
+      };
+    }
   } finally {
     sectionState.entitlementBusy = false;
-    sectionState.resourceInput = "";
-    if (inputElement && document.activeElement !== inputElement) {
-      inputElement.value = "";
-    }
+    sectionState.resourceInputHarvestKey = sectionState.selectedHarvestKey;
     syncRestV2ProfileAndEntitlementPanels(section, programmer, appInfo);
   }
 }
@@ -2806,11 +2989,34 @@ function wireRestV2ProfileAndEntitlementHandlers(section, programmer, appInfo) {
     });
   }
 
+  const copyUpstreamButton = section.querySelector(".rest-v2-entitlement-copy-upstream-btn");
+  if (copyUpstreamButton) {
+    copyUpstreamButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const copyValue = String(copyUpstreamButton.dataset.copyValue || "").trim();
+      if (!copyValue) {
+        showRestV2CopyButtonFeedback(copyUpstreamButton, false);
+        setStatus("No upstreamUserID is available for the selected profile.", "error");
+        return;
+      }
+      const copyResult = await copyTextToClipboard(copyValue);
+      if (!copyResult?.ok) {
+        showRestV2CopyButtonFeedback(copyUpstreamButton, false);
+        setStatus(copyResult?.error || "Unable to copy upstreamUserID to clipboard.", "error");
+        return;
+      }
+      showRestV2CopyButtonFeedback(copyUpstreamButton, true);
+      setStatus(`Copied ${copyValue} to clipboard.`, "success");
+    });
+  }
+
   const inputElement = section.querySelector(".rest-v2-resource-input");
   if (inputElement) {
     inputElement.addEventListener("input", () => {
       const sectionState = getRestV2SectionState(section);
       sectionState.resourceInput = String(inputElement.value || "");
+      sectionState.resourceInputHarvestKey = String(sectionState.selectedHarvestKey || "").trim();
     });
   }
 
@@ -2828,6 +3034,152 @@ function getRestV2SelectionKey(context) {
     return "";
   }
   return [context.programmerId, context.requestorId, context.mvpd].map((value) => String(value || "").trim()).join("|");
+}
+
+function isRestV2ProfileSessionActiveResult(profileCheckResult = null) {
+  if (!profileCheckResult || typeof profileCheckResult !== "object") {
+    return false;
+  }
+  if (profileCheckResult.checked !== true || profileCheckResult.ok !== true) {
+    return false;
+  }
+  return Number(profileCheckResult.profileCount || 0) > 0;
+}
+
+function hasRestV2AuthenticatedProfileMissingSignal(result = null) {
+  if (!result || typeof result !== "object") {
+    return false;
+  }
+  const errorText = String(result.error || "").trim().toLowerCase();
+  if (errorText.includes("authenticated_profile_missing")) {
+    return true;
+  }
+  const decisionRows = Array.isArray(result.decisionRows) ? result.decisionRows : [];
+  return decisionRows.some((row) => String(row?.errorCode || "").trim().toLowerCase() === "authenticated_profile_missing");
+}
+
+function getRestV2ActiveProfileWindowEntryForContext(context = null) {
+  if (!context?.ok) {
+    return null;
+  }
+  const selectionKey = getRestV2SelectionKey(context);
+  if (!selectionKey) {
+    return null;
+  }
+  return state.restV2ActiveProfileWindowBySelectionKey.get(selectionKey) || null;
+}
+
+function shouldRefreshRestV2ActiveProfileWindowEntry(entry = null, options = {}) {
+  if (options.force === true) {
+    return true;
+  }
+  if (!entry || typeof entry !== "object") {
+    return true;
+  }
+  const ageMs = Date.now() - Number(entry.checkedAt || 0);
+  if (!Number.isFinite(ageMs) || ageMs < 0) {
+    return true;
+  }
+  return ageMs > REST_V2_ACTIVE_PROFILE_CHECK_COOLDOWN_MS;
+}
+
+function setRestV2ActiveProfileWindowState(context, active = false, options = {}) {
+  if (!context?.ok) {
+    return null;
+  }
+  const selectionKey = getRestV2SelectionKey(context);
+  if (!selectionKey) {
+    return null;
+  }
+  const checkedAtRaw = Number(options.checkedAt || Date.now());
+  const checkedAt = Number.isFinite(checkedAtRaw) && checkedAtRaw > 0 ? checkedAtRaw : Date.now();
+  const next = {
+    selectionKey,
+    active: active === true,
+    checkedAt,
+    profileCount: Math.max(0, Number(options.profileCount || 0)),
+    status: Number(options.status || 0),
+    statusText: String(options.statusText || "").trim(),
+    error: String(options.error || "").trim(),
+    source: String(options.source || "").trim(),
+  };
+  state.restV2ActiveProfileWindowBySelectionKey.set(selectionKey, next);
+  return next;
+}
+
+function clearRestV2ProfileHarvestSessionState() {
+  state.restV2ActiveProfileWindowBySelectionKey.clear();
+  state.restV2ActiveProfileWindowPromiseBySelectionKey.clear();
+  state.restV2ProfileHarvestBySelectionKey.clear();
+  state.restV2ProfileHarvestByProgrammerId.clear();
+  state.restV2ProfileHarvestBucketByProgrammerId.clear();
+  state.restV2ProfileHarvestLast = null;
+  state.restV2PreauthorizeHistoryByProgrammerId.clear();
+}
+
+async function ensureRestV2ActiveProfileWindowForContext(section, programmer, appInfo, options = {}) {
+  const context = options?.context?.ok ? options.context : buildCurrentRestV2SelectionContext(programmer, appInfo);
+  if (!context?.ok) {
+    return null;
+  }
+  const selectionKey = getRestV2SelectionKey(context);
+  if (!selectionKey) {
+    return null;
+  }
+
+  const existingEntry = state.restV2ActiveProfileWindowBySelectionKey.get(selectionKey) || null;
+  if (!shouldRefreshRestV2ActiveProfileWindowEntry(existingEntry, options)) {
+    return existingEntry;
+  }
+
+  const existingPromise = state.restV2ActiveProfileWindowPromiseBySelectionKey.get(selectionKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const workPromise = (async () => {
+    const profileCheckResult = await fetchRestV2ProfileCheckResult(context, "", "profiles-ui-active-window");
+    const hasActiveProfile = isRestV2ProfileSessionActiveResult(profileCheckResult);
+    if (!hasActiveProfile) {
+      const explicitNoActiveProfile = isRestV2NoActiveProfileSignal(profileCheckResult);
+      const checkedNoProfiles =
+        profileCheckResult?.checked === true &&
+        profileCheckResult?.ok === true &&
+        Number(profileCheckResult?.profileCount || 0) === 0;
+      if (explicitNoActiveProfile || checkedNoProfiles) {
+        clearRestV2ProfileHarvestForContext(context);
+      }
+    }
+    return setRestV2ActiveProfileWindowState(context, hasActiveProfile, {
+      checkedAt: Date.now(),
+      profileCount: Number(profileCheckResult?.profileCount || 0),
+      status: Number(profileCheckResult?.status || 0),
+      statusText: String(profileCheckResult?.statusText || "").trim(),
+      error: String(profileCheckResult?.error || "").trim(),
+      source: "profiles-ui-active-window",
+    });
+  })()
+    .catch((error) => {
+      return setRestV2ActiveProfileWindowState(context, false, {
+        checkedAt: Date.now(),
+        profileCount: 0,
+        status: 0,
+        statusText: "",
+        error: error instanceof Error ? error.message : String(error),
+        source: "profiles-ui-active-window-error",
+      });
+    })
+    .finally(() => {
+      if (state.restV2ActiveProfileWindowPromiseBySelectionKey.get(selectionKey) === workPromise) {
+        state.restV2ActiveProfileWindowPromiseBySelectionKey.delete(selectionKey);
+      }
+      if (isCurrentRestV2SelectionKey(selectionKey)) {
+        refreshRestV2LoginPanels();
+      }
+    });
+
+  state.restV2ActiveProfileWindowPromiseBySelectionKey.set(selectionKey, workPromise);
+  return workPromise;
 }
 
 function isRestV2PreparedLoginEntryFresh(entry) {
@@ -2889,11 +3241,7 @@ function clearRestV2PreparedLoginState() {
   state.restV2PreparedLoginBySelectionKey.clear();
   state.restV2PreparePromiseBySelectionKey.clear();
   state.restV2PrepareErrorBySelectionKey.clear();
-  state.restV2ProfileHarvestBySelectionKey.clear();
-  state.restV2ProfileHarvestByProgrammerId.clear();
-  state.restV2ProfileHarvestBucketByProgrammerId.clear();
-  state.restV2ProfileHarvestLast = null;
-  state.restV2PreauthorizeHistoryByProgrammerId.clear();
+  clearRestV2ProfileHarvestSessionState();
   state.restV2LastLaunchTabId = 0;
   state.restV2LastLaunchWindowId = 0;
   state.restV2PreviousTabId = 0;
@@ -2951,10 +3299,31 @@ function syncRestV2CloseLoginButton(section) {
     return;
   }
 
+  const activeContext =
+    state.restV2RecordingContext && typeof state.restV2RecordingContext === "object" ? state.restV2RecordingContext : null;
+  const requestorId = String(activeContext?.requestorId || "").trim();
+  const mvpd = String(activeContext?.mvpd || "").trim();
+  const hasTuple = Boolean(requestorId) && Boolean(mvpd);
+  const mvpdLabel = getRestV2MvpdPickerLabel(
+    requestorId,
+    mvpd,
+    String(activeContext?.mvpdName || "").trim()
+      ? {
+          id: mvpd,
+          name: String(activeContext.mvpdName || "").trim(),
+        }
+      : null
+  );
+  const flowLabel = hasTuple ? `${requestorId} X ${mvpdLabel}` : "MVPD";
+  const hoverLabel = hasTuple
+    ? `Recording HTTP session traffic for ${requestorId} x ${mvpdLabel}. Click STOP to end capture and download HAR.`
+    : "Click STOP to end capture and download HAR.";
   const showClose = state.restV2RecordingActive === true;
   closeButton.hidden = !showClose;
   closeButton.disabled = !showClose || state.busy || state.restV2Stopping;
   closeButton.textContent = "STOP";
+  closeButton.title = hoverLabel;
+  closeButton.setAttribute("aria-label", `${flowLabel} STOP. ${hoverLabel}`);
 }
 
 async function getCurrentActiveTab() {
@@ -3135,11 +3504,17 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
   }
 
   const existingPromise = state.restV2PreparePromiseBySelectionKey.get(selectionKey);
-  if (existingPromise) {
+  if (existingPromise && !force) {
     return existingPromise;
+  }
+  if (existingPromise && force) {
+    state.restV2PreparePromiseBySelectionKey.delete(selectionKey);
   }
 
   const launchButton = section?.querySelector(".rest-v2-test-login-btn");
+  const requestorMvpdLabel = formatRestV2RequestorMvpdDisplay(context.requestorId, context.mvpd, context.mvpdMeta, {
+    separator: " x ",
+  });
   if (launchButton && isCurrentRestV2SelectionKey(selectionKey)) {
     launchButton.hidden = false;
     launchButton.disabled = true;
@@ -3147,7 +3522,7 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
   if (section && isCurrentRestV2SelectionKey(selectionKey)) {
     setRestV2LoginPanelStatus(
       section,
-      `Preparing ${context.requestorId} x ${context.mvpd} MVPD login target...`
+      `Preparing ${requestorMvpdLabel} MVPD login target...`
     );
   }
 
@@ -3177,7 +3552,7 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
         const appName = resolvedAppInfo?.appName || resolvedAppInfo?.guid || context.appInfo?.appName || "REST V2 App";
         setRestV2LoginPanelStatus(
           section,
-          `Ready to test ${context.requestorId} x ${context.mvpd} with "${appName}".`,
+          `Ready to test ${requestorMvpdLabel} with "${appName}".`,
           "success"
         );
         if (launchButton) {
@@ -3297,86 +3672,95 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
   };
 }
 
+function getRestV2MvpdPickerLabel(requestorId = "", mvpdId = "", mvpdMeta = null) {
+  const normalizedMvpdId = String(mvpdId || "").trim();
+  if (!normalizedMvpdId) {
+    return "MVPD";
+  }
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const cacheMeta =
+    normalizedRequestorId && state.mvpdCacheByRequestor.has(normalizedRequestorId)
+      ? state.mvpdCacheByRequestor.get(normalizedRequestorId)?.get(normalizedMvpdId) || null
+      : null;
+  const resolvedMeta = mvpdMeta && typeof mvpdMeta === "object" ? mvpdMeta : cacheMeta;
+  return formatMvpdPickerLabel(normalizedMvpdId, resolvedMeta) || normalizedMvpdId;
+}
+
+function formatRestV2RequestorMvpdDisplay(requestorId = "", mvpdId = "", mvpdMeta = null, options = {}) {
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const requestorLabel = normalizedRequestorId || "requestor";
+  const normalizedMvpdId = String(mvpdId || "").trim();
+  if (!normalizedMvpdId) {
+    return requestorLabel;
+  }
+  const separator = String(options?.separator || " X ");
+  return `${requestorLabel}${separator}${getRestV2MvpdPickerLabel(normalizedRequestorId, normalizedMvpdId, mvpdMeta)}`;
+}
+
 function syncRestV2LoginPanel(section, programmer, appInfo) {
   const button = section?.querySelector(".rest-v2-test-login-btn");
+  const context = buildCurrentRestV2SelectionContext(programmer, appInfo);
   syncRestV2CloseLoginButton(section);
   syncRestV2ProfileAndEntitlementPanels(section, programmer, appInfo);
   if (!button) {
     return;
   }
 
-  button.textContent = "START RECORDING";
-  button.hidden = false;
-
   if (state.restV2Stopping) {
+    button.hidden = state.restV2RecordingActive === true;
     button.disabled = true;
     setRestV2LoginPanelStatus(section, "Finalizing recording and HAR export...");
     return;
   }
 
   if (state.restV2RecordingActive && state.restV2DebugFlowId) {
+    button.hidden = true;
     button.disabled = true;
     const activeContext = state.restV2RecordingContext;
     const captureLabel =
       activeContext?.requestorId && activeContext?.mvpd
-        ? `${activeContext.requestorId} x ${activeContext.mvpd}`
+        ? formatRestV2RequestorMvpdDisplay(
+            activeContext.requestorId,
+            activeContext.mvpd,
+            String(activeContext?.mvpdName || "").trim()
+              ? {
+                  id: String(activeContext.mvpd || "").trim(),
+                  name: String(activeContext.mvpdName || "").trim(),
+                }
+              : null,
+            { separator: " x " }
+          )
         : "active MVPD flow";
-    setRestV2LoginPanelStatus(
-      section,
-      `Recording HTTP session traffic for ${captureLabel}. Click STOP to end capture and download HAR.`,
-      "success"
-    );
+    setRestV2LoginPanelStatus(section, `Recording HTTP session traffic for ${captureLabel}.`, "success");
     return;
   }
 
-  const context = buildCurrentRestV2SelectionContext(programmer, appInfo);
   if (!context.ok) {
     button.hidden = true;
     button.disabled = true;
+    button.removeAttribute("title");
+    button.removeAttribute("aria-label");
     setRestV2LoginPanelStatus(section, context.reason);
     return;
   }
 
   const selectionKey = getRestV2SelectionKey(context);
   const prepareError = state.restV2PrepareErrorBySelectionKey.get(selectionKey) || "";
-  const hasPreparePromise = state.restV2PreparePromiseBySelectionKey.has(selectionKey);
-  const preparedEntry = getRestV2PreparedLoginEntry(context);
   const appName = context.appInfo?.appName || context.appInfo?.guid || "REST V2 App";
+  const mvpdLabel = getRestV2MvpdPickerLabel(context.requestorId, context.mvpd, context.mvpdMeta);
+  const flowLabel = `${context.requestorId} X ${mvpdLabel}`;
+  const readyMessage = `Ready to start recording ${context.requestorId} x ${mvpdLabel} with "${appName}".`;
 
+  button.textContent = `${flowLabel} LOGIN`;
+  button.title = readyMessage;
+  button.setAttribute("aria-label", readyMessage);
   button.hidden = false;
-  if (preparedEntry?.loginUrl) {
-    button.disabled = false;
-    setRestV2LoginPanelStatus(
-      section,
-      `Ready to start recording ${context.requestorId} x ${context.mvpd} with "${appName}".`,
-      "success"
-    );
-    return;
-  }
-
-  if (hasPreparePromise) {
-    button.disabled = true;
-    setRestV2LoginPanelStatus(
-      section,
-      `Preparing ${context.requestorId} x ${context.mvpd} MVPD login target...`
-    );
-    return;
-  }
-
+  button.disabled = false;
   if (prepareError) {
-    button.disabled = false;
-    setRestV2LoginPanelStatus(section, prepareError, "error");
-    return;
+    setRestV2LoginPanelStatus(section, `${prepareError} Click ${button.textContent} to retry.`, "error");
+  } else {
+    setRestV2LoginPanelStatus(section, "");
   }
-
-  button.disabled = true;
-  setRestV2LoginPanelStatus(
-    section,
-    `Preparing ${context.requestorId} x ${context.mvpd} MVPD login target...`
-  );
-  void ensurePreparedRestV2LoginForContext(section, context).catch(() => {
-    // Status is surfaced by ensurePreparedRestV2LoginForContext.
-  });
 }
 
 function refreshRestV2LoginPanels() {
@@ -3395,6 +3779,85 @@ function waitForDelay(durationMs) {
   return new Promise((resolve) => {
     setTimeout(resolve, Math.max(0, Number(durationMs) || 0));
   });
+}
+
+async function copyTextToClipboard(text = "") {
+  const value = String(text || "").trim();
+  if (!value) {
+    return {
+      ok: false,
+      error: "Nothing to copy.",
+    };
+  }
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return { ok: true };
+    }
+  } catch {
+    // Continue to fallback flow.
+  }
+
+  let helper = null;
+  try {
+    helper = document.createElement("textarea");
+    helper.value = value;
+    helper.setAttribute("readonly", "");
+    helper.setAttribute("aria-hidden", "true");
+    helper.style.position = "fixed";
+    helper.style.left = "-9999px";
+    helper.style.top = "0";
+    helper.style.opacity = "0";
+    document.body.appendChild(helper);
+    helper.focus();
+    helper.select();
+    helper.setSelectionRange(0, helper.value.length);
+    const copied = document.execCommand("copy");
+    return copied
+      ? { ok: true }
+      : {
+          ok: false,
+          error: "Unable to copy upstreamUserID to clipboard.",
+        };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    if (helper && helper.parentNode) {
+      helper.parentNode.removeChild(helper);
+    }
+  }
+}
+
+function showRestV2CopyButtonFeedback(button, success = false) {
+  if (!button) {
+    return;
+  }
+  const baseLabel = "Copy upstreamUserID to clipboard";
+  const successLabel = "Copied upstreamUserID to clipboard";
+  button.classList.toggle("copied", success === true);
+  button.title = success ? successLabel : baseLabel;
+  button.setAttribute("aria-label", success ? successLabel : baseLabel);
+
+  const existingTimer = Number(button.__underparCopyFeedbackTimer || 0);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  if (!success) {
+    button.__underparCopyFeedbackTimer = 0;
+    return;
+  }
+
+  button.__underparCopyFeedbackTimer = window.setTimeout(() => {
+    button.classList.remove("copied");
+    button.title = baseLabel;
+    button.setAttribute("aria-label", baseLabel);
+    button.__underparCopyFeedbackTimer = 0;
+  }, 1400);
 }
 
 function toRestV2RecordingContext(context, appInfoOverride = null, options = {}) {
@@ -3417,6 +3880,7 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     requestorId: context.requestorId,
     serviceProviderId: context.serviceProviderId || context.requestorId,
     mvpd: context.mvpd,
+    mvpdName: String(context?.mvpdMeta?.name || "").trim(),
     appInfo: compactAppInfo,
     redirectUrl,
     startedAt: Date.now(),
@@ -3439,7 +3903,7 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
     if (state.restV2RecordingActive && state.restV2DebugFlowId) {
       setRestV2LoginPanelStatus(
         section,
-        "A recording session is already active. Click STOP to end capture and download HAR."
+        "A recording session is already active. Use STOP to end capture and download HAR."
       );
       return;
     }
@@ -3447,6 +3911,58 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
     const context = buildCurrentRestV2SelectionContext(programmer, appInfo);
     if (!context.ok) {
       throw new Error(context.reason);
+    }
+    const requestorMvpdLabel = formatRestV2RequestorMvpdDisplay(context.requestorId, context.mvpd, context.mvpdMeta, {
+      separator: " x ",
+    });
+    setRestV2ActiveProfileWindowState(context, false, {
+      checkedAt: Date.now(),
+      profileCount: 0,
+      status: 0,
+      statusText: "",
+      error: "",
+      source: "start-recording-reset",
+    });
+
+    const selectionKey = getRestV2SelectionKey(context);
+    if (selectionKey) {
+      state.restV2PreparedLoginBySelectionKey.delete(selectionKey);
+      state.restV2PrepareErrorBySelectionKey.delete(selectionKey);
+      state.restV2PreparePromiseBySelectionKey.delete(selectionKey);
+    }
+
+    setRestV2LoginPanelStatus(
+      section,
+      `Resetting prior ${requestorMvpdLabel} MVPD session before starting a fresh recording...`
+    );
+    const preStartLogoutResult = await executeRestV2LogoutFlow(context, "");
+    if (preStartLogoutResult.attempted !== true) {
+      throw new Error("Unable to start recording because REST V2 logout was not attempted.");
+    }
+    if (preStartLogoutResult.performed !== true) {
+      const logoutReason =
+        String(preStartLogoutResult.error || "").trim() ||
+        "REST V2 logout did not complete for the selected Requestor x MVPD.";
+      throw new Error(`Unable to start recording until REST V2 logout succeeds: ${logoutReason}`);
+    }
+
+    setRestV2LoginPanelStatus(
+      section,
+      `Confirming ${requestorMvpdLabel} session reset before new recording...`
+    );
+    const postLogoutProfiles = await verifyPostLogoutProfilesCleared(context, "");
+    if (!postLogoutProfiles.ok) {
+      const profileReason =
+        String(postLogoutProfiles.error || "").trim() ||
+        `${Number(postLogoutProfiles.profileCount || 0)} active profile(s) still returned`;
+      if (postLogoutProfiles.blocking) {
+        throw new Error(`Unable to start recording until REST V2 logout clears active profiles: ${profileReason}`);
+      }
+      setRestV2LoginPanelStatus(
+        section,
+        `Logout verification warning for ${requestorMvpdLabel}: ${profileReason}. Continuing with fresh login prep.`,
+        "error"
+      );
     }
 
     debugFlowId = await startRestV2DebugFlow(
@@ -3474,89 +3990,9 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
       mvpd: context.mvpd,
     });
 
-    const selectionKey = getRestV2SelectionKey(context);
-    if (selectionKey) {
-      state.restV2PreparedLoginBySelectionKey.delete(selectionKey);
-      state.restV2PrepareErrorBySelectionKey.delete(selectionKey);
-      state.restV2PreparePromiseBySelectionKey.delete(selectionKey);
-    }
-
     setRestV2LoginPanelStatus(
       section,
-      `Resetting prior ${context.requestorId} x ${context.mvpd} MVPD session before starting a fresh recording...`
-    );
-    const preStartLogoutResult = await executeRestV2LogoutFlow(context, debugFlowId);
-    emitRestV2DebugEvent(debugFlowId, {
-      source: "extension",
-      phase: "pre-start-logout-result",
-      requestorId: context.requestorId,
-      mvpd: context.mvpd,
-      attempted: preStartLogoutResult.attempted === true,
-      performed: preStartLogoutResult.performed === true,
-      actionName: String(preStartLogoutResult.actionName || "").trim(),
-      actionType: String(preStartLogoutResult.actionType || "").trim(),
-      logoutUrl: String(preStartLogoutResult.logoutUrl || "").trim(),
-      error: String(preStartLogoutResult.error || "").trim(),
-    });
-    if (preStartLogoutResult.attempted && !preStartLogoutResult.performed && preStartLogoutResult.error) {
-      emitRestV2DebugEvent(debugFlowId, {
-        source: "extension",
-        phase: "pre-start-logout-warning",
-        requestorId: context.requestorId,
-        mvpd: context.mvpd,
-        error: String(preStartLogoutResult.error || "").trim(),
-      });
-    }
-    if (preStartLogoutResult.attempted !== true) {
-      emitRestV2DebugEvent(debugFlowId, {
-        source: "extension",
-        phase: "pre-start-logout-blocked",
-        requestorId: context.requestorId,
-        mvpd: context.mvpd,
-        reason: "logout-not-attempted",
-      });
-      throw new Error("Unable to start recording because REST V2 logout was not attempted.");
-    }
-    if (preStartLogoutResult.performed !== true) {
-      const logoutReason =
-        String(preStartLogoutResult.error || "").trim() ||
-        "REST V2 logout did not complete for the selected Requestor x MVPD.";
-      emitRestV2DebugEvent(debugFlowId, {
-        source: "extension",
-        phase: "pre-start-logout-blocked",
-        requestorId: context.requestorId,
-        mvpd: context.mvpd,
-        reason: logoutReason,
-      });
-      throw new Error(`Unable to start recording until REST V2 logout succeeds: ${logoutReason}`);
-    }
-
-    setRestV2LoginPanelStatus(
-      section,
-      `Confirming ${context.requestorId} x ${context.mvpd} session reset before new recording...`
-    );
-    const postLogoutProfiles = await verifyPostLogoutProfilesCleared(context, debugFlowId);
-    if (!postLogoutProfiles.ok) {
-      const profileReason =
-        String(postLogoutProfiles.error || "").trim() ||
-        `${Number(postLogoutProfiles.profileCount || 0)} active profile(s) still returned`;
-      if (postLogoutProfiles.blocking) {
-        throw new Error(`Unable to start recording until REST V2 logout clears active profiles: ${profileReason}`);
-      }
-      emitRestV2DebugEvent(debugFlowId, {
-        source: "extension",
-        phase: "post-logout-profiles-check-warning",
-        requestorId: context.requestorId,
-        mvpd: context.mvpd,
-        reason: profileReason,
-        profileCount: Number(postLogoutProfiles.profileCount || 0),
-        status: Number(postLogoutProfiles.status || 0),
-      });
-    }
-
-    setRestV2LoginPanelStatus(
-      section,
-      `Preparing fresh ${context.requestorId} x ${context.mvpd} MVPD login session...`
+      `Preparing fresh ${requestorMvpdLabel} MVPD login session...`
     );
     const preparedEntry = await ensurePreparedRestV2LoginForContext(section, context, {
       force: true,
@@ -3640,7 +4076,7 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
 
     setRestV2LoginPanelStatus(
       section,
-      `Recording started for ${context.requestorId} x ${context.mvpd}. Use STOP to end capture and download HAR.`,
+      `Recording started for ${requestorMvpdLabel}. Use STOP to end capture and download HAR.`,
       "success"
     );
     syncRestV2LoginPanel(section, programmer, appInfo);
@@ -3989,76 +4425,246 @@ function resolveRestV2LogoutAction(payload, mvpd, fallbackLocation = "") {
   return null;
 }
 
-async function ensureBoundRestV2LaunchTabForFlow(flowId, context = null, metadata = {}) {
-  let launchTabId = Number(state.restV2LastLaunchTabId || 0);
-  if (!Number.isFinite(launchTabId) || launchTabId <= 0) {
-    const launchedTarget = await openRestV2LoginPopupWindow();
-    state.restV2LastLaunchWindowId = Number(launchedTarget.windowId || 0);
-    state.restV2LastLaunchTabId = Number(launchedTarget.tabId || 0);
-    launchTabId = Number(state.restV2LastLaunchTabId || 0);
+async function openRestV2BackgroundLogoutTarget(logoutUrl, flowId, context = null) {
+  const normalizedUrl = String(logoutUrl || "").trim();
+  if (!normalizedUrl) {
+    return {
+      ok: false,
+      error: "Missing logout URL.",
+      tabId: 0,
+      windowId: 0,
+      ownsWindow: false,
+      mode: "",
+    };
   }
 
-  if (!Number.isFinite(launchTabId) || launchTabId <= 0) {
-    throw new Error("Unable to open an MVPD browser tab for logout.");
+  let windowId = 0;
+  let tabId = 0;
+  let ownsWindow = false;
+  let mode = "";
+
+  try {
+    const createdWindow = await chrome.windows.create({
+      url: normalizedUrl,
+      focused: false,
+      state: "minimized",
+      width: 480,
+      height: 640,
+    });
+    windowId = Number(createdWindow?.id || 0);
+    tabId = Number(createdWindow?.tabs?.[0]?.id || 0);
+    ownsWindow = true;
+    mode = "minimized-window";
+  } catch (windowError) {
+    emitRestV2DebugEvent(flowId, {
+      source: "extension",
+      phase: "logout-background-window-failed",
+      requestorId: String(context?.requestorId || ""),
+      mvpd: String(context?.mvpd || ""),
+      logoutUrl: normalizedUrl,
+      error: windowError instanceof Error ? windowError.message : String(windowError),
+    });
+    try {
+      const createdTab = await chrome.tabs.create({
+        url: normalizedUrl,
+        active: false,
+      });
+      tabId = Number(createdTab?.id || 0);
+      windowId = Number(createdTab?.windowId || 0);
+      mode = "inactive-tab";
+    } catch (tabError) {
+      return {
+        ok: false,
+        error: tabError instanceof Error ? tabError.message : String(tabError),
+        tabId: 0,
+        windowId: 0,
+        ownsWindow: false,
+        mode: "",
+      };
+    }
+  }
+
+  if (!Number.isFinite(tabId) || tabId <= 0) {
+    return {
+      ok: false,
+      error: "Unable to open a background logout tab.",
+      tabId: 0,
+      windowId: 0,
+      ownsWindow: false,
+      mode,
+    };
   }
 
   if (flowId) {
-    const bound = await bindRestV2DebugFlowToTab(flowId, launchTabId, {
+    const bound = await bindRestV2DebugFlowToTab(flowId, tabId, {
       requestorId: String(context?.requestorId || ""),
       mvpd: String(context?.mvpd || ""),
-      ...metadata,
+      logoutUrl: normalizedUrl,
+      phase: "logout-background",
     });
     if (!bound) {
       emitRestV2DebugEvent(flowId, {
         source: "extension",
         phase: "logout-bind-tab-failed",
-        tabId: launchTabId,
+        tabId,
+        logoutUrl: normalizedUrl,
       });
     }
   }
 
-  return launchTabId;
+  return {
+    ok: true,
+    error: "",
+    tabId,
+    windowId,
+    ownsWindow,
+    mode,
+  };
 }
 
-async function navigateRestV2LogoutUrlInLaunchTab(logoutUrl, flowId, context = null) {
+async function navigateRestV2LogoutUrlInBackground(logoutUrl, flowId, context = null) {
   const normalizedUrl = String(logoutUrl || "").trim();
   if (!normalizedUrl) {
-    return { ok: false, reason: "missing-url" };
+    return { ok: false, reason: "missing-url", mode: "" };
   }
-
-  const launchTabId = await ensureBoundRestV2LaunchTabForFlow(flowId, context, {
-    logoutUrl: normalizedUrl,
-    phase: "logout",
-  });
-
-  await chrome.tabs.update(launchTabId, {
-    url: normalizedUrl,
-    active: true,
-  });
-
-  emitRestV2DebugEvent(flowId, {
-    source: "extension",
-    phase: "logout-navigation-start",
-    tabId: launchTabId,
-    logoutUrl: normalizedUrl,
-  });
-
-  const navigationResult = await waitForTabCompletion(launchTabId, REST_V2_LOGOUT_NAVIGATION_TIMEOUT_MS, {
-    expectedUrl: normalizedUrl,
-  });
-  await waitForDelay(REST_V2_LOGOUT_POST_NAV_DELAY_MS);
+  const target = await openRestV2BackgroundLogoutTarget(normalizedUrl, flowId, context);
+  if (!target.ok || !target.tabId) {
+    return {
+      ok: false,
+      reason: target.error || "unable-to-open-background-target",
+      mode: target.mode || "",
+      tabId: Number(target.tabId || 0),
+      windowId: Number(target.windowId || 0),
+      ownsWindow: target.ownsWindow === true,
+    };
+  }
+  const launchTabId = Number(target.tabId || 0);
+  const launchWindowId = Number(target.windowId || 0);
+  const ownsWindow = target.ownsWindow === true;
+  let navigationResult = { ok: false, reason: "unknown" };
+  try {
+    emitRestV2DebugEvent(flowId, {
+      source: "extension",
+      phase: "logout-navigation-start",
+      tabId: launchTabId,
+      windowId: launchWindowId,
+      mode: String(target.mode || ""),
+      logoutUrl: normalizedUrl,
+    });
+    navigationResult = await waitForTabCompletion(launchTabId, REST_V2_LOGOUT_NAVIGATION_TIMEOUT_MS, {
+      expectedUrl: normalizedUrl,
+    });
+    await waitForDelay(REST_V2_LOGOUT_POST_NAV_DELAY_MS);
+  } finally {
+    if (ownsWindow && Number.isFinite(launchWindowId) && launchWindowId > 0) {
+      try {
+        await chrome.windows.remove(launchWindowId);
+      } catch {
+        // Ignore close failures for already-closed windows.
+      }
+    } else if (Number.isFinite(launchTabId) && launchTabId > 0) {
+      try {
+        await chrome.tabs.remove(launchTabId);
+      } catch {
+        // Ignore close failures for already-closed tabs.
+      }
+    }
+  }
 
   emitRestV2DebugEvent(flowId, {
     source: "extension",
     phase: "logout-navigation-finished",
     tabId: launchTabId,
+    windowId: launchWindowId,
+    mode: String(target.mode || ""),
     logoutUrl: normalizedUrl,
     ...navigationResult,
   });
 
   return {
     ...navigationResult,
+    mode: String(target.mode || ""),
     tabId: launchTabId,
+    windowId: launchWindowId,
+    ownsWindow,
+  };
+}
+
+async function executeRestV2LogoutAction(logoutUrl, flowId, context = null) {
+  const normalizedUrl = String(logoutUrl || "").trim();
+  if (!normalizedUrl) {
+    return { ok: false, reason: "missing-url", mode: "" };
+  }
+
+  const navigationResult = await navigateRestV2LogoutUrlInBackground(normalizedUrl, flowId, context);
+  if (navigationResult?.ok === true || String(navigationResult?.reason || "") === "tab-removed") {
+    return {
+      ok: true,
+      reason: String(navigationResult?.reason || "").trim(),
+      mode: String(navigationResult?.mode || "background-navigation"),
+    };
+  }
+
+  emitRestV2DebugEvent(flowId, {
+    source: "extension",
+    phase: "logout-action-navigation-failed",
+    requestorId: String(context?.requestorId || ""),
+    mvpd: String(context?.mvpd || ""),
+    logoutUrl: normalizedUrl,
+    mode: String(navigationResult?.mode || ""),
+    reason: String(navigationResult?.reason || "").trim(),
+  });
+
+  return {
+    ok: false,
+    reason: String(navigationResult?.reason || "").trim() || "logout user-agent action did not complete",
+    mode: String(navigationResult?.mode || ""),
+  };
+}
+
+function isRestV2LogoutActionCompleted(result = null) {
+  const completionSignal = `${String(result?.actionName || "")} ${String(result?.actionType || "")}`.toLowerCase();
+  return /complete|success|logged\s*out|loggedout|no[_\s-]?session/.test(completionSignal);
+}
+
+function isRestV2LogoutActionInvalid(result = null) {
+  const actionSignal = `${String(result?.actionName || "")} ${String(result?.actionType || "")}`.toLowerCase();
+  return /invalid/.test(actionSignal);
+}
+
+function shouldRunRestV2LogoutUserAgentAction(result = null) {
+  const normalizedUrl = String(result?.logoutUrl || "").trim();
+  if (!normalizedUrl) {
+    return false;
+  }
+  if (isRestV2LogoutActionCompleted(result) || isRestV2LogoutActionInvalid(result)) {
+    return false;
+  }
+  return true;
+}
+
+function isRestV2LogoutApiAccepted(response = null) {
+  const status = Number(response?.status || 0);
+  return Boolean(response?.ok) || status === 302;
+}
+
+function buildRestV2LogoutFailureReason(responseText = "", parsed = {}, response = null) {
+  return (
+    firstNonEmptyString([
+      parsed?.code,
+      parsed?.error,
+      parsed?.message,
+      normalizeHttpErrorMessage(responseText),
+      response?.statusText,
+    ]) || `Logout failed (${Number(response?.status || 0)}).`
+  );
+}
+
+function buildRestV2LogoutAcceptedFallbackAction(parsed = {}, result = null) {
+  const responseSignal = firstNonEmptyString([parsed?.code, parsed?.error, parsed?.message, parsed?.description]);
+  return {
+    actionName: String(result?.actionName || responseSignal || "accepted-no-action"),
+    actionType: String(result?.actionType || (result?.logoutUrl ? "api+user-agent" : "api")),
   };
 }
 
@@ -4329,6 +4935,16 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
   const userId = firstNonEmptyString([selectedSummary?.userId, selectedSummary?.upstreamUserId, ...subjectCandidates]);
   const sessionId = firstNonEmptyString([selectedSummary?.sessionId, ...sessionCandidates]);
   const mvpd = firstNonEmptyString([selectedSummary?.mvpd, ...idpCandidates, context.mvpd]);
+  const cachedMvpdName =
+    String(context?.requestorId || "").trim() && String(mvpd || "").trim()
+      ? String(state.mvpdCacheByRequestor.get(String(context.requestorId || "").trim())?.get(String(mvpd || "").trim())?.name || "").trim()
+      : "";
+  const mvpdName = firstNonEmptyString([
+    String(context?.mvpdMeta?.name || "").trim(),
+    cachedMvpdName,
+    String(selectedSummary?.scalarFields?.displayName || "").trim(),
+    String(selectedSummary?.scalarFields?.providerName || "").trim(),
+  ]);
   const subject = firstNonEmptyString([selectedSummary?.subject, selectedSummary?.upstreamUserId, selectedSummary?.userId, ...subjectCandidates]);
 
   const notBeforeMs = Number(selectedSummary?.notBeforeMs || 0);
@@ -4369,6 +4985,7 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     selectedProfileFound: Boolean(selectedSummary),
     profileKey: String(selectedSummary?.profileKey || "").trim(),
     mvpd: String(mvpd || "").trim(),
+    mvpdName: String(mvpdName || "").trim(),
     subject: String(subject || "").trim(),
     upstreamUserId: String(upstreamUserId || "").trim(),
     userId: String(userId || "").trim(),
@@ -4931,7 +5548,22 @@ function buildRestV2ProfileVerdict(profileCheckResult, context = null) {
 
   const requestorId = String(context?.requestorId || "");
   const mvpd = String(context?.mvpd || "");
-  const targetLabel = requestorId && mvpd ? `${requestorId} x ${mvpd}` : "selected Requestor x MVPD";
+  const targetLabel =
+    requestorId && mvpd
+      ? formatRestV2RequestorMvpdDisplay(
+          requestorId,
+          mvpd,
+          String(context?.mvpdName || "").trim()
+            ? {
+                id: mvpd,
+                name: String(context.mvpdName || "").trim(),
+              }
+            : null,
+          {
+            separator: " x ",
+          }
+        )
+      : "selected Requestor x MVPD";
 
   if (profileCheckResult.error || !profileCheckResult.ok) {
     const reason =
@@ -4996,6 +5628,23 @@ async function verifyPostLogoutProfilesCleared(context, flowId) {
 
     if ((checkOk && profileCount === 0) || noActiveProfileSignal) {
       clearRestV2ProfileHarvestForContext(context);
+      setRestV2ActiveProfileWindowState(
+        {
+          ok: true,
+          programmerId: String(context?.programmerId || "").trim(),
+          requestorId: String(context?.requestorId || "").trim(),
+          mvpd: String(context?.mvpd || "").trim(),
+        },
+        false,
+        {
+          checkedAt: Date.now(),
+          profileCount,
+          status: Number(lastCheck?.status || 0),
+          statusText: String(lastCheck?.statusText || "").trim(),
+          error: String(lastCheck?.error || "").trim(),
+          source: "post-logout-profiles-check",
+        }
+      );
       return {
         ok: true,
         attempts: attempt,
@@ -5062,6 +5711,7 @@ async function executeRestV2LogoutFlow(context, flowId) {
       {
         method: "GET",
         mode: "cors",
+        credentials: "include",
         headers: buildRestV2Headers(context.serviceProviderId, {
           Accept: "application/json",
         }),
@@ -5096,38 +5746,56 @@ async function executeRestV2LogoutFlow(context, flowId) {
       responsePreview: truncateDebugText(responseText, 2000),
     });
 
-    if (!response.ok && response.status !== 302) {
-      result.error =
-        firstNonEmptyString([
-          parsed?.code,
-          parsed?.error,
-          parsed?.message,
-          normalizeHttpErrorMessage(responseText),
-          response.statusText,
-        ]) || `Logout failed (${response.status}).`;
+    const responseAccepted = isRestV2LogoutApiAccepted(response);
+    if (!responseAccepted) {
+      result.error = buildRestV2LogoutFailureReason(responseText, parsed, response);
       return result;
     }
 
-    if (result.logoutUrl) {
-      const navigationResult = await navigateRestV2LogoutUrlInLaunchTab(result.logoutUrl, flowId, context);
-      result.performed = navigationResult.ok === true || navigationResult.reason === "tab-removed";
-      if (!result.performed && !result.error) {
-        result.error = `Logout navigation did not complete (${navigationResult.reason || "unknown"}).`;
+    if (shouldRunRestV2LogoutUserAgentAction(result)) {
+      const logoutAction = await executeRestV2LogoutAction(result.logoutUrl, flowId, context);
+      emitRestV2DebugEvent(flowId, {
+        source: "extension",
+        phase: "logout-action-result",
+        requestorId: context.requestorId,
+        mvpd: context.mvpd,
+        logoutUrl: String(result.logoutUrl || "").trim(),
+        mode: String(logoutAction?.mode || ""),
+        ok: logoutAction?.ok === true,
+        reason: String(logoutAction?.reason || "").trim(),
+      });
+      if (logoutAction?.ok !== true) {
+        const actionReason = String(logoutAction?.reason || "").trim() || "unable to complete MVPD user-agent logout action";
+        result.error = `Logout user-agent action failed: ${actionReason}`;
+        return result;
       }
-      return result;
     }
 
-    const completionSignal = `${String(result.actionName || "")} ${String(result.actionType || "")}`.toLowerCase();
-    result.performed = /complete|success|logged\s*out|loggedout|no[_\s-]?session/.test(completionSignal);
+    result.performed = isRestV2LogoutActionCompleted(result) || !shouldRunRestV2LogoutUserAgentAction(result);
     if (!result.performed && !result.error) {
-      const responseSignal = firstNonEmptyString([parsed?.code, parsed?.error, parsed?.message, parsed?.description]);
-      if (response.ok) {
-        result.performed = true;
-        result.actionName = result.actionName || String(responseSignal || "accepted-no-action");
-      } else {
-        result.error =
-          String(responseSignal || "").trim() || "Logout response did not return an action for the selected MVPD.";
-      }
+      const fallbackAction = buildRestV2LogoutAcceptedFallbackAction(parsed, result);
+      result.performed = true;
+      result.actionName = fallbackAction.actionName;
+      result.actionType = fallbackAction.actionType;
+    }
+    if (result.performed) {
+      setRestV2ActiveProfileWindowState(
+        {
+          ok: true,
+          programmerId: String(context?.programmerId || "").trim(),
+          requestorId: String(context?.requestorId || "").trim(),
+          mvpd: String(context?.mvpd || "").trim(),
+        },
+        false,
+        {
+          checkedAt: Date.now(),
+          profileCount: 0,
+          status: Number(response.status || 0),
+          statusText: String(response.statusText || "").trim(),
+          error: "",
+          source: "logout-flow",
+        }
+      );
     }
     return result;
   } catch (error) {
@@ -5905,7 +6573,17 @@ function buildHarLogFromFlowSnapshot(flowSnapshot, context = null, logoutResult 
     context?.serviceType === "esm-decomp"
       ? "ESM decomp session"
       : context?.requestorId && context?.mvpd
-        ? `${context.requestorId} x ${context.mvpd}`
+        ? formatRestV2RequestorMvpdDisplay(
+            String(context.requestorId || "").trim(),
+            String(context.mvpd || "").trim(),
+            String(context?.mvpdName || "").trim()
+              ? {
+                  id: String(context.mvpd || "").trim(),
+                  name: String(context.mvpdName || "").trim(),
+                }
+              : null,
+            { separator: " x " }
+          )
         : "MVPD session";
   const compactContext = context
     ? {
@@ -6067,6 +6745,20 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
     try {
       if (hasRecordingContext) {
         profileCheckResult = await fetchRestV2ProfileCheckResult(recordingContext, activeFlowId, "profiles-check");
+        const activeWindowContext = {
+          ok: true,
+          programmerId: String(recordingContext.programmerId || "").trim(),
+          requestorId: String(recordingContext.requestorId || "").trim(),
+          mvpd: String(recordingContext.mvpd || "").trim(),
+        };
+        setRestV2ActiveProfileWindowState(activeWindowContext, isRestV2ProfileSessionActiveResult(profileCheckResult), {
+          checkedAt: Date.now(),
+          profileCount: Number(profileCheckResult?.profileCount || 0),
+          status: Number(profileCheckResult?.status || 0),
+          statusText: String(profileCheckResult?.statusText || "").trim(),
+          error: String(profileCheckResult?.error || "").trim(),
+          source: "recording-stop-profiles-check",
+        });
         const harvestedProfile = storeRestV2ProfileHarvest(recordingContext, profileCheckResult, activeFlowId);
         if (harvestedProfile) {
           emitRestV2DebugEvent(activeFlowId, {
@@ -6085,6 +6777,14 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
                 : null,
           });
         } else {
+          clearRestV2ProfileHarvestForContext(recordingContext);
+        }
+        const explicitNoActiveProfile = isRestV2NoActiveProfileSignal(profileCheckResult);
+        const checkedNoProfiles =
+          profileCheckResult?.checked === true &&
+          profileCheckResult?.ok === true &&
+          Number(profileCheckResult?.profileCount || 0) === 0;
+        if (explicitNoActiveProfile || checkedNoProfiles) {
           clearRestV2ProfileHarvestForContext(recordingContext);
         }
 
@@ -6154,6 +6854,10 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
     finalPanelMessage = panelMessage || (harFileName ? `Recording stopped. HAR downloaded as ${harFileName}.` : "Recording stopped.");
     finalPanelType = panelType;
   } finally {
+    state.restV2DebugFlowId = "";
+    state.restV2RecordingActive = false;
+    state.restV2RecordingStartedAt = 0;
+    state.restV2RecordingContext = null;
     state.restV2Stopping = false;
     syncRestV2LoginPanel(section, programmer, appInfo);
     if (finalPanelMessage) {
@@ -6911,7 +7615,7 @@ function clickEsmApplyMvpdOptions(clickState, entries, desiredSelectedIds) {
     const displayName = String(metadata?.name || mvpdId || "");
     const isProxy = metadata?.isProxy === false ? false : true;
     option.value = mvpdId;
-    option.textContent = `${displayName} (${mvpdId})`;
+    option.textContent = formatMvpdPickerLabel(mvpdId, metadata);
     option.classList.add(isProxy ? "click-esm-mvpd-proxy" : "click-esm-mvpd-direct");
     option.style.fontWeight = isProxy ? "400" : "700";
 
@@ -10193,7 +10897,17 @@ function cmBuildRestV2CorrelationRecords(programmer = null) {
       ),
       kind: "correlation",
       title: "MVPD Login Profile",
-      subtitle: `${payload.requestorId || "requestor"} x ${payload.mvpd || "mvpd"} | ${profileCheckStatus} | ${capturedAtLabel}`,
+      subtitle: `${formatRestV2RequestorMvpdDisplay(
+        String(payload.requestorId || "").trim(),
+        String(payload.mvpd || "").trim(),
+        String(profileHarvest?.mvpdName || "").trim()
+          ? {
+              id: String(payload.mvpd || "").trim(),
+              name: String(profileHarvest.mvpdName || "").trim(),
+            }
+          : null,
+        { separator: " x " }
+      )} | ${profileCheckStatus} | ${capturedAtLabel}`,
       endpointUrl: "",
       requestUrl: "",
       payload,
@@ -11189,6 +11903,35 @@ async function cmOpenRecordInWorkspace(cmState, record, requestToken, options = 
   });
 }
 
+async function cmOpenRecordsInWorkspace(cmState, records, requestToken, options = {}) {
+  const queue = (Array.isArray(records) ? records : []).filter((record) => record && typeof record === "object");
+  if (!cmState || queue.length === 0) {
+    return 0;
+  }
+  const workspaceTab = await cmEnsureWorkspaceTab({
+    activate: options.activate !== false,
+    windowId: Number(cmState.controllerWindowId || 0) || undefined,
+  });
+  cmBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  const targetWindowId = Number(workspaceTab?.windowId || cmState.controllerWindowId || 0);
+  cmBroadcastControllerState(cmState, targetWindowId);
+
+  let openedCount = 0;
+  for (const record of queue) {
+    if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
+      break;
+    }
+    await cmRunRecordToWorkspace(cmState, record, requestToken, {
+      emitStart: options.emitStart !== false,
+      forceRefetch: options.forceRefetch === true,
+      cardId: String(record?.cardId || generateRequestId()),
+      targetWindowId,
+    });
+    openedCount += 1;
+  }
+  return openedCount;
+}
+
 async function loadCmService(programmer, cmService, section, contentElement, requestToken) {
   if (!contentElement) {
     return;
@@ -11221,15 +11964,13 @@ async function loadCmService(programmer, cmService, section, contentElement, req
     const correlationRecords = cmBuildRestV2CorrelationRecords(programmer);
     const credentialHints = cmExtractCredentialHintsFromBundles(bundles);
     const credentialRecords = cmBuildCredentialHintRecords(credentialHints, programmer);
-    const apiOperationRecords = cmBuildCmV2OperationRecords(programmer, credentialHints);
-    const records = [...correlationRecords, ...bundleRecords, ...credentialRecords, ...apiOperationRecords];
+    const records = [...correlationRecords, ...bundleRecords, ...credentialRecords];
     const correlationCardRecords = records.filter((record) => record.kind === "correlation");
     const tenantRecords = records.filter((record) => record.kind === "tenant");
     const applicationRecords = records.filter((record) => record.kind === "applications");
     const credentialHintRecords = records.filter((record) => record.kind === "credential");
     const policyRecords = records.filter((record) => record.kind === "policies");
     const usageRecords = records.filter((record) => record.kind === "usage");
-    const operationRecords = records.filter((record) => record.kind === "cmv2-op");
     const groupDefinitions = [
       {
         key: "correlation",
@@ -11261,20 +12002,22 @@ async function loadCmService(programmer, cmService, section, contentElement, req
         label: "CM Usage (CMU)",
         records: usageRecords,
       },
-      {
-        key: "control-api",
-        label: "CM V2 Control API",
-        records: operationRecords,
-      },
     ];
     // Keep tenant groups in internal records for fast CM mapping/debug workflows,
     // but hide the broad CM tenant list from sidepanel UI.
     const hiddenCmGroupKeys = new Set(["tenants"]);
     const groupRecordsByKey = new Map();
+    const groupChildRecordIdsByGroupRecordId = new Map();
     groupDefinitions.forEach((group, index) => {
       const groupRecord = cmBuildGroupWorkspaceRecord(group.key, group.label, group.records, programmer, index);
       records.push(groupRecord);
       groupRecordsByKey.set(group.key, groupRecord);
+      if (groupRecord?.cardId) {
+        const childRecordIds = (Array.isArray(group.records) ? group.records : [])
+          .map((record) => String(record?.cardId || "").trim())
+          .filter(Boolean);
+        groupChildRecordIdsByGroupRecordId.set(groupRecord.cardId, childRecordIds);
+      }
     });
     const recordsById = new Map(records.map((record) => [record.cardId, record]));
     const sourceLabel = String(cmService?.sourceUrl || "").trim() || "CM API discovery";
@@ -11307,6 +12050,7 @@ async function loadCmService(programmer, cmService, section, contentElement, req
       requestToken,
       bundles,
       recordsById,
+      groupChildRecordIdsByGroupRecordId,
       controllerWindowId,
     };
     section.__underparCmState = cmState;
@@ -11348,20 +12092,42 @@ async function loadCmService(programmer, cmService, section, contentElement, req
     contentElement.querySelectorAll(".cm-group-link").forEach((button) => {
       button.addEventListener("click", async (event) => {
         event.stopPropagation();
+        if (button.disabled) {
+          return;
+        }
         const recordId = String(button.getAttribute("data-record-id") || "").trim();
         if (!recordId) {
           return;
         }
-        const groupRecord = cmState.recordsById.get(recordId);
-        if (!groupRecord) {
-          return;
+        const groupRecord = cmState.recordsById.get(recordId) || null;
+        const childRecordIds = Array.isArray(cmState.groupChildRecordIdsByGroupRecordId?.get(recordId))
+          ? cmState.groupChildRecordIdsByGroupRecordId.get(recordId)
+          : [];
+        const childRecords = childRecordIds.map((childRecordId) => cmState.recordsById.get(childRecordId)).filter(Boolean);
+        const groupLabel =
+          String(button.querySelector(".cm-group-title-text")?.textContent || groupRecord?.title || "CM Group").trim() || "CM Group";
+        const childPlural = childRecords.length === 1 ? "entry" : "entries";
+        if (childRecords.length > 0) {
+          setStatus(`${groupLabel}: loading ${childRecords.length} child ${childPlural} into CM Workspace...`, "info");
         }
-        await cmOpenRecordInWorkspace(cmState, groupRecord, requestToken, {
-          activate: true,
-          emitStart: true,
-          forceRefetch: false,
-          cardId: groupRecord.cardId,
-        });
+        button.disabled = true;
+        try {
+          const openedCount = await cmOpenRecordsInWorkspace(cmState, childRecords, requestToken, {
+            activate: true,
+            emitStart: true,
+            forceRefetch: false,
+          });
+          if (childRecords.length > 0) {
+            setStatus(
+              `${groupLabel}: loaded ${openedCount}/${childRecords.length} child ${childPlural} in CM Workspace.`,
+              "success"
+            );
+          } else {
+            setStatus(`${groupLabel}: no child entries found to load.`, "info");
+          }
+        } finally {
+          button.disabled = false;
+        }
       });
     });
 
@@ -11388,9 +12154,17 @@ function buildPremiumServiceSummaryHtml(programmer, serviceKey, appInfo) {
     const profileHarvest = getCmProfileHarvestForProgrammer(programmer) || profileHarvestList[0] || null;
     const correlationPairLabel =
       profileHarvestList.length > 0 && (profileHarvest?.subject || profileHarvest?.mvpd)
-        ? `${profileHarvestList.length} captured | latest: ${
-            String(profileHarvest.requestorId || "").trim() || "requestor"
-          } x ${String(profileHarvest.mvpd || "").trim() || "mvpd"}`
+        ? `${profileHarvestList.length} captured | latest: ${formatRestV2RequestorMvpdDisplay(
+            String(profileHarvest.requestorId || "").trim(),
+            String(profileHarvest.mvpd || "").trim(),
+            String(profileHarvest?.mvpdName || "").trim()
+              ? {
+                  id: String(profileHarvest.mvpd || "").trim(),
+                  name: String(profileHarvest.mvpdName || "").trim(),
+                }
+              : null,
+            { separator: " x " }
+          )}`
         : "No captured MVPD logins yet";
     const profileCheckOutcome = String(profileHarvest?.profileCheckOutcome || "").trim();
     const profileCount = Number(profileHarvest?.profileCount || 0);
@@ -11407,26 +12181,7 @@ function buildPremiumServiceSummaryHtml(programmer, serviceKey, appInfo) {
     return summaryItems.join("");
   }
 
-  const dcrCache = programmer?.programmerId && appInfo?.guid ? loadDcrCache(programmer.programmerId, appInfo.guid) : null;
-
-  let dcrState = "No DCR client cached.";
-  if (dcrCache?.clientId) {
-    const expiresAtMs = Number(dcrCache.tokenExpiresAt || 0);
-    const hasLiveToken = Boolean(dcrCache.accessToken) && Number.isFinite(expiresAtMs) && expiresAtMs > Date.now();
-    if (hasLiveToken) {
-      dcrState = `DCR token ready (expires ${new Date(expiresAtMs).toLocaleString()})`;
-    } else {
-      dcrState = "DCR client cached; token missing/expired.";
-    }
-  }
-
-  const title = PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey;
-  const summaryItems = [
-    buildMetadataItemHtml(`${title} Application`, appInfo?.appName || appInfo?.guid || "Registered application"),
-    buildMetadataItemHtml("DCR Cache", dcrState),
-  ];
-
-  return summaryItems.join("");
+  return "";
 }
 
 function stopPremiumServiceAutoRefresh(section) {
@@ -11588,19 +12343,24 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
     programmer?.programmerId && state.premiumAppsByProgrammerId.has(programmer.programmerId)
       ? state.premiumAppsByProgrammerId.get(programmer.programmerId)
       : null;
-  const resolvedRegisteredApp =
-    String(appInfo?.appName || appInfo?.guid || "").trim() ||
-    String(
-      servicesForProgrammer?.esm?.appName ||
-        servicesForProgrammer?.esm?.guid ||
-        servicesForProgrammer?.degradation?.appName ||
-        servicesForProgrammer?.degradation?.guid ||
-        servicesForProgrammer?.restV2?.appName ||
-        servicesForProgrammer?.restV2?.guid ||
-        ""
-    ).trim() ||
-    "Registered application";
-  const serviceHoverMessage = `Premium Service ${title} using registered application '${resolvedRegisteredApp}'.`;
+  const serviceScopedAppByKey = {
+    decompTree: servicesForProgrammer?.esm || null,
+    degradation: servicesForProgrammer?.degradation || null,
+    restV2: servicesForProgrammer?.restV2 || null,
+  };
+  const resolvedServiceApp =
+    (serviceKey === "decompTree" ? appInfo || serviceScopedAppByKey.decompTree : appInfo || serviceScopedAppByKey[serviceKey]) ||
+    null;
+  const resolvedRegisteredApp = String(resolvedServiceApp?.appName || resolvedServiceApp?.guid || "").trim();
+  const registeredAppLabel = resolvedRegisteredApp || "No registered application selected";
+  const hoverServiceLabelByKey = {
+    restV2: "REST",
+    decompTree: "ESM",
+    degradation: "DEGRADATION",
+  };
+  const serviceHoverMessage = hoverServiceLabelByKey[serviceKey]
+    ? `${hoverServiceLabelByKey[serviceKey]} premium service is powered by registered application '${registeredAppLabel}'.`
+    : "Concurrency Monitoring is powered by CM tenant APIs (not a registered application scope).";
   const serviceClassByKey = {
     cm: "service-cm",
     degradation: "service-degradation",
@@ -11614,15 +12374,15 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
     serviceKey === "restV2"
       ? `
         <section class="rest-v2-login-tool">
-          <p class="rest-v2-login-status">Choose Requestor + MVPD, then click START RECORDING to capture end-to-end MVPD traffic. Click STOP at any time to close and download HAR.</p>
+          <p class="rest-v2-login-status" hidden></p>
           <div class="rest-v2-login-actions">
-            <button type="button" class="rest-v2-test-login-btn" disabled hidden>START RECORDING</button>
+            <button type="button" class="rest-v2-test-login-btn" disabled hidden>LOGIN</button>
             <button type="button" class="rest-v2-close-login-btn" disabled hidden>STOP</button>
           </div>
         </section>
         <section class="rest-v2-profile-history-tool" hidden>
           <div class="rest-v2-tool-head">
-            <p class="rest-v2-tool-title">MVPD Login Profiles</p>
+            <p class="rest-v2-tool-title">MVPD Login Profiles (Session)</p>
             <div class="rest-v2-tool-head-actions">
               <button type="button" class="rest-v2-profile-export-btn" disabled>Export CSV</button>
               <span class="rest-v2-tool-count rest-v2-profile-count">0</span>
@@ -11634,7 +12394,18 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
           <div class="rest-v2-tool-head">
             <p class="rest-v2-tool-title">Can I watch?</p>
           </div>
-          <p class="rest-v2-entitlement-context"></p>
+          <div class="rest-v2-entitlement-context-row">
+            <p class="rest-v2-entitlement-context"></p>
+            <button
+              type="button"
+              class="rest-v2-entitlement-copy-upstream-btn"
+              aria-label="Copy upstreamUserID to clipboard"
+              title="Copy upstreamUserID to clipboard"
+              hidden
+            >
+              <span class="rest-v2-entitlement-copy-icon" aria-hidden="true"></span>
+            </button>
+          </div>
           <form class="rest-v2-entitlement-form">
             <input
               type="text"
@@ -16018,6 +16789,7 @@ async function signOutAndResetSession() {
   setBusy(true, "Signing out of UnderPAR...");
   setStatus("", "info");
   state.sessionMonitorSuppressed = true;
+  clearRestV2ProfileHarvestSessionState();
 
   try {
     await clearIdentityTokens();
@@ -20863,6 +21635,15 @@ function normalizeRestV2MvpdCollection(payload) {
     .filter(Boolean);
 }
 
+function formatMvpdPickerLabel(mvpdId = "", metadata = null) {
+  const normalizedMvpdId = String(mvpdId || "").trim();
+  if (!normalizedMvpdId) {
+    return "";
+  }
+  const displayName = String(firstNonEmptyString([metadata?.name, metadata?.displayName, normalizedMvpdId]) || normalizedMvpdId).trim();
+  return `${displayName} (${normalizedMvpdId})`;
+}
+
 function normalizeAdobeNavigationUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -21317,15 +22098,15 @@ async function populateMvpdSelectForRequestor(requestorId) {
     els.mvpdSelect.appendChild(defaultOption);
 
     const entries = [...merged.entries()].sort((a, b) => {
-      const aText = `${a[1].name || a[0]} (${a[0]})`;
-      const bText = `${b[1].name || b[0]} (${b[0]})`;
+      const aText = formatMvpdPickerLabel(a[0], a[1]);
+      const bText = formatMvpdPickerLabel(b[0], b[1]);
       return String(aText).localeCompare(String(bText), undefined, { sensitivity: "base" });
     });
 
     for (const [mvpdId, meta] of entries) {
       const option = document.createElement("option");
       option.value = mvpdId;
-      option.textContent = `${meta.name || mvpdId} (${mvpdId})`;
+      option.textContent = formatMvpdPickerLabel(mvpdId, meta);
       option.style.fontWeight = meta.isProxy === false ? "700" : "400";
       els.mvpdSelect.appendChild(option);
     }
