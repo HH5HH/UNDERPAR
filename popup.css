@@ -828,42 +828,6 @@ select:disabled {
   }
 }
 
-.click-esm-requestor-select,
-.click-esm-mvpd-select {
-  flex: 1 1 220px;
-  height: 32px;
-}
-
-.click-esm-requestor-tone-a {
-  background: var(--legacy-table-row);
-}
-
-.click-esm-requestor-tone-b {
-  background: var(--legacy-table-alt);
-}
-
-.click-esm-mvpd-tone-a1 {
-  background: #eaf3ff;
-}
-
-.click-esm-mvpd-tone-a2 {
-  background: #dcebff;
-}
-
-.click-esm-mvpd-tone-b1 {
-  background: #fff1e6;
-}
-
-.click-esm-mvpd-tone-b2 {
-  background: #ffe3d1;
-}
-
-.click-esm-mvpd-select option.click-esm-mvpd-hover,
-.click-esm-mvpd-select option:hover,
-.click-esm-mvpd-select option:focus {
-  background: #f0eee9 !important;
-}
-
 .service-esm-decomp .decomp-tree-panel,
 .service-esm-decomp .decomp-treemap-panel {
   border-color: var(--service-accent-soft);
@@ -902,40 +866,43 @@ select:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .decomp-zoom-filter {
   width: 72px;
   height: 30px;
   padding: 0 8px;
+  flex: 0 0 auto;
 }
 
 .decomp-search {
-  flex: 1 1 180px;
-  min-width: 140px;
+  flex: 1 1 auto;
+  min-width: 72px;
   height: 30px;
   border-radius: 8px;
   border: 1px solid var(--legacy-border);
   padding: 0 10px;
   font-size: 12px;
+  width: 100%;
 }
 
 .decomp-reset-btn {
   height: 30px;
   padding: 0 10px;
   border-radius: 8px;
-  border: 1px solid var(--legacy-border);
-  background: var(--legacy-panel);
-  color: var(--legacy-text);
+  border: 1px solid #3730a3;
+  background: #4338ca;
+  color: #ffffff;
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
+  flex: 0 0 auto;
 }
 
 .decomp-reset-btn {
-  border-color: var(--legacy-accent);
-  background: var(--legacy-accent);
+  border-color: #3730a3;
+  background: #4338ca;
 }
 
 .decomp-toolbar-icon-btn {
@@ -981,7 +948,8 @@ select:disabled {
 }
 
 .decomp-reset-btn:hover:not(:disabled) {
-  background: var(--legacy-accent-hover);
+  background: #4f46e5;
+  border-color: #4338ca;
 }
 
 .decomp-toolbar-icon-btn:hover:not(:disabled) {
@@ -1006,6 +974,7 @@ select:disabled {
   border: 2px solid rgba(30, 41, 59, 0.25);
   border-top-color: rgba(30, 41, 59, 0.75);
   animation: click-esm-spin 0.8s linear infinite;
+  flex: 0 0 auto;
 }
 
 .decomp-shell.net-busy {
@@ -1026,6 +995,7 @@ select:disabled {
     rgba(255, 255, 255, 0.88),
     rgba(250, 249, 244, 0.94)
   );
+  cursor: pointer;
 }
 
 .decomp-treemap-head {
@@ -1040,6 +1010,13 @@ select:disabled {
     rgba(255, 255, 255, 0.88),
     rgba(250, 249, 244, 0.94)
   );
+  cursor: pointer;
+}
+
+.decomp-tree-head:focus-visible,
+.decomp-treemap-head:focus-visible {
+  outline: 2px solid var(--s2-action-focus-ring);
+  outline-offset: -2px;
 }
 
 .decomp-recording-tool {
@@ -1050,7 +1027,7 @@ select:disabled {
 }
 
 .decomp-recording-status {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 12px;
   color: var(--legacy-muted);
   line-height: 1.35;
@@ -1070,8 +1047,15 @@ select:disabled {
   flex-wrap: wrap;
 }
 
-.decomp-start-record-btn {
-  height: 30px;
+.decomp-toolbar-recording-actions {
+  align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+
+.decomp-record-toggle-btn {
+  height: 32px;
+  min-width: 88px;
   padding: 0 12px;
   border: 1px solid #059669;
   border-radius: 999px;
@@ -1079,37 +1063,72 @@ select:disabled {
   color: #ffffff;
   font-size: 11px;
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+  white-space: nowrap;
 }
 
-.decomp-start-record-btn:hover:not(:disabled) {
+.decomp-record-toggle-btn:hover:not(:disabled) {
   background: #047857;
+  border-color: #047857;
 }
 
-.decomp-start-record-btn:disabled {
-  opacity: 0.68;
-  cursor: default;
-}
-
-.decomp-stop-record-btn {
-  height: 30px;
-  padding: 0 12px;
-  border: 1px solid #b91c1c;
-  border-radius: 999px;
+.decomp-record-toggle-btn.is-recording {
+  border-color: #b91c1c;
   background: #b91c1c;
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
 }
 
-.decomp-stop-record-btn:hover:not(:disabled) {
+.decomp-record-toggle-btn.is-recording:hover:not(:disabled) {
   background: #991b1b;
+  border-color: #991b1b;
 }
 
-.decomp-stop-record-btn:disabled {
+.decomp-record-toggle-btn.is-stopping {
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.22);
+}
+
+.decomp-record-toggle-btn:disabled {
   opacity: 0.68;
   cursor: default;
+}
+
+.decomp-record-btn-label {
+  line-height: 1;
+  letter-spacing: 0.03em;
+}
+
+.decomp-record-btn-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.decomp-record-btn-icon--record {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #fda4af;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.88),
+    0 0 0 4px rgba(244, 63, 94, 0.24);
+}
+
+.decomp-record-btn-icon--stop {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.88),
+    0 0 0 4px rgba(248, 113, 113, 0.32);
 }
 
 .decomp-make-clickesm-btn:disabled {
@@ -1127,37 +1146,6 @@ select:disabled {
   font-size: 13px;
   font-weight: 700;
   color: var(--legacy-text);
-}
-
-.decomp-tree-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.decomp-tree-toggle-btn,
-.decomp-treemap-toggle-btn {
-  height: 24px;
-  border-radius: 6px;
-  border: 1px solid var(--legacy-border);
-  background: var(--legacy-panel);
-  color: var(--legacy-text);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 0 8px;
-}
-
-.decomp-tree-toggle-btn:hover,
-.decomp-treemap-toggle-btn:hover {
-  background: var(--legacy-table-row);
-}
-
-.decomp-tree-toggle-btn:disabled,
-.decomp-treemap-toggle-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
 }
 
 .decomp-tree-scroll {
@@ -1309,23 +1297,25 @@ select:disabled {
 .decomp-tree-root {
   font-size: 13px;
   line-height: 1.25;
+  width: 100%;
 }
 
 .decomp-tree-root ul {
   list-style: none;
   margin: 0;
-  padding-left: 18px;
-  border-left: 1px dashed rgba(0, 0, 0, 0.14);
+  padding: 0;
+  border: 0;
 }
 
 .decomp-tree-root ul.decomp-root {
-  padding-left: 0;
-  border-left: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .decomp-tree-root li {
-  margin: 2px 0;
-  padding: 1px 0;
+  margin: 0;
+  padding: 0;
 }
 
 .decomp-tree-root.decomp-search-mode ul {
@@ -1344,8 +1334,9 @@ select:disabled {
 
 .decomp-node {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
 }
 
 .decomp-twisty {
@@ -1368,35 +1359,92 @@ select:disabled {
 
 .decomp-label {
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  align-content: flex-start;
   gap: 4px;
   flex-wrap: wrap;
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 6px;
+  padding: 5px;
+  border-radius: 22px;
+  border: 1px solid rgba(44, 70, 111, 0.28);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.72), rgba(244, 250, 255, 0.56));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    inset 0 -1px 0 rgba(20, 40, 68, 0.08),
+    0 3px 10px rgba(15, 23, 42, 0.08);
   flex: 1 1 auto;
   min-width: 0;
+  overflow: visible;
+  min-height: 34px;
 }
 
 .decomp-label:hover {
-  background: var(--legacy-hover);
+  border-color: rgba(26, 66, 126, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(20, 40, 68, 0.1),
+    0 6px 14px rgba(15, 23, 42, 0.12);
 }
 
 .decomp-chip {
-  display: inline-flex;
+  --decomp-seg-rgb: 106, 106, 106;
+  display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  padding: 1px 7px;
+  justify-content: center;
+  padding: 4px 11px;
+  min-height: 24px;
+  border: 1px solid rgba(20, 40, 68, 0.2);
   border-radius: 999px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
   font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: normal;
+  max-width: 100%;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  position: relative;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.decomp-chip.decomp-chip-clickable {
+  cursor: pointer;
+}
+
+.decomp-chip.decomp-chip-clickable:hover {
+  filter: saturate(1.08) brightness(1.03);
+}
+
+.decomp-chip.decomp-chip-clickable:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(16, 24, 40, 0.42);
+}
+
+.decomp-chip::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+
+.decomp-chip:first-child {
+  border-top-left-radius: 999px;
+  border-bottom-left-radius: 999px;
+}
+
+.decomp-chip:last-child {
+  border-top-right-radius: 999px;
+  border-bottom-right-radius: 999px;
 }
 
 .decomp-chip mark {
-  background: #e8c400;
+  background: rgba(232, 196, 0, 0.86);
   color: #101010;
-  border-radius: 2px;
+  border-radius: 4px;
   padding: 0 2px;
 }
 
@@ -1409,16 +1457,25 @@ select:disabled {
 
 .decomp-run {
   flex: 0 0 auto;
-  font-size: 12px;
+  width: 44px;
+  height: 34px;
   border: 1px solid rgba(0, 0, 0, 0.14);
   background: var(--legacy-panel);
-  border-radius: 6px;
-  padding: 3px 8px;
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 800;
   cursor: pointer;
 }
 
 .decomp-run:hover {
-  background: var(--legacy-table-row);
+  transform: translateY(-1px);
+}
+
+.decomp-run:active {
+  transform: translateY(0);
 }
 
 .decomp-badge {
@@ -1434,19 +1491,21 @@ select:disabled {
 }
 
 .decomp-label.decomp-col-match {
-  background: rgba(255, 200, 0, 0.2);
+  border-color: rgba(255, 200, 0, 0.64);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    inset 0 -1px 0 rgba(20, 40, 68, 0.12),
+    0 0 0 2px rgba(255, 200, 0, 0.22);
 }
 
 .decomp-footer {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-.decomp-requestor-select,
-.decomp-mvpd-select {
-  flex: 1 1 220px;
-  height: 32px;
+.decomp-footer-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .rest-v2-login-tool {

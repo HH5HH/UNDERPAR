@@ -12,6 +12,8 @@ const LOGIN_HELPER_RESULT_PREFIX = "underpar_helper_result_v1:";
 const LEGACY_LOGIN_HELPER_RESULT_PREFIX = "mincloudlogin_helper_result_v1:";
 const LOGIN_HELPER_RESULT_MESSAGE_TYPE = "underpar:loginHelperResult";
 const LEGACY_LOGIN_HELPER_RESULT_MESSAGE_TYPE = "mincloudlogin:loginHelperResult";
+const IMS_FETCH_REQUEST_TYPE = "underpar:imsFetch";
+const LEGACY_IMS_FETCH_REQUEST_TYPE = "mincloudlogin:imsFetch";
 const CONSOLE_AUTH_CALLBACK_PREFIX = "https://console.auth.adobe.com/oauth2/callback";
 
 const ADOBE_CONSOLE_BASE = "https://console.auth.adobe.com";
@@ -99,6 +101,8 @@ const CLICK_ESM_TEMPLATE_PLACEHOLDER_TITLE = "__UP_CLICK_ESM_TITLE__";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_CID = "__UP_CID__";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_CSC = "__UP_CSC__";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_ACCESS_TOKEN = "__UP_ACCESS_TOKEN__";
+const CLICK_ESM_TEMPLATE_PLACEHOLDER_REQUESTOR_IDS_JSON = "__UP_REQUESTOR_IDS_JSON__";
+const CLICK_ESM_TEMPLATE_PLACEHOLDER_THEME_SCOPE = "__UP_THEME_SCOPE__";
 const DECOMP_INLINE_RESULT_LIMIT = 100;
 const DECOMP_CSV_RESULT_LIMIT = 10000;
 const ESM_DEPRECATED_COLUMN_KEYS = new Set(["clientless-failures", "clientless-tokens"]);
@@ -151,8 +155,8 @@ const CM_V2_API_BASE_DEFAULT = "https://streams-stage.adobeprimetime.com";
 const CM_IMS_CHECK_TOKEN_ENDPOINT = "https://adobeid-na1.services.adobe.com/ims/check/v6/token";
 const CM_IMS_CHECK_DEFAULT_SCOPE =
   "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext";
-const CM_IMS_VALIDATE_CLIENT_IDS = ["exc_app", "cm-console-ui", "AdobePass1", IMS_CLIENT_ID];
-const CM_IMS_CHECK_CLIENT_IDS = ["cm-console-ui", "exc_app", "AdobePass1", IMS_CLIENT_ID];
+const CM_IMS_VALIDATE_CLIENT_IDS = ["cm-console-ui", "AdobePass1", IMS_CLIENT_ID];
+const CM_IMS_CHECK_CLIENT_IDS = ["cm-console-ui", "AdobePass1", IMS_CLIENT_ID];
 const CM_IMS_FORCE_REFRESH_SKEW_MS = 30 * 1000;
 const CM_V2_OPERATION_DEFINITIONS = [
   {
@@ -226,8 +230,8 @@ const AVATAR_MAX_RESOLVE_CANDIDATES = 20;
 const AVATAR_DIRECT_LOAD_TIMEOUT_MS = 1200;
 const AVATAR_IMS_REFRESH_COOLDOWN_MS = 2 * 60 * 1000;
 const IMS_AVATAR_CLIENT_IDS = ["AdobePass1", IMS_CLIENT_ID];
-const IMS_PROFILE_CLIENT_IDS = [IMS_CLIENT_ID, "AdobePass1", "exc_app"];
-const IMS_VALIDATE_CLIENT_IDS = [IMS_CLIENT_ID, "AdobePass1", "exc_app"];
+const IMS_PROFILE_CLIENT_IDS = [IMS_CLIENT_ID, "AdobePass1"];
+const IMS_VALIDATE_CLIENT_IDS = [IMS_CLIENT_ID, "AdobePass1"];
 const AVATAR_CACHE_STORAGE_PREFIX = "underpar_avatar_cache_v2:";
 const LEGACY_AVATAR_CACHE_STORAGE_PREFIX = "mincloudlogin_avatar_cache_v2:";
 const AVATAR_MAX_LOCALSTORAGE_DATAURL_BYTES = 220000;
@@ -467,6 +471,48 @@ async function sendRuntimeMessageSafe(payload) {
   } catch {
     return null;
   }
+}
+
+async function relayImsFetch(endpoint, options = {}) {
+  const url = String(endpoint || "").trim();
+  if (!url) {
+    throw new Error("IMS relay request missing URL.");
+  }
+
+  const message = {
+    type: IMS_FETCH_REQUEST_TYPE,
+    url,
+    method: String(options?.method || "GET").trim().toUpperCase(),
+    credentials: String(options?.credentials || "omit").trim().toLowerCase(),
+    headers: options?.headers && typeof options.headers === "object" ? { ...options.headers } : {},
+    body: typeof options?.body === "string" ? options.body : "",
+  };
+
+  let response = await sendRuntimeMessageSafe(message);
+  if (!response?.ok && response?.error && String(response.error).toLowerCase().includes("unsupported")) {
+    response = await sendRuntimeMessageSafe({
+      ...message,
+      type: LEGACY_IMS_FETCH_REQUEST_TYPE,
+    });
+  }
+  if (!response || response.ok !== true || !response.response || typeof response.response !== "object") {
+    throw new Error(String(response?.error || "IMS relay request failed."));
+  }
+
+  const payload = response.response;
+  const bodyText = typeof payload?.bodyText === "string" ? payload.bodyText : "";
+  const headers =
+    payload?.headers && typeof payload.headers === "object" ? new Headers(payload.headers) : new Headers();
+
+  return {
+    ok: Boolean(payload?.ok),
+    status: Number(payload?.status || 0),
+    statusText: String(payload?.statusText || ""),
+    url: String(payload?.url || url),
+    redirected: Boolean(payload?.redirected),
+    headers,
+    text: async () => bodyText,
+  };
 }
 
 async function startRestV2DebugFlow(context = {}, trigger = "test-mvpd-login") {
@@ -6107,6 +6153,7 @@ function buildExtensionHarEntries(flowEvents = []) {
   const pendingApiByKey = new Map();
   const pendingTokenByKey = new Map();
   const pendingCmByKey = new Map();
+  const completedTokenAttemptIds = new Set();
 
   const getApiKey = (event) => {
     return [
@@ -6118,6 +6165,10 @@ function buildExtensionHarEntries(flowEvents = []) {
     ].join("|");
   };
   const getTokenKey = (event) => {
+    const attemptId = String(event?.attemptId || "").trim();
+    if (attemptId) {
+      return `attempt:${attemptId}`;
+    }
     return [
       String(event?.transport || ""),
       String(event?.method || "POST").toUpperCase(),
@@ -6350,8 +6401,21 @@ function buildExtensionHarEntries(flowEvents = []) {
     const durationMs = Math.max(0, endedMs - startedMs);
     const requestUrl = String(requestEvent?.url || event?.url || `${ADOBE_SP_BASE}/o/client/token`);
     const requestMethod = String(requestEvent?.method || event?.method || "POST").toUpperCase();
+    const requestHeaders = toHarHeadersArray(requestEvent?.requestHeaders || event?.requestHeaders || {});
+    const responseHeaders = toHarHeadersArray(event?.responseHeaders || {});
+    const requestBodyText = String(requestEvent?.requestBodyPreview || event?.requestBodyPreview || "");
+    const responseBodyText = String(event?.responsePreview || event?.error || "");
     const status = Number(event?.status || 0);
     const statusText = String(event?.statusText || event?.error || "");
+    const tokenBootstrapComment = "DCR credentialed token bootstrap";
+    const clientIdIncluded =
+      /(?:^|[?&])client_id=/.test(requestUrl) || /(?:^|&)client_id=/.test(requestBodyText);
+    const clientSecretIncluded =
+      /(?:^|[?&])client_secret=/.test(requestUrl) || /(?:^|&)client_secret=/.test(requestBodyText);
+    const responseMimeType = firstNonEmptyString([
+      getHarHeaderValue(responseHeaders, "content-type").split(";")[0],
+      "application/json",
+    ]);
 
     entries.push({
       startedDateTime: new Date(startedMs).toISOString(),
@@ -6360,24 +6424,31 @@ function buildExtensionHarEntries(flowEvents = []) {
         method: requestMethod,
         url: requestUrl,
         httpVersion: "HTTP/1.1",
-        headers: [],
+        headers: requestHeaders,
         queryString: toHarQueryStringArray(requestUrl),
         cookies: [],
         headersSize: -1,
-        bodySize: 0,
+        bodySize: requestBodyText ? requestBodyText.length : 0,
+        postData: requestBodyText
+          ? {
+              mimeType: firstNonEmptyString([getHarHeaderValue(requestHeaders, "content-type"), "text/plain"]),
+              text: truncateDebugText(requestBodyText, 10000),
+            }
+          : undefined,
       },
       response: {
         status,
         statusText: statusText || (status > 0 ? "" : "TOKEN_REQUEST_FAILED"),
         httpVersion: "HTTP/1.1",
-        headers: [],
+        headers: responseHeaders,
         cookies: [],
         redirectURL: "",
         headersSize: -1,
-        bodySize: -1,
+        bodySize: responseBodyText ? responseBodyText.length : -1,
         content: {
-          size: 0,
-          mimeType: "application/json",
+          size: responseBodyText.length,
+          mimeType: responseMimeType,
+          text: responseBodyText ? truncateDebugText(responseBodyText, 10000) : undefined,
         },
       },
       cache: {},
@@ -6392,8 +6463,19 @@ function buildExtensionHarEntries(flowEvents = []) {
         mvpd: String(event?.mvpd || requestEvent?.mvpd || ""),
         requestScope: String(event?.requestScope || requestEvent?.requestScope || ""),
         transport: String(event?.transport || requestEvent?.transport || ""),
+        attemptId: String(event?.attemptId || requestEvent?.attemptId || ""),
+        comment: tokenBootstrapComment,
+        authFlow: "dcr-client-credentials",
+        clientIdIncluded,
+        clientSecretIncluded,
+        credentialsIncluded: clientIdIncluded && clientSecretIncluded,
       },
     });
+
+    const completedAttemptId = String(event?.attemptId || requestEvent?.attemptId || "").trim();
+    if (completedAttemptId) {
+      completedTokenAttemptIds.add(completedAttemptId);
+    }
   }
 
   for (const queue of pendingApiByKey.values()) {
@@ -6453,9 +6535,20 @@ function buildExtensionHarEntries(flowEvents = []) {
 
   for (const queue of pendingTokenByKey.values()) {
     for (const requestEvent of queue) {
+      const pendingAttemptId = String(requestEvent?.attemptId || "").trim();
+      if (pendingAttemptId && completedTokenAttemptIds.has(pendingAttemptId)) {
+        continue;
+      }
       const startedMs = pickFlowEventTimestampMs(requestEvent, Date.now());
       const requestUrl = String(requestEvent?.url || `${ADOBE_SP_BASE}/o/client/token`);
       const requestMethod = String(requestEvent?.method || "POST").toUpperCase();
+      const requestHeaders = toHarHeadersArray(requestEvent?.requestHeaders || {});
+      const requestBodyText = String(requestEvent?.requestBodyPreview || "");
+      const tokenBootstrapComment = "DCR credentialed token bootstrap";
+      const clientIdIncluded =
+        /(?:^|[?&])client_id=/.test(requestUrl) || /(?:^|&)client_id=/.test(requestBodyText);
+      const clientSecretIncluded =
+        /(?:^|[?&])client_secret=/.test(requestUrl) || /(?:^|&)client_secret=/.test(requestBodyText);
       entries.push({
         startedDateTime: new Date(startedMs).toISOString(),
         time: 0,
@@ -6463,11 +6556,17 @@ function buildExtensionHarEntries(flowEvents = []) {
           method: requestMethod,
           url: requestUrl,
           httpVersion: "HTTP/1.1",
-          headers: [],
+          headers: requestHeaders,
           queryString: toHarQueryStringArray(requestUrl),
           cookies: [],
           headersSize: -1,
-          bodySize: 0,
+          bodySize: requestBodyText ? requestBodyText.length : 0,
+          postData: requestBodyText
+            ? {
+                mimeType: firstNonEmptyString([getHarHeaderValue(requestHeaders, "content-type"), "text/plain"]),
+                text: truncateDebugText(requestBodyText, 10000),
+              }
+            : undefined,
         },
         response: {
           status: 0,
@@ -6495,6 +6594,12 @@ function buildExtensionHarEntries(flowEvents = []) {
           mvpd: String(requestEvent?.mvpd || ""),
           requestScope: String(requestEvent?.requestScope || ""),
           transport: String(requestEvent?.transport || ""),
+          attemptId: String(requestEvent?.attemptId || ""),
+          comment: tokenBootstrapComment,
+          authFlow: "dcr-client-credentials",
+          clientIdIncluded,
+          clientSecretIncluded,
+          credentialsIncluded: clientIdIncluded && clientSecretIncluded,
         },
       });
     }
@@ -6556,15 +6661,34 @@ function buildExtensionHarEntries(flowEvents = []) {
   return entries;
 }
 
+function shouldExcludeInternalExtensionHarEntry(entry = null) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+
+  const requestUrl = String(entry?.request?.url || "").trim();
+  if (!requestUrl) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(requestUrl);
+    return parsed.protocol === "chrome-extension:" || parsed.protocol === "moz-extension:";
+  } catch {
+    return /^chrome-extension:\/\//i.test(requestUrl) || /^moz-extension:\/\//i.test(requestUrl);
+  }
+}
+
 function buildHarLogFromFlowSnapshot(flowSnapshot, context = null, logoutResult = null) {
   const flowEvents = Array.isArray(flowSnapshot?.events) ? flowSnapshot.events : [];
-  const entries = [...buildWebRequestHarEntries(flowEvents, context), ...buildExtensionHarEntries(flowEvents)].sort(
-    (a, b) => {
-    const left = Date.parse(a?.startedDateTime || "") || 0;
-    const right = Date.parse(b?.startedDateTime || "") || 0;
-    return left - right;
-  }
-  );
+  const rawEntries = [...buildWebRequestHarEntries(flowEvents, context), ...buildExtensionHarEntries(flowEvents)];
+  const entries = rawEntries
+    .filter((entry) => !shouldExcludeInternalExtensionHarEntry(entry))
+    .sort((a, b) => {
+      const left = Date.parse(a?.startedDateTime || "") || 0;
+      const right = Date.parse(b?.startedDateTime || "") || 0;
+      return left - right;
+    });
 
   const startedDateTime = entries[0]?.startedDateTime || new Date().toISOString();
   const pageId = `page-${String(flowSnapshot?.flowId || "capture")}`;
@@ -7197,30 +7321,6 @@ function normalizeEsmColumns(columns, options = {}) {
   return output;
 }
 
-function clickEsmBuildEndpointUrl(clickState, endpoint) {
-  const zoomKey = clickEsmGetZoomKey(endpoint);
-  const timeWindow = clickEsmComputeTimeWindow(zoomKey);
-  const requestorSelect = clickState.contentElement?.querySelector(".click-esm-requestor-select");
-  const mvpdSelect = clickState.contentElement?.querySelector(".click-esm-mvpd-select");
-  const requestorIds = clickEsmGetSelectedValues(requestorSelect);
-  const mvpdIds = mvpdSelect?.disabled ? [] : clickEsmGetSelectedValues(mvpdSelect);
-
-  const parsed = new URL(endpoint.url);
-  parsed.searchParams.set("start", timeWindow.start);
-  parsed.searchParams.set("end", timeWindow.end);
-  parsed.searchParams.set("format", "json");
-  parsed.searchParams.delete("requestor-id");
-  parsed.searchParams.delete("mvpd");
-  requestorIds.forEach((requestorId) => {
-    parsed.searchParams.append("requestor-id", requestorId);
-  });
-  mvpdIds.forEach((mvpd) => {
-    parsed.searchParams.append("mvpd", mvpd);
-  });
-
-  return parsed.toString();
-}
-
 async function loadClickEsmEndpoints() {
   if (Array.isArray(clickEsmEndpoints) && clickEsmEndpoints.length > 0) {
     return clickEsmEndpoints;
@@ -7354,6 +7454,13 @@ function clickEsmReplaceHiddenInputHotspot(templateHtml, inputName, value, place
 function buildClickEsmHtmlFromTemplate(templateHtml, context = {}) {
   const programmerLabel = String(context.programmerLabel || "").trim();
   const titleText = `${programmerLabel || "Media Company"} CLICK ESM`;
+  const themeScope = String(context.themeScope || context.programmerId || programmerLabel || "MediaCompany").trim();
+  const requestorCatalog = uniqueSorted(
+    (Array.isArray(context.requestorCatalogIds) ? context.requestorCatalogIds : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  const encodedRequestorCatalog = encodeURIComponent(JSON.stringify(requestorCatalog));
   let output = clickEsmReplaceTitleHotspot(templateHtml, titleText);
   output = clickEsmReplaceHiddenInputHotspot(output, "cid", context.clientId, CLICK_ESM_TEMPLATE_PLACEHOLDER_CID);
   output = clickEsmReplaceHiddenInputHotspot(output, "csc", context.clientSecret, CLICK_ESM_TEMPLATE_PLACEHOLDER_CSC);
@@ -7362,6 +7469,18 @@ function buildClickEsmHtmlFromTemplate(templateHtml, context = {}) {
     "access_token",
     context.accessToken,
     CLICK_ESM_TEMPLATE_PLACEHOLDER_ACCESS_TOKEN
+  );
+  output = clickEsmReplaceHiddenInputHotspot(
+    output,
+    "requestor_ids_json",
+    encodedRequestorCatalog,
+    CLICK_ESM_TEMPLATE_PLACEHOLDER_REQUESTOR_IDS_JSON
+  );
+  output = clickEsmReplaceHiddenInputHotspot(
+    output,
+    "theme_scope",
+    themeScope,
+    CLICK_ESM_TEMPLATE_PLACEHOLDER_THEME_SCOPE
   );
   return output;
 }
@@ -7391,44 +7510,85 @@ function buildClickEsmDownloadFileName(programmer) {
   return `${base}_clickESM.html`;
 }
 
-function resolveClickEsmDownloadContext(decompState = null) {
-  if (decompState?.programmer?.programmerId && decompState?.appInfo?.guid) {
-    return {
-      programmer: decompState.programmer,
-      appInfo: decompState.appInfo,
-      requestorIds: clickEsmGetSelectedValues(decompState.requestorSelect),
-      mvpdIds: decompState?.mvpdSelect?.disabled ? [] : clickEsmGetSelectedValues(decompState.mvpdSelect),
-      section: decompState.section || null,
-    };
+function getGlobalRequestorMvpdSelections() {
+  const requestorId = String(state.selectedRequestorId || "").trim();
+  const mvpdId = String(state.selectedMvpdId || "").trim();
+  return {
+    requestorIds: requestorId ? [requestorId] : [],
+    mvpdIds: mvpdId ? [mvpdId] : [],
+  };
+}
+
+function getGlobalRequestorCatalogIds() {
+  const fromGlobalSelect = Array.from(els?.requestorSelect?.options || [])
+    .map((option) => String(option?.value || "").trim())
+    .filter(Boolean);
+  if (fromGlobalSelect.length > 0) {
+    return uniqueSorted(fromGlobalSelect);
   }
 
+  const selectedProgrammer = resolveSelectedProgrammer();
+  return uniqueSorted(
+    (Array.isArray(selectedProgrammer?.requestorIds) ? selectedProgrammer.requestorIds : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+}
+
+async function resolveClickEsmDownloadContext(decompState = null) {
+  const globalSelections = getGlobalRequestorMvpdSelections();
   const selectedProgrammer = resolveSelectedProgrammer();
   if (!selectedProgrammer?.programmerId) {
     return null;
   }
+
   const selectedServices = state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null;
-  const esmApp = selectedServices?.esm || null;
+  const cachedEsmApp = hasEsmScopedApp(selectedServices) ? selectedServices.esm : null;
+  const controllerEsmApp = decompState?.appInfo?.guid ? decompState.appInfo : null;
+  const esmApp = cachedEsmApp || controllerEsmApp;
   if (!esmApp?.guid) {
     return null;
   }
+  const requestorCatalogIds = uniqueSorted(
+    [
+      ...getGlobalRequestorCatalogIds(),
+      ...globalSelections.requestorIds,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+
   return {
     programmer: selectedProgrammer,
     appInfo: esmApp,
-    requestorIds: state.selectedRequestorId ? [String(state.selectedRequestorId)] : [],
-    mvpdIds: state.selectedMvpdId ? [String(state.selectedMvpdId)] : [],
-    section: null,
+    requestorIds: globalSelections.requestorIds,
+    requestorCatalogIds,
+    mvpdIds: globalSelections.mvpdIds,
+    section: decompState?.section || null,
   };
 }
 
 async function resolveClickEsmAuthContext(context, requestToken, options = {}) {
   const programmer = context?.programmer || null;
-  const appInfo = context?.appInfo || null;
+  let appInfo = context?.appInfo || null;
   if (!programmer?.programmerId) {
     throw new Error("Media company is required to generate clickESM.");
   }
-  if (!appInfo?.guid) {
+
+  const selectedProgrammer = resolveSelectedProgrammer();
+  if (!selectedProgrammer?.programmerId || selectedProgrammer.programmerId !== programmer.programmerId) {
+    throw new Error("Selected media company changed. Retry export with the active selection.");
+  }
+
+  const selectedServices = state.premiumAppsByProgrammerId.get(programmer.programmerId) || null;
+  const selectedEsmApp = hasEsmScopedApp(selectedServices) ? selectedServices.esm : null;
+  if (!selectedEsmApp?.guid && !appInfo?.guid) {
     throw new Error("ESM application details are required to generate clickESM.");
   }
+  if (selectedEsmApp?.guid && (!appInfo?.guid || appInfo.guid !== selectedEsmApp.guid)) {
+    appInfo = selectedEsmApp;
+  }
+
   if (
     context?.section &&
     !isEsmServiceRequestActive(context.section, requestToken, programmer.programmerId)
@@ -7478,9 +7638,12 @@ async function makeClickEsmDownload(context, requestToken, options = {}) {
   const fileName = buildClickEsmDownloadFileName(programmer);
   const downloadHtml = buildClickEsmHtmlFromTemplate(templateHtml, {
     programmerLabel: authContext.programmerLabel,
+    programmerId: String(programmer?.programmerId || ""),
+    themeScope: String(programmer?.programmerId || programmer?.programmerName || authContext.programmerLabel || "").trim(),
     clientId: authContext.clientId,
     clientSecret: authContext.clientSecret,
     accessToken: authContext.accessToken,
+    requestorCatalogIds: Array.isArray(context?.requestorCatalogIds) ? context.requestorCatalogIds : [],
   });
   downloadClickEsmHtmlFile(downloadHtml, fileName);
   return {
@@ -7489,430 +7652,16 @@ async function makeClickEsmDownload(context, requestToken, options = {}) {
   };
 }
 
-function clickEsmHideMvpdSelector(clickState) {
-  const mvpdSelect = clickState.mvpdSelect;
-  if (!mvpdSelect) {
-    return;
+function isRestV2ScopedAppMappingMissingError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  if (code === "RESTV2_APP_MAPPING_MISSING") {
+    return true;
   }
-  mvpdSelect.innerHTML = "";
-  mvpdSelect.disabled = true;
-  mvpdSelect.hidden = true;
-  clickState.lastKnownSelectedMvpdIds = new Set();
-}
-
-function clickEsmRememberMvpdSelection(clickState) {
-  clickState.lastKnownSelectedMvpdIds = new Set(clickEsmGetSelectedValues(clickState.mvpdSelect));
-}
-
-function clickEsmGetSharedMvpdMapForRequestor(requestorId) {
-  const normalizedRequestorId = String(requestorId || "").trim();
-  if (!normalizedRequestorId) {
-    return null;
-  }
-  const map = state.mvpdCacheByRequestor.get(normalizedRequestorId);
-  if (map instanceof Map && map.size > 0) {
-    return map;
-  }
-  return null;
-}
-
-async function clickEsmLoadMvpdMapForRequestor(requestorId) {
-  const normalizedRequestorId = String(requestorId || "").trim();
-  if (!normalizedRequestorId) {
-    return new Map();
-  }
-  const sharedMap = clickEsmGetSharedMvpdMapForRequestor(normalizedRequestorId);
-  if (sharedMap) {
-    return sharedMap;
-  }
-  return loadMvpdsFromRestV2(normalizedRequestorId);
-}
-
-function syncClickEsmMvpdMenusForRequestor(requestorId, mvpdMap) {
-  const normalizedRequestorId = String(requestorId || "").trim();
-  if (!normalizedRequestorId || !(mvpdMap instanceof Map)) {
-    return;
-  }
-
-  getInteractiveEsmStates().forEach((clickState) => {
-    if (!clickState?.section?.isConnected || !clickState.requestorSelect || !clickState.mvpdSelect) {
-      return;
-    }
-
-    const selectedRequestorIds = clickEsmGetSelectedValues(clickState.requestorSelect);
-    const isExactRequestorSelection =
-      selectedRequestorIds.length === 1 && selectedRequestorIds[0] === normalizedRequestorId;
-    const isImplicitTopSelection =
-      selectedRequestorIds.length === 0 && String(state.selectedRequestorId || "").trim() === normalizedRequestorId;
-    if (!isExactRequestorSelection && !isImplicitTopSelection) {
-      return;
-    }
-
-    if (isImplicitTopSelection && clickState.requestorSelect?.options?.length) {
-      [...clickState.requestorSelect.options].forEach((option) => {
-        option.selected = option.value === normalizedRequestorId;
-      });
-      clickState.pendingRequestorIds = [normalizedRequestorId];
-    }
-
-    const currentSelected = new Set(clickEsmGetSelectedValues(clickState.mvpdSelect));
-    const desiredSelectedIds = currentSelected.size ? currentSelected : new Set(clickState.lastKnownSelectedMvpdIds);
-    clickState.mvpdSelect.disabled = true;
-    clickState.mvpdSelect.hidden = false;
-    clickEsmApplyMvpdOptions(clickState, [...mvpdMap.entries()], desiredSelectedIds);
-    clickState.mvpdSelect.disabled = false;
-    clickEsmRememberMvpdSelection(clickState);
-    if (clickState.serviceType === "decompTree") {
-      decompBroadcastControllerState(clickState);
-    }
-  });
-}
-
-function clearClickEsmMvpdMenusForRequestor(requestorId, label = "-- MVPD config unavailable --") {
-  const normalizedRequestorId = String(requestorId || "").trim();
-  const clearAll = normalizedRequestorId.length === 0;
-  getInteractiveEsmStates().forEach((clickState) => {
-    if (!clickState?.section?.isConnected || !clickState.requestorSelect || !clickState.mvpdSelect) {
-      return;
-    }
-
-    const selectedRequestorIds = clickEsmGetSelectedValues(clickState.requestorSelect);
-    const isExactRequestorSelection =
-      selectedRequestorIds.length === 1 && selectedRequestorIds[0] === normalizedRequestorId;
-    const isImplicitTopSelection =
-      selectedRequestorIds.length === 0 && String(state.selectedRequestorId || "").trim() === normalizedRequestorId;
-    if (!clearAll && !isExactRequestorSelection && !isImplicitTopSelection) {
-      return;
-    }
-
-    clickState.mvpdSelect.innerHTML = `<option value="">${escapeHtml(label)}</option>`;
-    clickState.mvpdSelect.disabled = true;
-    clickState.mvpdSelect.hidden = false;
-    clickState.lastKnownSelectedMvpdIds = new Set();
-    if (clickState.serviceType === "decompTree") {
-      decompBroadcastControllerState(clickState);
-    }
-  });
-}
-
-function clickEsmApplyMvpdOptions(clickState, entries, desiredSelectedIds) {
-  const mvpdSelect = clickState.mvpdSelect;
-  if (!mvpdSelect) {
-    return;
-  }
-  mvpdSelect.innerHTML = "";
-
-  let lastLetter = "";
-  let indexWithinGroup = 0;
-  const orderedEntries = [...entries].sort((left, right) => {
-    const leftName = String(left?.[1]?.name || left?.[0] || "");
-    const rightName = String(right?.[1]?.name || right?.[0] || "");
-    return leftName.localeCompare(rightName, undefined, { sensitivity: "base" });
-  });
-
-  orderedEntries.forEach(([mvpdId, metadata]) => {
-    const option = document.createElement("option");
-    const displayName = String(metadata?.name || mvpdId || "");
-    const isProxy = metadata?.isProxy === false ? false : true;
-    option.value = mvpdId;
-    option.textContent = formatMvpdPickerLabel(mvpdId, metadata);
-    option.classList.add(isProxy ? "click-esm-mvpd-proxy" : "click-esm-mvpd-direct");
-    option.style.fontWeight = isProxy ? "400" : "700";
-
-    const letterMatch = displayName.match(/[A-Za-z]/);
-    const currentLetter = letterMatch ? letterMatch[0].toUpperCase() : "A";
-    if (currentLetter !== lastLetter) {
-      lastLetter = currentLetter;
-      indexWithinGroup = 0;
-    }
-
-    const isGroupA = (currentLetter.charCodeAt(0) - 65) % 2 === 0;
-    const isOdd = indexWithinGroup % 2 === 1;
-    if (isGroupA) {
-      option.classList.add(isOdd ? "click-esm-mvpd-tone-a2" : "click-esm-mvpd-tone-a1");
-      option.style.backgroundColor = isOdd ? "#dcebff" : "#eaf3ff";
-    } else {
-      option.classList.add(isOdd ? "click-esm-mvpd-tone-b2" : "click-esm-mvpd-tone-b1");
-      option.style.backgroundColor = isOdd ? "#ffe3d1" : "#fff1e6";
-    }
-    indexWithinGroup += 1;
-
-    if (desiredSelectedIds && desiredSelectedIds.has(mvpdId)) {
-      option.selected = true;
-    }
-    mvpdSelect.appendChild(option);
-  });
-
-  if (![...mvpdSelect.options].some((option) => option.selected)) {
-    mvpdSelect.selectedIndex = -1;
-  }
-}
-
-function clickEsmEnableMvpdHoverHint(clickState) {
-  const mvpdSelect = clickState?.mvpdSelect;
-  if (!mvpdSelect || mvpdSelect.__clickEsmHoverAttached) {
-    return;
-  }
-  mvpdSelect.__clickEsmHoverAttached = true;
-
-  let lastOption = null;
-  const clearHover = () => {
-    if (lastOption) {
-      lastOption.classList.remove("click-esm-mvpd-hover");
-    }
-    lastOption = null;
-  };
-  const setHover = (option) => {
-    if (!option || option === lastOption) {
-      return;
-    }
-    if (lastOption) {
-      lastOption.classList.remove("click-esm-mvpd-hover");
-    }
-    option.classList.add("click-esm-mvpd-hover");
-    lastOption = option;
-  };
-  const resolveOptionFromEvent = (event) => {
-    if (event?.target?.tagName === "OPTION") {
-      return event.target;
-    }
-
-    const optionCount = Number(mvpdSelect.options?.length || 0);
-    if (optionCount <= 0) {
-      return null;
-    }
-    if (!mvpdSelect.multiple && Number(mvpdSelect.size || 0) <= 1) {
-      return null;
-    }
-
-    const rect = mvpdSelect.getBoundingClientRect();
-    const y = Number(event?.clientY || 0) - rect.top + mvpdSelect.scrollTop;
-    const optionHeight = mvpdSelect.scrollHeight / optionCount;
-    if (!Number.isFinite(optionHeight) || optionHeight < 12 || optionHeight > 60) {
-      return null;
-    }
-
-    const optionIndex = Math.floor(y / optionHeight);
-    if (optionIndex < 0 || optionIndex >= optionCount) {
-      return null;
-    }
-    return mvpdSelect.options[optionIndex];
-  };
-
-  mvpdSelect.addEventListener("mousemove", (event) => {
-    const option = resolveOptionFromEvent(event);
-    if (option) {
-      setHover(option);
-    }
-  });
-  mvpdSelect.addEventListener("mouseleave", clearHover);
-  mvpdSelect.addEventListener("blur", clearHover);
-}
-
-async function clickEsmApplyRequestorSelection(clickState, requestorIds, requestToken) {
-  if (!clickState.mvpdSelect) {
-    return;
-  }
-  const serviceLabel = "decomp";
-
-  if (!requestorIds.length) {
-    clickEsmHideMvpdSelector(clickState);
-    if (clickState?.serviceType === "decompTree") {
-      decompBroadcastControllerState(clickState);
-    }
-    return;
-  }
-
-  const currentSelected = new Set(clickEsmGetSelectedValues(clickState.mvpdSelect));
-  const desiredSelectedIds = currentSelected.size ? currentSelected : new Set(clickState.lastKnownSelectedMvpdIds);
-
-  clickState.mvpdSelect.disabled = true;
-  clickState.mvpdSelect.hidden = false;
-  if (!clickState.mvpdSelect.options.length) {
-    clickState.mvpdSelect.innerHTML = '<option value="">Loading MVPDs...</option>';
-  }
-
-  const settledMaps = await Promise.allSettled(
-    requestorIds.map((requestorId) => clickEsmLoadMvpdMapForRequestor(requestorId))
+  const message = String(error?.message || error || "").trim().toLowerCase();
+  return (
+    message.includes("no rest v2 scoped app mapping was found for requestorid") ||
+    message.includes("no rest v2 scoped app is mapped to requestorid")
   );
-  if (!isEsmServiceRequestActive(clickState.section, requestToken, clickState.programmer?.programmerId)) {
-    return;
-  }
-
-  const maps = settledMaps.filter((entry) => entry.status === "fulfilled").map((entry) => entry.value);
-  const failures = settledMaps.filter((entry) => entry.status === "rejected").map((entry) => entry.reason);
-  if (maps.length === 0) {
-    clickState.mvpdSelect.innerHTML = '<option value="">-- MVPD config unavailable --</option>';
-    clickState.mvpdSelect.disabled = true;
-    if (failures.length > 0) {
-      const firstFailure = failures[0];
-      const reason = firstFailure instanceof Error ? firstFailure.message : String(firstFailure);
-      setStatus(`REST V2 configuration failed for ${serviceLabel} MVPD list: ${reason}`, "error");
-    }
-    if (clickState?.serviceType === "decompTree") {
-      decompBroadcastControllerState(clickState);
-    }
-    return;
-  }
-  if (failures.length > 0) {
-    const firstFailure = failures[0];
-    log(`${serviceLabel} MVPD merge fallback`, {
-      failedRequests: failures.length,
-      reason: firstFailure instanceof Error ? firstFailure.message : String(firstFailure),
-    });
-  }
-
-  const mergedMap = new Map();
-  maps.forEach((mvpdMap) => {
-    mvpdMap.forEach((metadata, mvpdId) => {
-      const normalized = {
-        name: String(metadata?.name || mvpdId || "").trim() || mvpdId,
-        isProxy: metadata?.isProxy === false ? false : true,
-      };
-      if (!mergedMap.has(mvpdId)) {
-        mergedMap.set(mvpdId, normalized);
-        return;
-      }
-
-      const existing = mergedMap.get(mvpdId) || {};
-      mergedMap.set(mvpdId, {
-        name: String(existing.name || normalized.name || mvpdId),
-        isProxy: existing.isProxy === false || normalized.isProxy === false ? false : true,
-      });
-    });
-  });
-
-  if (mergedMap.size === 0) {
-    clickState.mvpdSelect.innerHTML = '<option value="">-- No MVPDs available --</option>';
-    clickState.mvpdSelect.disabled = true;
-    if (clickState?.serviceType === "decompTree") {
-      decompBroadcastControllerState(clickState);
-    }
-    return;
-  }
-
-  clickEsmApplyMvpdOptions(clickState, [...mergedMap.entries()], desiredSelectedIds);
-  clickEsmRememberMvpdSelection(clickState);
-  clickState.mvpdSelect.disabled = false;
-  setStatus("", "info");
-  if (clickState?.serviceType === "decompTree") {
-    decompBroadcastControllerState(clickState);
-  }
-}
-
-function clickEsmScheduleRequestorSelection(clickState, requestToken) {
-  if (clickState.requestorApplyTimer) {
-    clearTimeout(clickState.requestorApplyTimer);
-    clickState.requestorApplyTimer = 0;
-  }
-
-  clickState.requestorApplyTimer = setTimeout(() => {
-    clickState.requestorApplyTimer = 0;
-    void clickEsmApplyRequestorSelection(clickState, clickState.pendingRequestorIds, requestToken);
-  }, 350);
-}
-
-function clickEsmHandleRequestorChange(clickState, requestToken, options = {}) {
-  clickState.pendingRequestorIds = clickEsmGetSelectedValues(clickState.requestorSelect);
-
-  if (!clickState.pendingRequestorIds.length) {
-    if (clickState.requestorApplyTimer) {
-      clearTimeout(clickState.requestorApplyTimer);
-      clickState.requestorApplyTimer = 0;
-    }
-    clickEsmHideMvpdSelector(clickState);
-    return;
-  }
-
-  if (options.immediate) {
-    void clickEsmApplyRequestorSelection(clickState, clickState.pendingRequestorIds, requestToken);
-    return;
-  }
-  clickEsmScheduleRequestorSelection(clickState, requestToken);
-}
-
-function clickEsmResolveSharedRequestorIds(clickState) {
-  const programmerRequestorIds = Array.isArray(clickState?.programmer?.requestorIds)
-    ? clickState.programmer.requestorIds
-    : [];
-  const normalizedProgrammerIds = uniqueSorted(programmerRequestorIds.map((value) => String(value || "").trim()).filter(Boolean));
-  if (normalizedProgrammerIds.length > 0) {
-    return normalizedProgrammerIds;
-  }
-  return getRequestorsForSelectedMediaCompany();
-}
-
-function clickEsmApplySharedRequestorOptions(clickState, requestToken, options = {}) {
-  if (!clickState.requestorSelect) {
-    return;
-  }
-
-  const rawRequestorIds = Array.isArray(options.requestorIds)
-    ? options.requestorIds
-    : clickEsmResolveSharedRequestorIds(clickState);
-  const requestorIds = uniqueSorted(rawRequestorIds.map((value) => String(value || "").trim()).filter(Boolean));
-  const selectedTopRequestorId =
-    options.selectedRequestorId !== undefined
-      ? String(options.selectedRequestorId || "").trim()
-      : String(state.selectedRequestorId || "").trim();
-  const existingSelectedIds = new Set(clickEsmGetSelectedValues(clickState.requestorSelect));
-  const desiredSelectedIds = selectedTopRequestorId
-    ? new Set([selectedTopRequestorId])
-    : existingSelectedIds;
-
-  clickState.requestorSelect.innerHTML = "";
-  if (requestorIds.length === 0) {
-    const emptyLabel = String(options.emptyLabel || "No requestor-id values returned.");
-    clickState.requestorSelect.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
-    clickState.requestorSelect.disabled = true;
-    clickEsmHideMvpdSelector(clickState);
-    return;
-  }
-
-  requestorIds.forEach((requestorId, index) => {
-    const option = document.createElement("option");
-    option.value = requestorId;
-    option.textContent = requestorId;
-    const isOdd = index % 2 === 1;
-    option.classList.add(isOdd ? "click-esm-requestor-tone-b" : "click-esm-requestor-tone-a");
-    // Inline fallback for environments that under-apply <option> class backgrounds.
-    option.style.backgroundColor = isOdd ? "#f2f5f8" : "#f9fafb";
-    if (desiredSelectedIds.has(requestorId)) {
-      option.selected = true;
-    }
-    clickState.requestorSelect.appendChild(option);
-  });
-
-  if (![...clickState.requestorSelect.options].some((option) => option.selected)) {
-    clickState.requestorSelect.selectedIndex = -1;
-  }
-  clickState.requestorSelect.disabled = false;
-  clickEsmHandleRequestorChange(clickState, requestToken, { immediate: true });
-}
-
-function syncClickEsmRequestorMenus(requestorIds, selectedRequestorId = "", options = {}) {
-  const normalizedRequestorIds = uniqueSorted(
-    (Array.isArray(requestorIds) ? requestorIds : []).map((value) => String(value || "").trim()).filter(Boolean)
-  );
-  const targetSelection = String(selectedRequestorId || "").trim();
-  const requestToken = Number(options.requestToken || state.premiumPanelRequestToken);
-  const emptyLabel = String(options.emptyLabel || "No requestor-id values returned.");
-  getInteractiveEsmStates().forEach((clickState) => {
-    if (!clickState?.section?.isConnected || !clickState.requestorSelect) {
-      return;
-    }
-    if (!isEsmServiceRequestActive(clickState.section, requestToken, clickState.programmer?.programmerId)) {
-      return;
-    }
-    clickEsmApplySharedRequestorOptions(clickState, requestToken, {
-      requestorIds: normalizedRequestorIds,
-      selectedRequestorId: targetSelection,
-      emptyLabel,
-    });
-    if (clickState.serviceType === "decompTree") {
-      decompBroadcastControllerState(clickState);
-    }
-  });
 }
 
 const DECOMP_SEGMENT_COLORS = {
@@ -7979,9 +7728,12 @@ function decompApplyChipColor(chipElement, segment) {
   if (!rgb) {
     return;
   }
-  chipElement.style.color = `rgb(${rgb.red}, ${rgb.green}, ${rgb.blue})`;
-  chipElement.style.backgroundColor = `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0.14)`;
-  chipElement.style.borderColor = `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0.35)`;
+  const luminance = (0.2126 * rgb.red + 0.7152 * rgb.green + 0.0722 * rgb.blue) / 255;
+  const textColor = luminance > 0.58 ? "16, 24, 40" : "250, 252, 255";
+  chipElement.style.setProperty("--decomp-seg-rgb", `${rgb.red}, ${rgb.green}, ${rgb.blue}`);
+  chipElement.style.color = `rgb(${textColor})`;
+  chipElement.style.background = `linear-gradient(140deg, rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0.22), rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0.12) 58%, rgba(255, 255, 255, 0.42) 100%)`;
+  chipElement.style.borderColor = `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 0.42)`;
 }
 
 function decompCompareSegments(left, right) {
@@ -8003,6 +7755,21 @@ function decompCompareSegments(left, right) {
   return leftKey.localeCompare(rightKey, undefined, { sensitivity: "base" });
 }
 
+function decompComparePathParts(leftParts, rightParts) {
+  const left = Array.isArray(leftParts) ? leftParts : [];
+  const right = Array.isArray(rightParts) ? rightParts : [];
+  const max = Math.max(left.length, right.length);
+  for (let index = 0; index < max; index += 1) {
+    const leftSegment = index < left.length ? left[index] : "";
+    const rightSegment = index < right.length ? right[index] : "";
+    if (leftSegment === rightSegment) {
+      continue;
+    }
+    return decompCompareSegments(leftSegment, rightSegment);
+  }
+  return left.length - right.length;
+}
+
 function decompExtractSegments(endpointUrl) {
   try {
     const parsed = new URL(endpointUrl);
@@ -8021,6 +7788,18 @@ function decompExtractSegments(endpointUrl) {
   }
 }
 
+function decompNormalizeEndpointSegments(rawSegments) {
+  const segments = Array.isArray(rawSegments)
+    ? rawSegments.map((segment) => String(segment || "").trim()).filter(Boolean)
+    : [];
+  const withoutMediaCompany = segments.filter((segment) => segment.toLowerCase() !== "media-company");
+  const yearIndex = withoutMediaCompany.findIndex((segment) => segment.toLowerCase() === "year");
+  if (yearIndex < 0) {
+    return [];
+  }
+  return withoutMediaCompany.slice(yearIndex);
+}
+
 function decompBuildCatalog(endpoints) {
   return (Array.isArray(endpoints) ? endpoints : [])
     .map((endpoint) => {
@@ -8031,7 +7810,10 @@ function decompBuildCatalog(endpoints) {
       if (!url) {
         return null;
       }
-      const segs = decompExtractSegments(url);
+      const segs = decompNormalizeEndpointSegments(decompExtractSegments(url));
+      if (segs.length === 0) {
+        return null;
+      }
       const columns = normalizeEsmColumns(endpoint.columns);
       const zoomKey = clickEsmGetZoomKey(endpoint);
       return {
@@ -8155,8 +7937,9 @@ function decompGetBoundWorkspaceTabId(windowId) {
 }
 
 function decompGetControllerStatePayload(decompState) {
-  const requestorIds = clickEsmGetSelectedValues(decompState?.requestorSelect);
-  const mvpdIds = decompState?.mvpdSelect?.disabled ? [] : clickEsmGetSelectedValues(decompState?.mvpdSelect);
+  const selections = getGlobalRequestorMvpdSelections();
+  const requestorIds = selections.requestorIds;
+  const mvpdIds = selections.mvpdIds;
   const profileHarvestContext = {
     programmerId: String(decompState?.programmer?.programmerId || ""),
     requestorId: String(requestorIds[0] || ""),
@@ -8187,19 +7970,21 @@ function decompGetControllerStatePayload(decompState) {
   };
 }
 
-function decompGetSelectedControllerStatePayload(programmer = null, services = null) {
+function decompGetSelectedControllerStatePayload(programmer = null, services = null, options = {}) {
   const resolvedProgrammer =
     programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
   let resolvedServices = services;
   if (!resolvedServices && resolvedProgrammer?.programmerId) {
     resolvedServices = state.premiumAppsByProgrammerId.get(resolvedProgrammer.programmerId) || null;
   }
+  const controllerReason = String(options?.controllerReason || "").trim();
 
-  const requestorIds = state.selectedRequestorId ? [String(state.selectedRequestorId)] : [];
-  const mvpdIds = state.selectedMvpdId ? [String(state.selectedMvpdId)] : [];
+  const selections = getGlobalRequestorMvpdSelections();
+  const requestorIds = selections.requestorIds;
+  const mvpdIds = selections.mvpdIds;
   let esmAvailable = null;
   if (resolvedServices && typeof resolvedServices === "object") {
-    esmAvailable = Boolean(resolvedServices.esm);
+    esmAvailable = Boolean(String(resolvedServices?.esm?.guid || "").trim());
   }
   const profileHarvestContext = {
     programmerId: String(resolvedProgrammer?.programmerId || ""),
@@ -8228,15 +8013,24 @@ function decompGetSelectedControllerStatePayload(programmer = null, services = n
             ...item,
           }))
         : [],
+    controllerReason,
     updatedAt: Date.now(),
   };
 }
 
-function decompBroadcastSelectedControllerState(programmer = null, services = null, targetWindowId = 0) {
+function hasEsmScopedApp(services) {
+  return Boolean(String(services?.esm?.guid || "").trim());
+}
+
+function decompBroadcastSelectedControllerState(programmer = null, services = null, targetWindowId = 0, options = {}) {
   const resolvedWindowId = Number(targetWindowId || 0) || Number(state.decompWorkspaceWindowId || 0);
-  void decompSendWorkspaceMessage("controller-state", decompGetSelectedControllerStatePayload(programmer, services), {
-    targetWindowId: resolvedWindowId,
-  });
+  void decompSendWorkspaceMessage(
+    "controller-state",
+    decompGetSelectedControllerStatePayload(programmer, services, options),
+    {
+      targetWindowId: resolvedWindowId,
+    }
+  );
 }
 
 async function decompSendWorkspaceMessage(event, payload = {}, options = {}) {
@@ -8318,14 +8112,12 @@ async function decompEnsureWorkspaceTab(options = {}) {
   return workspaceTab;
 }
 
-function getDecompRecordingSelections(decompState) {
-  const requestorIds = clickEsmGetSelectedValues(decompState?.requestorSelect);
-  const mvpdIds = decompState?.mvpdSelect?.disabled ? [] : clickEsmGetSelectedValues(decompState?.mvpdSelect);
-  return { requestorIds, mvpdIds };
+function getDecompRecordingSelections() {
+  return getGlobalRequestorMvpdSelections();
 }
 
 function toDecompRecordingContext(decompState) {
-  const selections = getDecompRecordingSelections(decompState);
+  const selections = getDecompRecordingSelections();
   return {
     serviceType: "esm-decomp",
     programmerId: String(decompState?.programmer?.programmerId || ""),
@@ -8384,28 +8176,49 @@ function syncDecompRecordingControls(decompState) {
     return;
   }
 
-  const startButton = decompState.startRecordingButton;
-  const stopButton = decompState.stopRecordingButton;
+  const toggleButton = decompState.recordingToggleButton;
   const context = toDecompRecordingContext(decompState);
   const hasProgrammer = Boolean(context.programmerId);
 
-  if (!startButton || !stopButton) {
+  if (!toggleButton) {
     return;
   }
 
+  const icon = toggleButton.querySelector(".decomp-record-btn-icon");
+  const label = toggleButton.querySelector(".decomp-record-btn-label");
+  const setToggleState = (mode = "idle") => {
+    const isRecording = mode === "recording" || mode === "stopping";
+    const isStopping = mode === "stopping";
+
+    toggleButton.classList.toggle("is-recording", isRecording);
+    toggleButton.classList.toggle("is-stopping", isStopping);
+    toggleButton.classList.toggle("is-idle", !isRecording);
+
+    if (label) {
+      label.textContent = isRecording ? "STOP" : "ESM";
+    }
+
+    if (icon) {
+      icon.classList.remove("decomp-record-btn-icon--record", "decomp-record-btn-icon--stop");
+      icon.classList.add(isRecording ? "decomp-record-btn-icon--stop" : "decomp-record-btn-icon--record");
+    }
+  };
+
   if (state.decompStopping) {
-    startButton.disabled = true;
-    stopButton.hidden = false;
-    stopButton.disabled = true;
+    setToggleState("stopping");
+    toggleButton.disabled = true;
+    toggleButton.title = "Finalizing ESM recording...";
+    toggleButton.setAttribute("aria-label", "Finalizing ESM recording");
     setDecompRecordingStatus(decompState, "Finalizing ESM recording...");
     return;
   }
 
   const activeFlowId = getActiveDecompDebugFlowId();
   if (activeFlowId) {
-    startButton.disabled = true;
-    stopButton.hidden = false;
-    stopButton.disabled = false;
+    setToggleState("recording");
+    toggleButton.disabled = false;
+    toggleButton.title = "Stop ESM recording";
+    toggleButton.setAttribute("aria-label", "Stop ESM recording");
 
     const requestorLabel = context.requestorIds.length > 0 ? context.requestorIds.join(", ") : "all requestors";
     const mvpdLabel = context.mvpdIds.length > 0 ? context.mvpdIds.join(", ") : "all MVPDs";
@@ -8417,9 +8230,10 @@ function syncDecompRecordingControls(decompState) {
     return;
   }
 
-  startButton.disabled = !hasProgrammer;
-  stopButton.hidden = true;
-  stopButton.disabled = true;
+  setToggleState("idle");
+  toggleButton.disabled = !hasProgrammer;
+  toggleButton.title = "Record ESM";
+  toggleButton.setAttribute("aria-label", "Record ESM");
 
   if (!hasProgrammer) {
     setDecompRecordingStatus(decompState, "Select a Media Company first.");
@@ -8428,7 +8242,7 @@ function syncDecompRecordingControls(decompState) {
 
   setDecompRecordingStatus(
     decompState,
-    "Click START RECORDING to capture token + decomp ESM API activity in the UP trace."
+    "Click RECORD ESM to capture token + decomp ESM API activity in the UP trace."
   );
 }
 
@@ -8702,8 +8516,9 @@ function decompEndNetwork(decompState) {
 function decompBuildEndpointUrl(decompState, endpoint) {
   const zoomKey = clickEsmGetZoomKey(endpoint);
   const timeWindow = clickEsmComputeTimeWindow(zoomKey);
-  const requestorIds = clickEsmGetSelectedValues(decompState?.requestorSelect);
-  const mvpdIds = decompState?.mvpdSelect?.disabled ? [] : clickEsmGetSelectedValues(decompState?.mvpdSelect);
+  const selections = getGlobalRequestorMvpdSelections();
+  const requestorIds = selections.requestorIds;
+  const mvpdIds = selections.mvpdIds;
 
   const parsed = new URL(endpoint.url);
   parsed.searchParams.set("start", timeWindow.start);
@@ -8743,8 +8558,9 @@ function decompNormalizeRunRequestUrlOverride(endpointUrl, requestUrlOverride) {
 }
 
 function decompBuildRequestMetadata(decompState) {
-  const requestorIds = clickEsmGetSelectedValues(decompState?.requestorSelect);
-  const mvpds = decompState?.mvpdSelect?.disabled ? [] : clickEsmGetSelectedValues(decompState?.mvpdSelect);
+  const selections = getGlobalRequestorMvpdSelections();
+  const requestorIds = selections.requestorIds;
+  const mvpds = selections.mvpdIds;
   return {
     requestorIds,
     mvpdIds: mvpds,
@@ -8804,8 +8620,9 @@ function decompBuildCsvFileName(decompState, endpointUrl) {
     endpointPath = "endpoint";
   }
 
-  const selectedRequestorIds = clickEsmGetSelectedValues(decompState?.requestorSelect);
-  const selectedMvpds = decompState?.mvpdSelect?.disabled ? [] : clickEsmGetSelectedValues(decompState?.mvpdSelect);
+  const selections = getGlobalRequestorMvpdSelections();
+  const selectedRequestorIds = selections.requestorIds;
+  const selectedMvpds = selections.mvpdIds;
   const requestorId = sanitizeHarFileSegment(selectedRequestorIds.join("-") || "all-requestors", "all-requestors");
   const mvpdId = sanitizeHarFileSegment(selectedMvpds.join("-") || "all-mvpds", "all-mvpds");
   const endpointSegment = sanitizeHarFileSegment(endpointPath, "endpoint");
@@ -9073,69 +8890,55 @@ function decompBuildShellHtml() {
     <div class="decomp-shell">
       <div class="decomp-toolbar">
         <select class="decomp-zoom-filter" title="Zoom Level">${zoomOptions}</select>
-        <input type="text" class="decomp-search" placeholder="Search segments / columns..." />
+        <input type="text" class="decomp-search" placeholder="ESM Column search..." />
         <button type="button" class="decomp-reset-btn">RESET</button>
-        <button
-          type="button"
-          class="decomp-make-clickesm-btn decomp-toolbar-icon-btn decomp-toolbar-icon-btn--tearsheet"
-          title="Generate ESM tearsheet (clickESM)"
-          aria-label="Generate ESM tearsheet (clickESM)"
-        >
-          <span class="decomp-toolbar-icon decomp-toolbar-icon--tearsheet" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M7 3.75h7.25L19 8.5v11.75A1.75 1.75 0 0 1 17.25 22H7A1.75 1.75 0 0 1 5.25 20.25V5.5A1.75 1.75 0 0 1 7 3.75Z" />
-              <path d="M14.25 3.75V8.5H19" />
-              <path d="M9.5 12.75 10 14.25 11.5 14.75 10 15.25 9.5 16.75 9 15.25 7.5 14.75 9 14.25 9.5 12.75Z" />
-              <path d="M14 12.25 14.3 13.1 15.2 13.4 14.3 13.7 14 14.55 13.7 13.7 12.8 13.4 13.7 13.1 14 12.25Z" />
-            </svg>
-          </span>
-        </button>
+        <div class="decomp-toolbar-recording-actions decomp-recording-actions">
+          <button
+            type="button"
+            class="decomp-record-toggle-btn"
+            title="Record ESM"
+            aria-label="Record ESM"
+          >
+            <span class="decomp-record-btn-icon decomp-record-btn-icon--record" aria-hidden="true"></span>
+            <span class="decomp-record-btn-label">ESM</span>
+          </button>
+        </div>
         <span class="decomp-net-indicator" title="Loading" aria-label="Loading" hidden></span>
       </div>
       <div class="decomp-tree-panel">
         <div class="decomp-tree-head">
-          <div class="decomp-tree-title">decomp Tree</div>
-          <div class="decomp-tree-actions">
-            <button type="button" class="decomp-tree-toggle-btn" aria-expanded="false" title="Expand all nodes">[ + ]</button>
-          </div>
+          <div class="decomp-tree-title">JellyBeans</div>
         </div>
-        <div class="decomp-tree-scroll">
+        <div class="decomp-tree-scroll" hidden>
           <div class="decomp-tree-root"></div>
         </div>
       </div>
       <div class="decomp-treemap-panel">
         <div class="decomp-treemap-head">
-          <div class="decomp-treemap-title">decomp Treemap</div>
-          <div class="decomp-tree-actions">
-            <button type="button" class="decomp-treemap-toggle-btn" aria-expanded="true" title="Hide treemap">Hide</button>
-          </div>
+          <div class="decomp-treemap-title">TreeMap</div>
         </div>
-        <div class="decomp-treemap-scroll">
+        <div class="decomp-treemap-scroll" hidden>
           <div class="decomp-treemap-root"></div>
         </div>
       </div>
-      <div class="decomp-recording-tool">
-        <p class="decomp-recording-status">Click START RECORDING to capture decomp ESM traffic in the UP trace.</p>
-        <div class="decomp-recording-actions">
-          <button type="button" class="decomp-start-record-btn">START RECORDING</button>
-          <button type="button" class="decomp-stop-record-btn" disabled hidden>STOP</button>
-        </div>
-      </div>
       <div class="decomp-footer">
-        <select
-          class="decomp-requestor-select click-esm-requestor-select"
-          multiple
-          size="1"
-          title="Filter by selected requestor-id(s)"
-        ></select>
-        <select
-          class="decomp-mvpd-select click-esm-mvpd-select"
-          multiple
-          size="1"
-          title="Filter by selected MVPD(s)"
-          disabled
-          hidden
-        ></select>
+        <div class="decomp-footer-actions">
+          <button
+            type="button"
+            class="decomp-make-clickesm-btn decomp-toolbar-icon-btn decomp-toolbar-icon-btn--tearsheet"
+            title="Generate ESM tearsheet (clickESM)"
+            aria-label="Generate ESM tearsheet (clickESM)"
+          >
+            <span class="decomp-toolbar-icon decomp-toolbar-icon--tearsheet" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M7 3.75h7.25L19 8.5v11.75A1.75 1.75 0 0 1 17.25 22H7A1.75 1.75 0 0 1 5.25 20.25V5.5A1.75 1.75 0 0 1 7 3.75Z" />
+                <path d="M14.25 3.75V8.5H19" />
+                <path d="M9.5 12.75 10 14.25 11.5 14.75 10 15.25 9.5 16.75 9 15.25 7.5 14.75 9 14.25 9.5 12.75Z" />
+                <path d="M14 12.25 14.3 13.1 15.2 13.4 14.3 13.7 14 14.55 13.7 13.7 12.8 13.4 13.7 13.1 14 12.25Z" />
+              </svg>
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   `;
@@ -9156,10 +8959,50 @@ function decompParsePathParts(rawValue) {
   }
 }
 
-function decompRenderLabelChips(labelElement, pathParts, term = "", highlightPattern = null) {
+function decompPathPartsToKey(pathParts) {
+  if (!Array.isArray(pathParts)) {
+    return "";
+  }
+  return decompNormalizeEndpointSegments(pathParts)
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join("/");
+}
+
+function decompResolveEndpointByPathParts(decompState, pathParts) {
+  const normalizedParts = decompNormalizeEndpointSegments(pathParts);
+  if (!normalizedParts.length) {
+    return null;
+  }
+  const map = decompState?.endpointIndexByPathKey instanceof Map ? decompState.endpointIndexByPathKey : null;
+  const catalog = Array.isArray(decompState?.catalog) ? decompState.catalog : [];
+
+  for (let size = normalizedParts.length; size >= 1; size -= 1) {
+    const candidateParts = normalizedParts.slice(0, size);
+    const candidateKey = decompPathPartsToKey(candidateParts);
+    if (!candidateKey) {
+      continue;
+    }
+    const mappedIndex = Number(map ? map.get(candidateKey) : -1);
+    if (Number.isInteger(mappedIndex) && mappedIndex >= 0) {
+      return catalog[mappedIndex] || null;
+    }
+    const fallbackIndex = catalog.findIndex((entry) => decompPathPartsToKey(entry?.segs) === candidateKey);
+    if (fallbackIndex >= 0) {
+      if (map) {
+        map.set(candidateKey, fallbackIndex);
+      }
+      return catalog[fallbackIndex] || null;
+    }
+  }
+  return null;
+}
+
+function decompRenderLabelChips(labelElement, pathParts, term = "", highlightPattern = null, options = {}) {
   if (!labelElement) {
     return;
   }
+  const onSegmentClick = typeof options.onSegmentClick === "function" ? options.onSegmentClick : null;
   const normalizedParts = Array.isArray(pathParts)
     ? pathParts.map((value) => String(value || "").trim()).filter(Boolean)
     : [];
@@ -9169,6 +9012,7 @@ function decompRenderLabelChips(labelElement, pathParts, term = "", highlightPat
     const chip = document.createElement("span");
     chip.className = "decomp-chip";
     chip.dataset.raw = segment;
+    chip.dataset.segmentIndex = String(index);
     const segHay = segment.toLowerCase().replace(/\s+/g, "");
     const showHighlight = Boolean(normalizedTerm && highlightPattern && segHay.includes(normalizedTerm));
     if (showHighlight) {
@@ -9177,15 +9021,31 @@ function decompRenderLabelChips(labelElement, pathParts, term = "", highlightPat
       chip.textContent = segment;
     }
     decompApplyChipColor(chip, segment);
-    labelElement.appendChild(chip);
-
-    if (index < normalizedParts.length - 1) {
-      const separator = document.createElement("span");
-      separator.className = "decomp-badge";
-      separator.textContent = "/";
-      separator.title = "Compressed path";
-      labelElement.appendChild(separator);
+    if (onSegmentClick) {
+      const segmentPathParts = normalizedParts.slice(0, index + 1);
+      const runSegment = () => {
+        onSegmentClick(segmentPathParts, segment, index);
+      };
+      chip.classList.add("decomp-chip-clickable");
+      chip.tabIndex = 0;
+      chip.setAttribute("role", "button");
+      chip.setAttribute("aria-label", `Open ESM table for ${segmentPathParts.join(" / ")}`);
+      chip.title = `Load ${segmentPathParts.join("/")}`;
+      chip.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        runSegment();
+      });
+      chip.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        runSegment();
+      });
     }
+    labelElement.appendChild(chip);
   });
 }
 
@@ -9214,12 +9074,11 @@ async function decompMakeClickEsmFromUi(decompState, requestToken, source = "sid
     triggerButton.disabled = true;
   }
   try {
-    const context = resolveClickEsmDownloadContext(decompState);
+    const context = await resolveClickEsmDownloadContext(decompState);
     if (!context) {
       throw new Error("Select a media company with ESM access to generate clickESM.");
     }
-    const result = await makeClickEsmDownload(context, requestToken, { source });
-    setStatus(`Downloaded ${result.fileName} for ${result.programmerLabel}.`, "success");
+    await makeClickEsmDownload(context, requestToken, { source });
   } catch (error) {
     setStatus(`Unable to generate clickESM: ${error instanceof Error ? error.message : String(error)}`, "error");
   } finally {
@@ -9325,106 +9184,28 @@ function decompRenderTreeNode(decompState, node, parentUl, requestToken, parentP
   parentUl.appendChild(item);
 }
 
-function decompIsTreeFullyExpanded(decompState) {
-  const root = decompState?.treeRootElement;
-  if (!root) {
-    return false;
+function decompSetTreeCollapsed(decompState, shouldCollapse) {
+  const scrollElement = decompState?.treeScrollElement;
+  const headElement = decompState?.treeHeadElement;
+  if (!scrollElement) {
+    return;
   }
-
-  const nestedLists = [...root.querySelectorAll("li > ul")].filter((nested) => {
-    const parentItem = nested.parentElement;
-    if (!(parentItem instanceof HTMLElement)) {
-      return false;
-    }
-    return parentItem.style.display !== "none";
-  });
-
-  if (nestedLists.length === 0) {
-    return false;
+  const collapsed = Boolean(shouldCollapse);
+  scrollElement.hidden = collapsed;
+  if (headElement) {
+    headElement.setAttribute("aria-expanded", collapsed ? "false" : "true");
   }
-
-  return nestedLists.every((nested) => nested.style.display !== "none");
 }
 
 function decompSyncTreeToggleButton(decompState) {
-  const button = decompState?.treeToggleButton;
-  if (!button) {
-    return;
-  }
-
+  const scrollElement = decompState?.treeScrollElement;
   const root = decompState?.treeRootElement;
-  if (!root) {
-    button.textContent = "[ + ]";
-    button.title = "Expand all nodes";
-    button.setAttribute("aria-label", "Expand all nodes");
-    button.setAttribute("aria-expanded", "false");
-    button.dataset.nextState = "expand";
-    button.disabled = true;
+  if (!scrollElement || !root) {
     return;
   }
-
-  const hasExpandableNodes = root.querySelector("li > ul") != null;
-  if (!hasExpandableNodes) {
-    button.textContent = "[ + ]";
-    button.title = "No expandable nodes";
-    button.setAttribute("aria-label", "No expandable nodes");
-    button.setAttribute("aria-expanded", "false");
-    button.dataset.nextState = "expand";
-    button.disabled = true;
-    return;
-  }
-
-  const expanded = decompIsTreeFullyExpanded(decompState);
-  const nextState = expanded ? "collapse" : "expand";
-  const label = expanded ? "[ - ]" : "[ + ]";
-  const title = expanded ? "Collapse all nodes" : "Expand all nodes";
-
-  button.textContent = label;
-  button.title = title;
-  button.setAttribute("aria-label", title);
-  button.setAttribute("aria-expanded", expanded ? "true" : "false");
-  button.dataset.nextState = nextState;
-  button.disabled = false;
-}
-
-function decompExpandCollapseAll(decompState, shouldExpand) {
-  const root = decompState?.treeRootElement;
-  if (!root) {
-    return;
-  }
-  root.querySelectorAll("li > ul").forEach((nested) => {
-    nested.style.display = shouldExpand ? "" : "none";
-  });
-  root.querySelectorAll(".decomp-twisty").forEach((twisty) => {
-    if (!twisty.classList.contains("hidden")) {
-      twisty.textContent = shouldExpand ? "−" : "+";
-    }
-  });
-  decompSyncTreeToggleButton(decompState);
-}
-
-function decompExpandTrunk(decompState) {
-  const root = decompState?.treeRootElement;
-  if (!root) {
-    return;
-  }
-  let current = root.querySelector("ul.decomp-root > li");
-  while (current) {
-    const childUl = current.querySelector(":scope > ul");
-    if (!childUl) {
-      break;
-    }
-    childUl.style.display = "";
-    const twisty = current.querySelector(":scope .decomp-twisty");
-    if (twisty && !twisty.classList.contains("hidden")) {
-      twisty.textContent = "−";
-    }
-
-    const children = [...childUl.children];
-    if (children.length !== 1) {
-      break;
-    }
-    current = children[0];
+  const hasRows = root.querySelector("ul.decomp-root > li[data-endpoint-index]") != null;
+  if (!hasRows) {
+    decompSetTreeCollapsed(decompState, true);
   }
 }
 
@@ -9449,7 +9230,11 @@ function decompBuildTreemapModel(catalog, endpointIndexes) {
       return;
     }
     let cursor = root;
-    endpoint.segs.forEach((rawSegment) => {
+    const segments = decompNormalizeEndpointSegments(endpoint?.segs);
+    if (segments.length === 0) {
+      return;
+    }
+    segments.forEach((rawSegment) => {
       const segment = String(rawSegment || "").trim();
       if (!segment) {
         return;
@@ -9490,8 +9275,15 @@ function decompFlattenTreemapNodes(model) {
     }
     node.children.forEach((child) => {
       const pathParts = Array.isArray(child.pathParts)
-        ? child.pathParts.slice().map((value) => String(value || "").trim()).filter(Boolean)
+        ? child.pathParts
+            .slice()
+            .map((value) => String(value || "").trim())
+            .filter((value) => value && value.toLowerCase() !== "media-company")
         : [String(child.key || "").trim()].filter(Boolean);
+      if (pathParts.length === 0) {
+        walk(child);
+        return;
+      }
       output.push({
         key: String(child.key || "").trim(),
         pathParts,
@@ -9549,8 +9341,9 @@ function decompCreateTreemapTile(decompState, nodeEntry, requestToken) {
   const parent = document.createElement("div");
   parent.className = "decomp-map-parent";
   const parentParts = Array.isArray(nodeEntry?.pathParts) ? nodeEntry.pathParts.slice(0, -1) : [];
-  parent.textContent = parentParts.length > 0 ? parentParts.join(" / ") : "media-company";
+  parent.textContent = parentParts.join(" / ");
   parent.title = parentParts.join("/");
+  parent.hidden = parentParts.length === 0;
   content.appendChild(parent);
 
   const meta = document.createElement("div");
@@ -9661,23 +9454,22 @@ function decompRenderTreemap(decompState, endpointIndexes, options = {}) {
 }
 
 function decompSetTreemapCollapsed(decompState, shouldCollapse) {
-  const toggleButton = decompState?.treemapToggleButton;
   const scrollElement = decompState?.treemapScrollElement;
-  if (!toggleButton || !scrollElement) {
+  const headElement = decompState?.treemapHeadElement;
+  if (!scrollElement) {
     return;
   }
   const collapsed = Boolean(shouldCollapse);
   scrollElement.hidden = collapsed;
-  toggleButton.textContent = collapsed ? "Show" : "Hide";
-  toggleButton.title = collapsed ? "Show treemap" : "Hide treemap";
-  toggleButton.setAttribute("aria-label", collapsed ? "Show treemap" : "Hide treemap");
-  toggleButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  if (headElement) {
+    headElement.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  }
 }
 
 function decompApplyTreeFilters(decompState, options = {}) {
   const root = decompState?.treeRootElement;
   if (!root) {
-    return;
+    return { visibleEndpointCount: 0 };
   }
 
   const zoomFilter = String(options.zoomFilter ?? decompState.zoomFilterSelect?.value ?? "")
@@ -9688,87 +9480,45 @@ function decompApplyTreeFilters(decompState, options = {}) {
   const filteredMode = Boolean(searchMode || zoomFilter);
   const doHighlight = Boolean(options.highlight && term);
   const highlightPattern = doHighlight ? new RegExp(clickEsmEscapeRegExp(term), "gi") : null;
-  let visibleEndpoints = 0;
   const visibleEndpointIndexes = [];
   root.classList.toggle("decomp-search-mode", searchMode);
 
-  const walk = (item) => {
-    let anyVisibleChild = false;
-    const childList = item.querySelector(":scope > ul");
-    if (childList) {
-      [...childList.children].forEach((childItem) => {
-        if (walk(childItem)) {
-          anyVisibleChild = true;
-        }
-      });
-    }
+  const endpointItems = root.querySelectorAll("ul.decomp-root > li[data-endpoint-index]");
+  endpointItems.forEach((item) => {
+    const endpointZoom = String(item.dataset.zoomKey || "").trim().toUpperCase();
+    const haystack = String(item.dataset.hay || "").toLowerCase();
+    const zoomPass = !zoomFilter || endpointZoom === zoomFilter;
+    const termPass = !term || haystack.includes(term);
+    const isVisible = zoomPass && termPass;
 
-    const isEndpoint = item.hasAttribute("data-endpoint-index");
-    let selfVisible = false;
+    item.style.display = isVisible ? "" : "none";
+    item.classList.remove("decomp-search-parent");
+
+    if (isVisible) {
+      const endpointIndex = Number(item.dataset.endpointIndex || -1);
+      if (Number.isInteger(endpointIndex) && endpointIndex >= 0) {
+        visibleEndpointIndexes.push(endpointIndex);
+      }
+    }
 
     const label = item.querySelector(":scope > .decomp-node > .decomp-label");
-
-    if (isEndpoint) {
-      const endpointZoom = String(item.dataset.zoomKey || "").trim().toUpperCase();
-      const haystack = String(item.dataset.hay || "").toLowerCase();
-      const zoomPass = !zoomFilter || endpointZoom === zoomFilter;
-      const termPass = !term || haystack.includes(term);
-      selfVisible = zoomPass && termPass;
-      if (selfVisible) {
-        visibleEndpoints += 1;
-        const endpointIndex = Number(item.dataset.endpointIndex || -1);
-        if (Number.isInteger(endpointIndex) && endpointIndex >= 0) {
-          visibleEndpointIndexes.push(endpointIndex);
-        }
-      }
-
-      if (label) {
-        const partsForRender = searchMode
-          ? decompParsePathParts(item.dataset.pathParts)
-          : decompParsePathParts(item.dataset.nodeParts);
-        decompRenderLabelChips(label, partsForRender, doHighlight ? term : "", highlightPattern);
-      }
-
-      const runButton = item.querySelector(":scope > .decomp-node > .decomp-run");
-      if (runButton) {
-        runButton.style.display = selfVisible ? "" : "none";
-      }
-
-      if (label) {
-        const pathHay = String(item.dataset.pathHay || "");
-        const segMatch = Boolean(term && pathHay.includes(term));
-        const colOnlyMatch = Boolean(term && termPass && !segMatch);
-        label.classList.toggle("decomp-col-match", colOnlyMatch);
-      }
-    } else if (label && !searchMode) {
-      decompRenderLabelChips(label, decompParsePathParts(item.dataset.nodeParts));
-      label.classList.remove("decomp-col-match");
+    if (label) {
+      const partsForRender = decompParsePathParts(item.dataset.pathParts);
+      decompRenderLabelChips(label, partsForRender, doHighlight ? term : "", highlightPattern, {
+        onSegmentClick: (segmentPathParts) => {
+          const endpoint = decompResolveEndpointByPathParts(decompState, segmentPathParts);
+          if (!endpoint) {
+            return;
+          }
+          void decompRunEndpointFromUi(decompState, endpoint, options.requestToken || decompState?.requestToken || 0, "tree");
+        },
+      });
+      const pathHay = String(item.dataset.pathHay || "");
+      const segMatch = Boolean(term && pathHay.includes(term));
+      const colOnlyMatch = Boolean(term && termPass && !segMatch);
+      label.classList.toggle("decomp-col-match", colOnlyMatch);
     }
-
-    // Endpoint nodes can also be branch parents; keep the branch visible when descendants match.
-    const shouldShow = selfVisible || anyVisibleChild;
-    item.style.display = shouldShow ? "" : "none";
-    item.classList.toggle("decomp-search-parent", searchMode && !selfVisible && anyVisibleChild);
-
-    if (searchMode && shouldShow && anyVisibleChild && childList) {
-      childList.style.display = "";
-      const twisty = item.querySelector(":scope > .decomp-node > .decomp-twisty");
-      if (twisty && !twisty.classList.contains("hidden")) {
-        twisty.textContent = "−";
-      }
-    } else if (!searchMode) {
-      item.classList.remove("decomp-search-parent");
-    }
-
-    return shouldShow;
-  };
-
-  const topList = root.querySelector("ul.decomp-root");
-  if (topList) {
-    [...topList.children].forEach((topItem) => {
-      walk(topItem);
-    });
-  }
+  });
 
   decompRenderTreemap(decompState, visibleEndpointIndexes, {
     zoomFilter,
@@ -9776,6 +9526,7 @@ function decompApplyTreeFilters(decompState, options = {}) {
     requestToken: options.requestToken || decompState?.requestToken || state.premiumPanelRequestToken || 0,
   });
   decompSyncTreeToggleButton(decompState);
+  return { visibleEndpointCount: visibleEndpointIndexes.length };
 }
 
 function decompBuildTree(decompState, requestToken) {
@@ -9784,26 +9535,85 @@ function decompBuildTree(decompState, requestToken) {
     return;
   }
 
-  const trie = decompBuildTrie(decompState.catalog);
-  const model = decompCompressTrie(trie);
-  decompCountEndpoints(model);
-  decompState.treeModel = model;
+  const catalog = Array.isArray(decompState.catalog) ? decompState.catalog : [];
+  const sortedEntries = catalog
+    .map((endpoint, endpointIndex) => {
+      const pathParts = decompNormalizeEndpointSegments(endpoint?.segs);
+      return {
+        endpoint,
+        endpointIndex,
+        pathParts,
+        searchHay: `${pathParts.join(" ")} ${Array.isArray(endpoint?.columns) ? endpoint.columns.join(" ") : ""}`
+          .toLowerCase()
+          .replace(/\s+/g, ""),
+      };
+    })
+    .filter((entry) => Array.isArray(entry.pathParts) && entry.pathParts.length > 0)
+    .sort((left, right) => {
+      const lengthDelta = left.pathParts.length - right.pathParts.length;
+      if (lengthDelta !== 0) {
+        return lengthDelta;
+      }
+      const pathDelta = decompComparePathParts(left.pathParts, right.pathParts);
+      if (pathDelta !== 0) {
+        return pathDelta;
+      }
+      return String(left.endpoint?.url || "").localeCompare(String(right.endpoint?.url || ""), undefined, {
+        sensitivity: "base",
+      });
+    });
+
+  decompState.endpointIndexByPathKey = new Map();
+  sortedEntries.forEach(({ endpointIndex, pathParts }) => {
+    const key = decompPathPartsToKey(pathParts);
+    if (!key || decompState.endpointIndexByPathKey.has(key)) {
+      return;
+    }
+    decompState.endpointIndexByPathKey.set(key, endpointIndex);
+  });
 
   treeRoot.innerHTML = "";
   const rootList = document.createElement("ul");
   rootList.className = "decomp-root";
-  const hasSyntheticRootParts = Array.isArray(model.parts) && model.parts.length > 0;
 
-  if (hasSyntheticRootParts || model.endpointIndex != null) {
-    decompRenderTreeNode(decompState, model, rootList, requestToken, []);
-  } else {
-    model.children.forEach((childNode) => {
-      decompRenderTreeNode(decompState, childNode, rootList, requestToken, []);
+  sortedEntries.forEach(({ endpoint, endpointIndex, pathParts, searchHay }) => {
+    const item = document.createElement("li");
+    item.dataset.endpointIndex = String(endpointIndex);
+    item.dataset.zoomKey = String(endpoint?.zoomKey || "");
+    item.dataset.hay = String(searchHay || "");
+    item.dataset.href = String(endpoint?.url || "");
+    item.dataset.nodeParts = JSON.stringify(pathParts);
+    item.dataset.pathParts = JSON.stringify(pathParts);
+    item.dataset.pathHay = pathParts.join(" ").toLowerCase().replace(/\s+/g, "");
+
+    const nodeRow = document.createElement("div");
+    nodeRow.className = "decomp-node";
+
+    const label = document.createElement("span");
+    label.className = "decomp-label";
+    label.title = String(endpoint?.url || "");
+    decompRenderLabelChips(label, pathParts, "", null, {
+      onSegmentClick: (segmentPathParts) => {
+        const segmentEndpoint = decompResolveEndpointByPathParts(decompState, segmentPathParts);
+        if (!segmentEndpoint) {
+          return;
+        }
+        void decompRunEndpointFromUi(decompState, segmentEndpoint, requestToken, "tree");
+      },
     });
-  }
+    label.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void decompRunEndpointFromUi(decompState, endpoint, requestToken, "tree");
+    });
+    nodeRow.appendChild(label);
+
+    item.appendChild(nodeRow);
+    rootList.appendChild(item);
+  });
 
   treeRoot.appendChild(rootList);
-  decompExpandTrunk(decompState);
+  decompState.treeModel = null;
   decompApplyTreeFilters(decompState, { highlight: false });
 }
 
@@ -9812,27 +9622,48 @@ function wireDecompInteractions(decompState, requestToken) {
     return;
   }
 
+  const toggleTreePanel = () => {
+    const expanded = String(
+      decompState.treeHeadElement?.getAttribute("aria-expanded") || (decompState.treeScrollElement?.hidden ? "false" : "true")
+    ) !== "false";
+    decompSetTreeCollapsed(decompState, expanded);
+  };
+
+  const toggleTreemapPanel = () => {
+    const expanded = String(
+      decompState.treemapHeadElement?.getAttribute("aria-expanded") || (decompState.treemapScrollElement?.hidden ? "false" : "true")
+    ) !== "false";
+    decompSetTreemapCollapsed(decompState, expanded);
+  };
+
   const applyDecompSearchFilters = ({ highlight = false, normalizeInput = false } = {}) => {
     const normalizedTerm = clickEsmNormalizeSearchTerm(decompState.searchInput?.value || "");
+    const normalizedZoomFilter = String(decompState.zoomFilterSelect?.value || "").trim().toUpperCase();
     if (decompState.searchInput && normalizeInput) {
       decompState.searchInput.value = normalizedTerm;
     }
-    decompApplyTreeFilters(decompState, {
+    const filterResult = decompApplyTreeFilters(decompState, {
+      zoomFilter: normalizedZoomFilter,
       term: normalizedTerm,
       highlight: Boolean(highlight && normalizedTerm),
     });
+    // Keep JellyBeans visibly open whenever ZM/search controls are actively filtering.
+    if ((normalizedTerm || normalizedZoomFilter) && Number(filterResult?.visibleEndpointCount || 0) >= 0) {
+      decompSetTreeCollapsed(decompState, false);
+    }
   };
 
-  decompState.startRecordingButton?.addEventListener("click", (event) => {
+  decompState.recordingToggleButton?.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (state.decompStopping) {
+      return;
+    }
+    if (getActiveDecompDebugFlowId()) {
+      void stopDecompEsmRecording(decompState);
+      return;
+    }
     void startDecompEsmRecording(decompState, requestToken);
-  });
-
-  decompState.stopRecordingButton?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    void stopDecompEsmRecording(decompState);
   });
 
   decompState.resetButton?.addEventListener("click", () => {
@@ -9872,30 +9703,30 @@ function wireDecompInteractions(decompState, requestToken) {
     applyDecompSearchFilters({ highlight: true, normalizeInput: true });
   });
 
-  decompState.treeToggleButton?.addEventListener("click", () => {
-    const nextState = String(decompState.treeToggleButton?.dataset.nextState || "expand").trim().toLowerCase();
-    const shouldExpand = nextState !== "collapse";
-    decompExpandCollapseAll(decompState, shouldExpand);
+  decompState.treeHeadElement?.addEventListener("click", () => {
+    toggleTreePanel();
   });
 
-  decompState.treemapToggleButton?.addEventListener("click", () => {
-    const expanded = String(decompState.treemapToggleButton?.getAttribute("aria-expanded") || "true") !== "false";
-    decompSetTreemapCollapsed(decompState, expanded);
+  decompState.treemapHeadElement?.addEventListener("click", () => {
+    toggleTreemapPanel();
   });
 
-  decompState.requestorSelect?.addEventListener("change", () => {
-    clickEsmHandleRequestorChange(decompState, requestToken);
-    decompBroadcastControllerState(decompState);
-    syncDecompRecordingControls(decompState);
+  decompState.treeHeadElement?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    toggleTreePanel();
   });
 
-  decompState.mvpdSelect?.addEventListener("change", () => {
-    clickEsmRememberMvpdSelection(decompState);
-    decompBroadcastControllerState(decompState);
-    syncDecompRecordingControls(decompState);
+  decompState.treemapHeadElement?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    toggleTreemapPanel();
   });
 
-  clickEsmEnableMvpdHoverHint(decompState);
 }
 
 function getActiveDecompState() {
@@ -9907,17 +9738,6 @@ function getActiveDecompState() {
     }
   }
   return null;
-}
-
-function getInteractiveEsmStates() {
-  const states = [];
-  document.querySelectorAll(".premium-service-section.service-esm-decomp").forEach((section) => {
-    const decompState = section?.__underparDecompState || null;
-    if (decompState?.section?.isConnected) {
-      states.push(decompState);
-    }
-  });
-  return states;
 }
 
 async function handleDecompWorkspaceAction(message, sender = null) {
@@ -9967,7 +9787,7 @@ async function handleDecompWorkspaceAction(message, sender = null) {
   }
 
   if (action === "make-clickesm") {
-    const context = resolveClickEsmDownloadContext(decompState);
+    const context = await resolveClickEsmDownloadContext(decompState);
     if (!context) {
       return { ok: false, error: "Select a media company with ESM access to generate clickESM." };
     }
@@ -9981,7 +9801,7 @@ async function handleDecompWorkspaceAction(message, sender = null) {
   }
 
   if (action === "resolve-clickesmws-auth") {
-    const context = resolveClickEsmDownloadContext(decompState);
+    const context = await resolveClickEsmDownloadContext(decompState);
     if (!context) {
       return { ok: false, error: "Select a media company with ESM access to generate clickESM workspace tearsheet." };
     }
@@ -10051,6 +9871,8 @@ async function handleDecompWorkspaceAction(message, sender = null) {
 
   if (action === "rerun-all") {
     const cards = Array.isArray(message?.cards) ? message.cards : [];
+    const reason = String(message?.reason || "").trim().toLowerCase();
+    const requestSourceForRerun = reason === "programmer-switch" ? "workspace-programmer-switch" : "workspace";
     emitDecompDebugEvent(activeFlowId, {
       phase: "workspace-action",
       action: "rerun-all",
@@ -10059,6 +9881,7 @@ async function handleDecompWorkspaceAction(message, sender = null) {
     });
     void decompSendWorkspaceMessage("batch-start", {
       total: cards.length,
+      reason,
       startedAt: Date.now(),
     }, {
       targetWindowId: senderWindowId || Number(decompState.controllerWindowId || 0),
@@ -10070,11 +9893,12 @@ async function handleDecompWorkspaceAction(message, sender = null) {
       }
       await decompRunEndpointToWorkspace(decompState, endpoint, String(card?.cardId || generateRequestId()), requestToken, {
         emitStart: true,
-        requestSource: "workspace",
+        requestSource: requestSourceForRerun,
       });
     }
     void decompSendWorkspaceMessage("batch-end", {
       total: cards.length,
+      reason,
       completedAt: Date.now(),
     }, {
       targetWindowId: senderWindowId || Number(decompState.controllerWindowId || 0),
@@ -10178,14 +10002,10 @@ async function loadDecompService(programmer, appInfo, section, contentElement, r
     return;
   }
   if (!programmer?.programmerId || !appInfo?.guid) {
-    contentElement.innerHTML = '<div class="service-error">Missing media company or ESM application details.</div>';
+    contentElement.innerHTML = "";
     return;
   }
 
-  const existingDecompState = section?.__underparDecompState || null;
-  if (existingDecompState?.requestorApplyTimer) {
-    clearTimeout(existingDecompState.requestorApplyTimer);
-  }
   section.__underparDecompState = null;
   if (
     state.decompRecordingActive &&
@@ -10205,7 +10025,7 @@ async function loadDecompService(programmer, appInfo, section, contentElement, r
       return;
     }
     if (!Array.isArray(endpoints) || endpoints.length === 0) {
-      contentElement.innerHTML = '<div class="service-error">No ESM endpoints were found for decomp.</div>';
+      contentElement.innerHTML = "";
       return;
     }
 
@@ -10232,44 +10052,41 @@ async function loadDecompService(programmer, appInfo, section, contentElement, r
       endpointByUrl,
       treeModel: null,
       netInFlight: 0,
-      requestorApplyTimer: 0,
-      pendingRequestorIds: [],
-      lastKnownSelectedMvpdIds: new Set(),
       requestToken,
       zoomFilterSelect: contentElement.querySelector(".decomp-zoom-filter"),
       searchInput: contentElement.querySelector(".decomp-search"),
       resetButton: contentElement.querySelector(".decomp-reset-btn"),
       makeClickEsmButton: contentElement.querySelector(".decomp-make-clickesm-btn"),
-      treeToggleButton: contentElement.querySelector(".decomp-tree-toggle-btn"),
+      treeHeadElement: contentElement.querySelector(".decomp-tree-head"),
+      treeScrollElement: contentElement.querySelector(".decomp-tree-scroll"),
       treeRootElement: contentElement.querySelector(".decomp-tree-root"),
-      treemapToggleButton: contentElement.querySelector(".decomp-treemap-toggle-btn"),
+      treemapHeadElement: contentElement.querySelector(".decomp-treemap-head"),
       treemapRootElement: contentElement.querySelector(".decomp-treemap-root"),
       treemapScrollElement: contentElement.querySelector(".decomp-treemap-scroll"),
-      requestorSelect: contentElement.querySelector(".decomp-requestor-select"),
-      mvpdSelect: contentElement.querySelector(".decomp-mvpd-select"),
       recordingStatusElement: contentElement.querySelector(".decomp-recording-status"),
-      startRecordingButton: contentElement.querySelector(".decomp-start-record-btn"),
-      stopRecordingButton: contentElement.querySelector(".decomp-stop-record-btn"),
+      recordingToggleButton: contentElement.querySelector(".decomp-record-toggle-btn"),
     };
+
+    if (decompState.treeHeadElement) {
+      decompState.treeHeadElement.setAttribute("role", "button");
+      decompState.treeHeadElement.setAttribute("tabindex", "0");
+      decompState.treeHeadElement.setAttribute("aria-expanded", "false");
+      decompState.treeHeadElement.setAttribute("aria-label", "Toggle JellyBeans");
+    }
+
+    if (decompState.treemapHeadElement) {
+      decompState.treemapHeadElement.setAttribute("role", "button");
+      decompState.treemapHeadElement.setAttribute("tabindex", "0");
+      decompState.treemapHeadElement.setAttribute("aria-expanded", "false");
+      decompState.treemapHeadElement.setAttribute("aria-label", "Toggle TreeMap");
+    }
 
     section.__underparDecompState = decompState;
     wireDecompInteractions(decompState, requestToken);
-    decompSetTreemapCollapsed(decompState, false);
+    decompSetTreeCollapsed(decompState, true);
+    decompSetTreemapCollapsed(decompState, true);
     syncDecompRecordingControls(decompState);
     decompBuildTree(decompState, requestToken);
-    clickEsmApplySharedRequestorOptions(decompState, requestToken, {
-      selectedRequestorId: state.selectedRequestorId,
-      emptyLabel: "-- Select a Media Company first --",
-    });
-
-    if (decompState.mvpdSelect && state.selectedMvpdId) {
-      [...decompState.mvpdSelect.options].forEach((option) => {
-        if (option.value === state.selectedMvpdId) {
-          option.selected = true;
-        }
-      });
-      clickEsmRememberMvpdSelection(decompState);
-    }
     syncDecompRecordingControls(decompState);
 
     ensureDecompRuntimeListener();
@@ -12516,12 +12333,13 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
   return section;
 }
 
-function renderPremiumServicesLoading(programmer) {
+function renderPremiumServicesLoading(programmer, options = {}) {
   if (!els.premiumServicesContainer) {
     return;
   }
   clearPremiumServiceAutoRefreshTimers();
-  decompBroadcastSelectedControllerState(programmer, null);
+  const controllerReason = String(options?.controllerReason || "").trim();
+  decompBroadcastSelectedControllerState(programmer, null, 0, { controllerReason });
   cmBroadcastSelectedControllerState(programmer, null);
 
   const label = programmer?.programmerName
@@ -12530,12 +12348,13 @@ function renderPremiumServicesLoading(programmer) {
   els.premiumServicesContainer.innerHTML = `<p class="metadata-empty">${escapeHtml(label)}</p>`;
 }
 
-function renderPremiumServicesError(error) {
+function renderPremiumServicesError(error, options = {}) {
   if (!els.premiumServicesContainer) {
     return;
   }
   clearPremiumServiceAutoRefreshTimers();
-  decompBroadcastSelectedControllerState(resolveSelectedProgrammer(), null);
+  const controllerReason = String(options?.controllerReason || "").trim();
+  decompBroadcastSelectedControllerState(resolveSelectedProgrammer(), null, 0, { controllerReason });
   cmBroadcastSelectedControllerState(resolveSelectedProgrammer(), null);
   const reason = error instanceof Error ? error.message : String(error);
   els.premiumServicesContainer.innerHTML = `<p class="metadata-empty service-error">${escapeHtml(reason)}</p>`;
@@ -12550,25 +12369,26 @@ function shouldShowCmService(cmService) {
   return matchedTenants.length > 0;
 }
 
-function renderPremiumServices(services, programmer = null) {
+function renderPremiumServices(services, programmer = null, options = {}) {
   if (!els.premiumServicesContainer) {
     return;
   }
   clearPremiumServiceAutoRefreshTimers();
+  const controllerReason = String(options?.controllerReason || "").trim();
 
   if (!services) {
-    decompBroadcastSelectedControllerState(programmer, null);
+    decompBroadcastSelectedControllerState(programmer, null, 0, { controllerReason });
     cmBroadcastSelectedControllerState(programmer, null);
     els.premiumServicesContainer.innerHTML =
       '<p class="metadata-empty">No premium scoped applications loaded yet.</p>';
     return;
   }
-  decompBroadcastSelectedControllerState(programmer, services);
+  decompBroadcastSelectedControllerState(programmer, services, 0, { controllerReason });
   cmBroadcastSelectedControllerState(programmer, services);
 
   const availableKeys = PREMIUM_SERVICE_DISPLAY_ORDER.filter((serviceKey) => {
     if (serviceKey === "decompTree") {
-      return Boolean(services?.esm);
+      return hasEsmScopedApp(services);
     }
     if (serviceKey === "cm") {
       return shouldShowCmService(services?.cm);
@@ -13190,9 +13010,8 @@ async function fetchValidateTokenSessionSnapshot(accessToken = "") {
 
     for (const attempt of attempts) {
       try {
-        const response = await fetch(endpoint, {
+        const response = await relayImsFetch(endpoint, {
           method: "POST",
-          mode: "cors",
           credentials: attempt.credentials,
           headers: {
             Accept: "application/json, text/plain, */*",
@@ -13949,9 +13768,8 @@ async function fetchProfile(accessToken) {
 
     for (const attempt of attempts) {
       try {
-        const response = await fetch(endpoint.url, {
+        const response = await relayImsFetch(endpoint.url, {
           method: "GET",
-          mode: "cors",
           credentials: attempt.credentials,
           headers: buildImsProfileHeaders(accessToken, endpoint.clientId),
         });
@@ -14026,16 +13844,12 @@ async function fetchImsSessionProfile(accessToken = "") {
   const imsBase = IMS_BASE_URL;
   const endpoints = [
     `${IMS_PROFILE_URL}?client_id=AdobePass1`,
-    `${IMS_PROFILE_URL}?client_id=exc_app`,
     `${IMS_PROFILE_URL}?client_id=${encodeURIComponent(IMS_CLIENT_ID)}`,
     IMS_PROFILE_URL,
     `${imsBase}/ims/userinfo/v2`,
-    `${imsBase}/ims/check/v6/status?client_id=exc_app`,
     `${imsBase}/ims/check/v6/status?client_id=AdobePass1`,
     `${imsBase}/ims/check/v6/status?client_id=${encodeURIComponent(IMS_CLIENT_ID)}`,
-    `${imsBase}/ims/check/v5/status?client_id=exc_app&locale=en_US`,
     `${imsBase}/ims/check/v5/status?client_id=AdobePass1&locale=en_US`,
-    `${imsBase}/ims/check/status?client_id=exc_app`,
     `${imsBase}/ims/check/status?client_id=AdobePass1`,
   ];
 
@@ -14070,9 +13884,8 @@ async function fetchImsSessionProfile(accessToken = "") {
   for (const endpoint of endpoints) {
     for (const variant of variants) {
       try {
-        const response = await fetch(endpoint, {
+        const response = await relayImsFetch(endpoint, {
           method: "GET",
-          mode: "cors",
           credentials: variant.credentials,
           headers: variant.headers,
         });
@@ -14105,7 +13918,9 @@ async function fetchImsSessionProfile(accessToken = "") {
 }
 
 async function fetchOrganizations(accessToken) {
-  const response = await fetch(IMS_ORGS_URL, {
+  const response = await relayImsFetch(IMS_ORGS_URL, {
+    method: "GET",
+    credentials: "omit",
     headers: {
       Accept: "*/*",
       "Content-Type": "application/json;charset=utf-8",
@@ -14118,7 +13933,7 @@ async function fetchOrganizations(accessToken) {
     throw new Error(`Organizations request failed (${response.status} ${response.statusText})${body ? ` - ${body}` : ""}`);
   }
 
-  return response.json();
+  return parseJsonText(await response.text().catch(() => ""), {});
 }
 
 function collectObjects(value, output = []) {
@@ -17432,17 +17247,15 @@ function startExperienceCloudSessionMonitor() {
 
 async function probeImsCookieSessionState() {
   const endpoints = [
-    `${IMS_BASE_URL}/ims/check/v6/status?client_id=exc_app`,
     `${IMS_BASE_URL}/ims/check/v6/status?client_id=AdobePass1`,
     `${IMS_BASE_URL}/ims/check/v6/status?client_id=${encodeURIComponent(IMS_CLIENT_ID)}`,
-    `${IMS_PROFILE_URL}?client_id=exc_app`,
+    `${IMS_PROFILE_URL}?client_id=AdobePass1`,
   ];
 
   for (const endpoint of endpoints) {
     try {
-      const response = await fetch(endpoint, {
+      const response = await relayImsFetch(endpoint, {
         method: "GET",
-        mode: "cors",
         credentials: "include",
         headers: {
           Accept: "application/json, text/plain, */*",
@@ -17469,9 +17282,8 @@ async function probeImsCookieSessionState() {
 
 async function probeExperienceCloudSsoCookieState() {
   try {
-    const response = await fetch(EXPERIENCE_CLOUD_SSO_TOKEN_ENDPOINT, {
+    const response = await relayImsFetch(EXPERIENCE_CLOUD_SSO_TOKEN_ENDPOINT, {
       method: "POST",
-      mode: "cors",
       credentials: "include",
       headers: {
         Accept: "application/json, text/plain, */*",
@@ -18069,15 +17881,13 @@ function populateRequestorSelect() {
 
   els.mvpdSelect.disabled = true;
   els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
-  syncClickEsmRequestorMenus(requestorIds, selectedRequestorId, {
-    emptyLabel: "-- Select a Media Company first --",
-  });
   refreshRestV2LoginPanels();
 }
 
 async function refreshProgrammerPanels(options = {}) {
   const programmer = resolveSelectedProgrammer();
   const forcePremiumRefresh = options.forcePremiumRefresh === true;
+  const controllerReason = String(options?.controllerReason || "").trim();
   const requestToken = ++state.premiumPanelRequestToken;
   if (forcePremiumRefresh) {
     state.cmTenantBundleByTenantKey.clear();
@@ -18085,12 +17895,10 @@ async function refreshProgrammerPanels(options = {}) {
   }
 
   if (!programmer) {
-    renderPremiumServices(null);
-    decompBroadcastSelectedControllerState(null, null);
-    cmBroadcastSelectedControllerState(null, null);
+    renderPremiumServices(null, null, { controllerReason });
     return;
   }
-  decompBroadcastSelectedControllerState(programmer, null);
+  decompBroadcastSelectedControllerState(programmer, null, 0, { controllerReason });
   cmBroadcastSelectedControllerState(programmer, null);
 
   const cachedServices = state.premiumAppsByProgrammerId.get(programmer.programmerId) || null;
@@ -18101,12 +17909,12 @@ async function refreshProgrammerPanels(options = {}) {
     !forcePremiumRefresh &&
     !shouldRetryCachedCmService(cachedServices?.cm);
   if (shouldReuseCachedServices) {
-    renderPremiumServices(cachedServices, programmer);
+    renderPremiumServices(cachedServices, programmer, { controllerReason });
     void prewarmRestV2ForProgrammer(programmer, cachedServices);
     return;
   }
 
-  renderPremiumServicesLoading(programmer);
+  renderPremiumServicesLoading(programmer, { controllerReason });
   try {
     const [premiumApps, cmService] = await Promise.all([
       ensurePremiumAppsForProgrammer(programmer, {
@@ -18124,13 +17932,13 @@ async function refreshProgrammerPanels(options = {}) {
       cm: cmService,
     };
     state.premiumAppsByProgrammerId.set(programmer.programmerId, mergedServices);
-    renderPremiumServices(mergedServices, programmer);
+    renderPremiumServices(mergedServices, programmer, { controllerReason });
     void prewarmRestV2ForProgrammer(programmer, mergedServices);
   } catch (error) {
     if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
       return;
     }
-    renderPremiumServicesError(error);
+    renderPremiumServicesError(error, { controllerReason });
   }
 }
 
@@ -19068,6 +18876,9 @@ async function registerClientWithSoftwareStatement(softwareStatement) {
 
 async function requestClientCredentialsToken(clientId, clientSecret, debugMeta = null) {
   const debugFlowId = String(debugMeta?.flowId || "").trim();
+  const tokenEndpointUrl = `${ADOBE_SP_BASE}/o/client/token`;
+  const createTokenAttemptId = (transport) =>
+    `token-${String(transport || "attempt")}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const emitTokenDebugEvent = (phase, details = {}) => {
     emitRestV2DebugEvent(debugFlowId, {
       source: "extension",
@@ -19084,17 +18895,25 @@ async function requestClientCredentialsToken(clientId, clientSecret, debugMeta =
   const attempts = [];
 
   attempts.push(async () => {
-    const url = `${ADOBE_SP_BASE}/o/client/token?grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`;
+    const attemptId = createTokenAttemptId("query");
+    const requestUrl = `${tokenEndpointUrl}?grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`;
+    const requestHeaders = {
+      Accept: "application/json",
+    };
     emitTokenDebugEvent("token-request-attempt", {
+      attemptId,
       transport: "query",
       method: "POST",
-      url: `${ADOBE_SP_BASE}/o/client/token`,
+      url: requestUrl,
+      requestHeaders,
+      requestBodyPreview: "",
     });
     const response = await fetchWithRateLimitRetry(
       () =>
-        fetch(url, {
+        fetch(requestUrl, {
           method: "POST",
           mode: "cors",
+          headers: requestHeaders,
         }),
       "DCR token query",
       {
@@ -19112,41 +18931,66 @@ async function requestClientCredentialsToken(clientId, clientSecret, debugMeta =
     if (!response.ok) {
       const reason = normalizeHttpErrorMessage(text) || response.statusText;
       emitTokenDebugEvent("token-request-attempt-failed", {
+        attemptId,
         transport: "query",
+        method: "POST",
+        url: requestUrl,
+        requestHeaders,
+        requestBodyPreview: "",
         status: Number(response.status || 0),
         statusText: String(response.statusText || ""),
+        responseHeaders: toDebugHeadersObject(response.headers),
+        responsePreview: text ? truncateDebugText(text, 4000) : "",
         error: reason,
       });
       throw new Error(`DCR token query failed (${response.status}): ${reason}`);
     }
+    const responseSummary = JSON.stringify({
+      token_type: String(parsed?.token_type || parsed?.tokenType || ""),
+      expires_in: Number(parsed?.expires_in || parsed?.expiresIn || 0),
+      scope: String(parsed?.scope || ""),
+    });
     emitTokenDebugEvent("token-request-attempt-succeeded", {
+      attemptId,
       transport: "query",
+      method: "POST",
+      url: requestUrl,
+      requestHeaders,
+      requestBodyPreview: "",
       status: Number(response.status || 0),
       statusText: String(response.statusText || ""),
+      responseHeaders: toDebugHeadersObject(response.headers),
+      responsePreview: responseSummary,
     });
     return parsed || {};
   });
 
   attempts.push(async () => {
+    const attemptId = createTokenAttemptId("form");
     const body = new URLSearchParams();
     body.set("grant_type", "client_credentials");
     body.set("client_id", clientId);
     body.set("client_secret", clientSecret);
+    const requestBodyPreview = body.toString();
+    const requestHeaders = {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    };
     emitTokenDebugEvent("token-request-attempt", {
+      attemptId,
       transport: "form",
       method: "POST",
-      url: `${ADOBE_SP_BASE}/o/client/token`,
+      url: tokenEndpointUrl,
+      requestHeaders,
+      requestBodyPreview,
     });
     const response = await fetchWithRateLimitRetry(
       () =>
-        fetch(`${ADOBE_SP_BASE}/o/client/token`, {
+        fetch(tokenEndpointUrl, {
           method: "POST",
           mode: "cors",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-          },
-          body: body.toString(),
+          headers: requestHeaders,
+          body: requestBodyPreview,
         }),
       "DCR token form",
       {
@@ -19164,17 +19008,36 @@ async function requestClientCredentialsToken(clientId, clientSecret, debugMeta =
     if (!response.ok) {
       const reason = normalizeHttpErrorMessage(text) || response.statusText;
       emitTokenDebugEvent("token-request-attempt-failed", {
+        attemptId,
         transport: "form",
+        method: "POST",
+        url: tokenEndpointUrl,
+        requestHeaders,
+        requestBodyPreview,
         status: Number(response.status || 0),
         statusText: String(response.statusText || ""),
+        responseHeaders: toDebugHeadersObject(response.headers),
+        responsePreview: text ? truncateDebugText(text, 4000) : "",
         error: reason,
       });
       throw new Error(`DCR token form failed (${response.status}): ${reason}`);
     }
+    const responseSummary = JSON.stringify({
+      token_type: String(parsed?.token_type || parsed?.tokenType || ""),
+      expires_in: Number(parsed?.expires_in || parsed?.expiresIn || 0),
+      scope: String(parsed?.scope || ""),
+    });
     emitTokenDebugEvent("token-request-attempt-succeeded", {
+      attemptId,
       transport: "form",
+      method: "POST",
+      url: tokenEndpointUrl,
+      requestHeaders,
+      requestBodyPreview,
       status: Number(response.status || 0),
       statusText: String(response.statusText || ""),
+      responseHeaders: toDebugHeadersObject(response.headers),
+      responsePreview: responseSummary,
     });
     return parsed || {};
   });
@@ -20238,9 +20101,8 @@ async function requestCmTokenViaValidateToken(seedToken = "", options = {}) {
     const attempts = [{ credentials: "include" }, { credentials: "omit" }];
     for (const attempt of attempts) {
       try {
-        const response = await fetch(endpoint, {
+        const response = await relayImsFetch(endpoint, {
           method: "POST",
-          mode: "cors",
           credentials: attempt.credentials,
           headers: {
             Accept: "application/json, text/plain, */*",
@@ -22045,7 +21907,10 @@ async function loadMvpdsFromRestV2(requestorId) {
     }
 
     if (!hasRestV2Candidate) {
-      throw new Error(`No REST V2 scoped app mapping was found for RequestorId "${requestorId}".`);
+      throw createProgrammersError(
+        `No REST V2 scoped app mapping was found for RequestorId "${requestorId}".`,
+        "RESTV2_APP_MAPPING_MISSING"
+      );
     }
     throw lastError || new Error("Unable to load MVPDs via REST V2 configuration.");
   })();
@@ -22068,7 +21933,6 @@ async function populateMvpdSelectForRequestor(requestorId) {
     els.mvpdSelect.disabled = true;
     els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
     state.selectedMvpdId = "";
-    clearClickEsmMvpdMenusForRequestor(expectedRequestorId, "-- Select Requestor first --");
     refreshRestV2LoginPanels();
     return;
   }
@@ -22114,7 +21978,6 @@ async function populateMvpdSelectForRequestor(requestorId) {
     els.mvpdSelect.disabled = false;
     state.selectedMvpdId = "";
     els.mvpdSelect.value = "";
-    syncClickEsmMvpdMenusForRequestor(expectedRequestorId, merged);
     refreshRestV2LoginPanels();
     setStatus("", "info");
   } catch (error) {
@@ -22124,10 +21987,13 @@ async function populateMvpdSelectForRequestor(requestorId) {
     els.mvpdSelect.disabled = true;
     els.mvpdSelect.innerHTML = '<option value="">-- MVPD config unavailable --</option>';
     state.selectedMvpdId = "";
-    clearClickEsmMvpdMenusForRequestor(expectedRequestorId, "-- MVPD config unavailable --");
     refreshRestV2LoginPanels();
-    const reason = error instanceof Error ? error.message : String(error);
-    setStatus(`REST V2 configuration failed for MVPD list: ${reason}`, "error");
+    if (isRestV2ScopedAppMappingMissingError(error)) {
+      setStatus("", "info");
+    } else {
+      const reason = error instanceof Error ? error.message : String(error);
+      setStatus(`REST V2 configuration failed for MVPD list: ${reason}`, "error");
+    }
   }
 }
 
@@ -22947,17 +22813,19 @@ function registerEventHandlers() {
     state.selectedRequestorId = "";
     state.selectedMvpdId = "";
     populateRequestorSelect();
-    void refreshProgrammerPanels();
+    void refreshProgrammerPanels({ controllerReason: "media-company-change" });
   });
 
   els.requestorSelect.addEventListener("change", (event) => {
     state.selectedRequestorId = String(event.target.value || "");
     state.selectedMvpdId = "";
-    syncClickEsmRequestorMenus(getRequestorsForSelectedMediaCompany(), state.selectedRequestorId, {
-      emptyLabel: "-- Select a Media Company first --",
-    });
     void refreshProgrammerPanels();
     void populateMvpdSelectForRequestor(state.selectedRequestorId);
+    const decompState = getActiveDecompState();
+    if (decompState) {
+      decompBroadcastControllerState(decompState);
+      syncDecompRecordingControls(decompState);
+    }
     const cmState = getActiveCmState();
     if (cmState) {
       cmBroadcastControllerState(cmState);

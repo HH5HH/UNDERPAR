@@ -49,6 +49,8 @@ const state = {
   batchRunning: false,
   workspaceLocked: false,
   nonEsmMode: false,
+  pendingAutoRerunProgrammerKey: "",
+  autoRerunInFlightProgrammerKey: "",
 };
 
 const els = {
@@ -62,6 +64,7 @@ const els = {
   status: document.getElementById("workspace-status"),
   lockBanner: document.getElementById("workspace-lock-banner"),
   lockMessage: document.getElementById("workspace-lock-message"),
+  rerunIndicator: document.getElementById("workspace-rerun-indicator"),
   makeClickEsmButton: document.getElementById("workspace-make-clickesm"),
   makeClickEsmWorkspaceButton: document.getElementById("workspace-make-clickesmws"),
   rerunAllButton: document.getElementById("workspace-rerun-all"),
@@ -540,8 +543,33 @@ function setActionButtonsDisabled(disabled) {
   }
 }
 
+function isWorkspaceNetworkBusy() {
+  if (state.batchRunning) {
+    return true;
+  }
+  for (const cardState of state.cardsById.values()) {
+    if (cardState?.running === true) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function syncWorkspaceNetworkIndicator() {
+  const isBusy = isWorkspaceNetworkBusy();
+  if (els.rerunAllButton) {
+    els.rerunAllButton.classList.toggle("net-busy", isBusy);
+    els.rerunAllButton.setAttribute("aria-busy", isBusy ? "true" : "false");
+    els.rerunAllButton.title = isBusy ? "Re-run all (loading...)" : "Re-run all";
+  }
+  if (els.rerunIndicator) {
+    els.rerunIndicator.hidden = !isBusy;
+  }
+}
+
 function syncActionButtonsDisabled() {
   setActionButtonsDisabled(state.batchRunning || state.workspaceLocked);
+  syncWorkspaceNetworkIndicator();
 }
 
 function syncTearsheetButtonsVisibility() {
@@ -554,13 +582,17 @@ function syncTearsheetButtonsVisibility() {
   }
 }
 
-function getProgrammerLabel() {
-  const name = String(state.programmerName || "").trim();
-  const id = String(state.programmerId || "").trim();
+function formatProgrammerLabel(programmerId = "", programmerName = "") {
+  const name = String(programmerName || "").trim();
+  const id = String(programmerId || "").trim();
   if (name && id && name !== id) {
     return `${name} (${id})`;
   }
   return name || id || "Selected Media Company";
+}
+
+function getProgrammerLabel() {
+  return formatProgrammerLabel(state.programmerId, state.programmerName);
 }
 
 function getWorkspaceLockMessage() {
@@ -605,7 +637,7 @@ function hasProgrammerContext() {
 }
 
 function shouldShowNonEsmMode() {
-  return !state.controllerOnline && state.esmAvailable === false && hasProgrammerContext();
+  return state.esmAvailable === false && hasProgrammerContext();
 }
 
 function clearWorkspaceCards() {
@@ -613,6 +645,11 @@ function clearWorkspaceCards() {
     cardState.element?.remove();
   });
   state.cardsById.clear();
+  syncWorkspaceNetworkIndicator();
+}
+
+function hasWorkspaceCardContext() {
+  return state.cardsById instanceof Map && state.cardsById.size > 0;
 }
 
 function updateNonEsmMode() {
@@ -625,9 +662,8 @@ function updateNonEsmMode() {
     els.nonEsmNote.innerHTML = buildNotPremiumConsoleLinkHtml("ESM");
   }
 
-  if (shouldShow) {
-    clearWorkspaceCards();
-  }
+  // Preserve workspace card context while temporarily viewing non-ESM media companies.
+  // Cards should only be cleared by explicit user action (Clear All) or workspace close.
 
   if (els.stylesheet) {
     els.stylesheet.disabled = shouldShow;
@@ -660,11 +696,13 @@ function updateControllerBanner() {
   }
 
   const hasProgrammerContext = Boolean(String(state.programmerId || "").trim() || String(state.programmerName || "").trim());
+  if (state.workspaceLocked) {
+    els.controllerState.textContent = `Selected Media Company: ${getProgrammerLabel()}`;
+    els.filterState.textContent = "decomp workspace is locked for this media company. No Premium, No ESM, No Dice.";
+    return;
+  }
   if (!state.controllerOnline) {
-    if (state.workspaceLocked) {
-      els.controllerState.textContent = `Selected Media Company: ${getProgrammerLabel()}`;
-      els.filterState.textContent = "decomp workspace is locked for this media company. No Premium, No ESM, No Dice.";
-    } else if (hasProgrammerContext) {
+    if (hasProgrammerContext) {
       els.controllerState.textContent = `Selected Media Company: ${getProgrammerLabel()}`;
       els.filterState.textContent = "Waiting for decomp controller sync from UnderPAR side panel...";
     } else {
@@ -691,6 +729,104 @@ function updateControllerBanner() {
       ? ` | MVPD Login History: ${harvestCount} captured${harvestPairLabel ? ` | Latest: ${harvestPairLabel}` : ""}`
       : "";
   els.filterState.textContent = `RequestorId(s): ${requestorLabel} | MVPD(s): ${mvpdLabel}${harvestSummary}`;
+}
+
+function getProgrammerIdentityKey(programmerId = "", programmerName = "") {
+  const id = String(programmerId || "").trim();
+  if (id) {
+    return `id:${id}`;
+  }
+  const name = String(programmerName || "").trim().toLowerCase();
+  return name ? `name:${name}` : "";
+}
+
+function hasProgrammerIdentityChanged(previousProgrammerId = "", previousProgrammerName = "", nextProgrammerId = "", nextProgrammerName = "") {
+  const previousId = String(previousProgrammerId || "").trim();
+  const nextId = String(nextProgrammerId || "").trim();
+  if (previousId && nextId) {
+    return previousId !== nextId;
+  }
+
+  const previousName = String(previousProgrammerName || "").trim().toLowerCase();
+  const nextName = String(nextProgrammerName || "").trim().toLowerCase();
+  if (previousName && nextName) {
+    return previousName !== nextName;
+  }
+
+  if (!previousId && !nextId && !previousName && !nextName) {
+    return false;
+  }
+  // Ignore transient partial identity payloads (e.g. id present in one state and name-only in another).
+  return false;
+}
+
+function clearPendingProgrammerSwitchTransition() {
+  state.pendingAutoRerunProgrammerKey = "";
+  state.autoRerunInFlightProgrammerKey = "";
+}
+
+async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
+  const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
+  if (!currentProgrammerKey) {
+    return false;
+  }
+  if (expectedProgrammerKey && currentProgrammerKey !== expectedProgrammerKey) {
+    return false;
+  }
+  if (state.esmAvailable !== true || state.workspaceLocked || state.nonEsmMode || state.batchRunning) {
+    return false;
+  }
+
+  const cards = getOrderedCardStates();
+  if (cards.length === 0) {
+    return false;
+  }
+
+  await rerunAllCards({
+    reason: "programmer-switch",
+  });
+  return true;
+}
+
+function maybeConsumePendingAutoRerun() {
+  const pendingProgrammerKey = String(state.pendingAutoRerunProgrammerKey || "").trim();
+  if (!pendingProgrammerKey) {
+    return;
+  }
+  if (state.controllerOnline) {
+    return;
+  }
+
+  const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
+  if (!currentProgrammerKey || currentProgrammerKey !== pendingProgrammerKey) {
+    return;
+  }
+
+  if (state.esmAvailable === false) {
+    clearPendingProgrammerSwitchTransition();
+    return;
+  }
+  if (state.esmAvailable !== true) {
+    return;
+  }
+
+  if (state.batchRunning || state.workspaceLocked || state.nonEsmMode) {
+    return;
+  }
+
+  const cards = getOrderedCardStates();
+  if (cards.length === 0) {
+    clearPendingProgrammerSwitchTransition();
+    return;
+  }
+
+  state.pendingAutoRerunProgrammerKey = "";
+  state.autoRerunInFlightProgrammerKey = currentProgrammerKey;
+  void autoRerunCardsForProgrammerSwitch(currentProgrammerKey).finally(() => {
+    if (String(state.autoRerunInFlightProgrammerKey || "").trim() === currentProgrammerKey) {
+      state.autoRerunInFlightProgrammerKey = "";
+    }
+  });
 }
 
 function getDefaultSortStack() {
@@ -1375,6 +1511,7 @@ function ensureCard(cardMeta) {
   cardState.closeButton.addEventListener("click", () => {
     cardState.element.remove();
     state.cardsById.delete(cardState.cardId);
+    syncWorkspaceNetworkIndicator();
   });
 
   state.cardsById.set(cardId, cardState);
@@ -1555,6 +1692,7 @@ function applyReportStart(payload) {
   if (cardState.element && !document.hidden) {
     cardState.element.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+  syncWorkspaceNetworkIndicator();
 }
 
 function applyReportResult(payload) {
@@ -1568,6 +1706,7 @@ function applyReportResult(payload) {
     const error = payload?.error || "Request failed.";
     renderCardMessage(cardState, error, { error: true });
     setStatus(error, "error");
+    syncWorkspaceNetworkIndicator();
     return;
   }
 
@@ -1579,13 +1718,20 @@ function applyReportResult(payload) {
 
   if (rows.length === 0) {
     renderCardMessage(cardState, "No data");
+    syncWorkspaceNetworkIndicator();
     return;
   }
 
   renderCardTable(cardState, rows, cardState.lastModified);
+  syncWorkspaceNetworkIndicator();
 }
 
 function applyControllerState(payload) {
+  const previousProgrammerId = String(state.programmerId || "");
+  const previousProgrammerName = String(state.programmerName || "");
+  const previousProgrammerKey = getProgrammerIdentityKey(previousProgrammerId, previousProgrammerName);
+  const controllerReason = String(payload?.controllerReason || "").trim().toLowerCase();
+
   state.controllerOnline = payload?.controllerOnline === true;
   if (payload?.esmAvailable === true) {
     state.esmAvailable = true;
@@ -1614,9 +1760,40 @@ function applyControllerState(payload) {
       : state.profileHarvest
         ? [{ ...state.profileHarvest }]
         : [];
+
+  const programmerChanged = hasProgrammerIdentityChanged(
+    previousProgrammerId,
+    previousProgrammerName,
+    state.programmerId,
+    state.programmerName
+  );
+  if (programmerChanged) {
+    state.batchRunning = false;
+    state.autoRerunInFlightProgrammerKey = "";
+    state.cardsById.forEach((cardState) => {
+      if (cardState) {
+        cardState.running = false;
+      }
+    });
+    syncActionButtonsDisabled();
+  }
+  const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
+  const shouldTriggerWorkspaceRedraw =
+    programmerChanged &&
+    Boolean(previousProgrammerKey) &&
+    hasWorkspaceCardContext() &&
+    state.controllerOnline === false &&
+    controllerReason === "media-company-change";
+  if (shouldTriggerWorkspaceRedraw && currentProgrammerKey) {
+    state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
+  } else if (programmerChanged) {
+    state.pendingAutoRerunProgrammerKey = "";
+  }
+
   syncTearsheetButtonsVisibility();
   updateWorkspaceLockState();
   updateControllerBanner();
+  maybeConsumePendingAutoRerun();
 }
 
 function handleWorkspaceEvent(eventName, payload) {
@@ -1631,6 +1808,7 @@ function handleWorkspaceEvent(eventName, payload) {
   }
 
   if (event === "report-start") {
+    clearPendingProgrammerSwitchTransition();
     applyReportStart(payload);
     return;
   }
@@ -1644,15 +1822,26 @@ function handleWorkspaceEvent(eventName, payload) {
     state.batchRunning = true;
     syncActionButtonsDisabled();
     const total = Number(payload?.total || 0);
-    setStatus(total > 0 ? `Re-running ${total} report(s)...` : "Re-running reports...");
+    const reason = String(payload?.reason || "").trim().toLowerCase();
+    if (reason === "manual-reload") {
+      setStatus(total > 0 ? `Reloading ${total} report(s)...` : "Reloading reports...");
+    } else {
+      setStatus(total > 0 ? `Re-running ${total} report(s)...` : "Re-running reports...");
+    }
     return;
   }
 
   if (event === "batch-end") {
     state.batchRunning = false;
+    state.cardsById.forEach((cardState) => {
+      if (cardState) {
+        cardState.running = false;
+      }
+    });
     syncActionButtonsDisabled();
     const total = Number(payload?.total || 0);
     setStatus(total > 0 ? `Re-run completed for ${total} report(s).` : "Re-run completed.");
+    maybeConsumePendingAutoRerun();
     return;
   }
 
@@ -1680,10 +1869,11 @@ async function sendWorkspaceAction(action, payload = {}) {
   }
 }
 
-async function rerunAllCards() {
+async function rerunAllCards(options = {}) {
   if (!ensureWorkspaceUnlocked()) {
     return;
   }
+  const reason = String(options?.reason || "").trim().toLowerCase();
   if (state.cardsById.size === 0) {
     setStatus("No reports are open.");
     return;
@@ -1692,8 +1882,12 @@ async function rerunAllCards() {
   const cards = [...state.cardsById.values()].map((cardState) => getCardPayload(cardState));
   state.batchRunning = true;
   syncActionButtonsDisabled();
-  setStatus(`Re-running ${cards.length} report(s)...`);
-  const result = await sendWorkspaceAction("rerun-all", { cards });
+  if (reason === "manual-reload") {
+    setStatus(`Reloading ${cards.length} report(s)...`);
+  } else {
+    setStatus(`Re-running ${cards.length} report(s)...`);
+  }
+  const result = await sendWorkspaceAction("rerun-all", { cards, reason });
   if (!result?.ok) {
     state.batchRunning = false;
     syncActionButtonsDisabled();
@@ -1711,14 +1905,12 @@ async function makeClickEsmDownload() {
     return;
   }
 
-  setStatus("Generating static clickESM reference file...");
+  setStatus("", "info");
   const result = await sendWorkspaceAction("make-clickesm");
   if (!result?.ok) {
     setStatus(result?.error || "Unable to generate clickESM file.", "error");
     return;
   }
-  const fileName = String(result?.fileName || "clickESM.html");
-  setStatus(`Downloaded static reference ${fileName}.`);
 }
 
 async function makeClickEsmWorkspaceDownload() {
@@ -1738,7 +1930,7 @@ async function makeClickEsmWorkspaceDownload() {
   if (els.makeClickEsmWorkspaceButton) {
     els.makeClickEsmWorkspaceButton.disabled = true;
   }
-  setStatus("Generating clickESMWS_TEARSHEET file...");
+  setStatus("", "info");
   try {
     const snapshot = buildWorkspaceExportSnapshot();
     const authResult = await sendWorkspaceAction("resolve-clickesmws-auth");
@@ -1757,7 +1949,6 @@ async function makeClickEsmWorkspaceDownload() {
     });
     const fileName = buildClickEsmWorkspaceFileName(snapshot);
     downloadHtmlFile(outputHtml, fileName);
-    setStatus(`Downloaded ${fileName}.`);
   } catch (error) {
     setStatus(
       `Unable to generate clickESMWS_TEARSHEET: ${error instanceof Error ? error.message : String(error)}`,
@@ -1789,7 +1980,9 @@ function registerEventHandlers() {
 
   if (els.rerunAllButton) {
     els.rerunAllButton.addEventListener("click", () => {
-      void rerunAllCards();
+      void rerunAllCards({
+        reason: "manual-reload",
+      });
     });
   }
 

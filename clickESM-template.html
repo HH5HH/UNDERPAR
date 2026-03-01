@@ -362,13 +362,36 @@ dd{margin-left:0;margin-bottom:10px}
   transition:background-color .14s ease,border-color .14s ease,box-shadow .14s ease,color .14s ease;
 }
 
+.col-chip-label{
+  border:1px solid var(--table-border);
+  border-radius:var(--radius-pill);
+  background:var(--table-row);
+  color:var(--text-muted);
+  font-size:13px;
+  font-weight:600;
+  line-height:1.2;
+  text-align:left;
+  padding:7px 12px;
+  margin:0;
+  width:auto;
+  max-width:100%;
+  white-space:nowrap;
+  box-shadow:inset 0 1px 0 color-mix(in srgb, var(--panel) 64%, transparent);
+  cursor:default;
+}
+
+.col-chip-label-static{
+  border-color:color-mix(in srgb, var(--table-border) 74%, transparent);
+  background:color-mix(in srgb, var(--table-row) 80%, var(--panel) 20%);
+}
+
 .col-chip:hover,
 .col-chip:focus-within{
   background:transparent;
 }
 
-.col-chip:hover .col-chip-trigger,
-.col-chip:focus-within .col-chip-trigger{
+.col-chip[data-filterable="1"]:hover .col-chip-trigger,
+.col-chip[data-filterable="1"]:focus-within .col-chip-trigger{
   background:var(--button-hover);
   border-color:color-mix(in srgb, var(--button-border) 76%, rgb(var(--click-url-rgb)) 24%);
 }
@@ -401,6 +424,12 @@ dd{margin-left:0;margin-bottom:10px}
 }
 
 .col-chip.col-chip-highlight .col-chip-trigger{
+  background:var(--chip-highlight-bg);
+  border-color:var(--chip-highlight-border);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--chip-highlight-border) 34%, transparent);
+}
+
+.col-chip.col-chip-highlight .col-chip-label{
   background:var(--chip-highlight-bg);
   border-color:var(--chip-highlight-border);
   box-shadow:0 0 0 3px color-mix(in srgb, var(--chip-highlight-border) 34%, transparent);
@@ -615,11 +644,28 @@ th .sort-icon {
 .esm-footer {
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+.esm-footer-controls{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.esm-footer-csv-link,
+.esm-footer-csv-link:visited{
+  color:var(--text-primary);
+  font-weight:600;
+}
+
+.esm-footer-csv-link:hover{
+  color:var(--text-primary);
 }
 
 .esm-last-modified {
-  margin-left: auto;
-  margin-right: 8px;
+  margin:0;
   font-size: 11.5px;
   font-weight: 600;
   letter-spacing:.01em;
@@ -717,6 +763,10 @@ th .sort-icon {
 .esm-action-btn:disabled{
   opacity:.65;
   cursor:default;
+}
+
+.esm-footer .esm-action-btn{
+  margin-right:0;
 }
 
 body[data-theme="dark"] dl{
@@ -818,6 +868,8 @@ body.net-busy input { cursor: progress; }
 <input type="hidden" name="cid" value="__UP_CID__">
 <input type="hidden" name="csc" value="__UP_CSC__">
 <input type="hidden" name="access_token" value="__UP_ACCESS_TOKEN__">
+<input type="hidden" name="requestor_ids_json" value="__UP_REQUESTOR_IDS_JSON__">
+<input type="hidden" name="theme_scope" value="__UP_THEME_SCOPE__">
 
 <div class="app-shell">
 
@@ -852,7 +904,6 @@ authz-rejected
 authz-successful
 clientless-failures
 clientless-tokens
-media-company
 media-tokens
 year</dd>
 <dd class="esm-table-host"></dd>
@@ -869,7 +920,6 @@ authz-rejected
 authz-successful
 clientless-failures
 clientless-tokens
-media-company
 media-tokens
 month
 year</dd>
@@ -888,7 +938,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 year</dd>
@@ -908,7 +957,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 unique-accounts
@@ -921,7 +969,6 @@ year</dd>
 <dd class="col-list">count
 day
 event
-media-company
 month
 year</dd>
 <dd class="esm-table-host"></dd>
@@ -931,7 +978,6 @@ year</dd>
 <dd class="col-list">count
 day
 event
-media-company
 month
 requestor-id
 year</dd>
@@ -942,7 +988,6 @@ year</dd>
 <dd class="col-list">count
 day
 event
-media-company
 month
 proxy
 requestor-id
@@ -954,7 +999,6 @@ year</dd>
 <dd class="col-list">count
 day
 event
-media-company
 month
 mvpd
 proxy
@@ -967,7 +1011,6 @@ year</dd>
 <dd class="col-list">count
 day
 event
-media-company
 month
 mvpd
 proxy
@@ -982,7 +1025,6 @@ year</dd>
 day
 dc
 event
-media-company
 month
 mvpd
 proxy
@@ -1005,7 +1047,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 year</dd>
@@ -1026,7 +1067,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 unique-accounts
@@ -1040,7 +1080,6 @@ year</dd>
 day
 event
 hour
-media-company
 month
 year</dd>
 <dd class="esm-table-host"></dd>
@@ -1051,7 +1090,6 @@ year</dd>
 day
 event
 hour
-media-company
 month
 requestor-id
 year</dd>
@@ -1063,7 +1101,6 @@ year</dd>
 day
 event
 hour
-media-company
 month
 proxy
 requestor-id
@@ -1076,7 +1113,6 @@ year</dd>
 day
 event
 hour
-media-company
 month
 mvpd
 proxy
@@ -1090,7 +1126,6 @@ year</dd>
 day
 event
 hour
-media-company
 month
 mvpd
 proxy
@@ -1106,7 +1141,6 @@ day
 dc
 event
 hour
-media-company
 month
 mvpd
 proxy
@@ -1127,7 +1161,6 @@ authz-rejected
 authz-successful
 day
 hour
-media-company
 minute
 month
 year</dd>
@@ -1139,7 +1172,6 @@ year</dd>
 day
 event
 hour
-media-company
 minute
 month
 year</dd>
@@ -1151,7 +1183,6 @@ year</dd>
 day
 event
 hour
-media-company
 minute
 month
 requestor-id
@@ -1164,7 +1195,6 @@ year</dd>
 day
 event
 hour
-media-company
 minute
 month
 proxy
@@ -1178,7 +1208,6 @@ year</dd>
 day
 event
 hour
-media-company
 minute
 month
 mvpd
@@ -1193,7 +1222,6 @@ year</dd>
 day
 event
 hour
-media-company
 minute
 month
 mvpd
@@ -1210,7 +1238,6 @@ day
 dc
 event
 hour
-media-company
 minute
 month
 mvpd
@@ -1234,7 +1261,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1256,7 +1282,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1279,7 +1304,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1304,7 +1328,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1325,7 +1348,6 @@ cdt
 channel
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1346,7 +1368,6 @@ cdt
 channel
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1369,7 +1390,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1396,7 +1416,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1416,7 +1435,6 @@ authz-successful
 cdt
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1438,7 +1456,6 @@ cdt
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1459,7 +1476,6 @@ authz-successful
 channel
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1480,7 +1496,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1505,7 +1520,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1524,7 +1538,6 @@ authn-successful
 day
 eap
 hour
-media-company
 minute
 month
 mvpd
@@ -1542,7 +1555,6 @@ authn-successful
 day
 eap
 hour
-media-company
 minute
 month
 mvpd
@@ -1561,7 +1573,6 @@ authn-successful
 day
 eap
 hour
-media-company
 minute
 month
 mvpd
@@ -1581,7 +1592,6 @@ authn-successful
 day
 eap
 hour
-media-company
 minute
 month
 mvpd
@@ -1603,7 +1613,6 @@ day
 dc
 eap
 hour
-media-company
 minute
 month
 mvpd
@@ -1629,7 +1638,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1655,7 +1663,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1682,7 +1689,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1705,7 +1711,6 @@ authz-successful
 channel
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1729,7 +1734,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1759,7 +1763,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1787,7 +1790,6 @@ clientless-tokens
 customer-app
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1809,7 +1811,6 @@ channel
 customer-app
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1832,7 +1833,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1861,7 +1861,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1889,7 +1888,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -1916,7 +1914,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1942,7 +1939,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1965,7 +1961,6 @@ authz-successful
 channel
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -1989,7 +1984,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -2017,7 +2011,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -2039,7 +2032,6 @@ authz-rejected
 authz-successful
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -2063,7 +2055,6 @@ authz-successful
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -2089,7 +2080,6 @@ authz-rejected
 authz-successful
 day
 hour
-media-company
 minute
 month
 requestor-id
@@ -2109,7 +2099,6 @@ authz-rejected
 authz-successful
 day
 hour
-media-company
 minute
 month
 requestor-id
@@ -2130,7 +2119,6 @@ authz-rejected
 authz-successful
 day
 hour
-media-company
 minute
 month
 requestor-id
@@ -2149,7 +2137,6 @@ authz-successful
 channel
 day
 hour
-media-company
 minute
 month
 requestor-id
@@ -2169,7 +2156,6 @@ channel
 day
 dc
 hour
-media-company
 minute
 month
 requestor-id
@@ -2191,7 +2177,6 @@ authz-successful
 day
 dc
 hour
-media-company
 minute
 month
 requestor-id
@@ -2211,7 +2196,6 @@ authz-successful
 customer-app
 day
 hour
-media-company
 minute
 month
 requestor-id
@@ -2229,7 +2213,6 @@ channel
 customer-app
 day
 hour
-media-company
 minute
 month
 requestor-id
@@ -2248,7 +2231,6 @@ customer-app
 day
 dc
 hour
-media-company
 minute
 month
 requestor-id
@@ -2269,7 +2251,6 @@ customer-app
 day
 dc
 hour
-media-company
 minute
 month
 requestor-id
@@ -2290,7 +2271,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -2314,7 +2294,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -2339,7 +2318,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -2360,7 +2338,6 @@ authz-successful
 channel
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -2382,7 +2359,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -2410,7 +2386,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -2436,7 +2411,6 @@ clientless-tokens
 customer-app
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -2456,7 +2430,6 @@ channel
 customer-app
 day
 hour
-media-company
 media-tokens
 minute
 month
@@ -2477,7 +2450,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -2504,7 +2476,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -2530,7 +2501,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 minute
 month
@@ -2555,7 +2525,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 proxy
@@ -2576,7 +2545,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2599,7 +2567,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2623,7 +2590,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2647,7 +2613,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2667,7 +2632,6 @@ cdt
 channel
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2687,7 +2651,6 @@ cdt
 channel
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2709,7 +2672,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2737,7 +2699,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2758,7 +2719,6 @@ authz-successful
 channel
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2778,7 +2738,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2799,7 +2758,6 @@ authz-successful
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2819,7 +2777,6 @@ content-category
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2840,7 +2797,6 @@ content-category
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2862,7 +2818,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2888,7 +2843,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -2908,7 +2862,6 @@ authn-successful
 day
 eap
 hour
-media-company
 month
 mvpd
 proxy
@@ -2925,7 +2878,6 @@ authn-successful
 day
 eap
 hour
-media-company
 month
 mvpd
 platform
@@ -2943,7 +2895,6 @@ authn-successful
 day
 eap
 hour
-media-company
 month
 mvpd
 nsdk
@@ -2962,7 +2913,6 @@ authn-successful
 day
 eap
 hour
-media-company
 month
 mvpd
 nsdk
@@ -2983,7 +2933,6 @@ day
 dc
 eap
 hour
-media-company
 month
 mvpd
 nsdk
@@ -3008,7 +2957,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3033,7 +2981,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3059,7 +3006,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3081,7 +3027,6 @@ authz-successful
 channel
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3104,7 +3049,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3133,7 +3077,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3160,7 +3103,6 @@ clientless-tokens
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3181,7 +3123,6 @@ channel
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3203,7 +3144,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3226,7 +3166,6 @@ content-category
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3248,7 +3187,6 @@ content-category
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3271,7 +3209,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3299,7 +3236,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3326,7 +3262,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3352,7 +3287,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3377,7 +3311,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3399,7 +3332,6 @@ authz-successful
 channel
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3422,7 +3354,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3451,7 +3382,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3474,7 +3404,6 @@ authz-rejected
 authz-successful
 day
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3497,7 +3426,6 @@ authz-successful
 day
 dc
 hour
-media-company
 media-tokens
 month
 mvpd
@@ -3526,7 +3454,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3548,7 +3475,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3571,7 +3497,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3590,7 +3515,6 @@ authz-successful
 channel
 day
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3610,7 +3534,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3636,7 +3559,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3660,7 +3582,6 @@ clientless-tokens
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3678,7 +3599,6 @@ channel
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3697,7 +3617,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3722,7 +3641,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 month
 requestor-id
@@ -3745,7 +3663,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 platform
@@ -3768,7 +3685,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 platform
@@ -3792,7 +3708,6 @@ clientless-failures
 clientless-tokens
 day
 hour
-media-company
 media-tokens
 month
 platform
@@ -3812,7 +3727,6 @@ authz-successful
 channel
 day
 hour
-media-company
 media-tokens
 month
 platform
@@ -3833,7 +3747,6 @@ channel
 day
 dc
 hour
-media-company
 media-tokens
 month
 platform
@@ -3860,7 +3773,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 platform
@@ -3885,7 +3797,6 @@ clientless-tokens
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 platform
@@ -3904,7 +3815,6 @@ channel
 customer-app
 day
 hour
-media-company
 media-tokens
 month
 platform
@@ -3924,7 +3834,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 month
 platform
@@ -3950,7 +3859,6 @@ customer-app
 day
 dc
 hour
-media-company
 media-tokens
 month
 platform
@@ -3975,7 +3883,6 @@ clientless-tokens
 day
 dc
 hour
-media-company
 media-tokens
 month
 platform
@@ -3998,7 +3905,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 proxy
@@ -4018,7 +3924,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -4040,7 +3945,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -4063,7 +3967,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -4086,7 +3989,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -4105,7 +4007,6 @@ authn-pending
 authn-successful
 day
 eap
-media-company
 month
 mvpd
 proxy
@@ -4121,7 +4022,6 @@ authn-pending
 authn-successful
 day
 eap
-media-company
 month
 mvpd
 platform
@@ -4138,7 +4038,6 @@ authn-pending
 authn-successful
 day
 eap
-media-company
 month
 mvpd
 nsdk
@@ -4156,7 +4055,6 @@ authn-pending
 authn-successful
 day
 eap
-media-company
 month
 mvpd
 nsdk
@@ -4176,7 +4074,6 @@ authn-successful
 day
 dc
 eap
-media-company
 month
 mvpd
 nsdk
@@ -4201,7 +4098,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -4224,7 +4120,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -4248,7 +4143,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -4274,7 +4168,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -4296,7 +4189,6 @@ authz-latency
 authz-rejected
 authz-successful
 day
-media-company
 media-tokens
 month
 mvpd
@@ -4318,7 +4210,6 @@ authz-rejected
 authz-successful
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -4346,7 +4237,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4367,7 +4257,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4389,7 +4278,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4407,7 +4295,6 @@ authz-rejected
 authz-successful
 channel
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4426,7 +4313,6 @@ authz-successful
 channel
 day
 dc
-media-company
 media-tokens
 month
 requestor-id
@@ -4451,7 +4337,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 requestor-id
@@ -4474,7 +4359,6 @@ cdt
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4491,7 +4375,6 @@ authz-successful
 cdt
 channel
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4508,7 +4391,6 @@ authz-successful
 cdt
 channel
 day
-media-company
 media-tokens
 month
 platform-version
@@ -4527,7 +4409,6 @@ cdt
 channel
 day
 dc
-media-company
 media-tokens
 month
 platform-version
@@ -4552,7 +4433,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 requestor-id
@@ -4570,7 +4450,6 @@ authz-rejected
 authz-successful
 cdt
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4588,7 +4467,6 @@ authz-successful
 cdt
 day
 dc
-media-company
 media-tokens
 month
 requestor-id
@@ -4612,7 +4490,6 @@ clientless-failures
 clientless-tokens
 customer-app
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4629,7 +4506,6 @@ authz-successful
 channel
 customer-app
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4647,7 +4523,6 @@ channel
 customer-app
 day
 dc
-media-company
 media-tokens
 month
 requestor-id
@@ -4666,7 +4541,6 @@ authz-successful
 content-category
 customer-app
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4684,7 +4558,6 @@ channel
 content-category
 customer-app
 day
-media-company
 media-tokens
 month
 requestor-id
@@ -4703,7 +4576,6 @@ content-category
 customer-app
 day
 dc
-media-company
 media-tokens
 month
 requestor-id
@@ -4727,7 +4599,6 @@ clientless-tokens
 customer-app
 day
 dc
-media-company
 media-tokens
 month
 requestor-id
@@ -4750,7 +4621,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 requestor-id
@@ -4773,7 +4643,6 @@ clientless-failures
 clientless-tokens
 day
 device
-media-company
 media-tokens
 month
 requestor-id
@@ -4794,7 +4663,6 @@ clientless-failures
 clientless-tokens
 day
 device
-media-company
 media-tokens
 month
 os-family
@@ -4817,7 +4685,6 @@ clientless-tokens
 day
 dc
 device
-media-company
 media-tokens
 month
 os-family
@@ -4840,7 +4707,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 os-family
@@ -4862,7 +4728,6 @@ browser-family
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 os-family
@@ -4885,7 +4750,6 @@ browser-version
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 os-family
@@ -4909,7 +4773,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 os-family
@@ -4932,7 +4795,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 platform
@@ -4954,7 +4816,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 platform
@@ -4977,7 +4838,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 platform
@@ -5001,7 +4861,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 platform
@@ -5026,7 +4885,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 platform
@@ -5047,7 +4905,6 @@ authz-rejected
 authz-successful
 channel
 day
-media-company
 media-tokens
 month
 platform
@@ -5067,7 +4924,6 @@ authz-successful
 channel
 day
 dc
-media-company
 media-tokens
 month
 platform
@@ -5093,7 +4949,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 platform
@@ -5117,7 +4972,6 @@ clientless-failures
 clientless-tokens
 customer-app
 day
-media-company
 media-tokens
 month
 platform
@@ -5135,7 +4989,6 @@ authz-successful
 channel
 customer-app
 day
-media-company
 media-tokens
 month
 platform
@@ -5154,7 +5007,6 @@ channel
 customer-app
 day
 dc
-media-company
 media-tokens
 month
 platform
@@ -5174,7 +5026,6 @@ authz-successful
 content-category
 customer-app
 day
-media-company
 media-tokens
 month
 platform
@@ -5193,7 +5044,6 @@ channel
 content-category
 customer-app
 day
-media-company
 media-tokens
 month
 platform
@@ -5213,7 +5063,6 @@ content-category
 customer-app
 day
 dc
-media-company
 media-tokens
 month
 platform
@@ -5238,7 +5087,6 @@ clientless-tokens
 customer-app
 day
 dc
-media-company
 media-tokens
 month
 platform
@@ -5262,7 +5110,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 platform
@@ -5285,7 +5132,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 nsdk
@@ -5307,7 +5153,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 nsdk
@@ -5326,7 +5171,6 @@ authz-rejected
 authz-successful
 channel
 day
-media-company
 media-tokens
 month
 nsdk
@@ -5346,7 +5190,6 @@ authz-successful
 channel
 day
 dc
-media-company
 media-tokens
 month
 nsdk
@@ -5372,7 +5215,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 nsdk
@@ -5397,7 +5239,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 nsdk
@@ -5422,7 +5263,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 nsdk
@@ -5443,7 +5283,6 @@ authz-latency
 authz-rejected
 authz-successful
 day
-media-company
 media-tokens
 month
 nsdk
@@ -5463,7 +5302,6 @@ authz-rejected
 authz-successful
 day
 dc
-media-company
 media-tokens
 month
 nsdk
@@ -5489,7 +5327,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 proxy
@@ -5510,7 +5347,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5533,7 +5369,6 @@ clientless-failures
 clientless-tokens
 day
 device
-media-company
 media-tokens
 month
 mvpd
@@ -5557,7 +5392,6 @@ clientless-tokens
 day
 dc
 device
-media-company
 media-tokens
 month
 mvpd
@@ -5581,7 +5415,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5605,7 +5438,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5630,7 +5462,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5651,7 +5482,6 @@ authz-rejected
 authz-successful
 channel
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5673,7 +5503,6 @@ authz-successful
 channel
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -5701,7 +5530,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -5727,7 +5555,6 @@ clientless-failures
 clientless-tokens
 customer-app
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5747,7 +5574,6 @@ authz-successful
 channel
 customer-app
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5768,7 +5594,6 @@ channel
 customer-app
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -5790,7 +5615,6 @@ decision-failed
 decision-media-tokens
 decision-successful
 decision-type
-media-company
 month
 mvpd
 platform
@@ -5810,7 +5634,6 @@ decision-failed
 decision-media-tokens
 decision-successful
 decision-type
-media-company
 month
 mvpd
 platform
@@ -5829,7 +5652,6 @@ authz-successful
 content-category
 customer-app
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5850,7 +5672,6 @@ channel
 content-category
 customer-app
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5872,7 +5693,6 @@ content-category
 customer-app
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -5899,7 +5719,6 @@ clientless-tokens
 customer-app
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -5925,7 +5744,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -5950,7 +5768,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -5974,7 +5791,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -6000,7 +5816,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -6027,7 +5842,6 @@ authz-successful
 clientless-failures
 clientless-tokens
 day
-media-company
 media-tokens
 month
 mvpd
@@ -6059,7 +5873,6 @@ clientless-failures
 clientless-tokens
 day
 dc
-media-company
 media-tokens
 month
 mvpd
@@ -6120,15 +5933,30 @@ function td(value) {
 }
 
 /* ---------- THEME ---------- */
-const THEME_STORAGE_KEY = 'esm3-findit-theme';
+const THEME_STORAGE_KEY_PREFIX = 'esm3-findit-theme';
 
 function __normalizeTheme(theme) {
   return theme === 'dark' ? 'dark' : 'light';
 }
 
+function getThemeStorageScope() {
+  const explicitScope = String(document.querySelector('input[name=theme_scope]')?.value ?? '').trim();
+  if (explicitScope) return explicitScope;
+
+  const fallbackClientId = String(document.querySelector('input[name=cid]')?.value ?? '').trim();
+  if (fallbackClientId) return `cid:${fallbackClientId}`;
+
+  const titleScope = String(document.title || '').trim();
+  return titleScope || 'default';
+}
+
+function getThemeStorageKey() {
+  return `${THEME_STORAGE_KEY_PREFIX}:${getThemeStorageScope()}`;
+}
+
 function __readStoredTheme() {
   try {
-    return localStorage.getItem(THEME_STORAGE_KEY);
+    return localStorage.getItem(getThemeStorageKey());
   } catch (e) {
     return null;
   }
@@ -6136,7 +5964,7 @@ function __readStoredTheme() {
 
 function __saveTheme(theme) {
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, __normalizeTheme(theme));
+    localStorage.setItem(getThemeStorageKey(), __normalizeTheme(theme));
   } catch (e) {
     // no-op when localStorage is blocked
   }
@@ -6198,17 +6026,45 @@ function __netEnd() {
 
 
 /* ---------- TOKEN MANAGEMENT ---------- */
+function getClientId() {
+  return String(document.querySelector('input[name=cid]')?.value ?? '').trim();
+}
+
+function getScopedAccessTokenStorageKey() {
+  const clientId = getClientId();
+  return clientId ? `access_token:${clientId}` : 'access_token';
+}
+
 function getToken() {
-  return (
-    localStorage.getItem('access_token') ||
-    (document.querySelector('input[name=access_token]')?.value ?? '')
-  );
+  const embeddedToken = String(document.querySelector('input[name=access_token]')?.value ?? '').trim();
+  if (embeddedToken) return embeddedToken;
+
+  const scopedToken = String(localStorage.getItem(getScopedAccessTokenStorageKey()) || '').trim();
+  if (scopedToken) return scopedToken;
+
+  return String(localStorage.getItem('access_token') || '').trim();
 }
 
 function setToken(t) {
-  localStorage.setItem('access_token', t);
+  const normalizedToken = String(t || '').trim();
+  const scopedStorageKey = getScopedAccessTokenStorageKey();
+
+  if (normalizedToken) {
+    localStorage.setItem(scopedStorageKey, normalizedToken);
+    localStorage.setItem('access_token', normalizedToken);
+  } else {
+    localStorage.removeItem(scopedStorageKey);
+    localStorage.removeItem('access_token');
+  }
+
   const input = document.querySelector('input[name=access_token]');
-  if (input) input.value = t;
+  if (input) input.value = normalizedToken;
+}
+
+function bootstrapEmbeddedAccessToken() {
+  const embeddedToken = String(document.querySelector('input[name=access_token]')?.value ?? '').trim();
+  if (!embeddedToken) return;
+  localStorage.setItem(getScopedAccessTokenStorageKey(), embeddedToken);
 }
 
 async function refreshToken() {
@@ -6315,13 +6171,137 @@ function appendFilterParams(url) {
 }
 
 const __localColumnFilterStateByDl = new WeakMap();
+const ESM_SUPPRESSED_COLUMNS = new Set(['media-company']);
+
+const ESM_PROGRAMMER_DIMENSION_DESCRIPTIONS = new Map([
+  ['year', '4-digit year'],
+  ['month', 'Month'],
+  ['day', 'Day'],
+  ['hour', 'Hour of day'],
+  ['minute', 'Minute of hour'],
+  ['dc', 'Data center'],
+  ['proxy', 'Proxy MVPD'],
+  ['mvpd', 'MVPD granting entitlement'],
+  ['requestor-id', 'Requestor ID used for entitlement'],
+  ['channel', 'Channel website'],
+  ['resource-id', 'Resource title'],
+  ['device', 'Device platform'],
+  ['eap', 'External auth provider'],
+  ['os-family', 'OS family'],
+  ['browser-family', 'Browser family'],
+  ['cdt', 'Clientless device type'],
+  ['platform-version', 'Clientless SDK version'],
+  ['os-type', 'OS'],
+  ['browser-version', 'Browser version'],
+  ['nsdk', 'Client SDK'],
+  ['nsdk-version', 'Adobe Pass SDK version'],
+  ['event', 'Adobe Pass event name'],
+  ['reason', 'Failure reason'],
+  ['sso-type', 'SSO mechanism'],
+  ['platform', 'Device platform'],
+  ['application-name', 'DCR app name'],
+  ['application-version', 'DCR app version'],
+  ['customer-app', 'Custom application ID'],
+  ['content-category', 'Content category requested'],
+  ['api', 'API entry point']
+]);
+
+const ESM_MVPD_DIMENSION_DESCRIPTIONS = new Map([
+  ['year', '4-digit year'],
+  ['month', 'Month'],
+  ['day', 'Day'],
+  ['hour', 'Hour of day'],
+  ['minute', 'Minute of hour'],
+  ['mvpd', 'MVPD ID'],
+  ['requestor-id', 'Requestor ID'],
+  ['eap', 'External auth provider'],
+  ['cdt', 'Clientless device type'],
+  ['sdk-type', 'Flash, HTML5, Android native, iOS, Clientless, etc.'],
+  ['platform', 'Device platform'],
+  ['nsdk', 'Client SDK'],
+  ['nsdk-version', 'Adobe Pass SDK version']
+]);
+
+function __normalizeColumnName(columnName) {
+  return String(columnName || '').trim().toLowerCase();
+}
+
+function __isSuppressedEsmColumn(columnName) {
+  const normalized = __normalizeColumnName(columnName);
+  return Boolean(normalized) && ESM_SUPPRESSED_COLUMNS.has(normalized);
+}
+
+function __normalizeDimensionName(columnName) {
+  return __normalizeColumnName(columnName);
+}
+
+function __resolveDimensionCatalogForHref(href) {
+  const normalizedHref = String(href || '').toLowerCase();
+  if (normalizedHref.includes('/esm/v3/mvpd/')) return ESM_MVPD_DIMENSION_DESCRIPTIONS;
+  return ESM_PROGRAMMER_DIMENSION_DESCRIPTIONS;
+}
+
+function __getDimensionDescription(columnName, href = '') {
+  const key = __normalizeDimensionName(columnName);
+  if (!key) return '';
+  if (__isSuppressedEsmColumn(key)) return '';
+  const primary = __resolveDimensionCatalogForHref(href);
+  if (primary.has(key)) return String(primary.get(key) || '').trim();
+  const secondary = primary === ESM_MVPD_DIMENSION_DESCRIPTIONS
+    ? ESM_PROGRAMMER_DIMENSION_DESCRIPTIONS
+    : ESM_MVPD_DIMENSION_DESCRIPTIONS;
+  return String(secondary.get(key) || '').trim();
+}
+
+function __isFilterableDimension(columnName, href = '') {
+  return Boolean(__getDimensionDescription(columnName, href));
+}
 
 function __parseColumnCloudTokens(rawText) {
   return String(rawText || '')
     .split(/\r?\n/)
     .map(v => v.trim())
     .filter(Boolean)
-    .filter(v => !/^no report columns$/i.test(v));
+    .filter(v => !/^no report columns$/i.test(v))
+    .filter(v => !__isSuppressedEsmColumn(v));
+}
+
+function __getFilterableDimensionsFromHref(href = '') {
+  const rawHref = String(href || '').trim();
+  if (!rawHref) return [];
+
+  let path = '';
+  try {
+    const parsed = new URL(rawHref, window.location.href);
+    path = String(parsed.pathname || '');
+  } catch {
+    path = rawHref.split('?')[0] || '';
+  }
+
+  const segments = path
+    .split('/')
+    .map(seg => decodeURIComponent(String(seg || '').trim().toLowerCase()))
+    .filter(Boolean);
+  if (!segments.length) return [];
+
+  const v3Index = segments.findIndex((seg, idx) => seg === 'v3' && segments[idx - 1] === 'esm');
+  const startIndex = (v3Index >= 0) ? (v3Index + 1) : 0;
+  let dimensionSegments = segments.slice(startIndex);
+  if (dimensionSegments[0] === 'media-company' || dimensionSegments[0] === 'mvpd') {
+    dimensionSegments = dimensionSegments.slice(1);
+  }
+
+  const orderedUnique = [];
+  const seen = new Set();
+  dimensionSegments.forEach(seg => {
+    if (__isSuppressedEsmColumn(seg)) return;
+    if (!__isFilterableDimension(seg, rawHref)) return;
+    if (seen.has(seg)) return;
+    seen.add(seg);
+    orderedUnique.push(seg);
+  });
+
+  return orderedUnique;
 }
 
 function __compareColumnValues(a, b) {
@@ -6337,17 +6317,26 @@ function __getLocalColumnFilterState(dl) {
   if (__localColumnFilterStateByDl.has(dl)) return __localColumnFilterStateByDl.get(dl);
 
   const dd = dl.querySelector('.col-list');
+  const anchor = dl.querySelector('a');
+  const baselineHref = String(anchor?.href || '');
   const rawText = dd?.innerText || '';
+  const hrefDimensions = __getFilterableDimensionsFromHref(baselineHref);
+  const staticDimensions = __parseColumnCloudTokens(rawText)
+    .filter(col => __isFilterableDimension(col, baselineHref));
+  const sanitizedRawText = (hrefDimensions.length ? hrefDimensions : staticDimensions).join('\n');
 
   const state = {
     dl,
     dd,
-    rawText,
+    rawText: sanitizedRawText,
     activeColumn: null,
     activeChipEl: null,
     hasBaselineData: false,
     selectedByColumn: new Map(),
     distinctByColumn: new Map(),
+    descriptionByColumn: new Map(),
+    baselineColumns: [],
+    baselineHref,
     cloudEl: null,
     pickerWrap: null,
     pickerSelect: null,
@@ -6356,7 +6345,8 @@ function __getLocalColumnFilterState(dl) {
   };
 
   if (dd) {
-    dd.dataset.searchText = rawText;
+    dd.textContent = sanitizedRawText || 'No report columns';
+    dd.dataset.searchText = sanitizedRawText;
     dd.dataset.colCloud = '0';
   }
 
@@ -6369,18 +6359,23 @@ function __updateLocalColumnMenuVisualState(state) {
   const pickerOpen = !!state.pickerWrap && !state.pickerWrap.hidden;
   state.cloudEl.querySelectorAll('.col-chip').forEach(chip => {
     const col = chip.dataset.column || '';
+    const isFilterable = chip.dataset.filterable === '1';
     const trigger = chip.querySelector('.col-chip-trigger');
-    const count = state.selectedByColumn.get(col)?.size || 0;
-    chip.classList.toggle('col-chip-active', pickerOpen && state.activeColumn === col);
-    chip.classList.toggle('col-chip-filtered', count > 0);
-    if (trigger) {
+    const count = isFilterable ? (state.selectedByColumn.get(col)?.size || 0) : 0;
+    chip.classList.toggle('col-chip-active', isFilterable && pickerOpen && state.activeColumn === col);
+    chip.classList.toggle('col-chip-filtered', isFilterable && count > 0);
+    const description = String(chip.dataset.description || '').trim();
+    const titleBase = description || col;
+    const title = (isFilterable && count > 0)
+      ? `${titleBase} (${count} selected)`
+      : titleBase;
+    if (trigger && isFilterable) {
       trigger.textContent = count > 0 ? `${col} (${count})` : col;
     }
-    const title = count
-      ? `Filter this table by ${col} (${count} selected)`
-      : `Filter this table by ${col}`;
     chip.title = title;
     if (trigger) trigger.title = title;
+    const label = chip.querySelector('.col-chip-label');
+    if (label) label.title = title;
   });
 }
 
@@ -6491,7 +6486,10 @@ function __renderLocalColumnPicker(state, columnName) {
   const selected = state.selectedByColumn.get(col) || new Set();
 
   state.pickerSelect.innerHTML = '';
-  state.pickerSelect.title = `Filter by ${col}`;
+  const pickerDescription = String(
+    state.descriptionByColumn.get(col) || __getDimensionDescription(col, state.baselineHref) || ''
+  ).trim();
+  state.pickerSelect.title = pickerDescription || `Filter by ${col}`;
 
   if (!values.length) {
     const opt = document.createElement('option');
@@ -6561,6 +6559,9 @@ function __deactivateLocalColumnFilterUi(dl, { clearState = true } = {}) {
     state.hasBaselineData = false;
     state.selectedByColumn.clear();
     state.distinctByColumn.clear();
+    state.descriptionByColumn.clear();
+    state.baselineColumns = [];
+    state.baselineHref = '';
   } else {
     __closeLocalColumnPicker(state);
   }
@@ -6601,27 +6602,42 @@ function __activateLocalColumnFilterUi(dl, rows) {
   }
 
   if (!state.hasBaselineData) {
-    const sampleColumns = Object.keys(sample).filter(Boolean);
+    const sampleColumns = Object.keys(sample)
+      .filter(Boolean)
+      .filter(col => !__isSuppressedEsmColumn(col));
     if (!sampleColumns.length) {
       __deactivateLocalColumnFilterUi(dl, { clearState: true });
       return;
     }
 
     const firstDistinct = __buildDistinctValuesForColumns(rows, sampleColumns);
-    const usableColumns = sampleColumns.filter(col => (firstDistinct.get(col) || []).length > 0);
-    if (!usableColumns.length) {
+    const baselineColumns = sampleColumns.filter(col => (firstDistinct.get(col) || []).length > 0);
+    if (!baselineColumns.length) {
       __deactivateLocalColumnFilterUi(dl, { clearState: true });
       return;
     }
 
+    const filterableColumns = baselineColumns.filter(col => __isFilterableDimension(col, state.baselineHref));
+    if (!filterableColumns.length) {
+      __deactivateLocalColumnFilterUi(dl, { clearState: true });
+      return;
+    }
+    const descriptionByColumn = new Map(
+      filterableColumns.map(col => [col, __getDimensionDescription(col, state.baselineHref)])
+    );
+
     // Persist baseline values from first successful run for this table.
     state.distinctByColumn = new Map(
-      usableColumns.map(col => [col, firstDistinct.get(col) || []])
+      filterableColumns.map(col => [col, firstDistinct.get(col) || []])
     );
+    state.descriptionByColumn = descriptionByColumn;
+    state.baselineColumns = filterableColumns;
     state.hasBaselineData = true;
   }
 
-  const usableColumns = [...state.distinctByColumn.keys()];
+  const usableColumns = Array.isArray(state.baselineColumns)
+    ? state.baselineColumns.filter(Boolean)
+    : [...state.distinctByColumn.keys()];
   if (!usableColumns.length) {
     __deactivateLocalColumnFilterUi(dl, { clearState: true });
     return;
@@ -6642,9 +6658,15 @@ function __activateLocalColumnFilterUi(dl, rows) {
   cloud.className = 'col-chip-cloud';
 
   usableColumns.forEach(col => {
+    const values = state.distinctByColumn.get(col) || [];
+    if (!values.length) return;
+
     const chip = document.createElement('div');
     chip.className = 'col-chip';
     chip.dataset.column = col;
+    const description = String(state.descriptionByColumn.get(col) || '').trim();
+    if (description) chip.dataset.description = description;
+    chip.dataset.filterable = '1';
 
     const trigger = document.createElement('button');
     trigger.type = 'button';
@@ -6658,10 +6680,15 @@ function __activateLocalColumnFilterUi(dl, rows) {
     trigger.addEventListener('click', (event) => {
       invokeToggle(event);
     });
-
     chip.appendChild(trigger);
+
     cloud.appendChild(chip);
   });
+
+  if (!cloud.childElementCount) {
+    __deactivateLocalColumnFilterUi(dl, { clearState: true });
+    return;
+  }
 
   const pickerWrap = document.createElement('div');
   pickerWrap.className = 'local-col-picker-wrap';
@@ -6686,7 +6713,7 @@ function __activateLocalColumnFilterUi(dl, rows) {
   state.cloudEl = cloud;
   state.pickerWrap = pickerWrap;
   state.pickerSelect = pickerSelect;
-  if (state.activeColumn && usableColumns.includes(state.activeColumn)) {
+  if (state.activeColumn && state.distinctByColumn.has(state.activeColumn) && usableColumns.includes(state.activeColumn)) {
     const matchingChip = [...cloud.querySelectorAll('.col-chip')]
       .find(chip => chip.dataset.column === state.activeColumn) || null;
     state.activeChipEl = matchingChip;
@@ -6747,45 +6774,50 @@ function __updateColumnChipHighlights(dd, term) {
 }
 
 
+function __getEmbeddedRequestorIds() {
+  const encoded = String(document.querySelector('input[name=requestor_ids_json]')?.value ?? '').trim();
+  if (!encoded) return [];
+  try {
+    const parsed = JSON.parse(decodeURIComponent(encoded));
+    if (!Array.isArray(parsed)) return [];
+    const unique = new Set();
+    parsed.forEach((value) => {
+      const normalized = String(value || '').trim();
+      if (normalized) unique.add(normalized);
+    });
+    return [...unique].sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
+  } catch {
+    return [];
+  }
+}
+
 async function loadRequestorIds() {
-  const url = 'https://mgmt.auth.adobe.com/esm/v3/media-company/year?requestor-id';
-
-  const r = await fetchWithRefresh(url);
-  if (!r.ok) return;
-
-  const j = await r.json();
-  if (!j.report || !Array.isArray(j.report)) return;
-
-  const ids = new Set();
-  let mediaCompany = null;
-
-  j.report.forEach(row => {
-    if (row['requestor-id']) ids.add(row['requestor-id']);
-    if (!mediaCompany && row['media-company']) mediaCompany = row['media-company'];
-  });
-
-  if (mediaCompany) document.title = `ESM3 FINDIT — ${mediaCompany}`;
-
   const sel = document.getElementById('fltr_requestorid');
   if (!sel) return;
 
-  [...ids]
-    .sort()
-    .forEach((id, idx) => {
-      const o = document.createElement('option');
-      o.value = id;
-      o.textContent = id;
+  sel.innerHTML = '';
+  const requestorIds = __getEmbeddedRequestorIds();
+  if (!requestorIds.length) {
+    sel.disabled = true;
+    return;
+  }
 
-      // Subtle alternating banding for readability.
-      const isOdd = (idx % 2 === 1);
-      const cls = isOdd ? 'req-tone-b' : 'req-tone-a';
-      o.classList.add(cls);
+  sel.disabled = false;
+  requestorIds.forEach((id, idx) => {
+    const o = document.createElement('option');
+    o.value = id;
+    o.textContent = id;
 
-      // Inline fallback for browsers that ignore <option> class styling.
-      o.style.backgroundColor = isOdd ? 'var(--table-alt)' : 'var(--table-row)';
+    // Subtle alternating banding for readability.
+    const isOdd = (idx % 2 === 1);
+    const cls = isOdd ? 'req-tone-b' : 'req-tone-a';
+    o.classList.add(cls);
 
-      sel.appendChild(o);
-    });
+    // Inline fallback for browsers that ignore <option> class styling.
+    o.style.backgroundColor = isOdd ? 'var(--table-alt)' : 'var(--table-row)';
+
+    sel.appendChild(o);
+  });
 }
 
 
@@ -7234,6 +7266,22 @@ function resetList() {
   window.location.reload();
 }
 
+function __sanitizeAllStaticColumnLists() {
+  document.querySelectorAll('dl').forEach(dl => {
+    const dd = dl.querySelector('dd.col-list');
+    if (!dd) return;
+    const anchor = dl.querySelector('a');
+    const baselineHref = String(anchor?.href || '');
+    const hrefDimensions = __getFilterableDimensionsFromHref(baselineHref);
+    const staticDimensions = __parseColumnCloudTokens(dd.innerText || dd.textContent || '')
+      .filter(col => __isFilterableDimension(col, baselineHref));
+    const sanitizedRawText = (hrefDimensions.length ? hrefDimensions : staticDimensions).join('\n');
+    dd.textContent = sanitizedRawText || 'No report columns';
+    dd.dataset.searchText = sanitizedRawText;
+    dd.dataset.colCloud = '0';
+  });
+}
+
 /* ---------- TABLE + SORT LOGIC ---------- */
 const METRIC_COLUMNS = new Set([
   'authn-attempts', 'authn-successful', 'authn-pending', 'authn-failed',
@@ -7470,6 +7518,9 @@ async function runEsm(a) {
   /* Build request URL (time-aware + filter aware) */
   const dl = a.closest('dl');
   const localColumnState = __getLocalColumnFilterState(dl);
+  if (localColumnState) {
+    localColumnState.baselineHref = String(a.href || '');
+  }
   const timedBase = appendTimeParams(a.href, a);
   const jsonBase = appendFilterParams(timedBase + '&format=json');
   const jsonUrl = __appendLocalColumnFilterParams(jsonBase, dl);
@@ -7518,6 +7569,7 @@ async function runEsm(a) {
     if (includeCsv) {
       const csv = document.createElement('a');
       csv.href = '#';
+      csv.className = 'esm-footer-csv-link';
       csv.textContent = 'CSV';
       csv.onclick = e => {
         e.preventDefault();
@@ -7526,21 +7578,23 @@ async function runEsm(a) {
       footer.appendChild(csv);
     }
 
-    const unfilterBtn = document.createElement('button');
-    unfilterBtn.type = 'button';
-    unfilterBtn.className = 'esm-action-btn esm-unfilter';
-    unfilterBtn.innerHTML = '<svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>';
-    unfilterBtn.setAttribute('aria-label', 'Un-filter and rerun this ESM table');
-    unfilterBtn.title = hasLocalFilters
-      ? 'Clear this table’s local column filters and rerun this ESM URL'
-      : 'Rerun this ESM URL from its original Click URL state';
-    unfilterBtn.style.marginLeft = 'auto';
-    unfilterBtn.onclick = async () => {
-      unfilterBtn.disabled = true;
-      __clearLocalColumnFilters(dl);
-      await runEsm(a);
-    };
-    footer.appendChild(unfilterBtn);
+    const footerControls = document.createElement('div');
+    footerControls.className = 'esm-footer-controls';
+
+    if (hasLocalFilters) {
+      const unfilterBtn = document.createElement('button');
+      unfilterBtn.type = 'button';
+      unfilterBtn.className = 'esm-action-btn esm-unfilter';
+      unfilterBtn.innerHTML = '<svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>';
+      unfilterBtn.setAttribute('aria-label', 'Un-filter and rerun this ESM table');
+      unfilterBtn.title = 'Clear this table’s local column filters and rerun this ESM URL';
+      unfilterBtn.onclick = async () => {
+        unfilterBtn.disabled = true;
+        __clearLocalColumnFilters(dl);
+        await runEsm(a);
+      };
+      footerControls.appendChild(unfilterBtn);
+    }
 
     if (includeCsv) {
       const lastModifiedLabel = document.createElement('span');
@@ -7554,8 +7608,7 @@ async function runEsm(a) {
       } else {
         lastModifiedLabel.textContent = 'Last-Modified: (real-time)';
       }
-      lastModifiedLabel.style.marginLeft = '8px';
-      footer.appendChild(lastModifiedLabel);
+      footerControls.appendChild(lastModifiedLabel);
     }
 
     const deleteDataBtn = document.createElement('button');
@@ -7564,16 +7617,15 @@ async function runEsm(a) {
     deleteDataBtn.innerHTML = '<svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
     deleteDataBtn.setAttribute('aria-label', 'Delete data table');
     deleteDataBtn.title = 'Delete this table data';
-    if (!includeCsv && !hasLocalFilters) {
-      deleteDataBtn.style.marginLeft = 'auto';
-    }
     deleteDataBtn.onclick = () => {
       host.innerHTML = '';
       if (!localColumnState) return;
       __closeLocalColumnPicker(localColumnState);
       __updateLocalColumnMenuVisualState(localColumnState);
     };
-    footer.appendChild(deleteDataBtn);
+    footerControls.appendChild(deleteDataBtn);
+
+    footer.appendChild(footerControls);
 
     ftd.appendChild(footer);
     ftRow.appendChild(ftd);
@@ -7595,21 +7647,21 @@ async function runEsm(a) {
     messageText.textContent = msg || 'No data';
     inline.appendChild(messageText);
 
-    const unfilterBtn = document.createElement('button');
-    unfilterBtn.type = 'button';
-    unfilterBtn.className = 'esm-action-btn esm-unfilter';
-    unfilterBtn.innerHTML = '<svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>';
-    unfilterBtn.setAttribute('aria-label', 'Remove local column filters and rerun this ESM table');
-    unfilterBtn.title = __hasLocalColumnFilters(dl)
-      ? 'Clear this table’s local column filters and rerun this ESM URL'
-      : 'Rerun this ESM URL from its original Click URL state';
-    unfilterBtn.style.marginLeft = '8px';
-    unfilterBtn.onclick = async () => {
-      unfilterBtn.disabled = true;
-      __clearLocalColumnFilters(dl);
-      await runEsm(a);
-    };
-    inline.appendChild(unfilterBtn);
+    if (__hasLocalColumnFilters(dl)) {
+      const unfilterBtn = document.createElement('button');
+      unfilterBtn.type = 'button';
+      unfilterBtn.className = 'esm-action-btn esm-unfilter';
+      unfilterBtn.innerHTML = '<svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>';
+      unfilterBtn.setAttribute('aria-label', 'Remove local column filters and rerun this ESM table');
+      unfilterBtn.title = 'Clear this table’s local column filters and rerun this ESM URL';
+      unfilterBtn.style.marginLeft = '8px';
+      unfilterBtn.onclick = async () => {
+        unfilterBtn.disabled = true;
+        __clearLocalColumnFilters(dl);
+        await runEsm(a);
+      };
+      inline.appendChild(unfilterBtn);
+    }
 
     td1.appendChild(inline);
     tr.appendChild(td1);
@@ -7678,7 +7730,7 @@ async function runEsm(a) {
     state.displayCols = Object.keys(row0).filter(c =>
       !METRIC_COLUMNS.has(c) &&
       !DATE_PARTS.includes(c) &&
-      c !== 'media-company'
+      !__isSuppressedEsmColumn(c)
     );
 
     /* Header list */
@@ -7814,6 +7866,7 @@ if (themeToggle) {
 }
 
 initTheme();
+__sanitizeAllStaticColumnLists();
 
 const searchTextInput = document.getElementById('searchText');
 if (searchTextInput) {
@@ -7826,6 +7879,7 @@ if (searchTextInput) {
 }
 
 enableMvpdHoverHint();
+bootstrapEmbeddedAccessToken();
 loadRequestorIds();
 </script>
 </body>

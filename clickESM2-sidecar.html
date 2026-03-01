@@ -7526,21 +7526,21 @@ async function runEsm(a) {
       footer.appendChild(csv);
     }
 
-    const unfilterBtn = document.createElement('button');
-    unfilterBtn.type = 'button';
-    unfilterBtn.className = 'esm-action-btn esm-unfilter';
-    unfilterBtn.innerHTML = '<svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>';
-    unfilterBtn.setAttribute('aria-label', 'Un-filter and rerun this ESM table');
-    unfilterBtn.title = hasLocalFilters
-      ? 'Clear this table’s local column filters and rerun this ESM URL'
-      : 'Rerun this ESM URL from its original Click URL state';
-    unfilterBtn.style.marginLeft = 'auto';
-    unfilterBtn.onclick = async () => {
-      unfilterBtn.disabled = true;
-      __clearLocalColumnFilters(dl);
-      await runEsm(a);
-    };
-    footer.appendChild(unfilterBtn);
+    if (hasLocalFilters) {
+      const unfilterBtn = document.createElement('button');
+      unfilterBtn.type = 'button';
+      unfilterBtn.className = 'esm-action-btn esm-unfilter';
+      unfilterBtn.innerHTML = '<svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>';
+      unfilterBtn.setAttribute('aria-label', 'Un-filter and rerun this ESM table');
+      unfilterBtn.title = 'Clear this table’s local column filters and rerun this ESM URL';
+      unfilterBtn.style.marginLeft = 'auto';
+      unfilterBtn.onclick = async () => {
+        unfilterBtn.disabled = true;
+        __clearLocalColumnFilters(dl);
+        await runEsm(a);
+      };
+      footer.appendChild(unfilterBtn);
+    }
 
     if (includeCsv) {
       const lastModifiedLabel = document.createElement('span');
@@ -7595,21 +7595,21 @@ async function runEsm(a) {
     messageText.textContent = msg || 'No data';
     inline.appendChild(messageText);
 
-    const unfilterBtn = document.createElement('button');
-    unfilterBtn.type = 'button';
-    unfilterBtn.className = 'esm-action-btn esm-unfilter';
-    unfilterBtn.innerHTML = '<svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>';
-    unfilterBtn.setAttribute('aria-label', 'Remove local column filters and rerun this ESM table');
-    unfilterBtn.title = __hasLocalColumnFilters(dl)
-      ? 'Clear this table’s local column filters and rerun this ESM URL'
-      : 'Rerun this ESM URL from its original Click URL state';
-    unfilterBtn.style.marginLeft = '8px';
-    unfilterBtn.onclick = async () => {
-      unfilterBtn.disabled = true;
-      __clearLocalColumnFilters(dl);
-      await runEsm(a);
-    };
-    inline.appendChild(unfilterBtn);
+    if (__hasLocalColumnFilters(dl)) {
+      const unfilterBtn = document.createElement('button');
+      unfilterBtn.type = 'button';
+      unfilterBtn.className = 'esm-action-btn esm-unfilter';
+      unfilterBtn.innerHTML = '<svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>';
+      unfilterBtn.setAttribute('aria-label', 'Remove local column filters and rerun this ESM table');
+      unfilterBtn.title = 'Clear this table’s local column filters and rerun this ESM URL';
+      unfilterBtn.style.marginLeft = '8px';
+      unfilterBtn.onclick = async () => {
+        unfilterBtn.disabled = true;
+        __clearLocalColumnFilters(dl);
+        await runEsm(a);
+      };
+      inline.appendChild(unfilterBtn);
+    }
 
     td1.appendChild(inline);
     tr.appendChild(td1);

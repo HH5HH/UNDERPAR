@@ -22,6 +22,8 @@ const BUILD_INFO_REQUEST_TYPE = "underpar:getBuildInfo";
 const LEGACY_BUILD_INFO_REQUEST_TYPE = "mincloudlogin:getBuildInfo";
 const FETCH_AVATAR_REQUEST_TYPE = "underpar:fetchAvatarDataUrl";
 const LEGACY_FETCH_AVATAR_REQUEST_TYPE = "mincloudlogin:fetchAvatarDataUrl";
+const IMS_FETCH_REQUEST_TYPE = "underpar:imsFetch";
+const LEGACY_IMS_FETCH_REQUEST_TYPE = "mincloudlogin:imsFetch";
 const DEBUG_MESSAGE_TYPE_PREFIX = "underpardebug:";
 const LEGACY_DEBUG_MESSAGE_TYPE_PREFIX = "minclouddebug:";
 const DEBUG_DEVTOOLS_PORT_NAME = "underpardebug-devtools";
@@ -563,6 +565,95 @@ async function fetchAvatarAsDataUrl(url, accessToken = "") {
   }
 
   throw lastError || new Error("Unable to fetch avatar.");
+}
+
+function isAllowedImsRelayUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return false;
+  }
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:") {
+      return false;
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (host === "ims-na1.adobelogin.com" || host.endsWith(".adobelogin.com")) {
+      return true;
+    }
+    if (host === "auth.services.adobe.com" || host.endsWith(".auth.services.adobe.com")) {
+      return true;
+    }
+    if (host === "idg.adobe.com" || host.endsWith(".idg.adobe.com")) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeImsRelayHeaders(headersLike) {
+  if (!headersLike || typeof headersLike !== "object") {
+    return {};
+  }
+  const output = {};
+  for (const [keyRaw, valueRaw] of Object.entries(headersLike)) {
+    const key = String(keyRaw || "").trim();
+    if (!key) {
+      continue;
+    }
+    output[key] = String(valueRaw ?? "");
+  }
+  return output;
+}
+
+function normalizeImsRelayCredentials(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "include" || normalized === "same-origin" || normalized === "omit") {
+    return normalized;
+  }
+  return "omit";
+}
+
+async function fetchImsRelayResponse(payload = {}) {
+  const requestUrl = String(payload?.url || "").trim();
+  if (!isAllowedImsRelayUrl(requestUrl)) {
+    throw new Error("IMS relay blocked: unsupported URL.");
+  }
+
+  const method = String(payload?.method || "GET").trim().toUpperCase();
+  if (method !== "GET" && method !== "POST") {
+    throw new Error(`IMS relay blocked: unsupported method "${method}".`);
+  }
+
+  const credentials = normalizeImsRelayCredentials(payload?.credentials);
+  const headers = normalizeImsRelayHeaders(payload?.headers);
+  const bodyText = typeof payload?.body === "string" ? payload.body : "";
+
+  const response = await fetch(requestUrl, {
+    method,
+    credentials,
+    cache: "no-store",
+    redirect: "follow",
+    headers,
+    body: method === "POST" ? bodyText : undefined,
+  });
+
+  const headersObject = {};
+  response.headers.forEach((value, key) => {
+    headersObject[key] = value;
+  });
+
+  return {
+    ok: response.ok,
+    status: Number(response.status || 0),
+    statusText: String(response.statusText || ""),
+    url: String(response.url || requestUrl),
+    redirected: Boolean(response.redirected),
+    headers: headersObject,
+    bodyText: await response.text().catch(() => ""),
+  };
 }
 
 async function syncBuildInfo(trigger) {
@@ -1816,6 +1907,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void fetchAvatarAsDataUrl(message?.url || "", message?.accessToken || "")
       .then((dataUrl) => {
         sendResponse({ ok: true, dataUrl });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+
+    return true;
+  }
+
+  if (message?.type === IMS_FETCH_REQUEST_TYPE || message?.type === LEGACY_IMS_FETCH_REQUEST_TYPE) {
+    void fetchImsRelayResponse(message || {})
+      .then((response) => {
+        sendResponse({ ok: true, response });
       })
       .catch((error) => {
         sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });

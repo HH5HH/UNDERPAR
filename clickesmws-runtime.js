@@ -1544,15 +1544,17 @@
 
     state.batchRunning = true;
     syncToolbarButtons();
-    setStatus(`Re-running ${cards.length} report(s)...`);
+    setStatus(`Reloading ${cards.length} report(s)...`);
 
-    for (const cardState of cards) {
-      await rerunCard(cardState, { suppressStatus: true });
+    try {
+      for (const cardState of cards) {
+        await rerunCard(cardState, { suppressStatus: true });
+      }
+      setStatus(`Re-run completed for ${cards.length} report(s).`);
+    } finally {
+      state.batchRunning = false;
+      syncToolbarButtons();
     }
-
-    state.batchRunning = false;
-    syncToolbarButtons();
-    setStatus(`Re-run completed for ${cards.length} report(s).`);
   }
 
   function hydrateCardsFromPayload() {
