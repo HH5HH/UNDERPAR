@@ -783,7 +783,9 @@ async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
   }
 
   await rerunAllCards({
-    reason: "programmer-switch",
+    // Keep media-company switch refresh behavior aligned with the same code path
+    // users trigger via the workspace Re-Run All button.
+    reason: "manual-reload",
   });
   return true;
 }

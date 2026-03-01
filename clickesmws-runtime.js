@@ -65,6 +65,7 @@
     exportMeta: document.getElementById("workspace-export-meta"),
     makeWorkspaceButton: document.getElementById("workspace-make-clickesmws"),
     rerunAllButton: document.getElementById("workspace-rerun-all"),
+    rerunIndicator: document.getElementById("workspace-rerun-indicator"),
     clearButton: document.getElementById("workspace-clear-all"),
   };
 
@@ -157,6 +158,31 @@
     }
     if (els.clearButton) {
       els.clearButton.disabled = isBusy || !hasCards;
+    }
+    syncRerunNetworkIndicator();
+  }
+
+  function isWorkspaceNetworkBusy() {
+    if (state.batchRunning) {
+      return true;
+    }
+    for (const cardState of state.cardsById.values()) {
+      if (cardState?.running === true) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function syncRerunNetworkIndicator() {
+    const isBusy = isWorkspaceNetworkBusy();
+    if (els.rerunAllButton) {
+      els.rerunAllButton.classList.toggle("net-busy", isBusy);
+      els.rerunAllButton.setAttribute("aria-busy", isBusy ? "true" : "false");
+      els.rerunAllButton.title = isBusy ? "Re-run all (loading...)" : "Re-run all";
+    }
+    if (els.rerunIndicator) {
+      els.rerunIndicator.hidden = !isBusy;
     }
   }
 
