@@ -6,13 +6,13 @@
     <title>__UP_CLICK_CMU_TITLE__</title>
     <style>
       :root {
-        --bg: #f8f6f2;
+        --bg: #f2f9eb;
         --panel: #ffffff;
         --ink: #1f2229;
-        --muted: #5f6678;
-        --line: rgba(23, 36, 61, 0.14);
-        --accent: #0a7c66;
-        --accent-ink: #075a4a;
+        --muted: #346d0c;
+        --line: rgba(64, 129, 17, 0.24);
+        --accent: #408111;
+        --accent-ink: #346d0c;
         --warn: #a8431f;
       }
 
@@ -23,7 +23,7 @@
       body {
         margin: 0;
         font-family: "Adobe Clean", "Segoe UI", sans-serif;
-        background: linear-gradient(180deg, #faf8f4 0%, var(--bg) 100%);
+        background: linear-gradient(180deg, #fbfdf4 0%, var(--bg) 100%);
         color: var(--ink);
       }
 
@@ -164,9 +164,9 @@
       }
 
       .badge.ok {
-        color: #0b624f;
-        background: rgba(10, 124, 102, 0.12);
-        border-color: rgba(10, 124, 102, 0.26);
+        color: #3f5f1a;
+        background: rgba(64, 129, 17, 0.16);
+        border-color: rgba(82, 161, 25, 0.34);
       }
 
       .badge.err {
@@ -192,7 +192,106 @@
         margin: 0;
         font-size: 11px;
         color: var(--muted);
-        word-break: break-word;
+      }
+
+      .card-url-context {
+        display: grid;
+        gap: 4px;
+        width: 100%;
+      }
+
+      .card-url-path {
+        min-width: 0;
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .card-url-path-segment {
+        max-width: 100%;
+        color: var(--accent-ink);
+        font-size: 10.8px;
+        font-weight: 560;
+        white-space: nowrap;
+      }
+
+      .card-url-path-link {
+        text-decoration: none;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .card-url-path-link:hover {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .card-url-path-link:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px var(--line);
+        border-radius: 3px;
+      }
+
+      .card-url-path-segment-terminal {
+        font-weight: 700;
+        color: var(--ink);
+      }
+
+      .card-url-path-segment-empty {
+        color: var(--muted);
+        font-weight: 520;
+      }
+
+      .card-url-path-divider {
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      .card-url-query-cloud {
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 9px;
+      }
+
+      .card-url-query-chip {
+        display: inline-block;
+        max-width: 100%;
+        color: var(--muted);
+        font-size: 10.2px;
+        font-weight: 560;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .card-url-query-key {
+        font-weight: 700;
+        color: var(--accent-ink);
+      }
+
+      .card-url-query-eq {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .card-url-query-value {
+        display: inline-block;
+        max-width: 184px;
+        margin-left: 0;
+        color: var(--ink);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: bottom;
+      }
+
+      .card-url-query-empty,
+      .card-url-empty {
+        color: var(--muted);
+        font-style: italic;
       }
 
       .error-box {
@@ -226,8 +325,47 @@
       th {
         position: sticky;
         top: 0;
-        background: #f7f9fb;
+        background: #eff8e7;
         z-index: 1;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #121b09;
+          --panel: #1a2710;
+          --ink: #e6f5d8;
+          --muted: #a8c88b;
+          --line: rgba(100, 190, 35, 0.3);
+          --accent: #4e9a17;
+          --accent-ink: #64be23;
+          --warn: #ffbb9d;
+        }
+
+        body {
+          background: linear-gradient(180deg, #18240d 0%, var(--bg) 100%);
+        }
+
+        button.secondary,
+        a.link-btn {
+          background: #2e381c;
+          color: var(--ink);
+        }
+
+        .badge.ok {
+          color: #edf5d8;
+          background: rgba(78, 154, 23, 0.24);
+          border-color: rgba(100, 190, 35, 0.42);
+        }
+
+        .badge.err {
+          color: #ffd6c7;
+          background: rgba(198, 83, 39, 0.22);
+          border-color: rgba(198, 83, 39, 0.42);
+        }
+
+        th {
+          background: #243516;
+        }
       }
 
       .empty {
@@ -719,6 +857,277 @@
             .replaceAll("'", "&#39;");
         }
 
+        function safeDecodeUrlSegment(value) {
+          const text = String(value || "");
+          try {
+            return decodeURIComponent(text);
+          } catch {
+            return text;
+          }
+        }
+
+        function parseRawQueryPairs(urlValue) {
+          const raw = String(urlValue || "").trim();
+          if (!raw) {
+            return [];
+          }
+          const queryIndex = raw.indexOf("?");
+          if (queryIndex < 0) {
+            return [];
+          }
+          const hashIndex = raw.indexOf("#", queryIndex + 1);
+          const queryText = raw.slice(queryIndex + 1, hashIndex >= 0 ? hashIndex : undefined).trim();
+          if (!queryText) {
+            return [];
+          }
+          return queryText
+            .split("&")
+            .map((entry) => String(entry || "").trim())
+            .filter(Boolean)
+            .map((entry) => {
+              const equalsIndex = entry.indexOf("=");
+              if (equalsIndex < 0) {
+                return {
+                  key: safeDecodeUrlSegment(entry.replace(/\+/g, " ")),
+                  value: "",
+                  hasValue: false,
+                };
+              }
+              const key = safeDecodeUrlSegment(entry.slice(0, equalsIndex).replace(/\+/g, " "));
+              const value = entry.slice(equalsIndex + 1);
+              return {
+                key,
+                value,
+                hasValue: true,
+              };
+            });
+        }
+
+        function parseRequestContext(urlValue) {
+          const raw = String(urlValue || "").trim();
+          if (!raw) {
+            return {
+              fullUrl: "",
+              pathSegments: [],
+              queryPairs: [],
+            };
+          }
+
+          let fullUrl = raw;
+          let pathSegments = [];
+          try {
+            const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+            fullUrl = parsed.toString();
+            pathSegments = String(parsed.pathname || "")
+              .split("/")
+              .map((segment) => safeDecodeUrlSegment(segment.trim()))
+              .filter(Boolean);
+          } catch {
+            pathSegments = String(raw.split(/[?#]/, 1)[0] || "")
+              .split("/")
+              .map((segment) => safeDecodeUrlSegment(segment.trim()))
+              .filter(Boolean);
+          }
+
+          return {
+            fullUrl,
+            pathSegments,
+            queryPairs: parseRawQueryPairs(fullUrl),
+          };
+        }
+
+        function buildPathEndpointUrl(baseEndpointUrl, pathSegments, depth) {
+          const normalizedDepth = Number(depth);
+          if (!Number.isInteger(normalizedDepth) || normalizedDepth < 1) {
+            return "";
+          }
+          const normalizedSegments = (Array.isArray(pathSegments) ? pathSegments : [])
+            .map((segment) => String(segment || "").trim())
+            .filter(Boolean)
+            .slice(0, normalizedDepth);
+          if (normalizedSegments.length === 0) {
+            return "";
+          }
+
+          const targetPath = normalizedSegments.join("/");
+          const fallback = `${CM_REPORTS_BASE_URL}/${targetPath}`;
+          const rawBase = String(baseEndpointUrl || "").trim();
+          if (!rawBase) {
+            return fallback;
+          }
+          try {
+            const parsed = new URL(rawBase, CM_REPORTS_BASE_URL);
+            parsed.pathname = `/${targetPath}`;
+            parsed.search = "";
+            parsed.hash = "";
+            return parsed.toString();
+          } catch {
+            return fallback;
+          }
+        }
+
+        function buildInheritedRequestUrl(endpointUrl, sourceRequestUrl) {
+          const endpointRaw = String(endpointUrl || "").trim();
+          if (!endpointRaw) {
+            return "";
+          }
+
+          try {
+            const endpointParsed = new URL(endpointRaw, CM_REPORTS_BASE_URL);
+            endpointParsed.search = "";
+            endpointParsed.hash = "";
+
+            const sourceRaw = String(sourceRequestUrl || "").trim();
+            if (!sourceRaw) {
+              return endpointParsed.toString();
+            }
+            const sourceParsed = new URL(sourceRaw, CM_REPORTS_BASE_URL);
+            sourceParsed.searchParams.forEach((value, key) => {
+              endpointParsed.searchParams.append(key, value);
+            });
+            return endpointParsed.toString();
+          } catch {
+            return endpointRaw;
+          }
+        }
+
+        function getEndpointKey(urlValue) {
+          const raw = String(urlValue || "").trim();
+          if (!raw) {
+            return "";
+          }
+          try {
+            const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+            return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`.toLowerCase();
+          } catch {
+            return raw.split(/[?#]/, 1)[0].replace(/\/+$/, "").toLowerCase();
+          }
+        }
+
+        function getEndpointLabel(urlValue) {
+          const context = parseRequestContext(urlValue);
+          if (context.pathSegments.length > 0) {
+            return context.pathSegments[context.pathSegments.length - 1];
+          }
+          return "CMU Endpoint";
+        }
+
+        function buildUrlContextMarkup(urlValue, endpointUrl = "") {
+          const context = parseRequestContext(urlValue);
+          if (!context.fullUrl) {
+            return '<span class="card-url-empty">No CMU URL</span>';
+          }
+
+          const pathMarkup =
+            context.pathSegments.length > 0
+              ? context.pathSegments
+                  .map((segment, index) => {
+                    const segmentClass = `card-url-path-segment${index === context.pathSegments.length - 1 ? " card-url-path-segment-terminal" : ""}`;
+                    const segmentEndpointUrl = buildPathEndpointUrl(endpointUrl || context.fullUrl, context.pathSegments, index + 1);
+                    const segmentText = escapeHtml(segment);
+                    const segmentMarkup = segmentEndpointUrl
+                      ? `<a class="${segmentClass} card-url-path-link" href="${escapeHtml(segmentEndpointUrl)}" data-endpoint-url="${escapeHtml(
+                          segmentEndpointUrl
+                        )}" data-source-request-url="${escapeHtml(context.fullUrl)}">${segmentText}</a>`
+                      : `<span class="${segmentClass}">${segmentText}</span>`;
+                    return `${segmentMarkup}${index < context.pathSegments.length - 1 ? '<span class="card-url-path-divider">/</span>' : ""}`;
+                  })
+                  .join("")
+              : '<span class="card-url-path-segment card-url-path-segment-empty">cm</span>';
+
+          const queryMarkup =
+            context.queryPairs.length > 0
+              ? context.queryPairs
+                  .map((pair) => {
+                    const keyHtml = `<span class="card-url-query-key">${escapeHtml(pair.key)}</span>`;
+                    if (!pair.hasValue) {
+                      return `<span class="card-url-query-chip">${keyHtml}</span>`;
+                    }
+                    return `<span class="card-url-query-chip">${keyHtml}<span class="card-url-query-eq">=</span><span class="card-url-query-value">${escapeHtml(
+                      pair.value
+                    )}</span></span>`;
+                  })
+                  .join("")
+              : '<span class="card-url-query-empty">no-query</span>';
+
+          return `
+            <span class="card-url-context" aria-label="CMU request context">
+              <span class="card-url-path" aria-label="CMU path">${pathMarkup}</span>
+              <span class="card-url-query-cloud" aria-label="CMU query context">${queryMarkup}</span>
+            </span>
+          `;
+        }
+
+        function normalizeEndpointRecord(endpoint) {
+          const normalizedUrl = normalizeEndpointUrl(endpoint?.url);
+          const label = String(endpoint?.label || "").trim() || getEndpointLabel(normalizedUrl);
+          const id = String(endpoint?.id || "").trim() || `cmu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+          return {
+            id,
+            label,
+            url: normalizedUrl,
+          };
+        }
+
+        function bindCardEndpoint(card, endpoint) {
+          const normalizedEndpoint = normalizeEndpointRecord(endpoint);
+          card.dataset.endpointId = normalizedEndpoint.id;
+          card.dataset.endpointUrl = normalizedEndpoint.url;
+          card.__underparEndpoint = normalizedEndpoint;
+          card.querySelector(".card-title").textContent = normalizedEndpoint.label;
+          const urlElement = card.querySelector(".url");
+          urlElement.innerHTML = buildUrlContextMarkup(normalizedEndpoint.url, normalizedEndpoint.url);
+          urlElement.title = normalizedEndpoint.url;
+          return normalizedEndpoint;
+        }
+
+        function setCardLoadingState(card) {
+          const badge = card.querySelector(".badge");
+          const meta = card.querySelector(".card-meta");
+          const tableWrap = card.querySelector(".table-wrap");
+          const empty = card.querySelector(".empty");
+          const error = card.querySelector(".error-box");
+          badge.textContent = "RUN";
+          badge.className = "badge";
+          meta.textContent = "Running request...";
+          tableWrap.hidden = true;
+          empty.hidden = true;
+          error.hidden = true;
+        }
+
+        async function handleCardPathNodeClick(card, endpointUrl, sourceRequestUrl) {
+          if (state.running) {
+            return;
+          }
+          const targetEndpointUrl = normalizeEndpointUrl(endpointUrl);
+          if (!targetEndpointUrl) {
+            return;
+          }
+          const inheritedRequestUrl = buildInheritedRequestUrl(targetEndpointUrl, sourceRequestUrl || card?.dataset?.endpointUrl || "");
+          const currentEndpointUrl = normalizeEndpointUrl(card?.dataset?.endpointUrl || "");
+          const targetEndpointKey = getEndpointKey(targetEndpointUrl);
+          const currentEndpointKey = getEndpointKey(currentEndpointUrl);
+
+          if (targetEndpointKey && currentEndpointKey && targetEndpointKey === currentEndpointKey) {
+            const cardEndpoint = card?.__underparEndpoint || normalizeEndpointRecord({ url: currentEndpointUrl, label: getEndpointLabel(currentEndpointUrl) });
+            await runEndpoint(
+              {
+                ...cardEndpoint,
+                url: inheritedRequestUrl || targetEndpointUrl,
+              },
+              { card }
+            );
+            return;
+          }
+
+          const nextEndpoint = normalizeEndpointRecord({
+            id: `path-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+            label: getEndpointLabel(targetEndpointUrl),
+            url: inheritedRequestUrl || targetEndpointUrl,
+          });
+          await runEndpoint(nextEndpoint);
+        }
+
         function createCard(endpoint) {
           const card = document.createElement("article");
           card.className = "card";
@@ -740,13 +1149,25 @@
               <p class="error-box" hidden></p>
             </div>
           `;
-          card.querySelector(".card-title").textContent = String(endpoint.label || "CMU Endpoint");
-          card.querySelector(".url").textContent = String(endpoint.url || "");
+          card.addEventListener("click", (event) => {
+            const link = event.target?.closest?.(".card-url-path-link[data-endpoint-url]");
+            if (!link || !card.contains(link)) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            void handleCardPathNodeClick(
+              card,
+              String(link.getAttribute("data-endpoint-url") || ""),
+              String(link.getAttribute("data-source-request-url") || "")
+            );
+          });
+          bindCardEndpoint(card, endpoint);
           els.cards.appendChild(card);
           return card;
         }
 
-        function renderCardResult(card, result) {
+        function renderCardResult(card, result, endpoint) {
           const badge = card.querySelector(".badge");
           const meta = card.querySelector(".card-meta");
           const tableWrap = card.querySelector(".table-wrap");
@@ -754,6 +1175,7 @@
           const tbody = card.querySelector("tbody");
           const empty = card.querySelector(".empty");
           const error = card.querySelector(".error-box");
+          bindCardEndpoint(card, endpoint);
           badge.textContent = `OK ${result.status}`;
           badge.className = "badge ok";
           meta.textContent = `Fetched: ${new Date(result.fetchedAt).toLocaleString()}`;
@@ -784,12 +1206,13 @@
             .join("");
         }
 
-        function renderCardError(card, errorText) {
+        function renderCardError(card, errorText, endpoint) {
           const badge = card.querySelector(".badge");
           const meta = card.querySelector(".card-meta");
           const tableWrap = card.querySelector(".table-wrap");
           const empty = card.querySelector(".empty");
           const error = card.querySelector(".error-box");
+          bindCardEndpoint(card, endpoint);
           badge.textContent = "ERR";
           badge.className = "badge err";
           meta.textContent = `Failed: ${new Date().toLocaleString()}`;
@@ -799,15 +1222,21 @@
           error.textContent = String(errorText || "Request failed.");
         }
 
-        async function runEndpoint(endpoint) {
-          const card = createCard(endpoint);
+        async function runEndpoint(endpoint, options = {}) {
+          const normalizedEndpoint = normalizeEndpointRecord(endpoint);
+          if (!normalizedEndpoint.url) {
+            return { ok: false, error: "CMU endpoint URL is missing." };
+          }
+          const card = options?.card || createCard(normalizedEndpoint);
+          bindCardEndpoint(card, normalizedEndpoint);
+          setCardLoadingState(card);
           try {
-            const result = await fetchEndpointPayload(endpoint, false);
-            renderCardResult(card, result);
+            const result = await fetchEndpointPayload(normalizedEndpoint, false);
+            renderCardResult(card, result, normalizedEndpoint);
             return { ok: true };
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            renderCardError(card, message);
+            renderCardError(card, message, normalizedEndpoint);
             return { ok: false, error: message };
           }
         }

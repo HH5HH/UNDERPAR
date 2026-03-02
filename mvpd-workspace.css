@@ -1,90 +1,161 @@
 @import url("./cm-workspace.css");
 
 :root {
-  --legacy-bg: #f4efe8;
-  --legacy-panel: rgba(252, 249, 245, 0.9);
-  --legacy-accent: #ff8a2a;
-  --legacy-accent-hover: #d86a0e;
-  --legacy-table-head: rgba(255, 241, 220, 0.98);
-  --legacy-table-row: rgba(255, 253, 250, 0.98);
-  --legacy-table-alt: rgba(255, 247, 235, 0.98);
-  --legacy-hover: rgba(255, 234, 205, 0.96);
-  --legacy-border: rgba(158, 93, 38, 0.24);
-  --legacy-text: #4b2a10;
-  --legacy-muted: #865730;
-  --table-header-deep-red: #8a4a12;
-  --ink: #5a2f0f;
-  --ink-muted: #895930;
-  --ink-soft: #aa7548;
-  --line-soft: rgba(142, 82, 30, 0.2);
-  --line-faint: rgba(255, 255, 255, 0.8);
-  --card-depth: 0 24px 42px rgba(133, 72, 23, 0.16), 0 8px 18px rgba(133, 72, 23, 0.1);
-  --card-band-top: linear-gradient(148deg, rgba(255, 254, 251, 0.97), rgba(255, 245, 232, 0.98) 54%, rgba(255, 236, 212, 0.95));
-  --card-band-bottom: linear-gradient(156deg, rgba(255, 250, 241, 0.98), rgba(255, 238, 214, 0.96));
-  --accent: #ff8a2a;
-  --accent-hover: #d86a0e;
-  --s2-action-bg-default: rgba(255, 255, 255, 0.95);
-  --s2-action-bg-hover: rgba(255, 239, 216, 0.98);
-  --s2-action-border-default: rgba(156, 92, 37, 0.24);
-  --s2-action-text-default: #7d4318;
-  --s2-action-bg-accent: #ff8a2a;
-  --s2-action-bg-accent-hover: #d86a0e;
-  --s2-action-border-accent: #ff8a2a;
-  --s2-action-text-accent: #ffffff;
-  --s2-action-focus-ring: rgba(255, 138, 42, 0.34);
-  --workspace-net-indicator-track: rgba(125, 67, 24, 0.28);
-  --workspace-net-indicator-head: rgba(125, 67, 24, 0.86);
+  color-scheme: dark;
+
+  /* ZIP Dark X Sunflower exact palette ramp (derived via ZIP buildTonePalette). */
+  --zip-accent-500: 168, 128, 9;
+  --zip-accent-600: 199, 151, 11;
+  --zip-accent-700: 227, 173, 12;
+  --zip-accent-800: 255, 194, 14;
+  --zip-accent-900: 255, 201, 43;
+  --zip-accent-1000: 255, 209, 72;
+  --zip-accent-1100: 255, 216, 101;
+  --zip-accent-focus: 255, 194, 14;
+  --zip-accent-on-primary: 34, 34, 34;
+
+  /* ZIP dark neutrals used by sidepanel shell/menu surfaces. */
+  --zip-menu-panel-bg: rgb(34, 34, 34);
+  --zip-menu-panel-elevated-bg: rgb(27, 27, 27);
+  --zip-menu-item-base-bg: rgb(34, 34, 34);
+  --zip-menu-item-hover-bg: rgb(44, 44, 44);
+  --zip-menu-fg: rgb(242, 242, 242);
+  --zip-menu-fg-subtle: rgb(175, 175, 175);
+  --zip-menu-border: rgb(57, 57, 57);
+
+  /* ZIP Dark X Sunflower vibe values (exact output from ZIP theme engine). */
+  --zip-theme-vibe-body-radial-alpha: 0.319;
+  --zip-theme-vibe-topbar-a-alpha: 0.289;
+  --zip-theme-vibe-topbar-b-alpha: 0.187;
+  --zip-theme-vibe-footer-a-alpha: 0.246;
+  --zip-theme-vibe-selection-a-alpha: 0.325;
+  --zip-theme-vibe-selection-b-alpha: 0.197;
+  --zip-theme-vibe-focus-alpha: 0.298;
+  --zip-theme-vibe-surface-soft-alpha: 0.211;
+  --zip-theme-vibe-surface-mid-alpha: 0.311;
+  --zip-theme-vibe-surface-strong-alpha: 0.446;
+  --zip-theme-vibe-feedback-bg-alpha: 0.217;
+  --zip-theme-vibe-feedback-border-alpha: 0.459;
+
+  /* ZIP palette companions used for semantic/neutral accents. */
+  --zip-carmine-rgb: 212, 67, 58;
+  --zip-silver-rgb: 158, 163, 168;
+  --zip-slate-rgb: 107, 114, 128;
+
+  --legacy-bg: var(--zip-menu-panel-elevated-bg);
+  --legacy-panel: rgba(34, 34, 34, 0.94);
+  --legacy-accent: rgb(var(--zip-accent-800));
+  --legacy-accent-hover: rgb(var(--zip-accent-700));
+  --legacy-table-head: rgba(var(--zip-accent-1000), 0.2);
+  --legacy-table-row: rgba(34, 34, 34, 0.96);
+  --legacy-table-alt: rgba(44, 44, 44, 0.92);
+  --legacy-hover: rgba(var(--zip-accent-900), 0.22);
+  --legacy-border: rgba(57, 57, 57, 0.98);
+  --legacy-text: var(--zip-menu-fg);
+  --legacy-muted: var(--zip-menu-fg-subtle);
+  --table-header-deep-red: rgb(var(--zip-accent-1000));
+  --ink: var(--zip-menu-fg);
+  --ink-muted: var(--zip-menu-fg-subtle);
+  --ink-soft: rgb(var(--zip-silver-rgb));
+  --line-soft: rgba(var(--zip-accent-900), 0.28);
+  --line-faint: rgba(242, 242, 242, 0.18);
+  --card-depth: 0 22px 40px rgba(34, 34, 34, 0.5), 0 9px 18px rgba(34, 34, 34, 0.38);
+  --card-band-top: linear-gradient(148deg, rgba(44, 44, 44, 0.98), rgba(34, 34, 34, 0.96) 54%, rgba(var(--zip-accent-1000), 0.18));
+  --card-band-bottom: linear-gradient(156deg, rgba(34, 34, 34, 0.98), rgba(27, 27, 27, 0.98));
+  --accent: rgb(var(--zip-accent-900));
+  --accent-hover: rgb(var(--zip-accent-1000));
+  --s2-action-bg-default: rgba(44, 44, 44, 0.98);
+  --s2-action-bg-hover: rgba(var(--zip-accent-900), 0.24);
+  --s2-action-border-default: rgba(57, 57, 57, 0.98);
+  --s2-action-text-default: rgb(var(--zip-accent-1000));
+  --s2-action-bg-accent: rgb(var(--zip-accent-800));
+  --s2-action-bg-accent-hover: rgb(var(--zip-accent-700));
+  --s2-action-border-accent: rgb(var(--zip-accent-800));
+  --s2-action-text-accent: rgb(var(--zip-accent-on-primary));
+  --s2-action-focus-ring: rgba(var(--zip-accent-focus), var(--zip-theme-vibe-focus-alpha));
+  --workspace-net-indicator-track: rgba(var(--zip-accent-900), 0.42);
+  --workspace-net-indicator-head: rgba(var(--zip-accent-1100), 0.96);
 }
 
 body {
   background:
-    radial-gradient(circle at 8% -12%, rgba(255, 162, 86, 0.14), rgba(255, 162, 86, 0) 48%),
-    radial-gradient(circle at 92% -10%, rgba(240, 230, 215, 0.2), rgba(240, 230, 215, 0) 46%),
-    radial-gradient(circle at 50% 120%, rgba(212, 188, 162, 0.12), rgba(212, 188, 162, 0) 50%),
-    linear-gradient(180deg, #f8f5f1 0%, var(--legacy-bg) 52%, #efedf0 100%);
+    radial-gradient(
+      circle at 8% -12%,
+      rgba(var(--zip-accent-800), var(--zip-theme-vibe-body-radial-alpha)),
+      rgba(var(--zip-accent-800), 0) 48%
+    ),
+    radial-gradient(
+      circle at 92% -10%,
+      rgba(var(--zip-accent-1000), var(--zip-theme-vibe-topbar-a-alpha)),
+      rgba(var(--zip-accent-1000), 0) 46%
+    ),
+    radial-gradient(
+      circle at 50% 120%,
+      rgba(var(--zip-accent-900), var(--zip-theme-vibe-footer-a-alpha)),
+      rgba(var(--zip-accent-900), 0) 52%
+    ),
+    linear-gradient(180deg, var(--zip-menu-item-base-bg) 0%, var(--zip-menu-panel-elevated-bg) 52%, var(--zip-menu-panel-bg) 100%);
+  color: var(--legacy-text);
 }
 
-body::before {
-  content: none;
-  display: none;
-}
-
+body::before,
 body::after {
   content: none;
   display: none;
 }
 
 .workspace-header::before {
-  background: linear-gradient(90deg, rgba(255, 138, 42, 0.98), rgba(255, 184, 91, 0.98));
+  background: linear-gradient(
+    90deg,
+    rgba(var(--zip-accent-700), 0.98),
+    rgba(var(--zip-accent-800), 0.98),
+    rgba(var(--zip-accent-1000), 0.98)
+  );
 }
 
 .workspace-header {
-  box-shadow: 0 12px 24px rgba(133, 72, 23, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  border-color: rgba(57, 57, 57, 0.98);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.96), rgba(34, 34, 34, 0.94));
+  box-shadow: 0 12px 24px rgba(34, 34, 34, 0.56), inset 0 1px 0 rgba(242, 242, 242, 0.12);
+}
+
+.workspace-controller-state {
+  color: var(--legacy-text);
 }
 
 .workspace-filter-state,
 .workspace-status {
-  color: #8a541f;
+  color: rgb(var(--zip-accent-1000));
+}
+
+.workspace-status.error {
+  color: rgb(var(--zip-carmine-rgb));
 }
 
 .workspace-icon-btn {
-  background: linear-gradient(180deg, var(--s2-action-bg-default), rgba(255, 239, 216, 0.96));
-  box-shadow: 0 5px 11px rgba(133, 72, 23, 0.12);
+  border-color: var(--s2-action-border-default);
+  background: linear-gradient(180deg, var(--s2-action-bg-default), rgba(34, 34, 34, 0.98));
+  color: var(--s2-action-text-default);
+  box-shadow: 0 6px 12px rgba(34, 34, 34, 0.5);
 }
 
 .workspace-icon-btn:hover:not(:disabled) {
-  box-shadow: 0 10px 20px rgba(133, 72, 23, 0.18);
+  background: linear-gradient(180deg, rgba(var(--zip-accent-900), 0.28), rgba(var(--zip-accent-700), 0.2));
+  border-color: rgba(var(--zip-accent-900), 0.56);
+  box-shadow: 0 10px 20px rgba(34, 34, 34, 0.64);
 }
 
 .workspace-icon-btn--accent {
-  background: linear-gradient(160deg, rgba(255, 138, 42, 0.98), rgba(216, 106, 14, 0.98));
-  box-shadow: 0 10px 20px rgba(255, 138, 42, 0.28), 0 2px 0 rgba(255, 255, 255, 0.34) inset;
+  background: linear-gradient(160deg, rgba(var(--zip-accent-900), 0.98), rgba(var(--zip-accent-700), 0.98));
+  border-color: var(--s2-action-border-accent);
+  color: var(--s2-action-text-accent);
+  box-shadow: 0 10px 20px rgba(34, 34, 34, 0.6), 0 1px 0 rgba(242, 242, 242, 0.16) inset;
 }
 
 .workspace-icon-btn--accent:hover:not(:disabled) {
-  background: linear-gradient(160deg, rgba(234, 118, 22, 0.98), rgba(191, 90, 10, 0.98));
-  border-color: var(--s2-action-border-accent);
-  box-shadow: 0 12px 22px rgba(255, 138, 42, 0.3), 0 2px 0 rgba(255, 255, 255, 0.28) inset;
+  background: linear-gradient(160deg, rgba(var(--zip-accent-1000), 0.98), rgba(var(--zip-accent-800), 0.98));
+  border-color: rgb(var(--zip-accent-1000));
+  box-shadow: 0 12px 22px rgba(34, 34, 34, 0.66), 0 1px 0 rgba(242, 242, 242, 0.14) inset;
 }
 
 .workspace-cards {
@@ -97,7 +168,7 @@ body::after {
   border-radius: 16px;
   border: 1px solid var(--legacy-border);
   background: var(--legacy-panel);
-  box-shadow: 0 14px 28px rgba(133, 72, 23, 0.12);
+  box-shadow: 0 14px 28px rgba(34, 34, 34, 0.58);
   overflow: hidden;
 }
 
@@ -108,13 +179,13 @@ body::after {
   gap: 10px;
   padding: 11px 13px;
   border-bottom: 1px solid var(--legacy-border);
-  background: linear-gradient(180deg, var(--legacy-table-head), rgba(255, 255, 255, 0.98));
+  background: linear-gradient(180deg, rgba(var(--zip-accent-1000), 0.24), rgba(34, 34, 34, 0.98));
   cursor: pointer;
   transition: background-color 120ms ease;
 }
 
 .mvpd-card-head:hover {
-  background: linear-gradient(180deg, var(--legacy-hover), rgba(255, 255, 255, 0.98));
+  background: linear-gradient(180deg, rgba(var(--zip-accent-1000), 0.3), rgba(var(--zip-accent-900), 0.18));
 }
 
 .mvpd-card-head:focus-visible {
@@ -133,7 +204,7 @@ body::after {
 .mvpd-card-toggle {
   appearance: none;
   border: 1px solid var(--legacy-border);
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(44, 44, 44, 0.98);
   color: var(--legacy-text);
   width: 24px;
   height: 24px;
@@ -143,12 +214,12 @@ body::after {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 2px 4px rgba(133, 72, 23, 0.16);
+  box-shadow: 0 2px 4px rgba(34, 34, 34, 0.62);
   transition: transform 120ms ease, background-color 120ms ease;
 }
 
 .mvpd-card-toggle:hover {
-  background: var(--legacy-hover);
+  background: rgba(var(--zip-accent-900), 0.24);
 }
 
 .mvpd-card-toggle:focus-visible {
@@ -182,6 +253,7 @@ body::after {
 
 .mvpd-card-body {
   padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(34, 34, 34, 0.98), rgba(27, 27, 27, 0.98));
 }
 
 .mvpd-grid {
@@ -223,8 +295,8 @@ body::after {
   text-align: left;
   font-size: 11px;
   padding: 8px 10px;
-  color: var(--legacy-text);
-  background: var(--legacy-table-head);
+  color: rgb(var(--zip-accent-1100));
+  background: linear-gradient(180deg, rgba(var(--zip-accent-900), 0.22), rgba(34, 34, 34, 0.98));
   border-bottom: 1px solid var(--legacy-border);
 }
 
@@ -236,14 +308,15 @@ body::after {
   border-bottom: 1px solid var(--legacy-border);
   color: var(--legacy-text);
   word-break: break-word;
+  background: rgba(34, 34, 34, 0.96);
 }
 
 .mvpd-table tbody tr:nth-child(even) td {
-  background: var(--legacy-table-alt);
+  background: rgba(44, 44, 44, 0.9);
 }
 
 .mvpd-call-link {
-  color: var(--accent);
+  color: rgb(var(--zip-accent-900));
   font-weight: 700;
   text-decoration-line: underline;
   text-decoration-thickness: 1px;
@@ -251,7 +324,7 @@ body::after {
 }
 
 .mvpd-call-link:hover {
-  color: var(--accent-hover);
+  color: rgb(var(--zip-accent-1000));
 }
 
 .mvpd-call-link:focus-visible {
@@ -261,8 +334,10 @@ body::after {
 }
 
 .mvpd-card.is-jump-target {
-  border-color: rgba(255, 138, 42, 0.55);
-  box-shadow: 0 0 0 2px rgba(255, 138, 42, 0.24), 0 14px 28px rgba(133, 72, 23, 0.16);
+  border-color: rgba(var(--zip-accent-900), var(--zip-theme-vibe-selection-a-alpha));
+  box-shadow:
+    0 0 0 2px rgba(var(--zip-accent-900), var(--zip-theme-vibe-selection-b-alpha)),
+    0 14px 28px rgba(34, 34, 34, 0.7);
 }
 
 .mvpd-error-pretty {
@@ -275,7 +350,7 @@ body::after {
   margin: 0;
   font-size: 11px;
   line-height: 1.35;
-  color: var(--legacy-text);
+  color: rgb(var(--zip-carmine-rgb));
   word-break: break-word;
 }
 
@@ -289,9 +364,9 @@ body::after {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  border: 1px solid rgba(255, 138, 42, 0.35);
-  background: rgba(255, 138, 42, 0.16);
-  color: #7a4319;
+  border: 1px solid rgba(var(--zip-accent-900), 0.62);
+  background: rgba(var(--zip-accent-900), var(--zip-theme-vibe-feedback-bg-alpha));
+  color: rgb(var(--zip-accent-1100));
   padding: 4px 9px;
   font-size: 11px;
   line-height: 1.2;

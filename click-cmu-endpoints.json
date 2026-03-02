@@ -1,0 +1,6415 @@
+{
+  "endpoints": [
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": [
+        "active-sessions",
+        "bstreams-105",
+        "bstreams-120",
+        "bstreams-15",
+        "bstreams-30",
+        "bstreams-45",
+        "bstreams-60",
+        "bstreams-75",
+        "bstreams-90",
+        "completed-sessions",
+        "dismissed-sessions",
+        "failed-attempts",
+        "killed-sessions",
+        "started-sessions",
+        "tenant",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/hour/mvpd/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/hour/tenant/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/mvpd/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/mvpd/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/mvpd/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/tenant/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/tenant/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/day/tenant/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/mvpd/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/mvpd/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/mvpd/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/mvpd/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/mvpd/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/mvpd/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/tenant/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/tenant/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/tenant/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/tenant/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/tenant/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/month/tenant/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/month/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/month/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/month/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/month/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/month/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/month/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/month/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/tenant",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": [
+        "activity-level",
+        "duration",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/tenant/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/tenant/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/mvpd/tenant/month/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": [
+        "activity-level",
+        "duration",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/month/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/month/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/month/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/month/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/month/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/month/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/month/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/mvpd",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": [
+        "activity-level",
+        "duration",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/mvpd/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/mvpd/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/activity-level/tenant/mvpd/month/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/hour/mvpd/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/hour/tenant/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/mvpd/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/mvpd/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/mvpd/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/tenant/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/tenant/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/day/tenant/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/mvpd/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/mvpd/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/mvpd/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/mvpd/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/mvpd/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/mvpd/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/tenant/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/tenant/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/tenant/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/tenant/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/tenant/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/activity-level/tenant/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/hour/mvpd/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/hour/tenant/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/mvpd/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/mvpd/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/mvpd/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/tenant/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/tenant/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/day/tenant/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/mvpd/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/mvpd/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/mvpd/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/mvpd/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/mvpd/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/mvpd/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/tenant/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/tenant/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/tenant/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/tenant/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/tenant/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/concurrency-level/tenant/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/hour/mvpd/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/hour/tenant/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/mvpd/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/mvpd/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/mvpd/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/tenant/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/tenant/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/activity-level/tenant/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/hour/mvpd/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/hour/tenant/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/mvpd/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/mvpd/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/mvpd/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/tenant/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/tenant/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/concurrency-level/tenant/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/activity-level/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/activity-level/mvpd/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/activity-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/activity-level/tenant/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/concurrency-level/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/concurrency-level/mvpd/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/concurrency-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/concurrency-level/tenant/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/mvpd/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/mvpd/activity-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/mvpd/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/mvpd/concurrency-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/mvpd/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/mvpd/tenant/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/mvpd/tenant/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/tenant/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/tenant/activity-level/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/tenant/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/tenant/concurrency-level/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/tenant/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/tenant/mvpd/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/hour/tenant/mvpd/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/activity-level/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/activity-level/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/activity-level/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/concurrency-level/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/concurrency-level/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/concurrency-level/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/hour/activity-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/hour/concurrency-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/hour/tenant/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/hour/tenant/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/tenant/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/tenant/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/tenant/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/tenant/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/tenant/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/mvpd/tenant/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/activity-level/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/activity-level/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/activity-level/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/concurrency-level/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/concurrency-level/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/concurrency-level/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/hour/activity-level/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/hour/concurrency-level/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/hour/mvpd/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/hour/mvpd/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/mvpd/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/mvpd/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/mvpd/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/mvpd/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/mvpd/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/day/tenant/mvpd/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/activity-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/activity-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/activity-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/activity-level/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/activity-level/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/activity-level/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/activity-level/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/activity-level/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/activity-level/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/concurrency-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/concurrency-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/concurrency-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/concurrency-level/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/concurrency-level/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/concurrency-level/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/concurrency-level/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/concurrency-level/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/concurrency-level/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/activity-level/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/activity-level/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/activity-level/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/concurrency-level/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/concurrency-level/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/concurrency-level/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/hour/activity-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/hour/concurrency-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/hour/tenant/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/hour/tenant/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/tenant/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/tenant/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/tenant/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/tenant/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/tenant/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/day/tenant/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/activity-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/activity-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/activity-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/concurrency-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/concurrency-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/concurrency-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/day/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/day/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/day/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/day/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/day/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/mvpd/tenant/day/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/activity-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/activity-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/activity-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/activity-level/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/activity-level/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/activity-level/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/activity-level/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/activity-level/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/activity-level/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/concurrency-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/concurrency-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/concurrency-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/concurrency-level/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/concurrency-level/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/concurrency-level/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/concurrency-level/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/concurrency-level/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/concurrency-level/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/activity-level/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/activity-level/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/activity-level/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/concurrency-level/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/concurrency-level/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/concurrency-level/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/hour/activity-level/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/hour/concurrency-level/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/hour/mvpd",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/hour/mvpd/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/hour/mvpd/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/mvpd",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/mvpd/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/mvpd/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/mvpd/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/mvpd/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/mvpd/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/mvpd/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/day/mvpd/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/activity-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/activity-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/activity-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/concurrency-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/concurrency-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/concurrency-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/day/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/day/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/day/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/day/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/day/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/month/tenant/mvpd/day/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/month/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/month/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/month/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/month/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/month/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/month/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/month/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/tenant",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": [
+        "activity-level",
+        "duration",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/tenant/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/tenant/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/activity-level/tenant/month/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/activity-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/activity-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/activity-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/activity-level/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/activity-level/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/activity-level/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/activity-level/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/activity-level/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/activity-level/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/concurrency-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/concurrency-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/concurrency-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/concurrency-level/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/concurrency-level/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/concurrency-level/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/concurrency-level/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/concurrency-level/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/concurrency-level/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/activity-level/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/activity-level/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/activity-level/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/concurrency-level/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/concurrency-level/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/concurrency-level/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/hour/activity-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": []
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/hour/concurrency-level/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/hour/tenant",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/hour/tenant/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/hour/tenant/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/tenant",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/tenant/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/tenant/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/tenant/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/tenant/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/tenant/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/tenant/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/day/tenant/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/activity-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/activity-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/activity-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/concurrency-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "concurrency-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/concurrency-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/concurrency-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/day/activity-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/day/activity-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/day/concurrency-level",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/day/concurrency-level/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/day/hour/activity-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/month/tenant/day/hour/concurrency-level",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "concurrency-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/tenant",
+      "zoomClass": "zmYR",
+      "zoomKey": "YR",
+      "columns": [
+        "duration",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/tenant/month",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/tenant/month/activity-level",
+      "zoomClass": "zmMO",
+      "zoomKey": "MO",
+      "columns": [
+        "activity-level",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/tenant/month/activity-level/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/tenant/month/activity-level/day/hour",
+      "zoomClass": "zmHR",
+      "zoomKey": "HR",
+      "columns": [
+        "activity-level",
+        "day",
+        "duration",
+        "hour",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/year/duration/occurrences/mvpd/tenant/month/day",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": [
+        "day",
+        "duration",
+        "month",
+        "mvpd",
+        "occurrences",
+        "tenant",
+        "users",
+        "year"
+      ]
+    }
+  ]
+}

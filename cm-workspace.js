@@ -2,6 +2,20 @@ const CM_MESSAGE_TYPE = "underpar:cm";
 const CM_SOURCE_UTC_OFFSET_MINUTES = -8 * 60;
 const CLIENT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 const WORKSPACE_TABLE_VISIBLE_ROW_CAP = 10;
+const WORKSPACE_TEARSHEET_RUNTIME_PATH = "cm-workspace.js";
+const WORKSPACE_TEARSHEET_TEMPLATE_PATH = "cm-workspace.html";
+const WORKSPACE_TEARSHEET_PAYLOAD_ID = "clickcmuws-payload";
+const CM_WORKSPACE_RUNTIME_TOKEN_INPUT_NAME = "access_token";
+const CM_WORKSPACE_RUNTIME_CLIENT_IDS_INPUT_NAME = "cm_client_ids";
+const CM_WORKSPACE_RUNTIME_USER_ID_INPUT_NAME = "cm_user_id";
+const CM_WORKSPACE_RUNTIME_SCOPE_INPUT_NAME = "cm_scope";
+const CM_WORKSPACE_IMS_VALIDATE_TOKEN_URL = "https://ims-na1.adobelogin.com/ims/validate_token/v1?jslVersion=underpar-clickcmuws";
+const CM_WORKSPACE_IMS_CHECK_TOKEN_URL = "https://adobeid-na1.services.adobe.com/ims/check/v6/token";
+const CM_WORKSPACE_IMS_DEFAULT_SCOPE =
+  "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext";
+const CM_WORKSPACE_TOKEN_REFRESH_SKEW_MS = 45 * 1000;
+const CM_WORKSPACE_FETCH_TIMEOUT_MS = 45 * 1000;
+const CM_WORKSPACE_FALLBACK_BASE_URL = "https://streams-stage.adobeprimetime.com";
 const PASS_CONSOLE_PROGRAMMER_APPLICATIONS_URL =
   "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production/programmers";
 const WORKSPACE_LOCK_MESSAGE_SUFFIX =
@@ -28,7 +42,7 @@ const CM_METRIC_COLUMNS = new Set([
   "decision-media-tokens",
 ]);
 const CM_DATE_DIMENSION_KEYS = new Set(["year", "month", "day", "hour", "minute", "second", "date", "time", "timestamp"]);
-const CM_FILTER_BLOCKED_COLUMNS = new Set(["view"]);
+const CM_FILTER_BLOCKED_COLUMNS = new Set(["view", "activity-level", "activity_level"]);
 
 const state = {
   windowId: 0,
@@ -58,9 +72,83 @@ const els = {
   lockBanner: document.getElementById("workspace-lock-banner"),
   lockMessage: document.getElementById("workspace-lock-message"),
   rerunIndicator: document.getElementById("workspace-rerun-indicator"),
+  makeClickCmuButton: document.getElementById("workspace-make-clickcmu"),
+  makeClickCmuWorkspaceButton: document.getElementById("workspace-make-clickcmuws"),
   rerunAllButton: document.getElementById("workspace-rerun-all"),
   clearButton: document.getElementById("workspace-clear-all"),
   cardsHost: document.getElementById("workspace-cards"),
+};
+
+let workspaceStylesheetTextCache = "";
+let workspaceTearsheetRuntimeTextCache = "";
+let workspaceTearsheetTemplateTextCache = "";
+
+function parseWorkspaceExportPayload() {
+  const payloadNode = document.getElementById(WORKSPACE_TEARSHEET_PAYLOAD_ID);
+  if (!payloadNode) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(String(payloadNode.textContent || "{}"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+const workspaceExportPayload = parseWorkspaceExportPayload();
+const IS_CM_WORKSPACE_TEARSHEET_RUNTIME = Boolean(workspaceExportPayload);
+
+function readHiddenInputValue(name) {
+  const normalizedName = String(name || "").trim();
+  if (!normalizedName || !document?.body) {
+    return "";
+  }
+  const input = document.body.querySelector(`input[name="${normalizedName}"]`);
+  return String(input?.value || "").trim();
+}
+
+function upsertBodyHiddenInput(doc, name, value) {
+  if (!doc || !doc.body) {
+    return;
+  }
+  const normalizedName = String(name || "").trim();
+  if (!normalizedName) {
+    return;
+  }
+  let input = doc.body.querySelector(`input[name="${normalizedName}"]`);
+  if (!input) {
+    input = doc.createElement("input");
+    input.type = "hidden";
+    input.name = normalizedName;
+    doc.body.insertBefore(input, doc.body.firstChild);
+  }
+  input.value = String(value || "");
+}
+
+function parseJsonArray(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+const cmWorkspaceRuntimeAuth = {
+  accessToken: readHiddenInputValue(CM_WORKSPACE_RUNTIME_TOKEN_INPUT_NAME),
+  clientIds: parseJsonArray(readHiddenInputValue(CM_WORKSPACE_RUNTIME_CLIENT_IDS_INPUT_NAME))
+    .map((value) => String(value || "").trim())
+    .filter(Boolean),
+  userId: readHiddenInputValue(CM_WORKSPACE_RUNTIME_USER_ID_INPUT_NAME),
+  scope: readHiddenInputValue(CM_WORKSPACE_RUNTIME_SCOPE_INPUT_NAME) || CM_WORKSPACE_IMS_DEFAULT_SCOPE,
 };
 
 function escapeHtml(value) {
@@ -100,6 +188,383 @@ function dedupeCandidateStrings(values = []) {
   return output;
 }
 
+function safeJsonParse(value, fallback = null) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return fallback;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeBearerTokenValue(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+}
+
+function parseJwtPayload(tokenValue) {
+  const token = normalizeBearerTokenValue(tokenValue);
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+  try {
+    const payloadPart = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = payloadPart + "=".repeat((4 - (payloadPart.length % 4 || 4)) % 4);
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
+function getTokenExpiryEpochMs(tokenValue) {
+  const claims = parseJwtPayload(tokenValue) || {};
+  const exp = Number(claims.exp || 0);
+  if (!Number.isFinite(exp) || exp <= 0) {
+    return 0;
+  }
+  return exp * 1000;
+}
+
+function isBearerTokenFresh(tokenValue, skewMs = 0) {
+  const token = normalizeBearerTokenValue(tokenValue);
+  if (!token) {
+    return false;
+  }
+  const expMs = getTokenExpiryEpochMs(token);
+  if (!expMs) {
+    return true;
+  }
+  return expMs > Date.now() + Math.max(0, Number(skewMs) || 0);
+}
+
+function tokenizeScopeSet(scopeValue) {
+  return String(scopeValue || "")
+    .split(/[\s,]+/g)
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+}
+
+function tokenSupportsCmCatalog(tokenValue) {
+  const token = normalizeBearerTokenValue(tokenValue);
+  if (!token) {
+    return false;
+  }
+  const claims = parseJwtPayload(token) || {};
+  const clientId = String(claims.client_id || claims.clientId || "").trim().toLowerCase();
+  if (clientId === "cm-console-ui") {
+    return true;
+  }
+  const scopes = new Set(tokenizeScopeSet(claims.scope || "").map((scope) => scope.toLowerCase()));
+  return scopes.has("read_organizations") || scopes.has("dma_group_mapping");
+}
+
+function extractImsAccessTokenFromPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const nestedToken =
+    payload.token && typeof payload.token === "object"
+      ? payload.token.access_token || payload.token.accessToken || payload.token.token || payload.token.value || ""
+      : payload.token || "";
+  return normalizeBearerTokenValue(
+    payload.access_token ||
+      payload.accessToken ||
+      nestedToken ||
+      payload.authorization ||
+      payload.Authorization ||
+      payload.bearer ||
+      payload.imsToken ||
+      ""
+  );
+}
+
+function formatCmuDateQueryValue(dateValue) {
+  const value = dateValue instanceof Date ? dateValue : new Date(dateValue);
+  const yyyy = value.getUTCFullYear();
+  const mm = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(value.getUTCDate()).padStart(2, "0");
+  const hh = String(value.getUTCHours()).padStart(2, "0");
+  const mi = String(value.getUTCMinutes()).padStart(2, "0");
+  const ss = String(value.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
+}
+
+function ensureCmuQueryDefaults(urlValue, limitValue = 1000) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    if (!parsed.searchParams.has("format")) {
+      parsed.searchParams.set("format", "json");
+    }
+    if (!parsed.searchParams.has("start") || !parsed.searchParams.has("end")) {
+      const endDate = new Date();
+      const startDate = new Date(endDate.getTime() - 9 * 24 * 60 * 60 * 1000);
+      if (!parsed.searchParams.has("start")) {
+        parsed.searchParams.set("start", formatCmuDateQueryValue(startDate));
+      }
+      if (!parsed.searchParams.has("end")) {
+        parsed.searchParams.set("end", formatCmuDateQueryValue(endDate));
+      }
+    }
+    const limit = Number(limitValue);
+    if (!parsed.searchParams.has("limit") && Number.isFinite(limit) && limit > 0) {
+      parsed.searchParams.set("limit", String(Math.max(1, Math.round(limit))));
+    }
+    const lowerPath = String(parsed.pathname || "").toLowerCase();
+    if (!parsed.searchParams.has("metrics") && (lowerPath.includes("/tenant") || lowerPath.includes("/hour"))) {
+      parsed.searchParams.set("metrics", "users");
+    }
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+async function fetchWithTimeout(url, init = {}, timeoutMs = CM_WORKSPACE_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timerId = window.setTimeout(() => controller.abort(), Math.max(2000, Number(timeoutMs) || CM_WORKSPACE_FETCH_TIMEOUT_MS));
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timerId);
+  }
+}
+
+function resolveWorkspaceRuntimeClientIds() {
+  return dedupeCandidateStrings([
+    ...(Array.isArray(cmWorkspaceRuntimeAuth.clientIds) ? cmWorkspaceRuntimeAuth.clientIds : []),
+    "cm-console-ui",
+    "AdobePass1",
+    "exc_app",
+  ]);
+}
+
+function buildValidateTokenFormBody(tokenValue, clientId) {
+  const form = new URLSearchParams({
+    type: "access_token",
+    token: normalizeBearerTokenValue(tokenValue),
+  });
+  if (clientId) {
+    form.set("client_id", String(clientId).trim());
+  }
+  return form.toString();
+}
+
+function buildImsCheckTokenUrl(clientId, scope, userId) {
+  const url = new URL(CM_WORKSPACE_IMS_CHECK_TOKEN_URL);
+  if (clientId) {
+    url.searchParams.set("client_id", clientId);
+  }
+  if (scope) {
+    url.searchParams.set("scope", scope);
+  }
+  if (userId) {
+    url.searchParams.set("user_id", userId);
+  }
+  return url.toString();
+}
+
+async function refreshTokenViaValidateToken(seedToken, forceFresh = false) {
+  const clientIds = resolveWorkspaceRuntimeClientIds();
+  for (const clientId of clientIds) {
+    for (const credentials of ["include", "omit"]) {
+      const response = await fetchWithTimeout(CM_WORKSPACE_IMS_VALIDATE_TOKEN_URL, {
+        method: "POST",
+        credentials,
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          ...(clientId ? { client_id: clientId } : {}),
+        },
+        body: buildValidateTokenFormBody(seedToken, clientId),
+      }).catch(() => null);
+      if (!response || !response.ok) {
+        continue;
+      }
+      const parsed = safeJsonParse(await response.text().catch(() => ""), null);
+      if (!parsed || typeof parsed !== "object") {
+        continue;
+      }
+      const refreshedToken = extractImsAccessTokenFromPayload(parsed);
+      if (refreshedToken && (!forceFresh || isBearerTokenFresh(refreshedToken, CM_WORKSPACE_TOKEN_REFRESH_SKEW_MS))) {
+        return refreshedToken;
+      }
+      if (parsed.valid === true && !forceFresh && tokenSupportsCmCatalog(seedToken)) {
+        return normalizeBearerTokenValue(seedToken);
+      }
+    }
+  }
+  return "";
+}
+
+async function refreshTokenViaImsCheck(forceFresh = false) {
+  const userId = String(cmWorkspaceRuntimeAuth.userId || "").trim();
+  if (!userId) {
+    return "";
+  }
+  const scopeValue = String(cmWorkspaceRuntimeAuth.scope || CM_WORKSPACE_IMS_DEFAULT_SCOPE).trim() || CM_WORKSPACE_IMS_DEFAULT_SCOPE;
+  const scopeCandidates = dedupeCandidateStrings([scopeValue, CM_WORKSPACE_IMS_DEFAULT_SCOPE].map((value) => tokenizeScopeSet(value).join(",")));
+  const scopes = scopeCandidates.length > 0 ? scopeCandidates : [CM_WORKSPACE_IMS_DEFAULT_SCOPE];
+  for (const clientId of resolveWorkspaceRuntimeClientIds()) {
+    for (const scope of scopes) {
+      const response = await fetchWithTimeout(buildImsCheckTokenUrl(clientId, scope, userId), {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+        },
+      }).catch(() => null);
+      if (!response || !response.ok) {
+        continue;
+      }
+      const parsed = safeJsonParse(await response.text().catch(() => ""), null);
+      if (!parsed || typeof parsed !== "object") {
+        continue;
+      }
+      const refreshedToken = extractImsAccessTokenFromPayload(parsed);
+      if (!refreshedToken) {
+        continue;
+      }
+      if (forceFresh && !isBearerTokenFresh(refreshedToken, CM_WORKSPACE_TOKEN_REFRESH_SKEW_MS)) {
+        continue;
+      }
+      return refreshedToken;
+    }
+  }
+  return "";
+}
+
+function isBasicAuthHeader(value) {
+  return /^basic\s+/i.test(String(value || "").trim());
+}
+
+function setWorkspaceRuntimeAccessToken(tokenValue) {
+  const token = normalizeBearerTokenValue(tokenValue);
+  cmWorkspaceRuntimeAuth.accessToken = token;
+  if (IS_CM_WORKSPACE_TEARSHEET_RUNTIME) {
+    upsertBodyHiddenInput(document, CM_WORKSPACE_RUNTIME_TOKEN_INPUT_NAME, token);
+  }
+}
+
+async function refreshCmWorkspaceAccessToken(forceFresh = false) {
+  const seedToken = normalizeBearerTokenValue(cmWorkspaceRuntimeAuth.accessToken || "");
+  if (!seedToken) {
+    return "";
+  }
+  if (!forceFresh && isBearerTokenFresh(seedToken, CM_WORKSPACE_TOKEN_REFRESH_SKEW_MS) && tokenSupportsCmCatalog(seedToken)) {
+    setWorkspaceRuntimeAccessToken(seedToken);
+    return seedToken;
+  }
+  let refreshedToken = "";
+  try {
+    refreshedToken = await refreshTokenViaValidateToken(seedToken, forceFresh);
+  } catch {
+    refreshedToken = "";
+  }
+  if (!refreshedToken) {
+    try {
+      refreshedToken = await refreshTokenViaImsCheck(forceFresh);
+    } catch {
+      refreshedToken = "";
+    }
+  }
+  const fallbackToken = !forceFresh && tokenSupportsCmCatalog(seedToken) ? seedToken : "";
+  const resolvedToken = normalizeBearerTokenValue(refreshedToken || fallbackToken);
+  if (resolvedToken) {
+    setWorkspaceRuntimeAccessToken(resolvedToken);
+  }
+  return resolvedToken;
+}
+
+async function fetchCmWorkspaceWithAuth(urlValue, init = {}, options = {}) {
+  const requestUrl = String(urlValue || "").trim();
+  if (!requestUrl) {
+    throw new Error("CM request URL is required.");
+  }
+  const method = String(init?.method || "GET").trim().toUpperCase() || "GET";
+  const headers = {
+    Accept: "application/json, text/plain, */*",
+    ...(init?.headers && typeof init.headers === "object" ? init.headers : {}),
+  };
+  const hasBasicAuthorization = isBasicAuthHeader(headers.Authorization || headers.authorization || "");
+  if (!hasBasicAuthorization) {
+    let token = normalizeBearerTokenValue(cmWorkspaceRuntimeAuth.accessToken || "");
+    if (!token || !isBearerTokenFresh(token, CM_WORKSPACE_TOKEN_REFRESH_SKEW_MS) || !tokenSupportsCmCatalog(token)) {
+      token = await refreshCmWorkspaceAccessToken(false);
+    }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+  }
+
+  const requestInit = {
+    ...init,
+    method,
+    credentials: "include",
+    headers,
+  };
+  let response = await fetchWithTimeout(requestUrl, requestInit, options.timeoutMs || CM_WORKSPACE_FETCH_TIMEOUT_MS);
+
+  const shouldRetryWithFreshToken =
+    !hasBasicAuthorization && options.retryOnAuthError !== false && (response.status === 401 || response.status === 403);
+  if (shouldRetryWithFreshToken) {
+    const refreshedToken = await refreshCmWorkspaceAccessToken(true);
+    if (refreshedToken) {
+      const retryHeaders = {
+        ...headers,
+        Authorization: `Bearer ${refreshedToken}`,
+      };
+      response = await fetchWithTimeout(
+        requestUrl,
+        {
+          ...requestInit,
+          headers: retryHeaders,
+        },
+        options.timeoutMs || CM_WORKSPACE_FETCH_TIMEOUT_MS
+      );
+    }
+  }
+
+  return response;
+}
+
+function extractRowsFromCmPayload(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  if (Array.isArray(payload.report)) {
+    return payload.report;
+  }
+  if (Array.isArray(payload.rows)) {
+    return payload.rows;
+  }
+  if (Array.isArray(payload.data)) {
+    return payload.data;
+  }
+  if (Array.isArray(payload.results)) {
+    return payload.results;
+  }
+  if (Array.isArray(payload.items)) {
+    return payload.items;
+  }
+  return [payload];
+}
+
 function normalizeCmColumnName(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -134,15 +599,44 @@ function compareCmColumnValues(leftValue, rightValue) {
   });
 }
 
-function isCmuUsageCard(cardState) {
-  const zoomKey = String(cardState?.zoomKey || "").trim().toLowerCase();
-  if (zoomKey === "usage") {
+function isCmuUsageRequestUrl(urlValue = "") {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return false;
+  }
+  const resolvePath = (value) => {
+    try {
+      return String(new URL(value).pathname || "").trim().toLowerCase();
+    } catch (_error) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .split("?")[0];
+    }
+  };
+  const path = resolvePath(raw);
+  if (!path) {
+    return false;
+  }
+  if (path.includes("/cmu/")) {
     return true;
   }
-  const requestUrl = String(cardState?.baseRequestUrl || cardState?.requestUrl || cardState?.endpointUrl || "")
-    .trim()
-    .toLowerCase();
-  return requestUrl.includes("/cmu/");
+  if (/\/v2\/year(?:\/|$)/i.test(path)) {
+    return true;
+  }
+  if (/\/v2\/year\/month(?:\/|$)/i.test(path)) {
+    return true;
+  }
+  return /\/v2\/.+/i.test(path) && /\/(?:usage|concurrency-level|occurrences|activity-level|duration)(?:\/|$)/i.test(path);
+}
+
+function isCmuUsageCard(cardState) {
+  const zoomKey = String(cardState?.zoomKey || "").trim().toLowerCase();
+  if (zoomKey === "usage" || zoomKey === "cmu") {
+    return true;
+  }
+  const requestUrl = String(cardState?.baseRequestUrl || cardState?.requestUrl || cardState?.endpointUrl || "").trim();
+  return isCmuUsageRequestUrl(requestUrl);
 }
 
 function isCmDateTimeColumn(columnName) {
@@ -165,15 +659,13 @@ function isCmMetricColumn(columnName) {
   return CM_METRIC_COLUMNS.has(canonical);
 }
 
-function isDisplayableCmuColumn(cardState, columnName) {
-  if (!isCmuUsageCard(cardState)) {
-    return false;
-  }
+function isDisplayableCmuUsageColumn(columnName) {
   const normalized = normalizeCmColumnName(columnName);
   if (!normalized || normalized.startsWith("__")) {
     return false;
   }
-  if (CM_FILTER_BLOCKED_COLUMNS.has(normalized)) {
+  const canonical = normalized.replace(/_/g, "-");
+  if (CM_FILTER_BLOCKED_COLUMNS.has(normalized) || CM_FILTER_BLOCKED_COLUMNS.has(canonical)) {
     return false;
   }
   if (isCmDateTimeColumn(normalized) || isCmMetricColumn(normalized)) {
@@ -182,21 +674,18 @@ function isDisplayableCmuColumn(cardState, columnName) {
   return true;
 }
 
+function isDisplayableCmuColumn(cardState, columnName) {
+  if (!isCmuUsageCard(cardState)) {
+    return false;
+  }
+  return isDisplayableCmuUsageColumn(columnName);
+}
+
 function isFilterableCmuColumn(cardState, columnName) {
   if (!isCmuUsageCard(cardState)) {
     return false;
   }
-  const normalized = normalizeCmColumnName(columnName);
-  if (!normalized || normalized.startsWith("__")) {
-    return false;
-  }
-  if (CM_FILTER_BLOCKED_COLUMNS.has(normalized)) {
-    return false;
-  }
-  if (isCmDateTimeColumn(normalized) || isCmMetricColumn(normalized)) {
-    return false;
-  }
-  return true;
+  return isDisplayableCmuUsageColumn(columnName);
 }
 
 function collectHarvestCandidateValues(harvestList = []) {
@@ -242,8 +731,15 @@ function setStatus(message = "", type = "info") {
 
 function setActionButtonsDisabled(disabled) {
   const isDisabled = Boolean(disabled);
+  const hasCards = hasWorkspaceCardContext();
+  if (els.makeClickCmuButton) {
+    els.makeClickCmuButton.disabled = isDisabled || state.cmAvailable !== true;
+  }
+  if (els.makeClickCmuWorkspaceButton) {
+    els.makeClickCmuWorkspaceButton.disabled = isDisabled || state.cmAvailable !== true || !hasCards;
+  }
   if (els.rerunAllButton) {
-    els.rerunAllButton.disabled = isDisabled || !hasWorkspaceCardContext();
+    els.rerunAllButton.disabled = isDisabled || !hasCards;
   }
   if (els.clearButton) {
     els.clearButton.disabled = isDisabled;
@@ -277,6 +773,16 @@ function syncWorkspaceNetworkIndicator() {
 function syncActionButtonsDisabled() {
   setActionButtonsDisabled(state.batchRunning || state.workspaceLocked);
   syncWorkspaceNetworkIndicator();
+}
+
+function syncTearsheetButtonsVisibility() {
+  const isVisible = state.cmAvailable === true;
+  if (els.makeClickCmuButton) {
+    els.makeClickCmuButton.hidden = !isVisible;
+  }
+  if (els.makeClickCmuWorkspaceButton) {
+    els.makeClickCmuWorkspaceButton.hidden = !isVisible;
+  }
 }
 
 function getProgrammerLabel() {
@@ -1063,7 +1569,13 @@ function getCmuUsageCellValue(row, columnKey, context = {}) {
 }
 
 function sortRows(rows, sortStack, context = null) {
-  const stack = Array.isArray(sortStack) && sortStack.length > 0 ? sortStack : [];
+  const fallbackStack =
+    context?.mode === "cmu-usage"
+      ? getDefaultCmuUsageSortStack()
+      : Array.isArray(context?.headers) && context.headers.length > 0
+        ? buildDefaultSortStack(context.headers)
+        : [];
+  const stack = Array.isArray(sortStack) && sortStack.length > 0 ? sortStack : fallbackStack;
   if (stack.length === 0) {
     return [...rows];
   }
@@ -1307,46 +1819,152 @@ function parseCmRequestContext(urlValue) {
   if (!raw) {
     return {
       fullUrl: "",
+      hiddenPathSegments: [],
       pathSegments: [],
       queryPairs: [],
     };
   }
 
-  let pathSegments = [];
+  let fullPathSegments = [];
   try {
     const parsed = new URL(raw);
-    pathSegments = String(parsed.pathname || "")
+    fullPathSegments = String(parsed.pathname || "")
       .split("/")
       .map((segment) => safeDecodeUrlSegment(segment.trim()))
       .filter(Boolean);
   } catch (_error) {
-    pathSegments = String(raw.split(/[?#]/, 1)[0] || "")
+    fullPathSegments = String(raw.split(/[?#]/, 1)[0] || "")
       .split("/")
       .map((segment) => safeDecodeUrlSegment(segment.trim()))
       .filter(Boolean);
   }
 
+  const normalizedFullPathSegments = fullPathSegments
+    .map((segment) => String(segment || "").trim())
+    .filter(Boolean);
+  let hiddenPathSegments = [];
+  let displayPathSegments = normalizedFullPathSegments;
+  if (normalizedFullPathSegments.length > 1 && String(normalizedFullPathSegments[0]).toLowerCase() === "v2") {
+    hiddenPathSegments = [normalizedFullPathSegments[0]];
+    displayPathSegments = normalizedFullPathSegments.slice(1);
+  }
+
   return {
     fullUrl: raw,
-    pathSegments,
+    hiddenPathSegments,
+    pathSegments: displayPathSegments,
     queryPairs: parseRawQueryPairs(raw),
   };
 }
 
-function buildCardHeaderContextMarkup(urlValue) {
+function buildPathEndpointUrl(baseEndpointUrl, pathSegments, depth) {
+  const normalizedDepth = Number(depth);
+  if (!Number.isInteger(normalizedDepth) || normalizedDepth < 1) {
+    return "";
+  }
+  const normalizedSegments = (Array.isArray(pathSegments) ? pathSegments : [])
+    .map((segment) => String(segment || "").trim())
+    .filter(Boolean)
+    .slice(0, normalizedDepth);
+  if (normalizedSegments.length === 0) {
+    return "";
+  }
+
+  const targetPath = normalizedSegments.join("/");
+  const fallback = `/${targetPath}`;
+  const rawBase = String(baseEndpointUrl || "").trim();
+  if (!rawBase) {
+    return fallback;
+  }
+
+  try {
+    const parsed = new URL(rawBase);
+    parsed.pathname = fallback;
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function buildInheritedRequestUrl(endpointUrl, sourceRequestUrl) {
+  const endpointRaw = String(endpointUrl || "").trim();
+  if (!endpointRaw) {
+    return "";
+  }
+
+  try {
+    const endpointParsed = new URL(endpointRaw);
+    endpointParsed.search = "";
+    endpointParsed.hash = "";
+
+    const sourceRaw = String(sourceRequestUrl || "").trim();
+    if (!sourceRaw) {
+      return endpointParsed.toString();
+    }
+
+    const sourceParsed = new URL(sourceRaw);
+    sourceParsed.searchParams.forEach((value, key) => {
+      endpointParsed.searchParams.append(key, value);
+    });
+    return endpointParsed.toString();
+  } catch (_error) {
+    const endpointWithoutHash = endpointRaw.split("#", 1)[0];
+    const endpointBase = endpointWithoutHash.split("?", 1)[0];
+    const sourceRaw = String(sourceRequestUrl || "").trim();
+    const sourceQueryIndex = sourceRaw.indexOf("?");
+    if (sourceQueryIndex < 0) {
+      return endpointBase;
+    }
+    const sourceHashIndex = sourceRaw.indexOf("#", sourceQueryIndex + 1);
+    const sourceQuery = sourceRaw.slice(sourceQueryIndex + 1, sourceHashIndex >= 0 ? sourceHashIndex : undefined).trim();
+    if (!sourceQuery) {
+      return endpointBase;
+    }
+    return `${endpointBase}?${sourceQuery}`;
+  }
+}
+
+function buildWorkspaceCardId(prefix = "workspace") {
+  const normalizedPrefix = String(prefix || "workspace").replace(/[^a-z0-9_-]+/gi, "-");
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${normalizedPrefix}-${crypto.randomUUID()}`;
+  }
+  const stamp = Date.now().toString(36);
+  const random = Math.random().toString(36).slice(2, 10);
+  return `${normalizedPrefix}-${stamp}-${random}`;
+}
+
+function buildCardHeaderContextMarkup(urlValue, endpointUrl = "") {
   const context = parseCmRequestContext(urlValue);
   if (!context.fullUrl) {
     return '<span class="card-url-empty">No CM URL</span>';
   }
 
+  const hiddenPathSegments = Array.isArray(context.hiddenPathSegments)
+    ? context.hiddenPathSegments
+    : [];
+  const visiblePathSegments = Array.isArray(context.pathSegments)
+    ? context.pathSegments
+    : [];
+  const fullPathSegments = [...hiddenPathSegments, ...visiblePathSegments];
+  const visibleOffset = hiddenPathSegments.length;
+
   const pathMarkup =
-    context.pathSegments.length > 0
-      ? context.pathSegments
+    visiblePathSegments.length > 0
+      ? visiblePathSegments
           .map((segment, index) => {
-            const segmentClass = `card-url-path-segment${index === context.pathSegments.length - 1 ? " card-url-path-segment-terminal" : ""}`;
+            const segmentClass = `card-url-path-segment${index === visiblePathSegments.length - 1 ? " card-url-path-segment-terminal" : ""}`;
+            const segmentEndpointUrl = buildPathEndpointUrl(endpointUrl || context.fullUrl, fullPathSegments, visibleOffset + index + 1);
             const segmentText = escapeHtml(segment);
-            return `<span class="${segmentClass}">${segmentText}</span>${
-              index < context.pathSegments.length - 1 ? '<span class="card-url-path-divider">/</span>' : ""
+            const segmentMarkup = segmentEndpointUrl
+              ? `<a class="${segmentClass} card-url-path-link" href="${escapeHtml(segmentEndpointUrl)}" data-endpoint-url="${escapeHtml(
+                  segmentEndpointUrl
+                )}" data-source-request-url="${escapeHtml(context.fullUrl)}">${segmentText}</a>`
+              : `<span class="${segmentClass}">${segmentText}</span>`;
+            return `${segmentMarkup}${
+              index < visiblePathSegments.length - 1 ? '<span class="card-url-path-divider">/</span>' : ""
             }`;
           })
           .join("")
@@ -1373,6 +1991,20 @@ function buildCardHeaderContextMarkup(urlValue) {
       <span class="card-url-query-cloud" aria-label="CM query context">${queryMarkup}</span>
     </span>
   `;
+}
+
+function getWorkspaceEndpointKey(urlValue) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    const normalizedPath = parsed.pathname.replace(/\/+$/, "");
+    return `${parsed.origin}${normalizedPath}`.toLowerCase();
+  } catch {
+    return raw.split(/[?#]/, 1)[0].replace(/\/+$/, "").toLowerCase();
+  }
 }
 
 function collectCardDataColumns(cardState) {
@@ -1407,6 +2039,23 @@ function getCmuUsageDisplayColumns(cardState) {
   collectCardDataColumns(cardState).forEach((columnName) => {
     const normalized = normalizeCmColumnName(columnName);
     if (!normalized || seen.has(normalized) || !isDisplayableCmuColumn(cardState, normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    output.push(normalized);
+  });
+  return output;
+}
+
+function getCmuUsageTableDisplayColumns(row) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    return [];
+  }
+  const output = [];
+  const seen = new Set();
+  Object.keys(row).forEach((columnName) => {
+    const normalized = normalizeCmColumnName(columnName);
+    if (!normalized || seen.has(normalized) || !isDisplayableCmuUsageColumn(normalized)) {
       return;
     }
     seen.add(normalized);
@@ -1513,8 +2162,8 @@ function buildCardLocalFilterResetMarkup(cardState, { compact = false } = {}) {
     return "";
   }
   const className = compact
-    ? "esm-action-btn esm-unfilter cm-clear-filter-rerun cm-clear-filter-rerun--inline"
-    : "esm-action-btn esm-unfilter cm-clear-filter-rerun";
+    ? "esm-action-btn esm-unfilter esm-clear-filter-rerun esm-clear-filter-rerun--inline"
+    : "esm-action-btn esm-unfilter esm-clear-filter-rerun";
   const ariaLabel = compact
     ? "Remove local column filters and rerun this CMU table"
     : "Un-filter and rerun this CMU table";
@@ -1735,7 +2384,74 @@ function createCardElements(cardState) {
   cardState.bodyElement = article.querySelector(".card-body");
 }
 
+function syncCardUsageModeClass(cardState) {
+  if (!cardState?.element) {
+    return;
+  }
+  cardState.element.classList.toggle("report-card--cmu-usage", isCmuUsageCard(cardState));
+}
+
+async function runCardFromPathNode(cardState, endpointUrl, sourceRequestUrl) {
+  const targetEndpointUrl = String(endpointUrl || "").trim();
+  if (!targetEndpointUrl) {
+    return;
+  }
+  const inheritedRequestUrl = buildInheritedRequestUrl(targetEndpointUrl, sourceRequestUrl || getCardEffectiveRequestUrl(cardState));
+  const targetEndpointKey = getWorkspaceEndpointKey(targetEndpointUrl);
+  const currentEndpointKey = getWorkspaceEndpointKey(String(cardState?.endpointUrl || getCardEffectiveRequestUrl(cardState) || ""));
+
+  if (targetEndpointKey && currentEndpointKey && targetEndpointKey === currentEndpointKey) {
+    const result = await sendWorkspaceAction("run-card", {
+      requestSource: "workspace-path-link",
+      card: {
+        ...getCardPayload(cardState),
+        endpointUrl: targetEndpointUrl,
+        requestUrl: inheritedRequestUrl || targetEndpointUrl,
+      },
+    });
+    if (!result?.ok) {
+      setStatus(result?.error || "Unable to re-run CMU node report.", "error");
+    }
+    return;
+  }
+
+  const nextCardPayload = {
+    cardId: buildWorkspaceCardId("path"),
+    endpointUrl: targetEndpointUrl,
+    requestUrl: inheritedRequestUrl || targetEndpointUrl,
+    baseRequestUrl: targetEndpointUrl,
+    zoomKey: String(cardState?.zoomKey || ""),
+    columns: Array.isArray(cardState?.columns) ? cardState.columns.map((column) => String(column || "")).filter(Boolean) : [],
+  };
+  const result = await sendWorkspaceAction("run-card", {
+    requestSource: "workspace-path-link",
+    card: nextCardPayload,
+  });
+  if (!result?.ok) {
+    setStatus(result?.error || "Unable to run CMU path node report.", "error");
+  }
+}
+
+function wireCardHeaderPathLinks(cardState) {
+  const titleElement = cardState?.titleElement;
+  if (!titleElement) {
+    return;
+  }
+  titleElement.querySelectorAll(".card-url-path-link[data-endpoint-url]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void runCardFromPathNode(
+        cardState,
+        String(link.getAttribute("data-endpoint-url") || ""),
+        String(link.getAttribute("data-source-request-url") || "")
+      );
+    });
+  });
+}
+
 function updateCardHeader(cardState) {
+  syncCardUsageModeClass(cardState);
   const operation = normalizeOperationDescriptor(cardState?.operation);
   if (operation) {
     const title = operation.label ? `${operation.label}` : `${operation.method} ${operation.pathTemplate}`;
@@ -1748,7 +2464,8 @@ function updateCardHeader(cardState) {
   }
   const effectiveRequestUrl = getCardEffectiveRequestUrl(cardState);
   if (isCmuUsageCard(cardState)) {
-    cardState.titleElement.innerHTML = buildCardHeaderContextMarkup(effectiveRequestUrl);
+    cardState.titleElement.innerHTML = buildCardHeaderContextMarkup(effectiveRequestUrl, String(cardState.endpointUrl || ""));
+    wireCardHeaderPathLinks(cardState);
   } else {
     cardState.titleElement.textContent = effectiveRequestUrl || "No CM URL";
   }
@@ -1759,6 +2476,9 @@ function updateCardHeader(cardState) {
 }
 
 function ensureWorkspaceUnlocked() {
+  if (IS_CM_WORKSPACE_TEARSHEET_RUNTIME) {
+    return true;
+  }
   if (!state.workspaceLocked) {
     return true;
   }
@@ -1799,7 +2519,7 @@ function wireCardRerunAndFilterActions(cardState) {
     });
   }
 
-  const clearFilterButtons = cardState?.bodyElement?.querySelectorAll(".cm-clear-filter-rerun") || [];
+  const clearFilterButtons = cardState?.bodyElement?.querySelectorAll(".esm-clear-filter-rerun, .cm-clear-filter-rerun") || [];
   clearFilterButtons.forEach((button) => {
     button.addEventListener("click", (event) => {
       event.preventDefault();
@@ -2040,6 +2760,9 @@ function ensureCard(cardMeta) {
       existing.localHasBaselineData = false;
       existing.localColumnFilters = new Map();
       existing.pickerOpenColumn = "";
+      existing.sortStack = getDefaultSortStackForCard(existing);
+    } else if (!Array.isArray(existing.sortStack) || existing.sortStack.length === 0) {
+      existing.sortStack = getDefaultSortStackForCard(existing);
     }
     updateCardHeader(existing);
     return existing;
@@ -2075,12 +2798,19 @@ function ensureCard(cardMeta) {
     bodyElement: null,
   };
 
+  cardState.sortStack = getDefaultSortStackForCard(cardState);
   createCardElements(cardState);
   cardState.localColumnFilters = normalizeCmLocalColumnFilters(cardMeta?.localColumnFilters, cardState);
   updateCardHeader(cardState);
   renderCardMessage(cardState, "Waiting for data...");
 
   cardState.closeButton.addEventListener("click", () => {
+    if (typeof cardState.pickerOutsidePointerHandler === "function") {
+      document.removeEventListener("pointerdown", cardState.pickerOutsidePointerHandler, true);
+    }
+    if (typeof cardState.pickerOutsideKeyHandler === "function") {
+      document.removeEventListener("keydown", cardState.pickerOutsideKeyHandler, true);
+    }
     cardState.element?.remove();
     state.cardsById.delete(cardState.cardId);
     syncActionButtonsDisabled();
@@ -2137,9 +2867,17 @@ function formatLastModifiedForDisplay(rawHttpDate) {
 function buildDefaultSortStack(headers = [], options = {}) {
   const normalizedHeaders = Array.isArray(headers) ? headers.map((header) => String(header || "").trim()).filter(Boolean) : [];
   if (options?.cmuUsage === true && options?.hasDate === true && normalizedHeaders.includes("DATE")) {
-    return [{ col: "DATE", dir: "DESC" }];
+    return getDefaultCmuUsageSortStack();
   }
   return normalizedHeaders.length > 0 ? [{ col: normalizedHeaders[0], dir: "DESC" }] : [];
+}
+
+function getDefaultCmuUsageSortStack() {
+  return [{ col: "DATE", dir: "DESC" }];
+}
+
+function getDefaultSortStackForCard(cardState) {
+  return isCmuUsageCard(cardState) ? getDefaultCmuUsageSortStack() : [];
 }
 
 function renderCardTable(cardState, rows, lastModified) {
@@ -2150,10 +2888,11 @@ function renderCardTable(cardState, rows, lastModified) {
   }
 
   const usageCard = isCmuUsageCard(cardState);
+  const firstRow = normalizedRows[0] && typeof normalizedRows[0] === "object" ? normalizedRows[0] : {};
   const genericHeaders = Array.from(
     new Set([
       ...(Array.isArray(cardState.columns) ? cardState.columns : []),
-      ...Object.keys(normalizedRows[0] || {}),
+      ...Object.keys(firstRow),
     ])
   ).filter((header) => {
     const normalizedHeader = String(header || "").trim();
@@ -2162,16 +2901,14 @@ function renderCardTable(cardState, rows, lastModified) {
   const hasDate = usageCard;
   const hasAuthN =
     usageCard &&
-    normalizedRows.some(
-      (row) => getRowValueByColumn(row, "authn-attempts") != null && getRowValueByColumn(row, "authn-successful") != null
-    );
+    getRowValueByColumn(firstRow, "authn-attempts") != null &&
+    getRowValueByColumn(firstRow, "authn-successful") != null;
   const hasAuthZ =
     usageCard &&
-    normalizedRows.some(
-      (row) => getRowValueByColumn(row, "authz-attempts") != null && getRowValueByColumn(row, "authz-successful") != null
-    );
-  const hasCount = usageCard && normalizedRows.some((row) => getRowValueByColumn(row, "count") != null);
-  const displayColumns = usageCard ? getCmuUsageDisplayColumns(cardState) : [];
+    getRowValueByColumn(firstRow, "authz-attempts") != null &&
+    getRowValueByColumn(firstRow, "authz-successful") != null;
+  const hasCount = usageCard && getRowValueByColumn(firstRow, "count") != null;
+  const displayColumns = usageCard ? getCmuUsageTableDisplayColumns(firstRow) : [];
   const headers = usageCard
     ? [
         ...(hasDate ? ["DATE"] : []),
@@ -2181,6 +2918,17 @@ function renderCardTable(cardState, rows, lastModified) {
         ...displayColumns,
       ]
     : genericHeaders;
+  const closeControlMarkup = usageCard
+    ? `<button type="button" class="esm-action-btn esm-delete-data" aria-label="Delete data table" title="Delete this table data">
+                    <svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M3 6h18"></path>
+                      <path d="M8 6V4h8v2"></path>
+                      <path d="M6 6l1 14h10l1-14"></path>
+                      <path d="M10 11v6"></path>
+                      <path d="M14 11v6"></path>
+                    </svg>
+                  </button>`
+    : `<span class="esm-close" title="Close table"> x </span>`;
 
   cardState.bodyElement.innerHTML = `
     <div class="esm-table-wrapper">
@@ -2191,11 +2939,11 @@ function renderCardTable(cardState, rows, lastModified) {
           <tr>
             <td class="esm-footer-cell">
               <div class="esm-footer">
-                <a href="#" class="cm-csv-link">CSV</a>
+                <a href="#" class="esm-csv-link">CSV</a>
                 <div class="esm-footer-controls">
                   ${buildCardLocalFilterResetMarkup(cardState)}
                   <span class="esm-last-modified"></span>
-                  <span class="esm-close" title="Close table"> x </span>
+                  ${closeControlMarkup}
                 </div>
               </div>
             </td>
@@ -2212,8 +2960,18 @@ function renderCardTable(cardState, rows, lastModified) {
   const tbody = table.querySelector("tbody");
   const footerCell = cardState.bodyElement.querySelector(".esm-footer-cell");
   const lastModifiedLabel = cardState.bodyElement.querySelector(".esm-last-modified");
-  const csvLink = cardState.bodyElement.querySelector(".cm-csv-link");
-  const closeButton = cardState.bodyElement.querySelector(".esm-close");
+  const csvLink = cardState.bodyElement.querySelector(".esm-csv-link");
+  const closeButton = cardState.bodyElement.querySelector(usageCard ? ".esm-delete-data" : ".esm-close");
+
+  const normalizedIncomingSortStack =
+    Array.isArray(cardState?.sortStack) && cardState.sortStack.length > 0
+      ? cardState.sortStack
+          .map((rule) => ({
+            col: String(rule?.col || "").trim(),
+            dir: String(rule?.dir || "").trim().toUpperCase() === "ASC" ? "ASC" : "DESC",
+          }))
+          .filter((rule) => rule.col)
+      : [];
 
   const tableState = {
     wrapper: tableWrapper,
@@ -2223,7 +2981,10 @@ function renderCardTable(cardState, rows, lastModified) {
     mode: usageCard ? "cmu-usage" : "generic",
     headers,
     data: normalizedRows,
-    sortStack: buildDefaultSortStack(headers, { cmuUsage: usageCard, hasDate }),
+    sortStack:
+      normalizedIncomingSortStack.length > 0
+        ? normalizedIncomingSortStack
+        : buildDefaultSortStack(headers, { cmuUsage: usageCard, hasDate }),
     hasDate,
     hasAuthN,
     hasAuthZ,
@@ -2232,6 +2993,7 @@ function renderCardTable(cardState, rows, lastModified) {
     context: usageCard
       ? {
           mode: "cmu-usage",
+          headers,
           hasDate,
           hasAuthN,
           hasAuthZ,
@@ -2299,17 +3061,24 @@ function renderCardTable(cardState, rows, lastModified) {
       if (!ensureWorkspaceUnlocked()) {
         return;
       }
+      const csvPayload =
+        usageCard
+          ? getCardPayload(cardState)
+          : {
+              ...getCardPayload(cardState),
+              rows: Array.isArray(cardState.rows) ? cardState.rows : [],
+            };
+      const defaultSortRule = usageCard
+        ? getDefaultCmuUsageSortStack()[0]
+        : tableState.sortStack?.[0] || null;
       const result = await sendWorkspaceAction("download-csv", {
-        card: {
-          ...getCardPayload(cardState),
-          rows: Array.isArray(cardState.rows) ? cardState.rows : [],
-        },
-        sortRule: cardState.sortStack?.[0] || tableState.sortStack?.[0] || null,
+        card: csvPayload,
+        sortRule: cardState.sortStack?.[0] || defaultSortRule,
       });
       if (!result?.ok) {
-        setStatus(result?.error || "Unable to download CM CSV.", "error");
+        setStatus(result?.error || (usageCard ? "Unable to download CSV." : "Unable to download CM CSV."), "error");
       } else {
-        setStatus("CM CSV download started.");
+        setStatus(usageCard ? "CSV download started." : "CM CSV download started.");
       }
     });
   }
@@ -2342,7 +3111,7 @@ function applyReportStart(payload) {
   cardState.running = true;
   cardState.rows = [];
   cardState.sourceRows = [];
-  cardState.sortStack = [];
+  cardState.sortStack = getDefaultSortStackForCard(cardState);
   updateCardHeader(cardState);
   renderCardMessage(cardState, "Loading report...");
   if (cardState.element && !document.hidden) {
@@ -2393,7 +3162,7 @@ function applyReportResult(payload) {
   const filteredRows = applyCmLocalColumnFiltersToRows(rows, cardState.localColumnFilters, cardState);
   cardState.rows = filteredRows;
   cardState.lastModified = String(payload?.lastModified || "");
-  cardState.sortStack = [];
+  cardState.sortStack = getDefaultSortStackForCard(cardState);
   updateCardHeader(cardState);
 
   if (filteredRows.length === 0) {
@@ -2454,6 +3223,7 @@ function applyControllerState(payload) {
     }
   });
 
+  syncTearsheetButtonsVisibility();
   updateWorkspaceLockState();
   updateControllerBanner();
 }
@@ -2495,9 +3265,764 @@ function handleWorkspaceEvent(eventName, payload) {
   }
 }
 
+function hasChromeRuntimeMessaging() {
+  return (
+    typeof chrome !== "undefined" &&
+    chrome?.runtime &&
+    typeof chrome.runtime.sendMessage === "function"
+  );
+}
+
+function hasChromeRuntimeMessageListener() {
+  return (
+    typeof chrome !== "undefined" &&
+    chrome?.runtime &&
+    chrome.runtime.onMessage &&
+    typeof chrome.runtime.onMessage.addListener === "function"
+  );
+}
+
+function getOrderedCardStates() {
+  const ordered = [];
+  if (els.cardsHost) {
+    els.cardsHost.querySelectorAll(".report-card[data-card-id]").forEach((element) => {
+      const cardId = String(element.getAttribute("data-card-id") || "").trim();
+      if (!cardId || !state.cardsById.has(cardId)) {
+        return;
+      }
+      ordered.push(state.cardsById.get(cardId));
+    });
+  }
+  if (ordered.length > 0) {
+    return ordered;
+  }
+  return [...state.cardsById.values()];
+}
+
+function sanitizeDownloadFileSegment(value, fallback = "download") {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+function truncateDownloadFileSegment(value, maxLength = 48) {
+  const text = String(value || "");
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return text.slice(0, maxLength).replace(/[_-]+$/g, "");
+}
+
+function buildClickCmuWorkspaceFileName(snapshot = {}) {
+  const mediaCompany = truncateDownloadFileSegment(
+    sanitizeDownloadFileSegment(
+      firstNonEmptyString([snapshot?.programmerName, snapshot?.programmerId, "MediaCompany"]),
+      "MediaCompany"
+    ),
+    48
+  );
+  const epoch = Date.now();
+  return `${mediaCompany}_clickCMUWS_${epoch}.html`;
+}
+
+function serializeCardForWorkspaceExport(cardState) {
+  if (!cardState) {
+    return null;
+  }
+  return {
+    cardId: String(cardState.cardId || ""),
+    endpointUrl: String(cardState.endpointUrl || ""),
+    requestUrl: String(cardState.requestUrl || cardState.endpointUrl || ""),
+    baseRequestUrl: String(cardState.baseRequestUrl || cardState.requestUrl || cardState.endpointUrl || ""),
+    zoomKey: String(cardState.zoomKey || ""),
+    columns: Array.isArray(cardState.columns) ? cardState.columns.map((column) => String(column || "")).filter(Boolean) : [],
+    localColumnFilters: serializeCmLocalColumnFilters(cardState.localColumnFilters, cardState),
+    operation: cardState.operation && typeof cardState.operation === "object" ? { ...cardState.operation } : null,
+    formValues: cardState.formValues && typeof cardState.formValues === "object" ? { ...cardState.formValues } : {},
+    rows: normalizeRows(Array.isArray(cardState.rows) ? cardState.rows : []),
+    sourceRows: normalizeRows(Array.isArray(cardState.sourceRows) ? cardState.sourceRows : []),
+    sortStack:
+      Array.isArray(cardState.sortStack) && cardState.sortStack.length > 0
+        ? cardState.sortStack
+            .map((rule) => ({
+              col: String(rule?.col || "").trim(),
+              dir: String(rule?.dir || "").trim().toUpperCase() === "ASC" ? "ASC" : "DESC",
+            }))
+            .filter((rule) => rule.col)
+        : [],
+    lastModified: String(cardState.lastModified || ""),
+  };
+}
+
+function buildWorkspaceExportSnapshot() {
+  const cards = getOrderedCardStates()
+    .map((cardState) => serializeCardForWorkspaceExport(cardState))
+    .filter(Boolean);
+  const generatedAt = new Date();
+  return {
+    title: `${getProgrammerLabel()} clickCMU Workspace`,
+    controllerStateText: String(els.controllerState?.textContent || "").trim(),
+    filterStateText: String(els.filterState?.textContent || "").trim(),
+    exportMetaText: "",
+    programmerId: String(state.programmerId || ""),
+    programmerName: String(state.programmerName || ""),
+    requestorIds: Array.isArray(state.requestorIds) ? state.requestorIds.slice(0, 24) : [],
+    mvpdIds: Array.isArray(state.mvpdIds) ? state.mvpdIds.slice(0, 24) : [],
+    profileHarvest: state.profileHarvest && typeof state.profileHarvest === "object" ? { ...state.profileHarvest } : null,
+    profileHarvestList:
+      Array.isArray(state.profileHarvestList) && state.profileHarvestList.length > 0
+        ? state.profileHarvestList.filter((entry) => entry && typeof entry === "object").map((entry) => ({ ...entry }))
+        : [],
+    generatedAt: generatedAt.toISOString(),
+    clientTimeZone: CLIENT_TIMEZONE,
+    cards,
+  };
+}
+
+async function loadWorkspaceStylesheetText() {
+  if (typeof workspaceStylesheetTextCache === "string" && workspaceStylesheetTextCache.trim().length > 0) {
+    return workspaceStylesheetTextCache;
+  }
+  const stylesheetUrl = String(els.stylesheet?.href || "").trim();
+  if (!stylesheetUrl) {
+    throw new Error("Workspace stylesheet URL is unavailable.");
+  }
+  const response = await fetch(stylesheetUrl, {
+    method: "GET",
+    credentials: "omit",
+    cache: "no-cache",
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load workspace stylesheet (${response.status}).`);
+  }
+  const stylesheetText = await response.text();
+  if (!String(stylesheetText || "").trim()) {
+    throw new Error("Workspace stylesheet is empty.");
+  }
+  workspaceStylesheetTextCache = stylesheetText;
+  return workspaceStylesheetTextCache;
+}
+
+async function loadWorkspaceTearsheetRuntimeText() {
+  if (typeof workspaceTearsheetRuntimeTextCache === "string" && workspaceTearsheetRuntimeTextCache.trim().length > 0) {
+    return workspaceTearsheetRuntimeTextCache;
+  }
+  if (!hasChromeRuntimeMessaging() || !chrome?.runtime?.getURL) {
+    throw new Error("CM workspace runtime loader requires extension context.");
+  }
+  const runtimeUrl = chrome.runtime.getURL(WORKSPACE_TEARSHEET_RUNTIME_PATH);
+  const response = await fetch(runtimeUrl, {
+    method: "GET",
+    credentials: "omit",
+    cache: "no-cache",
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load clickCMUWS runtime (${response.status}).`);
+  }
+  const runtimeText = await response.text();
+  if (!String(runtimeText || "").trim()) {
+    throw new Error("clickCMUWS runtime is empty.");
+  }
+  workspaceTearsheetRuntimeTextCache = runtimeText;
+  return workspaceTearsheetRuntimeTextCache;
+}
+
+async function loadWorkspaceTearsheetTemplateText() {
+  if (typeof workspaceTearsheetTemplateTextCache === "string" && workspaceTearsheetTemplateTextCache.trim().length > 0) {
+    return workspaceTearsheetTemplateTextCache;
+  }
+  if (!hasChromeRuntimeMessaging() || !chrome?.runtime?.getURL) {
+    throw new Error("CM workspace template loader requires extension context.");
+  }
+  const templateUrl = chrome.runtime.getURL(WORKSPACE_TEARSHEET_TEMPLATE_PATH);
+  const response = await fetch(templateUrl, {
+    method: "GET",
+    credentials: "omit",
+    cache: "no-cache",
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load clickCMUWS template (${response.status}).`);
+  }
+  const templateText = await response.text();
+  if (!String(templateText || "").trim()) {
+    throw new Error("clickCMUWS template is empty.");
+  }
+  workspaceTearsheetTemplateTextCache = templateText;
+  return workspaceTearsheetTemplateTextCache;
+}
+
+function buildWorkspaceTearsheetHtml(snapshot, templateHtml, stylesheetText, runtimeScriptText, authContext = {}) {
+  const templateText = String(templateHtml || "");
+  if (!templateText.trim()) {
+    throw new Error("clickCMUWS template is empty.");
+  }
+  const runtimeScript = String(runtimeScriptText || "").replace(/<\/script/gi, "<\\/script");
+  if (!runtimeScript.trim()) {
+    throw new Error("clickCMUWS runtime script is empty.");
+  }
+  const safeStyles = String(stylesheetText || "").replace(/<\/style/gi, "<\\/style");
+  if (!safeStyles.trim()) {
+    throw new Error("clickCMUWS stylesheet is empty.");
+  }
+  const payloadJson = JSON.stringify(snapshot || {}).replace(/</g, "\\u003c");
+
+  const doc = new DOMParser().parseFromString(templateText, "text/html");
+  if (!doc?.documentElement || !doc?.head || !doc?.body) {
+    throw new Error("clickCMUWS template is invalid.");
+  }
+
+  const titleText = String(snapshot?.title || "clickCMU Workspace Tearsheet").trim() || "clickCMU Workspace Tearsheet";
+  doc.title = titleText;
+
+  const styleNode = doc.createElement("style");
+  styleNode.id = "workspace-style-inline";
+  styleNode.textContent = safeStyles;
+  const existingStyleLink = doc.getElementById("workspace-style-link");
+  if (existingStyleLink?.parentNode) {
+    existingStyleLink.parentNode.replaceChild(styleNode, existingStyleLink);
+  } else {
+    doc.head.append(styleNode);
+  }
+
+  doc.querySelectorAll("script[src]").forEach((node) => node.remove());
+
+  const genericClickCmuButton = doc.getElementById("workspace-make-clickcmu");
+  if (genericClickCmuButton) {
+    genericClickCmuButton.remove();
+  }
+  const workspaceClickCmuButton = doc.getElementById("workspace-make-clickcmuws");
+  if (workspaceClickCmuButton) {
+    workspaceClickCmuButton.remove();
+  }
+  const workspaceClearAllButton = doc.getElementById("workspace-clear-all");
+  if (workspaceClearAllButton) {
+    workspaceClearAllButton.remove();
+  }
+
+  upsertBodyHiddenInput(doc, CM_WORKSPACE_RUNTIME_TOKEN_INPUT_NAME, String(authContext?.accessToken || ""));
+  upsertBodyHiddenInput(
+    doc,
+    CM_WORKSPACE_RUNTIME_CLIENT_IDS_INPUT_NAME,
+    JSON.stringify(
+      dedupeCandidateStrings(
+        (Array.isArray(authContext?.clientIds) ? authContext.clientIds : [])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      )
+    )
+  );
+  upsertBodyHiddenInput(doc, CM_WORKSPACE_RUNTIME_USER_ID_INPUT_NAME, String(authContext?.userId || ""));
+  upsertBodyHiddenInput(
+    doc,
+    CM_WORKSPACE_RUNTIME_SCOPE_INPUT_NAME,
+    String(authContext?.scope || CM_WORKSPACE_IMS_DEFAULT_SCOPE || "")
+  );
+
+  const payloadNode = doc.createElement("script");
+  payloadNode.id = WORKSPACE_TEARSHEET_PAYLOAD_ID;
+  payloadNode.type = "application/json";
+  payloadNode.textContent = payloadJson;
+  doc.body.append(payloadNode);
+
+  const runtimeNode = doc.createElement("script");
+  runtimeNode.textContent = runtimeScript;
+  doc.body.append(runtimeNode);
+
+  return `<!doctype html>\n${doc.documentElement.outerHTML}`;
+}
+
+function downloadHtmlFile(htmlText, fileName) {
+  const blob = new Blob([String(htmlText || "")], { type: "text/html;charset=utf-8" });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = String(fileName || "clickCMUWS.html");
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 1500);
+}
+
+function resolveCardStateForPayload(cardPayload) {
+  const cardId = String(cardPayload?.cardId || "").trim();
+  if (cardId && state.cardsById.has(cardId)) {
+    return state.cardsById.get(cardId);
+  }
+  const endpointKey = getWorkspaceEndpointKey(String(cardPayload?.endpointUrl || cardPayload?.baseRequestUrl || cardPayload?.requestUrl || ""));
+  if (!endpointKey) {
+    return null;
+  }
+  for (const cardState of state.cardsById.values()) {
+    const candidateKey = getWorkspaceEndpointKey(
+      String(cardState?.endpointUrl || cardState?.baseRequestUrl || cardState?.requestUrl || "")
+    );
+    if (candidateKey && candidateKey === endpointKey) {
+      return cardState;
+    }
+  }
+  return null;
+}
+
+function normalizeSortRule(sortRule) {
+  const col = String(sortRule?.col || "").trim();
+  if (!col) {
+    return null;
+  }
+  return {
+    col,
+    dir: String(sortRule?.dir || "").trim().toUpperCase() === "ASC" ? "ASC" : "DESC",
+  };
+}
+
+function buildCardRequestUrlForStandaloneRun(cardState, cardPayload = {}) {
+  const usageCard = isCmuUsageCard(cardState);
+  const baseRequestUrl = String(
+    cardPayload?.requestUrl ||
+      cardPayload?.baseRequestUrl ||
+      cardState?.requestUrl ||
+      cardState?.baseRequestUrl ||
+      cardState?.endpointUrl ||
+      ""
+  ).trim();
+  if (!baseRequestUrl) {
+    throw new Error("CM card request URL is missing.");
+  }
+  const filteredRequestUrl = appendCmLocalColumnFiltersToUrl(baseRequestUrl, cardState?.localColumnFilters, cardState);
+  return usageCard ? ensureCmuQueryDefaults(filteredRequestUrl, 1000) : filteredRequestUrl;
+}
+
+function buildStandaloneOperationRequest(operation, formValues = {}) {
+  const descriptor = normalizeOperationDescriptor(operation);
+  if (!descriptor) {
+    throw new Error("CM V2 operation metadata is missing.");
+  }
+  if (!descriptor.pathTemplate) {
+    throw new Error("CM V2 operation path template is missing.");
+  }
+
+  const values = normalizeOperationFormValues(descriptor, formValues || {});
+  const baseUrlRaw = String(values.baseUrl || CM_WORKSPACE_FALLBACK_BASE_URL).trim();
+  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
+  if (!baseUrl) {
+    throw new Error("CM V2 base URL is required.");
+  }
+
+  const pathParams = descriptor.parameters.filter((item) => item.in === "path");
+  const headerParams = descriptor.parameters.filter((item) => item.in === "header");
+  const queryParams = descriptor.parameters.filter((item) => item.in === "query");
+
+  let resolvedPath = descriptor.pathTemplate;
+  pathParams.forEach((param) => {
+    const fieldName = String(param?.name || "").trim();
+    if (!fieldName) {
+      return;
+    }
+    const lookupKey = fieldName.toLowerCase() === "x-terminate" ? "xTerminate" : fieldName;
+    const value = String(values?.[lookupKey] || "").trim();
+    if (!value && param.required) {
+      throw new Error(`CM V2 parameter "${fieldName}" is required.`);
+    }
+    const placeholderPattern = new RegExp(`\\{${fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\}`, "g");
+    resolvedPath = resolvedPath.replace(placeholderPattern, encodeURIComponent(value));
+  });
+
+  if (/\{[^}]+\}/.test(resolvedPath)) {
+    throw new Error(`CM V2 path contains unresolved parameters: ${resolvedPath}`);
+  }
+
+  const query = new URLSearchParams();
+  queryParams.forEach((param) => {
+    const fieldName = String(param?.name || "").trim();
+    if (!fieldName) {
+      return;
+    }
+    const value = String(values?.[fieldName] || "").trim();
+    if (!value && param.required) {
+      throw new Error(`CM V2 query parameter "${fieldName}" is required.`);
+    }
+    if (value) {
+      query.append(fieldName, value);
+    }
+  });
+
+  const headers = {
+    Accept: "application/json, text/plain, */*",
+  };
+  headerParams.forEach((param) => {
+    const fieldName = String(param?.name || "").trim();
+    if (!fieldName) {
+      return;
+    }
+    const lookupKey = fieldName.toLowerCase() === "x-terminate" ? "xTerminate" : fieldName;
+    const rawValue = String(values?.[lookupKey] || "").trim();
+    if (!rawValue && param.required) {
+      throw new Error(`CM V2 header "${fieldName}" is required.`);
+    }
+    if (!rawValue) {
+      return;
+    }
+    if (fieldName.toLowerCase() === "x-terminate") {
+      const normalized = rawValue
+        .split(/[\n,]+/)
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .join(",");
+      if (normalized) {
+        headers[fieldName] = normalized;
+      }
+      return;
+    }
+    headers[fieldName] = rawValue;
+  });
+
+  if (values.authUser || values.authPass) {
+    headers.Authorization = `Basic ${btoa(`${values.authUser || ""}:${values.authPass || ""}`)}`;
+  }
+
+  const queryText = query.toString();
+  const url = `${baseUrl}${resolvedPath}${queryText ? `?${queryText}` : ""}`;
+  return {
+    url,
+    method: descriptor.method || "GET",
+    headers,
+    formValues: values,
+  };
+}
+
+async function runStandaloneCard(cardPayload = {}, options = {}) {
+  const cardId = String(cardPayload?.cardId || "").trim() || buildWorkspaceCardId("runtime");
+  const startPayload = {
+    cardId,
+    endpointUrl: String(cardPayload?.endpointUrl || ""),
+    requestUrl: String(cardPayload?.requestUrl || cardPayload?.endpointUrl || ""),
+    baseRequestUrl: String(cardPayload?.baseRequestUrl || cardPayload?.requestUrl || cardPayload?.endpointUrl || ""),
+    zoomKey: String(cardPayload?.zoomKey || ""),
+    columns: Array.isArray(cardPayload?.columns) ? cardPayload.columns : [],
+    localColumnFilters: cardPayload?.localColumnFilters || {},
+  };
+  handleWorkspaceEvent("report-start", startPayload);
+  const cardState = resolveCardStateForPayload(startPayload) || ensureCard(startPayload);
+  if (!cardState) {
+    return { ok: false, error: "Unable to resolve workspace card state." };
+  }
+
+  try {
+    const requestUrl = buildCardRequestUrlForStandaloneRun(cardState, cardPayload);
+    const response = await fetchCmWorkspaceWithAuth(requestUrl, {
+      method: "GET",
+      credentials: "include",
+    });
+    const responseText = await response.text().catch(() => "");
+    const parsed = safeJsonParse(responseText, null);
+    if (!response.ok) {
+      const errorPreview = String(responseText || "").trim();
+      throw new Error(`HTTP ${response.status}${errorPreview ? ` ${errorPreview}` : ""}`);
+    }
+    const rows = normalizeRows(extractRowsFromCmPayload(parsed));
+    const columns =
+      rows.length > 0
+        ? Object.keys(rows[0]).filter((key) => String(key || "").trim() && !String(key || "").startsWith("__"))
+        : Array.isArray(cardState.columns)
+          ? cardState.columns
+          : [];
+    handleWorkspaceEvent("report-result", {
+      ...startPayload,
+      ok: true,
+      requestUrl,
+      baseRequestUrl: String(cardPayload?.baseRequestUrl || cardState.baseRequestUrl || requestUrl),
+      rows,
+      columns,
+      lastModified: String(response.headers.get("Last-Modified") || response.headers.get("Date") || ""),
+    });
+    if (options.suppressStatus !== true) {
+      setStatus(rows.length > 0 ? `Loaded ${rows.length} row(s).` : "No data.");
+    }
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    handleWorkspaceEvent("report-result", {
+      ...startPayload,
+      ok: false,
+      error: message || "Request failed.",
+    });
+    if (options.suppressStatus !== true) {
+      setStatus(message || "Request failed.", "error");
+    }
+    return { ok: false, error: message || "Request failed." };
+  }
+}
+
+async function runStandaloneApiOperation(cardPayload = {}, formValues = {}, options = {}) {
+  const cardId = String(cardPayload?.cardId || "").trim() || buildWorkspaceCardId("runtime-op");
+  const operation = normalizeOperationDescriptor(cardPayload?.operation);
+  if (!operation) {
+    return { ok: false, error: "CM V2 operation metadata is missing." };
+  }
+  const normalizedFormValues = normalizeOperationFormValues(operation, formValues || cardPayload?.formValues || {});
+  handleWorkspaceEvent("report-form", {
+    cardId,
+    endpointUrl: String(cardPayload?.endpointUrl || ""),
+    requestUrl: String(cardPayload?.requestUrl || cardPayload?.endpointUrl || ""),
+    baseRequestUrl: String(cardPayload?.baseRequestUrl || cardPayload?.requestUrl || cardPayload?.endpointUrl || ""),
+    zoomKey: String(cardPayload?.zoomKey || "CMV2"),
+    columns: Array.isArray(cardPayload?.columns) ? cardPayload.columns : [],
+    operation,
+    formValues: normalizedFormValues,
+    localColumnFilters: cardPayload?.localColumnFilters || {},
+  });
+  const cardState = resolveCardStateForPayload({ cardId }) || ensureCard({ cardId, operation, formValues: normalizedFormValues });
+  if (!cardState) {
+    return { ok: false, error: "Unable to resolve CM V2 operation card state." };
+  }
+
+  try {
+    const request = buildStandaloneOperationRequest(operation, normalizedFormValues);
+    handleWorkspaceEvent("report-start", {
+      cardId,
+      endpointUrl: String(cardPayload?.endpointUrl || request.url || operation.pathTemplate || ""),
+      requestUrl: request.url,
+      baseRequestUrl: String(cardPayload?.baseRequestUrl || request.url || ""),
+      zoomKey: String(cardPayload?.zoomKey || "CMV2"),
+      columns: Array.isArray(cardPayload?.columns) ? cardPayload.columns : [],
+      operation,
+      formValues: request.formValues,
+      localColumnFilters: cardPayload?.localColumnFilters || {},
+    });
+
+    const response = isBasicAuthHeader(request.headers?.Authorization || "")
+      ? await fetchWithTimeout(request.url, {
+          method: request.method,
+          credentials: "include",
+          headers: request.headers,
+        })
+      : await fetchCmWorkspaceWithAuth(request.url, {
+          method: request.method,
+          credentials: "include",
+          headers: request.headers,
+        });
+
+    const responseText = await response.text().catch(() => "");
+    const parsed = safeJsonParse(responseText, null);
+    if (!response.ok) {
+      const errorPreview = String(responseText || "").trim();
+      throw new Error(`HTTP ${response.status}${errorPreview ? ` ${errorPreview}` : ""}`);
+    }
+    const rows = normalizeRows(extractRowsFromCmPayload(parsed));
+    const columns =
+      rows.length > 0
+        ? Object.keys(rows[0]).filter((key) => String(key || "").trim() && !String(key || "").startsWith("__"))
+        : Array.isArray(cardState.columns)
+          ? cardState.columns
+          : [];
+
+    handleWorkspaceEvent("report-result", {
+      cardId,
+      endpointUrl: String(cardPayload?.endpointUrl || request.url || operation.pathTemplate || ""),
+      requestUrl: request.url,
+      baseRequestUrl: String(cardPayload?.baseRequestUrl || request.url || ""),
+      zoomKey: String(cardPayload?.zoomKey || "CMV2"),
+      columns,
+      operation,
+      formValues: request.formValues,
+      localColumnFilters: cardPayload?.localColumnFilters || {},
+      ok: true,
+      rows,
+      lastModified: String(response.headers.get("Last-Modified") || response.headers.get("Date") || ""),
+    });
+    if (options.suppressStatus !== true) {
+      setStatus(rows.length > 0 ? `Loaded ${rows.length} row(s).` : "No data.");
+    }
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    handleWorkspaceEvent("report-result", {
+      cardId,
+      endpointUrl: String(cardPayload?.endpointUrl || ""),
+      requestUrl: String(cardPayload?.requestUrl || cardPayload?.endpointUrl || ""),
+      baseRequestUrl: String(cardPayload?.baseRequestUrl || cardPayload?.requestUrl || cardPayload?.endpointUrl || ""),
+      zoomKey: String(cardPayload?.zoomKey || "CMV2"),
+      operation,
+      formValues: normalizedFormValues,
+      localColumnFilters: cardPayload?.localColumnFilters || {},
+      ok: false,
+      error: message || "CM V2 request failed.",
+    });
+    if (options.suppressStatus !== true) {
+      setStatus(message || "CM V2 request failed.", "error");
+    }
+    return { ok: false, error: message || "CM V2 request failed." };
+  }
+}
+
+function csvEscape(value) {
+  const text = String(value == null ? "" : value);
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, "\"\"")}"`;
+  }
+  return text;
+}
+
+function buildStandaloneCsvRows(cardState, sortRule = null) {
+  const rows = normalizeRows(Array.isArray(cardState?.rows) ? cardState.rows : []);
+  if (rows.length === 0) {
+    return [];
+  }
+  const usageCard = isCmuUsageCard(cardState);
+  if (!usageCard) {
+    const headers = collectCardDataColumns(cardState);
+    if (headers.length === 0) {
+      return [];
+    }
+    const normalizedSortRule = normalizeSortRule(sortRule);
+    const sortStack =
+      normalizedSortRule && headers.includes(normalizedSortRule.col)
+        ? [normalizedSortRule]
+        : Array.isArray(cardState?.sortStack) && cardState.sortStack.length > 0
+          ? cardState.sortStack
+          : buildDefaultSortStack(headers, { cmuUsage: false, hasDate: false });
+    const sortedRows = sortRows(rows, sortStack, null);
+    return [
+      headers,
+      ...sortedRows.map((row) => headers.map((header) => getRowValueByColumn(row, header) ?? "")),
+    ];
+  }
+
+  const firstRow = rows[0] || {};
+  const hasAuthN = getRowValueByColumn(firstRow, "authn-attempts") != null && getRowValueByColumn(firstRow, "authn-successful") != null;
+  const hasAuthZ = getRowValueByColumn(firstRow, "authz-attempts") != null && getRowValueByColumn(firstRow, "authz-successful") != null;
+  const hasCount = getRowValueByColumn(firstRow, "count") != null;
+  const displayColumns = getCmuUsageTableDisplayColumns(firstRow);
+  const headers = [
+    "DATE",
+    ...(hasAuthN ? ["AuthN Success"] : []),
+    ...(hasAuthZ ? ["AuthZ Success"] : []),
+    ...(!hasAuthN && !hasAuthZ && hasCount ? ["COUNT"] : []),
+    ...displayColumns,
+  ];
+  const context = {
+    mode: "cmu-usage",
+    hasDate: true,
+    hasAuthN,
+    hasAuthZ,
+  };
+  const normalizedSortRule = normalizeSortRule(sortRule);
+  const sortStack =
+    normalizedSortRule && headers.includes(normalizedSortRule.col)
+      ? [normalizedSortRule]
+      : Array.isArray(cardState?.sortStack) && cardState.sortStack.length > 0
+        ? cardState.sortStack
+        : getDefaultCmuUsageSortStack();
+  const sortedRows = sortRows(rows, sortStack, context);
+  const csvRows = [headers];
+  sortedRows.forEach((row) => {
+    const line = [buildCmuDateLabel(row)];
+    if (hasAuthN) {
+      line.push(formatPercent(safeRate(getRowValueByColumn(row, "authn-successful"), getRowValueByColumn(row, "authn-attempts"))));
+    }
+    if (hasAuthZ) {
+      line.push(formatPercent(safeRate(getRowValueByColumn(row, "authz-successful"), getRowValueByColumn(row, "authz-attempts"))));
+    }
+    if (!hasAuthN && !hasAuthZ && hasCount) {
+      line.push(getRowValueByColumn(row, "count") ?? "");
+    }
+    displayColumns.forEach((columnName) => {
+      line.push(getRowValueByColumn(row, columnName) ?? "");
+    });
+    csvRows.push(line);
+  });
+  return csvRows;
+}
+
+function downloadStandaloneCardCsv(cardPayload = {}, sortRule = null) {
+  const cardState = resolveCardStateForPayload(cardPayload);
+  if (!cardState) {
+    return { ok: false, error: "CM workspace card is unavailable for CSV export." };
+  }
+  const csvRows = buildStandaloneCsvRows(cardState, sortRule);
+  if (csvRows.length === 0) {
+    return { ok: false, error: "No CM data is available for CSV export." };
+  }
+  const csvText = csvRows.map((row) => row.map((value) => csvEscape(value)).join(",")).join("\r\n");
+  const nodeLabel = truncateDownloadFileSegment(
+    sanitizeDownloadFileSegment(getNodeLabel(getCardEffectiveRequestUrl(cardState)), "workspace"),
+    56
+  );
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const fileName = `${nodeLabel}_clickCMUWS_${stamp}.csv`;
+  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 1500);
+  return { ok: true, fileName };
+}
+
+async function runStandaloneBatch(cards = [], reason = "") {
+  const queue = Array.isArray(cards) ? cards : [];
+  handleWorkspaceEvent("batch-start", {
+    total: queue.length,
+    reason: String(reason || ""),
+    startedAt: Date.now(),
+  });
+  for (const card of queue) {
+    if (normalizeOperationDescriptor(card?.operation)) {
+      await runStandaloneApiOperation(card, card?.formValues || {}, { suppressStatus: true });
+    } else {
+      await runStandaloneCard(card, { suppressStatus: true });
+    }
+  }
+  handleWorkspaceEvent("batch-end", {
+    total: queue.length,
+    reason: String(reason || ""),
+    completedAt: Date.now(),
+  });
+  return { ok: true };
+}
+
+async function sendWorkspaceActionInStandaloneRuntime(action, payload = {}) {
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  if (normalizedAction === "workspace-ready") {
+    return { ok: true, controllerOnline: true, standalone: true };
+  }
+  if (normalizedAction === "run-card") {
+    const card = payload?.card && typeof payload.card === "object" ? payload.card : {};
+    return runStandaloneCard(card);
+  }
+  if (normalizedAction === "run-api-operation") {
+    const card = payload?.card && typeof payload.card === "object" ? payload.card : {};
+    const formValues = payload?.formValues && typeof payload.formValues === "object" ? payload.formValues : {};
+    return runStandaloneApiOperation(card, formValues);
+  }
+  if (normalizedAction === "rerun-all") {
+    return runStandaloneBatch(payload?.cards, payload?.reason || "");
+  }
+  if (normalizedAction === "download-csv") {
+    return downloadStandaloneCardCsv(payload?.card || {}, payload?.sortRule || null);
+  }
+  return {
+    ok: false,
+    error: `Unsupported workspace action in clickCMUWS tearsheet: ${normalizedAction || "unknown"}`,
+  };
+}
+
 async function sendWorkspaceAction(action, payload = {}) {
   if (String(action || "").trim().toLowerCase() !== "workspace-ready" && !ensureWorkspaceUnlocked()) {
     return { ok: false, error: getWorkspaceLockMessage() };
+  }
+  if (IS_CM_WORKSPACE_TEARSHEET_RUNTIME || !hasChromeRuntimeMessaging()) {
+    return sendWorkspaceActionInStandaloneRuntime(action, payload);
   }
   try {
     return await chrome.runtime.sendMessage({
@@ -2535,17 +4060,88 @@ async function rerunAllCards() {
   }
 }
 
+async function makeClickCmuDownload() {
+  if (!ensureWorkspaceUnlocked()) {
+    return;
+  }
+  if (state.cmAvailable !== true) {
+    setStatus("clickCMU generation is only available for media companies with Concurrency Monitoring.", "error");
+    return;
+  }
+
+  setStatus("", "info");
+  const result = await sendWorkspaceAction("make-clickcmu");
+  if (!result?.ok) {
+    setStatus(result?.error || "Unable to generate clickCMU file.", "error");
+  }
+}
+
+async function makeClickCmuWorkspaceDownload() {
+  if (!ensureWorkspaceUnlocked()) {
+    return;
+  }
+  if (state.cmAvailable !== true) {
+    setStatus("clickCMUWS_TEARSHEET generation is only available for media companies with Concurrency Monitoring.", "error");
+    return;
+  }
+
+  const cards = getOrderedCardStates();
+  if (cards.length === 0) {
+    setStatus("Open at least one workspace report before generating clickCMUWS_TEARSHEET.", "error");
+    return;
+  }
+
+  if (els.makeClickCmuWorkspaceButton) {
+    els.makeClickCmuWorkspaceButton.disabled = true;
+  }
+  setStatus("", "info");
+  try {
+    const snapshot = buildWorkspaceExportSnapshot();
+    const authResult = await sendWorkspaceAction("resolve-clickcmuws-auth");
+    if (!authResult?.ok) {
+      throw new Error(authResult?.error || "Unable to resolve clickCMU workspace credentials.");
+    }
+    const [templateHtml, runtimeScriptText, stylesheetText] = await Promise.all([
+      loadWorkspaceTearsheetTemplateText(),
+      loadWorkspaceTearsheetRuntimeText(),
+      loadWorkspaceStylesheetText(),
+    ]);
+    const outputHtml = buildWorkspaceTearsheetHtml(snapshot, templateHtml, stylesheetText, runtimeScriptText, {
+      accessToken: String(authResult?.accessToken || ""),
+      clientIds: Array.isArray(authResult?.clientIds) ? authResult.clientIds : [],
+      userId: String(authResult?.userId || ""),
+      scope: String(authResult?.scope || CM_WORKSPACE_IMS_DEFAULT_SCOPE || ""),
+    });
+    const fileName = buildClickCmuWorkspaceFileName(snapshot);
+    downloadHtmlFile(outputHtml, fileName);
+  } catch (error) {
+    setStatus(
+      `Unable to generate clickCMUWS_TEARSHEET: ${error instanceof Error ? error.message : String(error)}`,
+      "error"
+    );
+  } finally {
+    syncActionButtonsDisabled();
+  }
+}
+
 function clearWorkspace() {
   if (!ensureWorkspaceUnlocked()) {
     return;
   }
-  state.cardsById.forEach((cardState) => {
-    cardState.element?.remove();
-  });
-  state.cardsById.clear();
+  clearWorkspaceCards();
 }
 
 function registerEventHandlers() {
+  if (els.makeClickCmuButton) {
+    els.makeClickCmuButton.addEventListener("click", () => {
+      void makeClickCmuDownload();
+    });
+  }
+  if (els.makeClickCmuWorkspaceButton) {
+    els.makeClickCmuWorkspaceButton.addEventListener("click", () => {
+      void makeClickCmuWorkspaceDownload();
+    });
+  }
   if (els.rerunAllButton) {
     els.rerunAllButton.addEventListener("click", () => {
       void rerunAllCards();
@@ -2557,30 +4153,125 @@ function registerEventHandlers() {
     });
   }
 
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type !== CM_MESSAGE_TYPE || message?.channel !== "workspace-event") {
+  if (hasChromeRuntimeMessageListener()) {
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type !== CM_MESSAGE_TYPE || message?.channel !== "workspace-event") {
+        return false;
+      }
+      const targetWindowId = Number(message?.targetWindowId || 0);
+      if (targetWindowId > 0 && Number(state.windowId || 0) > 0 && targetWindowId !== Number(state.windowId)) {
+        return false;
+      }
+      handleWorkspaceEvent(message?.event, message?.payload || {});
       return false;
-    }
-    const targetWindowId = Number(message?.targetWindowId || 0);
-    if (targetWindowId > 0 && Number(state.windowId || 0) > 0 && targetWindowId !== Number(state.windowId)) {
-      return false;
-    }
-    handleWorkspaceEvent(message?.event, message?.payload || {});
-    return false;
+    });
+  }
+}
+
+function hydrateWorkspaceFromExportPayload(payload = workspaceExportPayload) {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+
+  applyControllerState({
+    controllerOnline: true,
+    cmAvailable: true,
+    programmerId: String(payload?.programmerId || ""),
+    programmerName: String(payload?.programmerName || ""),
+    requestorIds: Array.isArray(payload?.requestorIds) ? payload.requestorIds : [],
+    mvpdIds: Array.isArray(payload?.mvpdIds) ? payload.mvpdIds : [],
+    profileHarvest: payload?.profileHarvest && typeof payload.profileHarvest === "object" ? payload.profileHarvest : null,
+    profileHarvestList: Array.isArray(payload?.profileHarvestList) ? payload.profileHarvestList : [],
   });
+
+  clearWorkspaceCards();
+  const cards = Array.isArray(payload?.cards) ? payload.cards.slice().reverse() : [];
+  cards.forEach((cardMeta) => {
+    if (!cardMeta || typeof cardMeta !== "object") {
+      return;
+    }
+    const normalizedMeta = {
+      cardId: String(cardMeta?.cardId || buildWorkspaceCardId("import")),
+      endpointUrl: String(cardMeta?.endpointUrl || ""),
+      requestUrl: String(cardMeta?.requestUrl || cardMeta?.endpointUrl || ""),
+      baseRequestUrl: String(cardMeta?.baseRequestUrl || cardMeta?.requestUrl || cardMeta?.endpointUrl || ""),
+      zoomKey: String(cardMeta?.zoomKey || ""),
+      columns: Array.isArray(cardMeta?.columns) ? cardMeta.columns : [],
+      localColumnFilters: cardMeta?.localColumnFilters || {},
+      operation: cardMeta?.operation && typeof cardMeta.operation === "object" ? cardMeta.operation : null,
+      formValues: cardMeta?.formValues && typeof cardMeta.formValues === "object" ? cardMeta.formValues : {},
+    };
+    const cardState = ensureCard(normalizedMeta);
+    if (!cardState) {
+      return;
+    }
+
+    cardState.operation = normalizeOperationDescriptor(normalizedMeta.operation);
+    cardState.formValues = normalizeOperationFormValues(cardState.operation, normalizedMeta.formValues || {});
+    cardState.localColumnFilters = normalizeCmLocalColumnFilters(normalizedMeta.localColumnFilters, cardState);
+    cardState.sourceRows = normalizeRows(Array.isArray(cardMeta?.sourceRows) ? cardMeta.sourceRows : cardMeta?.rows || []);
+    const payloadRows = Array.isArray(cardMeta?.rows) ? cardMeta.rows : cardState.sourceRows;
+    cardState.rows = normalizeRows(payloadRows);
+    cardState.lastModified = String(cardMeta?.lastModified || "");
+    cardState.sortStack =
+      Array.isArray(cardMeta?.sortStack) && cardMeta.sortStack.length > 0
+        ? cardMeta.sortStack
+            .map((rule) => ({
+              col: String(rule?.col || "").trim(),
+              dir: String(rule?.dir || "").trim().toUpperCase() === "ASC" ? "ASC" : "DESC",
+            }))
+            .filter((rule) => rule.col)
+        : getDefaultSortStackForCard(cardState);
+
+    if (cardState.sourceRows.length > 0) {
+      initializeCardLocalFilterBaseline(cardState, cardState.sourceRows);
+      cardState.rows = applyCmLocalColumnFiltersToRows(cardState.sourceRows, cardState.localColumnFilters, cardState);
+    }
+
+    updateCardHeader(cardState);
+    if (cardState.rows.length > 0) {
+      renderCardTable(cardState, cardState.rows, cardState.lastModified);
+      return;
+    }
+    if (cardState.operation) {
+      renderOperationFormCard(cardState, {
+        formValues: cardState.formValues,
+      });
+      return;
+    }
+    renderCardMessage(cardState, "No data");
+  });
+
+  const total = state.cardsById.size;
+  setStatus(
+    total > 0
+      ? `clickCMUWS_TEARSHEET ready: ${total} report${total === 1 ? "" : "s"}.`
+      : "No workspace reports were captured for this tearsheet."
+  );
+  syncActionButtonsDisabled();
 }
 
 async function init() {
-  try {
-    const currentWindow = await chrome.windows.getCurrent();
-    state.windowId = Number(currentWindow?.id || 0);
-  } catch {
+  if (!IS_CM_WORKSPACE_TEARSHEET_RUNTIME && hasChromeRuntimeMessaging() && chrome?.windows?.getCurrent) {
+    try {
+      const currentWindow = await chrome.windows.getCurrent();
+      state.windowId = Number(currentWindow?.id || 0);
+    } catch {
+      state.windowId = 0;
+    }
+  } else {
     state.windowId = 0;
   }
 
   registerEventHandlers();
+  syncTearsheetButtonsVisibility();
   updateWorkspaceLockState();
   updateControllerBanner();
+
+  if (IS_CM_WORKSPACE_TEARSHEET_RUNTIME) {
+    hydrateWorkspaceFromExportPayload(workspaceExportPayload);
+    return;
+  }
 
   const result = await sendWorkspaceAction("workspace-ready");
   if (!result?.ok) {

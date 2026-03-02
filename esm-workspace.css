@@ -735,7 +735,7 @@ body.workspace-locked .workspace-cards {
   margin-right: 2px;
   font-size: 12px;
   font-weight: 500;
-  color: #476086;
+  color: var(--legacy-accent);
 }
 
 .esm-action-btn,

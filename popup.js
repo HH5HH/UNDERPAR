@@ -98,6 +98,7 @@ const EXPERIENCE_CLOUD_SSO_CLIENT_ID = "exc_app";
 const EXPERIENCE_CLOUD_SILENT_PROFILE_FILTER =
   '{"findFirst":true, "fallbackToAA":true, "preferForwardProfile":true}; hasPC("dma_tartan")';
 const CLICK_ESM_ENDPOINTS_PATH = "click-esm-endpoints.json";
+const CLICK_CMU_ENDPOINTS_PATH = "click-cmu-endpoints.json";
 const CLICK_ESM_TEMPLATE_PATH = "clickESM-template.html";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_TITLE = "__UP_CLICK_ESM_TITLE__";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_CID = "__UP_CID__";
@@ -845,6 +846,8 @@ const els = {
 
 let clickEsmEndpoints = [];
 let clickEsmEndpointsPromise = null;
+let clickCmuEndpoints = [];
+let clickCmuEndpointsPromise = null;
 let clickEsmTemplateHtml = "";
 let clickEsmTemplatePromise = null;
 
@@ -8061,6 +8064,27 @@ function normalizeEsmColumns(columns, options = {}) {
   return output;
 }
 
+function normalizeClickCmuColumns(columns) {
+  const output = [];
+  const seen = new Set();
+  (Array.isArray(columns) ? columns : []).forEach((value) => {
+    const normalized = String(value || "")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!normalized || /^no\s+report\s+columns$/i.test(normalized)) {
+      return;
+    }
+    const lower = normalized.toLowerCase();
+    if (lower === "media-company" || seen.has(lower)) {
+      return;
+    }
+    seen.add(lower);
+    output.push(normalized);
+  });
+  return output;
+}
+
 async function loadClickEsmEndpoints() {
   if (Array.isArray(clickEsmEndpoints) && clickEsmEndpoints.length > 0) {
     return clickEsmEndpoints;
@@ -8110,6 +8134,59 @@ async function loadClickEsmEndpoints() {
     return await clickEsmEndpointsPromise;
   } finally {
     clickEsmEndpointsPromise = null;
+  }
+}
+
+async function loadClickCmuEndpoints() {
+  if (Array.isArray(clickCmuEndpoints) && clickCmuEndpoints.length > 0) {
+    return clickCmuEndpoints;
+  }
+  if (clickCmuEndpointsPromise) {
+    return clickCmuEndpointsPromise;
+  }
+
+  clickCmuEndpointsPromise = (async () => {
+    const resourceUrl = chrome.runtime.getURL(CLICK_CMU_ENDPOINTS_PATH);
+    const response = await fetch(resourceUrl, {
+      method: "GET",
+      credentials: "omit",
+      cache: "no-cache",
+    });
+    if (!response.ok) {
+      throw new Error(`Unable to load CMU endpoint catalog (${response.status}).`);
+    }
+
+    const payload = await response.json().catch(() => null);
+    const endpoints = Array.isArray(payload?.endpoints) ? payload.endpoints : [];
+    clickCmuEndpoints = endpoints
+      .map((endpoint, index) => {
+        if (!endpoint || typeof endpoint !== "object") {
+          return null;
+        }
+        const url = ensureCmUsageEndpointFormat(endpoint.url);
+        if (!url) {
+          return null;
+        }
+        const normalizedColumns = normalizeClickCmuColumns(endpoint.columns);
+        return {
+          id: String(endpoint.id || `cmu-${index + 1}`).trim() || `cmu-${index + 1}`,
+          label: String(endpoint.label || "").trim() || formatCmUsageLabelFromPath(new URL(url, CM_REPORTS_BASE_URL).pathname),
+          url,
+          zoomClass: String(endpoint.zoomClass || "").trim(),
+          zoomKey: String(endpoint.zoomKey || "").trim().toUpperCase(),
+          columns: normalizedColumns,
+          columnsKnown: Array.isArray(endpoint.columns),
+        };
+      })
+      .filter(Boolean);
+
+    return clickCmuEndpoints;
+  })();
+
+  try {
+    return await clickCmuEndpointsPromise;
+  } finally {
+    clickCmuEndpointsPromise = null;
   }
 }
 
@@ -8444,7 +8521,7 @@ function ensureCmUsageEndpointFormat(url) {
   }
 }
 
-function buildClickCmuFallbackEndpoints() {
+function buildClickCmuFallbackEndpointsFromTemplates() {
   const entries = CM_USAGE_PATH_TEMPLATES.map((templatePath, index) => {
     const path = String(templatePath || "").trim();
     if (!path) {
@@ -8455,9 +8532,25 @@ function buildClickCmuFallbackEndpoints() {
       id: `cmu-${index + 1}`,
       label: formatCmUsageLabelFromPath(normalizedPath),
       url: ensureCmUsageEndpointFormat(`${CM_REPORTS_BASE_URL}${normalizedPath}`),
+      columns: [],
+      columnsKnown: false,
     };
   }).filter(Boolean);
   return normalizeClickCmuEndpointCatalog(entries);
+}
+
+async function buildClickCmuFallbackEndpoints() {
+  try {
+    const fromCatalog = await loadClickCmuEndpoints();
+    if (Array.isArray(fromCatalog) && fromCatalog.length > 0) {
+      return normalizeClickCmuEndpointCatalog(fromCatalog);
+    }
+  } catch (error) {
+    log("CMU endpoint catalog load failed; falling back to template paths.", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return buildClickCmuFallbackEndpointsFromTemplates();
 }
 
 function resolveClickCmuEndpointsFromCmState(cmState = null) {
@@ -8487,6 +8580,13 @@ function resolveClickCmuEndpointsFromCmState(cmState = null) {
       id: String(record?.cardId || record?.entityId || `cmu-${output.length + 1}`).trim() || `cmu-${output.length + 1}`,
       label,
       url: requestUrl,
+      columns: normalizeClickCmuColumns([
+        ...(Array.isArray(record?.columns) ? record.columns : []),
+        ...((Array.isArray(record?.rows) && record.rows[0] && typeof record.rows[0] === "object")
+          ? Object.keys(record.rows[0] || {})
+          : []),
+      ]),
+      columnsKnown: Array.isArray(record?.columns),
     });
   }
   return normalizeClickCmuEndpointCatalog(output);
@@ -8511,7 +8611,7 @@ function buildClickCmuTemplatePathOrderMap() {
 function normalizeClickCmuEndpointCatalog(entries = []) {
   const list = Array.isArray(entries) ? entries : [];
   const deduped = [];
-  const seen = new Set();
+  const byKey = new Map();
 
   list.forEach((entry, index) => {
     const normalizedUrl = ensureCmUsageEndpointFormat(entry?.url);
@@ -8521,11 +8621,11 @@ function normalizeClickCmuEndpointCatalog(entries = []) {
     const pathParts = cmuUsageExtractPathParts(normalizedUrl);
     const pathKey = cmuUsagePathPartsToKey(pathParts);
     const dedupeKey = String(pathKey || normalizedUrl.split("?", 1)[0]).toLowerCase();
-    if (!dedupeKey || seen.has(dedupeKey)) {
+    if (!dedupeKey) {
       return;
     }
-    seen.add(dedupeKey);
-
+    const normalizedColumns = normalizeClickCmuColumns(entry?.columns);
+    const columnsKnown = Array.isArray(entry?.columns) || entry?.columnsKnown === true;
     const fallbackLabel = (() => {
       try {
         return formatCmUsageLabelFromPath(new URL(normalizedUrl, CM_REPORTS_BASE_URL).pathname);
@@ -8533,13 +8633,35 @@ function normalizeClickCmuEndpointCatalog(entries = []) {
         return "CMU Endpoint";
       }
     })();
-    deduped.push({
+    const existing = byKey.get(dedupeKey);
+    if (existing) {
+      if (columnsKnown && existing.columnsKnown !== true) {
+        existing.columns = normalizedColumns;
+        existing.columnsKnown = true;
+      } else if (normalizedColumns.length > (existing.columns || []).length) {
+        existing.columns = normalizedColumns;
+        existing.columnsKnown = columnsKnown || existing.columnsKnown === true;
+      } else if (columnsKnown) {
+        existing.columnsKnown = true;
+      }
+      const incomingLabel = String(entry?.label || "").trim();
+      if (incomingLabel && (!existing.label || existing.label === fallbackLabel)) {
+        existing.label = incomingLabel;
+      }
+      return;
+    }
+
+    const normalizedEntry = {
       id: String(entry?.id || `cmu-${index + 1}`).trim() || `cmu-${index + 1}`,
       label: String(entry?.label || "").trim() || fallbackLabel,
       url: normalizedUrl,
+      columns: normalizedColumns,
+      columnsKnown,
       __pathKey: pathKey,
       __pathParts: pathParts,
-    });
+    };
+    byKey.set(dedupeKey, normalizedEntry);
+    deduped.push(normalizedEntry);
   });
 
   const pathOrderMap = buildClickCmuTemplatePathOrderMap();
@@ -8559,9 +8681,9 @@ function normalizeClickCmuEndpointCatalog(entries = []) {
   return deduped.map(({ __pathKey, __pathParts, ...entry }) => entry);
 }
 
-function buildClickCmuEndpointCatalog(context = null) {
+async function buildClickCmuEndpointCatalog(context = null) {
   const fromState = resolveClickCmuEndpointsFromCmState(context?.cmState || null);
-  const fallback = buildClickCmuFallbackEndpoints();
+  const fallback = await buildClickCmuFallbackEndpoints();
   return normalizeClickCmuEndpointCatalog([...fromState, ...fallback]);
 }
 
@@ -8597,6 +8719,8 @@ function buildClickCmuEndpointDlMarkup(endpointCatalog = []) {
       id: String(entry?.id || `cmu-${index + 1}`).trim() || `cmu-${index + 1}`,
       label: String(entry?.label || "CMU Endpoint").trim() || "CMU Endpoint",
       url: ensureCmUsageEndpointFormat(entry?.url),
+      columns: normalizeClickCmuColumns(entry?.columns),
+      columnsKnown: Array.isArray(entry?.columns) || entry?.columnsKnown === true,
     }))
     .filter((entry) => String(entry?.url || "").trim());
   return normalizedCatalog
@@ -8604,10 +8728,16 @@ function buildClickCmuEndpointDlMarkup(endpointCatalog = []) {
       const href = escapeHtml(entry.url);
       const label = escapeHtml(entry.label);
       const zoomClass = deriveClickCmuZoomClass(entry.url);
-      const columns = deriveClickCmuEndpointDimensions(entry.url)
-        .map((dimension) => String(dimension || "").trim())
-        .filter(Boolean);
-      const columnText = escapeHtml(columns.join("\n"));
+      const columns = entry.columns.length > 0
+        ? entry.columns
+        : (entry.columnsKnown
+          ? []
+          : deriveClickCmuEndpointDimensions(entry.url)
+              .map((dimension) => String(dimension || "").trim())
+              .filter(Boolean));
+      const columnText = columns.length > 0
+        ? escapeHtml(columns.join("\n"))
+        : "<em>No report columns</em>";
       return [
         "<dl>",
         `  <dt><a href="${href}" class="${zoomClass}" title="${label}" onclick="runEsm(this);return false;">${href}</a></dt>`,
@@ -9173,6 +9303,157 @@ body[data-theme="dark"]{
     searchInput.placeholder = String(searchInput.placeholder).replaceAll("ESM", "CMU");
   }
 
+  const CMU_FILTER_METRIC_COLUMNS = new Set([
+    "authn-attempts",
+    "authn-successful",
+    "authn-pending",
+    "authn-failed",
+    "clientless-tokens",
+    "clientless-failures",
+    "authz-attempts",
+    "authz-successful",
+    "authz-failed",
+    "authz-rejected",
+    "authz-latency",
+    "media-tokens",
+    "unique-accounts",
+    "unique-sessions",
+    "count",
+    "decision-attempts",
+    "decision-successful",
+    "decision-failed",
+    "decision-media-tokens",
+    "users",
+    "active-sessions",
+    "started-sessions",
+    "completed-sessions",
+    "dismissed-sessions",
+    "failed-attempts",
+    "killed-sessions",
+    "bstreams-15",
+    "bstreams-30",
+    "bstreams-45",
+    "bstreams-60",
+    "bstreams-75",
+    "bstreams-90",
+    "bstreams-105",
+    "bstreams-120",
+  ]);
+  const CMU_FILTER_DATE_DIMENSION_KEYS = new Set(["year", "month", "day", "hour", "minute", "second", "date", "time", "timestamp"]);
+  const CMU_FILTER_BLOCKED_COLUMNS = new Set(["media-company", "view", "activity-level", "activity_level"]);
+  const CMU_DIMENSION_LABELS = new Map([
+    ["tenant", "Concurrency Monitoring tenant"],
+    ["mvpd", "MVPD ID"],
+    ["duration", "Session duration bucket"],
+    ["occurrences", "Occurrence bucket"],
+    ["activity-level", "Activity level bucket"],
+    ["concurrency-level", "Concurrency level bucket"],
+  ]);
+
+  function normalizeCmuFilterColumnName(columnName) {
+    if (typeof window.__normalizeDimensionName === "function") {
+      try {
+        return String(window.__normalizeDimensionName(columnName) || "").trim().toLowerCase();
+      } catch {
+        return String(columnName || "").trim().toLowerCase();
+      }
+    }
+    return String(columnName || "").trim().toLowerCase();
+  }
+
+  function isCmuDateTimeColumn(columnName) {
+    const normalized = normalizeCmuFilterColumnName(columnName);
+    if (!normalized) {
+      return false;
+    }
+    if (CMU_FILTER_DATE_DIMENSION_KEYS.has(normalized)) {
+      return true;
+    }
+    return /(?:^|[-_])(year|month|day|hour|minute|second|date|time|timestamp)(?:$|[-_])/i.test(normalized);
+  }
+
+  function isCmuMetricColumn(columnName) {
+    const normalized = normalizeCmuFilterColumnName(columnName);
+    if (!normalized) {
+      return false;
+    }
+    const canonical = normalized.replace(/_/g, "-");
+    return CMU_FILTER_METRIC_COLUMNS.has(canonical);
+  }
+
+  function isCmuFilterableColumn(columnName) {
+    const normalized = normalizeCmuFilterColumnName(columnName);
+    if (!normalized) {
+      return false;
+    }
+    const canonical = normalized.replace(/_/g, "-");
+    if (CMU_FILTER_BLOCKED_COLUMNS.has(normalized) || CMU_FILTER_BLOCKED_COLUMNS.has(canonical)) {
+      return false;
+    }
+    if (isCmuDateTimeColumn(normalized) || isCmuMetricColumn(normalized)) {
+      return false;
+    }
+    return true;
+  }
+
+  const originalGetDimensionDescription =
+    typeof window.__getDimensionDescription === "function" ? window.__getDimensionDescription.bind(window) : null;
+
+  window.__isLocalFilterExcludedDimension = function cmuLocalFilterExcludedDimension(columnName) {
+    const normalized = normalizeCmuFilterColumnName(columnName);
+    if (!normalized) {
+      return true;
+    }
+    const canonical = normalized.replace(/_/g, "-");
+    if (CMU_FILTER_BLOCKED_COLUMNS.has(normalized) || CMU_FILTER_BLOCKED_COLUMNS.has(canonical)) {
+      return true;
+    }
+    return isCmuDateTimeColumn(normalized) || isCmuMetricColumn(normalized);
+  };
+
+  window.__isSupportedDimension = function cmuSupportedDimension(columnName, _href) {
+    return isCmuFilterableColumn(columnName);
+  };
+
+  window.__isDisplayableDimension = function cmuDisplayableDimension(columnName, href) {
+    const normalized = normalizeCmuFilterColumnName(columnName);
+    if (!normalized) {
+      return false;
+    }
+    if (window.__isLocalFilterExcludedDimension(normalized)) {
+      return false;
+    }
+    return window.__isSupportedDimension(normalized, href);
+  };
+
+  window.__isFilterableDimension = function cmuFilterableDimension(columnName, href) {
+    const normalized = normalizeCmuFilterColumnName(columnName);
+    if (!normalized) {
+      return false;
+    }
+    if (window.__isLocalFilterExcludedDimension(normalized)) {
+      return false;
+    }
+    return window.__isSupportedDimension(normalized, href);
+  };
+
+  window.__getDimensionDescription = function cmuDimensionDescription(columnName, href = "") {
+    const normalized = normalizeCmuFilterColumnName(columnName);
+    if (!normalized) {
+      return "";
+    }
+    if (isCmuFilterableColumn(normalized)) {
+      if (CMU_DIMENSION_LABELS.has(normalized)) {
+        return String(CMU_DIMENSION_LABELS.get(normalized) || "").trim();
+      }
+      return normalized.replace(/[-_]+/g, " ");
+    }
+    if (originalGetDimensionDescription) {
+      return String(originalGetDimensionDescription(columnName, href) || "").trim();
+    }
+    return "";
+  };
+
   const zoomSelect = document.getElementById("filterSelect");
   if (zoomSelect) {
     [...zoomSelect.options].forEach((option) => {
@@ -9368,6 +9649,16 @@ function buildClickCmuWorkspaceEndpointCatalog(cards = []) {
       id: endpointId,
       label,
       url: endpointUrl,
+      columns: normalizeClickCmuColumns([
+        ...(Array.isArray(card?.columns) ? card.columns : []),
+        ...((Array.isArray(card?.rows) && card.rows[0] && typeof card.rows[0] === "object")
+          ? Object.keys(card.rows[0] || {})
+          : []),
+        ...((Array.isArray(card?.sourceRows) && card.sourceRows[0] && typeof card.sourceRows[0] === "object")
+          ? Object.keys(card.sourceRows[0] || {})
+          : []),
+      ]),
+      columnsKnown: Array.isArray(card?.columns),
     });
   });
   return normalizeClickCmuEndpointCatalog(output).slice(0, 120);
@@ -9453,7 +9744,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
 async function makeClickCmuDownload(context, requestToken, options = {}) {
   const programmer = context?.programmer || null;
   const authContext = await resolveClickCmuAuthContext(context, requestToken, options);
-  const endpointCatalog = buildClickCmuEndpointCatalog(context);
+  const endpointCatalog = await buildClickCmuEndpointCatalog(context);
   if (endpointCatalog.length === 0) {
     throw new Error("No CMU endpoints were resolved for clickCMU export.");
   }
@@ -16658,15 +16949,9 @@ async function loadCmService(programmer, cmService, section, contentElement, req
           if (!clickCmuContext) {
             throw new Error("Select a media company with Concurrency Monitoring access to generate clickCMU.");
           }
-          const exportResult = await makeClickCmuDownload(clickCmuContext, requestToken, {
+          await makeClickCmuDownload(clickCmuContext, requestToken, {
             source: "sidepanel",
           });
-          setStatus(
-            `clickCMU download started (${Number(exportResult?.endpointCount || 0)} endpoint${
-              Number(exportResult?.endpointCount || 0) === 1 ? "" : "s"
-            }).`,
-            "success"
-          );
         } catch (error) {
           setStatus(
             `Unable to generate clickCMU: ${error instanceof Error ? error.message : String(error)}`,

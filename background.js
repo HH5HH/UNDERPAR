@@ -51,6 +51,7 @@ const BUILD_FINGERPRINT_FILES = [
   "clickesmws-runtime.js",
   "clickESM-template.html",
   "clickCMU-template.html",
+  "click-cmu-endpoints.json",
   "cm-workspace.html",
   "cm-workspace.css",
   "cm-workspace.js",

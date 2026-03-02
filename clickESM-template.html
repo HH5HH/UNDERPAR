@@ -6,44 +6,44 @@
 <style>
 :root{
   color-scheme:light;
-  /* ZIP Light x Silver accent ramp */
-  --zip-accent-500:191, 194, 198;
-  --zip-accent-600:179, 183, 187;
-  --zip-accent-700:169, 173, 178;
-  --zip-accent-800:158, 163, 168;
-  --zip-accent-900:142, 147, 151;
-  --zip-accent-1000:123, 127, 131;
-  --zip-accent-1100:107, 111, 114;
-  /* ZIP-generated light vibe values for Silver */
-  --zip-theme-vibe-body-radial-alpha:0.156;
-  --zip-theme-vibe-body-start-mix:30.56%;
-  --zip-theme-vibe-body-end-mix:25.78%;
-  --zip-theme-vibe-shell-mix:25.55%;
-  --zip-theme-vibe-border-mix:38.2%;
-  --zip-theme-vibe-topbar-a-alpha:0.146;
-  --zip-theme-vibe-topbar-b-alpha:0.085;
-  --zip-theme-vibe-topbar-c-mix:27.25%;
-  --zip-theme-vibe-footer-a-alpha:0.12;
-  --zip-theme-vibe-footer-b-mix:19.44%;
-  --zip-theme-vibe-menu-a-mix:16.32%;
-  --zip-theme-vibe-menu-b-mix:14.16%;
-  --zip-theme-vibe-login-a-alpha:0.142;
-  --zip-theme-vibe-login-c-alpha:0.103;
-  --zip-theme-vibe-section-a-mix:19.59%;
-  --zip-theme-vibe-section-b-mix:25.26%;
-  --zip-theme-vibe-header-a-alpha:0.158;
-  --zip-theme-vibe-selection-a-alpha:0.202;
-  --zip-theme-vibe-selection-b-alpha:0.132;
-  --zip-theme-vibe-focus-alpha:0.206;
-  --zip-theme-vibe-surface-soft-alpha:0.094;
-  --zip-theme-vibe-surface-mid-alpha:0.136;
-  --zip-theme-vibe-surface-strong-alpha:0.221;
-  --zip-theme-vibe-menu-surface-mix:14.92%;
-  --zip-theme-vibe-glow-alpha:0.172;
-  --zip-theme-vibe-feedback-bg-alpha:0.143;
-  --zip-theme-vibe-feedback-border-alpha:0.347;
-  --zip-theme-vibe-zebra-contrast:12.68%;
-  --zip-theme-vibe-zebra-hover:8.5%;
+  /* ZIP Light x Azure Blue accent ramp */
+  --zip-accent-500:87, 166, 227;
+  --zip-accent-600:56, 150, 221;
+  --zip-accent-700:28, 135, 217;
+  --zip-accent-800:0, 120, 212;
+  --zip-accent-900:0, 108, 191;
+  --zip-accent-1000:0, 94, 165;
+  --zip-accent-1100:0, 82, 144;
+  /* ZIP-generated light vibe values for Azure Blue */
+  --zip-theme-vibe-body-radial-alpha:0.189;
+  --zip-theme-vibe-body-start-mix:40.57%;
+  --zip-theme-vibe-body-end-mix:32.48%;
+  --zip-theme-vibe-shell-mix:35.55%;
+  --zip-theme-vibe-border-mix:44.8%;
+  --zip-theme-vibe-topbar-a-alpha:0.179;
+  --zip-theme-vibe-topbar-b-alpha:0.104;
+  --zip-theme-vibe-topbar-c-mix:32.73%;
+  --zip-theme-vibe-footer-a-alpha:0.144;
+  --zip-theme-vibe-footer-b-mix:24.48%;
+  --zip-theme-vibe-menu-a-mix:20.28%;
+  --zip-theme-vibe-menu-b-mix:17.04%;
+  --zip-theme-vibe-login-a-alpha:0.172;
+  --zip-theme-vibe-login-c-alpha:0.124;
+  --zip-theme-vibe-section-a-mix:24.63%;
+  --zip-theme-vibe-section-b-mix:31.55%;
+  --zip-theme-vibe-header-a-alpha:0.191;
+  --zip-theme-vibe-selection-a-alpha:0.232;
+  --zip-theme-vibe-selection-b-alpha:0.151;
+  --zip-theme-vibe-focus-alpha:0.239;
+  --zip-theme-vibe-surface-soft-alpha:0.112;
+  --zip-theme-vibe-surface-mid-alpha:0.154;
+  --zip-theme-vibe-surface-strong-alpha:0.238;
+  --zip-theme-vibe-menu-surface-mix:18.28%;
+  --zip-theme-vibe-glow-alpha:0.202;
+  --zip-theme-vibe-feedback-bg-alpha:0.164;
+  --zip-theme-vibe-feedback-border-alpha:0.39;
+  --zip-theme-vibe-zebra-contrast:15.74%;
+  --zip-theme-vibe-zebra-hover:9.13%;
 
   /* ZIP light neutral stop */
   --zip-gray-25-rgb:255, 255, 255;
@@ -63,10 +63,10 @@
   /* Keep remove-filter icon explicitly destructive red across themes */
   --danger-rgb:186, 54, 54;
   --danger-strong-rgb:159, 37, 37;
-  /* RESET (Light): ZIP Indigo family */
-  --reset-bg:#4338CA;
-  --reset-border:#3730A3;
-  --reset-hover:#4F46E5;
+  /* RESET (Light): ZIP Azure Blue family */
+  --reset-bg:#0078D4;
+  --reset-border:#005EA5;
+  --reset-hover:#1C87D9;
   --reset-text:#FFFFFF;
   --radius-card:14px;
   --radius-control:8px;
@@ -120,12 +120,12 @@
   --highlight:#FFC20E;
   --highlight-text:#131820;
   --highlight-border:rgba(146, 89, 16, .52);
-  --parent-highlight:rgba(37, 99, 235, .17);
-  --parent-highlight-border:rgba(37, 99, 235, .56);
-  --parent-highlight-glow:rgba(37, 99, 235, .24);
+  --parent-highlight:rgba(0, 120, 212, .17);
+  --parent-highlight-border:rgba(0, 108, 191, .56);
+  --parent-highlight-glow:rgba(0, 120, 212, .24);
   --match-row-hover:color-mix(in srgb, var(--table-row-hover) 54%, var(--parent-highlight-border) 46%);
-  --chip-highlight-bg:rgba(37, 99, 235, .14);
-  --chip-highlight-border:rgba(37, 99, 235, .58);
+  --chip-highlight-bg:rgba(0, 120, 212, .14);
+  --chip-highlight-border:rgba(0, 108, 191, .58);
   --footer-muted:rgb(var(--zip-gray-600-rgb));
   --spinner-track:rgba(0,0,0,.20);
   --spinner-head:rgba(0,0,0,.58);
@@ -145,44 +145,44 @@
 
 body[data-theme="dark"]{
   color-scheme:dark;
-  /* ZIP Dark x Charcoal accent ramp */
-  --zip-accent-500:22, 22, 22;
-  --zip-accent-600:27, 27, 27;
-  --zip-accent-700:30, 30, 30;
-  --zip-accent-800:34, 34, 34;
-  --zip-accent-900:61, 61, 61;
-  --zip-accent-1000:87, 87, 87;
-  --zip-accent-1100:114, 114, 114;
-  /* ZIP-generated dark vibe values for Charcoal */
-  --zip-theme-vibe-body-radial-alpha:0.27;
-  --zip-theme-vibe-body-start-mix:54.21%;
-  --zip-theme-vibe-body-end-mix:40.4%;
-  --zip-theme-vibe-shell-mix:39.51%;
-  --zip-theme-vibe-border-mix:47.44%;
-  --zip-theme-vibe-topbar-a-alpha:0.24;
-  --zip-theme-vibe-topbar-b-alpha:0.153;
-  --zip-theme-vibe-topbar-c-mix:31.12%;
-  --zip-theme-vibe-footer-a-alpha:0.201;
-  --zip-theme-vibe-footer-b-mix:28.46%;
-  --zip-theme-vibe-menu-a-mix:22.72%;
-  --zip-theme-vibe-menu-b-mix:16.11%;
-  --zip-theme-vibe-login-a-alpha:0.2;
-  --zip-theme-vibe-login-c-alpha:0.139;
-  --zip-theme-vibe-section-a-mix:33.33%;
-  --zip-theme-vibe-section-b-mix:40.01%;
-  --zip-theme-vibe-header-a-alpha:0.23;
-  --zip-theme-vibe-selection-a-alpha:0.283;
-  --zip-theme-vibe-selection-b-alpha:0.169;
-  --zip-theme-vibe-focus-alpha:0.26;
-  --zip-theme-vibe-surface-soft-alpha:0.176;
-  --zip-theme-vibe-surface-mid-alpha:0.275;
-  --zip-theme-vibe-surface-strong-alpha:0.4;
-  --zip-theme-vibe-menu-surface-mix:19.38%;
-  --zip-theme-vibe-glow-alpha:0.243;
-  --zip-theme-vibe-feedback-bg-alpha:0.189;
-  --zip-theme-vibe-feedback-border-alpha:0.41;
-  --zip-theme-vibe-zebra-contrast:15.28%;
-  --zip-theme-vibe-zebra-hover:9.34%;
+  /* ZIP Dark x Azure Blue accent ramp */
+  --zip-accent-500:0, 79, 140;
+  --zip-accent-600:0, 94, 165;
+  --zip-accent-700:0, 107, 189;
+  --zip-accent-800:0, 120, 212;
+  --zip-accent-900:31, 136, 217;
+  --zip-accent-1000:61, 152, 222;
+  --zip-accent-1100:92, 169, 227;
+  /* ZIP-generated dark vibe values for Azure Blue */
+  --zip-theme-vibe-body-radial-alpha:0.316;
+  --zip-theme-vibe-body-start-mix:51.23%;
+  --zip-theme-vibe-body-end-mix:43.52%;
+  --zip-theme-vibe-shell-mix:44.68%;
+  --zip-theme-vibe-border-mix:49.18%;
+  --zip-theme-vibe-topbar-a-alpha:0.286;
+  --zip-theme-vibe-topbar-b-alpha:0.169;
+  --zip-theme-vibe-topbar-c-mix:35.04%;
+  --zip-theme-vibe-footer-a-alpha:0.243;
+  --zip-theme-vibe-footer-b-mix:28.1%;
+  --zip-theme-vibe-menu-a-mix:23.66%;
+  --zip-theme-vibe-menu-b-mix:21.11%;
+  --zip-theme-vibe-login-a-alpha:0.236;
+  --zip-theme-vibe-login-c-alpha:0.165;
+  --zip-theme-vibe-section-a-mix:34.58%;
+  --zip-theme-vibe-section-b-mix:39.32%;
+  --zip-theme-vibe-header-a-alpha:0.266;
+  --zip-theme-vibe-selection-a-alpha:0.323;
+  --zip-theme-vibe-selection-b-alpha:0.195;
+  --zip-theme-vibe-focus-alpha:0.296;
+  --zip-theme-vibe-surface-soft-alpha:0.209;
+  --zip-theme-vibe-surface-mid-alpha:0.294;
+  --zip-theme-vibe-surface-strong-alpha:0.428;
+  --zip-theme-vibe-menu-surface-mix:21.65%;
+  --zip-theme-vibe-glow-alpha:0.283;
+  --zip-theme-vibe-feedback-bg-alpha:0.215;
+  --zip-theme-vibe-feedback-border-alpha:0.456;
+  --zip-theme-vibe-zebra-contrast:17.54%;
+  --zip-theme-vibe-zebra-hover:10.41%;
 
   --zip-gray-25-rgb:17, 17, 17;
   --zip-gray-50-rgb:27, 27, 27;
@@ -200,11 +200,11 @@ body[data-theme="dark"]{
 
   --danger-rgb:183, 56, 56;
   --danger-strong-rgb:198, 84, 84;
-  /* RESET (Dark): ZIP Turquoise family (distinct from Light palette) */
-  --reset-bg:#00B7C4;
-  --reset-border:#007B7F;
-  --reset-hover:#00A3E0;
-  --reset-text:#04161A;
+  /* RESET (Dark): ZIP Azure Blue family */
+  --reset-bg:#1F88D9;
+  --reset-border:#0078D4;
+  --reset-hover:#3D98DE;
+  --reset-text:#FFFFFF;
   --surface-frost:color-mix(in srgb, var(--panel) 90%, rgb(var(--zip-gray-50-rgb)) 10%);
   --card-shadow:0 2px 8px rgba(0,0,0,.42), 0 18px 34px rgba(0,0,0,.56);
   --card-shadow-hover:0 4px 12px rgba(0,0,0,.48), 0 22px 38px rgba(0,0,0,.62);
@@ -253,12 +253,12 @@ body[data-theme="dark"]{
   --highlight:#F97316;
   --highlight-text:#140B05;
   --highlight-border:rgba(251, 146, 60, .62);
-  --parent-highlight:rgba(16, 185, 129, .20);
-  --parent-highlight-border:rgba(52, 211, 153, .62);
-  --parent-highlight-glow:rgba(16, 185, 129, .27);
+  --parent-highlight:rgba(31, 136, 217, .20);
+  --parent-highlight-border:rgba(61, 152, 222, .62);
+  --parent-highlight-glow:rgba(31, 136, 217, .27);
   --match-row-hover:color-mix(in srgb, var(--table-row-hover) 52%, var(--parent-highlight-border) 48%);
-  --chip-highlight-bg:rgba(16, 185, 129, .20);
-  --chip-highlight-border:rgba(52, 211, 153, .64);
+  --chip-highlight-bg:rgba(31, 136, 217, .20);
+  --chip-highlight-border:rgba(61, 152, 222, .64);
   --footer-muted:rgb(var(--zip-gray-600-rgb));
   --spinner-track:rgba(242,242,242,.30);
   --spinner-head:rgba(242,242,242,.84);
@@ -266,9 +266,9 @@ body[data-theme="dark"]{
   --theme-ring:rgb(var(--zip-accent-1100));
   --theme-halo:rgba(var(--zip-accent-900), .30);
   --theme-shadow:rgba(0,0,0,.56);
-  /* Click URL (Dark): ZIP Emerald family (distinct from Light palette) */
-  --click-url-rgb:31, 167, 135;
-  --click-url-hover-rgb:61, 179, 152;
+  /* Click URL (Dark): ZIP Azure Blue family */
+  --click-url-rgb:31, 136, 217;
+  --click-url-hover-rgb:61, 152, 222;
   --mvpd-colorA:color-mix(in srgb, var(--table-row) 88%, rgb(var(--zip-accent-1000)) 12%);
   --mvpd-colorB:color-mix(in srgb, var(--table-alt) 88%, rgb(var(--zip-accent-900)) 12%);
   --mvpd-colorC:color-mix(in srgb, var(--table-row) 86%, rgb(var(--zip-gray-600-rgb)) 14%);
@@ -656,12 +656,12 @@ th .sort-icon {
 
 .esm-footer-csv-link,
 .esm-footer-csv-link:visited{
-  color:var(--text-primary);
+  color:rgb(var(--click-url-rgb));
   font-weight:600;
 }
 
 .esm-footer-csv-link:hover{
-  color:var(--text-primary);
+  color:rgb(var(--click-url-hover-rgb));
 }
 
 .esm-last-modified {
@@ -669,7 +669,7 @@ th .sort-icon {
   font-size: 11.5px;
   font-weight: 600;
   letter-spacing:.01em;
-  color: var(--footer-muted);
+  color: rgb(var(--click-url-rgb));
 }
 
 .esm-message-label{
@@ -6180,7 +6180,12 @@ const ESM_PROGRAMMER_DIMENSION_DESCRIPTIONS = new Map([
   ['day', 'Day'],
   ['hour', 'Hour of day'],
   ['minute', 'Minute of hour'],
+  ['duration', 'Session duration bucket'],
+  ['occurrences', 'Occurrence bucket'],
+  ['activity-level', 'Activity level bucket'],
+  ['concurrency-level', 'Concurrency level bucket'],
   ['dc', 'Data center'],
+  ['tenant', 'Concurrency Monitoring tenant'],
   ['proxy', 'Proxy MVPD'],
   ['mvpd', 'MVPD granting entitlement'],
   ['requestor-id', 'Requestor ID used for entitlement'],
@@ -6213,6 +6218,11 @@ const ESM_MVPD_DIMENSION_DESCRIPTIONS = new Map([
   ['day', 'Day'],
   ['hour', 'Hour of day'],
   ['minute', 'Minute of hour'],
+  ['duration', 'Session duration bucket'],
+  ['occurrences', 'Occurrence bucket'],
+  ['activity-level', 'Activity level bucket'],
+  ['concurrency-level', 'Concurrency level bucket'],
+  ['tenant', 'Concurrency Monitoring tenant'],
   ['mvpd', 'MVPD ID'],
   ['requestor-id', 'Requestor ID'],
   ['eap', 'External auth provider'],
