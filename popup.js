@@ -13003,15 +13003,75 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
         context: cmWorkspaceDebugContext,
       }
     );
-    const response = await fetch(request.url, {
-      method: request.method,
-      mode: "cors",
-      credentials: "include",
-      referrerPolicy: "no-referrer",
-      headers: request.headers,
-    });
+    const basicAuthHeader = String(request?.headers?.Authorization || request?.headers?.authorization || "").trim();
+    const usesBasicAuth = /^basic\s+/i.test(basicAuthHeader);
+    let responseUrl = String(request.url || "");
+    let responseStatus = 0;
+    let responseStatusText = "";
+    let responseLastModified = "";
+    let text = "";
+    let parsed = null;
 
-    const text = await response.text().catch(() => "");
+    if (usesBasicAuth) {
+      const response = await fetch(request.url, {
+        method: request.method,
+        mode: "cors",
+        credentials: "include",
+        referrerPolicy: "no-referrer",
+        headers: request.headers,
+      });
+      responseUrl = String(response.url || request.url || "");
+      responseStatus = Number(response.status || 0);
+      responseStatusText = String(response.statusText || "");
+      responseLastModified = String(response.headers?.get("Last-Modified") || "");
+      text = await response.text().catch(() => "");
+      parsed = parseJsonText(text, null);
+      if (!response.ok) {
+        const errorDetails = truncateDebugText(text || response.statusText || "Request failed.", 1600);
+        emitCmDebugEvent(
+          {
+            phase: "cm-v2-request-failed",
+            cardId,
+            operationKey: String(operation.key || ""),
+            method: request.method,
+            url: request.url,
+            status: Number(response.status || 0),
+            statusText: String(response.statusText || ""),
+            error: errorDetails,
+          },
+          {
+            context: cmWorkspaceDebugContext,
+          }
+        );
+        throw new Error(`CM V2 ${request.method} ${request.url} failed (${response.status}): ${errorDetails}`);
+      }
+    } else {
+      const response = await fetchCmJsonWithAuthVariants(
+        [request.url],
+        `CM V2 ${request.method} ${String(operation.label || operation.key || "operation").trim() || "operation"}`,
+        {
+          method: request.method,
+          mode: "cors",
+          credentials: "include",
+          referrerPolicy: "no-referrer",
+          headers: request.headers,
+          debugMeta: {
+            ...cmWorkspaceDebugContext,
+            scope: "cm-v2-operation",
+            cardId,
+            operationKey: String(operation.key || ""),
+            operationLabel: String(operation.label || ""),
+          },
+        }
+      );
+      responseUrl = String(response.url || request.url || "");
+      responseStatus = Number(response.status || 0);
+      responseStatusText = responseStatus > 0 ? "OK" : "";
+      responseLastModified = String(response.lastModified || "");
+      text = String(response.text || "");
+      parsed = response.parsed ?? parseJsonText(text, null);
+    }
+
     emitCmDebugEvent(
       {
         phase: "cm-v2-response",
@@ -13019,16 +13079,15 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
         operationKey: String(operation.key || ""),
         operationLabel: String(operation.label || ""),
         method: request.method,
-        url: request.url,
-        status: Number(response.status || 0),
-        statusText: String(response.statusText || ""),
+        url: responseUrl || request.url,
+        status: responseStatus,
+        statusText: responseStatusText,
         responsePreview: truncateDebugText(text, 1600),
       },
       {
         context: cmWorkspaceDebugContext,
       }
     );
-    const parsed = parseJsonText(text, null);
     const normalizedPayload = parsed ?? text;
     const rows = cmRowsFromPayload(normalizedPayload);
     const summaryRows =
@@ -13036,37 +13095,17 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
         ? rows
         : [
             {
-              status: Number(response.status || 0),
-              statusText: String(response.statusText || ""),
+              status: responseStatus,
+              statusText: responseStatusText,
               method: request.method,
-              url: request.url,
+              url: responseUrl || request.url,
               message: text ? truncateDebugText(text, 1200) : "(no body)",
             },
           ];
 
-    if (!response.ok) {
-      const errorDetails = truncateDebugText(text || response.statusText || "Request failed.", 1600);
-      emitCmDebugEvent(
-        {
-          phase: "cm-v2-request-failed",
-          cardId,
-          operationKey: String(operation.key || ""),
-          method: request.method,
-          url: request.url,
-          status: Number(response.status || 0),
-          statusText: String(response.statusText || ""),
-          error: errorDetails,
-        },
-        {
-          context: cmWorkspaceDebugContext,
-        }
-      );
-      throw new Error(`CM V2 ${request.method} ${request.url} failed (${response.status}): ${errorDetails}`);
-    }
-
-    record.requestUrl = request.url;
-    record.endpointUrl = request.url;
-    record.lastModified = String(response.headers?.get("Last-Modified") || "");
+    record.requestUrl = responseUrl || request.url;
+    record.endpointUrl = responseUrl || request.url;
+    record.lastModified = responseLastModified;
     record.columns = cmColumnsFromPayload(normalizedPayload);
 
     void cmSendWorkspaceMessage(
@@ -13074,8 +13113,8 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
       {
         ok: true,
         cardId,
-        endpointUrl: request.url,
-        requestUrl: request.url,
+        endpointUrl: responseUrl || request.url,
+        requestUrl: responseUrl || request.url,
         zoomKey: "CMV2",
         columns: record.columns,
         rows: summaryRows,
