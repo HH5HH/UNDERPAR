@@ -16,6 +16,8 @@ const IMS_FETCH_REQUEST_TYPE = "underpar:imsFetch";
 const LEGACY_IMS_FETCH_REQUEST_TYPE = "mincloudlogin:imsFetch";
 const CM_FETCH_REQUEST_TYPE = "underpar:cmFetch";
 const LEGACY_CM_FETCH_REQUEST_TYPE = "mincloudlogin:cmFetch";
+const SPLUNK_FETCH_REQUEST_TYPE = "underpar:splunkFetch";
+const LEGACY_SPLUNK_FETCH_REQUEST_TYPE = "mincloudlogin:splunkFetch";
 const CONSOLE_AUTH_CALLBACK_PREFIX = "https://console.auth.adobe.com/oauth2/callback";
 
 const ADOBE_CONSOLE_BASE = "https://console.auth.adobe.com";
@@ -125,6 +127,16 @@ const LEGACY_CM_MESSAGE_TYPE = "mincloud:cm";
 const MVPD_WORKSPACE_PATH = "mvpd-workspace.html";
 const MVPD_WORKSPACE_MESSAGE_TYPE = "underpar:mvpd-workspace";
 const LEGACY_MVPD_WORKSPACE_MESSAGE_TYPE = "mincloud:mvpd-workspace";
+const REST_WORKSPACE_PATH = "rest-workspace.html";
+const REST_WORKSPACE_MESSAGE_TYPE = "underpar:rest-workspace";
+const LEGACY_REST_WORKSPACE_MESSAGE_TYPE = "mincloud:rest-workspace";
+const SPLUNK_BASE_URL = "https://splunk-us.corp.adobe.com";
+const SPLUNK_APP_SEARCH_PATH = "/en-US/app/app_adobepass/search";
+const SPLUNK_SPLUNKD_BASE = `${SPLUNK_BASE_URL}/en-US/splunkd/__raw`;
+const SPLUNK_SEARCH_EARLIEST = "-24h@h";
+const SPLUNK_SEARCH_LATEST = "now";
+const SPLUNK_EVENT_FETCH_LIMIT = 500;
+const SPLUNK_EVENT_RENDER_LIMIT = 500;
 const ESM_SOURCE_UTC_OFFSET_MINUTES = -8 * 60;
 const CLIENT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 const CM_CONFIG_BASE_URL = "https://config.adobeprimetime.com";
@@ -702,6 +714,7 @@ const LOGIN_HELPER_RESULT_MESSAGE_TYPES = new Set([
 ]);
 const ESM_WORKSPACE_MESSAGE_TYPES = new Set([ESM_WORKSPACE_MESSAGE_TYPE, LEGACY_ESM_WORKSPACE_MESSAGE_TYPE]);
 const MVPD_WORKSPACE_MESSAGE_TYPES = new Set([MVPD_WORKSPACE_MESSAGE_TYPE, LEGACY_MVPD_WORKSPACE_MESSAGE_TYPE]);
+const REST_WORKSPACE_MESSAGE_TYPES = new Set([REST_WORKSPACE_MESSAGE_TYPE, LEGACY_REST_WORKSPACE_MESSAGE_TYPE]);
 
 const state = {
   busy: false,
@@ -815,6 +828,14 @@ const state = {
   mvpdWorkspaceTabWatcherBound: false,
   mvpdWorkspaceSnapshotCacheBySelectionKey: new Map(),
   mvpdWorkspaceSnapshotPromiseBySelectionKey: new Map(),
+  restWorkspaceTabId: 0,
+  restWorkspaceWindowId: 0,
+  restWorkspaceTabIdByWindowId: new Map(),
+  restWorkspaceRuntimeListenerBound: false,
+  restWorkspaceTabWatcherBound: false,
+  restWorkspaceLastSelectionKey: "",
+  restWorkspaceLastReportBySelectionKey: new Map(),
+  restWorkspaceLastQueryContextBySelectionKey: new Map(),
 };
 
 const els = {
@@ -861,13 +882,15 @@ function log(message, details = null) {
 
 function setStatus(message = "", type = "info") {
   const normalizedMessage = String(message || "").trim();
-  els.status.textContent = normalizedMessage;
-  els.status.hidden = normalizedMessage.length === 0;
+  const normalizedType = String(type || "info").trim().toLowerCase();
+  const showAsGlobalStatus = normalizedType === "error" && normalizedMessage.length > 0;
+
+  // Global top-of-sidepanel status is intentionally error-only to avoid redundant noise.
+  els.status.textContent = showAsGlobalStatus ? normalizedMessage : "";
+  els.status.hidden = !showAsGlobalStatus;
   els.status.classList.remove("error", "success");
-  if (type === "error") {
+  if (showAsGlobalStatus) {
     els.status.classList.add("error");
-  } else if (type === "success") {
-    els.status.classList.add("success");
   }
 }
 
@@ -1031,6 +1054,48 @@ async function relayCmFetch(endpoint, options = {}) {
   }
   if (!response || response.ok !== true || !response.response || typeof response.response !== "object") {
     throw new Error(String(response?.error || "CM relay request failed."));
+  }
+
+  const payload = response.response;
+  const bodyText = typeof payload?.bodyText === "string" ? payload.bodyText : "";
+  const headers =
+    payload?.headers && typeof payload.headers === "object" ? new Headers(payload.headers) : new Headers();
+
+  return {
+    ok: Boolean(payload?.ok),
+    status: Number(payload?.status || 0),
+    statusText: String(payload?.statusText || ""),
+    url: String(payload?.url || url),
+    redirected: Boolean(payload?.redirected),
+    headers,
+    text: async () => bodyText,
+  };
+}
+
+async function relaySplunkFetch(endpoint, options = {}) {
+  const url = String(endpoint || "").trim();
+  if (!url) {
+    throw new Error("Splunk relay request missing URL.");
+  }
+
+  const message = {
+    type: SPLUNK_FETCH_REQUEST_TYPE,
+    url,
+    method: String(options?.method || "GET").trim().toUpperCase(),
+    credentials: String(options?.credentials || "include").trim().toLowerCase(),
+    headers: options?.headers && typeof options.headers === "object" ? { ...options.headers } : {},
+    body: typeof options?.body === "string" ? options.body : "",
+  };
+
+  let response = await sendRuntimeMessageSafe(message);
+  if (!response?.ok && response?.error && String(response.error).toLowerCase().includes("unsupported")) {
+    response = await sendRuntimeMessageSafe({
+      ...message,
+      type: LEGACY_SPLUNK_FETCH_REQUEST_TYPE,
+    });
+  }
+  if (!response || response.ok !== true || !response.response || typeof response.response !== "object") {
+    throw new Error(String(response?.error || "Splunk relay request failed."));
   }
 
   const payload = response.response;
@@ -2440,6 +2505,8 @@ function getRestV2SectionState(section) {
       resourceInput: REST_V2_DEFAULT_RESOURCE_ID_INPUT,
       resourceInputHarvestKey: "",
       entitlementBusy: false,
+      splunkBusy: false,
+      splunkBusyHarvestKey: "",
       lastEntitlementResult: null,
     };
   }
@@ -2451,6 +2518,8 @@ function getRestV2SectionState(section) {
       resourceInput: REST_V2_DEFAULT_RESOURCE_ID_INPUT,
       resourceInputHarvestKey: "",
       entitlementBusy: false,
+      splunkBusy: false,
+      splunkBusyHarvestKey: "",
       lastEntitlementResult: null,
     };
   }
@@ -2471,6 +2540,12 @@ function getRestV2SectionState(section) {
   }
   if (typeof section.__underparRestV2State.entitlementBusy !== "boolean") {
     section.__underparRestV2State.entitlementBusy = false;
+  }
+  if (typeof section.__underparRestV2State.splunkBusy !== "boolean") {
+    section.__underparRestV2State.splunkBusy = false;
+  }
+  if (typeof section.__underparRestV2State.splunkBusyHarvestKey !== "string") {
+    section.__underparRestV2State.splunkBusyHarvestKey = "";
   }
   return section.__underparRestV2State;
 }
@@ -3162,6 +3237,7 @@ function renderRestV2EntitlementTool(section, programmerId, selectedHarvest = nu
   const tool = section?.querySelector(".rest-v2-entitlement-tool");
   const contextElement = section?.querySelector(".rest-v2-entitlement-context");
   const copyUpstreamButton = section?.querySelector(".rest-v2-entitlement-copy-upstream-btn");
+  const splunkButton = section?.querySelector(".rest-v2-entitlement-splunk-btn");
   const inputElement = section?.querySelector(".rest-v2-resource-input");
   const buttonElement = section?.querySelector(".rest-v2-entitlement-go-btn");
   const statusElement = section?.querySelector(".rest-v2-entitlement-status");
@@ -3179,6 +3255,11 @@ function renderRestV2EntitlementTool(section, programmerId, selectedHarvest = nu
       copyUpstreamButton.hidden = true;
       copyUpstreamButton.disabled = true;
       copyUpstreamButton.dataset.copyValue = "";
+    }
+    if (splunkButton) {
+      splunkButton.hidden = true;
+      splunkButton.disabled = true;
+      splunkButton.classList.remove("net-busy");
     }
     statusElement.hidden = true;
     statusElement.classList.remove("success", "error");
@@ -3215,6 +3296,17 @@ function renderRestV2EntitlementTool(section, programmerId, selectedHarvest = nu
     const copyLabel = "Copy upstreamUserID to clipboard";
     copyUpstreamButton.title = copyLabel;
     copyUpstreamButton.setAttribute("aria-label", copyLabel);
+  }
+  if (splunkButton) {
+    const hasUpstreamUserId = Boolean(selectedUpstreamUserId);
+    const splunkBusy = sectionState.splunkBusy === true;
+    splunkButton.hidden = !hasUpstreamUserId;
+    splunkButton.disabled = !hasUpstreamUserId || splunkBusy;
+    splunkButton.classList.toggle("net-busy", splunkBusy);
+    const baseLabel = "Run Splunk RCA lookup in REST Workspace";
+    const busyLabel = "Running Splunk RCA lookup in REST Workspace";
+    splunkButton.title = splunkBusy ? busyLabel : baseLabel;
+    splunkButton.setAttribute("aria-label", splunkBusy ? busyLabel : baseLabel);
   }
 
   const harvestKey = getRestV2HarvestRecordKey(selectedHarvest);
@@ -3648,6 +3740,692 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
   }
 }
 
+function getSelectedRestV2HarvestForProgrammer(section, programmerId) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const sectionState = getRestV2SectionState(section);
+  if (!normalizedProgrammerId) {
+    return {
+      sectionState,
+      harvestList: [],
+      selectedHarvest: null,
+      selectedHarvestKey: "",
+    };
+  }
+  const harvestList = getRestV2ProfileHarvestBucketForProgrammer(normalizedProgrammerId);
+  let selectedHarvest =
+    harvestList.find((item, index) => getRestV2HarvestRecordKey(item, index) === sectionState.selectedHarvestKey) || harvestList[0] || null;
+  const selectedHarvestKey = selectedHarvest ? getRestV2HarvestRecordKey(selectedHarvest, 0) : "";
+  if (selectedHarvestKey) {
+    sectionState.selectedHarvestKey = selectedHarvestKey;
+  }
+  return {
+    sectionState,
+    harvestList,
+    selectedHarvest,
+    selectedHarvestKey,
+  };
+}
+
+function buildSplunkSearchQueryForUpstreamUserId(upstreamUserId = "") {
+  const normalized = String(upstreamUserId || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const escaped = normalized.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `search index=pass-prod "${escaped}"`;
+}
+
+function getSplunkSearchLandingUrl(queryContext = null) {
+  const baseUrl = new URL(`${SPLUNK_BASE_URL}${SPLUNK_APP_SEARCH_PATH}`);
+  const searchExpression = firstNonEmptyString([
+    queryContext?.search,
+    buildSplunkSearchQueryForUpstreamUserId(queryContext?.upstreamUserId),
+  ]);
+  if (searchExpression) {
+    baseUrl.searchParams.set("q", searchExpression);
+  }
+  baseUrl.searchParams.set("earliest", String(queryContext?.earliest || SPLUNK_SEARCH_EARLIEST));
+  baseUrl.searchParams.set("latest", String(queryContext?.latest || SPLUNK_SEARCH_LATEST));
+  return baseUrl.toString();
+}
+
+async function openSplunkSearchTabForLogin(options = {}) {
+  const shouldActivate = options.activate !== false;
+  const requestedWindowId = Number(options.windowId || 0);
+  const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
+  const useWindowFilter = targetWindowId > 0;
+  const queryContext = options.queryContext && typeof options.queryContext === "object" ? options.queryContext : null;
+  const landingUrl = getSplunkSearchLandingUrl(queryContext);
+
+  let existingTab = null;
+  try {
+    const tabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
+    existingTab =
+      tabs.find((tab) => String(tab?.url || "").startsWith(`${SPLUNK_BASE_URL}/en-US/app/`)) ||
+      tabs.find((tab) => String(tab?.url || "").startsWith(`${SPLUNK_BASE_URL}/`)) ||
+      null;
+  } catch {
+    existingTab = null;
+  }
+
+  if (existingTab?.id) {
+    try {
+      const updated = await chrome.tabs.update(existingTab.id, {
+        url: landingUrl,
+        active: shouldActivate,
+      });
+      if (shouldActivate && Number(updated?.windowId || 0) > 0) {
+        await chrome.windows.update(Number(updated.windowId), { focused: true });
+      }
+      return {
+        ok: true,
+        reused: true,
+        tabId: Number(updated?.id || existingTab.id || 0),
+        windowId: Number(updated?.windowId || existingTab.windowId || 0),
+        url: landingUrl,
+      };
+    } catch {
+      // Continue with create fallback.
+    }
+  }
+
+  const created = await chrome.tabs.create({
+    url: landingUrl,
+    active: shouldActivate,
+    ...(useWindowFilter ? { windowId: targetWindowId } : {}),
+  });
+  return {
+    ok: true,
+    reused: false,
+    tabId: Number(created?.id || 0),
+    windowId: Number(created?.windowId || 0),
+    url: landingUrl,
+  };
+}
+
+function isSplunkAuthRequiredResponse(response, parsed = null, bodyText = "") {
+  const status = Number(response?.status || 0);
+  if (status === 401 || status === 403) {
+    return true;
+  }
+
+  const responseUrl = String(response?.url || "").trim().toLowerCase();
+  if (responseUrl.includes("/account/login") || responseUrl.includes("/signin")) {
+    return true;
+  }
+
+  const contentType = String(response?.headers?.get("content-type") || "").trim().toLowerCase();
+  const parsedCode = String(extractApiErrorCode(parsed) || "").trim().toLowerCase();
+  if (
+    parsedCode.includes("login") ||
+    parsedCode.includes("unauthorized") ||
+    parsedCode.includes("not_authenticated") ||
+    parsedCode.includes("invalid_session")
+  ) {
+    return true;
+  }
+
+  const body = String(bodyText || "").trim().toLowerCase();
+  if (!contentType.includes("text/html")) {
+    return false;
+  }
+  return (
+    body.includes("/account/login") ||
+    body.includes("splunk login") ||
+    body.includes("sign in") ||
+    body.includes("authentication required")
+  );
+}
+
+function extractSplunkJobSid(payload = null) {
+  return firstNonEmptyString([
+    payload?.sid,
+    payload?.data?.sid,
+    payload?.entry?.[0]?.content?.sid,
+    payload?.entry?.[0]?.sid,
+    payload?.content?.sid,
+  ]);
+}
+
+function extractSplunkJobResultCount(payload = null) {
+  const candidate = Number(
+    firstNonEmptyString([
+      String(payload?.entry?.[0]?.content?.resultCount || ""),
+      String(payload?.entry?.[0]?.content?.eventCount || ""),
+      String(payload?.resultCount || ""),
+      String(payload?.eventCount || ""),
+    ]) || 0
+  );
+  return Number.isFinite(candidate) && candidate > 0 ? candidate : 0;
+}
+
+function normalizeSplunkCellValue(value) {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeSplunkCellValue(entry)).join(", ");
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "[object]";
+    }
+  }
+  return String(value);
+}
+
+function collectSplunkColumnOrder(results = [], fields = []) {
+  const preferred = ["_time", "event", "eventType", "requestor_id", "mvpd", "resource", "ResourceId", "uid", "subjectId", "plainUid"];
+  const seen = new Set();
+  const output = [];
+  const append = (columnName) => {
+    const normalized = String(columnName || "").trim();
+    if (!normalized) {
+      return;
+    }
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    output.push(normalized);
+  };
+  preferred.forEach(append);
+  (Array.isArray(fields) ? fields : []).forEach((entry) => {
+    append(typeof entry === "string" ? entry : entry?.name);
+  });
+  (Array.isArray(results) ? results : []).forEach((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      return;
+    }
+    Object.keys(row).forEach((key) => append(key));
+  });
+  return output;
+}
+
+function normalizeSplunkRows(results = [], columns = []) {
+  const rows = Array.isArray(results) ? results : [];
+  const normalizedColumns = Array.isArray(columns) ? columns : [];
+  return rows.map((row) => {
+    const normalizedRow = {};
+    normalizedColumns.forEach((columnName) => {
+      normalizedRow[columnName] = normalizeSplunkCellValue(row?.[columnName]);
+    });
+    return normalizedRow;
+  });
+}
+
+async function runSplunkRelayRequest(url, options = {}, networkEvents = [], phase = "") {
+  const method = String(options?.method || "GET").trim().toUpperCase();
+  const requestBody = typeof options?.body === "string" ? options.body : "";
+  const startedAt = Date.now();
+  try {
+    const response = await relaySplunkFetch(url, {
+      method,
+      credentials: options.credentials || "include",
+      headers: options.headers && typeof options.headers === "object" ? options.headers : {},
+      ...(requestBody ? { body: requestBody } : {}),
+    });
+    const responseText = await response.text().catch(() => "");
+    const parsed = parseJsonText(responseText, null);
+    const durationMs = Date.now() - startedAt;
+    const event = {
+      phase: String(phase || "request"),
+      method,
+      url: String(response?.url || url),
+      status: Number(response?.status || 0),
+      statusText: String(response?.statusText || "").trim(),
+      ok: Boolean(response?.ok),
+      durationMs,
+      requestBody: requestBody ? truncateDebugText(requestBody, 800) : "",
+      responsePreview: truncateDebugText(responseText, 1600),
+    };
+    if (Array.isArray(networkEvents)) {
+      networkEvents.push(event);
+    }
+    return {
+      ok: Boolean(response?.ok),
+      status: Number(response?.status || 0),
+      statusText: String(response?.statusText || "").trim(),
+      url: String(response?.url || url),
+      headers: response?.headers instanceof Headers ? response.headers : new Headers(),
+      text: responseText,
+      parsed,
+      durationMs,
+      authRequired: isSplunkAuthRequiredResponse(response, parsed, responseText),
+    };
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const message = error instanceof Error ? error.message : String(error);
+    if (Array.isArray(networkEvents)) {
+      networkEvents.push({
+        phase: String(phase || "request"),
+        method,
+        url: String(url || ""),
+        status: 0,
+        statusText: "",
+        ok: false,
+        durationMs,
+        requestBody: requestBody ? truncateDebugText(requestBody, 800) : "",
+        responsePreview: truncateDebugText(message, 1600),
+        error: message,
+      });
+    }
+    throw error;
+  }
+}
+
+async function checkSplunkSessionActive(queryContext = null, networkEvents = []) {
+  const probeUrl = `${SPLUNK_SPLUNKD_BASE}/services/server/info/server-info?output_mode=json`;
+  const probe = await runSplunkRelayRequest(
+    probeUrl,
+    {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        Accept: "application/json, text/plain, */*",
+      },
+    },
+    networkEvents,
+    "session-probe"
+  );
+  return {
+    active: probe.ok && !probe.authRequired,
+    probe,
+    queryContext,
+  };
+}
+
+function buildSplunkSearchRequestContext(rawContext = null) {
+  const context = rawContext && typeof rawContext === "object" ? rawContext : {};
+  const programmerId = String(context.programmerId || "").trim();
+  const programmerName = String(context.programmerName || "").trim();
+  const requestorId = String(context.requestorId || context.serviceProviderId || "").trim();
+  const mvpd = String(context.mvpd || "").trim();
+  const mvpdLabel = String(context.mvpdLabel || "").trim();
+  const upstreamUserId = String(context.upstreamUserId || "").trim();
+  const earliest = String(context.earliest || SPLUNK_SEARCH_EARLIEST).trim() || SPLUNK_SEARCH_EARLIEST;
+  const latest = String(context.latest || SPLUNK_SEARCH_LATEST).trim() || SPLUNK_SEARCH_LATEST;
+  const search = String(context.search || buildSplunkSearchQueryForUpstreamUserId(upstreamUserId)).trim();
+  const selectionKey = firstNonEmptyString([
+    context.selectionKey,
+    buildRestWorkspaceSelectionKey({
+      programmerId,
+      requestorId,
+      mvpd,
+      upstreamUserId,
+    }),
+  ]);
+  return {
+    programmerId,
+    programmerName,
+    requestorId,
+    mvpd,
+    mvpdLabel,
+    upstreamUserId,
+    earliest,
+    latest,
+    search,
+    selectionKey,
+    requestSource: String(context.requestSource || "").trim(),
+  };
+}
+
+async function runSplunkSearchForQueryContext(rawQueryContext = null, options = {}) {
+  const queryContext = buildSplunkSearchRequestContext(rawQueryContext);
+  if (!queryContext.programmerId || !queryContext.requestorId || !queryContext.mvpd || !queryContext.search || !queryContext.upstreamUserId) {
+    return {
+      ok: false,
+      error: "Splunk search context is incomplete. Select a captured MVPD profile with upstreamUserID and retry.",
+    };
+  }
+
+  const openWorkspace = options.openWorkspace !== false;
+  const activateWorkspace = options.activateWorkspace !== false;
+  const forceLoginOnAuthFailure = options.forceLoginOnAuthFailure !== false;
+  let targetWindowId = Number(options.targetWindowId || 0);
+
+  if (openWorkspace) {
+    const workspaceTab = await restWorkspaceEnsureWorkspaceTab({
+      activate: activateWorkspace,
+      windowId: targetWindowId || undefined,
+    });
+    targetWindowId = Number(workspaceTab?.windowId || targetWindowId || state.restWorkspaceWindowId || 0);
+  }
+
+  const selectionContext = {
+    programmerId: queryContext.programmerId,
+    programmerName: queryContext.programmerName,
+    requestorId: queryContext.requestorId,
+    mvpd: queryContext.mvpd,
+    mvpdLabel: queryContext.mvpdLabel,
+    upstreamUserId: queryContext.upstreamUserId,
+    selectionKey: queryContext.selectionKey,
+  };
+  restWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), selectionContext, targetWindowId);
+  void restWorkspaceSendWorkspaceMessage(
+    "report-start",
+    {
+      selectionKey: queryContext.selectionKey,
+      queryContext,
+      startedAt: Date.now(),
+      search: queryContext.search,
+      earliest: queryContext.earliest,
+      latest: queryContext.latest,
+    },
+    {
+      targetWindowId,
+    }
+  );
+
+  const networkEvents = [];
+  try {
+    const session = await checkSplunkSessionActive(queryContext, networkEvents);
+    if (!session.active) {
+      if (forceLoginOnAuthFailure) {
+        await openSplunkSearchTabForLogin({
+          activate: true,
+          windowId: targetWindowId || undefined,
+          queryContext,
+        });
+      }
+      const sessionErrorReport = {
+        ok: false,
+        selectionKey: queryContext.selectionKey,
+        checkedAt: Date.now(),
+        queryContext,
+        sid: "",
+        columns: [],
+        rows: [],
+        totalRows: 0,
+        displayedRows: 0,
+        truncatedRows: false,
+        endpointUrl: `${SPLUNK_SPLUNKD_BASE}/services/server/info/server-info?output_mode=json`,
+        status: Number(session?.probe?.status || 0),
+        statusText: String(session?.probe?.statusText || "").trim(),
+        error:
+          "Splunk session is not active. Sign in or refresh auth in the opened Splunk tab, then click SPLUNK again.",
+        authRequired: true,
+        networkEvents,
+      };
+      restWorkspaceStoreLatestReport(sessionErrorReport);
+      void restWorkspaceSendWorkspaceMessage("report-result", sessionErrorReport, { targetWindowId });
+      return sessionErrorReport;
+    }
+
+    const createBody = new URLSearchParams({
+      search: queryContext.search,
+      earliest_time: queryContext.earliest,
+      latest_time: queryContext.latest,
+      output_mode: "json",
+    }).toString();
+    const createCandidates = [
+      `${SPLUNK_SPLUNKD_BASE}/services/search/v2/jobs`,
+      `${SPLUNK_SPLUNKD_BASE}/services/search/jobs`,
+    ];
+
+    let createResponse = null;
+    let jobsBaseUrl = "";
+    let sid = "";
+    let lastCreateError = "";
+
+    for (const createUrl of createCandidates) {
+      const response = await runSplunkRelayRequest(
+        createUrl,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          },
+          body: createBody,
+        },
+        networkEvents,
+        "create-job"
+      );
+      if (response.authRequired) {
+        if (forceLoginOnAuthFailure) {
+          await openSplunkSearchTabForLogin({
+            activate: true,
+            windowId: targetWindowId || undefined,
+            queryContext,
+          });
+        }
+        const authErrorReport = {
+          ok: false,
+          selectionKey: queryContext.selectionKey,
+          checkedAt: Date.now(),
+          queryContext,
+          sid: "",
+          columns: [],
+          rows: [],
+          totalRows: 0,
+          displayedRows: 0,
+          truncatedRows: false,
+          endpointUrl: createUrl,
+          status: Number(response?.status || 0),
+          statusText: String(response?.statusText || "").trim(),
+          error:
+            "Splunk session is not active. Sign in or refresh auth in the opened Splunk tab, then click SPLUNK again.",
+          authRequired: true,
+          networkEvents,
+        };
+        restWorkspaceStoreLatestReport(authErrorReport);
+        void restWorkspaceSendWorkspaceMessage("report-result", authErrorReport, { targetWindowId });
+        return authErrorReport;
+      }
+      if (!response.ok) {
+        lastCreateError = firstNonEmptyString([
+          normalizeHttpErrorMessage(response.text),
+          String(response.statusText || "").trim(),
+          `HTTP ${response.status || 0}`,
+        ]);
+        continue;
+      }
+      const extractedSid = extractSplunkJobSid(response.parsed);
+      if (!extractedSid) {
+        lastCreateError = "Splunk search job was created without a SID.";
+        continue;
+      }
+      createResponse = response;
+      jobsBaseUrl = createUrl;
+      sid = extractedSid;
+      break;
+    }
+
+    if (!createResponse || !sid || !jobsBaseUrl) {
+      throw new Error(lastCreateError || "Unable to create Splunk search job.");
+    }
+
+    const encodedSid = encodeURIComponent(sid);
+    const jobMetaUrl = `${jobsBaseUrl}/${encodedSid}?output_mode=json`;
+    const jobMeta = await runSplunkRelayRequest(
+      jobMetaUrl,
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+        },
+      },
+      networkEvents,
+      "job-status"
+    );
+
+    const totalCountFromMeta = extractSplunkJobResultCount(jobMeta.parsed);
+    const fetchCount = Math.max(50, Math.min(SPLUNK_EVENT_FETCH_LIMIT, totalCountFromMeta > 0 ? totalCountFromMeta : SPLUNK_EVENT_FETCH_LIMIT));
+    const eventsParams = new URLSearchParams({
+      output_mode: "json",
+      offset: "0",
+      count: String(fetchCount),
+      segmentation: "full",
+      max_lines: "5",
+      field_list: "*",
+      truncation_mode: "abstract",
+    });
+    const eventsUrl = `${jobsBaseUrl}/${encodedSid}/events?${eventsParams.toString()}`;
+    const eventsResponse = await runSplunkRelayRequest(
+      eventsUrl,
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+        },
+      },
+      networkEvents,
+      "fetch-events"
+    );
+
+    if (!eventsResponse.ok) {
+      throw new Error(
+        firstNonEmptyString([
+          normalizeHttpErrorMessage(eventsResponse.text),
+          String(eventsResponse.statusText || "").trim(),
+          `HTTP ${eventsResponse.status || 0}`,
+        ]) || "Unable to load Splunk events."
+      );
+    }
+
+    const fields = Array.isArray(eventsResponse?.parsed?.fields) ? eventsResponse.parsed.fields : [];
+    const rawRows = Array.isArray(eventsResponse?.parsed?.results) ? eventsResponse.parsed.results : [];
+    const columns = collectSplunkColumnOrder(rawRows, fields);
+    const normalizedRows = normalizeSplunkRows(rawRows, columns);
+    const displayedRows = normalizedRows.slice(0, SPLUNK_EVENT_RENDER_LIMIT);
+    const reportPayload = {
+      ok: true,
+      selectionKey: queryContext.selectionKey,
+      checkedAt: Date.now(),
+      queryContext,
+      sid,
+      columns,
+      rows: displayedRows,
+      totalRows: normalizedRows.length,
+      displayedRows: displayedRows.length,
+      truncatedRows: normalizedRows.length > displayedRows.length,
+      endpointUrl: eventsUrl,
+      status: Number(eventsResponse.status || 0),
+      statusText: String(eventsResponse.statusText || "").trim(),
+      error: "",
+      authRequired: false,
+      networkEvents,
+    };
+    restWorkspaceStoreLatestReport(reportPayload);
+    void restWorkspaceSendWorkspaceMessage("report-result", reportPayload, { targetWindowId });
+    return reportPayload;
+  } catch (error) {
+    if (forceLoginOnAuthFailure) {
+      const lowerMessage = String(error instanceof Error ? error.message : error).toLowerCase();
+      if (lowerMessage.includes("session") || lowerMessage.includes("auth") || lowerMessage.includes("login")) {
+        try {
+          await openSplunkSearchTabForLogin({
+            activate: true,
+            windowId: targetWindowId || undefined,
+            queryContext,
+          });
+        } catch {
+          // Ignore open-tab failures when reporting original error.
+        }
+      }
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    const errorPayload = {
+      ok: false,
+      selectionKey: queryContext.selectionKey,
+      checkedAt: Date.now(),
+      queryContext,
+      sid: "",
+      columns: [],
+      rows: [],
+      totalRows: 0,
+      displayedRows: 0,
+      truncatedRows: false,
+      endpointUrl: `${SPLUNK_SPLUNKD_BASE}/services/search/v2/jobs`,
+      status: 0,
+      statusText: "",
+      error: message,
+      authRequired: false,
+      networkEvents,
+    };
+    restWorkspaceStoreLatestReport(errorPayload);
+    void restWorkspaceSendWorkspaceMessage("report-result", errorPayload, { targetWindowId });
+    return errorPayload;
+  }
+}
+
+async function runRestV2SplunkLookup(section, programmer, appInfo) {
+  if (!section) {
+    return;
+  }
+  const sectionState = getRestV2SectionState(section);
+  if (sectionState.splunkBusy === true) {
+    return;
+  }
+
+  const programmerId = String(programmer?.programmerId || resolveSelectedProgrammer()?.programmerId || "").trim();
+  if (!programmerId) {
+    setStatus("Select a media company before querying Splunk.", "error");
+    return;
+  }
+
+  const selectedState = getSelectedRestV2HarvestForProgrammer(section, programmerId);
+  const selectedHarvest = selectedState.selectedHarvest;
+  if (!selectedHarvest || typeof selectedHarvest !== "object") {
+    setStatus("No captured MVPD profile is selected for Splunk query.", "error");
+    return;
+  }
+
+  const upstreamUserId = String(selectedHarvest?.upstreamUserId || "").trim();
+  if (!upstreamUserId) {
+    setStatus("Selected MVPD profile does not include upstreamUserID.", "error");
+    return;
+  }
+
+  const selectionContext = buildRestWorkspaceSelectionContextFromHarvest(selectedHarvest, programmer);
+  const queryContext = {
+    ...selectionContext,
+    search: buildSplunkSearchQueryForUpstreamUserId(upstreamUserId),
+    earliest: SPLUNK_SEARCH_EARLIEST,
+    latest: SPLUNK_SEARCH_LATEST,
+    requestSource: "rest-v2-can-i-watch-splunk",
+    appGuid: String(appInfo?.guid || "").trim(),
+    appName: String(appInfo?.appName || appInfo?.guid || "").trim(),
+    harvestKey: String(selectedState.selectedHarvestKey || "").trim(),
+  };
+
+  sectionState.splunkBusy = true;
+  sectionState.splunkBusyHarvestKey = String(selectedState.selectedHarvestKey || "").trim();
+  syncRestV2ProfileAndEntitlementPanels(section, programmer, appInfo);
+
+  const result = await runSplunkSearchForQueryContext(queryContext, {
+    openWorkspace: true,
+    activateWorkspace: true,
+    requestSource: "rest-v2-can-i-watch-splunk",
+    forceLoginOnAuthFailure: true,
+  });
+
+  sectionState.splunkBusy = false;
+  sectionState.splunkBusyHarvestKey = "";
+  syncRestV2ProfileAndEntitlementPanels(section, programmer, appInfo);
+
+  if (!result?.ok) {
+    setStatus(
+      firstNonEmptyString([
+        result?.error,
+        "Splunk query failed. Sign in to Splunk and retry.",
+      ]),
+      "error"
+    );
+    return;
+  }
+}
+
 function wireRestV2ProfileAndEntitlementHandlers(section, programmer, appInfo) {
   if (!section || section.__underparRestV2HandlersBound) {
     return;
@@ -3754,6 +4532,15 @@ function wireRestV2ProfileAndEntitlementHandlers(section, programmer, appInfo) {
       }
       showRestV2CopyButtonFeedback(copyUpstreamButton, true);
       setStatus(`Copied ${copyValue} to clipboard.`, "success");
+    });
+  }
+
+  const splunkButton = section.querySelector(".rest-v2-entitlement-splunk-btn");
+  if (splunkButton) {
+    splunkButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await runRestV2SplunkLookup(section, programmer, appInfo);
     });
   }
 
@@ -16693,22 +17480,27 @@ function syncMvpdWorkspaceToolForSection(section, programmer = null, services = 
     return;
   }
   const button = section.querySelector(".mvpd-open-workspace-btn");
-  const summary = section.querySelector(".mvpd-workspace-summary");
-  if (!button && !summary) {
+  const activeLabelElement = section.querySelector(".mvpd-workspace-active-label");
+  if (!button && !activeLabelElement) {
     return;
   }
   const context = mvpdWorkspaceGetSelectionContext(programmer, services);
+  const mvpdLabel = mvpdWorkspaceGetSelectionMvpdLabel(context);
+  const isMvpdActive = Boolean(context.isReady && mvpdLabel);
   if (button) {
     button.disabled = !context.isReady;
-  }
-  if (summary) {
     if (!context.programmerId) {
-      summary.textContent = "Select a Media Company first.";
+      button.title = "Select a Media Company first.";
     } else if (!context.requestorId || !context.mvpdId) {
-      summary.textContent = "Select Requestor + MVPD, then open MVPD Workspace.";
+      button.title = "Select Requestor + MVPD first.";
     } else {
-      summary.textContent = `Ready: ${context.requestorId} x ${context.mvpdId}`;
+      button.title = `Open MVPD Workspace for ${context.requestorId} x ${mvpdLabel}.`;
     }
+    button.setAttribute("aria-label", "MVPD Workspace");
+  }
+  if (activeLabelElement) {
+    activeLabelElement.textContent = isMvpdActive ? `MVPD ${mvpdLabel} Active` : "MVPD Not Active";
+    activeLabelElement.classList.toggle("is-active", isMvpdActive);
   }
 }
 
@@ -16721,6 +17513,10 @@ function refreshMvpdWorkspaceTools() {
   sections.forEach((section) => {
     syncMvpdWorkspaceToolForSection(section, selectedProgrammer, selectedServices);
   });
+  if (restWorkspaceHasOpenTab()) {
+    const selectionContext = restWorkspaceGetSelectionContextFromCurrentSelection(selectedProgrammer);
+    restWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext);
+  }
 }
 
 async function mvpdWorkspaceOpenFromRestV2(programmer = null, services = null, options = {}) {
@@ -16747,6 +17543,425 @@ async function mvpdWorkspaceOpenFromRestV2(programmer = null, services = null, o
     surfaceMissingSelectionError: true,
   });
   return workspaceTab;
+}
+
+function restWorkspaceGetWorkspaceUrl() {
+  return chrome.runtime.getURL(REST_WORKSPACE_PATH);
+}
+
+function restWorkspaceIsWorkspaceTab(tabLike) {
+  return String(tabLike?.url || "").startsWith(restWorkspaceGetWorkspaceUrl());
+}
+
+function restWorkspaceBindWorkspaceTab(windowId, tabId) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId > 0 && normalizedTabId > 0) {
+    state.restWorkspaceTabIdByWindowId.set(normalizedWindowId, normalizedTabId);
+  }
+  if (normalizedWindowId > 0) {
+    state.restWorkspaceWindowId = normalizedWindowId;
+  }
+  if (normalizedTabId > 0) {
+    state.restWorkspaceTabId = normalizedTabId;
+  }
+}
+
+function restWorkspaceUnbindWorkspaceTab(tabId) {
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedTabId > 0) {
+    for (const [windowId, mappedTabId] of state.restWorkspaceTabIdByWindowId.entries()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        state.restWorkspaceTabIdByWindowId.delete(windowId);
+      }
+    }
+  }
+  if (!normalizedTabId || Number(state.restWorkspaceTabId || 0) === normalizedTabId) {
+    state.restWorkspaceTabId = 0;
+    state.restWorkspaceWindowId = 0;
+  }
+}
+
+function restWorkspaceGetBoundWorkspaceTabId(windowId) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId > 0) {
+    const mapped = Number(state.restWorkspaceTabIdByWindowId.get(normalizedWindowId) || 0);
+    if (mapped > 0) {
+      return mapped;
+    }
+  }
+  return Number(state.restWorkspaceTabId || 0);
+}
+
+function buildRestWorkspaceSelectionKey(context = null) {
+  const programmerId = String(context?.programmerId || "").trim();
+  const requestorId = String(context?.requestorId || "").trim();
+  const mvpd = String(context?.mvpd || "").trim();
+  const upstreamUserId = String(context?.upstreamUserId || "").trim();
+  if (!programmerId || !requestorId || !mvpd) {
+    return "";
+  }
+  return [programmerId, requestorId, mvpd, upstreamUserId].join("|");
+}
+
+function buildRestWorkspaceSelectionContextFromHarvest(harvest = null, programmer = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const contextFromHarvest = buildRestV2ContextFromHarvest(harvest);
+  const programmerId = firstNonEmptyString([
+    contextFromHarvest?.programmerId,
+    harvest?.programmerId,
+    resolvedProgrammer?.programmerId,
+  ]);
+  const programmerName = firstNonEmptyString([
+    contextFromHarvest?.programmerName,
+    harvest?.programmerName,
+    resolvedProgrammer?.programmerName,
+  ]);
+  const requestorId = firstNonEmptyString([
+    contextFromHarvest?.requestorId,
+    harvest?.requestorId,
+    harvest?.serviceProviderId,
+    state.selectedRequestorId,
+  ]);
+  const mvpd = firstNonEmptyString([contextFromHarvest?.mvpd, harvest?.mvpd, state.selectedMvpdId]);
+  const mvpdLabel = mvpd ? getRestV2MvpdPickerLabel(requestorId, mvpd) : "";
+  const upstreamUserId = firstNonEmptyString([harvest?.upstreamUserId, harvest?.subject, harvest?.userId]);
+  const selectionContext = {
+    programmerId,
+    programmerName,
+    requestorId,
+    mvpd,
+    mvpdLabel,
+    upstreamUserId,
+    harvest: harvest && typeof harvest === "object" ? harvest : null,
+  };
+  selectionContext.selectionKey = buildRestWorkspaceSelectionKey(selectionContext);
+  return selectionContext;
+}
+
+function restWorkspaceGetSelectionContextFromCurrentSelection(programmer = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const requestorId = String(state.selectedRequestorId || "").trim();
+  const mvpd = String(state.selectedMvpdId || "").trim();
+  const harvestList = programmerId ? getRestV2ProfileHarvestBucketForProgrammer(programmerId) : [];
+  let selectedHarvest = null;
+  if (requestorId && mvpd) {
+    selectedHarvest =
+      harvestList.find((item) => {
+        const harvestRequestorId = String(item?.requestorId || item?.serviceProviderId || "").trim();
+        const harvestMvpd = String(item?.mvpd || "").trim();
+        return harvestRequestorId === requestorId && harvestMvpd === mvpd;
+      }) || null;
+  }
+  if (!selectedHarvest && harvestList.length > 0) {
+    selectedHarvest = harvestList[0];
+  }
+  return buildRestWorkspaceSelectionContextFromHarvest(selectedHarvest, resolvedProgrammer);
+}
+
+function restWorkspaceGetSelectedControllerStatePayload(programmer = null, selectionContext = null) {
+  const context =
+    selectionContext && typeof selectionContext === "object"
+      ? selectionContext
+      : restWorkspaceGetSelectionContextFromCurrentSelection(programmer);
+  return {
+    controllerOnline: true,
+    restReady: Boolean(context?.programmerId && context?.requestorId && context?.mvpd),
+    programmerId: String(context?.programmerId || "").trim(),
+    programmerName: String(context?.programmerName || "").trim(),
+    requestorId: String(context?.requestorId || "").trim(),
+    mvpd: String(context?.mvpd || "").trim(),
+    mvpdLabel: String(context?.mvpdLabel || "").trim(),
+    upstreamUserId: String(context?.upstreamUserId || "").trim(),
+    selectionKey: String(context?.selectionKey || "").trim(),
+    updatedAt: Date.now(),
+  };
+}
+
+async function restWorkspaceSendWorkspaceMessage(event, payload = {}, options = {}) {
+  const targetWindowId = Number(options.targetWindowId || 0);
+  try {
+    const message = {
+      type: REST_WORKSPACE_MESSAGE_TYPE,
+      channel: "workspace-event",
+      event: String(event || ""),
+      payload,
+    };
+    if (targetWindowId > 0) {
+      message.targetWindowId = targetWindowId;
+    }
+    await chrome.runtime.sendMessage(message);
+  } catch {
+    // Ignore when workspace listener is inactive.
+  }
+}
+
+function restWorkspaceBroadcastControllerState(programmer = null, selectionContext = null, targetWindowId = 0) {
+  const resolvedWindowId = Number(targetWindowId || 0) || Number(state.restWorkspaceWindowId || 0);
+  void restWorkspaceSendWorkspaceMessage(
+    "controller-state",
+    restWorkspaceGetSelectedControllerStatePayload(programmer, selectionContext),
+    {
+      targetWindowId: resolvedWindowId,
+    }
+  );
+}
+
+function restWorkspaceHasOpenTab() {
+  return Number(state.restWorkspaceTabId || 0) > 0 || state.restWorkspaceTabIdByWindowId.size > 0;
+}
+
+async function restWorkspaceEnsureWorkspaceTab(options = {}) {
+  const shouldActivate = options.activate !== false;
+  const requestedWindowId = Number(options.windowId || 0);
+  const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
+  const useWindowFilter = targetWindowId > 0;
+  let workspaceTab = null;
+
+  const boundTabId = restWorkspaceGetBoundWorkspaceTabId(targetWindowId);
+  if (boundTabId > 0) {
+    try {
+      const existing = await chrome.tabs.get(boundTabId);
+      if (restWorkspaceIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
+        workspaceTab = existing;
+      }
+    } catch {
+      restWorkspaceUnbindWorkspaceTab(boundTabId);
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    try {
+      const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
+      workspaceTab = allTabs.find((tab) => restWorkspaceIsWorkspaceTab(tab)) || null;
+    } catch {
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    workspaceTab = await chrome.tabs.create({
+      url: restWorkspaceGetWorkspaceUrl(),
+      active: shouldActivate,
+      ...(useWindowFilter ? { windowId: targetWindowId } : {}),
+    });
+  } else if (shouldActivate && workspaceTab.id) {
+    try {
+      workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
+      if (Number(workspaceTab?.windowId || 0) > 0) {
+        await chrome.windows.update(Number(workspaceTab.windowId), { focused: true });
+      }
+    } catch {
+      // Ignore activation failures.
+    }
+  }
+
+  restWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  return workspaceTab;
+}
+
+function restWorkspaceTrimCacheMaps(limit = 80) {
+  const maxSize = Math.max(10, Number(limit || 80));
+  while (state.restWorkspaceLastReportBySelectionKey.size > maxSize) {
+    const firstKey = state.restWorkspaceLastReportBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.restWorkspaceLastReportBySelectionKey.delete(firstKey);
+  }
+  while (state.restWorkspaceLastQueryContextBySelectionKey.size > maxSize) {
+    const firstKey = state.restWorkspaceLastQueryContextBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.restWorkspaceLastQueryContextBySelectionKey.delete(firstKey);
+  }
+}
+
+function restWorkspaceStoreLatestReport(reportPayload = null) {
+  if (!reportPayload || typeof reportPayload !== "object") {
+    return "";
+  }
+  const selectionKey = firstNonEmptyString([
+    reportPayload.selectionKey,
+    buildRestWorkspaceSelectionKey(reportPayload.queryContext || null),
+  ]);
+  if (!selectionKey) {
+    return "";
+  }
+  const clonedReport = cloneJsonLikeValue(reportPayload, null);
+  if (clonedReport && typeof clonedReport === "object") {
+    state.restWorkspaceLastReportBySelectionKey.set(selectionKey, clonedReport);
+  }
+  const queryContext = cloneJsonLikeValue(reportPayload?.queryContext, null);
+  if (queryContext && typeof queryContext === "object") {
+    state.restWorkspaceLastQueryContextBySelectionKey.set(selectionKey, queryContext);
+  }
+  state.restWorkspaceLastSelectionKey = selectionKey;
+  restWorkspaceTrimCacheMaps(80);
+  return selectionKey;
+}
+
+function restWorkspaceGetLatestReport(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (normalizedSelectionKey && state.restWorkspaceLastReportBySelectionKey.has(normalizedSelectionKey)) {
+    return state.restWorkspaceLastReportBySelectionKey.get(normalizedSelectionKey);
+  }
+  const fallbackSelectionKey = String(state.restWorkspaceLastSelectionKey || "").trim();
+  if (fallbackSelectionKey && state.restWorkspaceLastReportBySelectionKey.has(fallbackSelectionKey)) {
+    return state.restWorkspaceLastReportBySelectionKey.get(fallbackSelectionKey);
+  }
+  for (const report of state.restWorkspaceLastReportBySelectionKey.values()) {
+    return report;
+  }
+  return null;
+}
+
+function restWorkspaceGetLatestQueryContext(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (normalizedSelectionKey && state.restWorkspaceLastQueryContextBySelectionKey.has(normalizedSelectionKey)) {
+    return state.restWorkspaceLastQueryContextBySelectionKey.get(normalizedSelectionKey);
+  }
+  const fallbackSelectionKey = String(state.restWorkspaceLastSelectionKey || "").trim();
+  if (fallbackSelectionKey && state.restWorkspaceLastQueryContextBySelectionKey.has(fallbackSelectionKey)) {
+    return state.restWorkspaceLastQueryContextBySelectionKey.get(fallbackSelectionKey);
+  }
+  for (const queryContext of state.restWorkspaceLastQueryContextBySelectionKey.values()) {
+    return queryContext;
+  }
+  return null;
+}
+
+async function handleRestWorkspaceAction(message, sender = null) {
+  const action = String(message?.action || "").trim().toLowerCase();
+  const senderWindowId = Number(sender?.tab?.windowId || 0);
+  const senderTabId = Number(sender?.tab?.id || 0);
+  const mappedSenderTabId = senderWindowId > 0 ? Number(state.restWorkspaceTabIdByWindowId.get(senderWindowId) || 0) : 0;
+  if (senderWindowId > 0 && senderTabId > 0 && mappedSenderTabId > 0 && senderTabId !== mappedSenderTabId) {
+    return { ok: false, error: "This is not the bound REST workspace tab for the window." };
+  }
+  if (senderWindowId > 0 && senderTabId > 0 && (!mappedSenderTabId || mappedSenderTabId <= 0)) {
+    restWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+  }
+
+  if (action === "workspace-ready") {
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = restWorkspaceGetSelectionContextFromCurrentSelection(selectedProgrammer);
+    if (senderWindowId > 0) {
+      restWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+    }
+    restWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
+    const latestReport = restWorkspaceGetLatestReport(selectionContext.selectionKey);
+    if (latestReport) {
+      void restWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId: senderWindowId });
+    }
+    return { ok: true };
+  }
+
+  if (action === "open-workspace") {
+    const workspaceTab = await restWorkspaceEnsureWorkspaceTab({
+      activate: true,
+      windowId: senderWindowId || undefined,
+    });
+    const targetWindowId = Number(workspaceTab?.windowId || senderWindowId || state.restWorkspaceWindowId || 0);
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = restWorkspaceGetSelectionContextFromCurrentSelection(selectedProgrammer);
+    restWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, targetWindowId);
+    const latestReport = restWorkspaceGetLatestReport(selectionContext.selectionKey);
+    if (latestReport) {
+      void restWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId });
+    }
+    return { ok: true };
+  }
+
+  if (action === "refresh-latest") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const queryContext = restWorkspaceGetLatestQueryContext(selectionKey);
+    if (!queryContext || typeof queryContext !== "object") {
+      return { ok: false, error: "No previous Splunk query context is available to refresh." };
+    }
+    const refreshed = await runSplunkSearchForQueryContext(queryContext, {
+      openWorkspace: true,
+      activateWorkspace: true,
+      targetWindowId: senderWindowId,
+      requestSource: "rest-workspace-refresh",
+      forceLoginOnAuthFailure: true,
+    });
+    return refreshed?.ok ? { ok: true } : { ok: false, error: refreshed?.error || "Unable to refresh Splunk results." };
+  }
+
+  if (action === "clear-all") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    if (selectionKey) {
+      state.restWorkspaceLastReportBySelectionKey.delete(selectionKey);
+      state.restWorkspaceLastQueryContextBySelectionKey.delete(selectionKey);
+      if (state.restWorkspaceLastSelectionKey === selectionKey) {
+        state.restWorkspaceLastSelectionKey = "";
+      }
+    } else {
+      state.restWorkspaceLastReportBySelectionKey.clear();
+      state.restWorkspaceLastQueryContextBySelectionKey.clear();
+      state.restWorkspaceLastSelectionKey = "";
+    }
+    const targetWindowId = Number(senderWindowId || state.restWorkspaceWindowId || 0);
+    void restWorkspaceSendWorkspaceMessage("workspace-clear", {}, { targetWindowId });
+    return { ok: true };
+  }
+
+  return { ok: false, error: `Unsupported REST workspace action: ${action}` };
+}
+
+function ensureRestWorkspaceRuntimeListener() {
+  if (state.restWorkspaceRuntimeListenerBound) {
+    return;
+  }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!REST_WORKSPACE_MESSAGE_TYPES.has(String(message?.type || "")) || message?.channel !== "workspace-action") {
+      return false;
+    }
+    void handleRestWorkspaceAction(message, sender)
+      .then((result) => {
+        sendResponse(result && typeof result === "object" ? result : { ok: true });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+    return true;
+  });
+  state.restWorkspaceRuntimeListenerBound = true;
+}
+
+function ensureRestWorkspaceTabWatcher() {
+  if (state.restWorkspaceTabWatcherBound) {
+    return;
+  }
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    restWorkspaceUnbindWorkspaceTab(tabId);
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    const normalizedTabId = Number(tabId || 0);
+    if (!normalizedTabId || !changeInfo?.url) {
+      return;
+    }
+    if (restWorkspaceIsWorkspaceTab(tab)) {
+      restWorkspaceBindWorkspaceTab(tab?.windowId, normalizedTabId);
+      return;
+    }
+    const boundTabId = Number(state.restWorkspaceTabId || 0);
+    let isMappedTab = false;
+    for (const mappedTabId of state.restWorkspaceTabIdByWindowId.values()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        isMappedTab = true;
+        break;
+      }
+    }
+    if (isMappedTab || normalizedTabId === boundTabId) {
+      restWorkspaceUnbindWorkspaceTab(normalizedTabId);
+    }
+  });
+  state.restWorkspaceTabWatcherBound = true;
 }
 
 async function cmOpenRecordInWorkspace(cmState, record, requestToken, options = {}) {
@@ -17268,11 +18483,15 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
     serviceKey === "restV2"
       ? `
         <section class="rest-v2-login-tool">
-          <p class="rest-v2-login-status" hidden></p>
+          <p class="mvpd-workspace-active-label">MVPD Not Active</p>
           <div class="rest-v2-login-actions">
-            <button type="button" class="rest-v2-test-login-btn" disabled hidden>LOGIN</button>
-            <button type="button" class="rest-v2-close-login-btn" disabled hidden>STOP</button>
+            <div class="rest-v2-login-actions-left">
+              <button type="button" class="rest-v2-test-login-btn" disabled hidden>LOGIN</button>
+              <button type="button" class="rest-v2-close-login-btn" disabled hidden>STOP</button>
+            </div>
+            <button type="button" class="mvpd-open-workspace-btn">MVPD Workspace</button>
           </div>
+          <p class="rest-v2-login-status" hidden></p>
         </section>
         <section class="rest-v2-profile-history-tool" hidden>
           <div class="rest-v2-tool-head">
@@ -17299,6 +18518,15 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
             >
               <span class="rest-v2-entitlement-copy-icon" aria-hidden="true"></span>
             </button>
+            <button
+              type="button"
+              class="rest-v2-entitlement-splunk-btn"
+              aria-label="Run Splunk RCA lookup in REST Workspace"
+              title="Run Splunk RCA lookup in REST Workspace"
+              hidden
+            >
+              <span class="rest-v2-entitlement-splunk-icon" aria-hidden="true"></span>
+            </button>
           </div>
           <form class="rest-v2-entitlement-form">
             <input
@@ -17312,15 +18540,6 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
           </form>
           <p class="rest-v2-entitlement-status"></p>
           <div class="rest-v2-entitlement-summary" hidden></div>
-        </section>
-        <section class="mvpd-workspace-tool">
-          <div class="rest-v2-tool-head">
-            <p class="rest-v2-tool-title">MVPD Workspace</p>
-            <div class="rest-v2-tool-head-actions">
-              <button type="button" class="mvpd-open-workspace-btn">Open Workspace</button>
-            </div>
-          </div>
-          <p class="mvpd-workspace-summary">Select Requestor + MVPD to open details.</p>
         </section>
         `
       : "";
@@ -17547,6 +18766,12 @@ function resetWorkflowForLoggedOut() {
   state.mvpdWorkspaceTabIdByWindowId.clear();
   state.mvpdWorkspaceSnapshotCacheBySelectionKey.clear();
   state.mvpdWorkspaceSnapshotPromiseBySelectionKey.clear();
+  state.restWorkspaceTabId = 0;
+  state.restWorkspaceWindowId = 0;
+  state.restWorkspaceTabIdByWindowId.clear();
+  state.restWorkspaceLastSelectionKey = "";
+  state.restWorkspaceLastReportBySelectionKey.clear();
+  state.restWorkspaceLastQueryContextBySelectionKey.clear();
   state.premiumSectionCollapsedByKey.clear();
   state.premiumAutoRefreshMetaByKey.clear();
   state.premiumPanelRequestToken = 0;
@@ -17596,6 +18821,19 @@ function resetWorkflowForLoggedOut() {
     updatedAt: Date.now(),
   });
   void mvpdWorkspaceSendWorkspaceMessage("workspace-clear", {});
+  void restWorkspaceSendWorkspaceMessage("controller-state", {
+    controllerOnline: false,
+    restReady: false,
+    programmerId: "",
+    programmerName: "",
+    requestorId: "",
+    mvpd: "",
+    mvpdLabel: "",
+    upstreamUserId: "",
+    selectionKey: "",
+    updatedAt: Date.now(),
+  });
+  void restWorkspaceSendWorkspaceMessage("workspace-clear", {});
 
   els.mediaCompanySelect.disabled = true;
   els.mediaCompanySelect.innerHTML = '<option value="">-- Please login first --</option>';
@@ -28808,6 +30046,8 @@ function init() {
   ensureCmWorkspaceTabWatcher();
   ensureMvpdWorkspaceRuntimeListener();
   ensureMvpdWorkspaceTabWatcher();
+  ensureRestWorkspaceRuntimeListener();
+  ensureRestWorkspaceTabWatcher();
   void renderBuildInfo();
   resetWorkflowForLoggedOut();
   registerEventHandlers();

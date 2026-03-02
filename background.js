@@ -26,6 +26,8 @@ const IMS_FETCH_REQUEST_TYPE = "underpar:imsFetch";
 const LEGACY_IMS_FETCH_REQUEST_TYPE = "mincloudlogin:imsFetch";
 const CM_FETCH_REQUEST_TYPE = "underpar:cmFetch";
 const LEGACY_CM_FETCH_REQUEST_TYPE = "mincloudlogin:cmFetch";
+const SPLUNK_FETCH_REQUEST_TYPE = "underpar:splunkFetch";
+const LEGACY_SPLUNK_FETCH_REQUEST_TYPE = "mincloudlogin:splunkFetch";
 const DEBUG_MESSAGE_TYPE_PREFIX = "underpardebug:";
 const LEGACY_DEBUG_MESSAGE_TYPE_PREFIX = "minclouddebug:";
 const DEBUG_DEVTOOLS_PORT_NAME = "underpardebug-devtools";
@@ -55,6 +57,9 @@ const BUILD_FINGERPRINT_FILES = [
   "cm-workspace.html",
   "cm-workspace.css",
   "cm-workspace.js",
+  "rest-workspace.html",
+  "rest-workspace.css",
+  "rest-workspace.js",
   "devtools.html",
   "devtools.js",
   "up-devtools-panel.html",
@@ -690,6 +695,63 @@ async function fetchCmRelayResponse(payload = {}) {
   const method = String(payload?.method || "GET").trim().toUpperCase();
   if (method !== "GET" && method !== "POST") {
     throw new Error(`CM relay blocked: unsupported method "${method}".`);
+  }
+
+  const credentials = normalizeImsRelayCredentials(payload?.credentials);
+  const headers = normalizeImsRelayHeaders(payload?.headers);
+  const bodyText = typeof payload?.body === "string" ? payload.body : "";
+
+  const response = await fetch(requestUrl, {
+    method,
+    credentials,
+    cache: "no-store",
+    redirect: "follow",
+    headers,
+    body: method === "POST" ? bodyText : undefined,
+  });
+
+  const headersObject = {};
+  response.headers.forEach((value, key) => {
+    headersObject[key] = value;
+  });
+
+  return {
+    ok: response.ok,
+    status: Number(response.status || 0),
+    statusText: String(response.statusText || ""),
+    url: String(response.url || requestUrl),
+    redirected: Boolean(response.redirected),
+    headers: headersObject,
+    bodyText: await response.text().catch(() => ""),
+  };
+}
+
+function isAllowedSplunkRelayUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return false;
+  }
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:") {
+      return false;
+    }
+    const host = parsed.hostname.toLowerCase();
+    return host === "splunk-us.corp.adobe.com";
+  } catch {
+    return false;
+  }
+}
+
+async function fetchSplunkRelayResponse(payload = {}) {
+  const requestUrl = String(payload?.url || "").trim();
+  if (!isAllowedSplunkRelayUrl(requestUrl)) {
+    throw new Error("Splunk relay blocked: unsupported URL.");
+  }
+
+  const method = String(payload?.method || "GET").trim().toUpperCase();
+  if (method !== "GET" && method !== "POST") {
+    throw new Error(`Splunk relay blocked: unsupported method "${method}".`);
   }
 
   const credentials = normalizeImsRelayCredentials(payload?.credentials);
@@ -2017,6 +2079,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === CM_FETCH_REQUEST_TYPE || message?.type === LEGACY_CM_FETCH_REQUEST_TYPE) {
     void fetchCmRelayResponse(message || {})
+      .then((response) => {
+        sendResponse({ ok: true, response });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+
+    return true;
+  }
+
+  if (message?.type === SPLUNK_FETCH_REQUEST_TYPE || message?.type === LEGACY_SPLUNK_FETCH_REQUEST_TYPE) {
+    void fetchSplunkRelayResponse(message || {})
       .then((response) => {
         sendResponse({ ok: true, response });
       })
