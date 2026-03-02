@@ -1,0 +1,930 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__UP_CLICK_CMU_TITLE__</title>
+    <style>
+      :root {
+        --bg: #f8f6f2;
+        --panel: #ffffff;
+        --ink: #1f2229;
+        --muted: #5f6678;
+        --line: rgba(23, 36, 61, 0.14);
+        --accent: #0a7c66;
+        --accent-ink: #075a4a;
+        --warn: #a8431f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Adobe Clean", "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #faf8f4 0%, var(--bg) 100%);
+        color: var(--ink);
+      }
+
+      .app {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .head {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        line-height: 1.2;
+      }
+
+      .meta {
+        margin: 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      button,
+      a.link-btn {
+        appearance: none;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 7px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+
+      button.primary:hover:not(:disabled) {
+        background: var(--accent-ink);
+        border-color: var(--accent-ink);
+      }
+
+      button.secondary,
+      a.link-btn {
+        background: #fff;
+        color: var(--accent-ink);
+      }
+
+      button.secondary:hover:not(:disabled),
+      a.link-btn:hover {
+        border-color: var(--accent);
+      }
+
+      button:disabled {
+        opacity: 0.65;
+        cursor: default;
+      }
+
+      .status {
+        margin: 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .status.error {
+        color: var(--warn);
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 10px;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+        overflow: hidden;
+      }
+
+      .card-head {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .card-title {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 48px;
+        height: 20px;
+        padding: 0 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .badge.ok {
+        color: #0b624f;
+        background: rgba(10, 124, 102, 0.12);
+        border-color: rgba(10, 124, 102, 0.26);
+      }
+
+      .badge.err {
+        color: #8e2f12;
+        background: rgba(198, 83, 39, 0.14);
+        border-color: rgba(198, 83, 39, 0.3);
+      }
+
+      .card-meta {
+        margin: 0;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .card-body {
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .url {
+        margin: 0;
+        font-size: 11px;
+        color: var(--muted);
+        word-break: break-word;
+      }
+
+      .error-box {
+        margin: 0;
+        font-size: 11px;
+        color: var(--warn);
+        white-space: pre-wrap;
+      }
+
+      .table-wrap {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: auto;
+        max-height: 280px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 6px 8px;
+        text-align: left;
+        font-size: 11px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+
+      th {
+        position: sticky;
+        top: 0;
+        background: #f7f9fb;
+        z-index: 1;
+      }
+
+      .empty {
+        margin: 0;
+        font-size: 11px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <header class="head">
+        <div class="title-row">
+          <h1 id="title">CMU CLICK</h1>
+          <p id="token-meta" class="meta"></p>
+        </div>
+        <div class="actions">
+          <button id="run-all" class="primary" type="button">Run All CMU Calls</button>
+          <button id="refresh-token" class="secondary" type="button">Refresh IMS Token</button>
+          <a
+            class="link-btn"
+            href="https://experience.adobe.com/#/@adobepass/cm-console/cmu/year/month"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Sign In to Adobe Pass Console</a
+          >
+        </div>
+        <p id="status" class="status">Initializing clickCMU...</p>
+      </header>
+      <section id="cards" class="cards"></section>
+    </main>
+
+    <input id="cmu-programmer-id" type="hidden" value="__UP_CLICK_CMU_PROGRAMMER_ID__" />
+    <input id="cmu-seed-token" type="hidden" value="__UP_CLICK_CMU_ACCESS_TOKEN__" />
+    <input id="cmu-client-ids-json" type="hidden" value="__UP_CLICK_CMU_CLIENT_IDS_JSON__" />
+    <input id="cmu-user-id" type="hidden" value="__UP_CLICK_CMU_USER_ID__" />
+    <input id="cmu-scope" type="hidden" value="__UP_CLICK_CMU_SCOPE__" />
+    <input id="cmu-endpoints-json" type="hidden" value="__UP_CLICK_CMU_ENDPOINTS_JSON__" />
+
+    <script>
+      (() => {
+        "use strict";
+        window.__UNDERPAR_CLICK_CMU_RUNTIME__ = true;
+        const CM_REPORTS_BASE_URL = "https://cm-reports.adobeprimetime.com";
+        const IMS_VALIDATE_TOKEN_URL = "https://ims-na1.adobelogin.com/ims/validate_token/v1?jslVersion=underpar-clickcmu";
+        const IMS_CHECK_TOKEN_URL = "https://adobeid-na1.services.adobe.com/ims/check/v6/token";
+        const DEFAULT_SCOPE = "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext";
+        const TOKEN_FRESH_SKEW_MS = 45 * 1000;
+        const REQUEST_TIMEOUT_MS = 45 * 1000;
+
+        const els = {
+          title: document.getElementById("title"),
+          tokenMeta: document.getElementById("token-meta"),
+          status: document.getElementById("status"),
+          runAll: document.getElementById("run-all"),
+          refreshToken: document.getElementById("refresh-token"),
+          cards: document.getElementById("cards"),
+          programmerId: document.getElementById("cmu-programmer-id"),
+          seedToken: document.getElementById("cmu-seed-token"),
+          clientIdsJson: document.getElementById("cmu-client-ids-json"),
+          userId: document.getElementById("cmu-user-id"),
+          scope: document.getElementById("cmu-scope"),
+          endpointsJson: document.getElementById("cmu-endpoints-json"),
+        };
+
+        const state = {
+          running: false,
+          accessToken: "",
+          clientIds: [],
+          userId: "",
+          scope: "",
+          endpoints: [],
+          lastRefreshSource: "seed",
+          lastRefreshAt: 0,
+        };
+
+        function setStatus(message, type = "info") {
+          const text = String(message || "").trim();
+          els.status.textContent = text;
+          els.status.classList.toggle("error", type === "error");
+        }
+
+        function readEncodedInput(elementId) {
+          const node = document.getElementById(elementId);
+          if (!node) {
+            return "";
+          }
+          const raw = String(node.value || "").trim();
+          if (!raw) {
+            return "";
+          }
+          try {
+            return decodeURIComponent(raw);
+          } catch {
+            return raw;
+          }
+        }
+
+        function safeJsonParse(value, fallback = null) {
+          const text = String(value || "").trim();
+          if (!text) {
+            return fallback;
+          }
+          try {
+            return JSON.parse(text);
+          } catch {
+            return fallback;
+          }
+        }
+
+        function normalizeToken(value) {
+          return String(value || "")
+            .trim()
+            .replace(/^Bearer\s+/i, "")
+            .trim();
+        }
+
+        function parseJwtPayload(token) {
+          const normalized = normalizeToken(token);
+          const parts = normalized.split(".");
+          if (parts.length < 2) {
+            return null;
+          }
+          try {
+            const payloadBase64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+            const padded = payloadBase64 + "=".repeat((4 - (payloadBase64.length % 4 || 4)) % 4);
+            return JSON.parse(atob(padded));
+          } catch {
+            return null;
+          }
+        }
+
+        function tokenExpiryMs(token) {
+          const payload = parseJwtPayload(token) || {};
+          const exp = Number(payload.exp || 0);
+          if (!Number.isFinite(exp) || exp <= 0) {
+            return 0;
+          }
+          return exp * 1000;
+        }
+
+        function isTokenFresh(token, skewMs = 0) {
+          const normalized = normalizeToken(token);
+          if (!normalized) {
+            return false;
+          }
+          const expMs = tokenExpiryMs(normalized);
+          if (!expMs) {
+            return true;
+          }
+          return expMs > Date.now() + Math.max(0, Number(skewMs) || 0);
+        }
+
+        function tokenizeScopeSet(scope) {
+          return String(scope || "")
+            .split(/[\s,]+/g)
+            .map((part) => String(part || "").trim())
+            .filter(Boolean);
+        }
+
+        function uniqueStrings(values) {
+          const output = [];
+          const seen = new Set();
+          (Array.isArray(values) ? values : []).forEach((value) => {
+            const text = String(value || "").trim();
+            if (!text) {
+              return;
+            }
+            const key = text.toLowerCase();
+            if (seen.has(key)) {
+              return;
+            }
+            seen.add(key);
+            output.push(text);
+          });
+          return output;
+        }
+
+        function extractTokenFromPayload(payload) {
+          if (!payload || typeof payload !== "object") {
+            return "";
+          }
+          const nestedToken =
+            payload.token && typeof payload.token === "object"
+              ? payload.token.access_token || payload.token.accessToken || payload.token.token || payload.token.value || ""
+              : payload.token || "";
+          return normalizeToken(
+            payload.access_token ||
+              payload.accessToken ||
+              nestedToken ||
+              payload.authorization ||
+              payload.Authorization ||
+              payload.bearer ||
+              payload.imsToken ||
+              ""
+          );
+        }
+
+        async function fetchWithTimeout(url, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+          const controller = new AbortController();
+          const timerId = window.setTimeout(() => controller.abort(), Math.max(2000, Number(timeoutMs) || REQUEST_TIMEOUT_MS));
+          try {
+            return await fetch(url, {
+              ...init,
+              signal: controller.signal,
+            });
+          } finally {
+            window.clearTimeout(timerId);
+          }
+        }
+
+        function buildValidateTokenBody(token, clientId) {
+          const form = new URLSearchParams({
+            type: "access_token",
+            token: normalizeToken(token),
+          });
+          if (clientId) {
+            form.set("client_id", String(clientId).trim());
+          }
+          return form.toString();
+        }
+
+        async function refreshTokenViaValidateToken(forceFresh = false) {
+          const seedToken = normalizeToken(state.accessToken);
+          if (!seedToken) {
+            return null;
+          }
+          const candidateClientIds = uniqueStrings([...state.clientIds, "cm-console-ui", "AdobePass1"]);
+          for (const clientId of candidateClientIds) {
+            const body = buildValidateTokenBody(seedToken, clientId);
+            const response = await fetchWithTimeout(IMS_VALIDATE_TOKEN_URL, {
+              method: "POST",
+              credentials: "include",
+              headers: {
+                Accept: "application/json, text/plain, */*",
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                ...(clientId ? { client_id: clientId } : {}),
+              },
+              body,
+            }).catch(() => null);
+            if (!response || !response.ok) {
+              continue;
+            }
+            const rawText = await response.text().catch(() => "");
+            const parsed = safeJsonParse(rawText, null);
+            if (!parsed || typeof parsed !== "object") {
+              continue;
+            }
+            const refreshed = extractTokenFromPayload(parsed);
+            if (refreshed && (!forceFresh || isTokenFresh(refreshed, TOKEN_FRESH_SKEW_MS))) {
+              return { token: refreshed, source: `validate:${clientId}` };
+            }
+            if (parsed.valid === true && !forceFresh) {
+              return { token: seedToken, source: `validate-existing:${clientId}` };
+            }
+          }
+          return null;
+        }
+
+        function buildImsCheckUrl(clientId, scope, userId) {
+          const url = new URL(IMS_CHECK_TOKEN_URL);
+          if (clientId) {
+            url.searchParams.set("client_id", clientId);
+          }
+          if (scope) {
+            url.searchParams.set("scope", scope);
+          }
+          if (userId) {
+            url.searchParams.set("user_id", userId);
+          }
+          return url.toString();
+        }
+
+        async function refreshTokenViaImsCheck(forceFresh = false) {
+          const resolvedUserId = String(state.userId || "").trim();
+          if (!resolvedUserId) {
+            return null;
+          }
+          const candidateClientIds = uniqueStrings([...state.clientIds, "cm-console-ui", "AdobePass1"]);
+          const scopeCandidates = uniqueStrings([state.scope, DEFAULT_SCOPE].flatMap((value) => tokenizeScopeSet(value).join(",")));
+          for (const clientId of candidateClientIds) {
+            for (const scope of scopeCandidates.length > 0 ? scopeCandidates : [DEFAULT_SCOPE]) {
+              const requestUrl = buildImsCheckUrl(clientId, scope, resolvedUserId);
+              const response = await fetchWithTimeout(requestUrl, {
+                method: "POST",
+                credentials: "include",
+                headers: {
+                  Accept: "application/json, text/plain, */*",
+                },
+              }).catch(() => null);
+              if (!response || !response.ok) {
+                continue;
+              }
+              const rawText = await response.text().catch(() => "");
+              const parsed = safeJsonParse(rawText, null);
+              if (!parsed || typeof parsed !== "object") {
+                continue;
+              }
+              const refreshed = extractTokenFromPayload(parsed);
+              if (!refreshed) {
+                continue;
+              }
+              if (forceFresh && !isTokenFresh(refreshed, TOKEN_FRESH_SKEW_MS)) {
+                continue;
+              }
+              return { token: refreshed, source: `check:${clientId}` };
+            }
+          }
+          return null;
+        }
+
+        async function ensureAccessToken(forceRefresh = false) {
+          if (!forceRefresh && isTokenFresh(state.accessToken, TOKEN_FRESH_SKEW_MS)) {
+            return state.accessToken;
+          }
+          let refreshResult = null;
+          try {
+            refreshResult = await refreshTokenViaValidateToken(forceRefresh);
+          } catch {
+            refreshResult = null;
+          }
+          if (!refreshResult) {
+            try {
+              refreshResult = await refreshTokenViaImsCheck(forceRefresh);
+            } catch {
+              refreshResult = null;
+            }
+          }
+          if (refreshResult?.token) {
+            state.accessToken = normalizeToken(refreshResult.token);
+            state.lastRefreshSource = String(refreshResult.source || "refresh");
+            state.lastRefreshAt = Date.now();
+            updateTokenMeta();
+            return state.accessToken;
+          }
+          if (!forceRefresh && state.accessToken) {
+            return state.accessToken;
+          }
+          return "";
+        }
+
+        function normalizeEndpointUrl(url) {
+          const text = String(url || "").trim();
+          if (!text) {
+            return "";
+          }
+          try {
+            const parsed = new URL(text, CM_REPORTS_BASE_URL);
+            if (!parsed.searchParams.has("format")) {
+              parsed.searchParams.set("format", "json");
+            }
+            return parsed.toString();
+          } catch {
+            return text;
+          }
+        }
+
+        function normalizeEndpoints(value) {
+          const raw = Array.isArray(value) ? value : [];
+          const output = [];
+          const seen = new Set();
+          raw.forEach((entry, index) => {
+            const id = String(entry?.id || `cmu-${index + 1}`).trim() || `cmu-${index + 1}`;
+            const label = String(entry?.label || "CMU Endpoint").trim() || "CMU Endpoint";
+            const url = normalizeEndpointUrl(entry?.url);
+            if (!url || seen.has(url)) {
+              return;
+            }
+            seen.add(url);
+            output.push({ id, label, url });
+          });
+          return output;
+        }
+
+        function responseLooksLikeAuthFailure(status, parsed, text) {
+          if (Number(status || 0) !== 401 && Number(status || 0) !== 403) {
+            return false;
+          }
+          const errorText = String(
+            (parsed && typeof parsed === "object" && (parsed?.error?.message || parsed?.error || parsed?.message)) || text || ""
+          )
+            .trim()
+            .toLowerCase();
+          return (
+            errorText.includes("token") ||
+            errorText.includes("invalid_sso_info") ||
+            errorText.includes("session cookie is null") ||
+            errorText.includes("login")
+          );
+        }
+
+        async function fetchEndpointPayload(endpoint, forceRefreshToken = false) {
+          const token = await ensureAccessToken(forceRefreshToken);
+          if (!token) {
+            throw new Error(
+              "No IMS access token is available. Sign in to Adobe Pass Console in this browser, then retry."
+            );
+          }
+          const response = await fetchWithTimeout(endpoint.url, {
+            method: "GET",
+            credentials: "include",
+            headers: {
+              Accept: "application/json, text/plain, */*",
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          const text = await response.text().catch(() => "");
+          const parsed = safeJsonParse(text, null);
+          if (
+            !forceRefreshToken &&
+            responseLooksLikeAuthFailure(response.status, parsed, text)
+          ) {
+            const retriedToken = await ensureAccessToken(true);
+            if (retriedToken) {
+              return fetchEndpointPayload(endpoint, true);
+            }
+          }
+          if (!response.ok) {
+            const detailText = String(
+              (parsed && typeof parsed === "object" && (parsed?.error?.message || parsed?.error || parsed?.message)) || text || response.statusText
+            ).trim();
+            throw new Error(`HTTP ${response.status || 0}: ${detailText || "request failed"}`);
+          }
+          return {
+            status: Number(response.status || 0),
+            payload: parsed != null ? parsed : text,
+            fetchedAt: Date.now(),
+          };
+        }
+
+        function normalizeRows(payload) {
+          if (Array.isArray(payload)) {
+            return payload;
+          }
+          if (!payload || typeof payload !== "object") {
+            return [];
+          }
+          if (Array.isArray(payload.items)) {
+            return payload.items;
+          }
+          if (Array.isArray(payload.results)) {
+            return payload.results;
+          }
+          if (Array.isArray(payload.data)) {
+            return payload.data;
+          }
+          return [payload];
+        }
+
+        function collectColumns(rows) {
+          const output = [];
+          const seen = new Set();
+          (Array.isArray(rows) ? rows : []).slice(0, 60).forEach((row) => {
+            if (!row || typeof row !== "object") {
+              return;
+            }
+            Object.keys(row).forEach((key) => {
+              const text = String(key || "").trim();
+              if (!text || seen.has(text)) {
+                return;
+              }
+              seen.add(text);
+              output.push(text);
+            });
+          });
+          return output;
+        }
+
+        function formatCellValue(value) {
+          if (value == null) {
+            return "";
+          }
+          if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            return String(value);
+          }
+          try {
+            return JSON.stringify(value);
+          } catch {
+            return String(value);
+          }
+        }
+
+        function escapeHtml(value) {
+          return String(value || "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#39;");
+        }
+
+        function createCard(endpoint) {
+          const card = document.createElement("article");
+          card.className = "card";
+          card.innerHTML = `
+            <div class="card-head">
+              <p class="card-title"></p>
+              <span class="badge">RUN</span>
+            </div>
+            <div class="card-body">
+              <p class="card-meta"></p>
+              <p class="url"></p>
+              <div class="table-wrap" hidden>
+                <table>
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <p class="empty" hidden></p>
+              <p class="error-box" hidden></p>
+            </div>
+          `;
+          card.querySelector(".card-title").textContent = String(endpoint.label || "CMU Endpoint");
+          card.querySelector(".url").textContent = String(endpoint.url || "");
+          els.cards.appendChild(card);
+          return card;
+        }
+
+        function renderCardResult(card, result) {
+          const badge = card.querySelector(".badge");
+          const meta = card.querySelector(".card-meta");
+          const tableWrap = card.querySelector(".table-wrap");
+          const thead = card.querySelector("thead");
+          const tbody = card.querySelector("tbody");
+          const empty = card.querySelector(".empty");
+          const error = card.querySelector(".error-box");
+          badge.textContent = `OK ${result.status}`;
+          badge.className = "badge ok";
+          meta.textContent = `Fetched: ${new Date(result.fetchedAt).toLocaleString()}`;
+          error.hidden = true;
+          const rows = normalizeRows(result.payload);
+          if (rows.length === 0) {
+            tableWrap.hidden = true;
+            empty.hidden = false;
+            empty.textContent = "No rows returned.";
+            return;
+          }
+          const columns = collectColumns(rows);
+          if (columns.length === 0) {
+            tableWrap.hidden = true;
+            empty.hidden = false;
+            empty.textContent = "JSON payload returned (no tabular columns detected).";
+            return;
+          }
+          empty.hidden = true;
+          tableWrap.hidden = false;
+          thead.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>`;
+          tbody.innerHTML = rows
+            .slice(0, 250)
+            .map((row) => {
+              const cells = columns.map((column) => `<td>${escapeHtml(formatCellValue(row?.[column]))}</td>`).join("");
+              return `<tr>${cells}</tr>`;
+            })
+            .join("");
+        }
+
+        function renderCardError(card, errorText) {
+          const badge = card.querySelector(".badge");
+          const meta = card.querySelector(".card-meta");
+          const tableWrap = card.querySelector(".table-wrap");
+          const empty = card.querySelector(".empty");
+          const error = card.querySelector(".error-box");
+          badge.textContent = "ERR";
+          badge.className = "badge err";
+          meta.textContent = `Failed: ${new Date().toLocaleString()}`;
+          tableWrap.hidden = true;
+          empty.hidden = true;
+          error.hidden = false;
+          error.textContent = String(errorText || "Request failed.");
+        }
+
+        async function runEndpoint(endpoint) {
+          const card = createCard(endpoint);
+          try {
+            const result = await fetchEndpointPayload(endpoint, false);
+            renderCardResult(card, result);
+            return { ok: true };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            renderCardError(card, message);
+            return { ok: false, error: message };
+          }
+        }
+
+        function updateTokenMeta() {
+          const token = normalizeToken(state.accessToken);
+          const expMs = tokenExpiryMs(token);
+          const expLabel = expMs ? new Date(expMs).toLocaleString() : "unknown";
+          const source = String(state.lastRefreshSource || "seed");
+          const refreshedAt = state.lastRefreshAt ? new Date(state.lastRefreshAt).toLocaleTimeString() : "n/a";
+          const clientLabel = state.clientIds.length > 0 ? state.clientIds.join(", ") : "cm-console-ui";
+          const userLabel = state.userId || "unknown";
+          const scopeLabel = state.scope || DEFAULT_SCOPE;
+          els.tokenMeta.textContent = `token exp=${expLabel} | source=${source} @ ${refreshedAt} | clientId=${clientLabel} | userId=${userLabel} | scope=${scopeLabel}`;
+        }
+
+        async function runAllEndpoints() {
+          if (state.running) {
+            return;
+          }
+          if (state.endpoints.length === 0) {
+            setStatus("No CMU endpoints are configured in this clickCMU export.", "error");
+            return;
+          }
+          state.running = true;
+          els.runAll.disabled = true;
+          els.refreshToken.disabled = true;
+          els.cards.innerHTML = "";
+          setStatus(`Running ${state.endpoints.length} CMU endpoint${state.endpoints.length === 1 ? "" : "s"}...`);
+          let okCount = 0;
+          for (const endpoint of state.endpoints) {
+            const result = await runEndpoint(endpoint);
+            if (result.ok) {
+              okCount += 1;
+            }
+          }
+          state.running = false;
+          els.runAll.disabled = false;
+          els.refreshToken.disabled = false;
+          if (okCount === state.endpoints.length) {
+            setStatus(`Completed ${okCount}/${state.endpoints.length} CMU endpoint(s).`);
+          } else {
+            setStatus(
+              `Completed ${okCount}/${state.endpoints.length} CMU endpoint(s). Open Adobe Pass Console login if auth failed.`,
+              "error"
+            );
+          }
+        }
+
+        async function handleForceRefreshToken() {
+          if (state.running) {
+            return;
+          }
+          els.refreshToken.disabled = true;
+          try {
+            const refreshed = await ensureAccessToken(true);
+            if (refreshed) {
+              setStatus("IMS token refresh succeeded.");
+            } else {
+              setStatus("Unable to refresh IMS token. Sign in to Adobe Pass Console and retry.", "error");
+            }
+          } catch (error) {
+            setStatus(
+              `IMS token refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+              "error"
+            );
+          } finally {
+            els.refreshToken.disabled = false;
+          }
+        }
+
+        function loadStateFromTemplate() {
+          const rawProgrammerId = readEncodedInput("cmu-programmer-id");
+          const rawSeedToken = readEncodedInput("cmu-seed-token");
+          const rawClientIds = safeJsonParse(readEncodedInput("cmu-client-ids-json"), []);
+          const rawUserId = readEncodedInput("cmu-user-id");
+          const rawScope = readEncodedInput("cmu-scope");
+          const rawEndpoints = safeJsonParse(readEncodedInput("cmu-endpoints-json"), []);
+          state.accessToken = normalizeToken(rawSeedToken);
+          state.clientIds = uniqueStrings(rawClientIds);
+          state.userId = String(rawUserId || "").trim();
+          state.scope = String(rawScope || DEFAULT_SCOPE).trim() || DEFAULT_SCOPE;
+          state.endpoints = normalizeEndpoints(rawEndpoints);
+          if (state.endpoints.length === 0) {
+            state.endpoints = normalizeEndpoints([
+              {
+                id: "cmu-year-month",
+                label: "CMU Summary (Year/Month)",
+                url: `${CM_REPORTS_BASE_URL}/v2/year/month?format=json`,
+              },
+            ]);
+          }
+          const titleText = document.title || "CLICK CMU";
+          els.title.textContent = titleText;
+          if (rawProgrammerId) {
+            els.title.textContent = `${titleText} | ${rawProgrammerId}`;
+          }
+          updateTokenMeta();
+        }
+
+        async function init() {
+          loadStateFromTemplate();
+          els.runAll.addEventListener("click", () => {
+            void runAllEndpoints();
+          });
+          els.refreshToken.addEventListener("click", () => {
+            void handleForceRefreshToken();
+          });
+          if (!state.accessToken) {
+            setStatus("No seed IMS token found. Sign in to Adobe Pass Console and regenerate clickCMU.", "error");
+            return;
+          }
+          await runAllEndpoints();
+        }
+
+        void init();
+      })();
+    </script>
+  </body>
+</html>

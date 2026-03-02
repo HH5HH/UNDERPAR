@@ -99,17 +99,31 @@ const EXPERIENCE_CLOUD_SILENT_PROFILE_FILTER =
   '{"findFirst":true, "fallbackToAA":true, "preferForwardProfile":true}; hasPC("dma_tartan")';
 const CLICK_ESM_ENDPOINTS_PATH = "click-esm-endpoints.json";
 const CLICK_ESM_TEMPLATE_PATH = "clickESM-template.html";
+const CLICK_CMU_TEMPLATE_PATH = "clickCMU-template.html";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_TITLE = "__UP_CLICK_ESM_TITLE__";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_CID = "__UP_CID__";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_CSC = "__UP_CSC__";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_ACCESS_TOKEN = "__UP_ACCESS_TOKEN__";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_REQUESTOR_IDS_JSON = "__UP_REQUESTOR_IDS_JSON__";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_THEME_SCOPE = "__UP_THEME_SCOPE__";
+const CLICK_CMU_TEMPLATE_PLACEHOLDER_TITLE = "__UP_CLICK_CMU_TITLE__";
+const CLICK_CMU_TEMPLATE_PLACEHOLDER_ACCESS_TOKEN = "__UP_CLICK_CMU_ACCESS_TOKEN__";
+const CLICK_CMU_TEMPLATE_PLACEHOLDER_CLIENT_IDS_JSON = "__UP_CLICK_CMU_CLIENT_IDS_JSON__";
+const CLICK_CMU_TEMPLATE_PLACEHOLDER_USER_ID = "__UP_CLICK_CMU_USER_ID__";
+const CLICK_CMU_TEMPLATE_PLACEHOLDER_SCOPE = "__UP_CLICK_CMU_SCOPE__";
+const CLICK_CMU_TEMPLATE_PLACEHOLDER_ENDPOINTS_JSON = "__UP_CLICK_CMU_ENDPOINTS_JSON__";
+const CLICK_CMU_TEMPLATE_PLACEHOLDER_PROGRAMMER_ID = "__UP_CLICK_CMU_PROGRAMMER_ID__";
 const CLICK_ESM_TEMPLATE_REQUIRED_MARKERS = [
   "const __localColumnFilterStateByDl = new WeakMap();",
   "function __appendLocalColumnFilterParams(url, dl)",
   "function __applyLocalColumnFiltersToRows(rows, dl)",
   "--zip-theme-vibe-body-radial-alpha",
+];
+const CLICK_CMU_TEMPLATE_REQUIRED_MARKERS = [
+  "window.__UNDERPAR_CLICK_CMU_RUNTIME__ = true;",
+  "const CM_REPORTS_BASE_URL = \"https://cm-reports.adobeprimetime.com\";",
+  "async function refreshTokenViaValidateToken",
+  "async function refreshTokenViaImsCheck",
 ];
 const ESM_WORKSPACE_INLINE_RESULT_LIMIT = 100;
 const ESM_WORKSPACE_CSV_RESULT_LIMIT = 10000;
@@ -406,6 +420,8 @@ let clickEsmEndpoints = [];
 let clickEsmEndpointsPromise = null;
 let clickEsmTemplateHtml = "";
 let clickEsmTemplatePromise = null;
+let clickCmuTemplateHtml = "";
+let clickCmuTemplatePromise = null;
 
 function log(message, details = null) {
   if (details === null) {
@@ -7977,6 +7993,353 @@ async function makeClickEsmDownload(context, requestToken, options = {}) {
   };
 }
 
+function ensureCmUsageEndpointFormat(url) {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+    if (!parsed.searchParams.has("format")) {
+      parsed.searchParams.set("format", "json");
+    }
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function buildClickCmuFallbackEndpoints() {
+  const output = [];
+  const seen = new Set();
+  CM_USAGE_PATH_TEMPLATES.forEach((templatePath, index) => {
+    const path = String(templatePath || "").trim();
+    if (!path) {
+      return;
+    }
+    const normalizedPath = `/${path.replace(/^\/+/, "").replace(/\?.*$/, "")}`;
+    const url = ensureCmUsageEndpointFormat(`${CM_REPORTS_BASE_URL}${normalizedPath}`);
+    if (!url || seen.has(url)) {
+      return;
+    }
+    seen.add(url);
+    output.push({
+      id: `cmu-${index + 1}`,
+      label: formatCmUsageLabelFromPath(normalizedPath),
+      url,
+    });
+  });
+  return output;
+}
+
+function resolveClickCmuEndpointsFromCmState(cmState = null) {
+  const recordsById = cmState?.recordsById instanceof Map ? cmState.recordsById : null;
+  if (!recordsById || recordsById.size === 0) {
+    return [];
+  }
+  const output = [];
+  const seen = new Set();
+  for (const record of recordsById.values()) {
+    if (String(record?.kind || "").toLowerCase() !== "usage") {
+      continue;
+    }
+    const requestUrl = ensureCmUsageEndpointFormat(firstNonEmptyString([record?.sourceUrl, record?.requestUrl, record?.endpointUrl]));
+    if (!requestUrl || seen.has(requestUrl)) {
+      continue;
+    }
+    seen.add(requestUrl);
+    let label = String(record?.name || record?.title || "").trim();
+    if (!label) {
+      try {
+        const parsed = new URL(requestUrl);
+        label = formatCmUsageLabelFromPath(parsed.pathname);
+      } catch {
+        label = "CMU Endpoint";
+      }
+    }
+    output.push({
+      id: String(record?.cardId || record?.entityId || `cmu-${output.length + 1}`).trim() || `cmu-${output.length + 1}`,
+      label,
+      url: requestUrl,
+    });
+  }
+  return output;
+}
+
+function buildClickCmuEndpointCatalog(context = null) {
+  const fromState = resolveClickCmuEndpointsFromCmState(context?.cmState || null);
+  const source = fromState.length > 0 ? fromState : buildClickCmuFallbackEndpoints();
+  return source
+    .map((entry, index) => ({
+      id: String(entry?.id || `cmu-${index + 1}`).trim() || `cmu-${index + 1}`,
+      label: String(entry?.label || "CMU Endpoint").trim() || "CMU Endpoint",
+      url: ensureCmUsageEndpointFormat(entry?.url),
+    }))
+    .filter((entry) => String(entry?.url || "").trim())
+    .slice(0, 120);
+}
+
+function isModernClickCmuTemplate(templateHtml) {
+  const text = String(templateHtml || "");
+  if (!text.trim()) {
+    return false;
+  }
+  const placeholders = [
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_TITLE,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_ACCESS_TOKEN,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_CLIENT_IDS_JSON,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_USER_ID,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_SCOPE,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_ENDPOINTS_JSON,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_PROGRAMMER_ID,
+  ];
+  if (placeholders.some((token) => !text.includes(token))) {
+    return false;
+  }
+  return CLICK_CMU_TEMPLATE_REQUIRED_MARKERS.every((marker) => text.includes(marker));
+}
+
+function buildClickCmuTemplateResourceUrl({ forceBypassCache = false } = {}) {
+  const manifestVersion = String(chrome?.runtime?.getManifest?.()?.version || "").trim();
+  const params = new URLSearchParams();
+  if (manifestVersion) {
+    params.set("v", manifestVersion);
+  }
+  if (forceBypassCache) {
+    params.set("t", String(Date.now()));
+  }
+  const base = chrome.runtime.getURL(CLICK_CMU_TEMPLATE_PATH);
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
+}
+
+async function fetchClickCmuTemplateHtml({ forceBypassCache = false } = {}) {
+  const resourceUrl = buildClickCmuTemplateResourceUrl({ forceBypassCache });
+  const response = await fetch(resourceUrl, {
+    method: "GET",
+    credentials: "omit",
+    cache: forceBypassCache ? "reload" : "no-cache",
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load clickCMU template (${response.status}).`);
+  }
+  return await response.text();
+}
+
+async function loadClickCmuTemplateHtml() {
+  if (isModernClickCmuTemplate(clickCmuTemplateHtml)) {
+    return clickCmuTemplateHtml;
+  }
+  if (clickCmuTemplatePromise) {
+    return clickCmuTemplatePromise;
+  }
+
+  clickCmuTemplatePromise = (async () => {
+    let templateHtml = await fetchClickCmuTemplateHtml({ forceBypassCache: false });
+    if (!isModernClickCmuTemplate(templateHtml)) {
+      templateHtml = await fetchClickCmuTemplateHtml({ forceBypassCache: true });
+    }
+    if (!isModernClickCmuTemplate(templateHtml)) {
+      throw new Error("clickCMU template is not the latest export build.");
+    }
+    clickCmuTemplateHtml = templateHtml;
+    return clickCmuTemplateHtml;
+  })();
+
+  try {
+    return await clickCmuTemplatePromise;
+  } finally {
+    clickCmuTemplatePromise = null;
+  }
+}
+
+function clickCmuReplaceTemplateToken(templateHtml, token, value) {
+  const placeholder = String(token || "").trim();
+  if (!placeholder) {
+    throw new Error("clickCMU placeholder token is required.");
+  }
+  const output = String(templateHtml || "");
+  if (!output.includes(placeholder)) {
+    throw new Error(`clickCMU template is missing token ${placeholder}.`);
+  }
+  return output.replaceAll(placeholder, escapeHtml(String(value ?? "").trim()));
+}
+
+function buildClickCmuHtmlFromTemplate(templateHtml, context = {}) {
+  const programmerLabel = String(context.programmerLabel || "Media Company").trim() || "Media Company";
+  const titleText = `${programmerLabel} CLICK CMU`;
+  const accessToken = String(context.accessToken || "").trim();
+  if (!accessToken) {
+    throw new Error("CMU access token is required to generate clickCMU.");
+  }
+  const clientIds = uniqueSorted(
+    (Array.isArray(context.clientIds) ? context.clientIds : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  if (clientIds.length === 0) {
+    clientIds.push("cm-console-ui");
+  }
+  const endpointCatalog = (Array.isArray(context.endpointCatalog) ? context.endpointCatalog : [])
+    .map((entry, index) => ({
+      id: String(entry?.id || `cmu-${index + 1}`).trim() || `cmu-${index + 1}`,
+      label: String(entry?.label || "CMU Endpoint").trim() || "CMU Endpoint",
+      url: ensureCmUsageEndpointFormat(entry?.url),
+    }))
+    .filter((entry) => String(entry?.url || "").trim());
+  if (endpointCatalog.length === 0) {
+    throw new Error("No CMU endpoints are available for clickCMU export.");
+  }
+
+  let output = String(templateHtml || "");
+  output = clickCmuReplaceTemplateToken(output, CLICK_CMU_TEMPLATE_PLACEHOLDER_TITLE, titleText);
+  output = clickCmuReplaceTemplateToken(
+    output,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_ACCESS_TOKEN,
+    encodeURIComponent(accessToken)
+  );
+  output = clickCmuReplaceTemplateToken(
+    output,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_CLIENT_IDS_JSON,
+    encodeURIComponent(JSON.stringify(clientIds))
+  );
+  output = clickCmuReplaceTemplateToken(
+    output,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_USER_ID,
+    encodeURIComponent(String(context.userId || ""))
+  );
+  output = clickCmuReplaceTemplateToken(
+    output,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_SCOPE,
+    encodeURIComponent(String(context.scope || CM_IMS_CHECK_DEFAULT_SCOPE))
+  );
+  output = clickCmuReplaceTemplateToken(
+    output,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_ENDPOINTS_JSON,
+    encodeURIComponent(JSON.stringify(endpointCatalog))
+  );
+  output = clickCmuReplaceTemplateToken(
+    output,
+    CLICK_CMU_TEMPLATE_PLACEHOLDER_PROGRAMMER_ID,
+    encodeURIComponent(String(context.programmerId || ""))
+  );
+  return output;
+}
+
+function buildClickCmuDownloadFileName(programmer) {
+  const label = firstNonEmptyString([
+    programmer?.programmerName,
+    programmer?.mediaCompanyName,
+    programmer?.programmerId,
+  ]);
+  const base = sanitizeDownloadFileSegment(label, "MediaCompany");
+  return `${base}_clickCMU.html`;
+}
+
+async function resolveClickCmuDownloadContext(cmState = null) {
+  const selectedProgrammer = resolveSelectedProgrammer();
+  if (!selectedProgrammer?.programmerId) {
+    return null;
+  }
+  const programId = String(selectedProgrammer.programmerId || "").trim();
+  const stateProgramId = String(cmState?.programmer?.programmerId || "").trim();
+  if (cmState && stateProgramId && stateProgramId !== programId) {
+    return null;
+  }
+  const selectedServices = state.premiumAppsByProgrammerId.get(programId) || null;
+  const cmService = selectedServices?.cm || cmState?.cmService || null;
+  if (!cmService) {
+    return null;
+  }
+  return {
+    programmer: cmState?.programmer && stateProgramId === programId ? cmState.programmer : selectedProgrammer,
+    cmService,
+    cmState: cmState || null,
+    section: cmState?.section || null,
+  };
+}
+
+async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
+  const programmer = context?.programmer || null;
+  if (!programmer?.programmerId) {
+    throw new Error("Media company is required to generate clickCMU.");
+  }
+
+  const selectedProgrammer = resolveSelectedProgrammer();
+  if (!selectedProgrammer?.programmerId || selectedProgrammer.programmerId !== programmer.programmerId) {
+    throw new Error("Selected media company changed. Retry export with the active selection.");
+  }
+
+  if (
+    context?.section &&
+    !isCmServiceRequestActive(context.section, requestToken, programmer.programmerId)
+  ) {
+    throw new Error("CM controller is no longer active for the selected media company.");
+  }
+
+  const accessToken = await ensureCmApiAccessToken({
+    forceRefresh: options.forceRefresh === true,
+    freshLeewayMs: 60 * 1000,
+  });
+  const normalizedToken = String(accessToken || "").trim();
+  if (!normalizedToken) {
+    throw new Error(
+      "Unable to resolve CMU IMS token. Sign in to Adobe Pass Console, then retry clickCMU generation."
+    );
+  }
+
+  const hints = resolveCmImsTokenHints(normalizedToken);
+  const claims = parseJwtPayload(normalizedToken) || {};
+  const clientIds = uniqueSorted(
+    [hints.clientId, claims.client_id, claims.clientId, ...CM_IMS_VALIDATE_CLIENT_IDS, ...CM_IMS_CHECK_CLIENT_IDS]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  const userId = firstNonEmptyString([hints.userId, claims.user_id, claims.userId, state.loginData?.imsSession?.userId]);
+  const scope = firstNonEmptyString([hints.scope, claims.scope, CM_IMS_CHECK_DEFAULT_SCOPE]);
+
+  const programmerLabel = firstNonEmptyString([
+    programmer?.programmerName,
+    programmer?.mediaCompanyName,
+    programmer?.programmerId,
+  ]) || "Media Company";
+
+  return {
+    programmerLabel,
+    accessToken: normalizedToken,
+    clientIds: clientIds.length > 0 ? clientIds : ["cm-console-ui"],
+    userId,
+    scope,
+  };
+}
+
+async function makeClickCmuDownload(context, requestToken, options = {}) {
+  const programmer = context?.programmer || null;
+  const authContext = await resolveClickCmuAuthContext(context, requestToken, options);
+  const endpointCatalog = buildClickCmuEndpointCatalog(context);
+  if (endpointCatalog.length === 0) {
+    throw new Error("No CMU endpoints were resolved for clickCMU export.");
+  }
+
+  const templateHtml = await loadClickCmuTemplateHtml();
+  const fileName = buildClickCmuDownloadFileName(programmer);
+  const downloadHtml = buildClickCmuHtmlFromTemplate(templateHtml, {
+    programmerLabel: authContext.programmerLabel,
+    programmerId: String(programmer?.programmerId || ""),
+    accessToken: authContext.accessToken,
+    clientIds: authContext.clientIds,
+    userId: authContext.userId,
+    scope: authContext.scope,
+    endpointCatalog,
+  });
+  downloadClickEsmHtmlFile(downloadHtml, fileName);
+  return {
+    fileName,
+    programmerLabel: authContext.programmerLabel,
+    endpointCount: endpointCatalog.length,
+  };
+}
+
 function isRestV2ScopedAppMappingMissingError(error) {
   const code = String(error?.code || "").trim().toUpperCase();
   if (code === "RESTV2_APP_MAPPING_MISSING") {
@@ -14677,7 +15040,10 @@ async function loadCmService(programmer, cmService, section, contentElement, req
           <p class="cm-summary">
             Matched ${matchedTenants.length} tenant${matchedTenants.length === 1 ? "" : "s"} from ${escapeHtml(sourceLabel)}.
           </p>
-          <button type="button" class="cm-open-workspace-btn">Open CM Workspace</button>
+          <div class="cm-toolbar-actions">
+            <button type="button" class="cm-open-workspace-btn">Open CM Workspace</button>
+            <button type="button" class="cm-export-clickcmu-btn">Generate clickCMU</button>
+          </div>
         </div>
         <div class="cm-sidepanel">${groupMarkup}</div>
       </div>
@@ -14709,6 +15075,35 @@ async function loadCmService(programmer, cmService, section, contentElement, req
         });
         cmBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
         cmBroadcastControllerState(cmState, Number(workspaceTab?.windowId || targetWindowId || 0));
+      });
+    }
+    const exportClickCmuButton = contentElement.querySelector(".cm-export-clickcmu-btn");
+    if (exportClickCmuButton) {
+      exportClickCmuButton.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        exportClickCmuButton.disabled = true;
+        try {
+          const clickCmuContext = await resolveClickCmuDownloadContext(cmState);
+          if (!clickCmuContext) {
+            throw new Error("Select a media company with Concurrency Monitoring access to generate clickCMU.");
+          }
+          const exportResult = await makeClickCmuDownload(clickCmuContext, requestToken, {
+            source: "sidepanel",
+          });
+          setStatus(
+            `clickCMU download started (${Number(exportResult?.endpointCount || 0)} endpoint${
+              Number(exportResult?.endpointCount || 0) === 1 ? "" : "s"
+            }).`,
+            "success"
+          );
+        } catch (error) {
+          setStatus(
+            `Unable to generate clickCMU: ${error instanceof Error ? error.message : String(error)}`,
+            "error"
+          );
+        } finally {
+          exportClickCmuButton.disabled = false;
+        }
       });
     }
 

@@ -660,6 +660,13 @@ select:disabled {
   flex-wrap: wrap;
 }
 
+.cm-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .cm-summary {
   margin: 0;
   font-size: 12px;
@@ -684,7 +691,30 @@ select:disabled {
   border-color: var(--service-accent-ink);
 }
 
+.cm-export-clickcmu-btn {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--service-accent-soft);
+  border-radius: 999px;
+  background: var(--legacy-panel);
+  color: var(--service-accent-ink);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cm-export-clickcmu-btn:hover:not(:disabled) {
+  background: var(--legacy-table-row);
+  border-color: var(--service-accent);
+  color: var(--service-accent-ink);
+}
+
 .cm-open-workspace-btn:disabled {
+  opacity: 0.68;
+  cursor: default;
+}
+
+.cm-export-clickcmu-btn:disabled {
   opacity: 0.68;
   cursor: default;
 }
