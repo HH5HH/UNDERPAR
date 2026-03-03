@@ -647,6 +647,7 @@ const CM_IMS_FORCE_REFRESH_SKEW_MS = 30 * 1000;
 const CM_BOOTSTRAP_PARALLELISM = 6;
 const CM_BOOTSTRAP_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const CM_EMPTY_MATCH_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
+const CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v1";
 const CM_V2_OPERATION_DEFINITIONS = [
   {
     key: "metadata",
@@ -802,6 +803,8 @@ const state = {
   cmServiceLoadPromiseByMvpdSelectionKey: new Map(),
   cmTenantsCatalog: null,
   cmTenantsCatalogPromise: null,
+  cmTenantsCatalogHydrated: false,
+  cmTenantsCatalogHydrationPromise: null,
   cmConsoleBootstrapSummary: null,
   cmConsoleBootstrapPromise: null,
   cmAuthBootstrapPromise: null,
@@ -23236,6 +23239,8 @@ function resetWorkflowForLoggedOut() {
   state.cmServiceLoadPromiseByMvpdSelectionKey.clear();
   state.cmTenantsCatalog = null;
   state.cmTenantsCatalogPromise = null;
+  state.cmTenantsCatalogHydrated = false;
+  state.cmTenantsCatalogHydrationPromise = null;
   state.cmConsoleBootstrapSummary = null;
   state.cmConsoleBootstrapPromise = null;
   state.cmAuthBootstrapPromise = null;
@@ -31913,38 +31918,160 @@ function shouldRetryCachedCmService(cmService) {
   return cachedFingerprint !== currentFingerprint;
 }
 
+function normalizeCmTenantsCatalogPayload(payload = null) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const sourceUrl = String(payload.sourceUrl || "").trim();
+  const fetchedAt = Number(payload.fetchedAt || payload.persistedAt || 0);
+  const tenantsInput = Array.isArray(payload.tenants) ? payload.tenants : [];
+  const tenants = [];
+  const seen = new Set();
+  tenantsInput.forEach((entry, index) => {
+    const fallbackSource = sourceUrl || String(entry?.sourceUrl || "").trim();
+    const normalized = normalizeCmTenantRecord(entry?.raw && typeof entry.raw === "object" ? entry.raw : entry, index, fallbackSource);
+    if (!normalized) {
+      return;
+    }
+    const tenantId = String(firstNonEmptyString([entry?.tenantId, normalized.tenantId]) || "").trim();
+    const tenantName = String(firstNonEmptyString([entry?.tenantName, normalized.tenantName, tenantId]) || "").trim();
+    if (!tenantId && !tenantName) {
+      return;
+    }
+    const key = normalizeCmMatchText(`${tenantId}|${tenantName}`);
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    tenants.push({
+      ...normalized,
+      tenantId: tenantId || normalized.tenantId,
+      tenantName: tenantName || normalized.tenantName || tenantId,
+      aliases: uniqueSorted(
+        (Array.isArray(entry?.aliases) ? entry.aliases : []).concat(Array.isArray(normalized.aliases) ? normalized.aliases : [])
+      ),
+      links: uniqueSorted((Array.isArray(entry?.links) ? entry.links : []).concat(Array.isArray(normalized.links) ? normalized.links : [])),
+      sourceUrl: String(firstNonEmptyString([entry?.sourceUrl, normalized.sourceUrl, sourceUrl]) || ""),
+    });
+  });
+  if (tenants.length === 0) {
+    return null;
+  }
+  return {
+    tenants,
+    sourceUrl,
+    fetchedAt: fetchedAt > 0 ? fetchedAt : Date.now(),
+    persistedAt: Number(payload.persistedAt || 0) || Date.now(),
+  };
+}
+
+function buildCmTenantsCatalogPersistPayload(catalog = null) {
+  const normalizedCatalog = normalizeCmTenantsCatalogPayload(catalog);
+  if (!normalizedCatalog) {
+    return null;
+  }
+  const tenants = normalizedCatalog.tenants.map((tenant) => ({
+    tenantId: String(tenant?.tenantId || "").trim(),
+    tenantName: String(tenant?.tenantName || "").trim(),
+    aliases: uniqueSorted(Array.isArray(tenant?.aliases) ? tenant.aliases : []).slice(0, 32),
+    links: uniqueSorted(Array.isArray(tenant?.links) ? tenant.links : []).slice(0, 12),
+    raw: tenant?.raw && typeof tenant.raw === "object" ? tenant.raw : null,
+    sourceUrl: String(tenant?.sourceUrl || "").trim(),
+  }));
+  return {
+    tenants,
+    sourceUrl: String(normalizedCatalog.sourceUrl || "").trim(),
+    fetchedAt: Number(normalizedCatalog.fetchedAt || Date.now()),
+    persistedAt: Date.now(),
+  };
+}
+
+async function readPersistedCmTenantsCatalog() {
+  if (!chrome.storage?.local?.get) {
+    return null;
+  }
+  try {
+    const payload = await chrome.storage.local.get(CM_TENANTS_CATALOG_STORAGE_KEY);
+    return normalizeCmTenantsCatalogPayload(payload?.[CM_TENANTS_CATALOG_STORAGE_KEY] || null);
+  } catch {
+    return null;
+  }
+}
+
+async function persistCmTenantsCatalog(catalog = null) {
+  if (!chrome.storage?.local?.set) {
+    return false;
+  }
+  const persistable = buildCmTenantsCatalogPersistPayload(catalog);
+  if (!persistable) {
+    return false;
+  }
+  try {
+    await chrome.storage.local.set({ [CM_TENANTS_CATALOG_STORAGE_KEY]: persistable });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function hydrateCmTenantsCatalogFromStorage(options = {}) {
+  const forceReload = options?.forceReload === true;
+  if (!forceReload && state.cmTenantsCatalogHydrated) {
+    return state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) ? state.cmTenantsCatalog : null;
+  }
+  if (!forceReload && state.cmTenantsCatalogHydrationPromise) {
+    return state.cmTenantsCatalogHydrationPromise;
+  }
+  const hydrationPromise = (async () => {
+    const persistedCatalog = await readPersistedCmTenantsCatalog();
+    state.cmTenantsCatalogHydrated = true;
+    if (persistedCatalog && Array.isArray(persistedCatalog.tenants) && persistedCatalog.tenants.length > 0) {
+      state.cmTenantsCatalog = persistedCatalog;
+      emitCmDebugEvent({
+        phase: "cm-tenant-catalog-storage-hit",
+        tenantCount: Number(persistedCatalog.tenants.length || 0),
+        sourceUrl: String(persistedCatalog.sourceUrl || ""),
+        fetchedAt: Number(persistedCatalog.fetchedAt || 0),
+      });
+      return persistedCatalog;
+    }
+    return null;
+  })();
+  state.cmTenantsCatalogHydrationPromise = hydrationPromise;
+  try {
+    return await hydrationPromise;
+  } finally {
+    if (state.cmTenantsCatalogHydrationPromise === hydrationPromise) {
+      state.cmTenantsCatalogHydrationPromise = null;
+    }
+  }
+}
+
 function prefetchCmTenantsCatalogInBackground(reason = "background") {
   if (state.restricted || state.programmers.length === 0) {
     return;
   }
-  if (state.cmTenantsCatalogPromise || state.cmConsoleBootstrapPromise) {
+  if (state.cmTenantsCatalogPromise) {
     return;
   }
   const cachedCatalog = state.cmTenantsCatalog;
-  const cachedSummary = state.cmConsoleBootstrapSummary;
-  const summaryFresh =
-    cachedSummary &&
-    typeof cachedSummary === "object" &&
-    Number(cachedSummary.fetchedAt || 0) > 0 &&
-    Date.now() - Number(cachedSummary.fetchedAt || 0) <= CM_BOOTSTRAP_CACHE_MAX_AGE_MS;
-  if (cachedCatalog && Array.isArray(cachedCatalog.tenants) && cachedCatalog.tenants.length > 0 && summaryFresh) {
+  if (cachedCatalog && Array.isArray(cachedCatalog.tenants) && cachedCatalog.tenants.length > 0) {
     return;
   }
-  void ensureCmConsoleBootstrapSummary({ forceRefresh: false })
-    .then((summary) => {
-      if (!summary || typeof summary !== "object") {
+  void ensureCmTenantsCatalog({ forceRefresh: false })
+    .then((catalog) => {
+      if (!catalog || typeof catalog !== "object") {
         return;
       }
       emitCmDebugEvent({
-        phase: "cm-bootstrap-background-complete",
+        phase: "cm-tenant-catalog-background-complete",
         reason: String(reason || ""),
-        tenantCount: Number(summary.tenantCount || 0),
-        applicationCount: Number(summary.applicationCount || 0),
-        policyCount: Number(summary.policyCount || 0),
+        tenantCount: Number(catalog.tenants?.length || 0),
+        sourceUrl: String(catalog.sourceUrl || ""),
       });
     })
     .catch((error) => {
-      log("CM bootstrap prefetch failed", {
+      log("CM tenant catalog prefetch failed", {
         reason,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -32788,6 +32915,13 @@ async function ensureCmTenantsCatalog(options = {}) {
     return cachedCatalog;
   }
 
+  if (!forceRefresh && !cachedCatalog) {
+    const hydratedCatalog = await hydrateCmTenantsCatalogFromStorage({ forceReload: false });
+    if (hydratedCatalog && Array.isArray(hydratedCatalog.tenants) && hydratedCatalog.tenants.length > 0) {
+      return hydratedCatalog;
+    }
+  }
+
   if (!forceRefresh && state.cmTenantsCatalogPromise) {
     return state.cmTenantsCatalogPromise;
   }
@@ -32832,6 +32966,8 @@ async function ensureCmTenantsCatalog(options = {}) {
             fetchedAt: Date.now(),
           };
           state.cmTenantsCatalog = catalog;
+          state.cmTenantsCatalogHydrated = true;
+          void persistCmTenantsCatalog(catalog);
           log("CM tenants catalog loaded", {
             sourceUrl: response.url,
             tenantCount: tenants.length,
@@ -32868,6 +33004,16 @@ async function ensureCmTenantsCatalog(options = {}) {
           tenantCount: Number(cachedCatalog.tenants?.length || 0),
         });
         return cachedCatalog;
+      }
+      const persistedFallback = await hydrateCmTenantsCatalogFromStorage({ forceReload: false });
+      if (persistedFallback && Array.isArray(persistedFallback.tenants) && persistedFallback.tenants.length > 0) {
+        emitCmDebugEvent({
+          phase: "cm-tenant-catalog-storage-fallback",
+          error: lastError.message,
+          sourceUrl: String(persistedFallback.sourceUrl || ""),
+          tenantCount: Number(persistedFallback.tenants?.length || 0),
+        });
+        return persistedFallback;
       }
       emitCmDebugEvent({
         phase: "cm-tenant-catalog-error",
@@ -32949,7 +33095,7 @@ async function ensureCmServiceForProgrammer(programmer, options = {}) {
   const loadPromise = (async () => {
     let catalog = null;
     try {
-      catalog = await ensureCmTenantsCatalog({ forceRefresh });
+      catalog = await ensureCmTenantsCatalog({ forceRefresh: false });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       log("CM tenants load failed", {
@@ -33095,7 +33241,7 @@ async function ensureCmServiceForSelectedMvpd(programmer, options = {}) {
   const loadPromise = (async () => {
     let catalog = null;
     try {
-      catalog = await ensureCmTenantsCatalog({ forceRefresh });
+      catalog = await ensureCmTenantsCatalog({ forceRefresh: false });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const service = {
@@ -34793,6 +34939,7 @@ async function loadProgrammersData(accessToken = "") {
       requireEntities: false,
     });
     applyProgrammerEntities(entities);
+    prefetchCmTenantsCatalogInBackground("programmers-loaded");
     if (state.programmers.length === 0) {
       setStatus("No media company records were returned for this account.", "error");
     }
@@ -34825,12 +34972,8 @@ function applyProgrammerEntities(entities) {
   state.cmServiceLoadPromiseByProgrammerId.clear();
   state.cmServiceByMvpdSelectionKey.clear();
   state.cmServiceLoadPromiseByMvpdSelectionKey.clear();
-  state.cmTenantsCatalog = null;
-  state.cmTenantsCatalogPromise = null;
-  state.cmConsoleBootstrapSummary = null;
-  state.cmConsoleBootstrapPromise = null;
-  state.cmAuthBootstrapPromise = null;
-  state.cmAuthBootstrapLastAttemptAt = 0;
+  // Keep tenant catalog hydrated for the active signed-in session.
+  // CM matching should use this persisted catalog on each selection.
   state.cmTenantBundleByTenantKey.clear();
   state.cmTenantBundlePromiseByTenantKey.clear();
   state.premiumSectionCollapsedByKey.clear();
