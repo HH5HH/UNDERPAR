@@ -3935,7 +3935,7 @@ function downloadHtmlFile(htmlText, fileName) {
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = objectUrl;
-  anchor.download = String(fileName || "clickCMUWS.html");
+  anchor.download = String(fileName || `clickCMUWS_${Date.now()}.html`);
   anchor.style.display = "none";
   document.body.appendChild(anchor);
   anchor.click();

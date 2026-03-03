@@ -12251,7 +12251,7 @@ function downloadClickEsmHtmlFile(htmlText, fileName) {
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = objectUrl;
-  anchor.download = String(fileName || "clickESM.html");
+  anchor.download = String(fileName || `clickESM_${Date.now()}.html`);
   anchor.style.display = "none";
   document.body.appendChild(anchor);
   anchor.click();
@@ -12268,7 +12268,7 @@ function buildClickEsmDownloadFileName(programmer) {
     programmer?.programmerId,
   ]);
   const base = sanitizeDownloadFileSegment(label, "MediaCompany");
-  return `${base}_clickESM.html`;
+  return `${base}_clickESM_${Date.now()}.html`;
 }
 
 function getGlobalRequestorMvpdSelections() {
@@ -13918,7 +13918,7 @@ function buildClickCmuDownloadFileName(programmer, options = {}) {
     programmer?.programmerId,
   ]);
   const base = sanitizeDownloadFileSegment(label, "MediaCompany");
-  return `${base}_clickCMU.html`;
+  return `${base}_clickCMU_${Date.now()}.html`;
 }
 
 function buildClickCmuWorkspaceDownloadFileName(programmer, options = {}) {
@@ -13929,11 +13929,7 @@ function buildClickCmuWorkspaceDownloadFileName(programmer, options = {}) {
     programmer?.programmerId,
   ]);
   const base = sanitizeDownloadFileSegment(label, "MediaCompany");
-  if (options?.appendTimestamp === false) {
-    return `${base}_clickCMUWS.html`;
-  }
-  const epoch = Date.now();
-  return `${base}_clickCMUWS_${epoch}.html`;
+  return `${base}_clickCMUWS_${Date.now()}.html`;
 }
 
 function getClickCmuWorkspaceCardUrlCandidates(card = null, options = {}) {
@@ -14208,7 +14204,6 @@ async function makeClickCmuWorkspaceDownload(context, cards, requestToken, optio
   const templateHtml = await loadClickCmuTemplateHtml();
   const fileName = buildClickCmuWorkspaceDownloadFileName(programmer, {
     fileLabel: String(options?.fileLabel || "").trim(),
-    appendTimestamp: options?.appendTimestamp !== false,
   });
   const downloadHtml = buildClickCmuHtmlFromTemplate(templateHtml, {
     programmerLabel: String(options?.programmerLabelOverride || authContext.programmerLabel || "").trim() || authContext.programmerLabel,
@@ -21748,7 +21743,6 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
       themePreset: "sunflower",
       themeScope: `mvpd:${selectedMvpdTenantScope}`,
       fileLabel: exportFileScopeLabel,
-      appendTimestamp: false,
       programmerLabelOverride: `${selectedMvpdLabel} (${selectedMvpdTenantScope})`,
     });
     return {
