@@ -8880,11 +8880,13 @@ async function deleteRestV2ProfileHarvestWithLogout(programmer = null, harvestKe
     separator: " x ",
   });
   const flowId = String(options?.flowId || "").trim() || resolveRestV2DebugFlowIdForHarvest(harvest);
-  const logoutResult = await executeRestV2LogoutFlow(context, flowId);
-  if (logoutResult?.attempted !== true || logoutResult?.performed !== true) {
+  const logoutResult = await executeRestV2LogoutFlow(context, flowId, {
+    skipUserAgentAction: true,
+  });
+  if (logoutResult?.attempted !== true) {
     const reason = firstNonEmptyString([
       String(logoutResult?.error || "").trim(),
-      logoutResult?.attempted !== true ? "REST V2 logout was not attempted." : "REST V2 logout did not fully complete.",
+      "REST V2 logout was not attempted.",
     ]);
     return {
       ok: false,
@@ -9256,17 +9258,32 @@ function buildRestV2ProfileCheckEndpointCandidates(context = null) {
     url: `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles/code/${encodeURIComponent(sessionCode)}`,
   }));
 
-  if (mvpdProfilesUrl) {
-    pushEndpoint("profiles-mvpd", mvpdProfilesUrl, {
-      endpointLabel: "profiles/{mvpd}",
+  const likelySsoContext = isRestV2LikelyPartnerSsoContext(context);
+  if (likelySsoContext && sessionCodeEndpoints.length > 0) {
+    sessionCodeEndpoints.forEach((item) => {
+      pushEndpoint("profiles-code", item.url, {
+        endpointLabel: "profiles/code",
+        sessionCode: item.sessionCode,
+      });
+    });
+    if (mvpdProfilesUrl) {
+      pushEndpoint("profiles-mvpd", mvpdProfilesUrl, {
+        endpointLabel: "profiles/{mvpd}",
+      });
+    }
+  } else {
+    if (mvpdProfilesUrl) {
+      pushEndpoint("profiles-mvpd", mvpdProfilesUrl, {
+        endpointLabel: "profiles/{mvpd}",
+      });
+    }
+    sessionCodeEndpoints.forEach((item) => {
+      pushEndpoint("profiles-code", item.url, {
+        endpointLabel: "profiles/code",
+        sessionCode: item.sessionCode,
+      });
     });
   }
-  sessionCodeEndpoints.forEach((item) => {
-    pushEndpoint("profiles-code", item.url, {
-      endpointLabel: "profiles/code",
-      sessionCode: item.sessionCode,
-    });
-  });
 
   pushEndpoint("profiles-all", allProfilesUrl, {
     endpointLabel: "profiles",
@@ -9293,7 +9310,7 @@ function buildRestV2ProfileCheckAttemptSummary(result = null) {
   };
 }
 
-function shouldPreferRestV2ProfileCheckResult(candidate = null, current = null) {
+function shouldPreferRestV2ProfileCheckResult(candidate = null, current = null, context = null) {
   if (!candidate || typeof candidate !== "object") {
     return false;
   }
@@ -9305,6 +9322,18 @@ function shouldPreferRestV2ProfileCheckResult(candidate = null, current = null) 
   const currentActive = isRestV2ProfileSessionActiveResult(current);
   if (candidateActive !== currentActive) {
     return candidateActive;
+  }
+  if (candidateActive && currentActive && isRestV2LikelyPartnerSsoContext(context)) {
+    const candidateEndpoint = String(candidate?.profileCheckEndpoint || "").trim().toLowerCase();
+    const currentEndpoint = String(current?.profileCheckEndpoint || "").trim().toLowerCase();
+    if (candidateEndpoint !== currentEndpoint) {
+      if (candidateEndpoint === "profiles-code") {
+        return true;
+      }
+      if (currentEndpoint === "profiles-code") {
+        return false;
+      }
+    }
   }
 
   const candidateOk = candidate.checked === true && candidate.ok === true;
@@ -9435,6 +9464,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
       const strictFilteredProfiles = {};
       const aliasFilteredProfiles = {};
       const selectedHasSso = selectedAliases.some((alias) => restV2ValueHasSsoMarker(alias));
+      const requireSsoParity = allowSsoAliasMatch && selectedHasSso;
       for (const [profileKey, profileValue] of Object.entries(rawProfiles)) {
         if (!profileValue || typeof profileValue !== "object") {
           continue;
@@ -9509,7 +9539,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
           ...effectivePayload,
           profiles: strictFilteredBySsoParity,
         };
-      } else if (Object.keys(strictFilteredProfiles).length > 0) {
+      } else if (Object.keys(strictFilteredProfiles).length > 0 && !requireSsoParity) {
         effectiveProfiles = strictFilteredProfiles;
         effectivePayload = {
           ...effectivePayload,
@@ -9521,7 +9551,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
           ...effectivePayload,
           profiles: aliasFilteredBySsoParity,
         };
-      } else if (Object.keys(aliasFilteredProfiles).length > 0) {
+      } else if (Object.keys(aliasFilteredProfiles).length > 0 && !requireSsoParity) {
         effectiveProfiles = aliasFilteredProfiles;
         effectivePayload = {
           ...effectivePayload,
@@ -9584,17 +9614,19 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
             ? scoredProfiles
             : Object.keys(parityProfiles).length > 0
               ? parityProfiles
-              : rawProfiles;
+              : requireSsoParity
+                ? {}
+                : rawProfiles;
         effectiveProfiles = fallbackProfiles;
         effectivePayload = {
           ...effectivePayload,
           profiles: fallbackProfiles,
         };
       } else {
-        effectiveProfiles = strictFilteredProfiles;
+        effectiveProfiles = requireSsoParity ? {} : strictFilteredProfiles;
         effectivePayload = {
           ...effectivePayload,
-          profiles: strictFilteredProfiles,
+          profiles: effectiveProfiles,
         };
       }
     } else {
@@ -9754,7 +9786,7 @@ async function fetchRestV2ProfileCheckResult(context, flowId, scope = "profiles-
       }
     }
 
-    if (shouldPreferRestV2ProfileCheckResult(endpointResult, bestResult)) {
+    if (shouldPreferRestV2ProfileCheckResult(endpointResult, bestResult, context)) {
       bestResult = endpointResult;
     }
 
@@ -9995,7 +10027,7 @@ async function verifyPostLogoutProfilesCleared(context, flowId) {
   };
 }
 
-async function executeRestV2LogoutFlow(context, flowId) {
+async function executeRestV2LogoutFlow(context, flowId, options = {}) {
   const result = {
     attempted: false,
     performed: false,
@@ -10009,6 +10041,7 @@ async function executeRestV2LogoutFlow(context, flowId) {
     return result;
   }
 
+  const skipUserAgentAction = options?.skipUserAgentAction === true;
   result.attempted = true;
   const redirectUrl = firstNonEmptyString([
     REST_V2_REDIRECT_CANDIDATES[1],
@@ -10076,7 +10109,7 @@ async function executeRestV2LogoutFlow(context, flowId) {
       return result;
     }
 
-    if (shouldRunRestV2LogoutUserAgentAction(result)) {
+    if (shouldRunRestV2LogoutUserAgentAction(result) && !skipUserAgentAction) {
       const logoutAction = await executeRestV2LogoutAction(result.logoutUrl, flowId, context);
       emitRestV2DebugEvent(flowId, {
         source: "extension",
@@ -10093,14 +10126,26 @@ async function executeRestV2LogoutFlow(context, flowId) {
         result.error = `Logout user-agent action failed: ${actionReason}`;
         return result;
       }
+    } else if (shouldRunRestV2LogoutUserAgentAction(result) && skipUserAgentAction) {
+      emitRestV2DebugEvent(flowId, {
+        source: "extension",
+        phase: "logout-action-skipped",
+        requestorId: context.requestorId,
+        mvpd: context.mvpd,
+        logoutUrl: String(result.logoutUrl || "").trim(),
+        reason: "skip-user-agent-action",
+      });
     }
 
-    result.performed = isRestV2LogoutActionCompleted(result) || !shouldRunRestV2LogoutUserAgentAction(result);
+    result.performed =
+      isRestV2LogoutActionCompleted(result) || !shouldRunRestV2LogoutUserAgentAction(result) || skipUserAgentAction;
     if (!result.performed && !result.error) {
       const fallbackAction = buildRestV2LogoutAcceptedFallbackAction(parsed, result);
       result.performed = true;
       result.actionName = fallbackAction.actionName;
       result.actionType = fallbackAction.actionType;
+    } else if (result.performed && skipUserAgentAction && !String(result.actionType || "").trim()) {
+      result.actionType = "api-skip-user-agent";
     }
     if (result.performed) {
       setRestV2ActiveProfileWindowState(
