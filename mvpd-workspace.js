@@ -1912,9 +1912,23 @@ function safeDecodeUrlSegment(segment) {
   }
 }
 
+function isLikelyRequestUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return false;
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    return true;
+  }
+  if (raw.startsWith("/")) {
+    return true;
+  }
+  return /^[a-z0-9._~-]+\/[^\s]+$/i.test(raw);
+}
+
 function parseRawQueryPairs(urlValue) {
   const raw = String(urlValue || "").trim();
-  if (!raw) {
+  if (!isLikelyRequestUrl(raw)) {
     return [];
   }
   const queryIndex = raw.indexOf("?");
@@ -1951,7 +1965,7 @@ function parseRawQueryPairs(urlValue) {
 
 function parseCmRequestContext(urlValue) {
   const raw = String(urlValue || "").trim();
-  if (!raw) {
+  if (!isLikelyRequestUrl(raw)) {
     return {
       fullUrl: "",
       hiddenPathSegments: [],
@@ -2073,9 +2087,6 @@ function buildWorkspaceCardId(prefix = "workspace") {
 
 function buildCardHeaderContextMarkup(urlValue, endpointUrl = "") {
   const context = parseCmRequestContext(urlValue);
-  if (!context.fullUrl) {
-    return '<span class="card-url-empty">No CM URL</span>';
-  }
 
   const hiddenPathSegments = Array.isArray(context.hiddenPathSegments)
     ? context.hiddenPathSegments

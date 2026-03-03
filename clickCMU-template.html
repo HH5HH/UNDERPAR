@@ -1035,10 +1035,14 @@
             }
             Object.keys(row).forEach((key) => {
               const text = String(key || "").trim();
-              if (!text || seen.has(text)) {
+              if (!text) {
                 return;
               }
-              seen.add(text);
+              const normalized = text.toLowerCase();
+              if (normalized === "v2" || seen.has(normalized)) {
+                return;
+              }
+              seen.add(normalized);
               output.push(text);
             });
           });
@@ -1077,9 +1081,23 @@
           }
         }
 
+        function isLikelyRequestUrl(value) {
+          const raw = String(value || "").trim();
+          if (!raw) {
+            return false;
+          }
+          if (/^https?:\/\//i.test(raw)) {
+            return true;
+          }
+          if (raw.startsWith("/")) {
+            return true;
+          }
+          return /^[a-z0-9._~-]+\/[^\s]+$/i.test(raw);
+        }
+
         function parseRawQueryPairs(urlValue) {
           const raw = String(urlValue || "").trim();
-          if (!raw) {
+          if (!isLikelyRequestUrl(raw)) {
             return [];
           }
           const queryIndex = raw.indexOf("?");
@@ -1116,7 +1134,7 @@
 
         function parseRequestContext(urlValue) {
           const raw = String(urlValue || "").trim();
-          if (!raw) {
+          if (!isLikelyRequestUrl(raw)) {
             return {
               fullUrl: "",
               pathSegments: [],
@@ -1225,9 +1243,6 @@
 
         function buildUrlContextMarkup(urlValue, endpointUrl = "") {
           const context = parseRequestContext(urlValue);
-          if (!context.fullUrl) {
-            return '<span class="card-url-empty">No CMU URL</span>';
-          }
 
           const pathMarkup =
             context.pathSegments.length > 0
