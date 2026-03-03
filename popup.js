@@ -11916,6 +11916,18 @@ function ensureCmUsageEndpointFormat(url, options = {}) {
     if (!parsed.searchParams.has("format")) {
       parsed.searchParams.set("format", "json");
     }
+    if (isCanonicalCmuUsagePath(parsed.pathname)) {
+      const zoomKey = cmuUsageGetZoomKey(cmuUsageExtractPathParts(parsed.pathname), parsed.pathname);
+      const timeWindow = clickEsmComputeTimeWindow(zoomKey);
+      parsed.searchParams.set("start", String(timeWindow?.start || clickEsmIso(new Date())));
+      parsed.searchParams.set("end", String(timeWindow?.end || clickEsmIso(new Date())));
+      if (!parsed.searchParams.has("metrics")) {
+        const lowerPath = String(parsed.pathname || "").toLowerCase();
+        if (lowerPath.includes("/tenant") || lowerPath.includes("/hour")) {
+          parsed.searchParams.set("metrics", "users");
+        }
+      }
+    }
     if (tenantScope && isCanonicalCmuUsagePath(parsed.pathname)) {
       const existingTenantScope = resolveCmUsageTenantScopeValue(
         parsed.searchParams.get("tenant"),
@@ -12654,6 +12666,90 @@ body[data-theme="dark"]{
     return yyyy + "-" + mm + "-" + dd + "T" + hh + ":" + mi + ":" + ss;
   }
 
+  function formatCmuIsoValue(date) {
+    return new Date(date).toISOString().replace(/\\.\\d{3}Z$/, "Z");
+  }
+
+  function shiftInstantToPstCalendar(date) {
+    return new Date(date.getTime() + (${ESM_SOURCE_UTC_OFFSET_MINUTES} * 60 * 1000));
+  }
+
+  function getCmuZoomKeyFromPath(pathValue = "", fallbackUrl = "") {
+    const pathText = String(pathValue || "").trim().toLowerCase();
+    const fallbackText = String(fallbackUrl || "").trim().toLowerCase();
+    const haystack = pathText + " " + fallbackText;
+    if (haystack.includes("/minute")) {
+      return "MIN";
+    }
+    if (haystack.includes("/hour")) {
+      return "HR";
+    }
+    if (haystack.includes("/day")) {
+      return "DAY";
+    }
+    if (haystack.includes("/month")) {
+      return "MO";
+    }
+    if (haystack.includes("/year")) {
+      return "YR";
+    }
+    return "";
+  }
+
+  function computeCmuTimeWindowForZoom(zoomKey = "") {
+    const normalizedZoom = String(zoomKey || "").trim().toUpperCase();
+    const now = new Date();
+    const nowPst = shiftInstantToPstCalendar(now);
+    const nowIso = formatCmuIsoValue(now);
+
+    if (normalizedZoom === "YR") {
+      return {
+        start: String(nowPst.getUTCFullYear() - 1),
+        end: nowIso,
+      };
+    }
+
+    if (normalizedZoom === "MO") {
+      const previousMonth = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth() - 1, 1));
+      return {
+        start: String(previousMonth.getUTCFullYear()) + "-" + String(previousMonth.getUTCMonth() + 1).padStart(2, "0"),
+        end: nowIso,
+      };
+    }
+
+    if (normalizedZoom === "DAY") {
+      const previousDay = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth(), nowPst.getUTCDate() - 1));
+      return {
+        start:
+          String(previousDay.getUTCFullYear()) +
+          "-" +
+          String(previousDay.getUTCMonth() + 1).padStart(2, "0") +
+          "-" +
+          String(previousDay.getUTCDate()).padStart(2, "0"),
+        end: nowIso,
+      };
+    }
+
+    if (normalizedZoom === "HR") {
+      return {
+        start: formatCmuIsoValue(new Date(now.getTime() - 12 * 60 * 60 * 1000)),
+        end: nowIso,
+      };
+    }
+
+    if (normalizedZoom === "MIN") {
+      return {
+        start: formatCmuIsoValue(new Date(now.getTime() - 60 * 60 * 1000)),
+        end: nowIso,
+      };
+    }
+
+    return {
+      start: nowIso,
+      end: nowIso,
+    };
+  }
+
   const CMU_TENANT_QUERY_KEYS = ["tenant", "tenant_id", "tenant-id"];
   const CMU_USAGE_ROOT_SEGMENTS = ["year", "tenant"];
   const CMU_USAGE_ROOT_SEGMENT_SET = new Set(CMU_USAGE_ROOT_SEGMENTS);
@@ -12722,15 +12818,11 @@ body[data-theme="dark"]{
       if (!parsed.searchParams.has("format")) {
         parsed.searchParams.set("format", "json");
       }
-      if (!parsed.searchParams.has("start") || !parsed.searchParams.has("end")) {
-        const endDate = new Date();
-        const startDate = new Date(endDate.getTime() - 9 * 24 * 60 * 60 * 1000);
-        if (!parsed.searchParams.has("start")) {
-          parsed.searchParams.set("start", formatCmuDateValue(startDate));
-        }
-        if (!parsed.searchParams.has("end")) {
-          parsed.searchParams.set("end", formatCmuDateValue(endDate));
-        }
+      const effectivePath = canonicalPath || parsed.pathname;
+      if (isCmuUsagePath(effectivePath)) {
+        const timeWindow = computeCmuTimeWindowForZoom(getCmuZoomKeyFromPath(effectivePath, raw));
+        parsed.searchParams.set("start", String(timeWindow.start || formatCmuIsoValue(new Date())));
+        parsed.searchParams.set("end", String(timeWindow.end || formatCmuIsoValue(new Date())));
       }
       const limit = Number(limitValue);
       if (!parsed.searchParams.has("limit") && Number.isFinite(limit) && limit > 0) {
@@ -13232,6 +13324,9 @@ function buildClickCmuWorkspaceDownloadFileName(programmer, options = {}) {
     programmer?.programmerId,
   ]);
   const base = sanitizeDownloadFileSegment(label, "MediaCompany");
+  if (options?.appendTimestamp === false) {
+    return `${base}_clickCMUWS.html`;
+  }
   const epoch = Date.now();
   return `${base}_clickCMUWS_${epoch}.html`;
 }
@@ -13462,6 +13557,7 @@ async function makeClickCmuWorkspaceDownload(context, cards, requestToken, optio
   const templateHtml = await loadClickCmuTemplateHtml();
   const fileName = buildClickCmuWorkspaceDownloadFileName(programmer, {
     fileLabel: String(options?.fileLabel || "").trim(),
+    appendTimestamp: options?.appendTimestamp !== false,
   });
   const downloadHtml = buildClickCmuHtmlFromTemplate(templateHtml, {
     programmerLabel: String(options?.programmerLabelOverride || authContext.programmerLabel || "").trim() || authContext.programmerLabel,
@@ -20662,9 +20758,7 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     }
     const selectedMvpdMeta = getRestV2MvpdMeta(selectedRequestorId, selectedMvpdId);
     const selectedMvpdLabel = getRestV2MvpdPickerLabel(selectedRequestorId, selectedMvpdId, selectedMvpdMeta) || selectedMvpdId;
-    const exportFileScopeLabel = [String(selectedProgrammer.programmerId || "").trim(), selectedMvpdTenantScope]
-      .filter(Boolean)
-      .join("_");
+    const exportFileScopeLabel = String(selectedMvpdId || selectedMvpdTenantScope || "MVPD").trim();
     const clickCmuContext = {
       programmer: selectedProgrammer,
       cmService: selectedCmMvpdService,
@@ -20700,6 +20794,7 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
       themePreset: "sunflower",
       themeScope: `mvpd:${selectedMvpdTenantScope}`,
       fileLabel: exportFileScopeLabel,
+      appendTimestamp: false,
       programmerLabelOverride: `${selectedMvpdLabel} (${selectedMvpdTenantScope})`,
     });
     return {
@@ -23273,9 +23368,7 @@ async function loadCmService(programmer, cmService, section, contentElement, req
           const selectedMvpdLabel = selectedMvpdId
             ? getRestV2MvpdPickerLabel(selectedRequestorId, selectedMvpdId, selectedMvpdMeta) || selectedMvpdId
             : String(firstNonEmptyString([matchedTenants?.[0]?.tenantName, resolvedMvpdScope || ""])).trim();
-          const exportFileScopeLabel = [String(programmer?.programmerId || "").trim(), resolvedMvpdScope || selectedMvpdId]
-            .filter(Boolean)
-            .join("_");
+          const exportFileScopeLabel = String(selectedMvpdId || resolvedMvpdScope || "MVPD").trim();
           await makeClickCmuDownload(clickCmuContext, requestToken, {
             source: "sidepanel",
             tenantScope: isMvpdService ? resolvedMvpdScope : undefined,
@@ -33167,30 +33260,6 @@ function formatCmUsageDateValue(date) {
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
 }
 
-function buildCmUsageDateWindow(profileHarvest = null) {
-  const nowMs = Date.now();
-  let startMs = nowMs - 9 * 24 * 60 * 60 * 1000;
-  let endMs = nowMs;
-  const harvested = profileHarvest && typeof profileHarvest === "object" ? profileHarvest : null;
-  if (harvested) {
-    const notBeforeMs = Number(harvested.notBeforeMs || 0);
-    const notAfterMs = Number(harvested.notAfterMs || 0);
-    if (Number.isFinite(notBeforeMs) && notBeforeMs > 0) {
-      startMs = Math.max(notBeforeMs - 60 * 60 * 1000, nowMs - 31 * 24 * 60 * 60 * 1000);
-    }
-    if (Number.isFinite(notAfterMs) && notAfterMs > 0) {
-      endMs = Math.min(nowMs, notAfterMs + 60 * 60 * 1000);
-    }
-  }
-  if (endMs <= startMs) {
-    endMs = Math.min(nowMs, startMs + 24 * 60 * 60 * 1000);
-  }
-  return {
-    start: new Date(startMs),
-    end: new Date(endMs),
-  };
-}
-
 const CM_USAGE_TENANT_QUERY_KEYS = ["tenant", "tenant_id", "tenant-id"];
 const CM_USAGE_ROOT_SEGMENTS = ["year", "tenant"];
 const CM_USAGE_ROOT_SEGMENT_SET = new Set(CM_USAGE_ROOT_SEGMENTS);
@@ -33345,13 +33414,12 @@ function enforceCmUsageTenantScope(urlValue, tenantScope = "") {
 }
 
 function buildCmUsageQueryString(path, profileHarvest = null, tenantScope = "") {
-  const now = new Date();
-  const range = buildCmUsageDateWindow(profileHarvest);
-  const start = range.start || new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000);
-  const end = range.end || now;
+  const zoomKey = cmuUsageGetZoomKey(cmuUsageExtractPathParts(path), String(path || ""));
+  const timeWindow = clickEsmComputeTimeWindow(zoomKey);
+  const nowIso = clickEsmIso(new Date());
   const params = new URLSearchParams();
-  params.set("start", formatCmUsageDateValue(start));
-  params.set("end", formatCmUsageDateValue(end));
+  params.set("start", String(timeWindow?.start || nowIso));
+  params.set("end", String(timeWindow?.end || nowIso));
   params.set("limit", "1000");
   if (/\/tenant(?:\/|$)/i.test(String(path || "")) || /\/hour(?:\/|$)/i.test(String(path || ""))) {
     params.set("metrics", "users");

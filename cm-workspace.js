@@ -304,6 +304,89 @@ function formatCmuDateQueryValue(dateValue) {
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
 }
 
+function formatCmuIsoQueryValue(dateValue) {
+  return new Date(dateValue).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function shiftInstantToPstCalendar(dateValue) {
+  return new Date(new Date(dateValue).getTime() + (CM_SOURCE_UTC_OFFSET_MINUTES * 60 * 1000));
+}
+
+function getCmuZoomKeyFromUrl(urlValue = "") {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  let pathText = "";
+  try {
+    pathText = String(new URL(raw).pathname || "").toLowerCase();
+  } catch {
+    pathText = String(raw || "").split("?")[0].toLowerCase();
+  }
+  if (pathText.includes("/minute")) {
+    return "MIN";
+  }
+  if (pathText.includes("/hour")) {
+    return "HR";
+  }
+  if (pathText.includes("/day")) {
+    return "DAY";
+  }
+  if (pathText.includes("/month")) {
+    return "MO";
+  }
+  if (pathText.includes("/year")) {
+    return "YR";
+  }
+  return "";
+}
+
+function buildCmuTimeWindowForZoom(zoomKey = "") {
+  const normalizedZoom = String(zoomKey || "").trim().toUpperCase();
+  const now = new Date();
+  const nowPst = shiftInstantToPstCalendar(now);
+  const nowIso = formatCmuIsoQueryValue(now);
+
+  if (normalizedZoom === "YR") {
+    return {
+      start: String(nowPst.getUTCFullYear() - 1),
+      end: nowIso,
+    };
+  }
+  if (normalizedZoom === "MO") {
+    const previousMonth = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth() - 1, 1));
+    return {
+      start: `${previousMonth.getUTCFullYear()}-${String(previousMonth.getUTCMonth() + 1).padStart(2, "0")}`,
+      end: nowIso,
+    };
+  }
+  if (normalizedZoom === "DAY") {
+    const previousDay = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth(), nowPst.getUTCDate() - 1));
+    return {
+      start: `${previousDay.getUTCFullYear()}-${String(previousDay.getUTCMonth() + 1).padStart(2, "0")}-${String(
+        previousDay.getUTCDate()
+      ).padStart(2, "0")}`,
+      end: nowIso,
+    };
+  }
+  if (normalizedZoom === "HR") {
+    return {
+      start: formatCmuIsoQueryValue(new Date(now.getTime() - 12 * 60 * 60 * 1000)),
+      end: nowIso,
+    };
+  }
+  if (normalizedZoom === "MIN") {
+    return {
+      start: formatCmuIsoQueryValue(new Date(now.getTime() - 60 * 60 * 1000)),
+      end: nowIso,
+    };
+  }
+  return {
+    start: nowIso,
+    end: nowIso,
+  };
+}
+
 function normalizeWorkspaceTenantScopeValue(value) {
   return String(value || "").trim();
 }
@@ -366,15 +449,10 @@ function ensureCmuQueryDefaults(urlValue, limitValue = 1000, tenantScope = "") {
     if (!parsed.searchParams.has("format")) {
       parsed.searchParams.set("format", "json");
     }
-    if (!parsed.searchParams.has("start") || !parsed.searchParams.has("end")) {
-      const endDate = new Date();
-      const startDate = new Date(endDate.getTime() - 9 * 24 * 60 * 60 * 1000);
-      if (!parsed.searchParams.has("start")) {
-        parsed.searchParams.set("start", formatCmuDateQueryValue(startDate));
-      }
-      if (!parsed.searchParams.has("end")) {
-        parsed.searchParams.set("end", formatCmuDateQueryValue(endDate));
-      }
+    if (isCmuUsageRequestUrl(parsed.toString())) {
+      const timeWindow = buildCmuTimeWindowForZoom(getCmuZoomKeyFromUrl(parsed.toString()));
+      parsed.searchParams.set("start", String(timeWindow.start || formatCmuIsoQueryValue(new Date())));
+      parsed.searchParams.set("end", String(timeWindow.end || formatCmuIsoQueryValue(new Date())));
     }
     const limit = Number(limitValue);
     if (!parsed.searchParams.has("limit") && Number.isFinite(limit) && limit > 0) {
