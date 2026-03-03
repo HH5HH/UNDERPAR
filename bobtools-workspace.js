@@ -620,7 +620,7 @@ function collectSplunkRawPairs(value = null, output = [], prefix = "", depth = 0
       valueLabel = String(raw);
     }
     output.push({
-      key: keyLabel.toLowerCase() === "value" ? "" : keyLabel,
+      key: keyLabel,
       value: normalizeSplunkPlainText(valueLabel, 220),
     });
   };
@@ -704,12 +704,34 @@ function extractSplunkRawPairsFromText(rawValue = "") {
       return;
     }
     const valueRaw = decodeValue(chunk.slice(equalIndex + 1)).trim();
-    const normalizedKey = key.toLowerCase() === "value" ? "" : key;
+    const normalizedKey = key;
     pairs.push({
       key: normalizedKey,
       value: normalizeSplunkPlainText(valueRaw.replace(/^['"]|['"]$/g, ""), 220),
     });
   });
+  return pairs;
+}
+
+function extractSplunkRawPairsFromLooseText(rawValue = "") {
+  const text = getSplunkRawMetricsPayload(rawValue);
+  if (!text) {
+    return [];
+  }
+  const pairs = [];
+  const pattern = /(?:^|[,\n;|])\s*([A-Za-z0-9_.-]+)\s*[:=]\s*("([^"\\]|\\.)*"|'([^'\\]|\\.)*'|[^,\n;|]+)/g;
+  let match = pattern.exec(String(text || ""));
+  while (match && pairs.length < SPLUNK_RAW_PREVIEW_MAX_FIELDS) {
+    const key = String(match[1] || "").trim();
+    if (key && !shouldIgnoreSplunkRawKey(key)) {
+      const valueRaw = String(match[2] || "").trim().replace(/^['"]|['"]$/g, "");
+      pairs.push({
+        key,
+        value: normalizeSplunkPlainText(valueRaw, 220),
+      });
+    }
+    match = pattern.exec(String(text || ""));
+  }
   return pairs;
 }
 
@@ -722,6 +744,25 @@ function renderSplunkRawMarkup(rawValue = "") {
   }
   if (pairRows.length === 0) {
     pairRows.push(...extractSplunkRawPairsFromText(metricsPayload));
+  }
+  if (pairRows.length === 0) {
+    pairRows.push(...extractSplunkRawPairsFromLooseText(metricsPayload));
+  }
+  if (pairRows.length === 1 && String(pairRows[0]?.key || "").trim().toLowerCase() === "value") {
+    const nestedValue = String(pairRows[0]?.value || "").trim();
+    if (nestedValue) {
+      const nestedPairs = extractSplunkRawPairsFromText(nestedValue);
+      if (nestedPairs.length > 0) {
+        pairRows.length = 0;
+        pairRows.push(...nestedPairs);
+      } else {
+        const looseNestedPairs = extractSplunkRawPairsFromLooseText(nestedValue);
+        if (looseNestedPairs.length > 0) {
+          pairRows.length = 0;
+          pairRows.push(...looseNestedPairs);
+        }
+      }
+    }
   }
   if (pairRows.length > 0) {
     return `<ul class="bobtools-splunk-raw-pairs">${pairRows
@@ -871,8 +912,7 @@ function renderSplunkPanel(profile = null) {
             const rowRaw = firstNonEmptyString([row?._raw, row?.raw]);
             return `
               <article class="bobtools-splunk-event">
-                <div class="bobtools-splunk-field">
-                  <span class="bobtools-splunk-field-label">_time</span>
+                <div class="bobtools-splunk-field bobtools-splunk-field--time">
                   <span class="bobtools-splunk-time">${escapeHtml(formatSplunkTimeLabel(rowTime))}</span>
                 </div>
                 <div class="bobtools-splunk-field bobtools-splunk-field--raw">

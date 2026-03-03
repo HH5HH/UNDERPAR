@@ -63,7 +63,6 @@
                 aria-label="Resource IDs"
               />
               <button id="bobtools-go" class="bobtools-go" type="submit">GO</button>
-              <button id="bobtools-splunk" class="bobtools-splunk-go" type="button">SPLUNK</button>
             </form>
             <p id="bobtools-action-hint" class="bobtools-action-hint"></p>
             <p id="bobtools-result-status" class="bobtools-result-status"></p>
@@ -74,12 +73,15 @@
         <article id="bobtools-splunk-card" class="bobtools-card bobtools-card--splunk">
           <button type="button" class="bobtools-card-head bobtools-card-toggle" data-card-toggle="splunk" aria-expanded="true">
             <span class="bobtools-card-head-label">
-              <h2>Splunk RCA Report</h2>
+              <h2>Splunk RCA</h2>
               <span id="bobtools-splunk-card-meta" class="bobtools-count" hidden></span>
             </span>
             <span class="bobtools-card-chevron" aria-hidden="true">▼</span>
           </button>
           <div id="bobtools-splunk-body" class="bobtools-card-body bobtools-splunk-card-body" data-card-body="splunk">
+            <div class="bobtools-splunk-toolbar">
+              <button id="bobtools-splunk" class="bobtools-splunk-go bobtools-splunk-run" type="button">SPLUNK</button>
+            </div>
             <p id="bobtools-splunk-status" class="bobtools-splunk-status"></p>
             <div id="bobtools-splunk-summary" class="bobtools-splunk-summary"></div>
           </div>

@@ -16,6 +16,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   font-family: "Adobe Clean", "Segoe UI", Tahoma, sans-serif;
@@ -488,6 +492,15 @@ body {
   color: #a13a40;
 }
 
+.bobtools-splunk-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.bobtools-splunk-run {
+  min-width: 102px;
+}
+
 .bobtools-splunk-summary {
   display: flex;
   flex-direction: column;
@@ -590,7 +603,12 @@ body {
   word-break: break-word;
 }
 
+.bobtools-splunk-field--time {
+  grid-template-columns: 1fr;
+}
+
 .bobtools-splunk-field--raw {
+  grid-template-columns: 1fr;
   background: #f8fafc;
 }
 
