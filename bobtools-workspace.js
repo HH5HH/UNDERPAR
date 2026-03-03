@@ -9,8 +9,9 @@ const SPLUNK_PREVIEW_MAX_ROWS = 120;
 const SPLUNK_DOWNLOAD_MAX_ROWS = 1000;
 const SPLUNK_RAW_PREVIEW_MAX_FIELDS = 16;
 const SPLUNK_RAW_PREVIEW_MAX_TEXT = 720;
+const SPLUNK_XML_ARTIFACT_MAX_PER_EVENT = 4;
 const SPLUNK_METRICS_MARKER = "[METRICS]";
-const SPLUNK_RAW_IGNORED_KEYS = new Set(["trunc", "tokens", "segment_tree"]);
+const SPLUNK_RAW_IGNORED_KEYS = new Set(["trunc", "tokens", "segment_tree", "linecount", "_time", "time", "timestamp"]);
 
 const state = {
   windowId: 0,
@@ -36,6 +37,7 @@ const state = {
   resourceInputByHarvestKey: new Map(),
   splunkResultByHarvestKey: new Map(),
   splunkDownloadUrl: "",
+  splunkArtifactDownloadUrls: [],
 };
 
 const els = {
@@ -511,6 +513,22 @@ function releaseSplunkDownloadUrl() {
   state.splunkDownloadUrl = "";
 }
 
+function releaseSplunkArtifactDownloadUrls() {
+  const urls = Array.isArray(state.splunkArtifactDownloadUrls) ? state.splunkArtifactDownloadUrls : [];
+  urls.forEach((url) => {
+    const normalized = String(url || "").trim();
+    if (!normalized) {
+      return;
+    }
+    try {
+      URL.revokeObjectURL(normalized);
+    } catch {
+      // Ignore URL revoke errors.
+    }
+  });
+  state.splunkArtifactDownloadUrls = [];
+}
+
 function normalizeSplunkPlainText(value = "", maxLength = SPLUNK_RAW_PREVIEW_MAX_TEXT) {
   const compact = String(value || "")
     .replace(/\s+/g, " ")
@@ -586,6 +604,271 @@ function parseSplunkRawJson(rawValue = "") {
   return first;
 }
 
+function decodeSplunkRawPairValue(value = "") {
+  const plusDecoded = String(value || "").replace(/\+/g, " ");
+  try {
+    return decodeURIComponent(plusDecoded);
+  } catch {
+    return plusDecoded;
+  }
+}
+
+function isLikelySplunkRawPairKey(value = "") {
+  const key = String(value || "").trim();
+  if (!key || key.length > 120 || /^\d+$/.test(key)) {
+    return false;
+  }
+  return /^[A-Za-z0-9_.-]+$/.test(key);
+}
+
+function extractSplunkRawEntriesFromText(rawValue = "") {
+  const text = getSplunkRawMetricsPayload(rawValue);
+  if (!text) {
+    return [];
+  }
+  const source = String(text || "");
+  if (!source.trim()) {
+    return [];
+  }
+  const entries = [];
+  const pushEntry = (rawKey, rawValueText) => {
+    if (entries.length >= SPLUNK_RAW_PREVIEW_MAX_FIELDS) {
+      return;
+    }
+    const key = decodeSplunkRawPairValue(rawKey).trim();
+    if (!key) {
+      return;
+    }
+    const value = decodeSplunkRawPairValue(rawValueText).trim();
+    entries.push({
+      key,
+      value: String(value || ""),
+    });
+  };
+
+  const queryStylePattern = /(?:^|[&\n;|])\s*([A-Za-z0-9_.-]+)\s*=/g;
+  const queryMatches = [];
+  let queryMatch = queryStylePattern.exec(source);
+  while (queryMatch && queryMatches.length < SPLUNK_RAW_PREVIEW_MAX_FIELDS * 3) {
+    const rawKey = String(queryMatch[1] || "");
+    if (rawKey.trim()) {
+      const matchText = String(queryMatch[0] || "");
+      const keyOffsetInMatch = matchText.lastIndexOf(rawKey);
+      const keyStart = queryMatch.index + (keyOffsetInMatch >= 0 ? keyOffsetInMatch : 0);
+      queryMatches.push({
+        key: rawKey,
+        keyStart,
+        valueStart: queryStylePattern.lastIndex,
+      });
+    }
+    queryMatch = queryStylePattern.exec(source);
+  }
+  if (queryMatches.length > 0) {
+    queryMatches.forEach((entry, index) => {
+      if (entries.length >= SPLUNK_RAW_PREVIEW_MAX_FIELDS) {
+        return;
+      }
+      const valueEnd = index + 1 < queryMatches.length ? queryMatches[index + 1].keyStart : source.length;
+      const valueSlice = source
+        .slice(entry.valueStart, valueEnd)
+        .replace(/^[ \t\r\n&;|]+/, "")
+        .replace(/[ \t\r\n&;|]+$/, "");
+      pushEntry(entry.key, valueSlice);
+    });
+    if (entries.length > 0) {
+      return entries;
+    }
+  }
+
+  const loosePattern = /(?:^|[,\n;|])\s*([A-Za-z0-9_.-]+)\s*[:=]\s*("([^"\\]|\\.)*"|'([^'\\]|\\.)*'|[^,\n;|]+)/g;
+  let looseMatch = loosePattern.exec(source);
+  while (looseMatch && entries.length < SPLUNK_RAW_PREVIEW_MAX_FIELDS) {
+    pushEntry(String(looseMatch[1] || ""), String(looseMatch[2] || "").replace(/^['"]|['"]$/g, ""));
+    looseMatch = loosePattern.exec(source);
+  }
+  if (entries.length > 0) {
+    return entries;
+  }
+
+  const lines = source
+    .split(/\r?\n/)
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+  if (lines.length < 2) {
+    return entries;
+  }
+  for (let index = 0; index < lines.length && entries.length < SPLUNK_RAW_PREVIEW_MAX_FIELDS; index += 1) {
+    const key = String(lines[index] || "").trim();
+    if (!isLikelySplunkRawPairKey(key) || index + 1 >= lines.length) {
+      continue;
+    }
+    let cursor = index + 1;
+    const valueLines = [];
+    while (cursor < lines.length) {
+      const candidate = String(lines[cursor] || "").trim();
+      const nextLooksKey = isLikelySplunkRawPairKey(candidate) && cursor + 1 < lines.length;
+      if (nextLooksKey && valueLines.length > 0) {
+        break;
+      }
+      valueLines.push(candidate);
+      cursor += 1;
+    }
+    if (valueLines.length > 0) {
+      pushEntry(key, valueLines.join("\n"));
+      index = Math.max(index, cursor - 1);
+    }
+  }
+  return entries;
+}
+
+function extractLikelyXmlPayload(value = "") {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  const candidates = [
+    text.indexOf("<?xml"),
+    text.search(/<soap[0-9a-z]*:Envelope\b/i),
+    text.search(/<saml[0-9a-z]*:/i),
+    text.search(/<[A-Za-z_][A-Za-z0-9_.:-]*\b/),
+  ].filter((index) => Number.isFinite(index) && index >= 0);
+  if (candidates.length === 0) {
+    return "";
+  }
+  const start = Math.min(...candidates);
+  return text.slice(start).trim();
+}
+
+function isSplunkXmlPayload(value = "") {
+  const xmlCandidate = extractLikelyXmlPayload(value);
+  if (!xmlCandidate) {
+    return false;
+  }
+  return /^<\?xml\b/i.test(xmlCandidate) || /^<[A-Za-z_][A-Za-z0-9_.:-]*\b/.test(xmlCandidate);
+}
+
+function prettyPrintSplunkXml(value = "") {
+  const xmlCandidate = extractLikelyXmlPayload(value).replace(/>\s+</g, "><").trim();
+  if (!xmlCandidate) {
+    return "";
+  }
+
+  const rows = xmlCandidate.replace(/(>)(<)(\/*)/g, "$1\n$2$3").split("\n");
+  let indent = 0;
+  const output = [];
+  rows.forEach((line) => {
+    const normalizedLine = String(line || "").trim();
+    if (!normalizedLine) {
+      return;
+    }
+    if (/^<\/[^>]+>/.test(normalizedLine)) {
+      indent = Math.max(0, indent - 1);
+    }
+    output.push(`${"  ".repeat(indent)}${normalizedLine}`);
+    const opens = (normalizedLine.match(/<[^/!?][^>]*>/g) || []).length;
+    const closes = (normalizedLine.match(/<\/[^>]+>/g) || []).length;
+    const selfClosing = (normalizedLine.match(/<[^>]+\/>/g) || []).length;
+    const declarations = (normalizedLine.match(/<\?[^>]+\?>/g) || []).length + (normalizedLine.match(/<![^>]+>/g) || []).length;
+    const delta = opens - closes - selfClosing - declarations;
+    if (delta > 0) {
+      indent += delta;
+    }
+  });
+  return output.join("\n").trim();
+}
+
+function sanitizeSplunkFileToken(value = "", fallback = "artifact") {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+function createSplunkXmlArtifactDownload(xmlText = "", options = {}) {
+  const rawXml = String(xmlText || "").trim();
+  if (!rawXml) {
+    return null;
+  }
+  const blob = new Blob([rawXml], { type: "application/xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  if (!Array.isArray(state.splunkArtifactDownloadUrls)) {
+    state.splunkArtifactDownloadUrls = [];
+  }
+  state.splunkArtifactDownloadUrls.push(url);
+
+  const requestor = sanitizeSplunkFileToken(options.requestorId || state.requestorId, "requestor");
+  const mvpd = sanitizeSplunkFileToken(options.mvpd || state.mvpd, "mvpd");
+  const label = sanitizeSplunkFileToken(options.label || options.kind || "xml", "xml");
+  const rowPart = `row${Math.max(1, Number(options.rowIndex || 1))}`;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return {
+    url,
+    filename: `underpar_splunk_${requestor}_${mvpd}_${label}_${rowPart}_${stamp}.xml`,
+  };
+}
+
+function collectSplunkXmlArtifacts(rawValue = "") {
+  const artifacts = [];
+  const seen = new Set();
+  const pushArtifact = (label, candidateValue) => {
+    const xmlRaw = extractLikelyXmlPayload(candidateValue);
+    if (!isSplunkXmlPayload(xmlRaw)) {
+      return;
+    }
+    const key = xmlRaw.toLowerCase();
+    if (!xmlRaw || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    const xmlPretty = prettyPrintSplunkXml(xmlRaw);
+    const lowered = `${String(label || "").toLowerCase()} ${xmlRaw.toLowerCase()}`;
+    const kind = lowered.includes("saml") ? "saml" : lowered.includes("soap") || lowered.includes("envelope") ? "soap" : "xml";
+    artifacts.push({
+      label: String(label || kind).trim() || kind,
+      kind,
+      xmlRaw,
+      xmlPretty: xmlPretty || xmlRaw,
+    });
+  };
+
+  const parsed = parseSplunkRawJson(rawValue);
+  const walk = (value, path = "", depth = 0) => {
+    if (artifacts.length >= SPLUNK_XML_ARTIFACT_MAX_PER_EVENT || depth > 4 || value == null) {
+      return;
+    }
+    if (typeof value === "string") {
+      pushArtifact(path || "value", value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => {
+        walk(entry, `${path || "item"}[${index}]`, depth + 1);
+      });
+      return;
+    }
+    if (typeof value === "object") {
+      Object.entries(value).forEach(([key, entry]) => {
+        walk(entry, path ? `${path}.${key}` : key, depth + 1);
+      });
+    }
+  };
+  if (parsed != null) {
+    walk(parsed, "", 0);
+  }
+
+  extractSplunkRawEntriesFromText(rawValue).forEach((entry) => {
+    if (artifacts.length < SPLUNK_XML_ARTIFACT_MAX_PER_EVENT) {
+      pushArtifact(entry.key, entry.value);
+    }
+  });
+
+  if (artifacts.length < SPLUNK_XML_ARTIFACT_MAX_PER_EVENT) {
+    pushArtifact("payload", getSplunkRawMetricsPayload(rawValue));
+  }
+  return artifacts.slice(0, SPLUNK_XML_ARTIFACT_MAX_PER_EVENT);
+}
+
 function collectSplunkRawPairs(value = null, output = [], prefix = "", depth = 0) {
   if (output.length >= SPLUNK_RAW_PREVIEW_MAX_FIELDS || value == null) {
     return;
@@ -621,7 +904,7 @@ function collectSplunkRawPairs(value = null, output = [], prefix = "", depth = 0
     }
     output.push({
       key: keyLabel,
-      value: normalizeSplunkPlainText(valueLabel, 220),
+      value: String(valueLabel || ""),
     });
   };
 
@@ -666,51 +949,13 @@ function collectSplunkRawPairs(value = null, output = [], prefix = "", depth = 0
 }
 
 function extractSplunkRawPairsFromText(rawValue = "") {
-  const text = getSplunkRawMetricsPayload(rawValue);
-  if (!text) {
-    return [];
-  }
-  const compactText = String(text).trim();
-  const normalizedText = compactText
-    .replace(/^\?/, "")
-    .replace(/[ \t\r\n]*&[ \t\r\n]*/g, "&")
-    .replace(/[ \t\r\n]+/g, "&");
-  if (!normalizedText) {
-    return [];
-  }
-  const decodeValue = (value) => {
-    const plusDecoded = String(value || "").replace(/\+/g, " ");
-    try {
-      return decodeURIComponent(plusDecoded);
-    } catch {
-      return plusDecoded;
-    }
-  };
-  const pairs = [];
-  normalizedText.split("&").forEach((segment) => {
-    if (pairs.length >= SPLUNK_RAW_PREVIEW_MAX_FIELDS) {
-      return;
-    }
-    const chunk = String(segment || "").trim();
-    if (!chunk) {
-      return;
-    }
-    const equalIndex = chunk.indexOf("=");
-    if (equalIndex <= 0) {
-      return;
-    }
-    const key = decodeValue(chunk.slice(0, equalIndex)).trim();
-    if (!key || shouldIgnoreSplunkRawKey(key)) {
-      return;
-    }
-    const valueRaw = decodeValue(chunk.slice(equalIndex + 1)).trim();
-    const normalizedKey = key;
-    pairs.push({
-      key: normalizedKey,
-      value: normalizeSplunkPlainText(valueRaw.replace(/^['"]|['"]$/g, ""), 220),
-    });
-  });
-  return pairs;
+  return extractSplunkRawEntriesFromText(rawValue)
+    .filter((entry) => !shouldIgnoreSplunkRawKey(entry?.key))
+    .slice(0, SPLUNK_RAW_PREVIEW_MAX_FIELDS)
+    .map((entry) => ({
+      key: String(entry?.key || "").trim(),
+      value: String(entry?.value || ""),
+    }));
 }
 
 function extractSplunkRawPairsFromLooseText(rawValue = "") {
@@ -735,7 +980,33 @@ function extractSplunkRawPairsFromLooseText(rawValue = "") {
   return pairs;
 }
 
-function renderSplunkRawMarkup(rawValue = "") {
+function formatSplunkRawValuePreview(value = "") {
+  const rawText = String(value || "").trim();
+  if (!rawText) {
+    return "";
+  }
+  if (!isSplunkXmlPayload(rawText)) {
+    return normalizeSplunkPlainText(rawText, 360);
+  }
+  const xmlPayload = extractLikelyXmlPayload(rawText);
+  const xmlIndex = xmlPayload ? rawText.indexOf(xmlPayload) : -1;
+  const prefix = xmlIndex > 0 ? normalizeSplunkPlainText(rawText.slice(0, xmlIndex), 180) : "";
+  return prefix ? `${prefix} XML payload formatted below.` : "XML payload formatted below.";
+}
+
+function getSplunkXmlArtifactLabel(artifact = null, index = 0) {
+  const kind = String(artifact?.kind || "").trim().toLowerCase();
+  const suffix = index > 0 ? ` #${index + 1}` : "";
+  if (kind === "saml") {
+    return `SAML Object${suffix}`;
+  }
+  if (kind === "soap") {
+    return `SOAP XML${suffix}`;
+  }
+  return `XML Payload${suffix}`;
+}
+
+function renderSplunkRawMarkup(rawValue = "", options = {}) {
   const metricsPayload = getSplunkRawMetricsPayload(rawValue);
   const parsed = parseSplunkRawJson(metricsPayload);
   const pairRows = [];
@@ -764,13 +1035,14 @@ function renderSplunkRawMarkup(rawValue = "") {
       }
     }
   }
-  if (pairRows.length > 0) {
-    return `<ul class="bobtools-splunk-raw-pairs">${pairRows
+  const pairsMarkup =
+    pairRows.length > 0
+      ? `<ul class="bobtools-splunk-raw-pairs">${pairRows
       .slice(0, SPLUNK_RAW_PREVIEW_MAX_FIELDS)
       .map(
         (pair) => {
           const keyText = String(pair?.key || "").trim();
-          const valueText = String(pair?.value || "");
+          const valueText = formatSplunkRawValuePreview(pair?.value || "");
           return keyText
             ? `<li class="bobtools-splunk-raw-pair"><span class="bobtools-splunk-raw-key">${escapeHtml(
                 keyText
@@ -780,7 +1052,37 @@ function renderSplunkRawMarkup(rawValue = "") {
               )}</span></li>`;
         }
       )
-      .join("")}</ul>`;
+      .join("")}</ul>`
+      : "";
+  const artifacts = collectSplunkXmlArtifacts(metricsPayload);
+  const artifactMarkup =
+    artifacts.length > 0
+      ? `<div class="bobtools-splunk-xml-list">${artifacts
+          .map((artifact, index) => {
+            const artifactLabel = getSplunkXmlArtifactLabel(artifact, index);
+            const download = createSplunkXmlArtifactDownload(artifact?.xmlRaw, {
+              requestorId: options?.requestorId || state.requestorId,
+              mvpd: options?.mvpd || state.mvpd,
+              rowIndex: Number(options?.rowIndex || 1),
+              label: `${String(artifact?.kind || "xml")}-${index + 1}`,
+            });
+            const downloadMarkup = download?.url
+              ? `<a class="bobtools-splunk-xml-download" href="${escapeHtml(download.url)}" download="${escapeHtml(
+                  download.filename
+                )}">Download ${escapeHtml(artifactLabel)}</a>`
+              : "";
+            return `<section class="bobtools-splunk-xml-artifact">
+              <div class="bobtools-splunk-xml-head">
+                <span class="bobtools-splunk-xml-title">${escapeHtml(artifactLabel)}</span>
+                ${downloadMarkup}
+              </div>
+              <pre class="bobtools-splunk-xml-pre">${escapeHtml(String(artifact?.xmlPretty || artifact?.xmlRaw || ""))}</pre>
+            </section>`;
+          })
+          .join("")}</div>`
+      : "";
+  if (pairsMarkup || artifactMarkup) {
+    return `${pairsMarkup}${artifactMarkup}`;
   }
   const normalizedText = normalizeSplunkPlainText(metricsPayload, SPLUNK_RAW_PREVIEW_MAX_TEXT);
   return normalizedText
@@ -797,7 +1099,7 @@ function buildSplunkCsvContent(rows = []) {
   const lines = ["_time,_raw"];
   normalizedRows.forEach((row) => {
     const timeValue = firstNonEmptyString([row?._time, row?.time, row?.timestamp]);
-    const rawValue = firstNonEmptyString([row?._raw, row?.raw]);
+    const rawValue = firstNonEmptyString([row?._raw, row?.raw, row?.value, row?.message]);
     lines.push(`${buildSplunkCsvCell(timeValue)},${buildSplunkCsvCell(rawValue)}`);
   });
   return lines.join("\r\n");
@@ -832,6 +1134,7 @@ function renderSplunkPanel(profile = null) {
   if (!els.splunkCard || !els.splunkCardBody || !els.splunkSummary || !els.splunkStatus) {
     return;
   }
+  releaseSplunkArtifactDownloadUrls();
 
   if (!profile) {
     els.splunkSummary.innerHTML = '<p class="bobtools-splunk-empty">Select an MVPD login profile, then click SPLUNK to load RCA events.</p>';
@@ -907,16 +1210,21 @@ function renderSplunkPanel(profile = null) {
     rows.length === 0
       ? '<p class="bobtools-splunk-empty">No Splunk events were returned for this upstreamUserID.</p>'
       : `<div class="bobtools-splunk-events">${rows
-          .map((row) => {
+          .map((row, index) => {
             const rowTime = firstNonEmptyString([row?._time, row?.time, row?.timestamp, "N/A"]);
-            const rowRaw = firstNonEmptyString([row?._raw, row?.raw]);
+            const rowRaw = firstNonEmptyString([row?._raw, row?.raw, row?.value, row?.message]);
+            const rowPayload = rowRaw || JSON.stringify(row || {});
             return `
               <article class="bobtools-splunk-event">
                 <div class="bobtools-splunk-field bobtools-splunk-field--time">
                   <span class="bobtools-splunk-time">${escapeHtml(formatSplunkTimeLabel(rowTime))}</span>
                 </div>
                 <div class="bobtools-splunk-field bobtools-splunk-field--raw">
-                  <div class="bobtools-splunk-raw-block">${renderSplunkRawMarkup(rowRaw)}</div>
+                  <div class="bobtools-splunk-raw-block">${renderSplunkRawMarkup(rowPayload, {
+                    rowIndex: index + 1,
+                    requestorId: String(profile?.requestorId || state.requestorId || "").trim(),
+                    mvpd: String(profile?.mvpd || state.mvpd || "").trim(),
+                  })}</div>
                 </div>
               </article>
             `;
@@ -1292,6 +1600,8 @@ function handleWorkspaceEvent(eventName, payload = {}) {
     state.resultByHarvestActionKey.clear();
     state.resourceInputByHarvestKey.clear();
     state.splunkResultByHarvestKey.clear();
+    releaseSplunkDownloadUrl();
+    releaseSplunkArtifactDownloadUrls();
     render();
   }
 }
@@ -1299,6 +1609,7 @@ function handleWorkspaceEvent(eventName, payload = {}) {
 function registerEventHandlers() {
   window.addEventListener("beforeunload", () => {
     releaseSplunkDownloadUrl();
+    releaseSplunkArtifactDownloadUrls();
   });
 
   if (els.profileList) {

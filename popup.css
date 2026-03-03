@@ -1873,25 +1873,22 @@ select:disabled {
 }
 
 .rest-v2-bobtools-open-btn {
-  width: 100%;
-  border: 1px solid rgba(65, 88, 116, 0.52);
-  border-radius: 12px;
-  background: linear-gradient(180deg, #eef2f8 0%, #dde5f1 100%);
-  color: #24364c;
-  display: grid;
-  grid-template-columns: 32px 1fr;
+  width: auto;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  justify-content: center;
+  padding: 0;
+  line-height: 0;
   cursor: pointer;
+  align-self: flex-start;
 }
 
 .rest-v2-bobtools-open-btn:hover:not(:disabled) {
-  border-color: rgba(65, 88, 116, 0.86);
   box-shadow: 0 0 0 2px rgba(65, 88, 116, 0.16);
+  background: rgba(221, 229, 241, 0.52);
 }
 
 .rest-v2-bobtools-open-btn:disabled {
@@ -1899,28 +1896,11 @@ select:disabled {
   cursor: default;
 }
 
-.rest-v2-bobtools-open-icon-wrap {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid rgba(65, 88, 116, 0.22);
-  background: rgba(255, 255, 255, 0.72);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .rest-v2-bobtools-open-icon {
-  width: 22px;
-  height: 22px;
+  width: 54px;
+  height: 54px;
   display: block;
-}
-
-.rest-v2-bobtools-open-copy {
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  object-fit: contain;
 }
 
 .rest-v2-tool-head {

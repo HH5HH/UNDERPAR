@@ -7077,6 +7077,32 @@ function refreshRestV2LoginPanels() {
   refreshBobtoolsWorkspaceTools();
 }
 
+async function maybeAutoStopRestV2RecordingForSelectionChange(nextSelection = {}, options = {}) {
+  if (state.restV2Stopping || state.restV2RecordingActive !== true || !String(state.restV2DebugFlowId || "").trim()) {
+    return false;
+  }
+  const recordingContext =
+    state.restV2RecordingContext && typeof state.restV2RecordingContext === "object" ? state.restV2RecordingContext : null;
+  if (!recordingContext) {
+    return false;
+  }
+
+  const currentRequestorId = String(recordingContext.requestorId || recordingContext.serviceProviderId || "").trim().toLowerCase();
+  const currentMvpd = String(recordingContext.mvpd || "").trim().toLowerCase();
+  const nextRequestorId = String(nextSelection.requestorId || "").trim().toLowerCase();
+  const nextMvpd = String(nextSelection.mvpdId || "").trim().toLowerCase();
+  const selectionChanged = currentRequestorId !== nextRequestorId || currentMvpd !== nextMvpd;
+  if (!selectionChanged) {
+    return false;
+  }
+
+  const selectionReason = String(options.reason || "selection change").trim() || "selection change";
+  setStatus(`Detected ${selectionReason} while REST V2 recording was active. Auto-stopping previous capture...`, "info");
+  const restSection = document.querySelector(".premium-service-section.service-rest-v2");
+  await stopRestV2MvpdRecording(restSection || null, resolveSelectedProgrammer(), null);
+  return true;
+}
+
 function waitForDelay(durationMs) {
   return new Promise((resolve) => {
     setTimeout(resolve, Math.max(0, Number(durationMs) || 0));
@@ -23545,16 +23571,13 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
             aria-label="Open BOBTOOLS Workspace"
             title="Open BOBTOOLS Workspace"
           >
-            <span class="rest-v2-bobtools-open-icon-wrap" aria-hidden="true">
-              <img
-                class="rest-v2-bobtools-open-icon"
-                src="${escapeHtml(BOBTOOLS_INLINE_ICON_PATH)}"
-                alt=""
-                loading="lazy"
-                decoding="async"
-              />
-            </span>
-            <span class="rest-v2-bobtools-open-copy">Open BOBTOOLS Workspace</span>
+            <img
+              class="rest-v2-bobtools-open-icon"
+              src="${escapeHtml(BOBTOOLS_INLINE_ICON_PATH)}"
+              alt=""
+              loading="lazy"
+              decoding="async"
+            />
           </button>
         </section>
         `
@@ -36644,8 +36667,23 @@ function registerEventHandlers() {
     void refreshProgrammerPanels({ controllerReason: "media-company-change" });
   });
 
-  els.requestorSelect.addEventListener("change", (event) => {
-    state.selectedRequestorId = String(event.target.value || "");
+  els.requestorSelect.addEventListener("change", async (event) => {
+    const nextRequestorId = String(event.target.value || "").trim();
+    try {
+      await maybeAutoStopRestV2RecordingForSelectionChange(
+        {
+          requestorId: nextRequestorId,
+          mvpdId: "",
+        },
+        {
+          reason: "Requestor change",
+        }
+      );
+    } catch (error) {
+      setStatus(`Auto-stop before Requestor switch failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+
+    state.selectedRequestorId = nextRequestorId;
     state.selectedMvpdId = "";
     emitGlobalSelectorChangeLog("Requestor ID", state.selectedRequestorId, state.selectedRequestorId);
     void refreshProgrammerPanels();
@@ -36674,8 +36712,24 @@ function registerEventHandlers() {
     });
   });
 
-  els.mvpdSelect.addEventListener("change", (event) => {
-    state.selectedMvpdId = String(event.target.value || "");
+  els.mvpdSelect.addEventListener("change", async (event) => {
+    const nextMvpdId = String(event.target.value || "");
+    const nextRequestorId = String(state.selectedRequestorId || "").trim();
+    try {
+      await maybeAutoStopRestV2RecordingForSelectionChange(
+        {
+          requestorId: nextRequestorId,
+          mvpdId: nextMvpdId,
+        },
+        {
+          reason: "MVPD change",
+        }
+      );
+    } catch (error) {
+      setStatus(`Auto-stop before MVPD switch failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+
+    state.selectedMvpdId = nextMvpdId;
     const mvpdSelectionLabel = state.selectedMvpdId
       ? String(getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), state.selectedMvpdId) || "")
       : "";

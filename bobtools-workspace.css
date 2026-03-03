@@ -628,7 +628,7 @@ body {
 
 .bobtools-splunk-raw-pair {
   display: grid;
-  grid-template-columns: minmax(124px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(108px, 176px) minmax(0, 1fr);
   gap: 8px;
   margin: 0;
   align-items: start;
@@ -664,8 +664,9 @@ body {
   color: #243d5d;
   font-size: 11px;
   line-height: 1.35;
-  word-break: break-word;
-  overflow-wrap: break-word;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  writing-mode: horizontal-tb;
   white-space: normal;
   display: block;
   min-width: 0;
@@ -683,6 +684,77 @@ body {
   color: #243d5d;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.bobtools-splunk-xml-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bobtools-splunk-xml-artifact {
+  border: 1px solid #d5dfed;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.bobtools-splunk-xml-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border-bottom: 1px solid #dce5f1;
+  background: #eef4fb;
+}
+
+.bobtools-splunk-xml-title {
+  color: #365373;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.bobtools-splunk-xml-download {
+  color: #2f5f95;
+  text-decoration: none;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.bobtools-splunk-xml-download:hover,
+.bobtools-splunk-xml-download:focus-visible {
+  color: #1f466f;
+  text-decoration: underline;
+}
+
+.bobtools-splunk-xml-download:focus-visible {
+  outline: 2px solid rgba(63, 118, 178, 0.34);
+  outline-offset: 2px;
+}
+
+.bobtools-splunk-xml-pre {
+  margin: 0;
+  padding: 8px;
+  max-height: 260px;
+  overflow: auto;
+  background: #fff;
+  color: #243d5d;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+@media (max-width: 760px) {
+  .bobtools-splunk-raw-pair {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
 }
 
 .bobtools-splunk-table-wrap {
