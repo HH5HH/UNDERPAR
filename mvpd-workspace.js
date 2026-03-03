@@ -35,6 +35,7 @@ const state = {
   resolvedIntegration: "",
   integrationRef: "",
   integrationRecordUrl: "",
+  expectedSelectionKey: "",
   loading: false,
   snapshot: null,
   cmCardsById: new Map(),
@@ -256,7 +257,19 @@ function resolvePayloadMvpdLabel(payload = null) {
   return firstNonEmptyString([payload?.mvpdLabel, labels[0], payload?.snapshot?.mvpdLabel]);
 }
 
+function getPayloadSelectionKey(payload = null) {
+  const programmerId = String(payload?.programmerId || payload?.snapshot?.programmerId || "").trim();
+  const requestorId = String(payload?.requestorId || payload?.snapshot?.requestorId || "").trim();
+  const mvpdId = String(payload?.mvpdId || payload?.snapshot?.mvpdId || "").trim();
+  return getSelectionKey(programmerId, requestorId, mvpdId);
+}
+
 function payloadMatchesCurrentSelection(payload = null) {
+  const expectedSelectionKey = String(state.expectedSelectionKey || "").trim();
+  const payloadSelectionKey = getPayloadSelectionKey(payload);
+  if (expectedSelectionKey && payloadSelectionKey) {
+    return expectedSelectionKey === payloadSelectionKey;
+  }
   const activeProgrammer = String(state.programmerId || "").trim();
   const activeRequestor = getSelectedRequestorId();
   const activeMvpd = getSelectedMvpdId();
@@ -270,7 +283,7 @@ function payloadMatchesCurrentSelection(payload = null) {
     return true;
   }
   if (!activeRequestor || !activeMvpd) {
-    return false;
+    return true;
   }
   return activeRequestor === payloadRequestor && activeMvpd === payloadMvpd;
 }
@@ -1083,7 +1096,8 @@ function applyControllerState(payload) {
   state.integrationRef = String(payload?.integrationRef || "").trim();
   state.integrationRecordUrl = sanitizeHttpUrl(payload?.integrationRecordUrl || "");
   const nextSelectionKey = getSelectionKey();
-  if (previousSelectionKey && previousSelectionKey !== nextSelectionKey) {
+  state.expectedSelectionKey = nextSelectionKey;
+  if (previousSelectionKey !== nextSelectionKey) {
     state.loading = false;
     clearWorkspaceCards();
   }
@@ -1173,8 +1187,26 @@ function handleWorkspaceEvent(eventName, payload) {
     return;
   }
   if (event === "workspace-clear") {
+    const payloadProgrammerId = String(payload?.programmerId || "").trim();
+    const payloadRequestorId = String(payload?.requestorId || "").trim();
+    const payloadMvpdId = String(payload?.mvpdId || "").trim();
+    if (payloadProgrammerId) {
+      state.programmerId = payloadProgrammerId;
+    }
+    if (payloadRequestorId) {
+      state.requestorIds = [payloadRequestorId];
+    }
+    if (payloadMvpdId) {
+      state.mvpdIds = [payloadMvpdId];
+    }
+    const payloadMvpdLabel = resolvePayloadMvpdLabel(payload);
+    if (payloadMvpdLabel) {
+      state.mvpdLabel = payloadMvpdLabel;
+    }
+    state.expectedSelectionKey = getSelectionKey();
     state.loading = false;
     clearWorkspaceCards();
+    updateControllerBanner();
     setStatus("");
   }
 }

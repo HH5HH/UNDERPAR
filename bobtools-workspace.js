@@ -233,7 +233,9 @@ function syncCardCollapseState() {
     if (card) {
       card.classList.toggle("is-collapsed", collapsed);
     }
-    const body = card?.querySelector(`[data-card-body="${cardKey}"]`);
+    const body =
+      card?.querySelector(`[data-card-body="${cardKey}"]`) ||
+      document.querySelector(`.bobtools-card-body[data-card-body="${cardKey}"]`);
     if (body) {
       body.hidden = collapsed;
     }
@@ -725,10 +727,17 @@ function renderSplunkRawMarkup(rawValue = "") {
     return `<ul class="bobtools-splunk-raw-pairs">${pairRows
       .slice(0, SPLUNK_RAW_PREVIEW_MAX_FIELDS)
       .map(
-        (pair) =>
-          `<li class="bobtools-splunk-raw-pair"><span class="bobtools-splunk-raw-value">${escapeHtml(
-            String(pair?.key || "").trim() ? `${String(pair?.key || "").trim()}=${String(pair?.value || "")}` : String(pair?.value || "")
-          )}</span></li>`
+        (pair) => {
+          const keyText = String(pair?.key || "").trim();
+          const valueText = String(pair?.value || "");
+          return keyText
+            ? `<li class="bobtools-splunk-raw-pair"><span class="bobtools-splunk-raw-key">${escapeHtml(
+                keyText
+              )}</span><span class="bobtools-splunk-raw-value">${escapeHtml(valueText)}</span></li>`
+            : `<li class="bobtools-splunk-raw-pair bobtools-splunk-raw-pair-value-only"><span class="bobtools-splunk-raw-value">${escapeHtml(
+                valueText
+              )}</span></li>`;
+        }
       )
       .join("")}</ul>`;
   }
@@ -867,7 +876,6 @@ function renderSplunkPanel(profile = null) {
                   <span class="bobtools-splunk-time">${escapeHtml(formatSplunkTimeLabel(rowTime))}</span>
                 </div>
                 <div class="bobtools-splunk-field bobtools-splunk-field--raw">
-                  <span class="bobtools-splunk-field-label">_raw</span>
                   <div class="bobtools-splunk-raw-block">${renderSplunkRawMarkup(rowRaw)}</div>
                 </div>
               </article>
@@ -1294,17 +1302,34 @@ function registerEventHandlers() {
     });
   }
 
-  const cardToggles = document.querySelectorAll("[data-card-toggle]");
-  cardToggles.forEach((toggle) => {
-    toggle.addEventListener("click", (event) => {
-      event.preventDefault();
-      const cardKey = String(toggle.getAttribute("data-card-toggle") || "").trim();
-      if (!cardKey) {
-        return;
-      }
-      state.collapsedCards[cardKey] = state.collapsedCards?.[cardKey] !== true;
-      syncCardCollapseState();
-    });
+  const toggleCardCollapse = (toggleElement) => {
+    const cardKey = String(toggleElement?.getAttribute("data-card-toggle") || "").trim();
+    if (!cardKey) {
+      return;
+    }
+    state.collapsedCards[cardKey] = state.collapsedCards?.[cardKey] !== true;
+    syncCardCollapseState();
+  };
+
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("[data-card-toggle]") : null;
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    toggleCardCollapse(target);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("[data-card-toggle]") : null;
+    if (!target) {
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    toggleCardCollapse(target);
   });
 
   if (els.refreshButton) {

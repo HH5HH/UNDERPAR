@@ -18,6 +18,7 @@ const CM_FETCH_REQUEST_TYPE = "underpar:cmFetch";
 const LEGACY_CM_FETCH_REQUEST_TYPE = "mincloudlogin:cmFetch";
 const SPLUNK_FETCH_REQUEST_TYPE = "underpar:splunkFetch";
 const LEGACY_SPLUNK_FETCH_REQUEST_TYPE = "mincloudlogin:splunkFetch";
+const CONSOLE_LOG_RELAY_REQUEST_TYPE = "underpar:consoleLog";
 const CONSOLE_AUTH_CALLBACK_PREFIX = "https://console.auth.adobe.com/oauth2/callback";
 
 const ADOBE_CONSOLE_BASE = "https://console.auth.adobe.com";
@@ -155,6 +156,8 @@ const SPLUNK_SID_WAIT_TIMEOUT_MS = 15000;
 const SPLUNK_SID_WAIT_INTERVAL_MS = 450;
 const SPLUNK_JOB_POLL_TIMEOUT_MS = 15000;
 const SPLUNK_JOB_POLL_INTERVAL_MS = 450;
+const SPLUNK_AUTH_WAIT_TIMEOUT_MS = 120000;
+const SPLUNK_AUTH_WAIT_INTERVAL_MS = 1200;
 const REST_V2_SPLUNK_INLINE_MAX_ROWS = 80;
 const REST_V2_SPLUNK_INLINE_MAX_COLUMNS = 14;
 const ESM_SOURCE_UTC_OFFSET_MINUTES = -8 * 60;
@@ -164,7 +167,10 @@ const CM_REPORTS_BASE_URL = "https://cm-reports.adobeprimetime.com";
 const CM_DEFAULT_TENANT_ORG_HINT = "adobe";
 const CM_TENANT_ENDPOINT_CANDIDATES = [
   `${CM_CONFIG_BASE_URL}/core/tenants?orgId=${CM_DEFAULT_TENANT_ORG_HINT}`,
-  `${CM_CONFIG_BASE_URL}/core/tenants?orgId=adobepass`,
+];
+const CM_TENANT_DEBUG_EXPORT_ENABLED = false;
+const CM_TENANT_DEBUG_EXPORT_URLS = [
+  `${CM_CONFIG_BASE_URL}/core/tenants?orgId=adobe`,
 ];
 const CM_TENANT_DETAIL_PATH_TEMPLATES = [
   `/core/tenants?orgId=${CM_DEFAULT_TENANT_ORG_HINT}`,
@@ -647,7 +653,8 @@ const CM_IMS_FORCE_REFRESH_SKEW_MS = 30 * 1000;
 const CM_BOOTSTRAP_PARALLELISM = 6;
 const CM_BOOTSTRAP_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const CM_EMPTY_MATCH_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
-const CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v1";
+const CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v2";
+const LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v1";
 const CM_V2_OPERATION_DEFINITIONS = [
   {
     key: "metadata",
@@ -805,6 +812,9 @@ const state = {
   cmTenantsCatalogPromise: null,
   cmTenantsCatalogHydrated: false,
   cmTenantsCatalogHydrationPromise: null,
+  cmTenantsCatalogRuntimeFresh: false,
+  cmTenantsCatalogFetchAttempted: false,
+  cmTenantDebugExportedByUrl: new Set(),
   cmConsoleBootstrapSummary: null,
   cmConsoleBootstrapPromise: null,
   cmAuthBootstrapPromise: null,
@@ -900,6 +910,7 @@ const els = {
   avatarMenuEmail: document.getElementById("avatar-menu-email"),
   avatarMenuOrg: document.getElementById("avatar-menu-org"),
   avatarMenuDetails: document.getElementById("avatar-menu-details"),
+  avatarMenuSystem: document.getElementById("avatar-menu-system"),
   signOutBtn: document.getElementById("sign-out-btn"),
   mediaCompanySelect: document.getElementById("media-company-select"),
   requestorSelect: document.getElementById("requestor-select"),
@@ -920,6 +931,68 @@ function log(message, details = null) {
     return;
   }
   console.log(`[UnderPAR] ${message}`, details);
+}
+
+function relayDecisionLogToBackground(message, details = null) {
+  const payload = {
+    type: CONSOLE_LOG_RELAY_REQUEST_TYPE,
+    message: String(message || ""),
+    details: details && typeof details === "object" ? details : details == null ? null : { value: String(details) },
+    origin: "sidepanel",
+    at: Date.now(),
+  };
+  void sendRuntimeMessageSafe(payload).catch(() => {
+    // Best-effort mirror only.
+  });
+}
+
+function logDecisionPoint(message, details = null) {
+  log(message, details);
+  relayDecisionLogToBackground(message, details);
+}
+
+function emitGlobalSelectorChangeLog(menuName, value, label = "") {
+  const resolvedMenu = String(menuName || "Unknown").trim() || "Unknown";
+  const resolvedValue = String(value || "").trim();
+  const resolvedLabel = String(label || "").trim();
+  const displayValue = resolvedLabel || resolvedValue || "(none)";
+  logDecisionPoint(`Global selector changed | ${resolvedMenu} = ${displayValue}`, {
+    menu: resolvedMenu,
+    value: resolvedValue,
+    label: resolvedLabel,
+  });
+}
+
+function emitPremiumServiceDecisionLogs(programmer, services = null) {
+  if (!programmer) {
+    return;
+  }
+
+  const mediaCompanyLabel = String(
+    firstNonEmptyString([programmer.mediaCompanyName, programmer.programmerName, programmer.programmerId]) || ""
+  ).trim();
+  if (!mediaCompanyLabel) {
+    return;
+  }
+
+  const hasRestV2 = Boolean(services?.restV2);
+  const hasEsm = Boolean(services?.esm);
+  const hasDegradation = Boolean(services?.degradation);
+  const hasCm = shouldShowCmService(services?.cm);
+  const hasMvpdCm = shouldShowCmService(services?.cmMvpd);
+
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  const selectedMvpdId = String(state.selectedMvpdId || "").trim();
+  const selectedMvpdLabel = selectedMvpdId
+    ? String(getRestV2MvpdPickerLabel(selectedRequestorId, selectedMvpdId) || selectedMvpdId).trim()
+    : "";
+  const mvpdDecisionLabel = selectedMvpdLabel || selectedMvpdId || "MVPD not selected";
+
+  logDecisionPoint(`Decision | ${mediaCompanyLabel} has REST V2 = ${hasRestV2 ? "YES" : "NO"}`);
+  logDecisionPoint(`Decision | ${mediaCompanyLabel} has ESM = ${hasEsm ? "YES" : "NO"}`);
+  logDecisionPoint(`Decision | ${mediaCompanyLabel} has DEGRADATION = ${hasDegradation ? "YES" : "NO"}`);
+  logDecisionPoint(`Decision | ${mediaCompanyLabel} has Concurency Monitorring = ${hasCm ? "YES" : "NO"}`);
+  logDecisionPoint(`Decision | ${mvpdDecisionLabel} has Concurency Monitorring = ${hasMvpdCm ? "YES" : "NO"}`);
 }
 
 function setStatus(message = "", type = "info") {
@@ -4650,7 +4723,7 @@ async function waitForSplunkSidFromSearchTab(queryContext = null, options = {}) 
         tabId: Number(currentTab?.id || 0),
         windowId: Number(currentTab?.windowId || 0),
         url: String(currentTab?.url || ""),
-        error: "Splunk login screen is active. Sign in and re-run SPLUNK.",
+        error: "Splunk login screen is active. Complete login/MFA and wait for UnderPAR to continue.",
       };
     }
     activeTabId = Number(currentTab?.id || activeTabId);
@@ -4660,7 +4733,7 @@ async function waitForSplunkSidFromSearchTab(queryContext = null, options = {}) 
     ok: false,
     authRequired: false,
     sid: "",
-    error: "Splunk did not produce a search SID in time. Refresh the Splunk tab and click SPLUNK again.",
+    error: "Splunk did not produce a search SID in time. Keep the Splunk tab active until login and search complete.",
   };
 }
 
@@ -4873,7 +4946,7 @@ function buildSplunkAuthErrorReport(queryContext = null, networkEvents = [], opt
     statusText: String(options.statusText || "").trim(),
     error:
       String(options.error || "").trim() ||
-      "Splunk session is not active. Sign in or refresh auth in the opened Splunk tab, then click SPLUNK again.",
+      "Splunk session is not active. Sign in or refresh auth in the opened Splunk tab and wait for UnderPAR to complete.",
     authRequired: options.authRequired !== false,
     networkEvents: Array.isArray(networkEvents) ? networkEvents : [],
   };
@@ -4945,7 +5018,7 @@ async function fetchSplunkReportBySid(queryContext = null, sid = "", networkEven
       if (jobMeta.authRequired) {
         return {
           ok: false,
-          error: "Splunk session is not active. Sign in or refresh auth in the opened Splunk tab, then click SPLUNK again.",
+          error: "Splunk session is not active. Sign in or refresh auth in the opened Splunk tab and wait for UnderPAR to complete.",
           authRequired: true,
           report: buildSplunkAuthErrorReport(queryContext, networkEvents, {
             sid: normalizedSid,
@@ -5007,7 +5080,7 @@ async function fetchSplunkReportBySid(queryContext = null, sid = "", networkEven
     if (eventsResponse.authRequired) {
       return {
         ok: false,
-        error: "Splunk session is not active. Sign in or refresh auth in the opened Splunk tab, then click SPLUNK again.",
+        error: "Splunk session is not active. Sign in or refresh auth in the opened Splunk tab and wait for UnderPAR to complete.",
         authRequired: true,
         report: buildSplunkAuthErrorReport(queryContext, networkEvents, {
           sid: normalizedSid,
@@ -5402,6 +5475,86 @@ async function checkSplunkSessionActive(queryContext = null, networkEvents = [],
   };
 }
 
+async function ensureSplunkSessionReady(queryContext = null, networkEvents = [], options = {}) {
+  let targetWindowId = Number(options.targetWindowId || 0);
+  let splunkTab = options?.splunkTab && typeof options.splunkTab === "object" ? options.splunkTab : null;
+  const shouldForceLogin = options.forceLoginOnAuthFailure !== false;
+  const timeoutMs = Math.max(2000, Number(options.timeoutMs || SPLUNK_AUTH_WAIT_TIMEOUT_MS));
+  const pollIntervalMs = Math.max(300, Number(options.pollIntervalMs || SPLUNK_AUTH_WAIT_INTERVAL_MS));
+
+  if (!splunkTab && shouldForceLogin) {
+    try {
+      splunkTab = await openSplunkSearchTabForLogin({
+        activate: true,
+        windowId: targetWindowId || undefined,
+        queryContext,
+      });
+    } catch {
+      splunkTab = null;
+    }
+  }
+  if (Number(splunkTab?.windowId || 0) > 0) {
+    targetWindowId = Number(splunkTab.windowId);
+  }
+
+  let activeTabId = Number(splunkTab?.tabId || splunkTab?.id || 0);
+  if (!activeTabId && targetWindowId > 0) {
+    try {
+      const foundTab = await findSplunkSearchTab(targetWindowId);
+      if (foundTab) {
+        splunkTab = foundTab;
+        activeTabId = Number(foundTab?.id || 0);
+      }
+    } catch {
+      activeTabId = 0;
+    }
+  }
+
+  const startedAt = Date.now();
+  let lastSession = null;
+  do {
+    const relayOptions = {
+      tabId: activeTabId,
+      allowTabRelay: true,
+    };
+    const session = await checkSplunkSessionActive(queryContext, networkEvents, relayOptions);
+    lastSession = session;
+    if (session.active) {
+      return {
+        ok: true,
+        session,
+        splunkTab,
+        targetWindowId,
+      };
+    }
+
+    if (Date.now() - startedAt >= timeoutMs) {
+      break;
+    }
+    await waitForDelay(pollIntervalMs);
+
+    if (targetWindowId > 0) {
+      try {
+        const foundTab = await findSplunkSearchTab(targetWindowId);
+        if (foundTab) {
+          splunkTab = foundTab;
+          activeTabId = Number(foundTab?.id || activeTabId || 0);
+        }
+      } catch {
+        // Keep existing tab reference while polling.
+      }
+    }
+  } while (Date.now() - startedAt <= timeoutMs);
+
+  return {
+    ok: false,
+    session: lastSession,
+    splunkTab,
+    targetWindowId,
+    error: "Splunk login is still pending. Complete login/MFA in the Splunk tab and wait for query auto-retry.",
+  };
+}
+
 function buildSplunkSearchRequestContext(rawContext = null) {
   const context = rawContext && typeof rawContext === "object" ? rawContext : {};
   const programmerId = String(context.programmerId || "").trim();
@@ -5498,24 +5651,35 @@ async function runSplunkSearchForQueryContext(rawQueryContext = null, options = 
 
   try {
     let splunkTab = null;
-    try {
-      splunkTab = await openSplunkSearchTabForLogin({
-        activate: true,
-        windowId: targetWindowId || undefined,
-        queryContext,
-      });
-      if (Number(splunkTab?.windowId || 0) > 0) {
-        targetWindowId = Number(splunkTab.windowId);
-      }
-    } catch {
-      splunkTab = null;
+    const sessionReady = await ensureSplunkSessionReady(queryContext, networkEvents, {
+      targetWindowId,
+      forceLoginOnAuthFailure,
+      timeoutMs: SPLUNK_AUTH_WAIT_TIMEOUT_MS,
+      pollIntervalMs: SPLUNK_AUTH_WAIT_INTERVAL_MS,
+    });
+    if (Number(sessionReady?.targetWindowId || 0) > 0) {
+      targetWindowId = Number(sessionReady.targetWindowId);
     }
+    splunkTab = sessionReady?.splunkTab || null;
     const splunkTabId = Number(splunkTab?.tabId || splunkTab?.id || 0);
     const relayOptions = {
       tabId: splunkTabId,
       allowTabRelay: true,
     };
-    const session = await checkSplunkSessionActive(queryContext, networkEvents, relayOptions);
+    const session = sessionReady?.session || (await checkSplunkSessionActive(queryContext, networkEvents, relayOptions));
+    if (!sessionReady?.ok || !session?.active) {
+      return finalizeReport(
+        buildSplunkAuthErrorReport(queryContext, networkEvents, {
+          endpointUrl: `${SPLUNK_SPLUNKD_BASE}/services/authentication/current-context`,
+          status: Number(session?.probe?.status || 0),
+          statusText: String(session?.probe?.statusText || "").trim(),
+          error: firstNonEmptyString([
+            sessionReady?.error,
+            "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+          ]),
+        })
+      );
+    }
 
     const createBody = new URLSearchParams({
       search: queryContext.search,
@@ -5533,63 +5697,111 @@ async function runSplunkSearchForQueryContext(rawQueryContext = null, options = 
     let authStatusText = String(session?.probe?.statusText || "").trim();
     let lastCreateError = "";
 
-    for (const createUrl of createCandidates) {
-      const response = await runSplunkRelayRequest(
-        createUrl,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            Accept: "*/*",
-            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
+    const runCreatePass = async (phaseName = "create-job") => {
+      let passSawAuthRequired = false;
+      let passAuthEndpointUrl = createCandidates[0];
+      let passAuthStatus = Number(session?.probe?.status || 0);
+      let passAuthStatusText = String(session?.probe?.statusText || "").trim();
+      let passLastError = "";
+
+      for (const createUrl of createCandidates) {
+        const response = await runSplunkRelayRequest(
+          createUrl,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              Accept: "*/*",
+              "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+              "X-Requested-With": "XMLHttpRequest",
+            },
+            body: createBody,
           },
-          body: createBody,
-        },
-        networkEvents,
-        "create-job",
-        relayOptions
-      );
-      if (response.authRequired) {
-        sawAuthRequired = true;
-        authEndpointUrl = createUrl;
-        authStatus = Number(response?.status || 0);
-        authStatusText = String(response?.statusText || "").trim();
-        lastCreateError = firstNonEmptyString([
-          normalizeHttpErrorMessage(response.text),
-          "Splunk requires an authenticated session for job creation.",
-        ]);
-        continue;
+          networkEvents,
+          phaseName,
+          relayOptions
+        );
+        if (response.authRequired) {
+          passSawAuthRequired = true;
+          passAuthEndpointUrl = createUrl;
+          passAuthStatus = Number(response?.status || 0);
+          passAuthStatusText = String(response?.statusText || "").trim();
+          passLastError = firstNonEmptyString([
+            normalizeHttpErrorMessage(response.text),
+            "Splunk requires an authenticated session for job creation.",
+          ]);
+          continue;
+        }
+        if (!response.ok) {
+          passLastError = firstNonEmptyString([
+            normalizeHttpErrorMessage(response.text),
+            String(response.statusText || "").trim(),
+            `HTTP ${response.status || 0}`,
+          ]);
+          continue;
+        }
+        const extractedSid = extractSplunkJobSid(response.parsed);
+        if (!extractedSid) {
+          passLastError = "Splunk search job was created without a SID.";
+          continue;
+        }
+        const createdJobResult = await fetchSplunkReportBySid(queryContext, extractedSid, networkEvents, phaseName, relayOptions);
+        if (createdJobResult.ok && createdJobResult.report) {
+          return {
+            ok: true,
+            report: createdJobResult.report,
+            authRequired: false,
+            authEndpointUrl: passAuthEndpointUrl,
+            authStatus: passAuthStatus,
+            authStatusText: passAuthStatusText,
+            error: "",
+          };
+        }
+        if (createdJobResult.authRequired) {
+          passSawAuthRequired = true;
+          passAuthEndpointUrl = createUrl;
+          passAuthStatus = Number(createdJobResult?.report?.status || response.status || 0);
+          passAuthStatusText = String(createdJobResult?.report?.statusText || response.statusText || "").trim();
+        }
+        passLastError = firstNonEmptyString([createdJobResult?.error, passLastError]);
+        break;
       }
-      if (!response.ok) {
-        lastCreateError = firstNonEmptyString([
-          normalizeHttpErrorMessage(response.text),
-          String(response.statusText || "").trim(),
-          `HTTP ${response.status || 0}`,
-        ]);
-        continue;
+
+      return {
+        ok: false,
+        report: null,
+        authRequired: passSawAuthRequired,
+        authEndpointUrl: passAuthEndpointUrl,
+        authStatus: passAuthStatus,
+        authStatusText: passAuthStatusText,
+        error: passLastError,
+      };
+    };
+
+    let createPass = await runCreatePass("create-job");
+    if (!createPass.ok && createPass.authRequired && forceLoginOnAuthFailure) {
+      const refreshedSession = await ensureSplunkSessionReady(queryContext, networkEvents, {
+        targetWindowId,
+        forceLoginOnAuthFailure: true,
+        timeoutMs: SPLUNK_AUTH_WAIT_TIMEOUT_MS,
+        pollIntervalMs: SPLUNK_AUTH_WAIT_INTERVAL_MS,
+        splunkTab,
+      });
+      if (refreshedSession?.ok) {
+        splunkTab = refreshedSession?.splunkTab || splunkTab;
+        createPass = await runCreatePass("create-job-retry");
       }
-      const extractedSid = extractSplunkJobSid(response.parsed);
-      if (!extractedSid) {
-        lastCreateError = "Splunk search job was created without a SID.";
-        continue;
-      }
-      const createdJobResult = await fetchSplunkReportBySid(queryContext, extractedSid, networkEvents, "create-job", relayOptions);
-      if (createdJobResult.ok && createdJobResult.report) {
-        return finalizeReport(createdJobResult.report);
-      }
-      if (createdJobResult.authRequired) {
-        sawAuthRequired = true;
-        authEndpointUrl = createUrl;
-        authStatus = Number(createdJobResult?.report?.status || response.status || 0);
-        authStatusText = String(createdJobResult?.report?.statusText || response.statusText || "").trim();
-      }
-      lastCreateError = firstNonEmptyString([
-        createdJobResult?.error,
-        lastCreateError,
-      ]);
-      break;
     }
+
+    if (createPass.ok && createPass.report) {
+      return finalizeReport(createPass.report);
+    }
+
+    sawAuthRequired = createPass.authRequired === true;
+    authEndpointUrl = String(createPass.authEndpointUrl || authEndpointUrl);
+    authStatus = Number(createPass.authStatus || authStatus);
+    authStatusText = String(createPass.authStatusText || authStatusText);
+    lastCreateError = String(createPass.error || "").trim();
 
     const sidFromTab = await waitForSplunkSidFromSearchTab(queryContext, {
       tab: splunkTab,
@@ -7025,14 +7237,27 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
       `Resetting prior ${requestorMvpdLabel} MVPD session before starting a fresh recording...`
     );
     const preStartLogoutResult = await executeRestV2LogoutFlow(context, "");
-    if (preStartLogoutResult.attempted !== true) {
-      throw new Error("Unable to start recording because REST V2 logout was not attempted.");
-    }
-    if (preStartLogoutResult.performed !== true) {
-      const logoutReason =
-        String(preStartLogoutResult.error || "").trim() ||
-        "REST V2 logout did not complete for the selected Requestor x MVPD.";
-      throw new Error(`Unable to start recording until REST V2 logout succeeds: ${logoutReason}`);
+    if (preStartLogoutResult.attempted !== true || preStartLogoutResult.performed !== true) {
+      const logoutReason = firstNonEmptyString([
+        String(preStartLogoutResult.error || "").trim(),
+        preStartLogoutResult.attempted !== true
+          ? "REST V2 logout was not attempted."
+          : "REST V2 logout did not fully complete.",
+      ]);
+      setRestV2LoginPanelStatus(
+        section,
+        `Logout warning for ${requestorMvpdLabel}: ${logoutReason} Continuing to MVPD login...`,
+        "error"
+      );
+      emitRestV2DebugEvent(debugFlowId, {
+        source: "extension",
+        phase: "start-recording-logout-warning",
+        requestorId: context.requestorId,
+        mvpd: context.mvpd,
+        attempted: preStartLogoutResult.attempted === true,
+        performed: preStartLogoutResult.performed === true,
+        warning: logoutReason,
+      });
     }
 
     setRestV2LoginPanelStatus(
@@ -7044,14 +7269,19 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
       const profileReason =
         String(postLogoutProfiles.error || "").trim() ||
         `${Number(postLogoutProfiles.profileCount || 0)} active profile(s) still returned`;
-      if (postLogoutProfiles.blocking) {
-        throw new Error(`Unable to start recording until REST V2 logout clears active profiles: ${profileReason}`);
-      }
       setRestV2LoginPanelStatus(
         section,
-        `Logout verification warning for ${requestorMvpdLabel}: ${profileReason}. Continuing with fresh login prep.`,
+        `Logout verification warning for ${requestorMvpdLabel}: ${profileReason}. Continuing to MVPD login...`,
         "error"
       );
+      emitRestV2DebugEvent(debugFlowId, {
+        source: "extension",
+        phase: "start-recording-post-logout-warning",
+        requestorId: context.requestorId,
+        mvpd: context.mvpd,
+        blocking: postLogoutProfiles.blocking === true,
+        warning: profileReason,
+      });
     }
 
     debugFlowId = await startRestV2DebugFlow(
@@ -10221,6 +10451,169 @@ function sanitizeDownloadFileSegment(value, fallback = "download") {
     .replace(/[^\w.-]+/g, "_")
     .replace(/^_+|_+$/g, "");
   return normalized || fallback;
+}
+
+function downloadJsonFile(payload, fileName = "underpar-export.json") {
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = String(fileName || "underpar-export.json");
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 1500);
+}
+
+function getCmTenantDebugOrgId(url = "") {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return "unknown";
+  }
+  try {
+    const parsed = new URL(raw);
+    return sanitizeDownloadFileSegment(parsed.searchParams.get("orgId") || "unknown", "unknown");
+  } catch {
+    return "unknown";
+  }
+}
+
+function buildCmTenantDebugFileName(url = "", status = 0) {
+  const orgId = getCmTenantDebugOrgId(url);
+  const normalizedStatus = Number.isFinite(Number(status)) ? Number(status) : 0;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `underpar-cm-tenants-${orgId}-manual-get-http-${normalizedStatus || "na"}-${stamp}.json`;
+}
+
+async function performCmTenantManualGet(url = "") {
+  const requestUrl = normalizeCmUrl(url);
+  if (!requestUrl) {
+    return {
+      ok: false,
+      status: 0,
+      statusText: "invalid_url",
+      url: String(url || ""),
+      headers: {},
+      bodyText: "",
+      parsed: null,
+      error: "Invalid CM tenant URL.",
+    };
+  }
+  const requestInit = {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      Accept: "*/*",
+      Origin: "https://cdn.experience.adobe.net",
+      Referer: "https://cdn.experience.adobe.net/",
+    },
+  };
+  try {
+    const response = isCmRelayEligibleUrl(requestUrl)
+      ? await relayCmFetch(requestUrl, requestInit)
+      : await fetch(requestUrl, {
+          method: "GET",
+          mode: "cors",
+          credentials: "include",
+          referrerPolicy: "no-referrer",
+          headers: requestInit.headers,
+        });
+    const bodyText = await response.text().catch(() => "");
+    const parsed = parseJsonText(bodyText, null);
+    const headers = {};
+    if (response?.headers?.forEach) {
+      response.headers.forEach((value, key) => {
+        headers[String(key || "").trim()] = String(value || "");
+      });
+    }
+    return {
+      ok: Boolean(response?.ok),
+      status: Number(response?.status || 0),
+      statusText: String(response?.statusText || ""),
+      url: String(response?.url || requestUrl),
+      headers,
+      bodyText,
+      parsed,
+      error: "",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      statusText: "",
+      url: requestUrl,
+      headers: {},
+      bodyText: "",
+      parsed: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function maybeExportCmTenantDebugSnapshot(url = "", reason = "") {
+  if (!CM_TENANT_DEBUG_EXPORT_ENABLED) {
+    return;
+  }
+  const requestUrl = normalizeCmUrl(url);
+  if (!requestUrl) {
+    return;
+  }
+  if (state.cmTenantDebugExportedByUrl.has(requestUrl)) {
+    return;
+  }
+  state.cmTenantDebugExportedByUrl.add(requestUrl);
+
+  const result = await performCmTenantManualGet(requestUrl);
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    reason: String(reason || "").trim(),
+    underparVersion: String(chrome?.runtime?.getManifest?.()?.version || ""),
+    request: {
+      method: "GET",
+      url: requestUrl,
+      credentials: "include",
+      headers: {
+        Accept: "*/*",
+        Origin: "https://cdn.experience.adobe.net",
+        Referer: "https://cdn.experience.adobe.net/",
+      },
+    },
+    response: {
+      ok: Boolean(result?.ok),
+      status: Number(result?.status || 0),
+      statusText: String(result?.statusText || ""),
+      url: String(result?.url || requestUrl),
+      headers: result?.headers && typeof result.headers === "object" ? result.headers : {},
+      bodyLength: String(result?.bodyText || "").length,
+      error: String(result?.error || ""),
+    },
+    parsed: result?.parsed != null ? result.parsed : null,
+    bodyText: String(result?.bodyText || ""),
+  };
+
+  const fileName = buildCmTenantDebugFileName(requestUrl, result?.status || 0);
+  downloadJsonFile(payload, fileName);
+  logDecisionPoint("CM tenant manual GET debug export downloaded", {
+    url: requestUrl,
+    orgId: getCmTenantDebugOrgId(requestUrl),
+    status: Number(result?.status || 0),
+    ok: Boolean(result?.ok),
+    fileName,
+    reason: String(reason || "").trim(),
+  });
+}
+
+async function exportCmTenantDebugSnapshots(reason = "") {
+  const urls = (Array.isArray(CM_TENANT_DEBUG_EXPORT_URLS) ? CM_TENANT_DEBUG_EXPORT_URLS : [])
+    .map((value) => normalizeCmUrl(value))
+    .filter(Boolean);
+  for (const url of urls) {
+    await maybeExportCmTenantDebugSnapshot(url, reason);
+  }
 }
 
 function isRestV2EntitlementSignalValue(value = "") {
@@ -23241,6 +23634,9 @@ function resetWorkflowForLoggedOut() {
   state.cmTenantsCatalogPromise = null;
   state.cmTenantsCatalogHydrated = false;
   state.cmTenantsCatalogHydrationPromise = null;
+  state.cmTenantsCatalogRuntimeFresh = false;
+  state.cmTenantsCatalogFetchAttempted = false;
+  state.cmTenantDebugExportedByUrl.clear();
   state.cmConsoleBootstrapSummary = null;
   state.cmConsoleBootstrapPromise = null;
   state.cmAuthBootstrapPromise = null;
@@ -26015,6 +26411,92 @@ function getProfileEmail(profile) {
   ]);
 }
 
+function getProfileIdentity(profile) {
+  return firstNonEmptyString([
+    profile?.userId,
+    profile?.user_id,
+    profile?.sub,
+    profile?.id,
+    profile?.additional_info?.userId,
+    profile?.additional_info?.user_id,
+    profile?.additional_info?.sub,
+    profile?.additional_info?.id,
+  ]);
+}
+
+function isProfileDisplayNamePlaceholder(displayName = "") {
+  const normalized = String(displayName || "")
+    .trim()
+    .toLowerCase();
+  return !normalized || normalized === "adobe user";
+}
+
+function getSessionProfileCompleteness(loginData) {
+  const profile = resolveLoginProfile(loginData) || {};
+  const displayNameRaw = getProfileDisplayNameRaw(profile);
+  const displayName = getProfileDisplayName(profile);
+  const email = getProfileEmail(profile);
+  const userId = getProfileIdentity(profile);
+  const orgId = firstNonEmptyString([loginData?.adobePassOrg?.orgId, loginData?.adobePassOrg?.id]);
+  const orgName = firstNonEmptyString([
+    loginData?.adobePassOrg?.name,
+    profile?.organizationName,
+    profile?.organization_name,
+    profile?.orgName,
+    profile?.org_name,
+    profile?.companyName,
+    profile?.company_name,
+    profile?.additional_info?.organizationName,
+    profile?.additional_info?.organization_name,
+    profile?.additional_info?.orgName,
+    profile?.additional_info?.org_name,
+    profile?.additional_info?.companyName,
+    profile?.additional_info?.company_name,
+  ]);
+
+  const missing = [];
+  if (isProfileDisplayNamePlaceholder(displayNameRaw) && isProfileDisplayNamePlaceholder(displayName)) {
+    missing.push("name");
+  }
+  if (!email) {
+    missing.push("email");
+  }
+  if (!userId) {
+    missing.push("userId");
+  }
+  if (!orgId) {
+    missing.push("organizationId");
+  }
+  if (!orgName) {
+    missing.push("organizationName");
+  }
+
+  return {
+    complete: missing.length === 0,
+    missing,
+    displayNameRaw,
+    displayName,
+    email,
+    userId,
+    orgId,
+    orgName,
+  };
+}
+
+function isProfilePayloadComplete(profilePayload) {
+  if (!profilePayload || typeof profilePayload !== "object") {
+    return false;
+  }
+  const pseudoSession = {
+    profile: profilePayload,
+    adobePassOrg: {
+      orgId: ADOBEPASS_ORG_HANDLE,
+      name: ADOBEPASS_ORG_HANDLE,
+    },
+  };
+  return getSessionProfileCompleteness(pseudoSession).complete;
+}
+
 function getOrgDisplayName(loginData) {
   return firstNonEmptyString([loginData?.adobePassOrg?.name, ADOBEPASS_ORG_HANDLE]) || ADOBEPASS_ORG_HANDLE;
 }
@@ -27395,6 +27877,34 @@ function closeAvatarMenu() {
   }
 }
 
+function getAvatarMenuCmSummaryState() {
+  const catalog =
+    state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) ? state.cmTenantsCatalog : null;
+  if (catalog && Array.isArray(catalog.tenants)) {
+    const tenantCount = Math.max(0, Number(catalog.tenants.length || 0));
+    return {
+      text: `CM : ${tenantCount} Tenant${tenantCount === 1 ? "" : "s"}`,
+      state: "ready",
+    };
+  }
+  if (state.cmTenantsCatalogPromise || state.cmTenantsCatalogHydrationPromise) {
+    return {
+      text: "CM : Loading Tenants...",
+      state: "loading",
+    };
+  }
+  if (state.cmTenantsCatalogFetchAttempted) {
+    return {
+      text: "CM : -- Tenants",
+      state: "missing",
+    };
+  }
+  return {
+    text: "CM : -- Tenants",
+    state: "loading",
+  };
+}
+
 function renderAvatarMenu() {
   if (!els.avatarMenu || !state.sessionReady || !state.loginData || state.restricted) {
     closeAvatarMenu();
@@ -27450,6 +27960,26 @@ function renderAvatarMenu() {
     }
   }
 
+  if (els.avatarMenuSystem) {
+    const cmSummary = getAvatarMenuCmSummaryState();
+    const cmValue = String(cmSummary?.text || "")
+      .replace(/^CM\s*:\s*/i, "")
+      .trim();
+    const systemRow = document.createElement("div");
+    systemRow.className = "avatar-menu-row";
+    const systemKey = document.createElement("span");
+    systemKey.className = "avatar-menu-key";
+    systemKey.textContent = "CM";
+    const systemValue = document.createElement("span");
+    systemValue.className = "avatar-menu-value";
+    systemValue.textContent = cmValue || "-- Tenants";
+    systemRow.appendChild(systemKey);
+    systemRow.appendChild(systemValue);
+    els.avatarMenuSystem.innerHTML = "";
+    els.avatarMenuSystem.appendChild(systemRow);
+    els.avatarMenuSystem.hidden = false;
+  }
+
   els.avatarMenu.hidden = !state.avatarMenuOpen;
 }
 
@@ -27458,6 +27988,7 @@ function openAvatarMenu() {
     return;
   }
   state.avatarMenuOpen = true;
+  prefetchCmTenantsCatalogInBackground("avatar-menu-open", { forceRefresh: false });
   renderAvatarMenu();
 }
 
@@ -28163,7 +28694,25 @@ async function probeImsCookieSessionState() {
       }
       const payload = parseJsonText(responseText, null);
       if (payload && typeof payload === "object") {
-        return "active";
+        const profileComplete = isProfilePayloadComplete(payload);
+        if (profileComplete) {
+          return "active";
+        }
+        const statusSignal = firstNonEmptyString([
+          payload?.status,
+          payload?.state,
+          payload?.error,
+          payload?.errorCode,
+          payload?.message,
+          payload?.errorMessage,
+        ]).toLowerCase();
+        if (
+          /inactive|signed[_\s-]?out|logged[_\s-]?out|invalid[_\s-]?sso|session[_\s-]?cookie\s+is\s+null|not[_\s-]?authenticated/.test(
+            statusSignal
+          )
+        ) {
+          return "inactive";
+        }
       }
     } catch {
       // Continue probing remaining endpoints.
@@ -28275,7 +28824,7 @@ async function probeExperienceCloudSessionState() {
 
   try {
     const profile = await fetchImsSessionProfile("");
-    if (profile && typeof profile === "object") {
+    if (profile && typeof profile === "object" && isProfilePayloadComplete(profile)) {
       return markExperienceCloudSessionProbeResult("active", "ims-profile");
     }
   } catch {
@@ -28556,6 +29105,28 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   };
   resolvedLoginData.sessionKeys = buildSessionKeySnapshot(resolvedLoginData);
 
+  const sessionProfileCompleteness = getSessionProfileCompleteness(resolvedLoginData);
+  if (!sessionProfileCompleteness.complete) {
+    await clearLoginData();
+    resetWorkflowForLoggedOut();
+    state.loginData = null;
+    state.restricted = false;
+    state.sessionReady = false;
+    clearRefreshTimer();
+    logDecisionPoint("Session activation blocked: incomplete profile", {
+      source,
+      missing: sessionProfileCompleteness.missing,
+      displayName: sessionProfileCompleteness.displayName,
+      email: sessionProfileCompleteness.email,
+      userId: sessionProfileCompleteness.userId,
+      orgId: sessionProfileCompleteness.orgId,
+      orgName: sessionProfileCompleteness.orgName,
+    });
+    setStatus("Experience Cloud session profile is incomplete. Click Sign In.", "error");
+    render();
+    return false;
+  }
+
   state.loginData = resolvedLoginData;
   writePersistedAvatarCandidate(resolvedLoginData, {
     sourceUrl: resolvedLoginData.imageUrl || "",
@@ -28568,6 +29139,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
   clearRestrictedOrgOptions();
   state.sessionReady = true;
+  prefetchCmTenantsCatalogInBackground("session-activated", { forceRefresh: false });
   await saveLoginData(resolvedLoginData);
   scheduleNoTouchRefresh();
   render();
@@ -28834,6 +29406,7 @@ async function refreshProgrammerPanels(options = {}) {
     !forcePremiumRefresh &&
     !shouldRetryCachedCmService(cachedServices?.cm);
   if (shouldReuseCachedServices) {
+    emitPremiumServiceDecisionLogs(programmer, cachedServices);
     renderPremiumServices(cachedServices, programmer, { controllerReason });
     void prewarmRestV2ForProgrammer(programmer, cachedServices);
     return;
@@ -28862,6 +29435,7 @@ async function refreshProgrammerPanels(options = {}) {
       cmMvpdSelectionKey,
     };
     state.premiumAppsByProgrammerId.set(programmer.programmerId, mergedServices);
+    emitPremiumServiceDecisionLogs(programmer, mergedServices);
     renderPremiumServices(mergedServices, programmer, { controllerReason });
     void prewarmRestV2ForProgrammer(programmer, mergedServices);
   } catch (error) {
@@ -30712,11 +31286,11 @@ function normalizeCmTenantRecord(item, index = 0, sourceUrl = "") {
   }
   const links = uniqueSorted(collectCmUrlsFromValue(item).concat(sourceUrl ? [sourceUrl] : []));
   const tenantIdFromLink = firstNonEmptyString(links.map((url) => extractCmTenantIdFromUrl(url)));
+  const consoleId = firstNonEmptyString([item.consoleId, payload?.consoleId, payload?.console_id]);
   const tenantId = firstNonEmptyString([
+    consoleId,
     item.tenantId,
     item.tenant_id,
-    item.consoleId,
-    item.consoleOwnerId,
     item.id,
     item.uuid,
     item.slug,
@@ -30724,8 +31298,6 @@ function normalizeCmTenantRecord(item, index = 0, sourceUrl = "") {
     item.tenant,
     payload?.tenantId,
     payload?.tenant_id,
-    payload?.ownerId,
-    payload?.orgId,
     payload?.id,
     tenantIdFromLink,
     item.name,
@@ -30743,14 +31315,14 @@ function normalizeCmTenantRecord(item, index = 0, sourceUrl = "") {
     payload?.displayName,
     payload?.display_name,
     payload?.title,
-    payload?.ownerId,
+    consoleId,
     tenantIdFromLink,
     tenantId,
   ]);
   if (!tenantId && !tenantName) {
     return null;
   }
-  const aliases = collectCmNameCandidates(item, [tenantId, tenantName]);
+  const aliases = collectCmNameCandidates(item, [consoleId, tenantId, tenantName]);
   return {
     tenantId: String(tenantId || tenantName || `tenant-${index + 1}`),
     tenantName: String(tenantName || tenantId || `Tenant ${index + 1}`),
@@ -31050,12 +31622,23 @@ function collectCmEntityNameCandidates(values = []) {
     }
     addCandidate(raw);
 
-    const wordTokens = raw
+    const allWordTokens = raw
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .split(/[^A-Za-z0-9]+/g)
       .map((token) => normalizeCmConsoleKey(token))
-      .filter((token) => token.length >= 3);
+      .filter((token) => token.length > 0);
+    const wordTokens = allWordTokens.filter((token) => token.length >= 3);
     wordTokens.forEach((token) => output.add(token));
+    if (allWordTokens.length >= 2) {
+      const acronymAll = normalizeCmConsoleKey(allWordTokens.map((token) => String(token || "").charAt(0)).join(""));
+      if (acronymAll.length >= 3) {
+        output.add(acronymAll);
+      }
+      const joinedFirstTwo = normalizeCmConsoleKey(`${allWordTokens[0] || ""}${allWordTokens[1] || ""}`);
+      if (joinedFirstTwo.length >= 3) {
+        output.add(joinedFirstTwo);
+      }
+    }
     if (wordTokens.length >= 2) {
       const acronym = normalizeCmConsoleKey(wordTokens.map((token) => token.charAt(0)).join(""));
       if (acronym.length >= 3) {
@@ -31066,9 +31649,37 @@ function collectCmEntityNameCandidates(values = []) {
         output.add(firstWord);
       }
     }
+    if (allWordTokens.length > 0) {
+      const firstWordAny = normalizeCmConsoleKey(allWordTokens[0]);
+      if (firstWordAny.length >= 2) {
+        output.add(firstWordAny);
+      }
+    }
   });
 
   return uniqueSorted([...output]);
+}
+
+function collectCmProgrammerIdDerivedAliases(values = []) {
+  const output = new Set();
+  const suffixes = ["de", "dev", "qa", "uat", "test", "stage", "stg", "prod", "production"];
+  (Array.isArray(values) ? values : [values]).forEach((value) => {
+    const normalized = normalizeCmConsoleKey(value);
+    if (!normalized) {
+      return;
+    }
+    output.add(normalized);
+    suffixes.forEach((suffix) => {
+      if (!normalized.endsWith(suffix)) {
+        return;
+      }
+      const stripped = normalized.slice(0, Math.max(0, normalized.length - suffix.length));
+      if (stripped.length >= 3) {
+        output.add(stripped);
+      }
+    });
+  });
+  return [...output];
 }
 
 function collectCmProgrammerIdCandidates(programmer = null) {
@@ -31076,7 +31687,7 @@ function collectCmProgrammerIdCandidates(programmer = null) {
   const sourceKeyRaw = String(programmer?.source?.key || "").trim();
   const sourceKeyMatch = sourceKeyRaw.match(/^Programmer:(.+)$/i);
   const sourceKeyId = sourceKeyMatch ? String(sourceKeyMatch[1] || "").trim() : extractEntityIdFromToken(sourceKeyRaw);
-  return collectCmEntityIdCandidates([
+  const baseCandidates = [
     programmer?.programmerId,
     sourceEntity?.id,
     sourceEntity?.programmerId,
@@ -31087,7 +31698,8 @@ function collectCmProgrammerIdCandidates(programmer = null) {
     sourceEntity?.mediaCompanyId,
     sourceEntity?.["media-company-id"],
     sourceKeyId,
-  ]);
+  ];
+  return uniqueSorted([...collectCmEntityIdCandidates(baseCandidates), ...collectCmProgrammerIdDerivedAliases(baseCandidates)]);
 }
 
 function collectCmProgrammerNameCandidates(programmer = null) {
@@ -31107,13 +31719,39 @@ function collectCmProgrammerNameCandidates(programmer = null) {
 }
 
 function collectCmMvpdIdCandidates(mvpdId = "", mvpdMeta = null) {
-  return collectCmEntityIdCandidates([
+  const baseCandidates = [
     mvpdId,
     mvpdMeta?.id,
     mvpdMeta?.mvpdId,
     mvpdMeta?.code,
     mvpdMeta?.identifier,
-  ]);
+  ];
+  const suffixes = ["ott", "sso", "prod", "production", "stage", "stg", "qa", "dev", "test", "live"];
+  const derived = new Set();
+  (Array.isArray(baseCandidates) ? baseCandidates : []).forEach((value) => {
+    let normalized = normalizeCmConsoleKey(value);
+    if (!normalized) {
+      return;
+    }
+    derived.add(normalized);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const suffix of suffixes) {
+        if (!normalized.endsWith(suffix)) {
+          continue;
+        }
+        const stripped = normalizeCmConsoleKey(normalized.slice(0, Math.max(0, normalized.length - suffix.length)));
+        if (stripped && stripped.length >= 3 && stripped !== normalized) {
+          normalized = stripped;
+          derived.add(normalized);
+          changed = true;
+          break;
+        }
+      }
+    }
+  });
+  return uniqueSorted([...collectCmEntityIdCandidates(baseCandidates), ...derived]);
 }
 
 function collectCmMvpdNameCandidates(mvpdName = "", mvpdMeta = null, mvpdLabel = "") {
@@ -31127,13 +31765,34 @@ function collectCmMvpdNameCandidates(mvpdName = "", mvpdMeta = null, mvpdLabel =
   ]);
 }
 
+function collectCmTenantConsoleIdKeys(tenant) {
+  const consoleId = firstNonEmptyString([
+    tenant?.raw?.consoleId,
+    tenant?.raw?.payload?.consoleId,
+    tenant?.raw?.payload?.console_id,
+    tenant?.tenantId,
+  ]);
+  const normalized = normalizeCmConsoleKey(consoleId);
+  if (!normalized) {
+    return [];
+  }
+  const output = new Set([normalized]);
+  String(consoleId || "")
+    .split(/[^A-Za-z0-9]+/g)
+    .map((token) => normalizeCmConsoleKey(token))
+    .filter(Boolean)
+    .forEach((token) => {
+      output.add(token);
+    });
+  return [...output];
+}
+
 function collectCmTenantIdKeys(tenant) {
   return collectCmEntityIdCandidates([
     tenant?.raw?.consoleId,
+    tenant?.raw?.payload?.consoleId,
+    tenant?.raw?.payload?.console_id,
     tenant?.tenantId,
-    tenant?.raw?.payload?.id,
-    tenant?.raw?.payload?.tenantId,
-    tenant?.raw?.payload?.tenant_id,
   ]);
 }
 
@@ -31141,6 +31800,7 @@ function collectCmTenantNameKeys(tenant) {
   return collectCmEntityNameCandidates([
     tenant?.tenantName,
     tenant?.raw?.payload?.name,
+    tenant?.raw?.name,
     ...(Array.isArray(tenant?.aliases) ? tenant.aliases : []),
   ]);
 }
@@ -31332,7 +31992,7 @@ function emitCmTenantMatchDebugLine(programmer, catalog, matchedTenants, options
     cacheState: String(options?.cacheState || "live"),
     traceLine: `CM detect | media-company="${selectedMediaCompany || "unknown"}" | normalized-key="${normalizedMediaCompanyKey || "none"}" | matched-consoleIds="${matchedTenantConsoleIdsText || "none"}"`,
   };
-  log("CM tenant match decision", cmDecisionSummary);
+  logDecisionPoint("CM tenant match decision", cmDecisionSummary);
   emitCmDebugEvent({
     phase: "cm-tenant-match-decision",
     ...cmDecisionSummary,
@@ -31392,7 +32052,7 @@ function emitCmTenantMatchDebugLineForMvpd(programmer, mvpdContext, catalog, mat
     cacheState: String(options?.cacheState || "live"),
     traceLine: `CM detect (mvpd) | mvpd="${selectedMvpd || "unknown"}" | matched-consoleIds="${matchedTenantConsoleIdsText || "none"}"`,
   };
-  log("CM tenant match decision (MVPD)", cmDecisionSummary);
+  logDecisionPoint("CM tenant match decision (MVPD)", cmDecisionSummary);
   emitCmDebugEvent({
     phase: "cm-tenant-match-decision-mvpd",
     programmerId: String(programmer?.programmerId || ""),
@@ -31419,6 +32079,14 @@ function buildCmTenantEndpointCandidates() {
     ...CM_TENANT_ENDPOINT_CANDIDATES,
   ]
     .map((value) => normalizeCmUrl(value))
+    .filter((value) => {
+      try {
+        const parsed = new URL(String(value || ""));
+        return String(parsed.searchParams.get("orgId") || "").trim().toLowerCase() === CM_DEFAULT_TENANT_ORG_HINT;
+      } catch {
+        return false;
+      }
+    })
     .filter(Boolean);
   const seen = new Set();
   const uniqueCandidates = [];
@@ -32008,6 +32676,9 @@ async function persistCmTenantsCatalog(catalog = null) {
   }
   try {
     await chrome.storage.local.set({ [CM_TENANTS_CATALOG_STORAGE_KEY]: persistable });
+    if (chrome.storage?.local?.remove) {
+      await chrome.storage.local.remove(LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY).catch(() => {});
+    }
     return true;
   } catch {
     return false;
@@ -32027,6 +32698,7 @@ async function hydrateCmTenantsCatalogFromStorage(options = {}) {
     state.cmTenantsCatalogHydrated = true;
     if (persistedCatalog && Array.isArray(persistedCatalog.tenants) && persistedCatalog.tenants.length > 0) {
       state.cmTenantsCatalog = persistedCatalog;
+      state.cmTenantsCatalogRuntimeFresh = false;
       emitCmDebugEvent({
         phase: "cm-tenant-catalog-storage-hit",
         tenantCount: Number(persistedCatalog.tenants.length || 0),
@@ -32047,18 +32719,19 @@ async function hydrateCmTenantsCatalogFromStorage(options = {}) {
   }
 }
 
-function prefetchCmTenantsCatalogInBackground(reason = "background") {
-  if (state.restricted || state.programmers.length === 0) {
+function prefetchCmTenantsCatalogInBackground(reason = "background", options = {}) {
+  const forceRefresh = options?.forceRefresh === true;
+  if (state.restricted || !state.sessionReady) {
     return;
   }
   if (state.cmTenantsCatalogPromise) {
     return;
   }
   const cachedCatalog = state.cmTenantsCatalog;
-  if (cachedCatalog && Array.isArray(cachedCatalog.tenants) && cachedCatalog.tenants.length > 0) {
+  if (!forceRefresh && cachedCatalog && Array.isArray(cachedCatalog.tenants) && cachedCatalog.tenants.length > 0) {
     return;
   }
-  void ensureCmTenantsCatalog({ forceRefresh: false })
+  void ensureCmTenantsCatalog({ forceRefresh })
     .then((catalog) => {
       if (!catalog || typeof catalog !== "object") {
         return;
@@ -32069,12 +32742,18 @@ function prefetchCmTenantsCatalogInBackground(reason = "background") {
         tenantCount: Number(catalog.tenants?.length || 0),
         sourceUrl: String(catalog.sourceUrl || ""),
       });
+      if (state.avatarMenuOpen) {
+        renderAvatarMenu();
+      }
     })
     .catch((error) => {
       log("CM tenant catalog prefetch failed", {
         reason,
         error: error instanceof Error ? error.message : String(error),
       });
+      if (state.avatarMenuOpen) {
+        renderAvatarMenu();
+      }
     });
 }
 
@@ -32900,13 +33579,74 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
   throw lastError || new Error(`${contextLabel} failed.`);
 }
 
+async function fetchCmTenantCatalogWithSession(url = "") {
+  const requestUrl = normalizeCmUrl(url);
+  if (!requestUrl) {
+    throw new Error("CM tenants load failed: tenant catalog URL is missing.");
+  }
+  const cmBearerToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ forceRefresh: false }));
+  const requestHeaders = {
+    Accept: "*/*",
+    Origin: "https://cdn.experience.adobe.net",
+    Referer: "https://cdn.experience.adobe.net/",
+  };
+  if (cmBearerToken) {
+    requestHeaders.Authorization = `Bearer ${cmBearerToken}`;
+  }
+  const requestInit = {
+    method: "GET",
+    credentials: "include",
+    headers: requestHeaders,
+  };
+  const response = isCmRelayEligibleUrl(requestUrl)
+    ? await relayCmFetch(requestUrl, requestInit)
+    : await fetch(requestUrl, {
+        method: "GET",
+        mode: "cors",
+        credentials: "include",
+        referrerPolicy: "no-referrer",
+        headers: requestInit.headers,
+      });
+
+  const text = await response.text().catch(() => "");
+  const parsed = parseJsonText(text, null);
+  if (!response.ok) {
+    const message =
+      firstNonEmptyString([
+        parsed?.error?.code,
+        parsed?.error?.message,
+        typeof parsed?.error === "string" ? parsed.error : "",
+        parsed?.message,
+        normalizeHttpErrorMessage(text),
+        response.statusText,
+      ]) || response.statusText;
+    throw new Error(`CM tenants load failed (${Number(response.status || 0)}): ${message}`);
+  }
+  return {
+    url: String(response.url || requestUrl),
+    parsed: parsed ?? text,
+    text,
+    status: Number(response.status || 0),
+    lastModified: response.headers?.get("Last-Modified") || "",
+  };
+}
+
 async function ensureCmTenantsCatalog(options = {}) {
   const forceRefresh = options?.forceRefresh === true;
+  if (forceRefresh) {
+    state.cmTenantsCatalogRuntimeFresh = false;
+  }
   const cachedCatalog =
     state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) ? state.cmTenantsCatalog : null;
 
-  // Global CM tenant catalog should be loaded once per UnderPAR launch and reused.
-  if (!forceRefresh && cachedCatalog) {
+  // Global CM tenant catalog should be loaded once and reused until explicit refresh.
+  if (
+    !forceRefresh &&
+    cachedCatalog &&
+    Array.isArray(cachedCatalog.tenants) &&
+    cachedCatalog.tenants.length > 0 &&
+    state.cmTenantsCatalogRuntimeFresh === true
+  ) {
     emitCmDebugEvent({
       phase: "cm-tenant-catalog-cache-hit",
       sourceUrl: String(cachedCatalog.sourceUrl || ""),
@@ -32915,9 +33655,30 @@ async function ensureCmTenantsCatalog(options = {}) {
     return cachedCatalog;
   }
 
-  if (!forceRefresh && !cachedCatalog) {
+  // CM tenant catalog should be fetched once after login, then reused.
+  if (
+    !forceRefresh &&
+    state.cmTenantsCatalogFetchAttempted === true &&
+    cachedCatalog &&
+    Array.isArray(cachedCatalog.tenants) &&
+    cachedCatalog.tenants.length > 0
+  ) {
+    emitCmDebugEvent({
+      phase: "cm-tenant-catalog-cache-reuse-after-first-fetch",
+      sourceUrl: String(cachedCatalog.sourceUrl || ""),
+      tenantCount: Number(cachedCatalog.tenants?.length || 0),
+    });
+    return cachedCatalog;
+  }
+
+  if (!forceRefresh) {
     const hydratedCatalog = await hydrateCmTenantsCatalogFromStorage({ forceReload: false });
-    if (hydratedCatalog && Array.isArray(hydratedCatalog.tenants) && hydratedCatalog.tenants.length > 0) {
+    if (
+      hydratedCatalog &&
+      Array.isArray(hydratedCatalog.tenants) &&
+      hydratedCatalog.tenants.length > 0 &&
+      state.cmTenantsCatalogRuntimeFresh === true
+    ) {
       return hydratedCatalog;
     }
   }
@@ -32927,14 +33688,13 @@ async function ensureCmTenantsCatalog(options = {}) {
   }
 
   const loadPromise = (async () => {
-    await ensureCmApiAccessToken();
-
+    state.cmTenantsCatalogFetchAttempted = true;
     const tenantCatalogUrls = buildCmTenantEndpointCandidates();
     if (tenantCatalogUrls.length === 0) {
       throw new Error("CM tenants load failed: tenant catalog URL is missing.");
     }
 
-    log("CM tenant catalog lookup", {
+    logDecisionPoint("CM tenant catalog lookup", {
       urls: tenantCatalogUrls,
     });
     emitCmDebugEvent({
@@ -32948,14 +33708,19 @@ async function ensureCmTenantsCatalog(options = {}) {
     try {
       for (const tenantCatalogUrl of tenantCatalogUrls) {
         try {
-          const response = await fetchCmJsonWithAuthVariants([tenantCatalogUrl], "CM tenants load", {
-            debugMeta: {
-              scope: "tenant-catalog",
-              endpointUrl: tenantCatalogUrl,
-              requestorId: String(state.selectedRequestorId || ""),
-              mvpd: String(state.selectedMvpdId || ""),
-            },
-          });
+          let response = null;
+          try {
+            response = await fetchCmTenantCatalogWithSession(tenantCatalogUrl);
+          } catch {
+            response = await fetchCmJsonWithAuthVariants([tenantCatalogUrl], "CM tenants load", {
+              debugMeta: {
+                scope: "tenant-catalog",
+                endpointUrl: tenantCatalogUrl,
+                requestorId: String(state.selectedRequestorId || ""),
+                mvpd: String(state.selectedMvpdId || ""),
+              },
+            });
+          }
           const tenants = normalizeCmTenantsFromPayload(response.parsed, response.url);
           if (tenants.length === 0) {
             throw new Error(`CM tenants load failed: tenant catalog returned no tenants (${tenantCatalogUrl}).`);
@@ -32967,8 +33732,9 @@ async function ensureCmTenantsCatalog(options = {}) {
           };
           state.cmTenantsCatalog = catalog;
           state.cmTenantsCatalogHydrated = true;
+          state.cmTenantsCatalogRuntimeFresh = true;
           void persistCmTenantsCatalog(catalog);
-          log("CM tenants catalog loaded", {
+          logDecisionPoint("CM tenants catalog loaded", {
             sourceUrl: response.url,
             tenantCount: tenants.length,
           });
@@ -32994,6 +33760,7 @@ async function ensureCmTenantsCatalog(options = {}) {
     } catch (error) {
       const lastError = error instanceof Error ? error : new Error(String(error));
       if (cachedCatalog && Array.isArray(cachedCatalog.tenants) && cachedCatalog.tenants.length > 0) {
+        state.cmTenantsCatalogRuntimeFresh = false;
         log("Using stale CM tenant catalog cache after refresh failure", {
           error: lastError instanceof Error ? lastError.message : String(lastError),
         });
@@ -33007,6 +33774,7 @@ async function ensureCmTenantsCatalog(options = {}) {
       }
       const persistedFallback = await hydrateCmTenantsCatalogFromStorage({ forceReload: false });
       if (persistedFallback && Array.isArray(persistedFallback.tenants) && persistedFallback.tenants.length > 0) {
+        state.cmTenantsCatalogRuntimeFresh = false;
         emitCmDebugEvent({
           phase: "cm-tenant-catalog-storage-fallback",
           error: lastError.message,
@@ -33052,7 +33820,14 @@ async function ensureCmServiceForProgrammer(programmer, options = {}) {
     const cachedService = state.cmServiceByProgrammerId.get(programmer.programmerId);
     const cachedMatches = Array.isArray(cachedService?.matchedTenants) ? cachedService.matchedTenants : [];
     if (cachedMatches.length === 0) {
-      const catalog = state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) ? state.cmTenantsCatalog : null;
+      let catalog = state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) ? state.cmTenantsCatalog : null;
+      if (!catalog || !Array.isArray(catalog.tenants) || catalog.tenants.length === 0) {
+        try {
+          catalog = await ensureCmTenantsCatalog({ forceRefresh: false });
+        } catch {
+          catalog = null;
+        }
+      }
       if (catalog && catalog.tenants.length > 0) {
         const rematchedTenants = findCmTenantMatchesForProgrammer(programmer, catalog.tenants);
         if (rematchedTenants.length > 0) {
@@ -33098,7 +33873,7 @@ async function ensureCmServiceForProgrammer(programmer, options = {}) {
       catalog = await ensureCmTenantsCatalog({ forceRefresh: false });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      log("CM tenants load failed", {
+      logDecisionPoint("CM tenants load failed", {
         programmerId: programmer.programmerId,
         error: reason,
       });
@@ -33114,7 +33889,7 @@ async function ensureCmServiceForProgrammer(programmer, options = {}) {
       return service;
     }
 
-    const matchedTenants = findCmTenantMatchesForProgrammer(programmer, catalog?.tenants || []);
+    let matchedTenants = findCmTenantMatchesForProgrammer(programmer, catalog?.tenants || []);
     emitCmTenantMatchDebugLine(programmer, catalog, matchedTenants, {
       cacheState: forceRefresh ? "force-refresh" : "live",
     });
@@ -33129,7 +33904,7 @@ async function ensureCmServiceForProgrammer(programmer, options = {}) {
         }))
         .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
         .slice(0, 5);
-      log("CM no tenant match for programmer", {
+      logDecisionPoint("CM no tenant match for programmer", {
         programmerId: programmer.programmerId,
         programmerName: programmer.programmerName,
         topCandidates,
@@ -33152,7 +33927,7 @@ async function ensureCmServiceForProgrammer(programmer, options = {}) {
       tenantCount: Number(catalog?.tenants?.length || 0),
       tokenFingerprint,
     };
-    log("CM tenants matched for programmer", {
+    logDecisionPoint("CM tenants matched for programmer", {
       programmerId: programmer.programmerId,
       programmerName: programmer.programmerName,
       matchedTenants: matchedTenants.map((tenant) => tenant?.tenantName || tenant?.tenantId).slice(0, 10),
@@ -33190,7 +33965,14 @@ async function ensureCmServiceForSelectedMvpd(programmer, options = {}) {
     const cachedService = state.cmServiceByMvpdSelectionKey.get(mvpdContext.selectionKey);
     const cachedMatches = Array.isArray(cachedService?.matchedTenants) ? cachedService.matchedTenants : [];
     if (cachedMatches.length === 0) {
-      const catalog = state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) ? state.cmTenantsCatalog : null;
+      let catalog = state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) ? state.cmTenantsCatalog : null;
+      if (!catalog || !Array.isArray(catalog.tenants) || catalog.tenants.length === 0) {
+        try {
+          catalog = await ensureCmTenantsCatalog({ forceRefresh: false });
+        } catch {
+          catalog = null;
+        }
+      }
       if (catalog && catalog.tenants.length > 0) {
         const rematchedTenants = findCmTenantMatchesForMvpd(mvpdContext.mvpdId, mvpdContext.mvpdName, catalog.tenants, {
           mvpdMeta: mvpdContext.mvpdMeta,
@@ -33261,7 +34043,7 @@ async function ensureCmServiceForSelectedMvpd(programmer, options = {}) {
       return service;
     }
 
-    const matchedTenants = findCmTenantMatchesForMvpd(
+    let matchedTenants = findCmTenantMatchesForMvpd(
       mvpdContext.mvpdId,
       mvpdContext.mvpdName,
       catalog?.tenants || [],
@@ -34939,7 +35721,7 @@ async function loadProgrammersData(accessToken = "") {
       requireEntities: false,
     });
     applyProgrammerEntities(entities);
-    prefetchCmTenantsCatalogInBackground("programmers-loaded");
+    prefetchCmTenantsCatalogInBackground("programmers-loaded", { forceRefresh: false });
     if (state.programmers.length === 0) {
       setStatus("No media company records were returned for this account.", "error");
     }
@@ -34974,6 +35756,9 @@ function applyProgrammerEntities(entities) {
   state.cmServiceLoadPromiseByMvpdSelectionKey.clear();
   // Keep tenant catalog hydrated for the active signed-in session.
   // CM matching should use this persisted catalog on each selection.
+  state.cmTenantsCatalogRuntimeFresh = false;
+  state.cmTenantsCatalogFetchAttempted = false;
+  state.cmTenantDebugExportedByUrl.clear();
   state.cmTenantBundleByTenantKey.clear();
   state.cmTenantBundlePromiseByTenantKey.clear();
   state.premiumSectionCollapsedByKey.clear();
@@ -35048,6 +35833,27 @@ async function tryActivateCookieSession(source, options = {}) {
       ),
     };
     cookieSessionData.sessionKeys = buildSessionKeySnapshot(cookieSessionData);
+
+    const cookieProfileCompleteness = getSessionProfileCompleteness(cookieSessionData);
+    if (!cookieProfileCompleteness.complete) {
+      logDecisionPoint("Cookie session rejected: incomplete profile", {
+        source,
+        missing: cookieProfileCompleteness.missing,
+        displayName: cookieProfileCompleteness.displayName,
+        email: cookieProfileCompleteness.email,
+        userId: cookieProfileCompleteness.userId,
+        orgId: cookieProfileCompleteness.orgId,
+        orgName: cookieProfileCompleteness.orgName,
+      });
+      state.loginData = null;
+      state.sessionReady = false;
+      state.restricted = false;
+      resetWorkflowForLoggedOut();
+      clearRefreshTimer();
+      render();
+      return false;
+    }
+
     state.loginData = cookieSessionData;
 
     state.sessionReady = true;
@@ -35057,6 +35863,7 @@ async function tryActivateCookieSession(source, options = {}) {
     state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
     clearRestrictedOrgOptions();
     clearRefreshTimer();
+    prefetchCmTenantsCatalogInBackground("cookie-session-activated", { forceRefresh: false });
     render();
 
     if (state.programmers.length === 0) {
@@ -35592,6 +36399,13 @@ function registerEventHandlers() {
     state.selectedMvpdId = "";
     populateRequestorSelect();
     const selectedProgrammer = resolveSelectedProgrammer();
+    emitGlobalSelectorChangeLog(
+      "Media Company",
+      state.selectedProgrammerKey,
+      selectedProgrammer
+        ? `${String(selectedProgrammer.programmerName || "").trim()} - ${String(selectedProgrammer.programmerId || "").trim()}`
+        : ""
+    );
     mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, null);
     refreshMvpdWorkspaceTools();
     void mvpdWorkspaceRefreshSelectedSnapshot({
@@ -35607,6 +36421,7 @@ function registerEventHandlers() {
   els.requestorSelect.addEventListener("change", (event) => {
     state.selectedRequestorId = String(event.target.value || "");
     state.selectedMvpdId = "";
+    emitGlobalSelectorChangeLog("Requestor ID", state.selectedRequestorId, state.selectedRequestorId);
     void refreshProgrammerPanels();
     void populateMvpdSelectForRequestor(state.selectedRequestorId);
     const esmWorkspaceState = getActiveEsmWorkspaceState();
@@ -35635,6 +36450,24 @@ function registerEventHandlers() {
 
   els.mvpdSelect.addEventListener("change", (event) => {
     state.selectedMvpdId = String(event.target.value || "");
+    const mvpdSelectionLabel = state.selectedMvpdId
+      ? String(getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), state.selectedMvpdId) || "")
+      : "";
+    emitGlobalSelectorChangeLog("MVPD", state.selectedMvpdId, mvpdSelectionLabel);
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectedServices = selectedProgrammer?.programmerId
+      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      : null;
+    const mvpdClearLabel = state.selectedMvpdId
+      ? getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), state.selectedMvpdId)
+      : "";
+    // Non-negotiable UX: switching MVPD must clear MVPD Workspace immediately before redraw.
+    void mvpdWorkspaceSendWorkspaceMessage("workspace-clear", {
+      programmerId: String(selectedProgrammer?.programmerId || "").trim(),
+      requestorId: String(state.selectedRequestorId || "").trim(),
+      mvpdId: String(state.selectedMvpdId || "").trim(),
+      mvpdLabel: mvpdClearLabel,
+    });
     void refreshProgrammerPanels({ controllerReason: "mvpd-change" });
     refreshRestV2LoginPanels();
     const esmWorkspaceState = getActiveEsmWorkspaceState();
@@ -35646,10 +36479,6 @@ function registerEventHandlers() {
     if (cmState) {
       cmBroadcastControllerState(cmState);
     }
-    const selectedProgrammer = resolveSelectedProgrammer();
-    const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
-      : null;
     mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices);
     refreshMvpdWorkspaceTools();
     if (state.selectedMvpdId) {
@@ -35717,6 +36546,9 @@ function registerEventHandlers() {
 }
 
 function init() {
+  logDecisionPoint(`Sidepanel initialized | UnderPAR ${chrome.runtime?.getManifest?.()?.version || "unknown"}`, {
+    location: String(window.location.href || ""),
+  });
   ensureEsmWorkspaceRuntimeListener();
   ensureEsmWorkspaceWorkspaceTabWatcher();
   ensureCmRuntimeListener();

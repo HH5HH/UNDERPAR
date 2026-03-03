@@ -563,10 +563,11 @@ body {
 
 .bobtools-splunk-field {
   display: grid;
-  grid-template-columns: 72px 1fr;
+  grid-template-columns: 86px minmax(0, 1fr);
   gap: 8px;
   align-items: start;
   padding: 7px 9px;
+  width: 100%;
 }
 
 .bobtools-splunk-field + .bobtools-splunk-field {
@@ -601,14 +602,19 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 5px;
+  width: 100%;
 }
 
 .bobtools-splunk-raw-pair {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(124px, 220px) minmax(0, 1fr);
+  gap: 8px;
   margin: 0;
   align-items: start;
+  width: 100%;
 }
 
 .bobtools-splunk-raw-key {
@@ -617,6 +623,10 @@ body {
   font-weight: 700;
   line-height: 1.35;
   word-break: break-word;
+  overflow-wrap: break-word;
+  text-transform: none;
+  min-width: 0;
+  display: block;
 }
 
 .bobtools-splunk-raw-value {
@@ -624,7 +634,16 @@ body {
   font-size: 11px;
   line-height: 1.35;
   word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
   display: block;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.bobtools-splunk-raw-pair-value-only {
+  grid-template-columns: 1fr;
 }
 
 .bobtools-splunk-raw-text {

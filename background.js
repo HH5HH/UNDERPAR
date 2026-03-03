@@ -28,6 +28,7 @@ const CM_FETCH_REQUEST_TYPE = "underpar:cmFetch";
 const LEGACY_CM_FETCH_REQUEST_TYPE = "mincloudlogin:cmFetch";
 const SPLUNK_FETCH_REQUEST_TYPE = "underpar:splunkFetch";
 const LEGACY_SPLUNK_FETCH_REQUEST_TYPE = "mincloudlogin:splunkFetch";
+const CONSOLE_LOG_RELAY_REQUEST_TYPE = "underpar:consoleLog";
 const DEBUG_MESSAGE_TYPE_PREFIX = "underpardebug:";
 const LEGACY_DEBUG_MESSAGE_TYPE_PREFIX = "minclouddebug:";
 const DEBUG_DEVTOOLS_PORT_NAME = "underpardebug-devtools";
@@ -2464,6 +2465,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
 
     return true;
+  }
+
+  if (message?.type === CONSOLE_LOG_RELAY_REQUEST_TYPE) {
+    const text = String(message?.message || "").trim();
+    const details = message?.details && typeof message.details === "object" ? message.details : null;
+    if (text) {
+      if (details) {
+        console.log(`[UnderPAR][Sidepanel] ${text}`, details);
+      } else {
+        console.log(`[UnderPAR][Sidepanel] ${text}`);
+      }
+    }
+    sendResponse({ ok: true });
+    return false;
   }
 
   if (message?.type === `${DEBUG_MESSAGE_TYPE_PREFIX}startFlow` || message?.type === `${LEGACY_DEBUG_MESSAGE_TYPE_PREFIX}startFlow`) {
