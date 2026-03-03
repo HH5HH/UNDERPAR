@@ -31029,18 +31029,48 @@ function collectCmEntityIdCandidates(values = []) {
 }
 
 function collectCmEntityNameCandidates(values = []) {
-  return uniqueSorted(
-    (Array.isArray(values) ? values : [values])
-      .map((value) => String(value || "").trim())
-      .filter(Boolean)
-      .map((value) => normalizeCmConsoleKey(value))
-      .filter(Boolean)
-  );
+  const output = new Set();
+  const addCandidate = (value) => {
+    const normalized = normalizeCmConsoleKey(value);
+    if (!normalized) {
+      return;
+    }
+    output.add(normalized);
+  };
+
+  (Array.isArray(values) ? values : [values]).forEach((value) => {
+    const raw = String(value || "").trim();
+    if (!raw) {
+      return;
+    }
+    addCandidate(raw);
+
+    const wordTokens = raw
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .split(/[^A-Za-z0-9]+/g)
+      .map((token) => normalizeCmConsoleKey(token))
+      .filter((token) => token.length >= 3);
+    wordTokens.forEach((token) => output.add(token));
+    if (wordTokens.length >= 2) {
+      const acronym = normalizeCmConsoleKey(wordTokens.map((token) => token.charAt(0)).join(""));
+      if (acronym.length >= 3) {
+        output.add(acronym);
+      }
+      const firstWord = normalizeCmConsoleKey(wordTokens[0]);
+      if (firstWord.length >= 3) {
+        output.add(firstWord);
+      }
+    }
+  });
+
+  return uniqueSorted([...output]);
 }
 
 function collectCmProgrammerIdCandidates(programmer = null) {
   const sourceEntity = programmer?.source?.entityData && typeof programmer.source.entityData === "object" ? programmer.source.entityData : {};
-  const sourceKeyId = extractEntityIdFromToken(programmer?.source?.key || "");
+  const sourceKeyRaw = String(programmer?.source?.key || "").trim();
+  const sourceKeyMatch = sourceKeyRaw.match(/^Programmer:(.+)$/i);
+  const sourceKeyId = sourceKeyMatch ? String(sourceKeyMatch[1] || "").trim() : extractEntityIdFromToken(sourceKeyRaw);
   return collectCmEntityIdCandidates([
     programmer?.programmerId,
     sourceEntity?.id,
