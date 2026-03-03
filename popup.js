@@ -11958,6 +11958,7 @@ function normalizeClickCmuColumns(columns) {
     "tenant",
     "tenant-id",
     "tenant_id",
+    "v2",
     "view",
     "activity-level",
     "activity_level",
@@ -12474,17 +12475,43 @@ function getCmPrimaryUsageTenantScopeFromState(cmState = null) {
   return "";
 }
 
+function isClickCmuMvpdTenantMode(context = null) {
+  const sourceText = String(context?.source || "").trim().toLowerCase();
+  const cmServiceType = String(context?.cmState?.serviceType || "").trim().toLowerCase();
+  const cmWorkspaceKey = String(context?.cmState?.workspaceKey || "").trim().toLowerCase();
+  return (
+    context?.isMvpdWorkspaceExport === true ||
+    context?.preferMvpdService === true ||
+    sourceText.includes("mvpd") ||
+    cmServiceType === "cmmvpd" ||
+    cmWorkspaceKey === "mvpd"
+  );
+}
+
 function getClickCmuTenantScopeFromContext(context = null) {
+  const isMvpdTenantMode = isClickCmuMvpdTenantMode(context);
+  const explicitTenantScope = resolveCmUsageTenantScopeValue(
+    isMvpdTenantMode ? context?.mvpdId : "",
+    context?.tenantScope
+  );
   const primaryUsageTenantScope = getCmPrimaryUsageTenantScopeFromState(context?.cmState || null);
   const matchedTenantScope = resolveCmUsageTenantScopeValue(
     context?.cmService?.matchedTenants?.[0]?.tenantId,
     context?.cmService?.matchedTenants?.[0]?.tenantName
   );
+  if (isMvpdTenantMode) {
+    return resolveCmUsageTenantScopeValue(
+      explicitTenantScope,
+      primaryUsageTenantScope,
+      matchedTenantScope,
+      context?.cmState?.tenantScope
+    );
+  }
   return resolveCmUsageTenantScopeValue(
     primaryUsageTenantScope,
     matchedTenantScope,
     context?.cmState?.tenantScope,
-    context?.tenantScope,
+    explicitTenantScope,
     getCmTenantScopeForProgrammer(context?.programmer || context?.cmState?.programmer)
   );
 }
@@ -13543,6 +13570,7 @@ body[data-theme="dark"]{
     "tenant",
     "tenant-id",
     "tenant_id",
+    "v2",
     "view",
     "activity-level",
     "activity_level",
@@ -13710,10 +13738,10 @@ function buildClickCmuHtmlFromTemplate(templateHtml, context = {}) {
   const accessToken = String(context.accessToken || "").trim();
   const programmerId = String(context.programmerId || "").trim();
   const themeScope = String(context.themeScope || programmerId || programmerLabel || "MediaCompany").trim();
-  const tenantScope = resolveCmUsageTenantScopeValue(
-    context?.tenantScope,
-    getCmTenantScopeForProgrammer({ programmerId })
-  );
+  const isMvpdTenantMode = isClickCmuMvpdTenantMode(context) || themeScope.toLowerCase().startsWith("mvpd:");
+  const tenantScope = isMvpdTenantMode
+    ? resolveCmUsageTenantScopeValue(context?.mvpdId, context?.tenantScope)
+    : resolveCmUsageTenantScopeValue(context?.tenantScope, getCmTenantScopeForProgrammer({ programmerId }));
   if (!accessToken) {
     throw new Error("CMU access token is required to generate clickCMU.");
   }
@@ -13949,11 +13977,14 @@ function isClickCmuUsageCardLike(card = null, endpointUrl = "") {
 }
 
 function buildClickCmuWorkspaceEndpointCatalog(cards = [], options = {}) {
-  const tenantScope = resolveCmUsageTenantScopeValue(
-    options?.tenantScope,
-    options?.tenantId,
-    getCmTenantScopeForProgrammer({ programmerId: String(options?.programmerId || "").trim() })
-  );
+  const isMvpdTenantMode = options?.isMvpdWorkspaceExport === true;
+  const tenantScope = isMvpdTenantMode
+    ? resolveCmUsageTenantScopeValue(options?.mvpdId, options?.tenantScope, options?.tenantId)
+    : resolveCmUsageTenantScopeValue(
+        options?.tenantScope,
+        options?.tenantId,
+        getCmTenantScopeForProgrammer({ programmerId: String(options?.programmerId || "").trim() })
+      );
   const output = [];
   (Array.isArray(cards) ? cards : []).forEach((card, index) => {
     const urlCandidates = getClickCmuWorkspaceCardUrlCandidates(card, {
@@ -14001,7 +14032,7 @@ function buildClickCmuWorkspaceEndpointCatalog(cards = [], options = {}) {
   return normalizeClickCmuEndpointCatalog(output, { tenantScope }).slice(0, 120);
 }
 
-async function resolveClickCmuDownloadContext(cmState = null) {
+async function resolveClickCmuDownloadContext(cmState = null, options = {}) {
   const selectedProgrammer = resolveSelectedProgrammer();
   if (!selectedProgrammer?.programmerId) {
     return null;
@@ -14012,15 +14043,35 @@ async function resolveClickCmuDownloadContext(cmState = null) {
     return null;
   }
   const selectedServices = state.premiumAppsByProgrammerId.get(programId) || null;
-  const cmService = selectedServices?.cm || cmState?.cmService || null;
+  const isMvpdState =
+    String(cmState?.serviceType || "").trim().toLowerCase() === "cmmvpd" ||
+    String(cmState?.workspaceKey || "").trim().toLowerCase() === "mvpd";
+  const preferMvpdService =
+    options?.preferMvpdService === true || options?.isMvpdWorkspaceExport === true || isMvpdState;
+  const cmService = preferMvpdService
+    ? selectedServices?.cmMvpd || cmState?.cmService || selectedServices?.cm || null
+    : selectedServices?.cm || cmState?.cmService || selectedServices?.cmMvpd || null;
   if (!cmService) {
     return null;
   }
+  const resolvedMvpdId = String(options?.mvpdId || cmService?.mvpdId || state.selectedMvpdId || "").trim();
+  const resolvedTenantScope = resolveCmUsageTenantScopeValue(
+    preferMvpdService ? resolvedMvpdId : "",
+    options?.tenantScope,
+    cmState?.tenantScope,
+    cmService?.matchedTenants?.[0]?.tenantId,
+    cmService?.matchedTenants?.[0]?.tenantName
+  );
   return {
     programmer: cmState?.programmer && stateProgramId === programId ? cmState.programmer : selectedProgrammer,
     cmService,
     cmState: cmState || null,
     section: cmState?.section || null,
+    tenantScope: resolvedTenantScope,
+    mvpdId: resolvedMvpdId,
+    source: String(options?.source || "").trim(),
+    isMvpdWorkspaceExport: options?.isMvpdWorkspaceExport === true || preferMvpdService,
+    preferMvpdService,
   };
 }
 
@@ -14081,9 +14132,19 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
 async function makeClickCmuDownload(context, requestToken, options = {}) {
   const programmer = context?.programmer || null;
   const authContext = await resolveClickCmuAuthContext(context, requestToken, options);
-  const tenantScope = resolveCmUsageTenantScopeValue(options?.tenantScope, context?.tenantScope);
+  const isMvpdTenantMode = options?.isMvpdWorkspaceExport === true || context?.isMvpdWorkspaceExport === true;
+  const resolvedMvpdScope = resolveCmUsageTenantScopeValue(options?.mvpdId, context?.mvpdId);
+  const tenantScope = isMvpdTenantMode
+    ? resolveCmUsageTenantScopeValue(resolvedMvpdScope, options?.tenantScope, context?.tenantScope)
+    : resolveCmUsageTenantScopeValue(options?.tenantScope, context?.tenantScope);
+  if (isMvpdTenantMode && !tenantScope) {
+    throw new Error("Selected MVPD tenant scope is required to generate clickCMU.");
+  }
   const endpointCatalog = await buildClickCmuEndpointCatalog({
     ...(context && typeof context === "object" ? context : {}),
+    source: String(options?.source || context?.source || "").trim(),
+    isMvpdWorkspaceExport: isMvpdTenantMode,
+    mvpdId: resolvedMvpdScope,
     tenantScope: tenantScope || context?.tenantScope || "",
   });
   if (endpointCatalog.length === 0) {
@@ -14099,7 +14160,10 @@ async function makeClickCmuDownload(context, requestToken, options = {}) {
     programmerId: String(programmer?.programmerId || ""),
     themeScope: String(options?.themeScope || programmer?.programmerId || "").trim(),
     themePreset: String(options?.themePreset || "").trim(),
-    tenantScope: tenantScope || getCmTenantScopeForProgrammer(programmer),
+    source: String(options?.source || context?.source || "").trim(),
+    isMvpdWorkspaceExport: isMvpdTenantMode,
+    mvpdId: resolvedMvpdScope,
+    tenantScope: isMvpdTenantMode ? tenantScope : (tenantScope || getCmTenantScopeForProgrammer(programmer)),
     accessToken: authContext.accessToken,
     clientIds: authContext.clientIds,
     userId: authContext.userId,
@@ -14122,10 +14186,20 @@ async function makeClickCmuWorkspaceDownload(context, cards, requestToken, optio
   }
 
   const authContext = await resolveClickCmuAuthContext(context, requestToken, options);
-  const tenantScope = resolveCmUsageTenantScopeValue(options?.tenantScope, context?.tenantScope);
+  const isMvpdTenantMode = options?.isMvpdWorkspaceExport === true || context?.isMvpdWorkspaceExport === true;
+  const resolvedMvpdScope = resolveCmUsageTenantScopeValue(options?.mvpdId, context?.mvpdId);
+  const tenantScope = isMvpdTenantMode
+    ? resolveCmUsageTenantScopeValue(resolvedMvpdScope, options?.tenantScope, context?.tenantScope)
+    : resolveCmUsageTenantScopeValue(options?.tenantScope, context?.tenantScope);
+  if (isMvpdTenantMode && !tenantScope) {
+    throw new Error("Selected MVPD tenant scope is required to generate clickCMUWS_TEARSHEET.");
+  }
   const endpointCatalog = buildClickCmuWorkspaceEndpointCatalog(workspaceCards, {
-    tenantScope: tenantScope || getCmTenantScopeForProgrammer(context?.programmer),
+    tenantScope: isMvpdTenantMode ? tenantScope : (tenantScope || getCmTenantScopeForProgrammer(context?.programmer)),
     programmerId: String(context?.programmer?.programmerId || "").trim(),
+    source: String(options?.source || context?.source || "").trim(),
+    isMvpdWorkspaceExport: isMvpdTenantMode,
+    mvpdId: resolvedMvpdScope,
   });
   if (endpointCatalog.length === 0) {
     throw new Error("Open at least one CMU usage table before generating clickCMUWS_TEARSHEET.");
@@ -14141,7 +14215,10 @@ async function makeClickCmuWorkspaceDownload(context, cards, requestToken, optio
     programmerId: String(programmer?.programmerId || ""),
     themeScope: String(options?.themeScope || programmer?.programmerId || "").trim(),
     themePreset: String(options?.themePreset || "").trim(),
-    tenantScope: tenantScope || getCmTenantScopeForProgrammer(programmer),
+    source: String(options?.source || context?.source || "").trim(),
+    isMvpdWorkspaceExport: isMvpdTenantMode,
+    mvpdId: resolvedMvpdScope,
+    tenantScope: isMvpdTenantMode ? tenantScope : (tenantScope || getCmTenantScopeForProgrammer(programmer)),
     accessToken: authContext.accessToken,
     clientIds: authContext.clientIds,
     userId: authContext.userId,
@@ -18979,8 +19056,12 @@ function cmMountUsageJellyBeans(cmState, usageRecords, requestToken) {
   esmWorkspaceSetTreemapCollapsed(cmuUsageState, true);
 }
 
-function getActiveCmState() {
-  const sections = document.querySelectorAll(".premium-service-section.service-cm");
+function getActiveCmStateForServiceClass(serviceClass = "service-cm") {
+  const normalizedServiceClass = String(serviceClass || "").trim();
+  if (!normalizedServiceClass) {
+    return null;
+  }
+  const sections = document.querySelectorAll(`.premium-service-section.${normalizedServiceClass}`);
   for (const section of sections) {
     const cmState = section?.__underparCmState || null;
     if (cmState?.section?.isConnected) {
@@ -18988,6 +19069,14 @@ function getActiveCmState() {
     }
   }
   return null;
+}
+
+function getActiveCmState() {
+  return getActiveCmStateForServiceClass("service-cm");
+}
+
+function getActiveCmMvpdState() {
+  return getActiveCmStateForServiceClass("service-cm-mvpd");
 }
 
 function cmFindRecordByCard(cmState, card) {
@@ -21372,7 +21461,209 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     return refreshResult?.ok ? { ok: true } : { ok: false, error: refreshResult?.error || "Unable to refresh MVPD details." };
   }
 
-  if (action === "make-clickcmu" || action === "make-clickcmuws") {
+  if (action === "run-card") {
+    const cmState = getActiveCmMvpdState();
+    if (!cmState) {
+      return { ok: false, error: "Open MVPD Concurrency Monitoring in UnderPAR before running reports." };
+    }
+    const requestToken = Number(state.premiumPanelRequestToken || 0);
+    if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
+      return { ok: false, error: "MVPD CM controller is no longer active for the selected media company." };
+    }
+    const card = message?.card && typeof message.card === "object" ? message.card : {};
+    const shouldForceRefetch = message?.forceRefetch !== false;
+    const requestUrlOverride = String(card?.requestUrl || "").trim();
+    const baseRequestUrl = String(card?.baseRequestUrl || card?.endpointUrl || requestUrlOverride || "").trim();
+    const localColumnFilters = card?.localColumnFilters && typeof card.localColumnFilters === "object" ? card.localColumnFilters : {};
+    const targetWindowId = senderWindowId || Number(state.mvpdWorkspaceWindowId || cmState.controllerWindowId || 0);
+    const matchedRecord = cmFindRecordByCard(cmState, card);
+    if (!matchedRecord) {
+      const fallbackUrl = String(card?.requestUrl || card?.endpointUrl || "").trim();
+      if (!fallbackUrl) {
+        return { ok: false, error: "CM card request URL is missing." };
+      }
+      await cmRunRecordToWorkspace(
+        cmState,
+        {
+          cardId: String(card.cardId || generateRequestId()),
+          kind: "cm",
+          title: "CM item",
+          subtitle: "",
+          endpointUrl: fallbackUrl,
+          requestUrl: fallbackUrl,
+          payload: null,
+          columns: Array.isArray(card?.columns) ? card.columns : [],
+          lastModified: "",
+          tenantId: String(card?.tenantId || cmState?.tenantScope || state.selectedMvpdId || ""),
+          tenantName: String(card?.tenantName || state.selectedMvpdId || "MVPD"),
+        },
+        requestToken,
+        {
+          emitStart: true,
+          forceRefetch: shouldForceRefetch,
+          cardId: String(card.cardId || generateRequestId()),
+          targetWindowId,
+          targetWorkspace: "mvpd",
+          requestUrlOverride: requestUrlOverride || fallbackUrl,
+          baseRequestUrl: baseRequestUrl || fallbackUrl,
+          localColumnFilters,
+        }
+      );
+      return { ok: true };
+    }
+
+    await cmRunRecordToWorkspace(cmState, matchedRecord, requestToken, {
+      emitStart: true,
+      forceRefetch: shouldForceRefetch,
+      cardId: String(card?.cardId || matchedRecord.cardId || generateRequestId()),
+      targetWindowId,
+      targetWorkspace: "mvpd",
+      requestUrlOverride,
+      baseRequestUrl: baseRequestUrl || String(matchedRecord.requestUrl || matchedRecord.endpointUrl || ""),
+      localColumnFilters,
+    });
+    return { ok: true };
+  }
+
+  if (action === "run-api-operation") {
+    const cmState = getActiveCmMvpdState();
+    if (!cmState) {
+      return { ok: false, error: "Open MVPD Concurrency Monitoring in UnderPAR before running reports." };
+    }
+    const requestToken = Number(state.premiumPanelRequestToken || 0);
+    if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
+      return { ok: false, error: "MVPD CM controller is no longer active for the selected media company." };
+    }
+    const card = message?.card && typeof message.card === "object" ? message.card : {};
+    const formValues = message?.formValues && typeof message.formValues === "object" ? message.formValues : {};
+    let matchedRecord = cmFindRecordByCard(cmState, card);
+    if ((!matchedRecord || String(matchedRecord?.kind || "").toLowerCase() !== "cmv2-op") && card?.operation) {
+      matchedRecord = {
+        cardId: String(card?.cardId || generateRequestId()),
+        kind: "cmv2-op",
+        title: String(card?.operation?.label || "CM V2 Operation"),
+        subtitle: `${String(card?.operation?.method || "GET").toUpperCase()} ${String(card?.operation?.pathTemplate || "").trim()}`,
+        endpointUrl: String(card?.endpointUrl || ""),
+        requestUrl: String(card?.requestUrl || card?.endpointUrl || ""),
+        payload: {
+          operation: card.operation,
+          formDefaults: { ...formValues },
+        },
+        columns: Array.isArray(card?.columns) ? card.columns.map((value) => String(value || "")).filter(Boolean) : [],
+      };
+    }
+    if (!matchedRecord || String(matchedRecord?.kind || "").toLowerCase() !== "cmv2-op") {
+      return { ok: false, error: "CM V2 API operation record could not be resolved." };
+    }
+    await cmRunRecordToWorkspace(cmState, matchedRecord, requestToken, {
+      emitForm: false,
+      execute: true,
+      formValues,
+      cardId: String(card?.cardId || matchedRecord.cardId || generateRequestId()),
+      targetWindowId: senderWindowId || Number(state.mvpdWorkspaceWindowId || cmState.controllerWindowId || 0),
+      targetWorkspace: "mvpd",
+    });
+    return { ok: true };
+  }
+
+  if (action === "download-csv") {
+    const cmState = getActiveCmMvpdState();
+    if (!cmState) {
+      return { ok: false, error: "Open MVPD Concurrency Monitoring in UnderPAR before exporting CSV." };
+    }
+    const requestToken = Number(state.premiumPanelRequestToken || 0);
+    if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
+      return { ok: false, error: "MVPD CM controller is no longer active for the selected media company." };
+    }
+    const card = message?.card && typeof message.card === "object" ? message.card : {};
+    const sortRule = esmWorkspaceNormalizeSortRule(message?.sortRule);
+    const matchedRecord = cmFindRecordByCard(cmState, card);
+    const fallbackUrl = String(card?.requestUrl || card?.endpointUrl || "").trim();
+    const fallbackRecord = {
+      cardId: String(card?.cardId || generateRequestId()),
+      kind: "cm",
+      title: "CM item",
+      subtitle: "",
+      endpointUrl: fallbackUrl,
+      requestUrl: fallbackUrl,
+      payload: null,
+      columns: Array.isArray(card?.columns) ? card.columns.map((value) => String(value || "")).filter(Boolean) : [],
+      lastModified: "",
+      tenantId: String(card?.tenantId || cmState?.tenantScope || state.selectedMvpdId || "mvpd"),
+      tenantName: String(card?.tenantName || state.selectedMvpdId || "MVPD"),
+    };
+    const record = matchedRecord || fallbackRecord;
+    if (!matchedRecord && !fallbackUrl && (!Array.isArray(card?.rows) || card.rows.length === 0)) {
+      return { ok: false, error: "CM card request URL is missing." };
+    }
+
+    const csvResult = await cmDownloadCsvForCard(cmState, record, card, sortRule, requestToken);
+    if (!csvResult?.ok) {
+      return { ok: false, error: csvResult?.error || "Unable to download CM CSV." };
+    }
+    return { ok: true, fileName: csvResult.fileName || "" };
+  }
+
+  if (action === "rerun-all") {
+    const cmState = getActiveCmMvpdState();
+    if (!cmState) {
+      return { ok: false, error: "Open MVPD Concurrency Monitoring in UnderPAR before re-running reports." };
+    }
+    const requestToken = Number(state.premiumPanelRequestToken || 0);
+    if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
+      return { ok: false, error: "MVPD CM controller is no longer active for the selected media company." };
+    }
+    const cards = Array.isArray(message?.cards) ? message.cards : [];
+    const targetWindowId = senderWindowId || Number(state.mvpdWorkspaceWindowId || cmState.controllerWindowId || 0);
+    void cmSendReportWorkspaceMessage(
+      "mvpd",
+      "batch-start",
+      {
+        total: cards.length,
+        startedAt: Date.now(),
+      },
+      { targetWindowId }
+    );
+    for (const card of cards) {
+      const record = cmFindRecordByCard(cmState, card);
+      if (!record) {
+        continue;
+      }
+      if (String(record?.kind || "").toLowerCase() === "cmv2-op") {
+        await cmRunRecordToWorkspace(cmState, record, requestToken, {
+          emitForm: false,
+          execute: true,
+          formValues: card?.formValues && typeof card.formValues === "object" ? card.formValues : {},
+          cardId: String(card?.cardId || record.cardId || generateRequestId()),
+          targetWindowId,
+          targetWorkspace: "mvpd",
+        });
+        continue;
+      }
+      await cmRunRecordToWorkspace(cmState, record, requestToken, {
+        emitStart: true,
+        forceRefetch: true,
+        cardId: String(card?.cardId || record.cardId || generateRequestId()),
+        targetWindowId,
+        targetWorkspace: "mvpd",
+        requestUrlOverride: String(card?.requestUrl || "").trim(),
+        baseRequestUrl: String(card?.baseRequestUrl || card?.requestUrl || record.requestUrl || record.endpointUrl || "").trim(),
+        localColumnFilters: card?.localColumnFilters && typeof card.localColumnFilters === "object" ? card.localColumnFilters : {},
+      });
+    }
+    void cmSendReportWorkspaceMessage(
+      "mvpd",
+      "batch-end",
+      {
+        total: cards.length,
+        completedAt: Date.now(),
+      },
+      { targetWindowId }
+    );
+    return { ok: true };
+  }
+
+  if (action === "make-clickcmu" || action === "make-clickcmuws" || action === "resolve-clickcmuws-auth") {
     const selectedProgrammer = resolveSelectedProgrammer();
     if (!selectedProgrammer?.programmerId) {
       return { ok: false, error: "Select a media company before exporting clickCMU tearsheets." };
@@ -21381,7 +21672,12 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     const selectedCmMvpdService =
       selectedServices?.cmMvpd && typeof selectedServices.cmMvpd === "object" ? selectedServices.cmMvpd : null;
     const matchedMvpdTenants = Array.isArray(selectedCmMvpdService?.matchedTenants) ? selectedCmMvpdService.matchedTenants : [];
+    const selectedMvpdId = String(state.selectedMvpdId || "").trim();
+    if (!selectedMvpdId) {
+      return { ok: false, error: "Select an MVPD before exporting clickCMU tearsheets." };
+    }
     const selectedMvpdTenantScope = resolveCmUsageTenantScopeValue(
+      selectedMvpdId,
       matchedMvpdTenants?.[0]?.tenantId,
       matchedMvpdTenants?.[0]?.tenantName
     );
@@ -21389,10 +21685,6 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
       return { ok: false, error: "Selected MVPD does not have Concurrency Monitoring tenant access." };
     }
     const selectedRequestorId = String(state.selectedRequestorId || "").trim();
-    const selectedMvpdId = String(state.selectedMvpdId || "").trim();
-    if (!selectedMvpdId) {
-      return { ok: false, error: "Select an MVPD before exporting clickCMU tearsheets." };
-    }
     const selectedMvpdMeta = getRestV2MvpdMeta(selectedRequestorId, selectedMvpdId);
     const selectedMvpdLabel = getRestV2MvpdPickerLabel(selectedRequestorId, selectedMvpdId, selectedMvpdMeta) || selectedMvpdId;
     const exportFileScopeLabel = String(selectedMvpdId || selectedMvpdTenantScope || "MVPD").trim();
@@ -21402,11 +21694,34 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
       cmState: null,
       section: null,
       tenantScope: selectedMvpdTenantScope,
+      mvpdId: selectedMvpdId,
+      source: "mvpd-workspace",
+      isMvpdWorkspaceExport: true,
+      preferMvpdService: true,
     };
     const requestToken = Number(state.premiumPanelRequestToken || 0);
+    if (action === "resolve-clickcmuws-auth") {
+      const authContext = await resolveClickCmuAuthContext(clickCmuContext, requestToken, {
+        source: "mvpd-workspace-tearsheet",
+        isMvpdWorkspaceExport: true,
+        mvpdId: selectedMvpdId,
+        tenantScope: selectedMvpdTenantScope,
+      });
+      return {
+        ok: true,
+        programmerLabel: authContext.programmerLabel,
+        accessToken: authContext.accessToken,
+        clientIds: Array.isArray(authContext.clientIds) ? authContext.clientIds : [],
+        userId: String(authContext.userId || ""),
+        scope: String(authContext.scope || CM_IMS_CHECK_DEFAULT_SCOPE || ""),
+      };
+    }
+
     if (action === "make-clickcmu") {
       const exportResult = await makeClickCmuDownload(clickCmuContext, requestToken, {
         source: "mvpd-workspace",
+        isMvpdWorkspaceExport: true,
+        mvpdId: selectedMvpdId,
         tenantScope: selectedMvpdTenantScope,
         themePreset: "sunflower",
         themeScope: `mvpd:${selectedMvpdTenantScope}`,
@@ -21427,6 +21742,8 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     }
     const exportResult = await makeClickCmuWorkspaceDownload(clickCmuContext, cards, requestToken, {
       source: "mvpd-workspace-tearsheet",
+      isMvpdWorkspaceExport: true,
+      mvpdId: selectedMvpdId,
       tenantScope: selectedMvpdTenantScope,
       themePreset: "sunflower",
       themeScope: `mvpd:${selectedMvpdTenantScope}`,
@@ -24110,6 +24427,8 @@ async function loadCmService(programmer, cmService, section, contentElement, req
           const exportFileScopeLabel = String(selectedMvpdId || resolvedMvpdScope || "MVPD").trim();
           await makeClickCmuDownload(clickCmuContext, requestToken, {
             source: "sidepanel",
+            isMvpdWorkspaceExport: isMvpdService,
+            mvpdId: isMvpdService ? selectedMvpdId : undefined,
             tenantScope: isMvpdService ? resolvedMvpdScope : undefined,
             themePreset: isMvpdService ? "sunflower" : undefined,
             themeScope: isMvpdService && resolvedMvpdScope ? `mvpd:${resolvedMvpdScope}` : undefined,
