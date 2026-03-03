@@ -633,6 +633,19 @@ body {
   margin: 0;
   align-items: start;
   width: 100%;
+  padding: 4px 6px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+}
+
+.bobtools-splunk-raw-pair:nth-child(odd) {
+  background: rgba(62, 96, 136, 0.06);
+  border-color: rgba(62, 96, 136, 0.12);
+}
+
+.bobtools-splunk-raw-pair:nth-child(even) {
+  background: rgba(62, 96, 136, 0.03);
+  border-color: rgba(62, 96, 136, 0.08);
 }
 
 .bobtools-splunk-raw-key {
