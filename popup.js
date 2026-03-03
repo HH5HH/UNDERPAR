@@ -8277,7 +8277,7 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
   const upstreamUserId = firstNonEmptyString([selectedSummary?.upstreamUserId, selectedSummary?.userId, ...subjectCandidates]);
   const userId = firstNonEmptyString([selectedSummary?.userId, selectedSummary?.upstreamUserId, ...subjectCandidates]);
   const sessionId = firstNonEmptyString([selectedSummary?.sessionId, ...sessionCandidates]);
-  const mvpd = firstNonEmptyString([selectedSummary?.mvpd, ...idpCandidates, context.mvpd]);
+  const mvpd = firstNonEmptyString([context.mvpd, selectedSummary?.mvpd, ...idpCandidates]);
   const cachedMvpdName =
     String(context?.requestorId || "").trim() && String(mvpd || "").trim()
       ? String(state.mvpdCacheByRequestor.get(String(context.requestorId || "").trim())?.get(String(mvpd || "").trim())?.name || "").trim()
@@ -8966,7 +8966,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
 
     const responseText = await response.text().catch(() => "");
     const parsed = parseJsonText(responseText, {});
-    const normalizedMvpd = String(context?.mvpd || "").trim().toLowerCase();
+    const selectedMvpd = String(context?.mvpd || "").trim();
     const rawProfiles = parsed?.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {};
     let effectivePayload =
       parsed && typeof parsed === "object"
@@ -8977,26 +8977,42 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
     let effectiveProfiles = rawProfiles;
     const rawProfileCount = Object.keys(rawProfiles).length;
 
-    if (String(endpoint?.endpointKey || "").trim() === "profiles-all" && normalizedMvpd) {
+    const endpointKey = String(endpoint?.endpointKey || "").trim();
+    const allowSsoAliasMatch = isRestV2LikelyPartnerSsoContext(context);
+    if (endpointKey === "profiles-all" && selectedMvpd) {
       const filteredProfiles = {};
       for (const [profileKey, profileValue] of Object.entries(rawProfiles)) {
         if (!profileValue || typeof profileValue !== "object") {
           continue;
         }
         const summary = getRestV2ProfileSummary(profileValue, profileKey, context);
-        const keyMatch = String(profileKey || "").trim().toLowerCase() === normalizedMvpd;
-        const idpMatch = (Array.isArray(summary?.idpCandidates) ? summary.idpCandidates : []).some(
-          (candidate) => String(candidate || "").trim().toLowerCase() === normalizedMvpd
+        const candidateMvpds = dedupeRestV2CandidateStrings([
+          String(profileKey || "").trim(),
+          String(summary?.mvpd || "").trim(),
+          ...(Array.isArray(summary?.idpCandidates) ? summary.idpCandidates : []),
+        ]);
+        const mvpdMatch = candidateMvpds.some((candidate) =>
+          isRestV2MvpdMatch(candidate, selectedMvpd, {
+            allowSsoAlias: allowSsoAliasMatch,
+          })
         );
-        if (keyMatch || idpMatch) {
+        if (mvpdMatch) {
           filteredProfiles[profileKey] = profileValue;
         }
       }
-      effectiveProfiles = filteredProfiles;
-      effectivePayload = {
-        ...effectivePayload,
-        profiles: filteredProfiles,
-      };
+      if (Object.keys(filteredProfiles).length === 0 && rawProfileCount > 0 && allowSsoAliasMatch) {
+        effectiveProfiles = rawProfiles;
+        effectivePayload = {
+          ...effectivePayload,
+          profiles: rawProfiles,
+        };
+      } else {
+        effectiveProfiles = filteredProfiles;
+        effectivePayload = {
+          ...effectivePayload,
+          profiles: filteredProfiles,
+        };
+      }
     } else {
       effectivePayload = {
         ...effectivePayload,
@@ -20870,7 +20886,12 @@ function restWorkspaceGetSelectionContextFromCurrentSelection(programmer = null)
       harvestList.find((item) => {
         const harvestRequestorId = String(item?.requestorId || item?.serviceProviderId || "").trim();
         const harvestMvpd = String(item?.mvpd || "").trim();
-        return harvestRequestorId === requestorId && harvestMvpd === mvpd;
+        return (
+          harvestRequestorId === requestorId &&
+          isRestV2MvpdMatch(harvestMvpd, mvpd, {
+            allowSsoAlias: true,
+          })
+        );
       }) || null;
   }
   if (!selectedHarvest && harvestList.length > 0) {
@@ -21461,7 +21482,12 @@ function buildBobtoolsWorkspaceSelectionContext(programmer = null) {
       harvestList.find((item) => {
         const harvestRequestorId = String(item?.requestorId || item?.serviceProviderId || "").trim();
         const harvestMvpd = String(item?.mvpd || "").trim();
-        return harvestRequestorId === selectedRequestorId && harvestMvpd === selectedMvpd;
+        return (
+          harvestRequestorId === selectedRequestorId &&
+          isRestV2MvpdMatch(harvestMvpd, selectedMvpd, {
+            allowSsoAlias: true,
+          })
+        );
       }) || null;
   }
   if (!selectedHarvest && harvestList.length > 0) {
@@ -23295,69 +23321,6 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
             <button type="button" class="mvpd-open-workspace-btn">MVPD Workspace</button>
           </div>
           <p class="rest-v2-login-status" hidden></p>
-        </section>
-        <section class="rest-v2-profile-history-tool" hidden>
-          <div class="rest-v2-tool-head">
-            <button type="button" class="rest-v2-tool-collapse-btn rest-v2-profile-tool-toggle" aria-expanded="true">
-              <span class="rest-v2-tool-title">MVPD Login Profiles (Session)</span>
-              <span class="rest-v2-tool-collapse-icon" aria-hidden="true">▼</span>
-            </button>
-            <div class="rest-v2-tool-head-actions">
-              <button type="button" class="rest-v2-profile-export-btn" disabled>Export CSV</button>
-              <span class="rest-v2-tool-count rest-v2-profile-count">0</span>
-            </div>
-          </div>
-          <div class="rest-v2-tool-body rest-v2-profile-tool-body">
-            <ul class="rest-v2-profile-list"></ul>
-          </div>
-        </section>
-        <section class="rest-v2-entitlement-tool" hidden>
-          <div class="rest-v2-tool-head">
-            <button type="button" class="rest-v2-tool-collapse-btn rest-v2-entitlement-tool-toggle" aria-expanded="true">
-              <span class="rest-v2-tool-title">Can I watch?</span>
-              <span class="rest-v2-tool-collapse-icon" aria-hidden="true">▼</span>
-            </button>
-          </div>
-          <div class="rest-v2-tool-body rest-v2-entitlement-tool-body">
-            <div class="rest-v2-entitlement-context-row">
-              <p class="rest-v2-entitlement-context"></p>
-              <button
-                type="button"
-                class="rest-v2-entitlement-copy-upstream-btn"
-                aria-label="Copy upstreamUserID to clipboard"
-                title="Copy upstreamUserID to clipboard"
-                hidden
-              >
-                <span class="rest-v2-entitlement-copy-icon" aria-hidden="true"></span>
-              </button>
-              <button
-                type="button"
-                class="rest-v2-entitlement-splunk-btn"
-                aria-label="Run Splunk RCA lookup in REST Workspace"
-                title="Run Splunk RCA lookup in REST Workspace"
-                hidden
-              >
-                <span class="rest-v2-entitlement-splunk-icon" aria-hidden="true"></span>
-              </button>
-            </div>
-            <form class="rest-v2-entitlement-form">
-              <input
-                type="text"
-                class="rest-v2-resource-input"
-                placeholder="NBALPP, NBALP3, NBATV"
-                aria-label="Comma-delimited resource IDs"
-              />
-              <button type="submit" class="rest-v2-entitlement-go-btn">GO</button>
-            </form>
-            <p class="rest-v2-entitlement-status"></p>
-            <div class="rest-v2-entitlement-summary" hidden></div>
-          </div>
-        </section>
-        <section class="rest-v2-splunk-report-tool" hidden>
-          <div class="rest-v2-tool-head">
-            <p class="rest-v2-tool-title">Splunk RCA Results</p>
-          </div>
-          <div class="rest-v2-splunk-report-summary"></div>
         </section>
         <section class="rest-v2-bobtools-tool" hidden>
           <div class="rest-v2-tool-head">
@@ -35069,6 +35032,56 @@ function collectRestV2SessionCodeCandidates(values = [], serviceProviderId = "")
     }
   });
   return dedupeRestV2CandidateStrings(candidates);
+}
+
+function normalizeRestV2MvpdMatchToken(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function buildRestV2MvpdMatchTokens(value = "", options = {}) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return [];
+  }
+  const allowSsoAlias = options?.allowSsoAlias === true;
+  const tokenSet = new Set();
+  const push = (token) => {
+    const text = String(token || "").trim().toLowerCase();
+    if (text) {
+      tokenSet.add(text);
+    }
+  };
+
+  push(normalized);
+  push(normalized.replace(/[\s_-]+/g, "-"));
+  push(normalized.replace(/[\s_-]+/g, "_"));
+  const compact = normalizeRestV2MvpdMatchToken(normalized);
+  push(compact);
+
+  if (allowSsoAlias && compact) {
+    const compactWithoutSso = compact.replace(/sso$/i, "");
+    if (compactWithoutSso && compactWithoutSso !== compact) {
+      push(compactWithoutSso);
+    }
+    if (compactWithoutSso) {
+      push(`${compactWithoutSso}sso`);
+    }
+  }
+
+  return [...tokenSet];
+}
+
+function isRestV2MvpdMatch(candidate = "", target = "", options = {}) {
+  const candidateTokens = buildRestV2MvpdMatchTokens(candidate, options);
+  const targetTokens = buildRestV2MvpdMatchTokens(target, options);
+  if (candidateTokens.length === 0 || targetTokens.length === 0) {
+    return false;
+  }
+  const targetSet = new Set(targetTokens);
+  return candidateTokens.some((token) => targetSet.has(token));
 }
 
 function isRestV2LikelyPartnerSsoContext(context = null) {
