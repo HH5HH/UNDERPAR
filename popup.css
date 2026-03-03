@@ -760,6 +760,32 @@ select:disabled {
   color: var(--service-accent-ink);
 }
 
+.service-cm .cmu-jelly-make-clickcmu-btn.esm-workspace-toolbar-icon-btn--tearsheet {
+  border-color: #2a8b74;
+  background: linear-gradient(160deg, rgba(42, 139, 116, 0.98), rgba(29, 98, 82, 0.98));
+  color: #ffffff;
+  box-shadow: 0 10px 20px rgba(42, 139, 116, 0.28), 0 2px 0 rgba(255, 255, 255, 0.34) inset;
+}
+
+.service-cm .cmu-jelly-make-clickcmu-btn.esm-workspace-toolbar-icon-btn--tearsheet:hover:not(:disabled) {
+  border-color: #1f6f5e;
+  background: linear-gradient(160deg, rgba(48, 157, 131, 0.98), rgba(31, 111, 94, 0.98));
+  color: #ffffff;
+  box-shadow: 0 13px 24px rgba(29, 98, 82, 0.33), 0 2px 0 rgba(255, 255, 255, 0.34) inset;
+}
+
+.service-cm .cmu-jelly-make-clickcmu-btn.esm-workspace-toolbar-icon-btn--tearsheet:active:not(:disabled) {
+  border-color: #1a5b4d;
+  background: linear-gradient(160deg, rgba(38, 125, 104, 0.98), rgba(26, 91, 77, 0.98));
+  color: #ffffff;
+  box-shadow: 0 8px 15px rgba(26, 91, 77, 0.28), 0 2px 0 rgba(255, 255, 255, 0.28) inset;
+}
+
+.service-cm .cmu-jelly-make-clickcmu-btn.esm-workspace-toolbar-icon-btn--tearsheet:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(42, 139, 116, 0.34);
+}
+
 .service-cm-mvpd .cmu-jelly-shell .esm-workspace-treemap-title {
   color: var(--service-accent-ink);
 }
