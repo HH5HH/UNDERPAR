@@ -21688,17 +21688,17 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     const selectedMvpdMeta = getRestV2MvpdMeta(selectedRequestorId, selectedMvpdId);
     const selectedMvpdLabel = getRestV2MvpdPickerLabel(selectedRequestorId, selectedMvpdId, selectedMvpdMeta) || selectedMvpdId;
     const exportFileScopeLabel = String(selectedMvpdId || selectedMvpdTenantScope || "MVPD").trim();
-    const clickCmuContext = {
-      programmer: selectedProgrammer,
-      cmService: selectedCmMvpdService,
-      cmState: null,
-      section: null,
-      tenantScope: selectedMvpdTenantScope,
-      mvpdId: selectedMvpdId,
+    const activeMvpdCmState = getActiveCmMvpdState();
+    const clickCmuContext = await resolveClickCmuDownloadContext(activeMvpdCmState, {
       source: "mvpd-workspace",
       isMvpdWorkspaceExport: true,
       preferMvpdService: true,
-    };
+      mvpdId: selectedMvpdId,
+      tenantScope: selectedMvpdTenantScope,
+    });
+    if (!clickCmuContext) {
+      return { ok: false, error: "Select an MVPD with Concurrency Monitoring access before exporting clickCMU tearsheets." };
+    }
     const requestToken = Number(state.premiumPanelRequestToken || 0);
     if (action === "resolve-clickcmuws-auth") {
       const authContext = await resolveClickCmuAuthContext(clickCmuContext, requestToken, {
@@ -24426,7 +24426,7 @@ async function loadCmService(programmer, cmService, section, contentElement, req
             : String(firstNonEmptyString([matchedTenants?.[0]?.tenantName, resolvedMvpdScope || ""])).trim();
           const exportFileScopeLabel = String(selectedMvpdId || resolvedMvpdScope || "MVPD").trim();
           await makeClickCmuDownload(clickCmuContext, requestToken, {
-            source: "sidepanel",
+            source: isMvpdService ? "mvpd-workspace" : "sidepanel",
             isMvpdWorkspaceExport: isMvpdService,
             mvpdId: isMvpdService ? selectedMvpdId : undefined,
             tenantScope: isMvpdService ? resolvedMvpdScope : undefined,
