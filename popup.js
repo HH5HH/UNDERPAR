@@ -884,6 +884,7 @@ const state = {
   bobtoolsWorkspaceLastResultByHarvestKey: new Map(),
   restV2ProfilesHydrationLastAtBySelectionKey: new Map(),
   restV2ProfilesHydrationPromiseBySelectionKey: new Map(),
+  restV2PartnerSsoCreateResultByFlowKey: new Map(),
   restV2BobtoolsRedirectWatcherBound: false,
   restV2BobtoolsRedirectInFlightByTabId: new Set(),
   restV2LoginTabWatcherBound: false,
@@ -1591,6 +1592,27 @@ async function stopRestV2DebugFlowAndSnapshot(flowId, reason = "manual") {
     flow: response.flow && typeof response.flow === "object" ? response.flow : null,
     error: response.error ? String(response.error) : "",
   };
+}
+
+async function getRestV2DebugFlowSnapshot(flowId) {
+  const normalizedFlowId = String(flowId || "").trim();
+  if (!normalizedFlowId) {
+    return null;
+  }
+  let response = await sendRuntimeMessageSafe({
+    type: "underpardebug:getFlow",
+    flowId: normalizedFlowId,
+  });
+  if (!response?.ok) {
+    response = await sendRuntimeMessageSafe({
+      type: "minclouddebug:getFlow",
+      flowId: normalizedFlowId,
+    });
+  }
+  if (!response?.ok || !response?.flow || typeof response.flow !== "object") {
+    return null;
+  }
+  return response.flow;
 }
 
 function escapeHtml(value) {
@@ -2916,6 +2938,7 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     sessionCodeCandidates,
     sessionAction: String(harvest.sessionAction || "").trim(),
     sessionPartner: String(harvest.sessionPartner || "").trim(),
+    partnerFrameworkStatus: String(harvest.partnerFrameworkStatus || "").trim(),
     sessionUrl,
     loginUrl,
     appInfo,
@@ -3344,6 +3367,18 @@ async function fetchRestV2ProfilesForHarvest(harvest, options = {}) {
       : `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles/${encodeURIComponent(mvpd)}`;
   const actionLabel = getBobtoolsRestV2ActionLabel(actionMode);
   const flowId = resolveRestV2DebugFlowIdForHarvest(harvest);
+  const likelySsoContext = isRestV2LikelyPartnerSsoContext(harvest);
+  const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(harvest);
+  const requestHeaders = buildRestV2Headers(serviceProviderId, {
+    Accept: "application/json",
+  });
+  if (
+    actionMode === BOBTOOLS_REST_V2_ACTION_PROFILES_MVPD &&
+    likelySsoContext &&
+    partnerFrameworkStatus
+  ) {
+    requestHeaders["AP-Partner-Framework-Status"] = partnerFrameworkStatus;
+  }
 
   emitRestV2DebugEvent(flowId, {
     source: "extension",
@@ -3357,6 +3392,9 @@ async function fetchRestV2ProfilesForHarvest(harvest, options = {}) {
     appGuid: String(appInfo?.guid || ""),
     appName: String(appInfo?.appName || appInfo?.guid || ""),
     authMode: "dcr_client_bearer",
+    partnerFrameworkStatusPresent: Boolean(
+      actionMode === BOBTOOLS_REST_V2_ACTION_PROFILES_MVPD && likelySsoContext && partnerFrameworkStatus
+    ),
   });
 
   const response = await fetchWithPremiumAuth(
@@ -3366,9 +3404,7 @@ async function fetchRestV2ProfilesForHarvest(harvest, options = {}) {
     {
       method: "GET",
       mode: "cors",
-      headers: buildRestV2Headers(serviceProviderId, {
-        Accept: "application/json",
-      }),
+      headers: requestHeaders,
     },
     "refresh",
     {
@@ -6435,6 +6471,10 @@ function setRestV2PreparedLoginEntry(context, payload) {
     loginUrl: String(payload?.loginUrl || "").trim(),
     appInfo: payload?.appInfo || context?.appInfo || null,
     sessionData: payload?.sessionData && typeof payload.sessionData === "object" ? payload.sessionData : null,
+    sessionResponseHeaders:
+      payload?.sessionResponseHeaders && typeof payload.sessionResponseHeaders === "object" ? payload.sessionResponseHeaders : null,
+    partnerFrameworkStatus: String(payload?.partnerFrameworkStatus || payload?.sessionData?.partnerFrameworkStatus || "").trim(),
+    sessionPartner: String(payload?.sessionPartner || payload?.sessionData?.partner || "").trim(),
     payload: payload?.payload && typeof payload.payload === "object" ? payload.payload : null,
   };
   if (!entry.loginUrl) {
@@ -6455,6 +6495,7 @@ function clearRestV2PreparedLoginState() {
   state.restV2PreparedLoginBySelectionKey.clear();
   state.restV2PreparePromiseBySelectionKey.clear();
   state.restV2PrepareErrorBySelectionKey.clear();
+  state.restV2PartnerSsoCreateResultByFlowKey.clear();
   clearRestV2ProfileHarvestSessionState();
   state.restV2LastLaunchTabId = 0;
   state.restV2LastLaunchWindowId = 0;
@@ -6773,7 +6814,15 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
 
   const workPromise = (async () => {
     try {
-      const { loginUrl, appInfo: selectedAppInfo, sessionData, payload } = await createRestV2SessionForContext(context, {
+      const {
+        loginUrl,
+        appInfo: selectedAppInfo,
+        sessionData,
+        payload,
+        sessionResponseHeaders,
+        partnerFrameworkStatus,
+        sessionPartner,
+      } = await createRestV2SessionForContext(context, {
         debugFlowId,
       });
       if (!loginUrl) {
@@ -6786,6 +6835,9 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
         loginUrl,
         appInfo: resolvedAppInfo,
         sessionData,
+        sessionResponseHeaders,
+        partnerFrameworkStatus,
+        sessionPartner,
         payload,
       });
       if (!entry) {
@@ -7275,8 +7327,13 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     redirectUrl,
     sessionCode,
     sessionCodeCandidates,
-    sessionAction: String(options?.sessionAction || "").trim(),
-    sessionPartner: String(options?.sessionPartner || "").trim(),
+    sessionAction: String(firstNonEmptyString([options?.sessionAction, context?.sessionAction]) || "").trim(),
+    sessionPartner: String(firstNonEmptyString([options?.sessionPartner, context?.sessionPartner]) || "").trim(),
+    partnerFrameworkStatus: String(options?.partnerFrameworkStatus || context?.partnerFrameworkStatus || "").trim(),
+    sessionResponseHeaders:
+      options?.sessionResponseHeaders && typeof options.sessionResponseHeaders === "object"
+        ? { ...options.sessionResponseHeaders }
+        : null,
     sessionUrl,
     loginUrl,
     startedAt: Date.now(),
@@ -7438,7 +7495,14 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
       sessionCode: firstNonEmptyString([preparedEntry?.sessionData?.code, sessionCodeCandidates[0]]),
       sessionCodeCandidates,
       sessionAction: String(preparedEntry?.sessionData?.actionName || "").trim(),
-      sessionPartner: String(preparedEntry?.sessionData?.partner || "").trim(),
+      sessionPartner: String(firstNonEmptyString([preparedEntry?.sessionPartner, preparedEntry?.sessionData?.partner]) || "").trim(),
+      partnerFrameworkStatus: String(
+        firstNonEmptyString([preparedEntry?.partnerFrameworkStatus, preparedEntry?.sessionData?.partnerFrameworkStatus]) || ""
+      ).trim(),
+      sessionResponseHeaders:
+        preparedEntry?.sessionResponseHeaders && typeof preparedEntry.sessionResponseHeaders === "object"
+          ? { ...preparedEntry.sessionResponseHeaders }
+          : null,
       sessionUrl: normalizeAdobeNavigationUrl(firstNonEmptyString([preparedEntry?.sessionData?.url])),
       loginUrl: preparedEntry?.loginUrl,
     });
@@ -8654,6 +8718,7 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     sessionCodeCandidates,
     sessionAction: String(context?.sessionAction || "").trim(),
     sessionPartner: String(context?.sessionPartner || "").trim(),
+    partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
     sessionUrl,
     loginUrl,
     profileUrl: String(profileCheckResult.url || "").trim(),
@@ -9210,6 +9275,355 @@ function getRestV2ProfileHarvestForContext(context = null) {
   return state.restV2ProfileHarvestLast && typeof state.restV2ProfileHarvestLast === "object" ? state.restV2ProfileHarvestLast : null;
 }
 
+function resolveRestV2PartnerSsoFlowCacheKey(context = null, flowId = "") {
+  const normalizedFlowId = String(flowId || "").trim();
+  if (normalizedFlowId) {
+    return `flow:${normalizedFlowId}`;
+  }
+  const programmerId = String(context?.programmerId || "").trim().toLowerCase();
+  const requestorId = String(context?.requestorId || "").trim().toLowerCase();
+  const mvpd = String(context?.mvpd || "").trim().toLowerCase();
+  const sessionCode = String(context?.sessionCode || "").trim().toLowerCase();
+  return `context:${programmerId}|${requestorId}|${mvpd}|${sessionCode}`;
+}
+
+function getRestV2PartnerSsoCreateResultForFlow(context = null, flowId = "") {
+  const key = resolveRestV2PartnerSsoFlowCacheKey(context, flowId);
+  if (!key) {
+    return null;
+  }
+  return state.restV2PartnerSsoCreateResultByFlowKey.get(key) || null;
+}
+
+function setRestV2PartnerSsoCreateResultForFlow(context = null, flowId = "", result = null) {
+  const key = resolveRestV2PartnerSsoFlowCacheKey(context, flowId);
+  if (!key || !result || typeof result !== "object") {
+    return;
+  }
+  state.restV2PartnerSsoCreateResultByFlowKey.set(key, {
+    ...result,
+  });
+  const maxEntries = 120;
+  while (state.restV2PartnerSsoCreateResultByFlowKey.size > maxEntries) {
+    const firstKey = state.restV2PartnerSsoCreateResultByFlowKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.restV2PartnerSsoCreateResultByFlowKey.delete(firstKey);
+  }
+}
+
+function decodeBase64TextSafe(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const normalized = raw
+    .replace(/[\r\n]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  if (!normalized || /[^A-Za-z0-9+/=]/.test(normalized)) {
+    return "";
+  }
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+  try {
+    return atob(padded);
+  } catch {
+    return "";
+  }
+}
+
+function decodeSimpleHtmlEntities(value = "") {
+  return String(value || "")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&#x2b;/gi, "+")
+    .replace(/&#43;/g, "+")
+    .replace(/&amp;/gi, "&");
+}
+
+function normalizeRestV2SamlResponseForPartnerProfile(value = "") {
+  const raw = decodeSimpleHtmlEntities(String(value || "").trim());
+  if (!raw) {
+    return "";
+  }
+  if (/<\s*(?:\?xml|saml|soap|[A-Za-z0-9_.:-]+:Envelope)/i.test(raw)) {
+    return base64EncodeUtf8(raw);
+  }
+
+  const candidateValues = dedupeRestV2CandidateStrings([
+    raw,
+    raw.replace(/\s+/g, "+"),
+    decodeURIComponentSafe(raw),
+    decodeURIComponentSafe(raw).replace(/\s+/g, "+"),
+  ]);
+
+  for (const candidate of candidateValues) {
+    const normalized = String(candidate || "").trim().replace(/[\r\n]+/g, "").replace(/\s+/g, "+");
+    if (!normalized) {
+      continue;
+    }
+    const decoded = decodeBase64TextSafe(normalized);
+    if (decoded && /<\s*(?:\?xml|saml|soap|[A-Za-z0-9_.:-]+:Envelope)/i.test(decoded)) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
+function extractRestV2SamlResponseFromText(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/<\s*(?:\?xml|saml|soap|[A-Za-z0-9_.:-]+:Envelope)/i.test(raw)) {
+    return raw;
+  }
+  const patterns = [
+    /(?:^|[?&])SAMLResponse=([^&#]+)/i,
+    /name=["']SAMLResponse["'][^>]*value=["']([^"']+)["']/i,
+    /value=["']([^"']+)["'][^>]*name=["']SAMLResponse["']/i,
+    /["']SAMLResponse["']\s*[:=]\s*["']([^"']+)["']/i,
+  ];
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+    if (match?.[1]) {
+      return decodeSimpleHtmlEntities(String(match[1] || "").trim());
+    }
+  }
+  return "";
+}
+
+function extractRestV2SamlResponseFromWebRequestEvent(event = null) {
+  const formData = event?.requestBody?.formData;
+  if (!formData || typeof formData !== "object") {
+    return "";
+  }
+  const samlValues =
+    formData.SAMLResponse ||
+    formData.samlResponse ||
+    formData.samlresponse ||
+    getRestV2CaseInsensitiveObjectValue(formData, ["SAMLResponse"]);
+  if (Array.isArray(samlValues)) {
+    return String(samlValues[0] || "").trim();
+  }
+  return String(samlValues || "").trim();
+}
+
+function extractRestV2SamlResponseFromDebugFlow(flow = null) {
+  const events = Array.isArray(flow?.events) ? flow.events : [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    if (event.source === "tab-network" && String(event.phase || "").trim() === "body") {
+      const extracted = extractRestV2SamlResponseFromText(String(event.bodyPreview || "").trim());
+      const normalizedSaml = normalizeRestV2SamlResponseForPartnerProfile(extracted);
+      if (normalizedSaml) {
+        return {
+          samlResponse: normalizedSaml,
+          source: "tab-network:body",
+        };
+      }
+    }
+  }
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    if (event.source === "web-request" && String(event.phase || "").trim() === "onBeforeRequest") {
+      const rawSaml = extractRestV2SamlResponseFromWebRequestEvent(event);
+      const normalizedSaml = normalizeRestV2SamlResponseForPartnerProfile(rawSaml);
+      if (normalizedSaml) {
+        return {
+          samlResponse: normalizedSaml,
+          source: "web-request:onBeforeRequest",
+        };
+      }
+    }
+  }
+  return {
+    samlResponse: "",
+    source: "",
+  };
+}
+
+async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "", options = {}) {
+  const normalizedFlowId = String(flowId || "").trim();
+  const cached = getRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId);
+  if (cached && cached.attempted === true) {
+    return cached;
+  }
+
+  const result = {
+    attempted: false,
+    created: false,
+    ok: false,
+    status: 0,
+    statusText: "",
+    profileCount: 0,
+    partner: "",
+    frameworkStatusPresent: false,
+    endpointUrl: "",
+    error: "",
+    samlSource: "",
+  };
+
+  if (!context?.programmerId || !context?.appInfo?.guid || !context?.serviceProviderId || !context?.mvpd) {
+    result.error = "Missing REST V2 context for partner SSO profile creation.";
+    return result;
+  }
+  if (!isRestV2LikelyPartnerSsoContext(context)) {
+    result.error = "Selection is not a partner SSO context.";
+    return result;
+  }
+
+  const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(context);
+  const partner = resolveRestV2PartnerNameFromContext(context);
+  result.partner = String(partner || "").trim();
+  result.frameworkStatusPresent = Boolean(partnerFrameworkStatus);
+  if (!partner) {
+    result.error = "Missing partner from REST session response.";
+    setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
+    return result;
+  }
+  if (!partnerFrameworkStatus) {
+    result.error = "Missing AP-Partner-Framework-Status from REST session response.";
+    setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
+    return result;
+  }
+
+  const maxSamlCaptureAttempts = Math.max(1, Number(options?.maxSamlCaptureAttempts || 4));
+  const samlCaptureDelayMs = Math.max(0, Number(options?.samlCaptureDelayMs || 250));
+  let samlDetails = {
+    samlResponse: "",
+    source: "",
+  };
+  for (let attempt = 1; attempt <= maxSamlCaptureAttempts; attempt += 1) {
+    const flowSnapshot =
+      attempt === 1 && options?.flowSnapshot && typeof options.flowSnapshot === "object"
+        ? options.flowSnapshot
+        : await getRestV2DebugFlowSnapshot(normalizedFlowId);
+    samlDetails = extractRestV2SamlResponseFromDebugFlow(flowSnapshot);
+    if (String(samlDetails?.samlResponse || "").trim()) {
+      break;
+    }
+    if (attempt < maxSamlCaptureAttempts && samlCaptureDelayMs > 0) {
+      await waitForDelay(samlCaptureDelayMs);
+    }
+  }
+  const samlResponse = String(samlDetails?.samlResponse || "").trim();
+  result.samlSource = String(samlDetails?.source || "").trim();
+  if (!samlResponse) {
+    result.error = "SAMLResponse was not captured from response body/request body.";
+    setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
+    return result;
+  }
+
+  const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(context.serviceProviderId)}/profiles/sso/${encodeURIComponent(partner)}`;
+  result.endpointUrl = endpointUrl;
+  result.attempted = true;
+  emitRestV2DebugEvent(normalizedFlowId, {
+    source: "extension",
+    phase: "profiles-sso-create-request",
+    requestorId: String(context.requestorId || ""),
+    mvpd: String(context.mvpd || ""),
+    partner: String(partner || ""),
+    endpointUrl,
+    frameworkStatusPresent: true,
+    samlSource: result.samlSource,
+  });
+
+  const requestHeaders = buildRestV2Headers(context.serviceProviderId, {
+    Accept: "application/json",
+    "Content-Type": "application/x-www-form-urlencoded",
+    "AP-Partner-Framework-Status": partnerFrameworkStatus,
+  });
+  const requestBody = new URLSearchParams();
+  requestBody.set("SAMLResponse", samlResponse);
+
+  try {
+    const response = await fetchWithPremiumAuth(
+      context.programmerId,
+      context.appInfo,
+      endpointUrl,
+      {
+        method: "POST",
+        mode: "cors",
+        headers: requestHeaders,
+        body: requestBody.toString(),
+      },
+      "refresh",
+      {
+        flowId: normalizedFlowId,
+        requestorId: String(context.requestorId || ""),
+        mvpd: String(context.mvpd || ""),
+        scope: "profiles-sso-create",
+        service: "rest-v2-profiles-sso",
+        endpointUrl,
+      }
+    );
+    const responseText = await response.text().catch(() => "");
+    const parsed = parseJsonText(responseText, {});
+    const profileCount = Number(Object.keys(parsed?.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {}).length || 0);
+    result.status = Number(response.status || 0);
+    result.statusText = String(response.statusText || "").trim();
+    result.profileCount = profileCount;
+    result.ok = response.ok === true;
+    result.created = response.ok === true;
+    if (!result.ok) {
+      result.error =
+        firstNonEmptyString([
+          String(parsed?.code || "").trim(),
+          String(parsed?.error?.code || "").trim(),
+          String(parsed?.error || "").trim(),
+          String(parsed?.message || "").trim(),
+          normalizeHttpErrorMessage(responseText),
+          `HTTP ${result.status || 0} ${result.statusText || ""}`.trim(),
+        ]) || "Partner SSO profile creation failed.";
+    }
+    if (result.ok) {
+      context.partnerFrameworkStatus = partnerFrameworkStatus;
+      context.sessionPartner = partner;
+    }
+    emitRestV2DebugEvent(normalizedFlowId, {
+      source: "extension",
+      phase: "profiles-sso-create-response",
+      requestorId: String(context.requestorId || ""),
+      mvpd: String(context.mvpd || ""),
+      partner: String(partner || ""),
+      endpointUrl,
+      status: result.status,
+      statusText: result.statusText,
+      ok: result.ok,
+      created: result.created,
+      profileCount,
+      error: String(result.error || "").trim(),
+      responsePreview: truncateDebugText(responseText, 1200),
+    });
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error);
+    emitRestV2DebugEvent(normalizedFlowId, {
+      source: "extension",
+      phase: "profiles-sso-create-error",
+      requestorId: String(context.requestorId || ""),
+      mvpd: String(context.mvpd || ""),
+      partner: String(partner || ""),
+      endpointUrl,
+      error: result.error,
+    });
+  }
+
+  setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
+  return result;
+}
+
 function buildRestV2ProfileCheckEndpointCandidates(context = null) {
   if (!context || typeof context !== "object") {
     return [];
@@ -9255,16 +9669,14 @@ function buildRestV2ProfileCheckEndpointCandidates(context = null) {
   }));
 
   const likelySsoContext = isRestV2LikelyPartnerSsoContext(context);
-  if (likelySsoContext && sessionCodeEndpoints.length > 0) {
-    sessionCodeEndpoints.forEach((item) => {
-      pushEndpoint("profiles-code", item.url, {
-        endpointLabel: "profiles/code",
-        sessionCode: item.sessionCode,
-      });
-    });
+  if (likelySsoContext) {
     if (mvpdProfilesUrl) {
       pushEndpoint("profiles-mvpd", mvpdProfilesUrl, {
         endpointLabel: "profiles/{mvpd}",
+      });
+    } else {
+      pushEndpoint("profiles-all", allProfilesUrl, {
+        endpointLabel: "profiles",
       });
     }
   } else {
@@ -9279,11 +9691,10 @@ function buildRestV2ProfileCheckEndpointCandidates(context = null) {
         sessionCode: item.sessionCode,
       });
     });
+    pushEndpoint("profiles-all", allProfilesUrl, {
+      endpointLabel: "profiles",
+    });
   }
-
-  pushEndpoint("profiles-all", allProfilesUrl, {
-    endpointLabel: "profiles",
-  });
 
   return endpoints;
 }
@@ -9397,6 +9808,14 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
   }
 
   const endpointScope = `${String(scope || "profiles-check")}:${String(endpoint.endpointKey || "profiles").trim()}`;
+  const likelySsoContext = isRestV2LikelyPartnerSsoContext(context);
+  const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(context);
+  const requestHeaders = buildRestV2Headers(context.serviceProviderId, {
+    Accept: "application/json",
+  });
+  if (likelySsoContext && partnerFrameworkStatus && String(endpoint?.endpointKey || "").trim() === "profiles-mvpd") {
+    requestHeaders["AP-Partner-Framework-Status"] = partnerFrameworkStatus;
+  }
 
   emitRestV2DebugEvent(flowId, {
     source: "extension",
@@ -9407,6 +9826,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
     profileCheckEndpoint: endpoint.endpointKey,
     profileCheckEndpointLabel: endpoint.endpointLabel,
     profileCheckSessionCode: endpoint.sessionCode || "",
+    partnerFrameworkStatusPresent: Boolean(likelySsoContext && partnerFrameworkStatus),
   });
 
   try {
@@ -9417,9 +9837,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
       {
         method: "GET",
         mode: "cors",
-        headers: buildRestV2Headers(context.serviceProviderId, {
-          Accept: "application/json",
-        }),
+        headers: requestHeaders,
       },
       "refresh",
       {
@@ -9894,6 +10312,26 @@ async function probeRestV2PostAuthProfiles(context, flowId, options = {}) {
       requestorId: String(context?.requestorId || ""),
       mvpd: String(context?.mvpd || ""),
     });
+
+    if (isRestV2LikelyPartnerSsoContext(context)) {
+      const ssoCreateResult = await createRestV2PartnerSsoProfileForFlow(context, flowId);
+      emitRestV2DebugEvent(flowId, {
+        source: "extension",
+        phase: `${scopePrefix}-sso-create`,
+        attempt,
+        maxAttempts,
+        requestorId: String(context?.requestorId || ""),
+        mvpd: String(context?.mvpd || ""),
+        partner: String(ssoCreateResult?.partner || "").trim(),
+        attempted: ssoCreateResult?.attempted === true,
+        created: ssoCreateResult?.created === true,
+        ok: ssoCreateResult?.ok === true,
+        status: Number(ssoCreateResult?.status || 0),
+        statusText: String(ssoCreateResult?.statusText || "").trim(),
+        error: String(ssoCreateResult?.error || "").trim(),
+        samlSource: String(ssoCreateResult?.samlSource || "").trim(),
+      });
+    }
 
     lastCheck = await fetchRestV2ProfileCheckResult(context, flowId, `${scopePrefix}-${attempt}`);
     const hasActiveProfile = isRestV2ProfileSessionActiveResult(lastCheck);
@@ -22493,6 +22931,11 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
       : [],
     sessionAction: String(recordingContext.sessionAction || "").trim(),
     sessionPartner: String(recordingContext.sessionPartner || "").trim(),
+    partnerFrameworkStatus: String(recordingContext.partnerFrameworkStatus || "").trim(),
+    sessionResponseHeaders:
+      recordingContext?.sessionResponseHeaders && typeof recordingContext.sessionResponseHeaders === "object"
+        ? { ...recordingContext.sessionResponseHeaders }
+        : null,
     sessionUrl: normalizeAdobeNavigationUrl(String(recordingContext.sessionUrl || "").trim()),
     loginUrl: normalizeAdobeNavigationUrl(String(recordingContext.loginUrl || "").trim()),
     appInfo: {
@@ -22535,6 +22978,7 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null) {
     sessionCodeCandidates,
     sessionAction: String(context.sessionAction || "").trim(),
     sessionPartner: String(context.sessionPartner || "").trim(),
+    partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
     sessionUrl,
     loginUrl,
     harvestedAt: Date.now(),
@@ -24074,11 +24518,13 @@ function ensureRestV2BobtoolsRedirectWatcher() {
         recordingContext?.mvpd
       ) {
         try {
-          const profileCheckResult = await fetchRestV2ProfileCheckResult(
-            recordingContext,
-            String(state.restV2DebugFlowId || "").trim(),
-            "profiles-redirect-bobtools"
-          );
+          const postAuthProbe = await probeRestV2PostAuthProfiles(recordingContext, String(state.restV2DebugFlowId || "").trim(), {
+            scopePrefix: "profiles-redirect-bobtools",
+            maxAttempts: 1,
+            delayMs: 0,
+          });
+          const profileCheckResult =
+            postAuthProbe?.result || buildRestV2ProfileCheckFallbackResult("Profile check unavailable after redirect intercept.");
           if (profileCheckResult?.harvestedProfile && isUsableRestV2ProfileHarvest(profileCheckResult.harvestedProfile)) {
             const storedHarvest = storeRestV2ProfileHarvest(recordingContext, profileCheckResult, String(state.restV2DebugFlowId || "").trim());
             hydrationContext = buildRestV2ContextFromHarvest(storedHarvest);
@@ -36327,6 +36773,186 @@ function normalizeAdobeNavigationUrl(value) {
   }
 }
 
+function getRestV2CaseInsensitiveObjectValue(source = null, keyCandidates = []) {
+  if (!source || typeof source !== "object") {
+    return "";
+  }
+  const candidates = Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates];
+  const normalizedCandidates = candidates.map((key) => String(key || "").trim().toLowerCase()).filter(Boolean);
+  if (normalizedCandidates.length === 0) {
+    return "";
+  }
+  for (const [key, value] of Object.entries(source)) {
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    if (!normalizedKey || !normalizedCandidates.includes(normalizedKey)) {
+      continue;
+    }
+    return String(value || "").trim();
+  }
+  return "";
+}
+
+function getRestV2CaseInsensitiveHeaderValue(headersLike = null, keyCandidates = []) {
+  const candidates = Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates];
+  const normalizedCandidates = candidates.map((key) => String(key || "").trim().toLowerCase()).filter(Boolean);
+  if (normalizedCandidates.length === 0) {
+    return "";
+  }
+  if (headersLike instanceof Headers) {
+    for (const [key, value] of headersLike.entries()) {
+      const normalizedKey = String(key || "").trim().toLowerCase();
+      if (normalizedCandidates.includes(normalizedKey)) {
+        return String(value || "").trim();
+      }
+    }
+    return "";
+  }
+  if (!headersLike || typeof headersLike !== "object") {
+    return "";
+  }
+  return getRestV2CaseInsensitiveObjectValue(headersLike, normalizedCandidates);
+}
+
+function decodeURIComponentSafe(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return "";
+  }
+}
+
+function parseRestV2PartnerFrameworkStatusPayload(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return null;
+  }
+  const candidates = dedupeRestV2CandidateStrings([raw, decodeURIComponentSafe(raw)]);
+  for (const candidate of candidates) {
+    const parsed = parseJsonText(candidate, null);
+    if (parsed && typeof parsed === "object") {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function resolveRestV2PartnerFromFrameworkStatus(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const parsedPayload = parseRestV2PartnerFrameworkStatusPayload(raw);
+  const directFromParsed = firstNonEmptyString([
+    getRestV2CaseInsensitiveObjectValue(parsedPayload, [
+      "partner",
+      "partnerName",
+      "accountProviderIdentifier",
+      "accountProvider",
+      "provider",
+      "providerName",
+    ]),
+    getRestV2CaseInsensitiveObjectValue(parsedPayload?.partner, ["name", "partner", "id"]),
+  ]);
+  if (directFromParsed) {
+    return String(directFromParsed || "").trim();
+  }
+  const decoded = decodeURIComponentSafe(raw);
+  const sourceText = [raw, decoded].filter(Boolean).join(" ");
+  const partnerRegexes = [
+    /accountprovideridentifier["'=:\s]+([A-Za-z][A-Za-z0-9_-]{1,64})/i,
+    /partner(?:name)?["'=:\s]+([A-Za-z][A-Za-z0-9_-]{1,64})/i,
+    /\b(apple|roku|google|amazon|samsung)\b/i,
+  ];
+  for (const pattern of partnerRegexes) {
+    const match = sourceText.match(pattern);
+    if (match?.[1]) {
+      return String(match[1] || "").trim();
+    }
+  }
+  return "";
+}
+
+function resolveRestV2PartnerFrameworkStatusFromSessionData(sessionData = null, responseHeaders = null) {
+  const existingParameters =
+    sessionData?.existingParameters && typeof sessionData.existingParameters === "object" ? sessionData.existingParameters : null;
+  const candidates = dedupeRestV2CandidateStrings([
+    getRestV2CaseInsensitiveObjectValue(sessionData, [
+      "ap-partner-framework-status",
+      "AP-Partner-Framework-Status",
+      "partnerFrameworkStatus",
+      "partner_framework_status",
+      "frameworkStatus",
+      "framework_status",
+    ]),
+    getRestV2CaseInsensitiveObjectValue(existingParameters, [
+      "ap-partner-framework-status",
+      "AP-Partner-Framework-Status",
+      "partnerFrameworkStatus",
+      "partner_framework_status",
+      "frameworkStatus",
+      "framework_status",
+    ]),
+    getRestV2CaseInsensitiveHeaderValue(responseHeaders, [
+      "ap-partner-framework-status",
+      "AP-Partner-Framework-Status",
+    ]),
+  ]);
+  return firstNonEmptyString(candidates);
+}
+
+function resolveRestV2SessionPartnerFromSessionData(sessionData = null, partnerFrameworkStatus = "") {
+  const existingParameters =
+    sessionData?.existingParameters && typeof sessionData.existingParameters === "object" ? sessionData.existingParameters : null;
+  const partner = firstNonEmptyString([
+    getRestV2CaseInsensitiveObjectValue(sessionData, [
+      "partner",
+      "partnerName",
+      "accountProviderIdentifier",
+      "accountProvider",
+      "provider",
+      "providerName",
+    ]),
+    getRestV2CaseInsensitiveObjectValue(existingParameters, [
+      "partner",
+      "partnerName",
+      "accountProviderIdentifier",
+      "accountProvider",
+      "provider",
+      "providerName",
+    ]),
+    resolveRestV2PartnerFromFrameworkStatus(partnerFrameworkStatus),
+  ]);
+  return String(partner || "").trim();
+}
+
+function resolveRestV2PartnerFrameworkStatusFromContext(context = null) {
+  if (!context || typeof context !== "object") {
+    return "";
+  }
+  return firstNonEmptyString([
+    String(context.partnerFrameworkStatus || "").trim(),
+    String(context?.sessionData?.partnerFrameworkStatus || "").trim(),
+    resolveRestV2PartnerFrameworkStatusFromSessionData(context?.sessionData || null, context?.sessionResponseHeaders || null),
+  ]);
+}
+
+function resolveRestV2PartnerNameFromContext(context = null) {
+  if (!context || typeof context !== "object") {
+    return "";
+  }
+  const frameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(context);
+  return firstNonEmptyString([
+    String(context.sessionPartner || "").trim(),
+    String(context.partner || "").trim(),
+    resolveRestV2SessionPartnerFromSessionData(context?.sessionData || null, frameworkStatus),
+    resolveRestV2PartnerFromFrameworkStatus(frameworkStatus),
+  ]);
+}
+
 function resolveMvpdLoginNavigationUrl(sessionData, serviceProviderId) {
   const normalizedServiceProvider = String(serviceProviderId || "").trim();
   const rawUrl = normalizeAdobeNavigationUrl(sessionData?.url || "");
@@ -36512,7 +37138,13 @@ function isRestV2LikelyPartnerSsoContext(context = null) {
   const mvpd = String(context.mvpd || "").trim().toLowerCase();
   const sessionAction = String(context.sessionAction || "").trim().toLowerCase();
   const sessionPartner = String(context.sessionPartner || "").trim().toLowerCase();
-  return mvpd.includes("sso") || sessionAction.includes("sso") || sessionPartner.includes("sso");
+  const partnerFrameworkStatus = String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim();
+  return (
+    mvpd.includes("sso") ||
+    sessionAction.includes("sso") ||
+    sessionPartner.includes("sso") ||
+    Boolean(partnerFrameworkStatus)
+  );
 }
 
 function buildRestV2SessionCreatePayloadCandidates(mvpd) {
@@ -36622,8 +37254,17 @@ async function createRestV2SessionForContext(context, options = {}) {
 
       const text = await response.text().catch(() => "");
       const parsed = parseJsonText(text, null);
+      const responseHeaders = toDebugHeadersObject(response.headers || new Headers());
       if (response.ok) {
         const sessionData = parsed && typeof parsed === "object" ? parsed : {};
+        const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromSessionData(sessionData, responseHeaders);
+        const sessionPartner = resolveRestV2SessionPartnerFromSessionData(sessionData, partnerFrameworkStatus);
+        if (partnerFrameworkStatus && !String(sessionData?.partnerFrameworkStatus || "").trim()) {
+          sessionData.partnerFrameworkStatus = partnerFrameworkStatus;
+        }
+        if (sessionPartner && !String(sessionData?.partner || "").trim()) {
+          sessionData.partner = sessionPartner;
+        }
         const locationHeader = response.headers?.get("Location") || "";
         if (!sessionData.url && locationHeader) {
           sessionData.url = locationHeader;
@@ -36640,6 +37281,8 @@ async function createRestV2SessionForContext(context, options = {}) {
             appName: appCandidate.appName || appCandidate.guid,
             status: response.status,
             loginUrl,
+            sessionPartner: String(sessionPartner || "").trim(),
+            partnerFrameworkStatusPresent: Boolean(partnerFrameworkStatus),
             responsePreview: truncateDebugText(text, 2000),
           });
           return {
@@ -36647,6 +37290,9 @@ async function createRestV2SessionForContext(context, options = {}) {
             sessionData,
             payload: payloadCandidate,
             appInfo: appCandidate,
+            sessionResponseHeaders: responseHeaders,
+            partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
+            sessionPartner: String(sessionPartner || "").trim(),
           };
         }
         lastStatus = response.status;

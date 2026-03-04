@@ -2508,6 +2508,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  if (message?.type === `${DEBUG_MESSAGE_TYPE_PREFIX}getFlow` || message?.type === `${LEGACY_DEBUG_MESSAGE_TYPE_PREFIX}getFlow`) {
+    const flow = getFlowById(message?.flowId || "");
+    sendResponse({
+      ok: true,
+      flow: flow ? serializeFlow(flow) : null,
+    });
+    return false;
+  }
+
   if (message?.type === `${DEBUG_MESSAGE_TYPE_PREFIX}bindFlowTab` || message?.type === `${LEGACY_DEBUG_MESSAGE_TYPE_PREFIX}bindFlowTab`) {
     void bindFlowToTab(message?.flowId || "", message?.tabId || 0, message?.metadata || {})
       .then(() => {
