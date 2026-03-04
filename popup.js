@@ -9485,16 +9485,18 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
   }
 
   const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(context);
-  const partner = resolveRestV2PartnerNameFromContext(context);
-  result.partner = String(partner || "").trim();
   result.frameworkStatusPresent = Boolean(partnerFrameworkStatus);
-  if (!partner) {
-    result.error = "Missing partner from REST session response.";
+  if (!partnerFrameworkStatus) {
+    result.error = "Missing AP-Partner-Framework-Status from REST session response.";
     setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
     return result;
   }
-  if (!partnerFrameworkStatus) {
-    result.error = "Missing AP-Partner-Framework-Status from REST session response.";
+  const resolvedPartner = String(resolveRestV2PartnerNameFromContext(context) || "").trim();
+  const fallbackPartner = isRestV2LikelyPartnerSsoContext(context) ? "Apple" : "";
+  const partner = firstNonEmptyString([resolvedPartner, fallbackPartner]);
+  result.partner = /^(?:ios|tvos)$/i.test(String(partner || "").trim()) ? "Apple" : String(partner || "").trim();
+  if (!result.partner) {
+    result.error = "Missing partner for SSO profile creation.";
     setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
     return result;
   }
@@ -9526,7 +9528,7 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
     return result;
   }
 
-  const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(context.serviceProviderId)}/profiles/sso/${encodeURIComponent(partner)}`;
+  const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(context.serviceProviderId)}/profiles/sso/${encodeURIComponent(result.partner)}`;
   result.endpointUrl = endpointUrl;
   result.attempted = true;
   emitRestV2DebugEvent(normalizedFlowId, {
@@ -9534,7 +9536,7 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
     phase: "profiles-sso-create-request",
     requestorId: String(context.requestorId || ""),
     mvpd: String(context.mvpd || ""),
-    partner: String(partner || ""),
+    partner: String(result.partner || ""),
     endpointUrl,
     frameworkStatusPresent: true,
     samlSource: result.samlSource,
@@ -9590,14 +9592,14 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
     }
     if (result.ok) {
       context.partnerFrameworkStatus = partnerFrameworkStatus;
-      context.sessionPartner = partner;
+      context.sessionPartner = result.partner;
     }
     emitRestV2DebugEvent(normalizedFlowId, {
       source: "extension",
       phase: "profiles-sso-create-response",
       requestorId: String(context.requestorId || ""),
       mvpd: String(context.mvpd || ""),
-      partner: String(partner || ""),
+      partner: String(result.partner || ""),
       endpointUrl,
       status: result.status,
       statusText: result.statusText,
@@ -9614,7 +9616,7 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
       phase: "profiles-sso-create-error",
       requestorId: String(context.requestorId || ""),
       mvpd: String(context.mvpd || ""),
-      partner: String(partner || ""),
+      partner: String(result.partner || ""),
       endpointUrl,
       error: result.error,
     });
@@ -36830,7 +36832,10 @@ function parseRestV2PartnerFrameworkStatusPayload(value = "") {
   if (!raw) {
     return null;
   }
-  const candidates = dedupeRestV2CandidateStrings([raw, decodeURIComponentSafe(raw)]);
+  const decodedUri = decodeURIComponentSafe(raw);
+  const decodedBase64Raw = decodeBase64TextSafe(raw);
+  const decodedBase64Uri = decodeBase64TextSafe(decodedUri);
+  const candidates = dedupeRestV2CandidateStrings([raw, decodedUri, decodedBase64Raw, decodedBase64Uri]);
   for (const candidate of candidates) {
     const parsed = parseJsonText(candidate, null);
     if (parsed && typeof parsed === "object") {
@@ -36850,25 +36855,50 @@ function resolveRestV2PartnerFromFrameworkStatus(value = "") {
     getRestV2CaseInsensitiveObjectValue(parsedPayload, [
       "partner",
       "partnerName",
-      "accountProviderIdentifier",
-      "accountProvider",
-      "provider",
-      "providerName",
+      "frameworkPartner",
+      "frameworkPartnerName",
+      "frameworkPartnerId",
+    ]),
+    getRestV2CaseInsensitiveObjectValue(parsedPayload?.frameworkPartnerInfo, [
+      "partner",
+      "partnerName",
+      "name",
+      "id",
+      "identifier",
     ]),
     getRestV2CaseInsensitiveObjectValue(parsedPayload?.partner, ["name", "partner", "id"]),
   ]);
   if (directFromParsed) {
-    return String(directFromParsed || "").trim();
+    const normalizedDirect = String(directFromParsed || "").trim();
+    if (/^(?:ios|tvos)$/i.test(normalizedDirect)) {
+      return "Apple";
+    }
+    return normalizedDirect;
+  }
+  const frameworkName = firstNonEmptyString([
+    getRestV2CaseInsensitiveObjectValue(parsedPayload, ["frameworkName", "framework"]),
+    getRestV2CaseInsensitiveObjectValue(parsedPayload?.frameworkProviderInfo, ["frameworkName", "framework"]),
+  ]);
+  if (/^(?:ios|tvos|appletv|apple-tv)$/i.test(String(frameworkName || "").trim())) {
+    return "Apple";
   }
   const decoded = decodeURIComponentSafe(raw);
-  const sourceText = [raw, decoded].filter(Boolean).join(" ");
+  const decodedBase64Raw = decodeBase64TextSafe(raw);
+  const decodedBase64Uri = decodeBase64TextSafe(decoded);
+  const sourceText = [raw, decoded, decodedBase64Raw, decodedBase64Uri].filter(Boolean).join(" ");
   const partnerRegexes = [
-    /accountprovideridentifier["'=:\s]+([A-Za-z][A-Za-z0-9_-]{1,64})/i,
+    /frameworkname["'=:\s]+(?:ios|tvos|appletv|apple-tv)/i,
     /partner(?:name)?["'=:\s]+([A-Za-z][A-Za-z0-9_-]{1,64})/i,
     /\b(apple|roku|google|amazon|samsung)\b/i,
   ];
   for (const pattern of partnerRegexes) {
     const match = sourceText.match(pattern);
+    if (!match) {
+      continue;
+    }
+    if (pattern.source.startsWith("frameworkname")) {
+      return "Apple";
+    }
     if (match?.[1]) {
       return String(match[1] || "").trim();
     }
@@ -36911,18 +36941,10 @@ function resolveRestV2SessionPartnerFromSessionData(sessionData = null, partnerF
     getRestV2CaseInsensitiveObjectValue(sessionData, [
       "partner",
       "partnerName",
-      "accountProviderIdentifier",
-      "accountProvider",
-      "provider",
-      "providerName",
     ]),
     getRestV2CaseInsensitiveObjectValue(existingParameters, [
       "partner",
       "partnerName",
-      "accountProviderIdentifier",
-      "accountProvider",
-      "provider",
-      "providerName",
     ]),
     resolveRestV2PartnerFromFrameworkStatus(partnerFrameworkStatus),
   ]);
