@@ -26862,6 +26862,21 @@ function degradationBuildPremiumErrorMessage(status = 0, statusText = "", respon
   return `${httpLabel}: ${baseMessage}`;
 }
 
+function degradationFormatMvpdDisplayValue(requestorId = "", mvpdId = "") {
+  const normalizedMvpdId = String(mvpdId || "").trim();
+  if (!normalizedMvpdId) {
+    return "N/A";
+  }
+  const compact = normalizedMvpdId.toLowerCase().replace(/[\s_-]+/g, "");
+  if (compact === "all" || compact === "allmvpds" || compact === "*") {
+    return "ALL MVPDs";
+  }
+
+  const normalizedRequestorId = String(requestorId || state.selectedRequestorId || "").trim();
+  const pickerLabel = getRestV2MvpdPickerLabel(normalizedRequestorId, normalizedMvpdId);
+  return String(firstNonEmptyString([pickerLabel, normalizedMvpdId]) || normalizedMvpdId).trim() || normalizedMvpdId;
+}
+
 function degradationBuildStatusRow(endpointSpec, baseValues, targetNode, targetType, targetIdFallback = "") {
   const detail = targetNode && typeof targetNode === "object" ? targetNode : {};
   const enabledRaw = degradationGetObjectValueByKeys(detail, [
@@ -26897,7 +26912,7 @@ function degradationBuildStatusRow(endpointSpec, baseValues, targetNode, targetT
     Rule: endpointSpec.title,
     "Measure ID": String(baseValues.measureId || endpointSpec.measureId || endpointSpec.path || "").trim(),
     Programmer: String(baseValues.programmerId || "").trim() || "N/A",
-    MVPD: String(baseValues.mvpdId || "").trim() || "N/A",
+    MVPD: degradationFormatMvpdDisplayValue(baseValues.requestorId, baseValues.mvpdId),
     "Target Type": String(targetType || endpointSpec.targetType || "").trim() || "N/A",
     Target: resolvedTargetId || "N/A",
     Enabled: enabled == null ? "N/A" : enabled ? "true" : "false",
@@ -26938,6 +26953,7 @@ function degradationExtractRowsFromMegaPayload(parsedPayload, queryValues = {}) 
           String(measureObject.id || "").trim(),
           String(endpointTitle || "").trim().toLowerCase().replace(/\s+/g, "-"),
         ]),
+        requestorId: String(queryValues.requestorId || state.selectedRequestorId || "").trim(),
         programmerId,
         mvpdId,
       };
@@ -27017,6 +27033,7 @@ function degradationExtractRows(endpointSpec, parsedPayload, queryValues = {}) {
         String(measureObject.id || "").trim(),
         String(endpointSpec.measureId || endpointSpec.path || "").trim(),
       ]),
+      requestorId: String(queryValues.requestorId || state.selectedRequestorId || "").trim(),
       programmerId,
       mvpdId,
     };
