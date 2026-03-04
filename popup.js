@@ -26900,8 +26900,7 @@ function degradationBuildStatusRow(endpointSpec, baseValues, targetNode, targetT
   ]);
   const enabled = degradationCoerceBooleanValue(enabledRaw);
   const status = String(statusRaw == null ? "" : statusRaw).trim().toUpperCase();
-  const active =
-    enabled === true && (!status || status === "APPLIED" || status === "PENDING" || status === "ACTIVE");
+  const active = enabled === true && status === "APPLIED";
   const ttlNumeric = Number(ttlRaw);
   const ttlLabel = Number.isFinite(ttlNumeric) && ttlNumeric > 0 ? String(ttlNumeric) : "N/A";
   const resolvedTargetId = firstNonEmptyString([
@@ -27075,8 +27074,25 @@ function degradationExtractRows(endpointSpec, parsedPayload, queryValues = {}) {
   return rows;
 }
 
+function degradationIsAppliedActiveRow(row = null) {
+  if (!row || typeof row !== "object") {
+    return false;
+  }
+  const status = String(row?.Status || "").trim().toUpperCase();
+  const active = String(row?.Active || "").trim().toUpperCase();
+  return status === "APPLIED" && active === "YES";
+}
+
+function degradationFilterAppliedActiveRows(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return [];
+  }
+  return rows.filter((row) => degradationIsAppliedActiveRow(row));
+}
+
 function degradationBuildReportPayload(endpointSpec, queryValues, result = {}) {
-  const rows = Array.isArray(result.rows) ? result.rows : [];
+  const sourceRows = Array.isArray(result.rows) ? result.rows : [];
+  const rows = degradationFilterAppliedActiveRows(sourceRows);
   const columns = rows.length > 0 ? Object.keys(rows[0]) : getDegradationDefaultReportColumns();
   const activeCount = rows.reduce(
     (count, row) => count + (String(row?.Active || "").trim().toUpperCase() === "YES" ? 1 : 0),
@@ -27282,7 +27298,7 @@ async function degradationExecuteStatusRequest(panelState, endpointSpec, options
   if (!parsedPayload || typeof parsedPayload !== "object") {
     throw new Error(`DEGRADATION status response is not valid JSON (HTTP ${response.status}).`);
   }
-  const rows = degradationExtractRows(endpointSpec, parsedPayload, queryValues);
+  const rows = degradationFilterAppliedActiveRows(degradationExtractRows(endpointSpec, parsedPayload, queryValues));
   return degradationBuildReportPayload(endpointSpec, queryValues, {
     selectionKey: String(options.selectionKey || "").trim(),
     ok: true,

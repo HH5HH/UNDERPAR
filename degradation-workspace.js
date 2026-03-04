@@ -162,7 +162,7 @@ function renderTable(report = null) {
   const columns = Array.isArray(report?.columns) ? report.columns : [];
   const rows = Array.isArray(report?.rows) ? report.rows : [];
   if (columns.length === 0 || rows.length === 0) {
-    return '<p class="degradation-report-empty">No rule rows were returned for this request.</p>';
+    return '<p class="degradation-report-empty">No APPLIED active degradation rules were returned for this request.</p>';
   }
 
   const headerHtml = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("");
