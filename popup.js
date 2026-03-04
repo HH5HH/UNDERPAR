@@ -27313,9 +27313,6 @@ async function degradationExecuteStatusRequest(panelState, endpointSpec, options
 
 function degradationBuildControllerHtml(programmer, appInfo) {
   const requestorId = String(state.selectedRequestorId || "").trim();
-  const requestorNotice = requestorId
-    ? `Global RequestorId selected: ${requestorId}`
-    : "No global RequestorId selected. Pick one above, then retry.";
   const selectedMvpdId = String(state.selectedMvpdId || "").trim();
   const selectedMvpdLabel = selectedMvpdId ? getRestV2MvpdPickerLabel(requestorId, selectedMvpdId) || selectedMvpdId : "";
   const resolvedMvpdValue = selectedMvpdId || "";
@@ -27323,20 +27320,8 @@ function degradationBuildControllerHtml(programmer, appInfo) {
   const mvpdPlaceholder = resolvedMvpdValue
     ? "Selected MVPD (toggle All MVPDs to omit this value)"
     : "Leave empty to query all MVPD rules";
-  const appLabel = firstNonEmptyString([
-    String(appInfo?.appName || "").trim(),
-    String(appInfo?.guid || "").trim(),
-    "DEGRADATION app",
-  ]);
   return `
     <section class="degradation-controller-shell">
-      <div class="degradation-controller-head">
-        <p class="degradation-controller-title">DEGRADATION API Controller</p>
-      </div>
-      <p class="degradation-controller-subtitle">Registered app: <strong class="degradation-app-label">${escapeHtml(
-        appLabel
-      )}</strong></p>
-      <p class="degradation-controller-note">${escapeHtml(requestorNotice)}</p>
       <div class="degradation-recording-actions">
         <button
           type="button"
@@ -27349,8 +27334,7 @@ function degradationBuildControllerHtml(programmer, appInfo) {
         </button>
       </div>
       <p class="degradation-recording-status" aria-live="polite"></p>
-      <button type="button" class="degradation-mega-get-btn">BIG RED GET DEGRADATION</button>
-      <p class="degradation-mega-get-note">Single-call media-company snapshot via <code>/control/v3/degradation/{media-company}/all</code>.</p>
+      <button type="button" class="degradation-mega-get-btn">GET ACTIVE</button>
       <div class="degradation-runner-form">
         <label class="degradation-field">
           <span class="degradation-field-label">GET Method</span>
@@ -27633,7 +27617,7 @@ async function degradationRunAllStatusEndpointsFromPanel(panelState, options = {
     const totalActive = reports.reduce((count, report) => count + Number(report?.activeCount || 0), 0);
     const summaryPrefix =
       options?.megaMode === true
-        ? "BIG RED GET DEGRADATION completed"
+        ? "GET ACTIVE completed"
         : "DEGRADATION GET sweep completed";
     degradationSetControllerStatus(
       panelState,
@@ -27679,7 +27663,7 @@ async function degradationRunMegaProgrammerSweepFromPanel(panelState, options = 
   degradationSyncMvpdScopeControls(panelState);
   degradationSetControllerStatus(
     panelState,
-    "BIG RED GET DEGRADATION started (single-call media-company snapshot)...",
+    "GET ACTIVE started...",
     "info"
   );
   emitDegradationWorkspaceDebugEvent(getActiveDegradationWorkspaceDebugFlowId(), {
@@ -27743,7 +27727,7 @@ async function degradationRunMegaProgrammerSweepFromPanel(panelState, options = 
     if (report.ok) {
       degradationSetControllerStatus(
         panelState,
-        `BIG RED GET DEGRADATION complete. Loaded ${Number(report.rowCount || 0)} rows (${Number(
+        `GET ACTIVE complete. Loaded ${Number(report.rowCount || 0)} rows (${Number(
           report.activeCount || 0
         )} active).`,
         "success"
