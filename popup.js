@@ -27313,8 +27313,6 @@ async function degradationExecuteStatusRequest(panelState, endpointSpec, options
 
 function degradationBuildControllerHtml(programmer, appInfo) {
   const requestorId = String(state.selectedRequestorId || "").trim();
-  const mediaCompanyId = String(programmer?.programmerId || "").trim() || "N/A";
-  const derivedProgrammerId = requestorId || "N/A";
   const requestorNotice = requestorId
     ? `Global RequestorId selected: ${requestorId}`
     : "No global RequestorId selected. Pick one above, then retry.";
@@ -27337,9 +27335,7 @@ function degradationBuildControllerHtml(programmer, appInfo) {
       </div>
       <p class="degradation-controller-subtitle">Registered app: <strong class="degradation-app-label">${escapeHtml(
         appLabel
-      )}</strong> | Requestor: <strong>${escapeHtml(requestorId || "N/A")}</strong> | Media Company: <strong>${escapeHtml(
-        mediaCompanyId
-      )}</strong> | programmer query: <strong>${escapeHtml(derivedProgrammerId)}</strong></p>
+      )}</strong></p>
       <p class="degradation-controller-note">${escapeHtml(requestorNotice)}</p>
       <div class="degradation-recording-actions">
         <button
