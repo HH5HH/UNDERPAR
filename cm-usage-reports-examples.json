@@ -1,0 +1,1909 @@
+{
+  "sourceUrl": "https://experienceleague.adobe.com/en/docs/pass/cm/integration-guide/cm-usage-reports-examples",
+  "sourceLastUpdate": "2025-11-20",
+  "reportCount": 65,
+  "reports": [
+    {
+      "id": "monthly-01-cross-mvpd-monthly-stats",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Cross-MVPD monthly stats",
+      "path": "/v2/year/month/mvpd",
+      "dimensions": [
+        "year",
+        "month",
+        "mvpd"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "monthly-02-cross-mvpd-tenant-monthly-stats",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Cross-MVPD tenant monthly stats",
+      "path": "/v2/year/month/mvpd/tenant",
+      "dimensions": [
+        "year",
+        "month",
+        "mvpd",
+        "tenant"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "monthly-03-cross-mvpd-tenant-application-monthly-stats",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Cross-MVPD tenant/application monthly stats",
+      "path": "/v2/year/month/mvpd/tenant/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "mvpd",
+        "tenant",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "monthly-04-cross-mvpd-tenant-application-monthly-stats-with-application-name-and-platform",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Cross-MVPD tenant/application monthly stats with application name and platform",
+      "path": "/v2/year/month/mvpd/tenant/application-id/application/platform",
+      "dimensions": [
+        "year",
+        "month",
+        "mvpd",
+        "tenant",
+        "application-id",
+        "application",
+        "platform"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "monthly-05-per-tenant-monthly-report",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Per-tenant monthly report",
+      "path": "/v2/tenant/year/month",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "monthly-06-per-tenant-application-monthly-stats",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Per-tenant application monthly stats",
+      "path": "/v2/tenant/year/month/application-id",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "monthly-07-per-tenant-application-monthly-stats-with-application-name",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Per-tenant application monthly stats with application name",
+      "path": "/v2/tenant/year/month/application-id/application",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "monthly-08-per-tenant-mvpd-platform-channel-monthly-stats",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Per-tenant mvpd platform channel monthly stats",
+      "path": "/v2/tenant/year/month/mvpd/platform/application-id",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "mvpd",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "monthly-09-per-tenant-mvpd-platform-channel-monthly-stats-with-application-name",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Per-tenant mvpd platform channel monthly stats with application name",
+      "path": "/v2/tenant/year/month/mvpd/platform/application-id/application",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "mvpd",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "monthly-10-per-tenant-channel-platform-monthly-stats",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Per-tenant channel/platform monthly stats",
+      "path": "/v2/tenant/year/month/channel/platform/application-id",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "channel",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "monthly-11-per-tenant-channel-platform-monthly-stats-with-application-name",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Per-tenant channel/platform monthly stats with application name",
+      "path": "/v2/tenant/year/month/channel/platform/application-id/application",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "channel",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "monthly-12-per-mvpd-monthly-stats",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Per-mvpd monthly stats",
+      "path": "/v2/mvpd/year/month",
+      "dimensions": [
+        "mvpd",
+        "year",
+        "month"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "monthly-13-per-mvpd-tenant-monthly-stats",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Per-mvpd tenant monthly stats",
+      "path": "/v2/mvpd/year/month/tenant",
+      "dimensions": [
+        "mvpd",
+        "year",
+        "month",
+        "tenant"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "monthly-14-concurrency-level-monthly-report",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Concurrency level monthly report",
+      "path": "/v2/year/month/concurrency-level",
+      "dimensions": [
+        "year",
+        "month",
+        "concurrency-level"
+      ],
+      "metrics": [
+        "concurrency-level",
+        "users"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "monthly-15-concurrency-level-monthly-report-per-tenant",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Concurrency level monthly report per tenant",
+      "path": "/v2/year/month/concurrency-level/tenant",
+      "dimensions": [
+        "year",
+        "month",
+        "concurrency-level",
+        "tenant"
+      ],
+      "metrics": [
+        "concurrency-level",
+        "tenant",
+        "users"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "monthly-16-concurrency-level-monthly-report-per-tenant-mvpd",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Concurrency level monthly report per tenant mvpd",
+      "path": "/v2/year/month/concurrency-level/tenant/mvpd",
+      "dimensions": [
+        "year",
+        "month",
+        "concurrency-level",
+        "tenant",
+        "mvpd"
+      ],
+      "metrics": [
+        "concurrency-level",
+        "tenant",
+        "mvpd",
+        "users"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "monthly-17-activity-level-monthly-report",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Activity level monthly report",
+      "path": "/v2/year/month/activity-level",
+      "dimensions": [
+        "year",
+        "month",
+        "activity-level"
+      ],
+      "metrics": [
+        "activity-level",
+        "users"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "monthly-18-activity-level-monthly-report-per-tenant",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Activity level monthly report per tenant",
+      "path": "/v2/year/month/activity-level/tenant",
+      "dimensions": [
+        "year",
+        "month",
+        "activity-level",
+        "tenant"
+      ],
+      "metrics": [
+        "activity-level",
+        "tenant",
+        "users"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "monthly-19-activity-level-monthly-report-per-tenant-mvpd",
+      "section": "monthly",
+      "sectionLabel": "Monthly",
+      "name": "Activity level monthly report per tenant mvpd",
+      "path": "/v2/year/month/activity-level/tenant/mvpd",
+      "dimensions": [
+        "year",
+        "month",
+        "activity-level",
+        "tenant",
+        "mvpd"
+      ],
+      "metrics": [
+        "activity-level",
+        "tenant",
+        "mvpd",
+        "users"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-01-mvpd-platform-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Mvpd/platform daily stats",
+      "path": "/v2/year/month/day/tenant/mvpd/platform/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "tenant",
+        "mvpd",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-02-mvpd-platform-daily-stats-with-application-name",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Mvpd/platform daily stats with application name",
+      "path": "/v2/year/month/day/tenant/mvpd/platform/application-id/application",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "tenant",
+        "mvpd",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-03-platform-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Platform daily stats",
+      "path": "/v2/year/month/day/tenant/platform/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "tenant",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-04-platform-daily-stats-with-application-name",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Platform daily stats with application name",
+      "path": "/v2/year/month/day/tenant/platform/application-id/application",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "tenant",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-05-channel-platform-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Channel/platform daily stats",
+      "path": "/v2/year/month/day/tenant/channel/platform/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "tenant",
+        "channel",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-06-channel-platform-daily-stats-with-application-name",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Channel/platform daily stats with application name",
+      "path": "/v2/year/month/day/tenant/channel/platform/application-id/application",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "tenant",
+        "channel",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-07-cross-mvpd-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Cross-MVPD daily stats",
+      "path": "/v2/year/month/day/mvpd",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "mvpd"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-08-cross-mvpd-tenant-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Cross-MVPD tenant daily stats",
+      "path": "/v2/year/month/day/mvpd/tenant",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "mvpd",
+        "tenant"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-09-cross-mvpd-tenant-application-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Cross-MVPD tenant/application daily stats",
+      "path": "/v2/year/month/day/mvpd/tenant/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "mvpd",
+        "tenant",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-10-cross-mvpd-tenant-application-daily-stats-with-application-name-and-platform",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Cross-MVPD tenant/application daily stats with application name and platform",
+      "path": "/v2/year/month/day/mvpd/tenant/application-id/application/platform",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "mvpd",
+        "tenant",
+        "application-id",
+        "application",
+        "platform"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-11-per-tenant-daily-report",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Per-tenant daily report",
+      "path": "/v2/tenant/year/month/day",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-12-per-tenant-application-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Per-tenant application daily stats",
+      "path": "/v2/tenant/year/month/day/application-id",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-13-per-tenant-application-daily-stats-with-application-name",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Per-tenant application daily stats with application name",
+      "path": "/v2/tenant/year/month/day/application-id/application",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-14-per-tenant-mvpd-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Per-tenant mvpd daily stats",
+      "path": "/v2/tenant/year/month/day/mvpd/platform/application-id",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "mvpd",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-15-per-tenant-mvpd-daily-stats-with-application-name",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Per-tenant mvpd daily stats with application name",
+      "path": "/v2/tenant/year/month/day/mvpd/platform/application-id/application",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "mvpd",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-16-per-tenant-channel-platform-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Per-tenant channel/platform daily stats",
+      "path": "/v2/tenant/year/month/day/channel/platform/application-id",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "channel",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-17-per-tenant-channel-platform-daily-stats-with-application-name",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Per-tenant channel/platform daily stats with application name",
+      "path": "/v2/tenant/year/month/day/channel/platform/application-id/application",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "channel",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-18-per-mvpd-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Per-MVPD daily stats",
+      "path": "/v2/mvpd/year/month/day",
+      "dimensions": [
+        "mvpd",
+        "year",
+        "month",
+        "day"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-19-per-mvpd-tenant-daily-stats",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Per-mvpd tenant daily stats",
+      "path": "/v2/mvpd/year/month/day/tenant",
+      "dimensions": [
+        "mvpd",
+        "year",
+        "month",
+        "day",
+        "tenant"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-20-concurrency-level-daily-report",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Concurrency level daily report",
+      "path": "/v2/year/month/day/concurrency-level",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "concurrency-level"
+      ],
+      "metrics": [
+        "concurrency-level",
+        "users"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-21-concurrency-level-daily-report-per-tenant",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Concurrency level daily report per tenant",
+      "path": "/v2/year/month/day/concurrency-level/tenant",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "concurrency-level",
+        "tenant"
+      ],
+      "metrics": [
+        "concurrency-level",
+        "tenant",
+        "users"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-22-concurrency-level-daily-report-per-tenant-mvpd",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Concurrency level daily report per tenant mvpd",
+      "path": "/v2/year/month/day/concurrency-level/tenant/mvpd",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "concurrency-level",
+        "tenant",
+        "mvpd"
+      ],
+      "metrics": [
+        "concurrency-level",
+        "tenant",
+        "mvpd",
+        "users"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-23-activity-level-daily-report",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Activity level daily report",
+      "path": "/v2/year/month/day/activity-level",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "activity-level"
+      ],
+      "metrics": [
+        "activity-level",
+        "users"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-24-activity-level-daily-report-per-tenant",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Activity level daily report per tenant",
+      "path": "/v2/year/month/day/activity-level/tenant",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "activity-level",
+        "tenant"
+      ],
+      "metrics": [
+        "activity-level",
+        "tenant",
+        "users"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "daily-25-activity-level-daily-report-per-tenant-mvpd",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Activity level daily report per tenant mvpd",
+      "path": "/v2/year/month/day/activity-level/tenant/mvpd",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "activity-level",
+        "tenant",
+        "mvpd"
+      ],
+      "metrics": [
+        "activity-level",
+        "tenant",
+        "mvpd",
+        "users"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-01-application-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Application hourly stats",
+      "path": "/v2/year/month/day/hour/tenant/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "tenant",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-02-application-hourly-stats-with-application-name-and-platform",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Application hourly stats with application name and platform",
+      "path": "/v2/year/month/day/hour/tenant/application-id/application/platform",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "tenant",
+        "application-id",
+        "application",
+        "platform"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-03-mvpd-platform-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Mvpd/platform hourly stats",
+      "path": "/v2/year/month/day/hour/tenant/mvpd/platform/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "tenant",
+        "mvpd",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-04-mvpd-platform-hourly-stats-with-application-name",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Mvpd/platform hourly stats with application name",
+      "path": "/v2/year/month/day/hour/tenant/platform/application-id/application",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "tenant",
+        "mvpd",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-05-platform-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Platform hourly stats",
+      "path": "/v2/year/month/day/hour/tenant/platform/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "tenant",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-06-platform-hourly-stats-with-application-name",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Platform hourly stats with application name",
+      "path": "/v2/year/month/day/hour/tenant/platform/application-id/application",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "tenant",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-07-channel-platform-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Channel/platform hourly stats",
+      "path": "/v2/year/month/day/hour/tenant/channel/platform/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "tenant",
+        "channel",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-08-channel-platform-hourly-stats-with-application-name",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Channel/platform hourly stats with application name",
+      "path": "/v2/year/month/day/hour/tenant/channel/platform/application-id/application",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "tenant",
+        "channel",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-09-cross-mvpd-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Cross-MVPD hourly stats",
+      "path": "/v2/year/month/day/hour/mvpd/",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "mvpd"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-10-cross-mvpd-tenant-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Cross-MVPD tenant hourly stats",
+      "path": "/v2/year/month/day/hour/mvpd/tenant",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "mvpd",
+        "tenant"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-11-cross-mvpd-tenant-application-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Cross-MVPD tenant/application hourly stats",
+      "path": "/v2/year/month/day/hour/mvpd/tenant/application-id",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "mvpd",
+        "tenant",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-12-cross-mvpd-tenant-application-hourly-stats-with-application-name-and-platform",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Cross-MVPD tenant/application hourly stats with application name and platform",
+      "path": "/v2/year/month/day/hour/mvpd/tenant/application-id/application/platform",
+      "dimensions": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "mvpd",
+        "tenant",
+        "application-id",
+        "application",
+        "platform"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-13-per-tenant-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Per-tenant hourly stats",
+      "path": "/v2/tenant/year/month/day/hour",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "hour"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-14-per-tenant-application-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Per-tenant application hourly stats",
+      "path": "/v2/tenant/year/month/day/hour/application-id",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "hour",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-15-per-tenant-application-hourly-stats-with-application-name",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Per-tenant application hourly stats with application name",
+      "path": "/v2/tenant/year/month/day/hour/application-id/application",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "hour",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-16-per-tenant-mvpd-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Per-tenant mvpd hourly stats",
+      "path": "/v2/tenant/year/month/day/hour/mvpd/platform/application-id",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "hour",
+        "mvpd",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-17-per-tenant-mvpd-hourly-stats-with-application-name",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Per-tenant mvpd hourly stats with application name",
+      "path": "/v2/tenant/year/month/day/hour/mvpd/platform/application-id/application",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "hour",
+        "mvpd",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-18-per-tenant-channel-platform-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Per-tenant channel/platform hourly stats",
+      "path": "/v2/tenant/year/month/day/hour/channel/platform/application-id",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "hour",
+        "channel",
+        "platform",
+        "application-id"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-19-per-tenant-channel-platform-hourly-stats-with-application-name",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Per-tenant channel/platform hourly stats with application name",
+      "path": "/v2/tenant/year/month/day/hour/channel/platform/application-id/application",
+      "dimensions": [
+        "tenant",
+        "year",
+        "month",
+        "day",
+        "hour",
+        "channel",
+        "platform",
+        "application-id",
+        "application"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": false
+    },
+    {
+      "id": "hourly-20-per-mvpd-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Per-MVPD hourly stats",
+      "path": "/v2/mvpd/year/month/day/hour",
+      "dimensions": [
+        "mvpd",
+        "year",
+        "month",
+        "day",
+        "hour"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    },
+    {
+      "id": "hourly-21-per-mvpd-tenant-hourly-stats",
+      "section": "hourly",
+      "sectionLabel": "Hourly",
+      "name": "Per-MVPD tenant hourly stats",
+      "path": "/v2/mvpd/year/month/day/hour/tenant",
+      "dimensions": [
+        "mvpd",
+        "year",
+        "month",
+        "day",
+        "hour",
+        "tenant"
+      ],
+      "metrics": [
+        "active-users",
+        "active-sessions",
+        "started-sessions",
+        "completed-sessions",
+        "failed-attempts",
+        "dismissed-sessions",
+        "killed-sessions",
+        "duration_0-15",
+        "duration_15-30",
+        "duration_30-60",
+        "duration_60-120",
+        "duration_2h-4h",
+        "duration_4h-8h",
+        "duration_8h-16h",
+        "duration_16h-1d",
+        "duration_1d-3d",
+        "duration_3d-7d",
+        "duration_1w-1m",
+        "duration_over-1m"
+      ],
+      "hasMvpdDimension": true
+    }
+  ]
+}

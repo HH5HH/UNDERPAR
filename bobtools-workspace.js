@@ -29,9 +29,9 @@ const state = {
   splunkRunning: false,
   apiAction: ACTION_PREAUTHORIZE,
   collapsedCards: {
-    profiles: false,
-    watch: false,
-    splunk: false,
+    profiles: true,
+    watch: true,
+    splunk: true,
   },
   resultByHarvestActionKey: new Map(),
   resourceInputByHarvestKey: new Map(),

@@ -120,6 +120,7 @@ const EXPERIENCE_CLOUD_SILENT_PROFILE_FILTER =
   '{"findFirst":true, "preferForwardProfile":true}';
 const CLICK_ESM_ENDPOINTS_PATH = "click-esm-endpoints.json";
 const CLICK_CMU_ENDPOINTS_PATH = "click-cmu-endpoints.json";
+const CM_USAGE_REPORT_EXAMPLES_PATH = "cm-usage-reports-examples.json";
 const CLICK_ESM_TEMPLATE_PATH = "clickESM-template.html";
 const CLICK_DGR_TEMPLATE_PATH = "clickDGR-template.html";
 const CLICK_ESM_TEMPLATE_PLACEHOLDER_TITLE = "__UP_CLICK_ESM_TITLE__";
@@ -1013,6 +1014,8 @@ let clickEsmEndpoints = [];
 let clickEsmEndpointsPromise = null;
 let clickCmuEndpoints = [];
 let clickCmuEndpointsPromise = null;
+let cmUsageReportExamples = [];
+let cmUsageReportExamplesPromise = null;
 let clickEsmTemplateHtml = "";
 let clickEsmTemplatePromise = null;
 let clickDgrTemplateHtml = "";
@@ -2840,8 +2843,8 @@ function getRestV2SectionState(section) {
       entitlementBusy: false,
       splunkBusy: false,
       splunkBusyHarvestKey: "",
-      profileToolCollapsed: false,
-      entitlementToolCollapsed: false,
+      profileToolCollapsed: true,
+      entitlementToolCollapsed: true,
       lastEntitlementResult: null,
       lastSplunkResult: null,
       lastSplunkHarvestKey: "",
@@ -2857,8 +2860,8 @@ function getRestV2SectionState(section) {
       entitlementBusy: false,
       splunkBusy: false,
       splunkBusyHarvestKey: "",
-      profileToolCollapsed: false,
-      entitlementToolCollapsed: false,
+      profileToolCollapsed: true,
+      entitlementToolCollapsed: true,
       lastEntitlementResult: null,
       lastSplunkResult: null,
       lastSplunkHarvestKey: "",
@@ -2889,10 +2892,10 @@ function getRestV2SectionState(section) {
     section.__underparRestV2State.splunkBusyHarvestKey = "";
   }
   if (typeof section.__underparRestV2State.profileToolCollapsed !== "boolean") {
-    section.__underparRestV2State.profileToolCollapsed = false;
+    section.__underparRestV2State.profileToolCollapsed = true;
   }
   if (typeof section.__underparRestV2State.entitlementToolCollapsed !== "boolean") {
-    section.__underparRestV2State.entitlementToolCollapsed = false;
+    section.__underparRestV2State.entitlementToolCollapsed = true;
   }
   if (
     section.__underparRestV2State.lastSplunkResult != null &&
@@ -3971,7 +3974,7 @@ function renderRestV2ProfileHistoryTool(section, harvestList = []) {
     expandedHarvestKey = "";
   }
   if (!expandedHarvestKey && sectionState.hasProfileExpansionChoice !== true) {
-    expandedHarvestKey = selected.key;
+    expandedHarvestKey = "";
   }
   sectionState.expandedHarvestKey = expandedHarvestKey;
 
@@ -12673,6 +12676,354 @@ async function loadClickCmuEndpoints() {
   }
 }
 
+function normalizeCmUsageExampleSection(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "monthly" || normalized === "daily" || normalized === "hourly") {
+    return normalized;
+  }
+  return "usage";
+}
+
+function normalizeCmUsageExampleSectionLabel(section = "") {
+  const normalized = normalizeCmUsageExampleSection(section);
+  if (normalized === "monthly") {
+    return "Monthly";
+  }
+  if (normalized === "daily") {
+    return "Daily";
+  }
+  if (normalized === "hourly") {
+    return "Hourly";
+  }
+  return "Usage";
+}
+
+function normalizeCmUsageExamplePath(pathValue = "") {
+  const raw = String(pathValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const withoutOrigin = raw.replace(/^https?:\/\/[^/]+/i, "");
+  const withoutLeadingSlash = withoutOrigin.replace(/^\/+/, "");
+  if (!withoutLeadingSlash) {
+    return "";
+  }
+  const withoutCmuPrefix = withoutLeadingSlash.replace(/^cmu\/+/i, "");
+  const normalizedPath = /^v2\//i.test(withoutCmuPrefix)
+    ? withoutCmuPrefix
+    : `v2/${withoutCmuPrefix.replace(/^v2\/?/i, "")}`;
+  return `/${normalizedPath.replace(/^\/+/, "")}`;
+}
+
+function normalizeCmUsageExampleTokenList(values) {
+  const list = Array.isArray(values) ? values : [];
+  const output = [];
+  const seen = new Set();
+  list.forEach((value) => {
+    const token = String(value || "").trim().toLowerCase();
+    if (!token || seen.has(token)) {
+      return;
+    }
+    seen.add(token);
+    output.push(token);
+  });
+  return output;
+}
+
+function normalizeCmUsageReportExampleEntry(entry, index = 0) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const path = normalizeCmUsageExamplePath(entry.path || entry.url || "");
+  if (!path) {
+    return null;
+  }
+  const section = normalizeCmUsageExampleSection(entry.section);
+  const sectionLabel = String(entry.sectionLabel || normalizeCmUsageExampleSectionLabel(section)).trim() || "Usage";
+  const dimensions = normalizeCmUsageExampleTokenList(entry.dimensions);
+  const metrics = normalizeCmUsageExampleTokenList(entry.metrics);
+  const hasMvpdDimension = entry.hasMvpdDimension === true || dimensions.includes("mvpd") || /\/mvpd(?:\/|$)/i.test(path);
+  const normalizedName = String(entry.name || "").trim() || formatCmUsageLabelFromPath(path);
+  const normalizedId = String(entry.id || `${section}-${String(index + 1).padStart(2, "0")}`).trim();
+  return {
+    id: normalizedId || `${section}-${String(index + 1).padStart(2, "0")}`,
+    section,
+    sectionLabel,
+    name: normalizedName,
+    path,
+    dimensions,
+    metrics,
+    hasMvpdDimension,
+  };
+}
+
+async function loadCmUsageReportExamplesCatalog() {
+  if (Array.isArray(cmUsageReportExamples) && cmUsageReportExamples.length > 0) {
+    return cmUsageReportExamples;
+  }
+  if (cmUsageReportExamplesPromise) {
+    return cmUsageReportExamplesPromise;
+  }
+
+  cmUsageReportExamplesPromise = (async () => {
+    const resourceUrl = chrome.runtime.getURL(CM_USAGE_REPORT_EXAMPLES_PATH);
+    const response = await fetch(resourceUrl, {
+      method: "GET",
+      credentials: "omit",
+      cache: "no-cache",
+    });
+    if (!response.ok) {
+      throw new Error(`Unable to load CM usage report examples (${response.status}).`);
+    }
+    const payload = await response.json().catch(() => null);
+    const entries = Array.isArray(payload?.reports) ? payload.reports : [];
+    const normalized = entries
+      .map((entry, index) => normalizeCmUsageReportExampleEntry(entry, index))
+      .filter(Boolean);
+    cmUsageReportExamples = normalized;
+    return cmUsageReportExamples;
+  })();
+
+  try {
+    return await cmUsageReportExamplesPromise;
+  } finally {
+    cmUsageReportExamplesPromise = null;
+  }
+}
+
+function cmExtractRawUsagePathParts(pathname = "") {
+  return String(pathname || "")
+    .split("/")
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .filter((value) => value !== "cmu" && value !== "v2");
+}
+
+function cmBuildUsageExamplePathProfile(pathOrUrl = "") {
+  const pathParts = cmuUsageExtractPathParts(pathOrUrl);
+  const tokenSet = new Set(
+    pathParts
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  return {
+    pathParts,
+    tokenSet,
+    zoomKey: cmuUsageGetZoomKey(pathParts, pathOrUrl),
+  };
+}
+
+function cmComputeUsageExamplePathMatchScore(exampleProfile = null, candidateProfile = null) {
+  if (!exampleProfile || !candidateProfile) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const requiredTokens = [...(exampleProfile.tokenSet || new Set())].filter(
+    (token) => !CM_USAGE_ROOT_SEGMENT_SET.has(token)
+  );
+  for (const token of requiredTokens) {
+    if (!(candidateProfile.tokenSet instanceof Set) || !candidateProfile.tokenSet.has(token)) {
+      return Number.POSITIVE_INFINITY;
+    }
+  }
+
+  const candidateExtras = [...(candidateProfile.tokenSet || new Set())].filter(
+    (token) => !CM_USAGE_ROOT_SEGMENT_SET.has(token) && !(exampleProfile.tokenSet instanceof Set && exampleProfile.tokenSet.has(token))
+  );
+  const zoomMismatchPenalty =
+    exampleProfile.zoomKey && candidateProfile.zoomKey && exampleProfile.zoomKey !== candidateProfile.zoomKey ? 64 : 0;
+  const pathLengthPenalty = Math.abs(
+    Number(candidateProfile.pathParts?.length || 0) - Number(exampleProfile.pathParts?.length || 0)
+  );
+  return candidateExtras.length * 4 + pathLengthPenalty + zoomMismatchPenalty;
+}
+
+function cmResolveUsageExampleSourceEndpointUrl(example = null, usageRecords = [], options = {}) {
+  const normalizedPath = normalizeCmUsageExamplePath(example?.path || "");
+  if (!normalizedPath) {
+    return "";
+  }
+  const exampleProfile = cmBuildUsageExamplePathProfile(normalizedPath);
+  const tenantScope = resolveCmUsageTenantScopeValue(
+    options?.tenantScope,
+    options?.tenantId,
+    getCmTenantScopeForProgrammer({ programmerId: String(options?.programmerId || "").trim() })
+  );
+  const records = Array.isArray(usageRecords) ? usageRecords : [];
+  let bestMatch = null;
+
+  records.forEach((record) => {
+    if (!record || String(record?.kind || "").trim().toLowerCase() !== "usage") {
+      return;
+    }
+    if (record?.payload && typeof record.payload === "object" && record.payload.usageExample === true) {
+      return;
+    }
+    const candidateUrl = ensureCmUsageEndpointFormat(
+      firstNonEmptyString([record?.sourceUrl, record?.requestUrl, record?.endpointUrl]),
+      {
+        tenantScope: resolveCmUsageTenantScopeValue(record?.tenantId, record?.tenantName, tenantScope),
+      }
+    );
+    if (!candidateUrl) {
+      return;
+    }
+    const candidateProfile = cmBuildUsageExamplePathProfile(candidateUrl);
+    const score = cmComputeUsageExamplePathMatchScore(exampleProfile, candidateProfile);
+    if (!Number.isFinite(score)) {
+      return;
+    }
+    if (!bestMatch || score < bestMatch.score) {
+      bestMatch = {
+        score,
+        url: candidateUrl,
+      };
+    }
+  });
+
+  if (bestMatch?.url) {
+    return bestMatch.url;
+  }
+  return ensureCmUsageEndpointFormat(`${CM_REPORTS_BASE_URL}${normalizedPath}`, {
+    tenantScope,
+    tenantId: options?.tenantId,
+    programmerId: options?.programmerId,
+  });
+}
+
+function cmBuildUsageReportExampleRequestUrl(example = null, options = {}) {
+  const tenantScope = resolveCmUsageTenantScopeValue(
+    options?.tenantScope,
+    options?.tenantId,
+    getCmTenantScopeForProgrammer({ programmerId: String(options?.programmerId || "").trim() })
+  );
+  const sourceEndpointUrl = firstNonEmptyString([
+    String(options?.sourceEndpointUrl || "").trim(),
+    normalizeCmUrl(`${CM_REPORTS_BASE_URL}${normalizeCmUsageExamplePath(example?.path || "")}`),
+  ]);
+  const baseUrl = ensureCmUsageEndpointFormat(sourceEndpointUrl, {
+    tenantScope,
+    tenantId: options?.tenantId,
+    programmerId: options?.programmerId,
+  });
+  if (!baseUrl) {
+    return "";
+  }
+  try {
+    const parsed = new URL(baseUrl, CM_REPORTS_BASE_URL);
+    parsed.searchParams.set("format", "json");
+    const zoomKey = cmuUsageGetZoomKey(cmExtractRawUsagePathParts(parsed.pathname), parsed.toString());
+    const timeWindow = clickEsmComputeTimeWindow(zoomKey);
+    if (!parsed.searchParams.has("start")) {
+      parsed.searchParams.set("start", String(timeWindow?.start || clickEsmIso(new Date())));
+    }
+    if (!parsed.searchParams.has("end")) {
+      parsed.searchParams.set("end", String(timeWindow?.end || clickEsmIso(new Date())));
+    }
+    if (tenantScope) {
+      const existingTenantScope = resolveCmUsageTenantScopeValue(
+        parsed.searchParams.get("tenant"),
+        parsed.searchParams.get("tenant_id"),
+        parsed.searchParams.get("tenant-id")
+      );
+      applyCmUsageTenantScopeToSearchParams(parsed.searchParams, existingTenantScope || tenantScope);
+    }
+    if (example?.hasMvpdDimension === true) {
+      const mvpdId = String(options?.mvpdId || state.selectedMvpdId || "").trim();
+      parsed.searchParams.delete("mvpd");
+      parsed.searchParams.delete("mvpd_id");
+      parsed.searchParams.delete("mvpd-id");
+      if (mvpdId) {
+        parsed.searchParams.set("mvpd", mvpdId);
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return baseUrl;
+  }
+}
+
+function cmBuildUsageReportExampleWorkspaceRecords(examples = [], options = {}) {
+  const list = Array.isArray(examples) ? examples : [];
+  if (list.length === 0) {
+    return [];
+  }
+
+  const programmer = options?.programmer && typeof options.programmer === "object" ? options.programmer : null;
+  const tenantId = resolveCmUsageTenantScopeValue(
+    options?.tenantScope,
+    options?.tenantId,
+    programmer?.programmerId
+  );
+  const tenantName = firstNonEmptyString([
+    options?.tenantName,
+    options?.tenantId,
+    programmer?.programmerName,
+    programmer?.mediaCompanyName,
+    programmer?.programmerId,
+    tenantId,
+    "CM",
+  ]);
+  const programmerId = String(programmer?.programmerId || "").trim();
+  const liveUsageRecords = Array.isArray(options?.usageRecords) ? options.usageRecords : [];
+  const output = [];
+
+  list.forEach((example, index) => {
+    const normalizedExample = normalizeCmUsageReportExampleEntry(example, index);
+    if (!normalizedExample) {
+      return;
+    }
+    const sourceEndpointUrl = cmResolveUsageExampleSourceEndpointUrl(normalizedExample, liveUsageRecords, {
+      tenantScope: tenantId,
+      tenantId,
+      programmerId,
+    });
+    const resolvedHasMvpdDimension =
+      normalizedExample.hasMvpdDimension === true || /\/mvpd(?:\/|$)/i.test(String(sourceEndpointUrl || ""));
+    const requestUrl = cmBuildUsageReportExampleRequestUrl(
+      {
+        ...normalizedExample,
+        hasMvpdDimension: resolvedHasMvpdDimension,
+      },
+      {
+      tenantScope: tenantId,
+      tenantId,
+      programmerId,
+      mvpdId: options?.mvpdId,
+      sourceEndpointUrl,
+      }
+    );
+    if (!requestUrl) {
+      return;
+    }
+    const recordIdSeed = String(normalizedExample.id || `usage-example-${index + 1}`).trim() || `usage-example-${index + 1}`;
+    output.push({
+      cardId: cmBuildRecordId("usage-example", tenantId || "cm", recordIdSeed, index),
+      kind: "usage",
+      title: `${normalizedExample.sectionLabel} · ${normalizedExample.name}`,
+      subtitle: `CM Usage Report Example | ${tenantName}`,
+      endpointUrl: requestUrl,
+      requestUrl,
+      payload: {
+        usageExample: true,
+        usageExampleId: normalizedExample.id,
+        usageExampleSection: normalizedExample.section,
+        usageExampleName: normalizedExample.name,
+        usageExamplePath: normalizedExample.path,
+        usageExampleSourceEndpointUrl: sourceEndpointUrl,
+        usageExampleDimensions: normalizedExample.dimensions,
+        usageExampleMetrics: normalizedExample.metrics,
+        hasMvpdDimension: resolvedHasMvpdDimension,
+      },
+      columns: [],
+      lastModified: "",
+      tenantId: String(tenantId || ""),
+      tenantName: String(tenantName || ""),
+    });
+  });
+
+  return output;
+}
+
 function isModernClickEsmTemplate(templateHtml) {
   const text = String(templateHtml || "");
   if (!text.trim()) {
@@ -13439,6 +13790,9 @@ function resolveClickCmuEndpointsFromCmState(cmState = null, tenantScope = "") {
   const output = [];
   for (const record of recordsById.values()) {
     if (String(record?.kind || "").toLowerCase() !== "usage") {
+      continue;
+    }
+    if (record?.payload && typeof record.payload === "object" && record.payload.usageExample === true) {
       continue;
     }
     const requestUrl = ensureCmUsageEndpointFormat(
@@ -17046,7 +17400,19 @@ function esmWorkspaceBuildShellHtml() {
       </div>
       <div class="esm-workspace-tree-panel">
         <div class="esm-workspace-tree-head">
-          <div class="esm-workspace-tree-title">JellyBeans</div>
+          <button type="button" class="cmu-jelly-panel-toggle esm-workspace-tree-toggle" aria-expanded="false">
+            <span class="cmu-jelly-panel-toggle-icon" aria-hidden="true">▾</span>
+            <span class="esm-workspace-tree-title">JellyBeans</span>
+          </button>
+          <button
+            type="button"
+            class="cmu-jelly-panel-load-all esm-workspace-tree-load-all"
+            aria-label="Load all visible JellyBeans into ESM Workspace"
+            title="Load all visible JellyBeans into ESM Workspace"
+            disabled
+          >
+            <span class="cmu-jelly-panel-count esm-workspace-tree-count">0</span>
+          </button>
         </div>
         <div class="esm-workspace-tree-scroll" hidden>
           <div class="esm-workspace-tree-root"></div>
@@ -17054,7 +17420,19 @@ function esmWorkspaceBuildShellHtml() {
       </div>
       <div class="esm-workspace-treemap-panel">
         <div class="esm-workspace-treemap-head">
-          <div class="esm-workspace-treemap-title">TreeMap</div>
+          <button type="button" class="cmu-jelly-panel-toggle esm-workspace-treemap-toggle" aria-expanded="false">
+            <span class="cmu-jelly-panel-toggle-icon" aria-hidden="true">▾</span>
+            <span class="esm-workspace-treemap-title">TreeMap</span>
+          </button>
+          <button
+            type="button"
+            class="cmu-jelly-panel-load-all esm-workspace-treemap-load-all"
+            aria-label="Load all visible TreeMap endpoints into ESM Workspace"
+            title="Load all visible TreeMap endpoints into ESM Workspace"
+            disabled
+          >
+            <span class="cmu-jelly-panel-count esm-workspace-treemap-count">0</span>
+          </button>
         </div>
         <div class="esm-workspace-treemap-scroll" hidden>
           <div class="esm-workspace-treemap-root"></div>
@@ -17328,14 +17706,14 @@ function esmWorkspaceRenderTreeNode(esmWorkspaceState, node, parentUl, requestTo
 
 function esmWorkspaceSetTreeCollapsed(esmWorkspaceState, shouldCollapse) {
   const scrollElement = esmWorkspaceState?.treeScrollElement;
-  const headElement = esmWorkspaceState?.treeHeadElement;
+  const toggleElement = esmWorkspaceState?.treeToggleButton || esmWorkspaceState?.treeHeadElement;
   if (!scrollElement) {
     return;
   }
   const collapsed = Boolean(shouldCollapse);
   scrollElement.hidden = collapsed;
-  if (headElement) {
-    headElement.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  if (toggleElement) {
+    toggleElement.setAttribute("aria-expanded", collapsed ? "false" : "true");
   }
 }
 
@@ -17349,6 +17727,39 @@ function esmWorkspaceSyncTreeToggleButton(esmWorkspaceState) {
   if (!hasRows) {
     esmWorkspaceSetTreeCollapsed(esmWorkspaceState, true);
   }
+}
+
+function esmWorkspaceSyncPanelLoadAllButtons(esmWorkspaceState, endpointIndexes = []) {
+  const normalizedIndexes = [...new Set(
+    (Array.isArray(endpointIndexes) ? endpointIndexes : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value >= 0)
+  )];
+  const visibleCount = normalizedIndexes.length;
+  const loadAllBusy = esmWorkspaceState?.loadAllBusy === true;
+
+  const setCount = (element) => {
+    if (element) {
+      element.textContent = String(visibleCount);
+    }
+  };
+  setCount(esmWorkspaceState?.treeCountElement);
+  setCount(esmWorkspaceState?.treemapCountElement);
+
+  const setButtonState = (button) => {
+    if (!button) {
+      return;
+    }
+    button.disabled = visibleCount === 0 || loadAllBusy;
+    button.classList.toggle("net-busy", loadAllBusy);
+    if (loadAllBusy) {
+      button.setAttribute("aria-busy", "true");
+    } else {
+      button.removeAttribute("aria-busy");
+    }
+  };
+  setButtonState(esmWorkspaceState?.treeLoadAllButton);
+  setButtonState(esmWorkspaceState?.treemapLoadAllButton);
 }
 
 function esmWorkspaceBuildTreemapModel(catalog, endpointIndexes) {
@@ -17573,14 +17984,14 @@ function esmWorkspaceRenderTreemap(esmWorkspaceState, endpointIndexes, options =
 
 function esmWorkspaceSetTreemapCollapsed(esmWorkspaceState, shouldCollapse) {
   const scrollElement = esmWorkspaceState?.treemapScrollElement;
-  const headElement = esmWorkspaceState?.treemapHeadElement;
+  const toggleElement = esmWorkspaceState?.treemapToggleButton || esmWorkspaceState?.treemapHeadElement;
   if (!scrollElement) {
     return;
   }
   const collapsed = Boolean(shouldCollapse);
   scrollElement.hidden = collapsed;
-  if (headElement) {
-    headElement.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  if (toggleElement) {
+    toggleElement.setAttribute("aria-expanded", collapsed ? "false" : "true");
   }
 }
 
@@ -17643,8 +18054,13 @@ function esmWorkspaceApplyTreeFilters(esmWorkspaceState, options = {}) {
     onlyRunnable: filteredMode,
     requestToken: options.requestToken || esmWorkspaceState?.requestToken || state.premiumPanelRequestToken || 0,
   });
+  esmWorkspaceState.visibleEndpointIndexes = visibleEndpointIndexes.slice();
+  esmWorkspaceSyncPanelLoadAllButtons(esmWorkspaceState, visibleEndpointIndexes);
   esmWorkspaceSyncTreeToggleButton(esmWorkspaceState);
-  return { visibleEndpointCount: visibleEndpointIndexes.length };
+  return {
+    visibleEndpointCount: visibleEndpointIndexes.length,
+    visibleEndpointIndexes: visibleEndpointIndexes.slice(),
+  };
 }
 
 function esmWorkspaceBuildTree(esmWorkspaceState, requestToken) {
@@ -17742,16 +18158,66 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
 
   const toggleTreePanel = () => {
     const expanded = String(
-      esmWorkspaceState.treeHeadElement?.getAttribute("aria-expanded") || (esmWorkspaceState.treeScrollElement?.hidden ? "false" : "true")
+      esmWorkspaceState.treeToggleButton?.getAttribute("aria-expanded") ||
+        (esmWorkspaceState.treeScrollElement?.hidden ? "false" : "true")
     ) !== "false";
     esmWorkspaceSetTreeCollapsed(esmWorkspaceState, expanded);
   };
 
   const toggleTreemapPanel = () => {
     const expanded = String(
-      esmWorkspaceState.treemapHeadElement?.getAttribute("aria-expanded") || (esmWorkspaceState.treemapScrollElement?.hidden ? "false" : "true")
+      esmWorkspaceState.treemapToggleButton?.getAttribute("aria-expanded") ||
+        (esmWorkspaceState.treemapScrollElement?.hidden ? "false" : "true")
     ) !== "false";
     esmWorkspaceSetTreemapCollapsed(esmWorkspaceState, expanded);
+  };
+
+  const runVisibleEndpointsToWorkspace = async (source = "esm-jelly-load-all") => {
+    if (esmWorkspaceState.loadAllBusy === true) {
+      return;
+    }
+    const endpointIndexes = Array.isArray(esmWorkspaceState.visibleEndpointIndexes)
+      ? esmWorkspaceState.visibleEndpointIndexes
+      : [];
+    const endpointQueue = [...new Set(endpointIndexes)]
+      .map((endpointIndex) => Number(endpointIndex))
+      .filter((endpointIndex) => Number.isInteger(endpointIndex) && endpointIndex >= 0)
+      .map((endpointIndex) => esmWorkspaceState.catalog?.[endpointIndex])
+      .filter((endpoint) => endpoint && typeof endpoint === "object" && String(endpoint.url || "").trim());
+    if (endpointQueue.length === 0) {
+      return;
+    }
+
+    esmWorkspaceState.loadAllBusy = true;
+    esmWorkspaceSyncPanelLoadAllButtons(esmWorkspaceState, endpointIndexes);
+    try {
+      await esmWorkspaceEnsureWorkspaceTab({
+        activate: true,
+        windowId: Number(esmWorkspaceState.controllerWindowId || state.esmWorkspaceWorkspaceWindowId || 0),
+      });
+      esmWorkspaceBroadcastControllerState(esmWorkspaceState);
+
+      for (const endpoint of endpointQueue) {
+        if (!isEsmServiceRequestActive(esmWorkspaceState.section, requestToken, esmWorkspaceState.programmer?.programmerId)) {
+          break;
+        }
+        await esmWorkspaceRunEndpointToWorkspace(
+          esmWorkspaceState,
+          endpoint,
+          generateRequestId(),
+          requestToken,
+          {
+            emitStart: true,
+            requestSource: source,
+          }
+        );
+      }
+    } catch (error) {
+      setStatus(`Unable to load visible ESM endpoints: ${error instanceof Error ? error.message : String(error)}`, "error");
+    } finally {
+      esmWorkspaceState.loadAllBusy = false;
+      esmWorkspaceSyncPanelLoadAllButtons(esmWorkspaceState, esmWorkspaceState.visibleEndpointIndexes);
+    }
   };
 
   const applyEsmWorkspaceSearchFilters = ({ highlight = false, normalizeInput = false } = {}) => {
@@ -17821,30 +18287,29 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
     applyEsmWorkspaceSearchFilters({ highlight: true, normalizeInput: true });
   });
 
-  esmWorkspaceState.treeHeadElement?.addEventListener("click", () => {
+  esmWorkspaceState.treeToggleButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     toggleTreePanel();
   });
 
-  esmWorkspaceState.treemapHeadElement?.addEventListener("click", () => {
+  esmWorkspaceState.treemapToggleButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     toggleTreemapPanel();
   });
 
-  esmWorkspaceState.treeHeadElement?.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
+  esmWorkspaceState.treeLoadAllButton?.addEventListener("click", async (event) => {
     event.preventDefault();
-    toggleTreePanel();
+    event.stopPropagation();
+    await runVisibleEndpointsToWorkspace("esm-jelly-tree-load-all");
   });
 
-  esmWorkspaceState.treemapHeadElement?.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
+  esmWorkspaceState.treemapLoadAllButton?.addEventListener("click", async (event) => {
     event.preventDefault();
-    toggleTreemapPanel();
+    event.stopPropagation();
+    await runVisibleEndpointsToWorkspace("esm-jelly-treemap-load-all");
   });
-
 }
 
 function getActiveEsmWorkspaceState() {
@@ -18179,27 +18644,31 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
       resetButton: contentElement.querySelector(".esm-workspace-reset-btn"),
       makeClickEsmButton: contentElement.querySelector(".esm-workspace-make-clickesm-btn"),
       treeHeadElement: contentElement.querySelector(".esm-workspace-tree-head"),
+      treeToggleButton: contentElement.querySelector(".esm-workspace-tree-toggle"),
       treeScrollElement: contentElement.querySelector(".esm-workspace-tree-scroll"),
       treeRootElement: contentElement.querySelector(".esm-workspace-tree-root"),
       treemapHeadElement: contentElement.querySelector(".esm-workspace-treemap-head"),
+      treemapToggleButton: contentElement.querySelector(".esm-workspace-treemap-toggle"),
       treemapRootElement: contentElement.querySelector(".esm-workspace-treemap-root"),
       treemapScrollElement: contentElement.querySelector(".esm-workspace-treemap-scroll"),
+      treeLoadAllButton: contentElement.querySelector(".esm-workspace-tree-load-all"),
+      treemapLoadAllButton: contentElement.querySelector(".esm-workspace-treemap-load-all"),
+      treeCountElement: contentElement.querySelector(".esm-workspace-tree-count"),
+      treemapCountElement: contentElement.querySelector(".esm-workspace-treemap-count"),
+      visibleEndpointIndexes: [],
+      loadAllBusy: false,
       recordingStatusElement: contentElement.querySelector(".esm-workspace-recording-status"),
       recordingToggleButton: contentElement.querySelector(".esm-workspace-record-toggle-btn"),
     };
 
-    if (esmWorkspaceState.treeHeadElement) {
-      esmWorkspaceState.treeHeadElement.setAttribute("role", "button");
-      esmWorkspaceState.treeHeadElement.setAttribute("tabindex", "0");
-      esmWorkspaceState.treeHeadElement.setAttribute("aria-expanded", "false");
-      esmWorkspaceState.treeHeadElement.setAttribute("aria-label", "Toggle JellyBeans");
+    if (esmWorkspaceState.treeToggleButton) {
+      esmWorkspaceState.treeToggleButton.setAttribute("aria-expanded", "false");
+      esmWorkspaceState.treeToggleButton.setAttribute("aria-label", "Toggle JellyBeans");
     }
 
-    if (esmWorkspaceState.treemapHeadElement) {
-      esmWorkspaceState.treemapHeadElement.setAttribute("role", "button");
-      esmWorkspaceState.treemapHeadElement.setAttribute("tabindex", "0");
-      esmWorkspaceState.treemapHeadElement.setAttribute("aria-expanded", "false");
-      esmWorkspaceState.treemapHeadElement.setAttribute("aria-label", "Toggle TreeMap");
+    if (esmWorkspaceState.treemapToggleButton) {
+      esmWorkspaceState.treemapToggleButton.setAttribute("aria-expanded", "false");
+      esmWorkspaceState.treemapToggleButton.setAttribute("aria-label", "Toggle TreeMap");
     }
 
     section.__underparEsmWorkspaceState = esmWorkspaceState;
@@ -19059,28 +19528,87 @@ function cmBuildWorkspaceRecordsFromBundles(bundles) {
     seen.add(record.cardId);
     output.push(record);
   };
-  const buildCmApplicationDetailUrl = (tenantId = "", entityId = "") => {
+  const buildCmApplicationDetailUrl = (tenantId = "", applicationId = "") => {
     const normalizedTenantId = String(tenantId || "").trim();
-    const normalizedEntityId = String(entityId || "").trim();
-    if (!normalizedTenantId || !normalizedEntityId) {
+    const normalizedApplicationId = String(applicationId || "").trim();
+    if (!normalizedTenantId || !normalizedApplicationId) {
       return "";
     }
     return normalizeCmUrl(
-      `${CM_CONFIG_BASE_URL}/maitai/policy/${encodeURIComponent(normalizedEntityId)}?orgId=${encodeURIComponent(normalizedTenantId)}`
+      `${CM_CONFIG_BASE_URL}/maitai/applications/${encodeURIComponent(normalizedApplicationId)}?orgId=${encodeURIComponent(normalizedTenantId)}`
     );
   };
+
+  const resolveApplicationId = (row = null) =>
+    firstNonEmptyString([
+      row?.applicationId,
+      row?.application_id,
+      row?.appId,
+      row?.app_id,
+      row?.entityId,
+      row?.id,
+      row?.raw?.applicationId,
+      row?.raw?.application_id,
+      row?.raw?.appId,
+      row?.raw?.app_id,
+      row?.raw?.id,
+      row?.payload?.applicationId,
+      row?.payload?.application_id,
+      row?.payload?.appId,
+      row?.payload?.app_id,
+      row?.payload?.id,
+    ]);
+
+  const extractApplicationIdFromDetailUrl = (urlValue = "") => {
+    const raw = String(urlValue || "").trim();
+    if (!raw) {
+      return "";
+    }
+    try {
+      const parsed = new URL(raw);
+      const match = String(parsed.pathname || "").match(/\/maitai\/applications\/([^/?#]+)/i);
+      return match?.[1] ? decodeURIComponent(match[1]) : "";
+    } catch {
+      const match = raw.match(/\/maitai\/applications\/([^/?#]+)/i);
+      if (!match?.[1]) {
+        return "";
+      }
+      try {
+        return decodeURIComponent(match[1]);
+      } catch {
+        return String(match[1] || "").trim();
+      }
+    }
+  };
+
   const resolvePrimaryGroupRecordUrl = (groupKind, row, tenantId, entityId, fallbackUrl) => {
     const links = (Array.isArray(row?.links) ? row.links : []).map((value) => normalizeCmUrl(value)).filter(Boolean);
     const normalizedKind = String(groupKind || "").trim().toLowerCase();
     if (normalizedKind === "applications") {
-      const detailUrl = buildCmApplicationDetailUrl(tenantId, entityId);
+      const applicationId = firstNonEmptyString([resolveApplicationId(row), entityId]);
+      const applicationLinks = links.filter(
+        (value) => /\/maitai\/applications\/[^/?#]+/i.test(String(value || "")) && !cmIsApplicationsListRequestUrl(value)
+      );
+      if (applicationLinks.length > 0 && applicationId) {
+        const matchingApplicationLink = applicationLinks.find(
+          (value) => extractApplicationIdFromDetailUrl(value) === applicationId
+        );
+        if (matchingApplicationLink) {
+          return matchingApplicationLink;
+        }
+      }
+      const detailUrl = buildCmApplicationDetailUrl(tenantId, applicationId);
       if (detailUrl) {
         return detailUrl;
       }
-      const policyLink = links.find((value) => /\/maitai\/policy\/[^/?#]+/i.test(String(value || "")));
-      if (policyLink) {
-        return policyLink;
+      if (applicationLinks.length > 0) {
+        return applicationLinks[0];
       }
+      const nonListLink = links.find((value) => !cmIsApplicationsListRequestUrl(value));
+      if (nonListLink) {
+        return nonListLink;
+      }
+      return "";
     }
     return firstNonEmptyString([
       links[0],
@@ -19214,20 +19742,45 @@ function cmBuildGroupWorkspaceRecord(groupKey, groupLabel, records, programmer =
   };
 }
 
-function cmBuildGroupListHtml(groupLabel, records, groupRecordId = "") {
+function cmBuildGroupListHtml(groupKey, groupLabel, records, groupRecordId = "") {
   const rows = Array.isArray(records) ? records : [];
   const recordId = String(groupRecordId || "").trim();
-  const clickableHeaderMarkup = `
-    <button type="button" class="cm-group-title cm-group-link" data-record-id="${escapeHtml(recordId)}">
-      <span class="cm-group-title-text">${escapeHtml(groupLabel)}</span>
-      <span class="cm-group-title-count">${rows.length}</span>
-    </button>
+  const normalizedGroupKey = String(groupKey || groupLabel || "group")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\-.:]+/g, "_");
+  const bodyDomId = `cm-group-body-${String(recordId || normalizedGroupKey || "group").replace(/[^\w-]+/g, "_")}`;
+  const loadAllDisabled = rows.length === 0 || !recordId;
+  const headerMarkup = `
+    <div class="cm-group-title">
+      <button
+        type="button"
+        class="cm-group-toggle"
+        data-group-key="${escapeHtml(normalizedGroupKey)}"
+        aria-expanded="false"
+        aria-controls="${escapeHtml(bodyDomId)}"
+      >
+        <span class="cm-group-toggle-icon" aria-hidden="true">▾</span>
+        <span class="cm-group-title-text">${escapeHtml(groupLabel)}</span>
+      </button>
+      <button
+        type="button"
+        class="cm-group-load-all"
+        data-record-id="${escapeHtml(recordId)}"
+        title="Load all ${escapeHtml(groupLabel)} into CM Workspace"
+        ${loadAllDisabled ? "disabled" : ""}
+      >
+        <span class="cm-group-title-count">${rows.length}</span>
+      </button>
+    </div>
   `;
   if (rows.length === 0) {
     return `
-      <section class="cm-group">
-        ${clickableHeaderMarkup}
-        <p class="cm-group-empty">No ${escapeHtml(groupLabel.toLowerCase())} detected for this tenant set.</p>
+      <section class="cm-group is-collapsed" data-group-key="${escapeHtml(normalizedGroupKey)}">
+        ${headerMarkup}
+        <div class="cm-group-body" id="${escapeHtml(bodyDomId)}">
+          <p class="cm-group-empty">No ${escapeHtml(groupLabel.toLowerCase())} detected for this tenant set.</p>
+        </div>
       </section>
     `;
   }
@@ -19246,9 +19799,11 @@ function cmBuildGroupListHtml(groupLabel, records, groupRecordId = "") {
     .join("");
 
   return `
-    <section class="cm-group">
-      ${clickableHeaderMarkup}
-      <ul class="cm-group-list">${items}</ul>
+    <section class="cm-group is-collapsed" data-group-key="${escapeHtml(normalizedGroupKey)}">
+      ${headerMarkup}
+      <div class="cm-group-body" id="${escapeHtml(bodyDomId)}">
+        <ul class="cm-group-list">${items}</ul>
+      </div>
     </section>
   `;
 }
@@ -19455,7 +20010,19 @@ function cmuUsageBuildShellHtml() {
       </div>
       <div class="esm-workspace-tree-panel cmu-jelly-tree-panel">
         <div class="esm-workspace-tree-head cmu-jelly-tree-head">
-          <div class="esm-workspace-tree-title">CMU JellyBeans</div>
+          <button type="button" class="cmu-jelly-panel-toggle cmu-jelly-tree-toggle" aria-expanded="false">
+            <span class="cmu-jelly-panel-toggle-icon" aria-hidden="true">▾</span>
+            <span class="esm-workspace-tree-title">CMU JellyBeans</span>
+          </button>
+          <button
+            type="button"
+            class="cmu-jelly-panel-load-all cmu-jelly-tree-load-all"
+            title="Load all visible CMU JellyBeans into CM Workspace"
+            aria-label="Load all visible CMU JellyBeans into CM Workspace"
+            disabled
+          >
+            <span class="cmu-jelly-panel-count cmu-jelly-tree-count">0</span>
+          </button>
         </div>
         <div class="esm-workspace-tree-scroll cmu-jelly-tree-scroll" hidden>
           <div class="esm-workspace-tree-root cmu-jelly-tree-root"></div>
@@ -19463,7 +20030,19 @@ function cmuUsageBuildShellHtml() {
       </div>
       <div class="esm-workspace-treemap-panel cmu-jelly-treemap-panel">
         <div class="esm-workspace-treemap-head cmu-jelly-treemap-head">
-          <div class="esm-workspace-treemap-title">TreeMap</div>
+          <button type="button" class="cmu-jelly-panel-toggle cmu-jelly-treemap-toggle" aria-expanded="false">
+            <span class="cmu-jelly-panel-toggle-icon" aria-hidden="true">▾</span>
+            <span class="esm-workspace-treemap-title">TreeMap</span>
+          </button>
+          <button
+            type="button"
+            class="cmu-jelly-panel-load-all cmu-jelly-treemap-load-all"
+            title="Load all visible TreeMap endpoints into CM Workspace"
+            aria-label="Load all visible TreeMap endpoints into CM Workspace"
+            disabled
+          >
+            <span class="cmu-jelly-panel-count cmu-jelly-treemap-count">0</span>
+          </button>
         </div>
         <div class="esm-workspace-treemap-scroll cmu-jelly-treemap-scroll" hidden>
           <div class="esm-workspace-treemap-root cmu-jelly-treemap-root"></div>
@@ -19515,6 +20094,56 @@ function cmuUsageDeduplicateRecords(records = []) {
     deduped.push(record);
   });
   return deduped;
+}
+
+function cmuUsageResolveRecordsByEndpointIndexes(cmuUsageState, endpointIndexes = []) {
+  const catalog = Array.isArray(cmuUsageState?.catalog) ? cmuUsageState.catalog : [];
+  const output = [];
+  [...new Set(
+    (Array.isArray(endpointIndexes) ? endpointIndexes : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value >= 0 && value < catalog.length)
+  )].forEach((endpointIndex) => {
+    const endpoint = catalog[endpointIndex];
+    if (!endpoint || !Array.isArray(endpoint.pathParts) || endpoint.pathParts.length === 0) {
+      return;
+    }
+    const records = cmuUsageResolveRecordsByPath(cmuUsageState, endpoint.pathParts);
+    if (Array.isArray(records) && records.length > 0) {
+      output.push(...records);
+    }
+  });
+  return cmuUsageDeduplicateRecords(output);
+}
+
+function cmuUsageSyncPanelLoadAllButtons(cmuUsageState, endpointIndexes = []) {
+  const normalizedIndexes = [...new Set(
+    (Array.isArray(endpointIndexes) ? endpointIndexes : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value >= 0)
+  )];
+  const visibleCount = normalizedIndexes.length;
+  const loadAllBusy = cmuUsageState?.loadAllBusy === true;
+  const setCount = (element) => {
+    if (element) {
+      element.textContent = String(visibleCount);
+    }
+  };
+  setCount(cmuUsageState?.treeCountElement);
+  setCount(cmuUsageState?.treemapCountElement);
+  const setDisabled = (button) => {
+    if (button) {
+      button.disabled = visibleCount === 0 || loadAllBusy;
+      button.classList.toggle("net-busy", loadAllBusy);
+      if (loadAllBusy) {
+        button.setAttribute("aria-busy", "true");
+      } else {
+        button.removeAttribute("aria-busy");
+      }
+    }
+  };
+  setDisabled(cmuUsageState?.treeLoadAllButton);
+  setDisabled(cmuUsageState?.treemapLoadAllButton);
 }
 
 function cmuUsageResolveRecordsByPath(cmuUsageState, pathParts, options = {}) {
@@ -19767,8 +20396,13 @@ function cmuUsageApplyFilters(cmState, cmuUsageState, requestToken, options = {}
     onlyRunnable: filteredMode,
     requestToken: options.requestToken || cmuUsageState?.requestToken || state.premiumPanelRequestToken || 0,
   });
+  cmuUsageState.visibleEndpointIndexes = visibleEndpointIndexes.slice();
+  cmuUsageSyncPanelLoadAllButtons(cmuUsageState, visibleEndpointIndexes);
   esmWorkspaceSyncTreeToggleButton(cmuUsageState);
-  return { visibleEndpointCount: visibleEndpointIndexes.length };
+  return {
+    visibleEndpointCount: visibleEndpointIndexes.length,
+    visibleEndpointIndexes: visibleEndpointIndexes.slice(),
+  };
 }
 
 function cmuUsageBuildTree(cmState, cmuUsageState, requestToken) {
@@ -19892,25 +20526,43 @@ function cmuUsageWireInteractions(cmState, cmuUsageState, requestToken) {
     esmWorkspaceSetTreemapCollapsed(cmuUsageState, expanded);
   };
 
+  const runVisibleEndpointsToWorkspace = async (source = "cmu-jelly-load-all") => {
+    if (cmuUsageState.loadAllBusy === true) {
+      return;
+    }
+    const endpointIndexes = Array.isArray(cmuUsageState.visibleEndpointIndexes) ? cmuUsageState.visibleEndpointIndexes : [];
+    const records = cmuUsageResolveRecordsByEndpointIndexes(cmuUsageState, endpointIndexes);
+    if (records.length === 0) {
+      return;
+    }
+
+    cmuUsageState.loadAllBusy = true;
+    cmuUsageSyncPanelLoadAllButtons(cmuUsageState, endpointIndexes);
+    cmSetLoadAllButtonsBusy(cmState, [cmuUsageState.treeLoadAllButton, cmuUsageState.treemapLoadAllButton], true);
+    try {
+      await cmuUsageRunRecordsFromUi(cmState, cmuUsageState, records, requestToken, source);
+    } finally {
+      cmSetLoadAllButtonsBusy(cmState, [cmuUsageState.treeLoadAllButton, cmuUsageState.treemapLoadAllButton], false);
+      cmuUsageState.loadAllBusy = false;
+      cmuUsageSyncPanelLoadAllButtons(cmuUsageState, cmuUsageState.visibleEndpointIndexes);
+    }
+  };
+
   cmuUsageState.treeHeadElement?.addEventListener("click", () => {
     toggleTree();
   });
   cmuUsageState.treemapHeadElement?.addEventListener("click", () => {
     toggleTreemap();
   });
-  cmuUsageState.treeHeadElement?.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
+  cmuUsageState.treeLoadAllButton?.addEventListener("click", async (event) => {
     event.preventDefault();
-    toggleTree();
+    event.stopPropagation();
+    await runVisibleEndpointsToWorkspace("cmu-jelly-tree-load-all");
   });
-  cmuUsageState.treemapHeadElement?.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
+  cmuUsageState.treemapLoadAllButton?.addEventListener("click", async (event) => {
     event.preventDefault();
-    toggleTreemap();
+    event.stopPropagation();
+    await runVisibleEndpointsToWorkspace("cmu-jelly-treemap-load-all");
   });
 }
 
@@ -19925,29 +20577,31 @@ function cmMountUsageJellyBeans(cmState, usageRecords, requestToken) {
     catalog: Array.isArray(usageCatalog.catalog) ? usageCatalog.catalog : [],
     recordsByPathKey: usageCatalog.recordsByPathKey,
     endpointIndexByPathKey: new Map(),
+    visibleEndpointIndexes: [],
     requestToken,
-    treeHeadElement: host.querySelector(".cmu-jelly-tree-head"),
+    treeHeadElement: host.querySelector(".cmu-jelly-tree-toggle"),
     treeScrollElement: host.querySelector(".cmu-jelly-tree-scroll"),
     treeRootElement: host.querySelector(".cmu-jelly-tree-root"),
-    treemapHeadElement: host.querySelector(".cmu-jelly-treemap-head"),
+    treemapHeadElement: host.querySelector(".cmu-jelly-treemap-toggle"),
     treemapScrollElement: host.querySelector(".cmu-jelly-treemap-scroll"),
     treemapRootElement: host.querySelector(".cmu-jelly-treemap-root"),
     zoomFilterSelect: host.querySelector(".cmu-jelly-zoom-filter"),
     searchInput: host.querySelector(".cmu-jelly-search"),
     resetButton: host.querySelector(".cmu-jelly-reset-btn"),
     makeClickCmuButton: host.querySelector(".cmu-jelly-make-clickcmu-btn"),
+    treeLoadAllButton: host.querySelector(".cmu-jelly-tree-load-all"),
+    treemapLoadAllButton: host.querySelector(".cmu-jelly-treemap-load-all"),
+    treeCountElement: host.querySelector(".cmu-jelly-tree-count"),
+    treemapCountElement: host.querySelector(".cmu-jelly-treemap-count"),
+    loadAllBusy: false,
   };
 
   cmState.cmuUsageState = cmuUsageState;
   if (cmuUsageState.treeHeadElement) {
-    cmuUsageState.treeHeadElement.setAttribute("role", "button");
-    cmuUsageState.treeHeadElement.setAttribute("tabindex", "0");
     cmuUsageState.treeHeadElement.setAttribute("aria-expanded", "false");
     cmuUsageState.treeHeadElement.setAttribute("aria-label", "Toggle CMU JellyBeans");
   }
   if (cmuUsageState.treemapHeadElement) {
-    cmuUsageState.treemapHeadElement.setAttribute("role", "button");
-    cmuUsageState.treemapHeadElement.setAttribute("tabindex", "0");
     cmuUsageState.treemapHeadElement.setAttribute("aria-expanded", "false");
     cmuUsageState.treemapHeadElement.setAttribute("aria-label", "Toggle CMU TreeMap");
   }
@@ -20484,25 +21138,276 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
   }
 }
 
+function cmIsApplicationsListRequestUrl(urlValue = "") {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return false;
+  }
+  try {
+    const parsed = new URL(raw, CM_CONFIG_BASE_URL);
+    const path = String(parsed.pathname || "").replace(/\/+$/, "").toLowerCase();
+    return path === "/maitai/applications";
+  } catch {
+    const path = String(raw.split("?")[0] || "").replace(/\/+$/, "").toLowerCase();
+    return path.endsWith("/maitai/applications");
+  }
+}
+
+function cmExtractApplicationIdFromDetailUrl(urlValue = "") {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const readApplicationIdFromPath = (pathValue = "") => {
+    const match = String(pathValue || "").match(/\/maitai\/applications\/([^/?#]+)/i);
+    if (!match?.[1]) {
+      return "";
+    }
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return String(match[1] || "").trim();
+    }
+  };
+  try {
+    const parsed = new URL(raw, CM_CONFIG_BASE_URL);
+    return readApplicationIdFromPath(parsed.pathname || "");
+  } catch {
+    return readApplicationIdFromPath(raw.split("?")[0] || "");
+  }
+}
+
+function cmIsApplicationDetailRequestUrl(urlValue = "") {
+  return Boolean(cmExtractApplicationIdFromDetailUrl(urlValue));
+}
+
+function cmExtractPolicyIdFromDetailUrl(urlValue = "") {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const readPolicyIdFromPath = (pathValue = "") => {
+    const match = String(pathValue || "").match(/\/maitai\/policy\/([^/?#]+)/i);
+    if (!match?.[1]) {
+      return "";
+    }
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return String(match[1] || "").trim();
+    }
+  };
+  try {
+    const parsed = new URL(raw, CM_CONFIG_BASE_URL);
+    return readPolicyIdFromPath(parsed.pathname || "");
+  } catch {
+    return readPolicyIdFromPath(raw.split("?")[0] || "");
+  }
+}
+
+function cmNormalizeRecordKind(kindValue = "") {
+  const normalized = String(kindValue || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized === "application" || normalized === "applications") {
+    return "applications";
+  }
+  if (normalized === "policy" || normalized === "policies") {
+    return "policies";
+  }
+  if (normalized === "usage" || normalized === "cmu") {
+    return "usage";
+  }
+  if (normalized === "tenant" || normalized === "tenants") {
+    return "tenant";
+  }
+  if (normalized === "cmv2-op" || normalized === "cmv2" || normalized === "cm-v2" || normalized === "cm_v2") {
+    return "cmv2-op";
+  }
+  return normalized;
+}
+
+function cmInferRecordKindFromCard(card = null, fallbackUrl = "") {
+  const explicitKind = cmNormalizeRecordKind(card?.kind);
+  if (explicitKind) {
+    return explicitKind;
+  }
+
+  const zoomKind = cmNormalizeRecordKind(card?.zoomKey);
+  if (zoomKind) {
+    return zoomKind;
+  }
+
+  if (card?.operation && typeof card.operation === "object") {
+    return "cmv2-op";
+  }
+
+  const requestUrl = String(
+    firstNonEmptyString([card?.requestUrl, card?.endpointUrl, card?.baseRequestUrl, fallbackUrl])
+  ).trim();
+  if (!requestUrl) {
+    return "cm";
+  }
+  if (cmIsApplicationsListRequestUrl(requestUrl) || cmIsApplicationDetailRequestUrl(requestUrl)) {
+    return "applications";
+  }
+  if (/\/maitai\/policy(?:\/|\?|$)/i.test(requestUrl)) {
+    return "policies";
+  }
+  try {
+    const parsed = new URL(requestUrl, CM_REPORTS_BASE_URL);
+    if (isClickCmuUsagePath(parsed.pathname)) {
+      return "usage";
+    }
+  } catch {
+    if (isClickCmuUsagePath(requestUrl)) {
+      return "usage";
+    }
+  }
+  return "cm";
+}
+
+function cmBuildFallbackRecordFromCard(cmState, card = null, options = {}) {
+  const normalizedCard = card && typeof card === "object" ? card : {};
+  const fallbackUrl = String(
+    firstNonEmptyString([normalizedCard.requestUrl, normalizedCard.endpointUrl, normalizedCard.baseRequestUrl])
+  ).trim();
+  const recordKind = cmInferRecordKindFromCard(normalizedCard, fallbackUrl);
+  const payload = normalizedCard.payload && typeof normalizedCard.payload === "object" ? { ...normalizedCard.payload } : null;
+  const entityId = firstNonEmptyString([
+    normalizedCard.entityId,
+    payload?.entityId,
+    payload?.entity_id,
+    payload?.id,
+  ]);
+  const applicationId = firstNonEmptyString([
+    normalizedCard.applicationId,
+    normalizedCard.appId,
+    payload?.applicationId,
+    payload?.application_id,
+    payload?.appId,
+    payload?.app_id,
+    recordKind === "applications" ? entityId : "",
+    cmExtractApplicationIdFromDetailUrl(fallbackUrl),
+  ]);
+  const policyId = firstNonEmptyString([
+    normalizedCard.policyId,
+    payload?.policyId,
+    payload?.policy_id,
+    payload?.policy?.id,
+    payload?.applicationPolicyId,
+    payload?.application_policy_id,
+    recordKind === "policies" ? entityId : "",
+    cmExtractPolicyIdFromDetailUrl(fallbackUrl),
+  ]);
+  const tenantId = firstNonEmptyString(
+    [
+      ...(Array.isArray(options?.tenantIdCandidates) ? options.tenantIdCandidates : []),
+      normalizedCard.tenantId,
+      payload?.ownerId,
+      payload?.tenantId,
+      payload?.tenant_id,
+      payload?.orgId,
+      payload?.org_id,
+      payload?.policyOwnerId,
+      payload?.policy_owner_id,
+    ]
+  );
+  const tenantName = firstNonEmptyString(
+    [
+      ...(Array.isArray(options?.tenantNameCandidates) ? options.tenantNameCandidates : []),
+      normalizedCard.tenantName,
+      payload?.tenantName,
+      payload?.tenant_name,
+      payload?.ownerName,
+      payload?.owner_name,
+      payload?.ownerId,
+      payload?.policyOwnerId,
+    ]
+  );
+
+  return {
+    cardId: String(normalizedCard.cardId || generateRequestId()),
+    kind: recordKind || "cm",
+    title: String(
+      firstNonEmptyString([
+        normalizedCard.title,
+        recordKind === "applications" ? "CM application" : "",
+        recordKind === "policies" ? "CM policy" : "",
+        recordKind === "usage" ? "CM usage" : "",
+        "CM item",
+      ])
+    ),
+    subtitle: String(normalizedCard.subtitle || ""),
+    endpointUrl: fallbackUrl,
+    requestUrl: fallbackUrl,
+    payload,
+    columns: Array.isArray(normalizedCard?.columns) ? normalizedCard.columns : [],
+    lastModified: String(normalizedCard.lastModified || ""),
+    tenantId: String(tenantId || ""),
+    tenantName: String(tenantName || ""),
+    applicationId: String(applicationId || ""),
+    policyId: String(policyId || ""),
+  };
+}
+
 function cmResolveApplicationDetailUrl(record, fallbackUrl = "") {
   const fallback = String(fallbackUrl || "").trim();
   const normalizedKind = String(record?.kind || "").trim().toLowerCase();
   if (normalizedKind !== "applications") {
     return fallback;
   }
-  if (/\/maitai\/policy\/[^/?#]+/i.test(fallback)) {
-    return fallback;
-  }
-  const tenantId = String(record?.tenantId || "").trim();
   const payload = record?.payload && typeof record.payload === "object" ? record.payload : null;
-  const entityId = firstNonEmptyString([
-    payload?.id,
-    payload?.policyId,
-    payload?.policy_id,
+  const tenantId = firstNonEmptyString([
+    record?.tenantId,
+    payload?.ownerId,
+    payload?.tenantId,
+    payload?.tenant_id,
+    payload?.orgId,
+    payload?.org_id,
+    payload?.policyOwnerId,
+    payload?.policy_owner_id,
+  ]);
+  const applicationId = firstNonEmptyString([
+    record?.applicationId,
+    record?.entityId,
     payload?.applicationId,
     payload?.application_id,
-    payload?.name,
-    record?.title,
+    payload?.appId,
+    payload?.app_id,
+    payload?.id,
+  ]);
+  if (applicationId && tenantId) {
+    if (cmIsApplicationDetailRequestUrl(fallback)) {
+      const fallbackApplicationId = cmExtractApplicationIdFromDetailUrl(fallback);
+      if (fallbackApplicationId && fallbackApplicationId === String(applicationId || "").trim()) {
+        return normalizeCmUrl(fallback) || fallback;
+      }
+    }
+    return normalizeCmUrl(
+      `${CM_CONFIG_BASE_URL}/maitai/applications/${encodeURIComponent(String(applicationId || "").trim())}?orgId=${encodeURIComponent(tenantId)}`
+    );
+  }
+  if (cmIsApplicationsListRequestUrl(fallback)) {
+    return "";
+  }
+  const policyId = firstNonEmptyString([
+    record?.policyId,
+    payload?.policyId,
+    payload?.policy_id,
+    payload?.policy?.id,
+    payload?.applicationPolicyId,
+    payload?.application_policy_id,
+  ]);
+  const entityId = firstNonEmptyString([
+    policyId,
+    payload?.policyId,
+    payload?.policy_id,
+    payload?.policy?.id,
+    payload?.applicationPolicyId,
+    payload?.application_policy_id,
+    record?.policyId,
   ]);
   if (!tenantId || !entityId) {
     return fallback;
@@ -20523,6 +21428,47 @@ function cmResolveUsageTenantScope(cmState, record = null) {
   );
 }
 
+function cmApplyUsageExampleRequestContext(urlValue, record = null, cmState = null) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const payload = record?.payload && typeof record.payload === "object" ? record.payload : null;
+  if (payload?.usageExample !== true) {
+    return raw;
+  }
+  const hasMvpdDimension = payload?.hasMvpdDimension === true;
+  const selectedMvpdId = String(state.selectedMvpdId || "").trim();
+  try {
+    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+    parsed.searchParams.set("format", "json");
+    const zoomKey = cmuUsageGetZoomKey(cmExtractRawUsagePathParts(parsed.pathname), parsed.toString());
+    const timeWindow = clickEsmComputeTimeWindow(zoomKey);
+    parsed.searchParams.set("start", String(timeWindow?.start || clickEsmIso(new Date())));
+    parsed.searchParams.set("end", String(timeWindow?.end || clickEsmIso(new Date())));
+    const tenantScope = cmResolveUsageTenantScope(cmState, record);
+    if (tenantScope) {
+      const existingTenantScope = resolveCmUsageTenantScopeValue(
+        parsed.searchParams.get("tenant"),
+        parsed.searchParams.get("tenant_id"),
+        parsed.searchParams.get("tenant-id")
+      );
+      applyCmUsageTenantScopeToSearchParams(parsed.searchParams, existingTenantScope || tenantScope);
+    }
+    if (hasMvpdDimension) {
+      parsed.searchParams.delete("mvpd");
+      parsed.searchParams.delete("mvpd_id");
+      parsed.searchParams.delete("mvpd-id");
+      if (selectedMvpdId) {
+        parsed.searchParams.set("mvpd", selectedMvpdId);
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
 function cmScopeUsageRequestUrl(urlValue, cmState, record = null) {
   const raw = String(urlValue || "").trim();
   if (!raw) {
@@ -20530,12 +21476,17 @@ function cmScopeUsageRequestUrl(urlValue, cmState, record = null) {
   }
   try {
     const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+    const payload = record?.payload && typeof record.payload === "object" ? record.payload : null;
+    if (payload?.usageExample === true) {
+      return cmApplyUsageExampleRequestContext(parsed.toString(), record, cmState);
+    }
     if (!isClickCmuUsagePath(parsed.pathname)) {
       return parsed.toString();
     }
-    return ensureCmUsageEndpointFormat(parsed.toString(), {
+    const normalizedUsageUrl = ensureCmUsageEndpointFormat(parsed.toString(), {
       tenantScope: cmResolveUsageTenantScope(cmState, record),
     });
+    return normalizedUsageUrl;
   } catch {
     return raw;
   }
@@ -20589,24 +21540,36 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
     targetWorkspace === "mvpd"
       ? {
           ...(record && typeof record === "object" ? record : {}),
-          tenantId: firstNonEmptyString([targetMvpdId, String(record?.tenantId || "").trim()]),
+          tenantId: firstNonEmptyString([
+            String(record?.tenantId || "").trim(),
+            String(cmState?.cmService?.matchedTenants?.[0]?.tenantId || "").trim(),
+            targetMvpdId,
+            String(cmState?.tenantScope || "").trim(),
+          ]),
           tenantName: firstNonEmptyString([
+            String(record?.tenantName || "").trim(),
+            String(cmState?.cmService?.matchedTenants?.[0]?.tenantName || "").trim(),
             targetMvpdLabel,
             targetMvpdId,
-            String(record?.tenantName || "").trim(),
             "MVPD",
           ]),
         }
       : record;
   const reportTenantId = String(
-    firstNonEmptyString([String(scopedRecord?.tenantId || "").trim(), String(cmState?.programmer?.programmerId || "").trim()])
+    firstNonEmptyString([
+      String(scopedRecord?.tenantId || "").trim(),
+      targetWorkspace === "mvpd" ? targetMvpdId : "",
+      String(cmState?.programmer?.programmerId || "").trim(),
+    ])
   ).trim();
   const reportTenantName = String(
     firstNonEmptyString([
       String(scopedRecord?.tenantName || "").trim(),
+      targetWorkspace === "mvpd" ? targetMvpdLabel : "",
+      targetWorkspace === "mvpd" ? targetMvpdId : "",
       String(cmState?.programmer?.programmerName || "").trim(),
       String(cmState?.programmer?.programmerId || "").trim(),
-      "MVPD",
+      targetWorkspace === "mvpd" ? "MVPD" : "CM",
     ])
   ).trim();
   const endpointUrl = String(record.endpointUrl || record.requestUrl || "").trim();
@@ -20653,11 +21616,18 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
   const hasUrlOverrideDiffersFromRecord =
     Boolean(requestUrlOverride) && requestUrl !== recordRequestUrl;
   const recordKind = String(record?.kind || "").trim().toLowerCase();
-  const shouldRefetchForRecordKind = recordKind === "applications" || recordKind === "usage";
+  const applicationsListRequest = recordKind === "applications" && cmIsApplicationsListRequestUrl(requestUrl);
+  const shouldRefetchForRecordKind =
+    recordKind === "usage" ||
+    (recordKind === "applications" &&
+      (!payload || (Boolean(String(requestUrl || "").trim()) && !applicationsListRequest)));
   const shouldRefetch =
     options.forceRefetch === true || shouldRefetchForRecordKind || payload == null || hasUrlOverrideDiffersFromRecord;
   const allowPayloadFallbackOnFetchError =
-    payload != null && !shouldRefetchForRecordKind && !hasUrlOverrideDiffersFromRecord && options.forceRefetch !== true;
+    payload != null &&
+    (recordKind === "applications" || !shouldRefetchForRecordKind) &&
+    !hasUrlOverrideDiffersFromRecord &&
+    options.forceRefetch !== true;
   emitCmDebugEvent(
     {
       phase: "cm-report-request",
@@ -20739,8 +21709,8 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
     }
   }
 
-  const rows = cmRowsFromPayload(payload);
-  const columns = cmColumnsFromPayload(payload);
+  const rows = cmRowsFromPayloadForRecord(payload, record, requestUrl);
+  const columns = cmColumnsFromRows(rows);
   record.columns = columns;
   emitCmDebugEvent(
     {
@@ -20930,23 +21900,23 @@ async function handleCmWorkspaceAction(message, sender = null) {
       if (!fallbackUrl) {
         return { ok: false, error: "CM card request URL is missing." };
       }
+      const fallbackRecord = cmBuildFallbackRecordFromCard(cmState, card, {
+        tenantIdCandidates: [
+          String(card?.tenantId || "").trim(),
+          String(cmState?.tenantScope || "").trim(),
+          String(cmState?.programmer?.programmerId || "").trim(),
+        ],
+        tenantNameCandidates: [
+          String(card?.tenantName || "").trim(),
+          String(card?.tenantId || "").trim(),
+          String(cmState?.programmer?.programmerName || "").trim(),
+          String(cmState?.programmer?.programmerId || "").trim(),
+          "CM",
+        ],
+      });
       await cmRunRecordToWorkspace(
         cmState,
-        {
-          cardId: String(card.cardId || generateRequestId()),
-          kind: "cm",
-          title: "CM item",
-          subtitle: "",
-          endpointUrl: fallbackUrl,
-          requestUrl: fallbackUrl,
-          payload: null,
-          columns: Array.isArray(card?.columns) ? card.columns : [],
-          lastModified: "",
-          tenantId: String(card?.tenantId || cmState?.tenantScope || cmState?.programmer?.programmerId || ""),
-          tenantName: String(
-            card?.tenantName || card?.tenantId || cmState?.programmer?.programmerName || cmState?.programmer?.programmerId || ""
-          ),
-        },
+        fallbackRecord,
         requestToken,
         {
           emitStart: true,
@@ -21010,21 +21980,23 @@ async function handleCmWorkspaceAction(message, sender = null) {
     const sortRule = esmWorkspaceNormalizeSortRule(message?.sortRule);
     const matchedRecord = cmFindRecordByCard(cmState, card);
     const fallbackUrl = String(card?.requestUrl || card?.endpointUrl || "").trim();
-    const fallbackRecord = {
-      cardId: String(card?.cardId || generateRequestId()),
-      kind: "cm",
-      title: "CM item",
-      subtitle: "",
-      endpointUrl: fallbackUrl,
-      requestUrl: fallbackUrl,
-      payload: null,
-      columns: Array.isArray(card?.columns) ? card.columns.map((value) => String(value || "")).filter(Boolean) : [],
-      lastModified: "",
-      tenantId: String(card?.tenantId || cmState?.tenantScope || cmState?.programmer?.programmerId || "cm"),
-      tenantName: String(
-        card?.tenantName || card?.tenantId || cmState?.programmer?.programmerName || cmState?.programmer?.programmerId || "CM"
-      ),
-    };
+    const fallbackRecord = cmBuildFallbackRecordFromCard(cmState, card, {
+      tenantIdCandidates: [
+        String(card?.tenantId || "").trim(),
+        String(cmState?.tenantScope || "").trim(),
+        String(cmState?.programmer?.programmerId || "").trim(),
+      ],
+      tenantNameCandidates: [
+        String(card?.tenantName || "").trim(),
+        String(card?.tenantId || "").trim(),
+        String(cmState?.programmer?.programmerName || "").trim(),
+        String(cmState?.programmer?.programmerId || "").trim(),
+        "CM",
+      ],
+    });
+    fallbackRecord.columns = Array.isArray(card?.columns)
+      ? card.columns.map((value) => String(value || "")).filter(Boolean)
+      : [];
     const record = matchedRecord || fallbackRecord;
     if (!matchedRecord && !fallbackUrl && (!Array.isArray(card?.rows) || card.rows.length === 0)) {
       return { ok: false, error: "CM card request URL is missing." };
@@ -22451,27 +23423,28 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
       if (!fallbackUrl) {
         return { ok: false, error: "CM card request URL is missing." };
       }
-      await cmRunRecordToWorkspace(
-        cmState,
-        {
-          cardId: String(card.cardId || generateRequestId()),
-          kind: "cm",
-          title: "CM item",
-          subtitle: "",
-          endpointUrl: fallbackUrl,
-          requestUrl: fallbackUrl,
-          payload: null,
-          columns: Array.isArray(card?.columns) ? card.columns : [],
-          lastModified: "",
-          tenantId: String(state.selectedMvpdId || card?.tenantId || cmState?.tenantScope || ""),
-          tenantName: String(
+      const fallbackRecord = cmBuildFallbackRecordFromCard(cmState, card, {
+        tenantIdCandidates: [
+          String(card?.tenantId || "").trim(),
+          String(cmState?.cmService?.matchedTenants?.[0]?.tenantId || "").trim(),
+          String(cmState?.tenantScope || "").trim(),
+          String(cmState?.cmService?.mvpdId || "").trim(),
+          String(state.selectedMvpdId || "").trim(),
+        ],
+        tenantNameCandidates: [
+          String(
             getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), String(state.selectedMvpdId || "").trim()) ||
               state.selectedMvpdId ||
-              card?.tenantName ||
-              card?.tenantId ||
-              "MVPD"
-          ),
-        },
+              ""
+          ).trim(),
+          String(card?.tenantName || "").trim(),
+          String(card?.tenantId || "").trim(),
+          "MVPD",
+        ],
+      });
+      await cmRunRecordToWorkspace(
+        cmState,
+        fallbackRecord,
         requestToken,
         {
           emitStart: true,
@@ -22554,25 +23527,28 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     const sortRule = esmWorkspaceNormalizeSortRule(message?.sortRule);
     const matchedRecord = cmFindRecordByCard(cmState, card);
     const fallbackUrl = String(card?.requestUrl || card?.endpointUrl || "").trim();
-    const fallbackRecord = {
-      cardId: String(card?.cardId || generateRequestId()),
-      kind: "cm",
-      title: "CM item",
-      subtitle: "",
-      endpointUrl: fallbackUrl,
-      requestUrl: fallbackUrl,
-      payload: null,
-      columns: Array.isArray(card?.columns) ? card.columns.map((value) => String(value || "")).filter(Boolean) : [],
-      lastModified: "",
-      tenantId: String(state.selectedMvpdId || card?.tenantId || cmState?.tenantScope || "mvpd"),
-      tenantName: String(
-        getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), String(state.selectedMvpdId || "").trim()) ||
-          state.selectedMvpdId ||
-          card?.tenantName ||
-          card?.tenantId ||
-          "MVPD"
-      ),
-    };
+    const fallbackRecord = cmBuildFallbackRecordFromCard(cmState, card, {
+      tenantIdCandidates: [
+        String(card?.tenantId || "").trim(),
+        String(cmState?.cmService?.matchedTenants?.[0]?.tenantId || "").trim(),
+        String(cmState?.tenantScope || "").trim(),
+        String(cmState?.cmService?.mvpdId || "").trim(),
+        String(state.selectedMvpdId || "").trim(),
+      ],
+      tenantNameCandidates: [
+        String(
+          getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), String(state.selectedMvpdId || "").trim()) ||
+            state.selectedMvpdId ||
+            ""
+        ).trim(),
+        String(card?.tenantName || "").trim(),
+        String(card?.tenantId || "").trim(),
+        "MVPD",
+      ],
+    });
+    fallbackRecord.columns = Array.isArray(card?.columns)
+      ? card.columns.map((value) => String(value || "")).filter(Boolean)
+      : [];
     const record = matchedRecord || fallbackRecord;
     if (!matchedRecord && !fallbackUrl && (!Array.isArray(card?.rows) || card.rows.length === 0)) {
       return { ok: false, error: "CM card request URL is missing." };
@@ -25690,6 +26666,31 @@ function cmBroadcastTargetControllerState(cmState, targetWorkspace, targetWindow
   cmBroadcastControllerState(cmState, targetWindowId);
 }
 
+function cmSetLoadAllButtonsBusy(cmState, buttons = [], isBusy = false) {
+  if (!cmState) {
+    return;
+  }
+  const normalizedButtons = [...new Set(
+    (Array.isArray(buttons) ? buttons : []).filter((button) => button && typeof button.classList?.toggle === "function")
+  )];
+  normalizedButtons.forEach((button) => {
+    button.classList.toggle("net-busy", Boolean(isBusy));
+    if (isBusy) {
+      button.setAttribute("aria-busy", "true");
+    } else {
+      button.removeAttribute("aria-busy");
+    }
+  });
+
+  const currentBusyCount = Math.max(0, Number(cmState.loadAllBusyCount || 0));
+  const nextBusyCount = isBusy ? currentBusyCount + 1 : Math.max(0, currentBusyCount - 1);
+  cmState.loadAllBusyCount = nextBusyCount;
+  const shell = cmState?.contentElement?.querySelector(".cm-shell");
+  if (shell) {
+    shell.classList.toggle("net-busy", nextBusyCount > 0);
+  }
+}
+
 async function cmOpenRecordInWorkspace(cmState, record, requestToken, options = {}) {
   if (!cmState || !record) {
     return;
@@ -25807,13 +26808,33 @@ async function loadCmService(programmer, cmService, section, contentElement, req
     const correlationRecords = cmBuildRestV2CorrelationRecords(programmer);
     const credentialHints = cmExtractCredentialHintsFromBundles(bundles);
     const credentialRecords = cmBuildCredentialHintRecords(credentialHints, programmer);
-    const records = [...correlationRecords, ...bundleRecords, ...credentialRecords];
+    const liveUsageRecords = bundleRecords.filter((record) => String(record?.kind || "").trim().toLowerCase() === "usage");
+    let usageExampleRecords = [];
+    if (!isMvpdService) {
+      try {
+        const usageExamplesCatalog = await loadCmUsageReportExamplesCatalog();
+        usageExampleRecords = cmBuildUsageReportExampleWorkspaceRecords(usageExamplesCatalog, {
+          programmer,
+          tenantScope,
+          tenantId: matchedTenants?.[0]?.tenantId,
+          tenantName: matchedTenants?.[0]?.tenantName,
+          mvpdId: String(state.selectedMvpdId || "").trim(),
+          usageRecords: liveUsageRecords,
+        });
+      } catch (error) {
+        log("Unable to load CM usage report examples catalog.", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const records = [...correlationRecords, ...bundleRecords, ...credentialRecords, ...usageExampleRecords];
     const correlationCardRecords = records.filter((record) => record.kind === "correlation");
     const tenantRecords = records.filter((record) => record.kind === "tenant");
     const applicationRecords = records.filter((record) => record.kind === "applications");
     const credentialHintRecords = records.filter((record) => record.kind === "credential");
     const policyRecords = records.filter((record) => record.kind === "policies");
-    const usageRecords = records.filter((record) => record.kind === "usage");
+    const usageRecords = records.filter((record) => record.kind === "usage" && record?.payload?.usageExample !== true);
+    const usageExampleCardRecords = records.filter((record) => record.kind === "usage" && record?.payload?.usageExample === true);
     const groupDefinitions = [
       {
         key: "correlation",
@@ -25825,6 +26846,15 @@ async function loadCmService(programmer, cmService, section, contentElement, req
         label: "CM Usage (CMU)",
         records: usageRecords,
       },
+      ...(!isMvpdService && usageExampleCardRecords.length > 0
+        ? [
+            {
+              key: "usage-examples",
+              label: "CM Usage Reports Examples",
+              records: usageExampleCardRecords,
+            },
+          ]
+        : []),
       {
         key: "tenants",
         label: "CM Tenants",
@@ -25872,6 +26902,7 @@ async function loadCmService(programmer, cmService, section, contentElement, req
       };
     const correlationGroupRecord = groupRecordsByKey.get(correlationGroup.key);
     const correlationMarkup = cmBuildGroupListHtml(
+      correlationGroup.key,
       correlationGroup.label,
       correlationGroup.records,
       correlationGroupRecord?.cardId || ""
@@ -25880,7 +26911,7 @@ async function loadCmService(programmer, cmService, section, contentElement, req
       .filter((group) => !hiddenCmGroupKeys.has(group.key) && group.key !== "correlation")
       .map((group) => {
         const groupRecord = groupRecordsByKey.get(group.key);
-        return cmBuildGroupListHtml(group.label, group.records, groupRecord?.cardId || "");
+        return cmBuildGroupListHtml(group.key, group.label, group.records, groupRecord?.cardId || "");
       })
       .join("");
 
@@ -25906,6 +26937,7 @@ async function loadCmService(programmer, cmService, section, contentElement, req
       recordsById,
       groupChildRecordIdsByGroupRecordId,
       controllerWindowId,
+      loadAllBusyCount: 0,
     };
     section.__underparCmState = cmState;
     cmMountUsageJellyBeans(cmState, usageRecords, requestToken);
@@ -25978,7 +27010,34 @@ async function loadCmService(programmer, cmService, section, contentElement, req
       });
     });
 
-    contentElement.querySelectorAll(".cm-group-link").forEach((button) => {
+    const cmSetGroupCollapsed = (groupElement, collapsed) => {
+      if (!groupElement) {
+        return;
+      }
+      const isCollapsed = Boolean(collapsed);
+      groupElement.classList.toggle("is-collapsed", isCollapsed);
+      const toggleButton = groupElement.querySelector(".cm-group-toggle");
+      if (toggleButton) {
+        toggleButton.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+      }
+    };
+
+    contentElement.querySelectorAll(".cm-group").forEach((groupElement) => {
+      cmSetGroupCollapsed(groupElement, true);
+    });
+
+    contentElement.querySelectorAll(".cm-group-toggle").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const groupElement = button.closest(".cm-group");
+        if (!groupElement) {
+          return;
+        }
+        cmSetGroupCollapsed(groupElement, !groupElement.classList.contains("is-collapsed"));
+      });
+    });
+
+    contentElement.querySelectorAll(".cm-group-load-all").forEach((button) => {
       button.addEventListener("click", async (event) => {
         event.stopPropagation();
         if (button.disabled) {
@@ -25993,14 +27052,17 @@ async function loadCmService(programmer, cmService, section, contentElement, req
           ? cmState.groupChildRecordIdsByGroupRecordId.get(recordId)
           : [];
         const childRecords = childRecordIds.map((childRecordId) => cmState.recordsById.get(childRecordId)).filter(Boolean);
-        const groupLabel =
-          String(button.querySelector(".cm-group-title-text")?.textContent || groupRecord?.title || "CM Group").trim() || "CM Group";
+        const groupElement = button.closest(".cm-group");
+        const groupLabel = String(
+          groupElement?.querySelector(".cm-group-title-text")?.textContent || groupRecord?.title || "CM Group"
+        ).trim() || "CM Group";
         const childPlural = childRecords.length === 1 ? "entry" : "entries";
         const workspaceLabel = String(cmState.workspaceOrigin || "CM Workspace").trim() || "CM Workspace";
         if (childRecords.length > 0) {
           setStatus(`${groupLabel}: loading ${childRecords.length} child ${childPlural} into ${workspaceLabel}...`, "info");
         }
         button.disabled = true;
+        cmSetLoadAllButtonsBusy(cmState, [button], true);
         try {
           const openedCount = await cmOpenRecordsInWorkspace(cmState, childRecords, requestToken, {
             activate: true,
@@ -26016,6 +27078,7 @@ async function loadCmService(programmer, cmService, section, contentElement, req
             setStatus(`${groupLabel}: no child entries found to load.`, "info");
           }
         } finally {
+          cmSetLoadAllButtonsBusy(cmState, [button], false);
           button.disabled = false;
         }
       });
@@ -36875,6 +37938,14 @@ function normalizeCmUrl(value) {
   }
 }
 
+function isAllowedCmRequestUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return false;
+  }
+  return isCmRelayEligibleUrl(raw);
+}
+
 function collectCmUrlsFromValue(value, options = {}) {
   const maxDepth = Math.max(1, Number(options.maxDepth || 4));
   const urls = new Set();
@@ -37210,15 +38281,33 @@ function normalizeCmEntityRecord(kind, item, index = 0, tenant = null, fallbackU
   }
   const kindValue = String(kind || "").trim().toLowerCase();
   const payload = item.payload && typeof item.payload === "object" ? item.payload : null;
-  const entityId = firstNonEmptyString([
-    item.consoleId,
-    item.id,
+  const policyId = firstNonEmptyString([
+    item.policyId,
+    item.policy_id,
+    item.policy?.id,
+    payload?.policyId,
+    payload?.policy_id,
+    payload?.policy?.id,
+  ]);
+  const applicationId = firstNonEmptyString([
     item.applicationId,
     item.application_id,
     item.appId,
     item.app_id,
-    item.policyId,
-    item.policy_id,
+    kindValue === "applications" ? item.id : "",
+    kindValue === "applications" ? item.uuid : "",
+    kindValue === "applications" ? item.slug : "",
+    payload?.applicationId,
+    payload?.application_id,
+    payload?.appId,
+    payload?.app_id,
+    kindValue === "applications" ? payload?.id : "",
+    kindValue === "applications" ? payload?.uuid : "",
+    kindValue === "applications" ? payload?.slug : "",
+  ]);
+  const genericEntityId = firstNonEmptyString([
+    item.consoleId,
+    item.id,
     item.ruleId,
     item.rule_id,
     item.usageId,
@@ -37226,14 +38315,17 @@ function normalizeCmEntityRecord(kind, item, index = 0, tenant = null, fallbackU
     item.uuid,
     item.slug,
     payload?.id,
-    payload?.applicationId,
-    payload?.application_id,
-    payload?.policyId,
-    payload?.policy_id,
     payload?.ruleId,
     payload?.rule_id,
     payload?.usageId,
     payload?.usage_id,
+  ]);
+  const entityId = firstNonEmptyString([
+    kindValue === "applications" ? applicationId : "",
+    kindValue === "policies" ? policyId : "",
+    genericEntityId,
+    policyId,
+    applicationId,
     item.name,
     payload?.name,
   ]);
@@ -37269,11 +38361,25 @@ function normalizeCmEntityRecord(kind, item, index = 0, tenant = null, fallbackU
     .concat(payload ? collectCmUrlsFromValue(payload) : [])
     .concat(fallbackUrl ? [fallbackUrl] : []);
   const tenantId = String(tenant?.tenantId || "").trim();
-  if ((kindValue === "policies" || kindValue === "applications") && tenantId && entityId) {
+  const detailPolicyId = firstNonEmptyString([policyId, kindValue === "policies" ? entityId : ""]);
+  const detailApplicationId = firstNonEmptyString([
+    applicationId,
+    kindValue === "applications" ? entityId : "",
+    kindValue === "applications" ? item.id : "",
+    kindValue === "applications" ? payload?.id : "",
+  ]);
+  if (kindValue === "policies" && tenantId && detailPolicyId) {
     linkCandidates.push(
-      `${CM_CONFIG_BASE_URL}/maitai/policy/${encodeURIComponent(String(entityId || "").trim())}?orgId=${encodeURIComponent(
+      `${CM_CONFIG_BASE_URL}/maitai/policy/${encodeURIComponent(String(detailPolicyId || "").trim())}?orgId=${encodeURIComponent(
         tenantId
       )}`
+    );
+  }
+  if (kindValue === "applications" && tenantId && detailApplicationId) {
+    linkCandidates.push(
+      `${CM_CONFIG_BASE_URL}/maitai/applications/${encodeURIComponent(
+        String(detailApplicationId || "").trim()
+      )}?orgId=${encodeURIComponent(tenantId)}`
     );
   }
   const links = uniqueSorted(linkCandidates.map((value) => normalizeCmUrl(value)).filter(Boolean));
@@ -37281,6 +38387,8 @@ function normalizeCmEntityRecord(kind, item, index = 0, tenant = null, fallbackU
     kind: kindValue,
     entityId: String(entityId || name || `${kind}-${index + 1}`),
     name: String(name || entityId || `${kind}-${index + 1}`),
+    policyId: String(detailPolicyId || ""),
+    applicationId: String(detailApplicationId || applicationId || ""),
     tenantId: String(tenant?.tenantId || ""),
     tenantName: String(tenant?.tenantName || ""),
     aliases: collectCmNameCandidates(item, [entityId, name]),
@@ -39168,9 +40276,18 @@ function summarizeCmPayloadForDebug(payload = null) {
 }
 
 async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options = {}) {
-  const urls = uniqueSorted((Array.isArray(urlCandidates) ? urlCandidates : []).map((url) => normalizeCmUrl(url)).filter(Boolean));
+  const normalizedCandidates = uniqueSorted((Array.isArray(urlCandidates) ? urlCandidates : []).map((url) => normalizeCmUrl(url)).filter(Boolean));
+  const blockedUrls = normalizedCandidates.filter((url) => !isAllowedCmRequestUrl(url));
+  const urls = normalizedCandidates.filter((url) => isAllowedCmRequestUrl(url));
+  if (blockedUrls.length > 0) {
+    emitCmDebugEvent({
+      phase: "cm-request-blocked-url",
+      contextLabel: String(contextLabel || ""),
+      blockedUrls: blockedUrls.slice(0, 12),
+    });
+  }
   if (urls.length === 0) {
-    throw new Error(`${contextLabel} failed: no URL candidates.`);
+    throw new Error(`${contextLabel} failed: no allowlisted CM URL candidates.`);
   }
 
   const explicitAuthorizationHeader = firstNonEmptyString([
@@ -40383,6 +41500,7 @@ function cmRowsFromPayload(payload) {
     const collectionCandidates = [
       payload.items,
       payload.data,
+      payload.rows,
       payload.results,
       payload.records,
       payload.report,
@@ -40407,8 +41525,33 @@ function cmRowsFromPayload(payload) {
   return [{ value: cmNormalizeRowValue(payload) }];
 }
 
+function cmRowsFromPayloadForRecord(payload, record = null, requestUrl = "") {
+  const recordKind = String(record?.kind || "").trim().toLowerCase();
+  const normalizedRequestUrl = String(requestUrl || record?.requestUrl || record?.endpointUrl || "").trim();
+  const shouldRenderAsObjectRow =
+    recordKind === "applications" &&
+    cmIsApplicationDetailRequestUrl(normalizedRequestUrl) &&
+    payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload);
+
+  if (shouldRenderAsObjectRow) {
+    return [cmFlattenObjectToRow(payload)];
+  }
+
+  return cmRowsFromPayload(payload);
+}
+
 function cmColumnsFromPayload(payload) {
   const rows = cmRowsFromPayload(payload);
+  if (rows.length === 0) {
+    return [];
+  }
+  return cmColumnsFromRows(rows);
+}
+
+function cmColumnsFromPayloadForRecord(payload, record = null, requestUrl = "") {
+  const rows = cmRowsFromPayloadForRecord(payload, record, requestUrl);
   if (rows.length === 0) {
     return [];
   }
@@ -40577,11 +41720,17 @@ async function cmDownloadCsvForCard(cmState, record, card, sortRule, requestToke
     isMvpdCmContext
       ? {
           ...(record && typeof record === "object" ? record : {}),
-          tenantId: firstNonEmptyString([String(requestContext.mvpdId || "").trim(), String(record?.tenantId || "").trim()]),
+          tenantId: firstNonEmptyString([
+            String(record?.tenantId || "").trim(),
+            String(cmState?.cmService?.matchedTenants?.[0]?.tenantId || "").trim(),
+            String(cmState?.tenantScope || "").trim(),
+            String(requestContext.mvpdId || "").trim(),
+          ]),
           tenantName: firstNonEmptyString([
+            String(record?.tenantName || "").trim(),
+            String(cmState?.cmService?.matchedTenants?.[0]?.tenantName || "").trim(),
             String(requestContext.mvpdLabel || "").trim(),
             String(requestContext.mvpdId || "").trim(),
-            String(record?.tenantName || "").trim(),
           ]),
         }
       : record;
@@ -40598,8 +41747,11 @@ async function cmDownloadCsvForCard(cmState, record, card, sortRule, requestToke
   let columns = Array.isArray(normalizedCard.columns) ? normalizedCard.columns : [];
 
   if (rows.length === 0 && record?.payload != null) {
-    rows = cmRowsFromPayload(record.payload);
-    columns = Array.isArray(record?.columns) && record.columns.length > 0 ? record.columns : cmColumnsFromPayload(record.payload);
+    rows = cmRowsFromPayloadForRecord(record.payload, record, recordRequestUrl);
+    columns =
+      Array.isArray(record?.columns) && record.columns.length > 0
+        ? record.columns
+        : cmColumnsFromPayloadForRecord(record.payload, record, recordRequestUrl);
   }
 
   if (rows.length === 0 && record && String(record?.kind || "").toLowerCase() !== "cmv2-op") {
@@ -40621,8 +41773,8 @@ async function cmDownloadCsvForCard(cmState, record, card, sortRule, requestToke
         return { ok: false, skipped: true, error: "CM controller is no longer active for the selected media company." };
       }
       const responsePayload = response.parsed;
-      rows = cmRowsFromPayload(responsePayload);
-      columns = cmColumnsFromPayload(responsePayload);
+      rows = cmRowsFromPayloadForRecord(responsePayload, record, requestUrl);
+      columns = cmColumnsFromRows(rows);
       if (!hasUrlOverrideDiffersFromRecord) {
         record.payload = responsePayload;
         record.lastModified = String(response.lastModified || record.lastModified || "");

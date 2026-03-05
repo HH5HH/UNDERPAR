@@ -32,27 +32,27 @@
       </section>
 
       <section class="bobtools-grid">
-        <article class="bobtools-card bobtools-card--profiles">
-          <button type="button" class="bobtools-card-head bobtools-card-toggle" data-card-toggle="profiles" aria-expanded="true">
+        <article class="bobtools-card bobtools-card--profiles is-collapsed">
+          <button type="button" class="bobtools-card-head bobtools-card-toggle" data-card-toggle="profiles" aria-expanded="false">
             <span class="bobtools-card-head-label">
               <h2>MVPD Login Profiles</h2>
               <span id="bobtools-profile-count" class="bobtools-count">0</span>
             </span>
             <span class="bobtools-card-chevron" aria-hidden="true">▼</span>
           </button>
-          <div class="bobtools-card-body" data-card-body="profiles">
+          <div class="bobtools-card-body" data-card-body="profiles" hidden>
             <ul id="bobtools-profile-list" class="bobtools-profile-list"></ul>
           </div>
         </article>
 
-        <article class="bobtools-card bobtools-card--watch">
-          <button type="button" class="bobtools-card-head bobtools-card-toggle" data-card-toggle="watch" aria-expanded="true">
+        <article class="bobtools-card bobtools-card--watch is-collapsed">
+          <button type="button" class="bobtools-card-head bobtools-card-toggle" data-card-toggle="watch" aria-expanded="false">
             <span class="bobtools-card-head-label">
               <h2>Can I watch?</h2>
             </span>
             <span class="bobtools-card-chevron" aria-hidden="true">▼</span>
           </button>
-          <div class="bobtools-card-body" data-card-body="watch">
+          <div class="bobtools-card-body" data-card-body="watch" hidden>
             <p id="bobtools-profile-context" class="bobtools-profile-context"></p>
             <form id="bobtools-form" class="bobtools-form">
               <input
@@ -70,15 +70,15 @@
           </div>
         </article>
 
-        <article id="bobtools-splunk-card" class="bobtools-card bobtools-card--splunk">
-          <button type="button" class="bobtools-card-head bobtools-card-toggle" data-card-toggle="splunk" aria-expanded="true">
+        <article id="bobtools-splunk-card" class="bobtools-card bobtools-card--splunk is-collapsed">
+          <button type="button" class="bobtools-card-head bobtools-card-toggle" data-card-toggle="splunk" aria-expanded="false">
             <span class="bobtools-card-head-label">
               <h2>Splunk RCA</h2>
               <span id="bobtools-splunk-card-meta" class="bobtools-count" hidden></span>
             </span>
             <span class="bobtools-card-chevron" aria-hidden="true">▼</span>
           </button>
-          <div id="bobtools-splunk-body" class="bobtools-card-body bobtools-splunk-card-body" data-card-body="splunk">
+          <div id="bobtools-splunk-body" class="bobtools-card-body bobtools-splunk-card-body" data-card-body="splunk" hidden>
             <div class="bobtools-splunk-toolbar">
               <button id="bobtools-splunk" class="bobtools-splunk-go bobtools-splunk-run" type="button">SPLUNK</button>
             </div>
