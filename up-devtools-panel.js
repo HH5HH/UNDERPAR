@@ -47,7 +47,36 @@ const EVENT_WORKSPACE_LABELS = Object.freeze({
   "degradation-workspace": "DEGRADATION Workspace",
 });
 
-const port = chrome.runtime.connect({ name: "underpardebug-devtools" });
+function consumeRuntimeLastError() {
+  try {
+    const runtimeError = chrome.runtime?.lastError;
+    return runtimeError ? String(runtimeError.message || runtimeError) : "";
+  } catch {
+    return "";
+  }
+}
+
+const port = (() => {
+  try {
+    return chrome.runtime.connect({ name: "underpardebug-devtools" });
+  } catch {
+    consumeRuntimeLastError();
+    return null;
+  }
+})();
+
+function postPortMessageSafe(payload) {
+  if (!port) {
+    return false;
+  }
+  try {
+    port.postMessage(payload);
+    return true;
+  } catch {
+    consumeRuntimeLastError();
+    return false;
+  }
+}
 
 function isPanelVisible() {
   return document.visibilityState !== "hidden";
@@ -57,15 +86,11 @@ function notifyPanelVisibility() {
   if (!tabId) {
     return;
   }
-  try {
-    port.postMessage({
-      type: "panel-visibility",
-      tabId,
-      visible: isPanelVisible(),
-    });
-  } catch {
-    // Ignore disconnected port errors.
-  }
+  postPortMessageSafe({
+    type: "panel-visibility",
+    tabId,
+    visible: isPanelVisible(),
+  });
 }
 
 function setStatus(text) {
@@ -799,32 +824,47 @@ eventsEl.addEventListener("focus", handleFlowListFocus);
 eventsEl.addEventListener("blur", handleFlowListBlur);
 eventsEl.addEventListener("mousedown", handleFlowListMouseDown);
 
-port.onMessage.addListener((message) => {
-  if (!message || typeof message !== "object") {
-    return;
-  }
+if (port?.onMessage && typeof port.onMessage.addListener === "function") {
+  port.onMessage.addListener((message) => {
+    if (!message || typeof message !== "object") {
+      return;
+    }
 
-  if (message.type === "snapshot") {
-    applySnapshot(message.flow || null);
-    return;
-  }
+    if (message.type === "snapshot") {
+      applySnapshot(message.flow || null);
+      return;
+    }
 
-  if (message.type === "event") {
-    appendIncomingEvent(message.event, String(message.flowId || "").trim());
-    return;
-  }
+    if (message.type === "event") {
+      appendIncomingEvent(message.event, String(message.flowId || "").trim());
+      return;
+    }
 
-  if (message.type === "pass-event" || message.type === "cm-event") {
-    appendIncomingEvent(message.event, String(message.flowId || "").trim());
-  }
-});
+    if (message.type === "pass-event" || message.type === "cm-event") {
+      appendIncomingEvent(message.event, String(message.flowId || "").trim());
+    }
+  });
+}
+
+if (port?.onDisconnect && typeof port.onDisconnect.addListener === "function") {
+  port.onDisconnect.addListener(() => {
+    const reason = consumeRuntimeLastError();
+    if (reason) {
+      setStatus(`UP trace stream disconnected (${reason}). Reopen DevTools panel to retry.`);
+      return;
+    }
+    setStatus("UP trace stream disconnected. Reopen DevTools panel to retry.");
+  });
+}
 
 clearButton.addEventListener("click", () => {
   if (!tabId) {
     setStatus("Cannot clear events until this viewer is bound to a browser tab.");
     return;
   }
-  port.postMessage({ type: "clear", tabId });
+  if (!postPortMessageSafe({ type: "clear", tabId })) {
+    setStatus("Cannot clear events because the UP trace stream is disconnected.");
+  }
 });
 
 copyButton.addEventListener("click", async () => {
@@ -858,6 +898,9 @@ window.addEventListener("beforeunload", () => {
   eventsEl.removeEventListener("focus", handleFlowListFocus);
   eventsEl.removeEventListener("blur", handleFlowListBlur);
   eventsEl.removeEventListener("mousedown", handleFlowListMouseDown);
+  if (!port) {
+    return;
+  }
   try {
     port.disconnect();
   } catch {
@@ -872,9 +915,13 @@ document.addEventListener("visibilitychange", () => {
 if (tabId > 0) {
   tabLabelEl.textContent = `Tab ${tabId}`;
   setFlowSummary();
-  setStatus("Subscribing to UP trace stream...");
-  port.postMessage({ type: "subscribe", tabId, visible: isPanelVisible() });
-  notifyPanelVisibility();
+  if (postPortMessageSafe({ type: "subscribe", tabId, visible: isPanelVisible() })) {
+    setStatus("Subscribing to UP trace stream...");
+    notifyPanelVisibility();
+  } else {
+    setStatus("Unable to reach UP service worker (No SW). Reopen DevTools panel after opening UnderPAR side panel.");
+    clearButton.disabled = true;
+  }
 } else {
   tabLabelEl.textContent = queryFlowId ? `Flow ${queryFlowId}` : "No tab binding";
   setFlowSummary();

@@ -1978,13 +1978,15 @@ select:disabled {
   margin-left: auto;
   flex: 0 0 auto;
   max-inline-size: 100%;
+  border-radius: 10px;
+  padding: 0 14px;
 }
 
 .rest-v2-test-login-btn {
   height: 34px;
   padding: 0 16px;
   border: 1px solid #059669;
-  border-radius: 999px;
+  border-radius: 10px;
   background: #059669;
   color: #ffffff;
   font-size: 12px;
@@ -2002,10 +2004,10 @@ select:disabled {
 }
 
 .rest-v2-login-actions .rest-v2-test-login-btn {
-  inline-size: min(100%, 340px);
-  max-inline-size: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  inline-size: auto;
+  max-inline-size: none;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .rest-v2-login-actions .rest-v2-close-login-btn {
@@ -2045,7 +2047,7 @@ select:disabled {
   height: 34px;
   padding: 0 16px;
   border: 1px solid #b91c1c;
-  border-radius: 999px;
+  border-radius: 10px;
   background: #b91c1c;
   color: #ffffff;
   font-size: 12px;

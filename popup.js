@@ -7287,8 +7287,8 @@ function syncRestV2LoginPanel(section, programmer, appInfo) {
   const prepareError = state.restV2PrepareErrorBySelectionKey.get(selectionKey) || "";
   const appName = context.appInfo?.appName || context.appInfo?.guid || "REST V2 App";
   const mvpdLabel = getRestV2MvpdPickerLabel(context.requestorId, context.mvpd, context.mvpdMeta);
-  const flowLabel = `${context.requestorId} X ${mvpdLabel}`;
-  const readyMessage = `Ready to start recording ${context.requestorId} x ${mvpdLabel} with "${appName}".`;
+  const flowLabel = mvpdLabel || "MVPD";
+  const readyMessage = `Ready to start recording ${flowLabel} with "${appName}".`;
 
   button.textContent = `${flowLabel} LOGIN`;
   button.title = readyMessage;
@@ -22465,6 +22465,55 @@ function mvpdWorkspaceCollectChipValues(entries = [], pathRegex, valueRegex = nu
   return output.slice(0, maxValues);
 }
 
+function mvpdWorkspaceFilterChipValues(values = [], maxValues = 120) {
+  const output = [];
+  const seen = new Set();
+  const blocked = new Set(["", "null", "true", "false", "undefined", "n/a", "na", "none", "[]", "{}"]);
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    if (output.length >= maxValues) {
+      return;
+    }
+    const normalized = String(value || "").trim();
+    const lowered = normalized.toLowerCase();
+    if (!normalized || blocked.has(lowered) || normalized.length > 220) {
+      return;
+    }
+    if (!/[a-z0-9]/i.test(normalized)) {
+      return;
+    }
+    if (seen.has(lowered)) {
+      return;
+    }
+    seen.add(lowered);
+    output.push(normalized);
+  });
+  return output.slice(0, maxValues);
+}
+
+function mvpdWorkspaceIsLikelyResourceId(value = "") {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return false;
+  }
+  const lowered = normalized.toLowerCase();
+  if (normalized.startsWith("@")) {
+    return false;
+  }
+  if (/(authenticationproviderconfiguration|authorizationproviderconfiguration|logoutproviderconfiguration)/i.test(lowered)) {
+    return false;
+  }
+  if (/(integrationconfiguration|platformconfiguration|serviceprovider|mvpd:)/i.test(lowered)) {
+    return false;
+  }
+  if (/^[a-z]+:[a-z0-9._-]+$/i.test(normalized) && !/^urn:/i.test(normalized)) {
+    return false;
+  }
+  if (!/[a-z0-9]/i.test(normalized)) {
+    return false;
+  }
+  return true;
+}
+
 function mvpdWorkspaceNormalizeEntityRef(value) {
   const normalized = String(value || "").trim();
   return normalized.startsWith("@") ? normalized.slice(1) : normalized;
@@ -22771,16 +22820,7 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
     {
       key: "mvpdCatalog",
       label: "MVPD Catalog",
-      urls: [
-        `${ADOBE_CONSOLE_BASE}/rest/api/entity/Mvpd/${encodeURIComponent(context.mvpdId)}${
-          versionQuery ? `?${versionQuery}` : ""
-        }`,
-        `${ADOBE_CONSOLE_BASE}/rest/api/entity/MVPD/${encodeURIComponent(context.mvpdId)}${
-          versionQuery ? `?${versionQuery}` : ""
-        }`,
-        `${ADOBE_CONSOLE_BASE}/${withVersion("rest/api/entity/Mvpd")}`,
-        `${ADOBE_CONSOLE_BASE}/${withVersion("rest/api/entity/MVPD")}`,
-      ],
+      urls: [`${ADOBE_CONSOLE_BASE}/${withVersion("rest/api/entity/Mvpd")}`],
     },
     {
       key: "mvpdProxyCatalog",
@@ -22925,25 +22965,27 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
   });
 
   const bulkEntityRefs = new Set();
-  mvpdWorkspaceCollectEntityRefs(selectedMvpdEntity?.entityData || null, bulkEntityRefs, {
-    maxRefs: 240,
-    maxDepth: 6,
-  });
-  mvpdWorkspaceCollectEntityRefs(selectedMvpdProxyEntity?.entityData || null, bulkEntityRefs, {
-    maxRefs: 240,
-    maxDepth: 6,
-  });
   mvpdWorkspaceCollectEntityRefs(selectedIntegrationEntity?.entityData || null, bulkEntityRefs, {
     maxRefs: 240,
     maxDepth: 6,
   });
+  if (bulkEntityRefs.size === 0) {
+    mvpdWorkspaceCollectEntityRefs(selectedMvpdEntity?.entityData || null, bulkEntityRefs, {
+      maxRefs: 240,
+      maxDepth: 6,
+    });
+    mvpdWorkspaceCollectEntityRefs(selectedMvpdProxyEntity?.entityData || null, bulkEntityRefs, {
+      maxRefs: 240,
+      maxDepth: 6,
+    });
+  }
   if (selectedIntegrationRef) {
     bulkEntityRefs.add(mvpdWorkspaceNormalizeEntityRef(selectedIntegrationRef));
   }
   const bulkEntities = [...bulkEntityRefs]
     .map((entry) => mvpdWorkspaceNormalizeEntityRef(entry))
     .filter((entry) => /^[A-Z][A-Za-z0-9]+:[^\s]+$/.test(entry))
-    .slice(0, 320);
+    .slice(0, 220);
   if (bulkEntities.length > 0) {
     const payload = {
       entities: bulkEntities,
@@ -23007,15 +23049,38 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
   });
   const allEntries = [];
   const sourceSamples = [];
+  const selectionNeedles = [
+    String(context.mvpdId || ""),
+    String(context.requestorId || ""),
+    String(selectedIntegrationRefSplit.id || ""),
+    String(selectedIntegrationEntity?.entityData?.id || ""),
+    String(mvpdWorkspaceNormalizeEntityRef(selectedIntegrationRef) || ""),
+    String(selectedServiceProviderEntity?.entityData?.id || ""),
+  ]
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  const bulkEntryMatchesSelection = (entry) => {
+    if (!entry) {
+      return false;
+    }
+    const haystack = `${String(entry.path || "")} ${String(entry.value || "")}`.toLowerCase();
+    if (!haystack) {
+      return false;
+    }
+    return selectionNeedles.some((needle) => needle && haystack.includes(needle));
+  };
 
-  const addSourceEntries = (sourceKey, label, payload, maxEntries = 800, maxDepth = 6) => {
+  const addSourceEntries = (sourceKey, label, payload, maxEntries = 800, maxDepth = 6, entryFilter = null) => {
     if (payload == null) {
       return;
     }
-    const sourceEntries = mvpdWorkspaceCollectFlatEntries(sourceKey, payload, {
+    let sourceEntries = mvpdWorkspaceCollectFlatEntries(sourceKey, payload, {
       maxEntries,
       maxDepth,
     });
+    if (typeof entryFilter === "function") {
+      sourceEntries = sourceEntries.filter((entry) => entryFilter(entry));
+    }
     if (sourceEntries.length === 0) {
       return;
     }
@@ -23031,8 +23096,20 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
     .filter((call) => call?.ok)
     .forEach((call) => {
       const callKey = String(call?.key || "").trim();
+      const includeCallEntries =
+        callKey === "integrationConfigurationEntity" || callKey === "bulkRetrieveSelected" || callKey.startsWith("tmsIdMap_");
+      if (!includeCallEntries) {
+        return;
+      }
       const maxEntries = callKey === "bulkRetrieveSelected" ? 1400 : callKey.startsWith("tmsIdMap_") ? 1100 : 900;
-      addSourceEntries(callKey, call.label, call.parsed, maxEntries, 6);
+      addSourceEntries(
+        callKey,
+        call.label,
+        call.parsed,
+        maxEntries,
+        6,
+        callKey === "bulkRetrieveSelected" ? bulkEntryMatchesSelection : null
+      );
     });
 
   addSourceEntries("selectedProgrammer", "Selected Programmer Entity", selectedProgrammerEntity, 320, 6);
@@ -23072,8 +23149,45 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
     /(saml|metadata|assertion|certificate|acs)/i,
     200
   );
-  const resourceIds = mvpdWorkspaceCollectChipValues(allEntries, /resource([._-]?ids?)?/i, /resource/i, 120);
-  const tmsIdsFromNames = mvpdWorkspaceCollectChipValues(allEntries, /tms([._-]?ids?)?/i, /tms/i, 240);
+  const resolveTmsMapIdFromCall = (call = null) => {
+    const labelMatch = String(call?.label || "")
+      .trim()
+      .match(/^TMSID Map \((.+)\)$/i);
+    if (labelMatch && labelMatch[1]) {
+      return String(labelMatch[1]).trim();
+    }
+    const urlMatch = String(call?.url || "")
+      .trim()
+      .match(/\/TMSIdMap\/([^/?#]+)/i);
+    return urlMatch && urlMatch[1] ? decodeURIComponent(urlMatch[1]) : "";
+  };
+  const tmsMapIdBySourceKey = new Map();
+  const loadedTmsMapIds = [...new Set(
+    displayedCalls
+      .filter((call) => call?.ok && String(call?.key || "").startsWith("tmsIdMap_"))
+      .map((call) => {
+        const callKey = String(call?.key || "").trim();
+        const mapId = resolveTmsMapIdFromCall(call);
+        if (callKey && mapId) {
+          tmsMapIdBySourceKey.set(callKey, mapId);
+        }
+        return mapId;
+      })
+      .filter(Boolean)
+  )];
+  const fallbackResourceIds = mvpdWorkspaceFilterChipValues(
+    mvpdWorkspaceCollectChipValues(
+      allEntries,
+      /(authzresourcerequestor|resource([._-]?ids?)?|entitle([._-]?ids?)?)/i,
+      null,
+      180
+    ),
+    180
+  ).filter((value) => mvpdWorkspaceIsLikelyResourceId(value));
+  const tmsIdsFromNames = mvpdWorkspaceFilterChipValues(
+    mvpdWorkspaceCollectChipValues(allEntries, /(tms([._-]?ids?)?)/i, /tms/i, 240),
+    240
+  );
   const tmsIdsFromMaps = allEntries
     .filter((entry) => {
       const source = String(entry?.source || "").toLowerCase();
@@ -23081,9 +23195,120 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
       return source.includes("tmsidmap") && /(^|[.])mapping[.]/i.test(path);
     })
     .map((entry) => String(entry?.value || "").trim())
-    .filter(Boolean)
+    .filter((value) => Boolean(value))
     .slice(0, 240);
-  const tmsIds = [...new Set([...tmsIdsFromNames, ...tmsIdsFromMaps])].slice(0, 240);
+  const tmsIds = mvpdWorkspaceFilterChipValues([...new Set([...tmsIdsFromNames, ...tmsIdsFromMaps])], 240);
+  const tmsLabelByValueByMapId = new Map();
+  allEntries.forEach((entry) => {
+    const sourceKey = String(entry?.source || "").trim();
+    if (!sourceKey.startsWith("tmsIdMap_")) {
+      return;
+    }
+    const mapId = firstNonEmptyString([tmsMapIdBySourceKey.get(sourceKey), sourceKey.replace(/^tmsIdMap_/i, "")]);
+    const path = String(entry?.path || "").trim();
+    const labelMatch = path.match(/(?:^|[.])mapping[.]([^.\[]+)$/i);
+    const mappedLabel = labelMatch && labelMatch[1] ? String(labelMatch[1]).trim() : "";
+    const mappedValue = String(entry?.value || "").trim();
+    if (!mapId || !mappedLabel || !mappedValue) {
+      return;
+    }
+    const mapIdKey = String(mapId).trim().toLowerCase();
+    if (!mapIdKey) {
+      return;
+    }
+    if (!tmsLabelByValueByMapId.has(mapIdKey)) {
+      tmsLabelByValueByMapId.set(mapIdKey, new Map());
+    }
+    const valueToLabel = tmsLabelByValueByMapId.get(mapIdKey);
+    const valueKey = mappedValue.toLowerCase();
+    if (!valueToLabel.has(valueKey)) {
+      valueToLabel.set(valueKey, {
+        label: mappedLabel,
+        value: mappedValue,
+      });
+    }
+  });
+  const preferredTmsMapOrder = [];
+  const selectedMvpdMapKey = String(context.mvpdId || "").trim().toLowerCase();
+  if (selectedMvpdMapKey) {
+    preferredTmsMapOrder.push(selectedMvpdMapKey);
+  }
+  if (!preferredTmsMapOrder.includes("default")) {
+    preferredTmsMapOrder.push("default");
+  }
+  loadedTmsMapIds.forEach((mapId) => {
+    const mapKey = String(mapId || "").trim().toLowerCase();
+    if (mapKey && !preferredTmsMapOrder.includes(mapKey)) {
+      preferredTmsMapOrder.push(mapKey);
+    }
+  });
+  const tmsLabelByValue = new Map();
+  preferredTmsMapOrder.forEach((mapKey) => {
+    const valueToLabel = tmsLabelByValueByMapId.get(mapKey);
+    if (!(valueToLabel instanceof Map)) {
+      return;
+    }
+    valueToLabel.forEach((entry, valueKey) => {
+      if (!tmsLabelByValue.has(valueKey)) {
+        tmsLabelByValue.set(valueKey, entry);
+      }
+    });
+  });
+  const selectedMapEntries = tmsLabelByValueByMapId.get(selectedMvpdMapKey);
+  const defaultMapEntries = tmsLabelByValueByMapId.get("default");
+  const activeTmsMapKey = (() => {
+    if (selectedMvpdMapKey && selectedMapEntries instanceof Map && selectedMapEntries.size > 0) {
+      return selectedMvpdMapKey;
+    }
+    if (defaultMapEntries instanceof Map && defaultMapEntries.size > 0) {
+      return "default";
+    }
+    for (const mapKey of preferredTmsMapOrder) {
+      const entries = tmsLabelByValueByMapId.get(mapKey);
+      if (entries instanceof Map && entries.size > 0) {
+        return mapKey;
+      }
+    }
+    return "";
+  })();
+  const activeTmsMapEntries = activeTmsMapKey ? tmsLabelByValueByMapId.get(activeTmsMapKey) : null;
+  const translatedResourceIdsFromActiveMap =
+    activeTmsMapEntries instanceof Map
+      ? mvpdWorkspaceFilterChipValues(
+          [...activeTmsMapEntries.values()].map((entry) => {
+            const label = String(entry?.label || "").trim();
+            if (!label) {
+              return "";
+            }
+            return label;
+          }),
+          1200
+        )
+      : [];
+  const rawResourceIdsFromActiveMap =
+    activeTmsMapEntries instanceof Map
+      ? mvpdWorkspaceFilterChipValues(
+          [...activeTmsMapEntries.values()].map((entry) => String(entry?.value || "").trim()),
+          1200
+        )
+      : [];
+  const translatedFallbackResourceIds = mvpdWorkspaceFilterChipValues(
+    fallbackResourceIds.map((resourceId) => {
+      const rawValue = String(resourceId || "").trim();
+      if (!rawValue) {
+        return "";
+      }
+      const translatedEntry = tmsLabelByValue.get(rawValue.toLowerCase()) || null;
+      if (!translatedEntry) {
+        return rawValue;
+      }
+      const translatedLabel = String(translatedEntry.label || "").trim();
+      return translatedLabel || rawValue;
+    }),
+    1200
+  );
+  const finalResourceIds = translatedResourceIdsFromActiveMap.length > 0 ? translatedResourceIdsFromActiveMap : translatedFallbackResourceIds;
+  const finalResourceIdsRaw = rawResourceIdsFromActiveMap.length > 0 ? rawResourceIdsFromActiveMap : fallbackResourceIds;
 
   const completedCalls = displayedCalls.filter((call) => call?.ok).length;
   const failedCalls = displayedCalls.length - completedCalls;
@@ -23108,23 +23333,6 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
     getRestV2MvpdMeta(context.requestorId, context.mvpdId),
     { separator: " x " }
   );
-  const loadedTmsMapIds = [...new Set(
-    displayedCalls
-      .filter((call) => call?.ok && String(call?.key || "").startsWith("tmsIdMap_"))
-      .map((call) => {
-        const labelMatch = String(call?.label || "")
-          .trim()
-          .match(/^TMSID Map \((.+)\)$/i);
-        if (labelMatch && labelMatch[1]) {
-          return String(labelMatch[1]).trim();
-        }
-        const urlMatch = String(call?.url || "")
-          .trim()
-          .match(/\/TMSIdMap\/([^/?#]+)/i);
-        return urlMatch && urlMatch[1] ? decodeURIComponent(urlMatch[1]) : "";
-      })
-      .filter(Boolean)
-  )];
   const sections = [
     { id: "mvpd-match", title: "Selected MVPD Matches", entries: mvpdMatches },
     { id: "general", title: "General Settings", entries: generalEntries },
@@ -23171,7 +23379,9 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
       errorPayload: !call.ok ? cloneJsonLikeValue(call.parsed, null) : null,
       errorBody: !call.ok ? truncateDebugText(String(call.text || ""), 3000) : "",
     })),
-    resourceIds,
+    resourceIds: finalResourceIds,
+    resourceIdsRaw: finalResourceIdsRaw,
+    resourceIdTranslationMapId: activeTmsMapKey,
     tmsIds,
     sections,
     sourceSamples,
@@ -25500,6 +25710,69 @@ function buildBobtoolsWorkspaceResultSummary(result = null) {
   return `${actionLabel}: ${result?.ok === true ? "completed" : "error"}`;
 }
 
+function bobtoolsWorkspaceNormalizeQuickResourceIds(values = [], maxItems = 320) {
+  const normalizedMax = Number(maxItems || 0);
+  const limit = Number.isFinite(normalizedMax) && normalizedMax > 0 ? normalizedMax : 320;
+  const unique = [];
+  const seen = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const text = String(value || "").trim();
+    if (!text) {
+      return;
+    }
+    const key = text.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    unique.push(text);
+  });
+  return unique.slice(0, limit);
+}
+
+function bobtoolsWorkspaceBuildQuickResourceSelectionContext(programmerId = "", requestorId = "", mvpd = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const normalizedMvpdId = String(mvpd || "").trim();
+  const programmerMatch = normalizedProgrammerId
+    ? (Array.isArray(state.programmers) ? state.programmers : []).find(
+        (programmer) => String(programmer?.programmerId || "").trim() === normalizedProgrammerId
+      ) || null
+    : null;
+  return {
+    programmerId: normalizedProgrammerId,
+    programmerName: String(programmerMatch?.programmerName || "").trim(),
+    requestorId: normalizedRequestorId,
+    mvpdId: normalizedMvpdId,
+    isReady: Boolean(normalizedProgrammerId && normalizedRequestorId && normalizedMvpdId),
+  };
+}
+
+function bobtoolsWorkspaceResolveQuickResourceOptions(programmerId = "", requestorId = "", mvpd = "") {
+  const context = {
+    programmerId: String(programmerId || "").trim(),
+    requestorId: String(requestorId || "").trim(),
+    mvpdId: String(mvpd || "").trim(),
+  };
+  const cacheKey = mvpdWorkspaceGetSnapshotCacheKey(context);
+  if (!cacheKey) {
+    return {
+      resourceIds: [],
+      translationMapId: "",
+      source: "",
+    };
+  }
+  const snapshot = state.mvpdWorkspaceSnapshotCacheBySelectionKey.get(cacheKey) || null;
+  const translatedResourceIds = bobtoolsWorkspaceNormalizeQuickResourceIds(snapshot?.resourceIds || []);
+  const rawResourceIds = bobtoolsWorkspaceNormalizeQuickResourceIds(snapshot?.resourceIdsRaw || []);
+  const resourceIds = translatedResourceIds.length > 0 ? translatedResourceIds : rawResourceIds;
+  return {
+    resourceIds,
+    translationMapId: String(snapshot?.resourceIdTranslationMapId || "").trim(),
+    source: translatedResourceIds.length > 0 ? "translated" : rawResourceIds.length > 0 ? "raw" : "",
+  };
+}
+
 function buildBobtoolsWorkspaceProfilesPayload(programmer = null, options = {}) {
   const selectionContext = buildBobtoolsWorkspaceSelectionContext(programmer);
   const profiles = selectionContext.harvestList.map((harvest, index) => {
@@ -25516,6 +25789,7 @@ function buildBobtoolsWorkspaceProfilesPayload(programmer = null, options = {}) 
     const checks = getRestV2ProfilePreauthzChecks(harvest);
     const latestCheck = state.bobtoolsWorkspaceLastResultByHarvestKey.get(key) || checks[0] || null;
     const latestSummary = buildBobtoolsWorkspaceResultSummary(latestCheck);
+    const quickResourceOptions = bobtoolsWorkspaceResolveQuickResourceOptions(selectionContext.programmerId, requestorId, mvpd);
     return {
       key,
       requestorId,
@@ -25533,6 +25807,9 @@ function buildBobtoolsWorkspaceProfilesPayload(programmer = null, options = {}) 
       capturedAtLabel: formatTimestampLabel(harvest?.harvestedAt),
       lastCheck: latestCheck ? cloneJsonLikeValue(latestCheck, null) : null,
       lastCheckSummary: latestSummary,
+      quickResourceIds: quickResourceOptions.resourceIds,
+      quickResourceTranslationMapId: quickResourceOptions.translationMapId,
+      quickResourceSource: quickResourceOptions.source,
     };
   });
   const selectedHarvestKey = firstNonEmptyString([
@@ -26136,6 +26413,51 @@ async function handleBobtoolsWorkspaceAction(message, sender = null) {
       forceRefresh: false,
     });
     return { ok: true };
+  }
+
+  if (action === "resolve-quick-resource-options") {
+    const harvestKey = String(message?.harvestKey || "").trim();
+    const programmerId = String(
+      firstNonEmptyString([
+        message?.programmerId,
+        resolveSelectedProgrammer()?.programmerId,
+      ])
+    ).trim();
+    const requestorId = String(message?.requestorId || "").trim();
+    const mvpd = String(message?.mvpd || "").trim();
+    const selectionContext = bobtoolsWorkspaceBuildQuickResourceSelectionContext(programmerId, requestorId, mvpd);
+    if (!selectionContext.isReady) {
+      return {
+        ok: false,
+        harvestKey,
+        requestorId,
+        mvpd,
+        error: "Missing profile MVPD context.",
+      };
+    }
+    try {
+      await mvpdWorkspaceEnsureSnapshot(selectionContext, {
+        forceRefresh: message?.forceRefresh === true,
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        harvestKey,
+        requestorId,
+        mvpd,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    const options = bobtoolsWorkspaceResolveQuickResourceOptions(programmerId, requestorId, mvpd);
+    return {
+      ok: true,
+      harvestKey,
+      requestorId,
+      mvpd,
+      resourceIds: Array.isArray(options?.resourceIds) ? options.resourceIds : [],
+      translationMapId: String(options?.translationMapId || "").trim(),
+      source: String(options?.source || "").trim(),
+    };
   }
 
   if (action === "run-can-i-watch") {

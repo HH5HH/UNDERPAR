@@ -1528,10 +1528,20 @@ function shouldAllowNetworkCaptureForFlow(flow, tabId) {
   return isUpPanelVisibleForTab(normalizedTabId);
 }
 
+function consumeRuntimeLastError() {
+  try {
+    const runtimeError = chrome.runtime?.lastError;
+    return runtimeError ? String(runtimeError.message || runtimeError) : "";
+  } catch {
+    return "";
+  }
+}
+
 function postToPortSafe(port, payload) {
   try {
     port.postMessage(payload);
   } catch {
+    consumeRuntimeLastError();
     // Ignore disconnected ports.
   }
 }
@@ -2642,6 +2652,7 @@ chrome.runtime.onConnect.addListener((port) => {
   };
 
   const onDisconnect = () => {
+    consumeRuntimeLastError();
     if (subscribedTabId) {
       unsubscribePortFromTab(port, subscribedTabId);
     } else {

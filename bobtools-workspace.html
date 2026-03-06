@@ -53,7 +53,12 @@
             <span class="bobtools-card-chevron" aria-hidden="true">▼</span>
           </button>
           <div class="bobtools-card-body" data-card-body="watch" hidden>
-            <p id="bobtools-profile-context" class="bobtools-profile-context"></p>
+            <div class="bobtools-profile-context-row">
+              <p id="bobtools-profile-context" class="bobtools-profile-context"></p>
+              <div id="bobtools-resource-quick-add-wrap" class="bobtools-resource-quick-add-wrap" hidden>
+                <select id="bobtools-resource-quick-picker" class="bobtools-resource-quick-picker" aria-label="Pick resourceId"></select>
+              </div>
+            </div>
             <form id="bobtools-form" class="bobtools-form">
               <input
                 id="bobtools-resource-input"

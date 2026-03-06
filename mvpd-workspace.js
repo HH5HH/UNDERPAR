@@ -3379,12 +3379,18 @@ function renderSnapshot(snapshot) {
     regularCards.push(card);
   });
 
+  const selectionLabel = firstNonEmptyString([
+    snapshot?.requestorMvpdLabel,
+    snapshot?.mvpdLabel,
+    snapshot?.mvpdId,
+    "selected MVPD",
+  ]);
+  const chipSubtitle = `Values detected for ${selectionLabel} lookup payloads`;
+
   els.cardsHost.appendChild(renderOverviewCard(snapshot));
   els.cardsHost.appendChild(renderCallSummaryCard(snapshot, callLinkByKey));
-  els.cardsHost.appendChild(
-    renderChipCard("Resource IDs", "Values detected across MVPD lookup payloads", snapshot?.resourceIds || [])
-  );
-  const tmsAnchorCard = renderChipCard("TMSIDs", "Values detected across MVPD lookup payloads", snapshot?.tmsIds || []);
+  els.cardsHost.appendChild(renderChipCard("Resource IDs", chipSubtitle, snapshot?.resourceIds || []));
+  const tmsAnchorCard = renderChipCard("TMSIDs", chipSubtitle, snapshot?.tmsIds || []);
   els.cardsHost.appendChild(tmsAnchorCard);
 
   tmsCards.forEach((card) => {

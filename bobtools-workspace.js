@@ -35,6 +35,8 @@ const state = {
   },
   resultByHarvestActionKey: new Map(),
   resourceInputByHarvestKey: new Map(),
+  quickResourceLoadStateByHarvestKey: new Map(),
+  quickResourceLoadPromiseByHarvestKey: new Map(),
   splunkResultByHarvestKey: new Map(),
   splunkDownloadUrl: "",
   splunkArtifactDownloadUrls: [],
@@ -52,6 +54,8 @@ const els = {
   profileCount: document.getElementById("bobtools-profile-count"),
   profileList: document.getElementById("bobtools-profile-list"),
   profileContext: document.getElementById("bobtools-profile-context"),
+  quickResourceWrap: document.getElementById("bobtools-resource-quick-add-wrap"),
+  quickResourcePicker: document.getElementById("bobtools-resource-quick-picker"),
   form: document.getElementById("bobtools-form"),
   resourceInput: document.getElementById("bobtools-resource-input"),
   actionHint: document.getElementById("bobtools-action-hint"),
@@ -83,6 +87,33 @@ function firstNonEmptyString(values = []) {
     }
   }
   return "";
+}
+
+function normalizeResourceIdList(values = []) {
+  const unique = [];
+  const seen = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const text = String(value || "").trim();
+    if (!text) {
+      return;
+    }
+    const key = text.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    unique.push(text);
+  });
+  return unique;
+}
+
+function parseResourceInputValue(value = "") {
+  return normalizeResourceIdList(
+    String(value || "")
+      .split(/[,\n\r;]+/g)
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  );
 }
 
 function formatDateTime(value) {
@@ -164,6 +195,165 @@ function getSelectedProfile() {
   return state.profiles.find((profile) => String(profile?.key || "") === key) || null;
 }
 
+function getQuickResourceOptionsForProfile(profile = null) {
+  if (!profile || typeof profile !== "object") {
+    return [];
+  }
+  const preferredOptions = normalizeResourceIdList(profile?.quickResourceIds || []);
+  if (preferredOptions.length > 0) {
+    return preferredOptions;
+  }
+  return normalizeResourceIdList(profile?.lastCheck?.resourceIds || []);
+}
+
+function upsertProfileQuickResourceOptions(harvestKey = "", payload = {}) {
+  const key = String(harvestKey || "").trim();
+  if (!key) {
+    return;
+  }
+  const index = state.profiles.findIndex((profile) => String(profile?.key || "").trim() === key);
+  if (index < 0) {
+    return;
+  }
+  const profile = state.profiles[index] && typeof state.profiles[index] === "object" ? state.profiles[index] : {};
+  const quickResourceIds = normalizeResourceIdList(
+    payload?.resourceIds || payload?.quickResourceIds || profile?.quickResourceIds || []
+  );
+  const quickResourceTranslationMapId = firstNonEmptyString([
+    payload?.translationMapId,
+    payload?.quickResourceTranslationMapId,
+    profile?.quickResourceTranslationMapId,
+  ]);
+  const quickResourceSource = firstNonEmptyString([
+    payload?.source,
+    payload?.quickResourceSource,
+    profile?.quickResourceSource,
+  ]);
+  state.profiles[index] = {
+    ...profile,
+    quickResourceIds,
+    quickResourceTranslationMapId,
+    quickResourceSource,
+  };
+  state.quickResourceLoadStateByHarvestKey.set(key, quickResourceIds.length > 0 ? "ready" : "empty");
+}
+
+function ensureProfileQuickResources(profile = null, options = {}) {
+  const key = String(profile?.key || "").trim();
+  const requestorId = String(profile?.requestorId || "").trim();
+  const mvpd = String(profile?.mvpd || "").trim();
+  const programmerId = String(state.programmerId || "").trim();
+  if (!key || !requestorId || !mvpd || !programmerId) {
+    return Promise.resolve({ ok: false, skipped: true });
+  }
+  const forceRefresh = options?.forceRefresh === true;
+  const loadState = String(state.quickResourceLoadStateByHarvestKey.get(key) || "").trim().toLowerCase();
+  const existing = getQuickResourceOptionsForProfile(profile);
+  if (!forceRefresh && existing.length > 0) {
+    state.quickResourceLoadStateByHarvestKey.set(key, "ready");
+    return Promise.resolve({ ok: true, skipped: true, resourceIds: existing });
+  }
+  if (!forceRefresh && loadState === "empty") {
+    return Promise.resolve({ ok: true, skipped: true, resourceIds: [] });
+  }
+  const inFlight = state.quickResourceLoadPromiseByHarvestKey.get(key);
+  if (!forceRefresh && inFlight) {
+    return inFlight;
+  }
+  state.quickResourceLoadStateByHarvestKey.set(key, "loading");
+  const work = sendWorkspaceAction("resolve-quick-resource-options", {
+    programmerId,
+    harvestKey: key,
+    requestorId,
+    mvpd,
+    forceRefresh,
+  })
+    .then((response) => {
+      if (response?.ok) {
+        upsertProfileQuickResourceOptions(key, {
+          resourceIds: Array.isArray(response?.resourceIds) ? response.resourceIds : [],
+          translationMapId: String(response?.translationMapId || "").trim(),
+          source: String(response?.source || "").trim(),
+        });
+      } else {
+        state.quickResourceLoadStateByHarvestKey.set(key, "error");
+      }
+      return response;
+    })
+    .catch((error) => {
+      state.quickResourceLoadStateByHarvestKey.set(key, "error");
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    })
+    .finally(() => {
+      if (state.quickResourceLoadPromiseByHarvestKey.get(key) === work) {
+        state.quickResourceLoadPromiseByHarvestKey.delete(key);
+      }
+      render();
+    });
+  state.quickResourceLoadPromiseByHarvestKey.set(key, work);
+  return work;
+}
+
+function renderQuickResourcePicker(profile = null) {
+  if (!els.quickResourceWrap || !els.quickResourcePicker) {
+    return;
+  }
+  const key = String(profile?.key || "").trim();
+  const loadState = String(state.quickResourceLoadStateByHarvestKey.get(key) || "").trim().toLowerCase();
+  const options = getQuickResourceOptionsForProfile(profile);
+  const placeholderText =
+    options.length > 0
+      ? "Pick resourceId"
+      : loadState === "loading"
+        ? "Loading resourceIds..."
+        : "Pick resourceId";
+  const signature = `${loadState}::${placeholderText}::${options.join("\n")}`;
+  if (String(els.quickResourcePicker.dataset.optionsSignature || "") !== signature) {
+    const picker = els.quickResourcePicker;
+    picker.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = placeholderText;
+    picker.appendChild(placeholder);
+    options.forEach((resourceId) => {
+      const option = document.createElement("option");
+      option.value = resourceId;
+      option.textContent = resourceId;
+      picker.appendChild(option);
+    });
+    picker.dataset.optionsSignature = signature;
+  }
+  els.quickResourcePicker.value = "";
+  els.quickResourceWrap.hidden = !profile || (options.length === 0 && loadState !== "loading");
+}
+
+function addQuickResourceToInput(resourceId = "") {
+  const profile = getSelectedProfile();
+  if (!profile || !els.resourceInput) {
+    return false;
+  }
+  const normalized = String(resourceId || "").trim();
+  if (!normalized) {
+    return false;
+  }
+  const currentValues = parseResourceInputValue(els.resourceInput.value || "");
+  const alreadyExists = currentValues.some((item) => item.toLowerCase() === normalized.toLowerCase());
+  if (alreadyExists) {
+    return false;
+  }
+  const nextValues = [...currentValues, normalized];
+  const nextValue = nextValues.join(", ");
+  els.resourceInput.value = nextValue;
+  const key = String(profile?.key || "").trim();
+  if (key) {
+    state.resourceInputByHarvestKey.set(key, nextValue);
+  }
+  return true;
+}
+
 function buildResultMapKey(harvestKey = "", action = "") {
   return `${String(harvestKey || "").trim()}::${normalizeApiAction(action)}`;
 }
@@ -210,6 +400,10 @@ function syncButtons() {
   }
   if (els.resourceInput) {
     els.resourceInput.disabled = !hasProfile || networkBusy || !resourcesRequired;
+  }
+  if (els.quickResourcePicker) {
+    const hasQuickOptions = els.quickResourcePicker.options.length > 1;
+    els.quickResourcePicker.disabled = !hasProfile || networkBusy || !resourcesRequired || !hasQuickOptions;
   }
   if (els.splunkButton) {
     els.splunkButton.disabled = !hasProfile || !hasUpstreamUserId || networkBusy;
@@ -1298,6 +1492,7 @@ function renderResult() {
 
   if (!profile) {
     els.profileContext.textContent = "Select an MVPD login profile to run REST V2 actions.";
+    renderQuickResourcePicker(null);
     els.resultStatus.textContent = "REST V2 actions unlock after at least one successful MVPD login profile is captured.";
     els.resultStatus.classList.remove("error", "success");
     els.resultSummary.hidden = true;
@@ -1313,11 +1508,23 @@ function renderResult() {
     "MVPD profile",
   ]);
   const subjectText = firstNonEmptyString([profile?.upstreamUserId, profile?.subject, "N/A"]);
-  els.profileContext.innerHTML = `Using selected profile <strong>${escapeHtml(contextText)}</strong> | upstreamUserID=${escapeHtml(
-    subjectText
-  )}.`;
-
+  els.profileContext.innerHTML = `<span class="bobtools-profile-context-label">${escapeHtml(
+    contextText
+  )}</span> | <span class="bobtools-profile-context-meta">upstreamUserID=${escapeHtml(subjectText)}</span>`;
   const key = String(profile?.key || "").trim();
+  const currentQuickOptions = getQuickResourceOptionsForProfile(profile);
+  const loadState = String(state.quickResourceLoadStateByHarvestKey.get(key) || "").trim().toLowerCase();
+  if (
+    currentQuickOptions.length === 0 &&
+    loadState !== "loading" &&
+    loadState !== "ready" &&
+    loadState !== "empty" &&
+    loadState !== "error"
+  ) {
+    void ensureProfileQuickResources(profile);
+  }
+  renderQuickResourcePicker(profile);
+
   const rememberedInput = state.resourceInputByHarvestKey.get(key) || "";
   if (document.activeElement !== els.resourceInput) {
     els.resourceInput.value = rememberedInput;
@@ -1368,6 +1575,7 @@ function selectProfile(harvestKey = "") {
     return;
   }
   state.selectedHarvestKey = key;
+  void ensureProfileQuickResources(match);
   render();
 }
 
@@ -1402,7 +1610,27 @@ function applyControllerState(payload = {}) {
 }
 
 function applyProfiles(payload = {}) {
-  const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+  const previousProfilesByKey = new Map();
+  (Array.isArray(state.profiles) ? state.profiles : []).forEach((profile) => {
+    const key = String(profile?.key || "").trim();
+    if (key) {
+      previousProfilesByKey.set(key, profile);
+    }
+  });
+  const profiles = (Array.isArray(payload?.profiles) ? payload.profiles : []).map((profile) => {
+    const key = String(profile?.key || "").trim();
+    const previousProfile = key ? previousProfilesByKey.get(key) || null : null;
+    const quickResourceIds = normalizeResourceIdList(profile?.quickResourceIds || previousProfile?.quickResourceIds || []);
+    return {
+      ...(profile && typeof profile === "object" ? profile : {}),
+      quickResourceIds,
+      quickResourceTranslationMapId: firstNonEmptyString([
+        profile?.quickResourceTranslationMapId,
+        previousProfile?.quickResourceTranslationMapId,
+      ]),
+      quickResourceSource: firstNonEmptyString([profile?.quickResourceSource, previousProfile?.quickResourceSource]),
+    };
+  });
   state.profiles = profiles;
   state.requestorId = String(payload?.requestorId || state.requestorId || "");
   state.mvpd = String(payload?.mvpd || state.mvpd || "");
@@ -1421,6 +1649,11 @@ function applyProfiles(payload = {}) {
       if (Array.isArray(lastCheck?.resourceIds) && lastCheck.resourceIds.length > 0) {
         state.resourceInputByHarvestKey.set(key, lastCheck.resourceIds.join(", "));
       }
+    }
+    if (Array.isArray(profile?.quickResourceIds) && profile.quickResourceIds.length > 0) {
+      state.quickResourceLoadStateByHarvestKey.set(key, "ready");
+    } else if (!state.quickResourceLoadStateByHarvestKey.has(key)) {
+      state.quickResourceLoadStateByHarvestKey.set(key, "");
     }
   });
 
@@ -1443,6 +1676,16 @@ function applyProfiles(payload = {}) {
   for (const key of [...state.splunkResultByHarvestKey.keys()]) {
     if (!activeKeys.has(String(key || "").trim())) {
       state.splunkResultByHarvestKey.delete(key);
+    }
+  }
+  for (const key of [...state.quickResourceLoadStateByHarvestKey.keys()]) {
+    if (!activeKeys.has(String(key || "").trim())) {
+      state.quickResourceLoadStateByHarvestKey.delete(key);
+    }
+  }
+  for (const [key] of [...state.quickResourceLoadPromiseByHarvestKey.entries()]) {
+    if (!activeKeys.has(String(key || "").trim())) {
+      state.quickResourceLoadPromiseByHarvestKey.delete(key);
     }
   }
 
@@ -1641,6 +1884,8 @@ function handleWorkspaceEvent(eventName, payload = {}) {
   if (event === "workspace-clear") {
     state.resultByHarvestActionKey.clear();
     state.resourceInputByHarvestKey.clear();
+    state.quickResourceLoadStateByHarvestKey.clear();
+    state.quickResourceLoadPromiseByHarvestKey.clear();
     state.splunkResultByHarvestKey.clear();
     releaseSplunkDownloadUrl();
     releaseSplunkArtifactDownloadUrls();
@@ -1692,6 +1937,17 @@ function registerEventHandlers() {
         return;
       }
       state.resourceInputByHarvestKey.set(key, String(els.resourceInput.value || ""));
+    });
+  }
+
+  if (els.quickResourcePicker) {
+    els.quickResourcePicker.addEventListener("change", () => {
+      const selected = String(els.quickResourcePicker?.value || "").trim();
+      if (!selected) {
+        return;
+      }
+      addQuickResourceToInput(selected);
+      els.quickResourcePicker.value = "";
     });
   }
 
