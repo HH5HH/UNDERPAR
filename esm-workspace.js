@@ -2147,6 +2147,9 @@ function ensureCard(cardMeta) {
 
   if (state.cardsById.has(cardId)) {
     const existing = state.cardsById.get(cardId);
+    if (typeof existing.activeRunId !== "string") {
+      existing.activeRunId = "";
+    }
     const previousEndpointKey = getWorkspaceEndpointKey(String(existing.endpointUrl || existing.requestUrl || ""));
     if (cardMeta?.endpointUrl) {
       existing.endpointUrl = String(cardMeta.endpointUrl);
@@ -2191,6 +2194,7 @@ function ensureCard(cardMeta) {
     pickerOpenColumn: "",
     pickerOutsidePointerHandler: null,
     pickerOutsideKeyHandler: null,
+    activeRunId: "",
     running: false,
     element: null,
     titleElement: null,
@@ -2389,6 +2393,7 @@ function applyReportStart(payload) {
   if (!cardState) {
     return;
   }
+  cardState.activeRunId = String(payload?.runId || "").trim();
   cardState.running = true;
   cardState.rows = [];
   cardState.sortStack = getDefaultSortStack();
@@ -2405,7 +2410,18 @@ function applyReportResult(payload) {
   if (!cardState) {
     return;
   }
+  const incomingRunId = String(payload?.runId || "").trim();
+  if (cardState.activeRunId && incomingRunId && cardState.activeRunId !== incomingRunId) {
+    return;
+  }
+  cardState.activeRunId = "";
   cardState.running = false;
+
+  if (payload?.superseded === true) {
+    renderCardMessage(cardState, "Superseded by newer ESM selection.");
+    syncWorkspaceNetworkIndicator();
+    return;
+  }
 
   if (!payload?.ok) {
     const error = payload?.error || "Request failed.";
@@ -2594,6 +2610,7 @@ function handleWorkspaceEvent(eventName, payload) {
     state.batchRunning = false;
     state.cardsById.forEach((cardState) => {
       if (cardState) {
+        cardState.activeRunId = "";
         cardState.running = false;
       }
     });

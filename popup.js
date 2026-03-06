@@ -17229,6 +17229,7 @@ async function esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, c
     return;
   }
   const normalizedCardId = String(cardId || generateRequestId());
+  const runId = generateRequestId();
   const requestUrlOverride = esmWorkspaceNormalizeRunRequestUrlOverride(endpoint.url, options.requestUrlOverride);
   const normalizedLocalColumnFilters = esmWorkspaceNormalizeLocalColumnFilters(options.localColumnFilters);
   const baseRequestUrl = requestUrlOverride || esmWorkspaceBuildEndpointUrl(esmWorkspaceState, endpoint);
@@ -17244,8 +17245,13 @@ async function esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, c
     zoomKey: clickEsmGetZoomKey(endpoint),
     columns: normalizeEsmColumns(endpoint.columns, { href: endpoint.url }),
     localColumnFilters: normalizedLocalColumnFilters,
+    runId,
   };
   const targetWindowId = Number(esmWorkspaceState?.controllerWindowId || state.esmWorkspaceWorkspaceWindowId || 0);
+
+  if (!isEsmServiceRequestActive(esmWorkspaceState.section, requestToken, esmWorkspaceState.programmer?.programmerId)) {
+    return;
+  }
 
   if (options.emitStart !== false) {
     emitEsmWorkspaceDebugEvent(activeFlowId, {
@@ -17265,6 +17271,20 @@ async function esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, c
   }
 
   if (!isEsmServiceRequestActive(esmWorkspaceState.section, requestToken, esmWorkspaceState.programmer?.programmerId)) {
+    void esmWorkspaceSendWorkspaceMessage(
+      "report-result",
+      {
+        ...reportMeta,
+        ok: false,
+        superseded: true,
+        error: "Request superseded by a newer ESM selection.",
+        rows: [],
+        completedAt: Date.now(),
+      },
+      {
+        targetWindowId,
+      }
+    );
     return;
   }
 
@@ -17301,6 +17321,20 @@ async function esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, c
   }
 
   if (!isEsmServiceRequestActive(esmWorkspaceState.section, requestToken, esmWorkspaceState.programmer?.programmerId)) {
+    void esmWorkspaceSendWorkspaceMessage(
+      "report-result",
+      {
+        ...reportMeta,
+        ok: false,
+        superseded: true,
+        error: "Request superseded by a newer ESM selection.",
+        rows: [],
+        completedAt: Date.now(),
+      },
+      {
+        targetWindowId,
+      }
+    );
     return;
   }
 
