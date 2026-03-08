@@ -72,20 +72,36 @@ const ESM_MVPD_DIMENSION_DESCRIPTIONS = new Map([
   ["nsdk", "Client SDK"],
   ["nsdk-version", "Adobe Pass SDK version"],
 ]);
-const ESM_NODE_BASE_URL = "https://mgmt.auth.adobe.com/esm/v3/media-company/";
+let ESM_NODE_BASE_URL = "https://mgmt.auth.adobe.com/esm/v3/media-company/";
 const ESM_NODE_BASE_PATH = "esm/v3/media-company/";
 const WORKSPACE_EXPORT_FILE_SYSTEM_QUERY_KEYS = new Set(["format", "limit"]);
 const WORKSPACE_TABLE_VISIBLE_ROW_CAP = 10;
 const WORKSPACE_TEARSHEET_RUNTIME_PATH = "clickesmws-runtime.js";
 const WORKSPACE_TEARSHEET_TEMPLATE_PATH = "esm-workspace.html";
-const PASS_CONSOLE_PROGRAMMER_APPLICATIONS_URL =
+let PASS_CONSOLE_PROGRAMMER_APPLICATIONS_URL =
   "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production/programmers";
 const WORKSPACE_LOCK_MESSAGE_SUFFIX =
   "does not have access to ESM. Please confirm if the console is out of sync and this Media Company should have access to ESM.";
+const UNDERPAR_ENVIRONMENT_REGISTRY = globalThis.UnderParEnvironment || null;
+const DEFAULT_ADOBEPASS_ENVIRONMENT =
+  UNDERPAR_ENVIRONMENT_REGISTRY?.getDefaultEnvironment?.() || {
+    key: "release-production",
+    route: "release-production",
+    consoleBase: "https://console.auth.adobe.com",
+    mgmtBase: "https://mgmt.auth.adobe.com",
+    spBase: "https://sp.auth.adobe.com",
+    consoleProgrammersUrl:
+      "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production/programmers",
+    dcrRegisterUrl: "https://sp.auth.adobe.com/o/client/register",
+    dcrTokenUrl: "https://sp.auth.adobe.com/o/client/token",
+    clickEsmTokenUrl: "https://sp.auth.adobe.com/o/client/token",
+    esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/",
+  };
 
 const state = {
   windowId: 0,
   controllerOnline: false,
+  adobePassEnvironment: { ...DEFAULT_ADOBEPASS_ENVIRONMENT },
   esmAvailable: null,
   esmAvailabilityResolved: false,
   esmContainerVisible: null,
@@ -122,11 +138,102 @@ const els = {
   rerunAllButton: document.getElementById("workspace-rerun-all"),
   clearButton: document.getElementById("workspace-clear-all"),
   cardsHost: document.getElementById("workspace-cards"),
+  pageEnvBadge: document.getElementById("page-env-badge"),
+  pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
 };
 
 let workspaceStylesheetTextCache = "";
 let workspaceTearsheetRuntimeTextCache = "";
 let workspaceTearsheetTemplateTextCache = "";
+
+function getWorkspaceEnvironmentRegistry() {
+  return globalThis.UnderParEnvironment || UNDERPAR_ENVIRONMENT_REGISTRY || null;
+}
+
+function resolveWorkspaceAdobePassEnvironment(value = null) {
+  const registry = getWorkspaceEnvironmentRegistry();
+  if (registry?.getEnvironment) {
+    return registry.getEnvironment(value || DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  }
+  return { ...DEFAULT_ADOBEPASS_ENVIRONMENT };
+}
+
+function applyWorkspaceAdobePassEnvironment(environment = null) {
+  const resolved = resolveWorkspaceAdobePassEnvironment(environment);
+  ESM_NODE_BASE_URL = String(resolved.esmBase || `${resolved.mgmtBase}/esm/v3/media-company/`);
+  PASS_CONSOLE_PROGRAMMER_APPLICATIONS_URL = String(
+    resolved.consoleProgrammersUrl ||
+      `https://experience.adobe.com/#/@adobepass/pass/authentication/${resolved.route || "release-production"}/programmers`
+  );
+  state.adobePassEnvironment = resolved;
+  renderWorkspaceEnvironmentBadge();
+  return resolved;
+}
+
+async function initializeWorkspaceAdobePassEnvironment() {
+  const registry = getWorkspaceEnvironmentRegistry();
+  const environment = registry?.getStoredEnvironment
+    ? await registry.getStoredEnvironment()
+    : resolveWorkspaceAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  return applyWorkspaceAdobePassEnvironment(environment);
+}
+
+function buildWorkspaceEnvironmentTooltip(environment) {
+  const resolved = environment && typeof environment === "object" ? environment : {};
+  const route = String(resolved.route || DEFAULT_ADOBEPASS_ENVIRONMENT.route || "release-production").trim() || "release-production";
+  const label = String(resolved.label || (route === "release-staging" ? "Staging" : "Production")).trim() || "Production";
+  const consoleBase =
+    String(resolved.consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "").trim() ||
+    (route === "release-staging" ? "https://console.auth-staging.adobe.com" : "https://console.auth.adobe.com");
+  const mgmtBase =
+    String(resolved.mgmtBase || DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "").trim() ||
+    (route === "release-staging" ? "https://mgmt.auth-staging.adobe.com" : "https://mgmt.auth.adobe.com");
+  const spBase =
+    String(resolved.spBase || DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "").trim() ||
+    (route === "release-staging" ? "https://sp.auth-staging.adobe.com" : "https://sp.auth.adobe.com");
+  const consoleShellUrl = String(
+    resolved.consoleShellUrl || `https://experience.adobe.com/#/@adobepass/pass/authentication/${route}`
+  ).trim();
+  const cmConsoleOrigin = String(
+    resolved.cmConsoleOrigin || (route === "release-staging" ? "https://experience-stage.adobe.com" : "https://experience.adobe.com")
+  ).trim();
+  const cmConsoleShellUrl = String(resolved.cmConsoleShellUrl || `${cmConsoleOrigin.replace(/\/+$/, "")}/#/@adobepass/cm-console`).trim();
+  const dcrRegisterUrl = String(resolved.dcrRegisterUrl || `${spBase}/o/client/register`).trim();
+  const dcrTokenUrl = String(resolved.dcrTokenUrl || resolved.clickEsmTokenUrl || `${spBase}/o/client/token`).trim();
+  const restV2Base = String(resolved.restV2Base || `${spBase}/api/v2`).trim();
+  const esmBase = String(resolved.esmBase || `${mgmtBase}/esm/v3/media-company/`).trim();
+  const degradationBase = String(resolved.degradationBase || `${mgmtBase}/control/v3/degradation`).trim();
+  return String(
+    resolved.envBadgeTitle ||
+      [
+        `Environment : ${label}`,
+        `AdobePASS Console : ${consoleShellUrl}`,
+        `AdobePASS Console Base : ${consoleBase}`,
+        `CM Console : ${cmConsoleShellUrl}`,
+        `Management : ${mgmtBase}`,
+        `Service Provider : ${spBase}`,
+        `DCR Register : ${dcrRegisterUrl}`,
+        `DCR Token : ${dcrTokenUrl}`,
+        `REST V2 : ${restV2Base}`,
+        `ESM : ${esmBase}`,
+        `DEGRADATION : ${degradationBase}`,
+      ].join("\n")
+  ).trim();
+}
+
+function renderWorkspaceEnvironmentBadge() {
+  if (!els.pageEnvBadge || !els.pageEnvBadgeValue) {
+    return;
+  }
+  const environment = state.adobePassEnvironment && typeof state.adobePassEnvironment === "object"
+    ? state.adobePassEnvironment
+    : resolveWorkspaceAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  const label = String(environment?.label || "").trim() || "Production";
+  const title = buildWorkspaceEnvironmentTooltip(environment) || label;
+  els.pageEnvBadgeValue.textContent = label;
+  els.pageEnvBadge.title = title;
+  els.pageEnvBadge.setAttribute("aria-label", title);
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -686,6 +793,10 @@ function buildWorkspaceExportSnapshot() {
     controllerStateText: String(els.controllerState?.textContent || "").trim(),
     filterStateText: String(els.filterState?.textContent || "").trim(),
     exportMetaText: "",
+    adobePassEnvironment:
+      state.adobePassEnvironment && typeof state.adobePassEnvironment === "object"
+        ? { ...state.adobePassEnvironment }
+        : { ...DEFAULT_ADOBEPASS_ENVIRONMENT },
     programmerId: String(state.programmerId || ""),
     programmerName: String(state.programmerName || ""),
     requestorIds: Array.isArray(state.requestorIds) ? state.requestorIds.slice(0, 24) : [],
@@ -2502,6 +2613,15 @@ function applyControllerState(payload) {
     state.controllerStateUpdatedAt = incomingControllerUpdatedAt;
   }
 
+  const previousEnvironmentKey = String(state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim();
+  const incomingEnvironment =
+    payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object" ? payload.adobePassEnvironment : null;
+  const incomingEnvironmentKey = String(incomingEnvironment?.key || "").trim();
+  const environmentChanged = Boolean(incomingEnvironmentKey) && incomingEnvironmentKey !== previousEnvironmentKey;
+  if (incomingEnvironment) {
+    applyWorkspaceAdobePassEnvironment(incomingEnvironment);
+  }
+
   const previousProgrammerId = String(state.programmerId || "");
   const previousProgrammerName = String(state.programmerName || "");
   const previousProgrammerKey = getProgrammerIdentityKey(previousProgrammerId, previousProgrammerName);
@@ -2556,7 +2676,7 @@ function applyControllerState(payload) {
     state.programmerId,
     state.programmerName
   );
-  if (programmerChanged) {
+  if (programmerChanged || environmentChanged) {
     state.batchRunning = false;
     state.autoRerunInFlightProgrammerKey = "";
     state.cardsById.forEach((cardState) => {
@@ -2564,6 +2684,10 @@ function applyControllerState(payload) {
         cardState.running = false;
       }
     });
+    if (environmentChanged && hasWorkspaceCardContext()) {
+      clearWorkspaceCards();
+      setStatus(`Environment changed to ${String(state.adobePassEnvironment?.label || incomingEnvironmentKey || "Production")}.`);
+    }
     syncActionButtonsDisabled();
   }
   const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
@@ -2796,6 +2920,11 @@ function registerEventHandlers() {
 }
 
 async function init() {
+  try {
+    await initializeWorkspaceAdobePassEnvironment();
+  } catch {
+    applyWorkspaceAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  }
   try {
     const currentWindow = await chrome.windows.getCurrent();
     state.windowId = Number(currentWindow?.id || 0);

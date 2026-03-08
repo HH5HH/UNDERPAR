@@ -3,47 +3,74 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>UP Trace</title>
+    <title>UP Settings</title>
     <link rel="stylesheet" href="up-devtools-panel.css" />
   </head>
   <body>
-    <header class="toolbar">
-      <div class="toolbar-left">
-        <strong>UP REST V2 + MVPD Trace</strong>
-        <span id="tab-label" class="muted"></span>
-      </div>
-      <div class="toolbar-right">
-        <label class="toolbar-check"><input id="autoscroll" type="checkbox" checked /> Auto-scroll</label>
-        <button id="clear-btn" type="button">Clear</button>
-        <button id="copy-btn" type="button">Copy JSON</button>
-      </div>
-    </header>
-
-    <main class="content">
-      <section class="events-wrap">
-        <div class="pane-head">
-          <strong id="left-title">Flow • 0 event(s)</strong>
-          <span id="status" class="muted"></span>
+    <main class="settings-shell">
+      <section class="settings-card">
+        <label class="field-label" for="environment-select">Environment</label>
+        <div class="control-row">
+          <select id="environment-select" class="env-select" aria-label="AdobePASS environment">
+            <option value="">Loading environments...</option>
+          </select>
+          <button id="switch-btn" class="switch-btn" type="button">SWITCH</button>
         </div>
-        <div class="events-table-head" aria-hidden="true">
-          <span class="event-col-seq">#</span>
-          <span class="event-col-time">Time</span>
-          <span class="event-col-source">Source</span>
-          <span class="event-col-phase">Phase</span>
-          <span class="event-col-status">Status</span>
-        </div>
-        <div id="events" class="events"></div>
+        <p class="settings-note">
+          Switching reloads UnderPAR so AdobePASS console, DCR, REST V2, ESM, and DEGRADATION calls rebind to the selected
+          environment.
+        </p>
+        <p id="panel-status" class="panel-status" aria-live="polite" hidden></p>
       </section>
-      <section class="details-wrap">
-        <div class="pane-head">
-          <strong>Selected Event</strong>
-        </div>
-        <div id="details" class="details">
-          <p class="details-empty">Select an event to view details.</p>
-        </div>
+
+      <section class="context-card">
+        <h2>Current Environment URLs</h2>
+        <dl class="context-list">
+          <div class="context-row">
+            <dt>AdobePASS Console</dt>
+            <dd id="shell-url"></dd>
+          </div>
+          <div class="context-row">
+            <dt>AdobePASS Console Base</dt>
+            <dd id="console-base"></dd>
+          </div>
+          <div class="context-row">
+            <dt>Concurrency Monitoring</dt>
+            <dd id="cm-console-url"></dd>
+          </div>
+          <div class="context-row">
+            <dt>Management</dt>
+            <dd id="mgmt-base"></dd>
+          </div>
+          <div class="context-row">
+            <dt>Service Provider</dt>
+            <dd id="sp-base"></dd>
+          </div>
+          <div class="context-row">
+            <dt>DCR Register</dt>
+            <dd id="dcr-register-url"></dd>
+          </div>
+          <div class="context-row">
+            <dt>DCR Token</dt>
+            <dd id="dcr-token-url"></dd>
+          </div>
+          <div class="context-row">
+            <dt>REST V2</dt>
+            <dd id="rest-v2-base"></dd>
+          </div>
+          <div class="context-row">
+            <dt>ESM</dt>
+            <dd id="esm-base"></dd>
+          </div>
+          <div class="context-row">
+            <dt>DEGRADATION</dt>
+            <dd id="degradation-base"></dd>
+          </div>
+        </dl>
       </section>
     </main>
 
+    <script src="underpar-environment.js"></script>
     <script src="up-devtools-panel.js"></script>
   </body>
 </html>

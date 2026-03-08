@@ -65,6 +65,8 @@ body {
   width: 100%;
   min-height: 100vh;
   background: linear-gradient(180deg, #dcdddf 0%, var(--legacy-bg) 100%);
+  display: flex;
+  flex-direction: column;
 }
 
 .app {
@@ -73,6 +75,42 @@ body {
   flex-direction: column;
   gap: 14px;
   position: relative;
+  flex: 1 0 auto;
+}
+
+.page-env-badge-row {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0 16px 12px;
+  flex: 0 0 auto;
+}
+
+.page-env-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  color: var(--legacy-text);
+  cursor: default;
+}
+
+.page-env-badge-prefix,
+.page-env-badge-sep {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--legacy-muted);
+}
+
+.page-env-badge-value {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--service-esm-ink);
 }
 
 .header {
@@ -620,6 +658,12 @@ select:disabled {
   --service-open-bg-top: rgba(47, 114, 201, 0.2);
   --service-open-bg-mid: rgba(47, 114, 201, 0.1);
   --service-open-bg-glow: rgba(47, 114, 201, 0.24);
+  --esm-child-header-gradient: linear-gradient(
+    142deg,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(243, 248, 255, 0.95) 52%,
+    rgba(229, 240, 255, 0.94) 100%
+  );
 }
 
 .premium-service-section.service-cm {
@@ -761,8 +805,7 @@ select:disabled {
   gap: 8px;
 }
 
-.cmu-jelly-shell .cmu-jelly-tree-head,
-.cmu-jelly-shell .cmu-jelly-treemap-head {
+.cmu-jelly-shell .cmu-jelly-tree-head {
   cursor: default;
   padding: 6px 8px;
 }
@@ -786,11 +829,7 @@ select:disabled {
 .cmu-jelly-panel-toggle:focus-visible {
   outline: none;
   border-color: var(--service-accent);
-  box-shadow: 0 0 0 2px rgba(42, 139, 116, 0.24);
-}
-
-.service-cm-mvpd .cmu-jelly-panel-toggle:focus-visible {
-  box-shadow: 0 0 0 2px rgba(255, 194, 14, 0.26);
+  box-shadow: 0 0 0 2px var(--service-accent-focus);
 }
 
 .cmu-jelly-panel-toggle-icon {
@@ -821,11 +860,7 @@ select:disabled {
 .cmu-jelly-panel-load-all:focus-visible {
   outline: none;
   border-color: var(--service-accent);
-  box-shadow: 0 0 0 2px rgba(42, 139, 116, 0.24);
-}
-
-.service-cm-mvpd .cmu-jelly-panel-load-all:focus-visible {
-  box-shadow: 0 0 0 2px rgba(255, 194, 14, 0.26);
+  box-shadow: 0 0 0 2px var(--service-accent-focus);
 }
 
 .cmu-jelly-panel-load-all:disabled {
@@ -873,29 +908,16 @@ select:disabled {
   border-color: var(--service-accent-soft);
 }
 
-.service-cm .cmu-jelly-shell .esm-workspace-treemap-panel {
-  border-color: var(--service-accent-soft);
-}
-
-.service-cm-mvpd .cmu-jelly-shell .esm-workspace-treemap-panel {
-  border-color: var(--service-accent-soft);
-}
-
 .service-cm .cmu-jelly-shell .esm-workspace-tree-title {
   color: var(--service-accent-ink);
 }
 
 .service-cm .cmu-jelly-shell .cmu-jelly-tree-head,
-.service-cm .cmu-jelly-shell .cmu-jelly-treemap-head,
 .service-cm .cm-group-title {
   background: var(--cm-child-header-gradient);
 }
 
 .service-cm-mvpd .cmu-jelly-shell .esm-workspace-tree-title {
-  color: var(--service-accent-ink);
-}
-
-.service-cm .cmu-jelly-shell .esm-workspace-treemap-title {
   color: var(--service-accent-ink);
 }
 
@@ -923,10 +945,6 @@ select:disabled {
 .service-cm .cmu-jelly-make-clickcmu-btn.esm-workspace-toolbar-icon-btn--tearsheet:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px rgba(42, 139, 116, 0.34);
-}
-
-.service-cm-mvpd .cmu-jelly-shell .esm-workspace-treemap-title {
-  color: var(--service-accent-ink);
 }
 
 .service-cm-mvpd .cmu-jelly-make-clickcmu-btn.esm-workspace-toolbar-icon-btn--tearsheet {
@@ -1152,14 +1170,53 @@ select:disabled {
   }
 }
 
-.service-esm .esm-workspace-tree-panel,
-.service-esm .esm-workspace-treemap-panel {
+.service-esm .esm-workspace-tree-panel {
   border-color: var(--service-accent-soft);
 }
 
-.service-esm .esm-workspace-tree-title,
-.service-esm .esm-workspace-treemap-title {
+.service-esm .esm-workspace-tree-title {
   color: var(--service-accent-ink);
+}
+
+.service-esm .esm-jelly-shell .esm-workspace-tree-head {
+  cursor: default;
+  padding: 6px 8px;
+  border-bottom-color: var(--service-accent-soft);
+  background: var(--esm-child-header-gradient);
+}
+
+.service-esm .esm-jelly-shell .cmu-jelly-panel-toggle-icon {
+  color: var(--service-accent-ink);
+}
+
+.service-esm .esm-jelly-shell .esm-workspace-tree-scroll {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 250, 255, 0.96));
+}
+
+.service-esm .esm-workspace-make-clickesm-btn.esm-workspace-toolbar-icon-btn--tearsheet {
+  border-color: #2f72c9;
+  background: linear-gradient(160deg, rgba(47, 114, 201, 0.98), rgba(31, 79, 148, 0.98));
+  color: #ffffff;
+  box-shadow: 0 10px 20px rgba(47, 114, 201, 0.28), 0 2px 0 rgba(255, 255, 255, 0.34) inset;
+}
+
+.service-esm .esm-workspace-make-clickesm-btn.esm-workspace-toolbar-icon-btn--tearsheet:hover:not(:disabled) {
+  border-color: #255ca4;
+  background: linear-gradient(160deg, rgba(56, 128, 220, 0.98), rgba(37, 92, 164, 0.98));
+  color: #ffffff;
+  box-shadow: 0 13px 24px rgba(31, 79, 148, 0.33), 0 2px 0 rgba(255, 255, 255, 0.34) inset;
+}
+
+.service-esm .esm-workspace-make-clickesm-btn.esm-workspace-toolbar-icon-btn--tearsheet:active:not(:disabled) {
+  border-color: #1f4f94;
+  background: linear-gradient(160deg, rgba(41, 102, 179, 0.98), rgba(31, 79, 148, 0.98));
+  color: #ffffff;
+  box-shadow: 0 8px 15px rgba(31, 79, 148, 0.28), 0 2px 0 rgba(255, 255, 255, 0.28) inset;
+}
+
+.service-esm .esm-workspace-make-clickesm-btn.esm-workspace-toolbar-icon-btn--tearsheet:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(47, 114, 201, 0.34);
 }
 
 .service-esm .esm-workspace-run {
@@ -1178,8 +1235,7 @@ select:disabled {
   gap: 8px;
 }
 
-.esm-workspace-tree-panel,
-.esm-workspace-treemap-panel {
+.esm-workspace-tree-panel {
   border: 1px solid var(--legacy-border);
   border-radius: 12px;
   overflow: hidden;
@@ -1322,23 +1378,7 @@ select:disabled {
   cursor: default;
 }
 
-.esm-workspace-treemap-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--legacy-border);
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.88),
-    rgba(250, 249, 244, 0.94)
-  );
-  cursor: default;
-}
-
-.esm-workspace-tree-head:focus-visible,
-.esm-workspace-treemap-head:focus-visible {
+.esm-workspace-tree-head:focus-visible {
   outline: 2px solid var(--s2-action-focus-ring);
   outline-offset: -2px;
 }
@@ -1466,190 +1506,12 @@ select:disabled {
   color: var(--legacy-text);
 }
 
-.esm-workspace-treemap-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--legacy-text);
-}
-
 .esm-workspace-tree-scroll {
   max-height: 18em;
   overflow: auto;
   border: 0;
   background: var(--legacy-panel);
   padding: 10px;
-}
-
-.esm-workspace-treemap-scroll {
-  max-height: 34em;
-  overflow: auto;
-  background: var(--legacy-panel);
-  padding: 10px;
-}
-
-.esm-workspace-treemap-root {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.esm-workspace-map-depth-band {
-  border: 1px solid rgba(107, 114, 128, 0.34);
-  border-radius: 12px;
-  background: linear-gradient(160deg, rgba(158, 163, 168, 0.17), rgba(107, 114, 128, 0.08));
-  padding: 8px;
-}
-
-.esm-workspace-map-depth-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.esm-workspace-map-depth-label {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: rgba(0, 120, 212, 0.92);
-  text-transform: uppercase;
-}
-
-.esm-workspace-map-depth-count {
-  font-size: 10px;
-  color: rgba(107, 114, 128, 0.94);
-}
-
-.esm-workspace-map-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
-}
-
-.esm-workspace-treemap-empty {
-  border: 1px dashed rgba(107, 114, 128, 0.52);
-  border-radius: 12px;
-  background: linear-gradient(160deg, rgba(158, 163, 168, 0.14), rgba(107, 114, 128, 0.08));
-  padding: 16px 14px;
-  text-align: center;
-  color: rgba(107, 114, 128, 0.96);
-  font-size: 12px;
-}
-
-.esm-workspace-map-tile {
-  --tile-rest-rgb: 107, 114, 128;
-  --tile-hot-rgb: 158, 163, 168;
-  --tile-active-rgb: 175, 175, 175;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 84px;
-  border-radius: 12px;
-  border: 1px solid rgba(var(--tile-rest-rgb), 0.84);
-  background: linear-gradient(
-    155deg,
-    rgba(var(--tile-rest-rgb), 0.22),
-    rgba(var(--tile-rest-rgb), 0.12) 62%,
-    rgba(var(--tile-rest-rgb), 0.06) 100%
-  );
-  box-shadow:
-    inset 0 1px 0 rgba(var(--tile-rest-rgb), 0.24),
-    inset 0 0 0 1px rgba(var(--tile-rest-rgb), 0.28),
-    0 4px 14px rgba(var(--tile-rest-rgb), 0.18);
-  padding: 10px 12px;
-  transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease, border-color 140ms ease;
-}
-
-.esm-workspace-map-tile:hover {
-  border-color: rgba(var(--tile-hot-rgb), 0.98);
-  transform: translateY(-1px);
-  filter: saturate(1.16) brightness(1.05);
-  box-shadow:
-    inset 0 1px 0 rgba(var(--tile-hot-rgb), 0.3),
-    inset 0 0 0 1px rgba(var(--tile-hot-rgb), 0.44),
-    0 10px 22px rgba(var(--tile-hot-rgb), 0.28);
-  background: linear-gradient(
-    155deg,
-    rgba(var(--tile-hot-rgb), 0.36),
-    rgba(var(--tile-hot-rgb), 0.2) 62%,
-    rgba(var(--tile-hot-rgb), 0.12) 100%
-  );
-}
-
-.esm-workspace-map-tile:focus-within {
-  border-color: rgba(var(--tile-hot-rgb), 0.98);
-  box-shadow:
-    inset 0 0 0 1px rgba(var(--tile-hot-rgb), 0.46),
-    0 0 0 2px rgba(var(--tile-hot-rgb), 0.22);
-}
-
-.esm-workspace-map-tile:active {
-  border-color: rgba(var(--tile-active-rgb), 1);
-  transform: translateY(0);
-  filter: saturate(1.2) brightness(1.08);
-  background: linear-gradient(
-    155deg,
-    rgba(var(--tile-active-rgb), 0.46),
-    rgba(var(--tile-active-rgb), 0.26) 62%,
-    rgba(var(--tile-active-rgb), 0.14) 100%
-  );
-  box-shadow:
-    inset 0 1px 0 rgba(var(--tile-active-rgb), 0.32),
-    inset 0 0 0 1px rgba(var(--tile-active-rgb), 0.52),
-    0 6px 16px rgba(var(--tile-active-rgb), 0.22);
-}
-
-.esm-workspace-map-tile.esm-workspace-map-leaf {
-  cursor: pointer;
-}
-
-.esm-workspace-map-content {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1 1 auto;
-}
-
-.esm-workspace-map-name {
-  font-size: 12px;
-  font-weight: 800;
-  color: rgb(var(--tile-rest-rgb));
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: 0.02em;
-  transition: color 140ms ease;
-}
-
-.esm-workspace-map-parent {
-  font-size: 10px;
-  color: rgba(var(--tile-rest-rgb), 0.9);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: color 140ms ease;
-}
-
-.esm-workspace-map-meta {
-  font-size: 10px;
-  color: rgba(var(--tile-rest-rgb), 0.88);
-  letter-spacing: 0.03em;
-  transition: color 140ms ease;
-}
-
-.esm-workspace-map-tile:hover .esm-workspace-map-name,
-.esm-workspace-map-tile:hover .esm-workspace-map-parent,
-.esm-workspace-map-tile:hover .esm-workspace-map-meta {
-  color: rgb(var(--tile-hot-rgb));
-}
-
-.esm-workspace-map-tile:active .esm-workspace-map-name,
-.esm-workspace-map-tile:active .esm-workspace-map-parent,
-.esm-workspace-map-tile:active .esm-workspace-map-meta {
-  color: rgb(var(--tile-active-rgb));
 }
 
 .esm-workspace-tree-root {

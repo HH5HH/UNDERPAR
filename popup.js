@@ -19,19 +19,33 @@ const LEGACY_CM_FETCH_REQUEST_TYPE = "mincloudlogin:cmFetch";
 const SPLUNK_FETCH_REQUEST_TYPE = "underpar:splunkFetch";
 const LEGACY_SPLUNK_FETCH_REQUEST_TYPE = "mincloudlogin:splunkFetch";
 const CONSOLE_LOG_RELAY_REQUEST_TYPE = "underpar:consoleLog";
-const CONSOLE_AUTH_CALLBACK_PREFIX = "https://console.auth.adobe.com/oauth2/callback";
-
-const ADOBE_CONSOLE_BASE = "https://console.auth.adobe.com";
-const ADOBE_MGMT_BASE = "https://mgmt.auth.adobe.com";
-const ADOBE_SP_BASE = "https://sp.auth.adobe.com";
-const DEGRADATION_API_BASE = `${ADOBE_MGMT_BASE}/control/v3/degradation`;
-const REST_V2_BASE = `${ADOBE_SP_BASE}/api/v2`;
-const PROGRAMMER_ENDPOINTS = [
-  `${ADOBE_CONSOLE_BASE}/rest/api/entity/Programmer?configurationVersion=3522`,
-  `${ADOBE_CONSOLE_BASE}/rest/api/entity/Programmer`,
-  `${ADOBE_CONSOLE_BASE}/rest/api/programmers`,
-  `${ADOBE_CONSOLE_BASE}/rest/api/v1/programmers`,
-];
+const UNDERPAR_ENVIRONMENT_REGISTRY = globalThis.UnderParEnvironment || null;
+const DEFAULT_ADOBEPASS_ENVIRONMENT = UNDERPAR_ENVIRONMENT_REGISTRY?.getDefaultEnvironment?.() || {
+  key: "release-production",
+  label: "Production",
+  route: "release-production",
+  consoleBase: "https://console.auth.adobe.com",
+  cmConsoleOrigin: "https://experience.adobe.com",
+  mgmtBase: "https://mgmt.auth.adobe.com",
+  spBase: "https://sp.auth.adobe.com",
+  consoleShellUrl: "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production",
+  cmConsoleShellUrl: "https://experience.adobe.com/#/@adobepass/cm-console",
+  consoleProgrammersUrl: "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production/programmers",
+  consoleCallbackPrefix: "https://console.auth.adobe.com/oauth2/callback",
+  degradationBase: "https://mgmt.auth.adobe.com/control/v3/degradation",
+  dcrRegisterUrl: "https://sp.auth.adobe.com/o/client/register",
+  dcrTokenUrl: "https://sp.auth.adobe.com/o/client/token",
+  clickEsmTokenUrl: "https://sp.auth.adobe.com/o/client/token",
+  restV2Base: "https://sp.auth.adobe.com/api/v2",
+  esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/",
+};
+let CONSOLE_AUTH_CALLBACK_PREFIX = String(DEFAULT_ADOBEPASS_ENVIRONMENT.consoleCallbackPrefix || "");
+let ADOBE_CONSOLE_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "");
+let ADOBE_MGMT_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "");
+let ADOBE_SP_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "");
+let DEGRADATION_API_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.degradationBase || "");
+let REST_V2_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.restV2Base || "");
+let PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
 const DCR_CACHE_PREFIX = "underpar_dcr_cache_v1";
 const LEGACY_DCR_CACHE_PREFIX = "mincloudlogin_dcr_cache_v1";
 const PREMIUM_SERVICE_DISPLAY_ORDER = ["restV2", "esmWorkspace", "degradation", "cm", "cmMvpd"];
@@ -59,11 +73,17 @@ const PREMIUM_SERVICE_TITLE_BY_KEY = {
 const REST_V2_DEVICE_ID_STORAGE_KEY = "underpar_restv2_device_id_v1";
 const LEGACY_REST_V2_DEVICE_ID_STORAGE_KEY = "mincloudlogin_restv2_device_id_v1";
 const REST_V2_DEFAULT_DOMAIN = "adobe.com";
-const REST_V2_REDIRECT_CANDIDATES = [
-  "https://sp.auth-staging.adobe.com/apitest/api.html",
-  `${ADOBE_SP_BASE}/apitest/api.html`,
-  `${ADOBE_SP_BASE}/api.html`,
-];
+let REST_V2_REDIRECT_CANDIDATES = buildRestV2RedirectCandidatesForSpBase(ADOBE_SP_BASE);
+
+function isProductionAdobePassEnvironmentKey(environmentKey = "") {
+  return String(environmentKey || "").trim().toLowerCase() === String(DEFAULT_ADOBEPASS_ENVIRONMENT.key || "").trim().toLowerCase();
+}
+
+function getRestV2DeviceIdStorageKey(environmentKey = getActiveAdobePassEnvironmentKey()) {
+  const normalizedEnvironmentKey =
+    String(environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  return `${REST_V2_DEVICE_ID_STORAGE_KEY}:${normalizedEnvironmentKey}`;
+}
 
 const STORAGE_KEY = "ims_login_data";
 const DEBUG_FLOW_STORAGE_INDEX_KEY = "underpardebug_flow_index_v1";
@@ -118,6 +138,661 @@ const EXPERIENCE_CLOUD_SSO_TOKEN_ENDPOINT =
 const EXPERIENCE_CLOUD_SSO_CLIENT_ID = "exc_app";
 const EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE =
   "ab.manage,account_cluster.read,additional_info,additional_info.job_function,additional_info.projectedProductContext,additional_info.roles,AdobeID,adobeio.appregistry.read,adobeio_api,aem.frontend.all,audiencemanager_api,creative_cloud,mps,openid,org.read,pps.read,read_organizations,read_pc,read_pc.acp,read_pc.dma_tartan,service_principals.write,session";
+
+function getUnderParEnvironmentRegistry() {
+  return globalThis.UnderParEnvironment || UNDERPAR_ENVIRONMENT_REGISTRY || null;
+}
+
+function resolveAdobePassEnvironment(value = null) {
+  const registry = getUnderParEnvironmentRegistry();
+  if (registry?.getEnvironment) {
+    return registry.getEnvironment(value || DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  }
+  return {
+    ...DEFAULT_ADOBEPASS_ENVIRONMENT,
+  };
+}
+
+function buildProgrammerEndpointsForConsoleBase(consoleBase = "") {
+  const normalizedConsoleBase = String(consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "").trim();
+  return [
+    `${normalizedConsoleBase}/rest/api/entity/Programmer?configurationVersion=3522`,
+    `${normalizedConsoleBase}/rest/api/entity/Programmer`,
+    `${normalizedConsoleBase}/rest/api/programmers`,
+    `${normalizedConsoleBase}/rest/api/v1/programmers`,
+  ];
+}
+
+function buildRestV2RedirectCandidatesForSpBase(spBase = "") {
+  const normalizedSpBase = String(spBase || DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "").trim();
+  return uniqueSorted([
+    `${normalizedSpBase}/apitest/api.html`,
+    `${normalizedSpBase}/api.html`,
+  ]);
+}
+
+function getActiveAdobePassEnvironment() {
+  return resolveAdobePassEnvironment(state?.adobePassEnvironment || DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+}
+
+function getActiveAdobePassEnvironmentKey() {
+  return String(getActiveAdobePassEnvironment()?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+}
+
+function getEnvironmentScopedProgrammerKey(programmerId = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return "";
+  }
+  const normalizedEnvironmentKey =
+    String(environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  return `${normalizedEnvironmentKey}|${normalizedProgrammerId}`;
+}
+
+function getEnvironmentScopedRequestorKey(requestorId = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
+  const normalizedRequestorId = String(requestorId || "").trim();
+  if (!normalizedRequestorId) {
+    return "";
+  }
+  const normalizedEnvironmentKey =
+    String(environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  return `${normalizedEnvironmentKey}|${normalizedRequestorId}`;
+}
+
+function getStampedEnvironmentKey(value) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  return String(value.__underparEnvironmentKey || "").trim();
+}
+
+function stampEnvironmentAwareValue(value, environmentKey = getActiveAdobePassEnvironmentKey()) {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const normalizedEnvironmentKey =
+    String(environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  try {
+    Object.defineProperty(value, "__underparEnvironmentKey", {
+      value: normalizedEnvironmentKey,
+      configurable: true,
+      writable: true,
+      enumerable: false,
+    });
+  } catch {
+    try {
+      value.__underparEnvironmentKey = normalizedEnvironmentKey;
+    } catch {
+      // Ignore metadata stamp failures.
+    }
+  }
+  return value;
+}
+
+function isEnvironmentAwareValueCurrent(value, environmentKey = getActiveAdobePassEnvironmentKey()) {
+  const stampedEnvironmentKey = getStampedEnvironmentKey(value);
+  const normalizedEnvironmentKey =
+    String(environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  return Boolean(stampedEnvironmentKey) && stampedEnvironmentKey === normalizedEnvironmentKey;
+}
+
+function getCurrentProgrammerApplicationsSnapshot(programmerId = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return null;
+  }
+  const snapshot = state.applicationsByProgrammerId.get(normalizedProgrammerId) || null;
+  return isEnvironmentAwareValueCurrent(snapshot) ? snapshot : null;
+}
+
+function setCurrentProgrammerApplicationsSnapshot(programmerId = "", applicationsData = {}) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return null;
+  }
+  const snapshot =
+    applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
+  stampEnvironmentAwareValue(snapshot);
+  state.applicationsByProgrammerId.set(normalizedProgrammerId, snapshot);
+  return snapshot;
+}
+
+function getCurrentPremiumAppsSnapshot(programmerId = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return null;
+  }
+  const snapshot = state.premiumAppsByProgrammerId.get(normalizedProgrammerId) || null;
+  return isEnvironmentAwareValueCurrent(snapshot) ? snapshot : null;
+}
+
+function setCurrentPremiumAppsSnapshot(programmerId = "", premiumApps = {}) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return null;
+  }
+  const snapshot = premiumApps && typeof premiumApps === "object" && !Array.isArray(premiumApps) ? premiumApps : {};
+  stampEnvironmentAwareValue(snapshot);
+  state.premiumAppsByProgrammerId.set(normalizedProgrammerId, snapshot);
+  return snapshot;
+}
+
+function getRequestorScopedMvpdCache(requestorId = "") {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return null;
+  }
+  return state.mvpdCacheByRequestor.get(key) || null;
+}
+
+function setRequestorScopedMvpdCache(requestorId = "", value = null) {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return null;
+  }
+  if (value == null) {
+    state.mvpdCacheByRequestor.delete(key);
+    return null;
+  }
+  state.mvpdCacheByRequestor.set(key, value);
+  return value;
+}
+
+function getRequestorScopedMvpdLoadPromise(requestorId = "") {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return null;
+  }
+  return state.mvpdLoadPromiseByRequestor.get(key) || null;
+}
+
+function setRequestorScopedMvpdLoadPromise(requestorId = "", promise = null) {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return null;
+  }
+  if (!promise) {
+    state.mvpdLoadPromiseByRequestor.delete(key);
+    return null;
+  }
+  state.mvpdLoadPromiseByRequestor.set(key, promise);
+  return promise;
+}
+
+function getRequestorScopedRestV2AuthContext(requestorId = "") {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return null;
+  }
+  return state.restV2AuthContextByRequestor.get(key) || null;
+}
+
+function setRequestorScopedRestV2AuthContext(requestorId = "", value = null) {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return null;
+  }
+  if (!value || typeof value !== "object") {
+    state.restV2AuthContextByRequestor.delete(key);
+    return null;
+  }
+  const normalized = {
+    ...value,
+    environmentKey: getActiveAdobePassEnvironmentKey(),
+  };
+  state.restV2AuthContextByRequestor.set(key, normalized);
+  return normalized;
+}
+
+function clearEnvironmentAwareRegisteredAppState(reason = "environment-change") {
+  state.mvpdCacheByRequestor.clear();
+  state.mvpdLoadPromiseByRequestor.clear();
+  state.restV2AuthContextByRequestor.clear();
+  state.restV2PrewarmedAppsByProgrammerId.clear();
+  state.applicationsByProgrammerId.clear();
+  state.premiumAppsByProgrammerId.clear();
+  state.premiumAppsLoadPromiseByProgrammerId.clear();
+  state.premiumAppScopeHydrationPromiseByProgrammerId.clear();
+  state.dcrEnsureTokenPromiseByKey.clear();
+  state.restV2ProfileHarvestBySelectionKey.clear();
+  state.restV2ProfileHarvestByProgrammerId.clear();
+  state.restV2ProfileHarvestBucketByProgrammerId.clear();
+  state.restV2ProfileHarvestLast = null;
+  clearRestV2PreparedLoginState();
+  clearEsmWorkspaceRecordingState(reason);
+  clearEsmWorkspaceActivityDebugFlow(reason, { stopFlow: true });
+  state.premiumPanelRequestToken = Number(state.premiumPanelRequestToken || 0) + 1;
+}
+
+function buildActiveProgrammerConsoleApplicationsUrl(programmerId = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return "";
+  }
+  const environment = getActiveAdobePassEnvironment();
+  return `${String(environment.consoleProgrammersUrl || "").replace(/\/+$/, "")}/${encodeURIComponent(normalizedProgrammerId)}/applications`;
+}
+
+function rewriteAdobePassServiceUrl(urlValue, serviceKey = "console") {
+  const registry = getUnderParEnvironmentRegistry();
+  if (registry?.rewriteServiceUrl) {
+    return registry.rewriteServiceUrl(urlValue, serviceKey, getActiveAdobePassEnvironment());
+  }
+  return String(urlValue || "").trim();
+}
+
+function rewriteAdobePassTemplateForEnvironment(templateHtml = "") {
+  const environment = getActiveAdobePassEnvironment();
+  const replacements = [
+    ["https://console.auth.adobe.com", String(environment.consoleBase || "")],
+    ["https://mgmt.auth.adobe.com", String(environment.mgmtBase || "")],
+    ["https://sp.auth.adobe.com", String(environment.spBase || "")],
+  ];
+  let output = String(templateHtml || "");
+  replacements.forEach(([source, target]) => {
+    if (!source || !target || source === target) {
+      return;
+    }
+    output = output.replaceAll(source, target);
+    try {
+      output = output.replaceAll(new URL(source).host, new URL(target).host);
+    } catch {
+      // Ignore host-only rewrite failures.
+    }
+  });
+  return output;
+}
+
+function applyAdobePassEnvironment(environment = null) {
+  const previousEnvironmentKey =
+    String(state?.adobePassEnvironmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const resolved = resolveAdobePassEnvironment(environment);
+  const nextEnvironmentKey = String(resolved.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const environmentChanged = previousEnvironmentKey !== nextEnvironmentKey;
+  state.adobePassEnvironment = resolved;
+  state.adobePassEnvironmentKey = nextEnvironmentKey;
+  CONSOLE_AUTH_CALLBACK_PREFIX = String(resolved.consoleCallbackPrefix || `${resolved.consoleBase}/oauth2/callback`);
+  ADOBE_CONSOLE_BASE = String(resolved.consoleBase || "");
+  CM_CONSOLE_APP_ORIGIN = String(resolved.cmConsoleOrigin || "https://experience.adobe.com");
+  CM_CONSOLE_APP_REFERER = `${CM_CONSOLE_APP_ORIGIN.replace(/\/+$/, "")}/`;
+  ADOBE_MGMT_BASE = String(resolved.mgmtBase || "");
+  ADOBE_SP_BASE = String(resolved.spBase || "");
+  DEGRADATION_API_BASE = String(resolved.degradationBase || `${ADOBE_MGMT_BASE}/control/v3/degradation`);
+  REST_V2_BASE = String(resolved.restV2Base || `${ADOBE_SP_BASE}/api/v2`);
+  PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
+  REST_V2_REDIRECT_CANDIDATES = buildRestV2RedirectCandidatesForSpBase(ADOBE_SP_BASE);
+  clickEsmEndpoints = [];
+  clickEsmEndpointsPromise = null;
+  clickEsmTemplateHtml = "";
+  clickEsmTemplatePromise = null;
+  clickDgrTemplateHtml = "";
+  clickDgrTemplatePromise = null;
+  state.programmersApiEndpoint = null;
+  if (environmentChanged) {
+    clearEnvironmentAwareRegisteredAppState("environment-change");
+    clearDegradationWorkspaceRecordingState("environment-change");
+    clearDegradationWorkspaceActivityDebugFlow("environment-change", { stopFlow: true });
+    clearCmWorkspaceActivityDebugFlow("environment-change", { stopFlow: true });
+  }
+  return resolved;
+}
+
+async function initializeAdobePassEnvironment() {
+  const registry = getUnderParEnvironmentRegistry();
+  const environment = registry?.getStoredEnvironment
+    ? await registry.getStoredEnvironment()
+    : resolveAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  return applyAdobePassEnvironment(environment);
+}
+
+function getAdobePassEnvironmentStorageKey() {
+  const registry = getUnderParEnvironmentRegistry();
+  return String(registry?.STORAGE_KEY || "underpar_adobepass_environment_v1").trim() || "underpar_adobepass_environment_v1";
+}
+
+function captureAdobePassEnvironmentSwitchSelectionSnapshot() {
+  const programmer = resolveSelectedProgrammer();
+  return {
+    programmerId: String(programmer?.programmerId || "").trim(),
+    programmerName: String(programmer?.programmerName || programmer?.mediaCompanyName || "").trim(),
+    mediaCompanyName: String(programmer?.mediaCompanyName || programmer?.programmerName || "").trim(),
+    requestorId: String(state.selectedRequestorId || "").trim(),
+    mvpdId: String(state.selectedMvpdId || "").trim(),
+  };
+}
+
+function findProgrammerForEnvironmentSwitchSnapshot(snapshot = null) {
+  if (!snapshot || typeof snapshot !== "object" || !Array.isArray(state.programmers) || state.programmers.length === 0) {
+    return null;
+  }
+
+  const programmerId = String(snapshot.programmerId || "").trim().toLowerCase();
+  if (programmerId) {
+    const byProgrammerId = state.programmers.find(
+      (candidate) => String(candidate?.programmerId || "").trim().toLowerCase() === programmerId
+    );
+    if (byProgrammerId) {
+      return byProgrammerId;
+    }
+  }
+
+  const nameCandidates = [
+    String(snapshot.programmerName || "").trim().toLowerCase(),
+    String(snapshot.mediaCompanyName || "").trim().toLowerCase(),
+  ].filter(Boolean);
+  if (nameCandidates.length === 0) {
+    return null;
+  }
+
+  return (
+    state.programmers.find((candidate) => {
+      const candidateNames = [
+        String(candidate?.programmerName || "").trim().toLowerCase(),
+        String(candidate?.mediaCompanyName || "").trim().toLowerCase(),
+      ].filter(Boolean);
+      return candidateNames.some((candidateName) => nameCandidates.includes(candidateName));
+    }) || null
+  );
+}
+
+function prepareAdobePassEnvironmentSwitchUi(targetEnvironment = null) {
+  const environmentLabel = String(targetEnvironment?.label || "selected environment").trim() || "selected environment";
+  clearPremiumServiceAutoRefreshTimers();
+  state.programmersApiEndpoint = null;
+  applyProgrammerEntities([]);
+  els.mediaCompanySelect.disabled = true;
+  els.mediaCompanySelect.innerHTML = `<option value="">-- Switching to ${escapeHtml(environmentLabel)}... --</option>`;
+  els.requestorSelect.disabled = true;
+  els.requestorSelect.innerHTML = '<option value="">-- Reloading Content Providers... --</option>';
+  els.mvpdSelect.disabled = true;
+  els.mvpdSelect.innerHTML = '<option value="">-- Reloading MVPD menu... --</option>';
+  renderPremiumServices(null, null, {
+    controllerReason: "environment-switch",
+  });
+  void esmWorkspaceSendWorkspaceMessage("workspace-clear", {});
+  void cmSendWorkspaceMessage("workspace-clear", {});
+  void mvpdWorkspaceSendWorkspaceMessage("workspace-clear", {});
+  void restWorkspaceSendWorkspaceMessage("workspace-clear", {});
+  void degradationWorkspaceSendWorkspaceMessage("workspace-clear", {});
+  void bobtoolsWorkspaceSendWorkspaceMessage("workspace-clear", {});
+}
+
+async function restoreAdobePassEnvironmentSwitchSelection(snapshot = null) {
+  const result = {
+    programmerRestored: false,
+    requestorRestored: false,
+    mvpdRestored: false,
+    missingSelection: "",
+  };
+
+  const programmer = findProgrammerForEnvironmentSwitchSnapshot(snapshot);
+  if (!programmer) {
+    result.missingSelection = String(
+      snapshot?.programmerName || snapshot?.mediaCompanyName || snapshot?.programmerId || ""
+    ).trim();
+    return result;
+  }
+
+  state.selectedProgrammerKey = String(programmer.key || "").trim();
+  if (els.mediaCompanySelect) {
+    els.mediaCompanySelect.value = state.selectedProgrammerKey;
+  }
+  populateRequestorSelect();
+  result.programmerRestored = true;
+
+  const requestorId = String(snapshot?.requestorId || "").trim();
+  if (requestorId && Array.isArray(programmer.requestorIds) && programmer.requestorIds.includes(requestorId)) {
+    state.selectedRequestorId = requestorId;
+    if (els.requestorSelect) {
+      els.requestorSelect.value = requestorId;
+    }
+    result.requestorRestored = true;
+    await populateMvpdSelectForRequestor(requestorId);
+  }
+
+  const mvpdId = String(snapshot?.mvpdId || "").trim();
+  if (result.requestorRestored && mvpdId && els.mvpdSelect) {
+    const mvpdAvailable = Array.from(els.mvpdSelect.options || []).some((option) => String(option?.value || "") === mvpdId);
+    if (mvpdAvailable) {
+      state.selectedMvpdId = mvpdId;
+      els.mvpdSelect.value = mvpdId;
+      result.mvpdRestored = true;
+    }
+  }
+
+  await refreshProgrammerPanels({
+    controllerReason: "environment-switch",
+    forcePremiumRefresh: true,
+  });
+
+  refreshRestV2LoginPanels();
+  const esmWorkspaceState = getActiveEsmWorkspaceState();
+  if (esmWorkspaceState) {
+    esmWorkspaceBroadcastControllerState(esmWorkspaceState);
+    syncEsmWorkspaceRecordingControls(esmWorkspaceState);
+  }
+  const degradationState = getActiveDegradationWorkspaceState();
+  if (degradationState) {
+    degradationSyncGoButtonLabel(degradationState);
+    syncDegradationWorkspaceRecordingControls(degradationState);
+  }
+  const cmState = getActiveCmState();
+  if (cmState) {
+    cmBroadcastControllerState(cmState);
+  }
+  const selectedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+  mvpdWorkspaceBroadcastSelectedControllerState(programmer, selectedServices);
+  refreshMvpdWorkspaceTools();
+  void mvpdWorkspaceRefreshSelectedSnapshot({
+    programmer,
+    services: selectedServices,
+    forceRefresh: result.requestorRestored,
+    onlyIfWorkspaceOpen: !result.requestorRestored,
+    surfaceMissingSelectionError: false,
+  });
+
+  return result;
+}
+
+async function switchAdobePassEnvironmentInPlace(environment = null, options = {}) {
+  const targetEnvironment = resolveAdobePassEnvironment(environment);
+  const targetEnvironmentKey =
+    String(targetEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const currentEnvironmentKey =
+    String(state?.adobePassEnvironmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  if (targetEnvironmentKey === currentEnvironmentKey) {
+    renderBuildInfo();
+    return {
+      ok: true,
+      changed: false,
+      environment: targetEnvironment,
+      sessionReady: state.sessionReady === true,
+    };
+  }
+  if (state.environmentSwitchPromise) {
+    return state.environmentSwitchPromise;
+  }
+
+  const switchPromise = (async () => {
+    const selectionSnapshot = captureAdobePassEnvironmentSwitchSelectionSnapshot();
+    const retainedLoginData =
+      state.loginData && typeof state.loginData === "object"
+        ? {
+            ...state.loginData,
+            cmConsoleAccessToken: "",
+            cmConsoleExpiresAt: 0,
+            cmConsoleScope: "",
+            cmConsoleImsSession: null,
+          }
+        : null;
+    const environmentLabel = String(targetEnvironment?.label || "selected environment").trim() || "selected environment";
+    let lastError = null;
+
+    state.sessionMonitorSuppressed = true;
+    setBusy(true, `Switching to ${environmentLabel}...`);
+    setStatus("", "info");
+
+    try {
+      try {
+        await maybeAutoStopRestV2RecordingForSelectionChange(
+          {
+            requestorId: "",
+            mvpdId: "",
+          },
+          {
+            reason: `Environment switch to ${environmentLabel}`,
+          }
+        );
+      } catch (error) {
+        log("REST V2 auto-stop skipped during environment switch", error instanceof Error ? error.message : String(error));
+      }
+
+      applyAdobePassEnvironment(targetEnvironment);
+      renderBuildInfo();
+      prepareAdobePassEnvironmentSwitchUi(targetEnvironment);
+      render();
+
+      let activated = false;
+      let activationSource = "none";
+      const accessToken = String(retainedLoginData?.accessToken || "").trim();
+
+      if (accessToken) {
+        try {
+          const entities = await fetchProgrammersFromApi({
+            accessToken,
+            requireEntities: false,
+          });
+          applyProgrammerEntities(entities);
+          state.loginData = retainedLoginData;
+          state.sessionReady = true;
+          state.restricted = false;
+          state.sessionMonitorConsecutiveInactiveDetections = 0;
+          state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
+          prefetchCmTenantsCatalogInBackground("environment-switch-token", { forceRefresh: false });
+          await saveLoginData(state.loginData);
+          scheduleNoTouchRefresh();
+          queueCmConsoleAutoHydration("environment-switch-token");
+          activated = true;
+          activationSource = "token";
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          log("AdobePASS environment token rehydrate failed", {
+            environmentKey: targetEnvironmentKey,
+            error: lastError.message,
+          });
+        }
+      }
+
+      if (!activated) {
+        state.loginData = null;
+        state.sessionReady = false;
+        try {
+          const cookieActivated = await tryActivateCookieSession("environment-switch", {
+            restrictOnDenied: false,
+          });
+          if (cookieActivated) {
+            activated = true;
+            activationSource = "cookie";
+          }
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+        }
+      }
+
+      if (!activated) {
+        try {
+          const silent = await attemptSilentBootstrapLogin();
+          if (silent) {
+            const silentActivated = await activateSession(silent, "environment-switch");
+            if (silentActivated) {
+              activated = true;
+              activationSource = "silent";
+            }
+          }
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+        }
+      }
+
+      if (!activated) {
+        state.loginData = retainedLoginData;
+        state.sessionReady = false;
+        state.restricted = false;
+        setStatus(`Sign in is required for ${environmentLabel}.`, "error");
+        render();
+        return {
+          ok: true,
+          changed: true,
+          requiresSignIn: true,
+          environment: targetEnvironment,
+          activationSource,
+          error: lastError instanceof Error ? lastError.message : lastError ? String(lastError) : "",
+        };
+      }
+
+      const restoreResult = await restoreAdobePassEnvironmentSwitchSelection(selectionSnapshot);
+      const missingSelectionLabel = String(restoreResult.missingSelection || "").trim();
+      if (missingSelectionLabel) {
+        setStatus(
+          `${missingSelectionLabel} is not available in ${environmentLabel}. Re-select the Media Company in this environment.`,
+          "error"
+        );
+      } else if (state.programmers.length === 0) {
+        setStatus("No media company records were returned for this account.", "error");
+      } else {
+        setStatus("", "info");
+      }
+
+      renderBuildInfo();
+      render();
+      return {
+        ok: true,
+        changed: true,
+        environment: targetEnvironment,
+        activationSource,
+        ...restoreResult,
+      };
+    } finally {
+      state.sessionMonitorSuppressed = false;
+      setBusy(false);
+      render();
+    }
+  })();
+
+  state.environmentSwitchPromise = switchPromise;
+  try {
+    return await switchPromise;
+  } finally {
+    if (state.environmentSwitchPromise === switchPromise) {
+      state.environmentSwitchPromise = null;
+    }
+  }
+}
+
+function registerAdobePassEnvironmentStorageListener() {
+  if (state.adobePassEnvironmentStorageListenerBound || !chrome?.storage?.onChanged?.addListener) {
+    return;
+  }
+  const storageKey = getAdobePassEnvironmentStorageKey();
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes || !Object.prototype.hasOwnProperty.call(changes, storageKey)) {
+      return;
+    }
+    const nextEnvironmentKey =
+      String(changes?.[storageKey]?.newValue || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+      DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+    if (nextEnvironmentKey === getActiveAdobePassEnvironmentKey()) {
+      renderBuildInfo();
+      return;
+    }
+    void switchAdobePassEnvironmentInPlace(nextEnvironmentKey, {
+      source: "storage-change",
+    }).catch((error) => {
+      setStatus(error instanceof Error ? error.message : String(error), "error");
+    });
+  });
+  state.adobePassEnvironmentStorageListenerBound = true;
+}
 const EXPERIENCE_CLOUD_EARLY_TOKEN_FILTER =
   '{"findFirst":true, "fallbackToAA":true, "preferForwardProfile":true}; hasPC("dma_tartan")';
 const EXPERIENCE_CLOUD_SILENT_PROFILE_FILTER =
@@ -679,8 +1354,8 @@ const CM_BASE_URL_CANDIDATES = [
 const CM_V2_API_BASE_DEFAULT = "https://streams-stage.adobeprimetime.com";
 const CM_IMS_CHECK_TOKEN_ENDPOINT = "https://adobeid-na1.services.adobe.com/ims/check/v6/token";
 const CM_IMS_PRIMARY_CLIENT_ID = "cm-console-ui";
-const CM_CONSOLE_APP_ORIGIN = "https://experience.adobe.com";
-const CM_CONSOLE_APP_REFERER = `${CM_CONSOLE_APP_ORIGIN}/`;
+let CM_CONSOLE_APP_ORIGIN = String(DEFAULT_ADOBEPASS_ENVIRONMENT.cmConsoleOrigin || "https://experience.adobe.com");
+let CM_CONSOLE_APP_REFERER = `${CM_CONSOLE_APP_ORIGIN}/`;
 const CM_REPORTS_APP_ORIGIN = "https://cdn.experience.adobe.net";
 const CM_REPORTS_APP_REFERER = `${CM_REPORTS_APP_ORIGIN}/`;
 const CM_IMS_CHECK_DEFAULT_SCOPE =
@@ -828,6 +1503,9 @@ const DEGRADATION_MEGA_STATUS_ENDPOINT_SPEC = {
 const DEGRADATION_API_VERSION = "3.0";
 
 const state = {
+  adobePassEnvironment: resolveAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key),
+  adobePassEnvironmentKey: DEFAULT_ADOBEPASS_ENVIRONMENT.key,
+  adobePassEnvironmentStorageListenerBound: false,
   busy: false,
   restricted: false,
   restrictedOrgOptions: [],
@@ -912,6 +1590,7 @@ const state = {
   consoleContextReady: false,
   consoleContextPromise: null,
   isBootstrapping: false,
+  environmentSwitchPromise: null,
   sessionMonitorIntervalId: 0,
   sessionMonitorStartTimeoutId: 0,
   sessionMonitorBusy: false,
@@ -999,6 +1678,8 @@ const els = {
   authBtn: document.getElementById("auth-btn"),
   status: document.getElementById("status"),
   buildInfo: document.getElementById("build-info"),
+  pageEnvBadge: document.getElementById("page-env-badge"),
+  pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
   restrictedView: document.getElementById("restricted-view"),
   restrictedOrgSelect: document.getElementById("restricted-org-select"),
   restrictedOrgHint: document.getElementById("restricted-org-hint"),
@@ -2138,22 +2819,27 @@ function encodeDevicePayload(value) {
 
 function getStableRestV2DeviceIdentifier() {
   try {
-    const cached = localStorage.getItem(REST_V2_DEVICE_ID_STORAGE_KEY);
+    const environmentKey = getActiveAdobePassEnvironmentKey();
+    const scopedStorageKey = getRestV2DeviceIdStorageKey(environmentKey);
+    const cached = localStorage.getItem(scopedStorageKey);
     if (cached) {
       return cached;
     }
 
-    const legacyCached = localStorage.getItem(LEGACY_REST_V2_DEVICE_ID_STORAGE_KEY);
-    if (legacyCached) {
-      localStorage.setItem(REST_V2_DEVICE_ID_STORAGE_KEY, legacyCached);
-      return legacyCached;
+    if (isProductionAdobePassEnvironmentKey(environmentKey)) {
+      const legacyCached =
+        localStorage.getItem(REST_V2_DEVICE_ID_STORAGE_KEY) || localStorage.getItem(LEGACY_REST_V2_DEVICE_ID_STORAGE_KEY);
+      if (legacyCached) {
+        localStorage.setItem(scopedStorageKey, legacyCached);
+        return legacyCached;
+      }
     }
 
     const generated =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
-    localStorage.setItem(REST_V2_DEVICE_ID_STORAGE_KEY, generated);
+    localStorage.setItem(scopedStorageKey, generated);
     return generated;
   } catch {
     return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -3113,7 +3799,7 @@ function resolveRestV2AppInfoForHarvest(harvest = null) {
     return null;
   }
 
-  const services = state.premiumAppsByProgrammerId.get(programmerId) || null;
+  const services = getCurrentPremiumAppsSnapshot(programmerId);
   const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(services);
   const appGuid = String(harvest.appGuid || "").trim();
   if (appGuid) {
@@ -3159,7 +3845,7 @@ function buildRestV2ContextFromHarvest(harvest = null) {
   const sessionCode = firstNonEmptyString([String(harvest.sessionCode || "").trim(), sessionCodeCandidates[0]]);
   const harvestMvpdName = String(harvest.mvpdName || "").trim();
   const cachedMvpdMeta =
-    requestorId && state.mvpdCacheByRequestor.has(requestorId) ? state.mvpdCacheByRequestor.get(requestorId)?.get(mvpd) || null : null;
+    requestorId ? getRequestorScopedMvpdCache(requestorId)?.get(mvpd) || null : null;
   const mvpdMeta = cachedMvpdMeta || (harvestMvpdName ? { id: mvpd, name: harvestMvpdName } : null);
   const appInfo = resolveRestV2AppInfoForHarvest(harvest);
   if (!programmerId || !requestorId || !serviceProviderId || !mvpd || !appInfo?.guid) {
@@ -6532,7 +7218,9 @@ function getRestV2SelectionKey(context) {
   if (!context?.ok) {
     return "";
   }
-  return [context.programmerId, context.requestorId, context.mvpd].map((value) => String(value || "").trim()).join("|");
+  return [getActiveAdobePassEnvironmentKey(), context.programmerId, context.requestorId, context.mvpd]
+    .map((value) => String(value || "").trim())
+    .join("|");
 }
 
 function isRestV2ProfileSessionActiveResult(profileCheckResult = null) {
@@ -6752,13 +7440,13 @@ function storeRestV2AuthContextForRequestor(context, selectedAppInfo) {
     return;
   }
 
-  const existing = state.restV2AuthContextByRequestor.get(context.requestorId) || {};
+  const existing = getRequestorScopedRestV2AuthContext(context.requestorId) || {};
   const existingCandidateGuids = Array.isArray(existing.candidateGuids) ? existing.candidateGuids : [];
   const contextCandidateGuids = Array.isArray(context.restV2AppCandidates)
     ? context.restV2AppCandidates.map((item) => item?.guid).filter(Boolean)
     : [];
 
-  state.restV2AuthContextByRequestor.set(context.requestorId, {
+  setRequestorScopedRestV2AuthContext(context.requestorId, {
     programmerId: context.programmerId,
     preferredAppGuid: selectedAppInfo.guid,
     candidateGuids: [...new Set([selectedAppInfo.guid, ...contextCandidateGuids, ...existingCandidateGuids])],
@@ -6918,66 +7606,10 @@ function getUPTraceViewerUrl(tabId, flowId = "", source = "test-mvpd-login") {
 }
 
 async function openOrFocusUPTraceViewerWithState(tabId, flowId = "", options = {}) {
-  const normalizedTabId = Number(tabId || 0);
-  if (!Number.isFinite(normalizedTabId) || normalizedTabId <= 0) {
-    return { ok: false, error: "Unable to open UP trace: missing target tab id." };
-  }
-
-  const traceTabStateKey = String(options.traceTabStateKey || "restV2TraceViewerTabId");
-  const traceWindowStateKey = String(options.traceWindowStateKey || "restV2TraceViewerWindowId");
-  const source = String(options.source || "test-mvpd-login");
-  const traceViewerUrl = getUPTraceViewerUrl(normalizedTabId, flowId, source);
-  const existingTraceViewerTabId = Number(state?.[traceTabStateKey] || 0);
-
-  if (Number.isFinite(existingTraceViewerTabId) && existingTraceViewerTabId > 0) {
-    try {
-      const existingTab = await chrome.tabs.get(existingTraceViewerTabId);
-      if (existingTab?.id) {
-        await chrome.tabs.update(existingTab.id, {
-          url: traceViewerUrl,
-          active: true,
-        });
-        if (Number.isFinite(Number(existingTab.windowId)) && Number(existingTab.windowId) > 0) {
-          await chrome.windows.update(Number(existingTab.windowId), { focused: true });
-          state[traceWindowStateKey] = Number(existingTab.windowId);
-        }
-        state[traceTabStateKey] = Number(existingTab.id);
-        return {
-          ok: true,
-          reused: true,
-          tabId: Number(existingTab.id),
-          windowId: Number(existingTab.windowId || 0),
-        };
-      }
-    } catch {
-      state[traceTabStateKey] = 0;
-      state[traceWindowStateKey] = 0;
-    }
-  }
-
-  try {
-    const createdTab = await chrome.tabs.create({
-      url: traceViewerUrl,
-      active: true,
-    });
-    state[traceTabStateKey] =
-      Number.isFinite(Number(createdTab?.id)) && Number(createdTab.id) > 0 ? Number(createdTab.id) : 0;
-    state[traceWindowStateKey] =
-      Number.isFinite(Number(createdTab?.windowId)) && Number(createdTab.windowId) > 0 ? Number(createdTab.windowId) : 0;
-
-    return {
-      ok: true,
-      reused: false,
-      tabId: Number(state[traceTabStateKey] || 0),
-      windowId: Number(state[traceWindowStateKey] || 0),
-      mode: "tab",
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Unable to open UP trace viewer.",
-    };
-  }
+  return {
+    ok: false,
+    error: "UP DevTools is now reserved for Settings. Use Chrome Network for request traces.",
+  };
 }
 
 async function openOrFocusUPTraceViewer(tabId, flowId = "") {
@@ -7146,7 +7778,7 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
     return { ok: false, reason: "Select an MVPD to enable REST V2 test login." };
   }
 
-  const premiumApps = state.premiumAppsByProgrammerId.get(resolvedProgrammer.programmerId) || null;
+  const premiumApps = getCurrentPremiumAppsSnapshot(resolvedProgrammer.programmerId);
   const baseCandidates = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
   const byGuid = new Map();
   baseCandidates.forEach((item) => {
@@ -7154,11 +7786,12 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
       byGuid.set(item.guid, item);
     }
   });
-  if (appInfoOverride?.guid && !byGuid.has(appInfoOverride.guid)) {
+  const allowAppOverride = Boolean(appInfoOverride?.guid) && baseCandidates.some((item) => item?.guid === appInfoOverride.guid);
+  if (allowAppOverride && appInfoOverride?.guid && !byGuid.has(appInfoOverride.guid)) {
     byGuid.set(appInfoOverride.guid, appInfoOverride);
   }
 
-  const cachedAuthContext = state.restV2AuthContextByRequestor.get(requestorId) || null;
+  const cachedAuthContext = getRequestorScopedRestV2AuthContext(requestorId);
   const orderedCandidates = [];
   const pushCandidate = (item) => {
     if (!item?.guid || orderedCandidates.some((entry) => entry.guid === item.guid)) {
@@ -7183,7 +7816,7 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
     resolvedProgrammer.programmerId
   );
   pushCandidate(mappingPreferred);
-  pushCandidate(appInfoOverride);
+  pushCandidate(allowAppOverride ? appInfoOverride : null);
   baseCandidates.forEach((item) => pushCandidate(item));
 
   const resolvedApp =
@@ -7202,7 +7835,7 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
     };
   }
 
-  const mvpdMeta = state.mvpdCacheByRequestor.get(requestorId)?.get(mvpd) || null;
+  const mvpdMeta = getRequestorScopedMvpdCache(requestorId)?.get(mvpd) || null;
   return {
     ok: true,
     programmerId: resolvedProgrammer.programmerId,
@@ -7223,8 +7856,8 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
     return null;
   }
   const cacheMeta =
-    normalizedRequestorId && state.mvpdCacheByRequestor.has(normalizedRequestorId)
-      ? state.mvpdCacheByRequestor.get(normalizedRequestorId)?.get(normalizedMvpdId) || null
+    normalizedRequestorId
+      ? getRequestorScopedMvpdCache(normalizedRequestorId)?.get(normalizedMvpdId) || null
       : null;
   const resolvedMeta = mvpdMeta && typeof mvpdMeta === "object" ? mvpdMeta : cacheMeta;
   return resolvedMeta && typeof resolvedMeta === "object" ? resolvedMeta : null;
@@ -8857,7 +9490,7 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
   const identityHints = collectRestV2IdentityHintsFromHarvest(previousHarvest);
   const cachedMvpdMeta =
     String(context?.requestorId || "").trim() && String(context?.mvpd || "").trim()
-      ? state.mvpdCacheByRequestor.get(String(context.requestorId || "").trim())?.get(String(context.mvpd || "").trim()) || null
+      ? getRequestorScopedMvpdCache(String(context.requestorId || "").trim())?.get(String(context.mvpd || "").trim()) || null
       : null;
   const likelySsoContext = isRestV2LikelyPartnerSsoContext(context);
   const preferredSummaryOptions = {
@@ -8921,7 +9554,9 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
   ]);
   const cachedMvpdName =
     String(context?.requestorId || "").trim() && String(mvpd || "").trim()
-      ? String(state.mvpdCacheByRequestor.get(String(context.requestorId || "").trim())?.get(String(mvpd || "").trim())?.name || "").trim()
+      ? String(
+          getRequestorScopedMvpdCache(String(context.requestorId || "").trim())?.get(String(mvpd || "").trim())?.name || ""
+        ).trim()
       : "";
   const mvpdName = firstNonEmptyString([
     String(context?.mvpdMeta?.name || "").trim(),
@@ -10120,7 +10755,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
     if (endpointKey === "profiles-all" && selectedMvpd) {
       const cachedMvpdMeta =
         String(context?.requestorId || "").trim() && selectedMvpd
-          ? state.mvpdCacheByRequestor.get(String(context.requestorId || "").trim())?.get(selectedMvpd) || null
+          ? getRequestorScopedMvpdCache(String(context.requestorId || "").trim())?.get(selectedMvpd) || null
           : null;
       const selectedAliases = dedupeRestV2CandidateStrings([
         selectedMvpd,
@@ -12176,7 +12811,7 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
 
         const selectedProgrammer = resolveSelectedProgrammer();
         if (selectedProgrammer?.programmerId && selectedProgrammer.programmerId === recordingContext.programmerId) {
-          const selectedServices = state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null;
+          const selectedServices = getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId);
           cmBroadcastSelectedControllerState(selectedProgrammer, selectedServices);
           const activeCmState = getActiveCmState();
           if (activeCmState && String(activeCmState.programmer?.programmerId || "") === String(selectedProgrammer.programmerId)) {
@@ -12485,60 +13120,19 @@ function clickEsmGetZoomKey(endpoint) {
   return detected;
 }
 
-function clickEsmIso(date) {
-  return new Date(date).toISOString().replace(/\.\d{3}Z$/, "Z");
-}
-
-function clickEsmShiftInstantToPstCalendar(date) {
-  return new Date(date.getTime() + ESM_SOURCE_UTC_OFFSET_MINUTES * 60 * 1000);
-}
-
-function clickEsmComputeTimeWindow(zoomKey) {
-  const now = new Date();
-  const nowPst = clickEsmShiftInstantToPstCalendar(now);
-
-  if (zoomKey === "YR") {
-    return {
-      start: String(nowPst.getUTCFullYear() - 1),
-      end: clickEsmIso(now),
-    };
+function stripServerManagedTimeParams(urlValue, baseUrl = window.location.href) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
   }
-
-  if (zoomKey === "MO") {
-    const previousMonth = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth() - 1, 1));
-    return {
-      start: `${previousMonth.getUTCFullYear()}-${String(previousMonth.getUTCMonth() + 1).padStart(2, "0")}`,
-      end: clickEsmIso(now),
-    };
+  try {
+    const parsed = new URL(raw, baseUrl);
+    parsed.searchParams.delete("start");
+    parsed.searchParams.delete("end");
+    return parsed.toString();
+  } catch {
+    return raw;
   }
-
-  if (zoomKey === "DAY") {
-    const previousDay = new Date(
-      Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth(), nowPst.getUTCDate() - 1)
-    );
-    return {
-      start: `${previousDay.getUTCFullYear()}-${String(previousDay.getUTCMonth() + 1).padStart(2, "0")}-${String(
-        previousDay.getUTCDate()
-      ).padStart(2, "0")}`,
-      end: clickEsmIso(now),
-    };
-  }
-
-  if (zoomKey === "HR") {
-    return {
-      start: clickEsmIso(new Date(now.getTime() - 12 * 60 * 60 * 1000)),
-      end: clickEsmIso(now),
-    };
-  }
-
-  if (zoomKey === "MIN") {
-    return {
-      start: clickEsmIso(new Date(now.getTime() - 60 * 60 * 1000)),
-      end: clickEsmIso(now),
-    };
-  }
-
-  return { start: clickEsmIso(now), end: clickEsmIso(now) };
 }
 
 function clickEsmGetSelectedValues(selectElement) {
@@ -12743,7 +13337,7 @@ async function loadClickEsmEndpoints() {
         if (!endpoint || typeof endpoint !== "object") {
           return null;
         }
-        const url = String(endpoint.url || "").trim();
+        const url = rewriteAdobePassServiceUrl(String(endpoint.url || "").trim(), "mgmt");
         if (!url) {
           return null;
         }
@@ -13064,16 +13658,10 @@ function cmBuildUsageReportExampleRequestUrl(example = null, options = {}) {
     return "";
   }
   try {
-    const parsed = new URL(baseUrl, CM_REPORTS_BASE_URL);
+    const parsed = new URL(stripServerManagedTimeParams(baseUrl, CM_REPORTS_BASE_URL), CM_REPORTS_BASE_URL);
+    parsed.searchParams.delete("start");
+    parsed.searchParams.delete("end");
     parsed.searchParams.set("format", "json");
-    const zoomKey = cmuUsageGetZoomKey(cmExtractRawUsagePathParts(parsed.pathname), parsed.toString());
-    const timeWindow = clickEsmComputeTimeWindow(zoomKey);
-    if (!parsed.searchParams.has("start")) {
-      parsed.searchParams.set("start", String(timeWindow?.start || clickEsmIso(new Date())));
-    }
-    if (!parsed.searchParams.has("end")) {
-      parsed.searchParams.set("end", String(timeWindow?.end || clickEsmIso(new Date())));
-    }
     if (tenantScope) {
       applyCmUsageTenantScopeToSearchParams(parsed.searchParams, tenantScope);
     }
@@ -13311,7 +13899,7 @@ function buildClickEsmHtmlFromTemplate(templateHtml, context = {}) {
       .filter(Boolean)
   );
   const encodedRequestorCatalog = encodeURIComponent(JSON.stringify(requestorCatalog));
-  let output = clickEsmReplaceTitleHotspot(templateHtml, titleText);
+  let output = clickEsmReplaceTitleHotspot(rewriteAdobePassTemplateForEnvironment(templateHtml), titleText);
   output = clickEsmReplaceHiddenInputHotspot(output, "cid", context.clientId, CLICK_ESM_TEMPLATE_PLACEHOLDER_CID);
   output = clickEsmReplaceHiddenInputHotspot(output, "csc", context.clientSecret, CLICK_ESM_TEMPLATE_PLACEHOLDER_CSC);
   output = clickEsmReplaceHiddenInputHotspot(
@@ -13392,10 +13980,8 @@ async function resolveClickEsmDownloadContext(esmWorkspaceState = null) {
     return null;
   }
 
-  const selectedServices = state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null;
-  const cachedEsmApp = hasEsmScopedApp(selectedServices) ? selectedServices.esm : null;
-  const controllerEsmApp = esmWorkspaceState?.appInfo?.guid ? esmWorkspaceState.appInfo : null;
-  const esmApp = cachedEsmApp || controllerEsmApp;
+  const selectedServices = getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId);
+  const esmApp = hasEsmScopedApp(selectedServices) ? selectedServices.esm : null;
   if (!esmApp?.guid) {
     return null;
   }
@@ -13430,14 +14016,12 @@ async function resolveClickEsmAuthContext(context, requestToken, options = {}) {
     throw new Error("Selected media company changed. Retry export with the active selection.");
   }
 
-  const selectedServices = state.premiumAppsByProgrammerId.get(programmer.programmerId) || null;
+  const selectedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
   const selectedEsmApp = hasEsmScopedApp(selectedServices) ? selectedServices.esm : null;
-  if (!selectedEsmApp?.guid && !appInfo?.guid) {
+  if (!selectedEsmApp?.guid) {
     throw new Error("ESM application details are required to generate clickESM.");
   }
-  if (selectedEsmApp?.guid && (!appInfo?.guid || appInfo.guid !== selectedEsmApp.guid)) {
-    appInfo = selectedEsmApp;
-  }
+  appInfo = selectedEsmApp;
 
   if (
     context?.section &&
@@ -13590,7 +14174,7 @@ function buildClickDgrHtmlFromTemplate(templateHtml, context = {}) {
   ).trim();
   const defaultMvpdId = String(context.defaultMvpdId || "").trim();
   const encodedRequestorCatalog = encodeURIComponent(JSON.stringify(requestorCatalog));
-  let output = clickEsmReplaceTitleHotspot(templateHtml, titleText);
+  let output = clickEsmReplaceTitleHotspot(rewriteAdobePassTemplateForEnvironment(templateHtml), titleText);
   output = clickEsmReplaceHiddenInputHotspot(output, "cid", context.clientId, CLICK_DGR_TEMPLATE_PLACEHOLDER_CID);
   output = clickEsmReplaceHiddenInputHotspot(output, "csc", context.clientSecret, CLICK_DGR_TEMPLATE_PLACEHOLDER_CSC);
   output = clickEsmReplaceHiddenInputHotspot(
@@ -13655,20 +14239,17 @@ async function resolveClickDgrDownloadContext(panelState = null) {
     return null;
   }
 
-  const selectedServices = state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null;
-  const cachedDegradationApp = Boolean(String(selectedServices?.degradation?.guid || "").trim())
-    ? selectedServices.degradation
-    : null;
-  const controllerDegradationApp = panelState?.appInfo?.guid ? panelState.appInfo : null;
+  const selectedServices = getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId);
+  const cachedDegradationApp = Boolean(String(selectedServices?.degradation?.guid || "").trim()) ? selectedServices.degradation : null;
   const requestorId = String(globalSelections.requestorIds[0] || state.selectedRequestorId || "").trim();
   const degradationAppCandidates = resolveDegradationAppCandidates(
     selectedProgrammer.programmerId,
-    cachedDegradationApp || controllerDegradationApp,
+    cachedDegradationApp,
     {
       requestorId,
     }
   );
-  const degradationApp = degradationAppCandidates[0] || cachedDegradationApp || controllerDegradationApp;
+  const degradationApp = degradationAppCandidates[0] || cachedDegradationApp;
   if (!degradationApp?.guid) {
     return null;
   }
@@ -13714,7 +14295,7 @@ async function resolveClickDgrAuthContext(context, requestToken, options = {}) {
     throw new Error("DEGRADATION controller is no longer active for the selected media company.");
   }
 
-  const selectedServices = state.premiumAppsByProgrammerId.get(programmer.programmerId) || null;
+  const selectedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
   const requestorId = String(context?.defaultRequestorId || context?.requestorIds?.[0] || state.selectedRequestorId || "").trim();
   const degradationAppCandidates = resolveDegradationAppCandidates(
     programmer.programmerId,
@@ -13803,19 +14384,17 @@ function ensureCmUsageEndpointFormat(url, options = {}) {
     getCmTenantScopeForProgrammer({ programmerId: String(options?.programmerId || "").trim() })
   );
   try {
-    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+    const parsed = new URL(stripServerManagedTimeParams(raw, CM_REPORTS_BASE_URL), CM_REPORTS_BASE_URL);
     const canonicalPath = canonicalizeCmuUsagePath(parsed.pathname);
     if (canonicalPath) {
       parsed.pathname = canonicalPath;
     }
+    parsed.searchParams.delete("start");
+    parsed.searchParams.delete("end");
     if (!parsed.searchParams.has("format")) {
       parsed.searchParams.set("format", "json");
     }
     if (isCanonicalCmuUsagePath(parsed.pathname)) {
-      const zoomKey = cmuUsageGetZoomKey(cmuUsageExtractPathParts(parsed.pathname), parsed.toString());
-      const timeWindow = clickEsmComputeTimeWindow(zoomKey);
-      parsed.searchParams.set("start", String(timeWindow?.start || clickEsmIso(new Date())));
-      parsed.searchParams.set("end", String(timeWindow?.end || clickEsmIso(new Date())));
       if (!parsed.searchParams.has("metrics")) {
         const lowerPath = String(parsed.pathname || "").toLowerCase();
         if (lowerPath.includes("/tenant") || lowerPath.includes("/hour")) {
@@ -14601,14 +15180,6 @@ body[data-theme="dark"]{
     return yyyy + "-" + mm + "-" + dd + "T" + hh + ":" + mi + ":" + ss;
   }
 
-  function formatCmuIsoValue(date) {
-    return new Date(date).toISOString().replace(/\\.\\d{3}Z$/, "Z");
-  }
-
-  function shiftInstantToPstCalendar(date) {
-    return new Date(date.getTime() + (${ESM_SOURCE_UTC_OFFSET_MINUTES} * 60 * 1000));
-  }
-
   function normalizeCmuZoomToken(value = "") {
     const normalized = String(value || "")
       .trim()
@@ -14693,60 +15264,6 @@ body[data-theme="dark"]{
     return "";
   }
 
-  function computeCmuTimeWindowForZoom(zoomKey = "") {
-    const normalizedZoom = String(zoomKey || "").trim().toUpperCase();
-    const now = new Date();
-    const nowPst = shiftInstantToPstCalendar(now);
-    const nowIso = formatCmuIsoValue(now);
-
-    if (normalizedZoom === "YR") {
-      return {
-        start: String(nowPst.getUTCFullYear() - 1),
-        end: nowIso,
-      };
-    }
-
-    if (normalizedZoom === "MO") {
-      const previousMonth = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth() - 1, 1));
-      return {
-        start: String(previousMonth.getUTCFullYear()) + "-" + String(previousMonth.getUTCMonth() + 1).padStart(2, "0"),
-        end: nowIso,
-      };
-    }
-
-    if (normalizedZoom === "DAY") {
-      const previousDay = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth(), nowPst.getUTCDate() - 1));
-      return {
-        start:
-          String(previousDay.getUTCFullYear()) +
-          "-" +
-          String(previousDay.getUTCMonth() + 1).padStart(2, "0") +
-          "-" +
-          String(previousDay.getUTCDate()).padStart(2, "0"),
-        end: nowIso,
-      };
-    }
-
-    if (normalizedZoom === "HR") {
-      return {
-        start: formatCmuIsoValue(new Date(now.getTime() - 24 * 60 * 60 * 1000)),
-        end: "",
-      };
-    }
-
-    if (normalizedZoom === "MIN") {
-      return {
-        start: formatCmuIsoValue(new Date(now.getTime() - 60 * 60 * 1000)),
-        end: nowIso,
-      };
-    }
-
-    return {
-      start: nowIso,
-      end: nowIso,
-    };
-  }
-
   const CMU_TENANT_QUERY_KEYS = ["tenant", "tenant_id", "tenant-id"];
   const CMU_USAGE_ROOT_SEGMENTS = ["year", "tenant"];
   const CMU_USAGE_ROOT_SEGMENT_SET = new Set(CMU_USAGE_ROOT_SEGMENTS);
@@ -14812,14 +15329,10 @@ body[data-theme="dark"]{
       if (canonicalPath) {
         parsed.pathname = canonicalPath;
       }
+      parsed.searchParams.delete("start");
+      parsed.searchParams.delete("end");
       if (!parsed.searchParams.has("format")) {
         parsed.searchParams.set("format", "json");
-      }
-      const effectivePath = canonicalPath || parsed.pathname;
-      if (isCmuUsagePath(effectivePath)) {
-        const timeWindow = computeCmuTimeWindowForZoom(getCmuZoomKeyFromPath(effectivePath, raw));
-        parsed.searchParams.set("start", String(timeWindow.start || formatCmuIsoValue(new Date())));
-        parsed.searchParams.set("end", String(timeWindow.end || formatCmuIsoValue(new Date())));
       }
       const limit = Number(limitValue);
       if (!parsed.searchParams.has("limit") && Number.isFinite(limit) && limit > 0) {
@@ -15393,7 +15906,7 @@ function buildClickCmuHtmlFromTemplate(templateHtml, context = {}) {
   output = output.replace(/<title[\s\S]*?<\/title>/i, `<title>${escapeHtml(titleText)}</title>`);
   output = replaceClickCmuEndpointBlock(output, buildClickCmuEndpointDlMarkup(endpointCatalog, tenantScope));
   output = output
-    .replace("placeholder=\"ESM Column search...\"", "placeholder=\"CMU Column search...\"")
+    .replace("placeholder=\"find\"", "placeholder=\"CMU Column search...\"")
     .replace("Hard reset clickESM2 to first-run state", "Hard reset clickCMU to first-run state")
     .replaceAll("ESM table", "CMU table")
     .replaceAll("ESM URL", "CMU URL");
@@ -15657,7 +16170,7 @@ async function resolveClickCmuDownloadContext(cmState = null, options = {}) {
   if (cmState && stateProgramId && stateProgramId !== programId) {
     return null;
   }
-  const selectedServices = state.premiumAppsByProgrammerId.get(programId) || null;
+  const selectedServices = getCurrentPremiumAppsSnapshot(programId);
   const isMvpdState =
     String(cmState?.serviceType || "").trim().toLowerCase() === "cmmvpd" ||
     String(cmState?.workspaceKey || "").trim().toLowerCase() === "mvpd";
@@ -16043,16 +16556,6 @@ function esmWorkspaceApplyChipColor(chipElement, segment) {
   chipElement.style.setProperty("--esm-workspace-seg-active-rgb", tones.activeRgb);
 }
 
-function esmWorkspaceApplyTreemapTileColor(tileElement, segment) {
-  if (!tileElement) {
-    return;
-  }
-  const tones = zipResolveNodeToneSet(segment);
-  tileElement.style.setProperty("--tile-rest-rgb", tones.restRgb);
-  tileElement.style.setProperty("--tile-hot-rgb", tones.hotRgb);
-  tileElement.style.setProperty("--tile-active-rgb", tones.activeRgb);
-}
-
 function esmWorkspaceCompareSegments(left, right) {
   const rank = {
     year: 0,
@@ -16268,6 +16771,9 @@ function esmWorkspaceGetControllerStatePayload(esmWorkspaceState) {
   };
   const profileHarvest = getRestV2ProfileHarvestForContext(profileHarvestContext);
   const profileHarvestList = getRestV2ProfileHarvestBucketForProgrammer(profileHarvestContext.programmerId);
+  const adobePassEnvironment = {
+    ...getActiveAdobePassEnvironment(),
+  };
   return {
     controllerOnline: Boolean(esmWorkspaceState?.section?.isConnected),
     esmAvailable: true,
@@ -16275,6 +16781,7 @@ function esmWorkspaceGetControllerStatePayload(esmWorkspaceState) {
     esmContainerVisible: true,
     programmerId: String(esmWorkspaceState?.programmer?.programmerId || ""),
     programmerName: String(esmWorkspaceState?.programmer?.programmerName || ""),
+    adobePassEnvironment,
     requestorIds,
     mvpdIds,
     controllerStateVersion: nextEsmWorkspaceControllerStateVersion(),
@@ -16339,6 +16846,9 @@ function esmWorkspaceGetSelectedControllerStatePayload(programmer = null, servic
   };
   const profileHarvest = getRestV2ProfileHarvestForContext(profileHarvestContext);
   const profileHarvestList = getRestV2ProfileHarvestBucketForProgrammer(profileHarvestContext.programmerId);
+  const adobePassEnvironment = {
+    ...getActiveAdobePassEnvironment(),
+  };
 
   return {
     controllerOnline: false,
@@ -16347,6 +16857,7 @@ function esmWorkspaceGetSelectedControllerStatePayload(programmer = null, servic
     esmContainerVisible,
     programmerId: String(resolvedProgrammer?.programmerId || ""),
     programmerName: String(resolvedProgrammer?.programmerName || ""),
+    adobePassEnvironment,
     requestorIds,
     mvpdIds,
     controllerStateVersion: nextEsmWorkspaceControllerStateVersion(),
@@ -16546,10 +17057,13 @@ function scoreDebuggableWebTab(tab = null, preferredWindowId = 0) {
   if (url.includes("experience.adobe.com/#/@adobepass") || url.includes("experience.adobe.com/?shell_ims=prod#/@adobepass")) {
     score += 550;
   }
+  if (url.includes("experience-stage.adobe.com/#/@adobepass") || url.includes("experience-stage.adobe.com/?shell_ims=prod#/@adobepass")) {
+    score += 550;
+  }
   if (
     url.includes("experience.adobe.com") ||
-    url.includes("sp.auth.adobe.com") ||
-    url.includes("api.auth.adobe.com") ||
+    url.includes("experience-stage.adobe.com") ||
+    /(?:sp|api)\.auth(?:-staging)?\.adobe\.com/i.test(url) ||
     url.includes("config.adobeprimetime.com") ||
     url.includes("cm-reports.adobeprimetime.com")
   ) {
@@ -17195,15 +17709,13 @@ function esmWorkspaceEndNetwork(esmWorkspaceState) {
 }
 
 function esmWorkspaceBuildEndpointUrl(esmWorkspaceState, endpoint) {
-  const zoomKey = clickEsmGetZoomKey(endpoint);
-  const timeWindow = clickEsmComputeTimeWindow(zoomKey);
   const selections = getGlobalRequestorMvpdSelections();
   const requestorIds = selections.requestorIds;
   const mvpdIds = selections.mvpdIds;
 
-  const parsed = new URL(endpoint.url);
-  parsed.searchParams.set("start", timeWindow.start);
-  parsed.searchParams.set("end", timeWindow.end);
+  const parsed = new URL(stripServerManagedTimeParams(endpoint.url));
+  parsed.searchParams.delete("start");
+  parsed.searchParams.delete("end");
   parsed.searchParams.set("format", "json");
   parsed.searchParams.delete("requestor-id");
   parsed.searchParams.delete("mvpd");
@@ -17827,10 +18339,10 @@ function esmWorkspaceBuildShellHtml() {
   }).join("");
 
   return `
-    <div class="esm-workspace-shell">
+    <div class="esm-workspace-shell esm-jelly-shell">
       <div class="esm-workspace-toolbar">
         <select class="esm-workspace-zoom-filter" title="Zoom Level">${zoomOptions}</select>
-        <input type="text" class="esm-workspace-search" placeholder="ESM Column search..." />
+        <input type="text" class="esm-workspace-search" placeholder="find" />
         <button type="button" class="esm-workspace-reset-btn">RESET</button>
         <div class="esm-workspace-toolbar-recording-actions esm-workspace-recording-actions">
           <button
@@ -17862,26 +18374,6 @@ function esmWorkspaceBuildShellHtml() {
         </div>
         <div class="esm-workspace-tree-scroll" hidden>
           <div class="esm-workspace-tree-root"></div>
-        </div>
-      </div>
-      <div class="esm-workspace-treemap-panel">
-        <div class="esm-workspace-treemap-head">
-          <button type="button" class="cmu-jelly-panel-toggle esm-workspace-treemap-toggle" aria-expanded="false">
-            <span class="cmu-jelly-panel-toggle-icon" aria-hidden="true">▾</span>
-            <span class="esm-workspace-treemap-title">TreeMap</span>
-          </button>
-          <button
-            type="button"
-            class="cmu-jelly-panel-load-all esm-workspace-treemap-load-all"
-            aria-label="Load all visible TreeMap endpoints into ESM Workspace"
-            title="Load all visible TreeMap endpoints into ESM Workspace"
-            disabled
-          >
-            <span class="cmu-jelly-panel-count esm-workspace-treemap-count">0</span>
-          </button>
-        </div>
-        <div class="esm-workspace-treemap-scroll" hidden>
-          <div class="esm-workspace-treemap-root"></div>
         </div>
       </div>
       <div class="esm-workspace-footer">
@@ -18190,7 +18682,6 @@ function esmWorkspaceSyncPanelLoadAllButtons(esmWorkspaceState, endpointIndexes 
     }
   };
   setCount(esmWorkspaceState?.treeCountElement);
-  setCount(esmWorkspaceState?.treemapCountElement);
 
   const setButtonState = (button) => {
     if (!button) {
@@ -18205,240 +18696,6 @@ function esmWorkspaceSyncPanelLoadAllButtons(esmWorkspaceState, endpointIndexes 
     }
   };
   setButtonState(esmWorkspaceState?.treeLoadAllButton);
-  setButtonState(esmWorkspaceState?.treemapLoadAllButton);
-}
-
-function esmWorkspaceBuildTreemapModel(catalog, endpointIndexes) {
-  const root = {
-    key: "",
-    pathParts: [],
-    endpointIndex: null,
-    children: new Map(),
-    count: 0,
-  };
-
-  const normalizedIndexes = [...new Set(
-    (Array.isArray(endpointIndexes) ? endpointIndexes : [])
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value) && value >= 0 && value < catalog.length)
-  )];
-
-  normalizedIndexes.forEach((endpointIndex) => {
-    const endpoint = catalog[endpointIndex];
-    if (!endpoint) {
-      return;
-    }
-    let cursor = root;
-    const segments = esmWorkspaceNormalizeEndpointSegments(endpoint?.segs);
-    if (segments.length === 0) {
-      return;
-    }
-    segments.forEach((rawSegment) => {
-      const segment = String(rawSegment || "").trim();
-      if (!segment) {
-        return;
-      }
-      if (!cursor.children.has(segment)) {
-        cursor.children.set(segment, {
-          key: segment,
-          pathParts: [...cursor.pathParts, segment],
-          endpointIndex: null,
-          children: new Map(),
-          count: 0,
-        });
-      }
-      cursor = cursor.children.get(segment);
-    });
-    cursor.endpointIndex = endpointIndex;
-  });
-
-  const finalize = (node) => {
-    const childNodes = [...node.children.values()].sort((left, right) => esmWorkspaceCompareSegments(left.key, right.key));
-    node.children = childNodes.map((child) => finalize(child));
-    let endpointCount = node.endpointIndex != null ? 1 : 0;
-    node.children.forEach((child) => {
-      endpointCount += Number(child.count || 0);
-    });
-    node.count = endpointCount;
-    return node;
-  };
-
-  return finalize(root);
-}
-
-function esmWorkspaceFlattenTreemapNodes(model) {
-  const output = [];
-  const walk = (node) => {
-    if (!node || !Array.isArray(node.children)) {
-      return;
-    }
-    node.children.forEach((child) => {
-      const pathParts = Array.isArray(child.pathParts)
-        ? child.pathParts
-            .slice()
-            .map((value) => String(value || "").trim())
-            .filter(Boolean)
-        : [String(child.key || "").trim()].filter(Boolean);
-      if (pathParts.length === 0) {
-        walk(child);
-        return;
-      }
-      output.push({
-        key: String(child.key || "").trim(),
-        pathParts,
-        depth: pathParts.length,
-        endpointIndex: child.endpointIndex != null ? Number(child.endpointIndex) : null,
-        count: Number(child.count || 0),
-      });
-      walk(child);
-    });
-  };
-
-  walk(model);
-  output.sort((left, right) => {
-    const depthDelta = Number(left.depth || 0) - Number(right.depth || 0);
-    if (depthDelta !== 0) {
-      return depthDelta;
-    }
-    return left.pathParts
-      .join("/")
-      .localeCompare(right.pathParts.join("/"), undefined, { sensitivity: "base" });
-  });
-  return output;
-}
-
-function esmWorkspaceCreateTreemapTile(esmWorkspaceState, nodeEntry, requestToken) {
-  const tile = document.createElement("article");
-  tile.className = "esm-workspace-map-tile";
-  tile.dataset.depth = String(Math.max(1, Number(nodeEntry?.depth || 1)));
-  esmWorkspaceApplyTreemapTileColor(tile, nodeEntry?.key);
-
-  const endpoint =
-    nodeEntry?.endpointIndex != null && Number.isInteger(nodeEntry.endpointIndex)
-      ? esmWorkspaceState.catalog[nodeEntry.endpointIndex]
-      : null;
-  if (endpoint) {
-    tile.classList.add("esm-workspace-map-leaf");
-  }
-
-  const content = document.createElement("div");
-  content.className = "esm-workspace-map-content";
-
-  const name = document.createElement("div");
-  name.className = "esm-workspace-map-name";
-  name.textContent = nodeEntry?.key || "node";
-  name.title = Array.isArray(nodeEntry?.pathParts) ? nodeEntry.pathParts.join("/") : "";
-  content.appendChild(name);
-
-  const parent = document.createElement("div");
-  parent.className = "esm-workspace-map-parent";
-  const parentParts = Array.isArray(nodeEntry?.pathParts) ? nodeEntry.pathParts.slice(0, -1) : [];
-  parent.textContent = parentParts.join(" / ");
-  parent.title = parentParts.join("/");
-  parent.hidden = parentParts.length === 0;
-  content.appendChild(parent);
-
-  const meta = document.createElement("div");
-  meta.className = "esm-workspace-map-meta";
-  if (endpoint?.zoomKey) {
-    meta.textContent = `[${endpoint.zoomKey}]`;
-  } else {
-    const endpointCount = Number(nodeEntry?.count || 0);
-    meta.textContent = `${endpointCount} endpoint${endpointCount === 1 ? "" : "s"}`;
-  }
-  content.appendChild(meta);
-  tile.appendChild(content);
-
-  if (endpoint) {
-    tile.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void esmWorkspaceRunEndpointFromUi(esmWorkspaceState, endpoint, requestToken, "treemap");
-    });
-  }
-
-  return tile;
-}
-
-function esmWorkspaceRenderTreemap(esmWorkspaceState, endpointIndexes, options = {}) {
-  const treemapRoot = esmWorkspaceState?.treemapRootElement;
-  if (!treemapRoot) {
-    return;
-  }
-  const requestToken = Number(options.requestToken || esmWorkspaceState?.requestToken || state.premiumPanelRequestToken || 0);
-  const endpointList = [...new Set(
-    (Array.isArray(endpointIndexes) ? endpointIndexes : [])
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value) && value >= 0)
-  )];
-  const model = esmWorkspaceBuildTreemapModel(esmWorkspaceState.catalog, endpointList);
-  const onlyRunnable = options.onlyRunnable === true;
-  const nodeEntries = esmWorkspaceFlattenTreemapNodes(model).filter((nodeEntry) => {
-    if (!onlyRunnable) {
-      return true;
-    }
-    return Number.isInteger(nodeEntry?.endpointIndex) && nodeEntry.endpointIndex >= 0;
-  });
-  treemapRoot.innerHTML = "";
-
-  if (!model || nodeEntries.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "esm-workspace-treemap-empty";
-    empty.textContent = "No endpoints match current zoom/search filters.";
-    treemapRoot.appendChild(empty);
-  } else {
-    const groupedByDepth = new Map();
-    nodeEntries.forEach((nodeEntry) => {
-      const depth = Math.max(1, Number(nodeEntry.depth || 1));
-      if (!groupedByDepth.has(depth)) {
-        groupedByDepth.set(depth, []);
-      }
-      groupedByDepth.get(depth).push(nodeEntry);
-    });
-
-    [...groupedByDepth.keys()].sort((left, right) => left - right).forEach((depth) => {
-      const depthNodes = groupedByDepth.get(depth) || [];
-      const band = document.createElement("section");
-      band.className = "esm-workspace-map-depth-band";
-      band.dataset.depth = String(depth);
-
-      const bandHead = document.createElement("div");
-      bandHead.className = "esm-workspace-map-depth-head";
-      const depthLabel = document.createElement("span");
-      depthLabel.className = "esm-workspace-map-depth-label";
-      depthLabel.textContent = `Level ${depth}`;
-      const depthCount = document.createElement("span");
-      depthCount.className = "esm-workspace-map-depth-count";
-      depthCount.textContent = `${depthNodes.length} node${depthNodes.length === 1 ? "" : "s"}`;
-      bandHead.appendChild(depthLabel);
-      bandHead.appendChild(depthCount);
-      band.appendChild(bandHead);
-
-      const bandGrid = document.createElement("div");
-      bandGrid.className = "esm-workspace-map-grid";
-      depthNodes.forEach((nodeEntry) => {
-        const tile = esmWorkspaceCreateTreemapTile(esmWorkspaceState, nodeEntry, requestToken);
-        bandGrid.appendChild(tile);
-      });
-      band.appendChild(bandGrid);
-
-      treemapRoot.appendChild(band);
-    });
-  }
-
-}
-
-function esmWorkspaceSetTreemapCollapsed(esmWorkspaceState, shouldCollapse) {
-  const scrollElement = esmWorkspaceState?.treemapScrollElement;
-  const toggleElement = esmWorkspaceState?.treemapToggleButton || esmWorkspaceState?.treemapHeadElement;
-  if (!scrollElement) {
-    return;
-  }
-  const collapsed = Boolean(shouldCollapse);
-  scrollElement.hidden = collapsed;
-  if (toggleElement) {
-    toggleElement.setAttribute("aria-expanded", collapsed ? "false" : "true");
-  }
 }
 
 function esmWorkspaceApplyTreeFilters(esmWorkspaceState, options = {}) {
@@ -18452,7 +18709,6 @@ function esmWorkspaceApplyTreeFilters(esmWorkspaceState, options = {}) {
     .toUpperCase();
   const term = clickEsmNormalizeSearchTerm(options.term ?? esmWorkspaceState.searchInput?.value ?? "");
   const searchMode = Boolean(term);
-  const filteredMode = Boolean(searchMode || zoomFilter);
   const doHighlight = Boolean(options.highlight && term);
   const highlightPattern = doHighlight ? new RegExp(clickEsmEscapeRegExp(term), "gi") : null;
   const visibleEndpointIndexes = [];
@@ -18495,11 +18751,6 @@ function esmWorkspaceApplyTreeFilters(esmWorkspaceState, options = {}) {
     }
   });
 
-  esmWorkspaceRenderTreemap(esmWorkspaceState, visibleEndpointIndexes, {
-    zoomFilter,
-    onlyRunnable: filteredMode,
-    requestToken: options.requestToken || esmWorkspaceState?.requestToken || state.premiumPanelRequestToken || 0,
-  });
   esmWorkspaceState.visibleEndpointIndexes = visibleEndpointIndexes.slice();
   esmWorkspaceSyncPanelLoadAllButtons(esmWorkspaceState, visibleEndpointIndexes);
   esmWorkspaceSyncTreeToggleButton(esmWorkspaceState);
@@ -18608,14 +18859,6 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
         (esmWorkspaceState.treeScrollElement?.hidden ? "false" : "true")
     ) !== "false";
     esmWorkspaceSetTreeCollapsed(esmWorkspaceState, expanded);
-  };
-
-  const toggleTreemapPanel = () => {
-    const expanded = String(
-      esmWorkspaceState.treemapToggleButton?.getAttribute("aria-expanded") ||
-        (esmWorkspaceState.treemapScrollElement?.hidden ? "false" : "true")
-    ) !== "false";
-    esmWorkspaceSetTreemapCollapsed(esmWorkspaceState, expanded);
   };
 
   const runVisibleEndpointsToWorkspace = async (source = "esm-jelly-load-all") => {
@@ -18739,22 +18982,10 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
     toggleTreePanel();
   });
 
-  esmWorkspaceState.treemapToggleButton?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    toggleTreemapPanel();
-  });
-
   esmWorkspaceState.treeLoadAllButton?.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
     await runVisibleEndpointsToWorkspace("esm-jelly-tree-load-all");
-  });
-
-  esmWorkspaceState.treemapLoadAllButton?.addEventListener("click", async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    await runVisibleEndpointsToWorkspace("esm-jelly-treemap-load-all");
   });
 }
 
@@ -18808,7 +19039,7 @@ async function handleEsmWorkspaceWorkspaceAction(message, sender = null) {
     } else {
       const selectedProgrammer = resolveSelectedProgrammer();
       const selectedServices = selectedProgrammer?.programmerId
-        ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+        ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
         : null;
       esmWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices, senderWindowId);
     }
@@ -19033,7 +19264,9 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
   if (!contentElement) {
     return;
   }
-  if (!programmer?.programmerId || !appInfo?.guid) {
+  const currentServices = programmer?.programmerId ? getCurrentPremiumAppsSnapshot(programmer.programmerId) : null;
+  const resolvedAppInfo = hasEsmScopedApp(currentServices) ? currentServices.esm : appInfo;
+  if (!programmer?.programmerId || !resolvedAppInfo?.guid) {
     contentElement.innerHTML = "";
     return;
   }
@@ -19047,8 +19280,6 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
   ) {
     clearEsmWorkspaceRecordingState("programmer-change");
   }
-
-  contentElement.innerHTML = '<div class="loading">Loading ESM...</div>';
 
   try {
     const controllerWindowId = await esmWorkspaceGetCurrentWindowId();
@@ -19078,7 +19309,7 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
       section,
       contentElement,
       programmer,
-      appInfo,
+      appInfo: resolvedAppInfo,
       endpoints,
       catalog,
       endpointByUrl,
@@ -19093,14 +19324,8 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
       treeToggleButton: contentElement.querySelector(".esm-workspace-tree-toggle"),
       treeScrollElement: contentElement.querySelector(".esm-workspace-tree-scroll"),
       treeRootElement: contentElement.querySelector(".esm-workspace-tree-root"),
-      treemapHeadElement: contentElement.querySelector(".esm-workspace-treemap-head"),
-      treemapToggleButton: contentElement.querySelector(".esm-workspace-treemap-toggle"),
-      treemapRootElement: contentElement.querySelector(".esm-workspace-treemap-root"),
-      treemapScrollElement: contentElement.querySelector(".esm-workspace-treemap-scroll"),
       treeLoadAllButton: contentElement.querySelector(".esm-workspace-tree-load-all"),
-      treemapLoadAllButton: contentElement.querySelector(".esm-workspace-treemap-load-all"),
       treeCountElement: contentElement.querySelector(".esm-workspace-tree-count"),
-      treemapCountElement: contentElement.querySelector(".esm-workspace-treemap-count"),
       visibleEndpointIndexes: [],
       loadAllBusy: false,
       recordingStatusElement: contentElement.querySelector(".esm-workspace-recording-status"),
@@ -19112,15 +19337,9 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
       esmWorkspaceState.treeToggleButton.setAttribute("aria-label", "Toggle JellyBeans");
     }
 
-    if (esmWorkspaceState.treemapToggleButton) {
-      esmWorkspaceState.treemapToggleButton.setAttribute("aria-expanded", "false");
-      esmWorkspaceState.treemapToggleButton.setAttribute("aria-label", "Toggle TreeMap");
-    }
-
     section.__underparEsmWorkspaceState = esmWorkspaceState;
     wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken);
     esmWorkspaceSetTreeCollapsed(esmWorkspaceState, true);
-    esmWorkspaceSetTreemapCollapsed(esmWorkspaceState, true);
     syncEsmWorkspaceRecordingControls(esmWorkspaceState);
     esmWorkspaceBuildTree(esmWorkspaceState, requestToken);
     syncEsmWorkspaceRecordingControls(esmWorkspaceState);
@@ -19211,6 +19430,9 @@ function cmGetControllerStatePayload(cmState) {
   const mvpdIds = state.selectedMvpdId ? [String(state.selectedMvpdId)] : [];
   const profileHarvest = getCmProfileHarvestForProgrammer(cmState?.programmer || null);
   const profileHarvestList = getCmProfileHarvestListForProgrammer(cmState?.programmer || null);
+  const adobePassEnvironment = {
+    ...getActiveAdobePassEnvironment(),
+  };
   const tenantScope = resolveCmUsageTenantScopeValue(
     getCmPrimaryUsageTenantScopeFromState(cmState),
     cmState?.tenantScope,
@@ -19225,6 +19447,7 @@ function cmGetControllerStatePayload(cmState) {
     cmContainerVisible: true,
     programmerId: String(cmState?.programmer?.programmerId || ""),
     programmerName: String(cmState?.programmer?.programmerName || ""),
+    adobePassEnvironment,
     tenantScope,
     requestorIds,
     mvpdIds,
@@ -19289,6 +19512,9 @@ function cmGetSelectedControllerStatePayload(programmer = null, services = null,
   const mvpdIds = state.selectedMvpdId ? [String(state.selectedMvpdId)] : [];
   const profileHarvest = getCmProfileHarvestForProgrammer(resolvedProgrammer);
   const profileHarvestList = getCmProfileHarvestListForProgrammer(resolvedProgrammer);
+  const adobePassEnvironment = {
+    ...getActiveAdobePassEnvironment(),
+  };
   return {
     controllerOnline: false,
     cmAvailable,
@@ -19296,6 +19522,7 @@ function cmGetSelectedControllerStatePayload(programmer = null, services = null,
     cmContainerVisible,
     programmerId: String(resolvedProgrammer?.programmerId || ""),
     programmerName: String(resolvedProgrammer?.programmerName || ""),
+    adobePassEnvironment,
     tenantScope: getCmTenantScopeForProgrammer(resolvedProgrammer),
     requestorIds,
     mvpdIds,
@@ -20404,13 +20631,6 @@ function cmuUsagePathPartsToKey(pathParts) {
     .join("/");
 }
 
-function cmuUsageNormalizeTreemapPathParts(pathParts) {
-  return esmWorkspaceNormalizeEndpointSegments(pathParts)
-    .map((value) => normalizeCmuUsagePathSegment(value))
-    .filter(Boolean)
-    .filter((value) => value !== "cmu" && value !== "v2");
-}
-
 function cmuUsageBuildPathLookupCandidates(pathParts) {
   const normalizedInput = esmWorkspaceNormalizeEndpointSegments(pathParts)
     .map((value) => normalizeCmuUsagePathSegment(value))
@@ -20517,26 +20737,6 @@ function cmuUsageBuildShellHtml() {
           <div class="esm-workspace-tree-root cmu-jelly-tree-root"></div>
         </div>
       </div>
-      <div class="esm-workspace-treemap-panel cmu-jelly-treemap-panel">
-        <div class="esm-workspace-treemap-head cmu-jelly-treemap-head">
-          <button type="button" class="cmu-jelly-panel-toggle cmu-jelly-treemap-toggle" aria-expanded="false">
-            <span class="cmu-jelly-panel-toggle-icon" aria-hidden="true">▾</span>
-            <span class="esm-workspace-treemap-title">TreeMap</span>
-          </button>
-          <button
-            type="button"
-            class="cmu-jelly-panel-load-all cmu-jelly-treemap-load-all"
-            title="Load all visible TreeMap endpoints into CM Workspace"
-            aria-label="Load all visible TreeMap endpoints into CM Workspace"
-            disabled
-          >
-            <span class="cmu-jelly-panel-count cmu-jelly-treemap-count">0</span>
-          </button>
-        </div>
-        <div class="esm-workspace-treemap-scroll cmu-jelly-treemap-scroll" hidden>
-          <div class="esm-workspace-treemap-root cmu-jelly-treemap-root"></div>
-        </div>
-      </div>
       <div class="esm-workspace-footer cmu-jelly-footer">
         <div class="esm-workspace-footer-status" aria-hidden="true">
           <span class="esm-workspace-net-indicator" title="Loading" aria-label="Loading" hidden></span>
@@ -20619,7 +20819,6 @@ function cmuUsageSyncPanelLoadAllButtons(cmuUsageState, endpointIndexes = []) {
     }
   };
   setCount(cmuUsageState?.treeCountElement);
-  setCount(cmuUsageState?.treemapCountElement);
   const setDisabled = (button) => {
     if (button) {
       button.disabled = visibleCount === 0 || loadAllBusy;
@@ -20632,7 +20831,6 @@ function cmuUsageSyncPanelLoadAllButtons(cmuUsageState, endpointIndexes = []) {
     }
   };
   setDisabled(cmuUsageState?.treeLoadAllButton);
-  setDisabled(cmuUsageState?.treemapLoadAllButton);
 }
 
 function cmuUsageResolveRecordsByPath(cmuUsageState, pathParts, options = {}) {
@@ -20695,142 +20893,6 @@ async function cmuUsageRunRecordsFromUi(cmState, cmuUsageState, records, request
   }
 }
 
-function cmuUsageCreateTreemapTile(cmState, cmuUsageState, nodeEntry, requestToken) {
-  const tile = document.createElement("article");
-  tile.className = "esm-workspace-map-tile";
-  tile.dataset.depth = String(Math.max(1, Number(nodeEntry?.depth || 1)));
-  esmWorkspaceApplyTreemapTileColor(tile, nodeEntry?.key);
-
-  const endpoint =
-    nodeEntry?.endpointIndex != null && Number.isInteger(nodeEntry.endpointIndex)
-      ? cmuUsageState.catalog[nodeEntry.endpointIndex]
-      : null;
-  if (endpoint) {
-    tile.classList.add("esm-workspace-map-leaf");
-  }
-
-  const content = document.createElement("div");
-  content.className = "esm-workspace-map-content";
-
-  const name = document.createElement("div");
-  name.className = "esm-workspace-map-name";
-  name.textContent = nodeEntry?.key || "node";
-  name.title = Array.isArray(nodeEntry?.pathParts) ? nodeEntry.pathParts.join("/") : "";
-  content.appendChild(name);
-
-  const parent = document.createElement("div");
-  parent.className = "esm-workspace-map-parent";
-  const parentParts = Array.isArray(nodeEntry?.pathParts) ? nodeEntry.pathParts.slice(0, -1) : [];
-  parent.textContent = parentParts.join(" / ");
-  parent.title = parentParts.join("/");
-  parent.hidden = parentParts.length === 0;
-  content.appendChild(parent);
-
-  const meta = document.createElement("div");
-  meta.className = "esm-workspace-map-meta";
-  if (endpoint?.zoomKey) {
-    meta.textContent = `[${endpoint.zoomKey}]`;
-  } else {
-    const endpointCount = Number(nodeEntry?.count || 0);
-    meta.textContent = `${endpointCount} endpoint${endpointCount === 1 ? "" : "s"}`;
-  }
-  content.appendChild(meta);
-  tile.appendChild(content);
-
-  if (endpoint) {
-    tile.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const records = cmuUsageResolveRecordsByPath(cmuUsageState, endpoint.pathParts);
-      void cmuUsageRunRecordsFromUi(cmState, cmuUsageState, records, requestToken, "cmu-jelly-treemap");
-    });
-  }
-
-  return tile;
-}
-
-function cmuUsageRenderTreemap(cmState, cmuUsageState, endpointIndexes, options = {}) {
-  const treemapRoot = cmuUsageState?.treemapRootElement;
-  if (!treemapRoot) {
-    return;
-  }
-  const requestToken = Number(options.requestToken || cmuUsageState?.requestToken || state.premiumPanelRequestToken || 0);
-  const endpointList = [...new Set(
-    (Array.isArray(endpointIndexes) ? endpointIndexes : [])
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value) && value >= 0)
-  )];
-  const treemapCatalog = Array.isArray(cmuUsageState?.catalog) ? cmuUsageState.catalog : [];
-  const model = esmWorkspaceBuildTreemapModel(treemapCatalog, endpointList);
-  const onlyRunnable = options.onlyRunnable === true;
-  const nodeEntries = esmWorkspaceFlattenTreemapNodes(model)
-    .map((nodeEntry) => {
-      const normalizedPathParts = cmuUsageNormalizeTreemapPathParts(nodeEntry?.pathParts);
-      if (!Array.isArray(normalizedPathParts) || normalizedPathParts.length === 0) {
-        return null;
-      }
-      const normalizedEntry = {
-        ...nodeEntry,
-        pathParts: normalizedPathParts,
-        depth: normalizedPathParts.length,
-        key: normalizedPathParts[normalizedPathParts.length - 1] || String(nodeEntry?.key || "").trim(),
-      };
-      if (onlyRunnable) {
-        return Number.isInteger(normalizedEntry?.endpointIndex) && normalizedEntry.endpointIndex >= 0
-          ? normalizedEntry
-          : null;
-      }
-      return normalizedEntry;
-    })
-    .filter(Boolean);
-  treemapRoot.innerHTML = "";
-
-  if (!model || nodeEntries.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "esm-workspace-treemap-empty";
-    empty.textContent = "No CMU endpoints match current zoom/search filters.";
-    treemapRoot.appendChild(empty);
-    return;
-  }
-
-  const groupedByDepth = new Map();
-  nodeEntries.forEach((nodeEntry) => {
-    const depth = Math.max(1, Number(nodeEntry.depth || 1));
-    if (!groupedByDepth.has(depth)) {
-      groupedByDepth.set(depth, []);
-    }
-    groupedByDepth.get(depth).push(nodeEntry);
-  });
-
-  [...groupedByDepth.keys()].sort((left, right) => left - right).forEach((depth) => {
-    const depthNodes = groupedByDepth.get(depth) || [];
-    const band = document.createElement("section");
-    band.className = "esm-workspace-map-depth-band";
-    band.dataset.depth = String(depth);
-
-    const bandHead = document.createElement("div");
-    bandHead.className = "esm-workspace-map-depth-head";
-    const depthLabel = document.createElement("span");
-    depthLabel.className = "esm-workspace-map-depth-label";
-    depthLabel.textContent = `Level ${depth}`;
-    const depthCount = document.createElement("span");
-    depthCount.className = "esm-workspace-map-depth-count";
-    depthCount.textContent = `${depthNodes.length} node${depthNodes.length === 1 ? "" : "s"}`;
-    bandHead.appendChild(depthLabel);
-    bandHead.appendChild(depthCount);
-    band.appendChild(bandHead);
-
-    const bandGrid = document.createElement("div");
-    bandGrid.className = "esm-workspace-map-grid";
-    depthNodes.forEach((nodeEntry) => {
-      const tile = cmuUsageCreateTreemapTile(cmState, cmuUsageState, nodeEntry, requestToken);
-      bandGrid.appendChild(tile);
-    });
-    band.appendChild(bandGrid);
-    treemapRoot.appendChild(band);
-  });
-}
-
 function cmuUsageApplyFilters(cmState, cmuUsageState, requestToken, options = {}) {
   const root = cmuUsageState?.treeRootElement;
   if (!root) {
@@ -20842,7 +20904,6 @@ function cmuUsageApplyFilters(cmState, cmuUsageState, requestToken, options = {}
     .toUpperCase();
   const term = clickEsmNormalizeSearchTerm(options.term ?? cmuUsageState.searchInput?.value ?? "");
   const searchMode = Boolean(term);
-  const filteredMode = Boolean(searchMode || zoomFilter);
   const doHighlight = Boolean(options.highlight && term);
   const highlightPattern = doHighlight ? new RegExp(clickEsmEscapeRegExp(term), "gi") : null;
   const visibleEndpointIndexes = [];
@@ -20880,11 +20941,6 @@ function cmuUsageApplyFilters(cmState, cmuUsageState, requestToken, options = {}
     }
   });
 
-  cmuUsageRenderTreemap(cmState, cmuUsageState, visibleEndpointIndexes, {
-    zoomFilter,
-    onlyRunnable: filteredMode,
-    requestToken: options.requestToken || cmuUsageState?.requestToken || state.premiumPanelRequestToken || 0,
-  });
   cmuUsageState.visibleEndpointIndexes = visibleEndpointIndexes.slice();
   cmuUsageSyncPanelLoadAllButtons(cmuUsageState, visibleEndpointIndexes);
   esmWorkspaceSyncTreeToggleButton(cmuUsageState);
@@ -20903,10 +20959,6 @@ function cmuUsageBuildTree(cmState, cmuUsageState, requestToken) {
   treeRoot.innerHTML = "";
   if (catalog.length === 0) {
     treeRoot.innerHTML = '<div class="cmu-jelly-empty">No CM Usage endpoints available for JellyBeans.</div>';
-    cmuUsageRenderTreemap(cmState, cmuUsageState, [], {
-      onlyRunnable: true,
-      requestToken: requestToken || cmuUsageState?.requestToken || state.premiumPanelRequestToken || 0,
-    });
     return;
   }
   const rootList = document.createElement("ul");
@@ -21007,14 +21059,6 @@ function cmuUsageWireInteractions(cmState, cmuUsageState, requestToken) {
     ) !== "false";
     esmWorkspaceSetTreeCollapsed(cmuUsageState, expanded);
   };
-  const toggleTreemap = () => {
-    const expanded = String(
-      cmuUsageState.treemapHeadElement?.getAttribute("aria-expanded") ||
-        (cmuUsageState.treemapScrollElement?.hidden ? "false" : "true")
-    ) !== "false";
-    esmWorkspaceSetTreemapCollapsed(cmuUsageState, expanded);
-  };
-
   const runVisibleEndpointsToWorkspace = async (source = "cmu-jelly-load-all") => {
     if (cmuUsageState.loadAllBusy === true) {
       return;
@@ -21027,11 +21071,11 @@ function cmuUsageWireInteractions(cmState, cmuUsageState, requestToken) {
 
     cmuUsageState.loadAllBusy = true;
     cmuUsageSyncPanelLoadAllButtons(cmuUsageState, endpointIndexes);
-    cmSetLoadAllButtonsBusy(cmState, [cmuUsageState.treeLoadAllButton, cmuUsageState.treemapLoadAllButton], true);
+    cmSetLoadAllButtonsBusy(cmState, [cmuUsageState.treeLoadAllButton], true);
     try {
       await cmuUsageRunRecordsFromUi(cmState, cmuUsageState, records, requestToken, source);
     } finally {
-      cmSetLoadAllButtonsBusy(cmState, [cmuUsageState.treeLoadAllButton, cmuUsageState.treemapLoadAllButton], false);
+      cmSetLoadAllButtonsBusy(cmState, [cmuUsageState.treeLoadAllButton], false);
       cmuUsageState.loadAllBusy = false;
       cmuUsageSyncPanelLoadAllButtons(cmuUsageState, cmuUsageState.visibleEndpointIndexes);
     }
@@ -21040,18 +21084,10 @@ function cmuUsageWireInteractions(cmState, cmuUsageState, requestToken) {
   cmuUsageState.treeHeadElement?.addEventListener("click", () => {
     toggleTree();
   });
-  cmuUsageState.treemapHeadElement?.addEventListener("click", () => {
-    toggleTreemap();
-  });
   cmuUsageState.treeLoadAllButton?.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
     await runVisibleEndpointsToWorkspace("cmu-jelly-tree-load-all");
-  });
-  cmuUsageState.treemapLoadAllButton?.addEventListener("click", async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    await runVisibleEndpointsToWorkspace("cmu-jelly-treemap-load-all");
   });
 }
 
@@ -21071,17 +21107,12 @@ function cmMountUsageJellyBeans(cmState, usageRecords, requestToken) {
     treeHeadElement: host.querySelector(".cmu-jelly-tree-toggle"),
     treeScrollElement: host.querySelector(".cmu-jelly-tree-scroll"),
     treeRootElement: host.querySelector(".cmu-jelly-tree-root"),
-    treemapHeadElement: host.querySelector(".cmu-jelly-treemap-toggle"),
-    treemapScrollElement: host.querySelector(".cmu-jelly-treemap-scroll"),
-    treemapRootElement: host.querySelector(".cmu-jelly-treemap-root"),
     zoomFilterSelect: host.querySelector(".cmu-jelly-zoom-filter"),
     searchInput: host.querySelector(".cmu-jelly-search"),
     resetButton: host.querySelector(".cmu-jelly-reset-btn"),
     makeClickCmuButton: host.querySelector(".cmu-jelly-make-clickcmu-btn"),
     treeLoadAllButton: host.querySelector(".cmu-jelly-tree-load-all"),
-    treemapLoadAllButton: host.querySelector(".cmu-jelly-treemap-load-all"),
     treeCountElement: host.querySelector(".cmu-jelly-tree-count"),
-    treemapCountElement: host.querySelector(".cmu-jelly-treemap-count"),
     loadAllBusy: false,
   };
 
@@ -21090,14 +21121,9 @@ function cmMountUsageJellyBeans(cmState, usageRecords, requestToken) {
     cmuUsageState.treeHeadElement.setAttribute("aria-expanded", "false");
     cmuUsageState.treeHeadElement.setAttribute("aria-label", "Toggle JellyBeans");
   }
-  if (cmuUsageState.treemapHeadElement) {
-    cmuUsageState.treemapHeadElement.setAttribute("aria-expanded", "false");
-    cmuUsageState.treemapHeadElement.setAttribute("aria-label", "Toggle CMU TreeMap");
-  }
   cmuUsageWireInteractions(cmState, cmuUsageState, requestToken);
   cmuUsageBuildTree(cmState, cmuUsageState, requestToken);
   esmWorkspaceSetTreeCollapsed(cmuUsageState, true);
-  esmWorkspaceSetTreemapCollapsed(cmuUsageState, true);
 }
 
 function getActiveCmStateForServiceClass(serviceClass = "service-cm") {
@@ -21940,12 +21966,10 @@ function cmApplyUsageExampleRequestContext(urlValue, record = null, cmState = nu
   const hasMvpdDimension = payload?.hasMvpdDimension === true;
   const selectedMvpdId = String(state.selectedMvpdId || "").trim();
   try {
-    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+    const parsed = new URL(stripServerManagedTimeParams(raw, CM_REPORTS_BASE_URL), CM_REPORTS_BASE_URL);
     parsed.searchParams.set("format", "json");
-    const zoomKey = cmuUsageGetZoomKey(cmExtractRawUsagePathParts(parsed.pathname), parsed.toString());
-    const timeWindow = clickEsmComputeTimeWindow(zoomKey);
-    parsed.searchParams.set("start", String(timeWindow?.start || clickEsmIso(new Date())));
-    parsed.searchParams.set("end", String(timeWindow?.end || clickEsmIso(new Date())));
+    parsed.searchParams.delete("start");
+    parsed.searchParams.delete("end");
     const tenantScope = cmResolveUsageTenantScope(cmState, record);
     if (tenantScope) {
       applyCmUsageTenantScopeToSearchParams(parsed.searchParams, tenantScope);
@@ -22313,7 +22337,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
     } else {
       const selectedProgrammer = resolveSelectedProgrammer();
       const selectedServices = selectedProgrammer?.programmerId
-        ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+        ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
         : null;
       cmBroadcastSelectedControllerState(selectedProgrammer, selectedServices, senderWindowId);
     }
@@ -22725,7 +22749,7 @@ function mvpdWorkspaceGetSelectionContext(programmer = null, services = null) {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
   let resolvedServices = services;
   if (!resolvedServices && resolvedProgrammer?.programmerId) {
-    resolvedServices = state.premiumAppsByProgrammerId.get(resolvedProgrammer.programmerId) || null;
+    resolvedServices = getCurrentPremiumAppsSnapshot(resolvedProgrammer.programmerId);
   }
   const requestorId = String(state.selectedRequestorId || "").trim();
   const mvpdId = String(state.selectedMvpdId || "").trim();
@@ -24122,7 +24146,7 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
   if (action === "workspace-ready") {
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     if (senderWindowId > 0) {
       mvpdWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
@@ -24147,7 +24171,7 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     const targetWindowId = Number(workspaceTab?.windowId || senderWindowId || state.mvpdWorkspaceWindowId || 0);
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices, targetWindowId);
     await mvpdWorkspaceRefreshSelectedSnapshot({
@@ -24163,7 +24187,7 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
   if (action === "refresh-selected") {
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     const refreshResult = await mvpdWorkspaceRefreshSelectedSnapshot({
       programmer: selectedProgrammer,
@@ -24398,7 +24422,7 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     if (!selectedProgrammer?.programmerId) {
       return { ok: false, error: "Select a media company before exporting clickCMU tearsheets." };
     }
-    const selectedServices = state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null;
+    const selectedServices = getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId);
     const selectedCmMvpdService =
       selectedServices?.cmMvpd && typeof selectedServices.cmMvpd === "object" ? selectedServices.cmMvpd : null;
     const matchedMvpdTenants = Array.isArray(selectedCmMvpdService?.matchedTenants) ? selectedCmMvpdService.matchedTenants : [];
@@ -24622,7 +24646,7 @@ function syncMvpdWorkspaceToolForSection(section, programmer = null, services = 
 function refreshMvpdWorkspaceTools() {
   const selectedProgrammer = resolveSelectedProgrammer();
   const selectedServices = selectedProgrammer?.programmerId
-    ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+    ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
     : null;
   const sections = document.querySelectorAll(".premium-service-section.service-rest-v2");
   sections.forEach((section) => {
@@ -24654,7 +24678,7 @@ async function mvpdWorkspaceOpenFromRestV2(programmer = null, services = null, o
     services && typeof services === "object"
       ? services
       : resolvedProgrammer?.programmerId
-        ? state.premiumAppsByProgrammerId.get(resolvedProgrammer.programmerId) || null
+        ? getCurrentPremiumAppsSnapshot(resolvedProgrammer.programmerId)
         : null;
   const workspaceTab = await mvpdWorkspaceEnsureWorkspaceTab({
     activate: options.activate !== false,
@@ -24692,7 +24716,7 @@ function degradationWorkspaceGetSelectionContext(programmer = null, services = n
   const mvpdLabel = mvpd ? getRestV2MvpdPickerLabel(requestorId, mvpd) || mvpd : "";
   let resolvedServices = services;
   if (!resolvedServices && programmerId) {
-    resolvedServices = state.premiumAppsByProgrammerId.get(programmerId) || null;
+    resolvedServices = getCurrentPremiumAppsSnapshot(programmerId);
   }
   const degradationApp = resolvedServices?.degradation || null;
   const selectionContext = {
@@ -24974,7 +24998,7 @@ async function handleDegradationWorkspaceAction(message, sender = null) {
     });
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     const selectionContext = degradationWorkspaceGetSelectionContext(selectedProgrammer, selectedServices);
     if (senderWindowId > 0) {
@@ -25003,7 +25027,7 @@ async function handleDegradationWorkspaceAction(message, sender = null) {
     const targetWindowId = Number(workspaceTab?.windowId || senderWindowId || state.degradationWorkspaceWindowId || 0);
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     const selectionContext = degradationWorkspaceGetSelectionContext(selectedProgrammer, selectedServices);
     degradationWorkspaceBroadcastControllerState(selectedProgrammer, selectedServices, targetWindowId);
@@ -25298,7 +25322,7 @@ function findRestV2HarvestByRequestorAndMvpd(harvestList = [], requestorId = "",
   const allowSsoAlias = options?.allowSsoAlias === true;
   const selectedMvpdMeta =
     normalizedRequestorId && normalizedMvpd
-      ? state.mvpdCacheByRequestor.get(normalizedRequestorId)?.get(normalizedMvpd) || null
+      ? getRequestorScopedMvpdCache(normalizedRequestorId)?.get(normalizedMvpd) || null
       : null;
   const targetAliases = dedupeRestV2CandidateStrings([
     normalizedMvpd,
@@ -26874,7 +26898,7 @@ async function runRestV2CanIWatchForHarvest(harvest, resourceIds = []) {
 
 function syncRestV2BobtoolsLaunchers() {
   const selectedProgrammer = resolveSelectedProgrammer();
-  const services = selectedProgrammer?.programmerId ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null : null;
+  const services = selectedProgrammer?.programmerId ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId) : null;
   const sections = document.querySelectorAll(".premium-service-section.service-rest-v2");
   sections.forEach((section) => {
     syncRestV2BobtoolsLauncher(section, selectedProgrammer, services?.restV2 || null);
@@ -27543,7 +27567,7 @@ function cmBroadcastTargetControllerState(cmState, targetWorkspace, targetWindow
   if (targetWorkspace === "mvpd") {
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices, targetWindowId);
     return;
@@ -27655,7 +27679,6 @@ async function loadCmService(programmer, cmService, section, contentElement, req
     return;
   }
 
-  contentElement.innerHTML = '<div class="loading">Loading Concurrency Monitoring...</div>';
   try {
     const controllerWindowId = await esmWorkspaceGetCurrentWindowId();
     const profileHarvest = getCmProfileHarvestForProgrammer(programmer);
@@ -28068,7 +28091,7 @@ function shouldAutoRefreshPremiumService(programmer, serviceKey, appInfo = null)
   }
 
   if (normalizedServiceKey === "cm" || normalizedServiceKey === "cmmvpd") {
-    const cachedServices = state.premiumAppsByProgrammerId.get(programmerId) || {};
+    const cachedServices = getCurrentPremiumAppsSnapshot(programmerId) || {};
     const cmService =
       appInfo ||
       (normalizedServiceKey === "cmmvpd"
@@ -28175,7 +28198,7 @@ function getDegradationAppCandidatesForProgrammer(programmerId = "", seedAppInfo
   };
 
   if (normalizedProgrammerId) {
-    const services = state.premiumAppsByProgrammerId.get(normalizedProgrammerId) || null;
+    const services = getCurrentPremiumAppsSnapshot(normalizedProgrammerId);
     if (Array.isArray(services?.degradationApps) && services.degradationApps.length > 0) {
       services.degradationApps.forEach((appInfo) => pushCandidate(appInfo));
     } else {
@@ -28257,7 +28280,7 @@ function promoteDegradationAppForProgrammer(programmerId = "", appInfo = null) {
     return;
   }
 
-  const services = state.premiumAppsByProgrammerId.get(normalizedProgrammerId) || null;
+  const services = getCurrentPremiumAppsSnapshot(normalizedProgrammerId);
   if (!services || typeof services !== "object") {
     return;
   }
@@ -28265,7 +28288,7 @@ function promoteDegradationAppForProgrammer(programmerId = "", appInfo = null) {
   const nextCandidates = resolveDegradationAppCandidates(normalizedProgrammerId, appInfo);
   services.degradation = nextCandidates[0] || null;
   services.degradationApps = nextCandidates;
-  state.premiumAppsByProgrammerId.set(normalizedProgrammerId, services);
+  setCurrentPremiumAppsSnapshot(normalizedProgrammerId, services);
 }
 
 function setDegradationPanelActiveApp(panelState, appInfo, options = {}) {
@@ -28301,7 +28324,7 @@ function setDegradationPanelActiveApp(panelState, appInfo, options = {}) {
   const programmerId = String(panelState?.programmer?.programmerId || "").trim();
   if (programmerId) {
     promoteDegradationAppForProgrammer(programmerId, canonicalApp);
-    const services = state.premiumAppsByProgrammerId.get(programmerId) || { degradation: canonicalApp };
+    const services = getCurrentPremiumAppsSnapshot(programmerId) || { degradation: canonicalApp };
     const targetWindowId = Number(options?.targetWindowId || panelState?.controllerWindowId || 0);
     degradationWorkspaceBroadcastControllerState(panelState.programmer, services, targetWindowId);
   }
@@ -30190,7 +30213,6 @@ async function loadDegradationService(programmer, appInfo, section, contentEleme
     clearDegradationWorkspaceRecordingState("programmer-change");
   }
 
-  contentElement.innerHTML = '<div class="loading">Loading DEGRADATION...</div>';
   try {
     const controllerWindowId = await esmWorkspaceGetCurrentWindowId();
     if (!isDegradationServiceRequestActive(section, requestToken, programmer.programmerId)) {
@@ -30254,7 +30276,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
   const title = PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey;
   const servicesForProgrammer =
     programmer?.programmerId && state.premiumAppsByProgrammerId.has(programmer.programmerId)
-      ? state.premiumAppsByProgrammerId.get(programmer.programmerId)
+      ? getCurrentPremiumAppsSnapshot(programmer.programmerId)
       : null;
   const serviceScopedAppByKey = {
     esmWorkspace: servicesForProgrammer?.esm || null,
@@ -30322,13 +30344,9 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
         `
       : "";
   const serviceBodyHtml =
-    serviceKey === "esmWorkspace"
-      ? '<div class="loading">Loading ESM...</div>'
-      : serviceKey === "degradation"
-        ? '<div class="loading">Loading DEGRADATION...</div>'
-      : serviceKey === "cm" || serviceKey === "cmMvpd"
-        ? ""
-        : buildPremiumServiceSummaryHtml(programmer, serviceKey, appInfo);
+    serviceKey === "esmWorkspace" || serviceKey === "degradation" || serviceKey === "cm" || serviceKey === "cmMvpd"
+      ? ""
+      : buildPremiumServiceSummaryHtml(programmer, serviceKey, appInfo);
   const sectionLabel = title;
   section.innerHTML = `
     <button type="button" class="metadata-header service-box-header" title="${escapeHtml(serviceHoverMessage)}" aria-label="${escapeHtml(
@@ -30351,21 +30369,6 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
   const initialCollapsed = getPremiumSectionCollapsed(programmer?.programmerId, serviceKey);
   wireCollapsibleSection(toggleButton, container, initialCollapsed, (collapsed) => {
     setPremiumSectionCollapsed(programmer?.programmerId, serviceKey, collapsed);
-    if (!collapsed && typeof section.__underparRunAutoRefreshCheck === "function") {
-      void section.__underparRunAutoRefreshCheck();
-    }
-    if (!collapsed && serviceKey === "esmWorkspace" && typeof section.__underparRefreshEsmWorkspace === "function") {
-      void section.__underparRefreshEsmWorkspace();
-    }
-    if (!collapsed && serviceKey === "degradation" && typeof section.__underparRefreshDegradation === "function") {
-      void section.__underparRefreshDegradation();
-    }
-    if (!collapsed && (serviceKey === "cm" || serviceKey === "cmMvpd") && typeof section.__underparRefreshCm === "function") {
-      const hasLoadedCmState = Boolean(section.__underparCmState);
-      if (!hasLoadedCmState) {
-        void section.__underparRefreshCm();
-      }
-    }
   });
 
   if (serviceKey === "esmWorkspace") {
@@ -30393,9 +30396,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
         section.__underparCmLoadPending = false;
       });
     };
-    if (!initialCollapsed) {
-      void section.__underparRefreshCm();
-    }
+    void section.__underparRefreshCm();
   }
 
   if (serviceKey === "restV2") {
@@ -30419,7 +30420,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
       openMvpdWorkspaceButton.addEventListener("click", async (event) => {
         event.stopPropagation();
         const servicesForProgrammer = programmer?.programmerId
-          ? state.premiumAppsByProgrammerId.get(programmer.programmerId) || null
+          ? getCurrentPremiumAppsSnapshot(programmer.programmerId)
           : null;
         try {
           await mvpdWorkspaceOpenFromRestV2(programmer, servicesForProgrammer, {
@@ -30816,7 +30817,8 @@ function isAuthFlowUrl(url) {
     value.includes("adobelogin.com") ||
     value.includes("auth.services.adobe.com") ||
     value.includes("experience.adobe.com") ||
-    value.includes("console.auth.adobe.com") ||
+    value.includes("experience-stage.adobe.com") ||
+    /console\.auth(?:-staging)?\.adobe\.com/i.test(value) ||
     value.includes("login.aepdebugger.adobe.com") ||
     value.includes("pps.services.adobe.com")
   );
@@ -36657,7 +36659,7 @@ async function refreshProgrammerPanels(options = {}) {
   });
   mvpdWorkspaceBroadcastSelectedControllerState(programmer, null);
 
-  const cachedServices = state.premiumAppsByProgrammerId.get(programmer.programmerId) || null;
+  const cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
   const cachedIncludesCm = Boolean(cachedServices && Object.prototype.hasOwnProperty.call(cachedServices, "cm"));
   const cachedCmMvpdSelectionKey = String(cachedServices?.cmMvpdSelectionKey || "").trim();
   const cmMvpdSelectionMatches = cachedCmMvpdSelectionKey === cmMvpdSelectionKey;
@@ -36696,7 +36698,7 @@ async function refreshProgrammerPanels(options = {}) {
       cmMvpd: cmMvpdService,
       cmMvpdSelectionKey,
     };
-    state.premiumAppsByProgrammerId.set(programmer.programmerId, mergedServices);
+    setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
     emitPremiumServiceDecisionLogs(programmer, mergedServices);
     renderPremiumServices(mergedServices, programmer, { controllerReason });
     void prewarmRestV2ForProgrammer(programmer, mergedServices);
@@ -37347,7 +37349,8 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
     state.applicationsByProgrammerId.delete(programmerId);
   }
 
-  if (!forceRefresh && state.applicationsByProgrammerId.has(programmerId)) {
+  const cachedApplications = getCurrentProgrammerApplicationsSnapshot(programmerId);
+  if (!forceRefresh && cachedApplications) {
     emitPremiumDecisionDebugEvent(
       {
         phase: "premium-applications-cache-hit",
@@ -37357,7 +37360,7 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
         programmer: resolvedProgrammer,
       }
     );
-    return state.applicationsByProgrammerId.get(programmerId);
+    return cachedApplications;
   }
 
   const urlCandidates = [
@@ -37467,7 +37470,7 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
     throw (lastError instanceof Error ? lastError : new Error(reason));
   }
 
-  state.applicationsByProgrammerId.set(programmerId, byGuid);
+  setCurrentProgrammerApplicationsSnapshot(programmerId, byGuid);
   emitPremiumDecisionDebugEvent(
     {
       phase: "premium-applications-normalized",
@@ -37655,16 +37658,16 @@ function schedulePremiumAppScopeHydration(programmer, options = {}) {
     return;
   }
 
-  const seedApplicationsData = state.applicationsByProgrammerId.get(programmerId) || {};
+  const seedApplicationsData = getCurrentProgrammerApplicationsSnapshot(programmerId) || {};
   const hydrationPromise = (async () => {
     try {
       const hydratedApplications = await hydrateApplicationScopesForProgrammer(programmer, seedApplicationsData, {
         forceRefresh,
       });
-      state.applicationsByProgrammerId.set(programmerId, hydratedApplications || {});
+      setCurrentProgrammerApplicationsSnapshot(programmerId, hydratedApplications || {});
 
       const refreshedPremiumApps = findPremiumServiceApplications(programmer.applications || [], hydratedApplications || {});
-      const existingServices = state.premiumAppsByProgrammerId.get(programmerId) || null;
+      const existingServices = getCurrentPremiumAppsSnapshot(programmerId);
       const mergedServices = {
         ...refreshedPremiumApps,
         degradation: refreshedPremiumApps?.degradation || null,
@@ -37675,7 +37678,7 @@ function schedulePremiumAppScopeHydration(programmer, options = {}) {
         cmMvpd: existingServices?.cmMvpd ?? null,
         cmMvpdSelectionKey: String(existingServices?.cmMvpdSelectionKey || "").trim(),
       };
-      state.premiumAppsByProgrammerId.set(programmerId, mergedServices);
+      setCurrentPremiumAppsSnapshot(programmerId, mergedServices);
 
       const selectedProgrammer = resolveSelectedProgrammer();
       if (String(selectedProgrammer?.programmerId || "").trim() === programmerId) {
@@ -37878,12 +37881,12 @@ function collectRestV2AppCandidatesFromPremiumApps(premiumApps) {
 }
 
 function hasRestV2AppBeenPrewarmed(programmerId, appGuid) {
-  const appSet = state.restV2PrewarmedAppsByProgrammerId.get(String(programmerId || ""));
+  const appSet = state.restV2PrewarmedAppsByProgrammerId.get(getEnvironmentScopedProgrammerKey(programmerId));
   return Boolean(appSet && appSet.has(String(appGuid || "")));
 }
 
 function markRestV2AppPrewarmed(programmerId, appGuid) {
-  const key = String(programmerId || "");
+  const key = getEnvironmentScopedProgrammerKey(programmerId);
   const guid = String(appGuid || "");
   if (!key || !guid) {
     return;
@@ -37930,7 +37933,11 @@ async function prewarmRestV2ForProgrammer(programmer, premiumApps) {
   }
 }
 
-function getDcrCacheKey(programmerId, appGuid) {
+function getDcrCacheKey(programmerId, appGuid, environmentKey = getActiveAdobePassEnvironmentKey()) {
+  return `${DCR_CACHE_PREFIX}:${String(environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key)}:${programmerId}:${appGuid}`;
+}
+
+function getLegacyUnscopedDcrCacheKey(programmerId, appGuid) {
   return `${DCR_CACHE_PREFIX}:${programmerId}:${appGuid}`;
 }
 
@@ -37940,9 +37947,15 @@ function getLegacyDcrCacheKey(programmerId, appGuid) {
 
 function loadDcrCache(programmerId, appGuid) {
   try {
+    const environmentKey = getActiveAdobePassEnvironmentKey();
+    const scopedCacheKey = getDcrCacheKey(programmerId, appGuid, environmentKey);
+    const scopedRaw = localStorage.getItem(scopedCacheKey);
     const raw =
-      localStorage.getItem(getDcrCacheKey(programmerId, appGuid)) ||
-      localStorage.getItem(getLegacyDcrCacheKey(programmerId, appGuid));
+      scopedRaw ||
+      (isProductionAdobePassEnvironmentKey(environmentKey)
+        ? localStorage.getItem(getLegacyUnscopedDcrCacheKey(programmerId, appGuid)) ||
+          localStorage.getItem(getLegacyDcrCacheKey(programmerId, appGuid))
+        : "");
     if (!raw) {
       return null;
     }
@@ -37950,7 +37963,7 @@ function loadDcrCache(programmerId, appGuid) {
     if (!parsed || typeof parsed !== "object") {
       return null;
     }
-    return {
+    const normalized = {
       ...parsed,
       clientId: parsed.clientId || parsed.client_id || "",
       clientSecret: parsed.clientSecret || parsed.client_secret || "",
@@ -37958,6 +37971,10 @@ function loadDcrCache(programmerId, appGuid) {
       tokenExpiresAt: Number(parsed.tokenExpiresAt || parsed.expires_at || 0),
       tokenScope: String(parsed.tokenScope || parsed.scope || "").trim(),
     };
+    if (!scopedRaw && isProductionAdobePassEnvironmentKey(environmentKey)) {
+      localStorage.setItem(scopedCacheKey, JSON.stringify(normalized));
+    }
+    return normalized;
   } catch {
     return null;
   }
@@ -38077,6 +38094,7 @@ function resolveRequiredPremiumServiceScope(appInfo, debugMeta = null) {
 function clearDcrCache(programmerId, appGuid) {
   try {
     localStorage.removeItem(getDcrCacheKey(programmerId, appGuid));
+    localStorage.removeItem(getLegacyUnscopedDcrCacheKey(programmerId, appGuid));
     localStorage.removeItem(getLegacyDcrCacheKey(programmerId, appGuid));
   } catch {
     // Ignore localStorage cache cleanup failures.
@@ -38805,7 +38823,7 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
     state.premiumAppScopeHydrationPromiseByProgrammerId.delete(programmer.programmerId);
   }
 
-  const existing = state.premiumAppsByProgrammerId.get(programmer.programmerId);
+  const existing = getCurrentPremiumAppsSnapshot(programmer.programmerId);
   if (!forceRefresh && existing) {
     if (!existing?.degradation?.guid) {
       schedulePremiumAppScopeHydration(programmer, {
@@ -38857,7 +38875,7 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
         error: error instanceof Error ? error.message : String(error),
       });
     });
-    const existingServices = state.premiumAppsByProgrammerId.get(programmer.programmerId) || null;
+    const existingServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
     const resolvedDegradationApps = Array.isArray(premiumApps?.degradationApps)
       ? premiumApps.degradationApps.filter((appInfo) => appInfo?.guid)
       : [];
@@ -38869,7 +38887,7 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       cmMvpd: existingServices?.cmMvpd ?? null,
       cmMvpdSelectionKey: String(existingServices?.cmMvpdSelectionKey || "").trim(),
     };
-    state.premiumAppsByProgrammerId.set(programmer.programmerId, mergedServices);
+    setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
     return mergedServices;
   })();
 
@@ -39896,12 +39914,12 @@ function getCmTenantScopeForProgrammer(programmer = null) {
       : null;
   const selectedServiceByProgrammerId =
     programmerId && state.premiumAppsByProgrammerId instanceof Map
-      ? state.premiumAppsByProgrammerId.get(programmerId)?.cm
+      ? getCurrentPremiumAppsSnapshot(programmerId)?.cm
       : null;
   const selectedProgrammer = resolveSelectedProgrammer();
   const selectedProgrammerService =
     !programmerId && selectedProgrammer?.programmerId && state.premiumAppsByProgrammerId instanceof Map
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId)?.cm
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)?.cm
       : null;
   return resolveCmUsageTenantScopeValue(
     serviceByProgrammerId?.matchedTenants?.[0]?.tenantId,
@@ -41634,19 +41652,7 @@ function enforceCmUsageTenantScope(urlValue, tenantScope = "") {
 }
 
 function buildCmUsageQueryString(path, profileHarvest = null, tenantScope = "") {
-  const zoomKey = cmuUsageGetZoomKey(cmuUsageExtractPathParts(path), String(path || ""));
-  const timeWindow = zoomKey === "HR"
-    ? {
-        start: clickEsmIso(new Date(Date.now() - 24 * 60 * 60 * 1000)),
-        end: "",
-      }
-    : clickEsmComputeTimeWindow(zoomKey);
-  const nowIso = clickEsmIso(new Date());
   const params = new URLSearchParams();
-  params.set("start", String(timeWindow?.start || nowIso));
-  if (timeWindow?.end) {
-    params.set("end", String(timeWindow.end));
-  }
   params.set("limit", "1000");
   if (/\/tenant(?:\/|$)/i.test(String(path || "")) || /\/hour(?:\/|$)/i.test(String(path || ""))) {
     params.set("metrics", "users");
@@ -41792,8 +41798,6 @@ function buildCmRequestQueryDebugInfo(urlValue = "") {
       queryString: "",
       tenantScope: "",
       hasTenantScope: false,
-      start: "",
-      end: "",
       limit: "",
       metrics: "",
       format: "",
@@ -41814,8 +41818,6 @@ function buildCmRequestQueryDebugInfo(urlValue = "") {
       queryString,
       tenantScope,
       hasTenantScope: Boolean(tenantScope),
-      start: String(parsed.searchParams.get("start") || ""),
-      end: String(parsed.searchParams.get("end") || ""),
       limit: String(parsed.searchParams.get("limit") || ""),
       metrics: String(parsed.searchParams.get("metrics") || ""),
       format: String(parsed.searchParams.get("format") || ""),
@@ -41827,8 +41829,6 @@ function buildCmRequestQueryDebugInfo(urlValue = "") {
       queryString: "",
       tenantScope: "",
       hasTenantScope: false,
-      start: "",
-      end: "",
       limit: "",
       metrics: "",
       format: "",
@@ -41980,8 +41980,6 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
           endpointPath: queryDebugInfo.endpointPath,
           tenantScope: queryDebugInfo.tenantScope,
           hasTenantScope: queryDebugInfo.hasTenantScope,
-          start: queryDebugInfo.start,
-          end: queryDebugInfo.end,
           limit: queryDebugInfo.limit,
           metrics: queryDebugInfo.metrics,
           format: queryDebugInfo.format,
@@ -42028,8 +42026,6 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
             endpointPath: queryDebugInfo.endpointPath,
             tenantScope: queryDebugInfo.tenantScope,
             hasTenantScope: queryDebugInfo.hasTenantScope,
-            start: queryDebugInfo.start,
-            end: queryDebugInfo.end,
             limit: queryDebugInfo.limit,
             metrics: queryDebugInfo.metrics,
             format: queryDebugInfo.format,
@@ -42061,8 +42057,6 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
               endpointPath: queryDebugInfo.endpointPath,
               tenantScope: queryDebugInfo.tenantScope,
               hasTenantScope: queryDebugInfo.hasTenantScope,
-              start: queryDebugInfo.start,
-              end: queryDebugInfo.end,
               limit: queryDebugInfo.limit,
               metrics: queryDebugInfo.metrics,
               format: queryDebugInfo.format,
@@ -42129,8 +42123,6 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
             endpointPath: queryDebugInfo.endpointPath,
             tenantScope: queryDebugInfo.tenantScope,
             hasTenantScope: queryDebugInfo.hasTenantScope,
-            start: queryDebugInfo.start,
-            end: queryDebugInfo.end,
             limit: queryDebugInfo.limit,
             metrics: queryDebugInfo.metrics,
             format: queryDebugInfo.format,
@@ -42159,8 +42151,6 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
             endpointPath: queryDebugInfo.endpointPath,
             tenantScope: queryDebugInfo.tenantScope,
             hasTenantScope: queryDebugInfo.hasTenantScope,
-            start: queryDebugInfo.start,
-            end: queryDebugInfo.end,
             limit: queryDebugInfo.limit,
             metrics: queryDebugInfo.metrics,
             format: queryDebugInfo.format,
@@ -44232,7 +44222,7 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
 function orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestorId) {
   const candidates = Array.isArray(restV2Apps) ? restV2Apps : [];
   const byGuid = new Map(candidates.filter((item) => item?.guid).map((item) => [item.guid, item]));
-  const context = state.restV2AuthContextByRequestor.get(String(requestorId || "")) || {};
+  const context = getRequestorScopedRestV2AuthContext(String(requestorId || "")) || {};
   const ordered = [];
   const seen = new Set();
 
@@ -44301,12 +44291,14 @@ async function loadMvpdsFromRestV2(requestorId) {
     return new Map();
   }
 
-  if (state.mvpdCacheByRequestor.has(requestorId)) {
-    return state.mvpdCacheByRequestor.get(requestorId);
+  const cachedMvpdMap = getRequestorScopedMvpdCache(requestorId);
+  if (cachedMvpdMap) {
+    return cachedMvpdMap;
   }
 
-  if (state.mvpdLoadPromiseByRequestor.has(requestorId)) {
-    return state.mvpdLoadPromiseByRequestor.get(requestorId);
+  const existingLoadPromise = getRequestorScopedMvpdLoadPromise(requestorId);
+  if (existingLoadPromise) {
+    return existingLoadPromise;
   }
 
   const loadPromise = (async () => {
@@ -44334,8 +44326,8 @@ async function loadMvpdsFromRestV2(requestorId) {
           orderedCandidates
         );
 
-        state.mvpdCacheByRequestor.set(requestorId, map);
-        state.restV2AuthContextByRequestor.set(requestorId, {
+        setRequestorScopedMvpdCache(requestorId, map);
+        setRequestorScopedRestV2AuthContext(requestorId, {
           programmerId: programmer.programmerId,
           preferredAppGuid: appInfo.guid,
           candidateGuids: orderedCandidates.map((candidate) => candidate.guid).filter(Boolean),
@@ -44361,12 +44353,12 @@ async function loadMvpdsFromRestV2(requestorId) {
     throw lastError || new Error("Unable to load MVPDs via REST V2 configuration.");
   })();
 
-  state.mvpdLoadPromiseByRequestor.set(requestorId, loadPromise);
+  setRequestorScopedMvpdLoadPromise(requestorId, loadPromise);
   try {
     return await loadPromise;
   } finally {
-    if (state.mvpdLoadPromiseByRequestor.get(requestorId) === loadPromise) {
-      state.mvpdLoadPromiseByRequestor.delete(requestorId);
+    if (getRequestorScopedMvpdLoadPromise(requestorId) === loadPromise) {
+      setRequestorScopedMvpdLoadPromise(requestorId, null);
     }
   }
 }
@@ -44383,7 +44375,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
     refreshMvpdWorkspaceTools();
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices);
     void mvpdWorkspaceRefreshSelectedSnapshot({
@@ -44441,7 +44433,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
     refreshMvpdWorkspaceTools();
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices);
     void mvpdWorkspaceRefreshSelectedSnapshot({
@@ -44463,7 +44455,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
     refreshMvpdWorkspaceTools();
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices);
     void mvpdWorkspaceRefreshSelectedSnapshot({
@@ -44922,9 +44914,25 @@ async function hydrateCookieSessionWithProfile() {
 function renderBuildInfo() {
   const manifestVersion = chrome.runtime.getManifest().version;
   if (!els.buildInfo) {
+    renderPageEnvironmentBadge();
     return;
   }
   els.buildInfo.textContent = `v${manifestVersion}`;
+  renderPageEnvironmentBadge();
+}
+
+function renderPageEnvironmentBadge() {
+  if (!els.pageEnvBadge || !els.pageEnvBadgeValue) {
+    return;
+  }
+  const environment = getActiveAdobePassEnvironment();
+  const registry = getUnderParEnvironmentRegistry();
+  const label = String(environment?.label || "").trim() || "Production";
+  const title =
+    String(registry?.buildEnvironmentTooltip?.(environment) || environment?.envBadgeTitle || label).trim() || label;
+  els.pageEnvBadgeValue.textContent = label;
+  els.pageEnvBadge.title = title;
+  els.pageEnvBadge.setAttribute("aria-label", title);
 }
 
 function renderRestrictedView() {
@@ -45415,7 +45423,7 @@ function registerEventHandlers() {
     }
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices);
     refreshMvpdWorkspaceTools();
@@ -45452,7 +45460,7 @@ function registerEventHandlers() {
     emitGlobalSelectorChangeLog("MVPD", state.selectedMvpdId, mvpdSelectionLabel);
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
-      ? state.premiumAppsByProgrammerId.get(selectedProgrammer.programmerId) || null
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
       : null;
     const mvpdClearLabel = state.selectedMvpdId
       ? getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), state.selectedMvpdId)
@@ -45546,9 +45554,23 @@ function registerEventHandlers() {
   );
 }
 
-function init() {
+async function init() {
+  let environment = resolveAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  try {
+    environment = await initializeAdobePassEnvironment();
+  } catch (error) {
+    applyAdobePassEnvironment(environment);
+    log("AdobePASS environment bootstrap failed", error instanceof Error ? error.message : String(error));
+  }
   logDecisionPoint(`Sidepanel initialized | UnderPAR ${chrome.runtime?.getManifest?.()?.version || "unknown"}`, {
     location: String(window.location.href || ""),
+    adobePassEnvironment: {
+      key: String(environment?.key || ""),
+      label: String(environment?.label || ""),
+      consoleBase: String(environment?.consoleBase || ""),
+      mgmtBase: String(environment?.mgmtBase || ""),
+      spBase: String(environment?.spBase || ""),
+    },
   });
   ensureEsmWorkspaceRuntimeListener();
   ensureEsmWorkspaceWorkspaceTabWatcher();
@@ -45564,6 +45586,7 @@ function init() {
   ensureBobtoolsWorkspaceTabWatcher();
   ensureRestV2LoginTabWatcher();
   ensureRestV2BobtoolsRedirectWatcher();
+  registerAdobePassEnvironmentStorageListener();
   void renderBuildInfo();
   resetWorkflowForLoggedOut();
   registerEventHandlers();
@@ -45572,4 +45595,4 @@ function init() {
   startExperienceCloudSessionMonitor();
 }
 
-init();
+void init();

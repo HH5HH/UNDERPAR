@@ -72,7 +72,7 @@
     ["nsdk", "Client SDK"],
     ["nsdk-version", "Adobe Pass SDK version"],
   ]);
-  const ESM_NODE_BASE_URL = "https://mgmt.auth.adobe.com/esm/v3/media-company/";
+  let ESM_NODE_BASE_URL = "https://mgmt.auth.adobe.com/esm/v3/media-company/";
   const ESM_NODE_BASE_PATH = "esm/v3/media-company/";
   const WORKSPACE_EXPORT_FILE_SYSTEM_QUERY_KEYS = new Set(["format", "limit"]);
   const CLICK_ESM_ZOOM_OPTIONS = ["YR", "MO", "DAY", "HR", "MIN"];
@@ -84,7 +84,7 @@
     MIN: "/minute",
   };
   const CLICK_ESM_RESULT_LIMIT = 100;
-  const CLICK_ESM_TOKEN_URL = "https://mgmt.auth.adobe.com/api/v1/tokens/usermanagement";
+  let CLICK_ESM_TOKEN_URL = "https://sp.auth.adobe.com/o/client/token";
 
   const payloadNode = document.getElementById("clickesmws-payload");
   let payload = {};
@@ -93,6 +93,45 @@
   } catch {
     payload = {};
   }
+
+  const DEFAULT_ADOBEPASS_ENVIRONMENT = {
+    key: "release-production",
+    route: "release-production",
+    mgmtBase: "https://mgmt.auth.adobe.com",
+    spBase: "https://sp.auth.adobe.com",
+    dcrTokenUrl: "https://sp.auth.adobe.com/o/client/token",
+    clickEsmTokenUrl: "https://sp.auth.adobe.com/o/client/token",
+    esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/",
+  };
+
+  function resolveWorkspaceAdobePassEnvironment(value = null) {
+    const embedded =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? value
+        : payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object"
+          ? payload.adobePassEnvironment
+          : null;
+    if (embedded) {
+      return {
+        ...DEFAULT_ADOBEPASS_ENVIRONMENT,
+        ...embedded,
+      };
+    }
+    return {
+      ...DEFAULT_ADOBEPASS_ENVIRONMENT,
+    };
+  }
+
+  function applyWorkspaceAdobePassEnvironment(environment = null) {
+    const resolved = resolveWorkspaceAdobePassEnvironment(environment);
+    ESM_NODE_BASE_URL = String(resolved.esmBase || `${resolved.mgmtBase}/esm/v3/media-company/`);
+    CLICK_ESM_TOKEN_URL = String(
+      resolved.clickEsmTokenUrl || resolved.dcrTokenUrl || `${resolved.spBase || "https://sp.auth.adobe.com"}/o/client/token`
+    );
+    return resolved;
+  }
+
+  applyWorkspaceAdobePassEnvironment(payload?.adobePassEnvironment);
 
   const CLIENT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || String(payload.clientTimeZone || "UTC");
 
@@ -115,10 +154,13 @@
     rerunAllButton: document.getElementById("workspace-rerun-all"),
     rerunIndicator: document.getElementById("workspace-rerun-indicator"),
     clearButton: document.getElementById("workspace-clear-all"),
+    pageEnvBadge: document.getElementById("page-env-badge"),
+    pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
   };
 
   enforceExportToolbarConstraints();
   applyHeaderFromPayload();
+  renderWorkspaceEnvironmentBadge();
   registerTopHandlers();
   hydrateCardsFromPayload();
   syncToolbarButtons();
@@ -178,6 +220,60 @@
     if (els.exportMeta) {
       els.exportMeta.textContent = String(payload.exportMetaText || "");
     }
+  }
+
+  function buildWorkspaceEnvironmentTooltip(environment) {
+    const resolved = environment && typeof environment === "object" ? environment : {};
+    const route = String(resolved.route || DEFAULT_ADOBEPASS_ENVIRONMENT.route || "release-production").trim() || "release-production";
+    const label = String(resolved.label || (route === "release-staging" ? "Staging" : "Production")).trim() || "Production";
+    const consoleBase =
+      String(resolved.consoleBase || (route === "release-staging" ? "https://console.auth-staging.adobe.com" : "https://console.auth.adobe.com")).trim();
+    const mgmtBase =
+      String(resolved.mgmtBase || DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "").trim() ||
+      (route === "release-staging" ? "https://mgmt.auth-staging.adobe.com" : "https://mgmt.auth.adobe.com");
+    const spBase =
+      String(resolved.spBase || DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "").trim() ||
+      (route === "release-staging" ? "https://sp.auth-staging.adobe.com" : "https://sp.auth.adobe.com");
+    const consoleShellUrl = String(
+      resolved.consoleShellUrl || `https://experience.adobe.com/#/@adobepass/pass/authentication/${route}`
+    ).trim();
+    const cmConsoleOrigin = String(
+      resolved.cmConsoleOrigin || (route === "release-staging" ? "https://experience-stage.adobe.com" : "https://experience.adobe.com")
+    ).trim();
+    const cmConsoleShellUrl = String(resolved.cmConsoleShellUrl || `${cmConsoleOrigin.replace(/\/+$/, "")}/#/@adobepass/cm-console`).trim();
+    const dcrRegisterUrl = String(resolved.dcrRegisterUrl || `${spBase}/o/client/register`).trim();
+    const dcrTokenUrl = String(resolved.dcrTokenUrl || resolved.clickEsmTokenUrl || `${spBase}/o/client/token`).trim();
+    const restV2Base = String(resolved.restV2Base || `${spBase}/api/v2`).trim();
+    const esmBase = String(resolved.esmBase || `${mgmtBase}/esm/v3/media-company/`).trim();
+    const degradationBase = String(resolved.degradationBase || `${mgmtBase}/control/v3/degradation`).trim();
+    return String(
+      resolved.envBadgeTitle ||
+        [
+          `Environment : ${label}`,
+          `AdobePASS Console : ${consoleShellUrl}`,
+          `AdobePASS Console Base : ${consoleBase}`,
+          `CM Console : ${cmConsoleShellUrl}`,
+          `Management : ${mgmtBase}`,
+          `Service Provider : ${spBase}`,
+          `DCR Register : ${dcrRegisterUrl}`,
+          `DCR Token : ${dcrTokenUrl}`,
+          `REST V2 : ${restV2Base}`,
+          `ESM : ${esmBase}`,
+          `DEGRADATION : ${degradationBase}`,
+        ].join("\n")
+    ).trim();
+  }
+
+  function renderWorkspaceEnvironmentBadge() {
+    if (!els.pageEnvBadge || !els.pageEnvBadgeValue) {
+      return;
+    }
+    const environment = resolveWorkspaceAdobePassEnvironment(payload?.adobePassEnvironment);
+    const label = String(environment?.label || "").trim() || "Production";
+    const title = buildWorkspaceEnvironmentTooltip(environment) || label;
+    els.pageEnvBadgeValue.textContent = label;
+    els.pageEnvBadge.title = title;
+    els.pageEnvBadge.setAttribute("aria-label", title);
   }
 
   function registerTopHandlers() {
@@ -386,13 +482,28 @@
     return sanitizeFileSegment(new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z"), "snapshot");
   }
 
+  function getTokenStorageScope() {
+    const environment = resolveWorkspaceAdobePassEnvironment();
+    const key = String(environment?.key || "").trim().toLowerCase();
+    if (key) {
+      return key;
+    }
+    const origin = String(environment?.spBase || environment?.mgmtBase || ESM_NODE_BASE_URL || "").trim();
+    try {
+      return String(new URL(origin, window.location.href).host || "mgmt.auth.adobe.com").trim().toLowerCase();
+    } catch {
+      return String(origin || "mgmt.auth.adobe.com").trim().toLowerCase();
+    }
+  }
+
   function getTokenStorageKey() {
     const cid = String(document.querySelector('input[name="cid"]')?.value || "").trim();
+    const envScope = getTokenStorageScope().replace(/[^a-zA-Z0-9._-]+/g, "_") || "release-production";
     if (!cid) {
-      return "clickesm_access_token_default";
+      return `clickesm_access_token_${envScope}_default`;
     }
     const safeCid = cid.replace(/[^a-zA-Z0-9._-]+/g, "_");
-    return `clickesm_access_token_${safeCid}`;
+    return `clickesm_access_token_${envScope}_${safeCid}`;
   }
 
   function getToken() {
@@ -401,7 +512,7 @@
       return inputToken;
     }
     const storageKey = getTokenStorageKey();
-    return String(localStorage.getItem(storageKey) || localStorage.getItem("access_token") || "").trim();
+    return String(localStorage.getItem(storageKey) || "").trim();
   }
 
   function setToken(token) {
@@ -413,10 +524,8 @@
     const storageKey = getTokenStorageKey();
     if (normalized) {
       localStorage.setItem(storageKey, normalized);
-      localStorage.setItem("access_token", normalized);
     } else {
       localStorage.removeItem(storageKey);
-      localStorage.removeItem("access_token");
     }
   }
 
@@ -430,7 +539,7 @@
     const response = await fetch(
       `${CLICK_ESM_TOKEN_URL}?grant_type=client_credentials&client_id=${encodeURIComponent(cid)}&client_secret=${encodeURIComponent(csc)}`,
       {
-        method: "GET",
+        method: "POST",
       }
     );
     if (!response.ok) {

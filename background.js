@@ -44,6 +44,7 @@ const WEB_REQUEST_FILTER = { urls: ["<all_urls>"] };
 const BUILD_FINGERPRINT_FILES = [
   "manifest.json",
   "background.js",
+  "underpar-environment.js",
   "popup.js",
   "popup.html",
   "sidepanel.html",

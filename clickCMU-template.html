@@ -420,7 +420,6 @@
         const DEFAULT_SCOPE = "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext";
         const TOKEN_FRESH_SKEW_MS = 45 * 1000;
         const REQUEST_TIMEOUT_MS = 45 * 1000;
-        const CMU_SOURCE_UTC_OFFSET_MINUTES = -8 * 60;
         const TENANT_QUERY_KEYS = ["tenant", "tenant_id", "tenant-id"];
 
         const els = {
@@ -531,12 +530,19 @@
           return canonicalizeUsagePath(pathValue).startsWith("/v2/year/tenant");
         }
 
-        function formatIsoValue(dateValue) {
-          return new Date(dateValue).toISOString().replace(/\.\d{3}Z$/, "Z");
-        }
-
-        function shiftInstantToPstCalendar(dateValue) {
-          return new Date(new Date(dateValue).getTime() + (CMU_SOURCE_UTC_OFFSET_MINUTES * 60 * 1000));
+        function stripServerManagedTimeParams(urlValue) {
+          const raw = String(urlValue || "").trim();
+          if (!raw) {
+            return "";
+          }
+          try {
+            const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+            parsed.searchParams.delete("start");
+            parsed.searchParams.delete("end");
+            return parsed.toString();
+          } catch {
+            return raw;
+          }
         }
 
         function normalizeUsageZoomValue(value = "") {
@@ -617,39 +623,6 @@
             return "YR";
           }
           return "";
-        }
-
-        function computeUsageTimeWindow(zoomKey = "") {
-          const normalizedZoom = String(zoomKey || "").trim().toUpperCase();
-          const now = new Date();
-          const nowPst = shiftInstantToPstCalendar(now);
-          const nowIso = formatIsoValue(now);
-          if (normalizedZoom === "YR") {
-            return { start: String(nowPst.getUTCFullYear() - 1), end: nowIso };
-          }
-          if (normalizedZoom === "MO") {
-            const previousMonth = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth() - 1, 1));
-            return {
-              start: `${previousMonth.getUTCFullYear()}-${String(previousMonth.getUTCMonth() + 1).padStart(2, "0")}`,
-              end: nowIso,
-            };
-          }
-          if (normalizedZoom === "DAY") {
-            const previousDay = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth(), nowPst.getUTCDate() - 1));
-            return {
-              start: `${previousDay.getUTCFullYear()}-${String(previousDay.getUTCMonth() + 1).padStart(2, "0")}-${String(
-                previousDay.getUTCDate()
-              ).padStart(2, "0")}`,
-              end: nowIso,
-            };
-          }
-          if (normalizedZoom === "HR") {
-            return { start: formatIsoValue(new Date(now.getTime() - 12 * 60 * 60 * 1000)), end: nowIso };
-          }
-          if (normalizedZoom === "MIN") {
-            return { start: formatIsoValue(new Date(now.getTime() - 60 * 60 * 1000)), end: nowIso };
-          }
-          return { start: nowIso, end: nowIso };
         }
 
         function applyTenantScopeToSearchParams(searchParams, tenantScope = "") {
@@ -999,18 +972,17 @@
             return "";
           }
           try {
-            const parsed = new URL(text, CM_REPORTS_BASE_URL);
+            const parsed = new URL(stripServerManagedTimeParams(text), CM_REPORTS_BASE_URL);
             const canonicalPath = canonicalizeUsagePath(parsed.pathname);
             if (canonicalPath) {
               parsed.pathname = canonicalPath;
             }
+            parsed.searchParams.delete("start");
+            parsed.searchParams.delete("end");
             if (!parsed.searchParams.has("format")) {
               parsed.searchParams.set("format", "json");
             }
             if (isUsagePath(parsed.pathname)) {
-              const timeWindow = computeUsageTimeWindow(getUsageZoomKey(parsed.pathname, text));
-              parsed.searchParams.set("start", String(timeWindow.start || formatIsoValue(new Date())));
-              parsed.searchParams.set("end", String(timeWindow.end || formatIsoValue(new Date())));
               if (!parsed.searchParams.has("metrics")) {
                 const lowerPath = String(parsed.pathname || "").toLowerCase();
                 if (lowerPath.includes("/tenant") || lowerPath.includes("/hour")) {
@@ -1307,13 +1279,16 @@
             if (!sourceRaw) {
               return applyTenantScopeToUrl(endpointParsed.toString());
             }
-            const sourceParsed = new URL(sourceRaw, CM_REPORTS_BASE_URL);
+            const sourceParsed = new URL(stripServerManagedTimeParams(sourceRaw), CM_REPORTS_BASE_URL);
             sourceParsed.searchParams.forEach((value, key) => {
+              if (key === "start" || key === "end") {
+                return;
+              }
               endpointParsed.searchParams.append(key, value);
             });
             return applyTenantScopeToUrl(endpointParsed.toString());
           } catch {
-            return applyTenantScopeToUrl(endpointRaw);
+            return applyTenantScopeToUrl(stripServerManagedTimeParams(endpointRaw));
           }
         }
 
