@@ -205,7 +205,8 @@ function renderWorkspaceEnvironmentBadge() {
     : resolveWorkspaceAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
   const label = String(environment?.label || "").trim() || "Production";
   const title = buildWorkspaceEnvironmentTooltip(environment) || label;
-  els.pageEnvBadgeValue.textContent = label;
+  els.pageEnvBadgeValue.textContent = "";
+  els.pageEnvBadgeValue.setAttribute("aria-hidden", "true");
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
 }

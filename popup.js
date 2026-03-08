@@ -16559,6 +16559,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
   let accessToken = await ensureCmApiAccessToken({
     forceRefresh: options.forceRefresh === true,
     freshLeewayMs: 60 * 1000,
+    allowTemporaryPageContextTab: true,
   });
   const initialClaims = parseJwtPayload(String(accessToken || "").trim()) || {};
   const initialClientId = String(firstNonEmptyString([initialClaims.client_id, initialClaims.clientId]) || "")
@@ -16568,6 +16569,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
     accessToken = await ensureCmApiAccessToken({
       forceRefresh: true,
       freshLeewayMs: 60 * 1000,
+      allowTemporaryPageContextTab: true,
     });
   }
   const normalizedToken = String(accessToken || "").trim();
@@ -41344,6 +41346,7 @@ async function tryRefreshCmTokenFromIms(seedToken = "", options = {}) {
 
 async function ensureCmApiAccessToken(options = {}) {
   const forceRefresh = options.forceRefresh === true;
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
   const tokenFreshLeewayMs =
     Number.isFinite(options.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
       ? Number(options.freshLeewayMs)
@@ -41382,6 +41385,7 @@ async function ensureCmApiAccessToken(options = {}) {
       const requireFresh = forceRefresh || !tokenLooksFresh || !tokenSupportsCatalog;
       const refreshedFromPageContext = await requestCmConsoleTokenFromExperiencePageContext({
         requireFresh,
+        allowTemporaryTab: allowTemporaryPageContextTab,
       });
       if (refreshedFromPageContext?.accessToken) {
         const persistedPageContextToken = await persistCmTokenBootstrapResult(refreshedFromPageContext, {});
@@ -45327,7 +45331,8 @@ function renderPageEnvironmentBadge() {
         environment?.envBadgeTitle ||
         `Environment : ${label}`
     ).trim() || label;
-  els.pageEnvBadgeValue.textContent = label;
+  els.pageEnvBadgeValue.textContent = "";
+  els.pageEnvBadgeValue.setAttribute("aria-hidden", "true");
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
 }
