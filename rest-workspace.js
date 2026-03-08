@@ -407,6 +407,13 @@ function handleWorkspaceEvent(eventName, payload = {}) {
     handleReportResult(payload);
     return;
   }
+  if (event === "environment-switch-rerun") {
+    if (state.loading || !state.report) {
+      return;
+    }
+    void rerunLatestReport();
+    return;
+  }
   if (event === "workspace-clear") {
     clearWorkspaceCards();
     setStatus("");

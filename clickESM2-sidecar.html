@@ -8096,6 +8096,40 @@ function refreshHeaderStates(state) {
   });
 }
 
+function __sanitizeExportFileSegment(value, fallback = 'download') {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[^\w.-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return normalized || fallback;
+}
+
+function __resolveEnvironmentFileTag(urlValue = '') {
+  const raw = String(urlValue || '').trim().toLowerCase();
+  return raw.includes('staging') || raw.includes('stage') ? 'STAGE' : 'PROD';
+}
+
+function __buildEsmCsvFileName(anchor, requestUrl = '') {
+  const mediaCompany = __sanitizeExportFileSegment(
+    String(document.title || '').replace(/\s+click\s*esm.*$/i, ''),
+    'MediaCompany'
+  );
+  let endpoint = '';
+  try {
+    const parsed = new URL(String(anchor?.href || requestUrl || ''), window.location.href);
+    endpoint = String(parsed.pathname || '')
+      .replace(/^\/+/, '')
+      .replace(/^esm\/v3\/media-company\/?/i, '')
+      .replace(/\//g, '-');
+  } catch {
+    endpoint = '';
+  }
+  const endpointSegment = __sanitizeExportFileSegment(endpoint || anchor?.title || anchor?.textContent || 'endpoint', 'endpoint');
+  const envTag = __resolveEnvironmentFileTag(requestUrl || anchor?.href || '');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `${mediaCompany}_clickESM_${endpointSegment}_${envTag}_${stamp}.csv`;
+}
+
 /* ---------- CSV DOWNLOAD ---------- */
 async function downloadCsv(link, baseHref, sortState) {
   const dl = link.closest('dl');
@@ -8138,6 +8172,7 @@ async function downloadCsv(link, baseHref, sortState) {
 
   const a2 = document.createElement('a');
   a2.href = url;
+  a2.download = __buildEsmCsvFileName(anchor, csvUrl);
   a2.click();
 
   URL.revokeObjectURL(url);
@@ -8696,7 +8731,11 @@ function getCompactCmuLabel(value = "") {
 
 function getEnvBadgeMessage(value = "") {
   const raw = String(value || "").trim();
-  return raw ? `Data Environment : ${raw}` : "Data Environment";
+  if (!raw) {
+    return "Data Environment";
+  }
+  const label = /staging|stage/i.test(raw) ? "Staging" : "Production";
+  return [`Environment : ${label}`, `ESM : ${raw}`].join("\n");
 }
 
 function initCmuEnvDisplayAndLabels() {

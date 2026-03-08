@@ -52,6 +52,13 @@ body {
   backdrop-filter: blur(12px);
 }
 
+.settings-card {
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .settings-subtitle,
 .settings-note {
   margin: 8px 0 0;
@@ -76,15 +83,19 @@ body {
 }
 
 .control-row {
-  display: flex;
+  display: inline-flex;
   gap: 12px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  max-width: 100%;
 }
 
 .env-select {
-  flex: 1 1 320px;
-  min-width: 260px;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  max-width: min(100%, 24rem);
+  field-sizing: content;
   height: 40px;
   border: 1px solid rgba(20, 63, 126, 0.18);
   border-radius: 12px;
@@ -120,20 +131,6 @@ body {
 .env-select:disabled {
   opacity: 0.66;
   cursor: default;
-}
-
-.panel-status {
-  margin: 12px 0 0;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.panel-status.success {
-  color: var(--up-success);
-}
-
-.panel-status.error {
-  color: var(--up-error);
 }
 
 .context-card h2 {
@@ -180,14 +177,8 @@ body {
     padding: 14px;
   }
 
-  .control-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .switch-btn,
-  .env-select {
-    width: 100%;
+  .settings-card {
+    max-width: 100%;
   }
 
   .context-row {

@@ -1,6 +1,5 @@
 const environmentSelect = document.getElementById("environment-select");
 const switchButton = document.getElementById("switch-btn");
-const statusEl = document.getElementById("panel-status");
 const shellUrlEl = document.getElementById("shell-url");
 const consoleBaseEl = document.getElementById("console-base");
 const cmConsoleUrlEl = document.getElementById("cm-console-url");
@@ -57,12 +56,14 @@ function cloneEnvironment(environment) {
   const restV2Base = `${source.spBase}/api/v2`;
   const esmBase = `${source.mgmtBase}/esm/v3/media-company/`;
   const degradationBase = `${source.mgmtBase}/control/v3/degradation`;
+  const cmReportsBase = String(source.cmReportsBase || "https://cm-reports.adobeprimetime.com").trim();
   return {
     ...source,
     consoleShellUrl,
     cmConsoleShellUrl,
     consoleProgrammersUrl: `${consoleShellUrl}/programmers`,
     consoleCallbackPrefix: `${source.consoleBase}/oauth2/callback`,
+    cmReportsBase,
     degradationBase,
     dcrRegisterUrl,
     dcrTokenUrl,
@@ -82,6 +83,7 @@ function buildEnvironmentTooltip(environment) {
   const restV2Base = `${env.spBase}/api/v2`;
   const esmBase = `${env.mgmtBase}/esm/v3/media-company/`;
   const degradationBase = `${env.mgmtBase}/control/v3/degradation`;
+  const cmReportsBase = String(env.cmReportsBase || "https://cm-reports.adobeprimetime.com").trim();
   return [
     `Environment : ${env.label}`,
     `AdobePASS Console : ${consoleShellUrl}`,
@@ -94,6 +96,7 @@ function buildEnvironmentTooltip(environment) {
     `REST V2 : ${restV2Base}`,
     `ESM : ${esmBase}`,
     `DEGRADATION : ${degradationBase}`,
+    `Concurrency Monitoring : ${cmReportsBase}`,
   ].join("\n");
 }
 
@@ -138,16 +141,6 @@ const fallbackRegistry = Object.freeze({
     return setFallbackStoredEnvironment(value);
   },
 });
-
-function setStatus(message = "", type = "") {
-  const text = String(message || "").trim();
-  statusEl.textContent = text;
-  statusEl.hidden = text.length === 0;
-  statusEl.classList.remove("success", "error");
-  if (type === "success" || type === "error") {
-    statusEl.classList.add(type);
-  }
-}
 
 function getEnvironmentRegistry() {
   return globalThis.UnderParEnvironment || fallbackRegistry;
@@ -217,13 +210,11 @@ async function handleEnvironmentSelectionChange() {
   }
   const selectedEnvironment = registry.getEnvironment(environmentSelect.value);
   renderEnvironmentDetails(selectedEnvironment);
-  setStatus("");
 }
 
 async function handleSwitch() {
   const registry = getEnvironmentRegistry();
   if (!registry) {
-    setStatus("Environment registry is unavailable.", "error");
     return;
   }
 
@@ -235,14 +226,11 @@ async function handleSwitch() {
       : await fallbackRegistry.getStoredEnvironment();
     if (normalizeEnvironmentKey(currentEnvironment?.key) === normalizeEnvironmentKey(environmentSelect.value)) {
       renderEnvironmentDetails(currentEnvironment);
-      setStatus(`UnderPAR is already using ${currentEnvironment.label}.`, "success");
       return;
     }
-    const selectedEnvironment = await registry.setStoredEnvironment(environmentSelect.value);
-    renderEnvironmentDetails(selectedEnvironment);
-    setStatus(`Switching UnderPAR to ${selectedEnvironment.label}...`, "success");
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error), "error");
+    await registry.setStoredEnvironment(environmentSelect.value);
+    await loadSelectedEnvironment();
+  } catch (_error) {
   } finally {
     switchButton.disabled = false;
     environmentSelect.disabled = false;
@@ -258,8 +246,7 @@ function init() {
   switchButton.addEventListener("click", () => {
     void handleSwitch();
   });
-  void loadSelectedEnvironment().catch((error) => {
-    setStatus(error instanceof Error ? error.message : String(error), "error");
+  void loadSelectedEnvironment().catch(() => {
     environmentSelect.disabled = false;
     switchButton.disabled = false;
   });

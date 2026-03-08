@@ -226,42 +226,11 @@
     const resolved = environment && typeof environment === "object" ? environment : {};
     const route = String(resolved.route || DEFAULT_ADOBEPASS_ENVIRONMENT.route || "release-production").trim() || "release-production";
     const label = String(resolved.label || (route === "release-staging" ? "Staging" : "Production")).trim() || "Production";
-    const consoleBase =
-      String(resolved.consoleBase || (route === "release-staging" ? "https://console.auth-staging.adobe.com" : "https://console.auth.adobe.com")).trim();
     const mgmtBase =
       String(resolved.mgmtBase || DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "").trim() ||
       (route === "release-staging" ? "https://mgmt.auth-staging.adobe.com" : "https://mgmt.auth.adobe.com");
-    const spBase =
-      String(resolved.spBase || DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "").trim() ||
-      (route === "release-staging" ? "https://sp.auth-staging.adobe.com" : "https://sp.auth.adobe.com");
-    const consoleShellUrl = String(
-      resolved.consoleShellUrl || `https://experience.adobe.com/#/@adobepass/pass/authentication/${route}`
-    ).trim();
-    const cmConsoleOrigin = String(
-      resolved.cmConsoleOrigin || (route === "release-staging" ? "https://experience-stage.adobe.com" : "https://experience.adobe.com")
-    ).trim();
-    const cmConsoleShellUrl = String(resolved.cmConsoleShellUrl || `${cmConsoleOrigin.replace(/\/+$/, "")}/#/@adobepass/cm-console`).trim();
-    const dcrRegisterUrl = String(resolved.dcrRegisterUrl || `${spBase}/o/client/register`).trim();
-    const dcrTokenUrl = String(resolved.dcrTokenUrl || resolved.clickEsmTokenUrl || `${spBase}/o/client/token`).trim();
-    const restV2Base = String(resolved.restV2Base || `${spBase}/api/v2`).trim();
     const esmBase = String(resolved.esmBase || `${mgmtBase}/esm/v3/media-company/`).trim();
-    const degradationBase = String(resolved.degradationBase || `${mgmtBase}/control/v3/degradation`).trim();
-    return String(
-      resolved.envBadgeTitle ||
-        [
-          `Environment : ${label}`,
-          `AdobePASS Console : ${consoleShellUrl}`,
-          `AdobePASS Console Base : ${consoleBase}`,
-          `CM Console : ${cmConsoleShellUrl}`,
-          `Management : ${mgmtBase}`,
-          `Service Provider : ${spBase}`,
-          `DCR Register : ${dcrRegisterUrl}`,
-          `DCR Token : ${dcrTokenUrl}`,
-          `REST V2 : ${restV2Base}`,
-          `ESM : ${esmBase}`,
-          `DEGRADATION : ${degradationBase}`,
-        ].join("\n")
-    ).trim();
+    return [`Environment : ${label}`, `ESM : ${esmBase}`].join("\n").trim();
   }
 
   function renderWorkspaceEnvironmentBadge() {
@@ -351,6 +320,31 @@
       .replace(/[^\w.-]+/g, "_")
       .replace(/^_+|_+$/g, "");
     return normalized || fallback;
+  }
+
+  function getWorkspaceEnvironmentFileTag(environment = null) {
+    const resolved =
+      environment && typeof environment === "object" ? environment : resolveWorkspaceAdobePassEnvironment(payload?.adobePassEnvironment);
+    const raw = [
+      resolved?.shortCode,
+      resolved?.label,
+      resolved?.key,
+      resolved?.route,
+      resolved?.consoleBase,
+      resolved?.mgmtBase,
+      resolved?.spBase,
+      resolved?.consoleShellUrl,
+      resolved?.cmConsoleOrigin,
+      resolved?.cmConsoleShellUrl,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (raw.includes("staging") || raw.includes("stage")) {
+      return "STAGE";
+    }
+    return "PROD";
   }
 
   function truncateFileSegment(value, maxLength = 48) {
@@ -663,7 +657,12 @@
   }
 
   function buildLiveRequestUrl(cardState, endpointOverride = "") {
-    const baseUrl = firstNonEmptyString([endpointOverride, cardState?.endpointUrl, cardState?.requestUrl]);
+    const sourceUrl = firstNonEmptyString([endpointOverride, cardState?.endpointUrl, cardState?.requestUrl]);
+    const requestContext = parseEsmRequestContext(sourceUrl);
+    const rebasedBaseUrl = requestContext.displayPath
+      ? `${String(ESM_NODE_BASE_URL || "").replace(/\/+$/, "")}/${requestContext.displayPath}`
+      : sourceUrl;
+    const baseUrl = rebasedBaseUrl;
     if (!baseUrl) {
       throw new Error("Endpoint URL is required.");
     }
@@ -2186,8 +2185,9 @@
     const rows = buildCsvRows(tableState);
     const csvText = rows.map((line) => line.map(csvEscape).join(",")).join("\r\n");
     const nodeLabel = sanitizeFileSegment(getEsmNodeLabel(String(cardState?.requestUrl || cardState?.endpointUrl || "")), "workspace");
+    const envTag = getWorkspaceEnvironmentFileTag();
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const fileName = `${nodeLabel}_clickESMWS_${stamp}.csv`;
+    const fileName = `${nodeLabel}_clickESMWS_${envTag}_${stamp}.csv`;
 
     const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
     const objectUrl = URL.createObjectURL(blob);
@@ -2530,6 +2530,9 @@
       controllerStateText: String(els.controllerState?.textContent || payload?.controllerStateText || "Selected Media Company"),
       filterStateText: String(els.filterState?.textContent || payload?.filterStateText || ""),
       exportMetaText: "",
+      adobePassEnvironment: {
+        ...resolveWorkspaceAdobePassEnvironment(payload?.adobePassEnvironment),
+      },
       programmerId: String(payload?.programmerId || ""),
       programmerName: String(payload?.programmerName || ""),
       requestorIds: state.requestorIds.slice(0, 24),
@@ -2545,8 +2548,9 @@
       sanitizeFileSegment(firstNonEmptyString([snapshot?.programmerName, snapshot?.programmerId, "MediaCompany"]), "MediaCompany"),
       48
     );
+    const envTag = getWorkspaceEnvironmentFileTag(snapshot?.adobePassEnvironment);
     const epoch = Date.now();
-    return `${mediaCompany}_clickESMWS_${epoch}.html`;
+    return `${mediaCompany}_clickESMWS_${envTag}_${epoch}.html`;
   }
 
   function downloadHtmlFile(htmlText, fileName) {

@@ -179,46 +179,21 @@ async function initializeWorkspaceAdobePassEnvironment() {
 }
 
 function buildWorkspaceEnvironmentTooltip(environment) {
-  const resolved = environment && typeof environment === "object" ? environment : {};
+  const resolved =
+    environment && typeof environment === "object"
+      ? environment
+      : resolveWorkspaceAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  const registry = getWorkspaceEnvironmentRegistry();
+  if (registry?.buildEnvironmentBadgeTooltip) {
+    return String(registry.buildEnvironmentBadgeTooltip(resolved, "esm") || "").trim();
+  }
   const route = String(resolved.route || DEFAULT_ADOBEPASS_ENVIRONMENT.route || "release-production").trim() || "release-production";
   const label = String(resolved.label || (route === "release-staging" ? "Staging" : "Production")).trim() || "Production";
-  const consoleBase =
-    String(resolved.consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "").trim() ||
-    (route === "release-staging" ? "https://console.auth-staging.adobe.com" : "https://console.auth.adobe.com");
   const mgmtBase =
     String(resolved.mgmtBase || DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "").trim() ||
     (route === "release-staging" ? "https://mgmt.auth-staging.adobe.com" : "https://mgmt.auth.adobe.com");
-  const spBase =
-    String(resolved.spBase || DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "").trim() ||
-    (route === "release-staging" ? "https://sp.auth-staging.adobe.com" : "https://sp.auth.adobe.com");
-  const consoleShellUrl = String(
-    resolved.consoleShellUrl || `https://experience.adobe.com/#/@adobepass/pass/authentication/${route}`
-  ).trim();
-  const cmConsoleOrigin = String(
-    resolved.cmConsoleOrigin || (route === "release-staging" ? "https://experience-stage.adobe.com" : "https://experience.adobe.com")
-  ).trim();
-  const cmConsoleShellUrl = String(resolved.cmConsoleShellUrl || `${cmConsoleOrigin.replace(/\/+$/, "")}/#/@adobepass/cm-console`).trim();
-  const dcrRegisterUrl = String(resolved.dcrRegisterUrl || `${spBase}/o/client/register`).trim();
-  const dcrTokenUrl = String(resolved.dcrTokenUrl || resolved.clickEsmTokenUrl || `${spBase}/o/client/token`).trim();
-  const restV2Base = String(resolved.restV2Base || `${spBase}/api/v2`).trim();
   const esmBase = String(resolved.esmBase || `${mgmtBase}/esm/v3/media-company/`).trim();
-  const degradationBase = String(resolved.degradationBase || `${mgmtBase}/control/v3/degradation`).trim();
-  return String(
-    resolved.envBadgeTitle ||
-      [
-        `Environment : ${label}`,
-        `AdobePASS Console : ${consoleShellUrl}`,
-        `AdobePASS Console Base : ${consoleBase}`,
-        `CM Console : ${cmConsoleShellUrl}`,
-        `Management : ${mgmtBase}`,
-        `Service Provider : ${spBase}`,
-        `DCR Register : ${dcrRegisterUrl}`,
-        `DCR Token : ${dcrTokenUrl}`,
-        `REST V2 : ${restV2Base}`,
-        `ESM : ${esmBase}`,
-        `DEGRADATION : ${degradationBase}`,
-      ].join("\n")
-  ).trim();
+  return [`Environment : ${label}`, `ESM : ${esmBase}`].join("\n").trim();
 }
 
 function renderWorkspaceEnvironmentBadge() {
@@ -620,6 +595,34 @@ function truncateDownloadFileSegment(value, maxLength = 48) {
   return normalized.slice(0, maxLength);
 }
 
+function getWorkspaceEnvironmentFileTag(environment = null) {
+  const resolved =
+    environment && typeof environment === "object"
+      ? environment
+      : state.adobePassEnvironment && typeof state.adobePassEnvironment === "object"
+        ? state.adobePassEnvironment
+        : DEFAULT_ADOBEPASS_ENVIRONMENT;
+  const raw = [
+    resolved?.shortCode,
+    resolved?.label,
+    resolved?.key,
+    resolved?.route,
+    resolved?.consoleBase,
+    resolved?.mgmtBase,
+    resolved?.spBase,
+    resolved?.consoleShellUrl,
+    resolved?.cmConsoleOrigin,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (raw.includes("staging") || raw.includes("stage")) {
+    return "STAGE";
+  }
+  return "PROD";
+}
+
 function getWorkspaceExportQueryEntries(urlValue) {
   const raw = String(urlValue || "").trim();
   if (!raw) {
@@ -815,8 +818,9 @@ function buildClickEsmWorkspaceFileName(snapshot = {}) {
     ),
     48
   );
+  const envTag = getWorkspaceEnvironmentFileTag(snapshot?.adobePassEnvironment);
   const epoch = Date.now();
-  return `${mediaCompany}_clickESMWS_${epoch}.html`;
+  return `${mediaCompany}_clickESMWS_${envTag}_${epoch}.html`;
 }
 
 async function loadWorkspaceStylesheetText() {
@@ -2676,6 +2680,7 @@ function applyControllerState(payload) {
     state.programmerId,
     state.programmerName
   );
+  const hasWorkspaceCards = hasWorkspaceCardContext();
   if (programmerChanged || environmentChanged) {
     state.batchRunning = false;
     state.autoRerunInFlightProgrammerKey = "";
@@ -2684,23 +2689,29 @@ function applyControllerState(payload) {
         cardState.running = false;
       }
     });
-    if (environmentChanged && hasWorkspaceCardContext()) {
-      clearWorkspaceCards();
-      setStatus(`Environment changed to ${String(state.adobePassEnvironment?.label || incomingEnvironmentKey || "Production")}.`);
-    }
     syncActionButtonsDisabled();
   }
   const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
   const shouldTriggerWorkspaceRedraw =
-    programmerChanged &&
-    Boolean(previousProgrammerKey) &&
-    hasWorkspaceCardContext() &&
-    state.controllerOnline === false &&
-    controllerReason === "media-company-change";
+    hasWorkspaceCards &&
+    Boolean(currentProgrammerKey) &&
+    ((programmerChanged &&
+      Boolean(previousProgrammerKey) &&
+      state.controllerOnline === false &&
+      controllerReason === "media-company-change") ||
+      (environmentChanged && controllerReason === "environment-switch"));
   if (shouldTriggerWorkspaceRedraw && currentProgrammerKey) {
     state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
-  } else if (programmerChanged) {
+    setStatus(
+      `Refreshing ${state.cardsById.size} report(s) for ${getProgrammerLabel()} in ${String(
+        state.adobePassEnvironment?.label || incomingEnvironmentKey || "Production"
+      )}...`
+    );
+  } else if (programmerChanged || (environmentChanged && !hasWorkspaceCards)) {
     state.pendingAutoRerunProgrammerKey = "";
+    if (environmentChanged && !hasWorkspaceCards) {
+      setStatus(`Environment changed to ${String(state.adobePassEnvironment?.label || incomingEnvironmentKey || "Production")}.`);
+    }
   }
 
   syncTearsheetButtonsVisibility();
@@ -2756,6 +2767,17 @@ function handleWorkspaceEvent(eventName, payload) {
     const total = Number(payload?.total || 0);
     setStatus(total > 0 ? `Re-run completed for ${total} report(s).` : "Re-run completed.");
     maybeConsumePendingAutoRerun();
+    return;
+  }
+
+  if (event === "environment-switch-rerun") {
+    if (state.batchRunning || state.cardsById.size === 0) {
+      return;
+    }
+    clearPendingProgrammerSwitchTransition();
+    void rerunAllCards({
+      reason: "manual-reload",
+    });
     return;
   }
 

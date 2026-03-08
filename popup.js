@@ -38,6 +38,7 @@ const DEFAULT_ADOBEPASS_ENVIRONMENT = UNDERPAR_ENVIRONMENT_REGISTRY?.getDefaultE
   clickEsmTokenUrl: "https://sp.auth.adobe.com/o/client/token",
   restV2Base: "https://sp.auth.adobe.com/api/v2",
   esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/",
+  cmReportsBase: "https://cm-reports.adobeprimetime.com",
 };
 let CONSOLE_AUTH_CALLBACK_PREFIX = String(DEFAULT_ADOBEPASS_ENVIRONMENT.consoleCallbackPrefix || "");
 let ADOBE_CONSOLE_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "");
@@ -177,6 +178,29 @@ function getActiveAdobePassEnvironment() {
 
 function getActiveAdobePassEnvironmentKey() {
   return String(getActiveAdobePassEnvironment()?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+}
+
+function getAdobePassEnvironmentFileTag(environment = null) {
+  const resolved = environment && typeof environment === "object" ? environment : getActiveAdobePassEnvironment();
+  const raw = [
+    resolved?.shortCode,
+    resolved?.label,
+    resolved?.key,
+    resolved?.route,
+    resolved?.consoleBase,
+    resolved?.mgmtBase,
+    resolved?.spBase,
+    resolved?.consoleShellUrl,
+    resolved?.cmConsoleOrigin,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (raw.includes("staging") || raw.includes("stage")) {
+    return "STAGE";
+  }
+  return "PROD";
 }
 
 function getEnvironmentScopedProgrammerKey(programmerId = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
@@ -506,15 +530,156 @@ function prepareAdobePassEnvironmentSwitchUi(targetEnvironment = null) {
   els.requestorSelect.innerHTML = '<option value="">-- Reloading Content Providers... --</option>';
   els.mvpdSelect.disabled = true;
   els.mvpdSelect.innerHTML = '<option value="">-- Reloading MVPD menu... --</option>';
-  renderPremiumServices(null, null, {
-    controllerReason: "environment-switch",
-  });
-  void esmWorkspaceSendWorkspaceMessage("workspace-clear", {});
-  void cmSendWorkspaceMessage("workspace-clear", {});
-  void mvpdWorkspaceSendWorkspaceMessage("workspace-clear", {});
-  void restWorkspaceSendWorkspaceMessage("workspace-clear", {});
-  void degradationWorkspaceSendWorkspaceMessage("workspace-clear", {});
-  void bobtoolsWorkspaceSendWorkspaceMessage("workspace-clear", {});
+  if (els.premiumServicesContainer) {
+    els.premiumServicesContainer.innerHTML = `<p class="metadata-empty">Switching to ${escapeHtml(
+      environmentLabel
+    )}...</p>`;
+  }
+}
+
+function collectBoundWorkspaceWindowIds(primaryWindowId = 0, tabIdByWindowId = null) {
+  const windowIds = new Set();
+  const normalizedPrimaryWindowId = Number(primaryWindowId || 0);
+  if (normalizedPrimaryWindowId > 0) {
+    windowIds.add(normalizedPrimaryWindowId);
+  }
+  if (tabIdByWindowId instanceof Map) {
+    tabIdByWindowId.forEach((tabId, windowId) => {
+      if (Number(tabId || 0) > 0 && Number(windowId || 0) > 0) {
+        windowIds.add(Number(windowId));
+      }
+    });
+  }
+  return windowIds.size > 0 ? Array.from(windowIds) : [];
+}
+
+async function refreshOpenWorkspacesForEnvironmentSwitch(programmer = null, services = null) {
+  const environmentPayload = {
+    adobePassEnvironment: {
+      ...getActiveAdobePassEnvironment(),
+    },
+    reason: "environment-switch",
+    updatedAt: Date.now(),
+  };
+
+  const esmWindowIds = collectBoundWorkspaceWindowIds(
+    state.esmWorkspaceWorkspaceWindowId,
+    state.esmWorkspaceWorkspaceTabIdByWindowId
+  );
+  if (esmWindowIds.length > 0) {
+    const esmWorkspaceState = getActiveEsmWorkspaceState();
+    const esmAvailabilityResolved = hasResolvedPremiumServiceSnapshotForEsm(services);
+    const esmContainerVisible = esmWorkspaceState ? true : esmAvailabilityResolved ? hasEsmScopedApp(services) : null;
+    for (const targetWindowId of esmWindowIds) {
+      await esmWorkspaceSendWorkspaceMessage(
+        "controller-state",
+        esmWorkspaceGetSelectedControllerStatePayload(programmer, services, {
+          controllerReason: "environment-switch",
+          esmAvailabilityResolved,
+          esmContainerVisible,
+        }),
+        {
+          targetWindowId,
+        }
+      );
+      if (esmWorkspaceState) {
+        await esmWorkspaceSendWorkspaceMessage("controller-state", esmWorkspaceGetControllerStatePayload(esmWorkspaceState), {
+          targetWindowId,
+        });
+      }
+      await esmWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, {
+        targetWindowId,
+      });
+    }
+  }
+
+  const cmWindowIds = collectBoundWorkspaceWindowIds(state.cmWorkspaceWindowId, state.cmWorkspaceTabIdByWindowId);
+  if (cmWindowIds.length > 0) {
+    const cmState = getActiveCmState();
+    const cmAvailabilityResolved = hasResolvedPremiumServiceSnapshotForCm(services);
+    const cmContainerVisible = cmState
+      ? true
+      : cmAvailabilityResolved && Object.prototype.hasOwnProperty.call(services || {}, "cm")
+        ? shouldShowCmService(services?.cm)
+        : null;
+    for (const targetWindowId of cmWindowIds) {
+      await cmSendWorkspaceMessage(
+        "controller-state",
+        cmGetSelectedControllerStatePayload(programmer, services, {
+          controllerReason: "environment-switch",
+          cmAvailabilityResolved,
+          cmContainerVisible,
+        }),
+        {
+          targetWindowId,
+        }
+      );
+      if (cmState) {
+        await cmSendWorkspaceMessage("controller-state", cmGetControllerStatePayload(cmState), {
+          targetWindowId,
+        });
+      }
+      await cmSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
+    }
+  }
+
+  const mvpdWindowIds = collectBoundWorkspaceWindowIds(state.mvpdWorkspaceWindowId, state.mvpdWorkspaceTabIdByWindowId);
+  for (const targetWindowId of mvpdWindowIds) {
+    mvpdWorkspaceBroadcastSelectedControllerState(programmer, services, targetWindowId);
+    await mvpdWorkspaceRefreshSelectedSnapshot({
+      programmer,
+      services,
+      forceRefresh: true,
+      targetWindowId,
+      onlyIfWorkspaceOpen: true,
+      surfaceMissingSelectionError: false,
+    });
+    void mvpdWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
+  }
+
+  const restSelectionContext = restWorkspaceGetSelectionContextFromCurrentSelection(programmer);
+  const restWindowIds = collectBoundWorkspaceWindowIds(state.restWorkspaceWindowId, state.restWorkspaceTabIdByWindowId);
+  for (const targetWindowId of restWindowIds) {
+    restWorkspaceBroadcastControllerState(programmer, restSelectionContext, targetWindowId);
+    void restWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
+  }
+
+  const degradationSelectionContext = degradationWorkspaceGetSelectionContext(programmer, services);
+  const degradationWindowIds = collectBoundWorkspaceWindowIds(
+    state.degradationWorkspaceWindowId,
+    state.degradationWorkspaceTabIdByWindowId
+  );
+  for (const targetWindowId of degradationWindowIds) {
+    degradationWorkspaceBroadcastControllerState(programmer, services, targetWindowId, {
+      controllerReason: "environment-switch",
+    });
+    degradationWorkspaceBroadcastReports(degradationSelectionContext.selectionKey, targetWindowId);
+    void degradationWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
+  }
+
+  const bobtoolsWindowIds = collectBoundWorkspaceWindowIds(state.bobtoolsWorkspaceWindowId, state.bobtoolsWorkspaceTabIdByWindowId);
+  if (bobtoolsWindowIds.length > 0) {
+    const hydrationContext = resolveBobtoolsProfilesHydrationContext(programmer);
+    if (hydrationContext?.ok) {
+      try {
+        await ensureRestV2ProfilesHydratedForBobtools(hydrationContext, {
+          force: true,
+          source: "environment-switch",
+        });
+      } catch (error) {
+        log("BOBTOOLS environment-switch profile hydration failed", error instanceof Error ? error.message : String(error));
+      }
+    }
+    const bobtoolsSelectionContext = buildBobtoolsWorkspaceSelectionContext(programmer);
+    for (const targetWindowId of bobtoolsWindowIds) {
+      bobtoolsWorkspaceBroadcastControllerState(programmer, bobtoolsSelectionContext, targetWindowId);
+      bobtoolsWorkspaceBroadcastProfiles(programmer, {
+        targetWindowId,
+        selectedHarvestKey: bobtoolsSelectionContext.selectedHarvestKey,
+      });
+      void bobtoolsWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
+    }
+  }
 }
 
 async function restoreAdobePassEnvironmentSwitchSelection(snapshot = null) {
@@ -590,6 +755,7 @@ async function restoreAdobePassEnvironmentSwitchSelection(snapshot = null) {
     onlyIfWorkspaceOpen: !result.requestorRestored,
     surfaceMissingSelectionError: false,
   });
+  await refreshOpenWorkspacesForEnvironmentSwitch(programmer, selectedServices);
 
   return result;
 }
@@ -1801,6 +1967,14 @@ function setStatus(message = "", type = "info") {
 
 function setBusy(isBusy, context = "") {
   state.busy = isBusy;
+  if (document?.body) {
+    document.body.classList.toggle("net-busy", isBusy === true);
+    if (isBusy === true) {
+      document.body.setAttribute("aria-busy", "true");
+    } else {
+      document.body.removeAttribute("aria-busy");
+    }
+  }
 
   if (!state.sessionReady) {
     els.authBtn.disabled = isBusy;
@@ -2755,8 +2929,15 @@ function isConsoleAuthWindowSuccessUrl(url) {
   return false;
 }
 
-async function ensureConsoleSecurityContext(authorizationCodeUrl) {
+async function ensureConsoleSecurityContext(authorizationCodeUrl, options = {}) {
   if (!authorizationCodeUrl) {
+    return false;
+  }
+
+  if (options?.allowInteractive !== true) {
+    log("Console security context bootstrap skipped: interactive auth not allowed.", {
+      authorizationCodeUrl,
+    });
     return false;
   }
 
@@ -3612,8 +3793,9 @@ function downloadRestV2ProfileHarvestCsv(harvestList = [], programmerId = "") {
   ];
 
   const programmerSegment = sanitizeDownloadFileSegment(programmerId || "programmer", "programmer");
+  const envTag = getAdobePassEnvironmentFileTag();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const fileName = `restv2_mvpd_profiles_${programmerSegment}_${stamp}.csv`;
+  const fileName = `restv2_mvpd_profiles_${programmerSegment}_${envTag}_${stamp}.csv`;
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
   const blobUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -13945,7 +14127,7 @@ function buildClickEsmDownloadFileName(programmer) {
     programmer?.programmerId,
   ]);
   const base = sanitizeDownloadFileSegment(label, "MediaCompany");
-  return `${base}_clickESM_${Date.now()}.html`;
+  return `${base}_clickESM_${getAdobePassEnvironmentFileTag()}_${Date.now()}.html`;
 }
 
 function getGlobalRequestorMvpdSelections() {
@@ -14229,7 +14411,7 @@ function buildClickDgrDownloadFileName(programmer) {
     programmer?.programmerId,
   ]);
   const base = sanitizeDownloadFileSegment(label, "MediaCompany");
-  return `${base}_clickDGR_${Date.now()}.html`;
+  return `${base}_clickDGR_${getAdobePassEnvironmentFileTag()}_${Date.now()}.html`;
 }
 
 async function resolveClickDgrDownloadContext(panelState = null) {
@@ -14784,6 +14966,11 @@ function clickCmuSerializeForInlineScript(value) {
 }
 
 function buildClickCmuRuntimePatchSnippet(context = {}) {
+  const activeAdobePassEnvironment = {
+    ...getActiveAdobePassEnvironment(),
+    cmReportsBase:
+      String(getActiveAdobePassEnvironment()?.cmReportsBase || CM_REPORTS_BASE_URL).trim() || CM_REPORTS_BASE_URL,
+  };
   const runtimeConfig = {
     programmerId: String(context.programmerId || "").trim(),
     tenantScope: resolveCmUsageTenantScopeValue(context?.tenantScope),
@@ -14794,6 +14981,7 @@ function buildClickCmuRuntimePatchSnippet(context = {}) {
     ),
     userId: String(context.userId || "").trim(),
     scope: String(context.scope || CM_IMS_CHECK_DEFAULT_SCOPE).trim() || CM_IMS_CHECK_DEFAULT_SCOPE,
+    adobePassEnvironment: activeAdobePassEnvironment,
   };
   const runtimeJson = clickCmuSerializeForInlineScript(runtimeConfig);
   return `
@@ -14902,10 +15090,89 @@ body[data-theme="dark"]{
   "use strict";
   window.__UNDERPAR_CLICK_CMU_RUNTIME__ = true;
   const runtime = ${runtimeJson} || {};
-  const CM_REPORTS_BASE_URL = "https://cm-reports.adobeprimetime.com";
+  const DEFAULT_ADOBEPASS_ENVIRONMENT = {
+    key: "release-production",
+    label: "Production",
+    route: "release-production",
+    consoleBase: "https://console.auth.adobe.com",
+    cmConsoleOrigin: "https://experience.adobe.com",
+    mgmtBase: "https://mgmt.auth.adobe.com",
+    spBase: "https://sp.auth.adobe.com",
+    esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/",
+    degradationBase: "https://mgmt.auth.adobe.com/control/v3/degradation",
+    dcrRegisterUrl: "https://sp.auth.adobe.com/o/client/register",
+    dcrTokenUrl: "https://sp.auth.adobe.com/o/client/token",
+    clickEsmTokenUrl: "https://sp.auth.adobe.com/o/client/token",
+    restV2Base: "https://sp.auth.adobe.com/api/v2",
+    cmReportsBase: "https://cm-reports.adobeprimetime.com",
+    consoleShellUrl: "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production",
+    cmConsoleShellUrl: "https://experience.adobe.com/#/@adobepass/cm-console",
+  };
+  function resolveRuntimeAdobePassEnvironment(value = null) {
+    const payload = value && typeof value === "object" ? value : {};
+    const route = String(payload.route || DEFAULT_ADOBEPASS_ENVIRONMENT.route || "release-production").trim() || "release-production";
+    const isStaging = /staging/i.test(route) || /staging/i.test(String(payload.key || ""));
+    const consoleBase = String(
+      payload.consoleBase ||
+        (isStaging ? "https://console.auth-staging.adobe.com" : DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase)
+    ).trim();
+    const cmConsoleOrigin = String(
+      payload.cmConsoleOrigin ||
+        (isStaging ? "https://experience-stage.adobe.com" : DEFAULT_ADOBEPASS_ENVIRONMENT.cmConsoleOrigin)
+    ).trim();
+    const mgmtBase = String(
+      payload.mgmtBase ||
+        (isStaging ? "https://mgmt.auth-staging.adobe.com" : DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase)
+    ).trim();
+    const spBase = String(
+      payload.spBase ||
+        (isStaging ? "https://sp.auth-staging.adobe.com" : DEFAULT_ADOBEPASS_ENVIRONMENT.spBase)
+    ).trim();
+    const cmReportsBase = String(payload.cmReportsBase || DEFAULT_ADOBEPASS_ENVIRONMENT.cmReportsBase).trim();
+    return {
+      ...DEFAULT_ADOBEPASS_ENVIRONMENT,
+      ...payload,
+      key: String(payload.key || (isStaging ? "release-staging" : DEFAULT_ADOBEPASS_ENVIRONMENT.key)).trim(),
+      label: String(payload.label || (isStaging ? "Staging" : DEFAULT_ADOBEPASS_ENVIRONMENT.label)).trim(),
+      route,
+      consoleBase,
+      cmConsoleOrigin,
+      mgmtBase,
+      spBase,
+      dcrRegisterUrl: String(payload.dcrRegisterUrl || \`\${spBase}/o/client/register\`).trim(),
+      dcrTokenUrl: String(payload.dcrTokenUrl || payload.clickEsmTokenUrl || \`\${spBase}/o/client/token\`).trim(),
+      clickEsmTokenUrl: String(payload.clickEsmTokenUrl || payload.dcrTokenUrl || \`\${spBase}/o/client/token\`).trim(),
+      restV2Base: String(payload.restV2Base || \`\${spBase}/api/v2\`).trim(),
+      esmBase: String(payload.esmBase || \`\${mgmtBase}/esm/v3/media-company/\`).trim(),
+      degradationBase: String(payload.degradationBase || \`\${mgmtBase}/control/v3/degradation\`).trim(),
+      cmReportsBase,
+      consoleShellUrl: String(
+        payload.consoleShellUrl || \`https://experience.adobe.com/#/@adobepass/pass/authentication/\${route}\`
+      ).trim(),
+      cmConsoleShellUrl: String(
+        payload.cmConsoleShellUrl || \`\${cmConsoleOrigin.replace(/\\/+$/, "")}/#/@adobepass/cm-console\`
+      ).trim(),
+    };
+  }
+  const ACTIVE_ADOBEPASS_ENVIRONMENT = resolveRuntimeAdobePassEnvironment(runtime.adobePassEnvironment);
+  const CM_REPORTS_BASE_URL = String(
+    ACTIVE_ADOBEPASS_ENVIRONMENT.cmReportsBase || DEFAULT_ADOBEPASS_ENVIRONMENT.cmReportsBase
+  ).trim();
   const IMS_VALIDATE_TOKEN_URL = "https://ims-na1.adobelogin.com/ims/validate_token/v1?jslVersion=underpar-clickcmu";
   const IMS_CHECK_TOKEN_URL = "https://adobeid-na1.services.adobe.com/ims/check/v6/token";
   const CMU_CLIENT_ID = "cm-console-ui";
+  const CMU_CONSOLE_ORIGIN = String(
+    ACTIVE_ADOBEPASS_ENVIRONMENT.cmConsoleOrigin || DEFAULT_ADOBEPASS_ENVIRONMENT.cmConsoleOrigin
+  ).trim();
+  const CMU_CONSOLE_REFERER = \`\${CMU_CONSOLE_ORIGIN.replace(/\\/+$/, "")}/\`;
+  const CMU_REPORTS_ORIGIN = (() => {
+    try {
+      return String(new URL(CM_REPORTS_BASE_URL).origin || "https://cm-reports.adobeprimetime.com").trim();
+    } catch {
+      return "https://cm-reports.adobeprimetime.com";
+    }
+  })();
+  const CMU_REPORTS_REFERER = \`\${CMU_REPORTS_ORIGIN.replace(/\\/+$/, "")}/\`;
   const DEFAULT_SCOPE = "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext";
   const TOKEN_FRESH_SKEW_MS = 45 * 1000;
   const REQUEST_TIMEOUT_MS = 45 * 1000;
@@ -14981,6 +15248,67 @@ body[data-theme="dark"]{
       output.push(text);
     });
     return output;
+  }
+
+  function hasHeaderName(headersLike, headerName) {
+    const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
+    if (!normalizedHeaderName || !headersLike || typeof headersLike !== "object") {
+      return false;
+    }
+    return Object.keys(headersLike).some((key) => String(key || "").trim().toLowerCase() === normalizedHeaderName);
+  }
+
+  function isCmuReportsUrl(urlValue = "") {
+    const raw = String(urlValue || "").trim();
+    if (!raw) {
+      return false;
+    }
+    try {
+      return String(new URL(raw, CM_REPORTS_BASE_URL).origin || "").trim().toLowerCase() === CMU_REPORTS_ORIGIN.toLowerCase();
+    } catch {
+      return false;
+    }
+  }
+
+  function withCmuReportHeaders(headersLike = {}, endpointUrl = "") {
+    const nextHeaders = headersLike && typeof headersLike === "object" ? { ...headersLike } : {};
+    if (!isCmuReportsUrl(endpointUrl)) {
+      return nextHeaders;
+    }
+    if (!hasHeaderName(nextHeaders, "Origin")) {
+      nextHeaders.Origin = CMU_REPORTS_ORIGIN;
+    }
+    if (!hasHeaderName(nextHeaders, "Referer")) {
+      nextHeaders.Referer = CMU_REPORTS_REFERER;
+    }
+    return nextHeaders;
+  }
+
+  function buildClickCmuEnvironmentBadgeMessage(environment = ACTIVE_ADOBEPASS_ENVIRONMENT) {
+    const resolved = resolveRuntimeAdobePassEnvironment(environment);
+    return [\`Environment : \${resolved.label}\`, \`Concurrency Monitoring : \${resolved.cmReportsBase}\`].join(
+      "\\n"
+    );
+  }
+
+  function syncClickCmuEnvironmentBadge() {
+    const envDisplay = document.getElementById("envBaseDisplay");
+    const envBadge = envDisplay?.closest(".env-badge");
+    const envMessage = buildClickCmuEnvironmentBadgeMessage(ACTIVE_ADOBEPASS_ENVIRONMENT);
+    const envBase = String(
+      ACTIVE_ADOBEPASS_ENVIRONMENT.cmReportsBase || DEFAULT_ADOBEPASS_ENVIRONMENT.cmReportsBase
+    ).trim();
+    if (envDisplay) {
+      envDisplay.textContent = "";
+      envDisplay.title = envMessage;
+      envDisplay.setAttribute("aria-hidden", "true");
+      envDisplay.dataset.baseUrl = envBase;
+    }
+    if (envBadge) {
+      envBadge.title = envMessage;
+      envBadge.setAttribute("aria-label", envMessage);
+      envBadge.dataset.baseUrl = envBase;
+    }
   }
 
   function tokenizeScopeSet(scope) {
@@ -15064,6 +15392,8 @@ body[data-theme="dark"]{
           headers: {
             Accept: "application/json, text/plain, */*",
             "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            Origin: CMU_CONSOLE_ORIGIN,
+            Referer: CMU_CONSOLE_REFERER,
             ...(clientId ? { client_id: clientId } : {}),
           },
           body: buildValidateTokenBody(seedToken, clientId),
@@ -15118,6 +15448,8 @@ body[data-theme="dark"]{
           credentials: "include",
           headers: {
             Accept: "application/json, text/plain, */*",
+            Origin: CMU_CONSOLE_ORIGIN,
+            Referer: CMU_CONSOLE_REFERER,
           },
         }).catch(() => null);
         if (!response || !response.ok) {
@@ -15468,22 +15800,23 @@ body[data-theme="dark"]{
       if (token) {
         headers.Authorization = "Bearer " + token;
       }
+      const requestHeaders = withCmuReportHeaders(headers, finalUrl);
 
       let response = await fetch(finalUrl, {
         method,
         credentials: "include",
-        headers,
+        headers: requestHeaders,
         ...(opts.body != null ? { body: opts.body } : {}),
       });
 
       if (response.status === 401 || response.status === 403) {
         const refreshedToken = await refreshImsToken(true);
         if (refreshedToken) {
-          headers.Authorization = "Bearer " + refreshedToken;
+          requestHeaders.Authorization = "Bearer " + refreshedToken;
           response = await fetch(finalUrl, {
             method,
             credentials: "include",
-            headers,
+            headers: requestHeaders,
             ...(opts.body != null ? { body: opts.body } : {}),
           });
         }
@@ -15499,6 +15832,8 @@ body[data-theme="dark"]{
   window.appendTimeParams = function appendTimeParamsOverride(base) {
     return ensureCmuQueryDefaults(base, 1000);
   };
+
+  syncClickCmuEnvironmentBadge();
 
   const searchInput = document.getElementById("searchText");
   if (searchInput && String(searchInput.placeholder || "").trim()) {
@@ -16050,7 +16385,7 @@ function buildClickCmuDownloadFileName(programmer, options = {}) {
     programmer?.programmerId,
   ]);
   const base = sanitizeDownloadFileSegment(label, "MediaCompany");
-  return `${base}_clickCMU_${Date.now()}.html`;
+  return `${base}_clickCMU_${getAdobePassEnvironmentFileTag()}_${Date.now()}.html`;
 }
 
 function buildClickCmuWorkspaceDownloadFileName(programmer, options = {}) {
@@ -16061,7 +16396,7 @@ function buildClickCmuWorkspaceDownloadFileName(programmer, options = {}) {
     programmer?.programmerId,
   ]);
   const base = sanitizeDownloadFileSegment(label, "MediaCompany");
-  return `${base}_clickCMUWS_${Date.now()}.html`;
+  return `${base}_clickCMUWS_${getAdobePassEnvironmentFileTag()}_${Date.now()}.html`;
 }
 
 function getClickCmuWorkspaceCardUrlCandidates(card = null, options = {}) {
@@ -17709,11 +18044,24 @@ function esmWorkspaceEndNetwork(esmWorkspaceState) {
 }
 
 function esmWorkspaceBuildEndpointUrl(esmWorkspaceState, endpoint) {
+  const environment = getActiveAdobePassEnvironment();
+  const activeEsmBase = String(environment?.esmBase || `${ADOBE_MGMT_BASE}/esm/v3/media-company/`).trim();
   const selections = getGlobalRequestorMvpdSelections();
   const requestorIds = selections.requestorIds;
   const mvpdIds = selections.mvpdIds;
 
-  const parsed = new URL(stripServerManagedTimeParams(endpoint.url));
+  const endpointSegments = Array.isArray(endpoint?.segs)
+    ? endpoint.segs.map((segment) => String(segment || "").trim()).filter(Boolean)
+    : [];
+  const rawEndpointUrl = String(endpoint?.url || "").trim();
+  const parsed = new URL(activeEsmBase || stripServerManagedTimeParams(rawEndpointUrl));
+  if (endpointSegments.length > 0) {
+    parsed.pathname = `/esm/v3/media-company/${endpointSegments.join("/")}`;
+  } else if (rawEndpointUrl) {
+    const source = new URL(stripServerManagedTimeParams(rawEndpointUrl));
+    parsed.pathname = String(source.pathname || parsed.pathname || "");
+    parsed.search = String(source.search || "");
+  }
   parsed.searchParams.delete("start");
   parsed.searchParams.delete("end");
   parsed.searchParams.set("format", "json");
@@ -18034,8 +18382,12 @@ function esmWorkspaceBuildCsvFileName(esmWorkspaceState, endpointUrl) {
   const requestorId = sanitizeHarFileSegment(selectedRequestorIds.join("-") || "all-requestors", "all-requestors");
   const mvpdId = sanitizeHarFileSegment(selectedMvpds.join("-") || "all-mvpds", "all-mvpds");
   const endpointSegment = sanitizeHarFileSegment(endpointPath, "endpoint");
+  const envTag = getAdobePassEnvironmentFileTag();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `esm_${sanitizeHarFileSegment(esmWorkspaceState?.programmer?.programmerId, "programmer")}_${requestorId}_${mvpdId}_${endpointSegment}_${stamp}.csv`;
+  return `esm_${sanitizeHarFileSegment(
+    esmWorkspaceState?.programmer?.programmerId,
+    "programmer"
+  )}_${requestorId}_${mvpdId}_${endpointSegment}_${envTag}_${stamp}.csv`;
 }
 
 function esmWorkspaceFindEndpointByUrl(esmWorkspaceState, endpointUrl, fallback = {}) {
@@ -22797,6 +23149,9 @@ function mvpdWorkspaceGetSelectedControllerStatePayload(programmer = null, servi
   const cachedSnapshot = cacheKey ? state.mvpdWorkspaceSnapshotCacheBySelectionKey.get(cacheKey) || null : null;
   return {
     controllerOnline: true,
+    adobePassEnvironment: {
+      ...getActiveAdobePassEnvironment(),
+    },
     mvpdReady: context.isReady,
     hasRestV2Service: context.hasRestV2Service,
     hasMvpdCmTenant: context.hasMvpdCmTenant === true,
@@ -24643,11 +24998,12 @@ function syncMvpdWorkspaceToolForSection(section, programmer = null, services = 
   }
 }
 
-function refreshMvpdWorkspaceTools() {
+function refreshMvpdWorkspaceTools(options = {}) {
   const selectedProgrammer = resolveSelectedProgrammer();
   const selectedServices = selectedProgrammer?.programmerId
     ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
     : null;
+  const controllerReason = String(options?.controllerReason || "").trim();
   const sections = document.querySelectorAll(".premium-service-section.service-rest-v2");
   sections.forEach((section) => {
     syncMvpdWorkspaceToolForSection(section, selectedProgrammer, selectedServices);
@@ -24659,7 +25015,9 @@ function refreshMvpdWorkspaceTools() {
   }
   if (degradationWorkspaceHasOpenTab()) {
     const selectionContext = degradationWorkspaceGetSelectionContext(selectedProgrammer, selectedServices);
-    degradationWorkspaceBroadcastControllerState(selectedProgrammer, selectedServices);
+    degradationWorkspaceBroadcastControllerState(selectedProgrammer, selectedServices, 0, {
+      controllerReason,
+    });
     degradationWorkspaceBroadcastReports(selectionContext.selectionKey);
   }
   if (bobtoolsWorkspaceHasOpenTab()) {
@@ -24698,17 +25056,23 @@ async function mvpdWorkspaceOpenFromRestV2(programmer = null, services = null, o
 }
 
 function buildDegradationWorkspaceSelectionKey(context = null) {
+  const environmentKey = String(
+    context?.adobePassEnvironment?.key || context?.environmentKey || getActiveAdobePassEnvironmentKey()
+  ).trim();
   const programmerId = String(context?.programmerId || "").trim();
   const requestorId = String(context?.requestorId || "").trim();
   const mvpd = String(context?.mvpd || "").trim();
   if (!programmerId) {
     return "";
   }
-  return [programmerId, requestorId || "*", mvpd || "*"].join("|");
+  return [environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key, programmerId, requestorId || "*", mvpd || "*"].join("|");
 }
 
 function degradationWorkspaceGetSelectionContext(programmer = null, services = null) {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const adobePassEnvironment = {
+    ...getActiveAdobePassEnvironment(),
+  };
   const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
   const programmerName = String(resolvedProgrammer?.programmerName || resolvedProgrammer?.mediaCompanyName || "").trim();
   const requestorId = String(state.selectedRequestorId || "").trim();
@@ -24720,6 +25084,7 @@ function degradationWorkspaceGetSelectionContext(programmer = null, services = n
   }
   const degradationApp = resolvedServices?.degradation || null;
   const selectionContext = {
+    adobePassEnvironment,
     programmerId,
     programmerName,
     requestorId,
@@ -24734,16 +25099,25 @@ function degradationWorkspaceGetSelectionContext(programmer = null, services = n
   return selectionContext;
 }
 
-function degradationWorkspaceGetSelectedControllerStatePayload(programmer = null, services = null, selectionContext = null) {
+function degradationWorkspaceGetSelectedControllerStatePayload(programmer = null, services = null, selectionContext = null, options = {}) {
   const context =
     selectionContext && typeof selectionContext === "object"
       ? selectionContext
       : degradationWorkspaceGetSelectionContext(programmer, services);
+  const controllerReason = String(options?.controllerReason || "").trim();
   return {
     controllerOnline: true,
     degradationReady: context.degradationReady === true,
     programmerId: String(context.programmerId || "").trim(),
     programmerName: String(context.programmerName || "").trim(),
+    adobePassEnvironment:
+      context.adobePassEnvironment && typeof context.adobePassEnvironment === "object"
+        ? {
+            ...context.adobePassEnvironment,
+          }
+        : {
+            ...getActiveAdobePassEnvironment(),
+          },
     requestorId: String(context.requestorId || "").trim(),
     mvpd: String(context.mvpd || "").trim(),
     mvpdLabel: String(context.mvpdLabel || "").trim(),
@@ -24751,6 +25125,7 @@ function degradationWorkspaceGetSelectedControllerStatePayload(programmer = null
     selectionKey: String(context.selectionKey || "").trim(),
     appGuid: String(context.appGuid || "").trim(),
     appName: String(context.appName || "").trim(),
+    controllerReason,
     updatedAt: Date.now(),
   };
 }
@@ -24821,11 +25196,11 @@ async function degradationWorkspaceSendWorkspaceMessage(event, payload = {}, opt
   }
 }
 
-function degradationWorkspaceBroadcastControllerState(programmer = null, services = null, targetWindowId = 0) {
+function degradationWorkspaceBroadcastControllerState(programmer = null, services = null, targetWindowId = 0, options = {}) {
   const resolvedWindowId = Number(targetWindowId || 0) || Number(state.degradationWorkspaceWindowId || 0);
   void degradationWorkspaceSendWorkspaceMessage(
     "controller-state",
-    degradationWorkspaceGetSelectedControllerStatePayload(programmer, services),
+    degradationWorkspaceGetSelectedControllerStatePayload(programmer, services, null, options),
     {
       targetWindowId: resolvedWindowId,
     }
@@ -25066,6 +25441,7 @@ async function handleDegradationWorkspaceAction(message, sender = null) {
       "batch-start",
       {
         total: cards.length,
+        reason: String(message?.reason || "").trim(),
         startedAt: Date.now(),
       },
       { targetWindowId }
@@ -26425,6 +26801,9 @@ function bobtoolsWorkspaceGetSelectedControllerStatePayload(programmer = null, s
       : buildBobtoolsWorkspaceSelectionContext(programmer);
   return {
     controllerOnline: true,
+    adobePassEnvironment: {
+      ...getActiveAdobePassEnvironment(),
+    },
     bobtoolsReady: context.hasProfiles === true,
     programmerId: String(context.programmerId || "").trim(),
     programmerName: String(context.programmerName || "").trim(),
@@ -26976,8 +27355,8 @@ async function handleBobtoolsWorkspaceAction(message, sender = null) {
     const hydrationContext = resolveBobtoolsProfilesHydrationContext(selectedProgrammer);
     if (hydrationContext?.ok) {
       await ensureRestV2ProfilesHydratedForBobtools(hydrationContext, {
-        force: false,
-        source: "workspace-ready",
+        force: message?.forceRefresh === true,
+        source: message?.forceRefresh === true ? "environment-switch-workspace-ready" : "workspace-ready",
       });
       refreshRestV2LoginPanels();
     }
@@ -30487,7 +30866,9 @@ function renderPremiumServicesLoading(programmer, options = {}) {
     cmContainerVisible: null,
   });
   mvpdWorkspaceBroadcastSelectedControllerState(programmer, null);
-  degradationWorkspaceBroadcastControllerState(programmer, null);
+  degradationWorkspaceBroadcastControllerState(programmer, null, 0, {
+    controllerReason,
+  });
 
   const label = programmer?.programmerName
     ? `Loading premium services for ${programmer.programmerName}...`
@@ -30512,7 +30893,9 @@ function renderPremiumServicesError(error, options = {}) {
     cmContainerVisible: null,
   });
   mvpdWorkspaceBroadcastSelectedControllerState(resolveSelectedProgrammer(), null);
-  degradationWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), null);
+  degradationWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), null, 0, {
+    controllerReason,
+  });
   const reason = error instanceof Error ? error.message : String(error);
   els.premiumServicesContainer.innerHTML = `<p class="metadata-empty service-error">${escapeHtml(reason)}</p>`;
 }
@@ -30545,7 +30928,9 @@ function renderPremiumServices(services, programmer = null, options = {}) {
       cmContainerVisible: null,
     });
     mvpdWorkspaceBroadcastSelectedControllerState(programmer, null);
-    degradationWorkspaceBroadcastControllerState(programmer, null);
+    degradationWorkspaceBroadcastControllerState(programmer, null, 0, {
+      controllerReason,
+    });
     bobtoolsWorkspaceBroadcastControllerState(programmer, {
       programmerId: String(programmer?.programmerId || "").trim(),
       programmerName: String(programmer?.programmerName || "").trim(),
@@ -30588,7 +30973,9 @@ function renderPremiumServices(services, programmer = null, options = {}) {
     cmContainerVisible: hasCmContainer,
   });
   mvpdWorkspaceBroadcastSelectedControllerState(programmer, services);
-  degradationWorkspaceBroadcastControllerState(programmer, services);
+  degradationWorkspaceBroadcastControllerState(programmer, services, 0, {
+    controllerReason,
+  });
   const hasEsmContainer = availableKeys.includes("esmWorkspace");
   esmWorkspaceBroadcastSelectedControllerState(programmer, services, 0, {
     controllerReason,
@@ -37215,7 +37602,9 @@ async function fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel
             round === 0
           ) {
             bootstrapAttemptedForUrl = true;
-            const contextReady = await ensureConsoleSecurityContext(authorizationCodeUrl);
+            const contextReady = await ensureConsoleSecurityContext(authorizationCodeUrl, {
+              allowInteractive: requestOptions?.allowInteractiveAuthBootstrap === true,
+            });
             if (contextReady) {
               continue;
             }
@@ -40707,11 +41096,12 @@ async function requestCmConsoleTokenFromExperiencePageContext(options = {}) {
   }
 
   const requireFresh = options.requireFresh === true;
+  const allowTemporaryTab = options.allowTemporaryTab === true;
   const userIds = collectCmImsUserIdCandidates();
   let tab = await findExistingExperienceAdobeTab();
   let createdTemporaryTab = false;
 
-  if (!tab?.id) {
+  if (!tab?.id && allowTemporaryTab) {
     try {
       tab = await chrome.tabs.create({
         url: `${CM_CONSOLE_APP_ORIGIN}/`,
@@ -40725,6 +41115,8 @@ async function requestCmConsoleTokenFromExperiencePageContext(options = {}) {
       tab = null;
       createdTemporaryTab = false;
     }
+  } else if (!tab?.id) {
+    log("CM page-context token bootstrap skipped: no existing Experience tab and temporary tab creation is disabled.");
   }
 
   const tabId = Number(tab?.id || 0);
@@ -43308,8 +43700,9 @@ function cmBuildCsvFileName(cmState, record = null, fallbackCard = null) {
   const tenantSegment = sanitizeHarFileSegment(record?.tenantId || record?.tenantName, "tenant");
   const kindSegment = sanitizeHarFileSegment(record?.kind || fallbackCard?.zoomKey, "report");
   const entitySegment = sanitizeHarFileSegment(record?.title || fallbackCard?.cardId, "dataset");
+  const envTag = getAdobePassEnvironmentFileTag();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `cm_${programmerSegment}_${tenantSegment}_${kindSegment}_${entitySegment}_${stamp}.csv`;
+  return `cm_${programmerSegment}_${tenantSegment}_${kindSegment}_${entitySegment}_${envTag}_${stamp}.csv`;
 }
 
 function cmDownloadRowsAsCsv(rows, options = {}) {
@@ -44372,7 +44765,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
     els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
     state.selectedMvpdId = "";
     refreshRestV2LoginPanels();
-    refreshMvpdWorkspaceTools();
+    refreshMvpdWorkspaceTools({ controllerReason });
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
       ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
@@ -44929,7 +45322,11 @@ function renderPageEnvironmentBadge() {
   const registry = getUnderParEnvironmentRegistry();
   const label = String(environment?.label || "").trim() || "Production";
   const title =
-    String(registry?.buildEnvironmentTooltip?.(environment) || environment?.envBadgeTitle || label).trim() || label;
+    String(
+      registry?.buildEnvironmentBadgeTooltip?.(environment, "underpar") ||
+        environment?.envBadgeTitle ||
+        `Environment : ${label}`
+    ).trim() || label;
   els.pageEnvBadgeValue.textContent = label;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
@@ -45375,7 +45772,7 @@ function registerEventHandlers() {
       cmContainerVisible: null,
     });
     mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, null);
-    refreshMvpdWorkspaceTools();
+    refreshMvpdWorkspaceTools({ controllerReason });
     void mvpdWorkspaceRefreshSelectedSnapshot({
       programmer: selectedProgrammer,
       services: null,

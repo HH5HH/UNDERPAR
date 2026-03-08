@@ -56,6 +56,20 @@ body {
   color: var(--legacy-text);
 }
 
+body.net-busy,
+body[aria-busy="true"],
+body:has(.net-busy),
+body:has([aria-busy="true"]) {
+  cursor: progress;
+}
+
+body.net-busy *,
+body[aria-busy="true"] *,
+body:has(.net-busy) *,
+body:has([aria-busy="true"]) * {
+  cursor: progress !important;
+}
+
 body::before,
 body::after {
   content: "";

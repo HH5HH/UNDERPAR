@@ -224,46 +224,20 @@ async function initializeWorkspaceAdobePassEnvironment() {
 }
 
 function buildWorkspaceEnvironmentTooltip(environment) {
-  const resolved = environment && typeof environment === "object" ? environment : {};
+  const resolved =
+    environment && typeof environment === "object"
+      ? environment
+      : resolveWorkspaceAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  const registry = getWorkspaceEnvironmentRegistry();
+  if (registry?.buildEnvironmentBadgeTooltip) {
+    return String(registry.buildEnvironmentBadgeTooltip(resolved, "cm") || "").trim();
+  }
   const route = String(resolved.route || DEFAULT_ADOBEPASS_ENVIRONMENT.route || "release-production").trim() || "release-production";
   const label = String(resolved.label || (route === "release-staging" ? "Staging" : "Production")).trim() || "Production";
-  const consoleBase =
-    String(resolved.consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "").trim() ||
-    (route === "release-staging" ? "https://console.auth-staging.adobe.com" : "https://console.auth.adobe.com");
-  const mgmtBase =
-    String(resolved.mgmtBase || DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "").trim() ||
-    (route === "release-staging" ? "https://mgmt.auth-staging.adobe.com" : "https://mgmt.auth.adobe.com");
-  const spBase =
-    String(resolved.spBase || DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "").trim() ||
-    (route === "release-staging" ? "https://sp.auth-staging.adobe.com" : "https://sp.auth.adobe.com");
-  const consoleShellUrl = String(
-    resolved.consoleShellUrl || `https://experience.adobe.com/#/@adobepass/pass/authentication/${route}`
+  const cmReportsBase = String(
+    resolved.cmReportsBase || DEFAULT_ADOBEPASS_ENVIRONMENT.cmReportsBase || "https://cm-reports.adobeprimetime.com"
   ).trim();
-  const cmConsoleOrigin = String(
-    resolved.cmConsoleOrigin || (route === "release-staging" ? "https://experience-stage.adobe.com" : "https://experience.adobe.com")
-  ).trim();
-  const cmConsoleShellUrl = String(resolved.cmConsoleShellUrl || `${cmConsoleOrigin.replace(/\/+$/, "")}/#/@adobepass/cm-console`).trim();
-  const dcrRegisterUrl = String(resolved.dcrRegisterUrl || `${spBase}/o/client/register`).trim();
-  const dcrTokenUrl = String(resolved.dcrTokenUrl || resolved.clickEsmTokenUrl || `${spBase}/o/client/token`).trim();
-  const restV2Base = String(resolved.restV2Base || `${spBase}/api/v2`).trim();
-  const esmBase = String(resolved.esmBase || `${mgmtBase}/esm/v3/media-company/`).trim();
-  const degradationBase = String(resolved.degradationBase || `${mgmtBase}/control/v3/degradation`).trim();
-  return String(
-    resolved.envBadgeTitle ||
-      [
-        `Environment : ${label}`,
-        `AdobePASS Console : ${consoleShellUrl}`,
-        `AdobePASS Console Base : ${consoleBase}`,
-        `CM Console : ${cmConsoleShellUrl}`,
-        `Management : ${mgmtBase}`,
-        `Service Provider : ${spBase}`,
-        `DCR Register : ${dcrRegisterUrl}`,
-        `DCR Token : ${dcrTokenUrl}`,
-        `REST V2 : ${restV2Base}`,
-        `ESM : ${esmBase}`,
-        `DEGRADATION : ${degradationBase}`,
-      ].join("\n")
-  ).trim();
+  return [`Environment : ${label}`, `Concurrency Monitoring : ${cmReportsBase}`].join("\n").trim();
 }
 
 function renderWorkspaceEnvironmentBadge() {
@@ -4052,6 +4026,7 @@ function applyControllerState(payload) {
     state.programmerId,
     state.programmerName
   );
+  const replayCardsForSwitch = getWorkspaceReplayCards();
   if (programmerChanged || environmentChanged) {
     state.batchRunning = false;
     state.autoRerunInFlightProgrammerKey = "";
@@ -4060,10 +4035,6 @@ function applyControllerState(payload) {
         cardState.running = false;
       }
     });
-    if (environmentChanged && getOrderedCardStates().length > 0) {
-      clearWorkspaceCards();
-      setStatus(`Environment changed to ${String(state.adobePassEnvironment?.label || incomingEnvironmentKey || "Production")}.`);
-    }
     syncActionButtonsDisabled();
   }
 
@@ -4086,7 +4057,9 @@ function applyControllerState(payload) {
   });
 
   const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
-  const shouldStartProgrammerSwitchLoading = programmerChanged && Boolean(previousProgrammerKey);
+  const shouldStartProgrammerSwitchLoading =
+    (programmerChanged && Boolean(previousProgrammerKey)) ||
+    (environmentChanged && Boolean(getProgrammerIdentityKey(state.programmerId, state.programmerName)) && replayCardsForSwitch.length > 0);
   if (shouldStartProgrammerSwitchLoading && currentProgrammerKey) {
     state.programmerSwitchLoadingKey = currentProgrammerKey;
     state.programmerSwitchLoading = state.cmAvailabilityResolved !== true;
@@ -4104,12 +4077,13 @@ function applyControllerState(payload) {
       state.programmerSwitchLoadingKey = "";
     }
   }
-  const replayCardsForSwitch = getWorkspaceReplayCards();
   const shouldTriggerWorkspaceRedraw =
-    programmerChanged &&
-    Boolean(previousProgrammerKey) &&
     replayCardsForSwitch.length > 0 &&
-    (controllerReason === "media-company-change" || !controllerReason);
+    Boolean(currentProgrammerKey) &&
+    ((programmerChanged &&
+      Boolean(previousProgrammerKey) &&
+      (controllerReason === "media-company-change" || !controllerReason)) ||
+      (environmentChanged && controllerReason === "environment-switch"));
   if (shouldTriggerWorkspaceRedraw && currentProgrammerKey) {
     state.workspaceReplayCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
     state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
@@ -4120,9 +4094,12 @@ function applyControllerState(payload) {
         : "Refreshing workspace for selected Media Company..."
     );
     state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
-  } else if (programmerChanged) {
+  } else if (programmerChanged || (environmentChanged && replayCardsForSwitch.length === 0)) {
     state.pendingAutoRerunProgrammerKey = "";
     state.pendingAutoRerunCards = [];
+    if (environmentChanged && replayCardsForSwitch.length === 0) {
+      setStatus(`Environment changed to ${String(state.adobePassEnvironment?.label || incomingEnvironmentKey || "Production")}.`);
+    }
   }
 
   syncTearsheetButtonsVisibility();
@@ -4178,6 +4155,17 @@ function handleWorkspaceEvent(eventName, payload) {
     const total = Number(payload?.total || 0);
     setStatus(total > 0 ? `Re-run completed for ${total} report(s).` : "Re-run completed.");
     maybeConsumePendingAutoRerun();
+    return;
+  }
+  if (event === "environment-switch-rerun") {
+    if (state.batchRunning) {
+      return;
+    }
+    clearPendingProgrammerSwitchTransition();
+    void rerunAllCards({
+      reason: "manual-reload",
+    });
+    return;
   }
 }
 
@@ -4231,6 +4219,35 @@ function truncateDownloadFileSegment(value, maxLength = 48) {
   return text.slice(0, maxLength).replace(/[_-]+$/g, "");
 }
 
+function getWorkspaceEnvironmentFileTag(environment = null) {
+  const resolved =
+    environment && typeof environment === "object"
+      ? environment
+      : state.adobePassEnvironment && typeof state.adobePassEnvironment === "object"
+        ? state.adobePassEnvironment
+        : DEFAULT_ADOBEPASS_ENVIRONMENT;
+  const raw = [
+    resolved?.shortCode,
+    resolved?.label,
+    resolved?.key,
+    resolved?.route,
+    resolved?.consoleBase,
+    resolved?.mgmtBase,
+    resolved?.spBase,
+    resolved?.consoleShellUrl,
+    resolved?.cmConsoleOrigin,
+    resolved?.cmConsoleShellUrl,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (raw.includes("staging") || raw.includes("stage")) {
+    return "STAGE";
+  }
+  return "PROD";
+}
+
 function buildClickCmuWorkspaceFileName(snapshot = {}) {
   const mediaCompany = truncateDownloadFileSegment(
     sanitizeDownloadFileSegment(
@@ -4239,8 +4256,9 @@ function buildClickCmuWorkspaceFileName(snapshot = {}) {
     ),
     48
   );
+  const envTag = getWorkspaceEnvironmentFileTag(snapshot?.adobePassEnvironment);
   const epoch = Date.now();
-  return `${mediaCompany}_clickCMUWS_${epoch}.html`;
+  return `${mediaCompany}_clickCMUWS_${envTag}_${epoch}.html`;
 }
 
 function serializeCardForWorkspaceExport(cardState) {
@@ -4874,8 +4892,9 @@ function downloadStandaloneCardCsv(cardPayload = {}, sortRule = null) {
     sanitizeDownloadFileSegment(getNodeLabel(getCardEffectiveRequestUrl(cardState)), "workspace"),
     56
   );
+  const envTag = getWorkspaceEnvironmentFileTag();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const fileName = `${nodeLabel}_clickCMUWS_${stamp}.csv`;
+  const fileName = `${nodeLabel}_clickCMUWS_${envTag}_${stamp}.csv`;
   const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");

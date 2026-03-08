@@ -43,7 +43,7 @@
     return ENVIRONMENT_BY_KEY.get(normalizeEnvironmentKey(value)) || ENVIRONMENT_BY_KEY.get(DEFAULT_KEY);
   }
 
-  function cloneEnvironment(environment) {
+  function buildEnvironmentDetails(environment) {
     const resolved = resolveEnvironmentRecord(environment);
     const consoleShellUrl = `${EXPERIENCE_ORIGIN}/#/@adobepass/pass/authentication/${resolved.route}`;
     const cmConsoleShellUrl = `${String(resolved.cmConsoleOrigin || EXPERIENCE_ORIGIN).replace(/\/+$/, "")}/#/@adobepass/cm-console`;
@@ -52,19 +52,75 @@
     const restV2Base = `${resolved.spBase}/api/v2`;
     const esmBase = `${resolved.mgmtBase}/esm/v3/media-company/`;
     const degradationBase = `${resolved.mgmtBase}/control/v3/degradation`;
+    const cmReportsBase = String(resolved.cmReportsBase || "https://cm-reports.adobeprimetime.com").trim();
     return {
       ...resolved,
       consoleShellUrl,
       cmConsoleShellUrl,
-      consoleProgrammersUrl: `${consoleShellUrl}/programmers`,
-      consoleCallbackPrefix: `${resolved.consoleBase}/oauth2/callback`,
+      cmReportsBase,
       degradationBase,
       dcrRegisterUrl,
       dcrTokenUrl,
       clickEsmTokenUrl: dcrTokenUrl,
       restV2Base,
       esmBase,
-      envBadgeTitle: buildEnvironmentTooltip(resolved),
+    };
+  }
+
+  function resolveEnvironmentBadgeContext(environment, context = "console") {
+    const resolved = buildEnvironmentDetails(environment);
+    const normalizedContext = String(context || "console").trim().toLowerCase();
+    if (
+      normalizedContext === "esm" ||
+      normalizedContext === "clickesm" ||
+      normalizedContext === "esm-workspace" ||
+      normalizedContext === "esmws"
+    ) {
+      return { label: "ESM", url: resolved.esmBase };
+    }
+    if (
+      normalizedContext === "degradation" ||
+      normalizedContext === "dgr" ||
+      normalizedContext === "clickdgr"
+    ) {
+      return { label: "DEGRADATION", url: resolved.degradationBase };
+    }
+    if (
+      normalizedContext === "rest" ||
+      normalizedContext === "restv2" ||
+      normalizedContext === "rest-v2"
+    ) {
+      return { label: "REST V2", url: resolved.restV2Base };
+    }
+    if (
+      normalizedContext === "cm" ||
+      normalizedContext === "cmu" ||
+      normalizedContext === "clickcmu" ||
+      normalizedContext === "cm-workspace" ||
+      normalizedContext === "cm-console"
+    ) {
+      return { label: "Concurrency Monitoring", url: resolved.cmReportsBase };
+    }
+    return { label: "AdobePASS Console", url: resolved.consoleShellUrl };
+  }
+
+  function buildEnvironmentBadgeTooltip(environment, context = "console") {
+    const resolved = buildEnvironmentDetails(environment);
+    const badgeContext = resolveEnvironmentBadgeContext(resolved, context);
+    const lines = [`Environment : ${resolved.label}`];
+    if (String(badgeContext?.label || "").trim() && String(badgeContext?.url || "").trim()) {
+      lines.push(`${badgeContext.label} : ${badgeContext.url}`);
+    }
+    return lines.join("\n");
+  }
+
+  function cloneEnvironment(environment) {
+    const resolved = buildEnvironmentDetails(environment);
+    return {
+      ...resolved,
+      consoleProgrammersUrl: `${resolved.consoleShellUrl}/programmers`,
+      consoleCallbackPrefix: `${resolved.consoleBase}/oauth2/callback`,
+      envBadgeTitle: buildEnvironmentBadgeTooltip(resolved, "console"),
     };
   }
 
@@ -81,23 +137,16 @@
   }
 
   function buildEnvironmentTooltip(environment, options = {}) {
-    const resolved = resolveEnvironmentRecord(environment);
-    const consoleShellUrl = `${EXPERIENCE_ORIGIN}/#/@adobepass/pass/authentication/${resolved.route}`;
-    const cmConsoleShellUrl = `${String(resolved.cmConsoleOrigin || EXPERIENCE_ORIGIN).replace(/\/+$/, "")}/#/@adobepass/cm-console`;
-    const dcrRegisterUrl = `${resolved.spBase}/o/client/register`;
-    const dcrTokenUrl = `${resolved.spBase}/o/client/token`;
-    const restV2Base = `${resolved.spBase}/api/v2`;
-    const esmBase = `${resolved.mgmtBase}/esm/v3/media-company/`;
-    const degradationBase = `${resolved.mgmtBase}/control/v3/degradation`;
+    const resolved = buildEnvironmentDetails(environment);
     const lines = [`Environment : ${resolved.label}`];
     if (options.includeShell !== false) {
-      lines.push(`AdobePASS Console : ${consoleShellUrl}`);
+      lines.push(`AdobePASS Console : ${resolved.consoleShellUrl}`);
     }
     if (options.includeConsole !== false) {
       lines.push(`AdobePASS Console Base : ${resolved.consoleBase}`);
     }
     if (options.includeCmConsole !== false) {
-      lines.push(`CM Console : ${cmConsoleShellUrl}`);
+      lines.push(`CM Console : ${resolved.cmConsoleShellUrl}`);
     }
     if (options.includeManagement !== false) {
       lines.push(`Management : ${resolved.mgmtBase}`);
@@ -106,19 +155,22 @@
       lines.push(`Service Provider : ${resolved.spBase}`);
     }
     if (options.includeDcrRegister !== false) {
-      lines.push(`DCR Register : ${dcrRegisterUrl}`);
+      lines.push(`DCR Register : ${resolved.dcrRegisterUrl}`);
     }
     if (options.includeDcrToken !== false) {
-      lines.push(`DCR Token : ${dcrTokenUrl}`);
+      lines.push(`DCR Token : ${resolved.dcrTokenUrl}`);
     }
     if (options.includeRestV2 !== false) {
-      lines.push(`REST V2 : ${restV2Base}`);
+      lines.push(`REST V2 : ${resolved.restV2Base}`);
     }
     if (options.includeEsm !== false) {
-      lines.push(`ESM : ${esmBase}`);
+      lines.push(`ESM : ${resolved.esmBase}`);
     }
     if (options.includeDegradation !== false) {
-      lines.push(`DEGRADATION : ${degradationBase}`);
+      lines.push(`DEGRADATION : ${resolved.degradationBase}`);
+    }
+    if (options.includeCmReports !== false) {
+      lines.push(`Concurrency Monitoring : ${resolved.cmReportsBase}`);
     }
     return lines.join("\n");
   }
@@ -181,6 +233,7 @@
     getStoredEnvironment,
     setStoredEnvironment,
     buildEnvironmentTooltip,
+    buildEnvironmentBadgeTooltip,
     rewriteServiceUrl,
   });
 })(typeof globalThis !== "undefined" ? globalThis : window);

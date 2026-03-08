@@ -3,6 +3,7 @@ const DEGRADATION_WORKSPACE_MESSAGE_TYPE = "underpar:degradation-workspace";
 const state = {
   windowId: 0,
   controllerOnline: false,
+  adobePassEnvironment: null,
   degradationReady: false,
   programmerId: "",
   programmerName: "",
@@ -15,6 +16,9 @@ const state = {
   appName: "",
   reports: [],
   batchRunning: false,
+  pendingAutoRerunCards: [],
+  pendingAutoRerunSelectionKey: "",
+  autoRerunInFlightSelectionKey: "",
 };
 
 const els = {
@@ -25,6 +29,8 @@ const els = {
   rerunAllButton: document.getElementById("workspace-rerun-all"),
   clearButton: document.getElementById("workspace-clear-all"),
   cardsHost: document.getElementById("workspace-cards"),
+  pageEnvBadge: document.getElementById("page-env-badge"),
+  pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
 };
 
 function escapeHtml(value) {
@@ -44,6 +50,59 @@ function firstNonEmptyString(values = []) {
     }
   }
   return "";
+}
+
+function getEnvironmentKey(environment = null) {
+  return String(environment?.key || "").trim();
+}
+
+function getWorkspaceEnvironmentRegistry() {
+  return globalThis.UnderParEnvironment || null;
+}
+
+function resolveWorkspaceAdobePassEnvironment(value = null) {
+  const embedded = value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  const registry = getWorkspaceEnvironmentRegistry();
+  if (embedded) {
+    return registry?.getEnvironment ? registry.getEnvironment(embedded.key || embedded) : { ...embedded };
+  }
+  if (registry?.getEnvironment) {
+    return registry.getEnvironment(value || "release-production");
+  }
+  return {
+    key: "release-production",
+    label: "Production",
+    route: "release-production",
+    mgmtBase: "https://mgmt.auth.adobe.com",
+    degradationBase: "https://mgmt.auth.adobe.com/control/v3/degradation",
+  };
+}
+
+function buildWorkspaceEnvironmentTooltip(environment) {
+  const resolved = resolveWorkspaceAdobePassEnvironment(environment);
+  const registry = getWorkspaceEnvironmentRegistry();
+  if (registry?.buildEnvironmentBadgeTooltip) {
+    return String(registry.buildEnvironmentBadgeTooltip(resolved, "degradation") || "").trim();
+  }
+  const route = String(resolved.route || "release-production").trim() || "release-production";
+  const label = String(resolved.label || (route === "release-staging" ? "Staging" : "Production")).trim() || "Production";
+  const mgmtBase = String(
+    resolved.mgmtBase || (route === "release-staging" ? "https://mgmt.auth-staging.adobe.com" : "https://mgmt.auth.adobe.com")
+  ).trim();
+  const degradationBase = String(resolved.degradationBase || `${mgmtBase}/control/v3/degradation`).trim();
+  return [`Environment : ${label}`, `DEGRADATION : ${degradationBase}`].join("\n").trim();
+}
+
+function renderWorkspaceEnvironmentBadge() {
+  if (!els.pageEnvBadge || !els.pageEnvBadgeValue) {
+    return;
+  }
+  const environment = resolveWorkspaceAdobePassEnvironment(state.adobePassEnvironment);
+  const label = String(environment?.label || "").trim() || "Production";
+  const title = buildWorkspaceEnvironmentTooltip(environment) || label;
+  els.pageEnvBadgeValue.textContent = label;
+  els.pageEnvBadge.title = title;
+  els.pageEnvBadge.setAttribute("aria-label", title);
 }
 
 function normalizeReport(report = null) {
@@ -221,22 +280,117 @@ function updateControllerBanner() {
   if (els.filterState) {
     els.filterState.textContent = getFilterLabel();
   }
+  renderWorkspaceEnvironmentBadge();
   syncActionButtonsDisabled();
 }
 
+function getCurrentRerunCards(reportList = state.reports) {
+  return (Array.isArray(reportList) ? reportList : [])
+    .map((report) => getReportPayload(report))
+    .filter((card) => card && card.endpointKey);
+}
+
+function clearPendingAutoRerun() {
+  state.pendingAutoRerunCards = [];
+  state.pendingAutoRerunSelectionKey = "";
+  state.autoRerunInFlightSelectionKey = "";
+}
+
+function hasWorkspaceRefreshTransition() {
+  return state.pendingAutoRerunCards.length > 0 || Boolean(String(state.autoRerunInFlightSelectionKey || "").trim());
+}
+
+function queuePendingAutoRerun(nextSelectionKey = "") {
+  const cards = getCurrentRerunCards();
+  if (cards.length === 0) {
+    return false;
+  }
+  state.pendingAutoRerunCards = cards;
+  state.pendingAutoRerunSelectionKey = String(nextSelectionKey || state.selectionKey || "").trim();
+  const reportLabel = `${cards.length} report${cards.length === 1 ? "" : "s"}`;
+  setStatus(`Refreshing ${reportLabel} for ${getProgrammerLabel()}...`);
+  return true;
+}
+
+function maybeConsumePendingAutoRerun() {
+  if (state.batchRunning || state.controllerOnline !== true || state.degradationReady !== true) {
+    return;
+  }
+  const cards = Array.isArray(state.pendingAutoRerunCards)
+    ? state.pendingAutoRerunCards.filter((card) => card && card.endpointKey)
+    : [];
+  if (cards.length === 0) {
+    state.pendingAutoRerunCards = [];
+    state.pendingAutoRerunSelectionKey = "";
+    return;
+  }
+  const expectedSelectionKey = String(state.pendingAutoRerunSelectionKey || "").trim();
+  const currentSelectionKey = String(state.selectionKey || "").trim();
+  if (expectedSelectionKey && currentSelectionKey && expectedSelectionKey !== currentSelectionKey) {
+    return;
+  }
+  const inFlightSelectionKey = expectedSelectionKey || currentSelectionKey;
+  state.autoRerunInFlightSelectionKey = inFlightSelectionKey;
+  void rerunAllCards({
+    cards,
+    reason: "manual-reload",
+    selectionKey: expectedSelectionKey || currentSelectionKey,
+  }).then((started) => {
+    if (!started) {
+      if (String(state.autoRerunInFlightSelectionKey || "").trim() === inFlightSelectionKey) {
+        state.autoRerunInFlightSelectionKey = "";
+      }
+      return;
+    }
+    state.pendingAutoRerunCards = [];
+    state.pendingAutoRerunSelectionKey = "";
+  });
+}
+
 function applyControllerState(payload = {}) {
+  const previousSelectionKey = String(state.selectionKey || "").trim();
+  const previousProgrammerId = String(state.programmerId || "").trim();
+  const previousProgrammerName = String(state.programmerName || "").trim();
+  const previousEnvironmentKey = getEnvironmentKey(state.adobePassEnvironment);
+  const nextEnvironment =
+    payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object"
+      ? {
+          ...payload.adobePassEnvironment,
+        }
+      : state.adobePassEnvironment;
+  const nextEnvironmentKey = getEnvironmentKey(nextEnvironment);
+  const nextProgrammerId = String(payload?.programmerId || "");
+  const nextProgrammerName = String(payload?.programmerName || "");
+  const nextSelectionKey = String(payload?.selectionKey || previousSelectionKey || "").trim();
+  const selectionChanged = Boolean(previousSelectionKey && nextSelectionKey && previousSelectionKey !== nextSelectionKey);
+  const environmentChanged = Boolean(previousEnvironmentKey && nextEnvironmentKey && previousEnvironmentKey !== nextEnvironmentKey);
+  const programmerChanged =
+    Boolean(previousProgrammerId || previousProgrammerName) &&
+    (previousProgrammerId !== String(nextProgrammerId || "").trim() ||
+      (previousProgrammerName &&
+        nextProgrammerName &&
+        previousProgrammerName.toLowerCase() !== String(nextProgrammerName || "").trim().toLowerCase()));
+
   state.controllerOnline = payload?.controllerOnline === true;
+  state.adobePassEnvironment = nextEnvironment;
   state.degradationReady = payload?.degradationReady === true;
-  state.programmerId = String(payload?.programmerId || "");
-  state.programmerName = String(payload?.programmerName || "");
+  state.programmerId = nextProgrammerId;
+  state.programmerName = nextProgrammerName;
   state.requestorId = String(payload?.requestorId || "");
   state.mvpd = String(payload?.mvpd || "");
   state.mvpdLabel = String(payload?.mvpdLabel || "");
   state.mvpdScopeLabel = String(payload?.mvpdScopeLabel || "");
-  state.selectionKey = String(payload?.selectionKey || state.selectionKey || "");
+  state.selectionKey = nextSelectionKey;
   state.appGuid = String(payload?.appGuid || "");
   state.appName = String(payload?.appName || "");
+  if ((selectionChanged || environmentChanged || programmerChanged) && state.reports.length > 0) {
+    queuePendingAutoRerun(nextSelectionKey);
+  } else if ((selectionChanged || environmentChanged || programmerChanged) && state.reports.length === 0) {
+    state.pendingAutoRerunCards = [];
+    state.pendingAutoRerunSelectionKey = String(nextSelectionKey || "").trim();
+  }
   updateControllerBanner();
+  maybeConsumePendingAutoRerun();
 }
 
 function getScopeValues(report = null) {
@@ -449,6 +603,9 @@ function handleReportsSync(payload = {}) {
   if (selectionKey) {
     state.selectionKey = selectionKey;
   }
+  if (hasWorkspaceRefreshTransition()) {
+    return;
+  }
   replaceReports(reports);
   if (reports.length > 0) {
     setStatus(`Loaded ${reports.length} DEGRADATION report card${reports.length === 1 ? "" : "s"}.`, "success");
@@ -491,17 +648,41 @@ function handleWorkspaceEvent(eventName, payload = {}) {
     state.batchRunning = true;
     syncActionButtonsDisabled();
     const total = Number(payload?.total || 0);
-    setStatus(total > 0 ? `Re-running ${total} report(s)...` : "Re-running reports...");
+    const reason = String(payload?.reason || "").trim().toLowerCase();
+    if (reason === "manual-reload") {
+      setStatus(total > 0 ? `Reloading ${total} report(s)...` : "Reloading reports...");
+    } else {
+      setStatus(total > 0 ? `Re-running ${total} report(s)...` : "Re-running reports...");
+    }
     return;
   }
   if (event === "batch-end") {
     state.batchRunning = false;
+    state.autoRerunInFlightSelectionKey = "";
     syncActionButtonsDisabled();
     const total = Number(payload?.total || 0);
     setStatus(total > 0 ? `Re-run completed for ${total} report(s).` : "Re-run completed.");
+    maybeConsumePendingAutoRerun();
+    return;
+  }
+  if (event === "environment-switch-rerun") {
+    if (state.batchRunning) {
+      return;
+    }
+    if (state.pendingAutoRerunCards.length > 0) {
+      maybeConsumePendingAutoRerun();
+      return;
+    }
+    if (state.reports.length === 0) {
+      return;
+    }
+    void rerunAllCards({
+      reason: "manual-reload",
+    });
     return;
   }
   if (event === "workspace-clear") {
+    clearPendingAutoRerun();
     clearWorkspaceCards();
     setStatus("DEGRADATION workspace cleared.", "info");
   }
@@ -524,6 +705,7 @@ async function sendWorkspaceAction(action, payload = {}) {
 }
 
 function clearWorkspace() {
+  clearPendingAutoRerun();
   clearWorkspaceCards();
   void sendWorkspaceAction("clear-all", {
     selectionKey: String(state.selectionKey || "").trim(),
@@ -531,35 +713,38 @@ function clearWorkspace() {
   setStatus("DEGRADATION workspace cleared.", "info");
 }
 
-async function rerunAllCards() {
+async function rerunAllCards(options = {}) {
   if (state.batchRunning) {
-    return;
+    return false;
   }
-  if (state.reports.length === 0) {
-    setStatus("No reports are open.");
-    return;
-  }
-  const cards = state.reports
-    .map((report) => getReportPayload(report))
-    .filter((card) => card && card.endpointKey);
+  const cards = Array.isArray(options?.cards)
+    ? options.cards.filter((card) => card && card.endpointKey)
+    : getCurrentRerunCards();
   if (cards.length === 0) {
     setStatus("No reports are open.");
-    return;
+    return false;
   }
 
   state.batchRunning = true;
   syncActionButtonsDisabled();
-  setStatus(`Re-running ${cards.length} report(s)...`);
+  const reason = String(options?.reason || "manual-reload").trim().toLowerCase();
+  if (reason === "manual-reload") {
+    setStatus(`Reloading ${cards.length} report(s)...`);
+  } else {
+    setStatus(`Re-running ${cards.length} report(s)...`);
+  }
   const result = await sendWorkspaceAction("rerun-all", {
     cards,
-    reason: "manual-reload",
-    selectionKey: String(state.selectionKey || "").trim(),
+    reason,
+    selectionKey: String(options?.selectionKey || state.selectionKey || "").trim(),
   });
   if (!result?.ok) {
     state.batchRunning = false;
     syncActionButtonsDisabled();
     setStatus(result?.error || "Unable to re-run reports.", "error");
+    return false;
   }
+  return true;
 }
 
 function registerEventHandlers() {

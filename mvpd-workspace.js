@@ -101,6 +101,7 @@ const IS_MVPD_WORKSPACE_TEARSHEET_RUNTIME = Boolean(workspaceExportPayload);
 const state = {
   windowId: 0,
   controllerOnline: false,
+  adobePassEnvironment: null,
   mvpdReady: false,
   hasMvpdCmTenant: false,
   mvpdCmTenantScope: "",
@@ -3527,6 +3528,10 @@ function renderSnapshot(snapshot) {
 function applyControllerState(payload) {
   const previousSelectionKey = getSelectionKey();
   state.controllerOnline = payload?.controllerOnline === true;
+  state.adobePassEnvironment =
+    payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object"
+      ? cloneJsonCompatible(payload.adobePassEnvironment, null)
+      : state.adobePassEnvironment;
   state.mvpdReady = payload?.mvpdReady === true;
   state.hasMvpdCmTenant = payload?.hasMvpdCmTenant === true;
   state.mvpdCmTenantScope = String(payload?.mvpdCmTenantScope || "").trim();
@@ -3653,6 +3658,13 @@ function handleWorkspaceEvent(eventName, payload) {
     setStatus(total > 0 ? `Re-run completed for ${total} report(s).` : "Re-run completed.");
     return;
   }
+  if (event === "environment-switch-rerun") {
+    if (state.loading || state.batchRunning) {
+      return;
+    }
+    void rerunAllCmCards();
+    return;
+  }
   if (event === "workspace-clear") {
     const payloadProgrammerId = String(payload?.programmerId || "").trim();
     const payloadRequestorId = String(payload?.requestorId || "").trim();
@@ -3773,6 +3785,30 @@ function truncateDownloadFileSegment(value, maxLength = 64) {
   return text.slice(0, maxLength).replace(/[_-]+$/g, "");
 }
 
+function getWorkspaceEnvironmentFileTag(environment = null) {
+  const resolved = environment && typeof environment === "object" ? environment : state.adobePassEnvironment;
+  const raw = [
+    resolved?.shortCode,
+    resolved?.label,
+    resolved?.key,
+    resolved?.route,
+    resolved?.consoleBase,
+    resolved?.mgmtBase,
+    resolved?.spBase,
+    resolved?.consoleShellUrl,
+    resolved?.cmConsoleOrigin,
+    resolved?.cmConsoleShellUrl,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (raw.includes("staging") || raw.includes("stage")) {
+    return "STAGE";
+  }
+  return "PROD";
+}
+
 function cloneJsonCompatible(value, fallback = null) {
   if (value == null) {
     return fallback;
@@ -3802,7 +3838,8 @@ function buildClickMvpdWorkspaceFileName(snapshot = {}) {
     "MVPD",
   ]);
   const base = truncateDownloadFileSegment(sanitizeDownloadFileSegment(mvpdToken, "MVPD"), 64) || "MVPD";
-  return `${base}_clickCMUWS_${epoch}.html`;
+  const envTag = getWorkspaceEnvironmentFileTag(snapshot?.adobePassEnvironment);
+  return `${base}_clickCMUWS_${envTag}_${epoch}.html`;
 }
 
 function serializeCardForWorkspaceExport(cardState) {
@@ -3850,6 +3887,10 @@ function buildWorkspaceExportSnapshot() {
     controllerStateText: String(els.controllerState?.textContent || "").trim(),
     filterStateText: String(els.filterState?.textContent || "").trim(),
     exportMetaText: "",
+    adobePassEnvironment:
+      state.adobePassEnvironment && typeof state.adobePassEnvironment === "object"
+        ? cloneJsonCompatible(state.adobePassEnvironment, null)
+        : null,
     programmerId: String(state.programmerId || ""),
     programmerName: String(state.programmerName || ""),
     requestorIds,

@@ -38,6 +38,20 @@ body {
   color: var(--legacy-text);
 }
 
+body.net-busy,
+body[aria-busy="true"],
+body:has(.net-busy),
+body:has([aria-busy="true"]) {
+  cursor: progress;
+}
+
+body.net-busy *,
+body[aria-busy="true"] *,
+body:has(.net-busy) *,
+body:has([aria-busy="true"]) * {
+  cursor: progress !important;
+}
+
 .workspace-app {
   width: min(1520px, 100%);
   margin: 0 auto;
@@ -45,6 +59,42 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.page-env-badge-row {
+  width: min(1520px, 100%);
+  margin: 0 auto;
+  padding: 0 18px 18px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.page-env-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  color: var(--legacy-text);
+  cursor: default;
+}
+
+.page-env-badge-prefix,
+.page-env-badge-sep {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--legacy-muted);
+}
+
+.page-env-badge-value {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1f4f94;
 }
 
 .workspace-header {

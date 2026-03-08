@@ -16,6 +16,7 @@ const SPLUNK_RAW_IGNORED_KEYS = new Set(["trunc", "tokens", "segment_tree", "lin
 const state = {
   windowId: 0,
   controllerOnline: false,
+  adobePassEnvironment: null,
   bobtoolsReady: false,
   programmerId: "",
   programmerName: "",
@@ -91,6 +92,30 @@ function firstNonEmptyString(values = []) {
     }
   }
   return "";
+}
+
+function getWorkspaceEnvironmentFileTag(environment = null) {
+  const resolved = environment && typeof environment === "object" ? environment : state.adobePassEnvironment;
+  const raw = [
+    resolved?.shortCode,
+    resolved?.label,
+    resolved?.key,
+    resolved?.route,
+    resolved?.consoleBase,
+    resolved?.mgmtBase,
+    resolved?.spBase,
+    resolved?.consoleShellUrl,
+    resolved?.cmConsoleOrigin,
+    resolved?.cmConsoleShellUrl,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (raw.includes("staging") || raw.includes("stage")) {
+    return "STAGE";
+  }
+  return "PROD";
 }
 
 function normalizeResourceIdList(values = []) {
@@ -1404,11 +1429,12 @@ function createSplunkCsvDownload(profile = null, rows = [], report = null) {
   const mvpd = String(profile?.mvpd || state.mvpd || "mvpd")
     .trim()
     .replace(/[^A-Za-z0-9_-]+/g, "_");
+  const envTag = getWorkspaceEnvironmentFileTag();
   const checkedAt = Number(report?.checkedAt || Date.now());
   const stamp = Number.isFinite(checkedAt) ? new Date(checkedAt).toISOString().replace(/[:.]/g, "-") : String(Date.now());
   return {
     url,
-    filename: `underpar_splunk_${requestor}_${mvpd}_${stamp}.csv`,
+    filename: `underpar_splunk_${requestor}_${mvpd}_${envTag}_${stamp}.csv`,
   };
 }
 
@@ -1676,6 +1702,10 @@ async function sendWorkspaceAction(action, payload = {}) {
 
 function applyControllerState(payload = {}) {
   state.controllerOnline = payload?.controllerOnline === true;
+  state.adobePassEnvironment =
+    payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object"
+      ? { ...payload.adobePassEnvironment }
+      : state.adobePassEnvironment;
   state.bobtoolsReady = payload?.bobtoolsReady === true;
   state.programmerId = String(payload?.programmerId || "");
   state.programmerName = String(payload?.programmerName || "");
@@ -1963,6 +1993,13 @@ function handleWorkspaceEvent(eventName, payload = {}) {
   if (event === "can-i-watch-result") {
     applyCanIWatchResult(payload);
     render();
+    return;
+  }
+  if (event === "environment-switch-rerun") {
+    void sendWorkspaceAction("workspace-ready", {
+      windowId: Number(state.windowId || 0),
+      forceRefresh: true,
+    });
     return;
   }
   if (event === "workspace-clear") {
