@@ -2290,28 +2290,27 @@ function sortRows(rows, sortStack, context = null) {
       : Array.isArray(context?.headers) && context.headers.length > 0
         ? buildDefaultSortStack(context.headers)
         : [];
-  const stack = Array.isArray(sortStack) && sortStack.length > 0 ? sortStack : fallbackStack;
+  const stack = Array.isArray(sortStack) && sortStack.length > 0 ? [sortStack[0]] : fallbackStack.slice(0, 1);
   if (stack.length === 0) {
     return [...rows];
   }
 
+  const [rule] = stack;
   return [...rows].sort((left, right) => {
-    for (const rule of stack) {
-      const factor = rule.dir === "ASC" ? 1 : -1;
-      const leftValue =
-        context?.mode === "cmu-usage"
-          ? getCmuUsageCellValue(left, rule.col, context)
-          : getComparableValue(left, rule.col);
-      const rightValue =
-        context?.mode === "cmu-usage"
-          ? getCmuUsageCellValue(right, rule.col, context)
-          : getComparableValue(right, rule.col);
-      if (leftValue < rightValue) {
-        return -1 * factor;
-      }
-      if (leftValue > rightValue) {
-        return 1 * factor;
-      }
+    const factor = rule.dir === "ASC" ? 1 : -1;
+    const leftValue =
+      context?.mode === "cmu-usage"
+        ? getCmuUsageCellValue(left, rule.col, context)
+        : getComparableValue(left, rule.col);
+    const rightValue =
+      context?.mode === "cmu-usage"
+        ? getCmuUsageCellValue(right, rule.col, context)
+        : getComparableValue(right, rule.col);
+    if (leftValue < rightValue) {
+      return -1 * factor;
+    }
+    if (leftValue > rightValue) {
+      return 1 * factor;
     }
     if (context?.mode === "cmu-usage") {
       return getCmuUsageCellValue(right, "DATE", context) - getCmuUsageCellValue(left, "DATE", context);
@@ -3719,6 +3718,7 @@ function renderCardTable(cardState, rows, lastModified) {
             dir: String(rule?.dir || "").trim().toUpperCase() === "ASC" ? "ASC" : "DESC",
           }))
           .filter((rule) => rule.col)
+          .slice(0, 1)
       : [];
 
   const tableState = {
@@ -3765,20 +3765,14 @@ function renderCardTable(cardState, rows, lastModified) {
       icon.textContent = isActive ? (tableState.sortStack[0].dir === "ASC" ? "▲" : "▼") : "";
     };
 
-    th.addEventListener("click", (event) => {
-      const existingRule = tableState.sortStack.find((rule) => rule.col === header);
-      if (event.shiftKey && existingRule) {
-        existingRule.dir = existingRule.dir === "DESC" ? "ASC" : "DESC";
-      } else if (event.shiftKey) {
-        tableState.sortStack.push({ col: header, dir: "DESC" });
-      } else {
-        tableState.sortStack = [
-          {
-            col: header,
-            dir: existingRule ? (existingRule.dir === "DESC" ? "ASC" : "DESC") : "DESC",
-          },
-        ];
-      }
+    th.addEventListener("click", () => {
+      const existingRule = tableState.sortStack[0]?.col === header ? tableState.sortStack[0] : null;
+      tableState.sortStack = [
+        {
+          col: header,
+          dir: existingRule ? (existingRule.dir === "DESC" ? "ASC" : "DESC") : "DESC",
+        },
+      ];
       tableState.data = sortRows(tableState.data, tableState.sortStack, tableState.context);
       renderTableBody(tableState);
       updateTableWrapperViewport(tableState);

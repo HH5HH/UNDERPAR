@@ -1464,18 +1464,17 @@ function getCellValue(row, columnKey, context) {
 }
 
 function sortRows(rows, sortStack, context) {
-  const stack = Array.isArray(sortStack) && sortStack.length > 0 ? sortStack : getDefaultSortStack();
+  const stack = Array.isArray(sortStack) && sortStack.length > 0 ? [sortStack[0]] : getDefaultSortStack();
+  const [sortRule] = stack;
   return [...rows].sort((left, right) => {
-    for (const sortRule of stack) {
-      const factor = sortRule.dir === "ASC" ? 1 : -1;
-      const leftValue = getCellValue(left, sortRule.col, context);
-      const rightValue = getCellValue(right, sortRule.col, context);
-      if (leftValue < rightValue) {
-        return -1 * factor;
-      }
-      if (leftValue > rightValue) {
-        return 1 * factor;
-      }
+    const factor = sortRule.dir === "ASC" ? 1 : -1;
+    const leftValue = getCellValue(left, sortRule.col, context);
+    const rightValue = getCellValue(right, sortRule.col, context);
+    if (leftValue < rightValue) {
+      return -1 * factor;
+    }
+    if (leftValue > rightValue) {
+      return 1 * factor;
     }
     return getCellValue(right, "DATE", context) - getCellValue(left, "DATE", context);
   });
@@ -2442,19 +2441,13 @@ function renderCardTable(cardState, rows, lastModified) {
     };
 
     th.addEventListener("click", (event) => {
-      const existingRule = tableState.sortStack.find((rule) => rule.col === header);
-      if (event.shiftKey && existingRule) {
-        existingRule.dir = existingRule.dir === "DESC" ? "ASC" : "DESC";
-      } else if (event.shiftKey) {
-        tableState.sortStack.push({ col: header, dir: "DESC" });
-      } else {
-        tableState.sortStack = [
-          {
-            col: header,
-            dir: existingRule ? (existingRule.dir === "DESC" ? "ASC" : "DESC") : "DESC",
-          },
-        ];
-      }
+      const existingRule = tableState.sortStack[0]?.col === header ? tableState.sortStack[0] : null;
+      tableState.sortStack = [
+        {
+          col: header,
+          dir: existingRule ? (existingRule.dir === "DESC" ? "ASC" : "DESC") : "DESC",
+        },
+      ];
       tableState.data = sortRows(tableState.data, tableState.sortStack, tableState.context);
       renderTableBody(tableState);
       updateTableWrapperViewport(tableState);

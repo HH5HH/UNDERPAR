@@ -176,6 +176,17 @@ body:has([aria-busy="true"]) * {
   stroke-linejoin: round;
 }
 
+.workspace-icon--rerun-glyph {
+  width: auto;
+  min-width: 18px;
+  height: auto;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
 .workspace-net-indicator {
   width: 14px;
   height: 14px;

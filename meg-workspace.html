@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UP MEGSPACE</title>
+    <link rel="stylesheet" href="meg-workspace.css" />
+  </head>
+  <body>
+    <input type="hidden" name="cid" value="" />
+    <input type="hidden" name="csc" value="" />
+    <input type="hidden" name="access_token" value="" />
+    <input type="hidden" name="mgmt_base" value="" />
+    <input type="hidden" name="sp_base" value="" />
+
+    <main id="workspace-app-root" class="meg-app-shell">
+      <div class="meg-floating-bar">
+        <div class="meg-floating-controls">
+          <div class="form-row">
+            <h1
+              id="meg-reset-url"
+              title="MEGTOOL artisinal ESM querys made easy. Click for sample"
+              aria-label="MEGTOOL artisinal ESM querys made easy. Click for sample"
+            >
+              ESM
+            </h1>
+            <input type="text" id="fldEsmUrl" title="ESM Dimension URL" />
+            <input id="fldEsmStart" type="datetime-local" title="ESM start date" />
+            <input id="fldEsmEnd" type="datetime-local" title="ESM end date" />
+          </div>
+        </div>
+        <div class="meg-floating-actions">
+          <span id="page-env-badge" class="page-env-badge" aria-label="Data Environment" title="Data Environment">
+            <span class="page-env-badge-prefix">ENV</span>
+            <span class="page-env-badge-sep">|</span>
+            <span id="page-env-badge-value" class="page-env-badge-value"></span>
+          </span>
+          <button
+            id="workspace-rerun-all"
+            class="workspace-icon-btn workspace-icon-btn--rerun"
+            type="button"
+            title="Re-run all"
+            aria-label="Re-run all"
+          >
+            <span class="workspace-icon workspace-icon--rerun-glyph" aria-hidden="true">f5</span>
+            <span id="workspace-rerun-indicator" class="workspace-net-indicator" aria-hidden="true" hidden></span>
+          </button>
+        </div>
+      </div>
+
+      <p id="workspace-status" hidden></p>
+
+      <section class="meg-client-shell">
+        <div class="meg-drilldown-panel">
+          <table align="center" border="0" id="DD_TBL">
+            <thead><tr></tr></thead>
+            <tbody></tbody>
+          </table>
+          <progress
+            id="load_progress"
+            max="100"
+            value="0"
+            title="Great ESM queries take time--patience is progress!"
+          ></progress>
+        </div>
+
+        <div class="scrollable-table meg-results-panel">
+          <table id="RAW_TBL">
+            <thead><tr></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="meg-info-panel" class="meg-info-panel is-collapsed">
+        <button
+          id="meg-info-toggle"
+          class="meg-info-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="meg-info-body"
+          title="Expand INFO"
+        >
+          <span class="meg-info-toggle-label">INFO</span>
+          <span class="meg-info-toggle-icon" aria-hidden="true">▾</span>
+        </button>
+        <div id="meg-info-body" class="meg-info-body" hidden>
+          <div class="meg-info-section">
+            <h1>CONSOLE</h1>
+            <textarea id="stat_bkt" rows="21" readonly></textarea>
+          </div>
+
+          <div class="meg-info-section">
+            <h1>REFERENCE</h1>
+            <ul>
+              <li>
+                <a
+                  href="https://experienceleague.adobe.com/en/docs/pass/authentication/integration-guide-programmers/features-premium/esm/entitlement-service-monitoring-overview"
+                  target="_blank"
+                  rel="noreferrer"
+                  >Entitlement Service Monitoring Overview</a
+                >
+              </li>
+              <li>
+                <a
+                  href="https://experienceleague.adobe.com/en/docs/pass/authentication/integration-guide-programmers/features-premium/esm/entitlement-service-monitoring-api"
+                  target="_blank"
+                  rel="noreferrer"
+                  >Entitlement Service Monitoring API</a
+                >
+              </li>
+              <li>
+                <a
+                  href="https://experienceleague.adobe.com/en/docs/pass/authentication/integration-guide-programmers/features-premium/esm/understanding-serverside-metrics"
+                  target="_blank"
+                  rel="noreferrer"
+                  >Understanding Server-side Metrics</a
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <main id="workspace-non-esm-screen" class="meg-non-esm-screen" hidden>
+      <h1>
+        <code><tt id="workspace-non-esm-headline">No Soup for Selected Media Company. No Premium, No ESM, No Dice.</tt></code>
+      </h1>
+      <p id="workspace-non-esm-note" class="meg-non-esm-note">
+        * Please ensure the Adobe Pass console has all expected ESM Scoped Registered Applications across all up to date
+        Premium Workflow Customers.
+      </p>
+    </main>
+
+    <script src="underpar-environment.js"></script>
+    <script src="meg-workspace.js"></script>
+  </body>
+</html>
