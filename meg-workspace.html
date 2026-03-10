@@ -12,6 +12,7 @@
     <input type="hidden" name="access_token" value="" />
     <input type="hidden" name="mgmt_base" value="" />
     <input type="hidden" name="sp_base" value="" />
+    <input type="hidden" name="theme_scope" value="" />
 
     <main id="workspace-app-root" class="meg-app-shell">
       <div class="meg-floating-bar">
@@ -62,6 +63,14 @@
             <span class="workspace-icon workspace-icon--rerun-glyph" aria-hidden="true">f5</span>
             <span id="workspace-rerun-indicator" class="workspace-net-indicator" aria-hidden="true" hidden></span>
           </button>
+          <button
+            id="workspace-theme-toggle"
+            class="theme-toggle"
+            type="button"
+            title="Switch to dark theme"
+            aria-label="Switch to dark theme"
+            hidden
+          ></button>
         </div>
       </div>
 

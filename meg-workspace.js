@@ -2,6 +2,7 @@ const MEG_WORKSPACE_MESSAGE_TYPE = "underpar:meg-workspace";
 const MEG_EXPORT_FORMATS = Object.freeze(["csv", "json", "xml", "html"]);
 const MEG_SUPPRESSED_COLUMNS = new Set(["media-company"]);
 const SAVED_QUERY_STORAGE_PREFIX = "underpar:saved-esm-query:";
+const THEME_STORAGE_KEY_PREFIX = "underpar:megtool-theme";
 const MEG_WORKSPACE_PAYLOAD_NODE_ID = "meg-workspace-payload";
 const MEG_SAVED_QUERY_BRIDGE_MESSAGE_TYPE = "underpar:meg-saved-query-bridge";
 const MEG_SAVED_QUERY_BRIDGE_RESPONSE_TYPE = `${MEG_SAVED_QUERY_BRIDGE_MESSAGE_TYPE}:response`;
@@ -73,6 +74,7 @@ const btnMakeMegtool = document.getElementById("workspace-make-megtool");
 const fldEsmUrl = document.getElementById("fldEsmUrl");
 const fldStart = document.getElementById("fldEsmStart");
 const fldEnd = document.getElementById("fldEsmEnd");
+const themeToggle = document.getElementById("workspace-theme-toggle");
 const pageEnvBadge = document.getElementById("page-env-badge");
 const pageEnvBadgeValue = document.getElementById("page-env-badge-value");
 const rerunIndicator = document.getElementById("workspace-rerun-indicator");
@@ -108,6 +110,16 @@ function setEmbeddedInputValue(name, value) {
   }
 }
 
+function firstNonEmptyString(values = []) {
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = String(value ?? "").trim();
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
 function getMegWorkspacePayload() {
   return MEG_STANDALONE_PAYLOAD && typeof MEG_STANDALONE_PAYLOAD === "object" ? MEG_STANDALONE_PAYLOAD : {};
 }
@@ -136,6 +148,100 @@ function getMegStandaloneSavedQueryRecords() {
       return { name, url };
     })
     .filter(Boolean);
+}
+
+function syncStandaloneThemeToggle() {
+  const standalone = isMegStandaloneMode();
+  document.body.classList.toggle("meg-standalone-mode", standalone);
+  if (themeToggle) {
+    themeToggle.hidden = !standalone;
+  }
+}
+
+function normalizeTheme(theme) {
+  return String(theme || "").trim().toLowerCase() === "dark" ? "dark" : "light";
+}
+
+function syncThemeScope() {
+  if (!isMegStandaloneMode()) {
+    return;
+  }
+  const scope = firstNonEmptyString([
+    String(getMegWorkspacePayload()?.themeScope || "").trim(),
+    String(state.programmerId || "").trim(),
+    String(state.programmerName || "").trim(),
+    document.title,
+    "default",
+  ]);
+  if (scope) {
+    setEmbeddedInputValue("theme_scope", scope);
+  }
+}
+
+function getThemeScope() {
+  return firstNonEmptyString([
+    getEmbeddedInputValue("theme_scope"),
+    String(getMegWorkspacePayload()?.themeScope || "").trim(),
+    String(state.programmerId || "").trim(),
+    String(state.programmerName || "").trim(),
+    document.title,
+    "default",
+  ]);
+}
+
+function getThemeStorageKey() {
+  return `${THEME_STORAGE_KEY_PREFIX}:${getThemeScope()}`;
+}
+
+function readStoredTheme() {
+  try {
+    return localStorage.getItem(getThemeStorageKey());
+  } catch {
+    return null;
+  }
+}
+
+function storeTheme(theme) {
+  try {
+    localStorage.setItem(getThemeStorageKey(), normalizeTheme(theme));
+  } catch {
+    // no-op
+  }
+}
+
+function getActiveTheme() {
+  return normalizeTheme(document.body?.dataset?.theme);
+}
+
+function refreshThemeToggleUi() {
+  if (!themeToggle) {
+    return;
+  }
+  const nextTheme = getActiveTheme() === "dark" ? "light" : "dark";
+  const label = `Switch to ${nextTheme} theme`;
+  themeToggle.title = label;
+  themeToggle.setAttribute("aria-label", label);
+}
+
+function applyTheme(theme, { persist = true } = {}) {
+  const normalized = normalizeTheme(theme);
+  document.body.dataset.theme = normalized;
+  if (persist) {
+    storeTheme(normalized);
+  }
+  refreshThemeToggleUi();
+}
+
+function toggleTheme() {
+  applyTheme(getActiveTheme() === "dark" ? "light" : "dark");
+}
+
+function initTheme() {
+  if (!isMegStandaloneMode()) {
+    return;
+  }
+  syncThemeScope();
+  applyTheme(readStoredTheme(), { persist: false });
 }
 
 function buildWorkspaceEnvironmentTooltip(environment) {
@@ -921,6 +1027,7 @@ function applyControllerState(payload = {}) {
   setEmbeddedInputValue("mgmt_base", state.adobePassEnvironment?.mgmtBase || DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase);
   setEmbeddedInputValue("sp_base", state.adobePassEnvironment?.spBase || DEFAULT_ADOBEPASS_ENVIRONMENT.spBase);
   syncFloatingContext();
+  syncThemeScope();
   updateWorkspaceLockState();
   maybeConsumePendingAutoRerun();
 }
@@ -2219,6 +2326,10 @@ function registerEventHandlers() {
     setInfoPanelCollapsed(!infoPanel?.classList.contains("is-collapsed"));
   });
 
+  themeToggle?.addEventListener("click", () => {
+    toggleTheme();
+  });
+
   if (MEG_HAS_RUNTIME_MESSAGING && globalThis.chrome?.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message) => {
       if (message?.type !== MEG_WORKSPACE_MESSAGE_TYPE || message?.channel !== "workspace-event") {
@@ -2272,6 +2383,8 @@ async function init() {
   seedStandaloneSavedQueries();
   registerEventHandlers();
   applyStandaloneBootstrapState();
+  syncStandaloneThemeToggle();
+  initTheme();
   await refreshSavedQuerySelect();
   setInfoPanelCollapsed(true);
   setRerunBusy(false);

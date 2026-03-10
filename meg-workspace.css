@@ -1,3 +1,133 @@
+:root {
+  color-scheme: light;
+  --meg-body-bg: #ffffff;
+  --meg-body-text: #000000;
+  --meg-link: #000000;
+  --meg-link-hover: #2b2b2b;
+  --meg-surface: #ffffff;
+  --meg-surface-alt: #efefef;
+  --meg-surface-hover: #f3f3f3;
+  --meg-surface-hover-strong: #f7f7f7;
+  --meg-border: #000000;
+  --meg-border-soft: #d5d5d5;
+  --meg-border-quiet: rgba(143, 143, 143, 0.34);
+  --meg-shadow-soft: rgba(17, 45, 89, 0.12);
+  --meg-shadow-hover: rgba(20, 52, 102, 0.18);
+  --meg-focus: #0064e0;
+  --meg-focus-ring: rgba(0, 100, 224, 0.22);
+  --meg-env-bg: linear-gradient(180deg, rgb(248, 248, 248) 0%, rgb(233, 233, 233) 100%);
+  --meg-env-pill-bg: linear-gradient(180deg, rgb(248, 248, 248) 0%, rgb(233, 233, 233) 100%);
+  --meg-env-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -1px 0 rgba(80, 80, 80, 0.1);
+  --meg-env-text: #3d3d3d;
+  --meg-env-pill-text: #575757;
+  --meg-env-value-text: #454545;
+  --meg-button-bg: #ffffff;
+  --meg-button-text: #2c2c2c;
+  --meg-button-border: #d5d5d5;
+  --meg-rerun-border: rgba(132, 87, 14, 0.44);
+  --meg-rerun-bg: linear-gradient(180deg, rgba(255, 246, 214, 0.98), rgba(245, 216, 146, 0.98));
+  --meg-rerun-text: #5f370d;
+  --meg-rerun-shadow: 0 9px 18px rgba(132, 87, 14, 0.24);
+  --meg-rerun-hover-bg: linear-gradient(180deg, rgba(219, 255, 136, 0.99), rgba(165, 214, 58, 0.99));
+  --meg-rerun-hover-border: rgba(96, 143, 28, 0.78);
+  --meg-rerun-hover-text: #1f3208;
+  --meg-rerun-hover-shadow: 0 12px 22px rgba(96, 143, 28, 0.24);
+  --meg-rerun-active-bg: linear-gradient(180deg, rgba(201, 240, 111, 1), rgba(145, 194, 45, 1));
+  --meg-rerun-active-border: rgba(82, 127, 24, 0.84);
+  --meg-rerun-active-text: #182806;
+  --meg-rerun-active-shadow: 0 8px 16px rgba(82, 127, 24, 0.24);
+  --meg-spinner-track: rgba(30, 41, 59, 0.22);
+  --meg-spinner-head: rgba(30, 41, 59, 0.88);
+  --meg-status-error-bg: #f8f1f1;
+  --meg-status-error-text: #8a4f4f;
+  --meg-table-head-bg: #ffffff;
+  --meg-table-head-hover: #f3f3f3;
+  --meg-table-head-active-bg: #111111;
+  --meg-table-head-active-text: #ffffff;
+  --meg-progress-accent: #000000;
+  --meg-console-bg: #f0f0f0;
+  --meg-console-text: #707070;
+  --meg-console-border: #000000;
+  --meg-console-error-bg: #f4eded;
+  --meg-console-error-text: #7a4d4d;
+  --meg-utility-button-bg: linear-gradient(180deg, #f4f4f4 0%, #c7c7c7 100%);
+  --meg-utility-button-text: #000000;
+  --meg-utility-button-hover-bg: #000000;
+  --meg-utility-button-hover-text: #ffffff;
+  --meg-danger-bg: linear-gradient(180deg, #ffe0e0 0%, #f0aaaa 100%);
+  --meg-danger-text: #8d0000;
+  --meg-danger-border: #8d0000;
+  --meg-danger-hover-bg: #8d0000;
+  --meg-danger-hover-text: #ffffff;
+  --meg-saved-query-capri: #005f84;
+  --meg-save-query-cue-ring: rgba(0, 95, 132, 0.18);
+  --meg-save-query-cue-halo: rgba(0, 95, 132, 0.08);
+  --meg-save-query-cue-bg: #f6fbfe;
+  --meg-theme-preview: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(240, 249, 255, 0.97) 100%);
+  --meg-theme-ring: #0064e0;
+  --meg-theme-halo: rgba(0, 100, 224, 0.12);
+  --meg-theme-shadow: rgba(12, 29, 61, 0.08);
+}
+
+body[data-theme="dark"] {
+  color-scheme: dark;
+  --meg-body-bg: #10161f;
+  --meg-body-text: #e4edf8;
+  --meg-link: #7ed0f0;
+  --meg-link-hover: #b5e8fb;
+  --meg-surface: #16202c;
+  --meg-surface-alt: rgba(255, 255, 255, 0.03);
+  --meg-surface-hover: #1d2a39;
+  --meg-surface-hover-strong: #1c2734;
+  --meg-border: #3d5b78;
+  --meg-border-soft: #486480;
+  --meg-border-quiet: rgba(110, 150, 186, 0.38);
+  --meg-shadow-soft: rgba(0, 0, 0, 0.24);
+  --meg-shadow-hover: rgba(0, 0, 0, 0.34);
+  --meg-focus: #61b9e7;
+  --meg-focus-ring: rgba(61, 185, 231, 0.24);
+  --meg-env-bg: linear-gradient(180deg, rgba(30, 43, 59, 0.98) 0%, rgba(22, 32, 44, 0.98) 100%);
+  --meg-env-pill-bg: linear-gradient(180deg, rgba(33, 50, 69, 0.98) 0%, rgba(25, 37, 52, 0.98) 100%);
+  --meg-env-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(0, 0, 0, 0.24);
+  --meg-env-text: #bfd3e7;
+  --meg-env-pill-text: #d8ebf8;
+  --meg-env-value-text: #9fc0da;
+  --meg-button-bg: #1b2836;
+  --meg-button-text: #e4edf8;
+  --meg-button-border: #486480;
+  --meg-spinner-track: rgba(191, 211, 231, 0.22);
+  --meg-spinner-head: rgba(191, 211, 231, 0.88);
+  --meg-status-error-bg: rgba(122, 77, 77, 0.24);
+  --meg-status-error-text: #f3c1c1;
+  --meg-table-head-bg: #182432;
+  --meg-table-head-hover: #223244;
+  --meg-table-head-active-bg: #2e93c7;
+  --meg-table-head-active-text: #071019;
+  --meg-progress-accent: #3db9e7;
+  --meg-console-bg: #0f1722;
+  --meg-console-text: #9fb3c8;
+  --meg-console-border: #3d5b78;
+  --meg-console-error-bg: #291818;
+  --meg-console-error-text: #f5bbbb;
+  --meg-utility-button-bg: linear-gradient(180deg, rgba(35, 53, 70, 0.98) 0%, rgba(25, 38, 52, 0.98) 100%);
+  --meg-utility-button-text: #e4edf8;
+  --meg-utility-button-hover-bg: #2e93c7;
+  --meg-utility-button-hover-text: #071019;
+  --meg-danger-bg: linear-gradient(180deg, rgba(120, 37, 37, 0.94) 0%, rgba(93, 24, 24, 0.98) 100%);
+  --meg-danger-text: #ffd4d4;
+  --meg-danger-border: #d67676;
+  --meg-danger-hover-bg: #a53f3f;
+  --meg-danger-hover-text: #ffffff;
+  --meg-saved-query-capri: #61b9e7;
+  --meg-save-query-cue-ring: rgba(61, 185, 231, 0.22);
+  --meg-save-query-cue-halo: rgba(61, 185, 231, 0.1);
+  --meg-save-query-cue-bg: #142737;
+  --meg-theme-preview: linear-gradient(180deg, rgb(27, 27, 27) 0%, rgb(17, 17, 17) 100%);
+  --meg-theme-ring: #5cc4eb;
+  --meg-theme-halo: rgba(31, 174, 228, 0.16);
+  --meg-theme-shadow: rgba(0, 0, 0, 0.18);
+}
+
 * {
   box-sizing: border-box;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans",
@@ -11,8 +141,8 @@ body {
 
 body {
   margin: 0;
-  background: #ffffff;
-  color: #000000;
+  background: var(--meg-body-bg);
+  color: var(--meg-body-text);
   overflow: hidden;
 }
 
@@ -25,19 +155,19 @@ body.workspace-locked {
 }
 
 a {
-  color: #000000;
+  color: var(--meg-link);
 }
 
 a:hover {
-  color: #2b2b2b;
+  color: var(--meg-link-hover);
 }
 
 button,
 input,
 textarea {
-  border: 1px solid #000000;
-  background: #ffffff;
-  color: #000000;
+  border: 1px solid var(--meg-border);
+  background: var(--meg-surface);
+  color: var(--meg-body-text);
 }
 
 button {
@@ -63,7 +193,7 @@ td {
 }
 
 tr:nth-child(even) {
-  background-color: #efefef;
+  background-color: var(--meg-surface-alt);
 }
 
 h1 {
@@ -81,6 +211,11 @@ ul {
 
 p {
   margin: 0;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--meg-body-text) 48%, transparent);
 }
 
 .meg-non-esm-screen {
@@ -133,7 +268,7 @@ p {
   align-items: flex-start;
   gap: 8px;
   flex-wrap: wrap;
-  background: #ffffff;
+  background: var(--meg-body-bg);
 }
 
 .meg-floating-controls,
@@ -144,8 +279,8 @@ p {
 .meg-info-panel,
 .meg-info-section,
 #workspace-status {
-  border: 2px solid #000000;
-  background: #ffffff;
+  border: 2px solid var(--meg-border);
+  background: var(--meg-surface);
 }
 
 .meg-floating-controls {
@@ -168,7 +303,9 @@ p {
   justify-content: center;
   min-height: 28px;
   padding: 0 8px;
-  border: 1px solid #000000;
+  border: 1px solid var(--meg-border);
+  background: var(--meg-surface);
+  color: var(--meg-body-text);
   cursor: pointer;
   user-select: none;
   flex: 0 0 auto;
@@ -209,11 +346,11 @@ input[type="datetime-local"] {
   max-width: min(44vw, 420px);
   min-height: 22px;
   padding: 2px 8px 2px 6px;
-  border: 1px solid rgba(143, 143, 143, 0.34);
+  border: 1px solid var(--meg-border-quiet);
   border-radius: 6px;
-  background: linear-gradient(180deg, rgb(248, 248, 248) 0%, rgb(233, 233, 233) 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -1px 0 rgba(80, 80, 80, 0.1);
-  color: #3d3d3d;
+  background: var(--meg-env-bg);
+  box-shadow: var(--meg-env-shadow);
+  color: var(--meg-env-text);
   cursor: default;
   user-select: text;
   opacity: 0.88;
@@ -226,14 +363,14 @@ input[type="datetime-local"] {
   padding: 0 6px;
   flex: 0 0 auto;
   white-space: nowrap;
-  border: 1px solid rgba(143, 143, 143, 0.34);
+  border: 1px solid var(--meg-border-quiet);
   border-radius: 4px;
-  background: linear-gradient(180deg, rgb(248, 248, 248) 0%, rgb(233, 233, 233) 100%);
+  background: var(--meg-env-pill-bg);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #575757;
+  color: var(--meg-env-pill-text);
 }
 
 .page-env-badge-sep {
@@ -246,7 +383,7 @@ input[type="datetime-local"] {
   font-size: 11px;
   font-weight: 400;
   font-family: "Adobe Clean", "Source Sans Pro", "Segoe UI", system-ui, sans-serif;
-  color: #454545;
+  color: var(--meg-env-value-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -262,53 +399,73 @@ input[type="datetime-local"] {
   display: none;
 }
 
-.workspace-icon-btn {
+.workspace-icon-btn,
+.theme-toggle {
   appearance: none;
   width: 30px;
   height: 30px;
   padding: 0;
   border-radius: 999px;
-  border: 1px solid #d5d5d5;
-  background: #ffffff;
-  color: #2c2c2c;
   line-height: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
-  box-shadow: 0 5px 11px rgba(17, 45, 89, 0.12);
+}
+
+.workspace-icon-btn {
+  border: 1px solid var(--meg-button-border);
+  background: var(--meg-button-bg);
+  color: var(--meg-button-text);
+  box-shadow: 0 5px 11px var(--meg-shadow-soft);
 }
 
 .workspace-icon-btn--rerun {
-  border-color: rgba(132, 87, 14, 0.44);
-  background: linear-gradient(180deg, rgba(255, 246, 214, 0.98), rgba(245, 216, 146, 0.98));
-  color: #5f370d;
-  box-shadow: 0 9px 18px rgba(132, 87, 14, 0.24);
+  border-color: var(--meg-rerun-border);
+  background: var(--meg-rerun-bg);
+  color: var(--meg-rerun-text);
+  box-shadow: var(--meg-rerun-shadow);
 }
 
 .workspace-icon-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 10px 20px rgba(20, 52, 102, 0.18);
+  box-shadow: 0 10px 20px var(--meg-shadow-hover);
 }
 
 .workspace-icon-btn--rerun:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(219, 255, 136, 0.99), rgba(165, 214, 58, 0.99));
-  border-color: rgba(96, 143, 28, 0.78);
-  color: #1f3208;
-  box-shadow: 0 12px 22px rgba(96, 143, 28, 0.24);
+  background: var(--meg-rerun-hover-bg);
+  border-color: var(--meg-rerun-hover-border);
+  color: var(--meg-rerun-hover-text);
+  box-shadow: var(--meg-rerun-hover-shadow);
 }
 
 .workspace-icon-btn--rerun:active:not(:disabled) {
-  background: linear-gradient(180deg, rgba(201, 240, 111, 1), rgba(145, 194, 45, 1));
-  border-color: rgba(82, 127, 24, 0.84);
-  color: #182806;
-  box-shadow: 0 8px 16px rgba(82, 127, 24, 0.24);
+  background: var(--meg-rerun-active-bg);
+  border-color: var(--meg-rerun-active-border);
+  color: var(--meg-rerun-active-text);
+  box-shadow: var(--meg-rerun-active-shadow);
 }
 
 .workspace-icon-btn:disabled {
   opacity: 0.64;
   cursor: default;
+}
+
+.theme-toggle {
+  border: 2px solid var(--meg-theme-ring);
+  background: var(--meg-theme-preview);
+  box-shadow: 0 0 0 2px var(--meg-theme-halo), 0 5px 11px var(--meg-shadow-soft);
+}
+
+.theme-toggle:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--meg-focus);
+  box-shadow: 0 0 0 2px var(--meg-theme-halo), 0 10px 20px var(--meg-shadow-hover);
+}
+
+.theme-toggle:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .workspace-icon {
@@ -345,8 +502,8 @@ input[type="datetime-local"] {
   width: 18px;
   height: 18px;
   border-radius: 999px;
-  border: 2.5px solid rgba(30, 41, 59, 0.22);
-  border-top-color: rgba(30, 41, 59, 0.88);
+  border: 2.5px solid var(--meg-spinner-track);
+  border-top-color: var(--meg-spinner-head);
   flex: 0 0 auto;
   animation: workspace-net-spin 0.8s linear infinite;
 }
@@ -375,8 +532,8 @@ input[type="datetime-local"] {
 }
 
 #workspace-status.error {
-  background: #f8f1f1;
-  color: #8a4f4f;
+  background: var(--meg-status-error-bg);
+  color: var(--meg-status-error-text);
 }
 
 .meg-client-shell {
@@ -430,10 +587,10 @@ input[type="datetime-local"] {
   min-height: 32px;
   min-width: 56px;
   padding: 0 12px;
-  border: 1px solid #000000;
+  border: 1px solid var(--meg-border);
   border-radius: 0;
-  background: linear-gradient(180deg, #f4f4f4 0%, #c7c7c7 100%);
-  color: #000000;
+  background: var(--meg-utility-button-bg);
+  color: var(--meg-utility-button-text);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -442,12 +599,12 @@ input[type="datetime-local"] {
 
 .meg-export-pack-button:hover:not(:disabled),
 .meg-export-pack-button:active:not(:disabled) {
-  background: #000000;
-  color: #ffffff;
+  background: var(--meg-utility-button-hover-bg);
+  color: var(--meg-utility-button-hover-text);
 }
 
 .meg-export-pack-button:focus-visible {
-  outline: 2px solid #000000;
+  outline: 2px solid var(--meg-focus);
   outline-offset: 2px;
 }
 
@@ -489,20 +646,20 @@ input[type="datetime-local"] {
   top: 0;
   z-index: 1;
   padding: 0;
-  background: #ffffff;
-  border-bottom: 1px solid #000000;
+  background: var(--meg-table-head-bg);
+  border-bottom: 1px solid var(--meg-border);
   cursor: pointer;
   user-select: none;
   transition: background-color 120ms ease, color 120ms ease;
 }
 
 #RAW_TBL thead th:hover {
-  background: #f3f3f3;
+  background: var(--meg-table-head-hover);
 }
 
 #RAW_TBL thead th.active-sort {
-  background: #111111;
-  color: #ffffff;
+  background: var(--meg-table-head-active-bg);
+  color: var(--meg-table-head-active-text);
 }
 
 .meg-sort-button {
@@ -546,21 +703,21 @@ input[type="datetime-local"] {
   width: 100%;
   display: none;
   margin-top: 6px;
-  accent-color: #000000;
+  accent-color: var(--meg-progress-accent);
 }
 
 #stat_bkt {
   width: 100%;
   min-height: 240px;
   padding: 6px;
-  background-color: #f0f0f0;
-  color: #707070;
-  border: 1px solid #000000;
+  background-color: var(--meg-console-bg);
+  color: var(--meg-console-text);
+  border: 1px solid var(--meg-console-border);
 }
 
 #stat_bkt.meg-console-error {
-  background-color: #f4eded;
-  color: #7a4d4d;
+  background-color: var(--meg-console-error-bg);
+  color: var(--meg-console-error-text);
 }
 
 .meg-info-panel {
@@ -579,13 +736,13 @@ input[type="datetime-local"] {
   gap: 10px;
   padding: 8px 10px;
   border: 0;
-  background: #ffffff;
-  color: #000000;
+  background: var(--meg-surface);
+  color: var(--meg-body-text);
   cursor: pointer;
 }
 
 .meg-info-toggle:hover {
-  background: #f7f7f7;
+  background: var(--meg-surface-hover-strong);
 }
 
 .meg-info-toggle:focus-visible,
@@ -596,9 +753,11 @@ a.meg-saved-query-btn:focus-visible,
 button.meg-saved-query-btn:focus-visible,
 .meg-saved-query-select:focus-visible,
 .meg-saved-query-name:focus-visible,
+.theme-toggle:focus-visible,
 a:focus-visible {
-  outline: 2px solid #000000;
+  outline: 2px solid var(--meg-focus);
   outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--meg-focus-ring);
 }
 
 .meg-info-toggle-label {
@@ -622,7 +781,7 @@ a:focus-visible {
   flex-direction: column;
   gap: 8px;
   padding: 8px;
-  border-top: 2px solid #000000;
+  border-top: 2px solid var(--meg-border);
   max-height: min(42vh, 520px);
   overflow: auto;
 }
@@ -636,14 +795,13 @@ a:focus-visible {
 }
 
 .meg-saved-query-section {
-  --meg-saved-query-capri: #005f84;
   display: block;
   align-self: stretch;
   width: 100%;
   max-width: none;
   box-sizing: border-box;
-  border: 2px solid #000000;
-  background: #ffffff;
+  border: 2px solid var(--meg-border);
+  background: var(--meg-surface);
   overflow: visible;
   padding: 12px;
 }
@@ -690,10 +848,10 @@ a:focus-visible {
 .meg-saved-query-name,
 .meg-saved-query-select {
   min-height: 38px;
-  border: 1px solid #000000;
+  border: 1px solid var(--meg-border);
   border-radius: 0;
-  background: #ffffff;
-  color: #000000;
+  background: var(--meg-surface);
+  color: var(--meg-body-text);
   font-size: 13px;
   padding: 0 10px;
 }
@@ -713,10 +871,10 @@ a:focus-visible {
 .meg-saved-query-btn {
   min-height: 38px;
   padding: 0 14px;
-  border: 1px solid #000000;
+  border: 1px solid var(--meg-border);
   border-radius: 0;
-  background: linear-gradient(180deg, #f4f4f4 0%, #c7c7c7 100%);
-  color: #000000;
+  background: var(--meg-utility-button-bg);
+  color: var(--meg-utility-button-text);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -726,8 +884,8 @@ a:focus-visible {
 
 .meg-saved-query-btn:hover:not(:disabled),
 .meg-saved-query-btn:active:not(:disabled) {
-  background: #000000;
-  color: #ffffff;
+  background: var(--meg-utility-button-hover-bg);
+  color: var(--meg-utility-button-hover-text);
 }
 
 .meg-saved-query-btn:disabled {
@@ -735,24 +893,24 @@ a:focus-visible {
 }
 
 .meg-saved-query-btn--danger {
-  background: linear-gradient(180deg, #ffe0e0 0%, #f0aaaa 100%);
-  color: #8d0000;
-  border-color: #8d0000;
+  background: var(--meg-danger-bg);
+  color: var(--meg-danger-text);
+  border-color: var(--meg-danger-border);
 }
 
 .meg-saved-query-btn--danger:hover:not(:disabled),
 .meg-saved-query-btn--danger:active:not(:disabled) {
-  background: #8d0000;
-  color: #ffffff;
+  background: var(--meg-danger-hover-bg);
+  color: var(--meg-danger-hover-text);
 }
 
 .meg-saved-query-name.meg-save-query-cued,
 .meg-saved-query-btn.meg-save-query-cued {
-  box-shadow: 0 0 0 2px rgba(0, 95, 132, 0.18), 0 0 0 5px rgba(0, 95, 132, 0.08);
+  box-shadow: 0 0 0 2px var(--meg-save-query-cue-ring), 0 0 0 5px var(--meg-save-query-cue-halo);
 }
 
 .meg-saved-query-name.meg-save-query-cued {
-  background: #f6fbfe;
+  background: var(--meg-save-query-cue-bg);
 }
 
 @media (max-width: 1120px) {
