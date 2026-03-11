@@ -503,6 +503,86 @@ function sanitizePassVaultHintValue(...values) {
   return firstNonEmptyString(sanitizePassVaultHintList(...values));
 }
 
+const PASS_VAULT_SERVICE_PROVIDER_HINT_KEYS = Object.freeze([
+  "serviceproviders",
+  "contentproviders",
+  "requestors",
+  "requestorids",
+  "requestor",
+  "serviceprovider",
+]);
+
+const PASS_VAULT_PRIMARY_REQUESTOR_HINT_KEYS = Object.freeze([
+  "requestor",
+  "serviceprovider",
+]);
+
+function normalizePassVaultHintKey(value = "") {
+  return String(value || "")
+    .replace(/[^a-z0-9]+/gi, "")
+    .trim()
+    .toLowerCase();
+}
+
+function collectPassVaultHintValuesFromObject(source = null, matchingKeys = []) {
+  if (!source || typeof source !== "object") {
+    return [];
+  }
+
+  const normalizedKeys = new Set(
+    (Array.isArray(matchingKeys) ? matchingKeys : [])
+      .map((key) => normalizePassVaultHintKey(key))
+      .filter(Boolean)
+  );
+  if (normalizedKeys.size === 0) {
+    return [];
+  }
+
+  const collected = [];
+  const seenObjects = new Set();
+  const visit = (value) => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    if (seenObjects.has(value)) {
+      return;
+    }
+    seenObjects.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((entry) => visit(entry));
+      return;
+    }
+
+    Object.entries(value).forEach(([key, nested]) => {
+      if (normalizedKeys.has(normalizePassVaultHintKey(key))) {
+        collected.push(...sanitizePassVaultHintList(nested));
+      }
+      visit(nested);
+    });
+  };
+
+  visit(source);
+  return uniqueSorted(collected);
+}
+
+function collectPassVaultServiceProviderHintsFromAppData(appData = null, softwareStatement = "") {
+  const statement = firstNonEmptyString([softwareStatement, extractSoftwareStatementFromAppData(appData)]);
+  if (!statement) {
+    return [];
+  }
+  const claims = parseJwtPayload(statement);
+  return collectPassVaultHintValuesFromObject(claims, PASS_VAULT_SERVICE_PROVIDER_HINT_KEYS);
+}
+
+function extractPassVaultPrimaryRequestorHintFromAppData(appData = null, softwareStatement = "") {
+  const statement = firstNonEmptyString([softwareStatement, extractSoftwareStatementFromAppData(appData)]);
+  if (!statement) {
+    return "";
+  }
+  const claims = parseJwtPayload(statement);
+  return firstNonEmptyString(collectPassVaultHintValuesFromObject(claims, PASS_VAULT_PRIMARY_REQUESTOR_HINT_KEYS));
+}
+
 function sanitizePassVaultMatchedTenants(value = []) {
   return (Array.isArray(value) ? value : [])
     .map((entry) => {
@@ -530,11 +610,13 @@ function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackNam
     String(guid || "").trim(),
   ]);
   const scopes = getScopesFromApplication(source);
+  const claimServiceProviders = collectPassVaultServiceProviderHintsFromAppData(source);
   const serviceProviders = sanitizePassVaultHintList(
     source?.serviceProviders,
     source?.contentProviders,
     source?.requestors,
     source?.requestorIds,
+    claimServiceProviders,
     source?.__rawEnvelope?.entityData?.serviceProviders,
     source?.__rawEnvelope?.entityData?.contentProviders,
     source?.__rawEnvelope?.entityData?.requestors,
@@ -543,6 +625,7 @@ function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackNam
   const requestor = sanitizePassVaultHintValue(
     source?.requestor,
     source?.serviceProvider,
+    extractPassVaultPrimaryRequestorHintFromAppData(source),
     source?.__rawEnvelope?.entityData?.requestor,
     source?.__rawEnvelope?.entityData?.serviceProvider
   );
@@ -951,6 +1034,15 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
       services: legacyServiceSummary,
     })
   );
+  const normalizedHydrationStatus = normalizeUnderparVaultStatus(record?.hydrationStatus);
+  const derivedHydrationStatus =
+    normalizedHydrationStatus === UNDERPAR_VAULT_STATUS_PENDING &&
+    passVaultProgrammerRecordHasHydrationResults({
+      registeredApplicationsByGuid,
+      services: derivedServices,
+    })
+      ? UNDERPAR_VAULT_STATUS_COMPLETE
+      : normalizedHydrationStatus;
   const services = {
     restV2: {
       available: legacyServiceSummary?.restV2?.available === true || derivedServices.restV2.available === true,
@@ -1022,7 +1114,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
       resolvePassVaultRecordRuntimeLabel(environmentKey),
       String(environmentKey || "").trim(),
     ]),
-    hydrationStatus: normalizeUnderparVaultStatus(record?.hydrationStatus),
+    hydrationStatus: derivedHydrationStatus,
     source: String(record?.source || "").trim() || "live",
     premiumDetectionVersion: Math.max(
       0,
@@ -1116,6 +1208,9 @@ function normalizeUnderparVaultPayload(payload = null) {
         normalizedEnvironmentKey,
       ]),
       updatedAt: Number(rawEnvironmentRecord?.updatedAt || normalized.updatedAt || Date.now()),
+      cmTenants: normalizeCmTenantsCatalogPayload(
+        rawEnvironmentRecord?.cmTenants || rawEnvironmentRecord?.cmTenantsCatalog || null
+      ),
       mediaCompanies,
     };
   });
@@ -1201,6 +1296,24 @@ function getPassVaultMediaCompanyRecordFromVault(vault = null, programmerId = ""
   const environmentRecord = vault?.pass?.environments?.[normalizedEnvironmentKey];
   const record = environmentRecord?.mediaCompanies?.[normalizedProgrammerId] || null;
   return record && typeof record === "object" ? record : null;
+}
+
+function getPassVaultEnvironmentRecordFromVault(vault = null, environmentKey = getActiveAdobePassEnvironmentKey()) {
+  const normalizedEnvironmentKey = String(environmentKey || "").trim();
+  if (!normalizedEnvironmentKey) {
+    return null;
+  }
+
+  const environmentRecord = vault?.pass?.environments?.[normalizedEnvironmentKey] || null;
+  return environmentRecord && typeof environmentRecord === "object" ? environmentRecord : null;
+}
+
+function getPassVaultCmTenantsCatalogFromVault(vault = null, environmentKey = getActiveAdobePassEnvironmentKey()) {
+  const environmentRecord = getPassVaultEnvironmentRecordFromVault(vault, environmentKey);
+  if (!environmentRecord) {
+    return null;
+  }
+  return normalizeCmTenantsCatalogPayload(environmentRecord?.cmTenants || environmentRecord?.cmTenantsCatalog || null);
 }
 
 function getPassVaultMediaCompanyRecord(programmerId = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
@@ -1753,6 +1866,7 @@ async function persistPassVaultProgrammerRecord(programmer, services = null, opt
         key: environmentKey,
         label: String(environment?.label || environmentKey).trim() || environmentKey,
         updatedAt: Date.now(),
+        cmTenants: null,
         mediaCompanies: {},
       };
     }
@@ -2082,6 +2196,9 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.cmTenantsCatalogHydrationPromise = null;
   state.cmTenantsCatalogRuntimeFresh = false;
   state.cmTenantsCatalogFetchAttempted = false;
+  state.cmTenantsPrecheckPending = false;
+  state.cmTenantsPrecheckComplete = false;
+  state.cmTenantsPrecheckLastError = "";
   state.cmTenantDebugExportedByUrl.clear();
   state.cmTenantBundleByTenantKey.clear();
   state.cmTenantBundlePromiseByTenantKey.clear();
@@ -2099,6 +2216,9 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   selectProgrammerForController(null, controllerReason);
   populateMediaCompanySelect();
   applyMediaCompanyOptionHydrationState();
+  if (state.sessionReady && state.loginData && !state.restricted) {
+    prefetchCmTenantsCatalogInBackground("vault-runtime-reset", { forceRefresh: false });
+  }
 }
 
 async function purgePassVaultFromDevtools() {
@@ -2146,7 +2266,9 @@ function getPassVaultCredentialTasks(services = null) {
     });
   };
 
-  if (services?.restV2?.guid) {
+  if (Array.isArray(services?.restV2Apps) && services.restV2Apps.length > 0) {
+    services.restV2Apps.forEach((appInfo) => pushTask("restV2", appInfo));
+  } else if (services?.restV2?.guid) {
     pushTask("restV2", services.restV2);
   }
   if (services?.esm?.guid) {
@@ -2525,7 +2647,7 @@ function resolveLatestPremiumServiceAppInfo(programmerId = "", fallbackAppInfo =
   if (serviceKey === "restV2") {
     const requestorId = String(debugMeta?.requestorId || "").trim();
     const candidates = collectRestV2AppCandidatesFromPremiumApps(services);
-    return resolveRestV2AppForServiceProvider(candidates, requestorId, normalizedProgrammerId) || fallbackAppInfo;
+    return selectPreferredRestV2AppForRequestor(candidates, requestorId, normalizedProgrammerId) || fallbackAppInfo;
   }
 
   if (serviceKey === "degradation") {
@@ -2757,9 +2879,6 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
   }
 
   let missingServiceKeys = getMissingRequiredPremiumServiceKeys(resolvedServices, options?.requiredServiceKeys);
-  if (missingServiceKeys.length === 0) {
-    return resolvedServices;
-  }
 
   const applicationsSnapshot = getCurrentProgrammerApplicationsSnapshot(programmer.programmerId) || {};
   const guidOrder = getProgrammerRegisteredApplicationGuids(programmer, applicationsSnapshot);
@@ -2782,6 +2901,16 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
 
   const forceRefresh = options?.forceRefresh === true;
   const requestTimeoutMs = Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS));
+  const appAdvertisesServiceScope = (serviceKey, appInfo) => {
+    const requiredScope = normalizeScope(getPassVaultRequiredScopeForService(serviceKey, appInfo));
+    if (!requiredScope) {
+      return false;
+    }
+    return (Array.isArray(appInfo?.scopes) ? appInfo.scopes : [])
+      .map((scope) => normalizeScope(scope))
+      .filter(Boolean)
+      .includes(requiredScope);
+  };
   const pushUniqueServiceApp = (serviceKey, appInfo) => {
     if (!appInfo?.guid) {
       return;
@@ -2810,9 +2939,6 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
 
   for (const guid of guidOrder) {
     missingServiceKeys = getMissingRequiredPremiumServiceKeys(resolvedServices, options?.requiredServiceKeys);
-    if (missingServiceKeys.length === 0) {
-      break;
-    }
 
     const existingAppData =
       applicationsSnapshot?.[guid] && typeof applicationsSnapshot[guid] === "object" && !Array.isArray(applicationsSnapshot[guid])
@@ -2917,6 +3043,20 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
       });
     }
 
+    const scopedCandidate = {
+      ...candidateBase,
+      scopes: Array.isArray(baseScopes) ? baseScopes.slice() : [],
+    };
+    if (appAdvertisesServiceScope("restV2", scopedCandidate)) {
+      pushUniqueServiceApp("restV2", scopedCandidate);
+    }
+    if (appAdvertisesServiceScope("esm", scopedCandidate)) {
+      pushUniqueServiceApp("esm", scopedCandidate);
+    }
+    if (appAdvertisesServiceScope("degradation", scopedCandidate)) {
+      pushUniqueServiceApp("degradation", scopedCandidate);
+    }
+
     applicationsSnapshot[guid] = {
       ...mergedAppData,
       id: mergedAppData.id || guid,
@@ -3014,7 +3154,7 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       return !(cache?.clientId && cache?.clientSecret);
     }).length;
     const warningCount = credentialResults.filter((result) => String(result?.error || "").trim()).length;
-    const hydrationStatus = failedCount > 0 ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_PENDING;
+    const hydrationStatus = failedCount > 0 ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_COMPLETE;
     await persistPassVaultProgrammerRecord(programmer, resolvedServices, {
       source: "live",
       hydrationStatus,
@@ -5057,6 +5197,9 @@ const state = {
   cmTenantsCatalogHydrationPromise: null,
   cmTenantsCatalogRuntimeFresh: false,
   cmTenantsCatalogFetchAttempted: false,
+  cmTenantsPrecheckPending: false,
+  cmTenantsPrecheckComplete: false,
+  cmTenantsPrecheckLastError: "",
   cmTenantDebugExportedByUrl: new Set(),
   cmConsoleBootstrapSummary: null,
   cmConsoleBootstrapPromise: null,
@@ -5309,6 +5452,13 @@ function setStatus(message = "", type = "info") {
   if (showAsGlobalStatus) {
     els.status.classList.add("error");
   }
+}
+
+function clearStatusUnlessCmTenantsPrecheckBlocked() {
+  if (state.cmTenantsPrecheckComplete !== true && String(state.cmTenantsPrecheckLastError || "").trim()) {
+    return;
+  }
+  setStatus("", "info");
 }
 
 function getLocalGlobalNetworkActivityCount() {
@@ -5868,9 +6018,22 @@ function isCmReportsRequestUrl(urlValue = "") {
   }
 }
 
+function isCmConfigRequestUrl(urlValue = "") {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return false;
+  }
+  try {
+    const parsed = new URL(raw);
+    return String(parsed.hostname || "").trim().toLowerCase() === "config.adobeprimetime.com";
+  } catch {
+    return false;
+  }
+}
+
 function withCmReportContextHeaders(headersLike = {}, requestUrl = "") {
   const nextHeaders = headersLike && typeof headersLike === "object" ? { ...headersLike } : {};
-  if (!isCmReportsRequestUrl(requestUrl)) {
+  if (!isCmReportsRequestUrl(requestUrl) && !isCmConfigRequestUrl(requestUrl)) {
     return nextHeaders;
   }
   if (!hasHeaderName(nextHeaders, "Origin")) {
@@ -11688,7 +11851,7 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
     });
   }
 
-  const mappingPreferred = resolveRestV2AppForServiceProvider(
+  const mappingPreferred = selectPreferredRestV2AppForRequestor(
     baseCandidates,
     requestorId,
     resolvedProgrammer.programmerId
@@ -11703,7 +11866,8 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
     cachedAuthContext.preferredAppGuid
       ? orderedCandidates.find((item) => item.guid === cachedAuthContext.preferredAppGuid)
       : null) ||
-    orderedCandidates[0] ||
+    mappingPreferred ||
+    (orderedCandidates.length === 1 ? orderedCandidates[0] : null) ||
     null;
 
   if (!resolvedApp?.guid) {
@@ -36894,6 +37058,9 @@ function resetWorkflowForLoggedOut() {
   state.cmTenantsCatalogHydrationPromise = null;
   state.cmTenantsCatalogRuntimeFresh = false;
   state.cmTenantsCatalogFetchAttempted = false;
+  state.cmTenantsPrecheckPending = false;
+  state.cmTenantsPrecheckComplete = false;
+  state.cmTenantsPrecheckLastError = "";
   state.cmTenantDebugExportedByUrl.clear();
   state.cmConsoleBootstrapSummary = null;
   state.cmConsoleBootstrapPromise = null;
@@ -41301,15 +41468,94 @@ function closeAvatarMenu() {
   }
 }
 
+function getAvatarMenuCmMatchedTenantSummaryFromService(service = null) {
+  const matchedTenants = sanitizePassVaultMatchedTenants(service?.matchedTenants || []);
+  if (matchedTenants.length === 0) {
+    return null;
+  }
+  return {
+    tenantCount: matchedTenants.length,
+    state: "ready",
+    text: `CM : ${matchedTenants.length} Active Tenant${matchedTenants.length === 1 ? "" : "s"}`,
+  };
+}
+
+function getAvatarMenuActiveCmSummaryState() {
+  const selectedProgrammer = resolveSelectedProgrammer();
+  const selectedProgrammerId = String(selectedProgrammer?.programmerId || "").trim();
+  const selectedRuntimeService = selectedProgrammerId ? getCurrentPremiumAppsSnapshot(selectedProgrammerId)?.cm || null : null;
+  const selectedCachedService =
+    selectedProgrammerId && state.cmServiceByProgrammerId instanceof Map
+      ? state.cmServiceByProgrammerId.get(selectedProgrammerId) || null
+      : null;
+
+  const preferredSummary =
+    getAvatarMenuCmMatchedTenantSummaryFromService(selectedRuntimeService) ||
+    getAvatarMenuCmMatchedTenantSummaryFromService(selectedCachedService);
+  if (preferredSummary) {
+    return preferredSummary;
+  }
+
+  const uniqueTenantKeys = new Set();
+  const appendFromService = (service) => {
+    sanitizePassVaultMatchedTenants(service?.matchedTenants || []).forEach((tenant) => {
+      const key = firstNonEmptyString([tenant?.consoleId, tenant?.tenantId, tenant?.displayName]);
+      if (key) {
+        uniqueTenantKeys.add(key);
+      }
+    });
+  };
+
+  if (state.premiumAppsByProgrammerId instanceof Map) {
+    state.premiumAppsByProgrammerId.forEach((services) => appendFromService(services?.cm || null));
+  }
+  if (state.cmServiceByProgrammerId instanceof Map) {
+    state.cmServiceByProgrammerId.forEach((service) => appendFromService(service));
+  }
+
+  if (uniqueTenantKeys.size > 0) {
+    return {
+      tenantCount: uniqueTenantKeys.size,
+      state: "ready",
+      text: `CM : ${uniqueTenantKeys.size} Active Tenant${uniqueTenantKeys.size === 1 ? "" : "s"}`,
+    };
+  }
+
+  return null;
+}
+
 function getAvatarMenuCmSummaryState() {
+  const activeSummary = getAvatarMenuActiveCmSummaryState();
   const catalog =
     state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) ? state.cmTenantsCatalog : null;
+  const summary =
+    (state.cmConsoleBootstrapSummary && typeof state.cmConsoleBootstrapSummary === "object"
+      ? state.cmConsoleBootstrapSummary
+      : null) || buildCmConsoleBootstrapSummaryFromCatalog(catalog);
   if (catalog && Array.isArray(catalog.tenants)) {
-    const tenantCount = Math.max(0, Number(catalog.tenants.length || 0));
+    const tenantCount = Math.max(0, Number(summary?.tenantCount || catalog.tenantCount || catalog.tenants.length || 0));
+    const applicationCount = Math.max(0, Number(summary?.applicationCount || catalog.applicationCount || 0));
+    const policyCount = Math.max(0, Number(summary?.policyCount || catalog.policyCount || 0));
+    const fragments = [];
+    if (Math.max(0, Number(activeSummary?.tenantCount || 0)) > 0) {
+      const activeTenantCount = Math.max(0, Number(activeSummary?.tenantCount || 0));
+      fragments.push(`${activeTenantCount} Active Tenant${activeTenantCount === 1 ? "" : "s"}`);
+    }
+    fragments.push(`${tenantCount} Tenant${tenantCount === 1 ? "" : "s"}`);
+    fragments.push(applicationCount > 0 || summary?.summaryReady === true ? `${applicationCount} Applications` : "Loading Applications");
+    fragments.push(policyCount > 0 || summary?.summaryReady === true ? `${policyCount} Policies` : "Loading Policies");
     return {
-      text: `CM : ${tenantCount} Tenant${tenantCount === 1 ? "" : "s"}`,
-      state: "ready",
+      text: `CM : ${fragments.join(" | ")}`,
+      state:
+        summary?.summaryReady === true || applicationCount > 0 || policyCount > 0
+          ? "ready"
+          : state.cmConsoleBootstrapPromise
+            ? "loading"
+            : "partial",
     };
+  }
+  if (activeSummary) {
+    return activeSummary;
   }
   if (state.cmTenantsCatalogPromise || state.cmTenantsCatalogHydrationPromise) {
     return {
@@ -41449,6 +41695,7 @@ function openAvatarMenu() {
   }
   state.avatarMenuOpen = true;
   prefetchCmTenantsCatalogInBackground("avatar-menu-open", { forceRefresh: false });
+  prefetchCmConsoleBootstrapSummaryInBackground("avatar-menu-open", { forceRefresh: false });
   renderAvatarMenu();
 }
 
@@ -42484,6 +42731,17 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     return false;
   }
 
+  state.cmTenantsPrecheckPending = true;
+  state.cmTenantsPrecheckComplete = false;
+  state.cmTenantsPrecheckLastError = "";
+  state.cmTenantsCatalog = null;
+  state.cmTenantsCatalogPromise = null;
+  state.cmTenantsCatalogHydrated = false;
+  state.cmTenantsCatalogHydrationPromise = null;
+  state.cmTenantsCatalogRuntimeFresh = false;
+  state.cmTenantsCatalogFetchAttempted = false;
+  syncMediaCompanySelectAvailability();
+
   let programmersLoadError = null;
   try {
     await loadProgrammersData(enforced.loginData.accessToken);
@@ -42501,7 +42759,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
         adobePassOrg: deniedSessionData?.adobePassOrg || null,
       });
       if (recovered) {
-        setStatus("", "info");
+        clearStatusUnlessCmTenantsPrecheckBlocked();
         return true;
       }
     }
@@ -42637,17 +42895,30 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
   clearRestrictedOrgOptions();
   state.sessionReady = true;
-  prefetchCmTenantsCatalogInBackground("session-activated", { forceRefresh: false });
   await saveLoginData(resolvedLoginData);
   scheduleNoTouchRefresh();
+  let cmTenantsPrecheckError = null;
+  try {
+    await ensureCmTenantsPrecheckForActiveSession(`session-activated:${source}`, { forceRefresh: false });
+  } catch (error) {
+    cmTenantsPrecheckError = error instanceof Error ? error : new Error(String(error));
+  }
   if (programmersLoadError) {
     const message = String(programmersLoadError?.message || "").trim();
     setStatus(
       message || "Signed in, but UnderPAR could not load media companies. Refresh the session and retry.",
       "error"
     );
+  } else if (cmTenantsPrecheckError) {
+    const message = String(cmTenantsPrecheckError?.message || "").trim();
+    setStatus(
+      message
+        ? `Global CM tenants lookup failed. Media Company selection stays disabled until CM tenants load successfully. ${message}`
+        : "Global CM tenants lookup failed. Media Company selection stays disabled until CM tenants load successfully.",
+      "error"
+    );
   } else {
-    setStatus("", "info");
+    clearStatusUnlessCmTenantsPrecheckBlocked();
   }
   render();
   queueCmConsoleAutoHydration(`session-activated:${source}`);
@@ -42921,6 +43192,90 @@ function applyMediaCompanyOptionHydrationState() {
     selectedStatus && selectedStatus !== UNDERPAR_VAULT_STATUS_COMPLETE && !selectedReusable ? "rgba(42, 56, 77, 0.72)" : "";
 }
 
+function hasCmTenantsCatalogEntries(catalog = state.cmTenantsCatalog) {
+  return Boolean(catalog && Array.isArray(catalog.tenants) && catalog.tenants.length > 0);
+}
+
+function isMediaCompanySelectionLockedByCmPrecheck() {
+  return Boolean(state.sessionReady && state.loginData && !state.restricted && state.cmTenantsPrecheckComplete !== true);
+}
+
+function getMediaCompanySelectDefaultLabel() {
+  if (isMediaCompanySelectionLockedByCmPrecheck()) {
+    return state.cmTenantsPrecheckPending || state.cmTenantsCatalogPromise || state.cmTenantsCatalogHydrationPromise
+      ? "-- Loading CM Tenants before Media Companies --"
+      : "-- Complete CM Tenants lookup before selecting --";
+  }
+  return "-- Choose a Media Company --";
+}
+
+function syncMediaCompanySelectAvailability() {
+  if (!els?.mediaCompanySelect) {
+    return;
+  }
+
+  const defaultOption = els.mediaCompanySelect.options?.[0] || null;
+  if (defaultOption) {
+    defaultOption.textContent = getMediaCompanySelectDefaultLabel();
+  }
+
+  if (!state.sessionReady || !state.loginData || state.restricted) {
+    return;
+  }
+
+  const optionCount = Math.max(0, Number(els.mediaCompanySelect.options?.length || 0) - 1);
+  els.mediaCompanySelect.disabled = isMediaCompanySelectionLockedByCmPrecheck() || optionCount === 0;
+}
+
+async function ensureCmTenantsPrecheckForActiveSession(reason = "session", options = {}) {
+  const forceRefresh = options?.forceRefresh === true;
+  if (state.restricted || !state.loginData) {
+    return null;
+  }
+
+  if (!forceRefresh && state.cmTenantsPrecheckComplete === true && hasCmTenantsCatalogEntries()) {
+    syncMediaCompanySelectAvailability();
+    return state.cmTenantsCatalog;
+  }
+
+  state.cmTenantsPrecheckPending = true;
+  state.cmTenantsPrecheckComplete = false;
+  state.cmTenantsPrecheckLastError = "";
+  syncMediaCompanySelectAvailability();
+
+  try {
+    const catalog = await ensureCmTenantsCatalog({ forceRefresh });
+    if (!hasCmTenantsCatalogEntries(catalog)) {
+      throw new Error("CM tenants load failed: tenant catalog returned no tenants.");
+    }
+    state.cmTenantsPrecheckComplete = true;
+    state.cmTenantsPrecheckLastError = "";
+    prefetchCmConsoleBootstrapSummaryInBackground(`tenant-precheck:${reason}`, { forceRefresh: false });
+    emitCmDebugEvent({
+      phase: "cm-tenant-precheck-complete",
+      reason: String(reason || ""),
+      tenantCount: Number(catalog?.tenants?.length || 0),
+      sourceUrl: String(catalog?.sourceUrl || ""),
+    });
+    return catalog;
+  } catch (error) {
+    const resolvedError = error instanceof Error ? error : new Error(String(error));
+    state.cmTenantsPrecheckLastError = resolvedError.message;
+    emitCmDebugEvent({
+      phase: "cm-tenant-precheck-error",
+      reason: String(reason || ""),
+      error: resolvedError.message,
+    });
+    throw resolvedError;
+  } finally {
+    state.cmTenantsPrecheckPending = false;
+    syncMediaCompanySelectAvailability();
+    if (state.avatarMenuOpen) {
+      renderAvatarMenu();
+    }
+  }
+}
+
 function populateMediaCompanySelect() {
   state.selectedMvpdId = "";
 
@@ -42934,7 +43289,7 @@ function populateMediaCompanySelect() {
   els.mediaCompanySelect.innerHTML = "";
   const defaultOption = document.createElement("option");
   defaultOption.value = "";
-  defaultOption.textContent = "-- Choose a Media Company --";
+  defaultOption.textContent = getMediaCompanySelectDefaultLabel();
   els.mediaCompanySelect.appendChild(defaultOption);
 
   for (const optionValue of options) {
@@ -42945,8 +43300,7 @@ function populateMediaCompanySelect() {
   }
 
   applyMediaCompanyOptionHydrationState();
-
-  els.mediaCompanySelect.disabled = options.length === 0;
+  syncMediaCompanySelectAvailability();
 
   els.requestorSelect.disabled = true;
   els.requestorSelect.innerHTML = '<option value="">-- Select a Media Company first --</option>';
@@ -43069,7 +43423,7 @@ async function refreshProgrammerPanels(options = {}) {
   mvpdWorkspaceBroadcastSelectedControllerState(programmer, null);
 
   let cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
-  if (!forcePremiumRefresh && !cachedServices) {
+  if (!cachedServices) {
     await hydrateProgrammerFromPassVault(programmer, {
       forceReload: false,
       forceOverwrite: false,
@@ -43079,6 +43433,11 @@ async function refreshProgrammerPanels(options = {}) {
       return;
     }
     cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+  }
+  if (cachedServices && typeof cachedServices === "object") {
+    provisionalServices = cachedServices;
+    emitPremiumServiceDecisionLogs(programmer, cachedServices);
+    renderPremiumServices(cachedServices, programmer, { controllerReason });
   }
   const cachedIncludesCm = Boolean(cachedServices && Object.prototype.hasOwnProperty.call(cachedServices, "cm"));
   const cachedCmMvpdSelectionKey = String(cachedServices?.cmMvpdSelectionKey || "").trim();
@@ -43094,12 +43453,12 @@ async function refreshProgrammerPanels(options = {}) {
     (programmerVaultHydrated || isPassVaultBackedValue(cachedServices)) &&
     cachedVaultCredentialsReady;
   if (shouldReuseCachedServices) {
-    emitPremiumServiceDecisionLogs(programmer, cachedServices);
-    renderPremiumServices(cachedServices, programmer, { controllerReason });
     return;
   }
 
-  renderPremiumServicesLoading(programmer, { controllerReason });
+  if (!cachedServices) {
+    renderPremiumServicesLoading(programmer, { controllerReason });
+  }
   try {
     const premiumAppsPromise = ensurePremiumAppsForProgrammer(programmer, {
       forceRefresh: forcePremiumRefresh,
@@ -43319,6 +43678,7 @@ function collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId) {
   pushValue(appInfo?.appData?.requestorIds);
   pushValue(appInfo?.appData?.requestor);
   pushValue(appInfo?.appData?.serviceProvider);
+  pushValue(collectPassVaultServiceProviderHintsFromAppData(appInfo?.appData, appInfo?.softwareStatement));
 
   if (programmerId) {
     pushValue(programmerId);
@@ -43350,6 +43710,36 @@ function resolveRestV2AppForServiceProvider(restV2Apps, serviceProviderId, progr
   }
 
   return restV2Apps[0];
+}
+
+function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", programmerId = "") {
+  const candidates = Array.isArray(restV2Apps) ? restV2Apps.filter((item) => item?.guid) : [];
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const cachedAuthContext = normalizedRequestorId ? getRequestorScopedRestV2AuthContext(normalizedRequestorId) : null;
+  if (
+    cachedAuthContext &&
+    cachedAuthContext.preferredAppGuid &&
+    (!normalizedProgrammerId || String(cachedAuthContext.programmerId || "").trim() === normalizedProgrammerId)
+  ) {
+    const cachedMatch = candidates.find((item) => item.guid === cachedAuthContext.preferredAppGuid) || null;
+    if (cachedMatch) {
+      return cachedMatch;
+    }
+  }
+
+  if (normalizedRequestorId) {
+    const mapped = candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) || null;
+    if (mapped) {
+      return mapped;
+    }
+  }
+
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 function normalizeScope(scope) {
@@ -46673,6 +47063,39 @@ function normalizeCmResourceListFromPayload(kind, payload, tenant = null, fallba
   return rows;
 }
 
+function getCmConsoleTopLevelCollection(payload = null, preferredKeys = []) {
+  if (Array.isArray(payload)) {
+    return payload.filter((entry) => entry && typeof entry === "object");
+  }
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  const normalizedPreferredKeys = (Array.isArray(preferredKeys) ? preferredKeys : [])
+    .map((key) => String(key || "").trim().toLowerCase())
+    .filter(Boolean);
+  for (const preferredKey of normalizedPreferredKeys) {
+    const directValue = payload?.[preferredKey];
+    if (Array.isArray(directValue)) {
+      return directValue.filter((entry) => entry && typeof entry === "object");
+    }
+    const caseInsensitiveKey = Object.keys(payload).find((key) => String(key || "").trim().toLowerCase() === preferredKey);
+    if (caseInsensitiveKey && Array.isArray(payload?.[caseInsensitiveKey])) {
+      return payload[caseInsensitiveKey].filter((entry) => entry && typeof entry === "object");
+    }
+  }
+  return [];
+}
+
+function countCmConsoleSummaryRows(kind = "", payload = null) {
+  const normalizedKind = String(kind || "").trim().toLowerCase();
+  const preferredKeysByKind = {
+    tenant: ["tenants", "items", "data", "results"],
+    applications: ["applications", "items", "data", "results"],
+    policies: ["policies", "items", "data", "results"],
+  };
+  return getCmConsoleTopLevelCollection(payload, preferredKeysByKind[normalizedKind] || []).length;
+}
+
 function collectCmMatchVariants(values) {
   const variants = new Set();
   (Array.isArray(values) ? values : []).forEach((value) => {
@@ -47683,22 +48106,27 @@ async function requestCmTokenViaImsCheck(seedToken = "", options = {}) {
     }
     userIdCandidates.push(normalized);
   };
-  try {
-    const profileToken = normalizeBearerTokenValue(
-      firstNonEmptyString([seedToken, getPreferredPrimaryImsAccessTokenCandidate()])
-    );
-    const profilePayload = await fetchImsSessionProfile(profileToken);
-    pushUserIdCandidate(firstNonEmptyString([profilePayload?.userId, profilePayload?.user_id, profilePayload?.sub, profilePayload?.id]), true);
-    pushUserIdCandidate(
-      firstNonEmptyString([profilePayload?.additional_info?.userId, profilePayload?.additional_info?.user_id]),
-      true
-    );
-  } catch {
-    // Keep existing candidates best-effort.
-  };
   (Array.isArray(hints.userIdCandidates) ? hints.userIdCandidates : []).forEach((candidate) => {
     pushUserIdCandidate(candidate);
   });
+  if (userIdCandidates.length === 0) {
+    try {
+      const profileToken = normalizeBearerTokenValue(
+        firstNonEmptyString([seedToken, getPreferredPrimaryImsAccessTokenCandidate()])
+      );
+      const profilePayload = await fetchImsSessionProfile(profileToken);
+      pushUserIdCandidate(
+        firstNonEmptyString([profilePayload?.userId, profilePayload?.user_id, profilePayload?.sub, profilePayload?.id]),
+        true
+      );
+      pushUserIdCandidate(
+        firstNonEmptyString([profilePayload?.additional_info?.userId, profilePayload?.additional_info?.user_id]),
+        true
+      );
+    } catch {
+      // Keep existing candidates best-effort.
+    }
+  }
   if (!userIdCandidates.includes("")) {
     userIdCandidates.push("");
   }
@@ -47789,6 +48217,44 @@ async function requestCmTokenViaImsCheck(seedToken = "", options = {}) {
   return null;
 }
 
+async function bootstrapCmConsoleTenantSession(options = {}) {
+  const forceRefresh = options?.forceRefresh === true;
+  try {
+    const result = await requestCmTokenViaImsCheck("", {
+      requireFresh: forceRefresh,
+    });
+    const directToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(result || {}, {}));
+    if (directToken && tokenSupportsCmTenantCatalog(directToken)) {
+      emitCmDebugEvent({
+        phase: "cm-tenant-session-bootstrap",
+        source: String(result?.source || "ims-check"),
+        tokenClientId: String(parseJwtPayload(directToken)?.client_id || ""),
+      });
+      return directToken;
+    }
+
+    const pageContextResult = await requestCmConsoleTokenFromExperiencePageContext({
+      requireFresh: forceRefresh,
+      allowTemporaryTab: false,
+    });
+    const accessToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(pageContextResult || {}, {}));
+    if (accessToken && tokenSupportsCmTenantCatalog(accessToken)) {
+      emitCmDebugEvent({
+        phase: "cm-tenant-session-bootstrap",
+        source: String(pageContextResult?.source || "page-context-existing-tab"),
+        tokenClientId: String(parseJwtPayload(accessToken)?.client_id || ""),
+      });
+      return accessToken;
+    }
+  } catch (error) {
+    log("CM tenant session bootstrap failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return "";
+}
+
 async function persistCmTokenBootstrapResult(result = {}, options = {}) {
   const accessToken = normalizeBearerTokenValue(result?.accessToken);
   if (!accessToken || !isProbablyJwt(accessToken)) {
@@ -47866,6 +48332,32 @@ async function findExistingExperienceAdobeTab() {
         }
         if (url.includes("/pass/authentication")) {
           score += 1800;
+        }
+        return { tab, score };
+      })
+      .sort((left, right) => right.score - left.score);
+    return scored[0]?.tab || null;
+  } catch {
+    return null;
+  }
+}
+
+async function findExistingCmReportsAdobeTab() {
+  try {
+    const tabs = await chrome.tabs.query({
+      url: [`${CM_REPORTS_APP_ORIGIN}/*`],
+    });
+    const normalizedTabs = Array.isArray(tabs) ? tabs : [];
+    const scored = normalizedTabs
+      .filter((tab) => Number(tab?.id || 0) > 0)
+      .map((tab) => {
+        const url = String(tab?.url || tab?.pendingUrl || "").trim().toLowerCase();
+        let score = Number(tab?.lastAccessed || 0);
+        if (tab?.active === true) {
+          score += 5000;
+        }
+        if (url.startsWith(`${String(CM_REPORTS_APP_ORIGIN || "").trim().toLowerCase()}/`)) {
+          score += 2400;
         }
         return { tab, score };
       })
@@ -48095,6 +48587,218 @@ async function requestCmConsoleTokenFromExperiencePageContext(options = {}) {
       scope: firstNonEmptyString([claims?.scope, CM_IMS_CHECK_DEFAULT_SCOPE]),
       imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(accessToken), null),
       source: `page-cm:${tabId}`,
+    };
+  } catch {
+    return null;
+  } finally {
+    if (createdTemporaryTab && tabId > 0) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch {
+        // Ignore cleanup failures for temporary tab.
+      }
+    }
+  }
+}
+
+async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
+  if (!chrome.scripting?.executeScript) {
+    return null;
+  }
+
+  const requireFresh = options.requireFresh === true;
+  const allowTemporaryTab = options.allowTemporaryTab !== false;
+  let accessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken, getPreferredCmAccessTokenCandidate()]));
+  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
+    const directTokenResult = await requestCmTokenViaImsCheck("", {
+      requireFresh,
+    });
+    const directToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(directTokenResult || {}, {}));
+    accessToken = directToken || normalizeBearerTokenValue(directTokenResult?.accessToken || "");
+  }
+  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
+    const tokenResult = await requestCmConsoleTokenFromExperiencePageContext({
+      requireFresh,
+      allowTemporaryTab: false,
+    });
+    const persistedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
+    accessToken = persistedToken || normalizeBearerTokenValue(tokenResult?.accessToken || "");
+  }
+  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+    return null;
+  }
+
+  let tab = await findExistingCmReportsAdobeTab();
+  let createdTemporaryTab = false;
+  if (!tab?.id && allowTemporaryTab) {
+    try {
+      tab = await chrome.tabs.create({
+        url: `${CM_REPORTS_APP_ORIGIN}/`,
+        active: false,
+      });
+      createdTemporaryTab = Boolean(tab?.id);
+      if (createdTemporaryTab) {
+        await waitForTabCompletion(Number(tab.id), 12000, { allowUrlChange: true });
+      }
+    } catch {
+      tab = null;
+      createdTemporaryTab = false;
+    }
+  }
+
+  const tabId = Number(tab?.id || 0);
+  if (tabId <= 0) {
+    return null;
+  }
+
+  try {
+    const executionResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [
+        {
+          accessToken,
+          tenantUrl: `${CM_CONFIG_BASE_URL}/core/tenants?orgId=${encodeURIComponent(CM_DEFAULT_TENANT_ORG_HINT)}`,
+          applicationsBaseUrl: `${CM_CONFIG_BASE_URL}/maitai/applications?orgId=`,
+          policiesBaseUrl: `${CM_CONFIG_BASE_URL}/maitai/policy?orgId=`,
+          parallelism: Math.max(1, Number(CM_BOOTSTRAP_PARALLELISM) || 1),
+        },
+      ],
+      func: async (config) => {
+        const normalize = (value) => String(value || "").trim();
+        const parseJson = (text) => {
+          try {
+            return JSON.parse(String(text || ""));
+          } catch {
+            return null;
+          }
+        };
+        const extractCollection = (payload) => {
+          if (Array.isArray(payload)) {
+            return payload;
+          }
+          if (!payload || typeof payload !== "object") {
+            return [];
+          }
+          const collectionKeys = ["items", "data", "results", "tenants", "applications", "policies"];
+          for (const key of collectionKeys) {
+            if (Array.isArray(payload[key])) {
+              return payload[key];
+            }
+          }
+          return [];
+        };
+        const countRows = (payload) => extractCollection(payload).length;
+        const tenantCollectionFromPayload = (payload) =>
+          extractCollection(payload).filter((entry) => entry && typeof entry === "object");
+        const fetchJson = async (url) => {
+          const response = await fetch(String(url || ""), {
+            method: "GET",
+            credentials: "include",
+            headers: {
+              Accept: "*/*",
+              Authorization: `Bearer ${normalize(config?.accessToken || "")}`,
+            },
+          });
+          const text = await response.text().catch(() => "");
+          const headers = {};
+          response.headers.forEach((value, key) => {
+            headers[key] = value;
+          });
+          return {
+            ok: Boolean(response.ok),
+            status: Number(response.status || 0),
+            statusText: String(response.statusText || ""),
+            url: String(response.url || url || ""),
+            headers,
+            text,
+            parsed: parseJson(text),
+          };
+        };
+
+        const tenantResponse = await fetchJson(config?.tenantUrl || "");
+        if (!tenantResponse.ok) {
+          return {
+            ok: false,
+            stage: "tenants",
+            status: Number(tenantResponse.status || 0),
+            statusText: String(tenantResponse.statusText || ""),
+            error: normalize(tenantResponse.text || tenantResponse.statusText || "CM tenants request failed."),
+          };
+        }
+
+        const tenantRows = tenantCollectionFromPayload(tenantResponse.parsed);
+        const tenantIds = tenantRows
+          .map((entry) =>
+            normalize(
+              entry?.consoleId ||
+                entry?.tenantId ||
+                entry?.tenant_id ||
+                entry?.id ||
+                entry?.payload?.ownerId ||
+                entry?.payload?.tenantId ||
+                entry?.payload?.tenant_id ||
+                entry?.payload?.name
+            )
+          )
+          .filter(Boolean);
+
+        let applicationCount = 0;
+        let policyCount = 0;
+        const errors = [];
+        const parallelism = Math.max(1, Number(config?.parallelism || 1));
+
+        for (let index = 0; index < tenantIds.length; index += parallelism) {
+          const batch = tenantIds.slice(index, index + parallelism);
+          const batchResults = await Promise.all(
+            batch.map(async (tenantId) => {
+              const [applicationsResponse, policiesResponse] = await Promise.all([
+                fetchJson(`${String(config?.applicationsBaseUrl || "")}${encodeURIComponent(tenantId)}`),
+                fetchJson(`${String(config?.policiesBaseUrl || "")}${encodeURIComponent(tenantId)}`),
+              ]);
+              return {
+                tenantId,
+                applicationsResponse,
+                policiesResponse,
+              };
+            })
+          );
+
+          batchResults.forEach((result) => {
+            applicationCount += countRows(result?.applicationsResponse?.parsed);
+            policyCount += countRows(result?.policiesResponse?.parsed);
+            if (!result?.applicationsResponse?.ok) {
+              errors.push(
+                `${String(result?.tenantId || "tenant")}:applications:${Number(result?.applicationsResponse?.status || 0)}`
+              );
+            }
+            if (!result?.policiesResponse?.ok) {
+              errors.push(`${String(result?.tenantId || "tenant")}:policies:${Number(result?.policiesResponse?.status || 0)}`);
+            }
+          });
+        }
+
+        return {
+          ok: true,
+          accessToken: normalize(config?.accessToken || ""),
+          tenantPayload: tenantResponse.parsed,
+          tenantUrl: String(tenantResponse.url || config?.tenantUrl || ""),
+          tenantCount: tenantRows.length,
+          applicationCount,
+          policyCount,
+          summaryReady: errors.length === 0,
+          errors: errors.slice(0, 8),
+        };
+      },
+    });
+
+    const result = executionResults?.[0]?.result;
+    if (!result || result.ok !== true) {
+      return result && typeof result === "object" ? result : null;
+    }
+    return {
+      ...result,
+      accessToken,
     };
   } catch {
     return null;
@@ -48369,6 +49073,9 @@ function normalizeCmTenantsCatalogPayload(payload = null) {
   }
   const sourceUrl = String(payload.sourceUrl || "").trim();
   const fetchedAt = Number(payload.fetchedAt || payload.persistedAt || 0);
+  const explicitTenantCount = Math.max(0, Number(payload.tenantCount || payload?.summary?.tenantCount || 0));
+  const applicationCount = Math.max(0, Number(payload.applicationCount || payload?.summary?.applicationCount || 0));
+  const policyCount = Math.max(0, Number(payload.policyCount || payload?.summary?.policyCount || 0));
   const tenantsInput = Array.isArray(payload.tenants) ? payload.tenants : [];
   const tenants = [];
   const seen = new Set();
@@ -48405,6 +49112,13 @@ function normalizeCmTenantsCatalogPayload(payload = null) {
   return {
     tenants,
     sourceUrl,
+    tenantCount: Math.max(explicitTenantCount, tenants.length),
+    applicationCount,
+    policyCount,
+    summaryReady:
+      payload.summaryReady === true ||
+      payload.bootstrapSummaryReady === true ||
+      (applicationCount > 0 || policyCount > 0),
     fetchedAt: fetchedAt > 0 ? fetchedAt : Date.now(),
     persistedAt: Number(payload.persistedAt || 0) || Date.now(),
   };
@@ -48426,12 +49140,62 @@ function buildCmTenantsCatalogPersistPayload(catalog = null) {
   return {
     tenants,
     sourceUrl: String(normalizedCatalog.sourceUrl || "").trim(),
+    tenantCount: Math.max(0, Number(normalizedCatalog.tenantCount || normalizedCatalog.tenants.length || 0)),
+    applicationCount: Math.max(0, Number(normalizedCatalog.applicationCount || 0)),
+    policyCount: Math.max(0, Number(normalizedCatalog.policyCount || 0)),
+    summaryReady: normalizedCatalog.summaryReady === true,
     fetchedAt: Number(normalizedCatalog.fetchedAt || Date.now()),
     persistedAt: Date.now(),
   };
 }
 
+function buildCmConsoleBootstrapSummaryFromCatalog(catalog = null) {
+  const normalizedCatalog = normalizeCmTenantsCatalogPayload(catalog);
+  if (!normalizedCatalog) {
+    return null;
+  }
+  return {
+    tenantCount: Math.max(0, Number(normalizedCatalog.tenantCount || normalizedCatalog.tenants?.length || 0)),
+    applicationCount: Math.max(0, Number(normalizedCatalog.applicationCount || 0)),
+    policyCount: Math.max(0, Number(normalizedCatalog.policyCount || 0)),
+    summaryReady: normalizedCatalog.summaryReady === true,
+    sourceUrl: String(normalizedCatalog.sourceUrl || ""),
+    fetchedAt: Number(normalizedCatalog.fetchedAt || 0),
+  };
+}
+
+function syncCmConsoleBootstrapSummaryFromCatalog(catalog = null, options = {}) {
+  const summary = buildCmConsoleBootstrapSummaryFromCatalog(catalog);
+  if (!summary) {
+    state.cmConsoleBootstrapSummary = null;
+    return null;
+  }
+  const errors =
+    Array.isArray(options?.errors) && options.errors.length > 0
+      ? options.errors.map((value) => String(value || "").trim()).filter(Boolean).slice(0, 8)
+      : Array.isArray(state.cmConsoleBootstrapSummary?.errors)
+        ? state.cmConsoleBootstrapSummary.errors.slice(0, 8)
+        : [];
+  const nextSummary = {
+    ...summary,
+    errors,
+  };
+  state.cmConsoleBootstrapSummary = nextSummary;
+  return nextSummary;
+}
+
 async function readPersistedCmTenantsCatalog() {
+  try {
+    const vaultCatalog = getPassVaultCmTenantsCatalogFromVault(
+      state.passVault || (await ensurePassVaultLoaded({ forceReload: false }))
+    );
+    if (vaultCatalog && Array.isArray(vaultCatalog.tenants) && vaultCatalog.tenants.length > 0) {
+      return vaultCatalog;
+    }
+  } catch {
+    // Fall through to the legacy storage key during migration.
+  }
+
   if (!chrome.storage?.local?.get) {
     return null;
   }
@@ -48444,17 +49208,36 @@ async function readPersistedCmTenantsCatalog() {
 }
 
 async function persistCmTenantsCatalog(catalog = null) {
-  if (!chrome.storage?.local?.set) {
-    return false;
-  }
   const persistable = buildCmTenantsCatalogPersistPayload(catalog);
   if (!persistable) {
     return false;
   }
   try {
-    await chrome.storage.local.set({ [CM_TENANTS_CATALOG_STORAGE_KEY]: persistable });
+    await enqueuePassVaultPersist(async () => {
+      const vault = normalizeUnderparVaultPayload(state.passVault || (await ensurePassVaultLoaded({ forceReload: false })));
+      const environmentKey = getActiveAdobePassEnvironmentKey();
+      const environment = getActiveAdobePassEnvironment();
+
+      if (!vault.pass.environments[environmentKey]) {
+        vault.pass.environments[environmentKey] = {
+          key: environmentKey,
+          label: String(environment?.label || environmentKey).trim() || environmentKey,
+          updatedAt: Date.now(),
+          cmTenants: null,
+          mediaCompanies: {},
+        };
+      }
+
+      vault.pass.environments[environmentKey].label =
+        String(environment?.label || vault.pass.environments[environmentKey].label || environmentKey).trim() || environmentKey;
+      vault.pass.environments[environmentKey].updatedAt = Date.now();
+      vault.pass.environments[environmentKey].cmTenants = persistable;
+      vault.updatedAt = Date.now();
+
+      await persistPassVaultPayloadToStorage(vault, { silent: true });
+    });
     if (chrome.storage?.local?.remove) {
-      await chrome.storage.local.remove(LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY).catch(() => {});
+      await chrome.storage.local.remove([CM_TENANTS_CATALOG_STORAGE_KEY, LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY]).catch(() => {});
     }
     return true;
   } catch {
@@ -48476,14 +49259,19 @@ async function hydrateCmTenantsCatalogFromStorage(options = {}) {
     if (persistedCatalog && Array.isArray(persistedCatalog.tenants) && persistedCatalog.tenants.length > 0) {
       state.cmTenantsCatalog = persistedCatalog;
       state.cmTenantsCatalogRuntimeFresh = false;
+      syncCmConsoleBootstrapSummaryFromCatalog(persistedCatalog);
       emitCmDebugEvent({
         phase: "cm-tenant-catalog-storage-hit",
         tenantCount: Number(persistedCatalog.tenants.length || 0),
         sourceUrl: String(persistedCatalog.sourceUrl || ""),
         fetchedAt: Number(persistedCatalog.fetchedAt || 0),
       });
+      if (chrome.storage?.local?.remove) {
+        void chrome.storage.local.remove([CM_TENANTS_CATALOG_STORAGE_KEY, LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY]).catch(() => {});
+      }
       return persistedCatalog;
     }
+    state.cmConsoleBootstrapSummary = null;
     return null;
   })();
   state.cmTenantsCatalogHydrationPromise = hydrationPromise;
@@ -48508,8 +49296,19 @@ function prefetchCmTenantsCatalogInBackground(reason = "background", options = {
   if (!forceRefresh && cachedCatalog && Array.isArray(cachedCatalog.tenants) && cachedCatalog.tenants.length > 0) {
     return;
   }
+  if (state.cmTenantsPrecheckComplete !== true) {
+    state.cmTenantsPrecheckPending = true;
+    state.cmTenantsPrecheckLastError = "";
+    syncMediaCompanySelectAvailability();
+  }
   void ensureCmTenantsCatalog({ forceRefresh })
     .then((catalog) => {
+      if (hasCmTenantsCatalogEntries(catalog)) {
+        state.cmTenantsPrecheckComplete = true;
+        state.cmTenantsPrecheckLastError = "";
+      }
+      state.cmTenantsPrecheckPending = false;
+      syncMediaCompanySelectAvailability();
       if (!catalog || typeof catalog !== "object") {
         return;
       }
@@ -48519,12 +49318,62 @@ function prefetchCmTenantsCatalogInBackground(reason = "background", options = {
         tenantCount: Number(catalog.tenants?.length || 0),
         sourceUrl: String(catalog.sourceUrl || ""),
       });
+      prefetchCmConsoleBootstrapSummaryInBackground(`tenant-catalog:${reason}`, { forceRefresh: false });
       if (state.avatarMenuOpen) {
         renderAvatarMenu();
       }
     })
     .catch((error) => {
+      state.cmTenantsPrecheckPending = false;
+      if (state.cmTenantsPrecheckComplete !== true) {
+        state.cmTenantsPrecheckLastError = error instanceof Error ? error.message : String(error);
+      }
+      syncMediaCompanySelectAvailability();
       log("CM tenant catalog prefetch failed", {
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (state.avatarMenuOpen) {
+        renderAvatarMenu();
+      }
+    });
+}
+
+function prefetchCmConsoleBootstrapSummaryInBackground(reason = "background", options = {}) {
+  const forceRefresh = options?.forceRefresh === true;
+  if (state.restricted || !state.sessionReady) {
+    return;
+  }
+
+  const catalog =
+    state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) && state.cmTenantsCatalog.tenants.length > 0
+      ? state.cmTenantsCatalog
+      : null;
+  if (!catalog) {
+    return;
+  }
+
+  const cachedSummary = state.cmConsoleBootstrapSummary || buildCmConsoleBootstrapSummaryFromCatalog(catalog);
+  if (!forceRefresh && cachedSummary?.summaryReady === true) {
+    state.cmConsoleBootstrapSummary = cachedSummary;
+    return;
+  }
+  if (!forceRefresh && state.cmConsoleBootstrapPromise) {
+    return;
+  }
+
+  void ensureCmConsoleBootstrapSummary({ forceRefresh })
+    .then(() => {
+      emitCmDebugEvent({
+        phase: "cm-bootstrap-summary-background-complete",
+        reason: String(reason || ""),
+      });
+      if (state.avatarMenuOpen) {
+        renderAvatarMenu();
+      }
+    })
+    .catch((error) => {
+      log("CM bootstrap summary prefetch failed", {
         reason,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -48536,10 +49385,15 @@ function prefetchCmTenantsCatalogInBackground(reason = "background", options = {
 
 async function ensureCmConsoleBootstrapSummary(options = {}) {
   const forceRefresh = options?.forceRefresh === true;
-  const cachedSummary = state.cmConsoleBootstrapSummary;
-  if (!forceRefresh && cachedSummary && typeof cachedSummary === "object") {
+  const catalogSummary = buildCmConsoleBootstrapSummaryFromCatalog(state.cmTenantsCatalog);
+  const cachedSummary =
+    state.cmConsoleBootstrapSummary && typeof state.cmConsoleBootstrapSummary === "object"
+      ? state.cmConsoleBootstrapSummary
+      : catalogSummary;
+  if (!forceRefresh && cachedSummary?.summaryReady === true) {
     const fetchedAt = Number(cachedSummary.fetchedAt || 0);
     if (fetchedAt > 0 && Date.now() - fetchedAt <= CM_BOOTSTRAP_CACHE_MAX_AGE_MS) {
+      state.cmConsoleBootstrapSummary = cachedSummary;
       return cachedSummary;
     }
   }
@@ -48551,11 +49405,19 @@ async function ensureCmConsoleBootstrapSummary(options = {}) {
   const loadPromise = (async () => {
     const catalog = await ensureCmTenantsCatalog({ forceRefresh });
     const tenants = Array.isArray(catalog?.tenants) ? catalog.tenants : [];
+    if (!forceRefresh) {
+      const persistedSummary = buildCmConsoleBootstrapSummaryFromCatalog(catalog);
+      if (persistedSummary?.summaryReady === true) {
+        state.cmConsoleBootstrapSummary = persistedSummary;
+        return persistedSummary;
+      }
+    }
     if (tenants.length === 0) {
       const emptySummary = {
         tenantCount: 0,
         applicationCount: 0,
         policyCount: 0,
+        summaryReady: true,
         sourceUrl: String(catalog?.sourceUrl || ""),
         fetchedAt: Date.now(),
       };
@@ -48585,10 +49447,8 @@ async function ensureCmConsoleBootstrapSummary(options = {}) {
       );
 
       results.forEach((result) => {
-        const applicationRows = Array.isArray(result?.applicationsResult?.rows) ? result.applicationsResult.rows : [];
-        const policyRows = Array.isArray(result?.policiesResult?.rows) ? result.policiesResult.rows : [];
-        applicationCount += applicationRows.length;
-        policyCount += policyRows.length;
+        applicationCount += countCmConsoleSummaryRows("applications", result?.applicationsResult?.payload);
+        policyCount += countCmConsoleSummaryRows("policies", result?.policiesResult?.payload);
 
         if (String(result?.applicationsResult?.error || "").trim()) {
           errors.push(
@@ -48605,11 +49465,22 @@ async function ensureCmConsoleBootstrapSummary(options = {}) {
       tenantCount: tenants.length,
       applicationCount,
       policyCount,
+      summaryReady: errors.length === 0,
       sourceUrl: String(catalog?.sourceUrl || ""),
       fetchedAt: Date.now(),
       errors: errors.slice(0, 8),
     };
-    state.cmConsoleBootstrapSummary = summary;
+    const nextCatalog = {
+      ...catalog,
+      tenantCount: tenants.length,
+      applicationCount,
+      policyCount,
+      summaryReady: summary.summaryReady === true,
+      fetchedAt: Number(catalog?.fetchedAt || Date.now()),
+    };
+    state.cmTenantsCatalog = nextCatalog;
+    syncCmConsoleBootstrapSummaryFromCatalog(nextCatalog, { errors: summary.errors });
+    void persistCmTenantsCatalog(nextCatalog);
     emitCmDebugEvent({
       phase: "cm-bootstrap-summary",
       tenantCount: Number(summary.tenantCount || 0),
@@ -49108,6 +49979,7 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
       return [baseHeaders];
     }
     const variants = [];
+    const allowCookieFallback = isCmConfigRequestUrl(url);
     const candidateTokens = [];
     const seenTokens = new Set();
     [
@@ -49131,6 +50003,9 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
         Authorization: `Bearer ${accessToken}`,
       });
     });
+    if (allowCookieFallback || variants.length === 0) {
+      variants.push(baseHeaders);
+    }
     return variants;
   };
 
@@ -49357,36 +50232,52 @@ async function fetchCmTenantCatalogWithSession(url = "") {
   if (!requestUrl) {
     throw new Error("CM tenants load failed: tenant catalog URL is missing.");
   }
-  const cmBearerToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ forceRefresh: false }));
-  if (!cmBearerToken || !tokenSupportsCmTenantCatalog(cmBearerToken)) {
-    throw new Error(
-      "CM tenants load failed: UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session. Sign in again and retry."
-    );
+  const baseHeaders = withCmReportContextHeaders(
+    {
+      Accept: "*/*",
+    },
+    requestUrl
+  );
+  const headerVariants = [];
+  const cmBearerToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+  if (cmBearerToken && tokenSupportsCmTenantCatalog(cmBearerToken)) {
+    headerVariants.push({
+      ...baseHeaders,
+      Authorization: `Bearer ${cmBearerToken}`,
+    });
   }
-  const requestHeaders = {
-    Accept: "*/*",
-    Origin: "https://cdn.experience.adobe.net",
-    Referer: "https://cdn.experience.adobe.net/",
-    Authorization: `Bearer ${cmBearerToken}`,
-  };
-  const requestInit = {
-    method: "GET",
-    credentials: "include",
-    headers: requestHeaders,
-  };
-  const response = isCmRelayEligibleUrl(requestUrl)
-    ? await relayCmFetch(requestUrl, requestInit)
-    : await fetch(requestUrl, {
-        method: "GET",
-        mode: "cors",
-        credentials: "include",
-        referrerPolicy: "no-referrer",
-        headers: requestInit.headers,
-      });
+  headerVariants.push(baseHeaders);
 
-  const text = await response.text().catch(() => "");
-  const parsed = parseJsonText(text, null);
-  if (!response.ok) {
+  let lastError = null;
+  for (const requestHeaders of headerVariants) {
+    const requestInit = {
+      method: "GET",
+      credentials: "include",
+      headers: requestHeaders,
+    };
+    const response = isCmRelayEligibleUrl(requestUrl)
+      ? await relayCmFetch(requestUrl, requestInit)
+      : await fetch(requestUrl, {
+          method: "GET",
+          mode: "cors",
+          credentials: "include",
+          referrerPolicy: "no-referrer",
+          headers: requestInit.headers,
+        });
+
+    const text = await response.text().catch(() => "");
+    const parsed = parseJsonText(text, null);
+    if (response.ok) {
+      return {
+        url: String(response.url || requestUrl),
+        parsed: parsed ?? text,
+        text,
+        status: Number(response.status || 0),
+        lastModified: response.headers?.get("Last-Modified") || "",
+      };
+    }
+
+    const statusCode = Number(response.status || 0);
     const message =
       firstNonEmptyString([
         parsed?.error?.code,
@@ -49395,16 +50286,13 @@ async function fetchCmTenantCatalogWithSession(url = "") {
         parsed?.message,
         normalizeHttpErrorMessage(text),
         response.statusText,
-      ]) || response.statusText;
-    throw new Error(`CM tenants load failed (${Number(response.status || 0)}): ${message}`);
+        statusCode === 403 ? "Forbidden" : "",
+        statusCode === 401 ? "Unauthorized" : "",
+      ]) || `HTTP ${statusCode || 0}`;
+    lastError = new Error(`CM tenants load failed (${statusCode}): ${message}`);
   }
-  return {
-    url: String(response.url || requestUrl),
-    parsed: parsed ?? text,
-    text,
-    status: Number(response.status || 0),
-    lastModified: response.headers?.get("Last-Modified") || "",
-  };
+
+  throw lastError || new Error("CM tenants load failed.");
 }
 
 async function ensureCmTenantsCatalog(options = {}) {
@@ -49423,6 +50311,7 @@ async function ensureCmTenantsCatalog(options = {}) {
     cachedCatalog.tenants.length > 0 &&
     state.cmTenantsCatalogRuntimeFresh === true
   ) {
+    syncCmConsoleBootstrapSummaryFromCatalog(cachedCatalog);
     emitCmDebugEvent({
       phase: "cm-tenant-catalog-cache-hit",
       sourceUrl: String(cachedCatalog.sourceUrl || ""),
@@ -49439,6 +50328,7 @@ async function ensureCmTenantsCatalog(options = {}) {
     Array.isArray(cachedCatalog.tenants) &&
     cachedCatalog.tenants.length > 0
   ) {
+    syncCmConsoleBootstrapSummaryFromCatalog(cachedCatalog);
     emitCmDebugEvent({
       phase: "cm-tenant-catalog-cache-reuse-after-first-fetch",
       sourceUrl: String(cachedCatalog.sourceUrl || ""),
@@ -49455,6 +50345,7 @@ async function ensureCmTenantsCatalog(options = {}) {
       hydratedCatalog.tenants.length > 0 &&
       state.cmTenantsCatalogRuntimeFresh === true
     ) {
+      syncCmConsoleBootstrapSummaryFromCatalog(hydratedCatalog);
       return hydratedCatalog;
     }
   }
@@ -49480,23 +50371,13 @@ async function ensureCmTenantsCatalog(options = {}) {
       urls: tenantCatalogUrls,
     });
 
+    await bootstrapCmConsoleTenantSession({ forceRefresh });
+
     let lastError = null;
     try {
       for (const tenantCatalogUrl of tenantCatalogUrls) {
         try {
-          let response = null;
-          try {
-            response = await fetchCmTenantCatalogWithSession(tenantCatalogUrl);
-          } catch {
-            response = await fetchCmJsonWithAuthVariants([tenantCatalogUrl], "CM tenants load", {
-              debugMeta: {
-                scope: "tenant-catalog",
-                endpointUrl: tenantCatalogUrl,
-                requestorId: String(state.selectedRequestorId || ""),
-                mvpd: String(state.selectedMvpdId || ""),
-              },
-            });
-          }
+          const response = await fetchCmTenantCatalogWithSession(tenantCatalogUrl);
           const tenants = normalizeCmTenantsFromPayload(response.parsed, response.url);
           if (tenants.length === 0) {
             throw new Error(`CM tenants load failed: tenant catalog returned no tenants (${tenantCatalogUrl}).`);
@@ -49504,12 +50385,17 @@ async function ensureCmTenantsCatalog(options = {}) {
           const catalog = {
             tenants,
             sourceUrl: response.url,
+            tenantCount: tenants.length,
+            applicationCount: Math.max(0, Number(cachedCatalog?.applicationCount || 0)),
+            policyCount: Math.max(0, Number(cachedCatalog?.policyCount || 0)),
+            summaryReady: cachedCatalog?.summaryReady === true,
             fetchedAt: Date.now(),
           };
           state.cmTenantsCatalog = catalog;
           state.cmTenantsCatalogHydrated = true;
           state.cmTenantsCatalogRuntimeFresh = true;
-          void persistCmTenantsCatalog(catalog);
+          syncCmConsoleBootstrapSummaryFromCatalog(catalog);
+          await persistCmTenantsCatalog(catalog);
           logDecisionPoint("CM tenants catalog loaded", {
             sourceUrl: response.url,
             tenantCount: tenants.length,
@@ -49532,11 +50418,63 @@ async function ensureCmTenantsCatalog(options = {}) {
           });
         }
       }
+
+      const allowTemporaryReportsTab =
+        !cachedCatalog || !Array.isArray(cachedCatalog.tenants) || cachedCatalog.tenants.length === 0;
+      if (allowTemporaryReportsTab) {
+        try {
+          const pageContextCatalog = await requestCmConsoleBootstrapCatalogFromReportsPage({
+            requireFresh: forceRefresh,
+            allowTemporaryTab: true,
+          });
+          if (pageContextCatalog?.ok === true) {
+            const tenants = normalizeCmTenantsFromPayload(pageContextCatalog.tenantPayload, pageContextCatalog.tenantUrl);
+            if (tenants.length > 0) {
+              const catalog = {
+                tenants,
+                sourceUrl: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
+                tenantCount: Math.max(0, Number(pageContextCatalog.tenantCount || tenants.length || 0)),
+                applicationCount: Math.max(0, Number(pageContextCatalog.applicationCount || 0)),
+                policyCount: Math.max(0, Number(pageContextCatalog.policyCount || 0)),
+                summaryReady: pageContextCatalog.summaryReady === true,
+                fetchedAt: Date.now(),
+              };
+              state.cmTenantsCatalog = catalog;
+              state.cmTenantsCatalogHydrated = true;
+              state.cmTenantsCatalogRuntimeFresh = true;
+              syncCmConsoleBootstrapSummaryFromCatalog(catalog, {
+                errors: Array.isArray(pageContextCatalog.errors) ? pageContextCatalog.errors : [],
+              });
+              await persistCmTenantsCatalog(catalog);
+              emitCmDebugEvent({
+                phase: "cm-tenant-catalog-loaded",
+                source: "reports-page-context",
+                url: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
+                sourceUrl: String(pageContextCatalog.tenantUrl || ""),
+                tenantCount: Number(catalog.tenantCount || 0),
+                applicationCount: Number(catalog.applicationCount || 0),
+                policyCount: Number(catalog.policyCount || 0),
+              });
+              return catalog;
+            }
+          }
+        } catch (pageContextError) {
+          lastError = pageContextError instanceof Error ? pageContextError : new Error(String(pageContextError));
+          emitCmDebugEvent({
+            phase: "cm-tenant-catalog-page-context-failed",
+            method: "GET",
+            url: tenantCatalogUrls[0] || "",
+            error: lastError.message,
+          });
+        }
+      }
+
       throw lastError || new Error("CM tenants load failed: all tenant catalog candidates were exhausted.");
     } catch (error) {
       const lastError = error instanceof Error ? error : new Error(String(error));
       if (cachedCatalog && Array.isArray(cachedCatalog.tenants) && cachedCatalog.tenants.length > 0) {
         state.cmTenantsCatalogRuntimeFresh = false;
+        syncCmConsoleBootstrapSummaryFromCatalog(cachedCatalog);
         log("Using stale CM tenant catalog cache after refresh failure", {
           error: lastError instanceof Error ? lastError.message : String(lastError),
         });
@@ -49551,6 +50489,7 @@ async function ensureCmTenantsCatalog(options = {}) {
       const persistedFallback = await hydrateCmTenantsCatalogFromStorage({ forceReload: false });
       if (persistedFallback && Array.isArray(persistedFallback.tenants) && persistedFallback.tenants.length > 0) {
         state.cmTenantsCatalogRuntimeFresh = false;
+        syncCmConsoleBootstrapSummaryFromCatalog(persistedFallback);
         emitCmDebugEvent({
           phase: "cm-tenant-catalog-storage-fallback",
           error: lastError.message,
@@ -51269,6 +52208,8 @@ async function createRestV2SessionForContext(context, options = {}) {
           requestorId: context.requestorId,
           mvpd: context.mvpd,
           scope: "create-session",
+          lockAppSelection: true,
+          allowProvisioning: true,
         }
       );
 
@@ -51369,6 +52310,17 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
       headers: buildRestV2Headers(requestorId, {
         Accept: "application/json",
       }),
+    },
+    "refresh",
+    {
+      requestorId,
+      service: "rest-v2-configuration",
+      scope: "configuration",
+      requiredServiceScope: REST_V2_SCOPE,
+      appGuid: String(appInfo?.guid || ""),
+      appName: String(appInfo?.appName || appInfo?.guid || ""),
+      lockAppSelection: true,
+      allowProvisioning: true,
     }
   );
 
@@ -51511,12 +52463,12 @@ async function loadMvpdsFromRestV2(requestorId) {
           continue;
         }
         const restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
-        const resolvedApp = resolveRestV2AppForServiceProvider(restV2Apps, requestorId, programmer.programmerId);
-        if (!resolvedApp) {
+        if (restV2Apps.length === 0) {
           continue;
         }
 
         hasRestV2Candidate = true;
+        const resolvedApp = selectPreferredRestV2AppForRequestor(restV2Apps, requestorId, programmer.programmerId);
         const orderedCandidates = orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestorId);
         const { map, appInfo } = await fetchRestV2ConfigurationUsingCandidateApps(
           programmer,
@@ -51564,6 +52516,7 @@ async function loadMvpdsFromRestV2(requestorId) {
 async function populateMvpdSelectForRequestor(requestorId) {
   els.mvpdSelect.innerHTML = "";
   const expectedRequestorId = String(requestorId || "");
+  const controllerReason = expectedRequestorId ? "requestor-change" : "requestor-clear";
 
   if (!requestorId) {
     els.mvpdSelect.disabled = true;
@@ -51859,7 +52812,6 @@ async function loadProgrammersData(accessToken = "") {
       requireEntities: false,
     });
     applyProgrammerEntities(entities);
-    prefetchCmTenantsCatalogInBackground("programmers-loaded", { forceRefresh: false });
     if (state.programmers.length === 0) {
       setStatus("No media company records were returned for this account.", "error");
     }
@@ -51940,6 +52892,16 @@ function createCookieSessionLoginData() {
 
 async function tryActivateCookieSession(source, options = {}) {
   const restrictOnDenied = options.restrictOnDenied === true;
+  state.cmTenantsPrecheckPending = true;
+  state.cmTenantsPrecheckComplete = false;
+  state.cmTenantsPrecheckLastError = "";
+  state.cmTenantsCatalog = null;
+  state.cmTenantsCatalogPromise = null;
+  state.cmTenantsCatalogHydrated = false;
+  state.cmTenantsCatalogHydrationPromise = null;
+  state.cmTenantsCatalogRuntimeFresh = false;
+  state.cmTenantsCatalogFetchAttempted = false;
+  syncMediaCompanySelectAvailability();
   try {
     const entities = await fetchProgrammersFromApi({
       accessToken: "",
@@ -52010,14 +52972,27 @@ async function tryActivateCookieSession(source, options = {}) {
     state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
     clearRestrictedOrgOptions();
     clearRefreshTimer();
-    prefetchCmTenantsCatalogInBackground("cookie-session-activated", { forceRefresh: false });
+    let cmTenantsPrecheckError = null;
+    try {
+      await ensureCmTenantsPrecheckForActiveSession(`cookie-session:${source}`, { forceRefresh: false });
+    } catch (error) {
+      cmTenantsPrecheckError = error instanceof Error ? error : new Error(String(error));
+    }
     render();
     queueCmConsoleAutoHydration(`cookie-session:${source}`);
 
     if (state.programmers.length === 0) {
       setStatus("No media company records were returned for this account.", "error");
+    } else if (cmTenantsPrecheckError) {
+      const message = String(cmTenantsPrecheckError?.message || "").trim();
+      setStatus(
+        message
+          ? `Global CM tenants lookup failed. Media Company selection stays disabled until CM tenants load successfully. ${message}`
+          : "Global CM tenants lookup failed. Media Company selection stays disabled until CM tenants load successfully.",
+        "error"
+      );
     } else {
-      setStatus("", "info");
+      clearStatusUnlessCmTenantsPrecheckBlocked();
     }
 
     void hydrateCookieSessionWithProfile();
@@ -52038,6 +53013,8 @@ async function tryActivateCookieSession(source, options = {}) {
       setStatus("", "info");
       render();
     }
+    state.cmTenantsPrecheckPending = false;
+    syncMediaCompanySelectAvailability();
     return false;
   }
 }
@@ -52297,14 +53274,14 @@ async function signInInteractive() {
         restrictOnDenied: true,
       });
       if (cookieActivated) {
-        setStatus("", "info");
+        clearStatusUnlessCmTenantsPrecheckBlocked();
         return;
       }
-      setStatus("", "info");
+      clearStatusUnlessCmTenantsPrecheckBlocked();
       return;
     }
 
-    setStatus("", "info");
+    clearStatusUnlessCmTenantsPrecheckBlocked();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
@@ -52344,14 +53321,14 @@ async function refreshSessionManual() {
         restrictOnDenied: true,
       });
       if (cookieActivated) {
-        setStatus("", "info");
+        clearStatusUnlessCmTenantsPrecheckBlocked();
         return;
       }
-      setStatus("", "info");
+      clearStatusUnlessCmTenantsPrecheckBlocked();
       return;
     }
 
-    setStatus("", "info");
+    clearStatusUnlessCmTenantsPrecheckBlocked();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
@@ -52405,7 +53382,7 @@ async function onRestrictedOrgSwitch() {
           { allowDeniedRecovery: false }
         );
         if (activated) {
-          setStatus("", "info");
+          clearStatusUnlessCmTenantsPrecheckBlocked();
           return;
         }
       } catch (error) {
@@ -52421,7 +53398,7 @@ async function onRestrictedOrgSwitch() {
       restrictOnDenied: true,
     });
     if (cookieActivated) {
-      setStatus("", "info");
+      clearStatusUnlessCmTenantsPrecheckBlocked();
       return;
     }
 
@@ -52519,7 +53496,7 @@ async function bootstrapSession() {
         );
 
         if (activated) {
-          setStatus("", "info");
+          clearStatusUnlessCmTenantsPrecheckBlocked();
           return;
         }
 
