@@ -56,6 +56,8 @@ const els = {
   profileCount: document.getElementById("bobtools-profile-count"),
   profileList: document.getElementById("bobtools-profile-list"),
   profileContext: document.getElementById("bobtools-profile-context"),
+  copyUpstreamButton: document.getElementById("bobtools-copy-upstream"),
+  copyResultButton: document.getElementById("bobtools-copy-result"),
   quickResourceCard: document.getElementById("bobtools-resource-picker-card"),
   quickResourceCardHead: document.getElementById("bobtools-resource-picker-head"),
   quickResourceCardSubtitle: document.getElementById("bobtools-resource-picker-subtitle"),
@@ -608,6 +610,139 @@ function setStatus(message = "", type = "info") {
   }
 }
 
+async function copyTextToClipboard(text = "") {
+  const value = String(text || "").trim();
+  if (!value) {
+    return {
+      ok: false,
+      error: "Nothing to copy.",
+    };
+  }
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return { ok: true };
+    }
+  } catch {
+    // Continue to fallback flow.
+  }
+
+  let helper = null;
+  try {
+    helper = document.createElement("textarea");
+    helper.value = value;
+    helper.setAttribute("readonly", "");
+    helper.setAttribute("aria-hidden", "true");
+    helper.style.position = "fixed";
+    helper.style.left = "-9999px";
+    helper.style.top = "0";
+    helper.style.opacity = "0";
+    document.body.appendChild(helper);
+    helper.focus();
+    helper.select();
+    helper.setSelectionRange(0, helper.value.length);
+    const copied = document.execCommand("copy");
+    return copied
+      ? { ok: true }
+      : {
+          ok: false,
+          error: "Unable to copy upstreamUserID to clipboard.",
+        };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    if (helper && helper.parentNode) {
+      helper.parentNode.removeChild(helper);
+    }
+  }
+}
+
+function showCopyUpstreamButtonFeedback(button, success = false) {
+  if (!button) {
+    return;
+  }
+  const baseLabel = "Copy upstreamUserID to clipboard";
+  const successLabel = "Copied upstreamUserID to clipboard";
+  button.classList.toggle("copied", success === true);
+  button.title = success ? successLabel : baseLabel;
+  button.setAttribute("aria-label", success ? successLabel : baseLabel);
+}
+
+async function copyRichContentToClipboard(text = "", html = "") {
+  const plainText = String(text || "").trim();
+  const htmlText = String(html || "").trim();
+  if (!plainText) {
+    return {
+      ok: false,
+      error: "Nothing to copy.",
+    };
+  }
+
+  try {
+    if (navigator?.clipboard?.write && typeof ClipboardItem === "function" && htmlText) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([plainText], { type: "text/plain" }),
+          "text/html": new Blob([htmlText], { type: "text/html" }),
+        }),
+      ]);
+      return { ok: true, rich: true };
+    }
+  } catch {
+    // Continue to fallback flow.
+  }
+
+  if (htmlText) {
+    let helper = null;
+    let selection = null;
+    try {
+      helper = document.createElement("div");
+      helper.setAttribute("contenteditable", "true");
+      helper.setAttribute("aria-hidden", "true");
+      helper.innerHTML = htmlText;
+      helper.style.position = "fixed";
+      helper.style.left = "-9999px";
+      helper.style.top = "0";
+      helper.style.opacity = "0";
+      document.body.appendChild(helper);
+
+      selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(helper);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      if (document.execCommand("copy")) {
+        selection?.removeAllRanges();
+        return { ok: true, rich: true };
+      }
+    } catch {
+      // Continue to plain-text fallback.
+    } finally {
+      selection?.removeAllRanges();
+      if (helper && helper.parentNode) {
+        helper.parentNode.removeChild(helper);
+      }
+    }
+  }
+
+  return copyTextToClipboard(plainText);
+}
+
+function showCopyResultButtonFeedback(button, success = false) {
+  if (!button) {
+    return;
+  }
+  const baseLabel = "Copy formatted Can I watch? result";
+  const successLabel = "Copied formatted Can I watch? result";
+  button.classList.toggle("copied", success === true);
+  button.title = success ? successLabel : baseLabel;
+  button.setAttribute("aria-label", success ? successLabel : baseLabel);
+}
+
 function getSplunkButtonLabel(profile = null, options = {}) {
   const upstreamUserId = String(profile?.upstreamUserId || "").trim();
   if (!upstreamUserId) {
@@ -622,11 +757,15 @@ function syncButtons() {
   const hasProfile = Boolean(selectedProfile);
   const hasUpstreamUserId = Boolean(String(selectedProfile?.upstreamUserId || "").trim());
   const action = normalizeApiAction(state.apiAction);
+  const actionLabel = getApiActionLabel(action);
   const resourcesRequired = actionRequiresResources(action);
   const networkBusy = state.running || state.splunkRunning;
   if (els.goButton) {
     els.goButton.disabled = !hasProfile || networkBusy;
-    els.goButton.textContent = state.running ? "GO..." : "GO";
+    els.goButton.classList.toggle("is-running", state.running);
+    const buttonLabel = state.running ? `Running ${actionLabel}...` : `Run ${actionLabel}`;
+    els.goButton.setAttribute("aria-label", buttonLabel);
+    els.goButton.title = buttonLabel;
   }
   if (els.resourceInput) {
     els.resourceInput.disabled = !hasProfile || networkBusy || !resourcesRequired;
@@ -751,6 +890,242 @@ function buildDecisionReason(row = null) {
     return `source=${source}`;
   }
   return "No additional details";
+}
+
+function formatUtcIsoDateTime(value = 0) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "";
+  }
+  try {
+    return new Date(numeric).toISOString().replace(".000Z", "Z");
+  } catch {
+    return "";
+  }
+}
+
+function formatBobtoolsAuthModeLabel(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized === "dcr_client_bearer") {
+    return "DCR Client Bearer";
+  }
+  return String(value || "").trim();
+}
+
+function buildCanIWatchActualLabel(row = null, fallbackDecision = "ERROR", fallbackError = "") {
+  const decisionLabel = String(row?.decision || fallbackDecision || "Unknown").trim().toUpperCase() || "UNKNOWN";
+  const errorCode = String(row?.errorCode || "").trim();
+  if (errorCode && decisionLabel !== "PERMIT") {
+    return `${decisionLabel} - ${errorCode}`;
+  }
+  if ((decisionLabel === "ERROR" || decisionLabel === "UNKNOWN") && String(fallbackError || "").trim()) {
+    return `${decisionLabel} - ${String(fallbackError || "").trim()}`;
+  }
+  return decisionLabel;
+}
+
+function buildCanIWatchDecisionColor(actualLabel = "") {
+  const normalized = String(actualLabel || "").trim().toUpperCase();
+  if (normalized.startsWith("PERMIT")) {
+    return "green";
+  }
+  if (normalized.startsWith("DENY")) {
+    return "red";
+  }
+  return "";
+}
+
+function appendTicketReportField(fields, label, value, options = {}) {
+  const normalizedLabel = String(label || "").trim();
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedLabel || !normalizedValue) {
+    return;
+  }
+  fields.push({
+    label: normalizedLabel,
+    value: normalizedValue,
+    emphasize: options?.emphasize === true,
+    color: String(options?.color || "").trim(),
+  });
+}
+
+function buildCanIWatchDecisionHtml(decision = "", color = "") {
+  const normalizedDecision = String(decision || "").trim();
+  const normalizedColor = String(color || "").trim();
+  if (!normalizedDecision) {
+    return "";
+  }
+  const escapedDecision = escapeHtml(normalizedDecision);
+  if (!normalizedColor) {
+    return escapedDecision;
+  }
+  return `<font color="${normalizedColor}"><b>${escapedDecision}</b></font>`;
+}
+
+function buildCanIWatchClipboardPayload(result = null, profile = null) {
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+  const normalizedAction = normalizeApiAction(result?.apiAction || state.apiAction);
+  const reportTitle = normalizedAction === ACTION_AUTHORIZE ? "AUTHZ REPORT" : "PREAUTHZ REPORT";
+  const checkedAtUtc = formatUtcIsoDateTime(result?.checkedAt);
+  const environmentLabel = firstNonEmptyString([
+    state.adobePassEnvironment?.label,
+    state.adobePassEnvironment?.shortCode,
+    getWorkspaceEnvironmentFileTag(state.adobePassEnvironment),
+  ]);
+  const mediaCompanyLabel = firstNonEmptyString([getProgrammerLabel(), state.programmerId]);
+  const requestorId = firstNonEmptyString([result?.requestorId, profile?.requestorId, state.requestorId]);
+  const mvpdLabel = firstNonEmptyString([
+    profile?.mvpdLabel,
+    result?.mvpd,
+    profile?.mvpd,
+    state.mvpdLabel,
+    state.mvpd,
+  ]);
+  const subscriberId = firstNonEmptyString([result?.upstreamUserId, profile?.upstreamUserId, result?.subject, profile?.subject]);
+  const userId = firstNonEmptyString([result?.userId, profile?.userId]);
+  const sessionId = firstNonEmptyString([result?.sessionId, profile?.sessionId]);
+  const requestedResources = (Array.isArray(result?.resourceIds) ? result.resourceIds : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  const resourceIdLookup = buildResourceIdChipLookup(profile, {
+    resourceIdChips: result?.resourceIdChips,
+  });
+  const decisionRows = Array.isArray(result?.decisionRows) ? result.decisionRows : [];
+  const fallbackDecision =
+    result?.ok === true
+      ? result?.allRequestedPermitted
+        ? "PERMIT"
+        : "DENY"
+      : "ERROR";
+  const normalizedRows =
+    decisionRows.length > 0
+      ? decisionRows
+      : requestedResources.length > 0
+        ? requestedResources.map((resourceId) => ({
+            resourceId,
+            decision: fallbackDecision,
+            errorCode: "",
+            errorDetails: String(result?.error || "").trim(),
+            mediaTokenPresent: false,
+            mediaTokenPreview: "",
+            mediaTokenNotBeforeMs: 0,
+            mediaTokenNotAfterMs: 0,
+            notBeforeMs: 0,
+            notAfterMs: 0,
+          }))
+        : [
+            {
+              resourceId: "",
+              decision: fallbackDecision,
+              errorCode: "",
+              errorDetails: String(result?.error || "").trim(),
+              mediaTokenPresent: false,
+              mediaTokenPreview: "",
+              mediaTokenNotBeforeMs: 0,
+              mediaTokenNotAfterMs: 0,
+              notBeforeMs: 0,
+              notAfterMs: 0,
+            },
+          ];
+  const summaryLinesPrimary = [
+    ["Environment", environmentLabel],
+    ["Media Company", mediaCompanyLabel],
+    ["Requestor ID", requestorId],
+    ["MVPD", mvpdLabel],
+  ]
+    .filter(([, value]) => Boolean(String(value || "").trim()))
+    .map(([label, value]) => `${label}: ${String(value || "").trim()}`);
+  const summaryLinesSecondary = [
+    ["Time (UTC)", checkedAtUtc],
+    ["Subscriber ID", subscriberId],
+    ["User ID", userId],
+    ["Profile Session ID", sessionId],
+  ]
+    .filter(([, value]) => Boolean(String(value || "").trim()))
+    .map(([label, value]) => `${label}: ${String(value || "").trim()}`);
+
+  const resourceResults = normalizedRows.map((row) => {
+    const resourceChip = resolveResourceIdChip(row?.resourceId, profile, {
+      resourceIdLookup,
+    });
+    const resourceId = firstNonEmptyString([row?.resourceId, resourceChip.rawValue, resourceChip.label]);
+    const decisionLabel = String(row?.decision || fallbackDecision || "Unknown").trim().toUpperCase() || "UNKNOWN";
+    const actual = buildCanIWatchActualLabel(row, fallbackDecision, result?.error);
+    const actualColor = buildCanIWatchDecisionColor(actual);
+    const responseDetailRaw = firstNonEmptyString([
+      buildDecisionReason(row),
+      String(result?.error || "").trim(),
+    ]);
+    const responseDetail = responseDetailRaw === "No additional details" ? "" : responseDetailRaw;
+    const responseOutcome =
+      decisionLabel === "PERMIT" || decisionLabel === "DENY"
+        ? decisionLabel
+        : actual !== decisionLabel
+          ? actual
+          : decisionLabel;
+    const responseSuffix = responseDetail && responseOutcome === decisionLabel ? ` - ${responseDetail}` : "";
+    const plainLine = `${resourceId || "Unknown"}: ${responseOutcome}${responseSuffix}`;
+    return {
+      resourceId,
+      responseOutcome,
+      responseSuffix,
+      plainLine,
+      actualColor,
+    };
+  });
+
+  const plainTextSections = [
+    reportTitle,
+    summaryLinesPrimary.join("\n"),
+    summaryLinesSecondary.join("\n"),
+    [
+      "Resource Attempts:",
+      resourceResults.length > 0
+        ? resourceResults.map((entry) => entry.plainLine).join("\n\n")
+        : "No resource attempts returned.",
+    ].join("\n\n"),
+  ].filter(Boolean);
+  const plainText = plainTextSections.join("\n\n");
+
+  const resourceResultsHtml =
+    resourceResults.length > 0
+      ? resourceResults
+          .map((entry) => {
+            const resourceLabel = escapeHtml(entry.resourceId || "Unknown");
+            return `${resourceLabel}: ${buildCanIWatchDecisionHtml(entry.responseOutcome, entry.actualColor)}${entry.responseSuffix ? ` - ${escapeHtml(String(entry.responseSuffix || "").replace(/^\s*-\s*/, ""))}` : ""}`;
+          })
+          .join("<br><br>")
+      : "No resource attempts returned.";
+  const htmlSections = [
+    `<strong>${escapeHtml(reportTitle)}</strong>`,
+    summaryLinesPrimary.map((line) => escapeHtml(line)).join("<br>"),
+    summaryLinesSecondary.map((line) => escapeHtml(line)).join("<br>"),
+    `Resource Attempts:<br><br>${resourceResultsHtml}`,
+  ].filter(Boolean);
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#172554;max-width:820px;line-height:1.2;">${htmlSections.join("<br><br>")}</div>`;
+
+  return {
+    text: plainText,
+    html,
+  };
+}
+
+function syncCopyResultButton(result = null, profile = null) {
+  if (!els.copyResultButton) {
+    return;
+  }
+  const payload = buildCanIWatchClipboardPayload(result, profile);
+  const hasPayload = Boolean(payload?.text && payload?.html);
+  els.copyResultButton.hidden = !hasPayload;
+  els.copyResultButton.disabled = !hasPayload;
+  els.copyResultButton.dataset.copyText = hasPayload ? payload.text : "";
+  els.copyResultButton.dataset.copyHtml = hasPayload ? payload.html : "";
+  showCopyResultButtonFeedback(els.copyResultButton, false);
 }
 
 function renderDecisionsResult(result = null) {
@@ -1729,6 +2104,19 @@ function renderResult() {
 
   if (!profile) {
     els.profileContext.textContent = "Select an MVPD login profile to run REST V2 actions.";
+    if (els.copyUpstreamButton) {
+      els.copyUpstreamButton.hidden = true;
+      els.copyUpstreamButton.disabled = true;
+      els.copyUpstreamButton.dataset.copyValue = "";
+      showCopyUpstreamButtonFeedback(els.copyUpstreamButton, false);
+    }
+    if (els.copyResultButton) {
+      els.copyResultButton.hidden = true;
+      els.copyResultButton.disabled = true;
+      els.copyResultButton.dataset.copyText = "";
+      els.copyResultButton.dataset.copyHtml = "";
+      showCopyResultButtonFeedback(els.copyResultButton, false);
+    }
     renderQuickResourcePicker(null);
     els.resultStatus.textContent = "REST V2 actions unlock after at least one successful MVPD login profile is captured.";
     els.resultStatus.classList.remove("error", "success");
@@ -1748,6 +2136,14 @@ function renderResult() {
   els.profileContext.innerHTML = `<span class="bobtools-profile-context-label">${escapeHtml(
     contextText
   )}</span> | <span class="bobtools-profile-context-meta">upstreamUserID=${escapeHtml(subjectText)}</span>`;
+  if (els.copyUpstreamButton) {
+    const copySubject = firstNonEmptyString([profile?.upstreamUserId, profile?.subject]);
+    const copyValue = copySubject ? `upstreamUserID=${copySubject}` : "";
+    els.copyUpstreamButton.hidden = !copyValue;
+    els.copyUpstreamButton.disabled = !copyValue;
+    els.copyUpstreamButton.dataset.copyValue = copyValue;
+    showCopyUpstreamButtonFeedback(els.copyUpstreamButton, false);
+  }
   const key = String(profile?.key || "").trim();
   const currentQuickOptions = getQuickResourceOptionsForProfile(profile);
   const loadState = String(state.quickResourceLoadStateByHarvestKey.get(key) || "").trim().toLowerCase();
@@ -1770,10 +2166,11 @@ function renderResult() {
   const result = getResultForProfile(profile);
   if (!result || typeof result !== "object") {
     els.resultStatus.classList.remove("error", "success");
+    syncCopyResultButton(null, profile);
     if (actionRequiresResources(state.apiAction)) {
-      els.resultStatus.textContent = `Enter resourceIds, then press Enter or GO to run ${actionLabel}.`;
+      els.resultStatus.textContent = `Enter resourceIds, then press Enter or the TV button to run ${actionLabel}.`;
     } else {
-      els.resultStatus.textContent = `Press GO to run ${actionLabel} for the selected profile.`;
+      els.resultStatus.textContent = `Press the TV button to run ${actionLabel} for the selected profile.`;
     }
     els.resultSummary.hidden = true;
     els.resultSummary.innerHTML = "";
@@ -1782,13 +2179,16 @@ function renderResult() {
 
   const resultType = String(result?.resultType || "").trim().toLowerCase();
   if (resultType === "profiles") {
+    syncCopyResultButton(null, profile);
     renderProfilesResult(result);
     return;
   }
   if (resultType === "configuration") {
+    syncCopyResultButton(null, profile);
     renderConfigurationResult(result);
     return;
   }
+  syncCopyResultButton(result, profile);
   renderDecisionsResult(result);
 }
 
@@ -2181,6 +2581,47 @@ function registerEventHandlers() {
     els.form.addEventListener("submit", (event) => {
       event.preventDefault();
       void runSelectedActionFromForm();
+    });
+  }
+
+  if (els.copyUpstreamButton) {
+    els.copyUpstreamButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      const copyValue = String(els.copyUpstreamButton.dataset.copyValue || "").trim();
+      if (!copyValue) {
+        showCopyUpstreamButtonFeedback(els.copyUpstreamButton, false);
+        setStatus("Selected MVPD profile does not include upstreamUserID.", "error");
+        return;
+      }
+      const result = await copyTextToClipboard(copyValue);
+      if (!result?.ok) {
+        showCopyUpstreamButtonFeedback(els.copyUpstreamButton, false);
+        setStatus(result?.error || "Unable to copy upstreamUserID to clipboard.", "error");
+        return;
+      }
+      showCopyUpstreamButtonFeedback(els.copyUpstreamButton, true);
+      setStatus(`Copied ${copyValue} to clipboard.`);
+    });
+  }
+
+  if (els.copyResultButton) {
+    els.copyResultButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      const copyText = String(els.copyResultButton.dataset.copyText || "").trim();
+      const copyHtml = String(els.copyResultButton.dataset.copyHtml || "").trim();
+      if (!copyText) {
+        showCopyResultButtonFeedback(els.copyResultButton, false);
+        setStatus("Run Can I watch? first to copy a formatted result block.", "error");
+        return;
+      }
+      const result = await copyRichContentToClipboard(copyText, copyHtml);
+      if (!result?.ok) {
+        showCopyResultButtonFeedback(els.copyResultButton, false);
+        setStatus(result?.error || "Unable to copy formatted Can I watch? result.", "error");
+        return;
+      }
+      showCopyResultButtonFeedback(els.copyResultButton, true);
+      setStatus("Copied formatted Can I watch? result to clipboard.");
     });
   }
 

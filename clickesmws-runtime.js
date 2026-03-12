@@ -83,7 +83,6 @@
     HR: "/hour",
     MIN: "/minute",
   };
-  const CLICK_ESM_RESULT_LIMIT = 100;
   let CLICK_ESM_TOKEN_URL = "https://sp.auth.adobe.com/o/client/token";
   const UNDERPAR_NETWORK_ACTIVITY_MESSAGE_TYPE = "underpar:networkActivity";
 
@@ -698,7 +697,6 @@
     parsed.searchParams.set("start", timeWindow.start);
     parsed.searchParams.set("end", timeWindow.end);
     parsed.searchParams.set("format", "json");
-    parsed.searchParams.set("limit", String(CLICK_ESM_RESULT_LIMIT));
     parsed.searchParams.delete("requestor-id");
     parsed.searchParams.delete("mvpd");
 

@@ -6297,55 +6297,10 @@ async function refreshToken() {
   }
 }
 
-/* ---------- ESM LIMIT GUARD ----------
-   Inline table loads are capped to keep page memory/weight down.
-   CSV exports stay high to preserve full raw downloads.
-   Limit is only appended for ESM endpoints (mgmt.auth.adobe.com/esm/*). */
-const ESM_INLINE_RESULT_LIMIT = 50;
-const ESM_CSV_RESULT_LIMIT = 10000;
-
-function __isEsmUrl(url) {
-  const raw = String(url || '').trim();
-  if (!raw) return false;
-  try {
-    return /\/esm\/v\d+\//i.test(String(new URL(raw, window.location.href).pathname || ''));
-  } catch {
-    return /\/esm\/v\d+\//i.test(raw);
-  }
-}
-
-function __appendQueryParam(url, paramKV) {
-  // Inserts before hash fragment if present.
-  const hashIdx = url.indexOf('#');
-  const base = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
-  const hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
-
-  if (!base.includes('?')) return base + '?' + paramKV + hash;
-  if (base.endsWith('?') || base.endsWith('&')) return base + paramKV + hash;
-  return base + '&' + paramKV + hash;
-}
-
-function ensureEsmLimit(url, limit = ESM_CSV_RESULT_LIMIT) {
-  if (!__isEsmUrl(url)) return url;
-
-  const lim = encodeURIComponent(String(limit));
-
-  // If `limit` already exists, force it to our desired max.
-  if (/[?&]limit=/.test(url)) {
-    return url.replace(/([?&]limit=)([^&#]*)/, `$1${lim}`);
-  }
-
-  return __appendQueryParam(url, 'limit=' + lim);
-}
-
-
 async function fetchWithRefresh(url, options = {}) {
   __netStart();
   try {
-    const { esmLimit = ESM_CSV_RESULT_LIMIT } = options;
-
-    // Only ESM endpoints support the `limit` query param.
-    const finalUrl = ensureEsmLimit(url, esmLimit);
+    const finalUrl = String(url || '');
 
     let r = await fetch(finalUrl, { headers: { Authorization: 'Bearer ' + getToken() } });
     if (r.status === 401) {
@@ -8140,7 +8095,7 @@ async function downloadCsv(link, baseHref, sortState) {
   const csvBase = appendFilterParams(__ensureJsonFormatQuery(requestBase));
   const csvUrl = __appendLocalColumnFilterParams(csvBase, dl);
 
-  const r = await fetchWithRefresh(csvUrl, { esmLimit: ESM_CSV_RESULT_LIMIT });
+  const r = await fetchWithRefresh(csvUrl);
   if (!r.ok) return;
 
   const j = await r.json();
@@ -8343,7 +8298,7 @@ async function runEsm(a) {
 
   try {
     /* Fetch data */
-    const r = await fetchWithRefresh(jsonUrl, { esmLimit: ESM_INLINE_RESULT_LIMIT });
+    const r = await fetchWithRefresh(jsonUrl);
 
     // If server returns a string error (or any non-OK), show it in the same "No data" box.
     if (!r.ok) {

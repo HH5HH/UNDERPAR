@@ -55,6 +55,31 @@
           <div class="bobtools-card-body" data-card-body="watch" hidden>
             <div class="bobtools-profile-context-row">
               <p id="bobtools-profile-context" class="bobtools-profile-context"></p>
+              <div class="bobtools-profile-context-actions">
+                <button
+                  id="bobtools-copy-upstream"
+                  class="bobtools-copy-upstream-btn"
+                  type="button"
+                  aria-label="Copy upstreamUserID to clipboard"
+                  title="Copy upstreamUserID to clipboard"
+                  hidden
+                >
+                  <span class="bobtools-copy-upstream-icon" aria-hidden="true"></span>
+                </button>
+                <button
+                  id="bobtools-copy-result"
+                  class="bobtools-copy-result-btn"
+                  type="button"
+                  aria-label="Copy formatted Can I watch? result"
+                  title="Copy formatted Can I watch? result"
+                  hidden
+                >
+                  <svg class="bobtools-copy-result-icon" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+                    <rect x="1.5" y="1.5" width="9" height="9" rx="1.5"></rect>
+                    <path d="M3.3 4.1h5.4M3.3 6.1h5.4M3.3 8.1h3.6"></path>
+                  </svg>
+                </button>
+              </div>
             </div>
             <article id="bobtools-resource-picker-card" class="bobtools-resource-picker-card is-collapsed" hidden>
               <div
@@ -89,7 +114,24 @@
                 placeholder="RESOURCE_ID_1, RESOURCE_ID_2"
                 aria-label="Resource IDs"
               />
-              <button id="bobtools-go" class="bobtools-go" type="submit">GO</button>
+              <button
+                id="bobtools-go"
+                class="bobtools-go"
+                type="submit"
+                aria-label="Run Can I watch? (Preauthorize)"
+                title="Run Can I watch? (Preauthorize)"
+              >
+                <svg class="bobtools-go-icon" viewBox="0 0 40 32" aria-hidden="true" focusable="false">
+                  <rect class="bobtools-go-shell" x="1.5" y="1.5" width="37" height="29" rx="6.2" />
+                  <path class="bobtools-go-base" d="M1.5 22.1h37v2.2c0 3.5-2.8 6.2-6.2 6.2H7.7c-3.4 0-6.2-2.7-6.2-6.2v-2.2Z" />
+                  <rect class="bobtools-go-face" x="3.2" y="3.2" width="33.6" height="20.6" rx="4.4" />
+                  <path class="bobtools-go-gloss" d="M7.4 23.8V26c0 1.8.7 3.3 1.9 4.5H7.7c-3.4 0-6.2-2.7-6.2-6.2v-2.2h5.9c-.1.5 0 1.1 0 1.7Z" />
+                  <circle class="bobtools-go-badge" cx="20" cy="12.8" r="6.9" />
+                  <path class="bobtools-go-z" d="M14.4 9.4h10.1v2.3l-5.6 4.4h5.7V18H13.9v-2.2l5.8-4.5h-5.3V9.4Z" />
+                  <circle class="bobtools-go-led" cx="26.6" cy="26.6" r="1.05" />
+                  <circle class="bobtools-go-led" cx="30.4" cy="26.6" r="1.05" />
+                </svg>
+              </button>
             </form>
             <p id="bobtools-action-hint" class="bobtools-action-hint"></p>
             <p id="bobtools-result-status" class="bobtools-result-status"></p>

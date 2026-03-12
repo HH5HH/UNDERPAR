@@ -9,7 +9,12 @@ const CM_WORKSPACE_RUNTIME_TOKEN_INPUT_NAME = "access_token";
 const CM_WORKSPACE_RUNTIME_CLIENT_IDS_INPUT_NAME = "cm_client_ids";
 const CM_WORKSPACE_RUNTIME_USER_ID_INPUT_NAME = "cm_user_id";
 const CM_WORKSPACE_RUNTIME_SCOPE_INPUT_NAME = "cm_scope";
+const CM_WORKSPACE_RUNTIME_EXPERIENCE_TOKEN_INPUT_NAME = "experience_cloud_access_token";
+const CM_WORKSPACE_RUNTIME_EXPERIENCE_CLIENT_IDS_INPUT_NAME = "experience_cloud_client_ids";
+const CM_WORKSPACE_RUNTIME_EXPERIENCE_USER_ID_INPUT_NAME = "experience_cloud_user_id";
+const CM_WORKSPACE_RUNTIME_EXPERIENCE_SCOPE_INPUT_NAME = "experience_cloud_scope";
 const CM_WORKSPACE_PRIMARY_CLIENT_ID = "cm-console-ui";
+const CM_WORKSPACE_EXPERIENCE_CLIENT_ID = "exc_app";
 const CM_WORKSPACE_IMS_VALIDATE_TOKEN_URL = "https://ims-na1.adobelogin.com/ims/validate_token/v1?jslVersion=underpar-clickcmuws";
 const CM_WORKSPACE_IMS_CHECK_TOKEN_URL = "https://adobeid-na1.services.adobe.com/ims/check/v6/token";
 const UNDERPAR_NETWORK_ACTIVITY_MESSAGE_TYPE = "underpar:networkActivity";
@@ -22,6 +27,9 @@ const CM_WORKSPACE_IMS_DEFAULT_SCOPE =
 const CM_WORKSPACE_TOKEN_REFRESH_SKEW_MS = 45 * 1000;
 const CM_WORKSPACE_FETCH_TIMEOUT_MS = 45 * 1000;
 const CM_WORKSPACE_FALLBACK_BASE_URL = "https://streams-stage.adobeprimetime.com";
+const CM_WORKSPACE_EXPORT_FILE_SYSTEM_QUERY_KEYS = new Set(["format", "limit"]);
+const CM_CARD_EDITABLE_QUERY_KEYS = new Set(["start", "end"]);
+const CM_QUERY_CONTEXT_HIDDEN_KEYS = new Set(["metrics", ...CM_WORKSPACE_EXPORT_FILE_SYSTEM_QUERY_KEYS]);
 let PASS_CONSOLE_PROGRAMMER_APPLICATIONS_URL =
   "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production/programmers";
 const WORKSPACE_LOCK_MESSAGE_SUFFIX =
@@ -102,6 +110,129 @@ const CM_CMU_NON_DIMENSION_PATH_SEGMENTS = new Set([
   "usage",
 ]);
 const CM_TENANT_QUERY_PARAM_KEYS = ["tenant", "tenant_id", "tenant-id"];
+const CM_WORKSPACE_BROWSER_CONSOLE_TRACE_ENABLED = true;
+const CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_DEPTH = 4;
+const CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_ITEMS = 24;
+const CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_KEYS = 40;
+const CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_STRING = 1000;
+
+function summarizeCmWorkspaceConsoleString(value, keyName = "") {
+  const raw = String(value ?? "");
+  if (!raw) {
+    return "";
+  }
+  const normalizedKey = String(keyName || "").trim().toLowerCase();
+  const normalizedToken = normalizeBearerTokenValue(raw);
+  if (normalizedToken && normalizedToken.split(".").length === 3) {
+    return `<redacted-jwt:${normalizedToken.slice(-12)}>`;
+  }
+  if (
+    normalizedKey.includes("token") ||
+    normalizedKey.includes("secret") ||
+    normalizedKey.includes("password") ||
+    normalizedKey === "authorization" ||
+    normalizedKey === "cookie" ||
+    normalizedKey === "set-cookie"
+  ) {
+    return "<redacted>";
+  }
+  return raw.length > CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_STRING
+    ? `${raw.slice(0, CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_STRING)}... [truncated ${raw.length - CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_STRING} chars]`
+    : raw;
+}
+
+function sanitizeCmWorkspaceConsoleTraceValue(value, options = {}) {
+  const depth = Number(options.depth || 0);
+  const keyName = String(options.keyName || "").trim();
+  const seen = options.seen instanceof WeakSet ? options.seen : new WeakSet();
+
+  if (value == null) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return summarizeCmWorkspaceConsoleString(value, keyName);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+  if (value instanceof Error) {
+    return {
+      name: String(value.name || "Error"),
+      message: summarizeCmWorkspaceConsoleString(value.message || "", keyName || "message"),
+      stack: summarizeCmWorkspaceConsoleString(String(value.stack || ""), "stack"),
+    };
+  }
+  if (typeof Headers !== "undefined" && value instanceof Headers) {
+    const headers = {};
+    value.forEach((headerValue, headerName) => {
+      headers[headerName] = summarizeCmWorkspaceConsoleString(headerValue, headerName);
+    });
+    return sanitizeCmWorkspaceConsoleTraceValue(headers, {
+      depth: depth + 1,
+      keyName,
+      seen,
+    });
+  }
+  if (typeof value !== "object") {
+    return summarizeCmWorkspaceConsoleString(String(value), keyName);
+  }
+  if (depth >= CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_DEPTH) {
+    return Array.isArray(value) ? `[array:${value.length}]` : `[${String(value?.constructor?.name || "object")}]`;
+  }
+  if (seen.has(value)) {
+    return "[circular]";
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    const output = value
+      .slice(0, CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_ITEMS)
+      .map((entry) =>
+        sanitizeCmWorkspaceConsoleTraceValue(entry, {
+          depth: depth + 1,
+          keyName,
+          seen,
+        })
+      );
+    if (value.length > CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_ITEMS) {
+      output.push(`[+${value.length - CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_ITEMS} more]`);
+    }
+    return output;
+  }
+
+  const output = {};
+  const entries = Object.entries(value);
+  entries.slice(0, CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_KEYS).forEach(([entryKey, entryValue]) => {
+    output[entryKey] = sanitizeCmWorkspaceConsoleTraceValue(entryValue, {
+      depth: depth + 1,
+      keyName: entryKey,
+      seen,
+    });
+  });
+  if (entries.length > CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_KEYS) {
+    output.__truncatedKeys = entries.length - CM_WORKSPACE_BROWSER_CONSOLE_TRACE_MAX_KEYS;
+  }
+  return output;
+}
+
+function emitCmWorkspaceConsoleTrace(channel = "event", message = "", details = null, options = {}) {
+  if (CM_WORKSPACE_BROWSER_CONSOLE_TRACE_ENABLED !== true) {
+    return;
+  }
+  const consoleMethodName = ["log", "info", "warn", "error", "debug"].includes(String(options.level || "").trim())
+    ? String(options.level || "").trim()
+    : "log";
+  const consoleMethod = typeof console?.[consoleMethodName] === "function" ? console[consoleMethodName].bind(console) : console.log.bind(console);
+  const label = `[UnderPAR CM Workspace][${String(channel || "event").trim() || "event"}] ${String(message || "").trim() || "(no message)"}`;
+  if (details == null) {
+    consoleMethod(label);
+    return;
+  }
+  consoleMethod(label, sanitizeCmWorkspaceConsoleTraceValue(details));
+}
 
 const state = {
   windowId: 0,
@@ -304,7 +435,84 @@ const cmWorkspaceRuntimeAuth = {
     .filter((value) => String(value || "").trim().toLowerCase() === CM_WORKSPACE_PRIMARY_CLIENT_ID),
   userId: readHiddenInputValue(CM_WORKSPACE_RUNTIME_USER_ID_INPUT_NAME),
   scope: readHiddenInputValue(CM_WORKSPACE_RUNTIME_SCOPE_INPUT_NAME) || CM_WORKSPACE_IMS_DEFAULT_SCOPE,
+  experienceCloudAccessToken: readHiddenInputValue(CM_WORKSPACE_RUNTIME_EXPERIENCE_TOKEN_INPUT_NAME),
+  experienceCloudClientIds: parseJsonArray(readHiddenInputValue(CM_WORKSPACE_RUNTIME_EXPERIENCE_CLIENT_IDS_INPUT_NAME))
+    .map((value) => String(value || "").trim())
+    .filter((value) => String(value || "").trim().toLowerCase() === CM_WORKSPACE_EXPERIENCE_CLIENT_ID),
+  experienceCloudUserId: readHiddenInputValue(CM_WORKSPACE_RUNTIME_EXPERIENCE_USER_ID_INPUT_NAME),
+  experienceCloudScope: readHiddenInputValue(CM_WORKSPACE_RUNTIME_EXPERIENCE_SCOPE_INPUT_NAME) || "",
 };
+
+function applyWorkspaceRuntimeAuthContext(authContext = null) {
+  const source = authContext && typeof authContext === "object" ? authContext : {};
+  const token = normalizeBearerTokenValue(firstNonEmptyString([source.accessToken, source.access_token]));
+  if (token && tokenSupportsCmCatalog(token)) {
+    setWorkspaceRuntimeAccessToken(token);
+  }
+
+  const clientIds = dedupeCandidateStrings([
+    ...(Array.isArray(source.clientIds) ? source.clientIds : []),
+    ...(Array.isArray(source.client_ids) ? source.client_ids : []),
+    ...(Array.isArray(cmWorkspaceRuntimeAuth.clientIds) ? cmWorkspaceRuntimeAuth.clientIds : []),
+    CM_WORKSPACE_PRIMARY_CLIENT_ID,
+  ]).filter((value) => String(value || "").trim().toLowerCase() === CM_WORKSPACE_PRIMARY_CLIENT_ID);
+  cmWorkspaceRuntimeAuth.clientIds = clientIds;
+  upsertBodyHiddenInput(document, CM_WORKSPACE_RUNTIME_CLIENT_IDS_INPUT_NAME, JSON.stringify(clientIds));
+
+  const userId = firstNonEmptyString([source.userId, source.user_id, cmWorkspaceRuntimeAuth.userId]);
+  cmWorkspaceRuntimeAuth.userId = String(userId || "").trim();
+  upsertBodyHiddenInput(document, CM_WORKSPACE_RUNTIME_USER_ID_INPUT_NAME, cmWorkspaceRuntimeAuth.userId);
+
+  const scope = firstNonEmptyString([source.scope, cmWorkspaceRuntimeAuth.scope, CM_WORKSPACE_IMS_DEFAULT_SCOPE]);
+  cmWorkspaceRuntimeAuth.scope = String(scope || CM_WORKSPACE_IMS_DEFAULT_SCOPE).trim() || CM_WORKSPACE_IMS_DEFAULT_SCOPE;
+  upsertBodyHiddenInput(document, CM_WORKSPACE_RUNTIME_SCOPE_INPUT_NAME, cmWorkspaceRuntimeAuth.scope);
+
+  const experienceToken = normalizeBearerTokenValue(
+    firstNonEmptyString([source.experienceCloudAccessToken, source.experience_cloud_access_token])
+  );
+  if (experienceToken) {
+    cmWorkspaceRuntimeAuth.experienceCloudAccessToken = experienceToken;
+    upsertBodyHiddenInput(document, CM_WORKSPACE_RUNTIME_EXPERIENCE_TOKEN_INPUT_NAME, experienceToken);
+  }
+
+  const experienceClientIds = dedupeCandidateStrings([
+    ...(Array.isArray(source.experienceCloudClientIds) ? source.experienceCloudClientIds : []),
+    ...(Array.isArray(source.experience_cloud_client_ids) ? source.experience_cloud_client_ids : []),
+    ...(Array.isArray(cmWorkspaceRuntimeAuth.experienceCloudClientIds) ? cmWorkspaceRuntimeAuth.experienceCloudClientIds : []),
+    CM_WORKSPACE_EXPERIENCE_CLIENT_ID,
+  ]).filter((value) => String(value || "").trim().toLowerCase() === CM_WORKSPACE_EXPERIENCE_CLIENT_ID);
+  cmWorkspaceRuntimeAuth.experienceCloudClientIds = experienceClientIds;
+  upsertBodyHiddenInput(
+    document,
+    CM_WORKSPACE_RUNTIME_EXPERIENCE_CLIENT_IDS_INPUT_NAME,
+    JSON.stringify(experienceClientIds)
+  );
+
+  const experienceUserId = firstNonEmptyString([
+    source.experienceCloudUserId,
+    source.experience_cloud_user_id,
+    cmWorkspaceRuntimeAuth.experienceCloudUserId,
+  ]);
+  cmWorkspaceRuntimeAuth.experienceCloudUserId = String(experienceUserId || "").trim();
+  upsertBodyHiddenInput(
+    document,
+    CM_WORKSPACE_RUNTIME_EXPERIENCE_USER_ID_INPUT_NAME,
+    cmWorkspaceRuntimeAuth.experienceCloudUserId
+  );
+
+  const experienceScope = firstNonEmptyString([
+    source.experienceCloudScope,
+    source.experience_cloud_scope,
+    cmWorkspaceRuntimeAuth.experienceCloudScope,
+    cmWorkspaceRuntimeAuth.scope,
+  ]);
+  cmWorkspaceRuntimeAuth.experienceCloudScope = String(experienceScope || "").trim();
+  upsertBodyHiddenInput(
+    document,
+    CM_WORKSPACE_RUNTIME_EXPERIENCE_SCOPE_INPUT_NAME,
+    cmWorkspaceRuntimeAuth.experienceCloudScope
+  );
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -455,10 +663,14 @@ function tokenSupportsCmCatalog(tokenValue) {
 
 function collectWorkspaceUserIdCandidates() {
   const tokenClaims = parseJwtPayload(cmWorkspaceRuntimeAuth.accessToken || "") || {};
+  const experienceCloudClaims = parseJwtPayload(cmWorkspaceRuntimeAuth.experienceCloudAccessToken || "") || {};
   const orderedCandidates = [
     cmWorkspaceRuntimeAuth.userId,
+    cmWorkspaceRuntimeAuth.experienceCloudUserId,
     tokenClaims.user_id,
     tokenClaims.userId,
+    experienceCloudClaims.user_id,
+    experienceCloudClaims.userId,
   ];
   const output = [];
   const seen = new Set();
@@ -652,6 +864,23 @@ function normalizeWorkspaceTenantScopeValue(value) {
   return String(value || "").trim();
 }
 
+function workspaceUsagePathRequiresTenantScope(pathValue = "") {
+  try {
+    const parsed = new URL(String(pathValue || ""), DEFAULT_CM_REPORTS_BASE);
+    return String(parsed.pathname || "")
+      .split("/")
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean)
+      .includes("tenant");
+  } catch {
+    return String(pathValue || "")
+      .split("/")
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean)
+      .includes("tenant");
+  }
+}
+
 function applyWorkspaceTenantScopeToSearchParams(searchParams, tenantScope = "") {
   if (!(searchParams instanceof URLSearchParams)) {
     return;
@@ -669,15 +898,15 @@ function applyWorkspaceTenantScopeToUsageUrl(urlValue, tenantScope = "") {
     return "";
   }
   const normalizedTenantScope = normalizeWorkspaceTenantScopeValue(tenantScope);
-  if (!normalizedTenantScope) {
-    return raw;
-  }
   try {
     const parsed = new URL(raw);
     if (!isCmuUsageRequestUrl(parsed.toString())) {
       return parsed.toString();
     }
-    applyWorkspaceTenantScopeToSearchParams(parsed.searchParams, normalizedTenantScope);
+    CM_TENANT_QUERY_PARAM_KEYS.forEach((key) => parsed.searchParams.delete(key));
+    if (workspaceUsagePathRequiresTenantScope(parsed.pathname)) {
+      applyWorkspaceTenantScopeToSearchParams(parsed.searchParams, normalizedTenantScope);
+    }
     return parsed.toString();
   } catch {
     return raw;
@@ -687,17 +916,30 @@ function applyWorkspaceTenantScopeToUsageUrl(urlValue, tenantScope = "") {
 function resolveWorkspaceTenantScope(cardState = null, cardPayload = null) {
   return normalizeWorkspaceTenantScopeValue(
     firstNonEmptyString([
-      state.tenantScope,
-      state.programmerId,
       cardPayload?.tenantId,
       cardState?.tenantId,
+      state.tenantScope,
       cardPayload?.tenantName,
       cardState?.tenantName,
     ])
   );
 }
 
-function ensureCmuQueryDefaults(urlValue, limitValue = 1000, tenantScope = "") {
+function resolveWorkspaceTenantLabel(cardState = null, cardPayload = null) {
+  return String(
+    firstNonEmptyString([
+      cardPayload?.tenantName,
+      cardState?.tenantName,
+      cardPayload?.tenantId,
+      cardState?.tenantId,
+      state.tenantScope,
+      state.programmerName,
+      state.programmerId,
+    ]) || ""
+  ).trim();
+}
+
+function ensureCmuQueryDefaults(urlValue, tenantScope = "") {
   const raw = String(urlValue || "").trim();
   if (!raw) {
     return "";
@@ -711,10 +953,6 @@ function ensureCmuQueryDefaults(urlValue, limitValue = 1000, tenantScope = "") {
       const timeWindow = buildCmuTimeWindowForZoom(getCmuZoomKeyFromUrl(parsed.toString()));
       parsed.searchParams.set("start", String(timeWindow.start || formatCmuIsoQueryValue(new Date())));
       parsed.searchParams.set("end", String(timeWindow.end || formatCmuIsoQueryValue(new Date())));
-    }
-    const limit = Number(limitValue);
-    if (!parsed.searchParams.has("limit") && Number.isFinite(limit) && limit > 0) {
-      parsed.searchParams.set("limit", String(Math.max(1, Math.round(limit))));
     }
     const lowerPath = String(parsed.pathname || "").toLowerCase();
     if (!parsed.searchParams.has("metrics") && (lowerPath.includes("/tenant") || lowerPath.includes("/hour"))) {
@@ -731,6 +969,9 @@ async function fetchWithTimeout(url, init = {}, timeoutMs = CM_WORKSPACE_FETCH_T
     chrome?.runtime?.sendMessage && /^https?:\/\//i.test(String(url || "").trim())
       ? Math.trunc
       : null;
+  const requestUrl = String(url || "").trim();
+  const method = String(init?.method || "GET").trim().toUpperCase() || "GET";
+  const startedAt = Date.now();
   if (reportActivity) {
     void chrome.runtime
       .sendMessage({
@@ -743,10 +984,40 @@ async function fetchWithTimeout(url, init = {}, timeoutMs = CM_WORKSPACE_FETCH_T
   const controller = new AbortController();
   const timerId = window.setTimeout(() => controller.abort(), Math.max(2000, Number(timeoutMs) || CM_WORKSPACE_FETCH_TIMEOUT_MS));
   try {
-    return await fetch(url, {
+    emitCmWorkspaceConsoleTrace("fetch", `${method} ${requestUrl}`, {
+      phase: "request",
+      method,
+      url: requestUrl,
+      timeoutMs: Math.max(2000, Number(timeoutMs) || CM_WORKSPACE_FETCH_TIMEOUT_MS),
+    });
+    const response = await fetch(url, {
       ...init,
       signal: controller.signal,
     });
+    emitCmWorkspaceConsoleTrace("fetch", `${method} ${requestUrl}`, {
+      phase: "response",
+      method,
+      url: requestUrl,
+      status: Number(response?.status || 0),
+      ok: Boolean(response?.ok),
+      redirected: Boolean(response?.redirected),
+      durationMs: Date.now() - startedAt,
+    });
+    return response;
+  } catch (error) {
+    emitCmWorkspaceConsoleTrace(
+      "fetch",
+      `${method} ${requestUrl}`,
+      {
+        phase: "error",
+        method,
+        url: requestUrl,
+        durationMs: Date.now() - startedAt,
+        error,
+      },
+      { level: "error" }
+    );
+    throw error;
   } finally {
     window.clearTimeout(timerId);
     if (reportActivity) {
@@ -766,6 +1037,47 @@ function resolveWorkspaceRuntimeClientIds() {
     ...(Array.isArray(cmWorkspaceRuntimeAuth.clientIds) ? cmWorkspaceRuntimeAuth.clientIds : []),
     CM_WORKSPACE_PRIMARY_CLIENT_ID,
   ]).filter((value) => String(value || "").trim().toLowerCase() === CM_WORKSPACE_PRIMARY_CLIENT_ID);
+}
+
+function resolveWorkspaceExperienceClientIds() {
+  return dedupeCandidateStrings([
+    ...(Array.isArray(cmWorkspaceRuntimeAuth.experienceCloudClientIds) ? cmWorkspaceRuntimeAuth.experienceCloudClientIds : []),
+    CM_WORKSPACE_EXPERIENCE_CLIENT_ID,
+  ]).filter((value) => String(value || "").trim().toLowerCase() === CM_WORKSPACE_EXPERIENCE_CLIENT_ID);
+}
+
+function collectWorkspaceScopeCandidates() {
+  const candidates = dedupeCandidateStrings(
+    [
+      cmWorkspaceRuntimeAuth.scope,
+      cmWorkspaceRuntimeAuth.experienceCloudScope,
+      CM_WORKSPACE_IMS_DEFAULT_SCOPE,
+    ].map((value) => tokenizeScopeSet(value).join(","))
+  );
+  return candidates.length > 0 ? candidates : [CM_WORKSPACE_IMS_DEFAULT_SCOPE];
+}
+
+function collectWorkspaceValidateTokenSeeds() {
+  const output = [];
+  const seen = new Set();
+  const pushSeed = (tokenValue, clientIds) => {
+    const token = normalizeBearerTokenValue(tokenValue);
+    if (!token) {
+      return;
+    }
+    const key = token.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    output.push({
+      token,
+      clientIds: dedupeCandidateStrings(Array.isArray(clientIds) ? clientIds : []),
+    });
+  };
+  pushSeed(cmWorkspaceRuntimeAuth.experienceCloudAccessToken, resolveWorkspaceExperienceClientIds());
+  pushSeed(cmWorkspaceRuntimeAuth.accessToken, resolveWorkspaceRuntimeClientIds());
+  return output;
 }
 
 function buildValidateTokenFormBody(tokenValue, clientId) {
@@ -793,8 +1105,7 @@ function buildImsCheckTokenUrl(clientId, scope, userId) {
   return url.toString();
 }
 
-async function refreshTokenViaValidateToken(seedToken, forceFresh = false) {
-  const clientIds = resolveWorkspaceRuntimeClientIds();
+async function refreshTokenViaValidateToken(seedToken, forceFresh = false, clientIds = resolveWorkspaceRuntimeClientIds()) {
   for (const clientId of clientIds) {
     for (const credentials of ["include", "omit"]) {
       const response = await fetchWithTimeout(CM_WORKSPACE_IMS_VALIDATE_TOKEN_URL, {
@@ -842,9 +1153,7 @@ async function refreshTokenViaImsCheck(forceFresh = false) {
   if (!userIdCandidates.includes("")) {
     userIdCandidates.push("");
   }
-  const scopeValue = String(cmWorkspaceRuntimeAuth.scope || CM_WORKSPACE_IMS_DEFAULT_SCOPE).trim() || CM_WORKSPACE_IMS_DEFAULT_SCOPE;
-  const scopeCandidates = dedupeCandidateStrings([scopeValue, CM_WORKSPACE_IMS_DEFAULT_SCOPE].map((value) => tokenizeScopeSet(value).join(",")));
-  const scopes = scopeCandidates.length > 0 ? scopeCandidates : [CM_WORKSPACE_IMS_DEFAULT_SCOPE];
+  const scopes = collectWorkspaceScopeCandidates();
   for (const clientId of resolveWorkspaceRuntimeClientIds()) {
     for (const scope of scopes) {
       for (const userIdCandidate of userIdCandidates) {
@@ -893,6 +1202,23 @@ function setWorkspaceRuntimeAccessToken(tokenValue) {
   }
 }
 
+async function resolveWorkspaceRuntimeAuthFromController(forceFresh = false) {
+  const result = await sendWorkspaceAction("resolve-run-context", {
+    forceRefresh: forceFresh === true,
+    source: "cm-workspace-auth",
+  });
+  const authContext = result?.cmAuth && typeof result.cmAuth === "object" ? result.cmAuth : null;
+  if (authContext) {
+    applyWorkspaceRuntimeAuthContext(authContext);
+  }
+  const token = normalizeBearerTokenValue(authContext?.accessToken || "");
+  if (token && tokenSupportsCmCatalog(token)) {
+    setWorkspaceRuntimeAccessToken(token);
+    return token;
+  }
+  return "";
+}
+
 async function refreshCmWorkspaceAccessToken(forceFresh = false) {
   const seedToken = normalizeBearerTokenValue(cmWorkspaceRuntimeAuth.accessToken || "");
   if (!forceFresh && seedToken && isBearerTokenFresh(seedToken, CM_WORKSPACE_TOKEN_REFRESH_SKEW_MS) && tokenSupportsCmCatalog(seedToken)) {
@@ -900,11 +1226,32 @@ async function refreshCmWorkspaceAccessToken(forceFresh = false) {
     return seedToken;
   }
   let refreshedToken = "";
-  if (seedToken) {
+  try {
+    refreshedToken = await resolveWorkspaceRuntimeAuthFromController(forceFresh);
+  } catch {
+    refreshedToken = "";
+  }
+  if (refreshedToken && tokenSupportsCmCatalog(refreshedToken)) {
+    return refreshedToken;
+  }
+  if (!refreshedToken) {
     try {
-      refreshedToken = await refreshTokenViaValidateToken(seedToken, forceFresh);
+      refreshedToken = await resolveWorkspaceRuntimeAuthFromController(true);
     } catch {
       refreshedToken = "";
+    }
+  }
+  if (!refreshedToken) {
+    const seedEntries = collectWorkspaceValidateTokenSeeds();
+    for (const seedEntry of seedEntries) {
+      try {
+        refreshedToken = await refreshTokenViaValidateToken(seedEntry.token, forceFresh, seedEntry.clientIds);
+      } catch {
+        refreshedToken = "";
+      }
+      if (refreshedToken) {
+        break;
+      }
     }
   }
   if (!refreshedToken) {
@@ -1384,6 +1731,11 @@ function normalizeWorkspaceReplayCardPayload(card = null) {
     endpointUrl,
     requestUrl,
     baseRequestUrl,
+    seedEndpointUrl: String(card?.seedEndpointUrl || "").trim(),
+    seedRequestUrl: String(card?.seedRequestUrl || "").trim(),
+    seedBaseRequestUrl: String(card?.seedBaseRequestUrl || "").trim(),
+    seedLocalColumnFilters:
+      card?.seedLocalColumnFilters && typeof card.seedLocalColumnFilters === "object" ? { ...card.seedLocalColumnFilters } : {},
     zoomKey: String(card?.zoomKey || "").trim(),
     columns: Array.isArray(card?.columns) ? card.columns.map((column) => String(column || "")).filter(Boolean) : [],
     localColumnFilters:
@@ -1420,6 +1772,16 @@ function getWorkspaceReplayCards() {
 
 function syncWorkspaceReplayCardsFromCurrentCards() {
   const fromCurrentState = getWorkspaceReplayCardsFromCurrentState();
+  const existingReplayCards = cloneWorkspaceReplayCards(state.workspaceReplayCards);
+  const shouldPreserveExistingReplayContext =
+    existingReplayCards.length > fromCurrentState.length &&
+    (state.batchRunning === true ||
+      state.programmerSwitchLoading === true ||
+      Boolean(String(state.pendingAutoRerunProgrammerKey || "").trim()) ||
+      Boolean(String(state.autoRerunInFlightProgrammerKey || "").trim()));
+  if (shouldPreserveExistingReplayContext) {
+    return;
+  }
   if (fromCurrentState.length > 0) {
     state.workspaceReplayCards = cloneWorkspaceReplayCards(fromCurrentState);
     return;
@@ -1435,6 +1797,7 @@ function clearWorkspaceCards(options = {}) {
     state.workspaceReplayCards = [];
   }
   state.cardsById.forEach((cardState) => {
+    teardownCardHeaderQueryEditors(cardState);
     cardState.element?.remove();
   });
   state.cardsById.clear();
@@ -1619,7 +1982,9 @@ function maybeConsumePendingAutoRerun() {
   if (!pendingProgrammerKey) {
     return;
   }
-  if (state.controllerOnline !== true) {
+  const hasRunnableControllerContext =
+    state.controllerOnline === true || (state.cmAvailabilityResolved === true && state.cmAvailable === true);
+  if (!hasRunnableControllerContext) {
     return;
   }
   if (state.programmerSwitchLoading === true) {
@@ -2180,6 +2545,71 @@ function getCardEffectiveRequestUrl(cardState) {
   return appendCmLocalColumnFiltersToUrl(baseRequestUrl, cardState?.localColumnFilters, cardState);
 }
 
+function buildCardDisplayRequestUrl(cardState) {
+  const sourceRaw = firstNonEmptyString([
+    String(cardState?.requestUrl || "").trim(),
+    String(cardState?.baseRequestUrl || "").trim(),
+    String(cardState?.seedBaseRequestUrl || "").trim(),
+    String(cardState?.seedRequestUrl || "").trim(),
+    String(cardState?.seedEndpointUrl || "").trim(),
+    String(cardState?.endpointUrl || "").trim(),
+  ]);
+  if (!sourceRaw) {
+    return "";
+  }
+
+  const normalizedFilters = normalizeCmLocalColumnFilters(cardState?.localColumnFilters, cardState);
+  const nextPairs = parseRawQueryPairs(sourceRaw).filter((pair) => {
+    if (!pair?.hasValue) {
+      return true;
+    }
+    const normalizedKey = normalizeCmColumnName(pair?.key);
+    if (!normalizedKey || !normalizedFilters.has(normalizedKey)) {
+      return true;
+    }
+    return false;
+  });
+
+  normalizedFilters.forEach((values, columnName) => {
+    [...values]
+      .sort((left, right) => compareCmColumnValues(left, right))
+      .forEach((value) => {
+        nextPairs.push({
+          key: columnName,
+          value,
+          hasValue: true,
+        });
+      });
+  });
+
+  const queryText = nextPairs
+    .map((pair) => {
+      const key = encodeURIComponent(String(pair?.key || "").trim()).replace(/%20/g, "+");
+      if (!key) {
+        return "";
+      }
+      if (pair?.hasValue && String(pair?.value || "").trim().length > 0) {
+        return `${key}=${String(pair?.value || "")}`;
+      }
+      if (pair?.hasAssignment === true) {
+        return `${key}=`;
+      }
+      return key;
+    })
+    .filter(Boolean)
+    .join("&");
+
+  try {
+    const parsed = new URL(sourceRaw);
+    parsed.hash = "";
+    parsed.search = queryText ? `?${queryText}` : "";
+    return parsed.toString();
+  } catch (_error) {
+    const pathOnly = sourceRaw.split(/[?#]/, 1)[0] || sourceRaw;
+    return queryText ? `${pathOnly}?${queryText}` : pathOnly;
+  }
+}
+
 function getComparableValue(row, header) {
   const value = getRowValueByColumn(row, header);
   if (typeof value === "number") {
@@ -2478,13 +2908,17 @@ function getCardPayload(cardState) {
     endpointUrl: cardState.endpointUrl,
     requestUrl: effectiveRequestUrl,
     baseRequestUrl: getCardBaseRequestUrl(cardState),
+    seedEndpointUrl: String(cardState?.seedEndpointUrl || "").trim(),
+    seedRequestUrl: String(cardState?.seedRequestUrl || "").trim(),
+    seedBaseRequestUrl: String(cardState?.seedBaseRequestUrl || "").trim(),
+    seedLocalColumnFilters: serializeCmLocalColumnFilters(cardState?.seedLocalColumnFilters, cardState),
     zoomKey: cardState.zoomKey,
     columns: cardState.columns,
     localColumnFilters: serializeCmLocalColumnFilters(cardState?.localColumnFilters, cardState),
     operation: cardState.operation && typeof cardState.operation === "object" ? { ...cardState.operation } : null,
     formValues: cardState.formValues && typeof cardState.formValues === "object" ? { ...cardState.formValues } : {},
     tenantId: String(tenantScope || ""),
-    tenantName: String(firstNonEmptyString([state.programmerName, state.programmerId, cardState?.tenantName, cardState?.tenantId]) || ""),
+    tenantName: resolveWorkspaceTenantLabel(cardState),
   };
 }
 
@@ -2506,6 +2940,86 @@ function getNodeLabel(urlValue) {
     // Ignore parse errors.
   }
   return raw;
+}
+
+function cloneCmLocalFilterState(filterState, cardState = null) {
+  return normalizeCmLocalColumnFilters(filterState, cardState);
+}
+
+function hasStoredSeedQueryState(cardState) {
+  if (!cardState) {
+    return false;
+  }
+  return (
+    String(cardState.seedEndpointUrl || cardState.seedRequestUrl || cardState.seedBaseRequestUrl || "").trim().length > 0 ||
+    hasCmLocalColumnFilters(cardState.seedLocalColumnFilters, cardState)
+  );
+}
+
+function areCmLocalFilterMapsEqual(leftFilters, rightFilters, cardState = null) {
+  const left = normalizeCmLocalColumnFilters(leftFilters, cardState);
+  const right = normalizeCmLocalColumnFilters(rightFilters, cardState);
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const [columnName, leftValues] of left.entries()) {
+    const rightValues = right.get(columnName);
+    if (!(rightValues instanceof Set) || leftValues.size !== rightValues.size) {
+      return false;
+    }
+    for (const value of leftValues) {
+      if (!rightValues.has(value)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function snapshotCardStartingFilterState(cardState) {
+  if (!cardState) {
+    return;
+  }
+  cardState.startingUiLocalColumnFilters = cloneCmLocalFilterState(cardState.localColumnFilters, cardState);
+  cardState.startingUiPersistentQuerySignature = buildCardPersistentQuerySignature(
+    cardState,
+    getCardEffectiveRequestUrl(cardState) || cardState.requestUrl || cardState.endpointUrl || ""
+  );
+  cardState.startingUiStateCaptured = true;
+}
+
+function isCardAtStartingFilterState(cardState) {
+  if (!cardState?.startingUiStateCaptured) {
+    return !hasCmLocalColumnFilters(cardState?.localColumnFilters, cardState);
+  }
+  return (
+    areCmLocalFilterMapsEqual(cardState?.localColumnFilters, cardState?.startingUiLocalColumnFilters, cardState) &&
+    buildCardPersistentQuerySignature(
+      cardState,
+      getCardEffectiveRequestUrl(cardState) || cardState?.requestUrl || cardState?.endpointUrl || ""
+    ) === String(cardState?.startingUiPersistentQuerySignature || "[]")
+  );
+}
+
+function restoreCardSeedQueryState(cardState) {
+  if (!cardState || !hasStoredSeedQueryState(cardState)) {
+    return false;
+  }
+  teardownCardHeaderQueryEditors(cardState);
+  cardState.endpointUrl = String(cardState.seedEndpointUrl || cardState.endpointUrl || "").trim();
+  cardState.baseRequestUrl = String(
+    cardState.seedBaseRequestUrl || cardState.seedRequestUrl || cardState.seedEndpointUrl || cardState.baseRequestUrl || ""
+  ).trim();
+  cardState.requestUrl = String(
+    appendCmLocalColumnFiltersToUrl(cardState.baseRequestUrl, cardState.seedLocalColumnFilters, cardState) ||
+      cardState.baseRequestUrl ||
+      cardState.requestUrl ||
+      cardState.endpointUrl ||
+      ""
+  ).trim();
+  cardState.localColumnFilters = cloneCmLocalFilterState(cardState.seedLocalColumnFilters, cardState);
+  cardState.pickerOpenColumn = "";
+  return true;
 }
 
 function safeDecodeUrlSegment(segment) {
@@ -2556,6 +3070,7 @@ function parseRawQueryPairs(urlValue) {
           key: safeDecodeUrlSegment(entry.replace(/\+/g, " ")),
           value: "",
           hasValue: false,
+          hasAssignment: false,
         };
       }
       const key = safeDecodeUrlSegment(entry.slice(0, equalsIndex).replace(/\+/g, " "));
@@ -2563,9 +3078,107 @@ function parseRawQueryPairs(urlValue) {
       return {
         key,
         value,
-        hasValue: true,
+        hasValue: String(value || "").trim().length > 0,
+        hasAssignment: true,
       };
     });
+}
+
+function normalizeDisplayDimensionFromQueryKey(columnName = "") {
+  const normalized = normalizeCmColumnName(columnName);
+  if (!normalized) {
+    return "";
+  }
+  return normalized.endsWith("!") ? normalized.slice(0, -1) : normalized;
+}
+
+function decodeQueryPairValue(value = "") {
+  return safeDecodeUrlSegment(String(value || "").replace(/\+/g, " ")).trim();
+}
+
+function isEditableCardQueryKey(columnName = "") {
+  return CM_CARD_EDITABLE_QUERY_KEYS.has(normalizeCmColumnName(columnName));
+}
+
+function normalizeEditableQueryDateTimeValue(value = "") {
+  const decoded = decodeQueryPairValue(value);
+  if (!decoded) {
+    return "";
+  }
+  const normalized = decoded.replace(/\s+/, "T");
+  const match = normalized.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/i);
+  if (match) {
+    return `${match[1]}T${match[2]}`;
+  }
+  return "";
+}
+
+function buildCardPersistentQuerySignature(cardState, urlValue = "") {
+  const sourceRaw = String(urlValue || "").trim();
+  if (!sourceRaw) {
+    return "[]";
+  }
+
+  const controlColumns = new Set(normalizeCmLocalColumnFilters(cardState?.localColumnFilters, cardState).keys());
+  const signature = parseRawQueryPairs(sourceRaw)
+    .map((pair) => {
+      const normalizedKey = normalizeDisplayDimensionFromQueryKey(pair?.key);
+      if (!normalizedKey || CM_WORKSPACE_EXPORT_FILE_SYSTEM_QUERY_KEYS.has(normalizedKey) || controlColumns.has(normalizedKey)) {
+        return null;
+      }
+      return {
+        key: normalizedKey,
+        operator: normalizeCmColumnName(pair?.key).endsWith("!")
+          ? "!="
+          : pair?.hasAssignment === true || pair?.hasValue
+            ? "="
+            : "",
+        value: pair?.hasAssignment === true || pair?.hasValue ? decodeQueryPairValue(pair?.value) : "",
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftKey = `${left.key}\u0000${left.operator}\u0000${left.value}`;
+      const rightKey = `${right.key}\u0000${right.operator}\u0000${right.value}`;
+      return leftKey.localeCompare(rightKey, undefined, { numeric: true, sensitivity: "base" });
+    });
+
+  return JSON.stringify(signature);
+}
+
+function updateUrlQueryParamValue(urlValue = "", key = "", value = "") {
+  const rawUrl = String(urlValue || "").trim();
+  const normalizedKey = normalizeCmColumnName(key);
+  if (!rawUrl || !normalizedKey) {
+    return rawUrl;
+  }
+  try {
+    const parsed = new URL(rawUrl, window.location.href);
+    parsed.hash = "";
+    parsed.searchParams.delete(normalizedKey);
+    const normalizedValue = String(value || "").trim();
+    if (normalizedValue) {
+      parsed.searchParams.append(normalizedKey, normalizedValue);
+    }
+    return parsed.toString();
+  } catch (_error) {
+    return rawUrl;
+  }
+}
+
+function updateCardEditableQueryValue(cardState, key, value) {
+  if (!cardState) {
+    return;
+  }
+  const normalizedKey = normalizeCmColumnName(key);
+  if (!isEditableCardQueryKey(normalizedKey)) {
+    return;
+  }
+  const nextValue = String(value || "").trim();
+  const liveBaseRequestUrl = getCardBaseRequestUrl(cardState) || String(cardState.requestUrl || cardState.endpointUrl || "").trim();
+  const nextBaseRequestUrl = updateUrlQueryParamValue(liveBaseRequestUrl, normalizedKey, nextValue);
+  cardState.baseRequestUrl = nextBaseRequestUrl;
+  cardState.requestUrl = appendCmLocalColumnFiltersToUrl(nextBaseRequestUrl, cardState?.localColumnFilters, cardState);
 }
 
 function parseCmRequestContext(urlValue) {
@@ -2692,6 +3305,9 @@ function buildWorkspaceCardId(prefix = "workspace") {
 
 function buildCardHeaderContextMarkup(urlValue, endpointUrl = "") {
   const context = parseCmRequestContext(urlValue);
+  if (!context.fullUrl) {
+    return '<span class="card-url-empty">No CM URL</span>';
+  }
 
   const hiddenPathSegments = Array.isArray(context.hiddenPathSegments)
     ? context.hiddenPathSegments
@@ -2721,20 +3337,40 @@ function buildCardHeaderContextMarkup(urlValue, endpointUrl = "") {
           .join("")
       : '<span class="card-url-path-segment card-url-path-segment-empty">cm</span>';
 
-  const queryMarkup =
-    context.queryPairs.length > 0
-      ? context.queryPairs
-          .map((pair) => {
-            const keyHtml = `<span class="card-url-query-key">${escapeHtml(pair.key)}</span>`;
-            if (!pair.hasValue) {
-              return `<span class="card-url-query-chip">${keyHtml}</span>`;
-            }
-            return `<span class="card-url-query-chip">${keyHtml}<span class="card-url-query-eq">=</span><span class="card-url-query-value">${escapeHtml(
-              pair.value
-            )}</span></span>`;
-          })
-          .join("")
-      : '<span class="card-url-query-empty">no-query</span>';
+  const queryChips = context.queryPairs
+    .map((pair) => {
+      const rawKey = String(pair?.key || "").trim();
+      const normalizedKey = normalizeDisplayDimensionFromQueryKey(rawKey);
+      if (CM_QUERY_CONTEXT_HIDDEN_KEYS.has(normalizedKey)) {
+        return "";
+      }
+      const hasRenderableValue = pair?.hasValue === true && String(pair?.value || "").trim().length > 0;
+      const isNotEquals = hasRenderableValue && rawKey.endsWith("!");
+      const keyLabel = isNotEquals ? rawKey.slice(0, -1) : rawKey;
+      const keyHtml = `<span class="card-url-query-key">${escapeHtml(keyLabel)}</span>`;
+      if (!hasRenderableValue) {
+        return `<span class="card-url-query-chip">${keyHtml}</span>`;
+      }
+      const decodedValue = decodeQueryPairValue(pair.value);
+      const inputValue = normalizeEditableQueryDateTimeValue(decodedValue);
+      const isEditable = !isNotEquals && isEditableCardQueryKey(keyLabel) && Boolean(inputValue);
+      if (isEditable) {
+        return `<span class="card-url-query-chip card-url-query-chip--editable" data-query-key="${escapeHtml(
+          keyLabel
+        )}">${keyHtml}<span class="card-url-query-eq">=</span><button type="button" class="card-url-query-value-btn" data-query-editor-key="${escapeHtml(
+          keyLabel
+        )}" data-query-editor-value="${escapeHtml(inputValue)}" title="Edit ${escapeHtml(
+          keyLabel
+        )}">${escapeHtml(decodedValue || pair.value)}</button><span class="card-url-query-editor" hidden><input type="datetime-local" class="card-url-query-datetime-input" data-query-input-key="${escapeHtml(
+          keyLabel
+        )}" value="${escapeHtml(inputValue)}" /></span></span>`;
+      }
+      return `<span class="card-url-query-chip">${keyHtml}<span class="card-url-query-eq">${
+        isNotEquals ? "!=" : "="
+      }</span><span class="card-url-query-value">${escapeHtml(decodedValue || pair.value)}</span></span>`;
+    })
+    .filter(Boolean);
+  const queryMarkup = queryChips.length > 0 ? queryChips.join("") : "";
 
   return `
     <span class="card-url-context" aria-label="CM request context">
@@ -2816,7 +3452,7 @@ function getCmuUsageTableDisplayColumns(cardState, row) {
 }
 
 function buildCardColumnsMarkup(cardState) {
-  const requestUrl = getCardEffectiveRequestUrl(cardState);
+  const requestUrl = buildCardDisplayRequestUrl(cardState) || getCardEffectiveRequestUrl(cardState);
   const usageCard = isCmuUsageCard(cardState);
   const columns = usageCard
     ? getCmuUsageDisplayColumns(cardState)
@@ -3118,9 +3754,9 @@ function createCardElements(cardState) {
       </div>
       <div class="card-actions">
         <button type="button" class="card-close" aria-label="Close report card" title="Close report card">
-          <svg class="card-close-icon" viewBox="0 0 12 12" focusable="false" aria-hidden="true">
-            <path d="M2 2 10 10" />
-            <path d="M10 2 2 10" />
+          <svg class="card-close-icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+            <path d="M7 7 17 17" />
+            <path d="M17 7 7 17" />
           </svg>
         </button>
       </div>
@@ -3174,6 +3810,7 @@ async function runCardFromPathNode(cardState, endpointUrl, sourceRequestUrl) {
   }
 
   const resolvedRequestUrl = inheritedRequestUrl || targetEndpointUrl;
+  const nextTenantScope = resolveWorkspaceTenantScope(cardState);
   const nextCardPayload = {
     cardId: buildWorkspaceCardId("path"),
     endpointUrl: targetEndpointUrl,
@@ -3181,8 +3818,8 @@ async function runCardFromPathNode(cardState, endpointUrl, sourceRequestUrl) {
     baseRequestUrl: resolvedRequestUrl,
     zoomKey: String(cardState?.zoomKey || ""),
     columns: Array.isArray(cardState?.columns) ? cardState.columns.map((column) => String(column || "")).filter(Boolean) : [],
-    tenantId: String(cardState?.tenantId || state.programmerId || ""),
-    tenantName: String(cardState?.tenantName || state.programmerName || state.programmerId || ""),
+    tenantId: String(nextTenantScope || ""),
+    tenantName: resolveWorkspaceTenantLabel(cardState, { tenantId: nextTenantScope }),
   };
   const result = await sendWorkspaceAction("run-card", {
     requestSource: "workspace-path-link",
@@ -3211,8 +3848,111 @@ function wireCardHeaderPathLinks(cardState) {
   });
 }
 
+function teardownCardHeaderQueryEditors(cardState) {
+  if (!cardState) {
+    return;
+  }
+  if (typeof cardState.queryEditorOutsidePointerHandler === "function") {
+    document.removeEventListener("pointerdown", cardState.queryEditorOutsidePointerHandler, true);
+  }
+  if (typeof cardState.queryEditorOutsideKeyHandler === "function") {
+    document.removeEventListener("keydown", cardState.queryEditorOutsideKeyHandler, true);
+  }
+  cardState.queryEditorOutsidePointerHandler = null;
+  cardState.queryEditorOutsideKeyHandler = null;
+  cardState.openQueryEditorKey = "";
+}
+
+function wireCardHeaderQueryEditors(cardState) {
+  const titleElement = cardState?.titleElement;
+  if (!titleElement) {
+    return;
+  }
+  teardownCardHeaderQueryEditors(cardState);
+
+  const closeEditor = () => {
+    titleElement.querySelectorAll(".card-url-query-editor").forEach((editor) => {
+      editor.hidden = true;
+    });
+    teardownCardHeaderQueryEditors(cardState);
+  };
+
+  const openEditor = (button, editor, input, key) => {
+    if (!button || !editor || !input || !key) {
+      return;
+    }
+    closeEditor();
+    editor.hidden = false;
+    cardState.openQueryEditorKey = key;
+    input.value = normalizeEditableQueryDateTimeValue(input.value || button.getAttribute("data-query-editor-value") || "");
+    cardState.queryEditorOutsidePointerHandler = (event) => {
+      const target = event?.target;
+      if (target instanceof Node && (editor.contains(target) || button.contains(target))) {
+        return;
+      }
+      closeEditor();
+    };
+    cardState.queryEditorOutsideKeyHandler = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeEditor();
+      }
+    };
+    document.addEventListener("pointerdown", cardState.queryEditorOutsidePointerHandler, true);
+    document.addEventListener("keydown", cardState.queryEditorOutsideKeyHandler, true);
+    try {
+      input.focus({ preventScroll: true });
+    } catch (_error) {
+      input.focus();
+    }
+    try {
+      if (typeof input.showPicker === "function") {
+        input.showPicker();
+      }
+    } catch (_error) {
+      // Ignore browsers that block programmatic picker display.
+    }
+  };
+
+  titleElement.querySelectorAll(".card-url-query-value-btn[data-query-editor-key]").forEach((button) => {
+    const key = normalizeCmColumnName(button.getAttribute("data-query-editor-key"));
+    const editor = button.parentElement?.querySelector(".card-url-query-editor");
+    const input = editor?.querySelector(".card-url-query-datetime-input");
+    if (!key || !editor || !input) {
+      return;
+    }
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openEditor(button, editor, input, key);
+    });
+    input.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeEditor();
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        updateCardEditableQueryValue(cardState, key, input.value);
+        updateCardHeader(cardState);
+      }
+    });
+    input.addEventListener("change", () => {
+      updateCardEditableQueryValue(cardState, key, input.value);
+      updateCardHeader(cardState);
+    });
+  });
+}
+
 function updateCardHeader(cardState) {
   syncCardUsageModeClass(cardState);
+  teardownCardHeaderQueryEditors(cardState);
   const operation = normalizeOperationDescriptor(cardState?.operation);
   if (operation) {
     const title = operation.label ? `${operation.label}` : `${operation.method} ${operation.pathTemplate}`;
@@ -3223,10 +3963,11 @@ function updateCardHeader(cardState) {
     cardState.subtitleElement.textContent = `${subtitle} | Rows: ${rows}`;
     return;
   }
-  const effectiveRequestUrl = getCardEffectiveRequestUrl(cardState);
+  const effectiveRequestUrl = buildCardDisplayRequestUrl(cardState) || getCardEffectiveRequestUrl(cardState);
   if (isCmuUsageCard(cardState)) {
     cardState.titleElement.innerHTML = buildCardHeaderContextMarkup(effectiveRequestUrl, String(cardState.endpointUrl || ""));
     wireCardHeaderPathLinks(cardState);
+    wireCardHeaderQueryEditors(cardState);
   } else {
     cardState.titleElement.textContent = effectiveRequestUrl || "No CM URL";
   }
@@ -3284,7 +4025,10 @@ function wireCardRerunAndFilterActions(cardState) {
   clearFilterButtons.forEach((button) => {
     button.addEventListener("click", (event) => {
       event.preventDefault();
-      cardState.localColumnFilters = new Map();
+      const restoredSeed = restoreCardSeedQueryState(cardState);
+      if (!restoredSeed) {
+        cardState.localColumnFilters = new Map();
+      }
       cardState.pickerOpenColumn = "";
       void rerunCard(cardState);
     });
@@ -3498,6 +4242,15 @@ function ensureCard(cardMeta) {
     } else if (!String(existing.baseRequestUrl || "").trim()) {
       existing.baseRequestUrl = String(existing.requestUrl || existing.endpointUrl || "");
     }
+    if ("seedEndpointUrl" in (cardMeta || {})) {
+      existing.seedEndpointUrl = String(cardMeta?.seedEndpointUrl || "").trim();
+    }
+    if ("seedRequestUrl" in (cardMeta || {})) {
+      existing.seedRequestUrl = String(cardMeta?.seedRequestUrl || "").trim();
+    }
+    if ("seedBaseRequestUrl" in (cardMeta || {})) {
+      existing.seedBaseRequestUrl = String(cardMeta?.seedBaseRequestUrl || "").trim();
+    }
     if (cardMeta?.zoomKey) {
       existing.zoomKey = String(cardMeta.zoomKey);
     }
@@ -3512,6 +4265,9 @@ function ensureCard(cardMeta) {
     }
     if (cardMeta?.localColumnFilters && typeof cardMeta.localColumnFilters === "object") {
       existing.localColumnFilters = normalizeCmLocalColumnFilters(cardMeta.localColumnFilters, existing);
+    }
+    if (cardMeta?.seedLocalColumnFilters && typeof cardMeta.seedLocalColumnFilters === "object") {
+      existing.seedLocalColumnFilters = normalizeCmLocalColumnFilters(cardMeta.seedLocalColumnFilters, existing);
     }
     if (cardMeta?.operation && typeof cardMeta.operation === "object") {
       existing.operation = normalizeOperationDescriptor(cardMeta.operation);
@@ -3528,8 +4284,24 @@ function ensureCard(cardMeta) {
       existing.localColumnFilters = new Map();
       existing.pickerOpenColumn = "";
       existing.sortStack = getDefaultSortStackForCard(existing);
+      existing.seedEndpointUrl = String(cardMeta?.seedEndpointUrl || existing.endpointUrl || "").trim();
+      existing.seedRequestUrl = String(cardMeta?.seedRequestUrl || existing.requestUrl || existing.endpointUrl || "").trim();
+      existing.seedBaseRequestUrl = String(
+        cardMeta?.seedBaseRequestUrl || existing.baseRequestUrl || existing.requestUrl || existing.endpointUrl || ""
+      ).trim();
+      existing.seedLocalColumnFilters = normalizeCmLocalColumnFilters(cardMeta?.seedLocalColumnFilters, existing);
+      existing.startingUiLocalColumnFilters = new Map();
+      existing.startingUiPersistentQuerySignature = "[]";
+      existing.startingUiStateCaptured = false;
+      teardownCardHeaderQueryEditors(existing);
     } else if (!Array.isArray(existing.sortStack) || existing.sortStack.length === 0) {
       existing.sortStack = getDefaultSortStackForCard(existing);
+    }
+    if (!hasStoredSeedQueryState(existing)) {
+      existing.seedEndpointUrl = String(existing.endpointUrl || "").trim();
+      existing.seedRequestUrl = String(existing.requestUrl || existing.endpointUrl || "").trim();
+      existing.seedBaseRequestUrl = String(existing.baseRequestUrl || existing.requestUrl || existing.endpointUrl || "").trim();
+      existing.seedLocalColumnFilters = new Map();
     }
     updateCardHeader(existing);
     return existing;
@@ -3542,18 +4314,30 @@ function ensureCard(cardMeta) {
     baseRequestUrl: String(cardMeta?.baseRequestUrl || cardMeta?.requestUrl || cardMeta?.endpointUrl || ""),
     zoomKey: String(cardMeta?.zoomKey || ""),
     columns: Array.isArray(cardMeta?.columns) ? cardMeta.columns.map((column) => String(column || "")).filter(Boolean) : [],
-    tenantId: String(cardMeta?.tenantId || state.programmerId || ""),
-    tenantName: String(cardMeta?.tenantName || cardMeta?.tenantId || state.programmerName || state.programmerId || ""),
+    tenantId: resolveWorkspaceTenantScope(null, cardMeta),
+    tenantName: resolveWorkspaceTenantLabel(null, cardMeta),
     rows: [],
     sourceRows: [],
     sortStack: [],
     lastModified: "",
+    seedEndpointUrl: String(cardMeta?.seedEndpointUrl || cardMeta?.endpointUrl || ""),
+    seedRequestUrl: String(cardMeta?.seedRequestUrl || cardMeta?.requestUrl || cardMeta?.endpointUrl || ""),
+    seedBaseRequestUrl: String(
+      cardMeta?.seedBaseRequestUrl || cardMeta?.baseRequestUrl || cardMeta?.requestUrl || cardMeta?.endpointUrl || ""
+    ),
+    seedLocalColumnFilters: normalizeCmLocalColumnFilters(cardMeta?.seedLocalColumnFilters, null),
+    startingUiLocalColumnFilters: new Map(),
+    startingUiPersistentQuerySignature: "[]",
+    startingUiStateCaptured: false,
     localColumnFilters: normalizeCmLocalColumnFilters(cardMeta?.localColumnFilters, null),
     localDistinctByColumn: new Map(),
     localHasBaselineData: false,
     pickerOpenColumn: "",
     pickerOutsidePointerHandler: null,
     pickerOutsideKeyHandler: null,
+    queryEditorOutsidePointerHandler: null,
+    queryEditorOutsideKeyHandler: null,
+    openQueryEditorKey: "",
     operation: cardMeta?.operation && typeof cardMeta.operation === "object" ? normalizeOperationDescriptor(cardMeta.operation) : null,
     formValues:
       cardMeta?.formValues && typeof cardMeta.formValues === "object"
@@ -3570,6 +4354,12 @@ function ensureCard(cardMeta) {
   cardState.sortStack = getDefaultSortStackForCard(cardState);
   createCardElements(cardState);
   cardState.localColumnFilters = normalizeCmLocalColumnFilters(cardMeta?.localColumnFilters, cardState);
+  cardState.seedLocalColumnFilters = normalizeCmLocalColumnFilters(cardMeta?.seedLocalColumnFilters, cardState);
+  if (!hasStoredSeedQueryState(cardState)) {
+    cardState.seedEndpointUrl = String(cardState.endpointUrl || "").trim();
+    cardState.seedRequestUrl = String(cardState.requestUrl || cardState.endpointUrl || "").trim();
+    cardState.seedBaseRequestUrl = String(cardState.baseRequestUrl || cardState.requestUrl || cardState.endpointUrl || "").trim();
+  }
   updateCardHeader(cardState);
   renderCardMessage(cardState, "Waiting for data...");
 
@@ -3580,6 +4370,7 @@ function ensureCard(cardMeta) {
     if (typeof cardState.pickerOutsideKeyHandler === "function") {
       document.removeEventListener("keydown", cardState.pickerOutsideKeyHandler, true);
     }
+    teardownCardHeaderQueryEditors(cardState);
     cardState.element?.remove();
     state.cardsById.delete(cardState.cardId);
     syncWorkspaceReplayCardsFromCurrentCards();
@@ -3688,17 +4479,12 @@ function renderCardTable(cardState, rows, lastModified) {
         ...displayColumns,
       ]
     : genericHeaders;
-  const closeControlMarkup = usageCard
-    ? `<button type="button" class="esm-action-btn esm-delete-data" aria-label="Delete data table" title="Delete this table data">
+  const closeControlMarkup = `<button type="button" class="esm-action-btn esm-table-close" aria-label="Close table" title="Close table">
                     <svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M3 6h18"></path>
-                      <path d="M8 6V4h8v2"></path>
-                      <path d="M6 6l1 14h10l1-14"></path>
-                      <path d="M10 11v6"></path>
-                      <path d="M14 11v6"></path>
+                      <path d="M7 7 17 17"></path>
+                      <path d="M17 7 7 17"></path>
                     </svg>
-                  </button>`
-    : `<span class="esm-close" title="Close table"> x </span>`;
+                  </button>`;
 
   cardState.bodyElement.innerHTML = `
     <div class="esm-table-wrapper">
@@ -3731,7 +4517,7 @@ function renderCardTable(cardState, rows, lastModified) {
   const footerCell = cardState.bodyElement.querySelector(".esm-footer-cell");
   const lastModifiedLabel = cardState.bodyElement.querySelector(".esm-last-modified");
   const csvLink = cardState.bodyElement.querySelector(".esm-csv-link");
-  const closeButton = cardState.bodyElement.querySelector(usageCard ? ".esm-delete-data" : ".esm-close");
+  const closeButton = cardState.bodyElement.querySelector(".esm-table-close");
 
   const normalizedIncomingSortStack =
     Array.isArray(cardState?.sortStack) && cardState.sortStack.length > 0
@@ -3927,6 +4713,9 @@ function applyReportResult(payload) {
   const rows = normalizeRows(Array.isArray(payload?.rows) ? payload.rows : []);
   cardState.sourceRows = rows;
   initializeCardLocalFilterBaseline(cardState, rows);
+  if (!cardState.startingUiStateCaptured) {
+    snapshotCardStartingFilterState(cardState);
+  }
   const filteredRows = applyCmLocalColumnFiltersToRows(rows, cardState.localColumnFilters, cardState);
   cardState.rows = filteredRows;
   cardState.lastModified = String(payload?.lastModified || "");
@@ -3988,37 +4777,68 @@ function applyControllerState(payload) {
   if (incomingEnvironment) {
     applyWorkspaceAdobePassEnvironment(incomingEnvironment);
   }
+  applyWorkspaceRuntimeAuthContext(payload?.cmAuth);
 
   const previousProgrammerId = String(state.programmerId || "");
   const previousProgrammerName = String(state.programmerName || "");
   const previousProgrammerKey = getProgrammerIdentityKey(previousProgrammerId, previousProgrammerName);
   const controllerReason = String(payload?.controllerReason || "").trim().toLowerCase();
+  const hasWorkspaceCards = hasWorkspaceCardContext();
+  const hasActiveWorkspaceContext =
+    hasWorkspaceCards ||
+    state.batchRunning ||
+    Boolean(String(state.pendingAutoRerunProgrammerKey || "").trim()) ||
+    Boolean(String(state.autoRerunInFlightProgrammerKey || "").trim());
+
+  let nextCmAvailable = null;
+  if (payload?.cmAvailable === true) {
+    nextCmAvailable = true;
+  } else if (payload?.cmAvailable === false) {
+    nextCmAvailable = false;
+  }
+
+  let nextCmAvailabilityResolved = false;
+  if (payload?.cmAvailabilityResolved === true) {
+    nextCmAvailabilityResolved = true;
+  } else if (payload?.cmAvailabilityResolved === false) {
+    nextCmAvailabilityResolved = false;
+  } else {
+    nextCmAvailabilityResolved = nextCmAvailable === true || nextCmAvailable === false;
+  }
+
+  let nextCmContainerVisible = null;
+  if (payload?.cmContainerVisible === true) {
+    nextCmContainerVisible = true;
+  } else if (payload?.cmContainerVisible === false) {
+    nextCmContainerVisible = false;
+  }
+
+  const sameProgrammerIdentity = !hasProgrammerIdentityChanged(
+    previousProgrammerId,
+    previousProgrammerName,
+    String(payload?.programmerId || ""),
+    String(payload?.programmerName || "")
+  );
+  const shouldIgnoreTransientCmDowngrade =
+    nextCmAvailable === false &&
+    state.cmAvailable === true &&
+    sameProgrammerIdentity &&
+    !environmentChanged &&
+    hasActiveWorkspaceContext;
+
+  if (shouldIgnoreTransientCmDowngrade) {
+    nextCmAvailable = true;
+    nextCmAvailabilityResolved = true;
+    nextCmContainerVisible = true;
+  }
 
   state.controllerOnline = payload?.controllerOnline === true;
-  if (payload?.cmAvailable === true) {
-    state.cmAvailable = true;
-  } else if (payload?.cmAvailable === false) {
-    state.cmAvailable = false;
-  } else {
-    state.cmAvailable = null;
-  }
-  if (payload?.cmAvailabilityResolved === true) {
-    state.cmAvailabilityResolved = true;
-  } else if (payload?.cmAvailabilityResolved === false) {
-    state.cmAvailabilityResolved = false;
-  } else {
-    state.cmAvailabilityResolved = state.cmAvailable === true || state.cmAvailable === false;
-  }
-  if (payload?.cmContainerVisible === true) {
-    state.cmContainerVisible = true;
-  } else if (payload?.cmContainerVisible === false) {
-    state.cmContainerVisible = false;
-  } else {
-    state.cmContainerVisible = null;
-  }
+  state.cmAvailable = nextCmAvailable;
+  state.cmAvailabilityResolved = nextCmAvailabilityResolved;
+  state.cmContainerVisible = nextCmContainerVisible;
   state.programmerId = String(payload?.programmerId || "");
   state.programmerName = String(payload?.programmerName || "");
-  state.tenantScope = String(payload?.tenantScope || payload?.programmerId || "").trim();
+  state.tenantScope = String(payload?.tenantScope || "").trim();
   state.requestorIds = Array.isArray(payload?.requestorIds)
     ? payload.requestorIds.map((value) => String(value || "").trim()).filter(Boolean)
     : [];
@@ -4048,6 +4868,14 @@ function applyControllerState(payload) {
   if (programmerChanged || environmentChanged) {
     state.batchRunning = false;
     state.autoRerunInFlightProgrammerKey = "";
+    if (hasWorkspaceCards) {
+      state.cardsById.forEach((cardState) => {
+        if (cardState) {
+          cardState.localDistinctByColumn.clear();
+          cardState.localHasBaselineData = false;
+        }
+      });
+    }
     state.cardsById.forEach((cardState) => {
       if (cardState) {
         cardState.running = false;
@@ -4095,12 +4923,14 @@ function applyControllerState(payload) {
       state.programmerSwitchLoadingKey = "";
     }
   }
+  const isMediaCompanySwitchReason =
+    !controllerReason || controllerReason === "media-company-change" || controllerReason === "programmer-change";
   const shouldTriggerWorkspaceRedraw =
     replayCardsForSwitch.length > 0 &&
     Boolean(currentProgrammerKey) &&
     ((programmerChanged &&
       Boolean(previousProgrammerKey) &&
-      (controllerReason === "media-company-change" || !controllerReason)) ||
+      isMediaCompanySwitchReason) ||
       (environmentChanged && controllerReason === "environment-switch"));
   if (shouldTriggerWorkspaceRedraw && currentProgrammerKey) {
     state.workspaceReplayCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
@@ -4288,10 +5118,14 @@ function serializeCardForWorkspaceExport(cardState) {
     endpointUrl: String(cardState.endpointUrl || ""),
     requestUrl: String(cardState.requestUrl || cardState.endpointUrl || ""),
     baseRequestUrl: String(cardState.baseRequestUrl || cardState.requestUrl || cardState.endpointUrl || ""),
+    seedEndpointUrl: String(cardState.seedEndpointUrl || ""),
+    seedRequestUrl: String(cardState.seedRequestUrl || ""),
+    seedBaseRequestUrl: String(cardState.seedBaseRequestUrl || ""),
     zoomKey: String(cardState.zoomKey || ""),
     tenantId: String(cardState.tenantId || ""),
     tenantName: String(cardState.tenantName || ""),
     columns: Array.isArray(cardState.columns) ? cardState.columns.map((column) => String(column || "")).filter(Boolean) : [],
+    seedLocalColumnFilters: serializeCmLocalColumnFilters(cardState.seedLocalColumnFilters, cardState),
     localColumnFilters: serializeCmLocalColumnFilters(cardState.localColumnFilters, cardState),
     operation: cardState.operation && typeof cardState.operation === "object" ? { ...cardState.operation } : null,
     formValues: cardState.formValues && typeof cardState.formValues === "object" ? { ...cardState.formValues } : {},
@@ -4481,6 +5315,32 @@ function buildWorkspaceTearsheetHtml(snapshot, templateHtml, stylesheetText, run
     CM_WORKSPACE_RUNTIME_SCOPE_INPUT_NAME,
     String(authContext?.scope || CM_WORKSPACE_IMS_DEFAULT_SCOPE || "")
   );
+  upsertBodyHiddenInput(
+    doc,
+    CM_WORKSPACE_RUNTIME_EXPERIENCE_TOKEN_INPUT_NAME,
+    String(authContext?.experienceCloudAccessToken || "")
+  );
+  upsertBodyHiddenInput(
+    doc,
+    CM_WORKSPACE_RUNTIME_EXPERIENCE_CLIENT_IDS_INPUT_NAME,
+    JSON.stringify(
+      dedupeCandidateStrings(
+        (Array.isArray(authContext?.experienceCloudClientIds) ? authContext.experienceCloudClientIds : [])
+          .map((value) => String(value || "").trim())
+          .filter((value) => String(value || "").trim().toLowerCase() === CM_WORKSPACE_EXPERIENCE_CLIENT_ID)
+      )
+    )
+  );
+  upsertBodyHiddenInput(
+    doc,
+    CM_WORKSPACE_RUNTIME_EXPERIENCE_USER_ID_INPUT_NAME,
+    String(authContext?.experienceCloudUserId || "")
+  );
+  upsertBodyHiddenInput(
+    doc,
+    CM_WORKSPACE_RUNTIME_EXPERIENCE_SCOPE_INPUT_NAME,
+    String(authContext?.experienceCloudScope || "")
+  );
 
   const payloadNode = doc.createElement("script");
   payloadNode.id = WORKSPACE_TEARSHEET_PAYLOAD_ID;
@@ -4555,7 +5415,7 @@ function buildCardRequestUrlForStandaloneRun(cardState, cardPayload = {}) {
     throw new Error("CM card request URL is missing.");
   }
   const filteredRequestUrl = appendCmLocalColumnFiltersToUrl(baseRequestUrl, cardState?.localColumnFilters, cardState);
-  return usageCard ? ensureCmuQueryDefaults(filteredRequestUrl, 1000, resolveWorkspaceTenantScope(cardState, cardPayload)) : filteredRequestUrl;
+  return usageCard ? ensureCmuQueryDefaults(filteredRequestUrl, resolveWorkspaceTenantScope(cardState, cardPayload)) : filteredRequestUrl;
 }
 
 function buildStandaloneOperationRequest(operation, formValues = {}) {
@@ -4981,20 +5841,64 @@ async function sendWorkspaceActionInStandaloneRuntime(action, payload = {}) {
 }
 
 async function sendWorkspaceAction(action, payload = {}) {
+  const normalizedAction = String(action || "").trim();
+  const startedAt = Date.now();
   if (String(action || "").trim().toLowerCase() !== "workspace-ready" && !ensureWorkspaceUnlocked()) {
+    emitCmWorkspaceConsoleTrace("runtime", `blocked ${normalizedAction || "workspace-action"}`, {
+      phase: "blocked",
+      action: normalizedAction,
+      payload,
+      reason: getWorkspaceLockMessage(),
+    }, { level: "warn" });
     return { ok: false, error: getWorkspaceLockMessage() };
   }
   if (IS_CM_WORKSPACE_TEARSHEET_RUNTIME || !hasChromeRuntimeMessaging()) {
-    return sendWorkspaceActionInStandaloneRuntime(action, payload);
+    emitCmWorkspaceConsoleTrace("runtime", `standalone ${normalizedAction || "workspace-action"}`, {
+      phase: "request",
+      action: normalizedAction,
+      payload,
+    });
+    const response = await sendWorkspaceActionInStandaloneRuntime(action, payload);
+    emitCmWorkspaceConsoleTrace("runtime", `standalone ${normalizedAction || "workspace-action"}`, {
+      phase: "response",
+      action: normalizedAction,
+      durationMs: Date.now() - startedAt,
+      response,
+    });
+    return response;
   }
   try {
-    return await chrome.runtime.sendMessage({
+    emitCmWorkspaceConsoleTrace("runtime", `send ${normalizedAction || "workspace-action"}`, {
+      phase: "request",
+      action: normalizedAction,
+      payload,
+    });
+    const response = await chrome.runtime.sendMessage({
       type: CM_MESSAGE_TYPE,
       channel: "workspace-action",
       action,
       ...payload,
     });
+    emitCmWorkspaceConsoleTrace("runtime", `recv ${normalizedAction || "workspace-action"}`, {
+      phase: "response",
+      action: normalizedAction,
+      durationMs: Date.now() - startedAt,
+      response,
+    });
+    return response;
   } catch (error) {
+    emitCmWorkspaceConsoleTrace(
+      "runtime",
+      `error ${normalizedAction || "workspace-action"}`,
+      {
+        phase: "error",
+        action: normalizedAction,
+        durationMs: Date.now() - startedAt,
+        payload,
+        error,
+      },
+      { level: "error" }
+    );
     return {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
@@ -5091,6 +5995,12 @@ async function makeClickCmuWorkspaceDownload() {
       clientIds: Array.isArray(authResult?.clientIds) ? authResult.clientIds : [],
       userId: String(authResult?.userId || ""),
       scope: String(authResult?.scope || CM_WORKSPACE_IMS_DEFAULT_SCOPE || ""),
+      experienceCloudAccessToken: String(authResult?.experienceCloudAccessToken || ""),
+      experienceCloudClientIds: Array.isArray(authResult?.experienceCloudClientIds)
+        ? authResult.experienceCloudClientIds
+        : [],
+      experienceCloudUserId: String(authResult?.experienceCloudUserId || ""),
+      experienceCloudScope: String(authResult?.experienceCloudScope || ""),
     });
     const fileName = buildClickCmuWorkspaceFileName(snapshot);
     downloadHtmlFile(outputHtml, fileName);
@@ -5176,8 +6086,12 @@ function hydrateWorkspaceFromExportPayload(payload = workspaceExportPayload) {
       endpointUrl: String(cardMeta?.endpointUrl || ""),
       requestUrl: String(cardMeta?.requestUrl || cardMeta?.endpointUrl || ""),
       baseRequestUrl: String(cardMeta?.baseRequestUrl || cardMeta?.requestUrl || cardMeta?.endpointUrl || ""),
+      seedEndpointUrl: String(cardMeta?.seedEndpointUrl || ""),
+      seedRequestUrl: String(cardMeta?.seedRequestUrl || ""),
+      seedBaseRequestUrl: String(cardMeta?.seedBaseRequestUrl || ""),
       zoomKey: String(cardMeta?.zoomKey || ""),
       columns: Array.isArray(cardMeta?.columns) ? cardMeta.columns : [],
+      seedLocalColumnFilters: cardMeta?.seedLocalColumnFilters || {},
       localColumnFilters: cardMeta?.localColumnFilters || {},
       operation: cardMeta?.operation && typeof cardMeta.operation === "object" ? cardMeta.operation : null,
       formValues: cardMeta?.formValues && typeof cardMeta.formValues === "object" ? cardMeta.formValues : {},
@@ -5189,6 +6103,7 @@ function hydrateWorkspaceFromExportPayload(payload = workspaceExportPayload) {
 
     cardState.operation = normalizeOperationDescriptor(normalizedMeta.operation);
     cardState.formValues = normalizeOperationFormValues(cardState.operation, normalizedMeta.formValues || {});
+    cardState.seedLocalColumnFilters = normalizeCmLocalColumnFilters(normalizedMeta.seedLocalColumnFilters, cardState);
     cardState.localColumnFilters = normalizeCmLocalColumnFilters(normalizedMeta.localColumnFilters, cardState);
     cardState.sourceRows = normalizeRows(Array.isArray(cardMeta?.sourceRows) ? cardMeta.sourceRows : cardMeta?.rows || []);
     const payloadRows = Array.isArray(cardMeta?.rows) ? cardMeta.rows : cardState.sourceRows;

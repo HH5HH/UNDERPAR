@@ -385,6 +385,95 @@ body {
   text-overflow: ellipsis;
 }
 
+.bobtools-profile-context-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.bobtools-copy-upstream-btn,
+.bobtools-copy-result-btn {
+  width: 22px;
+  min-width: 22px;
+  max-width: 22px;
+  height: 22px;
+  border: 1px solid #c6cfdd;
+  border-radius: 999px;
+  background: #f7fafe;
+  color: #355476;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.bobtools-copy-upstream-btn:hover:not(:disabled),
+.bobtools-copy-result-btn:hover:not(:disabled) {
+  border-color: #6d88a8;
+  background: #eef4fb;
+}
+
+.bobtools-copy-upstream-btn:focus-visible,
+.bobtools-copy-result-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(53, 83, 114, 0.2);
+}
+
+.bobtools-copy-upstream-btn:disabled,
+.bobtools-copy-result-btn:disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+
+.bobtools-copy-upstream-btn.copied,
+.bobtools-copy-result-btn.copied {
+  border-color: #166534;
+  color: #166534;
+  background: rgba(22, 101, 52, 0.08);
+}
+
+.bobtools-copy-upstream-icon {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+}
+
+.bobtools-copy-upstream-icon::before,
+.bobtools-copy-upstream-icon::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+}
+
+.bobtools-copy-upstream-icon::before {
+  top: 0;
+  left: 2px;
+  background: transparent;
+}
+
+.bobtools-copy-upstream-icon::after {
+  top: 2px;
+  left: 0;
+  background: #f7fafe;
+}
+
+.bobtools-copy-result-icon {
+  width: 10px;
+  height: 10px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .bobtools-profile-context-label {
   display: inline;
   color: #1f3146;
@@ -536,18 +625,23 @@ body {
 }
 
 .bobtools-form {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  align-items: center;
   gap: 8px;
   padding: 0 12px 10px;
 }
 
 .bobtools-resource-input {
-  flex: 1;
+  width: 100%;
   min-width: 0;
-  border-radius: 10px;
+  min-height: 32px;
+  box-sizing: border-box;
+  border-radius: 8px;
   border: 1px solid #adb8ca;
-  padding: 8px 10px;
+  padding: 5px 10px;
   font-size: 12px;
+  line-height: 1.2;
   color: #1c2838;
   background: #fdfdfe;
 }
@@ -558,23 +652,86 @@ body {
 }
 
 .bobtools-go {
-  min-width: 72px;
-  border-radius: 10px;
-  border: 1px solid #7f95b3;
-  background: linear-gradient(180deg, #4f6988 0%, #2f4a69 100%);
-  color: #fff;
-  font-weight: 700;
-  font-size: 12px;
+  width: 40px;
+  min-width: 40px;
+  height: 32px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 0;
   cursor: pointer;
+  transition: filter 140ms ease, opacity 140ms ease;
 }
 
 .bobtools-go:hover:not(:disabled) {
-  filter: brightness(1.05);
+  filter: brightness(1.04) saturate(1.03);
+}
+
+.bobtools-go:focus-visible {
+  outline: 2px solid rgba(53, 83, 114, 0.34);
+  outline-offset: 2px;
 }
 
 .bobtools-go:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
+}
+
+.bobtools-go.is-running {
+  cursor: progress;
+}
+
+.bobtools-go-icon {
+  width: 40px;
+  height: 32px;
+  display: block;
+}
+
+.bobtools-go-shell {
+  fill: #06080d;
+}
+
+.bobtools-go-base {
+  fill: #05070b;
+}
+
+.bobtools-go-face {
+  fill: #f4f6f8;
+}
+
+.bobtools-go-gloss {
+  fill: rgba(255, 255, 255, 0.12);
+}
+
+.bobtools-go-badge {
+  fill: #e3141e;
+}
+
+.bobtools-go-z {
+  fill: #fff;
+}
+
+.bobtools-go-led {
+  fill: rgba(247, 251, 255, 0.96);
+}
+
+.bobtools-go.is-running .bobtools-go-badge,
+.bobtools-go.is-running .bobtools-go-led {
+  animation: bobtools-zbox-pulse 920ms ease-in-out infinite alternate;
+}
+
+@keyframes bobtools-zbox-pulse {
+  from {
+    opacity: 0.72;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .bobtools-splunk-go {
@@ -1182,7 +1339,8 @@ body {
   }
 
   .bobtools-form {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr) 40px;
+    gap: 8px;
   }
 
   .bobtools-profile-context-row {

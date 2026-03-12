@@ -20,6 +20,7 @@ const SPLUNK_FETCH_REQUEST_TYPE = "underpar:splunkFetch";
 const LEGACY_SPLUNK_FETCH_REQUEST_TYPE = "mincloudlogin:splunkFetch";
 const UP_DEVTOOLS_VAULT_ACTION_REQUEST_TYPE = "underpar:upDevtoolsVaultAction";
 const CONSOLE_LOG_RELAY_REQUEST_TYPE = "underpar:consoleLog";
+const UNDERPAR_NETWORK_ACTIVITY_MESSAGE_TYPE = "underpar:networkActivity";
 const GLOBAL_NETWORK_RELAY_MESSAGE_TYPES = new Set([
   IMS_FETCH_REQUEST_TYPE,
   LEGACY_IMS_FETCH_REQUEST_TYPE,
@@ -58,6 +59,7 @@ let ADOBE_MGMT_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "");
 let ADOBE_SP_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "");
 let DEGRADATION_API_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.degradationBase || "");
 let REST_V2_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.restV2Base || "");
+let activeLoginHelperBootstrapContext = null;
 let PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
 let underparTrackedFetchOriginal = null;
 const DCR_CACHE_PREFIX = "underpar_dcr_cache_v1";
@@ -444,6 +446,41 @@ function createEmptyUnderparVaultPayload() {
   };
 }
 
+function buildPassVaultCmGlobalAuthRecord(value = null) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const clientId = String(firstNonEmptyString([source?.clientId, CM_IMS_PRIMARY_CLIENT_ID]) || CM_IMS_PRIMARY_CLIENT_ID).trim();
+  const tokenClientId = String(firstNonEmptyString([source?.tokenClientId, clientId]) || clientId).trim();
+  const userId = String(firstNonEmptyString([source?.userId, source?.imsUserId]) || "").trim();
+  const scope = compactStorageString(firstNonEmptyString([source?.scope]), 2048);
+  const expiresAt = Math.max(0, Number(source?.expiresAt || 0));
+  const updatedAt = Math.max(0, Number(source?.updatedAt || source?.refreshedAt || 0));
+  const tokenFingerprint = String(source?.tokenFingerprint || "").trim();
+  const imsSession =
+    source?.imsSession && typeof source.imsSession === "object"
+      ? compactImsSessionForStorage(source.imsSession)
+      : null;
+
+  if (!clientId && !tokenClientId && !userId && !scope && !expiresAt && !updatedAt && !tokenFingerprint && !imsSession) {
+    return null;
+  }
+
+  return {
+    clientId,
+    tokenClientId,
+    userId,
+    scope,
+    expiresAt,
+    updatedAt: updatedAt || Date.now(),
+    tokenFingerprint,
+    imsSession,
+  };
+}
+
+function getPreferredCmTokenFingerprint(accessToken = "") {
+  const normalized = normalizeBearerTokenValue(accessToken);
+  return normalized ? String(normalized).slice(-24) : "";
+}
+
 function getUnderparVaultSavedQueriesInput(vault = null) {
   if (!vault || typeof vault !== "object") {
     return null;
@@ -588,17 +625,112 @@ function sanitizePassVaultMatchedTenants(value = []) {
     .map((entry) => {
       const consoleId = firstNonEmptyString([entry?.consoleId, entry?.id, entry?.tenantId, entry?.orgId]);
       const tenantId = firstNonEmptyString([entry?.tenantId, entry?.orgId, entry?.id, entry?.consoleId]);
-      const displayName = firstNonEmptyString([entry?.displayName, entry?.name, entry?.label]);
-      if (!consoleId && !tenantId && !displayName) {
+      const tenantName = firstNonEmptyString([entry?.tenantName, entry?.displayName, entry?.name, entry?.label]);
+      const sourceUrl = firstNonEmptyString([entry?.sourceUrl]);
+      if (!consoleId && !tenantId && !tenantName) {
         return null;
       }
       return {
         ...(consoleId ? { consoleId } : {}),
         ...(tenantId ? { tenantId } : {}),
-        ...(displayName ? { displayName } : {}),
+        ...(tenantName ? { tenantName } : {}),
+        ...(tenantName ? { displayName: tenantName } : {}),
+        ...(sourceUrl ? { sourceUrl } : {}),
       };
     })
     .filter(Boolean);
+}
+
+function normalizePassVaultCmBundleResourceRecord(value = null, kind = "") {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  const normalizedKind = String(kind || source?.kind || "").trim().toLowerCase();
+  const url = String(source?.url || source?.requestUrl || source?.endpointUrl || "").trim();
+  const lastModified = String(source?.lastModified || "").trim();
+  const error = String(source?.error || "").trim();
+  const tenantScope = String(source?.tenantScope || "").trim();
+  const rows = (Array.isArray(source?.rows) ? source.rows : [])
+    .map((row) => cloneJsonLikeValue(row, null))
+    .filter((row) => row && typeof row === "object");
+  const payload =
+    source && Object.prototype.hasOwnProperty.call(source, "payload") ? cloneJsonLikeValue(source.payload, null) : null;
+
+  if (!normalizedKind && !url && !lastModified && !error && !tenantScope && rows.length === 0 && payload == null) {
+    return null;
+  }
+
+  return {
+    ...(normalizedKind ? { kind: normalizedKind } : {}),
+    ...(url ? { url } : {}),
+    ...(lastModified ? { lastModified } : {}),
+    ...(error ? { error } : {}),
+    ...(tenantScope ? { tenantScope } : {}),
+    ...(rows.length > 0 ? { rows } : {}),
+    ...(payload != null ? { payload } : {}),
+  };
+}
+
+function normalizePassVaultCmTenantBundleRecord(value = null) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  if (!source) {
+    return null;
+  }
+
+  const tenant = sanitizePassVaultMatchedTenants([source?.tenant])[0] || null;
+  const tenantDetail = normalizePassVaultCmBundleResourceRecord(source?.tenantDetail, "tenant");
+  const applications = normalizePassVaultCmBundleResourceRecord(source?.applications, "applications");
+  const policies = normalizePassVaultCmBundleResourceRecord(source?.policies, "policies");
+  const usage = normalizePassVaultCmBundleResourceRecord(source?.usage, "usage");
+
+  if (!tenant && !tenantDetail && !applications && !policies && !usage) {
+    return null;
+  }
+
+  return {
+    ...(tenant ? { tenant } : {}),
+    ...(tenantDetail ? { tenantDetail } : {}),
+    ...(applications ? { applications } : {}),
+    ...(policies ? { policies } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
+function normalizePassVaultCmTenantBundlesByTenantKey(value = null) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const output = {};
+
+  Object.entries(input).forEach(([rawKey, rawBundle]) => {
+    const normalizedBundle = normalizePassVaultCmTenantBundleRecord(rawBundle);
+    const derivedKey = String(rawKey || cmGetTenantCacheKey(normalizedBundle?.tenant)).trim();
+    if (!derivedKey || !normalizedBundle) {
+      return;
+    }
+    output[derivedKey] = normalizedBundle;
+  });
+
+  return output;
+}
+
+function buildPassVaultStoredCmTenantBundlesByTenantKey(cmService = null, existingRecord = null) {
+  const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants : [];
+  if (matchedTenants.length === 0) {
+    return {};
+  }
+
+  const existingBundlesByTenantKey = normalizePassVaultCmTenantBundlesByTenantKey(existingRecord?.cmTenantBundlesByTenantKey || {});
+  const output = {};
+  matchedTenants.forEach((tenant) => {
+    const tenantCacheKey = cmGetTenantCacheKey(tenant);
+    if (!tenantCacheKey) {
+      return;
+    }
+    const cachedBundle = state.cmTenantBundleByTenantKey.get(tenantCacheKey)?.bundle || null;
+    const normalizedBundle = normalizePassVaultCmTenantBundleRecord(cachedBundle || existingBundlesByTenantKey[tenantCacheKey] || null);
+    if (!normalizedBundle) {
+      return;
+    }
+    output[tenantCacheKey] = normalizedBundle;
+  });
+  return output;
 }
 
 function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackName = "") {
@@ -1095,6 +1227,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
     },
   };
   const compactedRegisteredApplicationsByGuid = compactPassVaultRegisteredApplications(registeredApplicationsByGuid, services);
+  const cmTenantBundlesByTenantKey = normalizePassVaultCmTenantBundlesByTenantKey(record?.cmTenantBundlesByTenantKey || {});
 
   return {
     programmerId: normalizedProgrammerId,
@@ -1126,6 +1259,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
     registeredApplicationCount,
     registeredApplicationsByGuid: compactedRegisteredApplicationsByGuid,
     services,
+    cmTenantBundlesByTenantKey,
   };
 }
 
@@ -1208,6 +1342,7 @@ function normalizeUnderparVaultPayload(payload = null) {
         normalizedEnvironmentKey,
       ]),
       updatedAt: Number(rawEnvironmentRecord?.updatedAt || normalized.updatedAt || Date.now()),
+      cmGlobal: buildPassVaultCmGlobalAuthRecord(rawEnvironmentRecord?.cmGlobal || rawEnvironmentRecord?.cmConsole || null),
       cmTenants: normalizeCmTenantsCatalogPayload(
         rawEnvironmentRecord?.cmTenants || rawEnvironmentRecord?.cmTenantsCatalog || null
       ),
@@ -1314,6 +1449,14 @@ function getPassVaultCmTenantsCatalogFromVault(vault = null, environmentKey = ge
     return null;
   }
   return normalizeCmTenantsCatalogPayload(environmentRecord?.cmTenants || environmentRecord?.cmTenantsCatalog || null);
+}
+
+function getPassVaultCmGlobalAuthFromVault(vault = null, environmentKey = getActiveAdobePassEnvironmentKey()) {
+  const environmentRecord = getPassVaultEnvironmentRecordFromVault(vault, environmentKey);
+  if (!environmentRecord) {
+    return null;
+  }
+  return buildPassVaultCmGlobalAuthRecord(environmentRecord?.cmGlobal || environmentRecord?.cmConsole || null);
 }
 
 function getPassVaultMediaCompanyRecord(programmerId = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
@@ -1818,6 +1961,7 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
     registeredApplicationsByGuid,
     servicesSummary
   );
+  const cmTenantBundlesByTenantKey = buildPassVaultStoredCmTenantBundlesByTenantKey(cmServiceSnapshot, existingRecord);
 
   return {
     programmerId,
@@ -1837,7 +1981,43 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
     registeredApplicationCount,
     registeredApplicationsByGuid: compactedRegisteredApplicationsByGuid,
     services: servicesSummary,
+    cmTenantBundlesByTenantKey,
   };
+}
+
+async function persistPassVaultCmGlobalState(value = null, options = {}) {
+  const nextRecord = buildPassVaultCmGlobalAuthRecord(value);
+  if (!nextRecord) {
+    return null;
+  }
+
+  return enqueuePassVaultPersist(async () => {
+    const vault = normalizeUnderparVaultPayload(
+      state.passVault || (await ensurePassVaultLoaded({ forceReload: options?.forceReload === true }))
+    );
+    const environmentKey = getActiveAdobePassEnvironmentKey();
+    const environment = getActiveAdobePassEnvironment();
+
+    if (!vault.pass.environments[environmentKey]) {
+      vault.pass.environments[environmentKey] = {
+        key: environmentKey,
+        label: String(environment?.label || environmentKey).trim() || environmentKey,
+        updatedAt: Date.now(),
+        cmGlobal: null,
+        cmTenants: null,
+        mediaCompanies: {},
+      };
+    }
+
+    vault.pass.environments[environmentKey].label =
+      String(environment?.label || vault.pass.environments[environmentKey].label || environmentKey).trim() || environmentKey;
+    vault.pass.environments[environmentKey].updatedAt = Date.now();
+    vault.pass.environments[environmentKey].cmGlobal = nextRecord;
+    vault.updatedAt = Date.now();
+
+    await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false });
+    return nextRecord;
+  });
 }
 
 async function persistPassVaultProgrammerRecord(programmer, services = null, options = {}) {
@@ -1866,6 +2046,7 @@ async function persistPassVaultProgrammerRecord(programmer, services = null, opt
         key: environmentKey,
         label: String(environment?.label || environmentKey).trim() || environmentKey,
         updatedAt: Date.now(),
+        cmGlobal: null,
         cmTenants: null,
         mediaCompanies: {},
       };
@@ -1895,10 +2076,12 @@ function clearPassVaultProgrammerRuntimeState(programmerId = "", environmentKey 
   state.premiumAppScopeHydrationPromiseByProgrammerId.delete(normalizedProgrammerId);
   state.cmServiceByProgrammerId.delete(normalizedProgrammerId);
   state.cmServiceLoadPromiseByProgrammerId.delete(normalizedProgrammerId);
+  state.cmHydrationPromiseByProgrammerId.delete(normalizedProgrammerId);
   state.cmServiceByMvpdSelectionKey.clear();
   state.cmServiceLoadPromiseByMvpdSelectionKey.clear();
   state.cmTenantBundleByTenantKey.clear();
   state.cmTenantBundlePromiseByTenantKey.clear();
+  state.cmUsageWarmStateByProgrammerId.delete(normalizedProgrammerId);
   if (scopedKey) {
     state.restV2PrewarmedAppsByProgrammerId.delete(scopedKey);
     state.passVaultCompilePromiseByProgrammerKey.delete(scopedKey);
@@ -2188,6 +2371,7 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.premiumAppScopeHydrationPromiseByProgrammerId.clear();
   state.cmServiceByProgrammerId.clear();
   state.cmServiceLoadPromiseByProgrammerId.clear();
+  state.cmHydrationPromiseByProgrammerId.clear();
   state.cmServiceByMvpdSelectionKey.clear();
   state.cmServiceLoadPromiseByMvpdSelectionKey.clear();
   state.cmTenantsCatalog = null;
@@ -2202,7 +2386,7 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.cmTenantDebugExportedByUrl.clear();
   state.cmTenantBundleByTenantKey.clear();
   state.cmTenantBundlePromiseByTenantKey.clear();
-  state.premiumSectionCollapsedByKey.clear();
+  state.cmUsageWarmStateByProgrammerId.clear();
   state.premiumAutoRefreshMetaByKey.clear();
   state.premiumPanelRequestToken = 0;
   state.dcrEnsureTokenPromiseByKey.clear();
@@ -3147,27 +3331,65 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       validateSelectedServiceKeys: ["esm"],
     });
     setCurrentPremiumAppsSnapshot(programmer.programmerId, resolvedServices);
-    const credentialResults = await hydratePassVaultServiceCredentials(programmer, resolvedServices, {
-      forceRefresh,
-    });
+    const [credentialResults, cmHydration] = await Promise.all([
+      hydratePassVaultServiceCredentials(programmer, resolvedServices, {
+        forceRefresh,
+      }),
+      ensureCmHydratedForProgrammer(programmer, resolvedServices, {
+        forceRefresh,
+        reason: "pass-vault-compilation",
+      }).catch((error) => ({
+        ok: false,
+        skipped: false,
+        requiresHydration: true,
+        cmService: resolvedServices?.cm ?? null,
+        services: resolvedServices,
+        accessToken: "",
+        bundleCount: 0,
+        bundleErrors: [],
+        error: error instanceof Error ? error.message : String(error),
+      })),
+    ]);
+    const mergedServices =
+      cmHydration?.services && typeof cmHydration.services === "object"
+        ? cmHydration.services
+        : mergeProgrammerPremiumServicesWithCm(
+            programmer.programmerId,
+            resolvedServices,
+            cmHydration?.cmService ?? resolvedServices?.cm ?? null
+          );
+    setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
+    const usageWarmResult = {
+      ok: true,
+      skipped: true,
+      error: "",
+    };
     const failedCount = credentialResults.filter((result) => {
       const cache = normalizeUnderparVaultDcrCache(result?.cache || null);
       return !(cache?.clientId && cache?.clientSecret);
     }).length;
-    const warningCount = credentialResults.filter((result) => String(result?.error || "").trim()).length;
-    const hydrationStatus = failedCount > 0 ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_COMPLETE;
-    await persistPassVaultProgrammerRecord(programmer, resolvedServices, {
+    const credentialWarningCount = credentialResults.filter((result) => String(result?.error || "").trim()).length;
+    const cmWarningCount =
+      (Array.isArray(cmHydration?.bundleErrors) ? cmHydration.bundleErrors.length : 0) +
+      (cmHydration?.error ? 1 : 0);
+    const warningCount = credentialWarningCount + cmWarningCount;
+    const cmFailed = cmHydration?.requiresHydration === true && cmHydration?.ok !== true;
+    const hydrationStatus =
+      failedCount > 0 || cmFailed ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_COMPLETE;
+    await persistPassVaultProgrammerRecord(programmer, mergedServices, {
       source: "live",
       hydrationStatus,
       serviceCredentialResults: credentialResults,
     });
     applyMediaCompanyOptionHydrationState();
     return {
-      services: resolvedServices,
+      services: mergedServices,
       taskCount: credentialResults.length,
       failedCount,
       warningCount,
       hydrationStatus,
+      cmHydration,
+      usageWarmResult,
     };
   })().finally(() => {
     if (state.passVaultCompilePromiseByProgrammerKey.get(scopedKey) === compilePromise) {
@@ -3204,6 +3426,20 @@ async function finalizePassVaultProgrammerHydration(programmer, services = null)
   return nextRecord;
 }
 
+function restorePassVaultCmTenantBundlesToRuntime(record = null) {
+  const bundlesByTenantKey = normalizePassVaultCmTenantBundlesByTenantKey(record?.cmTenantBundlesByTenantKey || {});
+  Object.entries(bundlesByTenantKey).forEach(([tenantCacheKey, bundle]) => {
+    const normalizedTenantCacheKey = String(tenantCacheKey || "").trim();
+    if (!normalizedTenantCacheKey || !bundle) {
+      return;
+    }
+    state.cmTenantBundleByTenantKey.set(normalizedTenantCacheKey, {
+      fetchedAt: Date.now(),
+      bundle: cloneJsonLikeValue(bundle, null),
+    });
+  });
+}
+
 function applyPassVaultRecordToRuntime(programmer, record = null, options = {}) {
   const programmerId = String(programmer?.programmerId || "").trim();
   if (!programmerId || !record || typeof record !== "object") {
@@ -3211,6 +3447,15 @@ function applyPassVaultRecordToRuntime(programmer, record = null, options = {}) 
   }
 
   if (getCurrentPremiumAppsSnapshot(programmerId) && options?.forceOverwrite !== true) {
+    const currentServices = getCurrentPremiumAppsSnapshot(programmerId) || {};
+    const currentCmService =
+      currentServices?.cm && typeof currentServices.cm === "object"
+        ? currentServices.cm
+        : buildPassVaultRuntimeServicesSnapshot(record)?.cm || null;
+    if (currentCmService) {
+      state.cmServiceByProgrammerId.set(programmerId, cloneJsonLikeValue(currentCmService, null));
+    }
+    restorePassVaultCmTenantBundlesToRuntime(record);
     restoreDcrCachesFromPassVaultRecord(programmerId, record, {
       forceRestore: options?.forceDcrRestore === true,
     });
@@ -3262,6 +3507,7 @@ function applyPassVaultRecordToRuntime(programmer, record = null, options = {}) 
   } else {
     state.cmServiceByProgrammerId.delete(programmerId);
   }
+  restorePassVaultCmTenantBundlesToRuntime(record);
   restoreDcrCachesFromPassVaultRecord(programmerId, record, {
     forceRestore: options?.forceDcrRestore === true,
   });
@@ -3558,7 +3804,7 @@ function findProgrammerByProgrammerId(programmerId = "") {
   );
 }
 
-function selectProgrammerForController(programmer = null, controllerReason = "programmer-change") {
+function selectProgrammerForController(programmer = null, controllerReason = "media-company-change") {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : null;
   state.selectedProgrammerKey = String(resolvedProgrammer?.key || "").trim();
   state.selectedRequestorId = "";
@@ -4144,6 +4390,10 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
       state.loginData && typeof state.loginData === "object"
         ? {
             ...state.loginData,
+            experienceCloudAccessToken: "",
+            experienceCloudExpiresAt: 0,
+            experienceCloudScope: "",
+            experienceCloudImsSession: null,
             cmConsoleAccessToken: "",
             cmConsoleExpiresAt: 0,
             cmConsoleScope: "",
@@ -4392,8 +4642,6 @@ const CLICK_DGR_TEMPLATE_REQUIRED_MARKERS = [
   "function loadRequestorPicker(",
   "--zip-theme-vibe-body-radial-alpha",
 ];
-const ESM_WORKSPACE_INLINE_RESULT_LIMIT = 100;
-const ESM_WORKSPACE_CSV_RESULT_LIMIT = 10000;
 const ESM_LOCAL_FILTER_EXCLUDED_COLUMNS = new Set(["year", "month", "day", "hour", "minute"]);
 const ESM_QUERY_DISPLAY_EXCLUDED_COLUMNS = new Set([
   ...ESM_LOCAL_FILTER_EXCLUDED_COLUMNS,
@@ -4983,6 +5231,7 @@ const CM_IMS_FORCE_REFRESH_SKEW_MS = 30 * 1000;
 const CM_BOOTSTRAP_PARALLELISM = 6;
 const CM_BOOTSTRAP_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const CM_EMPTY_MATCH_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
+const CM_USAGE_WARM_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v2";
 const LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v1";
 const CM_V2_OPERATION_DEFINITIONS = [
@@ -5190,6 +5439,7 @@ const state = {
   premiumAppScopeHydrationPromiseByProgrammerId: new Map(),
   cmServiceByProgrammerId: new Map(),
   cmServiceLoadPromiseByProgrammerId: new Map(),
+  cmHydrationPromiseByProgrammerId: new Map(),
   cmServiceByMvpdSelectionKey: new Map(),
   cmServiceLoadPromiseByMvpdSelectionKey: new Map(),
   cmTenantsCatalog: null,
@@ -5206,10 +5456,12 @@ const state = {
   cmConsoleBootstrapPromise: null,
   cmAuthBootstrapPromise: null,
   cmAuthBootstrapLastAttemptAt: 0,
+  cmConsoleBootstrapQualified: false,
   cmConsoleTokenConsoleEmitKey: "",
   cmLastHydratedAccessToken: "",
   cmTenantBundleByTenantKey: new Map(),
   cmTenantBundlePromiseByTenantKey: new Map(),
+  cmUsageWarmStateByProgrammerId: new Map(),
   premiumSectionCollapsedByKey: new Map(),
   premiumAutoRefreshMetaByKey: new Map(),
   premiumPanelRequestToken: 0,
@@ -5267,6 +5519,8 @@ const state = {
   cmWorkspaceTabId: 0,
   cmWorkspaceWindowId: 0,
   cmWorkspaceTabIdByWindowId: new Map(),
+  cmWorkspaceReadyByWindowId: new Map(),
+  cmWorkspaceReadyWaitersByWindowId: new Map(),
   cmWorkspaceControllerStateVersion: 0,
   cmRuntimeListenerBound: false,
   cmWorkspaceTabWatcherBound: false,
@@ -5395,6 +5649,129 @@ function relayDecisionLogToBackground(message, details = null) {
 function logDecisionPoint(message, details = null) {
   log(message, details);
   relayDecisionLogToBackground(message, details);
+}
+
+const UNDERPAR_BROWSER_CONSOLE_TRACE_ENABLED = true;
+const UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_DEPTH = 4;
+const UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_ITEMS = 24;
+const UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_KEYS = 48;
+const UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_STRING = 1200;
+
+function summarizeUnderparConsoleSensitiveString(value, keyName = "") {
+  const raw = String(value ?? "");
+  if (!raw) {
+    return "";
+  }
+  const normalizedKey = String(keyName || "").trim().toLowerCase();
+  const normalizedBearerValue = normalizeBearerTokenValue(raw);
+  const looksSensitiveKey =
+    normalizedKey.includes("token") ||
+    normalizedKey.includes("secret") ||
+    normalizedKey.includes("password") ||
+    normalizedKey === "authorization" ||
+    normalizedKey === "cookie" ||
+    normalizedKey === "set-cookie";
+  if (DEBUG_REDACT_SENSITIVE && normalizedBearerValue && isProbablyJwt(normalizedBearerValue)) {
+    return `<redacted-jwt:${normalizedBearerValue.slice(-12)}>`;
+  }
+  if (DEBUG_REDACT_SENSITIVE && looksSensitiveKey) {
+    const redacted = redactSensitiveTokenValues(raw);
+    return truncateDebugText(redacted || "<redacted>", UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_STRING);
+  }
+  return truncateDebugText(redactSensitiveTokenValues(raw), UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_STRING);
+}
+
+function sanitizeUnderparConsoleTraceValue(value, options = {}) {
+  const depth = Number(options.depth || 0);
+  const keyName = String(options.keyName || "").trim();
+  const seen = options.seen instanceof WeakSet ? options.seen : new WeakSet();
+
+  if (value == null) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return summarizeUnderparConsoleSensitiveString(value, keyName);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+  if (value instanceof Error) {
+    return {
+      name: String(value.name || "Error"),
+      message: summarizeUnderparConsoleSensitiveString(value.message || "", keyName || "message"),
+      stack: truncateDebugText(redactSensitiveTokenValues(String(value.stack || "")), UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_STRING),
+    };
+  }
+  if (value instanceof Headers) {
+    return sanitizeUnderparConsoleTraceValue(toDebugHeadersObject(value), {
+      depth: depth + 1,
+      keyName,
+      seen,
+    });
+  }
+  if (typeof value !== "object") {
+    return summarizeUnderparConsoleSensitiveString(String(value), keyName);
+  }
+  if (depth >= UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_DEPTH) {
+    if (Array.isArray(value)) {
+      return `[array:${value.length}]`;
+    }
+    const constructorName = String(value?.constructor?.name || "object");
+    return `[${constructorName}]`;
+  }
+  if (seen.has(value)) {
+    return "[circular]";
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    const output = value
+      .slice(0, UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_ITEMS)
+      .map((entry) =>
+        sanitizeUnderparConsoleTraceValue(entry, {
+          depth: depth + 1,
+          keyName,
+          seen,
+        })
+      );
+    if (value.length > UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_ITEMS) {
+      output.push(`[+${value.length - UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_ITEMS} more]`);
+    }
+    return output;
+  }
+
+  const output = {};
+  const entries = Object.entries(value);
+  entries.slice(0, UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_KEYS).forEach(([entryKey, entryValue]) => {
+    output[entryKey] = sanitizeUnderparConsoleTraceValue(entryValue, {
+      depth: depth + 1,
+      keyName: entryKey,
+      seen,
+    });
+  });
+  if (entries.length > UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_KEYS) {
+    output.__truncatedKeys = entries.length - UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_KEYS;
+  }
+  return output;
+}
+
+function emitUnderparBrowserConsoleTrace(channel = "event", message = "", details = null, options = {}) {
+  if (UNDERPAR_BROWSER_CONSOLE_TRACE_ENABLED !== true) {
+    return;
+  }
+  const consoleMethodName = ["log", "info", "warn", "error", "debug"].includes(String(options.level || "").trim())
+    ? String(options.level || "").trim()
+    : "log";
+  const consoleMethod = typeof console?.[consoleMethodName] === "function" ? console[consoleMethodName].bind(console) : console.log.bind(console);
+  const label = `[UnderPAR Trace][${String(channel || "event").trim() || "event"}] ${String(message || "").trim() || "(no message)"}`;
+  if (details == null) {
+    consoleMethod(label);
+    return;
+  }
+  consoleMethod(label, sanitizeUnderparConsoleTraceValue(details));
 }
 
 function emitGlobalSelectorChangeLog(menuName, value, label = "") {
@@ -5557,6 +5934,20 @@ function resolveGlobalNetworkFetchUrl(input = null) {
   return "";
 }
 
+function resolveGlobalNetworkFetchMethod(input = null, init = null) {
+  const initMethod = String(init?.method || "").trim().toUpperCase();
+  if (initMethod) {
+    return initMethod;
+  }
+  if (input && typeof input === "object" && typeof input.method === "string") {
+    const requestMethod = String(input.method || "").trim().toUpperCase();
+    if (requestMethod) {
+      return requestMethod;
+    }
+  }
+  return "GET";
+}
+
 function shouldTrackGlobalNetworkUrl(rawUrl = "") {
   const normalizedUrl = String(rawUrl || "").trim();
   if (!normalizedUrl) {
@@ -5583,6 +5974,21 @@ function shouldTrackRuntimeNetworkMessage(payload = {}, options = {}) {
   return GLOBAL_NETWORK_RELAY_MESSAGE_TYPES.has(messageType);
 }
 
+function shouldMirrorRuntimeMessageToConsole(payload = {}) {
+  const messageType = String(payload?.type || "").trim();
+  if (!messageType) {
+    return false;
+  }
+  if (
+    messageType === "underpardebug:traceEvent" ||
+    messageType === "minclouddebug:traceEvent" ||
+    messageType === UNDERPAR_NETWORK_ACTIVITY_MESSAGE_TYPE
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function installGlobalNetworkFetchTracker() {
   if (state.globalNetworkFetchTrackerInstalled || typeof globalThis.fetch !== "function") {
     return;
@@ -5592,9 +5998,40 @@ function installGlobalNetworkFetchTracker() {
   const originalFetch = underparTrackedFetchOriginal;
   globalThis.fetch = async (...args) => {
     const requestUrl = resolveGlobalNetworkFetchUrl(args[0]);
+    const method = resolveGlobalNetworkFetchMethod(args[0], args[1]);
+    const startedAt = Date.now();
     const release = shouldTrackGlobalNetworkUrl(requestUrl) ? beginGlobalNetworkActivity(requestUrl) : null;
     try {
-      return await originalFetch(...args);
+      emitUnderparBrowserConsoleTrace("fetch", `${method} ${requestUrl}`, {
+        phase: "request",
+        method,
+        url: requestUrl,
+      });
+      const response = await originalFetch(...args);
+      emitUnderparBrowserConsoleTrace("fetch", `${method} ${requestUrl}`, {
+        phase: "response",
+        method,
+        url: requestUrl,
+        status: Number(response?.status || 0),
+        ok: Boolean(response?.ok),
+        redirected: Boolean(response?.redirected),
+        durationMs: Date.now() - startedAt,
+      });
+      return response;
+    } catch (error) {
+      emitUnderparBrowserConsoleTrace(
+        "fetch",
+        `${method} ${requestUrl}`,
+        {
+          phase: "error",
+          method,
+          url: requestUrl,
+          durationMs: Date.now() - startedAt,
+          error,
+        },
+        { level: "error" }
+      );
+      throw error;
     } finally {
       if (typeof release === "function") {
         release();
@@ -5686,6 +6123,19 @@ async function sendRuntimeMessageSafe(payload, options = {}) {
   const release = shouldTrackRuntimeNetworkMessage(payload, options)
     ? beginGlobalNetworkActivity(String(payload?.type || "").trim())
     : null;
+  const shouldTrace = shouldMirrorRuntimeMessageToConsole(payload);
+  const startedAt = Date.now();
+  if (shouldTrace) {
+    emitUnderparBrowserConsoleTrace("runtime", `send ${String(payload?.type || "message").trim() || "message"}`, {
+      phase: "request",
+      payload,
+      options: {
+        attempts: Math.max(1, Number(options?.attempts || 1)),
+        retryDelayMs: Math.max(0, Number(options?.retryDelayMs || 0)),
+        timeoutMs: Math.max(0, Number(options?.timeoutMs || 0)),
+      },
+    });
+  }
   try {
     const attempts = Math.max(1, Number(options?.attempts || 1));
     const retryDelayMs = Math.max(0, Number(options?.retryDelayMs || 0));
@@ -5693,7 +6143,7 @@ async function sendRuntimeMessageSafe(payload, options = {}) {
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
         if (timeoutMs > 0) {
-          return await Promise.race([
+          const response = await Promise.race([
             chrome.runtime.sendMessage(payload),
             new Promise((_, reject) => {
               window.setTimeout(() => {
@@ -5701,9 +6151,42 @@ async function sendRuntimeMessageSafe(payload, options = {}) {
               }, timeoutMs);
             }),
           ]);
+          if (shouldTrace) {
+            emitUnderparBrowserConsoleTrace("runtime", `recv ${String(payload?.type || "message").trim() || "message"}`, {
+              phase: "response",
+              attempt,
+              durationMs: Date.now() - startedAt,
+              response,
+            });
+          }
+          return response;
         }
-        return await chrome.runtime.sendMessage(payload);
+        const response = await chrome.runtime.sendMessage(payload);
+        if (shouldTrace) {
+          emitUnderparBrowserConsoleTrace("runtime", `recv ${String(payload?.type || "message").trim() || "message"}`, {
+            phase: "response",
+            attempt,
+            durationMs: Date.now() - startedAt,
+            response,
+          });
+        }
+        return response;
       } catch (error) {
+        if (shouldTrace) {
+          emitUnderparBrowserConsoleTrace(
+            "runtime",
+            `${attempt < attempts ? "retry" : "error"} ${String(payload?.type || "message").trim() || "message"}`,
+            {
+              phase: attempt < attempts ? "retry" : "error",
+              attempt,
+              attempts,
+              durationMs: Date.now() - startedAt,
+              error,
+              payload,
+            },
+            { level: attempt < attempts ? "warn" : "error" }
+          );
+        }
         if (attempt >= attempts) {
           throw error;
         }
@@ -5924,6 +6407,15 @@ function emitRestV2DebugEvent(flowId, event = {}) {
   if (!flowId) {
     return;
   }
+
+  emitUnderparBrowserConsoleTrace(
+    "debug",
+    `${String(event?.phase || event?.event || event?.service || "event").trim() || "event"} | flow=${String(flowId || "").trim()}`,
+    {
+      flowId,
+      event,
+    }
+  );
 
   void sendRuntimeMessageSafe({
     type: "underpardebug:traceEvent",
@@ -6834,14 +7326,20 @@ function getPremiumCollapseKey(programmerId, serviceKey) {
 
 function getPremiumSectionCollapsed(programmerId, serviceKey) {
   const key = getPremiumCollapseKey(programmerId, serviceKey);
-  if (!state.premiumSectionCollapsedByKey.has(key)) {
-    return true;
+  if (state.premiumSectionCollapsedByKey.has(key)) {
+    return Boolean(state.premiumSectionCollapsedByKey.get(key));
   }
-  return Boolean(state.premiumSectionCollapsedByKey.get(key));
+  const globalKey = getPremiumCollapseKey("__global__", serviceKey);
+  if (state.premiumSectionCollapsedByKey.has(globalKey)) {
+    return Boolean(state.premiumSectionCollapsedByKey.get(globalKey));
+  }
+  return true;
 }
 
 function setPremiumSectionCollapsed(programmerId, serviceKey, isCollapsed) {
-  state.premiumSectionCollapsedByKey.set(getPremiumCollapseKey(programmerId, serviceKey), Boolean(isCollapsed));
+  const collapsed = Boolean(isCollapsed);
+  state.premiumSectionCollapsedByKey.set(getPremiumCollapseKey(programmerId, serviceKey), collapsed);
+  state.premiumSectionCollapsedByKey.set(getPremiumCollapseKey("__global__", serviceKey), collapsed);
 }
 
 function applyCollapsibleState(toggleButton, containerElement, isCollapsed) {
@@ -17432,20 +17930,6 @@ function clickEsmGetSelectedValues(selectElement) {
   return [...selectElement.selectedOptions].map((option) => String(option.value || "").trim()).filter(Boolean);
 }
 
-function clickEsmEnsureLimit(url, limit) {
-  try {
-    const parsed = new URL(url);
-    const isEsmEndpoint = parsed.origin === ADOBE_MGMT_BASE && parsed.pathname.includes("/esm/");
-    if (!isEsmEndpoint) {
-      return parsed.toString();
-    }
-    parsed.searchParams.set("limit", String(limit));
-    return parsed.toString();
-  } catch {
-    return String(url || "");
-  }
-}
-
 function extractEsmDisplayDimensionsFromHref(href = "") {
   const rawHref = String(href || "").trim();
   if (!rawHref) {
@@ -17969,7 +18453,8 @@ function cmBuildUsageReportExampleRequestUrl(example = null, options = {}) {
     parsed.searchParams.delete("start");
     parsed.searchParams.delete("end");
     parsed.searchParams.set("format", "json");
-    if (tenantScope) {
+    CM_USAGE_TENANT_QUERY_KEYS.forEach((key) => parsed.searchParams.delete(key));
+    if (tenantScope && cmUsagePathRequiresTenantScope(parsed.pathname)) {
       applyCmUsageTenantScopeToSearchParams(parsed.searchParams, tenantScope);
     }
     if (example?.hasMvpdDimension === true) {
@@ -19045,7 +19530,8 @@ function ensureCmUsageEndpointFormat(url, options = {}) {
         }
       }
     }
-    if (tenantScope && isCanonicalCmuUsagePath(parsed.pathname)) {
+    CM_USAGE_TENANT_QUERY_KEYS.forEach((key) => parsed.searchParams.delete(key));
+    if (tenantScope && isCanonicalCmuUsagePath(parsed.pathname) && cmUsagePathRequiresTenantScope(parsed.pathname)) {
       applyCmUsageTenantScopeToSearchParams(parsed.searchParams, tenantScope);
     }
     return parsed.toString();
@@ -19385,15 +19871,21 @@ function buildClickCmuEndpointDlMarkup(endpointCatalog = [], tenantScope = "") {
 function replaceClickCmuEndpointBlock(templateHtml, endpointDlMarkup) {
   const output = String(templateHtml || "");
   const startMarker = "<div class=\"esm-scroll-container\">";
-  const endMarker = "<div class=\"footer-container search-container\">";
   const startIndex = output.indexOf(startMarker);
   if (startIndex < 0) {
     throw new Error("clickCMU build failed: missing ESM scroll container marker.");
   }
   const contentStart = startIndex + startMarker.length;
-  const endIndex = output.indexOf(endMarker, contentStart);
+  const legacyEndMarker = "<div class=\"footer-container search-container\">";
+  let endIndex = output.indexOf(legacyEndMarker, contentStart);
   if (endIndex < 0) {
-    throw new Error("clickCMU build failed: missing ESM footer container marker.");
+    endIndex = output.indexOf("\n</div>", contentStart);
+  }
+  if (endIndex < 0) {
+    endIndex = output.indexOf("</div>", contentStart);
+  }
+  if (endIndex < 0) {
+    throw new Error("clickCMU build failed: missing ESM scroll container closing marker.");
   }
   const replacement = `\n${String(endpointDlMarkup || "").trim()}\n\n`;
   return `${output.slice(0, contentStart)}${replacement}${output.slice(endIndex)}`;
@@ -19435,6 +19927,7 @@ function buildClickCmuRuntimePatchSnippet(context = {}) {
   const runtimeConfig = {
     programmerId: String(context.programmerId || "").trim(),
     tenantScope: resolveCmUsageTenantScopeValue(context?.tenantScope),
+    accessToken: String(context.accessToken || "").trim(),
     clientIds: uniqueSorted(
       (Array.isArray(context.clientIds) ? context.clientIds : [])
         .map((value) => String(value || "").trim())
@@ -19442,6 +19935,14 @@ function buildClickCmuRuntimePatchSnippet(context = {}) {
     ),
     userId: String(context.userId || "").trim(),
     scope: String(context.scope || CM_IMS_CHECK_DEFAULT_SCOPE).trim() || CM_IMS_CHECK_DEFAULT_SCOPE,
+    experienceCloudAccessToken: String(context.experienceCloudAccessToken || "").trim(),
+    experienceCloudClientIds: uniqueSorted(
+      (Array.isArray(context.experienceCloudClientIds) ? context.experienceCloudClientIds : [])
+        .map((value) => String(value || "").trim())
+        .filter((value) => String(value || "").trim().toLowerCase() === EXPERIENCE_CLOUD_SSO_CLIENT_ID)
+    ),
+    experienceCloudUserId: String(context.experienceCloudUserId || "").trim(),
+    experienceCloudScope: String(context.experienceCloudScope || "").trim(),
     adobePassEnvironment: activeAdobePassEnvironment,
   };
   const runtimeJson = clickCmuSerializeForInlineScript(runtimeConfig);
@@ -19831,6 +20332,68 @@ body[data-theme="dark"]{
     );
   }
 
+  function resolveExperienceCloudClientIds() {
+    return uniqueStrings([
+      ...(Array.isArray(runtime.experienceCloudClientIds) ? runtime.experienceCloudClientIds : []),
+      "exc_app",
+    ]).filter((value) => String(value || "").trim().toLowerCase() === "exc_app");
+  }
+
+  function resolveUserIdCandidates() {
+    return uniqueStrings([
+      String(runtime.userId || "").trim(),
+      String(runtime.experienceCloudUserId || "").trim(),
+    ]);
+  }
+
+  function resolveScopeCandidates() {
+    const candidates = uniqueStrings(
+      [runtime.scope, runtime.experienceCloudScope, DEFAULT_SCOPE].map((value) => tokenizeScopeSet(value).join(","))
+    );
+    return candidates.length > 0 ? candidates : [DEFAULT_SCOPE];
+  }
+
+  function resolveSeedClientIdsForToken(token) {
+    const claims = parseJwtPayload(token) || {};
+    const clientId = String(firstNonEmptyString([claims.client_id, claims.clientId]) || "").trim().toLowerCase();
+    if (clientId === "exc_app") {
+      return resolveExperienceCloudClientIds();
+    }
+    if (clientId === CMU_CLIENT_ID) {
+      return resolveClientIds();
+    }
+    return uniqueStrings([...resolveExperienceCloudClientIds(), ...resolveClientIds()]);
+  }
+
+  function collectSeedTokenEntries() {
+    const output = [];
+    const seen = new Set();
+    const pushSeed = (tokenValue, clientIds) => {
+      const token = normalizeToken(tokenValue);
+      if (!token) {
+        return;
+      }
+      const key = token.toLowerCase();
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      output.push({
+        token,
+        clientIds: uniqueStrings(Array.isArray(clientIds) ? clientIds : []),
+      });
+    };
+    pushSeed(runtime.experienceCloudAccessToken, resolveExperienceCloudClientIds());
+    pushSeed(runtime.accessToken, resolveClientIds());
+    pushSeed(typeof window.getToken === "function" ? window.getToken() : "", []);
+    output.forEach((entry) => {
+      if (!Array.isArray(entry.clientIds) || entry.clientIds.length === 0) {
+        entry.clientIds = resolveSeedClientIdsForToken(entry.token);
+      }
+    });
+    return output;
+  }
+
   function buildValidateTokenBody(token, clientId) {
     const form = new URLSearchParams({
       type: "access_token",
@@ -19842,8 +20405,8 @@ body[data-theme="dark"]{
     return form.toString();
   }
 
-  async function refreshTokenViaValidateToken(seedToken, forceFresh = false) {
-    const candidateClientIds = resolveClientIds();
+  async function refreshTokenViaValidateToken(seedToken, forceFresh = false, clientIdCandidates = resolveClientIds()) {
+    const candidateClientIds = uniqueStrings(Array.isArray(clientIdCandidates) ? clientIdCandidates : []);
     for (const clientId of candidateClientIds) {
       const credentialModes = ["include", "omit"];
       for (const credentials of credentialModes) {
@@ -19893,59 +20456,66 @@ body[data-theme="dark"]{
   }
 
   async function refreshTokenViaImsCheck(forceFresh = false) {
-    const userId = String(runtime.userId || "").trim();
-    if (!userId) {
+    const userIds = resolveUserIdCandidates();
+    if (userIds.length === 0) {
       return "";
     }
-    const scopeValue = String(runtime.scope || DEFAULT_SCOPE).trim() || DEFAULT_SCOPE;
-    const scopeCandidates = uniqueStrings(
-      [scopeValue, DEFAULT_SCOPE].map((value) => tokenizeScopeSet(value).join(","))
-    );
-    const scopes = scopeCandidates.length > 0 ? scopeCandidates : [DEFAULT_SCOPE];
+    const scopes = resolveScopeCandidates();
     for (const clientId of resolveClientIds()) {
       for (const scope of scopes) {
-        const response = await fetchWithTimeout(buildImsCheckUrl(clientId, scope, userId), {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            Accept: "application/json, text/plain, */*",
-            Origin: CMU_CONSOLE_ORIGIN,
-            Referer: CMU_CONSOLE_REFERER,
-          },
-        }).catch(() => null);
-        if (!response || !response.ok) {
-          continue;
+        for (const userId of userIds) {
+          const response = await fetchWithTimeout(buildImsCheckUrl(clientId, scope, userId), {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              Accept: "application/json, text/plain, */*",
+              Origin: CMU_CONSOLE_ORIGIN,
+              Referer: CMU_CONSOLE_REFERER,
+            },
+          }).catch(() => null);
+          if (!response || !response.ok) {
+            continue;
+          }
+          const parsed = safeJsonParse(await response.text().catch(() => ""), null);
+          if (!parsed || typeof parsed !== "object") {
+            continue;
+          }
+          const refreshed = extractTokenFromPayload(parsed);
+          if (!refreshed || !tokenSupportsCmCatalog(refreshed)) {
+            continue;
+          }
+          if (forceFresh && !isTokenFresh(refreshed, TOKEN_FRESH_SKEW_MS)) {
+            continue;
+          }
+          return refreshed;
         }
-        const parsed = safeJsonParse(await response.text().catch(() => ""), null);
-        if (!parsed || typeof parsed !== "object") {
-          continue;
-        }
-        const refreshed = extractTokenFromPayload(parsed);
-        if (!refreshed || !tokenSupportsCmCatalog(refreshed)) {
-          continue;
-        }
-        if (forceFresh && !isTokenFresh(refreshed, TOKEN_FRESH_SKEW_MS)) {
-          continue;
-        }
-        return refreshed;
       }
     }
     return "";
   }
 
   async function refreshImsToken(forceFresh = false) {
-    const seedToken = normalizeToken(typeof window.getToken === "function" ? window.getToken() : "");
-    if (!seedToken) {
-      return "";
-    }
-    if (!forceFresh && isTokenFresh(seedToken, TOKEN_FRESH_SKEW_MS) && tokenSupportsCmCatalog(seedToken)) {
-      return seedToken;
+    const seedEntries = collectSeedTokenEntries();
+    const cmSeedToken = seedEntries
+      .map((entry) => normalizeToken(entry.token))
+      .find((token) => token && tokenSupportsCmCatalog(token));
+    if (!forceFresh && cmSeedToken && isTokenFresh(cmSeedToken, TOKEN_FRESH_SKEW_MS)) {
+      if (typeof window.setToken === "function") {
+        window.setToken(cmSeedToken);
+      }
+      runtime.accessToken = cmSeedToken;
+      return cmSeedToken;
     }
     let refreshedToken = "";
-    try {
-      refreshedToken = await refreshTokenViaValidateToken(seedToken, forceFresh);
-    } catch {
-      refreshedToken = "";
+    for (const seedEntry of seedEntries) {
+      try {
+        refreshedToken = await refreshTokenViaValidateToken(seedEntry.token, forceFresh, seedEntry.clientIds);
+      } catch {
+        refreshedToken = "";
+      }
+      if (refreshedToken) {
+        break;
+      }
     }
     if (!refreshedToken) {
       try {
@@ -19954,10 +20524,13 @@ body[data-theme="dark"]{
         refreshedToken = "";
       }
     }
-    const fallbackSeedToken = !forceFresh && tokenSupportsCmCatalog(seedToken) ? seedToken : "";
+    const fallbackSeedToken = !forceFresh && cmSeedToken && tokenSupportsCmCatalog(cmSeedToken) ? cmSeedToken : "";
     const resolvedToken = normalizeToken(refreshedToken || fallbackSeedToken);
     if (resolvedToken && typeof window.setToken === "function") {
       window.setToken(resolvedToken);
+    }
+    if (resolvedToken) {
+      runtime.accessToken = resolvedToken;
     }
     return resolvedToken;
   }
@@ -20100,6 +20673,18 @@ body[data-theme="dark"]{
     return canonicalizeCmuUsagePath(pathValue).startsWith("/v2/" + CMU_USAGE_ROOT_SEGMENTS.join("/"));
   }
 
+  function cmuPathRequiresTenantScope(pathValue) {
+    const canonicalPath = canonicalizeCmuUsagePath(pathValue);
+    if (!canonicalPath) {
+      return false;
+    }
+    return canonicalPath
+      .split("/")
+      .map((part) => String(part || "").trim().toLowerCase())
+      .filter(Boolean)
+      .includes("tenant");
+  }
+
   function applyTenantScopeToSearchParams(searchParams, tenantScope = "") {
     if (!(searchParams instanceof URLSearchParams)) {
       return;
@@ -20111,7 +20696,7 @@ body[data-theme="dark"]{
     }
   }
 
-  function ensureCmuQueryDefaults(urlValue, limitValue = 1000) {
+  function ensureCmuQueryDefaults(urlValue) {
     const raw = String(urlValue || "").trim();
     if (!raw) {
       return "";
@@ -20127,10 +20712,6 @@ body[data-theme="dark"]{
       if (!parsed.searchParams.has("format")) {
         parsed.searchParams.set("format", "json");
       }
-      const limit = Number(limitValue);
-      if (!parsed.searchParams.has("limit") && Number.isFinite(limit) && limit > 0) {
-        parsed.searchParams.set("limit", String(Math.max(1, Math.round(limit))));
-      }
       const lowerPath = parsed.pathname.toLowerCase();
       if (
         !parsed.searchParams.has("metrics") &&
@@ -20144,7 +20725,8 @@ body[data-theme="dark"]{
           parsed.searchParams.get("tenant-id")
       );
       const tenantScope = existingTenantScope || normalizeTenantScopeValue(runtime.tenantScope);
-      if (!existingTenantScope && tenantScope && isCmuUsagePath(parsed.pathname)) {
+      CMU_TENANT_QUERY_KEYS.forEach((key) => parsed.searchParams.delete(key));
+      if (tenantScope && isCmuUsagePath(parsed.pathname) && cmuPathRequiresTenantScope(parsed.pathname)) {
         applyTenantScopeToSearchParams(parsed.searchParams, tenantScope);
       }
       return parsed.toString();
@@ -20248,8 +20830,7 @@ body[data-theme="dark"]{
     try {
       const opts = options && typeof options === "object" ? options : {};
       const method = String(opts.method || "GET").toUpperCase();
-      const limitValue = Number.isFinite(Number(opts.esmLimit)) ? Number(opts.esmLimit) : 1000;
-      const finalUrl = ensureCmuQueryDefaults(url, limitValue);
+      const finalUrl = ensureCmuQueryDefaults(url);
       const headers = {
         Accept: "application/json, text/plain, */*",
         ...(opts.headers && typeof opts.headers === "object" ? opts.headers : {}),
@@ -20291,7 +20872,7 @@ body[data-theme="dark"]{
   };
 
   window.appendTimeParams = function appendTimeParamsOverride(base) {
-    return ensureCmuQueryDefaults(base, 1000);
+    return ensureCmuQueryDefaults(base);
   };
 
   syncClickCmuEnvironmentBadge();
@@ -20711,9 +21292,14 @@ function buildClickCmuHtmlFromTemplate(templateHtml, context = {}) {
   const runtimePatch = buildClickCmuRuntimePatchSnippet({
     programmerId,
     tenantScope,
+    accessToken,
     clientIds,
     userId: String(context.userId || "").trim(),
     scope: String(context.scope || CM_IMS_CHECK_DEFAULT_SCOPE).trim() || CM_IMS_CHECK_DEFAULT_SCOPE,
+    experienceCloudAccessToken: String(context.experienceCloudAccessToken || "").trim(),
+    experienceCloudClientIds: Array.isArray(context.experienceCloudClientIds) ? context.experienceCloudClientIds : [],
+    experienceCloudUserId: String(context.experienceCloudUserId || "").trim(),
+    experienceCloudScope: String(context.experienceCloudScope || "").trim(),
   });
   const themeOverrideCss = buildClickCmuThemeOverrideCss(context?.themePreset);
   if (!output.includes("</body>")) {
@@ -21026,7 +21612,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
   let accessToken = await ensureCmApiAccessToken({
     forceRefresh: options.forceRefresh === true,
     freshLeewayMs: 60 * 1000,
-    allowTemporaryPageContextTab: true,
+    allowTemporaryPageContextTab: false,
   });
   const initialClaims = parseJwtPayload(String(accessToken || "").trim()) || {};
   const initialClientId = String(firstNonEmptyString([initialClaims.client_id, initialClaims.clientId]) || "")
@@ -21036,7 +21622,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
     accessToken = await ensureCmApiAccessToken({
       forceRefresh: true,
       freshLeewayMs: 60 * 1000,
-      allowTemporaryPageContextTab: true,
+      allowTemporaryPageContextTab: false,
     });
   }
   const normalizedToken = String(accessToken || "").trim();
@@ -21055,7 +21641,22 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
 
   const hints = resolveCmImsTokenHints(normalizedToken);
   const claims = parseJwtPayload(normalizedToken) || {};
-  const clientIds = [CM_IMS_PRIMARY_CLIENT_ID];
+  const controllerAuth = getCmControllerAuthPayload();
+  const experienceCloudAccessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([
+      controllerAuth?.experienceCloudAccessToken,
+      state.loginData?.experienceCloudAccessToken,
+    ])
+  );
+  const experienceCloudClaims = parseJwtPayload(experienceCloudAccessToken) || {};
+  const clientIds = uniqueSorted([
+    ...(Array.isArray(controllerAuth?.clientIds) ? controllerAuth.clientIds : []),
+    CM_IMS_PRIMARY_CLIENT_ID,
+  ]).filter((value) => String(value || "").trim().toLowerCase() === CM_IMS_PRIMARY_CLIENT_ID);
+  const experienceCloudClientIds = uniqueSorted([
+    ...(Array.isArray(controllerAuth?.experienceCloudClientIds) ? controllerAuth.experienceCloudClientIds : []),
+    EXPERIENCE_CLOUD_SSO_CLIENT_ID,
+  ]).filter((value) => String(value || "").trim().toLowerCase() === EXPERIENCE_CLOUD_SSO_CLIENT_ID);
   let profileUserId = "";
   try {
     const profilePayload = await fetchImsSessionProfile(normalizedToken);
@@ -21063,8 +21664,36 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
   } catch {
     profileUserId = "";
   }
-  const userId = firstNonEmptyString([profileUserId, hints.userId, claims.user_id, claims.userId, state.loginData?.imsSession?.userId]);
-  const scope = firstNonEmptyString([hints.scope, claims.scope, CM_IMS_CHECK_DEFAULT_SCOPE]);
+  const userId = firstNonEmptyString([
+    profileUserId,
+    controllerAuth?.userId,
+    hints.userId,
+    claims.user_id,
+    claims.userId,
+    state.loginData?.cmConsoleImsSession?.userId,
+    state.loginData?.imsSession?.userId,
+  ]);
+  const scope = firstNonEmptyString([
+    controllerAuth?.scope,
+    hints.scope,
+    claims.scope,
+    state.loginData?.cmConsoleScope,
+    CM_IMS_CHECK_DEFAULT_SCOPE,
+  ]);
+  const experienceCloudUserId = firstNonEmptyString([
+    controllerAuth?.experienceCloudUserId,
+    experienceCloudClaims.user_id,
+    experienceCloudClaims.userId,
+    state.loginData?.experienceCloudImsSession?.userId,
+    state.loginData?.imsSession?.userId,
+    userId,
+  ]);
+  const experienceCloudScope = firstNonEmptyString([
+    controllerAuth?.experienceCloudScope,
+    experienceCloudClaims.scope,
+    state.loginData?.experienceCloudScope,
+    scope,
+  ]);
 
   const programmerLabel = firstNonEmptyString([
     programmer?.programmerName,
@@ -21078,6 +21707,10 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
     clientIds: clientIds.length > 0 ? clientIds : ["cm-console-ui"],
     userId,
     scope,
+    experienceCloudAccessToken,
+    experienceCloudClientIds: experienceCloudClientIds.length > 0 ? experienceCloudClientIds : [EXPERIENCE_CLOUD_SSO_CLIENT_ID],
+    experienceCloudUserId,
+    experienceCloudScope,
   };
 }
 
@@ -21120,6 +21753,10 @@ async function makeClickCmuDownload(context, requestToken, options = {}) {
     clientIds: authContext.clientIds,
     userId: authContext.userId,
     scope: authContext.scope,
+    experienceCloudAccessToken: authContext.experienceCloudAccessToken,
+    experienceCloudClientIds: authContext.experienceCloudClientIds,
+    experienceCloudUserId: authContext.experienceCloudUserId,
+    experienceCloudScope: authContext.experienceCloudScope,
     endpointCatalog,
     exportPayload: buildUnderparTearsheetExportPayload(programmer, {
       serviceKey: "cm",
@@ -21180,6 +21817,10 @@ async function makeClickCmuWorkspaceDownload(context, cards, requestToken, optio
     clientIds: authContext.clientIds,
     userId: authContext.userId,
     scope: authContext.scope,
+    experienceCloudAccessToken: authContext.experienceCloudAccessToken,
+    experienceCloudClientIds: authContext.experienceCloudClientIds,
+    experienceCloudUserId: authContext.experienceCloudUserId,
+    experienceCloudScope: authContext.experienceCloudScope,
     endpointCatalog,
     exportPayload: buildUnderparTearsheetExportPayload(programmer, {
       serviceKey: "cm",
@@ -23371,8 +24012,8 @@ function esmWorkspaceBuildRequestMetadata(esmWorkspaceState) {
   };
 }
 
-async function esmWorkspaceFetchWithPremiumAuth(esmWorkspaceState, url, options = {}, limit = ESM_WORKSPACE_CSV_RESULT_LIMIT, debugMeta = {}) {
-  const finalUrl = clickEsmEnsureLimit(url, limit);
+async function esmWorkspaceFetchWithPremiumAuth(esmWorkspaceState, url, options = {}, debugMeta = {}) {
+  const finalUrl = String(url || "").trim();
   const requestMeta = esmWorkspaceBuildRequestMetadata(esmWorkspaceState);
   const activeFlowId = getActiveEsmWorkspaceDebugFlowId();
   const requestScope = String(debugMeta?.scope || "esm").trim() || "esm";
@@ -23488,7 +24129,6 @@ async function esmWorkspaceDownloadCsvForCard(esmWorkspaceState, endpoint, sortR
       esmWorkspaceState,
       dataUrl,
       { method: "GET" },
-      ESM_WORKSPACE_CSV_RESULT_LIMIT,
       {
         scope: "esm-csv",
         endpointUrl,
@@ -23636,10 +24276,9 @@ async function esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, c
   );
   const effectiveBaseRequestUrl =
     stripMegWorkspaceMediaCompanyQueryParam(String(presetLocalFilterContext.baseUrl || baseRequestUrl).trim()) || baseRequestUrl;
-  const requestUrl = stripMegWorkspaceMediaCompanyQueryParam(clickEsmEnsureLimit(
-    esmWorkspaceAppendLocalColumnFilters(effectiveBaseRequestUrl, normalizedLocalColumnFilters),
-    ESM_WORKSPACE_INLINE_RESULT_LIMIT
-  ));
+  const requestUrl = stripMegWorkspaceMediaCompanyQueryParam(
+    esmWorkspaceAppendLocalColumnFilters(effectiveBaseRequestUrl, normalizedLocalColumnFilters)
+  );
   const computedPresetLocalFilterBootstrapPending =
     Object.keys(globalSeedLocalColumnFilters || {}).length > 0 ||
     Object.keys(presetLocalFilterContext.localColumnFilters || {}).length > 0 ||
@@ -23735,7 +24374,6 @@ async function esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, c
       esmWorkspaceState,
       requestUrl,
       { method: "GET" },
-      ESM_WORKSPACE_INLINE_RESULT_LIMIT,
       {
         scope: "esm-report",
         endpointUrl: normalizedEndpoint.url,
@@ -25629,6 +26267,10 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
 }
 
 function isCmServiceRequestActive(section, requestToken, programmerId) {
+  if (section?.__underparDetachedCmState === true) {
+    const selected = resolveSelectedProgrammer();
+    return Boolean(selected && selected.programmerId === programmerId);
+  }
   if (!section || !section.isConnected) {
     return false;
   }
@@ -25661,6 +26303,102 @@ function cmBindWorkspaceTab(windowId, tabId) {
   }
 }
 
+function cmMarkWorkspaceReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  state.cmWorkspaceReadyByWindowId.set(normalizedWindowId, {
+    tabId: normalizedTabId,
+    readyAt: Date.now(),
+  });
+  const waiters = state.cmWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+  if (Array.isArray(waiters) && waiters.length > 0) {
+    state.cmWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+    waiters.forEach((waiter) => {
+      try {
+        if (waiter?.timerId) {
+          clearTimeout(waiter.timerId);
+        }
+      } catch {
+        // Ignore cleanup failures.
+      }
+      try {
+        waiter?.resolve?.(true);
+      } catch {
+        // Ignore waiter resolution failures.
+      }
+    });
+  }
+}
+
+function cmInvalidateWorkspaceReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  const existingReady = state.cmWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!existingReady) {
+    return;
+  }
+  if (!normalizedTabId || Number(existingReady?.tabId || 0) <= 0 || Number(existingReady?.tabId || 0) === normalizedTabId) {
+    state.cmWorkspaceReadyByWindowId.delete(normalizedWindowId);
+  }
+}
+
+function cmIsWorkspaceReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  const readyInfo = state.cmWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!readyInfo) {
+    return false;
+  }
+  if (normalizedTabId > 0 && Number(readyInfo?.tabId || 0) > 0 && Number(readyInfo.tabId) !== normalizedTabId) {
+    return false;
+  }
+  return true;
+}
+
+async function cmWaitForWorkspaceReady(windowId, tabId = 0, timeoutMs = 2500) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  if (cmIsWorkspaceReady(normalizedWindowId, normalizedTabId)) {
+    return true;
+  }
+  return new Promise((resolve) => {
+    const waiter = {
+      resolve,
+      timerId: setTimeout(() => {
+        const waiters = state.cmWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+        if (Array.isArray(waiters)) {
+          state.cmWorkspaceReadyWaitersByWindowId.set(
+            normalizedWindowId,
+            waiters.filter((entry) => entry !== waiter)
+          );
+          if ((state.cmWorkspaceReadyWaitersByWindowId.get(normalizedWindowId) || []).length === 0) {
+            state.cmWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+          }
+        }
+        resolve(false);
+      }, Math.max(500, Number(timeoutMs || 0) || 2500)),
+    };
+    const existingWaiters = state.cmWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+    if (Array.isArray(existingWaiters)) {
+      existingWaiters.push(waiter);
+    } else {
+      state.cmWorkspaceReadyWaitersByWindowId.set(normalizedWindowId, [waiter]);
+    }
+  });
+}
+
 function cmUnbindWorkspaceTab(tabId) {
   const normalizedTabId = Number(tabId || 0);
   if (normalizedTabId > 0 && Number(state.cmWorkspaceActivityDebugTargetTabId || 0) === normalizedTabId) {
@@ -25669,12 +26407,14 @@ function cmUnbindWorkspaceTab(tabId) {
   if (normalizedTabId > 0) {
     for (const [windowId, mappedTabId] of state.cmWorkspaceTabIdByWindowId.entries()) {
       if (Number(mappedTabId || 0) === normalizedTabId) {
+        cmInvalidateWorkspaceReady(windowId, normalizedTabId);
         state.cmWorkspaceTabIdByWindowId.delete(windowId);
       }
     }
   }
 
   if (!normalizedTabId || Number(state.cmWorkspaceTabId || 0) === normalizedTabId) {
+    cmInvalidateWorkspaceReady(state.cmWorkspaceWindowId, normalizedTabId);
     state.cmWorkspaceTabId = 0;
     state.cmWorkspaceWindowId = 0;
   }
@@ -25694,6 +26434,46 @@ function cmGetBoundWorkspaceTabId(windowId) {
 function nextCmWorkspaceControllerStateVersion() {
   state.cmWorkspaceControllerStateVersion = Number(state.cmWorkspaceControllerStateVersion || 0) + 1;
   return state.cmWorkspaceControllerStateVersion;
+}
+
+function getCmControllerAuthPayload() {
+  const accessToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+  const tokenClaims = parseJwtPayload(accessToken) || {};
+  const experienceCloudAccessToken = normalizeBearerTokenValue(getPreferredExperienceCloudConsoleAccessTokenCandidate());
+  const experienceCloudClaims = parseJwtPayload(experienceCloudAccessToken) || {};
+  const envGlobalCmAuth = getPassVaultCmGlobalAuthFromVault();
+  const hints = resolveCmImsTokenHints(accessToken);
+  return {
+    accessToken,
+    experienceCloudAccessToken,
+    clientIds: [CM_IMS_PRIMARY_CLIENT_ID],
+    experienceCloudClientIds: [EXPERIENCE_CLOUD_SSO_CLIENT_ID],
+    userId: firstNonEmptyString([
+      hints.userId,
+      tokenClaims.user_id,
+      tokenClaims.userId,
+      state.loginData?.cmConsoleImsSession?.userId,
+      envGlobalCmAuth?.userId,
+      state.loginData?.imsSession?.userId,
+    ]),
+    scope: firstNonEmptyString([
+      tokenClaims.scope,
+      state.loginData?.cmConsoleScope,
+      envGlobalCmAuth?.scope,
+      CM_IMS_CHECK_DEFAULT_SCOPE,
+    ]),
+    experienceCloudUserId: firstNonEmptyString([
+      experienceCloudClaims.user_id,
+      experienceCloudClaims.userId,
+      state.loginData?.experienceCloudImsSession?.userId,
+      state.loginData?.imsSession?.userId,
+      envGlobalCmAuth?.userId,
+    ]),
+    experienceCloudScope: firstNonEmptyString([
+      experienceCloudClaims.scope,
+      state.loginData?.experienceCloudScope,
+    ]),
+  };
 }
 
 function cmGetControllerStatePayload(cmState) {
@@ -25722,6 +26502,7 @@ function cmGetControllerStatePayload(cmState) {
     tenantScope,
     requestorIds,
     mvpdIds,
+    cmAuth: getCmControllerAuthPayload(),
     controllerStateVersion: nextCmWorkspaceControllerStateVersion(),
     profileHarvest:
       profileHarvest && typeof profileHarvest === "object"
@@ -25797,6 +26578,7 @@ function cmGetSelectedControllerStatePayload(programmer = null, services = null,
     tenantScope: getCmTenantScopeForProgrammer(resolvedProgrammer),
     requestorIds,
     mvpdIds,
+    cmAuth: getCmControllerAuthPayload(),
     controllerStateVersion: nextCmWorkspaceControllerStateVersion(),
     profileHarvest:
       profileHarvest && typeof profileHarvest === "object"
@@ -25857,6 +26639,8 @@ async function cmEnsureWorkspaceTab(options = {}) {
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
   const useWindowFilter = targetWindowId > 0;
   let workspaceTab = null;
+  let createdWorkspaceTab = false;
+  let reusedReadyCandidate = false;
 
   const boundTabId = cmGetBoundWorkspaceTabId(targetWindowId);
   if (boundTabId > 0) {
@@ -25864,6 +26648,7 @@ async function cmEnsureWorkspaceTab(options = {}) {
       const existing = await chrome.tabs.get(boundTabId);
       if (cmIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
         workspaceTab = existing;
+        reusedReadyCandidate = String(existing?.status || "").trim().toLowerCase() === "complete";
       }
     } catch {
       cmUnbindWorkspaceTab(boundTabId);
@@ -25875,6 +26660,7 @@ async function cmEnsureWorkspaceTab(options = {}) {
     try {
       const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
       workspaceTab = allTabs.find((tab) => cmIsWorkspaceTab(tab)) || null;
+      reusedReadyCandidate = String(workspaceTab?.status || "").trim().toLowerCase() === "complete";
     } catch {
       workspaceTab = null;
     }
@@ -25886,6 +26672,7 @@ async function cmEnsureWorkspaceTab(options = {}) {
       active: shouldActivate,
       ...(useWindowFilter ? { windowId: targetWindowId } : {}),
     });
+    createdWorkspaceTab = Boolean(workspaceTab?.id);
   } else if (shouldActivate && workspaceTab.id) {
     try {
       workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
@@ -25898,6 +26685,11 @@ async function cmEnsureWorkspaceTab(options = {}) {
   }
 
   cmBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  if (createdWorkspaceTab) {
+    cmInvalidateWorkspaceReady(workspaceTab?.windowId, workspaceTab?.id);
+  } else if (reusedReadyCandidate || cmIsWorkspaceReady(workspaceTab?.windowId, workspaceTab?.id)) {
+    cmMarkWorkspaceReady(workspaceTab?.windowId, workspaceTab?.id);
+  }
   return workspaceTab;
 }
 
@@ -27420,6 +28212,153 @@ function getActiveCmMvpdState() {
   return getActiveCmStateForServiceClass("service-cm-mvpd");
 }
 
+function buildDetachedCmWorkspaceState(programmer, cmService = null, requestToken = 0, options = {}) {
+  if (!programmer?.programmerId || !cmService || !shouldShowCmService(cmService)) {
+    return null;
+  }
+
+  const cachedRenderContext = getCachedCmRenderContext(programmer, cmService, {
+    allowSynthetic: true,
+    tenantScope: options?.tenantScope,
+  });
+  if (!cachedRenderContext || !Array.isArray(cachedRenderContext.bundles) || cachedRenderContext.bundles.length === 0) {
+    return null;
+  }
+
+  const serviceType = String(options?.serviceType || cmService?.serviceType || "cm").trim();
+  const isMvpdService = serviceType === "cmMvpd";
+  const workspaceKey = String(options?.workspaceKey || (isMvpdService ? "mvpd-workspace" : "cmu-workspace")).trim();
+  const workspaceOrigin = String(options?.workspaceOrigin || (isMvpdService ? "MVPD Workspace" : "CMU Workspace")).trim();
+  const bundles = cachedRenderContext.bundles.filter(Boolean);
+  const bundleRecords = cmBuildWorkspaceRecordsFromBundles(bundles);
+  const correlationRecords = cmBuildRestV2CorrelationRecords(programmer);
+  const credentialHints = cmExtractCredentialHintsFromBundles(bundles);
+  const credentialRecords = cmBuildCredentialHintRecords(credentialHints, programmer);
+  const records = [...correlationRecords, ...bundleRecords, ...credentialRecords];
+  const correlationCardRecords = records.filter((record) => record.kind === "correlation");
+  const tenantRecords = records.filter((record) => record.kind === "tenant");
+  const applicationRecords = records.filter((record) => record.kind === "applications");
+  const credentialHintRecords = records.filter((record) => record.kind === "credential");
+  const policyRecords = records.filter((record) => record.kind === "policies");
+  const groupDefinitions = [
+    {
+      key: "correlation",
+      label: "MVPD Login History",
+      records: correlationCardRecords,
+    },
+    {
+      key: "tenants",
+      label: "CM Tenants",
+      records: tenantRecords,
+    },
+    {
+      key: "applications",
+      label: "CM Applications",
+      records: applicationRecords,
+    },
+    {
+      key: "credentials",
+      label: "CM Credential Hints",
+      records: credentialHintRecords,
+    },
+    {
+      key: "policies",
+      label: "CM Policies",
+      records: policyRecords,
+    },
+  ];
+  const groupChildRecordIdsByGroupRecordId = new Map();
+  groupDefinitions.forEach((group, index) => {
+    const groupRecord = cmBuildGroupWorkspaceRecord(group.key, group.label, group.records, programmer, index);
+    records.push(groupRecord);
+    if (groupRecord?.cardId) {
+      const childRecordIds = (Array.isArray(group.records) ? group.records : [])
+        .map((record) => String(record?.cardId || "").trim())
+        .filter(Boolean);
+      groupChildRecordIdsByGroupRecordId.set(groupRecord.cardId, childRecordIds);
+    }
+  });
+
+  return {
+    detached: true,
+    serviceType,
+    workspaceKey,
+    workspaceOrigin,
+    section: {
+      isConnected: true,
+      __underparDetachedCmState: true,
+    },
+    programmer,
+    tenantScope: cachedRenderContext.tenantScope,
+    cmService,
+    contentElement: null,
+    requestToken: Number(requestToken || 0),
+    bundles,
+    recordsById: new Map(records.map((record) => [record.cardId, record])),
+    groupChildRecordIdsByGroupRecordId,
+    controllerWindowId: Number(options?.controllerWindowId || state.cmWorkspaceWindowId || 0),
+    loadAllBusyCount: 0,
+  };
+}
+
+async function resolveCmStateForWorkspaceAction(options = {}) {
+  const liveCmState = getActiveCmState();
+  if (liveCmState) {
+    return liveCmState;
+  }
+
+  const programmer = resolveSelectedProgrammer();
+  if (!programmer?.programmerId) {
+    return null;
+  }
+
+  await hydrateProgrammerFromPassVault(programmer, {
+    forceReload: false,
+    forceOverwrite: false,
+    forceDcrRestore: true,
+  }).catch(() => null);
+
+  const programmerId = String(programmer.programmerId || "").trim();
+  let services = getCurrentPremiumAppsSnapshot(programmerId) || {};
+  let cmService =
+    services?.cm ||
+    state.cmServiceByProgrammerId.get(programmerId) ||
+    buildPassVaultRuntimeCmServiceSnapshot(getPassVaultMediaCompanyRecord(programmerId)) ||
+    null;
+
+  if (
+    shouldShowCmService(cmService) &&
+    !hasCachedCmTenantBundleCoverage(cmService) &&
+    (isPassVaultBackedValue(cmService) || isPassVaultProgrammerHydrated(programmerId))
+  ) {
+    restorePassVaultCmTenantBundlesToRuntime(getPassVaultMediaCompanyRecord(programmerId));
+  }
+
+  const needsHydration =
+    !shouldShowCmService(cmService) ||
+    !hasReusableCmSnapshotForSelection(cmService) ||
+    !hasCachedCmTenantBundleCoverage(cmService);
+
+  if (needsHydration) {
+    const hydrated = await ensureCmHydratedForProgrammer(programmer, services, {
+      forceRefresh: false,
+      reason: String(options?.reason || "workspace-action"),
+      freshLeewayMs: 45 * 1000,
+    }).catch(() => null);
+    services = hydrated?.services || getCurrentPremiumAppsSnapshot(programmerId) || services;
+    cmService = hydrated?.cmService || services?.cm || cmService;
+  }
+
+  if (!shouldShowCmService(cmService)) {
+    return null;
+  }
+
+  return buildDetachedCmWorkspaceState(programmer, cmService, Number(state.premiumPanelRequestToken || 0), {
+    controllerWindowId: Number(options?.controllerWindowId || state.cmWorkspaceWindowId || 0),
+    reason: String(options?.reason || "workspace-action"),
+  });
+}
+
 function cmFindRecordByCard(cmState, card) {
   if (!cmState?.recordsById) {
     return null;
@@ -28242,7 +29181,8 @@ function cmApplyUsageExampleRequestContext(urlValue, record = null, cmState = nu
     parsed.searchParams.delete("start");
     parsed.searchParams.delete("end");
     const tenantScope = cmResolveUsageTenantScope(cmState, record);
-    if (tenantScope) {
+    CM_USAGE_TENANT_QUERY_KEYS.forEach((key) => parsed.searchParams.delete(key));
+    if (tenantScope && cmUsagePathRequiresTenantScope(parsed.pathname)) {
       applyCmUsageTenantScopeToSearchParams(parsed.searchParams, tenantScope);
     }
     if (hasMvpdDimension) {
@@ -28311,6 +29251,20 @@ function cmSendReportWorkspaceMessage(targetWorkspace = "cm", event = "", payloa
   });
 }
 
+function cmCardHasExplicitRequestContext(card = null) {
+  if (!card || typeof card !== "object") {
+    return false;
+  }
+  return [
+    card?.requestUrl,
+    card?.baseRequestUrl,
+    card?.seedRequestUrl,
+    card?.seedBaseRequestUrl,
+  ]
+    .map((value) => String(value || "").trim())
+    .some(Boolean);
+}
+
 async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {}) {
   if (!cmState || !record) {
     return;
@@ -28357,11 +29311,12 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
           ]),
         }
       : record;
+  const resolvedUsageTenantScope = cmResolveUsageTenantScope(cmState, scopedRecord);
   const reportTenantId = String(
     firstNonEmptyString([
       String(scopedRecord?.tenantId || "").trim(),
       targetWorkspace === "mvpd" ? targetMvpdId : "",
-      String(cmState?.programmer?.programmerId || "").trim(),
+      resolvedUsageTenantScope,
     ])
   ).trim();
   const reportTenantName = String(
@@ -28369,8 +29324,8 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
       String(scopedRecord?.tenantName || "").trim(),
       targetWorkspace === "mvpd" ? targetMvpdLabel : "",
       targetWorkspace === "mvpd" ? targetMvpdId : "",
+      resolvedUsageTenantScope,
       String(cmState?.programmer?.programmerName || "").trim(),
-      String(cmState?.programmer?.programmerId || "").trim(),
       targetWorkspace === "mvpd" ? "MVPD" : "CM",
     ])
   ).trim();
@@ -28401,6 +29356,13 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
         zoomKey: String(record.kind || "").toUpperCase(),
         columns: Array.isArray(record.columns) ? record.columns : [],
         localColumnFilters: normalizedLocalColumnFilters,
+        seedEndpointUrl: String(options.seedEndpointUrl || ""),
+        seedRequestUrl: String(options.seedRequestUrl || ""),
+        seedBaseRequestUrl: String(options.seedBaseRequestUrl || ""),
+        seedLocalColumnFilters:
+          options.seedLocalColumnFilters && typeof options.seedLocalColumnFilters === "object"
+            ? { ...options.seedLocalColumnFilters }
+            : {},
         tenantId: reportTenantId,
         tenantName: reportTenantName,
         programmerId: String(cmState?.programmer?.programmerId || ""),
@@ -28443,7 +29405,7 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
       hasUrlOverride: Boolean(requestUrlOverride),
       tenantId: reportTenantId,
       tenantName: reportTenantName,
-      tenantScope: cmResolveUsageTenantScope(cmState, scopedRecord),
+      tenantScope: resolvedUsageTenantScope,
       workspaceKey: cmWorkspaceKey,
       workspaceOrigin: cmWorkspaceOrigin,
     },
@@ -28460,13 +29422,14 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
         workspaceOrigin: cmWorkspaceOrigin,
         tenantId: reportTenantId,
         tenantName: reportTenantName,
-        tenantScope: cmResolveUsageTenantScope(cmState, scopedRecord),
+        tenantScope: resolvedUsageTenantScope,
       },
     }
   );
   if (requestUrl && shouldRefetch) {
     try {
       const response = await fetchCmJsonWithAuthVariants([requestUrl], `CM ${record.kind || "item"} report`, {
+        allowTemporaryPageContextTab: false,
         debugMeta: {
           scope: String(record.kind || "report"),
           cardId,
@@ -28527,7 +29490,7 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
       emptyResult: rows.length === 0,
       tenantId: reportTenantId,
       tenantName: reportTenantName,
-      tenantScope: cmResolveUsageTenantScope(cmState, scopedRecord),
+      tenantScope: resolvedUsageTenantScope,
       workspaceKey: cmWorkspaceKey,
       workspaceOrigin: cmWorkspaceOrigin,
     },
@@ -28544,7 +29507,7 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
         workspaceOrigin: cmWorkspaceOrigin,
         tenantId: reportTenantId,
         tenantName: reportTenantName,
-        tenantScope: cmResolveUsageTenantScope(cmState, scopedRecord),
+        tenantScope: resolvedUsageTenantScope,
       },
     }
   );
@@ -28575,7 +29538,7 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
 
 async function handleCmWorkspaceAction(message, sender = null) {
   const action = String(message?.action || "").trim().toLowerCase();
-  const cmState = getActiveCmState();
+  let cmState = getActiveCmState();
   const senderWindowId = Number(sender?.tab?.windowId || 0);
   const senderTabId = Number(sender?.tab?.id || 0);
   const controllerWindowId = cmState ? Number(cmState.controllerWindowId || state.cmWorkspaceWindowId || 0) : 0;
@@ -28595,6 +29558,12 @@ async function handleCmWorkspaceAction(message, sender = null) {
   }
 
   if (action === "workspace-ready") {
+    if (!cmState) {
+      cmState = await resolveCmStateForWorkspaceAction({
+        controllerWindowId: senderWindowId || Number(state.cmWorkspaceWindowId || 0),
+        reason: "workspace-ready",
+      }).catch(() => null);
+    }
     if (cmState) {
       void ensureCmWorkspaceActivityDebugFlow({
         reason: "cm-workspace-ready",
@@ -28604,22 +29573,34 @@ async function handleCmWorkspaceAction(message, sender = null) {
       if (senderWindowId > 0) {
         cmBindWorkspaceTab(senderWindowId, senderTabId);
       }
+      cmMarkWorkspaceReady(senderWindowId || Number(cmState.controllerWindowId || state.cmWorkspaceWindowId || 0), senderTabId);
       cmBroadcastControllerState(cmState, senderWindowId);
     } else {
       const selectedProgrammer = resolveSelectedProgrammer();
       const selectedServices = selectedProgrammer?.programmerId
         ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
         : null;
+      cmMarkWorkspaceReady(senderWindowId || Number(state.cmWorkspaceWindowId || 0), senderTabId);
       cmBroadcastSelectedControllerState(selectedProgrammer, selectedServices, senderWindowId);
     }
     return { ok: true, controllerOnline: Boolean(cmState) };
   }
 
   if (!cmState) {
-    return { ok: false, error: "Open Concurrency Monitoring in the UnderPAR side panel to run reports." };
+    cmState = await resolveCmStateForWorkspaceAction({
+      controllerWindowId: senderWindowId || Number(state.cmWorkspaceWindowId || 0),
+      reason: action || "workspace-action",
+    }).catch(() => null);
+  }
+
+  if (!cmState) {
+    return { ok: false, error: "Select a media company with Concurrency Monitoring access to run reports." };
   }
 
   const requestToken = Number(state.premiumPanelRequestToken || 0);
+  if (senderWindowId > 0 && Number(cmState.controllerWindowId || 0) <= 0) {
+    cmState.controllerWindowId = senderWindowId;
+  }
   if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
     return { ok: false, error: "CM controller is no longer active for the selected media company." };
   }
@@ -28660,6 +29641,12 @@ async function handleCmWorkspaceAction(message, sender = null) {
       clientIds: Array.isArray(authContext.clientIds) ? authContext.clientIds : [],
       userId: String(authContext.userId || ""),
       scope: String(authContext.scope || CM_IMS_CHECK_DEFAULT_SCOPE || ""),
+      experienceCloudAccessToken: String(authContext.experienceCloudAccessToken || ""),
+      experienceCloudClientIds: Array.isArray(authContext.experienceCloudClientIds)
+        ? authContext.experienceCloudClientIds
+        : [],
+      experienceCloudUserId: String(authContext.experienceCloudUserId || ""),
+      experienceCloudScope: String(authContext.experienceCloudScope || ""),
       vaultExportPayload: buildUnderparTearsheetExportPayload(clickCmuContext?.programmer || null, {
         serviceKey: "cm",
         passVaultRecord: clickCmuContext?.passVaultRecord || null,
@@ -28688,6 +29675,48 @@ async function handleCmWorkspaceAction(message, sender = null) {
       fileName: exportResult.fileName,
       programmerLabel: exportResult.programmerLabel,
       endpointCount: Number(exportResult?.endpointCount || 0),
+    };
+  }
+
+  if (action === "resolve-run-context") {
+    const forceRefresh = message?.forceRefresh === true;
+    let accessToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+    if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || forceRefresh || !isAccessTokenFreshEnough(accessToken, 45 * 1000)) {
+      accessToken = normalizeBearerTokenValue(
+        await ensureCmApiAccessToken({
+          forceRefresh,
+          freshLeewayMs: 45 * 1000,
+          allowTemporaryPageContextTab: false,
+        }).catch(() => "")
+      );
+    }
+    const cmAuth = getCmControllerAuthPayload();
+    const resolvedAccessToken = normalizeBearerTokenValue(
+      firstNonEmptyString([accessToken, cmAuth?.accessToken || ""])
+    );
+    const resolvedCmAuth = resolvedAccessToken
+      ? {
+          ...(cmAuth && typeof cmAuth === "object" ? cmAuth : {}),
+          accessToken: resolvedAccessToken,
+        }
+      : cmAuth;
+    if (!normalizeBearerTokenValue(resolvedCmAuth?.accessToken || "")) {
+      return {
+        ok: false,
+        error: "UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session. Sign in again and retry.",
+        cmAuth: resolvedCmAuth,
+      };
+    }
+    return {
+      ok: true,
+      cmAuth: resolvedCmAuth,
+      tenantScope: resolveCmUsageTenantScopeValue(
+        getCmPrimaryUsageTenantScopeFromState(cmState),
+        cmState?.tenantScope,
+        getCmTenantScopeForProgrammer(cmState?.programmer)
+      ),
+      programmerId: String(cmState?.programmer?.programmerId || ""),
+      programmerName: String(cmState?.programmer?.programmerName || ""),
     };
   }
 
@@ -28736,6 +29765,10 @@ async function handleCmWorkspaceAction(message, sender = null) {
           requestUrlOverride: requestUrlOverride || fallbackUrl,
           baseRequestUrl: baseRequestUrl || fallbackUrl,
           localColumnFilters,
+          seedEndpointUrl: String(card?.seedEndpointUrl || ""),
+          seedRequestUrl: String(card?.seedRequestUrl || ""),
+          seedBaseRequestUrl: String(card?.seedBaseRequestUrl || ""),
+          seedLocalColumnFilters: card?.seedLocalColumnFilters && typeof card.seedLocalColumnFilters === "object" ? card.seedLocalColumnFilters : {},
         }
       );
       return { ok: true };
@@ -28749,6 +29782,10 @@ async function handleCmWorkspaceAction(message, sender = null) {
       requestUrlOverride,
       baseRequestUrl: baseRequestUrl || String(matchedRecord.requestUrl || matchedRecord.endpointUrl || ""),
       localColumnFilters,
+      seedEndpointUrl: String(card?.seedEndpointUrl || ""),
+      seedRequestUrl: String(card?.seedRequestUrl || ""),
+      seedBaseRequestUrl: String(card?.seedBaseRequestUrl || ""),
+      seedLocalColumnFilters: card?.seedLocalColumnFilters && typeof card.seedLocalColumnFilters === "object" ? card.seedLocalColumnFilters : {},
     });
     return { ok: true };
   }
@@ -28822,7 +29859,6 @@ async function handleCmWorkspaceAction(message, sender = null) {
   if (action === "rerun-all") {
     const cards = Array.isArray(message?.cards) ? message.cards : [];
     const reason = String(message?.reason || "").trim().toLowerCase();
-    const preserveCardRequestContext = reason !== "manual-reload";
     const targetWindowId = senderWindowId || Number(cmState.controllerWindowId || 0);
     void cmSendWorkspaceMessage(
       "batch-start",
@@ -28834,6 +29870,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
       { targetWindowId }
     );
     for (const card of cards) {
+      const preserveCardRequestContext = reason !== "manual-reload" || cmCardHasExplicitRequestContext(card);
       let record = cmFindRecordByCard(cmState, card);
       if (!record && card?.operation && typeof card.operation === "object") {
         record = {
@@ -28908,6 +29945,10 @@ async function handleCmWorkspaceAction(message, sender = null) {
         requestUrlOverride,
         baseRequestUrl,
         localColumnFilters: card?.localColumnFilters && typeof card.localColumnFilters === "object" ? card.localColumnFilters : {},
+        seedEndpointUrl: String(card?.seedEndpointUrl || ""),
+        seedRequestUrl: String(card?.seedRequestUrl || ""),
+        seedBaseRequestUrl: String(card?.seedBaseRequestUrl || ""),
+        seedLocalColumnFilters: card?.seedLocalColumnFilters && typeof card.seedLocalColumnFilters === "object" ? card.seedLocalColumnFilters : {},
       });
     }
     void cmSendWorkspaceMessage(
@@ -33991,6 +35032,7 @@ async function cmEnsureTargetWorkspaceTab(cmState, options = {}) {
   });
   cmBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
   const targetWindowId = Number(workspaceTab?.windowId || cmState?.controllerWindowId || state.cmWorkspaceWindowId || 0);
+  await cmWaitForWorkspaceReady(targetWindowId, Number(workspaceTab?.id || 0), 3000).catch(() => false);
   return {
     targetWorkspace,
     workspaceTab,
@@ -34094,6 +35136,376 @@ async function cmOpenRecordsInWorkspace(cmState, records, requestToken, options 
   return openedCount;
 }
 
+function getCachedCmRenderContext(programmer, cmService = null, options = {}) {
+  const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants : [];
+  if (matchedTenants.length === 0) {
+    return null;
+  }
+  const profileHarvest = getCmProfileHarvestForProgrammer(programmer);
+  const tenantScope = resolveCmUsageTenantScopeValue(
+    options?.tenantScope,
+    matchedTenants?.[0]?.tenantId,
+    matchedTenants?.[0]?.tenantName,
+    getCmTenantScopeForProgrammer(programmer)
+  );
+  const hasBundleCoverage = hasCachedCmTenantBundleCoverage(cmService);
+  const bundles = matchedTenants
+    .map((tenant) => {
+      const tenantCacheKey = cmGetTenantCacheKey(tenant);
+      const cachedBundle = tenantCacheKey ? state.cmTenantBundleByTenantKey.get(tenantCacheKey)?.bundle || null : null;
+      if (!cachedBundle && hasBundleCoverage) {
+        return null;
+      }
+      const mergedTenant =
+        tenant && typeof tenant === "object" ? { ...(cachedBundle?.tenant || {}), ...tenant } : cachedBundle?.tenant || tenant;
+      if (cachedBundle) {
+        return {
+          ...cachedBundle,
+          tenant: mergedTenant,
+          usage: {
+            ...(cachedBundle.usage || {}),
+            rows: buildCmUsageSeedRows(mergedTenant, profileHarvest, tenantScope),
+            tenantScope,
+          },
+        };
+      }
+      if (options?.allowSynthetic !== true) {
+        return null;
+      }
+      return {
+        tenant: mergedTenant,
+        tenantDetail: {
+          kind: "tenant",
+          url: String(mergedTenant?.sourceUrl || cmService?.sourceUrl || ""),
+          payload: mergedTenant?.raw && typeof mergedTenant.raw === "object" ? mergedTenant.raw : mergedTenant || null,
+          lastModified: "",
+          rows:
+            mergedTenant?.raw && typeof mergedTenant.raw === "object"
+              ? [mergedTenant.raw]
+              : mergedTenant && typeof mergedTenant === "object"
+                ? [mergedTenant]
+                : [],
+          error: "",
+        },
+        applications: {
+          kind: "applications",
+          url: "",
+          payload: null,
+          lastModified: "",
+          rows: [],
+          error: "",
+        },
+        policies: {
+          kind: "policies",
+          url: "",
+          payload: null,
+          lastModified: "",
+          rows: [],
+          error: "",
+        },
+        usage: {
+          kind: "usage",
+          url: "",
+          payload: null,
+          lastModified: "",
+          rows: buildCmUsageSeedRows(mergedTenant, profileHarvest, tenantScope),
+          error: "",
+          tenantScope,
+        },
+      };
+    })
+    .filter(Boolean);
+  if (bundles.length !== matchedTenants.length) {
+    return null;
+  }
+  return {
+    bundles,
+    profileHarvest,
+    tenantScope,
+    synthetic: hasBundleCoverage !== true,
+  };
+}
+
+function renderCmServiceContent(programmer, resolvedCmService, section, contentElement, requestToken, options = {}) {
+  if (!contentElement || !programmer?.programmerId) {
+    return null;
+  }
+
+  const serviceType = String(options?.serviceType || resolvedCmService?.serviceType || "cm").trim();
+  const isMvpdService = serviceType === "cmMvpd";
+  const workspaceKey = String(options?.workspaceKey || (isMvpdService ? "mvpd-workspace" : "cmu-workspace")).trim();
+  const workspaceOrigin = String(options?.workspaceOrigin || (isMvpdService ? "MVPD Workspace" : "CMU Workspace")).trim();
+  const matchedTenants = Array.isArray(resolvedCmService?.matchedTenants) ? resolvedCmService.matchedTenants : [];
+  if (matchedTenants.length === 0) {
+    return null;
+  }
+
+  const bundles = (Array.isArray(options?.bundles) ? options.bundles : []).filter(Boolean);
+  if (bundles.length === 0) {
+    return null;
+  }
+  const tenantScope = resolveCmUsageTenantScopeValue(
+    options?.tenantScope,
+    matchedTenants?.[0]?.tenantId,
+    matchedTenants?.[0]?.tenantName,
+    getCmTenantScopeForProgrammer(programmer)
+  );
+  const controllerWindowId = Number(options?.controllerWindowId || section?.__underparCmState?.controllerWindowId || 0);
+  const bundleRecords = cmBuildWorkspaceRecordsFromBundles(bundles);
+  const correlationRecords = cmBuildRestV2CorrelationRecords(programmer);
+  const credentialHints = cmExtractCredentialHintsFromBundles(bundles);
+  const credentialRecords = cmBuildCredentialHintRecords(credentialHints, programmer);
+  const records = [...correlationRecords, ...bundleRecords, ...credentialRecords];
+  const correlationCardRecords = records.filter((record) => record.kind === "correlation");
+  const tenantRecords = records.filter((record) => record.kind === "tenant");
+  const applicationRecords = records.filter((record) => record.kind === "applications");
+  const credentialHintRecords = records.filter((record) => record.kind === "credential");
+  const policyRecords = records.filter((record) => record.kind === "policies");
+  const usageRecords = records.filter((record) => record.kind === "usage");
+  const groupDefinitions = [
+    {
+      key: "correlation",
+      label: "MVPD Login History",
+      records: correlationCardRecords,
+    },
+    {
+      key: "tenants",
+      label: "CM Tenants",
+      records: tenantRecords,
+    },
+    {
+      key: "applications",
+      label: "CM Applications",
+      records: applicationRecords,
+    },
+    {
+      key: "credentials",
+      label: "CM Credential Hints",
+      records: credentialHintRecords,
+    },
+    {
+      key: "policies",
+      label: "CM Policies",
+      records: policyRecords,
+    },
+  ];
+  const hiddenCmGroupKeys = new Set(["tenants"]);
+  const groupRecordsByKey = new Map();
+  const groupChildRecordIdsByGroupRecordId = new Map();
+  groupDefinitions.forEach((group, index) => {
+    const groupRecord = cmBuildGroupWorkspaceRecord(group.key, group.label, group.records, programmer, index);
+    records.push(groupRecord);
+    groupRecordsByKey.set(group.key, groupRecord);
+    if (groupRecord?.cardId) {
+      const childRecordIds = (Array.isArray(group.records) ? group.records : [])
+        .map((record) => String(record?.cardId || "").trim())
+        .filter(Boolean);
+      groupChildRecordIdsByGroupRecordId.set(groupRecord.cardId, childRecordIds);
+    }
+  });
+  const recordsById = new Map(records.map((record) => [record.cardId, record]));
+  const cmuJellyMarkup = `<section class="cmu-jelly-host"></section>`;
+  const correlationGroup =
+    groupDefinitions.find((group) => group.key === "correlation") || {
+      key: "correlation",
+      label: "MVPD Login History",
+      records: [],
+    };
+  const correlationGroupRecord = groupRecordsByKey.get(correlationGroup.key);
+  const correlationMarkup = cmBuildGroupListHtml(
+    correlationGroup.key,
+    correlationGroup.label,
+    correlationGroup.records,
+    correlationGroupRecord?.cardId || ""
+  );
+  const groupMarkup = groupDefinitions
+    .filter((group) => !hiddenCmGroupKeys.has(group.key) && group.key !== "correlation")
+    .map((group) => {
+      const groupRecord = groupRecordsByKey.get(group.key);
+      return cmBuildGroupListHtml(group.key, group.label, group.records, groupRecord?.cardId || "");
+    })
+    .join("");
+
+  contentElement.innerHTML = `
+    <div class="cm-shell">
+      ${cmuJellyMarkup}
+      <div class="cm-correlation-host">${correlationMarkup}</div>
+      <div class="cm-sidepanel">${groupMarkup}</div>
+    </div>
+  `;
+
+  const cmState = {
+    serviceType,
+    workspaceKey,
+    workspaceOrigin,
+    section,
+    programmer,
+    tenantScope,
+    cmService: resolvedCmService,
+    contentElement,
+    requestToken,
+    bundles,
+    recordsById,
+    groupChildRecordIdsByGroupRecordId,
+    controllerWindowId,
+    loadAllBusyCount: 0,
+  };
+  section.__underparCmState = cmState;
+  cmMountUsageJellyBeans(cmState, usageRecords, requestToken);
+
+  const exportClickCmuButton = contentElement.querySelector(".cmu-jelly-make-clickcmu-btn");
+  if (exportClickCmuButton) {
+    exportClickCmuButton.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      exportClickCmuButton.disabled = true;
+      try {
+        const clickCmuContext = await resolveClickCmuDownloadContext(cmState);
+        if (!clickCmuContext) {
+          throw new Error("Select a media company with Concurrency Monitoring access to generate clickCMU.");
+        }
+        const selectedRequestorId = String(state.selectedRequestorId || resolvedCmService?.requestorId || "").trim();
+        const selectedMvpdId = String(state.selectedMvpdId || resolvedCmService?.mvpdId || "").trim();
+        const resolvedMvpdScope = resolveCmUsageTenantScopeValue(
+          selectedMvpdId,
+          cmState?.tenantScope,
+          matchedTenants?.[0]?.tenantId,
+          matchedTenants?.[0]?.tenantName
+        );
+        if (isMvpdService && !resolvedMvpdScope) {
+          throw new Error("Select an MVPD before generating clickCMU.");
+        }
+        const selectedMvpdMeta = selectedMvpdId ? getRestV2MvpdMeta(selectedRequestorId, selectedMvpdId) : null;
+        const selectedMvpdLabel = selectedMvpdId
+          ? getRestV2MvpdPickerLabel(selectedRequestorId, selectedMvpdId, selectedMvpdMeta) || selectedMvpdId
+          : String(firstNonEmptyString([matchedTenants?.[0]?.tenantName, resolvedMvpdScope || ""])).trim();
+        const exportFileScopeLabel = String(selectedMvpdId || resolvedMvpdScope || "MVPD").trim();
+        await makeClickCmuDownload(clickCmuContext, requestToken, {
+          source: isMvpdService ? "mvpd-workspace" : "sidepanel",
+          isMvpdWorkspaceExport: isMvpdService,
+          mvpdId: isMvpdService ? selectedMvpdId : undefined,
+          tenantScope: isMvpdService ? resolvedMvpdScope : undefined,
+          themePreset: isMvpdService ? "sunflower" : undefined,
+          themeScope: isMvpdService && resolvedMvpdScope ? `mvpd:${resolvedMvpdScope}` : undefined,
+          fileLabel: isMvpdService ? exportFileScopeLabel : undefined,
+          programmerLabelOverride:
+            isMvpdService && resolvedMvpdScope ? `${selectedMvpdLabel} (${resolvedMvpdScope})` : undefined,
+        });
+      } catch (error) {
+        setStatus(
+          `Unable to generate clickCMU: ${error instanceof Error ? error.message : String(error)}`,
+          "error"
+        );
+      } finally {
+        exportClickCmuButton.disabled = false;
+      }
+    });
+  }
+
+  contentElement.querySelectorAll(".cm-record-link").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const recordId = String(button.getAttribute("data-record-id") || "").trim();
+      if (!recordId) {
+        return;
+      }
+      const record = cmState.recordsById.get(recordId);
+      if (!record) {
+        return;
+      }
+      await cmOpenRecordInWorkspace(cmState, record, requestToken, {
+        activate: true,
+        emitStart: true,
+        forceRefetch: false,
+        cardId: record.cardId,
+      });
+    });
+  });
+
+  contentElement.querySelectorAll(".cm-group").forEach((groupElement) => {
+    const toggleButton = groupElement.querySelector(".cm-group-toggle");
+    const bodyElement = groupElement.querySelector(".cm-group-body");
+    if (!toggleButton || !bodyElement) {
+      return;
+    }
+    wireCollapsibleSection(toggleButton, bodyElement, true, (collapsed) => {
+      groupElement.classList.toggle("is-collapsed", Boolean(collapsed));
+    });
+    groupElement.classList.toggle("is-collapsed", true);
+  });
+
+  contentElement.querySelectorAll(".cm-group-load-all").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      if (button.disabled) {
+        return;
+      }
+      const recordId = String(button.getAttribute("data-record-id") || "").trim();
+      if (!recordId) {
+        return;
+      }
+      const groupRecord = cmState.recordsById.get(recordId) || null;
+      const childRecordIds = Array.isArray(cmState.groupChildRecordIdsByGroupRecordId?.get(recordId))
+        ? cmState.groupChildRecordIdsByGroupRecordId.get(recordId)
+        : [];
+      const childRecords = childRecordIds.map((childRecordId) => cmState.recordsById.get(childRecordId)).filter(Boolean);
+      const groupElement = button.closest(".cm-group");
+      const groupLabel = String(
+        groupElement?.querySelector(".cm-group-title-text")?.textContent || groupRecord?.title || "CM Group"
+      ).trim() || "CM Group";
+      const childPlural = childRecords.length === 1 ? "entry" : "entries";
+      const workspaceLabel = String(cmState.workspaceOrigin || "CM Workspace").trim() || "CM Workspace";
+      if (childRecords.length > 0) {
+        setStatus(`${groupLabel}: loading ${childRecords.length} child ${childPlural} into ${workspaceLabel}...`, "info");
+      }
+      button.disabled = true;
+      cmSetLoadAllButtonsBusy(cmState, [button], true);
+      try {
+        const openedCount = await cmOpenRecordsInWorkspace(cmState, childRecords, requestToken, {
+          activate: true,
+          emitStart: true,
+          forceRefetch: false,
+        });
+        if (childRecords.length > 0) {
+          setStatus(
+            `${groupLabel}: loaded ${openedCount}/${childRecords.length} child ${childPlural} in ${workspaceLabel}.`,
+            "success"
+          );
+        } else {
+          setStatus(`${groupLabel}: no child entries found to load.`, "info");
+        }
+      } finally {
+        cmSetLoadAllButtonsBusy(cmState, [button], false);
+        button.disabled = false;
+      }
+    });
+  });
+
+  ensureCmRuntimeListener();
+  ensureCmWorkspaceTabWatcher();
+  cmBroadcastControllerState(cmState);
+  return cmState;
+}
+
+function renderCachedCmServiceContent(programmer, cmService, section, contentElement, requestToken, options = {}) {
+  const cachedRenderContext = getCachedCmRenderContext(programmer, cmService, options);
+  if (!cachedRenderContext) {
+    return null;
+  }
+  const cmState = renderCmServiceContent(programmer, cmService, section, contentElement, requestToken, {
+    ...options,
+    bundles: cachedRenderContext.bundles,
+    tenantScope: cachedRenderContext.tenantScope,
+    controllerWindowId: Number(section?.__underparCmState?.controllerWindowId || 0),
+  });
+  return cmState
+    ? {
+        rendered: true,
+        synthetic: cachedRenderContext.synthetic === true,
+        cmState,
+      }
+    : null;
+}
+
 async function loadCmService(programmer, cmService, section, contentElement, requestToken, options = {}) {
   if (!contentElement) {
     return;
@@ -34107,9 +35519,37 @@ async function loadCmService(programmer, cmService, section, contentElement, req
   const workspaceKey = isMvpdService ? "mvpd-workspace" : "cmu-workspace";
   const workspaceOrigin = isMvpdService ? "MVPD Workspace" : "CMU Workspace";
   const scopeLabel = isMvpdService ? "selected MVPD" : "media company";
-  const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants : [];
+  const latestServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || {};
+  let resolvedCmService =
+    (isMvpdService
+      ? latestServices?.cmMvpd || state.cmServiceByMvpdSelectionKey.get(buildCurrentCmMvpdSelectionKey(programmer))
+      : latestServices?.cm || state.cmServiceByProgrammerId.get(programmer.programmerId)) || cmService;
+  if (!isMvpdService && resolvedCmService && !hasCachedCmTenantBundleCoverage(resolvedCmService)) {
+    restorePassVaultCmTenantBundlesToRuntime(getPassVaultMediaCompanyRecord(programmer.programmerId));
+  }
+  const cachedRenderResult = renderCachedCmServiceContent(programmer, resolvedCmService, section, contentElement, requestToken, {
+    ...options,
+    allowSynthetic: true,
+  });
+  if (cachedRenderResult?.rendered && cachedRenderResult.synthetic !== true) {
+    return;
+  }
+  if (!isMvpdService) {
+    const cmHydrationReady =
+      hasReusableCmSnapshotForSelection(resolvedCmService) && hasCachedCmTenantBundleCoverage(resolvedCmService);
+    if (!cmHydrationReady) {
+      const hydrated = await ensureCmHydratedForProgrammer(programmer, getCurrentPremiumAppsSnapshot(programmer.programmerId), {
+        forceRefresh: false,
+        reason: "cm-panel-open",
+      }).catch(() => null);
+      resolvedCmService = hydrated?.cmService || state.cmServiceByProgrammerId.get(programmer.programmerId) || latestServices?.cm || cmService;
+    } else {
+      resolvedCmService = state.cmServiceByProgrammerId.get(programmer.programmerId) || latestServices?.cm || cmService;
+    }
+  }
+  const matchedTenants = Array.isArray(resolvedCmService?.matchedTenants) ? resolvedCmService.matchedTenants : [];
   if (matchedTenants.length === 0) {
-    const loadError = String(cmService?.loadError || "").trim();
+    const loadError = String(resolvedCmService?.loadError || "").trim();
     const message = loadError
       ? `CM tenant discovery failed: ${escapeHtml(loadError)}`
       : `No CM tenant matches were detected for the ${scopeLabel}.`;
@@ -34118,13 +35558,16 @@ async function loadCmService(programmer, cmService, section, contentElement, req
   }
 
   try {
+    const cachedRenderContext = getCachedCmRenderContext(programmer, resolvedCmService, options);
     const controllerWindowId = await esmWorkspaceGetCurrentWindowId();
-    const profileHarvest = getCmProfileHarvestForProgrammer(programmer);
-    const tenantScope = resolveCmUsageTenantScopeValue(
-      matchedTenants?.[0]?.tenantId,
-      matchedTenants?.[0]?.tenantName,
-      getCmTenantScopeForProgrammer(programmer)
-    );
+    const profileHarvest = cachedRenderContext?.profileHarvest || getCmProfileHarvestForProgrammer(programmer);
+    const tenantScope =
+      cachedRenderContext?.tenantScope ||
+      resolveCmUsageTenantScopeValue(
+        matchedTenants?.[0]?.tenantId,
+        matchedTenants?.[0]?.tenantName,
+        getCmTenantScopeForProgrammer(programmer)
+      );
     emitCmDebugEvent({
       phase: "cm-tenant-scope-selected",
       programmerId: String(programmer?.programmerId || ""),
@@ -34139,250 +35582,25 @@ async function loadCmService(programmer, cmService, section, contentElement, req
         .map((tenant) => String(tenant?.tenantName || "").trim())
         .filter(Boolean)
         .slice(0, 12),
-      requestorId: String(state.selectedRequestorId || cmService?.requestorId || ""),
-      mvpd: String(state.selectedMvpdId || cmService?.mvpdId || ""),
+      requestorId: String(state.selectedRequestorId || resolvedCmService?.requestorId || ""),
+      mvpd: String(state.selectedMvpdId || resolvedCmService?.mvpdId || ""),
       workspaceKey,
       workspaceOrigin,
     });
-    const bundles = await Promise.all(matchedTenants.map((tenant) => loadCmTenantBundle(tenant, { profileHarvest, tenantScope })));
+    const bundles =
+      cachedRenderContext?.bundles ||
+      (await Promise.all(matchedTenants.map((tenant) => loadCmTenantBundle(tenant, { profileHarvest, tenantScope }))));
     if (!isCmServiceRequestActive(section, requestToken, programmer.programmerId)) {
       return;
     }
-
-    const bundleRecords = cmBuildWorkspaceRecordsFromBundles(bundles);
-    const correlationRecords = cmBuildRestV2CorrelationRecords(programmer);
-    const credentialHints = cmExtractCredentialHintsFromBundles(bundles);
-    const credentialRecords = cmBuildCredentialHintRecords(credentialHints, programmer);
-    const records = [...correlationRecords, ...bundleRecords, ...credentialRecords];
-    const correlationCardRecords = records.filter((record) => record.kind === "correlation");
-    const tenantRecords = records.filter((record) => record.kind === "tenant");
-    const applicationRecords = records.filter((record) => record.kind === "applications");
-    const credentialHintRecords = records.filter((record) => record.kind === "credential");
-    const policyRecords = records.filter((record) => record.kind === "policies");
-    const usageRecords = records.filter((record) => record.kind === "usage");
-    const groupDefinitions = [
-      {
-        key: "correlation",
-        label: "MVPD Login History",
-        records: correlationCardRecords,
-      },
-      {
-        key: "tenants",
-        label: "CM Tenants",
-        records: tenantRecords,
-      },
-      {
-        key: "applications",
-        label: "CM Applications",
-        records: applicationRecords,
-      },
-      {
-        key: "credentials",
-        label: "CM Credential Hints",
-        records: credentialHintRecords,
-      },
-      {
-        key: "policies",
-        label: "CM Policies",
-        records: policyRecords,
-      },
-    ];
-    // Keep tenant groups in internal records for fast CM mapping/debug workflows,
-    // but hide the broad CM tenant list from sidepanel UI.
-    const hiddenCmGroupKeys = new Set(["tenants"]);
-    const groupRecordsByKey = new Map();
-    const groupChildRecordIdsByGroupRecordId = new Map();
-    groupDefinitions.forEach((group, index) => {
-      const groupRecord = cmBuildGroupWorkspaceRecord(group.key, group.label, group.records, programmer, index);
-      records.push(groupRecord);
-      groupRecordsByKey.set(group.key, groupRecord);
-      if (groupRecord?.cardId) {
-        const childRecordIds = (Array.isArray(group.records) ? group.records : [])
-          .map((record) => String(record?.cardId || "").trim())
-          .filter(Boolean);
-        groupChildRecordIdsByGroupRecordId.set(groupRecord.cardId, childRecordIds);
-      }
-    });
-    const recordsById = new Map(records.map((record) => [record.cardId, record]));
-    const cmuJellyMarkup = `<section class="cmu-jelly-host"></section>`;
-    const correlationGroup =
-      groupDefinitions.find((group) => group.key === "correlation") || {
-        key: "correlation",
-        label: "MVPD Login History",
-        records: [],
-      };
-    const correlationGroupRecord = groupRecordsByKey.get(correlationGroup.key);
-    const correlationMarkup = cmBuildGroupListHtml(
-      correlationGroup.key,
-      correlationGroup.label,
-      correlationGroup.records,
-      correlationGroupRecord?.cardId || ""
-    );
-    const groupMarkup = groupDefinitions
-      .filter((group) => !hiddenCmGroupKeys.has(group.key) && group.key !== "correlation")
-      .map((group) => {
-        const groupRecord = groupRecordsByKey.get(group.key);
-        return cmBuildGroupListHtml(group.key, group.label, group.records, groupRecord?.cardId || "");
-      })
-      .join("");
-
-    contentElement.innerHTML = `
-      <div class="cm-shell">
-        ${cmuJellyMarkup}
-        <div class="cm-correlation-host">${correlationMarkup}</div>
-        <div class="cm-sidepanel">${groupMarkup}</div>
-      </div>
-    `;
-
-    const cmState = {
+    renderCmServiceContent(programmer, resolvedCmService, section, contentElement, requestToken, {
       serviceType,
       workspaceKey,
       workspaceOrigin,
-      section,
-      programmer,
       tenantScope,
-      cmService,
-      contentElement,
-      requestToken,
       bundles,
-      recordsById,
-      groupChildRecordIdsByGroupRecordId,
       controllerWindowId,
-      loadAllBusyCount: 0,
-    };
-    section.__underparCmState = cmState;
-    cmMountUsageJellyBeans(cmState, usageRecords, requestToken);
-
-    const exportClickCmuButton = contentElement.querySelector(".cmu-jelly-make-clickcmu-btn");
-    if (exportClickCmuButton) {
-      exportClickCmuButton.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        exportClickCmuButton.disabled = true;
-        try {
-          const clickCmuContext = await resolveClickCmuDownloadContext(cmState);
-          if (!clickCmuContext) {
-            throw new Error("Select a media company with Concurrency Monitoring access to generate clickCMU.");
-          }
-          const selectedRequestorId = String(state.selectedRequestorId || cmService?.requestorId || "").trim();
-          const selectedMvpdId = String(state.selectedMvpdId || cmService?.mvpdId || "").trim();
-          const resolvedMvpdScope = resolveCmUsageTenantScopeValue(
-            selectedMvpdId,
-            cmState?.tenantScope,
-            matchedTenants?.[0]?.tenantId,
-            matchedTenants?.[0]?.tenantName
-          );
-          if (isMvpdService && !resolvedMvpdScope) {
-            throw new Error("Select an MVPD before generating clickCMU.");
-          }
-          const selectedMvpdMeta = selectedMvpdId ? getRestV2MvpdMeta(selectedRequestorId, selectedMvpdId) : null;
-          const selectedMvpdLabel = selectedMvpdId
-            ? getRestV2MvpdPickerLabel(selectedRequestorId, selectedMvpdId, selectedMvpdMeta) || selectedMvpdId
-            : String(firstNonEmptyString([matchedTenants?.[0]?.tenantName, resolvedMvpdScope || ""])).trim();
-          const exportFileScopeLabel = String(selectedMvpdId || resolvedMvpdScope || "MVPD").trim();
-          await makeClickCmuDownload(clickCmuContext, requestToken, {
-            source: isMvpdService ? "mvpd-workspace" : "sidepanel",
-            isMvpdWorkspaceExport: isMvpdService,
-            mvpdId: isMvpdService ? selectedMvpdId : undefined,
-            tenantScope: isMvpdService ? resolvedMvpdScope : undefined,
-            themePreset: isMvpdService ? "sunflower" : undefined,
-            themeScope: isMvpdService && resolvedMvpdScope ? `mvpd:${resolvedMvpdScope}` : undefined,
-            fileLabel: isMvpdService ? exportFileScopeLabel : undefined,
-            programmerLabelOverride:
-              isMvpdService && resolvedMvpdScope ? `${selectedMvpdLabel} (${resolvedMvpdScope})` : undefined,
-          });
-        } catch (error) {
-          setStatus(
-            `Unable to generate clickCMU: ${error instanceof Error ? error.message : String(error)}`,
-            "error"
-          );
-        } finally {
-          exportClickCmuButton.disabled = false;
-        }
-      });
-    }
-
-    contentElement.querySelectorAll(".cm-record-link").forEach((button) => {
-      button.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        const recordId = String(button.getAttribute("data-record-id") || "").trim();
-        if (!recordId) {
-          return;
-        }
-        const record = cmState.recordsById.get(recordId);
-        if (!record) {
-          return;
-        }
-        await cmOpenRecordInWorkspace(cmState, record, requestToken, {
-          activate: true,
-          emitStart: true,
-          forceRefetch: false,
-          cardId: record.cardId,
-        });
-      });
     });
-
-    contentElement.querySelectorAll(".cm-group").forEach((groupElement) => {
-      const toggleButton = groupElement.querySelector(".cm-group-toggle");
-      const bodyElement = groupElement.querySelector(".cm-group-body");
-      if (!toggleButton || !bodyElement) {
-        return;
-      }
-      wireCollapsibleSection(toggleButton, bodyElement, true, (collapsed) => {
-        groupElement.classList.toggle("is-collapsed", Boolean(collapsed));
-      });
-      groupElement.classList.toggle("is-collapsed", true);
-    });
-
-    contentElement.querySelectorAll(".cm-group-load-all").forEach((button) => {
-      button.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        if (button.disabled) {
-          return;
-        }
-        const recordId = String(button.getAttribute("data-record-id") || "").trim();
-        if (!recordId) {
-          return;
-        }
-        const groupRecord = cmState.recordsById.get(recordId) || null;
-        const childRecordIds = Array.isArray(cmState.groupChildRecordIdsByGroupRecordId?.get(recordId))
-          ? cmState.groupChildRecordIdsByGroupRecordId.get(recordId)
-          : [];
-        const childRecords = childRecordIds.map((childRecordId) => cmState.recordsById.get(childRecordId)).filter(Boolean);
-        const groupElement = button.closest(".cm-group");
-        const groupLabel = String(
-          groupElement?.querySelector(".cm-group-title-text")?.textContent || groupRecord?.title || "CM Group"
-        ).trim() || "CM Group";
-        const childPlural = childRecords.length === 1 ? "entry" : "entries";
-        const workspaceLabel = String(cmState.workspaceOrigin || "CM Workspace").trim() || "CM Workspace";
-        if (childRecords.length > 0) {
-          setStatus(`${groupLabel}: loading ${childRecords.length} child ${childPlural} into ${workspaceLabel}...`, "info");
-        }
-        button.disabled = true;
-        cmSetLoadAllButtonsBusy(cmState, [button], true);
-        try {
-          const openedCount = await cmOpenRecordsInWorkspace(cmState, childRecords, requestToken, {
-            activate: true,
-            emitStart: true,
-            forceRefetch: false,
-          });
-          if (childRecords.length > 0) {
-            setStatus(
-              `${groupLabel}: loaded ${openedCount}/${childRecords.length} child ${childPlural} in ${workspaceLabel}.`,
-              "success"
-            );
-          } else {
-            setStatus(`${groupLabel}: no child entries found to load.`, "info");
-          }
-        } finally {
-          cmSetLoadAllButtonsBusy(cmState, [button], false);
-          button.disabled = false;
-        }
-      });
-    });
-
-    ensureCmRuntimeListener();
-    ensureCmWorkspaceTabWatcher();
-    cmBroadcastControllerState(cmState);
   } catch (error) {
     if (!isCmServiceRequestActive(section, requestToken, programmer.programmerId)) {
       return;
@@ -36888,9 +38106,51 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
         serviceType: serviceKey,
       }).finally(() => {
         section.__underparCmLoadPending = false;
-      });
+        });
     };
-    void section.__underparRefreshCm();
+    const mountCachedCmContent = () =>
+      renderCachedCmServiceContent(
+        programmer,
+        (serviceKey === "cmMvpd"
+          ? getCurrentPremiumAppsSnapshot(programmer?.programmerId || "")?.cmMvpd ||
+            state.cmServiceByMvpdSelectionKey.get(buildCurrentCmMvpdSelectionKey(programmer))
+          : getCurrentPremiumAppsSnapshot(programmer?.programmerId || "")?.cm ||
+            state.cmServiceByProgrammerId.get(programmer?.programmerId || "")) || appInfo,
+        section,
+        contentElement,
+        state.premiumPanelRequestToken,
+        {
+          serviceType: serviceKey,
+          allowSynthetic: true,
+        }
+      );
+    const preloadCmContent = () => {
+      if (section.__underparCmState || section.__underparCmLoadPending) {
+        return;
+      }
+      void section.__underparRefreshCm();
+    };
+    const ensureCmContentReady = () => {
+      const cachedRenderResult = mountCachedCmContent();
+      if (cachedRenderResult?.rendered && cachedRenderResult.synthetic !== true) {
+        return;
+      }
+      if (!detailsElement?.open) {
+        if (cachedRenderResult?.synthetic === true) {
+          preloadCmContent();
+        }
+        return;
+      }
+      preloadCmContent();
+    };
+    const initialCachedRender = mountCachedCmContent();
+    if (!initialCachedRender?.rendered || initialCachedRender.synthetic === true) {
+      preloadCmContent();
+    }
+    if (detailsElement) {
+      detailsElement.addEventListener("toggle", ensureCmContentReady);
+    }
+    ensureCmContentReady();
   }
 
   if (serviceKey === "restV2") {
@@ -37106,8 +38366,10 @@ function resetWorkflowForLoggedOut() {
   state.cmTenantDebugExportedByUrl.clear();
   state.cmConsoleBootstrapSummary = null;
   state.cmConsoleBootstrapPromise = null;
+  state.cmUsageWarmStateByProgrammerId.clear();
   state.cmAuthBootstrapPromise = null;
   state.cmAuthBootstrapLastAttemptAt = 0;
+  state.cmConsoleBootstrapQualified = false;
   state.cmConsoleTokenConsoleEmitKey = "";
   state.cmLastHydratedAccessToken = "";
   state.cmTenantBundleByTenantKey.clear();
@@ -37115,6 +38377,8 @@ function resetWorkflowForLoggedOut() {
   state.cmWorkspaceTabId = 0;
   state.cmWorkspaceWindowId = 0;
   state.cmWorkspaceTabIdByWindowId.clear();
+  state.cmWorkspaceReadyByWindowId.clear();
+  state.cmWorkspaceReadyWaitersByWindowId.clear();
   state.cmWorkspaceControllerStateVersion = 0;
   state.megWorkspaceTabId = 0;
   state.megWorkspaceWindowId = 0;
@@ -37146,7 +38410,6 @@ function resetWorkflowForLoggedOut() {
   state.restV2ProfilesHydrationPromiseBySelectionKey.clear();
   state.restV2BobtoolsRedirectInFlightByTabId.clear();
   state.restV2PopupCloseProbeInFlightBySelectionKey.clear();
-  state.premiumSectionCollapsedByKey.clear();
   state.premiumAutoRefreshMetaByKey.clear();
   state.premiumPanelRequestToken = 0;
   state.mvpdCacheByRequestor.clear();
@@ -38011,6 +39274,196 @@ async function clearLoginHelperResult(requestId) {
   }
 }
 
+async function getTabByIdSafe(tabId) {
+  const normalizedTabId = Number(tabId || 0);
+  if (!Number.isInteger(normalizedTabId) || normalizedTabId <= 0 || !chrome.tabs?.get) {
+    return null;
+  }
+  try {
+    return await chrome.tabs.get(normalizedTabId);
+  } catch {
+    return null;
+  }
+}
+
+async function releaseLoginHelperBootstrapContext(reason = "unknown") {
+  const context = activeLoginHelperBootstrapContext;
+  activeLoginHelperBootstrapContext = null;
+  if (!context || typeof context !== "object") {
+    return;
+  }
+
+  const tabId = Number(context?.tabId || 0);
+  const windowId = Number(context?.windowId || 0);
+  const debuggerSession = context?.debuggerSession || null;
+
+  if (debuggerSession?.detach) {
+    try {
+      await debuggerSession.detach();
+    } catch {
+      // Ignore debugger detach failures during retained popup cleanup.
+    }
+  }
+
+  if (windowId > 0) {
+    try {
+      await chrome.windows.remove(windowId);
+      return;
+    } catch {
+      // Fall through to tab cleanup when the window is already gone.
+    }
+  }
+
+  if (tabId > 0) {
+    try {
+      await chrome.tabs.remove(tabId);
+    } catch {
+      // Ignore retained popup cleanup failures.
+    }
+  }
+
+  log("Released retained login helper popup", {
+    reason: String(reason || "unknown"),
+    tabId,
+    windowId,
+  });
+}
+
+async function retainLoginHelperBootstrapContext(context = {}) {
+  const tabId = Number(context?.tabId || 0);
+  const windowId = Number(context?.windowId || 0);
+  if (!Number.isInteger(tabId) || tabId <= 0 || !Number.isInteger(windowId) || windowId <= 0) {
+    return null;
+  }
+
+  await releaseLoginHelperBootstrapContext("superseded");
+  activeLoginHelperBootstrapContext = {
+    tabId,
+    windowId,
+    debuggerSession: context?.debuggerSession || null,
+    requestId: String(context?.requestId || "").trim(),
+    retainedAt: Date.now(),
+  };
+  log("Retained login helper popup for CM bootstrap", {
+    tabId,
+    windowId,
+    requestId: String(context?.requestId || "").trim(),
+  });
+  return activeLoginHelperBootstrapContext;
+}
+
+function getRetainedLoginHelperBootstrapTabId() {
+  return Number(activeLoginHelperBootstrapContext?.tabId || 0);
+}
+
+async function maybeReleaseRetainedLoginHelperBootstrapContext(preferredTabId = 0, reason = "unknown") {
+  const retainedTabId = getRetainedLoginHelperBootstrapTabId();
+  if (!Number.isInteger(retainedTabId) || retainedTabId <= 0) {
+    return false;
+  }
+  const normalizedPreferredTabId = Number(preferredTabId || 0);
+  if (Number.isInteger(normalizedPreferredTabId) && normalizedPreferredTabId > 0 && normalizedPreferredTabId !== retainedTabId) {
+    return false;
+  }
+  await releaseLoginHelperBootstrapContext(reason);
+  return true;
+}
+
+function getAdobePassConsoleAuthPrimeUrl() {
+  const environment =
+    state.adobePassEnvironment && typeof state.adobePassEnvironment === "object"
+      ? state.adobePassEnvironment
+      : getActiveAdobePassEnvironment();
+  const explicitUrl = String(environment?.consoleShellUrl || "").trim();
+  if (explicitUrl) {
+    return explicitUrl;
+  }
+  const cmConsoleOrigin = String(environment?.cmConsoleOrigin || CM_CONSOLE_APP_ORIGIN || "").trim();
+  const route = String(environment?.route || "release-production").trim() || "release-production";
+  if (!cmConsoleOrigin) {
+    return "";
+  }
+  return `${cmConsoleOrigin.replace(/\/+$/, "")}/#/@adobepass/pass/authentication/${route}`;
+}
+
+function getCmConsoleAuthPrimeUrl() {
+  const environment =
+    state.adobePassEnvironment && typeof state.adobePassEnvironment === "object"
+      ? state.adobePassEnvironment
+      : getActiveAdobePassEnvironment();
+  const explicitUrl = String(environment?.cmConsoleShellUrl || "").trim();
+  if (explicitUrl) {
+    return explicitUrl;
+  }
+  const cmConsoleOrigin = String(environment?.cmConsoleOrigin || CM_CONSOLE_APP_ORIGIN || "").trim();
+  if (!cmConsoleOrigin) {
+    return "";
+  }
+  return `${cmConsoleOrigin.replace(/\/+$/, "")}/#/@adobepass/cm-console`;
+}
+
+async function primeCmConsoleInAuthPopup(tabId, options = {}) {
+  const normalizedTabId = Number(tabId || 0);
+  const primeUrls = uniquePreserveOrder([
+    String(options?.passConsoleUrl || getAdobePassConsoleAuthPrimeUrl()).trim(),
+    String(options?.primeUrl || getCmConsoleAuthPrimeUrl()).trim(),
+  ]).filter(Boolean);
+  if (!Number.isInteger(normalizedTabId) || normalizedTabId <= 0 || primeUrls.length === 0) {
+    return { ok: false, skipped: true, reason: "missing-tab-or-url" };
+  }
+
+  const timeoutMs = Math.max(5000, Number(options?.timeoutMs || 15000));
+  const settleMs = Math.max(0, Number(options?.settleMs || 1800));
+  const requestId = String(options?.requestId || "").trim();
+
+  try {
+    log("Priming AdobePass/CM console in login popup", {
+      tabId: normalizedTabId,
+      requestId,
+      urls: primeUrls.map((value) => summarizeUrl(value)),
+    });
+    let lastNavigation = null;
+    for (const primeUrl of primeUrls) {
+      await chrome.tabs.update(normalizedTabId, {
+        url: primeUrl,
+        active: true,
+      });
+      lastNavigation = await waitForTabCompletion(normalizedTabId, timeoutMs, {
+        expectedUrl: primeUrl,
+      });
+      if (settleMs > 0) {
+        await sleepMs(settleMs);
+      }
+    }
+    log("AdobePass/CM console popup prime complete", {
+      tabId: normalizedTabId,
+      requestId,
+      ok: lastNavigation?.ok === true,
+      reason: String(lastNavigation?.reason || ""),
+      url: summarizeUrl(lastNavigation?.url || primeUrls[primeUrls.length - 1] || ""),
+    });
+    return {
+      ok: lastNavigation?.ok === true,
+      skipped: false,
+      reason: String(lastNavigation?.reason || ""),
+      url: String(lastNavigation?.url || primeUrls[primeUrls.length - 1] || ""),
+    };
+  } catch (error) {
+    log("AdobePass/CM console popup prime failed", {
+      tabId: normalizedTabId,
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+      urls: primeUrls.map((value) => summarizeUrl(value)),
+    });
+    return {
+      ok: false,
+      skipped: false,
+      reason: error instanceof Error ? error.message : String(error),
+      url: primeUrls[primeUrls.length - 1] || "",
+    };
+  }
+}
+
 function normalizeLoginHelperMessage(message, requestId) {
   if (!message || typeof message !== "object") {
     return null;
@@ -38024,7 +39477,7 @@ function normalizeLoginHelperMessage(message, requestId) {
   return message;
 }
 
-async function runLoginHelperFlow(requestState, extraParams = {}) {
+async function runLoginHelperFlow(requestState, extraParams = {}, options = {}) {
   const helperRequestId = randomStateValue();
   const helperUrl = new URL(chrome.runtime.getURL(LOGIN_HELPER_PATH));
   helperUrl.searchParams.set("mode", "login");
@@ -38042,11 +39495,14 @@ async function runLoginHelperFlow(requestState, extraParams = {}) {
 
   return new Promise(async (resolve, reject) => {
     let completed = false;
+    let primingCmConsole = false;
     let helperWindowId = 0;
     let helperTabId = 0;
     let debuggerSession = null;
     let timeoutId = null;
     let pollId = null;
+    const shouldPrimeCmConsole = extraParams?.prime_cm_console !== "false";
+    const keepWindowOpenForBootstrap = options?.keepWindowOpenForBootstrap === true;
 
     const finalize = async (payload, error) => {
       if (completed) {
@@ -38072,6 +39528,21 @@ async function runLoginHelperFlow(requestState, extraParams = {}) {
         }
       }
 
+      await clearLoginHelperResult(helperRequestId);
+
+      let retainedBootstrapContext = null;
+      if (!error && keepWindowOpenForBootstrap && helperWindowId && helperTabId && debuggerSession) {
+        retainedBootstrapContext = await retainLoginHelperBootstrapContext({
+          windowId: helperWindowId,
+          tabId: helperTabId,
+          debuggerSession,
+          requestId: helperRequestId,
+        });
+        debuggerSession = null;
+        helperWindowId = 0;
+        helperTabId = 0;
+      }
+
       if (debuggerSession) {
         try {
           await debuggerSession.detach();
@@ -38080,8 +39551,6 @@ async function runLoginHelperFlow(requestState, extraParams = {}) {
         }
         debuggerSession = null;
       }
-
-      await clearLoginHelperResult(helperRequestId);
 
       if (helperWindowId) {
         try {
@@ -38136,6 +39605,8 @@ async function runLoginHelperFlow(requestState, extraParams = {}) {
         imageUrl: resolvedImageUrl,
         capturedAvatarUrl,
         organizations: payload?.organizations && typeof payload.organizations === "object" ? payload.organizations : null,
+        authPopupTabId: Number(retainedBootstrapContext?.tabId || 0),
+        authPopupWindowId: Number(retainedBootstrapContext?.windowId || 0),
       });
     };
 
@@ -38150,8 +39621,18 @@ async function runLoginHelperFlow(requestState, extraParams = {}) {
         void finalize(null, new Error(message));
         return;
       }
+      if (!shouldPrimeCmConsole || primingCmConsole || !helperTabId) {
+        void finalize(normalized, null);
+        return;
+      }
 
-      void finalize(normalized, null);
+      primingCmConsole = true;
+      void (async () => {
+        await primeCmConsoleInAuthPopup(helperTabId, {
+          requestId: helperRequestId,
+        });
+        await finalize(normalized, null);
+      })();
     };
 
     const onRuntimeMessage = (incomingMessage) => {
@@ -38383,7 +39864,9 @@ async function startLogin(options = {}) {
 
   if (useLoginHelper) {
     try {
-      return await runLoginHelperFlow(requestState, extraParams);
+      return await runLoginHelperFlow(requestState, extraParams, {
+        keepWindowOpenForBootstrap: options.keepAuthWindowOpenForBootstrap === true,
+      });
     } catch (error) {
       const message = error?.message || String(error);
       const normalizedMessage = String(message).toLowerCase();
@@ -40277,12 +41760,17 @@ function buildAvatarMenuEntries(loginData) {
     .trim()
     .toLowerCase();
   const hasCmConsoleToken = Boolean(cmConsoleAccessToken && isCmConsoleClientId(cmConsoleClientId));
-  if (hasCmConsoleToken) {
-    pushEntry("cm-console-ui access token", cmConsoleAccessToken, {
-      multiline: true,
-      copyValue: cmConsoleAccessToken,
-    });
-  }
+  const cmConsoleStatusText = hasCmConsoleToken
+    ? cmConsoleAccessToken
+    : state.cmAuthBootstrapPromise || state.cmTenantsPrecheckPending
+      ? "Hydrating cm-console-ui bearer..."
+      : state.cmTenantsPrecheckLastError
+        ? `Unavailable: ${String(state.cmTenantsPrecheckLastError || "").trim()}`
+        : "Unavailable: cm-console-ui bearer has not been hydrated yet.";
+  pushEntry("cm-console-ui access token", cmConsoleStatusText, {
+    multiline: true,
+    copyValue: hasCmConsoleToken ? cmConsoleAccessToken : "",
+  });
   pushEntry("Profile Image URL", profileImageLabel);
   const allProfileImageCandidates = collectProfileImageCandidatesForMenu(profile);
   const allProfileImageLines =
@@ -40602,6 +42090,14 @@ function buildLoginSessionPayloadFromAuth(authData, profile = null, imageUrl = "
     idToken: compactStorageString(firstNonEmptyString([authData?.idToken]), 4096),
     refreshToken: compactStorageString(firstNonEmptyString([authData?.refreshToken]), 4096),
     imsSession,
+    experienceCloudAccessToken: "",
+    experienceCloudExpiresAt: 0,
+    experienceCloudScope: "",
+    experienceCloudImsSession: null,
+    cmConsoleAccessToken: "",
+    cmConsoleExpiresAt: 0,
+    cmConsoleScope: "",
+    cmConsoleImsSession: null,
     profile: normalizedProfile,
     imageUrl: resolvedImageUrl,
     sessionKeys: buildSessionKeySnapshot({
@@ -42043,6 +43539,24 @@ async function loadStoredLoginData() {
           : null
       )
     : null;
+  const storedExperienceCloudToken = normalizeBearerTokenValue(firstNonEmptyString([loginData?.experienceCloudAccessToken]));
+  const validStoredExperienceCloudToken = tokenSupportsExperienceCloudConsole(storedExperienceCloudToken)
+    ? storedExperienceCloudToken
+    : "";
+  const experienceCloudTokenSnapshot = validStoredExperienceCloudToken
+    ? deriveImsSessionSnapshotFromToken(validStoredExperienceCloudToken)
+    : null;
+  const experienceCloudExpiresAt = validStoredExperienceCloudToken
+    ? resolveStoredSessionExpiresAt({ expiresAt: loginData?.experienceCloudExpiresAt }, experienceCloudTokenSnapshot)
+    : 0;
+  const experienceCloudImsSession = validStoredExperienceCloudToken
+    ? mergeImsSessionSnapshots(
+        experienceCloudTokenSnapshot,
+        loginData?.experienceCloudImsSession && typeof loginData.experienceCloudImsSession === "object"
+          ? loginData.experienceCloudImsSession
+          : null
+      )
+    : null;
   return {
     ...loginData,
     accessToken,
@@ -42051,6 +43565,10 @@ async function loadStoredLoginData() {
     scope: compactStorageString(firstNonEmptyString([loginData?.scope]), 2048),
     idToken: compactStorageString(firstNonEmptyString([loginData?.idToken]), 4096),
     refreshToken: compactStorageString(firstNonEmptyString([loginData?.refreshToken]), 4096),
+    experienceCloudAccessToken: experienceCloudExpiresAt > Date.now() ? validStoredExperienceCloudToken : "",
+    experienceCloudExpiresAt: experienceCloudExpiresAt > Date.now() ? experienceCloudExpiresAt : 0,
+    experienceCloudScope: compactStorageString(firstNonEmptyString([loginData?.experienceCloudScope]), 2048),
+    experienceCloudImsSession,
     cmConsoleAccessToken: cmConsoleExpiresAt > Date.now() ? validStoredCmConsoleToken : "",
     cmConsoleExpiresAt: cmConsoleExpiresAt > Date.now() ? cmConsoleExpiresAt : 0,
     cmConsoleScope: compactStorageString(firstNonEmptyString([loginData?.cmConsoleScope]), 2048),
@@ -42280,6 +43798,10 @@ function buildStoredLoginData(loginData, minimal = false) {
     scope: compactStorageString(firstNonEmptyString([loginData?.scope, imsSession?.scope]), 2048),
     idToken: compactStorageString(firstNonEmptyString([loginData?.idToken]), 4096),
     refreshToken: compactStorageString(firstNonEmptyString([loginData?.refreshToken]), 4096),
+    experienceCloudAccessToken: compactStorageString(firstNonEmptyString([loginData?.experienceCloudAccessToken]), 4096),
+    experienceCloudExpiresAt: Number(loginData?.experienceCloudExpiresAt || 0),
+    experienceCloudScope: compactStorageString(firstNonEmptyString([loginData?.experienceCloudScope]), 2048),
+    experienceCloudImsSession: compactImsSessionForStorage(loginData?.experienceCloudImsSession),
     cmConsoleAccessToken: compactStorageString(firstNonEmptyString([loginData?.cmConsoleAccessToken]), 4096),
     cmConsoleExpiresAt: Number(loginData?.cmConsoleExpiresAt || 0),
     cmConsoleScope: compactStorageString(firstNonEmptyString([loginData?.cmConsoleScope]), 2048),
@@ -42577,20 +44099,10 @@ function getSessionExpiryState() {
 }
 
 async function attemptSessionAutoBootstrap(trigger = "interval") {
-  if (state.sessionMonitorSuppressed || state.sessionReady || state.restricted) {
-    return false;
-  }
-
-  const now = Date.now();
-  if (now - Number(state.sessionMonitorLastBootstrapAttemptAt || 0) < IMS_SESSION_MONITOR_BOOTSTRAP_COOLDOWN_MS) {
-    return false;
-  }
-  state.sessionMonitorLastBootstrapAttemptAt = now;
-
-  const cookieActivated = await tryActivateCookieSession(`session-monitor-${trigger}`, {
-    restrictOnDenied: false,
-  });
-  return cookieActivated;
+  // Manual-login mode: UnderPAR must remain on the sign-in screen until the
+  // user explicitly clicks Sign In. Do not auto-bootstrap cookie or silent
+  // sessions from the background monitor while logged out.
+  return false;
 }
 
 async function probeExperienceCloudSessionState() {
@@ -42756,6 +44268,8 @@ function scheduleNoTouchRefresh() {
 
 async function activateSession(sessionData, source = "unknown", options = {}) {
   const allowDeniedRecovery = options.allowDeniedRecovery !== false;
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
   const enforced = await enforceAdobePassAccess(sessionData);
   if (!enforced.allowed || !enforced.loginData) {
     await clearLoginData();
@@ -42888,6 +44402,14 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     idToken: compactStorageString(firstNonEmptyString([enforced.loginData?.idToken]), 4096),
     refreshToken: compactStorageString(firstNonEmptyString([enforced.loginData?.refreshToken]), 4096),
     imsSession: resolvedImsSession,
+    experienceCloudAccessToken: "",
+    experienceCloudExpiresAt: 0,
+    experienceCloudScope: "",
+    experienceCloudImsSession: null,
+    cmConsoleAccessToken: "",
+    cmConsoleExpiresAt: 0,
+    cmConsoleScope: "",
+    cmConsoleImsSession: null,
     profile: resolvedProfile,
     imageUrl: resolvedImageUrl,
     adobePassOrg:
@@ -42924,6 +44446,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   }
 
   state.loginData = resolvedLoginData;
+  state.cmConsoleBootstrapQualified = false;
   state.cmLastHydratedAccessToken = normalizeBearerTokenValue(firstNonEmptyString([resolvedLoginData.cmConsoleAccessToken || ""]));
   state.cmConsoleTokenConsoleEmitKey = "";
   writePersistedAvatarCandidate(resolvedLoginData, {
@@ -42941,7 +44464,11 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   scheduleNoTouchRefresh();
   let cmTenantsPrecheckError = null;
   try {
-    await ensureCmTenantsPrecheckForActiveSession(`session-activated:${source}`, { forceRefresh: false });
+    await ensureCmTenantsPrecheckForActiveSession(`session-activated:${source}`, {
+      forceRefresh: true,
+      allowTemporaryPageContextTab,
+      preferredCmBootstrapTabId,
+    });
   } catch (error) {
     cmTenantsPrecheckError = error instanceof Error ? error : new Error(String(error));
   }
@@ -42962,8 +44489,10 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   } else {
     clearStatusUnlessCmTenantsPrecheckBlocked();
   }
+  if (cmTenantsPrecheckError) {
+    queueCmConsoleAutoHydration(`session-activated:${source}`);
+  }
   render();
-  queueCmConsoleAutoHydration(`session-activated:${source}`);
   log(`Session activated (${source})`, {
     expiresAt: resolvedLoginData.expiresAt,
     org: resolvedLoginData.adobePassOrg,
@@ -43195,25 +44724,75 @@ function applyMediaCompanyOptionHydrationState() {
     (Array.isArray(state.programmers) ? state.programmers : []).map((programmer) => [String(programmer?.key || "").trim(), programmer])
   );
 
+  const resolveProgrammerCmOptionState = (programmer = null) => {
+    const programmerId = String(programmer?.programmerId || "").trim();
+    if (!programmerId) {
+      return {
+        checked: false,
+        matchedTenants: [],
+      };
+    }
+    const runtimeService =
+      getCurrentPremiumAppsSnapshot(programmerId)?.cm ||
+      state.cmServiceByProgrammerId.get(programmerId) ||
+      buildPassVaultRuntimeCmServiceSnapshot(getPassVaultMediaCompanyRecord(programmerId)) ||
+      null;
+    const matchedTenants = sanitizePassVaultMatchedTenants(runtimeService?.matchedTenants || []);
+    return {
+      checked: Boolean(
+        runtimeService &&
+          (runtimeService?.checked === true ||
+            Number(runtimeService?.fetchedAt || 0) > 0 ||
+            Boolean(String(runtimeService?.sourceUrl || "").trim()) ||
+            Boolean(String(runtimeService?.loadError || "").trim()))
+      ),
+      matchedTenants,
+    };
+  };
+
   Array.from(els.mediaCompanySelect.options || []).forEach((option) => {
     const optionValue = String(option?.value || "").trim();
     if (!optionValue) {
       option.style.color = "";
       option.title = "";
       delete option.dataset.vaultHydration;
+      delete option.dataset.baseLabel;
       return;
     }
 
     const programmer = programmerByKey.get(optionValue) || null;
+    const baseLabel = String(
+      option.dataset.baseLabel ||
+        option.textContent ||
+        `${String(programmer?.programmerName || "").trim()} - ${String(programmer?.programmerId || "").trim()}`
+    )
+      .replace(/\s+\[CM\]$/i, "")
+      .trim();
+    option.dataset.baseLabel = baseLabel;
+    const cmOptionState = resolveProgrammerCmOptionState(programmer);
+    const cmTenantNames = cmOptionState.matchedTenants
+      .map((tenant) => String(firstNonEmptyString([tenant?.tenantName, tenant?.tenantId]) || "").trim())
+      .filter(Boolean);
+    option.textContent = baseLabel;
     const hydrationStatus = getPassVaultProgrammerHydrationStatus(programmer?.programmerId);
     const reusable = isPassVaultProgrammerReadyForReuse(programmer?.programmerId);
+    const cmTitle =
+      cmTenantNames.length > 0
+        ? `CM detected in this environment: ${cmTenantNames.slice(0, 3).join(", ")}${cmTenantNames.length > 3 ? "..." : ""}.`
+        : cmOptionState.checked
+          ? "CM not detected for this Media Company in the active environment."
+          : "";
     if (hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE || reusable) {
       option.style.color = "";
       option.style.fontWeight = "";
-      option.title =
+      option.title = [
         hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE
           ? "UnderPAR vault hydrated for this Media Company."
-          : "UnderPAR vault already has reusable service mappings and credentials for this Media Company.";
+          : "UnderPAR vault already has reusable service mappings and credentials for this Media Company.",
+        cmTitle,
+      ]
+        .filter(Boolean)
+        .join(" ");
       option.dataset.vaultHydration = reusable ? UNDERPAR_VAULT_STATUS_COMPLETE : hydrationStatus;
       return;
     }
@@ -43221,10 +44800,14 @@ function applyMediaCompanyOptionHydrationState() {
     option.style.color = "rgba(42, 56, 77, 0.62)";
     option.style.fontWeight = "500";
     option.dataset.vaultHydration = hydrationStatus || UNDERPAR_VAULT_STATUS_PENDING;
-    option.title =
+    option.title = [
       hydrationStatus === UNDERPAR_VAULT_STATUS_PARTIAL
         ? "UnderPAR has a partial vault record for this Media Company. A refresh may still be required for full credential coverage."
-        : "UnderPAR has not fully hydrated this Media Company yet. First selection compiles and persists the vault record.";
+        : "UnderPAR has not fully hydrated this Media Company yet. First selection compiles and persists the vault record.",
+      cmTitle,
+    ]
+      .filter(Boolean)
+      .join(" ");
   });
 
   const selectedProgrammer = resolveSelectedProgrammer();
@@ -43271,11 +44854,19 @@ function syncMediaCompanySelectAvailability() {
 
 async function ensureCmTenantsPrecheckForActiveSession(reason = "session", options = {}) {
   const forceRefresh = options?.forceRefresh === true;
+  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
+  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
   if (state.restricted || !state.loginData) {
     return null;
   }
 
-  if (!forceRefresh && state.cmTenantsPrecheckComplete === true && hasCmTenantsCatalogEntries()) {
+  const existingCmToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+  const cmTokenReady =
+    existingCmToken &&
+    tokenSupportsCmTenantCatalog(existingCmToken) &&
+    isAccessTokenFreshEnough(existingCmToken, 45 * 1000);
+
+  if (!forceRefresh && state.cmTenantsPrecheckComplete === true && hasCmTenantsCatalogEntries() && cmTokenReady) {
     syncMediaCompanySelectAvailability();
     return state.cmTenantsCatalog;
   }
@@ -43286,11 +44877,50 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
   syncMediaCompanySelectAvailability();
 
   try {
-    const catalog = await ensureCmTenantsCatalog({ forceRefresh });
+    let hydratedToken = normalizeBearerTokenValue(
+      await hydrateGlobalCmConsoleBootstrapForActiveSession(reason, {
+        forceRefresh,
+        allowTemporaryPageContextTab,
+        preferredCmBootstrapTabId,
+      })
+    );
+    const catalog = await ensureCmTenantsCatalog({
+      forceRefresh,
+      accessToken: hydratedToken,
+      skipBootstrap: Boolean(hydratedToken),
+      allowTemporaryPageContextTab,
+      preferredCmBootstrapTabId,
+    });
     if (!hasCmTenantsCatalogEntries(catalog)) {
       throw new Error("CM tenants load failed: tenant catalog returned no tenants.");
     }
+    if (!hydratedToken || !tokenSupportsCmTenantCatalog(hydratedToken)) {
+      hydratedToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+    }
+    if (!hydratedToken || !tokenSupportsCmTenantCatalog(hydratedToken)) {
+      hydratedToken = normalizeBearerTokenValue(
+        await ensureCmApiAccessToken({
+          forceRefresh,
+          freshLeewayMs: 45 * 1000,
+          allowTemporaryPageContextTab,
+          preferredCmBootstrapTabId,
+        }).catch(() => "")
+      );
+    }
+    if (!hydratedToken || !tokenSupportsCmTenantCatalog(hydratedToken)) {
+      emitCmDebugEvent({
+        phase: "cm-tenant-precheck-token-missing",
+        reason: String(reason || ""),
+        tenantCount: Number(catalog?.tenants?.length || 0),
+        sourceUrl: String(catalog?.sourceUrl || ""),
+      });
+      throw new Error(
+        "CM token hydrate failed: UnderPAR could not auto-hydrate a cm-console-ui bearer for CMU usage."
+      );
+    }
+    await persistResolvedCmGlobalAuthState(hydratedToken, `tenant-precheck:${reason}`).catch(() => null);
     state.cmTenantsPrecheckComplete = true;
+    state.cmConsoleBootstrapQualified = true;
     state.cmTenantsPrecheckLastError = "";
     prefetchCmConsoleBootstrapSummaryInBackground(`tenant-precheck:${reason}`, { forceRefresh: false });
     emitCmDebugEvent({
@@ -43298,7 +44928,12 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
       reason: String(reason || ""),
       tenantCount: Number(catalog?.tenants?.length || 0),
       sourceUrl: String(catalog?.sourceUrl || ""),
+      tokenClientId: String(parseJwtPayload(hydratedToken)?.client_id || ""),
     });
+    await maybeReleaseRetainedLoginHelperBootstrapContext(
+      preferredCmBootstrapTabId,
+      `cm-global-hydrate-complete:${reason}`
+    );
     return catalog;
   } catch (error) {
     const resolvedError = error instanceof Error ? error : new Error(String(error));
@@ -43316,6 +44951,133 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
       renderAvatarMenu();
     }
   }
+}
+
+async function persistResolvedCmGlobalAuthState(accessToken = "", source = "unknown") {
+  const normalizedAccessToken = normalizeBearerTokenValue(accessToken);
+  if (!normalizedAccessToken || !tokenSupportsCmTenantCatalog(normalizedAccessToken)) {
+    return null;
+  }
+
+  const tokenClaims = parseJwtPayload(normalizedAccessToken) || {};
+  const resolvedImsSession = mergeImsSessionSnapshots(
+    deriveImsSessionSnapshotFromToken(normalizedAccessToken),
+    state.loginData?.cmConsoleImsSession && typeof state.loginData.cmConsoleImsSession === "object"
+      ? state.loginData.cmConsoleImsSession
+      : null
+  );
+
+  return persistPassVaultCmGlobalState(
+    {
+      clientId: CM_IMS_PRIMARY_CLIENT_ID,
+      tokenClientId: firstNonEmptyString([tokenClaims?.client_id, tokenClaims?.clientId, CM_IMS_PRIMARY_CLIENT_ID]),
+      userId: firstNonEmptyString([resolvedImsSession?.userId, tokenClaims?.user_id, tokenClaims?.userId]),
+      scope: firstNonEmptyString([tokenClaims?.scope, state.loginData?.cmConsoleScope]),
+      expiresAt:
+        coercePositiveNumber(resolveAuthResponseExpiry(normalizedAccessToken, coercePositiveNumber(tokenClaims?.expires_in))?.expiresAt) ||
+        coercePositiveNumber(state.loginData?.cmConsoleExpiresAt),
+      updatedAt: Date.now(),
+      tokenFingerprint: getPreferredCmTokenFingerprint(normalizedAccessToken),
+      imsSession: resolvedImsSession,
+      source: String(source || "unknown"),
+    },
+    { silent: true }
+  );
+}
+
+async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session", options = {}) {
+  const forceRefresh = options?.forceRefresh === true;
+  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
+  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+  if (state.restricted || !state.loginData) {
+    return "";
+  }
+
+  const existingToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+  if (
+    existingToken &&
+    tokenSupportsCmTenantCatalog(existingToken) &&
+    (!forceRefresh || isAccessTokenFreshEnough(existingToken, 45 * 1000))
+  ) {
+    await persistResolvedCmGlobalAuthState(existingToken, `existing:${reason}`).catch(() => null);
+    emitCmDebugEvent({
+      phase: "cm-global-hydrate-token-reuse",
+      reason: String(reason || ""),
+      tokenClientId: String(parseJwtPayload(existingToken)?.client_id || ""),
+    });
+    return existingToken;
+  }
+
+  let tokenResult = null;
+  const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
+  const experienceSeedResult = await requestExperienceCloudConsoleToken({
+    requireFresh: forceRefresh,
+    allowSilentAuth: true,
+  }).catch(() => null);
+  const persistedExperienceSeed = normalizeBearerTokenValue(
+    await persistExperienceCloudConsoleTokenResult(experienceSeedResult || {}, { silent: true })
+  );
+  const preferredExperienceSeed = normalizeBearerTokenValue(
+    firstNonEmptyString([
+      persistedExperienceSeed,
+      normalizeBearerTokenValue(experienceSeedResult?.accessToken || ""),
+      primarySeedToken,
+    ])
+  );
+
+  tokenResult = await requestQualifiedCmConsoleToken({
+    seedToken: preferredExperienceSeed,
+    requireFresh: forceRefresh,
+    allowSilentAuth: true,
+  }).catch(() => null);
+
+  if (!tokenResult?.accessToken && preferredExperienceSeed) {
+    tokenResult = await tryRefreshCmTokenFromIms(preferredExperienceSeed, {
+      requireFresh: forceRefresh,
+    }).catch(() => null);
+  }
+
+  if (!tokenResult?.accessToken && primarySeedToken && primarySeedToken !== preferredExperienceSeed) {
+    tokenResult = await requestQualifiedCmConsoleToken({
+      seedToken: primarySeedToken,
+      requireFresh: forceRefresh,
+      allowSilentAuth: true,
+    }).catch(() => null);
+  }
+
+  if (!tokenResult?.accessToken && primarySeedToken && primarySeedToken !== preferredExperienceSeed) {
+    tokenResult = await tryRefreshCmTokenFromIms(primarySeedToken, {
+      requireFresh: forceRefresh,
+    }).catch(() => null);
+  }
+
+  if (!tokenResult?.accessToken) {
+    tokenResult = await tryRefreshCmTokenFromIms("", {
+      requireFresh: forceRefresh,
+    }).catch(() => null);
+  }
+
+  if (!tokenResult?.accessToken) {
+    tokenResult = await requestCmConsoleTokenFromExperiencePageContext({
+      requireFresh: forceRefresh,
+      allowTemporaryTab: allowTemporaryPageContextTab,
+      preferredTabId: preferredCmBootstrapTabId,
+    }).catch(() => null);
+  }
+
+  const hydratedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
+  if (hydratedToken && tokenSupportsCmTenantCatalog(hydratedToken)) {
+    await persistResolvedCmGlobalAuthState(hydratedToken, `post-login:${reason}`).catch(() => null);
+    emitCmDebugEvent({
+      phase: "cm-global-hydrate-token-ready",
+      reason: String(reason || ""),
+      tokenClientId: String(parseJwtPayload(hydratedToken)?.client_id || ""),
+      source: String(tokenResult?.source || ""),
+    });
+    return hydratedToken;
+  }
+
+  return "";
 }
 
 function populateMediaCompanySelect() {
@@ -43338,6 +45100,7 @@ function populateMediaCompanySelect() {
     const option = document.createElement("option");
     option.value = optionValue.value;
     option.textContent = optionValue.text;
+    option.dataset.baseLabel = optionValue.text;
     els.mediaCompanySelect.appendChild(option);
   }
 
@@ -43448,6 +45211,7 @@ async function refreshProgrammerPanels(options = {}) {
   if (forcePremiumRefresh) {
     state.cmTenantBundleByTenantKey.clear();
     state.cmTenantBundlePromiseByTenantKey.clear();
+    state.cmUsageWarmStateByProgrammerId.clear();
     state.cmServiceByMvpdSelectionKey.clear();
     state.cmServiceLoadPromiseByMvpdSelectionKey.clear();
   }
@@ -43476,29 +45240,58 @@ async function refreshProgrammerPanels(options = {}) {
     }
     cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
   }
-  if (cachedServices && typeof cachedServices === "object") {
-    provisionalServices = cachedServices;
-    emitPremiumServiceDecisionLogs(programmer, cachedServices);
-    renderPremiumServices(cachedServices, programmer, { controllerReason });
+  if (
+    cachedServices &&
+    shouldShowCmService(cachedServices?.cm) &&
+    !hasCachedCmTenantBundleCoverage(cachedServices?.cm) &&
+    (isPassVaultBackedValue(cachedServices) || isPassVaultProgrammerHydrated(programmer?.programmerId))
+  ) {
+    restorePassVaultCmTenantBundlesToRuntime(getPassVaultMediaCompanyRecord(programmer.programmerId));
   }
   const cachedIncludesCm = Boolean(cachedServices && Object.prototype.hasOwnProperty.call(cachedServices, "cm"));
   const cachedCmMvpdSelectionKey = String(cachedServices?.cmMvpdSelectionKey || "").trim();
   const cmMvpdSelectionMatches = cachedCmMvpdSelectionKey === cmMvpdSelectionKey;
   const programmerVaultHydrated = isPassVaultProgrammerHydrated(programmer?.programmerId);
   const cachedVaultCredentialsReady = hasPassVaultCredentialCoverageForServices(programmer?.programmerId, cachedServices);
+  const cachedCmReadyForReuse = hasReusableCmSnapshotForSelection(cachedServices?.cm);
   const shouldReuseCachedServices =
     cachedServices &&
     cachedIncludesCm &&
+    cachedCmReadyForReuse &&
     cmMvpdSelectionMatches &&
     !forcePremiumRefresh &&
-    !shouldRetryCachedCmService(cachedServices?.cm) &&
     (programmerVaultHydrated || isPassVaultBackedValue(cachedServices)) &&
     cachedVaultCredentialsReady;
+  const cachedCmRuntimeReady = isCmRuntimeRenderReady(cachedServices?.cm);
+  if (cachedServices && typeof cachedServices === "object" && (cachedCmRuntimeReady || shouldReuseCachedServices)) {
+    // Repeat selection must paint instantly from the hydrated VAULT/runtime snapshot.
+    // CM runtime warmup can continue afterward without dropping the whole UI back
+    // to a loading shell.
+    provisionalServices = cachedServices;
+    emitPremiumServiceDecisionLogs(programmer, cachedServices);
+    renderPremiumServices(cachedServices, programmer, { controllerReason });
+  }
   if (shouldReuseCachedServices) {
+    if (cachedCmRuntimeReady) {
+      return;
+    }
+    const cachedHydration = await ensureCmHydratedForProgrammer(programmer, cachedServices, {
+      forceRefresh: forcePremiumRefresh,
+      reason: "panel-cache-reuse",
+    }).catch(() => null);
+    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+      return;
+    }
+    const reusedServices =
+      cachedHydration?.services || getCurrentPremiumAppsSnapshot(programmer.programmerId) || cachedServices;
+    setCurrentPremiumAppsSnapshot(programmer.programmerId, reusedServices);
+    provisionalServices = reusedServices;
+    emitPremiumServiceDecisionLogs(programmer, reusedServices);
+    renderPremiumServices(reusedServices, programmer, { controllerReason });
     return;
   }
 
-  if (!cachedServices) {
+  if (!provisionalServices) {
     renderPremiumServicesLoading(programmer, { controllerReason });
   }
   try {
@@ -43537,18 +45330,25 @@ async function refreshProgrammerPanels(options = {}) {
     };
     setCurrentPremiumAppsSnapshot(programmer.programmerId, initialMergedServices);
     provisionalServices = initialMergedServices;
+    const cmHydrationPromise = shouldShowCmService(initialMergedServices?.cm)
+      ? ensureCmHydratedForProgrammer(programmer, initialMergedServices, {
+          forceRefresh: forcePremiumRefresh,
+          reason: "panel-selection",
+        }).catch(() => null)
+      : Promise.resolve(null);
+    let renderReadyServices = initialMergedServices;
     const initialVaultCredentialsReady = hasPassVaultCredentialCoverageForServices(
       programmer.programmerId,
-      initialMergedServices
+      renderReadyServices
     );
-    emitPremiumServiceDecisionLogs(programmer, initialMergedServices);
-    renderPremiumServices(initialMergedServices, programmer, { controllerReason });
+    emitPremiumServiceDecisionLogs(programmer, renderReadyServices);
+    renderPremiumServices(renderReadyServices, programmer, { controllerReason });
     const shouldCompileVaultCredentials =
       forcePremiumRefresh ||
       !isPassVaultProgrammerHydrated(programmer.programmerId) ||
-      !isPassVaultBackedValue(initialMergedServices) ||
+      !isPassVaultBackedValue(renderReadyServices) ||
       !initialVaultCredentialsReady;
-    let runtimeServices = initialMergedServices;
+    let runtimeServices = renderReadyServices;
     if (shouldCompileVaultCredentials) {
       const cmResults = await Promise.allSettled([cmServicePromise, cmMvpdServicePromise]);
       if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
@@ -43556,9 +45356,9 @@ async function refreshProgrammerPanels(options = {}) {
       }
 
       const compiledMergedServices = {
-        ...(initialMergedServices && typeof initialMergedServices === "object" ? initialMergedServices : {}),
-        cm: cmResults[0]?.status === "fulfilled" ? cmResults[0].value : initialMergedServices?.cm ?? null,
-        cmMvpd: cmResults[1]?.status === "fulfilled" ? cmResults[1].value : initialMergedServices?.cmMvpd ?? null,
+        ...(renderReadyServices && typeof renderReadyServices === "object" ? renderReadyServices : {}),
+        cm: cmResults[0]?.status === "fulfilled" ? cmResults[0].value : renderReadyServices?.cm ?? null,
+        cmMvpd: cmResults[1]?.status === "fulfilled" ? cmResults[1].value : renderReadyServices?.cmMvpd ?? null,
         cmMvpdSelectionKey,
       };
       setCurrentPremiumAppsSnapshot(programmer.programmerId, compiledMergedServices);
@@ -43585,10 +45385,12 @@ async function refreshProgrammerPanels(options = {}) {
       }
       runtimeServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || compiledMergedServices;
     } else {
-      void persistPassVaultProgrammerRecord(programmer, initialMergedServices, {
+      await cmHydrationPromise;
+      const hydratedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || renderReadyServices;
+      void persistPassVaultProgrammerRecord(programmer, hydratedServices, {
         source: "live",
       }).catch(() => {});
-      runtimeServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || initialMergedServices;
+      runtimeServices = hydratedServices;
     }
 
     setCurrentPremiumAppsSnapshot(programmer.programmerId, runtimeServices);
@@ -43602,13 +45404,13 @@ async function refreshProgrammerPanels(options = {}) {
         }
         const currentServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || runtimeServices;
         const mergedServices = {
-        ...(currentServices && typeof currentServices === "object" ? currentServices : {}),
-        cm: results[0]?.status === "fulfilled" ? results[0].value : currentServices?.cm ?? null,
-        cmMvpd: results[1]?.status === "fulfilled" ? results[1].value : currentServices?.cmMvpd ?? null,
-        cmMvpdSelectionKey,
-      };
-      setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
-      emitPremiumServiceDecisionLogs(programmer, mergedServices);
+          ...(currentServices && typeof currentServices === "object" ? currentServices : {}),
+          cm: currentServices?.cm ?? (results[0]?.status === "fulfilled" ? results[0].value : null),
+          cmMvpd: currentServices?.cmMvpd ?? (results[1]?.status === "fulfilled" ? results[1].value : null),
+          cmMvpdSelectionKey,
+        };
+        setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
+        emitPremiumServiceDecisionLogs(programmer, mergedServices);
         renderPremiumServices(mergedServices, programmer, { controllerReason });
         void persistPassVaultProgrammerRecord(programmer, mergedServices, {
           source: "live",
@@ -47569,10 +49371,26 @@ function getCmTenantScopeForProgrammer(programmer = null) {
     selectedProgrammerService?.matchedTenants?.[0]?.tenantId,
     selectedProgrammerService?.matchedTenants?.[0]?.tenantName,
     programmer?.tenantId,
-    programmer?.tenantName,
-    programmer?.programmerId,
-    resolveSelectedProgrammer()?.programmerId
+    programmer?.tenantName
   );
+}
+
+function hasReusableCmSnapshotForSelection(cmService = null) {
+  if (!cmService || typeof cmService !== "object") {
+    return false;
+  }
+  if (shouldRetryCachedCmService(cmService)) {
+    return false;
+  }
+  if (isPassVaultBackedValue(cmService)) {
+    return (
+      (Array.isArray(cmService?.matchedTenants) && cmService.matchedTenants.length > 0) ||
+      Boolean(String(cmService?.loadError || "").trim()) ||
+      Boolean(String(cmService?.sourceUrl || "").trim()) ||
+      Number(cmService?.fetchedAt || 0) > 0
+    );
+  }
+  return true;
 }
 
 function emitCmTenantMatchDebugLine(programmer, catalog, matchedTenants, options = {}) {
@@ -47805,6 +49623,20 @@ function getPreferredPrimaryImsAccessTokenCandidate() {
   return token;
 }
 
+function getPreferredExperienceCloudConsoleAccessTokenCandidate() {
+  const persistedExperienceCloudToken = normalizeBearerTokenValue(firstNonEmptyString([state.loginData?.experienceCloudAccessToken || ""]));
+  if (persistedExperienceCloudToken && tokenSupportsExperienceCloudConsole(persistedExperienceCloudToken)) {
+    return persistedExperienceCloudToken;
+  }
+
+  const primaryToken = normalizeBearerTokenValue(firstNonEmptyString([state.loginData?.accessToken || ""]));
+  if (primaryToken && tokenSupportsExperienceCloudConsole(primaryToken)) {
+    return primaryToken;
+  }
+
+  return "";
+}
+
 function getPreferredCmAccessTokenCandidate() {
   return normalizeBearerTokenValue(firstNonEmptyString([state.cmLastHydratedAccessToken || "", state.loginData?.cmConsoleAccessToken || ""]));
 }
@@ -47927,8 +49759,200 @@ function buildExperienceCloudEarlyTokenFormBody() {
   return form.toString();
 }
 
+async function requestExperienceCloudValidateToken(seedToken = "", options = {}) {
+  const token = normalizeBearerTokenValue(seedToken);
+  if (!token || !isProbablyJwt(token) || !tokenSupportsExperienceCloudConsole(token)) {
+    return null;
+  }
+
+  const requireFresh = options.requireFresh === true;
+  const endpoint = `${IMS_BASE_URL}/ims/validate_token/v1?jslVersion=underpar-cm-seed`;
+  const form = new URLSearchParams({
+    type: "access_token",
+    client_id: EXPERIENCE_CLOUD_SSO_CLIENT_ID,
+    token,
+  });
+  const attempts = [{ credentials: "include" }, { credentials: "omit" }];
+
+  for (const attempt of attempts) {
+    try {
+      const response = await relayImsFetch(endpoint, {
+        method: "POST",
+        credentials: attempt.credentials,
+        headers: {
+          Accept: "*/*",
+          Origin: CM_CONSOLE_APP_ORIGIN,
+          Referer: CM_CONSOLE_APP_REFERER,
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        body: form.toString(),
+      });
+      if (!response.ok) {
+        continue;
+      }
+
+      const parsed = parseJsonText(await response.text().catch(() => ""), null);
+      if (!parsed || typeof parsed !== "object") {
+        continue;
+      }
+
+      const refreshedToken = normalizeBearerTokenValue(extractImsAccessTokenFromPayload(parsed));
+      if (!refreshedToken && parsed?.valid !== true) {
+        continue;
+      }
+      const resolvedToken = refreshedToken || token;
+      if (!resolvedToken || !isProbablyJwt(resolvedToken) || !tokenSupportsExperienceCloudConsole(resolvedToken)) {
+        continue;
+      }
+      if (requireFresh && !isAccessTokenFreshEnough(resolvedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+        continue;
+      }
+
+      const resolvedClaims = parseJwtPayload(resolvedToken) || {};
+      const tokenPayload = parsed?.token && typeof parsed.token === "object" ? parsed.token : {};
+      const statePayload = parseImsStatePayload(firstNonEmptyString([tokenPayload?.state]));
+      const createdAtRaw = Number(tokenPayload?.created_at || 0);
+      const createdAtMs =
+        createdAtRaw > 0 && createdAtRaw < 1000000000000 ? createdAtRaw * 1000 : createdAtRaw > 0 ? createdAtRaw : 0;
+
+      return {
+        accessToken: resolvedToken,
+        expiresAt: coercePositiveNumber(parsed?.expires_at || resolveAuthResponseExpiry(resolvedToken, 0)?.expiresAt),
+        expiresIn: coercePositiveNumber(tokenPayload?.expires_in || parsed?.expires_in || resolvedClaims?.expires_in),
+        scope: firstNonEmptyString([resolvedClaims?.scope, tokenPayload?.scope, parsed?.scope]),
+        imsSession: mergeImsSessionSnapshots(null, {
+          tokenId: tokenPayload?.id,
+          sessionId: tokenPayload?.sid,
+          sessionUrl: firstNonEmptyString([statePayload?.session]),
+          userId: firstNonEmptyString([tokenPayload?.user_id]),
+          authId: firstNonEmptyString([tokenPayload?.aa_id]),
+          clientId: firstNonEmptyString([tokenPayload?.client_id, EXPERIENCE_CLOUD_SSO_CLIENT_ID]),
+          tokenType: firstNonEmptyString([tokenPayload?.type]),
+          scope: firstNonEmptyString([tokenPayload?.scope, resolvedClaims?.scope]),
+          as: tokenPayload?.as,
+          fg: tokenPayload?.fg,
+          moi: tokenPayload?.moi,
+          pba: tokenPayload?.pba,
+          keyAlias: firstNonEmptyString([tokenPayload?.key_alias]),
+          stateNonce: statePayload?.nonce,
+          stateJslibVersion: firstNonEmptyString([statePayload?.jslibver, statePayload?.jslibVersion]),
+          createdAt: createdAtMs,
+          expiresAt: Number(parsed?.expires_at || 0),
+        }),
+        source: `exc-validate:${attempt.credentials}`,
+      };
+    } catch {
+      // Continue best-effort across credential modes.
+    }
+  }
+
+  return null;
+}
+
+async function requestQualifiedCmConsoleToken(options = {}) {
+  const requireFresh = options.requireFresh === true;
+  const allowSilentAuth = options.allowSilentAuth !== false;
+  const seedCandidates = [];
+  const seen = new Set();
+  const pushSeed = (value) => {
+    const normalized = normalizeBearerTokenValue(value);
+    if (
+      !normalized ||
+      !isProbablyJwt(normalized) ||
+      !tokenSupportsExperienceCloudConsole(normalized) ||
+      seen.has(normalized)
+    ) {
+      return;
+    }
+    seen.add(normalized);
+    seedCandidates.push(normalized);
+  };
+
+  pushSeed(options?.seedToken);
+  pushSeed(getPreferredPrimaryImsAccessTokenCandidate());
+  pushSeed(getPreferredExperienceCloudConsoleAccessTokenCandidate());
+
+  const runSeeds = async () => {
+    for (const seed of seedCandidates) {
+      const validatedSeedResult = (await requestExperienceCloudValidateToken(seed, { requireFresh })) || {
+        accessToken: seed,
+        expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(seed, 0)?.expiresAt),
+        expiresIn: 0,
+        scope: firstNonEmptyString([parseJwtPayload(seed)?.scope]),
+        imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(seed), null),
+        source: "exc-seed-existing",
+      };
+      const validatedSeedToken = normalizeBearerTokenValue(validatedSeedResult?.accessToken || seed);
+      if (!validatedSeedToken) {
+        continue;
+      }
+      const cmTokenResult = await requestCmTokenViaImsCheck(validatedSeedToken, {
+        requireFresh,
+      });
+      if (!cmTokenResult?.accessToken) {
+        continue;
+      }
+      return {
+        ...cmTokenResult,
+        imsSession: mergeImsSessionSnapshots(cmTokenResult?.imsSession || null, validatedSeedResult?.imsSession || null),
+        source: `qualified:${String(cmTokenResult?.source || "ims-check")}`,
+        qualified: true,
+      };
+    }
+    return null;
+  };
+
+  let qualifiedTokenResult = await runSeeds();
+  if (qualifiedTokenResult?.accessToken) {
+    return qualifiedTokenResult;
+  }
+
+  let experienceConsoleTokenResult = null;
+  try {
+    experienceConsoleTokenResult = await requestExperienceCloudConsoleToken({ requireFresh, allowSilentAuth });
+  } catch {
+    experienceConsoleTokenResult = null;
+  }
+  const persistedExperienceConsoleToken = normalizeBearerTokenValue(
+    await persistExperienceCloudConsoleTokenResult(experienceConsoleTokenResult || {})
+  );
+  pushSeed(persistedExperienceConsoleToken || experienceConsoleTokenResult?.accessToken);
+  qualifiedTokenResult = await runSeeds();
+  if (qualifiedTokenResult?.accessToken) {
+    return qualifiedTokenResult;
+  }
+
+  return null;
+}
+
 async function requestExperienceCloudConsoleToken(options = {}) {
   const requireFresh = options.requireFresh === true;
+  const allowSilentAuth = options.allowSilentAuth !== false;
+  const persistedExperienceToken = getPreferredExperienceCloudConsoleAccessTokenCandidate();
+  if (persistedExperienceToken && tokenSupportsExperienceCloudConsole(persistedExperienceToken)) {
+    if (!requireFresh || isAccessTokenFreshEnough(persistedExperienceToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+      return {
+        accessToken: persistedExperienceToken,
+        expiresAt:
+          coercePositiveNumber(resolveAuthResponseExpiry(persistedExperienceToken, 0)?.expiresAt) ||
+          coercePositiveNumber(state.loginData?.experienceCloudExpiresAt),
+        expiresIn: 0,
+        scope: firstNonEmptyString([
+          parseJwtPayload(persistedExperienceToken)?.scope,
+          state.loginData?.experienceCloudScope,
+          EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE,
+        ]),
+        imsSession: mergeImsSessionSnapshots(
+          deriveImsSessionSnapshotFromToken(persistedExperienceToken),
+          state.loginData?.experienceCloudImsSession && typeof state.loginData.experienceCloudImsSession === "object"
+            ? state.loginData.experienceCloudImsSession
+            : null
+        ),
+        source: "exc-persisted-existing",
+      };
+    }
+  }
+
   const currentPrimaryToken = getPreferredPrimaryImsAccessTokenCandidate();
   if (currentPrimaryToken && tokenSupportsExperienceCloudConsole(currentPrimaryToken)) {
     if (!requireFresh || isAccessTokenFreshEnough(currentPrimaryToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
@@ -47946,35 +49970,37 @@ async function requestExperienceCloudConsoleToken(options = {}) {
     }
   }
 
-  try {
-    const silentAuth = await startLogin({
-      interactive: false,
-      allowFallback: false,
-      extraParams: {
-        client_id: EXPERIENCE_CLOUD_SSO_CLIENT_ID,
-        scope: EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE,
-        profile_filter: EXPERIENCE_CLOUD_SILENT_PROFILE_FILTER,
-      },
-    });
-    const accessToken = normalizeBearerTokenValue(firstNonEmptyString([silentAuth?.accessToken]));
-    if (accessToken && isProbablyJwt(accessToken) && tokenSupportsExperienceCloudConsole(accessToken)) {
-      if (!requireFresh || isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-        const claims = parseJwtPayload(accessToken) || {};
-        return {
-          accessToken,
-          expiresAt: coercePositiveNumber(silentAuth?.expiresAt || resolveAuthResponseExpiry(accessToken, 0)?.expiresAt),
-          expiresIn: coercePositiveNumber(claims?.expires_in),
-          scope: firstNonEmptyString([silentAuth?.scope, claims?.scope, EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE]),
-          imsSession: mergeImsSessionSnapshots(
-            deriveImsSessionSnapshotFromToken(accessToken),
-            silentAuth?.imsSession && typeof silentAuth.imsSession === "object" ? silentAuth.imsSession : null
-          ),
-          source: "exc-silent-auth",
-        };
+  if (allowSilentAuth) {
+    try {
+      const silentAuth = await startLogin({
+        interactive: false,
+        allowFallback: false,
+        extraParams: {
+          client_id: EXPERIENCE_CLOUD_SSO_CLIENT_ID,
+          scope: EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE,
+          profile_filter: EXPERIENCE_CLOUD_SILENT_PROFILE_FILTER,
+        },
+      });
+      const accessToken = normalizeBearerTokenValue(firstNonEmptyString([silentAuth?.accessToken]));
+      if (accessToken && isProbablyJwt(accessToken) && tokenSupportsExperienceCloudConsole(accessToken)) {
+        if (!requireFresh || isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+          const claims = parseJwtPayload(accessToken) || {};
+          return {
+            accessToken,
+            expiresAt: coercePositiveNumber(silentAuth?.expiresAt || resolveAuthResponseExpiry(accessToken, 0)?.expiresAt),
+            expiresIn: coercePositiveNumber(claims?.expires_in),
+            scope: firstNonEmptyString([silentAuth?.scope, claims?.scope, EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE]),
+            imsSession: mergeImsSessionSnapshots(
+              deriveImsSessionSnapshotFromToken(accessToken),
+              silentAuth?.imsSession && typeof silentAuth.imsSession === "object" ? silentAuth.imsSession : null
+            ),
+            source: "exc-silent-auth",
+          };
+        }
       }
+    } catch {
+      // Fall through to the legacy fetch fallback.
     }
-  } catch {
-    // Fall through to the early-token endpoint.
   }
 
   try {
@@ -48148,27 +50174,25 @@ async function requestCmTokenViaImsCheck(seedToken = "", options = {}) {
     }
     userIdCandidates.push(normalized);
   };
+  try {
+    const profileToken = normalizeBearerTokenValue(
+      firstNonEmptyString([seedToken, getPreferredPrimaryImsAccessTokenCandidate()])
+    );
+    const profilePayload = await fetchImsSessionProfile(profileToken);
+    pushUserIdCandidate(
+      firstNonEmptyString([profilePayload?.userId, profilePayload?.user_id, profilePayload?.sub, profilePayload?.id]),
+      true
+    );
+    pushUserIdCandidate(
+      firstNonEmptyString([profilePayload?.additional_info?.userId, profilePayload?.additional_info?.user_id]),
+      true
+    );
+  } catch {
+    // Keep existing candidates best-effort.
+  }
   (Array.isArray(hints.userIdCandidates) ? hints.userIdCandidates : []).forEach((candidate) => {
     pushUserIdCandidate(candidate);
   });
-  if (userIdCandidates.length === 0) {
-    try {
-      const profileToken = normalizeBearerTokenValue(
-        firstNonEmptyString([seedToken, getPreferredPrimaryImsAccessTokenCandidate()])
-      );
-      const profilePayload = await fetchImsSessionProfile(profileToken);
-      pushUserIdCandidate(
-        firstNonEmptyString([profilePayload?.userId, profilePayload?.user_id, profilePayload?.sub, profilePayload?.id]),
-        true
-      );
-      pushUserIdCandidate(
-        firstNonEmptyString([profilePayload?.additional_info?.userId, profilePayload?.additional_info?.user_id]),
-        true
-      );
-    } catch {
-      // Keep existing candidates best-effort.
-    }
-  }
   if (!userIdCandidates.includes("")) {
     userIdCandidates.push("");
   }
@@ -48261,7 +50285,21 @@ async function requestCmTokenViaImsCheck(seedToken = "", options = {}) {
 
 async function bootstrapCmConsoleTenantSession(options = {}) {
   const forceRefresh = options?.forceRefresh === true;
+  const preferredTabId = Number(options?.preferredTabId || getRetainedLoginHelperBootstrapTabId() || 0);
   try {
+    const qualifiedResult = await requestQualifiedCmConsoleToken({
+      requireFresh: forceRefresh,
+    });
+    const qualifiedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(qualifiedResult || {}, {}));
+    if (qualifiedToken && tokenSupportsCmTenantCatalog(qualifiedToken)) {
+      emitCmDebugEvent({
+        phase: "cm-tenant-session-bootstrap",
+        source: String(qualifiedResult?.source || "qualified"),
+        tokenClientId: String(parseJwtPayload(qualifiedToken)?.client_id || ""),
+      });
+      return qualifiedToken;
+    }
+
     const result = await requestCmTokenViaImsCheck("", {
       requireFresh: forceRefresh,
     });
@@ -48278,6 +50316,7 @@ async function bootstrapCmConsoleTenantSession(options = {}) {
     const pageContextResult = await requestCmConsoleTokenFromExperiencePageContext({
       requireFresh: forceRefresh,
       allowTemporaryTab: false,
+      preferredTabId,
     });
     const accessToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(pageContextResult || {}, {}));
     if (accessToken && tokenSupportsCmTenantCatalog(accessToken)) {
@@ -48295,6 +50334,48 @@ async function bootstrapCmConsoleTenantSession(options = {}) {
   }
 
   return "";
+}
+
+async function persistExperienceCloudConsoleTokenResult(result = {}, options = {}) {
+  const accessToken = normalizeBearerTokenValue(result?.accessToken);
+  if (!accessToken || !isProbablyJwt(accessToken) || !tokenSupportsExperienceCloudConsole(accessToken)) {
+    return "";
+  }
+
+  const current = state.loginData || createCookieSessionLoginData();
+  const tokenClaims = parseJwtPayload(accessToken) || {};
+  const tokenExpiry = resolveAuthResponseExpiry(accessToken, coercePositiveNumber(result?.expiresIn || tokenClaims?.expires_in));
+  const nextExpiresAt =
+    coercePositiveNumber(result?.expiresAt || tokenExpiry?.expiresAt) ||
+    coercePositiveNumber(current?.experienceCloudExpiresAt);
+  const resolvedImsSession = mergeImsSessionSnapshots(
+    mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(accessToken), current?.experienceCloudImsSession || null),
+    result?.imsSession && typeof result.imsSession === "object" ? result.imsSession : null
+  );
+
+  const nextLoginData = {
+    ...current,
+    experienceCloudAccessToken: accessToken,
+    experienceCloudExpiresAt: nextExpiresAt,
+    experienceCloudScope: compactStorageString(
+      firstNonEmptyString([result?.scope, tokenClaims?.scope, current?.experienceCloudScope]),
+      2048
+    ),
+    experienceCloudImsSession: resolvedImsSession,
+  };
+
+  state.loginData = nextLoginData;
+  try {
+    await saveLoginData(nextLoginData);
+  } catch (error) {
+    if (options?.silent !== true) {
+      log("Experience Cloud seed token persisted in-memory only", {
+        error: error instanceof Error ? error.message : String(error),
+        source: String(result?.source || "unknown"),
+      });
+    }
+  }
+  return accessToken;
 }
 
 async function persistCmTokenBootstrapResult(result = {}, options = {}) {
@@ -48351,6 +50432,22 @@ async function persistCmTokenBootstrapResult(result = {}, options = {}) {
       source: String(result?.source || "unknown"),
     });
   }
+  if (state.avatarMenuOpen) {
+    renderAvatarMenu();
+  }
+  void persistPassVaultCmGlobalState(
+    {
+      clientId: CM_IMS_PRIMARY_CLIENT_ID,
+      tokenClientId: firstNonEmptyString([tokenClaims?.client_id, tokenClaims?.clientId, CM_IMS_PRIMARY_CLIENT_ID]),
+      userId: firstNonEmptyString([resolvedImsSession?.userId, tokenClaims?.user_id, tokenClaims?.userId]),
+      scope: firstNonEmptyString([result?.scope, tokenClaims?.scope, current?.cmConsoleScope]),
+      expiresAt: nextExpiresAt,
+      updatedAt: Date.now(),
+      tokenFingerprint: getPreferredCmTokenFingerprint(accessToken),
+      imsSession: resolvedImsSession,
+    },
+    { silent: true }
+  ).catch(() => {});
   scheduleNoTouchRefresh();
   return accessToken;
 }
@@ -48410,6 +50507,16 @@ async function findExistingCmReportsAdobeTab() {
   }
 }
 
+async function resolveReusableAdobePageContextTab(preferredTabId = 0) {
+  const preferredTab = await getTabByIdSafe(preferredTabId);
+  const preferredUrl = String(preferredTab?.url || preferredTab?.pendingUrl || "").trim();
+  if (preferredTab?.id && isAuthFlowUrl(preferredUrl)) {
+    return preferredTab;
+  }
+
+  return null;
+}
+
 async function requestCmConsoleTokenFromExperiencePageContext(options = {}) {
   if (!chrome.scripting?.executeScript) {
     return null;
@@ -48417,8 +50524,12 @@ async function requestCmConsoleTokenFromExperiencePageContext(options = {}) {
 
   const requireFresh = options.requireFresh === true;
   const allowTemporaryTab = options.allowTemporaryTab === true;
+  const preferredTabId = Number(options.preferredTabId || getRetainedLoginHelperBootstrapTabId() || 0);
   const userIds = collectCmImsUserIdCandidates();
-  let tab = await findExistingExperienceAdobeTab();
+  let tab = await resolveReusableAdobePageContextTab(preferredTabId);
+  if (!tab?.id) {
+    tab = await findExistingExperienceAdobeTab();
+  }
   let createdTemporaryTab = false;
 
   if (!tab?.id && allowTemporaryTab) {
@@ -48649,8 +50760,27 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
   }
 
   const requireFresh = options.requireFresh === true;
-  const allowTemporaryTab = options.allowTemporaryTab !== false;
+  const allowTemporaryTab = options.allowTemporaryTab === true;
+  const preferredTabId = Number(options.preferredTabId || getRetainedLoginHelperBootstrapTabId() || 0);
   let accessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken, getPreferredCmAccessTokenCandidate()]));
+  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
+    const experiencePageTokenResult = await requestCmConsoleTokenFromExperiencePageContext({
+      requireFresh,
+      allowTemporaryTab,
+      preferredTabId,
+    });
+    const persistedExperiencePageToken = normalizeBearerTokenValue(
+      await persistCmTokenBootstrapResult(experiencePageTokenResult || {}, {})
+    );
+    accessToken = persistedExperiencePageToken || normalizeBearerTokenValue(experiencePageTokenResult?.accessToken || "");
+  }
+  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
+    const qualifiedTokenResult = await requestQualifiedCmConsoleToken({
+      requireFresh,
+    });
+    const qualifiedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(qualifiedTokenResult || {}, {}));
+    accessToken = qualifiedToken || normalizeBearerTokenValue(qualifiedTokenResult?.accessToken || "");
+  }
   if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
     const directTokenResult = await requestCmTokenViaImsCheck("", {
       requireFresh,
@@ -48662,6 +50792,7 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
     const tokenResult = await requestCmConsoleTokenFromExperiencePageContext({
       requireFresh,
       allowTemporaryTab: false,
+      preferredTabId,
     });
     const persistedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
     accessToken = persistedToken || normalizeBearerTokenValue(tokenResult?.accessToken || "");
@@ -48670,7 +50801,13 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
     return null;
   }
 
-  let tab = await findExistingCmReportsAdobeTab();
+  let tab = await resolveReusableAdobePageContextTab(preferredTabId);
+  if (!tab?.id) {
+    tab = await findExistingCmReportsAdobeTab();
+  }
+  if (!tab?.id) {
+    tab = await findExistingExperienceAdobeTab();
+  }
   let createdTemporaryTab = false;
   if (!tab?.id && allowTemporaryTab) {
     try {
@@ -48700,6 +50837,8 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
       args: [
         {
           accessToken,
+          requireFresh,
+          freshSkewMs: CM_IMS_FORCE_REFRESH_SKEW_MS,
           tenantUrl: `${CM_CONFIG_BASE_URL}/core/tenants?orgId=${encodeURIComponent(CM_DEFAULT_TENANT_ORG_HINT)}`,
           applicationsBaseUrl: `${CM_CONFIG_BASE_URL}/maitai/applications?orgId=`,
           policiesBaseUrl: `${CM_CONFIG_BASE_URL}/maitai/policy?orgId=`,
@@ -48708,12 +50847,61 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
       ],
       func: async (config) => {
         const normalize = (value) => String(value || "").trim();
+        const isJwt = (value) => normalize(value).split(".").length === 3;
         const parseJson = (text) => {
           try {
             return JSON.parse(String(text || ""));
           } catch {
             return null;
           }
+        };
+        const parseJwt = (value) => {
+          const token = normalize(value);
+          if (!isJwt(token)) {
+            return null;
+          }
+          try {
+            const payloadBase64 = token.split(".")[1] || "";
+            const normalizedPayload = payloadBase64.replace(/-/g, "+").replace(/_/g, "/");
+            const padded = normalizedPayload + "=".repeat((4 - (normalizedPayload.length % 4 || 4)) % 4);
+            return JSON.parse(atob(padded));
+          } catch {
+            return null;
+          }
+        };
+        const tokenSupportsCmCatalog = (value) => {
+          const claims = parseJwt(value) || {};
+          const clientId = normalize(claims?.client_id || claims?.clientId).toLowerCase();
+          return clientId === "cm-console-ui";
+        };
+        const isFreshEnough = (value, skewMs = 0) => {
+          const claims = parseJwt(value) || {};
+          const exp = Number(claims?.exp || 0);
+          if (!Number.isFinite(exp) || exp <= 0) {
+            return Boolean(normalize(value));
+          }
+          return exp * 1000 > Date.now() + Math.max(0, Number(skewMs || 0));
+        };
+        const extractTokenFromPayload = (payload) => {
+          if (!payload || typeof payload !== "object") {
+            return "";
+          }
+          const nestedToken =
+            payload.token && typeof payload.token === "object"
+              ? payload.token.access_token || payload.token.accessToken || payload.token.token || payload.token.value || ""
+              : payload.token || "";
+          return normalize(
+            payload.access_token ||
+              payload.accessToken ||
+              nestedToken ||
+              payload.imsToken ||
+              payload.bearer ||
+              payload.authToken ||
+              payload.authorization ||
+              payload.Authorization ||
+              payload.value ||
+              ""
+          );
         };
         const extractCollection = (payload) => {
           if (Array.isArray(payload)) {
@@ -48733,14 +50921,10 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
         const countRows = (payload) => extractCollection(payload).length;
         const tenantCollectionFromPayload = (payload) =>
           extractCollection(payload).filter((entry) => entry && typeof entry === "object");
-        const fetchJson = async (url) => {
+        const fetchJson = async (url, init = {}) => {
           const response = await fetch(String(url || ""), {
-            method: "GET",
             credentials: "include",
-            headers: {
-              Accept: "*/*",
-              Authorization: `Bearer ${normalize(config?.accessToken || "")}`,
-            },
+            ...(init && typeof init === "object" ? init : {}),
           });
           const text = await response.text().catch(() => "");
           const headers = {};
@@ -48757,8 +50941,42 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
             parsed: parseJson(text),
           };
         };
+        const resolvedAccessToken = normalize(config?.accessToken || "");
+        if (!resolvedAccessToken) {
+          return {
+            ok: false,
+            stage: "token",
+            status: 0,
+            statusText: "",
+            error: "CM token bootstrap failed in reports page context.",
+          };
+        }
+        if (!isJwt(resolvedAccessToken) || !tokenSupportsCmCatalog(resolvedAccessToken)) {
+          return {
+            ok: false,
+            stage: "token",
+            status: 0,
+            statusText: "",
+            error: "CM token bootstrap produced a non-cm-console-ui bearer.",
+          };
+        }
+        if (config?.requireFresh && !isFreshEnough(resolvedAccessToken, config?.freshSkewMs)) {
+          return {
+            ok: false,
+            stage: "token",
+            status: 0,
+            statusText: "",
+            error: "CM token bootstrap produced a stale cm-console-ui bearer.",
+          };
+        }
 
-        const tenantResponse = await fetchJson(config?.tenantUrl || "");
+        const tenantResponse = await fetchJson(config?.tenantUrl || "", {
+          method: "GET",
+          headers: {
+            Accept: "*/*",
+            Authorization: `Bearer ${resolvedAccessToken}`,
+          },
+        });
         if (!tenantResponse.ok) {
           return {
             ok: false,
@@ -48795,8 +51013,20 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
           const batchResults = await Promise.all(
             batch.map(async (tenantId) => {
               const [applicationsResponse, policiesResponse] = await Promise.all([
-                fetchJson(`${String(config?.applicationsBaseUrl || "")}${encodeURIComponent(tenantId)}`),
-                fetchJson(`${String(config?.policiesBaseUrl || "")}${encodeURIComponent(tenantId)}`),
+                fetchJson(`${String(config?.applicationsBaseUrl || "")}${encodeURIComponent(tenantId)}`, {
+                  method: "GET",
+                  headers: {
+                    Accept: "*/*",
+                    Authorization: `Bearer ${resolvedAccessToken}`,
+                  },
+                }),
+                fetchJson(`${String(config?.policiesBaseUrl || "")}${encodeURIComponent(tenantId)}`, {
+                  method: "GET",
+                  headers: {
+                    Accept: "*/*",
+                    Authorization: `Bearer ${resolvedAccessToken}`,
+                  },
+                }),
               ]);
               return {
                 tenantId,
@@ -48822,7 +51052,7 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
 
         return {
           ok: true,
-          accessToken: normalize(config?.accessToken || ""),
+          accessToken: resolvedAccessToken,
           tenantPayload: tenantResponse.parsed,
           tenantUrl: String(tenantResponse.url || config?.tenantUrl || ""),
           tenantCount: tenantRows.length,
@@ -48855,18 +51085,169 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
   }
 }
 
+async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
+  if (!chrome.scripting?.executeScript) {
+    return null;
+  }
+
+  const normalizedUrl = normalizeCmUrl(requestUrl);
+  if (!normalizedUrl || (!isCmReportsRequestUrl(normalizedUrl) && !isCmConfigRequestUrl(normalizedUrl))) {
+    return null;
+  }
+
+  const method = String(options.method || "GET").trim().toUpperCase();
+  if (method !== "GET") {
+    return null;
+  }
+
+  const allowTemporaryTab = options.allowTemporaryTab === true;
+  let accessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([options?.accessToken, getPreferredCmAccessTokenCandidate()])
+  );
+  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+    accessToken = normalizeBearerTokenValue(
+      await ensureCmApiAccessToken({
+        forceRefresh: options.forceRefresh === true,
+        allowTemporaryPageContextTab: allowTemporaryTab,
+        freshLeewayMs:
+          Number.isFinite(options?.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
+            ? Number(options.freshLeewayMs)
+            : 45 * 1000,
+      })
+    );
+  }
+  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+    return null;
+  }
+
+  let tab = await findExistingCmReportsAdobeTab();
+  let createdTemporaryTab = false;
+  if (!tab?.id && allowTemporaryTab) {
+    try {
+      tab = await chrome.tabs.create({
+        url: `${CM_REPORTS_APP_ORIGIN}/`,
+        active: false,
+      });
+      createdTemporaryTab = Boolean(tab?.id);
+      if (createdTemporaryTab) {
+        await waitForTabCompletion(Number(tab.id), 12000, { allowUrlChange: true });
+      }
+    } catch {
+      tab = null;
+      createdTemporaryTab = false;
+    }
+  }
+
+  const tabId = Number(tab?.id || 0);
+  if (tabId <= 0) {
+    return null;
+  }
+
+  try {
+    const executionResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [
+        {
+          requestUrl: normalizedUrl,
+          accessToken,
+          headers: options?.headers && typeof options.headers === "object" ? options.headers : {},
+        },
+      ],
+      func: async (config) => {
+        const normalize = (value) => String(value || "").trim();
+        const parseJson = (text) => {
+          try {
+            return JSON.parse(String(text || ""));
+          } catch {
+            return null;
+          }
+        };
+        const requestHeaders = {
+          Accept: "*/*",
+          ...(config?.headers && typeof config.headers === "object" ? config.headers : {}),
+        };
+        requestHeaders.Authorization = `Bearer ${normalize(config?.accessToken || "")}`;
+        delete requestHeaders.Origin;
+        delete requestHeaders.origin;
+        delete requestHeaders.Referer;
+        delete requestHeaders.referer;
+
+        try {
+          const response = await fetch(String(config?.requestUrl || ""), {
+            method: "GET",
+            credentials: "include",
+            headers: requestHeaders,
+          });
+          const text = await response.text().catch(() => "");
+          const headers = {};
+          response.headers.forEach((value, key) => {
+            headers[key] = value;
+          });
+          return {
+            ok: Boolean(response.ok),
+            status: Number(response.status || 0),
+            statusText: String(response.statusText || ""),
+            url: String(response.url || config?.requestUrl || ""),
+            text,
+            parsed: parseJson(text),
+            headers,
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            status: 0,
+            statusText: error instanceof Error ? error.message : String(error),
+            url: String(config?.requestUrl || ""),
+            text: "",
+            parsed: null,
+            headers: {},
+          };
+        }
+      },
+    });
+
+    const result = executionResults?.[0]?.result;
+    if (!result || typeof result !== "object") {
+      return null;
+    }
+    return {
+      ok: result.ok === true,
+      status: Number(result.status || 0),
+      statusText: String(result.statusText || ""),
+      url: String(result.url || normalizedUrl),
+      text: String(result.text || ""),
+      parsed: result.parsed,
+      headers: result.headers && typeof result.headers === "object" ? result.headers : {},
+      lastModified: String(result?.headers?.["last-modified"] || result?.headers?.["Last-Modified"] || ""),
+    };
+  } catch {
+    return null;
+  } finally {
+    if (createdTemporaryTab && tabId > 0) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch {
+        // Ignore cleanup failures for temporary tab.
+      }
+    }
+  }
+}
+
 async function tryRefreshCmTokenFromIms(seedToken = "", options = {}) {
   const token = normalizeBearerTokenValue(seedToken);
-  const viaCheck = await requestCmTokenViaImsCheck(token, options);
+  const validatedExperienceSeed = token ? await requestExperienceCloudValidateToken(token, options) : null;
+  const effectiveSeedToken = normalizeBearerTokenValue(validatedExperienceSeed?.accessToken || token);
+  const viaCheck = await requestCmTokenViaImsCheck(effectiveSeedToken, options);
   if (viaCheck?.accessToken) {
     return viaCheck;
   }
 
-  if (!token || !isProbablyJwt(token)) {
+  if (!effectiveSeedToken || !isProbablyJwt(effectiveSeedToken)) {
     return null;
   }
 
-  const viaValidate = await requestCmTokenViaValidateToken(token, options);
+  const viaValidate = await requestCmTokenViaValidateToken(effectiveSeedToken, options);
   if (viaValidate?.accessToken) {
     return viaValidate;
   }
@@ -48877,6 +51258,7 @@ async function tryRefreshCmTokenFromIms(seedToken = "", options = {}) {
 async function ensureCmApiAccessToken(options = {}) {
   const forceRefresh = options.forceRefresh === true;
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
   const tokenFreshLeewayMs =
     Number.isFinite(options.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
       ? Number(options.freshLeewayMs)
@@ -48913,15 +51295,56 @@ async function ensureCmApiAccessToken(options = {}) {
   const promise = (async () => {
     try {
       const requireFresh = forceRefresh || !tokenLooksFresh || !tokenSupportsCatalog;
-      const refreshedFromPageContext = await requestCmConsoleTokenFromExperiencePageContext({
+      const globallyHydratedToken = normalizeBearerTokenValue(
+        await hydrateGlobalCmConsoleBootstrapForActiveSession("cm-api-access", {
+          forceRefresh: requireFresh,
+          allowTemporaryPageContextTab,
+          preferredCmBootstrapTabId,
+        }).catch(() => "")
+      );
+      if (globallyHydratedToken && tokenSupportsCmTenantCatalog(globallyHydratedToken)) {
+        emitCmConsoleTokenForTesting(globallyHydratedToken, "ensure-global-hydrate");
+        return globallyHydratedToken;
+      }
+
+      const tenantBootstrapToken = normalizeBearerTokenValue(
+        await bootstrapCmConsoleTenantSession({
+          forceRefresh: requireFresh,
+          preferredTabId: preferredCmBootstrapTabId,
+        }).catch(() => "")
+      );
+      if (tenantBootstrapToken && tokenSupportsCmTenantCatalog(tenantBootstrapToken)) {
+        emitCmConsoleTokenForTesting(tenantBootstrapToken, "ensure-tenant-bootstrap");
+        return tenantBootstrapToken;
+      }
+
+      const excConsoleTokenResult = await requestExperienceCloudConsoleToken({
         requireFresh,
-        allowTemporaryTab: allowTemporaryPageContextTab,
       });
-      if (refreshedFromPageContext?.accessToken) {
-        const persistedPageContextToken = await persistCmTokenBootstrapResult(refreshedFromPageContext, {});
-        if (persistedPageContextToken && tokenSupportsCmTenantCatalog(persistedPageContextToken)) {
-          emitCmConsoleTokenForTesting(persistedPageContextToken, "ensure-page-context");
-          return persistedPageContextToken;
+      const persistedExcConsoleToken = normalizeBearerTokenValue(
+        await persistExperienceCloudConsoleTokenResult(excConsoleTokenResult || {}, { silent: true })
+      );
+      if (persistedExcConsoleToken) {
+        const refreshedFromExperienceConsole = await tryRefreshCmTokenFromIms(persistedExcConsoleToken, {
+          requireFresh,
+        });
+        if (refreshedFromExperienceConsole?.accessToken) {
+          const persistedExperienceConsoleCmToken = await persistCmTokenBootstrapResult(refreshedFromExperienceConsole, {});
+          if (persistedExperienceConsoleCmToken && tokenSupportsCmTenantCatalog(persistedExperienceConsoleCmToken)) {
+            emitCmConsoleTokenForTesting(persistedExperienceConsoleCmToken, "ensure-exc-app-seed");
+            return persistedExperienceConsoleCmToken;
+          }
+        }
+      }
+
+      const qualifiedTokenResult = await requestQualifiedCmConsoleToken({
+        requireFresh,
+      });
+      if (qualifiedTokenResult?.accessToken) {
+        const persistedQualifiedToken = await persistCmTokenBootstrapResult(qualifiedTokenResult, {});
+        if (persistedQualifiedToken && tokenSupportsCmTenantCatalog(persistedQualifiedToken)) {
+          emitCmConsoleTokenForTesting(persistedQualifiedToken, "ensure-qualified");
+          return persistedQualifiedToken;
         }
       }
 
@@ -48937,7 +51360,7 @@ async function ensureCmApiAccessToken(options = {}) {
       }
 
       const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
-      if (primarySeedToken && tokenSupportsExperienceCloudConsole(primarySeedToken)) {
+      if (primarySeedToken && isProbablyJwt(primarySeedToken)) {
         const refreshedFromPrimary = await tryRefreshCmTokenFromIms(primarySeedToken, {
           requireFresh,
         });
@@ -48950,10 +51373,9 @@ async function ensureCmApiAccessToken(options = {}) {
         }
       }
 
-      const excConsoleTokenResult = await requestExperienceCloudConsoleToken({
-        requireFresh,
-      });
-      const excConsoleToken = normalizeBearerTokenValue(excConsoleTokenResult?.accessToken || "");
+      const excConsoleToken = normalizeBearerTokenValue(
+        firstNonEmptyString([persistedExcConsoleToken, excConsoleTokenResult?.accessToken])
+      );
       if (excConsoleToken && excConsoleToken !== primarySeedToken) {
         const refreshedFromIms = await tryRefreshCmTokenFromIms(excConsoleToken, {
           requireFresh,
@@ -48964,6 +51386,19 @@ async function ensureCmApiAccessToken(options = {}) {
             emitCmConsoleTokenForTesting(persistedRefreshedToken, "ensure-refreshed");
             return persistedRefreshedToken;
           }
+        }
+      }
+
+      const refreshedFromPageContext = await requestCmConsoleTokenFromExperiencePageContext({
+        requireFresh,
+        allowTemporaryTab: allowTemporaryPageContextTab,
+        preferredTabId: preferredCmBootstrapTabId,
+      });
+      if (refreshedFromPageContext?.accessToken) {
+        const persistedPageContextToken = await persistCmTokenBootstrapResult(refreshedFromPageContext, {});
+        if (persistedPageContextToken && tokenSupportsCmTenantCatalog(persistedPageContextToken)) {
+          emitCmConsoleTokenForTesting(persistedPageContextToken, "ensure-page-context");
+          return persistedPageContextToken;
         }
       }
 
@@ -49107,6 +51542,13 @@ function shouldRetryCachedCmService(cmService) {
     return true;
   }
   return cachedFingerprint !== currentFingerprint;
+}
+
+function isCmRuntimeRenderReady(cmService = null) {
+  if (!shouldShowCmService(cmService)) {
+    return true;
+  }
+  return hasReusableCmSnapshotForSelection(cmService) && hasCachedCmTenantBundleCoverage(cmService);
 }
 
 function normalizeCmTenantsCatalogPayload(payload = null) {
@@ -49265,6 +51707,7 @@ async function persistCmTenantsCatalog(catalog = null) {
           key: environmentKey,
           label: String(environment?.label || environmentKey).trim() || environmentKey,
           updatedAt: Date.now(),
+          cmGlobal: null,
           cmTenants: null,
           mediaCompanies: {},
         };
@@ -49618,7 +52061,6 @@ function resolveCmUsageTenantScopeValue(...candidates) {
         candidate.tenantId,
         candidate.tenantName,
         candidate.tenant_id,
-        candidate.programmerId,
         candidate.id,
       ]);
       const text = String(objectValue || "").trim();
@@ -49687,6 +52129,18 @@ function isCanonicalCmuUsagePath(pathValue = "") {
   return canonicalPath.startsWith(CM_USAGE_CANONICAL_PREFIX);
 }
 
+function cmUsagePathRequiresTenantScope(pathValue = "") {
+  const canonicalPath = canonicalizeCmuUsagePath(pathValue);
+  if (!canonicalPath) {
+    return false;
+  }
+  return canonicalPath
+    .split("/")
+    .map((value) => normalizeCmuUsagePathSegment(value))
+    .filter(Boolean)
+    .includes("tenant");
+}
+
 function getCanonicalCmUsageTemplatePaths() {
   if (Array.isArray(cmUsageCanonicalTemplatePathsCache) && cmUsageCanonicalTemplatePathsCache.length > 0) {
     return cmUsageCanonicalTemplatePathsCache;
@@ -49729,9 +52183,6 @@ function enforceCmUsageTenantScope(urlValue, tenantScope = "") {
     return "";
   }
   const normalizedTenantScope = resolveCmUsageTenantScopeValue(tenantScope);
-  if (!normalizedTenantScope) {
-    return raw;
-  }
 
   try {
     const parsed = new URL(raw, CM_REPORTS_BASE_URL);
@@ -49740,7 +52191,10 @@ function enforceCmUsageTenantScope(urlValue, tenantScope = "") {
       return parsed.toString();
     }
     parsed.pathname = canonicalPath;
-    applyCmUsageTenantScopeToSearchParams(parsed.searchParams, normalizedTenantScope);
+    CM_USAGE_TENANT_QUERY_KEYS.forEach((key) => parsed.searchParams.delete(key));
+    if (normalizedTenantScope && cmUsagePathRequiresTenantScope(canonicalPath)) {
+      applyCmUsageTenantScopeToSearchParams(parsed.searchParams, normalizedTenantScope);
+    }
     return parsed.toString();
   } catch {
     return raw;
@@ -49749,13 +52203,12 @@ function enforceCmUsageTenantScope(urlValue, tenantScope = "") {
 
 function buildCmUsageQueryString(path, profileHarvest = null, tenantScope = "") {
   const params = new URLSearchParams();
-  params.set("limit", "1000");
   if (/\/tenant(?:\/|$)/i.test(String(path || "")) || /\/hour(?:\/|$)/i.test(String(path || ""))) {
     params.set("metrics", "users");
   }
   params.set("format", "json");
   const resolvedTenantScope = resolveCmUsageTenantScopeValue(tenantScope);
-  if (resolvedTenantScope) {
+  if (resolvedTenantScope && cmUsagePathRequiresTenantScope(path)) {
     applyCmUsageTenantScopeToSearchParams(params, resolvedTenantScope);
   }
   return params.toString();
@@ -50006,6 +52459,7 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
   }
 
   const method = String(options.method || "GET").toUpperCase();
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
   const debugMeta = options.debugMeta && typeof options.debugMeta === "object" ? options.debugMeta : {};
   const optionHeaders = options.headers && typeof options.headers === "object" ? { ...options.headers } : {};
   const buildHeaderVariants = (url) => {
@@ -50022,11 +52476,13 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
     }
     const variants = [];
     const allowCookieFallback = isCmConfigRequestUrl(url);
+    const requiresBearerAuthorization = isCmReportsRequestUrl(url);
     const candidateTokens = [];
     const seenTokens = new Set();
     [
       ensuredCmAccessToken,
       normalizeBearerTokenValue(state.cmLastHydratedAccessToken || ""),
+      normalizeBearerTokenValue(state.loginData?.cmConsoleAccessToken || ""),
       normalizeBearerTokenValue(state.loginData?.accessToken || ""),
     ].forEach((accessToken) => {
       const normalizedToken = normalizeBearerTokenValue(accessToken);
@@ -50045,7 +52501,7 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
         Authorization: `Bearer ${accessToken}`,
       });
     });
-    if (allowCookieFallback || variants.length === 0) {
+    if (allowCookieFallback || (!requiresBearerAuthorization && variants.length === 0)) {
       variants.push(baseHeaders);
     }
     return variants;
@@ -50058,9 +52514,10 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
     let tokenRefreshAttempted = false;
     let headerVariants = buildHeaderVariants(url);
     if (headerVariants.length === 0) {
-      throw new Error(
+      lastError = new Error(
         `${contextLabel} failed: UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session. Sign in again and retry.`
       );
+      continue;
     }
     headersLoop: for (let headerIndex = 0; headerIndex < headerVariants.length; headerIndex += 1) {
       const headers = headerVariants[headerIndex];
@@ -50264,12 +52721,222 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
         );
       }
     }
+
+    const shouldTryPageContextFallback =
+      method === "GET" && (isCmReportsRequestUrl(url) || isCmConfigRequestUrl(url));
+    if (shouldTryPageContextFallback) {
+      const pageContextResult = await fetchCmJsonViaReportsPageContext(url, {
+        accessToken: firstNonEmptyString([
+          normalizeBearerTokenValue(explicitAuthorizationHeader),
+          ensuredCmAccessToken,
+          normalizeBearerTokenValue(state.cmLastHydratedAccessToken || ""),
+        ]),
+        allowTemporaryTab: allowTemporaryPageContextTab,
+        headers: optionHeaders,
+      }).catch(() => null);
+      if (pageContextResult?.ok === true) {
+        const parsedPayload = pageContextResult.parsed != null ? pageContextResult.parsed : pageContextResult.text;
+        const payloadSummary = summarizeCmPayloadForDebug(parsedPayload);
+        emitCmDebugEvent(
+          {
+            phase: "cm-page-context-fallback-success",
+            contextLabel: String(contextLabel || ""),
+            method,
+            url,
+            status: Number(pageContextResult.status || 0),
+            endpointPath: queryDebugInfo.endpointPath,
+            tenantScope: queryDebugInfo.tenantScope,
+            hasTenantScope: queryDebugInfo.hasTenantScope,
+            limit: queryDebugInfo.limit,
+            metrics: queryDebugInfo.metrics,
+            format: queryDebugInfo.format,
+            queryString: queryDebugInfo.queryString,
+            isUsagePath: queryDebugInfo.isUsagePath,
+            payloadType: payloadSummary.payloadType,
+            payloadCollection: payloadSummary.collectionKey,
+            rowCount: payloadSummary.rowCount,
+            emptyResult: payloadSummary.emptyResult,
+          },
+          {
+            flowId: String(debugMeta.flowId || "").trim(),
+            context: debugMeta,
+          }
+        );
+        return {
+          url: pageContextResult.url || url,
+          parsed: parsedPayload,
+          text: String(pageContextResult.text || ""),
+          status: Number(pageContextResult.status || 0),
+          lastModified: String(pageContextResult.lastModified || ""),
+        };
+      }
+      if (pageContextResult && typeof pageContextResult === "object") {
+        const pageContextMessage =
+          firstNonEmptyString([
+            pageContextResult?.parsed?.error?.code,
+            pageContextResult?.parsed?.error?.message,
+            typeof pageContextResult?.parsed?.error === "string" ? pageContextResult.parsed.error : "",
+            pageContextResult?.parsed?.message,
+            normalizeHttpErrorMessage(pageContextResult?.text || ""),
+            pageContextResult?.statusText,
+          ]) || "Page-context CM request failed.";
+        lastError = new Error(`${contextLabel} failed (${pageContextResult.status || 0}): ${pageContextMessage}`);
+        emitCmDebugEvent(
+          {
+            phase: "cm-page-context-fallback-failed",
+            contextLabel: String(contextLabel || ""),
+            method,
+            url,
+            status: Number(pageContextResult.status || 0),
+            statusText: String(pageContextResult.statusText || ""),
+            error: pageContextMessage,
+            endpointPath: queryDebugInfo.endpointPath,
+            tenantScope: queryDebugInfo.tenantScope,
+            hasTenantScope: queryDebugInfo.hasTenantScope,
+            limit: queryDebugInfo.limit,
+            metrics: queryDebugInfo.metrics,
+            format: queryDebugInfo.format,
+            queryString: queryDebugInfo.queryString,
+            isUsagePath: queryDebugInfo.isUsagePath,
+          },
+          {
+            flowId: String(debugMeta.flowId || "").trim(),
+            context: debugMeta,
+          }
+        );
+      }
+    }
   }
 
   throw lastError || new Error(`${contextLabel} failed.`);
 }
 
-async function fetchCmTenantCatalogWithSession(url = "") {
+async function ensureCmUsageWarmStateForProgrammer(programmer, cmService = null, options = {}) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  if (!programmerId) {
+    return {
+      ok: false,
+      skipped: true,
+      error: "Missing media company details.",
+    };
+  }
+
+  const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants : [];
+  const tenantScope = resolveCmUsageTenantScopeValue(
+    options?.tenantScope,
+    matchedTenants?.[0]?.tenantId,
+    matchedTenants?.[0]?.tenantName,
+    getCmTenantScopeForProgrammer(programmer)
+  );
+  if (matchedTenants.length === 0) {
+    state.cmUsageWarmStateByProgrammerId.set(programmerId, {
+      ok: true,
+      fetchedAt: Date.now(),
+      fingerprint: buildCmUsageWarmFingerprint(cmService, tenantScope),
+      tenantScope,
+      warmedUrls: [],
+      error: "",
+    });
+    return {
+      ok: true,
+      skipped: true,
+      error: "",
+    };
+  }
+
+  if (!options?.forceRefresh && hasFreshCmUsageWarmStateForProgrammer(programmerId, cmService, tenantScope)) {
+    return {
+      ok: true,
+      skipped: true,
+      error: "",
+    };
+  }
+
+  const accessToken = normalizeBearerTokenValue(
+    await ensureCmApiAccessToken({
+      forceRefresh: options?.forceRefresh === true,
+      allowTemporaryPageContextTab: options?.allowTemporaryPageContextTab === true,
+      freshLeewayMs:
+        Number.isFinite(options?.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
+          ? Number(options.freshLeewayMs)
+          : 45 * 1000,
+    })
+  );
+  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+    const errorMessage =
+      "UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session. Sign in again and retry.";
+    state.cmUsageWarmStateByProgrammerId.set(programmerId, {
+      ok: false,
+      fetchedAt: Date.now(),
+      fingerprint: buildCmUsageWarmFingerprint(cmService, tenantScope),
+      tenantScope,
+      warmedUrls: [],
+      error: errorMessage,
+    });
+    return {
+      ok: false,
+      skipped: false,
+      error: errorMessage,
+    };
+  }
+
+  const warmUrls = uniqueSorted(
+    [
+      `${CM_REPORTS_BASE_URL}/v2/year?format=json`,
+      `${CM_REPORTS_BASE_URL}/v2/year/tenant?format=json`,
+      tenantScope ? `${CM_REPORTS_BASE_URL}/v2/year/tenant?tenant=${encodeURIComponent(tenantScope)}&format=json` : "",
+    ]
+      .map((value) => normalizeCmUrl(value))
+      .filter(Boolean)
+  );
+
+  let lastError = null;
+  for (const warmUrl of warmUrls) {
+    try {
+      await fetchCmJsonWithAuthVariants([warmUrl], "CM usage warmup", {
+        allowTemporaryPageContextTab: options?.allowTemporaryPageContextTab === true,
+        debugMeta: {
+          scope: "usage-warmup",
+          endpointUrl: warmUrl,
+          programmerId,
+          requestorId: String(state.selectedRequestorId || ""),
+          mvpd: String(state.selectedMvpdId || ""),
+          tenantScope,
+        },
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      break;
+    }
+  }
+
+  state.cmUsageWarmStateByProgrammerId.set(programmerId, {
+    ok: !lastError,
+    fetchedAt: Date.now(),
+    fingerprint: buildCmUsageWarmFingerprint(cmService, tenantScope),
+    tenantScope,
+    warmedUrls: warmUrls,
+    error: lastError ? lastError.message : "",
+  });
+  emitCmDebugEvent({
+    phase: "cm-usage-warmup",
+    programmerId,
+    programmerName: String(programmer?.programmerName || programmerId),
+    tenantScope,
+    matchedTenantCount: matchedTenants.length,
+    warmedUrlCount: warmUrls.length,
+    error: lastError ? lastError.message : "",
+  });
+  return {
+    ok: !lastError,
+    skipped: false,
+    tenantScope,
+    warmedUrls: warmUrls,
+    error: lastError ? lastError.message : "",
+  };
+}
+
+async function fetchCmTenantCatalogWithSession(url = "", options = {}) {
   const requestUrl = normalizeCmUrl(url);
   if (!requestUrl) {
     throw new Error("CM tenants load failed: tenant catalog URL is missing.");
@@ -50281,7 +52948,9 @@ async function fetchCmTenantCatalogWithSession(url = "") {
     requestUrl
   );
   const headerVariants = [];
-  const cmBearerToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+  const cmBearerToken = normalizeBearerTokenValue(
+    firstNonEmptyString([options?.accessToken, getPreferredCmAccessTokenCandidate()])
+  );
   if (cmBearerToken && tokenSupportsCmTenantCatalog(cmBearerToken)) {
     headerVariants.push({
       ...baseHeaders,
@@ -50339,6 +53008,14 @@ async function fetchCmTenantCatalogWithSession(url = "") {
 
 async function ensureCmTenantsCatalog(options = {}) {
   const forceRefresh = options?.forceRefresh === true;
+  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
+  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+  const preferredAccessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken]));
+  const skipBootstrap =
+    options?.skipBootstrap === true &&
+    preferredAccessToken &&
+    tokenSupportsCmTenantCatalog(preferredAccessToken) &&
+    (!forceRefresh || isAccessTokenFreshEnough(preferredAccessToken, 45 * 1000));
   if (forceRefresh) {
     state.cmTenantsCatalogRuntimeFresh = false;
   }
@@ -50413,13 +53090,94 @@ async function ensureCmTenantsCatalog(options = {}) {
       urls: tenantCatalogUrls,
     });
 
-    await bootstrapCmConsoleTenantSession({ forceRefresh });
+    if (!skipBootstrap) {
+      await bootstrapCmConsoleTenantSession({
+        forceRefresh,
+        preferredTabId: preferredCmBootstrapTabId,
+      });
+    }
 
     let lastError = null;
     try {
+      const shouldPreferReportsPageBootstrap =
+        forceRefresh ||
+        !cachedCatalog ||
+        !Array.isArray(cachedCatalog.tenants) ||
+        cachedCatalog.tenants.length === 0;
+      if (shouldPreferReportsPageBootstrap) {
+        try {
+          const pageContextCatalog = await requestCmConsoleBootstrapCatalogFromReportsPage({
+            requireFresh: forceRefresh,
+            allowTemporaryTab: allowTemporaryPageContextTab,
+            accessToken: preferredAccessToken,
+            preferredTabId: preferredCmBootstrapTabId,
+          });
+          if (pageContextCatalog?.ok === true) {
+            if (pageContextCatalog?.accessToken) {
+              await persistCmTokenBootstrapResult(
+                {
+                  accessToken: String(pageContextCatalog.accessToken || "").trim(),
+                  source: "reports-page-context-bootstrap",
+                },
+                {}
+              ).catch(() => "");
+            }
+            const tenants = normalizeCmTenantsFromPayload(pageContextCatalog.tenantPayload, pageContextCatalog.tenantUrl);
+            if (tenants.length > 0) {
+              const catalog = {
+                tenants,
+                sourceUrl: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
+                tenantCount: Math.max(0, Number(pageContextCatalog.tenantCount || tenants.length || 0)),
+                applicationCount: Math.max(0, Number(pageContextCatalog.applicationCount || 0)),
+                policyCount: Math.max(0, Number(pageContextCatalog.policyCount || 0)),
+                summaryReady: pageContextCatalog.summaryReady === true,
+                fetchedAt: Date.now(),
+              };
+              state.cmTenantsCatalog = catalog;
+              state.cmTenantsCatalogHydrated = true;
+              state.cmTenantsCatalogRuntimeFresh = true;
+              syncCmConsoleBootstrapSummaryFromCatalog(catalog, {
+                errors: Array.isArray(pageContextCatalog.errors) ? pageContextCatalog.errors : [],
+              });
+              await persistCmTenantsCatalog(catalog);
+              emitCmDebugEvent({
+                phase: "cm-tenant-catalog-loaded",
+                source: "reports-page-context",
+                url: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
+                sourceUrl: String(pageContextCatalog.tenantUrl || ""),
+                tenantCount: Number(catalog.tenantCount || 0),
+                applicationCount: Number(catalog.applicationCount || 0),
+                policyCount: Number(catalog.policyCount || 0),
+              });
+              return catalog;
+            }
+          }
+          if (pageContextCatalog && typeof pageContextCatalog === "object" && pageContextCatalog.ok !== true) {
+            lastError = new Error(
+              firstNonEmptyString([
+                pageContextCatalog.error,
+                pageContextCatalog.status ? `CM tenants load failed (${Number(pageContextCatalog.status || 0)}).` : "",
+                "CM tenants load failed from reports page context.",
+              ]) || "CM tenants load failed from reports page context."
+            );
+            throw lastError;
+          }
+        } catch (pageContextError) {
+          lastError = pageContextError instanceof Error ? pageContextError : new Error(String(pageContextError));
+          emitCmDebugEvent({
+            phase: "cm-tenant-catalog-page-context-failed",
+            method: "GET",
+            url: tenantCatalogUrls[0] || "",
+            error: lastError.message,
+          });
+        }
+      }
+
       for (const tenantCatalogUrl of tenantCatalogUrls) {
         try {
-          const response = await fetchCmTenantCatalogWithSession(tenantCatalogUrl);
+          const response = await fetchCmTenantCatalogWithSession(tenantCatalogUrl, {
+            accessToken: preferredAccessToken,
+          });
           const tenants = normalizeCmTenantsFromPayload(response.parsed, response.url);
           if (tenants.length === 0) {
             throw new Error(`CM tenants load failed: tenant catalog returned no tenants (${tenantCatalogUrl}).`);
@@ -50462,14 +53220,26 @@ async function ensureCmTenantsCatalog(options = {}) {
       }
 
       const allowTemporaryReportsTab =
-        !cachedCatalog || !Array.isArray(cachedCatalog.tenants) || cachedCatalog.tenants.length === 0;
+        !shouldPreferReportsPageBootstrap &&
+        (!cachedCatalog || !Array.isArray(cachedCatalog.tenants) || cachedCatalog.tenants.length === 0);
       if (allowTemporaryReportsTab) {
         try {
           const pageContextCatalog = await requestCmConsoleBootstrapCatalogFromReportsPage({
             requireFresh: forceRefresh,
-            allowTemporaryTab: true,
+            allowTemporaryTab: false,
+            accessToken: preferredAccessToken,
+            preferredTabId: preferredCmBootstrapTabId,
           });
           if (pageContextCatalog?.ok === true) {
+            if (pageContextCatalog?.accessToken) {
+              await persistCmTokenBootstrapResult(
+                {
+                  accessToken: String(pageContextCatalog.accessToken || "").trim(),
+                  source: "reports-page-context-bootstrap",
+                },
+                {}
+              ).catch(() => "");
+            }
             const tenants = normalizeCmTenantsFromPayload(pageContextCatalog.tenantPayload, pageContextCatalog.tenantUrl);
             if (tenants.length > 0) {
               const catalog = {
@@ -50703,6 +53473,284 @@ async function ensureCmServiceForProgrammer(programmer, options = {}) {
   }
 }
 
+function hasCachedCmTenantBundleCoverage(cmService = null) {
+  const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants : [];
+  if (matchedTenants.length === 0) {
+    return true;
+  }
+  return matchedTenants.every((tenant) => {
+    const tenantCacheKey = cmGetTenantCacheKey(tenant);
+    return Boolean(tenantCacheKey && state.cmTenantBundleByTenantKey.get(tenantCacheKey)?.bundle);
+  });
+}
+
+function buildCmUsageWarmFingerprint(cmService = null, tenantScope = "") {
+  const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants : [];
+  const tenantKeys = matchedTenants
+    .map((tenant) => cmGetTenantCacheKey(tenant))
+    .filter(Boolean)
+    .slice(0, 8)
+    .join(",");
+  const resolvedTenantScope = resolveCmUsageTenantScopeValue(
+    tenantScope,
+    matchedTenants?.[0]?.tenantId,
+    matchedTenants?.[0]?.tenantName
+  );
+  return [
+    getActiveAdobePassEnvironmentKey(),
+    getCmAuthFingerprint(),
+    resolvedTenantScope,
+    tenantKeys,
+  ].join("|");
+}
+
+function hasFreshCmUsageWarmStateForProgrammer(programmerId = "", cmService = null, tenantScope = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return false;
+  }
+  const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants : [];
+  if (matchedTenants.length === 0) {
+    return true;
+  }
+  const warmState = state.cmUsageWarmStateByProgrammerId.get(normalizedProgrammerId);
+  if (!warmState || warmState.ok !== true) {
+    return false;
+  }
+  const fetchedAt = Number(warmState.fetchedAt || 0);
+  if (!fetchedAt || Date.now() - fetchedAt > CM_USAGE_WARM_CACHE_MAX_AGE_MS) {
+    return false;
+  }
+  return String(warmState.fingerprint || "").trim() === buildCmUsageWarmFingerprint(cmService, tenantScope);
+}
+
+function mergeProgrammerPremiumServicesWithCm(programmerId = "", services = null, cmService = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const currentServices = normalizedProgrammerId ? getCurrentPremiumAppsSnapshot(normalizedProgrammerId) || {} : {};
+  const baseServices = services && typeof services === "object" ? services : currentServices;
+  return {
+    ...(baseServices && typeof baseServices === "object" ? baseServices : {}),
+    cm: cmService,
+    cmMvpd: baseServices?.cmMvpd ?? currentServices?.cmMvpd ?? null,
+    cmMvpdSelectionKey: String(baseServices?.cmMvpdSelectionKey || currentServices?.cmMvpdSelectionKey || "").trim(),
+  };
+}
+
+async function ensureCmHydratedForProgrammer(programmer, services = null, options = {}) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  if (!programmerId) {
+    return {
+      ok: false,
+      skipped: true,
+      requiresHydration: false,
+      cmService: null,
+      services: services && typeof services === "object" ? services : null,
+      accessToken: "",
+      bundleCount: 0,
+      bundleErrors: [],
+      error: "Missing media company details.",
+    };
+  }
+
+  const forceRefresh = options?.forceRefresh === true;
+  if (!forceRefresh && state.cmHydrationPromiseByProgrammerId.has(programmerId)) {
+    return state.cmHydrationPromiseByProgrammerId.get(programmerId);
+  }
+
+  const hydrationPromise = (async () => {
+    const freshLeewayMs =
+      Number.isFinite(options?.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
+        ? Number(options.freshLeewayMs)
+        : 60 * 1000;
+    const reason = String(options?.reason || "").trim();
+    let cmService =
+      services?.cm && typeof services.cm === "object"
+        ? services.cm
+        : state.cmServiceByProgrammerId.get(programmerId) || null;
+
+    if (
+      forceRefresh ||
+      !cmService ||
+      shouldRetryCachedCmService(cmService) ||
+      (!Array.isArray(cmService?.matchedTenants) && !String(cmService?.loadError || "").trim())
+    ) {
+      cmService = await ensureCmServiceForProgrammer(programmer, {
+        forceRefresh,
+      }).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          matchedTenants: [],
+          sourceUrl: "",
+          fetchedAt: Date.now(),
+          tenantCount: 0,
+          tokenFingerprint: getCmAuthFingerprint(),
+          loadError: message,
+        };
+      });
+    }
+
+    if (
+      !forceRefresh &&
+      shouldShowCmService(cmService) &&
+      !hasCachedCmTenantBundleCoverage(cmService) &&
+      (isPassVaultBackedValue(cmService) || isPassVaultProgrammerHydrated(programmerId))
+    ) {
+      restorePassVaultCmTenantBundlesToRuntime(getPassVaultMediaCompanyRecord(programmerId));
+    }
+
+    const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants : [];
+    const initialServices = mergeProgrammerPremiumServicesWithCm(programmerId, services, cmService);
+    setCurrentPremiumAppsSnapshot(programmerId, initialServices);
+
+    if (matchedTenants.length === 0) {
+      const settledService = {
+        ...(cmService && typeof cmService === "object" ? cmService : {}),
+        fetchedAt: Number(cmService?.fetchedAt || Date.now()),
+        tokenFingerprint: getCmAuthFingerprint(),
+      };
+      state.cmServiceByProgrammerId.set(programmerId, settledService);
+      const mergedServices = mergeProgrammerPremiumServicesWithCm(programmerId, initialServices, settledService);
+      setCurrentPremiumAppsSnapshot(programmerId, mergedServices);
+      return {
+        ok: true,
+        skipped: true,
+        requiresHydration: false,
+        cmService: settledService,
+        services: mergedServices,
+        accessToken: "",
+        bundleCount: 0,
+        bundleErrors: [],
+        error: "",
+      };
+    }
+
+    const existingToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+    const tokenReady =
+      !forceRefresh &&
+      tokenSupportsCmTenantCatalog(existingToken) &&
+      isAccessTokenFreshEnough(existingToken, freshLeewayMs);
+    let accessToken = tokenReady
+      ? existingToken
+      : normalizeBearerTokenValue(
+          await ensureCmApiAccessToken({
+            forceRefresh,
+            freshLeewayMs,
+          })
+        );
+    if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+      const errorMessage =
+        "UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session. Sign in again and retry.";
+      const settledService = {
+        ...(cmService && typeof cmService === "object" ? cmService : {}),
+        matchedTenants,
+        fetchedAt: Date.now(),
+        tokenFingerprint: getCmAuthFingerprint(),
+      };
+      state.cmServiceByProgrammerId.set(programmerId, settledService);
+      const mergedServices = mergeProgrammerPremiumServicesWithCm(programmerId, initialServices, settledService);
+      setCurrentPremiumAppsSnapshot(programmerId, mergedServices);
+      emitCmDebugEvent({
+        phase: "cm-programmer-hydration-auth-failed",
+        programmerId,
+        programmerName: String(programmer?.programmerName || programmerId),
+        matchedTenantCount: matchedTenants.length,
+        reason,
+      });
+      return {
+        ok: false,
+        skipped: false,
+        requiresHydration: true,
+        cmService: settledService,
+        services: mergedServices,
+        accessToken: "",
+        bundleCount: 0,
+        bundleErrors: [],
+        error: errorMessage,
+      };
+    }
+    await persistResolvedCmGlobalAuthState(accessToken, `programmer-hydrate:${reason || programmerId}`).catch(() => null);
+
+    const hasCachedBundles = hasCachedCmTenantBundleCoverage(cmService);
+    const profileHarvest = getCmProfileHarvestForProgrammer(programmer);
+    const tenantScope = resolveCmUsageTenantScopeValue(
+      options?.tenantScope,
+      matchedTenants?.[0]?.tenantId,
+      matchedTenants?.[0]?.tenantName,
+      getCmTenantScopeForProgrammer(programmer)
+    );
+    const bundles =
+      !forceRefresh && hasCachedBundles
+        ? matchedTenants.map((tenant) => {
+            const tenantCacheKey = cmGetTenantCacheKey(tenant);
+            const cachedBundle = tenantCacheKey ? state.cmTenantBundleByTenantKey.get(tenantCacheKey)?.bundle || null : null;
+            if (cachedBundle) {
+              return {
+                ...cachedBundle,
+                usage: {
+                  ...(cachedBundle.usage || {}),
+                  rows: buildCmUsageSeedRows(tenant, profileHarvest, tenantScope),
+                  tenantScope,
+                },
+              };
+            }
+            return null;
+          }).filter(Boolean)
+        : await Promise.all(
+            matchedTenants.map((tenant) =>
+              loadCmTenantBundle(tenant, {
+                forceRefresh,
+                profileHarvest,
+                tenantScope,
+              })
+            )
+          );
+    const bundleErrors = bundles
+      .flatMap((bundle) => [bundle?.applications?.error, bundle?.policies?.error])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    const settledService = {
+      ...(cmService && typeof cmService === "object" ? cmService : {}),
+      matchedTenants,
+      fetchedAt: Date.now(),
+      tokenFingerprint: getCmAuthFingerprint(),
+      loadError: bundleErrors[0] || "",
+    };
+    state.cmServiceByProgrammerId.set(programmerId, settledService);
+    const mergedServices = mergeProgrammerPremiumServicesWithCm(programmerId, initialServices, settledService);
+    setCurrentPremiumAppsSnapshot(programmerId, mergedServices);
+    emitCmDebugEvent({
+      phase: "cm-programmer-hydration-complete",
+      programmerId,
+      programmerName: String(programmer?.programmerName || programmerId),
+      matchedTenantCount: matchedTenants.length,
+      bundleCount: bundles.length,
+      bundleErrorCount: bundleErrors.length,
+      tenantScope,
+      reason,
+    });
+    return {
+      ok: bundleErrors.length === 0,
+      skipped: false,
+      requiresHydration: true,
+      cmService: settledService,
+      services: mergedServices,
+      accessToken,
+      bundleCount: bundles.length,
+      bundleErrors,
+      error: bundleErrors[0] || "",
+    };
+  })();
+
+  state.cmHydrationPromiseByProgrammerId.set(programmerId, hydrationPromise);
+  try {
+    return await hydrationPromise;
+  } finally {
+    if (state.cmHydrationPromiseByProgrammerId.get(programmerId) === hydrationPromise) {
+      state.cmHydrationPromiseByProgrammerId.delete(programmerId);
+    }
+  }
+}
+
 async function ensureCmServiceForSelectedMvpd(programmer, options = {}) {
   if (!programmer?.programmerId) {
     return null;
@@ -50911,6 +53959,7 @@ async function fetchCmTenantResource(kind, tenant, profileHarvest = null, tenant
   for (const candidate of candidates) {
     try {
       const response = await fetchCmJsonWithAuthVariants([candidate], `CM ${kindValue} load`, {
+        allowTemporaryPageContextTab: false,
         debugMeta: {
           scope: kindValue,
           endpointUrl: candidate,
@@ -51553,6 +54602,7 @@ async function cmDownloadCsvForCard(cmState, record, card, sortRule, requestToke
     const requestUrl = requestUrlOverride || recordRequestUrl;
     if (requestUrl) {
       const response = await fetchCmJsonWithAuthVariants([requestUrl], `CM ${record.kind || "report"} CSV`, {
+        allowTemporaryPageContextTab: String(record?.kind || "").trim().toLowerCase() === "usage",
         debugMeta: {
           scope: `cm-csv-${String(record.kind || "report")}`,
           endpointUrl: requestUrl,
@@ -52884,6 +55934,7 @@ function applyProgrammerEntities(entities) {
   state.restV2ProfileHarvestLast = null;
   state.cmServiceByProgrammerId.clear();
   state.cmServiceLoadPromiseByProgrammerId.clear();
+  state.cmHydrationPromiseByProgrammerId.clear();
   state.cmServiceByMvpdSelectionKey.clear();
   state.cmServiceLoadPromiseByMvpdSelectionKey.clear();
   // Keep tenant catalog hydrated for the active signed-in session.
@@ -52917,6 +55968,10 @@ function createCookieSessionLoginData() {
     refreshToken: "",
     imsSession: null,
     sessionKeys: null,
+    experienceCloudAccessToken: "",
+    experienceCloudExpiresAt: 0,
+    experienceCloudScope: "",
+    experienceCloudImsSession: null,
     cmConsoleAccessToken: "",
     cmConsoleExpiresAt: 0,
     cmConsoleScope: "",
@@ -52934,6 +55989,8 @@ function createCookieSessionLoginData() {
 
 async function tryActivateCookieSession(source, options = {}) {
   const restrictOnDenied = options.restrictOnDenied === true;
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
   state.cmTenantsPrecheckPending = true;
   state.cmTenantsPrecheckComplete = false;
   state.cmTenantsPrecheckLastError = "";
@@ -52982,6 +56039,14 @@ async function tryActivateCookieSession(source, options = {}) {
         deriveImsSessionSnapshotFromToken(state.loginData?.accessToken || ""),
         state.loginData?.imsSession && typeof state.loginData.imsSession === "object" ? state.loginData.imsSession : null
       ),
+      experienceCloudAccessToken: "",
+      experienceCloudExpiresAt: 0,
+      experienceCloudScope: "",
+      experienceCloudImsSession: null,
+      cmConsoleAccessToken: "",
+      cmConsoleExpiresAt: 0,
+      cmConsoleScope: "",
+      cmConsoleImsSession: null,
     };
     cookieSessionData.sessionKeys = buildSessionKeySnapshot(cookieSessionData);
 
@@ -53016,12 +56081,15 @@ async function tryActivateCookieSession(source, options = {}) {
     clearRefreshTimer();
     let cmTenantsPrecheckError = null;
     try {
-      await ensureCmTenantsPrecheckForActiveSession(`cookie-session:${source}`, { forceRefresh: false });
+      await ensureCmTenantsPrecheckForActiveSession(`cookie-session:${source}`, {
+        forceRefresh: true,
+        allowTemporaryPageContextTab,
+        preferredCmBootstrapTabId,
+      });
     } catch (error) {
       cmTenantsPrecheckError = error instanceof Error ? error : new Error(String(error));
     }
     render();
-    queueCmConsoleAutoHydration(`cookie-session:${source}`);
 
     if (state.programmers.length === 0) {
       setStatus("No media company records were returned for this account.", "error");
@@ -53300,20 +56368,31 @@ function render() {
 
 async function signInInteractive() {
   cancelPendingBootstrapSession();
+  await releaseLoginHelperBootstrapContext("interactive-signin-reset");
   state.sessionMonitorSuppressed = false;
   setBusy(true, "Signing in...");
   setStatus("", "info");
 
   try {
-    const authData = await startLogin({ interactive: true, allowFallback: true });
+    const authData = await startLogin({
+      interactive: true,
+      allowFallback: true,
+      keepAuthWindowOpenForBootstrap: true,
+    });
     resetAvatarStateForInteractiveLogin();
     const profile = await resolveProfileAfterLogin(authData);
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
-    const activated = await activateSession(buildLoginSessionPayloadFromAuth(authData, profile, imageUrl), "interactive");
+    const preferredCmBootstrapTabId = Number(authData?.authPopupTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+    const activated = await activateSession(buildLoginSessionPayloadFromAuth(authData, profile, imageUrl), "interactive", {
+      allowTemporaryPageContextTab: false,
+      preferredCmBootstrapTabId,
+    });
 
     if (!activated) {
       const cookieActivated = await tryActivateCookieSession("interactive-post-login", {
         restrictOnDenied: true,
+        allowTemporaryPageContextTab: false,
+        preferredCmBootstrapTabId,
       });
       if (cookieActivated) {
         clearStatusUnlessCmTenantsPrecheckBlocked();
@@ -53327,6 +56406,7 @@ async function signInInteractive() {
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
+    await releaseLoginHelperBootstrapContext("interactive-signin-complete");
     setBusy(false);
     render();
   }
@@ -53664,7 +56744,7 @@ function registerEventHandlers() {
 
   els.mediaCompanySelect.addEventListener("change", (event) => {
     state.selectedProgrammerKey = String(event.target.value || "");
-    const controllerReason = "programmer-change";
+    const controllerReason = "media-company-change";
     const selectedProgrammer = selectProgrammerForController(resolveSelectedProgrammer(), controllerReason);
     const forcePremiumRefresh = shouldForceLivePassVaultProgrammerHydration(selectedProgrammer?.programmerId);
     emitGlobalSelectorChangeLog(
@@ -53884,7 +56964,6 @@ async function init() {
   resetWorkflowForLoggedOut();
   registerEventHandlers();
   render();
-  void bootstrapSession();
   startExperienceCloudSessionMonitor();
 }
 
