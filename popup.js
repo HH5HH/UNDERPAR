@@ -27090,6 +27090,19 @@ function getCmControllerAuthPayload() {
   };
 }
 
+function buildCmWorkspaceControllerContextKey(
+  programmerId = "",
+  requestToken = state.premiumPanelRequestToken,
+  environmentKey = getActiveAdobePassEnvironmentKey()
+) {
+  const normalizedEnvironmentKey =
+    String(environmentKey || getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+    DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const normalizedProgrammerId = String(programmerId || "").trim() || "no-programmer";
+  const normalizedRequestToken = Math.max(0, Number(requestToken || 0));
+  return `${normalizedEnvironmentKey}::${normalizedProgrammerId}::${normalizedRequestToken}`;
+}
+
 function cmGetControllerStatePayload(cmState) {
   const requestorIds = state.selectedRequestorId ? [String(state.selectedRequestorId)] : [];
   const mvpdIds = state.selectedMvpdId ? [String(state.selectedMvpdId)] : [];
@@ -27099,12 +27112,18 @@ function cmGetControllerStatePayload(cmState) {
     ...getActiveAdobePassEnvironment(),
   };
   const programmerId = String(cmState?.programmer?.programmerId || "");
+  const premiumPanelRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
   const tenantScope = resolveCmUsageTenantScopeValue(
     getCmPrimaryUsageTenantScopeFromState(cmState),
     cmState?.tenantScope,
     cmState?.cmService?.matchedTenants?.[0]?.tenantId,
     cmState?.cmService?.matchedTenants?.[0]?.tenantName,
     getCmTenantScopeForProgrammer(cmState?.programmer)
+  );
+  const workspaceContextKey = buildCmWorkspaceControllerContextKey(
+    programmerId,
+    premiumPanelRequestToken,
+    adobePassEnvironment?.key
   );
   return {
     controllerOnline: Boolean(cmState?.section?.isConnected),
@@ -27115,10 +27134,13 @@ function cmGetControllerStatePayload(cmState) {
     programmerName: String(cmState?.programmer?.programmerName || ""),
     programmerHydrationReady: isProgrammerWorkspaceHydrationReady(programmerId),
     adobePassEnvironment,
+    adobePassEnvironmentKey: String(adobePassEnvironment?.key || "").trim(),
     tenantScope,
     requestorIds,
     mvpdIds,
     cmAuth: getCmControllerAuthPayload(),
+    premiumPanelRequestToken,
+    workspaceContextKey,
     controllerStateVersion: nextCmWorkspaceControllerStateVersion(),
     profileHarvest:
       profileHarvest && typeof profileHarvest === "object"
@@ -27184,10 +27206,16 @@ function cmGetSelectedControllerStatePayload(programmer = null, services = null,
     ...getActiveAdobePassEnvironment(),
   };
   const programmerId = String(resolvedProgrammer?.programmerId || "");
+  const premiumPanelRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
   const programmerHydrationReady =
     options?.programmerHydrationReady === true || options?.programmerHydrationReady === false
       ? options.programmerHydrationReady === true
       : isProgrammerWorkspaceHydrationReady(programmerId);
+  const workspaceContextKey = buildCmWorkspaceControllerContextKey(
+    programmerId,
+    premiumPanelRequestToken,
+    adobePassEnvironment?.key
+  );
   return {
     controllerOnline: false,
     cmAvailable,
@@ -27197,10 +27225,13 @@ function cmGetSelectedControllerStatePayload(programmer = null, services = null,
     programmerName: String(resolvedProgrammer?.programmerName || ""),
     programmerHydrationReady,
     adobePassEnvironment,
+    adobePassEnvironmentKey: String(adobePassEnvironment?.key || "").trim(),
     tenantScope: getCmTenantScopeForProgrammer(resolvedProgrammer),
     requestorIds,
     mvpdIds,
     cmAuth: getCmControllerAuthPayload(),
+    premiumPanelRequestToken,
+    workspaceContextKey,
     controllerStateVersion: nextCmWorkspaceControllerStateVersion(),
     profileHarvest:
       profileHarvest && typeof profileHarvest === "object"
@@ -29230,6 +29261,22 @@ function cmResolveRequestorMvpdContext(cmState = null) {
   };
 }
 
+function cmBuildWorkspaceReportContextPayload(cmState = null, requestToken = 0) {
+  const programmerId = String(cmState?.programmer?.programmerId || "").trim();
+  const adobePassEnvironmentKey = String(getActiveAdobePassEnvironmentKey() || "").trim();
+  const premiumPanelRequestToken = Math.max(0, Number(requestToken || 0));
+  return {
+    programmerId,
+    adobePassEnvironmentKey,
+    premiumPanelRequestToken,
+    workspaceContextKey: buildCmWorkspaceControllerContextKey(
+      programmerId,
+      premiumPanelRequestToken,
+      adobePassEnvironmentKey
+    ),
+  };
+}
+
 async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, options = {}) {
   if (!cmState || !record) {
     return;
@@ -29262,6 +29309,7 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
     workspaceKey: cmWorkspaceKey,
     workspaceOrigin: cmWorkspaceOrigin,
   };
+  const workspaceReportContext = cmBuildWorkspaceReportContextPayload(cmState, requestToken);
   const formValues = cmNormalizeOperationFormValues(record, options.formValues || {});
   if (record.payload && typeof record.payload === "object") {
     record.payload.formDefaults = { ...formValues };
@@ -29275,6 +29323,7 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
       targetWorkspace,
       "report-form",
       {
+        ...workspaceReportContext,
         cardId,
         endpointUrl: fallbackUrl || displayPath,
         requestUrl: fallbackUrl || displayPath,
@@ -29299,6 +29348,7 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
     targetWorkspace,
     "report-start",
     {
+      ...workspaceReportContext,
       cardId,
       endpointUrl: fallbackUrl || displayPath,
       requestUrl: fallbackUrl || displayPath,
@@ -29437,6 +29487,7 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
       targetWorkspace,
       "report-result",
       {
+        ...workspaceReportContext,
         ok: true,
         cardId,
         endpointUrl: responseUrl || request.url,
@@ -29470,6 +29521,7 @@ async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, op
       targetWorkspace,
       "report-result",
       {
+        ...workspaceReportContext,
         ok: false,
         cardId,
         endpointUrl: fallbackUrl || displayPath,
@@ -29966,11 +30018,13 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
     Number(options.targetWindowId || 0) ||
     Number(cmState.controllerWindowId || 0) ||
     Number(targetWorkspace === "mvpd" ? state.mvpdWorkspaceWindowId : state.cmWorkspaceWindowId || 0);
+  const workspaceReportContext = cmBuildWorkspaceReportContextPayload(cmState, requestToken);
   if (options.emitStart !== false) {
     cmSendReportWorkspaceMessage(
       targetWorkspace,
       "report-start",
       {
+        ...workspaceReportContext,
         cardId,
         endpointUrl,
         requestUrl,
@@ -30075,6 +30129,7 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
           targetWorkspace,
           "report-result",
           {
+            ...workspaceReportContext,
             ok: false,
             cardId,
             endpointUrl,
@@ -30137,6 +30192,7 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
     targetWorkspace,
     "report-result",
     {
+      ...workspaceReportContext,
       ok: true,
       cardId,
       endpointUrl,
@@ -30482,9 +30538,11 @@ async function handleCmWorkspaceAction(message, sender = null) {
     const cards = Array.isArray(message?.cards) ? message.cards : [];
     const reason = String(message?.reason || "").trim().toLowerCase();
     const targetWindowId = senderWindowId || Number(cmState.controllerWindowId || 0);
+    const workspaceReportContext = cmBuildWorkspaceReportContextPayload(cmState, requestToken);
     void cmSendWorkspaceMessage(
       "batch-start",
       {
+        ...workspaceReportContext,
         total: cards.length,
         reason,
         startedAt: Date.now(),
@@ -30576,6 +30634,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
     void cmSendWorkspaceMessage(
       "batch-end",
       {
+        ...workspaceReportContext,
         total: cards.length,
         reason,
         completedAt: Date.now(),
@@ -45627,6 +45686,10 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
     (!forceRefresh || isAccessTokenFreshEnough(existingToken, 45 * 1000))
   ) {
     await persistResolvedCmGlobalAuthState(existingToken, `existing:${reason}`).catch(() => null);
+    await maybeReleaseRetainedLoginHelperBootstrapContext(
+      preferredCmBootstrapTabId,
+      `cm-global-hydrate-token-reuse:${reason}`
+    );
     emitCmDebugEvent({
       phase: "cm-global-hydrate-token-reuse",
       reason: String(reason || ""),
@@ -45695,6 +45758,10 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
   const hydratedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
   if (hydratedToken && tokenSupportsCmTenantCatalog(hydratedToken)) {
     await persistResolvedCmGlobalAuthState(hydratedToken, `post-login:${reason}`).catch(() => null);
+    await maybeReleaseRetainedLoginHelperBootstrapContext(
+      preferredCmBootstrapTabId,
+      `cm-global-hydrate-token-ready:${reason}`
+    );
     emitCmDebugEvent({
       phase: "cm-global-hydrate-token-ready",
       reason: String(reason || ""),

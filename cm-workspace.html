@@ -92,6 +92,19 @@
         <p id="workspace-lock-message" class="workspace-lock-message"></p>
       </section>
 
+      <section id="workspace-transition-overlay" class="workspace-transition-overlay" hidden aria-live="polite">
+        <div class="workspace-transition-panel">
+          <p class="workspace-transition-kicker">Refreshing CM Workspace</p>
+          <h2 id="workspace-transition-title" class="workspace-transition-title">Refreshing selected Media Company...</h2>
+          <p id="workspace-transition-note" class="workspace-transition-note">
+            Loading fresh CMU data for the selected Media Company.
+          </p>
+          <div class="workspace-transition-progress" aria-hidden="true">
+            <span class="workspace-transition-progress-bar"></span>
+          </div>
+        </div>
+      </section>
+
       <section id="workspace-cards" class="workspace-cards"></section>
     </main>
     <main id="workspace-non-cm-screen" hidden>

@@ -139,6 +139,9 @@ const els = {
   status: document.getElementById("workspace-status"),
   lockBanner: document.getElementById("workspace-lock-banner"),
   lockMessage: document.getElementById("workspace-lock-message"),
+  transitionOverlay: document.getElementById("workspace-transition-overlay"),
+  transitionTitle: document.getElementById("workspace-transition-title"),
+  transitionNote: document.getElementById("workspace-transition-note"),
   rerunIndicator: document.getElementById("workspace-rerun-indicator"),
   makeClickEsmButton: document.getElementById("workspace-make-clickesm"),
   makeClickEsmWorkspaceButton: document.getElementById("workspace-make-clickesmws"),
@@ -1275,9 +1278,85 @@ function syncWorkspaceNetworkIndicator() {
   }
 }
 
+function resolveWorkspaceTransitionOverlayState() {
+  const pendingProgrammerKey = String(state.pendingAutoRerunProgrammerKey || "").trim();
+  const inFlightProgrammerKey = String(state.autoRerunInFlightProgrammerKey || "").trim();
+  const hasTransitionContext =
+    hasWorkspaceCardContext() ||
+    (Array.isArray(state.workspaceReplayCards) && state.workspaceReplayCards.length > 0) ||
+    (Array.isArray(state.pendingAutoRerunCards) && state.pendingAutoRerunCards.length > 0);
+  const active = Boolean(hasTransitionContext && (pendingProgrammerKey || inFlightProgrammerKey));
+  if (!active || state.workspaceLocked || state.nonEsmMode) {
+    return {
+      active: false,
+      title: "",
+      note: "",
+      phase: "idle",
+    };
+  }
+
+  const programmerLabel = getProgrammerLabel();
+  if (state.esmAvailabilityResolved !== true) {
+    return {
+      active: true,
+      title: `Checking ${programmerLabel} for ESM...`,
+      note: "Preparing your saved workspace layout for the selected Media Company.",
+      phase: "checking",
+    };
+  }
+
+  if (state.programmerHydrationReady !== true) {
+    return {
+      active: true,
+      title: `Hydrating ${programmerLabel}...`,
+      note: "Compiling ESM access and restoring the workspace context for this Media Company.",
+      phase: "hydrating",
+    };
+  }
+
+  if (state.batchRunning === true || Boolean(inFlightProgrammerKey)) {
+    return {
+      active: true,
+      title: `Loading fresh ${programmerLabel} data...`,
+      note: "Your report cards are queued. UnderPAR is replacing the previous dataset now.",
+      phase: "loading",
+    };
+  }
+
+  return {
+    active: true,
+    title: `Refreshing ${programmerLabel}...`,
+    note: "Closing the curtain on the previous dataset and preparing the next ESM replay.",
+    phase: "preparing",
+  };
+}
+
+function syncWorkspaceTransitionOverlay() {
+  const overlayState = resolveWorkspaceTransitionOverlayState();
+  document.body.classList.toggle("workspace-transitioning", overlayState.active);
+
+  if (els.transitionOverlay) {
+    els.transitionOverlay.hidden = !overlayState.active;
+    if (overlayState.active) {
+      els.transitionOverlay.dataset.phase = String(overlayState.phase || "loading").trim() || "loading";
+      els.transitionOverlay.setAttribute("aria-busy", "true");
+    } else {
+      delete els.transitionOverlay.dataset.phase;
+      els.transitionOverlay.removeAttribute("aria-busy");
+    }
+  }
+  if (els.transitionTitle) {
+    els.transitionTitle.textContent = overlayState.active ? overlayState.title : "";
+  }
+  if (els.transitionNote) {
+    els.transitionNote.textContent = overlayState.active ? overlayState.note : "";
+  }
+}
+
 function syncActionButtonsDisabled() {
-  setActionButtonsDisabled(state.batchRunning || state.workspaceLocked);
+  setActionButtonsDisabled(state.batchRunning || state.workspaceLocked || resolveWorkspaceTransitionOverlayState().active);
   syncWorkspaceNetworkIndicator();
+  syncWorkspaceTransitionOverlay();
 }
 
 function syncTearsheetButtonsVisibility() {

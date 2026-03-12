@@ -245,6 +245,8 @@ const state = {
   programmerId: "",
   programmerName: "",
   programmerHydrationReady: false,
+  premiumPanelRequestToken: 0,
+  workspaceContextKey: "",
   requestorIds: [],
   mvpdIds: [],
   profileHarvest: null,
@@ -269,6 +271,9 @@ const els = {
   nonCmScreen: document.getElementById("workspace-non-cm-screen"),
   nonCmHeadline: document.getElementById("workspace-non-cm-headline"),
   nonCmNote: document.getElementById("workspace-non-cm-note"),
+  transitionOverlay: document.getElementById("workspace-transition-overlay"),
+  transitionTitle: document.getElementById("workspace-transition-title"),
+  transitionNote: document.getElementById("workspace-transition-note"),
   controllerState: document.getElementById("workspace-controller-state"),
   filterState: document.getElementById("workspace-filter-state"),
   status: document.getElementById("workspace-status"),
@@ -1645,9 +1650,85 @@ function syncWorkspaceNetworkIndicator() {
   }
 }
 
+function resolveWorkspaceTransitionOverlayState() {
+  const pendingProgrammerKey = String(state.pendingAutoRerunProgrammerKey || "").trim();
+  const inFlightProgrammerKey = String(state.autoRerunInFlightProgrammerKey || "").trim();
+  const hasTransitionContext =
+    hasWorkspaceCardContext() ||
+    (Array.isArray(state.workspaceReplayCards) && state.workspaceReplayCards.length > 0) ||
+    (Array.isArray(state.pendingAutoRerunCards) && state.pendingAutoRerunCards.length > 0);
+  const active = Boolean(hasTransitionContext && (pendingProgrammerKey || inFlightProgrammerKey));
+  if (!active || state.workspaceLocked || state.nonCmMode) {
+    return {
+      active: false,
+      title: "",
+      note: "",
+      phase: "idle",
+    };
+  }
+
+  const programmerLabel = getProgrammerLabel();
+  if (state.cmAvailabilityResolved !== true) {
+    return {
+      active: true,
+      title: `Checking ${programmerLabel} for CM...`,
+      note: "Preparing your saved workspace layout for the selected Media Company.",
+      phase: "checking",
+    };
+  }
+
+  if (state.programmerHydrationReady !== true) {
+    return {
+      active: true,
+      title: `Hydrating ${programmerLabel}...`,
+      note: "Compiling CM access and restoring the workspace context for this Media Company.",
+      phase: "hydrating",
+    };
+  }
+
+  if (state.batchRunning === true || Boolean(inFlightProgrammerKey)) {
+    return {
+      active: true,
+      title: `Loading fresh ${programmerLabel} data...`,
+      note: "Your report cards are queued. UnderPAR is replacing the previous dataset now.",
+      phase: "loading",
+    };
+  }
+
+  return {
+    active: true,
+    title: `Refreshing ${programmerLabel}...`,
+    note: "Closing the curtain on the previous dataset and preparing the next CM replay.",
+    phase: "preparing",
+  };
+}
+
+function syncWorkspaceTransitionOverlay() {
+  const overlayState = resolveWorkspaceTransitionOverlayState();
+  document.body.classList.toggle("workspace-transitioning", overlayState.active);
+
+  if (els.transitionOverlay) {
+    els.transitionOverlay.hidden = !overlayState.active;
+    if (overlayState.active) {
+      els.transitionOverlay.dataset.phase = String(overlayState.phase || "loading").trim() || "loading";
+      els.transitionOverlay.setAttribute("aria-busy", "true");
+    } else {
+      delete els.transitionOverlay.dataset.phase;
+      els.transitionOverlay.removeAttribute("aria-busy");
+    }
+  }
+  if (els.transitionTitle) {
+    els.transitionTitle.textContent = overlayState.active ? overlayState.title : "";
+  }
+  if (els.transitionNote) {
+    els.transitionNote.textContent = overlayState.active ? overlayState.note : "";
+  }
+}
+
 function syncActionButtonsDisabled() {
-  setActionButtonsDisabled(state.batchRunning || state.workspaceLocked);
+  setActionButtonsDisabled(state.batchRunning || state.workspaceLocked || resolveWorkspaceTransitionOverlayState().active);
   syncWorkspaceNetworkIndicator();
+  syncWorkspaceTransitionOverlay();
 }
 
 function syncTearsheetButtonsVisibility() {
@@ -1796,6 +1877,7 @@ function clearWorkspaceCards(options = {}) {
   const preserveReplayContext = options?.preserveReplayContext === true;
   if (!preserveReplayContext) {
     state.workspaceReplayCards = [];
+    state.pendingAutoRerunCards = [];
   }
   state.cardsById.forEach((cardState) => {
     teardownCardHeaderQueryEditors(cardState);
@@ -1815,33 +1897,24 @@ function hasWorkspaceReplayContext() {
 
 function updateNonCmMode() {
   const shouldShowNoCm = shouldShowNonCmMode();
-  const shouldShowSwitchLoading = state.programmerSwitchLoading === true && hasProgrammerContext();
-  const shouldShowInterimScreen = shouldShowNoCm || shouldShowSwitchLoading;
   state.nonCmMode = shouldShowNoCm;
   if (els.nonCmHeadline) {
-    if (shouldShowSwitchLoading) {
-      els.nonCmHeadline.textContent = `Checking CM availability for ${getProgrammerLabel()}...`;
-    } else {
-      els.nonCmHeadline.textContent = `No Soup for ${getProgrammerLabel()}. No Premium, No CM, No Dice.`;
-    }
+    els.nonCmHeadline.textContent = `No Soup for ${getProgrammerLabel()}. No Premium, No CM, No Dice.`;
   }
   if (els.nonCmNote) {
-    if (shouldShowSwitchLoading) {
-      els.nonCmNote.textContent =
-        "Clearing previous CM context while UnderPAR validates premium CM availability for the selected Media Company.";
-    } else {
-      els.nonCmNote.innerHTML = buildNotPremiumConsoleLinkHtml("CM");
-    }
+    els.nonCmNote.innerHTML = buildNotPremiumConsoleLinkHtml("CM");
   }
 
+  // Preserve the mounted CM workspace during non-CM selections so the same
+  // card layout can return immediately when the next CM-capable company lands.
   if (els.stylesheet) {
-    els.stylesheet.disabled = shouldShowInterimScreen;
+    els.stylesheet.disabled = false;
   }
   if (els.appRoot) {
-    els.appRoot.hidden = shouldShowInterimScreen;
+    els.appRoot.hidden = false;
   }
   if (els.nonCmScreen) {
-    els.nonCmScreen.hidden = !shouldShowInterimScreen;
+    els.nonCmScreen.hidden = true;
   }
 }
 
@@ -1940,6 +2013,47 @@ function hasProgrammerIdentityChanged(previousProgrammerId = "", previousProgram
   return false;
 }
 
+function buildWorkspaceControllerContextKey(
+  programmerId = "",
+  premiumPanelRequestToken = 0,
+  environmentKey = state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key
+) {
+  const normalizedEnvironmentKey =
+    String(environmentKey || state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+    DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const normalizedProgrammerId = String(programmerId || "").trim() || "no-programmer";
+  const normalizedRequestToken = Math.max(0, Number(premiumPanelRequestToken || 0));
+  return `${normalizedEnvironmentKey}::${normalizedProgrammerId}::${normalizedRequestToken}`;
+}
+
+function doesWorkspaceEventMatchCurrentContext(payload = {}) {
+  const incomingContextKey = String(payload?.workspaceContextKey || "").trim();
+  const currentContextKey = String(state.workspaceContextKey || "").trim();
+  if (incomingContextKey && currentContextKey && incomingContextKey !== currentContextKey) {
+    return false;
+  }
+
+  const incomingProgrammerId = String(payload?.programmerId || "").trim();
+  const currentProgrammerId = String(state.programmerId || "").trim();
+  if (incomingProgrammerId && currentProgrammerId && incomingProgrammerId !== currentProgrammerId) {
+    return false;
+  }
+
+  const incomingEnvironmentKey = String(payload?.adobePassEnvironmentKey || "").trim();
+  const currentEnvironmentKey = String(state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim();
+  if (incomingEnvironmentKey && currentEnvironmentKey && incomingEnvironmentKey !== currentEnvironmentKey) {
+    return false;
+  }
+
+  const incomingRequestToken = Math.max(0, Number(payload?.premiumPanelRequestToken || 0));
+  const currentRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
+  if (incomingRequestToken > 0 && currentRequestToken > 0 && incomingRequestToken !== currentRequestToken) {
+    return false;
+  }
+
+  return true;
+}
+
 function clearPendingProgrammerSwitchTransition() {
   state.programmerSwitchLoading = false;
   state.programmerSwitchLoadingKey = "";
@@ -1975,6 +2089,11 @@ async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
     return false;
   }
 
+  // Rebuild the visible workspace from the preserved replay snapshot when CM
+  // returns after one or more non-CM selections. This keeps replay context
+  // intact while preventing stale card DOM from leaking across companies.
+  clearWorkspaceCards({ preserveReplayContext: true });
+
   await rerunAllCards({
     // Keep media-company switch refresh behavior aligned with the same code path
     // users trigger via the workspace Re-Run All button.
@@ -1991,9 +2110,6 @@ function maybeConsumePendingAutoRerun() {
   }
   const hasRunnableControllerContext = state.controllerOnline === true;
   if (!hasRunnableControllerContext) {
-    return;
-  }
-  if (state.programmerSwitchLoading === true) {
     return;
   }
 
@@ -4852,6 +4968,17 @@ function applyControllerState(payload) {
   state.programmerId = String(payload?.programmerId || "");
   state.programmerName = String(payload?.programmerName || "");
   state.programmerHydrationReady = payload?.programmerHydrationReady === true;
+  state.premiumPanelRequestToken = Math.max(
+    0,
+    Number(payload?.premiumPanelRequestToken || state.premiumPanelRequestToken || 0)
+  );
+  state.workspaceContextKey =
+    String(payload?.workspaceContextKey || "").trim() ||
+    buildWorkspaceControllerContextKey(
+      state.programmerId,
+      state.premiumPanelRequestToken,
+      incomingEnvironmentKey || previousEnvironmentKey
+    );
   state.tenantScope = String(payload?.tenantScope || "").trim();
   state.requestorIds = Array.isArray(payload?.requestorIds)
     ? payload.requestorIds.map((value) => String(value || "").trim()).filter(Boolean)
@@ -4917,26 +5044,8 @@ function applyControllerState(payload) {
   });
 
   const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
-  const shouldStartProgrammerSwitchLoading =
-    (programmerChanged && Boolean(previousProgrammerKey)) ||
-    (environmentChanged && Boolean(getProgrammerIdentityKey(state.programmerId, state.programmerName)) && replayCardsForSwitch.length > 0);
-  if (shouldStartProgrammerSwitchLoading && currentProgrammerKey) {
-    state.programmerSwitchLoadingKey = currentProgrammerKey;
-    state.programmerSwitchLoading = state.cmAvailabilityResolved !== true;
-  } else if (programmerChanged) {
-    state.programmerSwitchLoading = false;
-    state.programmerSwitchLoadingKey = "";
-  }
-  if (state.programmerSwitchLoading) {
-    const loadingProgrammerKey = String(state.programmerSwitchLoadingKey || "").trim();
-    if (!currentProgrammerKey || (loadingProgrammerKey && loadingProgrammerKey !== currentProgrammerKey)) {
-      state.programmerSwitchLoading = false;
-      state.programmerSwitchLoadingKey = "";
-    } else if (state.cmAvailabilityResolved === true) {
-      state.programmerSwitchLoading = false;
-      state.programmerSwitchLoadingKey = "";
-    }
-  }
+  state.programmerSwitchLoading = false;
+  state.programmerSwitchLoadingKey = "";
   const isMediaCompanySwitchReason =
     !controllerReason || controllerReason === "media-company-change" || controllerReason === "programmer-change";
   const shouldTriggerWorkspaceRedraw =
@@ -4949,7 +5058,6 @@ function applyControllerState(payload) {
   if (shouldTriggerWorkspaceRedraw && currentProgrammerKey) {
     state.workspaceReplayCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
     state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
-    clearWorkspaceCards({ preserveReplayContext: true });
     setStatus(
       state.pendingAutoRerunCards.length > 0
         ? `Refreshing ${state.pendingAutoRerunCards.length} report(s) for ${getProgrammerLabel()}...`
@@ -4976,12 +5084,18 @@ function handleWorkspaceEvent(eventName, payload) {
     return;
   }
 
+  if (
+    ["report-start", "report-form", "report-result", "batch-start", "batch-end", "csv-complete"].includes(event) &&
+    !doesWorkspaceEventMatchCurrentContext(payload)
+  ) {
+    return;
+  }
+
   if (event === "controller-state") {
     applyControllerState(payload);
     return;
   }
   if (event === "report-start") {
-    clearPendingProgrammerSwitchTransition();
     applyReportStart(payload);
     return;
   }
@@ -5020,13 +5134,15 @@ function handleWorkspaceEvent(eventName, payload) {
     return;
   }
   if (event === "environment-switch-rerun") {
-    if (state.batchRunning) {
+    const replayCards = getWorkspaceReplayCards();
+    if (state.batchRunning || replayCards.length === 0) {
       return;
     }
     const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
     if (!currentProgrammerKey) {
       return;
     }
+    state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCards);
     state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
     maybeConsumePendingAutoRerun();
     return;
