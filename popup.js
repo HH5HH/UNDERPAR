@@ -4344,7 +4344,6 @@ async function restoreAdobePassEnvironmentSwitchSelection(snapshot = null) {
 
   await refreshProgrammerPanels({
     controllerReason: "environment-switch",
-    forcePremiumRefresh: shouldForceLivePassVaultProgrammerHydration(programmer.programmerId),
   });
 
   if (result.requestorRestored) {
@@ -45400,7 +45399,58 @@ async function refreshProgrammerPanels(options = {}) {
   });
   mvpdWorkspaceBroadcastSelectedControllerState(programmer, null);
 
+  let vaultReadiness = null;
+  if (!forcePremiumRefresh) {
+    await ensurePassVaultLoaded({ forceReload: false }).catch(() => null);
+    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+      return;
+    }
+    vaultReadiness = getPassVaultProgrammerReuseReadiness(programmer.programmerId);
+  }
+
   let cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+  const getCachedServiceReuseState = (services = null) => {
+    const cachedIncludesCm = Boolean(services && Object.prototype.hasOwnProperty.call(services, "cm"));
+    const cachedCmMvpdSelectionKey = String(services?.cmMvpdSelectionKey || "").trim();
+    const cmMvpdSelectionMatches = cachedCmMvpdSelectionKey === cmMvpdSelectionKey;
+    const programmerVaultHydrated = isPassVaultProgrammerHydrated(programmer?.programmerId);
+    const cachedVaultCredentialsReady = hasPassVaultCredentialCoverageForServices(programmer?.programmerId, services);
+    const cachedCmReadyForReuse = hasReusableCmSnapshotForSelection(services?.cm);
+    const shouldReuseCachedServices =
+      services &&
+      cachedIncludesCm &&
+      cachedCmReadyForReuse &&
+      cmMvpdSelectionMatches &&
+      !forcePremiumRefresh &&
+      (programmerVaultHydrated || isPassVaultBackedValue(services)) &&
+      cachedVaultCredentialsReady;
+    const cachedCmRuntimeReady = isCmRuntimeRenderReady(services?.cm);
+    return {
+      shouldReuseCachedServices,
+      cachedCmRuntimeReady,
+      instantRenderReady: Boolean(services && typeof services === "object" && (cachedCmRuntimeReady || shouldReuseCachedServices)),
+    };
+  };
+
+  let cachedReuseState = getCachedServiceReuseState(cachedServices);
+  // VAULT says load once: a complete/reusable ENV x Media Company record must
+  // restore into runtime before UnderPAR is allowed to show a loading shell.
+  const shouldRestoreCompleteVaultSnapshot =
+    !forcePremiumRefresh &&
+    (vaultReadiness?.reusable === true || vaultReadiness?.hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE) &&
+    !cachedReuseState.instantRenderReady;
+  if (shouldRestoreCompleteVaultSnapshot) {
+    await hydrateProgrammerFromPassVault(programmer, {
+      forceReload: false,
+      forceOverwrite: true,
+      forceDcrRestore: true,
+    }).catch(() => null);
+    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+      return;
+    }
+    cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+    cachedReuseState = getCachedServiceReuseState(cachedServices);
+  }
   if (!cachedServices) {
     await hydrateProgrammerFromPassVault(programmer, {
       forceReload: false,
@@ -45411,6 +45461,7 @@ async function refreshProgrammerPanels(options = {}) {
       return;
     }
     cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+    cachedReuseState = getCachedServiceReuseState(cachedServices);
   }
   if (
     cachedServices &&
@@ -45420,22 +45471,10 @@ async function refreshProgrammerPanels(options = {}) {
   ) {
     restorePassVaultCmTenantBundlesToRuntime(getPassVaultMediaCompanyRecord(programmer.programmerId));
   }
-  const cachedIncludesCm = Boolean(cachedServices && Object.prototype.hasOwnProperty.call(cachedServices, "cm"));
-  const cachedCmMvpdSelectionKey = String(cachedServices?.cmMvpdSelectionKey || "").trim();
-  const cmMvpdSelectionMatches = cachedCmMvpdSelectionKey === cmMvpdSelectionKey;
-  const programmerVaultHydrated = isPassVaultProgrammerHydrated(programmer?.programmerId);
-  const cachedVaultCredentialsReady = hasPassVaultCredentialCoverageForServices(programmer?.programmerId, cachedServices);
-  const cachedCmReadyForReuse = hasReusableCmSnapshotForSelection(cachedServices?.cm);
-  const shouldReuseCachedServices =
-    cachedServices &&
-    cachedIncludesCm &&
-    cachedCmReadyForReuse &&
-    cmMvpdSelectionMatches &&
-    !forcePremiumRefresh &&
-    (programmerVaultHydrated || isPassVaultBackedValue(cachedServices)) &&
-    cachedVaultCredentialsReady;
-  const cachedCmRuntimeReady = isCmRuntimeRenderReady(cachedServices?.cm);
-  if (cachedServices && typeof cachedServices === "object" && (cachedCmRuntimeReady || shouldReuseCachedServices)) {
+  cachedReuseState = getCachedServiceReuseState(cachedServices);
+  const shouldReuseCachedServices = cachedReuseState.shouldReuseCachedServices;
+  const cachedCmRuntimeReady = cachedReuseState.cachedCmRuntimeReady;
+  if (cachedReuseState.instantRenderReady) {
     // Repeat selection must paint instantly from the hydrated VAULT/runtime snapshot.
     // CM runtime warmup can continue afterward without dropping the whole UI back
     // to a loading shell.
@@ -56918,7 +56957,6 @@ function registerEventHandlers() {
     state.selectedProgrammerKey = String(event.target.value || "");
     const controllerReason = "media-company-change";
     const selectedProgrammer = selectProgrammerForController(resolveSelectedProgrammer(), controllerReason);
-    const forcePremiumRefresh = shouldForceLivePassVaultProgrammerHydration(selectedProgrammer?.programmerId);
     emitGlobalSelectorChangeLog(
       "Media Company",
       state.selectedProgrammerKey,
@@ -56928,7 +56966,6 @@ function registerEventHandlers() {
     );
     void refreshProgrammerPanels({
       controllerReason,
-      forcePremiumRefresh,
     });
   });
 
