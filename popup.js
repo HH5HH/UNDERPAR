@@ -341,6 +341,37 @@ function setCurrentPremiumAppsSnapshot(programmerId = "", premiumApps = {}) {
   return snapshot;
 }
 
+function getProgrammerWorkspaceHydrationReadyKey(
+  programmerId = "",
+  environmentKey = getActiveAdobePassEnvironmentKey()
+) {
+  return getEnvironmentScopedProgrammerKey(programmerId, environmentKey);
+}
+
+function isProgrammerWorkspaceHydrationReady(
+  programmerId = "",
+  environmentKey = getActiveAdobePassEnvironmentKey()
+) {
+  const scopedKey = getProgrammerWorkspaceHydrationReadyKey(programmerId, environmentKey);
+  if (!scopedKey) {
+    return false;
+  }
+  return state.programmerWorkspaceHydrationReadyByKey.get(scopedKey) === true;
+}
+
+function setProgrammerWorkspaceHydrationReady(
+  programmerId = "",
+  ready = false,
+  environmentKey = getActiveAdobePassEnvironmentKey()
+) {
+  const scopedKey = getProgrammerWorkspaceHydrationReadyKey(programmerId, environmentKey);
+  if (!scopedKey) {
+    return false;
+  }
+  state.programmerWorkspaceHydrationReadyByKey.set(scopedKey, ready === true);
+  return ready === true;
+}
+
 function normalizeUnderparVaultStatus(value = "") {
   const normalized = String(value || "").trim().toLowerCase();
   if (
@@ -435,6 +466,10 @@ function createEmptyUnderparVaultPayload() {
     schemaVersion: UNDERPAR_VAULT_SCHEMA_VERSION,
     updatedAt: Date.now(),
     underpar: {
+      globals: {
+        savedQueries: {},
+        cmImsByEnvironment: {},
+      },
       app: {
         savedQueries: {},
       },
@@ -476,6 +511,41 @@ function buildPassVaultCmGlobalAuthRecord(value = null) {
   };
 }
 
+function ensureUnderparVaultGlobalContainers(vault = null) {
+  const target = vault && typeof vault === "object" ? vault : createEmptyUnderparVaultPayload();
+  if (!target.underpar || typeof target.underpar !== "object" || Array.isArray(target.underpar)) {
+    target.underpar = {};
+  }
+  if (!target.underpar.globals || typeof target.underpar.globals !== "object" || Array.isArray(target.underpar.globals)) {
+    target.underpar.globals = {};
+  }
+  if (!target.underpar.app || typeof target.underpar.app !== "object" || Array.isArray(target.underpar.app)) {
+    target.underpar.app = {};
+  }
+  if (
+    !target.underpar.globals.savedQueries ||
+    typeof target.underpar.globals.savedQueries !== "object" ||
+    Array.isArray(target.underpar.globals.savedQueries)
+  ) {
+    target.underpar.globals.savedQueries = {};
+  }
+  if (
+    !target.underpar.globals.cmImsByEnvironment ||
+    typeof target.underpar.globals.cmImsByEnvironment !== "object" ||
+    Array.isArray(target.underpar.globals.cmImsByEnvironment)
+  ) {
+    target.underpar.globals.cmImsByEnvironment = {};
+  }
+  if (
+    !target.underpar.app.savedQueries ||
+    typeof target.underpar.app.savedQueries !== "object" ||
+    Array.isArray(target.underpar.app.savedQueries)
+  ) {
+    target.underpar.app.savedQueries = {};
+  }
+  return target;
+}
+
 function getPreferredCmTokenFingerprint(accessToken = "") {
   const normalized = normalizeBearerTokenValue(accessToken);
   return normalized ? String(normalized).slice(-24) : "";
@@ -484,6 +554,13 @@ function getPreferredCmTokenFingerprint(accessToken = "") {
 function getUnderparVaultSavedQueriesInput(vault = null) {
   if (!vault || typeof vault !== "object") {
     return null;
+  }
+  if (
+    vault?.underpar?.globals?.savedQueries &&
+    typeof vault.underpar.globals.savedQueries === "object" &&
+    !Array.isArray(vault.underpar.globals.savedQueries)
+  ) {
+    return vault.underpar.globals.savedQueries;
   }
   if (
     vault?.underpar?.app?.savedQueries &&
@@ -504,6 +581,129 @@ function getUnderparVaultSavedQueriesInput(vault = null) {
 
 function getUnderparVaultSavedQueries(vault = null) {
   return normalizeUnderparVaultSavedQueryEntries(getUnderparVaultSavedQueriesInput(vault));
+}
+
+function normalizeUnderparVaultCmImsByEnvironmentEntries(input = null) {
+  const normalizedEntries = {};
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return normalizedEntries;
+  }
+
+  Object.entries(input).forEach(([environmentKey, value]) => {
+    const normalizedEnvironmentKey = String(environmentKey || value?.key || value?.environmentKey || "").trim();
+    if (!normalizedEnvironmentKey) {
+      return;
+    }
+    const record = buildPassVaultCmGlobalAuthRecord(value);
+    if (!record) {
+      return;
+    }
+    normalizedEntries[normalizedEnvironmentKey] = record;
+  });
+
+  return normalizedEntries;
+}
+
+function getUnderparVaultCmImsByEnvironmentInput(vault = null) {
+  if (!vault || typeof vault !== "object") {
+    return null;
+  }
+  if (
+    vault?.underpar?.globals?.cmImsByEnvironment &&
+    typeof vault.underpar.globals.cmImsByEnvironment === "object" &&
+    !Array.isArray(vault.underpar.globals.cmImsByEnvironment)
+  ) {
+    return vault.underpar.globals.cmImsByEnvironment;
+  }
+  if (
+    vault?.underpar?.globals?.cmGlobalByEnvironment &&
+    typeof vault.underpar.globals.cmGlobalByEnvironment === "object" &&
+    !Array.isArray(vault.underpar.globals.cmGlobalByEnvironment)
+  ) {
+    return vault.underpar.globals.cmGlobalByEnvironment;
+  }
+  if (
+    vault?.underpar?.cmImsByEnvironment &&
+    typeof vault.underpar.cmImsByEnvironment === "object" &&
+    !Array.isArray(vault.underpar.cmImsByEnvironment)
+  ) {
+    return vault.underpar.cmImsByEnvironment;
+  }
+  return null;
+}
+
+function getUnderparVaultCmImsByEnvironment(vault = null) {
+  const explicitEntries = normalizeUnderparVaultCmImsByEnvironmentEntries(getUnderparVaultCmImsByEnvironmentInput(vault));
+  const fallbackEntries = {};
+  const environments =
+    vault?.pass?.environments && typeof vault.pass.environments === "object" ? vault.pass.environments : {};
+  Object.entries(environments).forEach(([environmentKey, environmentRecord]) => {
+    const normalizedEnvironmentKey = String(environmentKey || environmentRecord?.key || "").trim();
+    if (!normalizedEnvironmentKey) {
+      return;
+    }
+    const record = buildPassVaultCmGlobalAuthRecord(environmentRecord?.cmGlobal || environmentRecord?.cmConsole || null);
+    if (record) {
+      fallbackEntries[normalizedEnvironmentKey] = record;
+    }
+  });
+  return {
+    ...fallbackEntries,
+    ...explicitEntries,
+  };
+}
+
+function setUnderparVaultSavedQueries(vault = null, value = null) {
+  const target = ensureUnderparVaultGlobalContainers(vault);
+  const normalizedEntries = normalizeUnderparVaultSavedQueryEntries(value);
+  target.underpar.globals.savedQueries = cloneJsonLikeValue(normalizedEntries, {});
+  target.underpar.app.savedQueries = cloneJsonLikeValue(normalizedEntries, {});
+  return normalizedEntries;
+}
+
+function setUnderparVaultCmImsByEnvironmentRecord(vault = null, environmentKey = "", value = null) {
+  const target = ensureUnderparVaultGlobalContainers(vault);
+  const normalizedEnvironmentKey = String(environmentKey || "").trim();
+  if (!normalizedEnvironmentKey) {
+    return null;
+  }
+
+  const nextRecord = buildPassVaultCmGlobalAuthRecord(value);
+  if (nextRecord) {
+    target.underpar.globals.cmImsByEnvironment[normalizedEnvironmentKey] = cloneJsonLikeValue(nextRecord, null);
+  } else {
+    delete target.underpar.globals.cmImsByEnvironment[normalizedEnvironmentKey];
+  }
+
+  if (!target.pass || typeof target.pass !== "object" || Array.isArray(target.pass)) {
+    target.pass = {
+      schemaVersion: UNDERPAR_VAULT_SCHEMA_VERSION,
+      environments: {},
+    };
+  }
+  if (!target.pass.environments || typeof target.pass.environments !== "object" || Array.isArray(target.pass.environments)) {
+    target.pass.environments = {};
+  }
+  if (!target.pass.environments[normalizedEnvironmentKey]) {
+    target.pass.environments[normalizedEnvironmentKey] = {
+      key: normalizedEnvironmentKey,
+      label: resolvePassVaultRecordRuntimeLabel(normalizedEnvironmentKey) || normalizedEnvironmentKey,
+      updatedAt: Date.now(),
+      cmGlobal: null,
+      cmTenants: null,
+      mediaCompanies: {},
+    };
+  }
+
+  target.pass.environments[normalizedEnvironmentKey].label =
+    String(
+      target.pass.environments[normalizedEnvironmentKey].label ||
+        resolvePassVaultRecordRuntimeLabel(normalizedEnvironmentKey) ||
+        normalizedEnvironmentKey
+    ).trim() || normalizedEnvironmentKey;
+  target.pass.environments[normalizedEnvironmentKey].updatedAt = Date.now();
+  target.pass.environments[normalizedEnvironmentKey].cmGlobal = nextRecord ? cloneJsonLikeValue(nextRecord, null) : null;
+  return nextRecord;
 }
 
 function resolvePassVaultRecordRuntimeLabel(environmentKey = "") {
@@ -1304,7 +1504,9 @@ function normalizeUnderparVaultPayload(payload = null) {
 
   normalized.schemaVersion = Number(payload?.schemaVersion || UNDERPAR_VAULT_SCHEMA_VERSION) || UNDERPAR_VAULT_SCHEMA_VERSION;
   normalized.updatedAt = Number(payload?.updatedAt || Date.now()) || Date.now();
-  normalized.underpar.app.savedQueries = getUnderparVaultSavedQueries(payload);
+  setUnderparVaultSavedQueries(normalized, getUnderparVaultSavedQueries(payload));
+  const cmImsByEnvironment = getUnderparVaultCmImsByEnvironment(payload);
+  normalized.underpar.globals.cmImsByEnvironment = cloneJsonLikeValue(cmImsByEnvironment, {});
 
   const environmentsInput =
     payload?.pass?.environments && typeof payload.pass.environments === "object" ? payload.pass.environments : {};
@@ -1342,12 +1544,35 @@ function normalizeUnderparVaultPayload(payload = null) {
         normalizedEnvironmentKey,
       ]),
       updatedAt: Number(rawEnvironmentRecord?.updatedAt || normalized.updatedAt || Date.now()),
-      cmGlobal: buildPassVaultCmGlobalAuthRecord(rawEnvironmentRecord?.cmGlobal || rawEnvironmentRecord?.cmConsole || null),
+      cmGlobal: buildPassVaultCmGlobalAuthRecord(
+        cmImsByEnvironment[normalizedEnvironmentKey] || rawEnvironmentRecord?.cmGlobal || rawEnvironmentRecord?.cmConsole || null
+      ),
       cmTenants: normalizeCmTenantsCatalogPayload(
         rawEnvironmentRecord?.cmTenants || rawEnvironmentRecord?.cmTenantsCatalog || null
       ),
       mediaCompanies,
     };
+  });
+
+  Object.entries(cmImsByEnvironment).forEach(([environmentKey, cmImsRecord]) => {
+    const normalizedEnvironmentKey = String(environmentKey || "").trim();
+    if (!normalizedEnvironmentKey) {
+      return;
+    }
+    if (!normalized.pass.environments[normalizedEnvironmentKey]) {
+      normalized.pass.environments[normalizedEnvironmentKey] = {
+        key: normalizedEnvironmentKey,
+        label: resolvePassVaultRecordRuntimeLabel(normalizedEnvironmentKey) || normalizedEnvironmentKey,
+        updatedAt: normalized.updatedAt,
+        cmGlobal: buildPassVaultCmGlobalAuthRecord(cmImsRecord),
+        cmTenants: null,
+        mediaCompanies: {},
+      };
+      return;
+    }
+    if (!normalized.pass.environments[normalizedEnvironmentKey].cmGlobal) {
+      normalized.pass.environments[normalizedEnvironmentKey].cmGlobal = buildPassVaultCmGlobalAuthRecord(cmImsRecord);
+    }
   });
 
   return normalized;
@@ -1384,11 +1609,9 @@ function buildPassVaultStorageWriteMarker(vault = null) {
     vault?.pass?.environments && typeof vault.pass.environments === "object"
       ? Object.keys(vault.pass.environments).length
       : 0;
-  const savedQueryCount =
-    vault?.underpar?.app?.savedQueries && typeof vault.underpar.app.savedQueries === "object"
-      ? Object.keys(vault.underpar.app.savedQueries).length
-      : 0;
-  return `${normalizedUpdatedAt}:${environmentCount}:${savedQueryCount}`;
+  const savedQueryCount = Object.keys(getUnderparVaultSavedQueries(vault)).length;
+  const cmImsCount = Object.keys(getUnderparVaultCmImsByEnvironment(vault)).length;
+  return `${normalizedUpdatedAt}:${environmentCount}:${savedQueryCount}:${cmImsCount}`;
 }
 
 function trackPendingPassVaultStorageWrite(vault = null) {
@@ -1452,7 +1675,16 @@ function getPassVaultCmTenantsCatalogFromVault(vault = null, environmentKey = ge
 }
 
 function getPassVaultCmGlobalAuthFromVault(vault = null, environmentKey = getActiveAdobePassEnvironmentKey()) {
-  const environmentRecord = getPassVaultEnvironmentRecordFromVault(vault, environmentKey);
+  const normalizedEnvironmentKey = String(environmentKey || "").trim();
+  if (!normalizedEnvironmentKey) {
+    return null;
+  }
+  const cmImsByEnvironment = getUnderparVaultCmImsByEnvironment(vault);
+  const globalRecord = buildPassVaultCmGlobalAuthRecord(cmImsByEnvironment?.[normalizedEnvironmentKey] || null);
+  if (globalRecord) {
+    return globalRecord;
+  }
+  const environmentRecord = getPassVaultEnvironmentRecordFromVault(vault, normalizedEnvironmentKey);
   if (!environmentRecord) {
     return null;
   }
@@ -1499,7 +1731,7 @@ async function ensurePassVaultLoaded(options = {}) {
   const loadPromise = (async () => {
     if (!chrome?.storage?.local?.get) {
       const emptyVault = createEmptyUnderparVaultPayload();
-      emptyVault.underpar.app.savedQueries = readLegacySavedEsmQueryEntriesFromLocalStorage();
+      setUnderparVaultSavedQueries(emptyVault, readLegacySavedEsmQueryEntriesFromLocalStorage());
       state.passVault = emptyVault;
       rebuildPassVaultProgrammerStatusIndex(emptyVault);
       return emptyVault;
@@ -1510,10 +1742,10 @@ async function ensurePassVaultLoaded(options = {}) {
     const normalizedVault = normalizeUnderparVaultPayload(storedVault);
     const legacySavedQueries = readLegacySavedEsmQueryEntriesFromLocalStorage();
     if (Object.keys(legacySavedQueries).length > 0) {
-      normalizedVault.underpar.app.savedQueries = {
+      setUnderparVaultSavedQueries(normalizedVault, {
         ...legacySavedQueries,
         ...getUnderparVaultSavedQueries(normalizedVault),
-      };
+      });
       normalizedVault.updatedAt = Date.now();
     }
     state.passVault = normalizedVault;
@@ -1998,21 +2230,9 @@ async function persistPassVaultCmGlobalState(value = null, options = {}) {
     const environmentKey = getActiveAdobePassEnvironmentKey();
     const environment = getActiveAdobePassEnvironment();
 
-    if (!vault.pass.environments[environmentKey]) {
-      vault.pass.environments[environmentKey] = {
-        key: environmentKey,
-        label: String(environment?.label || environmentKey).trim() || environmentKey,
-        updatedAt: Date.now(),
-        cmGlobal: null,
-        cmTenants: null,
-        mediaCompanies: {},
-      };
-    }
-
+    setUnderparVaultCmImsByEnvironmentRecord(vault, environmentKey, nextRecord);
     vault.pass.environments[environmentKey].label =
       String(environment?.label || vault.pass.environments[environmentKey].label || environmentKey).trim() || environmentKey;
-    vault.pass.environments[environmentKey].updatedAt = Date.now();
-    vault.pass.environments[environmentKey].cmGlobal = nextRecord;
     vault.updatedAt = Date.now();
 
     await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false });
@@ -2367,6 +2587,7 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.restV2ProfileHarvestLast = null;
   state.applicationsByProgrammerId.clear();
   state.premiumAppsByProgrammerId.clear();
+  state.programmerWorkspaceHydrationReadyByKey.clear();
   state.premiumAppsLoadPromiseByProgrammerId.clear();
   state.premiumAppScopeHydrationPromiseByProgrammerId.clear();
   state.cmServiceByProgrammerId.clear();
@@ -3836,6 +4057,9 @@ function findProgrammerByProgrammerId(programmerId = "") {
 
 function selectProgrammerForController(programmer = null, controllerReason = "media-company-change") {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : null;
+  if (resolvedProgrammer?.programmerId) {
+    setProgrammerWorkspaceHydrationReady(resolvedProgrammer.programmerId, false);
+  }
   state.selectedProgrammerKey = String(resolvedProgrammer?.key || "").trim();
   state.selectedRequestorId = "";
   state.selectedMvpdId = "";
@@ -3910,11 +4134,6 @@ async function refreshOpenWorkspacesForEnvironmentSwitch(programmer = null, serv
           targetWindowId,
         }
       );
-      if (esmWorkspaceState) {
-        await esmWorkspaceSendWorkspaceMessage("controller-state", esmWorkspaceGetControllerStatePayload(esmWorkspaceState), {
-          targetWindowId,
-        });
-      }
       await esmWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, {
         targetWindowId,
       });
@@ -3935,11 +4154,6 @@ async function refreshOpenWorkspacesForEnvironmentSwitch(programmer = null, serv
           targetWindowId,
         }
       );
-      if (esmWorkspaceState) {
-        await megWorkspaceSendWorkspaceMessage("controller-state", esmWorkspaceGetControllerStatePayload(esmWorkspaceState), {
-          targetWindowId,
-        });
-      }
       await megWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, {
         targetWindowId,
       });
@@ -5464,6 +5678,7 @@ const state = {
   restV2TraceViewerTabId: 0,
   applicationsByProgrammerId: new Map(),
   premiumAppsByProgrammerId: new Map(),
+  programmerWorkspaceHydrationReadyByKey: new Map(),
   premiumAppsLoadPromiseByProgrammerId: new Map(),
   premiumAppScopeHydrationPromiseByProgrammerId: new Map(),
   cmServiceByProgrammerId: new Map(),
@@ -5791,9 +6006,15 @@ function emitUnderparBrowserConsoleTrace(channel = "event", message = "", detail
   if (UNDERPAR_BROWSER_CONSOLE_TRACE_ENABLED !== true) {
     return;
   }
-  const consoleMethodName = ["log", "info", "warn", "error", "debug"].includes(String(options.level || "").trim())
-    ? String(options.level || "").trim()
-    : "log";
+  const requestedConsoleLevel = String(options.level || "").trim().toLowerCase();
+  const consoleMethodName =
+    requestedConsoleLevel === "debug"
+      ? "debug"
+      : requestedConsoleLevel === "info"
+        ? "info"
+        : "log";
+  // Trace warnings/errors are intentionally logged as non-errors so Chrome's extension
+  // Errors pane only reflects real uncaught failures instead of expected diagnostic noise.
   const consoleMethod = typeof console?.[consoleMethodName] === "function" ? console[consoleMethodName].bind(console) : console.log.bind(console);
   const label = `[UnderPAR Trace][${String(channel || "event").trim() || "event"}] ${String(message || "").trim() || "(no message)"}`;
   if (details == null) {
@@ -5894,9 +6115,19 @@ function shouldShowBlockingBusyCursor() {
   return Boolean(state.sessionReady || state.loginData);
 }
 
+function shouldRunExperienceCloudSessionMonitor() {
+  return Boolean(state.sessionReady || state.loginData || state.restricted);
+}
+
+function shouldShowLoggedOutAuthActivity() {
+  return state.busy === true && isInteractiveAuthBusyContext(state.busyContext);
+}
+
 function syncGlobalNetworkActivityIndicator() {
   const networkActivityCount = getGlobalNetworkActivityCount();
-  const shouldShowBusy = state.busy === true || networkActivityCount > 0;
+  const shouldShowBusy = shouldRunExperienceCloudSessionMonitor()
+    ? state.busy === true || networkActivityCount > 0
+    : shouldShowLoggedOutAuthActivity();
   const shouldShowBlockingBusy = shouldShowBlockingBusyCursor();
   if (document?.body) {
     document.body.classList.toggle("net-busy", shouldShowBlockingBusy);
@@ -22836,6 +23067,19 @@ function nextEsmWorkspaceControllerStateVersion() {
   return state.esmWorkspaceControllerStateVersion;
 }
 
+function buildEsmWorkspaceControllerContextKey(
+  programmerId = "",
+  requestToken = state.premiumPanelRequestToken,
+  environmentKey = getActiveAdobePassEnvironmentKey()
+) {
+  const normalizedEnvironmentKey =
+    String(environmentKey || getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+    DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const normalizedProgrammerId = String(programmerId || "").trim() || "no-programmer";
+  const normalizedRequestToken = Math.max(0, Number(requestToken || 0));
+  return `${normalizedEnvironmentKey}::${normalizedProgrammerId}::${normalizedRequestToken}`;
+}
+
 function esmWorkspaceGetControllerStatePayload(esmWorkspaceState) {
   const selections = getGlobalRequestorMvpdSelections();
   const requestorIds = selections.requestorIds;
@@ -22850,16 +23094,27 @@ function esmWorkspaceGetControllerStatePayload(esmWorkspaceState) {
   const adobePassEnvironment = {
     ...getActiveAdobePassEnvironment(),
   };
+  const programmerId = String(esmWorkspaceState?.programmer?.programmerId || "");
+  const premiumPanelRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
+  const workspaceContextKey = buildEsmWorkspaceControllerContextKey(
+    programmerId,
+    premiumPanelRequestToken,
+    adobePassEnvironment?.key
+  );
   return {
     controllerOnline: Boolean(esmWorkspaceState?.section?.isConnected),
     esmAvailable: true,
     esmAvailabilityResolved: true,
     esmContainerVisible: true,
-    programmerId: String(esmWorkspaceState?.programmer?.programmerId || ""),
+    programmerId,
     programmerName: String(esmWorkspaceState?.programmer?.programmerName || ""),
+    programmerHydrationReady: isProgrammerWorkspaceHydrationReady(programmerId),
     adobePassEnvironment,
+    adobePassEnvironmentKey: String(adobePassEnvironment?.key || "").trim(),
     requestorIds,
     mvpdIds,
+    premiumPanelRequestToken,
+    workspaceContextKey,
     controllerStateVersion: nextEsmWorkspaceControllerStateVersion(),
     profileHarvest:
       profileHarvest && typeof profileHarvest === "object"
@@ -22925,17 +23180,32 @@ function esmWorkspaceGetSelectedControllerStatePayload(programmer = null, servic
   const adobePassEnvironment = {
     ...getActiveAdobePassEnvironment(),
   };
+  const programmerId = String(resolvedProgrammer?.programmerId || "");
+  const premiumPanelRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
+  const programmerHydrationReady =
+    options?.programmerHydrationReady === true || options?.programmerHydrationReady === false
+      ? options.programmerHydrationReady === true
+      : isProgrammerWorkspaceHydrationReady(programmerId);
+  const workspaceContextKey = buildEsmWorkspaceControllerContextKey(
+    programmerId,
+    premiumPanelRequestToken,
+    adobePassEnvironment?.key
+  );
 
   return {
     controllerOnline: false,
     esmAvailable,
     esmAvailabilityResolved,
     esmContainerVisible,
-    programmerId: String(resolvedProgrammer?.programmerId || ""),
+    programmerId,
     programmerName: String(resolvedProgrammer?.programmerName || ""),
+    programmerHydrationReady,
     adobePassEnvironment,
+    adobePassEnvironmentKey: String(adobePassEnvironment?.key || "").trim(),
     requestorIds,
     mvpdIds,
+    premiumPanelRequestToken,
+    workspaceContextKey,
     controllerStateVersion: nextEsmWorkspaceControllerStateVersion(),
     profileHarvest:
       profileHarvest && typeof profileHarvest === "object"
@@ -24489,6 +24759,14 @@ async function esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, c
     originCardKey,
     endpointUrl: effectiveBaseRequestUrl,
     requestUrl,
+    programmerId: String(esmWorkspaceState?.programmer?.programmerId || "").trim(),
+    adobePassEnvironmentKey: String(getActiveAdobePassEnvironmentKey() || "").trim(),
+    premiumPanelRequestToken: Math.max(0, Number(requestToken || 0)),
+    workspaceContextKey: buildEsmWorkspaceControllerContextKey(
+      String(esmWorkspaceState?.programmer?.programmerId || "").trim(),
+      requestToken,
+      getActiveAdobePassEnvironmentKey()
+    ),
     zoomKey: clickEsmGetZoomKey(normalizedEndpoint),
     columns: reportColumns,
     preserveQueryContext: normalizedEndpoint?.preserveQueryContext === true,
@@ -25022,17 +25300,123 @@ function getVaultSavedEsmQueryRecords(vault = null) {
     .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }
 
+function getMergedSavedEsmQueryEntries(vault = null) {
+  return {
+    ...readLegacySavedEsmQueryEntriesFromLocalStorage(),
+    ...getUnderparVaultSavedQueries(vault),
+  };
+}
+
 function popupGetSavedEsmQueryRecords() {
-  const vaultRecords = getVaultSavedEsmQueryRecords(state.passVault);
-  if (vaultRecords.length > 0) {
-    return vaultRecords;
-  }
   return getVaultSavedEsmQueryRecords({
     underpar: {
       app: {
-        savedQueries: readLegacySavedEsmQueryEntriesFromLocalStorage(),
+        savedQueries: getMergedSavedEsmQueryEntries(state.passVault),
       },
     },
+  });
+}
+
+async function ensureSavedEsmQueryVaultMirror(options = {}) {
+  const forceReload = options?.forceReload === true;
+  const vault = normalizeUnderparVaultPayload(
+    state.passVault || (await ensurePassVaultLoaded({ forceReload }))
+  );
+  const mergedSavedQueries = getMergedSavedEsmQueryEntries(vault);
+  const currentSavedQueries = getUnderparVaultSavedQueries(vault);
+  if (JSON.stringify(currentSavedQueries) === JSON.stringify(mergedSavedQueries)) {
+    state.passVault = vault;
+    return vault;
+  }
+  setUnderparVaultSavedQueries(vault, mergedSavedQueries);
+  vault.updatedAt = Date.now();
+  state.passVault = vault;
+  await persistPassVaultPayloadToStorage(vault, { silent: true });
+  return vault;
+}
+
+function syncLegacySavedEsmQueryRecordToLocalStorage(name = "", rawUrl = "") {
+  const record = popupBuildSavedEsmQueryRecord(name, rawUrl);
+  if (!record) {
+    return null;
+  }
+  const storageKey = `${SAVED_ESM_QUERY_STORAGE_PREFIX}${encodeURIComponent(record.name)}`;
+  try {
+    localStorage.setItem(storageKey, popupBuildSavedEsmQueryPayload(record.name, record.url));
+  } catch {
+    // Ignore local fallback sync failures.
+  }
+  return {
+    storageKey,
+    ...record,
+  };
+}
+
+function removeLegacySavedEsmQueryRecordFromLocalStorage(storageKey = "") {
+  const normalizedStorageKey = String(storageKey || "").trim();
+  if (!normalizedStorageKey) {
+    return;
+  }
+  try {
+    localStorage.removeItem(normalizedStorageKey);
+  } catch {
+    // Ignore local fallback sync failures.
+  }
+}
+
+async function popupPersistSavedEsmQueryRecord(name = "", rawUrl = "") {
+  const record = popupBuildSavedEsmQueryRecord(name, rawUrl);
+  if (!record) {
+    throw new Error("Saved Query name and URL are required.");
+  }
+
+  return enqueuePassVaultPersist(async () => {
+    const vault = await ensureSavedEsmQueryVaultMirror({ forceReload: false });
+    const nextSavedQueries = getMergedSavedEsmQueryEntries(vault);
+    const existed = Object.prototype.hasOwnProperty.call(nextSavedQueries, record.name);
+    nextSavedQueries[record.name] = record.url;
+    setUnderparVaultSavedQueries(vault, nextSavedQueries);
+    vault.updatedAt = Date.now();
+
+    syncLegacySavedEsmQueryRecordToLocalStorage(record.name, record.url);
+    await persistPassVaultPayloadToStorage(vault, { silent: true });
+    refreshAllEsmWorkspaceMegSavedQuerySelectors();
+
+    return {
+      storageKey: `${SAVED_ESM_QUERY_STORAGE_PREFIX}${encodeURIComponent(record.name)}`,
+      existed,
+      ...record,
+    };
+  });
+}
+
+async function popupDeleteSavedEsmQueryRecord(storageKey = "") {
+  const normalizedStorageKey = String(storageKey || "").trim();
+  if (!normalizedStorageKey.startsWith(SAVED_ESM_QUERY_STORAGE_PREFIX)) {
+    throw new Error("Saved Query storage key is required.");
+  }
+
+  const storedName = decodeURIComponent(normalizedStorageKey.slice(SAVED_ESM_QUERY_STORAGE_PREFIX.length) || "");
+  const normalizedName = popupNormalizeSavedEsmQueryName(storedName);
+  if (!normalizedName) {
+    throw new Error("Saved Query storage key is required.");
+  }
+
+  return enqueuePassVaultPersist(async () => {
+    const vault = await ensureSavedEsmQueryVaultMirror({ forceReload: false });
+    const nextSavedQueries = getMergedSavedEsmQueryEntries(vault);
+    delete nextSavedQueries[normalizedName];
+    setUnderparVaultSavedQueries(vault, nextSavedQueries);
+    vault.updatedAt = Date.now();
+
+    removeLegacySavedEsmQueryRecordFromLocalStorage(normalizedStorageKey);
+    await persistPassVaultPayloadToStorage(vault, { silent: true });
+    refreshAllEsmWorkspaceMegSavedQuerySelectors();
+
+    return {
+      storageKey: normalizedStorageKey,
+      name: normalizedName,
+    };
   });
 }
 
@@ -25944,6 +26328,13 @@ async function handleEsmWorkspaceWorkspaceAction(message, sender = null) {
     const cards = Array.isArray(message?.cards) ? message.cards : [];
     const reason = String(message?.reason || "").trim().toLowerCase();
     const requestSourceForRerun = reason === "programmer-switch" ? "workspace-programmer-switch" : "workspace";
+    const workspaceContextKey = buildEsmWorkspaceControllerContextKey(
+      String(esmWorkspaceState?.programmer?.programmerId || "").trim(),
+      requestToken,
+      getActiveAdobePassEnvironmentKey()
+    );
+    const adobePassEnvironmentKey = String(getActiveAdobePassEnvironmentKey() || "").trim();
+    const programmerId = String(esmWorkspaceState?.programmer?.programmerId || "").trim();
     emitEsmWorkspaceDebugEvent(activeFlowId, {
       phase: "workspace-action",
       action: "rerun-all",
@@ -25953,6 +26344,10 @@ async function handleEsmWorkspaceWorkspaceAction(message, sender = null) {
     void esmWorkspaceSendWorkspaceMessage("batch-start", {
       total: cards.length,
       reason,
+      programmerId,
+      adobePassEnvironmentKey,
+      premiumPanelRequestToken: requestToken,
+      workspaceContextKey,
       startedAt: Date.now(),
     }, {
       targetWindowId: senderWindowId || Number(esmWorkspaceState.controllerWindowId || 0),
@@ -25980,6 +26375,10 @@ async function handleEsmWorkspaceWorkspaceAction(message, sender = null) {
     void esmWorkspaceSendWorkspaceMessage("batch-end", {
       total: cards.length,
       reason,
+      programmerId,
+      adobePassEnvironmentKey,
+      premiumPanelRequestToken: requestToken,
+      workspaceContextKey,
       completedAt: Date.now(),
     }, {
       targetWindowId: senderWindowId || Number(esmWorkspaceState.controllerWindowId || 0),
@@ -26164,6 +26563,45 @@ async function handleMegWorkspaceWorkspaceAction(message, sender = null) {
       ok: true,
       fileName: result.fileName || "",
       format: result.format || format,
+    };
+  }
+
+  if (action === "saved-query-get-records") {
+    await ensureSavedEsmQueryVaultMirror({ forceReload: false });
+    return {
+      ok: true,
+      records: popupGetSavedEsmQueryRecords(),
+    };
+  }
+
+  if (action === "saved-query-put-record") {
+    const result = await popupPersistSavedEsmQueryRecord(
+      String(message?.payload?.name || ""),
+      String(message?.payload?.url || "")
+    );
+    return {
+      ok: true,
+      storageKey: String(result?.storageKey || ""),
+      existed: result?.existed === true,
+      records: popupGetSavedEsmQueryRecords(),
+    };
+  }
+
+  if (action === "saved-query-delete-record") {
+    const result = await popupDeleteSavedEsmQueryRecord(String(message?.payload?.storageKey || ""));
+    return {
+      ok: true,
+      storageKey: String(result?.storageKey || ""),
+      records: popupGetSavedEsmQueryRecords(),
+    };
+  }
+
+  if (action === "saved-query-sync-sidepanel") {
+    await ensureSavedEsmQueryVaultMirror({ forceReload: false });
+    refreshAllEsmWorkspaceMegSavedQuerySelectors();
+    return {
+      ok: true,
+      records: popupGetSavedEsmQueryRecords(),
     };
   }
 
@@ -26660,6 +27098,7 @@ function cmGetControllerStatePayload(cmState) {
   const adobePassEnvironment = {
     ...getActiveAdobePassEnvironment(),
   };
+  const programmerId = String(cmState?.programmer?.programmerId || "");
   const tenantScope = resolveCmUsageTenantScopeValue(
     getCmPrimaryUsageTenantScopeFromState(cmState),
     cmState?.tenantScope,
@@ -26672,8 +27111,9 @@ function cmGetControllerStatePayload(cmState) {
     cmAvailable: true,
     cmAvailabilityResolved: true,
     cmContainerVisible: true,
-    programmerId: String(cmState?.programmer?.programmerId || ""),
+    programmerId,
     programmerName: String(cmState?.programmer?.programmerName || ""),
+    programmerHydrationReady: isProgrammerWorkspaceHydrationReady(programmerId),
     adobePassEnvironment,
     tenantScope,
     requestorIds,
@@ -26743,13 +27183,19 @@ function cmGetSelectedControllerStatePayload(programmer = null, services = null,
   const adobePassEnvironment = {
     ...getActiveAdobePassEnvironment(),
   };
+  const programmerId = String(resolvedProgrammer?.programmerId || "");
+  const programmerHydrationReady =
+    options?.programmerHydrationReady === true || options?.programmerHydrationReady === false
+      ? options.programmerHydrationReady === true
+      : isProgrammerWorkspaceHydrationReady(programmerId);
   return {
     controllerOnline: false,
     cmAvailable,
     cmAvailabilityResolved,
     cmContainerVisible,
-    programmerId: String(resolvedProgrammer?.programmerId || ""),
+    programmerId,
     programmerName: String(resolvedProgrammer?.programmerName || ""),
+    programmerHydrationReady,
     adobePassEnvironment,
     tenantScope: getCmTenantScopeForProgrammer(resolvedProgrammer),
     requestorIds,
@@ -38519,6 +38965,7 @@ function resetWorkflowForLoggedOut() {
   state.selectedProgrammerKey = "";
   state.applicationsByProgrammerId.clear();
   state.premiumAppsByProgrammerId.clear();
+  state.programmerWorkspaceHydrationReadyByKey.clear();
   state.premiumAppsLoadPromiseByProgrammerId.clear();
   state.premiumAppScopeHydrationPromiseByProgrammerId.clear();
   state.cmServiceByProgrammerId.clear();
@@ -44140,6 +44587,10 @@ function stopExperienceCloudSessionMonitor() {
 }
 
 function startExperienceCloudSessionMonitor() {
+  if (!shouldRunExperienceCloudSessionMonitor()) {
+    stopExperienceCloudSessionMonitor();
+    return;
+  }
   stopExperienceCloudSessionMonitor();
 
   const tick = () => {
@@ -44314,6 +44765,7 @@ async function resetToSignedOutState(options = {}) {
   const statusMessage = String(options.statusMessage || "").trim();
   const statusType = options.statusType === "error" ? "error" : options.statusType === "success" ? "success" : "info";
   clearRefreshTimer();
+  stopExperienceCloudSessionMonitor();
   clearPremiumServiceAutoRefreshTimers();
   await clearLoginData();
   if (options.closeWorkspaces !== false) {
@@ -44336,6 +44788,9 @@ async function resetToSignedOutState(options = {}) {
 }
 
 async function runExperienceCloudSessionMonitorTick(trigger = "interval") {
+  if (!shouldRunExperienceCloudSessionMonitor()) {
+    return;
+  }
   if (state.sessionMonitorBusy || state.busy || state.isBootstrapping || state.restrictedOrgSwitchBusy) {
     return;
   }
@@ -44631,6 +45086,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
   clearRestrictedOrgOptions();
   state.sessionReady = true;
+  startExperienceCloudSessionMonitor();
   await saveLoginData(resolvedLoginData);
   scheduleNoTouchRefresh();
   let cmTenantsPrecheckError = null;
@@ -45391,6 +45847,7 @@ async function refreshProgrammerPanels(options = {}) {
     renderPremiumServices(null, null, { controllerReason });
     return;
   }
+  setProgrammerWorkspaceHydrationReady(programmer.programmerId, false);
   esmWorkspaceBroadcastSelectedControllerState(programmer, null, 0, { controllerReason });
   cmBroadcastSelectedControllerState(programmer, null, 0, {
     controllerReason,
@@ -45478,6 +45935,7 @@ async function refreshProgrammerPanels(options = {}) {
     // Repeat selection must paint instantly from the hydrated VAULT/runtime snapshot.
     // CM runtime warmup can continue afterward without dropping the whole UI back
     // to a loading shell.
+    setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
     provisionalServices = cachedServices;
     emitPremiumServiceDecisionLogs(programmer, cachedServices);
     renderPremiumServices(cachedServices, programmer, { controllerReason });
@@ -45496,6 +45954,7 @@ async function refreshProgrammerPanels(options = {}) {
     const reusedServices =
       cachedHydration?.services || getCurrentPremiumAppsSnapshot(programmer.programmerId) || cachedServices;
     setCurrentPremiumAppsSnapshot(programmer.programmerId, reusedServices);
+    setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
     provisionalServices = reusedServices;
     emitPremiumServiceDecisionLogs(programmer, reusedServices);
     renderPremiumServices(reusedServices, programmer, { controllerReason });
@@ -45605,6 +46064,7 @@ async function refreshProgrammerPanels(options = {}) {
     }
 
     setCurrentPremiumAppsSnapshot(programmer.programmerId, runtimeServices);
+    setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
     emitPremiumServiceDecisionLogs(programmer, runtimeServices);
     renderPremiumServices(runtimeServices, programmer, { controllerReason });
 
@@ -45621,6 +46081,7 @@ async function refreshProgrammerPanels(options = {}) {
           cmMvpdSelectionKey,
         };
         setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
+        setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
         emitPremiumServiceDecisionLogs(programmer, mergedServices);
         renderPremiumServices(mergedServices, programmer, { controllerReason });
         void persistPassVaultProgrammerRecord(programmer, mergedServices, {
@@ -56137,6 +56598,7 @@ function applyProgrammerEntities(entities) {
   state.restV2AuthContextByRequestor.clear();
   state.applicationsByProgrammerId.clear();
   state.premiumAppsByProgrammerId.clear();
+  state.programmerWorkspaceHydrationReadyByKey.clear();
   state.premiumAppsLoadPromiseByProgrammerId.clear();
   state.premiumAppScopeHydrationPromiseByProgrammerId.clear();
   state.restV2ProfileHarvestBySelectionKey.clear();
@@ -56288,6 +56750,7 @@ async function tryActivateCookieSession(source, options = {}) {
     state.sessionMonitorSuppressed = false;
     state.sessionMonitorConsecutiveInactiveDetections = 0;
     state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
+    startExperienceCloudSessionMonitor();
     clearRestrictedOrgOptions();
     clearRefreshTimer();
     let cmTenantsPrecheckError = null;
@@ -57107,12 +57570,15 @@ function registerEventHandlers() {
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
+    if (document.visibilityState === "visible" && shouldRunExperienceCloudSessionMonitor()) {
       void runExperienceCloudSessionMonitorTick("visibility");
     }
   });
 
   window.addEventListener("focus", () => {
+    if (!shouldRunExperienceCloudSessionMonitor()) {
+      return;
+    }
     void runExperienceCloudSessionMonitorTick("focus");
   });
 
@@ -57173,7 +57639,6 @@ async function init() {
   resetWorkflowForLoggedOut();
   registerEventHandlers();
   render();
-  startExperienceCloudSessionMonitor();
 }
 
 void init();

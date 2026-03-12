@@ -31,6 +31,14 @@
   --s2-action-border-accent: #2a8b74;
   --s2-action-text-accent: #ffffff;
   --s2-action-focus-ring: rgba(42, 139, 116, 0.32);
+  --s2-radius-default: 8px;
+  --s2-radius-strong: 10px;
+  --s2-radius-pill: 999px;
+  --s2-action-size: 40px;
+  --s2-action-size-compact: 28px;
+  --s2-icon-size: 20px;
+  --s2-icon-size-strong: 22px;
+  --s2-icon-size-compact: 15px;
   --danger-rgb: 186, 54, 54;
   --danger-strong-rgb: 159, 37, 37;
   --workspace-net-indicator-track: rgba(132, 87, 14, 0.34);
@@ -453,6 +461,8 @@ body.workspace-locked .workspace-cards {
 }
 
 .report-card {
+  --report-card-action-size: 24px;
+  --report-card-action-icon-size: 12px;
   position: relative;
   border: 1px solid rgba(21, 78, 64, 0.16);
   border-radius: 10px;
@@ -780,10 +790,23 @@ body.workspace-locked .workspace-cards {
     color 140ms ease;
 }
 
+.report-card .card-close,
+.report-card .esm-action-btn,
+.report-card .esm-clear-filter-rerun,
+.report-card .esm-table-close {
+  width: var(--report-card-action-size);
+  height: var(--report-card-action-size);
+  min-width: var(--report-card-action-size);
+  min-height: var(--report-card-action-size);
+}
+
 .report-card--cmu-usage .card-close,
+.report-card--cmu-usage .esm-clear-filter-rerun,
 .report-card--cmu-usage .esm-table-close {
-  min-width: var(--s2-action-size-compact);
-  min-height: var(--s2-action-size-compact);
+  width: var(--report-card-action-size);
+  height: var(--report-card-action-size);
+  min-width: var(--report-card-action-size);
+  min-height: var(--report-card-action-size);
   flex-shrink: 0;
 }
 
@@ -796,6 +819,12 @@ body.workspace-locked .workspace-cards {
   stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.report-card .card-close-icon,
+.report-card .esm-action-icon {
+  width: var(--report-card-action-icon-size);
+  height: var(--report-card-action-icon-size);
 }
 
 .card-close:hover,
@@ -1012,6 +1041,10 @@ body.workspace-locked .workspace-cards {
   box-shadow: none;
 }
 
+.esm-table tfoot .esm-footer-cell {
+  padding-right: 20px;
+}
+
 .esm-table tbody tr:nth-child(odd) {
   background: var(--legacy-table-row);
 }
@@ -1054,10 +1087,35 @@ body.workspace-locked .workspace-cards {
 
 .esm-footer-controls {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.esm-footer-meta {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+}
+
+.esm-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  min-width: 0;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.esm-footer-actions .esm-action-btn,
+.esm-footer-actions .esm-clear-filter-rerun,
+.esm-footer-actions .esm-table-close {
+  align-self: center;
 }
 
 .esm-footer a {
@@ -1371,6 +1429,12 @@ body.workspace-locked .workspace-cards {
   height: 26px;
 }
 
+.report-card .cm-clear-filter-rerun--inline,
+.report-card .esm-clear-filter-rerun--inline {
+  width: var(--report-card-action-size);
+  height: var(--report-card-action-size);
+}
+
 .card-message-inline .cm-clear-filter-rerun--inline,
 .card-message-inline .esm-clear-filter-rerun--inline {
   margin-left: 0;
@@ -1486,6 +1550,20 @@ body.workspace-locked .workspace-cards {
     justify-content: flex-start;
     width: 100%;
     max-width: none;
+  }
+
+  .esm-footer {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .esm-footer-controls {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .esm-footer-meta {
+    flex: 1 1 auto;
   }
 
   .esm-table th,

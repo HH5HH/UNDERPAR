@@ -2365,28 +2365,42 @@ function populateSavedQuerySelect(preferredStorageKey = "", records = state.save
 }
 
 async function loadSavedQueryRecords() {
+  const normalizeWorkspaceSavedQueryRecords = (rawRecords = []) =>
+    (Array.isArray(rawRecords) ? rawRecords : [])
+      .map((record) => {
+        const name = normalizeSavedQueryName(record?.name || "");
+        const url = stripMegScopedQueryParams(String(record?.url || "").trim(), {
+          stripRequestorId: true,
+        });
+        const storageKey = String(record?.storageKey || buildSavedQueryStorageKey(name)).trim();
+        if (!name || !url || !storageKey) {
+          return null;
+        }
+        return {
+          storageKey,
+          name,
+          url,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+
+  if (!isMegStandaloneMode()) {
+    try {
+      const result = await sendWorkspaceAction("saved-query-get-records");
+      if (result?.ok) {
+        return normalizeWorkspaceSavedQueryRecords(result?.records);
+      }
+      ack(`UnderPAR saved query read failed: ${String(result?.error || "Unknown error")}`);
+    } catch (error) {
+      ack(`UnderPAR saved query read failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   if (canUseMegSavedQueryBridge()) {
     try {
       const result = await requestMegSavedQueryBridge("get-records");
-      const rawRecords = Array.isArray(result?.records) ? result.records : [];
-      return rawRecords
-        .map((record) => {
-          const name = normalizeSavedQueryName(record?.name || "");
-          const url = stripMegScopedQueryParams(String(record?.url || "").trim(), {
-            stripRequestorId: true,
-          });
-          const storageKey = String(record?.storageKey || buildSavedQueryStorageKey(name)).trim();
-          if (!name || !url || !storageKey) {
-            return null;
-          }
-          return {
-            storageKey,
-            name,
-            url,
-          };
-        })
-        .filter(Boolean)
-        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+      return normalizeWorkspaceSavedQueryRecords(result?.records);
     } catch (error) {
       ack(`Saved query bridge read failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -2399,12 +2413,38 @@ async function refreshSavedQuerySelect(preferredStorageKey = "") {
   populateSavedQuerySelect(preferredStorageKey, state.savedQueryRecords);
 }
 
+async function refreshUnderparSidepanelSavedQuerySelectors() {
+  if (isMegStandaloneMode()) {
+    return;
+  }
+  try {
+    const result = await sendWorkspaceAction("saved-query-sync-sidepanel");
+    if (!result?.ok) {
+      ack(`UnderPAR saved query sidepanel sync failed: ${String(result?.error || "Unknown error")}`);
+    }
+  } catch (error) {
+    ack(`UnderPAR saved query sidepanel sync failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function persistSavedQueryRecord(queryName = "", esmUrl = "") {
   const storageKey = buildSavedQueryStorageKey(queryName);
   const sanitizedUrl = stripMegScopedQueryParams(esmUrl, {
     stripRequestorId: true,
   });
-  const nextPayload = buildSavedQueryPayload(queryName, sanitizedUrl);
+  if (!isMegStandaloneMode()) {
+    const result = await sendWorkspaceAction("saved-query-put-record", {
+      name: queryName,
+      url: sanitizedUrl,
+    });
+    if (!result?.ok) {
+      throw new Error(result?.error || "Unable to save Saved ESM Query in UnderPAR.");
+    }
+    return {
+      storageKey: String(result?.storageKey || storageKey).trim(),
+      existed: result?.existed === true,
+    };
+  }
   if (canUseMegSavedQueryBridge()) {
     try {
       const result = await requestMegSavedQueryBridge("put-record", {
@@ -2419,6 +2459,7 @@ async function persistSavedQueryRecord(queryName = "", esmUrl = "") {
       ack(`Saved query bridge save failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  const nextPayload = buildSavedQueryPayload(queryName, sanitizedUrl);
   const existingPayload = localStorage.getItem(storageKey);
   localStorage.setItem(storageKey, nextPayload);
   return {
@@ -2430,6 +2471,15 @@ async function persistSavedQueryRecord(queryName = "", esmUrl = "") {
 async function removeSavedQueryRecord(storageKey = "") {
   const normalizedStorageKey = String(storageKey || "").trim();
   if (!normalizedStorageKey) {
+    return;
+  }
+  if (!isMegStandaloneMode()) {
+    const result = await sendWorkspaceAction("saved-query-delete-record", {
+      storageKey: normalizedStorageKey,
+    });
+    if (!result?.ok) {
+      throw new Error(result?.error || "Unable to delete Saved ESM Query in UnderPAR.");
+    }
     return;
   }
   if (canUseMegSavedQueryBridge()) {
@@ -2477,6 +2527,7 @@ async function saveCurrentQuery() {
   try {
     const result = await persistSavedQueryRecord(queryName, esmUrl);
     await refreshSavedQuerySelect(result?.storageKey || buildSavedQueryStorageKey(queryName));
+    await refreshUnderparSidepanelSavedQuerySelectors();
     setSavedQueryCue(false);
     if (fldSavedQueryName) {
       fldSavedQueryName.value = "";
@@ -2540,6 +2591,7 @@ async function deleteSelectedSavedQuery() {
   try {
     await removeSavedQueryRecord(storageKey);
     await refreshSavedQuerySelect();
+    await refreshUnderparSidepanelSavedQuerySelectors();
     reportSavedQueryStatus(`Deleted Saved ESM Query "${savedQueryName}".`);
   } catch (error) {
     reportSavedQueryStatus(

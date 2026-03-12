@@ -157,11 +157,78 @@ function normalizeVaultSavedQueries(input = null) {
   return normalizedEntries;
 }
 
+function ensureVaultGlobalContainers(vaultPayload = null) {
+  const target = vaultPayload && typeof vaultPayload === "object" ? vaultPayload : {};
+  if (!target.underpar || typeof target.underpar !== "object" || Array.isArray(target.underpar)) {
+    target.underpar = {};
+  }
+  if (!target.underpar.globals || typeof target.underpar.globals !== "object" || Array.isArray(target.underpar.globals)) {
+    target.underpar.globals = {};
+  }
+  if (!target.underpar.app || typeof target.underpar.app !== "object" || Array.isArray(target.underpar.app)) {
+    target.underpar.app = {};
+  }
+  if (
+    !target.underpar.globals.savedQueries ||
+    typeof target.underpar.globals.savedQueries !== "object" ||
+    Array.isArray(target.underpar.globals.savedQueries)
+  ) {
+    target.underpar.globals.savedQueries = {};
+  }
+  if (
+    !target.underpar.app.savedQueries ||
+    typeof target.underpar.app.savedQueries !== "object" ||
+    Array.isArray(target.underpar.app.savedQueries)
+  ) {
+    target.underpar.app.savedQueries = {};
+  }
+  return target;
+}
+
+function getVaultSavedQueriesInput(vaultPayload = null) {
+  if (!vaultPayload || typeof vaultPayload !== "object") {
+    return null;
+  }
+  if (
+    vaultPayload?.underpar?.globals?.savedQueries &&
+    typeof vaultPayload.underpar.globals.savedQueries === "object" &&
+    !Array.isArray(vaultPayload.underpar.globals.savedQueries)
+  ) {
+    return vaultPayload.underpar.globals.savedQueries;
+  }
+  if (
+    vaultPayload?.underpar?.app?.savedQueries &&
+    typeof vaultPayload.underpar.app.savedQueries === "object" &&
+    !Array.isArray(vaultPayload.underpar.app.savedQueries)
+  ) {
+    return vaultPayload.underpar.app.savedQueries;
+  }
+  if (
+    vaultPayload?.underpar?.savedQueries &&
+    typeof vaultPayload.underpar.savedQueries === "object" &&
+    !Array.isArray(vaultPayload.underpar.savedQueries)
+  ) {
+    return vaultPayload.underpar.savedQueries;
+  }
+  return null;
+}
+
+function setVaultSavedQueries(vaultPayload = null, savedQueries = null) {
+  const target = ensureVaultGlobalContainers(vaultPayload);
+  const normalizedSavedQueries = normalizeVaultSavedQueries(savedQueries);
+  target.underpar.globals.savedQueries = JSON.parse(JSON.stringify(normalizedSavedQueries));
+  target.underpar.app.savedQueries = JSON.parse(JSON.stringify(normalizedSavedQueries));
+  return normalizedSavedQueries;
+}
+
 function normalizeVaultPayload(payload = null) {
   const normalized = {
     schemaVersion: 1,
     updatedAt: Date.now(),
     underpar: {
+      globals: {
+        savedQueries: {},
+      },
       app: {
         savedQueries: {},
       },
@@ -178,9 +245,7 @@ function normalizeVaultPayload(payload = null) {
 
   normalized.schemaVersion = Number(payload?.schemaVersion || 1) || 1;
   normalized.updatedAt = Number(payload?.updatedAt || Date.now()) || Date.now();
-  normalized.underpar.app.savedQueries = normalizeVaultSavedQueries(
-    payload?.underpar?.app?.savedQueries || payload?.underpar?.savedQueries || null
-  );
+  setVaultSavedQueries(normalized, getVaultSavedQueriesInput(payload));
   normalized.pass =
     payload?.pass && typeof payload.pass === "object" && !Array.isArray(payload.pass)
       ? payload.pass
@@ -212,7 +277,7 @@ async function getSavedQueryRecords() {
   const vault = await readVaultPayload();
   const mergedEntries = {
     ...Object.fromEntries(readLegacyLocalSavedQueries().map((record) => [record.name, record.url])),
-    ...normalizeVaultSavedQueries(vault?.underpar?.app?.savedQueries || null),
+    ...normalizeVaultSavedQueries(getVaultSavedQueriesInput(vault)),
   };
 
   return Object.entries(mergedEntries)
@@ -239,11 +304,11 @@ async function persistSavedQueryRecord(name = "", rawUrl = "") {
   const vault = await readVaultPayload();
   const nextSavedQueries = {
     ...Object.fromEntries(readLegacyLocalSavedQueries().map((entry) => [entry.name, entry.url])),
-    ...normalizeVaultSavedQueries(vault?.underpar?.app?.savedQueries || null),
+    ...normalizeVaultSavedQueries(getVaultSavedQueriesInput(vault)),
   };
   const existed = Object.prototype.hasOwnProperty.call(nextSavedQueries, record.name);
   nextSavedQueries[record.name] = record.url;
-  vault.underpar.app.savedQueries = nextSavedQueries;
+  setVaultSavedQueries(vault, nextSavedQueries);
   await writeVaultPayload(vault);
   return {
     storageKey,
@@ -264,10 +329,10 @@ async function deleteSavedQueryRecord(storageKey = "") {
   const vault = await readVaultPayload();
   const nextSavedQueries = {
     ...Object.fromEntries(readLegacyLocalSavedQueries().map((entry) => [entry.name, entry.url])),
-    ...normalizeVaultSavedQueries(vault?.underpar?.app?.savedQueries || null),
+    ...normalizeVaultSavedQueries(getVaultSavedQueriesInput(vault)),
   };
   delete nextSavedQueries[normalizedName];
-  vault.underpar.app.savedQueries = nextSavedQueries;
+  setVaultSavedQueries(vault, nextSavedQueries);
   await writeVaultPayload(vault);
   return {
     storageKey: normalizedStorageKey,

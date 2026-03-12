@@ -506,6 +506,13 @@ function getVaultSavedQueriesInput(vaultPayload = null) {
     return null;
   }
   if (
+    vaultPayload?.underpar?.globals?.savedQueries &&
+    typeof vaultPayload.underpar.globals.savedQueries === "object" &&
+    !Array.isArray(vaultPayload.underpar.globals.savedQueries)
+  ) {
+    return vaultPayload.underpar.globals.savedQueries;
+  }
+  if (
     vaultPayload?.underpar?.app?.savedQueries &&
     typeof vaultPayload.underpar.app.savedQueries === "object" &&
     !Array.isArray(vaultPayload.underpar.app.savedQueries)
@@ -522,11 +529,181 @@ function getVaultSavedQueriesInput(vaultPayload = null) {
   return null;
 }
 
+function ensureVaultGlobalContainers(vaultPayload = null) {
+  const target = vaultPayload && typeof vaultPayload === "object" ? vaultPayload : {};
+  if (!target.underpar || typeof target.underpar !== "object" || Array.isArray(target.underpar)) {
+    target.underpar = {};
+  }
+  if (!target.underpar.globals || typeof target.underpar.globals !== "object" || Array.isArray(target.underpar.globals)) {
+    target.underpar.globals = {};
+  }
+  if (!target.underpar.app || typeof target.underpar.app !== "object" || Array.isArray(target.underpar.app)) {
+    target.underpar.app = {};
+  }
+  if (
+    !target.underpar.globals.savedQueries ||
+    typeof target.underpar.globals.savedQueries !== "object" ||
+    Array.isArray(target.underpar.globals.savedQueries)
+  ) {
+    target.underpar.globals.savedQueries = {};
+  }
+  if (
+    !target.underpar.globals.cmImsByEnvironment ||
+    typeof target.underpar.globals.cmImsByEnvironment !== "object" ||
+    Array.isArray(target.underpar.globals.cmImsByEnvironment)
+  ) {
+    target.underpar.globals.cmImsByEnvironment = {};
+  }
+  if (
+    !target.underpar.app.savedQueries ||
+    typeof target.underpar.app.savedQueries !== "object" ||
+    Array.isArray(target.underpar.app.savedQueries)
+  ) {
+    target.underpar.app.savedQueries = {};
+  }
+  if (!target.pass || typeof target.pass !== "object" || Array.isArray(target.pass)) {
+    target.pass = {
+      schemaVersion: 1,
+      environments: {},
+    };
+  }
+  if (!target.pass.environments || typeof target.pass.environments !== "object" || Array.isArray(target.pass.environments)) {
+    target.pass.environments = {};
+  }
+  return target;
+}
+
+function normalizeVaultCmGlobalRecord(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const clientId = String(value?.clientId || "").trim();
+  const tokenClientId = String(value?.tokenClientId || clientId).trim();
+  const userId = String(value?.userId || value?.imsUserId || "").trim();
+  const scope = String(value?.scope || "").trim();
+  const expiresAt = Math.max(0, Number(value?.expiresAt || 0));
+  const updatedAt = Math.max(0, Number(value?.updatedAt || value?.refreshedAt || 0));
+  const tokenFingerprint = String(value?.tokenFingerprint || "").trim();
+  const imsSession =
+    value?.imsSession && typeof value.imsSession === "object" && !Array.isArray(value.imsSession)
+      ? cloneJsonLikeValue(value.imsSession, null)
+      : null;
+
+  if (!clientId && !tokenClientId && !userId && !scope && !expiresAt && !updatedAt && !tokenFingerprint && !imsSession) {
+    return null;
+  }
+
+  return {
+    clientId,
+    tokenClientId,
+    userId,
+    scope,
+    expiresAt,
+    updatedAt: updatedAt || Date.now(),
+    tokenFingerprint,
+    imsSession,
+  };
+}
+
+function getVaultCmGlobalInput(vaultPayload = null) {
+  if (!vaultPayload || typeof vaultPayload !== "object") {
+    return null;
+  }
+  if (
+    vaultPayload?.underpar?.globals?.cmImsByEnvironment &&
+    typeof vaultPayload.underpar.globals.cmImsByEnvironment === "object" &&
+    !Array.isArray(vaultPayload.underpar.globals.cmImsByEnvironment)
+  ) {
+    return vaultPayload.underpar.globals.cmImsByEnvironment;
+  }
+  if (
+    vaultPayload?.underpar?.globals?.cmGlobalByEnvironment &&
+    typeof vaultPayload.underpar.globals.cmGlobalByEnvironment === "object" &&
+    !Array.isArray(vaultPayload.underpar.globals.cmGlobalByEnvironment)
+  ) {
+    return vaultPayload.underpar.globals.cmGlobalByEnvironment;
+  }
+  return null;
+}
+
+function getVaultCmGlobalsByEnvironment(vaultPayload = null) {
+  const explicit = {};
+  const explicitInput = getVaultCmGlobalInput(vaultPayload);
+  if (explicitInput && typeof explicitInput === "object" && !Array.isArray(explicitInput)) {
+    Object.entries(explicitInput).forEach(([environmentKey, rawRecord]) => {
+      const normalizedEnvironmentKey = String(environmentKey || rawRecord?.environmentKey || rawRecord?.key || "").trim();
+      const record = normalizeVaultCmGlobalRecord(rawRecord);
+      if (normalizedEnvironmentKey && record) {
+        explicit[normalizedEnvironmentKey] = record;
+      }
+    });
+  }
+
+  const fallback = {};
+  const environmentsInput =
+    vaultPayload?.pass?.environments && typeof vaultPayload.pass.environments === "object" ? vaultPayload.pass.environments : {};
+  Object.entries(environmentsInput).forEach(([environmentKey, environmentRecord]) => {
+    const normalizedEnvironmentKey = String(environmentKey || environmentRecord?.key || "").trim();
+    const record = normalizeVaultCmGlobalRecord(environmentRecord?.cmGlobal || environmentRecord?.cmConsole || null);
+    if (normalizedEnvironmentKey && record) {
+      fallback[normalizedEnvironmentKey] = record;
+    }
+  });
+
+  return {
+    ...fallback,
+    ...explicit,
+  };
+}
+
+function setVaultSavedQueries(vaultPayload = null, savedQueries = null) {
+  const target = ensureVaultGlobalContainers(vaultPayload);
+  const normalizedSavedQueries = normalizeVaultSavedQueries(savedQueries);
+  target.underpar.globals.savedQueries = cloneJsonLikeValue(normalizedSavedQueries, {});
+  target.underpar.app.savedQueries = cloneJsonLikeValue(normalizedSavedQueries, {});
+  return normalizedSavedQueries;
+}
+
+function setVaultCmGlobalRecord(vaultPayload = null, environmentKey = "", record = null) {
+  const target = ensureVaultGlobalContainers(vaultPayload);
+  const normalizedEnvironmentKey = String(environmentKey || "").trim();
+  if (!normalizedEnvironmentKey) {
+    return null;
+  }
+  const normalizedRecord = normalizeVaultCmGlobalRecord(record);
+  if (normalizedRecord) {
+    target.underpar.globals.cmImsByEnvironment[normalizedEnvironmentKey] = cloneJsonLikeValue(normalizedRecord, null);
+  } else {
+    delete target.underpar.globals.cmImsByEnvironment[normalizedEnvironmentKey];
+  }
+  if (!target.pass.environments[normalizedEnvironmentKey]) {
+    target.pass.environments[normalizedEnvironmentKey] = {
+      key: normalizedEnvironmentKey,
+      label: firstNonEmptyString([resolveEnvironmentRecord(normalizedEnvironmentKey)?.label, normalizedEnvironmentKey]),
+      updatedAt: Date.now(),
+      cmGlobal: null,
+      mediaCompanies: {},
+    };
+  }
+  target.pass.environments[normalizedEnvironmentKey].label = firstNonEmptyString([
+    target.pass.environments[normalizedEnvironmentKey]?.label,
+    resolveEnvironmentRecord(normalizedEnvironmentKey)?.label,
+    normalizedEnvironmentKey,
+  ]);
+  target.pass.environments[normalizedEnvironmentKey].updatedAt = Date.now();
+  target.pass.environments[normalizedEnvironmentKey].cmGlobal = cloneJsonLikeValue(normalizedRecord, null);
+  return normalizedRecord;
+}
+
 function normalizeVaultPayload(payload = null) {
   const normalized = {
     schemaVersion: 1,
     updatedAt: Date.now(),
     underpar: {
+      globals: {
+        savedQueries: {},
+        cmImsByEnvironment: {},
+      },
       app: {
         savedQueries: {},
       },
@@ -543,7 +720,9 @@ function normalizeVaultPayload(payload = null) {
 
   normalized.schemaVersion = Number(payload?.schemaVersion || 1) || 1;
   normalized.updatedAt = Number(payload?.updatedAt || Date.now()) || Date.now();
-  normalized.underpar.app.savedQueries = normalizeVaultSavedQueries(getVaultSavedQueriesInput(payload));
+  setVaultSavedQueries(normalized, getVaultSavedQueriesInput(payload));
+  const cmGlobalsByEnvironment = getVaultCmGlobalsByEnvironment(payload);
+  normalized.underpar.globals.cmImsByEnvironment = cloneJsonLikeValue(cmGlobalsByEnvironment, {});
 
   const environmentsInput =
     payload?.pass?.environments && typeof payload.pass.environments === "object" ? payload.pass.environments : {};
@@ -582,8 +761,31 @@ function normalizeVaultPayload(payload = null) {
       key: normalizedEnvironmentKey,
       label: firstNonEmptyString([environmentRecord?.label, resolveEnvironmentRecord(normalizedEnvironmentKey)?.label, normalizedEnvironmentKey]),
       updatedAt: Number(environmentRecord?.updatedAt || normalized.updatedAt || Date.now()),
+      cmGlobal: normalizeVaultCmGlobalRecord(
+        cmGlobalsByEnvironment[normalizedEnvironmentKey] || environmentRecord?.cmGlobal || environmentRecord?.cmConsole || null
+      ),
       mediaCompanies,
     };
+  });
+
+  Object.entries(cmGlobalsByEnvironment).forEach(([environmentKey, record]) => {
+    const normalizedEnvironmentKey = String(environmentKey || "").trim();
+    if (!normalizedEnvironmentKey) {
+      return;
+    }
+    if (!normalized.pass.environments[normalizedEnvironmentKey]) {
+      normalized.pass.environments[normalizedEnvironmentKey] = {
+        key: normalizedEnvironmentKey,
+        label: firstNonEmptyString([resolveEnvironmentRecord(normalizedEnvironmentKey)?.label, normalizedEnvironmentKey]),
+        updatedAt: normalized.updatedAt,
+        cmGlobal: normalizeVaultCmGlobalRecord(record),
+        mediaCompanies: {},
+      };
+      return;
+    }
+    if (!normalized.pass.environments[normalizedEnvironmentKey].cmGlobal) {
+      normalized.pass.environments[normalizedEnvironmentKey].cmGlobal = normalizeVaultCmGlobalRecord(record);
+    }
   });
 
   return normalized;
@@ -1620,6 +1822,14 @@ function createVaultExportRowSkeleton() {
     "Access Token": "",
     "Token Expires At": "",
     "CM Matched Tenants": "",
+    "CM IMS Client ID": "",
+    "CM IMS Token Client ID": "",
+    "CM IMS User ID": "",
+    "CM IMS Scope": "",
+    "CM IMS Expires At": "",
+    "CM IMS Token Fingerprint": "",
+    "CM IMS Updated At": "",
+    "CM IMS Session": "",
     "Saved Query Name": "",
     "Saved Query URL": "",
   };
@@ -1629,6 +1839,7 @@ function buildVaultExportRows(vaultPayload = null) {
   const environments = getVaultPassEnvironments(vaultPayload);
   const rows = [];
   const savedQueries = normalizeVaultSavedQueries(getVaultSavedQueriesInput(vaultPayload));
+  const cmGlobalsByEnvironment = getVaultCmGlobalsByEnvironment(vaultPayload);
   Object.entries(savedQueries)
     .sort((left, right) => String(left[0] || "").localeCompare(String(right[0] || ""), undefined, { sensitivity: "base" }))
     .forEach(([name, url]) => {
@@ -1637,6 +1848,28 @@ function buildVaultExportRows(vaultPayload = null) {
         "Row Type": "underpar-saved-query",
         "Saved Query Name": String(name || "").trim(),
         "Saved Query URL": String(url || "").trim(),
+      });
+    });
+
+  Object.entries(cmGlobalsByEnvironment)
+    .sort((left, right) => String(left[0] || "").localeCompare(String(right[0] || ""), undefined, { sensitivity: "base" }))
+    .forEach(([environmentKey, record]) => {
+      const normalizedRecord = normalizeVaultCmGlobalRecord(record);
+      if (!normalizedRecord) {
+        return;
+      }
+      rows.push({
+        ...createVaultExportRowSkeleton(),
+        "Row Type": "underpar-cm-ims",
+        "Environment Key": String(environmentKey || "").trim(),
+        "CM IMS Client ID": String(normalizedRecord.clientId || "").trim(),
+        "CM IMS Token Client ID": String(normalizedRecord.tokenClientId || "").trim(),
+        "CM IMS User ID": String(normalizedRecord.userId || "").trim(),
+        "CM IMS Scope": String(normalizedRecord.scope || "").trim(),
+        "CM IMS Expires At": Number(normalizedRecord.expiresAt || 0) || "",
+        "CM IMS Token Fingerprint": String(normalizedRecord.tokenFingerprint || "").trim(),
+        "CM IMS Updated At": Number(normalizedRecord.updatedAt || 0) || "",
+        "CM IMS Session": normalizedRecord.imsSession ? JSON.stringify(normalizedRecord.imsSession) : "",
       });
     });
 
@@ -1759,11 +1992,20 @@ function mergeImportedVaultPayload(existingVault = null, importedVault = null) {
 
   const importedSavedQueries = normalizeVaultSavedQueries(getVaultSavedQueriesInput(normalizedImportedVault));
   if (Object.keys(importedSavedQueries).length > 0) {
-    nextVault.underpar.app.savedQueries = {
+    setVaultSavedQueries(nextVault, {
       ...normalizeVaultSavedQueries(getVaultSavedQueriesInput(nextVault)),
       ...cloneJsonLikeValue(importedSavedQueries, {}),
-    };
+    });
   }
+
+  const importedCmGlobalsByEnvironment = getVaultCmGlobalsByEnvironment(normalizedImportedVault);
+  Object.entries(importedCmGlobalsByEnvironment).forEach(([environmentKey, record]) => {
+    const normalizedEnvironmentKey = String(environmentKey || "").trim();
+    if (!normalizedEnvironmentKey) {
+      return;
+    }
+    setVaultCmGlobalRecord(nextVault, normalizedEnvironmentKey, record);
+  });
 
   Object.entries(getVaultPassEnvironments(normalizedImportedVault)).forEach(([environmentKey, environmentRecord]) => {
     if (!nextVault.pass.environments[environmentKey]) {
@@ -1771,6 +2013,7 @@ function mergeImportedVaultPayload(existingVault = null, importedVault = null) {
         key: environmentKey,
         label: firstNonEmptyString([environmentRecord?.label, environmentKey]),
         updatedAt: Date.now(),
+        cmGlobal: normalizeVaultCmGlobalRecord(environmentRecord?.cmGlobal || null),
         mediaCompanies: {},
       };
     }
@@ -1778,6 +2021,10 @@ function mergeImportedVaultPayload(existingVault = null, importedVault = null) {
     const targetEnvironment = nextVault.pass.environments[environmentKey];
     targetEnvironment.label = firstNonEmptyString([environmentRecord?.label, targetEnvironment.label, environmentKey]);
     targetEnvironment.updatedAt = Date.now();
+    const importedCmGlobalRecord = normalizeVaultCmGlobalRecord(environmentRecord?.cmGlobal || null);
+    if (importedCmGlobalRecord) {
+      setVaultCmGlobalRecord(nextVault, environmentKey, importedCmGlobalRecord);
+    }
     const importedMediaCompanies =
       environmentRecord?.mediaCompanies &&
       typeof environmentRecord.mediaCompanies === "object" &&
@@ -2121,6 +2368,7 @@ async function handleVaultImportFile(file) {
 
     const importedRecords = {};
     const importedSavedQueries = {};
+    const importedCmGlobalsByEnvironment = {};
     let importableRowCount = 0;
 
     rows.forEach((row) => {
@@ -2135,6 +2383,37 @@ async function handleVaultImportFile(file) {
         const queryUrl = String(row?.["Saved Query URL"] || "").trim();
         if (queryName && queryUrl) {
           importedSavedQueries[queryName] = queryUrl;
+          importableRowCount += 1;
+        }
+        return;
+      }
+
+      if (rowType === "underpar-cm-ims") {
+        const environmentKey = String(row?.["Environment Key"] || "").trim();
+        if (!environmentKey) {
+          return;
+        }
+        let imsSession = null;
+        const rawImsSession = String(row?.["CM IMS Session"] || "").trim();
+        if (rawImsSession) {
+          try {
+            imsSession = JSON.parse(rawImsSession);
+          } catch {
+            imsSession = null;
+          }
+        }
+        const record = normalizeVaultCmGlobalRecord({
+          clientId: row?.["CM IMS Client ID"],
+          tokenClientId: row?.["CM IMS Token Client ID"],
+          userId: row?.["CM IMS User ID"],
+          scope: row?.["CM IMS Scope"],
+          expiresAt: row?.["CM IMS Expires At"],
+          tokenFingerprint: row?.["CM IMS Token Fingerprint"],
+          updatedAt: row?.["CM IMS Updated At"],
+          imsSession,
+        });
+        if (record) {
+          importedCmGlobalsByEnvironment[environmentKey] = record;
           importableRowCount += 1;
         }
         return;
@@ -2249,6 +2528,10 @@ async function handleVaultImportFile(file) {
 
     const importedVault = normalizeVaultPayload({
       underpar: {
+        globals: {
+          savedQueries: importedSavedQueries,
+          cmImsByEnvironment: importedCmGlobalsByEnvironment,
+        },
         app: {
           savedQueries: importedSavedQueries,
         },

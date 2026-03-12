@@ -109,18 +109,23 @@ const state = {
   esmContainerVisible: null,
   programmerId: "",
   programmerName: "",
+  programmerHydrationReady: false,
   requestorIds: [],
   mvpdIds: [],
   profileHarvest: null,
   profileHarvestList: [],
   controllerStateVersion: 0,
   controllerStateUpdatedAt: 0,
+  premiumPanelRequestToken: 0,
+  workspaceContextKey: "",
   cardsById: new Map(),
+  workspaceReplayCards: [],
   batchRunning: false,
   workspaceLocked: false,
   nonEsmMode: false,
   pendingAutoRerunProgrammerKey: "",
   autoRerunInFlightProgrammerKey: "",
+  pendingAutoRerunCards: [],
 };
 
 const els = {
@@ -844,6 +849,75 @@ function getOrderedCardStates() {
   return [...cardsById.values()];
 }
 
+function normalizeWorkspaceReplayCardPayload(card = null) {
+  if (!card || typeof card !== "object") {
+    return null;
+  }
+  return {
+    cardId: String(card?.cardId || "").trim(),
+    originCardKey: String(card?.originCardKey || "").trim(),
+    endpointUrl: String(card?.endpointUrl || "").trim(),
+    requestUrl: String(card?.requestUrl || card?.endpointUrl || "").trim(),
+    zoomKey: String(card?.zoomKey || "").trim(),
+    columns: Array.isArray(card?.columns) ? card.columns.map((column) => String(column || "")).filter(Boolean) : [],
+    displayNodeLabel: String(card?.displayNodeLabel || "").trim(),
+    preserveQueryContext: card?.preserveQueryContext === true,
+    presetLocalFilterBootstrapPending: card?.presetLocalFilterBootstrapPending === true,
+    seedEndpointUrl: String(card?.seedEndpointUrl || "").trim(),
+    seedRequestUrl: String(card?.seedRequestUrl || "").trim(),
+    seedLocalColumnFilters:
+      card?.seedLocalColumnFilters && typeof card.seedLocalColumnFilters === "object" ? { ...card.seedLocalColumnFilters } : {},
+    seedLocalColumnExclusions:
+      card?.seedLocalColumnExclusions && typeof card.seedLocalColumnExclusions === "object"
+        ? { ...card.seedLocalColumnExclusions }
+        : {},
+    seedPresetLocalFilterBootstrapPending: card?.seedPresetLocalFilterBootstrapPending === true,
+    localColumnFilters:
+      card?.localColumnFilters && typeof card.localColumnFilters === "object" ? { ...card.localColumnFilters } : {},
+    localColumnExclusions:
+      card?.localColumnExclusions && typeof card.localColumnExclusions === "object" ? { ...card.localColumnExclusions } : {},
+  };
+}
+
+function cloneWorkspaceReplayCards(cards = []) {
+  return (Array.isArray(cards) ? cards : []).map((card) => normalizeWorkspaceReplayCardPayload(card)).filter(Boolean);
+}
+
+function getWorkspaceReplayCardsFromCurrentState() {
+  const cards = getOrderedCardStates();
+  if (!Array.isArray(cards) || cards.length === 0) {
+    return [];
+  }
+  return cloneWorkspaceReplayCards(cards.map((cardState) => getCardPayload(cardState)));
+}
+
+function getWorkspaceReplayCards() {
+  const fromCurrentState = getWorkspaceReplayCardsFromCurrentState();
+  if (fromCurrentState.length > 0) {
+    state.workspaceReplayCards = cloneWorkspaceReplayCards(fromCurrentState);
+    return cloneWorkspaceReplayCards(fromCurrentState);
+  }
+  return cloneWorkspaceReplayCards(state.workspaceReplayCards);
+}
+
+function syncWorkspaceReplayCardsFromCurrentCards() {
+  const fromCurrentState = getWorkspaceReplayCardsFromCurrentState();
+  const existingReplayCards = cloneWorkspaceReplayCards(state.workspaceReplayCards);
+  const shouldPreserveExistingReplayContext =
+    existingReplayCards.length > fromCurrentState.length &&
+    (state.batchRunning === true ||
+      Boolean(String(state.pendingAutoRerunProgrammerKey || "").trim()) ||
+      Boolean(String(state.autoRerunInFlightProgrammerKey || "").trim()));
+  if (shouldPreserveExistingReplayContext) {
+    return;
+  }
+  if (fromCurrentState.length > 0) {
+    state.workspaceReplayCards = cloneWorkspaceReplayCards(fromCurrentState);
+    return;
+  }
+  state.workspaceReplayCards = [];
+}
+
 function cloneWorkspaceRows(rows) {
   return (Array.isArray(rows) ? rows : []).map((row) => {
     if (!row || typeof row !== "object" || Array.isArray(row)) {
@@ -1299,7 +1373,12 @@ function shouldShowNonEsmMode() {
   );
 }
 
-function clearWorkspaceCards() {
+function clearWorkspaceCards(options = {}) {
+  const preserveReplayContext = options?.preserveReplayContext === true;
+  if (!preserveReplayContext) {
+    state.workspaceReplayCards = [];
+    state.pendingAutoRerunCards = [];
+  }
   state.cardsById.forEach((cardState) => {
     teardownCardHeaderQueryEditors(cardState);
     cardState.element?.remove();
@@ -1310,6 +1389,10 @@ function clearWorkspaceCards() {
 
 function hasWorkspaceCardContext() {
   return state.cardsById instanceof Map && state.cardsById.size > 0;
+}
+
+function hasWorkspaceReplayContext() {
+  return getWorkspaceReplayCards().length > 0;
 }
 
 function updateNonEsmMode() {
@@ -1420,9 +1503,51 @@ function hasProgrammerIdentityChanged(previousProgrammerId = "", previousProgram
   return false;
 }
 
+function buildWorkspaceControllerContextKey(
+  programmerId = "",
+  premiumPanelRequestToken = 0,
+  environmentKey = state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key
+) {
+  const normalizedEnvironmentKey =
+    String(environmentKey || state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+    DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const normalizedProgrammerId = String(programmerId || "").trim() || "no-programmer";
+  const normalizedRequestToken = Math.max(0, Number(premiumPanelRequestToken || 0));
+  return `${normalizedEnvironmentKey}::${normalizedProgrammerId}::${normalizedRequestToken}`;
+}
+
+function doesWorkspaceEventMatchCurrentContext(payload = {}) {
+  const incomingContextKey = String(payload?.workspaceContextKey || "").trim();
+  const currentContextKey = String(state.workspaceContextKey || "").trim();
+  if (incomingContextKey && currentContextKey && incomingContextKey !== currentContextKey) {
+    return false;
+  }
+
+  const incomingProgrammerId = String(payload?.programmerId || "").trim();
+  const currentProgrammerId = String(state.programmerId || "").trim();
+  if (incomingProgrammerId && currentProgrammerId && incomingProgrammerId !== currentProgrammerId) {
+    return false;
+  }
+
+  const incomingEnvironmentKey = String(payload?.adobePassEnvironmentKey || "").trim();
+  const currentEnvironmentKey = String(state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim();
+  if (incomingEnvironmentKey && currentEnvironmentKey && incomingEnvironmentKey !== currentEnvironmentKey) {
+    return false;
+  }
+
+  const incomingRequestToken = Math.max(0, Number(payload?.premiumPanelRequestToken || 0));
+  const currentRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
+  if (incomingRequestToken > 0 && currentRequestToken > 0 && incomingRequestToken !== currentRequestToken) {
+    return false;
+  }
+
+  return true;
+}
+
 function clearPendingProgrammerSwitchTransition() {
   state.pendingAutoRerunProgrammerKey = "";
   state.autoRerunInFlightProgrammerKey = "";
+  state.pendingAutoRerunCards = [];
 }
 
 async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
@@ -1433,19 +1558,36 @@ async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
   if (expectedProgrammerKey && currentProgrammerKey !== expectedProgrammerKey) {
     return false;
   }
-  if (state.esmAvailable !== true || state.workspaceLocked || state.nonEsmMode || state.batchRunning) {
+  if (
+    state.esmAvailable !== true ||
+    state.programmerHydrationReady !== true ||
+    state.workspaceLocked ||
+    state.nonEsmMode ||
+    state.batchRunning
+  ) {
     return false;
   }
 
-  const cards = getOrderedCardStates();
+  const queuedCards =
+    Array.isArray(state.pendingAutoRerunCards) && state.pendingAutoRerunCards.length > 0
+      ? cloneWorkspaceReplayCards(state.pendingAutoRerunCards)
+      : getWorkspaceReplayCards();
+  const cards = cloneWorkspaceReplayCards(queuedCards);
   if (cards.length === 0) {
     return false;
   }
+
+  // Rebuild the visible workspace from the preserved replay snapshot when ESM
+  // returns after one or more No Soup selections. This prevents stale card DOM
+  // from surviving across non-ESM droughts and guarantees the same workspace
+  // layout is reconstructed for the next ESM-capable media company.
+  clearWorkspaceCards({ preserveReplayContext: true });
 
   await rerunAllCards({
     // Keep programmer switch refresh behavior aligned with the same code path
     // users trigger via the workspace Re-Run All button.
     reason: "manual-reload",
+    cards,
   });
   return true;
 }
@@ -1463,6 +1605,12 @@ function maybeConsumePendingAutoRerun() {
   if (!currentProgrammerKey || currentProgrammerKey !== pendingProgrammerKey) {
     return;
   }
+  if (state.programmerHydrationReady !== true) {
+    return;
+  }
+  if (state.esmAvailabilityResolved !== true) {
+    return;
+  }
 
   if (state.esmAvailabilityResolved === true && state.esmAvailable === false) {
     clearPendingProgrammerSwitchTransition();
@@ -1476,7 +1624,10 @@ function maybeConsumePendingAutoRerun() {
     return;
   }
 
-  const cards = getOrderedCardStates();
+  const cards =
+    Array.isArray(state.pendingAutoRerunCards) && state.pendingAutoRerunCards.length > 0
+      ? cloneWorkspaceReplayCards(state.pendingAutoRerunCards)
+      : getWorkspaceReplayCards();
   if (cards.length === 0) {
     clearPendingProgrammerSwitchTransition();
     return;
@@ -3300,11 +3451,13 @@ function ensureCard(cardMeta) {
     teardownCardHeaderQueryEditors(cardState);
     cardState.element.remove();
     state.cardsById.delete(cardState.cardId);
+    syncWorkspaceReplayCardsFromCurrentCards();
     syncActionButtonsDisabled();
   });
 
   state.cardsById.set(cardId, cardState);
   els.cardsHost.prepend(cardState.element);
+  syncWorkspaceReplayCardsFromCurrentCards();
   syncActionButtonsDisabled();
   return cardState;
 }
@@ -3356,14 +3509,18 @@ function renderCardTable(cardState, rows, lastModified) {
               <div class="esm-footer">
                 <a href="#" class="esm-csv-link">CSV</a>
                 <div class="esm-footer-controls">
-                  ${buildCardLocalFilterResetMarkup(cardState)}
-                  <span class="esm-last-modified"></span>
-                  <button type="button" class="esm-action-btn esm-table-close" aria-label="Close table" title="Close table">
-                    <svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M7 7 17 17"></path>
-                      <path d="M17 7 7 17"></path>
-                    </svg>
-                  </button>
+                  <div class="esm-footer-meta">
+                    <span class="esm-last-modified"></span>
+                  </div>
+                  <div class="esm-footer-actions">
+                    ${buildCardLocalFilterResetMarkup(cardState)}
+                    <button type="button" class="esm-action-btn esm-table-close" aria-label="Close table" title="Close table">
+                      <svg class="esm-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M7 7 17 17"></path>
+                        <path d="M17 7 7 17"></path>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             </td>
@@ -3651,9 +3808,15 @@ function applyControllerState(payload) {
   );
   const controllerReason = String(payload?.controllerReason || "").trim().toLowerCase();
   const hasWorkspaceCards = hasWorkspaceCardContext();
+  const replayCardsForSwitch = hasWorkspaceCards
+    ? getWorkspaceReplayCardsFromCurrentState()
+    : cloneWorkspaceReplayCards(state.workspaceReplayCards);
   const hasActiveWorkspaceContext =
     hasWorkspaceCards ||
+    hasWorkspaceReplayContext() ||
+    replayCardsForSwitch.length > 0 ||
     state.batchRunning ||
+    (Array.isArray(state.pendingAutoRerunCards) && state.pendingAutoRerunCards.length > 0) ||
     Boolean(String(state.pendingAutoRerunProgrammerKey || "").trim()) ||
     Boolean(String(state.autoRerunInFlightProgrammerKey || "").trim());
 
@@ -3699,6 +3862,18 @@ function applyControllerState(payload) {
   state.esmContainerVisible = nextEsmContainerVisible;
   state.programmerId = incomingProgrammerId;
   state.programmerName = incomingProgrammerName;
+  state.programmerHydrationReady = payload?.programmerHydrationReady === true;
+  state.premiumPanelRequestToken = Math.max(
+    0,
+    Number(payload?.premiumPanelRequestToken || state.premiumPanelRequestToken || 0)
+  );
+  state.workspaceContextKey =
+    String(payload?.workspaceContextKey || "").trim() ||
+    buildWorkspaceControllerContextKey(
+      incomingProgrammerId,
+      state.premiumPanelRequestToken,
+      incomingEnvironmentKey || previousEnvironmentKey
+    );
   state.requestorIds = Array.isArray(payload?.requestorIds)
     ? payload.requestorIds.map((value) => String(value || "").trim()).filter(Boolean)
     : [];
@@ -3741,22 +3916,27 @@ function applyControllerState(payload) {
   const isMediaCompanySwitchReason =
     !controllerReason || controllerReason === "media-company-change" || controllerReason === "programmer-change";
   const shouldTriggerWorkspaceRedraw =
-    hasWorkspaceCards &&
+    replayCardsForSwitch.length > 0 &&
     Boolean(currentProgrammerKey) &&
     ((programmerChanged &&
       Boolean(previousProgrammerKey) &&
       isMediaCompanySwitchReason) ||
       (environmentChanged && controllerReason === "environment-switch"));
   if (shouldTriggerWorkspaceRedraw && currentProgrammerKey) {
+    state.workspaceReplayCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
+    state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
     state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
     setStatus(
-      `Refreshing ${state.cardsById.size} report(s) for ${getProgrammerLabel()} in ${String(
-        state.adobePassEnvironment?.label || incomingEnvironmentKey || "Production"
-      )}...`
+      state.pendingAutoRerunCards.length > 0
+        ? `Refreshing ${state.pendingAutoRerunCards.length} report(s) for ${getProgrammerLabel()} in ${String(
+            state.adobePassEnvironment?.label || incomingEnvironmentKey || "Production"
+          )}...`
+        : "Refreshing workspace for selected Media Company..."
     );
-  } else if (programmerChanged || (environmentChanged && !hasWorkspaceCards)) {
+  } else if (programmerChanged || (environmentChanged && replayCardsForSwitch.length === 0)) {
     state.pendingAutoRerunProgrammerKey = "";
-    if (environmentChanged && !hasWorkspaceCards) {
+    state.pendingAutoRerunCards = [];
+    if (environmentChanged && replayCardsForSwitch.length === 0) {
       setStatus(`Environment changed to ${String(state.adobePassEnvironment?.label || incomingEnvironmentKey || "Production")}.`);
     }
   }
@@ -3773,13 +3953,22 @@ function handleWorkspaceEvent(eventName, payload) {
     return;
   }
 
+  if (
+    ["report-start", "report-result", "batch-start", "batch-end", "csv-complete"].includes(event) &&
+    !doesWorkspaceEventMatchCurrentContext(payload)
+  ) {
+    return;
+  }
+
   if (event === "controller-state") {
     applyControllerState(payload);
     return;
   }
 
   if (event === "report-start") {
-    clearPendingProgrammerSwitchTransition();
+    // Do not clear pending switch replay state here. A previous media company's
+    // report-start can still arrive after a newer selection and would otherwise
+    // erase the queued workspace redraw context for the new programmer.
     applyReportStart(payload);
     return;
   }
@@ -3810,6 +3999,7 @@ function handleWorkspaceEvent(eventName, payload) {
         cardState.running = false;
       }
     });
+    syncWorkspaceReplayCardsFromCurrentCards();
     syncActionButtonsDisabled();
     const total = Number(payload?.total || 0);
     setStatus(total > 0 ? `Re-run completed for ${total} report(s).` : "Re-run completed.");
@@ -3818,13 +4008,17 @@ function handleWorkspaceEvent(eventName, payload) {
   }
 
   if (event === "environment-switch-rerun") {
-    if (state.batchRunning || state.cardsById.size === 0) {
+    const replayCards = getWorkspaceReplayCards();
+    if (state.batchRunning || replayCards.length === 0) {
       return;
     }
-    clearPendingProgrammerSwitchTransition();
-    void rerunAllCards({
-      reason: "manual-reload",
-    });
+    const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
+    if (!currentProgrammerKey) {
+      return;
+    }
+    state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCards);
+    state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
+    maybeConsumePendingAutoRerun();
     return;
   }
 
@@ -3857,12 +4051,20 @@ async function rerunAllCards(options = {}) {
     return;
   }
   const reason = String(options?.reason || "").trim().toLowerCase();
-  if (state.cardsById.size === 0) {
+  const explicitCards =
+    Array.isArray(options?.cards) && options.cards.length > 0
+      ? cloneWorkspaceReplayCards(options.cards)
+      : [];
+  const cards =
+    explicitCards.length > 0
+      ? explicitCards
+      : [...state.cardsById.values()].map((cardState) => getCardPayload(cardState));
+  if (cards.length === 0) {
     setStatus("No reports are open.");
     return;
   }
 
-  const cards = [...state.cardsById.values()].map((cardState) => getCardPayload(cardState));
+  state.workspaceReplayCards = cloneWorkspaceReplayCards(cards);
   state.batchRunning = true;
   syncActionButtonsDisabled();
   if (reason === "manual-reload") {
@@ -3948,6 +4150,7 @@ function clearWorkspace() {
   if (!ensureWorkspaceUnlocked()) {
     return;
   }
+  clearPendingProgrammerSwitchTransition();
   clearWorkspaceCards();
 }
 

@@ -481,6 +481,8 @@ body.workspace-locked .workspace-cards {
 }
 
 .report-card {
+  --report-card-action-size: 24px;
+  --report-card-action-icon-size: 12px;
   position: relative;
   border: 1px solid rgba(21, 52, 99, 0.14);
   border-radius: var(--s2-radius-strong);
@@ -778,6 +780,16 @@ body.workspace-locked .workspace-cards {
     color 140ms ease;
 }
 
+.report-card .card-close,
+.report-card .esm-action-btn,
+.report-card .esm-clear-filter-rerun,
+.report-card .esm-table-close {
+  width: var(--report-card-action-size);
+  height: var(--report-card-action-size);
+  min-width: var(--report-card-action-size);
+  min-height: var(--report-card-action-size);
+}
+
 .card-close-icon,
 .esm-action-icon {
   width: var(--s2-icon-size-compact);
@@ -787,6 +799,12 @@ body.workspace-locked .workspace-cards {
   stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.report-card .card-close-icon,
+.report-card .esm-action-icon {
+  width: var(--report-card-action-icon-size);
+  height: var(--report-card-action-icon-size);
 }
 
 .card-close:hover,
@@ -901,6 +919,10 @@ body.workspace-locked .workspace-cards {
   box-shadow: none;
 }
 
+.esm-table tfoot .esm-footer-cell {
+  padding-right: 20px;
+}
+
 .esm-table tbody tr:nth-child(odd) {
   background: var(--legacy-table-row);
 }
@@ -932,10 +954,35 @@ body.workspace-locked .workspace-cards {
 
 .esm-footer-controls {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.esm-footer-meta {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+}
+
+.esm-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  min-width: 0;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.esm-footer-actions .esm-action-btn,
+.esm-footer-actions .esm-clear-filter-rerun,
+.esm-footer-actions .esm-table-close {
+  align-self: center;
 }
 
 .esm-footer a {
@@ -995,6 +1042,11 @@ body.workspace-locked .workspace-cards {
   margin-left: 8px;
   width: 26px;
   height: 26px;
+}
+
+.report-card .esm-clear-filter-rerun--inline {
+  width: var(--report-card-action-size);
+  height: var(--report-card-action-size);
 }
 
 .card-message-inline .esm-clear-filter-rerun--inline {
@@ -1314,6 +1366,10 @@ body.workspace-locked .workspace-cards {
   .esm-footer-controls {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .esm-footer-meta {
+    flex: 1 1 auto;
   }
 
   .esm-table th,

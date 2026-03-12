@@ -244,6 +244,7 @@ const state = {
   tenantScope: "",
   programmerId: "",
   programmerName: "",
+  programmerHydrationReady: false,
   requestorIds: [],
   mvpdIds: [],
   profileHarvest: null,
@@ -1955,7 +1956,13 @@ async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
   if (expectedProgrammerKey && currentProgrammerKey !== expectedProgrammerKey) {
     return false;
   }
-  if (state.cmAvailable !== true || state.workspaceLocked || state.nonCmMode || state.batchRunning) {
+  if (
+    state.cmAvailable !== true ||
+    state.programmerHydrationReady !== true ||
+    state.workspaceLocked ||
+    state.nonCmMode ||
+    state.batchRunning
+  ) {
     return false;
   }
 
@@ -1982,8 +1989,7 @@ function maybeConsumePendingAutoRerun() {
   if (!pendingProgrammerKey) {
     return;
   }
-  const hasRunnableControllerContext =
-    state.controllerOnline === true || (state.cmAvailabilityResolved === true && state.cmAvailable === true);
+  const hasRunnableControllerContext = state.controllerOnline === true;
   if (!hasRunnableControllerContext) {
     return;
   }
@@ -1993,6 +1999,9 @@ function maybeConsumePendingAutoRerun() {
 
   const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
   if (!currentProgrammerKey || currentProgrammerKey !== pendingProgrammerKey) {
+    return;
+  }
+  if (state.programmerHydrationReady !== true) {
     return;
   }
 
@@ -4497,9 +4506,13 @@ function renderCardTable(cardState, rows, lastModified) {
               <div class="esm-footer">
                 <a href="#" class="esm-csv-link">CSV</a>
                 <div class="esm-footer-controls">
-                  ${buildCardLocalFilterResetMarkup(cardState)}
-                  <span class="esm-last-modified"></span>
-                  ${closeControlMarkup}
+                  <div class="esm-footer-meta">
+                    <span class="esm-last-modified"></span>
+                  </div>
+                  <div class="esm-footer-actions">
+                    ${buildCardLocalFilterResetMarkup(cardState)}
+                    ${closeControlMarkup}
+                  </div>
                 </div>
               </div>
             </td>
@@ -4838,6 +4851,7 @@ function applyControllerState(payload) {
   state.cmContainerVisible = nextCmContainerVisible;
   state.programmerId = String(payload?.programmerId || "");
   state.programmerName = String(payload?.programmerName || "");
+  state.programmerHydrationReady = payload?.programmerHydrationReady === true;
   state.tenantScope = String(payload?.tenantScope || "").trim();
   state.requestorIds = Array.isArray(payload?.requestorIds)
     ? payload.requestorIds.map((value) => String(value || "").trim()).filter(Boolean)
@@ -5009,10 +5023,12 @@ function handleWorkspaceEvent(eventName, payload) {
     if (state.batchRunning) {
       return;
     }
-    clearPendingProgrammerSwitchTransition();
-    void rerunAllCards({
-      reason: "manual-reload",
-    });
+    const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
+    if (!currentProgrammerKey) {
+      return;
+    }
+    state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
+    maybeConsumePendingAutoRerun();
     return;
   }
 }
