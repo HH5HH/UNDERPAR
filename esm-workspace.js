@@ -1409,7 +1409,9 @@ function updateNonEsmMode() {
   // Cards should only be cleared by explicit user action (Clear All) or workspace close.
 
   if (els.stylesheet) {
-    els.stylesheet.disabled = shouldShow;
+    // Keep the workspace stylesheet mounted even during No Soup so the GUI
+    // returns cleanly when an ESM-capable media company is selected next.
+    els.stylesheet.disabled = false;
   }
   if (els.appRoot) {
     els.appRoot.hidden = shouldShow;
