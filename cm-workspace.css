@@ -455,140 +455,10 @@ body::after {
   gap: 14px;
 }
 
-body.workspace-transitioning .workspace-header,
-body.workspace-transitioning .workspace-status,
-body.workspace-transitioning .workspace-lock-banner,
-body.workspace-transitioning .workspace-cards {
-  opacity: 0.24;
-  filter: blur(5px) saturate(0.72);
-  transform: scale(0.995);
-  pointer-events: none;
-  user-select: none;
-}
-
 body.workspace-locked .workspace-cards {
   opacity: 0.52;
   filter: saturate(0.8) blur(0.4px);
   pointer-events: none;
-}
-
-.workspace-transition-overlay {
-  position: absolute;
-  inset: 18px;
-  z-index: 24;
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
-  padding: 20px;
-  border-radius: 18px;
-  overflow: hidden;
-  background:
-    linear-gradient(180deg, rgba(240, 249, 244, 0.4), rgba(228, 243, 236, 0.56)),
-    radial-gradient(circle at 16% 18%, rgba(42, 139, 116, 0.2), rgba(42, 139, 116, 0) 44%),
-    radial-gradient(circle at 82% 78%, rgba(109, 194, 166, 0.18), rgba(109, 194, 166, 0) 48%);
-  border: 1px solid rgba(29, 98, 82, 0.18);
-  box-shadow: 0 24px 42px rgba(16, 59, 47, 0.14);
-  backdrop-filter: blur(16px) saturate(0.88);
-  isolation: isolate;
-}
-
-.workspace-transition-overlay::before {
-  content: "";
-  position: absolute;
-  top: -18%;
-  bottom: -18%;
-  left: -38%;
-  width: 38%;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.34) 28%,
-    rgba(110, 222, 189, 0.72) 52%,
-    rgba(255, 255, 255, 0.34) 74%,
-    rgba(255, 255, 255, 0) 100%
-  );
-  filter: blur(20px);
-  opacity: 0.92;
-  transform: skewX(-12deg);
-  animation: workspace-curtain-sweep 1680ms ease-in-out infinite;
-  pointer-events: none;
-}
-
-.workspace-transition-overlay::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0)),
-    repeating-linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.12) 0,
-      rgba(255, 255, 255, 0.12) 1px,
-      rgba(255, 255, 255, 0) 1px,
-      rgba(255, 255, 255, 0) 19px
-    );
-  opacity: 0.56;
-  pointer-events: none;
-}
-
-.workspace-transition-panel {
-  position: relative;
-  z-index: 1;
-  margin: auto;
-  width: min(520px, 100%);
-  padding: 22px 24px;
-  border-radius: 16px;
-  border: 1px solid rgba(29, 98, 82, 0.18);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(241, 250, 246, 0.92));
-  box-shadow: 0 18px 38px rgba(16, 59, 47, 0.12);
-  text-align: center;
-}
-
-.workspace-transition-kicker {
-  margin: 0 0 10px;
-  font-size: 11px;
-  font-weight: 760;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #2a6f5d;
-}
-
-.workspace-transition-title {
-  margin: 0;
-  font-size: clamp(22px, 3vw, 30px);
-  line-height: 1.08;
-  letter-spacing: -0.02em;
-  color: #184f42;
-}
-
-.workspace-transition-note {
-  margin: 12px 0 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: #41675a;
-  font-weight: 560;
-}
-
-.workspace-transition-progress {
-  position: relative;
-  margin: 18px auto 0;
-  width: min(320px, 100%);
-  height: 8px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: rgba(29, 98, 82, 0.12);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.72);
-}
-
-.workspace-transition-progress-bar {
-  display: block;
-  width: 42%;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, rgba(42, 139, 116, 0.92), rgba(110, 222, 189, 0.96));
-  box-shadow: 0 0 18px rgba(68, 174, 132, 0.34);
-  transform: translateX(-110%);
-  animation: workspace-progress-sweep 1260ms ease-in-out infinite;
 }
 
 .report-card {
@@ -648,30 +518,6 @@ body.workspace-locked .workspace-cards {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes workspace-curtain-sweep {
-  0% {
-    transform: translateX(0) skewX(-12deg);
-  }
-  50% {
-    transform: translateX(356%) skewX(-12deg);
-  }
-  100% {
-    transform: translateX(712%) skewX(-12deg);
-  }
-}
-
-@keyframes workspace-progress-sweep {
-  0% {
-    transform: translateX(-112%);
-  }
-  54% {
-    transform: translateX(132%);
-  }
-  100% {
-    transform: translateX(244%);
   }
 }
 

@@ -96,7 +96,7 @@ function resolveEnvironmentRecord(value) {
 function cloneEnvironment(environment) {
   const source = resolveEnvironmentRecord(environment);
   const consoleShellUrl = `https://experience.adobe.com/#/@adobepass/pass/authentication/${source.route}`;
-  const cmConsoleShellUrl = `${String(source.cmConsoleOrigin || "https://experience.adobe.com").replace(/\/+$/, "")}/#/@adobepass/cm-console`;
+  const cmConsoleShellUrl = `${String(source.cmConsoleOrigin || "https://experience.adobe.com").replace(/\/+$/, "")}/#/@adobepass/cm-console/cmu/year`;
   const dcrRegisterUrl = `${source.spBase}/o/client/register`;
   const dcrTokenUrl = `${source.spBase}/o/client/token`;
   const restV2Base = `${source.spBase}/api/v2`;
@@ -123,7 +123,7 @@ function cloneEnvironment(environment) {
 function buildEnvironmentTooltip(environment) {
   const env = resolveEnvironmentRecord(environment);
   const consoleShellUrl = `https://experience.adobe.com/#/@adobepass/pass/authentication/${env.route}`;
-  const cmConsoleShellUrl = `${String(env.cmConsoleOrigin || "https://experience.adobe.com").replace(/\/+$/, "")}/#/@adobepass/cm-console`;
+  const cmConsoleShellUrl = `${String(env.cmConsoleOrigin || "https://experience.adobe.com").replace(/\/+$/, "")}/#/@adobepass/cm-console/cmu/year`;
   const dcrRegisterUrl = `${env.spBase}/o/client/register`;
   const dcrTokenUrl = `${env.spBase}/o/client/token`;
   const restV2Base = `${env.spBase}/api/v2`;

@@ -42,7 +42,7 @@ const DEFAULT_ADOBEPASS_ENVIRONMENT = UNDERPAR_ENVIRONMENT_REGISTRY?.getDefaultE
   mgmtBase: "https://mgmt.auth.adobe.com",
   spBase: "https://sp.auth.adobe.com",
   consoleShellUrl: "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production",
-  cmConsoleShellUrl: "https://experience.adobe.com/#/@adobepass/cm-console",
+  cmConsoleShellUrl: "https://experience.adobe.com/#/@adobepass/cm-console/cmu/year",
   consoleProgrammersUrl: "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production/programmers",
   consoleCallbackPrefix: "https://console.auth.adobe.com/oauth2/callback",
   degradationBase: "https://mgmt.auth.adobe.com/control/v3/degradation",
@@ -20381,7 +20381,7 @@ body[data-theme="dark"]{
     restV2Base: "https://sp.auth.adobe.com/api/v2",
     cmReportsBase: "https://cm-reports.adobeprimetime.com",
     consoleShellUrl: "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production",
-    cmConsoleShellUrl: "https://experience.adobe.com/#/@adobepass/cm-console",
+    cmConsoleShellUrl: "https://experience.adobe.com/#/@adobepass/cm-console/cmu/year",
   };
   function resolveRuntimeAdobePassEnvironment(value = null) {
     const payload = value && typeof value === "object" ? value : {};
@@ -20425,7 +20425,7 @@ body[data-theme="dark"]{
         payload.consoleShellUrl || \`https://experience.adobe.com/#/@adobepass/pass/authentication/\${route}\`
       ).trim(),
       cmConsoleShellUrl: String(
-        payload.cmConsoleShellUrl || \`\${cmConsoleOrigin.replace(/\\/+$/, "")}/#/@adobepass/cm-console\`
+        payload.cmConsoleShellUrl || \`\${cmConsoleOrigin.replace(/\\/+$/, "")}/#/@adobepass/cm-console/cmu/year\`
       ).trim(),
     };
   }
@@ -30019,6 +30019,7 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
     Number(cmState.controllerWindowId || 0) ||
     Number(targetWorkspace === "mvpd" ? state.mvpdWorkspaceWindowId : state.cmWorkspaceWindowId || 0);
   const workspaceReportContext = cmBuildWorkspaceReportContextPayload(cmState, requestToken);
+  const requestSource = String(options.requestSource || "workspace").trim().toLowerCase() || "workspace";
   if (options.emitStart !== false) {
     cmSendReportWorkspaceMessage(
       targetWorkspace,
@@ -30045,6 +30046,7 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
         requestorId: targetRequestorId,
         mvpdId: targetMvpdId,
         mvpdLabel: targetMvpdLabel,
+        requestSource,
       },
       { targetWindowId }
     );
@@ -30537,6 +30539,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
   if (action === "rerun-all") {
     const cards = Array.isArray(message?.cards) ? message.cards : [];
     const reason = String(message?.reason || "").trim().toLowerCase();
+    const requestSourceForRerun = reason === "programmer-switch" ? "workspace-programmer-switch" : "workspace";
     const targetWindowId = senderWindowId || Number(cmState.controllerWindowId || 0);
     const workspaceReportContext = cmBuildWorkspaceReportContextPayload(cmState, requestToken);
     void cmSendWorkspaceMessage(
@@ -30622,6 +30625,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
         forceRefetch: true,
         cardId: String(card?.cardId || record.cardId || generateRequestId()),
         targetWindowId,
+        requestSource: requestSourceForRerun,
         requestUrlOverride,
         baseRequestUrl,
         localColumnFilters: card?.localColumnFilters && typeof card.localColumnFilters === "object" ? card.localColumnFilters : {},
@@ -40076,7 +40080,7 @@ function getCmConsoleAuthPrimeUrl() {
   if (!cmConsoleOrigin) {
     return "";
   }
-  return `${cmConsoleOrigin.replace(/\/+$/, "")}/#/@adobepass/cm-console`;
+  return `${cmConsoleOrigin.replace(/\/+$/, "")}/#/@adobepass/cm-console/cmu/year`;
 }
 
 async function primeCmConsoleInAuthPopup(tabId, options = {}) {
@@ -45545,6 +45549,11 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
   if (state.restricted || !state.loginData) {
     return null;
   }
+  const preferredCmBootstrapTab = preferredCmBootstrapTabId > 0 ? await getTabByIdSafe(preferredCmBootstrapTabId) : null;
+  const effectiveAllowTemporaryPageContextTab =
+    allowTemporaryPageContextTab ||
+    (preferredCmBootstrapTabId > 0 && !preferredCmBootstrapTab) ||
+    (preferredCmBootstrapTabId <= 0 && getRetainedLoginHelperBootstrapTabId() <= 0);
 
   const existingCmToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
   const cmTokenReady =
@@ -45566,7 +45575,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     let hydratedToken = normalizeBearerTokenValue(
       await hydrateGlobalCmConsoleBootstrapForActiveSession(reason, {
         forceRefresh,
-        allowTemporaryPageContextTab,
+        allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
         preferredCmBootstrapTabId,
       })
     );
@@ -45574,7 +45583,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
       forceRefresh,
       accessToken: hydratedToken,
       skipBootstrap: Boolean(hydratedToken),
-      allowTemporaryPageContextTab,
+      allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
       preferredCmBootstrapTabId,
     });
     if (!hasCmTenantsCatalogEntries(catalog)) {
@@ -45588,7 +45597,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
         await ensureCmApiAccessToken({
           forceRefresh,
           freshLeewayMs: 45 * 1000,
-          allowTemporaryPageContextTab,
+          allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
           preferredCmBootstrapTabId,
         }).catch(() => "")
       );
@@ -45608,7 +45617,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     state.cmTenantsPrecheckComplete = true;
     state.cmConsoleBootstrapQualified = true;
     state.cmTenantsPrecheckLastError = "";
-    prefetchCmConsoleBootstrapSummaryInBackground(`tenant-precheck:${reason}`, { forceRefresh: false });
+    // Automatic login bootstrap stops once CMU globals are ready.
     emitCmDebugEvent({
       phase: "cm-tenant-precheck-complete",
       reason: String(reason || ""),
@@ -52542,7 +52551,6 @@ function prefetchCmTenantsCatalogInBackground(reason = "background", options = {
         tenantCount: Number(catalog.tenants?.length || 0),
         sourceUrl: String(catalog.sourceUrl || ""),
       });
-      prefetchCmConsoleBootstrapSummaryInBackground(`tenant-catalog:${reason}`, { forceRefresh: false });
       if (state.avatarMenuOpen) {
         renderAvatarMenu();
       }
@@ -56691,11 +56699,8 @@ function applyProgrammerEntities(entities) {
   clearRestV2PreparedLoginState();
   clearCmWorkspaceActivityDebugFlow("programmer-entities-reset", { stopFlow: true });
   populateMediaCompanySelect();
-  void seedCurrentProgrammersFromPassVault({
-    forceReload: false,
-    forceOverwrite: false,
-    forceDcrRestore: true,
-  }).catch(() => {});
+  // Post-login stays GLOBALS-only. Per-company VAULT/runtime restore remains lazy
+  // until explicit Media Company selection or environment restore.
 }
 
 function createCookieSessionLoginData() {

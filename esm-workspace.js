@@ -123,6 +123,8 @@ const state = {
   batchRunning: false,
   workspaceLocked: false,
   nonEsmMode: false,
+  programmerSwitchLoading: false,
+  programmerSwitchLoadingKey: "",
   pendingAutoRerunProgrammerKey: "",
   autoRerunInFlightProgrammerKey: "",
   pendingAutoRerunCards: [],
@@ -139,9 +141,6 @@ const els = {
   status: document.getElementById("workspace-status"),
   lockBanner: document.getElementById("workspace-lock-banner"),
   lockMessage: document.getElementById("workspace-lock-message"),
-  transitionOverlay: document.getElementById("workspace-transition-overlay"),
-  transitionTitle: document.getElementById("workspace-transition-title"),
-  transitionNote: document.getElementById("workspace-transition-note"),
   rerunIndicator: document.getElementById("workspace-rerun-indicator"),
   makeClickEsmButton: document.getElementById("workspace-make-clickesm"),
   makeClickEsmWorkspaceButton: document.getElementById("workspace-make-clickesmws"),
@@ -1278,85 +1277,9 @@ function syncWorkspaceNetworkIndicator() {
   }
 }
 
-function resolveWorkspaceTransitionOverlayState() {
-  const pendingProgrammerKey = String(state.pendingAutoRerunProgrammerKey || "").trim();
-  const inFlightProgrammerKey = String(state.autoRerunInFlightProgrammerKey || "").trim();
-  const hasTransitionContext =
-    hasWorkspaceCardContext() ||
-    (Array.isArray(state.workspaceReplayCards) && state.workspaceReplayCards.length > 0) ||
-    (Array.isArray(state.pendingAutoRerunCards) && state.pendingAutoRerunCards.length > 0);
-  const active = Boolean(hasTransitionContext && (pendingProgrammerKey || inFlightProgrammerKey));
-  if (!active || state.workspaceLocked || state.nonEsmMode) {
-    return {
-      active: false,
-      title: "",
-      note: "",
-      phase: "idle",
-    };
-  }
-
-  const programmerLabel = getProgrammerLabel();
-  if (state.esmAvailabilityResolved !== true) {
-    return {
-      active: true,
-      title: `Checking ${programmerLabel} for ESM...`,
-      note: "Preparing your saved workspace layout for the selected Media Company.",
-      phase: "checking",
-    };
-  }
-
-  if (state.programmerHydrationReady !== true) {
-    return {
-      active: true,
-      title: `Hydrating ${programmerLabel}...`,
-      note: "Compiling ESM access and restoring the workspace context for this Media Company.",
-      phase: "hydrating",
-    };
-  }
-
-  if (state.batchRunning === true || Boolean(inFlightProgrammerKey)) {
-    return {
-      active: true,
-      title: `Loading fresh ${programmerLabel} data...`,
-      note: "Your report cards are queued. UnderPAR is replacing the previous dataset now.",
-      phase: "loading",
-    };
-  }
-
-  return {
-    active: true,
-    title: `Refreshing ${programmerLabel}...`,
-    note: "Closing the curtain on the previous dataset and preparing the next ESM replay.",
-    phase: "preparing",
-  };
-}
-
-function syncWorkspaceTransitionOverlay() {
-  const overlayState = resolveWorkspaceTransitionOverlayState();
-  document.body.classList.toggle("workspace-transitioning", overlayState.active);
-
-  if (els.transitionOverlay) {
-    els.transitionOverlay.hidden = !overlayState.active;
-    if (overlayState.active) {
-      els.transitionOverlay.dataset.phase = String(overlayState.phase || "loading").trim() || "loading";
-      els.transitionOverlay.setAttribute("aria-busy", "true");
-    } else {
-      delete els.transitionOverlay.dataset.phase;
-      els.transitionOverlay.removeAttribute("aria-busy");
-    }
-  }
-  if (els.transitionTitle) {
-    els.transitionTitle.textContent = overlayState.active ? overlayState.title : "";
-  }
-  if (els.transitionNote) {
-    els.transitionNote.textContent = overlayState.active ? overlayState.note : "";
-  }
-}
-
 function syncActionButtonsDisabled() {
-  setActionButtonsDisabled(state.batchRunning || state.workspaceLocked || resolveWorkspaceTransitionOverlayState().active);
+  setActionButtonsDisabled(state.batchRunning || state.workspaceLocked);
   syncWorkspaceNetworkIndicator();
-  syncWorkspaceTransitionOverlay();
 }
 
 function syncTearsheetButtonsVisibility() {
@@ -1626,6 +1549,8 @@ function doesWorkspaceEventMatchCurrentContext(payload = {}) {
 }
 
 function clearPendingProgrammerSwitchTransition() {
+  state.programmerSwitchLoading = false;
+  state.programmerSwitchLoadingKey = "";
   state.pendingAutoRerunProgrammerKey = "";
   state.autoRerunInFlightProgrammerKey = "";
   state.pendingAutoRerunCards = [];
@@ -1665,9 +1590,9 @@ async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
   clearWorkspaceCards({ preserveReplayContext: true });
 
   await rerunAllCards({
-    // Keep programmer switch refresh behavior aligned with the same code path
-    // users trigger via the workspace Re-Run All button.
-    reason: "manual-reload",
+    // Preserve the shared rerun-all path, but mark real programmer switches so
+    // normal one-off report runs stay distinct.
+    reason: "programmer-switch",
     cards,
   });
   return true;
@@ -1676,6 +1601,10 @@ async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
 function maybeConsumePendingAutoRerun() {
   const pendingProgrammerKey = String(state.pendingAutoRerunProgrammerKey || "").trim();
   if (!pendingProgrammerKey) {
+    if (!String(state.autoRerunInFlightProgrammerKey || "").trim()) {
+      state.programmerSwitchLoading = false;
+      state.programmerSwitchLoadingKey = "";
+    }
     return;
   }
   if (state.controllerOnline !== true) {
@@ -1716,10 +1645,17 @@ function maybeConsumePendingAutoRerun() {
 
   state.pendingAutoRerunProgrammerKey = "";
   state.autoRerunInFlightProgrammerKey = currentProgrammerKey;
+  state.programmerSwitchLoading = true;
+  state.programmerSwitchLoadingKey = currentProgrammerKey;
   void autoRerunCardsForProgrammerSwitch(currentProgrammerKey).finally(() => {
     if (String(state.autoRerunInFlightProgrammerKey || "").trim() === currentProgrammerKey) {
       state.autoRerunInFlightProgrammerKey = "";
     }
+    if (!String(state.pendingAutoRerunProgrammerKey || "").trim()) {
+      state.programmerSwitchLoading = false;
+      state.programmerSwitchLoadingKey = "";
+    }
+    syncActionButtonsDisabled();
   });
 }
 
@@ -3727,6 +3663,18 @@ function renderCardTable(cardState, rows, lastModified) {
 }
 
 function applyReportStart(payload) {
+  const requestSource = String(payload?.requestSource || "").trim().toLowerCase();
+  if (
+    requestSource !== "workspace-programmer-switch" &&
+    (
+      state.programmerSwitchLoading === true ||
+      String(state.pendingAutoRerunProgrammerKey || "").trim() ||
+      String(state.autoRerunInFlightProgrammerKey || "").trim()
+    )
+  ) {
+    clearPendingProgrammerSwitchTransition();
+    syncActionButtonsDisabled();
+  }
   const cardState = ensureCard(payload);
   if (!cardState) {
     return;
@@ -3982,6 +3930,8 @@ function applyControllerState(payload) {
   );
   if (programmerChanged || environmentChanged) {
     state.batchRunning = false;
+    state.programmerSwitchLoading = false;
+    state.programmerSwitchLoadingKey = "";
     state.autoRerunInFlightProgrammerKey = "";
     if (hasWorkspaceCards) {
       resetAllCardDistinctValueUniverses();
@@ -4007,6 +3957,8 @@ function applyControllerState(payload) {
     state.workspaceReplayCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
     state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
     state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
+    state.programmerSwitchLoading = true;
+    state.programmerSwitchLoadingKey = currentProgrammerKey;
     setStatus(
       state.pendingAutoRerunCards.length > 0
         ? `Refreshing ${state.pendingAutoRerunCards.length} report(s) for ${getProgrammerLabel()} in ${String(
@@ -4015,6 +3967,8 @@ function applyControllerState(payload) {
         : "Refreshing workspace for selected Media Company..."
     );
   } else if (programmerChanged || (environmentChanged && replayCardsForSwitch.length === 0)) {
+    state.programmerSwitchLoading = false;
+    state.programmerSwitchLoadingKey = "";
     state.pendingAutoRerunProgrammerKey = "";
     state.pendingAutoRerunCards = [];
     if (environmentChanged && replayCardsForSwitch.length === 0) {
@@ -4060,11 +4014,16 @@ function handleWorkspaceEvent(eventName, payload) {
   }
 
   if (event === "batch-start") {
+    if (String(payload?.reason || "").trim().toLowerCase() !== "programmer-switch" && state.programmerSwitchLoading === true) {
+      clearPendingProgrammerSwitchTransition();
+    }
     state.batchRunning = true;
     syncActionButtonsDisabled();
     const total = Number(payload?.total || 0);
     const reason = String(payload?.reason || "").trim().toLowerCase();
-    if (reason === "manual-reload") {
+    if (reason === "programmer-switch") {
+      setStatus(total > 0 ? `Refreshing ${total} report(s) for ${getProgrammerLabel()}...` : "Refreshing workspace...");
+    } else if (reason === "manual-reload") {
       setStatus(total > 0 ? `Reloading ${total} report(s)...` : "Reloading reports...");
     } else {
       setStatus(total > 0 ? `Re-running ${total} report(s)...` : "Re-running reports...");
@@ -4074,6 +4033,11 @@ function handleWorkspaceEvent(eventName, payload) {
 
   if (event === "batch-end") {
     state.batchRunning = false;
+    if (String(payload?.reason || "").trim().toLowerCase() === "programmer-switch" && !String(state.pendingAutoRerunProgrammerKey || "").trim()) {
+      state.programmerSwitchLoading = false;
+      state.programmerSwitchLoadingKey = "";
+      state.autoRerunInFlightProgrammerKey = "";
+    }
     state.cardsById.forEach((cardState) => {
       if (cardState) {
         cardState.activeRunId = "";
@@ -4099,6 +4063,8 @@ function handleWorkspaceEvent(eventName, payload) {
     }
     state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCards);
     state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
+    state.programmerSwitchLoading = true;
+    state.programmerSwitchLoadingKey = currentProgrammerKey;
     maybeConsumePendingAutoRerun();
     return;
   }
@@ -4148,7 +4114,9 @@ async function rerunAllCards(options = {}) {
   state.workspaceReplayCards = cloneWorkspaceReplayCards(cards);
   state.batchRunning = true;
   syncActionButtonsDisabled();
-  if (reason === "manual-reload") {
+  if (reason === "programmer-switch") {
+    setStatus(`Refreshing ${cards.length} report(s) for ${getProgrammerLabel()}...`);
+  } else if (reason === "manual-reload") {
     setStatus(`Reloading ${cards.length} report(s)...`);
   } else {
     setStatus(`Re-running ${cards.length} report(s)...`);

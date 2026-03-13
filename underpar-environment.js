@@ -46,7 +46,7 @@
   function buildEnvironmentDetails(environment) {
     const resolved = resolveEnvironmentRecord(environment);
     const consoleShellUrl = `${EXPERIENCE_ORIGIN}/#/@adobepass/pass/authentication/${resolved.route}`;
-    const cmConsoleShellUrl = `${String(resolved.cmConsoleOrigin || EXPERIENCE_ORIGIN).replace(/\/+$/, "")}/#/@adobepass/cm-console`;
+    const cmConsoleShellUrl = `${String(resolved.cmConsoleOrigin || EXPERIENCE_ORIGIN).replace(/\/+$/, "")}/#/@adobepass/cm-console/cmu/year`;
     const dcrRegisterUrl = `${resolved.spBase}/o/client/register`;
     const dcrTokenUrl = `${resolved.spBase}/o/client/token`;
     const restV2Base = `${resolved.spBase}/api/v2`;

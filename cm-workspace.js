@@ -271,9 +271,6 @@ const els = {
   nonCmScreen: document.getElementById("workspace-non-cm-screen"),
   nonCmHeadline: document.getElementById("workspace-non-cm-headline"),
   nonCmNote: document.getElementById("workspace-non-cm-note"),
-  transitionOverlay: document.getElementById("workspace-transition-overlay"),
-  transitionTitle: document.getElementById("workspace-transition-title"),
-  transitionNote: document.getElementById("workspace-transition-note"),
   controllerState: document.getElementById("workspace-controller-state"),
   filterState: document.getElementById("workspace-filter-state"),
   status: document.getElementById("workspace-status"),
@@ -1650,85 +1647,9 @@ function syncWorkspaceNetworkIndicator() {
   }
 }
 
-function resolveWorkspaceTransitionOverlayState() {
-  const pendingProgrammerKey = String(state.pendingAutoRerunProgrammerKey || "").trim();
-  const inFlightProgrammerKey = String(state.autoRerunInFlightProgrammerKey || "").trim();
-  const hasTransitionContext =
-    hasWorkspaceCardContext() ||
-    (Array.isArray(state.workspaceReplayCards) && state.workspaceReplayCards.length > 0) ||
-    (Array.isArray(state.pendingAutoRerunCards) && state.pendingAutoRerunCards.length > 0);
-  const active = Boolean(hasTransitionContext && (pendingProgrammerKey || inFlightProgrammerKey));
-  if (!active || state.workspaceLocked || state.nonCmMode) {
-    return {
-      active: false,
-      title: "",
-      note: "",
-      phase: "idle",
-    };
-  }
-
-  const programmerLabel = getProgrammerLabel();
-  if (state.cmAvailabilityResolved !== true) {
-    return {
-      active: true,
-      title: `Checking ${programmerLabel} for CM...`,
-      note: "Preparing your saved workspace layout for the selected Media Company.",
-      phase: "checking",
-    };
-  }
-
-  if (state.programmerHydrationReady !== true) {
-    return {
-      active: true,
-      title: `Hydrating ${programmerLabel}...`,
-      note: "Compiling CM access and restoring the workspace context for this Media Company.",
-      phase: "hydrating",
-    };
-  }
-
-  if (state.batchRunning === true || Boolean(inFlightProgrammerKey)) {
-    return {
-      active: true,
-      title: `Loading fresh ${programmerLabel} data...`,
-      note: "Your report cards are queued. UnderPAR is replacing the previous dataset now.",
-      phase: "loading",
-    };
-  }
-
-  return {
-    active: true,
-    title: `Refreshing ${programmerLabel}...`,
-    note: "Closing the curtain on the previous dataset and preparing the next CM replay.",
-    phase: "preparing",
-  };
-}
-
-function syncWorkspaceTransitionOverlay() {
-  const overlayState = resolveWorkspaceTransitionOverlayState();
-  document.body.classList.toggle("workspace-transitioning", overlayState.active);
-
-  if (els.transitionOverlay) {
-    els.transitionOverlay.hidden = !overlayState.active;
-    if (overlayState.active) {
-      els.transitionOverlay.dataset.phase = String(overlayState.phase || "loading").trim() || "loading";
-      els.transitionOverlay.setAttribute("aria-busy", "true");
-    } else {
-      delete els.transitionOverlay.dataset.phase;
-      els.transitionOverlay.removeAttribute("aria-busy");
-    }
-  }
-  if (els.transitionTitle) {
-    els.transitionTitle.textContent = overlayState.active ? overlayState.title : "";
-  }
-  if (els.transitionNote) {
-    els.transitionNote.textContent = overlayState.active ? overlayState.note : "";
-  }
-}
-
 function syncActionButtonsDisabled() {
-  setActionButtonsDisabled(state.batchRunning || state.workspaceLocked || resolveWorkspaceTransitionOverlayState().active);
+  setActionButtonsDisabled(state.batchRunning || state.workspaceLocked);
   syncWorkspaceNetworkIndicator();
-  syncWorkspaceTransitionOverlay();
 }
 
 function syncTearsheetButtonsVisibility() {
@@ -2095,9 +2016,9 @@ async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
   clearWorkspaceCards({ preserveReplayContext: true });
 
   await rerunAllCards({
-    // Keep media-company switch refresh behavior aligned with the same code path
-    // users trigger via the workspace Re-Run All button.
-    reason: "manual-reload",
+    // Use the explicit programmer-switch reason so media-company refreshes stay
+    // distinct from ordinary reruns and card adds.
+    reason: "programmer-switch",
     cards,
   });
   return true;
@@ -2106,6 +2027,10 @@ async function autoRerunCardsForProgrammerSwitch(expectedProgrammerKey = "") {
 function maybeConsumePendingAutoRerun() {
   const pendingProgrammerKey = String(state.pendingAutoRerunProgrammerKey || "").trim();
   if (!pendingProgrammerKey) {
+    if (!String(state.autoRerunInFlightProgrammerKey || "").trim()) {
+      state.programmerSwitchLoading = false;
+      state.programmerSwitchLoadingKey = "";
+    }
     return;
   }
   const hasRunnableControllerContext = state.controllerOnline === true;
@@ -2147,10 +2072,17 @@ function maybeConsumePendingAutoRerun() {
 
   state.pendingAutoRerunProgrammerKey = "";
   state.autoRerunInFlightProgrammerKey = currentProgrammerKey;
+  state.programmerSwitchLoading = true;
+  state.programmerSwitchLoadingKey = currentProgrammerKey;
   void autoRerunCardsForProgrammerSwitch(currentProgrammerKey).finally(() => {
     if (String(state.autoRerunInFlightProgrammerKey || "").trim() === currentProgrammerKey) {
       state.autoRerunInFlightProgrammerKey = "";
     }
+    if (!String(state.pendingAutoRerunProgrammerKey || "").trim()) {
+      state.programmerSwitchLoading = false;
+      state.programmerSwitchLoadingKey = "";
+    }
+    syncActionButtonsDisabled();
   });
 }
 
@@ -4784,6 +4716,18 @@ function renderCardTable(cardState, rows, lastModified) {
 }
 
 function applyReportStart(payload) {
+  const requestSource = String(payload?.requestSource || "").trim().toLowerCase();
+  if (
+    requestSource !== "workspace-programmer-switch" &&
+    (
+      state.programmerSwitchLoading === true ||
+      String(state.pendingAutoRerunProgrammerKey || "").trim() ||
+      String(state.autoRerunInFlightProgrammerKey || "").trim()
+    )
+  ) {
+    clearPendingProgrammerSwitchTransition();
+    syncActionButtonsDisabled();
+  }
   const cardState = ensureCard(payload);
   if (!cardState) {
     return;
@@ -5008,6 +4952,8 @@ function applyControllerState(payload) {
   const replayCardsForSwitch = getWorkspaceReplayCards();
   if (programmerChanged || environmentChanged) {
     state.batchRunning = false;
+    state.programmerSwitchLoading = false;
+    state.programmerSwitchLoadingKey = "";
     state.autoRerunInFlightProgrammerKey = "";
     if (hasWorkspaceCards) {
       state.cardsById.forEach((cardState) => {
@@ -5044,8 +4990,6 @@ function applyControllerState(payload) {
   });
 
   const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
-  state.programmerSwitchLoading = false;
-  state.programmerSwitchLoadingKey = "";
   const isMediaCompanySwitchReason =
     !controllerReason || controllerReason === "media-company-change" || controllerReason === "programmer-change";
   const shouldTriggerWorkspaceRedraw =
@@ -5058,6 +5002,8 @@ function applyControllerState(payload) {
   if (shouldTriggerWorkspaceRedraw && currentProgrammerKey) {
     state.workspaceReplayCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
     state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
+    state.programmerSwitchLoading = true;
+    state.programmerSwitchLoadingKey = currentProgrammerKey;
     setStatus(
       state.pendingAutoRerunCards.length > 0
         ? `Refreshing ${state.pendingAutoRerunCards.length} report(s) for ${getProgrammerLabel()}...`
@@ -5065,6 +5011,8 @@ function applyControllerState(payload) {
     );
     state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
   } else if (programmerChanged || (environmentChanged && replayCardsForSwitch.length === 0)) {
+    state.programmerSwitchLoading = false;
+    state.programmerSwitchLoadingKey = "";
     state.pendingAutoRerunProgrammerKey = "";
     state.pendingAutoRerunCards = [];
     if (environmentChanged && replayCardsForSwitch.length === 0) {
@@ -5108,11 +5056,16 @@ function handleWorkspaceEvent(eventName, payload) {
     return;
   }
   if (event === "batch-start") {
+    if (String(payload?.reason || "").trim().toLowerCase() !== "programmer-switch" && state.programmerSwitchLoading === true) {
+      clearPendingProgrammerSwitchTransition();
+    }
     state.batchRunning = true;
     syncActionButtonsDisabled();
     const total = Number(payload?.total || 0);
     const reason = String(payload?.reason || "").trim().toLowerCase();
-    if (reason === "manual-reload") {
+    if (reason === "programmer-switch") {
+      setStatus(total > 0 ? `Refreshing ${total} report(s) for ${getProgrammerLabel()}...` : "Refreshing workspace...");
+    } else if (reason === "manual-reload") {
       setStatus(total > 0 ? `Reloading ${total} report(s)...` : "Reloading reports...");
     } else {
       setStatus(total > 0 ? `Re-running ${total} report(s)...` : "Re-running reports...");
@@ -5121,6 +5074,11 @@ function handleWorkspaceEvent(eventName, payload) {
   }
   if (event === "batch-end") {
     state.batchRunning = false;
+    if (String(payload?.reason || "").trim().toLowerCase() === "programmer-switch" && !String(state.pendingAutoRerunProgrammerKey || "").trim()) {
+      state.programmerSwitchLoading = false;
+      state.programmerSwitchLoadingKey = "";
+      state.autoRerunInFlightProgrammerKey = "";
+    }
     state.cardsById.forEach((cardState) => {
       if (cardState) {
         cardState.running = false;
@@ -5144,6 +5102,8 @@ function handleWorkspaceEvent(eventName, payload) {
     }
     state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCards);
     state.pendingAutoRerunProgrammerKey = currentProgrammerKey;
+    state.programmerSwitchLoading = true;
+    state.programmerSwitchLoadingKey = currentProgrammerKey;
     maybeConsumePendingAutoRerun();
     return;
   }
@@ -6063,6 +6023,8 @@ async function rerunAllCards(options = {}) {
   syncActionButtonsDisabled();
   if (reason === "manual-reload") {
     setStatus(`Reloading ${cards.length} report(s)...`);
+  } else if (reason === "programmer-switch") {
+    setStatus(`Refreshing ${cards.length} report(s) for ${getProgrammerLabel()}...`);
   } else {
     setStatus(`Re-running ${cards.length} report(s)...`);
   }
