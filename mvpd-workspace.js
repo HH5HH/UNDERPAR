@@ -99,11 +99,28 @@ function parseWorkspaceExportPayload() {
 
 const workspaceExportPayload = parseWorkspaceExportPayload();
 const IS_MVPD_WORKSPACE_TEARSHEET_RUNTIME = Boolean(workspaceExportPayload);
+const BLONDIE_BUTTON_STATES = new Set(["inactive", "ready", "active", "ack"]);
+const BLONDIE_BUTTON_ACK_RESET_MS = 2000;
+const BLONDIE_BUTTON_INACTIVE_MESSAGE =
+  "No zip-zap without SLACKTIVATION.  Please feed ZIP.KEY to UP Tab inside Developer Tools";
+const BLONDIE_BUTTON_ICON_URLS = (() => {
+  const resolveIconUrl = (path) =>
+    typeof chrome !== "undefined" && chrome?.runtime?.getURL ? chrome.runtime.getURL(path) : path;
+  return {
+    inactive: resolveIconUrl("icons/blondie-active.svg"),
+    ready: resolveIconUrl("icons/blondie-slacktivated.svg"),
+    active: resolveIconUrl("icons/blondie-ack.svg"),
+    ack: resolveIconUrl("icons/blondie-inactive.svg"),
+  };
+})();
+const blondieAckResetTimerByButton = new WeakMap();
 
 const state = {
   windowId: 0,
   controllerOnline: false,
   adobePassEnvironment: null,
+  slackReady: false,
+  slackUserName: "",
   mvpdReady: false,
   hasMvpdCmTenant: false,
   mvpdCmTenantScope: "",
@@ -1980,6 +1997,178 @@ function renderCmuUsageTableBody(tableState) {
   });
 }
 
+function isBlondieButtonSupported() {
+  return !IS_MVPD_WORKSPACE_TEARSHEET_RUNTIME;
+}
+
+function canUseBlondieButton() {
+  return state.slackReady === true && isBlondieButtonSupported();
+}
+
+function getBlondieButtonDefaultState() {
+  return canUseBlondieButton() ? "ready" : "inactive";
+}
+
+function clearBlondieButtonAckReset(button) {
+  const timerId = blondieAckResetTimerByButton.get(button);
+  if (timerId) {
+    window.clearTimeout(timerId);
+    blondieAckResetTimerByButton.delete(button);
+  }
+}
+
+function getBlondieButtonState(button = null) {
+  const stateValue = String(button?.dataset?.blondieState || "").trim().toLowerCase();
+  return BLONDIE_BUTTON_STATES.has(stateValue) ? stateValue : getBlondieButtonDefaultState();
+}
+
+function getBlondieButtonTitle(buttonState = "") {
+  const normalizedState = BLONDIE_BUTTON_STATES.has(String(buttonState || "").trim().toLowerCase())
+    ? String(buttonState || "").trim().toLowerCase()
+    : getBlondieButtonDefaultState();
+  if (!isBlondieButtonSupported()) {
+    return ":blondiebtn: is unavailable in this workspace export.";
+  }
+  if (normalizedState === "active") {
+    return ":blondiebtn: is delivering your Slack CSV...";
+  }
+  if (normalizedState === "ack") {
+    return "Slack acknowledged :blondiebtn: delivery.";
+  }
+  if (canUseBlondieButton()) {
+    return "zip-zip data to SLACK when it's sitting in SLACKTIVATED state";
+  }
+  return BLONDIE_BUTTON_INACTIVE_MESSAGE;
+}
+
+function renderBlondieButtonState(button, nextState = "", options = {}) {
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  const preserveTimer = options?.preserveTimer === true;
+  if (!preserveTimer) {
+    clearBlondieButtonAckReset(button);
+  }
+  const supported = isBlondieButtonSupported();
+  let normalizedState = String(nextState || "").trim().toLowerCase();
+  if (!BLONDIE_BUTTON_STATES.has(normalizedState)) {
+    normalizedState = getBlondieButtonDefaultState();
+  }
+  if (!supported) {
+    normalizedState = "inactive";
+  }
+  const title = getBlondieButtonTitle(normalizedState);
+  button.hidden = !supported;
+  button.disabled = !supported;
+  button.dataset.blondieState = normalizedState;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.setAttribute("aria-busy", normalizedState === "active" ? "true" : "false");
+  const icon = button.querySelector(".underpar-blondie-icon");
+  if (icon instanceof HTMLImageElement) {
+    icon.src = BLONDIE_BUTTON_ICON_URLS[normalizedState] || BLONDIE_BUTTON_ICON_URLS.inactive;
+  }
+}
+
+function queueBlondieButtonAckReset(button) {
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  clearBlondieButtonAckReset(button);
+  const timerId = window.setTimeout(() => {
+    blondieAckResetTimerByButton.delete(button);
+    renderBlondieButtonState(button, getBlondieButtonDefaultState());
+  }, BLONDIE_BUTTON_ACK_RESET_MS);
+  blondieAckResetTimerByButton.set(button, timerId);
+}
+
+function buildBlondieButtonMarkup() {
+  const initialState = getBlondieButtonDefaultState();
+  const title = escapeHtml(getBlondieButtonTitle(initialState));
+  const hiddenAttr = isBlondieButtonSupported() ? "" : " hidden";
+  return `<button type="button" class="esm-action-btn underpar-blondie-btn" data-blondie-state="${escapeHtml(initialState)}" title="${title}" aria-label="${title}"${hiddenAttr}>
+      <img class="underpar-blondie-icon" src="${escapeHtml(BLONDIE_BUTTON_ICON_URLS[initialState])}" alt="" aria-hidden="true" />
+    </button>`;
+}
+
+function buildMvpdBlondieExportRow(row, tableState) {
+  if (tableState?.mode === "cmu-usage") {
+    const values = [];
+    if (tableState.hasDate) {
+      values.push(buildCmuDateLabel(row));
+    }
+    if (tableState.hasAuthN) {
+      values.push(
+        formatPercent(safeRate(getRowValueByColumn(row, "authn-successful"), getRowValueByColumn(row, "authn-attempts")))
+      );
+    }
+    if (tableState.hasAuthZ) {
+      values.push(
+        formatPercent(safeRate(getRowValueByColumn(row, "authz-successful"), getRowValueByColumn(row, "authz-attempts")))
+      );
+    }
+    if (!tableState.hasAuthN && !tableState.hasAuthZ && tableState.hasCount) {
+      values.push(getRowValueByColumn(row, "count") ?? "");
+    }
+    tableState.displayColumns.forEach((columnName) => {
+      values.push(getRowValueByColumn(row, columnName) ?? "");
+    });
+    return values.map((value) => String(value ?? ""));
+  }
+
+  return (Array.isArray(tableState?.headers) ? tableState.headers : []).map((header) => {
+    const actionKey = String(header || "").trim().toUpperCase();
+    if (actionKey === "VIEW") {
+      return String(getRowValueByColumn(row, header) || "VIEW");
+    }
+    return String(getRowValueByColumn(row, header) ?? "");
+  });
+}
+
+function buildMvpdBlondieExportPayload(cardState, tableState) {
+  const headers = Array.isArray(tableState?.headers) ? tableState.headers.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const rows = Array.isArray(tableState?.data) ? tableState.data.map((row) => buildMvpdBlondieExportRow(row, tableState)) : [];
+  if (headers.length === 0 || rows.length === 0) {
+    return null;
+  }
+  const requestUrl = String(getCardEffectiveRequestUrl(cardState) || cardState?.requestUrl || cardState?.endpointUrl || "").trim();
+  const operationLabel = String(cardState?.operation?.label || cardState?.operation?.pathTemplate || "").trim();
+  return {
+    workspaceKey: "mvpd",
+    workspaceLabel: "MVPD CM",
+    datasetLabel: operationLabel || getNodeLabel(requestUrl) || state.requestorMvpdLabel || "MVPD CM Report Card",
+    requestUrl,
+    columns: headers,
+    rows,
+    rowCount: rows.length,
+  };
+}
+
+function syncBlondieButtons(root = document) {
+  if (!root?.querySelectorAll) {
+    return;
+  }
+  root.querySelectorAll(".underpar-blondie-btn").forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    if (!isBlondieButtonSupported()) {
+      renderBlondieButtonState(button, "inactive");
+      return;
+    }
+    const currentState = getBlondieButtonState(button);
+    if (!canUseBlondieButton()) {
+      renderBlondieButtonState(button, "inactive");
+      return;
+    }
+    if (currentState === "active" || currentState === "ack") {
+      renderBlondieButtonState(button, currentState, { preserveTimer: true });
+      return;
+    }
+    renderBlondieButtonState(button, "ready");
+  });
+}
+
 function renderTableBody(tableState) {
   if (tableState?.mode === "cmu-usage") {
     renderCmuUsageTableBody(tableState);
@@ -3094,7 +3283,10 @@ function renderCardTable(cardState, rows, lastModified) {
           <tr>
             <td class="esm-footer-cell">
               <div class="esm-footer">
-                <a href="#" class="esm-csv-link">CSV</a>
+                <div class="underpar-export-actions">
+                  ${buildBlondieButtonMarkup()}
+                  <a href="#" class="esm-csv-link">CSV</a>
+                </div>
                 <div class="esm-footer-controls">
                   ${buildCardLocalFilterResetMarkup(cardState)}
                   <span class="esm-last-modified"></span>
@@ -3115,6 +3307,7 @@ function renderCardTable(cardState, rows, lastModified) {
   const tbody = table.querySelector("tbody");
   const footerCell = cardState.bodyElement.querySelector(".esm-footer-cell");
   const lastModifiedLabel = cardState.bodyElement.querySelector(".esm-last-modified");
+  const blondieButton = cardState.bodyElement.querySelector(".underpar-blondie-btn");
   const csvLink = cardState.bodyElement.querySelector(".esm-csv-link");
   const closeButton = cardState.bodyElement.querySelector(usageCard ? ".esm-delete-data" : ".esm-close");
 
@@ -3232,6 +3425,47 @@ function renderCardTable(cardState, rows, lastModified) {
     });
   }
 
+  if (blondieButton) {
+    blondieButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      if (!ensureWorkspaceUnlocked()) {
+        return;
+      }
+      const currentBlondieState = getBlondieButtonState(blondieButton);
+      if (currentBlondieState === "active" || currentBlondieState === "ack") {
+        return;
+      }
+      if (!canUseBlondieButton()) {
+        renderBlondieButtonState(blondieButton, "inactive");
+        setStatus(BLONDIE_BUTTON_INACTIVE_MESSAGE, "error");
+        return;
+      }
+      const exportPayload = buildMvpdBlondieExportPayload(cardState, tableState);
+      if (!exportPayload) {
+        setStatus("No visible MVPD CM rows are available for :blondiebtn:.", "error");
+        return;
+      }
+      renderBlondieButtonState(blondieButton, "active");
+      try {
+        const result = await sendWorkspaceAction("blondie-export", {
+          exportPayload,
+          card: getCardPayload(cardState),
+        });
+        if (!result?.ok) {
+          renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+          setStatus(result?.error || "Unable to deliver MVPD CM rows with :blondiebtn:.", "error");
+        } else {
+          renderBlondieButtonState(blondieButton, "ack");
+          queueBlondieButtonAckReset(blondieButton);
+          setStatus(`:blondiebtn: delivered ${exportPayload.rowCount} MVPD CM row(s) to your ZipTool panel.`, "success");
+        }
+      } catch (error) {
+        renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+        setStatus(error instanceof Error ? error.message : "Unable to deliver MVPD CM rows with :blondiebtn:.", "error");
+      }
+    });
+  }
+
   if (closeButton) {
     closeButton.addEventListener("click", (event) => {
       event.preventDefault();
@@ -3250,6 +3484,7 @@ function renderCardTable(cardState, rows, lastModified) {
   updateTableWrapperViewport(tableState);
   refreshHeaderStates(tableState);
   cardState.sortStack = tableState.sortStack;
+  syncBlondieButtons(cardState.bodyElement);
 }
 
 function ensureCmReportCard(cardMeta = {}) {
@@ -3559,6 +3794,8 @@ function applyControllerState(payload) {
       ? cloneJsonCompatible(payload.adobePassEnvironment, null)
       : state.adobePassEnvironment;
   state.mvpdReady = payload?.mvpdReady === true;
+  state.slackReady = payload?.slack?.ready === true;
+  state.slackUserName = String(payload?.slack?.userName || "").trim();
   state.hasMvpdCmTenant = payload?.hasMvpdCmTenant === true;
   state.mvpdCmTenantScope = String(payload?.mvpdCmTenantScope || "").trim();
   state.programmerId = String(payload?.programmerId || "");
@@ -3581,6 +3818,7 @@ function applyControllerState(payload) {
     clearWorkspaceCards();
   }
   updateControllerBanner();
+  syncBlondieButtons();
 }
 
 function handleSnapshotStart(payload) {

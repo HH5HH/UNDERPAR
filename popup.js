@@ -66,6 +66,18 @@ const DCR_CACHE_PREFIX = "underpar_dcr_cache_v1";
 const LEGACY_DCR_CACHE_PREFIX = "mincloudlogin_dcr_cache_v1";
 const UNDERPAR_VAULT_STORAGE_KEY = "underpar_vault_v1";
 const UNDERPAR_VAULT_SCHEMA_VERSION = 1;
+const UNDERPAR_SLACKTIVATION_SCHEMA_VERSION = 1;
+const UNDERPAR_ESM_DEEPLINK_STORAGE_KEY = "underpar_pending_esm_deeplink_v1";
+const UNDERPAR_ESM_DEEPLINK_MAX_AGE_MS = 30 * 60 * 1000;
+const UNDERPAR_ESM_DEEPLINK_BRIDGE_PATH = "esm-deeplink-bridge.html";
+const UNDERPAR_ESM_DEEPLINK_WORKSPACE_PATH = "esm-workspace.html";
+const UNDERPAR_ESM_DEEPLINK_CONTROLLER_PATH = "sidepanel.html";
+const UNDERPAR_ESM_NODE_PATH_PREFIX = "/esm/v3/media-company";
+const UNDERPAR_ESM_DEEPLINK_MARKER_PARAM = "underpar_deeplink";
+const UNDERPAR_ESM_DEEPLINK_MARKER_VALUE = "esm";
+const UNDERPAR_CM_DEEPLINK_MARKER_VALUE = "cm";
+const UNDERPAR_DEGRADATION_DEEPLINK_MARKER_VALUE = "degradation";
+const UNDERPAR_BLONDIE_ZIP_TOOL_BETA_ARTICLE_URL = "https://tve.zendesk.com/hc/en-us/articles/46503360732436-ZIP-TOOL-beta";
 const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 4;
 const UNDERPAR_VAULT_STATUS_PENDING = "pending";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
@@ -169,6 +181,14 @@ const PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS = 2500;
 const PREMIUM_SERVICE_SCOPE_HYDRATION_CONCURRENCY = 6;
 const PREMIUM_CM_RENDER_GRACE_MS = 250;
 const PREMIUM_REQUIRED_SERVICE_KEYS = ["restV2", "esm", "degradation"];
+const SLACKTIVATION_WORKSPACE_ORIGIN = "https://adobedx.slack.com";
+const SLACKTIVATION_API_ORIGIN = "https://slack.com";
+const SLACK_OPENID_AUTHORIZE_URL = "https://slack.com/openid/connect/authorize";
+const SLACK_OPENID_TOKEN_URL = "https://slack.com/api/openid.connect.token";
+const SLACK_OPENID_USERINFO_URL = "https://slack.com/api/openid.connect.userInfo";
+const SLACK_OPENID_DEFAULT_SCOPES = "openid profile email";
+const SLACK_OPENID_DEFAULT_REDIRECT_PATH = "slack-user";
+const SLACK_OPENID_STATUS_VERIFY_TTL_MS = 60 * 1000;
 const IMS_SESSION_MONITOR_INTERVAL_MS = 15 * 1000;
 const IMS_SESSION_MONITOR_START_DELAY_MS = 1500;
 const IMS_SESSION_MONITOR_BOOTSTRAP_COOLDOWN_MS = 20 * 1000;
@@ -469,6 +489,7 @@ function createEmptyUnderparVaultPayload() {
       globals: {
         savedQueries: {},
         cmImsByEnvironment: {},
+        slack: null,
       },
       app: {
         savedQueries: {},
@@ -511,6 +532,2856 @@ function buildPassVaultCmGlobalAuthRecord(value = null) {
   };
 }
 
+function normalizeSlacktivationText(value = "", maxLength = 0) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  return maxLength > 0 ? normalized.slice(0, maxLength) : normalized;
+}
+
+function normalizeSlackApiToken(value = "") {
+  const token = String(value || "").trim();
+  return /^(?:xoxe\.)?xox[a-z]-/i.test(token) ? token : "";
+}
+
+function isSlackBotApiToken(value = "") {
+  return /^xoxb-/i.test(normalizeSlackApiToken(value));
+}
+
+function isSlackUserOAuthToken(value = "") {
+  const token = normalizeSlackApiToken(value);
+  return Boolean(token) && !isSlackBotApiToken(token);
+}
+
+function normalizeSlackWorkspaceOrigin(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return SLACKTIVATION_WORKSPACE_ORIGIN;
+  }
+  try {
+    const parsed = new URL(raw);
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (parsed.protocol !== "https:" || (host !== "slack.com" && !host.endsWith(".slack.com"))) {
+      return SLACKTIVATION_WORKSPACE_ORIGIN;
+    }
+    return parsed.origin;
+  } catch {
+    return SLACKTIVATION_WORKSPACE_ORIGIN;
+  }
+}
+
+function normalizeSlackChannelId(value = "") {
+  const channelId = String(value || "").trim().toUpperCase();
+  return /^[CGD][A-Z0-9]{8,}$/.test(channelId) ? channelId : "";
+}
+
+function normalizeSlackDirectChannelId(value = "") {
+  const channelId = String(value || "").trim().toUpperCase();
+  return /^D[A-Z0-9]{8,}$/.test(channelId) ? channelId : "";
+}
+
+function normalizeSlackTeamId(value = "") {
+  const id = String(value || "").trim().toUpperCase();
+  return /^T[A-Z0-9]{8,}$/.test(id) ? id : "";
+}
+
+function normalizeSlackUserId(value = "") {
+  const id = String(value || "").trim().toUpperCase();
+  return /^[UW][A-Z0-9]{8,}$/.test(id) ? id : "";
+}
+
+function normalizeSlackMention(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/^<@[UW][A-Z0-9]{8,}>$/i.test(raw)) {
+    return raw;
+  }
+  const plain = raw.startsWith("@") ? raw.slice(1).trim() : raw;
+  return plain ? `@${plain}` : "";
+}
+
+function normalizeSlackOpenIdScopes(value = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return SLACK_OPENID_DEFAULT_SCOPES;
+  }
+  const allowed = new Set(["openid", "profile", "email"]);
+  const unique = [];
+  raw
+    .split(/[\s,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .forEach((entry) => {
+      if (!allowed.has(entry) || unique.includes(entry)) {
+        return;
+      }
+      unique.push(entry);
+    });
+  if (!unique.includes("openid")) {
+    unique.unshift("openid");
+  }
+  return unique.length > 0 ? unique.join(" ") : SLACK_OPENID_DEFAULT_SCOPES;
+}
+
+function normalizeSlackOpenIdRedirectPath(value = "") {
+  const raw = String(value || "").trim().replace(/^\/+/, "");
+  if (!raw) {
+    return SLACK_OPENID_DEFAULT_REDIRECT_PATH;
+  }
+  const normalized = raw.replace(/[^a-zA-Z0-9._/-]/g, "");
+  if (!normalized || normalized.includes("..")) {
+    return SLACK_OPENID_DEFAULT_REDIRECT_PATH;
+  }
+  return normalized;
+}
+
+function normalizeSlackOpenIdRedirectUri(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (parsed.protocol !== "https:" || !host.endsWith(".chromiumapp.org")) {
+      return "";
+    }
+    return `${parsed.origin}${String(parsed.pathname || "").trim() || "/"}`;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSlackAvatarUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSlackStatusIconName(value = "") {
+  const name = String(value || "").trim().toLowerCase();
+  return /^[a-z0-9_+\-]{1,64}$/.test(name) ? `:${name}:` : "";
+}
+
+function normalizeSlackStatusIcon(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/^:[a-z0-9_+\-]{1,64}:$/i.test(raw)) {
+    return raw.toLowerCase();
+  }
+  const alias = normalizeSlackStatusIconName(raw);
+  return alias || normalizeSlacktivationText(raw, 32);
+}
+
+function normalizeSlackStatusIconUrl(value = "") {
+  return normalizeSlackAvatarUrl(value);
+}
+
+function normalizeSlackStatusMessage(value = "") {
+  return normalizeSlacktivationText(value, 160);
+}
+
+function normalizeSlackDisplayName(value = "") {
+  const text = normalizeSlacktivationText(value, 120);
+  if (!text) {
+    return "";
+  }
+  if (/^:[a-z0-9_+\-]{1,64}:$/i.test(text) || normalizeSlackUserId(text)) {
+    return "";
+  }
+  return text;
+}
+
+function normalizeSlackEmail(value = "") {
+  const email = String(value || "").trim();
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email : "";
+}
+
+function normalizeSlacktivationReady(value = false) {
+  if (value === true) {
+    return true;
+  }
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "ready";
+}
+
+function getZipKeyValueByPath(payload = null, pathExpr = "") {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const expr = String(pathExpr || "").trim();
+  if (!expr) {
+    return undefined;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, expr)) {
+    return payload[expr];
+  }
+  const parts = expr.split(".").map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) {
+    return undefined;
+  }
+  let node = payload;
+  for (const part of parts) {
+    if (!node || typeof node !== "object" || !Object.prototype.hasOwnProperty.call(node, part)) {
+      return undefined;
+    }
+    node = node[part];
+  }
+  return node;
+}
+
+function readZipKeyValue(payload = null, candidates = []) {
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const value = getZipKeyValueByPath(payload, candidate);
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+      continue;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+  }
+  return "";
+}
+
+function decodeZipKeyPayloadBase64(value = "") {
+  const compact = String(value || "")
+    .replace(/\s+/g, "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  if (!compact) {
+    return "";
+  }
+  const remainder = compact.length % 4;
+  const padded = remainder === 0 ? compact : `${compact}${"=".repeat(4 - remainder)}`;
+  const binary = atob(padded);
+  try {
+    const bytes = Uint8Array.from(binary, (entry) => entry.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return binary;
+  }
+}
+
+function parseKeyValueText(rawText = "") {
+  const payload = {};
+  String(rawText || "")
+    .split(/\r?\n/)
+    .forEach((line) => {
+      const match = line.match(/^\s*([^=:\s]+)\s*[:=]\s*(.+)\s*$/);
+      if (!match) {
+        return;
+      }
+      payload[String(match[1] || "").trim()] = String(match[2] || "").trim();
+    });
+  return payload;
+}
+
+function parseZipKeyPayload(rawText = "") {
+  const raw = String(rawText || "").trim();
+  if (!raw) {
+    throw new Error("ZIP.KEY payload is empty.");
+  }
+  const prefix = "ZIPKEY1:";
+  let payloadText = raw;
+  if (raw.slice(0, prefix.length).toUpperCase() === prefix) {
+    payloadText = raw.slice(prefix.length).trim();
+  }
+  if (!payloadText) {
+    throw new Error("ZIP.KEY payload is empty.");
+  }
+  if (payloadText.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(payloadText);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch {
+      throw new Error("ZIP.KEY JSON payload could not be parsed.");
+    }
+  }
+  try {
+    const decoded = decodeZipKeyPayloadBase64(payloadText).trim();
+    if (decoded.startsWith("{")) {
+      const parsed = JSON.parse(decoded);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    }
+  } catch {
+    // Ignore and fall through to KEY=VALUE parsing.
+  }
+  const fromKeyValue = parseKeyValueText(payloadText);
+  if (Object.keys(fromKeyValue).length > 0) {
+    return fromKeyValue;
+  }
+  throw new Error("Unknown ZIP.KEY format. Use ZIPKEY1 base64 JSON, raw JSON, or KEY=VALUE lines.");
+}
+
+function normalizeZipKeyMeta(input = null) {
+  const meta = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const rawServices = [];
+  const appendService = (candidate) => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach((entry) => appendService(entry));
+      return;
+    }
+    const text = normalizeSlacktivationText(candidate, 64);
+    if (text) {
+      rawServices.push(text);
+    }
+  };
+  appendService(meta?.services);
+  appendService(meta?.service);
+  appendService(meta?.features);
+  return {
+    services: uniqueSorted(rawServices.length > 0 ? rawServices : ["slacktivation"]),
+    keyVersion: normalizeSlacktivationText(meta?.keyVersion || meta?.version || "", 64),
+    importedAt: normalizeSlacktivationText(meta?.importedAt || "", 80) || new Date().toISOString(),
+    source: normalizeSlacktivationText(meta?.source || "zip-key", 64) || "zip-key",
+  };
+}
+
+function normalizeUnderparSlacktivationZipKeyConfig(parsedPayload = null) {
+  const payload = parsedPayload && typeof parsedPayload === "object" ? parsedPayload : {};
+  const clientId = readZipKeyValue(payload, [
+    "services.slacktivation.client_id",
+    "services.slacktivation.clientId",
+    "services.slacktivation.oidc.client_id",
+    "services.slacktivation.oidc.clientId",
+    "slacktivation.client_id",
+    "slacktivation.clientId",
+    "slacktivation.oidc.client_id",
+    "slacktivation.oidc.clientId",
+    "client_id",
+    "clientId",
+  ]);
+  const clientSecret = readZipKeyValue(payload, [
+    "services.slacktivation.client_secret",
+    "services.slacktivation.clientSecret",
+    "services.slacktivation.oidc.client_secret",
+    "services.slacktivation.oidc.clientSecret",
+    "slacktivation.client_secret",
+    "slacktivation.clientSecret",
+    "slacktivation.oidc.client_secret",
+    "slacktivation.oidc.clientSecret",
+    "client_secret",
+    "clientSecret",
+  ]);
+  if (!clientId || !clientSecret) {
+    throw new Error("Parsed ZIP.KEY is missing required SLACKTIVATION values: client_id/client_secret.");
+  }
+  const userToken = normalizeSlackApiToken(readZipKeyValue(payload, [
+    "services.slacktivation.user_token",
+    "services.slacktivation.userToken",
+    "services.slacktivation.api.user_token",
+    "services.slacktivation.api.userToken",
+    "slacktivation.user_token",
+    "slacktivation.userToken",
+    "slacktivation.api.user_token",
+    "slacktivation.api.userToken",
+    "oauth_token",
+    "userToken",
+  ]));
+  const botToken = normalizeSlackApiToken(readZipKeyValue(payload, [
+    "services.slacktivation.bot_token",
+    "services.slacktivation.botToken",
+    "services.slacktivation.api.bot_token",
+    "services.slacktivation.api.botToken",
+    "slacktivation.bot_token",
+    "slacktivation.botToken",
+    "slacktivation.api.bot_token",
+    "slacktivation.api.botToken",
+    "bot_token",
+    "botToken",
+  ]));
+  const singularityChannelId = normalizeSlackChannelId(readZipKeyValue(payload, [
+    "services.slacktivation.singularity_channel_id",
+    "services.slacktivation.singularityChannelId",
+    "slacktivation.singularity_channel_id",
+    "slacktivation.singularityChannelId",
+    "singularity.channelId",
+    "channelId",
+  ]));
+  const singularityMention = normalizeSlackMention(readZipKeyValue(payload, [
+    "services.slacktivation.singularity_mention",
+    "services.slacktivation.singularityMention",
+    "slacktivation.singularity_mention",
+    "slacktivation.singularityMention",
+    "singularity.mention",
+    "mention",
+  ]));
+  const missingFields = [];
+  if (!userToken) {
+    missingFields.push("user_token");
+  }
+  if (!singularityChannelId) {
+    missingFields.push("singularity_channel_id");
+  }
+  if (!singularityMention) {
+    missingFields.push("singularity_mention");
+  }
+  if (missingFields.length > 0) {
+    throw new Error(`Parsed ZIP.KEY is missing required SLACKTIVATION values: ${missingFields.join("/")}.`);
+  }
+  return {
+    schemaVersion: UNDERPAR_SLACKTIVATION_SCHEMA_VERSION,
+    workspaceOrigin: normalizeSlackWorkspaceOrigin(
+      readZipKeyValue(payload, ["slacktivation.workspace_origin", "services.slacktivation.workspace_origin"]) || SLACKTIVATION_WORKSPACE_ORIGIN
+    ),
+    oidc: {
+      clientId: normalizeSlacktivationText(clientId, 160),
+      clientSecret: normalizeSlacktivationText(clientSecret, 200),
+      scope: normalizeSlackOpenIdScopes(readZipKeyValue(payload, [
+        "services.slacktivation.scope",
+        "services.slacktivation.oidc.scope",
+        "slacktivation.scope",
+        "slacktivation.oidc.scope",
+        "scope",
+      ])),
+      redirectPath: normalizeSlackOpenIdRedirectPath(readZipKeyValue(payload, [
+        "services.slacktivation.redirect_path",
+        "services.slacktivation.redirectPath",
+        "services.slacktivation.oidc.redirect_path",
+        "services.slacktivation.oidc.redirectPath",
+        "slacktivation.redirect_path",
+        "slacktivation.redirectPath",
+        "slacktivation.oidc.redirect_path",
+        "slacktivation.oidc.redirectPath",
+        "redirectPath",
+      ])),
+      redirectUri: normalizeSlackOpenIdRedirectUri(readZipKeyValue(payload, [
+        "services.slacktivation.redirect_uri",
+        "services.slacktivation.redirectUri",
+        "services.slacktivation.oidc.redirect_uri",
+        "services.slacktivation.oidc.redirectUri",
+        "slacktivation.redirect_uri",
+        "slacktivation.redirectUri",
+        "slacktivation.oidc.redirect_uri",
+        "slacktivation.oidc.redirectUri",
+        "redirect_uri",
+        "redirectUri",
+      ])),
+    },
+    api: {
+      botToken,
+      userToken,
+      oauthToken: userToken,
+    },
+    singularity: {
+      channelId: singularityChannelId,
+      mention: singularityMention,
+    },
+    keyMeta: normalizeZipKeyMeta(payload?.meta || {
+      keyVersion: readZipKeyValue(payload, ["keyVersion", "version", "meta.version"]),
+      source: "zip-key",
+      services: ["slacktivation"],
+    }),
+  };
+}
+
+function createEmptyUnderparVaultSlacktivationRecord() {
+  return {
+    schemaVersion: UNDERPAR_SLACKTIVATION_SCHEMA_VERSION,
+    workspaceOrigin: SLACKTIVATION_WORKSPACE_ORIGIN,
+    ready: false,
+    activatedAt: 0,
+    updatedAt: 0,
+    oidc: {
+      clientId: "",
+      clientSecret: "",
+      scope: SLACK_OPENID_DEFAULT_SCOPES,
+      redirectPath: SLACK_OPENID_DEFAULT_REDIRECT_PATH,
+      redirectUri: "",
+    },
+    api: {
+      botToken: "",
+      userToken: "",
+      oauthToken: "",
+    },
+    singularity: {
+      channelId: "",
+      mention: "",
+    },
+    keyMeta: null,
+    openIdSession: null,
+    identity: null,
+    lastError: null,
+  };
+}
+
+function normalizeUnderparVaultSlacktivationKeyMeta(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const normalized = normalizeZipKeyMeta(value);
+  if (!normalized.services.length && !normalized.keyVersion && !normalized.importedAt && !normalized.source) {
+    return null;
+  }
+  return normalized;
+}
+
+function normalizeUnderparVaultSlacktivationOpenIdSession(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const accessToken = normalizeSlackApiToken(value?.accessToken || value?.access_token || "");
+  const idToken = normalizeSlacktivationText(value?.idToken || value?.id_token || "", 4096);
+  const scope = normalizeSlackOpenIdScopes(value?.scope || "");
+  const expiresAtMs = Math.max(0, Number(value?.expiresAtMs || value?.expires_at_ms || 0));
+  const userId = normalizeSlackUserId(value?.userId || value?.user_id || "");
+  const teamId = normalizeSlackTeamId(value?.teamId || value?.team_id || "");
+  const userName = normalizeSlackDisplayName(value?.userName || value?.user_name || "");
+  const avatarUrl = normalizeSlackAvatarUrl(value?.avatarUrl || value?.avatar_url || "");
+  const email = normalizeSlackEmail(value?.email || "");
+  const verifiedAtMs = Math.max(0, Number(value?.verifiedAtMs || 0));
+  const createdAt = normalizeSlacktivationText(value?.createdAt || "", 80);
+  if (!accessToken && !idToken && !expiresAtMs && !userId && !teamId && !userName && !avatarUrl && !email) {
+    return null;
+  }
+  return {
+    accessToken,
+    idToken,
+    scope,
+    expiresAtMs,
+    userId,
+    teamId,
+    userName,
+    avatarUrl,
+    email,
+    verifiedAtMs,
+    createdAt,
+  };
+}
+
+function normalizeUnderparVaultSlacktivationIdentity(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const identity = {
+    mode: normalizeSlacktivationText(value?.mode || "", 32).toLowerCase(),
+    ready: normalizeSlacktivationReady(value?.ready),
+    userId: normalizeSlackUserId(value?.userId || value?.user_id || ""),
+    teamId: normalizeSlackTeamId(value?.teamId || value?.team_id || ""),
+    userName: normalizeSlackDisplayName(value?.userName || value?.user_name || ""),
+    email: normalizeSlackEmail(value?.email || ""),
+    avatarUrl: normalizeSlackAvatarUrl(value?.avatarUrl || value?.avatar_url || ""),
+    statusIcon: normalizeSlackStatusIcon(value?.statusIcon || value?.status_icon || ""),
+    statusIconUrl: normalizeSlackStatusIconUrl(value?.statusIconUrl || value?.status_icon_url || ""),
+    statusMessage: normalizeSlackStatusMessage(value?.statusMessage || value?.status_message || ""),
+    directChannelId: normalizeSlackDirectChannelId(value?.directChannelId || value?.direct_channel_id || ""),
+    directChannelErrorCode: normalizeSlacktivationText(value?.directChannelErrorCode || value?.direct_channel_error_code || "", 64),
+    avatarErrorCode: normalizeSlacktivationText(value?.avatarErrorCode || value?.avatar_error_code || "", 64),
+    avatarError: normalizeSlacktivationText(value?.avatarError || value?.avatar_error || "", 240),
+    updatedAt: Math.max(0, Number(value?.updatedAt || 0)),
+  };
+  const hasValue = Object.values(identity).some((entry) => {
+    if (typeof entry === "boolean") {
+      return entry === true;
+    }
+    if (typeof entry === "number") {
+      return entry > 0;
+    }
+    return Boolean(entry);
+  });
+  return hasValue ? identity : null;
+}
+
+function normalizeUnderparVaultSlacktivationError(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const code = normalizeSlacktivationText(value?.code || "", 64);
+  const message = normalizeSlacktivationText(value?.message || value?.error || "", 240);
+  const updatedAt = Math.max(0, Number(value?.updatedAt || 0));
+  if (!code && !message && !updatedAt) {
+    return null;
+  }
+  return {
+    code,
+    message,
+    updatedAt,
+  };
+}
+
+function normalizeUnderparVaultSlacktivationRecord(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const normalized = createEmptyUnderparVaultSlacktivationRecord();
+  normalized.schemaVersion = Math.max(UNDERPAR_SLACKTIVATION_SCHEMA_VERSION, Number(value?.schemaVersion || 0) || UNDERPAR_SLACKTIVATION_SCHEMA_VERSION);
+  normalized.workspaceOrigin = normalizeSlackWorkspaceOrigin(value?.workspaceOrigin || value?.workspace_origin || "");
+  normalized.oidc.clientId = normalizeSlacktivationText(value?.oidc?.clientId || value?.oidc?.client_id || "", 160);
+  normalized.oidc.clientSecret = normalizeSlacktivationText(value?.oidc?.clientSecret || value?.oidc?.client_secret || "", 200);
+  normalized.oidc.scope = normalizeSlackOpenIdScopes(value?.oidc?.scope || "");
+  normalized.oidc.redirectPath = normalizeSlackOpenIdRedirectPath(value?.oidc?.redirectPath || value?.oidc?.redirect_path || "");
+  normalized.oidc.redirectUri = normalizeSlackOpenIdRedirectUri(value?.oidc?.redirectUri || value?.oidc?.redirect_uri || "");
+  normalized.api.botToken = normalizeSlackApiToken(value?.api?.botToken || value?.api?.bot_token || "");
+  normalized.api.userToken = normalizeSlackApiToken(value?.api?.userToken || value?.api?.user_token || "");
+  normalized.api.oauthToken = normalizeSlackApiToken(
+    value?.api?.oauthToken || value?.api?.oauth_token || value?.api?.userToken || value?.api?.user_token || ""
+  );
+  normalized.singularity.channelId = normalizeSlackChannelId(value?.singularity?.channelId || value?.singularity?.channel_id || "");
+  normalized.singularity.mention = normalizeSlackMention(value?.singularity?.mention || "");
+  normalized.keyMeta = normalizeUnderparVaultSlacktivationKeyMeta(value?.keyMeta || value?.meta || null);
+  normalized.openIdSession = normalizeUnderparVaultSlacktivationOpenIdSession(value?.openIdSession || value?.openid || null);
+  normalized.identity = normalizeUnderparVaultSlacktivationIdentity(value?.identity || null);
+  normalized.lastError = normalizeUnderparVaultSlacktivationError(value?.lastError || null);
+  normalized.ready = normalized.identity?.ready === true || normalizeSlacktivationReady(value?.ready);
+  normalized.activatedAt = Math.max(0, Number(value?.activatedAt || value?.activated_at || 0));
+  normalized.updatedAt = Math.max(
+    0,
+    Number(value?.updatedAt || 0),
+    Number(normalized.identity?.updatedAt || 0),
+    Number(normalized.lastError?.updatedAt || 0)
+  );
+  if (!normalized.api.oauthToken) {
+    normalized.api.oauthToken = normalized.api.userToken;
+  }
+  if (!normalized.activatedAt && normalized.ready) {
+    normalized.activatedAt = Math.max(0, Number(normalized.identity?.updatedAt || normalized.updatedAt || Date.now()));
+  }
+  const hasConfig =
+    Boolean(normalized.oidc.clientId) ||
+    Boolean(normalized.oidc.clientSecret) ||
+    Boolean(normalized.api.userToken) ||
+    Boolean(normalized.api.botToken) ||
+    Boolean(normalized.singularity.channelId) ||
+    Boolean(normalized.singularity.mention);
+  const hasRuntime = Boolean(normalized.identity) || Boolean(normalized.keyMeta) || Boolean(normalized.openIdSession) || Boolean(normalized.lastError);
+  return hasConfig || hasRuntime ? normalized : null;
+}
+
+function getUnderparVaultSlacktivationInput(vault = null) {
+  if (!vault || typeof vault !== "object") {
+    return null;
+  }
+  if (vault?.underpar?.globals && Object.prototype.hasOwnProperty.call(vault.underpar.globals, "slack")) {
+    return vault.underpar.globals.slack;
+  }
+  if (vault?.underpar?.globals && Object.prototype.hasOwnProperty.call(vault.underpar.globals, "slacktivation")) {
+    return vault.underpar.globals.slacktivation;
+  }
+  if (vault?.underpar && Object.prototype.hasOwnProperty.call(vault.underpar, "slacktivation")) {
+    return vault.underpar.slacktivation;
+  }
+  return null;
+}
+
+function getUnderparVaultSlacktivationRecord(vault = null) {
+  return normalizeUnderparVaultSlacktivationRecord(getUnderparVaultSlacktivationInput(vault));
+}
+
+function setUnderparVaultSlacktivationRecord(vault = null, value = null) {
+  const target = ensureUnderparVaultGlobalContainers(vault);
+  const normalized = normalizeUnderparVaultSlacktivationRecord(value);
+  target.underpar.globals.slack = normalized ? cloneJsonLikeValue(normalized, null) : null;
+  if (Object.prototype.hasOwnProperty.call(target.underpar.globals, "slacktivation")) {
+    delete target.underpar.globals.slacktivation;
+  }
+  return normalized;
+}
+
+function pickSlackDisplayNameFromProfile(profile = null, userRecord = null) {
+  const user = userRecord && typeof userRecord === "object" ? userRecord : {};
+  const source = profile && typeof profile === "object" ? profile : {};
+  return firstNonEmptyString([
+    normalizeSlackDisplayName(source.display_name_normalized || ""),
+    normalizeSlackDisplayName(source.display_name || ""),
+    normalizeSlackDisplayName(source.real_name_normalized || ""),
+    normalizeSlackDisplayName(source.real_name || ""),
+    normalizeSlackDisplayName(user.real_name || ""),
+    normalizeSlackDisplayName(user.name || ""),
+  ]);
+}
+
+function pickSlackAvatarFromProfile(profile = null) {
+  const source = profile && typeof profile === "object" ? profile : {};
+  return firstNonEmptyString([
+    normalizeSlackAvatarUrl(source.image_original || ""),
+    normalizeSlackAvatarUrl(source.image_512 || ""),
+    normalizeSlackAvatarUrl(source.image_192 || ""),
+    normalizeSlackAvatarUrl(source.image_128 || ""),
+    normalizeSlackAvatarUrl(source.image_72 || ""),
+    normalizeSlackAvatarUrl(source.image_48 || ""),
+    normalizeSlackAvatarUrl(source.image_32 || ""),
+    normalizeSlackAvatarUrl(source.image_24 || ""),
+  ]);
+}
+
+function pickSlackStatusFromDisplayInfo(displayInfo = null) {
+  const entries = Array.isArray(displayInfo) ? displayInfo : displayInfo ? [displayInfo] : [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const statusIconUrl = firstNonEmptyString([
+      normalizeSlackStatusIconUrl(entry.display_url || ""),
+      normalizeSlackStatusIconUrl(entry.image_url || ""),
+      normalizeSlackStatusIconUrl(entry.url || ""),
+      normalizeSlackStatusIconUrl(entry.icon_url || ""),
+      normalizeSlackStatusIconUrl(entry.iconUrl || ""),
+    ]);
+    const statusIcon = firstNonEmptyString([
+      normalizeSlackStatusIcon(entry.unicode || ""),
+      normalizeSlackStatusIcon(entry.emoji_string || ""),
+      normalizeSlackStatusIcon(entry.emoji || ""),
+      normalizeSlackStatusIcon(entry.display_alias || ""),
+      normalizeSlackStatusIcon(entry.display_name || ""),
+      normalizeSlackStatusIcon(entry.name || ""),
+      normalizeSlackStatusIcon(entry.emoji_name || ""),
+      normalizeSlackStatusIconName(entry.name || entry.emoji_name || ""),
+    ]);
+    if (statusIcon || statusIconUrl) {
+      return {
+        statusIcon,
+        statusIconUrl,
+      };
+    }
+  }
+  return {
+    statusIcon: "",
+    statusIconUrl: "",
+  };
+}
+
+function pickSlackStatusFromProfile(profile = null, userRecord = null) {
+  const source = profile && typeof profile === "object" ? profile : {};
+  const user = userRecord && typeof userRecord === "object" ? userRecord : {};
+  const userProfile = user.profile && typeof user.profile === "object" ? user.profile : {};
+  const displayInfo = pickSlackStatusFromDisplayInfo(
+    source.status_emoji_display_info || userProfile.status_emoji_display_info || null
+  );
+  return {
+    statusIcon: firstNonEmptyString([
+      normalizeSlackStatusIcon(source.status_emoji || ""),
+      normalizeSlackStatusIcon(userProfile.status_emoji || ""),
+      displayInfo.statusIcon,
+    ]),
+    statusIconUrl: firstNonEmptyString([
+      normalizeSlackStatusIconUrl(source.status_emoji_url || ""),
+      normalizeSlackStatusIconUrl(userProfile.status_emoji_url || ""),
+      displayInfo.statusIconUrl,
+    ]),
+    statusMessage: firstNonEmptyString([
+      normalizeSlackStatusMessage(source.status_text || ""),
+      normalizeSlackStatusMessage(source.status_text_canonical || ""),
+      normalizeSlackStatusMessage(userProfile.status_text || ""),
+      normalizeSlackStatusMessage(userProfile.status_text_canonical || ""),
+    ]),
+  };
+}
+
+function extractSlackIdentityFromUsersProfilePayload(payload = null) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const profile = source.profile && typeof source.profile === "object" ? source.profile : {};
+  const status = pickSlackStatusFromProfile(profile, null);
+  return {
+    userName: pickSlackDisplayNameFromProfile(profile, null),
+    avatarUrl: pickSlackAvatarFromProfile(profile),
+    statusIcon: status.statusIcon,
+    statusIconUrl: status.statusIconUrl,
+    statusMessage: status.statusMessage,
+  };
+}
+
+function extractSlackIdentityFromUsersInfoPayload(payload = null) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const user = source.user && typeof source.user === "object" ? source.user : {};
+  const profile = user.profile && typeof user.profile === "object" ? user.profile : {};
+  const status = pickSlackStatusFromProfile(profile, user);
+  return {
+    userName: pickSlackDisplayNameFromProfile(profile, user),
+    avatarUrl: pickSlackAvatarFromProfile(profile),
+    statusIcon: status.statusIcon,
+    statusIconUrl: status.statusIconUrl,
+    statusMessage: status.statusMessage,
+  };
+}
+
+function buildSlackApiFormBody(fields = null) {
+  const params = new URLSearchParams();
+  const source = fields && typeof fields === "object" ? fields : {};
+  Object.entries(source).forEach(([key, value]) => {
+    if (value == null) {
+      return;
+    }
+    if (typeof value === "boolean") {
+      params.set(key, value ? "true" : "false");
+      return;
+    }
+    params.set(key, String(value));
+  });
+  return params.toString();
+}
+
+async function postSlackApiWithBearerToken(workspaceOrigin = "", apiPath = "", fields = null, token = "") {
+  const origin = normalizeSlackWorkspaceOrigin(workspaceOrigin);
+  const endpoint = `${origin}${String(apiPath || "")}`;
+  const authToken = normalizeSlackApiToken(token);
+  if (!authToken) {
+    return {
+      ok: false,
+      code: "slack_api_token_missing",
+      error: "Slack API token is missing.",
+    };
+  }
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: buildSlackApiFormBody(fields),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload || payload.ok === false) {
+      return {
+        ok: false,
+        status: response.status,
+        code: normalizeSlacktivationText(payload?.error || "", 64).toLowerCase() || "slack_api_error",
+        error: normalizeSlacktivationText(payload?.error || payload?.message || "Slack API request failed.", 240),
+        payload: payload && typeof payload === "object" ? payload : {},
+      };
+    }
+    return {
+      ok: true,
+      status: response.status,
+      payload,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "slack_api_network_error",
+      error: error instanceof Error ? error.message : "Slack API request failed.",
+    };
+  }
+}
+
+async function uploadSlackExternalFileWithBearerToken(options = {}) {
+  const authToken = normalizeSlackApiToken(options?.token || "");
+  const channelId = normalizeSlackChannelId(options?.channelId || "");
+  const fileName = String(options?.fileName || "").trim();
+  const title = String(options?.title || fileName || "UnderPAR export").trim() || "UnderPAR export";
+  const initialComment = String(options?.initialComment || "").trim();
+  const contentType = String(options?.contentType || "application/octet-stream").trim() || "application/octet-stream";
+  const snippetType = String(options?.snippetType || "").trim();
+  const bytes =
+    options?.bytes instanceof Uint8Array
+      ? options.bytes
+      : new TextEncoder().encode(String(options?.text == null ? "" : options.text));
+  if (!authToken) {
+    return {
+      ok: false,
+      code: "slack_api_token_missing",
+      error: "Slack API token is missing.",
+    };
+  }
+  if (!channelId) {
+    return {
+      ok: false,
+      code: "slack_channel_missing",
+      error: "Slack channel is missing.",
+    };
+  }
+  if (!fileName) {
+    return {
+      ok: false,
+      code: "slack_file_name_missing",
+      error: "Slack file name is missing.",
+    };
+  }
+  if (!bytes || bytes.byteLength <= 0) {
+    return {
+      ok: false,
+      code: "slack_file_empty",
+      error: "Slack file content is empty.",
+    };
+  }
+
+  const uploadTicketResult = await postSlackApiWithBearerToken(
+    SLACKTIVATION_API_ORIGIN,
+    "/api/files.getUploadURLExternal",
+    {
+      filename: fileName,
+      length: String(bytes.byteLength),
+      ...(snippetType ? { snippet_type: snippetType } : {}),
+      _x_reason: "underpar-blondie-file-get-upload-url",
+    },
+    authToken
+  );
+  if (!uploadTicketResult.ok) {
+    return uploadTicketResult;
+  }
+
+  const uploadUrl = String(uploadTicketResult.payload?.upload_url || "").trim();
+  const fileId = normalizeSlacktivationText(
+    uploadTicketResult.payload?.file_id || uploadTicketResult.payload?.file?.id || "",
+    128
+  );
+  if (!uploadUrl || !fileId) {
+    return {
+      ok: false,
+      code: "slack_upload_ticket_invalid",
+      error: "Slack file upload ticket is missing required values.",
+      payload: uploadTicketResult.payload && typeof uploadTicketResult.payload === "object" ? uploadTicketResult.payload : {},
+    };
+  }
+
+  try {
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": contentType,
+      },
+      body: bytes,
+    });
+    if (!uploadResponse.ok) {
+      return {
+        ok: false,
+        status: uploadResponse.status,
+        code: "slack_upload_bytes_failed",
+        error: `Slack file upload failed (${uploadResponse.status}).`,
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      code: "slack_upload_bytes_failed",
+      error: error instanceof Error ? error.message : "Slack file upload failed.",
+    };
+  }
+
+  const completeResult = await postSlackApiWithBearerToken(
+    SLACKTIVATION_API_ORIGIN,
+    "/api/files.completeUploadExternal",
+    {
+      files: JSON.stringify([{ id: fileId, title }]),
+      channel_id: channelId,
+      ...(initialComment ? { initial_comment: initialComment } : {}),
+      _x_reason: "underpar-blondie-file-complete-upload",
+    },
+    authToken
+  );
+  if (!completeResult.ok) {
+    return completeResult;
+  }
+
+  return {
+    ok: true,
+    status: completeResult.status,
+    fileId,
+    payload: completeResult.payload,
+  };
+}
+
+async function fetchSlackIdentityViaApi(workspaceOrigin = "", token = "", userId = "") {
+  const resolvedUserId = normalizeSlackUserId(userId);
+  const identity = {
+    userName: "",
+    avatarUrl: "",
+    statusIcon: "",
+    statusIconUrl: "",
+    statusMessage: "",
+    avatarErrorCode: "",
+    avatarErrorMessage: "",
+  };
+  const applyIdentity = (candidate = null) => {
+    const source = candidate && typeof candidate === "object" ? candidate : {};
+    if (!identity.userName) {
+      identity.userName = normalizeSlackDisplayName(source.userName || "");
+    }
+    if (!identity.avatarUrl) {
+      identity.avatarUrl = normalizeSlackAvatarUrl(source.avatarUrl || "");
+    }
+    if (!identity.statusIcon) {
+      identity.statusIcon = normalizeSlackStatusIcon(source.statusIcon || "");
+    }
+    if (!identity.statusIconUrl) {
+      identity.statusIconUrl = normalizeSlackStatusIconUrl(source.statusIconUrl || "");
+    }
+    if (!identity.statusMessage) {
+      identity.statusMessage = normalizeSlackStatusMessage(source.statusMessage || "");
+    }
+  };
+  const captureAvatarError = (result = null, fallbackMessage = "") => {
+    if (identity.avatarUrl) {
+      return;
+    }
+    const source = result && typeof result === "object" ? result : {};
+    const code = normalizeSlacktivationText(source?.code || source?.payload?.error || "", 64).toLowerCase();
+    const message = normalizeSlacktivationText(source?.error || fallbackMessage || "", 240);
+    if (code && !identity.avatarErrorCode) {
+      identity.avatarErrorCode = code;
+    }
+    if (message && !identity.avatarErrorMessage) {
+      identity.avatarErrorMessage = message;
+    }
+  };
+
+  const origins = uniqueSorted([SLACKTIVATION_API_ORIGIN, workspaceOrigin || SLACKTIVATION_WORKSPACE_ORIGIN]);
+  for (const origin of origins) {
+    const selfProfileResult = await postSlackApiWithBearerToken(origin, "/api/users.profile.get", {
+      _x_reason: "underpar-slacktivation-profile-self",
+    }, token);
+    if (selfProfileResult.ok) {
+      applyIdentity(extractSlackIdentityFromUsersProfilePayload(selfProfileResult.payload));
+    } else {
+      captureAvatarError(selfProfileResult, "users.profile.get(self) failed.");
+    }
+
+    if ((!identity.userName || !identity.avatarUrl) && resolvedUserId) {
+      const byUserResult = await postSlackApiWithBearerToken(origin, "/api/users.profile.get", {
+        user: resolvedUserId,
+        _x_reason: "underpar-slacktivation-profile-user",
+      }, token);
+      if (byUserResult.ok) {
+        applyIdentity(extractSlackIdentityFromUsersProfilePayload(byUserResult.payload));
+      } else {
+        captureAvatarError(byUserResult, "users.profile.get(user) failed.");
+      }
+    }
+
+    if ((!identity.userName || !identity.avatarUrl) && resolvedUserId) {
+      const usersInfoResult = await postSlackApiWithBearerToken(origin, "/api/users.info", {
+        user: resolvedUserId,
+        _x_reason: "underpar-slacktivation-users-info",
+      }, token);
+      if (usersInfoResult.ok) {
+        applyIdentity(extractSlackIdentityFromUsersInfoPayload(usersInfoResult.payload));
+      } else {
+        captureAvatarError(usersInfoResult, "users.info failed.");
+      }
+    }
+
+    if (identity.userName && identity.avatarUrl) {
+      break;
+    }
+  }
+  return identity;
+}
+
+function createSlackOpenIdEntropy() {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID().replace(/-/g, "");
+    }
+  } catch {
+    // Ignore and fall back.
+  }
+  return `${Date.now()}_${String(Math.random()).slice(2)}`;
+}
+
+function parseSlackOpenIdIdTokenPayload(idToken = "") {
+  const token = String(idToken || "").trim();
+  if (!token) {
+    return null;
+  }
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+  const payloadPart = String(parts[1] || "");
+  if (!payloadPart) {
+    return null;
+  }
+  const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
+  try {
+    const binary = atob(`${normalized}${padding}`);
+    const bytes = Uint8Array.from(binary, (entry) => entry.charCodeAt(0));
+    const text = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function pickSlackOpenIdUserName(userInfo = null, idPayload = null) {
+  const source = userInfo && typeof userInfo === "object" ? userInfo : {};
+  const tokenPayload = idPayload && typeof idPayload === "object" ? idPayload : {};
+  return firstNonEmptyString([
+    normalizeSlackDisplayName(source.name || ""),
+    normalizeSlackDisplayName(source.given_name || ""),
+    normalizeSlackDisplayName(source.family_name || ""),
+    normalizeSlackDisplayName(tokenPayload.name || ""),
+    normalizeSlackDisplayName(tokenPayload.given_name || ""),
+    normalizeSlackDisplayName(tokenPayload.family_name || ""),
+  ]);
+}
+
+function pickSlackOpenIdAvatar(userInfo = null, idPayload = null) {
+  const source = userInfo && typeof userInfo === "object" ? userInfo : {};
+  const tokenPayload = idPayload && typeof idPayload === "object" ? idPayload : {};
+  return firstNonEmptyString([
+    normalizeSlackAvatarUrl(source.picture || ""),
+    normalizeSlackAvatarUrl(tokenPayload.picture || ""),
+  ]);
+}
+
+function normalizeSlackOpenIdProfile(tokenPayload = null, userInfoPayload = null) {
+  const token = tokenPayload && typeof tokenPayload === "object" ? tokenPayload : {};
+  const userInfo = userInfoPayload && typeof userInfoPayload === "object" ? userInfoPayload : {};
+  const idPayload = parseSlackOpenIdIdTokenPayload(token.id_token || "");
+  const expiresInSec = Math.max(0, Number(token.expires_in || 0));
+  return {
+    accessToken: normalizeSlackApiToken(token.access_token || ""),
+    idToken: normalizeSlacktivationText(token.id_token || "", 4096),
+    scope: normalizeSlackOpenIdScopes(token.scope || ""),
+    expiresAtMs: expiresInSec > 0 ? Date.now() + expiresInSec * 1000 : 0,
+    userId: normalizeSlackUserId(
+      userInfo["https://slack.com/user_id"] || token.user_id || idPayload?.["https://slack.com/user_id"] || idPayload?.sub || ""
+    ),
+    teamId: normalizeSlackTeamId(
+      userInfo["https://slack.com/team_id"] || token.team_id || idPayload?.["https://slack.com/team_id"] || ""
+    ),
+    userName: pickSlackOpenIdUserName(userInfo, idPayload),
+    avatarUrl: pickSlackOpenIdAvatar(userInfo, idPayload),
+    email: normalizeSlackEmail(userInfo.email || idPayload?.email || ""),
+  };
+}
+
+async function fetchSlackOpenIdUserInfo(accessToken = "") {
+  const token = normalizeSlackApiToken(accessToken);
+  if (!token) {
+    return {
+      ok: false,
+      error: "Slack OpenID access token is missing.",
+    };
+  }
+  try {
+    const response = await fetch(SLACK_OPENID_USERINFO_URL, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload || payload.ok === false) {
+      return {
+        ok: false,
+        status: response.status,
+        error: normalizeSlacktivationText(payload?.error || payload?.message || "Unable to fetch Slack OpenID user info.", 240),
+        payload: payload && typeof payload === "object" ? payload : {},
+      };
+    }
+    return {
+      ok: true,
+      payload,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Slack OpenID user info request failed.",
+    };
+  }
+}
+
+function normalizeSlackOpenIdAuthConfig(input = null) {
+  const source = input && typeof input === "object" ? input : {};
+  return {
+    clientId: normalizeSlacktivationText(source?.clientId || source?.client_id || "", 160),
+    clientSecret: normalizeSlacktivationText(source?.clientSecret || source?.client_secret || "", 200),
+    scope: normalizeSlackOpenIdScopes(source?.scope || source?.scopes || ""),
+    redirectPath: normalizeSlackOpenIdRedirectPath(source?.redirectPath || source?.redirect_path || ""),
+    redirectUriRaw: normalizeSlackOpenIdRedirectUri(source?.redirectUri || source?.redirect_uri || ""),
+  };
+}
+
+function resolveSlackOpenIdRedirectUriCandidates(config = null) {
+  const candidates = [];
+  const seen = new Set();
+  const pushCandidate = (candidate) => {
+    const normalized = normalizeSlackOpenIdRedirectUri(candidate);
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    candidates.push(normalized);
+  };
+  const normalizedConfig = normalizeSlackOpenIdAuthConfig(config);
+  pushCandidate(normalizedConfig.redirectUriRaw);
+  if (chrome.identity && typeof chrome.identity.getRedirectURL === "function") {
+    pushCandidate(chrome.identity.getRedirectURL(normalizedConfig.redirectPath || SLACK_OPENID_DEFAULT_REDIRECT_PATH));
+    pushCandidate(chrome.identity.getRedirectURL(SLACK_OPENID_DEFAULT_REDIRECT_PATH));
+    pushCandidate(chrome.identity.getRedirectURL(""));
+  }
+  return candidates;
+}
+
+function isSlackOpenIdRedirectMismatchError(message = "") {
+  const normalized = String(message || "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes("invalid_redirect_uri") ||
+    normalized.includes("redirect_uri_mismatch") ||
+    normalized.includes("redirect uri did not match") ||
+    (normalized.includes("redirect_uri") && normalized.includes("configured uris"))
+  );
+}
+
+function launchSlackOpenIdWebAuth(url = "", interactive = true) {
+  const authUrl = String(url || "").trim();
+  if (!authUrl) {
+    return Promise.reject(new Error("Slack OpenID authorize URL is missing."));
+  }
+  return new Promise((resolve, reject) => {
+    if (!chrome.identity || typeof chrome.identity.launchWebAuthFlow !== "function") {
+      reject(new Error("chrome.identity.launchWebAuthFlow is unavailable."));
+      return;
+    }
+    chrome.identity.launchWebAuthFlow({
+      url: authUrl,
+      interactive: interactive !== false,
+    }, (responseUrl) => {
+      const runtimeError = chrome.runtime?.lastError?.message || "";
+      if (runtimeError) {
+        reject(new Error(runtimeError));
+        return;
+      }
+      const normalized = String(responseUrl || "").trim();
+      if (!normalized) {
+        reject(new Error("Slack OpenID auth did not return a callback URL."));
+        return;
+      }
+      resolve(normalized);
+    });
+  });
+}
+
+async function exchangeSlackOpenIdCodeForSession(input = null) {
+  const context = input && typeof input === "object" ? input : {};
+  const code = normalizeSlacktivationText(context?.code || "", 200);
+  const config = normalizeSlackOpenIdAuthConfig(context?.config || null);
+  const redirectUri = normalizeSlackOpenIdRedirectUri(context?.redirectUri || "");
+  const expectedNonce = normalizeSlacktivationText(context?.expectedNonce || "", 200);
+  if (!code) {
+    return {
+      ok: false,
+      error: "Slack OpenID callback did not return an auth code.",
+    };
+  }
+  if (!config.clientId || !config.clientSecret || !redirectUri) {
+    return {
+      ok: false,
+      error: "Slack OpenID client credentials or redirect URI are missing.",
+    };
+  }
+  const body = new URLSearchParams();
+  body.set("code", code);
+  body.set("client_id", config.clientId);
+  body.set("client_secret", config.clientSecret);
+  body.set("redirect_uri", redirectUri);
+  try {
+    const response = await fetch(SLACK_OPENID_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    });
+    const tokenPayload = await response.json().catch(() => null);
+    if (!response.ok || !tokenPayload || tokenPayload.ok === false) {
+      return {
+        ok: false,
+        status: response.status,
+        error: normalizeSlacktivationText(tokenPayload?.error || tokenPayload?.message || "Slack OpenID token exchange failed.", 240),
+        payload: tokenPayload && typeof tokenPayload === "object" ? tokenPayload : {},
+      };
+    }
+    const idPayload = parseSlackOpenIdIdTokenPayload(tokenPayload.id_token || "");
+    const tokenNonce = normalizeSlacktivationText(idPayload?.nonce || "", 200);
+    if (expectedNonce && tokenNonce && tokenNonce !== expectedNonce) {
+      return {
+        ok: false,
+        error: "Slack OpenID nonce validation failed.",
+      };
+    }
+    const userInfoResult = await fetchSlackOpenIdUserInfo(tokenPayload.access_token || "");
+    if (!userInfoResult.ok) {
+      return {
+        ok: false,
+        error: normalizeSlacktivationText(userInfoResult.error || "Slack OpenID user info fetch failed.", 240),
+      };
+    }
+    const profile = normalizeSlackOpenIdProfile(tokenPayload, userInfoResult.payload);
+    if (!profile.accessToken) {
+      return {
+        ok: false,
+        error: "Slack OpenID token response did not include an access token.",
+      };
+    }
+    return {
+      ok: true,
+      session: {
+        accessToken: profile.accessToken,
+        idToken: profile.idToken,
+        scope: profile.scope,
+        expiresAtMs: profile.expiresAtMs,
+        userId: profile.userId,
+        teamId: profile.teamId,
+        userName: profile.userName,
+        avatarUrl: profile.avatarUrl,
+        email: profile.email,
+        verifiedAtMs: Date.now(),
+        createdAt: new Date().toISOString(),
+      },
+      mode: "openid",
+      user_id: profile.userId,
+      team_id: profile.teamId,
+      user_name: profile.userName,
+      avatar_url: profile.avatarUrl,
+      email: profile.email,
+      scope: profile.scope,
+      expires_at_ms: profile.expiresAtMs,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Slack OpenID token exchange request failed.",
+    };
+  }
+}
+
+async function runSlackOpenIdAuth(input = null) {
+  const config = normalizeSlackOpenIdAuthConfig(input);
+  const interactive = input?.interactive !== false;
+  if (!config.clientId || !config.clientSecret) {
+    return {
+      ok: false,
+      code: "openid_not_configured",
+      error: "Slack OpenID client credentials are not configured.",
+    };
+  }
+  const redirectUriCandidates = resolveSlackOpenIdRedirectUriCandidates(config);
+  if (redirectUriCandidates.length === 0) {
+    return {
+      ok: false,
+      code: "redirect_uri_unavailable",
+      error: "Slack OpenID redirect URI is unavailable in this browser context.",
+    };
+  }
+  let redirectMismatchMessage = "";
+  for (let index = 0; index < redirectUriCandidates.length; index += 1) {
+    const redirectUri = redirectUriCandidates[index];
+    const hasFallbackCandidate = index + 1 < redirectUriCandidates.length;
+    const stateValue = createSlackOpenIdEntropy();
+    const nonce = createSlackOpenIdEntropy();
+    const params = new URLSearchParams();
+    params.set("response_type", "code");
+    params.set("client_id", config.clientId);
+    params.set("scope", config.scope);
+    params.set("redirect_uri", redirectUri);
+    params.set("state", stateValue);
+    params.set("nonce", nonce);
+    const authorizeUrl = `${SLACK_OPENID_AUTHORIZE_URL}?${params.toString()}`;
+    let callbackUrl = "";
+    try {
+      callbackUrl = await launchSlackOpenIdWebAuth(authorizeUrl, interactive);
+    } catch (error) {
+      const message = normalizeSlacktivationText(error instanceof Error ? error.message : String(error), 240);
+      if (isSlackOpenIdRedirectMismatchError(message) && hasFallbackCandidate) {
+        redirectMismatchMessage = message || redirectMismatchMessage;
+        continue;
+      }
+      return {
+        ok: false,
+        code: isSlackOpenIdRedirectMismatchError(message)
+          ? "redirect_uri_mismatch"
+          : interactive
+            ? "auth_flow_failed"
+            : "interaction_required",
+        error: message || "Slack OpenID authentication failed.",
+      };
+    }
+    let parsedUrl = null;
+    try {
+      parsedUrl = new URL(callbackUrl);
+    } catch {
+      return {
+        ok: false,
+        error: "Slack OpenID callback URL is invalid.",
+      };
+    }
+    const callbackState = normalizeSlacktivationText(parsedUrl.searchParams.get("state") || "", 200);
+    if (!callbackState || callbackState !== stateValue) {
+      return {
+        ok: false,
+        error: "Slack OpenID state validation failed.",
+      };
+    }
+    const callbackError = normalizeSlacktivationText(parsedUrl.searchParams.get("error") || "", 120);
+    if (callbackError) {
+      const description = normalizeSlacktivationText(parsedUrl.searchParams.get("error_description") || "", 240);
+      const message = description ? `${callbackError}: ${description}` : callbackError;
+      if (isSlackOpenIdRedirectMismatchError(message) && hasFallbackCandidate) {
+        redirectMismatchMessage = message || redirectMismatchMessage;
+        continue;
+      }
+      return {
+        ok: false,
+        code: isSlackOpenIdRedirectMismatchError(message) ? "redirect_uri_mismatch" : "auth_flow_failed",
+        error: message,
+      };
+    }
+    const code = normalizeSlacktivationText(parsedUrl.searchParams.get("code") || "", 200);
+    const exchangeResult = await exchangeSlackOpenIdCodeForSession({
+      code,
+      config,
+      redirectUri,
+      expectedNonce: nonce,
+    });
+    if (exchangeResult.ok) {
+      return exchangeResult;
+    }
+    const exchangeMessage = normalizeSlacktivationText(
+      exchangeResult.error || exchangeResult.payload?.error || "Slack OpenID token exchange failed.",
+      240
+    );
+    if (isSlackOpenIdRedirectMismatchError(exchangeMessage) && hasFallbackCandidate) {
+      redirectMismatchMessage = exchangeMessage || redirectMismatchMessage;
+      continue;
+    }
+    return {
+      ...exchangeResult,
+      code: isSlackOpenIdRedirectMismatchError(exchangeMessage) ? "redirect_uri_mismatch" : exchangeResult.code,
+    };
+  }
+  return {
+    ok: false,
+    code: "redirect_uri_mismatch",
+    error: redirectMismatchMessage || "Slack OpenID redirect URI did not match any configured Slack app callback URI.",
+  };
+}
+
+async function getSlackOpenIdStatus(session = null) {
+  const storedSession = normalizeUnderparVaultSlacktivationOpenIdSession(session);
+  if (!storedSession) {
+    return {
+      ok: false,
+      error: "No cached Slack OpenID session.",
+    };
+  }
+  const nowMs = Date.now();
+  if (storedSession.expiresAtMs > 0 && nowMs >= storedSession.expiresAtMs - 30 * 1000) {
+    return {
+      ok: false,
+      error: "Cached Slack OpenID session expired.",
+      expired: true,
+    };
+  }
+  if (Number.isFinite(storedSession.verifiedAtMs) && storedSession.verifiedAtMs > 0 && nowMs - storedSession.verifiedAtMs <= SLACK_OPENID_STATUS_VERIFY_TTL_MS) {
+    return {
+      ok: true,
+      session: storedSession,
+      mode: "openid",
+      user_id: storedSession.userId,
+      team_id: storedSession.teamId,
+      user_name: storedSession.userName,
+      avatar_url: storedSession.avatarUrl,
+      email: storedSession.email,
+      expires_at_ms: storedSession.expiresAtMs,
+      scope: storedSession.scope,
+    };
+  }
+  const userInfoResult = await fetchSlackOpenIdUserInfo(storedSession.accessToken || "");
+  if (!userInfoResult.ok) {
+    return {
+      ok: false,
+      error: normalizeSlacktivationText(userInfoResult.error || "Unable to verify Slack OpenID session.", 240),
+    };
+  }
+  const profile = normalizeSlackOpenIdProfile({
+    access_token: storedSession.accessToken,
+    id_token: storedSession.idToken,
+    scope: storedSession.scope,
+    expires_in: storedSession.expiresAtMs > nowMs ? Math.floor((storedSession.expiresAtMs - nowMs) / 1000) : 0,
+    team_id: storedSession.teamId,
+    user_id: storedSession.userId,
+  }, userInfoResult.payload);
+  const refreshedSession = normalizeUnderparVaultSlacktivationOpenIdSession({
+    ...storedSession,
+    userId: profile.userId || storedSession.userId,
+    teamId: profile.teamId || storedSession.teamId,
+    userName: profile.userName || storedSession.userName,
+    avatarUrl: profile.avatarUrl || storedSession.avatarUrl,
+    email: profile.email || storedSession.email,
+    verifiedAtMs: nowMs,
+  });
+  return {
+    ok: true,
+    session: refreshedSession,
+    mode: "openid",
+    user_id: refreshedSession?.userId || "",
+    team_id: refreshedSession?.teamId || "",
+    user_name: refreshedSession?.userName || "",
+    avatar_url: refreshedSession?.avatarUrl || "",
+    email: refreshedSession?.email || "",
+    expires_at_ms: Number(refreshedSession?.expiresAtMs || 0),
+    scope: refreshedSession?.scope || "",
+  };
+}
+
+async function slackAuthTestViaApi(input = null) {
+  const request = input && typeof input === "object" ? input : {};
+  const workspaceOrigin = normalizeSlackWorkspaceOrigin(request.workspaceOrigin || SLACKTIVATION_WORKSPACE_ORIGIN);
+  const userCandidates = uniqueSorted([
+    normalizeSlackApiToken(request.userToken || request.user_token || ""),
+    normalizeSlackApiToken(request.oauthToken || request.oauth_token || ""),
+    ...(Array.isArray(request.userCandidates) ? request.userCandidates.map((entry) => normalizeSlackApiToken(entry)) : []),
+  ]).filter((entry) => isSlackUserOAuthToken(entry));
+  const botCandidates = uniqueSorted([
+    normalizeSlackApiToken(request.botToken || request.bot_token || ""),
+    ...(Array.isArray(request.botCandidates) ? request.botCandidates.map((entry) => normalizeSlackApiToken(entry)) : []),
+  ]).filter((entry) => isSlackBotApiToken(entry));
+  if (userCandidates.length === 0) {
+    return {
+      ok: false,
+      code: "slack_user_token_missing",
+      error: "Slack user/session token is missing for API auth test.",
+    };
+  }
+
+  let lastFailureCode = "slack_auth_failed";
+  let lastFailureError = "Unable to validate Slack API credentials.";
+  for (const attemptToken of userCandidates) {
+    const authResult = await postSlackApiWithBearerToken(workspaceOrigin, "/api/auth.test", {
+      _x_reason: "underpar-slacktivation-auth",
+    }, attemptToken);
+    if (!authResult.ok) {
+      lastFailureCode = authResult.code || lastFailureCode;
+      lastFailureError = authResult.error || lastFailureError;
+      continue;
+    }
+    const payload = authResult.payload && typeof authResult.payload === "object" ? authResult.payload : {};
+    const userId = normalizeSlackUserId(payload.user_id || payload.user || request.userId || request.user_id || "");
+    const teamId = normalizeSlackTeamId(payload.team_id || payload.team || "");
+    let userName = normalizeSlackDisplayName(request.userName || request.user_name || "");
+    let avatarUrl = normalizeSlackAvatarUrl(request.avatarUrl || request.avatar_url || "");
+    let statusIcon = normalizeSlackStatusIcon(request.statusIcon || request.status_icon || "");
+    let statusIconUrl = normalizeSlackStatusIconUrl(request.statusIconUrl || request.status_icon_url || "");
+    let statusMessage = normalizeSlackStatusMessage(request.statusMessage || request.status_message || "");
+    let avatarErrorCode = "";
+    let avatarError = "";
+    if (!userName || !avatarUrl || !statusIcon || !statusMessage) {
+      const identity = await fetchSlackIdentityViaApi(workspaceOrigin, attemptToken, userId);
+      userName = userName || normalizeSlackDisplayName(identity.userName || payload.user || "");
+      avatarUrl = avatarUrl || normalizeSlackAvatarUrl(identity.avatarUrl || "");
+      statusIcon = statusIcon || normalizeSlackStatusIcon(identity.statusIcon || "");
+      statusIconUrl = statusIconUrl || normalizeSlackStatusIconUrl(identity.statusIconUrl || "");
+      statusMessage = statusMessage || normalizeSlackStatusMessage(identity.statusMessage || "");
+      avatarErrorCode = normalizeSlacktivationText(identity.avatarErrorCode || "", 64);
+      avatarError = normalizeSlacktivationText(identity.avatarErrorMessage || "", 240);
+    }
+    let directChannelId = normalizeSlackDirectChannelId(request.directChannelId || request.direct_channel_id || "");
+    let directChannelErrorCode = "";
+    if (!directChannelId && userId && botCandidates.length > 0) {
+      for (const botToken of botCandidates) {
+        const dmOpen = await postSlackApiWithBearerToken(SLACKTIVATION_API_ORIGIN, "/api/conversations.open", {
+          users: userId,
+          return_im: "true",
+          _x_reason: "underpar-slacktivation-open-dm",
+        }, botToken);
+        if (!dmOpen.ok) {
+          directChannelErrorCode = normalizeSlacktivationText(dmOpen.code || "slack_open_dm_failed", 64).toLowerCase();
+          continue;
+        }
+        const candidateChannel = normalizeSlackDirectChannelId(
+          dmOpen.payload?.channel?.id || dmOpen.payload?.channel_id || dmOpen.payload?.channel || ""
+        );
+        if (!candidateChannel) {
+          directChannelErrorCode = "slack_dm_channel_missing";
+          continue;
+        }
+        directChannelId = candidateChannel;
+        directChannelErrorCode = "";
+        break;
+      }
+    }
+    return {
+      ok: true,
+      ready: true,
+      mode: "api",
+      user_id: userId,
+      team_id: teamId,
+      user_name: userName || normalizeSlackDisplayName(payload.user || ""),
+      avatar_url: avatarUrl,
+      status_icon: statusIcon,
+      status_icon_url: statusIconUrl,
+      status_message: statusMessage,
+      direct_channel_id: directChannelId,
+      direct_channel_error_code: directChannelErrorCode,
+      avatar_error_code: avatarErrorCode,
+      avatar_error: avatarError,
+    };
+  }
+
+  return {
+    ok: false,
+    code: lastFailureCode,
+    error: lastFailureError,
+  };
+}
+
+function mergeUnderparSlacktivationRecord(base = null, updates = null) {
+  const current = normalizeUnderparVaultSlacktivationRecord(base) || createEmptyUnderparVaultSlacktivationRecord();
+  const patch = updates && typeof updates === "object" && !Array.isArray(updates) ? updates : {};
+  return normalizeUnderparVaultSlacktivationRecord({
+    ...current,
+    ...patch,
+    oidc: {
+      ...(current.oidc || {}),
+      ...(patch.oidc && typeof patch.oidc === "object" ? patch.oidc : {}),
+    },
+    api: {
+      ...(current.api || {}),
+      ...(patch.api && typeof patch.api === "object" ? patch.api : {}),
+    },
+    singularity: {
+      ...(current.singularity || {}),
+      ...(patch.singularity && typeof patch.singularity === "object" ? patch.singularity : {}),
+    },
+    keyMeta:
+      Object.prototype.hasOwnProperty.call(patch, "keyMeta")
+        ? patch.keyMeta
+        : current.keyMeta,
+    openIdSession:
+      Object.prototype.hasOwnProperty.call(patch, "openIdSession")
+        ? patch.openIdSession
+        : current.openIdSession,
+    identity:
+      Object.prototype.hasOwnProperty.call(patch, "identity")
+        ? patch.identity
+        : current.identity,
+    lastError:
+      Object.prototype.hasOwnProperty.call(patch, "lastError")
+        ? patch.lastError
+        : current.lastError,
+  });
+}
+
+function buildUnderparSlacktivationIdentityRecord(source = null, overrides = null) {
+  const payload = source && typeof source === "object" ? source : {};
+  const patch = overrides && typeof overrides === "object" ? overrides : {};
+  return normalizeUnderparVaultSlacktivationIdentity({
+    mode: patch.mode || payload.mode || "",
+    ready: Object.prototype.hasOwnProperty.call(patch, "ready") ? patch.ready : payload.ready,
+    userId: patch.userId || payload.user_id || payload.userId || "",
+    teamId: patch.teamId || payload.team_id || payload.teamId || "",
+    userName: patch.userName || payload.user_name || payload.userName || "",
+    email: patch.email || payload.email || "",
+    avatarUrl: patch.avatarUrl || payload.avatar_url || payload.avatarUrl || "",
+    statusIcon: patch.statusIcon || payload.status_icon || payload.statusIcon || "",
+    statusIconUrl: patch.statusIconUrl || payload.status_icon_url || payload.statusIconUrl || "",
+    statusMessage: patch.statusMessage || payload.status_message || payload.statusMessage || "",
+    directChannelId: patch.directChannelId || payload.direct_channel_id || payload.directChannelId || "",
+    directChannelErrorCode:
+      patch.directChannelErrorCode || payload.direct_channel_error_code || payload.directChannelErrorCode || "",
+    avatarErrorCode: patch.avatarErrorCode || payload.avatar_error_code || payload.avatarErrorCode || "",
+    avatarError: patch.avatarError || payload.avatar_error || payload.avatarError || "",
+    updatedAt: Math.max(0, Number(patch.updatedAt || payload.updatedAt || Date.now())),
+  });
+}
+
+function buildUnderparSlacktivationErrorRecord(code = "", message = "") {
+  return normalizeUnderparVaultSlacktivationError({
+    code,
+    message,
+    updatedAt: Date.now(),
+  });
+}
+
+async function authenticateUnderparSlacktivationRecord(record = null, options = {}) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  if (!normalizedRecord) {
+    return {
+      ok: false,
+      code: "slacktivation_missing",
+      error: "SLACKTIVATION is not configured yet.",
+    };
+  }
+
+  let openIdSession = normalizeUnderparVaultSlacktivationOpenIdSession(normalizedRecord.openIdSession || null);
+  let openIdStatus = null;
+  let openIdResult = null;
+  const buildApiAuthRequest = () => ({
+    workspaceOrigin: normalizedRecord.workspaceOrigin,
+    userToken: normalizedRecord.api.userToken,
+    oauthToken: normalizedRecord.api.oauthToken,
+    botToken: normalizedRecord.api.botToken,
+    userCandidates: [
+      openIdStatus?.session?.accessToken || "",
+      openIdResult?.session?.accessToken || "",
+      openIdSession?.accessToken || "",
+      normalizedRecord.api.oauthToken || "",
+      normalizedRecord.api.userToken || "",
+    ],
+    userId: openIdStatus?.user_id || openIdResult?.user_id || normalizedRecord.identity?.userId,
+    userName: openIdStatus?.user_name || openIdResult?.user_name || normalizedRecord.identity?.userName,
+    avatarUrl: openIdStatus?.avatar_url || openIdResult?.avatar_url || normalizedRecord.identity?.avatarUrl,
+    email: openIdStatus?.email || openIdResult?.email || normalizedRecord.identity?.email,
+  });
+  if (openIdSession) {
+    openIdStatus = await getSlackOpenIdStatus(openIdSession);
+    if (openIdStatus.ok) {
+      openIdSession = normalizeUnderparVaultSlacktivationOpenIdSession(openIdStatus.session);
+    } else {
+      openIdSession = null;
+    }
+  }
+
+  let apiResult = await slackAuthTestViaApi(buildApiAuthRequest());
+  if (!apiResult.ok && normalizedRecord.oidc.clientId && normalizedRecord.oidc.clientSecret && options?.interactive === true) {
+    openIdResult = await runSlackOpenIdAuth({
+      ...normalizedRecord.oidc,
+      interactive: true,
+    });
+    if (openIdResult.ok) {
+      openIdSession = normalizeUnderparVaultSlacktivationOpenIdSession(openIdResult.session);
+      openIdStatus = {
+        ok: true,
+        session: openIdSession,
+        user_id: openIdResult.user_id,
+        team_id: openIdResult.team_id,
+        user_name: openIdResult.user_name,
+        avatar_url: openIdResult.avatar_url,
+        email: openIdResult.email,
+        expires_at_ms: openIdResult.expires_at_ms,
+        scope: openIdResult.scope,
+      };
+      apiResult = await slackAuthTestViaApi(buildApiAuthRequest());
+    }
+  }
+
+  if (!apiResult.ok) {
+    const fallbackError = normalizeSlacktivationText(openIdResult?.error || "", 240);
+    return {
+      ok: false,
+      code: apiResult.code || openIdResult?.code || "slacktivation_failed",
+      error: apiResult.error || fallbackError || "Unable to validate Slack API credentials.",
+      openIdSession,
+    };
+  }
+
+  const identity = buildUnderparSlacktivationIdentityRecord(apiResult, {
+    ready: true,
+    email: openIdStatus?.email || openIdResult?.email || normalizedRecord.identity?.email || "",
+    updatedAt: Date.now(),
+  });
+  const nextRecord = mergeUnderparSlacktivationRecord(normalizedRecord, {
+    ready: true,
+    activatedAt: normalizedRecord.activatedAt || Date.now(),
+    updatedAt: Date.now(),
+    openIdSession,
+    identity,
+    lastError: null,
+  });
+  return {
+    ok: true,
+    record: nextRecord,
+  };
+}
+
+const UNDERPAR_BLONDIE_EXPORT_MAX_MESSAGE_CHARS = 36000;
+
+function getUnderparWorkspaceSlackStatePayload() {
+  const record = getUnderparVaultSlacktivationRecord(state.passVault);
+  return {
+    ready: record?.ready === true,
+    userId: String(record?.identity?.userId || "").trim(),
+    userName: String(record?.identity?.userName || "").trim(),
+    statusIcon: String(record?.identity?.statusIcon || "").trim(),
+    statusMessage: String(record?.identity?.statusMessage || "").trim(),
+  };
+}
+
+function normalizeUnderparBlondieExportPayload(input = null) {
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : null;
+  if (!source) {
+    return null;
+  }
+  const normalizeEndpointKeys = (value) => {
+    const rawValues = Array.isArray(value) ? value : String(value || "").split(",");
+    const output = [];
+    const seen = new Set();
+    rawValues.forEach((entry) => {
+      const normalized = String(entry || "").trim().toLowerCase();
+      if (!normalized || seen.has(normalized)) {
+        return;
+      }
+      seen.add(normalized);
+      output.push(normalized);
+    });
+    return output;
+  };
+  const normalizeReportItems = (value) => {
+    return (Array.isArray(value) ? value : [])
+      .map((item) => {
+        const sourceItem = item && typeof item === "object" && !Array.isArray(item) ? item : null;
+        if (!sourceItem) {
+          return null;
+        }
+        const title = String(
+          firstNonEmptyString([sourceItem.title, sourceItem.label, sourceItem.endpointTitle, sourceItem.endpointKey])
+        ).trim();
+        const summary = String(
+          firstNonEmptyString([sourceItem.summary, sourceItem.statusSummary, sourceItem.message, sourceItem.description])
+        ).trim();
+        if (!title && !summary) {
+          return null;
+        }
+        return {
+          title,
+          summary,
+          requestUrl: String(sourceItem.requestUrl || "").trim(),
+          endpointKey: String(sourceItem.endpointKey || "").trim().toLowerCase(),
+          endpointPath: String(sourceItem.endpointPath || "").trim(),
+          rowCount: Math.max(0, Number(sourceItem.rowCount || 0)),
+          activeCount: Math.max(0, Number(sourceItem.activeCount || 0)),
+          ok: sourceItem.ok === true,
+          status: Math.max(0, Number(sourceItem.status || 0)),
+          statusText: String(sourceItem.statusText || "").trim(),
+          error: String(sourceItem.error || "").trim(),
+        };
+      })
+      .filter(Boolean);
+  };
+  const columns = Array.isArray(source.columns)
+    ? source.columns.map((value) => String(value ?? "").trim()).filter(Boolean)
+    : [];
+  const rows = Array.isArray(source.rows)
+    ? source.rows
+        .map((row) => (Array.isArray(row) ? row.map((value) => String(value ?? "").trim()) : null))
+        .filter((row) => Array.isArray(row) && row.length > 0)
+    : [];
+  const reportItems = normalizeReportItems(source.reportItems);
+  const messageOnly = source.messageOnly === true || source.skipCsvAttachment === true || reportItems.length > 0;
+  if ((columns.length === 0 || rows.length === 0) && !messageOnly) {
+    return null;
+  }
+  const workspaceKey = String(source.workspaceKey || "").trim().toLowerCase() || "workspace";
+  const requestUrl = String(source.requestUrl || "").trim();
+  return {
+    workspaceKey,
+    workspaceLabel: String(source.workspaceLabel || "").trim() || "Workspace",
+    datasetLabel: String(source.datasetLabel || "").trim() || "Report Card",
+    displayNodeLabel: String(source.displayNodeLabel || source.datasetLabel || "").trim(),
+    requestLabel: String(source.requestLabel || "").trim(),
+    requestUrl,
+    requestPath:
+      workspaceKey === "esm"
+        ? normalizeUnderparEsmRequestPath(source.requestPath || requestUrl)
+        : workspaceKey === "cm"
+          ? normalizeUnderparCmDeeplinkRequestPath(source.requestPath || requestUrl)
+          : "",
+    endpointUrl: String(source.endpointUrl || "").trim(),
+    baseRequestUrl: String(source.baseRequestUrl || "").trim(),
+    zoomKey: String(source.zoomKey || "").trim(),
+    programmerId: String(source.programmerId || "").trim(),
+    programmerName: String(source.programmerName || "").trim(),
+    requestorId: String(source.requestorId || "").trim(),
+    mvpd: String(source.mvpd || "").trim(),
+    mvpdLabel: String(source.mvpdLabel || "").trim(),
+    mvpdScopeLabel: String(source.mvpdScopeLabel || "").trim(),
+    tenantId: String(source.tenantId || "").trim(),
+    tenantName: String(source.tenantName || "").trim(),
+    adobePassEnvironmentKey: String(source.adobePassEnvironmentKey || "").trim(),
+    adobePassEnvironmentLabel: String(source.adobePassEnvironmentLabel || "").trim(),
+    endpointKey: String(source.endpointKey || "").trim().toLowerCase(),
+    endpointPath: String(source.endpointPath || "").trim(),
+    endpointKeys: normalizeEndpointKeys(source.endpointKeys || source.endpointKey || source.endpointPath || ""),
+    includeAllMvpd: source.includeAllMvpd === true || !String(source.mvpd || "").trim(),
+    selectionKey: String(source.selectionKey || "").trim(),
+    csvFileName: String(source.csvFileName || source.fileName || "").trim(),
+    columns,
+    rows,
+    reportItems,
+    reportCount: Math.max(0, Number(source.reportCount || reportItems.length || 0)),
+    messageOnly,
+    skipCsvAttachment: source.skipCsvAttachment === true || messageOnly,
+    rowCount: Math.max(0, Number(source.rowCount || rows.length || 0)),
+  };
+}
+
+function underparBlondiePayloadHasTabularData(payload = null) {
+  return Boolean(Array.isArray(payload?.columns) && payload.columns.length > 0 && Array.isArray(payload?.rows) && payload.rows.length > 0);
+}
+
+function underparBlondiePayloadHasMessageContent(payload = null) {
+  return Boolean(Array.isArray(payload?.reportItems) && payload.reportItems.length > 0);
+}
+
+function underparBlondiePayloadRequiresCsvAttachment(payload = null) {
+  return payload?.messageOnly !== true && payload?.skipCsvAttachment !== true;
+}
+
+function underparBlondiePayloadHasDeliverableContent(payload = null) {
+  return underparBlondiePayloadHasTabularData(payload) || underparBlondiePayloadHasMessageContent(payload);
+}
+
+function buildUnderparEsmRequestPath(pathname = "", search = "", options = {}) {
+  const allowBarePath = options?.allowBarePath === true;
+  let normalizedPath = String(pathname || "").trim().replace(/\/+$/g, "");
+  if (!normalizedPath) {
+    return "";
+  }
+  if (/^\/?esm\/v3\/media-company(?:\/|$)/i.test(normalizedPath)) {
+    if (!normalizedPath.startsWith("/")) {
+      normalizedPath = `/${normalizedPath}`;
+    }
+    return `${normalizedPath}${String(search || "")}`;
+  }
+  if (!allowBarePath) {
+    return "";
+  }
+  normalizedPath = normalizedPath.replace(/^\/+/, "");
+  if (!normalizedPath) {
+    return "";
+  }
+  return `${UNDERPAR_ESM_NODE_PATH_PREFIX}/${normalizedPath}${String(search || "")}`;
+}
+
+function normalizeUnderparEsmRequestPath(rawValue = "") {
+  const normalized = stripMegWorkspaceMediaCompanyQueryParam(String(rawValue || "").trim());
+  if (!normalized) {
+    return "";
+  }
+  const hasAbsoluteScheme = /^[a-z][a-z\d+.-]*:/i.test(normalized);
+  try {
+    const base = String(getActiveAdobePassEnvironment()?.esmBase || `${ADOBE_MGMT_BASE}${UNDERPAR_ESM_NODE_PATH_PREFIX}/`).trim();
+    const parsed = hasAbsoluteScheme ? new URL(normalized) : new URL(normalized, base || ADOBE_MGMT_BASE);
+    return buildUnderparEsmRequestPath(String(parsed.pathname || ""), String(parsed.search || ""), {
+      allowBarePath: !hasAbsoluteScheme,
+    });
+  } catch (_error) {
+    const withoutHash = normalized.split("#")[0] || "";
+    const [pathPart, queryPart = ""] = withoutHash.split("?");
+    return buildUnderparEsmRequestPath(pathPart, queryPart ? `?${queryPart}` : "", {
+      allowBarePath: !hasAbsoluteScheme,
+    });
+  }
+}
+
+function buildUnderparWorkspaceBlondieDeeplinkBaseUrl(markerValue = "") {
+  const normalizedMarkerValue = String(markerValue || "").trim();
+  if (!normalizedMarkerValue) {
+    return null;
+  }
+  let baseUrl = "";
+  try {
+    baseUrl = String(chrome?.identity?.getRedirectURL?.("") || "").trim();
+  } catch (_error) {
+    baseUrl = "";
+  }
+  if (!baseUrl) {
+    baseUrl = `https://${String(chrome?.runtime?.id || "").trim()}.chromiumapp.org/`;
+  }
+  if (!baseUrl) {
+    return null;
+  }
+  const url = new URL(baseUrl);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set(UNDERPAR_ESM_DEEPLINK_MARKER_PARAM, normalizedMarkerValue);
+  return url;
+}
+
+function buildUnderparEsmBlondieDeeplinkPayload(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!payload || payload.workspaceKey !== "esm") {
+    return null;
+  }
+  const requestPath = normalizeUnderparEsmRequestPath(payload.requestPath || payload.requestUrl);
+  if (!requestPath) {
+    return null;
+  }
+  return {
+    requestPath,
+    displayNodeLabel: String(payload.displayNodeLabel || payload.datasetLabel || "").trim(),
+    programmerId: String(payload.programmerId || "").trim(),
+    programmerName: String(payload.programmerName || "").trim(),
+    environmentKey:
+      String(payload.adobePassEnvironmentKey || getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+      DEFAULT_ADOBEPASS_ENVIRONMENT.key,
+    environmentLabel: String(payload.adobePassEnvironmentLabel || getActiveAdobePassEnvironment()?.label || "").trim(),
+    source: "blondie-button",
+    createdAt: Date.now(),
+  };
+}
+
+function buildUnderparEsmBlondieDeeplinkUrl(exportPayload = null) {
+  const payload = buildUnderparEsmBlondieDeeplinkPayload(exportPayload);
+  if (!payload) {
+    return "";
+  }
+  const url = buildUnderparWorkspaceBlondieDeeplinkBaseUrl(UNDERPAR_ESM_DEEPLINK_MARKER_VALUE);
+  if (!url) {
+    return "";
+  }
+  const params = new URLSearchParams(url.search);
+  params.set("requestPath", payload.requestPath);
+  if (payload.displayNodeLabel) {
+    params.set("displayNodeLabel", payload.displayNodeLabel);
+  }
+  if (payload.programmerId) {
+    params.set("programmerId", payload.programmerId);
+  }
+  if (payload.programmerName) {
+    params.set("programmerName", payload.programmerName);
+  }
+  if (payload.environmentKey) {
+    params.set("environmentKey", payload.environmentKey);
+  }
+  if (payload.environmentLabel) {
+    params.set("environmentLabel", payload.environmentLabel);
+  }
+  params.set("source", payload.source);
+  params.set("createdAt", String(payload.createdAt || Date.now()));
+  url.search = params.toString();
+  return url.toString();
+}
+
+function buildUnderparDegradationBlondieDeeplinkPayload(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!payload || payload.workspaceKey !== "degradation") {
+    return null;
+  }
+  const endpointKeys = Array.isArray(payload.endpointKeys) && payload.endpointKeys.length > 0
+    ? payload.endpointKeys
+    : [firstNonEmptyString([payload.endpointKey, payload.endpointPath]).toLowerCase()].filter(Boolean);
+  const endpointKey = firstNonEmptyString([
+    payload.endpointKey,
+    endpointKeys.length > 1 ? "all" : "",
+    endpointKeys[0],
+    payload.endpointPath,
+  ]).toLowerCase();
+  const programmerId = String(payload.programmerId || "").trim();
+  const requestorId = String(payload.requestorId || "").trim();
+  if (!endpointKey || !programmerId || !requestorId) {
+    return null;
+  }
+  const mvpd = String(payload.mvpd || "").trim();
+  const includeAllMvpd = payload.includeAllMvpd === true || !mvpd;
+  const environmentKey =
+    String(payload.adobePassEnvironmentKey || getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+    DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  return {
+    endpointKey,
+    endpointKeys,
+    endpointPath: String(payload.endpointPath || endpointKey).trim(),
+    requestUrl: String(payload.requestUrl || "").trim(),
+    displayNodeLabel: String(payload.displayNodeLabel || payload.datasetLabel || "").trim(),
+    programmerId,
+    programmerName: String(payload.programmerName || "").trim(),
+    requestorId,
+    mvpd: includeAllMvpd ? "" : mvpd,
+    mvpdLabel: String(payload.mvpdLabel || "").trim(),
+    includeAllMvpd,
+    environmentKey,
+    environmentLabel: String(payload.adobePassEnvironmentLabel || getActiveAdobePassEnvironment()?.label || "").trim(),
+    selectionKey:
+      String(payload.selectionKey || "").trim() ||
+      buildDegradationWorkspaceSelectionKey({
+        environmentKey,
+        programmerId,
+        requestorId,
+        mvpd: includeAllMvpd ? "" : mvpd,
+      }),
+    source: "blondie-button",
+    createdAt: Date.now(),
+  };
+}
+
+function buildUnderparDegradationBlondieDeeplinkUrl(exportPayload = null) {
+  const payload = buildUnderparDegradationBlondieDeeplinkPayload(exportPayload);
+  if (!payload) {
+    return "";
+  }
+  const url = buildUnderparWorkspaceBlondieDeeplinkBaseUrl(UNDERPAR_DEGRADATION_DEEPLINK_MARKER_VALUE);
+  if (!url) {
+    return "";
+  }
+  const params = new URLSearchParams(url.search);
+  params.set("endpointKey", payload.endpointKey);
+  if (Array.isArray(payload.endpointKeys) && payload.endpointKeys.length > 0) {
+    params.set("endpointKeys", payload.endpointKeys.join(","));
+  }
+  if (payload.endpointPath) {
+    params.set("endpointPath", payload.endpointPath);
+  }
+  if (payload.requestUrl) {
+    params.set("requestUrl", payload.requestUrl);
+  }
+  if (payload.displayNodeLabel) {
+    params.set("displayNodeLabel", payload.displayNodeLabel);
+  }
+  if (payload.programmerId) {
+    params.set("programmerId", payload.programmerId);
+  }
+  if (payload.programmerName) {
+    params.set("programmerName", payload.programmerName);
+  }
+  if (payload.requestorId) {
+    params.set("requestorId", payload.requestorId);
+  }
+  if (payload.mvpd) {
+    params.set("mvpd", payload.mvpd);
+  }
+  if (payload.mvpdLabel) {
+    params.set("mvpdLabel", payload.mvpdLabel);
+  }
+  params.set("includeAllMvpd", payload.includeAllMvpd ? "true" : "false");
+  if (payload.environmentKey) {
+    params.set("environmentKey", payload.environmentKey);
+  }
+  if (payload.environmentLabel) {
+    params.set("environmentLabel", payload.environmentLabel);
+  }
+  if (payload.selectionKey) {
+    params.set("selectionKey", payload.selectionKey);
+  }
+  params.set("source", payload.source);
+  params.set("createdAt", String(payload.createdAt || Date.now()));
+  url.search = params.toString();
+  return url.toString();
+}
+
+function buildUnderparCmRequestPath(pathname = "", search = "", options = {}) {
+  const allowBarePath = options?.allowBarePath === true;
+  let normalizedPath = String(pathname || "").trim();
+  if (!normalizedPath) {
+    return "";
+  }
+  if (!normalizedPath.startsWith("/")) {
+    if (!allowBarePath) {
+      return "";
+    }
+    normalizedPath = `/${normalizedPath.replace(/^\/+/, "")}`;
+  }
+  const params = new URLSearchParams(String(search || "").replace(/^\?/, ""));
+  if (isClickCmuUsagePath(normalizedPath)) {
+    CM_USAGE_TENANT_QUERY_KEYS.forEach((key) => params.delete(key));
+  }
+  if (/^\/maitai\/(?:applications|policy)(?:\/|$)/i.test(normalizedPath)) {
+    params.delete("orgId");
+    params.delete("orgid");
+  }
+  const normalizedSearch = params.toString();
+  return `${normalizedPath}${normalizedSearch ? `?${normalizedSearch}` : ""}`;
+}
+
+function normalizeUnderparCmDeeplinkRequestPath(rawValue = "") {
+  const normalized = String(rawValue || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const hasAbsoluteScheme = /^[a-z][a-z\d+.-]*:/i.test(normalized);
+  try {
+    const parsed = hasAbsoluteScheme ? new URL(normalized) : new URL(normalized, CM_REPORTS_BASE_URL);
+    return buildUnderparCmRequestPath(String(parsed.pathname || ""), String(parsed.search || ""), {
+      allowBarePath: !hasAbsoluteScheme,
+    });
+  } catch (_error) {
+    const withoutHash = normalized.split("#")[0] || "";
+    const [pathPart, queryPart = ""] = withoutHash.split("?");
+    return buildUnderparCmRequestPath(pathPart, queryPart ? `?${queryPart}` : "", {
+      allowBarePath: !hasAbsoluteScheme,
+    });
+  }
+}
+
+function buildUnderparCmBlondieDeeplinkPayload(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!payload || payload.workspaceKey !== "cm") {
+    return null;
+  }
+  const requestPath = normalizeUnderparCmDeeplinkRequestPath(
+    payload.requestPath || payload.requestUrl || payload.baseRequestUrl || payload.endpointUrl
+  );
+  if (!requestPath) {
+    return null;
+  }
+  return {
+    requestPath,
+    displayNodeLabel: String(payload.displayNodeLabel || payload.datasetLabel || "").trim(),
+    source: "blondie-button",
+    createdAt: Date.now(),
+  };
+}
+
+function buildUnderparCmBlondieDeeplinkUrl(exportPayload = null) {
+  const payload = buildUnderparCmBlondieDeeplinkPayload(exportPayload);
+  if (!payload) {
+    return "";
+  }
+  const url = buildUnderparWorkspaceBlondieDeeplinkBaseUrl(UNDERPAR_CM_DEEPLINK_MARKER_VALUE);
+  if (!url) {
+    return "";
+  }
+  const params = new URLSearchParams(url.search);
+  params.set("requestPath", payload.requestPath);
+  if (payload.displayNodeLabel) {
+    params.set("displayNodeLabel", payload.displayNodeLabel);
+  }
+  params.set("source", payload.source);
+  params.set("createdAt", String(payload.createdAt || Date.now()));
+  url.search = params.toString();
+  return url.toString();
+}
+
+function escapeUnderparSlackMrkdwn(value = "") {
+  return String(value == null ? "" : value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function sanitizeUnderparSlackLinkTarget(value = "") {
+  return String(value == null ? "" : value)
+    .trim()
+    .replaceAll("<", "%3C")
+    .replaceAll(">", "%3E")
+    .replaceAll("|", "%7C")
+    .replaceAll(" ", "%20");
+}
+
+function buildUnderparSlackMrkdwnLink(urlValue = "", labelValue = "") {
+  const safeUrl = sanitizeUnderparSlackLinkTarget(urlValue);
+  const label = String(labelValue || "").trim();
+  if (!safeUrl) {
+    return escapeUnderparSlackMrkdwn(label);
+  }
+  if (!label || label === safeUrl) {
+    return `<${safeUrl}>`;
+  }
+  return `<${safeUrl}|${escapeUnderparSlackMrkdwn(label)}>`;
+}
+
+function formatUnderparBlondieHeaderRequestValue(payload = null) {
+  const requestLabel = String(payload?.requestLabel || "").trim();
+  if (requestLabel) {
+    return requestLabel;
+  }
+  const requestUrl = String(payload?.requestUrl || "").trim();
+  if (requestUrl) {
+    return requestUrl;
+  }
+  return String(payload?.requestPath || "").trim();
+}
+
+function escapeUnderparCsvValue(value = "") {
+  const text = String(value == null ? "" : value);
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, "\"\"")}"`;
+  }
+  return text;
+}
+
+function buildUnderparBlondieCsvText(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!payload) {
+    return "";
+  }
+  const csvRows = [
+    payload.columns,
+    ...payload.rows.map((row) => payload.columns.map((_, index) => String(row?.[index] ?? ""))),
+  ];
+  return csvRows.map((row) => row.map((value) => escapeUnderparCsvValue(value)).join(",")).join("\r\n");
+}
+
+function buildUnderparBlondieCsvTitle(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!payload) {
+    return "UnderPAR export";
+  }
+  const title = [payload.workspaceLabel, payload.datasetLabel || "Report Card"]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  return title.slice(0, 160) || "UnderPAR export";
+}
+
+function buildUnderparBlondieCsvFileName(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  const explicitFileName = String(payload?.csvFileName || "").trim();
+  if (explicitFileName) {
+    return explicitFileName;
+  }
+  const workspaceKey = sanitizeDownloadFileSegment(payload?.workspaceKey || "workspace", "workspace").toLowerCase();
+  const programmerSegment = sanitizeDownloadFileSegment(payload?.programmerId || "", "").slice(0, 32);
+  const datasetSegment = sanitizeDownloadFileSegment(
+    payload?.displayNodeLabel || payload?.datasetLabel || payload?.workspaceLabel || "report",
+    "report"
+  ).slice(0, 72);
+  const envSegment = sanitizeDownloadFileSegment(payload?.adobePassEnvironmentKey || getAdobePassEnvironmentFileTag(), "").slice(0, 16);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return [
+    "underpar",
+    workspaceKey,
+    programmerSegment,
+    datasetSegment || "report",
+    envSegment,
+    stamp,
+  ]
+    .filter(Boolean)
+    .join("_")
+    .concat(".csv");
+}
+
+function withUnderparBlondieCsvFileName(exportPayload = null, csvFileName = "") {
+  const normalizedFileName = String(csvFileName || "").trim();
+  if (!normalizedFileName || !exportPayload || typeof exportPayload !== "object" || Array.isArray(exportPayload)) {
+    return exportPayload;
+  }
+  return {
+    ...exportPayload,
+    csvFileName: normalizedFileName,
+  };
+}
+
+function buildUnderparBlondieEsmCsvFileName(cardPayload = null, exportPayload = null) {
+  const esmWorkspaceState = getActiveEsmWorkspaceState();
+  if (!esmWorkspaceState) {
+    return "";
+  }
+  const endpointUrl = stripMegWorkspaceMediaCompanyQueryParam(
+    String(cardPayload?.endpointUrl || cardPayload?.requestUrl || exportPayload?.requestUrl || "").trim()
+  );
+  if (!endpointUrl) {
+    return "";
+  }
+  return esmWorkspaceBuildCsvFileName(esmWorkspaceState, endpointUrl);
+}
+
+function buildUnderparBlondieCmCsvFileName(cmState, cardPayload = null, options = {}) {
+  if (!cmState) {
+    return "";
+  }
+  const card = cardPayload && typeof cardPayload === "object" && !Array.isArray(cardPayload) ? cardPayload : {};
+  const isMvpdCmContext = options?.isMvpdCmContext === true || String(cmState?.serviceType || "").trim().toLowerCase() === "cmmvpd";
+  const matchedRecord = cmFindRecordByCard(cmState, card);
+  const fallbackRecord = cmBuildFallbackRecordFromCard(cmState, card, {
+    tenantIdCandidates: Array.isArray(options?.tenantIdCandidates) ? options.tenantIdCandidates : [],
+    tenantNameCandidates: Array.isArray(options?.tenantNameCandidates) ? options.tenantNameCandidates : [],
+  });
+  fallbackRecord.columns = Array.isArray(card?.columns)
+    ? card.columns.map((value) => String(value || "")).filter(Boolean)
+    : [];
+  const requestContext = cmResolveRequestorMvpdContext(cmState);
+  const baseRecord = matchedRecord || fallbackRecord;
+  const scopedRecord = isMvpdCmContext
+    ? {
+        ...baseRecord,
+        tenantId: firstNonEmptyString([
+          String(baseRecord?.tenantId || "").trim(),
+          String(cmState?.cmService?.matchedTenants?.[0]?.tenantId || "").trim(),
+          String(cmState?.tenantScope || "").trim(),
+          String(requestContext.mvpdId || "").trim(),
+        ]),
+        tenantName: firstNonEmptyString([
+          String(baseRecord?.tenantName || "").trim(),
+          String(cmState?.cmService?.matchedTenants?.[0]?.tenantName || "").trim(),
+          String(requestContext.mvpdLabel || "").trim(),
+          String(requestContext.mvpdId || "").trim(),
+        ]),
+      }
+    : baseRecord;
+  return cmBuildCsvFileName(cmState, scopedRecord, card);
+}
+
+function buildUnderparBlondieWorkspaceDeeplinkUrl(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!payload) {
+    return "";
+  }
+  if (payload.workspaceKey === "esm") {
+    return buildUnderparEsmBlondieDeeplinkUrl(payload);
+  }
+  if (payload.workspaceKey === "cm") {
+    return buildUnderparCmBlondieDeeplinkUrl(payload);
+  }
+  if (payload.workspaceKey === "degradation") {
+    return buildUnderparDegradationBlondieDeeplinkUrl(payload);
+  }
+  return "";
+}
+
+function buildUnderparBlondieSignatureLine(payload = null, workspaceDeeplinkUrl = "") {
+  const zipZapLink = buildUnderparSlackMrkdwnLink(UNDERPAR_BLONDIE_ZIP_TOOL_BETA_ARTICLE_URL, "zip-zap");
+  if (workspaceDeeplinkUrl) {
+    return `// ${zipZapLink} :blondiebtn: ${buildUnderparSlackMrkdwnLink(workspaceDeeplinkUrl, "in UnderPAR")}`;
+  }
+  return `// ${zipZapLink} :blondiebtn: in UnderPAR`;
+}
+
+function buildUnderparDegradationBlondieMarkdown(payload = null) {
+  const normalizedPayload = normalizeUnderparBlondieExportPayload(payload);
+  if (!normalizedPayload) {
+    return "";
+  }
+  const requestLineValue = formatUnderparBlondieHeaderRequestValue(normalizedPayload);
+  const workspaceDeeplinkUrl = buildUnderparBlondieWorkspaceDeeplinkUrl(normalizedPayload);
+  const scopeLabel = [
+    String(normalizedPayload.requestorId || "").trim(),
+    String(
+      firstNonEmptyString([
+        normalizedPayload.mvpdScopeLabel,
+        normalizedPayload.includeAllMvpd === true ? "ALL MVPDs" : "",
+        normalizedPayload.mvpdLabel,
+        normalizedPayload.mvpd,
+      ])
+    ).trim(),
+  ]
+    .filter(Boolean)
+    .join(" X ");
+  const headerLines = [`*UNDERPAR ${escapeUnderparSlackMrkdwn(normalizedPayload.workspaceLabel)} query*`];
+  if (requestLineValue) {
+    headerLines.push(`• Request: ${escapeUnderparSlackMrkdwn(requestLineValue)}`);
+  }
+  if (scopeLabel) {
+    headerLines.push(`• Scope: ${escapeUnderparSlackMrkdwn(scopeLabel)}`);
+  }
+  headerLines.push(`• Reports: ${Math.max(0, Number(normalizedPayload.reportCount || normalizedPayload.reportItems.length || 0))}`);
+
+  const reportLines = normalizedPayload.reportItems
+    .map((item) => {
+      const title = escapeUnderparSlackMrkdwn(String(item?.title || "").trim());
+      const summary = escapeUnderparSlackMrkdwn(String(item?.summary || "").trim());
+      if (!title && !summary) {
+        return "";
+      }
+      if (!summary) {
+        return `• ${title}`;
+      }
+      if (!title) {
+        return `• ${summary}`;
+      }
+      return `• ${title}: ${summary}`;
+    })
+    .filter(Boolean);
+
+  const signatureLine = buildUnderparBlondieSignatureLine(normalizedPayload, workspaceDeeplinkUrl);
+  return headerLines
+    .concat(reportLines.length > 0 ? ["", ...reportLines] : [])
+    .concat(["", signatureLine])
+    .join("\n")
+    .trim()
+    .slice(0, UNDERPAR_BLONDIE_EXPORT_MAX_MESSAGE_CHARS);
+}
+
+function buildUnderparBlondieMarkdown(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!payload) {
+    return "";
+  }
+  if (payload.workspaceKey === "degradation" && underparBlondiePayloadHasMessageContent(payload)) {
+    return buildUnderparDegradationBlondieMarkdown(payload);
+  }
+  const requestLineValue = formatUnderparBlondieHeaderRequestValue(payload);
+  const workspaceDeeplinkUrl = buildUnderparBlondieWorkspaceDeeplinkUrl(payload);
+  const headerLines = [
+    `*UNDERPAR ${escapeUnderparSlackMrkdwn(payload.workspaceLabel)} query*`,
+  ];
+  if (requestLineValue) {
+    headerLines.push(`• Request: ${escapeUnderparSlackMrkdwn(requestLineValue)}`);
+  }
+  headerLines.push(`• Rows: ${Math.max(0, Number(payload.rowCount || 0))}`);
+
+  const signatureLine = buildUnderparBlondieSignatureLine(payload, workspaceDeeplinkUrl);
+  return headerLines.concat(["", signatureLine]).join("\n").trim().slice(0, UNDERPAR_BLONDIE_EXPORT_MAX_MESSAGE_CHARS);
+}
+
+function normalizePendingUnderparEsmDeeplinkPayload(input = null) {
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : null;
+  if (!source) {
+    return null;
+  }
+  const requestPath = normalizeUnderparEsmRequestPath(source.requestPath || source.requestUrl || "");
+  if (!requestPath) {
+    return null;
+  }
+  const createdAt = Math.max(0, Number(source.createdAt || Date.now() || 0));
+  if (!createdAt || Date.now() - createdAt > UNDERPAR_ESM_DEEPLINK_MAX_AGE_MS) {
+    return null;
+  }
+  return {
+    requestPath,
+    displayNodeLabel: String(source.displayNodeLabel || source.datasetLabel || "").trim(),
+    programmerId: String(source.programmerId || "").trim(),
+    programmerName: String(source.programmerName || "").trim(),
+    environmentKey:
+      String(source.environmentKey || source.adobePassEnvironmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+      DEFAULT_ADOBEPASS_ENVIRONMENT.key,
+    environmentLabel: String(source.environmentLabel || source.adobePassEnvironmentLabel || "").trim(),
+    source: String(source.source || "blondie-button").trim() || "blondie-button",
+    createdAt,
+  };
+}
+
+async function readPendingUnderparEsmDeeplink() {
+  if (!chrome?.storage?.local) {
+    return null;
+  }
+  const payload = await chrome.storage.local.get(UNDERPAR_ESM_DEEPLINK_STORAGE_KEY).catch(() => ({}));
+  const normalized = normalizePendingUnderparEsmDeeplinkPayload(payload?.[UNDERPAR_ESM_DEEPLINK_STORAGE_KEY] || null);
+  if (normalized) {
+    return normalized;
+  }
+  await chrome.storage.local.remove(UNDERPAR_ESM_DEEPLINK_STORAGE_KEY).catch(() => {});
+  return null;
+}
+
+async function clearPendingUnderparEsmDeeplink() {
+  if (!chrome?.storage?.local) {
+    return;
+  }
+  await chrome.storage.local.remove(UNDERPAR_ESM_DEEPLINK_STORAGE_KEY).catch(() => {});
+}
+
+async function resolveUnderparBlondieDeliveryChannel(record = null) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  if (!normalizedRecord?.ready || !normalizedRecord?.identity?.userId) {
+    return {
+      ok: false,
+      code: "slacktivation_required",
+      error: "SLACKTIVATE UnderPAR in the VAULT first.",
+    };
+  }
+
+  const userId = normalizeSlackUserId(normalizedRecord.identity.userId);
+  const tokenCandidates = [
+    normalizeSlackApiToken(normalizedRecord.api.botToken || ""),
+    normalizeSlackApiToken(normalizedRecord.api.userToken || ""),
+    normalizeSlackApiToken(normalizedRecord.api.oauthToken || ""),
+  ].filter(Boolean);
+
+  const uniqueTokens = [];
+  tokenCandidates.forEach((token) => {
+    if (!uniqueTokens.includes(token)) {
+      uniqueTokens.push(token);
+    }
+  });
+  for (const token of uniqueTokens) {
+    const openResult = await postSlackApiWithBearerToken(SLACKTIVATION_API_ORIGIN, "/api/conversations.open", {
+      users: userId,
+      return_im: "true",
+      _x_reason: "underpar-blondie-open-dm",
+    }, token);
+    if (!openResult.ok) {
+      continue;
+    }
+    const channelId = normalizeSlackDirectChannelId(
+      openResult.payload?.channel?.id || openResult.payload?.channel_id || openResult.payload?.channel || ""
+    );
+    if (!channelId) {
+      continue;
+    }
+    return {
+      ok: true,
+      channelId,
+      token,
+      deliveryMode: isSlackBotApiToken(token) ? "bot_direct_channel" : "user_direct_channel",
+    };
+  }
+
+  return {
+    ok: false,
+    code: "slack_direct_channel_unavailable",
+    error: "Unable to open your ZipTool panel conversation in Slack.",
+  };
+}
+
+async function sendUnderparBlondieExportToSlack(exportPayload = null, options = {}) {
+  const normalizedExport = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!normalizedExport || !underparBlondiePayloadHasDeliverableContent(normalizedExport)) {
+    return {
+      ok: false,
+      error: "No report data is available for :blondiebtn:.",
+    };
+  }
+
+  return enqueuePassVaultPersist(async () => {
+    const vault = normalizeUnderparVaultPayload(state.passVault || (await ensurePassVaultLoaded({ forceReload: false })));
+    const existingRecord = getUnderparVaultSlacktivationRecord(vault);
+    if (!existingRecord) {
+      return {
+        ok: false,
+        error: "SLACKTIVATE UnderPAR in the VAULT first.",
+      };
+    }
+
+    const authResult = await authenticateUnderparSlacktivationRecord(existingRecord, {
+      interactive: options?.interactive === true,
+    });
+    if (!authResult.ok) {
+      // A failed Blondie send should not silently "unslacktivate" the workspace.
+      // Keep the existing ready state so the button returns to the ready art
+      // unless the user explicitly deactivates Slacktivation.
+      const failedRecord = mergeUnderparSlacktivationRecord(existingRecord, {
+        ready: true,
+        updatedAt: Date.now(),
+        openIdSession: authResult.openIdSession || existingRecord.openIdSession || null,
+        identity: existingRecord.identity
+          ? {
+              ...existingRecord.identity,
+              ready: true,
+              updatedAt: Date.now(),
+            }
+          : null,
+        lastError: buildUnderparSlacktivationErrorRecord(authResult.code || "slacktivation_failed", authResult.error),
+      });
+      setUnderparVaultSlacktivationRecord(vault, failedRecord);
+      vault.updatedAt = Date.now();
+      await persistPassVaultPayloadToStorage(vault, { silent: true });
+      return {
+        ok: false,
+        error: authResult.error || "Unable to refresh SLACKTIVATION.",
+      };
+    }
+
+    const readyRecord = authResult.record;
+    const channelResult = await resolveUnderparBlondieDeliveryChannel(readyRecord);
+    if (!channelResult.ok) {
+      const failedRecord = mergeUnderparSlacktivationRecord(readyRecord, {
+        ready: true,
+        updatedAt: Date.now(),
+        lastError: buildUnderparSlacktivationErrorRecord(channelResult.code || "slack_direct_channel_unavailable", channelResult.error),
+      });
+      setUnderparVaultSlacktivationRecord(vault, failedRecord);
+      vault.updatedAt = Date.now();
+      await persistPassVaultPayloadToStorage(vault, { silent: true });
+      return {
+        ok: false,
+        error: channelResult.error || "Unable to open your ZipTool panel conversation in Slack.",
+      };
+    }
+
+    const markdownText = buildUnderparBlondieMarkdown(normalizedExport);
+    if (!underparBlondiePayloadRequiresCsvAttachment(normalizedExport)) {
+      const messageResult = await postSlackApiWithBearerToken(
+        SLACKTIVATION_API_ORIGIN,
+        "/api/chat.postMessage",
+        {
+          channel: channelResult.channelId,
+          text: markdownText,
+          mrkdwn: true,
+          unfurl_links: false,
+          unfurl_media: false,
+          _x_reason: "underpar-blondie-post-message",
+        },
+        channelResult.token
+      );
+      if (!messageResult.ok) {
+        const failedRecord = mergeUnderparSlacktivationRecord(readyRecord, {
+          ready: true,
+          updatedAt: Date.now(),
+          lastError: buildUnderparSlacktivationErrorRecord(
+            messageResult.code || "slack_message_failed",
+            messageResult.error
+          ),
+        });
+        setUnderparVaultSlacktivationRecord(vault, failedRecord);
+        vault.updatedAt = Date.now();
+        await persistPassVaultPayloadToStorage(vault, { silent: true });
+        return {
+          ok: false,
+          error: messageResult.error || "Unable to deliver :blondiebtn: message to Slack.",
+        };
+      }
+
+      const nextRecord = mergeUnderparSlacktivationRecord(readyRecord, {
+        ready: true,
+        updatedAt: Date.now(),
+        identity: buildUnderparSlacktivationIdentityRecord(readyRecord.identity || null, {
+          ready: true,
+          directChannelId: channelResult.channelId,
+          updatedAt: Date.now(),
+        }),
+        lastError: null,
+      });
+      setUnderparVaultSlacktivationRecord(vault, nextRecord);
+      vault.updatedAt = Date.now();
+      await persistPassVaultPayloadToStorage(vault, { silent: true });
+      return {
+        ok: true,
+        delivery_mode: channelResult.deliveryMode,
+        message_only: true,
+        report_count: Math.max(0, Number(normalizedExport.reportCount || normalizedExport.reportItems.length || 0)),
+        workspace_label: normalizedExport.workspaceLabel,
+      };
+    }
+
+    const csvText = buildUnderparBlondieCsvText(normalizedExport);
+    const csvFileName = buildUnderparBlondieCsvFileName(normalizedExport);
+    const csvTitle = buildUnderparBlondieCsvTitle(normalizedExport);
+    const uploadResult = await uploadSlackExternalFileWithBearerToken({
+      token: channelResult.token,
+      channelId: channelResult.channelId,
+      fileName: csvFileName,
+      title: csvTitle,
+      initialComment: markdownText,
+      text: csvText,
+      contentType: "text/csv;charset=utf-8",
+      snippetType: "csv",
+    });
+
+    if (!uploadResult.ok) {
+      const failedRecord = mergeUnderparSlacktivationRecord(readyRecord, {
+        ready: true,
+        updatedAt: Date.now(),
+        lastError: buildUnderparSlacktivationErrorRecord(
+          uploadResult.code || "slack_upload_failed",
+          uploadResult.error
+        ),
+      });
+      setUnderparVaultSlacktivationRecord(vault, failedRecord);
+      vault.updatedAt = Date.now();
+      await persistPassVaultPayloadToStorage(vault, { silent: true });
+      return {
+        ok: false,
+        error: uploadResult.error || "Unable to deliver :blondiebtn: CSV to Slack.",
+      };
+    }
+
+    const nextRecord = mergeUnderparSlacktivationRecord(readyRecord, {
+      ready: true,
+      updatedAt: Date.now(),
+      identity: buildUnderparSlacktivationIdentityRecord(readyRecord.identity || null, {
+        ready: true,
+        directChannelId: channelResult.channelId,
+        updatedAt: Date.now(),
+      }),
+      lastError: null,
+    });
+    setUnderparVaultSlacktivationRecord(vault, nextRecord);
+    vault.updatedAt = Date.now();
+    await persistPassVaultPayloadToStorage(vault, { silent: true });
+    return {
+      ok: true,
+      delivery_mode: channelResult.deliveryMode,
+      file_name: csvFileName,
+      row_count: normalizedExport.rowCount,
+      workspace_label: normalizedExport.workspaceLabel,
+    };
+  });
+}
+
+async function sendUnderparBlondieExportBatchToSlack(exportPayloads = [], options = {}) {
+  const normalizedExports = (Array.isArray(exportPayloads) ? exportPayloads : [])
+    .map((payload) => normalizeUnderparBlondieExportPayload(payload))
+    .filter(Boolean);
+  if (normalizedExports.length === 0) {
+    return {
+      ok: false,
+      error: String(options?.emptyError || "No report rows are available for :blondiebtn:.").trim() ||
+        "No report rows are available for :blondiebtn:.",
+      deliveredCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      totalCount: 0,
+    };
+  }
+
+  let deliveredCount = 0;
+  let failedCount = 0;
+  let skippedCount = 0;
+  const errors = [];
+
+  for (const exportPayload of normalizedExports) {
+    if (!underparBlondiePayloadHasDeliverableContent(exportPayload)) {
+      skippedCount += 1;
+      continue;
+    }
+    const sendResult = await sendUnderparBlondieExportToSlack(exportPayload, {
+      interactive: options?.interactive === true,
+    });
+    if (!sendResult?.ok) {
+      failedCount += 1;
+      errors.push(sendResult?.error || "Unable to deliver :blondiebtn: CSV to Slack.");
+      continue;
+    }
+    deliveredCount += 1;
+  }
+
+  if (deliveredCount <= 0) {
+    return {
+      ok: false,
+      error:
+        errors[0] ||
+        (skippedCount > 0
+          ? String(options?.emptyError || "No report rows are available for :blondiebtn:.").trim() ||
+            "No report rows are available for :blondiebtn:."
+          : String(options?.genericError || "Unable to deliver :blondiebtn: CSV to Slack.").trim() ||
+            "Unable to deliver :blondiebtn: CSV to Slack."),
+      deliveredCount,
+      failedCount,
+      skippedCount,
+      totalCount: normalizedExports.length,
+    };
+  }
+
+  return {
+    ok: true,
+    deliveredCount,
+    failedCount,
+    skippedCount,
+    totalCount: normalizedExports.length,
+    error: errors[0] || "",
+  };
+}
+
+function broadcastSlacktivationWorkspaceState(controllerReason = "slacktivation-update") {
+  const selectedProgrammer = resolveSelectedProgrammer();
+  const selectedServices = selectedProgrammer?.programmerId
+    ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
+    : null;
+  const activeEsmWorkspaceState = getActiveEsmWorkspaceState();
+  if (activeEsmWorkspaceState) {
+    esmWorkspaceBroadcastControllerState(activeEsmWorkspaceState);
+  } else {
+    esmWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices, 0, { controllerReason });
+  }
+  const activeCmState = getActiveCmState();
+  if (activeCmState) {
+    cmBroadcastControllerState(activeCmState);
+  } else {
+    cmBroadcastSelectedControllerState(selectedProgrammer, selectedServices, 0, { controllerReason });
+  }
+  mvpdWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices);
+  const activeDegradationState = getActiveDegradationWorkspaceState();
+  if (activeDegradationState?.programmer) {
+    const activeServices = getCurrentPremiumAppsSnapshot(String(activeDegradationState.programmer.programmerId || "").trim()) || selectedServices;
+    degradationWorkspaceBroadcastControllerState(activeDegradationState.programmer, activeServices, 0, { controllerReason });
+  } else {
+    degradationWorkspaceBroadcastControllerState(selectedProgrammer, selectedServices, 0, { controllerReason });
+  }
+}
+
 function ensureUnderparVaultGlobalContainers(vault = null) {
   const target = vault && typeof vault === "object" ? vault : createEmptyUnderparVaultPayload();
   if (!target.underpar || typeof target.underpar !== "object" || Array.isArray(target.underpar)) {
@@ -535,6 +3406,9 @@ function ensureUnderparVaultGlobalContainers(vault = null) {
     Array.isArray(target.underpar.globals.cmImsByEnvironment)
   ) {
     target.underpar.globals.cmImsByEnvironment = {};
+  }
+  if (!Object.prototype.hasOwnProperty.call(target.underpar.globals, "slack")) {
+    target.underpar.globals.slack = null;
   }
   if (
     !target.underpar.app.savedQueries ||
@@ -1507,6 +4381,7 @@ function normalizeUnderparVaultPayload(payload = null) {
   setUnderparVaultSavedQueries(normalized, getUnderparVaultSavedQueries(payload));
   const cmImsByEnvironment = getUnderparVaultCmImsByEnvironment(payload);
   normalized.underpar.globals.cmImsByEnvironment = cloneJsonLikeValue(cmImsByEnvironment, {});
+  setUnderparVaultSlacktivationRecord(normalized, getUnderparVaultSlacktivationInput(payload));
 
   const environmentsInput =
     payload?.pass?.environments && typeof payload.pass.environments === "object" ? payload.pass.environments : {};
@@ -2237,6 +5112,118 @@ async function persistPassVaultCmGlobalState(value = null, options = {}) {
 
     await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false });
     return nextRecord;
+  });
+}
+
+async function persistPassVaultSlacktivationState(value = null, options = {}) {
+  const nextRecord = normalizeUnderparVaultSlacktivationRecord(value);
+  return enqueuePassVaultPersist(async () => {
+    const vault = normalizeUnderparVaultPayload(
+      state.passVault || (await ensurePassVaultLoaded({ forceReload: options?.forceReload === true }))
+    );
+    setUnderparVaultSlacktivationRecord(vault, nextRecord);
+    vault.updatedAt = Date.now();
+    await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false });
+    return getUnderparVaultSlacktivationRecord(vault);
+  });
+}
+
+async function slacktivateUnderparFromDevtools(zipKeyText = "") {
+  const rawZipKeyText = String(zipKeyText || "").trim();
+  if (!rawZipKeyText) {
+    throw new Error("ZIP.KEY payload is required.");
+  }
+
+  return enqueuePassVaultPersist(async () => {
+    const vault = normalizeUnderparVaultPayload(state.passVault || (await ensurePassVaultLoaded({ forceReload: false })));
+    const existingRecord = getUnderparVaultSlacktivationRecord(vault);
+    const parsedPayload = parseZipKeyPayload(rawZipKeyText);
+    const zipKeyConfig = normalizeUnderparSlacktivationZipKeyConfig(parsedPayload);
+    const provisionalRecord = mergeUnderparSlacktivationRecord(existingRecord, {
+      ...zipKeyConfig,
+      ready: false,
+      updatedAt: Date.now(),
+      lastError: null,
+    });
+    setUnderparVaultSlacktivationRecord(vault, provisionalRecord);
+    vault.updatedAt = Date.now();
+    await persistPassVaultPayloadToStorage(vault, { silent: true });
+
+    const authResult = await authenticateUnderparSlacktivationRecord(provisionalRecord, {
+      interactive: true,
+    });
+    if (!authResult.ok) {
+      const failedRecord = mergeUnderparSlacktivationRecord(provisionalRecord, {
+        ready: false,
+        updatedAt: Date.now(),
+        openIdSession: authResult.openIdSession || provisionalRecord.openIdSession || null,
+        identity: provisionalRecord.identity
+          ? {
+              ...provisionalRecord.identity,
+              ready: false,
+              updatedAt: Date.now(),
+            }
+          : null,
+        lastError: buildUnderparSlacktivationErrorRecord(authResult.code || "slacktivation_failed", authResult.error),
+      });
+      setUnderparVaultSlacktivationRecord(vault, failedRecord);
+      vault.updatedAt = Date.now();
+      await persistPassVaultPayloadToStorage(vault, { silent: true });
+      broadcastSlacktivationWorkspaceState("slacktivation-failed");
+      throw new Error(authResult.error || "Unable to Slacktivate UnderPAR.");
+    }
+
+    setUnderparVaultSlacktivationRecord(vault, authResult.record);
+    vault.updatedAt = Date.now();
+    await persistPassVaultPayloadToStorage(vault, { silent: true });
+    broadcastSlacktivationWorkspaceState("slacktivation-ready");
+    return {
+      message: "UnderPAR is SLACKTIVATED.",
+      vaultPayload: cloneJsonLikeValue(vault, null),
+      slacktivation: cloneJsonLikeValue(getUnderparVaultSlacktivationRecord(vault), null),
+    };
+  });
+}
+
+async function refreshUnderparSlacktivationFromDevtools(options = {}) {
+  return enqueuePassVaultPersist(async () => {
+    const vault = normalizeUnderparVaultPayload(state.passVault || (await ensurePassVaultLoaded({ forceReload: false })));
+    const existingRecord = getUnderparVaultSlacktivationRecord(vault);
+    if (!existingRecord) {
+      throw new Error("Drop ZIP.KEY to SLACKTIVATE UnderPAR first.");
+    }
+    const authResult = await authenticateUnderparSlacktivationRecord(existingRecord, {
+      interactive: options?.interactive === true,
+    });
+    if (!authResult.ok) {
+      const failedRecord = mergeUnderparSlacktivationRecord(existingRecord, {
+        ready: false,
+        updatedAt: Date.now(),
+        openIdSession: authResult.openIdSession || existingRecord.openIdSession || null,
+        identity: existingRecord.identity
+          ? {
+              ...existingRecord.identity,
+              ready: false,
+              updatedAt: Date.now(),
+            }
+          : null,
+        lastError: buildUnderparSlacktivationErrorRecord(authResult.code || "slacktivation_failed", authResult.error),
+      });
+      setUnderparVaultSlacktivationRecord(vault, failedRecord);
+      vault.updatedAt = Date.now();
+      await persistPassVaultPayloadToStorage(vault, { silent: true });
+      broadcastSlacktivationWorkspaceState("slacktivation-refresh-failed");
+      throw new Error(authResult.error || "Unable to refresh Slacktivation.");
+    }
+    setUnderparVaultSlacktivationRecord(vault, authResult.record);
+    vault.updatedAt = Date.now();
+    await persistPassVaultPayloadToStorage(vault, { silent: true });
+    broadcastSlacktivationWorkspaceState("slacktivation-refresh");
+    return {
+      message: "UnderPAR Slacktivation refreshed.",
+      vaultPayload: cloneJsonLikeValue(vault, null),
+      slacktivation: cloneJsonLikeValue(getUnderparVaultSlacktivationRecord(vault), null),
+    };
   });
 }
 
@@ -5719,6 +8706,7 @@ const state = {
   passVaultCompilePromiseByProgrammerKey: new Map(),
   passVaultStorageListenerBound: false,
   upDevtoolsVaultActionListenerBound: false,
+  pendingUnderparEsmDeeplinkPromise: null,
   consoleContextReady: false,
   consoleContextPromise: null,
   isBootstrapping: false,
@@ -23103,6 +26091,7 @@ function esmWorkspaceGetControllerStatePayload(esmWorkspaceState) {
   );
   return {
     controllerOnline: Boolean(esmWorkspaceState?.section?.isConnected),
+    slack: getUnderparWorkspaceSlackStatePayload(),
     esmAvailable: true,
     esmAvailabilityResolved: true,
     esmContainerVisible: true,
@@ -23194,6 +26183,7 @@ function esmWorkspaceGetSelectedControllerStatePayload(programmer = null, servic
 
   return {
     controllerOnline: false,
+    slack: getUnderparWorkspaceSlackStatePayload(),
     esmAvailable,
     esmAvailabilityResolved,
     esmContainerVisible,
@@ -25435,6 +28425,45 @@ function esmWorkspaceBuildMegLaunchTooltip(endpointUrl = "") {
   return `Launch ${normalizedUrl} load in MEGTOOL`;
 }
 
+async function esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, requestPath, requestToken, options = {}) {
+  const normalizedRequestPath = normalizeUnderparEsmRequestPath(requestPath);
+  if (!esmWorkspaceState || !normalizedRequestPath) {
+    throw new Error("ESM request path is required.");
+  }
+  const targetWindowId = Number(options?.targetWindowId || esmWorkspaceState.controllerWindowId || state.esmWorkspaceWorkspaceWindowId || 0);
+  const environment = getActiveAdobePassEnvironment();
+  const absoluteRequestUrl = megWorkspaceBuildAbsoluteServiceUrl(
+    String(environment?.esmBase || environment?.mgmtBase || ADOBE_MGMT_BASE).trim(),
+    normalizedRequestPath
+  );
+  const workspaceTab = await esmWorkspaceEnsureWorkspaceTab({ activate: true, windowId: targetWindowId });
+  const resolvedTargetWindowId = Number(workspaceTab?.windowId || targetWindowId || state.esmWorkspaceWorkspaceWindowId || 0);
+  esmWorkspaceBroadcastControllerState(esmWorkspaceState, resolvedTargetWindowId);
+  const displayNodeLabel = String(options?.displayNodeLabel || "").trim();
+  const endpoint =
+    esmWorkspaceFindEndpointByUrl(esmWorkspaceState, absoluteRequestUrl, {
+      url: absoluteRequestUrl,
+      zoomKey: String(clickEsmGetZoomKey({ url: absoluteRequestUrl }) || ""),
+      columns: normalizeEsmColumns([], { href: absoluteRequestUrl }),
+      preserveQueryContext: true,
+      displayNodeLabel,
+    }) || null;
+  if (!endpoint) {
+    throw new Error("ESM request path is required.");
+  }
+  await esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, generateRequestId(), requestToken, {
+    emitStart: true,
+    requestSource: String(options?.requestSource || "workspace").trim() || "workspace",
+    displayNodeLabel,
+    targetWindowId: resolvedTargetWindowId,
+  });
+  return {
+    requestPath: normalizedRequestPath,
+    requestUrl: absoluteRequestUrl,
+    targetWindowId: resolvedTargetWindowId,
+  };
+}
+
 async function esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName = "") {
   const normalizedSavedQueryUrl = stripMegWorkspaceMediaCompanyQueryParam(String(savedQueryUrl || "").trim());
   if (!esmWorkspaceState || !normalizedSavedQueryUrl) {
@@ -25442,36 +28471,109 @@ async function esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl
   }
 
   try {
-    const targetWindowId = Number(esmWorkspaceState.controllerWindowId || state.esmWorkspaceWorkspaceWindowId || 0);
-    const environment = getActiveAdobePassEnvironment();
-    const absoluteSavedQueryUrl = megWorkspaceBuildAbsoluteServiceUrl(
-      String(environment?.esmBase || environment?.mgmtBase || ADOBE_MGMT_BASE).trim(),
-      normalizedSavedQueryUrl
-    );
-    const workspaceTab = await esmWorkspaceEnsureWorkspaceTab({ activate: true, windowId: targetWindowId });
-    const resolvedTargetWindowId = Number(workspaceTab?.windowId || targetWindowId || state.esmWorkspaceWorkspaceWindowId || 0);
-    esmWorkspaceBroadcastControllerState(esmWorkspaceState, resolvedTargetWindowId);
-    const endpoint =
-      esmWorkspaceFindEndpointByUrl(esmWorkspaceState, absoluteSavedQueryUrl, {
-        url: absoluteSavedQueryUrl,
-        zoomKey: String(clickEsmGetZoomKey({ url: absoluteSavedQueryUrl }) || ""),
-        columns: normalizeEsmColumns([], { href: absoluteSavedQueryUrl }),
-        preserveQueryContext: true,
-        displayNodeLabel: savedQueryName,
-      }) || null;
-    if (!endpoint) {
-      throw new Error("Saved Query URL is required.");
-    }
-    await esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, generateRequestId(), requestToken, {
-      emitStart: true,
+    await esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, normalizedSavedQueryUrl, requestToken, {
       requestSource: "saved-query",
       displayNodeLabel: savedQueryName,
-      targetWindowId: resolvedTargetWindowId,
     });
   } catch (error) {
     const suffix = savedQueryName ? ` "${savedQueryName}"` : "";
     setStatus(`Unable to open Saved Query${suffix} in ESM Workspace: ${error instanceof Error ? error.message : String(error)}`, "error");
   }
+}
+
+async function consumePendingUnderparEsmDeeplink() {
+  if (state.pendingUnderparEsmDeeplinkPromise) {
+    return state.pendingUnderparEsmDeeplinkPromise;
+  }
+  state.pendingUnderparEsmDeeplinkPromise = (async () => {
+    try {
+      if (!state.sessionReady || !state.loginData || state.restricted) {
+        return { ok: false, pending: true };
+      }
+      const pendingLaunch = await readPendingUnderparEsmDeeplink();
+      if (!pendingLaunch) {
+        return { ok: false, pending: false };
+      }
+
+      const pendingEnvironmentKey =
+        String(pendingLaunch.environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+      if (pendingEnvironmentKey !== String(getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim()) {
+        const switchResult = await switchAdobePassEnvironmentInPlace(pendingEnvironmentKey);
+        if (!switchResult?.ok) {
+          throw new Error(`Unable to switch UnderPAR to ${pendingLaunch.environmentLabel || pendingEnvironmentKey}.`);
+        }
+      }
+
+      let programmer = resolveSelectedProgrammer();
+      if (pendingLaunch.programmerId) {
+        const matchedProgrammer = findProgrammerByProgrammerId(pendingLaunch.programmerId);
+        if (!matchedProgrammer) {
+          throw new Error(`Media Company ${pendingLaunch.programmerId} is not available in this UnderPAR session.`);
+        }
+        const selectedProgrammerId = String(programmer?.programmerId || "").trim();
+        const needsSelectionRefresh =
+          selectedProgrammerId !== String(matchedProgrammer.programmerId || "").trim() ||
+          !isProgrammerWorkspaceHydrationReady(String(matchedProgrammer.programmerId || "").trim()) ||
+          !hasResolvedPremiumServiceSnapshotForEsm(getCurrentPremiumAppsSnapshot(String(matchedProgrammer.programmerId || "").trim()));
+        if (needsSelectionRefresh) {
+          programmer = selectProgrammerForController(matchedProgrammer, "esm-deeplink");
+          await refreshProgrammerPanels({
+            forcePremiumRefresh: false,
+            controllerReason: "esm-deeplink",
+          });
+        } else {
+          programmer = matchedProgrammer;
+        }
+      }
+
+      programmer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+      if (!programmer?.programmerId) {
+        throw new Error("Select a Media Company in UnderPAR before opening this ESM deeplink.");
+      }
+      const services = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+      if (!hasResolvedPremiumServiceSnapshotForEsm(services)) {
+        await refreshProgrammerPanels({
+          forcePremiumRefresh: false,
+          controllerReason: "esm-deeplink",
+        });
+      }
+      const refreshedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+      if (hasResolvedPremiumServiceSnapshotForEsm(refreshedServices) && !hasEsmScopedApp(refreshedServices)) {
+        throw new Error(
+          `${String(programmer.programmerName || programmer.programmerId || "Selected Media Company").trim()} is not ESM scoped.`
+        );
+      }
+      const esmWorkspaceState = getActiveEsmWorkspaceState();
+      if (!esmWorkspaceState) {
+        throw new Error("ESM controller is not ready yet.");
+      }
+
+      await esmWorkspaceOpenRequestPathInWorkspace(
+        esmWorkspaceState,
+        pendingLaunch.requestPath,
+        Number(state.premiumPanelRequestToken || 0),
+        {
+          requestSource: "slack-blondie-deeplink",
+          displayNodeLabel: String(pendingLaunch.displayNodeLabel || "").trim(),
+        }
+      );
+      await clearPendingUnderparEsmDeeplink();
+      const openedLabel = String(pendingLaunch.displayNodeLabel || pendingLaunch.requestPath || "ESM report").trim();
+      setStatus(`Opened ${openedLabel} in ESM Workspace.`, "success");
+      return { ok: true, pending: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/not ready yet/i.test(message)) {
+        return { ok: false, pending: true };
+      }
+      await clearPendingUnderparEsmDeeplink();
+      setStatus(`Unable to open Slack ESM deeplink: ${message}`, "error");
+      return { ok: false, pending: false, error: message };
+    } finally {
+      state.pendingUnderparEsmDeeplinkPromise = null;
+    }
+  })();
+  return state.pendingUnderparEsmDeeplinkPromise;
 }
 
 function esmWorkspaceSyncMegSavedQueryUi(esmWorkspaceState) {
@@ -26410,6 +29512,16 @@ async function handleEsmWorkspaceWorkspaceAction(message, sender = null) {
     return { ok: true };
   }
 
+  if (action === "blondie-export") {
+    const exportPayload = withUnderparBlondieCsvFileName(
+      message?.exportPayload || null,
+      buildUnderparBlondieEsmCsvFileName(message?.card || null, message?.exportPayload || null)
+    );
+    return await sendUnderparBlondieExportToSlack(exportPayload, {
+      interactive: true,
+    });
+  }
+
   return { ok: false, error: `Unsupported workspace action: ${action}` };
 }
 
@@ -26673,6 +29785,14 @@ function ensureUpDevtoolsVaultActionListener() {
       }
       if (action === "purge-vault") {
         return await purgePassVaultFromDevtools();
+      }
+      if (action === "slacktivate-import-key") {
+        return await slacktivateUnderparFromDevtools(String(message?.zipKeyText || "").trim());
+      }
+      if (action === "slacktivate-refresh") {
+        return await refreshUnderparSlacktivationFromDevtools({
+          interactive: message?.interactive === true,
+        });
       }
       throw new Error(`Unsupported UP VAULT action: ${action || "unknown"}`);
     })()
@@ -27127,6 +30247,7 @@ function cmGetControllerStatePayload(cmState) {
   );
   return {
     controllerOnline: Boolean(cmState?.section?.isConnected),
+    slack: getUnderparWorkspaceSlackStatePayload(),
     cmAvailable: true,
     cmAvailabilityResolved: true,
     cmContainerVisible: true,
@@ -27218,6 +30339,7 @@ function cmGetSelectedControllerStatePayload(programmer = null, services = null,
   );
   return {
     controllerOnline: false,
+    slack: getUnderparWorkspaceSlackStatePayload(),
     cmAvailable,
     cmAvailabilityResolved,
     cmContainerVisible,
@@ -30003,13 +33125,20 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
       targetWorkspace === "mvpd" ? "MVPD" : "CM",
     ])
   ).trim();
+  const requestSource = String(options.requestSource || "workspace").trim().toLowerCase() || "workspace";
+  const preserveExactRequestContext =
+    requestSource === "workspace-path-link" || requestSource === "workspace-path-node";
   const endpointUrl = String(record.endpointUrl || record.requestUrl || "").trim();
   const baseRequestUrlRaw = String(options.baseRequestUrl || record.requestUrl || endpointUrl).trim();
-  const baseRequestUrl = cmScopeUsageRequestUrl(baseRequestUrlRaw, cmState, scopedRecord) || baseRequestUrlRaw;
+  const baseRequestUrl = preserveExactRequestContext
+    ? baseRequestUrlRaw
+    : cmScopeUsageRequestUrl(baseRequestUrlRaw, cmState, scopedRecord) || baseRequestUrlRaw;
   const requestUrlOverride = String(options.requestUrlOverride || "").trim();
   let requestUrl = requestUrlOverride || baseRequestUrl;
-  requestUrl = cmResolveApplicationDetailUrl(scopedRecord, requestUrl);
-  requestUrl = cmScopeUsageRequestUrl(requestUrl, cmState, scopedRecord) || requestUrl;
+  if (!preserveExactRequestContext) {
+    requestUrl = cmResolveApplicationDetailUrl(scopedRecord, requestUrl);
+    requestUrl = cmScopeUsageRequestUrl(requestUrl, cmState, scopedRecord) || requestUrl;
+  }
   const normalizedLocalColumnFilters =
     options.localColumnFilters && typeof options.localColumnFilters === "object" ? { ...options.localColumnFilters } : {};
   const cmWorkspaceKey = targetWorkspace === "mvpd" ? "mvpd-workspace" : "cmu-workspace";
@@ -30019,7 +33148,6 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
     Number(cmState.controllerWindowId || 0) ||
     Number(targetWorkspace === "mvpd" ? state.mvpdWorkspaceWindowId : state.cmWorkspaceWindowId || 0);
   const workspaceReportContext = cmBuildWorkspaceReportContextPayload(cmState, requestToken);
-  const requestSource = String(options.requestSource || "workspace").trim().toLowerCase() || "workspace";
   if (options.emitStart !== false) {
     cmSendReportWorkspaceMessage(
       targetWorkspace,
@@ -30054,7 +33182,9 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
 
   let payload = record.payload;
   let lastModified = String(record.lastModified || "");
-  const recordRequestUrl = cmScopeUsageRequestUrl(String(record.requestUrl || endpointUrl || "").trim(), cmState, scopedRecord);
+  const recordRequestUrl = preserveExactRequestContext
+    ? String(record.requestUrl || endpointUrl || "").trim()
+    : cmScopeUsageRequestUrl(String(record.requestUrl || endpointUrl || "").trim(), cmState, scopedRecord);
   const hasUrlOverrideDiffersFromRecord =
     Boolean(requestUrlOverride) && requestUrl !== recordRequestUrl;
   const recordKind = String(record?.kind || "").trim().toLowerCase();
@@ -30409,6 +33539,8 @@ async function handleCmWorkspaceAction(message, sender = null) {
 
   if (action === "run-card") {
     const card = message?.card && typeof message.card === "object" ? message.card : {};
+    const requestSourceRaw = String(message?.requestSource || "").trim().toLowerCase();
+    const requestSource = requestSourceRaw || "workspace";
     const shouldForceRefetch = message?.forceRefetch !== false;
     const requestUrlOverride = String(card?.requestUrl || "").trim();
     const baseRequestUrl = String(card?.baseRequestUrl || card?.endpointUrl || requestUrlOverride || "").trim();
@@ -30442,6 +33574,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
           forceRefetch: shouldForceRefetch,
           cardId: String(card.cardId || generateRequestId()),
           targetWindowId: senderWindowId || Number(cmState.controllerWindowId || 0),
+          requestSource,
           requestUrlOverride: requestUrlOverride || fallbackUrl,
           baseRequestUrl: baseRequestUrl || fallbackUrl,
           localColumnFilters,
@@ -30459,6 +33592,7 @@ async function handleCmWorkspaceAction(message, sender = null) {
       forceRefetch: shouldForceRefetch,
       cardId: String(card?.cardId || matchedRecord.cardId || generateRequestId()),
       targetWindowId: senderWindowId || Number(cmState.controllerWindowId || 0),
+      requestSource,
       requestUrlOverride,
       baseRequestUrl: baseRequestUrl || String(matchedRecord.requestUrl || matchedRecord.endpointUrl || ""),
       localColumnFilters,
@@ -30534,6 +33668,30 @@ async function handleCmWorkspaceAction(message, sender = null) {
       return { ok: false, error: csvResult?.error || "Unable to download CM CSV." };
     }
     return { ok: true, fileName: csvResult.fileName || "" };
+  }
+
+  if (action === "blondie-export") {
+    const card = message?.card && typeof message.card === "object" ? message.card : {};
+    const exportPayload = withUnderparBlondieCsvFileName(
+      message?.exportPayload || null,
+      buildUnderparBlondieCmCsvFileName(cmState, card, {
+        tenantIdCandidates: [
+          String(cmState?.tenantScope || "").trim(),
+          String(cmState?.programmer?.programmerId || "").trim(),
+          String(card?.tenantId || "").trim(),
+        ],
+        tenantNameCandidates: [
+          String(cmState?.programmer?.programmerName || "").trim(),
+          String(cmState?.programmer?.programmerId || "").trim(),
+          String(card?.tenantName || "").trim(),
+          String(card?.tenantId || "").trim(),
+          "CM",
+        ],
+      })
+    );
+    return await sendUnderparBlondieExportToSlack(exportPayload, {
+      interactive: true,
+    });
   }
 
   if (action === "rerun-all") {
@@ -30802,6 +33960,7 @@ function mvpdWorkspaceGetSelectedControllerStatePayload(programmer = null, servi
   const cachedSnapshot = cacheKey ? state.mvpdWorkspaceSnapshotCacheBySelectionKey.get(cacheKey) || null : null;
   return {
     controllerOnline: true,
+    slack: getUnderparWorkspaceSlackStatePayload(),
     adobePassEnvironment: {
       ...getActiveAdobePassEnvironment(),
     },
@@ -32402,6 +35561,36 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     return { ok: true, fileName: csvResult.fileName || "" };
   }
 
+  if (action === "blondie-export") {
+    const card = message?.card && typeof message.card === "object" ? message.card : {};
+    const exportPayload = withUnderparBlondieCsvFileName(
+      message?.exportPayload || null,
+      buildUnderparBlondieCmCsvFileName(cmState, card, {
+        isMvpdCmContext: true,
+        tenantIdCandidates: [
+          String(card?.tenantId || "").trim(),
+          String(cmState?.cmService?.matchedTenants?.[0]?.tenantId || "").trim(),
+          String(cmState?.tenantScope || "").trim(),
+          String(cmState?.cmService?.mvpdId || "").trim(),
+          String(state.selectedMvpdId || "").trim(),
+        ],
+        tenantNameCandidates: [
+          String(
+            getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), String(state.selectedMvpdId || "").trim()) ||
+              state.selectedMvpdId ||
+              ""
+          ).trim(),
+          String(card?.tenantName || "").trim(),
+          String(card?.tenantId || "").trim(),
+          "MVPD",
+        ],
+      })
+    );
+    return await sendUnderparBlondieExportToSlack(exportPayload, {
+      interactive: true,
+    });
+  }
+
   if (action === "rerun-all") {
     const cmState = getActiveCmMvpdState();
     if (!cmState) {
@@ -32811,6 +36000,7 @@ function degradationWorkspaceGetSelectedControllerStatePayload(programmer = null
   const controllerReason = String(options?.controllerReason || "").trim();
   return {
     controllerOnline: true,
+    slack: getUnderparWorkspaceSlackStatePayload(),
     degradationReady: context.degradationReady === true,
     programmerId: String(context.programmerId || "").trim(),
     programmerName: String(context.programmerName || "").trim(),
@@ -33052,6 +36242,157 @@ function degradationWorkspaceBroadcastReports(selectionKey = "", targetWindowId 
   );
 }
 
+function degradationWorkspaceBuildCardQuery(card = null) {
+  const endpointKey = firstNonEmptyString([
+    String(card?.endpointKey || "").trim().toLowerCase(),
+    String(card?.endpointPath || "").trim().toLowerCase(),
+  ]);
+  if (!endpointKey) {
+    return null;
+  }
+  const requestorId = firstNonEmptyString([
+    String(card?.requestorId || "").trim(),
+    String(card?.programmerId || "").trim(),
+    String(state.selectedRequestorId || "").trim(),
+  ]);
+  const mvpd = String(card?.mvpd || "").trim();
+  const includeAllMvpd = card?.includeAllMvpd === true || !mvpd;
+  return {
+    endpointKey,
+    requestorId,
+    mvpd: includeAllMvpd ? "" : mvpd,
+    includeAllMvpd,
+    queryValues: {
+      requestorId,
+      programmerId: requestorId,
+      endpointKey,
+      includeAllMvpd,
+      mvpd: includeAllMvpd ? "" : mvpd,
+      apiVersion: DEGRADATION_API_VERSION,
+    },
+  };
+}
+
+function formatDegradationBlondieCellValue(rawValue) {
+  if (rawValue == null) {
+    return "N/A";
+  }
+  if (Array.isArray(rawValue)) {
+    const compactValues = rawValue
+      .map((item) => formatDegradationBlondieCellValue(item))
+      .filter((item) => item && item !== "N/A");
+    return compactValues.length > 0 ? compactValues.join(" | ") : "N/A";
+  }
+  if (typeof rawValue === "object") {
+    const preferred = firstNonEmptyString([
+      rawValue.id,
+      rawValue.name,
+      rawValue.label,
+      rawValue.value,
+      rawValue.status,
+      rawValue.message,
+    ]);
+    return preferred || "Structured value";
+  }
+  const text = String(rawValue).trim();
+  if (!text) {
+    return "N/A";
+  }
+  if (
+    (text.startsWith("{") && text.endsWith("}")) ||
+    (text.startsWith("[") && text.endsWith("]")) ||
+    (text.startsWith("<") && text.endsWith(">"))
+  ) {
+    return "Structured value";
+  }
+  return text;
+}
+
+function buildUnderparBlondieDegradationCsvFileName(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!payload) {
+    return "";
+  }
+  const mediaCompany = sanitizeDownloadFileSegment(
+    firstNonEmptyString([payload.programmerName, payload.programmerId]),
+    "MediaCompany"
+  );
+  const endpoint = sanitizeDownloadFileSegment(
+    firstNonEmptyString([payload.endpointKey, payload.endpointPath, payload.displayNodeLabel, payload.datasetLabel]),
+    "dgr"
+  );
+  const requestor = sanitizeDownloadFileSegment(payload.requestorId || "requestor", "requestor");
+  const scope = sanitizeDownloadFileSegment(payload.mvpd || "all-mvpds", "all-mvpds");
+  const environmentText = firstNonEmptyString([payload.requestUrl, payload.adobePassEnvironmentKey]).toLowerCase();
+  const envTag = environmentText.includes("staging") || environmentText.includes("stage") ? "STAGE" : "PROD";
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `${mediaCompany}_clickDGR_${endpoint}_${requestor}_${scope}_${envTag}_${stamp}.csv`;
+}
+
+function buildDegradationWorkspaceBlondieExportPayload(report = null, options = {}) {
+  if (!report || report.ok !== true) {
+    return null;
+  }
+  const columns = Array.isArray(report.columns)
+    ? report.columns.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  const rows = Array.isArray(report.rows)
+    ? report.rows.map((row) => columns.map((column) => formatDegradationBlondieCellValue(row?.[column])))
+    : [];
+  if (columns.length === 0 || rows.length === 0) {
+    return null;
+  }
+  const mediaCompanyId = String(options.programmerId || "").trim();
+  const mediaCompanyName = String(options.programmerName || "").trim();
+  const requestorId = firstNonEmptyString([options.requestorId, report.programmerId]);
+  const includeAllMvpd = options.includeAllMvpd === true || report.includeAllMvpd === true || !String(options.mvpd || report.mvpd || "").trim();
+  const mvpd = includeAllMvpd ? "" : String(options.mvpd || report.mvpd || "").trim();
+  const environmentKey =
+    String(options.adobePassEnvironmentKey || getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+    DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const scopeLabel = firstNonEmptyString([
+    options.mvpdScopeLabel,
+    report.mvpdScopeLabel,
+    degradationBuildScopeLabel({
+      requestorId,
+      mvpd,
+      includeAllMvpd,
+    }),
+    "ALL MVPDs",
+  ]);
+  const payload = {
+    workspaceKey: "degradation",
+    workspaceLabel: "DEGRADATION",
+    displayNodeLabel: String(report.endpointTitle || "DEGRADATION Status").trim(),
+    datasetLabel: `${String(report.endpointTitle || "DEGRADATION Status").trim()} | ${requestorId || "N/A"} X ${scopeLabel}`,
+    requestUrl: String(report.requestUrl || "").trim(),
+    programmerId: mediaCompanyId,
+    programmerName: mediaCompanyName,
+    requestorId,
+    mvpd,
+    mvpdLabel: String(options.mvpdLabel || "").trim(),
+    mvpdScopeLabel: scopeLabel,
+    adobePassEnvironmentKey: environmentKey,
+    adobePassEnvironmentLabel: String(options.adobePassEnvironmentLabel || getActiveAdobePassEnvironment()?.label || "").trim(),
+    endpointKey: String(report.endpointKey || options.endpointKey || "").trim().toLowerCase(),
+    endpointPath: String(report.endpointPath || options.endpointPath || "").trim(),
+    includeAllMvpd,
+    selectionKey:
+      String(options.selectionKey || report.selectionKey || "").trim() ||
+      buildDegradationWorkspaceSelectionKey({
+        environmentKey,
+        programmerId: mediaCompanyId,
+        requestorId,
+        mvpd,
+      }),
+    columns,
+    rows,
+    rowCount: rows.length,
+  };
+  payload.csvFileName = buildUnderparBlondieDegradationCsvFileName(payload);
+  return payload;
+}
+
 async function handleDegradationWorkspaceAction(message, sender = null) {
   const action = String(message?.action || "").trim().toLowerCase();
   const senderWindowId = Number(sender?.tab?.windowId || 0);
@@ -33154,30 +36495,13 @@ async function handleDegradationWorkspaceAction(message, sender = null) {
     degradationSetBusy(panelState, true);
     try {
       for (const card of cards) {
-        const endpointKey = firstNonEmptyString([
-          String(card?.endpointKey || "").trim().toLowerCase(),
-          String(card?.endpointPath || "").trim().toLowerCase(),
-        ]);
-        if (!endpointKey) {
+        const request = degradationWorkspaceBuildCardQuery(card);
+        if (!request) {
           continue;
         }
-        const cardRequestor = firstNonEmptyString([
-          String(card?.programmerId || "").trim(),
-          String(state.selectedRequestorId || "").trim(),
-        ]);
-        const cardMvpd = String(card?.mvpd || "").trim();
-        const includeAllMvpd = card?.includeAllMvpd === true || !cardMvpd;
-        const queryValues = {
-          requestorId: cardRequestor,
-          programmerId: cardRequestor,
-          endpointKey,
-          includeAllMvpd,
-          mvpd: includeAllMvpd ? "" : cardMvpd,
-          apiVersion: DEGRADATION_API_VERSION,
-        };
-        await degradationRunStatusEndpointFromPanel(panelState, endpointKey, {
+        await degradationRunStatusEndpointFromPanel(panelState, request.endpointKey, {
           requestToken,
-          queryValues,
+          queryValues: request.queryValues,
           manageBusy: false,
           openWorkspace: false,
           targetWindowId,
@@ -33189,12 +36513,40 @@ async function handleDegradationWorkspaceAction(message, sender = null) {
         "batch-end",
         {
           total: cards.length,
+          reason: String(message?.reason || "").trim(),
           completedAt: Date.now(),
         },
         { targetWindowId }
       );
     }
     return { ok: true };
+  }
+
+  if (action === "blondie-export-all") {
+    if (message?.exportPayload) {
+      return await sendUnderparBlondieExportToSlack(message.exportPayload, {
+        interactive: true,
+      });
+    }
+
+    const exportPayloads = Array.isArray(message?.exportPayloads) ? message.exportPayloads : [];
+    if (exportPayloads.length > 0) {
+      return await sendUnderparBlondieExportBatchToSlack(exportPayloads, {
+        interactive: true,
+        emptyError: "No visible DEGRADATION reports were available for :blondiebtn:.",
+        genericError: "Unable to deliver DEGRADATION reports with :blondiebtn:.",
+      });
+    }
+    return {
+      ok: false,
+      error: "No visible DEGRADATION report data was provided for :blondiebtn:.",
+    };
+  }
+
+  if (action === "blondie-export") {
+    return await sendUnderparBlondieExportToSlack(message?.exportPayload || null, {
+      interactive: true,
+    });
   }
 
   if (action === "clear-all") {
@@ -39111,6 +42463,7 @@ function resetWorkflowForLoggedOut() {
 
   void esmWorkspaceSendWorkspaceMessage("controller-state", {
     controllerOnline: false,
+    slack: getUnderparWorkspaceSlackStatePayload(),
     esmAvailable: null,
     esmAvailabilityResolved: false,
     esmContainerVisible: null,
@@ -39124,6 +42477,7 @@ function resetWorkflowForLoggedOut() {
   });
   void megWorkspaceSendWorkspaceMessage("controller-state", {
     controllerOnline: false,
+    slack: getUnderparWorkspaceSlackStatePayload(),
     esmAvailable: null,
     esmAvailabilityResolved: false,
     esmContainerVisible: null,
@@ -39138,6 +42492,7 @@ function resetWorkflowForLoggedOut() {
   void megWorkspaceSendWorkspaceMessage("workspace-clear", {});
   void cmSendWorkspaceMessage("controller-state", {
     controllerOnline: false,
+    slack: getUnderparWorkspaceSlackStatePayload(),
     cmAvailable: null,
     cmAvailabilityResolved: false,
     cmContainerVisible: null,
@@ -39152,6 +42507,7 @@ function resetWorkflowForLoggedOut() {
   });
   void mvpdWorkspaceSendWorkspaceMessage("controller-state", {
     controllerOnline: false,
+    slack: getUnderparWorkspaceSlackStatePayload(),
     mvpdReady: false,
     hasRestV2Service: false,
     hasMvpdCmTenant: false,
@@ -39179,6 +42535,7 @@ function resetWorkflowForLoggedOut() {
   void restWorkspaceSendWorkspaceMessage("workspace-clear", {});
   void degradationWorkspaceSendWorkspaceMessage("controller-state", {
     controllerOnline: false,
+    slack: getUnderparWorkspaceSlackStatePayload(),
     degradationReady: false,
     programmerId: "",
     programmerName: "",
@@ -57110,6 +60467,7 @@ function render() {
   }
   syncGlobalMvpdWorkspaceLauncher();
   renderAvatarMenu();
+  void consumePendingUnderparEsmDeeplink();
 }
 
 async function signInInteractive() {

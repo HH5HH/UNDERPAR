@@ -265,8 +265,8 @@ body::after {
 }
 
 .workspace-icon-btn--tearsheet {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
 }
 
 .workspace-icon-btn--reference {
@@ -356,7 +356,7 @@ body::after {
 }
 
 .workspace-icon-btn--workspace-tearsheet {
-  box-shadow: 0 12px 24px rgba(42, 139, 116, 0.3), 0 2px 0 rgba(255, 255, 255, 0.34) inset;
+  box-shadow: 0 10px 20px rgba(42, 139, 116, 0.28), 0 2px 0 rgba(255, 255, 255, 0.34) inset;
 }
 
 .workspace-icon-btn--rerun {
@@ -372,7 +372,7 @@ body::after {
 }
 
 .workspace-icon-btn--workspace-tearsheet:hover:not(:disabled) {
-  box-shadow: 0 14px 25px rgba(29, 98, 82, 0.33), 0 2px 0 rgba(255, 255, 255, 0.34) inset;
+  box-shadow: 0 10px 20px rgba(17, 68, 55, 0.18);
 }
 
 .workspace-icon-btn--rerun:hover:not(:disabled) {
@@ -1086,6 +1086,13 @@ body.workspace-locked .workspace-cards {
   width: 100%;
 }
 
+.underpar-export-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
 .esm-footer-controls {
   margin-left: auto;
   display: flex;
@@ -1117,6 +1124,31 @@ body.workspace-locked .workspace-cards {
 .esm-footer-actions .esm-clear-filter-rerun,
 .esm-footer-actions .esm-table-close {
   align-self: center;
+}
+
+.underpar-blondie-btn {
+  padding: 0;
+  overflow: hidden;
+}
+
+.underpar-blondie-btn[data-blondie-state="inactive"] {
+  opacity: 0.74;
+}
+
+.underpar-blondie-btn[data-blondie-state="active"] {
+  box-shadow: 0 0 0 2px rgba(255, 78, 135, 0.24), 0 8px 16px rgba(20, 52, 102, 0.18);
+}
+
+.underpar-blondie-btn[data-blondie-state="ack"] {
+  box-shadow: 0 0 0 2px rgba(76, 174, 255, 0.26), 0 8px 16px rgba(20, 52, 102, 0.2);
+}
+
+.underpar-blondie-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  border-radius: 999px;
+  object-fit: cover;
 }
 
 .esm-footer a {

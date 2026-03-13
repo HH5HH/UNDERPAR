@@ -727,6 +727,38 @@ body::after {
   color: rgb(var(--zip-accent-1000));
 }
 
+.underpar-export-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.underpar-blondie-btn {
+  padding: 0;
+  overflow: hidden;
+}
+
+.underpar-blondie-btn[data-blondie-state="inactive"] {
+  opacity: 0.74;
+}
+
+.underpar-blondie-btn[data-blondie-state="active"] {
+  box-shadow: 0 0 0 2px rgba(255, 78, 135, 0.24), 0 8px 16px rgba(20, 52, 102, 0.18);
+}
+
+.underpar-blondie-btn[data-blondie-state="ack"] {
+  box-shadow: 0 0 0 2px rgba(76, 174, 255, 0.26), 0 8px 16px rgba(20, 52, 102, 0.2);
+}
+
+.underpar-blondie-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
 .workspace-cards .cm-view-link:hover,
 .workspace-cards .esm-footer a:hover {
   color: rgb(var(--zip-accent-1100));

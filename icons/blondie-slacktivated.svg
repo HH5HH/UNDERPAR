@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-hidden="true">
+  <defs>
+    <clipPath id="badge">
+      <circle cx="64" cy="64" r="60"/>
+    </clipPath>
+  </defs>
+  <circle cx="64" cy="64" r="62" fill="#d8d8d8"/>
+  <g clip-path="url(#badge)">
+    <rect width="128" height="128" fill="#f0ede4"/>
+    <rect x="12" width="18" height="128" fill="#080808"/>
+    <rect x="42" width="18" height="128" fill="#080808"/>
+    <rect x="72" width="18" height="128" fill="#080808"/>
+    <rect x="102" width="18" height="128" fill="#080808"/>
+    <g transform="rotate(-8 64 64)">
+      <rect x="6" y="44" width="116" height="40" rx="6" fill="#ea1515"/>
+      <text x="64" y="71" fill="#fff7f2" font-family="Brush Script MT, Segoe Script, cursive" font-size="34" text-anchor="middle">Blondie</text>
+    </g>
+  </g>
+</svg>

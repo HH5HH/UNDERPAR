@@ -99,11 +99,28 @@ const DEFAULT_ADOBEPASS_ENVIRONMENT =
     clickEsmTokenUrl: "https://sp.auth.adobe.com/o/client/token",
     esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/",
   };
+const BLONDIE_BUTTON_STATES = new Set(["inactive", "ready", "active", "ack"]);
+const BLONDIE_BUTTON_ACK_RESET_MS = 2000;
+const BLONDIE_BUTTON_INACTIVE_MESSAGE =
+  "No zip-zap without SLACKTIVATION.  Please feed ZIP.KEY to UP Tab inside Developer Tools";
+const BLONDIE_BUTTON_ICON_URLS = (() => {
+  const resolveIconUrl = (path) =>
+    typeof chrome !== "undefined" && chrome?.runtime?.getURL ? chrome.runtime.getURL(path) : path;
+  return {
+    inactive: resolveIconUrl("icons/blondie-active.svg"),
+    ready: resolveIconUrl("icons/blondie-slacktivated.svg"),
+    active: resolveIconUrl("icons/blondie-ack.svg"),
+    ack: resolveIconUrl("icons/blondie-inactive.svg"),
+  };
+})();
+const blondieAckResetTimerByButton = new WeakMap();
 
 const state = {
   windowId: 0,
   controllerOnline: false,
   adobePassEnvironment: { ...DEFAULT_ADOBEPASS_ENVIRONMENT },
+  slackReady: false,
+  slackUserName: "",
   esmAvailable: null,
   esmAvailabilityResolved: false,
   esmContainerVisible: null,
@@ -128,14 +145,13 @@ const state = {
   pendingAutoRerunProgrammerKey: "",
   autoRerunInFlightProgrammerKey: "",
   pendingAutoRerunCards: [],
+  pendingWorkspaceDeeplink: null,
+  pendingWorkspaceDeeplinkConsuming: false,
 };
 
 const els = {
   appRoot: document.getElementById("workspace-app-root"),
   stylesheet: document.getElementById("workspace-style-link"),
-  nonEsmScreen: document.getElementById("workspace-non-esm-screen"),
-  nonEsmHeadline: document.getElementById("workspace-non-esm-headline"),
-  nonEsmNote: document.getElementById("workspace-non-esm-note"),
   controllerState: document.getElementById("workspace-controller-state"),
   filterState: document.getElementById("workspace-filter-state"),
   status: document.getElementById("workspace-status"),
@@ -177,6 +193,107 @@ function applyWorkspaceAdobePassEnvironment(environment = null) {
   state.adobePassEnvironment = resolved;
   renderWorkspaceEnvironmentBadge();
   return resolved;
+}
+
+function buildWorkspaceDeeplinkRequestPath(pathname = "", search = "", options = {}) {
+  const allowBarePath = options?.allowBarePath === true;
+  let normalizedPath = String(pathname || "").trim().replace(/\/+$/g, "");
+  if (!normalizedPath) {
+    return "";
+  }
+  if (/^\/?esm\/v3\/media-company(?:\/|$)/i.test(normalizedPath)) {
+    if (!normalizedPath.startsWith("/")) {
+      normalizedPath = `/${normalizedPath}`;
+    }
+    return `${normalizedPath}${String(search || "")}`;
+  }
+  if (!allowBarePath) {
+    return "";
+  }
+  normalizedPath = normalizedPath.replace(/^\/+/, "");
+  if (!normalizedPath) {
+    return "";
+  }
+  return `/${ESM_NODE_BASE_PATH}${normalizedPath}${String(search || "")}`;
+}
+
+function normalizeWorkspaceDeeplinkRequestPath(rawValue = "") {
+  const normalized = String(rawValue || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const hasAbsoluteScheme = /^[a-z][a-z\d+.-]*:/i.test(normalized);
+  try {
+    const parsed = hasAbsoluteScheme ? new URL(normalized) : new URL(normalized, ESM_NODE_BASE_URL || DEFAULT_ADOBEPASS_ENVIRONMENT.esmBase);
+    parsed.searchParams.delete("media-company");
+    parsed.hash = "";
+    return buildWorkspaceDeeplinkRequestPath(String(parsed.pathname || ""), String(parsed.search || ""), {
+      allowBarePath: !hasAbsoluteScheme,
+    });
+  } catch (_error) {
+    const withoutHash = normalized.split("#")[0] || "";
+    const [pathPart, queryPart = ""] = withoutHash.split("?");
+    const params = new URLSearchParams(queryPart);
+    params.delete("media-company");
+    const search = params.toString();
+    return buildWorkspaceDeeplinkRequestPath(pathPart, search ? `?${search}` : "", {
+      allowBarePath: !hasAbsoluteScheme,
+    });
+  }
+}
+
+function parseWorkspaceDeeplinkPayloadFromLocation() {
+  const query = String(window.location.hash || "").startsWith("#")
+    ? window.location.hash.slice(1)
+    : String(window.location.search || "").replace(/^\?/, "");
+  if (!query) {
+    return null;
+  }
+  const params = new URLSearchParams(query);
+  const requestPath = normalizeWorkspaceDeeplinkRequestPath(params.get("requestPath") || params.get("requestUrl") || "");
+  if (!requestPath) {
+    return null;
+  }
+  return {
+    requestPath,
+    displayNodeLabel: String(params.get("displayNodeLabel") || "").trim(),
+    source: String(params.get("source") || "blondie-button").trim() || "blondie-button",
+    createdAt: Math.max(0, Number(params.get("createdAt") || Date.now() || 0)),
+  };
+}
+
+function clearWorkspaceDeeplinkFromLocation() {
+  try {
+    const nextUrl = new URL(window.location.href);
+    nextUrl.hash = "";
+    [
+      "requestPath",
+      "requestUrl",
+      "displayNodeLabel",
+      "programmerId",
+      "programmerName",
+      "environmentKey",
+      "environmentLabel",
+      "source",
+      "createdAt",
+    ].forEach((key) => nextUrl.searchParams.delete(key));
+    const nextHref = `${String(nextUrl.pathname || "")}${String(nextUrl.search || "")}`;
+    window.history.replaceState(null, document.title, nextHref || window.location.pathname);
+  } catch (_error) {
+    // Ignore history cleanup failures.
+  }
+}
+
+function buildWorkspaceDeeplinkAbsoluteRequestUrl(requestPath = "") {
+  const normalizedPath = normalizeWorkspaceDeeplinkRequestPath(requestPath);
+  if (!normalizedPath) {
+    return "";
+  }
+  try {
+    return new URL(normalizedPath, ESM_NODE_BASE_URL || DEFAULT_ADOBEPASS_ENVIRONMENT.esmBase).toString();
+  } catch (_error) {
+    return "";
+  }
 }
 
 async function initializeWorkspaceAdobePassEnvironment() {
@@ -1337,20 +1454,6 @@ function getProgrammerConsoleApplicationsUrl() {
   );
 }
 
-function buildNotPremiumConsoleLinkHtml(serviceLabel = "ESM") {
-  const consoleUrl = getProgrammerConsoleApplicationsUrl();
-  if (!consoleUrl) {
-    return `* If this looks wrong, no Media Company id is available for an Adobe Pass Console deeplink for ${escapeHtml(
-      serviceLabel
-    )}.`;
-  }
-  return `* If this looks wrong, <a href="${escapeHtml(
-    consoleUrl
-  )}" target="_blank" rel="noopener noreferrer">click here to inspect this Media Company in Adobe Pass Console</a> and verify legacy applications and premium scopes for ${escapeHtml(
-    serviceLabel
-  )}.`;
-}
-
 function buildWorkspaceLockMessageHtml() {
   const baseMessage = escapeHtml(getWorkspaceLockMessage());
   const consoleUrl = getProgrammerConsoleApplicationsUrl();
@@ -1400,26 +1503,13 @@ function hasWorkspaceReplayContext() {
 function updateNonEsmMode() {
   const shouldShow = shouldShowNonEsmMode();
   state.nonEsmMode = shouldShow;
-  if (els.nonEsmHeadline) {
-    els.nonEsmHeadline.textContent = `No Soup for ${getProgrammerLabel()}. No Premium, No ESM, No Dice.`;
-  }
-  if (els.nonEsmNote) {
-    els.nonEsmNote.innerHTML = buildNotPremiumConsoleLinkHtml("ESM");
-  }
-
-  // Preserve workspace card context while temporarily viewing non-ESM media companies.
-  // Cards should only be cleared by explicit user action (Clear All) or workspace close.
-
   if (els.stylesheet) {
-    // Keep the workspace stylesheet mounted even during No Soup so the GUI
-    // returns cleanly when an ESM-capable media company is selected next.
+    // Keep the workspace stylesheet mounted so the GUI returns cleanly when
+    // an ESM-capable media company is selected next.
     els.stylesheet.disabled = false;
   }
   if (els.appRoot) {
-    els.appRoot.hidden = shouldShow;
-  }
-  if (els.nonEsmScreen) {
-    els.nonEsmScreen.hidden = !shouldShow;
+    els.appRoot.hidden = false;
   }
 }
 
@@ -1445,7 +1535,7 @@ function updateControllerBanner() {
   const hasProgrammerContext = Boolean(String(state.programmerId || "").trim() || String(state.programmerName || "").trim());
   if (state.workspaceLocked) {
     els.controllerState.textContent = `Selected Media Company: ${getProgrammerLabel()}`;
-    els.filterState.textContent = "ESM Workspace is locked for this media company. No Premium, No ESM, No Dice.";
+    els.filterState.textContent = "ESM access is unavailable for this media company.";
     return;
   }
   if (!state.controllerOnline) {
@@ -1855,6 +1945,169 @@ function renderTableBody(tableState) {
       tr.appendChild(createCell(row[column] ?? ""));
     });
     tableState.tbody.appendChild(tr);
+  });
+}
+
+function isBlondieButtonSupported() {
+  return true;
+}
+
+function canUseBlondieButton() {
+  return state.slackReady === true && isBlondieButtonSupported();
+}
+
+function getBlondieButtonDefaultState() {
+  return canUseBlondieButton() ? "ready" : "inactive";
+}
+
+function clearBlondieButtonAckReset(button) {
+  const timerId = blondieAckResetTimerByButton.get(button);
+  if (timerId) {
+    window.clearTimeout(timerId);
+    blondieAckResetTimerByButton.delete(button);
+  }
+}
+
+function getBlondieButtonState(button = null) {
+  const stateValue = String(button?.dataset?.blondieState || "").trim().toLowerCase();
+  return BLONDIE_BUTTON_STATES.has(stateValue) ? stateValue : getBlondieButtonDefaultState();
+}
+
+function getBlondieButtonTitle(buttonState = "") {
+  const normalizedState = BLONDIE_BUTTON_STATES.has(String(buttonState || "").trim().toLowerCase())
+    ? String(buttonState || "").trim().toLowerCase()
+    : getBlondieButtonDefaultState();
+  if (!isBlondieButtonSupported()) {
+    return ":blondiebtn: is unavailable in this workspace export.";
+  }
+  if (normalizedState === "active") {
+    return ":blondiebtn: is delivering your Slack CSV...";
+  }
+  if (normalizedState === "ack") {
+    return "Slack acknowledged :blondiebtn: delivery.";
+  }
+  if (canUseBlondieButton()) {
+    return "zip-zip data to SLACK when it's sitting in SLACKTIVATED state";
+  }
+  return BLONDIE_BUTTON_INACTIVE_MESSAGE;
+}
+
+function renderBlondieButtonState(button, nextState = "", options = {}) {
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  const preserveTimer = options?.preserveTimer === true;
+  if (!preserveTimer) {
+    clearBlondieButtonAckReset(button);
+  }
+  const supported = isBlondieButtonSupported();
+  let normalizedState = String(nextState || "").trim().toLowerCase();
+  if (!BLONDIE_BUTTON_STATES.has(normalizedState)) {
+    normalizedState = getBlondieButtonDefaultState();
+  }
+  if (!supported) {
+    normalizedState = "inactive";
+  }
+  const title = getBlondieButtonTitle(normalizedState);
+  button.hidden = !supported;
+  button.disabled = !supported;
+  button.dataset.blondieState = normalizedState;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.setAttribute("aria-busy", normalizedState === "active" ? "true" : "false");
+  const icon = button.querySelector(".underpar-blondie-icon");
+  if (icon instanceof HTMLImageElement) {
+    icon.src = BLONDIE_BUTTON_ICON_URLS[normalizedState] || BLONDIE_BUTTON_ICON_URLS.inactive;
+  }
+}
+
+function queueBlondieButtonAckReset(button) {
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  clearBlondieButtonAckReset(button);
+  const timerId = window.setTimeout(() => {
+    blondieAckResetTimerByButton.delete(button);
+    renderBlondieButtonState(button, getBlondieButtonDefaultState());
+  }, BLONDIE_BUTTON_ACK_RESET_MS);
+  blondieAckResetTimerByButton.set(button, timerId);
+}
+
+function buildBlondieButtonMarkup() {
+  const initialState = getBlondieButtonDefaultState();
+  const title = escapeHtml(getBlondieButtonTitle(initialState));
+  const hiddenAttr = isBlondieButtonSupported() ? "" : " hidden";
+  return `<button type="button" class="esm-action-btn underpar-blondie-btn" data-blondie-state="${escapeHtml(initialState)}" title="${title}" aria-label="${title}"${hiddenAttr}>
+      <img class="underpar-blondie-icon" src="${escapeHtml(BLONDIE_BUTTON_ICON_URLS[initialState])}" alt="" aria-hidden="true" />
+    </button>`;
+}
+
+function buildEsmBlondieExportRow(row, tableState) {
+  const values = [buildEsmDateLabel(row)];
+  if (tableState.showLegacyMetricColumns && tableState.hasAuthN) {
+    values.push(formatPercent(safeRate(row["authn-successful"], row["authn-attempts"])));
+  }
+  if (tableState.showLegacyMetricColumns && tableState.hasAuthZ) {
+    values.push(formatPercent(safeRate(row["authz-successful"], row["authz-attempts"])));
+  }
+  if (tableState.showLegacyMetricColumns && !tableState.hasAuthN && !tableState.hasAuthZ && tableState.hasCount) {
+    values.push(row.count ?? "");
+  }
+  tableState.displayColumns.forEach((column) => {
+    values.push(row[column] ?? "");
+  });
+  (Array.isArray(tableState.metricColumns) ? tableState.metricColumns : []).forEach((column) => {
+    values.push(row[column] ?? "");
+  });
+  return values.map((value) => String(value ?? ""));
+}
+
+function buildEsmBlondieExportPayload(cardState, tableState) {
+  const headers = Array.isArray(tableState?.headers) ? tableState.headers.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const rows = Array.isArray(tableState?.data) ? tableState.data.map((row) => buildEsmBlondieExportRow(row, tableState)) : [];
+  if (headers.length === 0 || rows.length === 0) {
+    return null;
+  }
+  const requestUrl = String(cardState?.requestUrl || cardState?.endpointUrl || "").trim();
+  return {
+    workspaceKey: "esm",
+    workspaceLabel: "ESM",
+    datasetLabel: String(cardState?.displayNodeLabel || "").trim() || getEsmNodeLabel(requestUrl) || "ESM Report Card",
+    displayNodeLabel: String(cardState?.displayNodeLabel || "").trim(),
+    requestUrl,
+    requestPath: buildCardDisplayRequestUrl(cardState) || requestUrl,
+    programmerId: String(state.programmerId || "").trim(),
+    programmerName: String(state.programmerName || "").trim(),
+    adobePassEnvironmentKey: String(state.adobePassEnvironment?.key || "").trim(),
+    adobePassEnvironmentLabel: String(state.adobePassEnvironment?.label || "").trim(),
+    columns: headers,
+    rows,
+    rowCount: rows.length,
+  };
+}
+
+function syncBlondieButtons(root = document) {
+  if (!root?.querySelectorAll) {
+    return;
+  }
+  root.querySelectorAll(".underpar-blondie-btn").forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    if (!isBlondieButtonSupported()) {
+      renderBlondieButtonState(button, "inactive");
+      return;
+    }
+    const currentState = getBlondieButtonState(button);
+    if (!canUseBlondieButton()) {
+      renderBlondieButtonState(button, "inactive");
+      return;
+    }
+    if (currentState === "active" || currentState === "ack") {
+      renderBlondieButtonState(button, currentState, { preserveTimer: true });
+      return;
+    }
+    renderBlondieButtonState(button, "ready");
   });
 }
 
@@ -3524,7 +3777,10 @@ function renderCardTable(cardState, rows, lastModified) {
           <tr>
             <td class="esm-footer-cell">
               <div class="esm-footer">
-                <a href="#" class="esm-csv-link">CSV</a>
+                <div class="underpar-export-actions">
+                  ${buildBlondieButtonMarkup()}
+                  <a href="#" class="esm-csv-link">CSV</a>
+                </div>
                 <div class="esm-footer-controls">
                   <div class="esm-footer-meta">
                     <span class="esm-last-modified"></span>
@@ -3554,6 +3810,7 @@ function renderCardTable(cardState, rows, lastModified) {
   const tbody = table.querySelector("tbody");
   const footerCell = cardState.bodyElement.querySelector(".esm-footer-cell");
   const lastModifiedLabel = cardState.bodyElement.querySelector(".esm-last-modified");
+  const blondieButton = cardState.bodyElement.querySelector(".underpar-blondie-btn");
   const csvLink = cardState.bodyElement.querySelector(".esm-csv-link");
   const closeButton = cardState.bodyElement.querySelector(".esm-table-close");
 
@@ -3567,6 +3824,7 @@ function renderCardTable(cardState, rows, lastModified) {
     hasAuthN,
     hasAuthZ,
     hasCount,
+    headers,
     displayColumns,
     metricColumns,
     showLegacyMetricColumns,
@@ -3643,6 +3901,47 @@ function renderCardTable(cardState, rows, lastModified) {
     });
   }
 
+  if (blondieButton) {
+    blondieButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      if (!ensureWorkspaceUnlocked()) {
+        return;
+      }
+      const currentBlondieState = getBlondieButtonState(blondieButton);
+      if (currentBlondieState === "active" || currentBlondieState === "ack") {
+        return;
+      }
+      if (!canUseBlondieButton()) {
+        renderBlondieButtonState(blondieButton, "inactive");
+        setStatus(BLONDIE_BUTTON_INACTIVE_MESSAGE, "error");
+        return;
+      }
+      const exportPayload = buildEsmBlondieExportPayload(cardState, tableState);
+      if (!exportPayload) {
+        setStatus("No visible ESM rows are available for :blondiebtn:.", "error");
+        return;
+      }
+      renderBlondieButtonState(blondieButton, "active");
+      try {
+        const result = await sendWorkspaceAction("blondie-export", {
+          exportPayload,
+          card: getCardPayload(cardState),
+        });
+        if (!result?.ok) {
+          renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+          setStatus(result?.error || "Unable to deliver ESM rows with :blondiebtn:.", "error");
+        } else {
+          renderBlondieButtonState(blondieButton, "ack");
+          queueBlondieButtonAckReset(blondieButton);
+          setStatus(`:blondiebtn: delivered ${exportPayload.rowCount} ESM row(s) to your ZipTool panel.`, "success");
+        }
+      } catch (error) {
+        renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+        setStatus(error instanceof Error ? error.message : "Unable to deliver ESM rows with :blondiebtn:.", "error");
+      }
+    });
+  }
+
   if (closeButton) {
     closeButton.addEventListener("click", (event) => {
       event.preventDefault();
@@ -3660,6 +3959,7 @@ function renderCardTable(cardState, rows, lastModified) {
   updateTableWrapperViewport(tableState);
   refreshHeaderStates(tableState);
   cardState.sortStack = tableState.sortStack;
+  syncBlondieButtons(cardState.bodyElement);
 }
 
 function applyReportStart(payload) {
@@ -3892,6 +4192,8 @@ function applyControllerState(payload) {
   state.programmerId = incomingProgrammerId;
   state.programmerName = incomingProgrammerName;
   state.programmerHydrationReady = payload?.programmerHydrationReady === true;
+  state.slackReady = payload?.slack?.ready === true;
+  state.slackUserName = String(payload?.slack?.userName || "").trim();
   state.premiumPanelRequestToken = Math.max(
     0,
     Number(payload?.premiumPanelRequestToken || state.premiumPanelRequestToken || 0)
@@ -3979,7 +4281,9 @@ function applyControllerState(payload) {
   syncTearsheetButtonsVisibility();
   updateWorkspaceLockState();
   updateControllerBanner();
+  syncBlondieButtons();
   maybeConsumePendingAutoRerun();
+  void maybeConsumePendingWorkspaceDeeplink();
 }
 
 function handleWorkspaceEvent(eventName, payload) {
@@ -4090,6 +4394,74 @@ async function sendWorkspaceAction(action, payload = {}) {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     };
+  }
+}
+
+async function maybeConsumePendingWorkspaceDeeplink() {
+  const pending = state.pendingWorkspaceDeeplink;
+  if (!pending || state.pendingWorkspaceDeeplinkConsuming) {
+    return;
+  }
+  if (!state.controllerOnline || !String(state.programmerId || "").trim()) {
+    return;
+  }
+  if (state.esmAvailable === false || state.esmContainerVisible === false || state.workspaceLocked || state.nonEsmMode) {
+    state.pendingWorkspaceDeeplink = null;
+    clearWorkspaceDeeplinkFromLocation();
+    setStatus(
+      "This ESM deeplink needs an active ESM-scoped Media Company selected in UnderPAR.",
+      "error"
+    );
+    return;
+  }
+
+  const requestUrl = buildWorkspaceDeeplinkAbsoluteRequestUrl(pending.requestPath);
+  if (!requestUrl) {
+    state.pendingWorkspaceDeeplink = null;
+    clearWorkspaceDeeplinkFromLocation();
+    setStatus("This ESM deeplink is missing a valid request path.", "error");
+    return;
+  }
+
+  state.pendingWorkspaceDeeplinkConsuming = true;
+  try {
+    const result = await sendWorkspaceAction("run-card", {
+      requestSource: "workspace-path-link",
+      card: {
+        cardId: buildWorkspaceCardId("deeplink"),
+        endpointUrl: requestUrl,
+        requestUrl,
+        zoomKey: resolveWorkspaceCardZoomKey({
+          endpointUrl: requestUrl,
+          requestUrl,
+        }),
+        columns: [],
+        preserveQueryContext: true,
+        displayNodeLabel: String(pending.displayNodeLabel || "").trim(),
+      },
+    });
+    if (!result?.ok) {
+      throw new Error(result?.error || "Unable to open ESM deeplink.");
+    }
+    state.pendingWorkspaceDeeplink = null;
+    clearWorkspaceDeeplinkFromLocation();
+    setStatus(
+      `Loaded ${String(pending.displayNodeLabel || pending.requestPath || "ESM report").trim()} from Slack.`,
+      "success"
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      /side panel controller/i.test(message) ||
+      /different window/i.test(message) ||
+      /bound ESM Workspace tab/i.test(message)
+    ) {
+      state.pendingWorkspaceDeeplink = null;
+      clearWorkspaceDeeplinkFromLocation();
+    }
+    setStatus(message || "Unable to open ESM deeplink.", "error");
+  } finally {
+    state.pendingWorkspaceDeeplinkConsuming = false;
   }
 }
 
@@ -4269,6 +4641,7 @@ async function init() {
   } catch {
     applyWorkspaceAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
   }
+  state.pendingWorkspaceDeeplink = parseWorkspaceDeeplinkPayloadFromLocation();
   try {
     const currentWindow = await chrome.windows.getCurrent();
     state.windowId = Number(currentWindow?.id || 0);
@@ -4279,6 +4652,11 @@ async function init() {
   syncTearsheetButtonsVisibility();
   updateWorkspaceLockState();
   updateControllerBanner();
+  if (state.pendingWorkspaceDeeplink?.requestPath) {
+    setStatus(
+      `Opening ${String(state.pendingWorkspaceDeeplink.displayNodeLabel || state.pendingWorkspaceDeeplink.requestPath).trim()} from Slack...`
+    );
+  }
   const result = await sendWorkspaceAction("workspace-ready");
   if (!result?.ok) {
     setStatus(result?.error || "Unable to contact UnderPAR side panel controller.", "error");

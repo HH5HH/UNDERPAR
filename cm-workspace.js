@@ -20,6 +20,8 @@ const CM_WORKSPACE_IMS_CHECK_TOKEN_URL = "https://adobeid-na1.services.adobe.com
 const UNDERPAR_NETWORK_ACTIVITY_MESSAGE_TYPE = "underpar:networkActivity";
 let CM_WORKSPACE_CONSOLE_ORIGIN = "https://experience.adobe.com";
 let CM_WORKSPACE_CONSOLE_REFERER = `${CM_WORKSPACE_CONSOLE_ORIGIN}/`;
+const CM_WORKSPACE_CONFIG_BASE_URL = "https://config.adobeprimetime.com";
+const CM_WORKSPACE_REPORTS_BASE_URL = "https://cm-reports.adobeprimetime.com";
 const CM_WORKSPACE_REPORTS_ORIGIN = "https://cdn.experience.adobe.net";
 const CM_WORKSPACE_REPORTS_REFERER = `${CM_WORKSPACE_REPORTS_ORIGIN}/`;
 const CM_WORKSPACE_IMS_DEFAULT_SCOPE =
@@ -45,6 +47,21 @@ const DEFAULT_ADOBEPASS_ENVIRONMENT =
     consoleProgrammersUrl:
       "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production/programmers",
   };
+const BLONDIE_BUTTON_STATES = new Set(["inactive", "ready", "active", "ack"]);
+const BLONDIE_BUTTON_ACK_RESET_MS = 2000;
+const BLONDIE_BUTTON_INACTIVE_MESSAGE =
+  "No zip-zap without SLACKTIVATION.  Please feed ZIP.KEY to UP Tab inside Developer Tools";
+const BLONDIE_BUTTON_ICON_URLS = (() => {
+  const resolveIconUrl = (path) =>
+    typeof chrome !== "undefined" && chrome?.runtime?.getURL ? chrome.runtime.getURL(path) : path;
+  return {
+    inactive: resolveIconUrl("icons/blondie-active.svg"),
+    ready: resolveIconUrl("icons/blondie-slacktivated.svg"),
+    active: resolveIconUrl("icons/blondie-ack.svg"),
+    ack: resolveIconUrl("icons/blondie-inactive.svg"),
+  };
+})();
+const blondieAckResetTimerByButton = new WeakMap();
 const CM_METRIC_COLUMNS = new Set([
   "authn-attempts",
   "authn-successful",
@@ -238,6 +255,8 @@ const state = {
   windowId: 0,
   controllerOnline: false,
   adobePassEnvironment: { ...DEFAULT_ADOBEPASS_ENVIRONMENT },
+  slackReady: false,
+  slackUserName: "",
   cmAvailable: null,
   cmAvailabilityResolved: false,
   cmContainerVisible: null,
@@ -263,6 +282,8 @@ const state = {
   autoRerunInFlightProgrammerKey: "",
   pendingAutoRerunCards: [],
   workspaceReplayCards: [],
+  pendingWorkspaceDeeplink: null,
+  pendingWorkspaceDeeplinkConsuming: false,
 };
 
 const els = {
@@ -345,6 +366,139 @@ function applyWorkspaceAdobePassEnvironment(environment = null) {
   state.adobePassEnvironment = resolved;
   renderWorkspaceEnvironmentBadge();
   return resolved;
+}
+
+function buildWorkspaceDeeplinkRequestPath(pathname = "", search = "", options = {}) {
+  const allowBarePath = options?.allowBarePath === true;
+  let normalizedPath = String(pathname || "").trim();
+  if (!normalizedPath) {
+    return "";
+  }
+  if (!normalizedPath.startsWith("/")) {
+    if (!allowBarePath) {
+      return "";
+    }
+    normalizedPath = `/${normalizedPath.replace(/^\/+/, "")}`;
+  }
+  const params = new URLSearchParams(String(search || "").replace(/^\?/, ""));
+  if (isCmuUsageRequestUrl(normalizedPath) || workspaceUsagePathRequiresTenantScope(normalizedPath)) {
+    CM_TENANT_QUERY_PARAM_KEYS.forEach((key) => params.delete(key));
+  }
+  if (/^\/maitai\/(?:applications|policy)(?:\/|$)/i.test(normalizedPath)) {
+    params.delete("orgId");
+    params.delete("orgid");
+  }
+  const normalizedSearch = params.toString();
+  return `${normalizedPath}${normalizedSearch ? `?${normalizedSearch}` : ""}`;
+}
+
+function normalizeWorkspaceDeeplinkRequestPath(rawValue = "") {
+  const normalized = String(rawValue || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const hasAbsoluteScheme = /^[a-z][a-z\d+.-]*:/i.test(normalized);
+  try {
+    const parsed = hasAbsoluteScheme ? new URL(normalized) : new URL(normalized, CM_WORKSPACE_REPORTS_BASE_URL);
+    return buildWorkspaceDeeplinkRequestPath(String(parsed.pathname || ""), String(parsed.search || ""), {
+      allowBarePath: !hasAbsoluteScheme,
+    });
+  } catch (_error) {
+    const withoutHash = normalized.split("#")[0] || "";
+    const [pathPart, queryPart = ""] = withoutHash.split("?");
+    return buildWorkspaceDeeplinkRequestPath(pathPart, queryPart ? `?${queryPart}` : "", {
+      allowBarePath: !hasAbsoluteScheme,
+    });
+  }
+}
+
+function parseWorkspaceDeeplinkPayloadFromLocation() {
+  const query = String(window.location.hash || "").startsWith("#")
+    ? window.location.hash.slice(1)
+    : String(window.location.search || "").replace(/^\?/, "");
+  if (!query) {
+    return null;
+  }
+  const params = new URLSearchParams(query);
+  const requestPath = normalizeWorkspaceDeeplinkRequestPath(
+    params.get("requestPath") || params.get("requestUrl") || params.get("baseRequestUrl") || params.get("endpointUrl") || ""
+  );
+  if (!requestPath) {
+    return null;
+  }
+  return {
+    requestPath,
+    displayNodeLabel: String(params.get("displayNodeLabel") || "").trim(),
+    source: String(params.get("source") || "blondie-button").trim() || "blondie-button",
+    createdAt: Math.max(0, Number(params.get("createdAt") || Date.now() || 0)),
+  };
+}
+
+function clearWorkspaceDeeplinkFromLocation() {
+  try {
+    const nextUrl = new URL(window.location.href);
+    nextUrl.hash = "";
+    [
+      "requestPath",
+      "requestUrl",
+      "endpointUrl",
+      "baseRequestUrl",
+      "displayNodeLabel",
+      "programmerId",
+      "programmerName",
+      "tenantId",
+      "tenantName",
+      "zoomKey",
+      "environmentKey",
+      "environmentLabel",
+      "source",
+      "createdAt",
+    ].forEach((key) => nextUrl.searchParams.delete(key));
+    const nextHref = `${String(nextUrl.pathname || "")}${String(nextUrl.search || "")}`;
+    window.history.replaceState(null, document.title, nextHref || window.location.pathname);
+  } catch (_error) {
+    // Ignore history cleanup failures.
+  }
+}
+
+function resolveWorkspaceDeeplinkBaseUrlForPath(requestPath = "") {
+  const normalizedPath = String(requestPath || "")
+    .trim()
+    .split(/[?#]/, 1)[0];
+  if (/^\/maitai(?:\/|$)/i.test(normalizedPath)) {
+    return CM_WORKSPACE_CONFIG_BASE_URL;
+  }
+  return (
+    String(state.adobePassEnvironment?.cmReportsBase || DEFAULT_ADOBEPASS_ENVIRONMENT.cmReportsBase || CM_WORKSPACE_REPORTS_BASE_URL).trim() ||
+    CM_WORKSPACE_REPORTS_BASE_URL
+  );
+}
+
+function buildWorkspaceDeeplinkAbsoluteRequestUrl(requestPath = "") {
+  const normalizedPath = normalizeWorkspaceDeeplinkRequestPath(requestPath);
+  if (!normalizedPath) {
+    return "";
+  }
+  try {
+    return new URL(normalizedPath, resolveWorkspaceDeeplinkBaseUrlForPath(normalizedPath)).toString();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function buildWorkspaceDeeplinkAbsoluteEndpointUrl(requestPath = "") {
+  const requestUrl = buildWorkspaceDeeplinkAbsoluteRequestUrl(requestPath);
+  if (!requestUrl) {
+    return "";
+  }
+  try {
+    const parsed = new URL(requestUrl);
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (_error) {
+    return String(requestUrl || "").split(/[?#]/, 1)[0];
+  }
 }
 
 async function initializeWorkspaceAdobePassEnvironment() {
@@ -914,6 +1068,33 @@ function applyWorkspaceTenantScopeToUsageUrl(urlValue, tenantScope = "") {
   } catch {
     return raw;
   }
+}
+
+function applyWorkspaceTenantScopeToConfigUrl(urlValue, tenantScope = "") {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const normalizedTenantScope = normalizeWorkspaceTenantScopeValue(tenantScope);
+  try {
+    const parsed = new URL(raw);
+    if (!/^\/maitai\/(?:applications|policy)(?:\/|$)/i.test(String(parsed.pathname || "").trim())) {
+      return parsed.toString();
+    }
+    parsed.searchParams.delete("orgId");
+    parsed.searchParams.delete("orgid");
+    if (normalizedTenantScope) {
+      parsed.searchParams.set("orgId", normalizedTenantScope);
+    }
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function applyWorkspaceTenantScopeToDeeplinkUrl(urlValue, tenantScope = "") {
+  const usageScopedUrl = applyWorkspaceTenantScopeToUsageUrl(urlValue, tenantScope);
+  return applyWorkspaceTenantScopeToConfigUrl(usageScopedUrl, tenantScope);
 }
 
 function resolveWorkspaceTenantScope(cardState = null, cardPayload = null) {
@@ -2936,6 +3117,158 @@ function renderCmuUsageTableBody(tableState) {
   });
 }
 
+function isBlondieButtonSupported() {
+  return !IS_CM_WORKSPACE_TEARSHEET_RUNTIME;
+}
+
+function canUseBlondieButton() {
+  return state.slackReady === true && isBlondieButtonSupported();
+}
+
+function getBlondieButtonDefaultState() {
+  return canUseBlondieButton() ? "ready" : "inactive";
+}
+
+function clearBlondieButtonAckReset(button) {
+  const timerId = blondieAckResetTimerByButton.get(button);
+  if (timerId) {
+    window.clearTimeout(timerId);
+    blondieAckResetTimerByButton.delete(button);
+  }
+}
+
+function getBlondieButtonState(button = null) {
+  const stateValue = String(button?.dataset?.blondieState || "").trim().toLowerCase();
+  return BLONDIE_BUTTON_STATES.has(stateValue) ? stateValue : getBlondieButtonDefaultState();
+}
+
+function getBlondieButtonTitle(buttonState = "") {
+  const normalizedState = BLONDIE_BUTTON_STATES.has(String(buttonState || "").trim().toLowerCase())
+    ? String(buttonState || "").trim().toLowerCase()
+    : getBlondieButtonDefaultState();
+  if (!isBlondieButtonSupported()) {
+    return ":blondiebtn: is unavailable in this workspace export.";
+  }
+  if (normalizedState === "active") {
+    return ":blondiebtn: is delivering your Slack CSV...";
+  }
+  if (normalizedState === "ack") {
+    return "Slack acknowledged :blondiebtn: delivery.";
+  }
+  if (canUseBlondieButton()) {
+    return "zip-zip data to SLACK when it's sitting in SLACKTIVATED state";
+  }
+  return BLONDIE_BUTTON_INACTIVE_MESSAGE;
+}
+
+function renderBlondieButtonState(button, nextState = "", options = {}) {
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  const preserveTimer = options?.preserveTimer === true;
+  if (!preserveTimer) {
+    clearBlondieButtonAckReset(button);
+  }
+  const supported = isBlondieButtonSupported();
+  let normalizedState = String(nextState || "").trim().toLowerCase();
+  if (!BLONDIE_BUTTON_STATES.has(normalizedState)) {
+    normalizedState = getBlondieButtonDefaultState();
+  }
+  if (!supported) {
+    normalizedState = "inactive";
+  }
+  const title = getBlondieButtonTitle(normalizedState);
+  button.hidden = !supported;
+  button.disabled = !supported;
+  button.dataset.blondieState = normalizedState;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.setAttribute("aria-busy", normalizedState === "active" ? "true" : "false");
+  const icon = button.querySelector(".underpar-blondie-icon");
+  if (icon instanceof HTMLImageElement) {
+    icon.src = BLONDIE_BUTTON_ICON_URLS[normalizedState] || BLONDIE_BUTTON_ICON_URLS.inactive;
+  }
+}
+
+function queueBlondieButtonAckReset(button) {
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  clearBlondieButtonAckReset(button);
+  const timerId = window.setTimeout(() => {
+    blondieAckResetTimerByButton.delete(button);
+    renderBlondieButtonState(button, getBlondieButtonDefaultState());
+  }, BLONDIE_BUTTON_ACK_RESET_MS);
+  blondieAckResetTimerByButton.set(button, timerId);
+}
+
+function buildBlondieButtonMarkup() {
+  const initialState = getBlondieButtonDefaultState();
+  const title = escapeHtml(getBlondieButtonTitle(initialState));
+  const hiddenAttr = isBlondieButtonSupported() ? "" : " hidden";
+  return `<button type="button" class="esm-action-btn underpar-blondie-btn" data-blondie-state="${escapeHtml(initialState)}" title="${title}" aria-label="${title}"${hiddenAttr}>
+      <img class="underpar-blondie-icon" src="${escapeHtml(BLONDIE_BUTTON_ICON_URLS[initialState])}" alt="" aria-hidden="true" />
+    </button>`;
+}
+
+function buildCmBlondieExportPayload(cardState, tableState) {
+  const sortRule = cardState?.sortStack?.[0] || tableState?.sortStack?.[0] || null;
+  const csvRows = buildStandaloneCsvRows(cardState, sortRule);
+  if (csvRows.length <= 1) {
+    return null;
+  }
+  const requestUrl = String(buildCardDisplayRequestUrl(cardState) || getCardEffectiveRequestUrl(cardState) || "").trim();
+  const requestPath = normalizeWorkspaceDeeplinkRequestPath(requestUrl);
+  const operationLabel = String(cardState?.operation?.label || cardState?.operation?.pathTemplate || "").trim();
+  const tenantScope = resolveWorkspaceTenantScope(cardState);
+  const displayNodeLabel = operationLabel || getNodeLabel(requestUrl) || "CM Report Card";
+  return {
+    workspaceKey: "cm",
+    workspaceLabel: "CM",
+    datasetLabel: displayNodeLabel,
+    displayNodeLabel,
+    requestUrl,
+    requestPath,
+    endpointUrl: String(cardState?.endpointUrl || requestUrl || "").trim(),
+    baseRequestUrl: String(getCardBaseRequestUrl(cardState) || requestUrl || "").trim(),
+    zoomKey: String(cardState?.zoomKey || "").trim(),
+    programmerId: String(state.programmerId || "").trim(),
+    programmerName: String(state.programmerName || "").trim(),
+    tenantId: String(tenantScope || "").trim(),
+    tenantName: resolveWorkspaceTenantLabel(cardState),
+    adobePassEnvironmentKey: String(state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim(),
+    adobePassEnvironmentLabel: String(state.adobePassEnvironment?.label || "").trim(),
+    columns: csvRows[0].map((value) => String(value ?? "").trim()).filter(Boolean),
+    rows: csvRows.slice(1).map((row) => row.map((value) => String(value ?? ""))),
+    rowCount: Math.max(0, csvRows.length - 1),
+  };
+}
+
+function syncBlondieButtons(root = document) {
+  if (!root?.querySelectorAll) {
+    return;
+  }
+  root.querySelectorAll(".underpar-blondie-btn").forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    if (!isBlondieButtonSupported()) {
+      renderBlondieButtonState(button, "inactive");
+      return;
+    }
+    const currentState = getBlondieButtonState(button);
+    if (!canUseBlondieButton()) {
+      renderBlondieButtonState(button, "inactive");
+      return;
+    }
+    if (currentState === "active" || currentState === "ack") {
+      renderBlondieButtonState(button, currentState, { preserveTimer: true });
+      return;
+    }
+    renderBlondieButtonState(button, "ready");
+  });
+}
+
 function updateTableWrapperViewport(tableState) {
   const wrapper = tableState?.wrapper;
   const table = tableState?.table;
@@ -4552,7 +4885,10 @@ function renderCardTable(cardState, rows, lastModified) {
           <tr>
             <td class="esm-footer-cell">
               <div class="esm-footer">
-                <a href="#" class="esm-csv-link">CSV</a>
+                <div class="underpar-export-actions">
+                  ${buildBlondieButtonMarkup()}
+                  <a href="#" class="esm-csv-link">CSV</a>
+                </div>
                 <div class="esm-footer-controls">
                   <div class="esm-footer-meta">
                     <span class="esm-last-modified"></span>
@@ -4577,6 +4913,7 @@ function renderCardTable(cardState, rows, lastModified) {
   const tbody = table.querySelector("tbody");
   const footerCell = cardState.bodyElement.querySelector(".esm-footer-cell");
   const lastModifiedLabel = cardState.bodyElement.querySelector(".esm-last-modified");
+  const blondieButton = cardState.bodyElement.querySelector(".underpar-blondie-btn");
   const csvLink = cardState.bodyElement.querySelector(".esm-csv-link");
   const closeButton = cardState.bodyElement.querySelector(".esm-table-close");
 
@@ -4695,6 +5032,47 @@ function renderCardTable(cardState, rows, lastModified) {
     });
   }
 
+  if (blondieButton) {
+    blondieButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      if (!ensureWorkspaceUnlocked()) {
+        return;
+      }
+      const currentBlondieState = getBlondieButtonState(blondieButton);
+      if (currentBlondieState === "active" || currentBlondieState === "ack") {
+        return;
+      }
+      if (!canUseBlondieButton()) {
+        renderBlondieButtonState(blondieButton, "inactive");
+        setStatus(BLONDIE_BUTTON_INACTIVE_MESSAGE, "error");
+        return;
+      }
+      const exportPayload = buildCmBlondieExportPayload(cardState, tableState);
+      if (!exportPayload) {
+        setStatus("No visible CM rows are available for :blondiebtn:.", "error");
+        return;
+      }
+      renderBlondieButtonState(blondieButton, "active");
+      try {
+        const result = await sendWorkspaceAction("blondie-export", {
+          exportPayload,
+          card: getCardPayload(cardState),
+        });
+        if (!result?.ok) {
+          renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+          setStatus(result?.error || "Unable to deliver CM rows with :blondiebtn:.", "error");
+        } else {
+          renderBlondieButtonState(blondieButton, "ack");
+          queueBlondieButtonAckReset(blondieButton);
+          setStatus(`:blondiebtn: delivered ${exportPayload.rowCount} CM row(s) to your ZipTool panel.`, "success");
+        }
+      } catch (error) {
+        renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+        setStatus(error instanceof Error ? error.message : "Unable to deliver CM rows with :blondiebtn:.", "error");
+      }
+    });
+  }
+
   if (closeButton) {
     closeButton.addEventListener("click", (event) => {
       event.preventDefault();
@@ -4713,6 +5091,7 @@ function renderCardTable(cardState, rows, lastModified) {
   updateTableWrapperViewport(tableState);
   refreshHeaderStates(tableState);
   cardState.sortStack = tableState.sortStack;
+  syncBlondieButtons(cardState.bodyElement);
 }
 
 function applyReportStart(payload) {
@@ -4912,6 +5291,8 @@ function applyControllerState(payload) {
   state.programmerId = String(payload?.programmerId || "");
   state.programmerName = String(payload?.programmerName || "");
   state.programmerHydrationReady = payload?.programmerHydrationReady === true;
+  state.slackReady = payload?.slack?.ready === true;
+  state.slackUserName = String(payload?.slack?.userName || "").trim();
   state.premiumPanelRequestToken = Math.max(
     0,
     Number(payload?.premiumPanelRequestToken || state.premiumPanelRequestToken || 0)
@@ -5023,7 +5404,9 @@ function applyControllerState(payload) {
   syncTearsheetButtonsVisibility();
   updateWorkspaceLockState();
   updateControllerBanner();
+  syncBlondieButtons();
   maybeConsumePendingAutoRerun();
+  void maybeConsumePendingWorkspaceDeeplink();
 }
 
 function handleWorkspaceEvent(eventName, payload) {
@@ -5998,6 +6381,75 @@ async function sendWorkspaceAction(action, payload = {}) {
   }
 }
 
+async function maybeConsumePendingWorkspaceDeeplink() {
+  const pending = state.pendingWorkspaceDeeplink;
+  if (!pending || state.pendingWorkspaceDeeplinkConsuming) {
+    return;
+  }
+  if (!state.controllerOnline || !String(state.programmerId || "").trim()) {
+    return;
+  }
+
+  if (state.cmAvailable === false || state.cmContainerVisible === false || state.workspaceLocked || state.nonCmMode) {
+    state.pendingWorkspaceDeeplink = null;
+    clearWorkspaceDeeplinkFromLocation();
+    setStatus(
+      "This CM deeplink needs an active Concurrency Monitoring-scoped Media Company selected in UnderPAR.",
+      "error"
+    );
+    return;
+  }
+
+  state.pendingWorkspaceDeeplinkConsuming = true;
+  try {
+    const tenantScope = resolveWorkspaceTenantScope();
+    const requestUrl =
+      applyWorkspaceTenantScopeToDeeplinkUrl(buildWorkspaceDeeplinkAbsoluteRequestUrl(pending.requestPath), tenantScope) ||
+      buildWorkspaceDeeplinkAbsoluteRequestUrl(pending.requestPath);
+    const endpointUrl = buildWorkspaceDeeplinkAbsoluteEndpointUrl(pending.requestPath);
+    const baseRequestUrl =
+      buildInheritedRequestUrl(endpointUrl || requestUrl, requestUrl, tenantScope) ||
+      applyWorkspaceTenantScopeToDeeplinkUrl(requestUrl, tenantScope) ||
+      requestUrl;
+    if (!requestUrl || !endpointUrl) {
+      throw new Error("This CM deeplink is missing a valid request path.");
+    }
+    const result = await sendWorkspaceAction("run-card", {
+      requestSource: "workspace-path-link",
+      card: {
+        cardId: buildWorkspaceCardId("deeplink"),
+        endpointUrl,
+        requestUrl: baseRequestUrl,
+        baseRequestUrl,
+        columns: [],
+        tenantId: String(tenantScope || "").trim(),
+        tenantName: resolveWorkspaceTenantLabel(),
+      },
+    });
+    if (!result?.ok) {
+      throw new Error(result?.error || "Unable to open CM deeplink.");
+    }
+    state.pendingWorkspaceDeeplink = null;
+    clearWorkspaceDeeplinkFromLocation();
+    setStatus(
+      `Loaded ${String(pending.displayNodeLabel || pending.requestPath || "CM report").trim()} from Slack.`,
+      "success"
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      /attached to a different window/i.test(message) ||
+      /bound CM workspace tab/i.test(message)
+    ) {
+      state.pendingWorkspaceDeeplink = null;
+      clearWorkspaceDeeplinkFromLocation();
+    }
+    setStatus(message || "Unable to open CM deeplink.", "error");
+  } finally {
+    state.pendingWorkspaceDeeplinkConsuming = false;
+  }
+}
+
 async function rerunAllCards(options = {}) {
   if (!ensureWorkspaceUnlocked()) {
     return;
@@ -6248,6 +6700,7 @@ async function init() {
   } catch {
     applyWorkspaceAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key);
   }
+  state.pendingWorkspaceDeeplink = parseWorkspaceDeeplinkPayloadFromLocation();
   if (!IS_CM_WORKSPACE_TEARSHEET_RUNTIME && hasChromeRuntimeMessaging() && chrome?.windows?.getCurrent) {
     try {
       const currentWindow = await chrome.windows.getCurrent();
@@ -6263,6 +6716,11 @@ async function init() {
   syncTearsheetButtonsVisibility();
   updateWorkspaceLockState();
   updateControllerBanner();
+  if (state.pendingWorkspaceDeeplink?.requestPath) {
+    setStatus(
+      `Opening ${String(state.pendingWorkspaceDeeplink.displayNodeLabel || state.pendingWorkspaceDeeplink.requestPath).trim()} from Slack...`
+    );
+  }
 
   if (IS_CM_WORKSPACE_TEARSHEET_RUNTIME) {
     hydrateWorkspaceFromExportPayload(workspaceExportPayload);
@@ -6272,7 +6730,9 @@ async function init() {
   const result = await sendWorkspaceAction("workspace-ready");
   if (!result?.ok) {
     setStatus(result?.error || "Unable to contact UnderPAR CM controller.", "error");
+    return;
   }
+  void maybeConsumePendingWorkspaceDeeplink();
 }
 
 void init();

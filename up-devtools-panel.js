@@ -28,13 +28,25 @@ const vaultExportButton = document.getElementById("vault-export-btn");
 const vaultImportButton = document.getElementById("vault-import-btn");
 const vaultPurgeButton = document.getElementById("vault-purge-btn");
 const vaultImportInput = document.getElementById("vault-import-input");
+const vaultSlacktivateToggle = document.getElementById("vault-slacktivate-toggle");
+const vaultSlacktivatePanel = document.getElementById("vault-slacktivate-panel");
+const vaultSlacktivateBadge = document.getElementById("vault-slacktivate-badge");
+const vaultSlacktivateContent = document.getElementById("vault-slacktivate-content");
+const vaultSlacktivateInput = document.getElementById("vault-slacktivate-input");
 const UP_DEVTOOLS_STATUS_PORT_NAME = "underpar-up-devtools-status";
 const FALLBACK_STORAGE_KEY = "underpar_adobepass_environment_v1";
 const UNDERPAR_VAULT_STORAGE_KEY = "underpar_vault_v1";
-const UNDERPAR_VAULT_CSV_SCHEMA = "underpar-pass-vault-csv-v4";
+const UNDERPAR_VAULT_CSV_SCHEMA = "underpar-pass-vault-csv-v5";
+const UNDERPAR_VAULT_SUPPORTED_CSV_SCHEMAS = new Set([
+  UNDERPAR_VAULT_CSV_SCHEMA,
+  "underpar-pass-vault-csv-v4",
+]);
 const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 3;
 const UP_DEVTOOLS_VAULT_ACTION_REQUEST_TYPE = "underpar:upDevtoolsVaultAction";
 const UNDERPAR_DCR_CACHE_PREFIX = "underpar_dcr_cache_v1";
+const SLACKTIVATION_WORKSPACE_ORIGIN = "https://adobedx.slack.com";
+const SLACKTIVATION_OPENID_DEFAULT_SCOPE = "openid profile email";
+const SLACKTIVATION_OPENID_DEFAULT_REDIRECT_PATH = "slack-user";
 const VAULT_REQUIRED_SCOPE_BY_SERVICE_KEY = Object.freeze({
   restV2: "api:client:v2",
   esm: "analytics:client",
@@ -77,6 +89,7 @@ const panelState = {
   vaultImportBusy: false,
   vaultActionBusy: false,
   vaultActionContext: null,
+  vaultSlacktivateDragDepth: 0,
 };
 
 function normalizeEnvironmentKey(value) {
@@ -392,6 +405,370 @@ function cloneJsonLikeValue(value, fallback = null) {
   }
 }
 
+function normalizeSlacktivationText(value = "", maxLength = 0) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (maxLength > 0) {
+    return normalized.slice(0, maxLength);
+  }
+  return normalized;
+}
+
+function normalizeSlacktivationToken(value = "") {
+  const token = String(value || "").trim();
+  return /^(?:xoxe\.)?xox[a-z]-/i.test(token) ? token : "";
+}
+
+function normalizeSlacktivationWorkspaceOrigin(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return SLACKTIVATION_WORKSPACE_ORIGIN;
+  }
+  try {
+    const parsed = new URL(raw);
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (parsed.protocol !== "https:" || (host !== "slack.com" && !host.endsWith(".slack.com"))) {
+      return SLACKTIVATION_WORKSPACE_ORIGIN;
+    }
+    return parsed.origin;
+  } catch {
+    return SLACKTIVATION_WORKSPACE_ORIGIN;
+  }
+}
+
+function normalizeSlacktivationChannelId(value = "") {
+  const normalized = String(value || "").trim().toUpperCase();
+  return /^[CGD][A-Z0-9]{8,}$/.test(normalized) ? normalized : "";
+}
+
+function normalizeSlacktivationDirectChannelId(value = "") {
+  const normalized = String(value || "").trim().toUpperCase();
+  return /^D[A-Z0-9]{8,}$/.test(normalized) ? normalized : "";
+}
+
+function normalizeSlacktivationUserId(value = "") {
+  const normalized = String(value || "").trim().toUpperCase();
+  return /^[UW][A-Z0-9]{8,}$/.test(normalized) ? normalized : "";
+}
+
+function normalizeSlacktivationTeamId(value = "") {
+  const normalized = String(value || "").trim().toUpperCase();
+  return /^T[A-Z0-9]{8,}$/.test(normalized) ? normalized : "";
+}
+
+function normalizeSlacktivationMention(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/^<@[UW][A-Z0-9]{8,}>$/i.test(raw)) {
+    return raw;
+  }
+  const plain = raw.startsWith("@") ? raw.slice(1).trim() : raw;
+  return plain ? `@${plain}` : "";
+}
+
+function normalizeSlacktivationAvatarUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSlacktivationStatusIcon(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/^:[a-z0-9_+\-]{1,64}:$/i.test(raw)) {
+    return raw.toLowerCase();
+  }
+  if (/^[a-z0-9_+\-]{1,64}$/i.test(raw)) {
+    return `:${raw.toLowerCase()}:`;
+  }
+  return normalizeSlacktivationText(raw, 32);
+}
+
+function normalizeSlacktivationStatusIconUrl(value = "") {
+  return normalizeSlacktivationAvatarUrl(value);
+}
+
+function normalizeSlacktivationReady(value = false) {
+  if (value === true) {
+    return true;
+  }
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "ready";
+}
+
+function normalizeSlacktivationOpenIdScope(value = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return SLACKTIVATION_OPENID_DEFAULT_SCOPE;
+  }
+  const allowed = new Set(["openid", "profile", "email"]);
+  const scopes = raw
+    .split(/[\s,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .filter((entry, index, array) => allowed.has(entry) && array.indexOf(entry) === index);
+  if (!scopes.includes("openid")) {
+    scopes.unshift("openid");
+  }
+  return scopes.length > 0 ? scopes.join(" ") : SLACKTIVATION_OPENID_DEFAULT_SCOPE;
+}
+
+function normalizeSlacktivationRedirectPath(value = "") {
+  const raw = String(value || "").trim().replace(/^\/+/, "");
+  if (!raw) {
+    return SLACKTIVATION_OPENID_DEFAULT_REDIRECT_PATH;
+  }
+  const normalized = raw.replace(/[^a-zA-Z0-9._/-]/g, "");
+  if (!normalized || normalized.includes("..")) {
+    return SLACKTIVATION_OPENID_DEFAULT_REDIRECT_PATH;
+  }
+  return normalized;
+}
+
+function normalizeSlacktivationRedirectUri(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (parsed.protocol !== "https:" || !host.endsWith(".chromiumapp.org")) {
+      return "";
+    }
+    return `${parsed.origin}${String(parsed.pathname || "").trim() || "/"}`;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeVaultSlacktivationKeyMeta(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const rawServices = [];
+  const appendService = (candidate) => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach((entry) => appendService(entry));
+      return;
+    }
+    const text = normalizeSlacktivationText(candidate, 64);
+    if (text) {
+      rawServices.push(text);
+    }
+  };
+  appendService(value?.services);
+  appendService(value?.service);
+  appendService(value?.features);
+  const services = uniqueSorted(
+    rawServices
+  );
+  const keyVersion = normalizeSlacktivationText(value?.keyVersion || value?.version || "", 64);
+  const importedAt = normalizeSlacktivationText(value?.importedAt || "", 80);
+  const source = normalizeSlacktivationText(value?.source || "", 64);
+  if (!services.length && !keyVersion && !importedAt && !source) {
+    return null;
+  }
+  return {
+    services,
+    keyVersion,
+    importedAt,
+    source,
+  };
+}
+
+function normalizeVaultSlacktivationOpenIdSession(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const accessToken = normalizeSlacktivationToken(value?.accessToken || value?.access_token || "");
+  const idToken = normalizeSlacktivationText(value?.idToken || value?.id_token || "", 4096);
+  const scope = normalizeSlacktivationOpenIdScope(value?.scope || "");
+  const expiresAtMs = Math.max(0, Number(value?.expiresAtMs || value?.expires_at_ms || 0));
+  const userId = normalizeSlacktivationUserId(value?.userId || value?.user_id || "");
+  const teamId = normalizeSlacktivationTeamId(value?.teamId || value?.team_id || "");
+  const userName = normalizeSlacktivationText(value?.userName || value?.user_name || "", 120);
+  const avatarUrl = normalizeSlacktivationAvatarUrl(value?.avatarUrl || value?.avatar_url || "");
+  const email = normalizeSlacktivationText(value?.email || "", 160);
+  const verifiedAtMs = Math.max(0, Number(value?.verifiedAtMs || 0));
+  const createdAt = normalizeSlacktivationText(value?.createdAt || "", 80);
+  if (!accessToken && !idToken && !userId && !teamId && !userName && !avatarUrl && !email && !expiresAtMs) {
+    return null;
+  }
+  return {
+    accessToken,
+    idToken,
+    scope,
+    expiresAtMs,
+    userId,
+    teamId,
+    userName,
+    avatarUrl,
+    email,
+    verifiedAtMs,
+    createdAt,
+  };
+}
+
+function normalizeVaultSlacktivationIdentity(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const mode = normalizeSlacktivationText(value?.mode || "", 32).toLowerCase();
+  const userId = normalizeSlacktivationUserId(value?.userId || value?.user_id || "");
+  const teamId = normalizeSlacktivationTeamId(value?.teamId || value?.team_id || "");
+  const userName = normalizeSlacktivationText(value?.userName || value?.user_name || "", 120);
+  const email = normalizeSlacktivationText(value?.email || "", 160);
+  const avatarUrl = normalizeSlacktivationAvatarUrl(value?.avatarUrl || value?.avatar_url || "");
+  const statusIcon = normalizeSlacktivationStatusIcon(value?.statusIcon || value?.status_icon || "");
+  const statusIconUrl = normalizeSlacktivationStatusIconUrl(value?.statusIconUrl || value?.status_icon_url || "");
+  const statusMessage = normalizeSlacktivationText(value?.statusMessage || value?.status_message || "", 160);
+  const directChannelId = normalizeSlacktivationDirectChannelId(value?.directChannelId || value?.direct_channel_id || "");
+  const directChannelErrorCode = normalizeSlacktivationText(
+    value?.directChannelErrorCode || value?.direct_channel_error_code || "",
+    64
+  );
+  const avatarErrorCode = normalizeSlacktivationText(value?.avatarErrorCode || value?.avatar_error_code || "", 64);
+  const avatarError = normalizeSlacktivationText(value?.avatarError || value?.avatar_error || "", 240);
+  const updatedAt = Math.max(0, Number(value?.updatedAt || 0));
+  const ready = normalizeSlacktivationReady(value?.ready);
+  if (
+    !mode &&
+    !userId &&
+    !teamId &&
+    !userName &&
+    !email &&
+    !avatarUrl &&
+    !statusIcon &&
+    !statusIconUrl &&
+    !statusMessage &&
+    !directChannelId &&
+    !directChannelErrorCode &&
+    !avatarErrorCode &&
+    !avatarError &&
+    !updatedAt &&
+    ready !== true
+  ) {
+    return null;
+  }
+  return {
+    mode,
+    userId,
+    teamId,
+    userName,
+    email,
+    avatarUrl,
+    statusIcon,
+    statusIconUrl,
+    statusMessage,
+    directChannelId,
+    directChannelErrorCode,
+    avatarErrorCode,
+    avatarError,
+    updatedAt,
+    ready,
+  };
+}
+
+function normalizeVaultSlacktivationError(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const code = normalizeSlacktivationText(value?.code || "", 64);
+  const message = normalizeSlacktivationText(value?.message || value?.error || "", 240);
+  const updatedAt = Math.max(0, Number(value?.updatedAt || 0));
+  if (!code && !message && !updatedAt) {
+    return null;
+  }
+  return {
+    code,
+    message,
+    updatedAt,
+  };
+}
+
+function normalizeVaultSlacktivationRecord(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const oidcInput = value?.oidc && typeof value.oidc === "object" ? value.oidc : {};
+  const apiInput = value?.api && typeof value.api === "object" ? value.api : {};
+  const singularityInput = value?.singularity && typeof value.singularity === "object" ? value.singularity : {};
+  const identity = normalizeVaultSlacktivationIdentity(value?.identity || null);
+  const keyMeta = normalizeVaultSlacktivationKeyMeta(value?.keyMeta || value?.meta || null);
+  const openIdSession = normalizeVaultSlacktivationOpenIdSession(value?.openIdSession || value?.openid || null);
+  const lastError = normalizeVaultSlacktivationError(value?.lastError || null);
+  const record = {
+    schemaVersion: Math.max(1, Number(value?.schemaVersion || 1)),
+    workspaceOrigin: normalizeSlacktivationWorkspaceOrigin(value?.workspaceOrigin || value?.workspace_origin || ""),
+    ready: identity?.ready === true || normalizeSlacktivationReady(value?.ready),
+    activatedAt: Math.max(0, Number(value?.activatedAt || value?.activated_at || 0)),
+    updatedAt: Math.max(0, Number(value?.updatedAt || 0)),
+    oidc: {
+      clientId: normalizeSlacktivationText(oidcInput?.clientId || oidcInput?.client_id || "", 160),
+      clientSecret: normalizeSlacktivationText(oidcInput?.clientSecret || oidcInput?.client_secret || "", 200),
+      scope: normalizeSlacktivationOpenIdScope(oidcInput?.scope || ""),
+      redirectPath: normalizeSlacktivationRedirectPath(oidcInput?.redirectPath || oidcInput?.redirect_path || ""),
+      redirectUri: normalizeSlacktivationRedirectUri(oidcInput?.redirectUri || oidcInput?.redirect_uri || ""),
+    },
+    api: {
+      botToken: normalizeSlacktivationToken(apiInput?.botToken || apiInput?.bot_token || ""),
+      userToken: normalizeSlacktivationToken(apiInput?.userToken || apiInput?.user_token || ""),
+      oauthToken: normalizeSlacktivationToken(apiInput?.oauthToken || apiInput?.oauth_token || apiInput?.userToken || ""),
+    },
+    singularity: {
+      channelId: normalizeSlacktivationChannelId(
+        singularityInput?.channelId || singularityInput?.channel_id || value?.channelId || ""
+      ),
+      mention: normalizeSlacktivationMention(
+        singularityInput?.mention || singularityInput?.singularityMention || value?.mention || ""
+      ),
+    },
+    identity,
+    openIdSession,
+    keyMeta,
+    lastError,
+  };
+  if (!record.api.oauthToken) {
+    record.api.oauthToken = record.api.userToken;
+  }
+  if (!record.activatedAt && record.ready) {
+    record.activatedAt = Math.max(0, Number(identity?.updatedAt || record.updatedAt || Date.now()));
+  }
+  if (!record.updatedAt) {
+    record.updatedAt = Math.max(
+      Number(identity?.updatedAt || 0),
+      Number(lastError?.updatedAt || 0),
+      record.ready ? Date.now() : 0
+    );
+  }
+  const hasConfig =
+    Boolean(record.oidc.clientId) ||
+    Boolean(record.oidc.clientSecret) ||
+    Boolean(record.api.userToken) ||
+    Boolean(record.api.botToken) ||
+    Boolean(record.singularity.channelId) ||
+    Boolean(record.singularity.mention);
+  const hasRuntime = Boolean(record.identity) || Boolean(record.keyMeta) || Boolean(record.openIdSession) || Boolean(record.lastError);
+  if (!hasConfig && !hasRuntime) {
+    return null;
+  }
+  return record;
+}
+
 function normalizeVaultHydrationStatus(value = "") {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "complete" || normalized === "partial" || normalized === "pending") {
@@ -554,6 +931,9 @@ function ensureVaultGlobalContainers(vaultPayload = null) {
   ) {
     target.underpar.globals.cmImsByEnvironment = {};
   }
+  if (!Object.prototype.hasOwnProperty.call(target.underpar.globals, "slack")) {
+    target.underpar.globals.slack = null;
+  }
   if (
     !target.underpar.app.savedQueries ||
     typeof target.underpar.app.savedQueries !== "object" ||
@@ -695,6 +1075,36 @@ function setVaultCmGlobalRecord(vaultPayload = null, environmentKey = "", record
   return normalizedRecord;
 }
 
+function getVaultSlacktivationInput(vaultPayload = null) {
+  if (!vaultPayload || typeof vaultPayload !== "object") {
+    return null;
+  }
+  if (vaultPayload?.underpar?.globals && Object.prototype.hasOwnProperty.call(vaultPayload.underpar.globals, "slack")) {
+    return vaultPayload.underpar.globals.slack;
+  }
+  if (vaultPayload?.underpar?.globals && Object.prototype.hasOwnProperty.call(vaultPayload.underpar.globals, "slacktivation")) {
+    return vaultPayload.underpar.globals.slacktivation;
+  }
+  if (vaultPayload?.underpar && Object.prototype.hasOwnProperty.call(vaultPayload.underpar, "slacktivation")) {
+    return vaultPayload.underpar.slacktivation;
+  }
+  return null;
+}
+
+function getVaultSlacktivationRecord(vaultPayload = null) {
+  return normalizeVaultSlacktivationRecord(getVaultSlacktivationInput(vaultPayload));
+}
+
+function setVaultSlacktivationRecord(vaultPayload = null, record = null) {
+  const target = ensureVaultGlobalContainers(vaultPayload);
+  const normalizedRecord = normalizeVaultSlacktivationRecord(record);
+  target.underpar.globals.slack = normalizedRecord ? cloneJsonLikeValue(normalizedRecord, null) : null;
+  if (Object.prototype.hasOwnProperty.call(target.underpar.globals, "slacktivation")) {
+    delete target.underpar.globals.slacktivation;
+  }
+  return normalizedRecord;
+}
+
 function normalizeVaultPayload(payload = null) {
   const normalized = {
     schemaVersion: 1,
@@ -703,6 +1113,7 @@ function normalizeVaultPayload(payload = null) {
       globals: {
         savedQueries: {},
         cmImsByEnvironment: {},
+        slack: null,
       },
       app: {
         savedQueries: {},
@@ -723,6 +1134,7 @@ function normalizeVaultPayload(payload = null) {
   setVaultSavedQueries(normalized, getVaultSavedQueriesInput(payload));
   const cmGlobalsByEnvironment = getVaultCmGlobalsByEnvironment(payload);
   normalized.underpar.globals.cmImsByEnvironment = cloneJsonLikeValue(cmGlobalsByEnvironment, {});
+  setVaultSlacktivationRecord(normalized, getVaultSlacktivationInput(payload));
 
   const environmentsInput =
     payload?.pass?.environments && typeof payload.pass.environments === "object" ? payload.pass.environments : {};
@@ -1376,9 +1788,8 @@ function syncVaultIdleState(message = "") {
     vaultImportButton.disabled = panelState.vaultImportBusy === true || panelState.vaultActionBusy === true;
   }
   if (vaultExportButton) {
-    const hasPassRecords = Number(panelState.vaultSnapshot?.passVaultSummary?.mediaCompanyCount || 0) > 0;
-    const hasSavedQueries = Number(panelState.vaultSnapshot?.savedQueryCount || 0) > 0;
-    vaultExportButton.disabled = panelState.vaultActionBusy === true || !(hasPassRecords || hasSavedQueries);
+    vaultExportButton.disabled =
+      panelState.vaultActionBusy === true || !hasVaultExportableData(panelState.vaultSnapshot?.vaultPayload || null, panelState.vaultSnapshot);
   }
   if (vaultPurgeButton) {
     vaultPurgeButton.disabled = panelState.vaultImportBusy === true || panelState.vaultActionBusy === true;
@@ -1832,6 +2243,36 @@ function createVaultExportRowSkeleton() {
     "CM IMS Session": "",
     "Saved Query Name": "",
     "Saved Query URL": "",
+    "Slack Workspace Origin": "",
+    "Slack Ready": "",
+    "Slack Auth Mode": "",
+    "Slack OIDC Client ID": "",
+    "Slack OIDC Client Secret": "",
+    "Slack OIDC Scope": "",
+    "Slack OIDC Redirect Path": "",
+    "Slack OIDC Redirect URI": "",
+    "Slack API Bot Token": "",
+    "Slack API User Token": "",
+    "Slack API OAuth Token": "",
+    "Slack Singularity Channel ID": "",
+    "Slack Singularity Mention": "",
+    "Slack User ID": "",
+    "Slack Team ID": "",
+    "Slack User Name": "",
+    "Slack Email": "",
+    "Slack Avatar URL": "",
+    "Slack Status Icon": "",
+    "Slack Status Icon URL": "",
+    "Slack Status Message": "",
+    "Slack Direct Channel ID": "",
+    "Slack Direct Channel Error Code": "",
+    "Slack Avatar Error Code": "",
+    "Slack Avatar Error": "",
+    "Slack Activated At": "",
+    "Slack Updated At": "",
+    "Slack Key Version": "",
+    "Slack Key Imported At": "",
+    "Slack Key Source": "",
   };
 }
 
@@ -1840,6 +2281,7 @@ function buildVaultExportRows(vaultPayload = null) {
   const rows = [];
   const savedQueries = normalizeVaultSavedQueries(getVaultSavedQueriesInput(vaultPayload));
   const cmGlobalsByEnvironment = getVaultCmGlobalsByEnvironment(vaultPayload);
+  const slacktivationRecord = getVaultSlacktivationRecord(vaultPayload);
   Object.entries(savedQueries)
     .sort((left, right) => String(left[0] || "").localeCompare(String(right[0] || ""), undefined, { sensitivity: "base" }))
     .forEach(([name, url]) => {
@@ -1872,6 +2314,43 @@ function buildVaultExportRows(vaultPayload = null) {
         "CM IMS Session": normalizedRecord.imsSession ? JSON.stringify(normalizedRecord.imsSession) : "",
       });
     });
+
+  if (slacktivationRecord) {
+    rows.push({
+      ...createVaultExportRowSkeleton(),
+      "Row Type": "underpar-slacktivation",
+      "Slack Workspace Origin": String(slacktivationRecord.workspaceOrigin || "").trim(),
+      "Slack Ready": slacktivationRecord.ready === true ? "true" : "false",
+      "Slack Auth Mode": String(slacktivationRecord.identity?.mode || "").trim(),
+      "Slack OIDC Client ID": String(slacktivationRecord.oidc?.clientId || "").trim(),
+      "Slack OIDC Client Secret": String(slacktivationRecord.oidc?.clientSecret || "").trim(),
+      "Slack OIDC Scope": String(slacktivationRecord.oidc?.scope || "").trim(),
+      "Slack OIDC Redirect Path": String(slacktivationRecord.oidc?.redirectPath || "").trim(),
+      "Slack OIDC Redirect URI": String(slacktivationRecord.oidc?.redirectUri || "").trim(),
+      "Slack API Bot Token": String(slacktivationRecord.api?.botToken || "").trim(),
+      "Slack API User Token": String(slacktivationRecord.api?.userToken || "").trim(),
+      "Slack API OAuth Token": String(slacktivationRecord.api?.oauthToken || "").trim(),
+      "Slack Singularity Channel ID": String(slacktivationRecord.singularity?.channelId || "").trim(),
+      "Slack Singularity Mention": String(slacktivationRecord.singularity?.mention || "").trim(),
+      "Slack User ID": String(slacktivationRecord.identity?.userId || "").trim(),
+      "Slack Team ID": String(slacktivationRecord.identity?.teamId || "").trim(),
+      "Slack User Name": String(slacktivationRecord.identity?.userName || "").trim(),
+      "Slack Email": String(slacktivationRecord.identity?.email || "").trim(),
+      "Slack Avatar URL": String(slacktivationRecord.identity?.avatarUrl || "").trim(),
+      "Slack Status Icon": String(slacktivationRecord.identity?.statusIcon || "").trim(),
+      "Slack Status Icon URL": String(slacktivationRecord.identity?.statusIconUrl || "").trim(),
+      "Slack Status Message": String(slacktivationRecord.identity?.statusMessage || "").trim(),
+      "Slack Direct Channel ID": String(slacktivationRecord.identity?.directChannelId || "").trim(),
+      "Slack Direct Channel Error Code": String(slacktivationRecord.identity?.directChannelErrorCode || "").trim(),
+      "Slack Avatar Error Code": String(slacktivationRecord.identity?.avatarErrorCode || "").trim(),
+      "Slack Avatar Error": String(slacktivationRecord.identity?.avatarError || "").trim(),
+      "Slack Activated At": Number(slacktivationRecord.activatedAt || 0) || "",
+      "Slack Updated At": Number(slacktivationRecord.updatedAt || slacktivationRecord.identity?.updatedAt || 0) || "",
+      "Slack Key Version": String(slacktivationRecord.keyMeta?.keyVersion || "").trim(),
+      "Slack Key Imported At": String(slacktivationRecord.keyMeta?.importedAt || "").trim(),
+      "Slack Key Source": String(slacktivationRecord.keyMeta?.source || "").trim(),
+    });
+  }
 
   Object.entries(environments).forEach(([environmentKey, environmentRecord]) => {
     const mediaCompanies =
@@ -2006,6 +2485,11 @@ function mergeImportedVaultPayload(existingVault = null, importedVault = null) {
     }
     setVaultCmGlobalRecord(nextVault, normalizedEnvironmentKey, record);
   });
+
+  const importedSlacktivationRecord = getVaultSlacktivationRecord(normalizedImportedVault);
+  if (importedSlacktivationRecord) {
+    setVaultSlacktivationRecord(nextVault, importedSlacktivationRecord);
+  }
 
   Object.entries(getVaultPassEnvironments(normalizedImportedVault)).forEach(([environmentKey, environmentRecord]) => {
     if (!nextVault.pass.environments[environmentKey]) {
@@ -2369,11 +2853,12 @@ async function handleVaultImportFile(file) {
     const importedRecords = {};
     const importedSavedQueries = {};
     const importedCmGlobalsByEnvironment = {};
+    let importedSlacktivationRecord = null;
     let importableRowCount = 0;
 
     rows.forEach((row) => {
       const schema = String(row?.["UnderPAR Vault CSV"] || "").trim();
-      if (schema !== UNDERPAR_VAULT_CSV_SCHEMA) {
+      if (!UNDERPAR_VAULT_SUPPORTED_CSV_SCHEMAS.has(schema)) {
         return;
       }
 
@@ -2414,6 +2899,59 @@ async function handleVaultImportFile(file) {
         });
         if (record) {
           importedCmGlobalsByEnvironment[environmentKey] = record;
+          importableRowCount += 1;
+        }
+        return;
+      }
+
+      if (rowType === "underpar-slacktivation") {
+        const record = normalizeVaultSlacktivationRecord({
+          workspaceOrigin: row?.["Slack Workspace Origin"],
+          ready: row?.["Slack Ready"],
+          activatedAt: row?.["Slack Activated At"],
+          updatedAt: row?.["Slack Updated At"],
+          oidc: {
+            clientId: row?.["Slack OIDC Client ID"],
+            clientSecret: row?.["Slack OIDC Client Secret"],
+            scope: row?.["Slack OIDC Scope"],
+            redirectPath: row?.["Slack OIDC Redirect Path"],
+            redirectUri: row?.["Slack OIDC Redirect URI"],
+          },
+          api: {
+            botToken: row?.["Slack API Bot Token"],
+            userToken: row?.["Slack API User Token"],
+            oauthToken: row?.["Slack API OAuth Token"],
+          },
+          singularity: {
+            channelId: row?.["Slack Singularity Channel ID"],
+            mention: row?.["Slack Singularity Mention"],
+          },
+          identity: {
+            ready: row?.["Slack Ready"],
+            mode: row?.["Slack Auth Mode"],
+            userId: row?.["Slack User ID"],
+            teamId: row?.["Slack Team ID"],
+            userName: row?.["Slack User Name"],
+            email: row?.["Slack Email"],
+            avatarUrl: row?.["Slack Avatar URL"],
+            statusIcon: row?.["Slack Status Icon"],
+            statusIconUrl: row?.["Slack Status Icon URL"],
+            statusMessage: row?.["Slack Status Message"],
+            directChannelId: row?.["Slack Direct Channel ID"],
+            directChannelErrorCode: row?.["Slack Direct Channel Error Code"],
+            avatarErrorCode: row?.["Slack Avatar Error Code"],
+            avatarError: row?.["Slack Avatar Error"],
+            updatedAt: row?.["Slack Updated At"],
+          },
+          keyMeta: {
+            keyVersion: row?.["Slack Key Version"],
+            importedAt: row?.["Slack Key Imported At"],
+            source: row?.["Slack Key Source"],
+            services: ["slacktivation"],
+          },
+        });
+        if (record) {
+          importedSlacktivationRecord = record;
           importableRowCount += 1;
         }
         return;
@@ -2531,6 +3069,7 @@ async function handleVaultImportFile(file) {
         globals: {
           savedQueries: importedSavedQueries,
           cmImsByEnvironment: importedCmGlobalsByEnvironment,
+          slacktivation: importedSlacktivationRecord,
         },
         app: {
           savedQueries: importedSavedQueries,
@@ -2811,6 +3350,261 @@ function buildVaultAreaMarkup(areaSnapshot) {
   `;
 }
 
+function formatSlacktivationModeLabel(mode = "") {
+  const normalized = String(mode || "").trim().toLowerCase();
+  if (normalized === "openid") {
+    return "Slack OpenID";
+  }
+  if (normalized === "api") {
+    return "Slack API";
+  }
+  return "Slack";
+}
+
+function isVaultSlacktivateActionBusy() {
+  return panelState.vaultActionBusy === true && String(panelState.vaultActionContext?.action || "").startsWith("slacktivate");
+}
+
+function hasVaultExportableData(vaultPayload = null, snapshot = null) {
+  const passRecordCount = Number(snapshot?.passVaultSummary?.mediaCompanyCount || 0);
+  const savedQueryCount = Number(snapshot?.savedQueryCount || 0);
+  const slacktivationRecord = getVaultSlacktivationRecord(vaultPayload || snapshot?.vaultPayload || null);
+  return passRecordCount > 0 || savedQueryCount > 0 || Boolean(slacktivationRecord);
+}
+
+function buildVaultSlacktivatePendingMarkup(record = null) {
+  const normalizedRecord = normalizeVaultSlacktivationRecord(record);
+  const lastError = normalizedRecord?.lastError || null;
+  const keyImportedAt = String(normalizedRecord?.keyMeta?.importedAt || "").trim();
+  const hasStoredZipKey =
+    Boolean(normalizedRecord?.oidc?.clientId) ||
+    Boolean(normalizedRecord?.api?.userToken) ||
+    Boolean(normalizedRecord?.singularity?.channelId);
+  const disabled = isVaultSlacktivateActionBusy() ? "disabled" : "";
+  const helperText = hasStoredZipKey
+    ? "ZIP.KEY is already loaded in GLOBAL.SLACK. Drop another ZIP.KEY to replace it."
+    : "Drag ZIP.KEY here or click to load it. UnderPAR will mirror the Slack activation contract into GLOBAL.SLACK.";
+  const statusMarkup = lastError?.message
+    ? `<p class="vault-slacktivate-inline-status" data-tone="error">${escapeHtml(lastError.message)}</p>`
+    : keyImportedAt
+      ? `<p class="vault-slacktivate-inline-status">Latest ZIP.KEY import ${escapeHtml(keyImportedAt)}</p>`
+      : "";
+  return `
+    <div class="vault-slacktivate-state" data-state="pending">
+      <button
+        type="button"
+        class="vault-slacktivate-dropzone"
+        data-slacktivate-trigger="file"
+        data-slacktivate-dropzone="true"
+        ${disabled}
+      >
+        <span class="vault-slacktivate-dropzone-title">DROP ZIP.KEY TO SLACKTIVATE</span>
+        <span class="vault-slacktivate-dropzone-copy">${escapeHtml(helperText)}</span>
+      </button>
+      ${statusMarkup}
+    </div>
+  `;
+}
+
+function buildVaultSlacktivateReadyMarkup(record = null) {
+  const normalizedRecord = normalizeVaultSlacktivationRecord(record);
+  const identity = normalizedRecord?.identity || null;
+  const statusText = normalizeSlacktivationText(identity?.statusMessage || "", 160) || "No custom Slack profile status set.";
+  const directChannelLabel = identity?.directChannelId ? identity.directChannelId : "Pending";
+  const keyImportedAt = normalizeSlacktivationText(normalizedRecord?.keyMeta?.importedAt || "", 80) || "Unknown";
+  const updatedAt = Math.max(0, Number(identity?.updatedAt || normalizedRecord?.updatedAt || 0));
+  const disabled = isVaultSlacktivateActionBusy() ? "disabled" : "";
+  return `
+    <div class="vault-slacktivate-state" data-state="ready">
+      <article class="vault-slacktivate-confirmation">
+        <div class="vault-slacktivate-confirmation-head">
+          <div>
+            <p class="vault-slacktivate-eyebrow">SLACKTIVATED</p>
+            <h3 class="vault-slacktivate-title">${escapeHtml(
+              firstNonEmptyString([identity?.userName, identity?.userId, "Slack identity verified"])
+            )}</h3>
+            <p class="vault-slacktivate-meta">
+              ${escapeHtml(formatSlacktivationModeLabel(identity?.mode || ""))} verified against
+              ${escapeHtml(normalizedRecord?.workspaceOrigin || SLACKTIVATION_WORKSPACE_ORIGIN)}.
+            </p>
+          </div>
+          <div class="vault-slacktivate-actions">
+            <button
+              type="button"
+              class="vault-slacktivate-action-btn"
+              data-slacktivate-action="refresh"
+              ${disabled}
+            >RE-SLACKTIVATE</button>
+            <button
+              type="button"
+              class="vault-slacktivate-action-btn"
+              data-slacktivate-trigger="file"
+              ${disabled}
+            >LOAD NEW ZIP.KEY</button>
+          </div>
+        </div>
+        <p class="vault-slacktivate-statusline">
+          <strong>${escapeHtml(identity?.statusIcon || "Status")}</strong> ${escapeHtml(statusText)}
+        </p>
+        <dl class="vault-slacktivate-details">
+          <div class="vault-slacktivate-detail">
+            <dt>Team</dt>
+            <dd>${escapeHtml(firstNonEmptyString([identity?.teamId, "Unknown"]))}</dd>
+          </div>
+          <div class="vault-slacktivate-detail">
+            <dt>Direct Channel</dt>
+            <dd>${escapeHtml(directChannelLabel)}</dd>
+          </div>
+          <div class="vault-slacktivate-detail">
+            <dt>Key Imported</dt>
+            <dd>${escapeHtml(keyImportedAt)}</dd>
+          </div>
+          <div class="vault-slacktivate-detail">
+            <dt>Verified</dt>
+            <dd>${escapeHtml(formatVaultTimestamp(updatedAt))}</dd>
+          </div>
+        </dl>
+        <p class="vault-slacktivate-footnote">
+          Slack avatar data is retained in GLOBAL.SLACK but intentionally hidden inside the UP tab.
+        </p>
+      </article>
+    </div>
+  `;
+}
+
+function renderVaultSlacktivation(vaultPayload = null) {
+  if (!vaultSlacktivateContent) {
+    return;
+  }
+  const record = getVaultSlacktivationRecord(vaultPayload);
+  const actionBusy = isVaultSlacktivateActionBusy();
+  vaultSlacktivateContent.dataset.dropActive = "false";
+  if (vaultSlacktivateBadge) {
+    vaultSlacktivateBadge.textContent = actionBusy ? "Working" : record?.ready === true ? "Ready" : "Pending";
+  }
+  vaultSlacktivateContent.innerHTML =
+    record?.ready === true ? buildVaultSlacktivateReadyMarkup(record) : buildVaultSlacktivatePendingMarkup(record);
+}
+
+async function performVaultSlacktivateAction(action = "", detail = {}, messages = {}) {
+  const normalizedAction = String(action || "").trim();
+  if (!normalizedAction) {
+    return;
+  }
+  if (!panelState.controllerReady) {
+    setVaultStatus(panelState.controllerStatusMessage || "Open the UnderPAR side panel before using VAULT actions.");
+    return;
+  }
+  if (panelState.vaultActionBusy === true || panelState.vaultImportBusy === true) {
+    return;
+  }
+
+  const startMessage = String(messages?.start || "Refreshing Slacktivation state...").trim();
+  panelState.vaultActionBusy = true;
+  panelState.vaultActionContext = buildVaultActionContext(normalizedAction, "", "", startMessage);
+  renderVaultSlacktivation(panelState.vaultSnapshot?.vaultPayload || null);
+  syncVaultIdleState(startMessage);
+  let actionCompleted = false;
+  let finalStatusMessage = "";
+
+  try {
+    const response = await sendVaultActionRequest(normalizedAction, detail);
+    const responseSnapshot = applyVaultActionResponseToSnapshot(panelState.vaultSnapshot, normalizedAction, response);
+    if (responseSnapshot) {
+      panelState.vaultSnapshot = responseSnapshot;
+      panelState.vaultDirty = false;
+      if (isVaultExpanded()) {
+        renderVaultSnapshot(responseSnapshot, {
+          keepDirty: false,
+        });
+      }
+    }
+    const refreshedSnapshot = await ensureVaultSnapshot({
+      force: true,
+      allowWhileCollapsed: true,
+    });
+    if (refreshedSnapshot) {
+      panelState.vaultSnapshot = refreshedSnapshot;
+      panelState.vaultDirty = false;
+      if (isVaultExpanded()) {
+        renderVaultSnapshot(refreshedSnapshot, {
+          keepDirty: false,
+        });
+      }
+    }
+    actionCompleted = true;
+    finalStatusMessage = String(response?.message || messages?.success || "Slacktivation updated.");
+    setVaultStatus(finalStatusMessage);
+  } catch (error) {
+    finalStatusMessage = error instanceof Error ? error.message : String(error || messages?.error || "Unable to Slacktivate UnderPAR.");
+    setVaultStatus(finalStatusMessage);
+    try {
+      const refreshedSnapshot = await ensureVaultSnapshot({
+        force: true,
+        allowWhileCollapsed: true,
+      });
+      if (refreshedSnapshot) {
+        panelState.vaultSnapshot = refreshedSnapshot;
+        panelState.vaultDirty = false;
+        if (isVaultExpanded()) {
+          renderVaultSnapshot(refreshedSnapshot, {
+            keepDirty: false,
+          });
+        }
+      }
+    } catch {
+      // Ignore follow-up refresh errors after a failed Slacktivation attempt.
+    }
+  } finally {
+    panelState.vaultActionBusy = false;
+    panelState.vaultActionContext = null;
+    renderVaultSlacktivation(panelState.vaultSnapshot?.vaultPayload || null);
+    if (isVaultExpanded() && panelState.vaultSnapshot) {
+      renderVaultSnapshot(panelState.vaultSnapshot, {
+        keepDirty: actionCompleted ? false : panelState.vaultDirty === true,
+      });
+    } else {
+      syncVaultIdleState();
+    }
+    if (finalStatusMessage) {
+      setVaultStatus(finalStatusMessage);
+    }
+  }
+}
+
+async function handleVaultSlacktivateFile(file = null) {
+  const selectedFile = file && typeof file === "object" ? file : null;
+  if (!selectedFile || typeof selectedFile.text !== "function") {
+    return;
+  }
+  const zipKeyText = String(await selectedFile.text() || "").trim();
+  if (!zipKeyText) {
+    setVaultStatus("The selected ZIP.KEY file is empty.");
+    return;
+  }
+  await performVaultSlacktivateAction(
+    "slacktivate-import-key",
+    { zipKeyText },
+    {
+      start: "Importing ZIP.KEY and starting Slacktivation...",
+      success: "UnderPAR is SLACKTIVATED.",
+      error: "Unable to Slacktivate UnderPAR from the selected ZIP.KEY.",
+    }
+  );
+}
+
+async function handleVaultSlacktivateRefreshButtonClick() {
+  await performVaultSlacktivateAction(
+    "slacktivate-refresh",
+    { interactive: true },
+    {
+      start: "Refreshing stored Slacktivation credentials...",
+      success: "UnderPAR Slacktivation refreshed.",
+      error: "Unable to refresh stored Slacktivation credentials.",
+    }
+  );
+}
+
 function renderVaultSnapshot(snapshot, options = {}) {
   const normalizedSnapshot = snapshot && typeof snapshot === "object" ? snapshot : null;
   const keepDirty = options?.keepDirty === true;
@@ -2838,6 +3632,7 @@ function renderVaultSnapshot(snapshot, options = {}) {
     if (vaultSections) {
       vaultSections.innerHTML = "";
     }
+    renderVaultSlacktivation(null);
     if (vaultExportButton) {
       vaultExportButton.disabled = panelState.vaultActionBusy === true;
     }
@@ -2877,10 +3672,9 @@ function renderVaultSnapshot(snapshot, options = {}) {
       .map((areaSnapshot) => buildVaultAreaMarkup(areaSnapshot))
       .join("");
   }
+  renderVaultSlacktivation(normalizedSnapshot.vaultPayload || null);
   if (vaultExportButton) {
-    const hasPassRecords = Number(normalizedSnapshot?.passVaultSummary?.mediaCompanyCount || 0) > 0;
-    const hasSavedQueries = Number(normalizedSnapshot?.savedQueryCount || 0) > 0;
-    vaultExportButton.disabled = panelState.vaultActionBusy === true || !(hasPassRecords || hasSavedQueries);
+    vaultExportButton.disabled = panelState.vaultActionBusy === true || !hasVaultExportableData(normalizedSnapshot.vaultPayload, normalizedSnapshot);
   }
   if (vaultImportButton) {
     vaultImportButton.disabled = panelState.vaultImportBusy === true || panelState.vaultActionBusy === true;
@@ -2914,6 +3708,7 @@ function renderVaultErrorState(error) {
   if (vaultSections) {
     vaultSections.innerHTML = "";
   }
+  renderVaultSlacktivation(panelState.vaultSnapshot?.vaultPayload || null);
   if (vaultExportButton) {
     vaultExportButton.disabled = panelState.vaultActionBusy === true;
   }
@@ -3149,6 +3944,20 @@ async function handleSwitch() {
   }
 }
 
+function setVaultSlacktivateDropActive(active) {
+  if (vaultSlacktivateContent) {
+    vaultSlacktivateContent.dataset.dropActive = active ? "true" : "false";
+  }
+}
+
+function getDroppedVaultSlacktivateFile(dataTransfer = null) {
+  if (!dataTransfer) {
+    return null;
+  }
+  const files = dataTransfer.files;
+  return files && files.length > 0 ? files[0] : null;
+}
+
 function init() {
   renderControllerStatus({
     ready: false,
@@ -3159,8 +3968,10 @@ function init() {
   connectControllerStatusPort();
   wireCollapsibleSection(environmentUrlsToggle, environmentUrlsPanel, false);
   wireCollapsibleSection(vaultToggle, vaultPanel, false);
+  wireCollapsibleSection(vaultSlacktivateToggle, vaultSlacktivatePanel, false);
   bindVaultRealtimeListeners();
   syncVaultIdleState();
+  renderVaultSlacktivation(null);
   if (vaultToggle) {
     vaultToggle.addEventListener("click", () => {
       if (vaultToggle.getAttribute("aria-expanded") === "true") {
@@ -3206,6 +4017,77 @@ function init() {
       }
       event.preventDefault();
       void handleVaultPassActionButtonClick(actionButton);
+    });
+  }
+  if (vaultSlacktivateContent) {
+    vaultSlacktivateContent.addEventListener("click", (event) => {
+      const trigger = event.target instanceof Element ? event.target.closest("[data-slacktivate-trigger]") : null;
+      if (trigger) {
+        event.preventDefault();
+        if (vaultSlacktivateInput && !isVaultSlacktivateActionBusy()) {
+          vaultSlacktivateInput.click();
+        }
+        return;
+      }
+      const actionButton = event.target instanceof Element ? event.target.closest("[data-slacktivate-action]") : null;
+      if (!actionButton) {
+        return;
+      }
+      event.preventDefault();
+      if (String(actionButton.getAttribute("data-slacktivate-action") || "") === "refresh") {
+        void handleVaultSlacktivateRefreshButtonClick();
+      }
+    });
+    vaultSlacktivateContent.addEventListener("dragenter", (event) => {
+      const hasDropzone = event.target instanceof Element && event.target.closest("[data-slacktivate-dropzone]");
+      if (!hasDropzone) {
+        return;
+      }
+      event.preventDefault();
+      panelState.vaultSlacktivateDragDepth += 1;
+      setVaultSlacktivateDropActive(true);
+    });
+    vaultSlacktivateContent.addEventListener("dragover", (event) => {
+      const hasDropzone = vaultSlacktivateContent.querySelector("[data-slacktivate-dropzone]");
+      if (!hasDropzone) {
+        return;
+      }
+      event.preventDefault();
+      setVaultSlacktivateDropActive(true);
+    });
+    vaultSlacktivateContent.addEventListener("dragleave", (event) => {
+      const hasDropzone = event.target instanceof Element && event.target.closest("[data-slacktivate-dropzone]");
+      if (!hasDropzone) {
+        return;
+      }
+      event.preventDefault();
+      panelState.vaultSlacktivateDragDepth = Math.max(0, Number(panelState.vaultSlacktivateDragDepth || 0) - 1);
+      if (panelState.vaultSlacktivateDragDepth === 0) {
+        setVaultSlacktivateDropActive(false);
+      }
+    });
+    vaultSlacktivateContent.addEventListener("drop", (event) => {
+      const hasDropzone = vaultSlacktivateContent.querySelector("[data-slacktivate-dropzone]");
+      if (!hasDropzone) {
+        return;
+      }
+      event.preventDefault();
+      panelState.vaultSlacktivateDragDepth = 0;
+      setVaultSlacktivateDropActive(false);
+      const file = getDroppedVaultSlacktivateFile(event.dataTransfer || null);
+      if (file) {
+        void handleVaultSlacktivateFile(file);
+      }
+    });
+  }
+  if (vaultSlacktivateInput) {
+    vaultSlacktivateInput.addEventListener("change", () => {
+      const selectedFile = vaultSlacktivateInput.files?.[0] || null;
+      if (selectedFile) {
+        void handleVaultSlacktivateFile(selectedFile).finally(() => {
+          vaultSlacktivateInput.value = "";
+        });
+      }
     });
   }
   environmentSelect.addEventListener("change", () => {

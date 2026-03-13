@@ -7,6 +7,16 @@ const PPS_PROFILE_BASE_URL = "https://pps.services.adobe.com";
 const IMS_AVATAR_CLIENT_IDS = ["AdobePass1", IMS_CLIENT_ID];
 const IMS_LOGIN_HELPER_PATH = "src/login/login.html";
 const IMS_LOGIN_REDIRECT_RULE_ID = 164001;
+const UNDERPAR_ESM_DEEPLINK_REDIRECT_RULE_ID = 164002;
+const UNDERPAR_DEGRADATION_DEEPLINK_REDIRECT_RULE_ID = 164003;
+const UNDERPAR_CM_DEEPLINK_REDIRECT_RULE_ID = 164004;
+const UNDERPAR_ESM_DEEPLINK_MARKER_PARAM = "underpar_deeplink";
+const UNDERPAR_ESM_DEEPLINK_MARKER_VALUE = "esm";
+const UNDERPAR_DEGRADATION_DEEPLINK_MARKER_VALUE = "degradation";
+const UNDERPAR_CM_DEEPLINK_MARKER_VALUE = "cm";
+const UNDERPAR_ESM_WORKSPACE_PATH = "esm-workspace.html";
+const UNDERPAR_DEGRADATION_WORKSPACE_PATH = "degradation-workspace.html";
+const UNDERPAR_CM_WORKSPACE_PATH = "cm-workspace.html";
 const AVATAR_SIZE_PREFERENCES = [128, 64, 256, 32];
 const AUTH_DEBUGGER_PROTOCOL_VERSION = "1.3";
 const DEBUG_TRACE_EVENT_LIMIT = 15000;
@@ -386,6 +396,88 @@ async function ensureImsLoginRedirectRule() {
   } catch {
     // Ignore DNR setup errors; auth flow has non-DNR fallback paths.
   }
+}
+
+async function ensureUnderparWorkspaceDeeplinkRedirectRule(ruleId, markerValue, workspacePath) {
+  const dnr = chrome.declarativeNetRequest;
+  if (!dnr?.updateSessionRules) {
+    return;
+  }
+
+  let workspaceUrl;
+  let redirectOrigin;
+  try {
+    workspaceUrl = new URL(chrome.runtime.getURL(workspacePath));
+    redirectOrigin = new URL(
+      String(chrome.identity?.getRedirectURL?.("") || `https://${String(chrome.runtime?.id || "").trim()}.chromiumapp.org/`).trim()
+    );
+  } catch {
+    return;
+  }
+
+  const escapedOrigin = String(redirectOrigin.origin || "")
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (!escapedOrigin) {
+    return;
+  }
+  const markerKey = UNDERPAR_ESM_DEEPLINK_MARKER_PARAM.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedMarkerValue = String(markerValue || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regexFilter = `^${escapedOrigin}/\\?${markerKey}=${escapedMarkerValue}(?:&.*)?$`;
+
+  try {
+    await dnr.updateSessionRules({
+      removeRuleIds: [Number(ruleId || 0)],
+      addRules: [
+        {
+          id: Number(ruleId || 0),
+          priority: 1,
+          action: {
+            type: "redirect",
+            redirect: {
+              transform: {
+                scheme: workspaceUrl.protocol.replace(":", ""),
+                host: workspaceUrl.host,
+                path: workspaceUrl.pathname,
+                queryTransform: {
+                  removeParams: [UNDERPAR_ESM_DEEPLINK_MARKER_PARAM],
+                },
+              },
+            },
+          },
+          condition: {
+            regexFilter,
+            resourceTypes: ["main_frame", "sub_frame"],
+          },
+        },
+      ],
+    });
+  } catch {
+    // Ignore DNR setup errors; deeplink fallback paths remain available.
+  }
+}
+
+async function ensureUnderparEsmDeeplinkRedirectRule() {
+  return ensureUnderparWorkspaceDeeplinkRedirectRule(
+    UNDERPAR_ESM_DEEPLINK_REDIRECT_RULE_ID,
+    UNDERPAR_ESM_DEEPLINK_MARKER_VALUE,
+    UNDERPAR_ESM_WORKSPACE_PATH
+  );
+}
+
+async function ensureUnderparDegradationDeeplinkRedirectRule() {
+  return ensureUnderparWorkspaceDeeplinkRedirectRule(
+    UNDERPAR_DEGRADATION_DEEPLINK_REDIRECT_RULE_ID,
+    UNDERPAR_DEGRADATION_DEEPLINK_MARKER_VALUE,
+    UNDERPAR_DEGRADATION_WORKSPACE_PATH
+  );
+}
+
+async function ensureUnderparCmDeeplinkRedirectRule() {
+  return ensureUnderparWorkspaceDeeplinkRedirectRule(
+    UNDERPAR_CM_DEEPLINK_REDIRECT_RULE_ID,
+    UNDERPAR_CM_DEEPLINK_MARKER_VALUE,
+    UNDERPAR_CM_WORKSPACE_PATH
+  );
 }
 
 async function getBuildInfo() {
@@ -2724,6 +2816,9 @@ function handleWebRequestError(details) {
 chrome.runtime.onInstalled.addListener((details) => {
   void configureSidePanelBehavior();
   void ensureImsLoginRedirectRule();
+  void ensureUnderparEsmDeeplinkRedirectRule();
+  void ensureUnderparDegradationDeeplinkRedirectRule();
+  void ensureUnderparCmDeeplinkRedirectRule();
   void updateActionBadge();
   void syncBuildInfo(`onInstalled:${details?.reason || "unknown"}`);
 });
@@ -2731,6 +2826,9 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.runtime.onStartup.addListener(() => {
   void configureSidePanelBehavior();
   void ensureImsLoginRedirectRule();
+  void ensureUnderparEsmDeeplinkRedirectRule();
+  void ensureUnderparDegradationDeeplinkRedirectRule();
+  void ensureUnderparCmDeeplinkRedirectRule();
   void updateActionBadge();
   void syncBuildInfo("onStartup");
 });
@@ -3097,6 +3195,9 @@ if (chrome.webRequest) {
 
 void configureSidePanelBehavior();
 void ensureImsLoginRedirectRule();
+void ensureUnderparEsmDeeplinkRedirectRule();
+void ensureUnderparDegradationDeeplinkRedirectRule();
+void ensureUnderparCmDeeplinkRedirectRule();
 void updateActionBadge();
 void syncBuildInfo("serviceWorkerStart");
 void restoreDebugStateFromStorage().then(() => reattachDebuggersFromState());

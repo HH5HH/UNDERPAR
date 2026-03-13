@@ -277,7 +277,7 @@ body::after {
 }
 
 .workspace-icon-btn--workspace-tearsheet {
-  box-shadow: 0 12px 24px rgba(0, 100, 224, 0.3), 0 2px 0 rgba(255, 255, 255, 0.36) inset;
+  box-shadow: 0 10px 20px rgba(0, 100, 224, 0.28), 0 2px 0 rgba(255, 255, 255, 0.36) inset;
 }
 
 .workspace-icon-btn--rerun {
@@ -304,7 +304,7 @@ body::after {
 }
 
 .workspace-icon-btn--workspace-tearsheet:hover:not(:disabled) {
-  box-shadow: 0 14px 25px rgba(0, 88, 196, 0.33), 0 2px 0 rgba(255, 255, 255, 0.36) inset;
+  box-shadow: 0 10px 20px rgba(20, 52, 102, 0.18);
 }
 
 .workspace-icon-btn--rerun:hover:not(:disabled) {
@@ -341,8 +341,8 @@ body::after {
 }
 
 .workspace-icon--tearsheet {
-  width: var(--s2-icon-size-strong);
-  height: var(--s2-icon-size-strong);
+  width: var(--s2-icon-size);
+  height: var(--s2-icon-size);
 }
 
 .workspace-net-indicator {
@@ -475,8 +475,8 @@ body::after {
 }
 
 body.workspace-locked .workspace-cards {
-  opacity: 0.52;
-  filter: saturate(0.8) blur(0.4px);
+  opacity: 0.36;
+  filter: saturate(0.62) blur(7px);
   pointer-events: none;
 }
 
@@ -963,6 +963,13 @@ body.workspace-locked .workspace-cards {
   width: 100%;
 }
 
+.underpar-export-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
 .esm-footer-controls {
   margin-left: auto;
   display: flex;
@@ -994,6 +1001,31 @@ body.workspace-locked .workspace-cards {
 .esm-footer-actions .esm-clear-filter-rerun,
 .esm-footer-actions .esm-table-close {
   align-self: center;
+}
+
+.underpar-blondie-btn {
+  padding: 0;
+  overflow: hidden;
+}
+
+.underpar-blondie-btn[data-blondie-state="inactive"] {
+  opacity: 0.74;
+}
+
+.underpar-blondie-btn[data-blondie-state="active"] {
+  box-shadow: 0 0 0 2px rgba(255, 78, 135, 0.24), 0 8px 16px rgba(20, 52, 102, 0.18);
+}
+
+.underpar-blondie-btn[data-blondie-state="ack"] {
+  box-shadow: 0 0 0 2px rgba(76, 174, 255, 0.26), 0 8px 16px rgba(20, 52, 102, 0.2);
+}
+
+.underpar-blondie-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  border-radius: 999px;
+  object-fit: cover;
 }
 
 .esm-footer a {

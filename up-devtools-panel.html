@@ -112,6 +112,33 @@
               <button id="vault-purge-btn" class="vault-refresh-btn vault-refresh-btn--danger" type="button">PURGE VAULT</button>
             </div>
           </div>
+          <section class="vault-slacktivate-shell">
+            <div class="vault-slacktivate-card up-collapsible-card">
+              <button
+                id="vault-slacktivate-toggle"
+                class="up-collapsible-toggle vault-slacktivate-toggle"
+                type="button"
+                aria-expanded="false"
+                aria-controls="vault-slacktivate-panel"
+              >
+                <span class="up-collapsible-heading">
+                  <span class="up-collapsible-title">SLACKTIVATE</span>
+                  <span class="up-collapsible-subtitle">Hidden Slack activation contract mirrored into the GLOBAL.SLACK vault record.</span>
+                </span>
+                <span id="vault-slacktivate-badge" class="up-collapsible-badge">Pending</span>
+                <span class="up-collapsible-icon" aria-hidden="true">▼</span>
+              </button>
+              <div id="vault-slacktivate-panel" class="up-collapsible-body vault-slacktivate-body" hidden>
+                <div id="vault-slacktivate-content" class="vault-slacktivate-content"></div>
+                <input
+                  id="vault-slacktivate-input"
+                  type="file"
+                  accept=".key,.txt,.json,text/plain,application/json"
+                  hidden
+                />
+              </div>
+            </div>
+          </section>
           <div id="vault-summary" class="vault-summary"></div>
           <div id="vault-pass-summary" class="vault-pass-summary"></div>
           <div id="vault-pass-records" class="vault-pass-records"></div>
