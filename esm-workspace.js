@@ -102,15 +102,18 @@ const DEFAULT_ADOBEPASS_ENVIRONMENT =
 const BLONDIE_BUTTON_STATES = new Set(["inactive", "ready", "active", "ack"]);
 const BLONDIE_BUTTON_ACK_RESET_MS = 2000;
 const BLONDIE_BUTTON_INACTIVE_MESSAGE =
-  "No zip-zap without SLACKTIVATION.  Please feed ZIP.KEY to UP Tab inside Developer Tools";
+  "No zip-zip without SLACKTIVATION. Please visit VAULT container on the UP Tab to feed your ZIP.KEY to UnderPAR";
+const BLONDIE_BUTTON_SHARE_TARGETS_EMPTY_MESSAGE =
+  "No pass-transition roster is cached yet. Re-SLACKTIVATE UnderPAR in the VAULT.";
+const BLONDIE_BUTTON_SHARE_NOTE_EMPTY_MESSAGE = "Enter a Slack note before sending.";
 const BLONDIE_BUTTON_ICON_URLS = (() => {
   const resolveIconUrl = (path) =>
     typeof chrome !== "undefined" && chrome?.runtime?.getURL ? chrome.runtime.getURL(path) : path;
   return {
-    inactive: resolveIconUrl("icons/blondie-active.svg"),
-    ready: resolveIconUrl("icons/blondie-slacktivated.svg"),
-    active: resolveIconUrl("icons/blondie-ack.svg"),
-    ack: resolveIconUrl("icons/blondie-inactive.svg"),
+    inactive: resolveIconUrl("icons/blondie-button-inactive.png"),
+    ready: resolveIconUrl("icons/blondie-button-slacktivated.png"),
+    active: resolveIconUrl("icons/blondie-button-active.png"),
+    ack: resolveIconUrl("icons/blondie-button-zipzap200.png"),
   };
 })();
 const blondieAckResetTimerByButton = new WeakMap();
@@ -120,7 +123,9 @@ const state = {
   controllerOnline: false,
   adobePassEnvironment: { ...DEFAULT_ADOBEPASS_ENVIRONMENT },
   slackReady: false,
+  slackUserId: "",
   slackUserName: "",
+  slackShareTargets: [],
   esmAvailable: null,
   esmAvailabilityResolved: false,
   esmContainerVisible: null,
@@ -170,6 +175,17 @@ const els = {
 let workspaceStylesheetTextCache = "";
 let workspaceTearsheetRuntimeTextCache = "";
 let workspaceTearsheetTemplateTextCache = "";
+const UNDERPAR_BLONDIE_SHARE_PICKER = globalThis.UnderParBlondieSharePicker;
+if (!UNDERPAR_BLONDIE_SHARE_PICKER?.createController || !UNDERPAR_BLONDIE_SHARE_PICKER?.normalizeTargets) {
+  throw new Error("UnderPar Blondie share picker runtime is unavailable.");
+}
+const blondieSharePickerController = UNDERPAR_BLONDIE_SHARE_PICKER.createController({
+  emptyTargetsMessage: BLONDIE_BUTTON_SHARE_TARGETS_EMPTY_MESSAGE,
+  emptyNoteMessage: BLONDIE_BUTTON_SHARE_NOTE_EMPTY_MESSAGE,
+  showHostStatus(message = "", type = "error") {
+    setStatus(message, type);
+  },
+});
 
 function getWorkspaceEnvironmentRegistry() {
   return globalThis.UnderParEnvironment || UNDERPAR_ENVIRONMENT_REGISTRY || null;
@@ -579,6 +595,63 @@ function compareColumnValues(leftValue, rightValue) {
     numeric: true,
     sensitivity: "base",
   });
+}
+
+function truncateCardFilterDisplayValue(value = "", maxLength = 30) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.length <= maxLength) {
+    return raw;
+  }
+  return `${raw.slice(0, Math.max(1, maxLength - 1)).trimEnd()}...`;
+}
+
+function summarizeCardFilterSelection(selectedValues, options = {}) {
+  const normalizedValues = [...(selectedValues instanceof Set ? selectedValues : new Set())]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .sort((left, right) => compareColumnValues(left, right));
+  if (normalizedValues.length === 0) {
+    return {
+      count: 0,
+      shortLabel: "",
+      fullLabel: "",
+    };
+  }
+  const fullLabel = normalizedValues.join(", ");
+  if (normalizedValues.length === 1) {
+    return {
+      count: 1,
+      shortLabel: truncateCardFilterDisplayValue(normalizedValues[0], Number(options.singleMaxLength || 32)),
+      fullLabel,
+    };
+  }
+  return {
+    count: normalizedValues.length,
+    shortLabel: `${truncateCardFilterDisplayValue(
+      normalizedValues[0],
+      Number(options.multiMaxLength || 20)
+    )} +${normalizedValues.length - 1}`,
+    fullLabel,
+  };
+}
+
+function buildCardFilterChipPresentation(cardState, columnName, description = "") {
+  const normalizedColumn = normalizeDimensionName(columnName);
+  const selectedValues = normalizedColumn ? cardState?.localColumnFilters?.get(normalizedColumn) : null;
+  const summary = summarizeCardFilterSelection(selectedValues);
+  const fallbackLabel = normalizedColumn || String(columnName || "").trim();
+  if (summary.count === 0) {
+    return {
+      label: fallbackLabel,
+      title: String(description || fallbackLabel).trim(),
+      selectedCount: 0,
+    };
+  }
+  return {
+    label: `${fallbackLabel}: ${summary.shortLabel}`,
+    title: `${String(description || fallbackLabel).trim() || fallbackLabel}: ${summary.fullLabel}`,
+    selectedCount: summary.count,
+  };
 }
 
 function buildDistinctValuesForColumns(rows, columns) {
@@ -1868,8 +1941,18 @@ function getCellValue(row, columnKey, context) {
     return rate == null ? -1 : rate;
   }
 
+  if (context.hasAuthNFail && columnKey === "AuthN Fail") {
+    const rate = safeRate(row["authn-failed"], row["authn-attempts"]);
+    return rate == null ? -1 : rate;
+  }
+
   if (context.hasAuthZ && columnKey === "AuthZ Success") {
     const rate = safeRate(row["authz-successful"], row["authz-attempts"]);
+    return rate == null ? -1 : rate;
+  }
+
+  if (context.hasAuthZFail && columnKey === "AuthZ Fail") {
+    const rate = safeRate(row["authz-failed"], row["authz-attempts"]);
     return rate == null ? -1 : rate;
   }
 
@@ -1931,10 +2014,23 @@ function renderTableBody(tableState) {
     if (tableState.showLegacyMetricColumns && tableState.hasAuthN) {
       tr.appendChild(createCell(formatPercent(safeRate(row["authn-successful"], row["authn-attempts"]))));
     }
+    if (tableState.showLegacyMetricColumns && tableState.hasAuthNFail) {
+      tr.appendChild(createCell(formatPercent(safeRate(row["authn-failed"], row["authn-attempts"]))));
+    }
     if (tableState.showLegacyMetricColumns && tableState.hasAuthZ) {
       tr.appendChild(createCell(formatPercent(safeRate(row["authz-successful"], row["authz-attempts"]))));
     }
-    if (tableState.showLegacyMetricColumns && !tableState.hasAuthN && !tableState.hasAuthZ && tableState.hasCount) {
+    if (tableState.showLegacyMetricColumns && tableState.hasAuthZFail) {
+      tr.appendChild(createCell(formatPercent(safeRate(row["authz-failed"], row["authz-attempts"]))));
+    }
+    if (
+      tableState.showLegacyMetricColumns &&
+      !tableState.hasAuthN &&
+      !tableState.hasAuthNFail &&
+      !tableState.hasAuthZ &&
+      !tableState.hasAuthZFail &&
+      tableState.hasCount
+    ) {
       tr.appendChild(createCell(row.count));
     }
 
@@ -1973,6 +2069,31 @@ function getBlondieButtonState(button = null) {
   return BLONDIE_BUTTON_STATES.has(stateValue) ? stateValue : getBlondieButtonDefaultState();
 }
 
+function normalizeBlondieShareTargets(value = null) {
+  return UNDERPAR_BLONDIE_SHARE_PICKER.normalizeTargets(value);
+}
+
+function hasBlondieShareTargets() {
+  return Array.isArray(state.slackShareTargets) && state.slackShareTargets.length > 0;
+}
+
+function isBlondieSharePickerOpen() {
+  return blondieSharePickerController.isOpen();
+}
+
+function closeBlondieSharePicker() {
+  blondieSharePickerController.close();
+}
+
+function openBlondieSharePicker(anchorButton, onSelect) {
+  blondieSharePickerController.open({
+    anchorButton,
+    onSelect,
+    selfUserId: state.slackUserId,
+    targets: state.slackShareTargets,
+  });
+}
+
 function getBlondieButtonTitle(buttonState = "") {
   const normalizedState = BLONDIE_BUTTON_STATES.has(String(buttonState || "").trim().toLowerCase())
     ? String(buttonState || "").trim().toLowerCase()
@@ -1987,7 +2108,9 @@ function getBlondieButtonTitle(buttonState = "") {
     return "Slack acknowledged :blondiebtn: delivery.";
   }
   if (canUseBlondieButton()) {
-    return "zip-zip data to SLACK when it's sitting in SLACKTIVATED state";
+    return hasBlondieShareTargets()
+      ? "Click sends to you. Shift-click opens the Slack note dialog for a pass-transition teammate."
+      : "Click sends to you. Re-SLACKTIVATE UnderPAR in the VAULT to load pass-transition teammates.";
   }
   return BLONDIE_BUTTON_INACTIVE_MESSAGE;
 }
@@ -2047,10 +2170,23 @@ function buildEsmBlondieExportRow(row, tableState) {
   if (tableState.showLegacyMetricColumns && tableState.hasAuthN) {
     values.push(formatPercent(safeRate(row["authn-successful"], row["authn-attempts"])));
   }
+  if (tableState.showLegacyMetricColumns && tableState.hasAuthNFail) {
+    values.push(formatPercent(safeRate(row["authn-failed"], row["authn-attempts"])));
+  }
   if (tableState.showLegacyMetricColumns && tableState.hasAuthZ) {
     values.push(formatPercent(safeRate(row["authz-successful"], row["authz-attempts"])));
   }
-  if (tableState.showLegacyMetricColumns && !tableState.hasAuthN && !tableState.hasAuthZ && tableState.hasCount) {
+  if (tableState.showLegacyMetricColumns && tableState.hasAuthZFail) {
+    values.push(formatPercent(safeRate(row["authz-failed"], row["authz-attempts"])));
+  }
+  if (
+    tableState.showLegacyMetricColumns &&
+    !tableState.hasAuthN &&
+    !tableState.hasAuthNFail &&
+    !tableState.hasAuthZ &&
+    !tableState.hasAuthZFail &&
+    tableState.hasCount
+  ) {
     values.push(row.count ?? "");
   }
   tableState.displayColumns.forEach((column) => {
@@ -2168,6 +2304,33 @@ function hasStoredSeedQueryState(cardState) {
   );
 }
 
+function buildCardStartingUiBaselineState(cardState) {
+  const useSeedState = hasStoredSeedQueryState(cardState);
+  const localColumnFilters = cloneLocalFilterState(
+    useSeedState ? cardState?.seedLocalColumnFilters : cardState?.localColumnFilters
+  );
+  const localColumnExclusions = cloneLocalFilterState(
+    useSeedState ? cardState?.seedLocalColumnExclusions : cardState?.localColumnExclusions
+  );
+  const pendingLocalColumnExclusions =
+    hasLocalColumnFilters(localColumnExclusions) && !hasLocalColumnFilters(localColumnFilters)
+      ? cloneLocalFilterState(localColumnExclusions)
+      : new Map();
+  return {
+    endpointUrl: String(
+      useSeedState ? cardState?.seedEndpointUrl || cardState?.endpointUrl || "" : cardState?.endpointUrl || ""
+    ).trim(),
+    requestUrl: String(
+      useSeedState
+        ? cardState?.seedRequestUrl || cardState?.seedEndpointUrl || cardState?.requestUrl || cardState?.endpointUrl || ""
+        : cardState?.requestUrl || cardState?.endpointUrl || ""
+    ).trim(),
+    localColumnFilters,
+    localColumnExclusions,
+    pendingLocalColumnExclusions,
+  };
+}
+
 function areLocalFilterMapsEqual(leftFilters, rightFilters) {
   const left = normalizeLocalColumnFilters(leftFilters);
   const right = normalizeLocalColumnFilters(rightFilters);
@@ -2187,11 +2350,16 @@ function snapshotCardStartingFilterState(cardState) {
   if (!cardState) {
     return;
   }
-  cardState.startingUiLocalColumnFilters = cloneLocalFilterState(cardState.localColumnFilters);
-  cardState.startingUiLocalColumnExclusions = cloneLocalFilterState(cardState.localColumnExclusions);
+  const baselineState = buildCardStartingUiBaselineState(cardState);
+  const signatureCardState = {
+    ...cardState,
+    ...baselineState,
+  };
+  cardState.startingUiLocalColumnFilters = cloneLocalFilterState(baselineState.localColumnFilters);
+  cardState.startingUiLocalColumnExclusions = cloneLocalFilterState(baselineState.localColumnExclusions);
   cardState.startingUiPersistentQuerySignature = buildCardPersistentQuerySignature(
-    cardState,
-    buildCardDisplayRequestUrl(cardState) || cardState.requestUrl || cardState.endpointUrl || ""
+    signatureCardState,
+    buildCardDisplayRequestUrl(signatureCardState) || baselineState.requestUrl || baselineState.endpointUrl || ""
   );
   cardState.startingUiStateCaptured = true;
 }
@@ -2604,7 +2772,35 @@ function findCardByOriginKey(originCardKey = "") {
   return null;
 }
 
-function buildCardHeaderContextMarkup(urlValue, endpointUrl = "") {
+function collectCardSupplementalQueryContextEntries(cardState, renderedQueryColumns = new Set()) {
+  const baselineState = buildCardStartingUiBaselineState(cardState);
+  const baselineFilters = cardState?.startingUiStateCaptured
+    ? cloneLocalFilterState(cardState.startingUiLocalColumnFilters)
+    : cloneLocalFilterState(baselineState.localColumnFilters);
+  const currentFilters = normalizeLocalColumnFilters(cardState?.localColumnFilters);
+  const entries = [];
+  baselineFilters.forEach((values, columnName) => {
+    if (!(values instanceof Set) || values.size === 0 || renderedQueryColumns.has(columnName)) {
+      return;
+    }
+    const currentValues = currentFilters.get(columnName);
+    if (currentValues instanceof Set && currentValues.size > 0) {
+      return;
+    }
+    entries.push({
+      key: columnName,
+      operator: "=",
+      value: "all",
+    });
+  });
+  return entries.sort((left, right) => {
+    const leftKey = `${left.key}\u0000${left.value}`;
+    const rightKey = `${right.key}\u0000${right.value}`;
+    return leftKey.localeCompare(rightKey, undefined, { numeric: true, sensitivity: "base" });
+  });
+}
+
+function buildCardHeaderContextMarkup(cardState, urlValue, endpointUrl = "") {
   const context = parseEsmRequestContext(urlValue);
   if (!context.fullUrl) {
     return '<span class="card-url-empty">No ESM URL</span>';
@@ -2633,44 +2829,62 @@ function buildCardHeaderContextMarkup(urlValue, endpointUrl = "") {
           .join("")
       : '<span class="card-url-path-segment card-url-path-segment-empty">media-company</span>';
 
+  const renderedQueryColumns = new Set();
+  const queryMarkupEntries = context.queryPairs
+    .map((pair) => {
+      const rawKey = String(pair?.key || "").trim();
+      const normalizedKey = normalizeDisplayDimensionFromQueryKey(rawKey);
+      if (ESM_QUERY_CONTEXT_HIDDEN_KEYS.has(normalizedKey)) {
+        return "";
+      }
+      if (normalizedKey) {
+        renderedQueryColumns.add(normalizedKey);
+      }
+      const hasRenderableValue = pair?.hasValue === true && String(pair?.value || "").trim().length > 0;
+      const isNotEquals = hasRenderableValue && rawKey.endsWith("!");
+      const keyLabel = isNotEquals ? rawKey.slice(0, -1) : rawKey;
+      const keyHtml = `<span class="card-url-query-key">${escapeHtml(keyLabel)}</span>`;
+      if (!hasRenderableValue) {
+        return `<span class="card-url-query-chip">${keyHtml}</span>`;
+      }
+      const decodedValue = decodeQueryPairValue(pair.value);
+      const isEditable = !isNotEquals && isEditableCardQueryKey(keyLabel);
+      if (isEditable) {
+        const inputValue = normalizeEditableQueryDateTimeValue(decodedValue);
+        return `<span class="card-url-query-chip card-url-query-chip--editable" data-query-key="${escapeHtml(
+          keyLabel
+        )}">${keyHtml}<span class="card-url-query-eq">=</span><button type="button" class="card-url-query-value-btn" data-query-editor-key="${escapeHtml(
+          keyLabel
+        )}" data-query-editor-value="${escapeHtml(inputValue)}" title="Edit ${escapeHtml(
+          keyLabel
+        )}">${escapeHtml(decodedValue || pair.value)}</button><span class="card-url-query-editor" hidden><input type="datetime-local" class="card-url-query-datetime-input" data-query-input-key="${escapeHtml(
+          keyLabel
+        )}" value="${escapeHtml(inputValue)}" /></span></span>`;
+      }
+      return `<span class="card-url-query-chip">${keyHtml}<span class="card-url-query-eq">${
+        isNotEquals ? "!=" : "="
+      }</span><span class="card-url-query-value">${escapeHtml(decodedValue || pair.value)}</span></span>`;
+    })
+    .filter(Boolean);
+  const supplementalQueryEntries = collectCardSupplementalQueryContextEntries(cardState, renderedQueryColumns);
   const queryMarkup =
-    context.queryPairs.length > 0
-      ? context.queryPairs
-          .map((pair) => {
-            const rawKey = String(pair?.key || "").trim();
-            const normalizedKey = normalizeDisplayDimensionFromQueryKey(rawKey);
-            if (ESM_QUERY_CONTEXT_HIDDEN_KEYS.has(normalizedKey)) {
-              return "";
-            }
-            const hasRenderableValue = pair?.hasValue === true && String(pair?.value || "").trim().length > 0;
-            const isNotEquals = hasRenderableValue && rawKey.endsWith("!");
-            const keyLabel = isNotEquals ? rawKey.slice(0, -1) : rawKey;
-            const keyHtml = `<span class="card-url-query-key">${escapeHtml(keyLabel)}</span>`;
-            if (!hasRenderableValue) {
-              return `<span class="card-url-query-chip">${keyHtml}</span>`;
-            }
-            const decodedValue = decodeQueryPairValue(pair.value);
-            const isEditable = !isNotEquals && isEditableCardQueryKey(keyLabel);
-            if (isEditable) {
-              const inputValue = normalizeEditableQueryDateTimeValue(decodedValue);
-              return `<span class="card-url-query-chip card-url-query-chip--editable" data-query-key="${escapeHtml(
-                keyLabel
-              )}">${keyHtml}<span class="card-url-query-eq">=</span><button type="button" class="card-url-query-value-btn" data-query-editor-key="${escapeHtml(
-                keyLabel
-              )}" data-query-editor-value="${escapeHtml(inputValue)}" title="Edit ${escapeHtml(
-                keyLabel
-              )}">${escapeHtml(decodedValue || pair.value)}</button><span class="card-url-query-editor" hidden><input type="datetime-local" class="card-url-query-datetime-input" data-query-input-key="${escapeHtml(
-                keyLabel
-              )}" value="${escapeHtml(inputValue)}" /></span></span>`;
-            }
-            return `<span class="card-url-query-chip">${keyHtml}<span class="card-url-query-eq">${
-              isNotEquals ? "!=" : "="
-            }</span><span class="card-url-query-value">${escapeHtml(
-              decodedValue || pair.value
-            )}</span></span>`;
-          })
+    queryMarkupEntries.length > 0 || supplementalQueryEntries.length > 0
+      ? [
+          queryMarkupEntries.join(""),
+          supplementalQueryEntries
+            .map(
+              (entry) =>
+                `<span class="card-url-query-chip"><span class="card-url-query-key">${escapeHtml(
+                  entry.key
+                )}</span><span class="card-url-query-eq">${escapeHtml(entry.operator)}</span><span class="card-url-query-value">${escapeHtml(
+                  entry.value
+                )}</span></span>`
+            )
+            .join(""),
+        ]
+          .filter(Boolean)
           .join("")
-      : '<span class="card-url-query-empty">no-query</span>';
+      : '<span class="card-url-query-empty" aria-hidden="true"></span>';
 
   return `
     <span class="card-url-context" aria-label="ESM request context">
@@ -3220,18 +3434,18 @@ function buildCardColumnsMarkup(cardState) {
       ? `<div class="col-chip-cloud">${displayColumns
           .map((column) => {
             if (interactiveColumnSet.has(column)) {
-            const description = String(
-              cardState?.localDescriptionByColumn?.get(column) || getDimensionDescription(column, requestUrl) || ""
-            ).trim();
-            const selectedCount = cardState?.localColumnFilters?.get(column)?.size || 0;
-            const label = selectedCount > 0 ? `${column} (${selectedCount})` : column;
-            const title = selectedCount > 0 ? `${description || column} (${selectedCount} selected)` : description || column;
-            const classes = `col-chip${selectedCount > 0 ? " col-chip-filtered" : ""}`;
-            return `<div class="${classes}" data-column="${escapeHtml(column)}" data-filterable="1"${
-              description ? ` data-description="${escapeHtml(description)}"` : ""
-            } title="${escapeHtml(title)}">
-              <button type="button" class="col-chip-trigger" title="${escapeHtml(title)}">${escapeHtml(label)}</button>
-            </div>`;
+              const description = String(
+                cardState?.localDescriptionByColumn?.get(column) || getDimensionDescription(column, requestUrl) || ""
+              ).trim();
+              const chipPresentation = buildCardFilterChipPresentation(cardState, column, description);
+              const classes = `col-chip${chipPresentation.selectedCount > 0 ? " col-chip-filtered" : ""}`;
+              return `<div class="${classes}" data-column="${escapeHtml(column)}" data-filterable="1"${
+                description ? ` data-description="${escapeHtml(description)}"` : ""
+              } title="${escapeHtml(chipPresentation.title)}">
+                <button type="button" class="col-chip-trigger" title="${escapeHtml(chipPresentation.title)}">${escapeHtml(
+                  chipPresentation.label
+                )}</button>
+              </div>`;
             }
             const description = String(getDimensionDescription(column, requestUrl) || "").trim();
             const title = description || column;
@@ -3311,7 +3525,7 @@ function updateCardHeader(cardState) {
   teardownCardHeaderQueryEditors(cardState);
   const requestUrl = String(cardState.requestUrl || cardState.endpointUrl || "").trim();
   const displayRequestUrl = buildCardDisplayRequestUrl(cardState) || requestUrl;
-  cardState.titleElement.innerHTML = buildCardHeaderContextMarkup(displayRequestUrl, String(cardState.endpointUrl || ""));
+  cardState.titleElement.innerHTML = buildCardHeaderContextMarkup(cardState, displayRequestUrl, String(cardState.endpointUrl || ""));
   cardState.titleElement.title = displayRequestUrl || "No ESM URL";
   const resolvedZoomKey = resolveWorkspaceCardZoomKey(cardState);
   if (resolvedZoomKey && cardState.zoomKey !== resolvedZoomKey) {
@@ -3401,16 +3615,15 @@ function wireCardColumnFilterCloud(cardState) {
         return;
       }
       const trigger = chip.querySelector(".col-chip-trigger");
-      const selectedCount = cardState?.localColumnFilters?.get(columnName)?.size || 0;
       const description = String(chip.getAttribute("data-description") || "").trim();
-      const title = selectedCount > 0 ? `${description || columnName} (${selectedCount} selected)` : description || columnName;
+      const chipPresentation = buildCardFilterChipPresentation(cardState, columnName, description);
       chip.classList.toggle("col-chip-active", pickerOpen && cardState.pickerOpenColumn === columnName);
-      chip.classList.toggle("col-chip-filtered", selectedCount > 0);
+      chip.classList.toggle("col-chip-filtered", chipPresentation.selectedCount > 0);
       if (trigger) {
-        trigger.textContent = selectedCount > 0 ? `${columnName} (${selectedCount})` : columnName;
-        trigger.title = title;
+        trigger.textContent = chipPresentation.label;
+        trigger.title = chipPresentation.title;
       }
-      chip.title = title;
+      chip.title = chipPresentation.title;
     });
   };
 
@@ -3735,7 +3948,9 @@ function ensureCard(cardMeta) {
 function renderCardTable(cardState, rows, lastModified) {
   const firstRow = rows[0];
   const hasAuthN = firstRow["authn-attempts"] != null && firstRow["authn-successful"] != null;
+  const hasAuthNFail = firstRow["authn-attempts"] != null && firstRow["authn-failed"] != null;
   const hasAuthZ = firstRow["authz-attempts"] != null && firstRow["authz-successful"] != null;
+  const hasAuthZFail = firstRow["authz-attempts"] != null && firstRow["authz-failed"] != null;
   const hasCount = firstRow.count != null;
   const requestUrl = String(cardState?.requestUrl || cardState?.endpointUrl || "").trim();
   const requestedMetricColumns = getRequestedMetricColumnsFromHref(requestUrl);
@@ -3760,10 +3975,16 @@ function renderCardTable(cardState, rows, lastModified) {
   if (showLegacyMetricColumns && hasAuthN) {
     headers.push("AuthN Success");
   }
+  if (showLegacyMetricColumns && hasAuthNFail) {
+    headers.push("AuthN Fail");
+  }
   if (showLegacyMetricColumns && hasAuthZ) {
     headers.push("AuthZ Success");
   }
-  if (showLegacyMetricColumns && !hasAuthN && !hasAuthZ && hasCount) {
+  if (showLegacyMetricColumns && hasAuthZFail) {
+    headers.push("AuthZ Fail");
+  }
+  if (showLegacyMetricColumns && !hasAuthN && !hasAuthNFail && !hasAuthZ && !hasAuthZFail && hasCount) {
     headers.push("COUNT");
   }
   headers.push(...displayColumns, ...metricColumns);
@@ -3822,7 +4043,9 @@ function renderCardTable(cardState, rows, lastModified) {
     data: rows,
     sortStack: getDefaultSortStack(),
     hasAuthN,
+    hasAuthNFail,
     hasAuthZ,
+    hasAuthZFail,
     hasCount,
     headers,
     displayColumns,
@@ -3830,7 +4053,9 @@ function renderCardTable(cardState, rows, lastModified) {
     showLegacyMetricColumns,
     context: {
       hasAuthN,
+      hasAuthNFail,
       hasAuthZ,
+      hasAuthZFail,
     },
   };
 
@@ -3921,24 +4146,58 @@ function renderCardTable(cardState, rows, lastModified) {
         setStatus("No visible ESM rows are available for :blondiebtn:.", "error");
         return;
       }
-      renderBlondieButtonState(blondieButton, "active");
-      try {
-        const result = await sendWorkspaceAction("blondie-export", {
-          exportPayload,
-          card: getCardPayload(cardState),
-        });
-        if (!result?.ok) {
-          renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
-          setStatus(result?.error || "Unable to deliver ESM rows with :blondiebtn:.", "error");
-        } else {
+      const sendExport = async (deliveryTarget = null) => {
+        renderBlondieButtonState(blondieButton, "active");
+        try {
+          const result = await sendWorkspaceAction("blondie-export", {
+            exportPayload,
+            card: getCardPayload(cardState),
+            deliveryTarget: deliveryTarget?.target || deliveryTarget || null,
+            noteText: deliveryTarget?.noteText || "",
+          });
+          if (!result?.ok) {
+            renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+            setStatus(result?.error || "Unable to deliver ESM rows with :blondiebtn:.", "error");
+            return {
+              ok: false,
+              error: result?.error || "Unable to deliver ESM rows with :blondiebtn:.",
+            };
+          }
           renderBlondieButtonState(blondieButton, "ack");
           queueBlondieButtonAckReset(blondieButton);
-          setStatus(`:blondiebtn: delivered ${exportPayload.rowCount} ESM row(s) to your ZipTool panel.`, "success");
+          const deliveredRecipientLabel = String(result?.recipient_label || "").trim();
+          const deliveredViaDialog = !!deliveryTarget && !!deliveredRecipientLabel;
+          setStatus(
+            deliveredViaDialog
+              ? `:blondiebtn: delivered ${exportPayload.rowCount} ESM row(s) to ${deliveredRecipientLabel}.`
+              : `:blondiebtn: delivered ${exportPayload.rowCount} ESM row(s) to your Slack DM.`,
+            "success"
+          );
+          return result;
+        } catch (error) {
+          renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+          const message = error instanceof Error ? error.message : "Unable to deliver ESM rows with :blondiebtn:.";
+          setStatus(message, "error");
+          return {
+            ok: false,
+            error: message,
+          };
         }
-      } catch (error) {
-        renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
-        setStatus(error instanceof Error ? error.message : "Unable to deliver ESM rows with :blondiebtn:.", "error");
+      };
+      if (event.shiftKey) {
+        openBlondieSharePicker(blondieButton, async ({ selectedTarget, noteText }) => {
+          return sendExport({
+            target: {
+              mode: "teammate",
+              userId: selectedTarget.userId,
+              userName: selectedTarget.userName || selectedTarget.label,
+            },
+            noteText,
+          });
+        });
+        return;
       }
+      await sendExport(null);
     });
   }
 
@@ -4193,7 +4452,12 @@ function applyControllerState(payload) {
   state.programmerName = incomingProgrammerName;
   state.programmerHydrationReady = payload?.programmerHydrationReady === true;
   state.slackReady = payload?.slack?.ready === true;
+  state.slackUserId = String(payload?.slack?.userId || "").trim().toUpperCase();
   state.slackUserName = String(payload?.slack?.userName || "").trim();
+  state.slackShareTargets = normalizeBlondieShareTargets(payload?.slack?.shareTargets || []);
+  if (!state.slackReady || state.slackShareTargets.length === 0) {
+    closeBlondieSharePicker();
+  }
   state.premiumPanelRequestToken = Math.max(
     0,
     Number(payload?.premiumPanelRequestToken || state.premiumPanelRequestToken || 0)

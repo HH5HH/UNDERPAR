@@ -709,7 +709,11 @@ body:has([aria-busy="true"]) * {
 }
 
 .underpar-blondie-btn[data-blondie-state="inactive"] {
-  opacity: 0.74;
+  opacity: 1;
+}
+
+.underpar-blondie-btn:disabled {
+  opacity: 1;
 }
 
 .underpar-blondie-btn[data-blondie-state="active"] {
@@ -736,8 +740,28 @@ body:has([aria-busy="true"]) * {
   display: block;
 }
 
+:root {
+  --underpar-blondie-share-backdrop: rgba(13, 25, 45, 0.34);
+  --underpar-blondie-share-dialog-border: rgba(24, 54, 97, 0.32);
+  --underpar-blondie-share-dialog-background: linear-gradient(180deg, rgba(29, 42, 64, 0.98), rgba(15, 28, 48, 0.98));
+  --underpar-blondie-share-dialog-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 34px rgba(18, 38, 68, 0.38);
+  --underpar-blondie-share-foreground: #f7f2e6;
+  --underpar-blondie-share-accent: #f5d876;
+  --underpar-blondie-share-recipient-border: rgba(255, 214, 92, 0.2);
+  --underpar-blondie-share-control-border: rgba(255, 214, 92, 0.16);
+  --underpar-blondie-share-editor-border: rgba(79, 138, 255, 0.42);
+  --underpar-blondie-share-editor-focus-border: rgba(122, 174, 255, 0.82);
+  --underpar-blondie-share-editor-focus-shadow: 0 0 0 2px rgba(122, 174, 255, 0.18);
+  --underpar-blondie-share-tool-hover-background: rgba(255, 214, 92, 0.14);
+  --underpar-blondie-share-tool-hover-border: rgba(255, 214, 92, 0.24);
+  --underpar-blondie-share-send-border: rgba(255, 214, 92, 0.3);
+  --underpar-blondie-share-send-background: rgba(255, 214, 92, 0.16);
+  --underpar-blondie-share-placeholder: rgba(247, 242, 230, 0.48);
+  --underpar-blondie-share-muted: rgba(247, 242, 230, 0.76);
+}
+
 .workspace-icon-btn--blondie-master[data-blondie-state="inactive"] {
-  opacity: 0.94;
+  opacity: 1;
 }
 
 .workspace-icon-btn--blondie-master[data-blondie-state="ready"] {

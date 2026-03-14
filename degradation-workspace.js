@@ -3,15 +3,18 @@ const BLONDIE_BUTTON_STATES = new Set(["inactive", "ready", "active", "ack"]);
 const BLONDIE_BUTTON_ACK_RESET_MS = 2000;
 const DEGRADATION_WORKSPACE_MAX_REPORTS = 60;
 const BLONDIE_BUTTON_INACTIVE_MESSAGE =
-  "No zip-zap without SLACKTIVATION.  Please feed ZIP.KEY to UP Tab inside Developer Tools";
+  "No zip-zip without SLACKTIVATION. Please visit VAULT container on the UP Tab to feed your ZIP.KEY to UnderPAR";
+const BLONDIE_BUTTON_SHARE_TARGETS_EMPTY_MESSAGE =
+  "No pass-transition roster is cached yet. Re-SLACKTIVATE UnderPAR in the VAULT.";
+const BLONDIE_BUTTON_SHARE_NOTE_EMPTY_MESSAGE = "Enter a Slack note before sending.";
 const BLONDIE_BUTTON_ICON_URLS = (() => {
   const resolveIconUrl = (path) =>
     typeof chrome !== "undefined" && chrome?.runtime?.getURL ? chrome.runtime.getURL(path) : path;
   return {
-    inactive: resolveIconUrl("icons/blondie-active.svg"),
-    ready: resolveIconUrl("icons/blondie-slacktivated.svg"),
-    active: resolveIconUrl("icons/blondie-degradation-active.svg"),
-    ack: resolveIconUrl("icons/blondie-inactive.svg"),
+    inactive: resolveIconUrl("icons/blondie-button-inactive.png"),
+    ready: resolveIconUrl("icons/blondie-button-slacktivated.png"),
+    active: resolveIconUrl("icons/blondie-button-active.png"),
+    ack: resolveIconUrl("icons/blondie-button-zipzap200.png"),
   };
 })();
 const blondieAckResetTimerByButton = new WeakMap();
@@ -21,7 +24,9 @@ const state = {
   controllerOnline: false,
   adobePassEnvironment: null,
   slackReady: false,
+  slackUserId: "",
   slackUserName: "",
+  slackShareTargets: [],
   degradationReady: false,
   programmerId: "",
   programmerName: "",
@@ -53,6 +58,17 @@ const els = {
   pageEnvBadge: document.getElementById("page-env-badge"),
   pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
 };
+const UNDERPAR_BLONDIE_SHARE_PICKER = globalThis.UnderParBlondieSharePicker;
+if (!UNDERPAR_BLONDIE_SHARE_PICKER?.createController || !UNDERPAR_BLONDIE_SHARE_PICKER?.normalizeTargets) {
+  throw new Error("UnderPar Blondie share picker runtime is unavailable.");
+}
+const blondieSharePickerController = UNDERPAR_BLONDIE_SHARE_PICKER.createController({
+  emptyTargetsMessage: BLONDIE_BUTTON_SHARE_TARGETS_EMPTY_MESSAGE,
+  emptyNoteMessage: BLONDIE_BUTTON_SHARE_NOTE_EMPTY_MESSAGE,
+  showHostStatus(message = "", type = "error") {
+    setStatus(message, type);
+  },
+});
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -460,6 +476,31 @@ function getBlondieButtonState(button = null) {
   return BLONDIE_BUTTON_STATES.has(stateValue) ? stateValue : getBlondieButtonDefaultState();
 }
 
+function normalizeBlondieShareTargets(value = null) {
+  return UNDERPAR_BLONDIE_SHARE_PICKER.normalizeTargets(value);
+}
+
+function hasBlondieShareTargets() {
+  return Array.isArray(state.slackShareTargets) && state.slackShareTargets.length > 0;
+}
+
+function isBlondieSharePickerOpen() {
+  return blondieSharePickerController.isOpen();
+}
+
+function closeBlondieSharePicker() {
+  blondieSharePickerController.close();
+}
+
+function openBlondieSharePicker(anchorButton, onSelect) {
+  blondieSharePickerController.open({
+    anchorButton,
+    onSelect,
+    selfUserId: state.slackUserId,
+    targets: state.slackShareTargets,
+  });
+}
+
 function getBlondieButtonTitle(buttonState = "", button = null) {
   const normalizedState = BLONDIE_BUTTON_STATES.has(String(buttonState || "").trim().toLowerCase())
     ? String(buttonState || "").trim().toLowerCase()
@@ -475,7 +516,9 @@ function getBlondieButtonTitle(buttonState = "", button = null) {
     return "Slack acknowledged :blondiebtn: delivery.";
   }
   if (canUseBlondieButton()) {
-    return "zip-zip data to SLACK when it's sitting in SLACKTIVATED state";
+    return hasBlondieShareTargets()
+      ? "Click sends to you. Shift-click picks a pass-transition teammate."
+      : "Click sends to you. Re-SLACKTIVATE UnderPAR in the VAULT to load pass-transition teammates.";
   }
   return BLONDIE_BUTTON_INACTIVE_MESSAGE;
 }
@@ -1063,7 +1106,12 @@ function applyControllerState(payload = {}) {
   state.adobePassEnvironment = nextEnvironment;
   state.degradationReady = payload?.degradationReady === true;
   state.slackReady = payload?.slack?.ready === true;
+  state.slackUserId = String(payload?.slack?.userId || "").trim().toUpperCase();
   state.slackUserName = String(payload?.slack?.userName || "").trim();
+  state.slackShareTargets = normalizeBlondieShareTargets(payload?.slack?.shareTargets || []);
+  if (!state.slackReady || state.slackShareTargets.length === 0) {
+    closeBlondieSharePicker();
+  }
   state.programmerId = String(payload?.programmerId || "");
   state.programmerName = String(payload?.programmerName || "");
   state.requestorId = String(payload?.requestorId || "");
@@ -1454,23 +1502,35 @@ async function rerunAllCards(options = {}) {
   return true;
 }
 
-async function deliverGroupToBlondie(groupId = "", button = null) {
+async function deliverGroupToBlondie(groupId = "", button = null, deliveryTarget = null) {
   if (!(button instanceof HTMLButtonElement)) {
-    return;
+    return {
+      ok: false,
+      error: "Blondie button is unavailable.",
+    };
   }
   const currentState = getBlondieButtonState(button);
   if (currentState === "active" || currentState === "ack" || state.batchRunning) {
-    return;
+    return {
+      ok: false,
+      error: "DEGRADATION Blondie is already busy.",
+    };
   }
   if (!canUseBlondieButton()) {
     renderBlondieButtonState(button, "inactive");
     setStatus(BLONDIE_BUTTON_INACTIVE_MESSAGE, "error");
-    return;
+    return {
+      ok: false,
+      error: BLONDIE_BUTTON_INACTIVE_MESSAGE,
+    };
   }
   const exportPayload = buildDegradationBlondieGroupExportPayload(groupId);
   if (!exportPayload) {
     setStatus("No visible DEGRADATION reports are available for :blondiebtn:.", "error");
-    return;
+    return {
+      ok: false,
+      error: "No visible DEGRADATION reports are available for :blondiebtn:.",
+    };
   }
 
   renderBlondieButtonState(button, "active");
@@ -1479,18 +1539,39 @@ async function deliverGroupToBlondie(groupId = "", button = null) {
   try {
     const result = await sendWorkspaceAction("blondie-export-all", {
       exportPayload,
+      deliveryTarget: deliveryTarget?.target || deliveryTarget || null,
+      noteText: deliveryTarget?.noteText || "",
     });
     if (!result?.ok) {
       renderBlondieButtonState(button, getBlondieButtonDefaultState());
       setStatus(result?.error || "Unable to deliver DEGRADATION reports with :blondiebtn:.", "error");
-      return;
+      return {
+        ok: false,
+        error: result?.error || "Unable to deliver DEGRADATION reports with :blondiebtn:.",
+      };
     }
     renderBlondieButtonState(button, "ack");
     queueBlondieButtonAckReset(button);
-    setStatus("", "info");
+    const deliveredRecipientLabel = String(result?.recipient_label || "").trim();
+    const deliveredReportCount = Math.max(
+      0,
+      Number(exportPayload?.reportCount || exportPayload?.reportItems?.length || 0)
+    );
+    setStatus(
+      deliveredRecipientLabel
+        ? `:blondiebtn: delivered ${deliveredReportCount} DEGRADATION report(s) to ${deliveredRecipientLabel}.`
+        : `:blondiebtn: delivered ${deliveredReportCount} DEGRADATION report(s) to your Slack DM.`,
+      "success"
+    );
+    return result;
   } catch (error) {
     renderBlondieButtonState(button, getBlondieButtonDefaultState());
-    setStatus(error instanceof Error ? error.message : "Unable to deliver DEGRADATION reports with :blondiebtn:.", "error");
+    const message = error instanceof Error ? error.message : "Unable to deliver DEGRADATION reports with :blondiebtn:.";
+    setStatus(message, "error");
+    return {
+      ok: false,
+      error: message,
+    };
   }
 }
 
@@ -1513,7 +1594,21 @@ function registerEventHandlers() {
       const groupBlondieTrigger = event.target.closest('button[data-action="blondie-export-group"]');
       if (groupBlondieTrigger instanceof HTMLButtonElement) {
         event.preventDefault();
-        void deliverGroupToBlondie(String(groupBlondieTrigger.getAttribute("data-group-id") || "").trim(), groupBlondieTrigger);
+        const groupId = String(groupBlondieTrigger.getAttribute("data-group-id") || "").trim();
+        if (event.shiftKey) {
+          openBlondieSharePicker(groupBlondieTrigger, async ({ selectedTarget, noteText }) => {
+            return deliverGroupToBlondie(groupId, groupBlondieTrigger, {
+              target: {
+                mode: "teammate",
+                userId: selectedTarget.userId,
+                userName: selectedTarget.userName || selectedTarget.label,
+              },
+              noteText,
+            });
+          });
+          return;
+        }
+        void deliverGroupToBlondie(groupId, groupBlondieTrigger);
         return;
       }
       const csvTrigger = event.target.closest('a[data-action="download-csv"]');

@@ -740,7 +740,11 @@ body::after {
 }
 
 .underpar-blondie-btn[data-blondie-state="inactive"] {
-  opacity: 0.74;
+  opacity: 1;
+}
+
+.underpar-blondie-btn:disabled {
+  opacity: 1;
 }
 
 .underpar-blondie-btn[data-blondie-state="active"] {

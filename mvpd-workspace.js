@@ -102,15 +102,18 @@ const IS_MVPD_WORKSPACE_TEARSHEET_RUNTIME = Boolean(workspaceExportPayload);
 const BLONDIE_BUTTON_STATES = new Set(["inactive", "ready", "active", "ack"]);
 const BLONDIE_BUTTON_ACK_RESET_MS = 2000;
 const BLONDIE_BUTTON_INACTIVE_MESSAGE =
-  "No zip-zap without SLACKTIVATION.  Please feed ZIP.KEY to UP Tab inside Developer Tools";
+  "No zip-zip without SLACKTIVATION. Please visit VAULT container on the UP Tab to feed your ZIP.KEY to UnderPAR";
+const BLONDIE_BUTTON_SHARE_TARGETS_EMPTY_MESSAGE =
+  "No pass-transition roster is cached yet. Re-SLACKTIVATE UnderPAR in the VAULT.";
+const BLONDIE_BUTTON_SHARE_NOTE_EMPTY_MESSAGE = "Enter a Slack note before sending.";
 const BLONDIE_BUTTON_ICON_URLS = (() => {
   const resolveIconUrl = (path) =>
     typeof chrome !== "undefined" && chrome?.runtime?.getURL ? chrome.runtime.getURL(path) : path;
   return {
-    inactive: resolveIconUrl("icons/blondie-active.svg"),
-    ready: resolveIconUrl("icons/blondie-slacktivated.svg"),
-    active: resolveIconUrl("icons/blondie-ack.svg"),
-    ack: resolveIconUrl("icons/blondie-inactive.svg"),
+    inactive: resolveIconUrl("icons/blondie-button-inactive.png"),
+    ready: resolveIconUrl("icons/blondie-button-slacktivated.png"),
+    active: resolveIconUrl("icons/blondie-button-active.png"),
+    ack: resolveIconUrl("icons/blondie-button-zipzap200.png"),
   };
 })();
 const blondieAckResetTimerByButton = new WeakMap();
@@ -120,7 +123,9 @@ const state = {
   controllerOnline: false,
   adobePassEnvironment: null,
   slackReady: false,
+  slackUserId: "",
   slackUserName: "",
+  slackShareTargets: [],
   mvpdReady: false,
   hasMvpdCmTenant: false,
   mvpdCmTenantScope: "",
@@ -165,6 +170,17 @@ state.cardsById = state.cmCardsById;
 let workspaceStylesheetTextCache = "";
 let workspaceTearsheetRuntimeTextCache = "";
 let workspaceTearsheetTemplateTextCache = "";
+const UNDERPAR_BLONDIE_SHARE_PICKER = globalThis.UnderParBlondieSharePicker;
+if (!UNDERPAR_BLONDIE_SHARE_PICKER?.createController || !UNDERPAR_BLONDIE_SHARE_PICKER?.normalizeTargets) {
+  throw new Error("UnderPar Blondie share picker runtime is unavailable.");
+}
+const blondieSharePickerController = UNDERPAR_BLONDIE_SHARE_PICKER.createController({
+  emptyTargetsMessage: BLONDIE_BUTTON_SHARE_TARGETS_EMPTY_MESSAGE,
+  emptyNoteMessage: BLONDIE_BUTTON_SHARE_NOTE_EMPTY_MESSAGE,
+  showHostStatus(message = "", type = "error") {
+    setStatus(message, type);
+  },
+});
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -2022,6 +2038,31 @@ function getBlondieButtonState(button = null) {
   return BLONDIE_BUTTON_STATES.has(stateValue) ? stateValue : getBlondieButtonDefaultState();
 }
 
+function normalizeBlondieShareTargets(value = null) {
+  return UNDERPAR_BLONDIE_SHARE_PICKER.normalizeTargets(value);
+}
+
+function hasBlondieShareTargets() {
+  return Array.isArray(state.slackShareTargets) && state.slackShareTargets.length > 0;
+}
+
+function isBlondieSharePickerOpen() {
+  return blondieSharePickerController.isOpen();
+}
+
+function closeBlondieSharePicker() {
+  blondieSharePickerController.close();
+}
+
+function openBlondieSharePicker(anchorButton, onSelect) {
+  blondieSharePickerController.open({
+    anchorButton,
+    onSelect,
+    selfUserId: state.slackUserId,
+    targets: state.slackShareTargets,
+  });
+}
+
 function getBlondieButtonTitle(buttonState = "") {
   const normalizedState = BLONDIE_BUTTON_STATES.has(String(buttonState || "").trim().toLowerCase())
     ? String(buttonState || "").trim().toLowerCase()
@@ -2036,7 +2077,9 @@ function getBlondieButtonTitle(buttonState = "") {
     return "Slack acknowledged :blondiebtn: delivery.";
   }
   if (canUseBlondieButton()) {
-    return "zip-zip data to SLACK when it's sitting in SLACKTIVATED state";
+    return hasBlondieShareTargets()
+      ? "Click sends to you. Shift-click opens the Slack note dialog for a pass-transition teammate."
+      : "Click sends to you. Re-SLACKTIVATE UnderPAR in the VAULT to load pass-transition teammates.";
   }
   return BLONDIE_BUTTON_INACTIVE_MESSAGE;
 }
@@ -2133,10 +2176,12 @@ function buildMvpdBlondieExportPayload(cardState, tableState) {
   }
   const requestUrl = String(getCardEffectiveRequestUrl(cardState) || cardState?.requestUrl || cardState?.endpointUrl || "").trim();
   const operationLabel = String(cardState?.operation?.label || cardState?.operation?.pathTemplate || "").trim();
+  const displayNodeLabel = operationLabel || getNodeLabel(requestUrl) || state.requestorMvpdLabel || "MVPD CM Report Card";
   return {
     workspaceKey: "mvpd",
     workspaceLabel: "MVPD CM",
-    datasetLabel: operationLabel || getNodeLabel(requestUrl) || state.requestorMvpdLabel || "MVPD CM Report Card",
+    datasetLabel: displayNodeLabel,
+    displayNodeLabel,
     requestUrl,
     columns: headers,
     rows,
@@ -3445,24 +3490,58 @@ function renderCardTable(cardState, rows, lastModified) {
         setStatus("No visible MVPD CM rows are available for :blondiebtn:.", "error");
         return;
       }
-      renderBlondieButtonState(blondieButton, "active");
-      try {
-        const result = await sendWorkspaceAction("blondie-export", {
-          exportPayload,
-          card: getCardPayload(cardState),
-        });
-        if (!result?.ok) {
-          renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
-          setStatus(result?.error || "Unable to deliver MVPD CM rows with :blondiebtn:.", "error");
-        } else {
+      const sendExport = async (deliveryTarget = null) => {
+        renderBlondieButtonState(blondieButton, "active");
+        try {
+          const result = await sendWorkspaceAction("blondie-export", {
+            exportPayload,
+            card: getCardPayload(cardState),
+            deliveryTarget: deliveryTarget?.target || deliveryTarget || null,
+            noteText: deliveryTarget?.noteText || "",
+          });
+          if (!result?.ok) {
+            renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+            setStatus(result?.error || "Unable to deliver MVPD CM rows with :blondiebtn:.", "error");
+            return {
+              ok: false,
+              error: result?.error || "Unable to deliver MVPD CM rows with :blondiebtn:.",
+            };
+          }
           renderBlondieButtonState(blondieButton, "ack");
           queueBlondieButtonAckReset(blondieButton);
-          setStatus(`:blondiebtn: delivered ${exportPayload.rowCount} MVPD CM row(s) to your ZipTool panel.`, "success");
+          const deliveredRecipientLabel = String(result?.recipient_label || "").trim();
+          const deliveredViaDialog = !!deliveryTarget && !!deliveredRecipientLabel;
+          setStatus(
+            deliveredViaDialog
+              ? `:blondiebtn: delivered ${exportPayload.rowCount} MVPD CM row(s) to ${deliveredRecipientLabel}.`
+              : `:blondiebtn: delivered ${exportPayload.rowCount} MVPD CM row(s) to your Slack DM.`,
+            "success"
+          );
+          return result;
+        } catch (error) {
+          renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
+          const message = error instanceof Error ? error.message : "Unable to deliver MVPD CM rows with :blondiebtn:.";
+          setStatus(message, "error");
+          return {
+            ok: false,
+            error: message,
+          };
         }
-      } catch (error) {
-        renderBlondieButtonState(blondieButton, getBlondieButtonDefaultState());
-        setStatus(error instanceof Error ? error.message : "Unable to deliver MVPD CM rows with :blondiebtn:.", "error");
+      };
+      if (event.shiftKey) {
+        openBlondieSharePicker(blondieButton, async ({ selectedTarget, noteText }) => {
+          return sendExport({
+            target: {
+              mode: "teammate",
+              userId: selectedTarget.userId,
+              userName: selectedTarget.userName || selectedTarget.label,
+            },
+            noteText,
+          });
+        });
+        return;
       }
+      await sendExport(null);
     });
   }
 
@@ -3795,7 +3874,12 @@ function applyControllerState(payload) {
       : state.adobePassEnvironment;
   state.mvpdReady = payload?.mvpdReady === true;
   state.slackReady = payload?.slack?.ready === true;
+  state.slackUserId = String(payload?.slack?.userId || "").trim().toUpperCase();
   state.slackUserName = String(payload?.slack?.userName || "").trim();
+  state.slackShareTargets = normalizeBlondieShareTargets(payload?.slack?.shareTargets || []);
+  if (!state.slackReady || state.slackShareTargets.length === 0) {
+    closeBlondieSharePicker();
+  }
   state.hasMvpdCmTenant = payload?.hasMvpdCmTenant === true;
   state.mvpdCmTenantScope = String(payload?.mvpdCmTenantScope || "").trim();
   state.programmerId = String(payload?.programmerId || "");

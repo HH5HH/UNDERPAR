@@ -47,6 +47,8 @@ const UNDERPAR_DCR_CACHE_PREFIX = "underpar_dcr_cache_v1";
 const SLACKTIVATION_WORKSPACE_ORIGIN = "https://adobedx.slack.com";
 const SLACKTIVATION_OPENID_DEFAULT_SCOPE = "openid profile email";
 const SLACKTIVATION_OPENID_DEFAULT_REDIRECT_PATH = "slack-user";
+const UNDERPAR_PASS_TRANSITION_CHANNEL_ID = "C09NHJCMFC1";
+const UNDERPAR_PASS_TRANSITION_CHANNEL_NAME = "pass-transition";
 const VAULT_REQUIRED_SCOPE_BY_SERVICE_KEY = Object.freeze({
   restV2: "api:client:v2",
   esm: "analytics:client",
@@ -416,6 +418,14 @@ function normalizeSlacktivationText(value = "", maxLength = 0) {
   return normalized;
 }
 
+function normalizeSlacktivationHandle(value = "") {
+  const handle = String(value || "").trim().replace(/^@+/, "");
+  if (!handle || /\s/.test(handle)) {
+    return "";
+  }
+  return /^[a-z0-9._-]{1,80}$/i.test(handle) ? handle : "";
+}
+
 function normalizeSlacktivationToken(value = "") {
   const token = String(value || "").trim();
   return /^(?:xoxe\.)?xox[a-z]-/i.test(token) ? token : "";
@@ -524,6 +534,40 @@ function normalizeSlacktivationOpenIdScope(value = "") {
     scopes.unshift("openid");
   }
   return scopes.length > 0 ? scopes.join(" ") : SLACKTIVATION_OPENID_DEFAULT_SCOPE;
+}
+
+function normalizeVaultSlacktivationApiTokens(value = null) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const rawCandidates = [
+    source.botToken,
+    source.bot_token,
+    source.userToken,
+    source.user_token,
+    source.oauthToken,
+    source.oauth_token,
+  ];
+  const botCandidates = [];
+  const userCandidates = [];
+  rawCandidates.forEach((entry) => {
+    const token = normalizeSlacktivationToken(entry);
+    if (!token) {
+      return;
+    }
+    if (/^xoxb-/i.test(token)) {
+      if (!botCandidates.includes(token)) {
+        botCandidates.push(token);
+      }
+      return;
+    }
+    if (!userCandidates.includes(token)) {
+      userCandidates.push(token);
+    }
+  });
+  return {
+    botToken: botCandidates[0] || "",
+    userToken: userCandidates[0] || "",
+    oauthToken: userCandidates[0] || "",
+  };
 }
 
 function normalizeSlacktivationRedirectPath(value = "") {
@@ -683,6 +727,76 @@ function normalizeVaultSlacktivationIdentity(value = null) {
   };
 }
 
+function normalizeVaultSlacktivationPassTransitionMember(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const userId = normalizeSlacktivationUserId(value?.userId || value?.user_id || value?.id || "");
+  const userName = normalizeSlacktivationText(value?.userName || value?.user_name || value?.name || "", 120);
+  const realName = normalizeSlacktivationText(value?.realName || value?.real_name || "", 120);
+  const handle = normalizeSlacktivationHandle(value?.handle || value?.username || "");
+  const email = normalizeSlacktivationText(value?.email || "", 160);
+  const avatarUrl = normalizeSlacktivationAvatarUrl(value?.avatarUrl || value?.avatar_url || "");
+  const deleted = value?.deleted === true;
+  const bot = value?.bot === true || value?.isBot === true || value?.is_bot === true || value?.is_app_user === true;
+  const updatedAt = Math.max(0, Number(value?.updatedAt || 0));
+  if (!userId && !userName && !realName && !handle && !email && !avatarUrl && !deleted && !bot && !updatedAt) {
+    return null;
+  }
+  return {
+    userId,
+    userName,
+    realName,
+    handle,
+    email,
+    avatarUrl,
+    deleted,
+    bot,
+    updatedAt,
+  };
+}
+
+function normalizeVaultSlacktivationPassTransition(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const channelId =
+    normalizeSlacktivationChannelId(value?.channelId || value?.channel_id || "") || UNDERPAR_PASS_TRANSITION_CHANNEL_ID;
+  const channelName =
+    normalizeSlacktivationText(value?.channelName || value?.channel_name || "", 80) || UNDERPAR_PASS_TRANSITION_CHANNEL_NAME;
+  const syncedAt = Math.max(0, Number(value?.syncedAt || value?.updatedAt || 0));
+  const tokenType = normalizeSlacktivationText(value?.tokenType || value?.token_type || "", 48).toLowerCase();
+  const members = [];
+  const seenUserIds = new Set();
+  (Array.isArray(value?.members) ? value.members : []).forEach((entry) => {
+    const member = normalizeVaultSlacktivationPassTransitionMember(entry);
+    if (!member || !member.userId || seenUserIds.has(member.userId)) {
+      return;
+    }
+    seenUserIds.add(member.userId);
+    members.push(member);
+  });
+  members.sort((left, right) =>
+    firstNonEmptyString([left.userName, left.realName, left.email, left.userId]).localeCompare(
+      firstNonEmptyString([right.userName, right.realName, right.email, right.userId]),
+      undefined,
+      { sensitivity: "base" }
+    )
+  );
+  const lastError = normalizeVaultSlacktivationError(value?.lastError || null);
+  if (!members.length && !syncedAt && !tokenType && !lastError && !channelId && !channelName) {
+    return null;
+  }
+  return {
+    channelId,
+    channelName,
+    syncedAt,
+    tokenType,
+    members,
+    lastError,
+  };
+}
+
 function normalizeVaultSlacktivationError(value = null) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -706,10 +820,22 @@ function normalizeVaultSlacktivationRecord(value = null) {
   }
   const oidcInput = value?.oidc && typeof value.oidc === "object" ? value.oidc : {};
   const apiInput = value?.api && typeof value.api === "object" ? value.api : {};
+  const apiTokens = normalizeVaultSlacktivationApiTokens(apiInput);
   const singularityInput = value?.singularity && typeof value.singularity === "object" ? value.singularity : {};
   const identity = normalizeVaultSlacktivationIdentity(value?.identity || null);
   const keyMeta = normalizeVaultSlacktivationKeyMeta(value?.keyMeta || value?.meta || null);
   const openIdSession = normalizeVaultSlacktivationOpenIdSession(value?.openIdSession || value?.openid || null);
+  const passTransition =
+    normalizeVaultSlacktivationPassTransition(
+      value?.passTransition || value?.pass_transition || value?.teamRoster || null
+    ) || {
+      channelId: UNDERPAR_PASS_TRANSITION_CHANNEL_ID,
+      channelName: UNDERPAR_PASS_TRANSITION_CHANNEL_NAME,
+      syncedAt: 0,
+      tokenType: "",
+      members: [],
+      lastError: null,
+    };
   const lastError = normalizeVaultSlacktivationError(value?.lastError || null);
   const record = {
     schemaVersion: Math.max(1, Number(value?.schemaVersion || 1)),
@@ -725,9 +851,9 @@ function normalizeVaultSlacktivationRecord(value = null) {
       redirectUri: normalizeSlacktivationRedirectUri(oidcInput?.redirectUri || oidcInput?.redirect_uri || ""),
     },
     api: {
-      botToken: normalizeSlacktivationToken(apiInput?.botToken || apiInput?.bot_token || ""),
-      userToken: normalizeSlacktivationToken(apiInput?.userToken || apiInput?.user_token || ""),
-      oauthToken: normalizeSlacktivationToken(apiInput?.oauthToken || apiInput?.oauth_token || apiInput?.userToken || ""),
+      botToken: apiTokens.botToken,
+      userToken: apiTokens.userToken,
+      oauthToken: apiTokens.oauthToken || apiTokens.userToken,
     },
     singularity: {
       channelId: normalizeSlacktivationChannelId(
@@ -738,13 +864,11 @@ function normalizeVaultSlacktivationRecord(value = null) {
       ),
     },
     identity,
+    passTransition,
     openIdSession,
     keyMeta,
     lastError,
   };
-  if (!record.api.oauthToken) {
-    record.api.oauthToken = record.api.userToken;
-  }
   if (!record.activatedAt && record.ready) {
     record.activatedAt = Math.max(0, Number(identity?.updatedAt || record.updatedAt || Date.now()));
   }
@@ -2273,6 +2397,13 @@ function createVaultExportRowSkeleton() {
     "Slack Key Version": "",
     "Slack Key Imported At": "",
     "Slack Key Source": "",
+    "Slack pass-transition Channel ID": "",
+    "Slack pass-transition Channel Name": "",
+    "Slack pass-transition Synced At": "",
+    "Slack pass-transition Token Type": "",
+    "Slack pass-transition Members JSON": "",
+    "Slack pass-transition Error Code": "",
+    "Slack pass-transition Error Message": "",
   };
 }
 
@@ -2349,6 +2480,13 @@ function buildVaultExportRows(vaultPayload = null) {
       "Slack Key Version": String(slacktivationRecord.keyMeta?.keyVersion || "").trim(),
       "Slack Key Imported At": String(slacktivationRecord.keyMeta?.importedAt || "").trim(),
       "Slack Key Source": String(slacktivationRecord.keyMeta?.source || "").trim(),
+      "Slack pass-transition Channel ID": String(slacktivationRecord.passTransition?.channelId || "").trim(),
+      "Slack pass-transition Channel Name": String(slacktivationRecord.passTransition?.channelName || "").trim(),
+      "Slack pass-transition Synced At": Number(slacktivationRecord.passTransition?.syncedAt || 0) || "",
+      "Slack pass-transition Token Type": String(slacktivationRecord.passTransition?.tokenType || "").trim(),
+      "Slack pass-transition Members JSON": safeJsonStringify(slacktivationRecord.passTransition?.members || []),
+      "Slack pass-transition Error Code": String(slacktivationRecord.passTransition?.lastError?.code || "").trim(),
+      "Slack pass-transition Error Message": String(slacktivationRecord.passTransition?.lastError?.message || "").trim(),
     });
   }
 
@@ -2905,6 +3043,16 @@ async function handleVaultImportFile(file) {
       }
 
       if (rowType === "underpar-slacktivation") {
+        let passTransitionMembers = [];
+        const rawPassTransitionMembers = String(row?.["Slack pass-transition Members JSON"] || "").trim();
+        if (rawPassTransitionMembers) {
+          try {
+            const parsedMembers = JSON.parse(rawPassTransitionMembers);
+            passTransitionMembers = Array.isArray(parsedMembers) ? parsedMembers : [];
+          } catch {
+            passTransitionMembers = [];
+          }
+        }
         const record = normalizeVaultSlacktivationRecord({
           workspaceOrigin: row?.["Slack Workspace Origin"],
           ready: row?.["Slack Ready"],
@@ -2948,6 +3096,17 @@ async function handleVaultImportFile(file) {
             importedAt: row?.["Slack Key Imported At"],
             source: row?.["Slack Key Source"],
             services: ["slacktivation"],
+          },
+          passTransition: {
+            channelId: row?.["Slack pass-transition Channel ID"],
+            channelName: row?.["Slack pass-transition Channel Name"],
+            syncedAt: row?.["Slack pass-transition Synced At"],
+            tokenType: row?.["Slack pass-transition Token Type"],
+            members: passTransitionMembers,
+            lastError: {
+              code: row?.["Slack pass-transition Error Code"],
+              message: row?.["Slack pass-transition Error Message"],
+            },
           },
         });
         if (record) {
@@ -3361,6 +3520,66 @@ function formatSlacktivationModeLabel(mode = "") {
   return "Slack";
 }
 
+function buildVaultSlacktivatePassTransitionMemberLabel(member = null) {
+  return firstNonEmptyString([
+    member?.userName,
+    member?.realName,
+    member?.email,
+    member?.userId,
+  ]);
+}
+
+function buildVaultSlacktivatePassTransitionMarkup(record = null) {
+  const passTransition = normalizeVaultSlacktivationPassTransition(record?.passTransition || null);
+  if (!passTransition) {
+    return "";
+  }
+  const activeMembers = (Array.isArray(passTransition.members) ? passTransition.members : []).filter(
+    (member) => member?.deleted !== true && member?.bot !== true
+  );
+  const syncedAtLabel = passTransition.syncedAt ? formatVaultTimestamp(passTransition.syncedAt) : "Not synced yet";
+  const tokenTypeLabel = passTransition.tokenType
+    ? `${passTransition.tokenType === "bot" ? "Bot" : "User"} token`
+    : "Token unknown";
+  const errorMarkup = passTransition.lastError?.message
+    ? `<p class="vault-slacktivate-inline-status" data-tone="error">${escapeHtml(passTransition.lastError.message)}</p>`
+    : "";
+  const listMarkup = activeMembers.length
+    ? `
+      <ul class="vault-slacktivate-roster-list">
+        ${activeMembers
+          .map((member) => {
+            const label = buildVaultSlacktivatePassTransitionMemberLabel(member);
+            return `
+              <li class="vault-slacktivate-roster-item">
+                <span class="vault-slacktivate-roster-name">${escapeHtml(label)}</span>
+                <span class="vault-slacktivate-roster-id">${escapeHtml(member.userId || "")}</span>
+              </li>
+            `;
+          })
+          .join("")}
+      </ul>
+    `
+    : '<p class="vault-slacktivate-inline-status">No pass-transition members are cached yet.</p>';
+  return `
+    <section class="vault-slacktivate-roster">
+      <div class="vault-slacktivate-roster-head">
+        <div>
+          <p class="vault-slacktivate-roster-title">${escapeHtml(
+            `${passTransition.channelName || UNDERPAR_PASS_TRANSITION_CHANNEL_NAME} member list`
+          )}</p>
+          <p class="vault-slacktivate-roster-meta">
+            ${escapeHtml(`${activeMembers.length} member${activeMembers.length === 1 ? "" : "s"} | ${tokenTypeLabel} | Synced ${syncedAtLabel}`)}
+          </p>
+        </div>
+        <span class="vault-slacktivate-roster-badge">${escapeHtml(String(activeMembers.length))}</span>
+      </div>
+      ${errorMarkup}
+      ${listMarkup}
+    </section>
+  `;
+}
+
 function isVaultSlacktivateActionBusy() {
   return panelState.vaultActionBusy === true && String(panelState.vaultActionContext?.action || "").startsWith("slacktivate");
 }
@@ -3375,32 +3594,29 @@ function hasVaultExportableData(vaultPayload = null, snapshot = null) {
 function buildVaultSlacktivatePendingMarkup(record = null) {
   const normalizedRecord = normalizeVaultSlacktivationRecord(record);
   const lastError = normalizedRecord?.lastError || null;
-  const keyImportedAt = String(normalizedRecord?.keyMeta?.importedAt || "").trim();
-  const hasStoredZipKey =
-    Boolean(normalizedRecord?.oidc?.clientId) ||
-    Boolean(normalizedRecord?.api?.userToken) ||
-    Boolean(normalizedRecord?.singularity?.channelId);
-  const disabled = isVaultSlacktivateActionBusy() ? "disabled" : "";
-  const helperText = hasStoredZipKey
-    ? "ZIP.KEY is already loaded in GLOBAL.SLACK. Drop another ZIP.KEY to replace it."
-    : "Drag ZIP.KEY here or click to load it. UnderPAR will mirror the Slack activation contract into GLOBAL.SLACK.";
+  const actionBusy = isVaultSlacktivateActionBusy();
+  const disabled = actionBusy ? "disabled" : "";
+  const processingClass = actionBusy ? " is-processing" : "";
+  const dropActionLabel = actionBusy ? "SLACKTIVATING ZIP.KEY…" : "DROP ZIP.KEY TO SLACKTIVATE";
   const statusMarkup = lastError?.message
     ? `<p class="vault-slacktivate-inline-status" data-tone="error">${escapeHtml(lastError.message)}</p>`
-    : keyImportedAt
-      ? `<p class="vault-slacktivate-inline-status">Latest ZIP.KEY import ${escapeHtml(keyImportedAt)}</p>`
-      : "";
+    : "";
   return `
     <div class="vault-slacktivate-state" data-state="pending">
-      <button
-        type="button"
-        class="vault-slacktivate-dropzone"
-        data-slacktivate-trigger="file"
-        data-slacktivate-dropzone="true"
-        ${disabled}
-      >
-        <span class="vault-slacktivate-dropzone-title">DROP ZIP.KEY TO SLACKTIVATE</span>
-        <span class="vault-slacktivate-dropzone-copy">${escapeHtml(helperText)}</span>
-      </button>
+      <section class="zip-config-gate underpar-slacktivate-gate" aria-live="polite">
+        <h2 class="zip-config-gate-title">Please drop ZIP.KEY to SLACKTIVATE</h2>
+        <p class="zip-config-gate-message">Drag and drop your ZIP.KEY file onto the target below.</p>
+        <button
+          type="button"
+          class="zip-config-dropzone spectrum-Button spectrum-Button--outline spectrum-Button--sizeM${processingClass}"
+          data-slacktivate-trigger="file"
+          data-slacktivate-dropzone="true"
+          ${disabled}
+        >
+          <span class="spectrum-Button-label">${escapeHtml(dropActionLabel)}</span>
+        </button>
+        <p class="zip-config-gate-meta hidden"></p>
+      </section>
       ${statusMarkup}
     </div>
   `;
@@ -3414,6 +3630,7 @@ function buildVaultSlacktivateReadyMarkup(record = null) {
   const keyImportedAt = normalizeSlacktivationText(normalizedRecord?.keyMeta?.importedAt || "", 80) || "Unknown";
   const updatedAt = Math.max(0, Number(identity?.updatedAt || normalizedRecord?.updatedAt || 0));
   const disabled = isVaultSlacktivateActionBusy() ? "disabled" : "";
+  const rosterMarkup = buildVaultSlacktivatePassTransitionMarkup(normalizedRecord);
   return `
     <div class="vault-slacktivate-state" data-state="ready">
       <article class="vault-slacktivate-confirmation">
@@ -3464,8 +3681,9 @@ function buildVaultSlacktivateReadyMarkup(record = null) {
             <dd>${escapeHtml(formatVaultTimestamp(updatedAt))}</dd>
           </div>
         </dl>
+        ${rosterMarkup}
         <p class="vault-slacktivate-footnote">
-          Slack avatar data is retained in GLOBAL.SLACK but intentionally hidden inside the UP tab.
+          Shift-click on any workspace :blondiebtn: uses this cached pass-transition roster to target a teammate.
         </p>
       </article>
     </div>
@@ -3479,6 +3697,7 @@ function renderVaultSlacktivation(vaultPayload = null) {
   const record = getVaultSlacktivationRecord(vaultPayload);
   const actionBusy = isVaultSlacktivateActionBusy();
   vaultSlacktivateContent.dataset.dropActive = "false";
+  vaultSlacktivateContent.dataset.state = record?.ready === true ? "ready" : "pending";
   if (vaultSlacktivateBadge) {
     vaultSlacktivateBadge.textContent = actionBusy ? "Working" : record?.ready === true ? "Ready" : "Pending";
   }
@@ -3586,7 +3805,7 @@ async function handleVaultSlacktivateFile(file = null) {
     "slacktivate-import-key",
     { zipKeyText },
     {
-      start: "Importing ZIP.KEY and starting Slacktivation...",
+      start: "SLACKTIVATING ZIP.KEY for UnderPAR...",
       success: "UnderPAR is SLACKTIVATED.",
       error: "Unable to Slacktivate UnderPAR from the selected ZIP.KEY.",
     }
@@ -3947,6 +4166,10 @@ async function handleSwitch() {
 function setVaultSlacktivateDropActive(active) {
   if (vaultSlacktivateContent) {
     vaultSlacktivateContent.dataset.dropActive = active ? "true" : "false";
+    const dropzone = vaultSlacktivateContent.querySelector("[data-slacktivate-dropzone]");
+    if (dropzone) {
+      dropzone.classList.toggle("is-dragover", active === true);
+    }
   }
 }
 

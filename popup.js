@@ -189,6 +189,10 @@ const SLACK_OPENID_USERINFO_URL = "https://slack.com/api/openid.connect.userInfo
 const SLACK_OPENID_DEFAULT_SCOPES = "openid profile email";
 const SLACK_OPENID_DEFAULT_REDIRECT_PATH = "slack-user";
 const SLACK_OPENID_STATUS_VERIFY_TTL_MS = 60 * 1000;
+const UNDERPAR_PASS_TRANSITION_CHANNEL_ID = "C09NHJCMFC1";
+const UNDERPAR_PASS_TRANSITION_CHANNEL_NAME = "pass-transition";
+const UNDERPAR_PASS_TRANSITION_ROSTER_TTL_MS = 30 * 60 * 1000;
+const UNDERPAR_PASS_TRANSITION_MEMBER_LIMIT = 250;
 const IMS_SESSION_MONITOR_INTERVAL_MS = 15 * 1000;
 const IMS_SESSION_MONITOR_START_DELAY_MS = 1500;
 const IMS_SESSION_MONITOR_BOOTSTRAP_COOLDOWN_MS = 20 * 1000;
@@ -626,6 +630,40 @@ function normalizeSlackOpenIdScopes(value = "") {
   return unique.length > 0 ? unique.join(" ") : SLACK_OPENID_DEFAULT_SCOPES;
 }
 
+function normalizeUnderparSlacktivationApiTokens(value = null) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const rawCandidates = [
+    source.botToken,
+    source.bot_token,
+    source.userToken,
+    source.user_token,
+    source.oauthToken,
+    source.oauth_token,
+  ];
+  const botCandidates = [];
+  const userCandidates = [];
+  rawCandidates.forEach((entry) => {
+    const token = normalizeSlackApiToken(entry);
+    if (!token) {
+      return;
+    }
+    if (isSlackBotApiToken(token)) {
+      if (!botCandidates.includes(token)) {
+        botCandidates.push(token);
+      }
+      return;
+    }
+    if (isSlackUserOAuthToken(token) && !userCandidates.includes(token)) {
+      userCandidates.push(token);
+    }
+  });
+  return {
+    botToken: botCandidates[0] || "",
+    userToken: userCandidates[0] || "",
+    oauthToken: userCandidates[0] || "",
+  };
+}
+
 function normalizeSlackOpenIdRedirectPath(value = "") {
   const raw = String(value || "").trim().replace(/^\/+/, "");
   if (!raw) {
@@ -702,6 +740,14 @@ function normalizeSlackDisplayName(value = "") {
     return "";
   }
   return text;
+}
+
+function normalizeSlackHandle(value = "") {
+  const handle = String(value || "").trim().replace(/^@+/, "");
+  if (!handle || /\s/.test(handle)) {
+    return "";
+  }
+  return /^[a-z0-9._-]{1,80}$/i.test(handle) ? handle : "";
 }
 
 function normalizeSlackEmail(value = "") {
@@ -898,8 +944,25 @@ function normalizeUnderparSlacktivationZipKeyConfig(parsedPayload = null) {
     "slacktivation.userToken",
     "slacktivation.api.user_token",
     "slacktivation.api.userToken",
+    "api.user_token",
+    "api.userToken",
     "oauth_token",
+    "oauthToken",
     "userToken",
+  ]));
+  const oauthToken = normalizeSlackApiToken(readZipKeyValue(payload, [
+    "services.slacktivation.oauth_token",
+    "services.slacktivation.oauthToken",
+    "services.slacktivation.api.oauth_token",
+    "services.slacktivation.api.oauthToken",
+    "slacktivation.oauth_token",
+    "slacktivation.oauthToken",
+    "slacktivation.api.oauth_token",
+    "slacktivation.api.oauthToken",
+    "api.oauth_token",
+    "api.oauthToken",
+    "oauth_token",
+    "oauthToken",
   ]));
   const botToken = normalizeSlackApiToken(readZipKeyValue(payload, [
     "services.slacktivation.bot_token",
@@ -910,9 +973,16 @@ function normalizeUnderparSlacktivationZipKeyConfig(parsedPayload = null) {
     "slacktivation.botToken",
     "slacktivation.api.bot_token",
     "slacktivation.api.botToken",
+    "api.bot_token",
+    "api.botToken",
     "bot_token",
     "botToken",
   ]));
+  const apiTokens = normalizeUnderparSlacktivationApiTokens({
+    botToken,
+    userToken,
+    oauthToken,
+  });
   const singularityChannelId = normalizeSlackChannelId(readZipKeyValue(payload, [
     "services.slacktivation.singularity_channel_id",
     "services.slacktivation.singularityChannelId",
@@ -930,7 +1000,7 @@ function normalizeUnderparSlacktivationZipKeyConfig(parsedPayload = null) {
     "mention",
   ]));
   const missingFields = [];
-  if (!userToken) {
+  if (!(apiTokens.userToken || apiTokens.oauthToken)) {
     missingFields.push("user_token");
   }
   if (!singularityChannelId) {
@@ -945,7 +1015,14 @@ function normalizeUnderparSlacktivationZipKeyConfig(parsedPayload = null) {
   return {
     schemaVersion: UNDERPAR_SLACKTIVATION_SCHEMA_VERSION,
     workspaceOrigin: normalizeSlackWorkspaceOrigin(
-      readZipKeyValue(payload, ["slacktivation.workspace_origin", "services.slacktivation.workspace_origin"]) || SLACKTIVATION_WORKSPACE_ORIGIN
+      readZipKeyValue(payload, [
+        "services.slacktivation.workspace_origin",
+        "services.slacktivation.workspaceOrigin",
+        "slacktivation.workspace_origin",
+        "slacktivation.workspaceOrigin",
+        "workspace_origin",
+        "workspaceOrigin",
+      ]) || SLACKTIVATION_WORKSPACE_ORIGIN
     ),
     oidc: {
       clientId: normalizeSlacktivationText(clientId, 160),
@@ -982,9 +1059,9 @@ function normalizeUnderparSlacktivationZipKeyConfig(parsedPayload = null) {
       ])),
     },
     api: {
-      botToken,
-      userToken,
-      oauthToken: userToken,
+      botToken: apiTokens.botToken,
+      userToken: apiTokens.userToken,
+      oauthToken: apiTokens.oauthToken || apiTokens.userToken,
     },
     singularity: {
       channelId: singularityChannelId,
@@ -1024,6 +1101,14 @@ function createEmptyUnderparVaultSlacktivationRecord() {
     keyMeta: null,
     openIdSession: null,
     identity: null,
+    passTransition: {
+      channelId: UNDERPAR_PASS_TRANSITION_CHANNEL_ID,
+      channelName: UNDERPAR_PASS_TRANSITION_CHANNEL_NAME,
+      syncedAt: 0,
+      tokenType: "",
+      members: [],
+      lastError: null,
+    },
     lastError: null,
   };
 }
@@ -1105,6 +1190,73 @@ function normalizeUnderparVaultSlacktivationIdentity(value = null) {
   return hasValue ? identity : null;
 }
 
+function normalizeUnderparVaultSlacktivationPassTransitionMember(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const userId = normalizeSlackUserId(value?.userId || value?.user_id || value?.id || "");
+  const userName = normalizeSlackDisplayName(value?.userName || value?.user_name || value?.name || value?.display_name || "");
+  const realName = normalizeSlackDisplayName(value?.realName || value?.real_name || value?.realNameNormalized || "");
+  const handle = normalizeSlackHandle(value?.handle || value?.username || "");
+  const email = normalizeSlackEmail(value?.email || "");
+  const avatarUrl = normalizeSlackAvatarUrl(value?.avatarUrl || value?.avatar_url || "");
+  const deleted = value?.deleted === true;
+  const bot = value?.bot === true || value?.isBot === true || value?.is_bot === true || value?.is_app_user === true;
+  const updatedAt = Math.max(0, Number(value?.updatedAt || 0));
+  if (!userId && !userName && !realName && !handle && !email && !avatarUrl && !deleted && !bot && !updatedAt) {
+    return null;
+  }
+  return {
+    userId,
+    userName,
+    realName,
+    handle,
+    email,
+    avatarUrl,
+    deleted,
+    bot,
+    updatedAt,
+  };
+}
+
+function normalizeUnderparVaultSlacktivationPassTransition(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const channelId = normalizeSlackChannelId(value?.channelId || value?.channel_id || "") || UNDERPAR_PASS_TRANSITION_CHANNEL_ID;
+  const channelName =
+    normalizeSlacktivationText(value?.channelName || value?.channel_name || "", 80) || UNDERPAR_PASS_TRANSITION_CHANNEL_NAME;
+  const syncedAt = Math.max(0, Number(value?.syncedAt || value?.updatedAt || 0));
+  const tokenType = normalizeSlacktivationText(value?.tokenType || value?.token_type || "", 48).toLowerCase();
+  const members = [];
+  const seenUserIds = new Set();
+  (Array.isArray(value?.members) ? value.members : []).forEach((entry) => {
+    const member = normalizeUnderparVaultSlacktivationPassTransitionMember(entry);
+    if (!member || !member.userId || seenUserIds.has(member.userId)) {
+      return;
+    }
+    seenUserIds.add(member.userId);
+    members.push(member);
+  });
+  members.sort((left, right) => {
+    const leftLabel = firstNonEmptyString([left.userName, left.realName, left.email, left.userId]).toLowerCase();
+    const rightLabel = firstNonEmptyString([right.userName, right.realName, right.email, right.userId]).toLowerCase();
+    return leftLabel.localeCompare(rightLabel, undefined, { sensitivity: "base" });
+  });
+  const lastError = normalizeUnderparVaultSlacktivationError(value?.lastError || null);
+  if (!members.length && !syncedAt && !tokenType && !lastError && !channelId && !channelName) {
+    return null;
+  }
+  return {
+    channelId,
+    channelName,
+    syncedAt,
+    tokenType,
+    members,
+    lastError,
+  };
+}
+
 function normalizeUnderparVaultSlacktivationError(value = null) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -1134,16 +1286,19 @@ function normalizeUnderparVaultSlacktivationRecord(value = null) {
   normalized.oidc.scope = normalizeSlackOpenIdScopes(value?.oidc?.scope || "");
   normalized.oidc.redirectPath = normalizeSlackOpenIdRedirectPath(value?.oidc?.redirectPath || value?.oidc?.redirect_path || "");
   normalized.oidc.redirectUri = normalizeSlackOpenIdRedirectUri(value?.oidc?.redirectUri || value?.oidc?.redirect_uri || "");
-  normalized.api.botToken = normalizeSlackApiToken(value?.api?.botToken || value?.api?.bot_token || "");
-  normalized.api.userToken = normalizeSlackApiToken(value?.api?.userToken || value?.api?.user_token || "");
-  normalized.api.oauthToken = normalizeSlackApiToken(
-    value?.api?.oauthToken || value?.api?.oauth_token || value?.api?.userToken || value?.api?.user_token || ""
-  );
+  const apiTokens = normalizeUnderparSlacktivationApiTokens(value?.api || value);
+  normalized.api.botToken = apiTokens.botToken;
+  normalized.api.userToken = apiTokens.userToken;
+  normalized.api.oauthToken = apiTokens.oauthToken || apiTokens.userToken;
   normalized.singularity.channelId = normalizeSlackChannelId(value?.singularity?.channelId || value?.singularity?.channel_id || "");
   normalized.singularity.mention = normalizeSlackMention(value?.singularity?.mention || "");
   normalized.keyMeta = normalizeUnderparVaultSlacktivationKeyMeta(value?.keyMeta || value?.meta || null);
   normalized.openIdSession = normalizeUnderparVaultSlacktivationOpenIdSession(value?.openIdSession || value?.openid || null);
   normalized.identity = normalizeUnderparVaultSlacktivationIdentity(value?.identity || null);
+  normalized.passTransition =
+    normalizeUnderparVaultSlacktivationPassTransition(
+      value?.passTransition || value?.pass_transition || value?.teamRoster || null
+    ) || createEmptyUnderparVaultSlacktivationRecord().passTransition;
   normalized.lastError = normalizeUnderparVaultSlacktivationError(value?.lastError || null);
   normalized.ready = normalized.identity?.ready === true || normalizeSlacktivationReady(value?.ready);
   normalized.activatedAt = Math.max(0, Number(value?.activatedAt || value?.activated_at || 0));
@@ -1153,9 +1308,6 @@ function normalizeUnderparVaultSlacktivationRecord(value = null) {
     Number(normalized.identity?.updatedAt || 0),
     Number(normalized.lastError?.updatedAt || 0)
   );
-  if (!normalized.api.oauthToken) {
-    normalized.api.oauthToken = normalized.api.userToken;
-  }
   if (!normalized.activatedAt && normalized.ready) {
     normalized.activatedAt = Math.max(0, Number(normalized.identity?.updatedAt || normalized.updatedAt || Date.now()));
   }
@@ -1579,6 +1731,470 @@ async function fetchSlackIdentityViaApi(workspaceOrigin = "", token = "", userId
     }
   }
   return identity;
+}
+
+function normalizeSlackConversationNameKey(value = "") {
+  const normalized = normalizeSlacktivationText(String(value || "").replace(/^#/, ""), 80).toLowerCase();
+  return normalized.replace(/\s+/g, "-");
+}
+
+function buildUnderparSlackApiOrigins(workspaceOrigin = "", preferredOrigin = "") {
+  const origins = [];
+  [preferredOrigin, workspaceOrigin, SLACKTIVATION_API_ORIGIN].forEach((entry) => {
+    const normalizedOrigin = normalizeSlackWorkspaceOrigin(entry);
+    if (!normalizedOrigin || origins.includes(normalizedOrigin)) {
+      return;
+    }
+    origins.push(normalizedOrigin);
+  });
+  return origins;
+}
+
+function normalizeUnderparPassTransitionConversation(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const channelId = normalizeSlackChannelId(value?.channelId || value?.channel_id || value?.id || "");
+  const channelName =
+    normalizeSlacktivationText(value?.channelName || value?.channel_name || value?.name_normalized || value?.name || "", 80) ||
+    UNDERPAR_PASS_TRANSITION_CHANNEL_NAME;
+  if (!channelId && !channelName) {
+    return null;
+  }
+  return {
+    channelId: channelId || UNDERPAR_PASS_TRANSITION_CHANNEL_ID,
+    channelName,
+  };
+}
+
+function buildUnderparPassTransitionChannelIdCandidates(record = null, options = {}) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  const output = [];
+  const seen = new Set();
+  [
+    options?.channelId || "",
+    normalizedRecord?.passTransition?.channelId || "",
+    UNDERPAR_PASS_TRANSITION_CHANNEL_ID,
+  ].forEach((entry) => {
+    const channelId = normalizeSlackChannelId(entry);
+    if (!channelId || seen.has(channelId)) {
+      return;
+    }
+    seen.add(channelId);
+    output.push(channelId);
+  });
+  return output;
+}
+
+function buildUnderparPassTransitionChannelNameCandidates(record = null, options = {}) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  const output = [];
+  const seen = new Set();
+  [
+    options?.channelName || "",
+    normalizedRecord?.passTransition?.channelName || "",
+    UNDERPAR_PASS_TRANSITION_CHANNEL_NAME,
+  ].forEach((entry) => {
+    const channelName = normalizeSlackConversationNameKey(entry);
+    if (!channelName || seen.has(channelName)) {
+      return;
+    }
+    seen.add(channelName);
+    output.push(channelName);
+  });
+  return output;
+}
+
+function underparPassTransitionConversationMatches(conversation = null, channelIds = [], channelNames = []) {
+  const normalizedConversation = normalizeUnderparPassTransitionConversation(conversation);
+  if (!normalizedConversation) {
+    return false;
+  }
+  if (channelIds.includes(normalizedConversation.channelId)) {
+    return true;
+  }
+  const conversationNameCandidates = uniqueSorted(
+    [
+      normalizedConversation.channelName,
+      conversation?.name || "",
+      conversation?.name_normalized || "",
+      ...(Array.isArray(conversation?.previous_names) ? conversation.previous_names : []),
+    ]
+      .map((entry) => normalizeSlackConversationNameKey(entry))
+      .filter(Boolean)
+  );
+  return conversationNameCandidates.some((entry) => channelNames.includes(entry));
+}
+
+async function resolveUnderparPassTransitionConversation(record = null, token = "", options = {}) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  if (!normalizedRecord) {
+    return {
+      ok: false,
+      code: "slacktivation_missing",
+      error: "SLACKTIVATION is not configured yet.",
+    };
+  }
+  const channelIds = buildUnderparPassTransitionChannelIdCandidates(normalizedRecord, options);
+  const channelNames = buildUnderparPassTransitionChannelNameCandidates(normalizedRecord, options);
+  const teamId = normalizeSlackTeamId(
+    options?.teamId || normalizedRecord.identity?.teamId || normalizedRecord.openIdSession?.teamId || ""
+  );
+  const origins = buildUnderparSlackApiOrigins(normalizedRecord.workspaceOrigin, options?.preferredOrigin || "");
+  let lastFailure = null;
+
+  for (const origin of origins) {
+    for (const channelId of channelIds) {
+      const infoResult = await postSlackApiWithBearerToken(
+        origin,
+        "/api/conversations.info",
+        {
+          channel: channelId,
+          include_num_members: "false",
+          _x_reason: "underpar-slacktivation-pass-transition-info",
+        },
+        token
+      );
+      if (infoResult.ok) {
+        const conversation = normalizeUnderparPassTransitionConversation(
+          infoResult.payload?.channel || infoResult.payload?.conversation || infoResult.payload || null
+        );
+        if (conversation && underparPassTransitionConversationMatches(conversation, channelIds, channelNames)) {
+          return {
+            ok: true,
+            origin,
+            channelId: conversation.channelId,
+            channelName: conversation.channelName,
+          };
+        }
+      } else if (infoResult.code !== "channel_not_found" && infoResult.code !== "team_access_not_granted") {
+        lastFailure = {
+          code: infoResult.code || "slack_conversation_info_failed",
+          error: infoResult.error || `Unable to inspect ${UNDERPAR_PASS_TRANSITION_CHANNEL_NAME} in Slack.`,
+        };
+      }
+    }
+
+    for (const includeTeamId of teamId ? [true, false] : [false]) {
+      let cursor = "";
+      let pageCount = 0;
+      do {
+        const listResult = await postSlackApiWithBearerToken(
+          origin,
+          "/api/conversations.list",
+          {
+            limit: 200,
+            types: "public_channel,private_channel",
+            exclude_archived: "true",
+            ...(cursor ? { cursor } : {}),
+            ...(includeTeamId && teamId ? { team_id: teamId } : {}),
+            _x_reason: includeTeamId
+              ? "underpar-slacktivation-pass-transition-list-team"
+              : "underpar-slacktivation-pass-transition-list",
+          },
+          token
+        );
+        if (!listResult.ok) {
+          if (!includeTeamId || !teamId) {
+            lastFailure = {
+              code: listResult.code || "slack_channel_lookup_failed",
+              error: listResult.error || `Unable to list ${UNDERPAR_PASS_TRANSITION_CHANNEL_NAME} conversations from Slack.`,
+            };
+          }
+          break;
+        }
+        const conversations = Array.isArray(listResult.payload?.channels) ? listResult.payload.channels : [];
+        const matchedConversation = conversations.find((conversation) =>
+          underparPassTransitionConversationMatches(conversation, channelIds, channelNames)
+        );
+        if (matchedConversation) {
+          const normalizedConversation = normalizeUnderparPassTransitionConversation(matchedConversation);
+          if (normalizedConversation) {
+            return {
+              ok: true,
+              origin,
+              channelId: normalizedConversation.channelId,
+              channelName: normalizedConversation.channelName,
+            };
+          }
+        }
+        cursor = String(listResult.payload?.response_metadata?.next_cursor || "").trim();
+        pageCount += 1;
+      } while (cursor && pageCount < 10);
+    }
+  }
+
+  return {
+    ok: false,
+    code: lastFailure?.code || "slack_channel_not_found",
+    error:
+      lastFailure?.error ||
+      `Slack could not resolve #${UNDERPAR_PASS_TRANSITION_CHANNEL_NAME} for the current token. Re-SLACKTIVATE with a token that can read that channel.`,
+  };
+}
+
+async function fetchUnderparPassTransitionMemberIds(record = null, token = "", options = {}) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  if (!normalizedRecord) {
+    return {
+      ok: false,
+      code: "slacktivation_missing",
+      error: "SLACKTIVATION is not configured yet.",
+    };
+  }
+  const channelId = normalizeSlackChannelId(options?.channelId || "");
+  const channelName =
+    normalizeSlacktivationText(options?.channelName || normalizedRecord.passTransition?.channelName || "", 80) ||
+    UNDERPAR_PASS_TRANSITION_CHANNEL_NAME;
+  if (!channelId) {
+    return {
+      ok: false,
+      code: "slack_channel_missing",
+      error: `Slack could not resolve a valid ${channelName} conversation ID.`,
+    };
+  }
+  const origins = buildUnderparSlackApiOrigins(normalizedRecord.workspaceOrigin, options?.preferredOrigin || "");
+  let lastFailure = {
+    code: "slack_channel_members_unavailable",
+    error: `Unable to read ${channelName} members from Slack.`,
+  };
+
+  for (const origin of origins) {
+    let cursor = "";
+    let pageCount = 0;
+    const memberIds = [];
+    const seenUserIds = new Set();
+    let failed = false;
+
+    do {
+      const membersResult = await postSlackApiWithBearerToken(
+        origin,
+        "/api/conversations.members",
+        {
+          channel: channelId,
+          limit: 200,
+          ...(cursor ? { cursor } : {}),
+          _x_reason: "underpar-slacktivation-pass-transition-members",
+        },
+        token
+      );
+      if (!membersResult.ok) {
+        lastFailure = {
+          code: membersResult.code || "slack_channel_members_unavailable",
+          error: membersResult.error || `Unable to read ${channelName} members from Slack.`,
+        };
+        failed = true;
+        break;
+      }
+      const payload = membersResult.payload && typeof membersResult.payload === "object" ? membersResult.payload : {};
+      const members = Array.isArray(payload.members) ? payload.members : [];
+      members.forEach((entry) => {
+        const userId = normalizeSlackUserId(entry);
+        if (!userId || seenUserIds.has(userId)) {
+          return;
+        }
+        seenUserIds.add(userId);
+        memberIds.push(userId);
+      });
+      cursor = String(payload?.response_metadata?.next_cursor || "").trim();
+      pageCount += 1;
+    } while (cursor && pageCount < 10 && memberIds.length < UNDERPAR_PASS_TRANSITION_MEMBER_LIMIT);
+
+    if (!failed) {
+      return {
+        ok: true,
+        origin,
+        memberIds,
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    code: lastFailure.code || "slack_channel_members_unavailable",
+    error: lastFailure.error || `Unable to read ${channelName} members from Slack.`,
+  };
+}
+
+async function fetchUnderparPassTransitionRoster(record = null, options = {}) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  if (!normalizedRecord) {
+    return {
+      ok: false,
+      code: "slacktivation_missing",
+      error: "SLACKTIVATION is not configured yet.",
+    };
+  }
+  const channelId =
+    normalizeSlackChannelId(options?.channelId || normalizedRecord.passTransition?.channelId || "") ||
+    UNDERPAR_PASS_TRANSITION_CHANNEL_ID;
+  const channelName =
+    normalizeSlacktivationText(options?.channelName || normalizedRecord.passTransition?.channelName || "", 80) ||
+    UNDERPAR_PASS_TRANSITION_CHANNEL_NAME;
+  const tokenCandidates = buildUnderparSlacktivationApiTokenCandidates(normalizedRecord, {
+    preferUser: true,
+  });
+  if (tokenCandidates.length === 0) {
+    return {
+      ok: false,
+      code: "slack_api_token_missing",
+      error: "Slack API token is missing.",
+    };
+  }
+
+  let lastFailure = {
+    code: "slack_channel_members_unavailable",
+    error: `Unable to read ${channelName} members from Slack.`,
+  };
+
+  for (const token of tokenCandidates) {
+    const conversationResult = await resolveUnderparPassTransitionConversation(normalizedRecord, token, {
+      channelId,
+      channelName,
+    });
+    if (!conversationResult.ok) {
+      lastFailure = {
+        code: conversationResult.code || "slack_channel_not_found",
+        error: conversationResult.error || `Unable to resolve ${channelName} in Slack.`,
+      };
+      continue;
+    }
+
+    const membersResult = await fetchUnderparPassTransitionMemberIds(normalizedRecord, token, {
+      channelId: conversationResult.channelId,
+      channelName: conversationResult.channelName,
+      preferredOrigin: conversationResult.origin,
+    });
+    if (!membersResult.ok) {
+      lastFailure = {
+        code: membersResult.code || "slack_channel_members_unavailable",
+        error: membersResult.error || `Unable to read ${conversationResult.channelName} members from Slack.`,
+      };
+      continue;
+    }
+
+    const rosterMembers = [];
+    for (let index = 0; index < membersResult.memberIds.length && index < UNDERPAR_PASS_TRANSITION_MEMBER_LIMIT; index += 1) {
+      const memberId = membersResult.memberIds[index];
+      let member = null;
+      let userInfoFailure = null;
+
+      for (const origin of buildUnderparSlackApiOrigins(normalizedRecord.workspaceOrigin, membersResult.origin)) {
+        const userInfoResult = await postSlackApiWithBearerToken(
+          origin,
+          "/api/users.info",
+          {
+            user: memberId,
+            include_locale: "false",
+            _x_reason: "underpar-slacktivation-pass-transition-user-info",
+          },
+          token
+        );
+        if (!userInfoResult.ok) {
+          userInfoFailure = {
+            code: userInfoResult.code || "slack_user_info_unavailable",
+            error: userInfoResult.error || `Unable to read ${conversationResult.channelName} member details from Slack.`,
+          };
+          continue;
+        }
+        const payload = userInfoResult.payload && typeof userInfoResult.payload === "object" ? userInfoResult.payload : {};
+        const user = payload.user && typeof payload.user === "object" ? payload.user : {};
+        const profile = user.profile && typeof user.profile === "object" ? user.profile : {};
+        member = normalizeUnderparVaultSlacktivationPassTransitionMember({
+          userId: user.id || memberId,
+          userName: pickSlackDisplayNameFromProfile(profile, user),
+          realName: normalizeSlackDisplayName(profile.real_name || user.real_name || ""),
+          handle: normalizeSlackHandle(user.name || ""),
+          email: normalizeSlackEmail(profile.email || ""),
+          avatarUrl: pickSlackAvatarFromProfile(profile),
+          deleted: user.deleted === true,
+          bot: user.is_bot === true || user.is_app_user === true,
+          updatedAt: Date.now(),
+        });
+        break;
+      }
+
+      if (!member) {
+        if (userInfoFailure) {
+          lastFailure = userInfoFailure;
+        }
+        continue;
+      }
+      if (!member || member.deleted === true || member.bot === true || !member.userId) {
+        continue;
+      }
+      rosterMembers.push(member);
+    }
+
+    return {
+      ok: true,
+      passTransition: {
+        channelId: conversationResult.channelId,
+        channelName: conversationResult.channelName,
+        syncedAt: Date.now(),
+        tokenType: isSlackBotApiToken(token) ? "bot" : "user",
+        members: rosterMembers,
+        lastError: null,
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    code: lastFailure.code || "slack_channel_members_unavailable",
+    error: lastFailure.error || `Unable to read ${channelName} members from Slack.`,
+  };
+}
+
+async function ensureUnderparPassTransitionRoster(record = null, options = {}) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  if (!normalizedRecord) {
+    return {
+      ok: false,
+      code: "slacktivation_missing",
+      error: "SLACKTIVATION is not configured yet.",
+      record: null,
+    };
+  }
+  const currentPassTransition =
+    normalizeUnderparVaultSlacktivationPassTransition(normalizedRecord.passTransition || null) ||
+    createEmptyUnderparVaultSlacktivationRecord().passTransition;
+  const shouldRefresh =
+    options?.force === true ||
+    !isUnderparPassTransitionRosterFresh(currentPassTransition) ||
+    !Array.isArray(currentPassTransition.members) ||
+    currentPassTransition.members.length === 0;
+  if (!shouldRefresh) {
+    return {
+      ok: true,
+      record: normalizedRecord,
+    };
+  }
+  const rosterResult = await fetchUnderparPassTransitionRoster(normalizedRecord, options);
+  if (!rosterResult.ok) {
+    return {
+      ok: false,
+      code: rosterResult.code || "slack_channel_members_unavailable",
+      error: rosterResult.error || `Unable to read ${UNDERPAR_PASS_TRANSITION_CHANNEL_NAME} members from Slack.`,
+      record: mergeUnderparSlacktivationRecord(normalizedRecord, {
+        updatedAt: Date.now(),
+        passTransition: {
+          ...currentPassTransition,
+          lastError: buildUnderparSlacktivationErrorRecord(
+            rosterResult.code || "slack_channel_members_unavailable",
+            rosterResult.error || `Unable to read ${UNDERPAR_PASS_TRANSITION_CHANNEL_NAME} members from Slack.`
+          ),
+        },
+      }),
+    };
+  }
+  return {
+    ok: true,
+    record: mergeUnderparSlacktivationRecord(normalizedRecord, {
+      updatedAt: Date.now(),
+      passTransition: rosterResult.passTransition,
+    }),
+  };
 }
 
 function createSlackOpenIdEntropy() {
@@ -2178,6 +2794,10 @@ function mergeUnderparSlacktivationRecord(base = null, updates = null) {
       Object.prototype.hasOwnProperty.call(patch, "identity")
         ? patch.identity
         : current.identity,
+    passTransition:
+      Object.prototype.hasOwnProperty.call(patch, "passTransition")
+        ? patch.passTransition
+        : current.passTransition,
     lastError:
       Object.prototype.hasOwnProperty.call(patch, "lastError")
         ? patch.lastError
@@ -2309,6 +2929,248 @@ async function authenticateUnderparSlacktivationRecord(record = null, options = 
 
 const UNDERPAR_BLONDIE_EXPORT_MAX_MESSAGE_CHARS = 36000;
 
+function buildUnderparSlacktivationApiTokenCandidates(record = null, options = {}) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  if (!normalizedRecord) {
+    return [];
+  }
+  const preferUser = options?.preferUser === true;
+  const orderedCandidates = preferUser
+    ? [
+        normalizedRecord.openIdSession?.accessToken || "",
+        normalizedRecord.api.userToken || "",
+        normalizedRecord.api.oauthToken || "",
+        normalizedRecord.api.botToken || "",
+      ]
+    : [
+        normalizedRecord.api.botToken || "",
+        normalizedRecord.api.userToken || "",
+        normalizedRecord.api.oauthToken || "",
+        normalizedRecord.openIdSession?.accessToken || "",
+      ];
+  const output = [];
+  const seen = new Set();
+  orderedCandidates.forEach((entry) => {
+    const token = normalizeSlackApiToken(entry);
+    if (!token || seen.has(token)) {
+      return;
+    }
+    seen.add(token);
+    output.push(token);
+  });
+  return output;
+}
+
+function buildUnderparSlacktivationUserApiTokenCandidates(record = null) {
+  return buildUnderparSlacktivationApiTokenCandidates(record, { preferUser: true }).filter((token) =>
+    isSlackUserOAuthToken(token)
+  );
+}
+
+function buildUnderparBlondieDeliveryActionTokenCandidates(record = null, channelResult = null) {
+  const output = [];
+  const seen = new Set();
+  const orderedCandidates =
+    channelResult?.deliveryMode === "user_direct_channel"
+      ? [
+          channelResult?.token || "",
+          ...buildUnderparSlacktivationUserApiTokenCandidates(record),
+        ]
+      : [channelResult?.token || ""];
+  orderedCandidates.forEach((entry) => {
+    const token = normalizeSlackApiToken(entry);
+    if (!token || seen.has(token)) {
+      return;
+    }
+    seen.add(token);
+    output.push(token);
+  });
+  return output;
+}
+
+function isUnderparPassTransitionRosterFresh(passTransition = null) {
+  const syncedAt = Number(passTransition?.syncedAt || 0);
+  if (!syncedAt || syncedAt <= 0) {
+    return false;
+  }
+  return Date.now() - syncedAt <= UNDERPAR_PASS_TRANSITION_ROSTER_TTL_MS;
+}
+
+function buildUnderparPassTransitionShareTargetLabel(fullName = "", handle = "", fallback = "") {
+  const normalizedName = normalizeSlackDisplayName(fullName || fallback);
+  const normalizedHandle = normalizeSlackHandle(handle);
+  if (
+    normalizedName &&
+    normalizedHandle &&
+    normalizedName.replace(/^@+/, "").trim().toLowerCase() !== normalizedHandle.toLowerCase()
+  ) {
+    return `${normalizedName} (@${normalizedHandle})`;
+  }
+  if (normalizedName) {
+    return normalizedName;
+  }
+  if (normalizedHandle) {
+    return `@${normalizedHandle}`;
+  }
+  return normalizeSlackDisplayName(fallback) || normalizeSlackEmail(fallback) || normalizeSlackUserId(fallback);
+}
+
+function buildUnderparPassTransitionShareTargets(record = null) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  const selfUserId = normalizeSlackUserId(normalizedRecord?.identity?.userId || "");
+  const members = Array.isArray(normalizedRecord?.passTransition?.members) ? normalizedRecord.passTransition.members : [];
+  const output = [];
+  const seen = new Set();
+  const pushTarget = (member = null, options = {}) => {
+      const userId = normalizeSlackUserId(member?.userId || "");
+      if (!userId || seen.has(userId)) {
+        return;
+      }
+      const userName = normalizeSlackDisplayName(member?.userName || "");
+      const realName = normalizeSlackDisplayName(member?.realName || "");
+      const handle =
+        normalizeSlackHandle(member?.handle || "") ||
+        (!/\s/.test(userName) ? normalizeSlackHandle(userName) : "");
+      const email = normalizeSlackEmail(member?.email || "");
+      const fullName = firstNonEmptyString([realName, userName, email, userId]);
+      const label = buildUnderparPassTransitionShareTargetLabel(fullName, handle, fullName);
+      if (!userId || !label) {
+        return;
+      }
+      seen.add(userId);
+      output.push({
+        userId,
+        userName,
+        realName,
+        handle,
+        email,
+        label,
+        isSelf: options?.isSelf === true || userId === selfUserId,
+      });
+  };
+  if (selfUserId) {
+    const selfMember =
+      members.find((member) => normalizeSlackUserId(member?.userId || "") === selfUserId && member?.deleted !== true && member?.bot !== true) ||
+      {
+        userId: selfUserId,
+        userName: normalizeSlackDisplayName(normalizedRecord?.identity?.userName || ""),
+        realName: "",
+        email: normalizeSlackEmail(normalizedRecord?.identity?.email || ""),
+      };
+    pushTarget(selfMember, { isSelf: true });
+  }
+  members
+    .filter((member) => member?.deleted !== true && member?.bot !== true)
+    .forEach((member) => pushTarget(member));
+  return output;
+}
+
+function buildUnderparBlondieSenderLabel(record = null) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  return firstNonEmptyString([
+    normalizedRecord?.identity?.userName,
+    normalizedRecord?.identity?.email,
+    normalizedRecord?.identity?.userId,
+    "UnderPAR",
+  ]);
+}
+
+function normalizeUnderparBlondieNoteText(value) {
+  return String(value == null ? "" : value)
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .trim();
+}
+
+function restoreUnderparBlondieProtectedSegments(text, segments) {
+  return String(text || "").replace(/__UNDERPAR_BLONDIE_SEGMENT_(\d+)__/g, (match, idx) => {
+    const index = Number(idx);
+    if (!Number.isFinite(index)) {
+      return match;
+    }
+    return Object.prototype.hasOwnProperty.call(segments, index) ? segments[index] : match;
+  });
+}
+
+function withUnderparBlondieProtectedCodeSegments(text, formatter) {
+  const source = String(text || "");
+  const segments = [];
+  const placeholder = source.replace(/```[\s\S]*?```|`[^`\n]+`/g, (chunk) => {
+    const token = `__UNDERPAR_BLONDIE_SEGMENT_${segments.length}__`;
+    segments.push(chunk);
+    return token;
+  });
+  const formatted = typeof formatter === "function" ? formatter(placeholder) : placeholder;
+  return restoreUnderparBlondieProtectedSegments(formatted, segments);
+}
+
+function normalizeUnderparBlondieNoteUrl(value) {
+  const normalized = String(value || "").replace(/\s+/g, "").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized;
+  }
+  if (/^www\./i.test(normalized)) {
+    return `https://${normalized}`;
+  }
+  return `https://${normalized}`;
+}
+
+function convertUnderparBlondieNoteToMrkdwn(value) {
+  const normalized = normalizeUnderparBlondieNoteText(value || "");
+  if (!normalized) {
+    return "";
+  }
+  return withUnderparBlondieProtectedCodeSegments(normalized, (input) => {
+    let text = String(input || "");
+    text = text.replace(/<br\s*\/?>/gi, "\n");
+    text = text.replace(/<\/(?:p|div|li|h[1-6]|blockquote|pre|ul|ol)>/gi, "\n");
+    text = text.replace(/<(?:p|div|li|h[1-6]|blockquote|pre|ul|ol)\b[^>]*>/gi, "");
+    text = text.replace(/<(?:strong|b)>([^<\n]+)<\/(?:strong|b)>/gi, "*$1*");
+    text = text.replace(/<(?:em|i|u)>([^<\n]+)<\/(?:em|i|u)>/gi, "_$1_");
+    text = text.replace(/<(?:del|s|strike)>([^<\n]+)<\/(?:del|s|strike)>/gi, "~$1~");
+    text = text.replace(/<a\b[^>]*href=(["'])([^"']+)\1[^>]*>([\s\S]*?)<\/a>/gi, (_match, _quote, urlValue, labelValue) => {
+      const safeUrl = normalizeUnderparBlondieNoteUrl(urlValue);
+      const label = String(labelValue || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      if (!safeUrl) {
+        return label;
+      }
+      if (!label || label === safeUrl) {
+        return `<${safeUrl}>`;
+      }
+      return `<${safeUrl}|${escapeUnderparSlackMrkdwn(label)}>`;
+    });
+    text = text.replace(/<[^>]+>/g, " ");
+    text = text.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_match, labelValue, urlValue) => {
+      const safeUrl = normalizeUnderparBlondieNoteUrl(urlValue);
+      const label = String(labelValue || "").trim();
+      if (!safeUrl) {
+        return label;
+      }
+      if (!label || label === safeUrl) {
+        return `<${safeUrl}>`;
+      }
+      return `<${safeUrl}|${escapeUnderparSlackMrkdwn(label)}>`;
+    });
+    text = text.replace(/\*\*([^*\n][^*\n]*?)\*\*/g, "*$1*");
+    text = text.replace(/__([^_\n][^_\n]*?)__/g, "_$1_");
+    text = text.replace(/~~([^~\n][^~\n]*?)~~/g, "~$1~");
+    text = text.replace(/^\s{0,3}#{1,6}\s+(.+)$/gm, "*$1*");
+    text = text.replace(/^\s*[-*+]\s+\[( |x|X)\]\s+/gm, (_match, checked) => `• [${String(checked || "").trim() ? "x" : " "}] `);
+    text = text.replace(/^\s*[-*+]\s+/gm, "• ");
+    text = text
+      .replace(/\r\n?/g, "\n")
+      .replace(/[ \t\f\v]+/g, " ")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    return text;
+  });
+}
+
 function getUnderparWorkspaceSlackStatePayload() {
   const record = getUnderparVaultSlacktivationRecord(state.passVault);
   return {
@@ -2317,6 +3179,10 @@ function getUnderparWorkspaceSlackStatePayload() {
     userName: String(record?.identity?.userName || "").trim(),
     statusIcon: String(record?.identity?.statusIcon || "").trim(),
     statusMessage: String(record?.identity?.statusMessage || "").trim(),
+    shareChannelId: String(record?.passTransition?.channelId || UNDERPAR_PASS_TRANSITION_CHANNEL_ID).trim(),
+    shareChannelName: String(record?.passTransition?.channelName || UNDERPAR_PASS_TRANSITION_CHANNEL_NAME).trim(),
+    shareTargetsSyncedAt: Math.max(0, Number(record?.passTransition?.syncedAt || 0)),
+    shareTargets: buildUnderparPassTransitionShareTargets(record),
   };
 }
 
@@ -2454,6 +3320,45 @@ function underparBlondiePayloadHasDeliverableContent(payload = null) {
   return underparBlondiePayloadHasTabularData(payload) || underparBlondiePayloadHasMessageContent(payload);
 }
 
+function normalizeUnderparBlondieContextLabel(value = "") {
+  return String(value == null ? "" : value)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function trimUnderparBlondieWorkspacePrefix(contextLabel = "", workspaceLabel = "") {
+  const normalizedContext = normalizeUnderparBlondieContextLabel(contextLabel);
+  const normalizedWorkspace = normalizeUnderparBlondieContextLabel(workspaceLabel);
+  if (!normalizedContext || !normalizedWorkspace) {
+    return normalizedContext;
+  }
+  const escapedWorkspace = normalizedWorkspace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const withoutPrefix = normalizedContext.replace(new RegExp(`^${escapedWorkspace}\\s+`, "i"), "").trim();
+  return withoutPrefix || normalizedContext;
+}
+
+function getUnderparBlondieHeaderContextLabel(payload = null) {
+  const workspaceLabel = String(payload?.workspaceLabel || payload?.workspaceKey || "").trim();
+  const directLabel = firstNonEmptyString([
+    payload?.displayNodeLabel,
+    payload?.requestLabel,
+    payload?.datasetLabel,
+    payload?.endpointPath,
+    payload?.endpointKey,
+  ]);
+  return trimUnderparBlondieWorkspacePrefix(directLabel, workspaceLabel);
+}
+
+function buildUnderparBlondieHeaderLine(payload = null) {
+  const workspaceLabel = String(payload?.workspaceLabel || payload?.workspaceKey || "Workspace").trim() || "Workspace";
+  const contextLabel = getUnderparBlondieHeaderContextLabel(payload);
+  const contextKind = underparBlondiePayloadHasMessageContent(payload) ? "Results" : "Query";
+  const heading = contextLabel
+    ? `${workspaceLabel} ${contextKind} "${contextLabel}"`
+    : `${workspaceLabel} ${contextKind}`;
+  return `*${escapeUnderparSlackMrkdwn(heading)}*`;
+}
+
 function buildUnderparEsmRequestPath(pathname = "", search = "", options = {}) {
   const allowBarePath = options?.allowBarePath === true;
   let normalizedPath = String(pathname || "").trim().replace(/\/+$/g, "");
@@ -2502,15 +3407,7 @@ function buildUnderparWorkspaceBlondieDeeplinkBaseUrl(markerValue = "") {
   if (!normalizedMarkerValue) {
     return null;
   }
-  let baseUrl = "";
-  try {
-    baseUrl = String(chrome?.identity?.getRedirectURL?.("") || "").trim();
-  } catch (_error) {
-    baseUrl = "";
-  }
-  if (!baseUrl) {
-    baseUrl = `https://${String(chrome?.runtime?.id || "").trim()}.chromiumapp.org/`;
-  }
+  const baseUrl = getUnderparWorkspaceBlondieDeeplinkRuntimeBaseUrl();
   if (!baseUrl) {
     return null;
   }
@@ -2519,6 +3416,23 @@ function buildUnderparWorkspaceBlondieDeeplinkBaseUrl(markerValue = "") {
   url.hash = "";
   url.searchParams.set(UNDERPAR_ESM_DEEPLINK_MARKER_PARAM, normalizedMarkerValue);
   return url;
+}
+
+function getUnderparWorkspaceBlondieDeeplinkRuntimeBaseUrl() {
+  let baseUrl = "";
+  try {
+    baseUrl = normalizeSlackOpenIdRedirectUri(chrome?.identity?.getRedirectURL?.(""));
+  } catch (_error) {
+    baseUrl = "";
+  }
+  if (baseUrl) {
+    return baseUrl;
+  }
+  const runtimeId = String(chrome?.runtime?.id || "").trim();
+  if (!runtimeId) {
+    return "";
+  }
+  return normalizeSlackOpenIdRedirectUri(`https://${runtimeId}.chromiumapp.org/`);
 }
 
 function buildUnderparEsmBlondieDeeplinkPayload(exportPayload = null) {
@@ -2836,6 +3750,16 @@ function buildUnderparBlondieCsvTitle(exportPayload = null) {
   return title.slice(0, 160) || "UnderPAR export";
 }
 
+function normalizeUnderparBlondieDeliveryTarget(input = null) {
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const mode = String(source.mode || "").trim().toLowerCase() === "teammate" ? "teammate" : "self";
+  return {
+    mode,
+    userId: normalizeSlackUserId(source.userId || source.user_id || ""),
+    userName: normalizeSlackDisplayName(source.userName || source.user_name || source.label || ""),
+  };
+}
+
 function buildUnderparBlondieCsvFileName(exportPayload = null) {
   const payload = normalizeUnderparBlondieExportPayload(exportPayload);
   const explicitFileName = String(payload?.csvFileName || "").trim();
@@ -3000,7 +3924,7 @@ function buildUnderparDegradationBlondieMarkdown(payload = null) {
   const requestLineValue = formatUnderparBlondieHeaderRequestValue(normalizedPayload);
   const workspaceDeeplinkUrl = buildUnderparBlondieWorkspaceDeeplinkUrl(normalizedPayload);
   const scopeLabel = buildUnderparDegradationBlondieScopeLabel(normalizedPayload);
-  const headerLines = [`*UNDERPAR ${escapeUnderparSlackMrkdwn(normalizedPayload.workspaceLabel)} results*`];
+  const headerLines = [buildUnderparBlondieHeaderLine(normalizedPayload)];
   if (scopeLabel) {
     headerLines.push(`Scope: ${escapeUnderparSlackMrkdwn(scopeLabel)}`);
   }
@@ -3049,9 +3973,7 @@ function buildUnderparBlondieMarkdown(exportPayload = null) {
   }
   const requestLineValue = formatUnderparBlondieHeaderRequestValue(payload);
   const workspaceDeeplinkUrl = buildUnderparBlondieWorkspaceDeeplinkUrl(payload);
-  const headerLines = [
-    `*UNDERPAR ${escapeUnderparSlackMrkdwn(payload.workspaceLabel)} query*`,
-  ];
+  const headerLines = [buildUnderparBlondieHeaderLine(payload)];
   if (requestLineValue) {
     headerLines.push(`• Request: ${escapeUnderparSlackMrkdwn(requestLineValue)}`);
   }
@@ -3059,6 +3981,17 @@ function buildUnderparBlondieMarkdown(exportPayload = null) {
 
   const signatureLine = buildUnderparBlondieSignatureLine(payload, workspaceDeeplinkUrl);
   return headerLines.concat(["", signatureLine]).join("\n").trim().slice(0, UNDERPAR_BLONDIE_EXPORT_MAX_MESSAGE_CHARS);
+}
+
+function applyUnderparBlondieDeliveryEnvelope(markdownText = "", record = null, deliveryTarget = null, noteText = "") {
+  const normalizedText = String(markdownText || "").trim();
+  if (!normalizedText) {
+    return "";
+  }
+  const normalizedNote = convertUnderparBlondieNoteToMrkdwn(noteText);
+  return normalizedNote
+    ? `${normalizedNote}\n${normalizedText}`.slice(0, UNDERPAR_BLONDIE_EXPORT_MAX_MESSAGE_CHARS)
+    : normalizedText;
 }
 
 function normalizePendingUnderparEsmDeeplinkPayload(input = null) {
@@ -3108,7 +4041,7 @@ async function clearPendingUnderparEsmDeeplink() {
   await chrome.storage.local.remove(UNDERPAR_ESM_DEEPLINK_STORAGE_KEY).catch(() => {});
 }
 
-async function resolveUnderparBlondieDeliveryChannel(record = null) {
+function resolveUnderparBlondieDeliveryRecipient(record = null, deliveryTarget = null) {
   const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
   if (!normalizedRecord?.ready || !normalizedRecord?.identity?.userId) {
     return {
@@ -3118,22 +4051,54 @@ async function resolveUnderparBlondieDeliveryChannel(record = null) {
     };
   }
 
-  const userId = normalizeSlackUserId(normalizedRecord.identity.userId);
-  const tokenCandidates = [
-    normalizeSlackApiToken(normalizedRecord.api.botToken || ""),
-    normalizeSlackApiToken(normalizedRecord.api.userToken || ""),
-    normalizeSlackApiToken(normalizedRecord.api.oauthToken || ""),
-  ].filter(Boolean);
+  const normalizedTarget = normalizeUnderparBlondieDeliveryTarget(deliveryTarget);
+  const selfUserId = normalizeSlackUserId(normalizedRecord.identity.userId);
+  if (normalizedTarget.mode === "teammate" && normalizedTarget.userId && normalizedTarget.userId !== selfUserId) {
+    const shareTarget = buildUnderparPassTransitionShareTargets(normalizedRecord).find(
+      (entry) => normalizeSlackUserId(entry?.userId || "") === normalizedTarget.userId
+    );
+    return {
+      ok: true,
+      targetMode: "teammate",
+      userId: normalizedTarget.userId,
+      recipientLabel: firstNonEmptyString([normalizedTarget.userName, shareTarget?.label, normalizedTarget.userId]),
+    };
+  }
+  return {
+    ok: true,
+    targetMode: "self",
+    userId: selfUserId,
+    recipientLabel: firstNonEmptyString([
+      normalizedRecord.identity.userName,
+      normalizedRecord.identity.email,
+      normalizedRecord.identity.userId,
+    ]),
+  };
+}
 
-  const uniqueTokens = [];
-  tokenCandidates.forEach((token) => {
-    if (!uniqueTokens.includes(token)) {
-      uniqueTokens.push(token);
-    }
-  });
-  for (const token of uniqueTokens) {
+async function resolveUnderparBlondieDeliveryChannel(record = null, options = {}) {
+  const normalizedRecord = normalizeUnderparVaultSlacktivationRecord(record);
+  const recipientResult = resolveUnderparBlondieDeliveryRecipient(normalizedRecord, options?.deliveryTarget || null);
+  if (!recipientResult.ok) {
+    return recipientResult;
+  }
+
+  const requireUserDirectMessage = options?.requireUserDirectMessage === true;
+  const tokenCandidates = requireUserDirectMessage
+    ? buildUnderparSlacktivationUserApiTokenCandidates(normalizedRecord)
+    : buildUnderparSlacktivationApiTokenCandidates(normalizedRecord, {
+        preferUser: recipientResult.targetMode === "teammate",
+      });
+  if (requireUserDirectMessage && tokenCandidates.length === 0) {
+    return {
+      ok: false,
+      code: "slack_user_token_missing",
+      error: "A SLACKTIVATED Slack user token is required to DM a pass-transition teammate from UnderPAR.",
+    };
+  }
+  for (const token of tokenCandidates) {
     const openResult = await postSlackApiWithBearerToken(SLACKTIVATION_API_ORIGIN, "/api/conversations.open", {
-      users: userId,
+      users: recipientResult.userId,
       return_im: "true",
       _x_reason: "underpar-blondie-open-dm",
     }, token);
@@ -3150,14 +4115,17 @@ async function resolveUnderparBlondieDeliveryChannel(record = null) {
       ok: true,
       channelId,
       token,
-      deliveryMode: isSlackBotApiToken(token) ? "bot_direct_channel" : "user_direct_channel",
+      deliveryMode: requireUserDirectMessage || !isSlackBotApiToken(token) ? "user_direct_channel" : "bot_direct_channel",
+      targetMode: recipientResult.targetMode,
+      recipientLabel: recipientResult.recipientLabel,
+      cacheDirectChannel: recipientResult.targetMode === "self",
     };
   }
 
   return {
     ok: false,
     code: "slack_direct_channel_unavailable",
-    error: "Unable to open your ZipTool panel conversation in Slack.",
+    error: "Unable to open a Slack direct message for this :blondiebtn: delivery.",
   };
 }
 
@@ -3171,6 +4139,8 @@ async function sendUnderparBlondieExportToSlack(exportPayload = null, options = 
   }
 
   return enqueuePassVaultPersist(async () => {
+    const deliveryTarget = normalizeUnderparBlondieDeliveryTarget(options?.deliveryTarget || null);
+    const requiresUserDirectMessage = deliveryTarget.mode === "teammate";
     const vault = normalizeUnderparVaultPayload(state.passVault || (await ensurePassVaultLoaded({ forceReload: false })));
     const existingRecord = getUnderparVaultSlacktivationRecord(vault);
     if (!existingRecord) {
@@ -3209,8 +4179,41 @@ async function sendUnderparBlondieExportToSlack(exportPayload = null, options = 
       };
     }
 
-    const readyRecord = authResult.record;
-    const channelResult = await resolveUnderparBlondieDeliveryChannel(readyRecord);
+    let readyRecord = authResult.record;
+    if (deliveryTarget.mode === "teammate") {
+      const rosterResult = await ensureUnderparPassTransitionRoster(readyRecord, {
+        force: false,
+      }).catch((error) => ({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+        record: readyRecord,
+      }));
+      readyRecord = rosterResult?.record || readyRecord;
+      if (!rosterResult?.ok && buildUnderparPassTransitionShareTargets(readyRecord).length === 0) {
+        const failedRecord = mergeUnderparSlacktivationRecord(readyRecord, {
+          ready: true,
+          updatedAt: Date.now(),
+          lastError: buildUnderparSlacktivationErrorRecord(
+            rosterResult?.code || "slack_channel_members_unavailable",
+            rosterResult?.error || `Unable to read ${UNDERPAR_PASS_TRANSITION_CHANNEL_NAME} members from Slack.`
+          ),
+        });
+        setUnderparVaultSlacktivationRecord(vault, failedRecord);
+        vault.updatedAt = Date.now();
+        await persistPassVaultPayloadToStorage(vault, { silent: true });
+        return {
+          ok: false,
+          error:
+            rosterResult?.error ||
+            `No ${UNDERPAR_PASS_TRANSITION_CHANNEL_NAME} roster is cached yet. Re-SLACKTIVATE UnderPAR in the VAULT.`,
+        };
+      }
+    }
+
+    const channelResult = await resolveUnderparBlondieDeliveryChannel(readyRecord, {
+      deliveryTarget,
+      requireUserDirectMessage: requiresUserDirectMessage,
+    });
     if (!channelResult.ok) {
       const failedRecord = mergeUnderparSlacktivationRecord(readyRecord, {
         ready: true,
@@ -3222,25 +4225,39 @@ async function sendUnderparBlondieExportToSlack(exportPayload = null, options = 
       await persistPassVaultPayloadToStorage(vault, { silent: true });
       return {
         ok: false,
-        error: channelResult.error || "Unable to open your ZipTool panel conversation in Slack.",
+        error: channelResult.error || "Unable to open a Slack direct message for this :blondiebtn: delivery.",
       };
     }
 
-    const markdownText = buildUnderparBlondieMarkdown(normalizedExport);
+    const effectiveDeliveryTarget =
+      channelResult.targetMode === "teammate" ? deliveryTarget : { mode: "self" };
+    const deliveryActionTokens = buildUnderparBlondieDeliveryActionTokenCandidates(readyRecord, channelResult);
+    const markdownText = applyUnderparBlondieDeliveryEnvelope(
+      buildUnderparBlondieMarkdown(normalizedExport),
+      readyRecord,
+      effectiveDeliveryTarget,
+      options?.noteText || ""
+    );
     if (!underparBlondiePayloadRequiresCsvAttachment(normalizedExport)) {
-      const messageResult = await postSlackApiWithBearerToken(
-        SLACKTIVATION_API_ORIGIN,
-        "/api/chat.postMessage",
-        {
-          channel: channelResult.channelId,
-          text: markdownText,
-          mrkdwn: true,
-          unfurl_links: false,
-          unfurl_media: false,
-          _x_reason: "underpar-blondie-post-message",
-        },
-        channelResult.token
-      );
+      let messageResult = null;
+      for (const deliveryToken of deliveryActionTokens) {
+        messageResult = await postSlackApiWithBearerToken(
+          SLACKTIVATION_API_ORIGIN,
+          "/api/chat.postMessage",
+          {
+            channel: channelResult.channelId,
+            text: markdownText,
+            mrkdwn: true,
+            unfurl_links: false,
+            unfurl_media: false,
+            _x_reason: "underpar-blondie-post-message",
+          },
+          deliveryToken
+        );
+        if (messageResult?.ok) {
+          break;
+        }
+      }
       if (!messageResult.ok) {
         const failedRecord = mergeUnderparSlacktivationRecord(readyRecord, {
           ready: true,
@@ -3259,14 +4276,15 @@ async function sendUnderparBlondieExportToSlack(exportPayload = null, options = 
         };
       }
 
+      const identityPatch = {
+        ready: true,
+        updatedAt: Date.now(),
+        ...(channelResult.cacheDirectChannel ? { directChannelId: channelResult.channelId } : {}),
+      };
       const nextRecord = mergeUnderparSlacktivationRecord(readyRecord, {
         ready: true,
         updatedAt: Date.now(),
-        identity: buildUnderparSlacktivationIdentityRecord(readyRecord.identity || null, {
-          ready: true,
-          directChannelId: channelResult.channelId,
-          updatedAt: Date.now(),
-        }),
+        identity: buildUnderparSlacktivationIdentityRecord(readyRecord.identity || null, identityPatch),
         lastError: null,
       });
       setUnderparVaultSlacktivationRecord(vault, nextRecord);
@@ -3275,6 +4293,8 @@ async function sendUnderparBlondieExportToSlack(exportPayload = null, options = 
       return {
         ok: true,
         delivery_mode: channelResult.deliveryMode,
+        delivery_target_mode: channelResult.targetMode,
+        recipient_label: channelResult.recipientLabel,
         message_only: true,
         report_count: Math.max(0, Number(normalizedExport.reportCount || normalizedExport.reportItems.length || 0)),
         workspace_label: normalizedExport.workspaceLabel,
@@ -3284,16 +4304,22 @@ async function sendUnderparBlondieExportToSlack(exportPayload = null, options = 
     const csvText = buildUnderparBlondieCsvText(normalizedExport);
     const csvFileName = buildUnderparBlondieCsvFileName(normalizedExport);
     const csvTitle = buildUnderparBlondieCsvTitle(normalizedExport);
-    const uploadResult = await uploadSlackExternalFileWithBearerToken({
-      token: channelResult.token,
-      channelId: channelResult.channelId,
-      fileName: csvFileName,
-      title: csvTitle,
-      initialComment: markdownText,
-      text: csvText,
-      contentType: "text/csv;charset=utf-8",
-      snippetType: "csv",
-    });
+    let uploadResult = null;
+    for (const deliveryToken of deliveryActionTokens) {
+      uploadResult = await uploadSlackExternalFileWithBearerToken({
+        token: deliveryToken,
+        channelId: channelResult.channelId,
+        fileName: csvFileName,
+        title: csvTitle,
+        initialComment: markdownText,
+        text: csvText,
+        contentType: "text/csv;charset=utf-8",
+        snippetType: "csv",
+      });
+      if (uploadResult?.ok) {
+        break;
+      }
+    }
 
     if (!uploadResult.ok) {
       const failedRecord = mergeUnderparSlacktivationRecord(readyRecord, {
@@ -3313,14 +4339,15 @@ async function sendUnderparBlondieExportToSlack(exportPayload = null, options = 
       };
     }
 
+    const identityPatch = {
+      ready: true,
+      updatedAt: Date.now(),
+      ...(channelResult.cacheDirectChannel ? { directChannelId: channelResult.channelId } : {}),
+    };
     const nextRecord = mergeUnderparSlacktivationRecord(readyRecord, {
       ready: true,
       updatedAt: Date.now(),
-      identity: buildUnderparSlacktivationIdentityRecord(readyRecord.identity || null, {
-        ready: true,
-        directChannelId: channelResult.channelId,
-        updatedAt: Date.now(),
-      }),
+      identity: buildUnderparSlacktivationIdentityRecord(readyRecord.identity || null, identityPatch),
       lastError: null,
     });
     setUnderparVaultSlacktivationRecord(vault, nextRecord);
@@ -3329,6 +4356,8 @@ async function sendUnderparBlondieExportToSlack(exportPayload = null, options = 
     return {
       ok: true,
       delivery_mode: channelResult.deliveryMode,
+      delivery_target_mode: channelResult.targetMode,
+      recipient_label: channelResult.recipientLabel,
       file_name: csvFileName,
       row_count: normalizedExport.rowCount,
       workspace_label: normalizedExport.workspaceLabel,
@@ -3364,6 +4393,8 @@ async function sendUnderparBlondieExportBatchToSlack(exportPayloads = [], option
     }
     const sendResult = await sendUnderparBlondieExportToSlack(exportPayload, {
       interactive: options?.interactive === true,
+      deliveryTarget: options?.deliveryTarget || null,
+      noteText: options?.noteText || "",
     });
     if (!sendResult?.ok) {
       failedCount += 1;
@@ -4805,8 +5836,12 @@ function buildPassVaultServiceGuids(serviceKey = "", premiumServicesSnapshot = n
     );
   }
   if (serviceKey === "esm") {
-    const guid = String(premiumServicesSnapshot?.esm?.guid || "").trim();
-    return guid ? [guid] : [];
+    const apps = collectEsmAppCandidatesFromPremiumApps(premiumServicesSnapshot);
+    return uniqueSorted(
+      apps
+        .map((appInfo) => String(appInfo?.guid || "").trim())
+        .filter(Boolean)
+    );
   }
   if (serviceKey === "degradation") {
     const apps = Array.isArray(premiumServicesSnapshot?.degradationApps)
@@ -5218,7 +6253,15 @@ async function slacktivateUnderparFromDevtools(zipKeyText = "") {
       throw new Error(authResult.error || "Unable to Slacktivate UnderPAR.");
     }
 
-    setUnderparVaultSlacktivationRecord(vault, authResult.record);
+    const rosterResult = await ensureUnderparPassTransitionRoster(authResult.record, {
+      force: true,
+    }).catch((error) => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      record: authResult.record,
+    }));
+    const readyRecord = rosterResult?.record || authResult.record;
+    setUnderparVaultSlacktivationRecord(vault, readyRecord);
     vault.updatedAt = Date.now();
     await persistPassVaultPayloadToStorage(vault, { silent: true });
     broadcastSlacktivationWorkspaceState("slacktivation-ready");
@@ -5260,7 +6303,15 @@ async function refreshUnderparSlacktivationFromDevtools(options = {}) {
       broadcastSlacktivationWorkspaceState("slacktivation-refresh-failed");
       throw new Error(authResult.error || "Unable to refresh Slacktivation.");
     }
-    setUnderparVaultSlacktivationRecord(vault, authResult.record);
+    const rosterResult = await ensureUnderparPassTransitionRoster(authResult.record, {
+      force: true,
+    }).catch((error) => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      record: authResult.record,
+    }));
+    const readyRecord = rosterResult?.record || authResult.record;
+    setUnderparVaultSlacktivationRecord(vault, readyRecord);
     vault.updatedAt = Date.now();
     await persistPassVaultPayloadToStorage(vault, { silent: true });
     broadcastSlacktivationWorkspaceState("slacktivation-refresh");
@@ -5792,18 +6843,17 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   const degradationApps = getPassVaultServiceAppGuidsFromRecord(record, "degradation")
     .map((guid) => resolveAppInfo(guid))
     .filter(Boolean);
-  const esmApp = selectPrimaryApp(
-    "esm",
-    getPassVaultServiceAppGuidsFromRecord(record, "esm")
-      .map((guid) => resolveAppInfo(guid))
-      .filter(Boolean)
-  );
+  const esmApps = getPassVaultServiceAppGuidsFromRecord(record, "esm")
+    .map((guid) => resolveAppInfo(guid))
+    .filter(Boolean);
+  const esmApp = selectPrimaryApp("esm", esmApps);
   const cmServiceSnapshot = buildPassVaultRuntimeCmServiceSnapshot(record);
 
   return {
     restV2: selectPrimaryApp("restV2", restV2Apps),
     restV2Apps,
     esm: esmApp,
+    esmApps,
     degradation: selectPrimaryApp("degradation", degradationApps),
     degradationApps,
     cm: cmServiceSnapshot,
@@ -6058,6 +7108,41 @@ function resolvePremiumServiceKeyForAuth(appInfo = null, debugMeta = null) {
   return "";
 }
 
+function collectEsmAppCandidatesFromPremiumApps(premiumApps = null, fallbackAppInfo = null) {
+  const candidates = [];
+  const seen = new Set();
+  const pushCandidate = (appInfo) => {
+    const guid = String(appInfo?.guid || "").trim();
+    if (!guid || seen.has(guid)) {
+      return;
+    }
+    seen.add(guid);
+    candidates.push(appInfo);
+  };
+  pushCandidate(fallbackAppInfo);
+  if (Array.isArray(premiumApps?.esmApps)) {
+    premiumApps.esmApps.forEach((appInfo) => pushCandidate(appInfo));
+  }
+  pushCandidate(premiumApps?.esm || null);
+  return candidates;
+}
+
+function selectPreferredEsmAppForRequestor(esmApps = [], requestorId = "", programmerId = "") {
+  const candidates = Array.isArray(esmApps) ? esmApps.filter((item) => item?.guid) : [];
+  if (candidates.length === 0) {
+    return null;
+  }
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (normalizedRequestorId) {
+    const mapped = candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) || null;
+    if (mapped) {
+      return mapped;
+    }
+  }
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 function resolveLatestPremiumServiceAppInfo(programmerId = "", fallbackAppInfo = null, debugMeta = null) {
   const normalizedProgrammerId = String(programmerId || "").trim();
   if (!normalizedProgrammerId) {
@@ -6078,7 +7163,12 @@ function resolveLatestPremiumServiceAppInfo(programmerId = "", fallbackAppInfo =
   }
 
   if (serviceKey === "esm") {
-    return hasEsmScopedApp(services) ? services.esm || fallbackAppInfo : fallbackAppInfo;
+    const requestorId = String(debugMeta?.requestorId || "").trim();
+    const candidates = collectEsmAppCandidatesFromPremiumApps(services, fallbackAppInfo);
+    return (
+      selectPreferredEsmAppForRequestor(candidates, requestorId, normalizedProgrammerId) ||
+      (hasEsmScopedApp(services) ? services.esm || fallbackAppInfo : fallbackAppInfo)
+    );
   }
 
   if (serviceKey === "restV2") {
@@ -6134,8 +7224,11 @@ function dropPremiumServiceAppFromResolvedServices(services = null, serviceKey =
   }
 
   if (normalizedServiceKey === "esm") {
+    services.esmApps = (Array.isArray(services.esmApps) ? services.esmApps : []).filter(
+      (appInfo) => String(appInfo?.guid || "").trim() !== normalizedGuid
+    );
     if (String(services?.esm?.guid || "").trim() === normalizedGuid) {
-      services.esm = null;
+      services.esm = services.esmApps[0] || null;
     }
     return;
   }
@@ -6305,10 +7398,14 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
   const resolvedServices = {
     ...(services && typeof services === "object" ? services : {}),
     restV2Apps: Array.isArray(services?.restV2Apps) ? services.restV2Apps.filter((appInfo) => appInfo?.guid) : [],
+    esmApps: Array.isArray(services?.esmApps) ? services.esmApps.filter((appInfo) => appInfo?.guid) : [],
     degradationApps: Array.isArray(services?.degradationApps) ? services.degradationApps.filter((appInfo) => appInfo?.guid) : [],
   };
   if (resolvedServices.degradation?.guid && resolvedServices.degradationApps.every((appInfo) => appInfo?.guid !== resolvedServices.degradation.guid)) {
     resolvedServices.degradationApps.push(resolvedServices.degradation);
+  }
+  if (resolvedServices.esm?.guid && resolvedServices.esmApps.every((appInfo) => appInfo?.guid !== resolvedServices.esm.guid)) {
+    resolvedServices.esmApps.push(resolvedServices.esm);
   }
   if (resolvedServices.restV2?.guid && resolvedServices.restV2Apps.every((appInfo) => appInfo?.guid !== resolvedServices.restV2.guid)) {
     resolvedServices.restV2Apps.push(resolvedServices.restV2);
@@ -6369,6 +7466,7 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
 
   const forceRefresh = options?.forceRefresh === true;
   const requestTimeoutMs = Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS));
+  const preferredRequestorId = String(options?.requestorId || "").trim();
   const appAdvertisesServiceScope = (serviceKey, appInfo) => {
     const requiredScope = normalizeScope(getPassVaultRequiredScopeForService(serviceKey, appInfo));
     if (!requiredScope) {
@@ -6400,8 +7498,20 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
       resolvedServices.degradation = resolvedServices.degradationApps[0] || null;
       return;
     }
-    if (serviceKey === "esm" && !resolvedServices.esm?.guid) {
-      resolvedServices.esm = appInfo;
+    if (serviceKey === "esm") {
+      if (resolvedServices.esmApps.every((entry) => entry?.guid !== appInfo.guid)) {
+        resolvedServices.esmApps.push(appInfo);
+      }
+      const preferredEsmApp = selectPreferredEsmAppForRequestor(
+        collectEsmAppCandidatesFromPremiumApps(resolvedServices),
+        preferredRequestorId,
+        programmer.programmerId
+      );
+      if (preferredEsmApp?.guid) {
+        resolvedServices.esm = preferredEsmApp;
+      } else if (!resolvedServices.esm?.guid) {
+        resolvedServices.esm = appInfo;
+      }
     }
   };
 
@@ -6531,6 +7641,17 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
       ...(baseScopes.length > 0 ? { scopes: baseScopes.slice(), scope: baseScopes.join(" ") } : {}),
       __underparScopeHydratedAt: Date.now(),
     };
+  }
+
+  const preferredEsmApp = selectPreferredEsmAppForRequestor(
+    collectEsmAppCandidatesFromPremiumApps(resolvedServices),
+    preferredRequestorId,
+    programmer.programmerId
+  );
+  if (preferredEsmApp?.guid) {
+    resolvedServices.esm = preferredEsmApp;
+  } else if (!resolvedServices.esm?.guid && resolvedServices.esmApps[0]?.guid) {
+    resolvedServices.esm = resolvedServices.esmApps[0];
   }
 
   setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, applicationsSnapshot);
@@ -6757,6 +7878,12 @@ function applyPassVaultRecordToRuntime(programmer, record = null, options = {}) 
       ? cloneJsonLikeValue(premiumServicesSnapshot.cm, null)
       : null;
   collectRestV2AppCandidatesFromPremiumApps(premiumServicesSnapshot).forEach((appInfo) => {
+    markPassVaultBackedValue(appInfo, record);
+    if (appInfo?.appData && typeof appInfo.appData === "object") {
+      markPassVaultBackedValue(appInfo.appData, record);
+    }
+  });
+  collectEsmAppCandidatesFromPremiumApps(premiumServicesSnapshot).forEach((appInfo) => {
     markPassVaultBackedValue(appInfo, record);
     if (appInfo?.appData && typeof appInfo.appData === "object") {
       markPassVaultBackedValue(appInfo.appData, record);
@@ -29564,6 +30691,8 @@ async function handleEsmWorkspaceWorkspaceAction(message, sender = null) {
     );
     return await sendUnderparBlondieExportToSlack(exportPayload, {
       interactive: true,
+      deliveryTarget: message?.deliveryTarget || null,
+      noteText: message?.noteText || "",
     });
   }
 
@@ -33736,6 +34865,8 @@ async function handleCmWorkspaceAction(message, sender = null) {
     );
     return await sendUnderparBlondieExportToSlack(exportPayload, {
       interactive: true,
+      deliveryTarget: message?.deliveryTarget || null,
+      noteText: message?.noteText || "",
     });
   }
 
@@ -35633,6 +36764,8 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
     );
     return await sendUnderparBlondieExportToSlack(exportPayload, {
       interactive: true,
+      deliveryTarget: message?.deliveryTarget || null,
+      noteText: message?.noteText || "",
     });
   }
 
@@ -36883,6 +38016,8 @@ async function handleDegradationWorkspaceAction(message, sender = null) {
     if (message?.exportPayload) {
       return await sendUnderparBlondieExportToSlack(message.exportPayload, {
         interactive: true,
+        deliveryTarget: message?.deliveryTarget || null,
+        noteText: message?.noteText || "",
       });
     }
 
@@ -36890,6 +38025,8 @@ async function handleDegradationWorkspaceAction(message, sender = null) {
     if (exportPayloads.length > 0) {
       return await sendUnderparBlondieExportBatchToSlack(exportPayloads, {
         interactive: true,
+        deliveryTarget: message?.deliveryTarget || null,
+        noteText: message?.noteText || "",
         emptyError: "No visible DEGRADATION reports were available for :blondiebtn:.",
         genericError: "Unable to deliver DEGRADATION reports with :blondiebtn:.",
       });
@@ -36903,6 +38040,8 @@ async function handleDegradationWorkspaceAction(message, sender = null) {
   if (action === "blondie-export") {
     return await sendUnderparBlondieExportToSlack(message?.exportPayload || null, {
       interactive: true,
+      deliveryTarget: message?.deliveryTarget || null,
+      noteText: message?.noteText || "",
     });
   }
 
@@ -52461,11 +53600,12 @@ function getRuntimePremiumServicesSeed(programmerId = "") {
   return markPassVaultBackedValue(buildPassVaultRuntimeServicesSnapshot(record), record);
 }
 
-async function recoverEsmServiceSelection(programmerId = "") {
+async function recoverEsmServiceSelection(programmerId = "", options = {}) {
   const normalizedProgrammerId = String(programmerId || "").trim();
   if (!normalizedProgrammerId) {
     return null;
   }
+  const preferredRequestorId = String(options?.requestorId || "").trim();
   const programmer =
     state.programmers.find((item) => String(item?.programmerId || "").trim() === normalizedProgrammerId) || null;
   if (!programmer) {
@@ -52474,6 +53614,7 @@ async function recoverEsmServiceSelection(programmerId = "") {
 
   const compileResult = await queuePassVaultProgrammerCompilation(programmer, getRuntimePremiumServicesSeed(normalizedProgrammerId), {
     forceRefresh: true,
+    requestorId: preferredRequestorId,
   });
   const services = compileResult?.services || getCurrentPremiumAppsSnapshot(normalizedProgrammerId) || null;
   if (services) {
@@ -52488,7 +53629,13 @@ async function recoverEsmServiceSelection(programmerId = "") {
   return {
     programmer,
     services,
-    appInfo: hasEsmScopedApp(services) ? services.esm : null,
+    appInfo:
+      selectPreferredEsmAppForRequestor(
+        collectEsmAppCandidatesFromPremiumApps(services),
+        preferredRequestorId,
+        normalizedProgrammerId
+      ) ||
+      (hasEsmScopedApp(services) ? services.esm : null),
   };
 }
 
@@ -52506,7 +53653,9 @@ async function ensureDcrAccessTokenWithEsmRecovery(programmerId, appInfo, forceR
     if (!shouldAttemptEsmServiceRecovery(error, debugMeta)) {
       throw error;
     }
-    const recovered = await recoverEsmServiceSelection(programmerId);
+    const recovered = await recoverEsmServiceSelection(programmerId, {
+      requestorId: String(debugMeta?.requestorId || "").trim(),
+    });
     const recoveredAppInfo = recovered?.appInfo || null;
     if (!recoveredAppInfo?.guid) {
       throw error;
@@ -52665,7 +53814,9 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
     if (isServiceProviderTokenMismatchError(bodyText)) {
       return response;
     }
-    const recovered = await recoverEsmServiceSelection(programmerId).catch(() => null);
+    const recovered = await recoverEsmServiceSelection(programmerId, {
+      requestorId: String(debugMeta?.requestorId || "").trim(),
+    }).catch(() => null);
     const recoveredAppInfo = recovered?.appInfo || null;
     if (recoveredAppInfo?.guid && String(recoveredAppInfo.guid || "").trim() !== String(resolvedAppInfo?.guid || "").trim()) {
       emitRestV2DebugEvent(debugFlowId, {
