@@ -9,6 +9,10 @@
   </head>
   <body>
     <main id="workspace-app-root" class="workspace-app">
+      <section id="workspace-lock-banner" class="workspace-lock-banner" role="alert" aria-live="assertive" hidden>
+        <p id="workspace-lock-message" class="workspace-lock-message"></p>
+      </section>
+
       <header class="workspace-header">
         <div class="workspace-title-wrap">
           <div class="workspace-title-row">
@@ -48,16 +52,11 @@
               aria-haspopup="dialog"
               aria-expanded="false"
               aria-controls="workspace-blondie-time-picker"
-              data-blondie-time-state="inactive"
+              data-blondie-time-state="notslacktivated"
               data-blondie-time-mode="self"
             >
               <span class="workspace-blondie-time-plate workspace-blondie-time-plate--base" aria-hidden="true"></span>
               <span class="workspace-blondie-time-plate workspace-blondie-time-plate--overlay" aria-hidden="true"></span>
-              <span class="workspace-blondie-time-copy" aria-hidden="true">
-                <span class="workspace-blondie-time-wordmark">Blondie</span>
-                <span class="workspace-blondie-time-subtitle">TIME</span>
-              </span>
-              <span id="workspace-blondie-time-countdown" class="workspace-blondie-time-countdown" aria-hidden="true"></span>
             </button>
             <button
               id="workspace-blondie-time-stop"
@@ -77,18 +76,12 @@
               aria-label="Set Blondie Time repeat interval"
               hidden
             >
-              <p class="workspace-blondie-time-picker-eyebrow">Blondie Time</p>
-              <p class="workspace-blondie-time-picker-title">Choose the repeat interval</p>
-              <p id="workspace-blondie-time-picker-hint" class="workspace-blondie-time-picker-hint">
-                Click repeats every open report card to your Slack DM.
-              </p>
               <div class="workspace-blondie-time-chip-row" role="group" aria-label="Repeat interval">
-                <button type="button" class="workspace-blondie-time-chip" data-minutes="2">2 min</button>
-                <button type="button" class="workspace-blondie-time-chip" data-minutes="5">5 min</button>
-                <button type="button" class="workspace-blondie-time-chip" data-minutes="10">10 min</button>
-                <button type="button" class="workspace-blondie-time-chip" data-minutes="15">15 min</button>
+                <button type="button" class="workspace-blondie-time-chip" data-minutes="2" aria-label="Repeat every 2 minutes">2m</button>
+                <button type="button" class="workspace-blondie-time-chip" data-minutes="5" aria-label="Repeat every 5 minutes">5m</button>
+                <button type="button" class="workspace-blondie-time-chip" data-minutes="10" aria-label="Repeat every 10 minutes">10m</button>
+                <button type="button" class="workspace-blondie-time-chip" data-minutes="15" aria-label="Repeat every 15 minutes">15m</button>
               </div>
-              <p class="workspace-blondie-time-picker-meta">Esc cancels. The X kill switch appears after the first lap starts.</p>
             </div>
           </div>
           <span id="page-env-badge" class="page-env-badge" aria-label="Data Environment" title="Data Environment">
@@ -142,10 +135,6 @@
       </header>
 
       <p id="workspace-status" class="workspace-status" aria-live="polite" hidden></p>
-      <section id="workspace-lock-banner" class="workspace-lock-banner" hidden>
-        <p id="workspace-lock-message" class="workspace-lock-message"></p>
-      </section>
-
       <section id="workspace-cards" class="workspace-cards"></section>
     </main>
     <script src="underpar-environment.js"></script>

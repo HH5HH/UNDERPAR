@@ -190,8 +190,6 @@ const els = {
   blondieTimeButton: document.getElementById("workspace-blondie-time"),
   blondieTimeStopButton: document.getElementById("workspace-blondie-time-stop"),
   blondieTimePicker: document.getElementById("workspace-blondie-time-picker"),
-  blondieTimePickerHint: document.getElementById("workspace-blondie-time-picker-hint"),
-  blondieTimeCountdown: document.getElementById("workspace-blondie-time-countdown"),
 };
 
 let workspaceStylesheetTextCache = "";
@@ -2383,6 +2381,10 @@ function isBlondieTimeActiveForCurrentWorkspace(runtimeState = null) {
 }
 
 function getBlondieTimeStartDisabledReason() {
+  const runtimeState = getCurrentBlondieTimeRuntimeState();
+  if (runtimeState?.running && !isBlondieTimeOwnedByCurrentWorkspace(runtimeState)) {
+    return "Blondie Time is already armed in another ESM workspace window.";
+  }
   if (state.workspaceLocked) {
     return getWorkspaceLockMessage();
   }
@@ -2430,6 +2432,12 @@ function getBlondieTimeButtonTitle() {
   if (isBlondieTimeActiveForCurrentWorkspace(runtimeState)) {
     const remainingLabel = formatBlondieTimeRemaining(getBlondieTimeRemainingMs(runtimeState));
     const cadenceLabel = `${runtimeState.intervalMinutes} minute${runtimeState.intervalMinutes === 1 ? "" : "s"}`;
+    if (state.blondieTimeLapRunning) {
+      if (runtimeState.triggerMode === "teammate" && runtimeState.deliveryTarget?.userName) {
+        return `Blondie Time is firing the ${cadenceLabel} lap for ${runtimeState.deliveryTarget.userName}.`;
+      }
+      return `Blondie Time is firing the ${cadenceLabel} lap to your Slack DM.`;
+    }
     if (runtimeState.triggerMode === "teammate" && runtimeState.deliveryTarget?.userName) {
       return `Blondie Time repeats every ${cadenceLabel} to ${runtimeState.deliveryTarget.userName}. ${remainingLabel} until the next lap.`;
     }
@@ -2456,15 +2464,15 @@ function getBlondieTimeButtonTitle() {
 function getBlondieTimeVisualState() {
   const runtimeState = getCurrentBlondieTimeRuntimeState();
   if (isBlondieTimeActiveForCurrentWorkspace(runtimeState)) {
-    return "active";
+    return state.blondieTimeLapRunning ? "settime" : "active";
   }
   if (state.blondieTimePickerOpen) {
-    return "picker";
+    return "settime";
   }
   if (String(state.blondieTimeLocalWarning || "").trim()) {
     return "warn";
   }
-  return canArmBlondieTime() ? "ready" : "inactive";
+  return state.slackReady ? "slacktivated" : "notslacktivated";
 }
 
 function getBlondieTimePickerButtons() {
@@ -2491,9 +2499,7 @@ function stopBlondieTimeCountdownAnimation() {
   state.blondieTimeCountdownSecond = -1;
   if (els.blondieTimeButton) {
     els.blondieTimeButton.style.setProperty("--blondie-time-progress", "1");
-  }
-  if (els.blondieTimeCountdown) {
-    els.blondieTimeCountdown.textContent = "";
+    els.blondieTimeButton.style.setProperty("--blondie-time-reveal-turn", "0turn");
   }
 }
 
@@ -2508,12 +2514,10 @@ function updateBlondieTimeCountdownFrame() {
   const intervalMs = Math.max(1, Number(runtimeState.intervalMs || runtimeState.intervalMinutes * 60 * 1000 || 1));
   const progress = Math.max(0, Math.min(1, remainingMs / intervalMs));
   els.blondieTimeButton.style.setProperty("--blondie-time-progress", progress.toFixed(4));
+  els.blondieTimeButton.style.setProperty("--blondie-time-reveal-turn", `${(1 - progress).toFixed(4)}turn`);
   const nextSecond = Math.max(0, Math.ceil(remainingMs / 1000));
   if (nextSecond !== state.blondieTimeCountdownSecond) {
     state.blondieTimeCountdownSecond = nextSecond;
-    if (els.blondieTimeCountdown) {
-      els.blondieTimeCountdown.textContent = formatBlondieTimeRemaining(remainingMs);
-    }
     const title = getBlondieTimeButtonTitle();
     els.blondieTimeButton.title = title;
     els.blondieTimeButton.setAttribute("aria-label", title);
@@ -2616,12 +2620,6 @@ function renderBlondieTimeControl() {
   els.blondieTimeButton.setAttribute("aria-expanded", state.blondieTimePickerOpen ? "true" : "false");
   if (els.blondieTimePicker) {
     els.blondieTimePicker.hidden = !state.blondieTimePickerOpen;
-  }
-  if (els.blondieTimePickerHint) {
-    els.blondieTimePickerHint.textContent =
-      getBlondieTimePendingMode() === "teammate"
-        ? "Shift-click mode repeats every open report card to one pass-transition teammate after you pick the recipient."
-        : "Click mode repeats every open report card straight to your Slack DM.";
   }
   if (els.blondieTimeStopButton) {
     els.blondieTimeStopButton.hidden = !runningHere;
@@ -2873,20 +2871,25 @@ async function executeWorkspaceBlondieTimeLap(options = {}) {
   renderBlondieTimeControl();
   let deliveredCount = 0;
   let deliveredRowCount = 0;
+  let noteDelivered = false;
   const errors = [];
   try {
     for (const cardState of candidateCards) {
+      const noteTextForCard = noteDelivered ? "" : String(options?.noteText || "");
       const result = await deliverEsmCardToBlondie(cardState, {
         tableState: cardState.tableState,
         button: getCardBlondieButton(cardState),
         quiet: true,
         allowAckState: true,
         deliveryTarget,
-        noteText: options?.noteText || "",
+        noteText: noteTextForCard,
       });
       if (!result?.ok) {
         errors.push(result?.error || "Unable to deliver one of the Blondie report cards.");
         continue;
+      }
+      if (noteTextForCard) {
+        noteDelivered = true;
       }
       deliveredCount += 1;
       deliveredRowCount += Math.max(0, Number(result?.exportPayload?.rowCount || 0));
@@ -5130,7 +5133,6 @@ function applyControllerState(payload) {
 
   const previousProgrammerId = String(state.programmerId || "");
   const previousProgrammerName = String(state.programmerName || "");
-  const previousProgrammerKey = getProgrammerIdentityKey(previousProgrammerId, previousProgrammerName);
   const incomingProgrammerId = String(payload?.programmerId || "");
   const incomingProgrammerName = String(payload?.programmerName || "");
   const sameProgrammerIdentity = !hasProgrammerIdentityChanged(
@@ -5139,7 +5141,6 @@ function applyControllerState(payload) {
     incomingProgrammerId,
     incomingProgrammerName
   );
-  const controllerReason = String(payload?.controllerReason || "").trim().toLowerCase();
   const hasWorkspaceCards = hasWorkspaceCardContext();
   const replayCardsForSwitch = hasWorkspaceCards
     ? getWorkspaceReplayCardsFromCurrentState()
@@ -5257,25 +5258,16 @@ function applyControllerState(payload) {
     state.programmerSwitchLoadingKey = "";
     state.autoRerunInFlightProgrammerKey = "";
     if (hasWorkspaceCards) {
-      resetAllCardDistinctValueUniverses();
+      // Preserve the current replay snapshot, but clear live cards so the next
+      // ESM-capable context always rebuilds cleanly instead of reusing stale DOM.
+      state.workspaceReplayCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
+      clearWorkspaceCards({ preserveReplayContext: true });
     }
-    state.cardsById.forEach((cardState) => {
-      if (cardState) {
-        cardState.running = false;
-      }
-    });
     syncActionButtonsDisabled();
   }
   const currentProgrammerKey = getProgrammerIdentityKey(state.programmerId, state.programmerName);
-  const isMediaCompanySwitchReason =
-    !controllerReason || controllerReason === "media-company-change" || controllerReason === "programmer-change";
   const shouldTriggerWorkspaceRedraw =
-    replayCardsForSwitch.length > 0 &&
-    Boolean(currentProgrammerKey) &&
-    ((programmerChanged &&
-      Boolean(previousProgrammerKey) &&
-      isMediaCompanySwitchReason) ||
-      (environmentChanged && controllerReason === "environment-switch"));
+    replayCardsForSwitch.length > 0 && Boolean(currentProgrammerKey) && (programmerChanged || environmentChanged);
   if (shouldTriggerWorkspaceRedraw && currentProgrammerKey) {
     state.workspaceReplayCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
     state.pendingAutoRerunCards = cloneWorkspaceReplayCards(replayCardsForSwitch);
