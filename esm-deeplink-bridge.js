@@ -68,7 +68,8 @@ function parseUnderparEsmDeeplinkPayload() {
     environmentKey: String(params.get("environmentKey") || "").trim(),
     environmentLabel: String(params.get("environmentLabel") || "").trim(),
     source: String(params.get("source") || "blondie-button").trim() || "blondie-button",
-    createdAt: Number(params.get("createdAt") || Date.now() || 0),
+    // Queue freshness should be based on click time, not on when a saved HTML export was generated.
+    createdAt: Date.now(),
   };
 }
 

@@ -3999,6 +3999,33 @@ function wireCardHeaderQueryEditors(cardState) {
     teardownCardHeaderQueryEditors(cardState);
   };
 
+  const focusAndRevealDateTimeInput = (input) => {
+    if (!input) {
+      return;
+    }
+    try {
+      input.focus({ preventScroll: true });
+    } catch (_error) {
+      input.focus();
+    }
+    let pickerOpened = false;
+    try {
+      if (typeof input.showPicker === "function") {
+        input.showPicker();
+        pickerOpened = true;
+      }
+    } catch (_error) {
+      pickerOpened = false;
+    }
+    if (!pickerOpened) {
+      try {
+        input.click();
+      } catch (_error) {
+        // Ignore fallback click failures on browsers that suppress synthetic picker opens.
+      }
+    }
+  };
+
   const openEditor = (button, editor, input, key) => {
     if (!button || !editor || !input || !key) {
       return;
@@ -4022,17 +4049,13 @@ function wireCardHeaderQueryEditors(cardState) {
     };
     document.addEventListener("pointerdown", cardState.queryEditorOutsidePointerHandler, true);
     document.addEventListener("keydown", cardState.queryEditorOutsideKeyHandler, true);
-    try {
-      input.focus({ preventScroll: true });
-    } catch (_error) {
-      input.focus();
-    }
-    try {
-      if (typeof input.showPicker === "function") {
-        input.showPicker();
-      }
-    } catch (_error) {
-      // Ignore browsers that block programmatic picker display.
+    focusAndRevealDateTimeInput(input);
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        if (!editor.hidden && cardState.openQueryEditorKey === key) {
+          focusAndRevealDateTimeInput(input);
+        }
+      });
     }
   };
 

@@ -4133,7 +4133,7 @@ function buildUnderparBlondieMarkdown(exportPayload = null) {
 
 function buildUnderparBlondieReportLines(reportItems = [], payload = null) {
   const normalizedPayload = normalizeUnderparBlondieExportPayload(payload);
-  return (Array.isArray(reportItems) ? reportItems : []).flatMap((item) => {
+  const reportBlocks = (Array.isArray(reportItems) ? reportItems : []).map((item) => {
     const title = escapeUnderparSlackMrkdwn(String(item?.title || "").trim());
     const rawTitle = String(item?.title || "").trim();
     const summaryLines = String(item?.summary || "")
@@ -4161,21 +4161,23 @@ function buildUnderparBlondieReportLines(reportItems = [], payload = null) {
     if (!title && summaryLines.length === 0) {
       return [];
     }
+    const sourceLine = sourceUrl ? `*ESM Source:* ${buildUnderparSlackInlineCode(sourceUrl)}` : "";
     if (!title) {
       return summaryLines
         .map((line) => `• ${line}`)
-        .concat(sourceUrl ? [buildUnderparSlackInlineCode(`ESM source: ${sourceUrl}`)] : []);
+        .concat(sourceLine ? [sourceLine] : []);
     }
     const titleLine = reportDeeplinkUrl
       ? `${buildUnderparSlackMrkdwnLink(reportDeeplinkUrl, rawTitle)}:`
       : `*${title}:*`;
     if (summaryLines.length === 0) {
-      return [titleLine].concat(sourceUrl ? [buildUnderparSlackInlineCode(`ESM source: ${sourceUrl}`)] : []);
+      return [titleLine].concat(sourceLine ? [sourceLine] : []);
     }
     return [titleLine]
       .concat(summaryLines.map((line) => `• ${line}`))
-      .concat(sourceUrl ? [buildUnderparSlackInlineCode(`ESM source: ${sourceUrl}`)] : []);
-  });
+      .concat(sourceLine ? [sourceLine] : []);
+  }).filter((block) => Array.isArray(block) && block.length > 0);
+  return reportBlocks.flatMap((block, index) => (index < reportBlocks.length - 1 ? block.concat([""]) : block));
 }
 
 function applyUnderparBlondieDeliveryEnvelope(markdownText = "", record = null, deliveryTarget = null, noteText = "") {
@@ -5148,11 +5150,16 @@ function buildPassVaultApplicationsSnapshotFromRegisteredApplications(registered
     if (!guid) {
       return;
     }
-    output[guid] = sanitizePassVaultApplicationData(
+    const sanitizedApp = sanitizePassVaultApplicationData(
       rawApplicationRecord?.applicationData || null,
       guid,
       firstNonEmptyString([rawApplicationRecord?.appName, guid])
     );
+    const serviceKeys = uniqueSorted(Array.isArray(rawApplicationRecord?.serviceKeys) ? rawApplicationRecord.serviceKeys : []);
+    output[guid] = {
+      ...sanitizedApp,
+      ...(serviceKeys.length > 0 ? { serviceKeys } : {}),
+    };
   });
   return output;
 }
@@ -5306,12 +5313,21 @@ function buildPassVaultRuntimeAppInfoFromRecord(record = null, guid = "", applic
           normalizedGuid,
           firstNonEmptyString([applicationRecord?.appName, normalizedGuid])
         );
+  const serviceKeys = uniqueSorted(
+    (Array.isArray(applicationRecord?.serviceKeys) ? applicationRecord.serviceKeys : []).concat(
+      Array.isArray(appData?.serviceKeys) ? appData.serviceKeys : []
+    )
+  );
+  const scopes = uniqueSorted(
+    (Array.isArray(applicationRecord?.scopes) ? applicationRecord.scopes : []).concat(getScopesFromApplication(appData))
+  );
   return {
     guid: normalizedGuid,
     appRef: `@RegisteredApplication:${normalizedGuid}`,
     appName: firstNonEmptyString([applicationRecord?.appName, appData?.name, appData?.displayName, normalizedGuid]),
     appData,
-    scopes: uniqueSorted(Array.isArray(applicationRecord?.scopes) ? applicationRecord.scopes : []),
+    scopes,
+    serviceKeys,
   };
 }
 
@@ -29845,22 +29861,23 @@ async function esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, c
     seedEndpointUrl: sanitizedSeedEndpointUrl,
     seedRequestUrl: sanitizedSeedRequestUrl,
   });
-  if (options.skipOriginLookup !== true && originCardKey && targetWindowId > 0) {
-    const existingCard = await esmWorkspaceFindExistingOriginCard(originCardKey, targetWindowId);
-    const existingCardId = String(existingCard?.cardId || "").trim();
-    if (existingCard && existingCardId && existingCardId !== normalizedCardId) {
-      const existingEndpoint = esmWorkspaceFindEndpointByUrl(esmWorkspaceState, existingCard.endpointUrl, existingCard);
-      if (existingEndpoint) {
-        await esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, existingEndpoint, existingCardId, requestToken, {
-          emitStart: options.emitStart !== false,
-          requestSource: "workspace",
-          targetWindowId,
-          originCardKey,
-          skipOriginLookup: true,
-          displayNodeLabel: String(existingCard?.displayNodeLabel || ""),
-          presetLocalFilterBootstrapPending: existingCard?.presetLocalFilterBootstrapPending === true,
-          seedEndpointUrl: stripMegWorkspaceMediaCompanyQueryParam(String(existingCard?.seedEndpointUrl || "").trim()),
-          seedRequestUrl: stripMegWorkspaceMediaCompanyQueryParam(String(existingCard?.seedRequestUrl || "").trim()),
+    if (options.skipOriginLookup !== true && originCardKey && targetWindowId > 0) {
+      const existingCard = await esmWorkspaceFindExistingOriginCard(originCardKey, targetWindowId);
+      const existingCardId = String(existingCard?.cardId || "").trim();
+      if (existingCard && existingCardId && existingCardId !== normalizedCardId) {
+        const existingEndpoint = esmWorkspaceFindEndpointByUrl(esmWorkspaceState, existingCard.endpointUrl, existingCard);
+        if (existingEndpoint) {
+          await esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, existingEndpoint, existingCardId, requestToken, {
+            emitStart: options.emitStart !== false,
+            requestSource: "workspace",
+            targetWindowId,
+            originCardKey,
+            requestUrlOverride: String(existingCard?.requestUrl || "").trim(),
+            skipOriginLookup: true,
+            displayNodeLabel: String(existingCard?.displayNodeLabel || ""),
+            presetLocalFilterBootstrapPending: existingCard?.presetLocalFilterBootstrapPending === true,
+            seedEndpointUrl: stripMegWorkspaceMediaCompanyQueryParam(String(existingCard?.seedEndpointUrl || "").trim()),
+            seedRequestUrl: stripMegWorkspaceMediaCompanyQueryParam(String(existingCard?.seedRequestUrl || "").trim()),
           seedLocalColumnFilters: existingCard?.seedLocalColumnFilters,
           seedLocalColumnExclusions: existingCard?.seedLocalColumnExclusions,
           seedPresetLocalFilterBootstrapPending: existingCard?.seedPresetLocalFilterBootstrapPending === true,
@@ -31590,8 +31607,7 @@ async function handleEsmWorkspaceWorkspaceAction(message, sender = null) {
     const card = message?.card && typeof message.card === "object" ? message.card : {};
     const requestSourceRaw = String(message?.requestSource || "").trim().toLowerCase();
     const requestSource = requestSourceRaw || "workspace";
-    const allowRequestOverride = requestSource === "workspace-path-link" || requestSource === "workspace-path-node";
-    const requestUrlOverride = allowRequestOverride ? String(card?.requestUrl || "") : "";
+    const requestUrlOverride = String(card?.requestUrl || "").trim();
     emitEsmWorkspaceDebugEvent(activeFlowId, {
       phase: "workspace-action",
       action: "run-card",
@@ -31659,6 +31675,7 @@ async function handleEsmWorkspaceWorkspaceAction(message, sender = null) {
         emitStart: true,
         requestSource: requestSourceForRerun,
         targetWindowId: senderWindowId || Number(esmWorkspaceState.controllerWindowId || 0),
+        requestUrlOverride: String(card?.requestUrl || "").trim(),
         originCardKey: card?.originCardKey,
         presetLocalFilterBootstrapPending: card?.presetLocalFilterBootstrapPending === true,
         seedEndpointUrl: card?.seedEndpointUrl,
@@ -31855,6 +31872,7 @@ async function handleBlondieTimeWorkspaceAction(message, sender = null) {
       emitStart: true,
       requestSource: "workspace",
       targetWindowId,
+      requestUrlOverride: String(card?.requestUrl || "").trim(),
       originCardKey: card?.originCardKey,
       presetLocalFilterBootstrapPending: card?.presetLocalFilterBootstrapPending === true,
       seedEndpointUrl: card?.seedEndpointUrl,
@@ -42701,8 +42719,21 @@ function getPreferredDegradationScopeForApp(appInfo = null) {
   return "";
 }
 
+function appHasMappedPremiumServiceKey(appInfo = null, serviceKey = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  if (!normalizedServiceKey) {
+    return false;
+  }
+  const serviceKeys = uniqueSorted(
+    (Array.isArray(appInfo?.serviceKeys) ? appInfo.serviceKeys : []).concat(
+      Array.isArray(appInfo?.appData?.serviceKeys) ? appInfo.appData.serviceKeys : []
+    )
+  );
+  return serviceKeys.includes(normalizedServiceKey);
+}
+
 function degradationAppHasRequiredScope(appInfo) {
-  return Boolean(getPreferredDegradationScopeForApp(appInfo));
+  return Boolean(getPreferredDegradationScopeForApp(appInfo) || appHasMappedPremiumServiceKey(appInfo, "degradation"));
 }
 
 function compareDegradationAppPriority(leftApp, rightApp) {

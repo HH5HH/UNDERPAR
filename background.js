@@ -368,7 +368,8 @@ async function enqueuePendingUnderparEsmDeeplink(payload = null) {
     .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry));
   queue.push({
     ...normalizedPayload,
-    createdAt: Math.max(0, Number(normalizedPayload.createdAt || Date.now() || 0)) || Date.now(),
+    // Queue freshness tracks when UnderPAR received the click, not when the source document was generated.
+    createdAt: Date.now(),
   });
   await chrome.storage.local.set({
     [UNDERPAR_ESM_DEEPLINK_STORAGE_KEY]: queue,
