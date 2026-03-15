@@ -16,22 +16,28 @@ function stripSavedQueryScopedQueryParams(rawUrl = "") {
   if (!normalized) {
     return "";
   }
-  const hasAbsoluteScheme = /^[a-z][a-z\d+.-]*:/i.test(normalized);
-  try {
-    const parsed = hasAbsoluteScheme ? new URL(normalized) : new URL(normalized, "https://example.invalid");
-    parsed.searchParams.delete("media-company");
-    parsed.searchParams.delete("requestor-id");
-    parsed.hash = "";
-    return hasAbsoluteScheme ? parsed.toString() : `${String(parsed.pathname || "")}${String(parsed.search || "")}`;
-  } catch (_error) {
-    const withoutHash = normalized.split("#")[0] || "";
-    const [path, query = ""] = withoutHash.split("?");
-    const params = new URLSearchParams(query);
-    params.delete("media-company");
-    params.delete("requestor-id");
-    const nextQuery = params.toString();
-    return nextQuery ? `${path}?${nextQuery}` : path;
+  const withoutHash = normalized.split("#")[0] || "";
+  const queryIndex = withoutHash.indexOf("?");
+  if (queryIndex < 0) {
+    return withoutHash;
   }
+  const path = withoutHash.slice(0, queryIndex);
+  const query = withoutHash.slice(queryIndex + 1);
+  const nextQuery = query
+    .split("&")
+    .filter((segment) => {
+      if (!segment) {
+        return false;
+      }
+      const keySegment = segment.includes("=") ? segment.slice(0, segment.indexOf("=")) : segment;
+      try {
+        return decodeURIComponent(keySegment.replace(/\+/g, "%20")).trim().toLowerCase() !== "media-company";
+      } catch (_error) {
+        return keySegment.trim().toLowerCase() !== "media-company";
+      }
+    })
+    .join("&");
+  return nextQuery ? `${path}?${nextQuery}` : path;
 }
 
 function buildSavedQueryRecord(name = "", rawUrl = "") {

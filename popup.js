@@ -81,7 +81,7 @@ const UNDERPAR_ESM_DEEPLINK_BRIDGE_MARKER_VALUE = "esm-bridge";
 const UNDERPAR_BT_DEEPLINK_MARKER_VALUE = "bt";
 const UNDERPAR_CM_DEEPLINK_MARKER_VALUE = "cm";
 const UNDERPAR_DEGRADATION_DEEPLINK_MARKER_VALUE = "degradation";
-const UNDERPAR_BLONDIE_ZIP_TOOL_BETA_ARTICLE_URL = "https://tve.zendesk.com/hc/en-us/articles/46503360732436-ZIP-TOOL-beta";
+const UNDERPAR_BLONDIE_ZIP_TOOL_BETA_ARTICLE_URL = "https://tve.zendesk.com/hc/en-us/articles/46503360732436-ZIP-ZAP";
 const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 4;
 const UNDERPAR_VAULT_STATUS_PENDING = "pending";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
@@ -27661,32 +27661,33 @@ function megWorkspaceBuildAbsoluteServiceUrl(baseOrigin, value) {
   }
 }
 
-function stripMegWorkspaceScopedQueryParams(rawUrl = "", options = {}) {
+function stripMegWorkspaceScopedQueryParams(rawUrl = "") {
   const normalized = String(rawUrl || "").trim();
   if (!normalized) {
     return "";
   }
-  const stripRequestorId = options?.stripRequestorId === true;
-  const hasAbsoluteScheme = /^[a-z][a-z\d+.-]*:/i.test(normalized);
-  try {
-    const parsed = hasAbsoluteScheme ? new URL(normalized) : new URL(normalized, "https://example.invalid");
-    parsed.searchParams.delete("media-company");
-    if (stripRequestorId) {
-      parsed.searchParams.delete("requestor-id");
-    }
-    parsed.hash = "";
-    return hasAbsoluteScheme ? parsed.toString() : `${String(parsed.pathname || "")}${String(parsed.search || "")}`;
-  } catch (_error) {
-    const withoutHash = normalized.split("#")[0] || "";
-    const [path, query = ""] = withoutHash.split("?");
-    const params = new URLSearchParams(query);
-    params.delete("media-company");
-    if (stripRequestorId) {
-      params.delete("requestor-id");
-    }
-    const nextQuery = params.toString();
-    return nextQuery ? `${path}?${nextQuery}` : path;
+  const withoutHash = normalized.split("#")[0] || "";
+  const queryIndex = withoutHash.indexOf("?");
+  if (queryIndex < 0) {
+    return withoutHash;
   }
+  const path = withoutHash.slice(0, queryIndex);
+  const query = withoutHash.slice(queryIndex + 1);
+  const nextQuery = query
+    .split("&")
+    .filter((segment) => {
+      if (!segment) {
+        return false;
+      }
+      const keySegment = segment.includes("=") ? segment.slice(0, segment.indexOf("=")) : segment;
+      try {
+        return decodeURIComponent(keySegment.replace(/\+/g, "%20")).trim().toLowerCase() !== "media-company";
+      } catch (_error) {
+        return keySegment.trim().toLowerCase() !== "media-company";
+      }
+    })
+    .join("&");
+  return nextQuery ? `${path}?${nextQuery}` : path;
 }
 
 function stripMegWorkspaceMediaCompanyQueryParam(rawUrl = "") {
@@ -30365,9 +30366,7 @@ function popupNormalizeSavedEsmQueryName(value = "") {
 
 function popupBuildSavedEsmQueryRecord(name = "", rawUrl = "") {
   const normalizedName = popupNormalizeSavedEsmQueryName(name);
-  const normalizedUrl = stripMegWorkspaceScopedQueryParams(String(rawUrl || "").trim(), {
-    stripRequestorId: true,
-  });
+  const normalizedUrl = stripMegWorkspaceScopedQueryParams(String(rawUrl || "").trim());
   if (!normalizedName || !normalizedUrl) {
     return null;
   }

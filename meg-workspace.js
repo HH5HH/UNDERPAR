@@ -167,9 +167,7 @@ function getMegStandaloneSavedQueryRecords() {
   return rawRecords
     .map((entry) => {
       const name = normalizeSavedQueryName(entry?.name || "");
-      const url = stripMegScopedQueryParams(String(entry?.url || "").trim(), {
-        stripRequestorId: true,
-      });
+      const url = stripMegScopedQueryParams(String(entry?.url || "").trim());
       if (!name || !url) {
         return null;
       }
@@ -461,32 +459,33 @@ function buildMegAbsoluteUrl(urlValue = "") {
   }
 }
 
-function stripMegScopedQueryParams(rawUrl = "", options = {}) {
+function stripMegScopedQueryParams(rawUrl = "") {
   const normalized = String(rawUrl || "").trim();
   if (!normalized) {
     return "";
   }
-  const stripRequestorId = options?.stripRequestorId === true;
-  const hasAbsoluteScheme = /^[a-z][a-z\d+.-]*:/i.test(normalized);
-  try {
-    const parsed = hasAbsoluteScheme ? new URL(normalized) : new URL(normalized, "https://example.invalid");
-    parsed.searchParams.delete("media-company");
-    if (stripRequestorId) {
-      parsed.searchParams.delete("requestor-id");
-    }
-    parsed.hash = "";
-    return hasAbsoluteScheme ? parsed.toString() : `${String(parsed.pathname || "")}${String(parsed.search || "")}`;
-  } catch (_error) {
-    const withoutHash = normalized.split("#")[0] || "";
-    const [path, query = ""] = withoutHash.split("?");
-    const params = new URLSearchParams(query);
-    params.delete("media-company");
-    if (stripRequestorId) {
-      params.delete("requestor-id");
-    }
-    const nextQuery = params.toString();
-    return nextQuery ? `${path}?${nextQuery}` : path;
+  const withoutHash = normalized.split("#")[0] || "";
+  const queryIndex = withoutHash.indexOf("?");
+  if (queryIndex < 0) {
+    return withoutHash;
   }
+  const path = withoutHash.slice(0, queryIndex);
+  const query = withoutHash.slice(queryIndex + 1);
+  const nextQuery = query
+    .split("&")
+    .filter((segment) => {
+      if (!segment) {
+        return false;
+      }
+      const keySegment = segment.includes("=") ? segment.slice(0, segment.indexOf("=")) : segment;
+      try {
+        return decodeURIComponent(keySegment.replace(/\+/g, "%20")).trim().toLowerCase() !== "media-company";
+      } catch (_error) {
+        return keySegment.trim().toLowerCase() !== "media-company";
+      }
+    })
+    .join("&");
+  return nextQuery ? `${path}?${nextQuery}` : path;
 }
 
 function stripMegMediaCompanyQueryParam(rawUrl = "") {
@@ -2212,9 +2211,7 @@ function buildSavedQueryStorageKey(name = "") {
 
 function buildSavedQueryRecord(name = "", rawUrl = "") {
   const normalizedName = normalizeSavedQueryName(name);
-  const normalizedUrl = stripMegScopedQueryParams(String(rawUrl || "").trim(), {
-    stripRequestorId: true,
-  });
+  const normalizedUrl = stripMegScopedQueryParams(String(rawUrl || "").trim());
   if (!normalizedName || !normalizedUrl) {
     return null;
   }
@@ -2369,9 +2366,7 @@ async function loadSavedQueryRecords() {
     (Array.isArray(rawRecords) ? rawRecords : [])
       .map((record) => {
         const name = normalizeSavedQueryName(record?.name || "");
-        const url = stripMegScopedQueryParams(String(record?.url || "").trim(), {
-          stripRequestorId: true,
-        });
+        const url = stripMegScopedQueryParams(String(record?.url || "").trim());
         const storageKey = String(record?.storageKey || buildSavedQueryStorageKey(name)).trim();
         if (!name || !url || !storageKey) {
           return null;
@@ -2429,9 +2424,7 @@ async function refreshUnderparSidepanelSavedQuerySelectors() {
 
 async function persistSavedQueryRecord(queryName = "", esmUrl = "") {
   const storageKey = buildSavedQueryStorageKey(queryName);
-  const sanitizedUrl = stripMegScopedQueryParams(esmUrl, {
-    stripRequestorId: true,
-  });
+  const sanitizedUrl = stripMegScopedQueryParams(esmUrl);
   if (!isMegStandaloneMode()) {
     const result = await sendWorkspaceAction("saved-query-put-record", {
       name: queryName,
@@ -2507,9 +2500,7 @@ function reportSavedQueryStatus(message = "", type = "info") {
 async function saveCurrentQuery() {
   const queryName = normalizeSavedQueryName(fldSavedQueryName?.value || "");
   const rawEsmUrl = String(fldEsmUrl?.value || "").trim();
-  const esmUrl = stripMegScopedQueryParams(rawEsmUrl, {
-    stripRequestorId: true,
-  });
+  const esmUrl = stripMegScopedQueryParams(rawEsmUrl);
   if (!queryName) {
     reportSavedQueryStatus("Query Name is required to save a Saved ESM Query.", "error");
     fldSavedQueryName?.focus();
