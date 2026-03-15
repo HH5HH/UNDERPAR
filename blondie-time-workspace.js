@@ -514,7 +514,7 @@ function getTimerButtonTitle() {
 
 function getTimerButtonVisualState() {
   if (isRuntimeActiveHere()) {
-    return state.lapRunning ? "warn" : "active";
+    return state.lapRunning ? "slacktivated" : "active";
   }
   if (state.timerPickerOpen) {
     return "settime";
@@ -656,7 +656,7 @@ function renderMonitoringStopZone() {
   els.monitoringStopZone.dataset.state = showSessionSummary ? "summary" : "stop";
   els.monitoringStopButton.hidden = !showStopButton;
   els.monitoringStopButton.disabled = !runtimeActive || state.lapRunning;
-  els.monitoringStopButton.title = "Stop Blondie Time, reveal the session summary, and enable the BT report export.";
+  els.monitoringStopButton.title = "Stop Blondie Time, reveal the session summary, and enable the BT PDF and CSV export.";
 }
 
 function updateTimerCountdownFrame() {
@@ -715,7 +715,7 @@ function renderMonitorHeader() {
       : state.timerPickerOpen
         ? "Pick an interval to run the first full BT lap now. The selected interval becomes the live session cadence."
         : state.sessionStoppedAt > 0
-          ? `Monitoring stopped at ${formatTimestamp(state.sessionStoppedAt)}. The Monitoring Session summary now owns the BT report export.`
+          ? `Monitoring stopped at ${formatTimestamp(state.sessionStoppedAt)}. The Monitoring Session summary now owns the BT PDF and CSV export.`
           : state.lastStartOptions
             ? "The ESM context is loaded in BT_WS. Click or shift-click the Blondie button to choose the monitoring interval."
             : "Launch Blondie Time from the ESM Workspace to begin live threshold monitoring.";
@@ -1572,9 +1572,9 @@ function buildSessionSummaryMarkup(model = null, options = {}) {
   const includeExportSection = options.includeExportSection !== false;
   const exportSectionMarkup = includeExportSection
     ? `
-    <section class="bt-session-block">
+    <section class="bt-session-block bt-session-block--export-meta">
       <h3 class="bt-session-block-title">Export Report</h3>
-      <p class="bt-card-empty">Export Report opens a print-ready PDF version of this BT monitoring session summary and downloads the full-span CSV rerun from <strong>${escapeHtml(
+      <p class="bt-card-empty">Export Report downloads the BT monitoring session PDF and the full-span CSV rerun from <strong>${escapeHtml(
         summaryModel.sessionWindow.startLabel
       )}</strong> through <strong>${escapeHtml(summaryModel.sessionWindow.endLabel)}</strong> for every analysis table in this workspace.</p>
     </section>
@@ -1659,8 +1659,8 @@ function renderSessionControls() {
     button.disabled = !isReport || !canExportReport || state.sessionExporting;
     button.title = isReport
       ? state.sessionExporting
-        ? "Building the BT monitoring session report..."
-        : "Open the BT summary as a print-ready PDF and download the full-session ESM CSV."
+        ? "Building the BT monitoring session PDF and full-session CSV..."
+        : "Download the BT monitoring session PDF and the full-session ESM CSV."
       : "";
     const label = button.querySelector(".spectrum-Button-label");
     if (label) {
@@ -2072,7 +2072,7 @@ async function stopMonitoring(reason = "manual") {
   state.exportPanelOpen = true;
   state.timerLocalWarning = "";
   rerenderWorkspace();
-  setStatus("Blondie Time stopped. The Monitoring Session summary and BT report export are ready below.", "success");
+  setStatus("Blondie Time stopped. The Monitoring Session summary and BT PDF/CSV export are ready below.", "success");
 }
 
 async function handleAlarmLap(message = {}) {
@@ -2113,16 +2113,38 @@ async function handleAlarmLap(message = {}) {
   }
 }
 
-function downloadTextFile(text = "", fileName = "bt-report.txt", contentType = "text/plain;charset=utf-8") {
-  const blob = new Blob([String(text || "")], { type: contentType });
+async function downloadBlobFile(blob = null, fileName = "bt-report.txt") {
+  if (!(blob instanceof Blob)) {
+    throw new Error("Unable to build the requested BT export file.");
+  }
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  let downloadStarted = false;
+  try {
+    if (chrome?.downloads?.download) {
+      await chrome.downloads.download({
+        url,
+        filename: String(fileName || "bt-report.txt"),
+        saveAs: false,
+        conflictAction: "uniquify",
+      });
+      downloadStarted = true;
+    }
+  } catch {
+    downloadStarted = false;
+  }
+  if (!downloadStarted) {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+async function downloadTextFile(text = "", fileName = "bt-report.txt", contentType = "text/plain;charset=utf-8") {
+  await downloadBlobFile(new Blob([String(text || "")], { type: contentType }), fileName);
 }
 
 function escapeDelimitedValue(value = "", delimiter = ",") {
@@ -2142,204 +2164,14 @@ function buildSessionReportFileName(extension = "txt") {
   return `underpar_bt_ws_${programmerSegment}_${stamp}.${extension}`;
 }
 
-function buildSessionReportDocumentHtml(model = null, fileName = "underpar_bt_ws_session.pdf") {
-  const summaryModel = model && typeof model === "object" ? model : buildSessionSummaryModel();
-  const documentTitle = escapeHtml(String(fileName || "underpar_bt_ws_session.pdf"));
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${documentTitle}</title>
-    <style>
-      :root {
-        --bt-ink: #142033;
-        --bt-ink-soft: #5b6f90;
-        --bt-paper: #fffdf8;
-        --bt-paper-soft: rgba(255, 255, 255, 0.62);
-        --bt-outline: rgba(20, 32, 51, 0.08);
-        --bt-shell-outline: rgba(20, 32, 51, 0.1);
-        --bt-shadow: rgba(137, 57, 0, 0.08);
-        --bt-bg: #edf3fb;
-        --bt-radius-xl: 28px;
-        --bt-radius-lg: 24px;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-      }
-
-      body {
-        min-height: 100vh;
-        padding: 28px;
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.86)),
-          linear-gradient(135deg, rgba(237, 243, 251, 0.96), rgba(251, 245, 236, 0.98));
-        color: var(--bt-ink);
-        font-family: "Adobe Clean", "Segoe UI", sans-serif;
-      }
-
-      .bt-session-print-shell {
-        max-width: 1440px;
-        margin: 0 auto;
-        padding: 28px;
-        border: 1px solid var(--bt-shell-outline);
-        border-radius: 32px;
-        background:
-          radial-gradient(circle at top left, rgba(255, 232, 204, 0.88), transparent 42%),
-          linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(255, 247, 237, 0.98));
-        box-shadow: 0 24px 60px var(--bt-shadow);
-      }
-
-      .bt-session-panel-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 16px;
-        flex-wrap: wrap;
-      }
-
-      .bt-session-panel-kicker {
-        margin: 0;
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--bt-ink-soft);
-      }
-
-      .bt-session-panel-title {
-        margin: 6px 0 0;
-        font-size: 22px;
-        font-weight: 800;
-      }
-
-      .bt-session-panel-body {
-        display: grid;
-        gap: 14px;
-        margin-top: 16px;
-      }
-
-      .bt-session-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
-      }
-
-      .bt-session-block {
-        padding: 14px 16px;
-        border: 1px solid var(--bt-outline);
-        border-radius: var(--bt-radius-lg);
-        background: var(--bt-paper-soft);
-        break-inside: avoid;
-      }
-
-      .bt-session-block-title {
-        margin: 0 0 10px;
-        font-size: 13px;
-        font-weight: 800;
-      }
-
-      .bt-session-list {
-        margin: 0;
-        padding: 0;
-        list-style: none;
-        display: grid;
-        gap: 8px;
-      }
-
-      .bt-session-list li,
-      .bt-card-empty,
-      .bt-session-table th,
-      .bt-session-table td {
-        font-size: 12px;
-        line-height: 1.45;
-        color: var(--bt-ink-soft);
-      }
-
-      .bt-session-list strong,
-      .bt-card-empty strong,
-      .bt-session-table td {
-        color: var(--bt-ink);
-      }
-
-      .bt-session-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-
-      .bt-session-table th,
-      .bt-session-table td {
-        padding: 10px 12px;
-        border-bottom: 1px solid rgba(20, 32, 51, 0.06);
-        text-align: left;
-      }
-
-      .bt-session-table th {
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-      }
-
-      .bt-card-empty {
-        margin: 0;
-      }
-
-      @media print {
-        body {
-          padding: 0;
-          background: #ffffff;
-        }
-
-        .bt-session-print-shell {
-          max-width: none;
-          min-height: 100vh;
-          border: 0;
-          border-radius: 0;
-          box-shadow: none;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <main class="bt-session-print-shell">
-      <div class="bt-session-panel-head">
-        <div>
-          <p class="bt-session-panel-kicker">Monitoring Session</p>
-          <h1 class="bt-session-panel-title">BT monitoring session summary</h1>
-        </div>
-      </div>
-      <div class="bt-session-panel-body">
-        ${buildSessionSummaryMarkup(summaryModel, { includeExportSection: true })}
-      </div>
-    </main>
-    <script>
-      window.addEventListener("load", () => {
-        window.setTimeout(() => {
-          window.focus();
-          window.print();
-        }, 120);
-      });
-    </script>
-  </body>
-</html>`;
-}
-
-function openSessionReportPrintWindow(fileName = "underpar_bt_ws_session.pdf", model = null) {
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) {
-    throw new Error("Allow pop-ups for UnderPAR to open the BT monitoring session PDF.");
+async function requestSessionPdfExport(fileName = "underpar_bt_ws_session.pdf") {
+  const result = await sendWorkspaceAction("export-session-pdf", {
+    fileName: String(fileName || "underpar_bt_ws_session.pdf"),
+  });
+  if (!result?.ok) {
+    throw new Error(result?.error || "Unable to download the BT monitoring session PDF.");
   }
-  printWindow.document.open();
-  printWindow.document.write(buildSessionReportDocumentHtml(model, fileName));
-  printWindow.document.close();
-  return printWindow;
+  return result;
 }
 
 function getSessionExportContext() {
@@ -2378,42 +2210,47 @@ async function exportSessionReport() {
 
   const summaryModel = buildSessionSummaryModel();
   const pdfFileName = buildSessionReportFileName("pdf");
-  let pdfOpened = false;
+  state.sessionExporting = true;
+  rerenderWorkspace();
+  let pdfDownloaded = false;
   let pdfWarning = "";
   try {
-    openSessionReportPrintWindow(pdfFileName, summaryModel);
-    pdfOpened = true;
+    await requestSessionPdfExport(pdfFileName);
+    pdfDownloaded = true;
   } catch (error) {
     pdfWarning = error instanceof Error ? error.message : String(error);
   }
 
-  state.sessionExporting = true;
-  rerenderWorkspace();
   try {
     const result = await requestSessionCsvExport(cards, sessionWindow);
-    downloadTextFile(
+    await downloadTextFile(
       String(result.csvText || ""),
       String(result.fileName || buildSessionReportFileName("csv")),
       "text/csv;charset=utf-8"
     );
-    if (pdfOpened) {
+    if (pdfDownloaded) {
       setStatus(
-        `Opened the BT monitoring session PDF view and downloaded full-session CSV for ${formatInteger(
+        `Downloaded the BT monitoring session PDF and full-session CSV for ${formatInteger(
           result.tableCount || cards.length
         )} analysis table(s) and ${formatInteger(result.rowCount || 0)} row(s).`,
         "success"
       );
     } else {
       setStatus(
-        `Downloaded full-session CSV for ${formatInteger(result.tableCount || cards.length)} analysis table(s) and ${formatInteger(
+        `Downloaded the full-session CSV for ${formatInteger(result.tableCount || cards.length)} analysis table(s) and ${formatInteger(
           result.rowCount || 0
-        )} row(s). ${pdfWarning}`.trim(),
+        )} row(s), but the BT monitoring session PDF failed: ${pdfWarning}`.trim(),
         pdfWarning ? "warn" : "success"
       );
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setStatus(pdfOpened ? `Opened the BT monitoring session PDF view, but CSV export failed: ${message}` : pdfWarning || message, pdfOpened ? "warn" : "error");
+    setStatus(
+      pdfDownloaded
+        ? `Downloaded the BT monitoring session PDF, but CSV export failed: ${message}`
+        : firstNonEmptyString([pdfWarning, message, "Unable to export the BT monitoring session files."]),
+      pdfDownloaded ? "warn" : "error"
+    );
   } finally {
     state.sessionExporting = false;
     rerenderWorkspace();

@@ -21427,6 +21427,68 @@ function sanitizeDownloadFileSegment(value, fallback = "download") {
   return normalized || fallback;
 }
 
+function decodeBase64ToUint8Array(base64Value = "") {
+  const normalized = String(base64Value || "").replace(/\s+/g, "");
+  if (!normalized) {
+    return new Uint8Array();
+  }
+  const raw = atob(normalized);
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) {
+    bytes[index] = raw.charCodeAt(index);
+  }
+  return bytes;
+}
+
+async function downloadBlobFile(blob, fileName = "underpar-download.bin") {
+  if (!(blob instanceof Blob)) {
+    throw new Error("Unable to build the requested UnderPAR download.");
+  }
+  const normalizedFileName = String(fileName || "").trim() || "underpar-download.bin";
+  const objectUrl = URL.createObjectURL(blob);
+  let downloadStarted = false;
+  try {
+    if (chrome?.downloads?.download) {
+      await chrome.downloads.download({
+        url: objectUrl,
+        filename: normalizedFileName,
+        saveAs: false,
+        conflictAction: "uniquify",
+      });
+      downloadStarted = true;
+    }
+  } catch {
+    downloadStarted = false;
+  }
+  if (!downloadStarted) {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = normalizedFileName;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+  setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 30000);
+}
+
+async function downloadBinaryFile(bytes, fileName = "underpar-download.bin", mimeType = "application/octet-stream") {
+  const normalizedBytes =
+    bytes instanceof Uint8Array
+      ? bytes
+      : ArrayBuffer.isView(bytes)
+        ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+        : bytes instanceof ArrayBuffer
+          ? new Uint8Array(bytes)
+          : new Uint8Array();
+  if (!normalizedBytes.byteLength) {
+    throw new Error("The requested UnderPAR download was empty.");
+  }
+  await downloadBlobFile(new Blob([normalizedBytes], { type: mimeType }), fileName);
+}
+
 function downloadJsonFile(payload, fileName = "underpar-export.json") {
   const json = JSON.stringify(payload, null, 2);
   const blob = new Blob([json], { type: "application/json;charset=utf-8" });
@@ -21696,6 +21758,68 @@ function downloadHarFile(harPayload, fileName) {
   setTimeout(() => {
     URL.revokeObjectURL(objectUrl);
   }, 1500);
+}
+
+async function exportBlondieTimeWorkspacePdf(tabId, fileName = "underpar_bt_ws_session.pdf") {
+  const normalizedTabId = Math.max(0, Number(tabId || 0));
+  if (!chrome?.debugger || !normalizedTabId) {
+    throw new Error("Blondie Time Workspace tab is no longer available for PDF export.");
+  }
+
+  const target = { tabId: normalizedTabId };
+  const tab = await chrome.tabs.get(normalizedTabId).catch(() => null);
+  if (!tab || !blondieTimeWorkspaceIsWorkspaceTab(tab)) {
+    throw new Error("Blondie Time Workspace tab is no longer available for PDF export.");
+  }
+
+  const normalizedFileNameBase = sanitizeDownloadFileSegment(String(fileName || "").trim(), "underpar_bt_ws_session.pdf");
+  const normalizedFileName = normalizedFileNameBase.toLowerCase().endsWith(".pdf")
+    ? normalizedFileNameBase
+    : `${normalizedFileNameBase}.pdf`;
+  let debuggerAttached = false;
+
+  try {
+    await chrome.debugger.attach(target, AUTH_DEBUGGER_PROTOCOL_VERSION);
+    debuggerAttached = true;
+    await chrome.debugger.sendCommand(target, "Page.enable");
+    await chrome.debugger.sendCommand(target, "Emulation.setEmulatedMedia", {
+      media: "print",
+    });
+    await sleepMs(80);
+    const pdfResult = await chrome.debugger.sendCommand(target, "Page.printToPDF", {
+      landscape: true,
+      printBackground: true,
+      preferCSSPageSize: true,
+      displayHeaderFooter: false,
+      scale: 1,
+    });
+    const pdfData = String(pdfResult?.data || "").trim();
+    if (!pdfData) {
+      throw new Error("BT monitoring session PDF returned no data.");
+    }
+    await downloadBinaryFile(decodeBase64ToUint8Array(pdfData), normalizedFileName, "application/pdf");
+    return {
+      ok: true,
+      fileName: normalizedFileName,
+    };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : String(error));
+  } finally {
+    if (debuggerAttached) {
+      try {
+        await chrome.debugger.sendCommand(target, "Emulation.setEmulatedMedia", {
+          media: "screen",
+        });
+      } catch {
+        // Ignore media reset failures during teardown.
+      }
+      try {
+        await chrome.debugger.detach(target);
+      } catch {
+        // Ignore detach failures during teardown.
+      }
+    }
+  }
 }
 
 async function stopRestV2MvpdRecording(section, programmer, appInfo) {
@@ -31166,6 +31290,20 @@ async function handleBlondieTimeWorkspaceAction(message, sender = null) {
       displayNodeLabel: String(card?.displayNodeLabel || "").trim(),
     });
     return { ok: true };
+  }
+
+  if (action === "export-session-pdf") {
+    const targetTabId = Number(
+      senderTabId || mappedSenderTabId || blondieTimeWorkspaceGetBoundWorkspaceTabId(senderWindowId || controllerWindowId || 0) || 0
+    );
+    if (!targetTabId) {
+      return { ok: false, error: "Blondie Time Workspace tab is no longer available for PDF export." };
+    }
+    const exportResult = await exportBlondieTimeWorkspacePdf(targetTabId, message?.fileName || "underpar_bt_ws_session.pdf");
+    return {
+      ok: true,
+      fileName: exportResult.fileName || "underpar_bt_ws_session.pdf",
+    };
   }
 
   if (action === "export-session-csv") {

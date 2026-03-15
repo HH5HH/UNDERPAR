@@ -985,6 +985,66 @@ body::before {
   color: var(--bt-ink-soft);
 }
 
+@page {
+  size: landscape;
+  margin: 0.25in;
+}
+
+@media print {
+  html,
+  body {
+    min-height: auto;
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body::before {
+    display: none !important;
+  }
+
+  .bt-app-shell {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    gap: 0;
+  }
+
+  #bt-workspace-root > :not(#bt-monitoring-stop-zone) {
+    display: none !important;
+  }
+
+  .bt-monitoring-stop-zone {
+    display: grid !important;
+    gap: 18px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .bt-monitoring-stop-button,
+  .bt-export-actions,
+  .bt-session-block--export-meta {
+    display: none !important;
+  }
+
+  .bt-session-panel {
+    display: grid !important;
+    gap: 16px;
+  }
+
+  .bt-session-panel,
+  .bt-session-grid,
+  .bt-session-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .bt-session-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+
 @media (max-width: 1240px) {
   .bt-controller-bar {
     grid-template-columns: 1fr;
