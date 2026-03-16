@@ -45774,27 +45774,6 @@ async function openPremiumServiceDocumentation(serviceKey = "", requestedUrl = "
 
   try {
     const targetWindowId = await resolveSidepanelControllerWindowId(false);
-    const tabs = await chrome.tabs.query(targetWindowId > 0 ? { windowId: targetWindowId, active: true } : { currentWindow: true, active: true });
-    const activeTab = Array.isArray(tabs) ? tabs.find((tab) => Number(tab?.id || 0) > 0) || null : null;
-
-    if (activeTab?.id) {
-      const updated = await chrome.tabs.update(Number(activeTab.id), {
-        url: documentationUrl,
-        active: true,
-      });
-      const windowId = Number(updated?.windowId || activeTab.windowId || 0);
-      if (windowId > 0) {
-        await chrome.windows.update(windowId, { focused: true }).catch(() => null);
-      }
-      return {
-        ok: true,
-        reused: true,
-        tabId: Number(updated?.id || activeTab.id || 0),
-        windowId,
-        url: documentationUrl,
-      };
-    }
-
     const created = await chrome.tabs.create({
       url: documentationUrl,
       active: true,

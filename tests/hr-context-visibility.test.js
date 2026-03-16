@@ -118,6 +118,7 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
 
 test("detected service pills are wired to documentation urls for the learning flow", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const openPremiumServiceDocumentationSource = extractFunctionSource(popupSource, "openPremiumServiceDocumentation");
 
   assert.match(popupSource, /PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY/);
   assert.match(
@@ -133,4 +134,6 @@ test("detected service pills are wired to documentation urls for the learning fl
   assert.match(popupSource, /data-service-doc-key/);
   assert.match(popupSource, /data-service-doc-url/);
   assert.match(popupSource, /openPremiumServiceDocumentation/);
+  assert.match(openPremiumServiceDocumentationSource, /chrome\.tabs\.create/);
+  assert.doesNotMatch(openPremiumServiceDocumentationSource, /chrome\.tabs\.update/);
 });
