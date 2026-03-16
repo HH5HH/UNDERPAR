@@ -45784,14 +45784,17 @@ function renderHrSections(services, programmer = null, options = {}) {
 
   setHrContextSectionsVisibility(true);
   els.hrServicesContainer.innerHTML = "";
-  const divider = document.createElement("div");
-  divider.className = "hr-context-divider";
-  divider.setAttribute("aria-hidden", "true");
-  divider.innerHTML = '<span class="hr-context-divider-label">HR</span>';
-  els.hrServicesContainer.appendChild(divider);
+  const topDivider = document.createElement("div");
+  topDivider.className = "hr-context-divider";
+  topDivider.setAttribute("aria-hidden", "true");
+  els.hrServicesContainer.appendChild(topDivider);
   for (const sectionKey of HR_CONTEXT_SECTION_DISPLAY_ORDER) {
     els.hrServicesContainer.appendChild(createHrContextSection(programmer, sectionKey, services, options));
   }
+  const bottomDivider = document.createElement("div");
+  bottomDivider.className = "hr-context-divider";
+  bottomDivider.setAttribute("aria-hidden", "true");
+  els.hrServicesContainer.appendChild(bottomDivider);
 }
 
 function renderPremiumServices(services, programmer = null, options = {}) {

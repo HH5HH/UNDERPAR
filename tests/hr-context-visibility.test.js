@@ -83,12 +83,14 @@ test("HR context stays hidden until the selected environment x media company is 
   assert.equal(shouldRevealHrContextSections({ programmerId: "nflx" }), false);
 });
 
-test("sidepanel seeds the HR context container hidden and popup runtime uses a divider instead of literal HR rails", () => {
+test("sidepanel seeds the HR context container hidden and popup runtime uses unlabeled top and bottom separators", () => {
   const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
 
   assert.match(sidepanelHtml, /id="hr-services-container"\s+class="hr-services-container"\s+hidden/);
-  assert.match(popupSource, /className = "hr-context-divider"/);
-  assert.match(popupSource, /hr-context-divider-label">HR<\/span>/);
+  assert.match(popupSource, /topDivider\.className = "hr-context-divider"/);
+  assert.match(popupSource, /bottomDivider\.className = "hr-context-divider"/);
+  assert.doesNotMatch(popupSource, /hr-context-divider-label/);
+  assert.doesNotMatch(popupSource, />HR</);
   assert.doesNotMatch(popupSource, /textContent = "- HR -"/);
 });

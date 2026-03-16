@@ -1087,20 +1087,6 @@ select:disabled {
 
 .hr-context-divider {
   margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  color: var(--legacy-muted);
-}
-
-.hr-context-divider::before,
-.hr-context-divider::after {
-  content: "";
-  flex: 1 1 auto;
   height: 1px;
   background: linear-gradient(
     90deg,
@@ -1110,11 +1096,6 @@ select:disabled {
     rgba(134, 151, 168, 0.32) 82%,
     rgba(134, 151, 168, 0)
   );
-}
-
-.hr-context-divider-label {
-  flex: 0 0 auto;
-  padding: 0 1px;
 }
 
 .premium-service-section,
