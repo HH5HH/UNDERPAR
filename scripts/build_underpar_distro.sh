@@ -26,11 +26,17 @@ if [[ ! -d "$staging_dir/$archive_root_name" ]]; then
   exit 1
 fi
 
+rm -rf \
+  "$staging_dir/$archive_root_name/.githooks" \
+  "$staging_dir/$archive_root_name/scripts" \
+  "$staging_dir/$archive_root_name/tests"
+rm -f "$staging_dir/$archive_root_name/AGENTS.md"
+
 find "$staging_dir/$archive_root_name" \( -name '*.zip' -o -name '.DS_Store' \) -delete
 
 (
   cd "$staging_dir"
-  zip -q -r "$output_path" "$archive_root_name"
+  zip -q -r -9 "$output_path" "$archive_root_name"
 )
 
 printf '%s\n' "$output_path"

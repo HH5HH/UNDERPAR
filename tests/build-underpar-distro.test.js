@@ -19,26 +19,45 @@ function runCommand(command, args, cwd) {
 test("distribution build emits the canonical latest archive and folder name", (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "underpar-distro-test-"));
   const repoDir = path.join(tempRoot, "repo");
+  const hooksDir = path.join(repoDir, ".githooks");
   const scriptDir = path.join(repoDir, "scripts");
+  const testsDir = path.join(repoDir, "tests");
   const artifactPath = path.join(repoDir, "underpar_distro.zip");
 
   t.after(() => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
+  fs.mkdirSync(hooksDir, { recursive: true });
   fs.mkdirSync(scriptDir, { recursive: true });
+  fs.mkdirSync(testsDir, { recursive: true });
   fs.copyFileSync(SCRIPT_PATH, path.join(scriptDir, "build_underpar_distro.sh"));
   fs.chmodSync(path.join(scriptDir, "build_underpar_distro.sh"), 0o755);
 
+  fs.writeFileSync(path.join(repoDir, "AGENTS.md"), "# repo instructions\n");
+  fs.writeFileSync(path.join(hooksDir, "pre-commit"), "#!/usr/bin/env bash\n");
   fs.writeFileSync(path.join(repoDir, "manifest.json"), '{ "version": "1.0.0" }\n');
   fs.writeFileSync(path.join(repoDir, "background.js"), 'console.log("underpar");\n');
   fs.writeFileSync(path.join(repoDir, ".DS_Store"), "ignore\n");
   fs.writeFileSync(path.join(repoDir, "UNDERPAR_DIST_v1.0.0.zip"), "legacy\n");
   fs.writeFileSync(path.join(repoDir, "ziptool_distro.zip"), "legacy\n");
   fs.writeFileSync(artifactPath, "stale\n");
+  fs.writeFileSync(path.join(testsDir, "noop.test.js"), 'console.log("noop");\n');
 
   runCommand("git", ["init", "--quiet"], repoDir);
-  runCommand("git", ["add", "scripts/build_underpar_distro.sh", "manifest.json", "background.js"], repoDir);
+  runCommand(
+    "git",
+    [
+      "add",
+      "AGENTS.md",
+      ".githooks/pre-commit",
+      "scripts/build_underpar_distro.sh",
+      "tests/noop.test.js",
+      "manifest.json",
+      "background.js",
+    ],
+    repoDir
+  );
 
   const outputPath = runCommand("bash", ["scripts/build_underpar_distro.sh"], repoDir).trim();
   const archiveEntries = runCommand("unzip", ["-Z1", artifactPath], repoDir)
@@ -56,7 +75,10 @@ test("distribution build emits the canonical latest archive and folder name", (t
   );
   assert.ok(archiveEntries.includes("underpar-distro/manifest.json"));
   assert.ok(archiveEntries.includes("underpar-distro/background.js"));
-  assert.ok(archiveEntries.includes("underpar-distro/scripts/build_underpar_distro.sh"));
+  assert.ok(!archiveEntries.includes("underpar-distro/AGENTS.md"));
+  assert.ok(!archiveEntries.includes("underpar-distro/.githooks/pre-commit"));
+  assert.ok(!archiveEntries.includes("underpar-distro/scripts/build_underpar_distro.sh"));
+  assert.ok(!archiveEntries.includes("underpar-distro/tests/noop.test.js"));
 });
 
 test("distribution build packages staged tracked files even when the worktree copy is missing", (t) => {
