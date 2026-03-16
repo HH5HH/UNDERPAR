@@ -8426,9 +8426,7 @@ function prepareAdobePassEnvironmentSwitchUi(targetEnvironment = null) {
   els.requestorSelect.innerHTML = '<option value="">-- Reloading Content Providers... --</option>';
   els.mvpdSelect.disabled = true;
   els.mvpdSelect.innerHTML = '<option value="">-- Reloading MVPD menu... --</option>';
-  if (els.hrServicesContainer) {
-    els.hrServicesContainer.innerHTML = `<p class="metadata-empty">Switching to ${escapeHtml(environmentLabel)}...</p>`;
-  }
+  setHrContextSectionsVisibility(false);
   if (els.premiumServicesContainer) {
     els.premiumServicesContainer.innerHTML = `<p class="metadata-empty">Switching to ${escapeHtml(
       environmentLabel
@@ -45670,6 +45668,23 @@ function getHrContextSummary(programmer = null) {
   };
 }
 
+function shouldRevealHrContextSections(programmer = null) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  return Boolean(programmerId) && isProgrammerWorkspaceHydrationReady(programmerId);
+}
+
+function setHrContextSectionsVisibility(visible = false) {
+  if (!els.hrServicesContainer) {
+    return;
+  }
+  const shouldShow = visible === true;
+  els.hrServicesContainer.hidden = !shouldShow;
+  els.hrServicesContainer.setAttribute("aria-hidden", shouldShow ? "false" : "true");
+  if (!shouldShow) {
+    els.hrServicesContainer.innerHTML = "";
+  }
+}
+
 function buildHrServiceListHtml(labels, fallbackText = "") {
   if (Array.isArray(labels) && labels.length > 0) {
     return `
@@ -45762,17 +45777,21 @@ function renderHrSections(services, programmer = null, options = {}) {
     return;
   }
 
+  if (!shouldRevealHrContextSections(programmer)) {
+    setHrContextSectionsVisibility(false);
+    return;
+  }
+
+  setHrContextSectionsVisibility(true);
   els.hrServicesContainer.innerHTML = "";
-  const topRail = document.createElement("p");
-  topRail.className = "hr-context-rail";
-  topRail.textContent = "- HR -";
-  topRail.setAttribute("aria-hidden", "true");
-  const bottomRail = topRail.cloneNode(true);
-  els.hrServicesContainer.appendChild(topRail);
+  const divider = document.createElement("div");
+  divider.className = "hr-context-divider";
+  divider.setAttribute("aria-hidden", "true");
+  divider.innerHTML = '<span class="hr-context-divider-label">HR</span>';
+  els.hrServicesContainer.appendChild(divider);
   for (const sectionKey of HR_CONTEXT_SECTION_DISPLAY_ORDER) {
     els.hrServicesContainer.appendChild(createHrContextSection(programmer, sectionKey, services, options));
   }
-  els.hrServicesContainer.appendChild(bottomRail);
 }
 
 function renderPremiumServices(services, programmer = null, options = {}) {

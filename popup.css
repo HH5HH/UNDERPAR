@@ -857,6 +857,7 @@ body[aria-busy="true"] .auth-btn::before {
 }
 
 .workflow > .field,
+.workflow > .hr-services-container,
 .workflow > .premium-services-container {
   grid-column: 1;
   min-width: 0;
@@ -1084,14 +1085,36 @@ select:disabled {
   min-width: 0;
 }
 
-.hr-context-rail {
+.hr-context-divider {
   margin: 0;
-  text-align: center;
-  font-size: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.24em;
   text-transform: uppercase;
   color: var(--legacy-muted);
+}
+
+.hr-context-divider::before,
+.hr-context-divider::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(134, 151, 168, 0),
+    rgba(134, 151, 168, 0.32) 18%,
+    rgba(134, 151, 168, 0.58) 50%,
+    rgba(134, 151, 168, 0.32) 82%,
+    rgba(134, 151, 168, 0)
+  );
+}
+
+.hr-context-divider-label {
+  flex: 0 0 auto;
+  padding: 0 1px;
 }
 
 .premium-service-section,
