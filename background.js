@@ -2196,6 +2196,8 @@ async function openUnderparGetLatestFlow() {
     downloadUrl,
     latestVersion: updateState.latestVersion || "",
     latestCommitSha: updateState.latestCommitSha || "",
+    updateAvailable: updateState.updateAvailable === true,
+    checkError: updateState.checkError || "",
     downloadOpened: false,
     extensionsOpened: false,
   };

@@ -123,6 +123,11 @@ const PREMIUM_SERVICE_TITLE_BY_KEY = {
   esmWorkspace: "ESM",
   restV2: "REST V2",
 };
+const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["health", "learning"];
+const HR_CONTEXT_SECTION_TITLE_BY_KEY = {
+  health: "HEALTH",
+  learning: "LEARNING",
+};
 const REST_V2_DEVICE_ID_STORAGE_KEY = "underpar_restv2_device_id_v1";
 const LEGACY_REST_V2_DEVICE_ID_STORAGE_KEY = "mincloudlogin_restv2_device_id_v1";
 const REST_V2_DEFAULT_DOMAIN = "adobe.com";
@@ -8421,6 +8426,9 @@ function prepareAdobePassEnvironmentSwitchUi(targetEnvironment = null) {
   els.requestorSelect.innerHTML = '<option value="">-- Reloading Content Providers... --</option>';
   els.mvpdSelect.disabled = true;
   els.mvpdSelect.innerHTML = '<option value="">-- Reloading MVPD menu... --</option>';
+  if (els.hrServicesContainer) {
+    els.hrServicesContainer.innerHTML = `<p class="metadata-empty">Switching to ${escapeHtml(environmentLabel)}...</p>`;
+  }
   if (els.premiumServicesContainer) {
     els.premiumServicesContainer.innerHTML = `<p class="metadata-empty">Switching to ${escapeHtml(
       environmentLabel
@@ -10276,6 +10284,7 @@ const els = {
   requestorSelect: document.getElementById("requestor-select"),
   mvpdSelect: document.getElementById("mvpd-select"),
   mvpdWorkspaceLaunchBtn: document.getElementById("mvpd-workspace-launch-btn"),
+  hrServicesContainer: document.getElementById("hr-services-container"),
   premiumServicesContainer: document.getElementById("premium-services-container"),
 };
 
@@ -12006,7 +12015,14 @@ function buildMetadataItemHtml(key, value) {
 }
 
 function getPremiumCollapseKey(programmerId, serviceKey) {
-  return `${String(programmerId || "")}:${String(serviceKey || "")}`;
+  const normalizedEnvironmentKey =
+    String(getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const scopedProgrammerKey =
+    normalizedProgrammerId === "__global__"
+      ? "__global__"
+      : getEnvironmentScopedProgrammerKey(normalizedProgrammerId, normalizedEnvironmentKey) || normalizedProgrammerId;
+  return `${normalizedEnvironmentKey}:${scopedProgrammerKey}:${String(serviceKey || "").trim()}`;
 }
 
 function getPremiumSectionCollapsed(programmerId, serviceKey) {
@@ -45555,6 +45571,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
 }
 
 function renderPremiumServicesLoading(programmer, options = {}) {
+  renderHrSections(null, programmer, { loading: true });
   if (!els.premiumServicesContainer) {
     return;
   }
@@ -45582,6 +45599,8 @@ function renderPremiumServicesLoading(programmer, options = {}) {
 }
 
 function renderPremiumServicesError(error, options = {}) {
+  const reason = error instanceof Error ? error.message : String(error);
+  renderHrSections(null, resolveSelectedProgrammer(), { error: reason });
   if (!els.premiumServicesContainer) {
     return;
   }
@@ -45601,7 +45620,6 @@ function renderPremiumServicesError(error, options = {}) {
   degradationWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), null, 0, {
     controllerReason,
   });
-  const reason = error instanceof Error ? error.message : String(error);
   els.premiumServicesContainer.innerHTML = `<p class="metadata-empty service-error">${escapeHtml(reason)}</p>`;
 }
 
@@ -45614,7 +45632,151 @@ function shouldShowCmService(cmService) {
   return matchedTenants.length > 0;
 }
 
+function getDetectedPremiumServiceKeys(services) {
+  if (!services || typeof services !== "object") {
+    return [];
+  }
+  return PREMIUM_SERVICE_DISPLAY_ORDER.filter((serviceKey) => {
+    if (serviceKey === "esmWorkspace") {
+      return hasEsmScopedApp(services);
+    }
+    if (serviceKey === "cm" || serviceKey === "cmMvpd") {
+      return shouldShowCmService(services?.[serviceKey]);
+    }
+    return Boolean(services?.[serviceKey]);
+  });
+}
+
+function getDetectedPremiumServiceLabels(services) {
+  return getDetectedPremiumServiceKeys(services).map((serviceKey) => PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey);
+}
+
+function getHrContextSummary(programmer = null) {
+  const environment = getActiveAdobePassEnvironment();
+  const environmentLabel = String(environment?.label || environment?.key || "Environment").trim() || "Environment";
+  const mediaCompanyLabel =
+    firstNonEmptyString([
+      String(programmer?.mediaCompanyName || "").trim(),
+      String(programmer?.programmerName || "").trim(),
+      String(programmer?.programmerId || "").trim(),
+    ]) || "Media Company";
+  return {
+    environmentLabel,
+    mediaCompanyLabel,
+    compositeLabel: `${environmentLabel} x ${mediaCompanyLabel}`,
+    hasProgrammerContext: Boolean(
+      String(programmer?.mediaCompanyName || programmer?.programmerName || programmer?.programmerId || "").trim()
+    ),
+  };
+}
+
+function buildHrServiceListHtml(labels, fallbackText = "") {
+  if (Array.isArray(labels) && labels.length > 0) {
+    return `
+      <article class="metadata-item">
+        <p class="metadata-key">Detected Adobe PASS Services</p>
+        <ul class="hr-context-service-list">
+          ${labels.map((label) => `<li class="hr-context-service-pill">${escapeHtml(label)}</li>`).join("")}
+        </ul>
+      </article>
+    `;
+  }
+  return buildMetadataItemHtml("Detected Adobe PASS Services", fallbackText);
+}
+
+function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services = null, options = {}) {
+  const context = getHrContextSummary(programmer);
+  const contextItemHtml = buildMetadataItemHtml("Context", context.compositeLabel);
+  if (sectionKey === "health") {
+    return `${contextItemHtml}${buildMetadataItemHtml("Status", "TODO: pull ESM, CMU? Health, Splunk info soon...")}`;
+  }
+
+  const detectedServiceLabels = getDetectedPremiumServiceLabels(services);
+  const detectedServiceSummary = detectedServiceLabels.join(", ");
+  const errorText = String(options?.error || "").trim();
+  let fallbackSummary = "";
+  if (errorText) {
+    fallbackSummary = `Service detection unavailable: ${errorText}`;
+  } else if (options.loading === true && context.hasProgrammerContext) {
+    fallbackSummary = `Detecting Adobe PASS services for ${context.compositeLabel}...`;
+  } else if (context.hasProgrammerContext) {
+    fallbackSummary = "No Adobe PASS services detected yet.";
+  } else {
+    fallbackSummary = "Select a media company to view detected services.";
+  }
+  const howtoSubject = detectedServiceSummary || fallbackSummary;
+  return `
+    ${contextItemHtml}
+    ${buildHrServiceListHtml(detectedServiceLabels, fallbackSummary)}
+    ${buildMetadataItemHtml("Docs", `HOWTO: ${howtoSubject} quick docs coming soon...`)}
+  `;
+}
+
+function createHrContextSection(programmer, sectionKey, services = null, options = {}) {
+  const title = HR_CONTEXT_SECTION_TITLE_BY_KEY[sectionKey] || String(sectionKey || "").trim().toUpperCase();
+  const context = getHrContextSummary(programmer);
+  const hoverMessage = `${title} guidance for ${context.compositeLabel}`;
+  const initialCollapsed = getPremiumSectionCollapsed(programmer?.programmerId, sectionKey);
+  const section = document.createElement("article");
+  section.className = `metadata-section hr-context-section hr-context-section--${sectionKey}`;
+  section.innerHTML = `
+    <details class="service-box-details"${initialCollapsed ? "" : " open"}>
+      <summary
+        class="metadata-header service-box-header"
+        title="${escapeHtml(hoverMessage)}"
+        aria-label="${escapeHtml(hoverMessage)}"
+      >
+        <span>${escapeHtml(title)}</span>
+        <span class="collapse-icon">▼</span>
+      </summary>
+      <div class="metadata-container service-box-container">
+        <div class="hr-context-content">
+          ${buildHrContextSectionBodyHtml(sectionKey, programmer, services, options)}
+        </div>
+      </div>
+    </details>
+  `;
+
+  const detailsElement = section.querySelector(".service-box-details");
+  const toggleButton = section.querySelector(".service-box-header");
+  const container = section.querySelector(".service-box-container");
+  if (detailsElement && toggleButton && container) {
+    const syncOpenState = () => {
+      const collapsed = detailsElement.open !== true;
+      toggleButton.classList.toggle("collapsed", collapsed);
+      toggleButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      container.classList.toggle("collapsed", collapsed);
+      container.hidden = collapsed;
+      container.setAttribute("aria-hidden", collapsed ? "true" : "false");
+      setPremiumSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
+    };
+    detailsElement.addEventListener("toggle", syncOpenState);
+    syncOpenState();
+  }
+
+  return section;
+}
+
+function renderHrSections(services, programmer = null, options = {}) {
+  if (!els.hrServicesContainer) {
+    return;
+  }
+
+  els.hrServicesContainer.innerHTML = "";
+  const topRail = document.createElement("p");
+  topRail.className = "hr-context-rail";
+  topRail.textContent = "- HR -";
+  topRail.setAttribute("aria-hidden", "true");
+  const bottomRail = topRail.cloneNode(true);
+  els.hrServicesContainer.appendChild(topRail);
+  for (const sectionKey of HR_CONTEXT_SECTION_DISPLAY_ORDER) {
+    els.hrServicesContainer.appendChild(createHrContextSection(programmer, sectionKey, services, options));
+  }
+  els.hrServicesContainer.appendChild(bottomRail);
+}
+
 function renderPremiumServices(services, programmer = null, options = {}) {
+  renderHrSections(services, programmer);
   if (!els.premiumServicesContainer) {
     return;
   }
@@ -45662,15 +45824,7 @@ function renderPremiumServices(services, programmer = null, options = {}) {
       '<p class="metadata-empty">No premium scoped applications loaded yet.</p>';
     return;
   }
-  const availableKeys = PREMIUM_SERVICE_DISPLAY_ORDER.filter((serviceKey) => {
-    if (serviceKey === "esmWorkspace") {
-      return hasEsmScopedApp(services);
-    }
-    if (serviceKey === "cm" || serviceKey === "cmMvpd") {
-      return shouldShowCmService(services?.[serviceKey]);
-    }
-    return Boolean(services?.[serviceKey]);
-  });
+  const availableKeys = getDetectedPremiumServiceKeys(services);
   const hasCmContainer = availableKeys.includes("cm") || availableKeys.includes("cmMvpd");
   cmBroadcastSelectedControllerState(programmer, services, 0, {
     controllerReason,
@@ -50590,9 +50744,24 @@ async function triggerGetLatestWorkflow() {
     }
     state.latestCommitSha = String(response?.latestCommitSha || state.latestCommitSha || "").trim();
     state.latestVersion = String(response?.latestVersion || state.latestVersion || "").trim();
-    state.updateAvailable = Boolean(state.updateAvailable || response?.latestVersion);
+    state.updateCheckError = String(response?.checkError || state.updateCheckError || "").trim();
+    if (typeof response?.updateAvailable === "boolean") {
+      state.updateAvailable = response.updateAvailable;
+    }
     syncAvatarMenuUpdateAction();
     syncSignInUpdateIndicator();
+    if (response?.downloadOpened === true && response?.extensionsOpened === true) {
+      setStatus("Opened latest UnderPAR package and chrome://extensions.", "success");
+      return;
+    }
+    if (response?.downloadOpened === true) {
+      setStatus("Opened latest UnderPAR package. Open chrome://extensions to finish the update.", "info");
+      return;
+    }
+    if (response?.extensionsOpened === true) {
+      setStatus("Opened chrome://extensions. Open the latest UnderPAR package to finish the update.", "info");
+      return;
+    }
     setStatus("Opening latest UnderPAR package and chrome://extensions...", "info");
   } catch (error) {
     setStatus(`Get Latest failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -52739,16 +52908,7 @@ async function refreshProgrammerPanels(options = {}) {
   });
   mvpdWorkspaceBroadcastSelectedControllerState(programmer, null);
 
-  let vaultReadiness = null;
-  if (!forcePremiumRefresh) {
-    await ensurePassVaultLoaded({ forceReload: false }).catch(() => null);
-    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
-      return;
-    }
-    vaultReadiness = getPassVaultProgrammerReuseReadiness(programmer.programmerId);
-  }
-
-  let cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+  let cachedServices = forcePremiumRefresh ? null : getCurrentPremiumAppsSnapshot(programmer.programmerId);
   const getCachedServiceReuseState = (services = null) => {
     const cachedIncludesCm = Boolean(services && Object.prototype.hasOwnProperty.call(services, "cm"));
     const cachedCmMvpdSelectionKey = String(services?.cmMvpdSelectionKey || "").trim();
@@ -52771,8 +52931,26 @@ async function refreshProgrammerPanels(options = {}) {
       instantRenderReady: Boolean(services && typeof services === "object" && (cachedCmRuntimeReady || shouldReuseCachedServices)),
     };
   };
-
   let cachedReuseState = getCachedServiceReuseState(cachedServices);
+  if (cachedReuseState.instantRenderReady) {
+    setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
+    provisionalServices = cachedServices;
+    emitPremiumServiceDecisionLogs(programmer, cachedServices);
+    renderPremiumServices(cachedServices, programmer, { controllerReason });
+  } else {
+    renderPremiumServicesLoading(programmer, { controllerReason });
+  }
+
+  let vaultReadiness = null;
+  if (!forcePremiumRefresh) {
+    await ensurePassVaultLoaded({ forceReload: false }).catch(() => null);
+    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+      return;
+    }
+    vaultReadiness = getPassVaultProgrammerReuseReadiness(programmer.programmerId);
+  }
+  cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || cachedServices;
+  cachedReuseState = getCachedServiceReuseState(cachedServices);
   // VAULT says load once: a complete/reusable ENV x Media Company record must
   // restore into runtime before UnderPAR is allowed to show a loading shell.
   const shouldRestoreCompleteVaultSnapshot =
@@ -52814,7 +52992,7 @@ async function refreshProgrammerPanels(options = {}) {
   cachedReuseState = getCachedServiceReuseState(cachedServices);
   const shouldReuseCachedServices = cachedReuseState.shouldReuseCachedServices;
   const cachedCmRuntimeReady = cachedReuseState.cachedCmRuntimeReady;
-  if (cachedReuseState.instantRenderReady) {
+  if (cachedReuseState.instantRenderReady && !provisionalServices) {
     // Repeat selection must paint instantly from the hydrated VAULT/runtime snapshot.
     // CM runtime warmup can continue afterward without dropping the whole UI back
     // to a loading shell.
@@ -52842,10 +53020,6 @@ async function refreshProgrammerPanels(options = {}) {
     emitPremiumServiceDecisionLogs(programmer, reusedServices);
     renderPremiumServices(reusedServices, programmer, { controllerReason });
     return;
-  }
-
-  if (!provisionalServices) {
-    renderPremiumServicesLoading(programmer, { controllerReason });
   }
   try {
     const premiumAppsPromise = ensurePremiumAppsForProgrammer(programmer, {

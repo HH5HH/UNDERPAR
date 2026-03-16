@@ -19,26 +19,14 @@ rm -f "$output_path"
 
 mkdir -p "$staging_dir/$archive_root_name"
 
-files=()
-while IFS= read -r -d '' file; do
-  case "$file" in
-    *.zip|.DS_Store|*/.DS_Store)
-      continue
-      ;;
-  esac
-  [[ -e "$file" ]] || continue
-  files+=("$file")
-done < <(git ls-files -z)
+git checkout-index --all --force --prefix="$staging_dir/$archive_root_name/"
 
-if [[ ${#files[@]} -eq 0 ]]; then
+if [[ ! -d "$staging_dir/$archive_root_name" ]]; then
   echo "No repository files available to package." >&2
   exit 1
 fi
 
-for file in "${files[@]}"; do
-  mkdir -p "$staging_dir/$archive_root_name/$(dirname "$file")"
-  cp "$file" "$staging_dir/$archive_root_name/$file"
-done
+find "$staging_dir/$archive_root_name" \( -name '*.zip' -o -name '.DS_Store' \) -delete
 
 (
   cd "$staging_dir"
