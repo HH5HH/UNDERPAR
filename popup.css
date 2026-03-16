@@ -1309,6 +1309,7 @@ select:disabled {
 }
 
 .hr-context-service-pill {
+  appearance: none;
   display: inline-flex;
   align-items: center;
   padding: 4px 8px;
@@ -1320,6 +1321,20 @@ select:disabled {
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: 0.02em;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.hr-context-service-pill:hover {
+  transform: translateY(-1px);
+  border-color: var(--service-accent);
+  box-shadow: 0 2px 8px var(--service-accent-soft);
+}
+
+.hr-context-service-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--service-accent-soft);
 }
 
 .cm-shell {

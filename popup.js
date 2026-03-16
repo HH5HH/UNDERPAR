@@ -123,6 +123,14 @@ const PREMIUM_SERVICE_TITLE_BY_KEY = {
   esmWorkspace: "ESM",
   restV2: "REST V2",
 };
+const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = {
+  cm: "https://streams-stage.adobeprimetime.com/swagger-ui/index.html",
+  cmMvpd: "https://streams-stage.adobeprimetime.com/swagger-ui/index.html",
+  degradation: "https://tve.zendesk.com/hc/en-us/articles/33912526308372-Adobe-Pass-Authentication-Degradation-API-v3",
+  esmWorkspace:
+    "https://experienceleague.adobe.com/en/docs/pass/authentication/integration-guide-programmers/features-premium/esm/entitlement-service-monitoring-api",
+  restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/",
+};
 const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["health", "learning"];
 const HR_CONTEXT_SECTION_TITLE_BY_KEY = {
   health: "HEALTH",
@@ -45649,6 +45657,14 @@ function getDetectedPremiumServiceLabels(services) {
   return getDetectedPremiumServiceKeys(services).map((serviceKey) => PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey);
 }
 
+function getDetectedPremiumServiceEntries(services) {
+  return getDetectedPremiumServiceKeys(services).map((serviceKey) => ({
+    serviceKey,
+    label: PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey,
+    documentationUrl: String(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY[serviceKey] || "").trim(),
+  }));
+}
+
 function getHrContextSummary(programmer = null) {
   const environment = getActiveAdobePassEnvironment();
   const environmentLabel = String(environment?.label || environment?.key || "Environment").trim() || "Environment";
@@ -45685,13 +45701,31 @@ function setHrContextSectionsVisibility(visible = false) {
   }
 }
 
-function buildHrServiceListHtml(labels, fallbackText = "") {
-  if (Array.isArray(labels) && labels.length > 0) {
+function buildHrServiceListHtml(entries, fallbackText = "") {
+  if (Array.isArray(entries) && entries.length > 0) {
     return `
       <article class="metadata-item">
         <p class="metadata-key">Detected Adobe PASS Services</p>
         <ul class="hr-context-service-list">
-          ${labels.map((label) => `<li class="hr-context-service-pill">${escapeHtml(label)}</li>`).join("")}
+          ${entries
+            .map((entry) => {
+              const label = String(entry?.label || "").trim();
+              const serviceKey = String(entry?.serviceKey || "").trim();
+              const documentationUrl = String(entry?.documentationUrl || "").trim();
+              const pillLabel = label || serviceKey || "Service";
+              const actionTitle = `Open ${pillLabel} documentation in main content`;
+              return `<li>
+                <button
+                  type="button"
+                  class="hr-context-service-pill"
+                  data-service-doc-key="${escapeHtml(serviceKey)}"
+                  data-service-doc-url="${escapeHtml(documentationUrl)}"
+                  title="${escapeHtml(actionTitle)}"
+                  aria-label="${escapeHtml(actionTitle)}"
+                >${escapeHtml(pillLabel)}</button>
+              </li>`;
+            })
+            .join("")}
         </ul>
       </article>
     `;
@@ -45706,7 +45740,8 @@ function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services =
     return `${contextItemHtml}${buildMetadataItemHtml("Status", "TODO: pull ESM, CMU? Health, Splunk info soon...")}`;
   }
 
-  const detectedServiceLabels = getDetectedPremiumServiceLabels(services);
+  const detectedServiceEntries = getDetectedPremiumServiceEntries(services);
+  const detectedServiceLabels = detectedServiceEntries.map((entry) => String(entry?.label || "").trim()).filter(Boolean);
   const detectedServiceSummary = detectedServiceLabels.join(", ");
   const errorText = String(options?.error || "").trim();
   let fallbackSummary = "";
@@ -45722,9 +45757,70 @@ function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services =
   const howtoSubject = detectedServiceSummary || fallbackSummary;
   return `
     ${contextItemHtml}
-    ${buildHrServiceListHtml(detectedServiceLabels, fallbackSummary)}
+    ${buildHrServiceListHtml(detectedServiceEntries, fallbackSummary)}
     ${buildMetadataItemHtml("Docs", `HOWTO: ${howtoSubject} quick docs coming soon...`)}
   `;
+}
+
+async function openPremiumServiceDocumentation(serviceKey = "", requestedUrl = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const documentationUrl = String(requestedUrl || PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY[normalizedServiceKey] || "").trim();
+  const serviceLabel = PREMIUM_SERVICE_TITLE_BY_KEY[normalizedServiceKey] || normalizedServiceKey || "service";
+
+  if (!documentationUrl) {
+    setStatus(`Documentation URL is not configured for ${serviceLabel}.`, "error");
+    return { ok: false, error: "missing-documentation-url" };
+  }
+
+  try {
+    const targetWindowId = await resolveSidepanelControllerWindowId(false);
+    const tabs = await chrome.tabs.query(targetWindowId > 0 ? { windowId: targetWindowId, active: true } : { currentWindow: true, active: true });
+    const activeTab = Array.isArray(tabs) ? tabs.find((tab) => Number(tab?.id || 0) > 0) || null : null;
+
+    if (activeTab?.id) {
+      const updated = await chrome.tabs.update(Number(activeTab.id), {
+        url: documentationUrl,
+        active: true,
+      });
+      const windowId = Number(updated?.windowId || activeTab.windowId || 0);
+      if (windowId > 0) {
+        await chrome.windows.update(windowId, { focused: true }).catch(() => null);
+      }
+      return {
+        ok: true,
+        reused: true,
+        tabId: Number(updated?.id || activeTab.id || 0),
+        windowId,
+        url: documentationUrl,
+      };
+    }
+
+    const created = await chrome.tabs.create({
+      url: documentationUrl,
+      active: true,
+      ...(targetWindowId > 0 ? { windowId: targetWindowId } : {}),
+    });
+    const windowId = Number(created?.windowId || targetWindowId || 0);
+    if (windowId > 0) {
+      await chrome.windows.update(windowId, { focused: true }).catch(() => null);
+    }
+    return {
+      ok: true,
+      reused: false,
+      tabId: Number(created?.id || 0),
+      windowId,
+      url: documentationUrl,
+    };
+  } catch (error) {
+    setStatus(
+      error instanceof Error ? error.message : `Unable to open ${serviceLabel} documentation in main content.`,
+      "error"
+    );
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error || "Unable to open service documentation."),
+    };
+  }
 }
 
 function createHrContextSection(programmer, sectionKey, services = null, options = {}) {
@@ -64536,6 +64632,25 @@ function registerEventHandlers() {
         return;
       }
       handleCollapsibleToggleEvent(event);
+    });
+  }
+
+  if (els.hrServicesContainer) {
+    els.hrServicesContainer.addEventListener("click", (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const serviceDocButton =
+        event.target instanceof Element ? event.target.closest("[data-service-doc-key][data-service-doc-url]") : null;
+      if (!serviceDocButton) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void openPremiumServiceDocumentation(
+        String(serviceDocButton.getAttribute("data-service-doc-key") || ""),
+        String(serviceDocButton.getAttribute("data-service-doc-url") || "")
+      );
     });
   }
 

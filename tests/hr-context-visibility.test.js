@@ -115,3 +115,22 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.doesNotMatch(popupSource, />HR</);
   assert.doesNotMatch(popupSource, /textContent = "- HR -"/);
 });
+
+test("detected service pills are wired to documentation urls for the learning flow", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+
+  assert.match(popupSource, /PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY/);
+  assert.match(
+    popupSource,
+    /https:\/\/experienceleague\.adobe\.com\/en\/docs\/pass\/authentication\/integration-guide-programmers\/features-premium\/esm\/entitlement-service-monitoring-api/
+  );
+  assert.match(
+    popupSource,
+    /https:\/\/tve\.zendesk\.com\/hc\/en-us\/articles\/33912526308372-Adobe-Pass-Authentication-Degradation-API-v3/
+  );
+  assert.match(popupSource, /https:\/\/developer\.adobe\.com\/adobe-pass\/api\/rest_api_v2\/interactive\//);
+  assert.match(popupSource, /https:\/\/streams-stage\.adobeprimetime\.com\/swagger-ui\/index\.html/);
+  assert.match(popupSource, /data-service-doc-key/);
+  assert.match(popupSource, /data-service-doc-url/);
+  assert.match(popupSource, /openPremiumServiceDocumentation/);
+});
