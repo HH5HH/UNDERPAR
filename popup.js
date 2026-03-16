@@ -20,6 +20,8 @@ const SPLUNK_FETCH_REQUEST_TYPE = "underpar:splunkFetch";
 const LEGACY_SPLUNK_FETCH_REQUEST_TYPE = "mincloudlogin:splunkFetch";
 const UP_DEVTOOLS_VAULT_ACTION_REQUEST_TYPE = "underpar:upDevtoolsVaultAction";
 const CONSOLE_LOG_RELAY_REQUEST_TYPE = "underpar:consoleLog";
+const UNDERPAR_GET_UPDATE_STATE_REQUEST_TYPE = "underpar:getUpdateState";
+const UNDERPAR_GET_LATEST_REQUEST_TYPE = "underpar:getLatest";
 const UNDERPAR_NETWORK_ACTIVITY_MESSAGE_TYPE = "underpar:networkActivity";
 const GLOBAL_NETWORK_RELAY_MESSAGE_TYPES = new Set([
   IMS_FETCH_REQUEST_TYPE,
@@ -8265,7 +8267,24 @@ function buildActiveProgrammerConsoleApplicationsUrl(programmerId = "") {
     return "";
   }
   const environment = getActiveAdobePassEnvironment();
-  return `${String(environment.consoleProgrammersUrl || "").replace(/\/+$/, "")}/${encodeURIComponent(normalizedProgrammerId)}/applications`;
+  const programmersUrl = String(environment?.consoleProgrammersUrl || "").replace(/\/+$/, "");
+  if (!programmersUrl) {
+    return "";
+  }
+  return `${programmersUrl}/${encodeURIComponent(normalizedProgrammerId)}/applications`;
+}
+
+async function openActiveProgrammerConsoleApplications(programmer = null, options = {}) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const consoleUrl = buildActiveProgrammerConsoleApplicationsUrl(programmerId);
+  if (!consoleUrl) {
+    throw new Error("Select a Media Company first.");
+  }
+  return chrome.tabs.create({
+    url: consoleUrl,
+    active: options.activate !== false,
+  });
 }
 
 function rewriteAdobePassServiceUrl(urlValue, serviceKey = "console") {
@@ -10022,6 +10041,11 @@ const state = {
   restrictedRecoveryLabel: "",
   sessionReady: false,
   avatarMenuOpen: false,
+  updateAvailable: false,
+  latestVersion: "",
+  latestCommitSha: "",
+  updateCheckError: "",
+  updateCheckPending: false,
   avatarResolvedUrl: "",
   avatarObjectUrl: "",
   avatarResolveKey: "",
@@ -10243,8 +10267,10 @@ const els = {
   avatarMenuOrg: document.getElementById("avatar-menu-org"),
   avatarMenuDetails: document.getElementById("avatar-menu-details"),
   avatarMenuSystem: document.getElementById("avatar-menu-system"),
+  getLatestBtn: document.getElementById("get-latest-btn"),
   signOutBtn: document.getElementById("sign-out-btn"),
   mediaCompanySelect: document.getElementById("media-company-select"),
+  mediaCompanyConsoleLaunchBtn: document.getElementById("media-company-console-launch-btn"),
   requestorSelect: document.getElementById("requestor-select"),
   mvpdSelect: document.getElementById("mvpd-select"),
   mvpdWorkspaceLaunchBtn: document.getElementById("mvpd-workspace-launch-btn"),
@@ -38755,6 +38781,43 @@ function syncMvpdWorkspaceToolForSection(section, programmer = null, services = 
   }
 }
 
+function syncGlobalMediaCompanyConsoleLauncher(programmer = null) {
+  const button = els.mediaCompanyConsoleLaunchBtn;
+  const row = els.mediaCompanySelect?.closest(".media-company-select-row") || null;
+  if (!button) {
+    return;
+  }
+  if (row && button.parentElement !== row) {
+    row.appendChild(button);
+  }
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const consoleUrl = buildActiveProgrammerConsoleApplicationsUrl(programmerId);
+  const hasSelectedProgrammer = Boolean(programmerId && consoleUrl);
+  button.classList.toggle("is-hidden", !hasSelectedProgrammer);
+  button.style.display = hasSelectedProgrammer ? "inline-flex" : "none";
+  button.disabled = !hasSelectedProgrammer;
+  button.setAttribute("aria-hidden", hasSelectedProgrammer ? "false" : "true");
+  button.tabIndex = hasSelectedProgrammer ? 0 : -1;
+  button.dataset.consoleUrl = hasSelectedProgrammer ? consoleUrl : "";
+  if (!hasSelectedProgrammer) {
+    button.title = "";
+    button.setAttribute("aria-label", "Open Media Company Registered Applications");
+    return;
+  }
+  const mediaCompanyLabel = firstNonEmptyString([
+    resolvedProgrammer?.programmerName,
+    resolvedProgrammer?.displayName,
+    resolvedProgrammer?.programmerId,
+    "selected Media Company",
+  ]);
+  const environment = getActiveAdobePassEnvironment();
+  const environmentLabel = String(environment?.label || environment?.key || "").trim();
+  const hoverText = `Open ${mediaCompanyLabel} Registered Applications in Adobe Pass Console${environmentLabel ? ` (${environmentLabel})` : ""}`;
+  button.title = hoverText;
+  button.setAttribute("aria-label", hoverText);
+}
+
 function syncGlobalMvpdWorkspaceLauncher(programmer = null, services = null) {
   const button = els.mvpdWorkspaceLaunchBtn;
   const row = els.mvpdSelect?.closest(".mvpd-select-row") || null;
@@ -38784,6 +38847,11 @@ function syncGlobalMvpdWorkspaceLauncher(programmer = null, services = null) {
   button.setAttribute("aria-label", hoverText);
 }
 
+function syncGlobalQuickLaunchButtons(programmer = null, services = null) {
+  syncGlobalMediaCompanyConsoleLauncher(programmer);
+  syncGlobalMvpdWorkspaceLauncher(programmer, services);
+}
+
 function refreshMvpdWorkspaceTools(options = {}) {
   const selectedProgrammer = resolveSelectedProgrammer();
   const selectedServices = selectedProgrammer?.programmerId
@@ -38795,7 +38863,7 @@ function refreshMvpdWorkspaceTools(options = {}) {
     syncMvpdWorkspaceToolForSection(section, selectedProgrammer, selectedServices);
     syncRestV2BobtoolsLauncher(section, selectedProgrammer, selectedServices?.restV2 || null);
   });
-  syncGlobalMvpdWorkspaceLauncher(selectedProgrammer, selectedServices);
+  syncGlobalQuickLaunchButtons(selectedProgrammer, selectedServices);
   if (restWorkspaceHasOpenTab()) {
     const selectionContext = restWorkspaceGetSelectionContextFromCurrentSelection(selectedProgrammer);
     restWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext);
@@ -50431,6 +50499,55 @@ function getAvatarMenuCmSummaryState() {
   };
 }
 
+function syncAvatarMenuUpdateAction() {
+  const button = els.getLatestBtn;
+  if (!button) {
+    return;
+  }
+  const updateAvailable = state.updateAvailable === true;
+  const currentVersion = String(chrome.runtime.getManifest()?.version || "").trim();
+  const latestVersion = String(state.latestVersion || "").trim();
+  button.hidden = !updateAvailable;
+  button.disabled = state.updateCheckPending === true;
+  button.textContent = "Get Latest";
+  const title = updateAvailable
+    ? `Open UnderPAR ${latestVersion ? `v${latestVersion}` : "latest"} from GitHub and chrome://extensions${currentVersion ? ` (current v${currentVersion})` : ""}`
+    : "Get Latest";
+  button.title = title;
+  button.setAttribute("aria-label", title);
+}
+
+function applyAvatarMenuUpdateState(updateInfo = null) {
+  const info = updateInfo && typeof updateInfo === "object" ? updateInfo : null;
+  state.updateAvailable = info?.updateAvailable === true;
+  state.latestVersion = String(info?.latestVersion || "").trim();
+  state.latestCommitSha = String(info?.latestCommitSha || "").trim();
+  state.updateCheckError = String(info?.checkError || "").trim();
+  syncAvatarMenuUpdateAction();
+}
+
+async function loadAvatarMenuUpdateState(force = false) {
+  state.updateCheckPending = true;
+  syncAvatarMenuUpdateAction();
+  try {
+    const response = await sendRuntimeMessageSafe({
+      type: UNDERPAR_GET_UPDATE_STATE_REQUEST_TYPE,
+      force: force === true,
+    });
+    applyAvatarMenuUpdateState(response || null);
+    return response || null;
+  } catch {
+    applyAvatarMenuUpdateState(null);
+    return null;
+  } finally {
+    state.updateCheckPending = false;
+    syncAvatarMenuUpdateAction();
+    if (state.avatarMenuOpen) {
+      renderAvatarMenu();
+    }
+  }
+}
+
 function renderAvatarMenu() {
   if (!els.avatarMenu || !state.sessionReady || !state.loginData || state.restricted) {
     closeAvatarMenu();
@@ -50542,6 +50659,7 @@ function renderAvatarMenu() {
     els.avatarMenuSystem.hidden = false;
   }
 
+  syncAvatarMenuUpdateAction();
   els.avatarMenu.hidden = !state.avatarMenuOpen;
 }
 
@@ -50553,6 +50671,7 @@ function openAvatarMenu() {
   prefetchCmTenantsCatalogInBackground("avatar-menu-open", { forceRefresh: false });
   prefetchCmConsoleBootstrapSummaryInBackground("avatar-menu-open", { forceRefresh: false });
   renderAvatarMenu();
+  void loadAvatarMenuUpdateState(false);
 }
 
 function toggleAvatarMenu() {
@@ -52452,7 +52571,7 @@ function populateMediaCompanySelect() {
 
   els.mvpdSelect.disabled = true;
   els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
-  syncGlobalMvpdWorkspaceLauncher();
+  syncGlobalQuickLaunchButtons();
   renderPremiumServices(null);
   refreshRestV2LoginPanels();
   refreshMvpdWorkspaceTools();
@@ -52488,7 +52607,7 @@ function populateRequestorSelect() {
 
   els.mvpdSelect.disabled = true;
   els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
-  syncGlobalMvpdWorkspaceLauncher();
+  syncGlobalQuickLaunchButtons();
   refreshRestV2LoginPanels();
   refreshMvpdWorkspaceTools();
 }
@@ -63010,7 +63129,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
     els.mvpdSelect.disabled = true;
     els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
     state.selectedMvpdId = "";
-    syncGlobalMvpdWorkspaceLauncher();
+    syncGlobalQuickLaunchButtons();
     refreshRestV2LoginPanels();
     refreshMvpdWorkspaceTools({ controllerReason });
     const selectedProgrammer = resolveSelectedProgrammer();
@@ -63043,7 +63162,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
       els.mvpdSelect.disabled = true;
       els.mvpdSelect.innerHTML = '<option value="">-- No MVPDs available --</option>';
       state.selectedMvpdId = "";
-      syncGlobalMvpdWorkspaceLauncher();
+      syncGlobalQuickLaunchButtons();
       refreshRestV2LoginPanels();
       return;
     }
@@ -63070,7 +63189,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
     els.mvpdSelect.disabled = false;
     state.selectedMvpdId = "";
     els.mvpdSelect.value = "";
-    syncGlobalMvpdWorkspaceLauncher();
+    syncGlobalQuickLaunchButtons();
     refreshRestV2LoginPanels();
     refreshMvpdWorkspaceTools();
     const selectedProgrammer = resolveSelectedProgrammer();
@@ -63093,7 +63212,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
     els.mvpdSelect.disabled = true;
     els.mvpdSelect.innerHTML = '<option value="">-- MVPD config unavailable --</option>';
     state.selectedMvpdId = "";
-    syncGlobalMvpdWorkspaceLauncher();
+    syncGlobalQuickLaunchButtons();
     refreshRestV2LoginPanels();
     refreshMvpdWorkspaceTools();
     const selectedProgrammer = resolveSelectedProgrammer();
@@ -63757,7 +63876,7 @@ function render() {
   if (!state.busy) {
     els.authBtn.title = "Account menu";
   }
-  syncGlobalMvpdWorkspaceLauncher();
+  syncGlobalQuickLaunchButtons();
   renderAvatarMenu();
   void consumePendingUnderparEsmDeeplink();
 }
@@ -64101,6 +64220,44 @@ function registerEventHandlers() {
     });
   }
 
+  if (els.getLatestBtn) {
+    els.getLatestBtn.addEventListener("click", async () => {
+      if (state.updateCheckPending) {
+        return;
+      }
+      closeAvatarMenu();
+      setStatus("Opening latest UnderPAR package and chrome://extensions...", "info");
+      try {
+        const response = await sendRuntimeMessageSafe({
+          type: UNDERPAR_GET_LATEST_REQUEST_TYPE,
+        });
+        if (response?.ok === false) {
+          setStatus(`Get Latest failed: ${response.error || "Unknown error"}`, "error");
+          return;
+        }
+        state.latestCommitSha = String(response?.latestCommitSha || state.latestCommitSha || "").trim();
+        state.latestVersion = String(response?.latestVersion || state.latestVersion || "").trim();
+        state.updateAvailable = Boolean(state.updateAvailable || response?.latestVersion);
+        setStatus("Opening latest UnderPAR package and chrome://extensions...", "info");
+      } catch (error) {
+        setStatus(`Get Latest failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    });
+  }
+
+  if (els.mediaCompanyConsoleLaunchBtn) {
+    els.mediaCompanyConsoleLaunchBtn.addEventListener("click", async (event) => {
+      event.preventDefault();
+      try {
+        await openActiveProgrammerConsoleApplications(resolveSelectedProgrammer(), {
+          activate: true,
+        });
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error), "error");
+      }
+    });
+  }
+
   if (els.mvpdWorkspaceLaunchBtn) {
     els.mvpdWorkspaceLaunchBtn.addEventListener("click", async (event) => {
       event.preventDefault();
@@ -64225,7 +64382,7 @@ function registerEventHandlers() {
     const mvpdSelectionLabel = state.selectedMvpdId
       ? String(getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), state.selectedMvpdId) || "")
       : "";
-    syncGlobalMvpdWorkspaceLauncher();
+    syncGlobalQuickLaunchButtons();
     emitGlobalSelectorChangeLog("MVPD", state.selectedMvpdId, mvpdSelectionLabel);
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId

@@ -39,6 +39,8 @@ const LEGACY_DEBUG_FLOW_STORAGE_INDEX_KEY = "minclouddebug_flow_index_v1";
 const LEGACY_DEBUG_FLOW_STORAGE_PREFIX = "minclouddebug_flow_v1:";
 const BUILD_INFO_REQUEST_TYPE = "underpar:getBuildInfo";
 const LEGACY_BUILD_INFO_REQUEST_TYPE = "mincloudlogin:getBuildInfo";
+const UNDERPAR_GET_UPDATE_STATE_REQUEST_TYPE = "underpar:getUpdateState";
+const UNDERPAR_GET_LATEST_REQUEST_TYPE = "underpar:getLatest";
 const FETCH_AVATAR_REQUEST_TYPE = "underpar:fetchAvatarDataUrl";
 const LEGACY_FETCH_AVATAR_REQUEST_TYPE = "mincloudlogin:fetchAvatarDataUrl";
 const UNDERPAR_NETWORK_ACTIVITY_MESSAGE_TYPE = "underpar:networkActivity";
@@ -59,6 +61,20 @@ const UP_DEVTOOLS_STATUS_PORT_NAME = "underpar-up-devtools-status";
 const DEBUG_FLOW_PERSIST_MAX = 8;
 const DEBUG_FLOW_PERSIST_DEBOUNCE_MS = 250;
 const IMS_RELAY_FETCH_TIMEOUT_MS = 15000;
+const UNDERPAR_GITHUB_OWNER = "HH5HH";
+const UNDERPAR_GITHUB_REPO = "UNDERPAR";
+const UNDERPAR_LATEST_REF_API_URL =
+  `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/git/ref/heads/main`;
+const UNDERPAR_LATEST_COMMIT_API_URL =
+  `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/commits/main`;
+const UNDERPAR_LATEST_MANIFEST_URL =
+  `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/main/manifest.json`;
+const UNDERPAR_LATEST_MANIFEST_API_URL =
+  `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/contents/manifest.json?ref=main`;
+const UNDERPAR_LATEST_PACKAGE_URL =
+  `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/main/underpar_distro.zip`;
+const CHROME_EXTENSIONS_URL = "chrome://extensions";
+const UPDATE_CHECK_TTL_MS = 10 * 60 * 1000;
 // Redirect-host filtering mode for flow capture trimming.
 // - "exact_path": ignore only the exact redirect URL path
 // - "path_tree": ignore redirect URL path and subtree
@@ -142,6 +158,16 @@ const controllerBridgeState = {
   devtoolsStatusPorts: new Set(),
   networkActivityCount: 0,
   networkActivityContext: "",
+};
+
+const updateState = {
+  currentVersion: "",
+  latestVersion: "",
+  latestCommitSha: "",
+  updateAvailable: false,
+  lastCheckedAt: 0,
+  checkError: "",
+  inFlight: null,
 };
 
 async function configureSidePanelBehavior() {
@@ -1958,6 +1984,240 @@ async function syncBuildInfo(trigger) {
   return info;
 }
 
+function getUnderparBuildVersion() {
+  return String(chrome.runtime.getManifest()?.version || "").trim();
+}
+
+function parseVersionPart(value) {
+  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compareVersions(a, b) {
+  const aParts = String(a || "").split(".");
+  const bParts = String(b || "").split(".");
+  const length = Math.max(aParts.length, bParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const aPart = parseVersionPart(aParts[index]);
+    const bPart = parseVersionPart(bParts[index]);
+    if (aPart > bPart) {
+      return 1;
+    }
+    if (aPart < bPart) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
+function extractVersionFromManifestObject(manifest) {
+  const version = manifest?.version ? String(manifest.version).trim() : "";
+  if (!version) {
+    throw new Error("Latest version unavailable");
+  }
+  return version;
+}
+
+async function fetchLatestUnderparVersionFromRaw() {
+  const response = await fetch(UNDERPAR_LATEST_MANIFEST_URL, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const manifest = await response.json();
+  return extractVersionFromManifestObject(manifest);
+}
+
+async function fetchLatestUnderparVersionFromGithubApi() {
+  const response = await fetch(UNDERPAR_LATEST_MANIFEST_API_URL, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  const encoded = payload?.content ? String(payload.content).replace(/\s+/g, "") : "";
+  if (!encoded) {
+    throw new Error("GitHub API content unavailable");
+  }
+  let decoded = "";
+  try {
+    decoded = atob(encoded);
+  } catch {
+    throw new Error("GitHub API manifest decode failed");
+  }
+  return extractVersionFromManifestObject(JSON.parse(decoded));
+}
+
+async function fetchLatestUnderparVersion() {
+  let lastError = null;
+  for (const resolver of [fetchLatestUnderparVersionFromRaw, fetchLatestUnderparVersionFromGithubApi]) {
+    try {
+      return await resolver();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Latest version unavailable");
+}
+
+function normalizeCommitSha(value) {
+  const sha = String(value || "").trim().toLowerCase();
+  return /^[a-f0-9]{40}$/.test(sha) ? sha : "";
+}
+
+function extractCommitShaFromRefPayload(payload) {
+  return normalizeCommitSha(payload?.object?.sha);
+}
+
+function extractCommitShaFromCommitPayload(payload) {
+  return normalizeCommitSha(payload?.sha);
+}
+
+async function fetchLatestUnderparCommitShaFromRefApi() {
+  const response = await fetch(UNDERPAR_LATEST_REF_API_URL, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  const sha = extractCommitShaFromRefPayload(payload);
+  if (!sha) {
+    throw new Error("Git ref API commit SHA unavailable");
+  }
+  return sha;
+}
+
+async function fetchLatestUnderparCommitShaFromCommitApi() {
+  const response = await fetch(UNDERPAR_LATEST_COMMIT_API_URL, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  const sha = extractCommitShaFromCommitPayload(payload);
+  if (!sha) {
+    throw new Error("Commit API SHA unavailable");
+  }
+  return sha;
+}
+
+async function fetchLatestUnderparCommitSha() {
+  let lastError = null;
+  for (const resolver of [fetchLatestUnderparCommitShaFromRefApi, fetchLatestUnderparCommitShaFromCommitApi]) {
+    try {
+      return await resolver();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Latest commit SHA unavailable");
+}
+
+function withCacheBust(url) {
+  const text = String(url || "").trim();
+  if (!text) {
+    return "";
+  }
+  const value = `cacheBust=${Date.now()}`;
+  return text.includes("?") ? `${text}&${value}` : `${text}?${value}`;
+}
+
+function buildLatestUnderparPackageUrl(commitSha = "") {
+  const normalizedSha = normalizeCommitSha(commitSha);
+  const baseUrl = normalizedSha
+    ? `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/${normalizedSha}/underpar_distro.zip`
+    : UNDERPAR_LATEST_PACKAGE_URL;
+  return withCacheBust(baseUrl);
+}
+
+function getUpdateStatePayload() {
+  return {
+    currentVersion: updateState.currentVersion || getUnderparBuildVersion(),
+    latestVersion: updateState.latestVersion || "",
+    latestCommitSha: updateState.latestCommitSha || "",
+    updateAvailable: updateState.updateAvailable === true,
+    checkedAt: Number(updateState.lastCheckedAt || 0),
+    checkError: updateState.checkError || "",
+  };
+}
+
+async function refreshUpdateState(options = {}) {
+  const force = options?.force === true;
+  const now = Date.now();
+  const currentVersion = getUnderparBuildVersion();
+  updateState.currentVersion = currentVersion;
+
+  if (!force && updateState.lastCheckedAt && now - updateState.lastCheckedAt < UPDATE_CHECK_TTL_MS) {
+    return { ...getUpdateStatePayload(), changed: false };
+  }
+
+  if (updateState.inFlight) {
+    return updateState.inFlight;
+  }
+
+  updateState.inFlight = (async () => {
+    const previous = {
+      latestVersion: updateState.latestVersion,
+      latestCommitSha: updateState.latestCommitSha,
+      updateAvailable: updateState.updateAvailable === true,
+      checkError: updateState.checkError,
+    };
+    try {
+      const [latestVersion, latestCommitSha] = await Promise.all([
+        fetchLatestUnderparVersion(),
+        fetchLatestUnderparCommitSha().catch(() => ""),
+      ]);
+      updateState.latestVersion = latestVersion;
+      updateState.latestCommitSha = normalizeCommitSha(latestCommitSha);
+      updateState.updateAvailable = compareVersions(currentVersion, latestVersion) < 0;
+      updateState.checkError = "";
+    } catch (error) {
+      updateState.latestVersion = "";
+      updateState.latestCommitSha = "";
+      updateState.updateAvailable = false;
+      updateState.checkError = error instanceof Error ? error.message : "Version check failed";
+    } finally {
+      updateState.lastCheckedAt = Date.now();
+      updateState.inFlight = null;
+    }
+    const payload = getUpdateStatePayload();
+    const changed =
+      previous.latestVersion !== updateState.latestVersion ||
+      previous.latestCommitSha !== updateState.latestCommitSha ||
+      previous.updateAvailable !== (updateState.updateAvailable === true) ||
+      previous.checkError !== updateState.checkError;
+    return { ...payload, changed };
+  })();
+
+  return updateState.inFlight;
+}
+
+async function openUnderparGetLatestFlow() {
+  await refreshUpdateState({ force: true }).catch(() => {});
+  const downloadUrl = buildLatestUnderparPackageUrl(updateState.latestCommitSha);
+  const result = {
+    ok: false,
+    downloadUrl,
+    latestVersion: updateState.latestVersion || "",
+    latestCommitSha: updateState.latestCommitSha || "",
+    downloadOpened: false,
+    extensionsOpened: false,
+  };
+  try {
+    await chrome.tabs.create({ url: downloadUrl });
+    result.downloadOpened = true;
+  } catch {
+    // Continue so Chrome extensions can still open.
+  }
+  try {
+    await chrome.tabs.create({ url: CHROME_EXTENSIONS_URL });
+    result.extensionsOpened = true;
+  } catch {
+    // Ignore tab creation failures here too.
+  }
+  result.ok = result.downloadOpened || result.extensionsOpened;
+  if (!result.ok) {
+    result.error = "Unable to open update links";
+  }
+  return result;
+}
+
 function getFlowStorageKey(flowId) {
   return `${DEBUG_FLOW_STORAGE_PREFIX}${String(flowId || "")}`;
 }
@@ -3448,6 +3708,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   void ensureUnderparCmDeeplinkRedirectRule();
   void updateActionBadge();
   void syncBuildInfo(`onInstalled:${details?.reason || "unknown"}`);
+  void refreshUpdateState({ force: true });
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -3461,7 +3722,12 @@ chrome.runtime.onStartup.addListener(() => {
   void ensureUnderparCmDeeplinkRedirectRule();
   void updateActionBadge();
   void syncBuildInfo("onStartup");
+  void refreshUpdateState({ force: true });
 });
+
+globalThis.setInterval(() => {
+  void refreshUpdateState({ force: true }).catch(() => {});
+}, UPDATE_CHECK_TTL_MS);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === UNDERPAR_ESM_DEEPLINK_REQUEST_TYPE) {
@@ -3558,6 +3824,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void syncBuildInfo("buildInfoRequest")
       .then((info) => {
         sendResponse({ ok: true, info });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+
+    return true;
+  }
+
+  if (message?.type === UNDERPAR_GET_UPDATE_STATE_REQUEST_TYPE) {
+    void refreshUpdateState({ force: message?.force === true })
+      .then((info) => {
+        sendResponse(info && typeof info === "object" ? info : getUpdateStatePayload());
+      })
+      .catch(() => {
+        sendResponse(getUpdateStatePayload());
+      });
+
+    return true;
+  }
+
+  if (message?.type === UNDERPAR_GET_LATEST_REQUEST_TYPE) {
+    void openUnderparGetLatestFlow()
+      .then((result) => {
+        sendResponse(result && typeof result === "object" ? result : { ok: false, error: "Unknown error" });
       })
       .catch((error) => {
         sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });

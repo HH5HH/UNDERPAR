@@ -624,7 +624,13 @@ body[aria-busy="true"] .auth-btn::before {
   border-top: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-.sign-out-btn {
+.avatar-menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.avatar-menu-action-btn {
   width: 100%;
   height: 44px;
   border-radius: 12px;
@@ -639,8 +645,22 @@ body[aria-busy="true"] .auth-btn::before {
   padding: 0 14px;
 }
 
-.sign-out-btn:hover {
+.avatar-menu-action-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.15);
+}
+
+.avatar-menu-action-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.45);
+  outline-offset: 1px;
+}
+
+.avatar-menu-action-btn:disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.avatar-menu-action-btn--latest {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .status {
@@ -793,6 +813,10 @@ body[aria-busy="true"] .auth-btn::before {
   grid-column: 1 / -1;
 }
 
+.workflow > .field--media-company {
+  grid-column: 1 / -1;
+}
+
 #media-company-select,
 #requestor-select,
 #mvpd-select {
@@ -801,7 +825,7 @@ body[aria-busy="true"] .auth-btn::before {
   min-width: 0;
 }
 
-.mvpd-select-row {
+.picker-action-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--underpar-shell-gutter-width);
   align-items: center;
@@ -810,22 +834,22 @@ body[aria-busy="true"] .auth-btn::before {
   width: 100%;
 }
 
-.mvpd-select-row select {
+.picker-action-row select {
   grid-column: 1;
   width: 100%;
   min-width: 0;
 }
 
-.mvpd-global-workspace-btn {
+.selector-quick-launch-btn {
   grid-column: 2;
-  justify-self: start;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  justify-self: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
   border: 1px solid rgba(86, 100, 120, 0.34);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(229, 234, 240, 0.96));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84), 0 1px 2px rgba(31, 41, 55, 0.08);
-  color: #516173;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84), 0 1px 1px rgba(31, 41, 55, 0.08);
+  color: #5a6878;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -833,32 +857,32 @@ body[aria-busy="true"] .auth-btn::before {
   transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.mvpd-global-workspace-btn.is-hidden {
+.selector-quick-launch-btn.is-hidden {
   display: none;
 }
 
-.mvpd-global-workspace-btn:hover:not(:disabled) {
+.selector-quick-launch-btn:hover:not(:disabled) {
   transform: translateY(-1px);
   border-color: rgba(62, 78, 99, 0.52);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 6px 16px rgba(62, 78, 99, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 4px 12px rgba(62, 78, 99, 0.16);
   color: #324154;
 }
 
-.mvpd-global-workspace-btn:focus-visible {
+.selector-quick-launch-btn:focus-visible {
   outline: none;
   border-color: rgba(2, 101, 220, 0.78);
   box-shadow: 0 0 0 2px rgba(2, 101, 220, 0.18);
 }
 
-.mvpd-global-workspace-btn:disabled {
+.selector-quick-launch-btn:disabled {
   cursor: default;
   opacity: 0.56;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
-.mvpd-global-workspace-icon {
-  width: 18px;
-  height: 18px;
+.selector-quick-launch-icon {
+  width: 16px;
+  height: 16px;
   fill: currentColor;
 }
 
