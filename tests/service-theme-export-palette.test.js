@@ -35,7 +35,8 @@ test("ESM export surfaces use the orange service palette", () => {
   assert.match(mirroredClickEsmTemplate, /--zip-accent-900:224,\s*100,\s*0;/);
   assert.match(mirroredClickEsmTemplate, /--fg-primary:var\(--spectrum-text-color-link\);/);
   assert.match(upsViewCss, /\.ups-utility-link\s*\{[\s\S]*?color:\s*var\(--fg-primary,\s*rgb\(243,\s*117,\s*0\)\);/);
-  assert.match(upsViewCss, /\.ibeta-app,[\s\S]*\.ibeta-stage,[\s\S]*\.ups-shell,[\s\S]*width:\s*max-content;/i);
+  assert.match(upsViewCss, /\.ibeta-report-scroll-shell\s*\{[\s\S]*overflow-x:\s*auto;[\s\S]*touch-action:\s*pan-x pan-y;/i);
+  assert.match(upsViewCss, /\.ibeta-report-card\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/i);
   assert.match(megWorkspaceCss, /--meg-focus:\s*rgb\(224,\s*100,\s*0\);/i);
   assert.match(megWorkspaceCss, /--meg-saved-query-accent:\s*rgb\(243,\s*117,\s*0\);/i);
   assert.match(megWorkspaceCss, /a:hover\s*\{[\s\S]*?text-decoration:\s*underline;/i);

@@ -313,7 +313,7 @@
       measuredWidths.push(measureNodeWidth(measurementRoot));
       Array.from(
         measurementRoot.querySelectorAll(
-          ".ibeta-report-card, .ibeta-report-card .card-head, .ibeta-report-card .card-col-list, .ibeta-report-card .esm-table-wrapper, .ibeta-report-card .esm-table"
+          ".ibeta-report-scroll-shell, .ibeta-report-card, .ibeta-report-card .card-head, .ibeta-report-card .card-col-list, .ibeta-report-card .esm-table-wrapper, .ibeta-report-card .esm-table"
         )
       ).forEach((node) => {
         measuredWidths.push(measureNodeWidth(node));
@@ -521,26 +521,28 @@
 
   function buildCardMarkup(snapshot) {
     return `
-      <article class="report-card ibeta-report-card">
-        <div class="card-head">
-          <div class="card-title-wrap">
-            <p class="card-title">${buildHeaderContextMarkup(snapshot)}</p>
-            <p class="card-subtitle">${escapeHtml(buildCardSubtitle(snapshot))}</p>
+      <div class="ibeta-report-scroll-shell">
+        <article class="report-card ibeta-report-card">
+          <div class="card-head">
+            <div class="card-title-wrap">
+              <p class="card-title">${buildHeaderContextMarkup(snapshot)}</p>
+              <p class="card-subtitle">${escapeHtml(buildCardSubtitle(snapshot))}</p>
+            </div>
+            <div class="card-actions" aria-hidden="true">
+              <button type="button" class="card-close" tabindex="-1" aria-hidden="true" title="Close report card">
+                <svg class="card-close-icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M7 7 17 17" />
+                  <path d="M17 7 7 17" />
+                </svg>
+              </button>
+            </div>
           </div>
-          <div class="card-actions" aria-hidden="true">
-            <button type="button" class="card-close" tabindex="-1" aria-hidden="true" title="Close report card">
-              <svg class="card-close-icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                <path d="M7 7 17 17" />
-                <path d="M17 7 7 17" />
-              </svg>
-            </button>
+          <div class="card-body">
+            ${buildTableMarkup(snapshot)}
+            ${buildCardColumnsMarkup(snapshot)}
           </div>
-        </div>
-        <div class="card-body">
-          ${buildTableMarkup(snapshot)}
-          ${buildCardColumnsMarkup(snapshot)}
-        </div>
-      </article>
+        </article>
+      </div>
     `;
   }
 

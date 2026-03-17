@@ -24,7 +24,7 @@ test("UPSpace print stylesheet keeps wide reports overflow-safe in PDF", () => {
   assert.match(runtimeSource, /function prepareUpspacePrintLayout\(/);
   assert.match(
     runtimeSource,
-    /measurementRoot\.querySelectorAll\(\s*"\.ibeta-report-card, \.ibeta-report-card \.card-head, \.ibeta-report-card \.card-col-list, \.ibeta-report-card \.esm-table-wrapper, \.ibeta-report-card \.esm-table"\s*\)/
+    /measurementRoot\.querySelectorAll\(\s*"\.ibeta-report-scroll-shell, \.ibeta-report-card, \.ibeta-report-card \.card-head, \.ibeta-report-card \.card-col-list, \.ibeta-report-card \.esm-table-wrapper, \.ibeta-report-card \.esm-table"\s*\)/
   );
   assert.match(runtimeSource, /buildUpspacePrintPageCss\(pxToMm\(widestMeasuredPx \+ 64\)\)/);
 });
@@ -32,10 +32,12 @@ test("UPSpace print stylesheet keeps wide reports overflow-safe in PDF", () => {
 test("UPSpace live layout expands to report width without truncating mobile data", () => {
   const source = read("ups/view.css");
   const workspaceSource = read("ups/esm-workspace.css");
+  const runtimeSource = read("ups/view.js");
 
-  assert.match(source, /html,[\s\S]*body\s*\{[\s\S]*width:\s*max-content;/i);
-  assert.match(source, /\.ibeta-stage\s*\{[\s\S]*width:\s*max-content;[\s\S]*overflow:\s*visible;/i);
-  assert.match(source, /\.ibeta-report-card \.esm-table-wrapper\s*\{[\s\S]*width:\s*max-content;[\s\S]*overflow:\s*visible;/i);
+  assert.match(source, /\.ibeta-report-scroll-shell\s*\{[\s\S]*overflow-x:\s*auto;[\s\S]*touch-action:\s*pan-x pan-y;/i);
+  assert.match(source, /\.ibeta-report-card\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/i);
+  assert.match(source, /\.ibeta-report-card \.esm-table-wrapper\s*\{[\s\S]*overflow:\s*visible;/i);
   assert.match(source, /\.ibeta-report-card \.esm-table\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/i);
   assert.match(workspaceSource, /\.esm-table th,[\s\S]*\.esm-table td \{[\s\S]*overflow:\s*visible;[\s\S]*text-overflow:\s*clip;/i);
+  assert.match(runtimeSource, /<div class="ibeta-report-scroll-shell">/);
 });
