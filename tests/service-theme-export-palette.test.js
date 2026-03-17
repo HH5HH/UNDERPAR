@@ -109,6 +109,8 @@ test("CM export surfaces use the purple service palette", () => {
 
 test("Popup service containers use ZIP dark service ramps while keeping the gold shell", () => {
   const popupCss = read("popup.css");
+  const popupHtml = read("popup.html");
+  const sidepanelHtml = read("sidepanel.html");
 
   assert.match(popupCss, /--service-health-zip-500:\s*2,\s*87,\s*58;/);
   assert.match(popupCss, /--service-learning-zip-500:\s*26,\s*58,\s*195;/);
@@ -116,10 +118,47 @@ test("Popup service containers use ZIP dark service ramps while keeping the gold
   assert.match(popupCss, /--service-cm-zip-800:\s*157,\s*78,\s*228;/);
   assert.match(popupCss, /--service-degradation-zip-800:\s*223,\s*52,\s*34;/);
   assert.match(popupCss, /--s2-action-bg-accent:\s*var\(--underpar-gold-base\);/);
+  assert.match(popupHtml, /<body class="underpar-up-tab">/i);
+  assert.doesNotMatch(sidepanelHtml, /underpar-up-tab/);
+  assert.match(popupCss, /body\.underpar-up-tab\s*\{[\s\S]*?--legacy-accent:\s*var\(--underpar-payne-gray\);/);
+  assert.match(popupCss, /body\.underpar-up-tab\s*\{[\s\S]*?--legacy-border:\s*rgb\(var\(--underpar-gray-300-rgb\)\);/);
+  assert.match(
+    popupCss,
+    /body\.underpar-up-tab \.header\s*\{[\s\S]*?background:\s*linear-gradient\(180deg,\s*rgba\(44,\s*44,\s*44,\s*0\.96\)\s*0%,\s*rgba\(27,\s*27,\s*27,\s*0\.98\)\s*100%\);/
+  );
+  assert.match(
+    popupCss,
+    /body\.underpar-up-tab \.sign-in-hero-btn\s*\{[\s\S]*?background:\s*var\(--s2-action-bg-accent\);/
+  );
   assert.match(popupCss, /\.premium-service-section,\s*\.hr-context-section\s*\{[\s\S]*?color-scheme:\s*dark;/);
   assert.match(
     popupCss,
     /\.service-esm :is\(\.esm-workspace-search, \.esm-workspace-zoom-filter, \.esm-workspace-meg-select, \.esm-workspace-meg-saved-select\) \{[\s\S]*?background:\s*var\(--service-input-bg\);/
+  );
+});
+
+test("BT monitoring session summary uses the dark orange workspace palette", () => {
+  const blondieWorkspaceCss = read("blondie-time-workspace.css");
+
+  assert.match(
+    blondieWorkspaceCss,
+    /\.bt-monitoring-stop-zone\s*\{[\s\S]*?border:\s*1px solid var\(--bt-line-strong\);[\s\S]*?rgba\(var\(--zip-accent-1000\),\s*0\.18\)[\s\S]*?linear-gradient\(180deg,\s*rgba\(44,\s*44,\s*44,\s*0\.96\),\s*rgba\(27,\s*27,\s*27,\s*0\.98\)\);/
+  );
+  assert.match(
+    blondieWorkspaceCss,
+    /\.bt-action-btn,\s*\.bt-export-btn\s*\{[\s\S]*?background:\s*linear-gradient\(180deg,\s*rgba\(44,\s*44,\s*44,\s*0\.98\),\s*rgba\(27,\s*27,\s*27,\s*0\.98\)\);/
+  );
+  assert.match(
+    blondieWorkspaceCss,
+    /\.bt-table-scroll\s*\{[\s\S]*?background:\s*var\(--bt-panel-muted\);/
+  );
+  assert.match(
+    blondieWorkspaceCss,
+    /\.bt-table thead th\s*\{[\s\S]*?background:\s*var\(--bt-band\);[\s\S]*?color:\s*var\(--bt-ink\);/
+  );
+  assert.match(
+    blondieWorkspaceCss,
+    /\.bt-session-block\s*\{[\s\S]*?border:\s*1px solid rgba\(var\(--zip-accent-1000\),\s*0\.18\);[\s\S]*?linear-gradient\(180deg,\s*rgba\(44,\s*44,\s*44,\s*0\.96\),\s*rgba\(27,\s*27,\s*27,\s*0\.98\)\);/
   );
 });
 

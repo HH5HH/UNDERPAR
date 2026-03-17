@@ -1,6 +1,22 @@
 :root {
   color-scheme: light;
   font-family: "Adobe Clean", "Avenir Next", "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+  --underpar-obsidian: #0B0B0B;
+  --underpar-payne-gray: #5C677D;
+  --underpar-payne-gray-rgb: 92, 103, 125;
+  --underpar-gray-25-rgb: 17, 17, 17;
+  --underpar-gray-50-rgb: 27, 27, 27;
+  --underpar-gray-75-rgb: 34, 34, 34;
+  --underpar-gray-100-rgb: 44, 44, 44;
+  --underpar-gray-200-rgb: 50, 50, 50;
+  --underpar-gray-300-rgb: 57, 57, 57;
+  --underpar-gray-400-rgb: 68, 68, 68;
+  --underpar-gray-500-rgb: 109, 109, 109;
+  --underpar-gray-600-rgb: 138, 138, 138;
+  --underpar-gray-700-rgb: 175, 175, 175;
+  --underpar-gray-800-rgb: 219, 219, 219;
+  --underpar-gray-900-rgb: 242, 242, 242;
+  --underpar-gray-1000-rgb: 255, 255, 255;
   --underpar-gold-top: #ffc736;
   --underpar-gold-base: #f2a70c;
   --underpar-gold-shadow: #c87500;
@@ -162,6 +178,292 @@ body[aria-busy="true"] {
 body.net-busy *,
 body[aria-busy="true"] * {
   cursor: progress !important;
+}
+
+body.underpar-up-tab {
+  color-scheme: dark;
+  --legacy-bg: rgb(var(--underpar-gray-25-rgb));
+  --legacy-panel: rgb(var(--underpar-gray-50-rgb));
+  --legacy-accent: var(--underpar-payne-gray);
+  --legacy-accent-hover: rgb(var(--underpar-gray-500-rgb));
+  --legacy-table-head: linear-gradient(180deg, rgb(var(--underpar-gray-100-rgb)) 0%, rgb(var(--underpar-gray-75-rgb)) 100%);
+  --legacy-table-row: rgb(var(--underpar-gray-25-rgb));
+  --legacy-table-alt: rgb(var(--underpar-gray-50-rgb));
+  --legacy-hover: rgb(var(--underpar-gray-100-rgb));
+  --legacy-border: rgb(var(--underpar-gray-300-rgb));
+  --legacy-text: rgb(var(--underpar-gray-900-rgb));
+  --legacy-muted: rgb(var(--underpar-gray-700-rgb));
+  --s2-action-bg-default: linear-gradient(180deg, rgb(var(--underpar-gray-75-rgb)) 0%, rgb(var(--underpar-gray-50-rgb)) 100%);
+  --s2-action-bg-hover: linear-gradient(180deg, rgb(var(--underpar-gray-100-rgb)) 0%, rgb(var(--underpar-gray-75-rgb)) 100%);
+  --s2-action-border-default: color-mix(in srgb, rgb(var(--underpar-gray-300-rgb)) 74%, var(--underpar-payne-gray) 26%);
+  --s2-action-text-default: rgb(var(--underpar-gray-900-rgb));
+  --s2-action-bg-accent: linear-gradient(180deg, rgb(var(--underpar-gray-500-rgb)) 0%, var(--underpar-payne-gray) 100%);
+  --s2-action-bg-accent-hover: linear-gradient(180deg, rgb(var(--underpar-gray-600-rgb)) 0%, rgb(var(--underpar-gray-500-rgb)) 100%);
+  --s2-action-border-accent: color-mix(in srgb, rgb(var(--underpar-gray-700-rgb)) 42%, var(--underpar-payne-gray) 58%);
+  --s2-action-text-accent: #ffffff;
+  --s2-action-focus-ring: rgba(var(--underpar-payne-gray-rgb), 0.28);
+  background:
+    radial-gradient(120% 72% at 8% 0%, rgba(var(--underpar-payne-gray-rgb), 0.26) 0%, transparent 52%),
+    radial-gradient(96% 56% at 92% 100%, rgba(var(--underpar-gray-400-rgb), 0.22) 0%, transparent 48%),
+    linear-gradient(180deg, rgb(var(--underpar-gray-25-rgb)) 0%, rgb(var(--underpar-gray-50-rgb)) 54%, var(--underpar-obsidian) 100%);
+  color: var(--legacy-text);
+}
+
+body.underpar-up-tab::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px;
+  opacity: 0.48;
+}
+
+body.underpar-up-tab .app {
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+body.underpar-up-tab .header {
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, rgb(var(--underpar-gray-300-rgb)) 72%, var(--underpar-payne-gray) 28%);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.96) 0%, rgba(27, 27, 27, 0.98) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 34px rgba(0, 0, 0, 0.24);
+}
+
+body.underpar-up-tab .brand h1 {
+  color: rgb(var(--underpar-gray-900-rgb));
+  text-shadow: none;
+}
+
+body.underpar-up-tab .build-info {
+  color: color-mix(in srgb, rgb(var(--underpar-gray-800-rgb)) 58%, var(--underpar-payne-gray) 42%);
+}
+
+body.underpar-up-tab .page-env-badge {
+  border-color: color-mix(in srgb, rgb(var(--underpar-gray-300-rgb)) 70%, var(--underpar-payne-gray) 30%);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.96) 0%, rgba(27, 27, 27, 0.98) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 10px 18px rgba(0, 0, 0, 0.18);
+  color: rgb(var(--underpar-gray-900-rgb));
+}
+
+body.underpar-up-tab .page-env-badge-prefix {
+  border-color: rgba(var(--underpar-payne-gray-rgb), 0.4);
+  background: linear-gradient(180deg, rgba(92, 103, 125, 0.24) 0%, rgba(44, 44, 44, 0.98) 100%);
+  color: rgb(var(--underpar-gray-900-rgb));
+}
+
+body.underpar-up-tab .page-env-badge-value {
+  color: rgb(var(--underpar-gray-800-rgb));
+}
+
+body.underpar-up-tab .auth-btn {
+  border-color: rgba(var(--underpar-gray-400-rgb), 0.6);
+  box-shadow:
+    0 16px 28px rgba(0, 0, 0, 0.32),
+    0 4px 12px rgba(var(--underpar-payne-gray-rgb), 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+body.underpar-up-tab .auth-btn:hover:not(:disabled) {
+  box-shadow:
+    0 20px 32px rgba(0, 0, 0, 0.36),
+    0 6px 16px rgba(var(--underpar-payne-gray-rgb), 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+body.underpar-up-tab .auth-btn:focus-visible {
+  box-shadow:
+    0 0 0 2px rgba(var(--underpar-gray-900-rgb), 0.9),
+    0 0 0 5px rgba(var(--underpar-payne-gray-rgb), 0.22),
+    0 16px 28px rgba(0, 0, 0, 0.34);
+}
+
+body.underpar-up-tab .sign-in-view-card {
+  border-color: color-mix(in srgb, rgb(var(--underpar-gray-300-rgb)) 72%, var(--underpar-payne-gray) 28%);
+  background:
+    radial-gradient(110% 140% at 0% 0%, rgba(var(--underpar-payne-gray-rgb), 0.18) 0%, transparent 42%),
+    linear-gradient(145deg, rgba(34, 34, 34, 0.98), rgba(17, 17, 17, 0.98));
+  box-shadow:
+    0 26px 46px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+body.underpar-up-tab .sign-in-eyebrow {
+  color: color-mix(in srgb, rgb(var(--underpar-gray-900-rgb)) 52%, var(--underpar-payne-gray) 48%);
+}
+
+body.underpar-up-tab .sign-in-copy {
+  color: rgb(var(--underpar-gray-800-rgb));
+}
+
+body.underpar-up-tab .sign-in-hero-btn {
+  border-color: color-mix(in srgb, rgb(var(--underpar-gray-700-rgb)) 42%, var(--underpar-payne-gray) 58%);
+  background: var(--s2-action-bg-accent);
+  color: var(--s2-action-text-accent);
+  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.26);
+}
+
+body.underpar-up-tab .sign-in-hero-btn:hover:not(:disabled) {
+  box-shadow: 0 18px 28px rgba(0, 0, 0, 0.3);
+}
+
+body.underpar-up-tab .sign-in-hero-btn:focus-visible,
+body.underpar-up-tab .sign-in-update-indicator:focus-visible {
+  box-shadow: 0 0 0 2px rgba(var(--underpar-gray-900-rgb), 0.84), 0 0 0 5px rgba(var(--underpar-payne-gray-rgb), 0.22);
+}
+
+body.underpar-up-tab .sign-in-update-indicator {
+  border-color: rgba(var(--underpar-payne-gray-rgb), 0.36);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
+  color: rgb(var(--underpar-gray-900-rgb));
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+}
+
+body.underpar-up-tab .sign-in-update-indicator:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(57, 57, 57, 0.98), rgba(34, 34, 34, 0.98));
+}
+
+body.underpar-up-tab .avatar-menu {
+  background:
+    radial-gradient(110% 120% at 100% 0%, rgba(var(--underpar-payne-gray-rgb), 0.18) 0%, transparent 38%),
+    linear-gradient(180deg, rgba(34, 34, 34, 0.99), rgba(17, 17, 17, 0.99));
+  border-color: rgba(var(--underpar-gray-300-rgb), 0.86);
+  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.58);
+  color: rgb(var(--underpar-gray-900-rgb));
+}
+
+body.underpar-up-tab .avatar-menu-email {
+  color: rgb(var(--underpar-gray-800-rgb));
+}
+
+body.underpar-up-tab .avatar-menu-org,
+body.underpar-up-tab .avatar-menu-key {
+  color: color-mix(in srgb, rgb(var(--underpar-gray-700-rgb)) 72%, var(--underpar-payne-gray) 28%);
+}
+
+body.underpar-up-tab .avatar-menu-details,
+body.underpar-up-tab .avatar-menu-system {
+  border-color: rgba(var(--underpar-gray-300-rgb), 0.74);
+  background: rgba(34, 34, 34, 0.7);
+}
+
+body.underpar-up-tab .avatar-menu-copy-btn,
+body.underpar-up-tab .avatar-menu-action-btn {
+  border-color: rgba(var(--underpar-gray-400-rgb), 0.72);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
+  color: rgb(var(--underpar-gray-900-rgb));
+}
+
+body.underpar-up-tab .avatar-menu-copy-btn:hover:not(:disabled),
+body.underpar-up-tab .avatar-menu-action-btn:hover:not(:disabled),
+body.underpar-up-tab .avatar-menu-action-btn--latest {
+  background: linear-gradient(180deg, rgba(57, 57, 57, 0.98), rgba(34, 34, 34, 0.98));
+}
+
+body.underpar-up-tab .avatar-menu-divider {
+  border-top-color: rgba(var(--underpar-gray-300-rgb), 0.86);
+}
+
+body.underpar-up-tab .restricted-view {
+  background: linear-gradient(180deg, rgba(34, 34, 34, 0.98), rgba(17, 17, 17, 0.98));
+  border-color: rgba(var(--underpar-gray-300-rgb), 0.86);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 32px rgba(0, 0, 0, 0.22);
+}
+
+body.underpar-up-tab .restricted-view-context {
+  border-color: rgba(var(--underpar-gray-300-rgb), 0.78);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.96), rgba(27, 27, 27, 0.98));
+}
+
+body.underpar-up-tab .restricted-action-btn {
+  border-color: color-mix(in srgb, rgb(var(--underpar-gray-700-rgb)) 42%, var(--underpar-payne-gray) 58%);
+  background: var(--s2-action-bg-accent);
+  color: #ffffff;
+}
+
+body.underpar-up-tab .restricted-action-btn:hover:not(:disabled) {
+  background: var(--s2-action-bg-accent-hover);
+}
+
+body.underpar-up-tab .restricted-action-btn-secondary {
+  border-color: rgba(var(--underpar-gray-300-rgb), 0.78);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
+  color: rgb(var(--underpar-gray-900-rgb));
+}
+
+body.underpar-up-tab .restricted-action-btn-secondary:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(57, 57, 57, 0.98), rgba(34, 34, 34, 0.98));
+}
+
+body.underpar-up-tab .selector-quick-launch-btn {
+  border-color: rgba(var(--underpar-gray-300-rgb), 0.74);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 6px 14px rgba(0, 0, 0, 0.18);
+  color: rgb(var(--underpar-gray-800-rgb));
+}
+
+body.underpar-up-tab .selector-quick-launch-btn:hover:not(:disabled) {
+  border-color: rgba(var(--underpar-payne-gray-rgb), 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 8px 18px rgba(0, 0, 0, 0.22);
+  color: rgb(var(--underpar-gray-900-rgb));
+}
+
+body.underpar-up-tab .selector-quick-launch-btn:focus-visible {
+  border-color: rgba(var(--underpar-payne-gray-rgb), 0.84);
+  box-shadow: 0 0 0 2px rgba(var(--underpar-payne-gray-rgb), 0.22);
+}
+
+body.underpar-up-tab label {
+  color: rgb(var(--underpar-gray-900-rgb));
+}
+
+body.underpar-up-tab select {
+  border-color: rgba(var(--underpar-gray-300-rgb), 0.78);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
+  color: rgb(var(--underpar-gray-900-rgb));
+}
+
+body.underpar-up-tab select:focus {
+  border-color: rgba(var(--underpar-payne-gray-rgb), 0.88);
+  box-shadow: 0 0 0 1px rgba(var(--underpar-payne-gray-rgb), 0.36);
+}
+
+body.underpar-up-tab select:disabled {
+  background: linear-gradient(180deg, rgba(34, 34, 34, 0.98), rgba(27, 27, 27, 0.98));
+  color: rgb(var(--underpar-gray-600-rgb));
+}
+
+body.underpar-up-tab .metadata-section,
+body.underpar-up-tab .metadata-item {
+  border-color: rgba(var(--underpar-gray-300-rgb), 0.8);
+  background: linear-gradient(180deg, rgba(34, 34, 34, 0.98), rgba(17, 17, 17, 0.98));
+}
+
+body.underpar-up-tab .metadata-header,
+body.underpar-up-tab .metadata-key {
+  border-bottom-color: rgba(var(--underpar-gray-300-rgb), 0.76);
+  background: linear-gradient(180deg, rgba(57, 57, 57, 0.98), rgba(34, 34, 34, 0.98));
+  color: rgb(var(--underpar-gray-900-rgb));
+}
+
+body.underpar-up-tab .metadata-header:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(var(--underpar-payne-gray-rgb), 0.42);
+}
+
+body.underpar-up-tab .metadata-header .collapse-icon,
+body.underpar-up-tab .metadata-empty {
+  color: rgb(var(--underpar-gray-700-rgb));
 }
 
 .app {
