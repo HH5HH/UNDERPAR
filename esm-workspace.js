@@ -210,6 +210,10 @@ const UNDERPAR_BLONDIE_SHARE_PICKER = globalThis.UnderParBlondieSharePicker;
 if (!UNDERPAR_BLONDIE_SHARE_PICKER?.createController || !UNDERPAR_BLONDIE_SHARE_PICKER?.normalizeTargets) {
   throw new Error("UnderPar Blondie share picker runtime is unavailable.");
 }
+const UNDERPAR_IBETA_SNAPSHOT = globalThis.UnderParIBetaSnapshot;
+if (!UNDERPAR_IBETA_SNAPSHOT?.buildEsmSnapshot) {
+  throw new Error("UnderPar iBeta snapshot runtime is unavailable.");
+}
 const blondieSharePickerController = UNDERPAR_BLONDIE_SHARE_PICKER.createController({
   emptyTargetsMessage: BLONDIE_BUTTON_SHARE_TARGETS_EMPTY_MESSAGE,
   emptyNoteMessage: BLONDIE_BUTTON_SHARE_NOTE_EMPTY_MESSAGE,
@@ -2307,6 +2311,21 @@ function buildEsmBlondieExportPayload(cardState, tableState) {
     return null;
   }
   const requestUrl = String(cardState?.requestUrl || cardState?.endpointUrl || "").trim();
+  const ibetaSnapshot = UNDERPAR_IBETA_SNAPSHOT.buildEsmSnapshot({
+    workspaceLabel: "ESM",
+    datasetLabel: String(cardState?.displayNodeLabel || "").trim() || getEsmNodeLabel(requestUrl) || "ESM Report Card",
+    displayNodeLabel: String(cardState?.displayNodeLabel || "").trim(),
+    requestUrl,
+    requestPath: buildCardDisplayRequestUrl(cardState) || requestUrl,
+    programmerId: String(state.programmerId || "").trim(),
+    programmerName: String(state.programmerName || "").trim(),
+    adobePassEnvironmentKey: String(state.adobePassEnvironment?.key || "").trim(),
+    adobePassEnvironmentLabel: String(state.adobePassEnvironment?.label || "").trim(),
+    lastModified: String(cardState?.lastModified || "").trim(),
+    rawColumns: normalizeEsmColumns(cardState?.columns),
+    rawRows: Array.isArray(tableState?.data) ? tableState.data : [],
+    createdAt: Date.now(),
+  });
   return {
     workspaceKey: "esm",
     workspaceLabel: "ESM",
@@ -2321,6 +2340,7 @@ function buildEsmBlondieExportPayload(cardState, tableState) {
     columns: headers,
     rows,
     rowCount: rows.length,
+    ibetaSnapshot,
   };
 }
 

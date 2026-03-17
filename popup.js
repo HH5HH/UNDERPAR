@@ -86,6 +86,10 @@ const UNDERPAR_BT_DEEPLINK_MARKER_VALUE = "bt";
 const UNDERPAR_CM_DEEPLINK_MARKER_VALUE = "cm";
 const UNDERPAR_DEGRADATION_DEEPLINK_MARKER_VALUE = "degradation";
 const UNDERPAR_BLONDIE_ZIP_TOOL_BETA_ARTICLE_URL = "https://tve.zendesk.com/hc/en-us/articles/46503360732436-ZIP-ZAP";
+const UNDERPAR_IBETA_HANDLER_BASE_URL = "https://hh5hh.com/ups/";
+const UNDERPAR_IBETA_HANDLER_STORE_URL = `${UNDERPAR_IBETA_HANDLER_BASE_URL}index.php?mode=store`;
+const UNDERPAR_IBETA_REQUEST_TIMEOUT_MS = 8000;
+const UNDERPAR_UPSPACE_SLACK_LINK_LABEL = "↗";
 const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 4;
 const UNDERPAR_VAULT_STATUS_PENDING = "pending";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
@@ -3207,6 +3211,95 @@ function getUnderparWorkspaceSlackStatePayload() {
   };
 }
 
+function normalizeUnderparIBetaSnapshot(input = null, options = {}) {
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : null;
+  if (!source) {
+    return null;
+  }
+  const normalizedCards = options?.allowCards === false
+    ? []
+    : (Array.isArray(source.cards) ? source.cards : [])
+        .map((card) => normalizeUnderparIBetaSnapshot(card, { allowCards: false }))
+        .filter(Boolean);
+  if (normalizedCards.length > 0) {
+    const primaryCard = normalizedCards[0];
+    return {
+      renderer: String(source.renderer || "").trim() || "underpar-esm-teaser-v1",
+      workspaceKey: String(source.workspaceKey || primaryCard?.workspaceKey || "").trim().toLowerCase() || "esm",
+      workspaceLabel: String(source.workspaceLabel || "").trim() || String(primaryCard?.workspaceLabel || "").trim() || "ESM",
+      datasetLabel: String(source.datasetLabel || "").trim() || String(primaryCard?.datasetLabel || "").trim() || "ESM Report Card",
+      displayNodeLabel: String(source.displayNodeLabel || "").trim() || String(primaryCard?.displayNodeLabel || "").trim(),
+      requestUrl: String(source.requestUrl || primaryCard?.requestUrl || "").trim(),
+      requestPath: String(source.requestPath || primaryCard?.requestPath || "").trim(),
+      programmerId: String(source.programmerId || primaryCard?.programmerId || "").trim(),
+      programmerName: String(source.programmerName || primaryCard?.programmerName || "").trim(),
+      adobePassEnvironmentKey: String(source.adobePassEnvironmentKey || primaryCard?.adobePassEnvironmentKey || "").trim(),
+      adobePassEnvironmentLabel: String(source.adobePassEnvironmentLabel || primaryCard?.adobePassEnvironmentLabel || "").trim(),
+      lastModified: String(source.lastModified || "").trim(),
+      createdAt: Math.max(0, Number(source.createdAt || primaryCard?.createdAt || Date.now() || 0)) || Date.now(),
+      cards: normalizedCards,
+      cardCount: normalizedCards.length,
+    };
+  }
+  const table = source.table && typeof source.table === "object" && !Array.isArray(source.table) ? source.table : null;
+  const headers = Array.isArray(table?.headers) ? table.headers.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const rows = Array.isArray(table?.rows)
+    ? table.rows
+        .map((row) => (Array.isArray(row) ? row.map((value) => String(value ?? "").trim()) : null))
+        .filter((row) => Array.isArray(row) && row.length > 0)
+    : [];
+  if (headers.length === 0 || rows.length === 0) {
+    return null;
+  }
+  const headerContext = source.headerContext && typeof source.headerContext === "object" && !Array.isArray(source.headerContext)
+    ? source.headerContext
+    : {};
+  return {
+    renderer: String(source.renderer || "").trim() || "underpar-esm-teaser-v1",
+    workspaceKey: String(source.workspaceKey || "").trim().toLowerCase() || "esm",
+    workspaceLabel: String(source.workspaceLabel || "").trim() || "ESM",
+    datasetLabel: String(source.datasetLabel || "").trim() || "ESM Report Card",
+    displayNodeLabel: String(source.displayNodeLabel || "").trim(),
+    requestUrl: String(source.requestUrl || "").trim(),
+    requestPath: String(source.requestPath || "").trim(),
+    programmerId: String(source.programmerId || "").trim(),
+    programmerName: String(source.programmerName || "").trim(),
+    adobePassEnvironmentKey: String(source.adobePassEnvironmentKey || "").trim(),
+    adobePassEnvironmentLabel: String(source.adobePassEnvironmentLabel || "").trim(),
+    lastModified: String(source.lastModified || "").trim(),
+    createdAt: Math.max(0, Number(source.createdAt || Date.now() || 0)) || Date.now(),
+    headerContext: {
+      pathSegments: Array.isArray(headerContext.pathSegments)
+        ? headerContext.pathSegments.map((value) => String(value || "").trim()).filter(Boolean)
+        : [],
+      queryPairs: Array.isArray(headerContext.queryPairs)
+        ? headerContext.queryPairs
+            .map((pair) => {
+              const sourcePair = pair && typeof pair === "object" && !Array.isArray(pair) ? pair : null;
+              if (!sourcePair) {
+                return null;
+              }
+              const key = String(sourcePair.key || "").trim();
+              if (!key) {
+                return null;
+              }
+              return {
+                key,
+                operator: String(sourcePair.operator || "").trim(),
+                value: String(sourcePair.value || "").trim(),
+              };
+            })
+            .filter(Boolean)
+        : [],
+    },
+    table: {
+      headers,
+      rows,
+      rowCount: Math.max(0, Number(table?.rowCount || rows.length || 0)),
+    },
+  };
+}
+
 function normalizeUnderparBlondieExportPayload(input = null) {
   const source = input && typeof input === "object" && !Array.isArray(input) ? input : null;
   if (!source) {
@@ -3255,6 +3348,7 @@ function normalizeUnderparBlondieExportPayload(input = null) {
           status: Math.max(0, Number(sourceItem.status || 0)),
           statusText: String(sourceItem.statusText || "").trim(),
           error: String(sourceItem.error || "").trim(),
+          ibetaSnapshot: normalizeUnderparIBetaSnapshot(sourceItem.ibetaSnapshot || null),
         };
       })
       .filter(Boolean);
@@ -3311,6 +3405,8 @@ function normalizeUnderparBlondieExportPayload(input = null) {
     rows,
     reportItems,
     reportCount: Math.max(0, Number(source.reportCount || reportItems.length || 0)),
+    ibetaSnapshot: normalizeUnderparIBetaSnapshot(source.ibetaSnapshot || null),
+    createdAt: Math.max(0, Number(source.createdAt || 0)),
     messageOnly,
     skipCsvAttachment: source.skipCsvAttachment === true || messageOnly,
     rowCount: Math.max(0, Number(source.rowCount || rows.length || 0)),
@@ -4018,10 +4114,132 @@ function buildUnderparBlondieWorkspaceDeeplinkUrl(exportPayload = null) {
   return "";
 }
 
-function buildUnderparBlondieSignatureLine(payload = null, workspaceDeeplinkUrl = "") {
+function buildUnderparIBetaStoreRequestBody(snapshot = null, options = {}) {
+  const normalizedSnapshot = normalizeUnderparIBetaSnapshot(snapshot);
+  if (!normalizedSnapshot) {
+    return null;
+  }
+  const debugRowCount = Array.isArray(normalizedSnapshot.cards)
+    ? normalizedSnapshot.cards.reduce(
+        (total, card) => total + Math.max(0, Number(card?.table?.rowCount || card?.table?.rows?.length || 0)),
+        0
+      )
+    : Math.max(0, Number(normalizedSnapshot?.table?.rowCount || normalizedSnapshot?.table?.rows?.length || 0));
+  return {
+    snapshot: normalizedSnapshot,
+    source: String(options.source || normalizedSnapshot.workspaceKey || "esm").trim() || "esm",
+    createdAt: Math.max(0, Number(options.createdAt || normalizedSnapshot.createdAt || Date.now() || 0)) || Date.now(),
+    debug: {
+      workspaceKey: String(normalizedSnapshot.workspaceKey || "").trim(),
+      requestUrl: String(normalizedSnapshot.requestUrl || "").trim(),
+      requestPath: String(normalizedSnapshot.requestPath || "").trim(),
+      rowCount: debugRowCount,
+      programmerId: String(normalizedSnapshot.programmerId || "").trim(),
+      adobePassEnvironmentKey: String(normalizedSnapshot.adobePassEnvironmentKey || "").trim(),
+    },
+  };
+}
+
+async function createUnderparIBetaViewUrl(snapshot = null, options = {}) {
+  const requestBody = buildUnderparIBetaStoreRequestBody(snapshot, options);
+  if (!requestBody) {
+    return "";
+  }
+  let timeoutId = 0;
+  const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+  if (abortController) {
+    timeoutId = window.setTimeout(() => {
+      try {
+        abortController.abort();
+      } catch {
+        // Ignore abort failures.
+      }
+    }, UNDERPAR_IBETA_REQUEST_TIMEOUT_MS);
+  }
+  try {
+    const response = await fetch(UNDERPAR_IBETA_HANDLER_STORE_URL, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      credentials: "omit",
+      cache: "no-store",
+      redirect: "follow",
+      mode: "cors",
+      body: JSON.stringify(requestBody),
+      signal: abortController?.signal,
+    });
+    if (!response.ok) {
+      return "";
+    }
+    const payload = parseJsonText(await response.text().catch(() => ""), null);
+    const viewUrl = firstNonEmptyString([
+      payload?.viewUrl,
+      payload?.view_url,
+      payload?.url,
+    ]);
+    return /^https:\/\//i.test(viewUrl) ? viewUrl : "";
+  } catch {
+    return "";
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+async function resolveUnderparBlondieIBetaLinks(exportPayload = null) {
+  const payload = normalizeUnderparBlondieExportPayload(exportPayload);
+  if (!payload) {
+    return {
+      workspaceIBetaUrl: "",
+      reportItemIBetaUrls: [],
+    };
+  }
+  const [workspaceIBetaUrl, reportItemIBetaUrls] = await Promise.all([
+    payload.workspaceKey === "esm" && payload.ibetaSnapshot
+      ? createUnderparIBetaViewUrl(payload.ibetaSnapshot, {
+          source: `${payload.workspaceKey || "workspace"}-workspace`,
+          createdAt: payload.createdAt,
+        })
+      : Promise.resolve(""),
+    Promise.all(
+      (Array.isArray(payload.reportItems) ? payload.reportItems : []).map((item) =>
+        item?.ibetaSnapshot
+          ? createUnderparIBetaViewUrl(item.ibetaSnapshot, {
+              source: `${payload.workspaceKey || "workspace"}-report-item`,
+              createdAt: item?.fetchedAt || payload.createdAt,
+            })
+          : Promise.resolve("")
+      )
+    ),
+  ]);
+  return {
+    workspaceIBetaUrl,
+    reportItemIBetaUrls,
+  };
+}
+
+function buildUnderparUpspaceSlackLink(urlValue = "") {
+  return buildUnderparSlackMrkdwnLink(urlValue, UNDERPAR_UPSPACE_SLACK_LINK_LABEL);
+}
+
+function buildUnderparBlondieSignatureLine(payload = null, workspaceDeeplinkUrl = "", workspaceIBetaUrl = "") {
+  const normalizedPayload =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload
+      : null;
   const zipZapLink = buildUnderparSlackMrkdwnLink(UNDERPAR_BLONDIE_ZIP_TOOL_BETA_ARTICLE_URL, "zip-zap");
+  const targetLinks = [];
   if (workspaceDeeplinkUrl) {
-    return `// ${zipZapLink} :blondiebtn: ${buildUnderparSlackMrkdwnLink(workspaceDeeplinkUrl, "in UnderPAR")}`;
+    targetLinks.push(buildUnderparSlackMrkdwnLink(workspaceDeeplinkUrl, "in UnderPAR"));
+  }
+  if (String(normalizedPayload?.workspaceKey || "").trim().toLowerCase() === "esm" && workspaceIBetaUrl) {
+    targetLinks.push(buildUnderparUpspaceSlackLink(workspaceIBetaUrl));
+  }
+  if (targetLinks.length > 0) {
+    return `// ${zipZapLink} :blondiebtn: ${targetLinks.join(" ")}`;
   }
   return `// ${zipZapLink} :blondiebtn: in UnderPAR`;
 }
@@ -4069,13 +4287,14 @@ function formatUnderparDegradationReceiptTimestamp(value = 0) {
   }
 }
 
-function buildUnderparDegradationBlondieMarkdown(payload = null) {
+function buildUnderparDegradationBlondieMarkdown(payload = null, options = {}) {
   const normalizedPayload = normalizeUnderparBlondieExportPayload(payload);
   if (!normalizedPayload) {
     return "";
   }
   const requestLineValue = formatUnderparBlondieHeaderRequestValue(normalizedPayload);
   const workspaceDeeplinkUrl = buildUnderparBlondieWorkspaceDeeplinkUrl(normalizedPayload);
+  const workspaceIBetaUrl = String(options?.workspaceIBetaUrl || "").trim();
   const scopeLabel = buildUnderparDegradationBlondieScopeLabel(normalizedPayload);
   const headerLines = [buildUnderparBlondieHeaderLine(normalizedPayload)];
   if (scopeLabel) {
@@ -4085,13 +4304,15 @@ function buildUnderparDegradationBlondieMarkdown(payload = null) {
     headerLines.push(`Request: ${escapeUnderparSlackMrkdwn(requestLineValue)}`);
   }
 
-  const reportLines = buildUnderparBlondieReportLines(normalizedPayload.reportItems, normalizedPayload);
+  const reportLines = buildUnderparBlondieReportLines(normalizedPayload.reportItems, normalizedPayload, {
+    reportItemIBetaUrls: Array.isArray(options?.reportItemIBetaUrls) ? options.reportItemIBetaUrls : [],
+  });
   const resultsCountLine = `Results :  ${Math.max(0, Number(normalizedPayload.reportCount || normalizedPayload.reportItems.length || 0))}`;
   const responseReceivedLabel = formatUnderparDegradationReceiptTimestamp(normalizedPayload.responseReceivedAt);
   const receiptTimestampLine = responseReceivedLabel ? `Response Received: ${escapeUnderparSlackMrkdwn(responseReceivedLabel)}` : "";
   const detailsFooterLines = [resultsCountLine, receiptTimestampLine].filter(Boolean);
 
-  const signatureLine = buildUnderparBlondieSignatureLine(normalizedPayload, workspaceDeeplinkUrl);
+  const signatureLine = buildUnderparBlondieSignatureLine(normalizedPayload, workspaceDeeplinkUrl, workspaceIBetaUrl);
   return headerLines
     .concat(reportLines.length > 0 ? ["", ...reportLines] : [])
     .concat(detailsFooterLines.length > 0 ? (reportLines.length > 0 ? detailsFooterLines : ["", ...detailsFooterLines]) : [])
@@ -4101,24 +4322,27 @@ function buildUnderparDegradationBlondieMarkdown(payload = null) {
     .slice(0, UNDERPAR_BLONDIE_EXPORT_MAX_MESSAGE_CHARS);
 }
 
-function buildUnderparBlondieMarkdown(exportPayload = null) {
+function buildUnderparBlondieMarkdown(exportPayload = null, options = {}) {
   const payload = normalizeUnderparBlondieExportPayload(exportPayload);
   if (!payload) {
     return "";
   }
   if (payload.workspaceKey === "degradation" && underparBlondiePayloadHasMessageContent(payload)) {
-    return buildUnderparDegradationBlondieMarkdown(payload);
+    return buildUnderparDegradationBlondieMarkdown(payload, options);
   }
   const requestLineValue = formatUnderparBlondieHeaderRequestValue(payload);
   const workspaceDeeplinkUrl = buildUnderparBlondieWorkspaceDeeplinkUrl(payload);
+  const workspaceIBetaUrl = String(options?.workspaceIBetaUrl || "").trim();
   const headerLines = [buildUnderparBlondieHeaderLine(payload)];
   if (payload.workspaceKey !== "bt" && requestLineValue) {
     headerLines.push(`• Request: ${escapeUnderparSlackMrkdwn(requestLineValue)}`);
   }
   headerLines.push(`• Rows: ${Math.max(0, Number(payload.rowCount || 0))}`);
-  const reportLines = buildUnderparBlondieReportLines(payload.reportItems, payload);
+  const reportLines = buildUnderparBlondieReportLines(payload.reportItems, payload, {
+    reportItemIBetaUrls: Array.isArray(options?.reportItemIBetaUrls) ? options.reportItemIBetaUrls : [],
+  });
 
-  const signatureLine = buildUnderparBlondieSignatureLine(payload, workspaceDeeplinkUrl);
+  const signatureLine = buildUnderparBlondieSignatureLine(payload, workspaceDeeplinkUrl, workspaceIBetaUrl);
   return headerLines
     .concat(reportLines.length > 0 ? ["", ...reportLines] : [])
     .concat(["", signatureLine])
@@ -4127,9 +4351,10 @@ function buildUnderparBlondieMarkdown(exportPayload = null) {
     .slice(0, UNDERPAR_BLONDIE_EXPORT_MAX_MESSAGE_CHARS);
 }
 
-function buildUnderparBlondieReportLines(reportItems = [], payload = null) {
+function buildUnderparBlondieReportLines(reportItems = [], payload = null, options = {}) {
   const normalizedPayload = normalizeUnderparBlondieExportPayload(payload);
-  const reportBlocks = (Array.isArray(reportItems) ? reportItems : []).map((item) => {
+  const ibetaUrls = Array.isArray(options?.reportItemIBetaUrls) ? options.reportItemIBetaUrls : [];
+  const reportBlocks = (Array.isArray(reportItems) ? reportItems : []).map((item, index) => {
     const title = escapeUnderparSlackMrkdwn(String(item?.title || "").trim());
     const rawTitle = String(item?.title || "").trim();
     const summaryLines = String(item?.summary || "")
@@ -4154,6 +4379,7 @@ function buildUnderparBlondieReportLines(reportItems = [], payload = null) {
           environmentKey: String(normalizedPayload?.adobePassEnvironmentKey || "").trim(),
         })
       : "";
+    const reportIBetaUrl = String(ibetaUrls[index] || "").trim();
     if (!title && summaryLines.length === 0) {
       return [];
     }
@@ -4163,9 +4389,16 @@ function buildUnderparBlondieReportLines(reportItems = [], payload = null) {
         .map((line) => `• ${line}`)
         .concat(sourceLine ? [sourceLine] : []);
     }
-    const titleLine = reportDeeplinkUrl
-      ? `${buildUnderparSlackMrkdwnLink(reportDeeplinkUrl, rawTitle)}:`
-      : `*${title}:*`;
+    const titleTargets = [];
+    if (reportDeeplinkUrl) {
+      titleTargets.push(buildUnderparSlackMrkdwnLink(reportDeeplinkUrl, rawTitle));
+    } else {
+      titleTargets.push(`*${title}*`);
+    }
+    if (reportIBetaUrl) {
+      titleTargets.push(buildUnderparUpspaceSlackLink(reportIBetaUrl));
+    }
+    const titleLine = `${titleTargets.join(" ")}:`;
     if (summaryLines.length === 0) {
       return [titleLine].concat(sourceLine ? [sourceLine] : []);
     }
@@ -4440,8 +4673,12 @@ async function sendUnderparBlondieExportToSlack(exportPayload = null, options = 
     const effectiveDeliveryTarget =
       channelResult.targetMode === "teammate" ? deliveryTarget : { mode: "self" };
     const deliveryActionTokens = buildUnderparBlondieDeliveryActionTokenCandidates(readyRecord, channelResult);
+    const ibetaLinks = await resolveUnderparBlondieIBetaLinks(normalizedExport);
     const markdownText = applyUnderparBlondieDeliveryEnvelope(
-      buildUnderparBlondieMarkdown(normalizedExport),
+      buildUnderparBlondieMarkdown(normalizedExport, {
+        workspaceIBetaUrl: ibetaLinks.workspaceIBetaUrl,
+        reportItemIBetaUrls: ibetaLinks.reportItemIBetaUrls,
+      }),
       readyRecord,
       effectiveDeliveryTarget,
       options?.noteText || ""

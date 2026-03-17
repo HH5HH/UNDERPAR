@@ -31,9 +31,11 @@ function loadBlondieSignatureHelpers() {
   const source = fs.readFileSync(POPUP_JS_PATH, "utf8");
   const script = [
     'const UNDERPAR_BLONDIE_ZIP_TOOL_BETA_ARTICLE_URL = "https://tve.zendesk.com/hc/en-us/articles/46503360732436-ZIP-ZAP";',
+    'const UNDERPAR_UPSPACE_SLACK_LINK_LABEL = "↗";',
     extractFunctionSource(source, "escapeUnderparSlackMrkdwn"),
     extractFunctionSource(source, "sanitizeUnderparSlackLinkTarget"),
     extractFunctionSource(source, "buildUnderparSlackMrkdwnLink"),
+    extractFunctionSource(source, "buildUnderparUpspaceSlackLink"),
     extractFunctionSource(source, "buildUnderparBlondieSignatureLine"),
     "module.exports = { buildUnderparBlondieSignatureLine };"
   ].join("\n\n");
@@ -57,5 +59,31 @@ test("UnderPAR Blondie signature keeps the UnderPAR deeplink alongside ZIP-ZAP",
   assert.equal(
     signature,
     "// <https://tve.zendesk.com/hc/en-us/articles/46503360732436-ZIP-ZAP|zip-zap> :blondiebtn: <https://underpar-runtime.chromiumapp.org/?underpar_deeplink=esm|in UnderPAR>"
+  );
+});
+
+test("UnderPAR Blondie signature appends the UPSpace launch link for ESM workspace payloads", () => {
+  const helpers = loadBlondieSignatureHelpers();
+  const signature = helpers.buildUnderparBlondieSignatureLine(
+    { workspaceKey: "esm" },
+    "https://underpar-runtime.chromiumapp.org/?underpar_deeplink=esm",
+    "https://hh5hh.com/ups/?id=abc123"
+  );
+  assert.equal(
+    signature,
+    "// <https://tve.zendesk.com/hc/en-us/articles/46503360732436-ZIP-ZAP|zip-zap> :blondiebtn: <https://underpar-runtime.chromiumapp.org/?underpar_deeplink=esm|in UnderPAR> <https://hh5hh.com/ups/?id=abc123|↗>"
+  );
+});
+
+test("UnderPAR Blondie signature skips the UPSpace launch link for non-ESM payloads", () => {
+  const helpers = loadBlondieSignatureHelpers();
+  const signature = helpers.buildUnderparBlondieSignatureLine(
+    { workspaceKey: "cm" },
+    "https://underpar-runtime.chromiumapp.org/?underpar_deeplink=cm",
+    "https://hh5hh.com/ups/?id=abc123"
+  );
+  assert.equal(
+    signature,
+    "// <https://tve.zendesk.com/hc/en-us/articles/46503360732436-ZIP-ZAP|zip-zap> :blondiebtn: <https://underpar-runtime.chromiumapp.org/?underpar_deeplink=cm|in UnderPAR>"
   );
 });

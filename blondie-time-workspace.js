@@ -8,6 +8,7 @@ const ESM_SOURCE_UTC_OFFSET_MINUTES = -8 * 60;
 const CLIENT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 const BLONDIE_TIME_LOGIC = globalThis.UnderParBlondieTimeLogic;
 const UNDERPAR_BLONDIE_SHARE_PICKER = globalThis.UnderParBlondieSharePicker;
+const UNDERPAR_IBETA_SNAPSHOT = globalThis.UnderParIBetaSnapshot;
 const DEFAULT_ADOBEPASS_ENVIRONMENT =
   globalThis.UnderParEnvironment?.getDefaultEnvironment?.() || {
     key: "release-production",
@@ -39,6 +40,9 @@ if (!BLONDIE_TIME_LOGIC?.analyzeRows) {
 }
 if (!UNDERPAR_BLONDIE_SHARE_PICKER?.createController || !UNDERPAR_BLONDIE_SHARE_PICKER?.normalizeTargets) {
   throw new Error("UnderPar Blondie share picker runtime is unavailable.");
+}
+if (!UNDERPAR_IBETA_SNAPSHOT?.buildEsmSnapshot) {
+  throw new Error("UnderPar iBeta snapshot runtime is unavailable.");
 }
 
 const blondieSharePickerController = UNDERPAR_BLONDIE_SHARE_PICKER.createController({
@@ -1387,12 +1391,61 @@ function buildCardThresholdReportSummary(analysis = null) {
   return BLONDIE_TIME_LOGIC.toSlackSummaryLines(analysis).join("\n");
 }
 
+function buildCardIBetaSnapshot(cardState = null, fetchedAt = 0) {
+  if (!cardState || !Array.isArray(cardState.rows) || cardState.rows.length === 0) {
+    return null;
+  }
+  const requestUrl = String(cardState.requestUrl || cardState.endpointUrl || "").trim();
+  if (!requestUrl) {
+    return null;
+  }
+  return UNDERPAR_IBETA_SNAPSHOT.buildEsmSnapshot({
+    workspaceLabel: "ESM",
+    datasetLabel: firstNonEmptyString([cardState.displayNodeLabel, cardState.endpointUrl, cardState.cardId, "ESM Report Card"]),
+    displayNodeLabel: String(cardState.displayNodeLabel || "").trim(),
+    requestUrl,
+    requestPath: requestUrl,
+    programmerId: String(state.programmerId || "").trim(),
+    programmerName: String(state.programmerName || "").trim(),
+    adobePassEnvironmentKey: String(getEnvironmentKey(state.adobePassEnvironment) || "").trim(),
+    adobePassEnvironmentLabel: String(resolveWorkspaceAdobePassEnvironment(state.adobePassEnvironment)?.label || "").trim(),
+    lastModified: String(cardState.lastModified || "").trim(),
+    rawColumns: Array.isArray(cardState.columns) ? cardState.columns : [],
+    rawRows: Array.isArray(cardState.rows) ? cardState.rows : [],
+    createdAt: Math.max(0, Number(fetchedAt || Date.now() || 0)) || Date.now(),
+  });
+}
+
+function buildLapIBetaSnapshot(cardSnapshots = [], lapRequest = null) {
+  const cards = (Array.isArray(cardSnapshots) ? cardSnapshots : []).filter(Boolean);
+  if (cards.length === 0) {
+    return null;
+  }
+  const headingLabel = String(lapRequest?.headingLabel || "BT_WS").trim() || "BT_WS";
+  const programmerLabel = String(state.programmerName || state.programmerId || "Media Company").trim() || "Media Company";
+  return {
+    renderer: "underpar-esm-teaser-v1",
+    workspaceKey: "bt",
+    workspaceLabel: "Blondie Time",
+    datasetLabel: `${programmerLabel} ${headingLabel}`.trim(),
+    displayNodeLabel: headingLabel,
+    programmerId: String(state.programmerId || "").trim(),
+    programmerName: String(state.programmerName || "").trim(),
+    adobePassEnvironmentKey: String(getEnvironmentKey(state.adobePassEnvironment) || "").trim(),
+    adobePassEnvironmentLabel: String(resolveWorkspaceAdobePassEnvironment(state.adobePassEnvironment)?.label || "").trim(),
+    createdAt: Math.max(0, Number(lapRequest?.requestedAt || Date.now() || 0)) || Date.now(),
+    cards,
+    cardCount: cards.length,
+  };
+}
+
 function buildCurrentLapExportPayload(options = {}) {
   const lapRequest = resolveCurrentLapRequestWindow(options);
   const cards = getOrderedCards();
   const unionDynamicColumns = [];
   const dynamicSeen = new Set();
   const reportItems = [];
+  const ibetaCardSnapshots = [];
   const rows = [];
   cards.forEach((cardState) => {
     analyzeCard(cardState);
@@ -1404,6 +1457,10 @@ function buildCurrentLapExportPayload(options = {}) {
           unionDynamicColumns.push(column);
         }
       });
+    const ibetaSnapshot = buildCardIBetaSnapshot(cardState, lapRequest.requestedAt);
+    if (ibetaSnapshot) {
+      ibetaCardSnapshots.push(ibetaSnapshot);
+    }
     reportItems.push({
       title: firstNonEmptyString([cardState.displayNodeLabel, cardState.endpointUrl, cardState.cardId, "Analysis Table"]),
       summary: buildCardThresholdReportSummary(cardState.analysis),
@@ -1411,6 +1468,7 @@ function buildCurrentLapExportPayload(options = {}) {
       fetchedAt: lapRequest.requestedAt,
       rowCount: Math.max(0, Number(cardState.analysis?.summary?.offendingRows || 0)),
       ok: true,
+      ibetaSnapshot,
     });
     buildCardExportRows(cardState).forEach((rowValues) => {
       const rowMap = new Map();
@@ -1436,6 +1494,7 @@ function buildCurrentLapExportPayload(options = {}) {
     rowCount: rows.length,
     reportItems,
     reportCount: reportItems.length,
+    ibetaSnapshot: buildLapIBetaSnapshot(ibetaCardSnapshots, lapRequest),
     requestWindowStart: String(lapRequest.requestWindow?.start || "").trim(),
     requestWindowEnd: String(lapRequest.requestWindow?.end || "").trim(),
     responseReceivedAt: Date.now(),
