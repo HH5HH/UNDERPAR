@@ -220,3 +220,36 @@ test("UPSpace launch labels stay ASCII badges", () => {
   assert.match(upsViewSource, />print<\/a>/);
   assert.doesNotMatch(upsViewSource, /🛰️|🖨️|↗/);
 });
+
+test("UP devtools panel uses ZIP dark obsidian while preserving the Slacktivate gate", () => {
+  const upDevtoolsCss = read("up-devtools-panel.css");
+
+  assert.match(upDevtoolsCss, /--up-obsidian:\s*#0B0B0B;/);
+  assert.match(upDevtoolsCss, /--up-payne-gray:\s*#5C677D;/);
+  assert.match(upDevtoolsCss, /--up-gray-300-rgb:\s*57,\s*57,\s*57;/);
+  assert.match(
+    upDevtoolsCss,
+    /body\s*\{[\s\S]*?linear-gradient\(180deg,\s*rgb\(var\(--up-gray-25-rgb\)\)\s*0%,\s*rgb\(var\(--up-gray-50-rgb\)\)\s*54%,\s*var\(--up-obsidian\)\s*100%\);/i
+  );
+  assert.match(
+    upDevtoolsCss,
+    /\.switch-btn\s*\{[\s\S]*?background:\s*var\(--up-button-gradient\);[\s\S]*?color:\s*#ffffff;/i
+  );
+  assert.match(
+    upDevtoolsCss,
+    /\.context-row dd a,\s*\.vault-entry-preview a,\s*\.vault-raw-json a\s*\{[\s\S]*?color:\s*var\(--up-link\);/i
+  );
+  assert.match(upDevtoolsCss, /\.zip-config-gate\s*\{[\s\S]*?border:\s*1px solid #000;[\s\S]*?background:\s*#fff;/i);
+  assert.match(
+    upDevtoolsCss,
+    /\.vault-slacktivate-state\[data-state="pending"\] \.zip-config-gate\s*\{[\s\S]*?border:\s*4px solid #000;[\s\S]*?background:\s*#fff;/i
+  );
+  assert.match(
+    upDevtoolsCss,
+    /\.zip-config-dropzone\s*\{[\s\S]*?border-color:\s*#000;[\s\S]*?background:\s*#fff;[\s\S]*?color:\s*#000;/i
+  );
+  assert.doesNotMatch(
+    upDevtoolsCss,
+    /#1b1307|#0d0904|#ffc736|#ffd978|#ffe7a5|255,\s*199,\s*54|255,\s*211,\s*102|255,\s*203,\s*72|255,\s*190,\s*76|255,\s*214,\s*112|255,\s*219,\s*130|255,\s*205,\s*98|255,\s*186,\s*72|255,\s*220,\s*138|255,\s*198,\s*62/i
+  );
+});

@@ -1,23 +1,57 @@
 :root {
   color-scheme: dark;
-  font-family: "Avenir Next", "Segoe UI Variable", "Gill Sans MT", "Trebuchet MS", sans-serif;
-  --up-bg: #1b1307;
-  --up-bg-deep: #0d0904;
-  --up-panel: rgba(26, 18, 9, 0.82);
-  --up-panel-strong: rgba(33, 23, 12, 0.92);
-  --up-panel-soft: rgba(43, 29, 13, 0.76);
-  --up-panel-elevated: rgba(55, 35, 13, 0.8);
-  --up-border: rgba(255, 199, 54, 0.2);
-  --up-border-strong: rgba(255, 211, 102, 0.34);
-  --up-text: #f8ead0;
-  --up-muted: #c9aa68;
-  --up-shadow: 0 24px 48px rgba(0, 0, 0, 0.34), 0 10px 24px rgba(0, 0, 0, 0.24);
-  --up-accent: #ffc736;
-  --up-accent-strong: #ffd978;
-  --up-accent-soft: rgba(255, 199, 54, 0.14);
-  --up-success: #71d88a;
-  --up-error: #ff9786;
-  --up-link: #ffe7a5;
+  font-family: "Adobe Clean", "Avenir Next", "Segoe UI Variable", "Gill Sans MT", "Trebuchet MS", sans-serif;
+  --up-obsidian: #0B0B0B;
+  --up-payne-gray: #5C677D;
+  --up-payne-gray-rgb: 92, 103, 125;
+  --up-gray-25-rgb: 17, 17, 17;
+  --up-gray-50-rgb: 27, 27, 27;
+  --up-gray-75-rgb: 34, 34, 34;
+  --up-gray-100-rgb: 44, 44, 44;
+  --up-gray-200-rgb: 50, 50, 50;
+  --up-gray-300-rgb: 57, 57, 57;
+  --up-gray-400-rgb: 68, 68, 68;
+  --up-gray-500-rgb: 109, 109, 109;
+  --up-gray-600-rgb: 138, 138, 138;
+  --up-gray-700-rgb: 175, 175, 175;
+  --up-gray-800-rgb: 219, 219, 219;
+  --up-gray-900-rgb: 242, 242, 242;
+  --up-success-rgb: 14, 175, 98;
+  --up-success-strong-rgb: 24, 193, 110;
+  --up-error-deep-rgb: 223, 52, 34;
+  --up-error-rgb: 255, 103, 86;
+  --up-bg: rgb(var(--up-gray-25-rgb));
+  --up-bg-deep: var(--up-obsidian);
+  --up-panel: rgba(27, 27, 27, 0.92);
+  --up-panel-strong: rgba(17, 17, 17, 0.96);
+  --up-panel-soft: rgba(34, 34, 34, 0.82);
+  --up-panel-elevated: rgba(44, 44, 44, 0.86);
+  --up-border: color-mix(in srgb, rgb(var(--up-gray-300-rgb)) 72%, var(--up-payne-gray) 28%);
+  --up-border-strong: color-mix(in srgb, rgb(var(--up-gray-500-rgb)) 52%, var(--up-payne-gray) 48%);
+  --up-text: rgb(var(--up-gray-900-rgb));
+  --up-muted: rgb(var(--up-gray-700-rgb));
+  --up-shadow:
+    0 24px 48px rgba(0, 0, 0, 0.42),
+    0 10px 24px rgba(var(--up-payne-gray-rgb), 0.12);
+  --up-accent: var(--up-payne-gray);
+  --up-accent-strong: color-mix(in srgb, rgb(var(--up-gray-900-rgb)) 64%, var(--up-payne-gray) 36%);
+  --up-accent-soft: rgba(var(--up-payne-gray-rgb), 0.16);
+  --up-success: rgb(var(--up-success-strong-rgb));
+  --up-error: rgb(var(--up-error-rgb));
+  --up-link: color-mix(in srgb, rgb(var(--up-gray-900-rgb)) 56%, var(--up-payne-gray) 44%);
+  --up-focus-ring: rgba(var(--up-payne-gray-rgb), 0.28);
+  --up-shell-gradient: linear-gradient(180deg, rgba(44, 44, 44, 0.96), rgba(27, 27, 27, 0.98));
+  --up-shell-gradient-strong: linear-gradient(180deg, rgba(34, 34, 34, 0.99), rgba(17, 17, 17, 0.99));
+  --up-shell-gradient-soft: linear-gradient(180deg, rgba(57, 57, 57, 0.96), rgba(34, 34, 34, 0.98));
+  --up-shell-highlight: radial-gradient(110% 120% at 100% 0%, rgba(var(--up-payne-gray-rgb), 0.18) 0%, transparent 40%);
+  --up-shell-highlight-soft: radial-gradient(120% 140% at 0% 0%, rgba(var(--up-payne-gray-rgb), 0.16) 0%, transparent 42%);
+  --up-button-gradient: linear-gradient(180deg, rgb(var(--up-gray-500-rgb)) 0%, var(--up-payne-gray) 100%);
+  --up-button-hover-gradient: linear-gradient(180deg, rgb(var(--up-gray-600-rgb)) 0%, rgb(var(--up-gray-500-rgb)) 100%);
+  --up-button-secondary-gradient: linear-gradient(180deg, rgba(57, 57, 57, 0.98), rgba(34, 34, 34, 0.98));
+  --up-button-secondary-hover-gradient: linear-gradient(180deg, rgba(68, 68, 68, 0.98), rgba(44, 44, 44, 0.98));
+  --up-danger-gradient: linear-gradient(180deg, rgba(var(--up-error-rgb), 0.92), rgba(var(--up-error-deep-rgb), 0.94));
+  --up-surface-muted: rgba(34, 34, 34, 0.7);
+  --up-surface-strong: rgba(17, 17, 17, 0.7);
 }
 
 * {
@@ -32,12 +66,24 @@ body {
 
 body {
   margin: 0;
+  position: relative;
   background:
-    radial-gradient(circle at 10% -8%, rgba(255, 214, 106, 0.32), rgba(255, 214, 106, 0) 36%),
-    radial-gradient(circle at 95% 0%, rgba(191, 110, 0, 0.26), rgba(191, 110, 0, 0) 34%),
-    radial-gradient(circle at 50% 120%, rgba(255, 168, 63, 0.12), rgba(255, 168, 63, 0) 42%),
-    linear-gradient(180deg, #3d2502 0%, var(--up-bg) 44%, var(--up-bg-deep) 100%);
+    radial-gradient(120% 72% at 8% 0%, rgba(var(--up-payne-gray-rgb), 0.26) 0%, transparent 52%),
+    radial-gradient(96% 56% at 92% 100%, rgba(var(--up-gray-400-rgb), 0.22) 0%, transparent 48%),
+    linear-gradient(180deg, rgb(var(--up-gray-25-rgb)) 0%, rgb(var(--up-gray-50-rgb)) 54%, var(--up-obsidian) 100%);
   color: var(--up-text);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px;
+  opacity: 0.48;
 }
 
 .settings-shell {
@@ -46,13 +92,15 @@ body {
   display: grid;
   gap: 16px;
   align-content: start;
+  position: relative;
+  z-index: 1;
 }
 
 .settings-card,
 .context-card {
   border: 1px solid var(--up-border);
   border-radius: 18px;
-  background: var(--up-panel);
+  background: var(--up-shell-highlight-soft), var(--up-shell-gradient);
   box-shadow: var(--up-shadow);
   backdrop-filter: blur(12px);
 }
@@ -72,13 +120,14 @@ body {
 }
 
 .controller-card {
-  border: 1px solid rgba(255, 190, 76, 0.24);
+  border: 1px solid var(--up-border);
   border-radius: 18px;
   padding: 16px 18px;
-  background:
-    linear-gradient(180deg, rgba(66, 41, 12, 0.95), rgba(26, 17, 9, 0.96)),
-    radial-gradient(circle at 100% 0%, rgba(255, 178, 74, 0.2), rgba(255, 178, 74, 0) 40%);
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.3), 0 8px 20px rgba(0, 0, 0, 0.2);
+  background: var(--up-shell-highlight), var(--up-shell-gradient-strong);
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.34),
+    0 8px 20px rgba(var(--up-payne-gray-rgb), 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .controller-card-head {
@@ -95,8 +144,8 @@ body {
   min-width: 88px;
   padding: 5px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 190, 76, 0.24);
-  background: rgba(80, 51, 18, 0.76);
+  border: 1px solid var(--up-border);
+  background: rgba(var(--up-gray-50-rgb), 0.88);
   color: var(--up-error);
   font-size: 10px;
   font-weight: 800;
@@ -105,13 +154,13 @@ body {
 }
 
 .controller-status-badge[data-status="restricted"] {
-  color: #ffd36e;
-  border-color: rgba(255, 196, 71, 0.28);
+  color: rgb(var(--up-gray-800-rgb));
+  border-color: var(--up-border-strong);
 }
 
 .controller-status-badge[data-status="bootstrapping"] {
-  color: var(--up-accent-strong);
-  border-color: rgba(255, 215, 120, 0.24);
+  color: var(--up-link);
+  border-color: rgba(var(--up-payne-gray-rgb), 0.42);
 }
 
 .controller-status-title {
@@ -154,8 +203,8 @@ body {
   border: 0;
   border-bottom: 1px solid transparent;
   background:
-    linear-gradient(180deg, rgba(255, 219, 130, 0.14), rgba(52, 34, 13, 0.92)),
-    linear-gradient(90deg, rgba(255, 198, 62, 0.16), rgba(255, 198, 62, 0));
+    var(--up-shell-gradient-soft),
+    linear-gradient(90deg, rgba(var(--up-payne-gray-rgb), 0.18), rgba(var(--up-payne-gray-rgb), 0));
   color: var(--up-text);
   text-align: left;
   display: grid;
@@ -166,7 +215,7 @@ body {
 }
 
 .up-collapsible-toggle[aria-expanded="true"] {
-  border-bottom-color: rgba(255, 199, 54, 0.12);
+  border-bottom-color: rgba(var(--up-payne-gray-rgb), 0.22);
 }
 
 .up-collapsible-toggle[aria-expanded="false"] {
@@ -175,7 +224,7 @@ body {
 
 .up-collapsible-toggle:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px rgba(255, 210, 95, 0.24);
+  box-shadow: inset 0 0 0 2px var(--up-focus-ring);
 }
 
 .up-collapsible-heading {
@@ -199,10 +248,10 @@ body {
 .up-collapsible-badge {
   min-width: 58px;
   padding: 5px 10px;
-  border: 1px solid rgba(255, 204, 77, 0.18);
+  border: 1px solid rgba(var(--up-payne-gray-rgb), 0.36);
   border-radius: 999px;
-  background: rgba(63, 41, 14, 0.82);
-  color: var(--up-accent-strong);
+  background: rgba(var(--up-gray-50-rgb), 0.84);
+  color: var(--up-link);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -214,7 +263,7 @@ body {
 .up-collapsible-icon {
   font-size: 12px;
   line-height: 1;
-  color: var(--up-accent-strong);
+  color: var(--up-link);
   transition: transform 160ms ease;
 }
 
@@ -262,11 +311,11 @@ body {
 .vault-refresh-btn {
   height: 34px;
   min-width: 104px;
-  border: 1px solid rgba(255, 204, 77, 0.2);
+  border: 1px solid var(--up-border-strong);
   border-radius: 999px;
   padding: 0 14px;
-  background: linear-gradient(180deg, rgba(86, 55, 18, 0.92), rgba(45, 29, 11, 0.96));
-  color: var(--up-accent-strong);
+  background: var(--up-button-secondary-gradient);
+  color: var(--up-text);
   font: inherit;
   font-size: 11px;
   font-weight: 800;
@@ -279,10 +328,29 @@ body {
   cursor: default;
 }
 
+.vault-refresh-btn:hover:not(:disabled),
+.vault-pass-action-btn:hover:not(:disabled),
+.vault-slacktivate-action-btn:hover:not(:disabled) {
+  background: var(--up-button-hover-gradient);
+  box-shadow:
+    0 12px 22px rgba(0, 0, 0, 0.22),
+    0 0 0 1px rgba(var(--up-payne-gray-rgb), 0.16);
+}
+
+.vault-refresh-btn:focus-visible,
+.vault-pass-action-btn:focus-visible,
+.vault-slacktivate-action-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(var(--up-gray-900-rgb), 0.88),
+    0 0 0 5px rgba(var(--up-payne-gray-rgb), 0.22),
+    0 12px 22px rgba(0, 0, 0, 0.2);
+}
+
 .vault-refresh-btn--danger {
-  border-color: rgba(255, 151, 134, 0.24);
-  color: var(--up-error);
-  background: linear-gradient(180deg, rgba(89, 34, 24, 0.94), rgba(49, 19, 14, 0.96));
+  border-color: rgba(var(--up-error-rgb), 0.36);
+  color: #ffffff;
+  background: var(--up-danger-gradient);
 }
 
 .vault-summary {
@@ -303,12 +371,10 @@ body {
 }
 
 .vault-metric-card {
-  border: 1px solid rgba(255, 199, 54, 0.14);
+  border: 1px solid var(--up-border);
   border-radius: 14px;
   padding: 12px 13px;
-  background:
-    linear-gradient(180deg, rgba(77, 48, 16, 0.7), rgba(38, 24, 9, 0.92)),
-    rgba(33, 23, 12, 0.9);
+  background: var(--up-shell-highlight-soft), var(--up-shell-gradient);
 }
 
 .vault-metric-card--nav {
@@ -322,8 +388,10 @@ body {
 .vault-metric-card--nav:hover,
 .vault-metric-card--nav:focus-visible {
   transform: translateY(-1px);
-  border-color: rgba(255, 214, 112, 0.34);
-  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(255, 214, 112, 0.08);
+  border-color: var(--up-border-strong);
+  box-shadow:
+    0 14px 24px rgba(0, 0, 0, 0.24),
+    0 0 0 1px rgba(var(--up-payne-gray-rgb), 0.14);
 }
 
 .vault-metric-card--nav:focus-visible {
@@ -331,10 +399,7 @@ body {
 }
 
 .vault-metric-card--primary {
-  background:
-    radial-gradient(circle at top left, rgba(255, 221, 133, 0.16), rgba(255, 221, 133, 0) 45%),
-    linear-gradient(180deg, rgba(96, 61, 18, 0.88), rgba(40, 26, 10, 0.96)),
-    rgba(33, 23, 12, 0.9);
+  background: var(--up-shell-highlight-soft), var(--up-shell-gradient-strong);
 }
 
 .vault-metric-label,
@@ -372,9 +437,9 @@ body {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border: 1px solid rgba(255, 199, 54, 0.14);
+  border: 1px solid var(--up-border);
   border-radius: 999px;
-  background: rgba(66, 42, 15, 0.78);
+  background: rgba(var(--up-gray-50-rgb), 0.82);
 }
 
 .vault-namespace-chip--nav {
@@ -387,8 +452,10 @@ body {
 .vault-namespace-chip--nav:hover,
 .vault-namespace-chip--nav:focus-visible {
   transform: translateY(-1px);
-  border-color: rgba(255, 214, 112, 0.34);
-  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.22);
+  border-color: var(--up-border-strong);
+  box-shadow:
+    0 10px 18px rgba(0, 0, 0, 0.22),
+    0 0 0 1px rgba(var(--up-payne-gray-rgb), 0.14);
 }
 
 .vault-namespace-chip--nav:focus-visible {
@@ -406,7 +473,7 @@ body {
 .vault-namespace-count {
   font-size: 11px;
   font-weight: 800;
-  color: var(--up-accent-strong);
+  color: var(--up-link);
 }
 
 .vault-empty-inline {
@@ -416,18 +483,14 @@ body {
 
 .vault-pass-card,
 .vault-pass-environment {
-  border: 1px solid rgba(255, 199, 54, 0.14);
+  border: 1px solid var(--up-border);
   border-radius: 16px;
   padding: 14px;
-  background:
-    linear-gradient(180deg, rgba(63, 40, 14, 0.74), rgba(31, 21, 10, 0.92)),
-    rgba(30, 21, 10, 0.9);
+  background: var(--up-shell-highlight-soft), var(--up-shell-gradient);
 }
 
 .vault-pass-card--empty {
-  background:
-    linear-gradient(180deg, rgba(57, 38, 17, 0.88), rgba(28, 20, 10, 0.94)),
-    rgba(30, 21, 10, 0.9);
+  background: var(--up-shell-gradient);
 }
 
 .vault-pass-card-head,
@@ -461,9 +524,9 @@ body {
   min-width: 86px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 201, 68, 0.16);
-  background: rgba(70, 45, 16, 0.82);
-  color: var(--up-accent-strong);
+  border: 1px solid rgba(var(--up-payne-gray-rgb), 0.28);
+  background: rgba(var(--up-gray-50-rgb), 0.82);
+  color: var(--up-link);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -485,10 +548,10 @@ body {
   justify-content: center;
   min-height: 32px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 201, 68, 0.2);
+  border: 1px solid var(--up-border-strong);
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(85, 54, 18, 0.92), rgba(44, 28, 11, 0.96));
-  color: var(--up-accent-strong);
+  background: var(--up-button-gradient);
+  color: #ffffff;
   font: inherit;
   font-size: 10px;
   font-weight: 800;
@@ -503,34 +566,36 @@ body {
 }
 
 .vault-pass-action-btn--working {
-  border-color: rgba(255, 219, 130, 0.34);
-  background: linear-gradient(180deg, rgba(122, 77, 24, 0.96), rgba(70, 43, 14, 0.98));
-  color: #fff1c7;
-  box-shadow: 0 0 0 1px rgba(255, 219, 130, 0.08), 0 10px 18px rgba(0, 0, 0, 0.22);
+  border-color: rgba(var(--up-payne-gray-rgb), 0.52);
+  background: var(--up-button-hover-gradient);
+  color: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(var(--up-payne-gray-rgb), 0.16),
+    0 10px 18px rgba(0, 0, 0, 0.22);
 }
 
 .vault-pass-status[data-status="complete"] {
-  border-color: rgba(113, 216, 138, 0.22);
+  border-color: rgba(var(--up-success-strong-rgb), 0.32);
   color: var(--up-success);
-  background: rgba(23, 74, 35, 0.42);
+  background: rgba(var(--up-success-rgb), 0.18);
 }
 
 .vault-pass-status[data-status="partial"] {
-  border-color: rgba(255, 192, 73, 0.24);
-  color: #ffd36e;
-  background: rgba(96, 62, 15, 0.46);
+  border-color: rgba(var(--up-payne-gray-rgb), 0.38);
+  color: var(--up-text);
+  background: rgba(var(--up-payne-gray-rgb), 0.18);
 }
 
 .vault-pass-status[data-status="pending"] {
-  border-color: rgba(177, 141, 74, 0.18);
-  color: #d7bb86;
-  background: rgba(65, 49, 24, 0.46);
+  border-color: rgba(var(--up-gray-400-rgb), 0.38);
+  color: rgb(var(--up-gray-700-rgb));
+  background: rgba(var(--up-gray-100-rgb), 0.48);
 }
 
 .vault-pass-status[data-status="working"] {
-  border-color: rgba(255, 219, 130, 0.34);
-  color: #fff1c7;
-  background: rgba(116, 73, 21, 0.58);
+  border-color: rgba(var(--up-payne-gray-rgb), 0.46);
+  color: var(--up-text);
+  background: rgba(var(--up-payne-gray-rgb), 0.24);
 }
 
 .vault-pass-metrics {
@@ -541,10 +606,10 @@ body {
 }
 
 .vault-pass-metric {
-  border: 1px solid rgba(255, 199, 54, 0.12);
+  border: 1px solid rgba(var(--up-gray-300-rgb), 0.78);
   border-radius: 12px;
   padding: 10px 11px;
-  background: rgba(67, 43, 15, 0.58);
+  background: rgba(var(--up-gray-50-rgb), 0.76);
 }
 
 .vault-pass-metric-label,
@@ -576,15 +641,17 @@ body {
 }
 
 .vault-pass-record {
-  border: 1px solid rgba(255, 199, 54, 0.12);
+  border: 1px solid rgba(var(--up-gray-300-rgb), 0.78);
   border-radius: 12px;
   padding: 12px;
-  background: rgba(67, 43, 15, 0.58);
+  background: rgba(var(--up-gray-50-rgb), 0.76);
 }
 
 .vault-pass-record--working {
-  border-color: rgba(255, 219, 130, 0.28);
-  box-shadow: 0 0 0 1px rgba(255, 219, 130, 0.08), 0 18px 28px rgba(0, 0, 0, 0.18);
+  border-color: rgba(var(--up-payne-gray-rgb), 0.42);
+  box-shadow:
+    0 0 0 1px rgba(var(--up-payne-gray-rgb), 0.12),
+    0 18px 28px rgba(0, 0, 0, 0.18);
 }
 
 .vault-pass-environment-meta,
@@ -608,8 +675,8 @@ body {
   align-items: center;
   padding: 5px 8px;
   border-radius: 999px;
-  background: rgba(255, 199, 54, 0.12);
-  color: var(--up-accent-strong);
+  background: rgba(var(--up-payne-gray-rgb), 0.16);
+  color: var(--up-link);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -617,7 +684,7 @@ body {
 }
 
 .vault-pass-tag--meta {
-  background: rgba(255, 232, 183, 0.08);
+  background: rgba(var(--up-gray-100-rgb), 0.58);
   color: var(--up-text);
 }
 
@@ -629,8 +696,8 @@ body {
 
 .vault-pass-tag--link:hover,
 .vault-pass-tag--link:focus-visible {
-  background: rgba(255, 211, 102, 0.18);
-  color: var(--up-accent-strong);
+  background: rgba(var(--up-payne-gray-rgb), 0.24);
+  color: var(--up-text);
   outline: none;
 }
 
@@ -641,12 +708,10 @@ body {
 }
 
 .vault-area-card {
-  border: 1px solid rgba(255, 199, 54, 0.14);
+  border: 1px solid var(--up-border);
   border-radius: 16px;
   padding: 14px;
-  background:
-    linear-gradient(180deg, rgba(61, 40, 15, 0.72), rgba(29, 20, 10, 0.92)),
-    rgba(31, 21, 10, 0.9);
+  background: var(--up-shell-highlight-soft), var(--up-shell-gradient);
   scroll-margin-top: 12px;
 }
 
@@ -682,9 +747,9 @@ body {
   min-width: 78px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 201, 68, 0.16);
-  background: rgba(71, 46, 16, 0.82);
-  color: var(--up-accent-strong);
+  border: 1px solid rgba(var(--up-payne-gray-rgb), 0.28);
+  background: rgba(var(--up-gray-50-rgb), 0.82);
+  color: var(--up-link);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -697,10 +762,10 @@ body {
 }
 
 .vault-entry-card {
-  border: 1px solid rgba(255, 199, 54, 0.12);
+  border: 1px solid rgba(var(--up-gray-300-rgb), 0.78);
   border-radius: 12px;
   padding: 11px 12px;
-  background: rgba(64, 42, 16, 0.56);
+  background: rgba(var(--up-gray-50-rgb), 0.74);
   scroll-margin-top: 12px;
 }
 
@@ -710,15 +775,15 @@ body {
 
 @keyframes vault-nav-flash {
   0% {
-    box-shadow: 0 0 0 0 rgba(255, 204, 77, 0.34);
-    border-color: rgba(255, 204, 77, 0.34);
+    box-shadow: 0 0 0 0 rgba(var(--up-payne-gray-rgb), 0.34);
+    border-color: rgba(var(--up-payne-gray-rgb), 0.34);
   }
   35% {
-    box-shadow: 0 0 0 6px rgba(255, 204, 77, 0.14);
-    border-color: rgba(255, 214, 112, 0.42);
+    box-shadow: 0 0 0 6px rgba(var(--up-payne-gray-rgb), 0.14);
+    border-color: rgba(var(--up-payne-gray-rgb), 0.48);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(255, 204, 77, 0);
+    box-shadow: 0 0 0 0 rgba(var(--up-payne-gray-rgb), 0);
   }
 }
 
@@ -730,7 +795,7 @@ body {
 }
 
 .vault-entry-key {
-  color: var(--up-accent-strong);
+  color: var(--up-link);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
   font-weight: 700;
@@ -750,7 +815,8 @@ body {
   margin: 8px 0 0;
   padding: 12px;
   border-radius: 10px;
-  background: rgba(8, 6, 3, 0.34);
+  border: 1px solid rgba(var(--up-gray-300-rgb), 0.6);
+  background: rgba(var(--up-gray-25-rgb), 0.86);
   color: var(--up-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 11px;
@@ -766,7 +832,7 @@ body {
 
 .vault-raw-dump summary {
   cursor: pointer;
-  color: var(--up-accent-strong);
+  color: var(--up-link);
   font-size: 12px;
   font-weight: 700;
 }
@@ -808,41 +874,58 @@ body {
   max-width: min(100%, 24rem);
   field-sizing: content;
   height: 40px;
-  border: 1px solid rgba(255, 203, 72, 0.2);
+  border: 1px solid var(--up-border);
   border-radius: 12px;
   padding: 0 14px;
-  background: var(--up-panel-strong);
+  background: var(--up-shell-gradient-strong);
   color: var(--up-text);
   font: inherit;
-  box-shadow: inset 0 1px 0 rgba(255, 234, 191, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .env-select:focus-visible {
   outline: none;
-  border-color: rgba(255, 213, 95, 0.48);
-  box-shadow: 0 0 0 3px rgba(255, 213, 95, 0.12);
+  border-color: rgba(var(--up-payne-gray-rgb), 0.84);
+  box-shadow: 0 0 0 3px rgba(var(--up-payne-gray-rgb), 0.18);
 }
 
 .switch-btn {
   height: 40px;
   min-width: 116px;
-  border: 1px solid var(--up-accent-strong);
+  border: 1px solid var(--up-border-strong);
   border-radius: 999px;
   padding: 0 18px;
-  background: linear-gradient(180deg, #ffd765, #d08d00);
-  color: #251500;
+  background: var(--up-button-gradient);
+  color: #ffffff;
   font: inherit;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   cursor: pointer;
-  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 247, 214, 0.34);
+  box-shadow:
+    0 12px 22px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .switch-btn:disabled,
 .env-select:disabled {
   opacity: 0.66;
   cursor: default;
+}
+
+.switch-btn:hover:not(:disabled) {
+  background: var(--up-button-hover-gradient);
+  box-shadow:
+    0 16px 28px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(var(--up-payne-gray-rgb), 0.14);
+}
+
+.switch-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(var(--up-gray-900-rgb), 0.88),
+    0 0 0 5px rgba(var(--up-payne-gray-rgb), 0.22),
+    0 16px 28px rgba(0, 0, 0, 0.26);
 }
 
 body.up-controller-disabled .settings-card {
@@ -867,9 +950,9 @@ body.up-controller-disabled .env-select {
   gap: 12px;
   align-items: start;
   padding: 10px 12px;
-  border: 1px solid rgba(255, 199, 54, 0.14);
+  border: 1px solid rgba(var(--up-gray-300-rgb), 0.78);
   border-radius: 12px;
-  background: rgba(62, 39, 14, 0.62);
+  background: rgba(var(--up-gray-50-rgb), 0.72);
 }
 
 .context-row dt {
@@ -892,6 +975,14 @@ body.up-controller-disabled .env-select {
 .vault-entry-preview a,
 .vault-raw-json a {
   color: var(--up-link);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.context-row dd a:hover,
+.vault-entry-preview a:hover,
+.vault-raw-json a:hover {
+  color: var(--up-text);
 }
 
 .vault-slacktivate-shell {
@@ -899,18 +990,16 @@ body.up-controller-disabled .env-select {
 }
 
 .vault-slacktivate-card {
-  border: 1px solid rgba(255, 199, 54, 0.12);
+  border: 1px solid var(--up-border);
   border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(60, 39, 15, 0.88), rgba(27, 18, 8, 0.94)),
-    radial-gradient(circle at 100% 0%, rgba(255, 186, 72, 0.12), rgba(255, 186, 72, 0) 42%);
-  box-shadow: inset 0 1px 0 rgba(255, 232, 178, 0.06);
+  background: var(--up-shell-highlight), var(--up-shell-gradient-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .vault-slacktivate-toggle {
   background:
-    linear-gradient(180deg, rgba(255, 220, 138, 0.12), rgba(43, 28, 11, 0.94)),
-    linear-gradient(90deg, rgba(255, 198, 62, 0.12), rgba(255, 198, 62, 0));
+    var(--up-shell-gradient-soft),
+    linear-gradient(90deg, rgba(var(--up-payne-gray-rgb), 0.18), rgba(var(--up-payne-gray-rgb), 0));
 }
 
 .vault-slacktivate-body {
@@ -1072,11 +1161,9 @@ body.up-controller-disabled .env-select {
   display: grid;
   gap: 8px;
   padding: 24px 20px;
-  border: 1px dashed rgba(255, 213, 95, 0.34);
+  border: 1px dashed rgba(var(--up-payne-gray-rgb), 0.52);
   border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(74, 48, 17, 0.72), rgba(29, 18, 9, 0.92)),
-    radial-gradient(circle at 100% 0%, rgba(255, 205, 98, 0.14), rgba(255, 205, 98, 0) 40%);
+  background: var(--up-shell-highlight-soft), var(--up-shell-gradient);
   color: var(--up-text);
   font: inherit;
   text-align: left;
@@ -1091,8 +1178,8 @@ body.up-controller-disabled .env-select {
 .vault-slacktivate-dropzone:hover:not(:disabled),
 .vault-slacktivate-dropzone:focus-visible,
 .vault-slacktivate-content[data-drop-active="true"] .vault-slacktivate-dropzone {
-  border-color: rgba(255, 221, 137, 0.78);
-  box-shadow: 0 0 0 3px rgba(255, 211, 110, 0.12);
+  border-color: rgba(var(--up-payne-gray-rgb), 0.78);
+  box-shadow: 0 0 0 3px rgba(var(--up-payne-gray-rgb), 0.16);
   transform: translateY(-1px);
 }
 
@@ -1138,11 +1225,9 @@ body.up-controller-disabled .env-select {
   display: grid;
   gap: 14px;
   padding: 18px;
-  border: 1px solid rgba(255, 205, 98, 0.18);
+  border: 1px solid var(--up-border);
   border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(47, 31, 12, 0.9), rgba(22, 14, 7, 0.94)),
-    radial-gradient(circle at 100% 0%, rgba(113, 216, 138, 0.1), rgba(113, 216, 138, 0) 40%);
+  background: var(--up-shell-highlight-soft), var(--up-shell-gradient-strong);
 }
 
 .vault-slacktivate-confirmation-head {
@@ -1182,7 +1267,7 @@ body.up-controller-disabled .env-select {
 }
 
 .vault-slacktivate-statusline strong {
-  color: var(--up-accent-strong);
+  color: var(--up-link);
 }
 
 .vault-slacktivate-details {
@@ -1195,14 +1280,14 @@ body.up-controller-disabled .env-select {
 .vault-slacktivate-detail {
   margin: 0;
   padding: 12px 14px;
-  border: 1px solid rgba(255, 199, 54, 0.12);
+  border: 1px solid rgba(var(--up-gray-300-rgb), 0.78);
   border-radius: 12px;
-  background: rgba(64, 41, 15, 0.54);
+  background: rgba(var(--up-gray-50-rgb), 0.76);
 }
 
 .vault-slacktivate-detail dt {
   margin: 0 0 4px;
-  color: var(--up-accent-strong);
+  color: var(--up-link);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -1219,9 +1304,9 @@ body.up-controller-disabled .env-select {
   display: grid;
   gap: 10px;
   padding: 14px;
-  border: 1px solid rgba(255, 199, 54, 0.12);
+  border: 1px solid rgba(var(--up-gray-300-rgb), 0.78);
   border-radius: 12px;
-  background: rgba(64, 41, 15, 0.46);
+  background: rgba(var(--up-gray-50-rgb), 0.72);
 }
 
 .vault-slacktivate-roster-head {
@@ -1233,7 +1318,7 @@ body.up-controller-disabled .env-select {
 
 .vault-slacktivate-roster-title {
   margin: 0 0 4px;
-  color: var(--up-accent-strong);
+  color: var(--up-link);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -1255,8 +1340,8 @@ body.up-controller-disabled .env-select {
   min-height: 24px;
   padding: 0 8px;
   border-radius: 999px;
-  background: rgba(255, 205, 98, 0.16);
-  color: var(--up-accent-strong);
+  background: rgba(var(--up-payne-gray-rgb), 0.2);
+  color: var(--up-text);
   font-size: 11px;
   font-weight: 800;
 }
@@ -1304,11 +1389,11 @@ body.up-controller-disabled .env-select {
 
 .vault-slacktivate-action-btn {
   min-height: 36px;
-  border: 1px solid rgba(255, 211, 102, 0.34);
+  border: 1px solid var(--up-border-strong);
   border-radius: 999px;
   padding: 0 16px;
-  background: linear-gradient(180deg, rgba(255, 220, 127, 0.3), rgba(140, 91, 9, 0.9));
-  color: #261600;
+  background: var(--up-button-gradient);
+  color: #ffffff;
   font: inherit;
   font-size: 11px;
   font-weight: 800;
