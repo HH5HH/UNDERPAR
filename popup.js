@@ -40709,10 +40709,9 @@ function ensureRestWorkspaceTabWatcher() {
 }
 
 function getUnderparActiveUserLabel() {
-  const profile = resolveLoginProfile(state.loginData) || {};
   return firstNonEmptyString([
-    getProfileDisplayName(profile),
-    getLoginEmail(state.loginData),
+    getLoginDisplayName(state.loginData),
+    getLoginPrincipalId(state.loginData),
     String(state.loginData?.email || "").trim(),
     String(state.loginData?.userId || "").trim(),
     "UnderPAR User",
@@ -48468,10 +48467,10 @@ function getProfileDisplayNameRaw(profile) {
 
 function updateRestrictedContext(sessionData, options = {}) {
   const profile = resolveLoginProfile(sessionData);
-  const displayName = getProfileDisplayNameRaw(profile);
-  const email = getLoginEmail(sessionData);
-  const loginLabel = firstNonEmptyString([displayName, email])
-    ? `Signed in as ${firstNonEmptyString([displayName, email])}${displayName && email ? ` (${email})` : ""}`
+  const displayName = getLoginDisplayName(sessionData);
+  const principalId = getLoginPrincipalId(sessionData);
+  const loginLabel = firstNonEmptyString([displayName, principalId])
+    ? `Signed in as ${firstNonEmptyString([displayName, principalId])}${displayName && principalId ? ` (${principalId})` : ""}`
     : "Sign-in state is unknown.";
 
   const orgFromProfile = firstNonEmptyString([
@@ -49390,42 +49389,52 @@ function getProfileIdentity(profile) {
   ]);
 }
 
-function getLoginEmail(loginData) {
-  const profile = resolveLoginProfile(loginData) || {};
+function resolveLoginAuthIdValue(loginData, profile = null) {
+  const resolvedProfile = profile && typeof profile === "object" ? profile : resolveLoginProfile(loginData) || {};
   return firstNonEmptyString([
-    getProfileEmail(profile),
     loginData?.imsSession?.authId,
     loginData?.sessionKeys?.authId,
     loginData?.cmConsoleImsSession?.authId,
     loginData?.experienceCloudImsSession?.authId,
+    getProfileEmail(resolvedProfile),
   ]);
 }
 
-function getLoginIdentity(loginData) {
-  const profile = resolveLoginProfile(loginData) || {};
+function resolveLoginUserIdValue(loginData, profile = null) {
+  const resolvedProfile = profile && typeof profile === "object" ? profile : resolveLoginProfile(loginData) || {};
   return firstNonEmptyString([
-    getProfileIdentity(profile),
     loginData?.imsSession?.userId,
     loginData?.sessionKeys?.userId,
     loginData?.cmConsoleImsSession?.userId,
     loginData?.experienceCloudImsSession?.userId,
     loginData?.adobePassOrg?.userId,
+    getProfileIdentity(resolvedProfile),
   ]);
 }
 
-function isProfileDisplayNamePlaceholder(displayName = "") {
-  const normalized = String(displayName || "")
-    .trim()
-    .toLowerCase();
-  return !normalized || normalized === "adobe user";
+function resolveLoginDisplayNameValue(loginData, profile = null) {
+  const resolvedProfile = profile && typeof profile === "object" ? profile : resolveLoginProfile(loginData) || {};
+  const displayNameRaw = getProfileDisplayNameRaw(resolvedProfile);
+  const displayName = getProfileDisplayName(resolvedProfile);
+  if (!isProfileDisplayNamePlaceholder(displayNameRaw) || !isProfileDisplayNamePlaceholder(displayName)) {
+    return displayName;
+  }
+  return firstNonEmptyString([
+    resolveLoginAuthIdValue(loginData, resolvedProfile),
+    resolveLoginUserIdValue(loginData, resolvedProfile),
+    "Adobe User",
+  ]);
 }
 
-function getSessionProfileCompleteness(loginData) {
+function buildLoginAuthContext(loginData = {}) {
   const profile = resolveLoginProfile(loginData) || {};
-  const displayNameRaw = getProfileDisplayNameRaw(profile);
-  const displayName = getProfileDisplayName(profile);
-  const email = getLoginEmail(loginData);
-  const userId = getLoginIdentity(loginData);
+  const primaryImsSession = loginData?.imsSession && typeof loginData.imsSession === "object" ? loginData.imsSession : {};
+  const principalId = firstNonEmptyString([
+    resolveLoginAuthIdValue(loginData, profile),
+    resolveLoginUserIdValue(loginData, profile),
+  ]);
+  const authId = resolveLoginAuthIdValue(loginData, profile);
+  const userId = resolveLoginUserIdValue(loginData, profile);
   const orgId = firstNonEmptyString([loginData?.adobePassOrg?.orgId, loginData?.adobePassOrg?.id]);
   const orgName = firstNonEmptyString([
     loginData?.adobePassOrg?.name,
@@ -49443,15 +49452,90 @@ function getSessionProfileCompleteness(loginData) {
     profile?.additional_info?.company_name,
   ]);
 
+  return {
+    principalId,
+    authId,
+    userId,
+    displayName: resolveLoginDisplayNameValue(loginData, profile),
+    orgId,
+    orgName,
+    sessionId: firstNonEmptyString([
+      primaryImsSession?.sessionId,
+      loginData?.sessionKeys?.sessionId,
+      loginData?.cmConsoleImsSession?.sessionId,
+      loginData?.experienceCloudImsSession?.sessionId,
+    ]),
+    tokenId: firstNonEmptyString([
+      primaryImsSession?.tokenId,
+      loginData?.sessionKeys?.tokenId,
+      loginData?.cmConsoleImsSession?.tokenId,
+      loginData?.experienceCloudImsSession?.tokenId,
+    ]),
+    clientId: firstNonEmptyString([
+      primaryImsSession?.clientId,
+      loginData?.cmConsoleImsSession?.clientId,
+      loginData?.experienceCloudImsSession?.clientId,
+    ]),
+    scope: firstNonEmptyString([
+      loginData?.scope,
+      primaryImsSession?.scope,
+      loginData?.cmConsoleScope,
+      loginData?.experienceCloudScope,
+    ]),
+    expiresAt: coercePositiveNumber([
+      loginData?.expiresAt,
+      primaryImsSession?.expiresAt,
+      loginData?.cmConsoleExpiresAt,
+      loginData?.experienceCloudExpiresAt,
+    ].find((value) => coercePositiveNumber(value) > 0)),
+    accessTokenFingerprint: firstNonEmptyString([
+      loginData?.sessionKeys?.accessTokenFingerprint,
+      loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "",
+    ]),
+  };
+}
+
+function getLoginAuthId(loginData) {
+  return firstNonEmptyString([loginData?.authContext?.authId, resolveLoginAuthIdValue(loginData)]);
+}
+
+function getLoginEmail(loginData) {
+  return getLoginAuthId(loginData);
+}
+
+function getLoginIdentity(loginData) {
+  return firstNonEmptyString([loginData?.authContext?.userId, resolveLoginUserIdValue(loginData)]);
+}
+
+function getLoginPrincipalId(loginData) {
+  return firstNonEmptyString([loginData?.authContext?.principalId, getLoginAuthId(loginData), getLoginIdentity(loginData)]);
+}
+
+function getLoginDisplayName(loginData) {
+  return firstNonEmptyString([loginData?.authContext?.displayName, resolveLoginDisplayNameValue(loginData), "Adobe User"]);
+}
+
+function isProfileDisplayNamePlaceholder(displayName = "") {
+  const normalized = String(displayName || "")
+    .trim()
+    .toLowerCase();
+  return !normalized || normalized === "adobe user";
+}
+
+function getSessionProfileCompleteness(loginData) {
+  const profile = resolveLoginProfile(loginData) || {};
+  const authContext = buildLoginAuthContext(loginData);
+  const displayNameRaw = getProfileDisplayNameRaw(profile);
+  const displayName = authContext.displayName || getLoginDisplayName(loginData);
+  const principalId = authContext.principalId;
+  const authId = authContext.authId;
+  const userId = authContext.userId;
+  const orgId = authContext.orgId;
+  const orgName = authContext.orgName;
+
   const missing = [];
-  if (isProfileDisplayNamePlaceholder(displayNameRaw) && isProfileDisplayNamePlaceholder(displayName)) {
-    missing.push("name");
-  }
-  if (!email) {
-    missing.push("email");
-  }
-  if (!userId) {
-    missing.push("userId");
+  if (!principalId) {
+    missing.push("principalId");
   }
   if (!orgId) {
     missing.push("organizationId");
@@ -49465,10 +49549,13 @@ function getSessionProfileCompleteness(loginData) {
     missing,
     displayNameRaw,
     displayName,
-    email,
+    principalId,
+    authId,
+    email: authId,
     userId,
     orgId,
     orgName,
+    authContext,
   };
 }
 
@@ -49671,8 +49758,9 @@ function buildAvatarMenuEntries(loginData) {
     });
   };
 
-  pushEntry("Name", getProfileDisplayName(profile));
-  pushEntry("Email", getLoginEmail(loginData));
+  pushEntry("Name", getLoginDisplayName(loginData));
+  pushEntry("Adobe Principal", getLoginPrincipalId(loginData));
+  pushEntry("Adobe Auth ID", getLoginAuthId(loginData));
   pushEntry("Organization", getOrgDisplayName(loginData));
   pushEntry("Organization ID", loginData?.adobePassOrg?.orgId);
   const cmConsoleAccessToken = getPreferredCmAccessTokenCandidate();
@@ -49699,7 +49787,7 @@ function buildAvatarMenuEntries(loginData) {
       ? allProfileImageCandidates.map((candidate) => formatAvatarCandidateForMenu(candidate))
       : ["No profile image URL candidates found in profile payload."];
   pushEntry("All Profile Image URLs", allProfileImageLines.join("\n"), { multiline: true });
-  pushEntry("User ID", firstNonEmptyString([profile?.userId, profile?.user_id, profile?.sub, profile?.id]));
+  pushEntry("User ID", getLoginIdentity(loginData));
   pushEntry(
     "Account Type",
     firstNonEmptyString([profile?.account_type, profile?.additional_info?.account_type, profile?.additional_info?.projectedProductContext])
@@ -49724,14 +49812,10 @@ function buildAvatarMenuEntries(loginData) {
 }
 
 function getAvatarCacheIdentity(loginData) {
-  const profile = resolveLoginProfile(loginData) || {};
   return firstNonEmptyString([
-    profile?.userId,
-    profile?.user_id,
-    profile?.id,
-    profile?.sub,
-    profile?.email,
-    profile?.user_email,
+    getLoginPrincipalId(loginData),
+    getLoginAuthId(loginData),
+    getLoginIdentity(loginData),
     loginData?.adobePassOrg?.userId,
     "anonymous",
   ]);
@@ -49739,16 +49823,11 @@ function getAvatarCacheIdentity(loginData) {
 
 function getAvatarPersistIdentityCandidates(loginData, options = {}) {
   const includeTokenFingerprint = options.includeTokenFingerprint !== false;
-  const profile = resolveLoginProfile(loginData) || {};
   const tokenFingerprint = loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "";
   const candidates = [
-    profile?.userId,
-    profile?.user_id,
-    profile?.sub,
-    profile?.id,
-    profile?.email,
-    profile?.user_email,
-    profile?.additional_info?.email,
+    getLoginPrincipalId(loginData),
+    getLoginAuthId(loginData),
+    getLoginIdentity(loginData),
     loginData?.adobePassOrg?.userId,
   ];
   if (includeTokenFingerprint && tokenFingerprint) {
@@ -49759,15 +49838,10 @@ function getAvatarPersistIdentityCandidates(loginData, options = {}) {
 }
 
 function hasAvatarPersistProfileIdentity(loginData) {
-  const profile = resolveLoginProfile(loginData) || {};
   const identity = firstNonEmptyString([
-    profile?.userId,
-    profile?.user_id,
-    profile?.sub,
-    profile?.id,
-    profile?.email,
-    profile?.user_email,
-    profile?.additional_info?.email,
+    getLoginPrincipalId(loginData),
+    getLoginAuthId(loginData),
+    getLoginIdentity(loginData),
     loginData?.adobePassOrg?.userId,
   ]);
   return Boolean(identity);
@@ -49968,28 +50042,25 @@ function resolveAuthAvatarSeed(authData, profile = null) {
 }
 
 function buildSessionKeySnapshot(loginData = {}) {
-  const profile = resolveLoginProfile(loginData) || {};
   const imsSession = loginData?.imsSession && typeof loginData.imsSession === "object" ? loginData.imsSession : {};
+  const authContext = buildLoginAuthContext({
+    ...loginData,
+    imsSession,
+  });
   return pruneEmptyObject({
-    userId: compactStorageString(
+    principalId: compactStorageString(firstNonEmptyString([authContext?.principalId]), 320),
+    userId: compactStorageString(firstNonEmptyString([authContext?.userId]), 220),
+    authId: compactStorageString(firstNonEmptyString([authContext?.authId]), 220),
+    sessionId: compactStorageString(firstNonEmptyString([authContext?.sessionId, imsSession?.sessionId]), 220),
+    tokenId: compactStorageString(firstNonEmptyString([authContext?.tokenId, imsSession?.tokenId]), 220),
+    orgId: compactStorageString(firstNonEmptyString([authContext?.orgId]), 220),
+    accessTokenFingerprint: compactStorageString(
       firstNonEmptyString([
-        imsSession?.userId,
-        profile?.userId,
-        profile?.user_id,
-        profile?.sub,
-        profile?.id,
-        loginData?.adobePassOrg?.userId,
+        authContext?.accessTokenFingerprint,
+        loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "",
       ]),
-      220
+      64
     ),
-    authId: compactStorageString(
-      firstNonEmptyString([imsSession?.authId, profile?.authId, profile?.aa_id, profile?.adobeID]),
-      220
-    ),
-    sessionId: compactStorageString(firstNonEmptyString([imsSession?.sessionId]), 220),
-    tokenId: compactStorageString(firstNonEmptyString([imsSession?.tokenId]), 220),
-    orgId: compactStorageString(firstNonEmptyString([loginData?.adobePassOrg?.orgId]), 220),
-    accessTokenFingerprint: compactStorageString(loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "", 64),
   });
 }
 
@@ -49999,34 +50070,158 @@ function buildLoginSessionPayloadFromAuth(authData, profile = null, imageUrl = "
     normalizeAvatarCandidate(
       firstNonEmptyString([imageUrl, resolveAuthAvatarSeed(authData, normalizedProfile || undefined)])
     ) || "";
-  const imsSession = mergeImsSessionSnapshots(
-    deriveImsSessionSnapshotFromToken(authData?.accessToken || ""),
-    authData?.imsSession && typeof authData.imsSession === "object" ? authData.imsSession : null
-  );
-  return {
-    accessToken: firstNonEmptyString([authData?.accessToken]),
-    expiresAt: Number(authData?.expiresAt || 0),
-    tokenType: compactStorageString(firstNonEmptyString([authData?.tokenType]), 60) || "bearer",
-    scope: compactStorageString(firstNonEmptyString([authData?.scope]), 2048),
-    idToken: compactStorageString(firstNonEmptyString([authData?.idToken]), 4096),
-    refreshToken: compactStorageString(firstNonEmptyString([authData?.refreshToken]), 4096),
-    imsSession,
-    experienceCloudAccessToken: "",
-    experienceCloudExpiresAt: 0,
-    experienceCloudScope: "",
-    experienceCloudImsSession: null,
-    cmConsoleAccessToken: "",
-    cmConsoleExpiresAt: 0,
-    cmConsoleScope: "",
-    cmConsoleImsSession: null,
-    profile: normalizedProfile,
-    imageUrl: resolvedImageUrl,
-    sessionKeys: buildSessionKeySnapshot({
-      accessToken: authData?.accessToken || "",
+  return buildNormalizedLoginData(
+    {
+      accessToken: firstNonEmptyString([authData?.accessToken]),
+      expiresAt: Number(authData?.expiresAt || 0),
+      tokenType: compactStorageString(firstNonEmptyString([authData?.tokenType]), 60) || "bearer",
+      scope: compactStorageString(firstNonEmptyString([authData?.scope]), 2048),
+      idToken: compactStorageString(firstNonEmptyString([authData?.idToken]), 4096),
+      refreshToken: compactStorageString(firstNonEmptyString([authData?.refreshToken]), 4096),
+      imsSession:
+        authData?.imsSession && typeof authData.imsSession === "object"
+          ? authData.imsSession
+          : deriveImsSessionSnapshotFromToken(authData?.accessToken || ""),
+      experienceCloudAccessToken: "",
+      experienceCloudExpiresAt: 0,
+      experienceCloudScope: "",
+      experienceCloudImsSession: null,
+      cmConsoleAccessToken: "",
+      cmConsoleExpiresAt: 0,
+      cmConsoleScope: "",
+      cmConsoleImsSession: null,
       profile: normalizedProfile,
-      imsSession,
-    }),
+      imageUrl: resolvedImageUrl,
+    },
+    {
+      resetBootstrapTokens: true,
+    }
+  );
+}
+
+function getDefaultAdobePassOrgDescriptor() {
+  return {
+    orgId: ADOBEPASS_ORG_HANDLE,
+    userId: null,
+    name: "@AdobePass",
+    avatarUrl: "",
   };
+}
+
+function buildNormalizedLoginData(loginData = {}, options = {}) {
+  const resetBootstrapTokens = options.resetBootstrapTokens === true;
+  const fallbackAdobePassOrg = options.fallbackAdobePassOrg || null;
+  const profile = resolveLoginProfile(loginData);
+  const normalizedProfile = profile && typeof profile === "object" ? profile : null;
+  const accessToken = firstNonEmptyString([loginData?.accessToken]);
+  const expiresAt = coercePositiveNumber(loginData?.expiresAt);
+  const derivedImsSession = accessToken ? deriveImsSessionSnapshotFromToken(accessToken) : null;
+  const mergedImsSession = mergeImsSessionSnapshots(
+    derivedImsSession,
+    loginData?.imsSession && typeof loginData?.imsSession === "object" ? loginData.imsSession : null
+  );
+  if (
+    mergedImsSession &&
+    (!coercePositiveNumber(mergedImsSession.expiresAt) ||
+      (expiresAt && Math.abs(coercePositiveNumber(mergedImsSession.expiresAt) - expiresAt) > 2 * 60 * 1000))
+  ) {
+    mergedImsSession.expiresAt = expiresAt || coercePositiveNumber(mergedImsSession.expiresAt);
+  }
+
+  const normalized = {
+    ...loginData,
+    accessToken,
+    expiresAt,
+    tokenType: compactStorageString(firstNonEmptyString([loginData?.tokenType, mergedImsSession?.tokenType]), 60) || "bearer",
+    scope: compactStorageString(firstNonEmptyString([loginData?.scope, mergedImsSession?.scope]), 2048),
+    idToken: compactStorageString(firstNonEmptyString([loginData?.idToken]), 4096),
+    refreshToken: compactStorageString(firstNonEmptyString([loginData?.refreshToken]), 4096),
+    experienceCloudAccessToken: resetBootstrapTokens
+      ? ""
+      : compactStorageString(firstNonEmptyString([loginData?.experienceCloudAccessToken]), 4096),
+    experienceCloudExpiresAt: resetBootstrapTokens ? 0 : coercePositiveNumber(loginData?.experienceCloudExpiresAt),
+    experienceCloudScope: resetBootstrapTokens
+      ? ""
+      : compactStorageString(firstNonEmptyString([loginData?.experienceCloudScope]), 2048),
+    experienceCloudImsSession: resetBootstrapTokens
+      ? null
+      : loginData?.experienceCloudImsSession && typeof loginData.experienceCloudImsSession === "object"
+        ? loginData.experienceCloudImsSession
+        : null,
+    cmConsoleAccessToken: resetBootstrapTokens ? "" : compactStorageString(firstNonEmptyString([loginData?.cmConsoleAccessToken]), 4096),
+    cmConsoleExpiresAt: resetBootstrapTokens ? 0 : coercePositiveNumber(loginData?.cmConsoleExpiresAt),
+    cmConsoleScope: resetBootstrapTokens ? "" : compactStorageString(firstNonEmptyString([loginData?.cmConsoleScope]), 2048),
+    cmConsoleImsSession: resetBootstrapTokens
+      ? null
+      : loginData?.cmConsoleImsSession && typeof loginData.cmConsoleImsSession === "object"
+        ? loginData.cmConsoleImsSession
+        : null,
+    profile: normalizedProfile,
+    imsSession: mergedImsSession,
+    imageUrl: "",
+    adobePassOrg: loginData?.adobePassOrg || fallbackAdobePassOrg || null,
+  };
+
+  normalized.imageUrl =
+    normalizeAvatarCandidate(resolveLoginImageUrl(normalized)) ||
+    normalizeAvatarCandidate(readPersistedAvatarCandidate(normalized)) ||
+    "";
+  normalized.authContext = buildLoginAuthContext(normalized);
+  normalized.sessionKeys = buildSessionKeySnapshot(normalized);
+  return normalized;
+}
+
+async function resolveNormalizedLoginData(loginData = {}, options = {}) {
+  const accessToken = firstNonEmptyString([loginData?.accessToken]);
+  const allowCookieProfile = options.allowCookieProfile === true;
+  const fetchProfileEnabled = options.fetchProfile !== false && (accessToken || allowCookieProfile);
+  const [profilePayload, validatedImsSession] = await Promise.all([
+    fetchProfileEnabled ? fetchImsSessionProfile(accessToken).catch(() => null) : Promise.resolve(null),
+    accessToken ? fetchValidateTokenSessionSnapshot(accessToken).catch(() => null) : Promise.resolve(null),
+  ]);
+
+  let resolvedProfile = resolveLoginProfile(loginData);
+  if (profilePayload && typeof profilePayload === "object") {
+    resolvedProfile = mergeProfilePayloads(resolvedProfile, profilePayload);
+  }
+
+  const mergedImsSession = mergeImsSessionSnapshots(
+    mergeImsSessionSnapshots(
+      accessToken ? deriveImsSessionSnapshotFromToken(accessToken) : null,
+      loginData?.imsSession && typeof loginData?.imsSession === "object" ? loginData.imsSession : null
+    ),
+    validatedImsSession
+  );
+  const resolvedImsSession = mergeImsSessionSnapshots(mergedImsSession, {
+    userId: firstNonEmptyString([
+      resolvedProfile?.userId,
+      resolvedProfile?.user_id,
+      resolvedProfile?.sub,
+      resolvedProfile?.id,
+    ]),
+    authId: firstNonEmptyString([
+      resolvedProfile?.authId,
+      resolvedProfile?.aa_id,
+      resolvedProfile?.adobeID,
+      resolvedProfile?.additional_info?.authId,
+      resolvedProfile?.additional_info?.aa_id,
+    ]),
+    expiresAt: coercePositiveNumber(loginData?.expiresAt),
+    tokenType: firstNonEmptyString([loginData?.tokenType, mergedImsSession?.tokenType]),
+    scope: firstNonEmptyString([loginData?.scope, mergedImsSession?.scope]),
+  });
+
+  return buildNormalizedLoginData(
+    {
+      ...loginData,
+      profile: resolvedProfile && typeof resolvedProfile === "object" ? resolvedProfile : null,
+      imsSession: resolvedImsSession,
+    },
+    {
+      resetBootstrapTokens: options.resetBootstrapTokens === true,
+      fallbackAdobePassOrg: options.fallbackAdobePassOrg || null,
+    }
+  );
 }
 
 function getAvatarCacheKey(loginData, url, size = 0) {
@@ -51163,9 +51358,8 @@ function renderAvatarMenu() {
     return;
   }
 
-  const profile = resolveLoginProfile(state.loginData) || {};
-  const name = getProfileDisplayName(profile);
-  const email = getLoginEmail(state.loginData) || "No email available";
+  const name = getLoginDisplayName(state.loginData);
+  const principalId = getLoginPrincipalId(state.loginData) || "No principal available";
 
   els.avatarMenuImage.style.backgroundImage = "";
   els.avatarMenuImage.classList.remove("avatar-loading");
@@ -51174,7 +51368,7 @@ function renderAvatarMenu() {
   els.avatarMenuImage.setAttribute("aria-hidden", "false");
   els.avatarMenuImage.setAttribute("aria-label", "UnderPAR account badge");
   els.avatarMenuName.textContent = name;
-  els.avatarMenuEmail.textContent = email;
+  els.avatarMenuEmail.textContent = principalId;
   els.avatarMenuOrg.textContent = `Organization: ${getOrgDisplayName(state.loginData)}`;
 
   const entries = buildAvatarMenuEntries(state.loginData);
@@ -51603,37 +51797,32 @@ async function loadStoredLoginData() {
           : null
       )
     : null;
-  return {
-    ...loginData,
-    accessToken,
-    expiresAt,
-    tokenType: compactStorageString(firstNonEmptyString([loginData?.tokenType]), 60) || "bearer",
-    scope: compactStorageString(firstNonEmptyString([loginData?.scope]), 2048),
-    idToken: compactStorageString(firstNonEmptyString([loginData?.idToken]), 4096),
-    refreshToken: compactStorageString(firstNonEmptyString([loginData?.refreshToken]), 4096),
-    experienceCloudAccessToken: experienceCloudExpiresAt > Date.now() ? validStoredExperienceCloudToken : "",
-    experienceCloudExpiresAt: experienceCloudExpiresAt > Date.now() ? experienceCloudExpiresAt : 0,
-    experienceCloudScope: compactStorageString(firstNonEmptyString([loginData?.experienceCloudScope]), 2048),
-    experienceCloudImsSession,
-    cmConsoleAccessToken: cmConsoleExpiresAt > Date.now() ? validStoredCmConsoleToken : "",
-    cmConsoleExpiresAt: cmConsoleExpiresAt > Date.now() ? cmConsoleExpiresAt : 0,
-    cmConsoleScope: compactStorageString(firstNonEmptyString([loginData?.cmConsoleScope]), 2048),
-    cmConsoleImsSession,
-    imsSession,
-    profile: normalizedProfile,
-    imageUrl: resolveLoginImageUrl({
+  return buildNormalizedLoginData(
+    {
       ...loginData,
+      accessToken,
+      expiresAt,
+      tokenType: compactStorageString(firstNonEmptyString([loginData?.tokenType]), 60) || "bearer",
+      scope: compactStorageString(firstNonEmptyString([loginData?.scope]), 2048),
+      idToken: compactStorageString(firstNonEmptyString([loginData?.idToken]), 4096),
+      refreshToken: compactStorageString(firstNonEmptyString([loginData?.refreshToken]), 4096),
+      experienceCloudAccessToken: experienceCloudExpiresAt > Date.now() ? validStoredExperienceCloudToken : "",
+      experienceCloudExpiresAt: experienceCloudExpiresAt > Date.now() ? experienceCloudExpiresAt : 0,
+      experienceCloudScope: compactStorageString(firstNonEmptyString([loginData?.experienceCloudScope]), 2048),
+      experienceCloudImsSession,
+      cmConsoleAccessToken: cmConsoleExpiresAt > Date.now() ? validStoredCmConsoleToken : "",
+      cmConsoleExpiresAt: cmConsoleExpiresAt > Date.now() ? cmConsoleExpiresAt : 0,
+      cmConsoleScope: compactStorageString(firstNonEmptyString([loginData?.cmConsoleScope]), 2048),
+      cmConsoleImsSession,
+      imsSession,
       profile: normalizedProfile,
-    }),
-    sessionKeys:
-      loginData?.sessionKeys && typeof loginData.sessionKeys === "object"
-        ? loginData.sessionKeys
-        : buildSessionKeySnapshot({
-            ...loginData,
-            profile: normalizedProfile,
-            imsSession,
-          }),
-  };
+      adobePassOrg: loginData?.adobePassOrg || null,
+      sessionKeys: loginData?.sessionKeys && typeof loginData.sessionKeys === "object" ? loginData.sessionKeys : null,
+    },
+    {
+      fallbackAdobePassOrg: loginData?.adobePassOrg || null,
+    }
+  );
 }
 
 function pruneEmptyObject(value) {
@@ -52320,6 +52509,48 @@ function scheduleNoTouchRefresh() {
   }, delay);
 }
 
+function resetCmTenantsPrecheckState() {
+  state.cmTenantsPrecheckPending = true;
+  state.cmTenantsPrecheckComplete = false;
+  state.cmTenantsPrecheckLastError = "";
+  state.cmTenantsCatalog = null;
+  state.cmTenantsCatalogPromise = null;
+  state.cmTenantsCatalogHydrated = false;
+  state.cmTenantsCatalogHydrationPromise = null;
+  state.cmTenantsCatalogRuntimeFresh = false;
+  state.cmTenantsCatalogFetchAttempted = false;
+  syncMediaCompanySelectAvailability();
+}
+
+async function applyActiveLoginSession(loginData, options = {}) {
+  const persist = options.persist === true;
+  const scheduleRefresh = options.scheduleRefresh !== false && Boolean(loginData?.accessToken);
+  state.loginData = loginData;
+  state.cmConsoleBootstrapQualified = false;
+  state.cmLastHydratedAccessToken = normalizeBearerTokenValue(firstNonEmptyString([loginData?.cmConsoleAccessToken || ""]));
+  state.cmConsoleTokenConsoleEmitKey = "";
+  writePersistedAvatarCandidate(loginData, {
+    sourceUrl: loginData?.imageUrl || "",
+    resolvedUrl: loginData?.imageUrl || "",
+  });
+  scheduleAvatarDataUrlPrefetch(loginData, loginData?.imageUrl || "");
+  state.restricted = false;
+  state.sessionMonitorSuppressed = false;
+  state.sessionMonitorConsecutiveInactiveDetections = 0;
+  state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
+  clearRestrictedOrgOptions();
+  state.sessionReady = true;
+  startExperienceCloudSessionMonitor();
+  if (persist) {
+    await saveLoginData(loginData);
+  }
+  if (scheduleRefresh) {
+    scheduleNoTouchRefresh();
+  } else {
+    clearRefreshTimer();
+  }
+}
+
 async function activateSession(sessionData, source = "unknown", options = {}) {
   const allowDeniedRecovery = options.allowDeniedRecovery !== false;
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
@@ -52341,16 +52572,12 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     return false;
   }
 
-  state.cmTenantsPrecheckPending = true;
-  state.cmTenantsPrecheckComplete = false;
-  state.cmTenantsPrecheckLastError = "";
-  state.cmTenantsCatalog = null;
-  state.cmTenantsCatalogPromise = null;
-  state.cmTenantsCatalogHydrated = false;
-  state.cmTenantsCatalogHydrationPromise = null;
-  state.cmTenantsCatalogRuntimeFresh = false;
-  state.cmTenantsCatalogFetchAttempted = false;
-  syncMediaCompanySelectAvailability();
+  resetCmTenantsPrecheckState();
+  const normalizedLoginDataPromise = resolveNormalizedLoginData(enforced.loginData, {
+    fetchProfile: true,
+    resetBootstrapTokens: true,
+    fallbackAdobePassOrg: enforced.loginData.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
+  });
 
   let programmersLoadError = null;
   try {
@@ -52398,84 +52625,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     }
   }
 
-  let sessionProfile = resolveLoginProfile(enforced.loginData);
-  try {
-    const profileFromSession = await fetchImsSessionProfile(enforced.loginData.accessToken || "");
-    if (profileFromSession && typeof profileFromSession === "object") {
-      sessionProfile = mergeProfilePayloads(sessionProfile, profileFromSession);
-    }
-  } catch {
-    // Keep existing profile data when IMS profile enrichment fails.
-  }
-
-  const resolvedProfile = sessionProfile;
-  const resolvedImageData = {
-    ...enforced.loginData,
-    profile: resolvedProfile,
-  };
-  const resolvedImageUrl =
-    normalizeAvatarCandidate(resolveLoginImageUrl(resolvedImageData)) ||
-    normalizeAvatarCandidate(readPersistedAvatarCandidate(resolvedImageData)) ||
-    "";
-
-  let validatedImsSession = null;
-  try {
-    validatedImsSession = await fetchValidateTokenSessionSnapshot(enforced.loginData.accessToken || "");
-  } catch {
-    validatedImsSession = null;
-  }
-
-  const resolvedImsSession = mergeImsSessionSnapshots(
-    mergeImsSessionSnapshots(
-      mergeImsSessionSnapshots(
-        deriveImsSessionSnapshotFromToken(enforced.loginData.accessToken || ""),
-        enforced.loginData?.imsSession && typeof enforced.loginData.imsSession === "object"
-          ? enforced.loginData.imsSession
-          : null
-      ),
-      validatedImsSession
-    ),
-    {
-      userId: firstNonEmptyString([
-        resolvedProfile?.userId,
-        resolvedProfile?.user_id,
-        resolvedProfile?.sub,
-        resolvedProfile?.id,
-      ]),
-      authId: firstNonEmptyString([resolvedProfile?.authId, resolvedProfile?.aa_id, resolvedProfile?.adobeID]),
-      expiresAt: Number(enforced.loginData?.expiresAt || 0),
-      tokenType: firstNonEmptyString([enforced.loginData?.tokenType]),
-      scope: firstNonEmptyString([enforced.loginData?.scope]),
-    }
-  );
-
-  const resolvedLoginData = {
-    ...enforced.loginData,
-    tokenType: compactStorageString(firstNonEmptyString([enforced.loginData?.tokenType]), 60) || "bearer",
-    scope: compactStorageString(firstNonEmptyString([enforced.loginData?.scope, resolvedImsSession?.scope]), 2048),
-    idToken: compactStorageString(firstNonEmptyString([enforced.loginData?.idToken]), 4096),
-    refreshToken: compactStorageString(firstNonEmptyString([enforced.loginData?.refreshToken]), 4096),
-    imsSession: resolvedImsSession,
-    experienceCloudAccessToken: "",
-    experienceCloudExpiresAt: 0,
-    experienceCloudScope: "",
-    experienceCloudImsSession: null,
-    cmConsoleAccessToken: "",
-    cmConsoleExpiresAt: 0,
-    cmConsoleScope: "",
-    cmConsoleImsSession: null,
-    profile: resolvedProfile,
-    imageUrl: resolvedImageUrl,
-    adobePassOrg:
-      enforced.loginData.adobePassOrg ||
-      {
-        orgId: ADOBEPASS_ORG_HANDLE,
-        userId: null,
-        name: "@AdobePass",
-        avatarUrl: "",
-      },
-  };
-  resolvedLoginData.sessionKeys = buildSessionKeySnapshot(resolvedLoginData);
+  const resolvedLoginData = await normalizedLoginDataPromise;
 
   const sessionProfileCompleteness = getSessionProfileCompleteness(resolvedLoginData);
   if (!sessionProfileCompleteness.complete) {
@@ -52485,38 +52635,27 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     state.restricted = false;
     state.sessionReady = false;
     clearRefreshTimer();
+    state.cmTenantsPrecheckPending = false;
+    syncMediaCompanySelectAvailability();
     logDecisionPoint("Session activation blocked: incomplete profile", {
       source,
       missing: sessionProfileCompleteness.missing,
       displayName: sessionProfileCompleteness.displayName,
-      email: sessionProfileCompleteness.email,
+      principalId: sessionProfileCompleteness.principalId,
+      authId: sessionProfileCompleteness.authId,
       userId: sessionProfileCompleteness.userId,
       orgId: sessionProfileCompleteness.orgId,
       orgName: sessionProfileCompleteness.orgName,
     });
-    setStatus("Experience Cloud session profile is incomplete. Click Sign In.", "error");
+    setStatus("Experience Cloud session context is incomplete. Click Sign In.", "error");
     render();
     return false;
   }
 
-  state.loginData = resolvedLoginData;
-  state.cmConsoleBootstrapQualified = false;
-  state.cmLastHydratedAccessToken = normalizeBearerTokenValue(firstNonEmptyString([resolvedLoginData.cmConsoleAccessToken || ""]));
-  state.cmConsoleTokenConsoleEmitKey = "";
-  writePersistedAvatarCandidate(resolvedLoginData, {
-    sourceUrl: resolvedLoginData.imageUrl || "",
-    resolvedUrl: resolvedLoginData.imageUrl || "",
+  await applyActiveLoginSession(resolvedLoginData, {
+    persist: true,
+    scheduleRefresh: true,
   });
-  scheduleAvatarDataUrlPrefetch(resolvedLoginData, resolvedLoginData.imageUrl || "");
-  state.restricted = false;
-  state.sessionMonitorSuppressed = false;
-  state.sessionMonitorConsecutiveInactiveDetections = 0;
-  state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
-  clearRestrictedOrgOptions();
-  state.sessionReady = true;
-  startExperienceCloudSessionMonitor();
-  await saveLoginData(resolvedLoginData);
-  scheduleNoTouchRefresh();
   let cmTenantsPrecheckError = null;
   try {
     await ensureCmTenantsPrecheckForActiveSession(`session-activated:${source}`, {
@@ -64148,16 +64287,7 @@ async function tryActivateCookieSession(source, options = {}) {
   const restrictOnDenied = options.restrictOnDenied === true;
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
   const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
-  state.cmTenantsPrecheckPending = true;
-  state.cmTenantsPrecheckComplete = false;
-  state.cmTenantsPrecheckLastError = "";
-  state.cmTenantsCatalog = null;
-  state.cmTenantsCatalogPromise = null;
-  state.cmTenantsCatalogHydrated = false;
-  state.cmTenantsCatalogHydrationPromise = null;
-  state.cmTenantsCatalogRuntimeFresh = false;
-  state.cmTenantsCatalogFetchAttempted = false;
-  syncMediaCompanySelectAvailability();
+  resetCmTenantsPrecheckState();
   try {
     const entities = await fetchProgrammersFromApi({
       accessToken: "",
@@ -64169,43 +64299,15 @@ async function tryActivateCookieSession(source, options = {}) {
       state.loginData = createCookieSessionLoginData();
     }
 
-    try {
-      const profileFromSession = await fetchImsSessionProfile("");
-      if (profileFromSession && typeof profileFromSession === "object") {
-        const mergedProfile = mergeProfilePayloads(resolveLoginProfile(state.loginData), profileFromSession);
-        state.loginData = {
-          ...state.loginData,
-          profile: mergedProfile,
-          imageUrl: resolveLoginImageUrl({
-            ...state.loginData,
-            profile: mergedProfile,
-          }),
-        };
-        writePersistedAvatarCandidate(state.loginData, {
-          sourceUrl: state.loginData.imageUrl || "",
-          resolvedUrl: state.loginData.imageUrl || "",
-        });
-      }
-    } catch {
-      // Ignore cookie-profile lookup errors.
-    }
-
-    const cookieSessionData = {
+    const cookieSessionData = await resolveNormalizedLoginData({
       ...state.loginData,
-      imsSession: mergeImsSessionSnapshots(
-        deriveImsSessionSnapshotFromToken(state.loginData?.accessToken || ""),
-        state.loginData?.imsSession && typeof state.loginData.imsSession === "object" ? state.loginData.imsSession : null
-      ),
-      experienceCloudAccessToken: "",
-      experienceCloudExpiresAt: 0,
-      experienceCloudScope: "",
-      experienceCloudImsSession: null,
-      cmConsoleAccessToken: "",
-      cmConsoleExpiresAt: 0,
-      cmConsoleScope: "",
-      cmConsoleImsSession: null,
-    };
-    cookieSessionData.sessionKeys = buildSessionKeySnapshot(cookieSessionData);
+      adobePassOrg: state.loginData?.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
+    }, {
+      allowCookieProfile: true,
+      fetchProfile: true,
+      resetBootstrapTokens: true,
+      fallbackAdobePassOrg: state.loginData?.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
+    });
 
     const cookieProfileCompleteness = getSessionProfileCompleteness(cookieSessionData);
     if (!cookieProfileCompleteness.complete) {
@@ -64213,7 +64315,8 @@ async function tryActivateCookieSession(source, options = {}) {
         source,
         missing: cookieProfileCompleteness.missing,
         displayName: cookieProfileCompleteness.displayName,
-        email: cookieProfileCompleteness.email,
+        principalId: cookieProfileCompleteness.principalId,
+        authId: cookieProfileCompleteness.authId,
         userId: cookieProfileCompleteness.userId,
         orgId: cookieProfileCompleteness.orgId,
         orgName: cookieProfileCompleteness.orgName,
@@ -64223,20 +64326,16 @@ async function tryActivateCookieSession(source, options = {}) {
       state.restricted = false;
       resetWorkflowForLoggedOut();
       clearRefreshTimer();
+      state.cmTenantsPrecheckPending = false;
+      syncMediaCompanySelectAvailability();
       render();
       return false;
     }
 
-    state.loginData = cookieSessionData;
-
-    state.sessionReady = true;
-    state.restricted = false;
-    state.sessionMonitorSuppressed = false;
-    state.sessionMonitorConsecutiveInactiveDetections = 0;
-    state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
-    startExperienceCloudSessionMonitor();
-    clearRestrictedOrgOptions();
-    clearRefreshTimer();
+    await applyActiveLoginSession(cookieSessionData, {
+      persist: false,
+      scheduleRefresh: false,
+    });
     let cmTenantsPrecheckError = null;
     try {
       await ensureCmTenantsPrecheckForActiveSession(`cookie-session:${source}`, {
@@ -64301,16 +64400,14 @@ async function hydrateCookieSessionWithProfile() {
     if (!silent) {
       const cookieProfile = await fetchImsSessionProfile("");
       if (cookieProfile && typeof cookieProfile === "object" && state.loginData) {
-        const mergedProfile = mergeProfilePayloads(resolveLoginProfile(state.loginData), cookieProfile);
-        const mergedCookieSession = {
+        const mergedCookieSession = buildNormalizedLoginData({
           ...state.loginData,
-          profile: mergedProfile,
-          imageUrl: resolveLoginImageUrl({
-            ...state.loginData,
-            profile: mergedProfile,
-          }),
-        };
-        mergedCookieSession.sessionKeys = buildSessionKeySnapshot(mergedCookieSession);
+          profile: mergeProfilePayloads(resolveLoginProfile(state.loginData), cookieProfile),
+          adobePassOrg: state.loginData?.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
+        }, {
+          resetBootstrapTokens: true,
+          fallbackAdobePassOrg: state.loginData?.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
+        });
         state.loginData = mergedCookieSession;
         writePersistedAvatarCandidate(state.loginData, {
           sourceUrl: state.loginData.imageUrl || "",
@@ -64327,37 +64424,26 @@ async function hydrateCookieSessionWithProfile() {
       return;
     }
 
-    const profileFromSession = await fetchImsSessionProfile(enforced.loginData.accessToken || "");
-    const hydratedProfile = mergeProfilePayloads(resolveLoginProfile(enforced.loginData), profileFromSession);
-    const hydratedImageUrl = resolveLoginImageUrl({
+    const hydrated = await resolveNormalizedLoginData({
       ...enforced.loginData,
-      profile: hydratedProfile,
-    });
-
-    const hydrated = {
-      ...buildLoginSessionPayloadFromAuth(enforced.loginData, hydratedProfile, hydratedImageUrl),
-      profile: hydratedProfile,
-      imageUrl: hydratedImageUrl,
       adobePassOrg:
         enforced.loginData.adobePassOrg ||
         state.loginData?.adobePassOrg ||
-        {
-          orgId: ADOBEPASS_ORG_HANDLE,
-          userId: null,
-          name: "@AdobePass",
-          avatarUrl: "",
-        },
-    };
-    hydrated.sessionKeys = buildSessionKeySnapshot(hydrated);
+        getDefaultAdobePassOrgDescriptor(),
+    }, {
+      fetchProfile: true,
+      resetBootstrapTokens: true,
+      fallbackAdobePassOrg:
+        enforced.loginData.adobePassOrg ||
+        state.loginData?.adobePassOrg ||
+        getDefaultAdobePassOrgDescriptor(),
+    });
 
-    state.loginData = hydrated;
-    writePersistedAvatarCandidate(hydrated, {
-      sourceUrl: hydrated.imageUrl || "",
-      resolvedUrl: hydrated.imageUrl || "",
+    await applyActiveLoginSession(hydrated, {
+      persist: true,
+      scheduleRefresh: true,
     });
     state.avatarResolveKey = "";
-    await saveLoginData(hydrated);
-    scheduleNoTouchRefresh();
     render();
     queueCmConsoleAutoHydration("cookie-session-profile-hydrated");
     log("Cookie session profile hydrated.");
@@ -64516,7 +64602,7 @@ function render() {
   els.authBtn.classList.add("avatar-ready");
   els.authBtn.style.backgroundImage = "";
   els.authBtn.textContent = "";
-  els.authBtn.setAttribute("aria-label", `${getProfileDisplayName(resolveLoginProfile(state.loginData) || {})} account menu`);
+  els.authBtn.setAttribute("aria-label", `${getLoginDisplayName(state.loginData)} account menu`);
   if (!state.busy) {
     els.authBtn.title = "Account menu";
   }
@@ -64763,14 +64849,14 @@ async function bootstrapSession() {
         if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
           return;
         }
-        const storedSessionPayload = {
-          ...buildLoginSessionPayloadFromAuth(stored, profile, stored.imageUrl),
+        const storedSessionPayload = buildNormalizedLoginData({
+          ...stored,
+          profile,
           adobePassOrg: stored.adobePassOrg || null,
-          sessionKeys: buildSessionKeySnapshot({
-            ...stored,
-            profile,
-          }),
-        };
+        }, {
+          resetBootstrapTokens: true,
+          fallbackAdobePassOrg: stored.adobePassOrg || null,
+        });
         const activated = await activateSession(
           storedSessionPayload,
           "stored"

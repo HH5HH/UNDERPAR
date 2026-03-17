@@ -95,18 +95,26 @@ function loadAuthHelpers(seed = {}) {
     extractFunctionSource(source, "parseJsonText"),
     extractFunctionSource(source, "decodeBase64UrlText"),
     extractLastFunctionSource(source, "parseJwtPayload"),
+    extractFunctionSource(source, "coercePositiveNumber"),
     extractFunctionSource(source, "firstNonEmptyString"),
     extractFunctionSource(source, "resolveLoginProfile"),
     extractFunctionSource(source, "getProfileDisplayNameRaw"),
     extractFunctionSource(source, "getProfileDisplayName"),
     extractFunctionSource(source, "getProfileEmail"),
     extractFunctionSource(source, "getProfileIdentity"),
+    extractFunctionSource(source, "resolveLoginAuthIdValue"),
+    extractFunctionSource(source, "resolveLoginUserIdValue"),
+    extractFunctionSource(source, "resolveLoginDisplayNameValue"),
+    extractFunctionSource(source, "buildLoginAuthContext"),
+    extractFunctionSource(source, "getLoginAuthId"),
     extractFunctionSource(source, "getLoginEmail"),
     extractFunctionSource(source, "getLoginIdentity"),
+    extractFunctionSource(source, "getLoginPrincipalId"),
+    extractFunctionSource(source, "getLoginDisplayName"),
     extractFunctionSource(source, "isProfileDisplayNamePlaceholder"),
     extractFunctionSource(source, "getSessionProfileCompleteness"),
     extractFunctionSource(source, "collectCmImsUserIdCandidates"),
-    "module.exports = { getLoginEmail, getLoginIdentity, getSessionProfileCompleteness, collectCmImsUserIdCandidates };",
+    "module.exports = { buildLoginAuthContext, getLoginAuthId, getLoginEmail, getLoginIdentity, getLoginPrincipalId, getLoginDisplayName, getSessionProfileCompleteness, collectCmImsUserIdCandidates };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
@@ -162,6 +170,38 @@ test("session completeness accepts IMS auth identifiers when profile email field
   assert.equal(result.missing.length, 0);
 });
 
+test("session completeness accepts authId-only principal without profile name or IMS user id", () => {
+  const helpers = loadAuthHelpers({
+    state: {},
+    getPreferredPrimaryImsAccessTokenCandidate: () => "",
+  });
+
+  const loginData = {
+    profile: {},
+    imsSession: {
+      authId: "F10A3319554D1E107F000101@adobe.com",
+      sessionId: "ims-session-1",
+    },
+    sessionKeys: {
+      authId: "F10A3319554D1E107F000101@adobe.com",
+      sessionId: "ims-session-1",
+    },
+    adobePassOrg: {
+      orgId: "@adobepass",
+      name: "@AdobePass",
+    },
+  };
+
+  const result = helpers.getSessionProfileCompleteness(loginData);
+
+  assert.equal(result.complete, true);
+  assert.equal(result.principalId, "F10A3319554D1E107F000101@adobe.com");
+  assert.equal(result.authId, "F10A3319554D1E107F000101@adobe.com");
+  assert.equal(result.userId, "");
+  assert.equal(result.displayName, "F10A3319554D1E107F000101@adobe.com");
+  assert.equal(result.missing.length, 0);
+});
+
 test("CM IMS user-id candidates prefer Adobe auth identifiers before internal IMS ids", () => {
   const primaryToken = buildJwt({
     user_id: "FC74713E66B412C20A495FE9@7ad01f61631c04d0495ef7.e",
@@ -198,4 +238,48 @@ test("CM IMS user-id candidates prefer Adobe auth identifiers before internal IM
     candidates.indexOf("F10A3319554D1E107F000101@adobe.com") <
       candidates.indexOf("FC74713E66B412C20A495FE9@7ad01f61631c04d0495ef7.e")
   );
+});
+
+test("login auth context prefers authId as principal and keeps org/session identifiers", () => {
+  const helpers = loadAuthHelpers({
+    state: {},
+    getPreferredPrimaryImsAccessTokenCandidate: () => "",
+  });
+
+  const loginData = {
+    profile: {
+      displayName: "Bishwajit Choudhary",
+    },
+    imsSession: {
+      userId: "FC74713E66B412C20A495FE9@7ad01f61631c04d0495ef7.e",
+      authId: "F10A3319554D1E107F000101@adobe.com",
+      sessionId: "ims-session-123",
+      tokenId: "ims-token-456",
+      clientId: "AdobePass1",
+      scope: "openid,AdobeID",
+    },
+    sessionKeys: {
+      accessTokenFingerprint: "fingerprint-123",
+    },
+    adobePassOrg: {
+      orgId: "@adobepass",
+      name: "@AdobePass",
+    },
+    expiresAt: 1770000000000,
+  };
+
+  const authContext = helpers.buildLoginAuthContext(loginData);
+
+  assert.equal(authContext.principalId, "F10A3319554D1E107F000101@adobe.com");
+  assert.equal(authContext.authId, "F10A3319554D1E107F000101@adobe.com");
+  assert.equal(authContext.userId, "FC74713E66B412C20A495FE9@7ad01f61631c04d0495ef7.e");
+  assert.equal(authContext.displayName, "Bishwajit Choudhary");
+  assert.equal(authContext.orgId, "@adobepass");
+  assert.equal(authContext.orgName, "@AdobePass");
+  assert.equal(authContext.sessionId, "ims-session-123");
+  assert.equal(authContext.tokenId, "ims-token-456");
+  assert.equal(authContext.clientId, "AdobePass1");
+  assert.equal(authContext.scope, "openid,AdobeID");
+  assert.equal(authContext.expiresAt, 1770000000000);
+  assert.equal(authContext.accessTokenFingerprint, "fingerprint-123");
 });
