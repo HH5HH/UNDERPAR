@@ -64,6 +64,15 @@
   --card-band-bottom: linear-gradient(156deg, rgba(34, 34, 34, 0.98), rgba(27, 27, 27, 0.98));
   --accent: rgb(var(--zip-accent-900));
   --accent-hover: rgb(var(--zip-accent-1000));
+  --workspace-link-rgb: var(--zip-accent-1000);
+  --workspace-link-hover-rgb: var(--zip-accent-1100);
+  --workspace-link-down-rgb: var(--zip-accent-900);
+  --workspace-link-focus-ring: rgba(var(--workspace-link-rgb), 0.24);
+  --spectrum-accent-content-color-default: rgb(var(--workspace-link-rgb));
+  --spectrum-accent-content-color-hover: rgb(var(--workspace-link-hover-rgb));
+  --spectrum-accent-content-color-down: rgb(var(--workspace-link-down-rgb));
+  --spectrum-text-color-link: var(--spectrum-accent-content-color-default);
+  --fg-primary: var(--spectrum-text-color-link);
   --s2-action-bg-default: rgba(44, 44, 44, 0.98);
   --s2-action-bg-hover: rgba(var(--zip-accent-900), 0.24);
   --s2-action-border-default: rgba(57, 57, 57, 0.98);
@@ -184,21 +193,22 @@ body::after {
 }
 
 .workspace-filter-link {
-  color: rgb(var(--zip-accent-1000));
+  color: var(--fg-primary);
   font-size: 11px;
   font-weight: 680;
-  text-decoration-line: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
+  text-decoration: none;
 }
 
 .workspace-filter-link:hover {
-  color: rgb(var(--zip-accent-1100));
+  color: var(--spectrum-accent-content-color-hover);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
 }
 
 .workspace-filter-link:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--s2-action-focus-ring);
+  box-shadow: 0 0 0 2px var(--workspace-link-focus-ring);
   border-radius: 4px;
 }
 
@@ -450,20 +460,21 @@ body::after {
 }
 
 .mvpd-call-link {
-  color: rgb(var(--zip-accent-900));
+  color: var(--fg-primary);
   font-weight: 700;
-  text-decoration-line: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
+  text-decoration: none;
 }
 
 .mvpd-call-link:hover {
-  color: rgb(var(--zip-accent-1000));
+  color: var(--spectrum-accent-content-color-hover);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
 }
 
 .mvpd-call-link:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--s2-action-focus-ring);
+  box-shadow: 0 0 0 2px var(--workspace-link-focus-ring);
   border-radius: 4px;
 }
 
@@ -575,11 +586,14 @@ body::after {
 }
 
 .workspace-cards .card-url-path-link:hover {
-  color: rgb(var(--zip-accent-1000));
+  color: var(--spectrum-accent-content-color-hover);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
 }
 
 .workspace-cards .card-url-path-link:focus-visible {
-  box-shadow: 0 0 0 2px var(--s2-action-focus-ring);
+  box-shadow: 0 0 0 2px var(--workspace-link-focus-ring);
 }
 
 .workspace-cards .card-close {
@@ -724,7 +738,7 @@ body::after {
 .workspace-cards .cm-view-link,
 .workspace-cards .esm-footer a,
 .workspace-cards .esm-last-modified {
-  color: rgb(var(--zip-accent-1000));
+  color: var(--fg-primary);
 }
 
 .underpar-export-actions {
@@ -765,7 +779,10 @@ body::after {
 
 .workspace-cards .cm-view-link:hover,
 .workspace-cards .esm-footer a:hover {
-  color: rgb(var(--zip-accent-1100));
+  color: var(--spectrum-accent-content-color-hover);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
 }
 
 .workspace-cards .esm-close {

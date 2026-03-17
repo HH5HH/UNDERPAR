@@ -18,6 +18,14 @@
         --line: rgba(57, 57, 57, 0.98);
         --accent: rgb(var(--accent-900-rgb));
         --accent-ink: rgb(var(--accent-1100-rgb));
+        --link-rgb: var(--accent-1000-rgb);
+        --link-hover-rgb: var(--accent-1100-rgb);
+        --link-down-rgb: var(--accent-900-rgb);
+        --spectrum-accent-content-color-default: rgb(var(--link-rgb));
+        --spectrum-accent-content-color-hover: rgb(var(--link-hover-rgb));
+        --spectrum-accent-content-color-down: rgb(var(--link-down-rgb));
+        --spectrum-text-color-link: var(--spectrum-accent-content-color-default);
+        --fg-primary: var(--spectrum-text-color-link);
         --warn: rgb(229, 116, 131);
       }
 
@@ -231,13 +239,15 @@
       }
 
       .card-url-path-link:hover {
-        color: var(--accent);
-        text-decoration: none;
+        color: var(--spectrum-accent-content-color-hover);
+        text-decoration: underline;
+        text-decoration-thickness: 1.5px;
+        text-underline-offset: 2px;
       }
 
       .card-url-path-link:focus-visible {
         outline: none;
-        box-shadow: 0 0 0 2px var(--line);
+        box-shadow: 0 0 0 2px rgba(var(--link-rgb), 0.24);
         border-radius: 3px;
       }
 

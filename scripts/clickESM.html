@@ -148,6 +148,12 @@
   /* Click URL (Light): ESM Workspace family */
   --click-url-rgb:194, 78, 0;
   --click-url-hover-rgb:167, 62, 0;
+  --click-url-down-rgb:144, 51, 0;
+  --spectrum-accent-content-color-default:rgb(var(--click-url-rgb));
+  --spectrum-accent-content-color-hover:rgb(var(--click-url-hover-rgb));
+  --spectrum-accent-content-color-down:rgb(var(--click-url-down-rgb));
+  --spectrum-text-color-link:var(--spectrum-accent-content-color-default);
+  --fg-primary:var(--spectrum-text-color-link);
   --mvpd-colorA:rgba(255, 255, 255, 0.96);
   --mvpd-colorB:rgba(255, 248, 241, 0.98);
   --mvpd-colorC:rgba(255, 244, 232, 0.97);
@@ -282,6 +288,12 @@ body[data-theme="dark"]{
   /* Click URL (Dark): ZIP Orange family */
   --click-url-rgb:243, 117, 0;
   --click-url-hover-rgb:255, 137, 0;
+  --click-url-down-rgb:224, 100, 0;
+  --spectrum-accent-content-color-default:rgb(var(--click-url-rgb));
+  --spectrum-accent-content-color-hover:rgb(var(--click-url-hover-rgb));
+  --spectrum-accent-content-color-down:rgb(var(--click-url-down-rgb));
+  --spectrum-text-color-link:var(--spectrum-accent-content-color-default);
+  --fg-primary:var(--spectrum-text-color-link);
   --mvpd-colorA:color-mix(in srgb, var(--field-bg) 82%, rgb(var(--zip-accent-1100)) 18%);
   --mvpd-colorB:color-mix(in srgb, var(--field-bg) 70%, rgb(var(--zip-accent-900)) 30%);
   --mvpd-colorC:color-mix(in srgb, var(--field-bg) 84%, rgb(var(--zip-gray-500-rgb)) 16%);
@@ -491,8 +503,18 @@ dd{margin-left:0;margin-bottom:10px}
 .local-col-menu option:focus{
   background-color:var(--local-col-menu-hover, var(--mvpd-hover)) !important;
 }
-a{color:var(--accent);text-decoration:none}
-a:hover{color:var(--accent-strong);text-decoration:underline}
+a{color:var(--fg-primary);text-decoration:none}
+a:hover{
+  color:var(--spectrum-accent-content-color-hover);
+  text-decoration:underline;
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px var(--field-focus-ring);
+  border-radius:6px;
+}
 /* Table master Click URL should read as the dominant action */
 dl > dt > a{
   font-family:var(--font-sans);
@@ -837,12 +859,16 @@ th .sort-icon {
 
 .esm-footer-csv-link,
 .esm-footer-csv-link:visited{
-  color:rgb(var(--click-url-rgb));
+  color:var(--fg-primary);
   font-weight:600;
+  text-decoration:none;
 }
 
 .esm-footer-csv-link:hover{
-  color:rgb(var(--click-url-hover-rgb));
+  color:var(--spectrum-accent-content-color-hover);
+  text-decoration:underline;
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
 }
 
 .esm-last-modified {

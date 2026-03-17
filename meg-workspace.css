@@ -7,6 +7,11 @@
   --meg-body-text: #000000;
   --meg-link: #000000;
   --meg-link-hover: #2b2b2b;
+  --spectrum-accent-content-color-default: var(--meg-link);
+  --spectrum-accent-content-color-hover: var(--meg-link-hover);
+  --spectrum-accent-content-color-down: color-mix(in srgb, var(--meg-link) 82%, var(--meg-body-text) 18%);
+  --spectrum-text-color-link: var(--spectrum-accent-content-color-default);
+  --fg-primary: var(--spectrum-text-color-link);
   --meg-surface: #ffffff;
   --meg-surface-alt: #efefef;
   --meg-surface-hover: #f3f3f3;
@@ -256,11 +261,22 @@ body.workspace-locked {
 }
 
 a {
-  color: var(--meg-link);
+  color: var(--fg-primary);
+  font-weight: 600;
+  text-decoration: none;
 }
 
 a:hover {
-  color: var(--meg-link-hover);
+  color: var(--spectrum-accent-content-color-hover);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+
+a:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--meg-focus-ring);
+  border-radius: 4px;
 }
 
 button,

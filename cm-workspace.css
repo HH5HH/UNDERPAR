@@ -29,6 +29,15 @@
   --card-band-bottom: linear-gradient(156deg, rgba(34, 34, 34, 0.98), rgba(27, 27, 27, 0.98));
   --accent: rgb(var(--zip-accent-900));
   --accent-hover: rgb(var(--zip-accent-1000));
+  --workspace-link-rgb: var(--zip-accent-1000);
+  --workspace-link-hover-rgb: var(--zip-accent-1100);
+  --workspace-link-down-rgb: var(--zip-accent-900);
+  --workspace-link-focus-ring: rgba(var(--workspace-link-rgb), 0.24);
+  --spectrum-accent-content-color-default: rgb(var(--workspace-link-rgb));
+  --spectrum-accent-content-color-hover: rgb(var(--workspace-link-hover-rgb));
+  --spectrum-accent-content-color-down: rgb(var(--workspace-link-down-rgb));
+  --spectrum-text-color-link: var(--spectrum-accent-content-color-default);
+  --fg-primary: var(--spectrum-text-color-link);
   --s2-action-bg-default: rgba(44, 44, 44, 0.98);
   --s2-action-bg-hover: rgba(var(--zip-accent-900), 0.24);
   --s2-action-border-default: rgba(57, 57, 57, 0.98);
@@ -562,12 +571,12 @@ body.workspace-locked .workspace-cards {
   margin: 0;
   font-size: 11.4px;
   font-weight: 560;
-  color: rgba(33, 59, 103, 0.7);
+  color: color-mix(in srgb, rgb(var(--workspace-link-hover-rgb)) 68%, var(--legacy-text) 32%);
   line-height: 1.3;
   overflow-wrap: anywhere;
   white-space: normal;
   letter-spacing: 0.016em;
-  text-shadow: 0 1px rgba(255, 255, 255, 0.9), 0 -1px rgba(66, 101, 150, 0.13);
+  text-shadow: none;
 }
 
 .card-url-context {
@@ -591,7 +600,7 @@ body.workspace-locked .workspace-cards {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgba(83, 28, 138, 0.9);
+  color: rgba(var(--workspace-link-hover-rgb), 0.92);
   font-size: 10.8px;
   font-weight: 520;
   letter-spacing: 0.012em;
@@ -600,33 +609,37 @@ body.workspace-locked .workspace-cards {
 }
 
 .card-url-path-link {
+  color: inherit;
   text-decoration: none;
   cursor: pointer;
 }
 
 .card-url-path-link:hover {
-  color: rgba(91, 25, 168, 0.97);
-  text-decoration: none;
+  color: var(--spectrum-accent-content-color-hover);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(var(--workspace-link-hover-rgb), 0.84);
 }
 
 .card-url-path-link:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(154, 71, 226, 0.22);
+  box-shadow: 0 0 0 2px var(--workspace-link-focus-ring);
   border-radius: 4px;
 }
 
 .card-url-path-segment-terminal {
   font-weight: 700;
-  color: rgba(72, 17, 129, 0.98);
+  color: rgb(var(--workspace-link-hover-rgb));
 }
 
 .card-url-path-segment-empty {
-  color: rgba(118, 92, 154, 0.74);
+  color: rgba(175, 175, 175, 0.78);
   font-weight: 520;
 }
 
 .card-url-path-divider {
-  color: rgba(132, 106, 168, 0.62);
+  color: rgba(175, 175, 175, 0.68);
   font-size: 10px;
   font-weight: 600;
 }
@@ -649,7 +662,7 @@ body.workspace-locked .workspace-cards {
   border-radius: 0;
   border: none;
   background: transparent;
-  color: rgba(88, 38, 145, 0.9);
+  color: rgba(var(--workspace-link-rgb), 0.88);
   font-size: 10.5px;
   font-weight: 560;
   letter-spacing: 0.018em;
@@ -663,13 +676,13 @@ body.workspace-locked .workspace-cards {
 
 .card-url-query-key {
   font-weight: 700;
-  color: rgba(78, 18, 138, 0.92);
+  color: rgb(var(--workspace-link-hover-rgb));
   white-space: nowrap;
 }
 
 .card-url-query-eq {
   margin: 0;
-  color: rgba(132, 106, 168, 0.62);
+  color: rgba(175, 175, 175, 0.68);
   white-space: nowrap;
 }
 
@@ -677,7 +690,7 @@ body.workspace-locked .workspace-cards {
   display: inline-block;
   max-width: 170px;
   margin-left: 0;
-  color: rgba(99, 56, 151, 0.84);
+  color: color-mix(in srgb, var(--legacy-text) 74%, rgb(var(--workspace-link-rgb)) 26%);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -692,7 +705,7 @@ body.workspace-locked .workspace-cards {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgba(88, 38, 145, 0.9);
+  color: var(--fg-primary);
   font: inherit;
   white-space: nowrap;
   overflow: hidden;
@@ -702,13 +715,15 @@ body.workspace-locked .workspace-cards {
 }
 
 .card-url-query-value-btn:hover {
-  color: rgba(72, 17, 129, 0.96);
+  color: var(--spectrum-accent-content-color-hover);
   text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
 }
 
 .card-url-query-value-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(154, 71, 226, 0.22);
+  box-shadow: 0 0 0 2px var(--workspace-link-focus-ring);
   border-radius: 4px;
 }
 
@@ -721,10 +736,10 @@ body.workspace-locked .workspace-cards {
   align-items: center;
   gap: 6px;
   padding: 6px;
-  border: 1px solid rgba(115, 13, 204, 0.22);
+  border: 1px solid rgba(var(--zip-accent-1000), 0.28);
   border-radius: var(--s2-radius-default);
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 14px 28px rgba(83, 0, 159, 0.18);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   z-index: 14;
 }
 
@@ -736,10 +751,10 @@ body.workspace-locked .workspace-cards {
   height: 32px;
   min-width: 198px;
   padding: 0 10px;
-  border: 1px solid rgba(115, 13, 204, 0.22);
+  border: 1px solid rgba(var(--zip-accent-1000), 0.28);
   border-radius: var(--s2-radius-default);
-  background: #fff;
-  color: rgba(72, 17, 129, 0.96);
+  background: linear-gradient(180deg, rgba(34, 34, 34, 0.98), rgba(27, 27, 27, 0.98));
+  color: var(--legacy-text);
   font: inherit;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -747,13 +762,13 @@ body.workspace-locked .workspace-cards {
 
 .card-url-query-datetime-input:focus-visible {
   outline: none;
-  border-color: rgba(154, 71, 226, 0.38);
-  box-shadow: 0 0 0 2px rgba(154, 71, 226, 0.16);
+  border-color: rgba(var(--zip-accent-1100), 0.42);
+  box-shadow: 0 0 0 2px var(--workspace-link-focus-ring);
 }
 
 .card-url-query-empty,
 .card-url-empty {
-  color: rgba(124, 100, 156, 0.74);
+  color: rgba(175, 175, 175, 0.72);
   font-style: italic;
 }
 
@@ -762,8 +777,8 @@ body.workspace-locked .workspace-cards {
   font-size: 10.8px;
   font-weight: 560;
   line-height: 1.45;
-  color: rgba(120, 90, 156, 0.74);
-  text-shadow: 0 1px rgba(255, 255, 255, 0.86), 0 -1px rgba(134, 80, 194, 0.08);
+  color: rgba(175, 175, 175, 0.78);
+  text-shadow: none;
   letter-spacing: 0.022em;
 }
 
@@ -783,17 +798,17 @@ body.workspace-locked .workspace-cards {
   width: var(--s2-action-size-compact);
   height: var(--s2-action-size-compact);
   padding: 0;
-  border: 1px solid rgba(115, 13, 204, 0.3);
+  border: 1px solid rgba(var(--zip-accent-1000), 0.3);
   border-radius: var(--s2-radius-pill);
-  background: rgba(255, 255, 255, 0.84);
-  color: rgba(91, 25, 168, 0.96);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
+  color: rgb(var(--workspace-link-hover-rgb));
   line-height: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
   cursor: pointer;
-  box-shadow: 0 5px 11px rgba(83, 0, 159, 0.12);
+  box-shadow: 0 5px 11px rgba(0, 0, 0, 0.28);
   transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease,
     color 140ms ease;
 }
@@ -840,9 +855,9 @@ body.workspace-locked .workspace-cards {
 .esm-clear-filter-rerun:hover,
 .esm-table-close:hover {
   background: var(--s2-action-bg-hover);
-  border-color: rgba(154, 71, 226, 0.58);
+  border-color: rgba(var(--zip-accent-1100), 0.58);
   transform: translateY(-1px);
-  box-shadow: 0 8px 16px rgba(83, 0, 159, 0.16);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.34);
 }
 
 .card-close:focus-visible,
@@ -850,7 +865,7 @@ body.workspace-locked .workspace-cards {
 .esm-clear-filter-rerun:focus-visible,
 .esm-table-close:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--s2-action-focus-ring), 0 8px 16px rgba(83, 0, 159, 0.16);
+  box-shadow: 0 0 0 3px var(--s2-action-focus-ring), 0 8px 16px rgba(0, 0, 0, 0.34);
 }
 
 .card-body {
@@ -1002,7 +1017,7 @@ body.workspace-locked .workspace-cards {
   overflow: auto;
   border: none;
   border-radius: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(240, 249, 255, 0.97));
+  background: linear-gradient(180deg, rgba(34, 34, 34, 0.98), rgba(27, 27, 27, 0.98));
   box-shadow: none;
 }
 
@@ -1038,14 +1053,14 @@ body.workspace-locked .workspace-cards {
 }
 
 .sort-icon {
-  color: #8628d9;
+  color: var(--fg-primary);
 }
 
 .esm-table tfoot td {
   position: sticky;
   bottom: 0;
   z-index: 2;
-  background: linear-gradient(180deg, rgba(245, 252, 255, 0.98), rgba(234, 246, 255, 0.98));
+  background: linear-gradient(180deg, rgba(34, 34, 34, 0.98), rgba(27, 27, 27, 0.98));
   box-shadow: none;
 }
 
@@ -1066,14 +1081,23 @@ body.workspace-locked .workspace-cards {
 }
 
 .cm-view-link {
-  color: var(--legacy-accent);
+  color: var(--fg-primary);
   text-decoration: none;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
 .cm-view-link:hover {
-  color: var(--legacy-accent-hover);
+  color: var(--spectrum-accent-content-color-hover);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+
+.cm-view-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--workspace-link-focus-ring);
+  border-radius: 4px;
 }
 
 .esm-table th.active-sort {
@@ -1163,7 +1187,7 @@ body.workspace-locked .workspace-cards {
 }
 
 .esm-footer a {
-  color: var(--legacy-accent);
+  color: var(--fg-primary);
   text-decoration: none;
   cursor: pointer;
   font-size: 13px;
@@ -1173,14 +1197,23 @@ body.workspace-locked .workspace-cards {
 }
 
 .esm-footer a:hover {
-  color: var(--legacy-accent-hover);
+  color: var(--spectrum-accent-content-color-hover);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+
+.esm-footer a:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--workspace-link-focus-ring);
+  border-radius: 4px;
 }
 
 .esm-last-modified {
   margin-right: 0;
   font-size: 12px;
   font-weight: 500;
-  color: var(--legacy-accent);
+  color: var(--fg-primary);
 }
 
 .card-col-list {
@@ -1189,8 +1222,8 @@ body.workspace-locked .workspace-cards {
   border-radius: 0 0 10px 10px;
   padding: 16px 18px 18px;
   background: var(--card-band-bottom);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
-  color: rgba(88, 38, 145, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: rgba(175, 175, 175, 0.88);
   font-size: 12px;
 }
 
@@ -1214,7 +1247,7 @@ body.workspace-locked .workspace-cards {
   width: 100%;
   min-height: 0;
   margin: 0;
-  color: rgba(91, 25, 168, 0.96);
+  color: var(--fg-primary);
   text-decoration: none;
   font-size: clamp(26px, 3.4vw, 52px);
   line-height: 0.94;
@@ -1225,22 +1258,22 @@ body.workspace-locked .workspace-cards {
   white-space: nowrap;
   overflow-wrap: normal;
   word-break: normal;
-  text-shadow: 0 1px rgba(255, 255, 255, 0.76), 0 -1px rgba(134, 80, 194, 0.16);
+  text-shadow: none;
 }
 
 .card-col-parent-url:hover {
-  color: rgba(72, 17, 129, 0.96);
+  color: var(--spectrum-accent-content-color-hover);
 }
 
 .card-col-parent-url:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--s2-action-focus-ring);
+  box-shadow: 0 0 0 3px var(--workspace-link-focus-ring);
   border-radius: 8px;
 }
 
 .card-col-parent-url-empty {
   cursor: default;
-  color: rgba(124, 100, 156, 0.74);
+  color: rgba(175, 175, 175, 0.72);
 }
 
 .card-col-columns {
@@ -1290,12 +1323,12 @@ body.workspace-locked .workspace-cards {
 
 .col-chip-trigger {
   appearance: none;
-  border: 1px solid rgba(115, 13, 204, 0.28);
-  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(var(--zip-accent-1000), 0.28);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
   border-radius: 999px;
   min-height: 24px;
   padding: 5px 10px;
-  color: rgba(91, 25, 168, 0.96);
+  color: rgb(var(--workspace-link-hover-rgb));
   font-size: 12px;
   font-weight: 650;
   line-height: 1.2;
@@ -1308,10 +1341,10 @@ body.workspace-locked .workspace-cards {
 }
 
 .col-chip-label {
-  border: 1px solid rgba(115, 13, 204, 0.24);
+  border: 1px solid rgba(var(--zip-accent-1000), 0.22);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.66);
-  color: rgba(88, 38, 145, 0.88);
+  background: rgba(34, 34, 34, 0.78);
+  color: rgba(var(--workspace-link-rgb), 0.88);
   font-size: 12px;
   font-weight: 620;
   line-height: 1.2;
@@ -1326,27 +1359,27 @@ body.workspace-locked .workspace-cards {
 }
 
 .col-chip-label-static {
-  border-color: rgba(115, 13, 204, 0.2);
-  background: rgba(248, 243, 255, 0.72);
+  border-color: rgba(var(--zip-accent-1000), 0.16);
+  background: rgba(27, 27, 27, 0.72);
 }
 
 .col-chip[data-filterable="1"]:hover .col-chip-trigger,
 .col-chip[data-filterable="1"]:focus-within .col-chip-trigger {
-  background: rgba(255, 255, 255, 0.96);
-  border-color: rgba(154, 71, 226, 0.58);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(28, 21, 36, 0.98));
+  border-color: rgba(var(--zip-accent-1100), 0.52);
 }
 
 .col-chip.col-chip-filtered .col-chip-trigger {
-  border-color: rgba(154, 71, 226, 0.6);
-  color: rgba(91, 25, 168, 0.96);
+  border-color: rgba(var(--zip-accent-1100), 0.58);
+  color: rgb(var(--workspace-link-hover-rgb));
   font-weight: 700;
-  background: rgba(243, 233, 255, 0.88);
+  background: rgba(var(--zip-accent-900), 0.18);
 }
 
 .col-chip.col-chip-active .col-chip-trigger {
-  border-color: rgba(134, 40, 217, 0.72);
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 0 0 3px rgba(154, 71, 226, 0.18);
+  border-color: rgba(var(--zip-accent-1100), 0.68);
+  background: rgba(var(--zip-accent-1000), 0.16);
+  box-shadow: 0 0 0 3px rgba(var(--zip-accent-900), 0.2);
 }
 
 .card-col-chip {
@@ -1357,7 +1390,7 @@ body.workspace-locked .workspace-cards {
   border: none;
   border-radius: 0;
   background: transparent;
-  color: rgba(53, 47, 40, 0.94);
+  color: rgba(175, 175, 175, 0.88);
   font-size: 12px;
   font-weight: 620;
   letter-spacing: 0.03em;
@@ -1370,8 +1403,8 @@ body.workspace-locked .workspace-cards {
 
 .card-col-chip-trigger {
   appearance: none;
-  border: 1px solid rgba(115, 13, 204, 0.28);
-  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(var(--zip-accent-1000), 0.28);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
   border-radius: 999px;
   min-height: 24px;
   padding: 5px 10px;
@@ -1384,21 +1417,21 @@ body.workspace-locked .workspace-cards {
 
 .card-col-chip[data-filterable="1"]:hover .card-col-chip-trigger,
 .card-col-chip[data-filterable="1"]:focus-within .card-col-chip-trigger {
-  background: rgba(255, 255, 255, 0.96);
-  border-color: rgba(154, 71, 226, 0.58);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(28, 21, 36, 0.98));
+  border-color: rgba(var(--zip-accent-1100), 0.52);
 }
 
 .card-col-chip.card-col-chip-filtered .card-col-chip-trigger {
-  border-color: rgba(154, 71, 226, 0.6);
-  color: rgba(91, 25, 168, 0.96);
+  border-color: rgba(var(--zip-accent-1100), 0.58);
+  color: rgb(var(--workspace-link-hover-rgb));
   font-weight: 700;
-  background: rgba(243, 233, 255, 0.88);
+  background: rgba(var(--zip-accent-900), 0.18);
 }
 
 .card-col-chip.card-col-chip-active .card-col-chip-trigger {
-  border-color: rgba(134, 40, 217, 0.72);
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 0 0 3px rgba(154, 71, 226, 0.18);
+  border-color: rgba(var(--zip-accent-1100), 0.68);
+  background: rgba(var(--zip-accent-1000), 0.16);
+  box-shadow: 0 0 0 3px rgba(var(--zip-accent-900), 0.2);
 }
 
 .local-col-picker-wrap {
@@ -1413,7 +1446,7 @@ body.workspace-locked .workspace-cards {
   min-height: 34px;
   border-radius: 10px;
   border: 1px solid var(--legacy-border);
-  background: rgba(255, 255, 255, 0.98);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
   color: var(--legacy-text);
   font-size: 12px;
   padding: 4px 8px;
@@ -1421,8 +1454,8 @@ body.workspace-locked .workspace-cards {
 
 .local-col-menu:focus {
   outline: none;
-  border-color: #8b5448;
-  box-shadow: 0 0 0 2px rgba(173, 58, 49, 0.18);
+  border-color: rgba(var(--zip-accent-1100), 0.42);
+  box-shadow: 0 0 0 2px var(--workspace-link-focus-ring);
 }
 
 .local-col-menu option.req-tone-a {
@@ -1497,7 +1530,7 @@ body.workspace-locked .workspace-cards {
 
 .card-col-empty {
   font-style: italic;
-  color: rgba(78, 112, 100, 0.78);
+  color: rgba(175, 175, 175, 0.78);
 }
 
 @media (max-width: 900px) {

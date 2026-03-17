@@ -28,11 +28,14 @@ test("ESM export surfaces use the orange service palette", () => {
   assert.match(clickEsmTemplate, /function __normalizeTheme\(theme\)\s*\{\s*return theme === 'light' \? 'light' : 'dark';/);
   assert.match(clickEsmTemplate, /--zip-accent-900:255,\s*128,\s*31;/);
   assert.match(clickEsmTemplate, /--click-url-rgb:255,\s*146,\s*61;/);
+  assert.match(clickEsmTemplate, /--fg-primary:var\(--spectrum-text-color-link\);/);
   assert.match(mirroredClickEsmTemplate, /<body data-theme="dark">/i);
   assert.match(mirroredClickEsmTemplate, /--zip-accent-900:255,\s*128,\s*31;/);
-  assert.match(upsViewCss, /\.ups-utility-link\s*\{[\s\S]*?color:\s*rgb\(255,\s*146,\s*61\);/);
+  assert.match(mirroredClickEsmTemplate, /--fg-primary:var\(--spectrum-text-color-link\);/);
+  assert.match(upsViewCss, /\.ups-utility-link\s*\{[\s\S]*?color:\s*var\(--fg-primary,\s*rgb\(255,\s*146,\s*61\)\);/);
   assert.match(megWorkspaceCss, /--meg-focus:\s*rgb\(255,\s*128,\s*31\);/i);
   assert.match(megWorkspaceCss, /--meg-saved-query-accent:\s*rgb\(255,\s*146,\s*61\);/i);
+  assert.match(megWorkspaceCss, /a:hover\s*\{[\s\S]*?text-decoration:\s*underline;/i);
   assert.match(
     megWorkspaceCss,
     /--meg-theme-preview-modern:\s*linear-gradient\(180deg,\s*rgb\(255,\s*111,\s*0\)\s*0%,\s*rgb\(255,\s*146,\s*61\)\s*100%\);/i
@@ -42,6 +45,9 @@ test("ESM export surfaces use the orange service palette", () => {
   assert.match(blondieWorkspaceCss, /--zip-accent-900:\s*255,\s*128,\s*31;/);
   assert.match(popupCss, /--s2-action-bg-accent:\s*var\(--underpar-gold-base\);/);
   assert.match(popupCss, /--service-esm-zip-800:\s*255,\s*111,\s*0;/);
+  assert.match(esmWorkspaceCss, /--workspace-link-rgb:\s*var\(--zip-accent-1000\);/);
+  assert.match(upsWorkspaceCss, /--workspace-link-rgb:\s*var\(--zip-accent-1000\);/);
+  assert.match(popupCss, /--service-link-rgb:\s*var\(--service-zip-1000\);/);
 
   [
     esmWorkspaceCss,
@@ -83,8 +89,12 @@ test("CM export surfaces use the purple service palette", () => {
   assert.match(mvpdWorkspaceCss, /force purple readability/i);
   assert.match(clickCmuTemplate, /color-scheme:\s*dark;/i);
   assert.match(clickCmuTemplate, /--accent-900-rgb:\s*97,\s*31,\s*145;/);
+  assert.match(clickCmuTemplate, /--fg-primary:\s*var\(--spectrum-text-color-link\);/);
+  assert.match(cmWorkspaceCss, /--workspace-link-rgb:\s*var\(--zip-accent-1000\);/);
+  assert.match(mvpdWorkspaceCss, /--workspace-link-rgb:\s*var\(--zip-accent-1000\);/);
   assert.match(popupSource, /--zip-accent-500":\s*"49,\s*0,\s*86"/);
   assert.match(popupSource, /--zip-accent-800":\s*"75,\s*0,\s*130"/);
+  assert.match(popupSource, /--fg-primary":\s*"rgb\(118,\s*61,\s*160\)"/);
   assert.match(popupSource, /themePreset:\s*"purple"/);
   assert.doesNotMatch(popupSource, /sunflower/i);
 
