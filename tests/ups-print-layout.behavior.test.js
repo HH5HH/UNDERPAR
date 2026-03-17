@@ -48,3 +48,15 @@ test("UPSpace live layout expands to report width without truncating mobile data
   assert.match(runtimeSource, /data-column-label="\$\{escapeHtml\(headerText\)\}"/);
   assert.match(runtimeSource, /data-is-primary="\$\{[\s\S]*index === 0 \? "true" : "false"[\s\S]*\}"/);
 });
+
+test("UPSpace entrypoint cache-busts CSS and JS assets", () => {
+  const source = read("ups/index.php");
+
+  assert.match(source, /\$upsAssetVersion = static function \(string \$relativePath\): string \{/);
+  assert.match(source, /\$esmWorkspaceCssHref = '\.\/esm-workspace\.css\?v=' \. \$upsAssetVersion\('esm-workspace\.css'\);/);
+  assert.match(source, /\$viewCssHref = '\.\/view\.css\?v=' \. \$upsAssetVersion\('view\.css'\);/);
+  assert.match(source, /\$viewJsHref = '\.\/view\.js\?v=' \. \$upsAssetVersion\('view\.js'\);/);
+  assert.match(source, /<link rel="stylesheet" href="<\?= htmlspecialchars\(\$esmWorkspaceCssHref, ENT_QUOTES, 'UTF-8'\) \?>" \/>/);
+  assert.match(source, /<link rel="stylesheet" href="<\?= htmlspecialchars\(\$viewCssHref, ENT_QUOTES, 'UTF-8'\) \?>" \/>/);
+  assert.match(source, /<script src="<\?= htmlspecialchars\(\$viewJsHref, ENT_QUOTES, 'UTF-8'\) \?>"><\/script>/);
+});

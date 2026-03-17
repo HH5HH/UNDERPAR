@@ -56,6 +56,14 @@ if ($snapshot === null) {
 
 $snapshotJson = $snapshot ? json_encode($snapshot, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : '{}';
 $debugComment = underpar_ibeta_html_comment($debugMeta);
+$upsAssetVersion = static function (string $relativePath): string {
+    $assetPath = __DIR__ . '/' . ltrim($relativePath, '/');
+    $modified = @filemtime($assetPath);
+    return rawurlencode((string) ($modified !== false ? $modified : '0'));
+};
+$esmWorkspaceCssHref = './esm-workspace.css?v=' . $upsAssetVersion('esm-workspace.css');
+$viewCssHref = './view.css?v=' . $upsAssetVersion('view.css');
+$viewJsHref = './view.js?v=' . $upsAssetVersion('view.js');
 ?>
 <!doctype html>
 <html lang="en">
@@ -63,8 +71,8 @@ $debugComment = underpar_ibeta_html_comment($debugMeta);
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UPSpace</title>
-    <link rel="stylesheet" href="./esm-workspace.css" />
-    <link rel="stylesheet" href="./view.css" />
+    <link rel="stylesheet" href="<?= htmlspecialchars($esmWorkspaceCssHref, ENT_QUOTES, 'UTF-8') ?>" />
+    <link rel="stylesheet" href="<?= htmlspecialchars($viewCssHref, ENT_QUOTES, 'UTF-8') ?>" />
   </head>
   <body>
     <main id="ibeta-root" class="workspace-app ibeta-app" aria-live="polite"></main>
@@ -72,7 +80,7 @@ $debugComment = underpar_ibeta_html_comment($debugMeta);
     <script>
       window.__UNDERPAR_IBETA_DEBUG__ = <?= json_encode($debugMeta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
     </script>
-    <script src="./view.js"></script>
+    <script src="<?= htmlspecialchars($viewJsHref, ENT_QUOTES, 'UTF-8') ?>"></script>
 <?= $debugComment . PHP_EOL ?>
   </body>
 </html>
