@@ -6,14 +6,19 @@
     <title>__UP_CLICK_CMU_TITLE__</title>
     <style>
       :root {
-        --bg: #f5effd;
-        --panel: #ffffff;
-        --ink: #32124f;
-        --muted: #5c1ca9;
-        --line: rgba(115, 13, 204, 0.24);
-        --accent: #9a47e2;
-        --accent-ink: #5c1ca9;
-        --warn: #a8431f;
+        color-scheme: dark;
+        --accent-800-rgb: 75, 0, 130;
+        --accent-900-rgb: 97, 31, 145;
+        --accent-1000-rgb: 118, 61, 160;
+        --accent-1100-rgb: 140, 92, 175;
+        --bg: rgb(17, 17, 17);
+        --panel: rgba(34, 34, 34, 0.96);
+        --ink: rgb(242, 242, 242);
+        --muted: rgb(175, 175, 175);
+        --line: rgba(57, 57, 57, 0.98);
+        --accent: rgb(var(--accent-900-rgb));
+        --accent-ink: rgb(var(--accent-1100-rgb));
+        --warn: rgb(229, 116, 131);
       }
 
       * {
@@ -23,7 +28,10 @@
       body {
         margin: 0;
         font-family: "Adobe Clean", "Segoe UI", sans-serif;
-        background: linear-gradient(180deg, #fcf8ff 0%, var(--bg) 100%);
+        background:
+          radial-gradient(circle at 10% -14%, rgba(var(--accent-900-rgb), 0.3), rgba(var(--accent-900-rgb), 0) 46%),
+          radial-gradient(circle at 92% -12%, rgba(var(--accent-1100-rgb), 0.2), rgba(var(--accent-1100-rgb), 0) 44%),
+          linear-gradient(180deg, rgb(27, 27, 27) 0%, var(--bg) 100%);
         color: var(--ink);
       }
 
@@ -39,7 +47,7 @@
       .head {
         border: 1px solid var(--line);
         border-radius: 14px;
-        background: var(--panel);
+        background: linear-gradient(180deg, rgba(44, 44, 44, 0.96), rgba(34, 34, 34, 0.94));
         padding: 12px;
         display: flex;
         flex-direction: column;
@@ -98,7 +106,7 @@
 
       button.secondary,
       a.link-btn {
-        background: #fff;
+        background: linear-gradient(180deg, rgba(42, 29, 52, 0.98), rgba(28, 21, 36, 0.98));
         color: var(--accent-ink);
       }
 
@@ -164,9 +172,9 @@
       }
 
       .badge.ok {
-        color: #5c1ca9;
-        background: rgba(154, 71, 226, 0.16);
-        border-color: rgba(134, 40, 217, 0.34);
+        color: rgb(var(--accent-1100-rgb));
+        background: rgba(var(--accent-900-rgb), 0.18);
+        border-color: rgba(var(--accent-1000-rgb), 0.34);
       }
 
       .badge.err {
@@ -325,46 +333,49 @@
       th {
         position: sticky;
         top: 0;
-        background: #eff8e7;
+        background: rgba(var(--accent-1000-rgb), 0.18);
         z-index: 1;
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
-          --bg: #121b09;
-          --panel: #1a2710;
-          --ink: #e6f5d8;
-          --muted: #a8c88b;
-          --line: rgba(100, 190, 35, 0.3);
-          --accent: #4e9a17;
-          --accent-ink: #64be23;
-          --warn: #ffbb9d;
+          --bg: rgb(17, 17, 17);
+          --panel: rgba(34, 34, 34, 0.96);
+          --ink: rgb(242, 242, 242);
+          --muted: rgb(175, 175, 175);
+          --line: rgba(57, 57, 57, 0.98);
+          --accent: rgb(var(--accent-900-rgb));
+          --accent-ink: rgb(var(--accent-1100-rgb));
+          --warn: rgb(229, 116, 131);
         }
 
         body {
-          background: linear-gradient(180deg, #18240d 0%, var(--bg) 100%);
+          background:
+            radial-gradient(circle at 10% -14%, rgba(var(--accent-900-rgb), 0.3), rgba(var(--accent-900-rgb), 0) 46%),
+            radial-gradient(circle at 92% -12%, rgba(var(--accent-1100-rgb), 0.2), rgba(var(--accent-1100-rgb), 0) 44%),
+            linear-gradient(180deg, rgb(27, 27, 27) 0%, var(--bg) 100%);
         }
 
         button.secondary,
         a.link-btn {
-          background: #2e381c;
+          background: linear-gradient(180deg, rgba(42, 29, 52, 0.98), rgba(28, 21, 36, 0.98));
           color: var(--ink);
         }
 
         .badge.ok {
-          color: #edf5d8;
-          background: rgba(78, 154, 23, 0.24);
-          border-color: rgba(100, 190, 35, 0.42);
+          color: rgb(var(--accent-1100-rgb));
+          background: rgba(var(--accent-900-rgb), 0.18);
+          border-color: rgba(var(--accent-1000-rgb), 0.34);
         }
 
         .badge.err {
-          color: #ffd6c7;
-          background: rgba(198, 83, 39, 0.22);
-          border-color: rgba(198, 83, 39, 0.42);
+          color: rgb(229, 116, 131);
+          background: rgba(220, 64, 84, 0.22);
+          border-color: rgba(220, 64, 84, 0.42);
         }
 
         th {
-          background: #243516;
+          background: rgba(var(--accent-1000-rgb), 0.18);
         }
       }
 

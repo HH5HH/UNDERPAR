@@ -202,7 +202,7 @@ function normalizeTheme(theme) {
   if (normalized === "retro" || normalized === "light") {
     return "retro";
   }
-  return "retro";
+  return "modern";
 }
 
 function syncThemeShellState() {
@@ -301,7 +301,7 @@ function initTheme() {
     return;
   }
   syncThemeScope();
-  applyTheme(readStoredTheme() || "retro", { persist: false });
+  applyTheme(readStoredTheme() || "modern", { persist: false });
 }
 
 function buildWorkspaceEnvironmentTooltip(environment) {

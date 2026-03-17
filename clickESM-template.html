@@ -1048,7 +1048,7 @@ body.net-busy input { cursor: progress; }
 
 </style>
 </head>
-<body>
+<body data-theme="dark">
 
 <input type="hidden" name="cid" value="__UP_CID__">
 <input type="hidden" name="csc" value="__UP_CSC__">
@@ -6114,7 +6114,7 @@ function td(value) {
 const THEME_STORAGE_KEY_PREFIX = 'esm3-findit-theme';
 
 function __normalizeTheme(theme) {
-  return theme === 'dark' ? 'dark' : 'light';
+  return theme === 'light' ? 'light' : 'dark';
 }
 
 function getThemeStorageScope() {
@@ -8541,13 +8541,13 @@ loadRequestorIds();
 </script>
 <style id="underpar-clickcmu-theme-overrides">
 :root{
-  --zip-accent-500:255, 162, 19;
-  --zip-accent-600:252, 125, 0;
-  --zip-accent-700:232, 106, 0;
-  --zip-accent-800:212, 91, 0;
-  --zip-accent-900:194, 78, 0;
-  --zip-accent-1000:167, 62, 0;
-  --zip-accent-1100:144, 51, 0;
+  --zip-accent-500:168, 73, 0;
+  --zip-accent-600:199, 87, 0;
+  --zip-accent-700:227, 99, 0;
+  --zip-accent-800:255, 111, 0;
+  --zip-accent-900:255, 128, 31;
+  --zip-accent-1000:255, 146, 61;
+  --zip-accent-1100:255, 163, 92;
   --zip-theme-vibe-body-radial-alpha:0.22;
   --zip-theme-vibe-body-start-mix:41.17%;
   --zip-theme-vibe-body-end-mix:32.47%;
@@ -8577,11 +8577,11 @@ loadRequestorIds();
   --zip-theme-vibe-feedback-border-alpha:0.39;
   --zip-theme-vibe-zebra-contrast:15.84%;
   --zip-theme-vibe-zebra-hover:9.07%;
-  --click-url-rgb:194, 78, 0;
-  --click-url-hover-rgb:167, 62, 0;
-  --reset-bg:#C24E00;
-  --reset-border:#A73E00;
-  --reset-hover:#A73E00;
+  --click-url-rgb:255, 128, 31;
+  --click-url-hover-rgb:255, 146, 61;
+  --reset-bg:rgb(var(--zip-accent-800));
+  --reset-border:rgb(var(--zip-accent-900));
+  --reset-hover:rgb(var(--zip-accent-900));
   --reset-text:rgb(var(--zip-gray-25-rgb));
   --page-surface-bg:
     radial-gradient(circle at 8% -12%, rgba(232, 106, 0, 0.22), rgba(232, 106, 0, 0) 46%),
@@ -8611,13 +8611,13 @@ loadRequestorIds();
   --chip-highlight-border:rgba(var(--click-url-rgb), .30);
 }
 body[data-theme="dark"]{
-  --zip-accent-500:135, 47, 0;
-  --zip-accent-600:162, 59, 0;
-  --zip-accent-700:185, 73, 0;
-  --zip-accent-800:199, 82, 0;
-  --zip-accent-900:224, 100, 0;
-  --zip-accent-1000:243, 117, 0;
-  --zip-accent-1100:255, 137, 0;
+  --zip-accent-500:168, 73, 0;
+  --zip-accent-600:199, 87, 0;
+  --zip-accent-700:227, 99, 0;
+  --zip-accent-800:255, 111, 0;
+  --zip-accent-900:255, 128, 31;
+  --zip-accent-1000:255, 146, 61;
+  --zip-accent-1100:255, 163, 92;
   --zip-theme-vibe-body-radial-alpha:0.319;
   --zip-theme-vibe-body-start-mix:51.95%;
   --zip-theme-vibe-body-end-mix:43.59%;
@@ -8647,8 +8647,8 @@ body[data-theme="dark"]{
   --zip-theme-vibe-feedback-border-alpha:0.457;
   --zip-theme-vibe-zebra-contrast:17.66%;
   --zip-theme-vibe-zebra-hover:10.34%;
-  --click-url-rgb:243, 117, 0;
-  --click-url-hover-rgb:255, 137, 0;
+  --click-url-rgb:255, 146, 61;
+  --click-url-hover-rgb:255, 163, 92;
   --reset-bg:rgb(var(--zip-accent-900));
   --reset-border:rgb(var(--zip-accent-1000));
   --reset-hover:rgb(var(--zip-accent-1000));

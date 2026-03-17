@@ -1,36 +1,43 @@
 :root {
-  color-scheme: light;
-  --legacy-bg: #f5effd;
-  --legacy-panel: rgba(255, 255, 255, 0.8);
-  --legacy-accent: #9a47e2;
-  --legacy-accent-hover: #8628d9;
-  --legacy-table-head: rgba(245, 236, 255, 0.97);
-  --legacy-table-row: rgba(255, 255, 255, 0.96);
-  --legacy-table-alt: rgba(250, 245, 255, 0.98);
-  --legacy-hover: rgba(243, 233, 255, 0.98);
-  --legacy-border: rgba(115, 13, 204, 0.18);
-  --legacy-text: #32124f;
-  --legacy-muted: #6d4b95;
-  --table-header-deep-red: #5c1ca9;
-  --ink: #341553;
-  --ink-muted: #6d4b95;
-  --ink-soft: #9b7dc2;
-  --line-soft: rgba(89, 25, 168, 0.16);
-  --line-faint: rgba(255, 255, 255, 0.78);
-  --card-depth: 0 24px 42px rgba(83, 0, 159, 0.15), 0 8px 18px rgba(83, 0, 159, 0.1);
-  --card-band-top: linear-gradient(148deg, rgba(255, 255, 255, 0.97), rgba(249, 242, 255, 0.98) 54%, rgba(240, 227, 255, 0.95));
-  --card-band-bottom: linear-gradient(156deg, rgba(253, 250, 255, 0.98), rgba(244, 236, 255, 0.96));
-  --accent: #9a47e2;
-  --accent-hover: #8628d9;
-  --s2-action-bg-default: rgba(255, 255, 255, 0.95);
-  --s2-action-bg-hover: rgba(244, 236, 255, 0.98);
-  --s2-action-border-default: rgba(115, 13, 204, 0.22);
-  --s2-action-text-default: #5a1ea2;
-  --s2-action-bg-accent: #9a47e2;
-  --s2-action-bg-accent-hover: #8628d9;
-  --s2-action-border-accent: #9a47e2;
+  color-scheme: dark;
+  --zip-accent-500: 49, 0, 86;
+  --zip-accent-600: 59, 0, 101;
+  --zip-accent-700: 67, 0, 116;
+  --zip-accent-800: 75, 0, 130;
+  --zip-accent-900: 97, 31, 145;
+  --zip-accent-1000: 118, 61, 160;
+  --zip-accent-1100: 140, 92, 175;
+  --legacy-bg: #111111;
+  --legacy-panel: rgba(34, 34, 34, 0.94);
+  --legacy-accent: rgb(var(--zip-accent-900));
+  --legacy-accent-hover: rgb(var(--zip-accent-1000));
+  --legacy-table-head: rgba(var(--zip-accent-1000), 0.2);
+  --legacy-table-row: rgba(34, 34, 34, 0.96);
+  --legacy-table-alt: rgba(44, 44, 44, 0.92);
+  --legacy-hover: rgba(var(--zip-accent-900), 0.22);
+  --legacy-border: rgba(57, 57, 57, 0.98);
+  --legacy-text: rgb(242, 242, 242);
+  --legacy-muted: rgb(175, 175, 175);
+  --table-header-deep-red: rgb(var(--zip-accent-1100));
+  --ink: rgb(242, 242, 242);
+  --ink-muted: rgb(175, 175, 175);
+  --ink-soft: rgb(219, 219, 219);
+  --line-soft: rgba(var(--zip-accent-900), 0.28);
+  --line-faint: rgba(242, 242, 242, 0.18);
+  --card-depth: 0 22px 40px rgba(0, 0, 0, 0.52), 0 9px 18px rgba(0, 0, 0, 0.4);
+  --card-band-top: linear-gradient(148deg, rgba(44, 44, 44, 0.98), rgba(34, 34, 34, 0.96) 54%, rgba(var(--zip-accent-1000), 0.18));
+  --card-band-bottom: linear-gradient(156deg, rgba(34, 34, 34, 0.98), rgba(27, 27, 27, 0.98));
+  --accent: rgb(var(--zip-accent-900));
+  --accent-hover: rgb(var(--zip-accent-1000));
+  --s2-action-bg-default: rgba(44, 44, 44, 0.98);
+  --s2-action-bg-hover: rgba(var(--zip-accent-900), 0.24);
+  --s2-action-border-default: rgba(57, 57, 57, 0.98);
+  --s2-action-text-default: rgb(var(--zip-accent-1100));
+  --s2-action-bg-accent: rgb(var(--zip-accent-800));
+  --s2-action-bg-accent-hover: rgb(var(--zip-accent-900));
+  --s2-action-border-accent: rgb(var(--zip-accent-900));
   --s2-action-text-accent: #ffffff;
-  --s2-action-focus-ring: rgba(154, 71, 226, 0.26);
+  --s2-action-focus-ring: rgba(var(--zip-accent-900), 0.26);
   --s2-radius-default: 8px;
   --s2-radius-strong: 10px;
   --s2-radius-pill: 999px;
@@ -39,10 +46,10 @@
   --s2-icon-size: 20px;
   --s2-icon-size-strong: 22px;
   --s2-icon-size-compact: 15px;
-  --danger-rgb: 186, 54, 54;
-  --danger-strong-rgb: 159, 37, 37;
-  --workspace-net-indicator-track: rgba(89, 25, 168, 0.28);
-  --workspace-net-indicator-head: rgba(191, 138, 238, 0.96);
+  --danger-rgb: 220, 64, 84;
+  --danger-strong-rgb: 229, 116, 131;
+  --workspace-net-indicator-track: rgba(var(--zip-accent-900), 0.3);
+  --workspace-net-indicator-head: rgba(var(--zip-accent-1100), 0.96);
   font-family: "Avenir Next", "Segoe UI Variable", "Gill Sans MT", "Trebuchet MS", sans-serif;
 }
 
@@ -57,10 +64,10 @@ body {
   isolation: isolate;
   overflow-x: hidden;
   background:
-    radial-gradient(circle at 8% -12%, rgba(154, 71, 226, 0.2), rgba(154, 71, 226, 0) 46%),
-    radial-gradient(circle at 92% -10%, rgba(208, 167, 243, 0.18), rgba(208, 167, 243, 0) 44%),
-    radial-gradient(circle at 50% 120%, rgba(134, 40, 217, 0.14), rgba(134, 40, 217, 0) 50%),
-    linear-gradient(180deg, #fbf8ff 0%, var(--legacy-bg) 48%, #f7f1ff 100%);
+    radial-gradient(circle at 8% -12%, rgba(var(--zip-accent-800), 0.28), rgba(var(--zip-accent-800), 0) 46%),
+    radial-gradient(circle at 92% -10%, rgba(var(--zip-accent-1000), 0.22), rgba(var(--zip-accent-1000), 0) 44%),
+    radial-gradient(circle at 50% 120%, rgba(var(--zip-accent-900), 0.16), rgba(var(--zip-accent-900), 0) 50%),
+    linear-gradient(180deg, rgb(27, 27, 27) 0%, var(--legacy-bg) 58%, rgb(17, 17, 17) 100%);
   color: var(--legacy-text);
 }
 
@@ -94,13 +101,13 @@ body::after {
 body::before {
   top: 92px;
   right: -96px;
-  background: radial-gradient(circle, rgba(208, 167, 243, 0.3) 0%, rgba(208, 167, 243, 0) 74%);
+  background: radial-gradient(circle, rgba(var(--zip-accent-1000), 0.3) 0%, rgba(var(--zip-accent-1000), 0) 74%);
 }
 
 body::after {
   bottom: -130px;
   left: -104px;
-  background: radial-gradient(circle, rgba(154, 71, 226, 0.24) 0%, rgba(154, 71, 226, 0) 74%);
+  background: radial-gradient(circle, rgba(var(--zip-accent-900), 0.24) 0%, rgba(var(--zip-accent-900), 0) 74%);
 }
 
 .workspace-app {
@@ -123,10 +130,10 @@ body::after {
   max-width: min(44vw, 420px);
   min-height: 24px;
   padding: 3px 8px 3px 6px;
-  border: 1px solid rgba(143, 143, 143, 0.34);
+  border: 1px solid rgba(var(--zip-accent-1000), 0.24);
   border-radius: 6px;
-  background: linear-gradient(180deg, rgb(248, 248, 248) 0%, rgb(233, 233, 233) 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -1px 0 rgba(80, 80, 80, 0.1);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.96) 0%, rgba(27, 27, 27, 0.96) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(0, 0, 0, 0.24);
   color: color-mix(in srgb, var(--legacy-text) 76%, var(--legacy-muted) 24%);
   cursor: default;
   user-select: text;
@@ -140,9 +147,9 @@ body::after {
   padding: 0 6px;
   flex: 0 0 auto;
   white-space: nowrap;
-  border: 1px solid rgba(143, 143, 143, 0.34);
+  border: 1px solid rgba(var(--zip-accent-1000), 0.26);
   border-radius: 4px;
-  background: linear-gradient(180deg, rgb(248, 248, 248) 0%, rgb(233, 233, 233) 100%);
+  background: linear-gradient(180deg, rgba(42, 29, 52, 0.98) 0%, rgba(28, 21, 36, 0.98) 100%);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -181,9 +188,9 @@ body::after {
   position: relative;
   border: 1px solid var(--legacy-border);
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(249, 242, 255, 0.86));
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.96), rgba(34, 34, 34, 0.94));
   backdrop-filter: blur(8px);
-  box-shadow: 0 12px 24px rgba(83, 0, 159, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   padding: 12px 14px;
   display: flex;
   align-items: flex-start;
@@ -201,7 +208,7 @@ body::after {
   top: 0;
   height: 3px;
   border-radius: 0 0 999px 999px;
-  background: linear-gradient(90deg, rgba(134, 40, 217, 0.98), rgba(154, 71, 226, 0.98), rgba(191, 138, 238, 0.98));
+  background: linear-gradient(90deg, rgba(var(--zip-accent-700), 0.98), rgba(var(--zip-accent-800), 0.98), rgba(var(--zip-accent-1000), 0.98));
   pointer-events: none;
 }
 
@@ -233,7 +240,7 @@ body::after {
 .workspace-filter-state {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #6b2eb2;
+  color: rgb(var(--zip-accent-1100));
   font-weight: 560;
   word-break: break-word;
 }
@@ -1607,4 +1614,123 @@ body.workspace-locked .workspace-cards {
   .esm-table td {
     padding: 7px 10px;
   }
+}
+
+/* ZIP dark x purple overrides for CM cards and lock-state chrome. */
+.workspace-icon-btn {
+  background: linear-gradient(180deg, var(--s2-action-bg-default), rgba(27, 27, 27, 0.98));
+  color: var(--s2-action-text-default);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.36);
+}
+
+.workspace-icon-btn--reference {
+  border-color: rgba(var(--zip-accent-1000), 0.34);
+  background: linear-gradient(180deg, rgba(42, 29, 52, 0.98), rgba(28, 21, 36, 0.98));
+  color: rgb(var(--zip-accent-1100));
+  box-shadow: 0 7px 15px rgba(0, 0, 0, 0.3);
+}
+
+.workspace-icon-btn--accent {
+  border-color: var(--s2-action-border-accent);
+  background: linear-gradient(160deg, rgba(var(--zip-accent-800), 0.98), rgba(var(--zip-accent-1000), 0.98));
+  color: var(--s2-action-text-accent);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(var(--zip-accent-1100), 0.18);
+}
+
+.workspace-icon-btn--workspace-tearsheet {
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(var(--zip-accent-1100), 0.18);
+}
+
+.workspace-icon-btn--rerun {
+  border-color: rgba(var(--zip-accent-1000), 0.34);
+  background: linear-gradient(180deg, rgba(42, 29, 52, 0.98), rgba(28, 21, 36, 0.98));
+  color: rgb(var(--zip-accent-1100));
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
+}
+
+.workspace-icon-btn:hover:not(:disabled) {
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
+}
+
+.workspace-icon-btn--reference:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(55, 41, 68, 0.98), rgba(36, 29, 46, 0.98));
+  border-color: rgba(var(--zip-accent-1100), 0.48);
+}
+
+.workspace-icon-btn--accent:hover:not(:disabled) {
+  background: linear-gradient(160deg, rgba(var(--zip-accent-900), 0.98), rgba(var(--zip-accent-1100), 0.98));
+  border-color: rgb(var(--zip-accent-1100));
+}
+
+.workspace-icon-btn--workspace-tearsheet:hover:not(:disabled) {
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.44), 0 0 0 1px rgba(var(--zip-accent-1100), 0.22);
+}
+
+.workspace-icon-btn--rerun:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(55, 41, 68, 0.98), rgba(36, 29, 46, 0.98));
+  border-color: rgba(var(--zip-accent-1100), 0.52);
+  color: rgb(var(--zip-accent-1100));
+  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.36);
+}
+
+.workspace-icon-btn--rerun:active:not(:disabled) {
+  background: linear-gradient(180deg, rgba(var(--zip-accent-900), 0.24), rgba(var(--zip-accent-800), 0.24));
+  border-color: rgba(var(--zip-accent-1100), 0.64);
+  color: rgb(var(--zip-accent-1100));
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.36);
+}
+
+.workspace-status {
+  color: rgb(var(--zip-accent-1100));
+}
+
+.workspace-status.error {
+  color: rgb(var(--danger-strong-rgb));
+}
+
+.workspace-lock-banner {
+  border-color: rgba(var(--danger-rgb), 0.34);
+  background: linear-gradient(180deg, rgba(54, 25, 31, 0.98), rgba(36, 18, 24, 0.96));
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.24);
+}
+
+.workspace-lock-message,
+.workspace-lock-message a {
+  color: rgb(var(--danger-strong-rgb));
+}
+
+.workspace-lock-message a:hover {
+  color: rgb(var(--danger-rgb));
+}
+
+.report-card::before {
+  border: 1px solid rgba(242, 242, 242, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(var(--zip-accent-900), 0.18);
+}
+
+.card-title {
+  color: rgba(var(--zip-accent-1100), 0.9);
+  text-shadow: none;
+}
+
+.card-url-path-segment {
+  color: rgba(var(--zip-accent-1100), 0.92);
+}
+
+.card-url-path-link:hover {
+  color: rgb(var(--zip-accent-1100));
+}
+
+.card-url-path-link:focus-visible {
+  box-shadow: 0 0 0 2px rgba(var(--zip-accent-900), 0.22);
+}
+
+.card-url-path-segment-terminal {
+  color: rgb(var(--zip-accent-1100));
+}
+
+.card-url-path-segment-empty,
+.card-url-query-chip,
+.card-url-path-divider {
+  color: rgba(175, 175, 175, 0.92);
 }

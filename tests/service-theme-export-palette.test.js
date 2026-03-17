@@ -16,22 +16,32 @@ test("ESM export surfaces use the orange service palette", () => {
   const mirroredClickEsmTemplate = read("scripts/clickESM.html");
   const upsViewCss = read("ups/view.css");
   const megWorkspaceCss = read("meg-workspace.css");
+  const megWorkspaceJs = read("meg-workspace.js");
   const blondieWorkspaceCss = read("blondie-time-workspace.css");
   const popupCss = read("popup.css");
 
-  assert.match(esmWorkspaceCss, /--legacy-accent:\s*#c24e00;/i);
-  assert.match(upsWorkspaceCss, /--legacy-accent:\s*#c24e00;/i);
-  assert.match(clickEsmTemplate, /--zip-accent-500:255,\s*162,\s*19;/);
-  assert.match(mirroredClickEsmTemplate, /--zip-accent-500:255,\s*162,\s*19;/);
-  assert.match(clickEsmTemplate, /--reset-bg:#C24E00;/);
-  assert.match(clickEsmTemplate, /--click-url-rgb:243,\s*117,\s*0;/);
-  assert.match(upsViewCss, /\.ups-utility-link\s*\{[\s\S]*?color:\s*#c24e00;/);
-  assert.match(megWorkspaceCss, /--meg-focus:\s*#c24e00;/i);
-  assert.match(megWorkspaceCss, /--meg-saved-query-accent:\s*#c24e00;/i);
-  assert.match(megWorkspaceCss, /--meg-theme-preview-modern:\s*linear-gradient\(180deg,\s*#c24e00 0%,\s*#ffa213 100%\);/i);
-  assert.match(blondieWorkspaceCss, /--bt-accent:\s*#c24e00;/i);
-  assert.match(blondieWorkspaceCss, /--zip-accent-900:\s*194,\s*78,\s*0;/);
+  assert.match(esmWorkspaceCss, /color-scheme:\s*dark;/i);
+  assert.match(esmWorkspaceCss, /--zip-accent-800:\s*255,\s*111,\s*0;/);
+  assert.match(upsWorkspaceCss, /color-scheme:\s*dark;/i);
+  assert.match(upsWorkspaceCss, /--zip-accent-1000:\s*255,\s*146,\s*61;/);
+  assert.match(clickEsmTemplate, /<body data-theme="dark">/i);
+  assert.match(clickEsmTemplate, /function __normalizeTheme\(theme\)\s*\{\s*return theme === 'light' \? 'light' : 'dark';/);
+  assert.match(clickEsmTemplate, /--zip-accent-900:255,\s*128,\s*31;/);
+  assert.match(clickEsmTemplate, /--click-url-rgb:255,\s*146,\s*61;/);
+  assert.match(mirroredClickEsmTemplate, /<body data-theme="dark">/i);
+  assert.match(mirroredClickEsmTemplate, /--zip-accent-900:255,\s*128,\s*31;/);
+  assert.match(upsViewCss, /\.ups-utility-link\s*\{[\s\S]*?color:\s*rgb\(255,\s*146,\s*61\);/);
+  assert.match(megWorkspaceCss, /--meg-focus:\s*rgb\(255,\s*128,\s*31\);/i);
+  assert.match(megWorkspaceCss, /--meg-saved-query-accent:\s*rgb\(255,\s*146,\s*61\);/i);
+  assert.match(
+    megWorkspaceCss,
+    /--meg-theme-preview-modern:\s*linear-gradient\(180deg,\s*rgb\(255,\s*111,\s*0\)\s*0%,\s*rgb\(255,\s*146,\s*61\)\s*100%\);/i
+  );
+  assert.match(megWorkspaceJs, /applyTheme\(readStoredTheme\(\) \|\| "modern", \{ persist: false \}\);/);
+  assert.match(blondieWorkspaceCss, /color-scheme:\s*dark;/i);
+  assert.match(blondieWorkspaceCss, /--zip-accent-900:\s*255,\s*128,\s*31;/);
   assert.match(popupCss, /--s2-action-bg-accent:\s*var\(--underpar-gold-base\);/);
+  assert.match(popupCss, /--service-esm-zip-800:\s*255,\s*111,\s*0;/);
 
   [
     esmWorkspaceCss,
@@ -67,17 +77,31 @@ test("CM export surfaces use the purple service palette", () => {
   const clickCmuTemplate = read("clickCMU-template.html");
   const popupSource = read("popup.js");
 
-  assert.match(cmWorkspaceCss, /--legacy-accent:\s*#9a47e2;/i);
-  assert.match(mvpdWorkspaceCss, /--zip-accent-500:\s*107,\s*6,\s*195;/);
+  assert.match(cmWorkspaceCss, /color-scheme:\s*dark;/i);
+  assert.match(cmWorkspaceCss, /--zip-accent-800:\s*75,\s*0,\s*130;/);
+  assert.match(mvpdWorkspaceCss, /--zip-accent-800:\s*75,\s*0,\s*130;/);
   assert.match(mvpdWorkspaceCss, /force purple readability/i);
-  assert.match(clickCmuTemplate, /--accent:\s*#9a47e2;/i);
-  assert.match(popupSource, /--zip-accent-500:208,\s*167,\s*243;/);
+  assert.match(clickCmuTemplate, /color-scheme:\s*dark;/i);
+  assert.match(clickCmuTemplate, /--accent-900-rgb:\s*97,\s*31,\s*145;/);
+  assert.match(popupSource, /--zip-accent-500":\s*"49,\s*0,\s*86"/);
+  assert.match(popupSource, /--zip-accent-800":\s*"75,\s*0,\s*130"/);
   assert.match(popupSource, /themePreset:\s*"purple"/);
   assert.doesNotMatch(popupSource, /sunflower/i);
 
   [cmWorkspaceCss, mvpdWorkspaceCss, clickCmuTemplate].forEach((source) => {
     assert.doesNotMatch(source, /#408111|#346d0c|#90e752|#2a8b74|#1d6252|Sunflower|#20498f/i);
   });
+});
+
+test("Popup service containers use ZIP dark service ramps while keeping the gold shell", () => {
+  const popupCss = read("popup.css");
+
+  assert.match(popupCss, /--service-health-zip-500:\s*0,\s*81,\s*56;/);
+  assert.match(popupCss, /--service-learning-zip-500:\s*0,\s*73,\s*95;/);
+  assert.match(popupCss, /--service-esm-zip-800:\s*255,\s*111,\s*0;/);
+  assert.match(popupCss, /--service-cm-zip-800:\s*75,\s*0,\s*130;/);
+  assert.match(popupCss, /--service-degradation-zip-800:\s*215,\s*38,\s*61;/);
+  assert.match(popupCss, /--s2-action-bg-accent:\s*var\(--underpar-gold-base\);/);
 });
 
 test("Degradation workspace surfaces stay on the red palette", () => {
