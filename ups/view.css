@@ -100,17 +100,26 @@ body {
   overflow: visible !important;
 }
 
-.ibeta-report-card .card-head {
-  padding-right: 20px;
+.ups-report-title-wrap {
+  position: relative;
+  z-index: 1;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid rgba(var(--zip-accent-1000), 0.14);
+  background: var(--card-band-top);
 }
 
-.ibeta-report-card .card-actions {
-  visibility: hidden;
-  pointer-events: none;
+.ups-report-title {
+  margin: 0;
+  color: var(--legacy-text);
+  font-size: 18px;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
 }
 
 .ibeta-report-card .card-body {
-  padding-bottom: 16px;
+  padding-bottom: 10px;
   overflow: visible;
 }
 
@@ -172,8 +181,8 @@ body {
     gap: 14px;
   }
 
-  .ibeta-report-card .card-head {
-    padding-right: 14px;
+  .ups-report-title-wrap {
+    padding: 16px 16px 10px;
   }
 
   .ibeta-report-scroll-shell {
@@ -254,39 +263,8 @@ body {
     display: none !important;
   }
 
-  .card-head {
-    padding-right: 12px;
-  }
-
-  .card-url-context {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 6px;
-  }
-
-  .card-url-query-cloud,
-  .card-col-columns,
-  .card-col-columns-wrap,
-  .col-chip-cloud {
-    justify-content: flex-start;
-    align-items: flex-start;
-    text-align: left;
-    width: 100%;
-    max-width: none;
-    min-width: 0;
-  }
-
-  .card-url-path-segment,
-  .card-url-query-chip,
-  .card-url-query-key,
-  .card-url-query-value,
-  .col-chip-label,
-  .col-chip-trigger,
-  .card-col-parent-url {
-    max-width: none !important;
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-    overflow-wrap: anywhere;
+  .ups-report-title-wrap {
+    padding: 12px 14px 10px;
   }
 
   .ibeta-report-card .esm-table-wrapper {
@@ -309,12 +287,7 @@ body {
     display: table-header-group;
   }
 
-  .ibeta-report-card .esm-table tfoot {
-    display: table-footer-group;
-  }
-
-  .ibeta-report-card .esm-table thead th,
-  .ibeta-report-card .esm-table tfoot td {
+  .ibeta-report-card .esm-table thead th {
     position: static !important;
   }
 

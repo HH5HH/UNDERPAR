@@ -18,13 +18,13 @@ test("UPSpace print stylesheet keeps wide reports overflow-safe in PDF", () => {
   assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table-wrapper\s*\{[\s\S]*width:\s*max-content !important;/i);
   assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table\s*\{[\s\S]*width:\s*max-content !important;/i);
   assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table\s*\{[\s\S]*table-layout:\s*auto !important;/i);
-  assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table thead th,[\s\S]*position:\s*static !important;/i);
+  assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table thead th\s*\{[\s\S]*position:\s*static !important;/i);
   assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table th,[\s\S]*white-space:\s*nowrap !important;/i);
   assert.match(runtimeSource, /const UPS_PRINT_PAGE_STYLE_ID = "underpar-ups-print-page-style";/);
   assert.match(runtimeSource, /function prepareUpspacePrintLayout\(/);
   assert.match(
     runtimeSource,
-    /measurementRoot\.querySelectorAll\(\s*"\.ibeta-report-scroll-shell, \.ibeta-report-card, \.ibeta-report-card \.card-head, \.ibeta-report-card \.card-col-list, \.ibeta-report-card \.esm-table-wrapper, \.ibeta-report-card \.esm-table"\s*\)/
+    /measurementRoot\.querySelectorAll\(\s*"\.ibeta-report-scroll-shell, \.ibeta-report-card, \.ibeta-report-card \.ups-report-title-wrap, \.ibeta-report-card \.esm-table-wrapper, \.ibeta-report-card \.esm-table"\s*\)/
   );
   assert.match(runtimeSource, /buildUpspacePrintPageCss\(pxToMm\(widestMeasuredPx \+ 64\)\)/);
 });
@@ -36,10 +36,14 @@ test("UPSpace live layout expands to report width without truncating mobile data
 
   assert.match(source, /\.ibeta-report-scroll-shell\s*\{[\s\S]*overflow-x:\s*auto;[\s\S]*touch-action:\s*pan-x pan-y;/i);
   assert.match(source, /\.ibeta-report-card\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/i);
+  assert.match(source, /\.ups-report-title-wrap\s*\{[\s\S]*background:\s*var\(--card-band-top\);/i);
+  assert.match(source, /\.ups-report-title\s*\{[\s\S]*font-size:\s*18px;/i);
   assert.match(source, /\.ibeta-report-card \.esm-table-wrapper\s*\{[\s\S]*overflow:\s*visible;/i);
   assert.match(source, /\.ibeta-report-card \.esm-table\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/i);
   assert.match(workspaceSource, /\.esm-table th,[\s\S]*\.esm-table td \{[\s\S]*overflow:\s*visible;[\s\S]*text-overflow:\s*clip;/i);
   assert.match(runtimeSource, /<div class="ibeta-report-scroll-shell">/);
+  assert.match(runtimeSource, /<h1 class="ups-report-title"/);
+  assert.doesNotMatch(runtimeSource, /card-url-context|card-col-list|card-subtitle/);
   assert.doesNotMatch(source, /@media screen and \(max-width:\s*900px\)[\s\S]*\.ibeta-report-card \.esm-table thead\s*\{[\s\S]*display:\s*none;/i);
   assert.doesNotMatch(source, /\.ibeta-report-card \.esm-table td::before\s*\{[\s\S]*content:\s*attr\(data-column-label\);/i);
   assert.doesNotMatch(runtimeSource, /data-column-label=|data-is-primary=/);

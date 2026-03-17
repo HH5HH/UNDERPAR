@@ -7,20 +7,6 @@
   const UPS_PRINT_PAGE_WIDTH_MIN_MM = 431.8;
   const UPS_PRINT_PAGE_WIDTH_MAX_MM = 1117.6;
   const UPS_PRINT_PAGE_HEIGHT_MM = 279.4;
-  const ESM_CARD_ZOOM_LABEL_BY_KEY = {
-    YR: "Year",
-    MO: "Month",
-    DAY: "Day",
-    HR: "Hour",
-    MIN: "Minute",
-  };
-  const ESM_CARD_ZOOM_PATH_TOKEN_BY_KEY = {
-    YR: "/year",
-    MO: "/month",
-    DAY: "/day",
-    HR: "/hour",
-    MIN: "/minute",
-  };
 
   function readSnapshot() {
     const node = document.getElementById("underpar-ibeta-snapshot");
@@ -74,75 +60,6 @@
       return normalized;
     }
     return normalized.slice(0, maxLength);
-  }
-
-  function normalizeQueryPairs(value) {
-    return (Array.isArray(value) ? value : [])
-      .map((pair) => {
-        const source = pair && typeof pair === "object" ? pair : null;
-        if (!source) {
-          return null;
-        }
-        const key = String(source.key || "").trim();
-        if (!key) {
-          return null;
-        }
-        return {
-          key,
-          operator: String(source.operator || "").trim(),
-          value: String(source.value || "").trim(),
-        };
-      })
-      .filter(Boolean);
-  }
-
-  function buildHeaderContextMarkup(snapshot) {
-    const headerContext = snapshot?.headerContext && typeof snapshot.headerContext === "object" ? snapshot.headerContext : {};
-    const pathSegments = (Array.isArray(headerContext.pathSegments) ? headerContext.pathSegments : [])
-      .map((segment) => String(segment || "").trim())
-      .filter(Boolean);
-    const queryPairs = normalizeQueryPairs(headerContext.queryPairs);
-
-    const pathMarkup =
-      pathSegments.length > 0
-        ? pathSegments
-            .map((segment, index) => {
-              const segmentClass = `card-url-path-segment${index === pathSegments.length - 1 ? " card-url-path-segment-terminal" : ""}`;
-              return `${`<span class="${segmentClass}">${escapeHtml(segment)}</span>`}${
-                index < pathSegments.length - 1 ? '<span class="card-url-path-divider">/</span>' : ""
-              }`;
-            })
-            .join("")
-        : '<span class="card-url-path-segment card-url-path-segment-empty">media-company</span>';
-
-    const queryMarkup =
-      queryPairs.length > 0
-        ? queryPairs
-            .map((pair) => {
-              const operator = pair.operator || (pair.value ? "=" : "");
-              const valueMarkup = pair.value
-                ? `<span class="card-url-query-eq">${escapeHtml(operator)}</span><span class="card-url-query-value">${escapeHtml(
-                    pair.value
-                  )}</span>`
-                : "";
-              return `<span class="card-url-query-chip"><span class="card-url-query-key">${escapeHtml(pair.key)}</span>${valueMarkup}</span>`;
-            })
-            .join("")
-        : '<span class="card-url-query-empty" aria-hidden="true"></span>';
-
-    return `
-      <span class="card-url-context" aria-label="ESM request context">
-        <span class="card-url-path" aria-label="ESM path">${pathMarkup}</span>
-        <span class="card-url-query-cloud" aria-label="ESM query context">${queryMarkup}</span>
-      </span>
-    `;
-  }
-
-  function buildCardSubtitle(snapshot) {
-    const rowCount = Math.max(0, Number(snapshot?.table?.rowCount || snapshot?.table?.rows?.length || 0));
-    const zoomLabel = getWorkspaceCardZoomLabel(snapshot);
-    const zoom = zoomLabel ? `Zoom: ${zoomLabel}` : "Zoom: --";
-    return `${zoom} | Rows: ${rowCount}`;
   }
 
   function getTerminalPathSegment(snapshot) {
@@ -313,7 +230,7 @@
       measuredWidths.push(measureNodeWidth(measurementRoot));
       Array.from(
         measurementRoot.querySelectorAll(
-          ".ibeta-report-scroll-shell, .ibeta-report-card, .ibeta-report-card .card-head, .ibeta-report-card .card-col-list, .ibeta-report-card .esm-table-wrapper, .ibeta-report-card .esm-table"
+          ".ibeta-report-scroll-shell, .ibeta-report-card, .ibeta-report-card .ups-report-title-wrap, .ibeta-report-card .esm-table-wrapper, .ibeta-report-card .esm-table"
         )
       ).forEach((node) => {
         measuredWidths.push(measureNodeWidth(node));
@@ -326,113 +243,6 @@
       cssText,
       widestMeasuredPx,
     };
-  }
-
-  function buildCardColumnsMarkup(snapshot) {
-    const nodeLabel = String(snapshot?.displayNodeLabel || snapshot?.datasetLabel || "").trim() || getTerminalPathSegment(snapshot);
-    const headers = (Array.isArray(snapshot?.table?.headers) ? snapshot.table.headers : [])
-      .map((header) => String(header || "").trim())
-      .filter((header) => header && header !== "DATE");
-    const columnsMarkup =
-      headers.length > 0
-        ? `<div class="col-chip-cloud">${headers
-            .map(
-              (header) => `<div class="col-chip" data-filterable="0" title="${escapeHtml(header)}">
-              <span class="col-chip-label col-chip-label-static" title="${escapeHtml(header)}">${escapeHtml(header)}</span>
-            </div>`
-            )
-            .join("")}</div>`
-        : '<span class="card-col-empty"></span>';
-    return `
-      <div class="card-col-list">
-        <div class="card-col-layout">
-          <div class="card-col-node">
-            <span class="card-col-parent-url" title="${escapeHtml(nodeLabel)}">${escapeHtml(nodeLabel)}</span>
-          </div>
-          <div class="card-col-columns-wrap">
-            <div class="card-col-columns" aria-label="ESM columns">${columnsMarkup}</div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  function normalizeWorkspaceZoomKey(value = "") {
-    const normalized = String(value || "").trim().toUpperCase();
-    return Object.prototype.hasOwnProperty.call(ESM_CARD_ZOOM_LABEL_BY_KEY, normalized) ? normalized : "";
-  }
-
-  function detectWorkspaceZoomKeyFromUrl(urlValue = "") {
-    const href = String(urlValue || "").trim().toLowerCase();
-    if (!href) {
-      return "";
-    }
-    let detected = "";
-    let bestIndex = -1;
-    Object.entries(ESM_CARD_ZOOM_PATH_TOKEN_BY_KEY).forEach(([key, token]) => {
-      const index = href.lastIndexOf(token);
-      if (index > bestIndex) {
-        detected = key;
-        bestIndex = index;
-      }
-    });
-    return detected;
-  }
-
-  function resolveWorkspaceCardZoomKey(snapshot = null) {
-    const explicit = normalizeWorkspaceZoomKey(snapshot?.zoomKey);
-    if (explicit) {
-      return explicit;
-    }
-    return (
-      detectWorkspaceZoomKeyFromUrl(String(snapshot?.requestUrl || "").trim()) ||
-      detectWorkspaceZoomKeyFromUrl(String(snapshot?.requestPath || "").trim()) ||
-      ""
-    );
-  }
-
-  function getWorkspaceCardZoomLabel(snapshot = null) {
-    const zoomKey = resolveWorkspaceCardZoomKey(snapshot);
-    return zoomKey ? ESM_CARD_ZOOM_LABEL_BY_KEY[zoomKey] || zoomKey : "";
-  }
-
-  function getLastModifiedSourceTimezone(rawHttpDate = "") {
-    const tail = String(rawHttpDate || "").trim().split(/\s+/).pop();
-    if (!tail) {
-      return "";
-    }
-    if (/^[A-Z]{2,4}$/i.test(tail)) {
-      return tail.toUpperCase();
-    }
-    if (/^[+-]\d{4}$/.test(tail)) {
-      return tail;
-    }
-    return "";
-  }
-
-  function formatLastModifiedForDisplay(rawHttpDate = "") {
-    if (rawHttpDate == null || String(rawHttpDate).trim() === "") {
-      return rawHttpDate;
-    }
-    const date = new Date(rawHttpDate);
-    if (Number.isNaN(date.getTime())) {
-      return rawHttpDate;
-    }
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: CLIENT_TIMEZONE,
-      month: "2-digit",
-      day: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-      timeZoneName: "short",
-    });
-    const parts = formatter.formatToParts(date);
-    const getPart = (type) => parts.find((part) => part.type === type)?.value ?? "";
-    const tzName = getPart("timeZoneName");
-    return `${getPart("month")}/${getPart("day")}/${getPart("year")} ${getPart("hour")}:${getPart("minute")}:${getPart("second")} ${tzName || CLIENT_TIMEZONE}`;
   }
 
   function normalizeCards(snapshot) {
@@ -470,37 +280,22 @@
   }
 
   function buildTableMarkup(snapshot) {
-    const headers = Array.isArray(snapshot?.table?.headers) ? snapshot.table.headers : [];
-    const lastModified = String(snapshot?.lastModified || "").trim();
-    const lastModifiedMarkup = lastModified
-      ? `Last-Modified: ${escapeHtml(formatLastModifiedForDisplay(lastModified))}`
-      : "Last-Modified: (real-time)";
-    const lastModifiedTitle = lastModified
-      ? (() => {
-          const sourceTz = getLastModifiedSourceTimezone(lastModified);
-          return sourceTz ? `Server time: ${sourceTz} (converted to your timezone)` : "Converted to your timezone";
-        })()
-      : "";
     return `
       <div class="esm-table-wrapper">
         <table class="esm-table">
           <thead><tr>${buildTableHeadMarkup(snapshot)}</tr></thead>
           <tbody>${buildTableBodyMarkup(snapshot)}</tbody>
-          <tfoot>
-            <tr>
-              <td class="esm-footer-cell" colspan="${Math.max(1, headers.length)}">
-                <div class="esm-footer">
-                  <div class="esm-footer-controls">
-                    <div class="esm-footer-meta">
-                      <span class="esm-last-modified"${lastModifiedTitle ? ` title="${escapeHtml(lastModifiedTitle)}"` : ""}>${lastModifiedMarkup}</span>
-                    </div>
-                  </div>
-                </div>
-              </td>
-            </tr>
-          </tfoot>
         </table>
       </div>
+    `;
+  }
+
+  function buildReportTitleMarkup(snapshot) {
+    const reportLabel = buildUpspaceReportLabel(snapshot);
+    return `
+      <header class="ups-report-title-wrap">
+        <h1 class="ups-report-title" title="${escapeHtml(reportLabel)}">${escapeHtml(reportLabel)}</h1>
+      </header>
     `;
   }
 
@@ -523,23 +318,9 @@
     return `
       <div class="ibeta-report-scroll-shell">
         <article class="report-card ibeta-report-card">
-          <div class="card-head">
-            <div class="card-title-wrap">
-              <p class="card-title">${buildHeaderContextMarkup(snapshot)}</p>
-              <p class="card-subtitle">${escapeHtml(buildCardSubtitle(snapshot))}</p>
-            </div>
-            <div class="card-actions" aria-hidden="true">
-              <button type="button" class="card-close" tabindex="-1" aria-hidden="true" title="Close report card">
-                <svg class="card-close-icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                  <path d="M7 7 17 17" />
-                  <path d="M17 7 7 17" />
-                </svg>
-              </button>
-            </div>
-          </div>
+          ${buildReportTitleMarkup(snapshot)}
           <div class="card-body">
             ${buildTableMarkup(snapshot)}
-            ${buildCardColumnsMarkup(snapshot)}
           </div>
         </article>
       </div>
