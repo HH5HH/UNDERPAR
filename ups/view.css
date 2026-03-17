@@ -172,28 +172,15 @@ body {
     gap: 14px;
   }
 
-  .ibeta-report-scroll-shell {
-    overflow: visible;
-    scrollbar-gutter: auto;
-  }
-
-  .ibeta-report-card {
-    width: 100%;
-    min-width: 0;
-  }
-
   .ibeta-report-card .card-head {
     padding-right: 14px;
   }
 
-  .ibeta-report-card .esm-table-wrapper {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .ibeta-report-card .esm-table {
-    width: 100%;
-    min-width: 0;
+  .ibeta-report-scroll-shell {
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
   }
 }
 
@@ -346,150 +333,5 @@ body {
   .underpar-export-actions,
   .ibeta-print-btn {
     display: none !important;
-  }
-}
-
-@media screen and (max-width: 900px) {
-  .ibeta-report-scroll-shell {
-    overflow: visible;
-    scrollbar-gutter: auto;
-  }
-
-  .ibeta-report-card {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .ibeta-report-card .esm-table-wrapper {
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    max-height: none;
-    overflow: visible;
-  }
-
-  .ibeta-report-card .esm-table {
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    table-layout: fixed;
-    font-size: 13px;
-    border-collapse: separate;
-    border-spacing: 0;
-  }
-
-  .ibeta-report-card .esm-table thead {
-    display: none;
-  }
-
-  .ibeta-report-card .esm-table tfoot {
-    display: block;
-  }
-
-  .ibeta-report-card .esm-table tbody,
-  .ibeta-report-card .esm-table tfoot,
-  .ibeta-report-card .esm-table tfoot tr,
-  .ibeta-report-card .esm-table tfoot td {
-    display: block;
-    width: 100%;
-  }
-
-  .ibeta-report-card .esm-table tbody {
-    display: grid;
-    gap: 12px;
-    padding: 10px 10px 0;
-  }
-
-  .ibeta-report-card .esm-table tbody tr {
-    display: grid;
-    gap: 8px;
-    padding: 14px;
-    border: 1px solid color-mix(in srgb, var(--spectrum-gray-300) 76%, rgb(var(--zip-accent-900)) 24%);
-    border-radius: 14px;
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--spectrum-gray-25) 92%, rgb(var(--zip-accent-1000)) 8%),
-      color-mix(in srgb, var(--spectrum-gray-50) 94%, rgb(var(--zip-accent-900)) 6%)
-    );
-    box-shadow: 0 12px 26px rgba(120, 55, 0, 0.12);
-  }
-
-  .ibeta-report-card .esm-table td,
-  .ibeta-report-card .esm-table tfoot td {
-    display: grid;
-    grid-template-columns: minmax(112px, 0.9fr) minmax(0, 1.1fr);
-    gap: 12px;
-    align-items: start;
-    width: 100%;
-    padding: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--spectrum-gray-300) 80%, rgb(var(--zip-accent-900)) 20%);
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-    overflow-wrap: anywhere !important;
-    word-break: break-word !important;
-    hyphens: auto !important;
-    vertical-align: top;
-  }
-
-  .ibeta-report-card .esm-table tbody td:last-child,
-  .ibeta-report-card .esm-table tfoot td:last-child {
-    border-bottom: none;
-  }
-
-  .ibeta-report-card .esm-table td::before {
-    content: attr(data-column-label);
-    display: block;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: color-mix(in srgb, var(--legacy-muted) 42%, rgb(var(--zip-accent-900)) 58%);
-  }
-
-  .ibeta-report-card .esm-table td[data-is-primary="true"] {
-    display: block;
-    padding: 0 0 8px;
-    border-bottom-width: 1px;
-    font-size: 14px;
-    font-weight: 700;
-    line-height: 1.45;
-    color: color-mix(in srgb, var(--legacy-text) 90%, rgb(var(--zip-accent-900)) 10%);
-  }
-
-  .ibeta-report-card .esm-table td[data-is-primary="true"]::before {
-    margin-bottom: 4px;
-  }
-
-  .ibeta-report-card .esm-table tfoot td {
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid color-mix(in srgb, var(--spectrum-gray-300) 76%, rgb(var(--zip-accent-900)) 24%);
-    border-bottom: none;
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
-
-  .ibeta-report-card .esm-table tfoot td::before {
-    content: "Report Context";
-  }
-
-  .ibeta-report-card .card-col-list {
-    display: none;
-  }
-
-  .ibeta-report-card .esm-table thead th,
-  .ibeta-report-card .esm-table tfoot td {
-    position: static !important;
-  }
-
-  .ibeta-report-card .esm-table th,
-  .ibeta-report-card .esm-table td {
-    font-size: inherit;
-  }
-
-  .ibeta-report-card .esm-last-modified {
-    display: block;
-    white-space: normal;
   }
 }
