@@ -3,7 +3,8 @@ body {
 }
 
 .ibeta-app {
-  width: min(1560px, 100%);
+  width: 100%;
+  max-width: 1560px;
   min-height: 100vh;
   justify-content: center;
 }
@@ -13,10 +14,13 @@ body {
   justify-content: center;
   align-items: flex-start;
   min-height: calc(100vh - 36px);
+  width: 100%;
 }
 
 .ups-shell {
-  width: min(1420px, 100%);
+  width: 100%;
+  max-width: 1420px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -62,13 +66,13 @@ body {
   width: 100%;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-start;
   gap: 18px;
 }
 
 .ibeta-report-card {
-  width: min(1420px, 100%);
+  width: 100%;
   margin: 0;
 }
 
@@ -116,9 +120,61 @@ body {
   letter-spacing: 0.01em;
 }
 
+@media (max-width: 900px) {
+  .ibeta-app {
+    min-height: auto;
+  }
+
+  .ibeta-stage {
+    min-height: 0;
+  }
+
+  .ups-shell {
+    gap: 12px;
+  }
+
+  .ups-utility-bar {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 0 2px;
+  }
+
+  .ibeta-cards {
+    gap: 14px;
+  }
+
+  .ibeta-report-card .card-head {
+    padding-right: 14px;
+  }
+
+  .ibeta-report-card .esm-table-wrapper {
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ibeta-report-card .esm-table {
+    min-width: max-content;
+  }
+}
+
+@page {
+  size: landscape;
+  margin: 10mm;
+}
+
 @media print {
+  html,
+  body {
+    width: 100%;
+    min-height: 0;
+  }
+
   body {
     background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   body::before,
@@ -126,9 +182,21 @@ body {
     display: none !important;
   }
 
-  .workspace-app {
+  .workspace-app,
+  .ibeta-app,
+  .ibeta-stage,
+  .ups-shell,
+  .ibeta-cards,
+  .ibeta-report-card {
     width: 100%;
+    max-width: none !important;
+    min-height: 0;
+  }
+
+  .workspace-app,
+  .ibeta-app {
     padding: 0;
+    margin: 0;
   }
 
   .ups-utility-bar {
@@ -136,14 +204,92 @@ body {
   }
 
   .ibeta-stage {
+    display: block;
     min-height: 0;
   }
 
   .report-card {
     box-shadow: none !important;
     border-color: rgba(19, 37, 63, 0.2) !important;
+    overflow: visible !important;
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  .report-card::before {
+    display: none !important;
+  }
+
+  .card-head {
+    padding-right: 12px;
+  }
+
+  .card-url-context {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .card-url-query-cloud,
+  .card-col-columns,
+  .card-col-columns-wrap,
+  .col-chip-cloud {
+    justify-content: flex-start;
+    align-items: flex-start;
+    text-align: left;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .card-url-path-segment,
+  .card-url-query-chip,
+  .card-url-query-key,
+  .card-url-query-value,
+  .col-chip-label,
+  .col-chip-trigger,
+  .card-col-parent-url {
+    max-width: none !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    overflow-wrap: anywhere;
+  }
+
+  .ibeta-report-card .esm-table-wrapper {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .ibeta-report-card .esm-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+    font-size: 10.5px;
+  }
+
+  .ibeta-report-card .esm-table thead {
+    display: table-header-group;
+  }
+
+  .ibeta-report-card .esm-table tfoot {
+    display: table-footer-group;
+  }
+
+  .ibeta-report-card .esm-table thead th,
+  .ibeta-report-card .esm-table tfoot td {
+    position: static !important;
+  }
+
+  .ibeta-report-card .esm-table th,
+  .ibeta-report-card .esm-table td {
+    padding: 6px 8px;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    hyphens: auto;
+    vertical-align: top;
   }
 
   .underpar-export-actions,
