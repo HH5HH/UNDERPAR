@@ -56,12 +56,16 @@ test("ESM export surfaces use the orange service palette", () => {
   assert.match(upsViewCss, /\.ups-utility-link\s*\{[\s\S]*?color:\s*var\(--fg-primary,\s*rgb\(243,\s*117,\s*0\)\);/);
   assert.match(upsViewCss, /\.ibeta-report-scroll-shell\s*\{[\s\S]*overflow-x:\s*auto;[\s\S]*touch-action:\s*pan-x pan-y;/i);
   assert.match(upsViewCss, /\.ibeta-report-card\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/i);
-  assert.match(megWorkspaceCss, /--meg-focus:\s*rgb\(224,\s*100,\s*0\);/i);
-  assert.match(megWorkspaceCss, /--meg-saved-query-accent:\s*rgb\(243,\s*117,\s*0\);/i);
+  assert.match(megWorkspaceCss, /--meg-focus:\s*rgb\(0,\s*0,\s*0\);/i);
+  assert.match(megWorkspaceCss, /--meg-saved-query-accent:\s*rgb\(0,\s*0,\s*0\);/i);
   assert.match(megWorkspaceCss, /a:hover\s*\{[\s\S]*?text-decoration:\s*underline;/i);
   assert.match(
     megWorkspaceCss,
-    /--meg-theme-preview-modern:\s*linear-gradient\(180deg,\s*rgb\(92,\s*103,\s*125\)\s*0%,\s*rgb\(17,\s*17,\s*17\)\s*100%\);/i
+    /--meg-theme-preview-modern:\s*linear-gradient\(180deg,\s*(?:#111111|rgb\(17,\s*17,\s*17\))\s*0%,\s*(?:#f4f4f4|rgb\(244,\s*244,\s*244\))\s*100%\);/i
+  );
+  assert.match(
+    megWorkspaceCss,
+    /body\.meg-standalone-mode\[data-theme="modern"\]\s*\{[\s\S]*?--meg-button-border:\s*#000000;[\s\S]*?--meg-rerun-bg:\s*linear-gradient\(180deg,\s*#f4f4f4\s*0%,\s*#c7c7c7\s*100%\);[\s\S]*?--meg-rerun-text:\s*#000000;/i
   );
   assert.match(megWorkspaceJs, /applyTheme\(readStoredTheme\(\) \|\| "modern", \{ persist: false \}\);/);
   assert.match(blondieWorkspaceCss, /color-scheme:\s*dark;/i);
@@ -162,11 +166,23 @@ test("Popup UP tab shifts to light obsidian while the sidepanel keeps the gold s
   );
   assert.match(
     popupCss,
-    /\.service-esm \.esm-workspace-meg-select,\s*\.service-esm \.esm-workspace-meg-saved-select \{[\s\S]*?background:\s*#ffffff;[\s\S]*?color:\s*#000;/
+    /\.service-esm \.esm-workspace-meg-panel \{[\s\S]*?border:\s*2px solid #000000;[\s\S]*?border-radius:\s*0;/
   );
   assert.match(
     popupCss,
-    /\.service-esm \.esm-workspace-meg-open-btn \{[\s\S]*?background:\s*#000;[\s\S]*?color:\s*#ffffff;/
+    /\.service-esm \.esm-workspace-meg-body \{[\s\S]*?border-top:\s*2px solid #000000;/
+  );
+  assert.match(
+    popupCss,
+    /\.service-esm \.esm-workspace-meg-select,\s*\.service-esm \.esm-workspace-meg-saved-select \{[\s\S]*?border:\s*1px solid #000000;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*#ffffff;[\s\S]*?color:\s*#000000;/
+  );
+  assert.match(
+    popupCss,
+    /\.service-esm \.esm-workspace-meg-open-btn \{[\s\S]*?border:\s*1px solid #000000;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*linear-gradient\(180deg,\s*#f4f4f4\s*0%,\s*#c7c7c7\s*100%\);[\s\S]*?color:\s*#000000;/
+  );
+  assert.match(
+    popupCss,
+    /\.service-esm \.esm-workspace-meg-toggle:focus-visible,\s*\.service-esm \.esm-workspace-meg-select:focus-visible,\s*\.service-esm \.esm-workspace-meg-saved-select:focus-visible,\s*\.service-esm \.esm-workspace-meg-open-btn:focus-visible \{[\s\S]*?outline:\s*2px solid #000000;[\s\S]*?outline-offset:\s*2px;/
   );
 });
 
