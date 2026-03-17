@@ -444,12 +444,16 @@
   }
 
   function buildTableBodyMarkup(snapshot) {
+    const headers = Array.isArray(snapshot?.table?.headers) ? snapshot.table.headers : [];
     const rows = Array.isArray(snapshot?.table?.rows) ? snapshot.table.rows : [];
     return rows
       .map((row) => {
-        const cells = (Array.isArray(row) ? row : []).map((value) => {
+        const cells = (Array.isArray(row) ? row : []).map((value, index) => {
           const text = String(value ?? "");
-          return `<td title="${escapeHtml(text)}">${escapeHtml(text)}</td>`;
+          const headerText = String(headers[index] ?? `Column ${index + 1}`).trim() || `Column ${index + 1}`;
+          return `<td title="${escapeHtml(text)}" data-column-label="${escapeHtml(headerText)}" data-is-primary="${
+            index === 0 ? "true" : "false"
+          }">${escapeHtml(text)}</td>`;
         });
         return `<tr>${cells.join("")}</tr>`;
       })

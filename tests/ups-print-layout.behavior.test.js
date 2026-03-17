@@ -38,6 +38,13 @@ test("UPSpace live layout expands to report width without truncating mobile data
   assert.match(source, /\.ibeta-report-card\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/i);
   assert.match(source, /\.ibeta-report-card \.esm-table-wrapper\s*\{[\s\S]*overflow:\s*visible;/i);
   assert.match(source, /\.ibeta-report-card \.esm-table\s*\{[\s\S]*width:\s*max-content;[\s\S]*min-width:\s*100%;/i);
+  assert.match(source, /@media screen and \(max-width:\s*900px\)[\s\S]*\.ibeta-report-scroll-shell\s*\{[\s\S]*overflow:\s*visible;/i);
+  assert.match(source, /@media screen and \(max-width:\s*900px\)[\s\S]*\.ibeta-report-card\s*\{[\s\S]*width:\s*100%;[\s\S]*min-width:\s*0;/i);
+  assert.match(source, /@media screen and \(max-width:\s*900px\)[\s\S]*\.ibeta-report-card \.esm-table thead\s*\{[\s\S]*display:\s*none;/i);
+  assert.match(source, /@media screen and \(max-width:\s*900px\)[\s\S]*\.ibeta-report-card \.esm-table tbody tr\s*\{[\s\S]*display:\s*grid;/i);
+  assert.match(source, /@media screen and \(max-width:\s*900px\)[\s\S]*\.ibeta-report-card \.esm-table td::before\s*\{[\s\S]*content:\s*attr\(data-column-label\);/i);
   assert.match(workspaceSource, /\.esm-table th,[\s\S]*\.esm-table td \{[\s\S]*overflow:\s*visible;[\s\S]*text-overflow:\s*clip;/i);
   assert.match(runtimeSource, /<div class="ibeta-report-scroll-shell">/);
+  assert.match(runtimeSource, /data-column-label="\$\{escapeHtml\(headerText\)\}"/);
+  assert.match(runtimeSource, /data-is-primary="\$\{[\s\S]*index === 0 \? "true" : "false"[\s\S]*\}"/);
 });
