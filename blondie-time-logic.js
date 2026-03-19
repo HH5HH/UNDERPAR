@@ -527,25 +527,81 @@
     return "Unknown";
   }
 
+  function formatMetricWarningRange(metricKey = "", lowValue = null, highValue = null) {
+    const low = toNumber(lowValue);
+    const high = toNumber(highValue);
+    if (low == null && high == null) {
+      return "—";
+    }
+    const isLatencyMetric = String(metricKey || "").trim() === "latency";
+    const unitSuffix = isLatencyMetric ? " ms" : "%";
+    const formatValue = (value) => (value == null ? "—" : Number(value).toFixed(2));
+    if (low == null || high == null || low === high) {
+      return `${formatValue(low ?? high)}${unitSuffix}`;
+    }
+    return isLatencyMetric
+      ? `${formatValue(low)}-${formatValue(high)}${unitSuffix}`
+      : `${formatValue(low)}%-${formatValue(high)}%`;
+  }
+
   function buildMetricWarningValues(analysis = null, metricKey = "") {
     if (!analysis || typeof analysis !== "object" || !metricKey) {
       return [];
     }
-    const values = [];
-    const seen = new Set();
+    const groups = new Map();
     (Array.isArray(analysis.offendingRows) ? analysis.offendingRows : []).forEach((row) => {
       const hits = Array.isArray(row?.__btThresholdHits) ? row.__btThresholdHits : [];
       const matchedHit = hits.find((hit) => String(hit?.key || "").trim() === metricKey);
       if (!matchedHit) {
         return;
       }
-      const label = `${getOffenderLabel(row)}(${String(matchedHit.displayValue || "").trim() || "—"})`;
-      if (seen.has(label)) {
-        return;
+      const offenderLabel = getOffenderLabel(row);
+      const groupKey = offenderLabel.toLowerCase();
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = {
+          label: offenderLabel,
+          count: 0,
+          lowValue: null,
+          highValue: null,
+          displayValues: [],
+        };
+        groups.set(groupKey, group);
       }
-      seen.add(label);
-      values.push(label);
+      group.count += 1;
+      const numericValue = toNumber(matchedHit.value);
+      if (numericValue != null) {
+        group.lowValue = group.lowValue == null ? numericValue : Math.min(group.lowValue, numericValue);
+        group.highValue = group.highValue == null ? numericValue : Math.max(group.highValue, numericValue);
+      }
+      const displayValue = String(matchedHit.displayValue || "").trim();
+      if (displayValue && !group.displayValues.includes(displayValue)) {
+        group.displayValues.push(displayValue);
+      }
     });
+    const isLatencyMetric = String(metricKey || "").trim() === "latency";
+    const summaryLimit = 5;
+    const orderedGroups = Array.from(groups.values()).sort((left, right) => {
+      const leftWorst = left[isLatencyMetric ? "highValue" : "lowValue"];
+      const rightWorst = right[isLatencyMetric ? "highValue" : "lowValue"];
+      if (leftWorst != null && rightWorst != null && leftWorst !== rightWorst) {
+        return isLatencyMetric ? rightWorst - leftWorst : leftWorst - rightWorst;
+      }
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+      return left.label.localeCompare(right.label);
+    });
+    const values = orderedGroups.slice(0, summaryLimit).map((group) => {
+      const fallbackDisplayValue = group.displayValues[0] || "—";
+      if (group.count <= 1) {
+        return `${group.label}(${fallbackDisplayValue})`;
+      }
+      return `${group.label}(${group.count} rows, ${formatMetricWarningRange(metricKey, group.lowValue, group.highValue)})`;
+    });
+    if (orderedGroups.length > summaryLimit) {
+      values.push(`+${orderedGroups.length - summaryLimit} more`);
+    }
     return values;
   }
 
@@ -566,11 +622,11 @@
     const authzWarnings = buildMetricWarningValues(analysis, "authz");
     return [
       `Pass: Avg MVPD response times: ${formatLatency(summary.liveAverageLatencyMs ?? summary.averageLatencyMs)}`,
-      ...(latencyWarnings.length > 0 ? [`NOTE: Warning levels for latency ${latencyWarnings.join(" ")}`] : []),
+      ...(latencyWarnings.length > 0 ? [`NOTE: Warning levels for latency ${latencyWarnings.join(" | ")}`] : []),
       `Pass: Avg AuthN successful conversions %: ${formatPercent(summary.liveAverageAuthnSuccessPercent ?? summary.averageAuthnSuccessPercent)}`,
-      ...(authnWarnings.length > 0 ? [`NOTE: Warning levels for authN ${authnWarnings.join(" ")}`] : []),
+      ...(authnWarnings.length > 0 ? [`NOTE: Warning levels for authN ${authnWarnings.join(" | ")}`] : []),
       `Pass: Avg AuthZ successful conversions %: ${formatPercent(summary.liveAverageAuthzSuccessPercent ?? summary.averageAuthzSuccessPercent)}`,
-      ...(authzWarnings.length > 0 ? [`NOTE: Warning levels for authZ ${authzWarnings.join(" ")}`] : []),
+      ...(authzWarnings.length > 0 ? [`NOTE: Warning levels for authZ ${authzWarnings.join(" | ")}`] : []),
       `Threshold results: Returned ${Math.max(0, Number(analysis.totalRows || 0))} | Eligible ${Math.max(0, Number(summary.eligibleRows || analysis.eligibleRows || 0))} | Offending ${Math.max(
         0,
         Number(summary.offendingRows || 0)

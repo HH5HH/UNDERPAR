@@ -958,10 +958,21 @@ body::before {
   background: var(--bt-panel-muted);
 }
 
+.bt-table-scroll--offenders {
+  border-color: rgba(var(--bt-vcr-stop-900), 0.26);
+  background:
+    linear-gradient(180deg, rgba(var(--bt-vcr-stop-500), 0.1), rgba(27, 27, 27, 0.98)),
+    var(--bt-panel-muted);
+}
+
 .bt-table {
   width: 100%;
   min-width: 980px;
   border-collapse: collapse;
+}
+
+.bt-table--offenders {
+  min-width: 860px;
 }
 
 .bt-table thead th {

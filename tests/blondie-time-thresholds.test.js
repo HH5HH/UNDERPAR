@@ -150,6 +150,58 @@ test("slack summary lines preserve legacy pass averages and explicit threshold w
   assert.match(lines[10], /Avg latency low\/avg\/high:/);
 });
 
+test("slack summary lines collapse repeated offender rows into a single ranged warning entry", () => {
+  const analysis = logic.analyzeRows(
+    [
+      {
+        mvpd: "Verizon",
+        "authn-attempts": "100",
+        "authn-successful": "35",
+        "authz-attempts": "90",
+        "authz-successful": "75",
+        "authz-latency": "300000",
+      },
+      {
+        mvpd: "Verizon",
+        "authn-attempts": "100",
+        "authn-successful": "37",
+        "authz-attempts": "90",
+        "authz-successful": "76",
+        "authz-latency": "320000",
+      },
+      {
+        mvpd: "Verizon",
+        "authn-attempts": "100",
+        "authn-successful": "39",
+        "authz-attempts": "90",
+        "authz-successful": "77",
+        "authz-latency": "340000",
+      },
+      {
+        mvpd: "Healthy",
+        "authn-attempts": "180",
+        "authn-successful": "140",
+        "authz-attempts": "150",
+        "authz-successful": "130",
+        "authz-latency": "420000",
+      },
+    ],
+    {
+      minAuthnAttempts: 100,
+      authnSuccessMin: 40,
+      authzSuccessMin: 10,
+      latencyMaxMs: 10000,
+    }
+  );
+
+  const lines = logic.toSlackSummaryLines(analysis);
+  const authnWarningLine = lines.find((line) => line.startsWith("NOTE: Warning levels for authN "));
+
+  assert.ok(authnWarningLine);
+  assert.equal((authnWarningLine.match(/Verizon\(/g) || []).length, 1);
+  assert.match(authnWarningLine, /Verizon\(3 rows, 35\.00%-39\.00%\)/);
+});
+
 test("slack summary lines always report clean threshold state when there are no offenders", () => {
   const analysis = logic.analyzeRows(
     [

@@ -882,6 +882,105 @@ function getThresholdHitMarkup(hits = []) {
     .join("")}</div>`;
 }
 
+function buildOffendingRowsContextColumns(cardState) {
+  const displayColumns = Array.isArray(cardState?.displayColumns) ? cardState.displayColumns : [];
+  const excludedColumns = new Set([
+    "year",
+    "month",
+    "day",
+    "hour",
+    "minute",
+    "authn-attempts",
+    "authn-successful",
+    "authz-attempts",
+    "authz-successful",
+    "authz-latency",
+  ]);
+  const preferredColumns = ["mvpd", "requestor-id", "proxy", "channel", "resource-id", "service-provider", "site-name", "partner"];
+  const output = [];
+  const seen = new Set();
+  const pushColumn = (column) => {
+    const label = String(column || "").trim();
+    const normalized = label.toLowerCase();
+    if (!label || excludedColumns.has(normalized) || seen.has(normalized) || output.length >= 4) {
+      return;
+    }
+    seen.add(normalized);
+    output.push(label);
+  };
+  preferredColumns.forEach((column) => {
+    const match = displayColumns.find((entry) => String(entry || "").trim().toLowerCase() === column);
+    if (match) {
+      pushColumn(match);
+    }
+  });
+  displayColumns.forEach((column) => {
+    pushColumn(column);
+  });
+  return output;
+}
+
+function buildOffendingRowTableCellMarkup(row = null, columnKey = "", metrics = null) {
+  const key = String(columnKey || "").trim();
+  const source = row && typeof row === "object" ? row : {};
+  const resolvedMetrics = metrics && typeof metrics === "object" ? metrics : BLONDIE_TIME_LOGIC.computeRowMetrics(source);
+  if (key === "__date") {
+    return escapeHtml(buildEsmDateLabel(source));
+  }
+  if (key === "__authnSuccess") {
+    return escapeHtml(formatPercent(resolvedMetrics.authnSuccessPercent));
+  }
+  if (key === "__authzSuccess") {
+    return escapeHtml(formatPercent(resolvedMetrics.authzSuccessPercent));
+  }
+  if (key === "__avgLatency") {
+    return escapeHtml(formatLatency(resolvedMetrics.avgLatencyMs));
+  }
+  if (key === "__hits") {
+    return getThresholdHitMarkup(source.__btThresholdHits);
+  }
+  if (key === "authn-attempts") {
+    return escapeHtml(formatInteger(resolvedMetrics.authnAttempts ?? source["authn-attempts"]));
+  }
+  return escapeHtml(source[key] == null || String(source[key]).trim() === "" ? "—" : String(source[key]));
+}
+
+function buildOffendingRowsTableMarkup(cardState) {
+  const offendingRows = Array.isArray(cardState?.offendingRows) ? cardState.offendingRows : [];
+  if (offendingRows.length === 0) {
+    return `<p class="bt-card-empty">No offending rows are active in this interval.</p>`;
+  }
+  const contextColumns = buildOffendingRowsContextColumns(cardState);
+  const columns = [
+    { key: "__date", label: "DATE" },
+    ...contextColumns.map((column) => ({ key: column, label: column })),
+    { key: "authn-attempts", label: "AuthN Attempts" },
+    { key: "__authnSuccess", label: "AuthN Success" },
+    { key: "__authzSuccess", label: "AuthZ Success" },
+    { key: "__avgLatency", label: "Avg AuthZ Latency" },
+    { key: "__hits", label: "Threshold Hits" },
+  ];
+  const headerMarkup = columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("");
+  const rowMarkup = offendingRows
+    .map((row) => {
+      const metrics = row?.__btMetrics && typeof row.__btMetrics === "object" ? row.__btMetrics : BLONDIE_TIME_LOGIC.computeRowMetrics(row);
+      return `<tr>${columns
+        .map((column) => `<td>${buildOffendingRowTableCellMarkup(row, column.key, metrics)}</td>`)
+        .join("")}</tr>`;
+    })
+    .join("");
+  return `
+    <div class="bt-table-scroll bt-table-scroll--offenders">
+      <table class="bt-table bt-table--offenders">
+        <thead>
+          <tr>${headerMarkup}</tr>
+        </thead>
+        <tbody>${rowMarkup}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 function sortOffendingRows(rows = []) {
   return [...(Array.isArray(rows) ? rows : [])].sort((left, right) => {
     const leftHitCount = Array.isArray(left?.__btThresholdHits) ? left.__btThresholdHits.length : 0;
@@ -1174,13 +1273,14 @@ function renderCard(cardState) {
   const overviewMarkup = buildOverviewCards(cardState.analysis);
   const currentStateMarkup = buildCurrentStateCards(cardState.analysis?.summary || {});
   const thresholdStatusMarkup = buildThresholdStatusCards(cardState.analysis);
+  const offendingRowsMarkup = buildOffendingRowsTableMarkup(cardState);
   const hitCount = Math.max(0, Number(cardState.analysis?.summary?.offendingRows || 0));
   const analysisStatusMarkup =
     hitCount > 0
       ? `<p class="bt-card-status bt-card-status--alert">Investigation is needed. ${formatInteger(
           hitCount
-        )} row(s) in the current interval are violating one or more BT thresholds. The attached Blondie CSV contains the raw ESM interval snapshot for drilldown.</p>`
-      : `<p class="bt-card-status">No active threshold violations in the current eligible dataset. BT_WS is showing translated analysis only while the raw interval dataset remains available through the Blondie CSV attachment.</p>`;
+        )} row(s) in the current interval are violating one or more BT thresholds. The exact offending rows are shown below for immediate triage, and the attached Blondie CSV still carries the full raw ESM interval snapshot.</p>`
+      : `<p class="bt-card-status">No active threshold violations in the current eligible dataset. BT_WS is showing translated analysis and will only render the offending-row drilldown when hits exist.</p>`;
   const article = document.createElement("article");
   article.className = "bt-analysis-card";
   article.dataset.cardId = String(cardState.cardId || "");
@@ -1221,11 +1321,22 @@ function renderCard(cardState) {
       <section class="bt-analysis-section" aria-label="Threshold results">
         <div class="bt-analysis-section-head">
           <h3 class="bt-analysis-section-title">Threshold Results</h3>
-          <p class="bt-analysis-section-copy">Fully translated threshold outcomes for the current interval, without the raw ESM row table.</p>
+          <p class="bt-analysis-section-copy">Translated threshold outcomes for the current interval. The offender drilldown below shows the exact failing rows only.</p>
         </div>
         <div class="bt-threshold-status-grid">
           ${thresholdStatusMarkup}
         </div>
+      </section>
+      <section class="bt-analysis-section" aria-label="Offending rows">
+        <div class="bt-analysis-section-head">
+          <h3 class="bt-analysis-section-title">Offending Rows</h3>
+          <p class="bt-analysis-section-copy">${
+            hitCount > 0
+              ? `Showing ${escapeHtml(formatInteger(hitCount))} exact offending row(s) for immediate triage. The Blondie CSV remains the full raw interval snapshot.`
+              : "No rows are currently violating the Blondie Time thresholds."
+          }</p>
+        </div>
+        ${offendingRowsMarkup}
       </section>
       <div class="bt-analysis-footer">
         <div class="bt-footer-grid">
