@@ -46306,7 +46306,6 @@ function degradationBuildCheatSheetCommands(panelState, context = {}) {
     return [
       methodPrefix,
       authHeader,
-      `-H ${quoteCurlDoubleQuoted(`api_version: ${DEGRADATION_API_VERSION}`)}`,
       quoteCurlDoubleQuoted(requestUrl),
     ].join(" ");
   };
@@ -47122,7 +47121,6 @@ async function degradationBuildCurlCommand(panelState, options = {}) {
   return [
     "curl -X GET",
     `-H ${quoteCurlDoubleQuoted(`Authorization: Bearer ${String(accessToken || "").trim()}`)}`,
-    `-H ${quoteCurlDoubleQuoted(`api_version: ${DEGRADATION_API_VERSION}`)}`,
     quoteCurlDoubleQuoted(requestUrl),
   ].join(" ");
 }
@@ -49209,10 +49207,10 @@ function resetWorkflowForLoggedOut() {
   els.mediaCompanySelect.innerHTML = '<option value="">-- Please login first --</option>';
 
   els.requestorSelect.disabled = true;
-  els.requestorSelect.innerHTML = '<option value="">-- Select a Media Company first --</option>';
+  els.requestorSelect.innerHTML = '<option value=""></option>';
 
   els.mvpdSelect.disabled = true;
-  els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
+  els.mvpdSelect.innerHTML = '<option value=""></option>';
 
   renderPremiumServices(null);
 }
@@ -55581,10 +55579,10 @@ function populateMediaCompanySelect() {
   syncMediaCompanySelectAvailability();
 
   els.requestorSelect.disabled = true;
-  els.requestorSelect.innerHTML = '<option value="">-- Select a Media Company first --</option>';
+  els.requestorSelect.innerHTML = '<option value=""></option>';
 
   els.mvpdSelect.disabled = true;
-  els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
+  els.mvpdSelect.innerHTML = '<option value=""></option>';
   syncGlobalQuickLaunchButtons();
   renderPremiumServices(null);
   refreshRestV2LoginPanels();
@@ -55607,7 +55605,7 @@ function populateRequestorSelect() {
   els.requestorSelect.innerHTML = "";
   const defaultOption = document.createElement("option");
   defaultOption.value = "";
-  defaultOption.textContent = "-- Choose a Content Provider --";
+  defaultOption.textContent = "";
   els.requestorSelect.appendChild(defaultOption);
 
   for (const requestorId of requestorIds) {
@@ -55620,7 +55618,7 @@ function populateRequestorSelect() {
   els.requestorSelect.disabled = requestorIds.length === 0;
 
   els.mvpdSelect.disabled = true;
-  els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
+  els.mvpdSelect.innerHTML = '<option value=""></option>';
   syncGlobalQuickLaunchButtons();
   refreshRestV2LoginPanels();
   refreshMvpdWorkspaceTools();
@@ -55949,10 +55947,12 @@ async function refreshProgrammerPanels(options = {}) {
           return;
         }
         const currentServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || runtimeServices;
+        const resolvedCmService = results[0]?.status === "fulfilled" ? results[0].value : null;
+        const resolvedCmMvpdService = results[1]?.status === "fulfilled" ? results[1].value : null;
         const mergedServices = {
           ...(currentServices && typeof currentServices === "object" ? currentServices : {}),
-          cm: currentServices?.cm ?? (results[0]?.status === "fulfilled" ? results[0].value : null),
-          cmMvpd: currentServices?.cmMvpd ?? (results[1]?.status === "fulfilled" ? results[1].value : null),
+          cm: selectPreferredCmRuntimeService(currentServices?.cm, resolvedCmService),
+          cmMvpd: selectPreferredCmRuntimeService(currentServices?.cmMvpd, resolvedCmMvpdService),
           cmMvpdSelectionKey,
         };
         setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
@@ -61671,6 +61671,55 @@ function shouldRetryCachedCmService(cmService) {
   return cachedFingerprint !== currentFingerprint;
 }
 
+function selectPreferredCmRuntimeService(currentService = null, resolvedService = null) {
+  const current =
+    currentService && typeof currentService === "object" && !Array.isArray(currentService) ? currentService : null;
+  const resolved =
+    resolvedService && typeof resolvedService === "object" && !Array.isArray(resolvedService) ? resolvedService : null;
+
+  if (!resolved) {
+    return current;
+  }
+  if (!current) {
+    return resolved;
+  }
+
+  const currentVisible = shouldShowCmService(current);
+  const resolvedVisible = shouldShowCmService(resolved);
+  if (resolvedVisible && !currentVisible) {
+    return resolved;
+  }
+  if (!resolvedVisible && currentVisible) {
+    return current;
+  }
+
+  const currentRetry = shouldRetryCachedCmService(current);
+  const resolvedRetry = shouldRetryCachedCmService(resolved);
+  if (currentRetry && !resolvedRetry) {
+    return resolved;
+  }
+  if (!currentRetry && resolvedRetry) {
+    return current;
+  }
+
+  const currentLoadError = String(current.loadError || "").trim();
+  const resolvedLoadError = String(resolved.loadError || "").trim();
+  if (currentLoadError && !resolvedLoadError) {
+    return resolved;
+  }
+  if (!currentLoadError && resolvedLoadError) {
+    return current;
+  }
+
+  const currentFetchedAt = Number(current.fetchedAt || 0);
+  const resolvedFetchedAt = Number(resolved.fetchedAt || 0);
+  if (resolvedFetchedAt > currentFetchedAt) {
+    return resolved;
+  }
+
+  return current;
+}
+
 function isCmRuntimeRenderReady(cmService = null) {
   if (!shouldShowCmService(cmService)) {
     return true;
@@ -65736,7 +65785,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
 
   if (!requestorId) {
     els.mvpdSelect.disabled = true;
-    els.mvpdSelect.innerHTML = '<option value="">-- Select Requestor first --</option>';
+    els.mvpdSelect.innerHTML = '<option value=""></option>';
     state.selectedMvpdId = "";
     syncGlobalQuickLaunchButtons();
     refreshRestV2LoginPanels();
@@ -65778,7 +65827,7 @@ async function populateMvpdSelectForRequestor(requestorId) {
 
     const defaultOption = document.createElement("option");
     defaultOption.value = "";
-    defaultOption.textContent = "-- Choose an MVPD --";
+    defaultOption.textContent = "";
     els.mvpdSelect.appendChild(defaultOption);
 
     const entries = [...merged.entries()].sort((a, b) => {

@@ -1758,6 +1758,15 @@ body[aria-busy="true"] .auth-btn::before {
   min-width: 0;
 }
 
+.selector-quick-launch-spacer {
+  grid-column: 2;
+  justify-self: center;
+  width: 32px;
+  height: 32px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .selector-quick-launch-btn {
   grid-column: 2;
   justify-self: center;

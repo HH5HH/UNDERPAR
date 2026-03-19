@@ -306,11 +306,16 @@ test("environment restore lets the premium panel path own PassVault hydration", 
 test("selected media company refresh primes CM tenant precheck before CM service matching", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+  const selectPreferredCmRuntimeServiceSource = extractFunctionSource(popupSource, "selectPreferredCmRuntimeService");
 
   assert.match(refreshPanelsSource, /ensureCmTenantsPrecheckForActiveSession\(`panel-selection:\$\{programmer\.programmerId\}`/);
   assert.match(refreshPanelsSource, /allowTemporaryPageContextTab:\s*true/);
   assert.match(refreshPanelsSource, /const cmServicePromise = Promise\.resolve\(cmSelectionBootstrapPromise\)/);
   assert.match(refreshPanelsSource, /const cmMvpdServicePromise = Promise\.resolve\(cmSelectionBootstrapPromise\)/);
+  assert.match(refreshPanelsSource, /selectPreferredCmRuntimeService\(currentServices\?\.cm,\s*resolvedCmService\)/);
+  assert.match(refreshPanelsSource, /selectPreferredCmRuntimeService\(currentServices\?\.cmMvpd,\s*resolvedCmMvpdService\)/);
+  assert.match(selectPreferredCmRuntimeServiceSource, /resolvedVisible && !currentVisible/);
+  assert.match(selectPreferredCmRuntimeServiceSource, /currentRetry && !resolvedRetry/);
 });
 
 test("environment switch reactivation allows temporary CM bootstrap context recovery", () => {
@@ -607,7 +612,29 @@ test("sidepanel requestor picker spans the same full workflow width as media com
   const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
 
   assert.match(sidepanelHtml, /<div class="field field--requestor">/);
+  assert.match(sidepanelHtml, /<div class="picker-action-row requestor-select-row">/);
+  assert.match(sidepanelHtml, /class="selector-quick-launch-spacer"/);
   assert.match(popupCss, /\.workflow > \.field--requestor\s*\{\s*grid-column:\s*1 \/ -1;\s*\}/);
+  assert.match(
+    popupCss,
+    /\.selector-quick-launch-spacer\s*\{[\s\S]*?grid-column:\s*2;[\s\S]*?width:\s*32px;[\s\S]*?visibility:\s*hidden;/i
+  );
+});
+
+test("requestor and MVPD selectors ship blank default options instead of placeholder copy", () => {
+  const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
+  const popupHtml = fs.readFileSync(path.join(ROOT, "popup.html"), "utf8");
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+
+  assert.match(sidepanelHtml, /id="requestor-select" disabled>\s*<option value=""><\/option>/);
+  assert.match(sidepanelHtml, /id="mvpd-select" disabled>\s*<option value=""><\/option>/);
+  assert.match(popupHtml, /id="requestor-select" disabled>\s*<option value=""><\/option>/);
+  assert.match(popupHtml, /id="mvpd-select" disabled>\s*<option value=""><\/option>/);
+  assert.match(popupSource, /els\.requestorSelect\.innerHTML = '<option value=""><\/option>';/);
+  assert.match(popupSource, /els\.mvpdSelect\.innerHTML = '<option value=""><\/option>';/);
+  assert.match(popupSource, /defaultOption\.textContent = "";/);
+  assert.doesNotMatch(popupSource, /-- Choose a Content Provider --/);
+  assert.doesNotMatch(popupSource, /-- Choose an MVPD --/);
 });
 
 test("sidepanel exposes LoginButton-style DEBUG INFO controls backed by popup runtime state", () => {

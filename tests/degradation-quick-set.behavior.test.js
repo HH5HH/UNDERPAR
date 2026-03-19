@@ -54,7 +54,7 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(popupSource, /-d \$\{quoteCurlDoubleQuoted\(tokenRequestBody\)\}/);
   assert.doesNotMatch(popupSource, /-H "Content-Type: application\/x-www-form-urlencoded"/);
   assert.match(popupSource, /-H "Authorization: Bearer \$DGR_ACCESS_TOKEN"/);
-  assert.match(popupSource, /quoteCurlDoubleQuoted\(`api_version: \$\{DEGRADATION_API_VERSION\}`\)/);
+  assert.doesNotMatch(popupSource, /quoteCurlDoubleQuoted\(`api_version: \$\{DEGRADATION_API_VERSION\}`\)/);
   assert.ok(cheatSheetSpecBlock, "expected cheat-sheet call inventory to be declared");
   assert.deepEqual(cheatSheetKeys, [
     "get-all",

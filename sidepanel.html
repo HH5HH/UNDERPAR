@@ -101,16 +101,19 @@
 
           <div class="field field--requestor">
             <label for="requestor-select">Content Provider (RequestorId)</label>
-            <select id="requestor-select" disabled>
-              <option value="">-- Select a Media Company first --</option>
-            </select>
+            <div class="picker-action-row requestor-select-row">
+              <select id="requestor-select" disabled>
+                <option value=""></option>
+              </select>
+              <span class="selector-quick-launch-spacer" aria-hidden="true"></span>
+            </div>
           </div>
 
           <div class="field field--mvpd">
             <label for="mvpd-select">MVPD</label>
             <div class="picker-action-row mvpd-select-row">
               <select id="mvpd-select" disabled>
-                <option value="">-- Select Requestor first --</option>
+                <option value=""></option>
               </select>
               <button
                 id="mvpd-workspace-launch-btn"
