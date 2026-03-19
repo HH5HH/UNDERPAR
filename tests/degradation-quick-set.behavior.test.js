@@ -40,6 +40,9 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(popupSource, /"cheat-sheet-start"/);
   assert.match(popupSource, /"cheat-sheet-progress"/);
   assert.match(popupSource, /"cheat-sheet-error"/);
+  assert.match(popupSource, /function buildDegradationCheatSheetTokenBootstrap\(/);
+  assert.match(popupSource, /grant_type=client_credentials/);
+  assert.match(popupSource, /DGR_ACCESS_TOKEN/);
   assert.match(popupSource, /void degradationWorkspaceSendWorkspaceMessage\("cheat-sheet-result"/);
   assert.match(popupSource, /click CHEAT again to mint a new bearer token/);
   assert.ok(cheatSheetSpecBlock, "expected cheat-sheet call inventory to be declared");
@@ -64,6 +67,9 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(workspaceSource, /function handleCheatSheetStart\(/);
   assert.match(workspaceSource, /function handleCheatSheetError\(/);
   assert.match(workspaceSource, /Generating DEGRADATION Cheat Sheet/);
+  assert.match(workspaceSource, /masterCopyText/);
+  assert.match(workspaceSource, /Fresh Token Bootstrap/);
+  assert.match(workspaceSource, /full DEGRADATION setup and command chain/);
   assert.match(workspaceSource, /event === "cheat-sheet-start"/);
   assert.match(workspaceSource, /event === "cheat-sheet-progress"/);
   assert.match(workspaceSource, /event === "cheat-sheet-error"/);

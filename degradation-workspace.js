@@ -388,6 +388,8 @@ function normalizeCheatSheet(payload = null) {
     tokenExpiresLabel: String(payload.tokenExpiresLabel || "unknown").trim(),
     liveRowCount: Math.max(0, Number(payload.liveRowCount || 0)),
     callCount: Math.max(0, Number(payload.callCount || calls.length || 0)),
+    tokenSetupScript: String(payload.tokenSetupScript || "").trim(),
+    masterCopyText: String(payload.masterCopyText || "").trim(),
     setupItems: (Array.isArray(payload.setupItems) ? payload.setupItems : []).map((item) => String(item || "").trim()).filter(Boolean),
     calls,
   };
@@ -531,13 +533,15 @@ async function copyCheatSheetAllCommands(cheatSheetId = "") {
     setStatus("Cheat sheet is unavailable.", "error");
     return;
   }
-  const combined = (Array.isArray(cheatSheet.calls) ? cheatSheet.calls : [])
-    .map((call) => String(call?.command || "").trim())
-    .filter(Boolean)
-    .join("\n\n");
+  const combined =
+    String(cheatSheet.masterCopyText || "").trim() ||
+    (Array.isArray(cheatSheet.calls) ? cheatSheet.calls : [])
+      .map((call) => String(call?.command || "").trim())
+      .filter(Boolean)
+      .join("\n\n");
   const copied = await copyTextToClipboard(combined);
   if (copied) {
-    setStatus("Copied all DEGRADATION cURL commands.", "success");
+    setStatus("Copied the full DEGRADATION setup and command chain.", "success");
   } else {
     setStatus("Unable to copy the DEGRADATION cheat sheet.", "error");
   }
@@ -1052,6 +1056,7 @@ function renderCheatSheetCard(cheatSheet = null) {
     return "";
   }
   const setupItems = Array.isArray(cheatSheet.setupItems) ? cheatSheet.setupItems : [];
+  const tokenSetupScript = String(cheatSheet.tokenSetupScript || "").trim();
   const callsMarkup = (Array.isArray(cheatSheet.calls) ? cheatSheet.calls : [])
     .map((call) => renderCheatSheetCallCard(cheatSheet, call))
     .join("");
@@ -1070,8 +1075,8 @@ function renderCheatSheetCard(cheatSheet = null) {
               class="degradation-cheat-action-btn"
               data-action="copy-cheat-all"
               data-cheat-sheet-id="${escapeHtml(String(cheatSheet.cheatSheetId || ""))}"
-              title="Copy all DEGRADATION cURL commands to clipboard"
-              aria-label="Copy all DEGRADATION cURL commands to clipboard"
+              title="Copy the full DEGRADATION setup and command chain to clipboard"
+              aria-label="Copy the full DEGRADATION setup and command chain to clipboard"
             >Copy to Clipboard</button>
           </div>
         </div>
@@ -1088,6 +1093,14 @@ function renderCheatSheetCard(cheatSheet = null) {
           ${setupItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
         </ol>
       </section>
+      ${
+        tokenSetupScript
+          ? `<section class="degradation-cheat-setup-shell">
+        <p class="degradation-cheat-setup-kicker">Fresh Token Bootstrap</p>
+        <pre class="degradation-cheat-command-block">${escapeHtml(tokenSetupScript)}</pre>
+      </section>`
+          : ""
+      }
       <section class="degradation-cheat-call-grid">
         ${callsMarkup}
       </section>

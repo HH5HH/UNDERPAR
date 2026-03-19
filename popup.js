@@ -45112,26 +45112,73 @@ function degradationBuildCheatSheetFallbackCoverage(error = null) {
 
 function degradationBuildCheatSheetCommands(panelState, context = {}) {
   const accessToken = String(context.accessToken || "").trim();
-  return DEGRADATION_CHEAT_SHEET_CALL_SPECS.map((callSpec) => {
-    const requestUrl = degradationBuildCheatSheetRequestUrl(panelState, callSpec, context);
-    const commandLines = [
+  const buildCommandLines = (requestUrl, callSpec, options = {}) => {
+    const useFreshTokenEnv = options.useFreshTokenEnv === true;
+    return [
       "curl --silent --show-error --location",
       `--request ${String(callSpec?.method || "GET").trim().toUpperCase() || "GET"}`,
       `--url ${quoteShellArgument(requestUrl)}`,
-      `--header ${quoteShellArgument(`Authorization: Bearer ${accessToken}`)}`,
+      useFreshTokenEnv
+        ? '--header "Authorization: Bearer $DGR_ACCESS_TOKEN"'
+        : `--header ${quoteShellArgument(`Authorization: Bearer ${accessToken}`)}`,
       `--header ${quoteShellArgument("Accept: application/json")}`,
       `--header ${quoteShellArgument(`api_version: ${DEGRADATION_API_VERSION}`)}`,
     ];
+  };
+  return DEGRADATION_CHEAT_SHEET_CALL_SPECS.map((callSpec) => {
+    const requestUrl = degradationBuildCheatSheetRequestUrl(panelState, callSpec, context);
     return {
       key: String(callSpec?.key || "").trim(),
       title: String(callSpec?.title || "").trim(),
       method: String(callSpec?.method || "GET").trim().toUpperCase() || "GET",
       path: String(callSpec?.path || "").trim(),
       requestUrl,
-      command: commandLines.join(" \\\n  "),
+      command: buildCommandLines(requestUrl, callSpec).join(" \\\n  "),
+      freshTokenCommand: buildCommandLines(requestUrl, callSpec, { useFreshTokenEnv: true }).join(" \\\n  "),
       mutation: String(callSpec?.method || "GET").trim().toUpperCase() !== "GET",
     };
   });
+}
+
+function buildDegradationCheatSheetTokenBootstrap(context = {}) {
+  const tokenUrl = String(context.tokenUrl || "").trim();
+  const clientId = String(context.clientId || "").trim();
+  const clientSecret = String(context.clientSecret || "").trim();
+  const tokenScope = String(context.tokenScope || "").trim();
+  if (!tokenUrl || !clientId || !clientSecret) {
+    return {
+      tokenSetupScript: "",
+      masterCopyText: "",
+    };
+  }
+
+  const tokenSetupScript = [
+    `export DGR_CLIENT_ID=${quoteShellArgument(clientId)}`,
+    `export DGR_CLIENT_SECRET=${quoteShellArgument(clientSecret)}`,
+    `export DGR_TOKEN_URL=${quoteShellArgument(tokenUrl)}`,
+    `export DGR_TOKEN_SCOPE=${quoteShellArgument(tokenScope)}`,
+    "",
+    "export DGR_TOKEN_JSON=$(curl --silent --show-error --location \\",
+    '  --request POST \\',
+    '  --url "$DGR_TOKEN_URL" \\',
+    "  --header 'Content-Type: application/x-www-form-urlencoded' \\",
+    "  --header 'Accept: application/json' \\",
+    "  --data-urlencode 'grant_type=client_credentials' \\",
+    '  --data-urlencode "client_id=$DGR_CLIENT_ID" \\',
+    '  --data-urlencode "client_secret=$DGR_CLIENT_SECRET" \\',
+    '  --data-urlencode "scope=$DGR_TOKEN_SCOPE")',
+    `export DGR_ACCESS_TOKEN=$(printf '%s' "$DGR_TOKEN_JSON" | tr -d '\\n' | sed -E 's/.*"access_token"[[:space:]]*:[[:space:]]*"([^"]+)".*/\\1/')`,
+    `[ -n "$DGR_ACCESS_TOKEN" ] || { echo "Failed to mint DEGRADATION access token."; printf '%s\\n' "$DGR_TOKEN_JSON"; exit 1; }`,
+  ].join("\n");
+
+  const freshTokenCommands = (Array.isArray(context.calls) ? context.calls : [])
+    .map((call) => String(call?.freshTokenCommand || "").trim())
+    .filter(Boolean);
+
+  return {
+    tokenSetupScript,
+    masterCopyText: [tokenSetupScript, ...freshTokenCommands].filter(Boolean).join("\n\n"),
+  };
 }
 
 function buildDegradationCheatSheetContextEnvelope(context = {}) {
@@ -45746,6 +45793,12 @@ async function degradationGenerateCheatSheetFromUi(panelState, options = {}) {
     const generatedAtLabel = generatedAt.toLocaleString();
     const tokenExpiresLabel =
       Number(dcrCache?.tokenExpiresAt || 0) > 0 ? new Date(Number(dcrCache.tokenExpiresAt)).toLocaleString() : "unknown";
+    const tokenScope = firstNonEmptyString([
+      String(dcrCache?.tokenRequestedScope || "").trim(),
+      String(dcrCache?.serviceScope || "").trim(),
+      getPreferredDegradationScopeForApp(authContext?.appInfo || null) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
+    ]);
+    const tokenUrl = `${String(getActiveAdobePassEnvironment()?.spBase || ADOBE_SP_BASE || "").trim()}/o/client/token`;
     const message = `UnderPAR DEGRADATION Cheat Sheet | ${queryValues.requestorId} | ${generatedAt.toISOString()}`;
     const commands = degradationBuildCheatSheetCommands(activePanelState, {
       mediaCompanyId: String(activePanelState?.programmer?.programmerId || "").trim(),
@@ -45782,6 +45835,10 @@ async function degradationGenerateCheatSheetFromUi(panelState, options = {}) {
       mvpdLabel: String(queryValues.mvpdLabel || queryValues.mvpd || "").trim(),
       appName: String(authContext?.appInfo?.appName || authContext?.appInfo?.guid || "").trim(),
       appGuid: String(authContext?.appInfo?.guid || "").trim(),
+      clientId: String(authContext?.clientId || "").trim(),
+      clientSecret: String(authContext?.clientSecret || "").trim(),
+      tokenUrl,
+      tokenScope,
       ttlSeconds: liveCoverage.ttlSeconds || 14400,
       message,
       resource: resolvedResource,
@@ -45796,6 +45853,7 @@ async function degradationGenerateCheatSheetFromUi(panelState, options = {}) {
       callCount: commands.length,
       calls: commands,
     };
+    Object.assign(cheatSheetPayload, buildDegradationCheatSheetTokenBootstrap(cheatSheetPayload));
     cheatSheetPayload.setupItems = buildDegradationCheatSheetSetupItems(cheatSheetPayload);
     degradationWorkspaceStoreCheatSheet(cheatSheetPayload);
     if (targetWindowId > 0) {
