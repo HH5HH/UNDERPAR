@@ -685,6 +685,20 @@ test("CM direct fetch and tenant catalog paths no longer issue unauthenticated c
   );
 });
 
+test("CM tenant bootstrap prefers direct bearer fetch before reports page fallback", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const ensureCatalogSource = extractFunctionSource(popupSource, "ensureCmTenantsCatalog");
+  const reportsPageSource = extractFunctionSource(popupSource, "requestCmConsoleBootstrapCatalogFromReportsPage");
+
+  assert.doesNotMatch(ensureCatalogSource, /const shouldPreferReportsPageBootstrap/);
+  assert.ok(
+    ensureCatalogSource.indexOf("for (const tenantCatalogUrl of tenantCatalogUrls)") <
+      ensureCatalogSource.indexOf("requestCmConsoleBootstrapCatalogFromReportsPage(")
+  );
+  assert.match(reportsPageSource, /openTemporaryAdobePageContextTarget/);
+  assert.doesNotMatch(reportsPageSource, /findExistingExperienceAdobeTab/);
+});
+
 test("PKCE authorization URL uses code response mode and the configured client ID", () => {
   const helpers = loadPopupImsHelpers();
 
@@ -903,11 +917,11 @@ test("sidepanel exposes LoginButton-style DEBUG INFO controls backed by popup ru
   assert.match(composeDebugSource, /precheck_pending/);
 });
 
-test("stored and silent session activation allow the bounded CM bootstrap tab when needed", () => {
+test("stored and silent session activation stay tabless unless explicitly allowed", () => {
   const helpers = loadPopupCmActivationHelper();
 
-  assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("stored", false), true);
-  assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("silent-bootstrap:startup", false), true);
+  assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("stored", false), false);
+  assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("silent-bootstrap:startup", false), false);
   assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("interactive", false), false);
   assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("manual-refresh", true), true);
 });

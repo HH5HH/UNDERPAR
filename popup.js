@@ -55531,11 +55531,7 @@ function resetCmTenantsPrecheckState() {
 }
 
 function shouldAllowTemporaryCmBootstrapTabForActivation(source = "", explicitAllow = false) {
-  if (explicitAllow === true) {
-    return true;
-  }
-  const normalizedSource = String(source || "").trim().toLowerCase();
-  return normalizedSource === "stored" || normalizedSource.startsWith("silent-bootstrap:");
+  return explicitAllow === true;
 }
 
 async function applyActiveLoginSession(loginData, options = {}) {
@@ -61990,35 +61986,6 @@ async function persistCmTokenBootstrapResult(result = {}, options = {}) {
   return accessToken;
 }
 
-async function findExistingExperienceAdobeTab() {
-  try {
-    const tabs = await chrome.tabs.query({
-      url: [`${CM_CONSOLE_APP_ORIGIN}/*`],
-    });
-    const normalizedTabs = Array.isArray(tabs) ? tabs : [];
-    const scored = normalizedTabs
-      .filter((tab) => Number(tab?.id || 0) > 0)
-      .map((tab) => {
-        const url = String(tab?.url || tab?.pendingUrl || "").trim().toLowerCase();
-        let score = Number(tab?.lastAccessed || 0);
-        if (tab?.active === true) {
-          score += 5000;
-        }
-        if (url.includes("/cm-console")) {
-          score += 2400;
-        }
-        if (url.includes("/pass/authentication")) {
-          score += 1800;
-        }
-        return { tab, score };
-      })
-      .sort((left, right) => right.score - left.score);
-    return scored[0]?.tab || null;
-  } catch {
-    return null;
-  }
-}
-
 async function findExistingCmReportsAdobeTab() {
   try {
     const tabs = await chrome.tabs.query({
@@ -62042,6 +62009,92 @@ async function findExistingCmReportsAdobeTab() {
     return scored[0]?.tab || null;
   } catch {
     return null;
+  }
+}
+
+async function openTemporaryAdobePageContextTarget(targetUrl = "") {
+  const normalizedUrl = String(targetUrl || "").trim();
+  if (!normalizedUrl) {
+    return null;
+  }
+
+  let temporaryTarget = null;
+  if (chrome.windows?.create) {
+    try {
+      const createdWindow = await chrome.windows.create({
+        url: normalizedUrl,
+        focused: false,
+        state: "minimized",
+        width: 480,
+        height: 640,
+      });
+      const windowId = Number(createdWindow?.id || 0);
+      const tab =
+        Array.isArray(createdWindow?.tabs)
+          ? createdWindow.tabs.find((candidate) => Number(candidate?.id || 0) > 0) || null
+          : null;
+      const tabId = Number(tab?.id || 0);
+      if (windowId > 0 && tabId > 0) {
+        temporaryTarget = {
+          tab,
+          tabId,
+          windowId,
+          ownsWindow: true,
+        };
+      }
+    } catch {
+      temporaryTarget = null;
+    }
+  }
+
+  if (!temporaryTarget && chrome.tabs?.create) {
+    try {
+      const createdTab = await chrome.tabs.create({
+        url: normalizedUrl,
+        active: false,
+      });
+      const tabId = Number(createdTab?.id || 0);
+      if (tabId > 0) {
+        temporaryTarget = {
+          tab: createdTab,
+          tabId,
+          windowId: Number(createdTab?.windowId || 0),
+          ownsWindow: false,
+        };
+      }
+    } catch {
+      temporaryTarget = null;
+    }
+  }
+
+  if (!temporaryTarget?.tabId) {
+    return null;
+  }
+
+  await waitForTabCompletion(temporaryTarget.tabId, 12000, { allowUrlChange: true }).catch(() => null);
+  return temporaryTarget;
+}
+
+async function closeTemporaryAdobePageContextTarget(target = null) {
+  const tabId = Number(target?.tabId || target?.tab?.id || 0);
+  const windowId = Number(target?.windowId || target?.tab?.windowId || 0);
+  const ownsWindow = target?.ownsWindow === true;
+
+  if (ownsWindow && windowId > 0 && chrome.windows?.remove) {
+    try {
+      await chrome.windows.remove(windowId);
+      return;
+    } catch {
+      // Fall through to tab cleanup if the temporary window is already gone.
+    }
+  }
+
+  if (tabId > 0 && chrome.tabs?.remove) {
+    try {
+      await chrome.tabs.remove(tabId);
+    } catch {
+      // Ignore cleanup failures for temporary page-context targets.
+    }
   }
 }
 
@@ -62082,24 +62135,10 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
   if (!tab?.id) {
     tab = await findExistingCmReportsAdobeTab();
   }
-  if (!tab?.id) {
-    tab = await findExistingExperienceAdobeTab();
-  }
-  let createdTemporaryTab = false;
+  let temporaryTarget = null;
   if (!tab?.id && allowTemporaryTab) {
-    try {
-      tab = await chrome.tabs.create({
-        url: `${CM_REPORTS_APP_ORIGIN}/`,
-        active: false,
-      });
-      createdTemporaryTab = Boolean(tab?.id);
-      if (createdTemporaryTab) {
-        await waitForTabCompletion(Number(tab.id), 12000, { allowUrlChange: true });
-      }
-    } catch {
-      tab = null;
-      createdTemporaryTab = false;
-    }
+    temporaryTarget = await openTemporaryAdobePageContextTarget(`${CM_REPORTS_APP_ORIGIN}/`);
+    tab = temporaryTarget?.tab || null;
   }
 
   const tabId = Number(tab?.id || 0);
@@ -62354,13 +62393,7 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
   } catch {
     return null;
   } finally {
-    if (createdTemporaryTab && tabId > 0) {
-      try {
-        await chrome.tabs.remove(tabId);
-      } catch {
-        // Ignore cleanup failures for temporary tab.
-      }
-    }
+    await closeTemporaryAdobePageContextTarget(temporaryTarget);
   }
 }
 
@@ -62400,21 +62433,10 @@ async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
   }
 
   let tab = await findExistingCmReportsAdobeTab();
-  let createdTemporaryTab = false;
+  let temporaryTarget = null;
   if (!tab?.id && allowTemporaryTab) {
-    try {
-      tab = await chrome.tabs.create({
-        url: `${CM_REPORTS_APP_ORIGIN}/`,
-        active: false,
-      });
-      createdTemporaryTab = Boolean(tab?.id);
-      if (createdTemporaryTab) {
-        await waitForTabCompletion(Number(tab.id), 12000, { allowUrlChange: true });
-      }
-    } catch {
-      tab = null;
-      createdTemporaryTab = false;
-    }
+    temporaryTarget = await openTemporaryAdobePageContextTarget(`${CM_REPORTS_APP_ORIGIN}/`);
+    tab = temporaryTarget?.tab || null;
   }
 
   const tabId = Number(tab?.id || 0);
@@ -62503,13 +62525,7 @@ async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
   } catch {
     return null;
   } finally {
-    if (createdTemporaryTab && tabId > 0) {
-      try {
-        await chrome.tabs.remove(tabId);
-      } catch {
-        // Ignore cleanup failures for temporary tab.
-      }
-    }
+    await closeTemporaryAdobePageContextTarget(temporaryTarget);
   }
 }
 
@@ -64366,80 +64382,8 @@ async function ensureCmTenantsCatalog(options = {}) {
 
     let lastError = null;
     try {
-      const shouldPreferReportsPageBootstrap =
-        forceRefresh ||
-        !cachedCatalog ||
-        !Array.isArray(cachedCatalog.tenants) ||
-        cachedCatalog.tenants.length === 0;
-      if (shouldPreferReportsPageBootstrap) {
-        try {
-          const pageContextCatalog = await requestCmConsoleBootstrapCatalogFromReportsPage({
-            requireFresh: forceRefresh,
-            allowTemporaryTab: allowTemporaryPageContextTab,
-            accessToken: preferredAccessToken,
-            preferredTabId: preferredCmBootstrapTabId,
-          });
-          if (pageContextCatalog?.ok === true) {
-            if (pageContextCatalog?.accessToken) {
-              await persistCmTokenBootstrapResult(
-                {
-                  accessToken: String(pageContextCatalog.accessToken || "").trim(),
-                  source: "reports-page-context-bootstrap",
-                },
-                {}
-              ).catch(() => "");
-            }
-            const tenants = normalizeCmTenantsFromPayload(pageContextCatalog.tenantPayload, pageContextCatalog.tenantUrl);
-            if (tenants.length > 0) {
-              const catalog = {
-                tenants,
-                sourceUrl: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
-                tenantCount: Math.max(0, Number(pageContextCatalog.tenantCount || tenants.length || 0)),
-                applicationCount: Math.max(0, Number(pageContextCatalog.applicationCount || 0)),
-                policyCount: Math.max(0, Number(pageContextCatalog.policyCount || 0)),
-                summaryReady: pageContextCatalog.summaryReady === true,
-                fetchedAt: Date.now(),
-              };
-              state.cmTenantsCatalog = catalog;
-              state.cmTenantsCatalogHydrated = true;
-              state.cmTenantsCatalogRuntimeFresh = true;
-              syncCmConsoleBootstrapSummaryFromCatalog(catalog, {
-                errors: Array.isArray(pageContextCatalog.errors) ? pageContextCatalog.errors : [],
-              });
-              await persistCmTenantsCatalog(catalog);
-              emitCmDebugEvent({
-                phase: "cm-tenant-catalog-loaded",
-                source: "reports-page-context",
-                url: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
-                sourceUrl: String(pageContextCatalog.tenantUrl || ""),
-                tenantCount: Number(catalog.tenantCount || 0),
-                applicationCount: Number(catalog.applicationCount || 0),
-                policyCount: Number(catalog.policyCount || 0),
-              });
-              return catalog;
-            }
-          }
-          if (pageContextCatalog && typeof pageContextCatalog === "object" && pageContextCatalog.ok !== true) {
-            lastError = new Error(
-              firstNonEmptyString([
-                pageContextCatalog.error,
-                pageContextCatalog.status ? `CM tenants load failed (${Number(pageContextCatalog.status || 0)}).` : "",
-                "CM tenants load failed from reports page context.",
-              ]) || "CM tenants load failed from reports page context."
-            );
-            throw lastError;
-          }
-        } catch (pageContextError) {
-          lastError = pageContextError instanceof Error ? pageContextError : new Error(String(pageContextError));
-          emitCmDebugEvent({
-            phase: "cm-tenant-catalog-page-context-failed",
-            method: "GET",
-            url: tenantCatalogUrls[0] || "",
-            error: lastError.message,
-          });
-        }
-      }
-
+      // Prefer the direct bearer path first. Reports-page context is a last-resort
+      // recovery path for explicit CM actions, not the default session-start path.
       for (const tenantCatalogUrl of tenantCatalogUrls) {
         try {
           const response = await fetchCmTenantCatalogWithAuth(tenantCatalogUrl, {
@@ -64486,66 +64430,70 @@ async function ensureCmTenantsCatalog(options = {}) {
         }
       }
 
-      const allowTemporaryReportsTab =
-        !shouldPreferReportsPageBootstrap &&
-        (!cachedCatalog || !Array.isArray(cachedCatalog.tenants) || cachedCatalog.tenants.length === 0);
-      if (allowTemporaryReportsTab) {
-        try {
-          const pageContextCatalog = await requestCmConsoleBootstrapCatalogFromReportsPage({
-            requireFresh: forceRefresh,
-            allowTemporaryTab: false,
-            accessToken: preferredAccessToken,
-            preferredTabId: preferredCmBootstrapTabId,
-          });
-          if (pageContextCatalog?.ok === true) {
-            if (pageContextCatalog?.accessToken) {
-              await persistCmTokenBootstrapResult(
-                {
-                  accessToken: String(pageContextCatalog.accessToken || "").trim(),
-                  source: "reports-page-context-bootstrap",
-                },
-                {}
-              ).catch(() => "");
-            }
-            const tenants = normalizeCmTenantsFromPayload(pageContextCatalog.tenantPayload, pageContextCatalog.tenantUrl);
-            if (tenants.length > 0) {
-              const catalog = {
-                tenants,
-                sourceUrl: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
-                tenantCount: Math.max(0, Number(pageContextCatalog.tenantCount || tenants.length || 0)),
-                applicationCount: Math.max(0, Number(pageContextCatalog.applicationCount || 0)),
-                policyCount: Math.max(0, Number(pageContextCatalog.policyCount || 0)),
-                summaryReady: pageContextCatalog.summaryReady === true,
-                fetchedAt: Date.now(),
-              };
-              state.cmTenantsCatalog = catalog;
-              state.cmTenantsCatalogHydrated = true;
-              state.cmTenantsCatalogRuntimeFresh = true;
-              syncCmConsoleBootstrapSummaryFromCatalog(catalog, {
-                errors: Array.isArray(pageContextCatalog.errors) ? pageContextCatalog.errors : [],
-              });
-              await persistCmTenantsCatalog(catalog);
-              emitCmDebugEvent({
-                phase: "cm-tenant-catalog-loaded",
-                source: "reports-page-context",
-                url: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
-                sourceUrl: String(pageContextCatalog.tenantUrl || ""),
-                tenantCount: Number(catalog.tenantCount || 0),
-                applicationCount: Number(catalog.applicationCount || 0),
-                policyCount: Number(catalog.policyCount || 0),
-              });
-              return catalog;
-            }
+      try {
+        const pageContextCatalog = await requestCmConsoleBootstrapCatalogFromReportsPage({
+          requireFresh: forceRefresh,
+          allowTemporaryTab: allowTemporaryPageContextTab,
+          accessToken: preferredAccessToken,
+          preferredTabId: preferredCmBootstrapTabId,
+        });
+        if (pageContextCatalog?.ok === true) {
+          if (pageContextCatalog?.accessToken) {
+            await persistCmTokenBootstrapResult(
+              {
+                accessToken: String(pageContextCatalog.accessToken || "").trim(),
+                source: "reports-page-context-bootstrap",
+              },
+              {}
+            ).catch(() => "");
           }
-        } catch (pageContextError) {
-          lastError = pageContextError instanceof Error ? pageContextError : new Error(String(pageContextError));
-          emitCmDebugEvent({
-            phase: "cm-tenant-catalog-page-context-failed",
-            method: "GET",
-            url: tenantCatalogUrls[0] || "",
-            error: lastError.message,
-          });
+          const tenants = normalizeCmTenantsFromPayload(pageContextCatalog.tenantPayload, pageContextCatalog.tenantUrl);
+          if (tenants.length > 0) {
+            const catalog = {
+              tenants,
+              sourceUrl: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
+              tenantCount: Math.max(0, Number(pageContextCatalog.tenantCount || tenants.length || 0)),
+              applicationCount: Math.max(0, Number(pageContextCatalog.applicationCount || 0)),
+              policyCount: Math.max(0, Number(pageContextCatalog.policyCount || 0)),
+              summaryReady: pageContextCatalog.summaryReady === true,
+              fetchedAt: Date.now(),
+            };
+            state.cmTenantsCatalog = catalog;
+            state.cmTenantsCatalogHydrated = true;
+            state.cmTenantsCatalogRuntimeFresh = true;
+            syncCmConsoleBootstrapSummaryFromCatalog(catalog, {
+              errors: Array.isArray(pageContextCatalog.errors) ? pageContextCatalog.errors : [],
+            });
+            await persistCmTenantsCatalog(catalog);
+            emitCmDebugEvent({
+              phase: "cm-tenant-catalog-loaded",
+              source: "reports-page-context",
+              url: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
+              sourceUrl: String(pageContextCatalog.tenantUrl || ""),
+              tenantCount: Number(catalog.tenantCount || 0),
+              applicationCount: Number(catalog.applicationCount || 0),
+              policyCount: Number(catalog.policyCount || 0),
+            });
+            return catalog;
+          }
         }
+        if (pageContextCatalog && typeof pageContextCatalog === "object" && pageContextCatalog.ok !== true) {
+          throw new Error(
+            firstNonEmptyString([
+              pageContextCatalog.error,
+              pageContextCatalog.status ? `CM tenants load failed (${Number(pageContextCatalog.status || 0)}).` : "",
+              "CM tenants load failed from reports page context.",
+            ]) || "CM tenants load failed from reports page context."
+          );
+        }
+      } catch (pageContextError) {
+        lastError = pageContextError instanceof Error ? pageContextError : new Error(String(pageContextError));
+        emitCmDebugEvent({
+          phase: "cm-tenant-catalog-page-context-failed",
+          method: "GET",
+          url: tenantCatalogUrls[0] || "",
+          error: lastError.message,
+        });
       }
 
       throw lastError || new Error("CM tenants load failed: all tenant catalog candidates were exhausted.");
