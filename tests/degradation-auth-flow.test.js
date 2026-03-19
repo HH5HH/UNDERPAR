@@ -1,0 +1,192 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+
+const ROOT = path.resolve(__dirname, "..");
+
+function extractFunctionSource(source, functionName) {
+  const markers = [`async function ${functionName}(`, `function ${functionName}(`];
+  let start = -1;
+  for (const marker of markers) {
+    start = source.indexOf(marker);
+    if (start !== -1) {
+      break;
+    }
+  }
+  assert.notEqual(start, -1, `Unable to locate ${functionName}`);
+  const paramsStart = source.indexOf("(", start);
+  assert.notEqual(paramsStart, -1, `Unable to locate params for ${functionName}`);
+  let paramsDepth = 0;
+  let bodyStart = -1;
+  for (let index = paramsStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "(") paramsDepth += 1;
+    if (char === ")") {
+      paramsDepth -= 1;
+      if (paramsDepth === 0) {
+        bodyStart = source.indexOf("{", index);
+        break;
+      }
+    }
+  }
+  assert.notEqual(bodyStart, -1, `Unable to locate body for ${functionName}`);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+  throw new Error(`Unterminated function: ${functionName}`);
+}
+
+function loadDegradationExecuteStatusRequestHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    'const DEGRADATION_API_BASE = "https://degradation.example";',
+    'const DEGRADATION_API_VERSION = "4";',
+    'const DEGRADATION_MEGA_STATUS_ENDPOINT_SPEC = { key: "all", path: "all" };',
+    'const PREMIUM_SERVICE_SCOPE_BY_KEY = { degradation: "entitlement:degradation" };',
+    'const state = { selectedRequestorId: "MML", degradationWorkspaceTabId: 0 };',
+    "let refreshCalls = 0;",
+    "let refreshOptions = [];",
+    "let fetchCalls = [];",
+    "let refreshApp = { guid: 'refreshed-app', appName: 'Refreshed App', scope: 'entitlement:degradation' };",
+    "function degradationCollectFormValues() { return { requestorId: 'MML', programmerId: 'MML', mvpd: 'ATT', includeAllMvpd: false }; }",
+    "function degradationBuildRequestUrl(panelState, endpointSpec, queryValues) { return new URL(`https://degradation.example/${panelState.programmer.programmerId}/${endpointSpec.path}?programmer=${queryValues.programmerId}`); }",
+    "function resolveDegradationDebugFlowIdForRequest() { return 'flow-1'; }",
+    "function degradationRefreshSelectedAppForRequest(panelState, options = {}) { refreshCalls += 1; refreshOptions.push(options); panelState.appInfo = refreshApp; return refreshApp; }",
+    "function getPreferredDegradationScopeForApp(appInfo = null) { return String(appInfo?.scope || 'entitlement:degradation').trim(); }",
+    "async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, retryStage = 'refresh', debugMeta = null) { fetchCalls.push({ programmerId, appInfo, url, options, retryStage, debugMeta }); return { ok: true, status: 200, statusText: 'OK', text: async () => JSON.stringify({ rows: [{ id: 'row-1', status: 'active' }] }) }; }",
+    "function parseJsonText(text = '', fallback = null) { try { return JSON.parse(text); } catch { return fallback; } }",
+    "function degradationExtractRows(endpointSpec, payload) { return Array.isArray(payload?.rows) ? payload.rows : []; }",
+    "function degradationFilterAppliedActiveRows(rows = []) { return Array.isArray(rows) ? rows : []; }",
+    "function degradationBuildReportPayload(endpointSpec, queryValues, result = {}) { const rows = Array.isArray(result.rows) ? result.rows : []; return { endpointKey: String(endpointSpec?.key || ''), endpointPath: String(endpointSpec?.path || ''), endpointTitle: String(endpointSpec?.title || endpointSpec?.key || ''), programmerId: String(queryValues?.programmerId || ''), mvpd: String(queryValues?.mvpd || ''), includeAllMvpd: queryValues?.includeAllMvpd === true, mvpdScopeLabel: queryValues?.includeAllMvpd === true ? 'ALL MVPDs' : String(queryValues?.mvpd || ''), rowCount: rows.length, activeCount: rows.length, ...result }; }",
+    extractFunctionSource(source, "degradationExecuteStatusRequest"),
+    "function setRefreshApp(nextApp) { refreshApp = nextApp; }",
+    "function getRefreshCalls() { return refreshCalls; }",
+    "function getRefreshOptions() { return refreshOptions.slice(); }",
+    "function getFetchCalls() { return fetchCalls.slice(); }",
+    "module.exports = { degradationExecuteStatusRequest, setRefreshApp, getRefreshCalls, getRefreshOptions, getFetchCalls };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    URL,
+    Date,
+    JSON,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+function loadDegradationRunAllHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "const DEGRADATION_STATUS_ENDPOINT_SPECS = [{ key: 'authnall' }, { key: 'authzall' }, { key: 'authznone' }];",
+    "let refreshCalls = 0;",
+    "let refreshOptions = [];",
+    "let endpointCalls = [];",
+    "function isDegradationServiceRequestActive() { return true; }",
+    "function degradationCollectFormValues() { return { requestorId: 'MML', programmerId: 'MML', mvpd: 'ATT', includeAllMvpd: false }; }",
+    "function degradationRequireSelectedRequestor() { return true; }",
+    "function degradationSetControllerStatus() {}",
+    "function degradationSetBusy(panelState, busy) { panelState.busy = busy === true; }",
+    "function buildDegradationRunGroupId() { return 'run-fixed'; }",
+    "async function degradationOpenWorkspaceFromPanel() { return { targetWindowId: 42 }; }",
+    "function degradationRefreshSelectedAppForRequest(panelState, options = {}) { refreshCalls += 1; refreshOptions.push(options); const app = { guid: 'app-1', appName: 'Degradation App', scope: 'entitlement:degradation' }; panelState.appInfo = app; return app; }",
+    "function emitDegradationWorkspaceDebugEvent() {}",
+    "function getActiveDegradationWorkspaceDebugFlowId() { return 'flow-1'; }",
+    "async function degradationRunStatusEndpointFromPanel(panelState, endpointKey, options = {}) { endpointCalls.push({ endpointKey, options }); return { ok: true, rowCount: 1, activeCount: 1 }; }",
+    extractFunctionSource(source, "degradationRunAllStatusEndpointsFromPanel"),
+    "function getRefreshCalls() { return refreshCalls; }",
+    "function getRefreshOptions() { return refreshOptions.slice(); }",
+    "function getEndpointCalls() { return endpointCalls.slice(); }",
+    "module.exports = { degradationRunAllStatusEndpointsFromPanel, getRefreshCalls, getRefreshOptions, getEndpointCalls };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+test("DEGRADATION status request honors a preselected app and locks auth selection", async () => {
+  const helpers = loadDegradationExecuteStatusRequestHelper();
+  const selectedApp = {
+    guid: "app-selected",
+    appName: "Selected App",
+    scope: "entitlement:degradation",
+  };
+  const panelState = {
+    programmer: {
+      programmerId: "Turner",
+    },
+  };
+
+  const report = await helpers.degradationExecuteStatusRequest(
+    panelState,
+    {
+      key: "authnall",
+      path: "authnAll",
+      title: "Authenticate All - Status",
+    },
+    {
+      queryValues: {
+        requestorId: "MML",
+        programmerId: "MML",
+        mvpd: "ATT",
+        includeAllMvpd: false,
+      },
+      selectedApp,
+    }
+  );
+
+  assert.equal(helpers.getRefreshCalls(), 0);
+  const [fetchCall] = helpers.getFetchCalls();
+  assert.equal(fetchCall.appInfo, selectedApp);
+  assert.equal(fetchCall.debugMeta.lockAppSelection, true);
+  assert.equal(fetchCall.debugMeta.requiredServiceScope, "entitlement:degradation");
+  assert.equal(report.ok, true);
+});
+
+test("DEGRADATION GET ALL resolves one app and reuses it for every endpoint", async () => {
+  const helpers = loadDegradationRunAllHelper();
+  const panelState = {
+    section: {},
+    programmer: {
+      programmerId: "Turner",
+    },
+    requestToken: 7,
+    busy: false,
+  };
+
+  const reports = await helpers.degradationRunAllStatusEndpointsFromPanel(panelState, {
+    requestToken: 7,
+  });
+
+  assert.equal(helpers.getRefreshCalls(), 1);
+  const [refreshOptions] = helpers.getRefreshOptions();
+  assert.equal(refreshOptions.requestorId, "MML");
+  assert.equal(refreshOptions.requestScope, "degradation-run-all");
+  assert.equal(refreshOptions.targetWindowId, 42);
+
+  const endpointCalls = helpers.getEndpointCalls();
+  assert.equal(endpointCalls.length, 3);
+  endpointCalls.forEach((call) => {
+    assert.equal(call.options.selectedApp.guid, "app-1");
+    assert.equal(call.options.runGroupId, "run-fixed");
+    assert.equal(call.options.targetWindowId, 42);
+  });
+  assert.equal(reports.length, 3);
+  assert.equal(panelState.busy, false);
+});

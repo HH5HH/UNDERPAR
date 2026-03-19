@@ -45993,6 +45993,7 @@ async function degradationPrimeAccessTokenForSelectedApp(panelState, debugMeta =
     service: "degradation",
     requiredServiceScope: getPreferredDegradationScopeForApp(appInfo) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
     requestorId,
+    lockAppSelection: true,
   });
   emitDegradationWorkspaceDebugEvent(String(debugMeta?.flowId || "").trim(), {
     phase: "degradation-token-prime-ready",
@@ -47740,6 +47741,7 @@ async function degradationBuildCurlCommand(panelState, options = {}) {
     requestorId: queryValues.requestorId,
     mvpd: String(queryValues.mvpd || "").trim(),
     requiredServiceScope: getPreferredDegradationScopeForApp(selectedApp) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
+    lockAppSelection: true,
   });
   const requestUrl = degradationBuildRequestUrl(activePanelState, endpointSpec, queryValues).toString();
 
@@ -48311,11 +48313,14 @@ async function degradationExecuteStatusRequest(panelState, endpointSpec, options
   };
 
   const requestStartedAt = Date.now();
-  const selectedApp = degradationRefreshSelectedAppForRequest(panelState, {
-    requestorId,
-    requestScope: `degradation:${endpointSpec.path}`,
-    targetWindowId: Number(options?.targetWindowId || panelState?.controllerWindowId || 0),
-  });
+  const selectedApp =
+    options?.selectedApp && typeof options.selectedApp === "object" && String(options.selectedApp?.guid || "").trim()
+      ? options.selectedApp
+      : degradationRefreshSelectedAppForRequest(panelState, {
+          requestorId,
+          requestScope: `degradation:${endpointSpec.path}`,
+          targetWindowId: Number(options?.targetWindowId || panelState?.controllerWindowId || 0),
+        });
   if (!selectedApp?.guid) {
     throw new Error("No DEGRADATION scoped registered application is selected for this media company.");
   }
@@ -48331,6 +48336,7 @@ async function degradationExecuteStatusRequest(panelState, endpointSpec, options
     {
       ...debugMeta,
       requiredServiceScope: getPreferredDegradationScopeForApp(selectedApp) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
+      lockAppSelection: true,
     }
   );
   const responseText = await response.text().catch(() => "");
@@ -48533,8 +48539,12 @@ async function degradationRunStatusEndpointFromPanel(panelState, endpointKey, op
       targetWindowId = Number(state.degradationWorkspaceWindowId || 0);
     }
 
+    const selectedApp =
+      options?.selectedApp && typeof options.selectedApp === "object" && String(options.selectedApp?.guid || "").trim()
+        ? options.selectedApp
+        : panelState.appInfo || null;
     const selectionContext = degradationWorkspaceGetSelectionContext(panelState.programmer, {
-      degradation: panelState.appInfo,
+      degradation: selectedApp,
     });
     const selectionKey = String(selectionContext.selectionKey || "").trim();
     let endpointUrl = `${DEGRADATION_API_BASE}/${endpointSpec.path}`;
@@ -48561,6 +48571,7 @@ async function degradationRunStatusEndpointFromPanel(panelState, endpointKey, op
       queryValues,
       selectionKey,
       runGroupId,
+      selectedApp,
     });
     degradationWorkspaceStoreReport(report, queryValues);
     emitDegradationWorkspaceDebugEvent(getActiveDegradationWorkspaceDebugFlowId(), {
@@ -48596,8 +48607,12 @@ async function degradationRunStatusEndpointFromPanel(panelState, endpointKey, op
     return report;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const selectedApp =
+      options?.selectedApp && typeof options.selectedApp === "object" && String(options.selectedApp?.guid || "").trim()
+        ? options.selectedApp
+        : panelState.appInfo || null;
     const selectionContext = degradationWorkspaceGetSelectionContext(panelState.programmer, {
-      degradation: panelState.appInfo,
+      degradation: selectedApp,
     });
     const errorReport = degradationBuildReportPayload(endpointSpec, queryValues, {
       selectionKey: String(selectionContext.selectionKey || "").trim(),
@@ -48678,6 +48693,14 @@ async function degradationRunAllStatusEndpointsFromPanel(panelState, options = {
       });
       targetWindowId = Number(workspaceResult?.targetWindowId || targetWindowId || 0);
     }
+    const selectedApp = degradationRefreshSelectedAppForRequest(panelState, {
+      requestorId: String(queryValues.requestorId || "").trim(),
+      requestScope: "degradation-run-all",
+      targetWindowId,
+    });
+    if (!selectedApp?.guid) {
+      throw new Error("No DEGRADATION scoped registered application is selected for this media company.");
+    }
     emitDegradationWorkspaceDebugEvent(getActiveDegradationWorkspaceDebugFlowId(), {
       phase: "sweep-start",
       requestScope: "degradation-run-all",
@@ -48694,6 +48717,7 @@ async function degradationRunAllStatusEndpointsFromPanel(panelState, options = {
         requestToken,
         queryValues,
         runGroupId,
+        selectedApp,
         manageBusy: false,
         openWorkspace: false,
         targetWindowId,
