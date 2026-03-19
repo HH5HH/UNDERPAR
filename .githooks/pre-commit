@@ -5,6 +5,32 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
 BUMP_SCRIPT="$ROOT/scripts/auto_bump_manifest_version.sh"
+BUILD_DISTRO_SCRIPT="$ROOT/scripts/build_underpar_distro.sh"
+CHECK_SCRIPT="$ROOT/scripts/check_manifest_version_bump.sh"
+
+has_staged_underpar_changes() {
+  local path
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+
+    case "$path" in
+      .git/*|.githooks/*|scripts/*)
+        continue
+        ;;
+    esac
+
+    case "$path" in
+      .DS_Store|docs/*|*/docs/*|*.md|*.MD|*.zip)
+        continue
+        ;;
+    esac
+
+    return 0
+  done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+  return 1
+}
+
 if [[ ! -x "$BUMP_SCRIPT" ]]; then
   exit 0
 fi
@@ -13,4 +39,14 @@ new_version="$($BUMP_SCRIPT --if-staged-underpar-changes)"
 if [[ -n "$new_version" ]]; then
   git add manifest.json
   echo "pre-commit: auto-bumped UnderPAR manifest version to $new_version"
+fi
+
+if has_staged_underpar_changes && [[ -x "$BUILD_DISTRO_SCRIPT" ]]; then
+  "$BUILD_DISTRO_SCRIPT" >/dev/null
+  git add underpar_distro.zip underpar_distro.version.json
+  echo "pre-commit: synced UnderPAR distro package"
+fi
+
+if [[ -x "$CHECK_SCRIPT" ]]; then
+  "$CHECK_SCRIPT" --staged
 fi

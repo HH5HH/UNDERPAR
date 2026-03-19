@@ -66,10 +66,11 @@ const UNDERPAR_LATEST_REF_API_URL =
   `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/git/ref/heads/main`;
 const UNDERPAR_LATEST_COMMIT_API_URL =
   `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/commits/main`;
-const UNDERPAR_LATEST_MANIFEST_URL =
-  `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/main/manifest.json`;
-const UNDERPAR_LATEST_MANIFEST_API_URL =
-  `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/contents/manifest.json?ref=main`;
+const UNDERPAR_PACKAGE_METADATA_PATH = "underpar_distro.version.json";
+const UNDERPAR_LATEST_PACKAGE_METADATA_URL =
+  `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/main/${UNDERPAR_PACKAGE_METADATA_PATH}`;
+const UNDERPAR_LATEST_PACKAGE_METADATA_API_URL =
+  `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/contents/${UNDERPAR_PACKAGE_METADATA_PATH}?ref=main`;
 const UNDERPAR_LATEST_PACKAGE_URL =
   `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/main/underpar_distro.zip`;
 const UNDERPAR_LOCAL_PACKAGE_PATH = "underpar_distro.zip";
@@ -2058,24 +2059,24 @@ function extractVersionFromManifestObject(manifest) {
   return version;
 }
 
-function buildLatestUnderparManifestRawUrl(ref = "") {
+function buildLatestUnderparPackageMetadataRawUrl(ref = "") {
   const normalizedRef = String(ref || "").trim().toLowerCase();
-  const manifestRef = /^[a-f0-9]{40}$/.test(normalizedRef) ? normalizedRef : "";
-  return manifestRef
-    ? `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/${manifestRef}/manifest.json`
-    : UNDERPAR_LATEST_MANIFEST_URL;
+  const metadataRef = /^[a-f0-9]{40}$/.test(normalizedRef) ? normalizedRef : "";
+  return metadataRef
+    ? `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/${metadataRef}/${UNDERPAR_PACKAGE_METADATA_PATH}`
+    : UNDERPAR_LATEST_PACKAGE_METADATA_URL;
 }
 
-function buildLatestUnderparManifestApiUrl(ref = "") {
+function buildLatestUnderparPackageMetadataApiUrl(ref = "") {
   const normalizedRef = String(ref || "").trim().toLowerCase();
-  const manifestRef = /^[a-f0-9]{40}$/.test(normalizedRef) ? normalizedRef : "";
-  return manifestRef
-    ? `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/contents/manifest.json?ref=${manifestRef}`
-    : UNDERPAR_LATEST_MANIFEST_API_URL;
+  const metadataRef = /^[a-f0-9]{40}$/.test(normalizedRef) ? normalizedRef : "";
+  return metadataRef
+    ? `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/contents/${UNDERPAR_PACKAGE_METADATA_PATH}?ref=${metadataRef}`
+    : UNDERPAR_LATEST_PACKAGE_METADATA_API_URL;
 }
 
 async function fetchLatestUnderparVersionFromRaw(ref = "") {
-  const response = await fetch(buildLatestUnderparManifestRawUrl(ref), { cache: "no-store" });
+  const response = await fetch(buildLatestUnderparPackageMetadataRawUrl(ref), { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
@@ -2084,7 +2085,7 @@ async function fetchLatestUnderparVersionFromRaw(ref = "") {
 }
 
 async function fetchLatestUnderparVersionFromGithubApi(ref = "") {
-  const response = await fetch(buildLatestUnderparManifestApiUrl(ref), { cache: "no-store" });
+  const response = await fetch(buildLatestUnderparPackageMetadataApiUrl(ref), { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }

@@ -23,6 +23,7 @@ test("distribution build emits the canonical latest archive and folder name", (t
   const scriptDir = path.join(repoDir, "scripts");
   const testsDir = path.join(repoDir, "tests");
   const artifactPath = path.join(repoDir, "underpar_distro.zip");
+  const metadataPath = path.join(repoDir, "underpar_distro.version.json");
 
   t.after(() => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -64,17 +65,24 @@ test("distribution build emits the canonical latest archive and folder name", (t
     .trim()
     .split(/\n+/)
     .filter(Boolean);
+  const packageMetadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
 
   assert.equal(fs.realpathSync(outputPath), fs.realpathSync(artifactPath));
   assert.equal(fs.existsSync(path.join(repoDir, "UNDERPAR_DIST_v1.0.0.zip")), false);
   assert.equal(fs.existsSync(path.join(repoDir, "ziptool_distro.zip")), false);
   assert.ok(fs.existsSync(artifactPath));
+  assert.ok(fs.existsSync(metadataPath));
+  assert.equal(packageMetadata.version, "1.0.0");
+  assert.equal(packageMetadata.version_name, "1.0.0");
+  assert.equal(packageMetadata.package_path, "underpar_distro.zip");
+  assert.equal(packageMetadata.archive_manifest_path, "underpar-distro/manifest.json");
   assert.ok(archiveEntries.length > 0);
   assert.ok(
     archiveEntries.every((entry) => entry === "underpar-distro/" || entry.startsWith("underpar-distro/"))
   );
   assert.ok(archiveEntries.includes("underpar-distro/manifest.json"));
   assert.ok(archiveEntries.includes("underpar-distro/background.js"));
+  assert.ok(!archiveEntries.includes("underpar-distro/underpar_distro.version.json"));
   assert.ok(!archiveEntries.includes("underpar-distro/AGENTS.md"));
   assert.ok(!archiveEntries.includes("underpar-distro/.githooks/pre-commit"));
   assert.ok(!archiveEntries.includes("underpar-distro/scripts/build_underpar_distro.sh"));
@@ -86,6 +94,7 @@ test("distribution build packages staged tracked files even when the worktree co
   const repoDir = path.join(tempRoot, "repo");
   const scriptDir = path.join(repoDir, "scripts");
   const artifactPath = path.join(repoDir, "underpar_distro.zip");
+  const metadataPath = path.join(repoDir, "underpar_distro.version.json");
 
   t.after(() => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -109,9 +118,11 @@ test("distribution build packages staged tracked files even when the worktree co
     .split(/\n+/)
     .filter(Boolean);
   const backgroundSource = runCommand("unzip", ["-p", artifactPath, "underpar-distro/background.js"], repoDir);
+  const packageMetadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
 
   assert.ok(archiveEntries.includes("underpar-distro/background.js"));
   assert.equal(backgroundSource, 'console.log("underpar");\n');
+  assert.equal(packageMetadata.version, "1.0.0");
 });
 
 test("distribution build prefers current tracked worktree content over stale index content", (t) => {
@@ -119,6 +130,7 @@ test("distribution build prefers current tracked worktree content over stale ind
   const repoDir = path.join(tempRoot, "repo");
   const scriptDir = path.join(repoDir, "scripts");
   const artifactPath = path.join(repoDir, "underpar_distro.zip");
+  const metadataPath = path.join(repoDir, "underpar_distro.version.json");
 
   t.after(() => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -140,7 +152,9 @@ test("distribution build prefers current tracked worktree content over stale ind
   runCommand("bash", ["scripts/build_underpar_distro.sh"], repoDir);
   const packagedManifest = runCommand("unzip", ["-p", artifactPath, "underpar-distro/manifest.json"], repoDir);
   const packagedBackground = runCommand("unzip", ["-p", artifactPath, "underpar-distro/background.js"], repoDir);
+  const packageMetadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
 
   assert.equal(packagedManifest, '{ "version": "1.0.2" }\n');
   assert.equal(packagedBackground, 'console.log("fresh-worktree");\n');
+  assert.equal(packageMetadata.version, "1.0.2");
 });

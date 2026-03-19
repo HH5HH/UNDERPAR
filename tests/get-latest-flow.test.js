@@ -54,8 +54,9 @@ function loadGetLatestHelpers(seed = {}) {
     'const UNDERPAR_GITHUB_REPO = "UNDERPAR";',
     'const UNDERPAR_LATEST_REF_API_URL = `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/git/ref/heads/main`;',
     'const UNDERPAR_LATEST_COMMIT_API_URL = `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/commits/main`;',
-    'const UNDERPAR_LATEST_MANIFEST_URL = `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/main/manifest.json`;',
-    'const UNDERPAR_LATEST_MANIFEST_API_URL = `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/contents/manifest.json?ref=main`;',
+    'const UNDERPAR_PACKAGE_METADATA_PATH = "underpar_distro.version.json";',
+    'const UNDERPAR_LATEST_PACKAGE_METADATA_URL = `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/main/${UNDERPAR_PACKAGE_METADATA_PATH}`;',
+    'const UNDERPAR_LATEST_PACKAGE_METADATA_API_URL = `https://api.github.com/repos/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/contents/${UNDERPAR_PACKAGE_METADATA_PATH}?ref=main`;',
     'const UNDERPAR_LATEST_PACKAGE_URL = `https://raw.githubusercontent.com/${UNDERPAR_GITHUB_OWNER}/${UNDERPAR_GITHUB_REPO}/main/underpar_distro.zip`;',
     'const UNDERPAR_LOCAL_PACKAGE_PATH = "underpar_distro.zip";',
     'const CHROME_EXTENSIONS_URL = "chrome://extensions";',
@@ -67,8 +68,8 @@ function loadGetLatestHelpers(seed = {}) {
     extractFunctionSource(source, "parseVersionPart"),
     extractFunctionSource(source, "compareVersions"),
     extractFunctionSource(source, "extractVersionFromManifestObject"),
-    extractFunctionSource(source, "buildLatestUnderparManifestRawUrl"),
-    extractFunctionSource(source, "buildLatestUnderparManifestApiUrl"),
+    extractFunctionSource(source, "buildLatestUnderparPackageMetadataRawUrl"),
+    extractFunctionSource(source, "buildLatestUnderparPackageMetadataApiUrl"),
     extractFunctionSource(source, "fetchLatestUnderparVersionFromRaw"),
     extractFunctionSource(source, "fetchLatestUnderparVersionFromGithubApi"),
     extractFunctionSource(source, "fetchLatestUnderparVersion"),
@@ -169,14 +170,14 @@ test("openUnderparGetLatestFlow uses a SHA-pinned underpar_distro.zip when GitHu
   const seed = createSeed({
     currentVersion: "1.0.0",
     responseByUrl: {
-      [`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/manifest.json`]: {
+      [`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/underpar_distro.version.json`]: {
         ok: true,
         status: 200,
         async json() {
           return { version: "9.9.9" };
         },
       },
-      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/manifest.json": {
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
         ok: true,
         status: 200,
         async json() {
@@ -213,14 +214,14 @@ test("openUnderparGetLatestFlow uses the commit-pinned manifest version when mai
   const seed = createSeed({
     currentVersion: "1.12.62",
     responseByUrl: {
-      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/manifest.json": {
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
         ok: true,
         status: 200,
         async json() {
           return { version: "1.12.62" };
         },
       },
-      [`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/manifest.json`]: {
+      [`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/underpar_distro.version.json`]: {
         ok: true,
         status: 200,
         async json() {
@@ -246,7 +247,7 @@ test("openUnderparGetLatestFlow uses the commit-pinned manifest version when mai
   assert.equal(seed.calls.downloadsDownload.length, 1);
   assert.match(String(seed.calls.downloadsDownload[0]?.filename || ""), /^UnderPAR-v1\.12\.64-89abcde\.zip$/);
   assert.ok(
-    seed.calls.fetch.includes(`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/manifest.json`)
+    seed.calls.fetch.includes(`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/underpar_distro.version.json`)
   );
 });
 
@@ -254,7 +255,7 @@ test("openUnderparGetLatestFlow prefers the local runtime package when the loade
   const seed = createSeed({
     currentVersion: "1.12.88",
     responseByUrl: {
-      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/manifest.json": {
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
         ok: true,
         status: 200,
         async json() {
@@ -285,7 +286,7 @@ test("openUnderparGetLatestFlow falls back to main underpar_distro.zip with cach
   const seed = createSeed({
     currentVersion: "1.0.0",
     responseByUrl: {
-      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/manifest.json": {
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
         ok: true,
         status: 200,
         async json() {
@@ -337,7 +338,7 @@ test("openUnderparGetLatestFlow falls back to opening the package tab when downl
     currentVersion: "1.0.0",
     downloadShouldFail: true,
     responseByUrl: {
-      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/manifest.json": {
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
         ok: true,
         status: 200,
         async json() {
@@ -364,6 +365,43 @@ test("openUnderparGetLatestFlow falls back to opening the package tab when downl
   assert.equal(seed.calls.tabsCreate.length, 2);
   assert.match(String(seed.calls.tabsCreate[0]?.url || ""), new RegExp(`/${latestSha}/underpar_distro\\.zip\\?cacheBust=\\d+$`));
   assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
+});
+
+test("refreshUpdateState reports the downloadable package version instead of a newer repo manifest", async () => {
+  const latestSha = "1234567890abcdef1234567890abcdef12345678";
+  const seed = createSeed({
+    currentVersion: "1.13.61",
+    responseByUrl: {
+      [`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/underpar_distro.version.json`]: {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.13.61" };
+        },
+      },
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: latestSha } };
+        },
+      },
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/manifest.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.13.63" };
+        },
+      },
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.refreshUpdateState({ force: true });
+
+  assert.equal(String(response.latestVersion || ""), "1.13.61");
+  assert.equal(response.updateAvailable, false);
+  assert.equal(seed.calls.fetch.includes("https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/manifest.json"), false);
 });
 
 test("UnderPAR avatar menu exposes a Get Latest action wired to the background flow", () => {

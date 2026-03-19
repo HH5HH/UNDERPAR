@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output_path="$repo_root/underpar_distro.zip"
+metadata_path="$repo_root/underpar_distro.version.json"
 archive_root_name="underpar-distro"
 staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/underpar-distro.XXXXXX")"
 
@@ -16,6 +17,29 @@ trap cleanup EXIT
 cd "$repo_root"
 find "$repo_root" -maxdepth 1 -type f -name '*.zip' ! -name "$(basename "$output_path")" -delete
 rm -f "$output_path"
+
+node - "$repo_root/manifest.json" "$metadata_path" <<'NODE'
+const fs = require("node:fs");
+
+const [manifestPath, metadataPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const version = String(manifest?.version || "").trim();
+const versionName = String(manifest?.version_name || version).trim() || version;
+
+if (!version) {
+  throw new Error("manifest.json is missing version");
+}
+
+const metadata = {
+  version,
+  version_name: versionName,
+  package_path: "underpar_distro.zip",
+  archive_root: "underpar-distro",
+  archive_manifest_path: "underpar-distro/manifest.json",
+};
+
+fs.writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+NODE
 
 mkdir -p "$staging_dir/$archive_root_name"
 
@@ -39,7 +63,9 @@ rm -rf \
   "$staging_dir/$archive_root_name/.githooks" \
   "$staging_dir/$archive_root_name/scripts" \
   "$staging_dir/$archive_root_name/tests"
-rm -f "$staging_dir/$archive_root_name/AGENTS.md"
+rm -f \
+  "$staging_dir/$archive_root_name/AGENTS.md" \
+  "$staging_dir/$archive_root_name/underpar_distro.version.json"
 
 find "$staging_dir/$archive_root_name" \( -name '*.zip' -o -name '.DS_Store' \) -delete
 
