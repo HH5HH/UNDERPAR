@@ -1,4 +1,3 @@
-const IMS_CLIENT_ID = "";
 const IMS_IDENTITY_SCOPE = "openid profile";
 const IMS_SCOPE = "openid profile offline_access additional_info.projectedProductContext";
 const IMS_CONSOLE_ALLOWED_SCOPES = Object.freeze([
@@ -24,18 +23,11 @@ const IMS_DEFAULT_AUTHORIZATION_ENDPOINT = `${IMS_ISSUER_URL}/ims/authorize/v2`;
 const IMS_DEFAULT_TOKEN_ENDPOINT = `${IMS_ISSUER_URL}/ims/token/v3`;
 const IMS_DEFAULT_USERINFO_ENDPOINT = `${IMS_ISSUER_URL}/ims/userinfo/v2`;
 const IMS_DEFAULT_REVOCATION_ENDPOINT = `${IMS_ISSUER_URL}/ims/revoke`;
-const IMS_AUTHORIZE_URL = IMS_DEFAULT_AUTHORIZATION_ENDPOINT;
 const IMS_BASE_URL = IMS_ISSUER_URL;
 const IMS_PROFILE_URL = "https://ims-na1.adobelogin.com/ims/profile/v1";
 const IMS_ORGS_URL = "https://ims-na1.adobelogin.com/ims/organizations/v5";
 const PPS_PROFILE_BASE_URL = "https://pps.services.adobe.com";
-const IMS_LEGACY_REDIRECT_URI = "";
-const IMS_FALLBACK_PROFILE_CLIENT_IDS = Object.freeze(["AdobePass1"]);
-const LOGIN_HELPER_PATH = "src/login/login.html";
-const LOGIN_HELPER_RESULT_PREFIX = "underpar_helper_result_v1:";
-const LEGACY_LOGIN_HELPER_RESULT_PREFIX = "mincloudlogin_helper_result_v1:";
-const LOGIN_HELPER_RESULT_MESSAGE_TYPE = "underpar:loginHelperResult";
-const LEGACY_LOGIN_HELPER_RESULT_MESSAGE_TYPE = "mincloudlogin:loginHelperResult";
+const LEGACY_IMS_AVATAR_CLIENT_IDS = Object.freeze(["AdobePass1"]);
 const IMS_FETCH_REQUEST_TYPE = "underpar:imsFetch";
 const LEGACY_IMS_FETCH_REQUEST_TYPE = "mincloudlogin:imsFetch";
 const CM_FETCH_REQUEST_TYPE = "underpar:cmFetch";
@@ -86,7 +78,7 @@ let ADOBE_MGMT_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "");
 let ADOBE_SP_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "");
 let DEGRADATION_API_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.degradationBase || "");
 let REST_V2_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.restV2Base || "");
-let activeLoginHelperBootstrapContext = null;
+let activeAuthPopupBootstrapContext = null;
 let PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
 let underparTrackedFetchOriginal = null;
 const DCR_CACHE_PREFIX = "underpar_dcr_cache_v1";
@@ -1065,6 +1057,18 @@ function normalizeUnderparVaultImsRuntimeConfigRecord(value = null) {
   };
 }
 
+function extractUnderparImsRuntimeConfigFromZipKeyText(zipKeyText = "") {
+  const parsedPayload = parseZipKeyPayload(zipKeyText);
+  const imsRuntimeConfig = normalizeUnderparVaultImsRuntimeConfigRecord(parsedPayload);
+  if (!imsRuntimeConfig?.clientId) {
+    throw new Error("Parsed ZIP.KEY is missing required Adobe IMS value: adobe.ims.client_id.");
+  }
+  return {
+    parsedPayload,
+    imsRuntimeConfig,
+  };
+}
+
 function normalizeUnderparSlacktivationZipKeyConfig(parsedPayload = null) {
   const payload = parsedPayload && typeof parsedPayload === "object" ? parsedPayload : {};
   const clientId = readZipKeyValue(payload, [
@@ -1509,6 +1513,48 @@ function setUnderparVaultImsRuntimeConfig(vault = null, value = null) {
     delete target.underpar.globals.ims;
   }
   return normalized;
+}
+
+async function importUnderparImsRuntimeConfigFromZipKeyText(zipKeyText = "", options = {}) {
+  const rawZipKeyText = String(zipKeyText || "").trim();
+  if (!rawZipKeyText) {
+    throw new Error("ZIP.KEY payload is required.");
+  }
+
+  const { imsRuntimeConfig } = extractUnderparImsRuntimeConfigFromZipKeyText(rawZipKeyText);
+  return enqueuePassVaultPersist(async () => {
+    const vault = normalizeUnderparVaultPayload(state.passVault || (await ensurePassVaultLoaded({ forceReload: false })));
+    const existingRuntimeConfig = getUnderparVaultImsRuntimeConfig(vault);
+    const previousClientId = String(existingRuntimeConfig?.clientId || "").trim();
+    const nextRuntimeConfig = normalizeUnderparVaultImsRuntimeConfigRecord({
+      ...existingRuntimeConfig,
+      ...imsRuntimeConfig,
+      source: "ZIP.KEY",
+      importedAt: new Date().toISOString(),
+      updatedAt: Date.now(),
+    });
+    const nextClientId = String(nextRuntimeConfig?.clientId || "").trim();
+    if (!nextClientId) {
+      throw new Error("Parsed ZIP.KEY is missing required Adobe IMS value: adobe.ims.client_id.");
+    }
+
+    setUnderparVaultImsRuntimeConfig(vault, nextRuntimeConfig);
+    vault.updatedAt = Date.now();
+    await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false });
+
+    if (previousClientId && previousClientId !== nextClientId) {
+      await clearLoginData().catch(() => {});
+    }
+
+    return {
+      message:
+        previousClientId && previousClientId !== nextClientId
+          ? `ZIP.KEY updated Adobe IMS client ${summarizeUnderparImsClientId(nextClientId)} in VAULT.`
+          : `ZIP.KEY imported Adobe IMS client ${summarizeUnderparImsClientId(nextClientId)} into VAULT.`,
+      imsRuntimeConfig: cloneJsonLikeValue(nextRuntimeConfig, null),
+      vaultPayload: cloneJsonLikeValue(vault, null),
+    };
+  });
 }
 
 function getUnderparVaultSlacktivationInput(vault = null) {
@@ -10420,9 +10466,6 @@ const AVATAR_SIZE_PREFERENCES = [128, 64, 256, 32];
 const AVATAR_MAX_RESOLVE_CANDIDATES = 20;
 const AVATAR_DIRECT_LOAD_TIMEOUT_MS = 1200;
 const AVATAR_IMS_REFRESH_COOLDOWN_MS = 2 * 60 * 1000;
-const IMS_AVATAR_CLIENT_IDS = [...IMS_FALLBACK_PROFILE_CLIENT_IDS];
-const IMS_PROFILE_CLIENT_IDS = [...IMS_FALLBACK_PROFILE_CLIENT_IDS];
-const IMS_VALIDATE_CLIENT_IDS = [...IMS_FALLBACK_PROFILE_CLIENT_IDS];
 const AVATAR_CACHE_STORAGE_PREFIX = "underpar_avatar_cache_v2:";
 const LEGACY_AVATAR_CACHE_STORAGE_PREFIX = "mincloudlogin_avatar_cache_v2:";
 const AVATAR_MAX_LOCALSTORAGE_DATAURL_BYTES = 220000;
@@ -10431,10 +10474,6 @@ const LEGACY_AVATAR_PERSIST_STORAGE_PREFIX = "mincloudlogin_avatar_persist_v1:";
 const AVATAR_PERSIST_GLOBAL_KEY = `${AVATAR_PERSIST_STORAGE_PREFIX}last`;
 const LEGACY_AVATAR_PERSIST_GLOBAL_KEY = `${LEGACY_AVATAR_PERSIST_STORAGE_PREFIX}last`;
 const AVATAR_PERSIST_TTL_SECONDS = 30 * 24 * 60 * 60;
-const LOGIN_HELPER_RESULT_MESSAGE_TYPES = new Set([
-  LOGIN_HELPER_RESULT_MESSAGE_TYPE,
-  LEGACY_LOGIN_HELPER_RESULT_MESSAGE_TYPE,
-]);
 const ESM_WORKSPACE_MESSAGE_TYPES = new Set([ESM_WORKSPACE_MESSAGE_TYPE, LEGACY_ESM_WORKSPACE_MESSAGE_TYPE]);
 const BLONDIE_TIME_WORKSPACE_MESSAGE_TYPES = new Set([BLONDIE_TIME_WORKSPACE_MESSAGE_TYPE]);
 const MEG_WORKSPACE_MESSAGE_TYPES = new Set([MEG_WORKSPACE_MESSAGE_TYPE, LEGACY_MEG_WORKSPACE_MESSAGE_TYPE]);
@@ -10585,6 +10624,10 @@ const state = {
   restrictedOrgLabel: "",
   restrictedRecoveryLabel: "",
   sessionReady: false,
+  zipKeyImportPending: false,
+  zipKeyImportDragActive: false,
+  zipKeyImportMessage: "",
+  zipKeyImportMessageType: "info",
   avatarMenuOpen: false,
   updateAvailable: false,
   latestVersion: "",
@@ -10799,6 +10842,17 @@ const els = {
   signInView: document.getElementById("sign-in-view"),
   signInHeroBtn: document.getElementById("sign-in-hero-btn"),
   signInUpdateIndicator: document.getElementById("sign-in-update-indicator"),
+  zipKeyImportView: document.getElementById("zip-key-import-view"),
+  zipKeyImportCard: document.getElementById("zip-key-import-card"),
+  zipKeyImportTitle: document.getElementById("zip-key-import-title"),
+  zipKeyImportDescription: document.getElementById("zip-key-import-description"),
+  zipKeyImportClient: document.getElementById("zip-key-import-client"),
+  zipKeyDropzone: document.getElementById("zip-key-dropzone"),
+  zipKeyDropzoneLabel: document.getElementById("zip-key-dropzone-label"),
+  zipKeyBrowseBtn: document.getElementById("zip-key-browse-btn"),
+  zipKeyContinueBtn: document.getElementById("zip-key-continue-btn"),
+  zipKeyImportState: document.getElementById("zip-key-import-state"),
+  zipKeyFileInput: document.getElementById("zip-key-file-input"),
   restrictedView: document.getElementById("restricted-view"),
   restrictedOrgSelect: document.getElementById("restricted-org-select"),
   restrictedOrgHint: document.getElementById("restricted-org-hint"),
@@ -11052,6 +11106,229 @@ function setStatus(message = "", type = "info") {
   els.status.classList.remove("error", "success");
   if (showAsGlobalStatus) {
     els.status.classList.add("error");
+  }
+}
+
+function summarizeUnderparImsClientId(clientId = "") {
+  const normalized = String(clientId || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= 22) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 12)}...${normalized.slice(-6)}`;
+}
+
+function hasConfiguredUnderparImsClientId(vault = state.passVault || null) {
+  return Boolean(getActiveUnderparImsRuntimeConfig(vault)?.clientId);
+}
+
+function setZipKeyImportFeedback(message = "", type = "info") {
+  state.zipKeyImportMessage = String(message || "").trim();
+  const normalizedType = String(type || "info").trim().toLowerCase();
+  state.zipKeyImportMessageType =
+    normalizedType === "error" || normalizedType === "success" ? normalizedType : "info";
+}
+
+function syncZipKeyImportView() {
+  if (!els.zipKeyImportView) {
+    return;
+  }
+
+  const show = !state.sessionReady && !state.restricted;
+  els.zipKeyImportView.hidden = !show;
+  if (!show) {
+    return;
+  }
+
+  const runtimeConfig = getActiveUnderparImsRuntimeConfig();
+  const hasClientId = Boolean(runtimeConfig?.clientId);
+  const pending = state.zipKeyImportPending === true;
+  const dragActive = state.zipKeyImportDragActive === true;
+  const clientSummary = summarizeUnderparImsClientId(runtimeConfig?.clientId || "");
+  const description = hasClientId
+    ? "Adobe IMS client is loaded in VAULT. Drop a new ZIP.KEY to replace it or continue to sign in."
+    : "UnderPAR needs a ZIP.KEY with adobe.ims.client_id before Adobe IMS sign-in can start.";
+  const stateMessage = pending
+    ? "Importing ZIP.KEY into VAULT..."
+    : String(state.zipKeyImportMessage || "").trim();
+  const stateType = pending ? "info" : String(state.zipKeyImportMessageType || "info").trim().toLowerCase();
+
+  if (els.zipKeyImportCard) {
+    els.zipKeyImportCard.classList.toggle("is-ready", hasClientId);
+    els.zipKeyImportCard.classList.toggle("is-drag-active", dragActive);
+    els.zipKeyImportCard.classList.toggle("is-busy", pending);
+  }
+  if (els.zipKeyImportTitle) {
+    els.zipKeyImportTitle.textContent = hasClientId ? "ZIP.KEY Ready" : "Import ZIP.KEY";
+  }
+  if (els.zipKeyImportDescription) {
+    els.zipKeyImportDescription.innerHTML = hasClientId
+      ? "Adobe IMS client is loaded in VAULT. Drop a new ZIP.KEY to replace it or continue to sign in."
+      : 'UnderPAR needs a ZIP.KEY with <code>adobe.ims.client_id</code> before Adobe IMS sign-in can start.';
+  }
+  if (els.zipKeyImportClient) {
+    els.zipKeyImportClient.hidden = !hasClientId;
+    els.zipKeyImportClient.textContent = hasClientId ? `Active Adobe IMS client: ${clientSummary}` : "";
+  }
+  if (els.zipKeyDropzoneLabel) {
+    els.zipKeyDropzoneLabel.textContent = pending
+      ? "Importing ZIP.KEY..."
+      : hasClientId
+        ? "Drop a new ZIP.KEY here"
+        : "Drop ZIP.KEY here";
+  }
+  if (els.zipKeyDropzone) {
+    els.zipKeyDropzone.setAttribute("aria-label", pending ? "Importing ZIP.KEY" : description);
+    els.zipKeyDropzone.setAttribute("aria-disabled", pending ? "true" : "false");
+    els.zipKeyDropzone.tabIndex = pending ? -1 : 0;
+  }
+  if (els.zipKeyBrowseBtn) {
+    els.zipKeyBrowseBtn.disabled = pending;
+    els.zipKeyBrowseBtn.textContent = pending ? "Importing..." : hasClientId ? "Replace ZIP.KEY" : "Choose ZIP.KEY";
+  }
+  if (els.zipKeyContinueBtn) {
+    els.zipKeyContinueBtn.hidden = !hasClientId;
+    els.zipKeyContinueBtn.disabled = pending || state.busy;
+  }
+  if (els.zipKeyImportState) {
+    els.zipKeyImportState.hidden = !stateMessage;
+    els.zipKeyImportState.textContent = stateMessage;
+    els.zipKeyImportState.classList.remove("error", "success", "info");
+    if (stateMessage) {
+      els.zipKeyImportState.classList.add(
+        stateType === "error" || stateType === "success" ? stateType : "info"
+      );
+    }
+  }
+  if (els.zipKeyFileInput) {
+    els.zipKeyFileInput.disabled = pending;
+  }
+}
+
+function promptForZipKeyImport() {
+  if (state.zipKeyImportPending) {
+    return;
+  }
+  setStatus("", "info");
+  if (!String(state.zipKeyImportMessage || "").trim()) {
+    setZipKeyImportFeedback("Choose a ZIP.KEY file to load the Adobe IMS client into VAULT.", "info");
+    render();
+  }
+  if (els.zipKeyFileInput) {
+    els.zipKeyFileInput.value = "";
+    els.zipKeyFileInput.click();
+    return;
+  }
+  if (els.zipKeyDropzone) {
+    els.zipKeyDropzone.focus();
+  }
+}
+
+function readUnderparTextFile(file = null) {
+  return new Promise((resolve, reject) => {
+    if (!(file instanceof File)) {
+      reject(new Error("ZIP.KEY file is required."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Unable to read ${String(file.name || "ZIP.KEY").trim() || "ZIP.KEY"}.`));
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      if (!text.trim()) {
+        reject(new Error("ZIP.KEY payload is empty."));
+        return;
+      }
+      resolve(text);
+    };
+    reader.readAsText(file);
+  });
+}
+
+function focusPostZipKeyImportAction() {
+  window.setTimeout(() => {
+    if (els.zipKeyContinueBtn && !els.zipKeyContinueBtn.hidden) {
+      els.zipKeyContinueBtn.focus();
+      return;
+    }
+    if (els.signInHeroBtn && !els.signInHeroBtn.hidden) {
+      els.signInHeroBtn.focus();
+      return;
+    }
+    if (els.authBtn) {
+      els.authBtn.focus();
+    }
+  }, 0);
+}
+
+async function importZipKeyIntoVaultFromText(zipKeyText = "", sourceLabel = "ZIP.KEY") {
+  state.zipKeyImportPending = true;
+  state.zipKeyImportDragActive = false;
+  setZipKeyImportFeedback(`Importing ${String(sourceLabel || "ZIP.KEY").trim() || "ZIP.KEY"}...`, "info");
+  render();
+
+  try {
+    const result = await importUnderparImsRuntimeConfigFromZipKeyText(zipKeyText, { silent: true });
+    setStatus("", "info");
+    setZipKeyImportFeedback(
+      result?.message || "ZIP.KEY imported into VAULT. Continue to sign in.",
+      "success"
+    );
+    render();
+    focusPostZipKeyImportAction();
+    return {
+      ok: true,
+      ...(result && typeof result === "object" ? result : {}),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setZipKeyImportFeedback(message, "error");
+    setStatus(message, "error");
+    render();
+    return {
+      ok: false,
+      error: message,
+    };
+  } finally {
+    state.zipKeyImportPending = false;
+    render();
+  }
+}
+
+async function importZipKeyIntoVaultFromFile(file = null) {
+  const label = String(file?.name || "ZIP.KEY").trim() || "ZIP.KEY";
+  state.zipKeyImportPending = true;
+  state.zipKeyImportDragActive = false;
+  setZipKeyImportFeedback(`Importing ${label}...`, "info");
+  render();
+
+  try {
+    const text = await readUnderparTextFile(file);
+    const result = await importUnderparImsRuntimeConfigFromZipKeyText(text, { silent: true });
+    setStatus("", "info");
+    setZipKeyImportFeedback(
+      result?.message || "ZIP.KEY imported into VAULT. Continue to sign in.",
+      "success"
+    );
+    render();
+    focusPostZipKeyImportAction();
+    return {
+      ok: true,
+      ...(result && typeof result === "object" ? result : {}),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setZipKeyImportFeedback(message, "error");
+    setStatus(message, "error");
+    render();
+    return {
+      ok: false,
+      error: message,
+    };
+  } finally {
+    state.zipKeyImportPending = false;
+    render();
   }
 }
 
@@ -48751,7 +49028,7 @@ async function requireUnderparImsRuntimeConfig() {
   if (runtimeConfig?.clientId) {
     return runtimeConfig;
   }
-  throw new Error("Adobe IMS client ID is not configured. Import a ZIP.KEY with adobe.ims.client_id in VAULT first.");
+  throw new Error("Adobe IMS client ID is not configured. Drop or choose a ZIP.KEY with adobe.ims.client_id in the VAULT import panel first.");
 }
 
 function getUnderparImsRedirectUri() {
@@ -48770,7 +49047,6 @@ function getUnderparImsClientIdCandidates(accessToken = "", ...hints) {
       ...hints,
       firstNonEmptyString([tokenClaims?.client_id, tokenClaims?.clientId]),
       runtimeConfig?.clientId,
-      ...IMS_FALLBACK_PROFILE_CLIENT_IDS,
     ]
       .map((value) => String(value || "").trim())
       .filter(Boolean)
@@ -48854,144 +49130,6 @@ async function fetchValidateTokenSessionSnapshot(accessToken = "") {
   return null;
 }
 
-function parseAuthResponse(responseUrl, requestState) {
-  const authParams = extractAuthParams(responseUrl);
-
-  const authError = authParams.get("error");
-  if (authError) {
-    const description = authParams.get("error_description");
-    throw new Error(redactSensitiveTokenValues(description ? `${authError}: ${description}` : authError));
-  }
-
-  const returnedState = authParams.get("state");
-  if (returnedState && returnedState !== requestState) {
-    throw new Error("State validation failed.");
-  }
-
-  const accessToken = authParams.get("access_token");
-  if (!accessToken) {
-    throw new Error("No access token returned from IMS.");
-  }
-
-  const expiry = resolveAuthResponseExpiry(accessToken, authParams.get("expires_in"));
-  const expiresAt = coercePositiveNumber(expiry.expiresAt);
-  const tokenType = String(authParams.get("token_type") || "bearer").trim();
-  const scope = String(authParams.get("scope") || "").trim();
-  const idToken = String(authParams.get("id_token") || "").trim();
-  const refreshToken = String(authParams.get("refresh_token") || "").trim();
-  const statePayload = parseImsStatePayload(String(authParams.get("state") || ""));
-
-  const callbackSession = mergeImsSessionSnapshots(null, {
-    tokenId: authParams.get("id"),
-    sessionId: authParams.get("sid"),
-    sessionUrl: firstNonEmptyString([authParams.get("session"), statePayload?.session]),
-    userId: firstNonEmptyString([authParams.get("user_id"), authParams.get("userId")]),
-    authId: firstNonEmptyString([authParams.get("aa_id"), authParams.get("authId"), authParams.get("auth_id")]),
-    clientId: authParams.get("client_id"),
-    tokenType,
-    scope,
-    as: authParams.get("as"),
-    fg: authParams.get("fg"),
-    moi: authParams.get("moi"),
-    pba: authParams.get("pba"),
-    keyAlias: authParams.get("key_alias"),
-    stateNonce: statePayload?.nonce,
-    stateJslibVersion: firstNonEmptyString([statePayload?.jslibver, statePayload?.jslibVersion]),
-    expiresAt,
-  });
-
-  const imsSession = mergeImsSessionSnapshots(expiry.tokenSnapshot, callbackSession);
-  if (imsSession && (!Number.isFinite(Number(imsSession.expiresAt)) || Number(imsSession.expiresAt) <= 0)) {
-    imsSession.expiresAt = expiresAt;
-  }
-
-  return {
-    accessToken,
-    expiresAt,
-    tokenType: tokenType || "bearer",
-    scope,
-    idToken,
-    refreshToken,
-    imsSession,
-  };
-}
-
-function shouldUseAuthWindowFallback(error) {
-  const text = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  return text.includes("authorization page could not be loaded");
-}
-
-function buildAuthorizeUrl(redirectUri, requestState, extraParams = {}) {
-  const params = new URLSearchParams({
-    client_id: IMS_CLIENT_ID,
-    response_type: "token",
-    scope: IMS_SCOPE,
-    state: requestState,
-    locale: "en_US",
-    redirect_uri: redirectUri,
-  });
-
-  for (const [key, value] of Object.entries(extraParams)) {
-    if (value !== undefined && value !== null && value !== "") {
-      params.set(key, String(value));
-    }
-  }
-
-  return `${IMS_AUTHORIZE_URL}?${params.toString()}`;
-}
-
-function encodeBase64UrlUtf8(value) {
-  const base64 = base64EncodeUtf8(value);
-  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function getLoginHelperStorageArea() {
-  return chrome.storage?.session || chrome.storage.local;
-}
-
-function buildLoginHelperResultKeys(requestId) {
-  const normalized = String(requestId || "").trim();
-  if (!normalized) {
-    return [];
-  }
-  return [`${LOGIN_HELPER_RESULT_PREFIX}${normalized}`, `${LEGACY_LOGIN_HELPER_RESULT_PREFIX}${normalized}`];
-}
-
-async function readLoginHelperResult(requestId) {
-  const keys = buildLoginHelperResultKeys(requestId);
-  const storageArea = getLoginHelperStorageArea();
-  if (keys.length === 0 || !storageArea?.get) {
-    return null;
-  }
-
-  try {
-    const payload = await storageArea.get(keys);
-    for (const key of keys) {
-      const result = payload?.[key];
-      if (result && typeof result === "object") {
-        return result;
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function clearLoginHelperResult(requestId) {
-  const keys = buildLoginHelperResultKeys(requestId);
-  const storageArea = getLoginHelperStorageArea();
-  if (keys.length === 0 || !storageArea?.remove) {
-    return;
-  }
-
-  try {
-    await storageArea.remove(keys);
-  } catch {
-    // Ignore storage cleanup failures.
-  }
-}
-
 async function getTabByIdSafe(tabId) {
   const normalizedTabId = Number(tabId || 0);
   if (!Number.isInteger(normalizedTabId) || normalizedTabId <= 0 || !chrome.tabs?.get) {
@@ -49004,9 +49142,9 @@ async function getTabByIdSafe(tabId) {
   }
 }
 
-async function releaseLoginHelperBootstrapContext(reason = "unknown") {
-  const context = activeLoginHelperBootstrapContext;
-  activeLoginHelperBootstrapContext = null;
+async function releaseAuthPopupBootstrapContext(reason = "unknown") {
+  const context = activeAuthPopupBootstrapContext;
+  activeAuthPopupBootstrapContext = null;
   if (!context || typeof context !== "object") {
     return;
   }
@@ -49040,42 +49178,42 @@ async function releaseLoginHelperBootstrapContext(reason = "unknown") {
     }
   }
 
-  log("Released retained login helper popup", {
+  log("Released retained auth popup", {
     reason: String(reason || "unknown"),
     tabId,
     windowId,
   });
 }
 
-async function retainLoginHelperBootstrapContext(context = {}) {
+async function retainAuthPopupBootstrapContext(context = {}) {
   const tabId = Number(context?.tabId || 0);
   const windowId = Number(context?.windowId || 0);
   if (!Number.isInteger(tabId) || tabId <= 0 || !Number.isInteger(windowId) || windowId <= 0) {
     return null;
   }
 
-  await releaseLoginHelperBootstrapContext("superseded");
-  activeLoginHelperBootstrapContext = {
+  await releaseAuthPopupBootstrapContext("superseded");
+  activeAuthPopupBootstrapContext = {
     tabId,
     windowId,
     debuggerSession: context?.debuggerSession || null,
     requestId: String(context?.requestId || "").trim(),
     retainedAt: Date.now(),
   };
-  log("Retained login helper popup for CM bootstrap", {
+  log("Retained auth popup for CM bootstrap", {
     tabId,
     windowId,
     requestId: String(context?.requestId || "").trim(),
   });
-  return activeLoginHelperBootstrapContext;
+  return activeAuthPopupBootstrapContext;
 }
 
-function getRetainedLoginHelperBootstrapTabId() {
-  return Number(activeLoginHelperBootstrapContext?.tabId || 0);
+function getRetainedAuthPopupBootstrapTabId() {
+  return Number(activeAuthPopupBootstrapContext?.tabId || 0);
 }
 
-async function maybeReleaseRetainedLoginHelperBootstrapContext(preferredTabId = 0, reason = "unknown") {
-  const retainedTabId = getRetainedLoginHelperBootstrapTabId();
+async function maybeReleaseRetainedAuthPopupBootstrapContext(preferredTabId = 0, reason = "unknown") {
+  const retainedTabId = getRetainedAuthPopupBootstrapTabId();
   if (!Number.isInteger(retainedTabId) || retainedTabId <= 0) {
     return false;
   }
@@ -49083,7 +49221,7 @@ async function maybeReleaseRetainedLoginHelperBootstrapContext(preferredTabId = 
   if (Number.isInteger(normalizedPreferredTabId) && normalizedPreferredTabId > 0 && normalizedPreferredTabId !== retainedTabId) {
     return false;
   }
-  await releaseLoginHelperBootstrapContext(reason);
+  await releaseAuthPopupBootstrapContext(reason);
   return true;
 }
 
@@ -49182,238 +49320,6 @@ async function primeCmConsoleInAuthPopup(tabId, options = {}) {
   }
 }
 
-function normalizeLoginHelperMessage(message, requestId) {
-  if (!message || typeof message !== "object") {
-    return null;
-  }
-
-  const normalizedRequestId = String(requestId || "").trim();
-  if (normalizedRequestId && String(message.requestId || "").trim() !== normalizedRequestId) {
-    return null;
-  }
-
-  return message;
-}
-
-async function runLoginHelperFlow(requestState, extraParams = {}, options = {}) {
-  const helperRequestId = randomStateValue();
-  const helperUrl = new URL(chrome.runtime.getURL(LOGIN_HELPER_PATH));
-  helperUrl.searchParams.set("mode", "login");
-  helperUrl.searchParams.set("requestId", helperRequestId);
-  helperUrl.searchParams.set("state", requestState);
-
-  const sanitizedExtraParams = Object.fromEntries(
-    Object.entries(extraParams || {}).filter(([, value]) => value !== undefined && value !== null && value !== "")
-  );
-  if (Object.keys(sanitizedExtraParams).length > 0) {
-    helperUrl.searchParams.set("extra", encodeBase64UrlUtf8(JSON.stringify(sanitizedExtraParams)));
-  }
-
-  await clearLoginHelperResult(helperRequestId);
-
-  return new Promise(async (resolve, reject) => {
-    let completed = false;
-    let primingCmConsole = false;
-    let helperWindowId = 0;
-    let helperTabId = 0;
-    let debuggerSession = null;
-    let timeoutId = null;
-    let pollId = null;
-    const shouldPrimeCmConsole = extraParams?.prime_cm_console !== "false";
-    const keepWindowOpenForBootstrap = options?.keepWindowOpenForBootstrap === true;
-
-    const finalize = async (payload, error) => {
-      if (completed) {
-        return;
-      }
-      completed = true;
-
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-      if (pollId) {
-        clearInterval(pollId);
-      }
-      chrome.runtime.onMessage.removeListener(onRuntimeMessage);
-      chrome.tabs.onRemoved.removeListener(onTabRemoved);
-
-      let capturedAvatarCandidate = "";
-      if (debuggerSession?.getCapturedAvatarCandidate) {
-        try {
-          capturedAvatarCandidate = debuggerSession.getCapturedAvatarCandidate() || "";
-        } catch {
-          capturedAvatarCandidate = "";
-        }
-      }
-
-      await clearLoginHelperResult(helperRequestId);
-
-      let retainedBootstrapContext = null;
-      if (!error && keepWindowOpenForBootstrap && helperWindowId && helperTabId && debuggerSession) {
-        retainedBootstrapContext = await retainLoginHelperBootstrapContext({
-          windowId: helperWindowId,
-          tabId: helperTabId,
-          debuggerSession,
-          requestId: helperRequestId,
-        });
-        debuggerSession = null;
-        helperWindowId = 0;
-        helperTabId = 0;
-      }
-
-      if (debuggerSession) {
-        try {
-          await debuggerSession.detach();
-        } catch {
-          // Ignore debugger detach failures.
-        }
-        debuggerSession = null;
-      }
-
-      if (helperWindowId) {
-        try {
-          await chrome.windows.remove(helperWindowId);
-        } catch {
-          // Ignore window close failures.
-        }
-      }
-
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      const accessToken = String(payload?.accessToken || "").trim();
-      if (!accessToken) {
-        reject(new Error("No access token returned from helper login flow."));
-        return;
-      }
-
-      const expiresAt = Number(payload?.expiresAt || 0);
-      const capturedAvatarUrl = normalizeAvatarCandidate(
-        firstNonEmptyString([payload?.capturedAvatarUrl, payload?.imageUrl, capturedAvatarCandidate])
-      );
-      const helperImsSession = mergeImsSessionSnapshots(
-        deriveImsSessionSnapshotFromToken(accessToken),
-        payload?.imsSession && typeof payload.imsSession === "object" ? payload.imsSession : null
-      );
-      const helperProfile = payload?.profile && typeof payload.profile === "object" ? payload.profile : null;
-      const mergedProfile = applyCapturedAvatarToProfile(helperProfile, capturedAvatarUrl);
-      const resolvedImageUrl =
-        normalizeAvatarCandidate(
-          firstNonEmptyString([
-            payload?.imageUrl,
-            capturedAvatarUrl,
-            resolveLoginImageUrl({
-              profile: mergedProfile,
-              imageUrl: capturedAvatarUrl,
-            }),
-          ])
-        ) || "";
-
-      resolve({
-        accessToken,
-        expiresAt: Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : Date.now() + 60 * 60 * 1000,
-        tokenType: compactStorageString(firstNonEmptyString([payload?.tokenType]), 60) || "bearer",
-        scope: compactStorageString(firstNonEmptyString([payload?.scope]), 2048),
-        idToken: compactStorageString(firstNonEmptyString([payload?.idToken]), 4096),
-        refreshToken: compactStorageString(firstNonEmptyString([payload?.refreshToken]), 4096),
-        imsSession: helperImsSession,
-        profile: mergedProfile,
-        imageUrl: resolvedImageUrl,
-        capturedAvatarUrl,
-        organizations: payload?.organizations && typeof payload.organizations === "object" ? payload.organizations : null,
-        authPopupTabId: Number(retainedBootstrapContext?.tabId || 0),
-        authPopupWindowId: Number(retainedBootstrapContext?.windowId || 0),
-      });
-    };
-
-    const handleHelperPayload = (payload) => {
-      const normalized = normalizeLoginHelperMessage(payload, helperRequestId);
-      if (!normalized) {
-        return;
-      }
-
-      if (normalized.ok !== true) {
-        const message = String(normalized.error || "Login helper flow failed.");
-        void finalize(null, new Error(message));
-        return;
-      }
-      if (!shouldPrimeCmConsole || primingCmConsole || !helperTabId) {
-        void finalize(normalized, null);
-        return;
-      }
-
-      primingCmConsole = true;
-      void (async () => {
-        await primeCmConsoleInAuthPopup(helperTabId, {
-          requestId: helperRequestId,
-        });
-        await finalize(normalized, null);
-      })();
-    };
-
-    const onRuntimeMessage = (incomingMessage) => {
-      if (!incomingMessage || !LOGIN_HELPER_RESULT_MESSAGE_TYPES.has(String(incomingMessage.type || ""))) {
-        return;
-      }
-
-      const payload =
-        incomingMessage.message && typeof incomingMessage.message === "object"
-          ? incomingMessage.message
-          : incomingMessage;
-      handleHelperPayload(payload);
-    };
-
-    const onTabRemoved = (tabId) => {
-      if (!helperTabId || tabId !== helperTabId || completed) {
-        return;
-      }
-      void finalize(null, new Error("Login window was closed before completion."));
-    };
-
-    chrome.runtime.onMessage.addListener(onRuntimeMessage);
-    chrome.tabs.onRemoved.addListener(onTabRemoved);
-
-    timeoutId = setTimeout(() => {
-      void finalize(null, new Error("Login timed out. Please try again."));
-    }, AUTH_WINDOW_TIMEOUT_MS);
-
-    pollId = setInterval(() => {
-      void readLoginHelperResult(helperRequestId)
-        .then((payload) => {
-          if (payload) {
-            handleHelperPayload(payload);
-          }
-        })
-        .catch(() => {
-          // Ignore helper storage polling failures.
-        });
-    }, 250);
-
-    try {
-      const helperWindow = await chrome.windows.create({
-        url: helperUrl.toString(),
-        type: "popup",
-        width: 520,
-        height: 720,
-        focused: true,
-      });
-
-      helperWindowId = Number(helperWindow?.id || 0);
-      helperTabId = Number(helperWindow?.tabs?.[0]?.id || 0);
-      if (!helperTabId) {
-        await finalize(null, new Error("Unable to open login window."));
-        return;
-      }
-
-      debuggerSession = await attachAuthDebugger(helperTabId, { captureProfileAvatar: true });
-    } catch (error) {
-      await finalize(null, error instanceof Error ? error : new Error(String(error)));
-    }
-  });
-}
-
 async function runAuthInPopupWindow(authUrl, redirectUri, options = {}) {
   return new Promise(async (resolve, reject) => {
     let completed = false;
@@ -49459,7 +49365,7 @@ async function runAuthInPopupWindow(authUrl, redirectUri, options = {}) {
 
       let retainedBootstrapContext = null;
       if (!error && keepWindowOpenForBootstrap && authWindowId && authTabId && debuggerSession) {
-        retainedBootstrapContext = await retainLoginHelperBootstrapContext({
+        retainedBootstrapContext = await retainAuthPopupBootstrapContext({
           windowId: authWindowId,
           tabId: authTabId,
           debuggerSession,
@@ -49562,36 +49468,6 @@ async function runAuthInPopupWindow(authUrl, redirectUri, options = {}) {
       await finish(null, error instanceof Error ? error : new Error(String(error)));
     }
   });
-}
-
-async function runIdentityWebAuthFlow(requestState, extraParams = {}, interactive = true) {
-  const redirectUri = chrome.identity.getRedirectURL("ims-callback");
-  const authUrl = buildAuthorizeUrl(redirectUri, requestState, extraParams);
-
-  const responseUrl = await chrome.identity.launchWebAuthFlow({
-    url: authUrl,
-    interactive,
-  });
-
-  if (!responseUrl) {
-    throw new Error("Login was canceled.");
-  }
-
-  return parseAuthResponse(responseUrl, requestState);
-}
-
-async function runLegacyAuthWindowFlow(requestState, extraParams = {}) {
-  const authUrl = buildAuthorizeUrl(IMS_LEGACY_REDIRECT_URI, requestState, extraParams);
-  const authWindowResult = await runAuthInPopupWindow(authUrl, IMS_LEGACY_REDIRECT_URI);
-  const responseUrl = String(authWindowResult?.responseUrl || "");
-  const parsed = parseAuthResponse(responseUrl, requestState);
-  const capturedAvatarUrl = normalizeAvatarCandidate(authWindowResult?.capturedAvatarUrl || "");
-  return capturedAvatarUrl
-    ? {
-        ...parsed,
-        capturedAvatarUrl,
-      }
-    : parsed;
 }
 
 function buildUnderparImsAuthError(parsed, text, fallbackMessage = "Adobe IMS request failed.") {
@@ -52893,7 +52769,7 @@ function buildAvatarFetchAttempts(accessToken = "", url = "") {
       "omit"
     );
 
-    for (const clientId of getUnderparImsClientIdCandidates(accessToken, ...IMS_AVATAR_CLIENT_IDS)) {
+    for (const clientId of getUnderparImsClientIdCandidates(accessToken, ...LEGACY_IMS_AVATAR_CLIENT_IDS)) {
       if (!clientId) {
         continue;
       }
@@ -53691,7 +53567,7 @@ async function signOutAndResetSession() {
 
   try {
     await clearIdentityTokens();
-    await Promise.all([clearDebugFlowStorageFromChromeStorage(), clearLoginHelperResultStorage()]);
+    await clearDebugFlowStorageFromChromeStorage();
     purgeAvatarCaches();
     purgeDcrCaches();
     await resetToSignedOutState({
@@ -54282,34 +54158,6 @@ async function clearDebugFlowStorageFromChromeStorage() {
   }
 }
 
-async function clearLoginHelperResultStorage() {
-  const areas = [chrome.storage?.session, chrome.storage?.local].filter(
-    (area) => area && typeof area.get === "function" && typeof area.remove === "function"
-  );
-  if (areas.length === 0) {
-    return 0;
-  }
-
-  let removedTotal = 0;
-  for (const area of areas) {
-    try {
-      const payload = await area.get(null);
-      const keysToRemove = Object.keys(payload || {}).filter(
-        (key) => key.startsWith(LOGIN_HELPER_RESULT_PREFIX) || key.startsWith(LEGACY_LOGIN_HELPER_RESULT_PREFIX)
-      );
-      if (keysToRemove.length === 0) {
-        continue;
-      }
-      await area.remove(keysToRemove);
-      removedTotal += keysToRemove.length;
-    } catch {
-      // Ignore storage cleanup failures.
-    }
-  }
-
-  return removedTotal;
-}
-
 async function saveLoginData(loginData) {
   const normalized = buildStoredLoginData(loginData, false);
   if (!normalized.accessToken || !normalized.expiresAt || normalized.expiresAt <= 0) {
@@ -54741,7 +54589,7 @@ async function applyActiveLoginSession(loginData, options = {}) {
 async function activateSession(sessionData, source = "unknown", options = {}) {
   const allowDeniedRecovery = options.allowDeniedRecovery !== false;
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const enforced = await enforceAdobePassAccess(sessionData);
   if (!enforced.allowed || !enforced.loginData) {
     await clearLoginData();
@@ -55222,7 +55070,7 @@ function syncMediaCompanySelectAvailability() {
 async function ensureCmTenantsPrecheckForActiveSession(reason = "session", options = {}) {
   const forceRefresh = options?.forceRefresh === true;
   const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   if (state.restricted || !state.loginData) {
     return null;
   }
@@ -55230,7 +55078,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
   const effectiveAllowTemporaryPageContextTab =
     allowTemporaryPageContextTab ||
     (preferredCmBootstrapTabId > 0 && !preferredCmBootstrapTab) ||
-    (preferredCmBootstrapTabId <= 0 && getRetainedLoginHelperBootstrapTabId() <= 0);
+    (preferredCmBootstrapTabId <= 0 && getRetainedAuthPopupBootstrapTabId() <= 0);
 
   const existingCmToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
   const cmTokenReady =
@@ -55302,7 +55150,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
       sourceUrl: String(catalog?.sourceUrl || ""),
       tokenClientId: String(parseJwtPayload(hydratedToken)?.client_id || ""),
     });
-    await maybeReleaseRetainedLoginHelperBootstrapContext(
+    await maybeReleaseRetainedAuthPopupBootstrapContext(
       preferredCmBootstrapTabId,
       `cm-global-hydrate-complete:${reason}`
     );
@@ -55359,8 +55207,7 @@ async function persistResolvedCmGlobalAuthState(accessToken = "", source = "unkn
 
 async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session", options = {}) {
   const forceRefresh = options?.forceRefresh === true;
-  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   if (state.restricted || !state.loginData) {
     return "";
   }
@@ -55372,7 +55219,7 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
     (!forceRefresh || isAccessTokenFreshEnough(existingToken, 45 * 1000))
   ) {
     await persistResolvedCmGlobalAuthState(existingToken, `existing:${reason}`).catch(() => null);
-    await maybeReleaseRetainedLoginHelperBootstrapContext(
+    await maybeReleaseRetainedAuthPopupBootstrapContext(
       preferredCmBootstrapTabId,
       `cm-global-hydrate-token-reuse:${reason}`
     );
@@ -55434,17 +55281,13 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
   }
 
   if (!tokenResult?.accessToken) {
-    tokenResult = await requestCmConsoleTokenFromExperiencePageContext({
-      requireFresh: forceRefresh,
-      allowTemporaryTab: allowTemporaryPageContextTab,
-      preferredTabId: preferredCmBootstrapTabId,
-    }).catch(() => null);
+    tokenResult = null;
   }
 
   const hydratedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
   if (hydratedToken && tokenSupportsCmTenantCatalog(hydratedToken)) {
     await persistResolvedCmGlobalAuthState(hydratedToken, `post-login:${reason}`).catch(() => null);
-    await maybeReleaseRetainedLoginHelperBootstrapContext(
+    await maybeReleaseRetainedAuthPopupBootstrapContext(
       preferredCmBootstrapTabId,
       `cm-global-hydrate-token-ready:${reason}`
     );
@@ -60756,7 +60599,6 @@ async function requestCmTokenViaImsCheck(seedToken = "", options = {}) {
 
 async function bootstrapCmConsoleTenantSession(options = {}) {
   const forceRefresh = options?.forceRefresh === true;
-  const preferredTabId = Number(options?.preferredTabId || getRetainedLoginHelperBootstrapTabId() || 0);
   try {
     const qualifiedResult = await requestQualifiedCmConsoleToken({
       requireFresh: forceRefresh,
@@ -60782,21 +60624,6 @@ async function bootstrapCmConsoleTenantSession(options = {}) {
         tokenClientId: String(parseJwtPayload(directToken)?.client_id || ""),
       });
       return directToken;
-    }
-
-    const pageContextResult = await requestCmConsoleTokenFromExperiencePageContext({
-      requireFresh: forceRefresh,
-      allowTemporaryTab: false,
-      preferredTabId,
-    });
-    const accessToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(pageContextResult || {}, {}));
-    if (accessToken && tokenSupportsCmTenantCatalog(accessToken)) {
-      emitCmDebugEvent({
-        phase: "cm-tenant-session-bootstrap",
-        source: String(pageContextResult?.source || "page-context-existing-tab"),
-        tokenClientId: String(parseJwtPayload(accessToken)?.client_id || ""),
-      });
-      return accessToken;
     }
   } catch (error) {
     log("CM tenant session bootstrap failed", {
@@ -60988,243 +60815,6 @@ async function resolveReusableAdobePageContextTab(preferredTabId = 0) {
   return null;
 }
 
-async function requestCmConsoleTokenFromExperiencePageContext(options = {}) {
-  if (!chrome.scripting?.executeScript) {
-    return null;
-  }
-
-  const requireFresh = options.requireFresh === true;
-  const allowTemporaryTab = options.allowTemporaryTab === true;
-  const preferredTabId = Number(options.preferredTabId || getRetainedLoginHelperBootstrapTabId() || 0);
-  const userIds = collectCmImsUserIdCandidates();
-  let tab = await resolveReusableAdobePageContextTab(preferredTabId);
-  if (!tab?.id) {
-    tab = await findExistingExperienceAdobeTab();
-  }
-  let createdTemporaryTab = false;
-
-  if (!tab?.id && allowTemporaryTab) {
-    try {
-      tab = await chrome.tabs.create({
-        url: `${CM_CONSOLE_APP_ORIGIN}/`,
-        active: false,
-      });
-      createdTemporaryTab = Boolean(tab?.id);
-      if (createdTemporaryTab) {
-        await waitForTabCompletion(Number(tab.id), 12000, { allowUrlChange: true });
-      }
-    } catch {
-      tab = null;
-      createdTemporaryTab = false;
-    }
-  } else if (!tab?.id) {
-    log("CM page-context token bootstrap skipped: no existing Experience tab and temporary tab creation is disabled.");
-  }
-
-  const tabId = Number(tab?.id || 0);
-  if (tabId <= 0) {
-    return null;
-  }
-
-  try {
-    const executionResults = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      args: [
-        {
-          imsOrigin: CM_IMS_CHECK_TOKEN_ENDPOINT.replace(/\/ims\/check\/v6\/token.*$/i, ""),
-          excClientId: EXPERIENCE_CLOUD_SSO_CLIENT_ID,
-          excScope: EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE,
-          excFilter: EXPERIENCE_CLOUD_EARLY_TOKEN_FILTER,
-          cmClientId: CM_IMS_PRIMARY_CLIENT_ID,
-          cmScope: CM_IMS_CHECK_DEFAULT_SCOPE,
-          userIds,
-          requireFresh,
-        },
-      ],
-      func: async (config) => {
-        const normalize = (value) => String(value || "").trim().replace(/^Bearer\s+/i, "").trim();
-        const parseJson = (text) => {
-          try {
-            return JSON.parse(String(text || ""));
-          } catch {
-            return null;
-          }
-        };
-        const extractToken = (payload) => {
-          if (!payload || typeof payload !== "object") {
-            return "";
-          }
-          const nestedToken =
-            payload.token && typeof payload.token === "object"
-              ? payload.token.access_token || payload.token.accessToken || payload.token.token || payload.token.value || ""
-              : payload.token || "";
-          return normalize(
-            payload.access_token ||
-              payload.accessToken ||
-              nestedToken ||
-              payload.imsToken ||
-              payload.bearer ||
-              payload.authToken ||
-              payload.authorization ||
-              payload.Authorization ||
-              payload.value ||
-              ""
-          );
-        };
-        const isJwt = (value) => normalize(value).split(".").length === 3;
-        const parseJwt = (value) => {
-          try {
-            const token = normalize(value);
-            const payload = token.split(".")[1] || "";
-            const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-            const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
-            return JSON.parse(atob(padded));
-          } catch {
-            return null;
-          }
-        };
-        const isFreshEnough = (token, skewMs) => {
-          const claims = parseJwt(token) || {};
-          const expSeconds = Number(claims.exp || 0);
-          if (!expSeconds) {
-            return true;
-          }
-          return expSeconds * 1000 > Date.now() + Math.max(0, Number(skewMs || 0));
-        };
-        const fetchJson = async (url, init) => {
-          const response = await fetch(String(url || ""), init);
-          const text = await response.text().catch(() => "");
-          return {
-            ok: Boolean(response.ok),
-            status: Number(response.status || 0),
-            parsed: parseJson(text),
-          };
-        };
-
-        const earlyBody = new URLSearchParams();
-        earlyBody.set("client_id", String(config?.excClientId || "exc_app"));
-        earlyBody.set("scope", String(config?.excScope || ""));
-        earlyBody.set("filter", String(config?.excFilter || ""));
-
-        const earlyTokenResponse = await fetchJson(`${String(config?.imsOrigin || "")}/ims/check/v6/token`, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-          },
-          body: earlyBody.toString(),
-        }).catch(() => ({ ok: false, status: 0, parsed: null }));
-
-        const excAccessToken = extractToken(earlyTokenResponse?.parsed);
-        if (!isJwt(excAccessToken)) {
-          return {
-            ok: false,
-            stage: "exc_app",
-            status: Number(earlyTokenResponse?.status || 0),
-          };
-        }
-        if (config?.requireFresh && !isFreshEnough(excAccessToken, 45000)) {
-          return {
-            ok: false,
-            stage: "exc_app_stale",
-          };
-        }
-
-        const excClaims = parseJwt(excAccessToken) || {};
-        const orderedUserIds = [];
-        const seen = new Set();
-        const pushUserId = (value) => {
-          const normalized = String(value || "").trim();
-          if (!normalized) {
-            return;
-          }
-          const key = normalized.toLowerCase();
-          if (seen.has(key)) {
-            return;
-          }
-          seen.add(key);
-          orderedUserIds.push(normalized);
-        };
-
-        (Array.isArray(config?.userIds) ? config.userIds : []).forEach(pushUserId);
-        pushUserId(excClaims.user_id);
-        pushUserId(excClaims.userId);
-        pushUserId(earlyTokenResponse?.parsed?.userId);
-        pushUserId(earlyTokenResponse?.parsed?.user_id);
-        pushUserId(earlyTokenResponse?.parsed?.authId);
-        pushUserId("");
-
-        for (const userId of orderedUserIds) {
-          const requestUrl = new URL(`${String(config?.imsOrigin || "")}/ims/check/v6/token`);
-          requestUrl.searchParams.set("client_id", String(config?.cmClientId || "cm-console-ui"));
-          requestUrl.searchParams.set(
-            "scope",
-            String(config?.cmScope || "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext")
-          );
-          if (userId) {
-            requestUrl.searchParams.set("user_id", userId);
-          }
-
-          const cmTokenResponse = await fetchJson(requestUrl.toString(), {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              Accept: "*/*",
-            },
-          }).catch(() => ({ ok: false, status: 0, parsed: null }));
-          const cmAccessToken = extractToken(cmTokenResponse?.parsed);
-          if (!isJwt(cmAccessToken)) {
-            continue;
-          }
-          if (config?.requireFresh && !isFreshEnough(cmAccessToken, 45000)) {
-            continue;
-          }
-          return {
-            ok: true,
-            stage: "cm-console-ui",
-            status: Number(cmTokenResponse?.status || 0),
-            accessToken: cmAccessToken,
-            excAccessToken,
-            userId: userId || "",
-          };
-        }
-
-        return {
-          ok: false,
-          stage: "cm-console-ui",
-          excAccessToken,
-        };
-      },
-    });
-
-    const result = executionResults?.[0]?.result;
-    const accessToken = normalizeBearerTokenValue(result?.accessToken || "");
-    if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
-      return null;
-    }
-    const claims = parseJwtPayload(accessToken) || {};
-    return {
-      accessToken,
-      expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(accessToken, coercePositiveNumber(claims?.expires_in))?.expiresAt),
-      expiresIn: coercePositiveNumber(claims?.expires_in),
-      scope: firstNonEmptyString([claims?.scope, CM_IMS_CHECK_DEFAULT_SCOPE]),
-      imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(accessToken), null),
-      source: `page-cm:${tabId}`,
-    };
-  } catch {
-    return null;
-  } finally {
-    if (createdTemporaryTab && tabId > 0) {
-      try {
-        await chrome.tabs.remove(tabId);
-      } catch {
-        // Ignore cleanup failures for temporary tab.
-      }
-    }
-  }
-}
-
 async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
   if (!chrome.scripting?.executeScript) {
     return null;
@@ -61232,41 +60822,17 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
 
   const requireFresh = options.requireFresh === true;
   const allowTemporaryTab = options.allowTemporaryTab === true;
-  const preferredTabId = Number(options.preferredTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   let accessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken, getPreferredCmAccessTokenCandidate()]));
   if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
-    const experiencePageTokenResult = await requestCmConsoleTokenFromExperiencePageContext({
-      requireFresh,
-      allowTemporaryTab,
-      preferredTabId,
-    });
-    const persistedExperiencePageToken = normalizeBearerTokenValue(
-      await persistCmTokenBootstrapResult(experiencePageTokenResult || {}, {})
+    accessToken = normalizeBearerTokenValue(
+      await ensureCmApiAccessToken({
+        forceRefresh: requireFresh,
+        allowTemporaryPageContextTab: false,
+        preferredCmBootstrapTabId: preferredTabId,
+        freshLeewayMs: CM_IMS_FORCE_REFRESH_SKEW_MS,
+      })
     );
-    accessToken = persistedExperiencePageToken || normalizeBearerTokenValue(experiencePageTokenResult?.accessToken || "");
-  }
-  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
-    const qualifiedTokenResult = await requestQualifiedCmConsoleToken({
-      requireFresh,
-    });
-    const qualifiedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(qualifiedTokenResult || {}, {}));
-    accessToken = qualifiedToken || normalizeBearerTokenValue(qualifiedTokenResult?.accessToken || "");
-  }
-  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
-    const directTokenResult = await requestCmTokenViaImsCheck("", {
-      requireFresh,
-    });
-    const directToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(directTokenResult || {}, {}));
-    accessToken = directToken || normalizeBearerTokenValue(directTokenResult?.accessToken || "");
-  }
-  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
-    const tokenResult = await requestCmConsoleTokenFromExperiencePageContext({
-      requireFresh,
-      allowTemporaryTab: false,
-      preferredTabId,
-    });
-    const persistedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
-    accessToken = persistedToken || normalizeBearerTokenValue(tokenResult?.accessToken || "");
   }
   if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
     return null;
@@ -61729,7 +61295,7 @@ async function tryRefreshCmTokenFromIms(seedToken = "", options = {}) {
 async function ensureCmApiAccessToken(options = {}) {
   const forceRefresh = options.forceRefresh === true;
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const tokenFreshLeewayMs =
     Number.isFinite(options.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
       ? Number(options.freshLeewayMs)
@@ -61857,19 +61423,6 @@ async function ensureCmApiAccessToken(options = {}) {
             emitCmConsoleTokenForTesting(persistedRefreshedToken, "ensure-refreshed");
             return persistedRefreshedToken;
           }
-        }
-      }
-
-      const refreshedFromPageContext = await requestCmConsoleTokenFromExperiencePageContext({
-        requireFresh,
-        allowTemporaryTab: allowTemporaryPageContextTab,
-        preferredTabId: preferredCmBootstrapTabId,
-      });
-      if (refreshedFromPageContext?.accessToken) {
-        const persistedPageContextToken = await persistCmTokenBootstrapResult(refreshedFromPageContext, {});
-        if (persistedPageContextToken && tokenSupportsCmTenantCatalog(persistedPageContextToken)) {
-          emitCmConsoleTokenForTesting(persistedPageContextToken, "ensure-page-context");
-          return persistedPageContextToken;
         }
       }
 
@@ -63479,7 +63032,7 @@ async function fetchCmTenantCatalogWithSession(url = "", options = {}) {
 async function ensureCmTenantsCatalog(options = {}) {
   const forceRefresh = options?.forceRefresh === true;
   const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const preferredAccessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken]));
   const skipBootstrap =
     options?.skipBootstrap === true &&
@@ -66458,7 +66011,7 @@ function createCookieSessionLoginData() {
 async function tryActivateCookieSession(source, options = {}) {
   const restrictOnDenied = options.restrictOnDenied === true;
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   resetCmTenantsPrecheckState();
   try {
     const entities = await fetchProgrammersFromApi({
@@ -66723,6 +66276,7 @@ function renderRestrictedView() {
 
 function render() {
   void syncSidepanelControllerBridge();
+  syncZipKeyImportView();
 
   if (state.restricted) {
     clearResolvedAvatar();
@@ -66753,17 +66307,19 @@ function render() {
   els.workflow.hidden = !(state.sessionReady && state.loginData);
 
   if (!state.sessionReady || !state.loginData) {
+    const imsConfigured = hasConfiguredUnderparImsClientId();
+    const authActionLabel = imsConfigured ? "Sign in to AdobePass" : "Import ZIP.KEY";
     clearResolvedAvatar();
     closeAvatarMenu();
     els.authBtn.classList.add("avatar", "avatar-ready");
     els.authBtn.classList.remove("avatar-loading");
     els.authBtn.style.backgroundImage = "";
-    els.authBtn.setAttribute("aria-label", "Sign in to AdobePass");
+    els.authBtn.setAttribute("aria-label", authActionLabel);
     els.authBtn.textContent = "";
     if (!state.busy) {
-      els.authBtn.title = "Sign in to AdobePass";
+      els.authBtn.title = authActionLabel;
       if (els.signInHeroBtn) {
-        els.signInHeroBtn.textContent = "Sign In";
+        els.signInHeroBtn.textContent = imsConfigured ? "Sign In" : "Import ZIP.KEY";
       }
     }
     return;
@@ -66785,7 +66341,7 @@ function render() {
 
 async function signInInteractive() {
   cancelPendingBootstrapSession();
-  await releaseLoginHelperBootstrapContext("interactive-signin-reset");
+  await releaseAuthPopupBootstrapContext("interactive-signin-reset");
   state.sessionMonitorSuppressed = false;
   setBusy(true, "Signing in...");
   setStatus("", "info");
@@ -66799,7 +66355,7 @@ async function signInInteractive() {
     resetAvatarStateForInteractiveLogin();
     const profile = await resolveProfileAfterLogin(authData);
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
-    const preferredCmBootstrapTabId = Number(authData?.authPopupTabId || getRetainedLoginHelperBootstrapTabId() || 0);
+    const preferredCmBootstrapTabId = Number(authData?.authPopupTabId || getRetainedAuthPopupBootstrapTabId() || 0);
     const activated = await activateSession(buildLoginSessionPayloadFromAuth(authData, profile, imageUrl), "interactive", {
       allowTemporaryPageContextTab: false,
       preferredCmBootstrapTabId,
@@ -66823,7 +66379,7 @@ async function signInInteractive() {
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
-    await releaseLoginHelperBootstrapContext("interactive-signin-complete");
+    await releaseAuthPopupBootstrapContext("interactive-signin-complete");
     setBusy(false);
     render();
   }
@@ -66970,9 +66526,17 @@ async function onRestrictedSignOut() {
 }
 
 async function onAuthClick() {
+  if (state.zipKeyImportPending) {
+    return;
+  }
   const allowInteractiveLoginWhileChecking =
     state.busy && !state.sessionReady && !state.restricted && !isInteractiveAuthBusyContext(state.busyContext);
   if (state.busy && !allowInteractiveLoginWhileChecking) {
+    return;
+  }
+
+  if (!state.sessionReady && !state.restricted && !hasConfiguredUnderparImsClientId()) {
+    promptForZipKeyImport();
     return;
   }
 
@@ -67131,6 +66695,91 @@ function registerEventHandlers() {
   if (els.getLatestBtn) {
     els.getLatestBtn.addEventListener("click", () => {
       void triggerGetLatestWorkflow();
+    });
+  }
+
+  if (els.zipKeyBrowseBtn) {
+    els.zipKeyBrowseBtn.addEventListener("click", () => {
+      promptForZipKeyImport();
+    });
+  }
+
+  if (els.zipKeyContinueBtn) {
+    els.zipKeyContinueBtn.addEventListener("click", () => {
+      void onAuthClick();
+    });
+  }
+
+  if (els.zipKeyFileInput) {
+    els.zipKeyFileInput.addEventListener("change", (event) => {
+      const file = event?.target?.files?.[0] || null;
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+      void importZipKeyIntoVaultFromFile(file);
+    });
+  }
+
+  if (els.zipKeyDropzone) {
+    els.zipKeyDropzone.addEventListener("click", () => {
+      promptForZipKeyImport();
+    });
+    els.zipKeyDropzone.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      promptForZipKeyImport();
+    });
+    els.zipKeyDropzone.addEventListener("dragenter", (event) => {
+      event.preventDefault();
+      if (state.zipKeyImportPending) {
+        return;
+      }
+      state.zipKeyImportDragActive = true;
+      render();
+    });
+    els.zipKeyDropzone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "copy";
+      }
+      if (state.zipKeyImportPending || state.zipKeyImportDragActive) {
+        return;
+      }
+      state.zipKeyImportDragActive = true;
+      render();
+    });
+    els.zipKeyDropzone.addEventListener("dragleave", (event) => {
+      event.preventDefault();
+      if (state.zipKeyImportPending) {
+        return;
+      }
+      const currentTarget = event.currentTarget;
+      const relatedTarget = event.relatedTarget;
+      if (currentTarget instanceof Node && relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) {
+        return;
+      }
+      state.zipKeyImportDragActive = false;
+      render();
+    });
+    els.zipKeyDropzone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      if (state.zipKeyImportPending) {
+        return;
+      }
+      state.zipKeyImportDragActive = false;
+      render();
+      const file = event.dataTransfer?.files?.[0] || null;
+      if (!file) {
+        const message = "Drop a ZIP.KEY file to load Adobe IMS settings into VAULT.";
+        setZipKeyImportFeedback(message, "error");
+        setStatus(message, "error");
+        render();
+        return;
+      }
+      void importZipKeyIntoVaultFromFile(file);
     });
   }
 

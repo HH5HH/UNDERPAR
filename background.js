@@ -1,12 +1,10 @@
 const BUILD_INFO_KEY = "underpar_build_info";
 const LEGACY_BUILD_INFO_KEY = "mincloudlogin_build_info";
 const AVATAR_MAX_DATAURL_BYTES = 6000000;
-const IMS_CLIENT_ID = "";
 const IMS_BASE_URL = "https://ims-na1.adobelogin.com";
 const PPS_PROFILE_BASE_URL = "https://pps.services.adobe.com";
-const IMS_AVATAR_CLIENT_IDS = ["AdobePass1"];
-const IMS_LOGIN_HELPER_PATH = "src/login/login.html";
-const IMS_LOGIN_REDIRECT_RULE_ID = 164001;
+const LEGACY_IMS_AVATAR_CLIENT_IDS = ["AdobePass1"];
+const LEGACY_IMS_LOGIN_REDIRECT_RULE_ID = 164001;
 const UNDERPAR_ESM_DEEPLINK_REDIRECT_RULE_ID = 164002;
 const UNDERPAR_DEGRADATION_DEEPLINK_REDIRECT_RULE_ID = 164003;
 const UNDERPAR_CM_DEEPLINK_REDIRECT_RULE_ID = 164004;
@@ -140,9 +138,6 @@ const BUILD_FINGERPRINT_FILES = [
   "up-devtools-panel.html",
   "up-devtools-panel.js",
   "up-devtools-panel.css",
-  "src/login/login.html",
-  "src/login/login.js",
-  "src/login/login.css",
 ];
 
 const debugState = {
@@ -984,7 +979,7 @@ async function closeUnderparWorkspaceTabs(options = {}) {
   };
 }
 
-async function ensureImsLoginRedirectRule() {
+async function cleanupLegacyImsLoginRedirectRule() {
   const dnr = chrome.declarativeNetRequest;
   if (!dnr?.updateSessionRules) {
     return;
@@ -992,7 +987,7 @@ async function ensureImsLoginRedirectRule() {
 
   try {
     await dnr.updateSessionRules({
-      removeRuleIds: [IMS_LOGIN_REDIRECT_RULE_ID],
+      removeRuleIds: [LEGACY_IMS_LOGIN_REDIRECT_RULE_ID],
     });
   } catch {
     // Ignore DNR cleanup errors.
@@ -1482,7 +1477,7 @@ async function getBackgroundImsAvatarClientIdCandidates(accessToken = "") {
   const tokenClaims = parseJwtPayload(accessToken) || {};
   const tokenClientId = String(tokenClaims?.client_id || tokenClaims?.clientId || "").trim();
   const configuredClientId = await loadUnderparImsClientIdFromVault();
-  return [...new Set([tokenClientId, configuredClientId, ...IMS_AVATAR_CLIENT_IDS].filter(Boolean))];
+  return [...new Set([tokenClientId, configuredClientId, ...LEGACY_IMS_AVATAR_CLIENT_IDS].filter(Boolean))];
 }
 
 async function buildAvatarFetchAttempts(accessToken = "", url = "") {
@@ -3874,7 +3869,7 @@ function handleWebRequestError(details) {
 chrome.runtime.onInstalled.addListener((details) => {
   void configureSidePanelBehavior();
   void ensureBlondieTimeRuntimeConsistency();
-  void ensureImsLoginRedirectRule();
+  void cleanupLegacyImsLoginRedirectRule();
   void ensureUnderparEsmDeeplinkRedirectRule();
   void ensureUnderparEsmBridgeDeeplinkRedirectRule();
   void ensureUnderparBtDeeplinkRedirectRule();
@@ -3888,7 +3883,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.runtime.onStartup.addListener(() => {
   void configureSidePanelBehavior();
   void ensureBlondieTimeRuntimeConsistency();
-  void ensureImsLoginRedirectRule();
+  void cleanupLegacyImsLoginRedirectRule();
   void ensureUnderparEsmDeeplinkRedirectRule();
   void ensureUnderparEsmBridgeDeeplinkRedirectRule();
   void ensureUnderparBtDeeplinkRedirectRule();
@@ -4405,7 +4400,7 @@ if (chrome.webRequest) {
 
 void configureSidePanelBehavior();
 void ensureBlondieTimeRuntimeConsistency();
-void ensureImsLoginRedirectRule();
+void cleanupLegacyImsLoginRedirectRule();
 void ensureUnderparEsmDeeplinkRedirectRule();
 void ensureUnderparEsmBridgeDeeplinkRedirectRule();
 void ensureUnderparDegradationDeeplinkRedirectRule();

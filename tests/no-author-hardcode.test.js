@@ -42,6 +42,9 @@ test("tracked runtime source does not contain author-specific hard-coded identit
 
   for (const relativePath of trackedFiles) {
     const absolutePath = path.join(ROOT, relativePath);
+    if (!fs.existsSync(absolutePath)) {
+      continue;
+    }
     const source = fs.readFileSync(absolutePath, "utf8");
     for (const pattern of BANNED_PATTERNS) {
       pattern.lastIndex = 0;
