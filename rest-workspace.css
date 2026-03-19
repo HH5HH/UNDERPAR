@@ -417,3 +417,22 @@ body:has([aria-busy="true"]) * {
     border-radius: 14px;
   }
 }
+
+/* Sticky table chrome must stay opaque so scrolling rows never bleed through. */
+.rest-report-table-wrap {
+  isolation: isolate;
+}
+
+.rest-report-table thead th {
+  background-color: rgb(34, 34, 34);
+  background-image: var(--legacy-table-head);
+  background-clip: padding-box;
+  backdrop-filter: none;
+  opacity: 1;
+}
+
+.rest-report-table thead th.active-sort {
+  background-color: rgb(166, 171, 180);
+  background-image: linear-gradient(165deg, rgba(189, 194, 203, 0.98), rgba(166, 171, 180, 0.98));
+  background-clip: padding-box;
+}

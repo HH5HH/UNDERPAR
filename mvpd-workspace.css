@@ -897,3 +897,36 @@ body::after {
     grid-template-columns: 1fr;
   }
 }
+
+/* Sticky table chrome must stay opaque so scrolling rows never bleed through. */
+.mvpd-table-wrap {
+  isolation: isolate;
+}
+
+.workspace-cards .esm-table-wrapper {
+  isolation: isolate;
+}
+
+.mvpd-table thead th {
+  background-color: rgb(34, 34, 34);
+  background-image: linear-gradient(180deg, rgba(var(--zip-accent-900), 0.34), rgba(34, 34, 34, 1));
+  background-clip: padding-box;
+  backdrop-filter: none;
+  opacity: 1;
+}
+
+.workspace-cards .esm-table thead th {
+  background-color: rgb(34, 34, 34);
+  background-image: linear-gradient(180deg, rgba(var(--zip-accent-900), 0.42), rgba(34, 34, 34, 1));
+  background-clip: padding-box;
+  backdrop-filter: none;
+  opacity: 1;
+}
+
+.workspace-cards .esm-table tfoot td {
+  background-color: rgb(26, 26, 26);
+  background-image: linear-gradient(180deg, rgba(34, 34, 34, 1), rgba(26, 26, 26, 1));
+  background-clip: padding-box;
+  backdrop-filter: none;
+  opacity: 1;
+}

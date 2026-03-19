@@ -1371,3 +1371,24 @@ body::before {
   color: var(--bt-accent-strong);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.32);
 }
+
+/* Sticky table chrome must stay opaque so scrolling rows never bleed through. */
+.bt-table-scroll {
+  isolation: isolate;
+}
+
+.bt-table thead th {
+  background-color: rgb(27, 27, 27);
+  background-image: var(--bt-band);
+  background-clip: padding-box;
+  backdrop-filter: none;
+  opacity: 1;
+}
+
+.bt-table tfoot td {
+  background-color: rgb(27, 27, 27);
+  background-image: linear-gradient(180deg, rgba(var(--zip-accent-900), 0.12), rgba(27, 27, 27, 0.98));
+  background-clip: padding-box;
+  backdrop-filter: none;
+  opacity: 1;
+}

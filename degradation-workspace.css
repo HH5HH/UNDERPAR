@@ -1071,3 +1071,16 @@ body:has([aria-busy="true"]) * {
     min-width: 760px;
   }
 }
+
+/* Sticky table chrome must stay opaque so scrolling rows never bleed through. */
+.degradation-report-table-wrap {
+  isolation: isolate;
+}
+
+.degradation-report-table thead th {
+  background-color: rgb(18, 12, 12);
+  background-image: var(--legacy-table-head);
+  background-clip: padding-box;
+  backdrop-filter: none;
+  opacity: 1;
+}

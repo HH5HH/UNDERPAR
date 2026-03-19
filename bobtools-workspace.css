@@ -1352,3 +1352,16 @@ body {
     margin-bottom: 12px;
   }
 }
+
+/* Sticky table chrome must stay opaque so scrolling rows never bleed through. */
+.bobtools-splunk-table-wrap {
+  isolation: isolate;
+}
+
+.bobtools-splunk-table thead th {
+  background-color: #eef2f8;
+  background-image: none;
+  background-clip: padding-box;
+  backdrop-filter: none;
+  opacity: 1;
+}

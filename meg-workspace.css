@@ -1654,3 +1654,32 @@ body.meg-standalone-mode[data-theme="modern"] .meg-saved-query-select {
   background-color: rgb(255, 210, 87);
   color: rgb(35, 19, 0);
 }
+
+/* Sticky table chrome must stay opaque so scrolling rows never bleed through. */
+.scrollable-table {
+  isolation: isolate;
+}
+
+.meg-results-panel {
+  isolation: isolate;
+}
+
+.meg-retro-results-panel {
+  isolation: isolate;
+}
+
+#RAW_TBL thead th {
+  background-color: var(--meg-table-head-bg);
+  background-image: none;
+  background-clip: padding-box;
+  backdrop-filter: none;
+  opacity: 1;
+}
+
+#RAW_TBL thead th:hover {
+  background-color: var(--meg-table-head-hover);
+}
+
+#RAW_TBL thead th.active-sort {
+  background-color: var(--meg-table-head-active-bg);
+}
