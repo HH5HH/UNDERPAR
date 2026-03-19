@@ -477,6 +477,22 @@ test("CM token bootstrap can harvest JWTs from raw IMS response text when access
   assert.match(checkSource, /extractImsAccessTokenFromPayload\(parsed,\s*text\)/);
 });
 
+test("CM request path accepts the configured UnderPAR shell bearer before requiring cm-console-ui requalification", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const requestSupportSource = extractFunctionSource(popupSource, "tokenSupportsCmConsoleRequests");
+  const ensureCmSource = extractFunctionSource(popupSource, "ensureCmApiAccessToken");
+  const tenantCatalogSource = extractFunctionSource(popupSource, "fetchCmTenantCatalogWithAuth");
+  const reportHeadersSource = extractFunctionSource(popupSource, "withCmReportContextHeaders");
+
+  assert.match(requestSupportSource, /isUnderparImsClientId/);
+  assert.match(ensureCmSource, /getPreferredCmRequestAccessTokenCandidate\(\)/);
+  assert.match(ensureCmSource, /tokenSupportsCmConsoleRequests\(existingToken\)/);
+  assert.match(ensureCmSource, /tokenSupportsCmConsoleRequests\(primarySeedToken\)/);
+  assert.match(tenantCatalogSource, /state\.loginData\?\.accessToken/);
+  assert.match(tenantCatalogSource, /tokenSupportsCmConsoleRequests\(candidate\)/);
+  assert.match(reportHeadersSource, /AP-Request-Id/);
+});
+
 test("CM direct fetch and tenant catalog paths no longer issue unauthenticated cookie-style fallbacks", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const fetchSource = extractFunctionSource(popupSource, "fetchCmJsonWithAuthVariants");

@@ -12680,6 +12680,9 @@ function withCmReportContextHeaders(headersLike = {}, requestUrl = "") {
   if (!isCmReportsRequestUrl(requestUrl) && !isCmConfigRequestUrl(requestUrl)) {
     return nextHeaders;
   }
+  if (!hasHeaderName(nextHeaders, "AP-Request-Id")) {
+    nextHeaders["AP-Request-Id"] = generateRequestId();
+  }
   if (!hasHeaderName(nextHeaders, "Origin")) {
     nextHeaders.Origin = CM_REPORTS_APP_ORIGIN;
   }
@@ -28406,7 +28409,7 @@ function buildClickCmuHtmlFromTemplate(templateHtml, context = {}) {
   if (!accessToken) {
     throw new Error("CMU access token is required to generate clickCMU.");
   }
-  const clientIds = uniqueSorted(
+  const clientIds = uniquePreserveOrder(
     (Array.isArray(context.clientIds) ? context.clientIds : [])
       .map((value) => String(value || "").trim())
       .filter(Boolean)
@@ -28780,11 +28783,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
     freshLeewayMs: 60 * 1000,
     allowTemporaryPageContextTab: false,
   });
-  const initialClaims = parseJwtPayload(String(accessToken || "").trim()) || {};
-  const initialClientId = String(firstNonEmptyString([initialClaims.client_id, initialClaims.clientId]) || "")
-    .trim()
-    .toLowerCase();
-  if (accessToken && !isCmConsoleClientId(initialClientId)) {
+  if (accessToken && !tokenSupportsCmConsoleRequests(accessToken)) {
     accessToken = await ensureCmApiAccessToken({
       forceRefresh: true,
       freshLeewayMs: 60 * 1000,
@@ -28797,11 +28796,11 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
       "Unable to resolve CMU IMS token. Sign in to Adobe Pass Console, then retry clickCMU generation."
     );
   }
-  if (!tokenSupportsCmTenantCatalog(normalizedToken)) {
+  if (!tokenSupportsCmConsoleRequests(normalizedToken)) {
     const claims = parseJwtPayload(normalizedToken) || {};
     const detectedClientId = String(firstNonEmptyString([claims.client_id, claims.clientId]) || "unknown");
     throw new Error(
-      `Warning: token client_id='${detectedClientId}', expected 'cm-console-ui' for CMU console tokens.`
+      `Warning: token client_id='${detectedClientId}' is not authorized for CMU console requests.`
     );
   }
 
@@ -28815,10 +28814,14 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
     ])
   );
   const experienceCloudClaims = parseJwtPayload(experienceCloudAccessToken) || {};
-  const clientIds = uniqueSorted([
+  const clientIds = uniquePreserveOrder([
     ...(Array.isArray(controllerAuth?.clientIds) ? controllerAuth.clientIds : []),
+    getConfiguredUnderparImsClientId(),
     CM_IMS_PRIMARY_CLIENT_ID,
-  ]).filter((value) => String(value || "").trim().toLowerCase() === CM_IMS_PRIMARY_CLIENT_ID);
+  ]).filter((value) => {
+    const normalizedValue = String(value || "").trim().toLowerCase();
+    return normalizedValue === CM_IMS_PRIMARY_CLIENT_ID || isUnderparImsClientId(normalizedValue);
+  });
   const experienceCloudClientIds = uniqueSorted([
     ...(Array.isArray(controllerAuth?.experienceCloudClientIds) ? controllerAuth.experienceCloudClientIds : []),
     EXPERIENCE_CLOUD_SSO_CLIENT_ID,
@@ -28870,7 +28873,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
   return {
     programmerLabel,
     accessToken: normalizedToken,
-    clientIds: clientIds.length > 0 ? clientIds : ["cm-console-ui"],
+    clientIds: clientIds.length > 0 ? clientIds : uniquePreserveOrder([getConfiguredUnderparImsClientId(), "cm-console-ui"].filter(Boolean)),
     userId,
     scope,
     experienceCloudAccessToken,
@@ -34663,7 +34666,7 @@ function nextCmWorkspaceControllerStateVersion() {
 }
 
 function getCmControllerAuthPayload() {
-  const accessToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+  const accessToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
   const tokenClaims = parseJwtPayload(accessToken) || {};
   const experienceCloudAccessToken = normalizeBearerTokenValue(getPreferredExperienceCloudConsoleAccessTokenCandidate());
   const experienceCloudClaims = parseJwtPayload(experienceCloudAccessToken) || {};
@@ -34672,7 +34675,11 @@ function getCmControllerAuthPayload() {
   return {
     accessToken,
     experienceCloudAccessToken,
-    clientIds: [CM_IMS_PRIMARY_CLIENT_ID],
+    clientIds: uniquePreserveOrder([
+      firstNonEmptyString([tokenClaims.client_id, tokenClaims.clientId]),
+      getConfiguredUnderparImsClientId(),
+      CM_IMS_PRIMARY_CLIENT_ID,
+    ].filter(Boolean)),
     experienceCloudClientIds: [EXPERIENCE_CLOUD_SSO_CLIENT_ID],
     userId: firstNonEmptyString([
       hints.userId,
@@ -37982,8 +37989,8 @@ async function handleCmWorkspaceAction(message, sender = null) {
 
   if (action === "resolve-run-context") {
     const forceRefresh = message?.forceRefresh === true;
-    let accessToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
-    if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || forceRefresh || !isAccessTokenFreshEnough(accessToken, 45 * 1000)) {
+    let accessToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
+    if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken) || forceRefresh || !isAccessTokenFreshEnough(accessToken, 45 * 1000)) {
       accessToken = normalizeBearerTokenValue(
         await ensureCmApiAccessToken({
           forceRefresh,
@@ -55353,10 +55360,10 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     (preferredCmBootstrapTabId > 0 && !preferredCmBootstrapTab) ||
     (preferredCmBootstrapTabId <= 0 && getRetainedAuthPopupBootstrapTabId() <= 0);
 
-  const existingCmToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+  const existingCmToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
   const cmTokenReady =
     existingCmToken &&
-    tokenSupportsCmTenantCatalog(existingCmToken) &&
+    tokenSupportsCmConsoleRequests(existingCmToken) &&
     isAccessTokenFreshEnough(existingCmToken, 45 * 1000);
 
   if (!forceRefresh && state.cmTenantsPrecheckComplete === true && hasCmTenantsCatalogEntries() && cmTokenReady) {
@@ -55387,10 +55394,10 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     if (!hasCmTenantsCatalogEntries(catalog)) {
       throw new Error("CM tenants load failed: tenant catalog returned no tenants.");
     }
-    if (!hydratedToken || !tokenSupportsCmTenantCatalog(hydratedToken)) {
-      hydratedToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+    if (!hydratedToken || !tokenSupportsCmConsoleRequests(hydratedToken)) {
+      hydratedToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
     }
-    if (!hydratedToken || !tokenSupportsCmTenantCatalog(hydratedToken)) {
+    if (!hydratedToken || !tokenSupportsCmConsoleRequests(hydratedToken)) {
       hydratedToken = normalizeBearerTokenValue(
         await ensureCmApiAccessToken({
           forceRefresh,
@@ -55400,7 +55407,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
         }).catch(() => "")
       );
     }
-    if (!hydratedToken || !tokenSupportsCmTenantCatalog(hydratedToken)) {
+    if (!hydratedToken || !tokenSupportsCmConsoleRequests(hydratedToken)) {
       emitCmDebugEvent({
         phase: "cm-tenant-precheck-token-missing",
         reason: String(reason || ""),
@@ -55448,7 +55455,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
 
 async function persistResolvedCmGlobalAuthState(accessToken = "", source = "unknown") {
   const normalizedAccessToken = normalizeBearerTokenValue(accessToken);
-  if (!normalizedAccessToken || !tokenSupportsCmTenantCatalog(normalizedAccessToken)) {
+  if (!normalizedAccessToken || !tokenSupportsCmConsoleRequests(normalizedAccessToken)) {
     return null;
   }
 
@@ -55485,10 +55492,10 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
     return "";
   }
 
-  const existingToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+  const existingToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
   if (
     existingToken &&
-    tokenSupportsCmTenantCatalog(existingToken) &&
+    tokenSupportsCmConsoleRequests(existingToken) &&
     (!forceRefresh || isAccessTokenFreshEnough(existingToken, 45 * 1000))
   ) {
     await persistResolvedCmGlobalAuthState(existingToken, `existing:${reason}`).catch(() => null);
@@ -55531,7 +55538,7 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
   }
 
   const hydratedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
-  if (hydratedToken && tokenSupportsCmTenantCatalog(hydratedToken)) {
+  if (hydratedToken && tokenSupportsCmConsoleRequests(hydratedToken)) {
     await persistResolvedCmGlobalAuthState(hydratedToken, `post-login:${reason}`).catch(() => null);
     await maybeReleaseRetainedAuthPopupBootstrapContext(
       preferredCmBootstrapTabId,
@@ -55820,7 +55827,7 @@ async function refreshProgrammerPanels(options = {}) {
     const shouldPrimeCmSelectionBootstrap =
       forcePremiumRefresh ||
       !hasCmTenantsCatalogEntries() ||
-      !tokenSupportsCmTenantCatalog(getPreferredCmAccessTokenCandidate()) ||
+      !tokenSupportsCmConsoleRequests(getPreferredCmRequestAccessTokenCandidate()) ||
       shouldRetryCachedCmService(cachedCmSelectionService);
     const cmSelectionBootstrapPromise = shouldPrimeCmSelectionBootstrap
       ? ensureCmTenantsPrecheckForActiveSession(`panel-selection:${programmer.programmerId}`, {
@@ -60318,6 +60325,23 @@ function isCmConsoleClientId(value = "") {
   return String(value || "").trim().toLowerCase() === CM_IMS_PRIMARY_CLIENT_ID;
 }
 
+function getConfiguredUnderparImsClientId() {
+  const runtimeConfig = getActiveUnderparImsRuntimeConfig();
+  return firstNonEmptyString([
+    runtimeConfig?.clientId,
+    state.loginData?.imsSession?.clientId,
+    state.loginData?.imsSession?.client_id,
+  ]);
+}
+
+function isUnderparImsClientId(value = "") {
+  const normalizedValue = String(value || "").trim().toLowerCase();
+  const configuredClientId = String(getConfiguredUnderparImsClientId() || "")
+    .trim()
+    .toLowerCase();
+  return Boolean(normalizedValue && configuredClientId && normalizedValue === configuredClientId);
+}
+
 function isExperienceCloudConsoleClientId(value = "") {
   return String(value || "").trim().toLowerCase() === EXPERIENCE_CLOUD_SSO_CLIENT_ID;
 }
@@ -60341,6 +60365,16 @@ function getPreferredPrimaryImsAccessTokenCandidate() {
     return "";
   }
   return token;
+}
+
+function getPreferredCmRequestAccessTokenCandidate() {
+  return normalizeBearerTokenValue(
+    firstNonEmptyString([
+      state.cmLastHydratedAccessToken || "",
+      state.loginData?.cmConsoleAccessToken || "",
+      state.loginData?.accessToken || "",
+    ])
+  );
 }
 
 function getPreferredExperienceCloudConsoleAccessTokenCandidate() {
@@ -60403,6 +60437,19 @@ function tokenSupportsCmTenantCatalog(accessToken = "") {
     .trim()
     .toLowerCase();
   return isCmConsoleClientId(clientId);
+}
+
+function tokenSupportsCmConsoleRequests(accessToken = "") {
+  const token = normalizeBearerTokenValue(accessToken);
+  if (!token || !isProbablyJwt(token)) {
+    return false;
+  }
+
+  const claims = parseJwtPayload(token) || {};
+  const clientId = String(firstNonEmptyString([claims.client_id, claims.clientId]) || "")
+    .trim()
+    .toLowerCase();
+  return isCmConsoleClientId(clientId) || isUnderparImsClientId(clientId);
 }
 
 function collectCmImsUserIdCandidates(seedToken = "") {
@@ -60978,8 +61025,8 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
   const requireFresh = options.requireFresh === true;
   const allowTemporaryTab = options.allowTemporaryTab === true;
   const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  let accessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken, getPreferredCmAccessTokenCandidate()]));
-  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
+  let accessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken, getPreferredCmRequestAccessTokenCandidate()]));
+  if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
     accessToken = normalizeBearerTokenValue(
       await ensureCmApiAccessToken({
         forceRefresh: requireFresh,
@@ -60989,7 +61036,7 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
       })
     );
   }
-  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+  if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
     return null;
   }
 
@@ -61029,6 +61076,7 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
       args: [
         {
           accessToken,
+          underparClientId: String(getConfiguredUnderparImsClientId() || "").trim(),
           requireFresh,
           freshSkewMs: CM_IMS_FORCE_REFRESH_SKEW_MS,
           tenantUrl: `${CM_CONFIG_BASE_URL}/core/tenants?orgId=${encodeURIComponent(CM_DEFAULT_TENANT_ORG_HINT)}`,
@@ -61064,7 +61112,8 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
         const tokenSupportsCmCatalog = (value) => {
           const claims = parseJwt(value) || {};
           const clientId = normalize(claims?.client_id || claims?.clientId).toLowerCase();
-          return clientId === "cm-console-ui";
+          const underparClientId = normalize(config?.underparClientId || "").toLowerCase();
+          return clientId === "cm-console-ui" || (underparClientId && clientId === underparClientId);
         };
         const isFreshEnough = (value, skewMs = 0) => {
           const claims = parseJwt(value) || {};
@@ -61149,7 +61198,7 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
             stage: "token",
             status: 0,
             statusText: "",
-            error: "CM token bootstrap produced a non-cm-console-ui bearer.",
+            error: "CM token bootstrap produced an unsupported Adobe IMS bearer.",
           };
         }
         if (config?.requireFresh && !isFreshEnough(resolvedAccessToken, config?.freshSkewMs)) {
@@ -61294,9 +61343,9 @@ async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
 
   const allowTemporaryTab = options.allowTemporaryTab === true;
   let accessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([options?.accessToken, getPreferredCmAccessTokenCandidate()])
+    firstNonEmptyString([options?.accessToken, getPreferredCmRequestAccessTokenCandidate()])
   );
-  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+  if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
     accessToken = normalizeBearerTokenValue(
       await ensureCmApiAccessToken({
         forceRefresh: options.forceRefresh === true,
@@ -61308,7 +61357,7 @@ async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
       })
     );
   }
-  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+  if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
     return null;
   }
 
@@ -61469,12 +61518,12 @@ async function ensureCmApiAccessToken(options = {}) {
     Number.isFinite(options.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
       ? Number(options.freshLeewayMs)
       : 60 * 1000;
-  const existingToken = getPreferredCmAccessTokenCandidate();
+  const existingToken = getPreferredCmRequestAccessTokenCandidate();
   const existingExpiresAt =
     coercePositiveNumber(resolveAuthResponseExpiry(existingToken, 0)?.expiresAt) || Number(state.loginData?.cmConsoleExpiresAt || 0);
   const hasKnownExpiry = Number.isFinite(existingExpiresAt) && existingExpiresAt > 0;
   const tokenLooksFresh = hasKnownExpiry && existingExpiresAt > Date.now() + tokenFreshLeewayMs;
-  const tokenSupportsCatalog = tokenSupportsCmTenantCatalog(existingToken);
+  const tokenSupportsCatalog = tokenSupportsCmConsoleRequests(existingToken);
   if (existingToken && !forceRefresh && (!hasKnownExpiry || tokenLooksFresh) && tokenSupportsCatalog) {
     emitCmConsoleTokenForTesting(existingToken, "ensure-existing");
     return existingToken;
@@ -61482,7 +61531,7 @@ async function ensureCmApiAccessToken(options = {}) {
 
   if (state.cmAuthBootstrapPromise) {
     const pendingToken = normalizeBearerTokenValue(await state.cmAuthBootstrapPromise);
-    if (pendingToken && tokenSupportsCmTenantCatalog(pendingToken)) {
+    if (pendingToken && tokenSupportsCmConsoleRequests(pendingToken)) {
       emitCmConsoleTokenForTesting(pendingToken, "ensure-pending");
       return pendingToken;
     }
@@ -61508,7 +61557,7 @@ async function ensureCmApiAccessToken(options = {}) {
           preferredCmBootstrapTabId,
         }).catch(() => "")
       );
-      if (globallyHydratedToken && tokenSupportsCmTenantCatalog(globallyHydratedToken)) {
+      if (globallyHydratedToken && tokenSupportsCmConsoleRequests(globallyHydratedToken)) {
         emitCmConsoleTokenForTesting(globallyHydratedToken, "ensure-global-hydrate");
         return globallyHydratedToken;
       }
@@ -61519,7 +61568,7 @@ async function ensureCmApiAccessToken(options = {}) {
           preferredTabId: preferredCmBootstrapTabId,
         }).catch(() => "")
       );
-      if (tenantBootstrapToken && tokenSupportsCmTenantCatalog(tenantBootstrapToken)) {
+      if (tenantBootstrapToken && tokenSupportsCmConsoleRequests(tenantBootstrapToken)) {
         emitCmConsoleTokenForTesting(tenantBootstrapToken, "ensure-tenant-bootstrap");
         return tenantBootstrapToken;
       }
@@ -61538,6 +61587,9 @@ async function ensureCmApiAccessToken(options = {}) {
       }
 
       if (primarySeedToken && isProbablyJwt(primarySeedToken)) {
+        if (tokenSupportsCmConsoleRequests(primarySeedToken) && (!requireFresh || isAccessTokenFreshEnough(primarySeedToken, tokenFreshLeewayMs))) {
+          return primarySeedToken;
+        }
         const refreshedFromPrimary = await tryRefreshCmTokenFromIms(primarySeedToken, {
           requireFresh,
         });
@@ -61553,6 +61605,9 @@ async function ensureCmApiAccessToken(options = {}) {
       const silent = await attemptSilentBootstrapLogin();
       const silentSeedToken = normalizeBearerTokenValue(silent?.accessToken || "");
       if (silentSeedToken) {
+        if (tokenSupportsCmConsoleRequests(silentSeedToken) && isAccessTokenFreshEnough(silentSeedToken, tokenFreshLeewayMs)) {
+          return silentSeedToken;
+        }
         const refreshedFromSilent = await tryRefreshCmTokenFromIms(silentSeedToken, {
           requireFresh: true,
         });
@@ -61578,7 +61633,7 @@ async function ensureCmApiAccessToken(options = {}) {
   state.cmAuthBootstrapPromise = promise;
   try {
     const resolvedToken = normalizeBearerTokenValue(await promise);
-    if (resolvedToken && tokenSupportsCmTenantCatalog(resolvedToken)) {
+    if (resolvedToken && tokenSupportsCmConsoleRequests(resolvedToken)) {
       emitCmConsoleTokenForTesting(resolvedToken, "ensure-resolved");
       return resolvedToken;
     }
@@ -61597,8 +61652,8 @@ async function autoHydrateCmConsoleTokenAfterImsLogin(source = "unknown") {
 
   const previousToken = normalizeBearerTokenValue(state.cmLastHydratedAccessToken || "");
   try {
-    const currentToken = getPreferredCmAccessTokenCandidate();
-    if (currentToken && tokenSupportsCmTenantCatalog(currentToken) && isAccessTokenFreshEnough(currentToken, 45 * 1000)) {
+    const currentToken = getPreferredCmRequestAccessTokenCandidate();
+    if (currentToken && tokenSupportsCmConsoleRequests(currentToken) && isAccessTokenFreshEnough(currentToken, 45 * 1000)) {
       emitCmConsoleTokenForTesting(currentToken, `auto-hydrate-existing:${source}`);
       if (currentToken !== previousToken) {
         render();
@@ -61607,7 +61662,7 @@ async function autoHydrateCmConsoleTokenAfterImsLogin(source = "unknown") {
     }
 
     let hydratedToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ freshLeewayMs: 45 * 1000 }));
-    if (hydratedToken && tokenSupportsCmTenantCatalog(hydratedToken)) {
+    if (hydratedToken && tokenSupportsCmConsoleRequests(hydratedToken)) {
       emitCmConsoleTokenForTesting(hydratedToken, `auto-hydrate:${source}`);
       if (hydratedToken !== previousToken) {
         render();
@@ -61620,7 +61675,7 @@ async function autoHydrateCmConsoleTokenAfterImsLogin(source = "unknown") {
     }
 
     hydratedToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ forceRefresh: true, freshLeewayMs: 45 * 1000 }));
-    if (hydratedToken && tokenSupportsCmTenantCatalog(hydratedToken)) {
+    if (hydratedToken && tokenSupportsCmConsoleRequests(hydratedToken)) {
       emitCmConsoleTokenForTesting(hydratedToken, `auto-hydrate-force-refresh:${source}`);
       if (hydratedToken !== previousToken) {
         render();
@@ -61642,7 +61697,7 @@ async function autoHydrateCmConsoleTokenAfterImsLogin(source = "unknown") {
 }
 
 function getCmAuthFingerprint() {
-  const token = getPreferredCmAccessTokenCandidate();
+  const token = getPreferredCmRequestAccessTokenCandidate();
   return token ? token.slice(-24) : "no-token";
 }
 
@@ -62681,7 +62736,7 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
       candidateTokens.push(normalizedToken);
     });
     candidateTokens.forEach((accessToken) => {
-      if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+      if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
         return;
       }
       variants.push({
@@ -63050,7 +63105,7 @@ async function ensureCmUsageWarmStateForProgrammer(programmer, cmService = null,
           : 45 * 1000,
     })
   );
-  if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+  if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
     const errorMessage =
       "UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session. Sign in again and retry.";
     state.cmUsageWarmStateByProgrammerId.set(programmerId, {
@@ -63138,10 +63193,11 @@ async function fetchCmTenantCatalogWithAuth(url = "", options = {}) {
   const headerVariants = [];
   const cmBearerToken = [
     normalizeBearerTokenValue(options?.accessToken),
-    normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate()),
+    normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate()),
     normalizeBearerTokenValue(state.loginData?.cmConsoleAccessToken || ""),
-  ].find((candidate) => candidate && tokenSupportsCmTenantCatalog(candidate));
-  if (cmBearerToken && tokenSupportsCmTenantCatalog(cmBearerToken)) {
+    normalizeBearerTokenValue(state.loginData?.accessToken || ""),
+  ].find((candidate) => candidate && tokenSupportsCmConsoleRequests(candidate));
+  if (cmBearerToken && tokenSupportsCmConsoleRequests(cmBearerToken)) {
     headerVariants.push({
       ...baseHeaders,
       Authorization: `Bearer ${cmBearerToken}`,
@@ -63208,7 +63264,7 @@ async function ensureCmTenantsCatalog(options = {}) {
   const skipBootstrap =
     options?.skipBootstrap === true &&
     preferredAccessToken &&
-    tokenSupportsCmTenantCatalog(preferredAccessToken) &&
+    tokenSupportsCmConsoleRequests(preferredAccessToken) &&
     (!forceRefresh || isAccessTokenFreshEnough(preferredAccessToken, 45 * 1000));
   if (forceRefresh) {
     state.cmTenantsCatalogRuntimeFresh = false;
@@ -63818,10 +63874,10 @@ async function ensureCmHydratedForProgrammer(programmer, services = null, option
       };
     }
 
-    const existingToken = normalizeBearerTokenValue(getPreferredCmAccessTokenCandidate());
+    const existingToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
     const tokenReady =
       !forceRefresh &&
-      tokenSupportsCmTenantCatalog(existingToken) &&
+      tokenSupportsCmConsoleRequests(existingToken) &&
       isAccessTokenFreshEnough(existingToken, freshLeewayMs);
     let accessToken = tokenReady
       ? existingToken
@@ -63831,7 +63887,7 @@ async function ensureCmHydratedForProgrammer(programmer, services = null, option
             freshLeewayMs,
           })
         );
-    if (!accessToken || !tokenSupportsCmTenantCatalog(accessToken)) {
+    if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
       const errorMessage =
         "UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session. Sign in again and retry.";
       const settledService = {
