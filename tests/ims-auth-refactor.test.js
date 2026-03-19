@@ -242,6 +242,96 @@ test("sign out path revokes Adobe tokens before clearing session state", () => {
   assert.match(popupSource, /revokeUnderparLoginTokensForLogout\(state\.loginData\)/);
 });
 
+test("interactive Adobe auth popup no longer attaches the debugger or retains the callback window", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const popupTransportSource = extractFunctionSource(popupSource, "runAuthInPopupWindow");
+  const signInSource = extractFunctionSource(popupSource, "signInInteractive");
+
+  assert.equal(/chrome\.debugger/.test(popupTransportSource), false);
+  assert.equal(/keepWindowOpenForBootstrap/.test(popupTransportSource), false);
+  assert.equal(/retainAuthPopupBootstrapContext/.test(popupTransportSource), false);
+  assert.equal(/keepAuthWindowOpenForBootstrap/.test(signInSource), false);
+});
+
+test("interactive login activations prime AdobePass and CM console context during CM hydration", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const signInSource = extractFunctionSource(popupSource, "signInInteractive");
+  const refreshSource = extractFunctionSource(popupSource, "refreshSessionManual");
+  const restrictedSwitchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
+  const recoverySource = extractFunctionSource(popupSource, "attemptInteractiveAdobePassRecovery");
+
+  assert.match(popupSource, /async function openTemporaryCmConsoleBootstrapTab/);
+  assert.match(popupSource, /getAdobePassConsoleAuthPrimeUrl/);
+  assert.match(popupSource, /getCmConsoleAuthPrimeUrl/);
+  assert.match(signInSource, /withTemporaryCmConsoleBootstrapContext/);
+  assert.match(refreshSource, /withTemporaryCmConsoleBootstrapContext/);
+  assert.match(restrictedSwitchSource, /withTemporaryCmConsoleBootstrapContext/);
+  assert.match(recoverySource, /withTemporaryCmConsoleBootstrapContext/);
+});
+
+test("active auth and bootstrap flows no longer fall back to cookie-session activation", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const signInSource = extractFunctionSource(popupSource, "signInInteractive");
+  const refreshSource = extractFunctionSource(popupSource, "refreshSessionManual");
+  const restrictedSwitchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
+  const bootstrapSource = extractFunctionSource(popupSource, "bootstrapSession");
+
+  assert.equal(/tryActivateCookieSession/.test(signInSource), false);
+  assert.equal(/tryActivateCookieSession/.test(refreshSource), false);
+  assert.equal(/tryActivateCookieSession/.test(restrictedSwitchSource), false);
+  assert.equal(/tryActivateCookieSession/.test(bootstrapSource), false);
+});
+
+test("IMS profile hydration uses token-backed profile and userinfo only", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const fetchProfileSource = extractFunctionSource(popupSource, "fetchImsSessionProfile");
+
+  assert.equal(/ims\/check\/v6\/status/.test(fetchProfileSource), false);
+  assert.equal(/ims\/check\/v5\/status/.test(fetchProfileSource), false);
+  assert.equal(/ims\/check\/status/.test(fetchProfileSource), false);
+  assert.match(fetchProfileSource, /ims\/userinfo\/v2/);
+  assert.match(fetchProfileSource, /return null;/);
+});
+
+test("session monitor is token-driven and no longer probes cookie or page session state", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const shouldRunSource = extractFunctionSource(popupSource, "shouldRunExperienceCloudSessionMonitor");
+  const tickSource = extractFunctionSource(popupSource, "runExperienceCloudSessionMonitorTick");
+
+  assert.match(shouldRunSource, /state\.sessionReady && state\.loginData\?\.accessToken && !state\.restricted/);
+  assert.equal(/probeExperienceCloudSessionState/.test(tickSource), false);
+  assert.equal(/attemptSessionAutoBootstrap/.test(tickSource), false);
+});
+
+test("console configuration version is sourced dynamically from console bootstrap state", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
+  const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
+
+  assert.equal(/configurationVersion=3522/.test(popupSource), false);
+  assert.match(popupSource, /function appendAdobeConsoleConfigurationVersion/);
+  assert.match(popupSource, /consoleBootstrapState/);
+  assert.match(loadProgrammersSource, /ensureConsoleBootstrapState/);
+  assert.match(fetchProgrammersSource, /Authorization: `Bearer \$\{accessToken\}`/);
+});
+
+test("active CM bootstrap uses UnderPAR bearer-derived qualification instead of exc_app seeding", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const requestQualifiedSource = extractFunctionSource(popupSource, "requestQualifiedCmConsoleToken");
+  const hydrateCmSource = extractFunctionSource(popupSource, "hydrateGlobalCmConsoleBootstrapForActiveSession");
+  const ensureCmSource = extractFunctionSource(popupSource, "ensureCmApiAccessToken");
+
+  assert.equal(/requestExperienceCloudConsoleToken/.test(requestQualifiedSource), false);
+  assert.equal(/persistExperienceCloudConsoleTokenResult/.test(requestQualifiedSource), false);
+  assert.equal(/getPreferredExperienceCloudConsoleAccessTokenCandidate/.test(requestQualifiedSource), false);
+  assert.equal(/requestExperienceCloudConsoleToken/.test(hydrateCmSource), false);
+  assert.equal(/persistExperienceCloudConsoleTokenResult/.test(hydrateCmSource), false);
+  assert.equal(/tryRefreshCmTokenFromIms\(\"\"/.test(hydrateCmSource), false);
+  assert.equal(/requestExperienceCloudConsoleToken/.test(ensureCmSource), false);
+  assert.equal(/persistExperienceCloudConsoleTokenResult/.test(ensureCmSource), false);
+  assert.equal(/ensure-cookie-session/.test(ensureCmSource), false);
+});
+
 test("PKCE authorization URL uses code response mode and the configured client ID", () => {
   const helpers = loadPopupImsHelpers();
 

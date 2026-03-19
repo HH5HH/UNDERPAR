@@ -247,11 +247,7 @@ const IMS_SESSION_MONITOR_START_DELAY_MS = 1500;
 const IMS_SESSION_MONITOR_BOOTSTRAP_COOLDOWN_MS = 20 * 1000;
 const IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS = 45 * 1000;
 const IMS_SESSION_MONITOR_INACTIVE_CONFIRM_TICKS = 2;
-const EXPERIENCE_CLOUD_SSO_TOKEN_ENDPOINT =
-  "https://auth.services.adobe.com/signin/v2/tokens?credential=sso&checkReauth=false&puser=&t2Only=false&euid=&pbaPolicy=";
 const EXPERIENCE_CLOUD_SSO_CLIENT_ID = "exc_app";
-const EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE =
-  "ab.manage,account_cluster.read,additional_info,additional_info.job_function,additional_info.projectedProductContext,additional_info.roles,AdobeID,adobeio.appregistry.read,adobeio_api,aem.frontend.all,audiencemanager_api,creative_cloud,mps,openid,org.read,pps.read,read_organizations,read_pc,read_pc.acp,read_pc.dma_tartan,service_principals.write,session";
 
 function getUnderParEnvironmentRegistry() {
   return globalThis.UnderParEnvironment || UNDERPAR_ENVIRONMENT_REGISTRY || null;
@@ -267,14 +263,38 @@ function resolveAdobePassEnvironment(value = null) {
   };
 }
 
+function getKnownAdobeConsoleConfigurationVersion() {
+  const bootstrapState =
+    typeof state !== "undefined" && state && typeof state === "object" ? state.consoleBootstrapState : null;
+  const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(bootstrapState, 0);
+  return configurationVersion > 0 ? configurationVersion : 0;
+}
+
+function appendAdobeConsoleConfigurationVersion(urlValue = "", configurationVersion = getKnownAdobeConsoleConfigurationVersion()) {
+  const normalizedUrl = String(urlValue || "").trim();
+  const normalizedVersion = Number(configurationVersion || 0);
+  if (!normalizedUrl || !Number.isFinite(normalizedVersion) || normalizedVersion <= 0) {
+    return normalizedUrl;
+  }
+
+  try {
+    const parsed = new URL(normalizedUrl);
+    parsed.searchParams.set("configurationVersion", String(normalizedVersion));
+    return parsed.toString();
+  } catch {
+    const separator = normalizedUrl.includes("?") ? "&" : "?";
+    return `${normalizedUrl}${separator}configurationVersion=${encodeURIComponent(String(normalizedVersion))}`;
+  }
+}
+
 function buildProgrammerEndpointsForConsoleBase(consoleBase = "") {
   const normalizedConsoleBase = String(consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "").trim();
-  return [
-    `${normalizedConsoleBase}/rest/api/entity/Programmer?configurationVersion=3522`,
+  return uniquePreserveOrder([
+    appendAdobeConsoleConfigurationVersion(`${normalizedConsoleBase}/rest/api/entity/Programmer`),
     `${normalizedConsoleBase}/rest/api/entity/Programmer`,
     `${normalizedConsoleBase}/rest/api/programmers`,
     `${normalizedConsoleBase}/rest/api/v1/programmers`,
-  ];
+  ]);
 }
 
 function buildRestV2RedirectCandidatesForSpBase(spBase = "") {
@@ -8821,6 +8841,8 @@ function applyAdobePassEnvironment(environment = null) {
   clickDgrTemplateHtml = "";
   clickDgrTemplatePromise = null;
   state.programmersApiEndpoint = null;
+  state.consoleBootstrapState = null;
+  state.consoleBootstrapPromise = null;
   if (environmentChanged) {
     clearEnvironmentAwareRegisteredAppState("environment-change");
     clearDegradationWorkspaceRecordingState("environment-change");
@@ -9564,44 +9586,17 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
 
       if (accessToken) {
         try {
-          const entities = await fetchProgrammersFromApi({
-            accessToken,
-            requireEntities: false,
-          });
-          applyProgrammerEntities(entities);
-          state.loginData = retainedLoginData;
-          state.sessionReady = true;
-          state.restricted = false;
-          state.sessionMonitorConsecutiveInactiveDetections = 0;
-          state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
-          prefetchCmTenantsCatalogInBackground("environment-switch-token", { forceRefresh: false });
-          await saveLoginData(state.loginData);
-          scheduleNoTouchRefresh();
-          queueCmConsoleAutoHydration("environment-switch-token");
-          activated = true;
-          activationSource = "token";
+          const reactivated = await activateSession(retainedLoginData, "environment-switch");
+          if (reactivated) {
+            activated = true;
+            activationSource = "token";
+          }
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error));
           log("AdobePASS environment token rehydrate failed", {
             environmentKey: targetEnvironmentKey,
             error: lastError.message,
           });
-        }
-      }
-
-      if (!activated) {
-        state.loginData = null;
-        state.sessionReady = false;
-        try {
-          const cookieActivated = await tryActivateCookieSession("environment-switch", {
-            restrictOnDenied: false,
-          });
-          if (cookieActivated) {
-            activated = true;
-            activationSource = "cookie";
-          }
-        } catch (error) {
-          lastError = error instanceof Error ? error : new Error(String(error));
         }
       }
 
@@ -9760,10 +9755,6 @@ function registerUnderparEsmDeeplinkStorageListener() {
 
   state.underparEsmDeeplinkStorageListenerBound = true;
 }
-const EXPERIENCE_CLOUD_EARLY_TOKEN_FILTER =
-  '{"findFirst":true, "fallbackToAA":true, "preferForwardProfile":true}; hasPC("dma_tartan")';
-const EXPERIENCE_CLOUD_SILENT_PROFILE_FILTER =
-  '{"findFirst":true, "preferForwardProfile":true}';
 const CLICK_ESM_ENDPOINTS_PATH = "click-esm-endpoints.json";
 const CLICK_CMU_ENDPOINTS_PATH = "click-cmu-endpoints.json";
 const CM_USAGE_REPORT_EXAMPLES_PATH = "cm-usage-reports-examples.json";
@@ -10725,6 +10716,8 @@ const state = {
   pendingUnderparEsmDeeplinkPromise: null,
   consoleContextReady: false,
   consoleContextPromise: null,
+  consoleBootstrapState: null,
+  consoleBootstrapPromise: null,
   isBootstrapping: false,
   sessionBootstrapGeneration: 0,
   environmentSwitchPromise: null,
@@ -11366,7 +11359,7 @@ function shouldShowBlockingBusyCursor() {
 }
 
 function shouldRunExperienceCloudSessionMonitor() {
-  return Boolean(state.sessionReady || state.loginData || state.restricted);
+  return Boolean(state.sessionReady && state.loginData?.accessToken && !state.restricted);
 }
 
 function shouldShowLoggedOutAuthActivity() {
@@ -48339,6 +48332,8 @@ function resetWorkflowForLoggedOut() {
   clearDegradationWorkspaceActivityDebugFlow("logout-reset", { stopFlow: true });
   clearCmWorkspaceActivityDebugFlow("logout-reset", { stopFlow: true });
   state.consoleContextReady = false;
+  state.consoleBootstrapState = null;
+  state.consoleBootstrapPromise = null;
   state.esmWorkspaceWorkspaceTabId = 0;
   state.esmWorkspaceWorkspaceWindowId = 0;
   state.esmWorkspaceWorkspaceTabIdByWindowId.clear();
@@ -48528,78 +48523,6 @@ function summarizeUrl(url) {
   }
 }
 
-function getDebuggerEventUrl(method, params) {
-  if (method === "Network.requestWillBeSent") {
-    return params?.request?.url || "";
-  }
-
-  if (method === "Network.responseReceived") {
-    return params?.response?.url || "";
-  }
-
-  if (method === "Network.loadingFailed") {
-    return params?.request?.url || "";
-  }
-
-  if (method === "Page.frameNavigated") {
-    return params?.frame?.url || "";
-  }
-
-  return "";
-}
-
-function isAuthAvatarCaptureCandidate(url) {
-  const normalized = normalizeAvatarCandidate(url);
-  if (!normalized) {
-    return false;
-  }
-  return (
-    isPpsProfileImageUrl(normalized) ||
-    isImsAvatarDownloadUrl(normalized) ||
-    /\/ims\/avatar\//i.test(normalized) ||
-    /\/api\/profile\/[^/]+\/image(\/|$)/i.test(normalized)
-  );
-}
-
-function scoreAuthAvatarCaptureCandidate(url, response = {}) {
-  const normalized = normalizeAvatarCandidate(url);
-  if (!normalized) {
-    return Number.NEGATIVE_INFINITY;
-  }
-
-  let score = 0;
-  if (isPpsProfileImageUrl(normalized)) {
-    score += 1200;
-  } else if (isImsAvatarDownloadUrl(normalized)) {
-    score += 760;
-  } else if (/\/ims\/avatar\//i.test(normalized)) {
-    score += 620;
-  } else if (/\/avatar/i.test(normalized)) {
-    score += 280;
-  }
-
-  const mimeType = String(response?.mimeType || "").toLowerCase();
-  const resourceType = String(response?.type || "").toLowerCase();
-  const status = Number(response?.status || 0);
-  if (mimeType.startsWith("image/")) {
-    score += 180;
-  }
-  if (resourceType === "image") {
-    score += 90;
-  }
-  if (status >= 200 && status < 300) {
-    score += 50;
-  }
-  if (normalized.includes("/100")) {
-    score += 18;
-  }
-  if (/avatar|profile|picture|photo|image/i.test(normalized)) {
-    score += 14;
-  }
-
-  return score;
-}
-
 function applyCapturedAvatarToProfile(profilePayload, avatarCandidate) {
   const normalizedAvatar = normalizeAvatarCandidate(avatarCandidate) || normalizeInlineAvatarData(avatarCandidate);
   if (!normalizedAvatar) {
@@ -48647,169 +48570,6 @@ function applyCapturedAvatarToProfile(profilePayload, avatarCandidate) {
 
   baseProfile.additional_info = additionalInfo;
   return normalizeProfileAvatarFields(baseProfile);
-}
-
-async function attachAuthDebugger(tabId, options = {}) {
-  if (!chrome.debugger || !tabId) {
-    return null;
-  }
-
-  const target = { tabId };
-  const captureProfileAvatar = options?.captureProfileAvatar === true;
-  let capturedAvatarCandidate = "";
-  let capturedAvatarScore = Number.NEGATIVE_INFINITY;
-  const responseByRequestId = new Map();
-
-  const setCapturedAvatarCandidate = (candidate, response = {}) => {
-    if (!captureProfileAvatar) {
-      return;
-    }
-
-    const normalized = normalizeAvatarCandidate(candidate) || normalizeInlineAvatarData(candidate);
-    if (!normalized || !isAuthAvatarCaptureCandidate(normalized)) {
-      return;
-    }
-
-    const score = scoreAuthAvatarCaptureCandidate(normalized, response);
-    if (score > capturedAvatarScore) {
-      capturedAvatarScore = score;
-      capturedAvatarCandidate = normalized;
-      log("Auth debugger captured avatar candidate", {
-        score,
-        status: response?.status,
-        url: summarizeUrl(normalized),
-      });
-    }
-  };
-
-  const onEvent = (source, method, params) => {
-    if (source.tabId !== tabId) {
-      return;
-    }
-
-    if (
-      method !== "Network.requestWillBeSent" &&
-      method !== "Network.responseReceived" &&
-      method !== "Network.loadingFinished" &&
-      method !== "Network.loadingFailed" &&
-      method !== "Page.frameNavigated"
-    ) {
-      return;
-    }
-
-    if (captureProfileAvatar && method === "Network.requestWillBeSent") {
-      const requestId = String(params?.requestId || "");
-      const requestUrl = params?.request?.url || "";
-      if (requestId && requestUrl) {
-        responseByRequestId.set(requestId, {
-          url: requestUrl,
-          status: 0,
-          mimeType: "",
-          type: "",
-        });
-        setCapturedAvatarCandidate(requestUrl, {
-          status: 0,
-          mimeType: "",
-          type: String(params?.type || ""),
-        });
-      }
-    }
-
-    if (captureProfileAvatar && method === "Network.responseReceived") {
-      const requestId = String(params?.requestId || "");
-      const responseUrl = params?.response?.url || "";
-      const metadata = {
-        status: Number(params?.response?.status || 0),
-        mimeType: String(params?.response?.mimeType || ""),
-        type: String(params?.type || ""),
-      };
-
-      if (requestId && responseUrl) {
-        responseByRequestId.set(requestId, {
-          url: responseUrl,
-          ...metadata,
-        });
-      }
-
-      setCapturedAvatarCandidate(responseUrl, metadata);
-    }
-
-    if (captureProfileAvatar && method === "Network.loadingFinished") {
-      const requestId = String(params?.requestId || "");
-      const responseMeta = requestId ? responseByRequestId.get(requestId) : null;
-      if (responseMeta?.url) {
-        setCapturedAvatarCandidate(responseMeta.url, responseMeta);
-      }
-      if (requestId) {
-        responseByRequestId.delete(requestId);
-      }
-    }
-
-    const eventUrl = getDebuggerEventUrl(method, params);
-    if (!isAuthFlowUrl(eventUrl)) {
-      return;
-    }
-
-    if (method === "Network.responseReceived") {
-      const status = params?.response?.status;
-      log("Auth debugger response", {
-        status,
-        url: summarizeUrl(eventUrl),
-      });
-      return;
-    }
-
-    if (method === "Network.loadingFailed") {
-      log("Auth debugger request failed", {
-        url: summarizeUrl(eventUrl),
-        error: params?.errorText || "unknown",
-      });
-      return;
-    }
-
-    log("Auth debugger event", {
-      method,
-      url: summarizeUrl(eventUrl),
-    });
-  };
-
-  const onDetach = (source, reason) => {
-    if (source.tabId !== tabId) {
-      return;
-    }
-    log("Auth debugger detached", { reason: reason || "unknown" });
-  };
-
-  chrome.debugger.onEvent.addListener(onEvent);
-  chrome.debugger.onDetach.addListener(onDetach);
-
-  try {
-    await chrome.debugger.attach(target, AUTH_DEBUGGER_PROTOCOL_VERSION);
-    await chrome.debugger.sendCommand(target, "Network.enable");
-    await chrome.debugger.sendCommand(target, "Page.enable");
-    log("Auth debugger attached", { tabId });
-  } catch (error) {
-    chrome.debugger.onEvent.removeListener(onEvent);
-    chrome.debugger.onDetach.removeListener(onDetach);
-    log("Unable to attach auth debugger", error?.message || String(error));
-    return null;
-  }
-
-  return {
-    getCapturedAvatarCandidate() {
-      return normalizeAvatarCandidate(capturedAvatarCandidate) || normalizeInlineAvatarData(capturedAvatarCandidate);
-    },
-    async detach() {
-      chrome.debugger.onEvent.removeListener(onEvent);
-      chrome.debugger.onDetach.removeListener(onDetach);
-      responseByRequestId.clear();
-      try {
-        await chrome.debugger.detach(target);
-      } catch {
-        // Ignore detach errors.
-      }
-    },
-  };
 }
 
 function extractAuthParams(responseUrl) {
@@ -49273,7 +49033,7 @@ async function primeCmConsoleInAuthPopup(tabId, options = {}) {
   const requestId = String(options?.requestId || "").trim();
 
   try {
-    log("Priming AdobePass/CM console in login popup", {
+    log("Priming AdobePass/CM console bootstrap tab", {
       tabId: normalizedTabId,
       requestId,
       urls: primeUrls.map((value) => summarizeUrl(value)),
@@ -49282,7 +49042,7 @@ async function primeCmConsoleInAuthPopup(tabId, options = {}) {
     for (const primeUrl of primeUrls) {
       await chrome.tabs.update(normalizedTabId, {
         url: primeUrl,
-        active: true,
+        active: options?.activateTab === true,
       });
       lastNavigation = await waitForTabCompletion(normalizedTabId, timeoutMs, {
         expectedUrl: primeUrl,
@@ -49291,7 +49051,7 @@ async function primeCmConsoleInAuthPopup(tabId, options = {}) {
         await sleepMs(settleMs);
       }
     }
-    log("AdobePass/CM console popup prime complete", {
+    log("AdobePass/CM console bootstrap tab prime complete", {
       tabId: normalizedTabId,
       requestId,
       ok: lastNavigation?.ok === true,
@@ -49305,7 +49065,7 @@ async function primeCmConsoleInAuthPopup(tabId, options = {}) {
       url: String(lastNavigation?.url || primeUrls[primeUrls.length - 1] || ""),
     };
   } catch (error) {
-    log("AdobePass/CM console popup prime failed", {
+    log("AdobePass/CM console bootstrap tab prime failed", {
       tabId: normalizedTabId,
       requestId,
       error: error instanceof Error ? error.message : String(error),
@@ -49320,153 +49080,238 @@ async function primeCmConsoleInAuthPopup(tabId, options = {}) {
   }
 }
 
-async function runAuthInPopupWindow(authUrl, redirectUri, options = {}) {
-  return new Promise(async (resolve, reject) => {
-    let completed = false;
-    let authWindowId = null;
-    let authTabId = null;
-    let debuggerSession = null;
-    let timeoutId = null;
-    let pollId = null;
-    const successUrlMatcher = typeof options.successUrlMatcher === "function" ? options.successUrlMatcher : null;
-    const keepWindowOpenForBootstrap = options?.keepWindowOpenForBootstrap === true;
-
-    const cleanup = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-      if (pollId) {
-        clearInterval(pollId);
-      }
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      chrome.tabs.onRemoved.removeListener(onRemoved);
+async function openTemporaryCmConsoleBootstrapTab(options = {}) {
+  if (!chrome.tabs?.create || !chrome.tabs?.remove) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "tabs-unavailable",
+      tabId: 0,
+      windowId: 0,
     };
+  }
 
-    const closeAuthWindow = async () => {
-      if (!authWindowId) {
-        return;
-      }
+  const passConsoleUrl = String(options?.passConsoleUrl || getAdobePassConsoleAuthPrimeUrl()).trim();
+  const cmConsoleUrl = String(options?.primeUrl || getCmConsoleAuthPrimeUrl()).trim();
+  const initialUrl = firstNonEmptyString([passConsoleUrl, cmConsoleUrl]);
+  if (!initialUrl) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "missing-prime-url",
+      tabId: 0,
+      windowId: 0,
+    };
+  }
+
+  let createdTabId = 0;
+  let createdWindowId = 0;
+  try {
+    const createdTab = await chrome.tabs.create({
+      url: initialUrl,
+      active: false,
+    });
+    createdTabId = Number(createdTab?.id || 0);
+    createdWindowId = Number(createdTab?.windowId || 0);
+    if (createdTabId <= 0) {
+      throw new Error("Unable to create the CM bootstrap tab.");
+    }
+
+    const primeResult = await primeCmConsoleInAuthPopup(createdTabId, {
+      passConsoleUrl,
+      primeUrl: cmConsoleUrl,
+      activateTab: false,
+      timeoutMs: options?.timeoutMs,
+      settleMs: options?.settleMs,
+      requestId: options?.requestId,
+    });
+
+    return {
+      ok: primeResult?.ok === true,
+      skipped: primeResult?.skipped === true,
+      reason: String(primeResult?.reason || ""),
+      url: String(primeResult?.url || initialUrl),
+      tabId: createdTabId,
+      windowId: createdWindowId,
+    };
+  } catch (error) {
+    if (createdTabId > 0) {
       try {
-        await chrome.windows.remove(authWindowId);
+        await chrome.tabs.remove(createdTabId);
       } catch {
-        // Ignore close errors.
+        // Ignore bootstrap tab cleanup failures.
       }
+    }
+    return {
+      ok: false,
+      skipped: false,
+      reason: error instanceof Error ? error.message : String(error),
+      url: initialUrl,
+      tabId: 0,
+      windowId: 0,
     };
+  }
+}
 
-    const finish = async (result, error) => {
-      if (completed) {
-        return;
-      }
-      completed = true;
-      const capturedAvatarUrl = debuggerSession?.getCapturedAvatarCandidate
-        ? normalizeAvatarCandidate(debuggerSession.getCapturedAvatarCandidate())
-        : "";
-      cleanup();
+async function withTemporaryCmConsoleBootstrapContext(task, options = {}) {
+  const action = typeof task === "function" ? task : null;
+  if (!action) {
+    return null;
+  }
 
-      let retainedBootstrapContext = null;
-      if (!error && keepWindowOpenForBootstrap && authWindowId && authTabId && debuggerSession) {
-        retainedBootstrapContext = await retainAuthPopupBootstrapContext({
-          windowId: authWindowId,
-          tabId: authTabId,
-          debuggerSession,
-        });
-        debuggerSession = null;
-        authWindowId = null;
-        authTabId = null;
-      }
+  const explicitTabId = Number(options?.preferredTabId || 0);
+  if (explicitTabId > 0) {
+    return action(explicitTabId);
+  }
 
-      if (debuggerSession) {
-        try {
-          await debuggerSession.detach();
-        } catch {
-          // Ignore debugger detach failures.
-        }
-        debuggerSession = null;
-      }
+  let bootstrapTabId = 0;
+  const primeResult = await openTemporaryCmConsoleBootstrapTab({
+    passConsoleUrl: options?.passConsoleUrl,
+    primeUrl: options?.primeUrl,
+    timeoutMs: options?.timeoutMs,
+    settleMs: options?.settleMs,
+    requestId: options?.requestId,
+  }).catch(() => null);
+  if (primeResult?.tabId > 0) {
+    bootstrapTabId = Number(primeResult.tabId || 0);
+  }
 
-      if (authWindowId) {
-        await closeAuthWindow();
+  try {
+    return await action(bootstrapTabId);
+  } finally {
+    if (bootstrapTabId > 0) {
+      try {
+        await chrome.tabs.remove(bootstrapTabId);
+      } catch {
+        // Ignore cleanup failures for temporary CM bootstrap tabs.
       }
+    }
+  }
+}
 
-      if (error) {
-        reject(error);
-      } else {
-        resolve({
-          responseUrl: String(result || ""),
-          capturedAvatarUrl,
-          authPopupTabId: Number(retainedBootstrapContext?.tabId || 0),
-          authPopupWindowId: Number(retainedBootstrapContext?.windowId || 0),
-        });
-      }
-    };
+async function runAuthInPopupWindow(authUrl, redirectUri, options = {}) {
+  if (!chrome.windows?.create || !chrome.tabs?.query || !chrome.tabs?.onUpdated) {
+    throw new Error("Chrome popup tab monitoring is unavailable. Add the tabs permission and reload the extension.");
+  }
 
-    const maybeResolveFromUrl = (url) => {
-      if (!url) {
-        return;
-      }
-      if (redirectUri && url.startsWith(redirectUri)) {
-        void finish(url, null);
-        return;
-      }
-      if (successUrlMatcher && successUrlMatcher(url)) {
-        void finish(url, null);
-      }
-    };
+  const successUrlMatcher = typeof options.successUrlMatcher === "function" ? options.successUrlMatcher : null;
+  const popupWindow = await chrome.windows.create({
+    url: authUrl,
+    type: "popup",
+    focused: true,
+    width: 560,
+    height: 760,
+  });
+  const popupWindowId = Number(popupWindow?.id || 0);
+  if (!popupWindowId) {
+    throw new Error("Unable to open the Adobe sign-in popup.");
+  }
 
-    const onUpdated = (tabId, changeInfo, tab) => {
-      if (tabId !== authTabId) {
-        return;
-      }
-      maybeResolveFromUrl(changeInfo.url || tab?.url || "");
-    };
+  const closePopupWindow = async () => {
+    if (!popupWindowId || !chrome.windows?.remove) {
+      return;
+    }
+    try {
+      await chrome.windows.remove(popupWindowId);
+    } catch {
+      // Ignore already-closed popup windows.
+    }
+  };
 
-    const onRemoved = (tabId) => {
-      if (tabId === authTabId && !completed) {
-        void finish(null, new Error("Login window was closed before completion."));
-      }
-    };
+  const popupTabs = await chrome.tabs.query({
+    windowId: popupWindowId,
+  });
+  const popupTabId = Number(popupTabs.find((tab) => Number.isFinite(tab?.id))?.id || 0);
+  if (!popupTabId) {
+    await closePopupWindow();
+    throw new Error("Unable to monitor the Adobe sign-in popup tab.");
+  }
 
-    chrome.tabs.onUpdated.addListener(onUpdated);
-    chrome.tabs.onRemoved.addListener(onRemoved);
-
-    timeoutId = setTimeout(() => {
-      void finish(null, new Error("Login timed out. Please try again."));
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      void fail(new Error("Adobe sign-in popup timed out before UnderPAR received the redirect."));
     }, AUTH_WINDOW_TIMEOUT_MS);
 
-    try {
-      const authWindow = await chrome.windows.create({
-        url: authUrl,
-        type: "popup",
-        width: 520,
-        height: 720,
-        focused: true,
-      });
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      chrome.tabs.onUpdated.removeListener(handleUpdated);
+      chrome.tabs.onRemoved.removeListener(handleTabRemoved);
+      chrome.windows.onRemoved.removeListener(handleWindowRemoved);
+    };
 
-      authWindowId = authWindow.id ?? null;
-      authTabId = authWindow.tabs?.[0]?.id ?? null;
-
-      if (!authTabId) {
-        await finish(null, new Error("Unable to open login window."));
+    const succeed = async (callbackUrl) => {
+      if (settled) {
         return;
       }
+      settled = true;
+      cleanup();
+      await closePopupWindow();
+      resolve({
+        responseUrl: String(callbackUrl || ""),
+        capturedAvatarUrl: "",
+        authPopupTabId: 0,
+        authPopupWindowId: 0,
+      });
+    };
 
-      debuggerSession = await attachAuthDebugger(authTabId, { captureProfileAvatar: true });
+    const fail = async (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      await closePopupWindow();
+      reject(error);
+    };
 
-      pollId = setInterval(async () => {
-        if (!authTabId || completed) {
-          return;
-        }
+    const maybeCaptureRedirect = (candidateUrl) => {
+      const normalizedCandidate = String(candidateUrl || "").trim();
+      if (!normalizedCandidate) {
+        return false;
+      }
+      if (redirectUri && normalizedCandidate.startsWith(redirectUri)) {
+        void succeed(normalizedCandidate);
+        return true;
+      }
+      if (successUrlMatcher && successUrlMatcher(normalizedCandidate)) {
+        void succeed(normalizedCandidate);
+        return true;
+      }
+      return false;
+    };
 
-        try {
-          const tab = await chrome.tabs.get(authTabId);
-          maybeResolveFromUrl(tab.url || "");
-        } catch {
-          // Ignore transient polling errors.
-        }
-      }, 250);
-    } catch (error) {
-      await finish(null, error instanceof Error ? error : new Error(String(error)));
-    }
+    const handleUpdated = (tabId, changeInfo, tab) => {
+      if (tabId !== popupTabId) {
+        return;
+      }
+      maybeCaptureRedirect(firstNonEmptyString([changeInfo?.url, tab?.pendingUrl, tab?.url]));
+    };
+
+    const handleTabRemoved = (tabId) => {
+      if (tabId !== popupTabId) {
+        return;
+      }
+      void fail(new Error("Adobe sign-in popup was closed before UnderPAR received the redirect."));
+    };
+
+    const handleWindowRemoved = (windowId) => {
+      if (windowId !== popupWindowId) {
+        return;
+      }
+      void fail(new Error("Adobe sign-in popup window was closed before UnderPAR received the redirect."));
+    };
+
+    chrome.tabs.onUpdated.addListener(handleUpdated);
+    chrome.tabs.onRemoved.addListener(handleTabRemoved);
+    chrome.windows.onRemoved.addListener(handleWindowRemoved);
+
+    void chrome.tabs
+      .get(popupTabId)
+      .then((tab) => {
+        maybeCaptureRedirect(firstNonEmptyString([tab?.pendingUrl, tab?.url]));
+      })
+      .catch(() => {});
   });
 }
 
@@ -49818,9 +49663,7 @@ async function runUnderparPkceLogin(options = {}) {
     let capturedAvatarUrl = "";
     let authPopupTabId = 0;
     if (interactive) {
-      const popupResult = await runAuthInPopupWindow(authorizeUrl, redirectUri, {
-        keepWindowOpenForBootstrap: options?.keepAuthWindowOpenForBootstrap === true,
-      });
+      const popupResult = await runAuthInPopupWindow(authorizeUrl, redirectUri);
       responseUrl = String(popupResult?.responseUrl || "");
       capturedAvatarUrl = normalizeAvatarCandidate(popupResult?.capturedAvatarUrl || "");
       authPopupTabId = Number(popupResult?.authPopupTabId || 0);
@@ -50162,23 +50005,23 @@ function mergeProfilePayloads(baseProfile, updateProfile) {
 }
 
 async function fetchImsSessionProfile(accessToken = "") {
+  const normalizedAccessToken = normalizeBearerTokenValue(accessToken);
+  if (!normalizedAccessToken) {
+    return null;
+  }
+
   const imsBase = IMS_BASE_URL;
-  const clientIdCandidates = getUnderparImsClientIdCandidates(accessToken);
+  const clientIdCandidates = getUnderparImsClientIdCandidates(normalizedAccessToken);
   const endpoints = [
     ...clientIdCandidates.map((clientId) => `${IMS_PROFILE_URL}?client_id=${encodeURIComponent(clientId)}`),
     IMS_PROFILE_URL,
     ...clientIdCandidates.map((clientId) => `${imsBase}/ims/userinfo/v2?client_id=${encodeURIComponent(clientId)}`),
-    ...clientIdCandidates.map((clientId) => `${imsBase}/ims/check/v6/status?client_id=${encodeURIComponent(clientId)}`),
-    ...clientIdCandidates.map(
-      (clientId) => `${imsBase}/ims/check/v5/status?client_id=${encodeURIComponent(clientId)}&locale=en_US`
-    ),
-    ...clientIdCandidates.map((clientId) => `${imsBase}/ims/check/status?client_id=${encodeURIComponent(clientId)}`),
   ];
 
   const variants = [];
   const dedupeKeys = new Set();
   const pushVariant = (clientId, credentials, includeToken) => {
-    const headers = buildImsProfileHeaders(includeToken ? accessToken : "", clientId);
+    const headers = buildImsProfileHeaders(includeToken ? normalizedAccessToken : "", clientId);
     const key = `${clientId}|${credentials}|${includeToken ? "token" : "notoken"}`;
     if (dedupeKeys.has(key)) {
       return;
@@ -50188,18 +50031,12 @@ async function fetchImsSessionProfile(accessToken = "") {
   };
 
   for (const clientId of clientIdCandidates) {
-    pushVariant(clientId, "include", false);
-    if (accessToken) {
-      pushVariant(clientId, "omit", true);
-      pushVariant(clientId, "include", true);
-    }
+    pushVariant(clientId, "omit", true);
+    pushVariant(clientId, "include", true);
   }
 
-  pushVariant("", "include", false);
-  if (accessToken) {
-    pushVariant("", "omit", true);
-    pushVariant("", "include", true);
-  }
+  pushVariant("", "omit", true);
+  pushVariant("", "include", true);
 
   let bestPayload = null;
   let bestPayloadScore = Number.NEGATIVE_INFINITY;
@@ -53842,10 +53679,19 @@ async function attemptInteractiveAdobePassRecovery(sessionData) {
     return false;
   }
 
-  return activateSession(
-    buildLoginSessionPayloadFromAuth(switched, switched.profile, switched.imageUrl),
-    "interactive-auto-switch-recovery",
-    { allowDeniedRecovery: false }
+  return withTemporaryCmConsoleBootstrapContext(
+    async (preferredCmBootstrapTabId) =>
+      activateSession(
+        buildLoginSessionPayloadFromAuth(switched, switched.profile, switched.imageUrl),
+        "interactive-auto-switch-recovery",
+        {
+          allowDeniedRecovery: false,
+          preferredCmBootstrapTabId,
+        }
+      ),
+    {
+      requestId: "interactive-auto-switch-recovery",
+    }
   );
 }
 
@@ -54342,107 +54188,6 @@ function startExperienceCloudSessionMonitor() {
   }, IMS_SESSION_MONITOR_START_DELAY_MS);
 }
 
-async function probeImsCookieSessionState() {
-  const clientIdCandidates = getUnderparImsClientIdCandidates("");
-  const endpoints = [
-    ...clientIdCandidates.map((clientId) => `${IMS_BASE_URL}/ims/check/v6/status?client_id=${encodeURIComponent(clientId)}`),
-    ...clientIdCandidates.map((clientId) => `${IMS_PROFILE_URL}?client_id=${encodeURIComponent(clientId)}`),
-  ];
-
-  for (const endpoint of endpoints) {
-    try {
-      const response = await relayImsFetch(endpoint, {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json, text/plain, */*",
-        },
-      });
-      const responseText = await response.text().catch(() => "");
-      if (responseLooksLikeExperienceCloudSignIn(response, responseText)) {
-        return "inactive";
-      }
-      if (!response.ok) {
-        continue;
-      }
-      const payload = parseJsonText(responseText, null);
-      if (payload && typeof payload === "object") {
-        const profileComplete = isProfilePayloadComplete(payload);
-        if (profileComplete) {
-          return "active";
-        }
-        const statusSignal = firstNonEmptyString([
-          payload?.status,
-          payload?.state,
-          payload?.error,
-          payload?.errorCode,
-          payload?.message,
-          payload?.errorMessage,
-        ]).toLowerCase();
-        if (
-          /inactive|signed[_\s-]?out|logged[_\s-]?out|invalid[_\s-]?sso|session[_\s-]?cookie\s+is\s+null|not[_\s-]?authenticated/.test(
-            statusSignal
-          )
-        ) {
-          return "inactive";
-        }
-      }
-    } catch {
-      // Continue probing remaining endpoints.
-    }
-  }
-
-  return "unknown";
-}
-
-async function probeExperienceCloudSsoCookieState() {
-  try {
-    const response = await relayImsFetch(EXPERIENCE_CLOUD_SSO_TOKEN_ENDPOINT, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        Accept: "application/json, text/plain, */*",
-        "Content-Type": "application/json",
-        "X-IMS-ClientId": EXPERIENCE_CLOUD_SSO_CLIENT_ID,
-      },
-      body: "{}",
-    });
-    const responseText = await response.text().catch(() => "");
-    const payload = parseJsonText(responseText, {});
-    if (response.status === 401 || response.status === 403) {
-      const errorCode = String(payload?.errorCode || payload?.error || "").toLowerCase();
-      const errorMessage = String(payload?.errorMessage || payload?.message || "").toLowerCase();
-      if (
-        errorCode.includes("invalid_sso_info") ||
-        errorMessage.includes("session cookie is null") ||
-        errorMessage.includes("session cookie")
-      ) {
-        return "inactive";
-      }
-      return "unknown";
-    }
-    if (response.ok) {
-      return "active";
-    }
-    if (responseLooksLikeExperienceCloudSignIn(response, responseText)) {
-      return "inactive";
-    }
-  } catch {
-    // Continue to the other probes.
-  }
-  return "unknown";
-}
-
-function markExperienceCloudSessionProbeResult(value, source = "unknown") {
-  state.sessionMonitorLastProbeSource = String(source || "unknown");
-  return value;
-}
-
-function isStrongInactiveSessionSignal(source = "unknown") {
-  const normalized = String(source || "unknown").trim().toLowerCase();
-  return normalized === "ims-cookie" || normalized === "programmers" || normalized === "sso-cookie";
-}
-
 function getSessionExpiryState() {
   const expiresAt = Number(state.loginData?.expiresAt || 0);
   if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
@@ -54465,40 +54210,6 @@ async function attemptSessionAutoBootstrap(trigger = "interval") {
   return false;
 }
 
-async function probeExperienceCloudSessionState() {
-  const ssoCookieState = await probeExperienceCloudSsoCookieState();
-  if (ssoCookieState === "active") {
-    return markExperienceCloudSessionProbeResult("active", "sso-cookie");
-  }
-
-  const imsCookieState = await probeImsCookieSessionState();
-  if (imsCookieState === "active" || imsCookieState === "inactive") {
-    return markExperienceCloudSessionProbeResult(imsCookieState, "ims-cookie");
-  }
-
-  try {
-    const profile = await fetchImsSessionProfile("");
-    if (profile && typeof profile === "object" && isProfilePayloadComplete(profile)) {
-      return markExperienceCloudSessionProbeResult("active", "ims-profile");
-    }
-  } catch {
-    // Fall through to programmers access check.
-  }
-
-  try {
-    await fetchProgrammersFromApi({ accessToken: "", requireEntities: false });
-    return markExperienceCloudSessionProbeResult("active", "programmers");
-  } catch (error) {
-    if (error?.code === "PROGRAMMERS_ACCESS_DENIED") {
-      return markExperienceCloudSessionProbeResult("inactive", "programmers");
-    }
-    if (ssoCookieState === "inactive") {
-      return markExperienceCloudSessionProbeResult("inactive", "sso-fallback");
-    }
-    return markExperienceCloudSessionProbeResult("unknown", "unknown");
-  }
-}
-
 async function resetToSignedOutState(options = {}) {
   const statusMessage = String(options.statusMessage || "").trim();
   const statusType = options.statusType === "error" ? "error" : options.statusType === "success" ? "success" : "info";
@@ -54516,6 +54227,8 @@ async function resetToSignedOutState(options = {}) {
   state.restricted = false;
   state.sessionReady = false;
   state.programmersApiEndpoint = null;
+  state.consoleBootstrapState = null;
+  state.consoleBootstrapPromise = null;
   state.mvpdCacheByRequestor.clear();
   state.sessionMonitorConsecutiveInactiveDetections = 0;
   state.sessionMonitorLastProbeSource = "unknown";
@@ -54538,77 +54251,33 @@ async function runExperienceCloudSessionMonitorTick(trigger = "interval") {
 
   state.sessionMonitorBusy = true;
   try {
+    const hasAccessToken = Boolean(normalizeBearerTokenValue(state.loginData?.accessToken || ""));
+    if (!hasAccessToken) {
+      await resetToSignedOutState({
+        statusMessage: "UnderPAR no longer has a valid Adobe session. Click Sign In.",
+        statusType: "error",
+      });
+      return;
+    }
+
     const expiryState = getSessionExpiryState();
+    if (expiryState === "fresh") {
+      state.sessionMonitorConsecutiveInactiveDetections = 0;
+      return;
+    }
+
+    if (expiryState === "unknown") {
+      return;
+    }
+
     if ((expiryState === "expiring" || expiryState === "expired") && state.sessionReady && state.loginData?.accessToken) {
       const refreshed = await refreshSessionNoTouch();
-      if (!refreshed) {
-        const postRefreshSessionState = await probeExperienceCloudSessionState();
-        if (postRefreshSessionState === "active") {
-          return;
-        }
-        await resetToSignedOutState({
-          statusMessage:
-            "Experience Cloud session is expiring. Please re-log into Experience Cloud, then click Sign In.",
-          statusType: "error",
-        });
-        return;
-      }
-    }
-
-    const sessionState = await probeExperienceCloudSessionState();
-    if (sessionState === "active") {
-      state.sessionMonitorConsecutiveInactiveDetections = 0;
-      if (!state.sessionReady && !state.restricted && !state.sessionMonitorSuppressed) {
-        await attemptSessionAutoBootstrap(trigger);
-      }
-      return;
-    }
-
-    if (sessionState === "unknown") {
-      state.sessionMonitorConsecutiveInactiveDetections = 0;
-      if (!state.sessionReady && !state.restricted && !state.sessionMonitorSuppressed) {
-        await attemptSessionAutoBootstrap(`${trigger}-unknown`);
-      }
-      return;
-    }
-
-    if (sessionState === "inactive" && (state.sessionReady || state.restricted || state.loginData)) {
-      const now = Date.now();
-      const hasFreshUnderparToken =
-        Boolean(state.loginData?.accessToken) && Number(state.loginData?.expiresAt || 0) > now + 60 * 1000;
-      const probeSource = String(state.sessionMonitorLastProbeSource || "unknown");
-      const strongInactiveSignal = isStrongInactiveSessionSignal(probeSource);
-      if (strongInactiveSignal) {
-        state.sessionMonitorConsecutiveInactiveDetections += 1;
-      } else {
+      if (refreshed) {
         state.sessionMonitorConsecutiveInactiveDetections = 0;
-      }
-
-      if (
-        hasFreshUnderparToken &&
-        (now < Number(state.sessionMonitorInactivityGuardUntil || 0) || !strongInactiveSignal)
-      ) {
         return;
       }
-
-      if (!strongInactiveSignal) {
-        return;
-      }
-
-      if (state.sessionMonitorConsecutiveInactiveDetections < IMS_SESSION_MONITOR_INACTIVE_CONFIRM_TICKS) {
-        return;
-      }
-
-      if (hasFreshUnderparToken) {
-        const refreshed = await refreshSessionNoTouch();
-        if (refreshed) {
-          state.sessionMonitorConsecutiveInactiveDetections = 0;
-          return;
-        }
-      }
-
       await resetToSignedOutState({
-        statusMessage: "Experience Cloud session ended. UnderPAR is paused. Re-login in Experience Cloud or click Sign In.",
+        statusMessage: "UnderPAR session expired. Click Sign In to continue.",
         statusType: "error",
       });
     }
@@ -55319,50 +54988,23 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
 
   let tokenResult = null;
   const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
-  const experienceSeedResult = await requestExperienceCloudConsoleToken({
-    requireFresh: forceRefresh,
-    allowSilentAuth: true,
-  }).catch(() => null);
-  const persistedExperienceSeed = normalizeBearerTokenValue(
-    await persistExperienceCloudConsoleTokenResult(experienceSeedResult || {}, { silent: true })
-  );
-  const preferredExperienceSeed = normalizeBearerTokenValue(
-    firstNonEmptyString([
-      persistedExperienceSeed,
-      normalizeBearerTokenValue(experienceSeedResult?.accessToken || ""),
-      primarySeedToken,
-    ])
-  );
 
   tokenResult = await requestQualifiedCmConsoleToken({
-    seedToken: preferredExperienceSeed,
+    seedToken: primarySeedToken,
     requireFresh: forceRefresh,
     allowSilentAuth: true,
   }).catch(() => null);
 
-  if (!tokenResult?.accessToken && preferredExperienceSeed) {
-    tokenResult = await tryRefreshCmTokenFromIms(preferredExperienceSeed, {
-      requireFresh: forceRefresh,
-    }).catch(() => null);
-  }
-
-  if (!tokenResult?.accessToken && primarySeedToken && primarySeedToken !== preferredExperienceSeed) {
-    tokenResult = await requestQualifiedCmConsoleToken({
-      seedToken: primarySeedToken,
-      requireFresh: forceRefresh,
-      allowSilentAuth: true,
-    }).catch(() => null);
-  }
-
-  if (!tokenResult?.accessToken && primarySeedToken && primarySeedToken !== preferredExperienceSeed) {
+  if (!tokenResult?.accessToken && primarySeedToken) {
     tokenResult = await tryRefreshCmTokenFromIms(primarySeedToken, {
       requireFresh: forceRefresh,
     }).catch(() => null);
   }
 
   if (!tokenResult?.accessToken) {
-    tokenResult = await tryRefreshCmTokenFromIms("", {
+    tokenResult = await requestQualifiedCmConsoleToken({
       requireFresh: forceRefresh,
+      allowSilentAuth: true,
     }).catch(() => null);
   }
 
@@ -56380,6 +56022,127 @@ function getAdobeConsoleRequestHeaders(accessToken = "") {
   return headers;
 }
 
+function extractAdobeConsoleGrantedAuthorities(payload = null) {
+  const candidateArrays = [
+    payload?.grantedAuthorities,
+    payload?.authorities,
+    payload?.roles,
+    payload?.profile?.grantedAuthorities,
+    payload?.profile?.authorities,
+    payload?.profile?.roles,
+  ];
+  const output = [];
+  const seen = new Set();
+  candidateArrays.forEach((candidateArray) => {
+    (Array.isArray(candidateArray) ? candidateArray : []).forEach((entry) => {
+      const normalized = String(entry || "").trim();
+      const key = normalized.toLowerCase();
+      if (!normalized || seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      output.push(normalized);
+    });
+  });
+  return output;
+}
+
+async function fetchAdobeConsoleBootstrapState(accessToken = "", options = {}) {
+  const normalizedAccessToken = normalizeBearerTokenValue(accessToken);
+  if (!normalizedAccessToken || !isProbablyJwt(normalizedAccessToken)) {
+    return null;
+  }
+
+  const timeoutMs = Math.max(1000, Number(options.timeoutMs || PROGRAMMERS_FETCH_TIMEOUT_MS));
+  const commonRequestOptions = {
+    timeoutMs,
+    preferAuthenticatedHeaders: true,
+    headers: {
+      Authorization: `Bearer ${normalizedAccessToken}`,
+    },
+  };
+
+  const [extendedProfileResponse, maintenanceStatusResponse, configurationVersionResponse] = await Promise.all([
+    fetchAdobeConsoleJsonWithAuthVariants(
+      [`${ADOBE_CONSOLE_BASE}/rest/api/user/extendedProfile`],
+      "Console extended profile",
+      commonRequestOptions
+    ),
+    fetchAdobeConsoleJsonWithAuthVariants(
+      [`${ADOBE_CONSOLE_BASE}/rest/api/admin/maintenance/status`],
+      "Console maintenance status",
+      commonRequestOptions
+    ),
+    fetchAdobeConsoleJsonWithAuthVariants(
+      [`${ADOBE_CONSOLE_BASE}/rest/api/config/latestActivatedConsoleConfigurationVersion`],
+      "Console configuration version",
+      commonRequestOptions
+    ),
+  ]);
+
+  const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(configurationVersionResponse?.parsed, 0);
+  return {
+    accessToken: normalizedAccessToken,
+    fetchedAt: Date.now(),
+    extendedProfile:
+      extendedProfileResponse?.parsed && typeof extendedProfileResponse.parsed === "object"
+        ? extendedProfileResponse.parsed
+        : null,
+    grantedAuthorities: extractAdobeConsoleGrantedAuthorities(extendedProfileResponse?.parsed),
+    maintenanceStatus:
+      maintenanceStatusResponse?.parsed && typeof maintenanceStatusResponse.parsed === "object"
+        ? maintenanceStatusResponse.parsed
+        : maintenanceStatusResponse?.parsed ?? null,
+    configurationVersion,
+  };
+}
+
+async function ensureConsoleBootstrapState(accessToken = "", options = {}) {
+  const normalizedAccessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([accessToken, getPreferredPrimaryImsAccessTokenCandidate()])
+  );
+  if (!normalizedAccessToken || !isProbablyJwt(normalizedAccessToken)) {
+    return null;
+  }
+
+  const forceRefresh = options.forceRefresh === true;
+  const existingBootstrapState =
+    state.consoleBootstrapState && typeof state.consoleBootstrapState === "object" ? state.consoleBootstrapState : null;
+  if (
+    !forceRefresh &&
+    existingBootstrapState &&
+    normalizeBearerTokenValue(existingBootstrapState.accessToken || "") === normalizedAccessToken
+  ) {
+    const existingConfigurationVersion = mvpdWorkspaceExtractConfigurationVersion(existingBootstrapState, 0);
+    if (existingConfigurationVersion > 0 || existingBootstrapState.extendedProfile) {
+      return existingBootstrapState;
+    }
+  }
+
+  if (state.consoleBootstrapPromise) {
+    return state.consoleBootstrapPromise;
+  }
+
+  let promise;
+  promise = (async () => {
+    try {
+      const bootstrapState = await fetchAdobeConsoleBootstrapState(normalizedAccessToken, options);
+      if (bootstrapState) {
+        state.consoleBootstrapState = bootstrapState;
+        PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
+      }
+      return bootstrapState;
+    } finally {
+      if (state.consoleBootstrapPromise === promise) {
+        state.consoleBootstrapPromise = null;
+      }
+    }
+  })();
+
+  state.consoleBootstrapPromise = promise;
+  return promise;
+}
+
 function getAdobeConsoleErrorMessage(parsed, text, statusText = "") {
   return (
     normalizeHttpErrorMessage(
@@ -56504,13 +56267,17 @@ async function fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel
   const preferAuthenticatedHeaders = options.preferAuthenticatedHeaders !== false;
 
   const getHeaderVariants = () => {
-    const activeAccessToken = firstNonEmptyString([state.loginData?.accessToken]);
+    const explicitAuthorization = firstNonEmptyString([customHeaders.Authorization, customHeaders.authorization]);
+    const explicitAccessToken = normalizeBearerTokenValue(explicitAuthorization.replace(/^Bearer\s+/i, ""));
+    const activeAccessToken = firstNonEmptyString([explicitAccessToken, state.loginData?.accessToken]);
     const variants = [];
     if (activeAccessToken && preferAuthenticatedHeaders) {
       variants.push(getAdobeConsoleRequestHeaders(activeAccessToken));
     }
-    variants.push(getAdobeConsoleRequestHeaders(""));
-    if (activeAccessToken) {
+    if (!activeAccessToken || preferAuthenticatedHeaders === false) {
+      variants.push(getAdobeConsoleRequestHeaders(""));
+    }
+    if (activeAccessToken && !preferAuthenticatedHeaders) {
       variants.push(getAdobeConsoleRequestHeaders(activeAccessToken));
     }
     return variants.filter((headers, index, list) => list.findIndex((item) => item.Authorization === headers.Authorization) === index);
@@ -56608,13 +56375,13 @@ async function fetchApplicationDetailsByGuid(guid, options = {}) {
   }
   const requestOptions = options && typeof options === "object" ? options : {};
   const encodedGuid = encodeURIComponent(guid);
-  const urlCandidates = [
+  const urlCandidates = uniquePreserveOrder([
     `${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`,
-    `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}?configurationVersion=3522`,
+    appendAdobeConsoleConfigurationVersion(`${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`),
     `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`,
     `${ADOBE_CONSOLE_BASE}/rest/api/registeredApplications/${encodedGuid}`,
     `${ADOBE_CONSOLE_BASE}/rest/api/registered-applications/${encodedGuid}`,
-  ];
+  ]);
   const { parsed } = await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application detail", requestOptions);
   const entityData =
     parsed?.entityData && typeof parsed.entityData === "object" && !Array.isArray(parsed.entityData)
@@ -56635,13 +56402,13 @@ async function fetchApplicationRawByGuid(guid, options = {}) {
   }
   const requestOptions = options && typeof options === "object" ? options : {};
   const encodedGuid = encodeURIComponent(guid);
-  const urlCandidates = [
+  const urlCandidates = uniquePreserveOrder([
     `${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`,
-    `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}?configurationVersion=3522`,
+    appendAdobeConsoleConfigurationVersion(`${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`),
     `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`,
     `${ADOBE_CONSOLE_BASE}/rest/api/registeredApplications/${encodedGuid}`,
     `${ADOBE_CONSOLE_BASE}/rest/api/registered-applications/${encodedGuid}`,
-  ];
+  ]);
   const payload = await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application raw fetch", requestOptions);
   const rawParsed = payload?.parsed || null;
   const parsedEntity =
@@ -56764,12 +56531,21 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
     return cachedApplications;
   }
 
+  const activeAccessToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
+  if (activeAccessToken) {
+    await ensureConsoleBootstrapState(activeAccessToken, {
+      forceRefresh: false,
+    }).catch(() => null);
+  }
+
   const urlCandidates = [
-    `${ADOBE_CONSOLE_BASE}/rest/api/applications?programmer=${encodeURIComponent(programmerId)}&configurationVersion=3522`,
+    appendAdobeConsoleConfigurationVersion(
+      `${ADOBE_CONSOLE_BASE}/rest/api/applications?programmer=${encodeURIComponent(programmerId)}`
+    ),
     `${ADOBE_CONSOLE_BASE}/rest/api/applications?programmer=${encodeURIComponent(programmerId)}`,
-    `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication?programmer=${encodeURIComponent(
-      programmerId
-    )}&configurationVersion=3522`,
+    appendAdobeConsoleConfigurationVersion(
+      `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication?programmer=${encodeURIComponent(programmerId)}`
+    ),
     `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication?programmer=${encodeURIComponent(programmerId)}`,
     `${ADOBE_CONSOLE_BASE}/rest/api/registeredApplications?programmer=${encodeURIComponent(programmerId)}`,
     `${ADOBE_CONSOLE_BASE}/rest/api/registered-applications?programmer=${encodeURIComponent(programmerId)}`,
@@ -60138,104 +59914,6 @@ function buildCmImsCheckUrl(config = {}) {
   return url.toString();
 }
 
-function buildExperienceCloudEarlyTokenFormBody() {
-  const form = new URLSearchParams();
-  form.set("client_id", EXPERIENCE_CLOUD_SSO_CLIENT_ID);
-  form.set("scope", EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE);
-  form.set("filter", EXPERIENCE_CLOUD_EARLY_TOKEN_FILTER);
-  return form.toString();
-}
-
-async function requestExperienceCloudValidateToken(seedToken = "", options = {}) {
-  const token = normalizeBearerTokenValue(seedToken);
-  if (!token || !isProbablyJwt(token) || !tokenSupportsExperienceCloudConsole(token)) {
-    return null;
-  }
-
-  const requireFresh = options.requireFresh === true;
-  const endpoint = `${IMS_BASE_URL}/ims/validate_token/v1?jslVersion=underpar-cm-seed`;
-  const form = new URLSearchParams({
-    type: "access_token",
-    client_id: EXPERIENCE_CLOUD_SSO_CLIENT_ID,
-    token,
-  });
-  const attempts = [{ credentials: "include" }, { credentials: "omit" }];
-
-  for (const attempt of attempts) {
-    try {
-      const response = await relayImsFetch(endpoint, {
-        method: "POST",
-        credentials: attempt.credentials,
-        headers: {
-          Accept: "*/*",
-          Origin: CM_CONSOLE_APP_ORIGIN,
-          Referer: CM_CONSOLE_APP_REFERER,
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        },
-        body: form.toString(),
-      });
-      if (!response.ok) {
-        continue;
-      }
-
-      const parsed = parseJsonText(await response.text().catch(() => ""), null);
-      if (!parsed || typeof parsed !== "object") {
-        continue;
-      }
-
-      const refreshedToken = normalizeBearerTokenValue(extractImsAccessTokenFromPayload(parsed));
-      if (!refreshedToken && parsed?.valid !== true) {
-        continue;
-      }
-      const resolvedToken = refreshedToken || token;
-      if (!resolvedToken || !isProbablyJwt(resolvedToken) || !tokenSupportsExperienceCloudConsole(resolvedToken)) {
-        continue;
-      }
-      if (requireFresh && !isAccessTokenFreshEnough(resolvedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-        continue;
-      }
-
-      const resolvedClaims = parseJwtPayload(resolvedToken) || {};
-      const tokenPayload = parsed?.token && typeof parsed.token === "object" ? parsed.token : {};
-      const statePayload = parseImsStatePayload(firstNonEmptyString([tokenPayload?.state]));
-      const createdAtRaw = Number(tokenPayload?.created_at || 0);
-      const createdAtMs =
-        createdAtRaw > 0 && createdAtRaw < 1000000000000 ? createdAtRaw * 1000 : createdAtRaw > 0 ? createdAtRaw : 0;
-
-      return {
-        accessToken: resolvedToken,
-        expiresAt: coercePositiveNumber(parsed?.expires_at || resolveAuthResponseExpiry(resolvedToken, 0)?.expiresAt),
-        expiresIn: coercePositiveNumber(tokenPayload?.expires_in || parsed?.expires_in || resolvedClaims?.expires_in),
-        scope: firstNonEmptyString([resolvedClaims?.scope, tokenPayload?.scope, parsed?.scope]),
-        imsSession: mergeImsSessionSnapshots(null, {
-          tokenId: tokenPayload?.id,
-          sessionId: tokenPayload?.sid,
-          sessionUrl: firstNonEmptyString([statePayload?.session]),
-          userId: firstNonEmptyString([tokenPayload?.user_id]),
-          authId: firstNonEmptyString([tokenPayload?.aa_id]),
-          clientId: firstNonEmptyString([tokenPayload?.client_id, EXPERIENCE_CLOUD_SSO_CLIENT_ID]),
-          tokenType: firstNonEmptyString([tokenPayload?.type]),
-          scope: firstNonEmptyString([tokenPayload?.scope, resolvedClaims?.scope]),
-          as: tokenPayload?.as,
-          fg: tokenPayload?.fg,
-          moi: tokenPayload?.moi,
-          pba: tokenPayload?.pba,
-          keyAlias: firstNonEmptyString([tokenPayload?.key_alias]),
-          stateNonce: statePayload?.nonce,
-          stateJslibVersion: firstNonEmptyString([statePayload?.jslibver, statePayload?.jslibVersion]),
-          createdAt: createdAtMs,
-          expiresAt: Number(parsed?.expires_at || 0),
-        }),
-        source: `exc-validate:${attempt.credentials}`,
-      };
-    } catch {
-      // Continue best-effort across credential modes.
-    }
-  }
-
-  return null;
-}
-
 async function requestQualifiedCmConsoleToken(options = {}) {
   const requireFresh = options.requireFresh === true;
   const allowSilentAuth = options.allowSilentAuth !== false;
@@ -60243,12 +59921,7 @@ async function requestQualifiedCmConsoleToken(options = {}) {
   const seen = new Set();
   const pushSeed = (value) => {
     const normalized = normalizeBearerTokenValue(value);
-    if (
-      !normalized ||
-      !isProbablyJwt(normalized) ||
-      !tokenSupportsExperienceCloudConsole(normalized) ||
-      seen.has(normalized)
-    ) {
+    if (!normalized || !isProbablyJwt(normalized) || seen.has(normalized)) {
       return;
     }
     seen.add(normalized);
@@ -60256,181 +59929,49 @@ async function requestQualifiedCmConsoleToken(options = {}) {
   };
 
   pushSeed(options?.seedToken);
+  pushSeed(getPreferredCmAccessTokenCandidate());
   pushSeed(getPreferredPrimaryImsAccessTokenCandidate());
-  pushSeed(getPreferredExperienceCloudConsoleAccessTokenCandidate());
 
-  const runSeeds = async () => {
-    for (const seed of seedCandidates) {
-      const validatedSeedResult = (await requestExperienceCloudValidateToken(seed, { requireFresh })) || {
+  if (allowSilentAuth && seedCandidates.length === 0) {
+    const silent = await attemptSilentBootstrapLogin().catch(() => null);
+    pushSeed(silent?.accessToken);
+  }
+
+  for (const seed of seedCandidates) {
+    if (tokenSupportsCmTenantCatalog(seed) && (!requireFresh || isAccessTokenFreshEnough(seed, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
+      return {
         accessToken: seed,
         expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(seed, 0)?.expiresAt),
         expiresIn: 0,
         scope: firstNonEmptyString([parseJwtPayload(seed)?.scope]),
         imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(seed), null),
-        source: "exc-seed-existing",
-      };
-      const validatedSeedToken = normalizeBearerTokenValue(validatedSeedResult?.accessToken || seed);
-      if (!validatedSeedToken) {
-        continue;
-      }
-      const cmTokenResult = await requestCmTokenViaImsCheck(validatedSeedToken, {
-        requireFresh,
-      });
-      if (!cmTokenResult?.accessToken) {
-        continue;
-      }
-      return {
-        ...cmTokenResult,
-        imsSession: mergeImsSessionSnapshots(cmTokenResult?.imsSession || null, validatedSeedResult?.imsSession || null),
-        source: `qualified:${String(cmTokenResult?.source || "ims-check")}`,
+        source: "qualified:existing-cm",
         qualified: true,
       };
     }
-    return null;
-  };
 
-  let qualifiedTokenResult = await runSeeds();
-  if (qualifiedTokenResult?.accessToken) {
-    return qualifiedTokenResult;
-  }
+    const viaCheck = await requestCmTokenViaImsCheck(seed, { requireFresh });
+    if (viaCheck?.accessToken) {
+      return {
+        ...viaCheck,
+        imsSession: mergeImsSessionSnapshots(viaCheck?.imsSession || null, deriveImsSessionSnapshotFromToken(seed)),
+        source: `qualified:${String(viaCheck?.source || "ims-check")}`,
+        qualified: true,
+      };
+    }
 
-  let experienceConsoleTokenResult = null;
-  try {
-    experienceConsoleTokenResult = await requestExperienceCloudConsoleToken({ requireFresh, allowSilentAuth });
-  } catch {
-    experienceConsoleTokenResult = null;
-  }
-  const persistedExperienceConsoleToken = normalizeBearerTokenValue(
-    await persistExperienceCloudConsoleTokenResult(experienceConsoleTokenResult || {})
-  );
-  pushSeed(persistedExperienceConsoleToken || experienceConsoleTokenResult?.accessToken);
-  qualifiedTokenResult = await runSeeds();
-  if (qualifiedTokenResult?.accessToken) {
-    return qualifiedTokenResult;
+    const viaValidate = await requestCmTokenViaValidateToken(seed, { requireFresh });
+    if (viaValidate?.accessToken) {
+      return {
+        ...viaValidate,
+        imsSession: mergeImsSessionSnapshots(viaValidate?.imsSession || null, deriveImsSessionSnapshotFromToken(seed)),
+        source: `qualified:${String(viaValidate?.source || "validate")}`,
+        qualified: true,
+      };
+    }
   }
 
   return null;
-}
-
-async function requestExperienceCloudConsoleToken(options = {}) {
-  const requireFresh = options.requireFresh === true;
-  const allowSilentAuth = options.allowSilentAuth !== false;
-  const persistedExperienceToken = getPreferredExperienceCloudConsoleAccessTokenCandidate();
-  if (persistedExperienceToken && tokenSupportsExperienceCloudConsole(persistedExperienceToken)) {
-    if (!requireFresh || isAccessTokenFreshEnough(persistedExperienceToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-      return {
-        accessToken: persistedExperienceToken,
-        expiresAt:
-          coercePositiveNumber(resolveAuthResponseExpiry(persistedExperienceToken, 0)?.expiresAt) ||
-          coercePositiveNumber(state.loginData?.experienceCloudExpiresAt),
-        expiresIn: 0,
-        scope: firstNonEmptyString([
-          parseJwtPayload(persistedExperienceToken)?.scope,
-          state.loginData?.experienceCloudScope,
-          EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE,
-        ]),
-        imsSession: mergeImsSessionSnapshots(
-          deriveImsSessionSnapshotFromToken(persistedExperienceToken),
-          state.loginData?.experienceCloudImsSession && typeof state.loginData.experienceCloudImsSession === "object"
-            ? state.loginData.experienceCloudImsSession
-            : null
-        ),
-        source: "exc-persisted-existing",
-      };
-    }
-  }
-
-  const currentPrimaryToken = getPreferredPrimaryImsAccessTokenCandidate();
-  if (currentPrimaryToken && tokenSupportsExperienceCloudConsole(currentPrimaryToken)) {
-    if (!requireFresh || isAccessTokenFreshEnough(currentPrimaryToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-      return {
-        accessToken: currentPrimaryToken,
-        expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(currentPrimaryToken, 0)?.expiresAt),
-        expiresIn: 0,
-        scope: firstNonEmptyString([parseJwtPayload(currentPrimaryToken)?.scope, state.loginData?.scope]),
-        imsSession: mergeImsSessionSnapshots(
-          deriveImsSessionSnapshotFromToken(currentPrimaryToken),
-          state.loginData?.imsSession && typeof state.loginData.imsSession === "object" ? state.loginData.imsSession : null
-        ),
-        source: "exc-primary-existing",
-      };
-    }
-  }
-
-  if (allowSilentAuth) {
-    try {
-      const silentAuth = await startLogin({
-        interactive: false,
-        allowFallback: false,
-        extraParams: {
-          scope: EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE,
-          profile_filter: EXPERIENCE_CLOUD_SILENT_PROFILE_FILTER,
-        },
-      });
-      const accessToken = normalizeBearerTokenValue(firstNonEmptyString([silentAuth?.accessToken]));
-      if (accessToken && isProbablyJwt(accessToken) && tokenSupportsExperienceCloudConsole(accessToken)) {
-        if (!requireFresh || isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-          const claims = parseJwtPayload(accessToken) || {};
-          return {
-            accessToken,
-            expiresAt: coercePositiveNumber(silentAuth?.expiresAt || resolveAuthResponseExpiry(accessToken, 0)?.expiresAt),
-            expiresIn: coercePositiveNumber(claims?.expires_in),
-            scope: firstNonEmptyString([silentAuth?.scope, claims?.scope, EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE]),
-            imsSession: mergeImsSessionSnapshots(
-              deriveImsSessionSnapshotFromToken(accessToken),
-              silentAuth?.imsSession && typeof silentAuth.imsSession === "object" ? silentAuth.imsSession : null
-            ),
-            source: "exc-silent-auth",
-          };
-        }
-      }
-    } catch {
-      // Fall through to the legacy fetch fallback.
-    }
-  }
-
-  try {
-    const response = await relayImsFetch(CM_IMS_CHECK_TOKEN_ENDPOINT, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        Accept: "*/*",
-        Origin: CM_CONSOLE_APP_ORIGIN,
-        Referer: CM_CONSOLE_APP_REFERER,
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-      },
-      body: buildExperienceCloudEarlyTokenFormBody(),
-    });
-    if (!response.ok) {
-      return null;
-    }
-
-    const parsed = parseJsonText(await response.text().catch(() => ""), null);
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
-
-    const accessToken = normalizeBearerTokenValue(extractImsAccessTokenFromPayload(parsed));
-    if (!accessToken || !isProbablyJwt(accessToken) || !tokenSupportsExperienceCloudConsole(accessToken)) {
-      return null;
-    }
-    if (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-      return null;
-    }
-
-    const claims = parseJwtPayload(accessToken) || {};
-    const tokenExpiry = resolveAuthResponseExpiry(accessToken, coercePositiveNumber(parsed?.expires_in || claims?.expires_in));
-    return {
-      accessToken,
-      expiresAt: coercePositiveNumber(tokenExpiry?.expiresAt),
-      expiresIn: coercePositiveNumber(parsed?.expires_in || claims?.expires_in),
-      scope: firstNonEmptyString([claims?.scope, parsed?.scope, EXPERIENCE_CLOUD_EARLY_TOKEN_SCOPE]),
-      imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(accessToken), null),
-      source: "exc-earlytoken",
-    };
-  } catch {
-    return null;
-  }
 }
 
 async function requestCmTokenViaValidateToken(seedToken = "", options = {}) {
@@ -60699,17 +60240,20 @@ async function bootstrapCmConsoleTenantSession(options = {}) {
       return qualifiedToken;
     }
 
-    const result = await requestCmTokenViaImsCheck("", {
-      requireFresh: forceRefresh,
-    });
-    const directToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(result || {}, {}));
-    if (directToken && tokenSupportsCmTenantCatalog(directToken)) {
-      emitCmDebugEvent({
-        phase: "cm-tenant-session-bootstrap",
-        source: String(result?.source || "ims-check"),
-        tokenClientId: String(parseJwtPayload(directToken)?.client_id || ""),
+    const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
+    if (primarySeedToken) {
+      const result = await requestCmTokenViaImsCheck(primarySeedToken, {
+        requireFresh: forceRefresh,
       });
-      return directToken;
+      const directToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(result || {}, {}));
+      if (directToken && tokenSupportsCmTenantCatalog(directToken)) {
+        emitCmDebugEvent({
+          phase: "cm-tenant-session-bootstrap",
+          source: String(result?.source || "ims-check"),
+          tokenClientId: String(parseJwtPayload(directToken)?.client_id || ""),
+        });
+        return directToken;
+      }
     }
   } catch (error) {
     log("CM tenant session bootstrap failed", {
@@ -60718,48 +60262,6 @@ async function bootstrapCmConsoleTenantSession(options = {}) {
   }
 
   return "";
-}
-
-async function persistExperienceCloudConsoleTokenResult(result = {}, options = {}) {
-  const accessToken = normalizeBearerTokenValue(result?.accessToken);
-  if (!accessToken || !isProbablyJwt(accessToken) || !tokenSupportsExperienceCloudConsole(accessToken)) {
-    return "";
-  }
-
-  const current = state.loginData || createCookieSessionLoginData();
-  const tokenClaims = parseJwtPayload(accessToken) || {};
-  const tokenExpiry = resolveAuthResponseExpiry(accessToken, coercePositiveNumber(result?.expiresIn || tokenClaims?.expires_in));
-  const nextExpiresAt =
-    coercePositiveNumber(result?.expiresAt || tokenExpiry?.expiresAt) ||
-    coercePositiveNumber(current?.experienceCloudExpiresAt);
-  const resolvedImsSession = mergeImsSessionSnapshots(
-    mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(accessToken), current?.experienceCloudImsSession || null),
-    result?.imsSession && typeof result.imsSession === "object" ? result.imsSession : null
-  );
-
-  const nextLoginData = {
-    ...current,
-    experienceCloudAccessToken: accessToken,
-    experienceCloudExpiresAt: nextExpiresAt,
-    experienceCloudScope: compactStorageString(
-      firstNonEmptyString([result?.scope, tokenClaims?.scope, current?.experienceCloudScope]),
-      2048
-    ),
-    experienceCloudImsSession: resolvedImsSession,
-  };
-
-  state.loginData = nextLoginData;
-  try {
-    await saveLoginData(nextLoginData);
-  } catch (error) {
-    if (options?.silent !== true) {
-      log("Experience Cloud seed token persisted in-memory only", {
-        error: error instanceof Error ? error.message : String(error),
-        source: String(result?.source || "unknown"),
-      });
-    }
-  }
-  return accessToken;
 }
 
 async function persistCmTokenBootstrapResult(result = {}, options = {}) {
@@ -61358,16 +60860,30 @@ async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
 }
 
 async function tryRefreshCmTokenFromIms(seedToken = "", options = {}) {
-  const token = normalizeBearerTokenValue(seedToken);
-  const validatedExperienceSeed = token ? await requestExperienceCloudValidateToken(token, options) : null;
-  const effectiveSeedToken = normalizeBearerTokenValue(validatedExperienceSeed?.accessToken || token);
+  const effectiveSeedToken = normalizeBearerTokenValue(
+    firstNonEmptyString([seedToken, getPreferredPrimaryImsAccessTokenCandidate()])
+  );
+  if (!effectiveSeedToken || !isProbablyJwt(effectiveSeedToken)) {
+    return null;
+  }
+
+  if (
+    tokenSupportsCmTenantCatalog(effectiveSeedToken) &&
+    (!options.requireFresh || isAccessTokenFreshEnough(effectiveSeedToken, CM_IMS_FORCE_REFRESH_SKEW_MS))
+  ) {
+    return {
+      accessToken: effectiveSeedToken,
+      expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(effectiveSeedToken, 0)?.expiresAt),
+      expiresIn: 0,
+      scope: firstNonEmptyString([parseJwtPayload(effectiveSeedToken)?.scope]),
+      imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(effectiveSeedToken), null),
+      source: "cm-existing",
+    };
+  }
+
   const viaCheck = await requestCmTokenViaImsCheck(effectiveSeedToken, options);
   if (viaCheck?.accessToken) {
     return viaCheck;
-  }
-
-  if (!effectiveSeedToken || !isProbablyJwt(effectiveSeedToken)) {
-    return null;
   }
 
   const viaValidate = await requestCmTokenViaValidateToken(effectiveSeedToken, options);
@@ -61441,26 +60957,9 @@ async function ensureCmApiAccessToken(options = {}) {
         return tenantBootstrapToken;
       }
 
-      const excConsoleTokenResult = await requestExperienceCloudConsoleToken({
-        requireFresh,
-      });
-      const persistedExcConsoleToken = normalizeBearerTokenValue(
-        await persistExperienceCloudConsoleTokenResult(excConsoleTokenResult || {}, { silent: true })
-      );
-      if (persistedExcConsoleToken) {
-        const refreshedFromExperienceConsole = await tryRefreshCmTokenFromIms(persistedExcConsoleToken, {
-          requireFresh,
-        });
-        if (refreshedFromExperienceConsole?.accessToken) {
-          const persistedExperienceConsoleCmToken = await persistCmTokenBootstrapResult(refreshedFromExperienceConsole, {});
-          if (persistedExperienceConsoleCmToken && tokenSupportsCmTenantCatalog(persistedExperienceConsoleCmToken)) {
-            emitCmConsoleTokenForTesting(persistedExperienceConsoleCmToken, "ensure-exc-app-seed");
-            return persistedExperienceConsoleCmToken;
-          }
-        }
-      }
-
+      const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
       const qualifiedTokenResult = await requestQualifiedCmConsoleToken({
+        seedToken: primarySeedToken,
         requireFresh,
       });
       if (qualifiedTokenResult?.accessToken) {
@@ -61471,18 +60970,6 @@ async function ensureCmApiAccessToken(options = {}) {
         }
       }
 
-      const refreshedFromCookieSession = await tryRefreshCmTokenFromIms("", {
-        requireFresh,
-      });
-      if (refreshedFromCookieSession?.accessToken) {
-        const persistedCookieSessionToken = await persistCmTokenBootstrapResult(refreshedFromCookieSession, {});
-        if (persistedCookieSessionToken && tokenSupportsCmTenantCatalog(persistedCookieSessionToken)) {
-          emitCmConsoleTokenForTesting(persistedCookieSessionToken, "ensure-cookie-session");
-          return persistedCookieSessionToken;
-        }
-      }
-
-      const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
       if (primarySeedToken && isProbablyJwt(primarySeedToken)) {
         const refreshedFromPrimary = await tryRefreshCmTokenFromIms(primarySeedToken, {
           requireFresh,
@@ -61492,22 +60979,6 @@ async function ensureCmApiAccessToken(options = {}) {
           if (persistedPrimaryToken && tokenSupportsCmTenantCatalog(persistedPrimaryToken)) {
             emitCmConsoleTokenForTesting(persistedPrimaryToken, "ensure-primary");
             return persistedPrimaryToken;
-          }
-        }
-      }
-
-      const excConsoleToken = normalizeBearerTokenValue(
-        firstNonEmptyString([persistedExcConsoleToken, excConsoleTokenResult?.accessToken])
-      );
-      if (excConsoleToken && excConsoleToken !== primarySeedToken) {
-        const refreshedFromIms = await tryRefreshCmTokenFromIms(excConsoleToken, {
-          requireFresh,
-        });
-        if (refreshedFromIms?.accessToken) {
-          const persistedRefreshedToken = await persistCmTokenBootstrapResult(refreshedFromIms, {});
-          if (persistedRefreshedToken && tokenSupportsCmTenantCatalog(persistedRefreshedToken)) {
-            emitCmConsoleTokenForTesting(persistedRefreshedToken, "ensure-refreshed");
-            return persistedRefreshedToken;
           }
         }
       }
@@ -65903,16 +65374,21 @@ function responseLooksLikeExperienceCloudSignIn(response, responseBody = "") {
 }
 
 async function fetchProgrammersFromApi(options = {}) {
-  const accessToken = options.accessToken || state.loginData?.accessToken || "";
+  let accessToken = normalizeBearerTokenValue(firstNonEmptyString([options.accessToken, state.loginData?.accessToken]));
   const requireEntities = options.requireEntities !== false;
+  if (!accessToken || !isProbablyJwt(accessToken)) {
+    throw createProgrammersError("Media company load requires a valid UnderPAR Adobe bearer.", "PROGRAMMERS_ACCESS_DENIED");
+  }
+
   const endpoints = state.programmersApiEndpoint
-    ? [state.programmersApiEndpoint, ...PROGRAMMER_ENDPOINTS.filter((item) => item !== state.programmersApiEndpoint)]
+    ? uniquePreserveOrder([appendAdobeConsoleConfigurationVersion(state.programmersApiEndpoint), state.programmersApiEndpoint, ...PROGRAMMER_ENDPOINTS])
     : [...PROGRAMMER_ENDPOINTS];
 
   let lastError = null;
   let denied = false;
   let bestEntities = null;
   let bestEndpoint = "";
+  let silentRefreshAttempted = false;
   for (const endpoint of endpoints) {
     try {
       const baseHeaders = {
@@ -65920,58 +65396,70 @@ async function fetchProgrammersFromApi(options = {}) {
         "ap-request-id": generateRequestId(),
         Origin: "https://cdn.experience.adobe.net",
         Referer: "https://cdn.experience.adobe.net/",
+        Authorization: `Bearer ${accessToken}`,
       };
 
-      const headerVariants = [baseHeaders];
-      if (accessToken) {
-        headerVariants.push({
-          ...baseHeaders,
-          Authorization: `Bearer ${accessToken}`,
-        });
-      }
-
-      for (const headers of headerVariants) {
+      for (let round = 0; round < 2; round += 1) {
         const response = await fetchWithAbortTimeout(
           endpoint,
           {
             method: "GET",
             credentials: "include",
             mode: "cors",
-            headers,
+            headers: baseHeaders,
           },
           PROGRAMMERS_FETCH_TIMEOUT_MS
         );
 
         const responseText = await response.text().catch(() => "");
+        const payload = parseJsonText(responseText, null);
+        if (
+          isAdobeConsoleTokenExpiredResponse(response.status, payload, responseText) &&
+          !silentRefreshAttempted &&
+          firstNonEmptyString([state.loginData?.accessToken])
+        ) {
+          silentRefreshAttempted = true;
+          const refreshed = await refreshSessionNoTouch();
+          if (refreshed) {
+            accessToken = normalizeBearerTokenValue(firstNonEmptyString([options.accessToken, state.loginData?.accessToken]));
+            if (accessToken) {
+              baseHeaders.Authorization = `Bearer ${accessToken}`;
+              continue;
+            }
+          }
+        }
+
         if (responseLooksLikeExperienceCloudSignIn(response, responseText)) {
           denied = true;
           lastError = createProgrammersError(
             `Media company access denied (${response.status || 0})`,
             "PROGRAMMERS_ACCESS_DENIED"
           );
-          continue;
+          break;
         }
 
         if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            denied = true;
+          }
           lastError = createProgrammersError(
             `Endpoint ${endpoint} failed (${response.status}): ${responseText || response.statusText}`,
             "PROGRAMMERS_ENDPOINT_FAILED"
           );
-          continue;
+          break;
         }
 
-        const payload = parseJsonText(responseText, null);
         if (payload === null) {
           lastError = createProgrammersError(
             `Endpoint ${endpoint} returned non-JSON payload (${response.status}).`,
             "PROGRAMMERS_ENDPOINT_FAILED"
           );
-          continue;
+          break;
         }
         const normalizedEntities = normalizeProgrammersResponse(payload);
         if (requireEntities && normalizedEntities.length === 0) {
           lastError = createProgrammersError(`Endpoint ${endpoint} returned no media companies.`, "PROGRAMMERS_EMPTY");
-          continue;
+          break;
         }
 
         if (normalizedEntities.length > Number(bestEntities?.length || 0)) {
@@ -66002,14 +65490,18 @@ async function fetchProgrammersFromApi(options = {}) {
 }
 
 async function loadProgrammersData(accessToken = "") {
-  if ((!state.loginData && !accessToken) || state.restricted) {
+  const normalizedAccessToken = normalizeBearerTokenValue(firstNonEmptyString([accessToken, state.loginData?.accessToken]));
+  if ((!state.loginData && !normalizedAccessToken) || state.restricted) {
     resetWorkflowForLoggedOut();
     return;
   }
 
   try {
+    await ensureConsoleBootstrapState(normalizedAccessToken, {
+      forceRefresh: false,
+    });
     const entities = await fetchProgrammersFromApi({
-      accessToken: accessToken || state.loginData?.accessToken,
+      accessToken: normalizedAccessToken,
       requireEntities: false,
     });
     applyProgrammerEntities(entities);
@@ -66436,27 +65928,24 @@ async function signInInteractive() {
     const authData = await startLogin({
       interactive: true,
       allowFallback: true,
-      keepAuthWindowOpenForBootstrap: true,
     });
     resetAvatarStateForInteractiveLogin();
     const profile = await resolveProfileAfterLogin(authData);
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
-    const preferredCmBootstrapTabId = Number(authData?.authPopupTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-    const activated = await activateSession(buildLoginSessionPayloadFromAuth(authData, profile, imageUrl), "interactive", {
-      allowTemporaryPageContextTab: false,
-      preferredCmBootstrapTabId,
+    const activated = await withTemporaryCmConsoleBootstrapContext(async (preferredCmBootstrapTabId) => {
+      return activateSession(
+        buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+        "interactive",
+        {
+          allowTemporaryPageContextTab: false,
+          preferredCmBootstrapTabId,
+        }
+      );
+    }, {
+      requestId: "interactive-signin",
     });
 
     if (!activated) {
-      const cookieActivated = await tryActivateCookieSession("interactive-post-login", {
-        restrictOnDenied: true,
-        allowTemporaryPageContextTab: false,
-        preferredCmBootstrapTabId,
-      });
-      if (cookieActivated) {
-        clearStatusUnlessCmTenantsPrecheckBlocked();
-        return;
-      }
       clearStatusUnlessCmTenantsPrecheckBlocked();
       return;
     }
@@ -66492,19 +65981,22 @@ async function refreshSessionManual() {
 
     const profile = await resolveProfileAfterLogin(authData);
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
-    const activated = await activateSession(
-      buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
-      "manual-refresh"
-    );
+    const runActivation = async (preferredCmBootstrapTabId = 0) => {
+      return activateSession(
+        buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+        "manual-refresh",
+        {
+          preferredCmBootstrapTabId,
+        }
+      );
+    };
+    const activated = usedInteractiveLogin
+      ? await withTemporaryCmConsoleBootstrapContext(runActivation, {
+          requestId: "manual-refresh-interactive",
+        })
+      : await runActivation();
 
     if (!activated) {
-      const cookieActivated = await tryActivateCookieSession("manual-refresh-post-login", {
-        restrictOnDenied: true,
-      });
-      if (cookieActivated) {
-        clearStatusUnlessCmTenantsPrecheckBlocked();
-        return;
-      }
       clearStatusUnlessCmTenantsPrecheckBlocked();
       return;
     }
@@ -66557,10 +66049,19 @@ async function onRestrictedOrgSwitch() {
         resetAvatarStateForInteractiveLogin();
         const profile = await resolveProfileAfterLogin(authData);
         const imageUrl = resolveAuthAvatarSeed(authData, profile);
-        const activated = await activateSession(
-          buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
-          "restricted-org-switch",
-          { allowDeniedRecovery: false }
+        const activated = await withTemporaryCmConsoleBootstrapContext(
+          async (preferredCmBootstrapTabId) =>
+            activateSession(
+              buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+              "restricted-org-switch",
+              {
+                allowDeniedRecovery: false,
+                preferredCmBootstrapTabId,
+              }
+            ),
+          {
+            requestId: "restricted-org-switch",
+          }
         );
         if (activated) {
           clearStatusUnlessCmTenantsPrecheckBlocked();
@@ -66573,14 +66074,6 @@ async function onRestrictedOrgSwitch() {
           error: error?.message || String(error),
         });
       }
-    }
-
-    const cookieActivated = await tryActivateCookieSession("restricted-org-switch", {
-      restrictOnDenied: true,
-    });
-    if (cookieActivated) {
-      clearStatusUnlessCmTenantsPrecheckBlocked();
-      return;
     }
 
     if (lastError) {
@@ -66700,16 +66193,6 @@ async function bootstrapSession() {
         log("Stored session invalid", error);
         await clearLoginData();
       }
-    }
-
-    const cookieActivated = await tryActivateCookieSession("bootstrap-cookie-precheck", {
-      restrictOnDenied: false,
-    });
-    if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
-      return;
-    }
-    if (cookieActivated) {
-      return;
     }
 
     resetWorkflowForLoggedOut();
