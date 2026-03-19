@@ -232,7 +232,7 @@ function renderControllerStatus(snapshot = null) {
   const normalizedStatus = String(status.status || "bootstrapping").trim().toLowerCase();
   const ready = status.ready === true;
   let badgeText = "Checking";
-  let titleText = "UP panel disabled";
+  let titleText = "UnderPAR panel disabled";
   let detailText = String(status.message || "Waiting for UnderPAR side panel status...");
 
   if (ready) {
@@ -302,7 +302,7 @@ function connectControllerStatusPort() {
       renderControllerStatus({
         ready: false,
         status: "sidepanel-closed",
-        message: "Open the UnderPAR side panel to re-enable this UP panel.",
+        message: "Open the UnderPAR side panel to re-enable this UnderPAR panel.",
       });
       scheduleStatusPortReconnect();
     });
@@ -3021,7 +3021,7 @@ function hydrateLegacyDcrCachesFromVault(vaultPayload = null) {
 
 async function persistImportedVaultPayload(vaultPayload = null) {
   if (!chrome?.storage?.local?.set) {
-    throw new Error("Chrome local storage is unavailable in the UP panel.");
+    throw new Error("Chrome local storage is unavailable in the UnderPAR panel.");
   }
   const normalizedVault = normalizeVaultPayload(vaultPayload);
   try {
@@ -3409,7 +3409,7 @@ async function handleVaultImportFile(file) {
 
 async function sendVaultActionRequest(action = "", detail = {}) {
   if (!chrome?.runtime?.sendMessage) {
-    throw new Error("Chrome runtime messaging is unavailable in the UP panel.");
+    throw new Error("Chrome runtime messaging is unavailable in the UnderPAR panel.");
   }
   const response = await chrome.runtime.sendMessage({
     type: UP_DEVTOOLS_VAULT_ACTION_REQUEST_TYPE,

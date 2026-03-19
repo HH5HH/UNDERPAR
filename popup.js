@@ -151,6 +151,12 @@ const PREMIUM_SERVICE_THEME_CLASS_BY_KEY = {
   esmWorkspace: "service-esm",
   restV2: "service-rest-v2",
 };
+const ADOBE_CONSOLE_PROGRAMMER_ACCESS_ROLES = Object.freeze([
+  "ROLE_CONSOLE_READ",
+  "ROLE_CONSOLE_WRITE",
+  "ROLE_CONSOLE_ADMIN",
+  "ROLE_CONSOLE_ALL_DATA",
+]);
 const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = {
   cm: "https://streams-stage.adobeprimetime.com/swagger-ui/index.html",
   cmMvpd: "https://streams-stage.adobeprimetime.com/swagger-ui/index.html",
@@ -303,8 +309,6 @@ function buildProgrammerEndpointsForConsoleBase(consoleBase = "") {
   return uniquePreserveOrder([
     appendAdobeConsoleConfigurationVersion(`${normalizedConsoleBase}/rest/api/entity/Programmer`),
     `${normalizedConsoleBase}/rest/api/entity/Programmer`,
-    `${normalizedConsoleBase}/rest/api/programmers`,
-    `${normalizedConsoleBase}/rest/api/v1/programmers`,
   ]);
 }
 
@@ -8960,6 +8964,9 @@ function applyAdobePassEnvironment(environment = null) {
   clickDgrTemplateHtml = "";
   clickDgrTemplatePromise = null;
   state.programmersApiEndpoint = null;
+  state.consoleContextReady = false;
+  state.consoleContextPromise = null;
+  state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
   state.consoleBootstrapPromise = null;
   if (environmentChanged) {
@@ -10853,6 +10860,7 @@ const state = {
   pendingUnderparEsmDeeplinkPromise: null,
   consoleContextReady: false,
   consoleContextPromise: null,
+  consoleCsrfToken: "",
   consoleBootstrapState: null,
   consoleBootstrapPromise: null,
   isBootstrapping: false,
@@ -10948,6 +10956,7 @@ const state = {
   degradationWorkspaceReportsBySelectionKey: new Map(),
   degradationWorkspaceCheatSheetsBySelectionKey: new Map(),
   degradationWorkspaceQueryStateBySelectionKey: new Map(),
+  degradationWorkspacePendingCheatSheetByWindowId: new Map(),
   bobtoolsWorkspaceTabId: 0,
   bobtoolsWorkspaceWindowId: 0,
   bobtoolsWorkspaceTabIdByWindowId: new Map(),
@@ -12008,6 +12017,32 @@ function focusPostZipKeyImportAction() {
   }, 0);
 }
 
+async function finalizeSuccessfulZipKeyImport(result = null) {
+  state.zipKeyImportPending = false;
+  state.manualZipKeyImportGate = false;
+  setStatus("", "info");
+  setZipKeyImportFeedback(READY_ZIP_KEY_IMPORT_STATUS_MESSAGE, "success");
+  render();
+  await bootstrapSession("zip-key-import");
+  focusPostZipKeyImportAction();
+  return {
+    ok: true,
+    ...(result && typeof result === "object" ? result : {}),
+  };
+}
+
+function finalizeFailedZipKeyImport(error = null) {
+  state.zipKeyImportPending = false;
+  const message = error instanceof Error ? error.message : String(error);
+  setZipKeyImportFeedback(message, "error");
+  setStatus(message, "error");
+  render();
+  return {
+    ok: false,
+    error: message,
+  };
+}
+
 async function importZipKeyIntoVaultFromText(zipKeyText = "", sourceLabel = "ZIP.KEY") {
   state.zipKeyImportPending = true;
   state.zipKeyImportDragActive = false;
@@ -12016,28 +12051,9 @@ async function importZipKeyIntoVaultFromText(zipKeyText = "", sourceLabel = "ZIP
 
   try {
     const result = await importUnderparImsRuntimeConfigFromZipKeyText(zipKeyText, { silent: true });
-    state.manualZipKeyImportGate = false;
-    setStatus("", "info");
-    setZipKeyImportFeedback(READY_ZIP_KEY_IMPORT_STATUS_MESSAGE, "success");
-    render();
-    await bootstrapSession("zip-key-import");
-    focusPostZipKeyImportAction();
-    return {
-      ok: true,
-      ...(result && typeof result === "object" ? result : {}),
-    };
+    return await finalizeSuccessfulZipKeyImport(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    setZipKeyImportFeedback(message, "error");
-    setStatus(message, "error");
-    render();
-    return {
-      ok: false,
-      error: message,
-    };
-  } finally {
-    state.zipKeyImportPending = false;
-    render();
+    return finalizeFailedZipKeyImport(error);
   }
 }
 
@@ -12051,26 +12067,9 @@ async function importZipKeyIntoVaultFromFile(file = null) {
   try {
     const text = await readUnderparTextFile(file);
     const result = await importUnderparImsRuntimeConfigFromZipKeyText(text, { silent: true });
-    setStatus("", "info");
-    setZipKeyImportFeedback(READY_ZIP_KEY_IMPORT_STATUS_MESSAGE, "success");
-    render();
-    focusPostZipKeyImportAction();
-    return {
-      ok: true,
-      ...(result && typeof result === "object" ? result : {}),
-    };
+    return await finalizeSuccessfulZipKeyImport(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    setZipKeyImportFeedback(message, "error");
-    setStatus(message, "error");
-    render();
-    return {
-      ok: false,
-      error: message,
-    };
-  } finally {
-    state.zipKeyImportPending = false;
-    render();
+    return finalizeFailedZipKeyImport(error);
   }
 }
 
@@ -40827,11 +40826,13 @@ function degradationWorkspaceUnbindWorkspaceTab(tabId) {
       if (Number(mappedTabId || 0) === normalizedTabId) {
         degradationWorkspaceInvalidateReady(windowId, normalizedTabId);
         state.degradationWorkspaceTabIdByWindowId.delete(windowId);
+        state.degradationWorkspacePendingCheatSheetByWindowId.delete(windowId);
       }
     }
   }
   if (!normalizedTabId || Number(state.degradationWorkspaceTabId || 0) === normalizedTabId) {
     degradationWorkspaceInvalidateReady(state.degradationWorkspaceWindowId, normalizedTabId);
+    state.degradationWorkspacePendingCheatSheetByWindowId.delete(Number(state.degradationWorkspaceWindowId || 0));
     state.degradationWorkspaceTabId = 0;
     state.degradationWorkspaceWindowId = 0;
   }
@@ -41048,6 +41049,46 @@ function degradationWorkspaceGetAllCheatSheets() {
   return cheatSheets.sort((left, right) => Number(right?.generatedAt || 0) - Number(left?.generatedAt || 0));
 }
 
+function degradationWorkspaceSetPendingCheatSheet(windowId, payload = {}) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId <= 0) {
+    return null;
+  }
+  const pendingState = {
+    selectionKey: String(payload?.selectionKey || "").trim(),
+    message: String(payload?.message || "Generating DEGRADATION Cheat Sheet...").trim() || "Generating DEGRADATION Cheat Sheet...",
+    startedAt: Date.now(),
+  };
+  state.degradationWorkspacePendingCheatSheetByWindowId.set(normalizedWindowId, pendingState);
+  return pendingState;
+}
+
+function degradationWorkspaceGetPendingCheatSheet(windowId, selectionKey = "") {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId <= 0) {
+    return null;
+  }
+  const pendingState = state.degradationWorkspacePendingCheatSheetByWindowId.get(normalizedWindowId);
+  if (!pendingState || typeof pendingState !== "object") {
+    return null;
+  }
+  const expectedSelectionKey = String(selectionKey || "").trim();
+  const pendingSelectionKey = String(pendingState.selectionKey || "").trim();
+  if (expectedSelectionKey && pendingSelectionKey && expectedSelectionKey !== pendingSelectionKey) {
+    return null;
+  }
+  return {
+    ...pendingState,
+  };
+}
+
+function degradationWorkspaceClearPendingCheatSheet(windowId) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId > 0) {
+    state.degradationWorkspacePendingCheatSheetByWindowId.delete(normalizedWindowId);
+  }
+}
+
 function degradationWorkspaceGetReports(selectionKey = "") {
   const normalizedSelectionKey = String(selectionKey || "").trim();
   if (normalizedSelectionKey && state.degradationWorkspaceReportsBySelectionKey.has(normalizedSelectionKey)) {
@@ -41068,12 +41109,15 @@ function degradationWorkspaceBroadcastReports(selectionKey = "", targetWindowId 
   const reports = degradationWorkspaceGetAllReports();
   const cheatSheets = degradationWorkspaceGetAllCheatSheets();
   const resolvedSelectionKey = firstNonEmptyString([selectionKey, state.degradationWorkspaceLastSelectionKey]);
+  const pendingCheatSheet = degradationWorkspaceGetPendingCheatSheet(resolvedWindowId, resolvedSelectionKey);
   void degradationWorkspaceSendWorkspaceMessage(
     "reports-sync",
     {
       selectionKey: resolvedSelectionKey,
       reports,
       cheatSheets,
+      cheatSheetPending: Boolean(pendingCheatSheet),
+      cheatSheetLoadingMessage: String(pendingCheatSheet?.message || "").trim(),
       updatedAt: Date.now(),
     },
     { targetWindowId: resolvedWindowId }
@@ -41522,6 +41566,16 @@ async function handleDegradationWorkspaceAction(message, sender = null) {
     }
     degradationWorkspaceMarkReady(senderWindowId || state.degradationWorkspaceWindowId || 0, senderTabId);
     degradationWorkspaceBroadcastControllerState(selectedProgrammer, selectedServices, senderWindowId);
+    const pendingCheatSheet = degradationWorkspaceGetPendingCheatSheet(senderWindowId, selectionContext.selectionKey);
+    if (pendingCheatSheet && senderWindowId > 0) {
+      void degradationWorkspaceSendWorkspaceMessage(
+        "cheat-sheet-start",
+        {
+          message: pendingCheatSheet.message,
+        },
+        { targetWindowId: senderWindowId }
+      );
+    }
     degradationWorkspaceBroadcastReports(selectionContext.selectionKey, senderWindowId);
     return { ok: true };
   }
@@ -47045,6 +47099,8 @@ async function degradationGenerateCheatSheetFromUi(panelState, options = {}) {
 
   degradationSetBusy(activePanelState, true);
   let targetWindowId = 0;
+  let targetTabId = 0;
+  let pendingSelectionKey = "";
   try {
     const queryValues = degradationCollectFormValues(activePanelState);
     if (!queryValues.requestorId) {
@@ -47053,6 +47109,11 @@ async function degradationGenerateCheatSheetFromUi(panelState, options = {}) {
     if (!queryValues.mvpd) {
       throw new Error("Select MVPD in the global picker first.");
     }
+    const initialSelectionContext = degradationWorkspaceGetSelectionContext(activePanelState.programmer, {
+      ...(getCurrentPremiumAppsSnapshot(String(activePanelState?.programmer?.programmerId || "").trim()) || {}),
+      degradation: activePanelState?.appInfo || null,
+    });
+    pendingSelectionKey = String(initialSelectionContext.selectionKey || "").trim();
 
     const workspaceResult = await degradationOpenWorkspaceFromPanel(activePanelState, {
       activate: true,
@@ -47061,8 +47122,12 @@ async function degradationGenerateCheatSheetFromUi(panelState, options = {}) {
     targetWindowId = Number(
       workspaceResult?.targetWindowId || workspaceResult?.workspaceTab?.windowId || state.degradationWorkspaceWindowId || 0
     );
-    const targetTabId = Number(workspaceResult?.workspaceTab?.id || 0);
+    targetTabId = Number(workspaceResult?.workspaceTab?.id || 0);
     if (targetWindowId > 0) {
+      degradationWorkspaceSetPendingCheatSheet(targetWindowId, {
+        selectionKey: pendingSelectionKey,
+        message: "Generating DEGRADATION Cheat Sheet...",
+      });
       void degradationWorkspaceSendWorkspaceMessage(
         "cheat-sheet-start",
         {
@@ -47185,6 +47250,7 @@ async function degradationGenerateCheatSheetFromUi(panelState, options = {}) {
     Object.assign(cheatSheetPayload, buildDegradationCheatSheetTokenBootstrap(cheatSheetPayload));
     cheatSheetPayload.setupItems = buildDegradationCheatSheetSetupItems(cheatSheetPayload);
     degradationWorkspaceStoreCheatSheet(cheatSheetPayload);
+    degradationWorkspaceClearPendingCheatSheet(targetWindowId);
     if (targetWindowId > 0) {
       await degradationWorkspaceWaitForReady(targetWindowId, targetTabId, 3000).catch(() => false);
     }
@@ -47212,6 +47278,9 @@ async function degradationGenerateCheatSheetFromUi(panelState, options = {}) {
     };
   } catch (error) {
     if (targetWindowId > 0) {
+      await degradationWorkspaceWaitForReady(targetWindowId, targetTabId, 1500).catch(() => false);
+      degradationWorkspaceClearPendingCheatSheet(targetWindowId);
+      degradationWorkspaceBroadcastReports(pendingSelectionKey, targetWindowId);
       void degradationWorkspaceSendWorkspaceMessage(
         "cheat-sheet-error",
         {
@@ -49212,6 +49281,7 @@ function resetWorkflowForLoggedOut() {
   state.degradationWorkspaceReportsBySelectionKey.clear();
   state.degradationWorkspaceCheatSheetsBySelectionKey.clear();
   state.degradationWorkspaceQueryStateBySelectionKey.clear();
+  state.degradationWorkspacePendingCheatSheetByWindowId.clear();
   state.bobtoolsWorkspaceTabId = 0;
   state.bobtoolsWorkspaceWindowId = 0;
   state.bobtoolsWorkspaceTabIdByWindowId.clear();
@@ -49234,6 +49304,7 @@ function resetWorkflowForLoggedOut() {
   clearDegradationWorkspaceActivityDebugFlow("logout-reset", { stopFlow: true });
   clearCmWorkspaceActivityDebugFlow("logout-reset", { stopFlow: true });
   state.consoleContextReady = false;
+  state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
   state.consoleBootstrapPromise = null;
   state.esmWorkspaceWorkspaceTabId = 0;
@@ -54932,6 +55003,8 @@ async function resetToSignedOutState(options = {}) {
   state.restricted = false;
   state.sessionReady = false;
   state.programmersApiEndpoint = null;
+  state.consoleContextReady = false;
+  state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
   state.consoleBootstrapPromise = null;
   state.mvpdCacheByRequestor.clear();
@@ -55059,6 +55132,10 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   const activationStartedAt = Date.now();
   const allowDeniedRecovery = options.allowDeniedRecovery !== false;
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const allowInteractiveConsoleBootstrap = shouldAllowInteractiveConsoleBootstrapForActivation(
+    source,
+    options.allowInteractiveConsoleBootstrap === true
+  );
   const allowBackgroundTemporaryPageContextTab = shouldAllowTemporaryCmBootstrapTabForActivation(
     source,
     allowTemporaryPageContextTab
@@ -55090,7 +55167,10 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
 
   let programmersLoadError = null;
   try {
-    await loadProgrammersData(enforced.loginData.accessToken);
+    await loadProgrammersData(enforced.loginData.accessToken, {
+      allowInteractiveAuthBootstrap: allowInteractiveConsoleBootstrap,
+      forceRefresh: false,
+    });
   } catch (error) {
     const accessDenied = error?.code === "PROGRAMMERS_ACCESS_DENIED";
     const deniedSessionData = enforced.loginData || sessionData;
@@ -55236,6 +55316,27 @@ async function refreshSessionNoTouch() {
 
   state.silentRefreshPromise = refreshPromise;
   return refreshPromise;
+}
+
+async function awaitCmBootstrapForExplicitActivation(reason = "session", options = {}) {
+  if (!state.sessionReady || !state.loginData || state.restricted) {
+    return null;
+  }
+  try {
+    return await ensureCmTenantsPrecheckForActiveSession(`explicit-activation:${String(reason || "session")}`, {
+      forceRefresh: options.forceRefresh === true,
+      allowTemporaryPageContextTab: options.allowTemporaryPageContextTab === true,
+      preferredCmBootstrapTabId: Number(options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+    });
+  } catch (error) {
+    const resolvedError = error instanceof Error ? error : new Error(String(error));
+    setStatus(resolvedError.message, "error");
+    log("Explicit activation CM bootstrap failed", {
+      reason: String(reason || "session"),
+      error: resolvedError.message,
+    });
+    return null;
+  }
 }
 
 async function attemptSilentBootstrapLogin() {
@@ -56786,7 +56887,28 @@ function getAdobeConsoleRequestHeaders(accessToken = "") {
     headers.Authorization = `Bearer ${accessToken}`;
   }
 
+  const csrfToken = String(state?.consoleCsrfToken || "").trim();
+  if (csrfToken) {
+    headers["X-CSRF-Token"] = csrfToken;
+  }
+
   return headers;
+}
+
+function extractAdobeConsoleGrantedAuthorityValue(entry) {
+  if (typeof entry === "string") {
+    return entry.trim();
+  }
+  if (!entry || typeof entry !== "object") {
+    return "";
+  }
+  return firstNonEmptyString([
+    entry.authority,
+    entry.role,
+    entry.name,
+    entry.value,
+    entry.id,
+  ]);
 }
 
 function extractAdobeConsoleGrantedAuthorities(payload = null) {
@@ -56802,7 +56924,7 @@ function extractAdobeConsoleGrantedAuthorities(payload = null) {
   const seen = new Set();
   candidateArrays.forEach((candidateArray) => {
     (Array.isArray(candidateArray) ? candidateArray : []).forEach((entry) => {
-      const normalized = String(entry || "").trim();
+      const normalized = String(extractAdobeConsoleGrantedAuthorityValue(entry) || "").trim();
       const key = normalized.toLowerCase();
       if (!normalized || seen.has(key)) {
         return;
@@ -56812,6 +56934,28 @@ function extractAdobeConsoleGrantedAuthorities(payload = null) {
     });
   });
   return output;
+}
+
+function hasAdobeConsoleProgrammerAccess(grantedAuthorities = []) {
+  const normalizedAuthorities = (Array.isArray(grantedAuthorities) ? grantedAuthorities : [])
+    .map((value) => String(value || "").trim().toUpperCase())
+    .filter(Boolean);
+  if (normalizedAuthorities.length === 0) {
+    return false;
+  }
+  return normalizedAuthorities.some((value) => ADOBE_CONSOLE_PROGRAMMER_ACCESS_ROLES.includes(value));
+}
+
+function captureAdobeConsoleResponseState(response = null) {
+  const csrfToken = String(
+    firstNonEmptyString([
+      response?.headers?.get?.("x-csrf-token"),
+      response?.headers?.get?.("X-CSRF-Token"),
+    ]) || ""
+  ).trim();
+  if (csrfToken) {
+    state.consoleCsrfToken = csrfToken;
+  }
 }
 
 async function fetchAdobeConsoleBootstrapState(accessToken = "", options = {}) {
@@ -56824,6 +56968,7 @@ async function fetchAdobeConsoleBootstrapState(accessToken = "", options = {}) {
   const commonRequestOptions = {
     timeoutMs,
     preferAuthenticatedHeaders: true,
+    allowInteractiveAuthBootstrap: options.allowInteractiveAuthBootstrap === true,
     headers: {
       Authorization: `Bearer ${normalizedAccessToken}`,
     },
@@ -56908,6 +57053,22 @@ async function ensureConsoleBootstrapState(accessToken = "", options = {}) {
 
   state.consoleBootstrapPromise = promise;
   return promise;
+}
+
+function shouldAllowInteractiveConsoleBootstrapForActivation(source = "", explicitAllow = false) {
+  if (explicitAllow === true) {
+    return true;
+  }
+  const normalizedSource = String(source || "").trim().toLowerCase();
+  if (!normalizedSource) {
+    return false;
+  }
+  return (
+    normalizedSource === "interactive" ||
+    normalizedSource.includes("interactive") ||
+    normalizedSource.includes("restricted") ||
+    normalizedSource === "environment-switch"
+  );
 }
 
 function getAdobeConsoleErrorMessage(parsed, text, statusText = "") {
@@ -57009,6 +57170,68 @@ function isAdobeConsoleTokenExpiredResponse(status, parsed, text = "") {
   );
 }
 
+function isAdobeConsoleAccessDeniedResponse(status, parsed, text = "") {
+  const normalizedStatus = Number(status || 0);
+  if (normalizedStatus !== 401 && normalizedStatus !== 403) {
+    return false;
+  }
+
+  const payload = parsed && typeof parsed === "object" ? parsed : {};
+  const normalizedError = String(
+    firstNonEmptyString([
+      payload?.error,
+      payload?.code,
+      payload?.error_code,
+      payload?.errorCode,
+      payload?.error?.code,
+      payload?.error?.error_code,
+      payload?.error?.errorCode,
+    ]) || ""
+  )
+    .trim()
+    .toLowerCase();
+  if (normalizedError === "access_denied" || normalizedError === "unauthorized") {
+    return true;
+  }
+
+  const normalizedMessage = String(
+    firstNonEmptyString([
+      payload?.error_description,
+      payload?.errorDescription,
+      payload?.error?.description,
+      payload?.error?.message,
+      typeof payload?.error === "string" ? payload.error : "",
+      payload?.message,
+      text,
+    ]) || ""
+  )
+    .trim()
+    .toLowerCase();
+
+  return (
+    normalizedMessage.includes("access is denied") ||
+    normalizedMessage.includes("access denied") ||
+    normalizedMessage.includes("authentication object was not found in the securitycontext") ||
+    normalizedMessage.includes("an authentication object was not found in the securitycontext") ||
+    normalizedMessage.includes("unauthorized")
+  );
+}
+
+function isAdobeConsoleAccessDeniedMessage(message = "") {
+  const normalizedMessage = String(message || "").trim().toLowerCase();
+  if (!normalizedMessage) {
+    return false;
+  }
+  return (
+    normalizedMessage.includes("access is denied") ||
+    normalizedMessage.includes("access denied") ||
+    normalizedMessage.includes("authentication object was not found in the securitycontext") ||
+    normalizedMessage.includes("unauthorized") ||
+    normalizedMessage.includes("console extended profile failed (401)") ||
+    normalizedMessage.includes("console extended profile failed (403)")
+  );
+}
+
 async function fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel, requestOptions = null) {
   const urls = Array.isArray(urlCandidates)
     ? [...new Set(urlCandidates.filter((item) => typeof item === "string" && item.trim()))]
@@ -57075,6 +57298,7 @@ async function fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel
             headers: requestHeaders,
             ...(body != null ? { body } : {}),
           });
+          captureAdobeConsoleResponseState(response);
 
           const text = await response.text().catch(() => "");
           const parsed = parseJsonText(text, null);
@@ -66275,13 +66499,7 @@ async function fetchProgrammersFromApi(options = {}) {
   let silentRefreshAttempted = false;
   for (const endpoint of endpoints) {
     try {
-      const baseHeaders = {
-        Accept: "application/json, text/plain, */*",
-        "ap-request-id": generateRequestId(),
-        Origin: "https://cdn.experience.adobe.net",
-        Referer: "https://cdn.experience.adobe.net/",
-        Authorization: `Bearer ${accessToken}`,
-      };
+      const baseHeaders = getAdobeConsoleRequestHeaders(accessToken);
 
       for (let round = 0; round < 2; round += 1) {
         const response = await fetchWithAbortTimeout(
@@ -66294,6 +66512,7 @@ async function fetchProgrammersFromApi(options = {}) {
           },
           PROGRAMMERS_FETCH_TIMEOUT_MS
         );
+        captureAdobeConsoleResponseState(response);
 
         const responseText = await response.text().catch(() => "");
         const payload = parseJsonText(responseText, null);
@@ -66323,12 +66542,13 @@ async function fetchProgrammersFromApi(options = {}) {
         }
 
         if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
+          const accessDeniedResponse = isAdobeConsoleAccessDeniedResponse(response.status, payload, responseText);
+          if (response.status === 401 || response.status === 403 || accessDeniedResponse) {
             denied = true;
           }
           lastError = createProgrammersError(
             `Endpoint ${endpoint} failed (${response.status}): ${responseText || response.statusText}`,
-            "PROGRAMMERS_ENDPOINT_FAILED"
+            accessDeniedResponse ? "PROGRAMMERS_ACCESS_DENIED" : "PROGRAMMERS_ENDPOINT_FAILED"
           );
           break;
         }
@@ -66373,23 +66593,40 @@ async function fetchProgrammersFromApi(options = {}) {
   throw lastError || createProgrammersError("Unable to load media companies from API.", "PROGRAMMERS_LOAD_FAILED");
 }
 
-async function loadProgrammersData(accessToken = "") {
+async function loadProgrammersData(accessToken = "", options = {}) {
   const normalizedAccessToken = normalizeBearerTokenValue(firstNonEmptyString([accessToken, state.loginData?.accessToken]));
   if ((!state.loginData && !normalizedAccessToken) || state.restricted) {
     resetWorkflowForLoggedOut();
     return;
   }
 
-  let consoleBootstrapError = null;
-  const consoleBootstrapPromise = ensureConsoleBootstrapState(normalizedAccessToken, {
-    forceRefresh: false,
-  }).catch((error) => {
-    consoleBootstrapError = error instanceof Error ? error : new Error(String(error));
-    log("Console bootstrap deferred during media company load", {
-      error: consoleBootstrapError.message,
+  let bootstrapState = null;
+  try {
+    bootstrapState = await ensureConsoleBootstrapState(normalizedAccessToken, {
+      forceRefresh: options.forceRefresh === true,
+      allowInteractiveAuthBootstrap: options.allowInteractiveAuthBootstrap === true,
     });
-    return null;
-  });
+  } catch (error) {
+    applyProgrammerEntities([]);
+    const bootstrapError = error instanceof Error ? error : new Error(String(error));
+    if (isAdobeConsoleAccessDeniedMessage(bootstrapError.message)) {
+      throw createProgrammersError(bootstrapError.message, "PROGRAMMERS_ACCESS_DENIED");
+    }
+    throw bootstrapError;
+  }
+
+  const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(bootstrapState, 0);
+  if (!bootstrapState || configurationVersion <= 0) {
+    applyProgrammerEntities([]);
+    throw createProgrammersError(
+      "UnderPAR could not complete Adobe Pass console bootstrap before loading media companies.",
+      "PROGRAMMERS_LOAD_FAILED"
+    );
+  }
+  if (!hasAdobeConsoleProgrammerAccess(bootstrapState.grantedAuthorities)) {
+    applyProgrammerEntities([]);
+    throw createProgrammersError("Adobe Pass console access is denied for this account.", "PROGRAMMERS_ACCESS_DENIED");
+  }
 
   let entities = [];
   let programmersLoadError = null;
@@ -66402,44 +66639,17 @@ async function loadProgrammersData(accessToken = "") {
     programmersLoadError = error instanceof Error ? error : new Error(String(error));
   }
 
-  if (programmersLoadError || entities.length === 0) {
-    const bootstrapState = await settlePromiseWithin(consoleBootstrapPromise, 900, null);
-    if (bootstrapState && (programmersLoadError || entities.length === 0)) {
-      try {
-        entities = await fetchProgrammersFromApi({
-          accessToken: normalizedAccessToken,
-          requireEntities: false,
-        });
-        programmersLoadError = null;
-      } catch (error) {
-        if (!programmersLoadError) {
-          programmersLoadError = error instanceof Error ? error : new Error(String(error));
-        }
-      }
-    }
-  }
-
   if (programmersLoadError) {
-    if (consoleBootstrapError) {
-      log("Media company retry followed console bootstrap failure", {
-        programmersError: programmersLoadError.message,
-        bootstrapError: consoleBootstrapError.message,
-      });
-    }
     log("Media company load failed", programmersLoadError);
     applyProgrammerEntities([]);
     throw programmersLoadError;
   }
 
-  try {
-    applyProgrammerEntities(entities);
-    if (state.programmers.length === 0) {
-      setStatus("No media company records were returned for this account.", "error");
-    }
-    return true;
-  } finally {
-    void consoleBootstrapPromise;
+  applyProgrammerEntities(entities);
+  if (state.programmers.length === 0) {
+    setStatus("No media company records were returned for this account.", "error");
   }
+  return true;
 }
 
 function applyProgrammerEntities(entities) {
@@ -66713,12 +66923,15 @@ async function signInInteractive() {
     );
 
     if (activated) {
+      await awaitCmBootstrapForExplicitActivation("interactive", {
+        allowTemporaryPageContextTab: true,
+      });
       log("Interactive sign-in critical path complete", {
         authMs: Math.max(0, authCompletedAt - signInStartedAt),
         profileMs: Math.max(0, profileResolvedAt - authCompletedAt),
         activationMs: Math.max(0, Date.now() - profileResolvedAt),
         totalMs: Math.max(0, Date.now() - signInStartedAt),
-        cmHydrationMode: "background",
+        cmHydrationMode: "blocking-until-ready",
       });
     }
 
@@ -66771,13 +66984,19 @@ async function refreshSessionManual() {
     );
 
     if (activated) {
+      await awaitCmBootstrapForExplicitActivation(
+        usedInteractiveLogin ? "manual-refresh-interactive" : "manual-refresh",
+        {
+          allowTemporaryPageContextTab: usedInteractiveLogin,
+        }
+      );
       log("Manual refresh critical path complete", {
         interactive: usedInteractiveLogin,
         authMs: Math.max(0, authCompletedAt - refreshStartedAt),
         profileMs: Math.max(0, profileResolvedAt - authCompletedAt),
         activationMs: Math.max(0, Date.now() - profileResolvedAt),
         totalMs: Math.max(0, Date.now() - refreshStartedAt),
-        cmHydrationMode: usedInteractiveLogin ? "background-temporary-tab-allowed" : "background",
+        cmHydrationMode: usedInteractiveLogin ? "blocking-temporary-tab-allowed" : "blocking-until-ready",
       });
     }
 
@@ -66843,6 +67062,9 @@ async function onRestrictedOrgSwitch() {
           }
         );
         if (activated) {
+          await awaitCmBootstrapForExplicitActivation("restricted-org-switch", {
+            allowTemporaryPageContextTab: true,
+          });
           clearStatusUnlessCmTenantsPrecheckBlocked();
           return;
         }

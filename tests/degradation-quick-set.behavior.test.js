@@ -32,6 +32,9 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
     /Open the DEGRADATION Cheat Sheet in the workspace using the current global RequestorId and MVPD/
   );
   assert.match(popupSource, /degradationWorkspaceStoreCheatSheet\(/);
+  assert.match(popupSource, /degradationWorkspacePendingCheatSheetByWindowId:\s*new Map\(\)/);
+  assert.match(popupSource, /function degradationWorkspaceSetPendingCheatSheet\(/);
+  assert.match(popupSource, /function degradationWorkspaceClearPendingCheatSheet\(/);
   assert.match(popupSource, /function degradationWorkspaceWaitForReady\(/);
   assert.match(popupSource, /degradationWorkspaceMarkReady\(/);
   assert.match(popupSource, /syncReports:\s*false/);
@@ -40,6 +43,9 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(popupSource, /"cheat-sheet-start"/);
   assert.match(popupSource, /"cheat-sheet-progress"/);
   assert.match(popupSource, /"cheat-sheet-error"/);
+  assert.match(popupSource, /cheatSheetPending:\s*Boolean\(pendingCheatSheet\)/);
+  assert.match(popupSource, /cheatSheetLoadingMessage:\s*String\(pendingCheatSheet\?\.message \|\| ""\)\.trim\(\)/);
+  assert.match(popupSource, /const pendingCheatSheet = degradationWorkspaceGetPendingCheatSheet\(senderWindowId, selectionContext\.selectionKey\);/);
   assert.match(popupSource, /function buildDegradationCheatSheetTokenBootstrap\(/);
   assert.match(popupSource, /grant_type:\s*"client_credentials"/);
   assert.match(popupSource, /Step 1\. Mint a fresh bearer token:/);
@@ -77,6 +83,8 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(workspaceSource, /function handleCheatSheetResult\(/);
   assert.match(workspaceSource, /function handleCheatSheetStart\(/);
   assert.match(workspaceSource, /function handleCheatSheetError\(/);
+  assert.match(workspaceSource, /const cheatSheetPending = payload\?\.cheatSheetPending === true;/);
+  assert.match(workspaceSource, /state\.cheatSheetLoading = cheatSheetPending;/);
   assert.match(workspaceSource, /Generating DEGRADATION Cheat Sheet/);
   assert.match(workspaceSource, /masterCopyText/);
   assert.match(workspaceSource, /Fresh Token Bootstrap/);

@@ -1634,9 +1634,15 @@ function handleReportsSync(payload = {}) {
   const reports = normalizeReports(payload?.reports);
   const cheatSheets = normalizeCheatSheets(payload?.cheatSheets);
   const selectionKey = String(payload?.selectionKey || "").trim();
+  const cheatSheetPending = payload?.cheatSheetPending === true;
+  const cheatSheetLoadingMessage = String(payload?.cheatSheetLoadingMessage || "").trim();
   if (selectionKey) {
     state.selectionKey = selectionKey;
   }
+  state.cheatSheetLoading = cheatSheetPending;
+  state.cheatSheetLoadingMessage = cheatSheetPending
+    ? cheatSheetLoadingMessage || state.cheatSheetLoadingMessage || "Generating DEGRADATION Cheat Sheet..."
+    : "";
   state.reports = reports;
   state.cheatSheets = cheatSheets;
   renderWorkspaceCards();

@@ -314,6 +314,9 @@ test("interactive login and org switching no longer block on a temporary CM boot
   assert.doesNotMatch(refreshSource, /withTemporaryCmConsoleBootstrapContext/);
   assert.doesNotMatch(restrictedSwitchSource, /withTemporaryCmConsoleBootstrapContext/);
   assert.doesNotMatch(recoverySource, /withTemporaryCmConsoleBootstrapContext/);
+  assert.match(signInSource, /await awaitCmBootstrapForExplicitActivation\("interactive"/);
+  assert.match(refreshSource, /await awaitCmBootstrapForExplicitActivation\(/);
+  assert.match(restrictedSwitchSource, /await awaitCmBootstrapForExplicitActivation\("restricted-org-switch"/);
 });
 
 test("session activation defers CM tenant hydration and unlocks Media Company selection immediately", () => {
@@ -429,9 +432,37 @@ test("console configuration version is sourced dynamically from console bootstra
   assert.match(popupSource, /let underparStateRef = null;/);
   assert.match(popupSource, /underparStateRef = state;/);
   assert.doesNotMatch(configVersionSource, /typeof state/);
-  assert.match(loadProgrammersSource, /const consoleBootstrapPromise = ensureConsoleBootstrapState/);
-  assert.match(loadProgrammersSource, /settlePromiseWithin\(consoleBootstrapPromise, 900, null\)/);
-  assert.match(fetchProgrammersSource, /Authorization: `Bearer \$\{accessToken\}`/);
+  assert.match(loadProgrammersSource, /bootstrapState = await ensureConsoleBootstrapState/);
+  assert.match(loadProgrammersSource, /allowInteractiveAuthBootstrap: options\.allowInteractiveAuthBootstrap === true/);
+  assert.match(loadProgrammersSource, /const configurationVersion = mvpdWorkspaceExtractConfigurationVersion\(bootstrapState, 0\)/);
+  assert.match(loadProgrammersSource, /hasAdobeConsoleProgrammerAccess\(bootstrapState\.grantedAuthorities\)/);
+  assert.match(fetchProgrammersSource, /const baseHeaders = getAdobeConsoleRequestHeaders\(accessToken\)/);
+});
+
+test("programmer endpoint access_denied responses stay on the auth-denied recovery path", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const helperSource = extractFunctionSource(popupSource, "isAdobeConsoleAccessDeniedResponse");
+  const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
+
+  assert.match(helperSource, /normalizedStatus !== 401 && normalizedStatus !== 403/);
+  assert.match(helperSource, /normalizedError === "access_denied" \|\| normalizedError === "unauthorized"/);
+  assert.match(helperSource, /normalizedMessage\.includes\("access is denied"\)/);
+  assert.match(fetchProgrammersSource, /const accessDeniedResponse = isAdobeConsoleAccessDeniedResponse/);
+  assert.match(fetchProgrammersSource, /accessDeniedResponse \? "PROGRAMMERS_ACCESS_DENIED" : "PROGRAMMERS_ENDPOINT_FAILED"/);
+});
+
+test("programmer discovery stays on deterministic entity endpoints and console role extraction handles authority objects", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const endpointBuilderSource = extractFunctionSource(popupSource, "buildProgrammerEndpointsForConsoleBase");
+  const roleExtractorSource = extractFunctionSource(popupSource, "extractAdobeConsoleGrantedAuthorities");
+  const roleValueSource = extractFunctionSource(popupSource, "extractAdobeConsoleGrantedAuthorityValue");
+
+  assert.match(endpointBuilderSource, /rest\/api\/entity\/Programmer/);
+  assert.doesNotMatch(endpointBuilderSource, /rest\/api\/programmers/);
+  assert.doesNotMatch(endpointBuilderSource, /rest\/api\/v1\/programmers/);
+  assert.match(roleValueSource, /entry\.authority/);
+  assert.match(roleValueSource, /entry\.role/);
+  assert.match(roleExtractorSource, /extractAdobeConsoleGrantedAuthorityValue\(entry\)/);
 });
 
 test("console endpoint bootstrap initializes underparStateRef before top-level programmer endpoint construction", () => {
@@ -468,6 +499,7 @@ test("post-ZIP.KEY logged-out flow silently probes for an existing Adobe session
   const initSource = extractFunctionSource(popupSource, "init");
   const registerHandlersSource = extractFunctionSource(popupSource, "registerEventHandlers");
   const importZipKeySource = extractFunctionSource(popupSource, "importZipKeyIntoVaultFromText");
+  const finalizeZipKeySource = extractFunctionSource(popupSource, "finalizeSuccessfulZipKeyImport");
   const bootstrapSource = extractFunctionSource(popupSource, "bootstrapSession");
 
   assert.match(popupSource, /const SILENT_BOOTSTRAP_RETRY_INTERVAL_MS = 15 \* 1000;/);
@@ -475,8 +507,9 @@ test("post-ZIP.KEY logged-out flow silently probes for an existing Adobe session
   assert.match(initSource, /await settleUnderparInitStep\("Session bootstrap", \(\) => bootstrapSession\("startup"\)\);/);
   assert.match(registerHandlersSource, /void bootstrapSession\("panel-visible"\);/);
   assert.match(registerHandlersSource, /void bootstrapSession\("window-focus"\);/);
-  assert.match(importZipKeySource, /state\.manualZipKeyImportGate = false;/);
-  assert.match(importZipKeySource, /await bootstrapSession\("zip-key-import"\);/);
+  assert.match(importZipKeySource, /return await finalizeSuccessfulZipKeyImport\(result\);/);
+  assert.match(finalizeZipKeySource, /state\.manualZipKeyImportGate = false;/);
+  assert.match(finalizeZipKeySource, /await bootstrapSession\("zip-key-import"\);/);
   assert.match(bootstrapSource, /const silent = await attemptSilentBootstrapLogin\(\);/);
   assert.match(bootstrapSource, /silent-bootstrap:/);
 });
@@ -680,12 +713,29 @@ test("missing-client-id flow renders a standalone ZIP.KEY gate before sign-in", 
 
   assert.match(popupHtml, /id="zip-key-import-view" class="zip-key-import-view zip-key-import-view--gate"/);
   assert.match(sidepanelHtml, /id="zip-key-import-view" class="zip-key-import-view zip-key-import-view--gate"/);
+  assert.doesNotMatch(popupHtml, /id="zip-key-import-view"[^>]*hidden/);
+  assert.doesNotMatch(sidepanelHtml, /id="zip-key-import-view"[^>]*hidden/);
   assert.ok(popupHtml.indexOf('id="zip-key-import-view"') < popupHtml.indexOf('id="sign-in-view"'));
+  assert.match(popupHtml, /id="sign-in-view" class="sign-in-view" hidden/);
+  assert.match(sidepanelHtml, /id="sign-in-view" class="sign-in-view" hidden/);
   assert.match(popupSource, /function shouldShowZipKeyImportGate\(/);
   assert.match(shouldShowGateSource, /state\.manualZipKeyImportGate === true \|\| !hasConfiguredUnderparImsClientId/);
   assert.match(syncZipKeyImportViewSource, /const show = shouldShowZipKeyImportGate\(\);/);
   assert.match(renderSource, /const showZipKeyImportGate = shouldShowZipKeyImportGate\(\);/);
   assert.match(renderSource, /els\.authBtn\.hidden = showZipKeyImportGate;/);
+});
+
+test("ZIP.KEY import completion clears the gate before bootstrap resumes session detection", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const finalizeSource = extractFunctionSource(popupSource, "finalizeSuccessfulZipKeyImport");
+  const fileImportSource = extractFunctionSource(popupSource, "importZipKeyIntoVaultFromFile");
+  const textImportSource = extractFunctionSource(popupSource, "importZipKeyIntoVaultFromText");
+
+  assert.match(finalizeSource, /state\.zipKeyImportPending = false;/);
+  assert.match(finalizeSource, /state\.manualZipKeyImportGate = false;/);
+  assert.match(finalizeSource, /await bootstrapSession\("zip-key-import"\)/);
+  assert.match(fileImportSource, /return await finalizeSuccessfulZipKeyImport\(result\);/);
+  assert.match(textImportSource, /return await finalizeSuccessfulZipKeyImport\(result\);/);
 });
 
 test("build label renders immediately from the manifest version with a placeholder fallback", () => {
