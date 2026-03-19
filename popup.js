@@ -235,6 +235,10 @@ const DEFAULT_DEBUG_TOGGLE_META = "Click copies. Shift+click toggles details.";
 const DEFAULT_DEBUG_COPY_STATUS = "Copied to clipboard";
 const COPY_DEBUG_RESET_DELAY_MS = 1600;
 const UNDERPAR_DEBUG_LOG_LIMIT = 200;
+const UNDERPAR_DEBUG_STATUS_HISTORY_LIMIT = 80;
+const UNDERPAR_DEBUG_STATUS_OUTPUT_LIMIT = 8;
+const UNDERPAR_DEBUG_FAILURE_OUTPUT_LIMIT = 6;
+const UNDERPAR_DEBUG_NON_FETCH_OUTPUT_LIMIT = 6;
 const REST_V2_POST_LOGOUT_PROFILE_CHECK_RETRIES = 3;
 const REST_V2_POST_LOGOUT_PROFILE_CHECK_DELAY_MS = 900;
 const REST_V2_POST_AUTH_PROFILE_CHECK_RETRIES = 7;
@@ -10857,6 +10861,8 @@ const state = {
   debugConsoleCollapsed: true,
   debugCopyStatus: "",
   logs: [],
+  debugStatusHistory: [],
+  debugMarkers: {},
   underparEsmDeeplinkStorageListenerBound: false,
   upDevtoolsVaultActionListenerBound: false,
   pendingUnderparEsmDeeplinkPromise: null,
@@ -11353,6 +11359,23 @@ function appendDebugLogEntry(channel = "app", message = "", details = null, opti
   renderDebugConsole();
 }
 
+function appendDebugStatusHistoryEntry(message = "", type = "info", source = "status") {
+  const normalizedMessage = redactSensitiveTokenValues(String(message || "").trim());
+  if (!normalizedMessage) {
+    return;
+  }
+
+  const normalizedType = String(type || "info").trim().toLowerCase() || "info";
+  const normalizedSource = String(source || "status").trim() || "status";
+  state.debugStatusHistory.unshift({
+    at: Date.now(),
+    type: normalizedType,
+    source: normalizedSource,
+    message: normalizedMessage,
+  });
+  state.debugStatusHistory = state.debugStatusHistory.slice(0, UNDERPAR_DEBUG_STATUS_HISTORY_LIMIT);
+}
+
 function compactRecentActivityEntries(entries, limit = 12) {
   if (!Array.isArray(entries) || entries.length === 0) {
     return [];
@@ -11377,6 +11400,134 @@ function compactRecentActivityEntries(entries, limit = 12) {
     const compact = parts.join(" | ");
     return compact.length > 420 ? `${compact.slice(0, 417)}...` : compact;
   });
+}
+
+function compactRecentStatusEntries(entries, limit = UNDERPAR_DEBUG_STATUS_OUTPUT_LIMIT) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return [];
+  }
+
+  return entries.slice(0, limit).map((entry) => {
+    const timestamp = Number(entry?.at || 0) > 0 ? new Date(Number(entry.at || 0)).toLocaleTimeString() : "n/a";
+    const parts = [
+      timestamp,
+      String(entry?.source || "status").trim() || "status",
+      String(entry?.type || "info").trim() || "info",
+      String(entry?.message || "").trim(),
+    ].filter(Boolean);
+    const compact = parts.join(" | ");
+    return compact.length > 420 ? `${compact.slice(0, 417)}...` : compact;
+  });
+}
+
+function getLatestDebugStatusEntry(predicate = null) {
+  const history = Array.isArray(state.debugStatusHistory) ? state.debugStatusHistory : [];
+  if (typeof predicate !== "function") {
+    return history[0] || null;
+  }
+  return history.find((entry) => {
+    try {
+      return predicate(entry);
+    } catch {
+      return false;
+    }
+  }) || null;
+}
+
+function isUnderparDebugErrorEntry(entry = null) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+  const level = String(entry?.level || "").trim().toLowerCase();
+  const statusType = String(entry?.details?.type || "").trim().toLowerCase();
+  return level === "error" || statusType === "error";
+}
+
+function getRecentDebugLogEntries(predicate = null, limit = 6) {
+  const history = Array.isArray(state.logs) ? state.logs : [];
+  const entries = typeof predicate === "function"
+    ? history.filter((entry) => {
+        try {
+          return predicate(entry);
+        } catch {
+          return false;
+        }
+      })
+    : [...history];
+  return entries.slice(0, limit);
+}
+
+function setUnderparDiagnosticMarker(markerKey = "", payload = null) {
+  const normalizedKey = String(markerKey || "").trim();
+  if (!normalizedKey) {
+    return;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    delete state.debugMarkers[normalizedKey];
+    return;
+  }
+
+  const sanitizedPayload = sanitizeUnderparDebugInfoValue(payload, {
+    keyName: normalizedKey,
+    seen: new WeakSet(),
+  });
+  const markerAt = Number(payload?.at || 0) > 0 ? Number(payload.at) : Date.now();
+  state.debugMarkers[normalizedKey] = {
+    ...sanitizedPayload,
+    at: markerAt,
+  };
+}
+
+function getUnderparDiagnosticMarker(markerKey = "") {
+  const normalizedKey = String(markerKey || "").trim();
+  if (!normalizedKey) {
+    return null;
+  }
+  const marker = state.debugMarkers?.[normalizedKey];
+  return marker && typeof marker === "object" ? marker : null;
+}
+
+function summarizeUnderparDiagnosticMarker(marker = null, preferredKeys = []) {
+  if (!marker || typeof marker !== "object") {
+    return "n/a";
+  }
+
+  const orderedKeys = Array.isArray(preferredKeys) ? preferredKeys : [];
+  const consumedKeys = new Set(["at", "status"]);
+  const parts = [];
+  const status = String(marker?.status || "").trim();
+  if (status) {
+    parts.push(status);
+  }
+
+  const pushField = (key) => {
+    if (consumedKeys.has(key)) {
+      return;
+    }
+    consumedKeys.add(key);
+    const rawValue = marker?.[key];
+    if (rawValue == null || rawValue === "") {
+      return;
+    }
+    const renderedValue = stringifyUnderparDebugInfoValue(rawValue);
+    if (!renderedValue) {
+      return;
+    }
+    parts.push(`${key}=${renderedValue}`);
+  };
+
+  orderedKeys.forEach(pushField);
+
+  for (const key of Object.keys(marker)) {
+    if (parts.length >= 6) {
+      break;
+    }
+    pushField(key);
+  }
+
+  parts.push(`at=${new Date(Number(marker.at || Date.now())).toISOString()}`);
+  return truncateDebugText(parts.join(" | "), 420);
 }
 
 function getUnderparCurrentView() {
@@ -11438,6 +11589,28 @@ function composeUnderparDebugConsoleOutput() {
     megWindowId: Number(state.megWorkspaceWindowId || 0),
     blondieWindowId: Number(state.blondieTimeWorkspaceWindowId || 0),
   };
+  const latestStatusEntry = getLatestDebugStatusEntry();
+  const latestErrorStatusEntry = getLatestDebugStatusEntry(
+    (entry) => String(entry?.type || "").trim().toLowerCase() === "error"
+  );
+  const recentStatusEntries = compactRecentStatusEntries(state.debugStatusHistory, UNDERPAR_DEBUG_STATUS_OUTPUT_LIMIT);
+  const recentFailureEntries = compactRecentActivityEntries(
+    getRecentDebugLogEntries((entry) => isUnderparDebugErrorEntry(entry), UNDERPAR_DEBUG_FAILURE_OUTPUT_LIMIT),
+    UNDERPAR_DEBUG_FAILURE_OUTPUT_LIMIT
+  );
+  const recentNonFetchEntries = compactRecentActivityEntries(
+    getRecentDebugLogEntries(
+      (entry) => String(entry?.channel || "").trim().toLowerCase() !== "fetch",
+      UNDERPAR_DEBUG_NON_FETCH_OUTPUT_LIMIT
+    ),
+    UNDERPAR_DEBUG_NON_FETCH_OUTPUT_LIMIT
+  );
+  const bootstrapMarker = getUnderparDiagnosticMarker("bootstrap");
+  const authMarker = getUnderparDiagnosticMarker("auth");
+  const activationMarker = getUnderparDiagnosticMarker("activation");
+  const consoleBootstrapMarker = getUnderparDiagnosticMarker("console_bootstrap");
+  const programmersMarker = getUnderparDiagnosticMarker("programmers");
+  const cmPrecheckMarker = getUnderparDiagnosticMarker("cm_precheck");
   const recentActivityEntries = compactRecentActivityEntries(state.logs, 12);
 
   lines.push("UnderPAR DEBUG INFO");
@@ -11482,6 +11655,19 @@ function composeUnderparDebugConsoleOutput() {
     `session_monitor_source=${String(state.sessionMonitorLastProbeSource || "n/a").trim() || "n/a"}`,
     `session_monitor_busy=${state.sessionMonitorBusy ? "yes" : "no"}`,
     `session_monitor_suppressed=${state.sessionMonitorSuppressed ? "yes" : "no"}`,
+  ]);
+
+  pushDebugSection(lines, "diagnostics", [
+    `last_status=${latestStatusEntry ? compactRecentStatusEntries([latestStatusEntry], 1)[0] : "n/a"}`,
+    `last_error_status=${latestErrorStatusEntry ? compactRecentStatusEntries([latestErrorStatusEntry], 1)[0] : "n/a"}`,
+    `last_non_fetch_activity=${recentNonFetchEntries[0] || "n/a"}`,
+    `last_failure_activity=${recentFailureEntries[0] || "n/a"}`,
+    `bootstrap=${summarizeUnderparDiagnosticMarker(bootstrapMarker, ["reason", "phase", "path"])}`,
+    `auth=${summarizeUnderparDiagnosticMarker(authMarker, ["mode", "phase", "interactiveFallback"])}`,
+    `activation=${summarizeUnderparDiagnosticMarker(activationMarker, ["source", "phase", "programmersCount"])}`,
+    `console_bootstrap=${summarizeUnderparDiagnosticMarker(consoleBootstrapMarker, ["phase", "configurationVersion", "authoritiesCount"])}`,
+    `programmers=${summarizeUnderparDiagnosticMarker(programmersMarker, ["phase", "count", "code", "endpoint"])}`,
+    `cm_precheck=${summarizeUnderparDiagnosticMarker(cmPrecheckMarker, ["reason", "phase", "tenantCount"])}`,
   ]);
 
   pushDebugSection(lines, "selection", [
@@ -11539,6 +11725,22 @@ function composeUnderparDebugConsoleOutput() {
     `browser_timezone=${String(Intl.DateTimeFormat().resolvedOptions().timeZone || "n/a").trim() || "n/a"}`,
     `workspace_windows=${stringifyUnderparDebugInfoValue(workspaceState) || "n/a"}`,
   ]);
+
+  pushDebugSection(
+    lines,
+    "recent_status",
+    recentStatusEntries.length > 0
+      ? recentStatusEntries.map((entry, index) => `event_${String(index + 1).padStart(2, "0")}=${entry}`)
+      : ["event_01=Waiting for status."]
+  );
+
+  pushDebugSection(
+    lines,
+    "recent_failures",
+    recentFailureEntries.length > 0
+      ? recentFailureEntries.map((entry, index) => `event_${String(index + 1).padStart(2, "0")}=${entry}`)
+      : ["event_01=Waiting for failures."]
+  );
 
   pushDebugSection(
     lines,
@@ -11849,6 +12051,7 @@ function setStatus(message = "", type = "info") {
     els.status.classList.add("error");
   }
   if (normalizedMessage) {
+    appendDebugStatusHistoryEntry(normalizedMessage, normalizedType, "status");
     appendDebugLogEntry("status", normalizedMessage, { type: normalizedType }, { level: normalizedType });
   }
 }
@@ -55366,17 +55569,26 @@ async function applyActiveLoginSession(loginData, options = {}) {
 
 async function activateSession(sessionData, source = "unknown", options = {}) {
   const activationStartedAt = Date.now();
+  const normalizedSource = String(source || "unknown").trim() || "unknown";
   const allowDeniedRecovery = options.allowDeniedRecovery !== false;
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
   const allowInteractiveConsoleBootstrap = shouldAllowInteractiveConsoleBootstrapForActivation(
-    source,
+    normalizedSource,
     options.allowInteractiveConsoleBootstrap === true
   );
   const allowBackgroundTemporaryPageContextTab = shouldAllowTemporaryCmBootstrapTabForActivation(
-    source,
+    normalizedSource,
     allowTemporaryPageContextTab
   );
   const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  setUnderparDiagnosticMarker("activation", {
+    status: "pending",
+    source: normalizedSource,
+    phase: "enforce-access",
+    allowDeniedRecovery,
+    allowInteractiveConsoleBootstrap,
+    allowBackgroundTemporaryPageContextTab,
+  });
   const enforced = await enforceAdobePassAccess(sessionData);
   if (!enforced.allowed || !enforced.loginData) {
     await clearLoginData();
@@ -55389,6 +55601,12 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     state.restricted = true;
     state.sessionReady = false;
     clearRefreshTimer();
+    setUnderparDiagnosticMarker("activation", {
+      status: "restricted",
+      source: normalizedSource,
+      phase: "access-denied",
+      recoveryLabel: "Unable to verify AdobePass access for this login.",
+    });
     setStatus("", "info");
     render();
     return false;
@@ -55421,6 +55639,13 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
         adobePassOrg: deniedSessionData?.adobePassOrg || null,
       });
       if (recovered) {
+        setUnderparDiagnosticMarker("activation", {
+          status: "success",
+          source: normalizedSource,
+          phase: "interactive-recovery",
+          programmersCount: Number(state.programmers.length || 0),
+          recovered: true,
+        });
         clearStatusUnlessCmTenantsPrecheckBlocked();
         return true;
       }
@@ -55442,6 +55667,12 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
           : "AdobePass access is still denied after auto-switch.",
       });
       state.restricted = true;
+      setUnderparDiagnosticMarker("activation", {
+        status: "restricted",
+        source: normalizedSource,
+        phase: "programmers-access-denied",
+        error: error instanceof Error ? error.message : String(error),
+      });
       setStatus("", "info");
       render();
       return false;
@@ -55471,6 +55702,12 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
       userId: sessionProfileCompleteness.userId,
       orgId: sessionProfileCompleteness.orgId,
       orgName: sessionProfileCompleteness.orgName,
+    });
+    setUnderparDiagnosticMarker("activation", {
+      status: "error",
+      source: normalizedSource,
+      phase: "incomplete-profile",
+      missing: sessionProfileCompleteness.missing,
     });
     setStatus("Experience Cloud session context is incomplete. Click Sign In.", "error");
     render();
@@ -55512,6 +55749,14 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     clearStatusUnlessCmTenantsPrecheckBlocked();
   }
   render();
+  setUnderparDiagnosticMarker("activation", {
+    status: programmersLoadError ? "warning" : "success",
+    source: normalizedSource,
+    phase: programmersLoadError ? "programmers-load-warning" : "complete",
+    programmersCount: Number(state.programmers.length || 0),
+    criticalPathMs: Math.max(0, Date.now() - activationStartedAt),
+    error: programmersLoadError ? String(programmersLoadError?.message || "").trim() : "",
+  });
   log(`Session activated (${source})`, {
     expiresAt: resolvedLoginData.expiresAt,
     org: resolvedLoginData.adobePassOrg,
@@ -55532,12 +55777,38 @@ async function refreshSessionNoTouch() {
   }
 
   const refreshPromise = (async () => {
+    setUnderparDiagnosticMarker("auth", {
+      status: "pending",
+      mode: "silent-refresh",
+      phase: "launch-web-auth-flow",
+    });
     try {
       const authData = await startLogin({ interactive: false, allowFallback: false });
+      setUnderparDiagnosticMarker("auth", {
+        status: "token-acquired",
+        mode: "silent-refresh",
+        phase: "token-acquired",
+      });
       const profile = await resolveProfileAfterLogin(authData);
+      setUnderparDiagnosticMarker("auth", {
+        status: "profile-resolved",
+        mode: "silent-refresh",
+        phase: "profile-resolved",
+      });
       const activated = await activateSession(buildLoginSessionPayloadFromAuth(authData, profile), "silent-refresh");
+      setUnderparDiagnosticMarker("auth", {
+        status: activated === true ? "success" : "incomplete",
+        mode: "silent-refresh",
+        phase: activated === true ? "activation-complete" : "activation-incomplete",
+      });
       return activated === true;
     } catch (error) {
+      setUnderparDiagnosticMarker("auth", {
+        status: "error",
+        mode: "silent-refresh",
+        phase: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
       log("No-touch refresh skipped", error?.message || String(error));
       if (state.loginData?.expiresAt && state.loginData.expiresAt > Date.now()) {
         scheduleNoTouchRefresh();
@@ -55878,12 +56149,23 @@ function syncMediaCompanySelectAvailability() {
 
 async function ensureCmTenantsPrecheckForActiveSession(reason = "session", options = {}) {
   const forceRefresh = options?.forceRefresh === true;
+  const normalizedReason = String(reason || "session").trim() || "session";
   const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
   const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   if (state.restricted || !state.loginData) {
+    setUnderparDiagnosticMarker("cm_precheck", {
+      status: "skipped",
+      reason: normalizedReason,
+      phase: "no-session",
+    });
     return null;
   }
   if (!forceRefresh && state.cmTenantsPrecheckPromise) {
+    setUnderparDiagnosticMarker("cm_precheck", {
+      status: "pending",
+      reason: normalizedReason,
+      phase: "reuse-promise",
+    });
     return state.cmTenantsPrecheckPromise;
   }
   const effectiveAllowTemporaryPageContextTab = allowTemporaryPageContextTab;
@@ -55895,6 +56177,12 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     isAccessTokenFreshEnough(existingCmToken, 45 * 1000);
 
   if (!forceRefresh && state.cmTenantsPrecheckComplete === true && hasCmTenantsCatalogEntries() && cmTokenReady) {
+    setUnderparDiagnosticMarker("cm_precheck", {
+      status: "cache-hit",
+      reason: normalizedReason,
+      phase: "ready",
+      tenantCount: Number(state.cmTenantsCatalog?.tenants?.length || 0),
+    });
     syncMediaCompanySelectAvailability();
     return state.cmTenantsCatalog;
   }
@@ -55904,6 +56192,13 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     state.cmTenantsPrecheckPending = true;
     state.cmTenantsPrecheckComplete = false;
     state.cmTenantsPrecheckLastError = "";
+    setUnderparDiagnosticMarker("cm_precheck", {
+      status: "pending",
+      reason: normalizedReason,
+      phase: "bootstrap",
+      forceRefresh,
+      allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
+    });
     syncMediaCompanySelectAvailability();
 
     try {
@@ -55952,9 +56247,16 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
       state.cmTenantsPrecheckComplete = true;
       state.cmConsoleBootstrapQualified = true;
       state.cmTenantsPrecheckLastError = "";
+      setUnderparDiagnosticMarker("cm_precheck", {
+        status: "success",
+        reason: normalizedReason,
+        phase: "complete",
+        tenantCount: Number(catalog?.tenants?.length || 0),
+        sourceUrl: String(catalog?.sourceUrl || ""),
+      });
       emitCmDebugEvent({
         phase: "cm-tenant-precheck-complete",
-        reason: String(reason || ""),
+        reason: normalizedReason,
         tenantCount: Number(catalog?.tenants?.length || 0),
         sourceUrl: String(catalog?.sourceUrl || ""),
         tokenClientId: String(parseJwtPayload(hydratedToken)?.client_id || ""),
@@ -55967,9 +56269,15 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     } catch (error) {
       const resolvedError = error instanceof Error ? error : new Error(String(error));
       state.cmTenantsPrecheckLastError = resolvedError.message;
+      setUnderparDiagnosticMarker("cm_precheck", {
+        status: "error",
+        reason: normalizedReason,
+        phase: "failed",
+        error: resolvedError.message,
+      });
       emitCmDebugEvent({
         phase: "cm-tenant-precheck-error",
-        reason: String(reason || ""),
+        reason: normalizedReason,
         error: resolvedError.message,
       });
       throw resolvedError;
@@ -57246,6 +57554,10 @@ async function ensureConsoleBootstrapState(accessToken = "", options = {}) {
     firstNonEmptyString([accessToken, getPreferredPrimaryImsAccessTokenCandidate()])
   );
   if (!normalizedAccessToken || !isProbablyJwt(normalizedAccessToken)) {
+    setUnderparDiagnosticMarker("console_bootstrap", {
+      status: "skipped",
+      phase: "no-access-token",
+    });
     return null;
   }
 
@@ -57259,23 +57571,58 @@ async function ensureConsoleBootstrapState(accessToken = "", options = {}) {
   ) {
     const existingConfigurationVersion = mvpdWorkspaceExtractConfigurationVersion(existingBootstrapState, 0);
     if (existingConfigurationVersion > 0 || existingBootstrapState.extendedProfile) {
+      setUnderparDiagnosticMarker("console_bootstrap", {
+        status: "cache-hit",
+        phase: "reuse",
+        configurationVersion: existingConfigurationVersion,
+        authoritiesCount: Array.isArray(existingBootstrapState?.grantedAuthorities)
+          ? existingBootstrapState.grantedAuthorities.length
+          : 0,
+      });
       return existingBootstrapState;
     }
   }
 
   if (state.consoleBootstrapPromise) {
+    setUnderparDiagnosticMarker("console_bootstrap", {
+      status: "pending",
+      phase: "reuse-promise",
+    });
     return state.consoleBootstrapPromise;
   }
 
   let promise;
   promise = (async () => {
+    setUnderparDiagnosticMarker("console_bootstrap", {
+      status: "pending",
+      phase: "fetch",
+      forceRefresh,
+    });
     try {
       const bootstrapState = await fetchAdobeConsoleBootstrapState(normalizedAccessToken, options);
       if (bootstrapState) {
         state.consoleBootstrapState = bootstrapState;
         PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
+        setUnderparDiagnosticMarker("console_bootstrap", {
+          status: "success",
+          phase: "complete",
+          configurationVersion: Number(bootstrapState?.configurationVersion || 0),
+          authoritiesCount: Array.isArray(bootstrapState?.grantedAuthorities)
+            ? bootstrapState.grantedAuthorities.length
+            : 0,
+          hasExtendedProfile: Boolean(bootstrapState?.extendedProfile),
+        });
       }
       return bootstrapState;
+    } catch (error) {
+      const resolvedError = error instanceof Error ? error : new Error(String(error));
+      setUnderparDiagnosticMarker("console_bootstrap", {
+        status: "error",
+        phase: "failed",
+        forceRefresh,
+        error: resolvedError.message,
+      });
+      throw resolvedError;
     } finally {
       if (state.consoleBootstrapPromise === promise) {
         state.consoleBootstrapPromise = null;
@@ -66828,9 +67175,20 @@ async function fetchProgrammersFromApi(options = {}) {
 async function loadProgrammersData(accessToken = "", options = {}) {
   const normalizedAccessToken = normalizeBearerTokenValue(firstNonEmptyString([accessToken, state.loginData?.accessToken]));
   if ((!state.loginData && !normalizedAccessToken) || state.restricted) {
+    setUnderparDiagnosticMarker("programmers", {
+      status: "skipped",
+      phase: "no-session",
+    });
     resetWorkflowForLoggedOut();
     return;
   }
+
+  setUnderparDiagnosticMarker("programmers", {
+    status: "pending",
+    phase: "console-bootstrap",
+    forceRefresh: options.forceRefresh === true,
+    allowInteractiveAuthBootstrap: options.allowInteractiveAuthBootstrap === true,
+  });
 
   let bootstrapState = null;
   try {
@@ -66841,6 +67199,12 @@ async function loadProgrammersData(accessToken = "", options = {}) {
   } catch (error) {
     applyProgrammerEntities([]);
     const bootstrapError = error instanceof Error ? error : new Error(String(error));
+    setUnderparDiagnosticMarker("programmers", {
+      status: isAdobeConsoleAccessDeniedMessage(bootstrapError.message) ? "denied" : "error",
+      phase: "console-bootstrap-failed",
+      error: bootstrapError.message,
+      code: isAdobeConsoleAccessDeniedMessage(bootstrapError.message) ? "PROGRAMMERS_ACCESS_DENIED" : "PROGRAMMERS_LOAD_FAILED",
+    });
     if (isAdobeConsoleAccessDeniedMessage(bootstrapError.message)) {
       throw createProgrammersError(bootstrapError.message, "PROGRAMMERS_ACCESS_DENIED");
     }
@@ -66850,6 +67214,11 @@ async function loadProgrammersData(accessToken = "", options = {}) {
   const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(bootstrapState, 0);
   if (!bootstrapState || configurationVersion <= 0) {
     applyProgrammerEntities([]);
+    setUnderparDiagnosticMarker("programmers", {
+      status: "error",
+      phase: "console-bootstrap-incomplete",
+      code: "PROGRAMMERS_LOAD_FAILED",
+    });
     throw createProgrammersError(
       "UnderPAR could not complete Adobe Pass console bootstrap before loading media companies.",
       "PROGRAMMERS_LOAD_FAILED"
@@ -66857,6 +67226,11 @@ async function loadProgrammersData(accessToken = "", options = {}) {
   }
   if (!hasAdobeConsoleProgrammerAccess(bootstrapState.grantedAuthorities)) {
     applyProgrammerEntities([]);
+    setUnderparDiagnosticMarker("programmers", {
+      status: "denied",
+      phase: "authority-check",
+      code: "PROGRAMMERS_ACCESS_DENIED",
+    });
     throw createProgrammersError("Adobe Pass console access is denied for this account.", "PROGRAMMERS_ACCESS_DENIED");
   }
 
@@ -66874,10 +67248,24 @@ async function loadProgrammersData(accessToken = "", options = {}) {
   if (programmersLoadError) {
     log("Media company load failed", programmersLoadError);
     applyProgrammerEntities([]);
+    setUnderparDiagnosticMarker("programmers", {
+      status: programmersLoadError?.code === "PROGRAMMERS_ACCESS_DENIED" ? "denied" : "error",
+      phase: "entity-fetch",
+      endpoint: String(state.programmersApiEndpoint || "").trim(),
+      code: String(programmersLoadError?.code || "").trim(),
+      error: programmersLoadError.message,
+    });
     throw programmersLoadError;
   }
 
   applyProgrammerEntities(entities);
+  setUnderparDiagnosticMarker("programmers", {
+    status: state.programmers.length > 0 ? "success" : "empty",
+    phase: "loaded",
+    count: Number(state.programmers.length || 0),
+    endpoint: String(state.programmersApiEndpoint || "").trim(),
+    configurationVersion,
+  });
   if (state.programmers.length === 0) {
     setStatus("No media company records were returned for this account.", "error");
   }
@@ -67134,6 +67522,11 @@ async function signInInteractive() {
   state.sessionMonitorSuppressed = false;
   setBusy(true, "Signing in...");
   setStatus("", "info");
+  setUnderparDiagnosticMarker("auth", {
+    status: "pending",
+    mode: "interactive",
+    phase: "launch-web-auth-flow",
+  });
 
   const signInStartedAt = Date.now();
   try {
@@ -67141,9 +67534,19 @@ async function signInInteractive() {
       interactive: true,
       allowFallback: true,
     });
+    setUnderparDiagnosticMarker("auth", {
+      status: "token-acquired",
+      mode: "interactive",
+      phase: "token-acquired",
+    });
     const authCompletedAt = Date.now();
     resetAvatarStateForInteractiveLogin();
     const profile = await resolveProfileAfterLogin(authData);
+    setUnderparDiagnosticMarker("auth", {
+      status: "profile-resolved",
+      mode: "interactive",
+      phase: "profile-resolved",
+    });
     const profileResolvedAt = Date.now();
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
     const activated = await activateSession(
@@ -67158,6 +67561,11 @@ async function signInInteractive() {
       await awaitCmBootstrapForExplicitActivation("interactive", {
         allowTemporaryPageContextTab: false,
       });
+      setUnderparDiagnosticMarker("auth", {
+        status: "success",
+        mode: "interactive",
+        phase: "activation-complete",
+      });
       log("Interactive sign-in critical path complete", {
         authMs: Math.max(0, authCompletedAt - signInStartedAt),
         profileMs: Math.max(0, profileResolvedAt - authCompletedAt),
@@ -67168,12 +67576,23 @@ async function signInInteractive() {
     }
 
     if (!activated) {
+      setUnderparDiagnosticMarker("auth", {
+        status: "incomplete",
+        mode: "interactive",
+        phase: "activation-incomplete",
+      });
       clearStatusUnlessCmTenantsPrecheckBlocked();
       return;
     }
 
     clearStatusUnlessCmTenantsPrecheckBlocked();
   } catch (error) {
+    setUnderparDiagnosticMarker("auth", {
+      status: "error",
+      mode: "interactive",
+      phase: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
     await releaseAuthPopupBootstrapContext("interactive-signin-complete");
@@ -67186,6 +67605,11 @@ async function refreshSessionManual() {
   state.sessionMonitorSuppressed = false;
   setBusy(true, "Refreshing session...");
   setStatus("", "info");
+  setUnderparDiagnosticMarker("auth", {
+    status: "pending",
+    mode: "manual-refresh",
+    phase: "launch-web-auth-flow",
+  });
 
   const refreshStartedAt = Date.now();
   try {
@@ -67197,6 +67621,12 @@ async function refreshSessionManual() {
       authData = await startLogin({ interactive: true, allowFallback: true });
       usedInteractiveLogin = true;
     }
+    setUnderparDiagnosticMarker("auth", {
+      status: "token-acquired",
+      mode: "manual-refresh",
+      phase: "token-acquired",
+      interactiveFallback: usedInteractiveLogin,
+    });
 
     const authCompletedAt = Date.now();
 
@@ -67205,6 +67635,12 @@ async function refreshSessionManual() {
     }
 
     const profile = await resolveProfileAfterLogin(authData);
+    setUnderparDiagnosticMarker("auth", {
+      status: "profile-resolved",
+      mode: "manual-refresh",
+      phase: "profile-resolved",
+      interactiveFallback: usedInteractiveLogin,
+    });
     const profileResolvedAt = Date.now();
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
     const activated = await activateSession(
@@ -67222,6 +67658,12 @@ async function refreshSessionManual() {
           allowTemporaryPageContextTab: false,
         }
       );
+      setUnderparDiagnosticMarker("auth", {
+        status: "success",
+        mode: "manual-refresh",
+        phase: "activation-complete",
+        interactiveFallback: usedInteractiveLogin,
+      });
       log("Manual refresh critical path complete", {
         interactive: usedInteractiveLogin,
         authMs: Math.max(0, authCompletedAt - refreshStartedAt),
@@ -67233,12 +67675,24 @@ async function refreshSessionManual() {
     }
 
     if (!activated) {
+      setUnderparDiagnosticMarker("auth", {
+        status: "incomplete",
+        mode: "manual-refresh",
+        phase: "activation-incomplete",
+        interactiveFallback: usedInteractiveLogin,
+      });
       clearStatusUnlessCmTenantsPrecheckBlocked();
       return;
     }
 
     clearStatusUnlessCmTenantsPrecheckBlocked();
   } catch (error) {
+    setUnderparDiagnosticMarker("auth", {
+      status: "error",
+      mode: "manual-refresh",
+      phase: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
     setBusy(false);
@@ -67271,6 +67725,12 @@ async function onRestrictedOrgSwitch() {
   state.restrictedOrgLabel = `Selected org: ${selected.label}`;
   state.restrictedRecoveryLabel = "Manual org switch in progress...";
   setStatus(`Switching org profile: ${selected.name || selected.orgId || "selected profile"}...`, "info");
+  setUnderparDiagnosticMarker("auth", {
+    status: "pending",
+    mode: "restricted-org-switch",
+    phase: "launch-web-auth-flow",
+    selectedOrg: selected.label,
+  });
   render();
 
   let lastError = null;
@@ -67297,6 +67757,12 @@ async function onRestrictedOrgSwitch() {
           await awaitCmBootstrapForExplicitActivation("restricted-org-switch", {
             allowTemporaryPageContextTab: false,
           });
+          setUnderparDiagnosticMarker("auth", {
+            status: "success",
+            mode: "restricted-org-switch",
+            phase: "activation-complete",
+            selectedOrg: selected.label,
+          });
           clearStatusUnlessCmTenantsPrecheckBlocked();
           return;
         }
@@ -67311,9 +67777,22 @@ async function onRestrictedOrgSwitch() {
 
     if (lastError) {
       state.restrictedRecoveryLabel = "Manual org switch failed. Try Sign In Again or Sign Out and retry.";
+      setUnderparDiagnosticMarker("auth", {
+        status: "error",
+        mode: "restricted-org-switch",
+        phase: "failed",
+        selectedOrg: selected.label,
+        error: lastError instanceof Error ? lastError.message : String(lastError),
+      });
       setStatus(lastError instanceof Error ? lastError.message : String(lastError), "error");
     } else {
       state.restrictedRecoveryLabel = "Manual org switch could not complete. Try Sign In Again.";
+      setUnderparDiagnosticMarker("auth", {
+        status: "incomplete",
+        mode: "restricted-org-switch",
+        phase: "activation-incomplete",
+        selectedOrg: selected.label,
+      });
       setStatus("Unable to switch org profile. Try Sign In Again.", "error");
     }
   } finally {
@@ -67397,11 +67876,17 @@ async function bootstrapSession(reason = "startup") {
   }
 
   const bootstrapGeneration = Number(state.sessionBootstrapGeneration || 0) + 1;
+  const normalizedReason = String(reason || "startup").trim() || "startup";
   state.sessionBootstrapGeneration = bootstrapGeneration;
   state.sessionMonitorSuppressed = false;
   state.isBootstrapping = true;
   setBusy(true, "Checking session...");
   setStatus("", "info");
+  setUnderparDiagnosticMarker("bootstrap", {
+    status: "pending",
+    reason: normalizedReason,
+    phase: "start",
+  });
 
   try {
     const stored = await loadStoredLoginData();
@@ -67428,11 +67913,23 @@ async function bootstrapSession(reason = "startup") {
         );
 
         if (activated) {
+          setUnderparDiagnosticMarker("bootstrap", {
+            status: "success",
+            reason: normalizedReason,
+            phase: "stored-session",
+            path: "stored",
+          });
           clearStatusUnlessCmTenantsPrecheckBlocked();
           return;
         }
 
         if (state.restricted) {
+          setUnderparDiagnosticMarker("bootstrap", {
+            status: "restricted",
+            reason: normalizedReason,
+            phase: "stored-session-denied",
+            path: "stored",
+          });
           setStatus("", "info");
           return;
         }
@@ -67441,6 +67938,13 @@ async function bootstrapSession(reason = "startup") {
           return;
         }
         log("Stored session invalid", error);
+        setUnderparDiagnosticMarker("bootstrap", {
+          status: "error",
+          reason: normalizedReason,
+          phase: "stored-session-invalid",
+          path: "stored",
+          error: error instanceof Error ? error.message : String(error),
+        });
         await clearLoginData();
       }
     }
@@ -67451,7 +67955,7 @@ async function bootstrapSession(reason = "startup") {
 
     if (shouldAttemptSilentBootstrapSession()) {
       const now = Date.now();
-      const silentProbeReason = String(reason || "startup").trim() || "startup";
+      const silentProbeReason = normalizedReason;
       if (
         silentProbeReason === "zip-key-import" ||
         silentProbeReason === "startup" ||
@@ -67466,6 +67970,12 @@ async function bootstrapSession(reason = "startup") {
           if (silent) {
             const activated = await activateSession(silent, `silent-bootstrap:${silentProbeReason}`);
             if (activated) {
+              setUnderparDiagnosticMarker("bootstrap", {
+                status: "success",
+                reason: normalizedReason,
+                phase: "silent-session",
+                path: `silent-bootstrap:${silentProbeReason}`,
+              });
               log("Auto-resumed Adobe Experience Cloud session", {
                 reason: silentProbeReason,
               });
@@ -67481,6 +67991,13 @@ async function bootstrapSession(reason = "startup") {
             reason: silentProbeReason,
             error: error instanceof Error ? error.message : String(error),
           });
+          setUnderparDiagnosticMarker("bootstrap", {
+            status: "error",
+            reason: normalizedReason,
+            phase: "silent-probe-failed",
+            path: `silent-bootstrap:${silentProbeReason}`,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     }
@@ -67489,6 +68006,11 @@ async function bootstrapSession(reason = "startup") {
     state.loginData = null;
     state.restricted = false;
     state.sessionReady = false;
+    setUnderparDiagnosticMarker("bootstrap", {
+      status: "no-session",
+      reason: normalizedReason,
+      phase: "complete",
+    });
     setStatus("", "info");
   } finally {
     if (isBootstrapSessionCurrent(bootstrapGeneration)) {

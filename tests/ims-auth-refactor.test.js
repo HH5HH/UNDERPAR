@@ -532,14 +532,20 @@ test("DEBUG INFO and logged-out controls bind before async init and keep a safe 
   const initSource = extractFunctionSource(popupSource, "init");
   const renderDebugSource = extractFunctionSource(popupSource, "renderDebugConsole");
   const copyDebugSource = extractFunctionSource(popupSource, "copyDebugConsoleToClipboard");
+  const statusSource = extractFunctionSource(popupSource, "setStatus");
 
   assert.match(popupSource, /let underparCoreInteractionHandlersBound = false;/);
   assert.match(popupSource, /function registerCoreInteractionHandlers\(\)/);
   assert.match(popupSource, /registerCoreInteractionHandlers\(\);\s*\n\s*function log\(/);
   assert.match(popupSource, /function composeUnderparDebugConsoleFallback\(/);
   assert.match(popupSource, /function getUnderparDebugConsoleSnapshot\(/);
+  assert.match(popupSource, /debugStatusHistory:\s*\[\]/);
+  assert.match(popupSource, /debugMarkers:\s*\{\}/);
+  assert.match(popupSource, /function appendDebugStatusHistoryEntry\(/);
+  assert.match(popupSource, /function setUnderparDiagnosticMarker\(/);
   assert.match(renderDebugSource, /setTextOutput\(els\.logOutput,\s*getUnderparDebugConsoleSnapshot\(\)\);/);
   assert.match(copyDebugSource, /els\.logOutput\?\.value \|\| getUnderparDebugConsoleSnapshot\(\)/);
+  assert.match(statusSource, /appendDebugStatusHistoryEntry\(normalizedMessage,\s*normalizedType,\s*"status"\)/);
   assert.match(initSource, /registerCoreInteractionHandlers\(\);/);
   assert.match(initSource, /registerEventHandlers\(\);/);
   assert.match(initSource, /await settleUnderparInitStep\("Initial shell render", \(\) => render\(\)\);/);
@@ -886,6 +892,13 @@ test("sidepanel exposes LoginButton-style DEBUG INFO controls backed by popup ru
   assert.match(renderDebugConsoleSource, /Shift-click to collapse/);
   assert.match(copyDebugConsoleSource, /UnderPAR could not copy the debug console to the clipboard\./);
   assert.match(composeDebugSource, /UnderPAR DEBUG INFO/);
+  assert.match(composeDebugSource, /"diagnostics"/);
+  assert.match(composeDebugSource, /"recent_status"/);
+  assert.match(composeDebugSource, /"recent_failures"/);
+  assert.match(composeDebugSource, /last_error_status=/);
+  assert.match(composeDebugSource, /console_bootstrap=/);
+  assert.match(composeDebugSource, /programmers=/);
+  assert.match(composeDebugSource, /cm_precheck=/);
   assert.match(composeDebugSource, /"recent_activity"/);
   assert.match(composeDebugSource, /precheck_pending/);
 });
