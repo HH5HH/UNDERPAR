@@ -6340,37 +6340,9 @@ async function fetchWithRefresh(url, options = {}) {
 }
 
 
-/* ---------- REQUESTOR + MVPD FILTERS ---------- */
-function __appendPinnedMediaCompanyQueryParam(url) {
-  const raw = String(url || '').trim();
-  if (!raw) return raw;
-
-  const hiddenScope = String(
-    document.querySelector('input[name=theme_scope], input[name=media_company_scope], input[name=media-company-scope]')?.value || ''
-  ).trim();
-  const titleMatch = String(document.title || '').match(/—\s*(.+)$/);
-  const mediaCompanyScope = hiddenScope || (titleMatch && String(titleMatch[1] || '').trim()) || '';
-  if (!mediaCompanyScope) return raw;
-
-  try {
-    const parsed = new URL(raw, window.location.href);
-    if (!/\/esm\/v3\/media-company\//i.test(String(parsed.pathname || ''))) {
-      return parsed.toString();
-    }
-    parsed.searchParams.set('media-company', mediaCompanyScope);
-    return parsed.toString();
-  } catch {
-    if (!/\/esm\/v3\/media-company\//i.test(raw)) return raw;
-    const [path, query = ''] = raw.split('?');
-    const params = new URLSearchParams(query);
-    params.set('media-company', mediaCompanyScope);
-    const nextQuery = params.toString();
-    return nextQuery ? `${path}?${nextQuery}` : path;
-  }
-}
-
 function appendFilterParams(url) {
-  const scopedUrl = __appendPinnedMediaCompanyQueryParam(url);
+  const scopedUrl = String(url || '').trim();
+  if (!scopedUrl) return scopedUrl;
   const reqSel = document.getElementById('fltr_requestorid');
   const mvpdSel = document.getElementById('fltr_mvpdId');
 
@@ -6426,7 +6398,6 @@ const ESM_PROGRAMMER_DIMENSION_DESCRIPTIONS = new Map([
   ['activity-level', 'Activity level bucket'],
   ['concurrency-level', 'Concurrency level bucket'],
   ['dc', 'Data center'],
-  ['media-company', 'Media company'],
   ['proxy', 'Proxy MVPD'],
   ['mvpd', 'MVPD granting entitlement'],
   ['requestor-id', 'Requestor ID used for entitlement'],
@@ -6463,7 +6434,6 @@ const ESM_MVPD_DIMENSION_DESCRIPTIONS = new Map([
   ['occurrences', 'Occurrence bucket'],
   ['activity-level', 'Activity level bucket'],
   ['concurrency-level', 'Concurrency level bucket'],
-  ['media-company', 'Media company'],
   ['mvpd', 'MVPD ID'],
   ['requestor-id', 'Requestor ID'],
   ['eap', 'External auth provider'],
@@ -6478,32 +6448,9 @@ function __normalizeColumnName(columnName) {
   return String(columnName || '').trim().toLowerCase();
 }
 
-function __getPinnedMediaCompanyScopeValue() {
-  const hiddenScope = String(
-    document.querySelector('input[name=theme_scope], input[name=media_company_scope], input[name=media-company-scope]')?.value || ''
-  ).trim();
-  if (hiddenScope) return hiddenScope;
-
-  const titleMatch = String(document.title || '').match(/—\s*(.+)$/);
-  if (titleMatch && String(titleMatch[1] || '').trim()) {
-    return String(titleMatch[1] || '').trim();
-  }
-
-  return '';
-}
-
-function __isPinnedMediaCompanyColumn(columnName) {
-  const normalized = __normalizeColumnName(columnName);
-  if (!normalized || !__getPinnedMediaCompanyScopeValue()) return false;
-  return normalized === 'media-company' || normalized === 'media_company' || normalized === 'media-company-id' || normalized === 'media_company_id';
-}
-
 function __isSuppressedEsmColumn(columnName) {
   const normalized = __normalizeColumnName(columnName);
-  return Boolean(normalized) && (
-    ESM_SUPPRESSED_COLUMNS.has(normalized) ||
-    __isPinnedMediaCompanyColumn(normalized)
-  );
+  return Boolean(normalized) && ESM_SUPPRESSED_COLUMNS.has(normalized);
 }
 
 function __isLocalFilterExcludedDimension(columnName) {
@@ -8167,7 +8114,7 @@ async function downloadCsv(link, baseHref, sortState) {
   const sortStack = sortState ? [sortState] : getDefaultSortStack();
   const sorted = sortByStack(filteredRows, sortStack, ctx);
 
-  const headers = Object.keys(sorted[0]);
+  const headers = Object.keys(sorted[0]).filter((columnName) => !__isSuppressedEsmColumn(columnName));
   const lines = [
     headers.join(','),
     ...sorted.map(rw =>
@@ -8732,7 +8679,7 @@ function getVisibleSystemQueryString(value = "") {
   try {
     const parsed = new URL(raw, window.location.href);
     const searchParams = new URLSearchParams(parsed.search);
-    ["format", "limit", "metrics"].forEach((key) => searchParams.delete(key));
+    ["format", "limit", "metrics", "media-company"].forEach((key) => searchParams.delete(key));
     const nextQuery = searchParams.toString();
     return nextQuery ? `?${nextQuery}` : "";
   } catch {
@@ -8742,7 +8689,7 @@ function getVisibleSystemQueryString(value = "") {
     }
     const queryText = raw.slice(queryIndex + 1).trim();
     const searchParams = new URLSearchParams(queryText);
-    ["format", "limit", "metrics"].forEach((key) => searchParams.delete(key));
+    ["format", "limit", "metrics", "media-company"].forEach((key) => searchParams.delete(key));
     const nextQuery = searchParams.toString();
     return nextQuery ? `?${nextQuery}` : "";
   }
