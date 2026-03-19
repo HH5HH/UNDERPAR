@@ -188,6 +188,7 @@ const AUTH_WINDOW_TIMEOUT_MS = 180000;
 const IMS_RELAY_MESSAGE_TIMEOUT_MS = 15000;
 const PROGRAMMERS_FETCH_TIMEOUT_MS = 15000;
 const NON_INTERACTIVE_AUTH_TIMEOUT_MS = 12000;
+const SILENT_BOOTSTRAP_RETRY_INTERVAL_MS = 15 * 1000;
 const TOKEN_REFRESH_LEEWAY_MS = 2 * 60 * 1000;
 const JWT_VALUE_REDACTION_PATTERN = /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 const BEARER_TOKEN_REDACTION_PATTERN = /\bBearer\s+[A-Za-z0-9._~-]{20,}\b/gi;
@@ -9720,7 +9721,10 @@ function registerPassVaultStorageListener() {
       return;
     }
 
+    const previousVault = normalizeUnderparVaultPayload(changes?.[UNDERPAR_VAULT_STORAGE_KEY]?.oldValue || null);
+    const previousClientId = String(getActiveUnderparImsRuntimeConfig(previousVault)?.clientId || "").trim();
     state.passVault = normalizeUnderparVaultPayload(changes?.[UNDERPAR_VAULT_STORAGE_KEY]?.newValue || null);
+    const nextClientId = String(getActiveUnderparImsRuntimeConfig(state.passVault)?.clientId || "").trim();
     rebuildPassVaultProgrammerStatusIndex(state.passVault);
     refreshAllEsmWorkspaceMegSavedQuerySelectors();
     if (consumePendingPassVaultStorageWrite(state.passVault)) {
@@ -9743,6 +9747,10 @@ function registerPassVaultStorageListener() {
         });
       }
     });
+
+    if (nextClientId && nextClientId !== previousClientId && shouldAttemptSilentBootstrapSession()) {
+      void bootstrapSession("vault-storage-change");
+    }
   });
 
   state.passVaultStorageListenerBound = true;
@@ -10654,6 +10662,7 @@ const state = {
   programmersApiEndpoint: null,
   refreshTimeoutId: null,
   silentRefreshPromise: null,
+  lastSilentBootstrapAttemptAt: 0,
   mvpdCacheByRequestor: new Map(),
   mvpdLoadPromiseByRequestor: new Map(),
   restV2AuthContextByRequestor: new Map(),
@@ -11894,9 +11903,11 @@ async function importZipKeyIntoVaultFromText(zipKeyText = "", sourceLabel = "ZIP
 
   try {
     const result = await importUnderparImsRuntimeConfigFromZipKeyText(zipKeyText, { silent: true });
+    state.manualZipKeyImportGate = false;
     setStatus("", "info");
     setZipKeyImportFeedback(READY_ZIP_KEY_IMPORT_STATUS_MESSAGE, "success");
     render();
+    await bootstrapSession("zip-key-import");
     focusPostZipKeyImportAction();
     return {
       ok: true,
@@ -66539,6 +66550,15 @@ function onZipKeyContinue() {
   closeZipKeyImportGate();
 }
 
+function shouldAttemptSilentBootstrapSession() {
+  return (
+    !state.sessionReady &&
+    !state.restricted &&
+    !state.zipKeyImportPending &&
+    hasConfiguredUnderparImsClientId()
+  );
+}
+
 function isBootstrapSessionCurrent(generation) {
   return Number(state.sessionBootstrapGeneration || 0) === Number(generation || 0);
 }
@@ -66548,7 +66568,7 @@ function cancelPendingBootstrapSession() {
   state.isBootstrapping = false;
 }
 
-async function bootstrapSession() {
+async function bootstrapSession(reason = "startup") {
   if (state.isBootstrapping) {
     return;
   }
@@ -66599,6 +66619,46 @@ async function bootstrapSession() {
         }
         log("Stored session invalid", error);
         await clearLoginData();
+      }
+    }
+
+    if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
+      return;
+    }
+
+    if (shouldAttemptSilentBootstrapSession()) {
+      const now = Date.now();
+      const silentProbeReason = String(reason || "startup").trim() || "startup";
+      if (
+        silentProbeReason === "zip-key-import" ||
+        silentProbeReason === "startup" ||
+        now - Number(state.lastSilentBootstrapAttemptAt || 0) >= SILENT_BOOTSTRAP_RETRY_INTERVAL_MS
+      ) {
+        state.lastSilentBootstrapAttemptAt = now;
+        try {
+          const silent = await attemptSilentBootstrapLogin();
+          if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
+            return;
+          }
+          if (silent) {
+            const activated = await activateSession(silent, `silent-bootstrap:${silentProbeReason}`);
+            if (activated) {
+              log("Auto-resumed Adobe Experience Cloud session", {
+                reason: silentProbeReason,
+              });
+              clearStatusUnlessCmTenantsPrecheckBlocked();
+              return;
+            }
+          }
+        } catch (error) {
+          if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
+            return;
+          }
+          log("Silent Adobe session probe failed", {
+            reason: silentProbeReason,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     }
 
@@ -66893,13 +66953,23 @@ function registerEventHandlers() {
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && shouldRunExperienceCloudSessionMonitor()) {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+    if (shouldRunExperienceCloudSessionMonitor()) {
       void runExperienceCloudSessionMonitorTick("visibility");
+      return;
+    }
+    if (shouldAttemptSilentBootstrapSession()) {
+      void bootstrapSession("panel-visible");
     }
   });
 
   window.addEventListener("focus", () => {
     if (!shouldRunExperienceCloudSessionMonitor()) {
+      if (shouldAttemptSilentBootstrapSession()) {
+        void bootstrapSession("window-focus");
+      }
       return;
     }
     void runExperienceCloudSessionMonitorTick("focus");
@@ -66985,6 +67055,7 @@ async function init() {
   await settleUnderparInitStep("Pass VAULT load", () => ensurePassVaultLoaded({ forceReload: false }));
   void renderBuildInfo();
   await settleUnderparInitStep("Sidepanel controller bridge", () => startSidepanelControllerBridge());
+  await settleUnderparInitStep("Session bootstrap", () => bootstrapSession("startup"));
   render();
   void loadAvatarMenuUpdateState(false);
 }

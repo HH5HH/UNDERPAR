@@ -403,6 +403,24 @@ test("DEBUG INFO and logged-out controls bind before async init and keep a safe 
   assert.match(initSource, /await settleUnderparInitStep\("Pass VAULT load", \(\) => ensurePassVaultLoaded\(\{ forceReload: false \}\)\);/);
 });
 
+test("post-ZIP.KEY logged-out flow silently probes for an existing Adobe session like LoginButton", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const initSource = extractFunctionSource(popupSource, "init");
+  const registerHandlersSource = extractFunctionSource(popupSource, "registerEventHandlers");
+  const importZipKeySource = extractFunctionSource(popupSource, "importZipKeyIntoVaultFromText");
+  const bootstrapSource = extractFunctionSource(popupSource, "bootstrapSession");
+
+  assert.match(popupSource, /const SILENT_BOOTSTRAP_RETRY_INTERVAL_MS = 15 \* 1000;/);
+  assert.match(popupSource, /function shouldAttemptSilentBootstrapSession\(\)/);
+  assert.match(initSource, /await settleUnderparInitStep\("Session bootstrap", \(\) => bootstrapSession\("startup"\)\);/);
+  assert.match(registerHandlersSource, /void bootstrapSession\("panel-visible"\);/);
+  assert.match(registerHandlersSource, /void bootstrapSession\("window-focus"\);/);
+  assert.match(importZipKeySource, /state\.manualZipKeyImportGate = false;/);
+  assert.match(importZipKeySource, /await bootstrapSession\("zip-key-import"\);/);
+  assert.match(bootstrapSource, /const silent = await attemptSilentBootstrapLogin\(\);/);
+  assert.match(bootstrapSource, /silent-bootstrap:/);
+});
+
 test("active CM bootstrap uses UnderPAR bearer-derived qualification instead of exc_app seeding", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const requestQualifiedSource = extractFunctionSource(popupSource, "requestQualifiedCmConsoleToken");
