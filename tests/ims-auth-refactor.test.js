@@ -303,6 +303,25 @@ test("environment restore lets the premium panel path own PassVault hydration", 
   assert.doesNotMatch(applySelectionSource, /hydrateProgrammerFromPassVault\(/);
 });
 
+test("selected media company refresh primes CM tenant precheck before CM service matching", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+
+  assert.match(refreshPanelsSource, /ensureCmTenantsPrecheckForActiveSession\(`panel-selection:\$\{programmer\.programmerId\}`/);
+  assert.match(refreshPanelsSource, /allowTemporaryPageContextTab:\s*true/);
+  assert.match(refreshPanelsSource, /const cmServicePromise = Promise\.resolve\(cmSelectionBootstrapPromise\)/);
+  assert.match(refreshPanelsSource, /const cmMvpdServicePromise = Promise\.resolve\(cmSelectionBootstrapPromise\)/);
+});
+
+test("environment switch reactivation allows temporary CM bootstrap context recovery", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const environmentSwitchSource = extractFunctionSource(popupSource, "switchAdobePassEnvironmentInPlace");
+
+  assert.match(environmentSwitchSource, /activateSession\(retainedLoginData,\s*"environment-switch",\s*\{/);
+  assert.match(environmentSwitchSource, /activateSession\(silent,\s*"environment-switch",\s*\{/);
+  assert.match(environmentSwitchSource, /allowTemporaryPageContextTab:\s*true/);
+});
+
 test("PassVault storage changes re-seed runtime without force-overwriting active service snapshots", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const storageListenerSource = extractFunctionSource(popupSource, "registerPassVaultStorageListener");
@@ -581,6 +600,14 @@ test("popup and sidepanel ship the same sparse logged-out sign-in surface after 
   assert.doesNotMatch(sidepanelHtml, /class="sign-in-view-card"/);
   assert.doesNotMatch(popupHtml, /class="sign-in-view-card"/);
   assert.ok(sidepanelHtml.indexOf('id="zip-key-import-view"') < sidepanelHtml.indexOf('id="sign-in-view"'));
+});
+
+test("sidepanel requestor picker spans the same full workflow width as media company and MVPD", () => {
+  const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
+  const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
+
+  assert.match(sidepanelHtml, /<div class="field field--requestor">/);
+  assert.match(popupCss, /\.workflow > \.field--requestor\s*\{\s*grid-column:\s*1 \/ -1;\s*\}/);
 });
 
 test("sidepanel exposes LoginButton-style DEBUG INFO controls backed by popup runtime state", () => {

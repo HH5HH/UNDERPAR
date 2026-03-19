@@ -1727,6 +1727,10 @@ body[aria-busy="true"] .auth-btn::before {
   grid-column: 1 / -1;
 }
 
+.workflow > .field--requestor {
+  grid-column: 1 / -1;
+}
+
 .workflow > .field--media-company {
   grid-column: 1 / -1;
 }

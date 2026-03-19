@@ -9597,7 +9597,9 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
 
       if (accessToken) {
         try {
-          const reactivated = await activateSession(retainedLoginData, "environment-switch");
+          const reactivated = await activateSession(retainedLoginData, "environment-switch", {
+            allowTemporaryPageContextTab: true,
+          });
           if (reactivated) {
             activated = true;
             activationSource = "token";
@@ -9615,7 +9617,9 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
         try {
           const silent = await attemptSilentBootstrapLogin();
           if (silent) {
-            const silentActivated = await activateSession(silent, "environment-switch");
+            const silentActivated = await activateSession(silent, "environment-switch", {
+              allowTemporaryPageContextTab: true,
+            });
             if (silentActivated) {
               activated = true;
               activationSource = "silent";
@@ -46293,13 +46297,14 @@ function degradationBuildCheatSheetCommands(panelState, context = {}) {
     const useFreshTokenEnv = options.useFreshTokenEnv === true;
     const useManualTokenPlaceholder = options.useManualTokenPlaceholder === true;
     const method = String(callSpec?.method || "GET").trim().toUpperCase() || "GET";
+    const methodPrefix = method === "GET" ? "curl" : `curl -X ${method}`;
     const authHeader = useManualTokenPlaceholder
       ? '-H "Authorization: Bearer <PASTE_FRESH_ACCESS_TOKEN_HERE>"'
       : useFreshTokenEnv
         ? '-H "Authorization: Bearer $DGR_ACCESS_TOKEN"'
         : `-H ${quoteCurlDoubleQuoted(`Authorization: Bearer ${accessToken}`)}`;
     return [
-      `curl -X ${method}`,
+      methodPrefix,
       authHeader,
       `-H ${quoteCurlDoubleQuoted(`api_version: ${DEGRADATION_API_VERSION}`)}`,
       quoteCurlDoubleQuoted(requestUrl),
@@ -46333,16 +46338,16 @@ function buildDegradationCheatSheetTokenBootstrap(context = {}) {
     };
   }
 
+  const tokenRequestBody = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope: tokenScope,
+  }).toString();
+
   const tokenSetupScript = [
     "Step 1. Mint a fresh bearer token:",
-    [
-      `curl -X POST ${quoteCurlDoubleQuoted(tokenUrl)}`,
-      '-H "Content-Type: application/x-www-form-urlencoded"',
-      `-d ${quoteShellArgument("grant_type=client_credentials")}`,
-      `-d ${quoteShellArgument(`client_id=${clientId}`)}`,
-      `-d ${quoteShellArgument(`client_secret=${clientSecret}`)}`,
-      `-d ${quoteShellArgument(`scope=${tokenScope}`)}`,
-    ].join(" "),
+    [`curl ${quoteCurlDoubleQuoted(tokenUrl)}`, `-d ${quoteCurlDoubleQuoted(tokenRequestBody)}`].join(" "),
     "",
     "Step 2. Copy only the access_token value from the JSON response.",
     "",
@@ -46385,7 +46390,7 @@ function buildDegradationCheatSheetSetupItems(context = {}) {
     `Confirm the runtime context before using these commands: ${contextEnvelope || "Environment | Media Company | Requestor x MVPD"}.`,
     `This export was generated on ${String(context.generatedAtLabel || "").trim() || "generation time"} for ${appLabel}. Expected token expiry: ${String(context.tokenExpiresLabel || "unknown").trim() || "unknown"}.`,
     "Use the one-line Fresh Token Bootstrap command when the token is stale or you see HTTP 401/403.",
-    'If Terminal says "Could not resolve host: --request" or similar, the command was pasted with rich-text spacing. Re-copy it directly from this sheet.',
+    'If Terminal says "Could not resolve host:" or similar, the command was pasted with rich-text spacing. Re-copy it directly from this sheet.',
     "Use only the newest cheat sheet. Older exports can carry expired bearer tokens.",
   ];
   const harvestWarning = String(context.harvestWarning || "").trim();
@@ -55811,15 +55816,39 @@ async function refreshProgrammerPanels(options = {}) {
     return;
   }
   try {
+    const cachedCmSelectionService =
+      cachedServices?.cm ||
+      state.cmServiceByProgrammerId.get(programmer.programmerId) ||
+      buildPassVaultRuntimeCmServiceSnapshot(getPassVaultMediaCompanyRecord(programmer.programmerId)) ||
+      null;
+    const shouldPrimeCmSelectionBootstrap =
+      forcePremiumRefresh ||
+      !hasCmTenantsCatalogEntries() ||
+      !tokenSupportsCmTenantCatalog(getPreferredCmAccessTokenCandidate()) ||
+      shouldRetryCachedCmService(cachedCmSelectionService);
+    const cmSelectionBootstrapPromise = shouldPrimeCmSelectionBootstrap
+      ? ensureCmTenantsPrecheckForActiveSession(`panel-selection:${programmer.programmerId}`, {
+          forceRefresh: forcePremiumRefresh,
+          allowTemporaryPageContextTab: true,
+        }).catch(() => null)
+      : Promise.resolve(state.cmTenantsCatalog);
     const premiumAppsPromise = ensurePremiumAppsForProgrammer(programmer, {
       forceRefresh: forcePremiumRefresh,
     });
-    const cmServicePromise = ensureCmServiceForProgrammer(programmer, {
-      forceRefresh: forcePremiumRefresh,
-    }).catch(() => null);
-    const cmMvpdServicePromise = ensureCmServiceForSelectedMvpd(programmer, {
-      forceRefresh: forcePremiumRefresh,
-    }).catch(() => null);
+    const cmServicePromise = Promise.resolve(cmSelectionBootstrapPromise)
+      .then(() =>
+        ensureCmServiceForProgrammer(programmer, {
+          forceRefresh: forcePremiumRefresh,
+        })
+      )
+      .catch(() => null);
+    const cmMvpdServicePromise = Promise.resolve(cmSelectionBootstrapPromise)
+      .then(() =>
+        ensureCmServiceForSelectedMvpd(programmer, {
+          forceRefresh: forcePremiumRefresh,
+        })
+      )
+      .catch(() => null);
 
     const premiumApps = await premiumAppsPromise;
     if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
