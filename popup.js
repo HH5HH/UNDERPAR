@@ -49488,6 +49488,91 @@ function buildUnderparImsAuthError(parsed, text, fallbackMessage = "Adobe IMS re
   return new Error(redactSensitiveTokenValues(message));
 }
 
+async function revokeUnderparImsToken({ revocationEndpoint = IMS_DEFAULT_REVOCATION_ENDPOINT, clientId = "", token = "" } = {}) {
+  const normalizedToken = String(token || "").trim();
+  const normalizedClientId = String(clientId || "").trim();
+  if (!normalizedToken || !normalizedClientId) {
+    return;
+  }
+
+  const endpoint = new URL(String(revocationEndpoint || IMS_DEFAULT_REVOCATION_ENDPOINT));
+  endpoint.searchParams.set("client_id", normalizedClientId);
+
+  let response;
+  try {
+    response = await relayImsFetch(endpoint.toString(), {
+      method: "POST",
+      credentials: "omit",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        token: normalizedToken,
+      }).toString(),
+    });
+  } catch (error) {
+    throw new Error(`Unable to revoke Adobe token: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (response.ok) {
+    return;
+  }
+
+  const text = await response.text().catch(() => "");
+  const parsed = parseJsonText(text, null);
+  throw buildUnderparImsAuthError(parsed, text, "Adobe token revocation failed.");
+}
+
+function getUnderparLogoutClientId(loginData = null) {
+  const sessionData = loginData && typeof loginData === "object" ? loginData : {};
+  const accessTokenClaims = parseJwtPayload(firstNonEmptyString([sessionData?.accessToken])) || {};
+  const runtimeConfig = getActiveUnderparImsRuntimeConfig();
+  return firstNonEmptyString([
+    accessTokenClaims?.client_id,
+    accessTokenClaims?.clientId,
+    sessionData?.imsSession?.clientId,
+    sessionData?.imsSession?.client_id,
+    runtimeConfig?.clientId,
+  ]);
+}
+
+async function revokeUnderparLoginTokensForLogout(loginData = null) {
+  const sessionData = loginData && typeof loginData === "object" ? loginData : {};
+  const clientId = getUnderparLogoutClientId(sessionData);
+  if (!clientId) {
+    return;
+  }
+
+  const authConfiguration = await fetchUnderparImsOpenIdConfiguration().catch(() => getDefaultUnderparImsAuthConfiguration());
+  const revocationEndpoint = firstNonEmptyString([
+    authConfiguration?.revocation_endpoint,
+    IMS_DEFAULT_REVOCATION_ENDPOINT,
+  ]);
+  const tokensToRevoke = uniquePreserveOrder([
+    firstNonEmptyString([sessionData?.accessToken]),
+    firstNonEmptyString([sessionData?.refreshToken]),
+  ]).filter(Boolean);
+  if (tokensToRevoke.length === 0) {
+    return;
+  }
+
+  const revocationResults = await Promise.allSettled(
+    tokensToRevoke.map((token) =>
+      revokeUnderparImsToken({
+        revocationEndpoint,
+        clientId,
+        token,
+      })
+    )
+  );
+
+  for (const result of revocationResults) {
+    if (result.status === "rejected") {
+      log("Adobe token revocation failed", result.reason instanceof Error ? result.reason.message : String(result.reason));
+    }
+  }
+}
+
 async function fetchUnderparImsOpenIdConfiguration() {
   const defaults = getDefaultUnderparImsAuthConfiguration();
   try {
@@ -53566,6 +53651,7 @@ async function signOutAndResetSession() {
   clearRestV2ProfileHarvestSessionState();
 
   try {
+    await revokeUnderparLoginTokensForLogout(state.loginData);
     await clearIdentityTokens();
     await clearDebugFlowStorageFromChromeStorage();
     purgeAvatarCaches();

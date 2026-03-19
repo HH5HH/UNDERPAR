@@ -102,6 +102,27 @@ function loadPopupClientIdCandidateHelper() {
   return context.module.exports;
 }
 
+function loadPopupLogoutClientIdHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "let tokenClaims = null;",
+    "let runtimeConfig = null;",
+    "function parseJwtPayload() { return tokenClaims || {}; }",
+    "function getActiveUnderparImsRuntimeConfig() { return runtimeConfig || {}; }",
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : []) { const text = String(value || '').trim(); if (text) { return text; } } return ''; }",
+    extractFunctionSource(source, "getUnderparLogoutClientId"),
+    "function setTestContext(nextTokenClaims = null, nextRuntimeConfig = null) { tokenClaims = nextTokenClaims; runtimeConfig = nextRuntimeConfig; }",
+    "module.exports = { getUnderparLogoutClientId, setTestContext };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("runtime source no longer hard-codes debugger client or legacy redirect host", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const backgroundSource = fs.readFileSync(path.join(ROOT, "background.js"), "utf8");
@@ -190,6 +211,35 @@ test("primary IMS client-id candidates come from the token and ZIP.KEY runtime c
 
   helpers.setTestContext({}, null);
   assert.deepEqual([...helpers.getUnderparImsClientIdCandidates("")], []);
+});
+
+test("logout revocation targets the active UnderPAR client id before falling back to ZIP.KEY runtime config", () => {
+  const helpers = loadPopupLogoutClientIdHelper();
+
+  helpers.setTestContext({ client_id: "token-client" }, { clientId: "vault-client" });
+  assert.equal(
+    helpers.getUnderparLogoutClientId({
+      accessToken: "token-value",
+      imsSession: {
+        clientId: "session-client",
+      },
+    }),
+    "token-client"
+  );
+
+  helpers.setTestContext({}, { clientId: "vault-client" });
+  assert.equal(
+    helpers.getUnderparLogoutClientId({
+      accessToken: "",
+      imsSession: {},
+    }),
+    "vault-client"
+  );
+});
+
+test("sign out path revokes Adobe tokens before clearing session state", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  assert.match(popupSource, /revokeUnderparLoginTokensForLogout\(state\.loginData\)/);
 });
 
 test("PKCE authorization URL uses code response mode and the configured client ID", () => {
