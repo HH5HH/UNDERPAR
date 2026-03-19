@@ -48036,6 +48036,15 @@ function degradationBuildStatusRow(endpointSpec, baseValues, targetNode, targetT
   };
 }
 
+function degradationMergeStatusDetailNode(parentNode = null, detailNode = null) {
+  const parentObject = parentNode && typeof parentNode === "object" && !Array.isArray(parentNode) ? parentNode : {};
+  const detailObject = detailNode && typeof detailNode === "object" && !Array.isArray(detailNode) ? detailNode : {};
+  return {
+    ...parentObject,
+    ...detailObject,
+  };
+}
+
 function degradationExtractRowsFromMegaPayload(parsedPayload, queryValues = {}) {
   const normalizedPayload = degradationNormalizeObjectKeys(parsedPayload);
   const payloadObject = normalizedPayload && typeof normalizedPayload === "object" ? normalizedPayload : {};
@@ -48078,8 +48087,7 @@ function degradationExtractRowsFromMegaPayload(parsedPayload, queryValues = {}) 
       };
 
       if (targetType === "programmer") {
-        const detailNode =
-          programmerTarget && typeof programmerTarget === "object" ? programmerTarget : measureObject;
+        const detailNode = degradationMergeStatusDetailNode(measureObject, programmerTarget);
         rows.push(
           degradationBuildStatusRow(
             rowEndpointSpec,
@@ -48110,7 +48118,7 @@ function degradationExtractRowsFromMegaPayload(parsedPayload, queryValues = {}) 
           degradationBuildStatusRow(
             rowEndpointSpec,
             baseValues,
-            targetNode && typeof targetNode === "object" ? targetNode : {},
+            degradationMergeStatusDetailNode(measureObject, targetNode),
             targetType,
             degradationResolveIdValue(targetNode, "")
           )
@@ -48157,7 +48165,7 @@ function degradationExtractRows(endpointSpec, parsedPayload, queryValues = {}) {
     };
 
     if (endpointSpec.targetType === "programmer") {
-      const detailNode = programmerNode && typeof programmerNode === "object" ? programmerNode : measureObject;
+      const detailNode = degradationMergeStatusDetailNode(measureObject, programmerNode);
       rows.push(
         degradationBuildStatusRow(
           endpointSpec,
@@ -48182,7 +48190,7 @@ function degradationExtractRows(endpointSpec, parsedPayload, queryValues = {}) {
         degradationBuildStatusRow(
           endpointSpec,
           baseValues,
-          targetNode && typeof targetNode === "object" ? targetNode : {},
+          degradationMergeStatusDetailNode(measureObject, targetNode),
           endpointSpec.targetType,
           degradationResolveIdValue(targetNode, "")
         )
@@ -48804,62 +48812,44 @@ async function degradationRunAllStatusEndpointsFromPanel(panelState, options = {
       programmerId: String(queryValues.programmerId || ""),
       mvpd: String(queryValues.mvpd || ""),
       includeAllMvpd: queryValues.includeAllMvpd === true,
-      endpointCount: queryValues.includeAllMvpd === true ? 1 : DEGRADATION_STATUS_ENDPOINT_SPECS.length,
+      endpointCount: 1,
       targetWindowId,
       workspaceKey: "degradation-workspace",
       workspaceOrigin: "DEGRADATION Workspace",
     });
-    if (queryValues.includeAllMvpd === true) {
-      const selectionContext = degradationWorkspaceGetSelectionContext(panelState.programmer, {
-        degradation: selectedApp,
-      });
-      const megaReport = await degradationExecuteStatusRequest(panelState, DEGRADATION_MEGA_STATUS_ENDPOINT_SPEC, {
-        queryValues,
-        selectionKey: String(selectionContext.selectionKey || "").trim(),
-        runGroupId,
-        selectedApp,
-        targetWindowId,
-      });
-      const splitReports = degradationBuildEndpointReportsFromMegaStatusReport(megaReport, queryValues);
-      splitReports.forEach((report) => {
-        degradationWorkspaceStoreReport(report, queryValues);
-        reports.push(report);
-      });
-      emitDegradationWorkspaceDebugEvent(getActiveDegradationWorkspaceDebugFlowId(), {
-        phase: megaReport.ok === true ? "sweep-mega-result" : "sweep-mega-error",
-        requestScope: "degradation-run-all",
-        endpoint: DEGRADATION_MEGA_STATUS_ENDPOINT_SPEC.path,
-        status: Number(megaReport.status || 0),
-        statusText: String(megaReport.statusText || ""),
-        rowCount: Number(megaReport.rowCount || 0),
-        activeCount: Number(megaReport.activeCount || 0),
-        error: String(megaReport.error || ""),
-        programmerId: String(queryValues.programmerId || ""),
-        mvpd: "",
-        includeAllMvpd: true,
-        targetWindowId,
-        workspaceKey: "degradation-workspace",
-        workspaceOrigin: "DEGRADATION Workspace",
-      });
-      if (targetWindowId > 0) {
-        degradationWorkspaceBroadcastReports(selectionContext.selectionKey, targetWindowId);
-      }
-    } else {
-      for (const endpointSpec of DEGRADATION_STATUS_ENDPOINT_SPECS) {
-        const report = await degradationRunStatusEndpointFromPanel(panelState, endpointSpec.key, {
-          requestToken,
-          queryValues,
-          runGroupId,
-          selectedApp,
-          manageBusy: false,
-          openWorkspace: false,
-          targetWindowId,
-          allowDetachedControllerContext: true,
-        });
-        if (report) {
-          reports.push(report);
-        }
-      }
+    const selectionContext = degradationWorkspaceGetSelectionContext(panelState.programmer, {
+      degradation: selectedApp,
+    });
+    const megaReport = await degradationExecuteStatusRequest(panelState, DEGRADATION_MEGA_STATUS_ENDPOINT_SPEC, {
+      queryValues,
+      selectionKey: String(selectionContext.selectionKey || "").trim(),
+      runGroupId,
+      selectedApp,
+      targetWindowId,
+    });
+    const splitReports = degradationBuildEndpointReportsFromMegaStatusReport(megaReport, queryValues);
+    splitReports.forEach((report) => {
+      degradationWorkspaceStoreReport(report, queryValues);
+      reports.push(report);
+    });
+    emitDegradationWorkspaceDebugEvent(getActiveDegradationWorkspaceDebugFlowId(), {
+      phase: megaReport.ok === true ? "sweep-mega-result" : "sweep-mega-error",
+      requestScope: "degradation-run-all",
+      endpoint: DEGRADATION_MEGA_STATUS_ENDPOINT_SPEC.path,
+      status: Number(megaReport.status || 0),
+      statusText: String(megaReport.statusText || ""),
+      rowCount: Number(megaReport.rowCount || 0),
+      activeCount: Number(megaReport.activeCount || 0),
+      error: String(megaReport.error || ""),
+      programmerId: String(queryValues.programmerId || ""),
+      mvpd: String(queryValues.mvpd || ""),
+      includeAllMvpd: queryValues.includeAllMvpd === true,
+      targetWindowId,
+      workspaceKey: "degradation-workspace",
+      workspaceOrigin: "DEGRADATION Workspace",
+    });
+    if (targetWindowId > 0) {
+      degradationWorkspaceBroadcastReports(selectionContext.selectionKey, targetWindowId);
     }
     const okCount = reports.filter((report) => report?.ok === true).length;
     const totalRows = reports.reduce((count, report) => count + Number(report?.rowCount || 0), 0);

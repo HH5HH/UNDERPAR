@@ -100,6 +100,7 @@ function loadDegradationRunAllHelper() {
     "let storedReports = [];",
     "let broadcastCalls = [];",
     "let queryValues = { requestorId: 'MML', programmerId: 'MML', mvpd: 'ATT', includeAllMvpd: false };",
+    "let megaRows = [{ Rule: 'Authorize All - Status', id: 'row-1' }];",
     "function isDegradationServiceRequestActive() { return true; }",
     "function degradationCollectFormValues() { return { ...queryValues }; }",
     "function degradationRequireSelectedRequestor() { return true; }",
@@ -111,7 +112,7 @@ function loadDegradationRunAllHelper() {
     "function emitDegradationWorkspaceDebugEvent() {}",
     "function getActiveDegradationWorkspaceDebugFlowId() { return 'flow-1'; }",
     "function degradationWorkspaceGetSelectionContext() { return { selectionKey: 'release-production|Turner' }; }",
-    "async function degradationExecuteStatusRequest(panelState, endpointSpec, options = {}) { executeStatusCalls.push({ endpointSpec, options }); return { ok: true, status: 200, statusText: 'OK', selectionKey: 'release-production|Turner', runGroupId: String(options.runGroupId || 'run-fixed'), requestUrl: 'https://degradation.example/Turner/all', rows: [{ Rule: 'Authorize All - Status', id: 'row-1' }], rowCount: 1, activeCount: 1, fetchedAt: 1000, durationMs: 20 }; }",
+    "async function degradationExecuteStatusRequest(panelState, endpointSpec, options = {}) { executeStatusCalls.push({ endpointSpec, options }); return { ok: true, status: 200, statusText: 'OK', selectionKey: 'release-production|Turner', runGroupId: String(options.runGroupId || 'run-fixed'), requestUrl: 'https://degradation.example/Turner/all', rows: megaRows.slice(), rowCount: megaRows.length, activeCount: megaRows.length, fetchedAt: 1000, durationMs: 20 }; }",
     "function degradationBuildReportPayload(endpointSpec, queryValues, result = {}) { const rows = Array.isArray(result.rows) ? result.rows : []; return { endpointKey: String(endpointSpec?.key || ''), endpointPath: String(endpointSpec?.path || ''), endpointTitle: String(endpointSpec?.title || endpointSpec?.key || ''), programmerId: String(queryValues?.programmerId || ''), mvpd: String(queryValues?.mvpd || ''), includeAllMvpd: queryValues?.includeAllMvpd === true, mvpdScopeLabel: queryValues?.includeAllMvpd === true ? 'ALL MVPDs' : String(queryValues?.mvpd || ''), rowCount: rows.length, activeCount: rows.length, ...result }; }",
     "function degradationWorkspaceStoreReport(report, state) { storedReports.push({ report, state }); }",
     "function degradationWorkspaceBroadcastReports(selectionKey, targetWindowId) { broadcastCalls.push({ selectionKey, targetWindowId }); }",
@@ -119,17 +120,53 @@ function loadDegradationRunAllHelper() {
     extractFunctionSource(source, "degradationBuildEndpointReportsFromMegaStatusReport"),
     extractFunctionSource(source, "degradationRunAllStatusEndpointsFromPanel"),
     "function setQueryValues(nextValues = {}) { queryValues = { ...queryValues, ...nextValues }; }",
+    "function setMegaRows(nextRows = []) { megaRows = Array.isArray(nextRows) ? nextRows.slice() : []; }",
     "function getRefreshCalls() { return refreshCalls; }",
     "function getRefreshOptions() { return refreshOptions.slice(); }",
     "function getEndpointCalls() { return endpointCalls.slice(); }",
     "function getExecuteStatusCalls() { return executeStatusCalls.slice(); }",
     "function getStoredReports() { return storedReports.slice(); }",
     "function getBroadcastCalls() { return broadcastCalls.slice(); }",
-    "module.exports = { degradationRunAllStatusEndpointsFromPanel, setQueryValues, getRefreshCalls, getRefreshOptions, getEndpointCalls, getExecuteStatusCalls, getStoredReports, getBroadcastCalls };",
+    "module.exports = { degradationRunAllStatusEndpointsFromPanel, setQueryValues, setMegaRows, getRefreshCalls, getRefreshOptions, getEndpointCalls, getExecuteStatusCalls, getStoredReports, getBroadcastCalls };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
     exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+function loadDegradationExtractRowsHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "const DEGRADATION_MEGA_STATUS_ENDPOINT_SPEC = { key: 'all', path: 'all' };",
+    "const state = { selectedRequestorId: 'MML' };",
+    "function firstNonEmptyString(values = []) { for (const value of values) { const normalized = String(value == null ? '' : value).trim(); if (normalized) { return normalized; } } return ''; }",
+    "function getRestV2MvpdPickerLabel(requestorId, mvpdId) { return mvpdId === 'ATT' ? 'AT&T U-verse (ATT)' : String(mvpdId || ''); }",
+    extractFunctionSource(source, "degradationNormalizeObjectKeys"),
+    extractFunctionSource(source, "degradationGetObjectValueByKeys"),
+    extractFunctionSource(source, "degradationToArray"),
+    extractFunctionSource(source, "degradationResolveIdValue"),
+    extractFunctionSource(source, "degradationCoerceBooleanValue"),
+    extractFunctionSource(source, "degradationFormatActivationTimeValue"),
+    extractFunctionSource(source, "degradationFormatMvpdDisplayValue"),
+    extractFunctionSource(source, "degradationBuildStatusRow"),
+    extractFunctionSource(source, "degradationMergeStatusDetailNode"),
+    extractFunctionSource(source, "degradationExtractRowsFromMegaPayload"),
+    extractFunctionSource(source, "degradationExtractRows"),
+    "module.exports = { degradationExtractRows };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Date,
+    Number,
+    String,
+    Array,
+    Object,
+    Math,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -208,8 +245,12 @@ test("DEGRADATION status request honors a preselected app and locks auth selecti
   assert.equal(report.ok, true);
 });
 
-test("DEGRADATION GET ALL resolves one app and reuses it for every endpoint", async () => {
+test("DEGRADATION GET ALL with a selected MVPD uses the mega endpoint and fans out report cards", async () => {
   const helpers = loadDegradationRunAllHelper();
+  helpers.setMegaRows([
+    { Rule: "Authorize All - Status", id: "row-1" },
+    { Rule: "Authenticate All - Status", id: "row-2" },
+  ]);
   const panelState = {
     section: {},
     programmer: {
@@ -229,14 +270,16 @@ test("DEGRADATION GET ALL resolves one app and reuses it for every endpoint", as
   assert.equal(refreshOptions.requestScope, "degradation-run-all");
   assert.equal(refreshOptions.targetWindowId, 42);
 
-  const endpointCalls = helpers.getEndpointCalls();
-  assert.equal(endpointCalls.length, 3);
-  endpointCalls.forEach((call) => {
-    assert.equal(call.options.selectedApp.guid, "app-1");
-    assert.equal(call.options.runGroupId, "run-fixed");
-    assert.equal(call.options.targetWindowId, 42);
-  });
+  assert.equal(helpers.getEndpointCalls().length, 0);
+  const [executeCall] = helpers.getExecuteStatusCalls();
+  assert.equal(executeCall.endpointSpec.key, "all");
+  assert.equal(executeCall.options.selectedApp.guid, "app-1");
+  assert.equal(executeCall.options.runGroupId, "run-fixed");
+  assert.equal(executeCall.options.targetWindowId, 42);
   assert.equal(reports.length, 3);
+  assert.equal(reports.find((report) => report.endpointKey === "authnall")?.rowCount, 1);
+  assert.equal(reports.find((report) => report.endpointKey === "authzall")?.rowCount, 1);
+  assert.equal(reports.find((report) => report.endpointKey === "authznone")?.rowCount, 0);
   assert.equal(panelState.busy, false);
 });
 
@@ -273,6 +316,48 @@ test("DEGRADATION GET ALL for ALL MVPDs uses the mega endpoint and fans out repo
   assert.equal(helpers.getStoredReports().length, 3);
   assert.equal(JSON.stringify(helpers.getBroadcastCalls()), JSON.stringify([{ selectionKey: "release-production|Turner", targetWindowId: 42 }]));
   assert.equal(panelState.busy, false);
+});
+
+test("DEGRADATION direct authnAll extraction keeps applied status from the parent measure node", () => {
+  const helpers = loadDegradationExtractRowsHelper();
+  const rows = helpers.degradationExtractRows(
+    {
+      key: "authnall",
+      path: "authnAll",
+      title: "Authenticate All - Status",
+      measureId: "authn-all",
+      targetType: "programmer",
+      targetKey: "programmer",
+    },
+    {
+      "degradation-measure": {
+        id: "authn-all",
+        programmer: {
+          id: "MML",
+        },
+        mvpd: {
+          id: "ATT",
+        },
+        "degradation-measure-enable": true,
+        "degradation-measure-status": "APPLIED",
+        ttl: 21600,
+        "activation-time": 1773947121,
+      },
+    },
+    {
+      requestorId: "MML",
+      programmerId: "MML",
+      mvpd: "ATT",
+      includeAllMvpd: false,
+    }
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].Rule, "Authenticate All - Status");
+  assert.equal(rows[0].Programmer, "MML");
+  assert.equal(rows[0].MVPD, "AT&T U-verse (ATT)");
+  assert.equal(rows[0].Status, "APPLIED");
+  assert.equal(rows[0].Active, "YES");
 });
 
 test("DEGRADATION workspace creation focuses the new tab window when GO opens it", async () => {
