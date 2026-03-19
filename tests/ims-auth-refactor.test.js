@@ -493,6 +493,16 @@ test("CM request path accepts the configured UnderPAR shell bearer before requir
   assert.match(reportHeadersSource, /AP-Request-Id/);
 });
 
+test("missing DCR credentials trigger on-demand pass vault compilation instead of requiring manual re-selection", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
+
+  assert.match(ensureDcrSource, /queuePassVaultProgrammerCompilation\(/);
+  assert.match(ensureDcrSource, /dcr-registration-trigger-vault-compile/);
+  assert.doesNotMatch(ensureDcrSource, /Re-select the media company to hydrate its registered applications first/);
+  assert.match(ensureDcrSource, /UnderPAR could not auto-hydrate DCR credentials/);
+});
+
 test("CM direct fetch and tenant catalog paths no longer issue unauthenticated cookie-style fallbacks", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const fetchSource = extractFunctionSource(popupSource, "fetchCmJsonWithAuthVariants");

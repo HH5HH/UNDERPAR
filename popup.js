@@ -58478,6 +58478,7 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
 
   const workPromise = (async () => {
     let cache = loadDcrCache(programmerId, resolvedAppInfo.guid) || {};
+    let attemptedVaultCompileRecovery = false;
 
     const ensureSoftwareStatement = async () => {
       const currentStatement = String(resolvedAppInfo?.softwareStatement || "").trim();
@@ -58507,10 +58508,27 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
 
     if ((!cache.clientId || !cache.clientSecret) && !allowProvisioning) {
       const scopedKey = getEnvironmentScopedProgrammerKey(programmerId);
-      const existingCompilePromise = scopedKey ? state.passVaultCompilePromiseByProgrammerKey.get(scopedKey) || null : null;
-      if (existingCompilePromise) {
-        emitDcrDebugEvent("dcr-registration-waiting-for-vault-compile");
-        await existingCompilePromise.catch(() => null);
+      let compilePromise = scopedKey ? state.passVaultCompilePromiseByProgrammerKey.get(scopedKey) || null : null;
+      if (!compilePromise) {
+        const programmer =
+          state.programmers.find((item) => String(item?.programmerId || "").trim() === String(programmerId || "").trim()) || null;
+        const compileSeedServices =
+          getRuntimePremiumServicesSeed(programmerId) ||
+          getCurrentPremiumAppsSnapshot(programmerId) ||
+          null;
+        if (programmer) {
+          attemptedVaultCompileRecovery = true;
+          emitDcrDebugEvent("dcr-registration-trigger-vault-compile");
+          compilePromise = queuePassVaultProgrammerCompilation(programmer, compileSeedServices, {
+            forceRefresh: true,
+          }).catch(() => null);
+        }
+      }
+      if (compilePromise) {
+        emitDcrDebugEvent("dcr-registration-waiting-for-vault-compile", {
+          selfStarted: attemptedVaultCompileRecovery,
+        });
+        await compilePromise.catch(() => null);
         refreshResolvedAppInfo();
         cache = loadDcrCache(programmerId, resolvedAppInfo.guid) || {};
       }
@@ -58519,10 +58537,11 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
     if (!cache.clientId || !cache.clientSecret) {
       emitDcrDebugEvent("dcr-registration-required", {
         allowProvisioning,
+        attemptedVaultCompileRecovery,
       });
       if (!allowProvisioning) {
         throw new Error(
-          `DCR credentials for ${resolvedAppInfo.appName || resolvedAppInfo.guid} are not available in the UnderPAR vault yet. Re-select the media company to hydrate its registered applications first.`
+          `UnderPAR could not auto-hydrate DCR credentials for ${resolvedAppInfo.appName || resolvedAppInfo.guid} from the registered applications cache yet.`
         );
       }
       const softwareStatement = await ensureSoftwareStatement();
