@@ -120,6 +120,39 @@ function loadDegradationRunAllHelper() {
   return context.module.exports;
 }
 
+function loadDegradationWorkspaceEnsureHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "const state = { degradationWorkspaceTabIdByWindowId: new Map(), degradationWorkspaceWindowId: 0, degradationWorkspaceTabId: 0, degradationWorkspaceReadyByWindowId: new Map() };",
+    "const createdTabs = [];",
+    "const focusedWindows = [];",
+    "function esmWorkspaceGetCurrentWindowId() { return Promise.resolve(12); }",
+    "function degradationWorkspaceGetBoundWorkspaceTabId() { return 0; }",
+    "function degradationWorkspaceIsWorkspaceTab(tabLike) { return String(tabLike?.url || '').startsWith('chrome-extension://underpar/degradation-workspace.html'); }",
+    "function degradationWorkspaceGetWorkspaceUrl() { return 'chrome-extension://underpar/degradation-workspace.html'; }",
+    "function degradationWorkspaceUnbindWorkspaceTab() {}",
+    "function degradationWorkspaceBindWorkspaceTab(windowId, tabId) { state.degradationWorkspaceWindowId = Number(windowId || 0); state.degradationWorkspaceTabId = Number(tabId || 0); if (Number(windowId || 0) > 0 && Number(tabId || 0) > 0) { state.degradationWorkspaceTabIdByWindowId.set(Number(windowId), Number(tabId)); } }",
+    "function degradationWorkspaceInvalidateReady() {}",
+    "function degradationWorkspaceIsReady() { return false; }",
+    "function degradationWorkspaceMarkReady() {}",
+    "const chrome = { tabs: { get: async () => { throw new Error('missing'); }, query: async () => [], create: async (options) => { createdTabs.push(options); return { id: 99, windowId: Number(options?.windowId || 12), url: String(options?.url || ''), status: 'complete' }; }, update: async (tabId, options) => ({ id: Number(tabId || 0), windowId: 12, active: options?.active === true, url: 'chrome-extension://underpar/degradation-workspace.html' }) }, windows: { update: async (windowId, options) => { focusedWindows.push({ windowId, options }); return { id: Number(windowId || 0) }; } } };",
+    extractFunctionSource(source, "degradationWorkspaceEnsureWorkspaceTab"),
+    "function getCreatedTabs() { return createdTabs.slice(); }",
+    "function getFocusedWindows() { return focusedWindows.slice(); }",
+    "module.exports = { degradationWorkspaceEnsureWorkspaceTab, getCreatedTabs, getFocusedWindows };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Map,
+    Number,
+    String,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("DEGRADATION status request honors a preselected app and locks auth selection", async () => {
   const helpers = loadDegradationExecuteStatusRequestHelper();
   const selectedApp = {
@@ -154,6 +187,7 @@ test("DEGRADATION status request honors a preselected app and locks auth selecti
   assert.equal(helpers.getRefreshCalls(), 0);
   const [fetchCall] = helpers.getFetchCalls();
   assert.equal(fetchCall.appInfo, selectedApp);
+  assert.equal(fetchCall.debugMeta.allowProvisioning, true);
   assert.equal(fetchCall.debugMeta.lockAppSelection, true);
   assert.equal(fetchCall.debugMeta.requiredServiceScope, "entitlement:degradation");
   assert.equal(report.ok, true);
@@ -189,4 +223,26 @@ test("DEGRADATION GET ALL resolves one app and reuses it for every endpoint", as
   });
   assert.equal(reports.length, 3);
   assert.equal(panelState.busy, false);
+});
+
+test("DEGRADATION workspace creation focuses the new tab window when GO opens it", async () => {
+  const helpers = loadDegradationWorkspaceEnsureHelper();
+
+  const workspaceTab = await helpers.degradationWorkspaceEnsureWorkspaceTab({
+    activate: true,
+    windowId: 12,
+  });
+
+  const [createCall] = helpers.getCreatedTabs();
+  assert.equal(createCall.url, "chrome-extension://underpar/degradation-workspace.html");
+  assert.equal(createCall.active, true);
+  assert.equal(createCall.windowId, 12);
+  const [focusCall] = helpers.getFocusedWindows();
+  assert.equal(JSON.stringify(focusCall), JSON.stringify({
+    windowId: 12,
+    options: {
+      focused: true,
+    },
+  }));
+  assert.equal(workspaceTab.id, 99);
 });

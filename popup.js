@@ -26790,6 +26790,8 @@ async function resolveClickDgrAuthContext(context, requestToken, options = {}) {
     appGuid: String(appInfo?.guid || ""),
     appName: String(appInfo?.appName || appInfo?.guid || ""),
     source: String(options.source || "sidepanel"),
+    allowProvisioning: true,
+    lockAppSelection: true,
   });
 
   const dcrCache = loadDcrCache(programmer.programmerId, appInfo.guid) || {};
@@ -41201,6 +41203,13 @@ async function degradationWorkspaceEnsureWorkspaceTab(options = {}) {
       ...(useWindowFilter ? { windowId: targetWindowId } : {}),
     });
     createdWorkspaceTab = Boolean(workspaceTab?.id);
+    if (shouldActivate && Number(workspaceTab?.windowId || 0) > 0) {
+      try {
+        await chrome.windows.update(Number(workspaceTab.windowId), { focused: true });
+      } catch {
+        // Ignore focus failures for newly created workspaces.
+      }
+    }
   } else if (shouldActivate && workspaceTab.id) {
     try {
       workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
@@ -45993,6 +46002,7 @@ async function degradationPrimeAccessTokenForSelectedApp(panelState, debugMeta =
     service: "degradation",
     requiredServiceScope: getPreferredDegradationScopeForApp(appInfo) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
     requestorId,
+    allowProvisioning: true,
     lockAppSelection: true,
   });
   emitDegradationWorkspaceDebugEvent(String(debugMeta?.flowId || "").trim(), {
@@ -47741,6 +47751,7 @@ async function degradationBuildCurlCommand(panelState, options = {}) {
     requestorId: queryValues.requestorId,
     mvpd: String(queryValues.mvpd || "").trim(),
     requiredServiceScope: getPreferredDegradationScopeForApp(selectedApp) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
+    allowProvisioning: true,
     lockAppSelection: true,
   });
   const requestUrl = degradationBuildRequestUrl(activePanelState, endpointSpec, queryValues).toString();
@@ -48336,6 +48347,7 @@ async function degradationExecuteStatusRequest(panelState, endpointSpec, options
     {
       ...debugMeta,
       requiredServiceScope: getPreferredDegradationScopeForApp(selectedApp) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
+      allowProvisioning: true,
       lockAppSelection: true,
     }
   );
