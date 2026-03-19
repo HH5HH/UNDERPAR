@@ -38,6 +38,7 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(popupSource, /degradationWorkspaceStoreCheatSheet\(/);
   assert.match(popupSource, /function degradationWorkspaceGetCheatSheets\(/);
   assert.match(popupSource, /function degradationWorkspaceFlushReportsToTarget\(/);
+  assert.match(popupSource, /function degradationWorkspaceActivateTarget\(/);
   assert.match(popupSource, /degradationWorkspacePendingCheatSheetByWindowId:\s*new Map\(\)/);
   assert.match(popupSource, /function degradationWorkspaceSetPendingCheatSheet\(/);
   assert.match(popupSource, /function degradationWorkspaceClearPendingCheatSheet\(/);
@@ -58,6 +59,9 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(popupSource, /await degradationWorkspaceWaitForReady\(/);
   assert.match(popupSource, /degradationWorkspaceBroadcastReports\(resolvedSelectionKey, resolvedWindowId\);/);
   assert.match(popupSource, /void degradationWorkspaceSendWorkspaceMessage\("report-result", reportPayload, \{ targetWindowId: resolvedWindowId \}\);/);
+  assert.match(popupSource, /activateWorkspace:\s*false/);
+  assert.match(popupSource, /void degradationWorkspaceActivateTarget\(\);/);
+  assert.match(popupSource, /allowDetachedControllerContext:\s*true/);
   assert.doesNotMatch(popupSource, /const reports = degradationWorkspaceGetAllReports\(\);\s*const cheatSheets = degradationWorkspaceGetAllCheatSheets\(\);/);
   assert.match(popupSource, /cheatSheetPending:\s*Boolean\(pendingCheatSheet\)/);
   assert.match(popupSource, /cheatSheetLoadingMessage:\s*String\(pendingCheatSheet\?\.message \|\| ""\)\.trim\(\)/);

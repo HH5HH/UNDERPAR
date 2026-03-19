@@ -41240,6 +41240,24 @@ async function degradationWorkspaceFlushReportsToTarget(selectionKey = "", targe
   return true;
 }
 
+async function degradationWorkspaceActivateTarget(targetWindowId = 0) {
+  const resolvedWindowId = Number(targetWindowId || 0) || Number(state.degradationWorkspaceWindowId || 0);
+  const targetTabId = Number(degradationWorkspaceGetBoundWorkspaceTabId(resolvedWindowId) || 0);
+  if (resolvedWindowId <= 0 || targetTabId <= 0) {
+    return false;
+  }
+  try {
+    const updatedTab = await chrome.tabs.update(targetTabId, { active: true });
+    const windowId = Number(updatedTab?.windowId || resolvedWindowId || 0);
+    if (windowId > 0) {
+      await chrome.windows.update(windowId, { focused: true }).catch(() => null);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function degradationWorkspaceBuildCardQuery(card = null) {
   const selectionParts = parseDegradationWorkspaceSelectionKey(card?.selectionKey);
   const endpointKey = firstNonEmptyString([
@@ -46035,8 +46053,9 @@ function resolveDegradationDebugFlowIdForRequest(panelState, options = {}) {
   return "";
 }
 
-function isDegradationServiceRequestActive(section, requestToken, programmerId) {
-  if (!section || !section.isConnected) {
+function isDegradationServiceRequestActive(section, requestToken, programmerId, options = {}) {
+  const allowDetachedSection = options?.allowDetachedSection === true;
+  if ((!section || !section.isConnected) && !allowDetachedSection) {
     return false;
   }
   if (requestToken !== state.premiumPanelRequestToken) {
@@ -48267,7 +48286,11 @@ async function degradationRunStatusEndpointFromPanel(panelState, endpointKey, op
     return null;
   }
   const requestToken = Number(options.requestToken || panelState.requestToken || 0);
-  if (!isDegradationServiceRequestActive(panelState.section, requestToken, panelState.programmer?.programmerId)) {
+  if (
+    !isDegradationServiceRequestActive(panelState.section, requestToken, panelState.programmer?.programmerId, {
+      allowDetachedSection: options.allowDetachedControllerContext === true,
+    })
+  ) {
     return null;
   }
 
@@ -48471,6 +48494,7 @@ async function degradationRunAllStatusEndpointsFromPanel(panelState, options = {
         manageBusy: false,
         openWorkspace: false,
         targetWindowId,
+        allowDetachedControllerContext: true,
       });
       if (report) {
         reports.push(report);
@@ -48662,19 +48686,18 @@ function wireDegradationPanelInteractions(panelState, requestToken) {
         String(panelState.endpointSelect?.value || "").trim().toLowerCase(),
         "all",
       ]);
-      if (endpointKey === "all") {
-        await degradationRunAllStatusEndpointsFromPanel(panelState, {
-          requestToken: panelState.requestToken,
-          openWorkspace: true,
-          activateWorkspace: true,
-        });
-        return;
-      }
-      await degradationRunStatusEndpointFromPanel(panelState, endpointKey, {
+      const runOptions = {
         requestToken: panelState.requestToken,
         openWorkspace: true,
-        activateWorkspace: true,
-      });
+        activateWorkspace: false,
+      };
+      if (endpointKey === "all") {
+        await degradationRunAllStatusEndpointsFromPanel(panelState, runOptions);
+        void degradationWorkspaceActivateTarget();
+        return;
+      }
+      await degradationRunStatusEndpointFromPanel(panelState, endpointKey, runOptions);
+      void degradationWorkspaceActivateTarget();
     });
   }
 
