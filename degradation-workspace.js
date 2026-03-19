@@ -939,6 +939,61 @@ function buildDegradationReportGroups(reportList = state.reports) {
     .sort((left, right) => Number(right.latestFetchedAt || 0) - Number(left.latestFetchedAt || 0));
 }
 
+function getWorkspaceFeedItemSortTime(item = null) {
+  if (!item || typeof item !== "object") {
+    return 0;
+  }
+  return Math.max(0, Number(item.sortTime || item.generatedAt || item.latestFetchedAt || item.fetchedAt || 0));
+}
+
+function buildWorkspaceFeedMarkup() {
+  const timelineItems = [];
+  normalizeCheatSheets(state.cheatSheets).forEach((cheatSheet) => {
+    timelineItems.push({
+      type: "cheat-sheet",
+      sortTime: Number(cheatSheet?.generatedAt || 0),
+      markup: renderCheatSheetCard(cheatSheet),
+    });
+  });
+  buildDegradationReportGroups(state.reports).forEach((group) => {
+    timelineItems.push({
+      type: "report-group",
+      sortTime: Number(group?.latestFetchedAt || 0),
+      markup: renderReportGroup(group),
+    });
+  });
+  return timelineItems
+    .sort((left, right) => getWorkspaceFeedItemSortTime(right) - getWorkspaceFeedItemSortTime(left))
+    .map((item) => item.markup)
+    .join("");
+}
+
+function workspacePayloadMatchesSelection(selectionKey = "") {
+  const expectedSelectionKey = String(state.selectionKey || "").trim();
+  const payloadSelectionKey = String(selectionKey || "").trim();
+  if (!expectedSelectionKey || !payloadSelectionKey) {
+    return true;
+  }
+  return expectedSelectionKey === payloadSelectionKey;
+}
+
+function resetWorkspaceCardsForSelection(nextSelectionKey = "") {
+  const normalizedSelectionKey = String(nextSelectionKey || "").trim();
+  state.cheatSheetLoading = false;
+  state.cheatSheetLoadingMessage = "";
+  if (!normalizedSelectionKey) {
+    state.cheatSheets = [];
+    state.reports = [];
+    return;
+  }
+  state.cheatSheets = normalizeCheatSheets(
+    state.cheatSheets.filter((cheatSheet) => String(cheatSheet?.selectionKey || "").trim() === normalizedSelectionKey)
+  );
+  state.reports = normalizeReports(
+    state.reports.filter((report) => String(report?.selectionKey || "").trim() === normalizedSelectionKey)
+  );
+}
+
 function getDegradationReportGroup(groupId = "", reportList = state.reports) {
   const normalizedGroupId = String(groupId || "").trim();
   if (!normalizedGroupId) {
@@ -1332,6 +1387,8 @@ async function maybeConsumePendingWorkspaceDeeplink() {
 }
 
 function applyControllerState(payload = {}) {
+  const previousSelectionKey = String(state.selectionKey || "").trim();
+  const nextSelectionKey = String(payload?.selectionKey || "").trim();
   const nextEnvironment =
     payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object"
       ? {
@@ -1355,10 +1412,16 @@ function applyControllerState(payload = {}) {
   state.mvpd = String(payload?.mvpd || "");
   state.mvpdLabel = String(payload?.mvpdLabel || "");
   state.mvpdScopeLabel = String(payload?.mvpdScopeLabel || "");
-  state.selectionKey = String(payload?.selectionKey || state.selectionKey || "").trim();
+  state.selectionKey = nextSelectionKey;
   state.appGuid = String(payload?.appGuid || "");
   state.appName = String(payload?.appName || "");
+  if (nextSelectionKey !== previousSelectionKey) {
+    resetWorkspaceCardsForSelection(nextSelectionKey);
+  }
   updateControllerBanner();
+  if (nextSelectionKey !== previousSelectionKey) {
+    renderWorkspaceCards();
+  }
   syncBlondieButtons();
   syncActionButtonsDisabled();
   void maybeConsumePendingWorkspaceDeeplink();
@@ -1563,11 +1626,7 @@ function renderWorkspaceCards() {
     syncActionButtonsDisabled();
     return;
   }
-  const cheatSheetsMarkup = (Array.isArray(state.cheatSheets) ? state.cheatSheets : [])
-    .map((cheatSheet) => renderCheatSheetCard(cheatSheet))
-    .join("");
-  const groupsMarkup = buildDegradationReportGroups(state.reports).map((group) => renderReportGroup(group)).join("");
-  els.cardsHost.innerHTML = `${cheatSheetsMarkup}${groupsMarkup}`;
+  els.cardsHost.innerHTML = buildWorkspaceFeedMarkup();
   syncBlondieButtons(els.cardsHost);
   syncActionButtonsDisabled();
 }
@@ -1667,6 +1726,9 @@ function handleReportResult(payload = {}) {
   if (!report) {
     return;
   }
+  if (!workspacePayloadMatchesSelection(report.selectionKey)) {
+    return;
+  }
   upsertReport(report);
   if (report.ok) {
     setStatus("", "info");
@@ -1680,6 +1742,9 @@ function handleCheatSheetResult(payload = {}) {
   if (!cheatSheet) {
     return;
   }
+  if (!workspacePayloadMatchesSelection(cheatSheet.selectionKey)) {
+    return;
+  }
   state.cheatSheetLoading = false;
   state.cheatSheetLoadingMessage = "";
   upsertCheatSheet(cheatSheet);
@@ -1690,18 +1755,27 @@ function handleCheatSheetResult(payload = {}) {
 }
 
 function handleCheatSheetStart(payload = {}) {
+  if (!workspacePayloadMatchesSelection(payload?.selectionKey)) {
+    return;
+  }
   state.cheatSheetLoading = true;
   state.cheatSheetLoadingMessage = String(payload?.message || "Generating DEGRADATION Cheat Sheet...").trim();
   setStatus(state.cheatSheetLoadingMessage, "info");
 }
 
 function handleCheatSheetProgress(payload = {}) {
+  if (!workspacePayloadMatchesSelection(payload?.selectionKey)) {
+    return;
+  }
   state.cheatSheetLoading = true;
   state.cheatSheetLoadingMessage = String(payload?.message || "Generating DEGRADATION Cheat Sheet...").trim();
   setStatus(state.cheatSheetLoadingMessage, String(payload?.type || "info").trim() || "info");
 }
 
 function handleCheatSheetError(payload = {}) {
+  if (!workspacePayloadMatchesSelection(payload?.selectionKey)) {
+    return;
+  }
   state.cheatSheetLoading = false;
   state.cheatSheetLoadingMessage = "";
   setStatus(String(payload?.message || "Unable to generate the DEGRADATION cheat sheet.").trim(), "error");

@@ -21,6 +21,9 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
 
   assert.match(popupSource, /class="degradation-cheat-sheet-row"/);
   assert.match(popupSource, /class="degradation-copy-curl-btn"/);
+  assert.match(popupSource, /function degradationHasQualifiedCheatSheetContext\(/);
+  assert.match(popupSource, /function degradationSyncCheatSheetButton\(/);
+  assert.match(popupSource, /Select Environment x Media Company, RequestorId, and MVPD first/);
   assert.doesNotMatch(popupSource, /class="degradation-quick-set-select"/);
   assert.doesNotMatch(popupSource, /class="degradation-quick-set-btn"/);
   assert.match(popupSource, /function buildDegradationCheatSheetSetupItems\(/);
@@ -33,6 +36,7 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
     /Open the DEGRADATION Cheat Sheet in the workspace using the current global RequestorId and MVPD/
   );
   assert.match(popupSource, /degradationWorkspaceStoreCheatSheet\(/);
+  assert.match(popupSource, /function degradationWorkspaceGetCheatSheets\(/);
   assert.match(popupSource, /degradationWorkspacePendingCheatSheetByWindowId:\s*new Map\(\)/);
   assert.match(popupSource, /function degradationWorkspaceSetPendingCheatSheet\(/);
   assert.match(popupSource, /function degradationWorkspaceClearPendingCheatSheet\(/);
@@ -46,6 +50,11 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(popupSource, /"cheat-sheet-start"/);
   assert.match(popupSource, /"cheat-sheet-progress"/);
   assert.match(popupSource, /"cheat-sheet-error"/);
+  assert.match(
+    popupSource,
+    /const reports = degradationWorkspaceGetReports\(resolvedSelectionKey\);\s*const cheatSheets = degradationWorkspaceGetCheatSheets\(resolvedSelectionKey\);/
+  );
+  assert.doesNotMatch(popupSource, /const reports = degradationWorkspaceGetAllReports\(\);\s*const cheatSheets = degradationWorkspaceGetAllCheatSheets\(\);/);
   assert.match(popupSource, /cheatSheetPending:\s*Boolean\(pendingCheatSheet\)/);
   assert.match(popupSource, /cheatSheetLoadingMessage:\s*String\(pendingCheatSheet\?\.message \|\| ""\)\.trim\(\)/);
   assert.match(popupSource, /const pendingCheatSheet = degradationWorkspaceGetPendingCheatSheet\(senderWindowId, selectionContext\.selectionKey\);/);
@@ -90,6 +99,9 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(popupCss, /\.degradation-copy-curl-btn\s*\{/);
 
   assert.match(workspaceSource, /function renderCheatSheetCard\(/);
+  assert.match(workspaceSource, /function buildWorkspaceFeedMarkup\(/);
+  assert.match(workspaceSource, /function workspacePayloadMatchesSelection\(/);
+  assert.match(workspaceSource, /function resetWorkspaceCardsForSelection\(/);
   assert.match(workspaceSource, /function handleCheatSheetResult\(/);
   assert.match(workspaceSource, /function handleCheatSheetStart\(/);
   assert.match(workspaceSource, /function handleCheatSheetError\(/);
@@ -103,6 +115,10 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
   assert.match(workspaceSource, /event === "cheat-sheet-progress"/);
   assert.match(workspaceSource, /event === "cheat-sheet-error"/);
   assert.match(workspaceSource, /event === "cheat-sheet-result"/);
+  assert.match(workspaceSource, /els\.cardsHost\.innerHTML = buildWorkspaceFeedMarkup\(\);/);
+  assert.match(workspaceSource, /if \(!workspacePayloadMatchesSelection\(report\.selectionKey\)\) \{\s*return;\s*\}/);
+  assert.match(workspaceSource, /if \(!workspacePayloadMatchesSelection\(cheatSheet\.selectionKey\)\) \{\s*return;\s*\}/);
+  assert.match(workspaceSource, /if \(!workspacePayloadMatchesSelection\(payload\?\.selectionKey\)\) \{\s*return;\s*\}/);
   assert.match(workspaceSource, /data-action="copy-cheat-all"/);
   assert.match(workspaceSource, /data-action="copy-cheat-command"/);
   assert.match(workspaceSource, /Prerequisite Setup/);
