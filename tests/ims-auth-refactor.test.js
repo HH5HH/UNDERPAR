@@ -423,11 +423,26 @@ test("missing-client-id flow renders a standalone ZIP.KEY gate before sign-in", 
 
 test("build label renders immediately from the manifest version with a placeholder fallback", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const popupHtml = fs.readFileSync(path.join(ROOT, "popup.html"), "utf8");
+  const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
+  const bootstrapSource = fs.readFileSync(path.join(ROOT, "build-info-bootstrap.js"), "utf8");
   const renderBuildInfoSource = extractFunctionSource(popupSource, "renderBuildInfo");
   const initSource = extractFunctionSource(popupSource, "init");
 
+  assert.match(popupHtml, /<script src="build-info-bootstrap\.js"><\/script>/);
+  assert.match(sidepanelHtml, /<script src="build-info-bootstrap\.js"><\/script>/);
+  assert.match(bootstrapSource, /chrome\?\.runtime\?\.getManifest\?\.\(\)\?\.version/);
+  assert.match(bootstrapSource, /Version \$\{version\}/);
   assert.match(renderBuildInfoSource, /chrome\?\.\s*runtime\?\.\s*getManifest\?\.\(\)\?\.version/);
   assert.match(renderBuildInfoSource, /Version \$\{manifestVersion\}/);
   assert.match(renderBuildInfoSource, /Version --/);
   assert.match(initSource, /renderBuildInfo\(\);/);
+});
+
+test("sidepanel ships the same logged-out sign-in hero after ZIP.KEY import", () => {
+  const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
+
+  assert.match(sidepanelHtml, /id="sign-in-view"/);
+  assert.match(sidepanelHtml, /id="sign-in-hero-btn"/);
+  assert.ok(sidepanelHtml.indexOf('id="zip-key-import-view"') < sidepanelHtml.indexOf('id="sign-in-view"'));
 });

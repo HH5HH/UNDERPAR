@@ -82,6 +82,35 @@
           </div>
         </section>
 
+        <section id="sign-in-view" class="sign-in-view">
+          <div class="sign-in-view-card">
+            <div class="sign-in-hero-art">
+              <img src="icons/underpar-source-upflat.jpg" alt="UnderPAR" loading="eager" decoding="async" />
+            </div>
+            <div class="sign-in-hero-copy">
+              <p class="sign-in-eyebrow">Adobe Pass Acceleration Layer</p>
+              <h2 class="sign-in-title">Sign In To UnderPAR</h2>
+              <p class="sign-in-copy">
+                Premium workspaces, tearsheets, and diagnostics from one control surface.
+              </p>
+              <div class="sign-in-hero-actions">
+                <button id="sign-in-hero-btn" type="button" class="sign-in-hero-btn">Sign In</button>
+                <button
+                  id="sign-in-update-indicator"
+                  type="button"
+                  class="sign-in-update-indicator"
+                  hidden
+                  title="A newer version of UnderPAR is now available for download."
+                  aria-label="A newer version of UnderPAR is now available for download."
+                >
+                  <img src="icons/medium.png" alt="" aria-hidden="true" loading="eager" decoding="async" />
+                  <span class="sign-in-update-indicator-label">New Version Available</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section id="restricted-view" class="restricted-view" hidden>
           <p>For @AdobePass only</p>
         </section>
@@ -166,6 +195,7 @@
 
     <script src="underpar-environment.js"></script>
     <script src="blondie-time-logic.js"></script>
+    <script src="build-info-bootstrap.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
