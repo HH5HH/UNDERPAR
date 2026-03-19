@@ -54583,7 +54583,7 @@ async function attemptInteractiveAdobePassRecovery(sessionData) {
     "interactive-auto-switch-recovery",
     {
       allowDeniedRecovery: false,
-      allowTemporaryPageContextTab: true,
+      allowTemporaryPageContextTab: false,
     }
   );
 }
@@ -55760,11 +55760,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
   if (!forceRefresh && state.cmTenantsPrecheckPromise) {
     return state.cmTenantsPrecheckPromise;
   }
-  const preferredCmBootstrapTab = preferredCmBootstrapTabId > 0 ? await getTabByIdSafe(preferredCmBootstrapTabId) : null;
-  const effectiveAllowTemporaryPageContextTab =
-    allowTemporaryPageContextTab ||
-    (preferredCmBootstrapTabId > 0 && !preferredCmBootstrapTab) ||
-    (preferredCmBootstrapTabId <= 0 && getRetainedAuthPopupBootstrapTabId() <= 0);
+  const effectiveAllowTemporaryPageContextTab = allowTemporaryPageContextTab;
 
   const existingCmToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
   const cmTokenReady =
@@ -67028,13 +67024,13 @@ async function signInInteractive() {
       buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
       "interactive",
       {
-        allowTemporaryPageContextTab: true,
+        allowTemporaryPageContextTab: false,
       }
     );
 
     if (activated) {
       await awaitCmBootstrapForExplicitActivation("interactive", {
-        allowTemporaryPageContextTab: true,
+        allowTemporaryPageContextTab: false,
       });
       log("Interactive sign-in critical path complete", {
         authMs: Math.max(0, authCompletedAt - signInStartedAt),
@@ -67089,7 +67085,7 @@ async function refreshSessionManual() {
       buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
       usedInteractiveLogin ? "manual-refresh-interactive" : "manual-refresh",
       {
-        allowTemporaryPageContextTab: usedInteractiveLogin,
+        allowTemporaryPageContextTab: false,
       }
     );
 
@@ -67097,7 +67093,7 @@ async function refreshSessionManual() {
       await awaitCmBootstrapForExplicitActivation(
         usedInteractiveLogin ? "manual-refresh-interactive" : "manual-refresh",
         {
-          allowTemporaryPageContextTab: usedInteractiveLogin,
+          allowTemporaryPageContextTab: false,
         }
       );
       log("Manual refresh critical path complete", {
@@ -67106,7 +67102,7 @@ async function refreshSessionManual() {
         profileMs: Math.max(0, profileResolvedAt - authCompletedAt),
         activationMs: Math.max(0, Date.now() - profileResolvedAt),
         totalMs: Math.max(0, Date.now() - refreshStartedAt),
-        cmHydrationMode: usedInteractiveLogin ? "blocking-temporary-tab-allowed" : "blocking-until-ready",
+        cmHydrationMode: "blocking-until-ready",
       });
     }
 
@@ -67168,12 +67164,12 @@ async function onRestrictedOrgSwitch() {
           "restricted-org-switch",
           {
             allowDeniedRecovery: false,
-            allowTemporaryPageContextTab: true,
+            allowTemporaryPageContextTab: false,
           }
         );
         if (activated) {
           await awaitCmBootstrapForExplicitActivation("restricted-org-switch", {
-            allowTemporaryPageContextTab: true,
+            allowTemporaryPageContextTab: false,
           });
           clearStatusUnlessCmTenantsPrecheckBlocked();
           return;

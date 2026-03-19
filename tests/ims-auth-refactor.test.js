@@ -365,6 +365,10 @@ test("interactive login and org switching no longer block on a temporary CM boot
   assert.match(signInSource, /await awaitCmBootstrapForExplicitActivation\("interactive"/);
   assert.match(refreshSource, /await awaitCmBootstrapForExplicitActivation\(/);
   assert.match(restrictedSwitchSource, /await awaitCmBootstrapForExplicitActivation\("restricted-org-switch"/);
+  assert.match(signInSource, /allowTemporaryPageContextTab:\s*false/);
+  assert.match(refreshSource, /allowTemporaryPageContextTab:\s*false/);
+  assert.match(restrictedSwitchSource, /allowTemporaryPageContextTab:\s*false/);
+  assert.match(recoverySource, /allowTemporaryPageContextTab:\s*false/);
 });
 
 test("session activation defers CM tenant hydration and unlocks Media Company selection immediately", () => {
@@ -923,6 +927,8 @@ test("CM tenant background prefetch is guarded by the shared precheck promise in
   assert.match(prefetchSource, /state\.cmTenantsCatalogPromise \|\| state\.cmTenantsPrecheckPromise/);
   assert.match(precheckSource, /if \(!forceRefresh && state\.cmTenantsPrecheckPromise\)/);
   assert.match(precheckSource, /state\.cmTenantsPrecheckPromise = precheckPromise/);
+  assert.match(precheckSource, /const effectiveAllowTemporaryPageContextTab = allowTemporaryPageContextTab;/);
+  assert.doesNotMatch(precheckSource, /preferredCmBootstrapTabId <= 0 && getRetainedAuthPopupBootstrapTabId\(\) <= 0/);
   assert.match(
     activateSessionSource,
     /allowTemporaryPageContextTab:\s*allowBackgroundTemporaryPageContextTab/
