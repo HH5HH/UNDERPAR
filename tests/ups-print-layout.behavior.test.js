@@ -15,6 +15,14 @@ test("UPSpace print stylesheet keeps wide reports overflow-safe in PDF", () => {
 
   assert.match(source, /@page\s*\{[\s\S]*size:\s*17in\s+11in;/i);
   assert.match(source, /@media print[\s\S]*print-color-adjust:\s*exact;/i);
+  assert.match(
+    source,
+    /@media print[\s\S]*\.workspace-app \*,[\s\S]*\.ibeta-app \*::after\s*\{[\s\S]*background-image:\s*none !important;/i
+  );
+  assert.match(source, /@media print[\s\S]*\.report-card\s*\{[\s\S]*background:\s*#fff !important;/i);
+  assert.match(source, /@media print[\s\S]*\.ups-report-title-wrap\s*\{[\s\S]*background:\s*#f3f4f6 !important;/i);
+  assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table thead th\s*\{[\s\S]*background:\s*#e7eaee !important;/i);
+  assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table tbody tr:nth-child\(even\) td\s*\{[\s\S]*background:\s*#f7f8fa !important;/i);
   assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table-wrapper\s*\{[\s\S]*width:\s*max-content !important;/i);
   assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table\s*\{[\s\S]*width:\s*max-content !important;/i);
   assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table\s*\{[\s\S]*table-layout:\s*auto !important;/i);
@@ -22,6 +30,7 @@ test("UPSpace print stylesheet keeps wide reports overflow-safe in PDF", () => {
   assert.match(source, /@media print[\s\S]*\.ibeta-report-card \.esm-table th,[\s\S]*white-space:\s*nowrap !important;/i);
   assert.match(runtimeSource, /const UPS_PRINT_PAGE_STYLE_ID = "underpar-ups-print-page-style";/);
   assert.match(runtimeSource, /function prepareUpspacePrintLayout\(/);
+  assert.match(runtimeSource, /sanitizeDownloadFileSegment\(buildUpspaceReportLabel\(snapshot\), "report"\),\s*40/);
   assert.match(
     runtimeSource,
     /measurementRoot\.querySelectorAll\(\s*"\.ibeta-report-scroll-shell, \.ibeta-report-card, \.ibeta-report-card \.ups-report-title-wrap, \.ibeta-report-card \.esm-table-wrapper, \.ibeta-report-card \.esm-table"\s*\)/

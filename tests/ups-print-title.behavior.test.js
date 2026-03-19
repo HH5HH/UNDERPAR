@@ -128,3 +128,23 @@ test("UPSpace print page css expands beyond baseline landscape when the report i
   assert.equal(helpers.buildUpspacePrintPageCss(620), "@page { size: 620.00mm 279.40mm; margin: 8mm; }");
   assert.equal(helpers.pxToMm(960).toFixed(2), "254.00");
 });
+
+test("UPSpace print titles stay compact and ASCII-safe for PDF save dialogs", () => {
+  const helpers = loadUpsPrintHelpers();
+  const snapshot = {
+    workspaceKey: "esm",
+    programmerId: "Turner",
+    adobePassEnvironmentKey: "release-production",
+    createdAt: Date.UTC(2026, 2, 19, 22, 15, 31, 803),
+    cards: [
+      {
+        displayNodeLabel: "LEM relative traffic investigation matrix with unusually verbose branch context for save dialogs",
+      },
+    ],
+  };
+
+  const title = helpers.buildUpspacePrintDocumentTitle(snapshot);
+  assert.ok(title.length <= 96);
+  assert.doesNotMatch(title, /…/);
+  assert.doesNotMatch(title, /[^A-Za-z0-9_.-]/);
+});

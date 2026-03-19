@@ -118,7 +118,7 @@
     );
     const datasetSegment = truncateDownloadFileSegment(
       sanitizeDownloadFileSegment(buildUpspaceReportLabel(snapshot), "report"),
-      72
+      40
     );
     const envSegment = truncateDownloadFileSegment(
       sanitizeDownloadFileSegment(
@@ -142,7 +142,10 @@
       buildUpspacePrintStamp(snapshot),
     ]
       .filter(Boolean)
-      .join("_");
+      .join("_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 96);
   }
 
   function buildUpspacePrintActionLabel(snapshot = null) {
