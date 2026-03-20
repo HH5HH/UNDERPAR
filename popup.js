@@ -59649,18 +59649,90 @@ async function fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, 
   return null;
 }
 
+function normalizeRegisteredApplicationEntityRef(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const normalized = raw.replace(/^@+/, "");
+  const match = normalized.match(/^RegisteredApplication:(.+)$/i);
+  const guid = String(match ? match[1] : normalized).trim();
+  if (!guid) {
+    return "";
+  }
+  return `RegisteredApplication:${guid}`;
+}
+
+function buildRegisteredApplicationBulkRetrieveRequest(entityRefs = [], configurationVersion = getKnownAdobeConsoleConfigurationVersion()) {
+  const entities = uniquePreserveOrder(
+    (Array.isArray(entityRefs) ? entityRefs : [entityRefs])
+      .map((entityRef) => normalizeRegisteredApplicationEntityRef(entityRef))
+      .filter(Boolean)
+      .map((entityRef) => entityRef.replace(/^@+/, ""))
+  );
+  if (entities.length === 0) {
+    return null;
+  }
+
+  const payload = {
+    entities,
+  };
+  const normalizedConfigurationVersion = Number(configurationVersion || 0);
+  if (Number.isFinite(normalizedConfigurationVersion) && normalizedConfigurationVersion > 0) {
+    payload.configVersion = normalizedConfigurationVersion;
+  }
+
+  return {
+    url: `${ADOBE_CONSOLE_BASE}/rest/api/entity/bulkRetrieve`,
+    body: JSON.stringify(payload),
+    entities,
+  };
+}
+
+async function fetchRegisteredApplicationsByEntityRefs(entityRefs = [], contextLabel = "Applications load", options = {}) {
+  const requestOptions = options && typeof options === "object" ? options : {};
+  const bulkRetrieveRequest = buildRegisteredApplicationBulkRetrieveRequest(
+    entityRefs,
+    requestOptions.configurationVersion
+  );
+  if (!bulkRetrieveRequest) {
+    return [];
+  }
+
+  const payload = await fetchAdobeConsoleJsonWithAuthVariants([bulkRetrieveRequest.url], contextLabel, {
+    ...requestOptions,
+    method: "POST",
+    headers: {
+      ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
+      "Content-Type": "application/json",
+    },
+    body: bulkRetrieveRequest.body,
+    preferAuthenticatedHeaders: requestOptions.preferAuthenticatedHeaders !== false,
+  });
+
+  return normalizeApplicationsResponse(payload?.parsed || payload);
+}
+
 async function fetchApplicationDetailsByGuid(guid, options = {}) {
   if (!guid) {
     return null;
   }
   const requestOptions = options && typeof options === "object" ? options : {};
+  const entityRef = normalizeRegisteredApplicationEntityRef(guid);
+  if (entityRef) {
+    const bulkEntities = await fetchRegisteredApplicationsByEntityRefs([entityRef], "Application detail", requestOptions).catch(
+      () => []
+    );
+    const bulkEntity = bulkEntities.find((item) => resolveApplicationGuidFromEntityData(item) === String(guid || "").trim()) || bulkEntities[0];
+    if (bulkEntity && typeof bulkEntity === "object") {
+      return bulkEntity;
+    }
+  }
   const encodedGuid = encodeURIComponent(guid);
   const urlCandidates = uniquePreserveOrder([
     `${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`,
     appendAdobeConsoleConfigurationVersion(`${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`),
     `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`,
-    `${ADOBE_CONSOLE_BASE}/rest/api/registeredApplications/${encodedGuid}`,
-    `${ADOBE_CONSOLE_BASE}/rest/api/registered-applications/${encodedGuid}`,
   ]);
   const payload =
     (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application detail", requestOptions).catch(() => null)) ||
@@ -59684,13 +59756,35 @@ async function fetchApplicationRawByGuid(guid, options = {}) {
     return { text: "", parsed: null };
   }
   const requestOptions = options && typeof options === "object" ? options : {};
+  const bulkRetrieveRequest = buildRegisteredApplicationBulkRetrieveRequest([guid], requestOptions.configurationVersion);
+  if (bulkRetrieveRequest) {
+    const bulkPayload = await fetchAdobeConsoleJsonWithAuthVariants([bulkRetrieveRequest.url], "Application raw fetch", {
+      ...requestOptions,
+      method: "POST",
+      headers: {
+        ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
+        "Content-Type": "application/json",
+      },
+      body: bulkRetrieveRequest.body,
+      preferAuthenticatedHeaders: requestOptions.preferAuthenticatedHeaders !== false,
+    }).catch(() => null);
+    if (bulkPayload) {
+      const bulkEntities = normalizeApplicationsResponse(bulkPayload?.parsed || bulkPayload);
+      const bulkEntity =
+        bulkEntities.find((item) => resolveApplicationGuidFromEntityData(item) === String(guid || "").trim()) || bulkEntities[0] || null;
+      if (bulkEntity && typeof bulkEntity === "object") {
+        return {
+          text: String(bulkPayload?.text || ""),
+          parsed: bulkEntity,
+        };
+      }
+    }
+  }
   const encodedGuid = encodeURIComponent(guid);
   const urlCandidates = uniquePreserveOrder([
     `${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`,
     appendAdobeConsoleConfigurationVersion(`${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`),
     `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`,
-    `${ADOBE_CONSOLE_BASE}/rest/api/registeredApplications/${encodedGuid}`,
-    `${ADOBE_CONSOLE_BASE}/rest/api/registered-applications/${encodedGuid}`,
   ]);
   const payload =
     (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application raw fetch", requestOptions).catch(() => null)) ||
@@ -59826,34 +59920,38 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
     }).catch(() => null);
   }
 
+  const expectedEntityRefs = uniquePreserveOrder(
+    (Array.isArray(resolvedProgrammer?.applications) ? resolvedProgrammer.applications : [])
+      .map((appReference) => normalizeRegisteredApplicationEntityRef(appReference))
+      .filter(Boolean)
+  );
   const urlCandidates = [
     appendAdobeConsoleConfigurationVersion(
       `${ADOBE_CONSOLE_BASE}/rest/api/applications?programmer=${encodeURIComponent(programmerId)}`
     ),
     `${ADOBE_CONSOLE_BASE}/rest/api/applications?programmer=${encodeURIComponent(programmerId)}`,
-    appendAdobeConsoleConfigurationVersion(
-      `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication?programmer=${encodeURIComponent(programmerId)}`
-    ),
-    `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication?programmer=${encodeURIComponent(programmerId)}`,
-    `${ADOBE_CONSOLE_BASE}/rest/api/registeredApplications?programmer=${encodeURIComponent(programmerId)}`,
-    `${ADOBE_CONSOLE_BASE}/rest/api/registered-applications?programmer=${encodeURIComponent(programmerId)}`,
   ];
   const uniqueUrlCandidates = [...new Set(urlCandidates)];
   const expectedGuidSet = new Set(
-    (Array.isArray(resolvedProgrammer?.applications) ? resolvedProgrammer.applications : [])
-      .map((appReference) => extractApplicationGuid(appReference))
+    expectedEntityRefs
+      .map((entityRef) => extractApplicationGuid(entityRef))
       .filter(Boolean)
   );
   const expectedCount = expectedGuidSet.size;
+  const bulkRetrieveRequest = buildRegisteredApplicationBulkRetrieveRequest(expectedEntityRefs);
 
   emitPremiumDecisionDebugEvent(
     {
       phase: "premium-applications-request",
       method: "GET",
       programmerId: String(programmerId || ""),
-      lookupUrls: uniqueUrlCandidates.slice(0, 12),
+      lookupUrls: uniquePreserveOrder([
+        String(bulkRetrieveRequest?.url || ""),
+        ...uniqueUrlCandidates,
+      ]).slice(0, 12),
       forceRefresh,
       expectedCount,
+      bulkEntityCount: Number(bulkRetrieveRequest?.entities?.length || 0),
       requestTimeoutMs,
     },
     {
@@ -59878,7 +59976,58 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
   };
   let successCount = 0;
   let lastError = null;
+  if (bulkRetrieveRequest) {
+    try {
+      const bulkPayload = await fetchAdobeConsoleJsonWithAuthVariants([bulkRetrieveRequest.url], "Applications load", {
+        timeoutMs: requestTimeoutMs,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: bulkRetrieveRequest.body,
+        preferAuthenticatedHeaders: true,
+      });
+      successCount += 1;
+      emitPremiumDecisionDebugEvent(
+        {
+          phase: "premium-applications-response",
+          programmerId: String(programmerId || ""),
+          method: "POST",
+          status: Number(bulkPayload?.status || 0),
+          url: String(bulkPayload?.url || bulkRetrieveRequest.url || ""),
+          bulkEntityCount: Number(bulkRetrieveRequest.entities.length || 0),
+        },
+        {
+          programmer: resolvedProgrammer,
+        }
+      );
+
+      const items = normalizeApplicationsResponse(bulkPayload?.parsed || bulkPayload);
+      for (const item of items) {
+        mergeApplicationEntity(item);
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      emitPremiumDecisionDebugEvent(
+        {
+          phase: "premium-applications-endpoint-error",
+          programmerId: String(programmerId || ""),
+          method: "POST",
+          url: String(bulkRetrieveRequest.url || ""),
+          error: lastError.message,
+          bulkEntityCount: Number(bulkRetrieveRequest.entities.length || 0),
+        },
+        {
+          programmer: resolvedProgrammer,
+        }
+      );
+    }
+  }
+
   for (const lookupUrl of uniqueUrlCandidates) {
+    if (expectedCount > 0 && Object.keys(byGuid).length >= expectedCount) {
+      break;
+    }
     let payload = null;
     try {
       payload =
@@ -59930,11 +60079,6 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
         mergedCount += 1;
       }
     }
-
-    if (expectedCount > 0 && Object.keys(byGuid).length >= expectedCount) {
-      break;
-    }
-
   }
 
   if (successCount === 0) {
