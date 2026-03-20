@@ -455,6 +455,22 @@ test("activation reuses cached organization payloads from the PKCE login handoff
   assert.doesNotMatch(enforceAccessSource, /let organizations = \[\];/);
 });
 
+test("activation qualifies an Experience Cloud shell token before console programmer discovery", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const activateSource = extractFunctionSource(popupSource, "activateSession");
+  const qualifyShellTokenSource = extractFunctionSource(popupSource, "requestQualifiedExperienceCloudConsoleToken");
+  const mergeShellTokenSource = extractFunctionSource(popupSource, "mergeExperienceCloudConsoleTokenIntoLoginData");
+
+  assert.match(qualifyShellTokenSource, /requestExperienceCloudConsoleTokenViaValidateToken/);
+  assert.match(qualifyShellTokenSource, /requestExperienceCloudConsoleTokenViaImsCheck/);
+  assert.match(qualifyShellTokenSource, /qualified:existing-experience-cloud/);
+  assert.match(mergeShellTokenSource, /experienceCloudAccessToken: accessToken/);
+  assert.match(activateSource, /const consoleShellTokenResult = await requestQualifiedExperienceCloudConsoleToken/);
+  assert.match(activateSource, /const consoleScopedLoginData = mergeExperienceCloudConsoleTokenIntoLoginData/);
+  assert.match(activateSource, /await loadProgrammersData\(consoleAccessToken/);
+  assert.match(activateSource, /resetBootstrapTokens: !Boolean\(consoleShellTokenResult\?\.accessToken\)/);
+});
+
 test("sign out path revokes Adobe tokens before clearing session state", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   assert.match(popupSource, /revokeUnderparLoginTokensForLogout\(state\.loginData\)/);

@@ -10610,6 +10610,8 @@ const CM_REPORTS_APP_ORIGIN = "https://cdn.experience.adobe.net";
 const CM_REPORTS_APP_REFERER = `${CM_REPORTS_APP_ORIGIN}/`;
 const CM_IMS_CHECK_DEFAULT_SCOPE =
   "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext";
+const EXPERIENCE_CLOUD_IMS_CHECK_DEFAULT_SCOPE =
+  "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext";
 const CM_IMS_VALIDATE_CLIENT_IDS = [CM_IMS_PRIMARY_CLIENT_ID];
 const CM_IMS_CHECK_CLIENT_IDS = [CM_IMS_PRIMARY_CLIENT_ID];
 const CM_IMS_FORCE_REFRESH_SKEW_MS = 30 * 1000;
@@ -56113,15 +56115,28 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   }
 
   resetCmTenantsPrecheckState();
-  const normalizedLoginDataPromise = resolveNormalizedLoginData(enforced.loginData, {
+  const consoleShellTokenResult = await requestQualifiedExperienceCloudConsoleToken({
+    existingToken: enforced.loginData?.experienceCloudAccessToken,
+    seedToken: enforced.loginData?.accessToken,
+    requireFresh: false,
+    allowSilentAuth: false,
+  }).catch(() => null);
+  const consoleScopedLoginData = mergeExperienceCloudConsoleTokenIntoLoginData(
+    enforced.loginData,
+    consoleShellTokenResult
+  );
+  const consoleAccessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([consoleShellTokenResult?.accessToken, consoleScopedLoginData?.accessToken])
+  );
+  const normalizedLoginDataPromise = resolveNormalizedLoginData(consoleScopedLoginData, {
     fetchProfile: true,
-    resetBootstrapTokens: true,
+    resetBootstrapTokens: !Boolean(consoleShellTokenResult?.accessToken),
     fallbackAdobePassOrg: enforced.loginData.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
   });
 
   let programmersLoadError = null;
   try {
-    await loadProgrammersData(enforced.loginData.accessToken, {
+    await loadProgrammersData(consoleAccessToken, {
       allowInteractiveAuthBootstrap: allowInteractiveConsoleBootstrap,
       allowRestrictedSession: true,
       forceRefresh: false,
@@ -62081,6 +62096,353 @@ function buildCmImsCheckUrl(config = {}) {
     url.searchParams.set("user_id", userId);
   }
   return url.toString();
+}
+
+async function requestExperienceCloudConsoleTokenViaValidateToken(seedToken = "", options = {}) {
+  const token = normalizeBearerTokenValue(seedToken);
+  if (!token || !isProbablyJwt(token)) {
+    return null;
+  }
+
+  const hints = resolveCmImsTokenHints(token);
+  const clientIds = uniqueSorted(
+    [EXPERIENCE_CLOUD_SSO_CLIENT_ID, hints.clientId]
+      .map((value) => String(value || "").trim())
+      .filter((value) => isExperienceCloudConsoleClientId(value))
+  );
+  const requireFresh = options.requireFresh === true;
+  const endpoint = `${IMS_BASE_URL}/ims/validate_token/v1?jslVersion=underpar-console`;
+
+  for (const clientId of clientIds) {
+    const form = new URLSearchParams({
+      type: "access_token",
+      token,
+    });
+    if (clientId) {
+      form.set("client_id", clientId);
+    }
+
+    const attempts = [{ credentials: "include" }, { credentials: "omit" }];
+    for (const attempt of attempts) {
+      try {
+        const response = await relayImsFetch(endpoint, {
+          method: "POST",
+          credentials: attempt.credentials,
+          headers: {
+            Accept: "*/*",
+            Origin: CM_CONSOLE_APP_ORIGIN,
+            Referer: CM_CONSOLE_APP_REFERER,
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            ...(clientId ? { client_id: clientId } : {}),
+          },
+          body: form.toString(),
+        });
+        if (!response.ok) {
+          continue;
+        }
+
+        const text = await response.text().catch(() => "");
+        const parsed = parseJsonText(text, null);
+        const refreshedToken = normalizeBearerTokenValue(extractImsAccessTokenFromPayload(parsed, text));
+        if (refreshedToken && isProbablyJwt(refreshedToken) && tokenSupportsExperienceCloudConsole(refreshedToken)) {
+          if (!requireFresh || isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+            const tokenPayload = parsed?.token && typeof parsed.token === "object" ? parsed.token : {};
+            const statePayload = parseImsStatePayload(firstNonEmptyString([tokenPayload?.state]));
+            const createdAtRaw = Number(tokenPayload?.created_at || 0);
+            const createdAtMs =
+              createdAtRaw > 0 && createdAtRaw < 1000000000000 ? createdAtRaw * 1000 : createdAtRaw > 0 ? createdAtRaw : 0;
+            const tokenSnapshot = mergeImsSessionSnapshots(null, {
+              tokenId: tokenPayload?.id,
+              sessionId: tokenPayload?.sid,
+              sessionUrl: firstNonEmptyString([statePayload?.session]),
+              userId: firstNonEmptyString([tokenPayload?.user_id, hints.userId]),
+              authId: firstNonEmptyString([tokenPayload?.aa_id]),
+              clientId: firstNonEmptyString([tokenPayload?.client_id, clientId, EXPERIENCE_CLOUD_SSO_CLIENT_ID]),
+              tokenType: firstNonEmptyString([tokenPayload?.type]),
+              scope: firstNonEmptyString([tokenPayload?.scope, hints.scope]),
+              as: tokenPayload?.as,
+              fg: tokenPayload?.fg,
+              moi: tokenPayload?.moi,
+              pba: tokenPayload?.pba,
+              keyAlias: firstNonEmptyString([tokenPayload?.key_alias]),
+              stateNonce: statePayload?.nonce,
+              stateJslibVersion: firstNonEmptyString([statePayload?.jslibver, statePayload?.jslibVersion]),
+              createdAt: createdAtMs,
+              expiresAt: Number(parsed?.expires_at || 0),
+            });
+            return {
+              accessToken: refreshedToken,
+              expiresAt: coercePositiveNumber(parsed?.expires_at),
+              expiresIn: coercePositiveNumber(tokenPayload?.expires_in || parsed?.expires_in),
+              scope: firstNonEmptyString([tokenPayload?.scope, parseJwtPayload(refreshedToken)?.scope, hints.scope]),
+              imsSession: tokenSnapshot,
+              source: `validate:${clientId}:${attempt.credentials}`,
+            };
+          }
+        }
+
+        if (parsed?.valid === true && !requireFresh && tokenSupportsExperienceCloudConsole(token)) {
+          return {
+            accessToken: token,
+            expiresAt: 0,
+            expiresIn: 0,
+            scope: firstNonEmptyString([hints.scope, parseJwtPayload(token)?.scope]),
+            imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(token), null),
+            source: `validate-existing:${clientId}:${attempt.credentials}`,
+          };
+        }
+      } catch {
+        // Continue best-effort across client and credential variants.
+      }
+    }
+  }
+
+  return null;
+}
+
+async function requestExperienceCloudConsoleTokenViaImsCheck(seedToken = "", options = {}) {
+  const hints = resolveCmImsTokenHints(seedToken);
+  const userIdCandidates = [];
+  const pushUserIdCandidate = (value, preferFront = false) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return;
+    }
+    const existingIndex = userIdCandidates.indexOf(normalized);
+    if (existingIndex >= 0) {
+      if (preferFront && existingIndex > 0) {
+        userIdCandidates.splice(existingIndex, 1);
+        userIdCandidates.unshift(normalized);
+      }
+      return;
+    }
+    if (preferFront) {
+      userIdCandidates.unshift(normalized);
+      return;
+    }
+    userIdCandidates.push(normalized);
+  };
+
+  try {
+    const profileToken = normalizeBearerTokenValue(
+      firstNonEmptyString([seedToken, getPreferredExperienceCloudConsoleAccessTokenCandidate(), getPreferredPrimaryImsAccessTokenCandidate()])
+    );
+    const profilePayload = await fetchImsSessionProfile(profileToken);
+    pushUserIdCandidate(
+      firstNonEmptyString([
+        profilePayload?.authId,
+        profilePayload?.aa_id,
+        profilePayload?.adobeID,
+        profilePayload?.email,
+        profilePayload?.user_email,
+        profilePayload?.emailAddress,
+        profilePayload?.additional_info?.authId,
+        profilePayload?.additional_info?.aa_id,
+        profilePayload?.additional_info?.email,
+      ]),
+      true
+    );
+    pushUserIdCandidate(
+      firstNonEmptyString([profilePayload?.userId, profilePayload?.user_id, profilePayload?.sub, profilePayload?.id]),
+      false
+    );
+    pushUserIdCandidate(
+      firstNonEmptyString([profilePayload?.additional_info?.userId, profilePayload?.additional_info?.user_id]),
+      false
+    );
+  } catch {
+    // Keep existing candidates best-effort.
+  }
+
+  (Array.isArray(hints.userIdCandidates) ? hints.userIdCandidates : []).forEach((candidate) => {
+    pushUserIdCandidate(candidate);
+  });
+  if (!userIdCandidates.includes("")) {
+    userIdCandidates.push("");
+  }
+
+  const clientIds = uniqueSorted(
+    [EXPERIENCE_CLOUD_SSO_CLIENT_ID, hints.clientId]
+      .map((value) => String(value || "").trim())
+      .filter((value) => isExperienceCloudConsoleClientId(value))
+  );
+  const scopes = uniqueSorted(
+    [EXPERIENCE_CLOUD_IMS_CHECK_DEFAULT_SCOPE, hints.scope, state.loginData?.experienceCloudScope]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  const requireFresh = options.requireFresh === true;
+
+  for (const clientId of clientIds) {
+    for (const scope of scopes) {
+      for (const userIdCandidate of userIdCandidates) {
+        const requestUrl = buildCmImsCheckUrl({
+          clientId,
+          scope,
+          userId: userIdCandidate,
+        });
+        const authSeedTokens = uniqueSorted(
+          [
+            seedToken,
+            getPreferredExperienceCloudConsoleAccessTokenCandidate(),
+            getPreferredPrimaryImsAccessTokenCandidate(),
+          ]
+            .map((value) => normalizeBearerTokenValue(value))
+            .filter((value) => isProbablyJwt(value))
+        );
+        const attempts = [{ credentials: "include", headers: {} }, { credentials: "omit", headers: {} }];
+        authSeedTokens.forEach((authToken) => {
+          attempts.push({
+            credentials: "omit",
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+              "X-IMS-ClientId": clientId,
+              "x-api-key": clientId,
+            },
+          });
+        });
+        for (const attempt of attempts) {
+          try {
+            const response = await relayImsFetch(requestUrl, {
+              method: "POST",
+              credentials: attempt.credentials,
+              headers: {
+                Accept: "*/*",
+                Origin: CM_CONSOLE_APP_ORIGIN,
+                Referer: CM_CONSOLE_APP_REFERER,
+                ...(attempt.headers && typeof attempt.headers === "object" ? attempt.headers : {}),
+              },
+            });
+            if (!response.ok) {
+              continue;
+            }
+
+            const text = await response.text().catch(() => "");
+            const parsed = parseJsonText(text, null);
+            const refreshedToken = normalizeBearerTokenValue(extractImsAccessTokenFromPayload(parsed, text));
+            if (!refreshedToken || !isProbablyJwt(refreshedToken) || !tokenSupportsExperienceCloudConsole(refreshedToken)) {
+              continue;
+            }
+            if (requireFresh && !isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+              continue;
+            }
+
+            const claims = parseJwtPayload(refreshedToken) || {};
+            return {
+              accessToken: refreshedToken,
+              expiresAt: 0,
+              expiresIn: coercePositiveNumber(claims?.expires_in || parsed?.expires_in),
+              scope: firstNonEmptyString([claims?.scope, hints.scope, scope]),
+              imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(refreshedToken), null),
+              source: `check:${clientId}:${attempt.credentials}`,
+            };
+          } catch {
+            // Continue best-effort across check and credential variants.
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+async function requestQualifiedExperienceCloudConsoleToken(options = {}) {
+  const requireFresh = options.requireFresh === true;
+  const allowSilentAuth = options.allowSilentAuth === true;
+  const seedCandidates = [];
+  const seen = new Set();
+  const pushSeed = (value) => {
+    const normalized = normalizeBearerTokenValue(value);
+    if (!normalized || !isProbablyJwt(normalized) || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    seedCandidates.push(normalized);
+  };
+
+  pushSeed(options?.existingToken);
+  pushSeed(options?.seedToken);
+  pushSeed(getPreferredExperienceCloudConsoleAccessTokenCandidate());
+  pushSeed(getPreferredPrimaryImsAccessTokenCandidate());
+
+  if (allowSilentAuth && seedCandidates.length === 0) {
+    const silent = await attemptSilentBootstrapLogin().catch(() => null);
+    pushSeed(silent?.accessToken);
+  }
+
+  for (const seed of seedCandidates) {
+    if (
+      tokenSupportsExperienceCloudConsole(seed) &&
+      (!requireFresh || isAccessTokenFreshEnough(seed, CM_IMS_FORCE_REFRESH_SKEW_MS))
+    ) {
+      return {
+        accessToken: seed,
+        expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(seed, 0)?.expiresAt),
+        expiresIn: 0,
+        scope: firstNonEmptyString([parseJwtPayload(seed)?.scope]),
+        imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(seed), null),
+        source: "qualified:existing-experience-cloud",
+        qualified: true,
+      };
+    }
+
+    const viaValidate = await requestExperienceCloudConsoleTokenViaValidateToken(seed, { requireFresh });
+    if (viaValidate?.accessToken) {
+      return {
+        ...viaValidate,
+        imsSession: mergeImsSessionSnapshots(viaValidate?.imsSession || null, deriveImsSessionSnapshotFromToken(seed)),
+        source: `qualified:${String(viaValidate?.source || "validate")}`,
+        qualified: true,
+      };
+    }
+
+    const viaCheck = await requestExperienceCloudConsoleTokenViaImsCheck(seed, { requireFresh });
+    if (viaCheck?.accessToken) {
+      return {
+        ...viaCheck,
+        imsSession: mergeImsSessionSnapshots(viaCheck?.imsSession || null, deriveImsSessionSnapshotFromToken(seed)),
+        source: `qualified:${String(viaCheck?.source || "ims-check")}`,
+        qualified: true,
+      };
+    }
+  }
+
+  return null;
+}
+
+function mergeExperienceCloudConsoleTokenIntoLoginData(loginData = {}, tokenResult = null) {
+  const current = loginData && typeof loginData === "object" ? loginData : {};
+  const accessToken = normalizeBearerTokenValue(tokenResult?.accessToken);
+  if (!accessToken || !tokenSupportsExperienceCloudConsole(accessToken)) {
+    return current;
+  }
+
+  const tokenClaims = parseJwtPayload(accessToken) || {};
+  const tokenExpiry = resolveAuthResponseExpiry(accessToken, coercePositiveNumber(tokenResult?.expiresIn));
+  const resolvedExpiresAt =
+    coercePositiveNumber(tokenResult?.expiresAt) || coercePositiveNumber(tokenExpiry?.expiresAt);
+  const resolvedImsSession = mergeImsSessionSnapshots(
+    mergeImsSessionSnapshots(
+      deriveImsSessionSnapshotFromToken(accessToken),
+      current?.experienceCloudImsSession && typeof current.experienceCloudImsSession === "object"
+        ? current.experienceCloudImsSession
+        : null
+    ),
+    tokenResult?.imsSession && typeof tokenResult.imsSession === "object" ? tokenResult.imsSession : null
+  );
+
+  return {
+    ...current,
+    experienceCloudAccessToken: accessToken,
+    experienceCloudExpiresAt:
+      resolvedExpiresAt || coercePositiveNumber(current?.experienceCloudExpiresAt) || Date.now() + 30 * 60 * 1000,
+    experienceCloudScope: compactStorageString(
+      firstNonEmptyString([tokenResult?.scope, tokenClaims?.scope, current?.experienceCloudScope]),
+      2048
+    ),
+    experienceCloudImsSession: resolvedImsSession,
+  };
 }
 
 async function requestQualifiedCmConsoleToken(options = {}) {
