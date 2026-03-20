@@ -68340,6 +68340,8 @@ function shouldAttemptSilentBootstrapSession() {
   return (
     !state.sessionReady &&
     !state.restricted &&
+    !state.busy &&
+    !state.restrictedOrgSwitchBusy &&
     !state.zipKeyImportPending &&
     !state.manualSignOutHold &&
     hasConfiguredUnderparImsClientId()
@@ -68467,6 +68469,16 @@ async function bootstrapSession(reason = "startup") {
               clearStatusUnlessCmTenantsPrecheckBlocked();
               return;
             }
+            if (state.restricted) {
+              setUnderparDiagnosticMarker("bootstrap", {
+                status: "restricted",
+                reason: normalizedReason,
+                phase: "silent-session-denied",
+                path: `silent-bootstrap:${silentProbeReason}`,
+              });
+              setStatus("", "info");
+              return;
+            }
           }
         } catch (error) {
           if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
@@ -68485,6 +68497,16 @@ async function bootstrapSession(reason = "startup") {
           });
         }
       }
+    }
+
+    if (state.restricted) {
+      setUnderparDiagnosticMarker("bootstrap", {
+        status: "restricted",
+        reason: normalizedReason,
+        phase: "complete",
+      });
+      setStatus("", "info");
+      return;
     }
 
     resetWorkflowForLoggedOut();

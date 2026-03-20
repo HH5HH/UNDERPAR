@@ -200,7 +200,7 @@ function loadPopupSilentBootstrapGateHelper() {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
   const script = [
-    "const state = { sessionReady: false, restricted: false, zipKeyImportPending: false, manualSignOutHold: false };",
+    "const state = { sessionReady: false, restricted: false, busy: false, restrictedOrgSwitchBusy: false, zipKeyImportPending: false, manualSignOutHold: false };",
     "function hasConfiguredUnderparImsClientId() { return true; }",
     extractFunctionSource(source, "shouldAttemptSilentBootstrapSession"),
     "function setState(nextState = {}) { Object.assign(state, nextState || {}); }",
@@ -685,9 +685,31 @@ test("manual sign-out suppresses silent bootstrap until the user explicitly sign
     manualSignOutHold: true,
   });
   assert.equal(helpers.shouldAttemptSilentBootstrapSession(), false);
+  helpers.setState({
+    manualSignOutHold: false,
+    busy: true,
+  });
+  assert.equal(helpers.shouldAttemptSilentBootstrapSession(), false);
+  helpers.setState({
+    busy: false,
+    restrictedOrgSwitchBusy: true,
+  });
+  assert.equal(helpers.shouldAttemptSilentBootstrapSession(), false);
   assert.match(signOutSource, /persistManualSignOutHold\(true,\s*"manual-sign-out"\)/);
   assert.match(applySessionSource, /persistManualSignOutHold\(false,\s*"session-activated"\)/);
   assert.match(finalizeZipKeySource, /if \(!state\.manualSignOutHold\) \{\s*await bootstrapSession\("zip-key-import"\);/);
+});
+
+test("silent bootstrap preserves restricted recovery instead of resetting back to logged-out sign-in", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const bootstrapSource = extractFunctionSource(popupSource, "bootstrapSession");
+
+  assert.match(bootstrapSource, /if \(state\.restricted\) \{\s*setUnderparDiagnosticMarker\("bootstrap", \{\s*status: "restricted",[\s\S]*phase: "silent-session-denied",/);
+  assert.match(bootstrapSource, /if \(state\.restricted\) \{\s*setUnderparDiagnosticMarker\("bootstrap", \{\s*status: "restricted",[\s\S]*phase: "complete",/);
+  assert.ok(
+    bootstrapSource.indexOf('phase: "silent-session-denied"') <
+      bootstrapSource.indexOf("resetWorkflowForLoggedOut();")
+  );
 });
 
 test("interactive recovery paths force Adobe IMS to show the login chooser and retain org-readable scope", () => {
