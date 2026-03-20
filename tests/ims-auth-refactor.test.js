@@ -921,7 +921,9 @@ test("shell page context harvests the unified shell IMS session before console e
   const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
   const tempTargetSource = extractFunctionSource(popupSource, "openTemporaryAdobePageContextTarget");
 
-  assert.match(bootstrapUrlSource, /isProgrammersRequest \? getActiveAdobePassEnvironment\(\)\?\.consoleProgrammersUrl/);
+  assert.match(bootstrapUrlSource, /const isProgrammersRequest =/);
+  assert.match(bootstrapUrlSource, /const isApplicationsRequest =/);
+  assert.match(bootstrapUrlSource, /isProgrammersRequest \|\| isApplicationsRequest \? getActiveAdobePassEnvironment\(\)\?\.consoleProgrammersUrl/);
   assert.match(resolveTargetSource, /resolveReusableAdobePageContextTab/);
   assert.match(resolveTargetSource, /findExistingExperienceCloudAdobeTab/);
   assert.match(resolveTargetSource, /openTemporaryAdobePageContextTarget\(\s*getAdobeConsolePageContextBootstrapUrl\(requestUrl\)/);
@@ -958,6 +960,28 @@ test("shell page context harvests the unified shell IMS session before console e
   assert.match(tempTargetSource, /chrome\.windows\?\.create/);
   assert.match(tempTargetSource, /type:\s*"popup"/);
   assert.doesNotMatch(tempTargetSource, /state:\s*"normal"/);
+});
+
+test("media company selection reuses AdobePass shell page context for application hydration", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const pageContextVariantsSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithShellPageContextVariants");
+  const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
+  const fetchApplicationDetailsSource = extractFunctionSource(popupSource, "fetchApplicationDetailsByGuid");
+  const fetchApplicationRawSource = extractFunctionSource(popupSource, "fetchApplicationRawByGuid");
+  const ensurePremiumAppsSource = extractFunctionSource(popupSource, "ensurePremiumAppsForProgrammer");
+  const hydrateScopesSource = extractFunctionSource(popupSource, "hydrateApplicationScopesForProgrammer");
+  const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+
+  assert.match(pageContextVariantsSource, /fetchAdobeConsoleJsonViaShellPageContext/);
+  assert.match(pageContextVariantsSource, /allowTemporaryPageContextTab === true/);
+  assert.match(fetchApplicationsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants\(\[lookupUrl\], "Applications load"/);
+  assert.match(fetchApplicationDetailsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants\(urlCandidates, "Application detail"/);
+  assert.match(fetchApplicationRawSource, /fetchAdobeConsoleJsonWithShellPageContextVariants\(urlCandidates, "Application raw fetch"/);
+  assert.match(ensurePremiumAppsSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(ensurePremiumAppsSource, /const preferredTabId = Number\(options\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
+  assert.match(hydrateScopesSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(refreshPanelsSource, /ensurePremiumAppsForProgrammer\(programmer,\s*\{/);
+  assert.match(refreshPanelsSource, /allowTemporaryPageContextTab:\s*true/);
 });
 
 test("restricted org labels collapse duplicate AdobePass segments", () => {

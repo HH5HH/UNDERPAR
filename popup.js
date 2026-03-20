@@ -58222,6 +58222,8 @@ async function refreshProgrammerPanels(options = {}) {
       : Promise.resolve(state.cmTenantsCatalog);
     const premiumAppsPromise = ensurePremiumAppsForProgrammer(programmer, {
       forceRefresh: forcePremiumRefresh,
+      allowTemporaryPageContextTab: true,
+      preferredTabId: getRetainedAuthPopupBootstrapTabId() || 0,
     });
     const cmServicePromise = Promise.resolve(cmSelectionBootstrapPromise)
       .then(() =>
@@ -59520,6 +59522,49 @@ async function fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel
   throw lastError || new Error(`${contextLabel} failed.`);
 }
 
+async function fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, contextLabel, requestOptions = null) {
+  const urls = Array.isArray(urlCandidates)
+    ? [...new Set(urlCandidates.filter((item) => typeof item === "string" && item.trim()))]
+    : [];
+  if (urls.length === 0) {
+    return null;
+  }
+
+  const options = requestOptions && typeof requestOptions === "object" ? requestOptions : {};
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const timeoutMs = Math.max(
+    allowTemporaryPageContextTab ? 9000 : 2000,
+    Number(options.timeoutMs || 0) || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS
+  );
+  const accessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([options.accessToken, getPreferredAdobeConsoleAccessTokenCandidate()])
+  );
+
+  for (const url of urls) {
+    const response = await fetchAdobeConsoleJsonViaShellPageContext(url, {
+      accessToken,
+      preferredTabId,
+      preferShellAccessToken: options.preferShellAccessToken !== false,
+      allowTemporaryTab: allowTemporaryPageContextTab,
+      timeoutMs,
+    }).catch(() => null);
+    if (!response?.ok) {
+      continue;
+    }
+    return {
+      url: String(response.url || url),
+      parsed: response.parsed ?? {},
+      text: String(response.text || ""),
+      status: Number(response.status || 0),
+      headers: response.headers && typeof response.headers === "object" ? response.headers : {},
+      shell: response.shell && typeof response.shell === "object" ? response.shell : null,
+    };
+  }
+
+  return null;
+}
+
 async function fetchApplicationDetailsByGuid(guid, options = {}) {
   if (!guid) {
     return null;
@@ -59533,7 +59578,10 @@ async function fetchApplicationDetailsByGuid(guid, options = {}) {
     `${ADOBE_CONSOLE_BASE}/rest/api/registeredApplications/${encodedGuid}`,
     `${ADOBE_CONSOLE_BASE}/rest/api/registered-applications/${encodedGuid}`,
   ]);
-  const { parsed } = await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application detail", requestOptions);
+  const payload =
+    (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application detail", requestOptions).catch(() => null)) ||
+    (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application detail", requestOptions));
+  const parsed = payload?.parsed ?? null;
   const entityData =
     parsed?.entityData && typeof parsed.entityData === "object" && !Array.isArray(parsed.entityData)
       ? parsed.entityData
@@ -59560,7 +59608,9 @@ async function fetchApplicationRawByGuid(guid, options = {}) {
     `${ADOBE_CONSOLE_BASE}/rest/api/registeredApplications/${encodedGuid}`,
     `${ADOBE_CONSOLE_BASE}/rest/api/registered-applications/${encodedGuid}`,
   ]);
-  const payload = await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application raw fetch", requestOptions);
+  const payload =
+    (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application raw fetch", requestOptions).catch(() => null)) ||
+    (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application raw fetch", requestOptions));
   const rawParsed = payload?.parsed || null;
   const parsedEntity =
     rawParsed?.entityData && typeof rawParsed.entityData === "object" && !Array.isArray(rawParsed.entityData)
@@ -59663,6 +59713,8 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
   const resolvedProgrammer =
     state.programmers.find((item) => String(item?.programmerId || "") === String(programmerId || "")) || null;
   const forceRefresh = options.forceRefresh === true;
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const requestTimeoutMs = Math.max(1000, Number(options.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS));
   if (forceRefresh) {
     state.applicationsByProgrammerId.delete(programmerId);
@@ -59744,10 +59796,17 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
   for (const lookupUrl of uniqueUrlCandidates) {
     let payload = null;
     try {
-      payload = await fetchAdobeConsoleJsonWithAuthVariants([lookupUrl], "Applications load", {
-        timeoutMs: requestTimeoutMs,
-        preferAuthenticatedHeaders: true,
-      });
+      payload =
+        (await fetchAdobeConsoleJsonWithShellPageContextVariants([lookupUrl], "Applications load", {
+          timeoutMs: requestTimeoutMs,
+          accessToken: activeAccessToken,
+          preferredTabId,
+          allowTemporaryPageContextTab,
+        }).catch(() => null)) ||
+        (await fetchAdobeConsoleJsonWithAuthVariants([lookupUrl], "Applications load", {
+          timeoutMs: requestTimeoutMs,
+          preferAuthenticatedHeaders: true,
+        }));
       successCount += 1;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -59828,6 +59887,8 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
               const details = await fetchApplicationDetailsByGuid(guid, {
                 timeoutMs: requestTimeoutMs,
                 preferAuthenticatedHeaders: true,
+                preferredTabId,
+                allowTemporaryPageContextTab,
               });
               if (details && typeof details === "object") {
                 mergeApplicationEntity({
@@ -59917,6 +59978,8 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
   }
 
   const retryAfterMs = Math.max(10 * 1000, Number(options.retryAfterMs || 2 * 60 * 1000));
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const now = Date.now();
   const pendingGuids = [];
   for (const guid of guidOrder) {
@@ -59997,6 +60060,8 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
         fetchApplicationDetailsByGuid(guid, {
           timeoutMs: requestTimeoutMs,
           preferAuthenticatedHeaders: true,
+          preferredTabId,
+          allowTemporaryPageContextTab,
         })
       );
       if (details && typeof details === "object") {
@@ -60017,6 +60082,8 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
           fetchSoftwareStatementForAppGuid(guid, {
             timeoutMs: requestTimeoutMs,
             preferAuthenticatedHeaders: true,
+            preferredTabId,
+            allowTemporaryPageContextTab,
           })
         );
         if (softwareStatement) {
@@ -61534,6 +61601,8 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
   }
 
   const forceRefresh = options.forceRefresh === true;
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   if (forceRefresh) {
     state.premiumAppsByProgrammerId.delete(programmer.programmerId);
     state.applicationsByProgrammerId.delete(programmer.programmerId);
@@ -61574,6 +61643,8 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
     const applicationsData = await fetchApplicationsForProgrammer(programmer.programmerId, {
       forceRefresh,
       requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
+      allowTemporaryPageContextTab,
+      preferredTabId,
     });
     const hydratedApplications = await hydrateApplicationScopesForProgrammer(programmer, applicationsData || {}, {
       forceRefresh,
@@ -61581,6 +61652,8 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       concurrency: PREMIUM_SERVICE_SCOPE_HYDRATION_CONCURRENCY,
       requiredServiceKeys: PREMIUM_REQUIRED_SERVICE_KEYS,
       stopWhenResolved: true,
+      allowTemporaryPageContextTab,
+      preferredTabId,
     });
     setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, hydratedApplications || {});
     const premiumApps = findPremiumServiceApplications(programmer.applications || [], hydratedApplications || {});
@@ -64279,8 +64352,13 @@ async function resolveReusableAdobePageContextTab(preferredTabId = 0) {
 function getAdobeConsolePageContextBootstrapUrl(requestUrl = "") {
   const normalizedUrl = String(requestUrl || "").trim();
   const isProgrammersRequest = /\/entity\/Programmer(?:[/?#]|$)/i.test(normalizedUrl);
+  const isApplicationsRequest =
+    /\/applications(?:[/?#]|$)/i.test(normalizedUrl) ||
+    /\/entity\/RegisteredApplication(?:[/?#]|$)/i.test(normalizedUrl) ||
+    /\/registeredApplications(?:[/?#]|$)/i.test(normalizedUrl) ||
+    /\/registered-applications(?:[/?#]|$)/i.test(normalizedUrl);
   return firstNonEmptyString([
-    isProgrammersRequest ? getActiveAdobePassEnvironment()?.consoleProgrammersUrl : "",
+    isProgrammersRequest || isApplicationsRequest ? getActiveAdobePassEnvironment()?.consoleProgrammersUrl : "",
     getActiveAdobePassEnvironment()?.consoleShellUrl,
     `${String(CM_CONSOLE_APP_ORIGIN || "").trim().replace(/\/+$/, "")}/`,
   ]);
