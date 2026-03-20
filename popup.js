@@ -69218,66 +69218,9 @@ function renderSignInView() {
     return;
   }
 
-  const targetOrganizationContext = buildTargetOrganizationContext();
-  const targetOrganization = targetOrganizationContext.selectedOrganization;
-  const options = Array.isArray(targetOrganizationContext.options) ? targetOrganizationContext.options : [];
   const signingIn = state.busy && isInteractiveAuthBusyContext(state.busyContext);
-
-  if (els.signInOrgField && els.signInOrgSelect) {
-    const showOrgPicker = options.length > 0;
-    els.signInOrgField.hidden = !showOrgPicker;
-    if (showOrgPicker) {
-      const signature = options.map((option) => `${option.key}:${option.label}`).join("|");
-      if (els.signInOrgSelect.dataset.optionsSignature !== signature) {
-        els.signInOrgSelect.innerHTML = "";
-        if (options.length > 1) {
-          const placeholderOption = document.createElement("option");
-          placeholderOption.value = PREAUTH_TARGET_ORG_PLACEHOLDER_VALUE;
-          placeholderOption.textContent = "Choose Adobe organization";
-          els.signInOrgSelect.appendChild(placeholderOption);
-        }
-        options.forEach((option) => {
-          const optionNode = document.createElement("option");
-          optionNode.value = option.key;
-          optionNode.textContent = option.label;
-          els.signInOrgSelect.appendChild(optionNode);
-        });
-        els.signInOrgSelect.dataset.optionsSignature = signature;
-      }
-      els.signInOrgSelect.value =
-        targetOrganization?.key ||
-        (options.length > 1 ? PREAUTH_TARGET_ORG_PLACEHOLDER_VALUE : firstNonEmptyString([options[0]?.key]));
-      els.signInOrgSelect.disabled = state.busy || options.length <= 1;
-    } else {
-      els.signInOrgSelect.innerHTML = '<option value="">-- Use Adobe profile chooser --</option>';
-      els.signInOrgSelect.value = "";
-      els.signInOrgSelect.disabled = true;
-      delete els.signInOrgSelect.dataset.optionsSignature;
-    }
-  }
-
-  if (els.signInOrgMeta) {
-    els.signInOrgMeta.textContent = targetOrganization
-      ? `Targeting ${targetOrganization.label} (${firstNonEmptyString([targetOrganization.id, targetOrganization.orgId])}).`
-      : options.length > 1
-        ? "Choose the Adobe org UnderPAR should target before sign-in."
-        : "No app-owned Adobe org target is selected.";
-  }
-
-  if (els.signInOrgHint) {
-    els.signInOrgHint.textContent = targetOrganization
-      ? "UnderPAR will force Adobe sign-in with prompt=login, then verify the returned org context before console bootstrap."
-      : options.length > 1
-        ? "Pick one ZIP.KEY org target before sign-in so UnderPAR can keep the Adobe session out of the recovery loop."
-        : "Sign In always forces Adobe's profile chooser so the user can pick the correct Adobe profile.";
-  }
-
-  els.signInHeroBtn.disabled = signingIn || targetOrganizationContext.requiresSelection;
-  els.signInHeroBtn.textContent = signingIn
-    ? "Signing In..."
-    : targetOrganizationContext.requiresSelection
-      ? "Choose Org"
-      : "Sign In";
+  els.signInHeroBtn.disabled = signingIn;
+  els.signInHeroBtn.textContent = signingIn ? "Signing In..." : "Sign In";
 }
 
 function render() {
@@ -69709,22 +69652,10 @@ async function onPrimarySignInClick() {
     return;
   }
 
-  const targetOrganizationContext = buildTargetOrganizationContext();
-  if (targetOrganizationContext.requiresSelection) {
-    setStatus("Choose an Adobe org target before signing in.", "error");
-    render();
-    return;
-  }
-
-  const signInOptions = {
+  await signInInteractive({
     prompt: "login",
     forceBrowserLogout: true,
-  };
-  if (targetOrganizationContext.selectedOrganization) {
-    signInOptions.targetOrganization = targetOrganizationContext.selectedOrganization;
-  }
-
-  await signInInteractive(signInOptions);
+  });
 }
 
 async function onAuthClick() {
@@ -69748,7 +69679,6 @@ function onZipKeyContinue() {
 }
 
 function shouldAttemptSilentBootstrapSession() {
-  const targetOrganizationContext = buildTargetOrganizationContext();
   return (
     !state.sessionReady &&
     !state.restricted &&
@@ -69756,7 +69686,6 @@ function shouldAttemptSilentBootstrapSession() {
     !state.restrictedOrgSwitchBusy &&
     !state.zipKeyImportPending &&
     !state.manualSignOutHold &&
-    !targetOrganizationContext.requiresSelection &&
     hasConfiguredUnderparImsClientId()
   );
 }
