@@ -50105,6 +50105,7 @@ function resetWorkflowForLoggedOut(options = {}) {
   const nextPassVault = preservePassVault
     ? normalizeUnderparVaultPayload(state.passVault || createEmptyUnderparVaultPayload())
     : createEmptyUnderparVaultPayload();
+  const hasZipKeyClientId = hasConfiguredUnderparImsClientId(nextPassVault);
   clearRestrictedOrgOptions();
   state.programmers = [];
   state.selectedMediaCompany = "";
@@ -50188,6 +50189,11 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.mvpdLoadPromiseByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
   state.restV2PrewarmedAppsByProgrammerId.clear();
+  state.zipKeyImportPending = false;
+  state.zipKeyImportDragActive = false;
+  if (!hasZipKeyClientId) {
+    setZipKeyImportFeedback("", "info");
+  }
   state.passVault = nextPassVault;
   state.passVaultLoadPromise = null;
   state.passVaultPersistPromise = null;

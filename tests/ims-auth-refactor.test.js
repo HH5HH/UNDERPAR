@@ -1317,7 +1317,11 @@ test("logged-out workflow reset preserves imported ZIP.KEY IMS config unless the
 
   assert.match(resetSource, /const preservePassVault = options\?\.preservePassVault !== false;/);
   assert.match(resetSource, /const nextPassVault = preservePassVault/);
+  assert.match(resetSource, /const hasZipKeyClientId = hasConfiguredUnderparImsClientId\(nextPassVault\);/);
   assert.match(resetSource, /normalizeUnderparVaultPayload\(state\.passVault \|\| createEmptyUnderparVaultPayload\(\)\)/);
+  assert.match(resetSource, /state\.zipKeyImportPending = false;/);
+  assert.match(resetSource, /state\.zipKeyImportDragActive = false;/);
+  assert.match(resetSource, /if \(!hasZipKeyClientId\) \{\s*setZipKeyImportFeedback\("",\s*"info"\);\s*\}/);
   assert.match(resetSource, /state\.passVault = nextPassVault;/);
   assert.match(resetSource, /rebuildPassVaultProgrammerStatusIndex\(nextPassVault\);/);
   assert.doesNotMatch(resetSource, /state\.passVault = createEmptyUnderparVaultPayload\(\);/);
