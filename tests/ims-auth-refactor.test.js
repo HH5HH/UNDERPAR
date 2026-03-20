@@ -724,8 +724,8 @@ test("console configuration version is sourced dynamically from console bootstra
   assert.match(configExtractorSource, /payload\.configurationInfo/);
   assert.doesNotMatch(configExtractorSource, /for \(const nestedValue of Object\.values\(payload\)\)/);
   assert.match(consoleHeaderSource, /const csrfToken = String\(state\?\.consoleCsrfToken \|\| ""\)\.trim\(\) \|\| "NO-TOKEN";/);
-  assert.match(consoleHeaderSource, /Origin: CM_CONSOLE_APP_ORIGIN/);
-  assert.match(consoleHeaderSource, /Referer: CM_CONSOLE_APP_REFERER/);
+  assert.match(consoleHeaderSource, /Origin: ADOBE_CONSOLE_RUNTIME_ORIGIN/);
+  assert.match(consoleHeaderSource, /Referer: ADOBE_CONSOLE_RUNTIME_REFERER/);
   assert.match(consoleHeaderSource, /"AP-Request-Id": generateRequestId\(\)/);
   assert.match(bootstrapEnsureSource, /getPreferredAdobeConsoleAccessTokenCandidate\(\)/);
   assert.match(loadProgrammersSource, /bootstrapState = await ensureConsoleBootstrapState/);
@@ -876,12 +876,21 @@ test("shell page context harvests the unified shell IMS session before console e
   assert.match(shellFetchSource, /const isExplicitShellRoot = \/window\\\.\(\?:__shellConfiguration\|shellConfiguration\|__excShellConfiguration\|__adobeShellConfiguration\)\$\/i/);
   assert.match(shellFetchSource, /if \(preferShellAccessToken && variants\.length > 0\) \{\s*return variants;/);
   assert.match(shellFetchSource, /target: \{ tabId, allFrames: true \ }|target: \{ tabId, allFrames: true \}/);
+  assert.match(
+    shellFetchSource,
+    /\.\.\.\(headers && typeof headers === "object" \? headers : \{\}\),\s*Authorization: `Bearer \$\{shellSnapshot\.imsToken\}`/
+  );
   assert.match(shellFetchSource, /const shellSnapshot = await waitForShellSnapshot\(\);/);
+  assert.match(shellFetchSource, /const isAdobePassConsoleFrame =\s*\/cdn\\\.experience\\\.adobe\\\.net\\\/solutions\\\/AdobePass-adobepass-unifiedshell-console-client\\\//);
+  assert.match(shellFetchSource, /const normalizeExecutionResults = \(executionResults = \[\]\) =>/);
+  assert.match(shellFetchSource, /const preferredFrameWaitDeadline = Date\.now\(\) \+ Math\.max\(1200, Math\.min\(timeoutMs, 6000\)\)/);
+  assert.match(shellFetchSource, /const preferredFrameResults = normalizedResults\.filter\(\(entry\) => entry\.isAdobePassConsoleFrame\)/);
+  assert.match(shellFetchSource, /await new Promise\(\(resolve\) => setTimeout\(resolve, 180\)\)/);
   assert.match(shellFetchSource, /window\.__shellConfiguration/);
   assert.match(shellFetchSource, /window\.shellConfiguration/);
   assert.match(shellFetchSource, /const isReadyShellSnapshot = \(snapshot = null\) =>/);
-  assert.match(shellFetchSource, /const normalizedResults = \(Array\.isArray\(executionResults\) \? executionResults : \[\]\)/);
-  assert.match(shellFetchSource, /if \(isJwt\(shellSnapshot\?\.imsToken\)\) \{\s*pushVariant\(\{\s*Authorization: `Bearer \$\{shellSnapshot\.imsToken\}`,/);
+  assert.match(shellFetchSource, /frameUrl,/);
+  assert.match(shellFetchSource, /isAdobePassConsoleFrame,/);
   assert.match(shellFetchSource, /shell: normalizedShellSnapshot/);
   assert.match(shellMergeSource, /tokenSupportsExperienceCloudConsole\(normalizedShellSnapshot\.imsToken\)/);
   assert.match(shellMergeSource, /organizations: mergedOrganizations/);

@@ -80,6 +80,8 @@ let ADOBE_MGMT_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "");
 let ADOBE_SP_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "");
 let DEGRADATION_API_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.degradationBase || "");
 let REST_V2_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.restV2Base || "");
+const ADOBE_CONSOLE_RUNTIME_ORIGIN = "https://cdn.experience.adobe.net";
+const ADOBE_CONSOLE_RUNTIME_REFERER = `${ADOBE_CONSOLE_RUNTIME_ORIGIN}/`;
 let activeAuthPopupBootstrapContext = null;
 let underparStateRef = null;
 let PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
@@ -58875,8 +58877,8 @@ function normalizeApplicationsResponse(payload) {
 function getAdobeConsoleRequestHeaders(accessToken = "") {
   const headers = {
     Accept: "application/json, text/plain, */*",
-    Origin: CM_CONSOLE_APP_ORIGIN,
-    Referer: CM_CONSOLE_APP_REFERER,
+    Origin: ADOBE_CONSOLE_RUNTIME_ORIGIN,
+    Referer: ADOBE_CONSOLE_RUNTIME_REFERER,
     "AP-Request-Id": generateRequestId(),
   };
 
@@ -64300,20 +64302,21 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
   }
 
   try {
-    const executionResults = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      world: "MAIN",
-      args: [
-        {
-          requestUrl: normalizedUrl,
-          timeoutMs,
-          accessToken,
-          headerVariants: headerVariants.map((headers) =>
-            headers && typeof headers === "object" ? { ...headers } : {}
-          ),
-        },
-      ],
-      func: async (config) => {
+    const executeAcrossFrames = async () =>
+      chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        world: "MAIN",
+        args: [
+          {
+            requestUrl: normalizedUrl,
+            timeoutMs,
+            accessToken,
+            headerVariants: headerVariants.map((headers) =>
+              headers && typeof headers === "object" ? { ...headers } : {}
+            ),
+          },
+        ],
+        func: async (config) => {
         const normalize = (value) => String(value || "").trim();
         const isJwt = (value) => /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/.test(normalize(value));
         const parseJson = (text) => {
@@ -64593,6 +64596,18 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
             seen.add(dedupeKey);
             variants.push(requestHeaders);
           };
+          const explicitVariants = Array.isArray(config?.headerVariants) ? config.headerVariants : [{}];
+          if (preferShellAccessToken && isJwt(shellSnapshot?.imsToken)) {
+            explicitVariants.forEach((headers) =>
+              pushVariant({
+                ...(headers && typeof headers === "object" ? headers : {}),
+                Authorization: `Bearer ${shellSnapshot.imsToken}`,
+              })
+            );
+            if (variants.length > 0) {
+              return variants;
+            }
+          }
           if (isJwt(shellSnapshot?.imsToken)) {
             pushVariant({
               Authorization: `Bearer ${shellSnapshot.imsToken}`,
@@ -64601,7 +64616,6 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
           if (preferShellAccessToken && variants.length > 0) {
             return variants;
           }
-          const explicitVariants = Array.isArray(config?.headerVariants) ? config.headerVariants : [{}];
           explicitVariants.forEach((headers) => pushVariant(headers));
           const configuredAccessToken = normalize(config?.accessToken || "");
           if (isJwt(configuredAccessToken)) {
@@ -64663,45 +64677,105 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
         };
 
         const shellSnapshot = await waitForShellSnapshot();
+        const frameUrl = String(globalThis.location?.href || "");
+        const frameOrigin = String(globalThis.location?.origin || "");
+        const documentReadyState = String(globalThis.document?.readyState || "");
+        const isAdobePassConsoleFrame =
+          /cdn\.experience\.adobe\.net\/solutions\/AdobePass-adobepass-unifiedshell-console-client\//i.test(frameUrl) ||
+          /#\/@adobepass\/pass\/authentication\//i.test(frameUrl);
         let lastResult = null;
         const variants = buildHeaderVariants(shellSnapshot);
         for (const headers of variants) {
           const result = await fetchJson(headers, shellSnapshot);
           if (result?.ok === true) {
-            return result;
+            return {
+              ...result,
+              frameUrl,
+              frameOrigin,
+              documentReadyState,
+              isAdobePassConsoleFrame,
+            };
           }
-          lastResult = result;
+          lastResult = {
+            ...result,
+            frameUrl,
+            frameOrigin,
+            documentReadyState,
+            isAdobePassConsoleFrame,
+          };
         }
 
         return lastResult;
       },
     });
 
-    const normalizedResults = (Array.isArray(executionResults) ? executionResults : [])
-      .map((entry) => {
+    const normalizeExecutionResults = (executionResults = []) =>
+      (Array.isArray(executionResults) ? executionResults : [])
+        .map((entry) => {
         const result = entry?.result;
         if (!result || typeof result !== "object") {
           return null;
         }
         const normalizedShellSnapshot = normalizeExperienceCloudShellSnapshot(result.shell);
+        const frameUrl = String(result.frameUrl || "");
+        const isAdobePassConsoleFrame =
+          result.isAdobePassConsoleFrame === true ||
+          /cdn\.experience\.adobe\.net\/solutions\/AdobePass-adobepass-unifiedshell-console-client\//i.test(frameUrl) ||
+          /#\/@adobepass\/pass\/authentication\//i.test(frameUrl);
+        const frameReady =
+          String(result.documentReadyState || "").trim().toLowerCase() === "complete" ||
+          Boolean(normalizedShellSnapshot?.imsToken);
         const score =
+          (isAdobePassConsoleFrame ? 1400 : 0) +
           (result.ok === true ? 1000 : 0) +
           (normalizedShellSnapshot?.imsToken ? 320 : 0) +
           (normalizedShellSnapshot?.imsOrg ? 120 : 0) +
           (Array.isArray(normalizedShellSnapshot?.imsOrgs) && normalizedShellSnapshot.imsOrgs.length > 0 ? 90 : 0) +
           (normalizedShellSnapshot?.imsProfile?.userId || normalizedShellSnapshot?.imsProfile?.email ? 60 : 0) +
+          (frameReady ? 40 : 0) +
           (Number(entry?.frameId || 0) > 0 ? 40 : 0);
         return {
           frameId: Number(entry?.frameId || 0),
           result,
           shellSnapshot: normalizedShellSnapshot,
+          frameUrl,
+          isAdobePassConsoleFrame,
+          frameReady,
           score,
         };
       })
       .filter(Boolean)
       .sort((left, right) => Number(right?.score || 0) - Number(left?.score || 0));
 
-    const bestResult = normalizedResults[0] || null;
+    const shouldWaitForPreferredFrame = /\/entity\/Programmer|\/user\/extendedProfile|\/config\/latestActivatedConsoleConfigurationVersion|\/admin\/maintenance\/status/i.test(
+      normalizedUrl
+    );
+    const preferredFrameWaitDeadline = Date.now() + Math.max(1200, Math.min(timeoutMs, 6000));
+    let normalizedResults = [];
+    let bestResult = null;
+
+    while (true) {
+      const executionResults = await executeAcrossFrames();
+      normalizedResults = normalizeExecutionResults(executionResults);
+      const preferredFrameResults = normalizedResults.filter((entry) => entry.isAdobePassConsoleFrame);
+      const successfulPreferredFrameResult = preferredFrameResults.find((entry) => entry.result?.ok === true) || null;
+      const successfulAnyFrameResult = normalizedResults.find((entry) => entry.result?.ok === true) || null;
+      const readyPreferredFrameResult = preferredFrameResults.find((entry) => entry.frameReady) || null;
+
+      bestResult = successfulPreferredFrameResult || successfulAnyFrameResult || readyPreferredFrameResult || normalizedResults[0] || null;
+
+      if (successfulPreferredFrameResult) {
+        break;
+      }
+      if (successfulAnyFrameResult && (!shouldWaitForPreferredFrame || readyPreferredFrameResult)) {
+        break;
+      }
+      if (!shouldWaitForPreferredFrame || readyPreferredFrameResult || Date.now() >= preferredFrameWaitDeadline) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 180));
+    }
+
     const result = bestResult?.result || null;
     if (!result || typeof result !== "object") {
       return null;
