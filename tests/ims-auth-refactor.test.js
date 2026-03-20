@@ -542,18 +542,20 @@ test("activation reuses cached organization payloads from the PKCE login handoff
   assert.doesNotMatch(enforceAccessSource, /let organizations = \[\];/);
 });
 
-test("activation defers console token resolution to shell-first bootstrap before programmer discovery", () => {
+test("activation qualifies the unified-shell console bearer before programmer discovery", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activateSource = extractFunctionSource(popupSource, "activateSession");
   const consoleTokenPreferenceSource = extractFunctionSource(popupSource, "getPreferredAdobeConsoleAccessTokenCandidate");
 
   assert.match(consoleTokenPreferenceSource, /getPreferredExperienceCloudConsoleAccessTokenCandidate\(\)/);
   assert.match(consoleTokenPreferenceSource, /getPreferredPrimaryImsAccessTokenCandidate\(\)/);
+  assert.match(activateSource, /requestQualifiedExperienceCloudConsoleToken\(\{/);
   assert.match(activateSource, /state\.consoleBootstrapState\?\.shellSnapshot\?\.imsToken/);
-  assert.match(activateSource, /enforced\.loginData\?\.experienceCloudAccessToken/);
+  assert.match(activateSource, /qualifiedExperienceCloudTokenResult\?\.accessToken/);
+  assert.match(activateSource, /mergeExperienceCloudConsoleTokenIntoLoginData\(enforced\.loginData,\s*qualifiedExperienceCloudTokenResult\)/);
   assert.match(activateSource, /await loadProgrammersData\(consoleAccessToken/);
   assert.match(activateSource, /resetBootstrapTokens: true/);
-  assert.doesNotMatch(activateSource, /requestQualifiedExperienceCloudConsoleToken/);
+  assert.match(activateSource, /mergeExperienceCloudConsoleTokenIntoLoginData\(\s*mergeExperienceCloudShellSnapshotIntoLoginData\(/);
 });
 
 test("sign out path revokes Adobe tokens before clearing session state", () => {

@@ -57039,12 +57039,32 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   }
 
   resetCmTenantsPrecheckState();
+  let qualifiedExperienceCloudTokenResult = null;
+  try {
+    qualifiedExperienceCloudTokenResult = await requestQualifiedExperienceCloudConsoleToken({
+      existingToken: firstNonEmptyString([
+        enforced.loginData?.experienceCloudAccessToken,
+        state.consoleBootstrapState?.shellSnapshot?.imsToken,
+        state.loginData?.experienceCloudAccessToken,
+      ]),
+      seedToken: firstNonEmptyString([enforced.loginData?.accessToken, sessionData?.accessToken]),
+      requireFresh: false,
+      allowSilentAuth: false,
+    });
+  } catch {
+    qualifiedExperienceCloudTokenResult = null;
+  }
+  const loginDataForConsole =
+    qualifiedExperienceCloudTokenResult && qualifiedExperienceCloudTokenResult.accessToken
+      ? mergeExperienceCloudConsoleTokenIntoLoginData(enforced.loginData, qualifiedExperienceCloudTokenResult)
+      : enforced.loginData;
   const consoleAccessToken = normalizeBearerTokenValue(
     firstNonEmptyString([
       state.consoleBootstrapState?.shellSnapshot?.imsToken,
-      enforced.loginData?.experienceCloudAccessToken,
+      qualifiedExperienceCloudTokenResult?.accessToken,
+      loginDataForConsole?.experienceCloudAccessToken,
       getPreferredExperienceCloudConsoleAccessTokenCandidate(),
-      enforced.loginData?.accessToken,
+      loginDataForConsole?.accessToken,
     ])
   );
   const normalizedLoginDataPromise = resolveNormalizedLoginData(enforced.loginData, {
@@ -57098,9 +57118,12 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   }
 
   const resolvedLoginData = buildNormalizedLoginData(
-    mergeExperienceCloudShellSnapshotIntoLoginData(
-      await normalizedLoginDataPromise,
-      state.consoleBootstrapState?.shellSnapshot || null
+    mergeExperienceCloudConsoleTokenIntoLoginData(
+      mergeExperienceCloudShellSnapshotIntoLoginData(
+        await normalizedLoginDataPromise,
+        state.consoleBootstrapState?.shellSnapshot || null
+      ),
+      qualifiedExperienceCloudTokenResult
     ),
     {
       resetBootstrapTokens: false,
