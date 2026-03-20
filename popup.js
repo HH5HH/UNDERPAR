@@ -58969,8 +58969,8 @@ async function fetchAdobeConsoleBootstrapState(accessToken = "", options = {}) {
   let grantedAuthorities = [];
   const fetchViaShellPageContext = async (endpoint) =>
     fetchAdobeConsoleJsonViaShellPageContext(endpoint, {
-      accessToken: normalizedAccessToken,
       preferredTabId,
+      preferShellAccessToken: true,
       allowTemporaryTab: allowTemporaryPageContextTab,
       timeoutMs,
     }).catch(() => null);
@@ -64372,6 +64372,10 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
           if (!value || typeof value !== "object") {
             return null;
           }
+          const normalizedSourcePath = String(sourcePath || "");
+          const isExplicitShellRoot = /window\.(?:__shellConfiguration|shellConfiguration|__excShellConfiguration|__adobeShellConfiguration)$/i.test(
+            normalizedSourcePath
+          );
           let imsToken = "";
           let imsOrg = "";
           let imsOrgName = "";
@@ -64379,7 +64383,7 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
           let imsClientId = "";
           let imsProfile = null;
           const sourceLooksShellish = /(?:^|\.)(?:__)?(?:exc)?shell(?:configuration)?(?:\.|$)|shellconfiguration|gainsight|runtime/i.test(
-            String(sourcePath || "")
+            normalizedSourcePath
           );
           try {
             const nestedToken = safeGetProperty(value, "token");
@@ -64445,18 +64449,31 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
           if (!sourceLooksShellish && !imsToken) {
             return null;
           }
+          const shellTenant = normalize(safeGetProperty(value, "tenant"));
+          const shellEnvironment = normalize(safeGetProperty(value, "environment"));
+          const shellBaseFrameUrl = normalize(safeGetProperty(value, "baseFrameUrl"));
+          const shellBaseUrl = normalize(safeGetProperty(value, "baseUrl"));
+          const hasShellShape =
+            Boolean(imsOrg || imsOrgName || imsOrgs.length > 0 || imsProfile || shellTenant || shellEnvironment || shellBaseFrameUrl || shellBaseUrl);
+          if (!isExplicitShellRoot && !hasShellShape) {
+            return null;
+          }
           if (!imsToken && !imsOrg && !imsOrgName && imsOrgs.length === 0 && !imsProfile) {
             return null;
           }
           const score =
+            (isExplicitShellRoot ? 1200 : 0) +
             (isJwt(imsToken) ? 120 : imsToken ? 60 : 0) +
             (sourceLooksShellish ? 80 : 0) +
+            (shellTenant ? 40 : 0) +
+            (shellEnvironment ? 30 : 0) +
+            (shellBaseFrameUrl || shellBaseUrl ? 20 : 0) +
             (imsOrg ? 24 : 0) +
             (imsOrgName ? 18 : 0) +
             (imsOrgs.length > 0 ? 16 : 0) +
             (imsProfile?.userId ? 12 : 0) +
             (imsProfile?.email ? 8 : 0) +
-            (/shell/i.test(sourcePath) ? 12 : 0);
+            (/shell/i.test(normalizedSourcePath) ? 12 : 0);
           return {
             imsToken,
             imsOrg,
@@ -64551,6 +64568,7 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
         const buildHeaderVariants = (shellSnapshot = null) => {
           const variants = [];
           const seen = new Set();
+          const preferShellAccessToken = config?.preferShellAccessToken === true;
           const pushVariant = (headers = {}) => {
             const requestHeaders = {
               Accept: "application/json, text/plain, */*",
@@ -64579,6 +64597,9 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
             pushVariant({
               Authorization: `Bearer ${shellSnapshot.imsToken}`,
             });
+          }
+          if (preferShellAccessToken && variants.length > 0) {
+            return variants;
           }
           const explicitVariants = Array.isArray(config?.headerVariants) ? config.headerVariants : [{}];
           explicitVariants.forEach((headers) => pushVariant(headers));
@@ -69658,6 +69679,7 @@ async function fetchProgrammersFromApi(options = {}) {
       const pageContextResult = await fetchAdobeConsoleJsonViaShellPageContext(endpoint, {
         accessToken,
         preferredTabId,
+        preferShellAccessToken: true,
         allowTemporaryTab: allowTemporaryPageContextTab,
         timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
       }).catch(() => null);

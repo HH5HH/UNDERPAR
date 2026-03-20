@@ -733,6 +733,7 @@ test("console configuration version is sourced dynamically from console bootstra
   assert.match(fetchBootstrapSource, /const fetchViaShellPageContext = async \(endpoint\) =>/);
   assert.match(fetchBootstrapSource, /await Promise\.all\(\[/);
   assert.match(fetchBootstrapSource, /fetchAdobeConsoleJsonViaShellPageContext/);
+  assert.match(fetchBootstrapSource, /preferShellAccessToken:\s*true/);
   assert.match(loadProgrammersSource, /const configurationVersion = mvpdWorkspaceExtractConfigurationVersion\(bootstrapState, 0\)/);
   assert.doesNotMatch(loadProgrammersSource, /configurationVersion <= 0/);
   assert.match(loadProgrammersSource, /!bootstrapState \|\| !bootstrapState\.extendedProfile/);
@@ -744,6 +745,7 @@ test("console configuration version is sourced dynamically from console bootstra
   assert.match(fetchProgrammersSource, /const buildHeaderVariants = \(\) =>/);
   assert.match(fetchProgrammersSource, /getAdobeConsoleRequestHeaders\(""\)/);
   assert.match(fetchProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext/);
+  assert.match(fetchProgrammersSource, /preferShellAccessToken:\s*true/);
   assert.match(fetchBootstrapSource, /shellPageExtendedProfile/);
   assert.match(fetchBootstrapSource, /shellSnapshot\?\.imsToken/);
   assert.match(fetchBootstrapSource, /mergeExperienceCloudShellSnapshotIntoLoginData\(state\.loginData,\s*shellSnapshot\)/);
@@ -871,6 +873,8 @@ test("shell page context harvests the unified shell IMS session before console e
   assert.match(withTargetSource, /resolveAdobeConsolePageContextTarget\(requestUrl,\s*\{/);
   assert.match(withTargetSource, /closeTemporaryAdobePageContextTarget\(target\.temporaryTarget\)/);
   assert.match(shellFetchSource, /const target = await resolveAdobeConsolePageContextTarget\(normalizedUrl,\s*\{/);
+  assert.match(shellFetchSource, /const isExplicitShellRoot = \/window\\\.\(\?:__shellConfiguration\|shellConfiguration\|__excShellConfiguration\|__adobeShellConfiguration\)\$\/i/);
+  assert.match(shellFetchSource, /if \(preferShellAccessToken && variants\.length > 0\) \{\s*return variants;/);
   assert.match(shellFetchSource, /target: \{ tabId, allFrames: true \ }|target: \{ tabId, allFrames: true \}/);
   assert.match(shellFetchSource, /const shellSnapshot = await waitForShellSnapshot\(\);/);
   assert.match(shellFetchSource, /window\.__shellConfiguration/);
