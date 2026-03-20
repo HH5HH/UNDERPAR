@@ -52022,6 +52022,7 @@ function extractOrgId(org) {
   const candidates = [
     org?.orgId,
     org?.orgID,
+    org?.org_id,
     org?.organizationId,
     org?.organizationID,
     org?.organization_id,
@@ -52033,12 +52034,6 @@ function extractOrgId(org) {
     org?.customer_org_id,
     org?.companyId,
     org?.company_id,
-    org?.value,
-    org?.org,
-    org?.organization,
-    org?.tenant,
-    org?.id,
-    org?.code,
   ];
   return candidates.find((value) => value !== undefined && value !== null && value !== "") || null;
 }
@@ -52258,8 +52253,7 @@ function extractOrganizationId(value) {
 
   return firstNonEmptyString([
     extractStrongOrganizationId(value),
-    extractOrgId(value),
-    looksLikeOrganizationObject(value) ? firstNonEmptyString([value.id, value.code]) : "",
+    looksLikeOrganizationObject(value) ? firstNonEmptyString([value.value, value.id, value.code]) : "",
   ]);
 }
 
@@ -52307,14 +52301,38 @@ function buildRestrictedOrgOptionKey({ orgId, userId, name }) {
 
 function buildRestrictedOrgOptionLabel({ name, orgId, userId }) {
   const labelSegments = [];
-  if (name) {
-    labelSegments.push(name);
-  }
-  if (orgId) {
-    labelSegments.push(orgId);
+  const seenSegments = new Set();
+  const appendSegment = (value) => {
+    const parts = String(value || "")
+      .split("|")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    for (const part of parts) {
+      const normalized = normalizeOrganizationIdentifier(part);
+      if (!normalized || seenSegments.has(normalized)) {
+        continue;
+      }
+      seenSegments.add(normalized);
+      labelSegments.push(part);
+    }
+  };
+
+  const normalizedName = normalizeOrganizationIdentifier(name);
+  const normalizedOrgId = normalizeOrganizationIdentifier(orgId);
+  const normalizedGeneratedName = orgId
+    ? normalizeOrganizationIdentifier(`Adobe IMS Org ${String(orgId || "").trim()}`)
+    : "";
+
+  appendSegment(name);
+  if (
+    normalizedOrgId &&
+    normalizedName !== normalizedOrgId &&
+    normalizedName !== normalizedGeneratedName
+  ) {
+    appendSegment(orgId);
   }
   if (userId) {
-    labelSegments.push(`user ${userId}`);
+    appendSegment(`user ${userId}`);
   }
 
   return labelSegments.join(" | ");
@@ -52798,18 +52816,17 @@ function attachTargetOrganizationToLoginData(loginData = {}, targetOrganization 
 }
 
 function extractVerifiedCustomerOrganizationClaim(sessionData = null) {
-  const profile = resolveLoginProfile(sessionData) || {};
   const idClaims = parseJwtPayload(sessionData?.idToken) || {};
   const accessClaims = parseJwtPayload(sessionData?.accessToken) || {};
   const candidates = [
-    { value: extractOrganizationId(idClaims), source: "idClaims" },
-    { value: extractOrganizationId(accessClaims), source: "accessClaims" },
-    { value: extractOrganizationId(profile?.projectedProductContext), source: "profile.projectedProductContext" },
-    {
-      value: extractOrganizationId(profile?.additional_info?.projectedProductContext),
-      source: "profile.additional_info.projectedProductContext",
-    },
-    { value: extractOrganizationId(profile), source: "profile" },
+    { value: idClaims?.org_id, source: "idClaims.org_id" },
+    { value: idClaims?.orgId, source: "idClaims.orgId" },
+    { value: idClaims?.organizationId, source: "idClaims.organizationId" },
+    { value: idClaims?.organization_id, source: "idClaims.organization_id" },
+    { value: accessClaims?.org_id, source: "accessClaims.org_id" },
+    { value: accessClaims?.orgId, source: "accessClaims.orgId" },
+    { value: accessClaims?.organizationId, source: "accessClaims.organizationId" },
+    { value: accessClaims?.organization_id, source: "accessClaims.organization_id" },
   ];
   const match = candidates.find((entry) => normalizeOrganizationIdentifier(entry?.value));
   return match

@@ -198,6 +198,22 @@ function loadPopupExperienceCloudAuthResponseHelper() {
   return context.module.exports;
 }
 
+function loadPopupRestrictedOrgLabelHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    extractFunctionSource(source, "normalizeOrganizationIdentifier"),
+    extractFunctionSource(source, "buildRestrictedOrgOptionLabel"),
+    "module.exports = { buildRestrictedOrgOptionLabel };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadPopupImsAuthLaunchHelper() {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -834,6 +850,19 @@ test("experience cloud auth redirect detection accepts plain-object headers from
   );
 });
 
+test("restricted org labels collapse duplicate AdobePass segments", () => {
+  const { buildRestrictedOrgOptionLabel } = loadPopupRestrictedOrgLabelHelper();
+
+  assert.equal(
+    buildRestrictedOrgOptionLabel({
+      name: "@AdobePass | @adobepass | @adobepass",
+      orgId: "@adobepass",
+      userId: "",
+    }),
+    "@AdobePass"
+  );
+});
+
 test("console endpoint bootstrap initializes underparStateRef before top-level programmer endpoint construction", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const stateRefIndex = popupSource.indexOf("let underparStateRef = null;");
@@ -1240,11 +1269,19 @@ test("granted IMS scope merges response and claims tokens for org diagnostics", 
 test("restricted org extraction accepts shell-style label and value records", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const extractOrgIdSource = extractFunctionSource(popupSource, "extractOrgId");
+  const extractOrganizationIdSource = extractFunctionSource(popupSource, "extractOrganizationId");
+  const extractVerifiedOrgClaimSource = extractFunctionSource(popupSource, "extractVerifiedCustomerOrganizationClaim");
   const extractOrgNameSource = extractFunctionSource(popupSource, "extractOrgName");
   const extractUserIdSource = extractFunctionSource(popupSource, "extractUserId");
 
-  assert.match(extractOrgIdSource, /org\?\.value/);
-  assert.match(extractOrgIdSource, /org\?\.organization/);
+  assert.doesNotMatch(extractOrgIdSource, /org\?\.value/);
+  assert.doesNotMatch(extractOrgIdSource, /org\?\.organization(?!Id|ID|_id)\b/);
+  assert.doesNotMatch(extractOrgIdSource, /org\?\.id/);
+  assert.match(extractOrganizationIdSource, /looksLikeOrganizationObject\(value\) \? firstNonEmptyString\(\[value\.value, value\.id, value\.code\]\) : ""/);
+  assert.match(extractVerifiedOrgClaimSource, /idClaims\?\.org_id/);
+  assert.match(extractVerifiedOrgClaimSource, /accessClaims\?\.organizationId/);
+  assert.doesNotMatch(extractVerifiedOrgClaimSource, /profile\.projectedProductContext/);
+  assert.doesNotMatch(extractVerifiedOrgClaimSource, /extractOrganizationId\(accessClaims\)/);
   assert.match(extractOrgNameSource, /org\?\.label/);
   assert.match(extractUserIdSource, /org\?\.profileGuid/);
   assert.match(extractUserIdSource, /org\?\.userGuid/);
