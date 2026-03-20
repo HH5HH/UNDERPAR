@@ -1716,10 +1716,15 @@ body[aria-busy="true"] .auth-btn::before {
   min-width: 0;
 }
 
-.workflow > .field,
+.workflow > .field {
+  grid-column: 1;
+  min-width: 0;
+}
+
 .workflow > .hr-services-container,
 .workflow > .premium-services-container {
-  grid-column: 1;
+  grid-column: 1 / -1;
+  width: 100%;
   min-width: 0;
 }
 
@@ -2015,6 +2020,10 @@ select:disabled {
   --service-vibe-glow-alpha: 0.243;
   --service-vibe-feedback-bg-alpha: 0.189;
   --service-vibe-feedback-border-alpha: 0.410;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  box-sizing: border-box;
   --service-accent: rgb(var(--service-zip-1000));
   --service-accent-ink: rgb(var(--service-zip-1100));
   --service-accent-soft: rgba(var(--service-zip-1000), var(--service-vibe-surface-soft-alpha));
@@ -2376,6 +2385,8 @@ select:disabled {
 .premium-service-section .service-box-details,
 .hr-context-section .service-box-details {
   display: block;
+  width: 100%;
+  min-width: 0;
 }
 
 .premium-service-section .service-box-details > summary,

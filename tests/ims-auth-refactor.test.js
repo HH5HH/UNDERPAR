@@ -984,6 +984,18 @@ test("sidepanel requestor picker spans the same full workflow width as media com
     popupCss,
     /\.selector-quick-launch-spacer\s*\{[\s\S]*?grid-column:\s*2;[\s\S]*?width:\s*32px;[\s\S]*?visibility:\s*hidden;/i
   );
+  assert.match(
+    popupCss,
+    /\.workflow > \.hr-services-container,\s*\.workflow > \.premium-services-container\s*\{[\s\S]*?grid-column:\s*1 \/ -1;[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;/
+  );
+  assert.match(
+    popupCss,
+    /\.premium-service-section,\s*\.hr-context-section\s*\{[\s\S]*?width:\s*100%;[\s\S]*?max-width:\s*none;[\s\S]*?min-width:\s*0;[\s\S]*?box-sizing:\s*border-box;/
+  );
+  assert.match(
+    popupCss,
+    /\.premium-service-section \.service-box-details,\s*\.hr-context-section \.service-box-details\s*\{[\s\S]*?display:\s*block;[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;/
+  );
 });
 
 test("requestor and MVPD selectors ship blank default options instead of placeholder copy", () => {
