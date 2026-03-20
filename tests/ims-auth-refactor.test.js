@@ -649,7 +649,7 @@ test("interactive login and org switching allow a temporary shared shell page co
   assert.match(recoverySource, /allowTemporaryPageContextTab:\s*true/);
 });
 
-test("session activation defers CM tenant hydration and unlocks Media Company selection immediately", () => {
+test("session activation hydrates CM tenants before programmer load and keeps Media Company user-owned", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activateSource = extractFunctionSource(popupSource, "activateSession");
   const programmersSource = extractFunctionSource(popupSource, "loadProgrammersData");
@@ -659,8 +659,14 @@ test("session activation defers CM tenant hydration and unlocks Media Company se
 
   assert.doesNotMatch(activateSource, /prefetchCmTenantsCatalogInBackground/);
   assert.match(activateSource, /prefetchCmConsoleBootstrapSummaryInBackground/);
+  assert.ok(
+    activateSource.indexOf("await ensureCmTenantsPrecheckForActiveSession") <
+      activateSource.indexOf("await loadProgrammersData(")
+  );
   assert.match(activateSource, /allowRestrictedSession:\s*true/);
-  assert.doesNotMatch(activateSource, /await ensureCmTenantsPrecheckForActiveSession/);
+  assert.match(activateSource, /await ensureCmTenantsPrecheckForActiveSession\(`activation:\$\{normalizedSource\}`/);
+  assert.match(activateSource, /releaseRetainedAuthPopupContext:\s*false/);
+  assert.match(activateSource, /mergeCmConsoleBootstrapIntoLoginData\(/);
   assert.match(programmersSource, /const allowRestrictedSession = options\.allowRestrictedSession === true;/);
   assert.match(programmersSource, /\(state\.restricted && !allowRestrictedSession\)/);
   assert.match(mediaCompanyLockSource, /return false;/);
@@ -1908,9 +1914,20 @@ test("CM tenant background prefetch is guarded by the shared precheck promise in
   assert.match(precheckSource, /if \(!forceRefresh && state\.cmTenantsPrecheckPromise\)/);
   assert.match(precheckSource, /state\.cmTenantsPrecheckPromise = precheckPromise/);
   assert.match(precheckSource, /const effectiveAllowTemporaryPageContextTab = allowTemporaryPageContextTab;/);
+  assert.match(precheckSource, /const releaseRetainedAuthPopupContext = options\?\.releaseRetainedAuthPopupContext !== false;/);
+  assert.match(precheckSource, /if \(releaseRetainedAuthPopupContext\) \{\s*await maybeReleaseRetainedAuthPopupBootstrapContext/);
   assert.doesNotMatch(precheckSource, /preferredCmBootstrapTabId <= 0 && getRetainedAuthPopupBootstrapTabId\(\) <= 0/);
   assert.match(
     activateSessionSource,
     /allowTemporaryPageContextTab:\s*allowBackgroundTemporaryPageContextTab/
   );
+});
+
+test("applying the active session preserves a hydrated cm-console-ui bearer instead of clearing CM qualification", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const applySource = extractFunctionSource(popupSource, "applyActiveLoginSession");
+
+  assert.match(applySource, /const normalizedCmConsoleAccessToken = normalizeBearerTokenValue/);
+  assert.match(applySource, /state\.cmConsoleBootstrapQualified =[\s\S]*tokenSupportsCmConsoleRequests/);
+  assert.doesNotMatch(applySource, /state\.cmConsoleBootstrapQualified = false;/);
 });

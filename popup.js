@@ -57061,12 +57061,15 @@ function shouldAllowTemporaryCmBootstrapTabForActivation(source = "", explicitAl
 async function applyActiveLoginSession(loginData, options = {}) {
   const persist = options.persist === true;
   const scheduleRefresh = options.scheduleRefresh !== false && Boolean(loginData?.accessToken);
+  const normalizedCmConsoleAccessToken = normalizeBearerTokenValue(firstNonEmptyString([loginData?.cmConsoleAccessToken || ""]));
   if (state.manualSignOutHold === true) {
     await persistManualSignOutHold(false, "session-activated");
   }
   state.loginData = loginData;
-  state.cmConsoleBootstrapQualified = false;
-  state.cmLastHydratedAccessToken = normalizeBearerTokenValue(firstNonEmptyString([loginData?.cmConsoleAccessToken || ""]));
+  state.cmConsoleBootstrapQualified =
+    Boolean(normalizedCmConsoleAccessToken && tokenSupportsCmConsoleRequests(normalizedCmConsoleAccessToken)) &&
+    (state.cmTenantsPrecheckComplete === true || hasCmTenantsCatalogEntries());
+  state.cmLastHydratedAccessToken = normalizedCmConsoleAccessToken;
   state.cmConsoleTokenConsoleEmitKey = "";
   writePersistedAvatarCandidate(loginData, {
     sourceUrl: loginData?.imageUrl || "",
@@ -57176,6 +57179,49 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     resetBootstrapTokens: true,
     fallbackAdobePassOrg: enforced.loginData.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
   });
+  const stagedLoginData = buildNormalizedLoginData(loginDataForConsole, {
+    resetBootstrapTokens: false,
+    fallbackAdobePassOrg: enforced.loginData.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
+  });
+  state.loginData = stagedLoginData;
+  state.restricted = false;
+  state.sessionReady = false;
+  state.cmLastHydratedAccessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([stagedLoginData?.cmConsoleAccessToken || ""])
+  );
+  setUnderparDiagnosticMarker("activation", {
+    status: "pending",
+    source: normalizedSource,
+    phase: "cm-precheck",
+    allowBackgroundTemporaryPageContextTab,
+  });
+  try {
+    await ensureCmTenantsPrecheckForActiveSession(`activation:${normalizedSource}`, {
+      forceRefresh: false,
+      allowTemporaryPageContextTab: allowBackgroundTemporaryPageContextTab,
+      preferredCmBootstrapTabId,
+      releaseRetainedAuthPopupContext: false,
+    });
+  } catch (error) {
+    const resolvedError = error instanceof Error ? error : new Error(String(error));
+    await clearLoginData();
+    resetWorkflowForLoggedOut();
+    state.loginData = null;
+    state.restricted = false;
+    state.sessionReady = false;
+    clearRefreshTimer();
+    state.cmTenantsPrecheckPending = false;
+    syncMediaCompanySelectAvailability();
+    setUnderparDiagnosticMarker("activation", {
+      status: "error",
+      source: normalizedSource,
+      phase: "cm-precheck-failed",
+      error: resolvedError.message,
+    });
+    setStatus(resolvedError.message, "error");
+    render();
+    return false;
+  }
 
   let programmersLoadError = null;
   try {
@@ -57222,12 +57268,15 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   }
 
   const resolvedLoginData = buildNormalizedLoginData(
-    mergeExperienceCloudConsoleTokenIntoLoginData(
-      mergeExperienceCloudShellSnapshotIntoLoginData(
-        await normalizedLoginDataPromise,
-        state.consoleBootstrapState?.shellSnapshot || null
+    mergeCmConsoleBootstrapIntoLoginData(
+      mergeExperienceCloudConsoleTokenIntoLoginData(
+        mergeExperienceCloudShellSnapshotIntoLoginData(
+          await normalizedLoginDataPromise,
+          state.consoleBootstrapState?.shellSnapshot || null
+        ),
+        qualifiedExperienceCloudTokenResult
       ),
-      qualifiedExperienceCloudTokenResult
+      state.loginData
     ),
     {
       resetBootstrapTokens: false,
@@ -57296,7 +57345,9 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     org: resolvedLoginData.adobePassOrg,
     programmersCount: Number(state.programmers.length || 0),
     criticalPathMs: Math.max(0, Date.now() - activationStartedAt),
-    cmHydrationMode: allowBackgroundTemporaryPageContextTab ? "background-temporary-tab-allowed" : "background",
+    cmHydrationMode: allowBackgroundTemporaryPageContextTab
+      ? "activation-critical-path-temporary-tab-allowed"
+      : "activation-critical-path",
   });
   return true;
 }
@@ -57696,6 +57747,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
   const normalizedReason = String(reason || "session").trim() || "session";
   const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
   const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const releaseRetainedAuthPopupContext = options?.releaseRetainedAuthPopupContext !== false;
   if (state.restricted || !state.loginData) {
     setUnderparDiagnosticMarker("cm_precheck", {
       status: "skipped",
@@ -57751,6 +57803,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
           forceRefresh,
           allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
           preferredCmBootstrapTabId,
+          releaseRetainedAuthPopupContext,
         })
       );
       const catalog = await ensureCmTenantsCatalog({
@@ -57805,10 +57858,12 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
         sourceUrl: String(catalog?.sourceUrl || ""),
         tokenClientId: String(parseJwtPayload(hydratedToken)?.client_id || ""),
       });
-      await maybeReleaseRetainedAuthPopupBootstrapContext(
-        preferredCmBootstrapTabId,
-        `cm-global-hydrate-complete:${reason}`
-      );
+      if (releaseRetainedAuthPopupContext) {
+        await maybeReleaseRetainedAuthPopupBootstrapContext(
+          preferredCmBootstrapTabId,
+          `cm-global-hydrate-complete:${reason}`
+        );
+      }
       return catalog;
     } catch (error) {
       const resolvedError = error instanceof Error ? error : new Error(String(error));
@@ -57876,6 +57931,7 @@ async function persistResolvedCmGlobalAuthState(accessToken = "", source = "unkn
 async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session", options = {}) {
   const forceRefresh = options?.forceRefresh === true;
   const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const releaseRetainedAuthPopupContext = options?.releaseRetainedAuthPopupContext !== false;
   if (state.restricted || !state.loginData) {
     return "";
   }
@@ -57887,10 +57943,12 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
     (!forceRefresh || isAccessTokenFreshEnough(existingToken, 45 * 1000))
   ) {
     await persistResolvedCmGlobalAuthState(existingToken, `existing:${reason}`).catch(() => null);
-    await maybeReleaseRetainedAuthPopupBootstrapContext(
-      preferredCmBootstrapTabId,
-      `cm-global-hydrate-token-reuse:${reason}`
-    );
+    if (releaseRetainedAuthPopupContext) {
+      await maybeReleaseRetainedAuthPopupBootstrapContext(
+        preferredCmBootstrapTabId,
+        `cm-global-hydrate-token-reuse:${reason}`
+      );
+    }
     emitCmDebugEvent({
       phase: "cm-global-hydrate-token-reuse",
       reason: String(reason || ""),
@@ -57928,10 +57986,12 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
   const hydratedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
   if (hydratedToken && tokenSupportsCmConsoleRequests(hydratedToken)) {
     await persistResolvedCmGlobalAuthState(hydratedToken, `post-login:${reason}`).catch(() => null);
-    await maybeReleaseRetainedAuthPopupBootstrapContext(
-      preferredCmBootstrapTabId,
-      `cm-global-hydrate-token-ready:${reason}`
-    );
+    if (releaseRetainedAuthPopupContext) {
+      await maybeReleaseRetainedAuthPopupBootstrapContext(
+        preferredCmBootstrapTabId,
+        `cm-global-hydrate-token-ready:${reason}`
+      );
+    }
     emitCmDebugEvent({
       phase: "cm-global-hydrate-token-ready",
       reason: String(reason || ""),
@@ -63622,6 +63682,31 @@ function mergeExperienceCloudConsoleTokenIntoLoginData(loginData = {}, tokenResu
       2048
     ),
     experienceCloudImsSession: resolvedImsSession,
+  };
+}
+
+function mergeCmConsoleBootstrapIntoLoginData(loginData = {}, bootstrapLoginData = null) {
+  const current = loginData && typeof loginData === "object" ? loginData : {};
+  const bootstrap = bootstrapLoginData && typeof bootstrapLoginData === "object" ? bootstrapLoginData : null;
+  if (!bootstrap) {
+    return current;
+  }
+
+  const mergedProfile = mergeProfilePayloads(resolveLoginProfile(current), resolveLoginProfile(bootstrap));
+  return {
+    ...current,
+    cmConsoleAccessToken: compactStorageString(
+      firstNonEmptyString([bootstrap?.cmConsoleAccessToken, current?.cmConsoleAccessToken]),
+      4096
+    ),
+    cmConsoleExpiresAt:
+      coercePositiveNumber(bootstrap?.cmConsoleExpiresAt) || coercePositiveNumber(current?.cmConsoleExpiresAt),
+    cmConsoleScope: compactStorageString(firstNonEmptyString([bootstrap?.cmConsoleScope, current?.cmConsoleScope]), 2048),
+    cmConsoleImsSession: mergeImsSessionSnapshots(
+      current?.cmConsoleImsSession && typeof current.cmConsoleImsSession === "object" ? current.cmConsoleImsSession : null,
+      bootstrap?.cmConsoleImsSession && typeof bootstrap.cmConsoleImsSession === "object" ? bootstrap.cmConsoleImsSession : null
+    ),
+    profile: mergedProfile && typeof mergedProfile === "object" ? mergedProfile : null,
   };
 }
 
@@ -70637,7 +70722,7 @@ async function signInInteractive(options = {}) {
         profileMs: Math.max(0, profileResolvedAt - authCompletedAt),
         activationMs: Math.max(0, Date.now() - profileResolvedAt),
         totalMs: Math.max(0, Date.now() - signInStartedAt),
-        cmHydrationMode: "selection-driven",
+        cmHydrationMode: "activation-critical-path",
       });
     }
 
@@ -70737,7 +70822,7 @@ async function refreshSessionManual() {
         profileMs: Math.max(0, profileResolvedAt - authCompletedAt),
         activationMs: Math.max(0, Date.now() - profileResolvedAt),
         totalMs: Math.max(0, Date.now() - refreshStartedAt),
-        cmHydrationMode: "selection-driven",
+        cmHydrationMode: "activation-critical-path",
       });
     }
 
