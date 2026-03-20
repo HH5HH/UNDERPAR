@@ -64226,7 +64226,7 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
 
   try {
     const executionResults = await chrome.scripting.executeScript({
-      target: { tabId },
+      target: { tabId, allFrames: true },
       world: "MAIN",
       args: [
         {
@@ -64581,7 +64581,32 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
       },
     });
 
-    const result = executionResults?.[0]?.result;
+    const normalizedResults = (Array.isArray(executionResults) ? executionResults : [])
+      .map((entry) => {
+        const result = entry?.result;
+        if (!result || typeof result !== "object") {
+          return null;
+        }
+        const normalizedShellSnapshot = normalizeExperienceCloudShellSnapshot(result.shell);
+        const score =
+          (result.ok === true ? 1000 : 0) +
+          (normalizedShellSnapshot?.imsToken ? 320 : 0) +
+          (normalizedShellSnapshot?.imsOrg ? 120 : 0) +
+          (Array.isArray(normalizedShellSnapshot?.imsOrgs) && normalizedShellSnapshot.imsOrgs.length > 0 ? 90 : 0) +
+          (normalizedShellSnapshot?.imsProfile?.userId || normalizedShellSnapshot?.imsProfile?.email ? 60 : 0) +
+          (Number(entry?.frameId || 0) > 0 ? 40 : 0);
+        return {
+          frameId: Number(entry?.frameId || 0),
+          result,
+          shellSnapshot: normalizedShellSnapshot,
+          score,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => Number(right?.score || 0) - Number(left?.score || 0));
+
+    const bestResult = normalizedResults[0] || null;
+    const result = bestResult?.result || null;
     if (!result || typeof result !== "object") {
       return null;
     }
@@ -64597,7 +64622,7 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
       state.consoleCsrfToken = csrfToken;
     }
 
-    const normalizedShellSnapshot = normalizeExperienceCloudShellSnapshot(result.shell);
+    const normalizedShellSnapshot = bestResult?.shellSnapshot || null;
     if (normalizedShellSnapshot) {
       state.consoleBootstrapState = {
         ...(state.consoleBootstrapState && typeof state.consoleBootstrapState === "object"

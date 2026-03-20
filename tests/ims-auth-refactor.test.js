@@ -859,10 +859,12 @@ test("shell page context harvests the unified shell IMS session before console e
   const tempTargetSource = extractFunctionSource(popupSource, "openTemporaryAdobePageContextTarget");
 
   assert.match(shellFetchSource, /isProgrammersRequest \? getActiveAdobePassEnvironment\(\)\?\.consoleProgrammersUrl/);
+  assert.match(shellFetchSource, /target: \{ tabId, allFrames: true \ }|target: \{ tabId, allFrames: true \}/);
   assert.match(shellFetchSource, /const shellSnapshot = await waitForShellSnapshot\(\);/);
   assert.match(shellFetchSource, /window\.__shellConfiguration/);
   assert.match(shellFetchSource, /window\.shellConfiguration/);
   assert.match(shellFetchSource, /const isReadyShellSnapshot = \(snapshot = null\) =>/);
+  assert.match(shellFetchSource, /const normalizedResults = \(Array\.isArray\(executionResults\) \? executionResults : \[\]\)/);
   assert.match(shellFetchSource, /if \(isJwt\(shellSnapshot\?\.imsToken\)\) \{\s*pushVariant\(\{\s*Authorization: `Bearer \$\{shellSnapshot\.imsToken\}`,/);
   assert.match(shellFetchSource, /shell: normalizedShellSnapshot/);
   assert.match(shellMergeSource, /tokenSupportsExperienceCloudConsole\(normalizedShellSnapshot\.imsToken\)/);
