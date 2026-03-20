@@ -178,6 +178,26 @@ function loadPopupConsoleConfigUrlHelper() {
   return context.module.exports;
 }
 
+function loadPopupExperienceCloudAuthResponseHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveHeaderValue"),
+    extractFunctionSource(source, "isExperienceCloudAuthResponseUrl"),
+    extractFunctionSource(source, "responseLooksLikeExperienceCloudSignIn"),
+    "module.exports = { responseLooksLikeExperienceCloudSignIn };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    URL,
+    Headers,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadPopupImsAuthLaunchHelper() {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -793,6 +813,25 @@ test("programmer discovery keeps fetch header variants as plain header objects",
   assert.match(fetchProgrammersSource, /if \(accessToken\) \{\s*variants\.push\(\{ headers: getAdobeConsoleRequestHeaders\(accessToken\) \}\);/);
   assert.match(fetchProgrammersSource, /variants\.push\(\{ headers: getAdobeConsoleRequestHeaders\(""\) \}\);/);
   assert.doesNotMatch(fetchProgrammersSource, /uniquePreserveOrder\(\s*\[\s*accessToken \? getAdobeConsoleRequestHeaders/);
+});
+
+test("experience cloud auth redirect detection accepts plain-object headers from shell page context", () => {
+  const { responseLooksLikeExperienceCloudSignIn } = loadPopupExperienceCloudAuthResponseHelper();
+
+  assert.equal(
+    responseLooksLikeExperienceCloudSignIn(
+      {
+        status: 403,
+        url: "https://console.auth.adobe.com/rest/api/entity/Programmer?configurationVersion=0",
+        headers: {
+          "content-type": "application/json",
+          "www-authenticate": 'Bearer realm="AdobeID login_required"',
+        },
+      },
+      '{"error":"access_denied","error_description":"Access is denied"}'
+    ),
+    true
+  );
 });
 
 test("console endpoint bootstrap initializes underparStateRef before top-level programmer endpoint construction", () => {

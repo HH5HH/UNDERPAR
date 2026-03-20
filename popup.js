@@ -68995,10 +68995,10 @@ function responseLooksLikeExperienceCloudSignIn(response, responseBody = "") {
     return true;
   }
 
-  const contentType = String(response?.headers?.get("content-type") || "").toLowerCase();
+  const contentType = String(getRestV2CaseInsensitiveHeaderValue(response?.headers, ["content-type"]) || "").toLowerCase();
   const body = String(responseBody || "").toLowerCase();
   if (status === 401 || status === 403) {
-    const authHeader = String(response?.headers?.get("www-authenticate") || "").toLowerCase();
+    const authHeader = String(getRestV2CaseInsensitiveHeaderValue(response?.headers, ["www-authenticate"]) || "").toLowerCase();
     if (
       body.includes("invalid_sso_info") ||
       body.includes("session cookie is null") ||
