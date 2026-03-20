@@ -10252,10 +10252,6 @@ function registerPassVaultStorageListener() {
         });
       }
     });
-
-    if (nextClientId && nextClientId !== previousClientId && shouldAttemptSilentBootstrapSession()) {
-      void bootstrapSession("vault-storage-change");
-    }
   });
 
   state.passVaultStorageListenerBound = true;
@@ -12614,9 +12610,6 @@ async function finalizeSuccessfulZipKeyImport(result = null) {
   setStatus("", "info");
   setZipKeyImportFeedback(READY_ZIP_KEY_IMPORT_STATUS_MESSAGE, "success");
   render();
-  if (!state.manualSignOutHold) {
-    await bootstrapSession("zip-key-import");
-  }
   focusPostZipKeyImportAction();
   return {
     ok: true,
@@ -50235,6 +50228,7 @@ function resetWorkflowForLoggedOut(options = {}) {
     : createEmptyUnderparVaultPayload();
   const hasZipKeyClientId = hasConfiguredUnderparImsClientId(nextPassVault);
   clearRestrictedOrgOptions();
+  state.selectedTargetOrganizationKey = "";
   state.programmers = [];
   state.selectedMediaCompany = "";
   state.selectedRequestorId = "";
@@ -52868,13 +52862,12 @@ function buildTargetOrganizationContext(
   const explicitSelection = normalizedSelectedKey
     ? findConfiguredTargetOrganization(options, { key: normalizedSelectedKey })
     : null;
-  const selectedOrganization = explicitSelection || (options.length === 1 ? options[0] : null);
 
   return {
     options,
-    selectedOrganization,
-    requiresSelection: options.length > 1 && !explicitSelection,
-    selectionMode: explicitSelection ? "manual" : options.length === 1 ? "implicit-single" : "none",
+    selectedOrganization: explicitSelection || null,
+    requiresSelection: false,
+    selectionMode: explicitSelection ? "manual" : "none",
   };
 }
 
@@ -53108,7 +53101,7 @@ function updateRestrictedContext(sessionData, options = {}) {
   const targetOrganization =
     sessionData?.targetOrganization && typeof sessionData.targetOrganization === "object"
       ? sessionData.targetOrganization
-      : resolveTargetOrganizationForLogin();
+      : null;
   const targetLabel = firstNonEmptyString([targetOrganization?.label, targetOrganization?.name]);
   const orgVerificationMessage = String(sessionData?.orgVerification?.message || "").trim();
   const orgLabel = firstNonEmptyString([
@@ -56205,14 +56198,11 @@ async function enforceAdobePassAccess(loginData) {
   const selectedTargetOrganization =
     findConfiguredTargetOrganization(
       configuredTargetOrganizations,
-      loginData?.targetOrganization || resolveTargetOrganizationForLogin()
+      loginData?.targetOrganization && typeof loginData.targetOrganization === "object"
+        ? loginData.targetOrganization
+        : null
     ) ||
-    (loginData?.targetOrganization && typeof loginData.targetOrganization === "object"
-      ? loginData.targetOrganization
-      : resolveTargetOrganizationForLogin());
-  if (selectedTargetOrganization?.key) {
-    state.selectedTargetOrganizationKey = selectedTargetOrganization.key;
-  }
+    (loginData?.targetOrganization && typeof loginData.targetOrganization === "object" ? loginData.targetOrganization : null);
   const profileSeedData = attachTargetOrganizationToLoginData(
     {
       ...loginData,
@@ -56258,10 +56248,7 @@ async function enforceAdobePassAccess(loginData) {
     findMatchingRestrictedOrganizationOption(state.restrictedOrgOptions, {
       orgId: firstNonEmptyString([orgVerification?.verifiedOrgId, orgVerification?.resolvedOrgId]),
     }) ||
-    findMatchingRestrictedOrganizationOption(state.restrictedOrgOptions, selectedTargetOrganization) ||
     findMatchingRestrictedOrganizationOption(state.restrictedOrgOptions, loginData?.adobePassOrg) ||
-    state.restrictedOrgOptions.find((option) => option.isAdobePass) ||
-    state.restrictedOrgOptions[0] ||
     null;
 
   const resolved = {
@@ -57383,7 +57370,9 @@ async function refreshSessionNoTouch() {
       const activated = await activateSession(
         attachTargetOrganizationToLoginData(
           buildLoginSessionPayloadFromAuth(authData, profile),
-          state.loginData?.targetOrganization || resolveTargetOrganizationForLogin()
+          state.loginData?.targetOrganization && typeof state.loginData.targetOrganization === "object"
+            ? state.loginData.targetOrganization
+            : null
         ),
         "silent-refresh"
       );
@@ -57446,7 +57435,9 @@ async function attemptSilentBootstrapLogin() {
     const profile = await resolveProfileAfterLogin(authData);
     return attachTargetOrganizationToLoginData(
       buildLoginSessionPayloadFromAuth(authData, profile),
-      resolveTargetOrganizationForLogin()
+      state.loginData?.targetOrganization && typeof state.loginData.targetOrganization === "object"
+        ? state.loginData.targetOrganization
+        : null
     );
   } catch {
     // Silent PKCE bootstrap is best-effort only.
@@ -70759,7 +70750,9 @@ function renderRestrictedView() {
   const targetedOption =
     findMatchingRestrictedOrganizationOption(
       options,
-      state.loginData?.targetOrganization || resolveTargetOrganizationForLogin()
+      state.loginData?.targetOrganization && typeof state.loginData.targetOrganization === "object"
+        ? state.loginData.targetOrganization
+        : null
     ) || null;
   const recommended = targetedOption || options.find((option) => option.isAdobePass);
   if (options.length === 0) {
@@ -70868,7 +70861,7 @@ async function signInInteractive(options = {}) {
   const requestedTargetOrganization =
     loginOptions?.targetOrganization && typeof loginOptions.targetOrganization === "object"
       ? loginOptions.targetOrganization
-      : resolveTargetOrganizationForLogin();
+      : null;
   const targetOrganization =
     findConfiguredTargetOrganization(configuredTargetOrganizations, requestedTargetOrganization) ||
     requestedTargetOrganization ||
@@ -71021,7 +71014,9 @@ async function refreshSessionManual() {
     const activated = await activateSession(
       attachTargetOrganizationToLoginData(
         buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
-        state.loginData?.targetOrganization || resolveTargetOrganizationForLogin()
+        state.loginData?.targetOrganization && typeof state.loginData.targetOrganization === "object"
+          ? state.loginData.targetOrganization
+          : null
       ),
       usedInteractiveLogin ? "manual-refresh-interactive" : "manual-refresh",
       {
@@ -71170,17 +71165,11 @@ async function onRestrictedSignInAgain() {
   if (state.busy || state.restrictedOrgSwitchBusy) {
     return;
   }
-  const selected = getSelectedRestrictedOrgOption();
-  const targetOrganization =
-    findConfiguredTargetOrganization(getConfiguredTargetOrganizations(), selected || resolveTargetOrganizationForLogin()) ||
-    selected ||
-    resolveTargetOrganizationForLogin() ||
-    null;
+  state.selectedTargetOrganizationKey = "";
   state.restrictedRecoveryLabel = "Resetting Adobe sign-in and reopening the profile chooser.";
   await signInInteractive({
     prompt: "login",
     forceBrowserLogout: true,
-    targetOrganization,
   });
 }
 
@@ -71201,6 +71190,7 @@ async function onPrimarySignInClick() {
     return;
   }
 
+  state.selectedTargetOrganizationKey = "";
   await signInInteractive({
     prompt: "login",
     forceBrowserLogout: true,
@@ -71329,65 +71319,6 @@ async function bootstrapSession(reason = "startup") {
 
     if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
       return;
-    }
-
-    if (shouldAttemptSilentBootstrapSession()) {
-      const now = Date.now();
-      const silentProbeReason = normalizedReason;
-      if (
-        silentProbeReason === "zip-key-import" ||
-        silentProbeReason === "startup" ||
-        now - Number(state.lastSilentBootstrapAttemptAt || 0) >= SILENT_BOOTSTRAP_RETRY_INTERVAL_MS
-      ) {
-        state.lastSilentBootstrapAttemptAt = now;
-        try {
-          const silent = await attemptSilentBootstrapLogin();
-          if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
-            return;
-          }
-          if (silent) {
-            const activated = await activateSession(silent, `silent-bootstrap:${silentProbeReason}`);
-            if (activated) {
-              setUnderparDiagnosticMarker("bootstrap", {
-                status: "success",
-                reason: normalizedReason,
-                phase: "silent-session",
-                path: `silent-bootstrap:${silentProbeReason}`,
-              });
-              log("Auto-resumed Adobe Experience Cloud session", {
-                reason: silentProbeReason,
-              });
-              clearStatusUnlessCmTenantsPrecheckBlocked();
-              return;
-            }
-            if (state.restricted) {
-              setUnderparDiagnosticMarker("bootstrap", {
-                status: "restricted",
-                reason: normalizedReason,
-                phase: "silent-session-denied",
-                path: `silent-bootstrap:${silentProbeReason}`,
-              });
-              setStatus("", "info");
-              return;
-            }
-          }
-        } catch (error) {
-          if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
-            return;
-          }
-          log("Silent Adobe session probe failed", {
-            reason: silentProbeReason,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          setUnderparDiagnosticMarker("bootstrap", {
-            status: "error",
-            reason: normalizedReason,
-            phase: "silent-probe-failed",
-            path: `silent-bootstrap:${silentProbeReason}`,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
     }
 
     if (state.restricted) {
@@ -71710,21 +71641,13 @@ function registerEventHandlers() {
     }
     if (shouldRunExperienceCloudSessionMonitor()) {
       void runExperienceCloudSessionMonitorTick("visibility");
-      return;
-    }
-    if (shouldAttemptSilentBootstrapSession()) {
-      void bootstrapSession("panel-visible");
     }
   });
 
   window.addEventListener("focus", () => {
-    if (!shouldRunExperienceCloudSessionMonitor()) {
-      if (shouldAttemptSilentBootstrapSession()) {
-        void bootstrapSession("window-focus");
-      }
-      return;
+    if (shouldRunExperienceCloudSessionMonitor()) {
+      void runExperienceCloudSessionMonitorTick("focus");
     }
-    void runExperienceCloudSessionMonitorTick("focus");
   });
 
   window.addEventListener(

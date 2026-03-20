@@ -1157,70 +1157,46 @@ test("DEBUG INFO and logged-out controls bind before async init and keep a safe 
   assert.match(initSource, /await settleUnderparInitStep\("Pass VAULT load", \(\) => ensurePassVaultLoaded\(\{ forceReload: false \}\)\);/);
 });
 
-test("post-ZIP.KEY logged-out flow silently probes for an existing Adobe session like LoginButton", () => {
+test("post-ZIP.KEY logged-out flow stays user-driven and does not auto-bootstrap Adobe auth", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const initSource = extractFunctionSource(popupSource, "init");
   const registerHandlersSource = extractFunctionSource(popupSource, "registerEventHandlers");
+  const vaultListenerSource = extractFunctionSource(popupSource, "registerPassVaultStorageListener");
   const importZipKeySource = extractFunctionSource(popupSource, "importZipKeyIntoVaultFromText");
   const finalizeZipKeySource = extractFunctionSource(popupSource, "finalizeSuccessfulZipKeyImport");
   const bootstrapSource = extractFunctionSource(popupSource, "bootstrapSession");
 
-  assert.match(popupSource, /const SILENT_BOOTSTRAP_RETRY_INTERVAL_MS = 15 \* 1000;/);
-  assert.match(popupSource, /function shouldAttemptSilentBootstrapSession\(\)/);
   assert.match(initSource, /await settleUnderparInitStep\("Session bootstrap", \(\) => bootstrapSession\("startup"\)\);/);
-  assert.match(registerHandlersSource, /void bootstrapSession\("panel-visible"\);/);
-  assert.match(registerHandlersSource, /void bootstrapSession\("window-focus"\);/);
+  assert.doesNotMatch(registerHandlersSource, /void bootstrapSession\("panel-visible"\);/);
+  assert.doesNotMatch(registerHandlersSource, /void bootstrapSession\("window-focus"\);/);
+  assert.doesNotMatch(vaultListenerSource, /bootstrapSession\("vault-storage-change"\)/);
   assert.match(importZipKeySource, /return await finalizeSuccessfulZipKeyImport\(result\);/);
   assert.match(finalizeZipKeySource, /state\.manualZipKeyImportGate = false;/);
-  assert.match(finalizeZipKeySource, /await bootstrapSession\("zip-key-import"\);/);
-  assert.match(bootstrapSource, /const silent = await attemptSilentBootstrapLogin\(\);/);
-  assert.match(bootstrapSource, /silent-bootstrap:/);
+  assert.doesNotMatch(finalizeZipKeySource, /bootstrapSession\("zip-key-import"\)/);
+  assert.doesNotMatch(bootstrapSource, /attemptSilentBootstrapLogin\(\)/);
+  assert.doesNotMatch(bootstrapSource, /silent-bootstrap:/);
 });
 
-test("manual sign-out suppresses silent bootstrap until the user explicitly signs in again", () => {
+test("plain sign-in paths clear hidden target-org steering before Adobe chooser opens", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const helpers = loadPopupSilentBootstrapGateHelper();
-  const applySessionSource = extractFunctionSource(popupSource, "applyActiveLoginSession");
-  const finalizeZipKeySource = extractFunctionSource(popupSource, "finalizeSuccessfulZipKeyImport");
-  const signOutSource = extractFunctionSource(popupSource, "signOutAndResetSession");
+  const primarySignInSource = extractFunctionSource(popupSource, "onPrimarySignInClick");
+  const signInAgainSource = extractFunctionSource(popupSource, "onRestrictedSignInAgain");
+  const signInSource = extractFunctionSource(popupSource, "signInInteractive");
 
-  helpers.setState({
-    sessionReady: false,
-    restricted: false,
-    zipKeyImportPending: false,
-    manualSignOutHold: false,
-  });
-  assert.equal(helpers.shouldAttemptSilentBootstrapSession(), true);
-
-  helpers.setState({
-    manualSignOutHold: true,
-  });
-  assert.equal(helpers.shouldAttemptSilentBootstrapSession(), false);
-  helpers.setState({
-    manualSignOutHold: false,
-    busy: true,
-  });
-  assert.equal(helpers.shouldAttemptSilentBootstrapSession(), false);
-  helpers.setState({
-    busy: false,
-    restrictedOrgSwitchBusy: true,
-  });
-  assert.equal(helpers.shouldAttemptSilentBootstrapSession(), false);
-  assert.match(signOutSource, /persistManualSignOutHold\(true,\s*"manual-sign-out"\)/);
-  assert.match(applySessionSource, /persistManualSignOutHold\(false,\s*"session-activated"\)/);
-  assert.match(finalizeZipKeySource, /if \(!state\.manualSignOutHold\) \{\s*await bootstrapSession\("zip-key-import"\);/);
+  assert.match(primarySignInSource, /state\.selectedTargetOrganizationKey = "";/);
+  assert.match(signInAgainSource, /state\.selectedTargetOrganizationKey = "";/);
+  assert.doesNotMatch(signInAgainSource, /targetOrganization/);
+  assert.doesNotMatch(signInSource, /resolveTargetOrganizationForLogin\(\)/);
 });
 
-test("silent bootstrap preserves restricted recovery instead of resetting back to logged-out sign-in", () => {
+test("bootstrap restores stored sessions only and does not probe ambient Adobe browser auth", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const bootstrapSource = extractFunctionSource(popupSource, "bootstrapSession");
 
-  assert.match(bootstrapSource, /if \(state\.restricted\) \{\s*setUnderparDiagnosticMarker\("bootstrap", \{\s*status: "restricted",[\s\S]*phase: "silent-session-denied",/);
   assert.match(bootstrapSource, /if \(state\.restricted\) \{\s*setUnderparDiagnosticMarker\("bootstrap", \{\s*status: "restricted",[\s\S]*phase: "complete",/);
-  assert.ok(
-    bootstrapSource.indexOf('phase: "silent-session-denied"') <
-      bootstrapSource.indexOf("resetWorkflowForLoggedOut();")
-  );
+  assert.doesNotMatch(bootstrapSource, /attemptSilentBootstrapLogin\(\)/);
+  assert.doesNotMatch(bootstrapSource, /phase: "silent-session-denied"/);
+  assert.doesNotMatch(bootstrapSource, /phase: "silent-probe-failed"/);
 });
 
 test("interactive recovery paths force Adobe IMS to show the login chooser without hard-gating activation on helper scopes", () => {
@@ -1242,12 +1218,14 @@ test("interactive recovery paths force Adobe IMS to show the login chooser witho
   assert.match(signInSource, /await runUnderparImsBrowserLogout\(/);
   assert.doesNotMatch(signInSource, /minimumGrantedScope/);
   assert.doesNotMatch(signInSource, /requiredActivationScope/);
+  assert.doesNotMatch(signInSource, /resolveTargetOrganizationForLogin\(\)/);
   assert.match(switchSource, /prompt: "login"/);
   assert.doesNotMatch(switchSource, /minimumGrantedScope/);
   assert.doesNotMatch(switchSource, /requiredActivationScope/);
   assert.match(autoSwitchSource, /const prompt = normalizeUnderparImsPrompt\(options\?\.prompt \|\| \(interactive \? "login" : ""\), interactive\);/);
   assert.doesNotMatch(autoSwitchSource, /minimumGrantedScope/);
   assert.match(signInAgainSource, /await signInInteractive\(\{[\s\S]*prompt: "login",[\s\S]*forceBrowserLogout: true,[\s\S]*\}\);/);
+  assert.doesNotMatch(signInAgainSource, /targetOrganization/);
   assert.match(retrySource, /scope: IMS_ORGANIZATION_SCOPE,\s*reason: "org-scope-fallback"/);
   assert.doesNotMatch(retrySource, /minimumGrantedScope/);
   assert.doesNotMatch(retrySource, /INSUFFICIENT_IMS_SCOPE/);
@@ -1605,23 +1583,28 @@ test("primary sign-in always forces Adobe's chooser and silent bootstrap no long
 
   assert.doesNotMatch(primarySignInSource, /buildTargetOrganizationContext\(\)/);
   assert.doesNotMatch(primarySignInSource, /Choose an Adobe org target before signing in\./);
+  assert.match(primarySignInSource, /state\.selectedTargetOrganizationKey = "";/);
   assert.match(primarySignInSource, /await signInInteractive\(\{\s*prompt: "login",\s*forceBrowserLogout: true,\s*\}\);/);
   assert.doesNotMatch(silentBootstrapSource, /targetOrganizationContext/);
   assert.match(silentBootstrapSource, /!state\.manualSignOutHold/);
   assert.match(silentBootstrapSource, /hasConfiguredUnderparImsClientId\(\)/);
 });
 
-test("activation and restricted recovery are target-org aware and no longer multi-loop org-switch attempts", () => {
+test("activation only trusts explicit target-org selection and restricted retry no longer reuses hidden config", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activationPrepSource = extractFunctionSource(popupSource, "enforceAdobePassAccess");
   const restrictedSwitchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
+  const restrictedRetrySource = extractFunctionSource(popupSource, "onRestrictedSignInAgain");
   const restrictedOptionsSource = extractFunctionSource(popupSource, "ensureRestrictedOrgOptionsFromToken");
 
   assert.match(activationPrepSource, /attachTargetOrganizationToLoginData/);
   assert.match(activationPrepSource, /verifyTargetOrganizationSelection/);
   assert.match(activationPrepSource, /tokenHasReadOrganizationsScope/);
+  assert.doesNotMatch(activationPrepSource, /resolveTargetOrganizationForLogin\(\)/);
+  assert.doesNotMatch(activationPrepSource, /state\.selectedTargetOrganizationKey =/);
   assert.match(restrictedOptionsSource, /updateRestrictedOrgOptions\(cachedOrganizations, configuredPreferredOrg, seedSession\)/);
   assert.match(restrictedSwitchSource, /buildPreferredOrgSwitchStrategy\(selected\)/);
+  assert.doesNotMatch(restrictedRetrySource, /targetOrganization/);
   assert.doesNotMatch(restrictedSwitchSource, /for \(const strategy of strategies\)/);
   assert.doesNotMatch(activationPrepSource, /orgVerification\.status === "verified-mismatch"/);
 });
@@ -1683,7 +1666,7 @@ test("missing-client-id flow renders a standalone ZIP.KEY gate before sign-in", 
   assert.match(renderSource, /els\.authBtn\.hidden = showZipKeyImportGate;/);
 });
 
-test("ZIP.KEY import completion clears the gate before bootstrap resumes session detection", () => {
+test("ZIP.KEY import completion clears the gate without starting Adobe login in the background", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const finalizeSource = extractFunctionSource(popupSource, "finalizeSuccessfulZipKeyImport");
   const fileImportSource = extractFunctionSource(popupSource, "importZipKeyIntoVaultFromFile");
@@ -1691,7 +1674,7 @@ test("ZIP.KEY import completion clears the gate before bootstrap resumes session
 
   assert.match(finalizeSource, /state\.zipKeyImportPending = false;/);
   assert.match(finalizeSource, /state\.manualZipKeyImportGate = false;/);
-  assert.match(finalizeSource, /await bootstrapSession\("zip-key-import"\)/);
+  assert.doesNotMatch(finalizeSource, /bootstrapSession\("zip-key-import"\)/);
   assert.match(fileImportSource, /return await finalizeSuccessfulZipKeyImport\(result\);/);
   assert.match(textImportSource, /return await finalizeSuccessfulZipKeyImport\(result\);/);
 });
@@ -1706,6 +1689,7 @@ test("logged-out workflow reset preserves imported ZIP.KEY IMS config unless the
   assert.match(resetSource, /const nextPassVault = preservePassVault/);
   assert.match(resetSource, /const hasZipKeyClientId = hasConfiguredUnderparImsClientId\(nextPassVault\);/);
   assert.match(resetSource, /normalizeUnderparVaultPayload\(state\.passVault \|\| createEmptyUnderparVaultPayload\(\)\)/);
+  assert.match(resetSource, /state\.selectedTargetOrganizationKey = "";/);
   assert.match(resetSource, /state\.zipKeyImportPending = false;/);
   assert.match(resetSource, /state\.zipKeyImportDragActive = false;/);
   assert.match(resetSource, /if \(!hasZipKeyClientId\) \{\s*setZipKeyImportFeedback\("",\s*"info"\);\s*\}/);
