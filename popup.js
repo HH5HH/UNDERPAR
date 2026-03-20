@@ -1,5 +1,6 @@
 const IMS_IDENTITY_SCOPE = "openid profile";
-const IMS_SCOPE = "openid profile offline_access additional_info.projectedProductContext";
+const IMS_ORGANIZATION_SCOPE = "openid profile read_organizations";
+const IMS_SCOPE = "openid profile offline_access additional_info.projectedProductContext read_organizations";
 const IMS_CONSOLE_ALLOWED_SCOPES = Object.freeze([
   "openid",
   "profile",
@@ -51037,9 +51038,19 @@ async function launchUnderparImsAuthorizationFlow(authorizeUrl, interactive = tr
   });
 }
 
+function normalizeUnderparImsPrompt(promptValue = "", interactive = true) {
+  if (interactive !== true) {
+    return "none";
+  }
+
+  const normalizedPrompt = String(promptValue || "").trim().toLowerCase();
+  return normalizedPrompt === "login" ? "login" : "";
+}
+
 async function runUnderparPkceLogin(options = {}) {
   const interactive = options?.interactive !== false;
   const extraParams = options?.extraParams && typeof options.extraParams === "object" ? options.extraParams : {};
+  const prompt = normalizeUnderparImsPrompt(options?.prompt, interactive);
   const runtimeConfig = await requireUnderparImsRuntimeConfig();
   const authConfiguration = await fetchUnderparImsOpenIdConfiguration();
   const redirectUri = getUnderparImsRedirectUri();
@@ -51061,7 +51072,7 @@ async function runUnderparPkceLogin(options = {}) {
       scope: requestedScope,
       state: requestState,
       codeChallenge,
-      prompt: interactive ? "" : "none",
+      prompt,
       extraParams,
     });
 
@@ -51070,6 +51081,7 @@ async function runUnderparPkceLogin(options = {}) {
       reason,
       clientId: runtimeConfig.clientId,
       scope: requestedScope,
+      prompt,
       redirectUri,
     });
 
@@ -51148,14 +51160,39 @@ async function runUnderparPkceLogin(options = {}) {
   };
 
   const configuredScope = normalizeImsScopeList(firstNonEmptyString([runtimeConfig.scope, IMS_SCOPE]), IMS_SCOPE);
+  const retryAttempts = [
+    {
+      scope: IMS_ORGANIZATION_SCOPE,
+      reason: "org-scope-fallback",
+    },
+    {
+      scope: IMS_IDENTITY_SCOPE,
+      reason: "identity-scope-fallback",
+    },
+  ].filter(({ scope }) => normalizeImsScopeList(scope, IMS_SCOPE) !== configuredScope);
+
+  let lastError = null;
   try {
     return await runAttempt(configuredScope, "configured-scope");
   } catch (error) {
+    lastError = error;
     if (!shouldRetryUnderparImsLoginWithIdentityScope(error, configuredScope)) {
       throw error;
     }
-    return await runAttempt(IMS_IDENTITY_SCOPE, "identity-scope-fallback");
   }
+
+  for (const attempt of retryAttempts) {
+    try {
+      return await runAttempt(attempt.scope, attempt.reason);
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetryUnderparImsLoginWithIdentityScope(error, attempt.scope)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("Adobe IMS login failed.");
 }
 
 async function startLogin(options = {}) {
@@ -54922,6 +54959,7 @@ async function attemptAutoSwitchToAdobePass(organizations, options = {}) {
 
   const interactive = options.interactive === true;
   const allowFallback = options.allowFallback === true;
+  const prompt = normalizeUnderparImsPrompt(options?.prompt || (interactive ? "login" : ""), interactive);
   const maxStrategies = Number.isFinite(options.maxStrategies) ? Math.max(1, Number(options.maxStrategies)) : 0;
   const strategies = buildOrgSwitchStrategies({
     ...toAdobePassOrgDescriptor(adobePassOrg),
@@ -54936,6 +54974,7 @@ async function attemptAutoSwitchToAdobePass(organizations, options = {}) {
         extraParams: strategy,
         interactive,
         allowFallback,
+        prompt,
       });
       if (interactive) {
         resetAvatarStateForInteractiveLogin();
@@ -67705,7 +67744,8 @@ function render() {
   void consumePendingUnderparEsmDeeplink();
 }
 
-async function signInInteractive() {
+async function signInInteractive(options = {}) {
+  const loginOptions = options && typeof options === "object" ? options : {};
   cancelPendingBootstrapSession();
   await releaseAuthPopupBootstrapContext("interactive-signin-reset");
   state.sessionMonitorSuppressed = false;
@@ -67720,8 +67760,10 @@ async function signInInteractive() {
   const signInStartedAt = Date.now();
   try {
     const authData = await startLogin({
+      ...loginOptions,
       interactive: true,
       allowFallback: true,
+      prompt: normalizeUnderparImsPrompt(loginOptions?.prompt || "login", true),
     });
     setUnderparDiagnosticMarker("auth", {
       status: "token-acquired",
@@ -67807,7 +67849,7 @@ async function refreshSessionManual() {
     try {
       authData = await startLogin({ interactive: false, allowFallback: false });
     } catch {
-      authData = await startLogin({ interactive: true, allowFallback: true });
+      authData = await startLogin({ interactive: true, allowFallback: true, prompt: "login" });
       usedInteractiveLogin = true;
     }
     setUnderparDiagnosticMarker("auth", {
@@ -67930,6 +67972,7 @@ async function onRestrictedOrgSwitch() {
           extraParams: strategy,
           interactive: true,
           allowFallback: true,
+          prompt: "login",
         });
         resetAvatarStateForInteractiveLogin();
         const profile = await resolveProfileAfterLogin(authData);
@@ -67995,7 +68038,7 @@ async function onRestrictedSignInAgain() {
     return;
   }
   state.restrictedRecoveryLabel = "Running full interactive sign-in flow.";
-  await signInInteractive();
+  await signInInteractive({ prompt: "login" });
 }
 
 async function onRestrictedSignOut() {

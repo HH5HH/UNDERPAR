@@ -50,7 +50,8 @@ function loadPopupImsHelpers() {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
   const script = [
-    'const IMS_SCOPE = "openid profile offline_access additional_info.projectedProductContext";',
+    'const IMS_SCOPE = "openid profile offline_access additional_info.projectedProductContext read_organizations";',
+    'const IMS_ORGANIZATION_SCOPE = "openid profile read_organizations";',
     'const IMS_DEFAULT_AUTHORIZATION_ENDPOINT = "https://ims-na1.adobelogin.com/ims/authorize/v2";',
     'const IMS_CONSOLE_ALLOWED_SCOPES = ["openid","profile","offline_access","additional_info.projectedProductContext","AdobeID","read_organizations","additional_info.job_function"];',
     'const IMS_LEGACY_SCOPE_MIGRATION_TOKENS = ["avatar","session","additional_info.account_type","additional_info.roles","additional_info.user_image_url","analytics_services"];',
@@ -351,7 +352,7 @@ test("legacy IMS scope bundles clamp to the LoginButton-style PKCE default scope
     "AdobeID,openid,avatar,session,read_organizations,additional_info.job_function,additional_info.projectedProductContext,analytics_services"
   );
 
-  assert.equal(result.scope, "openid profile offline_access additional_info.projectedProductContext");
+  assert.equal(result.scope, "openid profile offline_access additional_info.projectedProductContext read_organizations");
   assert.deepEqual([...result.droppedScopes].sort(), ["analytics_services", "avatar", "session"].sort());
 });
 
@@ -678,6 +679,23 @@ test("manual sign-out suppresses silent bootstrap until the user explicitly sign
   assert.match(finalizeZipKeySource, /if \(!state\.manualSignOutHold\) \{\s*await bootstrapSession\("zip-key-import"\);/);
 });
 
+test("interactive recovery paths force Adobe IMS to show the login chooser and retain org-readable scope", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const signInSource = extractFunctionSource(popupSource, "signInInteractive");
+  const switchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
+  const retrySource = extractFunctionSource(popupSource, "runUnderparPkceLogin");
+  const autoSwitchSource = extractFunctionSource(popupSource, "attemptAutoSwitchToAdobePass");
+  const signInAgainSource = extractFunctionSource(popupSource, "onRestrictedSignInAgain");
+
+  assert.match(popupSource, /const IMS_SCOPE = "openid profile offline_access additional_info\.projectedProductContext read_organizations";/);
+  assert.match(popupSource, /const IMS_ORGANIZATION_SCOPE = "openid profile read_organizations";/);
+  assert.match(signInSource, /prompt: normalizeUnderparImsPrompt\(loginOptions\?\.prompt \|\| "login", true\)/);
+  assert.match(switchSource, /prompt: "login"/);
+  assert.match(autoSwitchSource, /const prompt = normalizeUnderparImsPrompt\(options\?\.prompt \|\| \(interactive \? "login" : ""\), interactive\);/);
+  assert.match(signInAgainSource, /await signInInteractive\(\{ prompt: "login" \}\);/);
+  assert.match(retrySource, /scope: IMS_ORGANIZATION_SCOPE,\s*reason: "org-scope-fallback"/);
+});
+
 test("vault purge path forces a durable start-shell reset and clears in-memory vault state", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const purgeSource = extractFunctionSource(popupSource, "purgePassVaultFromDevtools");
@@ -882,6 +900,22 @@ test("PKCE authorization URL ignores auth-envelope overrides from extra params",
   assert.equal(parsed.searchParams.get("code_challenge_method"), "S256");
   assert.equal(parsed.searchParams.get("code_challenge"), "challenge-123");
   assert.equal(parsed.searchParams.get("organization"), "@adobepass");
+});
+
+test("PKCE authorization URL carries the supported IMS login prompt when requested", () => {
+  const helpers = loadPopupImsHelpers();
+
+  const authorizationUrl = helpers.buildUnderparImsAuthorizationCodeUrl({
+    clientId: "underpar-client-id",
+    redirectUri: "https://example.chromiumapp.org/ims-callback",
+    scope: "openid profile read_organizations",
+    state: "state-123",
+    codeChallenge: "challenge-123",
+    prompt: "login",
+  });
+
+  const parsed = new URL(authorizationUrl);
+  assert.equal(parsed.searchParams.get("prompt"), "login");
 });
 
 test("logged-out popup and sidepanel surfaces expose ZIP.KEY import controls", () => {
