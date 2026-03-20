@@ -177,16 +177,18 @@ function loadPopupHeaderAuthClickHelper() {
     "const state = { zipKeyImportPending: false, busy: false, sessionReady: false, loginData: null, restricted: false };",
     "let promptCount = 0;",
     "let signInCount = 0;",
+    "let signInArgs = [];",
     "let toggleCount = 0;",
     "function shouldShowZipKeyImportGate() { return false; }",
     "function promptForZipKeyImport() { promptCount += 1; }",
-    "async function signInInteractive() { signInCount += 1; }",
+    "async function signInInteractive(options = {}) { signInCount += 1; signInArgs.push(options || {}); }",
     "function toggleAvatarMenu() { toggleCount += 1; }",
     extractFunctionSource(source, "onPrimarySignInClick"),
     extractFunctionSource(source, "onAuthClick"),
     "function setState(nextState = {}) { Object.assign(state, nextState || {}); }",
     "function getCounts() { return { promptCount, signInCount, toggleCount }; }",
-    "module.exports = { onPrimarySignInClick, onAuthClick, setState, getCounts };",
+    "function getLastSignInOptions() { return signInArgs.length > 0 ? signInArgs[signInArgs.length - 1] : null; }",
+    "module.exports = { onPrimarySignInClick, onAuthClick, setState, getCounts, getLastSignInOptions };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
@@ -298,6 +300,13 @@ test("header UP button no longer launches sign-in when logged out", async () => 
     signInCount: 1,
     toggleCount: 0,
   }));
+  assert.equal(
+    JSON.stringify(helpers.getLastSignInOptions()),
+    JSON.stringify({
+      prompt: "login",
+      forceBrowserLogout: true,
+    })
+  );
 
   helpers.setState({
     sessionReady: true,
@@ -468,13 +477,17 @@ test("interactive login and org switching no longer block on a temporary CM boot
 test("session activation defers CM tenant hydration and unlocks Media Company selection immediately", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activateSource = extractFunctionSource(popupSource, "activateSession");
+  const programmersSource = extractFunctionSource(popupSource, "loadProgrammersData");
   const mediaCompanyLockSource = extractFunctionSource(popupSource, "isMediaCompanySelectionLockedByCmPrecheck");
   const mediaCompanyLabelSource = extractFunctionSource(popupSource, "getMediaCompanySelectDefaultLabel");
   const prefetchSource = extractFunctionSource(popupSource, "prefetchCmTenantsCatalogInBackground");
 
   assert.match(activateSource, /prefetchCmTenantsCatalogInBackground/);
   assert.match(activateSource, /prefetchCmConsoleBootstrapSummaryInBackground/);
+  assert.match(activateSource, /allowRestrictedSession:\s*true/);
   assert.doesNotMatch(activateSource, /await ensureCmTenantsPrecheckForActiveSession/);
+  assert.match(programmersSource, /const allowRestrictedSession = options\.allowRestrictedSession === true;/);
+  assert.match(programmersSource, /\(state\.restricted && !allowRestrictedSession\)/);
   assert.match(mediaCompanyLockSource, /return false;/);
   assert.match(mediaCompanyLabelSource, /-- Choose a Media Company --/);
   assert.match(prefetchSource, /ensureCmTenantsPrecheckForActiveSession/);

@@ -56078,6 +56078,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   try {
     await loadProgrammersData(enforced.loginData.accessToken, {
       allowInteractiveAuthBootstrap: allowInteractiveConsoleBootstrap,
+      allowRestrictedSession: true,
       forceRefresh: false,
     });
   } catch (error) {
@@ -67581,7 +67582,8 @@ async function fetchProgrammersFromApi(options = {}) {
 
 async function loadProgrammersData(accessToken = "", options = {}) {
   const normalizedAccessToken = normalizeBearerTokenValue(firstNonEmptyString([accessToken, state.loginData?.accessToken]));
-  if ((!state.loginData && !normalizedAccessToken) || state.restricted) {
+  const allowRestrictedSession = options.allowRestrictedSession === true;
+  if ((!state.loginData && !normalizedAccessToken) || (state.restricted && !allowRestrictedSession)) {
     setUnderparDiagnosticMarker("programmers", {
       status: "skipped",
       phase: "no-session",
@@ -68255,7 +68257,10 @@ async function onPrimarySignInClick() {
     return;
   }
 
-  await signInInteractive();
+  await signInInteractive({
+    prompt: "login",
+    forceBrowserLogout: true,
+  });
 }
 
 async function onAuthClick() {
