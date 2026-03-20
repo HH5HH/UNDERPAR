@@ -57079,6 +57079,7 @@ async function applyActiveLoginSession(loginData, options = {}) {
   state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
   clearRestrictedOrgOptions();
   state.sessionReady = true;
+  syncMediaCompanySelectAvailability();
   startExperienceCloudSessionMonitor();
   if (persist) {
     await saveLoginData(loginData);
@@ -57682,6 +57683,7 @@ function syncMediaCompanySelectAvailability() {
   }
 
   if (!state.sessionReady || !state.loginData || state.restricted) {
+    els.mediaCompanySelect.disabled = true;
     return;
   }
 

@@ -2127,6 +2127,12 @@ function hasProgrammerIdentityChanged(previousProgrammerId = "", previousProgram
   if (!previousId && !nextId && !previousName && !nextName) {
     return false;
   }
+  if ((previousId || previousName) && !(nextId || nextName)) {
+    return true;
+  }
+  if (!(previousId || previousName) && (nextId || nextName)) {
+    return true;
+  }
   // Ignore transient partial identity payloads (e.g. id present in one state and name-only in another).
   return false;
 }

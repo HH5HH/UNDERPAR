@@ -1153,6 +1153,13 @@ function hasProgrammerIdentityChanged(previousProgrammerId = "", previousProgram
     return false;
   }
 
+  if ((previousId || previousName) && !(nextId || nextName)) {
+    return true;
+  }
+  if (!(previousId || previousName) && (nextId || nextName)) {
+    return true;
+  }
+
   return false;
 }
 

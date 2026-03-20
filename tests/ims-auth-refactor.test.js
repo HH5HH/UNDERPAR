@@ -320,6 +320,42 @@ function loadPopupCmPrecheckResetHelper() {
   return context.module.exports;
 }
 
+function loadPopupMediaCompanyAvailabilityHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "const state = { sessionReady: false, loginData: null, restricted: false };",
+    'const els = { mediaCompanySelect: { disabled: false, options: [{ textContent: "" }, { value: "abc" }] } };',
+    extractFunctionSource(source, "getMediaCompanySelectDefaultLabel"),
+    extractFunctionSource(source, "isMediaCompanySelectionLockedByCmPrecheck"),
+    extractFunctionSource(source, "syncMediaCompanySelectAvailability"),
+    "function setState(nextState = {}) { Object.assign(state, nextState || {}); }",
+    "function getSelect() { return els.mediaCompanySelect; }",
+    "module.exports = { syncMediaCompanySelectAvailability, setState, getSelect };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+function loadWorkspaceProgrammerIdentityHelper(fileName) {
+  const filePath = path.join(ROOT, fileName);
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    extractFunctionSource(source, "hasProgrammerIdentityChanged"),
+    "module.exports = { hasProgrammerIdentityChanged };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("runtime source no longer hard-codes debugger client or legacy redirect host", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const backgroundSource = fs.readFileSync(path.join(ROOT, "background.js"), "utf8");
@@ -1817,6 +1853,41 @@ test("CM precheck reset clears stale pending state before background bootstrap b
   assert.equal(stateSnapshot.cmTenantsCatalogRuntimeFresh, false);
   assert.equal(stateSnapshot.cmTenantsCatalogFetchAttempted, false);
   assert.equal(helpers.getSyncCalls(), 1);
+});
+
+test("media company select availability disables before session activation and re-enables immediately after activation", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const applySessionSource = extractFunctionSource(popupSource, "applyActiveLoginSession");
+  const helpers = loadPopupMediaCompanyAvailabilityHelper();
+
+  helpers.setState({
+    sessionReady: false,
+    loginData: null,
+    restricted: false,
+  });
+  helpers.syncMediaCompanySelectAvailability();
+  assert.equal(helpers.getSelect().disabled, true);
+
+  helpers.setState({
+    sessionReady: true,
+    loginData: { accessToken: "token" },
+    restricted: false,
+  });
+  helpers.syncMediaCompanySelectAvailability();
+  assert.equal(helpers.getSelect().disabled, false);
+  assert.match(applySessionSource, /state\.sessionReady = true;\s*syncMediaCompanySelectAvailability\(\);/);
+});
+
+test("workspace identity helpers treat cleared programmer context as a real change", () => {
+  const esmHelpers = loadWorkspaceProgrammerIdentityHelper("esm-workspace.js");
+  const cmHelpers = loadWorkspaceProgrammerIdentityHelper("cm-workspace.js");
+
+  for (const helpers of [esmHelpers, cmHelpers]) {
+    assert.equal(helpers.hasProgrammerIdentityChanged("Turner", "Turner", "", ""), true);
+    assert.equal(helpers.hasProgrammerIdentityChanged("", "", "ABC", "ABC"), true);
+    assert.equal(helpers.hasProgrammerIdentityChanged("ABC", "ABC", "ABC", "ABC"), false);
+    assert.equal(helpers.hasProgrammerIdentityChanged("ABC", "", "", "ABC"), false);
+  }
 });
 
 test("CM tenant background prefetch is guarded by the shared precheck promise instead of a stale pending flag", () => {
