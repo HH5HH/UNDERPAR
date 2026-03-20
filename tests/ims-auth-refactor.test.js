@@ -1347,6 +1347,7 @@ test("activation and restricted recovery are target-org aware and no longer mult
   assert.match(restrictedOptionsSource, /updateRestrictedOrgOptions\(cachedOrganizations, configuredPreferredOrg, seedSession\)/);
   assert.match(restrictedSwitchSource, /buildPreferredOrgSwitchStrategy\(selected\)/);
   assert.doesNotMatch(restrictedSwitchSource, /for \(const strategy of strategies\)/);
+  assert.doesNotMatch(activationPrepSource, /orgVerification\.status === "verified-mismatch"/);
 });
 
 test("programmer access denial drops into the org picker instead of auto-restarting recovery auth", () => {

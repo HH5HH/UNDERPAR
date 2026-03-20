@@ -56169,14 +56169,6 @@ async function enforceAdobePassAccess(loginData) {
     orgVerification,
   };
 
-  if (orgVerification.status === "verified-mismatch") {
-    return {
-      allowed: false,
-      loginData: resolved,
-      recoveryLabel: orgVerification.message,
-    };
-  }
-
   return {
     allowed: true,
     loginData: resolved,
