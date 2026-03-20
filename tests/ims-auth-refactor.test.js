@@ -53,6 +53,7 @@ function loadPopupImsHelpers() {
     'const IMS_SCOPE = "openid profile offline_access additional_info.projectedProductContext read_organizations";',
     'const IMS_ORGANIZATION_SCOPE = "openid profile read_organizations";',
     'const IMS_DEFAULT_AUTHORIZATION_ENDPOINT = "https://ims-na1.adobelogin.com/ims/authorize/v2";',
+    'const IMS_DEFAULT_LOGOUT_ENDPOINT = "https://ims-na1.adobelogin.com/ims/logout";',
     'const IMS_CONSOLE_ALLOWED_SCOPES = ["openid","profile","offline_access","additional_info.projectedProductContext","AdobeID","read_organizations","additional_info.job_function"];',
     'const IMS_LEGACY_SCOPE_MIGRATION_TOKENS = ["avatar","session","additional_info.account_type","additional_info.roles","additional_info.user_image_url","analytics_services"];',
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : []) { const text = String(value || '').trim(); if (text) { return text; } } return ''; }",
@@ -67,7 +68,8 @@ function loadPopupImsHelpers() {
     extractFunctionSource(source, "normalizeUnderparVaultImsRuntimeConfigRecord"),
     extractFunctionSource(source, "extractUnderparImsRuntimeConfigFromZipKeyText"),
     extractFunctionSource(source, "buildUnderparImsAuthorizationCodeUrl"),
-    "module.exports = { normalizeImsScopeList, sanitizeUnderparImsScopeForCredential, normalizeUnderparVaultImsRuntimeConfigRecord, extractUnderparImsRuntimeConfigFromZipKeyText, buildUnderparImsAuthorizationCodeUrl };",
+    extractFunctionSource(source, "buildUnderparImsLogoutUrl"),
+    "module.exports = { normalizeImsScopeList, sanitizeUnderparImsScopeForCredential, normalizeUnderparVaultImsRuntimeConfigRecord, extractUnderparImsRuntimeConfigFromZipKeyText, buildUnderparImsAuthorizationCodeUrl, buildUnderparImsLogoutUrl };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
@@ -686,14 +688,25 @@ test("interactive recovery paths force Adobe IMS to show the login chooser and r
   const retrySource = extractFunctionSource(popupSource, "runUnderparPkceLogin");
   const autoSwitchSource = extractFunctionSource(popupSource, "attemptAutoSwitchToAdobePass");
   const signInAgainSource = extractFunctionSource(popupSource, "onRestrictedSignInAgain");
+  const logoutSource = extractFunctionSource(popupSource, "runUnderparImsBrowserLogout");
+  const organizationsSource = extractFunctionSource(popupSource, "fetchOrganizations");
 
   assert.match(popupSource, /const IMS_SCOPE = "openid profile offline_access additional_info\.projectedProductContext read_organizations";/);
   assert.match(popupSource, /const IMS_ORGANIZATION_SCOPE = "openid profile read_organizations";/);
+  assert.match(popupSource, /const IMS_DEFAULT_LOGOUT_ENDPOINT = `\$\{IMS_ISSUER_URL\}\/ims\/logout`;/);
   assert.match(signInSource, /prompt: normalizeUnderparImsPrompt\(loginOptions\?\.prompt \|\| "login", true\)/);
+  assert.match(signInSource, /if \(loginOptions\?\.forceBrowserLogout === true\)/);
+  assert.match(signInSource, /await runUnderparImsBrowserLogout\(/);
   assert.match(switchSource, /prompt: "login"/);
   assert.match(autoSwitchSource, /const prompt = normalizeUnderparImsPrompt\(options\?\.prompt \|\| \(interactive \? "login" : ""\), interactive\);/);
-  assert.match(signInAgainSource, /await signInInteractive\(\{ prompt: "login" \}\);/);
+  assert.match(signInAgainSource, /await signInInteractive\(\{ prompt: "login", forceBrowserLogout: true \}\);/);
   assert.match(retrySource, /scope: IMS_ORGANIZATION_SCOPE,\s*reason: "org-scope-fallback"/);
+  assert.match(logoutSource, /buildUnderparImsLogoutUrl\(/);
+  assert.match(logoutSource, /await launchUnderparImsAuthorizationFlow\(logoutUrl, interactive\);/);
+  assert.match(organizationsSource, /const clientIdCandidates = getUnderparImsClientIdCandidates\(normalizedAccessToken\);/);
+  assert.match(organizationsSource, /credentials: "include"/);
+  assert.match(organizationsSource, /headers: buildImsProfileHeaders\(normalizedAccessToken, endpoint\.clientId\)/);
+  assert.match(organizationsSource, /const payloadScore = flattenOrganizations\(parsed\)\.length;/);
 });
 
 test("vault purge path forces a durable start-shell reset and clears in-memory vault state", () => {
@@ -916,6 +929,23 @@ test("PKCE authorization URL carries the supported IMS login prompt when request
 
   const parsed = new URL(authorizationUrl);
   assert.equal(parsed.searchParams.get("prompt"), "login");
+});
+
+test("IMS logout URL carries the browser reset parameters needed for recovery re-auth", () => {
+  const helpers = loadPopupImsHelpers();
+
+  const logoutUrl = helpers.buildUnderparImsLogoutUrl({
+    accessToken: "ims-access-token",
+    redirectUri: "https://example.chromiumapp.org/ims-callback",
+    clientId: "underpar-client-id",
+  });
+
+  const parsed = new URL(logoutUrl);
+  assert.equal(parsed.origin, "https://ims-na1.adobelogin.com");
+  assert.equal(parsed.pathname, "/ims/logout");
+  assert.equal(parsed.searchParams.get("access_token"), "ims-access-token");
+  assert.equal(parsed.searchParams.get("redirect_uri"), "https://example.chromiumapp.org/ims-callback");
+  assert.equal(parsed.searchParams.get("client_id"), "underpar-client-id");
 });
 
 test("logged-out popup and sidepanel surfaces expose ZIP.KEY import controls", () => {

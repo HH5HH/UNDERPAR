@@ -23,6 +23,7 @@ const IMS_OPENID_CONFIGURATION_URL = `${IMS_ISSUER_URL}/ims/.well-known/openid-c
 const IMS_DEFAULT_AUTHORIZATION_ENDPOINT = `${IMS_ISSUER_URL}/ims/authorize/v2`;
 const IMS_DEFAULT_TOKEN_ENDPOINT = `${IMS_ISSUER_URL}/ims/token/v3`;
 const IMS_DEFAULT_USERINFO_ENDPOINT = `${IMS_ISSUER_URL}/ims/userinfo/v2`;
+const IMS_DEFAULT_LOGOUT_ENDPOINT = `${IMS_ISSUER_URL}/ims/logout`;
 const IMS_DEFAULT_REVOCATION_ENDPOINT = `${IMS_ISSUER_URL}/ims/revoke`;
 const IMS_BASE_URL = IMS_ISSUER_URL;
 const IMS_PROFILE_URL = "https://ims-na1.adobelogin.com/ims/profile/v1";
@@ -50907,6 +50908,30 @@ function buildUnderparImsAuthorizationCodeUrl({
   return `${String(authorizationEndpoint || IMS_DEFAULT_AUTHORIZATION_ENDPOINT).trim()}?${params.toString()}`;
 }
 
+function buildUnderparImsLogoutUrl({
+  logoutEndpoint = IMS_DEFAULT_LOGOUT_ENDPOINT,
+  accessToken = "",
+  redirectUri = "",
+  clientId = "",
+} = {}) {
+  const params = new URLSearchParams();
+  const normalizedAccessToken = String(accessToken || "").trim();
+  const normalizedRedirectUri = String(redirectUri || "").trim();
+  const normalizedClientId = String(clientId || "").trim();
+
+  if (normalizedAccessToken) {
+    params.set("access_token", normalizedAccessToken);
+  }
+  if (normalizedRedirectUri) {
+    params.set("redirect_uri", normalizedRedirectUri);
+  }
+  if (normalizedClientId) {
+    params.set("client_id", normalizedClientId);
+  }
+
+  return `${String(logoutEndpoint || IMS_DEFAULT_LOGOUT_ENDPOINT).trim()}?${params.toString()}`;
+}
+
 function parseUnderparImsAuthorizationCodeResponse(responseUrl, expectedState = "") {
   const authParams = extractAuthParams(responseUrl);
   const authError = authParams.get("error");
@@ -51036,6 +51061,43 @@ async function launchUnderparImsAuthorizationFlow(authorizeUrl, interactive = tr
     abortOnLoadForNonInteractive: false,
     timeoutMsForNonInteractive: NON_INTERACTIVE_AUTH_TIMEOUT_MS,
   });
+}
+
+async function runUnderparImsBrowserLogout(options = {}) {
+  const interactive = options?.interactive !== false;
+  const accessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([options?.accessToken, state.loginData?.accessToken])
+  );
+  const redirectUri = firstNonEmptyString([options?.redirectUri, getUnderparImsRedirectUri()]);
+  const clientId = firstNonEmptyString([options?.clientId, ...getUnderparImsClientIdCandidates(accessToken)]);
+  if (!redirectUri || (!accessToken && !clientId)) {
+    return false;
+  }
+
+  const logoutUrl = buildUnderparImsLogoutUrl({
+    accessToken,
+    redirectUri,
+    clientId,
+  });
+
+  log("Starting UnderPAR Adobe IMS browser logout", {
+    interactive,
+    hasAccessToken: Boolean(accessToken),
+    clientId,
+    redirectUri,
+  });
+
+  try {
+    await launchUnderparImsAuthorizationFlow(logoutUrl, interactive);
+    return true;
+  } catch (error) {
+    log("UnderPAR Adobe IMS browser logout failed", {
+      interactive,
+      clientId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 }
 
 function normalizeUnderparImsPrompt(promptValue = "", interactive = true) {
@@ -51516,22 +51578,73 @@ async function fetchImsSessionProfile(accessToken = "") {
 }
 
 async function fetchOrganizations(accessToken) {
-  const response = await relayImsFetch(IMS_ORGS_URL, {
-    method: "GET",
-    credentials: "omit",
-    headers: {
-      Accept: "*/*",
-      "Content-Type": "application/json;charset=utf-8",
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Organizations request failed (${response.status} ${response.statusText})${body ? ` - ${body}` : ""}`);
+  const normalizedAccessToken = normalizeBearerTokenValue(accessToken);
+  if (!normalizedAccessToken) {
+    throw new Error("Organizations request failed: missing Adobe IMS access token.");
   }
 
-  return parseJsonText(await response.text().catch(() => ""), {});
+  const clientIdCandidates = getUnderparImsClientIdCandidates(normalizedAccessToken);
+  const endpoints = [
+    ...clientIdCandidates.map((clientId) => ({
+      url: `${IMS_ORGS_URL}?client_id=${encodeURIComponent(clientId)}`,
+      clientId,
+    })),
+    {
+      url: IMS_ORGS_URL,
+      clientId: "",
+    },
+  ];
+
+  let lastError = null;
+  let bestPayload = null;
+  let bestPayloadScore = Number.NEGATIVE_INFINITY;
+  for (const endpoint of endpoints) {
+    const attempts = [
+      { credentials: "omit" },
+      { credentials: "include" },
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        const response = await relayImsFetch(endpoint.url, {
+          method: "GET",
+          credentials: attempt.credentials,
+          headers: buildImsProfileHeaders(normalizedAccessToken, endpoint.clientId),
+        });
+        const text = await response.text().catch(() => "");
+        if (!response.ok) {
+          lastError = new Error(
+            `Organizations request failed (${response.status} ${response.statusText})${
+              text ? ` - ${normalizeHttpErrorMessage(text)}` : ""
+            }`
+          );
+          continue;
+        }
+
+        const parsed = parseJsonText(text, null);
+        if (!parsed || typeof parsed !== "object") {
+          continue;
+        }
+
+        const payloadScore = flattenOrganizations(parsed).length;
+        if (payloadScore > bestPayloadScore) {
+          bestPayload = parsed;
+          bestPayloadScore = payloadScore;
+        }
+        if (payloadScore > 0) {
+          return parsed;
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+  }
+
+  if (bestPayload) {
+    return bestPayload;
+  }
+
+  throw lastError || new Error("Organizations request failed.");
 }
 
 function collectObjects(value, output = []) {
@@ -67656,7 +67769,7 @@ function renderRestrictedView() {
   const recommended = options.find((option) => option.isAdobePass);
   if (options.length === 0) {
     els.restrictedOrgHint.textContent =
-      "No org profiles were returned from IMS. Click Sign In Again and choose the correct profile.";
+      "No org profiles were returned from IMS for this Adobe session. Click Sign In Again to reset Adobe sign-in and choose another profile.";
   } else if (recommended) {
     els.restrictedOrgHint.textContent = `Recommended profile: ${recommended.label}`;
   } else {
@@ -67759,6 +67872,14 @@ async function signInInteractive(options = {}) {
 
   const signInStartedAt = Date.now();
   try {
+    if (loginOptions?.forceBrowserLogout === true) {
+      setStatus("Resetting Adobe sign-in session before re-authenticating...", "info");
+      await runUnderparImsBrowserLogout({
+        accessToken: firstNonEmptyString([loginOptions?.accessToken, state.loginData?.accessToken]),
+        interactive: true,
+      });
+    }
+
     const authData = await startLogin({
       ...loginOptions,
       interactive: true,
@@ -68037,8 +68158,8 @@ async function onRestrictedSignInAgain() {
   if (state.busy || state.restrictedOrgSwitchBusy) {
     return;
   }
-  state.restrictedRecoveryLabel = "Running full interactive sign-in flow.";
-  await signInInteractive({ prompt: "login" });
+  state.restrictedRecoveryLabel = "Resetting Adobe sign-in and reopening the profile chooser.";
+  await signInInteractive({ prompt: "login", forceBrowserLogout: true });
 }
 
 async function onRestrictedSignOut() {
