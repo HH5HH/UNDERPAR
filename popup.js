@@ -7567,6 +7567,7 @@ async function purgePassVaultFromDevtools() {
     const message = "UnderPAR vault purged. Click Sign In when ready.";
     await resetToSignedOutState({
       closeWorkspaceReason: "up-devtools-vault-purge",
+      preservePassVault: false,
       statusMessage: message,
       statusType: "success",
     });
@@ -49827,7 +49828,11 @@ function renderPremiumServices(services, programmer = null, options = {}) {
   refreshRestV2LoginPanels();
 }
 
-function resetWorkflowForLoggedOut() {
+function resetWorkflowForLoggedOut(options = {}) {
+  const preservePassVault = options?.preservePassVault !== false;
+  const nextPassVault = preservePassVault
+    ? normalizeUnderparVaultPayload(state.passVault || createEmptyUnderparVaultPayload())
+    : createEmptyUnderparVaultPayload();
   clearRestrictedOrgOptions();
   state.programmers = [];
   state.selectedMediaCompany = "";
@@ -49911,12 +49916,12 @@ function resetWorkflowForLoggedOut() {
   state.mvpdLoadPromiseByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
   state.restV2PrewarmedAppsByProgrammerId.clear();
-  state.passVault = createEmptyUnderparVaultPayload();
+  state.passVault = nextPassVault;
   state.passVaultLoadPromise = null;
   state.passVaultPersistPromise = null;
   state.passVaultPendingStorageWriteMarkers.clear();
-  state.passVaultProgrammerStatusByKey.clear();
   state.passVaultCompilePromiseByProgrammerKey.clear();
+  rebuildPassVaultProgrammerStatusIndex(nextPassVault);
   clearRestV2PreparedLoginState();
   clearEsmWorkspaceRecordingState("logout-reset");
   clearEsmWorkspaceActivityDebugFlow("logout-reset", { stopFlow: true });
@@ -55655,6 +55660,7 @@ function getSessionExpiryState() {
 async function resetToSignedOutState(options = {}) {
   const statusMessage = String(options.statusMessage || "").trim();
   const statusType = options.statusType === "error" ? "error" : options.statusType === "success" ? "success" : "info";
+  const preservePassVault = options.preservePassVault !== false;
   clearRefreshTimer();
   stopExperienceCloudSessionMonitor();
   clearPremiumServiceAutoRefreshTimers();
@@ -55664,7 +55670,9 @@ async function resetToSignedOutState(options = {}) {
       reason: String(options.closeWorkspaceReason || "signed-out-reset"),
     });
   }
-  resetWorkflowForLoggedOut();
+  resetWorkflowForLoggedOut({
+    preservePassVault,
+  });
   state.loginData = null;
   state.restricted = false;
   state.sessionReady = false;

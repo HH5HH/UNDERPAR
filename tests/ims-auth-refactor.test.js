@@ -691,7 +691,9 @@ test("vault purge path forces a durable start-shell reset and clears in-memory v
     purgeSource,
     /resetToSignedOutState\(\{\s*closeWorkspaceReason:\s*"up-devtools-vault-purge",[\s\S]*statusMessage:\s*message,[\s\S]*statusType:\s*"success",?[\s\S]*\}\)/
   );
-  assert.match(resetWorkflowSource, /state\.passVault = createEmptyUnderparVaultPayload\(\);/);
+  assert.match(purgeSource, /preservePassVault:\s*false,/);
+  assert.match(resetWorkflowSource, /const preservePassVault = options\?\.preservePassVault !== false;/);
+  assert.match(resetWorkflowSource, /: createEmptyUnderparVaultPayload\(\);/);
   assert.match(resetWorkflowSource, /state\.passVaultLoadPromise = null;/);
   assert.match(resetWorkflowSource, /state\.passVaultPersistPromise = null;/);
   assert.match(resetWorkflowSource, /state\.passVaultPendingStorageWriteMarkers\.clear\(\);/);
@@ -942,6 +944,23 @@ test("ZIP.KEY import completion clears the gate before bootstrap resumes session
   assert.match(finalizeSource, /await bootstrapSession\("zip-key-import"\)/);
   assert.match(fileImportSource, /return await finalizeSuccessfulZipKeyImport\(result\);/);
   assert.match(textImportSource, /return await finalizeSuccessfulZipKeyImport\(result\);/);
+});
+
+test("logged-out workflow reset preserves imported ZIP.KEY IMS config unless the vault is explicitly purged", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const resetSource = extractFunctionSource(popupSource, "resetWorkflowForLoggedOut");
+  const signedOutSource = extractFunctionSource(popupSource, "resetToSignedOutState");
+  const purgeSource = extractFunctionSource(popupSource, "purgePassVaultFromDevtools");
+
+  assert.match(resetSource, /const preservePassVault = options\?\.preservePassVault !== false;/);
+  assert.match(resetSource, /const nextPassVault = preservePassVault/);
+  assert.match(resetSource, /normalizeUnderparVaultPayload\(state\.passVault \|\| createEmptyUnderparVaultPayload\(\)\)/);
+  assert.match(resetSource, /state\.passVault = nextPassVault;/);
+  assert.match(resetSource, /rebuildPassVaultProgrammerStatusIndex\(nextPassVault\);/);
+  assert.doesNotMatch(resetSource, /state\.passVault = createEmptyUnderparVaultPayload\(\);/);
+  assert.match(signedOutSource, /const preservePassVault = options\.preservePassVault !== false;/);
+  assert.match(signedOutSource, /resetWorkflowForLoggedOut\(\{\s*preservePassVault,\s*\}\);/);
+  assert.match(purgeSource, /preservePassVault: false,/);
 });
 
 test("build label renders immediately from the manifest version with a placeholder fallback", () => {
