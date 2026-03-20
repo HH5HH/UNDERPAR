@@ -1,21 +1,20 @@
 const IMS_IDENTITY_SCOPE = "openid profile";
 const IMS_ORG_DISCOVERY_SCOPE = "read_organizations";
-const IMS_LEGACY_DEFAULT_SCOPE = "openid profile offline_access additional_info.projectedProductContext read_organizations";
-const IMS_ORGANIZATION_SCOPE = "openid profile AdobeID read_organizations additional_info.projectedProductContext additional_info.job_function";
-const IMS_SCOPE =
-  "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function";
+const IMS_LEGACY_DEFAULT_SCOPE = "openid profile offline_access additional_info.projectedProductContext";
+const IMS_ORGANIZATION_SCOPE = "openid profile offline_access additional_info.projectedProductContext read_organizations";
+const IMS_SCOPE = "openid profile offline_access additional_info.projectedProductContext";
 const IMS_CONSOLE_ALLOWED_SCOPES = Object.freeze([
   "openid",
   "profile",
-  "AdobeID",
-  "read_organizations",
   "offline_access",
   "additional_info.projectedProductContext",
-  "additional_info.job_function",
 ]);
 const IMS_LEGACY_SCOPE_MIGRATION_TOKENS = Object.freeze([
+  "AdobeID",
   "avatar",
   "session",
+  "read_organizations",
+  "additional_info.job_function",
   "additional_info.account_type",
   "additional_info.roles",
   "additional_info.user_image_url",
@@ -51460,8 +51459,9 @@ async function fetchUnderparImsUserInfo({
 }
 
 function shouldRetryUnderparImsLoginWithIdentityScope(error, configuredScope = "") {
-  const message = String(error?.message || error || "").toLowerCase();
-  return message.includes("invalid_scope") && normalizeImsScopeList(configuredScope, IMS_SCOPE) !== IMS_IDENTITY_SCOPE;
+  void error;
+  void configuredScope;
+  return false;
 }
 
 function shouldRetryUnderparImsLoginWithConfiguredScope(error, attemptedScope = "", configuredScope = "") {
@@ -51695,11 +51695,7 @@ async function runUnderparPkceLogin(options = {}) {
     }
   }
 
-  try {
-    return await runAttempt(IMS_IDENTITY_SCOPE, "identity-scope-fallback");
-  } catch (error) {
-    throw error || lastError || new Error("Adobe IMS login failed.");
-  }
+  throw lastError || new Error("Adobe IMS login failed.");
 }
 
 async function startLogin(options = {}) {
@@ -57226,7 +57222,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   });
   try {
     await ensureCmTenantsPrecheckForActiveSession(`activation:${normalizedSource}`, {
-      forceRefresh: false,
+      forceRefresh: true,
       allowTemporaryPageContextTab: allowBackgroundTemporaryPageContextTab,
       preferredCmBootstrapTabId,
       releaseRetainedAuthPopupContext: false,
@@ -59065,13 +59061,11 @@ function normalizeApplicationsResponse(payload) {
 function getAdobeConsoleRequestHeaders(accessToken = "") {
   const headers = {
     Accept: "application/json, text/plain, */*",
-    Origin: ADOBE_CONSOLE_RUNTIME_ORIGIN,
-    Referer: ADOBE_CONSOLE_RUNTIME_REFERER,
     "AP-Request-Id": generateRequestId(),
   };
 
   if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
+    headers.Authorization = `bearer ${accessToken}`;
   }
 
   const csrfToken = String(state?.consoleCsrfToken || "").trim() || "NO-TOKEN";
@@ -59150,43 +59144,11 @@ async function fetchAdobeConsoleBootstrapState(accessToken = "", options = {}) {
   }
 
   const timeoutMs = Math.max(1000, Number(options.timeoutMs || PROGRAMMERS_FETCH_TIMEOUT_MS));
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
-  let shellSnapshot = null;
+  const shellSnapshot = normalizeExperienceCloudShellSnapshot(state.consoleBootstrapState?.shellSnapshot || null);
   let extendedProfileResponse = null;
   let maintenanceStatusResponse = null;
   let configurationVersionResponse = null;
   let grantedAuthorities = [];
-  const fetchViaShellPageContext = async (endpoint) =>
-    fetchAdobeConsoleJsonViaShellPageContext(endpoint, {
-      preferredTabId,
-      preferShellAccessToken: true,
-      allowTemporaryTab: allowTemporaryPageContextTab,
-      timeoutMs,
-    }).catch(() => null);
-
-  const [shellPageExtendedProfile, shellPageMaintenanceStatus, shellPageConfigurationVersion] =
-    await Promise.all([
-      fetchViaShellPageContext(`${ADOBE_CONSOLE_BASE}/rest/api/user/extendedProfile`),
-      fetchViaShellPageContext(`${ADOBE_CONSOLE_BASE}/rest/api/admin/maintenance/status`),
-      fetchViaShellPageContext(`${ADOBE_CONSOLE_BASE}/rest/api/config/latestActivatedConsoleConfigurationVersion`),
-    ]);
-
-  shellSnapshot = normalizeExperienceCloudShellSnapshot(shellPageExtendedProfile?.shell);
-  if (shellSnapshot && state.loginData) {
-    state.loginData = mergeExperienceCloudShellSnapshotIntoLoginData(state.loginData, shellSnapshot);
-  }
-
-  if (shellPageExtendedProfile?.ok && shellPageExtendedProfile?.parsed && typeof shellPageExtendedProfile.parsed === "object") {
-    extendedProfileResponse = shellPageExtendedProfile;
-    grantedAuthorities = extractAdobeConsoleGrantedAuthorities(shellPageExtendedProfile.parsed);
-  }
-  if (shellPageMaintenanceStatus?.ok) {
-    maintenanceStatusResponse = shellPageMaintenanceStatus;
-  }
-  if (shellPageConfigurationVersion?.ok) {
-    configurationVersionResponse = shellPageConfigurationVersion;
-  }
 
   const resolvedConsoleAccessToken = normalizeBearerTokenValue(
     firstNonEmptyString([shellSnapshot?.imsToken, normalizedAccessToken])
@@ -59194,10 +59156,10 @@ async function fetchAdobeConsoleBootstrapState(accessToken = "", options = {}) {
   const commonRequestOptions = {
     timeoutMs,
     preferAuthenticatedHeaders: true,
-    allowInteractiveAuthBootstrap: options.allowInteractiveAuthBootstrap === true,
+    allowInteractiveAuthBootstrap: false,
     headers: resolvedConsoleAccessToken
       ? {
-          Authorization: `Bearer ${resolvedConsoleAccessToken}`,
+          Authorization: `bearer ${resolvedConsoleAccessToken}`,
         }
       : {},
   };
@@ -59606,22 +59568,6 @@ async function fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel
             }
           }
 
-          const authorizationCodeUrl = extractAuthorizationCodeUrl(parsed || {});
-          if (
-            response.status === 401 &&
-            authorizationCodeUrl &&
-            !bootstrapAttemptedForUrl &&
-            round === 0
-          ) {
-            bootstrapAttemptedForUrl = true;
-            const contextReady = await ensureConsoleSecurityContext(authorizationCodeUrl, {
-              allowInteractive: requestOptions?.allowInteractiveAuthBootstrap === true,
-            });
-            if (contextReady) {
-              continue;
-            }
-          }
-
           const message = getAdobeConsoleErrorMessage(parsed, text, response.statusText);
           lastError = new Error(`${contextLabel} failed (${response.status}): ${message}`);
           break;
@@ -59749,16 +59695,6 @@ async function fetchRegisteredApplicationsByEntityRefs(entityRefs = [], contextL
   }
 
   const payload =
-    (await fetchAdobeConsoleJsonWithShellPageContextVariants([bulkRetrieveRequest.url], contextLabel, {
-      ...requestOptions,
-      method: "POST",
-      headers: {
-        ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
-        "Content-Type": "application/json",
-      },
-      body: bulkRetrieveRequest.body,
-      preferShellAccessToken: true,
-    }).catch(() => null)) ||
     (await fetchAdobeConsoleJsonWithAuthVariants([bulkRetrieveRequest.url], contextLabel, {
       ...requestOptions,
       method: "POST",
@@ -59768,7 +59704,17 @@ async function fetchRegisteredApplicationsByEntityRefs(entityRefs = [], contextL
       },
       body: bulkRetrieveRequest.body,
       preferAuthenticatedHeaders: requestOptions.preferAuthenticatedHeaders !== false,
-    }));
+    })) ||
+    (await fetchAdobeConsoleJsonWithShellPageContextVariants([bulkRetrieveRequest.url], contextLabel, {
+      ...requestOptions,
+      method: "POST",
+      headers: {
+        ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
+        "Content-Type": "application/json",
+      },
+      body: bulkRetrieveRequest.body,
+      preferShellAccessToken: true,
+    }).catch(() => null));
 
   return normalizeApplicationsResponse(payload?.parsed || payload);
 }
@@ -59795,8 +59741,8 @@ async function fetchApplicationDetailsByGuid(guid, options = {}) {
     `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`,
   ]);
   const payload =
-    (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application detail", requestOptions).catch(() => null)) ||
-    (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application detail", requestOptions));
+    (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application detail", requestOptions)) ||
+    (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application detail", requestOptions).catch(() => null));
   const parsed = payload?.parsed ?? null;
   const entityData =
     parsed?.entityData && typeof parsed.entityData === "object" && !Array.isArray(parsed.entityData)
@@ -59819,16 +59765,6 @@ async function fetchApplicationRawByGuid(guid, options = {}) {
   const bulkRetrieveRequest = buildRegisteredApplicationBulkRetrieveRequest([guid], requestOptions.configurationVersion);
   if (bulkRetrieveRequest) {
     const bulkPayload =
-      (await fetchAdobeConsoleJsonWithShellPageContextVariants([bulkRetrieveRequest.url], "Application raw fetch", {
-        ...requestOptions,
-        method: "POST",
-        headers: {
-          ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
-          "Content-Type": "application/json",
-        },
-        body: bulkRetrieveRequest.body,
-        preferShellAccessToken: true,
-      }).catch(() => null)) ||
       (await fetchAdobeConsoleJsonWithAuthVariants([bulkRetrieveRequest.url], "Application raw fetch", {
         ...requestOptions,
         method: "POST",
@@ -59838,6 +59774,16 @@ async function fetchApplicationRawByGuid(guid, options = {}) {
         },
         body: bulkRetrieveRequest.body,
         preferAuthenticatedHeaders: requestOptions.preferAuthenticatedHeaders !== false,
+      }).catch(() => null)) ||
+      (await fetchAdobeConsoleJsonWithShellPageContextVariants([bulkRetrieveRequest.url], "Application raw fetch", {
+        ...requestOptions,
+        method: "POST",
+        headers: {
+          ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
+          "Content-Type": "application/json",
+        },
+        body: bulkRetrieveRequest.body,
+        preferShellAccessToken: true,
       }).catch(() => null));
     if (bulkPayload) {
       const bulkEntities = normalizeApplicationsResponse(bulkPayload?.parsed || bulkPayload);
@@ -59858,8 +59804,8 @@ async function fetchApplicationRawByGuid(guid, options = {}) {
     `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`,
   ]);
   const payload =
-    (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application raw fetch", requestOptions).catch(() => null)) ||
-    (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application raw fetch", requestOptions));
+    (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application raw fetch", requestOptions)) ||
+    (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application raw fetch", requestOptions).catch(() => null));
   const rawParsed = payload?.parsed || null;
   const parsedEntity =
     rawParsed?.entityData && typeof rawParsed.entityData === "object" && !Array.isArray(rawParsed.entityData)
@@ -64644,38 +64590,8 @@ async function findExistingExperienceCloudAdobeTab() {
 }
 
 async function openTemporaryAdobePageContextTarget(targetUrl = "") {
-  const normalizedUrl = String(targetUrl || "").trim();
-  if (!normalizedUrl) {
-    return null;
-  }
-
-  let temporaryTarget = null;
-  if (chrome.tabs?.create) {
-    try {
-      const createdTab = await chrome.tabs.create({
-        url: normalizedUrl,
-        active: false,
-      });
-      const tabId = Number(createdTab?.id || 0);
-      if (tabId > 0) {
-        temporaryTarget = {
-          tab: createdTab,
-          tabId,
-          windowId: Number(createdTab?.windowId || 0),
-          ownsWindow: false,
-        };
-      }
-    } catch {
-      temporaryTarget = null;
-    }
-  }
-
-  if (!temporaryTarget?.tabId) {
-    return null;
-  }
-
-  await waitForTabCompletion(temporaryTarget.tabId, 12000, { allowUrlChange: true }).catch(() => null);
-  return temporaryTarget;
+  void targetUrl;
+  return null;
 }
 
 async function closeTemporaryAdobePageContextTarget(target = null) {
@@ -65852,8 +65768,6 @@ async function tryRefreshCmTokenFromIms(seedToken = "", options = {}) {
 
 async function ensureCmApiAccessToken(options = {}) {
   const forceRefresh = options.forceRefresh === true;
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const tokenFreshLeewayMs =
     Number.isFinite(options.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
       ? Number(options.freshLeewayMs)
@@ -65915,49 +65829,6 @@ async function ensureCmApiAccessToken(options = {}) {
           if (persistedPrimaryToken && tokenSupportsCmTenantCatalog(persistedPrimaryToken)) {
             emitCmConsoleTokenForTesting(persistedPrimaryToken, "ensure-primary");
             return persistedPrimaryToken;
-          }
-        }
-      }
-
-      const globallyHydratedToken = normalizeBearerTokenValue(
-        await hydrateGlobalCmConsoleBootstrapForActiveSession("cm-api-access", {
-          forceRefresh: requireFresh,
-          allowTemporaryPageContextTab,
-          preferredCmBootstrapTabId,
-        }).catch(() => "")
-      );
-      if (globallyHydratedToken && tokenSupportsCmConsoleRequests(globallyHydratedToken)) {
-        emitCmConsoleTokenForTesting(globallyHydratedToken, "ensure-global-hydrate");
-        return globallyHydratedToken;
-      }
-
-      const tenantBootstrapToken = normalizeBearerTokenValue(
-        await bootstrapCmConsoleTenantSession({
-          forceRefresh: requireFresh,
-          preferredTabId: preferredCmBootstrapTabId,
-        }).catch(() => "")
-      );
-      if (tenantBootstrapToken && tokenSupportsCmConsoleRequests(tenantBootstrapToken)) {
-        emitCmConsoleTokenForTesting(tenantBootstrapToken, "ensure-tenant-bootstrap");
-        return tenantBootstrapToken;
-      }
-
-      const silent = await attemptSilentBootstrapLogin();
-      const silentSeedToken = normalizeBearerTokenValue(silent?.accessToken || "");
-      if (silentSeedToken) {
-        if (tokenSupportsCmConsoleRequests(silentSeedToken) && isAccessTokenFreshEnough(silentSeedToken, tokenFreshLeewayMs)) {
-          return silentSeedToken;
-        }
-        const refreshedFromSilent = await tryRefreshCmTokenFromIms(silentSeedToken, {
-          requireFresh: true,
-        });
-        if (refreshedFromSilent?.accessToken) {
-          const persistedSilentToken = await persistCmTokenBootstrapResult(refreshedFromSilent, {
-            profileMerge: resolveLoginProfile(silent),
-          });
-          if (persistedSilentToken) {
-            emitCmConsoleTokenForTesting(persistedSilentToken, "ensure-silent");
-            return persistedSilentToken;
           }
         }
       }
@@ -67742,72 +67613,6 @@ async function ensureCmTenantsCatalog(options = {}) {
             error: lastError.message,
           });
         }
-      }
-
-      try {
-        const pageContextCatalog = await requestCmConsoleBootstrapCatalogFromReportsPage({
-          requireFresh: forceRefresh,
-          allowTemporaryTab: allowTemporaryPageContextTab,
-          accessToken: preferredAccessToken,
-          preferredTabId: preferredCmBootstrapTabId,
-        });
-        if (pageContextCatalog?.ok === true) {
-          if (pageContextCatalog?.accessToken) {
-            await persistCmTokenBootstrapResult(
-              {
-                accessToken: String(pageContextCatalog.accessToken || "").trim(),
-                source: "reports-page-context-bootstrap",
-              },
-              {}
-            ).catch(() => "");
-          }
-          const tenants = normalizeCmTenantsFromPayload(pageContextCatalog.tenantPayload, pageContextCatalog.tenantUrl);
-          if (tenants.length > 0) {
-            const catalog = {
-              tenants,
-              sourceUrl: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
-              tenantCount: Math.max(0, Number(pageContextCatalog.tenantCount || tenants.length || 0)),
-              applicationCount: Math.max(0, Number(pageContextCatalog.applicationCount || 0)),
-              policyCount: Math.max(0, Number(pageContextCatalog.policyCount || 0)),
-              summaryReady: pageContextCatalog.summaryReady === true,
-              fetchedAt: Date.now(),
-            };
-            state.cmTenantsCatalog = catalog;
-            state.cmTenantsCatalogHydrated = true;
-            state.cmTenantsCatalogRuntimeFresh = true;
-            syncCmConsoleBootstrapSummaryFromCatalog(catalog, {
-              errors: Array.isArray(pageContextCatalog.errors) ? pageContextCatalog.errors : [],
-            });
-            await persistCmTenantsCatalog(catalog);
-            emitCmDebugEvent({
-              phase: "cm-tenant-catalog-loaded",
-              source: "reports-page-context",
-              url: String(pageContextCatalog.tenantUrl || tenantCatalogUrls[0] || ""),
-              sourceUrl: String(pageContextCatalog.tenantUrl || ""),
-              tenantCount: Number(catalog.tenantCount || 0),
-              applicationCount: Number(catalog.applicationCount || 0),
-              policyCount: Number(catalog.policyCount || 0),
-            });
-            return catalog;
-          }
-        }
-        if (pageContextCatalog && typeof pageContextCatalog === "object" && pageContextCatalog.ok !== true) {
-          throw new Error(
-            firstNonEmptyString([
-              pageContextCatalog.error,
-              pageContextCatalog.status ? `CM tenants load failed (${Number(pageContextCatalog.status || 0)}).` : "",
-              "CM tenants load failed from reports page context.",
-            ]) || "CM tenants load failed from reports page context."
-          );
-        }
-      } catch (pageContextError) {
-        lastError = pageContextError instanceof Error ? pageContextError : new Error(String(pageContextError));
-        emitCmDebugEvent({
-          phase: "cm-tenant-catalog-page-context-failed",
-          method: "GET",
-          url: tenantCatalogUrls[0] || "",
-          error: lastError.message,
-        });
       }
 
       throw lastError || new Error("CM tenants load failed: all tenant catalog candidates were exhausted.");
@@ -70349,50 +70154,6 @@ async function fetchProgrammersFromApi(options = {}) {
   let silentRefreshAttempted = false;
   for (const endpoint of endpoints) {
     try {
-      const pageContextResult = await fetchAdobeConsoleJsonViaShellPageContext(endpoint, {
-        accessToken,
-        preferredTabId,
-        preferShellAccessToken: true,
-        allowTemporaryTab: allowTemporaryPageContextTab,
-        timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
-      }).catch(() => null);
-
-      if (pageContextResult) {
-        const payload = pageContextResult.parsed;
-        const responseText = String(pageContextResult.text || "");
-        if (pageContextResult.ok) {
-          const normalizedEntities = normalizeProgrammersResponse(payload);
-          if (requireEntities && normalizedEntities.length === 0) {
-            lastError = createProgrammersError(`Endpoint ${endpoint} returned no media companies.`, "PROGRAMMERS_EMPTY");
-          } else {
-            if (normalizedEntities.length > Number(bestEntities?.length || 0)) {
-              bestEntities = normalizedEntities;
-              bestEndpoint = endpoint;
-            }
-            if (normalizedEntities.length > 0 || !requireEntities) {
-              state.programmersApiEndpoint = endpoint;
-              return normalizedEntities;
-            }
-          }
-        } else {
-          const accessDeniedResponse =
-            responseLooksLikeExperienceCloudSignIn(pageContextResult, responseText) ||
-            isAdobeConsoleAccessDeniedResponse(pageContextResult.status, payload, responseText);
-          if (accessDeniedResponse) {
-            denied = true;
-            lastError = createProgrammersError(
-              `Endpoint ${endpoint} failed (${pageContextResult.status || 0}): ${responseText || pageContextResult.statusText}`,
-              "PROGRAMMERS_ACCESS_DENIED"
-            );
-            continue;
-          }
-          lastError = createProgrammersError(
-            `Endpoint ${endpoint} failed (${pageContextResult.status || 0}): ${responseText || pageContextResult.statusText}`,
-            "PROGRAMMERS_ENDPOINT_FAILED"
-          );
-        }
-      }
-
       const buildHeaderVariants = () => {
         const variants = [];
         variants.push({ headers: getAdobeConsoleRequestHeaders("") });
@@ -70511,7 +70272,7 @@ async function loadProgrammersData(accessToken = "", options = {}) {
     firstNonEmptyString([accessToken, getPreferredAdobeConsoleAccessTokenCandidate(), state.loginData?.accessToken])
   );
   const allowRestrictedSession = options.allowRestrictedSession === true;
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const allowTemporaryPageContextTab = false;
   const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   if ((!state.loginData && !normalizedAccessToken) || (state.restricted && !allowRestrictedSession)) {
     setUnderparDiagnosticMarker("programmers", {
@@ -70537,8 +70298,8 @@ async function loadProgrammersData(accessToken = "", options = {}) {
     try {
       bootstrapState = await ensureConsoleBootstrapState(normalizedAccessToken, {
         forceRefresh: options.forceRefresh === true,
-        allowInteractiveAuthBootstrap: options.allowInteractiveAuthBootstrap === true,
-        allowTemporaryPageContextTab: resolvedAllowTemporaryPageContextTab,
+        allowInteractiveAuthBootstrap: false,
+        allowTemporaryPageContextTab: false,
         preferredTabId: resolvedPreferredTabId,
       });
     } catch (error) {
@@ -70587,18 +70348,11 @@ async function loadProgrammersData(accessToken = "", options = {}) {
     let entities = [];
     let programmersLoadError = null;
     try {
-      await fetchAdobeConsoleJsonViaShellPageContext(`${ADOBE_CONSOLE_BASE}/rest/api/config/history`, {
-        accessToken: resolvedConsoleAccessToken,
-        preferredTabId: resolvedPreferredTabId,
-        preferShellAccessToken: true,
-        allowTemporaryTab: resolvedAllowTemporaryPageContextTab,
-        timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
-      }).catch(() => null);
       entities = await fetchProgrammersFromApi({
         accessToken: resolvedConsoleAccessToken,
         requireEntities: false,
         preferredTabId: resolvedPreferredTabId,
-        allowTemporaryPageContextTab: resolvedAllowTemporaryPageContextTab,
+        allowTemporaryPageContextTab: false,
       });
     } catch (error) {
       programmersLoadError = error instanceof Error ? error : new Error(String(error));
@@ -70616,22 +70370,6 @@ async function loadProgrammersData(accessToken = "", options = {}) {
           error: programmersLoadError.message,
         });
         return true;
-      }
-      if (programmersLoadError?.code === "PROGRAMMERS_ACCESS_DENIED") {
-        const vault = await ensurePassVaultLoaded({ forceReload: false }).catch(() => state.passVault || null);
-        const vaultedProgrammers = buildProgrammerEntitiesFromPassVault(vault, getActiveAdobePassEnvironmentKey());
-        if (vaultedProgrammers.length > 0) {
-          applyProgrammerEntities(vaultedProgrammers);
-          setUnderparDiagnosticMarker("programmers", {
-            status: "warning",
-            phase: "vault-fallback",
-            count: Number(state.programmers.length || 0),
-            code: String(programmersLoadError?.code || "").trim(),
-            error: programmersLoadError.message,
-          });
-          setStatus("Adobe console denied live media-company access. Using vaulted media companies.", "info");
-          return true;
-        }
       }
       log("Media company load failed", programmersLoadError);
       applyProgrammerEntities([]);
@@ -70670,21 +70408,6 @@ async function loadProgrammersData(accessToken = "", options = {}) {
     }
     return true;
   };
-
-  if (allowTemporaryPageContextTab) {
-    return withAdobeConsolePageContextTarget(
-      `${ADOBE_CONSOLE_BASE}/rest/api/entity/Programmer`,
-      {
-        preferredTabId,
-        allowTemporaryTab: true,
-      },
-      async (pageContextOptions) =>
-        runProgrammerLoad({
-          preferredTabId: pageContextOptions?.preferredTabId || preferredTabId,
-          allowTemporaryPageContextTab: pageContextOptions?.allowTemporaryPageContextTab === true,
-        })
-    );
-  }
 
   return runProgrammerLoad({
     preferredTabId,

@@ -50,16 +50,16 @@ function loadPopupImsHelpers() {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
   const script = [
-    'const IMS_LEGACY_DEFAULT_SCOPE = "openid profile offline_access additional_info.projectedProductContext read_organizations";',
-    'const IMS_SCOPE = "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function";',
+    'const IMS_LEGACY_DEFAULT_SCOPE = "openid profile offline_access additional_info.projectedProductContext";',
+    'const IMS_SCOPE = "openid profile offline_access additional_info.projectedProductContext";',
     'const UNDERPAR_ACTIVATION_REQUIRED_SCOPE = "openid profile additional_info.projectedProductContext";',
     'const UNDERPAR_RECOVERY_REQUIRED_SCOPE = "openid profile additional_info.projectedProductContext read_organizations";',
     'const IMS_ORG_DISCOVERY_SCOPE = "read_organizations";',
-    'const IMS_ORGANIZATION_SCOPE = "openid profile AdobeID read_organizations additional_info.projectedProductContext additional_info.job_function";',
+    'const IMS_ORGANIZATION_SCOPE = "openid profile offline_access additional_info.projectedProductContext read_organizations";',
     'const IMS_DEFAULT_AUTHORIZATION_ENDPOINT = "https://ims-na1.adobelogin.com/ims/authorize/v2";',
     'const IMS_DEFAULT_LOGOUT_ENDPOINT = "https://ims-na1.adobelogin.com/ims/logout";',
-    'const IMS_CONSOLE_ALLOWED_SCOPES = ["openid","profile","AdobeID","read_organizations","offline_access","additional_info.projectedProductContext","additional_info.job_function"];',
-    'const IMS_LEGACY_SCOPE_MIGRATION_TOKENS = ["avatar","session","additional_info.account_type","additional_info.roles","additional_info.user_image_url","analytics_services"];',
+    'const IMS_CONSOLE_ALLOWED_SCOPES = ["openid","profile","offline_access","additional_info.projectedProductContext"];',
+    'const IMS_LEGACY_SCOPE_MIGRATION_TOKENS = ["AdobeID","avatar","session","read_organizations","additional_info.job_function","additional_info.account_type","additional_info.roles","additional_info.user_image_url","analytics_services"];',
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : []) { const text = String(value || '').trim(); if (text) { return text; } } return ''; }",
     "function uniqueSorted(values = []) { return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || '').trim()).filter(Boolean))].sort(); }",
     "function getZipKeyValueByPath(payload = null, pathExpr = '') { if (!payload || typeof payload !== 'object') { return undefined; } const expr = String(pathExpr || '').trim(); if (!expr) { return undefined; } if (Object.prototype.hasOwnProperty.call(payload, expr)) { return payload[expr]; } const parts = expr.split('.').map((part) => part.trim()).filter(Boolean); if (parts.length === 0) { return undefined; } let node = payload; for (const part of parts) { if (!node || typeof node !== 'object' || !Object.prototype.hasOwnProperty.call(node, part)) { return undefined; } node = node[part]; } return node; }",
@@ -489,7 +489,7 @@ test("ZIP.KEY-only Adobe IMS imports accept direct adobe.ims.client_id entries",
   assert.equal(result.imsRuntimeConfig.source, "ZIP.KEY");
 });
 
-test("legacy UnderPAR ZIP.KEY scope bundle upgrades to the LoginButton consent scope set", () => {
+test("legacy UnderPAR ZIP.KEY scope bundle clamps to the LoginButton consent scope set", () => {
   const helpers = loadPopupImsHelpers();
 
   const result = helpers.extractUnderparImsRuntimeConfigFromZipKeyText([
@@ -499,7 +499,7 @@ test("legacy UnderPAR ZIP.KEY scope bundle upgrades to the LoginButton consent s
 
   assert.equal(
     result.imsRuntimeConfig.scope,
-    "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function"
+    "openid profile offline_access additional_info.projectedProductContext"
   );
 });
 
@@ -552,61 +552,61 @@ test("legacy IMS scope bundles clamp to the LoginButton-style PKCE default scope
 
   assert.equal(
     result.scope,
-    "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function"
+    "openid profile offline_access additional_info.projectedProductContext"
   );
-  assert.deepEqual([...result.droppedScopes].sort(), ["analytics_services", "avatar", "session"].sort());
+  assert.deepEqual(
+    [...result.droppedScopes].sort(),
+    ["AdobeID", "additional_info.job_function", "analytics_services", "avatar", "read_organizations", "session"].sort()
+  );
 });
 
-test("supported Adobe IMS org scopes survive ZIP.KEY normalization order", () => {
+test("supported Adobe IMS consent scopes survive ZIP.KEY normalization order", () => {
   const helpers = loadPopupImsHelpers();
 
   const result = helpers.sanitizeUnderparImsScopeForCredential(
-    "openid AdobeID read_organizations additional_info.projectedProductContext additional_info.job_function"
+    "offline_access openid profile additional_info.projectedProductContext"
   );
 
   assert.equal(
     result.scope,
-    "openid AdobeID read_organizations additional_info.projectedProductContext additional_info.job_function"
+    "openid profile offline_access additional_info.projectedProductContext"
   );
   assert.deepEqual([...result.droppedScopes], []);
 });
 
-test("interactive IMS scope planning matches LoginButton's org-discovery-first request order", () => {
+test("interactive IMS scope planning never widens beyond the supported LoginButton consent scope", () => {
   const helpers = loadPopupImsHelpers();
 
   assert.equal(
     helpers.buildPreferredUnderparRequestedScope(
-      "openid profile AdobeID offline_access additional_info.projectedProductContext additional_info.job_function"
+      "openid profile offline_access additional_info.projectedProductContext"
     ),
-    "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function"
+    "openid profile offline_access additional_info.projectedProductContext"
   );
   assert.deepEqual(
     [...helpers.buildUnderparRequestedScopePlan(
-      "openid profile AdobeID offline_access additional_info.projectedProductContext additional_info.job_function"
+      "openid profile offline_access additional_info.projectedProductContext"
     )],
-    [
-      "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function",
-      "openid profile AdobeID offline_access additional_info.projectedProductContext additional_info.job_function",
-    ]
+    ["openid profile offline_access additional_info.projectedProductContext"]
   );
 });
 
-test("interactive sign-in promotes narrow ZIP.KEY scope settings to the full LoginButton consent bundle", () => {
+test("interactive sign-in promotes narrow ZIP.KEY scope settings to the supported LoginButton consent bundle", () => {
   const helpers = loadPopupImsHelpers();
 
   assert.equal(
     helpers.resolveInteractiveUnderparRequestedScope("openid profile AdobeID"),
-    "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function"
+    "openid profile offline_access additional_info.projectedProductContext"
   );
   assert.equal(
     helpers.resolveInteractiveUnderparRequestedScope("openid profile offline_access additional_info.projectedProductContext"),
-    "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function"
+    "openid profile offline_access additional_info.projectedProductContext"
   );
   assert.equal(
     helpers.resolveInteractiveUnderparRequestedScope(
-      "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function"
+      "openid profile offline_access additional_info.projectedProductContext read_organizations"
     ),
-    "openid profile AdobeID read_organizations offline_access additional_info.projectedProductContext additional_info.job_function"
+    "openid profile offline_access additional_info.projectedProductContext"
   );
 });
 
@@ -870,7 +870,7 @@ test("session monitor is token-driven and no longer probes cookie or page sessio
   assert.doesNotMatch(popupSource, /function attemptSessionAutoBootstrap/);
 });
 
-test("console configuration version is sourced dynamically from console bootstrap state", () => {
+test("console configuration version is sourced dynamically from direct console bootstrap state", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
   const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
@@ -891,31 +891,30 @@ test("console configuration version is sourced dynamically from console bootstra
   assert.match(configExtractorSource, /payload\.configurationInfo/);
   assert.doesNotMatch(configExtractorSource, /for \(const nestedValue of Object\.values\(payload\)\)/);
   assert.match(consoleHeaderSource, /const csrfToken = String\(state\?\.consoleCsrfToken \|\| ""\)\.trim\(\) \|\| "NO-TOKEN";/);
-  assert.match(consoleHeaderSource, /Origin: ADOBE_CONSOLE_RUNTIME_ORIGIN/);
-  assert.match(consoleHeaderSource, /Referer: ADOBE_CONSOLE_RUNTIME_REFERER/);
   assert.match(consoleHeaderSource, /"AP-Request-Id": generateRequestId\(\)/);
+  assert.match(consoleHeaderSource, /headers\.Authorization = `bearer \$\{accessToken\}`;/);
+  assert.doesNotMatch(consoleHeaderSource, /Origin:/);
+  assert.doesNotMatch(consoleHeaderSource, /Referer:/);
   assert.match(bootstrapEnsureSource, /getPreferredAdobeConsoleAccessTokenCandidate\(\)/);
   assert.match(loadProgrammersSource, /bootstrapState = await ensureConsoleBootstrapState/);
-  assert.match(loadProgrammersSource, /allowInteractiveAuthBootstrap: options\.allowInteractiveAuthBootstrap === true/);
-  assert.match(fetchBootstrapSource, /const fetchViaShellPageContext = async \(endpoint\) =>/);
-  assert.match(fetchBootstrapSource, /await Promise\.all\(\[/);
-  assert.match(fetchBootstrapSource, /fetchAdobeConsoleJsonViaShellPageContext/);
-  assert.match(fetchBootstrapSource, /preferShellAccessToken:\s*true/);
+  assert.match(loadProgrammersSource, /allowInteractiveAuthBootstrap:\s*false/);
+  assert.match(fetchBootstrapSource, /fetchAdobeConsoleJsonWithAuthVariants/);
+  assert.doesNotMatch(fetchBootstrapSource, /fetchAdobeConsoleJsonViaShellPageContext/);
+  assert.doesNotMatch(fetchBootstrapSource, /const fetchViaShellPageContext = async \(endpoint\) =>/);
+  assert.doesNotMatch(fetchBootstrapSource, /Promise\.all\(\[/);
   assert.match(loadProgrammersSource, /const configurationVersion = mvpdWorkspaceExtractConfigurationVersion\(bootstrapState, 0\)/);
   assert.doesNotMatch(loadProgrammersSource, /configurationVersion <= 0/);
   assert.match(loadProgrammersSource, /!bootstrapState \|\| !bootstrapState\.extendedProfile/);
   assert.match(loadProgrammersSource, /grantedAuthorities\.length > 0 && !hasAdobeConsoleProgrammerAccess\(grantedAuthorities\)/);
+  assert.match(fetchConsoleSource, /variants\.push\(getAdobeConsoleRequestHeaders\(activeAccessToken\)\)/);
   assert.match(fetchConsoleSource, /variants\.push\(getAdobeConsoleRequestHeaders\(""\)\)/);
   assert.match(fetchProgrammersSource, /state\.loginData\?\.experienceCloudAccessToken/);
   assert.match(fetchProgrammersSource, /getPreferredExperienceCloudConsoleAccessTokenCandidate\(\)/);
-  assert.match(fetchProgrammersSource, /const pageContextResult = await fetchAdobeConsoleJsonViaShellPageContext/);
   assert.match(fetchProgrammersSource, /const buildHeaderVariants = \(\) =>/);
   assert.match(fetchProgrammersSource, /getAdobeConsoleRequestHeaders\(""\)/);
-  assert.match(fetchProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext/);
-  assert.match(fetchProgrammersSource, /preferShellAccessToken:\s*true/);
-  assert.match(fetchBootstrapSource, /shellPageExtendedProfile/);
+  assert.doesNotMatch(fetchProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext/);
+  assert.doesNotMatch(fetchProgrammersSource, /preferShellAccessToken:\s*true/);
   assert.match(fetchBootstrapSource, /shellSnapshot\?\.imsToken/);
-  assert.match(fetchBootstrapSource, /mergeExperienceCloudShellSnapshotIntoLoginData\(state\.loginData,\s*shellSnapshot\)/);
   assert.match(loadProgrammersSource, /const resolvedConsoleAccessToken = normalizeBearerTokenValue\(/);
   assert.match(loadProgrammersSource, /firstNonEmptyString\(\[bootstrapState\?\.accessToken,\s*normalizedAccessToken\]\)/);
 });
@@ -932,7 +931,7 @@ test("programmer endpoint access_denied responses stay on the auth-denied recove
   assert.match(fetchProgrammersSource, /accessDeniedResponse \? "PROGRAMMERS_ACCESS_DENIED" : "PROGRAMMERS_ENDPOINT_FAILED"/);
 });
 
-test("programmer access denial can fall back to vaulted media companies", () => {
+test("programmer access denial stays live and does not fall back to vaulted media companies during initial load", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const vaultBuilderSource = extractFunctionSource(popupSource, "buildProgrammerEntitiesFromPassVault");
   const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
@@ -943,11 +942,11 @@ test("programmer access denial can fall back to vaulted media companies", () => 
   assert.match(vaultBuilderSource, /buildPassVaultApplicationsSnapshotFromRegisteredApplications/);
   assert.match(vaultBuilderSource, /contentProviders: requestorIds/);
   assert.ok(bootstrapFallbackIndex !== -1);
-  assert.ok(vaultFallbackIndex !== -1);
-  assert.ok(bootstrapFallbackIndex < vaultFallbackIndex, "bootstrap fallback should run before vault fallback");
-  assert.match(loadProgrammersSource, /buildProgrammerEntitiesFromPassVault\(vault, getActiveAdobePassEnvironmentKey\(\)\)/);
-  assert.match(loadProgrammersSource, /phase: "vault-fallback"/);
-  assert.match(loadProgrammersSource, /Using vaulted media companies/);
+  assert.equal(vaultFallbackIndex, -1);
+  assert.doesNotMatch(loadProgrammersSource, /buildProgrammerEntitiesFromPassVault\(vault, getActiveAdobePassEnvironmentKey\(\)\)/);
+  assert.doesNotMatch(loadProgrammersSource, /phase: "vault-fallback"/);
+  assert.doesNotMatch(loadProgrammersSource, /Using vaulted media companies/);
+  assert.match(loadProgrammersSource, /phase: "bootstrap-accessible-entities"/);
 });
 
 test("console bootstrap accessible root entities can seed media companies when Programmer listing is denied", () => {
@@ -1062,69 +1061,29 @@ test("experience cloud auth redirect detection accepts plain-object headers from
   );
 });
 
-test("shell page context harvests the unified shell IMS session before console entity fetches", () => {
+test("programmer load stays direct and tabless instead of requiring shell page context", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const bootstrapUrlSource = extractFunctionSource(popupSource, "getAdobeConsolePageContextBootstrapUrl");
-  const resolveTargetSource = extractFunctionSource(popupSource, "resolveAdobeConsolePageContextTarget");
-  const withTargetSource = extractFunctionSource(popupSource, "withAdobeConsolePageContextTarget");
-  const shellFetchSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonViaShellPageContext");
-  const shellMergeSource = extractFunctionSource(popupSource, "mergeExperienceCloudShellSnapshotIntoLoginData");
+  const resolveTargetSource = extractFunctionSource(popupSource, "resolveReusableAdobePageContextTab");
+  const tempTargetSource = extractFunctionSource(popupSource, "openTemporaryAdobePageContextTarget");
+  const pageContextVariantsSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithShellPageContextVariants");
   const activationSource = extractFunctionSource(popupSource, "activateSession");
   const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
-  const tempTargetSource = extractFunctionSource(popupSource, "openTemporaryAdobePageContextTarget");
 
   assert.match(bootstrapUrlSource, /const isProgrammersRequest =/);
   assert.match(bootstrapUrlSource, /const isApplicationsRequest =/);
   assert.match(bootstrapUrlSource, /const isProgrammersRuntimeRequest =/);
   assert.match(bootstrapUrlSource, /const environment = getActiveAdobePassEnvironment\(\);/);
   assert.match(bootstrapUrlSource, /isProgrammersRuntimeRequest \? environment\?\.consoleProgrammersUrl/);
-  assert.match(resolveTargetSource, /resolveReusableAdobePageContextTab/);
-  assert.match(resolveTargetSource, /findExistingExperienceCloudAdobeTab/);
-  assert.match(resolveTargetSource, /openTemporaryAdobePageContextTarget\(\s*getAdobeConsolePageContextBootstrapUrl\(requestUrl\)/);
-  assert.match(withTargetSource, /resolveAdobeConsolePageContextTarget\(requestUrl,\s*\{/);
-  assert.match(withTargetSource, /closeTemporaryAdobePageContextTarget\(target\.temporaryTarget\)/);
-  assert.match(shellFetchSource, /const target = await resolveAdobeConsolePageContextTarget\(normalizedUrl,\s*\{/);
-  assert.match(shellFetchSource, /const shouldWaitForProgrammersFrame =/);
-  assert.match(shellFetchSource, /const isExplicitShellRoot = \/window\\\.\(\?:__shellConfiguration\|shellConfiguration\|__excShellConfiguration\|__adobeShellConfiguration\)\$\/i/);
-  assert.match(shellFetchSource, /const stripAuthorizationHeaders = \(headers = \{\}\) =>/);
-  assert.match(shellFetchSource, /delete nextHeaders\.Authorization;/);
-  assert.match(shellFetchSource, /delete nextHeaders\.authorization;/);
-  assert.match(shellFetchSource, /explicitVariants\.forEach\(\(headers\) => pushVariant\(stripAuthorizationHeaders\(headers\)\)\);/);
-  assert.match(shellFetchSource, /target: \{ tabId, allFrames: true \ }|target: \{ tabId, allFrames: true \}/);
-  assert.match(
-    shellFetchSource,
-    /\.\.\.stripAuthorizationHeaders\(headers\),\s*Authorization: `Bearer \$\{shellSnapshot\.imsToken\}`/
-  );
-  assert.match(shellFetchSource, /if \(preferShellAccessToken && isJwt\(shellSnapshot\?\.imsToken\)\) \{/);
-  assert.match(shellFetchSource, /return variants;/);
-  assert.match(shellFetchSource, /const shellSnapshot = await waitForShellSnapshot\(\);/);
-  assert.match(shellFetchSource, /const isAdobePassConsoleFrame =\s*\/cdn\\\.experience\\\.adobe\\\.net\\\/solutions\\\/AdobePass-adobepass-unifiedshell-console-client\\\//);
-  assert.match(shellFetchSource, /const isAdobePassProgrammersFrame =/);
-  assert.match(shellFetchSource, /const normalizeExecutionResults = \(executionResults = \[\]\) =>/);
-  assert.match(shellFetchSource, /const preferredFrameWaitDeadline = Date\.now\(\) \+ Math\.max\(1800, Math\.min\(timeoutMs, shouldWaitForProgrammersFrame \? 9000 : 6000\)\)/);
-  assert.match(shellFetchSource, /const programmersFrameResults = normalizedResults\.filter\(\(entry\) => entry\.isAdobePassProgrammersFrame\)/);
-  assert.match(shellFetchSource, /const successfulProgrammersFrameResult = programmersFrameResults\.find\(\(entry\) => entry\.result\?\.ok === true\) \|\| null/);
-  assert.match(shellFetchSource, /const readyProgrammersFrameResult = programmersFrameResults\.find\(\(entry\) => entry\.frameReady\) \|\| null/);
-  assert.match(shellFetchSource, /const preferredFrameResults = normalizedResults\.filter\(\(entry\) => entry\.isAdobePassConsoleFrame\)/);
-  assert.match(shellFetchSource, /await new Promise\(\(resolve\) => setTimeout\(resolve, 180\)\)/);
-  assert.match(shellFetchSource, /window\.__shellConfiguration/);
-  assert.match(shellFetchSource, /window\.shellConfiguration/);
-  assert.match(shellFetchSource, /const isReadyShellSnapshot = \(snapshot = null\) =>/);
-  assert.match(shellFetchSource, /frameUrl,/);
-  assert.match(shellFetchSource, /isAdobePassConsoleFrame,/);
-  assert.match(shellFetchSource, /shell: normalizedShellSnapshot/);
-  assert.match(shellMergeSource, /tokenSupportsExperienceCloudConsole\(normalizedShellSnapshot\.imsToken\)/);
-  assert.match(shellMergeSource, /organizations: mergedOrganizations/);
-  assert.match(activationSource, /mergeExperienceCloudShellSnapshotIntoLoginData\(/);
+  assert.match(resolveTargetSource, /if \(preferredTab\?\.id && isAuthFlowUrl\(preferredUrl\)\) \{/);
+  assert.match(tempTargetSource, /void targetUrl;/);
+  assert.match(tempTargetSource, /return null;/);
+  assert.match(pageContextVariantsSource, /allowTemporaryPageContextTab === true/);
   assert.match(activationSource, /state\.consoleBootstrapState\?\.shellSnapshot/);
-  assert.match(loadProgrammersSource, /return withAdobeConsolePageContextTarget\(/);
-  assert.match(loadProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext\(/);
-  assert.match(loadProgrammersSource, /\/rest\/api\/config\/history/);
-  assert.match(loadProgrammersSource, /allowTemporaryPageContextTab:\s*pageContextOptions\?\.allowTemporaryPageContextTab === true/);
-  assert.match(tempTargetSource, /chrome\.tabs\?\.create/);
-  assert.match(tempTargetSource, /active:\s*false/);
-  assert.doesNotMatch(tempTargetSource, /chrome\.windows\?\.create/);
-  assert.doesNotMatch(tempTargetSource, /type:\s*"popup"/);
+  assert.doesNotMatch(loadProgrammersSource, /withAdobeConsolePageContextTarget\(/);
+  assert.doesNotMatch(loadProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext\(/);
+  assert.doesNotMatch(loadProgrammersSource, /\/rest\/api\/config\/history/);
+  assert.match(loadProgrammersSource, /allowTemporaryPageContextTab:\s*false/);
 });
 
 test("media company selection keeps CM-first bounded application hydration without temporary Adobe tab recovery", () => {
@@ -1303,7 +1262,7 @@ test("interactive recovery paths force Adobe IMS to show the login chooser witho
 
   assert.match(
     popupSource,
-    /const IMS_SCOPE =\s*"openid profile AdobeID read_organizations offline_access additional_info\.projectedProductContext additional_info\.job_function";/
+    /const IMS_SCOPE =\s*"openid profile offline_access additional_info\.projectedProductContext";/
   );
   assert.match(popupSource, /const IMS_ORG_DISCOVERY_SCOPE = "read_organizations";/);
   assert.match(popupSource, /const IMS_DEFAULT_LOGOUT_ENDPOINT = `\$\{IMS_ISSUER_URL\}\/ims\/logout`;/);
@@ -1324,7 +1283,7 @@ test("interactive recovery paths force Adobe IMS to show the login chooser witho
   assert.match(retrySource, /const scopePlan = buildUnderparRequestedScopePlan\(effectiveConfiguredScope\);/);
   assert.match(retrySource, /"preferred-org-discovery-scope"/);
   assert.match(retrySource, /"configured-scope-fallback"/);
-  assert.match(retrySource, /return await runAttempt\(IMS_IDENTITY_SCOPE, "identity-scope-fallback"\);/);
+  assert.doesNotMatch(retrySource, /identity-scope-fallback/);
   assert.doesNotMatch(retrySource, /minimumGrantedScope/);
   assert.doesNotMatch(retrySource, /INSUFFICIENT_IMS_SCOPE/);
   assert.match(logoutSource, /buildUnderparImsLogoutUrl\(/);
@@ -1491,11 +1450,10 @@ test("CM direct fetch and tenant catalog paths try runtime-context headers befor
   assert.match(tenantCatalogSource, /if \(!attemptedTokenRefresh && authMode === "none" && \(statusCode === 401 \|\| statusCode === 403\)\)/);
 });
 
-test("CM tenant bootstrap loads the tenant catalog before CM token hydration and keeps reports-page fallback last", () => {
+test("CM tenant bootstrap loads the tenant catalog before CM token hydration without reports-page fallback in session bootstrap", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const ensureCatalogSource = extractFunctionSource(popupSource, "ensureCmTenantsCatalog");
   const precheckSource = extractFunctionSource(popupSource, "ensureCmTenantsPrecheckForActiveSession");
-  const reportsPageSource = extractFunctionSource(popupSource, "requestCmConsoleBootstrapCatalogFromReportsPage");
 
   assert.doesNotMatch(ensureCatalogSource, /bootstrapCmConsoleTenantSession\(/);
   assert.ok(
@@ -1503,12 +1461,9 @@ test("CM tenant bootstrap loads the tenant catalog before CM token hydration and
       precheckSource.indexOf("await ensureCmApiAccessToken(")
   );
   assert.doesNotMatch(ensureCatalogSource, /const shouldPreferReportsPageBootstrap/);
-  assert.ok(
-    ensureCatalogSource.indexOf("for (const tenantCatalogUrl of tenantCatalogUrls)") <
-      ensureCatalogSource.indexOf("requestCmConsoleBootstrapCatalogFromReportsPage(")
-  );
-  assert.match(reportsPageSource, /openTemporaryAdobePageContextTarget/);
-  assert.doesNotMatch(reportsPageSource, /findExistingExperienceAdobeTab/);
+  assert.doesNotMatch(ensureCatalogSource, /requestCmConsoleBootstrapCatalogFromReportsPage\(/);
+  assert.match(ensureCatalogSource, /for \(const tenantCatalogUrl of tenantCatalogUrls\)/);
+  assert.match(ensureCatalogSource, /fetchCmTenantCatalogWithAuth\(tenantCatalogUrl/);
 });
 
 test("PKCE authorization URL uses code response mode and the configured client ID", () => {
