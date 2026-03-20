@@ -6502,6 +6502,51 @@ function getPassVaultMediaCompanyRecord(programmerId = "", environmentKey = getA
   return getPassVaultMediaCompanyRecordFromVault(state.passVault, programmerId, environmentKey);
 }
 
+function buildProgrammerEntitiesFromPassVault(vault = null, environmentKey = getActiveAdobePassEnvironmentKey()) {
+  const environmentRecord = getPassVaultEnvironmentRecordFromVault(vault, environmentKey);
+  const mediaCompanies =
+    environmentRecord?.mediaCompanies && typeof environmentRecord.mediaCompanies === "object" && !Array.isArray(environmentRecord.mediaCompanies)
+      ? environmentRecord.mediaCompanies
+      : {};
+  const entities = [];
+
+  Object.values(mediaCompanies).forEach((record, index) => {
+    const normalizedRecord = normalizeUnderparPassVaultProgrammerRecord(
+      String(record?.programmerId || "").trim(),
+      record,
+      environmentKey
+    );
+    if (!normalizedRecord?.programmerId) {
+      return;
+    }
+
+    const applicationsSnapshot = buildPassVaultApplicationsSnapshotFromRegisteredApplications(
+      normalizedRecord.registeredApplicationsByGuid || {}
+    );
+    const applications = Object.values(applicationsSnapshot);
+    const requestorIds = uniqueSorted(
+      applications.flatMap((application) => {
+        const serviceProviders = Array.isArray(application?.serviceProviders) ? application.serviceProviders : [];
+        const requestor = String(application?.requestor || "").trim();
+        return requestor ? [...serviceProviders, requestor] : serviceProviders;
+      })
+    );
+
+    entities.push({
+      key: `Programmer:${normalizedRecord.programmerId}:${index}`,
+      entityData: {
+        id: normalizedRecord.programmerId,
+        displayName: normalizedRecord.programmerName,
+        mediaCompanyName: normalizedRecord.mediaCompanyName,
+        contentProviders: requestorIds,
+        applications,
+      },
+    });
+  });
+
+  return entities;
+}
+
 function getPassVaultRegisteredApplicationRecord(programmerId = "", appGuid = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
   const normalizedAppGuid = String(appGuid || "").trim();
   if (!normalizedAppGuid) {
@@ -67666,6 +67711,22 @@ async function loadProgrammersData(accessToken = "", options = {}) {
   }
 
   if (programmersLoadError) {
+    if (programmersLoadError?.code === "PROGRAMMERS_ACCESS_DENIED") {
+      const vault = await ensurePassVaultLoaded({ forceReload: false }).catch(() => state.passVault || null);
+      const vaultedProgrammers = buildProgrammerEntitiesFromPassVault(vault, getActiveAdobePassEnvironmentKey());
+      if (vaultedProgrammers.length > 0) {
+        applyProgrammerEntities(vaultedProgrammers);
+        setUnderparDiagnosticMarker("programmers", {
+          status: "warning",
+          phase: "vault-fallback",
+          count: Number(state.programmers.length || 0),
+          code: String(programmersLoadError?.code || "").trim(),
+          error: programmersLoadError.message,
+        });
+        setStatus("Adobe console denied live media-company access. Using vaulted media companies.", "info");
+        return true;
+      }
+    }
     log("Media company load failed", programmersLoadError);
     applyProgrammerEntities([]);
     setUnderparDiagnosticMarker("programmers", {

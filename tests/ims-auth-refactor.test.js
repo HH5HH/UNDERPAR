@@ -614,6 +614,19 @@ test("programmer endpoint access_denied responses stay on the auth-denied recove
   assert.match(fetchProgrammersSource, /accessDeniedResponse \? "PROGRAMMERS_ACCESS_DENIED" : "PROGRAMMERS_ENDPOINT_FAILED"/);
 });
 
+test("programmer access denial can fall back to vaulted media companies", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const vaultBuilderSource = extractFunctionSource(popupSource, "buildProgrammerEntitiesFromPassVault");
+  const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
+
+  assert.match(vaultBuilderSource, /normalizeUnderparPassVaultProgrammerRecord/);
+  assert.match(vaultBuilderSource, /buildPassVaultApplicationsSnapshotFromRegisteredApplications/);
+  assert.match(vaultBuilderSource, /contentProviders: requestorIds/);
+  assert.match(loadProgrammersSource, /buildProgrammerEntitiesFromPassVault\(vault, getActiveAdobePassEnvironmentKey\(\)\)/);
+  assert.match(loadProgrammersSource, /phase: "vault-fallback"/);
+  assert.match(loadProgrammersSource, /Using vaulted media companies/);
+});
+
 test("programmer discovery stays on deterministic entity endpoints and console role extraction handles authority objects", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const endpointBuilderSource = extractFunctionSource(popupSource, "buildProgrammerEndpointsForConsoleBase");
