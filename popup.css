@@ -934,6 +934,32 @@ body[aria-busy="true"] .auth-btn::before {
   padding-top: 4px;
 }
 
+.sign-in-org-card {
+  width: min(100%, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sign-in-org-field {
+  margin: 0;
+}
+
+.sign-in-org-meta,
+.sign-in-org-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.sign-in-org-meta {
+  color: var(--legacy-text);
+}
+
+.sign-in-org-hint {
+  color: var(--legacy-muted);
+}
+
 .sign-in-hero-art {
   display: none;
 }
@@ -973,6 +999,7 @@ body[aria-busy="true"] .auth-btn::before {
   box-shadow: 0 14px 24px rgba(255, 166, 0, 0.24);
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+  align-self: flex-start;
 }
 
 .sign-in-secondary-btn {

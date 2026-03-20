@@ -207,7 +207,10 @@ function loadPopupHeaderAuthClickHelper() {
     "let signInArgs = [];",
     "let toggleCount = 0;",
     "function shouldShowZipKeyImportGate() { return false; }",
+    "function buildTargetOrganizationContext() { return { requiresSelection: false, selectedOrganization: null }; }",
     "function promptForZipKeyImport() { promptCount += 1; }",
+    "function setStatus() {}",
+    "function render() {}",
     "async function signInInteractive(options = {}) { signInCount += 1; signInArgs.push(options || {}); }",
     "function toggleAvatarMenu() { toggleCount += 1; }",
     extractFunctionSource(source, "onPrimarySignInClick"),
@@ -231,6 +234,7 @@ function loadPopupSilentBootstrapGateHelper() {
   const script = [
     "const state = { sessionReady: false, restricted: false, busy: false, restrictedOrgSwitchBusy: false, zipKeyImportPending: false, manualSignOutHold: false };",
     "function hasConfiguredUnderparImsClientId() { return true; }",
+    "function buildTargetOrganizationContext() { return { requiresSelection: false }; }",
     extractFunctionSource(source, "shouldAttemptSilentBootstrapSession"),
     "function setState(nextState = {}) { Object.assign(state, nextState || {}); }",
     "module.exports = { shouldAttemptSilentBootstrapSession, setState };",
@@ -1180,6 +1184,50 @@ test("restricted org picker merges IMS orgs with profile claims and configured Z
   assert.match(collectCandidatesSource, /collectCandidatesFromValue\(profile\?\.additional_info, "profile\.additional_info"\)/);
   assert.match(collectCandidatesSource, /collectCandidatesFromValue\(accessClaims, "accessClaims"\)/);
   assert.match(collectCandidatesSource, /collectCandidatesFromValue\(idClaims, "idClaims"\)/);
+});
+
+test("popup and sidepanel both ship the pre-auth org target picker", () => {
+  const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
+  const popupHtml = fs.readFileSync(path.join(ROOT, "popup.html"), "utf8");
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const renderSignInViewSource = extractFunctionSource(popupSource, "renderSignInView");
+
+  for (const htmlSource of [popupHtml, sidepanelHtml]) {
+    assert.match(htmlSource, /id="sign-in-org-field"/);
+    assert.match(htmlSource, /id="sign-in-org-select"/);
+    assert.match(htmlSource, /id="sign-in-org-meta"/);
+    assert.match(htmlSource, /id="sign-in-org-hint"/);
+    assert.match(htmlSource, /Adobe Org Target/);
+  }
+
+  assert.match(renderSignInViewSource, /buildTargetOrganizationContext\(\)/);
+  assert.match(renderSignInViewSource, /PREAUTH_TARGET_ORG_PLACEHOLDER_VALUE/);
+  assert.match(renderSignInViewSource, /Choose Org/);
+});
+
+test("target org selection gates sign-in and silent bootstrap", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const primarySignInSource = extractFunctionSource(popupSource, "onPrimarySignInClick");
+  const silentBootstrapSource = extractFunctionSource(popupSource, "shouldAttemptSilentBootstrapSession");
+
+  assert.match(primarySignInSource, /buildTargetOrganizationContext\(\)/);
+  assert.match(primarySignInSource, /Choose an Adobe org target before signing in\./);
+  assert.match(primarySignInSource, /targetOrganizationContext\.selectedOrganization/);
+  assert.match(silentBootstrapSource, /!targetOrganizationContext\.requiresSelection/);
+});
+
+test("activation and restricted recovery are target-org aware and no longer multi-loop org-switch attempts", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const activationPrepSource = extractFunctionSource(popupSource, "enforceAdobePassAccess");
+  const restrictedSwitchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
+  const restrictedOptionsSource = extractFunctionSource(popupSource, "ensureRestrictedOrgOptionsFromToken");
+
+  assert.match(activationPrepSource, /attachTargetOrganizationToLoginData/);
+  assert.match(activationPrepSource, /verifyTargetOrganizationSelection/);
+  assert.match(activationPrepSource, /tokenHasReadOrganizationsScope/);
+  assert.match(restrictedOptionsSource, /updateRestrictedOrgOptions\(cachedOrganizations, configuredPreferredOrg, seedSession\)/);
+  assert.match(restrictedSwitchSource, /buildPreferredOrgSwitchStrategy\(selected\)/);
+  assert.doesNotMatch(restrictedSwitchSource, /for \(const strategy of strategies\)/);
 });
 
 test("programmer access denial drops into the org picker instead of auto-restarting recovery auth", () => {

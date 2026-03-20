@@ -51,7 +51,17 @@
       </section>
 
       <section id="sign-in-view" class="sign-in-view" hidden>
-        <button id="sign-in-hero-btn" type="button" class="sign-in-hero-btn">SIGN IN</button>
+        <div class="sign-in-org-card">
+          <div id="sign-in-org-field" class="field sign-in-org-field" hidden>
+            <label for="sign-in-org-select">Adobe Org Target</label>
+            <select id="sign-in-org-select" disabled>
+              <option value="">-- Use Adobe profile chooser --</option>
+            </select>
+          </div>
+          <p id="sign-in-org-meta" class="sign-in-org-meta"></p>
+          <p id="sign-in-org-hint" class="sign-in-org-hint"></p>
+          <button id="sign-in-hero-btn" type="button" class="sign-in-hero-btn">SIGN IN</button>
+        </div>
       </section>
 
       <section id="avatar-menu" class="avatar-menu" hidden>

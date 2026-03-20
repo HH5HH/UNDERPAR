@@ -233,6 +233,7 @@ const BUILD_VERSION = String(chrome?.runtime?.getManifest?.()?.version || "").tr
 const DEFAULT_ZIP_KEY_IMPORT_STATUS_MESSAGE = "Drop key.";
 const READY_ZIP_KEY_IMPORT_STATUS_MESSAGE = "Key loaded.";
 const PENDING_ZIP_KEY_IMPORT_STATUS_MESSAGE = "Loading key...";
+const PREAUTH_TARGET_ORG_PLACEHOLDER_VALUE = "__underpar_choose_target_org__";
 const DEFAULT_DEBUG_TOGGLE_LABEL = "DEBUG INFO";
 const DEFAULT_DEBUG_TOGGLE_META = "Click copies. Shift+click toggles details.";
 const DEFAULT_DEBUG_COPY_STATUS = "Copied to clipboard";
@@ -11036,6 +11037,7 @@ const state = {
   globalNetworkActivityContext: "",
   globalNetworkFetchTrackerInstalled: false,
   restricted: false,
+  selectedTargetOrganizationKey: "",
   restrictedOrgOptions: [],
   selectedRestrictedOrgKey: "",
   restrictedOrgSwitchBusy: false,
@@ -11273,6 +11275,10 @@ const els = {
   pageEnvBadge: document.getElementById("page-env-badge"),
   pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
   signInView: document.getElementById("sign-in-view"),
+  signInOrgField: document.getElementById("sign-in-org-field"),
+  signInOrgSelect: document.getElementById("sign-in-org-select"),
+  signInOrgMeta: document.getElementById("sign-in-org-meta"),
+  signInOrgHint: document.getElementById("sign-in-org-hint"),
   signInHeroBtn: document.getElementById("sign-in-hero-btn"),
   signInZipKeyBtn: document.getElementById("sign-in-zip-key-btn"),
   signInUpdateIndicator: document.getElementById("sign-in-update-indicator"),
@@ -12801,19 +12807,12 @@ function setBusy(isBusy, context = "") {
     const busyLabel = nextBusy ? "UnderPAR activity" : "UnderPAR activity";
     els.authBtn.title = busyLabel;
     els.authBtn.setAttribute("aria-label", busyLabel);
-    if (els.signInHeroBtn) {
-      const shouldLockPrimarySignIn = nextBusy && isInteractiveAuthBusyContext(context);
-      els.signInHeroBtn.disabled = shouldLockPrimarySignIn;
-      els.signInHeroBtn.textContent = shouldLockPrimarySignIn ? "Signing In..." : "Sign In";
-    }
+    renderSignInView();
     return;
   }
 
   els.authBtn.title = nextBusy ? "Working..." : "Account menu";
-  if (els.signInHeroBtn) {
-    els.signInHeroBtn.disabled = nextBusy;
-    els.signInHeroBtn.textContent = "Sign In";
-  }
+  renderSignInView();
 }
 
 function truncateDebugText(value, limit = DEBUG_TEXT_PREVIEW_LIMIT) {
@@ -51932,6 +51931,15 @@ function isReadOrganizationsScopeError(error) {
   return /read_organizations/i.test(message);
 }
 
+function tokenHasReadOrganizationsScope(accessToken = "") {
+  const token = normalizeBearerTokenValue(accessToken);
+  if (!token) {
+    return false;
+  }
+  const grantedScope = resolveGrantedUnderparImsScope(token, "", "");
+  return getMissingUnderparImsScopeTokens(grantedScope, "read_organizations").length === 0;
+}
+
 function collectObjects(value, output = []) {
   if (!value) {
     return output;
@@ -52584,12 +52592,296 @@ function buildRestrictedOrgOptions(organizations, sessionData = null, preferredO
   });
 }
 
+function getConfiguredTargetOrganizations(runtimeConfig = getActiveUnderparImsRuntimeConfig()) {
+  return Array.isArray(runtimeConfig?.organizations)
+    ? runtimeConfig.organizations.filter((entry) => entry && typeof entry === "object")
+    : [];
+}
+
+function findConfiguredTargetOrganization(options = [], candidate = null) {
+  if (!Array.isArray(options) || options.length === 0 || !candidate || typeof candidate !== "object") {
+    return null;
+  }
+
+  const normalizedKey = String(candidate.key || "").trim();
+  if (normalizedKey) {
+    const directMatch = options.find((option) => String(option?.key || "").trim() === normalizedKey) || null;
+    if (directMatch) {
+      return directMatch;
+    }
+  }
+
+  const normalizedId = normalizeOrganizationIdentifier(
+    firstNonEmptyString([
+      candidate.id,
+      candidate.orgId,
+      candidate.organizationId,
+      candidate.organization_id,
+      extractOrganizationId(candidate),
+    ])
+  );
+  if (normalizedId) {
+    const idMatch =
+      options.find((option) => {
+        return (
+          normalizeOrganizationIdentifier(firstNonEmptyString([option?.id, option?.orgId, option?.organizationId])) ===
+          normalizedId
+        );
+      }) || null;
+    if (idMatch) {
+      return idMatch;
+    }
+  }
+
+  const normalizedLabel = normalizeOrganizationIdentifier(
+    firstNonEmptyString([candidate.label, candidate.name, candidate.orgName, extractOrganizationName(candidate)])
+  );
+  if (!normalizedLabel) {
+    return null;
+  }
+
+  return (
+    options.find((option) => {
+      return (
+        normalizeOrganizationIdentifier(firstNonEmptyString([option?.label, option?.name])) === normalizedLabel ||
+        normalizeOrganizationIdentifier(firstNonEmptyString([option?.id, option?.orgId])) === normalizedLabel
+      );
+    }) || null
+  );
+}
+
+function findMatchingRestrictedOrganizationOption(options = [], candidate = null) {
+  if (!Array.isArray(options) || options.length === 0 || !candidate || typeof candidate !== "object") {
+    return null;
+  }
+
+  const normalizedKey = String(candidate.key || "").trim();
+  if (normalizedKey) {
+    const directMatch = options.find((option) => String(option?.key || "").trim() === normalizedKey) || null;
+    if (directMatch) {
+      return directMatch;
+    }
+  }
+
+  const normalizedOrgId = normalizeOrganizationIdentifier(
+    firstNonEmptyString([candidate.orgId, candidate.id, candidate.organizationId, extractOrganizationId(candidate)])
+  );
+  const normalizedUserId = normalizeOrganizationIdentifier(
+    firstNonEmptyString([candidate.userId, candidate.profileGuid, candidate.userGuid, extractUserId(candidate)])
+  );
+  if (normalizedOrgId || normalizedUserId) {
+    const idMatch =
+      options.find((option) => {
+        const optionOrgId = normalizeOrganizationIdentifier(firstNonEmptyString([option?.orgId, option?.id]));
+        const optionUserId = normalizeOrganizationIdentifier(firstNonEmptyString([option?.userId]));
+        if (normalizedOrgId && optionOrgId && normalizedOrgId !== optionOrgId) {
+          return false;
+        }
+        if (normalizedUserId && optionUserId && normalizedUserId !== optionUserId) {
+          return false;
+        }
+        return Boolean(
+          (normalizedOrgId && optionOrgId && normalizedOrgId === optionOrgId) ||
+            (normalizedUserId && optionUserId && normalizedUserId === optionUserId)
+        );
+      }) || null;
+    if (idMatch) {
+      return idMatch;
+    }
+  }
+
+  const normalizedLabel = normalizeOrganizationIdentifier(
+    firstNonEmptyString([candidate.label, candidate.name, candidate.orgName, extractOrganizationName(candidate)])
+  );
+  if (!normalizedLabel) {
+    return null;
+  }
+
+  return (
+    options.find((option) => {
+      return (
+        normalizeOrganizationIdentifier(firstNonEmptyString([option?.label, option?.name])) === normalizedLabel ||
+        normalizeOrganizationIdentifier(firstNonEmptyString([option?.orgId, option?.id])) === normalizedLabel
+      );
+    }) || null
+  );
+}
+
+function buildTargetOrganizationContext(
+  runtimeConfig = getActiveUnderparImsRuntimeConfig(),
+  selectedKey = state.selectedTargetOrganizationKey
+) {
+  const options = getConfiguredTargetOrganizations(runtimeConfig);
+  const normalizedSelectedKey = String(selectedKey || "").trim();
+  const explicitSelection = normalizedSelectedKey
+    ? findConfiguredTargetOrganization(options, { key: normalizedSelectedKey })
+    : null;
+  const selectedOrganization = explicitSelection || (options.length === 1 ? options[0] : null);
+
+  return {
+    options,
+    selectedOrganization,
+    requiresSelection: options.length > 1 && !explicitSelection,
+    selectionMode: explicitSelection ? "manual" : options.length === 1 ? "implicit-single" : "none",
+  };
+}
+
+function resolveTargetOrganizationForLogin(
+  runtimeConfig = getActiveUnderparImsRuntimeConfig(),
+  selectedKey = state.selectedTargetOrganizationKey
+) {
+  return buildTargetOrganizationContext(runtimeConfig, selectedKey).selectedOrganization;
+}
+
+function attachTargetOrganizationToLoginData(loginData = {}, targetOrganization = null) {
+  const nextLoginData = loginData && typeof loginData === "object" ? { ...loginData } : {};
+  if (targetOrganization && typeof targetOrganization === "object") {
+    const targetId = firstNonEmptyString([
+      targetOrganization.id,
+      targetOrganization.orgId,
+      targetOrganization.organizationId,
+      extractOrganizationId(targetOrganization),
+    ]);
+    const targetLabel =
+      firstNonEmptyString([
+        targetOrganization.label,
+        targetOrganization.name,
+        targetOrganization.orgName,
+        extractOrganizationName(targetOrganization),
+        targetId,
+      ]) || "Adobe organization";
+    nextLoginData.targetOrganization = {
+      key: String(targetOrganization.key || "").trim(),
+      id: targetId,
+      orgId: targetId,
+      userId: firstNonEmptyString([targetOrganization.userId, extractUserId(targetOrganization)]),
+      label: targetLabel,
+      name: targetLabel,
+      isAdobePass: targetOrganization.isAdobePass === true,
+      source: String(targetOrganization.source || "zip-key").trim() || "zip-key",
+    };
+  } else {
+    delete nextLoginData.targetOrganization;
+  }
+  return nextLoginData;
+}
+
+function extractVerifiedCustomerOrganizationClaim(sessionData = null) {
+  const profile = resolveLoginProfile(sessionData) || {};
+  const idClaims = parseJwtPayload(sessionData?.idToken) || {};
+  const accessClaims = parseJwtPayload(sessionData?.accessToken) || {};
+  const candidates = [
+    { value: extractOrganizationId(idClaims), source: "idClaims" },
+    { value: extractOrganizationId(accessClaims), source: "accessClaims" },
+    { value: extractOrganizationId(profile?.projectedProductContext), source: "profile.projectedProductContext" },
+    {
+      value: extractOrganizationId(profile?.additional_info?.projectedProductContext),
+      source: "profile.additional_info.projectedProductContext",
+    },
+    { value: extractOrganizationId(profile), source: "profile" },
+  ];
+  const match = candidates.find((entry) => normalizeOrganizationIdentifier(entry?.value));
+  return match
+    ? {
+        id: normalizeOrganizationIdentifier(match.value),
+        rawId: String(match.value || "").trim(),
+        source: String(match.source || "unknown"),
+      }
+    : {
+        id: "",
+        rawId: "",
+        source: "unavailable",
+      };
+}
+
+function verifyTargetOrganizationSelection(sessionData = null, targetOrganization = null) {
+  const expectedOrgId = normalizeOrganizationIdentifier(
+    firstNonEmptyString([targetOrganization?.id, targetOrganization?.orgId])
+  );
+  const targetLabel = firstNonEmptyString([targetOrganization?.label, targetOrganization?.name, targetOrganization?.orgId]);
+  if (!expectedOrgId) {
+    return {
+      status: "not-applicable",
+      source: "n/a",
+      expectedOrgId: "",
+      verifiedOrgId: "",
+      resolvedOrgId: "",
+      message: "No target org was selected before Adobe sign-in.",
+    };
+  }
+
+  const verifiedClaim = extractVerifiedCustomerOrganizationClaim(sessionData);
+  const profile = resolveLoginProfile(sessionData) || {};
+  const resolvedOrgId = normalizeOrganizationIdentifier(
+    firstNonEmptyString([
+      extractOrganizationId(profile),
+      extractOrganizationId(profile?.projectedProductContext),
+      extractOrganizationId(profile?.additional_info?.projectedProductContext),
+      extractOrganizationId(parseJwtPayload(sessionData?.accessToken) || {}),
+      extractOrganizationId(parseJwtPayload(sessionData?.idToken) || {}),
+    ])
+  );
+
+  if (verifiedClaim.id) {
+    return {
+      status: verifiedClaim.id === expectedOrgId ? "verified-match" : "verified-mismatch",
+      source: verifiedClaim.source,
+      expectedOrgId,
+      verifiedOrgId: verifiedClaim.id,
+      resolvedOrgId,
+      message:
+        verifiedClaim.id === expectedOrgId
+          ? `Verified Adobe org ${targetLabel || targetOrganization?.id} via ${verifiedClaim.source}.`
+          : `Adobe returned verified org ${verifiedClaim.rawId || verifiedClaim.id} via ${verifiedClaim.source}, but UnderPAR targeted ${targetLabel || targetOrganization?.id}.`,
+    };
+  }
+
+  if (resolvedOrgId) {
+    return {
+      status: resolvedOrgId === expectedOrgId ? "derived-match" : "derived-mismatch",
+      source: "resolved-payload",
+      expectedOrgId,
+      verifiedOrgId: "",
+      resolvedOrgId,
+      message:
+        resolvedOrgId === expectedOrgId
+          ? `Resolved Adobe org ${targetLabel || targetOrganization?.id} from returned Adobe payloads.`
+          : `Resolved Adobe org ${resolvedOrgId} from returned Adobe payloads while UnderPAR targeted ${targetLabel || targetOrganization?.id}.`,
+    };
+  }
+
+  return {
+    status: "no-org-claim",
+    source: "unavailable",
+    expectedOrgId,
+    verifiedOrgId: "",
+    resolvedOrgId: "",
+    message: `Adobe did not return a verifiable org claim for target org ${targetLabel || targetOrganization?.id}.`,
+  };
+}
+
+function buildPreferredOrgSwitchStrategy(orgValue = null) {
+  return buildOrgSwitchStrategies(orgValue)[0] || null;
+}
+
 function updateRestrictedOrgOptions(organizations, preferredOrg = null, sessionData = null) {
   const options = buildRestrictedOrgOptions(organizations, sessionData, preferredOrg);
   state.restrictedOrgOptions = options;
 
   if (options.length === 0) {
     state.selectedRestrictedOrgKey = "";
+    return;
+  }
+
+  const directPreferredKey = String(preferredOrg?.key || "").trim();
+  if (directPreferredKey && options.some((option) => option.key === directPreferredKey)) {
+    state.selectedRestrictedOrgKey = directPreferredKey;
+    return;
+  }
+
+  const preferredMatch = findMatchingRestrictedOrganizationOption(options, preferredOrg);
+  if (preferredMatch?.key) {
+    state.selectedRestrictedOrgKey = preferredMatch.key;
     return;
   }
 
@@ -52662,6 +52954,12 @@ function updateRestrictedContext(sessionData, options = {}) {
     profile?.additional_info?.company_name,
   ]);
   const selectedOption = getSelectedRestrictedOrgOption();
+  const targetOrganization =
+    sessionData?.targetOrganization && typeof sessionData.targetOrganization === "object"
+      ? sessionData.targetOrganization
+      : resolveTargetOrganizationForLogin();
+  const targetLabel = firstNonEmptyString([targetOrganization?.label, targetOrganization?.name]);
+  const orgVerificationMessage = String(sessionData?.orgVerification?.message || "").trim();
   const orgLabel = firstNonEmptyString([
     options.orgLabel,
     orgFromProfile,
@@ -52672,6 +52970,8 @@ function updateRestrictedContext(sessionData, options = {}) {
 
   const recoveryLabel = firstNonEmptyString([
     options.recoveryLabel,
+    orgVerificationMessage,
+    targetLabel ? `Target org: ${targetLabel}. Switch this session or sign in again to choose a different Adobe profile.` : "",
     state.restrictedRecoveryLabel,
     "Choose an Adobe org profile, switch this session, or sign in again to reopen Adobe's profile chooser.",
   ]);
@@ -55750,68 +56050,89 @@ async function attemptAutoSwitchToAdobePass(organizations, options = {}) {
 
 async function enforceAdobePassAccess(loginData) {
   const normalizedProfile = resolveLoginProfile(loginData);
-  const profileSeedData = {
-    ...loginData,
-    profile: normalizedProfile,
-  };
+  const configuredTargetOrganizations = getConfiguredTargetOrganizations();
+  const selectedTargetOrganization =
+    findConfiguredTargetOrganization(
+      configuredTargetOrganizations,
+      loginData?.targetOrganization || resolveTargetOrganizationForLogin()
+    ) ||
+    (loginData?.targetOrganization && typeof loginData.targetOrganization === "object"
+      ? loginData.targetOrganization
+      : resolveTargetOrganizationForLogin());
+  if (selectedTargetOrganization?.key) {
+    state.selectedTargetOrganizationKey = selectedTargetOrganization.key;
+  }
+  const profileSeedData = attachTargetOrganizationToLoginData(
+    {
+      ...loginData,
+      profile: normalizedProfile,
+    },
+    selectedTargetOrganization
+  );
   const normalizedImageUrl =
     normalizeAvatarCandidate(resolveLoginImageUrl(profileSeedData)) ||
     normalizeAvatarCandidate(readPersistedAvatarCandidate(profileSeedData)) ||
     "";
   let organizations = resolveCachedOrganizationsFromLoginData(loginData);
-  let orgFetchFailed = false;
+  const preferredOrganizationSeed = selectedTargetOrganization || loginData?.adobePassOrg || null;
+  updateRestrictedOrgOptions(organizations, preferredOrganizationSeed, profileSeedData);
 
-  if (organizations.length > 0) {
-    updateRestrictedOrgOptions(organizations, loginData?.adobePassOrg || null, profileSeedData);
-  } else {
+  if (state.restrictedOrgOptions.length === 0 && tokenHasReadOrganizationsScope(loginData?.accessToken)) {
     try {
       const orgPayload = await fetchOrganizations(loginData.accessToken);
       organizations = flattenOrganizations(orgPayload);
-      updateRestrictedOrgOptions(organizations, loginData?.adobePassOrg || null, profileSeedData);
+      updateRestrictedOrgOptions(organizations, preferredOrganizationSeed, {
+        ...profileSeedData,
+        organizations,
+      });
     } catch (error) {
-      orgFetchFailed = true;
-      log("Unable to fetch organizations; allowing session as unknown", error);
-      updateRestrictedOrgOptions([], loginData?.adobePassOrg || null, profileSeedData);
+      log("Unable to fetch organizations; keeping local org resolution only", error);
+      updateRestrictedOrgOptions(organizations, preferredOrganizationSeed, profileSeedData);
+      if (isReadOrganizationsScopeError(error)) {
+        state.restrictedRecoveryLabel =
+          "Adobe did not grant org-picker scope for this session. Use the ZIP.KEY org targets or Sign In Again to reopen Adobe's profile chooser.";
+      }
     }
   }
 
-  if (orgFetchFailed) {
-    return {
-      allowed: true,
-      loginData: {
-        ...loginData,
-        profile: normalizedProfile,
-        imageUrl: normalizedImageUrl,
-        organizations: organizations.length > 0 ? organizations : loginData?.organizations || null,
-        adobePassOrg: loginData.adobePassOrg || null,
-      },
-    };
-  }
-
-  const adobePassOrg = findAdobePassOrg(organizations);
-  if (!adobePassOrg) {
-    // Do not block purely on org parsing mismatches; final entitlement is verified via programmers access.
-    return {
-      allowed: true,
-      loginData: {
-        ...loginData,
-        profile: normalizedProfile,
-        imageUrl: normalizedImageUrl,
-        organizations,
-        adobePassOrg: loginData.adobePassOrg || null,
-      },
-    };
-  }
-
-  let resolved = {
-    ...loginData,
+  const normalizedOrganizations = organizations.length > 0 ? organizations : loginData?.organizations || null;
+  const verificationSeed = {
+    ...profileSeedData,
     profile: normalizedProfile,
     imageUrl: normalizedImageUrl,
-    organizations,
-    adobePassOrg: toAdobePassOrgDescriptor(adobePassOrg, normalizedProfile),
+    organizations: normalizedOrganizations,
+  };
+  const orgVerification = verifyTargetOrganizationSelection(verificationSeed, selectedTargetOrganization);
+  const resolvedOrganizationOption =
+    findMatchingRestrictedOrganizationOption(state.restrictedOrgOptions, {
+      orgId: firstNonEmptyString([orgVerification?.verifiedOrgId, orgVerification?.resolvedOrgId]),
+    }) ||
+    findMatchingRestrictedOrganizationOption(state.restrictedOrgOptions, selectedTargetOrganization) ||
+    findMatchingRestrictedOrganizationOption(state.restrictedOrgOptions, loginData?.adobePassOrg) ||
+    state.restrictedOrgOptions.find((option) => option.isAdobePass) ||
+    state.restrictedOrgOptions[0] ||
+    null;
+
+  const resolved = {
+    ...verificationSeed,
+    adobePassOrg: resolvedOrganizationOption
+      ? toAdobePassOrgDescriptor(resolvedOrganizationOption.raw || resolvedOrganizationOption, normalizedProfile)
+      : loginData?.adobePassOrg || null,
+    orgVerification,
   };
 
-  return { allowed: true, loginData: resolved };
+  if (orgVerification.status === "verified-mismatch") {
+    return {
+      allowed: false,
+      loginData: resolved,
+      recoveryLabel: orgVerification.message,
+    };
+  }
+
+  return {
+    allowed: true,
+    loginData: resolved,
+  };
 }
 
 async function ensureRestrictedOrgOptionsFromToken(accessToken, preferredOrg = null, sessionData = null) {
@@ -55830,23 +56151,37 @@ async function ensureRestrictedOrgOptionsFromToken(accessToken, preferredOrg = n
           accessToken: token,
         };
 
-  try {
-    const orgPayload = await fetchOrganizations(token);
-    const organizations = flattenOrganizations(orgPayload);
-    updateRestrictedOrgOptions(organizations, preferredOrg, {
-      ...seedSession,
-      organizations,
-    });
-    return state.restrictedOrgOptions.length > 0;
-  } catch (error) {
-    log("Unable to load org options for restricted picker", error);
-    updateRestrictedOrgOptions([], preferredOrg, seedSession);
-    if (isReadOrganizationsScopeError(error)) {
+  const configuredPreferredOrg =
+    findConfiguredTargetOrganization(getConfiguredTargetOrganizations(), preferredOrg || seedSession?.targetOrganization) ||
+    preferredOrg ||
+    seedSession?.targetOrganization ||
+    null;
+  const cachedOrganizations = resolveCachedOrganizationsFromLoginData(seedSession);
+  updateRestrictedOrgOptions(cachedOrganizations, configuredPreferredOrg, seedSession);
+  if (state.restrictedOrgOptions.length > 0 || !tokenHasReadOrganizationsScope(token)) {
+    if (state.restrictedOrgOptions.length === 0 && !tokenHasReadOrganizationsScope(token)) {
       state.restrictedRecoveryLabel =
-        "Adobe did not grant org-picker scope for this session. Use Sign In Again to reopen Adobe's profile chooser.";
+        "Adobe did not grant org-picker scope for this session. Use the ZIP.KEY org targets or Sign In Again to reopen Adobe's profile chooser.";
     }
     return state.restrictedOrgOptions.length > 0;
   }
+
+  try {
+    const orgPayload = await fetchOrganizations(token);
+    const organizations = flattenOrganizations(orgPayload);
+    updateRestrictedOrgOptions(organizations, configuredPreferredOrg, {
+      ...seedSession,
+      organizations,
+    });
+  } catch (error) {
+    log("Unable to load org options for restricted picker", error);
+    updateRestrictedOrgOptions(cachedOrganizations, configuredPreferredOrg, seedSession);
+    if (isReadOrganizationsScopeError(error)) {
+      state.restrictedRecoveryLabel =
+        "Adobe did not grant org-picker scope for this session. Use the ZIP.KEY org targets or Sign In Again to reopen Adobe's profile chooser.";
+    }
+  }
+  return state.restrictedOrgOptions.length > 0;
 }
 
 async function attemptInteractiveAdobePassRecovery(sessionData) {
@@ -56168,6 +56503,24 @@ function compactAdobePassOrgForStorage(org) {
   return Object.keys(compact).length > 0 ? compact : null;
 }
 
+function compactTargetOrganizationForStorage(targetOrganization) {
+  if (!targetOrganization || typeof targetOrganization !== "object") {
+    return null;
+  }
+
+  const compact = pruneEmptyObject({
+    key: compactStorageString(targetOrganization.key, 180),
+    id: compactStorageString(firstNonEmptyString([targetOrganization.id, targetOrganization.orgId]), 180),
+    orgId: compactStorageString(firstNonEmptyString([targetOrganization.orgId, targetOrganization.id]), 180),
+    userId: compactStorageString(targetOrganization.userId, 180),
+    label: compactStorageString(firstNonEmptyString([targetOrganization.label, targetOrganization.name]), 240),
+    name: compactStorageString(firstNonEmptyString([targetOrganization.name, targetOrganization.label]), 240),
+    source: compactStorageString(targetOrganization.source, 80),
+  });
+
+  return Object.keys(compact).length > 0 ? compact : null;
+}
+
 function compactProfileForStorage(profile) {
   if (!profile || typeof profile !== "object") {
     return null;
@@ -56297,6 +56650,7 @@ function buildStoredLoginData(loginData, minimal = false) {
     imsSession,
     sessionKeys,
     adobePassOrg: compactAdobePassOrgForStorage(loginData?.adobePassOrg),
+    targetOrganization: compactTargetOrganizationForStorage(loginData?.targetOrganization),
   });
 
   return compact;
@@ -56621,11 +56975,13 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     resetWorkflowForLoggedOut();
     await ensureRestrictedOrgOptionsFromToken(
       sessionData?.accessToken,
-      sessionData?.adobePassOrg || null,
-      sessionData
+      enforced?.loginData?.targetOrganization || sessionData?.targetOrganization || sessionData?.adobePassOrg || null,
+      enforced?.loginData || sessionData
     );
-    updateRestrictedContext(sessionData, {
-      recoveryLabel: "Choose an Adobe org profile and switch this session.",
+    updateRestrictedContext(enforced?.loginData || sessionData, {
+      recoveryLabel:
+        firstNonEmptyString([enforced?.recoveryLabel]) ||
+        "Choose an Adobe org profile and switch this session.",
     });
     state.loginData = null;
     state.restricted = true;
@@ -56687,7 +57043,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
       clearRefreshTimer();
       await ensureRestrictedOrgOptionsFromToken(
         deniedAccessToken,
-        deniedSessionData?.adobePassOrg || sessionData?.adobePassOrg || null,
+        deniedSessionData?.targetOrganization || deniedSessionData?.adobePassOrg || sessionData?.targetOrganization || sessionData?.adobePassOrg || null,
         deniedSessionData
       );
       updateRestrictedContext(deniedSessionData, {
@@ -56823,7 +57179,13 @@ async function refreshSessionNoTouch() {
         mode: "silent-refresh",
         phase: "profile-resolved",
       });
-      const activated = await activateSession(buildLoginSessionPayloadFromAuth(authData, profile), "silent-refresh");
+      const activated = await activateSession(
+        attachTargetOrganizationToLoginData(
+          buildLoginSessionPayloadFromAuth(authData, profile),
+          state.loginData?.targetOrganization || resolveTargetOrganizationForLogin()
+        ),
+        "silent-refresh"
+      );
       setUnderparDiagnosticMarker("auth", {
         status: activated === true ? "success" : "incomplete",
         mode: "silent-refresh",
@@ -56881,7 +57243,10 @@ async function attemptSilentBootstrapLogin() {
       allowFallback: false,
     });
     const profile = await resolveProfileAfterLogin(authData);
-    return buildLoginSessionPayloadFromAuth(authData, profile);
+    return attachTargetOrganizationToLoginData(
+      buildLoginSessionPayloadFromAuth(authData, profile),
+      resolveTargetOrganizationForLogin()
+    );
   } catch {
     // Silent PKCE bootstrap is best-effort only.
   }
@@ -68821,15 +69186,89 @@ function renderRestrictedView() {
   els.restrictedRecoveryState.textContent =
     state.restrictedRecoveryLabel || "Choose an Adobe org profile and switch this session.";
 
-  const recommended = options.find((option) => option.isAdobePass);
+  const targetedOption =
+    findMatchingRestrictedOrganizationOption(
+      options,
+      state.loginData?.targetOrganization || resolveTargetOrganizationForLogin()
+    ) || null;
+  const recommended = targetedOption || options.find((option) => option.isAdobePass);
   if (options.length === 0) {
     els.restrictedOrgHint.textContent =
       "No Adobe org profiles were resolved from the current Adobe session. Click Sign In Again to reopen Adobe's profile chooser.";
+  } else if (targetedOption) {
+    els.restrictedOrgHint.textContent = `Target org: ${targetedOption.label}`;
   } else if (recommended) {
     els.restrictedOrgHint.textContent = `Recommended profile: ${recommended.label}`;
   } else {
     els.restrictedOrgHint.textContent = "Select an Adobe org profile and click Switch Org.";
   }
+}
+
+function renderSignInView() {
+  if (!els.signInHeroBtn) {
+    return;
+  }
+
+  const targetOrganizationContext = buildTargetOrganizationContext();
+  const targetOrganization = targetOrganizationContext.selectedOrganization;
+  const options = Array.isArray(targetOrganizationContext.options) ? targetOrganizationContext.options : [];
+  const signingIn = state.busy && isInteractiveAuthBusyContext(state.busyContext);
+
+  if (els.signInOrgField && els.signInOrgSelect) {
+    const showOrgPicker = options.length > 0;
+    els.signInOrgField.hidden = !showOrgPicker;
+    if (showOrgPicker) {
+      const signature = options.map((option) => `${option.key}:${option.label}`).join("|");
+      if (els.signInOrgSelect.dataset.optionsSignature !== signature) {
+        els.signInOrgSelect.innerHTML = "";
+        if (options.length > 1) {
+          const placeholderOption = document.createElement("option");
+          placeholderOption.value = PREAUTH_TARGET_ORG_PLACEHOLDER_VALUE;
+          placeholderOption.textContent = "Choose Adobe organization";
+          els.signInOrgSelect.appendChild(placeholderOption);
+        }
+        options.forEach((option) => {
+          const optionNode = document.createElement("option");
+          optionNode.value = option.key;
+          optionNode.textContent = option.label;
+          els.signInOrgSelect.appendChild(optionNode);
+        });
+        els.signInOrgSelect.dataset.optionsSignature = signature;
+      }
+      els.signInOrgSelect.value =
+        targetOrganization?.key ||
+        (options.length > 1 ? PREAUTH_TARGET_ORG_PLACEHOLDER_VALUE : firstNonEmptyString([options[0]?.key]));
+      els.signInOrgSelect.disabled = state.busy || options.length <= 1;
+    } else {
+      els.signInOrgSelect.innerHTML = '<option value="">-- Use Adobe profile chooser --</option>';
+      els.signInOrgSelect.value = "";
+      els.signInOrgSelect.disabled = true;
+      delete els.signInOrgSelect.dataset.optionsSignature;
+    }
+  }
+
+  if (els.signInOrgMeta) {
+    els.signInOrgMeta.textContent = targetOrganization
+      ? `Targeting ${targetOrganization.label} (${firstNonEmptyString([targetOrganization.id, targetOrganization.orgId])}).`
+      : options.length > 1
+        ? "Choose the Adobe org UnderPAR should target before sign-in."
+        : "No app-owned Adobe org target is selected.";
+  }
+
+  if (els.signInOrgHint) {
+    els.signInOrgHint.textContent = targetOrganization
+      ? "UnderPAR will force Adobe sign-in with prompt=login, then verify the returned org context before console bootstrap."
+      : options.length > 1
+        ? "Pick one ZIP.KEY org target before sign-in so UnderPAR can keep the Adobe session out of the recovery loop."
+        : "Sign In always forces Adobe's profile chooser so the user can pick the correct Adobe profile.";
+  }
+
+  els.signInHeroBtn.disabled = signingIn || targetOrganizationContext.requiresSelection;
+  els.signInHeroBtn.textContent = signingIn
+    ? "Signing In..."
+    : targetOrganizationContext.requiresSelection
+      ? "Choose Org"
+      : "Sign In";
 }
 
 function render() {
@@ -68890,10 +69329,8 @@ function render() {
     els.authBtn.textContent = "";
     if (!state.busy) {
       els.authBtn.title = authActionLabel;
-      if (els.signInHeroBtn) {
-        els.signInHeroBtn.textContent = "Sign In";
-      }
     }
+    renderSignInView();
     return;
   }
 
@@ -68914,6 +69351,16 @@ function render() {
 
 async function signInInteractive(options = {}) {
   const loginOptions = options && typeof options === "object" ? options : {};
+  const configuredTargetOrganizations = getConfiguredTargetOrganizations();
+  const requestedTargetOrganization =
+    loginOptions?.targetOrganization && typeof loginOptions.targetOrganization === "object"
+      ? loginOptions.targetOrganization
+      : resolveTargetOrganizationForLogin();
+  const targetOrganization =
+    findConfiguredTargetOrganization(configuredTargetOrganizations, requestedTargetOrganization) ||
+    requestedTargetOrganization ||
+    null;
+  const targetOrgStrategy = buildPreferredOrgSwitchStrategy(targetOrganization);
   cancelPendingBootstrapSession();
   await releaseAuthPopupBootstrapContext("interactive-signin-reset");
   state.sessionMonitorSuppressed = false;
@@ -68940,6 +69387,10 @@ async function signInInteractive(options = {}) {
       interactive: true,
       allowFallback: true,
       prompt: normalizeUnderparImsPrompt(loginOptions?.prompt || "login", true),
+      extraParams: {
+        ...(loginOptions?.extraParams && typeof loginOptions.extraParams === "object" ? loginOptions.extraParams : {}),
+        ...(targetOrgStrategy || {}),
+      },
     });
     setUnderparDiagnosticMarker("auth", {
       status: "token-acquired",
@@ -68957,7 +69408,10 @@ async function signInInteractive(options = {}) {
     const profileResolvedAt = Date.now();
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
     const activated = await activateSession(
-      buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+      attachTargetOrganizationToLoginData(
+        buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+        targetOrganization
+      ),
       "interactive",
       {
         allowTemporaryPageContextTab: false,
@@ -69055,7 +69509,10 @@ async function refreshSessionManual() {
     const profileResolvedAt = Date.now();
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
     const activated = await activateSession(
-      buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+      attachTargetOrganizationToLoginData(
+        buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+        state.loginData?.targetOrganization || resolveTargetOrganizationForLogin()
+      ),
       usedInteractiveLogin ? "manual-refresh-interactive" : "manual-refresh",
       {
         allowTemporaryPageContextTab: false,
@@ -69124,8 +69581,13 @@ async function onRestrictedOrgSwitch() {
     return;
   }
 
-  const strategies = buildOrgSwitchStrategies(selected);
-  if (strategies.length === 0) {
+  const configuredTarget = findConfiguredTargetOrganization(getConfiguredTargetOrganizations(), selected);
+  if (configuredTarget?.key) {
+    state.selectedTargetOrganizationKey = configuredTarget.key;
+  }
+
+  const preferredStrategy = buildPreferredOrgSwitchStrategy(selected);
+  if (!preferredStrategy) {
     state.restrictedRecoveryLabel = "Selected profile does not include switchable identifiers.";
     setStatus("The selected org does not include switchable identifiers.", "error");
     render();
@@ -69144,69 +69606,59 @@ async function onRestrictedOrgSwitch() {
   });
   render();
 
-  let lastError = null;
   try {
-    for (const strategy of strategies) {
-      try {
-        const authData = await startLogin({
-          extraParams: strategy,
-          interactive: true,
-          allowFallback: true,
-          prompt: "login",
-        });
-        resetAvatarStateForInteractiveLogin();
-        const profile = await resolveProfileAfterLogin(authData);
-        const imageUrl = resolveAuthAvatarSeed(authData, profile);
-        const activated = await activateSession(
-          buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
-          "restricted-org-switch",
-          {
-            allowDeniedRecovery: false,
-            allowTemporaryPageContextTab: false,
-          }
-        );
-        if (activated) {
-          await awaitCmBootstrapForExplicitActivation("restricted-org-switch", {
-            allowTemporaryPageContextTab: false,
-          });
-          setUnderparDiagnosticMarker("auth", {
-            status: "success",
-            mode: "restricted-org-switch",
-            phase: "activation-complete",
-            selectedOrg: selected.label,
-          });
-          clearStatusUnlessCmTenantsPrecheckBlocked();
-          return;
-        }
-      } catch (error) {
-        lastError = error;
-        log("Restricted org switch strategy failed", {
-          strategy,
-          error: error?.message || String(error),
-        });
+    const authData = await startLogin({
+      extraParams: preferredStrategy,
+      interactive: true,
+      allowFallback: true,
+      prompt: "login",
+    });
+    resetAvatarStateForInteractiveLogin();
+    const profile = await resolveProfileAfterLogin(authData);
+    const imageUrl = resolveAuthAvatarSeed(authData, profile);
+    const activated = await activateSession(
+      attachTargetOrganizationToLoginData(
+        buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+        configuredTarget || selected
+      ),
+      "restricted-org-switch",
+      {
+        allowDeniedRecovery: false,
+        allowTemporaryPageContextTab: false,
       }
+    );
+    if (activated) {
+      await awaitCmBootstrapForExplicitActivation("restricted-org-switch", {
+        allowTemporaryPageContextTab: false,
+      });
+      setUnderparDiagnosticMarker("auth", {
+        status: "success",
+        mode: "restricted-org-switch",
+        phase: "activation-complete",
+        selectedOrg: selected.label,
+      });
+      clearStatusUnlessCmTenantsPrecheckBlocked();
+      return;
     }
 
-    if (lastError) {
-      state.restrictedRecoveryLabel = "Manual org switch failed. Try Sign In Again or Sign Out and retry.";
-      setUnderparDiagnosticMarker("auth", {
-        status: "error",
-        mode: "restricted-org-switch",
-        phase: "failed",
-        selectedOrg: selected.label,
-        error: lastError instanceof Error ? lastError.message : String(lastError),
-      });
-      setStatus(lastError instanceof Error ? lastError.message : String(lastError), "error");
-    } else {
-      state.restrictedRecoveryLabel = "Manual org switch could not complete. Try Sign In Again.";
-      setUnderparDiagnosticMarker("auth", {
-        status: "incomplete",
-        mode: "restricted-org-switch",
-        phase: "activation-incomplete",
-        selectedOrg: selected.label,
-      });
-      setStatus("Unable to switch org profile. Try Sign In Again.", "error");
-    }
+    state.restrictedRecoveryLabel = "Manual org switch could not complete. Try Sign In Again.";
+    setUnderparDiagnosticMarker("auth", {
+      status: "incomplete",
+      mode: "restricted-org-switch",
+      phase: "activation-incomplete",
+      selectedOrg: selected.label,
+    });
+    setStatus("Unable to switch org profile. Try Sign In Again.", "error");
+  } catch (error) {
+    state.restrictedRecoveryLabel = "Manual org switch failed. Try Sign In Again or Sign Out and retry.";
+    setUnderparDiagnosticMarker("auth", {
+      status: "error",
+      mode: "restricted-org-switch",
+      phase: "failed",
+      selectedOrg: selected.label,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
     state.restrictedOrgSwitchBusy = false;
     render();
@@ -69217,10 +69669,17 @@ async function onRestrictedSignInAgain() {
   if (state.busy || state.restrictedOrgSwitchBusy) {
     return;
   }
+  const selected = getSelectedRestrictedOrgOption();
+  const targetOrganization =
+    findConfiguredTargetOrganization(getConfiguredTargetOrganizations(), selected || resolveTargetOrganizationForLogin()) ||
+    selected ||
+    resolveTargetOrganizationForLogin() ||
+    null;
   state.restrictedRecoveryLabel = "Resetting Adobe sign-in and reopening the profile chooser.";
   await signInInteractive({
     prompt: "login",
     forceBrowserLogout: true,
+    targetOrganization,
   });
 }
 
@@ -69241,10 +69700,22 @@ async function onPrimarySignInClick() {
     return;
   }
 
-  await signInInteractive({
+  const targetOrganizationContext = buildTargetOrganizationContext();
+  if (targetOrganizationContext.requiresSelection) {
+    setStatus("Choose an Adobe org target before signing in.", "error");
+    render();
+    return;
+  }
+
+  const signInOptions = {
     prompt: "login",
     forceBrowserLogout: true,
-  });
+  };
+  if (targetOrganizationContext.selectedOrganization) {
+    signInOptions.targetOrganization = targetOrganizationContext.selectedOrganization;
+  }
+
+  await signInInteractive(signInOptions);
 }
 
 async function onAuthClick() {
@@ -69268,6 +69739,7 @@ function onZipKeyContinue() {
 }
 
 function shouldAttemptSilentBootstrapSession() {
+  const targetOrganizationContext = buildTargetOrganizationContext();
   return (
     !state.sessionReady &&
     !state.restricted &&
@@ -69275,6 +69747,7 @@ function shouldAttemptSilentBootstrapSession() {
     !state.restrictedOrgSwitchBusy &&
     !state.zipKeyImportPending &&
     !state.manualSignOutHold &&
+    !targetOrganizationContext.requiresSelection &&
     hasConfiguredUnderparImsClientId()
   );
 }
@@ -69469,6 +69942,15 @@ function registerEventHandlers() {
   if (els.signInUpdateIndicator) {
     els.signInUpdateIndicator.addEventListener("click", () => {
       void triggerGetLatestWorkflow();
+    });
+  }
+
+  if (els.signInOrgSelect) {
+    els.signInOrgSelect.addEventListener("change", (event) => {
+      const nextValue = String(event.target.value || "").trim();
+      state.selectedTargetOrganizationKey =
+        nextValue === PREAUTH_TARGET_ORG_PLACEHOLDER_VALUE ? "" : nextValue;
+      renderSignInView();
     });
   }
 
