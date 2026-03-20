@@ -57789,27 +57789,15 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     syncMediaCompanySelectAvailability();
 
     try {
-      let hydratedToken = normalizeBearerTokenValue(
-        await hydrateGlobalCmConsoleBootstrapForActiveSession(reason, {
-          forceRefresh,
-          allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
-          preferredCmBootstrapTabId,
-          releaseRetainedAuthPopupContext,
-        })
-      );
       const catalog = await ensureCmTenantsCatalog({
         forceRefresh,
-        accessToken: hydratedToken,
-        skipBootstrap: Boolean(hydratedToken),
         allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
         preferredCmBootstrapTabId,
       });
       if (!hasCmTenantsCatalogEntries(catalog)) {
         throw new Error("CM tenants load failed: tenant catalog returned no tenants.");
       }
-      if (!hydratedToken || !tokenSupportsCmConsoleRequests(hydratedToken)) {
-        hydratedToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
-      }
+      let hydratedToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
       if (!hydratedToken || !tokenSupportsCmConsoleRequests(hydratedToken)) {
         hydratedToken = normalizeBearerTokenValue(
           await ensureCmApiAccessToken({
@@ -65817,29 +65805,6 @@ async function ensureCmApiAccessToken(options = {}) {
   const promise = (async () => {
     try {
       const requireFresh = forceRefresh || !tokenLooksFresh || !tokenSupportsCatalog;
-      const globallyHydratedToken = normalizeBearerTokenValue(
-        await hydrateGlobalCmConsoleBootstrapForActiveSession("cm-api-access", {
-          forceRefresh: requireFresh,
-          allowTemporaryPageContextTab,
-          preferredCmBootstrapTabId,
-        }).catch(() => "")
-      );
-      if (globallyHydratedToken && tokenSupportsCmConsoleRequests(globallyHydratedToken)) {
-        emitCmConsoleTokenForTesting(globallyHydratedToken, "ensure-global-hydrate");
-        return globallyHydratedToken;
-      }
-
-      const tenantBootstrapToken = normalizeBearerTokenValue(
-        await bootstrapCmConsoleTenantSession({
-          forceRefresh: requireFresh,
-          preferredTabId: preferredCmBootstrapTabId,
-        }).catch(() => "")
-      );
-      if (tenantBootstrapToken && tokenSupportsCmConsoleRequests(tenantBootstrapToken)) {
-        emitCmConsoleTokenForTesting(tenantBootstrapToken, "ensure-tenant-bootstrap");
-        return tenantBootstrapToken;
-      }
-
       const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
       const qualifiedTokenResult = await requestQualifiedCmConsoleToken({
         seedToken: primarySeedToken,
@@ -65867,6 +65832,29 @@ async function ensureCmApiAccessToken(options = {}) {
             return persistedPrimaryToken;
           }
         }
+      }
+
+      const globallyHydratedToken = normalizeBearerTokenValue(
+        await hydrateGlobalCmConsoleBootstrapForActiveSession("cm-api-access", {
+          forceRefresh: requireFresh,
+          allowTemporaryPageContextTab,
+          preferredCmBootstrapTabId,
+        }).catch(() => "")
+      );
+      if (globallyHydratedToken && tokenSupportsCmConsoleRequests(globallyHydratedToken)) {
+        emitCmConsoleTokenForTesting(globallyHydratedToken, "ensure-global-hydrate");
+        return globallyHydratedToken;
+      }
+
+      const tenantBootstrapToken = normalizeBearerTokenValue(
+        await bootstrapCmConsoleTenantSession({
+          forceRefresh: requireFresh,
+          preferredTabId: preferredCmBootstrapTabId,
+        }).catch(() => "")
+      );
+      if (tenantBootstrapToken && tokenSupportsCmConsoleRequests(tenantBootstrapToken)) {
+        emitCmConsoleTokenForTesting(tenantBootstrapToken, "ensure-tenant-bootstrap");
+        return tenantBootstrapToken;
       }
 
       const silent = await attemptSilentBootstrapLogin();
@@ -66960,7 +66948,9 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
     options?.headers?.authorization,
   ]);
   let ensuredCmAccessToken = "";
-  if (!explicitAuthorizationHeader) {
+  if (explicitAuthorizationHeader) {
+    ensuredCmAccessToken = normalizeBearerTokenValue(explicitAuthorizationHeader.replace(/^Bearer\s+/i, ""));
+  } else if (options.requireCmAccessToken === true) {
     try {
       ensuredCmAccessToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ freshLeewayMs: 45 * 1000 }));
     } catch {
@@ -66986,7 +66976,10 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
       return [baseHeaders];
     }
     const variants = [];
-    const requiresAdobeConsoleAuth = isCmReportsRequestUrl(url) || isCmConfigRequestUrl(url);
+    const supportsRuntimeContextOnly = method === "GET" && (isCmReportsRequestUrl(url) || isCmConfigRequestUrl(url));
+    if (supportsRuntimeContextOnly) {
+      variants.push(baseHeaders);
+    }
     const candidateTokens = [];
     const seenTokens = new Set();
     [
@@ -67011,7 +67004,7 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
         Authorization: `Bearer ${accessToken}`,
       });
     });
-    if (!requiresAdobeConsoleAuth && variants.length === 0) {
+    if (variants.length === 0) {
       variants.push(baseHeaders);
     }
     return variants;
@@ -67142,14 +67135,33 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
         const authRedirectResponse = isCmAuthRedirectResponse(response, parsed, text);
         const tokenExpiredResponse = isCmTokenExpiredResponse(response.status, parsed, text);
 
-        if (!tokenRefreshAttempted && (authRedirectResponse || tokenExpiredResponse)) {
+        const shouldForceCmTokenHydration =
+          !tokenRefreshAttempted &&
+          !explicitAuthorizationHeader &&
+          (
+            authRedirectResponse ||
+            tokenExpiredResponse ||
+            ((response.status === 401 || response.status === 403) &&
+              authMode === "none" &&
+              (isCmReportsRequestUrl(url) || isCmConfigRequestUrl(url)))
+          );
+
+        if (shouldForceCmTokenHydration) {
           tokenRefreshAttempted = true;
-          const refreshedToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ forceRefresh: true }));
+          const refreshedToken = normalizeBearerTokenValue(
+            await ensureCmApiAccessToken({
+              forceRefresh: true,
+              allowTemporaryPageContextTab,
+              freshLeewayMs: 45 * 1000,
+            })
+          );
           if (String(refreshedToken || "").trim()) {
             ensuredCmAccessToken = refreshedToken;
-            headerVariants = buildHeaderVariants(url);
-            headerIndex = -1;
-            continue headersLoop;
+            headerVariants = buildHeaderVariants(url).filter((variant) => detectCmAuthMode(variant) !== "none");
+            if (headerVariants.length > 0) {
+              headerIndex = -1;
+              continue headersLoop;
+            }
           }
         }
 
@@ -67457,27 +67469,30 @@ async function fetchCmTenantCatalogWithAuth(url = "", options = {}) {
     },
     requestUrl
   );
-  const headerVariants = [];
-  const cmBearerToken = [
-    normalizeBearerTokenValue(options?.accessToken),
-    normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate()),
-    normalizeBearerTokenValue(state.loginData?.cmConsoleAccessToken || ""),
-    normalizeBearerTokenValue(state.loginData?.accessToken || ""),
-  ].find((candidate) => candidate && tokenSupportsCmConsoleRequests(candidate));
-  if (cmBearerToken && tokenSupportsCmConsoleRequests(cmBearerToken)) {
+  const headerVariants = [baseHeaders];
+  const appendTokenVariant = (tokenValue) => {
+    const normalizedToken = normalizeBearerTokenValue(tokenValue);
+    if (!normalizedToken || !tokenSupportsCmConsoleRequests(normalizedToken)) {
+      return;
+    }
+    const dedupeKey = `Bearer ${normalizedToken}`;
+    if (headerVariants.some((headers) => String(headers.Authorization || headers.authorization || "") === dedupeKey)) {
+      return;
+    }
     headerVariants.push({
       ...baseHeaders,
-      Authorization: `Bearer ${cmBearerToken}`,
+      Authorization: dedupeKey,
     });
-  }
-  if (headerVariants.length === 0) {
-    throw new Error(
-      "CM tenants load failed: UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session."
-    );
-  }
+  };
+  appendTokenVariant(options?.accessToken);
+  appendTokenVariant(getPreferredCmRequestAccessTokenCandidate());
+  appendTokenVariant(state.loginData?.cmConsoleAccessToken || "");
+  appendTokenVariant(state.loginData?.accessToken || "");
 
   let lastError = null;
-  for (const requestHeaders of headerVariants) {
+  let attemptedTokenRefresh = false;
+  for (let headerIndex = 0; headerIndex < headerVariants.length; headerIndex += 1) {
+    const requestHeaders = headerVariants[headerIndex];
     const requestInit = {
       method: "GET",
       credentials: "include",
@@ -67506,6 +67521,20 @@ async function fetchCmTenantCatalogWithAuth(url = "", options = {}) {
     }
 
     const statusCode = Number(response.status || 0);
+    const authMode = detectCmAuthMode(requestHeaders);
+    if (!attemptedTokenRefresh && authMode === "none" && (statusCode === 401 || statusCode === 403)) {
+      attemptedTokenRefresh = true;
+      const refreshedToken = normalizeBearerTokenValue(
+        await ensureCmApiAccessToken({
+          forceRefresh: true,
+          freshLeewayMs: 45 * 1000,
+        }).catch(() => "")
+      );
+      if (refreshedToken && tokenSupportsCmConsoleRequests(refreshedToken)) {
+        appendTokenVariant(refreshedToken);
+        continue;
+      }
+    }
     const message =
       firstNonEmptyString([
         parsed?.error?.code,
@@ -67528,11 +67557,6 @@ async function ensureCmTenantsCatalog(options = {}) {
   const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
   const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const preferredAccessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken]));
-  const skipBootstrap =
-    options?.skipBootstrap === true &&
-    preferredAccessToken &&
-    tokenSupportsCmConsoleRequests(preferredAccessToken) &&
-    (!forceRefresh || isAccessTokenFreshEnough(preferredAccessToken, 45 * 1000));
   if (forceRefresh) {
     state.cmTenantsCatalogRuntimeFresh = false;
   }
@@ -67585,14 +67609,6 @@ async function ensureCmTenantsCatalog(options = {}) {
       url: tenantCatalogUrls[0],
       urls: tenantCatalogUrls,
     });
-
-    if (!skipBootstrap) {
-      await bootstrapCmConsoleTenantSession({
-        forceRefresh,
-        preferredTabId: preferredCmBootstrapTabId,
-      });
-    }
-
     let lastError = null;
     try {
       // Prefer the direct bearer path first. Reports-page context is a last-resort

@@ -652,6 +652,7 @@ test("interactive login and org switching allow a temporary shared shell page co
 test("session activation hydrates CM tenants before programmer load and keeps Media Company user-owned", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activateSource = extractFunctionSource(popupSource, "activateSession");
+  const precheckSource = extractFunctionSource(popupSource, "ensureCmTenantsPrecheckForActiveSession");
   const programmersSource = extractFunctionSource(popupSource, "loadProgrammersData");
   const mediaCompanyLockSource = extractFunctionSource(popupSource, "isMediaCompanySelectionLockedByCmPrecheck");
   const mediaCompanyLabelSource = extractFunctionSource(popupSource, "getMediaCompanySelectDefaultLabel");
@@ -667,6 +668,11 @@ test("session activation hydrates CM tenants before programmer load and keeps Me
   assert.match(activateSource, /await ensureCmTenantsPrecheckForActiveSession\(`activation:\$\{normalizedSource\}`/);
   assert.match(activateSource, /releaseRetainedAuthPopupContext:\s*false/);
   assert.match(activateSource, /mergeCmConsoleBootstrapIntoLoginData\(/);
+  assert.ok(
+    precheckSource.indexOf("const catalog = await ensureCmTenantsCatalog(") <
+      precheckSource.indexOf("await ensureCmApiAccessToken(")
+  );
+  assert.doesNotMatch(precheckSource, /await hydrateGlobalCmConsoleBootstrapForActiveSession\(/);
   assert.match(programmersSource, /const allowRestrictedSession = options\.allowRestrictedSession === true;/);
   assert.match(programmersSource, /\(state\.restricted && !allowRestrictedSession\)/);
   assert.match(mediaCompanyLockSource, /return false;/);
@@ -1307,8 +1313,8 @@ test("CM request path accepts the configured UnderPAR shell bearer before requir
   assert.match(ensureCmSource, /getPreferredCmRequestAccessTokenCandidate\(\)/);
   assert.match(ensureCmSource, /tokenSupportsCmConsoleRequests\(existingToken\)/);
   assert.match(ensureCmSource, /tokenSupportsCmConsoleRequests\(primarySeedToken\)/);
-  assert.match(tenantCatalogSource, /state\.loginData\?\.accessToken/);
-  assert.match(tenantCatalogSource, /tokenSupportsCmConsoleRequests\(candidate\)/);
+  assert.match(tenantCatalogSource, /const headerVariants = \[baseHeaders\];/);
+  assert.match(tenantCatalogSource, /appendTokenVariant\(state\.loginData\?\.accessToken \|\| ""\)/);
   assert.match(reportHeadersSource, /AP-Request-Id/);
 });
 
@@ -1379,26 +1385,31 @@ test("ESM, CM, and DEGRADATION panel loaders wait for in-flight programmer hydra
   assert.match(degradationSource, /primeProgrammerServiceHydration\(programmer, getCurrentPremiumAppsSnapshot\(programmer\.programmerId\)/);
 });
 
-test("CM direct fetch and tenant catalog paths no longer issue unauthenticated cookie-style fallbacks", () => {
+test("CM direct fetch and tenant catalog paths try runtime-context headers before cm-console-ui bearer escalation", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const fetchSource = extractFunctionSource(popupSource, "fetchCmJsonWithAuthVariants");
   const tenantCatalogSource = extractFunctionSource(popupSource, "fetchCmTenantCatalogWithAuth");
 
   assert.doesNotMatch(popupSource, /function fetchCmTenantCatalogWithSession/);
-  assert.match(fetchSource, /const requiresAdobeConsoleAuth = isCmReportsRequestUrl\(url\) \|\| isCmConfigRequestUrl\(url\);/);
+  assert.match(fetchSource, /const supportsRuntimeContextOnly = method === "GET" && \(isCmReportsRequestUrl\(url\) \|\| isCmConfigRequestUrl\(url\)\);/);
+  assert.match(fetchSource, /if \(supportsRuntimeContextOnly\) \{\s*variants\.push\(baseHeaders\);/);
+  assert.match(fetchSource, /response\.status === 401 \|\| response\.status === 403/);
   assert.doesNotMatch(fetchSource, /allowCookieFallback/);
-  assert.doesNotMatch(tenantCatalogSource, /headerVariants\.push\(baseHeaders\)/);
-  assert.match(
-    tenantCatalogSource,
-    /UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session/
-  );
+  assert.match(tenantCatalogSource, /const headerVariants = \[baseHeaders\];/);
+  assert.match(tenantCatalogSource, /if \(!attemptedTokenRefresh && authMode === "none" && \(statusCode === 401 \|\| statusCode === 403\)\)/);
 });
 
-test("CM tenant bootstrap prefers direct bearer fetch before reports page fallback", () => {
+test("CM tenant bootstrap loads the tenant catalog before CM token hydration and keeps reports-page fallback last", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const ensureCatalogSource = extractFunctionSource(popupSource, "ensureCmTenantsCatalog");
+  const precheckSource = extractFunctionSource(popupSource, "ensureCmTenantsPrecheckForActiveSession");
   const reportsPageSource = extractFunctionSource(popupSource, "requestCmConsoleBootstrapCatalogFromReportsPage");
 
+  assert.doesNotMatch(ensureCatalogSource, /bootstrapCmConsoleTenantSession\(/);
+  assert.ok(
+    precheckSource.indexOf("const catalog = await ensureCmTenantsCatalog(") <
+      precheckSource.indexOf("await ensureCmApiAccessToken(")
+  );
   assert.doesNotMatch(ensureCatalogSource, /const shouldPreferReportsPageBootstrap/);
   assert.ok(
     ensureCatalogSource.indexOf("for (const tenantCatalogUrl of tenantCatalogUrls)") <
