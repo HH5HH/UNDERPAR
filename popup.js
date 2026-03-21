@@ -10382,10 +10382,6 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
       state.loginData && typeof state.loginData === "object"
         ? {
             ...state.loginData,
-            experienceCloudAccessToken: "",
-            experienceCloudExpiresAt: 0,
-            experienceCloudScope: "",
-            experienceCloudImsSession: null,
             cmConsoleAccessToken: "",
             cmConsoleExpiresAt: 0,
             cmConsoleScope: "",
@@ -28257,14 +28253,6 @@ function buildClickCmuRuntimePatchSnippet(context = {}) {
     ),
     userId: String(context.userId || "").trim(),
     scope: String(context.scope || CM_IMS_CHECK_DEFAULT_SCOPE).trim() || CM_IMS_CHECK_DEFAULT_SCOPE,
-    experienceCloudAccessToken: String(context.experienceCloudAccessToken || "").trim(),
-    experienceCloudClientIds: uniqueSorted(
-      (Array.isArray(context.experienceCloudClientIds) ? context.experienceCloudClientIds : [])
-        .map((value) => String(value || "").trim())
-        .filter((value) => String(value || "").trim().toLowerCase() === EXPERIENCE_CLOUD_SSO_CLIENT_ID)
-    ),
-    experienceCloudUserId: String(context.experienceCloudUserId || "").trim(),
-    experienceCloudScope: String(context.experienceCloudScope || "").trim(),
     adobePassEnvironment: activeAdobePassEnvironment,
   };
   const runtimeJson = clickCmuSerializeForInlineScript(runtimeConfig);
@@ -28789,37 +28777,22 @@ body[data-theme="dark"]{
     );
   }
 
-  function resolveExperienceCloudClientIds() {
-    return uniqueStrings([
-      ...(Array.isArray(runtime.experienceCloudClientIds) ? runtime.experienceCloudClientIds : []),
-      "exc_app",
-    ]).filter((value) => String(value || "").trim().toLowerCase() === "exc_app");
-  }
-
   function resolveUserIdCandidates() {
-    return uniqueStrings([
-      String(runtime.userId || "").trim(),
-      String(runtime.experienceCloudUserId || "").trim(),
-    ]);
+    return uniqueStrings([String(runtime.userId || "").trim()]);
   }
 
   function resolveScopeCandidates() {
-    const candidates = uniqueStrings(
-      [runtime.scope, runtime.experienceCloudScope, DEFAULT_SCOPE].map((value) => tokenizeScopeSet(value).join(","))
-    );
+    const candidates = uniqueStrings([runtime.scope, DEFAULT_SCOPE].map((value) => tokenizeScopeSet(value).join(",")));
     return candidates.length > 0 ? candidates : [DEFAULT_SCOPE];
   }
 
   function resolveSeedClientIdsForToken(token) {
     const claims = parseJwtPayload(token) || {};
     const clientId = String(firstNonEmptyString([claims.client_id, claims.clientId]) || "").trim().toLowerCase();
-    if (clientId === "exc_app") {
-      return resolveExperienceCloudClientIds();
-    }
     if (clientId === CMU_CLIENT_ID) {
       return resolveClientIds();
     }
-    return uniqueStrings([...resolveExperienceCloudClientIds(), ...resolveClientIds()]);
+    return resolveClientIds();
   }
 
   function collectSeedTokenEntries() {
@@ -28840,7 +28813,6 @@ body[data-theme="dark"]{
         clientIds: uniqueStrings(Array.isArray(clientIds) ? clientIds : []),
       });
     };
-    pushSeed(runtime.experienceCloudAccessToken, resolveExperienceCloudClientIds());
     pushSeed(runtime.accessToken, resolveClientIds());
     pushSeed(typeof window.getToken === "function" ? window.getToken() : "", []);
     output.forEach((entry) => {
@@ -29757,10 +29729,6 @@ function buildClickCmuHtmlFromTemplate(templateHtml, context = {}) {
     clientIds,
     userId: String(context.userId || "").trim(),
     scope: String(context.scope || CM_IMS_CHECK_DEFAULT_SCOPE).trim() || CM_IMS_CHECK_DEFAULT_SCOPE,
-    experienceCloudAccessToken: String(context.experienceCloudAccessToken || "").trim(),
-    experienceCloudClientIds: Array.isArray(context.experienceCloudClientIds) ? context.experienceCloudClientIds : [],
-    experienceCloudUserId: String(context.experienceCloudUserId || "").trim(),
-    experienceCloudScope: String(context.experienceCloudScope || "").trim(),
   });
   const themeOverrideCss = buildClickCmuThemeOverrideCss(context?.themePreset);
   if (!output.includes("</body>")) {
@@ -30110,13 +30078,6 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
   const hints = resolveCmImsTokenHints(normalizedToken);
   const claims = parseJwtPayload(normalizedToken) || {};
   const controllerAuth = getCmControllerAuthPayload();
-  const experienceCloudAccessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([
-      controllerAuth?.experienceCloudAccessToken,
-      state.loginData?.experienceCloudAccessToken,
-    ])
-  );
-  const experienceCloudClaims = parseJwtPayload(experienceCloudAccessToken) || {};
   const clientIds = uniquePreserveOrder([
     ...(Array.isArray(controllerAuth?.clientIds) ? controllerAuth.clientIds : []),
     getConfiguredUnderparImsClientId(),
@@ -30125,38 +30086,18 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
     const normalizedValue = String(value || "").trim().toLowerCase();
     return normalizedValue === CM_IMS_PRIMARY_CLIENT_ID || isUnderparImsClientId(normalizedValue);
   });
-  const experienceCloudClientIds = uniqueSorted([
-    ...(Array.isArray(controllerAuth?.experienceCloudClientIds) ? controllerAuth.experienceCloudClientIds : []),
-    EXPERIENCE_CLOUD_SSO_CLIENT_ID,
-  ]).filter((value) => String(value || "").trim().toLowerCase() === EXPERIENCE_CLOUD_SSO_CLIENT_ID);
   const userId = firstNonEmptyString([
     controllerAuth?.userId,
     hints.userId,
     claims.user_id,
     claims.userId,
-    state.loginData?.cmConsoleImsSession?.userId,
     state.loginData?.imsSession?.userId,
   ]);
   const scope = firstNonEmptyString([
     controllerAuth?.scope,
     hints.scope,
     claims.scope,
-    state.loginData?.cmConsoleScope,
     CM_IMS_CHECK_DEFAULT_SCOPE,
-  ]);
-  const experienceCloudUserId = firstNonEmptyString([
-    controllerAuth?.experienceCloudUserId,
-    experienceCloudClaims.user_id,
-    experienceCloudClaims.userId,
-    state.loginData?.experienceCloudImsSession?.userId,
-    state.loginData?.imsSession?.userId,
-    userId,
-  ]);
-  const experienceCloudScope = firstNonEmptyString([
-    controllerAuth?.experienceCloudScope,
-    experienceCloudClaims.scope,
-    state.loginData?.experienceCloudScope,
-    scope,
   ]);
 
   const programmerLabel = firstNonEmptyString([
@@ -30171,10 +30112,6 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
     clientIds: clientIds.length > 0 ? clientIds : uniquePreserveOrder([getConfiguredUnderparImsClientId(), "cm-console-ui"].filter(Boolean)),
     userId,
     scope,
-    experienceCloudAccessToken,
-    experienceCloudClientIds: experienceCloudClientIds.length > 0 ? experienceCloudClientIds : [EXPERIENCE_CLOUD_SSO_CLIENT_ID],
-    experienceCloudUserId,
-    experienceCloudScope,
   };
 }
 
@@ -30217,10 +30154,6 @@ async function makeClickCmuDownload(context, requestToken, options = {}) {
     clientIds: authContext.clientIds,
     userId: authContext.userId,
     scope: authContext.scope,
-    experienceCloudAccessToken: authContext.experienceCloudAccessToken,
-    experienceCloudClientIds: authContext.experienceCloudClientIds,
-    experienceCloudUserId: authContext.experienceCloudUserId,
-    experienceCloudScope: authContext.experienceCloudScope,
     endpointCatalog,
     exportPayload: buildUnderparTearsheetExportPayload(programmer, {
       serviceKey: "cm",
@@ -30281,10 +30214,6 @@ async function makeClickCmuWorkspaceDownload(context, cards, requestToken, optio
     clientIds: authContext.clientIds,
     userId: authContext.userId,
     scope: authContext.scope,
-    experienceCloudAccessToken: authContext.experienceCloudAccessToken,
-    experienceCloudClientIds: authContext.experienceCloudClientIds,
-    experienceCloudUserId: authContext.experienceCloudUserId,
-    experienceCloudScope: authContext.experienceCloudScope,
     endpointCatalog,
     exportPayload: buildUnderparTearsheetExportPayload(programmer, {
       serviceKey: "cm",
@@ -35990,43 +35919,26 @@ function nextCmWorkspaceControllerStateVersion() {
 function getCmControllerAuthPayload() {
   const accessToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
   const tokenClaims = parseJwtPayload(accessToken) || {};
-  const experienceCloudAccessToken = normalizeBearerTokenValue(getPreferredExperienceCloudConsoleAccessTokenCandidate());
-  const experienceCloudClaims = parseJwtPayload(experienceCloudAccessToken) || {};
   const envGlobalCmAuth = getPassVaultCmGlobalAuthFromVault();
   const hints = resolveCmImsTokenHints(accessToken);
   return {
     accessToken,
-    experienceCloudAccessToken,
     clientIds: uniquePreserveOrder([
       firstNonEmptyString([tokenClaims.client_id, tokenClaims.clientId]),
       getConfiguredUnderparImsClientId(),
       CM_IMS_PRIMARY_CLIENT_ID,
     ].filter(Boolean)),
-    experienceCloudClientIds: [EXPERIENCE_CLOUD_SSO_CLIENT_ID],
     userId: firstNonEmptyString([
       hints.userId,
       tokenClaims.user_id,
       tokenClaims.userId,
-      state.loginData?.cmConsoleImsSession?.userId,
       envGlobalCmAuth?.userId,
       state.loginData?.imsSession?.userId,
     ]),
     scope: firstNonEmptyString([
       tokenClaims.scope,
-      state.loginData?.cmConsoleScope,
       envGlobalCmAuth?.scope,
       CM_IMS_CHECK_DEFAULT_SCOPE,
-    ]),
-    experienceCloudUserId: firstNonEmptyString([
-      experienceCloudClaims.user_id,
-      experienceCloudClaims.userId,
-      state.loginData?.experienceCloudImsSession?.userId,
-      state.loginData?.imsSession?.userId,
-      envGlobalCmAuth?.userId,
-    ]),
-    experienceCloudScope: firstNonEmptyString([
-      experienceCloudClaims.scope,
-      state.loginData?.experienceCloudScope,
     ]),
   };
 }
@@ -39272,12 +39184,6 @@ async function handleCmWorkspaceAction(message, sender = null) {
       clientIds: Array.isArray(authContext.clientIds) ? authContext.clientIds : [],
       userId: String(authContext.userId || ""),
       scope: String(authContext.scope || CM_IMS_CHECK_DEFAULT_SCOPE || ""),
-      experienceCloudAccessToken: String(authContext.experienceCloudAccessToken || ""),
-      experienceCloudClientIds: Array.isArray(authContext.experienceCloudClientIds)
-        ? authContext.experienceCloudClientIds
-        : [],
-      experienceCloudUserId: String(authContext.experienceCloudUserId || ""),
-      experienceCloudScope: String(authContext.experienceCloudScope || ""),
       vaultExportPayload: buildUnderparTearsheetExportPayload(clickCmuContext?.programmer || null, {
         serviceKey: "cm",
         passVaultRecord: clickCmuContext?.passVaultRecord || null,
@@ -56023,8 +55929,6 @@ function resolveLoginAuthIdValue(loginData, profile = null) {
   return firstNonEmptyString([
     loginData?.imsSession?.authId,
     loginData?.sessionKeys?.authId,
-    loginData?.cmConsoleImsSession?.authId,
-    loginData?.experienceCloudImsSession?.authId,
     getProfileEmail(resolvedProfile),
   ]);
 }
@@ -56034,8 +55938,6 @@ function resolveLoginUserIdValue(loginData, profile = null) {
   return firstNonEmptyString([
     loginData?.imsSession?.userId,
     loginData?.sessionKeys?.userId,
-    loginData?.cmConsoleImsSession?.userId,
-    loginData?.experienceCloudImsSession?.userId,
     getProfileIdentity(resolvedProfile),
   ]);
 }
@@ -56121,31 +56023,21 @@ function buildLoginAuthContext(loginData = {}) {
     sessionId: firstNonEmptyString([
       primaryImsSession?.sessionId,
       loginData?.sessionKeys?.sessionId,
-      loginData?.cmConsoleImsSession?.sessionId,
-      loginData?.experienceCloudImsSession?.sessionId,
     ]),
     tokenId: firstNonEmptyString([
       primaryImsSession?.tokenId,
       loginData?.sessionKeys?.tokenId,
-      loginData?.cmConsoleImsSession?.tokenId,
-      loginData?.experienceCloudImsSession?.tokenId,
     ]),
     clientId: firstNonEmptyString([
       primaryImsSession?.clientId,
-      loginData?.cmConsoleImsSession?.clientId,
-      loginData?.experienceCloudImsSession?.clientId,
     ]),
     scope: firstNonEmptyString([
       loginData?.scope,
       primaryImsSession?.scope,
-      loginData?.cmConsoleScope,
-      loginData?.experienceCloudScope,
     ]),
     expiresAt: coercePositiveNumber([
       loginData?.expiresAt,
       primaryImsSession?.expiresAt,
-      loginData?.cmConsoleExpiresAt,
-      loginData?.experienceCloudExpiresAt,
     ].find((value) => coercePositiveNumber(value) > 0)),
     accessTokenFingerprint: firstNonEmptyString([
       loginData?.sessionKeys?.accessTokenFingerprint,
@@ -56754,10 +56646,6 @@ function buildLoginSessionPayloadFromAuth(authData, profile = null, imageUrl = "
         authData?.imsSession && typeof authData.imsSession === "object"
           ? authData.imsSession
           : deriveImsSessionSnapshotFromToken(authData?.accessToken || ""),
-      experienceCloudAccessToken: "",
-      experienceCloudExpiresAt: 0,
-      experienceCloudScope: "",
-      experienceCloudImsSession: null,
       cmConsoleAccessToken: "",
       cmConsoleExpiresAt: 0,
       cmConsoleScope: "",
@@ -56886,18 +56774,6 @@ function buildNormalizedLoginData(loginData = {}, options = {}) {
     scope: compactStorageString(firstNonEmptyString([loginData?.scope, mergedImsSession?.scope]), 2048),
     idToken: compactStorageString(firstNonEmptyString([loginData?.idToken]), 4096),
     refreshToken: compactStorageString(firstNonEmptyString([loginData?.refreshToken]), 4096),
-    experienceCloudAccessToken: resetBootstrapTokens
-      ? ""
-      : compactStorageString(firstNonEmptyString([loginData?.experienceCloudAccessToken]), 4096),
-    experienceCloudExpiresAt: resetBootstrapTokens ? 0 : coercePositiveNumber(loginData?.experienceCloudExpiresAt),
-    experienceCloudScope: resetBootstrapTokens
-      ? ""
-      : compactStorageString(firstNonEmptyString([loginData?.experienceCloudScope]), 2048),
-    experienceCloudImsSession: resetBootstrapTokens
-      ? null
-      : loginData?.experienceCloudImsSession && typeof loginData.experienceCloudImsSession === "object"
-        ? loginData.experienceCloudImsSession
-        : null,
     cmConsoleAccessToken: resetBootstrapTokens ? "" : compactStorageString(firstNonEmptyString([loginData?.cmConsoleAccessToken]), 4096),
     cmConsoleExpiresAt: resetBootstrapTokens ? 0 : coercePositiveNumber(loginData?.cmConsoleExpiresAt),
     cmConsoleScope: resetBootstrapTokens ? "" : compactStorageString(firstNonEmptyString([loginData?.cmConsoleScope]), 2048),
@@ -66328,23 +66204,6 @@ function isUnderparImsClientId(value = "") {
   return Boolean(normalizedValue && configuredClientId && normalizedValue === configuredClientId);
 }
 
-function isExperienceCloudConsoleClientId(value = "") {
-  return String(value || "").trim().toLowerCase() === EXPERIENCE_CLOUD_SSO_CLIENT_ID;
-}
-
-function tokenSupportsExperienceCloudConsole(accessToken = "") {
-  const token = normalizeBearerTokenValue(accessToken);
-  if (!token || !isProbablyJwt(token)) {
-    return false;
-  }
-
-  const claims = parseJwtPayload(token) || {};
-  const clientId = String(firstNonEmptyString([claims.client_id, claims.clientId]) || "")
-    .trim()
-    .toLowerCase();
-  return isExperienceCloudConsoleClientId(clientId);
-}
-
 function getPreferredPrimaryImsAccessTokenCandidate() {
   const token = normalizeBearerTokenValue(firstNonEmptyString([state.loginData?.accessToken || ""]));
   if (!token || tokenSupportsCmTenantCatalog(token)) {
@@ -66364,20 +66223,6 @@ function getPreferredCmRequestAccessTokenCandidate() {
       state.loginData?.cmConsoleAccessToken || "",
     ])
   );
-}
-
-function getPreferredExperienceCloudConsoleAccessTokenCandidate() {
-  const persistedExperienceCloudToken = normalizeBearerTokenValue(firstNonEmptyString([state.loginData?.experienceCloudAccessToken || ""]));
-  if (persistedExperienceCloudToken && tokenSupportsExperienceCloudConsole(persistedExperienceCloudToken)) {
-    return persistedExperienceCloudToken;
-  }
-
-  const primaryToken = normalizeBearerTokenValue(firstNonEmptyString([state.loginData?.accessToken || ""]));
-  if (primaryToken && tokenSupportsExperienceCloudConsole(primaryToken)) {
-    return primaryToken;
-  }
-
-  return "";
 }
 
 function getPreferredCmAccessTokenCandidate() {
@@ -66479,10 +66324,6 @@ function collectCmConsoleUserIdCandidates(session = null, seedToken = "") {
   const currentSession = session && typeof session === "object" ? session : {};
   const profile = resolveLoginProfile(currentSession) || {};
   const imsSession = currentSession?.imsSession && typeof currentSession.imsSession === "object" ? currentSession.imsSession : {};
-  const cmConsoleImsSession =
-    currentSession?.cmConsoleImsSession && typeof currentSession.cmConsoleImsSession === "object"
-      ? currentSession.cmConsoleImsSession
-      : {};
   const accessTokenClaims = parseJwtPayload(firstNonEmptyString([currentSession?.accessToken])) || {};
   const idTokenClaims = parseJwtPayload(firstNonEmptyString([currentSession?.idToken])) || {};
   const seedClaims = parseJwtPayload(seedToken) || {};
@@ -66511,8 +66352,6 @@ function collectCmConsoleUserIdCandidates(session = null, seedToken = "") {
     profile?.user_email,
     profile?.emailAddress,
     profile?.additional_info?.email,
-    cmConsoleImsSession?.userId,
-    cmConsoleImsSession?.authId,
     seedClaims?.user_id,
     seedClaims?.userId,
     seedClaims?.sub,
@@ -66836,8 +66675,6 @@ function collectCmImsUserIdCandidates(seedToken = "") {
     primaryClaims.authId,
     seedClaims.aa_id,
     seedClaims.authId,
-    state.loginData?.cmConsoleImsSession?.authId,
-    state.loginData?.experienceCloudImsSession?.authId,
     getLoginIdentity(state.loginData),
     state.loginData?.imsSession?.userId,
     state.loginData?.sessionKeys?.userId,
@@ -66849,8 +66686,6 @@ function collectCmImsUserIdCandidates(seedToken = "") {
     primaryClaims.userId,
     seedClaims.user_id,
     seedClaims.userId,
-    state.loginData?.cmConsoleImsSession?.userId,
-    state.loginData?.experienceCloudImsSession?.userId,
   ];
   const output = [];
   const seen = new Set();
@@ -66900,349 +66735,6 @@ function buildCmImsCheckUrl(config = {}) {
   return url.toString();
 }
 
-async function requestExperienceCloudConsoleTokenViaValidateToken(seedToken = "", options = {}) {
-  const token = normalizeBearerTokenValue(seedToken);
-  if (!token || !isProbablyJwt(token)) {
-    return null;
-  }
-
-  const hints = resolveCmImsTokenHints(token);
-  const clientIds = uniqueSorted(
-    [EXPERIENCE_CLOUD_SSO_CLIENT_ID, hints.clientId]
-      .map((value) => String(value || "").trim())
-      .filter((value) => isExperienceCloudConsoleClientId(value))
-  );
-  const requireFresh = options.requireFresh === true;
-  const endpoint = `${IMS_BASE_URL}/ims/validate_token/v1?jslVersion=underpar-console`;
-
-  for (const clientId of clientIds) {
-    const form = new URLSearchParams({
-      type: "access_token",
-      token,
-    });
-    if (clientId) {
-      form.set("client_id", clientId);
-    }
-
-    const attempts = [{ credentials: "include" }, { credentials: "omit" }];
-    for (const attempt of attempts) {
-      try {
-        const response = await relayImsFetch(endpoint, {
-          method: "POST",
-          credentials: attempt.credentials,
-          headers: {
-            Accept: "*/*",
-            Origin: CM_CONSOLE_APP_ORIGIN,
-            Referer: CM_CONSOLE_APP_REFERER,
-            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-            ...(clientId ? { client_id: clientId } : {}),
-          },
-          body: form.toString(),
-        });
-        if (!response.ok) {
-          continue;
-        }
-
-        const text = await response.text().catch(() => "");
-        const parsed = parseJsonText(text, null);
-        const refreshedToken = normalizeBearerTokenValue(extractImsAccessTokenFromPayload(parsed, text));
-        if (refreshedToken && isProbablyJwt(refreshedToken) && tokenSupportsExperienceCloudConsole(refreshedToken)) {
-          if (!requireFresh || isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-            const tokenPayload = parsed?.token && typeof parsed.token === "object" ? parsed.token : {};
-            const statePayload = parseImsStatePayload(firstNonEmptyString([tokenPayload?.state]));
-            const createdAtRaw = Number(tokenPayload?.created_at || 0);
-            const createdAtMs =
-              createdAtRaw > 0 && createdAtRaw < 1000000000000 ? createdAtRaw * 1000 : createdAtRaw > 0 ? createdAtRaw : 0;
-            const tokenSnapshot = mergeImsSessionSnapshots(null, {
-              tokenId: tokenPayload?.id,
-              sessionId: tokenPayload?.sid,
-              sessionUrl: firstNonEmptyString([statePayload?.session]),
-              userId: firstNonEmptyString([tokenPayload?.user_id, hints.userId]),
-              authId: firstNonEmptyString([tokenPayload?.aa_id]),
-              clientId: firstNonEmptyString([tokenPayload?.client_id, clientId, EXPERIENCE_CLOUD_SSO_CLIENT_ID]),
-              tokenType: firstNonEmptyString([tokenPayload?.type]),
-              scope: firstNonEmptyString([tokenPayload?.scope, hints.scope]),
-              as: tokenPayload?.as,
-              fg: tokenPayload?.fg,
-              moi: tokenPayload?.moi,
-              pba: tokenPayload?.pba,
-              keyAlias: firstNonEmptyString([tokenPayload?.key_alias]),
-              stateNonce: statePayload?.nonce,
-              stateJslibVersion: firstNonEmptyString([statePayload?.jslibver, statePayload?.jslibVersion]),
-              createdAt: createdAtMs,
-              expiresAt: Number(parsed?.expires_at || 0),
-            });
-            return {
-              accessToken: refreshedToken,
-              expiresAt: coercePositiveNumber(parsed?.expires_at),
-              expiresIn: coercePositiveNumber(tokenPayload?.expires_in || parsed?.expires_in),
-              scope: firstNonEmptyString([tokenPayload?.scope, parseJwtPayload(refreshedToken)?.scope, hints.scope]),
-              imsSession: tokenSnapshot,
-              source: `validate:${clientId}:${attempt.credentials}`,
-            };
-          }
-        }
-
-        if (parsed?.valid === true && !requireFresh && tokenSupportsExperienceCloudConsole(token)) {
-          return {
-            accessToken: token,
-            expiresAt: 0,
-            expiresIn: 0,
-            scope: firstNonEmptyString([hints.scope, parseJwtPayload(token)?.scope]),
-            imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(token), null),
-            source: `validate-existing:${clientId}:${attempt.credentials}`,
-          };
-        }
-      } catch {
-        // Continue best-effort across client and credential variants.
-      }
-    }
-  }
-
-  return null;
-}
-
-async function requestExperienceCloudConsoleTokenViaImsCheck(seedToken = "", options = {}) {
-  const hints = resolveCmImsTokenHints(seedToken);
-  const userIdCandidates = [];
-  const pushUserIdCandidate = (value, preferFront = false) => {
-    const normalized = String(value || "").trim();
-    if (!normalized) {
-      return;
-    }
-    const existingIndex = userIdCandidates.indexOf(normalized);
-    if (existingIndex >= 0) {
-      if (preferFront && existingIndex > 0) {
-        userIdCandidates.splice(existingIndex, 1);
-        userIdCandidates.unshift(normalized);
-      }
-      return;
-    }
-    if (preferFront) {
-      userIdCandidates.unshift(normalized);
-      return;
-    }
-    userIdCandidates.push(normalized);
-  };
-
-  try {
-    const profileToken = normalizeBearerTokenValue(
-      firstNonEmptyString([seedToken, getPreferredExperienceCloudConsoleAccessTokenCandidate(), getPreferredPrimaryImsAccessTokenCandidate()])
-    );
-    const profilePayload = await fetchImsSessionProfile(profileToken);
-    pushUserIdCandidate(
-      firstNonEmptyString([
-        profilePayload?.authId,
-        profilePayload?.aa_id,
-        profilePayload?.adobeID,
-        profilePayload?.email,
-        profilePayload?.user_email,
-        profilePayload?.emailAddress,
-        profilePayload?.additional_info?.authId,
-        profilePayload?.additional_info?.aa_id,
-        profilePayload?.additional_info?.email,
-      ]),
-      true
-    );
-    pushUserIdCandidate(
-      firstNonEmptyString([profilePayload?.userId, profilePayload?.user_id, profilePayload?.sub, profilePayload?.id]),
-      false
-    );
-    pushUserIdCandidate(
-      firstNonEmptyString([profilePayload?.additional_info?.userId, profilePayload?.additional_info?.user_id]),
-      false
-    );
-  } catch {
-    // Keep existing candidates best-effort.
-  }
-
-  (Array.isArray(hints.userIdCandidates) ? hints.userIdCandidates : []).forEach((candidate) => {
-    pushUserIdCandidate(candidate);
-  });
-  if (!userIdCandidates.includes("")) {
-    userIdCandidates.push("");
-  }
-
-  const clientIds = uniqueSorted(
-    [EXPERIENCE_CLOUD_SSO_CLIENT_ID, hints.clientId]
-      .map((value) => String(value || "").trim())
-      .filter((value) => isExperienceCloudConsoleClientId(value))
-  );
-  const scopes = uniqueSorted(
-    [EXPERIENCE_CLOUD_IMS_CHECK_DEFAULT_SCOPE, hints.scope, state.loginData?.experienceCloudScope]
-      .map((value) => String(value || "").trim())
-      .filter(Boolean)
-  );
-  const requireFresh = options.requireFresh === true;
-
-  for (const clientId of clientIds) {
-    for (const scope of scopes) {
-      for (const userIdCandidate of userIdCandidates) {
-        const requestUrl = buildCmImsCheckUrl({
-          clientId,
-          scope,
-          userId: userIdCandidate,
-        });
-        const authSeedTokens = uniqueSorted(
-          [
-            seedToken,
-            getPreferredExperienceCloudConsoleAccessTokenCandidate(),
-            getPreferredPrimaryImsAccessTokenCandidate(),
-          ]
-            .map((value) => normalizeBearerTokenValue(value))
-            .filter((value) => isProbablyJwt(value))
-        );
-        const attempts = [{ credentials: "include", headers: {} }, { credentials: "omit", headers: {} }];
-        authSeedTokens.forEach((authToken) => {
-          attempts.push({
-            credentials: "omit",
-            headers: {
-              Authorization: `Bearer ${authToken}`,
-              "X-IMS-ClientId": clientId,
-              "x-api-key": clientId,
-            },
-          });
-        });
-        for (const attempt of attempts) {
-          try {
-            const response = await relayImsFetch(requestUrl, {
-              method: "POST",
-              credentials: attempt.credentials,
-              headers: {
-                Accept: "*/*",
-                Origin: CM_CONSOLE_APP_ORIGIN,
-                Referer: CM_CONSOLE_APP_REFERER,
-                ...(attempt.headers && typeof attempt.headers === "object" ? attempt.headers : {}),
-              },
-            });
-            if (!response.ok) {
-              continue;
-            }
-
-            const text = await response.text().catch(() => "");
-            const parsed = parseJsonText(text, null);
-            const refreshedToken = normalizeBearerTokenValue(extractImsAccessTokenFromPayload(parsed, text));
-            if (!refreshedToken || !isProbablyJwt(refreshedToken) || !tokenSupportsExperienceCloudConsole(refreshedToken)) {
-              continue;
-            }
-            if (requireFresh && !isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-              continue;
-            }
-
-            const claims = parseJwtPayload(refreshedToken) || {};
-            return {
-              accessToken: refreshedToken,
-              expiresAt: 0,
-              expiresIn: coercePositiveNumber(claims?.expires_in || parsed?.expires_in),
-              scope: firstNonEmptyString([claims?.scope, hints.scope, scope]),
-              imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(refreshedToken), null),
-              source: `check:${clientId}:${attempt.credentials}`,
-            };
-          } catch {
-            // Continue best-effort across check and credential variants.
-          }
-        }
-      }
-    }
-  }
-
-  return null;
-}
-
-async function requestQualifiedExperienceCloudConsoleToken(options = {}) {
-  const requireFresh = options.requireFresh === true;
-  const allowSilentAuth = options.allowSilentAuth === true;
-  const seedCandidates = [];
-  const seen = new Set();
-  const pushSeed = (value) => {
-    const normalized = normalizeBearerTokenValue(value);
-    if (!normalized || !isProbablyJwt(normalized) || seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    seedCandidates.push(normalized);
-  };
-
-  pushSeed(options?.existingToken);
-  pushSeed(options?.seedToken);
-  pushSeed(getPreferredExperienceCloudConsoleAccessTokenCandidate());
-  pushSeed(getPreferredPrimaryImsAccessTokenCandidate());
-  void allowSilentAuth;
-
-  for (const seed of seedCandidates) {
-    if (
-      tokenSupportsExperienceCloudConsole(seed) &&
-      (!requireFresh || isAccessTokenFreshEnough(seed, CM_IMS_FORCE_REFRESH_SKEW_MS))
-    ) {
-      return {
-        accessToken: seed,
-        expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(seed, 0)?.expiresAt),
-        expiresIn: 0,
-        scope: firstNonEmptyString([parseJwtPayload(seed)?.scope]),
-        imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(seed), null),
-        source: "qualified:existing-experience-cloud",
-        qualified: true,
-      };
-    }
-
-    const viaValidate = await requestExperienceCloudConsoleTokenViaValidateToken(seed, { requireFresh });
-    if (viaValidate?.accessToken) {
-      return {
-        ...viaValidate,
-        imsSession: mergeImsSessionSnapshots(viaValidate?.imsSession || null, deriveImsSessionSnapshotFromToken(seed)),
-        source: `qualified:${String(viaValidate?.source || "validate")}`,
-        qualified: true,
-      };
-    }
-
-    const viaCheck = await requestExperienceCloudConsoleTokenViaImsCheck(seed, { requireFresh });
-    if (viaCheck?.accessToken) {
-      return {
-        ...viaCheck,
-        imsSession: mergeImsSessionSnapshots(viaCheck?.imsSession || null, deriveImsSessionSnapshotFromToken(seed)),
-        source: `qualified:${String(viaCheck?.source || "ims-check")}`,
-        qualified: true,
-      };
-    }
-  }
-
-  return null;
-}
-
-function mergeExperienceCloudConsoleTokenIntoLoginData(loginData = {}, tokenResult = null) {
-  const current = loginData && typeof loginData === "object" ? loginData : {};
-  const accessToken = normalizeBearerTokenValue(tokenResult?.accessToken);
-  if (!accessToken || !tokenSupportsExperienceCloudConsole(accessToken)) {
-    return current;
-  }
-
-  const tokenClaims = parseJwtPayload(accessToken) || {};
-  const tokenExpiry = resolveAuthResponseExpiry(accessToken, coercePositiveNumber(tokenResult?.expiresIn));
-  const resolvedExpiresAt =
-    coercePositiveNumber(tokenResult?.expiresAt) || coercePositiveNumber(tokenExpiry?.expiresAt);
-  const resolvedImsSession = mergeImsSessionSnapshots(
-    mergeImsSessionSnapshots(
-      deriveImsSessionSnapshotFromToken(accessToken),
-      current?.experienceCloudImsSession && typeof current.experienceCloudImsSession === "object"
-        ? current.experienceCloudImsSession
-        : null
-    ),
-    tokenResult?.imsSession && typeof tokenResult.imsSession === "object" ? tokenResult.imsSession : null
-  );
-
-  return {
-    ...current,
-    experienceCloudAccessToken: accessToken,
-    experienceCloudExpiresAt:
-      resolvedExpiresAt || coercePositiveNumber(current?.experienceCloudExpiresAt) || Date.now() + 30 * 60 * 1000,
-    experienceCloudScope: compactStorageString(
-      firstNonEmptyString([tokenResult?.scope, tokenClaims?.scope, current?.experienceCloudScope]),
-      2048
-    ),
-    experienceCloudImsSession: resolvedImsSession,
-  };
-}
-
 function mergeCmConsoleBootstrapIntoLoginData(loginData = {}, bootstrapLoginData = null) {
   const current = loginData && typeof loginData === "object" ? loginData : {};
   const bootstrap = bootstrapLoginData && typeof bootstrapLoginData === "object" ? bootstrapLoginData : null;
@@ -67267,187 +66759,6 @@ function mergeCmConsoleBootstrapIntoLoginData(loginData = {}, bootstrapLoginData
     profile: mergedProfile && typeof mergedProfile === "object" ? mergedProfile : null,
   };
 }
-
-function normalizeExperienceCloudShellOrganizations(rawOrganizations = []) {
-  const normalizedOrganizations = [];
-  const seen = new Set();
-  flattenOrganizations(rawOrganizations).forEach((entry, index) => {
-    if (!entry || typeof entry !== "object") {
-      return;
-    }
-
-    const orgId = firstNonEmptyString([entry.value, entry.id, entry.code, extractOrgId(entry)]);
-    const label = firstNonEmptyString([
-      entry.label,
-      entry.name,
-      entry.displayName,
-      extractOrgName(entry),
-      orgId ? `Adobe IMS Org ${orgId}` : "",
-    ]);
-    const userId = firstNonEmptyString([
-      entry.userId,
-      entry.user_id,
-      entry.profileGuid,
-      entry.profileId,
-      extractUserId(entry),
-    ]);
-    if (!orgId && !label) {
-      return;
-    }
-
-    const key = buildRestrictedOrgOptionKey({ orgId, userId, name: label }) || `shell-org-${index}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    normalizedOrganizations.push({
-      id: orgId,
-      value: orgId,
-      label,
-      userId,
-    });
-  });
-  return normalizedOrganizations;
-}
-
-function normalizeExperienceCloudShellProfile(profilePayload = null) {
-  const profile = profilePayload && typeof profilePayload === "object" ? profilePayload : null;
-  if (!profile) {
-    return null;
-  }
-
-  const displayName = firstNonEmptyString([profile.displayName, profile.name]);
-  const email = firstNonEmptyString([profile.email, profile.login_email, profile.username]);
-  const avatarUrl = normalizeAvatarCandidate(
-    firstNonEmptyString([profile.avatar, profile.avatarUrl, profile.user_image_url, profile.imageUrl])
-  );
-  const userId = firstNonEmptyString([profile.userId, profile.user_id, profile.sub, profile.id]);
-  if (!displayName && !email && !avatarUrl && !userId) {
-    return null;
-  }
-
-  return {
-    ...(displayName ? { displayName } : {}),
-    ...(email ? { email } : {}),
-    ...(avatarUrl ? { avatar: avatarUrl, avatarUrl } : {}),
-    ...(userId ? { userId } : {}),
-  };
-}
-
-function normalizeExperienceCloudShellSnapshot(shellSnapshot = null) {
-  const raw = shellSnapshot && typeof shellSnapshot === "object" ? shellSnapshot : null;
-  if (!raw) {
-    return null;
-  }
-
-  const imsToken = normalizeBearerTokenValue(firstNonEmptyString([raw.imsToken, raw.accessToken, raw.token]));
-  const tokenClaims = parseJwtPayload(imsToken) || {};
-  const imsOrgs = normalizeExperienceCloudShellOrganizations(
-    Array.isArray(raw.imsOrgs)
-      ? raw.imsOrgs
-      : Array.isArray(raw.organizations)
-        ? raw.organizations
-        : Array.isArray(raw.orgs)
-          ? raw.orgs
-          : []
-  );
-  const imsOrg = firstNonEmptyString([
-    raw.imsOrg,
-    raw.orgId,
-    raw.org_id,
-    raw.organizationId,
-    raw.organization,
-    raw.value,
-  ]);
-  const imsOrgName = firstNonEmptyString([
-    raw.imsOrgName,
-    raw.orgName,
-    raw.org_name,
-    raw.organizationName,
-    raw.organization_name,
-    imsOrgs.find((entry) => normalizeOrganizationIdentifier(entry?.value) === normalizeOrganizationIdentifier(imsOrg))?.label,
-  ]);
-  const imsClientId = firstNonEmptyString([raw.imsClientId, raw.clientId, tokenClaims.client_id, tokenClaims.clientId]);
-  const imsProfile = normalizeExperienceCloudShellProfile(
-    raw.imsProfile && typeof raw.imsProfile === "object"
-      ? raw.imsProfile
-      : raw.profile && typeof raw.profile === "object"
-        ? raw.profile
-        : raw.user && typeof raw.user === "object"
-          ? raw.user
-          : null
-  );
-  const scope = firstNonEmptyString([raw.scope, tokenClaims.scope]);
-  const sourcePath = firstNonEmptyString([raw.sourcePath, raw.path, raw.source]);
-
-  if (!imsToken && !imsOrg && imsOrgs.length === 0 && !imsProfile) {
-    return null;
-  }
-
-  return {
-    imsToken,
-    imsClientId,
-    imsOrg,
-    imsOrgName,
-    imsOrgs,
-    imsProfile,
-    scope,
-    sourcePath,
-  };
-}
-
-function mergeExperienceCloudShellSnapshotIntoLoginData(loginData = {}, shellSnapshot = null) {
-  const current = loginData && typeof loginData === "object" ? loginData : {};
-  const normalizedShellSnapshot = normalizeExperienceCloudShellSnapshot(shellSnapshot);
-  if (!normalizedShellSnapshot) {
-    return current;
-  }
-
-  const experienceCloudTokenResult =
-    normalizedShellSnapshot.imsToken && tokenSupportsExperienceCloudConsole(normalizedShellSnapshot.imsToken)
-      ? {
-          accessToken: normalizedShellSnapshot.imsToken,
-          expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(normalizedShellSnapshot.imsToken, 0)?.expiresAt),
-          scope: normalizedShellSnapshot.scope,
-          imsSession: {
-            clientId: firstNonEmptyString([normalizedShellSnapshot.imsClientId]),
-            userId: firstNonEmptyString([normalizedShellSnapshot.imsProfile?.userId]),
-            orgId: firstNonEmptyString([normalizedShellSnapshot.imsOrg]),
-            orgName: firstNonEmptyString([normalizedShellSnapshot.imsOrgName]),
-          },
-        }
-      : null;
-
-  const withConsoleToken = experienceCloudTokenResult
-    ? mergeExperienceCloudConsoleTokenIntoLoginData(current, experienceCloudTokenResult)
-    : { ...current };
-  const mergedProfile = normalizedShellSnapshot.imsProfile
-    ? mergeProfilePayloads(resolveLoginProfile(withConsoleToken), normalizedShellSnapshot.imsProfile)
-    : resolveLoginProfile(withConsoleToken);
-  const mergedExperienceCloudSession = mergeImsSessionSnapshots(
-    withConsoleToken?.experienceCloudImsSession && typeof withConsoleToken.experienceCloudImsSession === "object"
-      ? withConsoleToken.experienceCloudImsSession
-      : null,
-    {
-      clientId: firstNonEmptyString([normalizedShellSnapshot.imsClientId]),
-      userId: firstNonEmptyString([normalizedShellSnapshot.imsProfile?.userId]),
-      orgId: firstNonEmptyString([normalizedShellSnapshot.imsOrg]),
-      orgName: firstNonEmptyString([normalizedShellSnapshot.imsOrgName]),
-    }
-  );
-  const mergedOrganizations = normalizedShellSnapshot.imsOrgs.length > 0
-    ? normalizedShellSnapshot.imsOrgs
-    : withConsoleToken?.organizations || null;
-
-  return {
-    ...withConsoleToken,
-    profile: mergedProfile,
-    organizations: mergedOrganizations,
-    experienceCloudImsSession: mergedExperienceCloudSession || withConsoleToken?.experienceCloudImsSession || null,
-    adobePassOrg: null,
-  };
-}
-
 async function resolveQualifiedCmConsoleAccessToken(session = null, previousToken = "", options = {}) {
   const currentSession = session && typeof session === "object" ? session : {};
   const existingTokenCandidates = dedupeCandidateStrings([
@@ -73722,10 +73033,6 @@ function createCmBootstrapSeedLoginData() {
     refreshToken: "",
     imsSession: null,
     sessionKeys: null,
-    experienceCloudAccessToken: "",
-    experienceCloudExpiresAt: 0,
-    experienceCloudScope: "",
-    experienceCloudImsSession: null,
     cmConsoleAccessToken: "",
     cmConsoleExpiresAt: 0,
     cmConsoleScope: "",

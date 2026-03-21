@@ -1982,10 +1982,15 @@ test("CM tenant bootstrap now follows the LoginButton CM context flow without re
 test("clickCMU auth context reuses the shared CM token helper without a profile round-trip", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const clickCmuAuthSource = extractFunctionSource(popupSource, "resolveClickCmuAuthContext");
+  const clickCmuRuntimeSource = extractFunctionSource(popupSource, "buildClickCmuRuntimePatchSnippet");
 
   assert.match(clickCmuAuthSource, /ensureCmApiAccessToken\(\{/);
   assert.doesNotMatch(clickCmuAuthSource, /fetchImsSessionProfile\(/);
   assert.doesNotMatch(clickCmuAuthSource, /forceRefresh:\s*true/);
+  assert.doesNotMatch(clickCmuAuthSource, /experienceCloudAccessToken/);
+  assert.doesNotMatch(clickCmuAuthSource, /experienceCloudClientIds/);
+  assert.doesNotMatch(clickCmuRuntimeSource, /experienceCloudAccessToken/);
+  assert.doesNotMatch(clickCmuRuntimeSource, /resolveExperienceCloudClientIds/);
 });
 
 test("PKCE authorization URL uses code response mode and the configured client ID", () => {
@@ -2731,33 +2736,39 @@ test("authoritative AdobePass descriptor no longer trusts shell selection or dow
   assert.doesNotMatch(descriptorSource, /currentSession\?\.unifiedShell\?\.selectedOrg/);
 });
 
-test("shell snapshot and CM bootstrap seed no longer inject AdobePass identity", () => {
+test("legacy Experience Cloud shell merge helper is removed and CM bootstrap seed no longer injects AdobePass identity", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const shellMergeSource = extractFunctionSource(popupSource, "mergeExperienceCloudShellSnapshotIntoLoginData");
   const cmSeedSource = extractFunctionSource(popupSource, "createCmBootstrapSeedLoginData");
 
-  assert.match(shellMergeSource, /adobePassOrg: null,/);
-  assert.doesNotMatch(shellMergeSource, /const shellAdobePassOrg =/);
-  assert.doesNotMatch(shellMergeSource, /current\?\.adobePassOrg \|\| null/);
-  assert.doesNotMatch(shellMergeSource, /current\?\.adobePassOrg\?\.orgId/);
+  assert.doesNotMatch(popupSource, /function mergeExperienceCloudShellSnapshotIntoLoginData\(/);
   assert.match(cmSeedSource, /adobePassOrg: null,/);
+  assert.doesNotMatch(cmSeedSource, /experienceCloudAccessToken:/);
+  assert.doesNotMatch(cmSeedSource, /experienceCloudImsSession:/);
 });
 
 test("session identity, avatar, and CM token hints no longer fall back to stale AdobePass user data", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const resolveAuthIdSource = extractFunctionSource(popupSource, "resolveLoginAuthIdValue");
   const resolveUserIdSource = extractFunctionSource(popupSource, "resolveLoginUserIdValue");
   const avatarCandidatesSource = extractFunctionSource(popupSource, "getAvatarCandidates");
   const avatarCacheIdentitySource = extractFunctionSource(popupSource, "getAvatarCacheIdentity");
   const avatarPersistSource = extractFunctionSource(popupSource, "getAvatarPersistIdentityCandidates");
   const persistIdentitySource = extractFunctionSource(popupSource, "hasAvatarPersistProfileIdentity");
   const cmCandidatesSource = extractFunctionSource(popupSource, "collectCmImsUserIdCandidates");
+  const cmConsoleCandidatesSource = extractFunctionSource(popupSource, "collectCmConsoleUserIdCandidates");
 
+  assert.doesNotMatch(resolveAuthIdSource, /cmConsoleImsSession/);
+  assert.doesNotMatch(resolveAuthIdSource, /experienceCloudImsSession/);
   assert.doesNotMatch(resolveUserIdSource, /loginData\?\.adobePassOrg\?\.userId/);
+  assert.doesNotMatch(resolveUserIdSource, /cmConsoleImsSession/);
+  assert.doesNotMatch(resolveUserIdSource, /experienceCloudImsSession/);
   assert.doesNotMatch(avatarCandidatesSource, /loginData\?\.adobePassOrg\?\.avatarUrl/);
   assert.doesNotMatch(avatarCacheIdentitySource, /loginData\?\.adobePassOrg\?\.userId/);
   assert.doesNotMatch(avatarPersistSource, /loginData\?\.adobePassOrg\?\.userId/);
   assert.doesNotMatch(persistIdentitySource, /loginData\?\.adobePassOrg\?\.userId/);
   assert.doesNotMatch(cmCandidatesSource, /state\.loginData\?\.adobePassOrg\?\.userId/);
+  assert.doesNotMatch(cmCandidatesSource, /experienceCloudImsSession/);
+  assert.doesNotMatch(cmConsoleCandidatesSource, /cmConsoleImsSession/);
 });
 
 test("auth context no longer treats downstream console shells as authoritative org identity", () => {
@@ -3085,6 +3096,8 @@ test("stored session restore persists and reuses hydrated console state before b
 
   assert.match(buildNormalizedSource, /consoleHydration: normalizeStoredConsoleHydrationSnapshot\(loginData\?\.consoleHydration\),/);
   assert.match(buildNormalizedSource, /adobePassOrg: null,/);
+  assert.doesNotMatch(buildNormalizedSource, /experienceCloudAccessToken:/);
+  assert.doesNotMatch(buildNormalizedSource, /experienceCloudImsSession:/);
   assert.match(buildStoredSource, /const consoleHydration = minimal \? null : compactStoredConsoleHydrationSnapshot\(loginData\?\.consoleHydration\);/);
   assert.match(buildStoredSource, /consoleHydration,/);
   assert.doesNotMatch(buildStoredSource, /experienceCloudAccessToken:/);
