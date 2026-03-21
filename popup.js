@@ -30,6 +30,60 @@ const IMS_DEFAULT_REVOCATION_ENDPOINT = `${IMS_ISSUER_URL}/ims/revoke`;
 const IMS_BASE_URL = IMS_ISSUER_URL;
 const IMS_PROFILE_URL = "https://ims-na1.adobelogin.com/ims/profile/v1";
 const IMS_ORGS_URL = "https://ims-na1.adobelogin.com/ims/organizations/v5";
+const UNIFIED_SHELL_GRAPHQL_URL = "https://exc-unifiedcontent.experience.adobe.net/api/gql/app/shell/graphql?appId=shell";
+const UNIFIED_SHELL_API_KEY = "exc_app";
+const UNIFIED_SHELL_OPERATION_NAME = "underparShellInitDataQuery";
+const UNIFIED_SHELL_INIT_QUERY = `
+  query underparShellInitDataQuery($selectedOrg: String, $useConsolidatedAccounts: Boolean) {
+    imsExtendedAccountClusterData(
+      selectedOrg: $selectedOrg
+      ignoreSuppressed: true
+      useV3: true
+      useConsolidatedAccounts: $useConsolidatedAccounts
+    ) {
+      data {
+        consolidatedAccount
+        restricted
+        userId
+        userType
+        owningOrg {
+          aemInstances {
+            domain
+            environment
+            path
+            rootTemplate
+            title
+            type
+          }
+          aepRegion
+          hasAEP
+          imsOrgId
+          orgName
+          tenantId
+        }
+        orgs {
+          aemInstances {
+            domain
+            environment
+            path
+            rootTemplate
+            title
+            type
+          }
+          aepRegion
+          hasAEP
+          imsOrgId
+          orgName
+          tenantId
+        }
+      }
+      next
+      preferredLanguages
+      timestamp
+    }
+    userProfileJson(ignoreImsCache: false)
+  }
+`;
 const PPS_PROFILE_BASE_URL = "https://pps.services.adobe.com";
 const LEGACY_IMS_AVATAR_CLIENT_IDS = Object.freeze(["AdobePass1"]);
 const IMS_FETCH_REQUEST_TYPE = "underpar:imsFetch";
@@ -84,6 +138,9 @@ let DEGRADATION_API_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.degradationBase 
 let REST_V2_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.restV2Base || "");
 const ADOBE_CONSOLE_RUNTIME_ORIGIN = "https://cdn.experience.adobe.net";
 const ADOBE_CONSOLE_RUNTIME_REFERER = `${ADOBE_CONSOLE_RUNTIME_ORIGIN}/`;
+const ADOBE_PASS_CONSOLE_APP_SLUG = "AdobePass-adobepass-unifiedshell-console-client";
+const CONSOLE_PAGE_CONTEXT_ALLOWED_ORIGINS = [ADOBE_CONSOLE_RUNTIME_ORIGIN];
+const ADOBE_PAGE_CONTEXT_TIMEOUT_MS = 12 * 1000;
 let activeAuthPopupBootstrapContext = null;
 let underparStateRef = null;
 let PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
@@ -124,10 +181,19 @@ const PREMIUM_SERVICE_SCOPE_BY_KEY = {
   esm: "analytics:client",
   restV2: "api:client:v2",
 };
+const PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE = "temporary:passes:owner";
+const PREMIUM_SERVICE_SCOPE_RULES = Object.freeze([
+  { key: "restV2", label: "REST V2", scope: PREMIUM_SERVICE_SCOPE_BY_KEY.restV2 },
+  { key: "esmWorkspace", label: "ESM", scope: PREMIUM_SERVICE_SCOPE_BY_KEY.esm },
+  { key: "degradation", label: "DEGRADATION", scope: PREMIUM_SERVICE_SCOPE_BY_KEY.degradation },
+  { key: "resetTempPass", label: "Reset TempPASS", scope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE },
+]);
+const PREMIUM_SERVICE_CONCURRENCY_LABEL = "Concurrency Monitoring";
+const PREMIUM_SERVICE_RESET_TEMPPASS_REMINDER_PREFIX = "TODO: implement RESET TempPASS support";
 const DEGRADATION_SCOPE_CANDIDATES = [PREMIUM_SERVICE_SCOPE_BY_KEY.degradation];
 const KNOWN_PREMIUM_SERVICE_SCOPES = Array.from(
   new Set(
-    [...Object.values(PREMIUM_SERVICE_SCOPE_BY_KEY), ...DEGRADATION_SCOPE_CANDIDATES]
+    [...Object.values(PREMIUM_SERVICE_SCOPE_BY_KEY), PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE, ...DEGRADATION_SCOPE_CANDIDATES]
       .map((scope) => String(scope || "").trim().toLowerCase())
       .filter(Boolean)
   )
@@ -260,6 +326,7 @@ const DEGRADATION_CHEAT_SHEET_FAST_AUTH_TIMEOUT_MS = 1200;
 const DEGRADATION_CHEAT_SHEET_FAST_HARVEST_TIMEOUT_MS = 1200;
 const PREMIUM_SERVICE_SCOPE_HYDRATION_CONCURRENCY = 6;
 const PREMIUM_CM_RENDER_GRACE_MS = 250;
+const PREMIUM_PROGRAMMER_HYDRATION_GRACE_MS = 750;
 const PREMIUM_REQUIRED_SERVICE_KEYS = ["restV2", "esm", "degradation"];
 const SLACKTIVATION_WORKSPACE_ORIGIN = "https://adobedx.slack.com";
 const SLACKTIVATION_API_ORIGIN = "https://slack.com";
@@ -322,6 +389,13 @@ function buildProgrammerEndpointsForConsoleBase(consoleBase = "") {
   const normalizedConsoleBase = String(consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "").trim();
   return uniquePreserveOrder([
     appendAdobeConsoleConfigurationVersion(`${normalizedConsoleBase}/rest/api/entity/Programmer`),
+  ]);
+}
+
+function buildChannelEndpointsForConsoleBase(consoleBase = "") {
+  const normalizedConsoleBase = String(consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "").trim();
+  return uniquePreserveOrder([
+    appendAdobeConsoleConfigurationVersion(`${normalizedConsoleBase}/rest/api/entity/ServiceProvider`),
   ]);
 }
 
@@ -493,6 +567,96 @@ function setProgrammerWorkspaceHydrationReady(
   return ready === true;
 }
 
+function getProgrammerPremiumHydrationProgress(
+  programmerId = "",
+  environmentKey = getActiveAdobePassEnvironmentKey()
+) {
+  const scopedKey = getProgrammerWorkspaceHydrationReadyKey(programmerId, environmentKey);
+  if (!scopedKey) {
+    return null;
+  }
+  return state.premiumHydrationProgressByProgrammerKey.get(scopedKey) || null;
+}
+
+function clearProgrammerPremiumHydrationProgress(
+  programmerId = "",
+  environmentKey = getActiveAdobePassEnvironmentKey()
+) {
+  const scopedKey = getProgrammerWorkspaceHydrationReadyKey(programmerId, environmentKey);
+  if (!scopedKey) {
+    return null;
+  }
+  state.premiumHydrationProgressByProgrammerKey.delete(scopedKey);
+  return null;
+}
+
+function setProgrammerPremiumHydrationProgress(
+  programmerId = "",
+  progress = null,
+  options = {}
+) {
+  const scopedKey = getProgrammerWorkspaceHydrationReadyKey(programmerId, options?.environmentKey);
+  if (!scopedKey) {
+    return null;
+  }
+
+  if (!progress || typeof progress !== "object") {
+    state.premiumHydrationProgressByProgrammerKey.delete(scopedKey);
+    return null;
+  }
+
+  const currentProgress = state.premiumHydrationProgressByProgrammerKey.get(scopedKey) || {};
+  const detectedServiceLabels = uniqueSorted(
+    (Array.isArray(progress?.detectedServiceLabels) ? progress.detectedServiceLabels : currentProgress?.detectedServiceLabels || [])
+      .map((label) => String(label || "").trim())
+      .filter(Boolean)
+  );
+  const nextProgress = {
+    ...currentProgress,
+    ...progress,
+    label: String(progress?.label || currentProgress?.label || "").trim(),
+    detail: String(progress?.detail || currentProgress?.detail || "").trim(),
+    step: String(progress?.step || currentProgress?.step || "").trim(),
+    detectedServiceLabels,
+    updatedAt: Date.now(),
+  };
+  state.premiumHydrationProgressByProgrammerKey.set(scopedKey, nextProgress);
+  const selectedProgrammer = resolveSelectedProgrammer();
+  if (
+    options?.render !== false &&
+    selectedProgrammer?.programmerId &&
+    String(selectedProgrammer.programmerId || "").trim() === String(programmerId || "").trim() &&
+    !isProgrammerPremiumUiReady(String(programmerId || "").trim(), getCurrentPremiumAppsSnapshot(programmerId))
+  ) {
+    renderPremiumServicesLoading(selectedProgrammer, {
+      controllerReason: String(options?.controllerReason || "").trim(),
+      hydrationProgress: nextProgress,
+    });
+  }
+  return nextProgress;
+}
+
+function isProgrammerPremiumUiReady(programmerId = "", services = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const resolvedServices = services && typeof services === "object" ? services : null;
+  if (!normalizedProgrammerId || !resolvedServices) {
+    return false;
+  }
+  if (getDetectedPremiumServiceKeys(resolvedServices).length > 0) {
+    return true;
+  }
+  return hasResolvedPremiumServiceSnapshotForEsm(resolvedServices) || hasResolvedPremiumServiceSnapshotForCm(resolvedServices);
+}
+
+function isProgrammerRuntimeServicesReady(programmerId = "", services = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const resolvedServices = services && typeof services === "object" ? services : null;
+  if (!normalizedProgrammerId || !resolvedServices) {
+    return false;
+  }
+  return hasPassVaultCredentialCoverageForServices(normalizedProgrammerId, resolvedServices);
+}
+
 function getProgrammerServiceHydrationPromise(
   programmerId = "",
   environmentKey = getActiveAdobePassEnvironmentKey()
@@ -571,15 +735,11 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
       setCurrentPremiumAppsSnapshot(programmerId, runtimeServices);
     }
 
-    const runtimeReady = Boolean(
-      runtimeServices &&
-        typeof runtimeServices === "object" &&
-        hasPassVaultCredentialCoverageForServices(programmerId, runtimeServices) &&
-        isCmRuntimeRenderReady(runtimeServices?.cm)
-    );
+    const runtimeReady = isProgrammerRuntimeServicesReady(programmerId, runtimeServices);
+    const uiReady = isProgrammerPremiumUiReady(programmerId, runtimeServices);
     const selectedProgrammerId = String(resolveSelectedProgrammer()?.programmerId || "").trim();
     if (
-      runtimeReady &&
+      uiReady &&
       selectedProgrammerId === programmerId &&
       requestToken === Number(state.premiumPanelRequestToken || 0)
     ) {
@@ -5978,6 +6138,7 @@ function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackNam
     source?.__rawEnvelope?.entityData?.requestor,
     source?.__rawEnvelope?.entityData?.serviceProvider
   );
+  const softwareStatement = extractSoftwareStatementFromAppData(source);
   const sanitized = {
     ...(guid ? { guid } : {}),
     ...(appName ? { name: appName } : {}),
@@ -5990,6 +6151,9 @@ function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackNam
   }
   if (requestor) {
     sanitized.requestor = requestor;
+  }
+  if (softwareStatement) {
+    sanitized.softwareStatement = softwareStatement;
   }
   return sanitized;
 }
@@ -6183,6 +6347,10 @@ function buildPassVaultRuntimeAppInfoFromRecord(record = null, guid = "", applic
     appData,
     scopes,
     serviceKeys,
+    softwareStatement: firstNonEmptyString([
+      String(applicationRecord?.softwareStatement || "").trim(),
+      extractSoftwareStatementFromAppData(appData),
+    ]),
   };
 }
 
@@ -6780,10 +6948,11 @@ function buildProgrammerEntitiesFromConsoleBootstrap(bootstrapState = null) {
       : bootstrapState && typeof bootstrapState === "object"
         ? bootstrapState
         : null;
-  const accessibleRootEntities =
-    extendedProfile?.accessibleRootEntities && typeof extendedProfile.accessibleRootEntities === "object"
-      ? extendedProfile.accessibleRootEntities
-      : null;
+  const accessibleRootEntities = [
+    extendedProfile?.accessibleRootEntities,
+    extendedProfile?.profile?.accessibleRootEntities,
+    extendedProfile?.userExtendedProfile?.accessibleRootEntities,
+  ].find((candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate));
   if (!accessibleRootEntities) {
     return [];
   }
@@ -7583,6 +7752,7 @@ function clearPassVaultProgrammerRuntimeState(programmerId = "", environmentKey 
     return;
   }
   state.applicationsByProgrammerId.delete(normalizedProgrammerId);
+  state.programmerApplicationsLoadPromiseByProgrammerId.delete(normalizedProgrammerId);
   state.premiumAppsByProgrammerId.delete(normalizedProgrammerId);
   state.premiumAppsLoadPromiseByProgrammerId.delete(normalizedProgrammerId);
   state.premiumAppScopeHydrationPromiseByProgrammerId.delete(normalizedProgrammerId);
@@ -7594,6 +7764,7 @@ function clearPassVaultProgrammerRuntimeState(programmerId = "", environmentKey 
   state.cmTenantBundleByTenantKey.clear();
   state.cmTenantBundlePromiseByTenantKey.clear();
   state.cmUsageWarmStateByProgrammerId.delete(normalizedProgrammerId);
+  clearProgrammerPremiumHydrationProgress(normalizedProgrammerId, environmentKey);
   if (scopedKey) {
     state.restV2PrewarmedAppsByProgrammerId.delete(scopedKey);
     state.passVaultCompilePromiseByProgrammerKey.delete(scopedKey);
@@ -7649,31 +7820,6 @@ async function invalidatePassVaultProgrammerRecord(programmerId = "", environmen
     applyMediaCompanyOptionHydrationState();
     return null;
   });
-}
-
-function shouldClearSelectedProgrammerForVaultRehydrate(programmerId = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
-  const normalizedProgrammerId = String(programmerId || "").trim();
-  const normalizedEnvironmentKey = normalizeEnvironmentKey(environmentKey);
-  const selectedProgrammer = resolveSelectedProgrammer();
-  return (
-    Boolean(normalizedProgrammerId) &&
-    normalizeEnvironmentKey(getActiveAdobePassEnvironmentKey()) === normalizedEnvironmentKey &&
-    String(selectedProgrammer?.programmerId || "").trim() === normalizedProgrammerId
-  );
-}
-
-function clearSelectedProgrammerUiForVaultRehydrate(programmerId = "", environmentKey = getActiveAdobePassEnvironmentKey(), controllerReason = "up-devtools-vault-rehydrate") {
-  if (!shouldClearSelectedProgrammerForVaultRehydrate(programmerId, environmentKey)) {
-    return false;
-  }
-
-  clearPremiumServiceAutoRefreshTimers();
-  state.premiumPanelRequestToken += 1;
-  selectProgrammerForController(null, controllerReason);
-  renderPremiumServices(null, null, {
-    controllerReason,
-  });
-  return true;
 }
 
 function passVaultProgrammerRecordHasHydrationResults(record = null) {
@@ -7758,17 +7904,8 @@ async function rehydratePassVaultMediaCompanyFromDevtools(environmentKey = "", p
   setBusy(true, `Re-hydrating ${programmer.programmerName || programmer.programmerId}...`);
   setStatus(`Re-hydrating ${programmer.programmerName || programmer.programmerId} in ${targetEnvironmentLabel}...`, "info");
   try {
-    clearSelectedProgrammerUiForVaultRehydrate(
-      programmer.programmerId,
-      targetEnvironmentKey,
-      "up-devtools-vault-rehydrate-reset"
-    );
     await invalidatePassVaultProgrammerRecord(programmer.programmerId, targetEnvironmentKey);
-    selectProgrammerForController(programmer, "up-devtools-vault-rehydrate");
-    renderPremiumServicesLoading(programmer, {
-      controllerReason: "up-devtools-vault-rehydrate",
-    });
-    await refreshProgrammerPanels({
+    await hydrateProgrammerSelection(programmer, {
       controllerReason: "up-devtools-vault-rehydrate",
       forcePremiumRefresh: true,
     });
@@ -7819,17 +7956,8 @@ async function rehydratePassVaultEnvironmentFromDevtools(environmentKey = "") {
         skippedProgrammers.push(programmerId);
         continue;
       }
-      clearSelectedProgrammerUiForVaultRehydrate(
-        programmer.programmerId,
-        targetEnvironmentKey,
-        "up-devtools-vault-environment-rehydrate-reset"
-      );
       await invalidatePassVaultProgrammerRecord(programmer.programmerId, targetEnvironmentKey);
-      selectProgrammerForController(programmer, "up-devtools-vault-environment-rehydrate");
-      renderPremiumServicesLoading(programmer, {
-        controllerReason: "up-devtools-vault-environment-rehydrate",
-      });
-      await refreshProgrammerPanels({
+      await hydrateProgrammerSelection(programmer, {
         controllerReason: "up-devtools-vault-environment-rehydrate",
         forcePremiumRefresh: true,
       });
@@ -7879,8 +8007,10 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.restV2ProfileHarvestBucketByProgrammerId.clear();
   state.restV2ProfileHarvestLast = null;
   state.applicationsByProgrammerId.clear();
+  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByProgrammerId.clear();
   state.programmerWorkspaceHydrationReadyByKey.clear();
+  state.premiumHydrationProgressByProgrammerKey.clear();
   state.premiumAppsLoadPromiseByProgrammerId.clear();
   state.premiumAppScopeHydrationPromiseByProgrammerId.clear();
   state.cmServiceByProgrammerId.clear();
@@ -7903,6 +8033,7 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.cmTenantBundlePromiseByTenantKey.clear();
   state.cmUsageWarmStateByProgrammerId.clear();
   state.premiumAutoRefreshMetaByKey.clear();
+  state.premiumServiceReminderLogKeys.clear();
   state.premiumPanelRequestToken = 0;
   state.dcrEnsureTokenPromiseByKey.clear();
   state.premiumServiceRecoveryPromiseByProgrammerKey.clear();
@@ -7957,36 +8088,101 @@ async function purgePassVaultFromDevtools() {
   }
 }
 
-function getPassVaultCredentialTasks(services = null) {
-  const tasks = [];
+function getPassVaultServiceProvisioningRank(programmerId = "", appInfo = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const guid = String(appInfo?.guid || "").trim();
+  if (!guid) {
+    return 0;
+  }
+  if (normalizedProgrammerId && hasPassVaultServiceClientCredentials(normalizedProgrammerId, appInfo)) {
+    return 3;
+  }
+  const softwareStatement = firstNonEmptyString([
+    String(appInfo?.softwareStatement || "").trim(),
+    extractSoftwareStatementFromAppData(appInfo?.appData || null),
+    extractSoftwareStatementFromAppData(appInfo),
+  ]);
+  if (softwareStatement) {
+    return 2;
+  }
+  return 1;
+}
+
+function collectPassVaultServiceCredentialCandidates(programmerId = "", serviceKey = "", services = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const candidates = [];
   const seen = new Set();
-  const pushTask = (serviceKey, appInfo) => {
+  const pushCandidate = (appInfo) => {
     const guid = String(appInfo?.guid || "").trim();
-    if (!serviceKey || !guid) {
+    if (!guid || seen.has(guid)) {
       return;
     }
-    const dedupeKey = `${serviceKey}:${guid}`;
+    seen.add(guid);
+    candidates.push(appInfo);
+  };
+
+  if (normalizedServiceKey === "restV2") {
+    pushCandidate(services?.restV2 || null);
+    if (Array.isArray(services?.restV2Apps)) {
+      services.restV2Apps.forEach((appInfo) => pushCandidate(appInfo));
+    }
+  } else if (normalizedServiceKey === "esm") {
+    pushCandidate(services?.esm || null);
+    if (Array.isArray(services?.esmApps)) {
+      services.esmApps.forEach((appInfo) => pushCandidate(appInfo));
+    }
+  } else if (normalizedServiceKey === "degradation") {
+    pushCandidate(services?.degradation || null);
+    if (Array.isArray(services?.degradationApps)) {
+      services.degradationApps.forEach((appInfo) => pushCandidate(appInfo));
+    }
+  }
+
+  return candidates.sort((leftApp, rightApp) => {
+    const rankDelta =
+      getPassVaultServiceProvisioningRank(normalizedProgrammerId, rightApp) -
+      getPassVaultServiceProvisioningRank(normalizedProgrammerId, leftApp);
+    if (rankDelta !== 0) {
+      return rankDelta;
+    }
+    if (normalizedServiceKey === "degradation") {
+      return compareDegradationAppPriority(leftApp, rightApp);
+    }
+    return String(leftApp?.appName || leftApp?.guid || "").localeCompare(
+      String(rightApp?.appName || rightApp?.guid || ""),
+      undefined,
+      {
+        sensitivity: "base",
+      }
+    );
+  });
+}
+
+function getPassVaultCredentialTasks(programmerId = "", services = null) {
+  const tasks = [];
+  const seen = new Set();
+  const pushTask = (serviceKey, appCandidates = []) => {
+    const normalizedServiceKey = String(serviceKey || "").trim();
+    const orderedCandidates = Array.isArray(appCandidates) ? appCandidates.filter((appInfo) => appInfo?.guid) : [];
+    if (!normalizedServiceKey || orderedCandidates.length === 0) {
+      return;
+    }
+    const dedupeKey = `${normalizedServiceKey}:${orderedCandidates.map((appInfo) => appInfo.guid).join(",")}`;
     if (seen.has(dedupeKey)) {
       return;
     }
     seen.add(dedupeKey);
     tasks.push({
-      serviceKey,
-      appInfo,
+      serviceKey: normalizedServiceKey,
+      appCandidates: orderedCandidates,
+      appInfo: orderedCandidates[0] || null,
     });
   };
 
-  if (Array.isArray(services?.restV2Apps) && services.restV2Apps.length > 0) {
-    services.restV2Apps.forEach((appInfo) => pushTask("restV2", appInfo));
-  } else if (services?.restV2?.guid) {
-    pushTask("restV2", services.restV2);
-  }
-  if (services?.esm?.guid) {
-    pushTask("esm", services.esm);
-  }
-  if (services?.degradation?.guid) {
-    pushTask("degradation", services.degradation);
-  }
+  pushTask("restV2", collectPassVaultServiceCredentialCandidates(programmerId, "restV2", services));
+  pushTask("esm", collectPassVaultServiceCredentialCandidates(programmerId, "esm", services));
+  pushTask("degradation", collectPassVaultServiceCredentialCandidates(programmerId, "degradation", services));
   return tasks;
 }
 
@@ -8007,12 +8203,16 @@ function hasPassVaultCredentialCoverageForServices(programmerId = "", services =
     return false;
   }
 
-  const tasks = getPassVaultCredentialTasks(services);
+  const tasks = getPassVaultCredentialTasks(normalizedProgrammerId, services);
   if (tasks.length === 0) {
     return true;
   }
 
-  return tasks.every((task) => hasPassVaultServiceClientCredentials(normalizedProgrammerId, task?.appInfo || null));
+  return tasks.every((task) =>
+    (Array.isArray(task?.appCandidates) ? task.appCandidates : []).some((appInfo) =>
+      hasPassVaultServiceClientCredentials(normalizedProgrammerId, appInfo)
+    )
+  );
 }
 
 function buildPassVaultRuntimeServicesSnapshot(record = null) {
@@ -8022,6 +8222,7 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   const applicationsSnapshot = buildPassVaultApplicationsSnapshotFromRegisteredApplications(
     getPassVaultRegisteredApplicationsByGuid(record)
   );
+  const detectedServices = findPremiumServiceApplications([], applicationsSnapshot);
   const resolveAppInfo = (guid = "") => buildPassVaultRuntimeAppInfoFromRecord(record, guid, applicationsSnapshot);
   const hasCredentialEntryForService = (serviceKey = "", guid = "") => {
     const normalizedServiceKey = String(serviceKey || "").trim();
@@ -8078,6 +8279,8 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
     esmApps,
     degradation: selectPrimaryApp("degradation", degradationApps),
     degradationApps,
+    resetTempPass: detectedServices?.resetTempPass || null,
+    resetTempPassApps: Array.isArray(detectedServices?.resetTempPassApps) ? detectedServices.resetTempPassApps : [],
     cm: cmServiceSnapshot,
     cmMvpd: null,
     cmMvpdSelectionKey: "",
@@ -8218,7 +8421,6 @@ function getPassVaultProgrammerReuseReadiness(
   const reusable =
     hydrationStatus !== UNDERPAR_VAULT_STATUS_PENDING &&
     runtimeCoverage &&
-    credentialCoverage &&
     cmCoverage &&
     trustNegativeServiceSummary &&
     !scopedServiceSummaryMismatch;
@@ -8259,7 +8461,8 @@ function shouldForceLivePassVaultProgrammerHydration(
   }
   // Older VAULT rows can still be perfectly reusable. Do not force a cold hydrate
   // on selection if the current ENV x Media Company record already has the service
-  // mappings, credentials, and CM coverage UnderPAR needs to operate.
+  // mappings and CM coverage UnderPAR needs to operate. DCR credentials are now
+  // hydrated on demand when a premium workflow actually uses them.
   if (readiness.reusable) {
     return false;
   }
@@ -8268,7 +8471,6 @@ function shouldForceLivePassVaultProgrammerHydration(
   }
   return !(
     readiness.runtimeCoverage &&
-    readiness.credentialCoverage &&
     readiness.cmCoverage &&
     readiness.trustNegativeServiceSummary &&
     !readiness.scopedServiceSummaryMismatch
@@ -8356,13 +8558,32 @@ function selectPreferredEsmAppForRequestor(esmApps = [], requestorId = "", progr
   }
   const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedProgrammerId = String(programmerId || "").trim();
+  const selectBestCandidate = (appInfos = []) => {
+    const rankedCandidates = (Array.isArray(appInfos) ? appInfos : [])
+      .filter((appInfo) => appInfo?.guid)
+      .slice()
+      .sort((left, right) => {
+        const rankDelta =
+          getPassVaultServiceProvisioningRank(normalizedProgrammerId, right) -
+          getPassVaultServiceProvisioningRank(normalizedProgrammerId, left);
+        if (rankDelta !== 0) {
+          return rankDelta;
+        }
+        return String(left?.appName || left?.guid || "").localeCompare(String(right?.appName || right?.guid || ""), undefined, {
+          sensitivity: "base",
+        });
+      });
+    return rankedCandidates[0] || null;
+  };
   if (normalizedRequestorId) {
-    const mapped = candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) || null;
+    const mapped = selectBestCandidate(
+      candidates.filter((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId))
+    );
     if (mapped) {
       return mapped;
     }
   }
-  return candidates.length === 1 ? candidates[0] : null;
+  return selectBestCandidate(candidates) || (candidates.length === 1 ? candidates[0] : null);
 }
 
 function resolveLatestPremiumServiceAppInfo(programmerId = "", fallbackAppInfo = null, debugMeta = null) {
@@ -8666,6 +8887,9 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
   }
 
   let missingServiceKeys = getMissingRequiredPremiumServiceKeys(resolvedServices, options?.requiredServiceKeys);
+  if (missingServiceKeys.length === 0) {
+    return resolvedServices;
+  }
 
   const applicationsSnapshot = getCurrentProgrammerApplicationsSnapshot(programmer.programmerId) || {};
   const guidOrder = getProgrammerRegisteredApplicationGuids(programmer, applicationsSnapshot);
@@ -8739,6 +8963,9 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
 
   for (const guid of guidOrder) {
     missingServiceKeys = getMissingRequiredPremiumServiceKeys(resolvedServices, options?.requiredServiceKeys);
+    if (missingServiceKeys.length === 0) {
+      break;
+    }
 
     const existingAppData =
       applicationsSnapshot?.[guid] && typeof applicationsSnapshot[guid] === "object" && !Array.isArray(applicationsSnapshot[guid])
@@ -8863,6 +9090,9 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
       ...(baseScopes.length > 0 ? { scopes: baseScopes.slice(), scope: baseScopes.join(" ") } : {}),
       __underparScopeHydratedAt: Date.now(),
     };
+    if (getMissingRequiredPremiumServiceKeys(resolvedServices, options?.requiredServiceKeys).length === 0) {
+      break;
+    }
   }
 
   const preferredEsmApp = selectPreferredEsmAppForRequestor(
@@ -8881,32 +9111,52 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
 }
 
 async function hydratePassVaultServiceCredentials(programmer, services = null, options = {}) {
-  const tasks = getPassVaultCredentialTasks(services);
+  const tasks = getPassVaultCredentialTasks(programmer?.programmerId || "", services);
   if (tasks.length === 0) {
     return [];
   }
 
   const forceRefresh = options?.forceRefresh === true;
-  const concurrency = Math.max(1, Math.min(UNDERPAR_VAULT_DCR_COMPILE_CONCURRENCY, tasks.length));
-  const results = [];
-  const counters = { index: 0 };
+  const promoteResolvedServiceApp = (serviceKey = "", appInfo = null) => {
+    if (!services || typeof services !== "object" || !appInfo?.guid) {
+      return;
+    }
+    if (serviceKey === "restV2") {
+      services.restV2 = appInfo;
+      services.restV2Apps = collectPassVaultServiceCredentialCandidates(programmer.programmerId, "restV2", {
+        ...services,
+        restV2: appInfo,
+      });
+      return;
+    }
+    if (serviceKey === "esm") {
+      services.esm = appInfo;
+      services.esmApps = collectPassVaultServiceCredentialCandidates(programmer.programmerId, "esm", {
+        ...services,
+        esm: appInfo,
+      });
+      return;
+    }
+    if (serviceKey === "degradation") {
+      services.degradation = appInfo;
+      services.degradationApps = collectPassVaultServiceCredentialCandidates(programmer.programmerId, "degradation", {
+        ...services,
+        degradation: appInfo,
+      });
+    }
+  };
 
-  const workers = Array.from({ length: concurrency }, () =>
-    (async () => {
-      while (true) {
-        const currentIndex = counters.index;
-        counters.index += 1;
-        if (currentIndex >= tasks.length) {
-          return;
-        }
-
-        const task = tasks[currentIndex];
-        const appInfo = task?.appInfo;
+  const results = await Promise.all(
+    tasks.map(async (task) => {
+      const appCandidates = Array.isArray(task?.appCandidates) ? task.appCandidates : [];
+      let lastError = "";
+      let lastGuid = "";
+      for (const appInfo of appCandidates) {
         const guid = String(appInfo?.guid || "").trim();
         if (!guid) {
           continue;
         }
-
+        lastGuid = guid;
         try {
           await ensureDcrAccessToken(programmer.programmerId, appInfo, forceRefresh, {
             service: task.serviceKey,
@@ -8916,24 +9166,25 @@ async function hydratePassVaultServiceCredentials(programmer, services = null, o
             allowProvisioning: true,
             lockAppSelection: true,
           });
-          results.push({
+          promoteResolvedServiceApp(task.serviceKey, appInfo);
+          return {
             serviceKey: task.serviceKey,
             appGuid: guid,
             cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, guid) || null),
-          });
+          };
         } catch (error) {
-          results.push({
-            serviceKey: task.serviceKey,
-            appGuid: guid,
-            cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, guid) || null),
-            error: error instanceof Error ? error.message : String(error),
-          });
+          lastError = error instanceof Error ? error.message : String(error);
         }
       }
-    })()
+      return {
+        serviceKey: task.serviceKey,
+        appGuid: lastGuid,
+        cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, lastGuid) || null),
+        error: lastError,
+      };
+    })
   );
 
-  await Promise.all(workers);
   return results;
 }
 
@@ -8950,13 +9201,26 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
   }
 
   const compilePromise = (async () => {
+    setProgrammerPremiumHydrationProgress(programmerId, {
+      step: "detect",
+      label: "Detecting premium services...",
+    });
     const resolvedServices = await resolveMissingPassVaultServiceMappings(programmer, services, {
       forceRefresh,
       requiredServiceKeys: PREMIUM_REQUIRED_SERVICE_KEYS,
       requestTimeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
-      validateSelectedServiceKeys: ["esm"],
+      validateSelectedServiceKeys: PREMIUM_REQUIRED_SERVICE_KEYS,
     });
     setCurrentPremiumAppsSnapshot(programmer.programmerId, resolvedServices);
+    const detectedServiceLabels = getDetectedPremiumServiceLabels(resolvedServices);
+    setProgrammerPremiumHydrationProgress(programmerId, {
+      step: "register",
+      label:
+        detectedServiceLabels.length > 0
+          ? `Registering premium service clients for ${detectedServiceLabels.join(" | ")}...`
+          : "Registering premium service clients...",
+      detectedServiceLabels,
+    });
     const [credentialResults, cmHydration] = await Promise.all([
       hydratePassVaultServiceCredentials(programmer, resolvedServices, {
         forceRefresh,
@@ -8985,6 +9249,11 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
             cmHydration?.cmService ?? resolvedServices?.cm ?? null
           );
     setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
+    setProgrammerPremiumHydrationProgress(programmerId, {
+      step: "vault",
+      label: "Saving premium services to VAULT...",
+      detectedServiceLabels,
+    });
     const usageWarmResult = {
       ok: true,
       skipped: true,
@@ -9007,6 +9276,15 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       hydrationStatus,
       serviceCredentialResults: credentialResults,
     });
+    if (hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE) {
+      clearProgrammerPremiumHydrationProgress(programmerId);
+    } else {
+      setProgrammerPremiumHydrationProgress(programmerId, {
+        step: "pending",
+        label: "Finishing premium service hydration...",
+        detectedServiceLabels,
+      });
+    }
     applyMediaCompanyOptionHydrationState();
     return {
       services: mergedServices,
@@ -9261,6 +9539,7 @@ function clearEnvironmentAwareRegisteredAppState(reason = "environment-change") 
   state.restV2AuthContextByRequestor.clear();
   state.restV2PrewarmedAppsByProgrammerId.clear();
   state.applicationsByProgrammerId.clear();
+  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByProgrammerId.clear();
   state.premiumAppsLoadPromiseByProgrammerId.clear();
   state.premiumAppScopeHydrationPromiseByProgrammerId.clear();
@@ -9509,6 +9788,30 @@ function selectProgrammerForController(programmer = null, controllerReason = "me
     surfaceMissingSelectionError: false,
   });
   return resolvedProgrammer;
+}
+
+async function hydrateProgrammerSelection(programmer = null, options = {}) {
+  const controllerReason = String(options?.controllerReason || "media-company-change").trim() || "media-company-change";
+  const forcePremiumRefresh = options.forcePremiumRefresh === true;
+  const skipCmBootstrap = options.skipCmBootstrap === true;
+  const selectedProgrammer = selectProgrammerForController(programmer, controllerReason);
+  const retainedConsoleTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const programmerApplicationsPromise = selectedProgrammer?.programmerId
+    ? ensureSelectedProgrammerApplicationsLoaded(selectedProgrammer, {
+        forceRefresh: forcePremiumRefresh,
+        allowTemporaryPageContextTab: false,
+        preferredTabId: retainedConsoleTabId,
+        requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
+      })
+    : Promise.resolve({});
+  await refreshProgrammerPanels({
+    controllerReason,
+    forcePremiumRefresh,
+    skipCmBootstrap,
+    preferredTabId: retainedConsoleTabId,
+    programmerApplicationsPromise,
+  });
+  return selectedProgrammer;
 }
 
 function collectBoundWorkspaceWindowIds(primaryWindowId = 0, tabIdByWindowId = null) {
@@ -10139,23 +10442,6 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
       }
 
       if (!activated) {
-        try {
-          const silent = await attemptSilentBootstrapLogin();
-          if (silent) {
-            const silentActivated = await activateSession(silent, "environment-switch", {
-              allowTemporaryPageContextTab: true,
-            });
-            if (silentActivated) {
-              activated = true;
-              activationSource = "silent";
-            }
-          }
-        } catch (error) {
-          lastError = error instanceof Error ? error : new Error(String(error));
-        }
-      }
-
-      if (!activated) {
         state.loginData = retainedLoginData;
         state.sessionReady = false;
         state.restricted = false;
@@ -10440,6 +10726,9 @@ const CLIENT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC
 const BLONDIE_TIME_LOGIC = globalThis.UnderParBlondieTimeLogic || null;
 const CM_CONFIG_BASE_URL = "https://config.adobeprimetime.com";
 const CM_REPORTS_BASE_URL = "https://cm-reports.adobeprimetime.com";
+const CM_BASE_URL = CM_CONFIG_BASE_URL;
+const CM_TENANTS_PATH = "/core/tenants";
+const CM_TENANTS_OWNER_ORG_ID = "adobe";
 const CM_DEFAULT_TENANT_ORG_HINT = "adobe";
 const CM_TENANT_ENDPOINT_CANDIDATES = [
   `${CM_CONFIG_BASE_URL}/core/tenants?orgId=${CM_DEFAULT_TENANT_ORG_HINT}`,
@@ -10922,12 +11211,22 @@ const CM_BASE_URL_CANDIDATES = [
 const CM_V2_API_BASE_DEFAULT = "https://streams-stage.adobeprimetime.com";
 const CM_IMS_CHECK_TOKEN_ENDPOINT = "https://adobeid-na1.services.adobe.com/ims/check/v6/token";
 const CM_IMS_PRIMARY_CLIENT_ID = "cm-console-ui";
+const CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT = CM_IMS_CHECK_TOKEN_ENDPOINT;
+const CM_CONSOLE_IMS_VALIDATE_TOKEN_ENDPOINT = `${IMS_BASE_URL}/ims/validate_token/v1?jslVersion=underpar-cm`;
+const CM_CONSOLE_IMS_CLIENT_ID = CM_IMS_PRIMARY_CLIENT_ID;
 let CM_CONSOLE_APP_ORIGIN = String(DEFAULT_ADOBEPASS_ENVIRONMENT.cmConsoleOrigin || "https://experience.adobe.com");
 let CM_CONSOLE_APP_REFERER = `${CM_CONSOLE_APP_ORIGIN}/`;
+function getCmConsoleBootstrapUrl() {
+  return `${String(CM_CONSOLE_APP_ORIGIN || "").trim().replace(/\/+$/, "")}/#/@${ADOBEPASS_ORG_HANDLE}/cm-console/cmu/year`;
+}
 const CM_REPORTS_APP_ORIGIN = "https://cdn.experience.adobe.net";
 const CM_REPORTS_APP_REFERER = `${CM_REPORTS_APP_ORIGIN}/`;
 const CM_IMS_CHECK_DEFAULT_SCOPE =
   "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext";
+const CM_CONSOLE_IMS_SCOPE = CM_IMS_CHECK_DEFAULT_SCOPE;
+const CM_REPORTS_SUMMARY_PATH = "/v2/year/month";
+const CMU_TOKEN_HEADER_NAME = "Authorization";
+const CMU_TOKEN_HEADER_SCHEME = "Bearer";
 const EXPERIENCE_CLOUD_IMS_CHECK_DEFAULT_SCOPE =
   "AdobeID,openid,dma_group_mapping,read_organizations,additional_info.projectedProductContext";
 const CM_IMS_VALIDATE_CLIENT_IDS = [CM_IMS_PRIMARY_CLIENT_ID];
@@ -11001,6 +11300,8 @@ const REDIRECT_IGNORE_MATCHER_MODE = "origin_except_pass";
 
 const ADOBEPASS_ORG_KEYWORD = "adobepass";
 const ADOBEPASS_ORG_HANDLE = "@adobepass";
+const ADOBEPASS_ORG_DISPLAY_NAME = "Adobe Pass";
+const ADOBEPASS_IMS_ORG_ID = "30FC5E0951240C900A490D4D@AdobeOrg";
 const ADOBEPASS_ORG_ID_ALLOWLIST = [];
 const DEFAULT_AVATAR = "icons/underpar-128.png";
 const FALLBACK_AVATAR_ASSET = "icons/underpar-128.png";
@@ -11227,8 +11528,10 @@ const state = {
   restV2TraceViewerWindowId: 0,
   restV2TraceViewerTabId: 0,
   applicationsByProgrammerId: new Map(),
+  programmerApplicationsLoadPromiseByProgrammerId: new Map(),
   premiumAppsByProgrammerId: new Map(),
   programmerWorkspaceHydrationReadyByKey: new Map(),
+  premiumHydrationProgressByProgrammerKey: new Map(),
   premiumAppsLoadPromiseByProgrammerId: new Map(),
   premiumAppScopeHydrationPromiseByProgrammerId: new Map(),
   cmServiceByProgrammerId: new Map(),
@@ -11259,7 +11562,10 @@ const state = {
   cmUsageWarmStateByProgrammerId: new Map(),
   premiumSectionCollapsedByKey: new Map(),
   premiumAutoRefreshMetaByKey: new Map(),
+  premiumServiceReminderLogKeys: new Set(),
   premiumPanelRequestToken: 0,
+  authenticatedHydrationToken: 0,
+  programmersLoadInFlight: false,
   dcrEnsureTokenPromiseByKey: new Map(),
   premiumServiceRecoveryPromiseByProgrammerKey: new Map(),
   passVault: null,
@@ -12104,7 +12410,10 @@ function composeUnderparDebugConsoleOutput() {
       degradation: Boolean(selectedServices?.degradation),
       cm: Boolean(selectedServices?.cm),
       cmMvpd: Boolean(selectedServices?.cmMvpd),
+      resetTempPass: Boolean(selectedServices?.resetTempPassAvailable || selectedServices?.resetTempPass),
     }) || "n/a"}`,
+    `premium_services_summary=${String(firstNonEmptyString([selectedServices?.premiumServicesSummary]) || "n/a").trim() || "n/a"}`,
+    `reset_temp_pass_reminder=${String(selectedServices?.resetTempPassReminder || "n/a").trim() || "n/a"}`,
   ]);
 
   pushDebugSection(lines, "cm", [
@@ -12423,6 +12732,203 @@ function emitGlobalSelectorChangeLog(menuName, value, label = "") {
   });
 }
 
+function hasResetTempPassAvailable(services = null) {
+  if (!services || typeof services !== "object") {
+    return false;
+  }
+  if (String(services?.resetTempPass?.guid || "").trim()) {
+    return true;
+  }
+  return Array.isArray(services?.resetTempPassApps)
+    ? services.resetTempPassApps.some((appInfo) => String(appInfo?.guid || "").trim())
+    : false;
+}
+
+function programmerMatchesCmTenantCatalog(selectedProgrammer = null, cmCatalog = null) {
+  if (!selectedProgrammer || typeof selectedProgrammer !== "object") {
+    return false;
+  }
+
+  const tenants = Array.isArray(cmCatalog?.tenants)
+    ? cmCatalog.tenants
+    : Array.isArray(cmCatalog)
+      ? cmCatalog
+      : [];
+  if (tenants.length === 0) {
+    return false;
+  }
+
+  const programmerIdentifiers = new Set(
+    [
+      selectedProgrammer.programmerId,
+      selectedProgrammer.programmerName,
+      selectedProgrammer.mediaCompanyName,
+      selectedProgrammer.label,
+      selectedProgrammer.key,
+      selectedProgrammer.tenantId,
+      selectedProgrammer.tenantName,
+    ]
+      .map((value) => normalizeOrganizationIdentifier(value))
+      .filter(Boolean)
+  );
+  if (programmerIdentifiers.size === 0) {
+    return false;
+  }
+
+  return tenants.some((tenant) =>
+    [
+      tenant?.tenantId,
+      tenant?.tenantName,
+      tenant?.label,
+      tenant?.key,
+      tenant?.raw?.payload?.name,
+      tenant?.raw?.consoleId,
+      ...(Array.isArray(tenant?.aliases) ? tenant.aliases : []),
+    ]
+      .map((value) => normalizeOrganizationIdentifier(value))
+      .filter(Boolean)
+      .some((identifier) => programmerIdentifiers.has(identifier))
+  );
+}
+
+function applyPremiumServiceRuntimeSummary(programmer = null, services = null, options = {}) {
+  const currentServices = services && typeof services === "object" ? { ...services } : {};
+  const cmCatalog = options?.cmCatalog && typeof options.cmCatalog === "object" ? options.cmCatalog : state.cmTenantsCatalog;
+  const matchedCatalogTenants =
+    programmer && Array.isArray(cmCatalog?.tenants) ? findCmTenantMatchesForProgrammer(programmer, cmCatalog.tenants) : [];
+  const syntheticCmService =
+    !shouldShowCmService(currentServices?.cm) && matchedCatalogTenants.length > 0
+      ? {
+          ...(currentServices?.cm && typeof currentServices.cm === "object" ? currentServices.cm : {}),
+          serviceType: "cm",
+          matchedTenants: matchedCatalogTenants,
+          sourceUrl: String(cmCatalog?.sourceUrl || currentServices?.cm?.sourceUrl || "").trim(),
+          fetchedAt: Number(currentServices?.cm?.fetchedAt || 0) || Date.now(),
+          synthetic: true,
+          syntheticSource: "cm-catalog",
+        }
+      : null;
+  const resolvedCmService = shouldShowCmService(currentServices?.cm) ? currentServices.cm : syntheticCmService;
+  const items = [];
+  const labels = [];
+
+  PREMIUM_SERVICE_SCOPE_RULES.forEach((rule) => {
+    const serviceValue =
+      rule.key === "esmWorkspace"
+        ? currentServices?.esm || null
+        : rule.key === "resetTempPass"
+          ? currentServices?.resetTempPass || null
+          : currentServices?.[rule.key] || null;
+    const serviceApps =
+      rule.key === "esmWorkspace"
+        ? currentServices?.esmApps
+        : rule.key === "resetTempPass"
+          ? currentServices?.resetTempPassApps
+          : currentServices?.[`${rule.key}Apps`];
+    const matchingApplication =
+      (serviceValue && typeof serviceValue === "object" ? serviceValue : null) ||
+      (Array.isArray(serviceApps) ? serviceApps.find((appInfo) => String(appInfo?.guid || "").trim()) : null) ||
+      null;
+    if (!matchingApplication) {
+      return;
+    }
+
+    const applicationName = firstNonEmptyString([
+      matchingApplication?.appName,
+      matchingApplication?.name,
+      matchingApplication?.displayName,
+      matchingApplication?.guid,
+      rule.label,
+    ]);
+    labels.push(rule.label);
+    items.push({
+      key: `${rule.key}:${applicationName}`,
+      label: rule.label,
+      applicationName,
+    });
+  });
+
+  const hasCmDetection = shouldShowCmService(resolvedCmService) || programmerMatchesCmTenantCatalog(programmer, cmCatalog);
+  if (hasCmDetection) {
+    labels.push(PREMIUM_SERVICE_CONCURRENCY_LABEL);
+    items.push({
+      key: `cm:${String(programmer?.programmerId || programmer?.programmerName || "programmer").trim()}`,
+      label: PREMIUM_SERVICE_CONCURRENCY_LABEL,
+      applicationName: firstNonEmptyString([
+        currentServices?.restV2?.appName,
+        currentServices?.esm?.appName,
+        currentServices?.degradation?.appName,
+        programmer?.programmerName,
+        programmer?.programmerId,
+        PREMIUM_SERVICE_CONCURRENCY_LABEL,
+      ]),
+    });
+  }
+
+  const resetTempPassAvailable = hasResetTempPassAvailable(currentServices);
+  const resetTempPassAppName = firstNonEmptyString([
+    currentServices?.resetTempPass?.appName,
+    currentServices?.resetTempPass?.name,
+    currentServices?.resetTempPass?.displayName,
+    currentServices?.resetTempPass?.guid,
+    Array.isArray(currentServices?.resetTempPassApps)
+      ? firstNonEmptyString(
+          currentServices.resetTempPassApps.flatMap((appInfo) => [
+            appInfo?.appName,
+            appInfo?.name,
+            appInfo?.displayName,
+            appInfo?.guid,
+          ])
+        )
+      : "",
+  ]);
+  const mediaCompanyLabel = firstNonEmptyString([
+    programmer?.mediaCompanyName,
+    programmer?.programmerName,
+    programmer?.programmerId,
+    "this media company",
+  ]);
+  const resetTempPassReminder = resetTempPassAvailable
+    ? `${PREMIUM_SERVICE_RESET_TEMPPASS_REMINDER_PREFIX} for ${mediaCompanyLabel}${resetTempPassAppName ? ` using ${resetTempPassAppName}` : ""}.`
+    : "";
+
+  return {
+    ...currentServices,
+    ...(resolvedCmService ? { cm: resolvedCmService } : {}),
+    detectedPremiumServiceLabels: labels,
+    detectedPremiumServiceItems: items,
+    premiumServicesSummary: labels.length > 0 ? labels.join(" | ") : "No premium services detected",
+    resetTempPassAvailable,
+    resetTempPassAppName,
+    resetTempPassReminder,
+  };
+}
+
+function emitResetTempPassSupportReminder(programmer, services = null) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  if (!programmerId || !hasResetTempPassAvailable(services)) {
+    return;
+  }
+
+  const reminderKey = getEnvironmentScopedProgrammerKey(programmerId);
+  if (!reminderKey || state.premiumServiceReminderLogKeys.has(reminderKey)) {
+    return;
+  }
+  state.premiumServiceReminderLogKeys.add(reminderKey);
+
+  const reminderMessage =
+    String(services?.resetTempPassReminder || "").trim() ||
+    `${PREMIUM_SERVICE_RESET_TEMPPASS_REMINDER_PREFIX} for ${String(programmer?.programmerName || programmerId).trim()}.`;
+  const details = {
+    programmerId,
+    programmerName: String(programmer?.programmerName || programmer?.mediaCompanyName || "").trim(),
+    applicationName: String(services?.resetTempPassAppName || services?.resetTempPass?.appName || "").trim(),
+    scope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE,
+  };
+  console.log(`[UnderPAR Reminder] ${reminderMessage}`, details);
+  appendDebugLogEntry("premium", reminderMessage, details, { level: "info" });
+}
+
 function emitPremiumServiceDecisionLogs(programmer, services = null) {
   if (!programmer) {
     return;
@@ -12440,6 +12946,7 @@ function emitPremiumServiceDecisionLogs(programmer, services = null) {
   const hasDegradation = Boolean(services?.degradation);
   const hasCm = shouldShowCmService(services?.cm);
   const hasMvpdCm = shouldShowCmService(services?.cmMvpd);
+  const hasResetTempPass = hasResetTempPassAvailable(services);
 
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const selectedMvpdId = String(state.selectedMvpdId || "").trim();
@@ -12451,8 +12958,12 @@ function emitPremiumServiceDecisionLogs(programmer, services = null) {
   logDecisionPoint(`Decision | ${mediaCompanyLabel} has REST V2 = ${hasRestV2 ? "YES" : "NO"}`);
   logDecisionPoint(`Decision | ${mediaCompanyLabel} has ESM = ${hasEsm ? "YES" : "NO"}`);
   logDecisionPoint(`Decision | ${mediaCompanyLabel} has DEGRADATION = ${hasDegradation ? "YES" : "NO"}`);
+  logDecisionPoint(`Decision | ${mediaCompanyLabel} has Reset TempPASS = ${hasResetTempPass ? "YES" : "NO"}`);
   logDecisionPoint(`Decision | ${mediaCompanyLabel} has Concurency Monitorring = ${hasCm ? "YES" : "NO"}`);
   logDecisionPoint(`Decision | ${mvpdDecisionLabel} has Concurency Monitorring = ${hasMvpdCm ? "YES" : "NO"}`);
+  if (hasResetTempPass) {
+    emitResetTempPassSupportReminder(programmer, services);
+  }
 }
 
 function setStatus(message = "", type = "info") {
@@ -12726,7 +13237,7 @@ function shouldShowBlockingBusyCursor() {
 }
 
 function shouldRunExperienceCloudSessionMonitor() {
-  return Boolean(state.sessionReady && state.loginData?.accessToken && !state.restricted);
+  return false;
 }
 
 function shouldShowLoggedOutAuthActivity() {
@@ -13729,6 +14240,14 @@ function parseJsonText(text, fallback = {}) {
   } catch {
     return fallback;
   }
+}
+
+function serializeError(error) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error || "Unknown error");
 }
 
 function parseJsonOrFormText(text, fallback = {}) {
@@ -29568,19 +30087,13 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
     throw new Error("CM controller is no longer active for the selected media company.");
   }
 
-  let accessToken = await ensureCmApiAccessToken({
-    forceRefresh: options.forceRefresh === true,
-    freshLeewayMs: 60 * 1000,
-    allowTemporaryPageContextTab: false,
-  });
-  if (accessToken && !tokenSupportsCmConsoleRequests(accessToken)) {
-    accessToken = await ensureCmApiAccessToken({
-      forceRefresh: true,
+  const normalizedToken = normalizeBearerTokenValue(
+    await ensureCmApiAccessToken({
+      forceRefresh: options.forceRefresh === true,
       freshLeewayMs: 60 * 1000,
       allowTemporaryPageContextTab: false,
-    });
-  }
-  const normalizedToken = String(accessToken || "").trim();
+    })
+  );
   if (!normalizedToken) {
     throw new Error(
       "Unable to resolve CMU IMS token. Sign in to Adobe Pass Console, then retry clickCMU generation."
@@ -29616,15 +30129,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
     ...(Array.isArray(controllerAuth?.experienceCloudClientIds) ? controllerAuth.experienceCloudClientIds : []),
     EXPERIENCE_CLOUD_SSO_CLIENT_ID,
   ]).filter((value) => String(value || "").trim().toLowerCase() === EXPERIENCE_CLOUD_SSO_CLIENT_ID);
-  let profileUserId = "";
-  try {
-    const profilePayload = await fetchImsSessionProfile(normalizedToken);
-    profileUserId = firstNonEmptyString([profilePayload?.userId, profilePayload?.user_id, profilePayload?.sub, profilePayload?.id]);
-  } catch {
-    profileUserId = "";
-  }
   const userId = firstNonEmptyString([
-    profileUserId,
     controllerAuth?.userId,
     hints.userId,
     claims.user_id,
@@ -35182,6 +35687,17 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
   }
   let currentServices = programmer?.programmerId ? getCurrentPremiumAppsSnapshot(programmer.programmerId) : null;
   let resolvedAppInfo = hasEsmScopedApp(currentServices) ? currentServices.esm : appInfo;
+  if (programmer?.programmerId && !resolvedAppInfo?.guid) {
+    const inFlightHydration = getProgrammerServiceHydrationPromise(programmer.programmerId);
+    if (inFlightHydration) {
+      const hydratedServices = await inFlightHydration.catch(() => null);
+      currentServices =
+        (hydratedServices && typeof hydratedServices === "object" ? hydratedServices : null) ||
+        getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
+        currentServices;
+      resolvedAppInfo = hasEsmScopedApp(currentServices) ? currentServices.esm : resolvedAppInfo;
+    }
+  }
   if (programmer?.programmerId && !resolvedAppInfo?.guid) {
     const hydratedServices =
       (await getProgrammerServiceHydrationPromise(programmer.programmerId)?.catch(() => null)) ||
@@ -49561,11 +50077,32 @@ async function loadDegradationService(programmer, appInfo, section, contentEleme
   if (!contentElement) {
     return;
   }
+  let currentServices = programmer?.programmerId ? getCurrentPremiumAppsSnapshot(programmer.programmerId) : null;
   let resolvedAppInfo = appInfo;
+  if (programmer?.programmerId && !resolvedAppInfo?.guid) {
+    const inFlightHydration = getProgrammerServiceHydrationPromise(programmer.programmerId);
+    if (inFlightHydration) {
+      const hydratedServices = await inFlightHydration.catch(() => null);
+      const latestHydratedServices =
+        (hydratedServices && typeof hydratedServices === "object" ? hydratedServices : null) ||
+        getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
+        currentServices;
+      const hydratedCandidates = resolveDegradationAppCandidates(
+        String(programmer?.programmerId || "").trim(),
+        latestHydratedServices?.degradation || resolvedAppInfo,
+        {
+          preferredGuid: String(resolvedAppInfo?.guid || "").trim(),
+          requestorId: String(state.selectedRequestorId || "").trim(),
+        }
+      );
+      currentServices = latestHydratedServices;
+      resolvedAppInfo = hydratedCandidates[0] || resolvedAppInfo;
+    }
+  }
   if (programmer?.programmerId && !resolvedAppInfo?.guid) {
     const hydratedServices =
       (await getProgrammerServiceHydrationPromise(programmer.programmerId)?.catch(() => null)) ||
-      (await primeProgrammerServiceHydration(programmer, getCurrentPremiumAppsSnapshot(programmer.programmerId), {
+      (await primeProgrammerServiceHydration(programmer, currentServices, {
         forceRefresh: false,
         controllerReason: "degradation-panel-open",
         requestToken,
@@ -49899,7 +50436,13 @@ function renderPremiumServicesLoading(programmer, options = {}) {
   const label = programmer?.programmerName
     ? `Loading premium services for ${programmer.programmerName}...`
     : "Loading premium services...";
-  els.premiumServicesContainer.innerHTML = `<p class="metadata-empty">${escapeHtml(label)}</p>`;
+  const hydrationProgress =
+    options?.hydrationProgress && typeof options.hydrationProgress === "object"
+      ? options.hydrationProgress
+      : getProgrammerPremiumHydrationProgress(String(programmer?.programmerId || "").trim());
+  const progressLabel = String(hydrationProgress?.label || "").trim();
+  const displayLabel = progressLabel || label;
+  els.premiumServicesContainer.innerHTML = `<p class="metadata-empty">${escapeHtml(displayLabel)}</p>`;
 }
 
 function renderPremiumServicesError(error, options = {}) {
@@ -50268,8 +50811,10 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.selectedMvpdId = "";
   state.selectedProgrammerKey = "";
   state.applicationsByProgrammerId.clear();
+  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByProgrammerId.clear();
   state.programmerWorkspaceHydrationReadyByKey.clear();
+  state.premiumHydrationProgressByProgrammerKey.clear();
   state.premiumAppsLoadPromiseByProgrammerId.clear();
   state.premiumAppScopeHydrationPromiseByProgrammerId.clear();
   state.cmServiceByProgrammerId.clear();
@@ -50338,7 +50883,10 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.restV2BobtoolsRedirectInFlightByTabId.clear();
   state.restV2PopupCloseProbeInFlightBySelectionKey.clear();
   state.premiumAutoRefreshMetaByKey.clear();
+  state.premiumServiceReminderLogKeys.clear();
   state.premiumPanelRequestToken = 0;
+  state.authenticatedHydrationToken = 0;
+  state.programmersLoadInFlight = false;
   state.premiumServiceRecoveryPromiseByProgrammerKey.clear();
   state.mvpdCacheByRequestor.clear();
   state.mvpdLoadPromiseByRequestor.clear();
@@ -51591,7 +52139,14 @@ async function runUnderparPkceLogin(options = {}) {
     let responseUrl = "";
     let capturedAvatarUrl = "";
     let authPopupTabId = 0;
-    responseUrl = String(await launchUnderparImsAuthorizationFlow(authorizeUrl, interactive));
+    if (interactive) {
+      const popupResult = await runAuthInPopupWindow(authorizeUrl, redirectUri);
+      responseUrl = String(firstNonEmptyString([popupResult?.responseUrl]) || "");
+      capturedAvatarUrl = normalizeAvatarCandidate(firstNonEmptyString([popupResult?.capturedAvatarUrl]));
+      authPopupTabId = Number(popupResult?.authPopupTabId || 0);
+    } else {
+      responseUrl = String(await launchUnderparImsAuthorizationFlow(authorizeUrl, false));
+    }
 
     const authResponse = parseUnderparImsAuthorizationCodeResponse(responseUrl, requestState);
     const tokenPayload = await exchangeUnderparImsAuthorizationCode({
@@ -52092,6 +52647,471 @@ async function fetchOrganizations(accessToken) {
   throw lastError || new Error("Organizations request failed.");
 }
 
+function extractUnifiedShellErrorMessage(parsedPayload, rawText = "") {
+  if (parsedPayload && typeof parsedPayload === "object") {
+    const directMessage = firstNonEmptyString([
+      parsedPayload.message,
+      parsedPayload.error,
+      parsedPayload.error_description,
+      parsedPayload.detail,
+      parsedPayload.reason,
+    ]);
+    if (directMessage) {
+      return directMessage;
+    }
+
+    if (Array.isArray(parsedPayload.errors)) {
+      const firstError =
+        parsedPayload.errors.find((value) => value && typeof value === "object") || parsedPayload.errors[0];
+      if (firstError && typeof firstError === "object") {
+        return firstNonEmptyString([
+          firstError.message,
+          firstError.detail,
+          firstError.error,
+          firstError.reason,
+        ]);
+      }
+      return firstNonEmptyString(parsedPayload.errors);
+    }
+  }
+
+  return firstNonEmptyString([normalizeHttpErrorMessage(rawText), String(rawText || "").trim()]);
+}
+
+function normalizeUnderparUnifiedShellOrganizationNode(organization, cluster = null) {
+  if (!organization || typeof organization !== "object") {
+    return null;
+  }
+
+  const tenantId = firstNonEmptyString([organization.tenantId, organization.tenant_id]);
+  const imsOrgId = firstNonEmptyString([organization.imsOrgId, organization.ims_org_id]);
+  const orgName = firstNonEmptyString([
+    organization.orgName,
+    organization.org_name,
+    organization.organizationName,
+    organization.organization_name,
+  ]);
+  const id = firstNonEmptyString([tenantId, imsOrgId, organization.id]);
+  if (!id && !orgName) {
+    return null;
+  }
+
+  return {
+    id,
+    orgId: id,
+    tenantId,
+    imsOrgId,
+    name: orgName || id,
+    orgName: orgName || id,
+    organizationName: orgName || id,
+    aepRegion: firstNonEmptyString([organization.aepRegion, organization.aep_region]),
+    hasAEP: organization.hasAEP === true,
+    aemInstances: Array.isArray(organization.aemInstances) ? organization.aemInstances : [],
+    clusterIndex: Number.isFinite(cluster?.index) ? cluster.index : -1,
+    clusterUserId: firstNonEmptyString([cluster?.userId]),
+    clusterUserType: firstNonEmptyString([cluster?.userType]),
+    clusterRestricted: cluster?.restricted === true,
+    consolidatedAccount: cluster?.consolidatedAccount === true,
+  };
+}
+
+function collectUnderparUnifiedShellOrganizations(parsedPayload = null, options = {}) {
+  const clusterRows = Array.isArray(parsedPayload?.data?.imsExtendedAccountClusterData?.data)
+    ? parsedPayload.data.imsExtendedAccountClusterData.data
+    : [];
+  const selectedOrg = normalizeOrganizationIdentifier(firstNonEmptyString([options?.selectedOrg]));
+  const activeOrganization = options?.activeOrganization && typeof options.activeOrganization === "object"
+    ? options.activeOrganization
+    : null;
+  const activeIdentifiers = new Set(
+    [
+      firstNonEmptyString([activeOrganization?.key]),
+      firstNonEmptyString([activeOrganization?.id]),
+      firstNonEmptyString([activeOrganization?.orgId]),
+      firstNonEmptyString([activeOrganization?.tenantId]),
+      firstNonEmptyString([activeOrganization?.imsOrgId]),
+      firstNonEmptyString([activeOrganization?.name]),
+      firstNonEmptyString([activeOrganization?.label]),
+    ].map((value) => normalizeOrganizationIdentifier(value)).filter(Boolean)
+  );
+  const candidateMap = new Map();
+  const idIndex = new Map();
+  const nameIndex = new Map();
+
+  const upsertOrganization = (organization, source, cluster = null) => {
+    const normalized = normalizeUnderparUnifiedShellOrganizationNode(organization, cluster);
+    if (!normalized) {
+      return;
+    }
+
+    const orgId = firstNonEmptyString([normalized.orgId, normalized.id, normalized.tenantId, normalized.imsOrgId]);
+    const userId = firstNonEmptyString([normalized.clusterUserId, normalized.userId]);
+    const name =
+      firstNonEmptyString([normalized.name, normalized.orgName, normalized.organizationName, orgId ? `Adobe IMS Org ${orgId}` : ""]) ||
+      "Adobe organization";
+    const normalizedId = normalizeOrganizationIdentifier(orgId);
+    const normalizedName = normalizeOrganizationIdentifier(name);
+    let existingKey = normalizedId ? idIndex.get(normalizedId) : "";
+    if (!existingKey && normalizedName) {
+      existingKey = nameIndex.get(normalizedName) || "";
+    }
+
+    const key = firstNonEmptyString([
+      normalized.key,
+      buildRestrictedOrgOptionKey({
+        orgId,
+        userId,
+        name,
+      }),
+    ]);
+    const label = firstNonEmptyString([
+      normalized.label,
+      buildRestrictedOrgOptionLabel({
+        name,
+        orgId,
+        userId,
+      }),
+      name,
+    ]);
+    const hinted =
+      normalized.hinted === true ||
+      activeIdentifiers.has(normalizedId) ||
+      activeIdentifiers.has(normalizedName) ||
+      activeIdentifiers.has(normalizeOrganizationIdentifier(key)) ||
+      (selectedOrg && selectedOrg === normalizeOrganizationIdentifier(normalized.tenantId));
+
+    if (!existingKey) {
+      if (!key) {
+        return;
+      }
+
+      const nextCandidate = {
+        ...normalized,
+        key,
+        id: orgId,
+        orgId,
+        tenantId: firstNonEmptyString([normalized.tenantId, orgId && !/@adobeorg$/i.test(orgId) ? orgId : ""]),
+        imsOrgId: firstNonEmptyString([normalized.imsOrgId, /@adobeorg$/i.test(orgId) ? orgId : ""]),
+        userId,
+        name,
+        label,
+        source,
+        sources: source ? [source] : [],
+        hinted,
+        isAdobePass: matchesAdobePassOrg(normalized),
+        raw: organization,
+      };
+      candidateMap.set(key, nextCandidate);
+      if (normalizedId) {
+        idIndex.set(normalizedId, key);
+      }
+      if (normalizedName) {
+        nameIndex.set(normalizedName, key);
+      }
+      return;
+    }
+
+    const existingCandidate = candidateMap.get(existingKey);
+    if (!existingCandidate) {
+      return;
+    }
+
+    existingCandidate.id = firstNonEmptyString([existingCandidate.id, orgId]);
+    existingCandidate.orgId = firstNonEmptyString([existingCandidate.orgId, orgId]);
+    existingCandidate.tenantId = firstNonEmptyString([
+      existingCandidate.tenantId,
+      normalized.tenantId,
+      existingCandidate.orgId && !/@adobeorg$/i.test(existingCandidate.orgId) ? existingCandidate.orgId : "",
+    ]);
+    existingCandidate.imsOrgId = firstNonEmptyString([
+      existingCandidate.imsOrgId,
+      normalized.imsOrgId,
+      /@adobeorg$/i.test(existingCandidate.orgId) ? existingCandidate.orgId : "",
+    ]);
+    existingCandidate.userId = firstNonEmptyString([existingCandidate.userId, userId]);
+    const existingSourceRank = rankRestrictedOrganizationSource(existingCandidate.source);
+    const incomingSourceRank = rankRestrictedOrganizationSource(source);
+    existingCandidate.name =
+      incomingSourceRank < existingSourceRank && firstNonEmptyString([name])
+        ? name
+        : choosePreferredOrganizationName(existingCandidate.name, name, existingCandidate.orgId || orgId);
+    existingCandidate.label = buildRestrictedOrgOptionLabel({
+      name: existingCandidate.name,
+      orgId: existingCandidate.orgId,
+      userId: existingCandidate.userId,
+    });
+    existingCandidate.aepRegion = firstNonEmptyString([existingCandidate.aepRegion, normalized.aepRegion]);
+    existingCandidate.hasAEP = existingCandidate.hasAEP === true || normalized.hasAEP === true;
+    if ((!Array.isArray(existingCandidate.aemInstances) || existingCandidate.aemInstances.length === 0) && Array.isArray(normalized.aemInstances)) {
+      existingCandidate.aemInstances = normalized.aemInstances;
+    }
+    existingCandidate.clusterIndex =
+      existingCandidate.clusterIndex >= 0 ? existingCandidate.clusterIndex : Number(normalized.clusterIndex || -1);
+    existingCandidate.clusterUserId = firstNonEmptyString([existingCandidate.clusterUserId, normalized.clusterUserId, normalized.userId]);
+    existingCandidate.clusterUserType = firstNonEmptyString([existingCandidate.clusterUserType, normalized.clusterUserType]);
+    existingCandidate.clusterRestricted = existingCandidate.clusterRestricted === true || normalized.clusterRestricted === true;
+    existingCandidate.consolidatedAccount =
+      existingCandidate.consolidatedAccount === true || normalized.consolidatedAccount === true;
+    existingCandidate.hinted =
+      existingCandidate.hinted === true ||
+      hinted === true;
+    existingCandidate.isAdobePass = existingCandidate.isAdobePass === true || matchesAdobePassOrg(normalized);
+    if (source && !existingCandidate.sources.includes(source)) {
+      existingCandidate.sources.push(source);
+    }
+    if (!existingCandidate.source || incomingSourceRank < existingSourceRank) {
+      existingCandidate.source = source;
+      existingCandidate.raw = organization;
+    }
+  };
+
+  clusterRows.forEach((cluster) => {
+    if (!cluster || typeof cluster !== "object") {
+      return;
+    }
+    const normalizedCluster = {
+      index: Number.isFinite(cluster?.index) ? cluster.index : clusterRows.indexOf(cluster),
+      consolidatedAccount: cluster?.consolidatedAccount === true,
+      restricted: cluster?.restricted === true,
+      userId: firstNonEmptyString([cluster?.userId]),
+      userType: firstNonEmptyString([cluster?.userType]),
+    };
+    upsertOrganization(
+      cluster.owningOrg,
+      `unifiedShell.imsExtendedAccountClusterData[${normalizedCluster.index}].owningOrg`,
+      normalizedCluster
+    );
+    (Array.isArray(cluster.orgs) ? cluster.orgs : []).forEach((organization, organizationIndex) => {
+      upsertOrganization(
+        organization,
+        `unifiedShell.imsExtendedAccountClusterData[${normalizedCluster.index}].orgs[${organizationIndex}]`,
+        normalizedCluster
+      );
+    });
+  });
+
+  return Array.from(candidateMap.values());
+}
+
+function resolveRestrictedPickerSelectedOrg(preferredOrg = null, sessionData = null) {
+  const preferredOrganization = preferredOrg && typeof preferredOrg === "object" ? preferredOrg : null;
+  const session = sessionData && typeof sessionData === "object" ? sessionData : null;
+  const profile = resolveLoginProfile(session);
+  const requestedTargetOrganization = normalizeRequestedTargetOrganization(session?.targetOrganization);
+  const targetSelectedOrg = firstNonEmptyString([
+    preferredOrganization?.tenantId,
+    preferredOrganization?.id && !/@adobeorg$/i.test(String(preferredOrganization?.id || "").trim())
+      ? preferredOrganization.id
+      : "",
+    requestedTargetOrganization?.tenantId,
+    requestedTargetOrganization?.id && !/@adobeorg$/i.test(String(requestedTargetOrganization?.id || "").trim())
+      ? requestedTargetOrganization.id
+      : "",
+  ]);
+  if (targetSelectedOrg) {
+    return targetSelectedOrg;
+  }
+
+  const previousSelectedOrg = firstNonEmptyString([session?.unifiedShell?.selectedOrg]);
+  if (previousSelectedOrg && !/@adobeorg$/i.test(previousSelectedOrg)) {
+    return previousSelectedOrg;
+  }
+
+  const activeOrganization = buildRestrictedOrganizationContext(
+    resolveCachedOrganizationsFromLoginData(session),
+    session,
+    preferredOrganization
+  ).activeOrganization;
+  const activeId = firstNonEmptyString([activeOrganization?.tenantId, activeOrganization?.id]);
+  if (activeId && !/@adobeorg$/i.test(activeId)) {
+    return activeId;
+  }
+
+  const projectedProductContexts = [
+    ...(Array.isArray(profile?.projectedProductContext) ? profile.projectedProductContext : []),
+    ...(Array.isArray(profile?.additional_info?.projectedProductContext)
+      ? profile.additional_info.projectedProductContext
+      : []),
+    ...(Array.isArray(session?.console?.extendedProfile?.userProfile?.projectedProductContext)
+      ? session.console.extendedProfile.userProfile.projectedProductContext
+      : []),
+  ];
+  for (const entry of projectedProductContexts) {
+    const prodCtx = entry?.prodCtx && typeof entry.prodCtx === "object" ? entry.prodCtx : entry;
+    const tenantId = firstNonEmptyString([prodCtx?.tenantId, prodCtx?.tenant_id, prodCtx?.companyId, prodCtx?.company_id]);
+    if (tenantId) {
+      return tenantId;
+    }
+  }
+
+  const verifiedClaim = extractVerifiedCustomerOrganizationClaim(session);
+  return firstNonEmptyString([
+    previousSelectedOrg,
+    activeId,
+    profile?.tenantId,
+    profile?.tenant_id,
+    verifiedClaim?.id && !/@adobeorg$/i.test(verifiedClaim.id) ? verifiedClaim.id : "",
+  ]);
+}
+
+function buildOrganizationContextFromSession(sessionData = null) {
+  const currentSession = sessionData && typeof sessionData === "object" ? sessionData : {};
+  return buildRestrictedOrganizationContext(
+    resolveCachedOrganizationsFromLoginData(currentSession),
+    currentSession,
+    currentSession?.targetOrganization && typeof currentSession.targetOrganization === "object"
+      ? currentSession.targetOrganization
+      : null
+  );
+}
+
+function resolveProgrammerAccessContext(sessionData = null) {
+  return resolveAdobePassAccessContext(sessionData);
+}
+
+function findAdobePassOrganizationCandidate(organizations = []) {
+  return findAdobePassOrg(Array.isArray(organizations) ? organizations : []) || null;
+}
+
+function isAdobePassOrganization(organization = null) {
+  return matchesAdobePassOrg(organization);
+}
+
+async function fetchUnderparUnifiedShellInit(accessToken = "", options = {}) {
+  const normalizedAccessToken = normalizeBearerTokenValue(accessToken);
+  if (!normalizedAccessToken) {
+    throw new Error("Unified Shell request is missing the Adobe IMS access token.");
+  }
+
+  const selectedOrg = firstNonEmptyString([options?.selectedOrg]);
+  let response;
+  try {
+    response = await fetch(UNIFIED_SHELL_GRAPHQL_URL, {
+      method: "POST",
+      mode: "cors",
+      credentials: "include",
+      cache: "no-store",
+      redirect: "follow",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${normalizedAccessToken}`,
+        "Content-Type": "application/json",
+        "x-api-key": UNIFIED_SHELL_API_KEY,
+      },
+      body: JSON.stringify({
+        operationName: UNIFIED_SHELL_OPERATION_NAME,
+        query: UNIFIED_SHELL_INIT_QUERY,
+        variables: {
+          selectedOrg: selectedOrg || null,
+          useConsolidatedAccounts: false,
+        },
+      }),
+    });
+  } catch (error) {
+    throw new Error(
+      `Unable to reach Unified Shell GraphQL: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  const text = await response.text().catch(() => "");
+  const parsed = parseJsonText(text, null);
+  if (!response.ok) {
+    const message = extractUnifiedShellErrorMessage(parsed, text);
+    throw new Error(`Unified Shell GraphQL returned ${response.status}${message ? `: ${message}` : ""}`);
+  }
+  if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
+    const message = extractUnifiedShellErrorMessage(parsed, text);
+    throw new Error(`Unified Shell GraphQL returned an application error${message ? `: ${message}` : ""}`);
+  }
+
+  return parsed ?? { data: {} };
+}
+
+async function fetchUnderparUnifiedShellOrganizations(accessToken = "", options = {}) {
+  const parsed = await fetchUnderparUnifiedShellInit(accessToken, options);
+  return collectUnderparUnifiedShellOrganizations(parsed, {
+    selectedOrg: firstNonEmptyString([options?.selectedOrg]),
+    activeOrganization: options?.activeOrganization || null,
+  });
+}
+
+async function buildUnifiedShellContext(session, reason = "post-login") {
+  const currentSession = session && typeof session === "object" ? session : {};
+  const previousUnifiedShell =
+    currentSession?.unifiedShell && typeof currentSession.unifiedShell === "object" ? currentSession.unifiedShell : {};
+  const accessToken = firstNonEmptyString([currentSession?.accessToken]);
+  const hydratedAt = new Date().toISOString();
+  const activeOrganization = buildOrganizationContextFromSession(currentSession).activeOrganization;
+  const selectedOrg = resolveRestrictedPickerSelectedOrg(activeOrganization, currentSession);
+
+  if (!accessToken) {
+    return {
+      ...previousUnifiedShell,
+      hydratedAt,
+      selectedOrg,
+      status: "unavailable",
+      organizations: [],
+      clusterCount: 0,
+      userProfile: null,
+      errors: {
+        init: "Adobe IMS access token is unavailable.",
+      },
+    };
+  }
+
+  log(`Hydrating Unified Shell org context from ${UNIFIED_SHELL_GRAPHQL_URL} (${reason}).`);
+  const initResult = await settle(() =>
+    fetchUnderparUnifiedShellInit(accessToken, {
+      selectedOrg,
+      activeOrganization,
+    })
+  );
+
+  if (!initResult.ok) {
+    log(`Unified Shell org hydration failed: ${serializeError(initResult.error)}`);
+    return {
+      ...previousUnifiedShell,
+      hydratedAt,
+      selectedOrg,
+      status: "unavailable",
+      organizations: [],
+      clusterCount: 0,
+      userProfile: null,
+      errors: {
+        init: serializeError(initResult.error),
+      },
+    };
+  }
+
+  const payload = initResult.value?.data && typeof initResult.value.data === "object" ? initResult.value.data : {};
+  const clusterMeta =
+    payload?.imsExtendedAccountClusterData && typeof payload.imsExtendedAccountClusterData === "object"
+      ? payload.imsExtendedAccountClusterData
+      : {};
+  const clusterRows = Array.isArray(clusterMeta?.data) ? clusterMeta.data : [];
+  const organizations = collectUnderparUnifiedShellOrganizations(initResult.value, {
+    selectedOrg,
+    activeOrganization,
+  });
+  const userProfile = payload?.userProfileJson && typeof payload.userProfileJson === "object" ? payload.userProfileJson : null;
+
+  return {
+    ...previousUnifiedShell,
+    hydratedAt,
+    selectedOrg,
+    status: organizations.length > 0 || userProfile ? "ready" : "limited",
+    clusterCount: clusterRows.length,
+    next: firstNonEmptyString([clusterMeta?.next]),
+    timestamp: firstNonEmptyString([clusterMeta?.timestamp]),
+    preferredLanguages: Array.isArray(clusterMeta?.preferredLanguages) ? clusterMeta.preferredLanguages.filter(Boolean) : [],
+    organizations,
+    userProfile,
+    errors: {
+      init: "",
+    },
+  };
+}
+
 function isReadOrganizationsScopeError(error) {
   const message = error instanceof Error ? error.message : String(error || "");
   return /read_organizations/i.test(message);
@@ -52146,9 +53166,343 @@ function flattenOrganizations(payload) {
   return flattened;
 }
 
+function hasCanonicalRestrictedStoredOrganizations(organizations = []) {
+  return Array.isArray(organizations) && organizations.some((organization) => {
+    if (!organization || typeof organization !== "object") {
+      return false;
+    }
+
+    return ["key", "label", "source", "sources", "hinted"].some((field) =>
+      Object.prototype.hasOwnProperty.call(organization, field)
+    );
+  });
+}
+
+function normalizeStoredRestrictedOrganizationCandidates(organizations = []) {
+  if (!Array.isArray(organizations)) {
+    return [];
+  }
+
+  const normalizedOrganizations = [];
+  const seenKeys = new Set();
+
+  organizations.forEach((organization, index) => {
+    if (!organization || typeof organization !== "object") {
+      return;
+    }
+
+    const orgId = firstNonEmptyString([
+      organization.id,
+      organization.orgId,
+      organization.organizationId,
+      extractOrganizationId(organization),
+    ]);
+    const userId = firstNonEmptyString([
+      organization.userId,
+      organization.clusterUserId,
+      extractUserId(organization),
+    ]);
+    const name =
+      firstNonEmptyString([
+        organization.name,
+        extractOrganizationName(organization),
+        organization.label,
+        orgId ? `Adobe IMS Org ${orgId}` : "",
+      ]) || "Adobe organization";
+    const label = firstNonEmptyString([
+      organization.label,
+      buildRestrictedOrgOptionLabel({
+        name,
+        orgId,
+        userId,
+      }),
+      name,
+    ]);
+    const key = firstNonEmptyString([
+      organization.key,
+      buildRestrictedOrgOptionKey({
+        orgId,
+        userId,
+        name: label,
+      }),
+    ]);
+    if (!key || seenKeys.has(key)) {
+      return;
+    }
+    seenKeys.add(key);
+
+    const source = firstNonEmptyString([
+      organization.source,
+      Array.isArray(organization.sources) ? organization.sources[0] : "",
+      `session.organizations[${index}]`,
+    ]);
+    const sources = [];
+    [source, ...(Array.isArray(organization.sources) ? organization.sources : [])].forEach((value) => {
+      const normalizedSource = String(value || "").trim();
+      if (normalizedSource && !sources.includes(normalizedSource)) {
+        sources.push(normalizedSource);
+      }
+    });
+
+    normalizedOrganizations.push({
+      key,
+      id: firstNonEmptyString([organization.id, organization.orgId, organization.organizationId, orgId]),
+      orgId: firstNonEmptyString([organization.orgId, organization.id, organization.organizationId, orgId]),
+      tenantId: firstNonEmptyString([
+        organization.tenantId,
+        organization.tenant_id,
+        extractTenantOrganizationId(organization),
+        orgId && !/@adobeorg$/i.test(orgId) ? orgId : "",
+      ]),
+      imsOrgId: firstNonEmptyString([
+        organization.imsOrgId,
+        organization.ims_org_id,
+        extractImsOrganizationId(organization),
+        /@adobeorg$/i.test(orgId) ? orgId : "",
+      ]),
+      userId,
+      clusterUserId: firstNonEmptyString([organization.clusterUserId, organization.userId]),
+      clusterUserType: firstNonEmptyString([organization.clusterUserType, organization.userType]),
+      name,
+      label,
+      source,
+      sources,
+      hinted: organization.hinted === true,
+      isAdobePass: organization.isAdobePass === true || matchesAdobePassOrg(organization),
+      raw: organization.raw && typeof organization.raw === "object" ? organization.raw : organization,
+    });
+  });
+
+  return normalizedOrganizations;
+}
+
+function collectCanonicalRestrictedDetectedOrganizations(sessionData = null, organizations = []) {
+  const currentSession = sessionData && typeof sessionData === "object" ? sessionData : {};
+  const providedOrganizations = Array.isArray(organizations) ? organizations : [];
+  if (hasCanonicalRestrictedStoredOrganizations(providedOrganizations)) {
+    return normalizeStoredRestrictedOrganizationCandidates(providedOrganizations);
+  }
+  if (providedOrganizations.length === 0 && hasCanonicalRestrictedStoredOrganizations(currentSession?.detectedOrganizations)) {
+    return normalizeStoredRestrictedOrganizationCandidates(currentSession.detectedOrganizations);
+  }
+
+  return collectRestrictedOrganizationCandidates({
+    profile: resolveLoginProfile(currentSession),
+    accessClaims: parseJwtPayload(currentSession?.accessToken),
+    idClaims: parseJwtPayload(currentSession?.idToken),
+    organizations: providedOrganizations,
+    configuredOrganizations: [],
+  });
+}
+
+function mergeRestrictedDetectedOrganizations({
+  existingOrganizations = [],
+  additionalOrganizations = [],
+  activeOrganizationHint = null,
+} = {}) {
+  const candidateMap = new Map();
+  const idIndex = new Map();
+  const nameIndex = new Map();
+  const activeIdentifiers = new Set(
+    [
+      firstNonEmptyString([activeOrganizationHint?.key]),
+      firstNonEmptyString([activeOrganizationHint?.id]),
+      firstNonEmptyString([activeOrganizationHint?.orgId]),
+      firstNonEmptyString([activeOrganizationHint?.tenantId]),
+      firstNonEmptyString([activeOrganizationHint?.imsOrgId]),
+      firstNonEmptyString([activeOrganizationHint?.name]),
+    ]
+      .map((value) => normalizeOrganizationIdentifier(value))
+      .filter(Boolean)
+  );
+
+  const upsert = (organization, defaultSource) => {
+    if (!organization || typeof organization !== "object") {
+      return;
+    }
+
+    const orgId = firstNonEmptyString([
+      organization.orgId,
+      organization.id,
+      organization.organizationId,
+      organization.tenantId,
+      organization.imsOrgId,
+    ]);
+    const userId = firstNonEmptyString([organization.userId, organization.clusterUserId]);
+    const name = firstNonEmptyString([organization.name, organization.label, orgId ? `Adobe IMS Org ${orgId}` : ""]);
+    if (!orgId && !name) {
+      return;
+    }
+
+    const normalizedId = normalizeOrganizationIdentifier(orgId);
+    const normalizedName = normalizeOrganizationIdentifier(name);
+    let existingKey = normalizedId ? idIndex.get(normalizedId) : "";
+    if (!existingKey && normalizedName) {
+      existingKey = nameIndex.get(normalizedName) || "";
+    }
+
+    const source = firstNonEmptyString([
+      organization.source,
+      Array.isArray(organization.sources) ? organization.sources[0] : "",
+      defaultSource,
+    ]);
+    const sources = [];
+    [source, ...(Array.isArray(organization.sources) ? organization.sources : [])].forEach((value) => {
+      const normalizedSource = String(value || "").trim();
+      if (normalizedSource && !sources.includes(normalizedSource)) {
+        sources.push(normalizedSource);
+      }
+    });
+
+    if (!existingKey) {
+      const key = firstNonEmptyString([
+        organization.key,
+        buildRestrictedOrgOptionKey({
+          orgId,
+          userId,
+          name,
+        }),
+      ]);
+      if (!key) {
+        return;
+      }
+
+      const nextCandidate = {
+        key,
+        id: firstNonEmptyString([organization.id, organization.orgId, organization.organizationId, orgId]),
+        orgId: firstNonEmptyString([organization.orgId, organization.id, organization.organizationId, orgId]),
+        tenantId: firstNonEmptyString([
+          organization.tenantId,
+          orgId && !/@adobeorg$/i.test(orgId) ? orgId : "",
+        ]),
+        imsOrgId: firstNonEmptyString([
+          organization.imsOrgId,
+          /@adobeorg$/i.test(orgId) ? orgId : "",
+        ]),
+        userId,
+        clusterUserId: firstNonEmptyString([organization.clusterUserId, organization.userId]),
+        clusterUserType: firstNonEmptyString([organization.clusterUserType, organization.userType]),
+        name,
+        label: firstNonEmptyString([
+          organization.label,
+          buildRestrictedOrgOptionLabel({
+            name,
+            orgId,
+            userId,
+          }),
+        ]),
+        source,
+        sources,
+        hinted:
+          organization.hinted === true ||
+          activeIdentifiers.has(normalizedId) ||
+          activeIdentifiers.has(normalizedName) ||
+          activeIdentifiers.has(normalizeOrganizationIdentifier(organization.key)),
+        isAdobePass: organization.isAdobePass === true || matchesAdobePassOrg(organization),
+        aepRegion: firstNonEmptyString([organization.aepRegion]),
+        hasAEP: organization.hasAEP === true,
+        aemInstances: Array.isArray(organization.aemInstances) ? organization.aemInstances : [],
+        clusterIndex: Number.isFinite(organization.clusterIndex) ? organization.clusterIndex : -1,
+        clusterRestricted: organization.clusterRestricted === true || organization.restricted === true,
+        consolidatedAccount: organization.consolidatedAccount === true,
+        raw: organization.raw && typeof organization.raw === "object" ? organization.raw : organization,
+      };
+
+      candidateMap.set(key, nextCandidate);
+      if (normalizedId) {
+        idIndex.set(normalizedId, key);
+      }
+      if (normalizedName) {
+        nameIndex.set(normalizedName, key);
+      }
+      return;
+    }
+
+    const existingCandidate = candidateMap.get(existingKey);
+    if (!existingCandidate) {
+      return;
+    }
+
+    existingCandidate.id = firstNonEmptyString([existingCandidate.id, organization.id, orgId]);
+    existingCandidate.orgId = firstNonEmptyString([existingCandidate.orgId, organization.orgId, orgId]);
+    existingCandidate.tenantId = firstNonEmptyString([
+      existingCandidate.tenantId,
+      organization.tenantId,
+      existingCandidate.orgId && !/@adobeorg$/i.test(existingCandidate.orgId) ? existingCandidate.orgId : "",
+    ]);
+    existingCandidate.imsOrgId = firstNonEmptyString([
+      existingCandidate.imsOrgId,
+      organization.imsOrgId,
+      /@adobeorg$/i.test(existingCandidate.orgId) ? existingCandidate.orgId : "",
+    ]);
+    existingCandidate.userId = firstNonEmptyString([existingCandidate.userId, userId]);
+    const existingSourceRank = rankRestrictedOrganizationSource(existingCandidate.source);
+    const incomingSourceRank = rankRestrictedOrganizationSource(source);
+    existingCandidate.name =
+      incomingSourceRank < existingSourceRank && firstNonEmptyString([name])
+        ? name
+        : choosePreferredOrganizationName(existingCandidate.name, name, existingCandidate.orgId || orgId);
+    existingCandidate.label = buildRestrictedOrgOptionLabel({
+      name: existingCandidate.name,
+      orgId: existingCandidate.orgId,
+      userId: existingCandidate.userId,
+    });
+    existingCandidate.aepRegion = firstNonEmptyString([existingCandidate.aepRegion, organization.aepRegion]);
+    existingCandidate.hasAEP = existingCandidate.hasAEP === true || organization.hasAEP === true;
+    if ((!Array.isArray(existingCandidate.aemInstances) || existingCandidate.aemInstances.length === 0) && Array.isArray(organization.aemInstances)) {
+      existingCandidate.aemInstances = organization.aemInstances;
+    }
+    existingCandidate.clusterIndex =
+      existingCandidate.clusterIndex >= 0 ? existingCandidate.clusterIndex : Number(organization.clusterIndex || -1);
+    existingCandidate.clusterUserId = firstNonEmptyString([existingCandidate.clusterUserId, organization.clusterUserId, organization.userId]);
+    existingCandidate.clusterUserType = firstNonEmptyString([existingCandidate.clusterUserType, organization.clusterUserType, organization.userType]);
+    existingCandidate.clusterRestricted =
+      existingCandidate.clusterRestricted === true ||
+      organization.clusterRestricted === true ||
+      organization.restricted === true;
+    existingCandidate.consolidatedAccount =
+      existingCandidate.consolidatedAccount === true || organization.consolidatedAccount === true;
+    existingCandidate.hinted =
+      existingCandidate.hinted === true ||
+      organization.hinted === true ||
+      activeIdentifiers.has(normalizedId) ||
+      activeIdentifiers.has(normalizedName) ||
+      activeIdentifiers.has(normalizeOrganizationIdentifier(organization.key));
+    existingCandidate.isAdobePass = existingCandidate.isAdobePass === true || matchesAdobePassOrg(organization);
+
+    sources.forEach((value) => {
+      if (!existingCandidate.sources.includes(value)) {
+        existingCandidate.sources.push(value);
+      }
+    });
+    if (!existingCandidate.source || incomingSourceRank < existingSourceRank) {
+      existingCandidate.source = source;
+      existingCandidate.raw = organization.raw && typeof organization.raw === "object" ? organization.raw : organization;
+    }
+  };
+
+  (Array.isArray(existingOrganizations) ? existingOrganizations : []).forEach((organization, index) => {
+    upsert(organization, `existingOrganizations[${index}]`);
+  });
+  (Array.isArray(additionalOrganizations) ? additionalOrganizations : []).forEach((organization, index) => {
+    upsert(organization, `additionalOrganizations[${index}]`);
+  });
+
+  return Array.from(candidateMap.values());
+}
+
 function resolveCachedOrganizationsFromLoginData(loginData) {
   if (!loginData || typeof loginData !== "object") {
     return [];
+  }
+  if (hasCanonicalRestrictedStoredOrganizations(loginData.detectedOrganizations)) {
+    return normalizeStoredRestrictedOrganizationCandidates(loginData.detectedOrganizations);
+  }
+  if (hasCanonicalRestrictedStoredOrganizations(loginData.organizations)) {
+    return normalizeStoredRestrictedOrganizationCandidates(loginData.organizations);
+  }
+  if (Array.isArray(loginData.detectedOrganizations) && loginData.detectedOrganizations.length > 0) {
+    return flattenOrganizations(loginData.detectedOrganizations);
   }
   return flattenOrganizations(loginData.organizations);
 }
@@ -52272,12 +53626,42 @@ function isOrgIdAllowed(orgId) {
   if (!orgId || ADOBEPASS_ORG_ID_ALLOWLIST.length === 0) {
     return false;
   }
-  return ADOBEPASS_ORG_ID_ALLOWLIST.includes(String(orgId));
+  return ADOBEPASS_ORG_ID_ALLOWLIST.map((value) => normalizeOrganizationIdentifier(value)).includes(
+    normalizeOrganizationIdentifier(orgId)
+  );
 }
 
 function matchesAdobePassOrg(org) {
-  const orgId = extractOrgId(org);
-  return isOrgIdAllowed(orgId) || objectContainsAdobePass(org);
+  if (!org || typeof org !== "object") {
+    return false;
+  }
+
+  const candidateValues = collectRestrictedOrganizationIdentifierSet(org);
+  if (candidateValues.size === 0) {
+    return false;
+  }
+
+  const adobePassIdentifiers = new Set(
+    [
+      "adobepass",
+      `org:${ADOBEPASS_ORG_KEYWORD}`,
+      `org:${ADOBEPASS_ORG_HANDLE}`,
+      ADOBEPASS_ORG_HANDLE,
+      ADOBEPASS_ORG_DISPLAY_NAME,
+      ADOBEPASS_IMS_ORG_ID,
+      ...ADOBEPASS_ORG_ID_ALLOWLIST,
+    ]
+      .map((value) => normalizeOrganizationIdentifier(value))
+      .filter(Boolean)
+  );
+
+  for (const candidateValue of candidateValues) {
+    if (adobePassIdentifiers.has(candidateValue) || isOrgIdAllowed(candidateValue)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function findAdobePassOrg(organizations) {
@@ -52388,7 +53772,27 @@ function extractOrganizationId(value) {
 
   return firstNonEmptyString([
     extractStrongOrganizationId(value),
-    looksLikeOrganizationObject(value) ? firstNonEmptyString([value.value, value.id, value.code]) : "",
+    looksLikeOrganizationObject(value) ? firstNonEmptyString([value.id, value.code]) : "",
+  ]);
+}
+
+function extractTenantOrganizationId(value) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  return firstNonEmptyString([value.tenantId, value.tenant_id, value.companyId, value.company_id]);
+}
+
+function extractImsOrganizationId(value) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  return firstNonEmptyString([
+    value.imsOrgId,
+    value.ims_org_id,
+    /@adobeorg$/i.test(String(value.id || "").trim()) ? String(value.id || "").trim() : "",
   ]);
 }
 
@@ -52408,7 +53812,6 @@ function extractOrganizationName(value) {
     value.company_name,
     value.tenantName,
     value.tenant_name,
-    extractOrgName(value),
     looksLikeOrganizationObject(value) ? firstNonEmptyString([value.displayName, value.name, value.title]) : "",
   ]);
 }
@@ -52466,11 +53869,30 @@ function buildRestrictedOrgOptionLabel({ name, orgId, userId }) {
   ) {
     appendSegment(orgId);
   }
-  if (userId) {
-    appendSegment(`user ${userId}`);
-  }
 
   return labelSegments.join(" | ");
+}
+
+function isLikelyRestrictedOrganizationIdentifier(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return false;
+  }
+  if (/^https?:\/\//i.test(normalized)) {
+    return false;
+  }
+  if (/\s/.test(normalized)) {
+    return false;
+  }
+  return /^[a-z0-9@._-]+$/i.test(normalized);
+}
+
+function pickRestrictedOrganizationIdentifier(candidates = []) {
+  return (
+    (Array.isArray(candidates) ? candidates : []).find((candidate) =>
+      isLikelyRestrictedOrganizationIdentifier(candidate)
+    ) || ""
+  );
 }
 
 function choosePreferredOrganizationName(currentName, nextName, organizationId = "") {
@@ -52509,23 +53931,26 @@ function rankRestrictedOrganizationSource(source = "") {
   if (/^organizations\[\d+\]/.test(normalizedSource)) {
     return 0;
   }
-  if (/^runtimeConfig\.organizations\[\d+\]/.test(normalizedSource)) {
+  if (/^unifiedShell\./.test(normalizedSource)) {
     return 1;
   }
-  if (/projectedProductContext/i.test(normalizedSource)) {
+  if (/^runtimeConfig\.organizations\[\d+\]/.test(normalizedSource)) {
     return 2;
   }
-  if (/^profile/.test(normalizedSource)) {
+  if (/projectedProductContext/i.test(normalizedSource)) {
     return 3;
   }
-  if (/^idClaims/.test(normalizedSource)) {
+  if (/^profile/.test(normalizedSource)) {
     return 4;
   }
-  if (/^accessClaims/.test(normalizedSource)) {
+  if (/^idClaims/.test(normalizedSource)) {
     return 5;
   }
+  if (/^accessClaims/.test(normalizedSource)) {
+    return 6;
+  }
 
-  return 6;
+  return 7;
 }
 
 function collectOrganizationObjects(value, path = "payload", results = [], seen = new WeakSet()) {
@@ -52575,6 +54000,8 @@ function collectRestrictedOrganizationCandidates({
     }
 
     const orgId = extractOrganizationId(value);
+    const tenantId = extractTenantOrganizationId(value);
+    const imsOrgId = extractImsOrganizationId(value);
     const name = extractOrganizationName(value);
     const userId = firstNonEmptyString([extractUserId(value)]);
     if (!orgId && !name) {
@@ -52596,11 +54023,18 @@ function collectRestrictedOrganizationCandidates({
 
       candidateMap.set(mergeKey, {
         mergeKey,
+        key: firstNonEmptyString([value.key]),
         orgId,
+        tenantId: firstNonEmptyString([tenantId, orgId && !/@adobeorg$/i.test(orgId) ? orgId : ""]),
+        imsOrgId: firstNonEmptyString([imsOrgId, /@adobeorg$/i.test(orgId) ? orgId : ""]),
         userId,
+        clusterUserId: firstNonEmptyString([value.clusterUserId, value.userId]),
+        clusterUserType: firstNonEmptyString([value.clusterUserType, value.userType]),
         name,
+        label: firstNonEmptyString([value.label]),
         source,
         sources: source ? [source] : [],
+        hinted: value.hinted === true,
         isAdobePass: matchesAdobePassOrg(value),
         raw: value,
       });
@@ -52618,21 +54052,37 @@ function collectRestrictedOrganizationCandidates({
       return;
     }
 
+    const existingSourceRank = rankRestrictedOrganizationSource(existingCandidate.source);
+    const incomingSourceRank = rankRestrictedOrganizationSource(source);
     existingCandidate.orgId = firstNonEmptyString([existingCandidate.orgId, orgId]);
+    existingCandidate.tenantId = firstNonEmptyString([
+      existingCandidate.tenantId,
+      tenantId,
+      existingCandidate.orgId && !/@adobeorg$/i.test(existingCandidate.orgId) ? existingCandidate.orgId : "",
+    ]);
+    existingCandidate.imsOrgId = firstNonEmptyString([
+      existingCandidate.imsOrgId,
+      imsOrgId,
+      /@adobeorg$/i.test(existingCandidate.orgId) ? existingCandidate.orgId : "",
+    ]);
     existingCandidate.userId = firstNonEmptyString([existingCandidate.userId, userId]);
-    existingCandidate.name = choosePreferredOrganizationName(
-      existingCandidate.name,
-      name,
-      existingCandidate.orgId || orgId
-    );
+    existingCandidate.clusterUserId = firstNonEmptyString([existingCandidate.clusterUserId, value.clusterUserId, value.userId]);
+    existingCandidate.clusterUserType = firstNonEmptyString([existingCandidate.clusterUserType, value.clusterUserType, value.userType]);
+    existingCandidate.name =
+      incomingSourceRank < existingSourceRank && firstNonEmptyString([name])
+        ? name
+        : choosePreferredOrganizationName(existingCandidate.name, name, existingCandidate.orgId || orgId);
+    existingCandidate.label = buildRestrictedOrgOptionLabel({
+      name: existingCandidate.name,
+      orgId: existingCandidate.orgId,
+      userId: existingCandidate.userId,
+    });
+    existingCandidate.hinted = existingCandidate.hinted === true || value.hinted === true;
     existingCandidate.isAdobePass = existingCandidate.isAdobePass || matchesAdobePassOrg(value);
     if (source && !existingCandidate.sources.includes(source)) {
       existingCandidate.sources.push(source);
     }
-    if (
-      !existingCandidate.source ||
-      rankRestrictedOrganizationSource(source) < rankRestrictedOrganizationSource(existingCandidate.source)
-    ) {
+    if (!existingCandidate.source || incomingSourceRank < existingSourceRank) {
       existingCandidate.source = source;
       existingCandidate.raw = value;
     }
@@ -52657,10 +54107,24 @@ function collectRestrictedOrganizationCandidates({
     });
   };
 
-  organizations.forEach((organization, index) => upsertCandidate(organization, `organizations[${index}]`));
-  configuredOrganizations.forEach((organization, index) =>
-    upsertCandidate(organization, `runtimeConfig.organizations[${index}]`)
-  );
+  organizations.forEach((organization, index) => {
+    const source = isRestrictedOrganizationPickerRecord(organization)
+      ? firstNonEmptyString([
+          organization?.source,
+          Array.isArray(organization?.sources) ? organization.sources[0] : "",
+          `organizations[${index}]`,
+        ])
+      : `organizations[${index}]`;
+    upsertCandidate(organization, source);
+  });
+  configuredOrganizations.forEach((organization, index) => {
+    const source = firstNonEmptyString([
+      organization?.source,
+      Array.isArray(organization?.sources) ? organization.sources[0] : "",
+      `runtimeConfig.organizations[${index}]`,
+    ]);
+    upsertCandidate(organization, source);
+  });
   collectCandidatesFromValue(profile, "profile");
   collectCandidatesFromValue(profile?.additional_info, "profile.additional_info");
   collectCandidatesFromValue(profile?.projectedProductContext, "profile.projectedProductContext");
@@ -52669,111 +54133,440 @@ function collectRestrictedOrganizationCandidates({
   collectCandidatesFromValue(idClaims, "idClaims");
 
   const hintedOrgIds = new Set(orgIdHints.map(normalizeOrganizationIdentifier).filter(Boolean));
-  const options = Array.from(candidateMap.values()).map((candidate, index) => {
-    const name =
-      firstNonEmptyString([
-        candidate.name,
-        candidate.orgId ? `Adobe IMS Org ${candidate.orgId}` : "",
-        candidate.isAdobePass ? "@AdobePass" : "",
-      ]) || "Adobe organization";
-    const orgId = firstNonEmptyString([candidate.orgId]);
-    const userId = firstNonEmptyString([candidate.userId]);
-    const key =
-      buildRestrictedOrgOptionKey({
-        orgId,
-        userId,
-        name,
-      }) || `org-index-${index}`;
-
-    return {
-      key,
-      label:
-        buildRestrictedOrgOptionLabel({
-          name,
+  return Array.from(candidateMap.values())
+    .map((candidate, index) => {
+      const displayName =
+        firstNonEmptyString([
+          candidate.name,
+          candidate.orgId ? `Adobe IMS Org ${candidate.orgId}` : "",
+          candidate.isAdobePass ? "@AdobePass" : "",
+        ]) || "Adobe organization";
+      const orgId = firstNonEmptyString([candidate.orgId]);
+      const userId = firstNonEmptyString([candidate.userId]);
+      if (!orgId && candidate.isAdobePass !== true) {
+        return null;
+      }
+      if (/^https?:\/\//i.test(orgId) || isLikelyUrlWithoutScheme(orgId)) {
+        return null;
+      }
+      const key =
+        firstNonEmptyString([candidate.key]) ||
+        buildRestrictedOrgOptionKey({
           orgId,
           userId,
-        }) || `Organization ${index + 1}`,
-      orgId,
-      userId,
-      name,
-      hinted: Boolean(orgId && hintedOrgIds.has(normalizeOrganizationIdentifier(orgId))),
-      source: firstNonEmptyString([candidate.source, "returned-payload"]),
-      isAdobePass: candidate.isAdobePass === true,
-      raw: candidate.raw,
+          name: displayName,
+        }) || `org-index-${index}`;
+
+      return {
+        key,
+        orgId,
+        id: orgId,
+        tenantId: firstNonEmptyString([candidate.tenantId, orgId && !/@adobeorg$/i.test(orgId) ? orgId : ""]),
+        imsOrgId: firstNonEmptyString([candidate.imsOrgId, /@adobeorg$/i.test(orgId) ? orgId : ""]),
+        userId,
+        clusterUserId: firstNonEmptyString([candidate.clusterUserId, candidate.userId]),
+        clusterUserType: firstNonEmptyString([candidate.clusterUserType]),
+        name: displayName,
+        hinted: candidate.hinted === true || Boolean(orgId && hintedOrgIds.has(normalizeOrganizationIdentifier(orgId))),
+        source: firstNonEmptyString([candidate.source, "returned-payload"]),
+        sources: Array.isArray(candidate.sources) ? [...candidate.sources] : [],
+        isAdobePass: candidate.isAdobePass === true,
+        raw: candidate.raw,
+        label:
+          firstNonEmptyString([candidate.label]) ||
+          buildRestrictedOrgOptionLabel({
+            name: displayName,
+            orgId,
+            userId,
+          }) || `Organization ${index + 1}`,
+      };
+    })
+    .filter(Boolean);
+}
+
+function collectRestrictedOrganizationIdentifierSet(organization = null) {
+  if (!organization) {
+    return new Set();
+  }
+
+  const values =
+    typeof organization === "string"
+      ? [organization]
+      : [
+          organization.key,
+          organization.id,
+          organization.orgId,
+          organization.organizationId,
+          organization.tenantId,
+          organization.tenant_id,
+          organization.companyId,
+          organization.company_id,
+          organization.imsOrgId,
+          organization.ims_org_id,
+          organization.name,
+          organization.label,
+          organization.orgName,
+          organization.organizationName,
+          extractOrganizationId(organization),
+          extractTenantOrganizationId(organization),
+          extractImsOrganizationId(organization),
+          extractOrganizationName(organization),
+        ];
+
+  return new Set(values.map((value) => normalizeOrganizationIdentifier(value)).filter(Boolean));
+}
+
+function restrictedOrganizationMatchesAnyIdentifier(organization = null, identifiers = []) {
+  const candidateIdentifiers = collectRestrictedOrganizationIdentifierSet(organization);
+  if (candidateIdentifiers.size === 0) {
+    return false;
+  }
+
+  return (Array.isArray(identifiers) ? identifiers : []).some((identifier) =>
+    candidateIdentifiers.has(normalizeOrganizationIdentifier(identifier))
+  );
+}
+
+function hasRestrictedOrganizationIdentifierIntersection(leftIdentifiers = new Set(), rightIdentifiers = new Set()) {
+  for (const identifier of leftIdentifiers) {
+    if (rightIdentifiers.has(identifier)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function compareRestrictedOrganizationCandidatePriority(left, right) {
+  const leftHintScore = left?.hinted === true ? 0 : 1;
+  const rightHintScore = right?.hinted === true ? 0 : 1;
+  if (leftHintScore !== rightHintScore) {
+    return leftHintScore - rightHintScore;
+  }
+
+  const leftSourceRank = rankRestrictedOrganizationSource(left?.source);
+  const rightSourceRank = rankRestrictedOrganizationSource(right?.source);
+  if (leftSourceRank !== rightSourceRank) {
+    return leftSourceRank - rightSourceRank;
+  }
+
+  const leftIdentifierCount = collectRestrictedOrganizationIdentifierSet(left).size;
+  const rightIdentifierCount = collectRestrictedOrganizationIdentifierSet(right).size;
+  if (leftIdentifierCount !== rightIdentifierCount) {
+    return rightIdentifierCount - leftIdentifierCount;
+  }
+
+  return String(left?.label || left?.name || "").localeCompare(String(right?.label || right?.name || ""), undefined, {
+    sensitivity: "base",
+  });
+}
+
+function findMatchingRestrictedOrganizationCandidate(organizationCandidates = [], identifiers = []) {
+  const normalizedIdentifiers = Array.isArray(identifiers)
+    ? identifiers.map((identifier) => normalizeOrganizationIdentifier(identifier)).filter(Boolean)
+    : [];
+  if (normalizedIdentifiers.length === 0) {
+    return null;
+  }
+
+  return [...(Array.isArray(organizationCandidates) ? organizationCandidates : [])]
+    .filter((candidate) => restrictedOrganizationMatchesAnyIdentifier(candidate, normalizedIdentifiers))
+    .sort(compareRestrictedOrganizationCandidatePriority)[0] || null;
+}
+
+function collectSessionActiveRestrictedOrganizationIdentifiers(session = null) {
+  const currentSession = session && typeof session === "object" ? session : {};
+  const profile = resolveLoginProfile(currentSession);
+  const projectedContexts = [];
+  const addProjectedContexts = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach((entry) => {
+        if (entry && typeof entry === "object") {
+          projectedContexts.push(entry);
+          if (entry.prodCtx && typeof entry.prodCtx === "object") {
+            projectedContexts.push(entry.prodCtx);
+          }
+        }
+      });
+      return;
+    }
+    if (value && typeof value === "object") {
+      projectedContexts.push(value);
+      if (value.prodCtx && typeof value.prodCtx === "object") {
+        projectedContexts.push(value.prodCtx);
+      }
+    }
+  };
+
+  addProjectedContexts(profile?.projectedProductContext);
+  addProjectedContexts(profile?.projected_product_context);
+  addProjectedContexts(profile?.additional_info?.projectedProductContext);
+  addProjectedContexts(profile?.additional_info?.projected_product_context);
+
+  const candidates = [
+    currentSession,
+    currentSession?.imsSession && typeof currentSession.imsSession === "object" ? currentSession.imsSession : null,
+    profile,
+    profile?.additional_info && typeof profile.additional_info === "object" ? profile.additional_info : null,
+    ...projectedContexts,
+  ].filter((value) => value && typeof value === "object");
+
+  const identifiers = new Set();
+  const collectFromObject = (value) => {
+    [
+      value?.tenantId,
+      value?.tenant_id,
+      value?.companyId,
+      value?.company_id,
+      value?.orgId,
+      value?.org_id,
+      value?.organizationId,
+      value?.organization_id,
+      value?.imsOrgId,
+      value?.ims_org_id,
+      value?.tenantName,
+      value?.tenant_name,
+      value?.companyName,
+      value?.company_name,
+      value?.orgName,
+      value?.org_name,
+      value?.organizationName,
+      value?.organization_name,
+    ]
+      .map((entry) => normalizeOrganizationIdentifier(entry))
+      .filter(Boolean)
+      .forEach((entry) => identifiers.add(entry));
+  };
+
+  candidates.forEach(collectFromObject);
+  return [...identifiers];
+}
+
+function resolveActiveRestrictedOrganization({ organizationCandidates = [], session = null }) {
+  const verifiedClaim = extractVerifiedCustomerOrganizationClaim(session);
+  const candidates = Array.isArray(organizationCandidates) ? organizationCandidates : [];
+  const verifiedCandidate = findMatchingRestrictedOrganizationCandidate(candidates, [
+    verifiedClaim?.rawId,
+    verifiedClaim?.id,
+  ]);
+  const sessionCandidate = verifiedCandidate
+    ? null
+    : findMatchingRestrictedOrganizationCandidate(candidates, collectSessionActiveRestrictedOrganizationIdentifiers(session));
+  const sortedCandidates = [...candidates].sort(compareRestrictedOrganizationCandidatePriority);
+  const matchedCandidate = verifiedCandidate || sessionCandidate || sortedCandidates[0] || null;
+
+  if (!matchedCandidate) {
+    return {
+      key: "",
+      name: "Adobe organization unavailable",
+      id: "",
+      source: "not-resolved",
+      authoritative: false,
+      resolutionSource: "not-resolved",
     };
-  });
-
-  options.sort((left, right) => {
-    if (left.isAdobePass !== right.isAdobePass) {
-      return left.isAdobePass ? -1 : 1;
-    }
-    if (left.hinted !== right.hinted) {
-      return left.hinted ? -1 : 1;
-    }
-    return left.label.localeCompare(right.label);
-  });
-
-  return options;
-}
-
-function buildOrgSwitchStrategies(orgValue) {
-  if (!orgValue) {
-    return [];
   }
 
-  const source = orgValue.raw && typeof orgValue.raw === "object" ? orgValue.raw : orgValue;
-  const orgId = firstNonEmptyString([toEntryValueString(orgValue.orgId), toEntryValueString(extractOrgId(source))]);
-  const userId = firstNonEmptyString([toEntryValueString(orgValue.userId), toEntryValueString(extractUserId(source))]);
-  const orgName = firstNonEmptyString([toEntryValueString(orgValue.name), toEntryValueString(extractOrgName(source))]);
-  const isAdobePass = orgValue.isAdobePass === true || matchesAdobePassOrg(source);
-  const strategyCandidates = [
-    { organization_id: orgId },
-    { organization: orgId },
-    { organization_id: orgId, user_id: userId },
-    { organization: orgId, user_id: userId },
-    { organization: orgName },
-    isAdobePass ? { organization: ADOBEPASS_ORG_HANDLE } : null,
-    isAdobePass ? { organization_id: orgId, organization: ADOBEPASS_ORG_HANDLE, user_id: userId } : null,
-    { user_id: userId },
-  ];
-
-  const seen = new Set();
-  const strategies = [];
-  for (const candidate of strategyCandidates) {
-    if (!candidate || typeof candidate !== "object") {
-      continue;
-    }
-
-    const cleaned = Object.fromEntries(
-      Object.entries(candidate).filter(([, value]) => value !== undefined && value !== null && value !== "")
-    );
-    const key = JSON.stringify(cleaned);
-    if (key !== "{}" && !seen.has(key)) {
-      seen.add(key);
-      strategies.push(cleaned);
-    }
-  }
-  return strategies;
+  return {
+    ...matchedCandidate,
+    authoritative: Boolean(
+      verifiedCandidate ||
+        sessionCandidate ||
+        sortedCandidates.length === 1
+    ),
+    resolutionSource: verifiedCandidate
+      ? "verified-claim"
+      : sessionCandidate
+        ? "session-payload"
+        : sortedCandidates.length === 1
+          ? "single-candidate"
+          : "fallback-sort",
+  };
 }
 
-function buildRestrictedOrgOptions(organizations, sessionData = null, preferredOrg = null) {
+function sortRestrictedOrganizationOptions(options = [], activeOrganization = null) {
+  const activeKey = String(activeOrganization?.key || "").trim();
+  return [...(Array.isArray(options) ? options : [])].sort((left, right) => {
+    const leftKey = String(left?.key || "").trim();
+    const rightKey = String(right?.key || "").trim();
+    if (leftKey === activeKey && rightKey !== activeKey) {
+      return -1;
+    }
+    if (rightKey === activeKey && leftKey !== activeKey) {
+      return 1;
+    }
+
+    return compareRestrictedOrganizationCandidatePriority(left, right);
+  });
+}
+
+function isRestrictedOrganizationPickerRecord(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const hasKey = Object.prototype.hasOwnProperty.call(value, "key");
+  const hasLabel = Object.prototype.hasOwnProperty.call(value, "label");
+  const hasSource = Object.prototype.hasOwnProperty.call(value, "source");
+  const hasSources = Object.prototype.hasOwnProperty.call(value, "sources");
+  const hasHinted = Object.prototype.hasOwnProperty.call(value, "hinted");
+
+  return (hasKey && hasLabel) || hasSources || hasHinted || (hasSource && (hasKey || hasLabel));
+}
+
+function hasRestrictedOrganizationPickerOnlySource(organization = null) {
+  if (!organization || typeof organization !== "object") {
+    return false;
+  }
+
+  const sources = [
+    organization?.source,
+    ...(Array.isArray(organization?.sources) ? organization.sources : []),
+  ]
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean);
+
+  return sources.some((source) => source === "session-picker" || /^targetOrganization\b/i.test(source));
+}
+
+function isRestrictedOrganizationAuthoritativeCandidate(organization = null) {
+  if (!organization || typeof organization !== "object") {
+    return false;
+  }
+  if (isRestrictedOrganizationPickerRecord(organization)) {
+    return false;
+  }
+
+  return hasRestrictedOrganizationPickerOnlySource(organization) !== true;
+}
+
+function collectAuthoritativeRestrictedOrganizations(value = null) {
+  return flattenOrganizations(value).filter((organization) => isRestrictedOrganizationAuthoritativeCandidate(organization));
+}
+
+function buildRestrictedOrganizationContext(organizations, sessionData = null, preferredOrg = null) {
   const currentSession = sessionData && typeof sessionData === "object" ? sessionData : {};
+  const profile = resolveLoginProfile(currentSession);
+  const accessClaims = parseJwtPayload(currentSession?.accessToken);
+  const idClaims = parseJwtPayload(currentSession?.idToken);
   const runtimeConfig = getActiveUnderparImsRuntimeConfig();
   const configuredOrganizations = Array.isArray(runtimeConfig?.organizations) ? runtimeConfig.organizations : [];
-  const normalizedOrganizations = flattenOrganizations([
-    ...(Array.isArray(organizations) ? organizations : []),
+  const providedOrganizations = Array.isArray(organizations) ? organizations : flattenOrganizations(organizations);
+  const storedOrganizations = hasCanonicalRestrictedStoredOrganizations(currentSession?.detectedOrganizations)
+    ? normalizeStoredRestrictedOrganizationCandidates(currentSession.detectedOrganizations).filter(
+        (organization) => hasRestrictedOrganizationPickerOnlySource(organization) !== true
+      )
+    : hasCanonicalRestrictedStoredOrganizations(currentSession?.organizations)
+      ? normalizeStoredRestrictedOrganizationCandidates(currentSession.organizations).filter(
+          (organization) => hasRestrictedOrganizationPickerOnlySource(organization) !== true
+        )
+      : [];
+  const providedCanonicalOrganizations = hasCanonicalRestrictedStoredOrganizations(providedOrganizations)
+    ? normalizeStoredRestrictedOrganizationCandidates(providedOrganizations).filter(
+        (organization) => hasRestrictedOrganizationPickerOnlySource(organization) !== true
+      )
+    : [];
+  const authoritativeProvidedOrganizations =
+    providedCanonicalOrganizations.length > 0
+      ? providedCanonicalOrganizations
+      : collectAuthoritativeRestrictedOrganizations(providedOrganizations);
+  const returnedOrganizations = [
+    ...storedOrganizations,
+    ...authoritativeProvidedOrganizations,
+  ];
+  const optionOrganizations = [
+    ...returnedOrganizations,
     ...(preferredOrg && typeof preferredOrg === "object"
       ? [preferredOrg.raw && typeof preferredOrg.raw === "object" ? preferredOrg.raw : preferredOrg]
       : []),
-  ]);
+  ];
 
-  return collectRestrictedOrganizationCandidates({
-    profile: resolveLoginProfile(currentSession),
-    accessClaims: parseJwtPayload(currentSession?.accessToken),
-    idClaims: parseJwtPayload(currentSession?.idToken),
-    organizations: normalizedOrganizations,
+  const options = collectRestrictedOrganizationCandidates({
+    profile,
+    accessClaims,
+    idClaims,
+    organizations: optionOrganizations,
     configuredOrganizations,
   });
+  const activeOrganizationCandidates = collectRestrictedOrganizationCandidates({
+    profile,
+    accessClaims,
+    idClaims,
+    organizations: returnedOrganizations,
+    configuredOrganizations: [],
+  });
+  const activeOrganization = resolveActiveRestrictedOrganization({
+    organizationCandidates: activeOrganizationCandidates,
+    session: currentSession,
+  });
+
+  return {
+    options: sortRestrictedOrganizationOptions(options, activeOrganization),
+    detectedOrganizations: sortRestrictedOrganizationOptions(activeOrganizationCandidates, activeOrganization),
+    activeOrganization,
+  };
+}
+
+function resolveAdobePassAccessContext(sessionData = null, preferredOrg = null) {
+  const currentSession = sessionData && typeof sessionData === "object" ? sessionData : {};
+  const cachedOrganizations = resolveCachedOrganizationsFromLoginData(currentSession);
+  const organizationContext = buildRestrictedOrganizationContext(cachedOrganizations, currentSession, preferredOrg);
+  const activeOrganization = organizationContext?.activeOrganization || null;
+  const detectedOrganizations = Array.isArray(organizationContext?.detectedOrganizations)
+    ? organizationContext.detectedOrganizations
+    : [];
+  const activeOrganizationTrusted = activeOrganization?.authoritative === true || detectedOrganizations.length === 1;
+  const requiredOrganization =
+    findAdobePassOrg([
+      activeOrganization,
+      ...(Array.isArray(organizationContext?.options) ? organizationContext.options : []),
+      ...(Array.isArray(state.restrictedOrgOptions) ? state.restrictedOrgOptions : []),
+    ].filter((entry) => entry && typeof entry === "object")) || null;
+  const activeIsAdobePass = activeOrganizationTrusted && matchesAdobePassOrg(activeOrganization);
+  const requiredLabel = firstNonEmptyString([
+    requiredOrganization?.label,
+    requiredOrganization?.name,
+    "@AdobePass",
+  ]);
+
+  if (activeIsAdobePass) {
+    return {
+      eligible: true,
+      activeIsAdobePass: true,
+      activeOrganization,
+      requiredOrganization,
+      requiredOrgKey: firstNonEmptyString([requiredOrganization?.key, "org:@adobepass"]),
+      requiredOrgId: firstNonEmptyString([requiredOrganization?.orgId, requiredOrganization?.id, "@adobepass"]),
+      requiredLabel,
+      reason: "",
+    };
+  }
+
+  if (requiredOrganization) {
+    return {
+      eligible: false,
+      activeIsAdobePass: false,
+      activeOrganization,
+      requiredOrganization,
+      requiredOrgKey: firstNonEmptyString([requiredOrganization?.key, "org:@adobepass"]),
+      requiredOrgId: firstNonEmptyString([requiredOrganization?.orgId, requiredOrganization?.id, "@adobepass"]),
+      requiredLabel,
+      reason: `Switch Adobe Org to ${requiredLabel} to load Adobe Pass media companies.`,
+    };
+  }
+
+  return {
+    eligible: false,
+    activeIsAdobePass: false,
+    activeOrganization,
+    requiredOrganization: null,
+    requiredOrgKey: "org:@adobepass",
+    requiredOrgId: "@adobepass",
+    requiredLabel: "@AdobePass",
+    reason: "Adobe Pass org was not detected in the current Adobe session, so UnderPAR stays on the org picker.",
+  };
+}
+
+function buildRestrictedOrgOptions(organizations, sessionData = null, preferredOrg = null) {
+  return buildRestrictedOrganizationContext(organizations, sessionData, preferredOrg).options;
 }
 
 function getConfiguredTargetOrganizations(runtimeConfig = getActiveUnderparImsRuntimeConfig()) {
@@ -52916,33 +54709,86 @@ function resolveTargetOrganizationForLogin(
   return buildTargetOrganizationContext(runtimeConfig, selectedKey).selectedOrganization;
 }
 
+function normalizeRequestedTargetOrganization(targetOrganization = null) {
+  if (!targetOrganization || typeof targetOrganization !== "object") {
+    return null;
+  }
+
+  const tenantId = firstNonEmptyString([
+    targetOrganization.tenantId,
+    targetOrganization.tenant_id,
+    extractTenantOrganizationId(targetOrganization),
+  ]);
+  const imsOrgId = firstNonEmptyString([
+    targetOrganization.imsOrgId,
+    targetOrganization.ims_org_id,
+    extractImsOrganizationId(targetOrganization),
+  ]);
+  const id = firstNonEmptyString([
+    targetOrganization.id,
+    targetOrganization.orgId,
+    targetOrganization.organizationId,
+    tenantId,
+    imsOrgId,
+    extractOrganizationId(targetOrganization),
+  ]);
+  const userId = firstNonEmptyString([
+    targetOrganization.userId,
+    targetOrganization.clusterUserId,
+    extractUserId(targetOrganization),
+  ]);
+  const name =
+    firstNonEmptyString([
+      targetOrganization.name,
+      targetOrganization.orgName,
+      targetOrganization.organizationName,
+      targetOrganization.label,
+      extractOrganizationName(targetOrganization),
+      id ? `Adobe IMS Org ${id}` : "",
+    ]) || "Adobe organization";
+  const label = firstNonEmptyString([
+    targetOrganization.label,
+    buildRestrictedOrgOptionLabel({
+      name,
+      orgId: id,
+      userId,
+    }),
+    name,
+  ]);
+  const key = firstNonEmptyString([
+    targetOrganization.key,
+    buildRestrictedOrgOptionKey({
+      orgId: id,
+      userId,
+      name: label,
+    }),
+  ]);
+  if (!key) {
+    return null;
+  }
+
+  return {
+    key,
+    id,
+    orgId: id,
+    tenantId: firstNonEmptyString([tenantId, id && !/@adobeorg$/i.test(id) ? id : ""]),
+    imsOrgId: firstNonEmptyString([imsOrgId, /@adobeorg$/i.test(id) ? id : ""]),
+    userId,
+    clusterUserId: firstNonEmptyString([targetOrganization.clusterUserId, targetOrganization.userId]),
+    clusterUserType: firstNonEmptyString([targetOrganization.clusterUserType, targetOrganization.userType]),
+    name,
+    label,
+    hinted: targetOrganization.hinted === true,
+    isAdobePass: matchesAdobePassOrg(targetOrganization),
+    source: firstNonEmptyString([targetOrganization.source, "session-picker"]),
+  };
+}
+
 function attachTargetOrganizationToLoginData(loginData = {}, targetOrganization = null) {
   const nextLoginData = loginData && typeof loginData === "object" ? { ...loginData } : {};
-  if (targetOrganization && typeof targetOrganization === "object") {
-    const targetId = firstNonEmptyString([
-      targetOrganization.id,
-      targetOrganization.orgId,
-      targetOrganization.organizationId,
-      extractOrganizationId(targetOrganization),
-    ]);
-    const targetLabel =
-      firstNonEmptyString([
-        targetOrganization.label,
-        targetOrganization.name,
-        targetOrganization.orgName,
-        extractOrganizationName(targetOrganization),
-        targetId,
-      ]) || "Adobe organization";
-    nextLoginData.targetOrganization = {
-      key: String(targetOrganization.key || "").trim(),
-      id: targetId,
-      orgId: targetId,
-      userId: firstNonEmptyString([targetOrganization.userId, extractUserId(targetOrganization)]),
-      label: targetLabel,
-      name: targetLabel,
-      isAdobePass: targetOrganization.isAdobePass === true,
-      source: String(targetOrganization.source || "zip-key").trim() || "zip-key",
-    };
+  const normalizedTargetOrganization = normalizeRequestedTargetOrganization(targetOrganization);
+  if (normalizedTargetOrganization) {
+    nextLoginData.targetOrganization = normalizedTargetOrganization;
   } else {
     delete nextLoginData.targetOrganization;
   }
@@ -52977,58 +54823,89 @@ function extractVerifiedCustomerOrganizationClaim(sessionData = null) {
 }
 
 function verifyTargetOrganizationSelection(sessionData = null, targetOrganization = null) {
-  const expectedOrgId = normalizeOrganizationIdentifier(
-    firstNonEmptyString([targetOrganization?.id, targetOrganization?.orgId])
-  );
-  const targetLabel = firstNonEmptyString([targetOrganization?.label, targetOrganization?.name, targetOrganization?.orgId]);
-  if (!expectedOrgId) {
+  const normalizedTargetOrganization = normalizeRequestedTargetOrganization(targetOrganization);
+  if (!normalizedTargetOrganization?.key) {
     return {
       status: "not-applicable",
       source: "n/a",
       expectedOrgId: "",
+      expectedOrgKey: "",
       verifiedOrgId: "",
       resolvedOrgId: "",
+      resolvedOrgKey: "",
       message: "No target org was selected before Adobe sign-in.",
     };
   }
 
-  const verifiedClaim = extractVerifiedCustomerOrganizationClaim(sessionData);
-  const profile = resolveLoginProfile(sessionData) || {};
-  const resolvedOrgId = normalizeOrganizationIdentifier(
+  const requestedLabel = firstNonEmptyString([
+    normalizedTargetOrganization.label,
+    normalizedTargetOrganization.name,
+    normalizedTargetOrganization.id,
+    "selected Adobe IMS org",
+  ]);
+  const expectedOrgId = normalizeOrganizationIdentifier(
     firstNonEmptyString([
-      extractOrganizationId(profile),
-      extractOrganizationId(profile?.projectedProductContext),
-      extractOrganizationId(profile?.additional_info?.projectedProductContext),
-      extractOrganizationId(parseJwtPayload(sessionData?.accessToken) || {}),
-      extractOrganizationId(parseJwtPayload(sessionData?.idToken) || {}),
+      normalizedTargetOrganization.imsOrgId,
+      normalizedTargetOrganization.tenantId,
+      normalizedTargetOrganization.id,
     ])
   );
+  const expectedOrgKey = String(normalizedTargetOrganization.key || "").trim();
+  const expectedOrgIdentifiers = collectRestrictedOrganizationIdentifierSet(normalizedTargetOrganization);
+  const verifiedClaim = extractVerifiedCustomerOrganizationClaim(sessionData);
+  const resolvedActiveOrganization = buildRestrictedOrganizationContext(
+    resolveCachedOrganizationsFromLoginData(sessionData),
+    sessionData,
+    null
+  ).activeOrganization;
+  const resolvedOrgIdentifiers = collectRestrictedOrganizationIdentifierSet(resolvedActiveOrganization);
+  const resolvedOrgId = normalizeOrganizationIdentifier(
+    firstNonEmptyString([
+      resolvedActiveOrganization?.imsOrgId,
+      resolvedActiveOrganization?.tenantId,
+      resolvedActiveOrganization?.id,
+    ])
+  );
+  const resolvedOrgKey = String(resolvedActiveOrganization?.key || "").trim();
 
   if (verifiedClaim.id) {
+    const verifiedMatch = expectedOrgIdentifiers.has(verifiedClaim.id);
     return {
-      status: verifiedClaim.id === expectedOrgId ? "verified-match" : "verified-mismatch",
+      status: verifiedMatch ? "verified-match" : "verified-mismatch",
       source: verifiedClaim.source,
       expectedOrgId,
+      expectedOrgKey,
       verifiedOrgId: verifiedClaim.id,
       resolvedOrgId,
+      resolvedOrgKey,
       message:
-        verifiedClaim.id === expectedOrgId
-          ? `Verified Adobe org ${targetLabel || targetOrganization?.id} via ${verifiedClaim.source}.`
-          : `Adobe returned verified org ${verifiedClaim.rawId || verifiedClaim.id} via ${verifiedClaim.source}, but UnderPAR targeted ${targetLabel || targetOrganization?.id}.`,
+        verifiedMatch
+          ? `Adobe returned the requested Adobe IMS org ${requestedLabel} via ${verifiedClaim.source}.`
+          : `Adobe returned verified org ${verifiedClaim.rawId || verifiedClaim.id} via ${verifiedClaim.source} instead of ${requestedLabel}.`,
     };
   }
 
-  if (resolvedOrgId) {
+  if (resolvedOrgKey) {
+    const resolvedMatch =
+      resolvedOrgIdentifiers.size > 0 &&
+      hasRestrictedOrganizationIdentifierIntersection(expectedOrgIdentifiers, resolvedOrgIdentifiers);
     return {
-      status: resolvedOrgId === expectedOrgId ? "derived-match" : "derived-mismatch",
+      status: resolvedMatch ? "derived-match" : "derived-mismatch",
       source: "resolved-payload",
       expectedOrgId,
+      expectedOrgKey,
       verifiedOrgId: "",
       resolvedOrgId,
+      resolvedOrgKey,
       message:
-        resolvedOrgId === expectedOrgId
-          ? `Resolved Adobe org ${targetLabel || targetOrganization?.id} from returned Adobe payloads.`
-          : `Resolved Adobe org ${resolvedOrgId} from returned Adobe payloads while UnderPAR targeted ${targetLabel || targetOrganization?.id}.`,
+        resolvedMatch
+          ? `Resolved the requested Adobe IMS org ${requestedLabel} from the returned payloads.`
+          : `Adobe returned ${firstNonEmptyString([
+              resolvedActiveOrganization?.label,
+              resolvedActiveOrganization?.name,
+              resolvedActiveOrganization?.id,
+              "another Adobe IMS org",
+            ])} instead of ${requestedLabel}.`,
     };
   }
 
@@ -53036,22 +54913,90 @@ function verifyTargetOrganizationSelection(sessionData = null, targetOrganizatio
     status: "no-org-claim",
     source: "unavailable",
     expectedOrgId,
+    expectedOrgKey,
     verifiedOrgId: "",
     resolvedOrgId: "",
-    message: `Adobe did not return a verifiable org claim for target org ${targetLabel || targetOrganization?.id}.`,
+    resolvedOrgKey: "",
+    message: `Adobe did not return a verifiable org claim for target org ${requestedLabel}.`,
   };
 }
 
-function buildPreferredOrgSwitchStrategy(orgValue = null) {
-  return buildOrgSwitchStrategies(orgValue)[0] || null;
+function isSuccessfulTargetOrganizationVerification(verification = null) {
+  const status = String(verification?.status || "").trim();
+  return status === "verified-match" || status === "derived-match";
+}
+
+function finalizeRequestedTargetLoginData(loginData = {}, targetOrganization = null, options = {}) {
+  const normalizedTargetOrganization = normalizeRequestedTargetOrganization(targetOrganization);
+  let finalizedLoginData = attachTargetOrganizationToLoginData(loginData, normalizedTargetOrganization);
+  const orgVerification = verifyTargetOrganizationSelection(finalizedLoginData, normalizedTargetOrganization);
+  finalizedLoginData.orgVerification = orgVerification;
+
+  if (!normalizedTargetOrganization) {
+    return {
+      ok: true,
+      acceptedReturnedOrganization: false,
+      loginData: finalizedLoginData,
+      verification: orgVerification,
+      message: String(orgVerification?.message || "").trim(),
+    };
+  }
+
+  log(String(orgVerification?.message || "").trim());
+  if (isSuccessfulTargetOrganizationVerification(orgVerification)) {
+    return {
+      ok: true,
+      acceptedReturnedOrganization: false,
+      loginData: finalizedLoginData,
+      verification: orgVerification,
+      message: String(orgVerification?.message || "").trim(),
+    };
+  }
+
+  if (options?.acceptReturnedOrganization === true) {
+    finalizedLoginData = attachTargetOrganizationToLoginData(finalizedLoginData, null);
+    finalizedLoginData.orgVerification = {
+      ...orgVerification,
+      status: "accepted-returned-org",
+      expectedOrgKey: "",
+      message: `${String(orgVerification?.message || "").trim()} UnderPAR switched to the active returned Adobe org.`,
+    };
+    return {
+      ok: true,
+      acceptedReturnedOrganization: true,
+      loginData: finalizedLoginData,
+      verification: finalizedLoginData.orgVerification,
+      message: String(finalizedLoginData?.orgVerification?.message || "").trim(),
+    };
+  }
+
+  return {
+    ok: false,
+    acceptedReturnedOrganization: false,
+    loginData: null,
+    verification: orgVerification,
+    message: `${String(orgVerification?.message || "").trim()} UnderPAR kept the prior session so it does not misrepresent the selected Adobe profile. Use Sign In Again if Adobe needs to reopen the chooser.`,
+  };
 }
 
 function updateRestrictedOrgOptions(organizations, preferredOrg = null, sessionData = null) {
-  const options = buildRestrictedOrgOptions(organizations, sessionData, preferredOrg);
+  const organizationContext = buildRestrictedOrganizationContext(organizations, sessionData, preferredOrg);
+  const options = Array.isArray(organizationContext?.options) ? organizationContext.options : [];
+  const activeOrganization = organizationContext?.activeOrganization || null;
   state.restrictedOrgOptions = options;
 
   if (options.length === 0) {
     state.selectedRestrictedOrgKey = "";
+    return;
+  }
+
+  const activeKey = String(activeOrganization?.key || "").trim();
+  if (activeKey && options.some((option) => option.key === activeKey)) {
+    state.selectedRestrictedOrgKey = activeKey;
+    return;
+  }
+
+  if (state.selectedRestrictedOrgKey && options.some((option) => option.key === state.selectedRestrictedOrgKey)) {
     return;
   }
 
@@ -53064,21 +55009,6 @@ function updateRestrictedOrgOptions(organizations, preferredOrg = null, sessionD
   const preferredMatch = findMatchingRestrictedOrganizationOption(options, preferredOrg);
   if (preferredMatch?.key) {
     state.selectedRestrictedOrgKey = preferredMatch.key;
-    return;
-  }
-
-  const preferredDescriptor = preferredOrg ? toAdobePassOrgDescriptor(preferredOrg) : null;
-  const preferredKey =
-    preferredDescriptor && typeof preferredDescriptor === "object"
-      ? [toEntryValueString(preferredDescriptor.orgId), toEntryValueString(preferredDescriptor.userId), toEntryValueString(preferredDescriptor.name).toLowerCase()].join("::")
-      : "";
-
-  if (preferredKey && options.some((option) => option.key === preferredKey)) {
-    state.selectedRestrictedOrgKey = preferredKey;
-    return;
-  }
-
-  if (state.selectedRestrictedOrgKey && options.some((option) => option.key === state.selectedRestrictedOrgKey)) {
     return;
   }
 
@@ -53096,6 +55026,62 @@ function clearRestrictedOrgOptions() {
 
 function getSelectedRestrictedOrgOption() {
   return state.restrictedOrgOptions.find((option) => option.key === state.selectedRestrictedOrgKey) || null;
+}
+
+function isAuthenticatedOrgSwitchOnlySession(sessionData = state.loginData) {
+  const currentSession = sessionData && typeof sessionData === "object" ? sessionData : null;
+  return Boolean(
+    currentSession &&
+    state.sessionReady === true &&
+    state.restricted !== true &&
+    resolveProgrammerAccessContext(currentSession).eligible !== true
+  );
+}
+
+function syncAuthenticatedOrgSwitchOnlyContext(sessionData = null) {
+  const currentSession = sessionData && typeof sessionData === "object" ? sessionData : null;
+  if (!currentSession) {
+    clearRestrictedOrgOptions();
+    return;
+  }
+
+  const configuredTargetOrganization =
+    findConfiguredTargetOrganization(
+      getConfiguredTargetOrganizations(),
+      currentSession?.targetOrganization && typeof currentSession.targetOrganization === "object"
+        ? currentSession.targetOrganization
+        : null
+    ) ||
+    (currentSession?.targetOrganization && typeof currentSession.targetOrganization === "object"
+      ? currentSession.targetOrganization
+      : null) ||
+    null;
+  const organizations = resolveCachedOrganizationsFromLoginData(currentSession);
+  const detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations(
+    {
+      ...currentSession,
+      organizations,
+    },
+    organizations
+  );
+  updateRestrictedOrgOptions(organizations, configuredTargetOrganization, {
+    ...currentSession,
+    organizations,
+    detectedOrganizations,
+  });
+  updateRestrictedContext(
+    {
+      ...currentSession,
+      organizations,
+      detectedOrganizations,
+    },
+    {
+      recoveryLabel: firstNonEmptyString([
+        resolveProgrammerAccessContext(currentSession).reason,
+        state.restrictedRecoveryLabel,
+      ]),
+    }
+  );
 }
 
 function getProfileDisplayNameRaw(profile) {
@@ -53919,15 +55905,6 @@ function getAvatarCandidates(loginData) {
   candidates.push(...profileCandidates);
   candidates.push(...discoveredProfileCandidates);
 
-  const orgAvatar = normalizeAvatarCandidate(loginData?.adobePassOrg?.avatarUrl || "");
-  if (orgAvatar) {
-    candidates.push(orgAvatar);
-  }
-
-  if (loginData?.adobePassOrg) {
-    candidates.push(FALLBACK_AVATAR);
-  }
-
   candidates.push(DEFAULT_AVATAR);
   return [...new Set(candidates.filter(Boolean))];
 }
@@ -54059,7 +56036,6 @@ function resolveLoginUserIdValue(loginData, profile = null) {
     loginData?.sessionKeys?.userId,
     loginData?.cmConsoleImsSession?.userId,
     loginData?.experienceCloudImsSession?.userId,
-    loginData?.adobePassOrg?.userId,
     getProfileIdentity(resolvedProfile),
   ]);
 }
@@ -54081,15 +56057,46 @@ function resolveLoginDisplayNameValue(loginData, profile = null) {
 function buildLoginAuthContext(loginData = {}) {
   const profile = resolveLoginProfile(loginData) || {};
   const primaryImsSession = loginData?.imsSession && typeof loginData.imsSession === "object" ? loginData.imsSession : {};
+  const restrictedOrganizationContext = buildRestrictedOrganizationContext(
+    resolveCachedOrganizationsFromLoginData(loginData),
+    loginData,
+    null
+  );
+  const activeOrganization = restrictedOrganizationContext?.activeOrganization || null;
+  const detectedOrganizations = Array.isArray(restrictedOrganizationContext?.detectedOrganizations)
+    ? restrictedOrganizationContext.detectedOrganizations
+    : [];
+  const activeOrganizationTrusted = activeOrganization?.authoritative === true || detectedOrganizations.length === 1;
   const principalId = firstNonEmptyString([
     resolveLoginAuthIdValue(loginData, profile),
     resolveLoginUserIdValue(loginData, profile),
   ]);
   const authId = resolveLoginAuthIdValue(loginData, profile);
   const userId = resolveLoginUserIdValue(loginData, profile);
-  const orgId = firstNonEmptyString([loginData?.adobePassOrg?.orgId, loginData?.adobePassOrg?.id]);
+  const verifiedClaim = extractVerifiedCustomerOrganizationClaim(loginData);
+  const orgId = firstNonEmptyString([
+    activeOrganizationTrusted ? activeOrganization?.orgId : "",
+    activeOrganizationTrusted ? activeOrganization?.id : "",
+    verifiedClaim?.rawId,
+    verifiedClaim?.id,
+    primaryImsSession?.orgId,
+    profile?.tenantId,
+    profile?.tenant_id,
+    profile?.companyId,
+    profile?.company_id,
+    profile?.organizationId,
+    profile?.organization_id,
+    profile?.additional_info?.tenantId,
+    profile?.additional_info?.tenant_id,
+    profile?.additional_info?.companyId,
+    profile?.additional_info?.company_id,
+    profile?.additional_info?.organizationId,
+    profile?.additional_info?.organization_id,
+  ]);
   const orgName = firstNonEmptyString([
-    loginData?.adobePassOrg?.name,
+    activeOrganizationTrusted ? activeOrganization?.name : "",
+    activeOrganizationTrusted ? activeOrganization?.label : "",
+    primaryImsSession?.orgName,
     profile?.organizationName,
     profile?.organization_name,
     profile?.orgName,
@@ -54217,16 +56224,16 @@ function isProfilePayloadComplete(profilePayload) {
   }
   const pseudoSession = {
     profile: profilePayload,
-    adobePassOrg: {
-      orgId: ADOBEPASS_ORG_HANDLE,
-      name: ADOBEPASS_ORG_HANDLE,
-    },
   };
   return getSessionProfileCompleteness(pseudoSession).complete;
 }
 
 function getOrgDisplayName(loginData) {
-  return firstNonEmptyString([loginData?.adobePassOrg?.name, ADOBEPASS_ORG_HANDLE]) || ADOBEPASS_ORG_HANDLE;
+  return firstNonEmptyString([
+    loginData?.authContext?.orgName,
+    buildLoginAuthContext(loginData).orgName,
+    "Adobe organization unavailable",
+  ]);
 }
 
 function toEntryValueString(value) {
@@ -54389,6 +56396,10 @@ function collectProfileImageCandidatesForMenu(profile) {
 
 function buildAvatarMenuEntries(loginData) {
   const profile = resolveLoginProfile(loginData) || {};
+  const authContext =
+    loginData?.authContext && typeof loginData.authContext === "object"
+      ? loginData.authContext
+      : buildLoginAuthContext(loginData);
   const resolvedProfileImage = resolveLoginImageUrl(loginData);
   const profileImageLabel = resolvedProfileImage.startsWith("data:image/")
     ? "[inline image payload]"
@@ -54414,7 +56425,7 @@ function buildAvatarMenuEntries(loginData) {
   pushEntry("Adobe Principal", getLoginPrincipalId(loginData));
   pushEntry("Adobe Auth ID", getLoginAuthId(loginData));
   pushEntry("Organization", getOrgDisplayName(loginData));
-  pushEntry("Organization ID", loginData?.adobePassOrg?.orgId);
+  pushEntry("Organization ID", authContext?.orgId);
   const cmConsoleAccessToken = getPreferredCmAccessTokenCandidate();
   const cmConsoleClaims = parseJwtPayload(cmConsoleAccessToken) || {};
   const cmConsoleClientId = String(firstNonEmptyString([cmConsoleClaims.client_id, cmConsoleClaims.clientId]) || "")
@@ -54468,7 +56479,6 @@ function getAvatarCacheIdentity(loginData) {
     getLoginPrincipalId(loginData),
     getLoginAuthId(loginData),
     getLoginIdentity(loginData),
-    loginData?.adobePassOrg?.userId,
     "anonymous",
   ]);
 }
@@ -54480,7 +56490,6 @@ function getAvatarPersistIdentityCandidates(loginData, options = {}) {
     getLoginPrincipalId(loginData),
     getLoginAuthId(loginData),
     getLoginIdentity(loginData),
-    loginData?.adobePassOrg?.userId,
   ];
   if (includeTokenFingerprint && tokenFingerprint) {
     candidates.push(`token:${tokenFingerprint}`);
@@ -54494,7 +56503,6 @@ function hasAvatarPersistProfileIdentity(loginData) {
     getLoginPrincipalId(loginData),
     getLoginAuthId(loginData),
     getLoginIdentity(loginData),
-    loginData?.adobePassOrg?.userId,
   ]);
   return Boolean(identity);
 }
@@ -54718,10 +56726,22 @@ function buildSessionKeySnapshot(loginData = {}) {
 
 function buildLoginSessionPayloadFromAuth(authData, profile = null, imageUrl = "") {
   const normalizedProfile = profile && typeof profile === "object" ? profile : null;
+  const rawOrganizations =
+    authData?.organizations && typeof authData.organizations === "object" ? authData.organizations : null;
+  const flattenedOrganizations = flattenOrganizations(rawOrganizations);
   const resolvedImageUrl =
     normalizeAvatarCandidate(
       firstNonEmptyString([imageUrl, resolveAuthAvatarSeed(authData, normalizedProfile || undefined)])
     ) || "";
+  const detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations(
+    {
+      accessToken: firstNonEmptyString([authData?.accessToken]),
+      idToken: compactStorageString(firstNonEmptyString([authData?.idToken]), 4096),
+      organizations: rawOrganizations,
+      profile: normalizedProfile,
+    },
+    flattenedOrganizations
+  );
   return buildNormalizedLoginData(
     {
       accessToken: firstNonEmptyString([authData?.accessToken]),
@@ -54742,8 +56762,8 @@ function buildLoginSessionPayloadFromAuth(authData, profile = null, imageUrl = "
       cmConsoleExpiresAt: 0,
       cmConsoleScope: "",
       cmConsoleImsSession: null,
-      organizations:
-        authData?.organizations && typeof authData.organizations === "object" ? authData.organizations : null,
+      organizations: rawOrganizations,
+      detectedOrganizations,
       profile: normalizedProfile,
       imageUrl: resolvedImageUrl,
     },
@@ -54762,9 +56782,85 @@ function getDefaultAdobePassOrgDescriptor() {
   };
 }
 
+function resolveAuthoritativeAdobePassOrgDescriptor(loginData = {}) {
+  const currentSession = loginData && typeof loginData === "object" ? loginData : {};
+  const cachedOrganizations = resolveCachedOrganizationsFromLoginData(currentSession);
+  const organizationContext = buildRestrictedOrganizationContext(cachedOrganizations, currentSession, null);
+  const activeOrganization = organizationContext?.activeOrganization || null;
+  const detectedOrganizations = Array.isArray(organizationContext?.detectedOrganizations)
+    ? organizationContext.detectedOrganizations
+    : [];
+  const activeOrganizationTrusted = activeOrganization?.authoritative === true || detectedOrganizations.length === 1;
+  const verifiedClaim = extractVerifiedCustomerOrganizationClaim(currentSession);
+  const provenAdobePass =
+    (activeOrganizationTrusted && matchesAdobePassOrg(activeOrganization)) ||
+    matchesAdobePassOrg({
+      orgId: firstNonEmptyString([verifiedClaim?.rawId, verifiedClaim?.id]),
+    }) ||
+    matchesAdobePassOrg(currentSession?.imsSession);
+
+  if (!provenAdobePass) {
+    return null;
+  }
+
+  const profile = resolveLoginProfile(currentSession);
+  const descriptorSource =
+    findAdobePassOrg([
+      activeOrganizationTrusted ? activeOrganization : null,
+      ...detectedOrganizations,
+      ...cachedOrganizations,
+    ].filter((entry) => entry && typeof entry === "object")) || null;
+  if (descriptorSource) {
+    const normalizedDescriptor = toAdobePassOrgDescriptor(
+      descriptorSource?.raw && typeof descriptorSource.raw === "object" ? descriptorSource.raw : descriptorSource,
+      profile
+    );
+    if (
+      normalizedDescriptor &&
+      firstNonEmptyString([
+        normalizedDescriptor?.orgId,
+        normalizedDescriptor?.userId,
+        normalizedDescriptor?.name,
+        normalizedDescriptor?.avatarUrl,
+      ])
+    ) {
+      return normalizedDescriptor;
+    }
+  }
+
+  const derivedDescriptor = {
+    orgId: firstNonEmptyString([
+      activeOrganizationTrusted ? activeOrganization?.orgId : "",
+      activeOrganizationTrusted ? activeOrganization?.id : "",
+      currentSession?.imsSession?.orgId,
+      verifiedClaim?.rawId,
+      verifiedClaim?.id,
+      ADOBEPASS_ORG_HANDLE,
+    ]),
+    userId: firstNonEmptyString([
+      currentSession?.imsSession?.userId,
+    ]),
+    name: firstNonEmptyString([
+      activeOrganizationTrusted ? activeOrganization?.name : "",
+      activeOrganizationTrusted ? activeOrganization?.label : "",
+      currentSession?.imsSession?.orgName,
+      ADOBEPASS_ORG_DISPLAY_NAME,
+    ]),
+    avatarUrl: "",
+  };
+
+  return firstNonEmptyString([
+    derivedDescriptor.orgId,
+    derivedDescriptor.userId,
+    derivedDescriptor.name,
+    derivedDescriptor.avatarUrl,
+  ])
+    ? derivedDescriptor
+    : null;
+}
+
 function buildNormalizedLoginData(loginData = {}, options = {}) {
   const resetBootstrapTokens = options.resetBootstrapTokens === true;
-  const fallbackAdobePassOrg = options.fallbackAdobePassOrg || null;
   const profile = resolveLoginProfile(loginData);
   const normalizedProfile = profile && typeof profile === "object" ? profile : null;
   const accessToken = firstNonEmptyString([loginData?.accessToken]);
@@ -54810,10 +56906,12 @@ function buildNormalizedLoginData(loginData = {}, options = {}) {
       : loginData?.cmConsoleImsSession && typeof loginData.cmConsoleImsSession === "object"
         ? loginData.cmConsoleImsSession
         : null,
+    targetOrganization: normalizeRequestedTargetOrganization(loginData?.targetOrganization),
+    consoleHydration: normalizeStoredConsoleHydrationSnapshot(loginData?.consoleHydration),
     profile: normalizedProfile,
     imsSession: mergedImsSession,
     imageUrl: "",
-    adobePassOrg: loginData?.adobePassOrg || fallbackAdobePassOrg || null,
+    adobePassOrg: null,
   };
 
   normalized.imageUrl =
@@ -54872,7 +56970,6 @@ async function resolveNormalizedLoginData(loginData = {}, options = {}) {
     },
     {
       resetBootstrapTokens: options.resetBootstrapTokens === true,
-      fallbackAdobePassOrg: options.fallbackAdobePassOrg || null,
     }
   );
 }
@@ -55110,7 +57207,6 @@ function makeAvatarResolveKey(loginData) {
 
   const tokenFingerprint = loginData?.accessToken ? String(loginData.accessToken).slice(-16) : "";
   const persistedAvatar = compactAvatarValue(readPersistedAvatarCandidate(loginData));
-  const orgAvatar = compactAvatarValue(loginData?.adobePassOrg?.avatarUrl || "");
   const explicitLoginImageUrl = compactAvatarValue(resolveLoginImageUrl(loginData));
   const loginProfile = resolveLoginProfile(loginData) || {};
   const profileCandidates = getProfileAvatarCandidates(loginProfile).map((value) => compactAvatarValue(value));
@@ -55120,7 +57216,6 @@ function makeAvatarResolveKey(loginData) {
   return JSON.stringify({
     tokenFingerprint,
     persistedAvatar,
-    orgAvatar,
     explicitLoginImageUrl,
     profileCandidates,
     discoveredProfileCandidates,
@@ -55137,7 +57232,6 @@ function getAvatarRefreshSessionKey(loginData) {
     profile?.id,
     profile?.email,
     profile?.user_email,
-    loginData?.adobePassOrg?.userId,
   ]);
   return `${identity}::${tokenFingerprint}`;
 }
@@ -56124,8 +58218,6 @@ function openAvatarMenu() {
     return;
   }
   state.avatarMenuOpen = true;
-  prefetchCmTenantsCatalogInBackground("avatar-menu-open", { forceRefresh: false });
-  prefetchCmConsoleBootstrapSummaryInBackground("avatar-menu-open", { forceRefresh: false });
   renderAvatarMenu();
   void loadAvatarMenuUpdateState(false);
 }
@@ -56185,51 +58277,6 @@ async function signOutAndResetSession() {
   }
 }
 
-async function attemptAutoSwitchToAdobePass(organizations, options = {}) {
-  const adobePassOrg = findAdobePassOrg(organizations);
-  if (!adobePassOrg) {
-    return null;
-  }
-
-  const interactive = options.interactive === true;
-  const allowFallback = options.allowFallback === true;
-  const prompt = normalizeUnderparImsPrompt(options?.prompt || (interactive ? "login" : ""), interactive);
-  const maxStrategies = Number.isFinite(options.maxStrategies) ? Math.max(1, Number(options.maxStrategies)) : 0;
-  const strategies = buildOrgSwitchStrategies({
-    ...toAdobePassOrgDescriptor(adobePassOrg),
-    isAdobePass: true,
-    raw: adobePassOrg,
-  });
-  const orderedStrategies = maxStrategies > 0 ? strategies.slice(0, maxStrategies) : strategies;
-
-  for (const strategy of orderedStrategies) {
-    try {
-      const authData = await startLogin({
-        extraParams: strategy,
-        interactive,
-        allowFallback,
-        prompt,
-      });
-      if (interactive) {
-        resetAvatarStateForInteractiveLogin();
-      }
-
-      const profile = await resolveProfileAfterLogin(authData);
-      const imageUrl = resolveAuthAvatarSeed(authData, profile);
-      return buildLoginSessionPayloadFromAuth(authData, profile, imageUrl);
-    } catch (error) {
-      log("Auto-switch strategy failed", {
-        strategy,
-        interactive,
-        allowFallback,
-        error: error?.message || String(error),
-      });
-    }
-  }
-
-  return null;
-}
-
 async function enforceAdobePassAccess(loginData) {
   const normalizedProfile = resolveLoginProfile(loginData);
   const configuredTargetOrganizations = getConfiguredTargetOrganizations();
@@ -56253,24 +58300,110 @@ async function enforceAdobePassAccess(loginData) {
     normalizeAvatarCandidate(readPersistedAvatarCandidate(profileSeedData)) ||
     "";
   let organizations = resolveCachedOrganizationsFromLoginData(loginData);
-  const preferredOrganizationSeed = selectedTargetOrganization || loginData?.adobePassOrg || null;
-  updateRestrictedOrgOptions(organizations, preferredOrganizationSeed, profileSeedData);
+  const preferredOrganizationSeed = selectedTargetOrganization || null;
+  let detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations(
+    {
+      ...profileSeedData,
+      profile: normalizedProfile,
+      organizations,
+    },
+    organizations
+  );
+  updateRestrictedOrgOptions(organizations, preferredOrganizationSeed, {
+    ...profileSeedData,
+    profile: normalizedProfile,
+    organizations,
+    detectedOrganizations,
+  });
 
   if (state.restrictedOrgOptions.length === 0 && tokenHasReadOrganizationsScope(loginData?.accessToken)) {
     try {
       const orgPayload = await fetchOrganizations(loginData.accessToken);
       organizations = flattenOrganizations(orgPayload);
+      detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations(
+        {
+          ...profileSeedData,
+          profile: normalizedProfile,
+          organizations,
+        },
+        organizations
+      );
       updateRestrictedOrgOptions(organizations, preferredOrganizationSeed, {
         ...profileSeedData,
+        profile: normalizedProfile,
         organizations,
+        detectedOrganizations,
       });
     } catch (error) {
       log("Unable to fetch organizations; keeping local org resolution only", error);
-      updateRestrictedOrgOptions(organizations, preferredOrganizationSeed, profileSeedData);
+      updateRestrictedOrgOptions(organizations, preferredOrganizationSeed, {
+        ...profileSeedData,
+        profile: normalizedProfile,
+        organizations,
+        detectedOrganizations,
+      });
       if (isReadOrganizationsScopeError(error)) {
         state.restrictedRecoveryLabel =
           "Adobe did not grant org-picker scope for this session. Use the ZIP.KEY org targets or Sign In Again to reopen Adobe's profile chooser.";
       }
+    }
+  }
+  let pickerOrganizations = [...organizations];
+
+  let accessContext = resolveAdobePassAccessContext(
+    {
+      ...profileSeedData,
+      profile: normalizedProfile,
+      imageUrl: normalizedImageUrl,
+      organizations,
+      detectedOrganizations,
+    },
+    selectedTargetOrganization || preferredOrganizationSeed
+  );
+
+  if (!accessContext.eligible && loginData?.accessToken) {
+    try {
+      const activeOrganizationSeed = buildRestrictedOrganizationContext(
+        organizations,
+        {
+          ...profileSeedData,
+          profile: normalizedProfile,
+          imageUrl: normalizedImageUrl,
+          organizations,
+          detectedOrganizations,
+        },
+        null
+      ).activeOrganization;
+      const unifiedShellOrganizations = await fetchUnderparUnifiedShellOrganizations(loginData.accessToken, {
+        selectedOrg: resolveRestrictedPickerSelectedOrg(preferredOrganizationSeed, {
+          ...profileSeedData,
+          profile: normalizedProfile,
+          organizations,
+          detectedOrganizations,
+        }),
+        activeOrganization: activeOrganizationSeed,
+      });
+      if (Array.isArray(unifiedShellOrganizations) && unifiedShellOrganizations.length > 0) {
+        pickerOrganizations = [...organizations, ...unifiedShellOrganizations];
+        updateRestrictedOrgOptions(pickerOrganizations, preferredOrganizationSeed, {
+          ...profileSeedData,
+          profile: normalizedProfile,
+          organizations: pickerOrganizations,
+          detectedOrganizations,
+        });
+        accessContext = resolveAdobePassAccessContext(
+          {
+            ...profileSeedData,
+            profile: normalizedProfile,
+            imageUrl: normalizedImageUrl,
+            organizations,
+            detectedOrganizations,
+          },
+          selectedTargetOrganization || preferredOrganizationSeed
+        );
+      }
+    } catch (error) {
+      log("Unable to load Unified Shell org context before AdobePass access enforcement", error);
     }
   }
 
@@ -56280,26 +58413,33 @@ async function enforceAdobePassAccess(loginData) {
     profile: normalizedProfile,
     imageUrl: normalizedImageUrl,
     organizations: normalizedOrganizations,
+    detectedOrganizations,
   };
   const orgVerification = verifyTargetOrganizationSelection(verificationSeed, selectedTargetOrganization);
   const resolvedOrganizationOption =
-    findMatchingRestrictedOrganizationOption(state.restrictedOrgOptions, {
-      orgId: firstNonEmptyString([orgVerification?.verifiedOrgId, orgVerification?.resolvedOrgId]),
-    }) ||
-    findMatchingRestrictedOrganizationOption(state.restrictedOrgOptions, loginData?.adobePassOrg) ||
-    null;
+    accessContext?.activeIsAdobePass && accessContext?.activeOrganization
+      ? accessContext.activeOrganization
+      : findMatchingRestrictedOrganizationOption(state.restrictedOrgOptions, {
+          orgId: firstNonEmptyString([orgVerification?.verifiedOrgId, orgVerification?.resolvedOrgId]),
+        }) || null;
+  accessContext = resolveAdobePassAccessContext(
+    {
+      ...verificationSeed,
+      orgVerification,
+      detectedOrganizations,
+    },
+    selectedTargetOrganization || preferredOrganizationSeed
+  );
 
   const resolved = {
     ...verificationSeed,
-    adobePassOrg: resolvedOrganizationOption
-      ? toAdobePassOrgDescriptor(resolvedOrganizationOption.raw || resolvedOrganizationOption, normalizedProfile)
-      : loginData?.adobePassOrg || null,
     orgVerification,
   };
 
   return {
-    allowed: true,
+    allowed: accessContext.eligible === true,
     loginData: resolved,
+    recoveryLabel: firstNonEmptyString([accessContext.reason]),
   };
 }
 
@@ -56324,88 +58464,51 @@ async function ensureRestrictedOrgOptionsFromToken(accessToken, preferredOrg = n
     preferredOrg ||
     seedSession?.targetOrganization ||
     null;
+  const selectedOrg = resolveRestrictedPickerSelectedOrg(configuredPreferredOrg, seedSession);
   const cachedOrganizations = resolveCachedOrganizationsFromLoginData(seedSession);
-  updateRestrictedOrgOptions(cachedOrganizations, configuredPreferredOrg, seedSession);
-  if (state.restrictedOrgOptions.length > 0 || !tokenHasReadOrganizationsScope(token)) {
-    if (state.restrictedOrgOptions.length === 0 && !tokenHasReadOrganizationsScope(token)) {
-      state.restrictedRecoveryLabel =
-        "Adobe did not grant org-picker scope for this session. Use the ZIP.KEY org targets or Sign In Again to reopen Adobe's profile chooser.";
+  let mergedOrganizations = [...cachedOrganizations];
+  let organizationsScopeDenied = false;
+
+  if (tokenHasReadOrganizationsScope(token)) {
+    try {
+      const orgPayload = await fetchOrganizations(token);
+      mergedOrganizations = [...mergedOrganizations, ...flattenOrganizations(orgPayload)];
+    } catch (error) {
+      log("Unable to load organizations endpoint org options for restricted picker", error);
+      organizationsScopeDenied = isReadOrganizationsScopeError(error);
     }
-    return state.restrictedOrgOptions.length > 0;
   }
 
   try {
-    const orgPayload = await fetchOrganizations(token);
-    const organizations = flattenOrganizations(orgPayload);
-    updateRestrictedOrgOptions(organizations, configuredPreferredOrg, {
-      ...seedSession,
-      organizations,
+    const unifiedShellOrganizations = await fetchUnderparUnifiedShellOrganizations(token, {
+      selectedOrg,
+      activeOrganization: configuredPreferredOrg,
     });
-  } catch (error) {
-    log("Unable to load org options for restricted picker", error);
-    updateRestrictedOrgOptions(cachedOrganizations, configuredPreferredOrg, seedSession);
-    if (isReadOrganizationsScopeError(error)) {
-      state.restrictedRecoveryLabel =
-        "Adobe did not grant org-picker scope for this session. Use the ZIP.KEY org targets or Sign In Again to reopen Adobe's profile chooser.";
+    if (Array.isArray(unifiedShellOrganizations) && unifiedShellOrganizations.length > 0) {
+      mergedOrganizations = [...mergedOrganizations, ...unifiedShellOrganizations];
     }
+  } catch (error) {
+    log("Unable to load Unified Shell org options for restricted picker", error);
+  }
+
+  const detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations(
+    {
+      ...seedSession,
+      organizations: mergedOrganizations,
+    },
+    mergedOrganizations
+  );
+  updateRestrictedOrgOptions(mergedOrganizations, configuredPreferredOrg, {
+    ...seedSession,
+    organizations: mergedOrganizations,
+    detectedOrganizations,
+  });
+
+  if (state.restrictedOrgOptions.length === 0 && (organizationsScopeDenied || !tokenHasReadOrganizationsScope(token))) {
+    state.restrictedRecoveryLabel =
+      "Adobe did not return additional org memberships for this session. Use Sign In Again to reopen Adobe's profile chooser.";
   }
   return state.restrictedOrgOptions.length > 0;
-}
-
-async function attemptInteractiveAdobePassRecovery(sessionData) {
-  const token = String(sessionData?.accessToken || "").trim();
-  if (!token) {
-    return false;
-  }
-
-  let organizations = resolveCachedOrganizationsFromLoginData(sessionData);
-  if (organizations.length > 0) {
-    updateRestrictedOrgOptions(organizations, sessionData?.adobePassOrg || null, sessionData);
-  } else {
-    try {
-      const orgPayload = await fetchOrganizations(token);
-      organizations = flattenOrganizations(orgPayload);
-      updateRestrictedOrgOptions(organizations, sessionData?.adobePassOrg || null, sessionData);
-    } catch (error) {
-      log("Unable to load organizations for interactive AdobePass recovery", error);
-      updateRestrictedOrgOptions([], sessionData?.adobePassOrg || null, sessionData);
-      if (isReadOrganizationsScopeError(error)) {
-        updateRestrictedContext(sessionData, {
-          recoveryLabel:
-            "Adobe did not grant org-picker scope for this session. Use Sign In Again to reopen Adobe's profile chooser.",
-        });
-      }
-      return false;
-    }
-  }
-
-  if (!findAdobePassOrg(organizations)) {
-    updateRestrictedContext(sessionData, {
-      recoveryLabel: "AdobePass was not auto-detected. Pick an Adobe org manually below or sign in again.",
-    });
-    return false;
-  }
-
-  const switched = await attemptAutoSwitchToAdobePass(organizations, {
-    interactive: true,
-    allowFallback: true,
-    maxStrategies: 4,
-  });
-  if (!switched) {
-    updateRestrictedContext(sessionData, {
-      recoveryLabel: "Automatic org switching failed. Select an Adobe org manually or sign in again.",
-    });
-    return false;
-  }
-
-  return activateSession(
-    buildLoginSessionPayloadFromAuth(switched, switched.profile, switched.imageUrl),
-    "interactive-auto-switch-recovery",
-    {
-      allowDeniedRecovery: false,
-      allowTemporaryPageContextTab: true,
-    }
-  );
 }
 
 async function loadManualSignOutHold() {
@@ -56507,40 +58610,6 @@ async function loadStoredLoginData() {
   if (imsSession && (!coercePositiveNumber(imsSession.expiresAt) || Math.abs(coercePositiveNumber(imsSession.expiresAt) - expiresAt) > 2 * 60 * 1000)) {
     imsSession.expiresAt = expiresAt;
   }
-  const storedCmConsoleToken = normalizeBearerTokenValue(firstNonEmptyString([loginData?.cmConsoleAccessToken]));
-  const validStoredCmConsoleToken = tokenSupportsCmTenantCatalog(storedCmConsoleToken) ? storedCmConsoleToken : "";
-  const cmConsoleTokenSnapshot = validStoredCmConsoleToken
-    ? deriveImsSessionSnapshotFromToken(validStoredCmConsoleToken)
-    : null;
-  const cmConsoleExpiresAt = validStoredCmConsoleToken
-    ? resolveStoredSessionExpiresAt({ expiresAt: loginData?.cmConsoleExpiresAt }, cmConsoleTokenSnapshot)
-    : 0;
-  const cmConsoleImsSession = validStoredCmConsoleToken
-    ? mergeImsSessionSnapshots(
-        cmConsoleTokenSnapshot,
-        loginData?.cmConsoleImsSession && typeof loginData.cmConsoleImsSession === "object"
-          ? loginData.cmConsoleImsSession
-          : null
-      )
-    : null;
-  const storedExperienceCloudToken = normalizeBearerTokenValue(firstNonEmptyString([loginData?.experienceCloudAccessToken]));
-  const validStoredExperienceCloudToken = tokenSupportsExperienceCloudConsole(storedExperienceCloudToken)
-    ? storedExperienceCloudToken
-    : "";
-  const experienceCloudTokenSnapshot = validStoredExperienceCloudToken
-    ? deriveImsSessionSnapshotFromToken(validStoredExperienceCloudToken)
-    : null;
-  const experienceCloudExpiresAt = validStoredExperienceCloudToken
-    ? resolveStoredSessionExpiresAt({ expiresAt: loginData?.experienceCloudExpiresAt }, experienceCloudTokenSnapshot)
-    : 0;
-  const experienceCloudImsSession = validStoredExperienceCloudToken
-    ? mergeImsSessionSnapshots(
-        experienceCloudTokenSnapshot,
-        loginData?.experienceCloudImsSession && typeof loginData.experienceCloudImsSession === "object"
-          ? loginData.experienceCloudImsSession
-          : null
-      )
-    : null;
   return buildNormalizedLoginData(
     {
       ...loginData,
@@ -56550,21 +58619,13 @@ async function loadStoredLoginData() {
       scope: compactStorageString(firstNonEmptyString([loginData?.scope]), 2048),
       idToken: compactStorageString(firstNonEmptyString([loginData?.idToken]), 4096),
       refreshToken: compactStorageString(firstNonEmptyString([loginData?.refreshToken]), 4096),
-      experienceCloudAccessToken: experienceCloudExpiresAt > Date.now() ? validStoredExperienceCloudToken : "",
-      experienceCloudExpiresAt: experienceCloudExpiresAt > Date.now() ? experienceCloudExpiresAt : 0,
-      experienceCloudScope: compactStorageString(firstNonEmptyString([loginData?.experienceCloudScope]), 2048),
-      experienceCloudImsSession,
-      cmConsoleAccessToken: cmConsoleExpiresAt > Date.now() ? validStoredCmConsoleToken : "",
-      cmConsoleExpiresAt: cmConsoleExpiresAt > Date.now() ? cmConsoleExpiresAt : 0,
-      cmConsoleScope: compactStorageString(firstNonEmptyString([loginData?.cmConsoleScope]), 2048),
-      cmConsoleImsSession,
       imsSession,
       profile: normalizedProfile,
-      adobePassOrg: loginData?.adobePassOrg || null,
+      consoleHydration: normalizeStoredConsoleHydrationSnapshot(loginData?.consoleHydration),
       sessionKeys: loginData?.sessionKeys && typeof loginData.sessionKeys === "object" ? loginData.sessionKeys : null,
     },
     {
-      fallbackAdobePassOrg: loginData?.adobePassOrg || null,
+      resetBootstrapTokens: true,
     }
   );
 }
@@ -56680,13 +58741,151 @@ function compactTargetOrganizationForStorage(targetOrganization) {
     key: compactStorageString(targetOrganization.key, 180),
     id: compactStorageString(firstNonEmptyString([targetOrganization.id, targetOrganization.orgId]), 180),
     orgId: compactStorageString(firstNonEmptyString([targetOrganization.orgId, targetOrganization.id]), 180),
+    tenantId: compactStorageString(firstNonEmptyString([targetOrganization.tenantId]), 180),
+    imsOrgId: compactStorageString(firstNonEmptyString([targetOrganization.imsOrgId]), 220),
     userId: compactStorageString(targetOrganization.userId, 180),
+    clusterUserId: compactStorageString(targetOrganization.clusterUserId, 180),
+    clusterUserType: compactStorageString(targetOrganization.clusterUserType, 80),
     label: compactStorageString(firstNonEmptyString([targetOrganization.label, targetOrganization.name]), 240),
     name: compactStorageString(firstNonEmptyString([targetOrganization.name, targetOrganization.label]), 240),
+    hinted: targetOrganization.hinted === true,
+    isAdobePass: targetOrganization.isAdobePass === true,
     source: compactStorageString(targetOrganization.source, 80),
   });
 
   return Object.keys(compact).length > 0 ? compact : null;
+}
+
+function compactStoredConsoleRequestorOptionForStorage(option) {
+  if (!option || typeof option !== "object") {
+    return null;
+  }
+
+  const compact = pruneEmptyObject({
+    key: compactStorageString(firstNonEmptyString([option.key, option.id]), 180),
+    id: compactStorageString(firstNonEmptyString([option.id, option.key]), 180),
+    name: compactStorageString(firstNonEmptyString([option.name, option.label, option.id]), 240),
+    label: compactStorageString(firstNonEmptyString([option.label, option.name, option.id]), 320),
+    programmerId: compactStorageString(firstNonEmptyString([option.programmerId]), 180),
+  });
+
+  return Object.keys(compact).length > 0 ? compact : null;
+}
+
+function compactStoredConsoleChannelForStorage(channel) {
+  if (!channel || typeof channel !== "object") {
+    return null;
+  }
+
+  const compact = pruneEmptyObject({
+    key: compactStorageString(firstNonEmptyString([channel.key, channel.id]), 180),
+    id: compactStorageString(firstNonEmptyString([channel.id, channel.key]), 180),
+    name: compactStorageString(firstNonEmptyString([channel.name, channel.label, channel.id]), 240),
+    label: compactStorageString(firstNonEmptyString([channel.label, channel.name, channel.id]), 320),
+    programmerId: compactStorageString(firstNonEmptyString([channel.programmerId]), 180),
+  });
+
+  return Object.keys(compact).length > 0 ? compact : null;
+}
+
+function compactStoredConsoleProgrammerForStorage(programmer) {
+  if (!programmer || typeof programmer !== "object") {
+    return null;
+  }
+
+  const requestorOptions = (Array.isArray(programmer.requestorOptions) ? programmer.requestorOptions : [])
+    .map((option) => compactStoredConsoleRequestorOptionForStorage(option))
+    .filter(Boolean)
+    .slice(0, 250);
+  const requestorIds = uniquePreserveOrder(
+    (Array.isArray(programmer.requestorIds) ? programmer.requestorIds : [])
+      .map((value) => compactStorageString(value, 180))
+      .filter(Boolean)
+      .slice(0, 250)
+  );
+  const compact = pruneEmptyObject({
+    key: compactStorageString(firstNonEmptyString([programmer.key, programmer.programmerId]), 180),
+    programmerId: compactStorageString(firstNonEmptyString([programmer.programmerId]), 180),
+    programmerName: compactStorageString(
+      firstNonEmptyString([programmer.programmerName, programmer.mediaCompanyName, programmer.programmerId]),
+      240
+    ),
+    mediaCompanyName: compactStorageString(
+      firstNonEmptyString([programmer.mediaCompanyName, programmer.programmerName, programmer.programmerId]),
+      240
+    ),
+    label: compactStorageString(
+      firstNonEmptyString([programmer.label, programmer.programmerName, programmer.mediaCompanyName, programmer.programmerId]),
+      320
+    ),
+    requestorIds,
+    requestorOptions,
+  });
+
+  return Object.keys(compact).length > 0 ? compact : null;
+}
+
+function compactStoredConsoleHydrationSnapshot(snapshot = null) {
+  const raw = snapshot && typeof snapshot === "object" ? snapshot : null;
+  if (!raw) {
+    return null;
+  }
+
+  const configurationVersion = Number(raw.configurationVersion || raw.configVersion || 0);
+  const hydratedAt = Number(raw.hydratedAt || raw.fetchedAt || raw.updatedAt || 0);
+  const grantedAuthorities = uniquePreserveOrder(
+    (Array.isArray(raw.grantedAuthorities) ? raw.grantedAuthorities : [])
+      .map((value) => compactStorageString(value, 180))
+      .filter(Boolean)
+      .slice(0, 64)
+  );
+  const channels = (Array.isArray(raw.channels) ? raw.channels : [])
+    .map((channel) => compactStoredConsoleChannelForStorage(channel))
+    .filter(Boolean)
+    .slice(0, 500);
+  const programmers = (Array.isArray(raw.programmers) ? raw.programmers : [])
+    .map((programmer) => compactStoredConsoleProgrammerForStorage(programmer))
+    .filter(Boolean)
+    .slice(0, 500);
+  const compact = pruneEmptyObject({
+    configurationVersion,
+    hydratedAt,
+    grantedAuthorities,
+    channels,
+    programmers,
+    programmersApiEndpoint: compactStorageString(firstNonEmptyString([raw.programmersApiEndpoint]), 2048),
+  });
+
+  return Object.keys(compact).length > 0 ? compact : null;
+}
+
+function normalizeStoredConsoleHydrationSnapshot(snapshot = null) {
+  const compact = compactStoredConsoleHydrationSnapshot(snapshot);
+  if (!compact) {
+    return null;
+  }
+
+  return {
+    configurationVersion: Number(compact.configurationVersion || 0),
+    hydratedAt: Number(compact.hydratedAt || 0),
+    grantedAuthorities: Array.isArray(compact.grantedAuthorities) ? compact.grantedAuthorities.slice() : [],
+    channels: Array.isArray(compact.channels) ? compact.channels.slice() : [],
+    programmers: Array.isArray(compact.programmers) ? compact.programmers.slice() : [],
+    programmersApiEndpoint: firstNonEmptyString([compact.programmersApiEndpoint]),
+  };
+}
+
+function buildStoredConsoleHydrationSnapshotFromState() {
+  return compactStoredConsoleHydrationSnapshot({
+    configurationVersion: Number(state.consoleBootstrapState?.configurationVersion || 0),
+    hydratedAt: Date.now(),
+    grantedAuthorities: Array.isArray(state.consoleBootstrapState?.grantedAuthorities)
+      ? state.consoleBootstrapState.grantedAuthorities
+      : [],
+    channels: Array.isArray(state.consoleBootstrapState?.channels) ? state.consoleBootstrapState.channels : [],
+    programmers: Array.isArray(state.programmers) ? state.programmers : [],
+    programmersApiEndpoint: firstNonEmptyString([state.programmersApiEndpoint]),
+  });
 }
 
 function compactProfileForStorage(profile) {
@@ -56770,6 +58969,7 @@ function compactProfileForStorage(profile) {
 
 function buildStoredLoginData(loginData, minimal = false) {
   const profile = minimal ? null : compactProfileForStorage(resolveLoginProfile(loginData));
+  const consoleHydration = minimal ? null : compactStoredConsoleHydrationSnapshot(loginData?.consoleHydration);
   const imsSession = compactImsSessionForStorage(loginData?.imsSession);
   const sessionKeys =
     loginData?.sessionKeys && typeof loginData.sessionKeys === "object"
@@ -56784,7 +58984,6 @@ function buildStoredLoginData(loginData, minimal = false) {
     profile?.userId,
     profile?.user_id,
     profile?.sub,
-    loginData?.adobePassOrg?.userId,
   ]);
   const fallbackAvatar = fallbackIdentity ? toImsAvatarDownloadUrl(fallbackIdentity, 128) : "";
 
@@ -56795,21 +58994,12 @@ function buildStoredLoginData(loginData, minimal = false) {
     scope: compactStorageString(firstNonEmptyString([loginData?.scope, imsSession?.scope]), 2048),
     idToken: compactStorageString(firstNonEmptyString([loginData?.idToken]), 4096),
     refreshToken: compactStorageString(firstNonEmptyString([loginData?.refreshToken]), 4096),
-    experienceCloudAccessToken: compactStorageString(firstNonEmptyString([loginData?.experienceCloudAccessToken]), 4096),
-    experienceCloudExpiresAt: Number(loginData?.experienceCloudExpiresAt || 0),
-    experienceCloudScope: compactStorageString(firstNonEmptyString([loginData?.experienceCloudScope]), 2048),
-    experienceCloudImsSession: compactImsSessionForStorage(loginData?.experienceCloudImsSession),
-    cmConsoleAccessToken: compactStorageString(firstNonEmptyString([loginData?.cmConsoleAccessToken]), 4096),
-    cmConsoleExpiresAt: Number(loginData?.cmConsoleExpiresAt || 0),
-    cmConsoleScope: compactStorageString(firstNonEmptyString([loginData?.cmConsoleScope]), 2048),
-    cmConsoleImsSession: compactImsSessionForStorage(loginData?.cmConsoleImsSession),
     imageUrl: compactStorageAvatarUrl(
       firstNonEmptyString([
         loginData?.imageUrl,
         loginData?.user_image_url,
         loginData?.avatarUrl,
         loginData?.avatar_url,
-        loginData?.adobePassOrg?.avatarUrl,
         profile?.user_image_url,
         fallbackAvatar,
       ])
@@ -56817,8 +59007,8 @@ function buildStoredLoginData(loginData, minimal = false) {
     profile,
     imsSession,
     sessionKeys,
-    adobePassOrg: compactAdobePassOrgForStorage(loginData?.adobePassOrg),
     targetOrganization: compactTargetOrganizationForStorage(loginData?.targetOrganization),
+    consoleHydration,
   });
 
   return compact;
@@ -57054,15 +59244,6 @@ async function runExperienceCloudSessionMonitorTick(trigger = "interval") {
 
 function scheduleNoTouchRefresh() {
   clearRefreshTimer();
-
-  if (!state.loginData?.expiresAt) {
-    return;
-  }
-
-  const delay = Math.max(15000, state.loginData.expiresAt - Date.now() - TOKEN_REFRESH_LEEWAY_MS);
-  state.refreshTimeoutId = setTimeout(() => {
-    void refreshSessionNoTouch();
-  }, delay);
 }
 
 function resetCmTenantsPrecheckState() {
@@ -57080,7 +59261,11 @@ function resetCmTenantsPrecheckState() {
 }
 
 function shouldAllowTemporaryCmBootstrapTabForActivation(source = "", explicitAllow = false) {
-  return explicitAllow === true;
+  if (explicitAllow === true) {
+    return true;
+  }
+  const normalizedSource = String(source || "").trim().toLowerCase();
+  return normalizedSource === "stored";
 }
 
 async function applyActiveLoginSession(loginData, options = {}) {
@@ -57105,8 +59290,12 @@ async function applyActiveLoginSession(loginData, options = {}) {
   state.sessionMonitorSuppressed = false;
   state.sessionMonitorConsecutiveInactiveDetections = 0;
   state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
-  clearRestrictedOrgOptions();
   state.sessionReady = true;
+  if (resolveProgrammerAccessContext(loginData).eligible !== true) {
+    syncAuthenticatedOrgSwitchOnlyContext(loginData);
+  } else {
+    clearRestrictedOrgOptions();
+  }
   syncMediaCompanySelectAvailability();
   startExperienceCloudSessionMonitor();
   if (persist) {
@@ -57119,6 +59308,186 @@ async function applyActiveLoginSession(loginData, options = {}) {
   }
 }
 
+function resetWorkflowForAuthenticatedHydration() {
+  applyProgrammerEntities([]);
+  state.programmersLoadInFlight = true;
+  if (els.mediaCompanySelect) {
+    els.mediaCompanySelect.disabled = true;
+    els.mediaCompanySelect.innerHTML = `<option value="">${escapeHtml(getMediaCompanySelectDefaultLabel())}</option>`;
+  }
+  if (els.requestorSelect) {
+    els.requestorSelect.disabled = true;
+    els.requestorSelect.innerHTML = '<option value=""></option>';
+  }
+  if (els.mvpdSelect) {
+    els.mvpdSelect.disabled = true;
+    els.mvpdSelect.innerHTML = '<option value=""></option>';
+  }
+  renderPremiumServicesLoading(null, {
+    controllerReason: "post-login-hydration",
+  });
+  syncMediaCompanySelectAvailability();
+  syncGlobalQuickLaunchButtons();
+}
+
+async function hydrateAuthenticatedAdobePassSession(source = "session", options = {}) {
+  const normalizedSource = String(source || "session").trim() || "session";
+  const hydrationToken = ++state.authenticatedHydrationToken;
+  const preferredCmBootstrapTabId = Number(
+    options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0
+  );
+  const allowBackgroundTemporaryPageContextTab = options.allowBackgroundTemporaryPageContextTab === true;
+  const preserveExistingOnFailure = options.preserveExistingOnFailure === true;
+  state.programmersLoadInFlight = preserveExistingOnFailure ? false : true;
+  syncMediaCompanySelectAvailability();
+
+  const currentLoginData = state.loginData && typeof state.loginData === "object" ? state.loginData : null;
+  let hydrationResult = await settle(() =>
+    hydratePostLoginSessionData(currentLoginData, {
+      reason: `activation:${normalizedSource}`,
+      preferredTabId: preferredCmBootstrapTabId,
+      allowTemporaryPageContextTab: allowBackgroundTemporaryPageContextTab,
+      forceRefresh: options.forceRefresh === true,
+    })
+  );
+  let hydratedLoginData = hydrationResult.ok ? hydrationResult.value : currentLoginData;
+  const shouldRetryLimitedRestrictedSwitchHydration =
+    hydrationResult.ok &&
+    hydratedLoginData &&
+    allowBackgroundTemporaryPageContextTab &&
+    Array.isArray(hydratedLoginData?.console?.programmers) &&
+    hydratedLoginData.console.programmers.length === 0 &&
+    Number(hydratedLoginData?.console?.configurationVersion || 0) <= 0 &&
+    (normalizedSource === "restricted-org-switch" || normalizedSource === "interactive-auto-switch-recovery");
+  if (shouldRetryLimitedRestrictedSwitchHydration) {
+    log("Retrying Adobe Pass session hydration after limited restricted switch bootstrap", {
+      source: normalizedSource,
+      configurationVersion: Number(hydratedLoginData?.console?.configurationVersion || 0),
+      preferredCmBootstrapTabId,
+    });
+    await sleep(250);
+    hydrationResult = await settle(() =>
+      hydratePostLoginSessionData(hydratedLoginData, {
+        reason: `activation:${normalizedSource}:retry`,
+        preferredTabId: preferredCmBootstrapTabId,
+        allowTemporaryPageContextTab: allowBackgroundTemporaryPageContextTab,
+        forceRefresh: true,
+      })
+    );
+    if (hydrationResult.ok) {
+      hydratedLoginData = hydrationResult.value;
+    }
+  }
+  await maybeReleaseRetainedAuthPopupBootstrapContext(
+    preferredCmBootstrapTabId,
+    `post-login-hydration-complete:${normalizedSource}`
+  ).catch(() => null);
+  if (hydrationToken !== state.authenticatedHydrationToken) {
+    return false;
+  }
+
+  state.programmersLoadInFlight = false;
+  syncMediaCompanySelectAvailability();
+
+  let programmersLoadError = null;
+  let cmPrecheckError = null;
+
+  if (!hydrationResult.ok) {
+    programmersLoadError =
+      hydrationResult.error instanceof Error ? hydrationResult.error : new Error(String(hydrationResult.error));
+  } else if (hydratedLoginData && typeof hydratedLoginData === "object") {
+    state.loginData = hydratedLoginData;
+    applyHydratedSessionContextsToState(hydratedLoginData, {
+      preserveExistingOnFailure,
+      reason: `activation:${normalizedSource}`,
+    });
+    if (resolveProgrammerAccessContext(hydratedLoginData).eligible !== true) {
+      syncAuthenticatedOrgSwitchOnlyContext(hydratedLoginData);
+    } else {
+      clearRestrictedOrgOptions();
+    }
+    await saveLoginData(hydratedLoginData).catch(() => false);
+    await persistAuthenticatedConsoleHydrationSnapshot().catch(() => null);
+
+    const consoleContext = hydratedLoginData?.console && typeof hydratedLoginData.console === "object"
+      ? hydratedLoginData.console
+      : null;
+    const cmContext = hydratedLoginData?.cm && typeof hydratedLoginData.cm === "object"
+      ? hydratedLoginData.cm
+      : null;
+    const hasProgrammers = Array.isArray(consoleContext?.programmers) && consoleContext.programmers.length > 0;
+    const consoleBootstrapIncomplete = !consoleContext?.extendedProfile;
+    const consoleConfigurationMissing = Number(consoleContext?.configurationVersion || 0) <= 0;
+    const consoleProgrammerMessage = firstNonEmptyString([
+      !hasProgrammers && consoleBootstrapIncomplete ? consoleContext?.errors?.extendedProfile : "",
+      !hasProgrammers && !consoleConfigurationMissing ? consoleContext?.errors?.configurationVersion : "",
+      !hasProgrammers && !consoleConfigurationMissing ? consoleContext?.errors?.programmers : "",
+    ]);
+    if (consoleProgrammerMessage) {
+      programmersLoadError = new Error(consoleProgrammerMessage);
+    }
+
+    const cmCatalogReady = hasCmTenantsCatalogEntries(state.cmTenantsCatalog);
+    const cmTokenReady =
+      Boolean(normalizeBearerTokenValue(firstNonEmptyString([hydratedLoginData?.cmConsoleAccessToken, cmContext?.cmuToken]))) &&
+      state.cmConsoleBootstrapQualified === true;
+    if (!(cmCatalogReady && cmTokenReady)) {
+      const cmErrorMessage = firstNonEmptyString([
+        cmContext?.errors?.tenants,
+        cmContext?.errors?.cmuToken,
+      ]);
+      if (cmErrorMessage) {
+        cmPrecheckError = new Error(cmErrorMessage);
+      }
+    }
+  }
+
+  if (programmersLoadError) {
+    if (!(preserveExistingOnFailure || normalizedSource === "stored")) {
+      setStatus(
+        firstNonEmptyString([
+          String(programmersLoadError?.message || "").trim(),
+          "Signed in, but UnderPAR could not load media companies. Refresh the session and retry.",
+        ]),
+        "error"
+      );
+    } else {
+      clearStatusUnlessCmTenantsPrecheckBlocked();
+    }
+  } else if (cmPrecheckError) {
+    setStatus(
+      firstNonEmptyString([
+        String(cmPrecheckError?.message || "").trim(),
+        "Signed in, but UnderPAR could not hydrate CM and CMU yet.",
+      ]),
+      "error"
+    );
+  } else {
+    clearStatusUnlessCmTenantsPrecheckBlocked();
+  }
+
+  render();
+  setUnderparDiagnosticMarker("activation", {
+    status: programmersLoadError || cmPrecheckError ? "warning" : "success",
+    source: normalizedSource,
+    phase: programmersLoadError ? "programmers-load-warning" : cmPrecheckError ? "cm-precheck-warning" : "complete",
+    programmersCount: Number(state.programmers.length || 0),
+    criticalPathMs: Math.max(0, Date.now() - Number(options.activationStartedAt || Date.now())),
+    error: firstNonEmptyString([
+      String(programmersLoadError?.message || "").trim(),
+      String(cmPrecheckError?.message || "").trim(),
+    ]),
+  });
+  log(`Session hydration completed (${normalizedSource})`, {
+    programmersCount: Number(state.programmers.length || 0),
+    cmTenantsCount: Number(state.cmTenantsCatalog?.tenants?.length || 0),
+    criticalPathMs: Math.max(0, Date.now() - Number(options.activationStartedAt || Date.now())),
+    programmersError: String(programmersLoadError?.message || "").trim(),
+    cmPrecheckError: String(cmPrecheckError?.message || "").trim(),
+  });
+  return !(programmersLoadError || cmPrecheckError);
+}
+
 async function activateSession(sessionData, source = "unknown", options = {}) {
   const activationStartedAt = Date.now();
   const normalizedSource = String(source || "unknown").trim() || "unknown";
@@ -57128,7 +59497,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     normalizedSource,
     options.allowInteractiveConsoleBootstrap === true
   );
-  const allowBackgroundTemporaryPageContextTab = shouldAllowTemporaryCmBootstrapTabForActivation(
+  const activationAllowsTemporaryPageContextTab = shouldAllowTemporaryCmBootstrapTabForActivation(
     normalizedSource,
     allowTemporaryPageContextTab
   );
@@ -57139,181 +59508,52 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     phase: "enforce-access",
     allowDeniedRecovery,
     allowInteractiveConsoleBootstrap,
-    allowBackgroundTemporaryPageContextTab,
+    allowBackgroundTemporaryPageContextTab: activationAllowsTemporaryPageContextTab,
   });
   const enforced = await enforceAdobePassAccess(sessionData);
-  if (!enforced.allowed || !enforced.loginData) {
-    await clearLoginData();
-    resetWorkflowForLoggedOut();
-    await ensureRestrictedOrgOptionsFromToken(
-      sessionData?.accessToken,
-      enforced?.loginData?.targetOrganization || sessionData?.targetOrganization || sessionData?.adobePassOrg || null,
-      enforced?.loginData || sessionData
-    );
-    updateRestrictedContext(enforced?.loginData || sessionData, {
-      recoveryLabel:
-        firstNonEmptyString([enforced?.recoveryLabel]) ||
-        "Choose an Adobe org profile and switch this session.",
-    });
-    state.loginData = null;
-    state.restricted = true;
-    state.sessionReady = false;
-    clearRefreshTimer();
-    setUnderparDiagnosticMarker("activation", {
-      status: "restricted",
-      source: normalizedSource,
-      phase: "access-denied",
-      recoveryLabel: "Unable to verify AdobePass access for this login.",
-    });
-    setStatus("", "info");
-    render();
-    return false;
-  }
-
-  resetCmTenantsPrecheckState();
-  let qualifiedExperienceCloudTokenResult = null;
-  try {
-    qualifiedExperienceCloudTokenResult = await requestQualifiedExperienceCloudConsoleToken({
-      existingToken: firstNonEmptyString([
-        enforced.loginData?.experienceCloudAccessToken,
-        state.consoleBootstrapState?.shellSnapshot?.imsToken,
-        state.loginData?.experienceCloudAccessToken,
-      ]),
-      seedToken: firstNonEmptyString([enforced.loginData?.accessToken, sessionData?.accessToken]),
-      requireFresh: false,
-      allowSilentAuth: false,
-    });
-  } catch {
-    qualifiedExperienceCloudTokenResult = null;
-  }
-  const loginDataForConsole =
-    qualifiedExperienceCloudTokenResult && qualifiedExperienceCloudTokenResult.accessToken
-      ? mergeExperienceCloudConsoleTokenIntoLoginData(enforced.loginData, qualifiedExperienceCloudTokenResult)
-      : enforced.loginData;
-  const consoleAccessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([
-      state.consoleBootstrapState?.shellSnapshot?.imsToken,
-      qualifiedExperienceCloudTokenResult?.accessToken,
-      loginDataForConsole?.experienceCloudAccessToken,
-      getPreferredExperienceCloudConsoleAccessTokenCandidate(),
-      loginDataForConsole?.accessToken,
-    ])
-  );
-  const normalizedLoginDataPromise = resolveNormalizedLoginData(enforced.loginData, {
-    fetchProfile: true,
-    resetBootstrapTokens: true,
-    fallbackAdobePassOrg: enforced.loginData.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
-  });
-  const stagedLoginData = buildNormalizedLoginData(loginDataForConsole, {
-    resetBootstrapTokens: false,
-    fallbackAdobePassOrg: enforced.loginData.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
-  });
-  state.loginData = stagedLoginData;
-  state.restricted = false;
-  state.sessionReady = false;
-  state.cmLastHydratedAccessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([stagedLoginData?.cmConsoleAccessToken || ""])
-  );
-  setUnderparDiagnosticMarker("activation", {
-    status: "pending",
-    source: normalizedSource,
-    phase: "cm-precheck",
-    allowBackgroundTemporaryPageContextTab,
-  });
-  try {
-    await ensureCmTenantsPrecheckForActiveSession(`activation:${normalizedSource}`, {
-      forceRefresh: true,
-      allowTemporaryPageContextTab: allowBackgroundTemporaryPageContextTab,
-      preferredCmBootstrapTabId,
-      releaseRetainedAuthPopupContext: false,
-    });
-  } catch (error) {
-    const resolvedError = error instanceof Error ? error : new Error(String(error));
+  if (!enforced?.loginData) {
     await clearLoginData();
     resetWorkflowForLoggedOut();
     state.loginData = null;
     state.restricted = false;
     state.sessionReady = false;
     clearRefreshTimer();
-    state.cmTenantsPrecheckPending = false;
-    syncMediaCompanySelectAvailability();
     setUnderparDiagnosticMarker("activation", {
       status: "error",
       source: normalizedSource,
-      phase: "cm-precheck-failed",
-      error: resolvedError.message,
+      phase: "missing-login-data",
+      recoveryLabel:
+        firstNonEmptyString([enforced?.recoveryLabel]) || "Unable to resolve Adobe session state for this login.",
     });
-    setStatus(resolvedError.message, "error");
+    setStatus("Unable to resolve Adobe session state for this login. Click Sign In.", "error");
     render();
     return false;
   }
 
-  let programmersLoadError = null;
-  try {
-    await loadProgrammersData(consoleAccessToken, {
-      allowInteractiveAuthBootstrap: allowInteractiveConsoleBootstrap,
-      allowRestrictedSession: true,
-      forceRefresh: false,
-      allowTemporaryPageContextTab: allowBackgroundTemporaryPageContextTab,
-      preferredTabId: preferredCmBootstrapTabId,
-    });
-  } catch (error) {
-    const accessDenied = error?.code === "PROGRAMMERS_ACCESS_DENIED";
-    const deniedSessionData = mergeCmConsoleBootstrapIntoLoginData(
-      mergeExperienceCloudShellSnapshotIntoLoginData(
-        enforced.loginData || sessionData,
-        state.consoleBootstrapState?.shellSnapshot || null
-      ),
-      state.loginData
-    );
-    const deniedAccessToken = firstNonEmptyString([enforced.loginData?.accessToken, sessionData?.accessToken]);
-
-    if (accessDenied) {
-      await clearLoginData();
-      resetWorkflowForLoggedOut();
-      state.loginData = null;
-      state.sessionReady = false;
-      clearRefreshTimer();
-      await ensureRestrictedOrgOptionsFromToken(
-        deniedAccessToken,
-        deniedSessionData?.targetOrganization || deniedSessionData?.adobePassOrg || sessionData?.targetOrganization || sessionData?.adobePassOrg || null,
-        deniedSessionData
-      );
-      updateRestrictedContext(deniedSessionData, {
-        recoveryLabel:
-          "Console access is still denied for this Adobe session. Pick another org or sign in again to choose a different Adobe profile.",
-      });
-      state.restricted = true;
-      setUnderparDiagnosticMarker("activation", {
-        status: "restricted",
-        source: normalizedSource,
-        phase: "programmers-access-denied",
-        error: error instanceof Error ? error.message : String(error),
-      });
-      setStatus("", "info");
-      render();
-      return false;
-    } else {
-      programmersLoadError = error instanceof Error ? error : new Error(String(error));
-    }
-  }
-
-  const resolvedLoginData = buildNormalizedLoginData(
+  resetCmTenantsPrecheckState();
+  state.consoleCsrfToken = "";
+  state.consoleBootstrapState = null;
+  const normalizedLoginDataPromise = resolveNormalizedLoginData(enforced.loginData, {
+    fetchProfile: true,
+    resetBootstrapTokens: true,
+  });
+  let resolvedLoginData = buildNormalizedLoginData(
     mergeCmConsoleBootstrapIntoLoginData(
-      mergeExperienceCloudConsoleTokenIntoLoginData(
-        mergeExperienceCloudShellSnapshotIntoLoginData(
-          await normalizedLoginDataPromise,
-          state.consoleBootstrapState?.shellSnapshot || null
-        ),
-        qualifiedExperienceCloudTokenResult
-      ),
-      state.loginData
+      await normalizedLoginDataPromise,
+      enforced.loginData
     ),
     {
       resetBootstrapTokens: false,
-      fallbackAdobePassOrg: enforced.loginData.adobePassOrg || getDefaultAdobePassOrgDescriptor(),
     }
   );
+  const sessionRequiresOrgSelection = resolveProgrammerAccessContext(resolvedLoginData).eligible !== true;
+  const targetOrganizationVerification = verifyTargetOrganizationSelection(
+    resolvedLoginData,
+    resolvedLoginData?.targetOrganization && typeof resolvedLoginData.targetOrganization === "object"
+      ? resolvedLoginData.targetOrganization
+      : null
+  );
+  resolvedLoginData.orgVerification = targetOrganizationVerification;
 
   const sessionProfileCompleteness = getSessionProfileCompleteness(resolvedLoginData);
   if (!sessionProfileCompleteness.complete) {
@@ -57346,39 +59586,120 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     return false;
   }
 
+  if (
+    resolvedLoginData?.targetOrganization &&
+    !isSuccessfulTargetOrganizationVerification(targetOrganizationVerification)
+  ) {
+    const verificationFailureMessage = `${targetOrganizationVerification.message} UnderPAR kept the prior session so it does not misrepresent the selected Adobe profile.`;
+    log(verificationFailureMessage);
+    setUnderparDiagnosticMarker("activation", {
+      status: "error",
+      source: normalizedSource,
+      phase: "org-verification-mismatch",
+      expectedOrgKey: firstNonEmptyString([targetOrganizationVerification?.expectedOrgKey]),
+      resolvedOrgKey: firstNonEmptyString([targetOrganizationVerification?.resolvedOrgKey]),
+      error: verificationFailureMessage,
+    });
+    if (state.sessionReady && state.loginData) {
+      if (resolveProgrammerAccessContext(state.loginData).eligible !== true) {
+        syncAuthenticatedOrgSwitchOnlyContext(state.loginData);
+        updateRestrictedContext(state.loginData, {
+          recoveryLabel: verificationFailureMessage,
+        });
+      } else {
+        clearRestrictedOrgOptions();
+      }
+    } else {
+      clearRestrictedOrgOptions();
+    }
+    setStatus(verificationFailureMessage, "error");
+    render();
+    return false;
+  }
+
+  if (sessionRequiresOrgSelection) {
+    resolvedLoginData = buildNormalizedLoginData(
+      {
+        ...resolvedLoginData,
+        consoleHydration: null,
+      },
+      {
+        resetBootstrapTokens: true,
+      }
+    );
+    resolvedLoginData.orgVerification = targetOrganizationVerification;
+  }
+
   await applyActiveLoginSession(resolvedLoginData, {
     persist: true,
     scheduleRefresh: true,
   });
-  prefetchCmConsoleBootstrapSummaryInBackground(`session-activated:${source}`, {
-    forceRefresh: false,
-  });
-  if (programmersLoadError) {
-    const message = String(programmersLoadError?.message || "").trim();
-    setStatus(
-      message || "Signed in, but UnderPAR could not load media companies. Refresh the session and retry.",
-      "error"
-    );
+  state.cmLastHydratedAccessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([resolvedLoginData?.cmConsoleAccessToken || ""])
+  );
+  const restoredAuthenticatedConsoleHydration =
+    normalizedSource === "stored" && !sessionRequiresOrgSelection
+      ? restoreStoredAuthenticatedConsoleHydration(resolvedLoginData)
+      : false;
+  const allowBackgroundTemporaryPageContextTab = restoredAuthenticatedConsoleHydration
+    ? false
+    : activationAllowsTemporaryPageContextTab;
+  if (restoredAuthenticatedConsoleHydration) {
+    state.programmersLoadInFlight = false;
+    syncMediaCompanySelectAvailability();
+    syncGlobalQuickLaunchButtons();
   } else {
-    clearStatusUnlessCmTenantsPrecheckBlocked();
+    resetWorkflowForAuthenticatedHydration();
   }
   render();
   setUnderparDiagnosticMarker("activation", {
-    status: programmersLoadError ? "warning" : "success",
+    status: "pending",
     source: normalizedSource,
-    phase: programmersLoadError ? "programmers-load-warning" : "complete",
-    programmersCount: Number(state.programmers.length || 0),
+    phase: sessionRequiresOrgSelection ? "org-selection-required" : "post-login-hydration",
+    programmersCount: 0,
     criticalPathMs: Math.max(0, Date.now() - activationStartedAt),
-    error: programmersLoadError ? String(programmersLoadError?.message || "").trim() : "",
   });
   log(`Session activated (${source})`, {
     expiresAt: resolvedLoginData.expiresAt,
-    org: resolvedLoginData.adobePassOrg,
-    programmersCount: Number(state.programmers.length || 0),
+    org: firstNonEmptyString([resolvedLoginData?.authContext?.orgId]),
+    orgSelectionRequired: sessionRequiresOrgSelection,
     criticalPathMs: Math.max(0, Date.now() - activationStartedAt),
     cmHydrationMode: allowBackgroundTemporaryPageContextTab
       ? "activation-critical-path-temporary-tab-allowed"
-      : "activation-critical-path",
+      : "activation-background",
+  });
+  void hydrateAuthenticatedAdobePassSession(normalizedSource, {
+    activationStartedAt,
+    consoleAccessToken: normalizeBearerTokenValue(
+      firstNonEmptyString([
+        resolvedLoginData?.accessToken,
+        getPreferredPrimaryImsAccessTokenCandidate(),
+        getPreferredAdobeConsoleAccessTokenCandidate(),
+      ])
+    ),
+    forceRefresh: true,
+    allowBackgroundTemporaryPageContextTab,
+    preferredCmBootstrapTabId,
+    preserveExistingOnFailure: restoredAuthenticatedConsoleHydration,
+  }).catch((error) => {
+    const resolvedError = error instanceof Error ? error : new Error(String(error));
+    if (state.restricted || !state.sessionReady || !state.loginData) {
+      return;
+    }
+    state.programmersLoadInFlight = false;
+    syncMediaCompanySelectAvailability();
+    setUnderparDiagnosticMarker("activation", {
+      status: "warning",
+      source: normalizedSource,
+      phase: "background-hydration-failed",
+      error: resolvedError.message,
+    });
+    if (!(normalizedSource === "stored" || restoredAuthenticatedConsoleHydration)) {
+      setStatus(resolvedError.message, "error");
+    } else {
+      clearStatusUnlessCmTenantsPrecheckBlocked();
+    }
+    render();
   });
   return true;
 }
@@ -57471,22 +59792,6 @@ async function awaitCmBootstrapForExplicitActivation(reason = "session", options
 }
 
 async function attemptSilentBootstrapLogin() {
-  try {
-    const authData = await startLogin({
-      interactive: false,
-      allowFallback: false,
-    });
-    const profile = await resolveProfileAfterLogin(authData);
-    return attachTargetOrganizationToLoginData(
-      buildLoginSessionPayloadFromAuth(authData, profile),
-      state.loginData?.targetOrganization && typeof state.loginData.targetOrganization === "object"
-        ? state.loginData.targetOrganization
-        : null
-    );
-  } catch {
-    // Silent PKCE bootstrap is best-effort only.
-  }
-
   return null;
 }
 
@@ -57586,6 +59891,153 @@ function normalizeProgrammersResponse(data) {
   return [];
 }
 
+function computeEntityReferenceId(reference = "") {
+  const normalizedReference = String(reference || "").trim();
+  if (!normalizedReference) {
+    return "";
+  }
+
+  const matches = normalizedReference.match(/@[^:]+:(.+)$/);
+  return firstNonEmptyString([matches?.[1], normalizedReference]);
+}
+
+function normalizeConsoleChannelsResponse(payload) {
+  const entities = Array.isArray(payload?.entities) ? payload.entities : Array.isArray(payload) ? payload : [];
+  const seen = new Set();
+  const channels = [];
+
+  entities.forEach((entity, index) => {
+    const entityData = entity?.entityData && typeof entity.entityData === "object" ? entity.entityData : entity;
+    if (!entityData || typeof entityData !== "object") {
+      return;
+    }
+
+    const id = firstNonEmptyString([entityData.id, entity?.id, entity?.key]);
+    const key = firstNonEmptyString([id, entity?.key, `channel-${index + 1}`]);
+    if (!key || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    const name = firstNonEmptyString([
+      entityData.displayName,
+      entityData.name,
+      entityData.label,
+      entityData.title,
+      id ? `Channel ${id}` : `Channel ${index + 1}`,
+    ]);
+    channels.push({
+      key,
+      id,
+      name,
+      label:
+        id &&
+        normalizeOrganizationIdentifier(name) !== normalizeOrganizationIdentifier(id) &&
+        normalizeOrganizationIdentifier(name) !== normalizeOrganizationIdentifier(`Channel ${id}`)
+          ? `${name} | ${id}`
+          : name,
+      programmerId: computeEntityReferenceId(entityData.programmer),
+      raw: entityData,
+    });
+  });
+
+  return channels.sort((left, right) => {
+    const leftLabel = firstNonEmptyString([left?.name, left?.label, left?.id]);
+    const rightLabel = firstNonEmptyString([right?.name, right?.label, right?.id]);
+    return leftLabel.localeCompare(rightLabel, undefined, { sensitivity: "base" });
+  });
+}
+
+function deriveProgrammerRequestorOptionsFromChannels(programmerData = null, channels = []) {
+  if (!programmerData || typeof programmerData !== "object") {
+    return [];
+  }
+
+  const normalizedProgrammerId = normalizeOrganizationIdentifier(
+    firstNonEmptyString([programmerData.id, programmerData.programmerId, programmerData["programmer-id"]])
+  );
+  const rawServiceProviders = Array.isArray(programmerData?.serviceProviders)
+    ? programmerData.serviceProviders
+    : Array.isArray(programmerData?.contentProviders)
+      ? programmerData.contentProviders
+      : [];
+  const referencedRequestorIds = new Set(
+    rawServiceProviders
+      .map((reference) => computeEntityReferenceId(reference))
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  const requestors = [];
+  const seen = new Set();
+  const pushRequestor = (option) => {
+    if (!option || typeof option !== "object") {
+      return;
+    }
+
+    const id = String(firstNonEmptyString([option.id, option.key]) || "").trim();
+    const key = String(firstNonEmptyString([option.key, id]) || "").trim();
+    if (!id || !key) {
+      return;
+    }
+
+    const dedupeKey = key.toLowerCase();
+    if (seen.has(dedupeKey)) {
+      return;
+    }
+
+    seen.add(dedupeKey);
+    requestors.push({
+      key,
+      id,
+      name: firstNonEmptyString([option.name, option.label, id]) || id,
+      label: firstNonEmptyString([option.label, option.name, id]) || id,
+      programmerId: firstNonEmptyString([
+        option.programmerId,
+        programmerData.id,
+        programmerData.programmerId,
+        programmerData["programmer-id"],
+      ]),
+      raw: option.raw || option,
+    });
+  };
+
+  (Array.isArray(channels) ? channels : []).forEach((channel) => {
+    const channelProgrammerId = normalizeOrganizationIdentifier(channel?.programmerId);
+    const channelId = String(channel?.id || "").trim();
+    const matchesProgrammer =
+      normalizedProgrammerId && channelProgrammerId && channelProgrammerId === normalizedProgrammerId;
+    const matchesReference = channelId && referencedRequestorIds.has(channelId);
+    if (matchesProgrammer || matchesReference) {
+      pushRequestor(channel);
+    }
+  });
+
+  referencedRequestorIds.forEach((requestorId) => {
+    pushRequestor({
+      key: requestorId,
+      id: requestorId,
+      name: requestorId,
+      label: requestorId,
+      programmerId: firstNonEmptyString([
+        programmerData.id,
+        programmerData.programmerId,
+        programmerData["programmer-id"],
+      ]),
+      raw: {
+        id: requestorId,
+      },
+    });
+  });
+
+  return requestors.sort((left, right) =>
+    firstNonEmptyString([left?.label, left?.name, left?.id]).localeCompare(
+      firstNonEmptyString([right?.label, right?.name, right?.id]),
+      undefined,
+      { sensitivity: "base" }
+    )
+  );
+}
+
 function extractContentProviderId(reference) {
   const text = String(reference || "");
   const match = text.match(/^@ContentProvider:(.+)$/);
@@ -57597,7 +60049,14 @@ function extractContentProviderId(reference) {
 }
 
 function mapProgrammerEntity(entity, index) {
-  const data = entity.entityData || {};
+  const data =
+    entity?.entityData && typeof entity.entityData === "object"
+      ? entity.entityData
+      : entity?.raw && typeof entity.raw === "object"
+        ? entity.raw
+        : entity && typeof entity === "object"
+          ? entity
+          : {};
   const programmerId = data.id || data.programmerId || data["programmer-id"] || `programmer-${index + 1}`;
   const programmerName = data.displayName || data["display-name"] || data.name || programmerId;
   const mediaCompanyName =
@@ -57609,9 +60068,19 @@ function mapProgrammerEntity(entity, index) {
     programmerName ||
     programmerId;
 
-  const requestorIds = Array.isArray(data.contentProviders)
-    ? data.contentProviders.map((item) => extractContentProviderId(item)).filter(Boolean)
-    : [];
+  const requestorOptions =
+    Array.isArray(data.requestorOptions) && data.requestorOptions.length > 0
+      ? data.requestorOptions
+      : deriveProgrammerRequestorOptionsFromChannels(
+          data,
+          Array.isArray(state?.consoleBootstrapState?.channels) ? state.consoleBootstrapState.channels : []
+        );
+  const requestorIds =
+    requestorOptions.length > 0
+      ? uniqueSorted(requestorOptions.map((item) => String(item?.id || item?.key || "").trim()).filter(Boolean))
+      : Array.isArray(data.contentProviders)
+        ? data.contentProviders.map((item) => extractContentProviderId(item)).filter(Boolean)
+        : [];
   const applications = Array.isArray(data.applications) ? data.applications : [];
 
   return {
@@ -57619,8 +60088,15 @@ function mapProgrammerEntity(entity, index) {
     programmerId,
     programmerName,
     mediaCompanyName,
+    label:
+      programmerId &&
+      normalizeOrganizationIdentifier(programmerName) !== normalizeOrganizationIdentifier(programmerId)
+        ? `${programmerName} | ${programmerId}`
+        : programmerName,
     requestorIds,
+    requestorOptions,
     applications,
+    raw: data,
     source: entity,
   };
 }
@@ -57755,6 +60231,9 @@ function isMediaCompanySelectionLockedByCmPrecheck() {
 }
 
 function getMediaCompanySelectDefaultLabel() {
+  if (state.programmersLoadInFlight === true) {
+    return "-- Loading Media Companies... --";
+  }
   return "-- Choose a Media Company --";
 }
 
@@ -57768,7 +60247,14 @@ function syncMediaCompanySelectAvailability() {
     defaultOption.textContent = getMediaCompanySelectDefaultLabel();
   }
 
-  if (!state.sessionReady || !state.loginData || state.restricted) {
+  const sessionRequiresOrgSwitchOnly =
+    state.sessionReady === true &&
+    Boolean(state.loginData) &&
+    state.restricted !== true &&
+    typeof resolveProgrammerAccessContext === "function" &&
+    resolveProgrammerAccessContext(state.loginData).eligible !== true;
+
+  if (!state.sessionReady || !state.loginData || state.restricted || sessionRequiresOrgSwitchOnly) {
     els.mediaCompanySelect.disabled = true;
     return;
   }
@@ -57789,6 +60275,18 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
       reason: normalizedReason,
       phase: "no-session",
     });
+    return null;
+  }
+  if (resolveProgrammerAccessContext(state.loginData).eligible !== true) {
+    state.cmTenantsPrecheckPending = false;
+    state.cmTenantsPrecheckComplete = false;
+    state.cmTenantsPrecheckLastError = "";
+    setUnderparDiagnosticMarker("cm_precheck", {
+      status: "restricted",
+      reason: normalizedReason,
+      phase: "org-selection-required",
+    });
+    syncMediaCompanySelectAvailability();
     return null;
   }
   if (!forceRefresh && state.cmTenantsPrecheckPromise) {
@@ -57833,15 +60331,32 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     syncMediaCompanySelectAvailability();
 
     try {
-      const catalog = await ensureCmTenantsCatalog({
-        forceRefresh,
-        allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
-        preferredCmBootstrapTabId,
+      const cmContext = await buildCmContext(state.loginData, normalizedReason, {
+        preferredTabId: preferredCmBootstrapTabId,
+        allowTemporaryTab: effectiveAllowTemporaryPageContextTab,
       });
+      const catalog =
+        buildCmTenantsCatalogFromContext(cmContext, state.cmTenantsCatalog) ||
+        (await ensureCmTenantsCatalog({
+          forceRefresh,
+          allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
+          preferredCmBootstrapTabId,
+        }));
       if (!hasCmTenantsCatalogEntries(catalog)) {
         throw new Error("CM tenants load failed: tenant catalog returned no tenants.");
       }
-      let hydratedToken = normalizeBearerTokenValue(getPreferredCmRequestAccessTokenCandidate());
+
+      if (buildCmTenantsCatalogFromContext(cmContext, state.cmTenantsCatalog)) {
+        state.cmTenantsCatalog = catalog;
+        state.cmTenantsCatalogHydrated = true;
+        state.cmTenantsCatalogRuntimeFresh = true;
+        syncCmConsoleBootstrapSummaryFromCatalog(catalog, {
+          errors: [cmContext?.errors?.reports, cmContext?.errors?.tenants, cmContext?.errors?.cmuToken].filter(Boolean),
+        });
+        await persistCmTenantsCatalog(catalog).catch(() => false);
+      }
+
+      let hydratedToken = normalizeBearerTokenValue(cmuTokenFromContext(cmContext));
       if (!hydratedToken || !tokenSupportsCmConsoleRequests(hydratedToken)) {
         hydratedToken = normalizeBearerTokenValue(
           await ensureCmApiAccessToken({
@@ -57860,7 +60375,10 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
           sourceUrl: String(catalog?.sourceUrl || ""),
         });
         throw new Error(
-          "CM token hydrate failed: UnderPAR could not auto-hydrate a cm-console-ui bearer for CMU usage."
+          firstNonEmptyString([
+            cmContext?.errors?.cmuToken,
+            "CM token hydrate failed: UnderPAR could not auto-hydrate a cm-console-ui bearer for CMU usage.",
+          ])
         );
       }
       await persistResolvedCmGlobalAuthState(hydratedToken, `tenant-precheck:${reason}`).catch(() => null);
@@ -57980,32 +60498,17 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
     return existingToken;
   }
 
-  let tokenResult = null;
-  const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
-
-  tokenResult = await requestQualifiedCmConsoleToken({
-    seedToken: primarySeedToken,
-    requireFresh: forceRefresh,
-    allowSilentAuth: true,
-  }).catch(() => null);
-
-  if (!tokenResult?.accessToken && primarySeedToken) {
-    tokenResult = await tryRefreshCmTokenFromIms(primarySeedToken, {
-      requireFresh: forceRefresh,
-    }).catch(() => null);
-  }
-
-  if (!tokenResult?.accessToken) {
-    tokenResult = await requestQualifiedCmConsoleToken({
-      requireFresh: forceRefresh,
-      allowSilentAuth: true,
-    }).catch(() => null);
-  }
-
-  if (!tokenResult?.accessToken) {
-    tokenResult = null;
-  }
-
+  const resolvedToken = await settle(() =>
+    resolveQualifiedCmConsoleAccessToken(
+      state.loginData,
+      firstNonEmptyString([state.loginData?.cmConsoleAccessToken, getPreferredPrimaryImsAccessTokenCandidate()]),
+      {
+        preferredTabId: preferredCmBootstrapTabId,
+        allowTemporaryTab: options?.allowTemporaryPageContextTab !== false,
+      }
+    )
+  );
+  const tokenResult = resolvedToken.ok ? buildCmConsoleBootstrapResult(resolvedToken.value?.token, resolvedToken.value?.source) : null;
   const hydratedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
   if (hydratedToken && tokenSupportsCmConsoleRequests(hydratedToken)) {
     await persistResolvedCmGlobalAuthState(hydratedToken, `post-login:${reason}`).catch(() => null);
@@ -58033,7 +60536,7 @@ function populateMediaCompanySelect() {
   const options = [...state.programmers]
     .map((item) => ({
       value: item.key,
-      text: `${item.programmerName} - ${item.programmerId}`,
+      text: firstNonEmptyString([item.label, item.programmerName, item.programmerId]),
     }))
     .sort((left, right) => left.text.localeCompare(right.text, undefined, { sensitivity: "base" }));
 
@@ -58070,12 +60573,38 @@ function getRequestorsForSelectedMediaCompany() {
   if (!programmer) {
     return [];
   }
-  return uniqueSorted(programmer.requestorIds || []);
+
+  const requestorOptions = Array.isArray(programmer.requestorOptions)
+    ? programmer.requestorOptions
+        .filter((option) => option && typeof option === "object")
+        .map((option) => ({
+          key: String(firstNonEmptyString([option.key, option.id]) || "").trim(),
+          id: String(firstNonEmptyString([option.id, option.key]) || "").trim(),
+          label: firstNonEmptyString([option.label, option.name, option.id, option.key]),
+        }))
+        .filter((option) => option.id)
+    : [];
+
+  if (requestorOptions.length > 0) {
+    return requestorOptions.sort((left, right) =>
+      String(firstNonEmptyString([left.label, left.id])).localeCompare(
+        String(firstNonEmptyString([right.label, right.id])),
+        undefined,
+        { sensitivity: "base" }
+      )
+    );
+  }
+
+  return uniqueSorted(programmer.requestorIds || []).map((requestorId) => ({
+    key: requestorId,
+    id: requestorId,
+    label: requestorId,
+  }));
 }
 
 function populateRequestorSelect() {
   state.selectedMvpdId = "";
-  const requestorIds = getRequestorsForSelectedMediaCompany();
+  const requestorOptions = getRequestorsForSelectedMediaCompany();
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
 
   els.requestorSelect.innerHTML = "";
@@ -58084,14 +60613,20 @@ function populateRequestorSelect() {
   defaultOption.textContent = "";
   els.requestorSelect.appendChild(defaultOption);
 
-  for (const requestorId of requestorIds) {
+  for (const requestor of requestorOptions) {
     const option = document.createElement("option");
-    option.value = requestorId;
-    option.textContent = requestorId;
+    option.value = String(requestor.id || requestor.key || "").trim();
+    option.textContent = firstNonEmptyString([requestor.label, requestor.id, requestor.key]);
     els.requestorSelect.appendChild(option);
   }
 
-  els.requestorSelect.disabled = requestorIds.length === 0;
+  els.requestorSelect.disabled = requestorOptions.length === 0;
+  if (selectedRequestorId && requestorOptions.some((option) => String(option.id || "").trim() === selectedRequestorId)) {
+    els.requestorSelect.value = selectedRequestorId;
+  } else {
+    state.selectedRequestorId = "";
+    els.requestorSelect.value = "";
+  }
 
   els.mvpdSelect.disabled = true;
   els.mvpdSelect.innerHTML = '<option value=""></option>';
@@ -58148,13 +60683,27 @@ function settlePromiseWithin(promise, timeoutMs = 0, fallbackValue = null) {
   });
 }
 
+async function settle(fn) {
+  try {
+    return {
+      ok: true,
+      value: await fn(),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error,
+    };
+  }
+}
+
 async function refreshProgrammerPanels(options = {}) {
   const programmer = resolveSelectedProgrammer();
   const forcePremiumRefresh = options.forcePremiumRefresh === true;
   const skipCmBootstrap = options.skipCmBootstrap === true;
   const controllerReason = String(options?.controllerReason || "").trim();
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const requestToken = ++state.premiumPanelRequestToken;
-  let provisionalServices = null;
   const cmMvpdSelectionKey = buildCurrentCmMvpdSelectionKey(programmer);
   if (forcePremiumRefresh) {
     state.cmTenantBundleByTenantKey.clear();
@@ -58168,7 +60717,27 @@ async function refreshProgrammerPanels(options = {}) {
     renderPremiumServices(null, null, { controllerReason });
     return;
   }
+  const retainedConsoleTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const programmerApplicationsPromise =
+    options.programmerApplicationsPromise && typeof options.programmerApplicationsPromise.then === "function"
+      ? options.programmerApplicationsPromise
+      : ensureSelectedProgrammerApplicationsLoaded(programmer, {
+          forceRefresh: forcePremiumRefresh,
+          allowTemporaryPageContextTab: false,
+          preferredTabId: retainedConsoleTabId,
+          requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
+        });
+  const premiumAppsPromise = Promise.resolve(programmerApplicationsPromise).then((applicationsData) =>
+    ensurePremiumAppsForProgrammer(programmer, {
+      forceRefresh: forcePremiumRefresh,
+      allowTemporaryPageContextTab: false,
+      preferredTabId: retainedConsoleTabId,
+      requestorId: selectedRequestorId,
+      applicationsData,
+    })
+  );
   setProgrammerWorkspaceHydrationReady(programmer.programmerId, false);
+  clearProgrammerPremiumHydrationProgress(programmer.programmerId);
   esmWorkspaceBroadcastSelectedControllerState(programmer, null, 0, { controllerReason });
   cmBroadcastSelectedControllerState(programmer, null, 0, {
     controllerReason,
@@ -58177,153 +60746,120 @@ async function refreshProgrammerPanels(options = {}) {
   });
   mvpdWorkspaceBroadcastSelectedControllerState(programmer, null);
 
-  let cachedServices = forcePremiumRefresh ? null : getCurrentPremiumAppsSnapshot(programmer.programmerId);
-  const getCachedServiceReuseState = (services = null) => {
-    const cachedIncludesCm = Boolean(services && Object.prototype.hasOwnProperty.call(services, "cm"));
-    const cachedCmMvpdSelectionKey = String(services?.cmMvpdSelectionKey || "").trim();
-    const cmMvpdSelectionMatches = cachedCmMvpdSelectionKey === cmMvpdSelectionKey;
-    const programmerVaultHydrated = isPassVaultProgrammerHydrated(programmer?.programmerId);
-    const cachedVaultCredentialsReady = hasPassVaultCredentialCoverageForServices(programmer?.programmerId, services);
-    const cachedCmReadyForReuse = hasReusableCmSnapshotForSelection(services?.cm);
-    const shouldReuseCachedServices =
-      services &&
-      cachedIncludesCm &&
-      cachedCmReadyForReuse &&
-      cmMvpdSelectionMatches &&
-      !forcePremiumRefresh &&
-      (programmerVaultHydrated || isPassVaultBackedValue(services)) &&
-      cachedVaultCredentialsReady;
-    const cachedCmRuntimeReady = isCmRuntimeRenderReady(services?.cm);
-    return {
-      shouldReuseCachedServices,
-      cachedCmRuntimeReady,
-      instantRenderReady: Boolean(services && typeof services === "object" && (cachedCmRuntimeReady || shouldReuseCachedServices)),
-    };
+  let provisionalServices = forcePremiumRefresh ? null : getCurrentPremiumAppsSnapshot(programmer.programmerId);
+  const mergeSelectionServices = (baseServices = null, nextCmService = null, nextCmMvpdService = null) => ({
+    ...(baseServices && typeof baseServices === "object" ? baseServices : {}),
+    cm: selectPreferredCmRuntimeService(baseServices?.cm, nextCmService),
+    cmMvpd: selectPreferredCmRuntimeService(baseServices?.cmMvpd, nextCmMvpdService),
+    cmMvpdSelectionKey,
+  });
+  const summarizeSelectionServices = (baseServices = null, nextCmService = null, nextCmMvpdService = null) =>
+    applyPremiumServiceRuntimeSummary(
+      programmer,
+      mergeSelectionServices(baseServices, nextCmService, nextCmMvpdService),
+      {
+        cmCatalog: state.cmTenantsCatalog,
+      }
+    );
+  const applySelectionServicesSnapshot = (baseServices = null, nextCmService = null, nextCmMvpdService = null, options = {}) => {
+    const resolvedServices = summarizeSelectionServices(baseServices, nextCmService, nextCmMvpdService);
+    setCurrentPremiumAppsSnapshot(programmer.programmerId, resolvedServices);
+    const uiReady = isProgrammerPremiumUiReady(programmer.programmerId, resolvedServices);
+    const shouldMarkHydrated =
+      options.markHydrated === true ||
+      (options.markHydrated !== false && uiReady);
+    if (shouldMarkHydrated) {
+      setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
+    }
+    provisionalServices = resolvedServices;
+    emitPremiumServiceDecisionLogs(programmer, resolvedServices);
+    if (uiReady) {
+      clearProgrammerPremiumHydrationProgress(programmer.programmerId);
+      renderPremiumServices(resolvedServices, programmer, { controllerReason });
+    } else {
+      renderPremiumServicesLoading(programmer, {
+        controllerReason,
+        hydrationProgress: getProgrammerPremiumHydrationProgress(programmer.programmerId),
+      });
+    }
+    return resolvedServices;
   };
-  let cachedReuseState = getCachedServiceReuseState(cachedServices);
-  if (cachedReuseState.instantRenderReady) {
-    setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
-    provisionalServices = cachedServices;
-    emitPremiumServiceDecisionLogs(programmer, cachedServices);
-    renderPremiumServices(cachedServices, programmer, { controllerReason });
+  const computePersistedHydrationStatus = (services = null) => {
+    return isProgrammerRuntimeServicesReady(programmer.programmerId, services)
+      ? UNDERPAR_VAULT_STATUS_COMPLETE
+      : UNDERPAR_VAULT_STATUS_PARTIAL;
+  };
+
+  if (!provisionalServices && !forcePremiumRefresh) {
+    const vaultRecord = getPassVaultMediaCompanyRecord(programmer.programmerId);
+    const vaultedServices = markPassVaultBackedValue(
+      buildPassVaultRuntimeServicesSnapshot(vaultRecord),
+      vaultRecord
+    );
+    if (vaultedServices) {
+      provisionalServices = vaultedServices;
+      setCurrentPremiumAppsSnapshot(programmer.programmerId, vaultedServices);
+
+      const vaultedApplications = markPassVaultBackedValue(
+        buildPassVaultApplicationsSnapshotFromRegisteredApplications(
+          getPassVaultRegisteredApplicationsByGuid(vaultRecord)
+        ),
+        vaultRecord
+      );
+      if (
+        vaultedApplications &&
+        typeof vaultedApplications === "object" &&
+        !Array.isArray(vaultedApplications) &&
+        Object.keys(vaultedApplications).length > 0 &&
+        !getCurrentProgrammerApplicationsSnapshot(programmer.programmerId)
+      ) {
+        setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, vaultedApplications);
+      }
+    }
+  }
+
+  const provisionalUiReady = isProgrammerPremiumUiReady(programmer.programmerId, provisionalServices);
+  if (provisionalServices && provisionalUiReady) {
+    provisionalServices = summarizeSelectionServices(
+      provisionalServices,
+      state.cmServiceByProgrammerId.get(programmer.programmerId) || null,
+      cmMvpdSelectionKey ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null : null
+    );
+    setCurrentPremiumAppsSnapshot(programmer.programmerId, provisionalServices);
+    clearProgrammerPremiumHydrationProgress(programmer.programmerId);
+    emitPremiumServiceDecisionLogs(programmer, provisionalServices);
+    renderPremiumServices(provisionalServices, programmer, { controllerReason });
   } else {
+    setProgrammerPremiumHydrationProgress(programmer.programmerId, {
+      step: "detect",
+      label: "Detecting premium services...",
+    });
     renderPremiumServicesLoading(programmer, { controllerReason });
   }
 
-  let vaultReadiness = null;
-  if (!forcePremiumRefresh) {
-    await ensurePassVaultLoaded({ forceReload: false }).catch(() => null);
-    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
-      return;
-    }
-    vaultReadiness = getPassVaultProgrammerReuseReadiness(programmer.programmerId);
-  }
-  cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || cachedServices;
-  cachedReuseState = getCachedServiceReuseState(cachedServices);
-  // VAULT says load once: a complete/reusable ENV x Media Company record must
-  // restore into runtime before UnderPAR is allowed to show a loading shell.
-  const shouldRestoreCompleteVaultSnapshot =
-    !forcePremiumRefresh &&
-    (vaultReadiness?.reusable === true || vaultReadiness?.hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE) &&
-    !cachedReuseState.instantRenderReady;
-  if (shouldRestoreCompleteVaultSnapshot) {
-    await hydrateProgrammerFromPassVault(programmer, {
-      forceReload: false,
-      forceOverwrite: true,
-      forceDcrRestore: true,
-    }).catch(() => null);
-    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
-      return;
-    }
-    cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
-    cachedReuseState = getCachedServiceReuseState(cachedServices);
-  }
-  if (!cachedServices) {
-    await hydrateProgrammerFromPassVault(programmer, {
-      forceReload: false,
-      forceOverwrite: false,
-      forceDcrRestore: true,
-    }).catch(() => null);
-    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
-      return;
-    }
-    cachedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
-    cachedReuseState = getCachedServiceReuseState(cachedServices);
-  }
-  if (
-    cachedServices &&
-    shouldShowCmService(cachedServices?.cm) &&
-    !hasCachedCmTenantBundleCoverage(cachedServices?.cm) &&
-    (isPassVaultBackedValue(cachedServices) || isPassVaultProgrammerHydrated(programmer?.programmerId))
-  ) {
-    restorePassVaultCmTenantBundlesToRuntime(getPassVaultMediaCompanyRecord(programmer.programmerId));
-  }
-  cachedReuseState = getCachedServiceReuseState(cachedServices);
-  const shouldReuseCachedServices = cachedReuseState.shouldReuseCachedServices;
-  const cachedCmRuntimeReady = cachedReuseState.cachedCmRuntimeReady;
-  if (cachedReuseState.instantRenderReady && !provisionalServices) {
-    // Repeat selection must paint instantly from the hydrated VAULT/runtime snapshot.
-    // CM runtime warmup can continue afterward without dropping the whole UI back
-    // to a loading shell.
-    setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
-    provisionalServices = cachedServices;
-    emitPremiumServiceDecisionLogs(programmer, cachedServices);
-    renderPremiumServices(cachedServices, programmer, { controllerReason });
-  }
-  if (shouldReuseCachedServices) {
-    if (cachedCmRuntimeReady) {
-      return;
-    }
-    const cachedHydration = await ensureCmHydratedForProgrammer(programmer, cachedServices, {
-      forceRefresh: forcePremiumRefresh,
-      reason: "panel-cache-reuse",
-    }).catch(() => null);
-    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
-      return;
-    }
-    const reusedServices =
-      cachedHydration?.services || getCurrentPremiumAppsSnapshot(programmer.programmerId) || cachedServices;
-    setCurrentPremiumAppsSnapshot(programmer.programmerId, reusedServices);
-    setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
-    provisionalServices = reusedServices;
-    emitPremiumServiceDecisionLogs(programmer, reusedServices);
-    renderPremiumServices(reusedServices, programmer, { controllerReason });
-    return;
-  }
   try {
     const cachedCmSelectionService =
-      cachedServices?.cm ||
+      provisionalServices?.cm ||
       state.cmServiceByProgrammerId.get(programmer.programmerId) ||
       buildPassVaultRuntimeCmServiceSnapshot(getPassVaultMediaCompanyRecord(programmer.programmerId)) ||
       null;
-    const shouldPrimeCmSelectionBootstrap =
-      !skipCmBootstrap &&
-      (forcePremiumRefresh ||
-        !hasCmTenantsCatalogEntries() ||
-        !tokenSupportsCmConsoleRequests(getPreferredCmRequestAccessTokenCandidate()) ||
-        shouldRetryCachedCmService(cachedCmSelectionService));
-    const cmSelectionBootstrapPromise = shouldPrimeCmSelectionBootstrap
-      ? ensureCmTenantsPrecheckForActiveSession(`panel-selection:${programmer.programmerId}`, {
-          forceRefresh: forcePremiumRefresh,
-          allowTemporaryPageContextTab: false,
-        }).catch(() => null)
-      : Promise.resolve(state.cmTenantsCatalog);
-    if (!skipCmBootstrap) {
-      // Media Company selection must honor the CM-first activation contract.
-      await cmSelectionBootstrapPromise;
-      if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
-        return;
-      }
+    const cmSelectionBootstrapResult = skipCmBootstrap
+      ? { ok: true, value: state.cmTenantsCatalog }
+      : await settle(() =>
+          ensureCmTenantsPrecheckForActiveSession(`panel-selection:${programmer.programmerId}`, {
+            forceRefresh: forcePremiumRefresh,
+            allowTemporaryPageContextTab: false,
+          })
+        );
+    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+      return;
     }
 
-    const retainedConsoleTabId = Number(getRetainedAuthPopupBootstrapTabId() || 0);
-    const premiumAppsPromise = ensurePremiumAppsForProgrammer(programmer, {
-      forceRefresh: forcePremiumRefresh,
-      allowTemporaryPageContextTab: false,
-      preferredTabId: retainedConsoleTabId,
-    });
+    const cmBootstrapBlocked = !cmSelectionBootstrapResult.ok;
     const cmServicePromise = skipCmBootstrap
       ? Promise.resolve(cachedCmSelectionService)
+      : cmBootstrapBlocked
+        ? Promise.resolve(cachedCmSelectionService)
       : ensureCmServiceForProgrammer(programmer, {
           forceRefresh: forcePremiumRefresh,
         }).catch(() => null);
@@ -58331,6 +60867,10 @@ async function refreshProgrammerPanels(options = {}) {
       ? Promise.resolve(
           cmMvpdSelectionKey ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null : null
         )
+      : cmBootstrapBlocked
+        ? Promise.resolve(
+            cmMvpdSelectionKey ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null : null
+          )
       : ensureCmServiceForSelectedMvpd(programmer, {
           forceRefresh: forcePremiumRefresh,
         }).catch(() => null);
@@ -58339,6 +60879,36 @@ async function refreshProgrammerPanels(options = {}) {
     const cachedCmMvpdService = cmMvpdSelectionKey
       ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null
       : null;
+    const earlyPremiumAppsRenderPromise = Promise.resolve(premiumAppsPromise)
+      .then((premiumApps) => {
+        if (
+          requestToken !== state.premiumPanelRequestToken ||
+          resolveSelectedProgrammer()?.programmerId !== programmer.programmerId
+        ) {
+          return null;
+        }
+
+        const currentServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || provisionalServices;
+        const currentCmService = state.cmServiceByProgrammerId.get(programmer.programmerId) || currentServices?.cm || cachedCmService;
+        const currentCmMvpdService =
+          (cmMvpdSelectionKey ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null : null) ||
+          currentServices?.cmMvpd ||
+          cachedCmMvpdService;
+        const mergedPremiumServices = applySelectionServicesSnapshot(
+          {
+            ...(currentServices && typeof currentServices === "object" ? currentServices : {}),
+            ...(premiumApps && typeof premiumApps === "object" ? premiumApps : {}),
+          },
+          currentCmService,
+          currentCmMvpdService
+        );
+        void persistPassVaultProgrammerRecord(programmer, mergedPremiumServices, {
+          source: "live",
+          hydrationStatus: computePersistedHydrationStatus(mergedPremiumServices),
+        }).catch(() => {});
+        return mergedPremiumServices;
+      })
+      .catch(() => null);
     const [initialCmService, initialCmMvpdService] = await Promise.all([
       settlePromiseWithin(cmServicePromise, PREMIUM_CM_RENDER_GRACE_MS, cachedCmService),
       settlePromiseWithin(cmMvpdServicePromise, PREMIUM_CM_RENDER_GRACE_MS, cachedCmMvpdService),
@@ -58347,121 +60917,86 @@ async function refreshProgrammerPanels(options = {}) {
       return;
     }
 
-    const initialMergedServices = {
-      ...(cachedServices && typeof cachedServices === "object" ? cachedServices : {}),
-      cm: initialCmService,
-      cmMvpd: initialCmMvpdService,
-      cmMvpdSelectionKey,
-    };
-    setCurrentPremiumAppsSnapshot(programmer.programmerId, initialMergedServices);
-    provisionalServices = initialMergedServices;
-    emitPremiumServiceDecisionLogs(programmer, initialMergedServices);
-    renderPremiumServices(initialMergedServices, programmer, { controllerReason });
+    const initialMergedServices = applySelectionServicesSnapshot(
+      getCurrentPremiumAppsSnapshot(programmer.programmerId) || provisionalServices,
+      initialCmService,
+      initialCmMvpdService
+    );
 
-    const premiumApps = await premiumAppsPromise;
-    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+    const mergedPremiumServices =
+      (await earlyPremiumAppsRenderPromise) ||
+      getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
+      initialMergedServices;
+    if (
+      requestToken !== state.premiumPanelRequestToken ||
+      resolveSelectedProgrammer()?.programmerId !== programmer.programmerId
+    ) {
       return;
     }
-
-    const mergedPremiumServices = {
-      ...(premiumApps && typeof premiumApps === "object" ? premiumApps : {}),
-      cm: initialCmService,
-      cmMvpd: initialCmMvpdService,
-      cmMvpdSelectionKey,
-    };
-    setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedPremiumServices);
     provisionalServices = mergedPremiumServices;
-    const cmHydrationPromise = !skipCmBootstrap && shouldShowCmService(mergedPremiumServices?.cm)
+
+    const serviceHydrationPromise = isProgrammerRuntimeServicesReady(programmer.programmerId, mergedPremiumServices)
+      ? Promise.resolve(mergedPremiumServices)
+      : primeProgrammerServiceHydration(programmer, mergedPremiumServices, {
+          forceRefresh: forcePremiumRefresh,
+          controllerReason: controllerReason || "panel-selection",
+          requestToken,
+          requestorId: selectedRequestorId,
+        }).catch(() => null);
+    const earlyHydratedServices = await settlePromiseWithin(
+      serviceHydrationPromise,
+      PREMIUM_PROGRAMMER_HYDRATION_GRACE_MS,
+      null
+    );
+    if (
+      requestToken !== state.premiumPanelRequestToken ||
+      resolveSelectedProgrammer()?.programmerId !== programmer.programmerId
+    ) {
+      return;
+    }
+    if (earlyHydratedServices && typeof earlyHydratedServices === "object") {
+      provisionalServices = applySelectionServicesSnapshot(
+        earlyHydratedServices,
+        state.cmServiceByProgrammerId.get(programmer.programmerId) || earlyHydratedServices?.cm || null,
+        cmMvpdSelectionKey
+          ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || earlyHydratedServices?.cmMvpd || null
+          : earlyHydratedServices?.cmMvpd || null
+      );
+    }
+
+    const cmHydrationPromise = !skipCmBootstrap && !cmBootstrapBlocked && shouldShowCmService(mergedPremiumServices?.cm)
       ? ensureCmHydratedForProgrammer(programmer, mergedPremiumServices, {
           forceRefresh: forcePremiumRefresh,
           reason: "panel-selection",
         }).catch(() => null)
       : Promise.resolve(null);
-    let renderReadyServices = mergedPremiumServices;
-    const initialVaultCredentialsReady = hasPassVaultCredentialCoverageForServices(
-      programmer.programmerId,
-      renderReadyServices
-    );
-    const allowBackgroundCredentialCompilation = options?.allowBackgroundCredentialCompilation === true;
-    const shouldCompileVaultCredentials =
-      allowBackgroundCredentialCompilation &&
-      (forcePremiumRefresh ||
-        !isPassVaultProgrammerHydrated(programmer.programmerId) ||
-        !isPassVaultBackedValue(renderReadyServices) ||
-        !initialVaultCredentialsReady);
-    let runtimeServices = renderReadyServices;
-    if (shouldCompileVaultCredentials) {
-      const backgroundHydrationPromise = primeProgrammerServiceHydration(programmer, mergedPremiumServices, {
-        forceRefresh: forcePremiumRefresh,
-        controllerReason,
-        requestToken,
-        requestorId: selectedRequestorId,
-      }).catch(() => null);
-      const [cmResults, hydratedRuntimeServices] = await Promise.all([
-        Promise.allSettled([cmServicePromise, cmMvpdServicePromise]),
-        backgroundHydrationPromise,
-      ]);
+    void Promise.allSettled([cmServicePromise, cmMvpdServicePromise, cmHydrationPromise]).then((results) => {
       if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
         return;
       }
-      runtimeServices =
-        (hydratedRuntimeServices && typeof hydratedRuntimeServices === "object" ? hydratedRuntimeServices : null) ||
-        getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
-        renderReadyServices;
-      runtimeServices = {
-        ...(runtimeServices && typeof runtimeServices === "object" ? runtimeServices : {}),
-        cm: selectPreferredCmRuntimeService(
-          runtimeServices?.cm,
-          cmResults[0]?.status === "fulfilled" ? cmResults[0].value : null
-        ),
-        cmMvpd: selectPreferredCmRuntimeService(
-          runtimeServices?.cmMvpd,
-          cmResults[1]?.status === "fulfilled" ? cmResults[1].value : null
-        ),
-        cmMvpdSelectionKey,
-      };
-    } else {
-      await cmHydrationPromise;
-      const hydratedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || renderReadyServices;
-      void persistPassVaultProgrammerRecord(programmer, hydratedServices, {
+      const currentServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || mergedPremiumServices;
+      const resolvedCmService = selectPreferredCmRuntimeService(
+        currentServices?.cm,
+        results[0]?.status === "fulfilled" ? results[0].value : null
+      );
+      const resolvedCmMvpdService = selectPreferredCmRuntimeService(
+        currentServices?.cmMvpd,
+        results[1]?.status === "fulfilled" ? results[1].value : null
+      );
+      const hydratedCmServices =
+        results[2]?.status === "fulfilled" && results[2].value?.services && typeof results[2].value.services === "object"
+          ? results[2].value.services
+          : null;
+      const finalServices = applySelectionServicesSnapshot(
+        hydratedCmServices || currentServices,
+        resolvedCmService,
+        resolvedCmMvpdService
+      );
+      void persistPassVaultProgrammerRecord(programmer, finalServices, {
         source: "live",
-        hydrationStatus: UNDERPAR_VAULT_STATUS_PENDING,
+        hydrationStatus: computePersistedHydrationStatus(finalServices),
       }).catch(() => {});
-      runtimeServices = hydratedServices;
-    }
-
-    setCurrentPremiumAppsSnapshot(programmer.programmerId, runtimeServices);
-    setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
-    emitPremiumServiceDecisionLogs(programmer, runtimeServices);
-    renderPremiumServices(runtimeServices, programmer, { controllerReason });
-
-    if (!shouldCompileVaultCredentials) {
-      void Promise.allSettled([cmServicePromise, cmMvpdServicePromise]).then((results) => {
-        if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
-          return;
-        }
-        const currentServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || runtimeServices;
-        const resolvedCmService = results[0]?.status === "fulfilled" ? results[0].value : null;
-        const resolvedCmMvpdService = results[1]?.status === "fulfilled" ? results[1].value : null;
-        const mergedServices = {
-          ...(currentServices && typeof currentServices === "object" ? currentServices : {}),
-          cm: selectPreferredCmRuntimeService(currentServices?.cm, resolvedCmService),
-          cmMvpd: selectPreferredCmRuntimeService(currentServices?.cmMvpd, resolvedCmMvpdService),
-          cmMvpdSelectionKey,
-        };
-        setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
-        setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
-        emitPremiumServiceDecisionLogs(programmer, mergedServices);
-        renderPremiumServices(mergedServices, programmer, { controllerReason });
-        void persistPassVaultProgrammerRecord(programmer, mergedServices, {
-          source: "live",
-          hydrationStatus: UNDERPAR_VAULT_STATUS_PENDING,
-        }).catch(() => {});
-        if (allowBackgroundCredentialCompilation) {
-          void finalizePassVaultProgrammerHydration(programmer, mergedServices).catch(() => {});
-        }
-      });
-    }
+    });
   } catch (error) {
     if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
       return;
@@ -58477,7 +61012,11 @@ async function refreshProgrammerPanels(options = {}) {
         setStatus(message, "error");
       }
       emitPremiumServiceDecisionLogs(programmer, provisionalServices);
-      renderPremiumServices(provisionalServices, programmer, { controllerReason });
+      if (isProgrammerRuntimeServicesReady(programmer.programmerId, provisionalServices)) {
+        renderPremiumServices(provisionalServices, programmer, { controllerReason });
+      } else {
+        renderPremiumServicesError(error, { controllerReason });
+      }
       return;
     }
     renderPremiumServicesError(error, { controllerReason });
@@ -58616,6 +61155,39 @@ function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", prog
 
   const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedProgrammerId = String(programmerId || "").trim();
+  const getProvisioningRank = (appInfo) => {
+    const guid = String(appInfo?.guid || "").trim();
+    if (!guid) {
+      return 0;
+    }
+    if (hasPassVaultServiceClientCredentials(normalizedProgrammerId, appInfo)) {
+      return 3;
+    }
+    const softwareStatement = firstNonEmptyString([
+      String(appInfo?.softwareStatement || "").trim(),
+      extractSoftwareStatementFromAppData(appInfo?.appData || null),
+      extractSoftwareStatementFromAppData(appInfo),
+    ]);
+    if (softwareStatement) {
+      return 2;
+    }
+    return 1;
+  };
+  const selectBestCandidate = (appInfos = []) => {
+    const rankedCandidates = (Array.isArray(appInfos) ? appInfos : [])
+      .filter((appInfo) => appInfo?.guid)
+      .slice()
+      .sort((left, right) => {
+        const rankDelta = getProvisioningRank(right) - getProvisioningRank(left);
+        if (rankDelta !== 0) {
+          return rankDelta;
+        }
+        return String(left?.appName || left?.guid || "").localeCompare(String(right?.appName || right?.guid || ""), undefined, {
+          sensitivity: "base",
+        });
+      });
+    return rankedCandidates[0] || null;
+  };
   const cachedAuthContext = normalizedRequestorId ? getRequestorScopedRestV2AuthContext(normalizedRequestorId) : null;
   if (
     cachedAuthContext &&
@@ -58623,19 +61195,22 @@ function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", prog
     (!normalizedProgrammerId || String(cachedAuthContext.programmerId || "").trim() === normalizedProgrammerId)
   ) {
     const cachedMatch = candidates.find((item) => item.guid === cachedAuthContext.preferredAppGuid) || null;
-    if (cachedMatch) {
+    if (cachedMatch && getProvisioningRank(cachedMatch) > 1) {
       return cachedMatch;
     }
   }
 
   if (normalizedRequestorId) {
-    const mapped = candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) || null;
+    const mappedCandidates = candidates.filter((appInfo) =>
+      appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)
+    );
+    const mapped = selectBestCandidate(mappedCandidates);
     if (mapped) {
       return mapped;
     }
   }
 
-  return candidates.length === 1 ? candidates[0] : null;
+  return selectBestCandidate(candidates) || (candidates.length === 1 ? candidates[0] : null);
 }
 
 function normalizeScope(scope) {
@@ -59115,6 +61690,431 @@ function extractAdobeConsoleGrantedAuthorities(payload = null) {
   return output;
 }
 
+async function buildConsoleContext(session, reason = "post-login", options = {}) {
+  const currentSession = session && typeof session === "object" ? session : {};
+  const previousConsole = currentSession?.console && typeof currentSession.console === "object" ? currentSession.console : {};
+  const environment = getActiveAdobePassEnvironment();
+  const accessToken = normalizeBearerTokenValue(firstNonEmptyString([currentSession?.accessToken]));
+  const hydratedAt = new Date().toISOString();
+  const programmerAccess = resolveProgrammerAccessContext(currentSession);
+  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
+  const pageContextTargetRef = { target: null };
+  let csrfToken = firstNonEmptyString([previousConsole?.csrfToken, state.consoleCsrfToken, "NO-TOKEN"]);
+  let transport = firstNonEmptyString([previousConsole?.transport]);
+  let pageContextOrigin = firstNonEmptyString([previousConsole?.pageContextOrigin]);
+  let pageContextUrl = firstNonEmptyString([previousConsole?.pageContextUrl]);
+
+  const syncConsoleFetchMeta = (result = null) => {
+    if (!result || typeof result !== "object") {
+      return;
+    }
+
+    const responseHeaders = result?.headers && typeof result.headers === "object" ? result.headers : {};
+    const nextCsrfToken = String(
+      firstNonEmptyString([
+        responseHeaders["x-csrf-token"],
+        responseHeaders["X-CSRF-Token"],
+        csrfToken,
+        state.consoleCsrfToken,
+      ]) || ""
+    ).trim();
+    if (nextCsrfToken) {
+      csrfToken = nextCsrfToken;
+      state.consoleCsrfToken = nextCsrfToken;
+    }
+    transport = firstNonEmptyString([result?.shell ? "page-context" : "", result?.transport, transport]);
+    pageContextOrigin = firstNonEmptyString([result?.pageContext?.origin, pageContextOrigin]);
+    pageContextUrl = firstNonEmptyString([result?.pageContext?.url, pageContextUrl]);
+  };
+
+  if (!accessToken) {
+    setUnderparDiagnosticMarker("console_bootstrap", {
+      status: "skipped",
+      phase: "no-access-token",
+    });
+    return {
+      ...previousConsole,
+      environmentId: String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key,
+      environmentLabel: String(environment?.label || "Production").trim() || "Production",
+      baseUrl: ADOBE_CONSOLE_BASE,
+      csrfToken: String(state.consoleCsrfToken || "").trim(),
+      transport: "",
+      pageContextOrigin: "",
+      pageContextUrl: "",
+      configurationVersion: 0,
+      extendedProfile: null,
+      roles: [],
+      channels: [],
+      programmers: [],
+      hydratedAt,
+      programmerAccess,
+      status: "unavailable",
+      errors: {
+        extendedProfile: "Adobe IMS access token is unavailable.",
+        configurationVersion: "Adobe IMS access token is unavailable.",
+        channels: "Adobe IMS access token is unavailable.",
+        programmers: "Adobe IMS access token is unavailable.",
+      },
+    };
+  }
+
+  if (!programmerAccess.eligible) {
+    setUnderparDiagnosticMarker("console_bootstrap", {
+      status: "restricted",
+      phase: "org-selection-required",
+      configurationVersion: 0,
+      authoritiesCount: 0,
+      hasExtendedProfile: false,
+    });
+    return {
+      ...previousConsole,
+      environmentId: String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key,
+      environmentLabel: String(environment?.label || "Production").trim() || "Production",
+      baseUrl: ADOBE_CONSOLE_BASE,
+      csrfToken: String(state.consoleCsrfToken || "").trim(),
+      transport: "",
+      pageContextOrigin: "",
+      pageContextUrl: "",
+      configurationVersion: 0,
+      extendedProfile: null,
+      roles: [],
+      channels: [],
+      programmers: [],
+      hydratedAt,
+      programmerAccess,
+      status: "org-selection-required",
+      errors: {
+        extendedProfile: "",
+        configurationVersion: "",
+        channels: "",
+        programmers: "",
+      },
+    };
+  }
+
+  setUnderparDiagnosticMarker("console_bootstrap", {
+    status: "pending",
+    phase: "fetch",
+    forceRefresh: options?.forceRefresh === true,
+  });
+  log(`Hydrating Adobe Pass console context from ${ADOBE_CONSOLE_BASE} (${reason}).`);
+
+  const buildCommonRequestOptions = () => ({
+    timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
+    accessToken,
+    allowTemporaryPageContextTab,
+    preferredTabId,
+    pageContextTargetRef,
+    headers: {
+      Authorization: `bearer ${accessToken}`,
+      "X-CSRF-Token": firstNonEmptyString([csrfToken, state.consoleCsrfToken, "NO-TOKEN"]),
+    },
+  });
+
+  try {
+    const extendedProfileResult = await settle(() =>
+      fetchAdobeConsoleJsonWithLoginButtonFallback(
+        [`${ADOBE_CONSOLE_BASE}/rest/api/user/extendedProfile`],
+        "Console extended profile",
+        buildCommonRequestOptions()
+      )
+    );
+    if (extendedProfileResult.ok) {
+      syncConsoleFetchMeta(extendedProfileResult.value);
+    }
+
+    const configurationVersionResult = await settle(() =>
+      fetchAdobeConsoleJsonWithLoginButtonFallback(
+        [`${ADOBE_CONSOLE_BASE}/rest/api/config/latestActivatedConsoleConfigurationVersion`],
+        "Console configuration version",
+        buildCommonRequestOptions()
+      )
+    );
+    if (configurationVersionResult.ok) {
+      syncConsoleFetchMeta(configurationVersionResult.value);
+    }
+
+    const extendedProfile =
+      extendedProfileResult.ok && extendedProfileResult.value?.parsed && typeof extendedProfileResult.value.parsed === "object"
+        ? extendedProfileResult.value.parsed
+        : null;
+    const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(configurationVersionResult.ok ? configurationVersionResult.value?.parsed : null, 0);
+    const configurationVersionMissingError = configurationVersion > 0
+      ? null
+      : new Error("Console did not return an activated configuration version.");
+    const [channelsResult, programmersResult] =
+      configurationVersion > 0
+        ? await Promise.all([
+            settle(() =>
+              fetchConsoleChannelsFromApi({
+                accessToken,
+                configurationVersion,
+                allowTemporaryPageContextTab,
+                pageContextTargetRef,
+                preferredTabId,
+              })
+            ),
+            settle(() =>
+              fetchProgrammersFromApi({
+                accessToken,
+                configurationVersion,
+                requireEntities: false,
+                allowTemporaryPageContextTab,
+                pageContextTargetRef,
+                preferredTabId,
+              })
+            ),
+          ])
+        : [
+            {
+              ok: false,
+              error: configurationVersionMissingError,
+            },
+            {
+              ok: false,
+              error: configurationVersionMissingError,
+            },
+          ];
+
+    const channels = channelsResult.ok ? channelsResult.value : [];
+    const fallbackProgrammers = buildProgrammerEntitiesFromConsoleBootstrap({
+      extendedProfile,
+      profile: extendedProfile,
+    });
+    const programmers = programmersResult.ok
+      ? programmersResult.value
+      : fallbackProgrammers.length > 0
+        ? fallbackProgrammers
+        : [];
+    const roles = extractAdobeConsoleGrantedAuthorities(extendedProfile);
+    const errors = {
+      extendedProfile: extendedProfileResult.ok ? "" : serializeError(extendedProfileResult.error),
+      configurationVersion:
+        configurationVersionResult.ok && configurationVersion > 0
+          ? ""
+          : configurationVersionResult.ok
+            ? "Console did not return an activated configuration version."
+            : serializeError(configurationVersionResult.error),
+      channels: channelsResult.ok ? "" : serializeError(channelsResult.error),
+      programmers: programmersResult.ok ? "" : serializeError(programmersResult.error),
+    };
+    const successfulSegments = [
+      extendedProfile ? 1 : 0,
+      configurationVersion > 0 ? 1 : 0,
+      channelsResult.ok ? 1 : 0,
+      programmersResult.ok ? 1 : 0,
+    ].reduce((total, value) => total + value, 0);
+    const nextConsoleContext = {
+      ...previousConsole,
+      environmentId: String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key,
+      environmentLabel: String(environment?.label || "Production").trim() || "Production",
+      baseUrl: ADOBE_CONSOLE_BASE,
+      csrfToken: String(firstNonEmptyString([csrfToken, state.consoleCsrfToken, ""]) || "").trim(),
+      transport,
+      pageContextOrigin,
+      pageContextUrl,
+      configurationVersion,
+      extendedProfile,
+      roles,
+      channels,
+      programmers,
+      programmersApiEndpoint: firstNonEmptyString([state.programmersApiEndpoint, previousConsole?.programmersApiEndpoint]),
+      hydratedAt,
+      programmerAccess,
+      status: successfulSegments === 4 ? "ready" : successfulSegments > 0 ? "limited" : "unavailable",
+      errors,
+    };
+
+    setUnderparDiagnosticMarker("console_bootstrap", {
+      status: extendedProfile ? "success" : "error",
+      phase: extendedProfile ? "complete" : "failed",
+      forceRefresh: options?.forceRefresh === true,
+      configurationVersion: Number(configurationVersion || 0),
+      authoritiesCount: Array.isArray(roles) ? roles.length : 0,
+      hasExtendedProfile: Boolean(extendedProfile),
+      error: !extendedProfile ? errors.extendedProfile : "",
+    });
+    return nextConsoleContext;
+  } catch (error) {
+    const resolvedError = error instanceof Error ? error : new Error(String(error));
+    setUnderparDiagnosticMarker("console_bootstrap", {
+      status: "error",
+      phase: "failed",
+      forceRefresh: options?.forceRefresh === true,
+      error: resolvedError.message,
+    });
+    throw resolvedError;
+  } finally {
+    await closeTemporaryAdobePageContextTarget(pageContextTargetRef?.target?.temporaryTarget || null).catch(() => null);
+  }
+}
+
+function mergeCmContextIntoLoginData(loginData = {}, cmContext = null) {
+  const current = loginData && typeof loginData === "object" ? loginData : {};
+  const token = normalizeBearerTokenValue(firstNonEmptyString([cmContext?.cmuToken, current?.cmConsoleAccessToken]));
+  if (!token) {
+    return current;
+  }
+
+  const tokenClaims = parseJwtPayload(token) || {};
+  const expiresAt = coercePositiveNumber(Date.parse(firstNonEmptyString([cmContext?.cmuTokenExpiresAt]))) ||
+    coercePositiveNumber(resolveAuthResponseExpiry(token, coercePositiveNumber(tokenClaims?.expires_in))?.expiresAt) ||
+    coercePositiveNumber(current?.cmConsoleExpiresAt);
+
+  return {
+    ...current,
+    cmConsoleAccessToken: token,
+    cmConsoleExpiresAt: expiresAt,
+    cmConsoleScope: compactStorageString(
+      firstNonEmptyString([cmContext?.cmuTokenScope, tokenClaims?.scope, current?.cmConsoleScope]),
+      2048
+    ),
+    cmConsoleImsSession: mergeImsSessionSnapshots(
+      current?.cmConsoleImsSession && typeof current.cmConsoleImsSession === "object" ? current.cmConsoleImsSession : null,
+      {
+        ...(deriveImsSessionSnapshotFromToken(token) || {}),
+        clientId: firstNonEmptyString([cmContext?.cmuTokenClientId, tokenClaims?.client_id, tokenClaims?.clientId]),
+        userId: firstNonEmptyString([cmContext?.cmuTokenUserId, tokenClaims?.user_id, tokenClaims?.userId]),
+        scope: firstNonEmptyString([cmContext?.cmuTokenScope, tokenClaims?.scope]),
+        expiresAt,
+      }
+    ),
+  };
+}
+
+function buildConsoleBootstrapStateFromContext(consoleContext = null, loginData = null) {
+  if (!consoleContext || typeof consoleContext !== "object") {
+    return null;
+  }
+
+  return {
+    accessToken: normalizeBearerTokenValue(firstNonEmptyString([loginData?.accessToken])),
+    fetchedAt: coercePositiveNumber(Date.parse(firstNonEmptyString([consoleContext?.hydratedAt]))) || Date.now(),
+    extendedProfile:
+      consoleContext?.extendedProfile && typeof consoleContext.extendedProfile === "object"
+        ? consoleContext.extendedProfile
+        : null,
+    grantedAuthorities: Array.isArray(consoleContext?.roles) ? consoleContext.roles.slice() : [],
+    configurationVersion: Number(consoleContext?.configurationVersion || 0),
+    channels: Array.isArray(consoleContext?.channels) ? consoleContext.channels.slice() : [],
+    programmersApiEndpoint: firstNonEmptyString([consoleContext?.programmersApiEndpoint]),
+    errors: {
+      extendedProfile: firstNonEmptyString([consoleContext?.errors?.extendedProfile]),
+      configurationVersion: firstNonEmptyString([consoleContext?.errors?.configurationVersion]),
+      channels: firstNonEmptyString([consoleContext?.errors?.channels]),
+      programmers: firstNonEmptyString([consoleContext?.errors?.programmers]),
+    },
+  };
+}
+
+function applyHydratedSessionContextsToState(loginData = null, options = {}) {
+  const currentSession = loginData && typeof loginData === "object" ? loginData : state.loginData || null;
+  if (!currentSession || typeof currentSession !== "object") {
+    return;
+  }
+
+  const consoleContext = currentSession?.console && typeof currentSession.console === "object" ? currentSession.console : null;
+  const cmContext = currentSession?.cm && typeof currentSession.cm === "object" ? currentSession.cm : null;
+  const preserveExistingOnFailure = options?.preserveExistingOnFailure === true;
+  const normalizedReason = String(options?.reason || "post-login").trim() || "post-login";
+  const consoleProgrammers = Array.isArray(consoleContext?.programmers) ? consoleContext.programmers : [];
+  const cmRequiresOrgSelection = cmContext?.status === "org-selection-required";
+
+  state.consoleBootstrapState = buildConsoleBootstrapStateFromContext(consoleContext, currentSession);
+  state.consoleCsrfToken = firstNonEmptyString([consoleContext?.csrfToken, state.consoleCsrfToken]);
+  state.programmersApiEndpoint = firstNonEmptyString([consoleContext?.programmersApiEndpoint, state.programmersApiEndpoint]);
+
+  if (!(preserveExistingOnFailure && consoleProgrammers.length === 0 && Array.isArray(state.programmers) && state.programmers.length > 0)) {
+    applyProgrammerEntities(consoleProgrammers);
+  }
+
+  const catalog = buildCmTenantsCatalogFromContext(cmContext, state.cmTenantsCatalog);
+  if (catalog) {
+    state.cmTenantsCatalog = catalog;
+    state.cmTenantsCatalogHydrated = true;
+    state.cmTenantsCatalogRuntimeFresh = true;
+    state.cmTenantsCatalogFetchAttempted = true;
+    syncCmConsoleBootstrapSummaryFromCatalog(catalog, {
+      errors: [
+        cmContext?.errors?.reports,
+        cmContext?.errors?.tenants,
+        cmContext?.errors?.cmuToken,
+      ].filter(Boolean),
+    });
+    void persistCmTenantsCatalog(catalog).catch(() => false);
+  }
+
+  const cmToken = normalizeBearerTokenValue(
+    firstNonEmptyString([currentSession?.cmConsoleAccessToken, cmContext?.cmuToken, state.cmLastHydratedAccessToken])
+  );
+  const cmCatalogReady = hasCmTenantsCatalogEntries(state.cmTenantsCatalog);
+  state.cmTenantsPrecheckPending = false;
+  state.cmTenantsPrecheckComplete = cmCatalogReady;
+  state.cmTenantsPrecheckLastError = cmCatalogReady || cmRequiresOrgSelection
+    ? ""
+    : firstNonEmptyString([cmContext?.errors?.tenants, cmContext?.errors?.cmuToken, cmContext?.errors?.reports]);
+  state.cmConsoleBootstrapQualified =
+    Boolean(cmCatalogReady) && Boolean(cmToken && tokenSupportsCmConsoleRequests(cmToken));
+  state.cmLastHydratedAccessToken = cmToken;
+  if (cmToken) {
+    emitCmConsoleTokenForTesting(cmToken, `post-login-context:${normalizedReason}`);
+    void persistResolvedCmGlobalAuthState(cmToken, `post-login-context:${normalizedReason}`).catch(() => null);
+  }
+  setUnderparDiagnosticMarker("cm_precheck", {
+    status: cmCatalogReady ? "success" : cmRequiresOrgSelection ? "restricted" : currentSession?.accessToken ? "error" : "skipped",
+    reason: normalizedReason,
+    phase: cmCatalogReady ? "complete" : cmRequiresOrgSelection ? "org-selection-required" : currentSession?.accessToken ? "failed" : "no-session",
+    tenantCount: Number(state.cmTenantsCatalog?.tenants?.length || 0),
+    sourceUrl: String(state.cmTenantsCatalog?.sourceUrl || ""),
+    error: cmCatalogReady || cmRequiresOrgSelection ? "" : state.cmTenantsPrecheckLastError,
+  });
+  syncMediaCompanySelectAvailability();
+  syncGlobalQuickLaunchButtons();
+}
+
+async function hydratePostLoginSessionData(session, options = {}) {
+  const currentSession = session && typeof session === "object" ? session : null;
+  if (!currentSession?.accessToken) {
+    return currentSession;
+  }
+
+  const normalizedReason = String(options?.reason || "post-login").trim() || "post-login";
+  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
+  const [nextConsoleContext, nextCmContext, nextUnifiedShellContext] = await Promise.all([
+    buildConsoleContext(currentSession, normalizedReason, {
+      preferredTabId,
+      allowTemporaryPageContextTab,
+      forceRefresh: options?.forceRefresh === true,
+    }),
+    buildCmContext(currentSession, normalizedReason, {
+      preferredTabId,
+      allowTemporaryTab: allowTemporaryPageContextTab,
+    }),
+    buildUnifiedShellContext(currentSession, normalizedReason),
+  ]);
+  const existingOrganizations = resolveCachedOrganizationsFromLoginData(currentSession);
+  const activeOrganizationHint = buildRestrictedOrganizationContext(existingOrganizations, currentSession, null).activeOrganization;
+  const mergedDetectedOrganizations = mergeRestrictedDetectedOrganizations({
+    existingOrganizations: collectCanonicalRestrictedDetectedOrganizations(currentSession, existingOrganizations),
+    additionalOrganizations: Array.isArray(nextUnifiedShellContext?.organizations) ? nextUnifiedShellContext.organizations : [],
+    activeOrganizationHint,
+  });
+  const nextLoginData = mergeCmContextIntoLoginData(
+    {
+      ...currentSession,
+      console: nextConsoleContext,
+      cm: nextCmContext,
+      unifiedShell: nextUnifiedShellContext,
+      detectedOrganizations: mergedDetectedOrganizations,
+    },
+    nextCmContext
+  );
+
+  return buildNormalizedLoginData(nextLoginData);
+}
+
 function hasAdobeConsoleProgrammerAccess(grantedAuthorities = []) {
   const normalizedAuthorities = (Array.isArray(grantedAuthorities) ? grantedAuthorities : [])
     .map((value) => String(value || "").trim().toUpperCase())
@@ -59144,66 +62144,94 @@ async function fetchAdobeConsoleBootstrapState(accessToken = "", options = {}) {
   }
 
   const timeoutMs = Math.max(1000, Number(options.timeoutMs || PROGRAMMERS_FETCH_TIMEOUT_MS));
-  const shellSnapshot = normalizeExperienceCloudShellSnapshot(state.consoleBootstrapState?.shellSnapshot || null);
-  let extendedProfileResponse = null;
-  let maintenanceStatusResponse = null;
-  let configurationVersionResponse = null;
-  let grantedAuthorities = [];
-
-  const resolvedConsoleAccessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([shellSnapshot?.imsToken, normalizedAccessToken])
-  );
-  const commonRequestOptions = {
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const pageContextTargetRef =
+    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
+      ? options.pageContextTargetRef
+      : null;
+  let csrfToken = firstNonEmptyString([state.consoleCsrfToken, "NO-TOKEN"]);
+  const buildCommonRequestOptions = () => ({
     timeoutMs,
-    preferAuthenticatedHeaders: true,
-    allowInteractiveAuthBootstrap: false,
-    headers: resolvedConsoleAccessToken
-      ? {
-          Authorization: `bearer ${resolvedConsoleAccessToken}`,
-        }
-      : {},
-  };
+    accessToken: normalizedAccessToken,
+    allowTemporaryPageContextTab,
+    preferredTabId,
+    pageContextTargetRef,
+    headers: {
+      Authorization: `bearer ${normalizedAccessToken}`,
+      "X-CSRF-Token": firstNonEmptyString([csrfToken, state.consoleCsrfToken, "NO-TOKEN"]),
+    },
+  });
 
-  if (!extendedProfileResponse) {
-    extendedProfileResponse = await fetchAdobeConsoleJsonWithAuthVariants(
+  const extendedProfileResult = await settle(() =>
+    fetchAdobeConsoleJsonWithLoginButtonFallback(
       [`${ADOBE_CONSOLE_BASE}/rest/api/user/extendedProfile`],
       "Console extended profile",
-      commonRequestOptions
-    );
-    grantedAuthorities = extractAdobeConsoleGrantedAuthorities(extendedProfileResponse?.parsed);
+      buildCommonRequestOptions()
+    )
+  );
+  if (extendedProfileResult.ok) {
+    const responseHeaders =
+      extendedProfileResult.value?.headers && typeof extendedProfileResult.value.headers === "object"
+        ? extendedProfileResult.value.headers
+        : {};
+    const nextCsrfToken = String(
+      firstNonEmptyString([
+        responseHeaders["x-csrf-token"],
+        responseHeaders["X-CSRF-Token"],
+        csrfToken,
+        state.consoleCsrfToken,
+      ]) || ""
+    ).trim();
+    if (nextCsrfToken) {
+      csrfToken = nextCsrfToken;
+      state.consoleCsrfToken = nextCsrfToken;
+    }
   }
-
-  if (!maintenanceStatusResponse) {
-    maintenanceStatusResponse = await fetchAdobeConsoleJsonWithAuthVariants(
-      [`${ADOBE_CONSOLE_BASE}/rest/api/admin/maintenance/status`],
-      "Console maintenance status",
-      commonRequestOptions
-    ).catch(() => null);
-  }
-
-  if (!configurationVersionResponse) {
-    configurationVersionResponse = await fetchAdobeConsoleJsonWithAuthVariants(
+  const configurationVersionResult = await settle(() =>
+    fetchAdobeConsoleJsonWithLoginButtonFallback(
       [`${ADOBE_CONSOLE_BASE}/rest/api/config/latestActivatedConsoleConfigurationVersion`],
       "Console configuration version",
-      commonRequestOptions
-    ).catch(() => null);
-  }
+      buildCommonRequestOptions()
+    )
+  );
+  const extendedProfileResponse = extendedProfileResult.ok ? extendedProfileResult.value : null;
+  const configurationVersionResponse = configurationVersionResult.ok ? configurationVersionResult.value : null;
 
   const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(configurationVersionResponse?.parsed, 0);
+  const extendedProfile =
+    extendedProfileResponse?.parsed && typeof extendedProfileResponse.parsed === "object"
+      ? extendedProfileResponse.parsed
+      : null;
+  const configurationVersionError = !configurationVersionResult.ok
+    ? configurationVersionResult.error instanceof Error
+      ? configurationVersionResult.error.message
+      : String(configurationVersionResult.error)
+    : !(configurationVersion > 0)
+      ? "Console configuration version did not resolve."
+      : "";
+  const extendedProfileError = !extendedProfileResult.ok
+    ? extendedProfileResult.error instanceof Error
+      ? extendedProfileResult.error.message
+      : String(extendedProfileResult.error)
+    : !extendedProfile
+      ? "Console extended profile did not resolve."
+      : "";
+  if (!extendedProfile) {
+    throw new Error(extendedProfileError || "Console extended profile did not resolve.");
+  }
+
   return {
-    accessToken: firstNonEmptyString([shellSnapshot?.imsToken, resolvedConsoleAccessToken]),
+    accessToken: normalizedAccessToken,
     fetchedAt: Date.now(),
-    extendedProfile:
-      extendedProfileResponse?.parsed && typeof extendedProfileResponse.parsed === "object"
-        ? extendedProfileResponse.parsed
-        : null,
-    grantedAuthorities,
-    shellSnapshot,
-    maintenanceStatus:
-      maintenanceStatusResponse?.parsed && typeof maintenanceStatusResponse.parsed === "object"
-        ? maintenanceStatusResponse.parsed
-        : maintenanceStatusResponse?.parsed ?? null,
+    extendedProfile,
+    grantedAuthorities: extractAdobeConsoleGrantedAuthorities(extendedProfile),
     configurationVersion,
+    channels: Array.isArray(state.consoleBootstrapState?.channels) ? state.consoleBootstrapState.channels : [],
+    errors: {
+      extendedProfile: extendedProfileError,
+      configurationVersion: configurationVersionError,
+    },
   };
 }
 
@@ -59491,95 +62519,60 @@ async function fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel
   const credentials = String(options.credentials || "include");
   const mode = String(options.mode || "cors");
   const timeoutMs = Math.max(0, Number(options.timeoutMs || 0));
-  const preferAuthenticatedHeaders = options.preferAuthenticatedHeaders !== false;
-
-  const getHeaderVariants = () => {
-    const explicitAuthorization = firstNonEmptyString([customHeaders.Authorization, customHeaders.authorization]);
-    const explicitAccessToken = normalizeBearerTokenValue(explicitAuthorization.replace(/^Bearer\s+/i, ""));
-    const activeAccessToken = firstNonEmptyString([
+  const explicitAuthorization = firstNonEmptyString([customHeaders.Authorization, customHeaders.authorization]);
+  const explicitAccessToken = normalizeBearerTokenValue(explicitAuthorization.replace(/^Bearer\s+/i, ""));
+  const activeAccessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([
       explicitAccessToken,
+      options.accessToken,
       getPreferredAdobeConsoleAccessTokenCandidate(),
       state.loginData?.accessToken,
-    ]);
-    const variants = [];
-    if (activeAccessToken && preferAuthenticatedHeaders) {
-      variants.push(getAdobeConsoleRequestHeaders(activeAccessToken));
-      variants.push(getAdobeConsoleRequestHeaders(""));
-    }
-    if (!activeAccessToken || preferAuthenticatedHeaders === false) {
-      variants.push(getAdobeConsoleRequestHeaders(""));
-    }
-    if (activeAccessToken && !preferAuthenticatedHeaders) {
-      variants.push(getAdobeConsoleRequestHeaders(activeAccessToken));
-    }
-    return variants.filter((headers, index, list) => list.findIndex((item) => item.Authorization === headers.Authorization) === index);
-  };
+    ])
+  );
+  if (!activeAccessToken || !isProbablyJwt(activeAccessToken)) {
+    throw new Error(`${contextLabel} failed: Adobe Pass console request is missing a valid IMS bearer.`);
+  }
 
   let lastError = null;
   for (const url of urls) {
-    let bootstrapAttemptedForUrl = false;
-    let silentRefreshAttemptedForUrl = false;
-    let headerVariants = getHeaderVariants();
+    try {
+      const requestHeaders = {
+        ...getAdobeConsoleRequestHeaders(activeAccessToken),
+        ...customHeaders,
+      };
+      const fetchImpl =
+        timeoutMs > 0
+          ? (targetUrl, init) => fetchWithAbortTimeout(targetUrl, init, timeoutMs)
+          : (targetUrl, init) => fetch(targetUrl, init);
+      const response = await fetchImpl(url, {
+        method,
+        credentials,
+        mode,
+        headers: requestHeaders,
+        ...(body != null ? { body } : {}),
+      });
+      captureAdobeConsoleResponseState(response);
 
-    headersLoop: for (let headerIndex = 0; headerIndex < headerVariants.length; headerIndex += 1) {
-      const headers = headerVariants[headerIndex];
-      for (let round = 0; round < 2; round += 1) {
-        try {
-          const requestHeaders = {
-            ...headers,
-            ...customHeaders,
-          };
-          const fetchImpl =
-            timeoutMs > 0
-              ? (targetUrl, init) => fetchWithAbortTimeout(targetUrl, init, timeoutMs)
-              : (targetUrl, init) => fetch(targetUrl, init);
-          const response = await fetchImpl(url, {
-            method,
-            credentials,
-            mode,
-            headers: requestHeaders,
-            ...(body != null ? { body } : {}),
-          });
-          captureAdobeConsoleResponseState(response);
-
-          const text = await response.text().catch(() => "");
-          const parsed = parseJsonText(text, null);
-          if (response.ok) {
-            return {
-              url,
-              parsed: parsed ?? {},
-              text,
-              status: response.status,
-            };
-          }
-
-          if (
-            isAdobeConsoleTokenExpiredResponse(response.status, parsed, text) &&
-            !silentRefreshAttemptedForUrl &&
-            firstNonEmptyString([state.loginData?.accessToken])
-          ) {
-            silentRefreshAttemptedForUrl = true;
-            const refreshed = await refreshSessionNoTouch();
-            if (refreshed) {
-              headerVariants = getHeaderVariants();
-              bootstrapAttemptedForUrl = false;
-              headerIndex = -1;
-              continue headersLoop;
-            }
-          }
-
-          const message = getAdobeConsoleErrorMessage(parsed, text, response.statusText);
-          lastError = new Error(`${contextLabel} failed (${response.status}): ${message}`);
-          break;
-        } catch (error) {
-          const timedOut = Boolean(timeoutMs > 0 && (error?.name === "AbortError" || /abort/i.test(String(error?.message || ""))));
-          const message = timedOut
-            ? `${contextLabel} timed out after ${timeoutMs}ms.`
-            : normalizeHttpErrorMessage(error instanceof Error ? error.message : String(error));
-          lastError = new Error(message || `${contextLabel} request failed.`);
-          break;
-        }
+      const text = await response.text().catch(() => "");
+      const parsed = parseJsonText(text, null);
+      if (response.ok) {
+        return {
+          url,
+          parsed: parsed ?? {},
+          text,
+          status: response.status,
+          headers: toDebugHeadersObject(response.headers || new Headers()),
+        };
       }
+
+      const message = getAdobeConsoleErrorMessage(parsed, text, response.statusText);
+      lastError = new Error(`${contextLabel} failed (${response.status}): ${message}`);
+    } catch (error) {
+      const timedOut = Boolean(timeoutMs > 0 && (error?.name === "AbortError" || /abort/i.test(String(error?.message || ""))));
+      const message = timedOut
+        ? `${contextLabel} timed out after ${timeoutMs}ms.`
+        : normalizeHttpErrorMessage(error instanceof Error ? error.message : String(error));
+      lastError = new Error(message || `${contextLabel} request failed.`);
     }
   }
 
@@ -59604,6 +62597,10 @@ async function fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, 
   const accessToken = normalizeBearerTokenValue(
     firstNonEmptyString([options.accessToken, getPreferredAdobeConsoleAccessTokenCandidate()])
   );
+  const pageContextTargetRef =
+    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
+      ? options.pageContextTargetRef
+      : null;
   const method = String(options.method || "GET")
     .trim()
     .toUpperCase();
@@ -59623,6 +62620,7 @@ async function fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, 
       body,
       credentials,
       accessToken,
+      pageContextTargetRef,
       preferredTabId,
       preferShellAccessToken: options.preferShellAccessToken !== false,
       allowTemporaryTab: allowTemporaryPageContextTab,
@@ -59642,6 +62640,37 @@ async function fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, 
   }
 
   return null;
+}
+
+async function fetchAdobeConsoleJsonWithLoginButtonFallback(urlCandidates, contextLabel, requestOptions = null) {
+  const options = requestOptions && typeof requestOptions === "object" ? requestOptions : {};
+  const directResult = await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel, {
+    ...options,
+    preferShellAccessToken: false,
+    preferAuthenticatedHeaders: options.preferAuthenticatedHeaders !== false,
+  }).catch((error) => {
+    return {
+      __underparError: error instanceof Error ? error : new Error(String(error)),
+    };
+  });
+  if (directResult && typeof directResult === "object" && !directResult.__underparError) {
+    return directResult;
+  }
+
+  const pageContextResult = await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, contextLabel, {
+    ...options,
+    allowTemporaryPageContextTab: options.allowTemporaryPageContextTab === true,
+    pageContextTargetRef:
+      options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
+        ? options.pageContextTargetRef
+        : null,
+    preferShellAccessToken: false,
+  }).catch(() => null);
+  if (pageContextResult) {
+    return pageContextResult;
+  }
+
+  throw directResult?.__underparError || new Error(`${contextLabel} failed.`);
 }
 
 function normalizeRegisteredApplicationEntityRef(value = "") {
@@ -59905,19 +62934,22 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
     return {};
   }
 
+  const currentSession = options?.session && typeof options.session === "object" ? options.session : state.loginData || null;
   const resolvedProgrammer =
-    state.programmers.find((item) => String(item?.programmerId || "") === String(programmerId || "")) || null;
+    state.programmers.find((item) => String(item?.programmerId || "").trim() === String(programmerId || "").trim()) || null;
   const forceRefresh = options.forceRefresh === true;
-  const skipDetailBackfill = options.skipDetailBackfill !== false;
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const requestTimeoutMs = Math.max(1000, Number(options.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS));
+
   if (forceRefresh) {
     state.applicationsByProgrammerId.delete(programmerId);
   }
 
   const cachedApplications = getCurrentProgrammerApplicationsSnapshot(programmerId);
-  if (!forceRefresh && cachedApplications) {
+  const cachedApplicationsAreLive =
+    cachedApplications &&
+    typeof cachedApplications === "object" &&
+    !Array.isArray(cachedApplications) &&
+    !isPassVaultBackedValue(cachedApplications);
+  if (!forceRefresh && cachedApplicationsAreLive) {
     emitPremiumDecisionDebugEvent(
       {
         phase: "premium-applications-cache-hit",
@@ -59929,284 +62961,61 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
     );
     return cachedApplications;
   }
-
-  const activeAccessToken = normalizeBearerTokenValue(getPreferredAdobeConsoleAccessTokenCandidate());
-  if (activeAccessToken) {
-    await ensureConsoleBootstrapState(activeAccessToken, {
-      forceRefresh: false,
-    }).catch(() => null);
+  if (!forceRefresh && cachedApplications && !cachedApplicationsAreLive) {
+    emitPremiumDecisionDebugEvent(
+      {
+        phase: "premium-applications-vault-seed-bypass",
+        programmerId: String(programmerId || ""),
+      },
+      {
+        programmer: resolvedProgrammer,
+      }
+    );
   }
-
-  const expectedEntityRefs = uniquePreserveOrder(
-    (Array.isArray(resolvedProgrammer?.applications) ? resolvedProgrammer.applications : [])
-      .map((appReference) => normalizeRegisteredApplicationEntityRef(appReference))
-      .filter(Boolean)
-  );
-  const urlCandidates = [
-    appendAdobeConsoleConfigurationVersion(
-      `${ADOBE_CONSOLE_BASE}/rest/api/applications?programmer=${encodeURIComponent(programmerId)}`
-    ),
-    `${ADOBE_CONSOLE_BASE}/rest/api/applications?programmer=${encodeURIComponent(programmerId)}`,
-  ];
-  const uniqueUrlCandidates = [...new Set(urlCandidates)];
-  const expectedGuidSet = new Set(
-    expectedEntityRefs
-      .map((entityRef) => extractApplicationGuid(entityRef))
-      .filter(Boolean)
-  );
-  const expectedCount = expectedGuidSet.size;
-  const bulkRetrieveRequest = buildRegisteredApplicationBulkRetrieveRequest(expectedEntityRefs);
-  const shouldUseBoundedBulkRetrieve = Boolean(bulkRetrieveRequest && expectedCount > 0);
 
   emitPremiumDecisionDebugEvent(
     {
       phase: "premium-applications-request",
       method: "GET",
       programmerId: String(programmerId || ""),
-      lookupUrls: uniquePreserveOrder([
-        String(bulkRetrieveRequest?.url || ""),
-        ...uniqueUrlCandidates,
-      ]).slice(0, 12),
       forceRefresh,
-      expectedCount,
-      bulkEntityCount: Number(bulkRetrieveRequest?.entities?.length || 0),
-      requestTimeoutMs,
+      requestTimeoutMs: Math.max(1000, Number(options.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS)),
     },
     {
       programmer: resolvedProgrammer,
     }
   );
 
-  const byGuid = {};
-  const mergeApplicationEntity = (item) => {
-    const guid = resolveApplicationGuidFromEntityData(item);
-    if (!guid) {
-      return false;
-    }
-    const existing = byGuid[guid];
-    const merged = {
-      ...(existing && typeof existing === "object" ? existing : {}),
-      ...(item && typeof item === "object" ? item : {}),
-      id: guid,
-    };
-    byGuid[guid] = merged;
-    return true;
-  };
-  let successCount = 0;
-  let lastError = null;
-  if (bulkRetrieveRequest) {
-    try {
-      const bulkPayload =
-        (await fetchAdobeConsoleJsonWithShellPageContextVariants([bulkRetrieveRequest.url], "Applications load", {
-          timeoutMs: requestTimeoutMs,
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: bulkRetrieveRequest.body,
-          accessToken: activeAccessToken,
-          preferredTabId,
-          allowTemporaryPageContextTab,
-          preferShellAccessToken: true,
-        }).catch(() => null)) ||
-        (await fetchAdobeConsoleJsonWithAuthVariants([bulkRetrieveRequest.url], "Applications load", {
-          timeoutMs: requestTimeoutMs,
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: bulkRetrieveRequest.body,
-          preferAuthenticatedHeaders: true,
-        }));
-      successCount += 1;
-      emitPremiumDecisionDebugEvent(
-        {
-          phase: "premium-applications-response",
-          programmerId: String(programmerId || ""),
-          method: "POST",
-          status: Number(bulkPayload?.status || 0),
-          url: String(bulkPayload?.url || bulkRetrieveRequest.url || ""),
-          bulkEntityCount: Number(bulkRetrieveRequest.entities.length || 0),
-        },
-        {
-          programmer: resolvedProgrammer,
-        }
-      );
-
-      const items = normalizeApplicationsResponse(bulkPayload?.parsed || bulkPayload);
-      for (const item of items) {
-        mergeApplicationEntity(item);
-      }
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      emitPremiumDecisionDebugEvent(
-        {
-          phase: "premium-applications-endpoint-error",
-          programmerId: String(programmerId || ""),
-          method: "POST",
-          url: String(bulkRetrieveRequest.url || ""),
-          error: lastError.message,
-          bulkEntityCount: Number(bulkRetrieveRequest.entities.length || 0),
-        },
-        {
-          programmer: resolvedProgrammer,
-        }
-      );
-    }
-  }
-
-  if (!shouldUseBoundedBulkRetrieve) {
-    for (const lookupUrl of uniqueUrlCandidates) {
-      if (expectedCount > 0 && Object.keys(byGuid).length >= expectedCount) {
-        break;
-      }
-      let payload = null;
-      try {
-        payload =
-          (await fetchAdobeConsoleJsonWithShellPageContextVariants([lookupUrl], "Applications load", {
-            timeoutMs: requestTimeoutMs,
-            accessToken: activeAccessToken,
-            preferredTabId,
-            allowTemporaryPageContextTab,
-          }).catch(() => null)) ||
-          (await fetchAdobeConsoleJsonWithAuthVariants([lookupUrl], "Applications load", {
-            timeoutMs: requestTimeoutMs,
-            preferAuthenticatedHeaders: true,
-          }));
-        successCount += 1;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        emitPremiumDecisionDebugEvent(
-          {
-            phase: "premium-applications-endpoint-error",
-            programmerId: String(programmerId || ""),
-            method: "GET",
-            url: String(lookupUrl || ""),
-            error: lastError.message,
-          },
-          {
-            programmer: resolvedProgrammer,
-          }
-        );
-        continue;
-      }
-
-      emitPremiumDecisionDebugEvent(
-        {
-          phase: "premium-applications-response",
-          programmerId: String(programmerId || ""),
-          method: "GET",
-          status: Number(payload?.status || 0),
-          url: String(payload?.url || lookupUrl || ""),
-        },
-        {
-          programmer: resolvedProgrammer,
-        }
-      );
-
-      const items = normalizeApplicationsResponse(payload?.parsed || payload);
-      let mergedCount = 0;
-      for (const item of items) {
-        if (mergeApplicationEntity(item)) {
-          mergedCount += 1;
-        }
-      }
-    }
-  }
-
-  if (successCount === 0) {
-    const vaultRecord = getPassVaultMediaCompanyRecord(programmerId);
-    const vaultApplications = buildPassVaultApplicationsSnapshotFromRegisteredApplications(
-      getPassVaultRegisteredApplicationsByGuid(vaultRecord)
-    );
-    if (Object.keys(vaultApplications).length > 0) {
-      emitPremiumDecisionDebugEvent(
-        {
-          phase: "premium-applications-vault-fallback",
-          programmerId: String(programmerId || ""),
-          applicationCount: Object.keys(vaultApplications).length,
-        },
-        {
-          programmer: resolvedProgrammer,
-        }
-      );
-      return vaultApplications;
-    }
-    if (shouldUseBoundedBulkRetrieve && (state.cmTenantsPrecheckComplete === true || state.cmConsoleBootstrapQualified === true)) {
-      emitPremiumDecisionDebugEvent(
-        {
-          phase: "premium-applications-empty-fallback",
-          programmerId: String(programmerId || ""),
-          expectedCount,
-          error: lastError instanceof Error ? lastError.message : String(lastError || ""),
-        },
-        {
-          programmer: resolvedProgrammer,
-        }
-      );
-      return {};
-    }
-    const reason = lastError instanceof Error ? lastError.message : String(lastError || "Request failed.");
+  let result = null;
+  try {
+    result = await fetchProgrammerRegisteredApplications(currentSession, programmerId, options);
+  } catch (error) {
+    const resolvedError = error instanceof Error ? error : new Error(String(error));
     emitPremiumDecisionDebugEvent(
       {
         phase: "premium-applications-error",
         programmerId: String(programmerId || ""),
         method: "GET",
-        lookupUrls: uniqueUrlCandidates.slice(0, 12),
-        error: reason,
+        error: resolvedError.message,
       },
       {
         programmer: resolvedProgrammer,
       }
     );
-    throw (lastError instanceof Error ? lastError : new Error(reason));
+    throw resolvedError;
   }
 
-  if (!skipDetailBackfill && expectedCount > 0 && Object.keys(byGuid).length < expectedCount) {
-    const missingGuids = [...expectedGuidSet].filter((guid) => !Object.prototype.hasOwnProperty.call(byGuid, guid));
-    const detailConcurrency = Math.max(1, Math.min(4, Number(options.detailConcurrency || 4)));
-    const queueState = { index: 0 };
-    await Promise.all(
-      Array.from({ length: Math.min(detailConcurrency, missingGuids.length) }, () =>
-        (async () => {
-          while (true) {
-            const currentIndex = queueState.index;
-            queueState.index += 1;
-            if (currentIndex >= missingGuids.length) {
-              return;
-            }
-            const guid = missingGuids[currentIndex];
-            try {
-              const details = await fetchApplicationDetailsByGuid(guid, {
-                timeoutMs: requestTimeoutMs,
-                preferAuthenticatedHeaders: true,
-                preferredTabId,
-                allowTemporaryPageContextTab,
-              });
-              if (details && typeof details === "object") {
-                mergeApplicationEntity({
-                  ...details,
-                  id: guid,
-                });
-              }
-            } catch (error) {
-              emitPremiumDecisionDebugEvent(
-                {
-                  phase: "premium-application-detail-backfill-error",
-                  programmerId: String(programmerId || ""),
-                  guid: String(guid || ""),
-                  error: error instanceof Error ? error.message : String(error),
-                },
-                {
-                  programmer: resolvedProgrammer,
-                }
-              );
-            }
-          }
-        })()
-      )
-    );
-  }
+  const byGuid = {};
+  (Array.isArray(result?.applications) ? result.applications : []).forEach((item) => {
+    const guid = resolveApplicationGuidFromEntityData(item);
+    if (!guid) {
+      return;
+    }
+    byGuid[guid] = {
+      ...(item && typeof item === "object" ? item : {}),
+      id: guid,
+    };
+  });
 
   setCurrentProgrammerApplicationsSnapshot(programmerId, byGuid);
   emitPremiumDecisionDebugEvent(
@@ -60214,14 +63023,117 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
       phase: "premium-applications-normalized",
       programmerId: String(programmerId || ""),
       applicationCount: Object.keys(byGuid).length,
-      expectedCount,
-      lookupCount: successCount,
+      lookupCount: 1,
+      url: String(result?.url || ""),
+      status: Number(result?.status || 0),
     },
     {
       programmer: resolvedProgrammer,
     }
   );
   return byGuid;
+}
+
+async function ensureSelectedProgrammerApplicationsLoaded(programmer = null, options = {}) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  if (!programmerId) {
+    return {};
+  }
+
+  const forceRefresh = options.forceRefresh === true;
+  const cachedApplications = getCurrentProgrammerApplicationsSnapshot(programmerId);
+  const cachedApplicationsAreLive =
+    cachedApplications &&
+    typeof cachedApplications === "object" &&
+    !Array.isArray(cachedApplications) &&
+    !isPassVaultBackedValue(cachedApplications);
+
+  if (!forceRefresh && cachedApplicationsAreLive) {
+    return cachedApplications;
+  }
+
+  if (!forceRefresh && state.programmerApplicationsLoadPromiseByProgrammerId.has(programmerId)) {
+    return state.programmerApplicationsLoadPromiseByProgrammerId.get(programmerId);
+  }
+
+  const loadPromise = (async () => {
+    const applicationsData = await fetchApplicationsForProgrammer(programmerId, options);
+    const normalizedApplications =
+      applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
+    setCurrentProgrammerApplicationsSnapshot(programmerId, normalizedApplications);
+    return normalizedApplications;
+  })();
+
+  state.programmerApplicationsLoadPromiseByProgrammerId.set(programmerId, loadPromise);
+
+  try {
+    return await loadPromise;
+  } finally {
+    if (state.programmerApplicationsLoadPromiseByProgrammerId.get(programmerId) === loadPromise) {
+      state.programmerApplicationsLoadPromiseByProgrammerId.delete(programmerId);
+    }
+  }
+}
+
+async function fetchProgrammerRegisteredApplications(session, programmerId, options = {}) {
+  const currentSession = session && typeof session === "object" ? session : null;
+  const consoleContext = currentSession?.console && typeof currentSession.console === "object" ? currentSession.console : {};
+  const accessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([options.accessToken, currentSession?.accessToken])
+  );
+  const baseUrl = firstNonEmptyString([consoleContext?.baseUrl, ADOBE_CONSOLE_BASE]);
+  const configurationVersion = Number(
+    options.configurationVersion || consoleContext?.configurationVersion || getKnownAdobeConsoleConfigurationVersion() || 0
+  );
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const pageContextTargetRef =
+    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
+      ? options.pageContextTargetRef
+      : null;
+  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const requestTimeoutMs = Math.max(1000, Number(options.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS));
+
+  if (!accessToken || !baseUrl || configurationVersion <= 0 || !normalizedProgrammerId) {
+    throw new Error("Registered Applications request is missing console context.");
+  }
+
+  const urlCandidates = [
+    appendAdobeConsoleConfigurationVersion(
+      `${baseUrl}/rest/api/applications?programmer=${encodeURIComponent(normalizedProgrammerId)}`,
+      configurationVersion
+    ),
+  ].filter(Boolean);
+  const payload = await fetchAdobeConsoleJsonWithLoginButtonFallback(urlCandidates, "Applications load", {
+    timeoutMs: requestTimeoutMs,
+    accessToken,
+    preferAuthenticatedHeaders: true,
+    preferredTabId,
+    allowTemporaryPageContextTab,
+    pageContextTargetRef,
+  });
+
+  const responseHeaders = payload?.headers && typeof payload.headers === "object" ? payload.headers : {};
+  const nextCsrfToken = String(
+    firstNonEmptyString([
+      responseHeaders["x-csrf-token"],
+      responseHeaders["X-CSRF-Token"],
+      state.consoleCsrfToken,
+    ]) || ""
+  ).trim();
+  if (nextCsrfToken) {
+    state.consoleCsrfToken = nextCsrfToken;
+  }
+
+  return {
+    applications: normalizeApplicationsResponse(payload?.parsed || payload),
+    csrfToken: nextCsrfToken,
+    pageContext: payload?.pageContext || null,
+    transport: firstNonEmptyString([payload?.transport, payload?.shell ? "page-context" : ""]),
+    url: String(payload?.url || urlCandidates[0] || ""),
+    status: Number(payload?.status || 0),
+  };
 }
 
 function getProgrammerRegisteredApplicationGuids(programmer = null, applicationsData = {}) {
@@ -60465,16 +63377,26 @@ function schedulePremiumAppScopeHydration(programmer, options = {}) {
 
       const refreshedPremiumApps = findPremiumServiceApplications(programmer.applications || [], hydratedApplications || {});
       const existingServices = getCurrentPremiumAppsSnapshot(programmerId);
-      const mergedServices = {
-        ...refreshedPremiumApps,
-        degradation: refreshedPremiumApps?.degradation || null,
-        degradationApps: Array.isArray(refreshedPremiumApps?.degradationApps)
-          ? refreshedPremiumApps.degradationApps.filter((appInfo) => appInfo?.guid)
-          : [],
-        cm: existingServices?.cm ?? null,
-        cmMvpd: existingServices?.cmMvpd ?? null,
-        cmMvpdSelectionKey: String(existingServices?.cmMvpdSelectionKey || "").trim(),
-      };
+      const mergedServices = applyPremiumServiceRuntimeSummary(
+        programmer,
+        {
+          ...refreshedPremiumApps,
+          degradation: refreshedPremiumApps?.degradation || null,
+          degradationApps: Array.isArray(refreshedPremiumApps?.degradationApps)
+            ? refreshedPremiumApps.degradationApps.filter((appInfo) => appInfo?.guid)
+            : [],
+          resetTempPass: refreshedPremiumApps?.resetTempPass || null,
+          resetTempPassApps: Array.isArray(refreshedPremiumApps?.resetTempPassApps)
+            ? refreshedPremiumApps.resetTempPassApps.filter((appInfo) => appInfo?.guid)
+            : [],
+          cm: existingServices?.cm ?? null,
+          cmMvpd: existingServices?.cmMvpd ?? null,
+          cmMvpdSelectionKey: String(existingServices?.cmMvpdSelectionKey || "").trim(),
+        },
+        {
+          cmCatalog: state.cmTenantsCatalog,
+        }
+      );
       setCurrentPremiumAppsSnapshot(programmerId, mergedServices);
 
       const selectedProgrammer = resolveSelectedProgrammer();
@@ -60571,11 +63493,16 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
   return candidates;
 }
 
-function findPremiumServiceApplications(applicationsArray, applicationsData) {
+function findPremiumServiceApplications(applicationsArray, applicationsData, options = {}) {
+  const normalizedProgrammerId = String(options?.programmerId || "").trim();
+  const normalizedRequestorId = String(options?.requestorId || "").trim();
   const services = {
     degradation: null,
     degradationApps: [],
     esm: null,
+    esmApps: [],
+    resetTempPass: null,
+    resetTempPassApps: [],
     restV2: null,
     restV2Apps: [],
   };
@@ -60586,23 +63513,47 @@ function findPremiumServiceApplications(applicationsArray, applicationsData) {
     if (degradationAppHasRequiredScope(appInfo)) {
       services.degradationApps.push(appInfo);
     }
-    if (!services.esm && appInfo.scopes.includes(PREMIUM_SERVICE_SCOPE_BY_KEY.esm)) {
-      services.esm = appInfo;
+    if (appInfo.scopes.includes(PREMIUM_SERVICE_SCOPE_BY_KEY.esm)) {
+      services.esmApps.push(appInfo);
+    }
+    if (appInfo.scopes.includes(PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)) {
+      services.resetTempPassApps.push(appInfo);
     }
     if (appInfo.scopes.includes(PREMIUM_SERVICE_SCOPE_BY_KEY.restV2)) {
-      if (!services.restV2) {
-        services.restV2 = appInfo;
-      }
       services.restV2Apps.push(appInfo);
     }
   }
 
   if (services.degradationApps.length > 0) {
     services.degradationApps.sort(compareDegradationAppPriority);
-    services.degradation = services.degradationApps[0];
+    services.degradation =
+      (normalizedRequestorId
+        ? services.degradationApps.find((appInfo) =>
+            appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)
+          )
+        : null) ||
+      services.degradationApps[0] ||
+      null;
   } else {
     services.degradation = null;
   }
+
+  services.esm =
+    selectPreferredEsmAppForRequestor(services.esmApps, normalizedRequestorId, normalizedProgrammerId) ||
+    services.esmApps[0] ||
+    null;
+  services.resetTempPass =
+    (normalizedRequestorId
+      ? services.resetTempPassApps.find((appInfo) =>
+          appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)
+        )
+      : null) ||
+    services.resetTempPassApps[0] ||
+    null;
+  services.restV2 =
+    selectPreferredRestV2AppForRequestor(services.restV2Apps, normalizedRequestorId, normalizedProgrammerId) ||
+    services.restV2Apps[0] ||
+    null;
 
   return services;
 }
@@ -61441,13 +64392,24 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
     let attemptedVaultCompileRecovery = false;
 
     const ensureSoftwareStatement = async () => {
-      const currentStatement = String(resolvedAppInfo?.softwareStatement || "").trim();
+      const currentStatement = firstNonEmptyString([
+        String(resolvedAppInfo?.softwareStatement || "").trim(),
+        extractSoftwareStatementFromAppData(resolvedAppInfo?.appData || null),
+        extractSoftwareStatementFromAppData(resolvedAppInfo),
+      ]);
       if (currentStatement) {
+        resolvedAppInfo.softwareStatement = currentStatement;
         return currentStatement;
       }
 
       try {
         const details = await fetchApplicationDetailsByGuid(resolvedAppInfo.guid);
+        if (details && typeof details === "object") {
+          resolvedAppInfo.appData = {
+            ...(resolvedAppInfo?.appData && typeof resolvedAppInfo.appData === "object" ? resolvedAppInfo.appData : {}),
+            ...details,
+          };
+        }
         const extracted = extractSoftwareStatementFromAppData(details);
         if (extracted) {
           resolvedAppInfo.softwareStatement = extracted;
@@ -61890,14 +64852,24 @@ function getProgrammerCandidatesForRequestor(requestorId) {
 
 async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
   if (!programmer || !programmer.programmerId) {
-    return { degradation: null, degradationApps: [], esm: null, restV2: null, restV2Apps: [], cm: null };
+    return {
+      degradation: null,
+      degradationApps: [],
+      esm: null,
+      esmApps: [],
+      resetTempPass: null,
+      resetTempPassApps: [],
+      restV2: null,
+      restV2Apps: [],
+      cm: null,
+    };
   }
 
   const forceRefresh = options.forceRefresh === true;
-  const eagerScopeHydration = options.eagerScopeHydration === true;
-  const backgroundScopeHydration = options.backgroundScopeHydration !== false;
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
   const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const pageContextTargetRef = { target: null };
+  const selectedRequestorId = String(options?.requestorId || state.selectedRequestorId || "").trim();
   if (forceRefresh) {
     state.premiumAppsByProgrammerId.delete(programmer.programmerId);
     state.applicationsByProgrammerId.delete(programmer.programmerId);
@@ -61905,29 +64877,61 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
   }
 
   const existing = getCurrentPremiumAppsSnapshot(programmer.programmerId);
-  if (!forceRefresh && existing) {
+  const cachedApplications = getCurrentProgrammerApplicationsSnapshot(programmer.programmerId);
+  const preloadedApplications =
+    options?.applicationsData && typeof options.applicationsData === "object" && !Array.isArray(options.applicationsData)
+      ? options.applicationsData
+      : null;
+  const cachedApplicationsAreLive =
+    cachedApplications &&
+    typeof cachedApplications === "object" &&
+    !Array.isArray(cachedApplications) &&
+    !isPassVaultBackedValue(cachedApplications);
+  const buildLivePremiumServices = (applicationsData = {}, existingServices = null) => {
+    const premiumApps = findPremiumServiceApplications(programmer.applications || [], applicationsData, {
+      programmerId: programmer.programmerId,
+      requestorId: selectedRequestorId,
+    });
+    return applyPremiumServiceRuntimeSummary(
+      programmer,
+      {
+        ...premiumApps,
+        degradation: premiumApps?.degradation || null,
+        degradationApps: Array.isArray(premiumApps?.degradationApps)
+          ? premiumApps.degradationApps.filter((appInfo) => appInfo?.guid)
+          : [],
+        esm: premiumApps?.esm || null,
+        esmApps: Array.isArray(premiumApps?.esmApps) ? premiumApps.esmApps.filter((appInfo) => appInfo?.guid) : [],
+        resetTempPass: premiumApps?.resetTempPass || null,
+        resetTempPassApps: Array.isArray(premiumApps?.resetTempPassApps)
+          ? premiumApps.resetTempPassApps.filter((appInfo) => appInfo?.guid)
+          : [],
+        cm: existingServices?.cm ?? null,
+        cmMvpd: existingServices?.cmMvpd ?? null,
+        cmMvpdSelectionKey: String(existingServices?.cmMvpdSelectionKey || "").trim(),
+        __underparLiveHydrated: true,
+        __underparLiveHydratedAt: Date.now(),
+      },
+      {
+        cmCatalog: state.cmTenantsCatalog,
+      }
+    );
+  };
+  if (!forceRefresh && cachedApplicationsAreLive) {
+    const recomputedServices = buildLivePremiumServices(cachedApplications, existing);
+    setCurrentPremiumAppsSnapshot(programmer.programmerId, recomputedServices);
     emitPremiumDecisionDebugEvent(
       {
-        phase: "premium-service-cache-hit",
+        phase: "premium-service-runtime-hit",
         programmerId: String(programmer.programmerId || ""),
+        requestorId: selectedRequestorId,
+        applicationCount: Object.keys(cachedApplications || {}).length,
       },
       {
         programmer,
       }
     );
-    return existing;
-  }
-
-  if (!forceRefresh) {
-    await hydrateProgrammerFromPassVault(programmer, {
-      forceReload: false,
-      forceOverwrite: false,
-      forceDcrRestore: true,
-    }).catch(() => null);
-    const vaultBackedExisting = getCurrentPremiumAppsSnapshot(programmer.programmerId);
-    if (vaultBackedExisting) {
-      return vaultBackedExisting;
-    }
+    return recomputedServices;
   }
 
   if (!forceRefresh && state.premiumAppsLoadPromiseByProgrammerId.has(programmer.programmerId)) {
@@ -61935,47 +64939,34 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
   }
 
   const loadPromise = (async () => {
-    const applicationsData = await fetchApplicationsForProgrammer(programmer.programmerId, {
-      forceRefresh,
-      requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
-      skipDetailBackfill: !eagerScopeHydration,
-      allowTemporaryPageContextTab,
-      preferredTabId,
-    });
-    let resolvedApplications = applicationsData || {};
-    let premiumApps = findPremiumServiceApplications(programmer.applications || [], resolvedApplications);
-    const missingRequiredServiceKeys = getMissingRequiredPremiumServiceKeys(premiumApps, PREMIUM_REQUIRED_SERVICE_KEYS);
-    if (eagerScopeHydration && missingRequiredServiceKeys.length > 0) {
-      resolvedApplications = await hydrateApplicationScopesForProgrammer(programmer, resolvedApplications, {
+    const applicationsData =
+      preloadedApplications ||
+      (await fetchApplicationsForProgrammer(programmer.programmerId, {
         forceRefresh,
-        requestTimeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
-        concurrency: PREMIUM_SERVICE_SCOPE_HYDRATION_CONCURRENCY,
-        requiredServiceKeys: missingRequiredServiceKeys,
-        stopWhenResolved: true,
+        requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
         allowTemporaryPageContextTab,
+        pageContextTargetRef,
         preferredTabId,
-      });
-      premiumApps = findPremiumServiceApplications(programmer.applications || [], resolvedApplications || {});
-    } else if (backgroundScopeHydration && missingRequiredServiceKeys.length > 0) {
-      schedulePremiumAppScopeHydration(programmer, {
-        forceRefresh,
-        requestTimeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
-        concurrency: PREMIUM_SERVICE_SCOPE_HYDRATION_CONCURRENCY,
-        requiredServiceKeys: missingRequiredServiceKeys,
-        stopWhenResolved: true,
-        allowTemporaryPageContextTab: false,
-        preferredTabId,
-      });
-    }
-    setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, resolvedApplications || {});
+      }));
+    const resolvedApplications =
+      applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
+    const premiumApps = findPremiumServiceApplications(programmer.applications || [], resolvedApplications, {
+      programmerId: programmer.programmerId,
+      requestorId: selectedRequestorId,
+    });
+    setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, resolvedApplications);
     emitPremiumDecisionDebugEvent(
       {
         phase: "premium-service-decision",
         programmerId: String(programmer.programmerId || ""),
+        requestorId: selectedRequestorId,
         hasDegradation: Boolean(premiumApps?.degradation?.guid),
         hasEsm: Boolean(premiumApps?.esm?.guid),
+        hasResetTempPass: Boolean(premiumApps?.resetTempPass?.guid),
         hasRestV2: Boolean(premiumApps?.restV2?.guid),
         restV2AppCount: Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps.length : 0,
+        esmAppCount: Array.isArray(premiumApps?.esmApps) ? premiumApps.esmApps.length : 0,
+        resetTempPassAppCount: Array.isArray(premiumApps?.resetTempPassApps) ? premiumApps.resetTempPassApps.length : 0,
         applicationCount:
           resolvedApplications && typeof resolvedApplications === "object"
             ? Object.keys(resolvedApplications).length
@@ -61986,17 +64977,7 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       }
     );
     const existingServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
-    const resolvedDegradationApps = Array.isArray(premiumApps?.degradationApps)
-      ? premiumApps.degradationApps.filter((appInfo) => appInfo?.guid)
-      : [];
-    const mergedServices = {
-      ...premiumApps,
-      degradation: premiumApps?.degradation || null,
-      degradationApps: resolvedDegradationApps,
-      cm: existingServices?.cm ?? null,
-      cmMvpd: existingServices?.cmMvpd ?? null,
-      cmMvpdSelectionKey: String(existingServices?.cmMvpdSelectionKey || "").trim(),
-    };
+    const mergedServices = buildLivePremiumServices(resolvedApplications, existingServices);
     setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
     return mergedServices;
   })();
@@ -62006,6 +64987,8 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
   try {
     return await loadPromise;
   } finally {
+    await closeTemporaryAdobePageContextTarget(pageContextTargetRef?.target?.temporaryTarget || null).catch(() => null);
+    pageContextTargetRef.target = null;
     if (state.premiumAppsLoadPromiseByProgrammerId.get(programmer.programmerId) === loadPromise) {
       state.premiumAppsLoadPromiseByProgrammerId.delete(programmer.programmerId);
     }
@@ -63371,12 +66354,7 @@ function getPreferredPrimaryImsAccessTokenCandidate() {
 }
 
 function getPreferredAdobeConsoleAccessTokenCandidate() {
-  return normalizeBearerTokenValue(
-    firstNonEmptyString([
-      getPreferredExperienceCloudConsoleAccessTokenCandidate(),
-      getPreferredPrimaryImsAccessTokenCandidate(),
-    ])
-  );
+  return normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
 }
 
 function getPreferredCmRequestAccessTokenCandidate() {
@@ -63384,7 +66362,6 @@ function getPreferredCmRequestAccessTokenCandidate() {
     firstNonEmptyString([
       state.cmLastHydratedAccessToken || "",
       state.loginData?.cmConsoleAccessToken || "",
-      state.loginData?.accessToken || "",
     ])
   );
 }
@@ -63461,7 +66438,385 @@ function tokenSupportsCmConsoleRequests(accessToken = "") {
   const clientId = String(firstNonEmptyString([claims.client_id, claims.clientId]) || "")
     .trim()
     .toLowerCase();
-  return isCmConsoleClientId(clientId) || isUnderparImsClientId(clientId);
+  return isCmConsoleClientId(clientId);
+}
+
+function buildPrimetimeRequestHeaders(accessToken = "") {
+  const bearerToken = String(accessToken || "").trim();
+  return {
+    Accept: "*/*",
+    Authorization: `Bearer ${bearerToken}`,
+  };
+}
+
+function buildCmuReportRequestHeaders(accessToken = "") {
+  const bearerToken = normalizeBearerTokenValue(accessToken);
+  return {
+    Accept: "*/*",
+    ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+  };
+}
+
+function dedupeCandidateStrings(values = []) {
+  const output = [];
+  const seen = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return;
+    }
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    output.push(normalized);
+  });
+  return output;
+}
+
+function collectCmConsoleUserIdCandidates(session = null, seedToken = "") {
+  const currentSession = session && typeof session === "object" ? session : {};
+  const profile = resolveLoginProfile(currentSession) || {};
+  const imsSession = currentSession?.imsSession && typeof currentSession.imsSession === "object" ? currentSession.imsSession : {};
+  const cmConsoleImsSession =
+    currentSession?.cmConsoleImsSession && typeof currentSession.cmConsoleImsSession === "object"
+      ? currentSession.cmConsoleImsSession
+      : {};
+  const accessTokenClaims = parseJwtPayload(firstNonEmptyString([currentSession?.accessToken])) || {};
+  const idTokenClaims = parseJwtPayload(firstNonEmptyString([currentSession?.idToken])) || {};
+  const seedClaims = parseJwtPayload(seedToken) || {};
+
+  return dedupeCandidateStrings([
+    imsSession?.userId,
+    accessTokenClaims?.user_id,
+    accessTokenClaims?.userId,
+    accessTokenClaims?.sub,
+    idTokenClaims?.user_id,
+    idTokenClaims?.userId,
+    idTokenClaims?.sub,
+    profile?.userId,
+    profile?.user_id,
+    profile?.sub,
+    profile?.id,
+    profile?.additional_info?.userId,
+    profile?.additional_info?.user_id,
+    imsSession?.authId,
+    profile?.authId,
+    profile?.aa_id,
+    profile?.adobeID,
+    profile?.additional_info?.authId,
+    profile?.additional_info?.aa_id,
+    profile?.email,
+    profile?.user_email,
+    profile?.emailAddress,
+    profile?.additional_info?.email,
+    cmConsoleImsSession?.userId,
+    cmConsoleImsSession?.authId,
+    seedClaims?.user_id,
+    seedClaims?.userId,
+    seedClaims?.sub,
+    seedClaims?.aa_id,
+    seedClaims?.authId,
+  ]);
+}
+
+function normalizeCmuAccessToken(value, rawText = "") {
+  return extractImsAccessTokenFromPayload(value, rawText);
+}
+
+function buildCmuAuthorizationHeaderValue(token = "") {
+  const normalizedToken = normalizeBearerTokenValue(token);
+  return normalizedToken ? `${CMU_TOKEN_HEADER_SCHEME} ${normalizedToken}` : "";
+}
+
+function buildImsCheckTokenUrl({ endpoint, clientId, scope, userId }) {
+  const normalizedEndpoint = String(endpoint || "").trim();
+  const normalizedClientId = String(clientId || "").trim();
+  const normalizedScope = String(scope || "").trim();
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedEndpoint || !normalizedClientId || !normalizedScope || !normalizedUserId) {
+    throw new Error("IMS check token request is missing required context.");
+  }
+
+  const url = new URL(normalizedEndpoint);
+  url.searchParams.set("client_id", normalizedClientId);
+  url.searchParams.set("scope", normalizedScope);
+  url.searchParams.set("user_id", normalizedUserId);
+  return url;
+}
+
+function buildApiRequestUrl(baseUrl = "", path = "", queryParams = {}) {
+  const normalizedBaseUrl = String(baseUrl || "").trim();
+  const normalizedPath = String(path || "").trim();
+  if (!normalizedBaseUrl || !normalizedPath) {
+    throw new Error("API request URL is missing required context.");
+  }
+
+  const base = normalizedBaseUrl.endsWith("/") ? normalizedBaseUrl : `${normalizedBaseUrl}/`;
+  const relativePath = normalizedPath.replace(/^\/+/, "");
+  const url = new URL(relativePath, base);
+  Object.entries(queryParams || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || String(value).trim() === "") {
+      return;
+    }
+    url.searchParams.set(key, String(value));
+  });
+  return url;
+}
+
+async function resolveExperienceAdobePageContextTarget({ preferredTabId = 0, allowTemporaryTab = true } = {}) {
+  let tab = await getTabByIdSafe(preferredTabId);
+  const preferredUrl = String(tab?.url || tab?.pendingUrl || "").trim();
+  if (!isExperienceAdobeTabUrl(preferredUrl)) {
+    tab = await findExistingExperienceCloudAdobeTab();
+  }
+
+  let temporaryTarget = null;
+  if (!tab?.id && allowTemporaryTab) {
+    temporaryTarget = await openTemporaryAdobePageContextTarget(getCmConsoleBootstrapUrl());
+    tab = temporaryTarget?.tab || null;
+  }
+
+  return {
+    tab: tab || null,
+    tabId: Number(tab?.id || 0),
+    temporaryTarget,
+  };
+}
+
+async function fetchImsCheckTokenViaAdobePageContext({
+  endpoint,
+  clientId,
+  scope,
+  userId,
+  preferredTabId = 0,
+  allowTemporaryTab = true,
+  timeoutMs = ADOBE_PAGE_CONTEXT_TIMEOUT_MS,
+}) {
+  if (!chrome.scripting?.executeScript) {
+    throw new Error("Chrome page-context scripting is unavailable. Add the scripting permission and reload the extension.");
+  }
+
+  const requestUrl = buildImsCheckTokenUrl({
+    endpoint,
+    clientId,
+    scope,
+    userId,
+  }).toString();
+  const target = await resolveExperienceAdobePageContextTarget({
+    preferredTabId,
+    allowTemporaryTab,
+  });
+  const temporaryTarget = target?.temporaryTarget || null;
+  const tabId = Number(target?.tabId || 0);
+  if (tabId <= 0) {
+    throw new Error("Unable to open an Adobe Experience Cloud page context for the CMU token bootstrap.");
+  }
+
+  try {
+    await waitForTabCompletion(tabId, timeoutMs).catch(() => null);
+    const executionResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [
+        {
+          requestUrl,
+          timeoutMs,
+        },
+      ],
+      func: async (config) => {
+        const normalize = (value) => String(value || "").trim();
+        const parseJson = (text) => {
+          try {
+            return JSON.parse(String(text || ""));
+          } catch {
+            return null;
+          }
+        };
+
+        const controller = new AbortController();
+        const timerId = window.setTimeout(
+          () => controller.abort(),
+          Math.max(2000, Number(config?.timeoutMs || 0) || 12000)
+        );
+        try {
+          const response = await fetch(String(config?.requestUrl || ""), {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              Accept: "*/*",
+            },
+            signal: controller.signal,
+          });
+          const text = await response.text().catch(() => "");
+          return {
+            ok: Boolean(response.ok),
+            status: Number(response.status || 0),
+            statusText: normalize(response.statusText),
+            url: normalize(response.url || config?.requestUrl),
+            text,
+            parsed: parseJson(text),
+            frameUrl: normalize(globalThis.location?.href),
+            frameOrigin: normalize(globalThis.location?.origin),
+            documentReadyState: normalize(globalThis.document?.readyState),
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            status: 0,
+            statusText: error instanceof Error ? error.message : String(error),
+            url: normalize(config?.requestUrl),
+            text: "",
+            parsed: null,
+            frameUrl: normalize(globalThis.location?.href),
+            frameOrigin: normalize(globalThis.location?.origin),
+            documentReadyState: normalize(globalThis.document?.readyState),
+          };
+        } finally {
+          window.clearTimeout(timerId);
+        }
+      },
+    });
+
+    const result = executionResults?.[0]?.result;
+    if (!result || typeof result !== "object") {
+      throw new Error("Adobe page context did not return a usable IMS check response.");
+    }
+
+    if (!result.ok) {
+      const message = getAdobeConsoleErrorMessage(result.parsed, result.text, result.statusText);
+      throw new Error(
+        `${new URL(requestUrl).pathname} returned ${Number(result.status || 0)}${
+          message ? `: ${message}` : ""
+        } via Adobe page context ${firstNonEmptyString([result.frameOrigin, "unknown-origin"])}.`
+      );
+    }
+
+    return {
+      data: result.parsed ?? (result.text ? String(result.text).trim() : null),
+      rawText: String(result.text || ""),
+      pageContext: {
+        url: firstNonEmptyString([result.frameUrl]),
+        origin: firstNonEmptyString([result.frameOrigin]),
+        readyState: firstNonEmptyString([result.documentReadyState]),
+      },
+    };
+  } finally {
+    await closeTemporaryAdobePageContextTarget(temporaryTarget);
+  }
+}
+
+async function fetchImsValidateToken({ endpoint, clientId, token, credentials = "include" }) {
+  const normalizedEndpoint = String(endpoint || "").trim();
+  const normalizedClientId = String(clientId || "").trim();
+  const normalizedToken = normalizeBearerTokenValue(token);
+  if (!normalizedEndpoint || !normalizedClientId || !normalizedToken) {
+    throw new Error("IMS validate token request is missing required context.");
+  }
+
+  const body = new URLSearchParams({
+    type: "access_token",
+    token: normalizedToken,
+  });
+  body.set("client_id", normalizedClientId);
+
+  let response;
+  try {
+    response = await fetch(normalizedEndpoint, {
+      method: "POST",
+      mode: "cors",
+      credentials,
+      referrer: CM_CONSOLE_APP_REFERER,
+      referrerPolicy: "strict-origin-when-cross-origin",
+      headers: {
+        Accept: "*/*",
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        client_id: normalizedClientId,
+      },
+      body: body.toString(),
+    });
+  } catch (error) {
+    throw new Error(`Unable to reach ${new URL(normalizedEndpoint).pathname}: ${serializeError(error)}`);
+  }
+
+  const text = await response.text().catch(() => "");
+  const parsed = parseJsonText(text, null);
+  if (!response.ok) {
+    const message = getAdobeConsoleErrorMessage(parsed, text, response.statusText);
+    throw new Error(`${new URL(normalizedEndpoint).pathname} returned ${response.status}${message ? `: ${message}` : ""}`);
+  }
+
+  return {
+    data: parsed ?? (text ? text.trim() : null),
+    rawText: text,
+  };
+}
+
+async function fetchImsCheckToken({ endpoint, clientId, scope, userId, credentials = "include", seedToken = "" }) {
+  const url = buildImsCheckTokenUrl({
+    endpoint,
+    clientId,
+    scope,
+    userId,
+  });
+  const normalizedClientId = String(clientId || "").trim();
+  const normalizedSeedToken = normalizeBearerTokenValue(seedToken);
+  const requestHeaders = {
+    Accept: "*/*",
+    ...(normalizedSeedToken
+      ? {
+          Authorization: `Bearer ${normalizedSeedToken}`,
+          "X-IMS-ClientId": normalizedClientId,
+          "x-api-key": normalizedClientId,
+        }
+      : {}),
+  };
+
+  let response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "POST",
+      mode: "cors",
+      credentials,
+      referrer: CM_CONSOLE_APP_REFERER,
+      referrerPolicy: "strict-origin-when-cross-origin",
+      headers: requestHeaders,
+    });
+  } catch (error) {
+    throw new Error(`Unable to reach ${url.pathname}: ${serializeError(error)}`);
+  }
+
+  const text = await response.text().catch(() => "");
+  const parsed = parseJsonText(text, null);
+  if (!response.ok) {
+    const message = getAdobeConsoleErrorMessage(parsed, text, response.statusText);
+    throw new Error(`${url.pathname} returned ${response.status}${message ? `: ${message}` : ""}`);
+  }
+
+  return {
+    data: parsed ?? (text ? text.trim() : null),
+    rawText: text,
+  };
+}
+
+function buildCmConsoleBootstrapResult(accessToken = "", source = "") {
+  const normalizedToken = normalizeBearerTokenValue(accessToken);
+  if (!normalizedToken || !tokenSupportsCmTenantCatalog(normalizedToken)) {
+    return null;
+  }
+
+  const claims = parseJwtPayload(normalizedToken) || {};
+  return {
+    accessToken: normalizedToken,
+    expiresAt: coercePositiveNumber(
+      resolveAuthResponseExpiry(normalizedToken, coercePositiveNumber(claims?.expires_in))?.expiresAt
+    ),
+    expiresIn: coercePositiveNumber(claims?.expires_in),
+    scope: firstNonEmptyString([claims?.scope, CM_CONSOLE_IMS_SCOPE]),
+    imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(normalizedToken), null),
+    source: String(source || "cm-console-ui"),
+  };
 }
 
 function collectCmImsUserIdCandidates(seedToken = "") {
@@ -63496,7 +66851,6 @@ function collectCmImsUserIdCandidates(seedToken = "") {
     seedClaims.userId,
     state.loginData?.cmConsoleImsSession?.userId,
     state.loginData?.experienceCloudImsSession?.userId,
-    state.loginData?.adobePassOrg?.userId,
   ];
   const output = [];
   const seen = new Set();
@@ -63813,11 +67167,7 @@ async function requestQualifiedExperienceCloudConsoleToken(options = {}) {
   pushSeed(options?.seedToken);
   pushSeed(getPreferredExperienceCloudConsoleAccessTokenCandidate());
   pushSeed(getPreferredPrimaryImsAccessTokenCandidate());
-
-  if (allowSilentAuth && seedCandidates.length === 0) {
-    const silent = await attemptSilentBootstrapLogin().catch(() => null);
-    pushSeed(silent?.accessToken);
-  }
+  void allowSilentAuth;
 
   for (const seed of seedCandidates) {
     if (
@@ -64088,84 +67438,459 @@ function mergeExperienceCloudShellSnapshotIntoLoginData(loginData = {}, shellSna
   const mergedOrganizations = normalizedShellSnapshot.imsOrgs.length > 0
     ? normalizedShellSnapshot.imsOrgs
     : withConsoleToken?.organizations || null;
-  const nextAdobePassOrg =
-    matchesAdobePassOrg({ orgId: normalizedShellSnapshot.imsOrg, name: normalizedShellSnapshot.imsOrgName }) ||
-    normalizedShellSnapshot.imsOrgs.some((entry) => matchesAdobePassOrg(entry))
-      ? {
-          orgId: firstNonEmptyString([normalizedShellSnapshot.imsOrg, current?.adobePassOrg?.orgId, ADOBEPASS_ORG_HANDLE]),
-          userId: firstNonEmptyString([normalizedShellSnapshot.imsProfile?.userId, current?.adobePassOrg?.userId]),
-          name: firstNonEmptyString([normalizedShellSnapshot.imsOrgName, current?.adobePassOrg?.name, "@AdobePass"]),
-          avatarUrl: firstNonEmptyString([normalizedShellSnapshot.imsProfile?.avatarUrl, current?.adobePassOrg?.avatarUrl]),
-        }
-      : current?.adobePassOrg || null;
 
   return {
     ...withConsoleToken,
     profile: mergedProfile,
     organizations: mergedOrganizations,
     experienceCloudImsSession: mergedExperienceCloudSession || withConsoleToken?.experienceCloudImsSession || null,
-    adobePassOrg: nextAdobePassOrg,
+    adobePassOrg: null,
   };
 }
 
-async function requestQualifiedCmConsoleToken(options = {}) {
-  const requireFresh = options.requireFresh === true;
-  const allowSilentAuth = options.allowSilentAuth !== false;
-  const seedCandidates = [];
-  const seen = new Set();
-  const pushSeed = (value) => {
-    const normalized = normalizeBearerTokenValue(value);
-    if (!normalized || !isProbablyJwt(normalized) || seen.has(normalized)) {
-      return;
+async function resolveQualifiedCmConsoleAccessToken(session = null, previousToken = "", options = {}) {
+  const currentSession = session && typeof session === "object" ? session : {};
+  const existingTokenCandidates = dedupeCandidateStrings([
+    previousToken,
+    currentSession?.cmConsoleAccessToken,
+    currentSession?.accessToken,
+  ]);
+
+  for (const candidate of existingTokenCandidates) {
+    if (tokenSupportsCmTenantCatalog(candidate) && isAccessTokenFreshEnough(candidate, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+      return {
+        token: normalizeBearerTokenValue(candidate),
+        source: candidate === currentSession?.accessToken ? "existing:session" : "existing:cached",
+      };
     }
-    seen.add(normalized);
-    seedCandidates.push(normalized);
+  }
+
+  const seedTokens = dedupeCandidateStrings([
+    currentSession?.accessToken,
+    previousToken,
+  ]).filter((value) => isProbablyJwt(value));
+  const userIdCandidates = collectCmConsoleUserIdCandidates(currentSession);
+  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const allowTemporaryTab = options?.allowTemporaryTab !== false;
+  let lastError = null;
+
+  for (const userId of userIdCandidates) {
+    const pageContextResult = await settle(() =>
+      fetchImsCheckTokenViaAdobePageContext({
+        endpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
+        clientId: CM_CONSOLE_IMS_CLIENT_ID,
+        scope: CM_CONSOLE_IMS_SCOPE,
+        userId,
+        preferredTabId,
+        allowTemporaryTab,
+      })
+    );
+    if (pageContextResult.ok) {
+      const nextToken = normalizeCmuAccessToken(pageContextResult.value?.data, pageContextResult.value?.rawText);
+      if (tokenSupportsCmTenantCatalog(nextToken) && isAccessTokenFreshEnough(nextToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+        return {
+          token: nextToken,
+          source: "page-context:ims-check",
+        };
+      }
+      if (nextToken) {
+        const claims = parseJwtPayload(nextToken) || {};
+        lastError = new Error(
+          `Adobe page context minted an unsupported Adobe IMS token client_id=${firstNonEmptyString([
+            claims?.client_id,
+            claims?.clientId,
+            "unknown",
+          ])}.`
+        );
+      } else {
+        lastError = new Error("Adobe page context IMS check response did not include a cm-console-ui access token.");
+      }
+    } else {
+      lastError = pageContextResult.error;
+    }
+
+    const attempts = [
+      {
+        credentials: "include",
+        seedToken: "",
+      },
+      {
+        credentials: "omit",
+        seedToken: "",
+      },
+      ...seedTokens.map((seedToken) => ({
+        credentials: "omit",
+        seedToken,
+      })),
+    ];
+
+    for (const attempt of attempts) {
+      const result = await settle(() =>
+        fetchImsCheckToken({
+          endpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
+          clientId: CM_CONSOLE_IMS_CLIENT_ID,
+          scope: CM_CONSOLE_IMS_SCOPE,
+          userId,
+          credentials: attempt.credentials,
+          seedToken: attempt.seedToken,
+        })
+      );
+      if (!result.ok) {
+        lastError = result.error;
+        continue;
+      }
+
+      const nextToken = normalizeCmuAccessToken(result.value?.data, result.value?.rawText);
+      if (tokenSupportsCmTenantCatalog(nextToken) && isAccessTokenFreshEnough(nextToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+        return {
+          token: nextToken,
+          source: `ims-check:${attempt.credentials}${attempt.seedToken ? ":seed" : ""}`,
+        };
+      }
+      if (nextToken) {
+        const claims = parseJwtPayload(nextToken) || {};
+        lastError = new Error(
+          `IMS check minted an unsupported Adobe IMS token client_id=${firstNonEmptyString([
+            claims?.client_id,
+            claims?.clientId,
+            "unknown",
+          ])}.`
+        );
+      } else {
+        lastError = new Error("IMS check token response did not include a cm-console-ui access token.");
+      }
+    }
+  }
+
+  for (const seedToken of seedTokens) {
+    for (const credentials of ["include", "omit"]) {
+      const result = await settle(() =>
+        fetchImsValidateToken({
+          endpoint: CM_CONSOLE_IMS_VALIDATE_TOKEN_ENDPOINT,
+          clientId: CM_CONSOLE_IMS_CLIENT_ID,
+          token: seedToken,
+          credentials,
+        })
+      );
+      if (!result.ok) {
+        lastError = result.error;
+        continue;
+      }
+
+      const nextToken = normalizeCmuAccessToken(result.value?.data, result.value?.rawText);
+      if (tokenSupportsCmTenantCatalog(nextToken) && isAccessTokenFreshEnough(nextToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+        return {
+          token: nextToken,
+          source: `validate:${credentials}`,
+        };
+      }
+      if (nextToken) {
+        const claims = parseJwtPayload(nextToken) || {};
+        lastError = new Error(
+          `IMS validate token minted an unsupported Adobe IMS token client_id=${firstNonEmptyString([
+            claims?.client_id,
+            claims?.clientId,
+            "unknown",
+          ])}.`
+        );
+      } else {
+        lastError = new Error("IMS validate token response did not include a cm-console-ui access token.");
+      }
+    }
+  }
+
+  throw lastError || new Error("UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session.");
+}
+
+async function fetchPrimetimeJson({ baseUrl, path, accessToken, queryParams = {} }) {
+  const normalizedBaseUrl = String(baseUrl || "").trim();
+  const normalizedPath = String(path || "").trim();
+  const bearerToken = String(accessToken || "").trim();
+  if (!normalizedBaseUrl || !normalizedPath || !bearerToken) {
+    throw new Error("CM request is missing required context.");
+  }
+
+  const url = buildApiRequestUrl(normalizedBaseUrl, normalizedPath, queryParams);
+
+  let response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "GET",
+      mode: "cors",
+      credentials: "include",
+      headers: buildPrimetimeRequestHeaders(bearerToken),
+    });
+  } catch (error) {
+    throw new Error(`Unable to reach ${url.pathname}: ${serializeError(error)}`);
+  }
+
+  const text = await response.text().catch(() => "");
+  const parsed = parseJsonText(text, null);
+  if (!response.ok) {
+    const message = getAdobeConsoleErrorMessage(parsed, text, response.statusText);
+    throw new Error(`${url.pathname} returned ${response.status}${message ? `: ${message}` : ""}`);
+  }
+
+  return {
+    data: parsed ?? (text ? text.trim() : null),
+    url: String(response.url || url.toString()),
   };
+}
 
-  pushSeed(options?.seedToken);
-  pushSeed(getPreferredCmAccessTokenCandidate());
-  pushSeed(getPreferredPrimaryImsAccessTokenCandidate());
-
-  if (allowSilentAuth && seedCandidates.length === 0) {
-    const silent = await attemptSilentBootstrapLogin().catch(() => null);
-    pushSeed(silent?.accessToken);
+async function fetchCmuReportJson({ baseUrl, path, accessToken, queryParams = {} }) {
+  const normalizedBaseUrl = String(baseUrl || "").trim();
+  const normalizedPath = String(path || "").trim();
+  const bearerToken = normalizeBearerTokenValue(accessToken);
+  if (!normalizedBaseUrl || !normalizedPath || !bearerToken) {
+    throw new Error("CMU report request is missing required context.");
   }
 
-  for (const seed of seedCandidates) {
-    if (tokenSupportsCmTenantCatalog(seed) && (!requireFresh || isAccessTokenFreshEnough(seed, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
-      return {
-        accessToken: seed,
-        expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(seed, 0)?.expiresAt),
-        expiresIn: 0,
-        scope: firstNonEmptyString([parseJwtPayload(seed)?.scope]),
-        imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(seed), null),
-        source: "qualified:existing-cm",
-        qualified: true,
-      };
-    }
+  const url = buildApiRequestUrl(normalizedBaseUrl, normalizedPath, queryParams);
 
-    const viaCheck = await requestCmTokenViaImsCheck(seed, { requireFresh });
-    if (viaCheck?.accessToken) {
-      return {
-        ...viaCheck,
-        imsSession: mergeImsSessionSnapshots(viaCheck?.imsSession || null, deriveImsSessionSnapshotFromToken(seed)),
-        source: `qualified:${String(viaCheck?.source || "ims-check")}`,
-        qualified: true,
-      };
-    }
-
-    const viaValidate = await requestCmTokenViaValidateToken(seed, { requireFresh });
-    if (viaValidate?.accessToken) {
-      return {
-        ...viaValidate,
-        imsSession: mergeImsSessionSnapshots(viaValidate?.imsSession || null, deriveImsSessionSnapshotFromToken(seed)),
-        source: `qualified:${String(viaValidate?.source || "validate")}`,
-        qualified: true,
-      };
-    }
+  let response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "GET",
+      mode: "cors",
+      credentials: "include",
+      referrer: CM_REPORTS_APP_REFERER,
+      referrerPolicy: "strict-origin-when-cross-origin",
+      headers: buildCmuReportRequestHeaders(bearerToken),
+    });
+  } catch (error) {
+    throw new Error(`Unable to reach ${url.pathname}: ${serializeError(error)}`);
   }
 
-  return null;
+  const text = await response.text().catch(() => "");
+  const parsed = parseJsonText(text, null);
+  if (!response.ok) {
+    const message = getAdobeConsoleErrorMessage(parsed, text, response.statusText);
+    throw new Error(`${url.pathname} returned ${response.status}${message ? `: ${message}` : ""}`);
+  }
+
+  return {
+    data: parsed ?? (text ? text.trim() : null),
+    url: String(response.url || url.toString()),
+  };
+}
+
+async function buildCmContext(session, reason = "post-login", options = {}) {
+  const currentSession = session && typeof session === "object" ? session : {};
+  const accessToken = firstNonEmptyString([currentSession?.accessToken]);
+  const hydratedAt = new Date().toISOString();
+  const programmerAccess = resolveAdobePassAccessContext(currentSession);
+  const tenantsSourceUrl = buildApiRequestUrl(CM_BASE_URL, CM_TENANTS_PATH, {
+    orgId: CM_TENANTS_OWNER_ORG_ID,
+  }).toString();
+
+  if (!accessToken) {
+    return {
+      baseUrl: CM_BASE_URL,
+      reportsBaseUrl: CM_REPORTS_BASE_URL,
+      checkTokenEndpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
+      validateTokenEndpoint: CM_CONSOLE_IMS_VALIDATE_TOKEN_ENDPOINT,
+      tenantAuthModel: "loginbutton-ims",
+      cmuAuthModel: "cm-console-ui",
+      cmuToken: "",
+      cmuTokenSource: "",
+      cmuTokenClientId: "",
+      cmuTokenScope: "",
+      cmuTokenUserId: "",
+      cmuTokenExpiresAt: "",
+      cmuTokenHeaderName: CMU_TOKEN_HEADER_NAME,
+      cmuTokenHeaderValue: "",
+      reportsStatus: "unavailable",
+      reportsSummary: null,
+      tenants: [],
+      tenantsSourceUrl,
+      hydratedAt,
+      status: "unavailable",
+      errors: {
+        cmuToken: "Adobe IMS access token is unavailable.",
+        tenants: "Adobe IMS access token is unavailable.",
+        reports: "Adobe IMS access token is unavailable.",
+      },
+    };
+  }
+
+  if (!programmerAccess.eligible) {
+    return {
+      baseUrl: CM_BASE_URL,
+      reportsBaseUrl: CM_REPORTS_BASE_URL,
+      checkTokenEndpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
+      validateTokenEndpoint: CM_CONSOLE_IMS_VALIDATE_TOKEN_ENDPOINT,
+      tenantAuthModel: "loginbutton-ims",
+      cmuAuthModel: "cm-console-ui",
+      cmuToken: "",
+      cmuTokenSource: "",
+      cmuTokenClientId: "",
+      cmuTokenScope: "",
+      cmuTokenUserId: "",
+      cmuTokenExpiresAt: "",
+      cmuTokenHeaderName: CMU_TOKEN_HEADER_NAME,
+      cmuTokenHeaderValue: "",
+      reportsStatus: "org-selection-required",
+      reportsSummary: null,
+      tenants: [],
+      tenantsSourceUrl,
+      hydratedAt,
+      status: "org-selection-required",
+      errors: {
+        cmuToken: "",
+        tenants: "",
+        reports: "",
+      },
+    };
+  }
+
+  log(
+    `Hydrating CM tenant + CMU context from ${CM_BASE_URL}, ${CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT}, and ${CM_REPORTS_BASE_URL} (${reason}).`
+  );
+
+  const cmuTokenResult = await settle(() =>
+    resolveQualifiedCmConsoleAccessToken(currentSession, firstNonEmptyString([currentSession?.cmConsoleAccessToken]), {
+      preferredTabId: Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+      allowTemporaryTab: options?.allowTemporaryTab !== false,
+    })
+  );
+
+  if (!cmuTokenResult.ok) {
+    log(`CMU token fetch failed: ${serializeError(cmuTokenResult.error)}`);
+  }
+
+  const cmuToken = cmuTokenResult.ok ? normalizeBearerTokenValue(cmuTokenResult.value?.token) : "";
+  const cmuTokenSource = cmuTokenResult.ok ? firstNonEmptyString([cmuTokenResult.value?.source]) : "";
+  const cmuTokenError =
+    cmuTokenResult.ok
+      ? cmuToken
+        ? ""
+        : "CMU token bootstrap returned an empty token."
+      : serializeError(cmuTokenResult.error);
+  const cmuTokenClaims = cmuToken ? parseJwtPayload(cmuToken) || {} : {};
+  const cmuTokenClientId = firstNonEmptyString([cmuTokenClaims?.client_id, cmuTokenClaims?.clientId, CM_CONSOLE_IMS_CLIENT_ID]);
+  const cmuTokenScope = firstNonEmptyString([cmuTokenClaims?.scope, CM_CONSOLE_IMS_SCOPE]);
+  const cmuTokenUserId = firstNonEmptyString([
+    cmuTokenClaims?.user_id,
+    cmuTokenClaims?.userId,
+    currentSession?.imsSession?.userId,
+    parseJwtPayload(currentSession?.accessToken)?.user_id,
+    parseJwtPayload(currentSession?.accessToken)?.sub,
+  ]);
+  const cmuTokenExpiresAtMs = coercePositiveNumber(
+    resolveAuthResponseExpiry(cmuToken, coercePositiveNumber(cmuTokenClaims?.expires_in))?.expiresAt
+  );
+  const cmuTokenExpiresAt = cmuTokenExpiresAtMs ? new Date(cmuTokenExpiresAtMs).toISOString() : "";
+  const cmuTokenHeaderValue = buildCmuAuthorizationHeaderValue(cmuToken);
+
+  const tenantsResult = await settle(() =>
+    fetchPrimetimeJson({
+      baseUrl: CM_BASE_URL,
+      path: CM_TENANTS_PATH,
+      accessToken,
+      queryParams: {
+        orgId: CM_TENANTS_OWNER_ORG_ID,
+      },
+    })
+  );
+
+  if (!tenantsResult.ok) {
+    log(`CM tenants fetch failed: ${serializeError(tenantsResult.error)}`);
+  }
+
+  const reportsResult = cmuToken
+    ? await settle(() =>
+        fetchCmuReportJson({
+          baseUrl: CM_REPORTS_BASE_URL,
+          path: CM_REPORTS_SUMMARY_PATH,
+          accessToken: cmuToken,
+          queryParams: {
+            format: "json",
+          },
+        })
+      )
+    : {
+        ok: false,
+        error: new Error("CMU token is unavailable."),
+      };
+
+  if (cmuToken && !reportsResult.ok) {
+    log(`CMU reports bootstrap failed: ${serializeError(reportsResult.error)}`);
+  }
+
+  const resolvedTenants = tenantsResult.ok
+    ? normalizeCmTenantsFromPayload(tenantsResult.value?.data, tenantsResult.value?.url)
+    : [];
+  const successfulSegments = [cmuTokenHeaderValue ? 1 : 0, tenantsResult.ok ? 1 : 0, reportsResult.ok ? 1 : 0].reduce(
+    (total, value) => total + value,
+    0
+  );
+
+  return {
+    baseUrl: CM_BASE_URL,
+    reportsBaseUrl: CM_REPORTS_BASE_URL,
+    checkTokenEndpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
+    validateTokenEndpoint: CM_CONSOLE_IMS_VALIDATE_TOKEN_ENDPOINT,
+    tenantAuthModel: "loginbutton-ims",
+    cmuAuthModel: "cm-console-ui",
+    cmuToken,
+    cmuTokenSource,
+    cmuTokenClientId,
+    cmuTokenScope,
+    cmuTokenUserId,
+    cmuTokenExpiresAt,
+    cmuTokenHeaderName: CMU_TOKEN_HEADER_NAME,
+    cmuTokenHeaderValue,
+    reportsStatus: reportsResult.ok ? "ready" : cmuToken ? "unavailable" : "pending",
+    reportsSummary: reportsResult.ok ? reportsResult.value?.data ?? null : null,
+    tenants: resolvedTenants,
+    tenantsSourceUrl: String(firstNonEmptyString([tenantsResult.value?.url, tenantsSourceUrl])),
+    hydratedAt,
+    status: successfulSegments === 3 ? "ready" : successfulSegments > 0 ? "limited" : "unavailable",
+    errors: {
+      cmuToken: cmuTokenError,
+      tenants: tenantsResult.ok ? "" : serializeError(tenantsResult.error),
+      reports: reportsResult.ok ? "" : serializeError(reportsResult.error),
+    },
+  };
+}
+
+function buildCmTenantsCatalogFromContext(cmContext = null, fallbackCatalog = null) {
+  const tenants = Array.isArray(cmContext?.tenants) ? cmContext.tenants : [];
+  if (tenants.length === 0) {
+    return null;
+  }
+
+  return {
+    tenants,
+    sourceUrl: String(cmContext?.tenantsSourceUrl || ""),
+    tenantCount: tenants.length,
+    applicationCount: Math.max(0, Number(fallbackCatalog?.applicationCount || 0)),
+    policyCount: Math.max(0, Number(fallbackCatalog?.policyCount || 0)),
+    summaryReady: cmContext?.reportsStatus === "ready",
+    fetchedAt: Date.now(),
+  };
+}
+
+function cmuTokenFromContext(cmContext = null) {
+  return normalizeBearerTokenValue(firstNonEmptyString([cmContext?.cmuToken]));
+}
+
+async function requestQualifiedCmConsoleToken(options = {}) {
+  const currentSession = state.loginData || createCmBootstrapSeedLoginData();
+  try {
+    const resolved = await resolveQualifiedCmConsoleAccessToken(
+      currentSession,
+      firstNonEmptyString([options?.seedToken, currentSession?.cmConsoleAccessToken]),
+      {
+        preferredTabId: Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+        allowTemporaryTab: options?.allowTemporaryPageContextTab !== false,
+      }
+    );
+    const normalizedResult = buildCmConsoleBootstrapResult(resolved?.token, resolved?.source);
+    return normalizedResult ? { ...normalizedResult, qualified: true } : null;
+  } catch {
+    return null;
+  }
 }
 
 async function requestCmTokenViaValidateToken(seedToken = "", options = {}) {
@@ -64174,238 +67899,93 @@ async function requestCmTokenViaValidateToken(seedToken = "", options = {}) {
     return null;
   }
 
-  const hints = resolveCmImsTokenHints(token);
-  const clientIds = uniqueSorted(
-    [CM_IMS_PRIMARY_CLIENT_ID, hints.clientId, ...CM_IMS_VALIDATE_CLIENT_IDS]
-      .map((value) => String(value || "").trim())
-      .filter((value) => isCmConsoleClientId(value))
-  );
   const requireFresh = options.requireFresh === true;
-  const endpoint = `${IMS_BASE_URL}/ims/validate_token/v1?jslVersion=underpar-cm`;
-
-  for (const clientId of clientIds) {
-    const form = new URLSearchParams({
-      type: "access_token",
-      token,
-    });
-    if (clientId) {
-      form.set("client_id", clientId);
+  for (const credentials of ["include", "omit"]) {
+    const result = await settle(() =>
+      fetchImsValidateToken({
+        endpoint: CM_CONSOLE_IMS_VALIDATE_TOKEN_ENDPOINT,
+        clientId: CM_CONSOLE_IMS_CLIENT_ID,
+        token,
+        credentials,
+      })
+    );
+    if (!result.ok) {
+      continue;
     }
-
-    const attempts = [{ credentials: "include" }, { credentials: "omit" }];
-    for (const attempt of attempts) {
-      try {
-        const response = await relayImsFetch(endpoint, {
-          method: "POST",
-          credentials: attempt.credentials,
-          headers: {
-            Accept: "*/*",
-            Origin: CM_CONSOLE_APP_ORIGIN,
-            Referer: CM_CONSOLE_APP_REFERER,
-            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-            ...(clientId ? { client_id: clientId } : {}),
-          },
-          body: form.toString(),
-        });
-        if (!response.ok) {
-          continue;
-        }
-
-        const text = await response.text().catch(() => "");
-        const parsed = parseJsonText(text, null);
-        const refreshedToken = normalizeBearerTokenValue(extractImsAccessTokenFromPayload(parsed, text));
-        if (refreshedToken && isProbablyJwt(refreshedToken) && tokenSupportsCmTenantCatalog(refreshedToken)) {
-          if (!requireFresh || isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-            const tokenPayload = parsed?.token && typeof parsed.token === "object" ? parsed.token : {};
-            const statePayload = parseImsStatePayload(firstNonEmptyString([tokenPayload?.state]));
-            const createdAtRaw = Number(tokenPayload?.created_at || 0);
-            const createdAtMs =
-              createdAtRaw > 0 && createdAtRaw < 1000000000000 ? createdAtRaw * 1000 : createdAtRaw > 0 ? createdAtRaw : 0;
-            const tokenSnapshot = mergeImsSessionSnapshots(null, {
-              tokenId: tokenPayload?.id,
-              sessionId: tokenPayload?.sid,
-              sessionUrl: firstNonEmptyString([statePayload?.session]),
-              userId: firstNonEmptyString([tokenPayload?.user_id, hints.userId]),
-              authId: firstNonEmptyString([tokenPayload?.aa_id]),
-              clientId: firstNonEmptyString([tokenPayload?.client_id, clientId]),
-              tokenType: firstNonEmptyString([tokenPayload?.type]),
-              scope: firstNonEmptyString([tokenPayload?.scope, hints.scope]),
-              as: tokenPayload?.as,
-              fg: tokenPayload?.fg,
-              moi: tokenPayload?.moi,
-              pba: tokenPayload?.pba,
-              keyAlias: firstNonEmptyString([tokenPayload?.key_alias]),
-              stateNonce: statePayload?.nonce,
-              stateJslibVersion: firstNonEmptyString([statePayload?.jslibver, statePayload?.jslibVersion]),
-              createdAt: createdAtMs,
-              expiresAt: Number(parsed?.expires_at || 0),
-            });
-            return {
-              accessToken: refreshedToken,
-              expiresAt: coercePositiveNumber(parsed?.expires_at),
-              expiresIn: coercePositiveNumber(tokenPayload?.expires_in || parsed?.expires_in),
-              scope: firstNonEmptyString([tokenPayload?.scope, hints.scope]),
-              imsSession: tokenSnapshot,
-              source: `validate:${clientId}:${attempt.credentials}`,
-            };
-          }
-        }
-
-        if (parsed?.valid === true && !requireFresh && tokenSupportsCmTenantCatalog(token)) {
-          return {
-            accessToken: token,
-            expiresAt: 0,
-            expiresIn: 0,
-            scope: hints.scope,
-            imsSession: null,
-            source: `validate-existing:${clientId}:${attempt.credentials}`,
-          };
-        }
-      } catch {
-        // Continue best-effort across client/credential variants.
-      }
+    const refreshedToken = normalizeCmuAccessToken(result.value?.data, result.value?.rawText);
+    if (!refreshedToken || !tokenSupportsCmTenantCatalog(refreshedToken)) {
+      continue;
     }
+    if (requireFresh && !isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+      continue;
+    }
+    return buildCmConsoleBootstrapResult(refreshedToken, `validate:${credentials}`);
   }
 
   return null;
 }
 
 async function requestCmTokenViaImsCheck(seedToken = "", options = {}) {
-  const hints = resolveCmImsTokenHints(seedToken);
-  const userIdCandidates = [];
-  const pushUserIdCandidate = (value, preferFront = false) => {
-    const normalized = String(value || "").trim();
-    if (!normalized) {
-      return;
-    }
-    const existingIndex = userIdCandidates.indexOf(normalized);
-    if (existingIndex >= 0) {
-      if (preferFront && existingIndex > 0) {
-        userIdCandidates.splice(existingIndex, 1);
-        userIdCandidates.unshift(normalized);
-      }
-      return;
-    }
-    if (preferFront) {
-      userIdCandidates.unshift(normalized);
-      return;
-    }
-    userIdCandidates.push(normalized);
-  };
-  try {
-    const profileToken = normalizeBearerTokenValue(
-      firstNonEmptyString([seedToken, getPreferredPrimaryImsAccessTokenCandidate()])
-    );
-    const profilePayload = await fetchImsSessionProfile(profileToken);
-    pushUserIdCandidate(
-      firstNonEmptyString([
-        profilePayload?.authId,
-        profilePayload?.aa_id,
-        profilePayload?.adobeID,
-        profilePayload?.email,
-        profilePayload?.user_email,
-        profilePayload?.emailAddress,
-        profilePayload?.additional_info?.authId,
-        profilePayload?.additional_info?.aa_id,
-        profilePayload?.additional_info?.email,
-      ]),
-      true
-    );
-    pushUserIdCandidate(
-      firstNonEmptyString([profilePayload?.userId, profilePayload?.user_id, profilePayload?.sub, profilePayload?.id]),
-      false
-    );
-    pushUserIdCandidate(
-      firstNonEmptyString([profilePayload?.additional_info?.userId, profilePayload?.additional_info?.user_id]),
-      false
-    );
-  } catch {
-    // Keep existing candidates best-effort.
-  }
-  (Array.isArray(hints.userIdCandidates) ? hints.userIdCandidates : []).forEach((candidate) => {
-    pushUserIdCandidate(candidate);
-  });
-  if (!userIdCandidates.includes("")) {
-    userIdCandidates.push("");
-  }
-
-  const clientIds = uniqueSorted(
-    [CM_IMS_PRIMARY_CLIENT_ID, hints.clientId, ...CM_IMS_CHECK_CLIENT_IDS]
-      .map((value) => String(value || "").trim())
-      .filter((value) => isCmConsoleClientId(value))
-  );
-  const scopes = uniqueSorted(
-    [CM_IMS_CHECK_DEFAULT_SCOPE, hints.scope].map((value) => String(value || "").trim()).filter(Boolean)
-  );
   const requireFresh = options.requireFresh === true;
+  const currentSession = state.loginData || createCmBootstrapSeedLoginData();
+  const seedTokens = dedupeCandidateStrings([
+    seedToken,
+    currentSession?.accessToken,
+  ]).filter((value) => isProbablyJwt(value));
+  const userIdCandidates = collectCmConsoleUserIdCandidates(currentSession, seedToken);
+  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const allowTemporaryTab = options?.allowTemporaryPageContextTab !== false;
 
-  for (const clientId of clientIds) {
-    for (const scope of scopes) {
-      for (const userIdCandidate of userIdCandidates) {
-        const requestUrl = buildCmImsCheckUrl({
-          clientId,
-          scope,
-          userId: userIdCandidate,
-        });
-        const authSeedTokens = uniqueSorted(
-          [
-            seedToken,
-            getPreferredPrimaryImsAccessTokenCandidate(),
-          ]
-            .map((value) => normalizeBearerTokenValue(value))
-            .filter((value) => isProbablyJwt(value))
-        );
-        const attempts = [{ credentials: "include", headers: {} }, { credentials: "omit", headers: {} }];
-        authSeedTokens.forEach((authToken) => {
-          attempts.push({
-            credentials: "omit",
-            headers: {
-              Authorization: `Bearer ${authToken}`,
-              "X-IMS-ClientId": clientId,
-              "x-api-key": clientId,
-            },
-          });
-        });
-        for (const attempt of attempts) {
-          try {
-            const response = await relayImsFetch(requestUrl, {
-              method: "POST",
-              credentials: attempt.credentials,
-              headers: {
-                Accept: "*/*",
-                Origin: CM_CONSOLE_APP_ORIGIN,
-                Referer: CM_CONSOLE_APP_REFERER,
-                ...(attempt.headers && typeof attempt.headers === "object" ? attempt.headers : {}),
-              },
-            });
-            if (!response.ok) {
-              continue;
-            }
-
-            const text = await response.text().catch(() => "");
-            const parsed = parseJsonText(text, null);
-            const refreshedToken = normalizeBearerTokenValue(extractImsAccessTokenFromPayload(parsed, text));
-            if (!refreshedToken || !isProbablyJwt(refreshedToken) || !tokenSupportsCmTenantCatalog(refreshedToken)) {
-              continue;
-            }
-            if (requireFresh && !isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-              continue;
-            }
-
-            const claims = parseJwtPayload(refreshedToken) || {};
-            return {
-              accessToken: refreshedToken,
-              expiresAt: 0,
-              expiresIn: coercePositiveNumber(claims?.expires_in || parsed?.expires_in),
-              scope: firstNonEmptyString([claims?.scope, hints.scope, scope]),
-              imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(refreshedToken), null),
-              source: `check:${clientId}:${attempt.credentials}`,
-            };
-          } catch {
-            // Continue best-effort across check and credential variants.
-          }
+  for (const userIdCandidate of userIdCandidates) {
+    const pageContextResult = await settle(() =>
+      fetchImsCheckTokenViaAdobePageContext({
+        endpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
+        clientId: CM_CONSOLE_IMS_CLIENT_ID,
+        scope: CM_CONSOLE_IMS_SCOPE,
+        userId: userIdCandidate,
+        preferredTabId,
+        allowTemporaryTab,
+      })
+    );
+    if (pageContextResult.ok) {
+      const refreshedToken = normalizeCmuAccessToken(pageContextResult.value?.data, pageContextResult.value?.rawText);
+      if (refreshedToken && tokenSupportsCmTenantCatalog(refreshedToken)) {
+        if (!requireFresh || isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+          return buildCmConsoleBootstrapResult(refreshedToken, "page-context:ims-check");
         }
       }
+    }
+
+    const attempts = [
+      { credentials: "include", seedToken: "" },
+      { credentials: "omit", seedToken: "" },
+      ...seedTokens.map((candidate) => ({ credentials: "omit", seedToken: candidate })),
+    ];
+    for (const attempt of attempts) {
+      const result = await settle(() =>
+        fetchImsCheckToken({
+          endpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
+          clientId: CM_CONSOLE_IMS_CLIENT_ID,
+          scope: CM_CONSOLE_IMS_SCOPE,
+          userId: userIdCandidate,
+          credentials: attempt.credentials,
+          seedToken: attempt.seedToken,
+        })
+      );
+      if (!result.ok) {
+        continue;
+      }
+      const refreshedToken = normalizeCmuAccessToken(result.value?.data, result.value?.rawText);
+      if (!refreshedToken || !tokenSupportsCmTenantCatalog(refreshedToken)) {
+        continue;
+      }
+      if (requireFresh && !isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
+        continue;
+      }
+      return buildCmConsoleBootstrapResult(
+        refreshedToken,
+        `ims-check:${attempt.credentials}${attempt.seedToken ? ":seed" : ""}`
+      );
     }
   }
 
@@ -64571,13 +68151,13 @@ async function findExistingExperienceCloudAdobeTab() {
         if (tab?.active === true) {
           score += 5000;
         }
-        if (url.startsWith(`${normalizedOrigin.toLowerCase()}/`)) {
+        if (url.includes("/#/@adobepass/cm-console/")) {
           score += 2400;
         }
         if (url.includes("/#/@adobepass/")) {
           score += 1800;
         }
-        if (url.includes("/pass/authentication/")) {
+        if (isExperienceAdobeTabUrl(url)) {
           score += 1200;
         }
         return { tab, score };
@@ -64589,9 +68169,139 @@ async function findExistingExperienceCloudAdobeTab() {
   }
 }
 
+function isExperienceAdobeTabUrl(value = "") {
+  const normalizedUrl = String(value || "").trim().toLowerCase();
+  const normalizedOrigin = String(CM_CONSOLE_APP_ORIGIN || "").trim().toLowerCase().replace(/\/+$/, "");
+  if (!normalizedUrl || !normalizedOrigin) {
+    return false;
+  }
+  return normalizedUrl === normalizedOrigin || normalizedUrl.startsWith(`${normalizedOrigin}/`);
+}
+
+function buildAdobePassConsoleBootstrapUrl(environment = null, page = "programmers") {
+  const resolvedEnvironment = resolveAdobePassEnvironment(environment);
+  const normalizedRoute =
+    String(resolvedEnvironment?.route || resolvedEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.route || DEFAULT_ADOBEPASS_ENVIRONMENT.key)
+      .trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const normalizedPage = String(page || "").trim() || "programmers";
+  return `${ADOBE_CONSOLE_RUNTIME_ORIGIN}/solutions/${ADOBE_PASS_CONSOLE_APP_SLUG}/${normalizedRoute}/${normalizedPage}`;
+}
+
+function isAdobePassConsoleAppUrl(value = "") {
+  const normalizedUrl = String(value || "").trim().toLowerCase();
+  if (!normalizedUrl) {
+    return false;
+  }
+  return normalizedUrl.includes(`/solutions/${ADOBE_PASS_CONSOLE_APP_SLUG.toLowerCase()}/`);
+}
+
+async function findExistingAdobeConsoleTab() {
+  const normalizedOrigin = String(ADOBE_CONSOLE_RUNTIME_ORIGIN || "").trim().replace(/\/+$/, "");
+  if (!normalizedOrigin) {
+    return null;
+  }
+
+  try {
+    const tabs = await chrome.tabs.query({
+      url: [`${normalizedOrigin}/*`],
+    });
+    const normalizedTabs = Array.isArray(tabs) ? tabs : [];
+    const scored = normalizedTabs
+      .filter((tab) => Number(tab?.id || 0) > 0)
+      .map((tab) => ({
+        tab,
+        url: String(tab?.url || tab?.pendingUrl || "").trim().toLowerCase(),
+      }))
+      .filter(({ url }) => isAdobePassConsoleAppUrl(url))
+      .map(({ tab, url }) => {
+        let score = Number(tab?.lastAccessed || 0);
+        if (tab?.active === true) {
+          score += 5000;
+        }
+        if (url.includes("/programmers")) {
+          score += 2600;
+        }
+        if (isAdobePassConsoleAppUrl(url)) {
+          score += 1800;
+        }
+        return { tab, score };
+      })
+      .sort((left, right) => right.score - left.score);
+    return scored[0]?.tab || null;
+  } catch {
+    return null;
+  }
+}
+
 async function openTemporaryAdobePageContextTarget(targetUrl = "") {
-  void targetUrl;
-  return null;
+  const normalizedUrl = String(targetUrl || "").trim();
+  if (!normalizedUrl) {
+    return null;
+  }
+
+  let temporaryTarget = null;
+  if (chrome.tabs?.create) {
+    try {
+      const createdTab = await chrome.tabs.create({
+        url: normalizedUrl,
+        active: false,
+      });
+      const tabId = Number(createdTab?.id || 0);
+      if (tabId > 0) {
+        temporaryTarget = {
+          tab: createdTab,
+          tabId,
+          windowId: Number(createdTab?.windowId || 0),
+          ownsWindow: false,
+        };
+      }
+    } catch {
+      temporaryTarget = null;
+    }
+  }
+
+  if (!temporaryTarget && chrome.windows?.create) {
+    try {
+      const createdWindow = await chrome.windows.create({
+        url: normalizedUrl,
+        type: "popup",
+        focused: false,
+        width: 480,
+        height: 640,
+      });
+      const tab =
+        Array.isArray(createdWindow?.tabs) && createdWindow.tabs.length > 0
+          ? createdWindow.tabs.find((candidate) => Number(candidate?.id || 0) > 0) || null
+          : null;
+      const tabId = Number(tab?.id || 0);
+      const windowId = Number(createdWindow?.id || 0);
+      if (tabId > 0 && windowId > 0) {
+        temporaryTarget = {
+          tab,
+          tabId,
+          windowId,
+          ownsWindow: true,
+        };
+      }
+    } catch {
+      temporaryTarget = null;
+    }
+  }
+
+  if (!temporaryTarget?.tabId) {
+    return null;
+  }
+
+  await waitForTabCompletion(
+    temporaryTarget.tabId,
+    Math.max(5000, Number(PROGRAMMERS_FETCH_TIMEOUT_MS || 0) || 5000),
+    { expectedUrl: normalizedUrl }
+  ).catch(() => null);
+  const resolvedTab = await getTabByIdSafe(temporaryTarget.tabId).catch(() => null);
+  return {
+    ...temporaryTarget,
+    tab: resolvedTab || temporaryTarget.tab,
+  };
 }
 
 async function closeTemporaryAdobePageContextTarget(target = null) {
@@ -64620,8 +68330,20 @@ async function closeTemporaryAdobePageContextTarget(target = null) {
 async function resolveReusableAdobePageContextTab(preferredTabId = 0) {
   const preferredTab = await getTabByIdSafe(preferredTabId);
   const preferredUrl = String(preferredTab?.url || preferredTab?.pendingUrl || "").trim();
-  if (preferredTab?.id && isAuthFlowUrl(preferredUrl)) {
+  if (preferredTab?.id && isAdobePassConsoleAppUrl(preferredUrl)) {
     return preferredTab;
+  }
+
+  if (preferredTab?.id && isAuthFlowUrl(preferredUrl)) {
+    await waitForTabCompletion(
+      Number(preferredTab.id || 0),
+      Math.max(5000, Number(PROGRAMMERS_FETCH_TIMEOUT_MS || 0) || 5000)
+    ).catch(() => null);
+    const refreshedTab = await getTabByIdSafe(preferredTab.id).catch(() => null);
+    const refreshedUrl = String(refreshedTab?.url || refreshedTab?.pendingUrl || "").trim();
+    if (refreshedTab?.id && isAdobePassConsoleAppUrl(refreshedUrl)) {
+      return refreshedTab;
+    }
   }
 
   return null;
@@ -64640,13 +68362,10 @@ function getAdobeConsolePageContextBootstrapUrl(requestUrl = "") {
     isProgrammersRequest ||
     isApplicationsRequest ||
     /\/config\/history(?:[/?#]|$)/i.test(normalizedUrl);
-  const environment = getActiveAdobePassEnvironment();
-  return firstNonEmptyString([
-    isProgrammersRuntimeRequest ? environment?.consoleProgrammersUrl : "",
-    isProgrammersRuntimeRequest ? environment?.consoleShellUrl : "",
-    environment?.consoleShellUrl,
-    `${String(CM_CONSOLE_APP_ORIGIN || "").trim().replace(/\/+$/, "")}/`,
-  ]);
+  return buildAdobePassConsoleBootstrapUrl(
+    getActiveAdobePassEnvironment(),
+    isProgrammersRuntimeRequest ? "programmers" : "programmers"
+  );
 }
 
 async function resolveAdobeConsolePageContextTarget(requestUrl = "", options = {}) {
@@ -64655,14 +68374,12 @@ async function resolveAdobeConsolePageContextTarget(requestUrl = "", options = {
 
   let tab = await resolveReusableAdobePageContextTab(preferredTabId);
   if (!tab?.id) {
-    tab = await findExistingExperienceCloudAdobeTab();
+    tab = await findExistingAdobeConsoleTab();
   }
 
   let temporaryTarget = null;
   if (!tab?.id && allowTemporaryTab) {
-    temporaryTarget = await openTemporaryAdobePageContextTarget(
-      getAdobeConsolePageContextBootstrapUrl(requestUrl)
-    );
+    temporaryTarget = await openTemporaryAdobePageContextTarget(getAdobeConsolePageContextBootstrapUrl(requestUrl));
     tab = temporaryTarget?.tab || null;
   }
 
@@ -64700,6 +68417,230 @@ async function withAdobeConsolePageContextTarget(requestUrl = "", options = {}, 
   }
 }
 
+async function sleep(ms = 0) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, Math.max(0, Number(ms || 0)));
+  });
+}
+
+async function executeFetchViaAdobePageContextTarget({
+  tabId,
+  requestUrl,
+  method = "GET",
+  headers = {},
+  bodyText = "",
+  timeoutMs = ADOBE_PAGE_CONTEXT_TIMEOUT_MS,
+  requiredFrameOrigins = [],
+  requiredFrameUrlIncludes = [],
+} = {}) {
+  if (!chrome.scripting?.executeScript) {
+    throw new Error("Chrome page-context scripting is unavailable. Add the scripting permission and reload the extension.");
+  }
+
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedTabId <= 0) {
+    throw new Error("Adobe page-context fetch is missing a usable tab target.");
+  }
+
+  const normalizedRequestUrl = String(requestUrl || "").trim();
+  if (!normalizedRequestUrl) {
+    throw new Error("Adobe page-context fetch is missing a request URL.");
+  }
+
+  const normalizedMethod = String(method || "GET").trim().toUpperCase();
+  const normalizedHeaders = Object.entries(headers || {}).reduce((result, [key, value]) => {
+    const normalizedKey = String(key || "").trim();
+    const normalizedValue = String(value || "").trim();
+    if (normalizedKey && normalizedValue) {
+      result[normalizedKey] = normalizedValue;
+    }
+    return result;
+  }, {});
+  const normalizedOrigins = (Array.isArray(requiredFrameOrigins) ? requiredFrameOrigins : [])
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+  const normalizedUrlIncludes = (Array.isArray(requiredFrameUrlIncludes) ? requiredFrameUrlIncludes : [])
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+  const deadline = Date.now() + Math.max(2500, Number(timeoutMs || 0) || ADOBE_PAGE_CONTEXT_TIMEOUT_MS);
+  let lastFrameSummary = [];
+  let lastError = null;
+
+  while (Date.now() < deadline) {
+    try {
+      await waitForTabCompletion(normalizedTabId, Math.min(1200, Math.max(200, deadline - Date.now()))).catch(() => null);
+      const executionResults = await chrome.scripting.executeScript({
+        target: { tabId: normalizedTabId, allFrames: true },
+        world: "MAIN",
+        args: [
+          {
+            requestUrl: normalizedRequestUrl,
+            method: normalizedMethod,
+            headers: normalizedHeaders,
+            bodyText: String(bodyText || ""),
+            timeoutMs: Math.max(1500, deadline - Date.now()),
+            requiredFrameOrigins: normalizedOrigins,
+            requiredFrameUrlIncludes: normalizedUrlIncludes,
+          },
+        ],
+        func: async (config) => {
+          const normalize = (value) => String(value || "").trim();
+          const parseJson = (text) => {
+            try {
+              return JSON.parse(String(text || ""));
+            } catch {
+              return null;
+            }
+          };
+          const frameUrl = normalize(globalThis.location?.href);
+          const frameOrigin = normalize(globalThis.location?.origin).toLowerCase();
+          const documentReadyState = normalize(globalThis.document?.readyState);
+          const requiredOrigins = (Array.isArray(config?.requiredFrameOrigins) ? config.requiredFrameOrigins : [])
+            .map((value) => normalize(value).toLowerCase())
+            .filter(Boolean);
+          const requiredUrlIncludes = (Array.isArray(config?.requiredFrameUrlIncludes) ? config.requiredFrameUrlIncludes : [])
+            .map((value) => normalize(value).toLowerCase())
+            .filter(Boolean);
+          const matchesOrigin = requiredOrigins.length === 0 || requiredOrigins.includes(frameOrigin);
+          const frameUrlLower = frameUrl.toLowerCase();
+          const matchesUrl =
+            requiredUrlIncludes.length === 0 || requiredUrlIncludes.some((fragment) => frameUrlLower.includes(fragment));
+
+          if (!matchesOrigin || !matchesUrl) {
+            return {
+              skipped: true,
+              frameUrl,
+              frameOrigin,
+              documentReadyState,
+            };
+          }
+
+          const controller = new AbortController();
+          const timerId = window.setTimeout(
+            () => controller.abort(),
+            Math.max(1200, Number(config?.timeoutMs || 0) || 5000)
+          );
+
+          try {
+            const response = await fetch(normalize(config?.requestUrl), {
+              method: normalize(config?.method || "GET") || "GET",
+              credentials: "include",
+              headers: config?.headers && typeof config.headers === "object" ? config.headers : {},
+              ...(normalize(config?.method || "GET").toUpperCase() === "GET"
+                ? {}
+                : { body: String(config?.bodyText || "") }),
+              signal: controller.signal,
+            });
+            const text = await response.text().catch(() => "");
+            const responseHeaders = {};
+            response.headers.forEach((value, key) => {
+              const normalizedKey = normalize(key).toLowerCase();
+              if (normalizedKey) {
+                responseHeaders[normalizedKey] = normalize(value);
+              }
+            });
+            return {
+              skipped: false,
+              ok: Boolean(response.ok),
+              status: Number(response.status || 0),
+              statusText: normalize(response.statusText),
+              url: normalize(response.url || config?.requestUrl),
+              text,
+              parsed: parseJson(text),
+              responseHeaders,
+              frameUrl,
+              frameOrigin,
+              documentReadyState,
+            };
+          } catch (error) {
+            return {
+              skipped: false,
+              ok: false,
+              status: 0,
+              statusText: error instanceof Error ? error.message : String(error),
+              url: normalize(config?.requestUrl),
+              text: "",
+              parsed: null,
+              responseHeaders: {},
+              frameUrl,
+              frameOrigin,
+              documentReadyState,
+            };
+          } finally {
+            window.clearTimeout(timerId);
+          }
+        },
+      });
+
+      const results = (Array.isArray(executionResults) ? executionResults : [])
+        .map((entry) => (entry?.result && typeof entry.result === "object" ? entry.result : null))
+        .filter(Boolean);
+      const matchingResults = results.filter((result) => result?.skipped !== true);
+
+      if (matchingResults.length === 0) {
+        lastFrameSummary = results.map((result) => ({
+          frameOrigin: firstNonEmptyString([result?.frameOrigin, "unknown-origin"]),
+          frameUrl: firstNonEmptyString([result?.frameUrl, "unknown-url"]),
+        }));
+        await sleep(150);
+        continue;
+      }
+
+      const scoreResult = (result) => {
+        const frameOrigin = String(result?.frameOrigin || "").trim().toLowerCase();
+        const originIndex = normalizedOrigins.indexOf(frameOrigin);
+        return originIndex >= 0 ? normalizedOrigins.length - originIndex : 0;
+      };
+      matchingResults.sort((left, right) => scoreResult(right) - scoreResult(left));
+      const selectedResult = matchingResults[0];
+
+      if (!selectedResult?.ok) {
+        const message = getAdobeConsoleErrorMessage(selectedResult?.parsed, selectedResult?.text, selectedResult?.statusText);
+        throw new Error(
+          `${new URL(normalizedRequestUrl).pathname} returned ${Number(selectedResult?.status || 0)}${
+            message ? `: ${message}` : ""
+          } via Adobe page context ${firstNonEmptyString([selectedResult?.frameOrigin, "unknown-origin"])}.`
+        );
+      }
+
+      return {
+        data: selectedResult.parsed ?? (selectedResult.text ? String(selectedResult.text).trim() : null),
+        rawText: String(selectedResult.text || ""),
+        headers:
+          selectedResult.responseHeaders && typeof selectedResult.responseHeaders === "object"
+            ? selectedResult.responseHeaders
+            : {},
+        pageContext: {
+          url: firstNonEmptyString([selectedResult.frameUrl]),
+          origin: firstNonEmptyString([selectedResult.frameOrigin]),
+          readyState: firstNonEmptyString([selectedResult.documentReadyState]),
+        },
+      };
+    } catch (error) {
+      lastError = error;
+      break;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  const observedFrames = lastFrameSummary
+    .map((frame) => {
+      const origin = firstNonEmptyString([frame?.frameOrigin, "unknown-origin"]);
+      const url = firstNonEmptyString([frame?.frameUrl, "unknown-url"]);
+      return `${origin} | ${url}`;
+    })
+    .filter(Boolean)
+    .join(", ");
+  throw new Error(
+    observedFrames
+      ? `Adobe page context did not expose the Adobe Pass console frame. Observed: ${observedFrames}`
+      : "Adobe page context did not expose the Adobe Pass console frame."
+  );
+}
+
 async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options = {}) {
   if (!chrome.scripting?.executeScript) {
     return null;
@@ -64724,29 +68665,33 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
         : JSON.stringify(options.body)
       : undefined;
   const requestCredentials = String(options.credentials || "include");
-  const shouldWaitForProgrammersFrame =
-    /\/entity\/Programmer(?:[/?#]|$)|\/applications(?:[/?#]|$)|\/entity\/bulkRetrieve(?:[/?#]|$)|\/entity\/RegisteredApplication(?:[/?#]|$)|\/registeredApplications(?:[/?#]|$)|\/registered-applications(?:[/?#]|$)|\/config\/history(?:[/?#]|$)/i.test(
-      normalizedUrl
-    );
+  const pageContextTargetRef =
+    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
+      ? options.pageContextTargetRef
+      : null;
   const explicitAuthorization = firstNonEmptyString([customHeaders.Authorization, customHeaders.authorization]);
   const explicitAccessToken = normalizeBearerTokenValue(String(explicitAuthorization || "").replace(/^Bearer\s+/i, ""));
   const accessToken = normalizeBearerTokenValue(
     firstNonEmptyString([explicitAccessToken, options?.accessToken, getPreferredAdobeConsoleAccessTokenCandidate()])
   );
-  const headerVariants = [];
-  const buildRequestHeaders = (token = "") => ({
-    ...getAdobeConsoleRequestHeaders(token),
+  const requestHeaders = {
+    ...getAdobeConsoleRequestHeaders(accessToken),
     ...customHeaders,
-  });
-  if (accessToken) {
-    headerVariants.push(buildRequestHeaders(accessToken));
-  }
-  headerVariants.push(buildRequestHeaders(""));
+  };
 
-  const target = await resolveAdobeConsolePageContextTarget(normalizedUrl, {
-    preferredTabId,
-    allowTemporaryTab,
-  }).catch(() => null);
+  let target =
+    pageContextTargetRef?.target && typeof pageContextTargetRef.target === "object"
+      ? pageContextTargetRef.target
+      : null;
+  if (Number(target?.tabId || 0) <= 0) {
+    target = await resolveAdobeConsolePageContextTarget(normalizedUrl, {
+      preferredTabId,
+      allowTemporaryTab,
+    }).catch(() => null);
+    if (pageContextTargetRef && target) {
+      pageContextTargetRef.target = target;
+    }
+  }
   const temporaryTarget = target?.temporaryTarget || null;
   const tabId = Number(target?.tabId || 0);
   if (tabId <= 0) {
@@ -64754,559 +68699,38 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
   }
 
   try {
-    const executeAcrossFrames = async () =>
-      chrome.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        world: "MAIN",
-        args: [
-          {
-            requestUrl: normalizedUrl,
-            timeoutMs,
-            method: requestMethod,
-            body: requestBody,
-            credentials: requestCredentials,
-            accessToken,
-            headerVariants: headerVariants.map((headers) =>
-              headers && typeof headers === "object" ? { ...headers } : {}
-            ),
-          },
-        ],
-        func: async (config) => {
-        const normalize = (value) => String(value || "").trim();
-        const isJwt = (value) => /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/.test(normalize(value));
-        const parseJson = (text) => {
-          try {
-            return JSON.parse(String(text || ""));
-          } catch {
-            return null;
-          }
-        };
-        const safeGetProperty = (container, key) => {
-          try {
-            return container?.[key];
-          } catch {
-            return undefined;
-          }
-        };
-        const normalizeShellOrganizations = (value) =>
-          (Array.isArray(value) ? value : [])
-            .map((entry) => {
-              if (!entry || typeof entry !== "object") {
-                return null;
-              }
-              const organizationId = normalize(entry.value || entry.id || entry.code || entry.orgId || entry.organizationId);
-              const label = normalize(entry.label || entry.name || entry.displayName || entry.orgName || entry.organizationName);
-              const userId = normalize(entry.userId || entry.user_id || entry.profileGuid || entry.profileId);
-              if (!organizationId && !label) {
-                return null;
-              }
-              return {
-                value: organizationId,
-                id: organizationId,
-                label,
-                userId,
-              };
-            })
-            .filter(Boolean);
-        const normalizeShellProfile = (value) => {
-          if (!value || typeof value !== "object") {
-            return null;
-          }
-          const displayName = normalize(value.displayName || value.name);
-          const email = normalize(value.email || value.login_email || value.username);
-          const avatar = normalize(value.avatar || value.avatarUrl || value.user_image_url || value.imageUrl);
-          const userId = normalize(value.userId || value.user_id || value.sub || value.id);
-          if (!displayName && !email && !avatar && !userId) {
-            return null;
-          }
-          return {
-            ...(displayName ? { displayName } : {}),
-            ...(email ? { email } : {}),
-            ...(avatar ? { avatar } : {}),
-            ...(userId ? { userId } : {}),
-          };
-        };
-        const buildShellCandidate = (value, sourcePath = "") => {
-          if (!value || typeof value !== "object") {
-            return null;
-          }
-          const normalizedSourcePath = String(sourcePath || "");
-          const isExplicitShellRoot = /window\.(?:__shellConfiguration|shellConfiguration|__excShellConfiguration|__adobeShellConfiguration)$/i.test(
-            normalizedSourcePath
-          );
-          let imsToken = "";
-          let imsOrg = "";
-          let imsOrgName = "";
-          let imsOrgs = [];
-          let imsClientId = "";
-          let imsProfile = null;
-          const sourceLooksShellish = /(?:^|\.)(?:__)?(?:exc)?shell(?:configuration)?(?:\.|$)|shellconfiguration|gainsight|runtime/i.test(
-            normalizedSourcePath
-          );
-          try {
-            const nestedToken = safeGetProperty(value, "token");
-            imsToken = normalize(
-              safeGetProperty(value, "imsToken") ||
-                safeGetProperty(value, "accessToken") ||
-                safeGetProperty(value, "access_token") ||
-                (nestedToken && typeof nestedToken === "object"
-                  ? safeGetProperty(nestedToken, "imsToken") ||
-                    safeGetProperty(nestedToken, "accessToken") ||
-                    safeGetProperty(nestedToken, "access_token")
-                  : "") ||
-                safeGetProperty(value, "authorization") ||
-                safeGetProperty(value, "Authorization") ||
-                ""
-            );
-            imsOrg = normalize(
-              safeGetProperty(value, "imsOrg") ||
-                safeGetProperty(value, "ims_org") ||
-                safeGetProperty(value, "orgId") ||
-                safeGetProperty(value, "org_id") ||
-                safeGetProperty(value, "organizationId") ||
-                safeGetProperty(value, "organization") ||
-                ""
-            );
-            imsOrgName = normalize(
-              safeGetProperty(value, "imsOrgName") ||
-                safeGetProperty(value, "ims_org_name") ||
-                safeGetProperty(value, "orgName") ||
-                safeGetProperty(value, "org_name") ||
-                safeGetProperty(value, "organizationName") ||
-                safeGetProperty(value, "organization_name") ||
-                safeGetProperty(value, "label") ||
-                ""
-            );
-            imsOrgs = normalizeShellOrganizations(
-              Array.isArray(safeGetProperty(value, "imsOrgs"))
-                ? safeGetProperty(value, "imsOrgs")
-                : Array.isArray(safeGetProperty(value, "organizations"))
-                  ? safeGetProperty(value, "organizations")
-                  : Array.isArray(safeGetProperty(value, "orgs"))
-                    ? safeGetProperty(value, "orgs")
-                    : []
-            );
-            imsClientId = normalize(
-              safeGetProperty(value, "imsClientId") || safeGetProperty(value, "clientId") || safeGetProperty(value, "imsClientID") || ""
-            );
-            const imsProfileValue = safeGetProperty(value, "imsProfile");
-            const profileValue = safeGetProperty(value, "profile");
-            const userValue = safeGetProperty(value, "user");
-            imsProfile = normalizeShellProfile(
-              imsProfileValue && typeof imsProfileValue === "object"
-                ? imsProfileValue
-                : profileValue && typeof profileValue === "object"
-                  ? profileValue
-                  : userValue && typeof userValue === "object"
-                    ? userValue
-                    : null
-            );
-          } catch {
-            return null;
-          }
-          if (!sourceLooksShellish && !imsToken) {
-            return null;
-          }
-          const shellTenant = normalize(safeGetProperty(value, "tenant"));
-          const shellEnvironment = normalize(safeGetProperty(value, "environment"));
-          const shellBaseFrameUrl = normalize(safeGetProperty(value, "baseFrameUrl"));
-          const shellBaseUrl = normalize(safeGetProperty(value, "baseUrl"));
-          const hasShellShape =
-            Boolean(imsOrg || imsOrgName || imsOrgs.length > 0 || imsProfile || shellTenant || shellEnvironment || shellBaseFrameUrl || shellBaseUrl);
-          if (!isExplicitShellRoot && !hasShellShape) {
-            return null;
-          }
-          if (!imsToken && !imsOrg && !imsOrgName && imsOrgs.length === 0 && !imsProfile) {
-            return null;
-          }
-          const score =
-            (isExplicitShellRoot ? 1200 : 0) +
-            (isJwt(imsToken) ? 120 : imsToken ? 60 : 0) +
-            (sourceLooksShellish ? 80 : 0) +
-            (shellTenant ? 40 : 0) +
-            (shellEnvironment ? 30 : 0) +
-            (shellBaseFrameUrl || shellBaseUrl ? 20 : 0) +
-            (imsOrg ? 24 : 0) +
-            (imsOrgName ? 18 : 0) +
-            (imsOrgs.length > 0 ? 16 : 0) +
-            (imsProfile?.userId ? 12 : 0) +
-            (imsProfile?.email ? 8 : 0) +
-            (/shell/i.test(normalizedSourcePath) ? 12 : 0);
-          return {
-            imsToken,
-            imsOrg,
-            imsOrgName,
-            imsOrgs,
-            imsClientId,
-            imsProfile,
-            sourcePath,
-            score,
-          };
-        };
-        const findBestShellSnapshot = () => {
-          const rootEntries = [
-            ["window.__shellConfiguration", window.__shellConfiguration],
-            ["window.shellConfiguration", window.shellConfiguration],
-            ["window.__excShellConfiguration", window.__excShellConfiguration],
-            ["window.__adobeShellConfiguration", window.__adobeShellConfiguration],
-            ["window.__INITIAL_STATE__.shellConfiguration", safeGetProperty(safeGetProperty(window, "__INITIAL_STATE__"), "shellConfiguration")],
-            ["window.__INITIAL_STATE__.shell", safeGetProperty(safeGetProperty(window, "__INITIAL_STATE__"), "shell")],
-            ["window.__PRELOADED_STATE__.shellConfiguration", safeGetProperty(safeGetProperty(window, "__PRELOADED_STATE__"), "shellConfiguration")],
-            ["window.__PRELOADED_STATE__.shell", safeGetProperty(safeGetProperty(window, "__PRELOADED_STATE__"), "shell")],
-            ["window.__runtime.shellConfiguration", safeGetProperty(safeGetProperty(window, "__runtime"), "shellConfiguration")],
-            ["window.__excRuntime.shellConfiguration", safeGetProperty(safeGetProperty(window, "__excRuntime"), "shellConfiguration")],
-          ];
-          const visited = new WeakSet();
-          const candidates = [];
-          let visitedCount = 0;
-          const shouldSkipObject = (value) => {
-            if (!value || typeof value !== "object") {
-              return true;
-            }
-            if (visited.has(value)) {
-              return true;
-            }
-            if (typeof Window !== "undefined" && value instanceof Window) {
-              return true;
-            }
-            if (typeof Document !== "undefined" && value instanceof Document) {
-              return true;
-            }
-            if (typeof Element !== "undefined" && value instanceof Element) {
-              return true;
-            }
-            if (typeof Node !== "undefined" && value instanceof Node) {
-              return true;
-            }
-            return false;
-          };
-          const visit = (value, sourcePath = "", depth = 0) => {
-            if (depth > 3 || visitedCount >= 180 || shouldSkipObject(value)) {
-              return;
-            }
-            visited.add(value);
-            visitedCount += 1;
-            const candidate = buildShellCandidate(value, sourcePath);
-            if (candidate) {
-              candidates.push(candidate);
-            }
-            Object.keys(value)
-              .slice(0, 60)
-              .forEach((key) => {
-                const child = safeGetProperty(value, key);
-                if (!child || typeof child !== "object") {
-                  return;
-                }
-                visit(child, sourcePath ? `${sourcePath}.${key}` : key, depth + 1);
-              });
-          };
-          rootEntries.forEach(([sourcePath, value]) => visit(value, String(sourcePath || ""), 0));
-          candidates.sort((left, right) => Number(right?.score || 0) - Number(left?.score || 0));
-          return candidates[0] || null;
-        };
-        const isReadyShellSnapshot = (snapshot = null) =>
-          Boolean(
-            snapshot &&
-              isJwt(snapshot.imsToken) &&
-              (snapshot.imsOrg ||
-                (Array.isArray(snapshot.imsOrgs) && snapshot.imsOrgs.length > 0) ||
-                snapshot.imsProfile?.userId ||
-                snapshot.imsProfile?.email)
-          );
-        const waitForShellSnapshot = async () => {
-          const maxWaitMs = Math.max(250, Math.min(5000, Math.floor(Math.max(0, Number(config?.timeoutMs || 0)) / 2)));
-          const deadline = Date.now() + maxWaitMs;
-          let bestSnapshot = findBestShellSnapshot();
-          while (!isReadyShellSnapshot(bestSnapshot) && Date.now() < deadline) {
-            await new Promise((resolve) => window.setTimeout(resolve, 120));
-            bestSnapshot = findBestShellSnapshot();
-          }
-          return bestSnapshot || findBestShellSnapshot();
-        };
-        const buildHeaderVariants = (shellSnapshot = null) => {
-          const variants = [];
-          const seen = new Set();
-          const preferShellAccessToken = config?.preferShellAccessToken === true;
-          const stripAuthorizationHeaders = (headers = {}) => {
-            const nextHeaders = headers && typeof headers === "object" ? { ...headers } : {};
-            delete nextHeaders.Authorization;
-            delete nextHeaders.authorization;
-            return nextHeaders;
-          };
-          const pushVariant = (headers = {}) => {
-            const requestHeaders = {
-              Accept: "application/json, text/plain, */*",
-              ...(headers && typeof headers === "object" ? headers : {}),
-            };
-            if (!normalize(requestHeaders.Authorization || requestHeaders.authorization)) {
-              delete requestHeaders.Authorization;
-              delete requestHeaders.authorization;
-            }
-            delete requestHeaders.Origin;
-            delete requestHeaders.origin;
-            delete requestHeaders.Referer;
-            delete requestHeaders.referer;
-            const dedupeKey = JSON.stringify(
-              Object.entries(requestHeaders)
-                .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-                .map(([key, value]) => [key, normalize(value)])
-            );
-            if (seen.has(dedupeKey)) {
-              return;
-            }
-            seen.add(dedupeKey);
-            variants.push(requestHeaders);
-          };
-          const explicitVariants = Array.isArray(config?.headerVariants) ? config.headerVariants : [{}];
-          explicitVariants.forEach((headers) => pushVariant(stripAuthorizationHeaders(headers)));
-          if (preferShellAccessToken && isJwt(shellSnapshot?.imsToken)) {
-            explicitVariants.forEach((headers) =>
-              pushVariant({
-                ...stripAuthorizationHeaders(headers),
-                Authorization: `Bearer ${shellSnapshot.imsToken}`,
-              })
-            );
-            return variants;
-          }
-          if (isJwt(shellSnapshot?.imsToken)) {
-            pushVariant({
-              Authorization: `Bearer ${shellSnapshot.imsToken}`,
-            });
-          }
-          const configuredAccessToken = normalize(config?.accessToken || "");
-          if (isJwt(configuredAccessToken)) {
-            pushVariant({
-              Authorization: `Bearer ${configuredAccessToken}`,
-            });
-          }
-          if (variants.length === 0) {
-            pushVariant({});
-          }
-          return variants;
-        };
-        const fetchJson = async (headers = {}, shellSnapshot = null) => {
-          const requestHeaders = {
-            ...(headers && typeof headers === "object" ? headers : {}),
-          };
-
-          const controller = new AbortController();
-          const timerId = window.setTimeout(
-            () => controller.abort(),
-            Math.max(2000, Number(config?.timeoutMs || 0) || 15000)
-          );
-          try {
-            const response = await fetch(String(config?.requestUrl || ""), {
-              method: String(config?.method || "GET"),
-              credentials: String(config?.credentials || "include"),
-              headers: requestHeaders,
-              signal: controller.signal,
-              ...(Object.prototype.hasOwnProperty.call(config || {}, "body") && config?.body != null ? { body: config.body } : {}),
-            });
-            const text = await response.text().catch(() => "");
-            const responseHeaders = {};
-            response.headers.forEach((value, key) => {
-              responseHeaders[key] = value;
-            });
-            return {
-              ok: Boolean(response.ok),
-              status: Number(response.status || 0),
-              statusText: String(response.statusText || ""),
-              url: String(response.url || config?.requestUrl || ""),
-              text,
-              parsed: parseJson(text),
-              headers: responseHeaders,
-              shell: shellSnapshot,
-            };
-          } catch (error) {
-            return {
-              ok: false,
-              status: 0,
-              statusText: error instanceof Error ? error.message : String(error),
-              url: String(config?.requestUrl || ""),
-              text: "",
-              parsed: null,
-              headers: {},
-              shell: shellSnapshot,
-            };
-          } finally {
-            window.clearTimeout(timerId);
-          }
-        };
-
-        const shellSnapshot = await waitForShellSnapshot();
-        const frameUrl = String(globalThis.location?.href || "");
-        const frameOrigin = String(globalThis.location?.origin || "");
-        const documentReadyState = String(globalThis.document?.readyState || "");
-        const isAdobePassConsoleFrame =
-          /cdn\.experience\.adobe\.net\/solutions\/AdobePass-adobepass-unifiedshell-console-client\//i.test(frameUrl) ||
-          /#\/@adobepass\/pass\/authentication\//i.test(frameUrl);
-        const isAdobePassProgrammersFrame =
-          /cdn\.experience\.adobe\.net\/solutions\/AdobePass-adobepass-unifiedshell-console-client\/[^/?#]+\/programmers(?:[/?#]|$)/i.test(
-            frameUrl
-          ) ||
-          /#\/@adobepass\/pass\/authentication\/[^/?#]+\/programmers(?:[/?#]|$)/i.test(frameUrl);
-        let lastResult = null;
-        const variants = buildHeaderVariants(shellSnapshot);
-        for (const headers of variants) {
-          const result = await fetchJson(headers, shellSnapshot);
-          if (result?.ok === true) {
-            return {
-              ...result,
-              frameUrl,
-              frameOrigin,
-              documentReadyState,
-              isAdobePassConsoleFrame,
-              isAdobePassProgrammersFrame,
-            };
-          }
-          lastResult = {
-            ...result,
-            frameUrl,
-            frameOrigin,
-            documentReadyState,
-            isAdobePassConsoleFrame,
-            isAdobePassProgrammersFrame,
-          };
-        }
-
-        return lastResult;
-      },
+    const result = await executeFetchViaAdobePageContextTarget({
+      tabId,
+      requestUrl: normalizedUrl,
+      method: requestMethod,
+      headers: requestHeaders,
+      bodyText: requestBody || "",
+      timeoutMs,
+      requiredFrameOrigins: CONSOLE_PAGE_CONTEXT_ALLOWED_ORIGINS,
+      requiredFrameUrlIncludes: [`/solutions/${ADOBE_PASS_CONSOLE_APP_SLUG}/`],
     });
-
-    const normalizeExecutionResults = (executionResults = []) =>
-      (Array.isArray(executionResults) ? executionResults : [])
-        .map((entry) => {
-        const result = entry?.result;
-        if (!result || typeof result !== "object") {
-          return null;
-        }
-        const normalizedShellSnapshot = normalizeExperienceCloudShellSnapshot(result.shell);
-        const frameUrl = String(result.frameUrl || "");
-        const isAdobePassConsoleFrame =
-          result.isAdobePassConsoleFrame === true ||
-          /cdn\.experience\.adobe\.net\/solutions\/AdobePass-adobepass-unifiedshell-console-client\//i.test(frameUrl) ||
-          /#\/@adobepass\/pass\/authentication\//i.test(frameUrl);
-        const isAdobePassProgrammersFrame =
-          result.isAdobePassProgrammersFrame === true ||
-          /cdn\.experience\.adobe\.net\/solutions\/AdobePass-adobepass-unifiedshell-console-client\/[^/?#]+\/programmers(?:[/?#]|$)/i.test(
-            frameUrl
-          ) ||
-          /#\/@adobepass\/pass\/authentication\/[^/?#]+\/programmers(?:[/?#]|$)/i.test(frameUrl);
-        const frameReady =
-          String(result.documentReadyState || "").trim().toLowerCase() === "complete" ||
-          Boolean(normalizedShellSnapshot?.imsToken);
-        const score =
-          (shouldWaitForProgrammersFrame && isAdobePassProgrammersFrame ? 1800 : 0) +
-          (isAdobePassConsoleFrame ? 1400 : 0) +
-          (result.ok === true ? 1000 : 0) +
-          (normalizedShellSnapshot?.imsToken ? 320 : 0) +
-          (normalizedShellSnapshot?.imsOrg ? 120 : 0) +
-          (Array.isArray(normalizedShellSnapshot?.imsOrgs) && normalizedShellSnapshot.imsOrgs.length > 0 ? 90 : 0) +
-          (normalizedShellSnapshot?.imsProfile?.userId || normalizedShellSnapshot?.imsProfile?.email ? 60 : 0) +
-          (frameReady ? 40 : 0) +
-          (Number(entry?.frameId || 0) > 0 ? 40 : 0);
-        return {
-          frameId: Number(entry?.frameId || 0),
-          result,
-          shellSnapshot: normalizedShellSnapshot,
-          frameUrl,
-          isAdobePassConsoleFrame,
-          isAdobePassProgrammersFrame,
-          frameReady,
-          score,
-        };
-      })
-      .filter(Boolean)
-      .sort((left, right) => Number(right?.score || 0) - Number(left?.score || 0));
-
-    const shouldWaitForPreferredFrame = /\/entity\/Programmer|\/user\/extendedProfile|\/config\/latestActivatedConsoleConfigurationVersion|\/admin\/maintenance\/status|\/config\/history|\/applications|\/entity\/RegisteredApplication/i.test(
-      normalizedUrl
-    );
-    const preferredFrameWaitDeadline = Date.now() + Math.max(1800, Math.min(timeoutMs, shouldWaitForProgrammersFrame ? 9000 : 6000));
-    let normalizedResults = [];
-    let bestResult = null;
-
-    while (true) {
-      const executionResults = await executeAcrossFrames();
-      normalizedResults = normalizeExecutionResults(executionResults);
-      const preferredFrameResults = normalizedResults.filter((entry) => entry.isAdobePassConsoleFrame);
-      const programmersFrameResults = normalizedResults.filter((entry) => entry.isAdobePassProgrammersFrame);
-      const successfulProgrammersFrameResult = programmersFrameResults.find((entry) => entry.result?.ok === true) || null;
-      const successfulPreferredFrameResult = preferredFrameResults.find((entry) => entry.result?.ok === true) || null;
-      const successfulAnyFrameResult = normalizedResults.find((entry) => entry.result?.ok === true) || null;
-      const readyProgrammersFrameResult = programmersFrameResults.find((entry) => entry.frameReady) || null;
-      const readyPreferredFrameResult = preferredFrameResults.find((entry) => entry.frameReady) || null;
-      const requiredReadyFrameResult = shouldWaitForProgrammersFrame
-        ? readyProgrammersFrameResult
-        : readyPreferredFrameResult;
-
-      bestResult =
-        successfulProgrammersFrameResult ||
-        successfulPreferredFrameResult ||
-        successfulAnyFrameResult ||
-        requiredReadyFrameResult ||
-        normalizedResults[0] ||
-        null;
-
-      if (successfulProgrammersFrameResult) {
-        break;
-      }
-      if (successfulPreferredFrameResult && (!shouldWaitForProgrammersFrame || readyProgrammersFrameResult)) {
-        break;
-      }
-      if (successfulAnyFrameResult && (!shouldWaitForPreferredFrame || requiredReadyFrameResult)) {
-        break;
-      }
-      if (!shouldWaitForPreferredFrame || requiredReadyFrameResult || Date.now() >= preferredFrameWaitDeadline) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 180));
-    }
-
-    const result = bestResult?.result || null;
-    if (!result || typeof result !== "object") {
-      return null;
-    }
-
-    const responseHeaders = result.headers && typeof result.headers === "object" ? result.headers : {};
-    const csrfToken = String(
-      firstNonEmptyString([
-        responseHeaders["x-csrf-token"],
-        responseHeaders["X-CSRF-Token"],
-      ]) || ""
-    ).trim();
+    const responseHeaders = result?.headers && typeof result.headers === "object" ? result.headers : {};
+    const csrfToken = String(firstNonEmptyString([responseHeaders["x-csrf-token"], state.consoleCsrfToken || ""])).trim();
     if (csrfToken) {
       state.consoleCsrfToken = csrfToken;
     }
-
-    const normalizedShellSnapshot = bestResult?.shellSnapshot || null;
-    if (normalizedShellSnapshot) {
-      state.consoleBootstrapState = {
-        ...(state.consoleBootstrapState && typeof state.consoleBootstrapState === "object"
-          ? state.consoleBootstrapState
-          : {}),
-        shellSnapshot: normalizedShellSnapshot,
-        accessToken: firstNonEmptyString([
-          normalizedShellSnapshot.imsToken,
-          state.consoleBootstrapState?.accessToken,
-        ]),
-      };
-    }
-
     return {
-      ok: result.ok === true,
-      status: Number(result.status || 0),
-      statusText: String(result.statusText || ""),
-      url: String(result.url || normalizedUrl),
-      text: String(result.text || ""),
-      parsed: result.parsed,
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      url: normalizedUrl,
+      text: String(result?.rawText || ""),
+      parsed: result?.data ?? null,
       headers: responseHeaders,
-      shell: normalizedShellSnapshot,
+      shell: null,
+      pageContext: result?.pageContext || null,
     };
   } catch {
     return null;
   } finally {
-    await closeTemporaryAdobePageContextTarget(temporaryTarget);
+    if (!pageContextTargetRef) {
+      await closeTemporaryAdobePageContextTarget(temporaryTarget);
+    }
   }
 }
 
@@ -65316,7 +68740,6 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
   }
 
   const requireFresh = options.requireFresh === true;
-  const allowTemporaryTab = options.allowTemporaryTab === true;
   const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   let accessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken, getPreferredCmRequestAccessTokenCandidate()]));
   if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
@@ -65336,11 +68759,6 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
   let tab = await resolveReusableAdobePageContextTab(preferredTabId);
   if (!tab?.id) {
     tab = await findExistingCmReportsAdobeTab();
-  }
-  let temporaryTarget = null;
-  if (!tab?.id && allowTemporaryTab) {
-    temporaryTarget = await openTemporaryAdobePageContextTarget(`${CM_REPORTS_APP_ORIGIN}/`);
-    tab = temporaryTarget?.tab || null;
   }
 
   const tabId = Number(tab?.id || 0);
@@ -65594,8 +69012,6 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
     };
   } catch {
     return null;
-  } finally {
-    await closeTemporaryAdobePageContextTarget(temporaryTarget);
   }
 }
 
@@ -65614,7 +69030,6 @@ async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
     return null;
   }
 
-  const allowTemporaryTab = options.allowTemporaryTab === true;
   let accessToken = normalizeBearerTokenValue(
     firstNonEmptyString([options?.accessToken, getPreferredCmRequestAccessTokenCandidate()])
   );
@@ -65622,7 +69037,7 @@ async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
     accessToken = normalizeBearerTokenValue(
       await ensureCmApiAccessToken({
         forceRefresh: options.forceRefresh === true,
-        allowTemporaryPageContextTab: allowTemporaryTab,
+        allowTemporaryPageContextTab: false,
         freshLeewayMs:
           Number.isFinite(options?.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
             ? Number(options.freshLeewayMs)
@@ -65635,11 +69050,6 @@ async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
   }
 
   let tab = await findExistingCmReportsAdobeTab();
-  let temporaryTarget = null;
-  if (!tab?.id && allowTemporaryTab) {
-    temporaryTarget = await openTemporaryAdobePageContextTarget(`${CM_REPORTS_APP_ORIGIN}/`);
-    tab = temporaryTarget?.tab || null;
-  }
 
   const tabId = Number(tab?.id || 0);
   if (tabId <= 0) {
@@ -65726,8 +69136,6 @@ async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
     };
   } catch {
     return null;
-  } finally {
-    await closeTemporaryAdobePageContextTarget(temporaryTarget);
   }
 }
 
@@ -65803,35 +69211,23 @@ async function ensureCmApiAccessToken(options = {}) {
 
   const promise = (async () => {
     try {
-      const requireFresh = forceRefresh || !tokenLooksFresh || !tokenSupportsCatalog;
-      const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
-      const qualifiedTokenResult = await requestQualifiedCmConsoleToken({
-        seedToken: primarySeedToken,
-        requireFresh,
-      });
+      const resolved = await resolveQualifiedCmConsoleAccessToken(
+        state.loginData,
+        firstNonEmptyString([state.loginData?.cmConsoleAccessToken, getPreferredPrimaryImsAccessTokenCandidate()]),
+        {
+          preferredTabId: Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+          allowTemporaryTab: options?.allowTemporaryPageContextTab !== false,
+        }
+      );
+      const qualifiedTokenResult = buildCmConsoleBootstrapResult(resolved?.token, resolved?.source);
       if (qualifiedTokenResult?.accessToken) {
         const persistedQualifiedToken = await persistCmTokenBootstrapResult(qualifiedTokenResult, {});
-        if (persistedQualifiedToken && tokenSupportsCmTenantCatalog(persistedQualifiedToken)) {
+        if (persistedQualifiedToken && tokenSupportsCmConsoleRequests(persistedQualifiedToken)) {
           emitCmConsoleTokenForTesting(persistedQualifiedToken, "ensure-qualified");
           return persistedQualifiedToken;
         }
       }
 
-      if (primarySeedToken && isProbablyJwt(primarySeedToken)) {
-        if (tokenSupportsCmConsoleRequests(primarySeedToken) && (!requireFresh || isAccessTokenFreshEnough(primarySeedToken, tokenFreshLeewayMs))) {
-          return primarySeedToken;
-        }
-        const refreshedFromPrimary = await tryRefreshCmTokenFromIms(primarySeedToken, {
-          requireFresh,
-        });
-        if (refreshedFromPrimary?.accessToken) {
-          const persistedPrimaryToken = await persistCmTokenBootstrapResult(refreshedFromPrimary, {});
-          if (persistedPrimaryToken && tokenSupportsCmTenantCatalog(persistedPrimaryToken)) {
-            emitCmConsoleTokenForTesting(persistedPrimaryToken, "ensure-primary");
-            return persistedPrimaryToken;
-          }
-        }
-      }
       return "";
     } catch (error) {
       log("CM token bootstrap skipped", {
@@ -65872,7 +69268,7 @@ async function autoHydrateCmConsoleTokenAfterImsLogin(source = "unknown") {
       return currentToken;
     }
 
-    let hydratedToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ freshLeewayMs: 45 * 1000 }));
+    const hydratedToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ freshLeewayMs: 45 * 1000 }));
     if (hydratedToken && tokenSupportsCmConsoleRequests(hydratedToken)) {
       emitCmConsoleTokenForTesting(hydratedToken, `auto-hydrate:${source}`);
       if (hydratedToken !== previousToken) {
@@ -65880,20 +69276,7 @@ async function autoHydrateCmConsoleTokenAfterImsLogin(source = "unknown") {
       }
       logDecisionPoint("CM token auto-hydrated", {
         source: String(source || "unknown"),
-        mode: "best-effort",
-      });
-      return hydratedToken;
-    }
-
-    hydratedToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ forceRefresh: true, freshLeewayMs: 45 * 1000 }));
-    if (hydratedToken && tokenSupportsCmConsoleRequests(hydratedToken)) {
-      emitCmConsoleTokenForTesting(hydratedToken, `auto-hydrate-force-refresh:${source}`);
-      if (hydratedToken !== previousToken) {
-        render();
-      }
-      logDecisionPoint("CM token auto-hydrated", {
-        source: String(source || "unknown"),
-        mode: "force-refresh",
+        mode: "direct",
       });
       return hydratedToken;
     }
@@ -66264,9 +69647,6 @@ function prefetchCmTenantsCatalogInBackground(reason = "background", options = {
       if (state.avatarMenuOpen) {
         renderAvatarMenu();
       }
-      prefetchCmConsoleBootstrapSummaryInBackground(`cm-tenant-catalog-prefetch:${reason}`, {
-        forceRefresh: false,
-      });
     })
     .catch((error) => {
       log("CM tenant catalog prefetch failed", {
@@ -66899,100 +70279,100 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
     throw new Error(`${contextLabel} failed: no allowlisted CM URL candidates.`);
   }
 
-  const explicitAuthorizationHeader = firstNonEmptyString([
-    options?.headers?.Authorization,
-    options?.headers?.authorization,
-  ]);
-  let ensuredCmAccessToken = "";
-  if (explicitAuthorizationHeader) {
-    ensuredCmAccessToken = normalizeBearerTokenValue(explicitAuthorizationHeader.replace(/^Bearer\s+/i, ""));
-  } else if (options.requireCmAccessToken === true) {
-    try {
-      ensuredCmAccessToken = normalizeBearerTokenValue(await ensureCmApiAccessToken({ freshLeewayMs: 45 * 1000 }));
-    } catch {
-      // Best-effort bootstrap; request-level retries still handle auth fallback.
-      ensuredCmAccessToken = "";
-    }
-  }
-
   const method = String(options.method || "GET").toUpperCase();
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
   const debugMeta = options.debugMeta && typeof options.debugMeta === "object" ? options.debugMeta : {};
   const optionHeaders = options.headers && typeof options.headers === "object" ? { ...options.headers } : {};
-  const buildHeaderVariants = (url) => {
-    const baseHeaders = withCmReportContextHeaders(
-      {
-        Accept: "*/*",
-        ...optionHeaders,
-      },
-      url
-    );
-    const baseAuthorizationHeader = firstNonEmptyString([baseHeaders.Authorization, baseHeaders.authorization]);
-    if (baseAuthorizationHeader) {
-      return [baseHeaders];
-    }
-    const variants = [];
-    const supportsRuntimeContextOnly = method === "GET" && (isCmReportsRequestUrl(url) || isCmConfigRequestUrl(url));
-    if (supportsRuntimeContextOnly) {
-      variants.push(baseHeaders);
-    }
-    const candidateTokens = [];
-    const seenTokens = new Set();
-    [
-      ensuredCmAccessToken,
-      normalizeBearerTokenValue(state.cmLastHydratedAccessToken || ""),
-      normalizeBearerTokenValue(state.loginData?.cmConsoleAccessToken || ""),
-      normalizeBearerTokenValue(state.loginData?.accessToken || ""),
-    ].forEach((accessToken) => {
-      const normalizedToken = normalizeBearerTokenValue(accessToken);
-      if (!normalizedToken || seenTokens.has(normalizedToken)) {
-        return;
-      }
-      seenTokens.add(normalizedToken);
-      candidateTokens.push(normalizedToken);
-    });
-    candidateTokens.forEach((accessToken) => {
-      if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
-        return;
-      }
-      variants.push({
-        ...baseHeaders,
-        Authorization: `Bearer ${accessToken}`,
-      });
-    });
-    if (variants.length === 0) {
-      variants.push(baseHeaders);
-    }
-    return variants;
-  };
+  const explicitAuthorizationHeader = firstNonEmptyString([
+    optionHeaders.Authorization,
+    optionHeaders.authorization,
+  ]);
+  const explicitAccessToken = normalizeBearerTokenValue(explicitAuthorizationHeader.replace(/^Bearer\s+/i, ""));
 
   let lastError = null;
   let attemptCounter = 0;
   for (const url of urls) {
     const queryDebugInfo = buildCmRequestQueryDebugInfo(url);
-    let tokenRefreshAttempted = false;
-    let headerVariants = buildHeaderVariants(url);
-    if (headerVariants.length === 0) {
+    const resolvedAccessToken = normalizeBearerTokenValue(
+      firstNonEmptyString([
+        explicitAccessToken,
+        getPreferredCmRequestAccessTokenCandidate(),
+      ])
+    );
+    if (!resolvedAccessToken || !tokenSupportsCmConsoleRequests(resolvedAccessToken)) {
       lastError = new Error(
-        `${contextLabel} failed: UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session. Sign in again and retry.`
+        `${contextLabel} failed: UnderPAR could not resolve the required CM bearer from the current Adobe IMS session.`
       );
       continue;
     }
-    headersLoop: for (let headerIndex = 0; headerIndex < headerVariants.length; headerIndex += 1) {
-      const headers = headerVariants[headerIndex];
-      const authMode = detectCmAuthMode(headers);
-      const credentialsMode = String(options.credentials ?? "include");
-      attemptCounter += 1;
+
+    const headers = withCmReportContextHeaders(
+      {
+        Accept: "*/*",
+        ...optionHeaders,
+        Authorization: `Bearer ${resolvedAccessToken}`,
+      },
+      url
+    );
+    const authMode = detectCmAuthMode(headers);
+    const credentialsMode = String(options.credentials ?? "include");
+    attemptCounter += 1;
+    emitCmDebugEvent(
+      {
+        phase: "cm-request-attempt",
+        contextLabel: String(contextLabel || ""),
+        method,
+        url,
+        attempt: attemptCounter,
+        authMode,
+        credentialsMode,
+        hasBody: options.body != null,
+        endpointPath: queryDebugInfo.endpointPath,
+        tenantScope: queryDebugInfo.tenantScope,
+        hasTenantScope: queryDebugInfo.hasTenantScope,
+        limit: queryDebugInfo.limit,
+        metrics: queryDebugInfo.metrics,
+        format: queryDebugInfo.format,
+        queryString: queryDebugInfo.queryString,
+        isUsagePath: queryDebugInfo.isUsagePath,
+      },
+      {
+        flowId: String(debugMeta.flowId || "").trim(),
+        context: debugMeta,
+      }
+    );
+
+    try {
+      const requestInit = {
+        method,
+        credentials: options.credentials ?? "include",
+        headers,
+        ...(options.body != null ? { body: options.body } : {}),
+      };
+      const response = isCmRelayEligibleUrl(url)
+        ? await relayCmFetch(url, requestInit)
+        : await fetch(url, {
+            method,
+            mode: options.mode || "cors",
+            credentials: options.credentials ?? "include",
+            referrerPolicy: options.referrerPolicy || "no-referrer",
+            headers,
+            ...(options.body != null ? { body: options.body } : {}),
+          });
+
+      const text = await response.text().catch(() => "");
+      const parsed = parseJsonText(text, null);
+      const payloadSummary = summarizeCmPayloadForDebug(parsed != null ? parsed : text);
       emitCmDebugEvent(
         {
-          phase: "cm-request-attempt",
+          phase: "cm-response",
           contextLabel: String(contextLabel || ""),
           method,
           url,
           attempt: attemptCounter,
+          status: Number(response.status || 0),
+          statusText: String(response.statusText || ""),
           authMode,
           credentialsMode,
-          hasBody: options.body != null,
           endpointPath: queryDebugInfo.endpointPath,
           tenantScope: queryDebugInfo.tenantScope,
           hasTenantScope: queryDebugInfo.hasTenantScope,
@@ -67001,64 +70381,20 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
           format: queryDebugInfo.format,
           queryString: queryDebugInfo.queryString,
           isUsagePath: queryDebugInfo.isUsagePath,
+          payloadType: payloadSummary.payloadType,
+          payloadCollection: payloadSummary.collectionKey,
+          rowCount: payloadSummary.rowCount,
+          emptyResult: payloadSummary.emptyResult,
+          responsePreview: truncateDebugText(text, 1600),
         },
         {
           flowId: String(debugMeta.flowId || "").trim(),
           context: debugMeta,
         }
       );
-      try {
-        const requestInit = {
-          method,
-          credentials: options.credentials ?? "include",
-          headers,
-          ...(options.body != null ? { body: options.body } : {}),
-        };
-        const response = isCmRelayEligibleUrl(url)
-          ? await relayCmFetch(url, requestInit)
-          : await fetch(url, {
-              method,
-              mode: options.mode || "cors",
-              credentials: options.credentials ?? "include",
-              referrerPolicy: options.referrerPolicy || "no-referrer",
-              headers,
-              ...(options.body != null ? { body: options.body } : {}),
-            });
 
-        const text = await response.text().catch(() => "");
-        const parsed = parseJsonText(text, null);
-        const payloadSummary = summarizeCmPayloadForDebug(parsed != null ? parsed : text);
-        emitCmDebugEvent(
-          {
-            phase: "cm-response",
-            contextLabel: String(contextLabel || ""),
-            method,
-            url,
-            attempt: attemptCounter,
-            status: Number(response.status || 0),
-            statusText: String(response.statusText || ""),
-            authMode,
-            credentialsMode,
-            endpointPath: queryDebugInfo.endpointPath,
-            tenantScope: queryDebugInfo.tenantScope,
-            hasTenantScope: queryDebugInfo.hasTenantScope,
-            limit: queryDebugInfo.limit,
-            metrics: queryDebugInfo.metrics,
-            format: queryDebugInfo.format,
-            queryString: queryDebugInfo.queryString,
-            isUsagePath: queryDebugInfo.isUsagePath,
-            payloadType: payloadSummary.payloadType,
-            payloadCollection: payloadSummary.collectionKey,
-            rowCount: payloadSummary.rowCount,
-            emptyResult: payloadSummary.emptyResult,
-            responsePreview: truncateDebugText(text, 1600),
-          },
-          {
-            flowId: String(debugMeta.flowId || "").trim(),
-            context: debugMeta,
-          }
-        );
-        if (response.ok && queryDebugInfo.isUsagePath && payloadSummary.emptyResult) {
+      if (response.ok) {
+        if (queryDebugInfo.isUsagePath && payloadSummary.emptyResult) {
           emitCmDebugEvent(
             {
               phase: "cm-empty-result",
@@ -67088,201 +70424,76 @@ async function fetchCmJsonWithAuthVariants(urlCandidates, contextLabel, options 
             }
           );
         }
-        const authRedirectResponse = isCmAuthRedirectResponse(response, parsed, text);
-        const tokenExpiredResponse = isCmTokenExpiredResponse(response.status, parsed, text);
-
-        const shouldForceCmTokenHydration =
-          !tokenRefreshAttempted &&
-          !explicitAuthorizationHeader &&
-          (
-            authRedirectResponse ||
-            tokenExpiredResponse ||
-            ((response.status === 401 || response.status === 403) &&
-              authMode === "none" &&
-              (isCmReportsRequestUrl(url) || isCmConfigRequestUrl(url)))
-          );
-
-        if (shouldForceCmTokenHydration) {
-          tokenRefreshAttempted = true;
-          const refreshedToken = normalizeBearerTokenValue(
-            await ensureCmApiAccessToken({
-              forceRefresh: true,
-              allowTemporaryPageContextTab,
-              freshLeewayMs: 45 * 1000,
-            })
-          );
-          if (String(refreshedToken || "").trim()) {
-            ensuredCmAccessToken = refreshedToken;
-            headerVariants = buildHeaderVariants(url).filter((variant) => detectCmAuthMode(variant) !== "none");
-            if (headerVariants.length > 0) {
-              headerIndex = -1;
-              continue headersLoop;
-            }
-          }
-        }
-
-        if (response.ok && !authRedirectResponse) {
-          return {
-            url,
-            parsed: parsed ?? text,
-            text,
-            status: Number(response.status || 0),
-            lastModified: response.headers?.get("Last-Modified") || "",
-          };
-        }
-
-        const message =
-          authRedirectResponse
-            ? "Experience Cloud session requires sign-in."
-            : firstNonEmptyString([
-                parsed?.error?.code,
-                parsed?.error?.message,
-                typeof parsed?.error === "string" ? parsed.error : "",
-                parsed?.message,
-                normalizeHttpErrorMessage(text),
-                response.statusText,
-              ]) || response.statusText;
-        lastError = new Error(`${contextLabel} failed (${response.status || 0}): ${message}`);
-        emitCmDebugEvent(
-          {
-            phase: "cm-request-failed",
-            contextLabel: String(contextLabel || ""),
-            method,
-            url,
-            attempt: attemptCounter,
-            status: Number(response.status || 0),
-            statusText: String(response.statusText || ""),
-            error: message,
-            authMode,
-            credentialsMode,
-            endpointPath: queryDebugInfo.endpointPath,
-            tenantScope: queryDebugInfo.tenantScope,
-            hasTenantScope: queryDebugInfo.hasTenantScope,
-            limit: queryDebugInfo.limit,
-            metrics: queryDebugInfo.metrics,
-            format: queryDebugInfo.format,
-            queryString: queryDebugInfo.queryString,
-            isUsagePath: queryDebugInfo.isUsagePath,
-            authRedirectResponse,
-            tokenExpiredResponse,
-          },
-          {
-            flowId: String(debugMeta.flowId || "").trim(),
-            context: debugMeta,
-          }
-        );
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        emitCmDebugEvent(
-          {
-            phase: "cm-request-error",
-            contextLabel: String(contextLabel || ""),
-            method,
-            url,
-            attempt: attemptCounter,
-            error: lastError.message,
-            authMode,
-            credentialsMode,
-            endpointPath: queryDebugInfo.endpointPath,
-            tenantScope: queryDebugInfo.tenantScope,
-            hasTenantScope: queryDebugInfo.hasTenantScope,
-            limit: queryDebugInfo.limit,
-            metrics: queryDebugInfo.metrics,
-            format: queryDebugInfo.format,
-            queryString: queryDebugInfo.queryString,
-            isUsagePath: queryDebugInfo.isUsagePath,
-          },
-          {
-            flowId: String(debugMeta.flowId || "").trim(),
-            context: debugMeta,
-          }
-        );
-      }
-    }
-
-    const shouldTryPageContextFallback =
-      method === "GET" && (isCmReportsRequestUrl(url) || isCmConfigRequestUrl(url));
-    if (shouldTryPageContextFallback) {
-      const pageContextResult = await fetchCmJsonViaReportsPageContext(url, {
-        accessToken: firstNonEmptyString([
-          normalizeBearerTokenValue(explicitAuthorizationHeader),
-          ensuredCmAccessToken,
-          normalizeBearerTokenValue(state.cmLastHydratedAccessToken || ""),
-        ]),
-        allowTemporaryTab: allowTemporaryPageContextTab,
-        headers: optionHeaders,
-      }).catch(() => null);
-      if (pageContextResult?.ok === true) {
-        const parsedPayload = pageContextResult.parsed != null ? pageContextResult.parsed : pageContextResult.text;
-        const payloadSummary = summarizeCmPayloadForDebug(parsedPayload);
-        emitCmDebugEvent(
-          {
-            phase: "cm-page-context-fallback-success",
-            contextLabel: String(contextLabel || ""),
-            method,
-            url,
-            status: Number(pageContextResult.status || 0),
-            endpointPath: queryDebugInfo.endpointPath,
-            tenantScope: queryDebugInfo.tenantScope,
-            hasTenantScope: queryDebugInfo.hasTenantScope,
-            limit: queryDebugInfo.limit,
-            metrics: queryDebugInfo.metrics,
-            format: queryDebugInfo.format,
-            queryString: queryDebugInfo.queryString,
-            isUsagePath: queryDebugInfo.isUsagePath,
-            payloadType: payloadSummary.payloadType,
-            payloadCollection: payloadSummary.collectionKey,
-            rowCount: payloadSummary.rowCount,
-            emptyResult: payloadSummary.emptyResult,
-          },
-          {
-            flowId: String(debugMeta.flowId || "").trim(),
-            context: debugMeta,
-          }
-        );
         return {
-          url: pageContextResult.url || url,
-          parsed: parsedPayload,
-          text: String(pageContextResult.text || ""),
-          status: Number(pageContextResult.status || 0),
-          lastModified: String(pageContextResult.lastModified || ""),
+          url,
+          parsed: parsed ?? text,
+          text,
+          status: Number(response.status || 0),
+          lastModified: response.headers?.get("Last-Modified") || "",
         };
       }
-      if (pageContextResult && typeof pageContextResult === "object") {
-        const pageContextMessage =
-          firstNonEmptyString([
-            pageContextResult?.parsed?.error?.code,
-            pageContextResult?.parsed?.error?.message,
-            typeof pageContextResult?.parsed?.error === "string" ? pageContextResult.parsed.error : "",
-            pageContextResult?.parsed?.message,
-            normalizeHttpErrorMessage(pageContextResult?.text || ""),
-            pageContextResult?.statusText,
-          ]) || "Page-context CM request failed.";
-        lastError = new Error(`${contextLabel} failed (${pageContextResult.status || 0}): ${pageContextMessage}`);
-        emitCmDebugEvent(
-          {
-            phase: "cm-page-context-fallback-failed",
-            contextLabel: String(contextLabel || ""),
-            method,
-            url,
-            status: Number(pageContextResult.status || 0),
-            statusText: String(pageContextResult.statusText || ""),
-            error: pageContextMessage,
-            endpointPath: queryDebugInfo.endpointPath,
-            tenantScope: queryDebugInfo.tenantScope,
-            hasTenantScope: queryDebugInfo.hasTenantScope,
-            limit: queryDebugInfo.limit,
-            metrics: queryDebugInfo.metrics,
-            format: queryDebugInfo.format,
-            queryString: queryDebugInfo.queryString,
-            isUsagePath: queryDebugInfo.isUsagePath,
-          },
-          {
-            flowId: String(debugMeta.flowId || "").trim(),
-            context: debugMeta,
-          }
-        );
-      }
+
+      const message = firstNonEmptyString([
+        parsed?.error?.code,
+        parsed?.error?.message,
+        typeof parsed?.error === "string" ? parsed.error : "",
+        parsed?.message,
+        normalizeHttpErrorMessage(text),
+        response.statusText,
+      ]) || response.statusText;
+      lastError = new Error(`${contextLabel} failed (${response.status || 0}): ${message}`);
+      emitCmDebugEvent(
+        {
+          phase: "cm-request-failed",
+          contextLabel: String(contextLabel || ""),
+          method,
+          url,
+          attempt: attemptCounter,
+          status: Number(response.status || 0),
+          statusText: String(response.statusText || ""),
+          error: message,
+          authMode,
+          credentialsMode,
+          endpointPath: queryDebugInfo.endpointPath,
+          tenantScope: queryDebugInfo.tenantScope,
+          hasTenantScope: queryDebugInfo.hasTenantScope,
+          limit: queryDebugInfo.limit,
+          metrics: queryDebugInfo.metrics,
+          format: queryDebugInfo.format,
+          queryString: queryDebugInfo.queryString,
+          isUsagePath: queryDebugInfo.isUsagePath,
+        },
+        {
+          flowId: String(debugMeta.flowId || "").trim(),
+          context: debugMeta,
+        }
+      );
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      emitCmDebugEvent(
+        {
+          phase: "cm-request-error",
+          contextLabel: String(contextLabel || ""),
+          method,
+          url,
+          attempt: attemptCounter,
+          error: lastError.message,
+          authMode,
+          credentialsMode,
+          endpointPath: queryDebugInfo.endpointPath,
+          tenantScope: queryDebugInfo.tenantScope,
+          hasTenantScope: queryDebugInfo.hasTenantScope,
+          limit: queryDebugInfo.limit,
+          metrics: queryDebugInfo.metrics,
+          format: queryDebugInfo.format,
+          queryString: queryDebugInfo.queryString,
+          isUsagePath: queryDebugInfo.isUsagePath,
+        },
+        {
+          flowId: String(debugMeta.flowId || "").trim(),
+          context: debugMeta,
+        }
+      );
     }
   }
 
@@ -67419,100 +70630,67 @@ async function fetchCmTenantCatalogWithAuth(url = "", options = {}) {
   if (!requestUrl) {
     throw new Error("CM tenants load failed: tenant catalog URL is missing.");
   }
-  const baseHeaders = withCmReportContextHeaders(
+  const accessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([options?.accessToken, getPreferredPrimaryImsAccessTokenCandidate()])
+  );
+  if (!accessToken || !isProbablyJwt(accessToken)) {
+    throw new Error("CM tenants load failed: primary Adobe IMS bearer is unavailable.");
+  }
+
+  const requestHeaders = withCmReportContextHeaders(
     {
       Accept: "*/*",
+      Authorization: `Bearer ${accessToken}`,
     },
     requestUrl
   );
-  const headerVariants = [baseHeaders];
-  const appendTokenVariant = (tokenValue) => {
-    const normalizedToken = normalizeBearerTokenValue(tokenValue);
-    if (!normalizedToken || !tokenSupportsCmConsoleRequests(normalizedToken)) {
-      return;
-    }
-    const dedupeKey = `Bearer ${normalizedToken}`;
-    if (headerVariants.some((headers) => String(headers.Authorization || headers.authorization || "") === dedupeKey)) {
-      return;
-    }
-    headerVariants.push({
-      ...baseHeaders,
-      Authorization: dedupeKey,
-    });
+  const requestInit = {
+    method: "GET",
+    credentials: "include",
+    headers: requestHeaders,
   };
-  appendTokenVariant(options?.accessToken);
-  appendTokenVariant(getPreferredCmRequestAccessTokenCandidate());
-  appendTokenVariant(state.loginData?.cmConsoleAccessToken || "");
-  appendTokenVariant(state.loginData?.accessToken || "");
+  const response = isCmRelayEligibleUrl(requestUrl)
+    ? await relayCmFetch(requestUrl, requestInit)
+    : await fetch(requestUrl, {
+        method: "GET",
+        mode: "cors",
+        credentials: "include",
+        referrerPolicy: "no-referrer",
+        headers: requestInit.headers,
+      });
 
-  let lastError = null;
-  let attemptedTokenRefresh = false;
-  for (let headerIndex = 0; headerIndex < headerVariants.length; headerIndex += 1) {
-    const requestHeaders = headerVariants[headerIndex];
-    const requestInit = {
-      method: "GET",
-      credentials: "include",
-      headers: requestHeaders,
+  const text = await response.text().catch(() => "");
+  const parsed = parseJsonText(text, null);
+  if (response.ok) {
+    return {
+      url: String(response.url || requestUrl),
+      parsed: parsed ?? text,
+      text,
+      status: Number(response.status || 0),
+      lastModified: response.headers?.get("Last-Modified") || "",
     };
-    const response = isCmRelayEligibleUrl(requestUrl)
-      ? await relayCmFetch(requestUrl, requestInit)
-      : await fetch(requestUrl, {
-          method: "GET",
-          mode: "cors",
-          credentials: "include",
-          referrerPolicy: "no-referrer",
-          headers: requestInit.headers,
-        });
-
-    const text = await response.text().catch(() => "");
-    const parsed = parseJsonText(text, null);
-    if (response.ok) {
-      return {
-        url: String(response.url || requestUrl),
-        parsed: parsed ?? text,
-        text,
-        status: Number(response.status || 0),
-        lastModified: response.headers?.get("Last-Modified") || "",
-      };
-    }
-
-    const statusCode = Number(response.status || 0);
-    const authMode = detectCmAuthMode(requestHeaders);
-    if (!attemptedTokenRefresh && authMode === "none" && (statusCode === 401 || statusCode === 403)) {
-      attemptedTokenRefresh = true;
-      const refreshedToken = normalizeBearerTokenValue(
-        await ensureCmApiAccessToken({
-          forceRefresh: true,
-          freshLeewayMs: 45 * 1000,
-        }).catch(() => "")
-      );
-      if (refreshedToken && tokenSupportsCmConsoleRequests(refreshedToken)) {
-        appendTokenVariant(refreshedToken);
-        continue;
-      }
-    }
-    const message =
-      firstNonEmptyString([
-        parsed?.error?.code,
-        parsed?.error?.message,
-        typeof parsed?.error === "string" ? parsed.error : "",
-        parsed?.message,
-        normalizeHttpErrorMessage(text),
-        response.statusText,
-        statusCode === 403 ? "Forbidden" : "",
-        statusCode === 401 ? "Unauthorized" : "",
-      ]) || `HTTP ${statusCode || 0}`;
-    lastError = new Error(`CM tenants load failed (${statusCode}): ${message}`);
   }
 
-  throw lastError || new Error("CM tenants load failed.");
+  const statusCode = Number(response.status || 0);
+  const message =
+    firstNonEmptyString([
+      parsed?.error?.code,
+      parsed?.error?.message,
+      typeof parsed?.error === "string" ? parsed.error : "",
+      parsed?.message,
+      normalizeHttpErrorMessage(text),
+      response.statusText,
+      statusCode === 403 ? "Forbidden" : "",
+      statusCode === 401 ? "Unauthorized" : "",
+    ]) || `HTTP ${statusCode || 0}`;
+  throw new Error(`CM tenants load failed (${statusCode}): ${message}`);
 }
 
 async function ensureCmTenantsCatalog(options = {}) {
   const forceRefresh = options?.forceRefresh === true;
-  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const preferredAccessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken]));
+  const preferredAccessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([options?.accessToken, getPreferredPrimaryImsAccessTokenCandidate()])
+  );
   if (forceRefresh) {
     state.cmTenantsCatalogRuntimeFresh = false;
   }
@@ -67551,107 +70729,69 @@ async function ensureCmTenantsCatalog(options = {}) {
 
   const loadPromise = (async () => {
     state.cmTenantsCatalogFetchAttempted = true;
-    const tenantCatalogUrls = buildCmTenantEndpointCandidates();
-    if (tenantCatalogUrls.length === 0) {
+    const tenantCatalogUrl = buildApiRequestUrl(CM_BASE_URL, CM_TENANTS_PATH, {
+      orgId: CM_TENANTS_OWNER_ORG_ID,
+    }).toString();
+    if (!tenantCatalogUrl) {
       throw new Error("CM tenants load failed: tenant catalog URL is missing.");
     }
 
     logDecisionPoint("CM tenant catalog lookup", {
-      urls: tenantCatalogUrls,
+      url: tenantCatalogUrl,
     });
     emitCmDebugEvent({
       phase: "cm-tenant-catalog-request",
       method: "GET",
-      url: tenantCatalogUrls[0],
-      urls: tenantCatalogUrls,
+      url: tenantCatalogUrl,
     });
-    let lastError = null;
     try {
-      // Prefer the direct bearer path first. Reports-page context is a last-resort
-      // recovery path for explicit CM actions, not the default session-start path.
-      for (const tenantCatalogUrl of tenantCatalogUrls) {
-        try {
-          const response = await fetchCmTenantCatalogWithAuth(tenantCatalogUrl, {
-            accessToken: preferredAccessToken,
-          });
-          const tenants = normalizeCmTenantsFromPayload(response.parsed, response.url);
-          if (tenants.length === 0) {
-            throw new Error(`CM tenants load failed: tenant catalog returned no tenants (${tenantCatalogUrl}).`);
-          }
-          const catalog = {
-            tenants,
-            sourceUrl: response.url,
-            tenantCount: tenants.length,
-            applicationCount: Math.max(0, Number(cachedCatalog?.applicationCount || 0)),
-            policyCount: Math.max(0, Number(cachedCatalog?.policyCount || 0)),
-            summaryReady: cachedCatalog?.summaryReady === true,
-            fetchedAt: Date.now(),
-          };
-          state.cmTenantsCatalog = catalog;
-          state.cmTenantsCatalogHydrated = true;
-          state.cmTenantsCatalogRuntimeFresh = true;
-          syncCmConsoleBootstrapSummaryFromCatalog(catalog);
-          await persistCmTenantsCatalog(catalog);
-          logDecisionPoint("CM tenants catalog loaded", {
-            sourceUrl: response.url,
-            tenantCount: tenants.length,
-          });
-          emitCmDebugEvent({
-            phase: "cm-tenant-catalog-loaded",
-            status: Number(response.status || 0),
-            url: String(response.url || tenantCatalogUrl),
-            sourceUrl: String(response.url || ""),
-            tenantCount: tenants.length,
-          });
-          return catalog;
-        } catch (candidateError) {
-          lastError = candidateError instanceof Error ? candidateError : new Error(String(candidateError));
-          emitCmDebugEvent({
-            phase: "cm-tenant-catalog-candidate-failed",
-            method: "GET",
-            url: tenantCatalogUrl,
-            error: lastError.message,
-          });
-        }
+      const response = await fetchPrimetimeJson({
+        baseUrl: CM_BASE_URL,
+        path: CM_TENANTS_PATH,
+        accessToken: preferredAccessToken,
+        queryParams: {
+          orgId: CM_TENANTS_OWNER_ORG_ID,
+        },
+      });
+      const tenants = normalizeCmTenantsFromPayload(response.data, response.url);
+      if (tenants.length === 0) {
+        throw new Error(`CM tenants load failed: tenant catalog returned no tenants (${tenantCatalogUrl}).`);
       }
-
-      throw lastError || new Error("CM tenants load failed: all tenant catalog candidates were exhausted.");
+      const catalog = {
+        tenants,
+        sourceUrl: response.url,
+        tenantCount: tenants.length,
+        applicationCount: Math.max(0, Number(cachedCatalog?.applicationCount || 0)),
+        policyCount: Math.max(0, Number(cachedCatalog?.policyCount || 0)),
+        summaryReady: cachedCatalog?.summaryReady === true,
+        fetchedAt: Date.now(),
+      };
+      state.cmTenantsCatalog = catalog;
+      state.cmTenantsCatalogHydrated = true;
+      state.cmTenantsCatalogRuntimeFresh = true;
+      syncCmConsoleBootstrapSummaryFromCatalog(catalog);
+      await persistCmTenantsCatalog(catalog);
+      logDecisionPoint("CM tenants catalog loaded", {
+        sourceUrl: response.url,
+        tenantCount: tenants.length,
+      });
+      emitCmDebugEvent({
+        phase: "cm-tenant-catalog-loaded",
+        method: "GET",
+        url: String(response.url || tenantCatalogUrl),
+        sourceUrl: String(response.url || ""),
+        tenantCount: tenants.length,
+      });
+      return catalog;
     } catch (error) {
-      const lastError = error instanceof Error ? error : new Error(String(error));
-      if (cachedCatalog && Array.isArray(cachedCatalog.tenants) && cachedCatalog.tenants.length > 0) {
-        state.cmTenantsCatalogRuntimeFresh = false;
-        syncCmConsoleBootstrapSummaryFromCatalog(cachedCatalog);
-        log("Using stale CM tenant catalog cache after refresh failure", {
-          error: lastError instanceof Error ? lastError.message : String(lastError),
-        });
-        emitCmDebugEvent({
-          phase: "cm-tenant-catalog-stale-cache",
-          error: lastError.message,
-          sourceUrl: String(cachedCatalog.sourceUrl || ""),
-          tenantCount: Number(cachedCatalog.tenants?.length || 0),
-        });
-        return cachedCatalog;
-      }
-      const persistedFallback = await hydrateCmTenantsCatalogFromStorage({ forceReload: false });
-      if (persistedFallback && Array.isArray(persistedFallback.tenants) && persistedFallback.tenants.length > 0) {
-        state.cmTenantsCatalogRuntimeFresh = false;
-        syncCmConsoleBootstrapSummaryFromCatalog(persistedFallback);
-        emitCmDebugEvent({
-          phase: "cm-tenant-catalog-storage-fallback",
-          error: lastError.message,
-          sourceUrl: String(persistedFallback.sourceUrl || ""),
-          tenantCount: Number(persistedFallback.tenants?.length || 0),
-        });
-        return persistedFallback;
-      }
+      const resolvedError = error instanceof Error ? error : new Error(String(error));
       emitCmDebugEvent({
         phase: "cm-tenant-catalog-error",
         method: "GET",
-        url: tenantCatalogUrls[0] || "",
-        urls: tenantCatalogUrls,
-        error: lastError.message,
+        url: tenantCatalogUrl,
+        error: resolvedError.message,
       });
-      throw lastError;
+      throw resolvedError;
     }
   })();
 
@@ -68407,19 +71547,6 @@ async function loadCmTenantBundle(tenant, options = {}) {
   }
   try {
     return await loadPromise;
-  } catch (error) {
-    if (!forceRefresh && tenantCacheKey) {
-      const fallbackEntry = state.cmTenantBundleByTenantKey.get(tenantCacheKey);
-      if (fallbackEntry?.bundle) {
-        log("Using stale CM tenant bundle cache after refresh failure", {
-          tenantId: tenant?.tenantId || "",
-          tenantName: tenant?.tenantName || "",
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return fallbackEntry.bundle;
-      }
-    }
-    throw error;
   } finally {
     if (tenantCacheKey && state.cmTenantBundlePromiseByTenantKey.get(tenantCacheKey) === loadPromise) {
       state.cmTenantBundlePromiseByTenantKey.delete(tenantCacheKey);
@@ -70128,143 +73255,92 @@ function responseLooksLikeExperienceCloudSignIn(response, responseBody = "") {
 }
 
 async function fetchProgrammersFromApi(options = {}) {
-  let accessToken = normalizeBearerTokenValue(
+  const accessToken = normalizeBearerTokenValue(
     firstNonEmptyString([
       options.accessToken,
-      state.loginData?.experienceCloudAccessToken,
-      getPreferredExperienceCloudConsoleAccessTokenCandidate(),
       state.loginData?.accessToken,
+      getPreferredPrimaryImsAccessTokenCandidate(),
+      getPreferredAdobeConsoleAccessTokenCandidate(),
     ])
   );
   const requireEntities = options.requireEntities !== false;
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const pageContextTargetRef =
+    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
+      ? options.pageContextTargetRef
+      : null;
   if (!accessToken || !isProbablyJwt(accessToken)) {
     throw createProgrammersError("Media company load requires a valid UnderPAR Adobe bearer.", "PROGRAMMERS_ACCESS_DENIED");
   }
 
+  const configurationVersion = Number(options.configurationVersion || getKnownAdobeConsoleConfigurationVersion() || 0);
   const endpoints = state.programmersApiEndpoint
-    ? uniquePreserveOrder([appendAdobeConsoleConfigurationVersion(state.programmersApiEndpoint), ...PROGRAMMER_ENDPOINTS])
-    : [...PROGRAMMER_ENDPOINTS];
+    ? uniquePreserveOrder([
+        appendAdobeConsoleConfigurationVersion(state.programmersApiEndpoint, configurationVersion),
+        ...PROGRAMMER_ENDPOINTS.map((endpoint) => appendAdobeConsoleConfigurationVersion(endpoint, configurationVersion)),
+      ])
+    : [...PROGRAMMER_ENDPOINTS.map((endpoint) => appendAdobeConsoleConfigurationVersion(endpoint, configurationVersion))];
 
   let lastError = null;
-  let denied = false;
-  let bestEntities = null;
-  let bestEndpoint = "";
-  let silentRefreshAttempted = false;
   for (const endpoint of endpoints) {
     try {
-      const buildHeaderVariants = () => {
-        const variants = [];
-        variants.push({ headers: getAdobeConsoleRequestHeaders("") });
-        if (accessToken) {
-          variants.push({ headers: getAdobeConsoleRequestHeaders(accessToken) });
-        }
-        return variants;
-      };
-
-      let headerVariants = buildHeaderVariants();
-      headersLoop: for (let headerIndex = 0; headerIndex < headerVariants.length; headerIndex += 1) {
-        const baseHeaders = headerVariants[headerIndex]?.headers || getAdobeConsoleRequestHeaders("");
-
-        for (let round = 0; round < 2; round += 1) {
-          const response = await fetchWithAbortTimeout(
-            endpoint,
-            {
-              method: "GET",
-              credentials: "include",
-              mode: "cors",
-              headers: baseHeaders,
-            },
-            PROGRAMMERS_FETCH_TIMEOUT_MS
-          );
-          captureAdobeConsoleResponseState(response);
-
-          const responseText = await response.text().catch(() => "");
-          const payload = parseJsonText(responseText, null);
-          if (
-            isAdobeConsoleTokenExpiredResponse(response.status, payload, responseText) &&
-            !silentRefreshAttempted &&
-            firstNonEmptyString([state.loginData?.accessToken])
-          ) {
-            silentRefreshAttempted = true;
-            const refreshed = await refreshSessionNoTouch();
-            if (refreshed) {
-              accessToken = normalizeBearerTokenValue(
-                firstNonEmptyString([
-                  options.accessToken,
-                  state.loginData?.experienceCloudAccessToken,
-                  getPreferredExperienceCloudConsoleAccessTokenCandidate(),
-                  state.loginData?.accessToken,
-                ])
-              );
-              headerVariants = buildHeaderVariants();
-              headerIndex = -1;
-              continue headersLoop;
-            }
-          }
-
-          if (responseLooksLikeExperienceCloudSignIn(response, responseText)) {
-            denied = true;
-            lastError = createProgrammersError(
-              `Media company access denied (${response.status || 0})`,
-              "PROGRAMMERS_ACCESS_DENIED"
-            );
-            break;
-          }
-
-          if (!response.ok) {
-            const accessDeniedResponse = isAdobeConsoleAccessDeniedResponse(response.status, payload, responseText);
-            if (response.status === 401 || response.status === 403 || accessDeniedResponse) {
-              denied = true;
-            }
-            lastError = createProgrammersError(
-              `Endpoint ${endpoint} failed (${response.status}): ${responseText || response.statusText}`,
-              accessDeniedResponse ? "PROGRAMMERS_ACCESS_DENIED" : "PROGRAMMERS_ENDPOINT_FAILED"
-            );
-            break;
-          }
-
-          if (payload === null) {
-            lastError = createProgrammersError(
-              `Endpoint ${endpoint} returned non-JSON payload (${response.status}).`,
-              "PROGRAMMERS_ENDPOINT_FAILED"
-            );
-            break;
-          }
-          const normalizedEntities = normalizeProgrammersResponse(payload);
-          if (requireEntities && normalizedEntities.length === 0) {
-            lastError = createProgrammersError(`Endpoint ${endpoint} returned no media companies.`, "PROGRAMMERS_EMPTY");
-            break;
-          }
-
-          if (normalizedEntities.length > Number(bestEntities?.length || 0)) {
-            bestEntities = normalizedEntities;
-            bestEndpoint = endpoint;
-          }
-
-          if (normalizedEntities.length > 1) {
-            state.programmersApiEndpoint = endpoint;
-            return normalizedEntities;
-          }
-        }
+      const payload = await fetchAdobeConsoleJsonWithLoginButtonFallback([endpoint], "Media company load", {
+        timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
+        accessToken,
+        preferAuthenticatedHeaders: true,
+        preferredTabId: Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+        allowTemporaryPageContextTab,
+        pageContextTargetRef,
+        preferShellAccessToken: false,
+      });
+      const normalizedEntities = normalizeProgrammersResponse(payload?.parsed || payload);
+      if (requireEntities && normalizedEntities.length === 0) {
+        lastError = createProgrammersError(`Endpoint ${endpoint} returned no media companies.`, "PROGRAMMERS_EMPTY");
+        continue;
       }
-
+      state.programmersApiEndpoint = endpoint;
+      return normalizedEntities;
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      const resolvedError = error instanceof Error ? error : new Error(String(error));
+      lastError = resolvedError;
     }
   }
 
-  if (bestEntities && bestEntities.length > 0) {
-    state.programmersApiEndpoint = bestEndpoint || null;
-    return bestEntities;
-  }
-
-  if (denied) {
-    throw lastError || createProgrammersError("Media company access denied.", "PROGRAMMERS_ACCESS_DENIED");
-  }
-
   throw lastError || createProgrammersError("Unable to load media companies from API.", "PROGRAMMERS_LOAD_FAILED");
+}
+
+async function fetchConsoleChannelsFromApi(options = {}) {
+  const accessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([
+      options.accessToken,
+      state.loginData?.accessToken,
+      getPreferredPrimaryImsAccessTokenCandidate(),
+      getPreferredAdobeConsoleAccessTokenCandidate(),
+    ])
+  );
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const pageContextTargetRef =
+    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
+      ? options.pageContextTargetRef
+      : null;
+  if (!accessToken || !isProbablyJwt(accessToken)) {
+    throw new Error("Content provider load requires a valid UnderPAR Adobe bearer.");
+  }
+
+  const configurationVersion = Number(options.configurationVersion || getKnownAdobeConsoleConfigurationVersion() || 0);
+  const endpoints = buildChannelEndpointsForConsoleBase(ADOBE_CONSOLE_BASE).map((endpoint) =>
+    appendAdobeConsoleConfigurationVersion(endpoint, configurationVersion)
+  );
+  const payload = await fetchAdobeConsoleJsonWithLoginButtonFallback(endpoints, "Content provider load", {
+    timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
+    accessToken,
+    preferAuthenticatedHeaders: true,
+    preferredTabId: Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+    allowTemporaryPageContextTab,
+    pageContextTargetRef,
+    preferShellAccessToken: false,
+  });
+  return normalizeConsoleChannelsResponse(payload?.parsed || payload);
 }
 
 async function loadProgrammersData(accessToken = "", options = {}) {
@@ -70272,8 +73348,11 @@ async function loadProgrammersData(accessToken = "", options = {}) {
     firstNonEmptyString([accessToken, getPreferredAdobeConsoleAccessTokenCandidate(), state.loginData?.accessToken])
   );
   const allowRestrictedSession = options.allowRestrictedSession === true;
-  const allowTemporaryPageContextTab = false;
+  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preserveExistingOnFailure = options.preserveExistingOnFailure === true;
   const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const pageContextTargetRef = { target: null };
+  const preserveExistingState = preserveExistingOnFailure && Array.isArray(state.programmers) && state.programmers.length > 0;
   if ((!state.loginData && !normalizedAccessToken) || (state.restricted && !allowRestrictedSession)) {
     setUnderparDiagnosticMarker("programmers", {
       status: "skipped",
@@ -70283,43 +73362,30 @@ async function loadProgrammersData(accessToken = "", options = {}) {
     return;
   }
 
-  const runProgrammerLoad = async (pageContextOptions = {}) => {
-    const resolvedPreferredTabId = Number(pageContextOptions.preferredTabId || preferredTabId || 0);
-    const resolvedAllowTemporaryPageContextTab = pageContextOptions.allowTemporaryPageContextTab === true;
+  state.programmersLoadInFlight = preserveExistingState ? false : true;
+  syncMediaCompanySelectAvailability();
 
+  try {
     setUnderparDiagnosticMarker("programmers", {
       status: "pending",
       phase: "console-bootstrap",
       forceRefresh: options.forceRefresh === true,
-      allowInteractiveAuthBootstrap: options.allowInteractiveAuthBootstrap === true,
+      allowInteractiveAuthBootstrap: false,
     });
 
-    let bootstrapState = null;
-    try {
-      bootstrapState = await ensureConsoleBootstrapState(normalizedAccessToken, {
-        forceRefresh: options.forceRefresh === true,
-        allowInteractiveAuthBootstrap: false,
-        allowTemporaryPageContextTab: false,
-        preferredTabId: resolvedPreferredTabId,
-      });
-    } catch (error) {
-      applyProgrammerEntities([]);
-      const bootstrapError = error instanceof Error ? error : new Error(String(error));
-      setUnderparDiagnosticMarker("programmers", {
-        status: isAdobeConsoleAccessDeniedMessage(bootstrapError.message) ? "denied" : "error",
-        phase: "console-bootstrap-failed",
-        error: bootstrapError.message,
-        code: isAdobeConsoleAccessDeniedMessage(bootstrapError.message) ? "PROGRAMMERS_ACCESS_DENIED" : "PROGRAMMERS_LOAD_FAILED",
-      });
-      if (isAdobeConsoleAccessDeniedMessage(bootstrapError.message)) {
-        throw createProgrammersError(bootstrapError.message, "PROGRAMMERS_ACCESS_DENIED");
-      }
-      throw bootstrapError;
-    }
-
+    const bootstrapState = await ensureConsoleBootstrapState(normalizedAccessToken, {
+      forceRefresh: options.forceRefresh === true,
+      allowInteractiveAuthBootstrap: false,
+      allowTemporaryPageContextTab,
+      preferredTabId,
+      pageContextTargetRef,
+    });
     const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(bootstrapState, 0);
-    if (!bootstrapState || !bootstrapState.extendedProfile) {
-      applyProgrammerEntities([]);
+
+    if (!bootstrapState?.extendedProfile) {
+      if (!preserveExistingState) {
+        applyProgrammerEntities([]);
+      }
       setUnderparDiagnosticMarker("programmers", {
         status: "error",
         phase: "console-bootstrap-incomplete",
@@ -70330,9 +73396,12 @@ async function loadProgrammersData(accessToken = "", options = {}) {
         "PROGRAMMERS_LOAD_FAILED"
       );
     }
+
     const grantedAuthorities = Array.isArray(bootstrapState.grantedAuthorities) ? bootstrapState.grantedAuthorities : [];
     if (grantedAuthorities.length > 0 && !hasAdobeConsoleProgrammerAccess(grantedAuthorities)) {
-      applyProgrammerEntities([]);
+      if (!preserveExistingState) {
+        applyProgrammerEntities([]);
+      }
       setUnderparDiagnosticMarker("programmers", {
         status: "denied",
         phase: "authority-check",
@@ -70344,79 +73413,125 @@ async function loadProgrammersData(accessToken = "", options = {}) {
     const resolvedConsoleAccessToken = normalizeBearerTokenValue(
       firstNonEmptyString([bootstrapState?.accessToken, normalizedAccessToken])
     );
-    const bootstrapProgrammers = buildProgrammerEntitiesFromConsoleBootstrap(bootstrapState);
-    let entities = [];
-    let programmersLoadError = null;
-    try {
-      entities = await fetchProgrammersFromApi({
-        accessToken: resolvedConsoleAccessToken,
-        requireEntities: false,
-        preferredTabId: resolvedPreferredTabId,
-        allowTemporaryPageContextTab: false,
-      });
-    } catch (error) {
-      programmersLoadError = error instanceof Error ? error : new Error(String(error));
-    }
-
-    if (programmersLoadError) {
-      if (programmersLoadError?.code === "PROGRAMMERS_ACCESS_DENIED" && bootstrapProgrammers.length > 0) {
-        applyProgrammerEntities(bootstrapProgrammers);
-        setUnderparDiagnosticMarker("programmers", {
-          status: "warning",
-          phase: "bootstrap-accessible-entities",
-          count: Number(state.programmers.length || 0),
-          code: String(programmersLoadError?.code || "").trim(),
-          configurationVersion,
-          error: programmersLoadError.message,
-        });
-        return true;
-      }
-      log("Media company load failed", programmersLoadError);
-      applyProgrammerEntities([]);
-      setUnderparDiagnosticMarker("programmers", {
-        status: programmersLoadError?.code === "PROGRAMMERS_ACCESS_DENIED" ? "denied" : "error",
-        phase: "entity-fetch",
-        endpoint: String(state.programmersApiEndpoint || "").trim(),
-        code: String(programmersLoadError?.code || "").trim(),
-        error: programmersLoadError.message,
-      });
-      throw programmersLoadError;
-    }
-
-    if (entities.length === 0 && bootstrapProgrammers.length > 0) {
-      applyProgrammerEntities(bootstrapProgrammers);
-      setUnderparDiagnosticMarker("programmers", {
-        status: "warning",
-        phase: "bootstrap-accessible-entities",
-        count: Number(state.programmers.length || 0),
-        endpoint: String(state.programmersApiEndpoint || "").trim(),
+    const configurationVersionMissingError = new Error("Console did not return an activated configuration version.");
+    const [entitiesResult, channelsResult] =
+      configurationVersion > 0
+        ? await Promise.all([
+            settle(() =>
+              fetchProgrammersFromApi({
+                accessToken: resolvedConsoleAccessToken,
+                configurationVersion,
+                requireEntities: false,
+                allowTemporaryPageContextTab,
+                pageContextTargetRef,
+                preferredTabId,
+              })
+            ),
+            settle(() =>
+              fetchConsoleChannelsFromApi({
+                accessToken: resolvedConsoleAccessToken,
+                configurationVersion,
+                allowTemporaryPageContextTab,
+                pageContextTargetRef,
+                preferredTabId,
+              })
+            ),
+          ])
+        : [
+            {
+              ok: false,
+              error: configurationVersionMissingError,
+            },
+            {
+              ok: false,
+              error: configurationVersionMissingError,
+            },
+          ];
+    const channels = channelsResult.ok ? channelsResult.value : [];
+    const fallbackEntities = buildProgrammerEntitiesFromConsoleBootstrap(bootstrapState);
+    const entities = entitiesResult.ok
+      ? entitiesResult.value
+      : fallbackEntities.length > 0
+        ? fallbackEntities
+        : [];
+    if (!entitiesResult.ok) {
+      log("Adobe Pass programmers fetch failed during programmer hydration", {
+        error: entitiesResult.error instanceof Error ? entitiesResult.error.message : String(entitiesResult.error),
         configurationVersion,
       });
-      return true;
+    }
+    if (!channelsResult.ok) {
+      log("Adobe Pass channels fetch failed during programmer hydration", {
+        error: channelsResult.error instanceof Error ? channelsResult.error.message : String(channelsResult.error),
+      });
     }
 
-    applyProgrammerEntities(entities);
+    state.consoleBootstrapState = {
+      ...(bootstrapState && typeof bootstrapState === "object" ? bootstrapState : {}),
+      channels: Array.isArray(channels) ? channels : [],
+      errors: {
+        ...((bootstrapState?.errors && typeof bootstrapState.errors === "object") ? bootstrapState.errors : {}),
+        channels: channelsResult.ok
+          ? ""
+          : channelsResult.error instanceof Error
+            ? channelsResult.error.message
+            : String(channelsResult.error || ""),
+        programmers: entitiesResult.ok
+          ? ""
+          : entitiesResult.error instanceof Error
+            ? entitiesResult.error.message
+            : String(entitiesResult.error || ""),
+      },
+    };
+
+    applyProgrammerEntities(Array.isArray(entities) ? entities : []);
+    await persistAuthenticatedConsoleHydrationSnapshot().catch(() => null);
+    const programmerPhase = entitiesResult.ok
+      ? "loaded"
+      : configurationVersion > 0
+        ? "bootstrap-fallback"
+        : "limited";
+    const programmerStatus = state.programmers.length > 0
+      ? entitiesResult.ok
+        ? "success"
+        : "partial"
+      : entitiesResult.ok
+        ? "empty"
+        : "partial";
     setUnderparDiagnosticMarker("programmers", {
-      status: state.programmers.length > 0 ? "success" : "empty",
-      phase: "loaded",
+      status: programmerStatus,
+      phase: programmerPhase,
       count: Number(state.programmers.length || 0),
       endpoint: String(state.programmersApiEndpoint || "").trim(),
       configurationVersion,
     });
     if (state.programmers.length === 0) {
-      setStatus("No media company records were returned for this account.", "error");
+      clearStatusUnlessCmTenantsPrecheckBlocked();
     }
     return true;
-  };
-
-  return runProgrammerLoad({
-    preferredTabId,
-    allowTemporaryPageContextTab: false,
-  });
+  } catch (error) {
+    if (!preserveExistingState) {
+      applyProgrammerEntities([]);
+    }
+    const resolvedError = error instanceof Error ? error : new Error(String(error));
+    const errorCode = String(resolvedError?.code || "").trim();
+    setUnderparDiagnosticMarker("programmers", {
+      status: errorCode === "PROGRAMMERS_ACCESS_DENIED" ? "denied" : "error",
+      phase: "entity-fetch",
+      endpoint: String(state.programmersApiEndpoint || "").trim(),
+      code: errorCode || "PROGRAMMERS_LOAD_FAILED",
+      error: resolvedError.message,
+    });
+    throw resolvedError;
+  } finally {
+    await closeTemporaryAdobePageContextTarget(pageContextTargetRef?.target?.temporaryTarget || null).catch(() => null);
+    pageContextTargetRef.target = null;
+    state.programmersLoadInFlight = false;
+    syncMediaCompanySelectAvailability();
+  }
 }
 
-function applyProgrammerEntities(entities) {
-  state.programmers = entities.map((entity, index) => mapProgrammerEntity(entity, index));
+function resetProgrammerRuntimeState() {
   state.selectedMediaCompany = "";
   state.selectedRequestorId = "";
   state.selectedMvpdId = "";
@@ -70425,8 +73540,10 @@ function applyProgrammerEntities(entities) {
   state.mvpdLoadPromiseByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
   state.applicationsByProgrammerId.clear();
+  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByProgrammerId.clear();
   state.programmerWorkspaceHydrationReadyByKey.clear();
+  state.premiumHydrationProgressByProgrammerKey.clear();
   state.premiumAppsLoadPromiseByProgrammerId.clear();
   state.premiumAppScopeHydrationPromiseByProgrammerId.clear();
   state.restV2ProfileHarvestBySelectionKey.clear();
@@ -70447,13 +73564,152 @@ function applyProgrammerEntities(entities) {
   state.cmTenantBundlePromiseByTenantKey.clear();
   state.premiumSectionCollapsedByKey.clear();
   state.premiumAutoRefreshMetaByKey.clear();
+  state.premiumServiceReminderLogKeys.clear();
   state.premiumPanelRequestToken = 0;
   state.restV2PrewarmedAppsByProgrammerId.clear();
   clearRestV2PreparedLoginState();
   clearCmWorkspaceActivityDebugFlow("programmer-entities-reset", { stopFlow: true });
+}
+
+function applyStoredProgrammerSnapshot(entries) {
+  const normalizedEntries = (Array.isArray(entries) ? entries : [])
+    .map((entry, index) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const programmerId = firstNonEmptyString([entry.programmerId]) || `programmer-${index + 1}`;
+      const programmerName = firstNonEmptyString([entry.programmerName, entry.mediaCompanyName, programmerId]) || programmerId;
+      const mediaCompanyName = firstNonEmptyString([entry.mediaCompanyName, entry.programmerName, programmerId]) || programmerId;
+      const requestorOptions = (Array.isArray(entry.requestorOptions) ? entry.requestorOptions : [])
+        .map((option) => {
+          if (!option || typeof option !== "object") {
+            return null;
+          }
+          const id = firstNonEmptyString([option.id, option.key]);
+          const key = firstNonEmptyString([option.key, option.id, id]);
+          if (!id || !key) {
+            return null;
+          }
+          return {
+            key,
+            id,
+            name: firstNonEmptyString([option.name, option.label, id]) || id,
+            label: firstNonEmptyString([option.label, option.name, id]) || id,
+            programmerId,
+            raw: {
+              id,
+            },
+          };
+        })
+        .filter(Boolean);
+      const requestorIds = uniqueSorted(
+        [
+          ...(Array.isArray(entry.requestorIds) ? entry.requestorIds : []),
+          ...requestorOptions.map((option) => option.id),
+        ]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      );
+
+      return {
+        key: firstNonEmptyString([entry.key, `${programmerId}-${index}`]) || `${programmerId}-${index}`,
+        programmerId,
+        programmerName,
+        mediaCompanyName,
+        label:
+          firstNonEmptyString([entry.label]) ||
+          (normalizeOrganizationIdentifier(programmerName) !== normalizeOrganizationIdentifier(programmerId)
+            ? `${programmerName} | ${programmerId}`
+            : programmerName),
+        requestorIds,
+        requestorOptions,
+        applications: [],
+        raw: {
+          id: programmerId,
+          programmerId,
+          displayName: programmerName,
+          mediaCompanyName,
+          requestorOptions,
+          contentProviders: requestorIds,
+        },
+        source: entry,
+      };
+    })
+    .filter(Boolean);
+
+  resetProgrammerRuntimeState();
+  state.programmers = normalizedEntries;
+  populateMediaCompanySelect();
+}
+
+function applyProgrammerEntities(entities) {
+  resetProgrammerRuntimeState();
+  state.programmers = entities.map((entity, index) => mapProgrammerEntity(entity, index));
   populateMediaCompanySelect();
   // Post-login stays GLOBALS-only. Per-company VAULT/runtime restore remains lazy
   // until explicit Media Company selection or environment restore.
+}
+
+function restoreStoredAuthenticatedConsoleHydration(loginData = null) {
+  if (resolveProgrammerAccessContext(loginData).eligible !== true) {
+    return false;
+  }
+  const snapshot = normalizeStoredConsoleHydrationSnapshot(loginData?.consoleHydration);
+  if (!snapshot) {
+    return false;
+  }
+
+  const configurationVersion = Number(snapshot.configurationVersion || 0);
+  const channels = Array.isArray(snapshot.channels) ? snapshot.channels.slice() : [];
+  const programmers = Array.isArray(snapshot.programmers) ? snapshot.programmers.slice() : [];
+  const grantedAuthorities = Array.isArray(snapshot.grantedAuthorities) ? snapshot.grantedAuthorities.slice() : [];
+  if (!(configurationVersion > 0) && channels.length === 0 && programmers.length === 0 && grantedAuthorities.length === 0) {
+    return false;
+  }
+
+  state.consoleBootstrapState = {
+    accessToken: normalizeBearerTokenValue(firstNonEmptyString([loginData?.accessToken])),
+    fetchedAt: Number(snapshot.hydratedAt || Date.now()),
+    extendedProfile: null,
+    grantedAuthorities,
+    configurationVersion,
+    channels,
+    errors: {
+      extendedProfile: "",
+      configurationVersion: "",
+    },
+  };
+  state.programmersApiEndpoint = firstNonEmptyString([snapshot.programmersApiEndpoint, state.programmersApiEndpoint]);
+  if (programmers.length > 0) {
+    applyStoredProgrammerSnapshot(programmers);
+  }
+  syncMediaCompanySelectAvailability();
+  syncGlobalQuickLaunchButtons();
+  return programmers.length > 0 || configurationVersion > 0 || channels.length > 0;
+}
+
+async function persistAuthenticatedConsoleHydrationSnapshot() {
+  if (!state.sessionReady || state.restricted || !state.loginData?.accessToken) {
+    return false;
+  }
+  if (resolveProgrammerAccessContext(state.loginData).eligible !== true) {
+    return false;
+  }
+
+  const consoleHydration = buildStoredConsoleHydrationSnapshotFromState();
+  if (!consoleHydration) {
+    return false;
+  }
+
+  const nextLoginData = buildNormalizedLoginData(
+    {
+      ...state.loginData,
+      consoleHydration,
+    }
+  );
+  state.loginData = nextLoginData;
+  return saveLoginData(nextLoginData);
 }
 
 function createCmBootstrapSeedLoginData() {
@@ -70476,12 +73732,7 @@ function createCmBootstrapSeedLoginData() {
     cmConsoleImsSession: null,
     profile: null,
     imageUrl: "",
-    adobePassOrg: {
-      orgId: ADOBEPASS_ORG_HANDLE,
-      userId: null,
-      name: "@AdobePass",
-      avatarUrl: "",
-    },
+    adobePassOrg: null,
   };
 }
 
@@ -70515,16 +73766,7 @@ function renderPageEnvironmentBadge() {
 }
 
 function renderRestrictedView() {
-  if (
-    !els.restrictedOrgSelect ||
-    !els.restrictedOrgHint ||
-    !els.restrictedOrgSwitchBtn ||
-    !els.restrictedSignInBtn ||
-    !els.restrictedSignOutBtn ||
-    !els.restrictedLoginState ||
-    !els.restrictedOrgState ||
-    !els.restrictedRecoveryState
-  ) {
+  if (!els.restrictedOrgSelect) {
     return;
   }
 
@@ -70545,7 +73787,7 @@ function renderRestrictedView() {
     for (const option of options) {
       const optionNode = document.createElement("option");
       optionNode.value = option.key;
-      optionNode.textContent = option.isAdobePass ? `${option.label} (recommended)` : option.label;
+      optionNode.textContent = option.label;
       els.restrictedOrgSelect.appendChild(optionNode);
     }
   }
@@ -70554,41 +73796,6 @@ function renderRestrictedView() {
 
   const actionsDisabled = state.busy || state.restrictedOrgSwitchBusy;
   els.restrictedOrgSelect.disabled = actionsDisabled || options.length === 0;
-  els.restrictedOrgSwitchBtn.disabled = actionsDisabled || options.length === 0 || !state.selectedRestrictedOrgKey;
-  els.restrictedOrgSwitchBtn.textContent = state.restrictedOrgSwitchBusy ? "Switching..." : "Switch Org";
-  els.restrictedSignInBtn.disabled = actionsDisabled;
-  els.restrictedSignOutBtn.disabled = actionsDisabled;
-
-  if (!state.restrictedOrgLabel) {
-    const selected = getSelectedRestrictedOrgOption();
-    if (selected) {
-      state.restrictedOrgLabel = `Selected org: ${selected.label}`;
-    }
-  }
-
-  els.restrictedLoginState.textContent = state.restrictedLoginLabel || "Sign-in state is unknown.";
-  els.restrictedOrgState.textContent = state.restrictedOrgLabel || "Detected org: Unknown org profile";
-  els.restrictedRecoveryState.textContent =
-    state.restrictedRecoveryLabel || "Choose an Adobe org profile and switch this session.";
-
-  const targetedOption =
-    findMatchingRestrictedOrganizationOption(
-      options,
-      state.loginData?.targetOrganization && typeof state.loginData.targetOrganization === "object"
-        ? state.loginData.targetOrganization
-        : null
-    ) || null;
-  const recommended = targetedOption || options.find((option) => option.isAdobePass);
-  if (options.length === 0) {
-    els.restrictedOrgHint.textContent =
-      "No Adobe org profiles were resolved from the current Adobe session. Click Sign In Again to reopen Adobe's profile chooser.";
-  } else if (targetedOption) {
-    els.restrictedOrgHint.textContent = `Target org: ${targetedOption.label}`;
-  } else if (recommended) {
-    els.restrictedOrgHint.textContent = `Recommended profile: ${recommended.label}`;
-  } else {
-    els.restrictedOrgHint.textContent = "Select an Adobe org profile and click Switch Org.";
-  }
 }
 
 function renderSignInView() {
@@ -70605,6 +73812,7 @@ function render() {
   void syncSidepanelControllerBridge();
   syncZipKeyImportView();
   renderDebugConsole();
+  const authenticatedOrgSwitchOnly = isAuthenticatedOrgSwitchOnlySession();
 
   if (state.restricted) {
     clearResolvedAvatar();
@@ -70644,8 +73852,8 @@ function render() {
   if (els.signInView) {
     els.signInView.hidden = Boolean(state.sessionReady && state.loginData);
   }
-  els.restrictedView.hidden = true;
-  els.workflow.hidden = !(state.sessionReady && state.loginData);
+  els.restrictedView.hidden = !authenticatedOrgSwitchOnly;
+  els.workflow.hidden = authenticatedOrgSwitchOnly || !(state.sessionReady && state.loginData);
 
   if (!state.sessionReady || !state.loginData) {
     const authActionLabel = "UnderPAR activity";
@@ -70674,6 +73882,9 @@ function render() {
   if (!state.busy) {
     els.authBtn.title = "Account menu";
   }
+  if (authenticatedOrgSwitchOnly) {
+    renderRestrictedView();
+  }
   syncGlobalQuickLaunchButtons();
   renderAvatarMenu();
   void consumePendingUnderparEsmDeeplink();
@@ -70690,7 +73901,6 @@ async function signInInteractive(options = {}) {
     findConfiguredTargetOrganization(configuredTargetOrganizations, requestedTargetOrganization) ||
     requestedTargetOrganization ||
     null;
-  const targetOrgStrategy = buildPreferredOrgSwitchStrategy(targetOrganization);
   cancelPendingBootstrapSession();
   await releaseAuthPopupBootstrapContext("interactive-signin-reset");
   state.sessionMonitorSuppressed = false;
@@ -70713,14 +73923,10 @@ async function signInInteractive(options = {}) {
     }
 
     const authData = await startLogin({
-      ...loginOptions,
       interactive: true,
       allowFallback: true,
+      accessToken: firstNonEmptyString([loginOptions?.accessToken]),
       prompt: normalizeUnderparImsPrompt(loginOptions?.prompt || "login", true),
-      extraParams: {
-        ...(loginOptions?.extraParams && typeof loginOptions.extraParams === "object" ? loginOptions.extraParams : {}),
-        ...(targetOrgStrategy || {}),
-      },
     });
     setUnderparDiagnosticMarker("auth", {
       status: "token-acquired",
@@ -70737,14 +73943,34 @@ async function signInInteractive(options = {}) {
     });
     const profileResolvedAt = Date.now();
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
+    const finalizedLoginDataResult = finalizeRequestedTargetLoginData(
+      buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+      targetOrganization,
+      {
+        acceptReturnedOrganization: loginOptions?.forceBrowserLogout === true,
+      }
+    );
+    if (!finalizedLoginDataResult.ok || !finalizedLoginDataResult.loginData) {
+      setUnderparDiagnosticMarker("auth", {
+        status: "error",
+        mode: "interactive",
+        phase: "org-verification-mismatch",
+        error: finalizedLoginDataResult?.message || "Adobe returned a different org than UnderPAR requested.",
+      });
+      setStatus(
+        finalizedLoginDataResult?.message || "Adobe returned a different org than UnderPAR requested.",
+        "error"
+      );
+      return;
+    }
+    if (finalizedLoginDataResult.message) {
+      log(finalizedLoginDataResult.message);
+    }
     const activated = await activateSession(
-      attachTargetOrganizationToLoginData(
-        buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
-        targetOrganization
-      ),
+      finalizedLoginDataResult.loginData,
       "interactive",
       {
-        allowTemporaryPageContextTab: false,
+        allowTemporaryPageContextTab: true,
       }
     );
 
@@ -70783,7 +74009,9 @@ async function signInInteractive(options = {}) {
     });
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
-    await releaseAuthPopupBootstrapContext("interactive-signin-complete");
+    if (!(state.sessionReady && state.loginData && !state.restricted)) {
+      await releaseAuthPopupBootstrapContext("interactive-signin-complete");
+    }
     setBusy(false);
     render();
   }
@@ -70835,16 +74063,39 @@ async function refreshSessionManual() {
     });
     const profileResolvedAt = Date.now();
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
+    const requestedTargetOrganization =
+      state.loginData?.targetOrganization && typeof state.loginData.targetOrganization === "object"
+        ? state.loginData.targetOrganization
+        : null;
+    const finalizedLoginDataResult = finalizeRequestedTargetLoginData(
+      buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+      requestedTargetOrganization,
+      {
+        acceptReturnedOrganization: false,
+      }
+    );
+    if (!finalizedLoginDataResult.ok || !finalizedLoginDataResult.loginData) {
+      setUnderparDiagnosticMarker("auth", {
+        status: "error",
+        mode: "manual-refresh",
+        phase: "org-verification-mismatch",
+        interactiveFallback: usedInteractiveLogin,
+        error: finalizedLoginDataResult?.message || "Adobe returned a different org than UnderPAR requested.",
+      });
+      setStatus(
+        finalizedLoginDataResult?.message || "Adobe returned a different org than UnderPAR requested.",
+        "error"
+      );
+      return;
+    }
+    if (finalizedLoginDataResult.message) {
+      log(finalizedLoginDataResult.message);
+    }
     const activated = await activateSession(
-      attachTargetOrganizationToLoginData(
-        buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
-        state.loginData?.targetOrganization && typeof state.loginData.targetOrganization === "object"
-          ? state.loginData.targetOrganization
-          : null
-      ),
+      finalizedLoginDataResult.loginData,
       usedInteractiveLogin ? "manual-refresh-interactive" : "manual-refresh",
       {
-        allowTemporaryPageContextTab: false,
+        allowTemporaryPageContextTab: usedInteractiveLogin,
       }
     );
 
@@ -70892,7 +74143,7 @@ async function refreshSessionManual() {
 }
 
 async function onRestrictedOrgSwitch() {
-  if (state.busy || state.restrictedOrgSwitchBusy || !state.restricted) {
+  if (state.busy || state.restrictedOrgSwitchBusy || !(state.restricted || isAuthenticatedOrgSwitchOnlySession())) {
     return;
   }
 
@@ -70909,14 +74160,6 @@ async function onRestrictedOrgSwitch() {
     state.selectedTargetOrganizationKey = configuredTarget.key;
   }
 
-  const preferredStrategy = buildPreferredOrgSwitchStrategy(selected);
-  if (!preferredStrategy) {
-    state.restrictedRecoveryLabel = "Selected profile does not include switchable identifiers.";
-    setStatus("The selected org does not include switchable identifiers.", "error");
-    render();
-    return;
-  }
-
   state.restrictedOrgSwitchBusy = true;
   state.restrictedOrgLabel = `Selected org: ${selected.label}`;
   state.restrictedRecoveryLabel = "Manual org switch in progress...";
@@ -70929,9 +74172,18 @@ async function onRestrictedOrgSwitch() {
   });
   render();
 
+  let activationSucceeded = false;
   try {
+    cancelPendingBootstrapSession();
+    await releaseAuthPopupBootstrapContext("restricted-org-switch-reset");
+    state.sessionMonitorSuppressed = false;
+    setStatus("Resetting Adobe sign-in session before re-authenticating...", "info");
+    await runUnderparImsBrowserLogout({
+      accessToken: firstNonEmptyString([state.loginData?.accessToken]),
+      interactive: true,
+    });
+    setStatus(`Switching org profile: ${selected.name || selected.orgId || "selected profile"}...`, "info");
     const authData = await startLogin({
-      extraParams: preferredStrategy,
       interactive: true,
       allowFallback: true,
       prompt: "login",
@@ -70939,18 +74191,42 @@ async function onRestrictedOrgSwitch() {
     resetAvatarStateForInteractiveLogin();
     const profile = await resolveProfileAfterLogin(authData);
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
+    const finalizedLoginDataResult = finalizeRequestedTargetLoginData(
+      buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
+      configuredTarget || selected,
+      {
+        acceptReturnedOrganization: true,
+      }
+    );
+    if (!finalizedLoginDataResult.ok || !finalizedLoginDataResult.loginData) {
+      state.restrictedRecoveryLabel =
+        finalizedLoginDataResult?.message || "Adobe returned a different org than UnderPAR requested.";
+      setUnderparDiagnosticMarker("auth", {
+        status: "error",
+        mode: "restricted-org-switch",
+        phase: "org-verification-mismatch",
+        selectedOrg: selected.label,
+        error: finalizedLoginDataResult?.message || "Adobe returned a different org than UnderPAR requested.",
+      });
+      setStatus(
+        finalizedLoginDataResult?.message || "Adobe returned a different org than UnderPAR requested.",
+        "error"
+      );
+      return;
+    }
+    if (finalizedLoginDataResult.message) {
+      log(finalizedLoginDataResult.message);
+    }
     const activated = await activateSession(
-      attachTargetOrganizationToLoginData(
-        buildLoginSessionPayloadFromAuth(authData, profile, imageUrl),
-        configuredTarget || selected
-      ),
+      finalizedLoginDataResult.loginData,
       "restricted-org-switch",
       {
         allowDeniedRecovery: false,
-        allowTemporaryPageContextTab: false,
+        allowTemporaryPageContextTab: true,
       }
     );
     if (activated) {
+      activationSucceeded = true;
       setUnderparDiagnosticMarker("auth", {
         status: "success",
         mode: "restricted-org-switch",
@@ -70961,14 +74237,12 @@ async function onRestrictedOrgSwitch() {
       return;
     }
 
-    state.restrictedRecoveryLabel = "Manual org switch could not complete. Try Sign In Again.";
     setUnderparDiagnosticMarker("auth", {
       status: "incomplete",
       mode: "restricted-org-switch",
       phase: "activation-incomplete",
       selectedOrg: selected.label,
     });
-    setStatus("Unable to switch org profile. Try Sign In Again.", "error");
   } catch (error) {
     state.restrictedRecoveryLabel = "Manual org switch failed. Try Sign In Again or Sign Out and retry.";
     setUnderparDiagnosticMarker("auth", {
@@ -70980,6 +74254,9 @@ async function onRestrictedOrgSwitch() {
     });
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
+    if (!activationSucceeded) {
+      await releaseAuthPopupBootstrapContext("restricted-org-switch-complete");
+    }
     state.restrictedOrgSwitchBusy = false;
     render();
   }
@@ -71081,66 +74358,6 @@ async function bootstrapSession(reason = "startup") {
   });
 
   try {
-    const stored = await loadStoredLoginData();
-    if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
-      return;
-    }
-    if (stored) {
-      try {
-        const profile = await fetchProfile(stored.accessToken);
-        if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
-          return;
-        }
-        const storedSessionPayload = buildNormalizedLoginData({
-          ...stored,
-          profile,
-          adobePassOrg: stored.adobePassOrg || null,
-        }, {
-          resetBootstrapTokens: true,
-          fallbackAdobePassOrg: stored.adobePassOrg || null,
-        });
-        const activated = await activateSession(
-          storedSessionPayload,
-          "stored"
-        );
-
-        if (activated) {
-          setUnderparDiagnosticMarker("bootstrap", {
-            status: "success",
-            reason: normalizedReason,
-            phase: "stored-session",
-            path: "stored",
-          });
-          clearStatusUnlessCmTenantsPrecheckBlocked();
-          return;
-        }
-
-        if (state.restricted) {
-          setUnderparDiagnosticMarker("bootstrap", {
-            status: "restricted",
-            reason: normalizedReason,
-            phase: "stored-session-denied",
-            path: "stored",
-          });
-          setStatus("", "info");
-          return;
-        }
-      } catch (error) {
-        if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
-          return;
-        }
-        log("Stored session invalid", error);
-        setUnderparDiagnosticMarker("bootstrap", {
-          status: "error",
-          reason: normalizedReason,
-          phase: "stored-session-invalid",
-          path: "stored",
-          error: error instanceof Error ? error.message : String(error),
-        });
-        await clearLoginData();
-      }
-    }
-
     if (!isBootstrapSessionCurrent(bootstrapGeneration)) {
       return;
     }
@@ -71159,10 +74376,12 @@ async function bootstrapSession(reason = "startup") {
     state.loginData = null;
     state.restricted = false;
     state.sessionReady = false;
+    clearRefreshTimer();
+    stopExperienceCloudSessionMonitor();
     setUnderparDiagnosticMarker("bootstrap", {
       status: "no-session",
       reason: normalizedReason,
-      phase: "complete",
+      phase: "explicit-sign-in-required",
     });
     setStatus("", "info");
   } finally {
@@ -71198,12 +74417,22 @@ function registerEventHandlers() {
 
   if (els.restrictedOrgSelect) {
     els.restrictedOrgSelect.addEventListener("change", (event) => {
+      const previousSelection = String(state.selectedRestrictedOrgKey || "");
       state.selectedRestrictedOrgKey = String(event.target.value || "");
       const selected = getSelectedRestrictedOrgOption();
       if (selected) {
         state.restrictedOrgLabel = `Selected org: ${selected.label}`;
       }
       renderRestrictedView();
+      if (
+        selected &&
+        state.selectedRestrictedOrgKey &&
+        state.selectedRestrictedOrgKey !== previousSelection &&
+        !state.busy &&
+        !state.restrictedOrgSwitchBusy
+      ) {
+        void onRestrictedOrgSwitch();
+      }
     });
   }
 
@@ -71309,7 +74538,7 @@ function registerEventHandlers() {
   els.mediaCompanySelect.addEventListener("change", (event) => {
     state.selectedProgrammerKey = String(event.target.value || "");
     const controllerReason = "media-company-change";
-    const selectedProgrammer = selectProgrammerForController(resolveSelectedProgrammer(), controllerReason);
+    const selectedProgrammer = resolveSelectedProgrammer();
     emitGlobalSelectorChangeLog(
       "Media Company",
       state.selectedProgrammerKey,
@@ -71317,7 +74546,7 @@ function registerEventHandlers() {
         ? `${String(selectedProgrammer.programmerName || "").trim()} - ${String(selectedProgrammer.programmerId || "").trim()}`
         : ""
     );
-    void refreshProgrammerPanels({
+    void hydrateProgrammerSelection(selectedProgrammer, {
       controllerReason,
     });
   });

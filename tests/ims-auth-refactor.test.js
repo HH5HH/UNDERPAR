@@ -219,6 +219,103 @@ function loadPopupRestrictedOrgLabelHelper() {
   return context.module.exports;
 }
 
+function loadPopupRestrictedActiveOrgHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    'const ADOBEPASS_ORG_KEYWORD = "adobepass";',
+    'const ADOBEPASS_ORG_HANDLE = "@adobepass";',
+    'const ADOBEPASS_ORG_DISPLAY_NAME = "Adobe Pass";',
+    'const ADOBEPASS_IMS_ORG_ID = "30FC5E0951240C900A490D4D@AdobeOrg";',
+    "const ADOBEPASS_ORG_ID_ALLOWLIST = [];",
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : []) { const text = String(value || '').trim(); if (text) { return text; } } return ''; }",
+    extractFunctionSource(source, "collectObjects"),
+    extractFunctionSource(source, "flattenOrganizations"),
+    extractFunctionSource(source, "normalizeOrganizationIdentifier"),
+    extractFunctionSource(source, "extractStrongOrganizationId"),
+    extractFunctionSource(source, "looksLikeOrganizationObject"),
+    extractFunctionSource(source, "extractOrgName"),
+    extractFunctionSource(source, "extractOrganizationId"),
+    extractFunctionSource(source, "extractTenantOrganizationId"),
+    extractFunctionSource(source, "extractImsOrganizationId"),
+    extractFunctionSource(source, "extractOrganizationName"),
+    extractFunctionSource(source, "extractUserId"),
+    extractFunctionSource(source, "choosePreferredOrganizationName"),
+    extractFunctionSource(source, "isGeneratedOrganizationName"),
+    extractFunctionSource(source, "rankRestrictedOrganizationSource"),
+    extractFunctionSource(source, "buildRestrictedOrgCandidateMergeKey"),
+    extractFunctionSource(source, "buildRestrictedOrgOptionKey"),
+    extractFunctionSource(source, "buildRestrictedOrgOptionLabel"),
+    extractFunctionSource(source, "collectOrganizationObjects"),
+    extractFunctionSource(source, "isLikelyUrlWithoutScheme"),
+    extractFunctionSource(source, "collectRestrictedOrganizationCandidates"),
+    extractFunctionSource(source, "restrictedOrganizationMatchesAnyIdentifier"),
+    extractFunctionSource(source, "compareRestrictedOrganizationCandidatePriority"),
+    extractFunctionSource(source, "findMatchingRestrictedOrganizationCandidate"),
+    extractFunctionSource(source, "collectSessionActiveRestrictedOrganizationIdentifiers"),
+    extractFunctionSource(source, "resolveActiveRestrictedOrganization"),
+    extractFunctionSource(source, "sortRestrictedOrganizationOptions"),
+    extractFunctionSource(source, "hasRestrictedOrganizationPickerOnlySource"),
+    extractFunctionSource(source, "isRestrictedOrganizationAuthoritativeCandidate"),
+    extractFunctionSource(source, "buildRestrictedOrganizationContext"),
+    extractFunctionSource(source, "normalizeUnderparUnifiedShellOrganizationNode"),
+    extractFunctionSource(source, "collectUnderparUnifiedShellOrganizations"),
+    extractFunctionSource(source, "hasCanonicalRestrictedStoredOrganizations"),
+    extractFunctionSource(source, "normalizeStoredRestrictedOrganizationCandidates"),
+    extractFunctionSource(source, "collectRestrictedOrganizationIdentifierSet"),
+    extractFunctionSource(source, "hasRestrictedOrganizationIdentifierIntersection"),
+    extractFunctionSource(source, "isOrgIdAllowed"),
+    extractFunctionSource(source, "matchesAdobePassOrg"),
+    extractFunctionSource(source, "resolveCachedOrganizationsFromLoginData"),
+    extractFunctionSource(source, "normalizeRequestedTargetOrganization"),
+    extractFunctionSource(source, "isRestrictedOrganizationPickerRecord"),
+    extractFunctionSource(source, "collectAuthoritativeRestrictedOrganizations"),
+    "module.exports = { isRestrictedOrganizationPickerRecord, collectAuthoritativeRestrictedOrganizations, collectUnderparUnifiedShellOrganizations, hasCanonicalRestrictedStoredOrganizations, normalizeStoredRestrictedOrganizationCandidates, resolveCachedOrganizationsFromLoginData, matchesAdobePassOrg, normalizeRequestedTargetOrganization, buildRestrictedOrganizationContext };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    resolveLoginProfile: (session) => (session && typeof session.profile === "object" ? session.profile : {}),
+    parseJwtPayload: () => ({}),
+    getActiveUnderparImsRuntimeConfig: () => ({ organizations: [] }),
+    extractVerifiedCustomerOrganizationClaim: (session) =>
+      session && session.verifiedClaim && typeof session.verifiedClaim === "object"
+        ? session.verifiedClaim
+        : { id: "", rawId: "", source: "unavailable" },
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+function loadPopupRestrictedSelectedOrgHelper() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : []) { const text = String(value || '').trim(); if (text) { return text; } } return ''; }",
+    extractFunctionSource(source, "resolveRestrictedPickerSelectedOrg"),
+    "module.exports = { resolveRestrictedPickerSelectedOrg };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    normalizeRequestedTargetOrganization: (value) => (value && typeof value === "object" ? value : null),
+    resolveLoginProfile: (session) => (session && typeof session.profile === "object" ? session.profile : {}),
+    extractVerifiedCustomerOrganizationClaim: (session) =>
+      session && session.verifiedClaim && typeof session.verifiedClaim === "object"
+        ? session.verifiedClaim
+        : { id: "", rawId: "", source: "unavailable" },
+    resolveCachedOrganizationsFromLoginData: () => [],
+    buildRestrictedOrganizationContext: (_organizations, session) => ({
+      activeOrganization:
+        session && session.activeOrganization && typeof session.activeOrganization === "object"
+          ? session.activeOrganization
+          : null,
+    }),
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadPopupBootstrapProgrammersHelper() {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -387,18 +484,14 @@ test("legacy helper login surface is no longer shipped", () => {
   }
 });
 
-test("interactive UnderPAR IMS login uses chrome.identity.launchWebAuthFlow", async () => {
-  const helpers = loadPopupImsAuthLaunchHelper();
-  helpers.resetRecordedOptions();
+test("interactive UnderPAR IMS login now uses the monitored browser popup transport", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const retrySource = extractFunctionSource(popupSource, "runUnderparPkceLogin");
 
-  const response = await helpers.launchUnderparImsAuthorizationFlow("https://ims.example/authorize", true);
-
-  assert.equal(response, "callback:true");
-  const [request] = helpers.getRecordedOptions();
-  assert.equal(request.url, "https://ims.example/authorize");
-  assert.equal(request.interactive, true);
-  assert.equal(Object.prototype.hasOwnProperty.call(request, "abortOnLoadForNonInteractive"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(request, "timeoutMsForNonInteractive"), false);
+  assert.match(retrySource, /if \(interactive\) \{\s*const popupResult = await runAuthInPopupWindow\(authorizeUrl, redirectUri\);/);
+  assert.match(retrySource, /responseUrl = String\(firstNonEmptyString\(\[popupResult\?\.responseUrl\]\) \|\| ""\);/);
+  assert.match(retrySource, /responseUrl = String\(await launchUnderparImsAuthorizationFlow\(authorizeUrl, false\)\);/);
+  assert.doesNotMatch(retrySource, /launchUnderparImsAuthorizationFlow\(authorizeUrl, interactive\)/);
 });
 
 test("header UP button no longer launches sign-in when logged out", async () => {
@@ -654,20 +747,33 @@ test("activation reuses cached organization payloads from the PKCE login handoff
   assert.doesNotMatch(enforceAccessSource, /let organizations = \[\];/);
 });
 
-test("activation qualifies the unified-shell console bearer before programmer discovery", () => {
+test("activation uses the primary IMS bearer before programmer discovery", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activateSource = extractFunctionSource(popupSource, "activateSession");
+  const hydrateSource = extractFunctionSource(popupSource, "hydrateAuthenticatedAdobePassSession");
+  const postLoginHydrateSource = extractFunctionSource(popupSource, "hydratePostLoginSessionData");
   const consoleTokenPreferenceSource = extractFunctionSource(popupSource, "getPreferredAdobeConsoleAccessTokenCandidate");
 
-  assert.match(consoleTokenPreferenceSource, /getPreferredExperienceCloudConsoleAccessTokenCandidate\(\)/);
   assert.match(consoleTokenPreferenceSource, /getPreferredPrimaryImsAccessTokenCandidate\(\)/);
-  assert.match(activateSource, /requestQualifiedExperienceCloudConsoleToken\(\{/);
-  assert.match(activateSource, /state\.consoleBootstrapState\?\.shellSnapshot\?\.imsToken/);
-  assert.match(activateSource, /qualifiedExperienceCloudTokenResult\?\.accessToken/);
-  assert.match(activateSource, /mergeExperienceCloudConsoleTokenIntoLoginData\(enforced\.loginData,\s*qualifiedExperienceCloudTokenResult\)/);
-  assert.match(activateSource, /await loadProgrammersData\(consoleAccessToken/);
+  assert.doesNotMatch(consoleTokenPreferenceSource, /getPreferredExperienceCloudConsoleAccessTokenCandidate\(\)/);
+  assert.match(activateSource, /state\.consoleCsrfToken = "";/);
+  assert.match(activateSource, /state\.consoleBootstrapState = null;/);
+  assert.match(
+    activateSource,
+    /firstNonEmptyString\(\[\s*resolvedLoginData\?\.accessToken,\s*getPreferredPrimaryImsAccessTokenCandidate\(\),\s*getPreferredAdobeConsoleAccessTokenCandidate\(\),/
+  );
+  assert.doesNotMatch(activateSource, /requestQualifiedExperienceCloudConsoleToken\(\{/);
+  assert.doesNotMatch(activateSource, /qualifiedExperienceCloudTokenResult\?\.accessToken/);
+  assert.doesNotMatch(activateSource, /mergeExperienceCloudConsoleTokenIntoLoginData\(/);
+  assert.doesNotMatch(activateSource, /await loadProgrammersData\(consoleAccessToken/);
+  assert.match(activateSource, /void hydrateAuthenticatedAdobePassSession\(normalizedSource,\s*\{/);
+  assert.match(hydrateSource, /hydratePostLoginSessionData\(currentLoginData,\s*\{/);
+  assert.match(postLoginHydrateSource, /buildConsoleContext\(/);
+  assert.match(postLoginHydrateSource, /buildCmContext\(/);
+  assert.match(postLoginHydrateSource, /buildUnifiedShellContext\(/);
   assert.match(activateSource, /resetBootstrapTokens: true/);
-  assert.match(activateSource, /mergeExperienceCloudConsoleTokenIntoLoginData\(\s*mergeExperienceCloudShellSnapshotIntoLoginData\(/);
+  assert.match(activateSource, /mergeCmConsoleBootstrapIntoLoginData\(\s*await normalizedLoginDataPromise,\s*enforced\.loginData\s*\)/);
+  assert.doesNotMatch(activateSource, /getDefaultAdobePassOrgDescriptor\(\)/);
 });
 
 test("sign out path revokes Adobe tokens before clearing session state", () => {
@@ -686,62 +792,155 @@ test("interactive Adobe auth popup no longer attaches the debugger or retains th
   assert.equal(/keepAuthWindowOpenForBootstrap/.test(signInSource), false);
 });
 
-test("interactive login and org switching keep normal activation on the retained auth context instead of opening extra temp tabs", () => {
+test("interactive login and org switching keep normal activation without legacy org-forcing auth params", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const signInSource = extractFunctionSource(popupSource, "signInInteractive");
   const refreshSource = extractFunctionSource(popupSource, "refreshSessionManual");
   const restrictedSwitchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
-  const recoverySource = extractFunctionSource(popupSource, "attemptInteractiveAdobePassRecovery");
 
   assert.match(signInSource, /activateSession\(/);
   assert.match(refreshSource, /activateSession\(/);
   assert.match(restrictedSwitchSource, /activateSession\(/);
-  assert.match(recoverySource, /activateSession\(/);
   assert.doesNotMatch(signInSource, /withTemporaryCmConsoleBootstrapContext/);
   assert.doesNotMatch(refreshSource, /withTemporaryCmConsoleBootstrapContext/);
   assert.doesNotMatch(restrictedSwitchSource, /withTemporaryCmConsoleBootstrapContext/);
-  assert.doesNotMatch(recoverySource, /withTemporaryCmConsoleBootstrapContext/);
   assert.doesNotMatch(signInSource, /await awaitCmBootstrapForExplicitActivation\("interactive"/);
   assert.doesNotMatch(refreshSource, /await awaitCmBootstrapForExplicitActivation\(/);
   assert.doesNotMatch(restrictedSwitchSource, /await awaitCmBootstrapForExplicitActivation\("restricted-org-switch"/);
-  assert.match(signInSource, /allowTemporaryPageContextTab:\s*false/);
-  assert.match(refreshSource, /allowTemporaryPageContextTab:\s*false/);
-  assert.match(restrictedSwitchSource, /allowTemporaryPageContextTab:\s*false/);
-  assert.match(recoverySource, /allowTemporaryPageContextTab:\s*true/);
+  assert.match(signInSource, /allowTemporaryPageContextTab:\s*true/);
+  assert.match(restrictedSwitchSource, /runUnderparImsBrowserLogout\(/);
+  assert.match(signInSource, /if \(!\(state\.sessionReady && state\.loginData && !state\.restricted\)\) \{\s*await releaseAuthPopupBootstrapContext\("interactive-signin-complete"\);/);
+  assert.match(refreshSource, /allowTemporaryPageContextTab:\s*usedInteractiveLogin/);
+  assert.match(restrictedSwitchSource, /allowTemporaryPageContextTab:\s*true/);
+  assert.doesNotMatch(signInSource, /extraParams:/);
+  assert.doesNotMatch(restrictedSwitchSource, /extraParams:/);
+  assert.doesNotMatch(popupSource, /function buildPreferredOrgSwitchStrategy\(/);
+  assert.doesNotMatch(popupSource, /function buildOrgSwitchStrategies\(/);
+  assert.doesNotMatch(popupSource, /function attemptInteractiveAdobePassRecovery\(/);
+  assert.doesNotMatch(popupSource, /function attemptAutoSwitchToAdobePass\(/);
 });
 
-test("session activation hydrates CM tenants before programmer load and keeps Media Company user-owned", () => {
+test("session activation delegates background hydration to the shared LoginButton-style session context builder", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activateSource = extractFunctionSource(popupSource, "activateSession");
-  const precheckSource = extractFunctionSource(popupSource, "ensureCmTenantsPrecheckForActiveSession");
-  const programmersSource = extractFunctionSource(popupSource, "loadProgrammersData");
+  const hydrateSource = extractFunctionSource(popupSource, "hydrateAuthenticatedAdobePassSession");
+  const postLoginHydrateSource = extractFunctionSource(popupSource, "hydratePostLoginSessionData");
+  const buildConsoleContextSource = extractFunctionSource(popupSource, "buildConsoleContext");
   const mediaCompanyLockSource = extractFunctionSource(popupSource, "isMediaCompanySelectionLockedByCmPrecheck");
   const mediaCompanyLabelSource = extractFunctionSource(popupSource, "getMediaCompanySelectDefaultLabel");
   const prefetchSource = extractFunctionSource(popupSource, "prefetchCmTenantsCatalogInBackground");
 
   assert.doesNotMatch(activateSource, /prefetchCmTenantsCatalogInBackground/);
-  assert.match(activateSource, /prefetchCmConsoleBootstrapSummaryInBackground/);
+  assert.doesNotMatch(activateSource, /await ensureCmTenantsPrecheckForActiveSession/);
+  assert.doesNotMatch(activateSource, /await loadProgrammersData\(/);
+  assert.match(activateSource, /void hydrateAuthenticatedAdobePassSession\(normalizedSource,/);
+  assert.match(hydrateSource, /hydratePostLoginSessionData\(currentLoginData,\s*\{/);
+  assert.match(hydrateSource, /applyHydratedSessionContextsToState\(hydratedLoginData,\s*\{/);
+  assert.match(hydrateSource, /const shouldRetryLimitedRestrictedSwitchHydration =/);
+  assert.match(hydrateSource, /normalizedSource === "restricted-org-switch" \|\| normalizedSource === "interactive-auto-switch-recovery"/);
+  assert.match(hydrateSource, /Retrying Adobe Pass session hydration after limited restricted switch bootstrap/);
+  assert.match(postLoginHydrateSource, /buildConsoleContext\(/);
+  assert.match(postLoginHydrateSource, /buildCmContext\(/);
+  assert.match(postLoginHydrateSource, /buildUnifiedShellContext\(/);
   assert.ok(
-    activateSource.indexOf("await ensureCmTenantsPrecheckForActiveSession") <
-      activateSource.indexOf("await loadProgrammersData(")
+    buildConsoleContextSource.indexOf("Console extended profile") <
+      buildConsoleContextSource.indexOf("Console configuration version")
   );
-  assert.match(activateSource, /allowRestrictedSession:\s*true/);
-  assert.match(activateSource, /await ensureCmTenantsPrecheckForActiveSession\(`activation:\$\{normalizedSource\}`/);
-  assert.match(activateSource, /releaseRetainedAuthPopupContext:\s*false/);
+  assert.doesNotMatch(hydrateSource, /prefetchCmConsoleBootstrapSummaryInBackground/);
   assert.match(activateSource, /mergeCmConsoleBootstrapIntoLoginData\(/);
-  assert.ok(
-    precheckSource.indexOf("const catalog = await ensureCmTenantsCatalog(") <
-      precheckSource.indexOf("await ensureCmApiAccessToken(")
-  );
-  assert.doesNotMatch(precheckSource, /await hydrateGlobalCmConsoleBootstrapForActiveSession\(/);
-  assert.match(programmersSource, /const allowRestrictedSession = options\.allowRestrictedSession === true;/);
-  assert.match(programmersSource, /\(state\.restricted && !allowRestrictedSession\)/);
   assert.match(mediaCompanyLockSource, /return false;/);
   assert.match(mediaCompanyLabelSource, /-- Choose a Media Company --/);
   assert.match(prefetchSource, /ensureCmTenantsPrecheckForActiveSession/);
   assert.doesNotMatch(activateSource, /captureAdobePassEnvironmentSwitchSelectionSnapshot\(\)/);
   assert.doesNotMatch(activateSource, /restorePreferredProgrammerSelectionForActivation\(/);
   assert.doesNotMatch(activateSource, /refreshProgrammerPanels\(\{[\s\S]*session-activated:/);
+});
+
+test("authenticated non-AdobePass sessions stay on the populated org picker instead of flipping into restricted logout state", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const activateSource = extractFunctionSource(popupSource, "activateSession");
+  const applySessionSource = extractFunctionSource(popupSource, "applyActiveLoginSession");
+  const renderSource = extractFunctionSource(popupSource, "render");
+  const restrictedSwitchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
+
+  assert.doesNotMatch(activateSource, /if \(!enforced\.allowed \|\| !enforced\.loginData\)/);
+  assert.match(activateSource, /if \(!enforced\?\.loginData\) \{/);
+  assert.match(activateSource, /const sessionRequiresOrgSelection = resolveProgrammerAccessContext\(resolvedLoginData\)\.eligible !== true;/);
+  assert.match(
+    applySessionSource,
+    /if \(resolveProgrammerAccessContext\(loginData\)\.eligible !== true\) \{\s*syncAuthenticatedOrgSwitchOnlyContext\(loginData\);\s*\} else \{\s*clearRestrictedOrgOptions\(\);/s
+  );
+  assert.match(renderSource, /const authenticatedOrgSwitchOnly = isAuthenticatedOrgSwitchOnlySession\(\);/);
+  assert.match(renderSource, /els\.restrictedView\.hidden = !authenticatedOrgSwitchOnly;/);
+  assert.match(renderSource, /els\.workflow\.hidden = authenticatedOrgSwitchOnly \|\| !\(state\.sessionReady && state\.loginData\);/);
+  assert.match(renderSource, /if \(authenticatedOrgSwitchOnly\) \{\s*renderRestrictedView\(\);/s);
+  assert.match(
+    restrictedSwitchSource,
+    /if \(state\.busy \|\| state\.restrictedOrgSwitchBusy \|\| !\(state\.restricted \|\| isAuthenticatedOrgSwitchOnlySession\(\)\)\) \{/
+  );
+});
+
+test("CM precheck treats authenticated org-selection-required sessions as gated instead of failed", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const precheckSource = extractFunctionSource(popupSource, "ensureCmTenantsPrecheckForActiveSession");
+  const applyHydratedSource = extractFunctionSource(popupSource, "applyHydratedSessionContextsToState");
+
+  assert.match(precheckSource, /if \(resolveProgrammerAccessContext\(state\.loginData\)\.eligible !== true\) \{/);
+  assert.match(precheckSource, /status:\s*"restricted",[\s\S]*phase:\s*"org-selection-required"/);
+  assert.match(applyHydratedSource, /const cmRequiresOrgSelection = cmContext\?\.status === "org-selection-required";/);
+  assert.match(
+    applyHydratedSource,
+    /status: cmCatalogReady \? "success" : cmRequiresOrgSelection \? "restricted" : currentSession\?\.accessToken \? "error" : "skipped"/
+  );
+});
+
+test("restricted org switch retries programmer hydration once after CM precheck when console bootstrap stayed limited", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const hydrateSource = extractFunctionSource(popupSource, "hydrateAuthenticatedAdobePassSession");
+
+  assert.match(hydrateSource, /Array\.isArray\(hydratedLoginData\?\.console\?\.programmers\)/);
+  assert.match(hydrateSource, /Number\(hydratedLoginData\?\.console\?\.configurationVersion \|\| 0\) <= 0/);
+  assert.match(hydrateSource, /allowBackgroundTemporaryPageContextTab/);
+  assert.match(hydrateSource, /await sleep\(250\);/);
+  assert.match(hydrateSource, /forceRefresh:\s*true/);
+  assert.match(hydrateSource, /hydrationResult = await settle\(\(\) =>\s*hydratePostLoginSessionData\(hydratedLoginData,\s*\{/);
+});
+
+test("post-login hydration starts AdobePass console bootstrap in parallel with CM and Unified Shell like LoginButton", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const hydrateSource = extractFunctionSource(popupSource, "hydratePostLoginSessionData");
+
+  assert.match(
+    hydrateSource,
+    /const \[nextConsoleContext,\s*nextCmContext,\s*nextUnifiedShellContext\] = await Promise\.all\(\[\s*buildConsoleContext\(currentSession,\s*normalizedReason,\s*\{[\s\S]*?buildCmContext\(currentSession,\s*normalizedReason,\s*\{[\s\S]*?buildUnifiedShellContext\(currentSession,\s*normalizedReason\),[\s\S]*?\]\);/s
+  );
+  assert.doesNotMatch(
+    hydrateSource,
+    /const \[nextCmContext,\s*nextUnifiedShellContext\] = await Promise\.all\(\[[\s\S]*?const nextConsoleContext = await buildConsoleContext\(/s
+  );
+  assert.doesNotMatch(
+    hydrateSource,
+    /buildConsoleContext\(\s*\{\s*\.\.\.currentSession,\s*cm:\s*nextCmContext,\s*unifiedShell:\s*nextUnifiedShellContext/s
+  );
+});
+
+test("limited console bootstrap without a configuration version no longer escalates into a fatal programmer load error", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const hydrateSource = extractFunctionSource(popupSource, "hydrateAuthenticatedAdobePassSession");
+
+  assert.match(hydrateSource, /const consoleConfigurationMissing = Number\(consoleContext\?\.configurationVersion \|\| 0\) <= 0;/);
+  assert.match(
+    hydrateSource,
+    /!hasProgrammers && !consoleConfigurationMissing \? consoleContext\?\.errors\?\.configurationVersion : "",/
+  );
+  assert.match(
+    hydrateSource,
+    /!hasProgrammers && !consoleConfigurationMissing \? consoleContext\?\.errors\?\.programmers : "",/
+  );
+  assert.doesNotMatch(
+    hydrateSource,
+    /!hasProgrammers && consoleConfigurationMissing \? consoleContext\?\.errors\?\.configurationVersion : "",/
+  );
 });
 
 test("environment restore lets the premium panel path own PassVault hydration", () => {
@@ -752,47 +951,76 @@ test("environment restore lets the premium panel path own PassVault hydration", 
   assert.doesNotMatch(applySelectionSource, /hydrateProgrammerFromPassVault\(/);
 });
 
-test("selected media company refresh primes CM tenant precheck before CM service matching", () => {
+test("selected media company refresh starts direct premium hydration immediately and keeps CM matching bounded", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+  const ensureApplicationsSource = extractFunctionSource(popupSource, "ensureSelectedProgrammerApplicationsLoaded");
   const selectPreferredCmRuntimeServiceSource = extractFunctionSource(popupSource, "selectPreferredCmRuntimeService");
 
   assert.match(refreshPanelsSource, /const skipCmBootstrap = options\.skipCmBootstrap === true;/);
-  assert.match(refreshPanelsSource, /ensureCmTenantsPrecheckForActiveSession\(`panel-selection:\$\{programmer\.programmerId\}`/);
-  assert.ok(
-    refreshPanelsSource.indexOf("await cmSelectionBootstrapPromise;") <
-      refreshPanelsSource.indexOf("const premiumAppsPromise = ensurePremiumAppsForProgrammer(")
+  assert.match(
+    refreshPanelsSource,
+    /const programmerApplicationsPromise =[\s\S]*options\.programmerApplicationsPromise[\s\S]*ensureSelectedProgrammerApplicationsLoaded\(programmer,/
   );
+  assert.match(refreshPanelsSource, /const premiumAppsPromise = Promise\.resolve\(programmerApplicationsPromise\)\.then\(\(applicationsData\) =>/);
+  assert.match(refreshPanelsSource, /applicationsData,/);
+  assert.match(refreshPanelsSource, /ensureCmTenantsPrecheckForActiveSession\(`panel-selection:\$\{programmer\.programmerId\}`/);
+  assert.ok(refreshPanelsSource.indexOf("const programmerApplicationsPromise = ensureSelectedProgrammerApplicationsLoaded(") <
+    refreshPanelsSource.indexOf("const cmSelectionBootstrapResult ="));
+  assert.ok(refreshPanelsSource.indexOf("const premiumAppsPromise = Promise.resolve(programmerApplicationsPromise)") <
+    refreshPanelsSource.indexOf("const cmSelectionBootstrapResult ="));
+  assert.doesNotMatch(refreshPanelsSource, /hydrateProgrammerFromPassVault\(/);
+  assert.match(refreshPanelsSource, /buildPassVaultRuntimeServicesSnapshot\(vaultRecord\)/);
   assert.match(refreshPanelsSource, /allowTemporaryPageContextTab:\s*false/);
   assert.doesNotMatch(refreshPanelsSource, /withAdobeConsolePageContextTarget\(/);
   assert.match(refreshPanelsSource, /const cmServicePromise = skipCmBootstrap/);
   assert.match(refreshPanelsSource, /const cmMvpdServicePromise = skipCmBootstrap/);
-  assert.match(refreshPanelsSource, /const premiumAppsPromise = ensurePremiumAppsForProgrammer\(/);
-  assert.match(refreshPanelsSource, /selectPreferredCmRuntimeService\(currentServices\?\.cm,\s*resolvedCmService\)/);
-  assert.match(refreshPanelsSource, /selectPreferredCmRuntimeService\(currentServices\?\.cmMvpd,\s*resolvedCmMvpdService\)/);
+  assert.match(refreshPanelsSource, /const resolvedCmService = selectPreferredCmRuntimeService\(/);
+  assert.match(refreshPanelsSource, /const resolvedCmMvpdService = selectPreferredCmRuntimeService\(/);
+  assert.match(refreshPanelsSource, /const serviceHydrationPromise = isProgrammerRuntimeServicesReady\(programmer\.programmerId,\s*mergedPremiumServices\)/);
+  assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*mergedPremiumServices,\s*\{/);
+  assert.match(refreshPanelsSource, /settlePromiseWithin\(\s*serviceHydrationPromise,\s*PREMIUM_PROGRAMMER_HYDRATION_GRACE_MS,/);
+  assert.match(refreshPanelsSource, /isProgrammerPremiumUiReady\(programmer\.programmerId,\s*resolvedServices\)/);
+  assert.doesNotMatch(refreshPanelsSource, /markHydrated:\s*true/);
+  assert.match(ensureApplicationsSource, /state\.programmerApplicationsLoadPromiseByProgrammerId/);
   assert.match(selectPreferredCmRuntimeServiceSource, /resolvedVisible && !currentVisible/);
   assert.match(selectPreferredCmRuntimeServiceSource, /currentRetry && !resolvedRetry/);
 });
 
-test("programmer application hydration prefers bounded bulk retrieve and degrades to vault or empty state before raw applications list fallbacks", () => {
+test("programmer application hydration uses direct applications queries and normalizes results without vault-first fallbacks", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const fetchRegisteredApplicationsSource = extractFunctionSource(popupSource, "fetchProgrammerRegisteredApplications");
   const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
+  const ensureApplicationsSource = extractFunctionSource(popupSource, "ensureSelectedProgrammerApplicationsLoaded");
 
-  assert.match(fetchApplicationsSource, /const shouldUseBoundedBulkRetrieve = Boolean\(bulkRetrieveRequest && expectedCount > 0\);/);
-  assert.match(fetchApplicationsSource, /if \(!shouldUseBoundedBulkRetrieve\) \{/);
-  assert.match(fetchApplicationsSource, /const vaultRecord = getPassVaultMediaCompanyRecord\(programmerId\);/);
-  assert.match(fetchApplicationsSource, /const vaultApplications = buildPassVaultApplicationsSnapshotFromRegisteredApplications\(/);
-  assert.match(fetchApplicationsSource, /phase: "premium-applications-vault-fallback"/);
-  assert.match(fetchApplicationsSource, /phase: "premium-applications-empty-fallback"/);
-  assert.match(fetchApplicationsSource, /return \{\};/);
+  assert.match(fetchRegisteredApplicationsSource, /Registered Applications request is missing console context\./);
+  assert.match(fetchRegisteredApplicationsSource, /configurationVersion <= 0/);
+  assert.match(fetchRegisteredApplicationsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback\(urlCandidates,\s*"Applications load"/);
+  assert.match(fetchRegisteredApplicationsSource, /appendAdobeConsoleConfigurationVersion\(/);
+  assert.match(fetchRegisteredApplicationsSource, /rest\/api\/applications\?programmer=/);
+  assert.match(fetchRegisteredApplicationsSource, /normalizeApplicationsResponse\(payload\?\.parsed \|\| payload\)/);
+  assert.match(fetchApplicationsSource, /fetchProgrammerRegisteredApplications\(currentSession,\s*programmerId,\s*options\)/);
+  assert.match(fetchApplicationsSource, /const cachedApplicationsAreLive =/);
+  assert.match(fetchApplicationsSource, /!isPassVaultBackedValue\(cachedApplications\)/);
+  assert.match(fetchApplicationsSource, /Array\.isArray\(result\?\.applications\) \? result\.applications : \[\]/);
+  assert.match(fetchApplicationsSource, /setCurrentProgrammerApplicationsSnapshot\(programmerId,\s*byGuid\)/);
+  assert.match(ensureApplicationsSource, /fetchApplicationsForProgrammer\(programmerId,\s*options\)/);
+  assert.match(ensureApplicationsSource, /setCurrentProgrammerApplicationsSnapshot\(programmerId,\s*normalizedApplications\)/);
+  assert.match(ensureApplicationsSource, /state\.programmerApplicationsLoadPromiseByProgrammerId\.set\(programmerId,\s*loadPromise\)/);
+  assert.doesNotMatch(fetchApplicationsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback\(urlCandidates,\s*"Applications load"/);
+  assert.doesNotMatch(fetchApplicationsSource, /buildRegisteredApplicationBulkRetrieveRequest/);
+  assert.doesNotMatch(fetchApplicationsSource, /getPassVaultMediaCompanyRecord\(programmerId\)/);
+  assert.doesNotMatch(fetchApplicationsSource, /premium-applications-vault-fallback/);
+  assert.doesNotMatch(fetchApplicationsSource, /premium-applications-empty-fallback/);
 });
 
-test("environment switch reactivation allows temporary CM bootstrap context recovery", () => {
+test("environment switch only reactivates the retained explicit session and never silent-auths Adobe", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const environmentSwitchSource = extractFunctionSource(popupSource, "switchAdobePassEnvironmentInPlace");
 
   assert.match(environmentSwitchSource, /activateSession\(retainedLoginData,\s*"environment-switch",\s*\{/);
-  assert.match(environmentSwitchSource, /activateSession\(silent,\s*"environment-switch",\s*\{/);
+  assert.doesNotMatch(environmentSwitchSource, /attemptSilentBootstrapLogin\(/);
+  assert.doesNotMatch(environmentSwitchSource, /activationSource = "silent"/);
   assert.match(environmentSwitchSource, /allowTemporaryPageContextTab:\s*true/);
   assert.match(
     environmentSwitchSource,
@@ -822,6 +1050,42 @@ test("PassVault storage changes re-seed runtime without force-overwriting active
 
   assert.match(storageListenerSource, /seedCurrentProgrammersFromPassVault/);
   assert.match(storageListenerSource, /forceOverwrite: false/);
+});
+
+test("media-company selection and vault rehydrate share the same programmer hydration entrypoint", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const hydrateSelectionSource = extractFunctionSource(popupSource, "hydrateProgrammerSelection");
+  const selectProgrammerSource = extractFunctionSource(popupSource, "selectProgrammerForController");
+  const premiumDetectionSource = extractFunctionSource(popupSource, "findPremiumServiceApplications");
+  const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+  const devtoolsRehydrateSource = extractFunctionSource(popupSource, "rehydratePassVaultMediaCompanyFromDevtools");
+  const mediaCompanyChangeBlock = popupSource.match(
+    /els\.mediaCompanySelect\.addEventListener\("change",[\s\S]*?void hydrateProgrammerSelection\(selectedProgrammer,\s*\{[\s\S]*?controllerReason,[\s\S]*?\}\);[\s\S]*?\}\);/
+  );
+
+  assert.match(hydrateSelectionSource, /selectProgrammerForController\(programmer,\s*controllerReason\)/);
+  assert.match(selectProgrammerSource, /populateRequestorSelect\(\);/);
+  assert.doesNotMatch(selectProgrammerSource, /populateMvpdSelectForRequestor\(/);
+  assert.doesNotMatch(selectProgrammerSource, /getFirstSelectableOptionValue\(els\.requestorSelect\)/);
+  assert.match(hydrateSelectionSource, /const retainedConsoleTabId = Number\(options\?\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
+  assert.match(hydrateSelectionSource, /const programmerApplicationsPromise = selectedProgrammer\?\.programmerId/);
+  assert.match(hydrateSelectionSource, /ensureSelectedProgrammerApplicationsLoaded\(selectedProgrammer,\s*\{/);
+  assert.match(hydrateSelectionSource, /await refreshProgrammerPanels\(\{/);
+  assert.match(hydrateSelectionSource, /programmerApplicationsPromise,/);
+  assert.match(refreshPanelsSource, /const selectedRequestorId = String\(state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
+  assert.match(
+    premiumDetectionSource,
+    /services\.esm =[\s\S]*selectPreferredEsmAppForRequestor\(services\.esmApps,\s*normalizedRequestorId,\s*normalizedProgrammerId\)[\s\S]*services\.esmApps\[0\]/
+  );
+  assert.match(
+    premiumDetectionSource,
+    /services\.restV2 =[\s\S]*selectPreferredRestV2AppForRequestor\(services\.restV2Apps,\s*normalizedRequestorId,\s*normalizedProgrammerId\)[\s\S]*services\.restV2Apps\[0\]/
+  );
+  assert.match(refreshPanelsSource, /options\.programmerApplicationsPromise && typeof options\.programmerApplicationsPromise\.then === "function"/);
+  assert.match(devtoolsRehydrateSource, /await hydrateProgrammerSelection\(programmer,\s*\{[\s\S]*forcePremiumRefresh:\s*true,/);
+  assert.doesNotMatch(devtoolsRehydrateSource, /clearSelectedProgrammerUiForVaultRehydrate\(/);
+  assert.doesNotMatch(devtoolsRehydrateSource, /renderPremiumServicesLoading\(/);
+  assert.ok(mediaCompanyChangeBlock);
 });
 
 test("active auth and bootstrap flows no longer fall back to cookie-session activation", () => {
@@ -859,14 +1123,14 @@ test("IMS profile hydration uses token-backed profile and userinfo only", () => 
   assert.match(fetchProfileSource, /return null;/);
 });
 
-test("session monitor is token-driven and no longer probes cookie or page session state", () => {
+test("session monitor is disabled so UnderPAR never auto-refreshes Adobe auth", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const shouldRunSource = extractFunctionSource(popupSource, "shouldRunExperienceCloudSessionMonitor");
-  const tickSource = extractFunctionSource(popupSource, "runExperienceCloudSessionMonitorTick");
+  const scheduleRefreshSource = extractFunctionSource(popupSource, "scheduleNoTouchRefresh");
 
-  assert.match(shouldRunSource, /state\.sessionReady && state\.loginData\?\.accessToken && !state\.restricted/);
-  assert.equal(/probeExperienceCloudSessionState/.test(tickSource), false);
-  assert.equal(/attemptSessionAutoBootstrap/.test(tickSource), false);
+  assert.match(shouldRunSource, /return false;/);
+  assert.doesNotMatch(scheduleRefreshSource, /setTimeout\(/);
+  assert.doesNotMatch(scheduleRefreshSource, /refreshSessionNoTouch\(/);
   assert.doesNotMatch(popupSource, /function attemptSessionAutoBootstrap/);
 });
 
@@ -875,18 +1139,15 @@ test("console configuration version is sourced dynamically from direct console b
   const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
   const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
   const fetchBootstrapSource = extractFunctionSource(popupSource, "fetchAdobeConsoleBootstrapState");
-  const configVersionSource = extractFunctionSource(popupSource, "getKnownAdobeConsoleConfigurationVersion");
   const configExtractorSource = extractFunctionSource(popupSource, "mvpdWorkspaceExtractConfigurationVersion");
   const consoleHeaderSource = extractFunctionSource(popupSource, "getAdobeConsoleRequestHeaders");
   const bootstrapEnsureSource = extractFunctionSource(popupSource, "ensureConsoleBootstrapState");
   const fetchConsoleSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithAuthVariants");
+  const loginButtonFallbackSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithLoginButtonFallback");
 
   assert.equal(/configurationVersion=3522/.test(popupSource), false);
   assert.match(popupSource, /function appendAdobeConsoleConfigurationVersion/);
   assert.match(popupSource, /consoleBootstrapState/);
-  assert.match(popupSource, /let underparStateRef = null;/);
-  assert.match(popupSource, /underparStateRef = state;/);
-  assert.doesNotMatch(configVersionSource, /typeof state/);
   assert.match(configExtractorSource, /payload\.configurationVersion/);
   assert.match(configExtractorSource, /payload\.configurationInfo/);
   assert.doesNotMatch(configExtractorSource, /for \(const nestedValue of Object\.values\(payload\)\)/);
@@ -898,28 +1159,64 @@ test("console configuration version is sourced dynamically from direct console b
   assert.match(bootstrapEnsureSource, /getPreferredAdobeConsoleAccessTokenCandidate\(\)/);
   assert.match(loadProgrammersSource, /bootstrapState = await ensureConsoleBootstrapState/);
   assert.match(loadProgrammersSource, /allowInteractiveAuthBootstrap:\s*false/);
-  assert.match(fetchBootstrapSource, /fetchAdobeConsoleJsonWithAuthVariants/);
+  assert.match(loadProgrammersSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(fetchBootstrapSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
   assert.doesNotMatch(fetchBootstrapSource, /fetchAdobeConsoleJsonViaShellPageContext/);
-  assert.doesNotMatch(fetchBootstrapSource, /const fetchViaShellPageContext = async \(endpoint\) =>/);
-  assert.doesNotMatch(fetchBootstrapSource, /Promise\.all\(\[/);
+  assert.match(loginButtonFallbackSource, /fetchAdobeConsoleJsonWithAuthVariants/);
+  assert.match(loginButtonFallbackSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
+  assert.match(loginButtonFallbackSource, /preferShellAccessToken:\s*false/);
+  assert.match(fetchBootstrapSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(fetchBootstrapSource, /const preferredTabId = Number\(options\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
+  assert.match(fetchBootstrapSource, /const pageContextTargetRef =/);
+  assert.match(fetchBootstrapSource, /allowTemporaryPageContextTab,/);
+  assert.match(fetchBootstrapSource, /preferredTabId,/);
+  assert.match(fetchBootstrapSource, /const extendedProfileResult = await settle/);
+  assert.match(fetchBootstrapSource, /const configurationVersionResult = await settle/);
+  assert.match(fetchBootstrapSource, /rest\/api\/user\/extendedProfile/);
+  assert.match(fetchBootstrapSource, /rest\/api\/config\/latestActivatedConsoleConfigurationVersion/);
+  assert.match(fetchBootstrapSource, /throw new Error\(extendedProfileError \|\| "Console extended profile did not resolve\."\)/);
+  assert.doesNotMatch(fetchBootstrapSource, /error\.bootstrapSnapshot = \{/);
   assert.match(loadProgrammersSource, /const configurationVersion = mvpdWorkspaceExtractConfigurationVersion\(bootstrapState, 0\)/);
-  assert.doesNotMatch(loadProgrammersSource, /configurationVersion <= 0/);
-  assert.match(loadProgrammersSource, /!bootstrapState \|\| !bootstrapState\.extendedProfile/);
+  assert.match(loadProgrammersSource, /if \(!bootstrapState\?\.extendedProfile\)/);
+  assert.doesNotMatch(loadProgrammersSource, /bootstrapSnapshot/);
   assert.match(loadProgrammersSource, /grantedAuthorities\.length > 0 && !hasAdobeConsoleProgrammerAccess\(grantedAuthorities\)/);
-  assert.match(fetchConsoleSource, /variants\.push\(getAdobeConsoleRequestHeaders\(activeAccessToken\)\)/);
-  assert.match(fetchConsoleSource, /variants\.push\(getAdobeConsoleRequestHeaders\(""\)\)/);
-  assert.match(fetchProgrammersSource, /state\.loginData\?\.experienceCloudAccessToken/);
-  assert.match(fetchProgrammersSource, /getPreferredExperienceCloudConsoleAccessTokenCandidate\(\)/);
-  assert.match(fetchProgrammersSource, /const buildHeaderVariants = \(\) =>/);
-  assert.match(fetchProgrammersSource, /getAdobeConsoleRequestHeaders\(""\)/);
+  assert.match(fetchConsoleSource, /getAdobeConsoleRequestHeaders\(activeAccessToken\)/);
+  assert.doesNotMatch(fetchConsoleSource, /const getHeaderVariants = \(\) =>/);
+  assert.doesNotMatch(fetchConsoleSource, /getAdobeConsoleRequestHeaders\(""\)/);
+  assert.doesNotMatch(fetchConsoleSource, /refreshSessionNoTouch\(\)/);
+  assert.doesNotMatch(fetchProgrammersSource, /state\.loginData\?\.experienceCloudAccessToken/);
+  assert.doesNotMatch(fetchProgrammersSource, /getPreferredExperienceCloudConsoleAccessTokenCandidate\(\)/);
+  assert.match(fetchProgrammersSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(fetchProgrammersSource, /getPreferredPrimaryImsAccessTokenCandidate\(\)/);
+  assert.match(fetchProgrammersSource, /fetchAdobeConsoleJsonWithLoginButtonFallback\(\[endpoint\],\s*"Media company load"/);
+  assert.match(fetchProgrammersSource, /allowTemporaryPageContextTab,/);
   assert.doesNotMatch(fetchProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext/);
   assert.doesNotMatch(fetchProgrammersSource, /preferShellAccessToken:\s*true/);
-  assert.match(fetchBootstrapSource, /shellSnapshot\?\.imsToken/);
   assert.match(loadProgrammersSource, /const resolvedConsoleAccessToken = normalizeBearerTokenValue\(/);
   assert.match(loadProgrammersSource, /firstNonEmptyString\(\[bootstrapState\?\.accessToken,\s*normalizedAccessToken\]\)/);
+  assert.match(loadProgrammersSource, /const configurationVersionMissingError = new Error\("Console did not return an activated configuration version\."\);/);
+  assert.match(loadProgrammersSource, /configurationVersion > 0\s*\?\s*await Promise\.all/);
 });
 
-test("programmer endpoint access_denied responses stay on the auth-denied recovery path", () => {
+test("console bootstrap carries the rolling CSRF token through direct UnderPAR console requests like LoginButton", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const buildConsoleContextSource = extractFunctionSource(popupSource, "buildConsoleContext");
+  const fetchBootstrapSource = extractFunctionSource(popupSource, "fetchAdobeConsoleBootstrapState");
+  const fetchConsoleSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithAuthVariants");
+
+  assert.match(
+    buildConsoleContextSource,
+    /let csrfToken = firstNonEmptyString\(\[previousConsole\?\.csrfToken,\s*state\.consoleCsrfToken,\s*"NO-TOKEN"\]\);/
+  );
+  assert.match(
+    buildConsoleContextSource,
+    /"X-CSRF-Token": firstNonEmptyString\(\[csrfToken,\s*state\.consoleCsrfToken,\s*"NO-TOKEN"\]\),/
+  );
+  assert.match(fetchBootstrapSource, /let csrfToken = firstNonEmptyString\(\[state\.consoleCsrfToken,\s*"NO-TOKEN"\]\);/);
+  assert.match(fetchConsoleSource, /headers:\s*toDebugHeadersObject\(response\.headers \|\| new Headers\(\)\),/);
+});
+
+test("programmer endpoint access_denied responses stay on the limited console path", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const helperSource = extractFunctionSource(popupSource, "isAdobeConsoleAccessDeniedResponse");
   const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
@@ -927,26 +1224,24 @@ test("programmer endpoint access_denied responses stay on the auth-denied recove
   assert.match(helperSource, /normalizedStatus !== 401 && normalizedStatus !== 403/);
   assert.match(helperSource, /normalizedError === "access_denied" \|\| normalizedError === "unauthorized"/);
   assert.match(helperSource, /normalizedMessage\.includes\("access is denied"\)/);
-  assert.match(fetchProgrammersSource, /const accessDeniedResponse = isAdobeConsoleAccessDeniedResponse/);
-  assert.match(fetchProgrammersSource, /accessDeniedResponse \? "PROGRAMMERS_ACCESS_DENIED" : "PROGRAMMERS_ENDPOINT_FAILED"/);
+  assert.match(fetchProgrammersSource, /lastError = resolvedError;/);
+  assert.doesNotMatch(fetchProgrammersSource, /createProgrammersError\(resolvedError\.message,\s*"PROGRAMMERS_ACCESS_DENIED"\)/);
+  assert.doesNotMatch(fetchProgrammersSource, /PROGRAMMERS_ENDPOINT_FAILED/);
 });
 
-test("programmer access denial stays live and does not fall back to vaulted media companies during initial load", () => {
+test("programmer access stays limited and initial load prefers console bootstrap fallback over vault reuse", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const vaultBuilderSource = extractFunctionSource(popupSource, "buildProgrammerEntitiesFromPassVault");
   const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
-  const bootstrapFallbackIndex = loadProgrammersSource.indexOf("buildProgrammerEntitiesFromConsoleBootstrap");
-  const vaultFallbackIndex = loadProgrammersSource.indexOf("buildProgrammerEntitiesFromPassVault");
 
-  assert.match(vaultBuilderSource, /normalizeUnderparPassVaultProgrammerRecord/);
-  assert.match(vaultBuilderSource, /buildPassVaultApplicationsSnapshotFromRegisteredApplications/);
-  assert.match(vaultBuilderSource, /contentProviders: requestorIds/);
-  assert.ok(bootstrapFallbackIndex !== -1);
-  assert.equal(vaultFallbackIndex, -1);
-  assert.doesNotMatch(loadProgrammersSource, /buildProgrammerEntitiesFromPassVault\(vault, getActiveAdobePassEnvironmentKey\(\)\)/);
+  assert.doesNotMatch(loadProgrammersSource, /buildProgrammerEntitiesFromPassVault\(/);
   assert.doesNotMatch(loadProgrammersSource, /phase: "vault-fallback"/);
   assert.doesNotMatch(loadProgrammersSource, /Using vaulted media companies/);
-  assert.match(loadProgrammersSource, /phase: "bootstrap-accessible-entities"/);
+  assert.match(loadProgrammersSource, /buildProgrammerEntitiesFromConsoleBootstrap\(/);
+  assert.match(loadProgrammersSource, /const programmerPhase = entitiesResult\.ok/);
+  assert.match(loadProgrammersSource, /configurationVersion > 0\s*\?\s*"bootstrap-fallback"\s*:\s*"limited"/);
+  assert.match(loadProgrammersSource, /const entities = entitiesResult\.ok/);
+  assert.match(loadProgrammersSource, /fallbackEntities\.length > 0/);
+  assert.doesNotMatch(loadProgrammersSource, /throw entitiesResult\.error;/);
 });
 
 test("console bootstrap accessible root entities can seed media companies when Programmer listing is denied", () => {
@@ -978,6 +1273,35 @@ test("console bootstrap accessible root entities can seed media companies when P
           contentProviders: [],
           applications: [],
           permissions: ["WRITE"],
+        },
+      },
+    ])
+  );
+
+  assert.equal(
+    JSON.stringify(
+      buildProgrammerEntitiesFromConsoleBootstrap({
+        extendedProfile: {
+          profile: {
+            accessibleRootEntities: {
+              "com.adobe.pass.model.olca.actor.Programmer": {
+                "@Programmer:NestedAdobe": "READ",
+              },
+            },
+          },
+        },
+      })
+    ),
+    JSON.stringify([
+      {
+        key: "@Programmer:NestedAdobe",
+        entityData: {
+          id: "NestedAdobe",
+          displayName: "NestedAdobe",
+          mediaCompanyName: "NestedAdobe",
+          contentProviders: [],
+          applications: [],
+          permissions: ["READ"],
         },
       },
     ])
@@ -1035,11 +1359,12 @@ test("programmer discovery keeps configurationVersion=0 on Adobe console entity 
 
 test("programmer discovery keeps fetch header variants as plain header objects", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
+  const fetchConsoleSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithAuthVariants");
 
-  assert.match(fetchProgrammersSource, /variants\.push\(\{ headers: getAdobeConsoleRequestHeaders\(""\) \}\);/);
-  assert.match(fetchProgrammersSource, /if \(accessToken\) \{\s*variants\.push\(\{ headers: getAdobeConsoleRequestHeaders\(accessToken\) \}\);/);
-  assert.doesNotMatch(fetchProgrammersSource, /uniquePreserveOrder\(\s*\[\s*accessToken \? getAdobeConsoleRequestHeaders/);
+  assert.match(fetchConsoleSource, /getAdobeConsoleRequestHeaders\(activeAccessToken\)/);
+  assert.doesNotMatch(fetchConsoleSource, /const getHeaderVariants = \(\) =>/);
+  assert.doesNotMatch(fetchConsoleSource, /getAdobeConsoleRequestHeaders\(""\)/);
+  assert.doesNotMatch(fetchConsoleSource, /refreshSessionNoTouch\(\)/);
 });
 
 test("experience cloud auth redirect detection accepts plain-object headers from shell page context", () => {
@@ -1061,94 +1386,122 @@ test("experience cloud auth redirect detection accepts plain-object headers from
   );
 });
 
-test("programmer load stays direct and tabless instead of requiring shell page context", () => {
+test("programmer load stays on direct console requests while allowing LoginButton-style fallback targets", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const bootstrapUrlSource = extractFunctionSource(popupSource, "getAdobeConsolePageContextBootstrapUrl");
-  const resolveTargetSource = extractFunctionSource(popupSource, "resolveReusableAdobePageContextTab");
-  const tempTargetSource = extractFunctionSource(popupSource, "openTemporaryAdobePageContextTarget");
-  const pageContextVariantsSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithShellPageContextVariants");
-  const activationSource = extractFunctionSource(popupSource, "activateSession");
   const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
+  const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
+  const fetchChannelsSource = extractFunctionSource(popupSource, "fetchConsoleChannelsFromApi");
+  const fetchRegisteredApplicationsSource = extractFunctionSource(popupSource, "fetchProgrammerRegisteredApplications");
+  const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
 
-  assert.match(bootstrapUrlSource, /const isProgrammersRequest =/);
-  assert.match(bootstrapUrlSource, /const isApplicationsRequest =/);
-  assert.match(bootstrapUrlSource, /const isProgrammersRuntimeRequest =/);
-  assert.match(bootstrapUrlSource, /const environment = getActiveAdobePassEnvironment\(\);/);
-  assert.match(bootstrapUrlSource, /isProgrammersRuntimeRequest \? environment\?\.consoleProgrammersUrl/);
-  assert.match(resolveTargetSource, /if \(preferredTab\?\.id && isAuthFlowUrl\(preferredUrl\)\) \{/);
-  assert.match(tempTargetSource, /void targetUrl;/);
-  assert.match(tempTargetSource, /return null;/);
-  assert.match(pageContextVariantsSource, /allowTemporaryPageContextTab === true/);
-  assert.match(activationSource, /state\.consoleBootstrapState\?\.shellSnapshot/);
   assert.doesNotMatch(loadProgrammersSource, /withAdobeConsolePageContextTarget\(/);
   assert.doesNotMatch(loadProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext\(/);
-  assert.doesNotMatch(loadProgrammersSource, /\/rest\/api\/config\/history/);
-  assert.match(loadProgrammersSource, /allowTemporaryPageContextTab:\s*false/);
+  assert.match(loadProgrammersSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(fetchProgrammersSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(fetchChannelsSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(fetchRegisteredApplicationsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
+  assert.match(fetchRegisteredApplicationsSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(fetchRegisteredApplicationsSource, /preferredTabId,/);
+  assert.match(fetchApplicationsSource, /fetchProgrammerRegisteredApplications\(currentSession,\s*programmerId,\s*options\)/);
+  assert.doesNotMatch(fetchProgrammersSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
+  assert.doesNotMatch(fetchChannelsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
+  assert.doesNotMatch(fetchRegisteredApplicationsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
+  assert.doesNotMatch(fetchApplicationsSource, /buildRegisteredApplicationBulkRetrieveRequest/);
 });
 
-test("media company selection keeps CM-first bounded application hydration without temporary Adobe tab recovery", () => {
+test("console page-context target resolution matches LoginButton behavior", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const withTargetSource = extractFunctionSource(popupSource, "withAdobeConsolePageContextTarget");
-  const pageContextVariantsSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithShellPageContextVariants");
-  const bulkRequestBuilderSource = extractFunctionSource(popupSource, "buildRegisteredApplicationBulkRetrieveRequest");
-  const bulkRetrieveSource = extractFunctionSource(popupSource, "fetchRegisteredApplicationsByEntityRefs");
+  const cmBootstrapUrlSource = extractFunctionSource(popupSource, "getCmConsoleBootstrapUrl");
+  const bootstrapUrlSource = extractFunctionSource(popupSource, "buildAdobePassConsoleBootstrapUrl");
+  const consoleUrlSource = extractFunctionSource(popupSource, "isAdobePassConsoleAppUrl");
+  const findConsoleTabSource = extractFunctionSource(popupSource, "findExistingAdobeConsoleTab");
+  const openTemporarySource = extractFunctionSource(popupSource, "openTemporaryAdobePageContextTarget");
+  const resolveReusableSource = extractFunctionSource(popupSource, "resolveReusableAdobePageContextTab");
+  const resolveTargetSource = extractFunctionSource(popupSource, "resolveAdobeConsolePageContextTarget");
+  const resolveExperienceTargetSource = extractFunctionSource(popupSource, "resolveExperienceAdobePageContextTarget");
+  const findExperienceTargetSource = extractFunctionSource(popupSource, "findExistingExperienceCloudAdobeTab");
+
+  assert.match(cmBootstrapUrlSource, /cm-console\/cmu\/year/);
+  assert.match(cmBootstrapUrlSource, /ADOBEPASS_ORG_HANDLE/);
+  assert.match(bootstrapUrlSource, /ADOBE_CONSOLE_RUNTIME_ORIGIN/);
+  assert.match(bootstrapUrlSource, /\/solutions\/\$\{ADOBE_PASS_CONSOLE_APP_SLUG\}\//);
+  assert.match(consoleUrlSource, /ADOBE_PASS_CONSOLE_APP_SLUG/);
+  assert.doesNotMatch(consoleUrlSource, /consoleShellUrl/);
+  assert.doesNotMatch(consoleUrlSource, /consoleProgrammersUrl/);
+  assert.match(findConsoleTabSource, /isAdobePassConsoleAppUrl\(url\)/);
+  assert.match(findConsoleTabSource, /ADOBE_CONSOLE_RUNTIME_ORIGIN/);
+  assert.match(openTemporarySource, /chrome\.tabs\?\.create/);
+  assert.match(openTemporarySource, /chrome\.windows\?\.create/);
+  assert.match(openTemporarySource, /waitForTabCompletion/);
+  assert.match(resolveReusableSource, /isAdobePassConsoleAppUrl\(preferredUrl\)/);
+  assert.doesNotMatch(resolveReusableSource, /isExperienceAdobeTabUrl\(preferredUrl\)/);
+  assert.match(resolveReusableSource, /isAuthFlowUrl\(preferredUrl\)/);
+  assert.match(resolveReusableSource, /waitForTabCompletion/);
+  assert.match(resolveTargetSource, /tab = await findExistingAdobeConsoleTab\(\);/);
+  assert.doesNotMatch(resolveTargetSource, /findExistingExperienceCloudAdobeTab\(\)/);
+  assert.match(resolveTargetSource, /const allowTemporaryTab = options\.allowTemporaryTab === true;/);
+  assert.match(resolveTargetSource, /temporaryTarget = await openTemporaryAdobePageContextTarget\(getAdobeConsolePageContextBootstrapUrl\(requestUrl\)\);/);
+  assert.match(findExperienceTargetSource, /url\.includes\("\/#\/@adobepass\/cm-console\/"\)/);
+  assert.match(findExperienceTargetSource, /isExperienceAdobeTabUrl\(url\)/);
+  assert.match(resolveExperienceTargetSource, /openTemporaryAdobePageContextTarget/);
+  assert.match(resolveExperienceTargetSource, /getCmConsoleBootstrapUrl\(\)/);
+});
+
+test("CM reports page helpers no longer open temporary Adobe tabs for direct fetches", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const reportsBootstrapSource = extractFunctionSource(popupSource, "requestCmConsoleBootstrapCatalogFromReportsPage");
+  const reportsFetchSource = extractFunctionSource(popupSource, "fetchCmJsonViaReportsPageContext");
+
+  assert.doesNotMatch(reportsBootstrapSource, /openTemporaryAdobePageContextTarget/);
+  assert.doesNotMatch(reportsFetchSource, /openTemporaryAdobePageContextTarget/);
+  assert.match(reportsFetchSource, /allowTemporaryPageContextTab:\s*false/);
+});
+
+test("media company selection uses cached live AdobePass apps or direct applications queries without selection-time vault hydration", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const fetchRegisteredApplicationsSource = extractFunctionSource(popupSource, "fetchProgrammerRegisteredApplications");
   const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
-  const fetchApplicationDetailsSource = extractFunctionSource(popupSource, "fetchApplicationDetailsByGuid");
-  const fetchApplicationRawSource = extractFunctionSource(popupSource, "fetchApplicationRawByGuid");
+  const ensureApplicationsSource = extractFunctionSource(popupSource, "ensureSelectedProgrammerApplicationsLoaded");
   const ensurePremiumAppsSource = extractFunctionSource(popupSource, "ensurePremiumAppsForProgrammer");
-  const hydrateScopesSource = extractFunctionSource(popupSource, "hydrateApplicationScopesForProgrammer");
   const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
 
-  assert.match(withTargetSource, /allowTemporaryPageContextTab:\s*resolvedTabId > 0 \? false : allowTemporaryTab/);
-  assert.match(pageContextVariantsSource, /fetchAdobeConsoleJsonViaShellPageContext/);
-  assert.match(pageContextVariantsSource, /allowTemporaryPageContextTab === true/);
-  assert.match(pageContextVariantsSource, /const method = String\(options\.method \|\| "GET"\)/);
-  assert.match(pageContextVariantsSource, /const body =/);
-  assert.match(pageContextVariantsSource, /credentials = String\(options\.credentials \|\| "include"\)/);
-  assert.match(bulkRequestBuilderSource, /rest\/api\/entity\/bulkRetrieve/);
-  assert.match(bulkRequestBuilderSource, /configVersion/);
-  assert.match(bulkRetrieveSource, /fetchAdobeConsoleJsonWithShellPageContextVariants\(\[bulkRetrieveRequest\.url\], contextLabel/);
-  assert.match(bulkRetrieveSource, /fetchAdobeConsoleJsonWithAuthVariants\(\[bulkRetrieveRequest\.url\], contextLabel/);
-  assert.match(fetchApplicationsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants\(\[lookupUrl\], "Applications load"/);
-  assert.match(fetchApplicationsSource, /buildRegisteredApplicationBulkRetrieveRequest/);
-  assert.match(fetchApplicationsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants\(\[bulkRetrieveRequest\.url\], "Applications load"/);
-  assert.match(fetchApplicationsSource, /fetchAdobeConsoleJsonWithAuthVariants\(\[bulkRetrieveRequest\.url\], "Applications load"/);
-  assert.match(fetchApplicationsSource, /const shouldUseBoundedBulkRetrieve = Boolean\(bulkRetrieveRequest && expectedCount > 0\);/);
-  assert.match(fetchApplicationsSource, /if \(!shouldUseBoundedBulkRetrieve\) \{/);
-  assert.doesNotMatch(fetchApplicationsSource, /entity\/RegisteredApplication\?programmer=/);
-  assert.doesNotMatch(fetchApplicationsSource, /registeredApplications\?programmer=/);
-  assert.doesNotMatch(fetchApplicationsSource, /registered-applications\?programmer=/);
-  assert.match(fetchApplicationDetailsSource, /fetchRegisteredApplicationsByEntityRefs\(\[entityRef\], "Application detail"/);
-  assert.match(fetchApplicationDetailsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants\(urlCandidates, "Application detail"/);
-  assert.doesNotMatch(fetchApplicationDetailsSource, /registeredApplications/);
-  assert.doesNotMatch(fetchApplicationDetailsSource, /registered-applications/);
-  assert.match(fetchApplicationRawSource, /buildRegisteredApplicationBulkRetrieveRequest/);
-  assert.match(fetchApplicationRawSource, /fetchAdobeConsoleJsonWithShellPageContextVariants\(urlCandidates, "Application raw fetch"/);
-  assert.doesNotMatch(fetchApplicationRawSource, /registeredApplications/);
-  assert.doesNotMatch(fetchApplicationRawSource, /registered-applications/);
-  assert.match(fetchApplicationsSource, /const skipDetailBackfill = options\.skipDetailBackfill !== false;/);
-  assert.match(ensurePremiumAppsSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
-  assert.match(ensurePremiumAppsSource, /const eagerScopeHydration = options\.eagerScopeHydration === true;/);
-  assert.match(ensurePremiumAppsSource, /skipDetailBackfill:\s*!eagerScopeHydration/);
-  assert.match(ensurePremiumAppsSource, /schedulePremiumAppScopeHydration\(programmer,\s*\{/);
-  assert.match(ensurePremiumAppsSource, /allowTemporaryPageContextTab:\s*false/);
-  assert.match(ensurePremiumAppsSource, /const preferredTabId = Number\(options\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
-  assert.match(hydrateScopesSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
-  assert.ok(
-    refreshPanelsSource.indexOf("await cmSelectionBootstrapPromise;") <
-      refreshPanelsSource.indexOf("const premiumAppsPromise = ensurePremiumAppsForProgrammer(")
+  assert.match(
+    refreshPanelsSource,
+    /const programmerApplicationsPromise =[\s\S]*options\.programmerApplicationsPromise[\s\S]*ensureSelectedProgrammerApplicationsLoaded\(programmer,/
   );
+  assert.match(refreshPanelsSource, /const premiumAppsPromise = Promise\.resolve\(programmerApplicationsPromise\)\.then\(\(applicationsData\) =>/);
+  assert.doesNotMatch(refreshPanelsSource, /hydrateProgrammerFromPassVault\(/);
+  assert.match(refreshPanelsSource, /buildPassVaultRuntimeServicesSnapshot\(vaultRecord\)/);
+  assert.match(refreshPanelsSource, /buildPassVaultApplicationsSnapshotFromRegisteredApplications/);
+  assert.match(ensurePremiumAppsSource, /const selectedRequestorId = String\(options\?\.requestorId \|\| state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
+  assert.match(ensurePremiumAppsSource, /const cachedApplications = getCurrentProgrammerApplicationsSnapshot\(programmer\.programmerId\)/);
+  assert.match(ensurePremiumAppsSource, /!isPassVaultBackedValue\(cachedApplications\)/);
+  assert.match(ensurePremiumAppsSource, /phase: "premium-service-runtime-hit"/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /phase: "premium-service-cache-hit"/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /existing\?\.__underparLiveHydrated === true/);
+  assert.match(ensurePremiumAppsSource, /const preloadedApplications =/);
+  assert.match(ensurePremiumAppsSource, /preloadedApplications \|\|/);
+  assert.match(fetchRegisteredApplicationsSource, /appendAdobeConsoleConfigurationVersion\(/);
+  assert.match(fetchApplicationsSource, /fetchProgrammerRegisteredApplications\(currentSession,\s*programmerId,\s*options\)/);
+  assert.match(ensureApplicationsSource, /const cachedApplicationsAreLive =/);
+  assert.match(ensureApplicationsSource, /state\.programmerApplicationsLoadPromiseByProgrammerId\.has\(programmerId\)/);
+  assert.doesNotMatch(fetchApplicationsSource, /buildRegisteredApplicationBulkRetrieveRequest/);
+  assert.match(ensurePremiumAppsSource, /const preferredTabId = Number\(options\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
+  assert.match(refreshPanelsSource, /ensureSelectedProgrammerApplicationsLoaded\(programmer,\s*\{/);
   assert.match(refreshPanelsSource, /ensurePremiumAppsForProgrammer\(programmer,\s*\{/);
   assert.match(refreshPanelsSource, /allowTemporaryPageContextTab:\s*false/);
-  assert.match(refreshPanelsSource, /const retainedConsoleTabId = Number\(getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
+  assert.match(
+    refreshPanelsSource,
+    /const retainedConsoleTabId = Number\(options\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/
+  );
   assert.match(refreshPanelsSource, /preferredTabId:\s*retainedConsoleTabId/);
-  assert.match(refreshPanelsSource, /renderPremiumServices\(initialMergedServices, programmer, \{ controllerReason \}\);/);
+  assert.match(refreshPanelsSource, /const earlyPremiumAppsRenderPromise = Promise\.resolve\(premiumAppsPromise\)/);
+  assert.match(refreshPanelsSource, /applySelectionServicesSnapshot\(/);
+  assert.match(refreshPanelsSource, /await earlyPremiumAppsRenderPromise/);
   assert.match(refreshPanelsSource, /const suppressAccessDeniedStatus =/);
   assert.match(refreshPanelsSource, /clearStatusUnlessCmTenantsPrecheckBlocked\(\);/);
   assert.doesNotMatch(refreshPanelsSource, /withAdobeConsolePageContextTarget\(/);
   assert.doesNotMatch(refreshPanelsSource, /shouldOpenTemporaryAdobePageContextTab/);
-  assert.match(refreshPanelsSource, /const allowBackgroundCredentialCompilation = options\?\.allowBackgroundCredentialCompilation === true;/);
-  assert.doesNotMatch(refreshPanelsSource, /backgroundHydrationPromise = primeProgrammerServiceHydration\(programmer, cachedServices/);
 });
 
 test("single resolved media company is not auto-selected after programmer hydration", () => {
@@ -1169,6 +1522,19 @@ test("restricted org labels collapse duplicate AdobePass segments", () => {
       userId: "",
     }),
     "@AdobePass"
+  );
+});
+
+test("restricted org labels use the LoginButton name-plus-org format without user ids", () => {
+  const { buildRestrictedOrgOptionLabel } = loadPopupRestrictedOrgLabelHelper();
+
+  assert.equal(
+    buildRestrictedOrgOptionLabel({
+      name: "Adobe Campaign Customer Care",
+      orgId: "campaigncustomercare",
+      userId: "820f",
+    }),
+    "Adobe Campaign Customer Care | campaigncustomercare"
   );
 });
 
@@ -1239,14 +1605,14 @@ test("plain sign-in paths clear hidden target-org steering before Adobe chooser 
   assert.doesNotMatch(signInSource, /resolveTargetOrganizationForLogin\(\)/);
 });
 
-test("bootstrap restores stored sessions only and does not probe ambient Adobe browser auth", () => {
+test("bootstrap stays logged out until the user explicitly signs in", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const bootstrapSource = extractFunctionSource(popupSource, "bootstrapSession");
 
-  assert.match(bootstrapSource, /if \(state\.restricted\) \{\s*setUnderparDiagnosticMarker\("bootstrap", \{\s*status: "restricted",[\s\S]*phase: "complete",/);
+  assert.doesNotMatch(bootstrapSource, /loadStoredLoginData\(/);
+  assert.doesNotMatch(bootstrapSource, /activateSession\(/);
   assert.doesNotMatch(bootstrapSource, /attemptSilentBootstrapLogin\(\)/);
-  assert.doesNotMatch(bootstrapSource, /phase: "silent-session-denied"/);
-  assert.doesNotMatch(bootstrapSource, /phase: "silent-probe-failed"/);
+  assert.match(bootstrapSource, /phase: "explicit-sign-in-required"/);
 });
 
 test("interactive recovery paths force Adobe IMS to show the login chooser without hard-gating activation on helper scopes", () => {
@@ -1254,7 +1620,6 @@ test("interactive recovery paths force Adobe IMS to show the login chooser witho
   const signInSource = extractFunctionSource(popupSource, "signInInteractive");
   const switchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
   const retrySource = extractFunctionSource(popupSource, "runUnderparPkceLogin");
-  const autoSwitchSource = extractFunctionSource(popupSource, "attemptAutoSwitchToAdobePass");
   const signInAgainSource = extractFunctionSource(popupSource, "onRestrictedSignInAgain");
   const logoutSource = extractFunctionSource(popupSource, "runUnderparImsBrowserLogout");
   const organizationsSource = extractFunctionSource(popupSource, "fetchOrganizations");
@@ -1269,14 +1634,18 @@ test("interactive recovery paths force Adobe IMS to show the login chooser witho
   assert.match(signInSource, /prompt: normalizeUnderparImsPrompt\(loginOptions\?\.prompt \|\| "login", true\)/);
   assert.match(signInSource, /if \(loginOptions\?\.forceBrowserLogout === true\)/);
   assert.match(signInSource, /await runUnderparImsBrowserLogout\(/);
+  assert.match(signInSource, /allowTemporaryPageContextTab:\s*true/);
+  assert.match(signInSource, /if \(!\(state\.sessionReady && state\.loginData && !state\.restricted\)\) \{\s*await releaseAuthPopupBootstrapContext\("interactive-signin-complete"\);/);
   assert.doesNotMatch(signInSource, /minimumGrantedScope/);
   assert.doesNotMatch(signInSource, /requiredActivationScope/);
   assert.doesNotMatch(signInSource, /resolveTargetOrganizationForLogin\(\)/);
+  assert.doesNotMatch(signInSource, /extraParams:/);
   assert.match(switchSource, /prompt: "login"/);
+  assert.match(switchSource, /allowTemporaryPageContextTab:\s*true/);
   assert.doesNotMatch(switchSource, /minimumGrantedScope/);
   assert.doesNotMatch(switchSource, /requiredActivationScope/);
-  assert.match(autoSwitchSource, /const prompt = normalizeUnderparImsPrompt\(options\?\.prompt \|\| \(interactive \? "login" : ""\), interactive\);/);
-  assert.doesNotMatch(autoSwitchSource, /minimumGrantedScope/);
+  assert.doesNotMatch(switchSource, /extraParams:/);
+  assert.doesNotMatch(popupSource, /function attemptAutoSwitchToAdobePass\(/);
   assert.match(signInAgainSource, /await signInInteractive\(\{[\s\S]*prompt: "login",[\s\S]*forceBrowserLogout: true,[\s\S]*\}\);/);
   assert.doesNotMatch(signInAgainSource, /targetOrganization/);
   assert.match(retrySource, /const effectiveConfiguredScope = interactive \? resolveInteractiveUnderparRequestedScope\(configuredScope\) : configuredScope;/);
@@ -1336,37 +1705,50 @@ test("active CM bootstrap uses UnderPAR bearer-derived qualification instead of 
   assert.equal(/requestExperienceCloudConsoleToken/.test(ensureCmSource), false);
   assert.equal(/persistExperienceCloudConsoleTokenResult/.test(ensureCmSource), false);
   assert.equal(/ensure-cookie-session/.test(ensureCmSource), false);
+  assert.doesNotMatch(requestQualifiedSource, /attemptSilentBootstrapLogin/);
+  assert.doesNotMatch(ensureCmSource, /tryRefreshCmTokenFromIms/);
 });
 
 test("CM token bootstrap can harvest JWTs from raw IMS response text when access_token fields are missing", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const extractTokenSource = extractFunctionSource(popupSource, "extractImsAccessTokenFromPayload");
+  const validateTransportSource = extractFunctionSource(popupSource, "fetchImsValidateToken");
+  const checkTransportSource = extractFunctionSource(popupSource, "fetchImsCheckToken");
   const validateSource = extractFunctionSource(popupSource, "requestCmTokenViaValidateToken");
   const checkSource = extractFunctionSource(popupSource, "requestCmTokenViaImsCheck");
 
   assert.match(extractTokenSource, /extractJwtAndUrls\(payload\)/);
   assert.match(extractTokenSource, /rawJwtMatch/);
   assert.match(extractTokenSource, /access_token\|accessToken\|bearer\|authorization\|authToken\|token/);
-  assert.match(validateSource, /const text = await response\.text\(\)\.catch\(\(\) => ""\);/);
-  assert.match(validateSource, /extractImsAccessTokenFromPayload\(parsed,\s*text\)/);
-  assert.match(checkSource, /const text = await response\.text\(\)\.catch\(\(\) => ""\);/);
-  assert.match(checkSource, /extractImsAccessTokenFromPayload\(parsed,\s*text\)/);
+  assert.match(validateTransportSource, /const text = await response\.text\(\)\.catch\(\(\) => ""\);/);
+  assert.match(validateTransportSource, /rawText: text/);
+  assert.match(checkTransportSource, /const text = await response\.text\(\)\.catch\(\(\) => ""\);/);
+  assert.match(checkTransportSource, /rawText: text/);
+  assert.match(validateSource, /normalizeCmuAccessToken\(result\.value\?\.data,\s*result\.value\?\.rawText\)/);
+  assert.match(checkSource, /normalizeCmuAccessToken\(result\.value\?\.data,\s*result\.value\?\.rawText\)/);
 });
 
-test("CM request path accepts the configured UnderPAR shell bearer before requiring cm-console-ui requalification", () => {
+test("CM request path now requires cm-console-ui qualification instead of accepting the UnderPAR shell bearer", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const requestSupportSource = extractFunctionSource(popupSource, "tokenSupportsCmConsoleRequests");
+  const preferredTokenSource = extractFunctionSource(popupSource, "getPreferredCmRequestAccessTokenCandidate");
   const ensureCmSource = extractFunctionSource(popupSource, "ensureCmApiAccessToken");
-  const tenantCatalogSource = extractFunctionSource(popupSource, "fetchCmTenantCatalogWithAuth");
-  const reportHeadersSource = extractFunctionSource(popupSource, "withCmReportContextHeaders");
+  const resolveQualifiedSource = extractFunctionSource(popupSource, "resolveQualifiedCmConsoleAccessToken");
+  const fetchCmSource = extractFunctionSource(popupSource, "fetchCmJsonWithAuthVariants");
+  const reportHeadersSource = extractFunctionSource(popupSource, "buildCmuReportRequestHeaders");
 
-  assert.match(requestSupportSource, /isUnderparImsClientId/);
-  assert.match(ensureCmSource, /getPreferredCmRequestAccessTokenCandidate\(\)/);
-  assert.match(ensureCmSource, /tokenSupportsCmConsoleRequests\(existingToken\)/);
-  assert.match(ensureCmSource, /tokenSupportsCmConsoleRequests\(primarySeedToken\)/);
-  assert.match(tenantCatalogSource, /const headerVariants = \[baseHeaders\];/);
-  assert.match(tenantCatalogSource, /appendTokenVariant\(state\.loginData\?\.accessToken \|\| ""\)/);
-  assert.match(reportHeadersSource, /AP-Request-Id/);
+  assert.match(requestSupportSource, /isCmConsoleClientId/);
+  assert.doesNotMatch(requestSupportSource, /isUnderparImsClientId/);
+  assert.doesNotMatch(preferredTokenSource, /state\.loginData\?\.accessToken/);
+  assert.match(ensureCmSource, /resolveQualifiedCmConsoleAccessToken/);
+  assert.match(resolveQualifiedSource, /fetchImsCheckTokenViaAdobePageContext/);
+  assert.match(resolveQualifiedSource, /fetchImsCheckToken\(/);
+  assert.match(resolveQualifiedSource, /fetchImsValidateToken\(/);
+  assert.doesNotMatch(fetchCmSource, /fetchCmJsonViaReportsPageContext/);
+  assert.doesNotMatch(fetchCmSource, /allowTemporaryPageContextTab/);
+  assert.doesNotMatch(fetchCmSource, /headerVariants/);
+  assert.doesNotMatch(fetchCmSource, /tokenRefreshAttempted/);
+  assert.match(reportHeadersSource, /Authorization: `Bearer \$\{bearerToken\}`/);
 });
 
 test("CM tenant catalog reuses the vaulted tenant list until explicit refresh instead of forcing per-session re-fetches", () => {
@@ -1383,7 +1765,17 @@ test("CM tenant catalog reuses the vaulted tenant list until explicit refresh in
     ensureCatalogSource,
     /const hydratedCatalog = await hydrateCmTenantsCatalogFromStorage\(\{ forceReload: false \}\);[\s\S]*phase: "cm-tenant-catalog-vault-hit"[\s\S]*return hydratedCatalog;/
   );
+  assert.doesNotMatch(ensureCatalogSource, /cm-tenant-catalog-stale-cache/);
+  assert.doesNotMatch(ensureCatalogSource, /cm-tenant-catalog-storage-fallback/);
   assert.doesNotMatch(activateSessionSource, /prefetchCmTenantsCatalogInBackground\(`session-activated:\$\{source\}`,\s*\{/);
+});
+
+test("CM tenant bundle loader no longer returns stale bundle data after a live failure", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const bundleSource = extractFunctionSource(popupSource, "loadCmTenantBundle");
+
+  assert.doesNotMatch(bundleSource, /Using stale CM tenant bundle cache after refresh failure/);
+  assert.doesNotMatch(bundleSource, /fallbackEntry\?\.bundle/);
 });
 
 test("missing DCR credentials trigger on-demand pass vault compilation instead of requiring manual re-selection", () => {
@@ -1396,22 +1788,121 @@ test("missing DCR credentials trigger on-demand pass vault compilation instead o
   assert.match(ensureDcrSource, /UnderPAR could not auto-hydrate DCR credentials/);
 });
 
+test("selected premium apps are revalidated for DCR usability and software statements survive into the pass vault runtime snapshot", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
+  const sanitizeApplicationSource = extractFunctionSource(popupSource, "sanitizePassVaultApplicationData");
+  const runtimeAppInfoSource = extractFunctionSource(popupSource, "buildPassVaultRuntimeAppInfoFromRecord");
+  const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
+
+  assert.match(compileSource, /validateSelectedServiceKeys:\s*PREMIUM_REQUIRED_SERVICE_KEYS/);
+  assert.match(sanitizeApplicationSource, /const softwareStatement = extractSoftwareStatementFromAppData\(source\);/);
+  assert.match(sanitizeApplicationSource, /if \(softwareStatement\) \{\s*sanitized\.softwareStatement = softwareStatement;\s*\}/);
+  assert.match(runtimeAppInfoSource, /softwareStatement:\s*firstNonEmptyString\(\[/);
+  assert.match(ensureDcrSource, /extractSoftwareStatementFromAppData\(resolvedAppInfo\?\.appData \|\| null\)/);
+});
+
+test("pass vault compilation provisions the first DCR-usable app per premium service and stops scanning once required services are resolved", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const esmSelectionSource = extractFunctionSource(popupSource, "selectPreferredEsmAppForRequestor");
+  const credentialTasksSource = extractFunctionSource(popupSource, "getPassVaultCredentialTasks");
+  const hydrateCredentialsSource = extractFunctionSource(popupSource, "hydratePassVaultServiceCredentials");
+  const resolveMappingsSource = extractFunctionSource(popupSource, "resolveMissingPassVaultServiceMappings");
+  const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
+
+  assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"restV2",\s*services\)/);
+  assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"esm",\s*services\)/);
+  assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"degradation",\s*services\)/);
+  assert.match(hydrateCredentialsSource, /for \(const appInfo of appCandidates\)/);
+  assert.match(hydrateCredentialsSource, /promoteResolvedServiceApp\(task\.serviceKey,\s*appInfo\)/);
+  assert.match(esmSelectionSource, /getPassVaultServiceProvisioningRank\(normalizedProgrammerId,\s*right\)/);
+  assert.match(esmSelectionSource, /return selectBestCandidate\(candidates\)/);
+  assert.match(resolveMappingsSource, /if \(missingServiceKeys\.length === 0\) \{\s*return resolvedServices;\s*\}/);
+  assert.match(resolveMappingsSource, /if \(missingServiceKeys\.length === 0\) \{\s*break;\s*\}/);
+  assert.match(compileSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
+  assert.match(compileSource, /label:\s*"Saving premium services to VAULT\.\.\."/);
+  assert.match(compileSource, /label:\s*"Finishing premium service hydration\.\.\."/);
+});
+
+test("REST V2 app selection prefers DCR-ready or software-statement-ready candidates before falling back", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const selectRestV2Source = extractFunctionSource(popupSource, "selectPreferredRestV2AppForRequestor");
+
+  assert.match(selectRestV2Source, /hasPassVaultServiceClientCredentials\(normalizedProgrammerId, appInfo\)/);
+  assert.match(selectRestV2Source, /extractSoftwareStatementFromAppData\(appInfo\?\.appData \|\| null\)/);
+  assert.match(selectRestV2Source, /const mappedCandidates = candidates\.filter\(\(appInfo\) =>/);
+  assert.match(selectRestV2Source, /return selectBestCandidate\(candidates\)/);
+});
+
 test("activation leaves the global selectors user-owned and premium hydration starts only after explicit selection", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const refreshSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
   const activateSessionSource = extractFunctionSource(popupSource, "activateSession");
   const passVaultRecordSource = extractFunctionSource(popupSource, "buildPassVaultProgrammerRecord");
 
-  assert.match(popupSource, /async function primeProgrammerServiceHydration\(/);
-  assert.doesNotMatch(refreshSource, /primeProgrammerServiceHydration\(programmer,\s*cachedServices/);
-  assert.match(refreshSource, /const allowBackgroundCredentialCompilation = options\?\.allowBackgroundCredentialCompilation === true;/);
-  assert.match(refreshSource, /hydrationStatus:\s*UNDERPAR_VAULT_STATUS_PENDING/);
+  assert.doesNotMatch(refreshSource, /hydrateProgrammerFromPassVault\(/);
+  assert.match(
+    refreshSource,
+    /const programmerApplicationsPromise =[\s\S]*options\.programmerApplicationsPromise[\s\S]*ensureSelectedProgrammerApplicationsLoaded\(programmer,/
+  );
+  assert.match(refreshSource, /const premiumAppsPromise = Promise\.resolve\(programmerApplicationsPromise\)\.then\(\(applicationsData\) =>/);
+  assert.match(refreshSource, /buildPassVaultRuntimeServicesSnapshot\(vaultRecord\)/);
   assert.doesNotMatch(activateSessionSource, /restorePreferredProgrammerSelectionForActivation\(/);
   assert.doesNotMatch(activateSessionSource, /captureAdobePassEnvironmentSwitchSelectionSnapshot\(\)/);
   assert.doesNotMatch(activateSessionSource, /selectProgrammerForController\(/);
   assert.doesNotMatch(activateSessionSource, /refreshProgrammerPanels\(\{/);
   assert.match(passVaultRecordSource, /lastSelectedAt:\s*0/);
-  assert.doesNotMatch(activateSessionSource, /primeProgrammerServiceHydration\(\s*selectedProgrammerForHydration/);
+  assert.match(activateSessionSource, /void hydrateAuthenticatedAdobePassSession\(normalizedSource,/);
+});
+
+test("premium detection uses LoginButton-style app scopes plus CM tenant catalog and emits Reset TempPASS reminders", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const findPremiumAppsSource = extractFunctionSource(popupSource, "findPremiumServiceApplications");
+  const applySummarySource = extractFunctionSource(popupSource, "applyPremiumServiceRuntimeSummary");
+  const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+  const premiumDecisionSource = extractFunctionSource(popupSource, "emitPremiumServiceDecisionLogs");
+
+  assert.match(findPremiumAppsSource, /resetTempPass:\s*null/);
+  assert.match(findPremiumAppsSource, /resetTempPassApps:\s*\[\]/);
+  assert.match(findPremiumAppsSource, /PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE/);
+  assert.match(applySummarySource, /findCmTenantMatchesForProgrammer\(programmer,\s*cmCatalog\.tenants\)/);
+  assert.match(applySummarySource, /PREMIUM_SERVICE_SCOPE_RULES\.forEach/);
+  assert.match(applySummarySource, /syntheticSource:\s*"cm-catalog"/);
+  assert.match(refreshPanelsSource, /const earlyPremiumAppsRenderPromise = Promise\.resolve\(premiumAppsPromise\)/);
+  assert.match(refreshPanelsSource, /if \(provisionalServices && provisionalUiReady\)/);
+  assert.match(refreshPanelsSource, /setProgrammerPremiumHydrationProgress\(programmer\.programmerId,\s*\{\s*step:\s*"detect"/);
+  assert.match(refreshPanelsSource, /renderPremiumServicesLoading\(programmer,\s*\{\s*controllerReason,\s*hydrationProgress:/);
+  assert.match(refreshPanelsSource, /await earlyPremiumAppsRenderPromise/);
+  assert.match(premiumDecisionSource, /has Reset TempPASS/);
+  assert.match(premiumDecisionSource, /emitResetTempPassSupportReminder/);
+  assert.match(popupSource, /reset_temp_pass_reminder=/);
+});
+
+test("premium runtime readiness depends on DCR-ready premium apps and no longer blocks on CM bundle hydration", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const runtimeReadySource = extractFunctionSource(popupSource, "isProgrammerRuntimeServicesReady");
+  const uiReadySource = extractFunctionSource(popupSource, "isProgrammerPremiumUiReady");
+  const progressSource = extractFunctionSource(popupSource, "setProgrammerPremiumHydrationProgress");
+  const loadingSource = extractFunctionSource(popupSource, "renderPremiumServicesLoading");
+
+  assert.match(runtimeReadySource, /hasPassVaultCredentialCoverageForServices\(normalizedProgrammerId,\s*resolvedServices\)/);
+  assert.match(uiReadySource, /getDetectedPremiumServiceKeys\(resolvedServices\)\.length > 0/);
+  assert.match(progressSource, /!isProgrammerPremiumUiReady\(String\(programmerId \|\| ""\)\.trim\(\), getCurrentPremiumAppsSnapshot\(programmerId\)\)/);
+  assert.doesNotMatch(runtimeReadySource, /isCmRuntimeRenderReady/);
+  assert.doesNotMatch(loadingSource, /Detected:/);
+  assert.doesNotMatch(loadingSource, /detailLines/);
+});
+
+test("premium panel rendering no longer waits for every DCR client before leaving the loading state", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const primeSource = extractFunctionSource(popupSource, "primeProgrammerServiceHydration");
+  const refreshSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+
+  assert.match(primeSource, /const uiReady = isProgrammerPremiumUiReady\(programmerId,\s*runtimeServices\)/);
+  assert.match(primeSource, /if \(\s*uiReady &&/);
+  assert.match(refreshSource, /const uiReady = isProgrammerPremiumUiReady\(programmer\.programmerId,\s*resolvedServices\)/);
+  assert.match(refreshSource, /const provisionalUiReady = isProgrammerPremiumUiReady\(programmer\.programmerId,\s*provisionalServices\)/);
+  assert.doesNotMatch(refreshSource, /const provisionalRuntimeReady = isProgrammerRuntimeServicesReady/);
 });
 
 test("no-selection authenticated state tells the user to choose a Media Company instead of implying hydration failure", () => {
@@ -1424,46 +1915,77 @@ test("no-selection authenticated state tells the user to choose a Media Company 
   );
 });
 
-test("ESM, CM, and DEGRADATION panel loaders wait for in-flight programmer hydration before surfacing missing-service state", () => {
+test("ESM and DEGRADATION panel loaders render immediately from the selected app instead of blocking on in-flight programmer hydration", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const esmSource = extractFunctionSource(popupSource, "loadEsmWorkspaceService");
   const cmSource = extractFunctionSource(popupSource, "loadCmService");
   const degradationSource = extractFunctionSource(popupSource, "loadDegradationService");
 
   assert.match(esmSource, /getProgrammerServiceHydrationPromise\(programmer\.programmerId\)/);
+  assert.match(esmSource, /if \(programmer\?\.programmerId && !resolvedAppInfo\?\.guid\) \{/);
+  assert.match(esmSource, /const inFlightHydration = getProgrammerServiceHydrationPromise\(programmer\.programmerId\);/);
   assert.match(esmSource, /primeProgrammerServiceHydration\(programmer, currentServices/);
   assert.match(cmSource, /primeProgrammerServiceHydration\(programmer, latestServices/);
-  assert.match(degradationSource, /primeProgrammerServiceHydration\(programmer, getCurrentPremiumAppsSnapshot\(programmer\.programmerId\)/);
+  assert.match(degradationSource, /if \(programmer\?\.programmerId && !resolvedAppInfo\?\.guid\) \{/);
+  assert.match(degradationSource, /const inFlightHydration = getProgrammerServiceHydrationPromise\(programmer\.programmerId\);/);
+  assert.match(degradationSource, /primeProgrammerServiceHydration\(programmer, currentServices/);
+  assert.ok(
+    esmSource.indexOf("if (programmer?.programmerId && !resolvedAppInfo?.guid) {") <
+      esmSource.indexOf("const inFlightHydration = getProgrammerServiceHydrationPromise(programmer.programmerId);")
+  );
+  assert.ok(
+    degradationSource.indexOf("if (programmer?.programmerId && !resolvedAppInfo?.guid) {") <
+      degradationSource.indexOf("const inFlightHydration = getProgrammerServiceHydrationPromise(programmer.programmerId);")
+  );
 });
 
-test("CM direct fetch and tenant catalog paths try runtime-context headers before cm-console-ui bearer escalation", () => {
+test("CM direct fetch and tenant catalog paths stay on explicit bearer contracts", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const fetchSource = extractFunctionSource(popupSource, "fetchCmJsonWithAuthVariants");
   const tenantCatalogSource = extractFunctionSource(popupSource, "fetchCmTenantCatalogWithAuth");
 
   assert.doesNotMatch(popupSource, /function fetchCmTenantCatalogWithSession/);
-  assert.match(fetchSource, /const supportsRuntimeContextOnly = method === "GET" && \(isCmReportsRequestUrl\(url\) \|\| isCmConfigRequestUrl\(url\)\);/);
-  assert.match(fetchSource, /if \(supportsRuntimeContextOnly\) \{\s*variants\.push\(baseHeaders\);/);
-  assert.match(fetchSource, /response\.status === 401 \|\| response\.status === 403/);
+  assert.match(fetchSource, /getPreferredCmRequestAccessTokenCandidate\(\)/);
+  assert.match(fetchSource, /Authorization: `Bearer \$\{resolvedAccessToken\}`/);
+  assert.doesNotMatch(fetchSource, /fetchCmJsonViaReportsPageContext/);
+  assert.doesNotMatch(fetchSource, /headerVariants/);
+  assert.doesNotMatch(fetchSource, /tokenRefreshAttempted/);
   assert.doesNotMatch(fetchSource, /allowCookieFallback/);
-  assert.match(tenantCatalogSource, /const headerVariants = \[baseHeaders\];/);
-  assert.match(tenantCatalogSource, /if \(!attemptedTokenRefresh && authMode === "none" && \(statusCode === 401 \|\| statusCode === 403\)\)/);
+  assert.match(tenantCatalogSource, /getPreferredPrimaryImsAccessTokenCandidate\(\)/);
+  assert.match(tenantCatalogSource, /Authorization: `Bearer \$\{accessToken\}`/);
+  assert.doesNotMatch(tenantCatalogSource, /headerVariants/);
+  assert.doesNotMatch(tenantCatalogSource, /attemptedTokenRefresh/);
 });
 
-test("CM tenant bootstrap loads the tenant catalog before CM token hydration without reports-page fallback in session bootstrap", () => {
+test("CM tenant bootstrap now follows the LoginButton CM context flow without reports-page fallback", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const buildCmContextSource = extractFunctionSource(popupSource, "buildCmContext");
   const ensureCatalogSource = extractFunctionSource(popupSource, "ensureCmTenantsCatalog");
   const precheckSource = extractFunctionSource(popupSource, "ensureCmTenantsPrecheckForActiveSession");
+  const prefetchSource = extractFunctionSource(popupSource, "prefetchCmTenantsCatalogInBackground");
+  const avatarMenuSource = extractFunctionSource(popupSource, "openAvatarMenu");
 
   assert.doesNotMatch(ensureCatalogSource, /bootstrapCmConsoleTenantSession\(/);
-  assert.ok(
-    precheckSource.indexOf("const catalog = await ensureCmTenantsCatalog(") <
-      precheckSource.indexOf("await ensureCmApiAccessToken(")
-  );
+  assert.match(precheckSource, /const cmContext = await buildCmContext/);
+  assert.match(precheckSource, /buildCmTenantsCatalogFromContext\(cmContext/);
+  assert.match(buildCmContextSource, /resolveQualifiedCmConsoleAccessToken/);
+  assert.match(buildCmContextSource, /fetchPrimetimeJson/);
+  assert.match(buildCmContextSource, /fetchCmuReportJson/);
   assert.doesNotMatch(ensureCatalogSource, /const shouldPreferReportsPageBootstrap/);
   assert.doesNotMatch(ensureCatalogSource, /requestCmConsoleBootstrapCatalogFromReportsPage\(/);
-  assert.match(ensureCatalogSource, /for \(const tenantCatalogUrl of tenantCatalogUrls\)/);
-  assert.match(ensureCatalogSource, /fetchCmTenantCatalogWithAuth\(tenantCatalogUrl/);
+  assert.match(ensureCatalogSource, /const tenantCatalogUrl = buildApiRequestUrl\(CM_BASE_URL,\s*CM_TENANTS_PATH/);
+  assert.match(ensureCatalogSource, /fetchPrimetimeJson\(\{/);
+  assert.doesNotMatch(prefetchSource, /prefetchCmConsoleBootstrapSummaryInBackground/);
+  assert.doesNotMatch(avatarMenuSource, /prefetchCmConsoleBootstrapSummaryInBackground/);
+});
+
+test("clickCMU auth context reuses the shared CM token helper without a profile round-trip", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const clickCmuAuthSource = extractFunctionSource(popupSource, "resolveClickCmuAuthContext");
+
+  assert.match(clickCmuAuthSource, /ensureCmApiAccessToken\(\{/);
+  assert.doesNotMatch(clickCmuAuthSource, /fetchImsSessionProfile\(/);
+  assert.doesNotMatch(clickCmuAuthSource, /forceRefresh:\s*true/);
 });
 
 test("PKCE authorization URL uses code response mode and the configured client ID", () => {
@@ -1589,7 +2111,8 @@ test("restricted org extraction accepts shell-style label and value records", ()
   assert.doesNotMatch(extractOrgIdSource, /org\?\.value/);
   assert.doesNotMatch(extractOrgIdSource, /org\?\.organization(?!Id|ID|_id)\b/);
   assert.doesNotMatch(extractOrgIdSource, /org\?\.id/);
-  assert.match(extractOrganizationIdSource, /looksLikeOrganizationObject\(value\) \? firstNonEmptyString\(\[value\.value, value\.id, value\.code\]\) : ""/);
+  assert.doesNotMatch(extractOrganizationIdSource, /value\.value/);
+  assert.match(extractOrganizationIdSource, /looksLikeOrganizationObject\(value\) \? firstNonEmptyString\(\[value\.id, value\.code\]\) : ""/);
   assert.match(extractVerifiedOrgClaimSource, /idClaims\?\.org_id/);
   assert.match(extractVerifiedOrgClaimSource, /accessClaims\?\.organizationId/);
   assert.doesNotMatch(extractVerifiedOrgClaimSource, /profile\.projectedProductContext/);
@@ -1599,19 +2122,492 @@ test("restricted org extraction accepts shell-style label and value records", ()
   assert.match(extractUserIdSource, /org\?\.userGuid/);
 });
 
+test("restricted active-org resolution ignores picker-only option records", () => {
+  const {
+    collectAuthoritativeRestrictedOrganizations,
+    collectUnderparUnifiedShellOrganizations,
+    resolveCachedOrganizationsFromLoginData,
+    matchesAdobePassOrg,
+    normalizeRequestedTargetOrganization,
+  } = loadPopupRestrictedActiveOrgHelper();
+
+  const organizations = collectAuthoritativeRestrictedOrganizations([
+    {
+      key: "org:@adobepass",
+      label: "@AdobePass",
+      source: "runtimeConfig.organizations[0]",
+      hinted: false,
+      orgId: "@adobepass",
+    },
+    {
+      orgId: "campaigncustomercare",
+      orgName: "Adobe Campaign Customer Care",
+    },
+    {
+      key: "org:campaigncustomercare",
+      label: "Adobe Campaign Customer Care | campaigncustomercare",
+      sources: ["organizations[0]"],
+      orgId: "campaigncustomercare",
+    },
+    {
+      tenantId: "pass-tenant",
+      imsOrgId: "pass@AdobeOrg",
+      organizationName: "@AdobePass",
+    },
+  ]);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(organizations)), [
+    {
+      orgId: "campaigncustomercare",
+      orgName: "Adobe Campaign Customer Care",
+    },
+    {
+      tenantId: "pass-tenant",
+      imsOrgId: "pass@AdobeOrg",
+      organizationName: "@AdobePass",
+    },
+  ]);
+
+  assert.equal(
+    matchesAdobePassOrg({
+      orgId: "customersupport",
+      orgName: "Adobe Marketing Cloud | customersupport",
+      projectedProductContext: [{ orgId: "@adobepass", orgName: "@AdobePass" }],
+    }),
+    false
+  );
+  assert.equal(
+    matchesAdobePassOrg({
+      orgId: "@adobepass",
+      label: "@AdobePass",
+    }),
+    true
+  );
+
+  const normalizedTarget = normalizeRequestedTargetOrganization({
+    imsOrgId: "30FC5E0951240C900A490D4D@AdobeOrg",
+    tenantId: "adobepass",
+    userId: "user-123",
+    label: "Adobe Pass",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(normalizedTarget)), {
+    key: "adobepass::user-123::adobe pass",
+    id: "adobepass",
+    orgId: "adobepass",
+    tenantId: "adobepass",
+    imsOrgId: "30FC5E0951240C900A490D4D@AdobeOrg",
+    userId: "user-123",
+    clusterUserId: "user-123",
+    clusterUserType: "",
+    name: "Adobe Pass",
+    label: "Adobe Pass",
+    hinted: false,
+    isAdobePass: true,
+    source: "session-picker",
+  });
+
+  const storedOrganizations = resolveCachedOrganizationsFromLoginData({
+    detectedOrganizations: [
+      {
+        key: "org:adobepass::user-123::adobe pass",
+        label: "Adobe Pass | 30FC5E0951240C900A490D4D@AdobeOrg",
+        orgId: "adobepass",
+        tenantId: "adobepass",
+        imsOrgId: "30FC5E0951240C900A490D4D@AdobeOrg",
+        userId: "user-123",
+        hinted: true,
+        source: "session.detectedOrganizations[0]",
+        raw: {
+          orgId: "customersupport",
+          orgName: "Adobe Marketing Cloud | customersupport",
+        },
+      },
+    ],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(storedOrganizations)), [
+    {
+      key: "org:adobepass::user-123::adobe pass",
+      id: "adobepass",
+      orgId: "adobepass",
+      tenantId: "adobepass",
+      imsOrgId: "30FC5E0951240C900A490D4D@AdobeOrg",
+      userId: "user-123",
+      clusterUserId: "user-123",
+      clusterUserType: "",
+      name: "Adobe Pass | 30FC5E0951240C900A490D4D@AdobeOrg",
+      label: "Adobe Pass | 30FC5E0951240C900A490D4D@AdobeOrg",
+      source: "session.detectedOrganizations[0]",
+      sources: ["session.detectedOrganizations[0]"],
+      hinted: true,
+      isAdobePass: true,
+      raw: {
+        orgId: "customersupport",
+        orgName: "Adobe Marketing Cloud | customersupport",
+      },
+    },
+  ]);
+
+  const unifiedShellOrganizations = collectUnderparUnifiedShellOrganizations(
+    {
+      data: {
+        imsExtendedAccountClusterData: {
+          data: [
+            {
+              userId: "user-123",
+              userType: "federatedID",
+              restricted: false,
+              consolidatedAccount: false,
+              owningOrg: {
+                tenantId: "customersupport",
+                imsOrgId: "customersupport@AdobeOrg",
+                orgName: "Customer Support",
+              },
+              orgs: [
+                {
+                  tenantId: "adobepass",
+                  imsOrgId: "30FC5E0951240C900A490D4D@AdobeOrg",
+                  orgName: "Adobe Pass",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    },
+    {
+      selectedOrg: "adobepass",
+    }
+  );
+  assert.equal(
+    unifiedShellOrganizations.some((organization) =>
+      organization.tenantId === "adobepass" &&
+      organization.imsOrgId === "30FC5E0951240C900A490D4D@AdobeOrg" &&
+      organization.hinted === true
+    ),
+    true
+  );
+});
+
+test("restricted picker selectedOrg prefers tenant ids over AdobeOrg ids like LoginButton", () => {
+  const { resolveRestrictedPickerSelectedOrg } = loadPopupRestrictedSelectedOrgHelper();
+
+  assert.equal(
+    resolveRestrictedPickerSelectedOrg(
+      {
+        orgId: "30FC5E0951240C900A490D4D@AdobeOrg",
+        id: "30FC5E0951240C900A490D4D@AdobeOrg",
+        tenantId: "adobepass",
+        imsOrgId: "30FC5E0951240C900A490D4D@AdobeOrg",
+      },
+      {}
+    ),
+    "adobepass"
+  );
+
+  assert.equal(
+    resolveRestrictedPickerSelectedOrg(null, {
+      targetOrganization: {
+        id: "30FC5E0951240C900A490D4D@AdobeOrg",
+        tenantId: "adobepass",
+      },
+    }),
+    "adobepass"
+  );
+});
+
+test("restricted org context upgrades generic stored labels from Unified Shell like LoginButton", () => {
+  const { buildRestrictedOrganizationContext } = loadPopupRestrictedActiveOrgHelper();
+
+  const organizationContext = buildRestrictedOrganizationContext(
+    [
+      {
+        key: "wileypublishing::user-1::wiley.",
+        id: "wileypublishing",
+        orgId: "wileypublishing",
+        tenantId: "wileypublishing",
+        userId: "user-1",
+        name: "Wiley.",
+        label: "Wiley. | wileypublishing",
+        source: "unifiedShell.imsExtendedAccountClusterData[22].owningOrg",
+        hinted: true,
+      },
+    ],
+    {
+      detectedOrganizations: [
+        {
+          key: "wileypublishing::user-1::adobe marketing cloud",
+          id: "wileypublishing",
+          orgId: "wileypublishing",
+          tenantId: "wileypublishing",
+          userId: "user-1",
+          name: "Adobe Marketing Cloud",
+          label: "Adobe Marketing Cloud",
+          source: "session.detectedOrganizations[0]",
+          hinted: true,
+        },
+      ],
+      verifiedClaim: {
+        id: "wileypublishing",
+        rawId: "wileypublishing",
+        source: "accessClaims.org_id",
+      },
+    }
+  );
+
+  assert.equal(organizationContext.activeOrganization.name, "Wiley.");
+  assert.equal(organizationContext.activeOrganization.label, "Wiley. | wileypublishing");
+  assert.equal(organizationContext.options[0].label, "Wiley. | wileypublishing");
+});
+
+test("restricted org context does not let the requested target org override the returned active org", () => {
+  const { buildRestrictedOrganizationContext } = loadPopupRestrictedActiveOrgHelper();
+
+  const organizationContext = buildRestrictedOrganizationContext(
+    [
+      {
+        key: "org:wfadoberm",
+        id: "wfadoberm",
+        orgId: "wfadoberm",
+        tenantId: "wfadoberm",
+        userId: "user-1",
+        name: "Workfront AdobeRM",
+        label: "Workfront AdobeRM | wfadoberm",
+        source: "unifiedShell.imsExtendedAccountClusterData[4].owningOrg",
+        hinted: true,
+      },
+    ],
+    {
+      verifiedClaim: {
+        id: "wfadoberm",
+        rawId: "wfadoberm",
+        source: "accessClaims.org_id",
+      },
+    },
+    {
+      key: "org:adobepass",
+      id: "adobepass",
+      orgId: "adobepass",
+      tenantId: "adobepass",
+      name: "Adobe Pass",
+      label: "Adobe Pass | adobepass",
+      source: "session-picker",
+      hinted: true,
+    }
+  );
+
+  assert.equal(organizationContext.activeOrganization.orgId, "wfadoberm");
+  assert.equal(organizationContext.activeOrganization.label, "Workfront AdobeRM | wfadoberm");
+  assert.equal(organizationContext.options.some((option) => option.orgId === "adobepass"), true);
+});
+
+test("restricted org context does not persist picker-only target orgs into detected org state", () => {
+  const { buildRestrictedOrganizationContext } = loadPopupRestrictedActiveOrgHelper();
+
+  const organizationContext = buildRestrictedOrganizationContext(
+    [
+      {
+        key: "org:wfadoberm",
+        id: "wfadoberm",
+        orgId: "wfadoberm",
+        tenantId: "wfadoberm",
+        userId: "user-1",
+        name: "Workfront AdobeRM",
+        label: "Workfront AdobeRM | wfadoberm",
+        source: "unifiedShell.imsExtendedAccountClusterData[4].owningOrg",
+        hinted: true,
+      },
+    ],
+    {
+      detectedOrganizations: [
+        {
+          key: "org:adobepass",
+          id: "adobepass",
+          orgId: "adobepass",
+          tenantId: "adobepass",
+          name: "Adobe Pass",
+          label: "Adobe Pass | adobepass",
+          source: "session-picker",
+          sources: ["session-picker"],
+          hinted: true,
+        },
+      ],
+    },
+    {
+      key: "org:adobepass",
+      id: "adobepass",
+      orgId: "adobepass",
+      tenantId: "adobepass",
+      name: "Adobe Pass",
+      label: "Adobe Pass | adobepass",
+      source: "session-picker",
+      hinted: true,
+    }
+  );
+
+  assert.equal(organizationContext.activeOrganization.orgId, "wfadoberm");
+  assert.equal(organizationContext.detectedOrganizations.some((option) => option.orgId === "adobepass"), false);
+  assert.equal(organizationContext.options.some((option) => option.orgId === "adobepass"), true);
+});
+
+test("restricted org context prefers returned session payload org over stale detected candidates when no verified claim is available", () => {
+  const { buildRestrictedOrganizationContext } = loadPopupRestrictedActiveOrgHelper();
+
+  const organizationContext = buildRestrictedOrganizationContext(
+    [
+      {
+        key: "org:adobepass",
+        id: "adobepass",
+        orgId: "adobepass",
+        tenantId: "adobepass",
+        name: "Adobe Pass",
+        label: "Adobe Pass | adobepass",
+        source: "stored.detectedOrganizations[0]",
+      },
+      {
+        key: "org:nbaproperties",
+        id: "nbaproperties",
+        orgId: "nbaproperties",
+        tenantId: "nbaproperties",
+        name: "NBA Properties, Inc.",
+        label: "NBA Properties, Inc. | nbaproperties",
+        source: "unifiedShell.imsExtendedAccountClusterData[2].owningOrg",
+      },
+    ],
+    {
+      profile: {
+        tenantId: "nbaproperties",
+        organizationName: "NBA Properties, Inc.",
+      },
+    },
+    {
+      key: "org:adobepass",
+      id: "adobepass",
+      orgId: "adobepass",
+      tenantId: "adobepass",
+      name: "Adobe Pass",
+      label: "Adobe Pass | adobepass",
+      source: "session-picker",
+      hinted: true,
+    }
+  );
+
+  assert.equal(organizationContext.activeOrganization.orgId, "nbaproperties");
+  assert.equal(organizationContext.activeOrganization.authoritative, true);
+  assert.equal(organizationContext.activeOrganization.resolutionSource, "session-payload");
+});
+
+test("restricted picker selectedOrg falls back through shell and projected product context tenant ids", () => {
+  const { resolveRestrictedPickerSelectedOrg } = loadPopupRestrictedSelectedOrgHelper();
+
+  assert.equal(
+    resolveRestrictedPickerSelectedOrg(null, {
+      unifiedShell: {
+        selectedOrg: "adobepass",
+      },
+    }),
+    "adobepass"
+  );
+
+  assert.equal(
+    resolveRestrictedPickerSelectedOrg(null, {
+      profile: {
+        projectedProductContext: [
+          {
+            prodCtx: {
+              tenantId: "adobepass",
+            },
+          },
+        ],
+      },
+    }),
+    "adobepass"
+  );
+});
+
+test("login auth context prefers the resolved org name before the picker label like LoginButton", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const buildLoginAuthContextSource = extractFunctionSource(popupSource, "buildLoginAuthContext");
+
+  assert.match(buildLoginAuthContextSource, /const activeOrganizationTrusted = activeOrganization\?\.authoritative === true \|\| detectedOrganizations\.length === 1;/);
+  assert.match(buildLoginAuthContextSource, /activeOrganizationTrusted \? activeOrganization\?\.name : "",\s*activeOrganizationTrusted \? activeOrganization\?\.label : "",/);
+  assert.doesNotMatch(buildLoginAuthContextSource, /loginData\?\.adobePassOrg\?\.name/);
+  assert.doesNotMatch(buildLoginAuthContextSource, /loginData\?\.adobePassOrg\?\.orgId/);
+});
+
 test("restricted org picker merges IMS orgs with profile claims and configured ZIP.KEY orgs", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const buildOptionsSource = extractFunctionSource(popupSource, "buildRestrictedOrgOptions");
+  const buildContextSource = extractFunctionSource(popupSource, "buildRestrictedOrganizationContext");
   const collectCandidatesSource = extractFunctionSource(popupSource, "collectRestrictedOrganizationCandidates");
+  const ensureRestrictedOptionsSource = extractFunctionSource(popupSource, "ensureRestrictedOrgOptionsFromToken");
+  const resolveCachedOrganizationsSource = extractFunctionSource(popupSource, "resolveCachedOrganizationsFromLoginData");
+  const fetchUnifiedShellInitSource = extractFunctionSource(popupSource, "fetchUnderparUnifiedShellInit");
+  const fetchUnifiedShellSource = extractFunctionSource(popupSource, "fetchUnderparUnifiedShellOrganizations");
 
-  assert.match(buildOptionsSource, /getActiveUnderparImsRuntimeConfig\(\)/);
-  assert.match(buildOptionsSource, /parseJwtPayload\(currentSession\?\.accessToken\)/);
-  assert.match(buildOptionsSource, /parseJwtPayload\(currentSession\?\.idToken\)/);
+  assert.match(buildOptionsSource, /buildRestrictedOrganizationContext\(organizations, sessionData, preferredOrg\)\.options/);
+  assert.match(buildContextSource, /getActiveUnderparImsRuntimeConfig\(\)/);
+  assert.match(buildContextSource, /parseJwtPayload\(currentSession\?\.accessToken\)/);
+  assert.match(buildContextSource, /parseJwtPayload\(currentSession\?\.idToken\)/);
+  assert.match(buildContextSource, /const providedOrganizations = Array\.isArray\(organizations\) \? organizations : flattenOrganizations\(organizations\);/);
+  assert.match(buildContextSource, /const storedOrganizations = hasCanonicalRestrictedStoredOrganizations\(currentSession\?\.detectedOrganizations\)/);
+  assert.match(buildContextSource, /normalizeStoredRestrictedOrganizationCandidates\(currentSession\.detectedOrganizations\)/);
+  assert.match(buildContextSource, /const providedCanonicalOrganizations = hasCanonicalRestrictedStoredOrganizations\(providedOrganizations\)/);
+  assert.match(buildContextSource, /collectAuthoritativeRestrictedOrganizations/);
+  assert.match(buildContextSource, /const returnedOrganizations = \[/);
+  assert.match(buildContextSource, /const optionOrganizations = \[/);
+  assert.match(buildContextSource, /\.\.\.storedOrganizations,/);
+  assert.match(buildContextSource, /const authoritativeProvidedOrganizations =/);
+  assert.match(buildContextSource, /collectAuthoritativeRestrictedOrganizations\(providedOrganizations\)/);
+  assert.match(buildContextSource, /organizations: optionOrganizations,/);
+  assert.match(buildContextSource, /const activeOrganizationCandidates = collectRestrictedOrganizationCandidates\(/);
+  assert.match(buildContextSource, /organizations: returnedOrganizations,/);
+  assert.match(buildContextSource, /configuredOrganizations: \[\]/);
+  assert.match(buildContextSource, /organizationCandidates: activeOrganizationCandidates/);
+  const matchesAdobePassSource = extractFunctionSource(popupSource, "matchesAdobePassOrg");
+  assert.doesNotMatch(matchesAdobePassSource, /objectContainsAdobePass/);
+  const verifyTargetSource = extractFunctionSource(popupSource, "verifyTargetOrganizationSelection");
+  const attachTargetSource = extractFunctionSource(popupSource, "attachTargetOrganizationToLoginData");
+  const buildLoginPayloadSource = extractFunctionSource(popupSource, "buildLoginSessionPayloadFromAuth");
+  assert.match(attachTargetSource, /const normalizedTargetOrganization = normalizeRequestedTargetOrganization\(targetOrganization\);/);
+  assert.match(verifyTargetSource, /const normalizedTargetOrganization = normalizeRequestedTargetOrganization\(targetOrganization\);/);
+  assert.match(verifyTargetSource, /buildRestrictedOrganizationContext\(\s*resolveCachedOrganizationsFromLoginData\(sessionData\),/);
+  assert.match(verifyTargetSource, /hasRestrictedOrganizationIdentifierIntersection\(expectedOrgIdentifiers, resolvedOrgIdentifiers\)/);
+  assert.match(buildLoginPayloadSource, /const flattenedOrganizations = flattenOrganizations\(rawOrganizations\);/);
+  assert.match(buildLoginPayloadSource, /const detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations\(/);
+  assert.match(buildLoginPayloadSource, /detectedOrganizations,/);
+  assert.doesNotMatch(collectCandidatesSource, /left\.isAdobePass/);
   assert.match(collectCandidatesSource, /configuredOrganizations\.forEach/);
+  assert.match(collectCandidatesSource, /hinted: value\.hinted === true/);
+  assert.match(collectCandidatesSource, /candidate\.hinted === true \|\| Boolean\(orgId && hintedOrgIds\.has/);
   assert.match(collectCandidatesSource, /collectCandidatesFromValue\(profile, "profile"\)/);
   assert.match(collectCandidatesSource, /collectCandidatesFromValue\(profile\?\.additional_info, "profile\.additional_info"\)/);
   assert.match(collectCandidatesSource, /collectCandidatesFromValue\(accessClaims, "accessClaims"\)/);
   assert.match(collectCandidatesSource, /collectCandidatesFromValue\(idClaims, "idClaims"\)/);
+  assert.match(collectCandidatesSource, /if \(\/\^https\?:\\\/\\\//);
+  assert.match(resolveCachedOrganizationsSource, /loginData\.detectedOrganizations/);
+  assert.match(resolveCachedOrganizationsSource, /hasCanonicalRestrictedStoredOrganizations\(loginData\.detectedOrganizations\)/);
+  assert.match(resolveCachedOrganizationsSource, /normalizeStoredRestrictedOrganizationCandidates\(loginData\.detectedOrganizations\)/);
+  assert.match(ensureRestrictedOptionsSource, /fetchUnderparUnifiedShellOrganizations\(token/);
+  assert.match(ensureRestrictedOptionsSource, /const detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations\(/);
+  assert.match(ensureRestrictedOptionsSource, /detectedOrganizations,/);
+  assert.match(fetchUnifiedShellInitSource, /response = await fetch\(UNIFIED_SHELL_GRAPHQL_URL/);
+  assert.match(fetchUnifiedShellInitSource, /selectedOrg: selectedOrg \|\| null/);
+  assert.doesNotMatch(fetchUnifiedShellInitSource, /relayImsFetch/);
+  assert.doesNotMatch(fetchUnifiedShellInitSource, /serializeError/);
+  assert.match(fetchUnifiedShellSource, /const parsed = await fetchUnderparUnifiedShellInit\(accessToken, options\);/);
+  assert.match(fetchUnifiedShellSource, /return collectUnderparUnifiedShellOrganizations\(parsed, \{/);
+  assert.match(fetchUnifiedShellSource, /selectedOrg: firstNonEmptyString\(\[options\?\.selectedOrg\]\)/);
+  assert.match(fetchUnifiedShellSource, /activeOrganization: options\?\.activeOrganization \|\| null/);
+});
+
+test("post-login hydration persists authoritative detected orgs instead of picker options", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const hydrateSource = extractFunctionSource(popupSource, "hydratePostLoginSessionData");
+
+  assert.match(hydrateSource, /const existingOrganizations = resolveCachedOrganizationsFromLoginData\(currentSession\);/);
+  assert.match(hydrateSource, /const activeOrganizationHint = buildRestrictedOrganizationContext\(existingOrganizations, currentSession, null\)\.activeOrganization;/);
+  assert.match(hydrateSource, /const mergedDetectedOrganizations = mergeRestrictedDetectedOrganizations\(/);
+  assert.doesNotMatch(hydrateSource, /const mergedOrganizationContext = buildRestrictedOrganizationContext\(/);
 });
 
 test("popup and sidepanel ship a minimal sign-in surface without a pre-auth org target picker", () => {
@@ -1634,6 +2630,17 @@ test("popup and sidepanel ship a minimal sign-in surface without a pre-auth org 
   assert.match(renderSignInViewSource, /els\.signInHeroBtn\.textContent = signingIn \? "Signing In\.\.\." : "Sign In";/);
 });
 
+test("shared serializeError helper is available to CM hydration helpers", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const serializeErrorSource = extractFunctionSource(popupSource, "serializeError");
+  const buildCmContextSource = extractFunctionSource(popupSource, "buildCmContext");
+
+  assert.match(serializeErrorSource, /error instanceof Error/);
+  assert.match(serializeErrorSource, /return String\(error \|\| "Unknown error"\);/);
+  assert.match(buildCmContextSource, /serializeError\(cmuTokenResult\.error\)/);
+  assert.match(buildCmContextSource, /serializeError\(tenantsResult\.error\)/);
+});
+
 test("primary sign-in always forces Adobe's chooser and silent bootstrap no longer waits on pre-auth org selection", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const primarySignInSource = extractFunctionSource(popupSource, "onPrimarySignInClick");
@@ -1648,36 +2655,174 @@ test("primary sign-in always forces Adobe's chooser and silent bootstrap no long
   assert.match(silentBootstrapSource, /hasConfiguredUnderparImsClientId\(\)/);
 });
 
+test("avatar menu no longer triggers background CM tenant hydration", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const openAvatarMenuSource = extractFunctionSource(popupSource, "openAvatarMenu");
+
+  assert.doesNotMatch(openAvatarMenuSource, /prefetchCmTenantsCatalogInBackground\(/);
+  assert.match(openAvatarMenuSource, /renderAvatarMenu\(\);/);
+});
+
 test("activation only trusts explicit target-org selection and restricted retry no longer reuses hidden config", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activationPrepSource = extractFunctionSource(popupSource, "enforceAdobePassAccess");
   const restrictedSwitchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
   const restrictedRetrySource = extractFunctionSource(popupSource, "onRestrictedSignInAgain");
   const restrictedOptionsSource = extractFunctionSource(popupSource, "ensureRestrictedOrgOptionsFromToken");
+  const updateRestrictedOptionsSource = extractFunctionSource(popupSource, "updateRestrictedOrgOptions");
 
   assert.match(activationPrepSource, /attachTargetOrganizationToLoginData/);
   assert.match(activationPrepSource, /verifyTargetOrganizationSelection/);
+  assert.match(activationPrepSource, /resolveAdobePassAccessContext\(/);
+  assert.match(activationPrepSource, /collectCanonicalRestrictedDetectedOrganizations\(/);
+  assert.match(activationPrepSource, /fetchUnderparUnifiedShellOrganizations\(loginData\.accessToken/);
+  assert.match(activationPrepSource, /const activeOrganizationSeed = buildRestrictedOrganizationContext\(/);
+  assert.match(activationPrepSource, /activeOrganization: activeOrganizationSeed/);
   assert.match(activationPrepSource, /tokenHasReadOrganizationsScope/);
+  assert.doesNotMatch(activationPrepSource, /selectedTargetOrganization \|\| loginData\?\.adobePassOrg/);
+  assert.doesNotMatch(activationPrepSource, /findMatchingRestrictedOrganizationOption\(state\.restrictedOrgOptions, loginData\?\.adobePassOrg\)/);
   assert.doesNotMatch(activationPrepSource, /resolveTargetOrganizationForLogin\(\)/);
   assert.doesNotMatch(activationPrepSource, /state\.selectedTargetOrganizationKey =/);
-  assert.match(restrictedOptionsSource, /updateRestrictedOrgOptions\(cachedOrganizations, configuredPreferredOrg, seedSession\)/);
-  assert.match(restrictedSwitchSource, /buildPreferredOrgSwitchStrategy\(selected\)/);
+  assert.match(restrictedOptionsSource, /fetchUnderparUnifiedShellOrganizations\(token/);
+  assert.match(restrictedOptionsSource, /activeOrganization: configuredPreferredOrg/);
+  assert.match(restrictedOptionsSource, /updateRestrictedOrgOptions\(mergedOrganizations, configuredPreferredOrg,/);
+  assert.match(restrictedOptionsSource, /const detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations\(/);
+  assert.match(restrictedOptionsSource, /detectedOrganizations,/);
+  assert.match(updateRestrictedOptionsSource, /const activeKey = String\(activeOrganization\?\.key \|\| ""\)\.trim\(\);/);
+  assert.doesNotMatch(restrictedSwitchSource, /buildPreferredOrgSwitchStrategy\(selected\)/);
+  assert.doesNotMatch(restrictedSwitchSource, /extraParams:/);
   assert.doesNotMatch(restrictedRetrySource, /targetOrganization/);
   assert.doesNotMatch(restrictedSwitchSource, /for \(const strategy of strategies\)/);
   assert.doesNotMatch(activationPrepSource, /orgVerification\.status === "verified-mismatch"/);
+  assert.match(activationPrepSource, /allowed: accessContext\.eligible === true/);
+  assert.match(activationPrepSource, /recoveryLabel: firstNonEmptyString\(\[accessContext\.reason\]\)/);
 });
 
-test("programmer access denial drops into the org picker instead of auto-restarting recovery auth", () => {
+test("interactive sign-in flows verify Adobe's returned org before activation", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const finalizeSource = extractFunctionSource(popupSource, "finalizeRequestedTargetLoginData");
+  const signInInteractiveSource = extractFunctionSource(popupSource, "signInInteractive");
+  const restrictedSwitchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
+  const refreshSource = extractFunctionSource(popupSource, "refreshSessionManual");
+
+  assert.match(finalizeSource, /const orgVerification = verifyTargetOrganizationSelection\(finalizedLoginData, normalizedTargetOrganization\);/);
+  assert.match(finalizeSource, /status: "accepted-returned-org"/);
+  assert.match(finalizeSource, /UnderPAR switched to the active returned Adobe org\./);
+  assert.match(finalizeSource, /UnderPAR kept the prior session so it does not misrepresent the selected Adobe profile\./);
+  assert.match(signInInteractiveSource, /const finalizedLoginDataResult = finalizeRequestedTargetLoginData\(/);
+  assert.match(signInInteractiveSource, /acceptReturnedOrganization: loginOptions\?\.forceBrowserLogout === true/);
+  assert.match(restrictedSwitchSource, /const finalizedLoginDataResult = finalizeRequestedTargetLoginData\(/);
+  assert.match(restrictedSwitchSource, /acceptReturnedOrganization: true/);
+  assert.match(refreshSource, /const finalizedLoginDataResult = finalizeRequestedTargetLoginData\(/);
+  assert.match(refreshSource, /acceptReturnedOrganization: false/);
+});
+
+test("authoritative AdobePass descriptor no longer trusts shell selection or downstream console tokens", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const descriptorSource = extractFunctionSource(popupSource, "resolveAuthoritativeAdobePassOrgDescriptor");
+
+  assert.match(descriptorSource, /const activeOrganizationTrusted = activeOrganization\?\.authoritative === true \|\| detectedOrganizations\.length === 1;/);
+  assert.match(descriptorSource, /matchesAdobePassOrg\(activeOrganization\)/);
+  assert.match(descriptorSource, /matchesAdobePassOrg\(currentSession\?\.imsSession\)/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.adobePassOrg/);
+  assert.doesNotMatch(descriptorSource, /fallbackAdobePassOrg/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.experienceCloudImsSession/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.cmConsoleImsSession/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.unifiedShell\?\.selectedOrg/);
+});
+
+test("shell snapshot and CM bootstrap seed no longer inject AdobePass identity", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const shellMergeSource = extractFunctionSource(popupSource, "mergeExperienceCloudShellSnapshotIntoLoginData");
+  const cmSeedSource = extractFunctionSource(popupSource, "createCmBootstrapSeedLoginData");
+
+  assert.match(shellMergeSource, /adobePassOrg: null,/);
+  assert.doesNotMatch(shellMergeSource, /const shellAdobePassOrg =/);
+  assert.doesNotMatch(shellMergeSource, /current\?\.adobePassOrg \|\| null/);
+  assert.doesNotMatch(shellMergeSource, /current\?\.adobePassOrg\?\.orgId/);
+  assert.match(cmSeedSource, /adobePassOrg: null,/);
+});
+
+test("session identity, avatar, and CM token hints no longer fall back to stale AdobePass user data", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const resolveUserIdSource = extractFunctionSource(popupSource, "resolveLoginUserIdValue");
+  const avatarCandidatesSource = extractFunctionSource(popupSource, "getAvatarCandidates");
+  const avatarCacheIdentitySource = extractFunctionSource(popupSource, "getAvatarCacheIdentity");
+  const avatarPersistSource = extractFunctionSource(popupSource, "getAvatarPersistIdentityCandidates");
+  const persistIdentitySource = extractFunctionSource(popupSource, "hasAvatarPersistProfileIdentity");
+  const cmCandidatesSource = extractFunctionSource(popupSource, "collectCmImsUserIdCandidates");
+
+  assert.doesNotMatch(resolveUserIdSource, /loginData\?\.adobePassOrg\?\.userId/);
+  assert.doesNotMatch(avatarCandidatesSource, /loginData\?\.adobePassOrg\?\.avatarUrl/);
+  assert.doesNotMatch(avatarCacheIdentitySource, /loginData\?\.adobePassOrg\?\.userId/);
+  assert.doesNotMatch(avatarPersistSource, /loginData\?\.adobePassOrg\?\.userId/);
+  assert.doesNotMatch(persistIdentitySource, /loginData\?\.adobePassOrg\?\.userId/);
+  assert.doesNotMatch(cmCandidatesSource, /state\.loginData\?\.adobePassOrg\?\.userId/);
+});
+
+test("auth context no longer treats downstream console shells as authoritative org identity", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const authContextSource = extractFunctionSource(popupSource, "buildLoginAuthContext");
+  const descriptorSource = extractFunctionSource(popupSource, "resolveAuthoritativeAdobePassOrgDescriptor");
+  const avatarResolveKeySource = extractFunctionSource(popupSource, "makeAvatarResolveKey");
+  const avatarRefreshKeySource = extractFunctionSource(popupSource, "getAvatarRefreshSessionKey");
+
+  assert.doesNotMatch(authContextSource, /loginData\?\.experienceCloudImsSession\?\.orgId/);
+  assert.doesNotMatch(authContextSource, /loginData\?\.cmConsoleImsSession\?\.orgId/);
+  assert.doesNotMatch(authContextSource, /loginData\?\.experienceCloudImsSession\?\.orgName/);
+  assert.doesNotMatch(authContextSource, /loginData\?\.cmConsoleImsSession\?\.orgName/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.experienceCloudImsSession\?\.orgId/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.cmConsoleImsSession\?\.orgId/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.experienceCloudImsSession\?\.userId/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.cmConsoleImsSession\?\.userId/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.experienceCloudImsSession\?\.orgName/);
+  assert.doesNotMatch(descriptorSource, /currentSession\?\.cmConsoleImsSession\?\.orgName/);
+  assert.doesNotMatch(avatarResolveKeySource, /loginData\?\.adobePassOrg\?\.avatarUrl/);
+  assert.doesNotMatch(avatarRefreshKeySource, /loginData\?\.adobePassOrg\?\.userId/);
+});
+
+test("programmer access denial keeps the session authenticated and drops into the org picker surface instead of auto-restarting recovery auth", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activationSource = extractFunctionSource(popupSource, "activateSession");
 
   assert.doesNotMatch(activationSource, /attemptInteractiveAdobePassRecovery/);
+  assert.doesNotMatch(activationSource, /if \(!enforced\.allowed \|\| !enforced\.loginData\) \{/);
+  assert.match(activationSource, /const sessionRequiresOrgSelection = resolveProgrammerAccessContext\(resolvedLoginData\)\.eligible !== true;/);
+  assert.match(activationSource, /phase: sessionRequiresOrgSelection \? "org-selection-required" : "post-login-hydration"/);
+  assert.doesNotMatch(activationSource, /state\.restricted = true;/);
+});
+
+test("activation rejects mismatched org-switch results before replacing the current session", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const activationSource = extractFunctionSource(popupSource, "activateSession");
+  const verificationHelperSource = extractFunctionSource(popupSource, "isSuccessfulTargetOrganizationVerification");
+
+  assert.match(verificationHelperSource, /status === "verified-match" \|\| status === "derived-match"/);
+  assert.match(activationSource, /const targetOrganizationVerification = verifyTargetOrganizationSelection\(/);
+  assert.match(activationSource, /resolvedLoginData\.orgVerification = targetOrganizationVerification;/);
   assert.match(
     activationSource,
-    /const deniedSessionData = mergeCmConsoleBootstrapIntoLoginData\(\s*mergeExperienceCloudShellSnapshotIntoLoginData\(\s*enforced\.loginData \|\| sessionData,\s*state\.consoleBootstrapState\?\.shellSnapshot \|\| null\s*\),\s*state\.loginData\s*\);/
+    /resolvedLoginData\?\.targetOrganization &&\s*!isSuccessfulTargetOrganizationVerification\(targetOrganizationVerification\)/
   );
-  assert.match(activationSource, /ensureRestrictedOrgOptionsFromToken\(\s*deniedAccessToken,[\s\S]*deniedSessionData/);
-  assert.match(activationSource, /updateRestrictedContext\(deniedSessionData,/);
+  assert.match(activationSource, /UnderPAR kept the prior session so it does not misrepresent the selected Adobe profile\./);
+  assert.match(activationSource, /phase:\s*"org-verification-mismatch"/);
+  assert.match(activationSource, /syncAuthenticatedOrgSwitchOnlyContext\(state\.loginData\)/);
+  assert.match(activationSource, /updateRestrictedContext\(state\.loginData,\s*\{\s*recoveryLabel: verificationFailureMessage,/s);
+});
+
+test("login auth context and profile completeness no longer fabricate AdobePass identity", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const authContextSource = extractFunctionSource(popupSource, "buildLoginAuthContext");
+  const profileCompleteSource = extractFunctionSource(popupSource, "isProfilePayloadComplete");
+  const orgDisplaySource = extractFunctionSource(popupSource, "getOrgDisplayName");
+
+  assert.match(authContextSource, /buildRestrictedOrganizationContext\(/);
+  assert.match(authContextSource, /const activeOrganization = restrictedOrganizationContext\?\.activeOrganization \|\| null;/);
+  assert.doesNotMatch(authContextSource, /loginData\?\.adobePassOrg\?\.orgId/);
+  assert.doesNotMatch(authContextSource, /loginData\?\.adobePassOrg\?\.name/);
+  assert.doesNotMatch(profileCompleteSource, /ADOBEPASS_ORG_HANDLE/);
+  assert.match(orgDisplaySource, /Adobe organization unavailable/);
+  assert.doesNotMatch(orgDisplaySource, /ADOBEPASS_ORG_HANDLE/);
 });
 
 test("logged-out popup and sidepanel surfaces expose ZIP.KEY import controls", () => {
@@ -1806,25 +2951,34 @@ test("popup and sidepanel both ship the generic restricted org picker surface", 
   const renderRestrictedSource = extractFunctionSource(popupSource, "renderRestrictedView");
 
   for (const htmlSource of [popupHtml, sidepanelHtml]) {
-    assert.match(htmlSource, /id="restricted-view"/);
-    assert.match(htmlSource, /class="restricted-view-card"/);
-    assert.match(htmlSource, /id="restricted-org-select"/);
-    assert.match(htmlSource, /id="restricted-org-hint"/);
-    assert.match(htmlSource, /id="restricted-org-switch-btn"/);
-    assert.match(htmlSource, /id="restricted-sign-in-btn"/);
-    assert.match(htmlSource, /id="restricted-sign-out-btn"/);
-    assert.match(htmlSource, /Adobe Org Picker/);
-    assert.match(htmlSource, /Adobe Org Profile/);
-    assert.match(htmlSource, /Sign In Again/);
-    assert.match(htmlSource, /Sign Out/);
-    assert.doesNotMatch(htmlSource, /For @AdobePass only/);
+    const restrictedSectionMatch = htmlSource.match(/<section id="restricted-view"[\s\S]*?<\/section>/);
+    assert.ok(restrictedSectionMatch, "restricted view section should exist");
+    const restrictedSection = restrictedSectionMatch[0];
+    assert.match(restrictedSection, /id="restricted-view"/);
+    assert.match(restrictedSection, /class="restricted-view-card"/);
+    assert.match(restrictedSection, /id="restricted-org-select"/);
+    assert.match(restrictedSection, /Adobe Org/);
+    assert.doesNotMatch(restrictedSection, /Adobe Org Picker/);
+    assert.doesNotMatch(restrictedSection, /Adobe Org Profile/);
+    assert.doesNotMatch(restrictedSection, /Sign In Again/);
+    assert.doesNotMatch(restrictedSection, /Sign Out/);
+    assert.doesNotMatch(restrictedSection, /Switch Org/);
+    assert.doesNotMatch(restrictedSection, /For @AdobePass only/);
   }
 
   assert.match(renderRestrictedSource, /!els\.restrictedOrgSelect/);
-  assert.match(renderRestrictedSource, /!els\.restrictedOrgSwitchBtn/);
-  assert.match(renderRestrictedSource, /!els\.restrictedSignInBtn/);
-  assert.match(renderRestrictedSource, /!els\.restrictedSignOutBtn/);
+  assert.doesNotMatch(renderRestrictedSource, /restrictedOrgSwitchBtn/);
+  assert.doesNotMatch(renderRestrictedSource, /restrictedSignInBtn/);
+  assert.doesNotMatch(renderRestrictedSource, /restrictedSignOutBtn/);
   assert.doesNotMatch(renderRestrictedSource, /Auto-switch to @AdobePass is required for access\./);
+});
+
+test("restricted org picker change immediately triggers the org-switch auth flow", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const registerHandlersSource = extractFunctionSource(popupSource, "registerEventHandlers");
+
+  assert.match(registerHandlersSource, /const previousSelection = String\(state\.selectedRestrictedOrgKey \|\| ""\);/);
+  assert.match(registerHandlersSource, /void onRestrictedOrgSwitch\(\);/);
 });
 
 test("sidepanel requestor picker spans the same full workflow width as media company and MVPD", () => {
@@ -1913,10 +3067,44 @@ test("sidepanel exposes LoginButton-style DEBUG INFO controls backed by popup ru
 test("stored and silent session activation stay tabless unless explicitly allowed", () => {
   const helpers = loadPopupCmActivationHelper();
 
-  assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("stored", false), false);
+  assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("stored", false), true);
   assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("silent-bootstrap:startup", false), false);
   assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("interactive", false), false);
   assert.equal(helpers.shouldAllowTemporaryCmBootstrapTabForActivation("manual-refresh", true), true);
+});
+
+test("stored session restore persists and reuses hydrated console state before background refresh", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const buildNormalizedSource = extractFunctionSource(popupSource, "buildNormalizedLoginData");
+  const buildStoredSource = extractFunctionSource(popupSource, "buildStoredLoginData");
+  const loadStoredSource = extractFunctionSource(popupSource, "loadStoredLoginData");
+  const restoreStoredSource = extractFunctionSource(popupSource, "restoreStoredAuthenticatedConsoleHydration");
+  const persistStoredSource = extractFunctionSource(popupSource, "persistAuthenticatedConsoleHydrationSnapshot");
+  const hydrateSource = extractFunctionSource(popupSource, "hydrateAuthenticatedAdobePassSession");
+  const activateSource = extractFunctionSource(popupSource, "activateSession");
+
+  assert.match(buildNormalizedSource, /consoleHydration: normalizeStoredConsoleHydrationSnapshot\(loginData\?\.consoleHydration\),/);
+  assert.match(buildNormalizedSource, /adobePassOrg: null,/);
+  assert.match(buildStoredSource, /const consoleHydration = minimal \? null : compactStoredConsoleHydrationSnapshot\(loginData\?\.consoleHydration\);/);
+  assert.match(buildStoredSource, /consoleHydration,/);
+  assert.doesNotMatch(buildStoredSource, /experienceCloudAccessToken:/);
+  assert.doesNotMatch(buildStoredSource, /cmConsoleAccessToken:/);
+  assert.doesNotMatch(buildStoredSource, /adobePassOrg:/);
+  assert.match(loadStoredSource, /consoleHydration: normalizeStoredConsoleHydrationSnapshot\(loginData\?\.consoleHydration\),/);
+  assert.match(loadStoredSource, /resetBootstrapTokens: true,/);
+  assert.doesNotMatch(loadStoredSource, /experienceCloudAccessToken:/);
+  assert.doesNotMatch(loadStoredSource, /cmConsoleAccessToken:/);
+  assert.match(restoreStoredSource, /if \(resolveProgrammerAccessContext\(loginData\)\.eligible !== true\) \{\s*return false;\s*\}/);
+  assert.match(persistStoredSource, /if \(resolveProgrammerAccessContext\(state\.loginData\)\.eligible !== true\) \{\s*return false;\s*\}/);
+  assert.match(activateSource, /normalizedSource === "stored" && !sessionRequiresOrgSelection/);
+  assert.match(activateSource, /restoreStoredAuthenticatedConsoleHydration\(resolvedLoginData\)/);
+  assert.match(activateSource, /if \(sessionRequiresOrgSelection\) \{\s*resolvedLoginData = buildNormalizedLoginData\(/s);
+  assert.match(activateSource, /resetBootstrapTokens: true,/);
+  assert.match(activateSource, /const allowBackgroundTemporaryPageContextTab = restoredAuthenticatedConsoleHydration/);
+  assert.match(activateSource, /preserveExistingOnFailure: restoredAuthenticatedConsoleHydration/);
+  assert.match(hydrateSource, /const preserveExistingOnFailure = options\.preserveExistingOnFailure === true;/);
+  assert.match(hydrateSource, /await persistAuthenticatedConsoleHydrationSnapshot\(\)\.catch/);
+  assert.match(hydrateSource, /if \(!\(preserveExistingOnFailure \|\| normalizedSource === "stored"\)\)/);
 });
 
 test("CM precheck reset clears stale pending state before background bootstrap begins", () => {
@@ -1958,7 +3146,10 @@ test("media company select availability disables before session activation and r
   });
   helpers.syncMediaCompanySelectAvailability();
   assert.equal(helpers.getSelect().disabled, false);
-  assert.match(applySessionSource, /state\.sessionReady = true;\s*syncMediaCompanySelectAvailability\(\);/);
+  assert.match(
+    applySessionSource,
+    /state\.sessionReady = true;[\s\S]*syncMediaCompanySelectAvailability\(\);/
+  );
 });
 
 test("workspace identity helpers treat cleared programmer context as a real change", () => {
@@ -1977,7 +3168,7 @@ test("CM tenant background prefetch is guarded by the shared precheck promise in
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const prefetchSource = extractFunctionSource(popupSource, "prefetchCmTenantsCatalogInBackground");
   const precheckSource = extractFunctionSource(popupSource, "ensureCmTenantsPrecheckForActiveSession");
-  const activateSessionSource = extractFunctionSource(popupSource, "activateSession");
+  const hydrateSource = extractFunctionSource(popupSource, "hydrateAuthenticatedAdobePassSession");
 
   assert.match(prefetchSource, /state\.cmTenantsCatalogPromise \|\| state\.cmTenantsPrecheckPromise/);
   assert.match(precheckSource, /if \(!forceRefresh && state\.cmTenantsPrecheckPromise\)/);
@@ -1987,7 +3178,7 @@ test("CM tenant background prefetch is guarded by the shared precheck promise in
   assert.match(precheckSource, /if \(releaseRetainedAuthPopupContext\) \{\s*await maybeReleaseRetainedAuthPopupBootstrapContext/);
   assert.doesNotMatch(precheckSource, /preferredCmBootstrapTabId <= 0 && getRetainedAuthPopupBootstrapTabId\(\) <= 0/);
   assert.match(
-    activateSessionSource,
+    hydrateSource,
     /allowTemporaryPageContextTab:\s*allowBackgroundTemporaryPageContextTab/
   );
 });
