@@ -1875,6 +1875,7 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   const resolveServiceApplicationSource = extractFunctionSource(popupSource, "resolvePassVaultHydrationServiceApplication");
   const rawFetchSource = extractFunctionSource(popupSource, "fetchApplicationRawByGuid");
   const hydrateEntriesSource = extractFunctionSource(popupSource, "hydratePassVaultServiceEntries");
+  const hydrateServiceRecordSource = extractFunctionSource(popupSource, "hydratePassVaultServiceRecordWithContext");
   const directServicesSource = extractFunctionSource(popupSource, "buildPassVaultDirectPremiumServicesSnapshot");
   const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
   const statementTextSource = extractFunctionSource(popupSource, "extractSoftwareStatementFromText");
@@ -1896,12 +1897,20 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(collectCandidatesSource, /services\.esmApps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
   assert.match(collectCandidatesSource, /services\.degradationApps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
   assert.match(credentialCoverageSource, /hasPassVaultServiceClientCredentials\(normalizedProgrammerId,\s*task\?\.appInfo \|\| null\)/);
+  assert.match(serviceEntriesSource, /const cachedClient =/);
+  assert.match(serviceEntriesSource, /loadDcrCache\(programmerId,\s*appGuid\)/);
   assert.match(serviceEntriesSource, /registeredApplication:\s*registeredApplication \? cloneJsonLikeValue\(registeredApplication,\s*null\) : null,/);
   assert.match(serviceEntriesSource, /status: registeredApplication \? \(client\?\.clientId && client\?\.clientSecret \? "ready" : "pending"\) : "unavailable",/);
   assert.match(serviceEntriesSource, /compactPassVaultRegisteredApplicationsMatch\(registeredApplication,\s*existingService\?\.registeredApplication\)/);
   assert.match(resolveServiceApplicationSource, /normalizedApplications\.length === 0 \? existingService\?\.registeredApplication : null/);
   assert.match(hydrateEntriesSource, /for \(const definition of definitionsToHydrate\)/);
+  assert.match(hydrateEntriesSource, /const sharedHydratedApplicationsByGuid = new Map\(\);/);
+  assert.match(hydrateEntriesSource, /const sharedClientByGuid = new Map\(\);/);
   assert.match(hydrateEntriesSource, /hydratePassVaultServiceRecordWithContext\(/);
+  assert.match(hydrateServiceRecordSource, /const cachedClient =/);
+  assert.match(hydrateServiceRecordSource, /loadDcrCache\(programmerId,\s*guid\)/);
+  assert.match(hydrateServiceRecordSource, /sharedHydratedApplicationsByGuid/);
+  assert.match(hydrateServiceRecordSource, /sharedClientByGuid/);
   assert.match(directServicesSource, /restV2:\s*hydratedServiceEntries\?\.restV2\?\.registeredApplication \|\| restV2Apps\[0\] \|\| null,/);
   assert.match(directServicesSource, /esm:\s*hydratedServiceEntries\?\.esm\?\.registeredApplication \|\| esmApps\[0\] \|\| null,/);
   assert.match(directServicesSource, /degradation:\s*hydratedServiceEntries\?\.degradation\?\.registeredApplication \|\| degradationApps\[0\] \|\| null,/);
@@ -1910,6 +1919,8 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.doesNotMatch(popupSource, /function hydratePassVaultServiceCredentials\(/);
   assert.match(compileSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
   assert.match(compileSource, /label:\s*"Saving premium services to VAULT\.\.\."/);
+  assert.match(compileSource, /const persistPromise = persistPassVaultProgrammerRecord\(programmer,\s*mergedServices,\s*\{/);
+  assert.doesNotMatch(compileSource, /await persistPassVaultProgrammerRecord\(programmer,\s*mergedServices,/);
   assert.match(compileSource, /const firstFailure =/);
   assert.match(statementTextSource, /const parsed = JSON\.parse\(normalizedText\)/);
   assert.match(rawFetchSource, /let bulkFallback = null;/);

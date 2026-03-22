@@ -8356,12 +8356,16 @@ function buildPassVaultServiceHydrationEntries({
       existingRecord,
     });
     const appGuid = String(registeredApplication?.guid || "").trim();
+    const cachedClient =
+      normalizeUnderparVaultCredentialEntry((programmerId && appGuid ? loadDcrCache(programmerId, appGuid) : null) || null) ||
+      null;
     const client =
-      compactPassVaultRegisteredApplicationsMatch(registeredApplication, existingService?.registeredApplication) &&
+      cachedClient ||
+      (compactPassVaultRegisteredApplicationsMatch(registeredApplication, existingService?.registeredApplication) &&
       existingService?.client &&
-      typeof existingService.client === "object"
+      typeof existingService.client === "object")
         ? {
-            ...existingService.client,
+            ...(cachedClient || existingService.client),
           }
         : null;
 
@@ -8440,6 +8444,19 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
 
   const programmerId = String(hydrationContext?.programmerId || "").trim();
   const guid = String(registeredApplication?.guid || "").trim();
+  const sharedHydratedApplicationsByGuid =
+    hydrationContext?.sharedHydratedApplicationsByGuid instanceof Map
+      ? hydrationContext.sharedHydratedApplicationsByGuid
+      : null;
+  const sharedClientByGuid =
+    hydrationContext?.sharedClientByGuid instanceof Map ? hydrationContext.sharedClientByGuid : null;
+  const sharedHydratedApplication =
+    guid && sharedHydratedApplicationsByGuid?.has(guid)
+      ? cloneJsonLikeValue(sharedHydratedApplicationsByGuid.get(guid), null)
+      : null;
+  if (sharedHydratedApplication && typeof sharedHydratedApplication === "object") {
+    registeredApplication = sharedHydratedApplication;
+  }
   const applicationLabel = firstNonEmptyString([
     registeredApplication?.name,
     registeredApplication?.label,
@@ -8448,10 +8465,24 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
   ]);
   const now = Date.now();
   const requiredScope = getPassVaultRequiredScopeForService(normalizedDefinition.serviceKey, registeredApplication);
+  const cachedClient =
+    normalizeUnderparVaultDcrCache((programmerId && guid ? loadDcrCache(programmerId, guid) : null) || null) || null;
+  const sharedClient = normalizeUnderparVaultDcrCache((guid ? sharedClientByGuid?.get(guid) : null) || null) || null;
   const nextClient =
-    normalizeUnderparVaultDcrCache(currentRecord?.client || null) || createEmptyUnderparVaultCredential();
+    normalizeUnderparVaultDcrCache(currentRecord?.client || null) ||
+    cachedClient ||
+    sharedClient ||
+    createEmptyUnderparVaultCredential();
 
   nextClient.serviceScope = String(requiredScope || nextClient.serviceScope || "").trim();
+  if (guid && sharedHydratedApplicationsByGuid && !sharedHydratedApplicationsByGuid.has(guid)) {
+    sharedHydratedApplicationsByGuid.set(guid, cloneJsonLikeValue(registeredApplication, null));
+  }
+  if (guid && sharedClientByGuid && (nextClient.clientId || nextClient.clientSecret || nextClient.accessToken)) {
+    sharedClientByGuid.set(guid, {
+      ...nextClient,
+    });
+  }
 
   if (!nextClient.clientId || !nextClient.clientSecret) {
     registeredApplication =
@@ -8465,6 +8496,9 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
             ? hydrationContext.pageContextTargetRef
             : null,
       }).catch(() => registeredApplication)) || registeredApplication;
+    if (guid && sharedHydratedApplicationsByGuid) {
+      sharedHydratedApplicationsByGuid.set(guid, cloneJsonLikeValue(registeredApplication, null));
+    }
 
     const softwareStatement = firstNonEmptyString([
       registeredApplication?.softwareStatement,
@@ -8494,6 +8528,11 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
       nextClient.error = "";
       if (programmerId && guid) {
         saveDcrCache(programmerId, guid, nextClient);
+      }
+      if (guid && sharedClientByGuid) {
+        sharedClientByGuid.set(guid, {
+          ...nextClient,
+        });
       }
     } catch (error) {
       return {
@@ -8541,6 +8580,11 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
       if (programmerId && guid) {
         saveDcrCache(programmerId, guid, nextClient);
       }
+      if (guid && sharedClientByGuid) {
+        sharedClientByGuid.set(guid, {
+          ...nextClient,
+        });
+      }
     } catch (error) {
       return {
         ...currentRecord,
@@ -8557,6 +8601,11 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
     }
   } else if (programmerId && guid) {
     saveDcrCache(programmerId, guid, nextClient);
+  }
+  if (guid && sharedClientByGuid) {
+    sharedClientByGuid.set(guid, {
+      ...nextClient,
+    });
   }
 
   return {
@@ -8587,6 +8636,8 @@ async function hydratePassVaultServiceEntries(entries = {}, serviceKeys = null, 
     hydrationContext?.pageContextTargetRef && typeof hydrationContext.pageContextTargetRef === "object"
       ? hydrationContext.pageContextTargetRef
       : { target: null };
+  const sharedHydratedApplicationsByGuid = new Map();
+  const sharedClientByGuid = new Map();
 
   try {
     for (const definition of definitionsToHydrate) {
@@ -8596,6 +8647,8 @@ async function hydratePassVaultServiceEntries(entries = {}, serviceKeys = null, 
         {
           ...hydrationContext,
           pageContextTargetRef,
+          sharedHydratedApplicationsByGuid,
+          sharedClientByGuid,
         }
       );
     }
@@ -9432,12 +9485,13 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
     const credentialWarningCount = credentialResults.filter((result) => String(result?.error || "").trim()).length;
     const warningCount = credentialWarningCount;
     const hydrationStatus = failedCount > 0 ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_COMPLETE;
-    await persistPassVaultProgrammerRecord(programmer, mergedServices, {
+    const persistPromise = persistPassVaultProgrammerRecord(programmer, mergedServices, {
       source: "live",
       hydrationStatus,
       serviceCredentialResults: credentialResults,
-    });
+    }).catch(() => null);
     if (firstFailure) {
+      void persistPromise;
       throw new Error(
         firstNonEmptyString([
           String(firstFailure?.error || "").trim(),
@@ -9455,6 +9509,9 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       });
     }
     applyMediaCompanyOptionHydrationState();
+    void persistPromise.then(() => {
+      applyMediaCompanyOptionHydrationState();
+    });
     void ensureCmHydratedForProgrammer(programmer, mergedServices, {
       forceRefresh,
       reason: "pass-vault-compilation",
