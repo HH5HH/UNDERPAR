@@ -27706,21 +27706,28 @@ function resolveClickDgrCachedAuthContext(context, requestToken) {
 async function resolveClickDgrAuthContext(context, requestToken, options = {}) {
   const selectedContext = resolveClickDgrSelectedAppContext(context, requestToken);
   const programmer = selectedContext.programmer;
-  const appInfo = selectedContext.appInfo;
+  let appInfo = selectedContext.appInfo;
   const requiredScope = getPreferredDegradationScopeForApp(appInfo) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation;
-  const accessToken = await ensureDcrAccessToken(programmer.programmerId, appInfo, options?.forceFreshToken === true, {
-    service: "degradation-clickdgr",
-    scope: requiredScope,
-    requestorIds: Array.isArray(context?.requestorIds) ? context.requestorIds.slice(0, 24) : [],
-    mvpdIds: Array.isArray(context?.mvpdIds) ? context.mvpdIds.slice(0, 24) : [],
-    requestorId: String(context?.requestorIds?.[0] || selectedContext.requestorId || ""),
-    mvpd: String(context?.mvpdIds?.[0] || ""),
-    appGuid: String(appInfo?.guid || ""),
-    appName: String(appInfo?.appName || appInfo?.guid || ""),
-    source: String(options.source || "sidepanel"),
-    allowProvisioning: true,
-    lockAppSelection: true,
-  });
+  const tokenResult = await ensureDcrAccessTokenWithServiceRecovery(
+    programmer.programmerId,
+    appInfo,
+    options?.forceFreshToken === true,
+    {
+      service: "degradation-clickdgr",
+      scope: requiredScope,
+      requestorIds: Array.isArray(context?.requestorIds) ? context.requestorIds.slice(0, 24) : [],
+      mvpdIds: Array.isArray(context?.mvpdIds) ? context.mvpdIds.slice(0, 24) : [],
+      requestorId: String(context?.requestorIds?.[0] || selectedContext.requestorId || ""),
+      mvpd: String(context?.mvpdIds?.[0] || ""),
+      appGuid: String(appInfo?.guid || ""),
+      appName: String(appInfo?.appName || appInfo?.guid || ""),
+      source: String(options.source || "sidepanel"),
+      allowProvisioning: true,
+      lockAppSelection: true,
+    }
+  );
+  appInfo = tokenResult?.appInfo || appInfo;
+  const accessToken = String(tokenResult?.accessToken || "");
 
   const dcrCache = loadDcrCache(programmer.programmerId, appInfo.guid) || {};
   const clientId = String(dcrCache.clientId || "");
@@ -46447,14 +46454,14 @@ function resolveDegradationAppCandidates(programmerId = "", seedAppInfo = null, 
   const getCandidateAffinity = (appInfo) => {
     const normalizedGuid = String(appInfo?.guid || "").trim();
     let score = 0;
-    if (normalizedPreferredGuid && normalizedGuid === normalizedPreferredGuid) {
-      score += 400;
-    }
     if (normalizedRequestorId && appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) {
       score += 200;
     }
+    if (normalizedPreferredGuid && normalizedGuid === normalizedPreferredGuid) {
+      score += 50;
+    }
     if (normalizedSeedGuid && normalizedGuid === normalizedSeedGuid) {
-      score += 100;
+      score += 25;
     }
     return score;
   };
@@ -46463,6 +46470,12 @@ function resolveDegradationAppCandidates(programmerId = "", seedAppInfo = null, 
     const affinityDelta = getCandidateAffinity(rightApp) - getCandidateAffinity(leftApp);
     if (affinityDelta !== 0) {
       return affinityDelta;
+    }
+    const provisioningDelta =
+      getPassVaultServiceProvisioningRank(normalizedProgrammerId, rightApp) -
+      getPassVaultServiceProvisioningRank(normalizedProgrammerId, leftApp);
+    if (provisioningDelta !== 0) {
+      return provisioningDelta;
     }
     return compareDegradationAppPriority(leftApp, rightApp);
   });
@@ -46889,7 +46902,7 @@ async function degradationPrimeAccessTokenForSelectedApp(panelState, debugMeta =
     throw new Error("Programmer identifier is required.");
   }
 
-  const appInfo = panelState?.appInfo || null;
+  let appInfo = panelState?.appInfo || null;
   if (!appInfo?.guid) {
     throw new Error("No DEGRADATION scoped registered application is selected.");
   }
@@ -46906,7 +46919,7 @@ async function degradationPrimeAccessTokenForSelectedApp(panelState, debugMeta =
     workspaceKey: "degradation-workspace",
     workspaceOrigin: "DEGRADATION Workspace",
   });
-  await ensureDcrAccessToken(programmerId, appInfo, false, {
+  const tokenResult = await ensureDcrAccessTokenWithServiceRecovery(programmerId, appInfo, false, {
     ...debugMeta,
     service: "degradation",
     requiredServiceScope: getPreferredDegradationScopeForApp(appInfo) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
@@ -46914,6 +46927,13 @@ async function degradationPrimeAccessTokenForSelectedApp(panelState, debugMeta =
     allowProvisioning: true,
     lockAppSelection: true,
   });
+  appInfo = tokenResult?.appInfo || appInfo;
+  if (appInfo?.guid) {
+    setDegradationPanelActiveApp(panelState, appInfo, {
+      requestorId,
+      preferredGuid: String(appInfo.guid || "").trim(),
+    });
+  }
   emitDegradationWorkspaceDebugEvent(String(debugMeta?.flowId || "").trim(), {
     phase: "degradation-token-prime-ready",
     requestScope: String(debugMeta?.scope || "degradation-access-token"),
@@ -48656,20 +48676,26 @@ async function degradationBuildCurlCommand(panelState, options = {}) {
     throw new Error("No DEGRADATION scoped registered application is selected for this media company.");
   }
 
-  const accessToken = await ensureDcrAccessToken(activePanelState.programmer.programmerId, selectedApp, false, {
-    service: "degradation-curl",
-    scope: `degradation-curl:${endpointSpec.path}`,
-    requestorId: queryValues.requestorId,
-    mvpd: String(queryValues.mvpd || "").trim(),
-    requiredServiceScope: getPreferredDegradationScopeForApp(selectedApp) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
-    allowProvisioning: true,
-    lockAppSelection: true,
-  });
+  const tokenResult = await ensureDcrAccessTokenWithServiceRecovery(
+    activePanelState.programmer.programmerId,
+    selectedApp,
+    false,
+    {
+      service: "degradation-curl",
+      scope: `degradation-curl:${endpointSpec.path}`,
+      requestorId: queryValues.requestorId,
+      mvpd: String(queryValues.mvpd || "").trim(),
+      requiredServiceScope: getPreferredDegradationScopeForApp(selectedApp) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
+      allowProvisioning: true,
+      lockAppSelection: true,
+    }
+  );
+  const accessToken = String(tokenResult?.accessToken || "").trim();
   const requestUrl = degradationBuildRequestUrl(activePanelState, endpointSpec, queryValues).toString();
 
   return [
     "curl -X GET",
-    `-H ${quoteCurlDoubleQuoted(`Authorization: Bearer ${String(accessToken || "").trim()}`)}`,
+    `-H ${quoteCurlDoubleQuoted(`Authorization: Bearer ${accessToken}`)}`,
     quoteCurlDoubleQuoted(requestUrl),
   ].join(" ");
 }
@@ -64545,18 +64571,194 @@ async function ensureDcrAccessTokenWithEsmRecovery(programmerId, appInfo, forceR
   }
 }
 
+function shouldAttemptAlternatePremiumServiceRecovery(error, appInfo = null, debugMeta = null) {
+  const serviceKey = resolvePremiumServiceKeyForAuth(appInfo, debugMeta);
+  if (serviceKey !== "restV2" && serviceKey !== "degradation") {
+    return false;
+  }
+
+  const message = String(error?.message || error || "").trim().toLowerCase();
+  if (!message) {
+    return false;
+  }
+
+  return (
+    message.includes("software statement") ||
+    message.includes("dcr credentials") ||
+    message.includes("vault yet") ||
+    message.includes("client_id/client_secret") ||
+    message.includes("access_token") ||
+    message.includes("required scope")
+  );
+}
+
+function selectRecoveredPremiumServiceApp(programmerId = "", serviceKey = "", services = null, options = {}) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const normalizedRequestorId = String(options?.requestorId || "").trim();
+  const excludedGuid = String(options?.excludedGuid || "").trim();
+  if (!normalizedProgrammerId || !normalizedServiceKey || !services || typeof services !== "object") {
+    return null;
+  }
+
+  if (normalizedServiceKey === "restV2") {
+    const candidates = collectRestV2AppCandidatesFromPremiumApps(services).filter(
+      (entry) => String(entry?.guid || "").trim() !== excludedGuid
+    );
+    return (
+      selectPreferredRestV2AppForRequestor(candidates, normalizedRequestorId, normalizedProgrammerId) ||
+      candidates[0] ||
+      null
+    );
+  }
+
+  if (normalizedServiceKey === "degradation") {
+    const candidates = resolveDegradationAppCandidates(normalizedProgrammerId, services?.degradation || null, {
+      requestorId: normalizedRequestorId,
+      preferredGuid: "",
+    }).filter((entry) => String(entry?.guid || "").trim() !== excludedGuid);
+    return candidates[0] || null;
+  }
+
+  return null;
+}
+
+function promoteRecoveredPremiumServiceApp(programmerId = "", serviceKey = "", appInfo = null, options = {}) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const normalizedRequestorId = String(options?.requestorId || "").trim();
+  if (!normalizedProgrammerId || !normalizedServiceKey || !appInfo?.guid) {
+    return;
+  }
+
+  const services = getCurrentPremiumAppsSnapshot(normalizedProgrammerId);
+  if (!services || typeof services !== "object") {
+    return;
+  }
+
+  if (normalizedServiceKey === "restV2") {
+    const nextServices = {
+      ...services,
+      restV2: appInfo,
+    };
+    nextServices.restV2Apps = collectPassVaultServiceCredentialCandidates(normalizedProgrammerId, "restV2", nextServices);
+    setCurrentPremiumAppsSnapshot(normalizedProgrammerId, nextServices);
+    if (normalizedRequestorId) {
+      const existingContext = getRequestorScopedRestV2AuthContext(normalizedRequestorId) || {};
+      const existingGuids = Array.isArray(existingContext.candidateGuids) ? existingContext.candidateGuids : [];
+      setRequestorScopedRestV2AuthContext(normalizedRequestorId, {
+        ...existingContext,
+        programmerId: normalizedProgrammerId,
+        preferredAppGuid: String(appInfo.guid || "").trim(),
+        candidateGuids: [...new Set([String(appInfo.guid || "").trim(), ...existingGuids])],
+      });
+    }
+    return;
+  }
+
+  if (normalizedServiceKey === "degradation") {
+    promoteDegradationAppForProgrammer(normalizedProgrammerId, appInfo, {
+      requestorId: normalizedRequestorId,
+      preferredGuid: String(appInfo.guid || "").trim(),
+    });
+  }
+}
+
+async function recoverPremiumServiceSelection(programmerId = "", appInfo = null, debugMeta = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const serviceKey = resolvePremiumServiceKeyForAuth(appInfo, debugMeta);
+  const requestorId = String(debugMeta?.requestorId || "").trim();
+  const failedGuid = String(appInfo?.guid || "").trim();
+  if (!normalizedProgrammerId || !serviceKey) {
+    return null;
+  }
+
+  const programmer =
+    state.programmers.find((item) => String(item?.programmerId || "").trim() === normalizedProgrammerId) || null;
+  if (!programmer) {
+    return null;
+  }
+
+  const compileResult = await queuePassVaultProgrammerCompilation(programmer, getRuntimePremiumServicesSeed(normalizedProgrammerId), {
+    forceRefresh: true,
+    requestorId,
+  });
+  const services = compileResult?.services || getCurrentPremiumAppsSnapshot(normalizedProgrammerId) || null;
+  if (services) {
+    setCurrentPremiumAppsSnapshot(normalizedProgrammerId, services);
+  }
+  await finalizePassVaultProgrammerHydration(programmer, services).catch(() => null);
+
+  const recoveredAppInfo = selectRecoveredPremiumServiceApp(normalizedProgrammerId, serviceKey, services, {
+    requestorId,
+    excludedGuid: failedGuid,
+  });
+  if (!recoveredAppInfo?.guid) {
+    return null;
+  }
+
+  promoteRecoveredPremiumServiceApp(normalizedProgrammerId, serviceKey, recoveredAppInfo, {
+    requestorId,
+  });
+
+  const selectedProgrammer = resolveSelectedProgrammer();
+  if (String(selectedProgrammer?.programmerId || "").trim() === normalizedProgrammerId && services) {
+    renderPremiumServices(getCurrentPremiumAppsSnapshot(normalizedProgrammerId) || services, selectedProgrammer, {
+      controllerReason: `${serviceKey}-auto-recovery`,
+    });
+  }
+
+  return {
+    programmer,
+    services: getCurrentPremiumAppsSnapshot(normalizedProgrammerId) || services,
+    appInfo: recoveredAppInfo,
+  };
+}
+
+async function ensureDcrAccessTokenWithServiceRecovery(programmerId, appInfo, forceRefresh = false, debugMeta = null) {
+  if (isEsmServiceDebugMeta(debugMeta)) {
+    return ensureDcrAccessTokenWithEsmRecovery(programmerId, appInfo, forceRefresh, debugMeta);
+  }
+
+  let resolvedAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, appInfo, debugMeta) || appInfo;
+  try {
+    const accessToken = await ensureDcrAccessToken(programmerId, resolvedAppInfo, forceRefresh, debugMeta);
+    resolvedAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
+    return {
+      accessToken,
+      appInfo: resolvedAppInfo,
+      recovered: false,
+    };
+  } catch (error) {
+    if (!shouldAttemptAlternatePremiumServiceRecovery(error, resolvedAppInfo, debugMeta)) {
+      throw error;
+    }
+    const recovered = await recoverPremiumServiceSelection(programmerId, resolvedAppInfo, debugMeta);
+    const recoveredAppInfo = recovered?.appInfo || null;
+    if (!recoveredAppInfo?.guid || String(recoveredAppInfo.guid || "").trim() === String(resolvedAppInfo?.guid || "").trim()) {
+      throw error;
+    }
+    return {
+      accessToken: await ensureDcrAccessToken(programmerId, recoveredAppInfo, true, debugMeta),
+      appInfo: recoveredAppInfo,
+      services: recovered?.services || null,
+      recovered: true,
+    };
+  }
+}
+
 async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, retryStage = "refresh", debugMeta = null) {
   const debugFlowId = String(debugMeta?.flowId || "").trim();
   const workspaceKey = normalizeWorkspaceDebugKey(debugMeta?.workspaceKey || debugMeta?.workspaceOrigin || "");
   const workspaceOrigin = firstNonEmptyString([debugMeta?.workspaceOrigin, getWorkspaceDebugLabel(workspaceKey)]);
   const forceFreshDcrToken = debugMeta?.forceFreshToken === true;
   let resolvedAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, appInfo, debugMeta) || appInfo;
-  const tokenResult = isEsmServiceDebugMeta(debugMeta)
-    ? await ensureDcrAccessTokenWithEsmRecovery(programmerId, resolvedAppInfo, forceFreshDcrToken, debugMeta)
-    : {
-        accessToken: await ensureDcrAccessToken(programmerId, resolvedAppInfo, forceFreshDcrToken, debugMeta),
-        appInfo: resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo,
-      };
+  const tokenResult = await ensureDcrAccessTokenWithServiceRecovery(
+    programmerId,
+    resolvedAppInfo,
+    forceFreshDcrToken,
+    debugMeta
+  );
   resolvedAppInfo = tokenResult?.appInfo || resolvedAppInfo;
   const token = tokenResult?.accessToken || "";
   const headers = new Headers(options.headers || {});

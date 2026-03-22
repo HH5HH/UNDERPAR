@@ -1838,6 +1838,7 @@ test("REST V2 app selection prefers DCR-ready or software-statement-ready candid
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const selectRestV2Source = extractFunctionSource(popupSource, "selectPreferredRestV2AppForRequestor");
   const loadMvpdsSource = extractFunctionSource(popupSource, "loadMvpdsFromRestV2");
+  const fetchWithPremiumAuthSource = extractFunctionSource(popupSource, "fetchWithPremiumAuth");
 
   assert.match(selectRestV2Source, /hasPassVaultServiceClientCredentials\(normalizedProgrammerId, appInfo\)/);
   assert.match(selectRestV2Source, /extractSoftwareStatementFromAppData\(appInfo\?\.appData \|\| null\)/);
@@ -1848,6 +1849,22 @@ test("REST V2 app selection prefers DCR-ready or software-statement-ready candid
   assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
   assert.match(loadMvpdsSource, /await primeProgrammerServiceHydration\(programmer,\s*premiumApps,\s*\{/);
   assert.match(loadMvpdsSource, /requestorId,/);
+  assert.match(fetchWithPremiumAuthSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
+});
+
+test("degradation selection and DCR auth recovery no longer stay pinned to invalid apps", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const resolveDegradationSource = extractFunctionSource(popupSource, "resolveDegradationAppCandidates");
+  const recoverSource = extractFunctionSource(popupSource, "ensureDcrAccessTokenWithServiceRecovery");
+  const clickDgrAuthSource = extractFunctionSource(popupSource, "resolveClickDgrAuthContext");
+  const degradationCurlSource = extractFunctionSource(popupSource, "degradationBuildCurlCommand");
+
+  assert.match(resolveDegradationSource, /getPassVaultServiceProvisioningRank\(normalizedProgrammerId,\s*rightApp\)/);
+  assert.match(resolveDegradationSource, /if \(normalizedPreferredGuid && normalizedGuid === normalizedPreferredGuid\) \{\s*score \+= 50;/);
+  assert.match(recoverSource, /shouldAttemptAlternatePremiumServiceRecovery\(error,\s*resolvedAppInfo,\s*debugMeta\)/);
+  assert.match(recoverSource, /recoverPremiumServiceSelection\(programmerId,\s*resolvedAppInfo,\s*debugMeta\)/);
+  assert.match(clickDgrAuthSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
+  assert.match(degradationCurlSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
 });
 
 test("activation leaves the global selectors user-owned and premium hydration starts only after explicit selection", () => {
