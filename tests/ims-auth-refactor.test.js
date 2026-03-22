@@ -1840,10 +1840,12 @@ test("pass vault compilation detects premium apps first, preserves detected orde
   assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"esm",\s*services\)/);
   assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"degradation",\s*services\)/);
   assert.doesNotMatch(collectCandidatesSource, /getPassVaultServiceProvisioningRank/);
-  assert.doesNotMatch(collectCandidatesSource, /forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
+  assert.match(collectCandidatesSource, /services\.restV2Apps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
+  assert.match(collectCandidatesSource, /services\.esmApps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
+  assert.match(collectCandidatesSource, /services\.degradationApps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
   assert.match(credentialCoverageSource, /hasPassVaultServiceClientCredentials\(normalizedProgrammerId,\s*task\?\.appInfo \|\| null\)/);
-  assert.match(hydrateCredentialsSource, /const appInfo = task\?\.appInfo \|\| null;/);
-  assert.doesNotMatch(hydrateCredentialsSource, /for \(const appInfo of appCandidates\)/);
+  assert.match(hydrateCredentialsSource, /const appCandidates = Array\.isArray\(task\?\.appCandidates\)/);
+  assert.match(hydrateCredentialsSource, /for \(const appInfo of appCandidates\)/);
   assert.match(hydrateCredentialsSource, /promoteResolvedServiceApp\(task\.serviceKey,\s*appInfo\)/);
   assert.doesNotMatch(esmSelectionSource, /pickHighestRankedPassVaultServiceCandidate/);
   assert.match(esmSelectionSource, /return candidates\[0\] \|\| null;/);
@@ -1851,6 +1853,22 @@ test("pass vault compilation detects premium apps first, preserves detected orde
   assert.match(compileSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
   assert.match(compileSource, /label:\s*"Saving premium services to VAULT\.\.\."/);
   assert.match(compileSource, /label:\s*"Finishing premium service hydration\.\.\."/);
+});
+
+test("premium services reuse the mounted DOM when the selected service signature has not changed", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const renderSource = extractFunctionSource(popupSource, "renderPremiumServices");
+  const signatureSource = extractFunctionSource(popupSource, "buildPremiumServicesRenderSignature");
+  const refreshExistingSource = extractFunctionSource(popupSource, "refreshExistingPremiumServiceSections");
+
+  assert.match(signatureSource, /const selectedRequestorId = String\(state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
+  assert.match(signatureSource, /const selectedMvpdId = String\(state\.selectedMvpdId \|\| ""\)\.trim\(\);/);
+  assert.match(renderSource, /const renderSignature = buildPremiumServicesRenderSignature\(programmer,\s*services\);/);
+  assert.match(renderSource, /els\.premiumServicesContainer\.dataset\.renderSignature/);
+  assert.match(renderSource, /refreshExistingPremiumServiceSections\(programmer,\s*services\)/);
+  assert.match(refreshExistingSource, /syncRestV2LoginPanel\(section,\s*programmer,\s*serviceApp\)/);
+  assert.match(refreshExistingSource, /syncMvpdWorkspaceToolForSection\(section,\s*programmer,\s*services\)/);
+  assert.match(refreshExistingSource, /section\.__underparRefreshCm/);
 });
 
 test("REST V2 app selection preserves detected order while still reusing requestor-scoped app context", () => {

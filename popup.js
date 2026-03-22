@@ -8141,18 +8141,18 @@ function collectPassVaultServiceCredentialCandidates(programmerId = "", serviceK
 
   if (normalizedServiceKey === "restV2") {
     pushCandidate(services?.restV2 || null);
-    if (candidates.length === 0 && Array.isArray(services?.restV2Apps)) {
-      pushCandidate(services.restV2Apps[0] || null);
+    if (Array.isArray(services?.restV2Apps)) {
+      services.restV2Apps.forEach((appInfo) => pushCandidate(appInfo));
     }
   } else if (normalizedServiceKey === "esm") {
     pushCandidate(services?.esm || null);
-    if (candidates.length === 0 && Array.isArray(services?.esmApps)) {
-      pushCandidate(services.esmApps[0] || null);
+    if (Array.isArray(services?.esmApps)) {
+      services.esmApps.forEach((appInfo) => pushCandidate(appInfo));
     }
   } else if (normalizedServiceKey === "degradation") {
     pushCandidate(services?.degradation || null);
-    if (candidates.length === 0 && Array.isArray(services?.degradationApps)) {
-      pushCandidate(services.degradationApps[0] || null);
+    if (Array.isArray(services?.degradationApps)) {
+      services.degradationApps.forEach((appInfo) => pushCandidate(appInfo));
     }
   }
 
@@ -8878,9 +8878,14 @@ async function hydratePassVaultServiceCredentials(programmer, services = null, o
 
   const results = await Promise.all(
     tasks.map(async (task) => {
-      const appInfo = task?.appInfo || null;
-      const guid = String(appInfo?.guid || "").trim();
-      if (!guid) {
+      const appCandidates = Array.isArray(task?.appCandidates)
+        ? task.appCandidates.filter((appInfo) => appInfo?.guid)
+        : [];
+      const fallbackAppInfo = task?.appInfo || null;
+      if (appCandidates.length === 0 && fallbackAppInfo?.guid) {
+        appCandidates.push(fallbackAppInfo);
+      }
+      if (appCandidates.length === 0) {
         return {
           serviceKey: task?.serviceKey || "",
           appGuid: "",
@@ -8888,29 +8893,43 @@ async function hydratePassVaultServiceCredentials(programmer, services = null, o
           error: "Registered application details are missing.",
         };
       }
-      try {
-        await ensureDcrAccessToken(programmer.programmerId, appInfo, forceRefresh, {
-          service: task.serviceKey,
-          requiredServiceScope: getPassVaultRequiredScopeForService(task.serviceKey, appInfo),
-          scope: getPassVaultRequiredScopeForService(task.serviceKey, appInfo),
-          appGuid: guid,
-          allowProvisioning: true,
-          lockAppSelection: true,
-        });
-        promoteResolvedServiceApp(task.serviceKey, appInfo);
-        return {
-          serviceKey: task.serviceKey,
-          appGuid: guid,
-          cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, guid) || null),
-        };
-      } catch (error) {
-        return {
-          serviceKey: task.serviceKey,
-          appGuid: guid,
-          cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, guid) || null),
-          error: error instanceof Error ? error.message : String(error),
-        };
+
+      let lastResult = {
+        serviceKey: task?.serviceKey || "",
+        appGuid: "",
+        cache: null,
+        error: "Registered application details are missing.",
+      };
+      for (const appInfo of appCandidates) {
+        const guid = String(appInfo?.guid || "").trim();
+        if (!guid) {
+          continue;
+        }
+        try {
+          await ensureDcrAccessToken(programmer.programmerId, appInfo, forceRefresh, {
+            service: task.serviceKey,
+            requiredServiceScope: getPassVaultRequiredScopeForService(task.serviceKey, appInfo),
+            scope: getPassVaultRequiredScopeForService(task.serviceKey, appInfo),
+            appGuid: guid,
+            allowProvisioning: true,
+            lockAppSelection: true,
+          });
+          promoteResolvedServiceApp(task.serviceKey, appInfo);
+          return {
+            serviceKey: task.serviceKey,
+            appGuid: guid,
+            cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, guid) || null),
+          };
+        } catch (error) {
+          lastResult = {
+            serviceKey: task.serviceKey,
+            appGuid: guid,
+            cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, guid) || null),
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
       }
+      return lastResult;
     })
   );
 
@@ -49881,6 +49900,9 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
 
   const section = document.createElement("article");
   section.className = `metadata-section premium-service-section ${PREMIUM_SERVICE_THEME_CLASS_BY_KEY[serviceKey] || ""}`;
+  section.dataset.programmerId = String(programmer?.programmerId || "").trim();
+  section.dataset.serviceKey = String(serviceKey || "").trim();
+  section.dataset.appGuid = String(resolvedServiceApp?.guid || "").trim();
   const restV2LoginToolHtml =
     serviceKey === "restV2"
       ? `
@@ -50066,6 +50088,49 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
   return section;
 }
 
+function buildPremiumServicesRenderSignature(programmer = null, services = null) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  if (!programmerId || !services || typeof services !== "object") {
+    return "";
+  }
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  const selectedMvpdId = String(state.selectedMvpdId || "").trim();
+  const availableKeys = getDetectedPremiumServiceKeys(services);
+  const serviceSegments = availableKeys.map((serviceKey) => {
+    const appInfo = serviceKey === "esmWorkspace" ? services?.esm : services?.[serviceKey];
+    const appGuid = String(appInfo?.guid || "").trim();
+    return `${serviceKey}:${appGuid}`;
+  });
+  return [programmerId, selectedRequestorId, selectedMvpdId, ...serviceSegments].join("|");
+}
+
+function refreshExistingPremiumServiceSections(programmer, services = null) {
+  if (!els.premiumServicesContainer || !programmer?.programmerId || !services || typeof services !== "object") {
+    return;
+  }
+
+  const sections = els.premiumServicesContainer.querySelectorAll(".premium-service-section");
+  sections.forEach((section) => {
+    if (!(section instanceof HTMLElement)) {
+      return;
+    }
+    const serviceKey = String(section.dataset.serviceKey || "").trim();
+    if (!serviceKey) {
+      return;
+    }
+    const serviceApp = serviceKey === "esmWorkspace" ? services?.esm || null : services?.[serviceKey] || null;
+    section.dataset.appGuid = String(serviceApp?.guid || "").trim();
+    if (serviceKey === "restV2") {
+      syncRestV2LoginPanel(section, programmer, serviceApp);
+      syncMvpdWorkspaceToolForSection(section, programmer, services);
+      return;
+    }
+    if ((serviceKey === "cm" || serviceKey === "cmMvpd") && typeof section.__underparRefreshCm === "function") {
+      void section.__underparRefreshCm();
+    }
+  });
+}
+
 function renderPremiumServicesLoading(programmer, options = {}) {
   renderHrSections(null, programmer, { loading: true });
   if (!els.premiumServicesContainer) {
@@ -50097,6 +50162,7 @@ function renderPremiumServicesLoading(programmer, options = {}) {
       : getProgrammerPremiumHydrationProgress(String(programmer?.programmerId || "").trim());
   const progressLabel = String(hydrationProgress?.label || "").trim();
   const displayLabel = progressLabel || label;
+  delete els.premiumServicesContainer.dataset.renderSignature;
   els.premiumServicesContainer.innerHTML = `<p class="metadata-empty">${escapeHtml(displayLabel)}</p>`;
 }
 
@@ -50122,6 +50188,7 @@ function renderPremiumServicesError(error, options = {}) {
   degradationWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), null, 0, {
     controllerReason,
   });
+  delete els.premiumServicesContainer.dataset.renderSignature;
   els.premiumServicesContainer.innerHTML = `<p class="metadata-empty service-error">${escapeHtml(reason)}</p>`;
 }
 
@@ -50414,6 +50481,7 @@ function renderPremiumServices(services, programmer = null, options = {}) {
       profiles: [],
       updatedAt: Date.now(),
     });
+    delete els.premiumServicesContainer.dataset.renderSignature;
     els.premiumServicesContainer.innerHTML = programmer?.programmerId
       ? '<p class="metadata-empty">No premium scoped applications loaded yet.</p>'
       : '<p class="metadata-empty">Select a Media Company to load premium scoped applications.</p>';
@@ -50437,8 +50505,20 @@ function renderPremiumServices(services, programmer = null, options = {}) {
     esmContainerVisible: hasEsmContainer,
   });
   if (availableKeys.length === 0) {
+    delete els.premiumServicesContainer.dataset.renderSignature;
     els.premiumServicesContainer.innerHTML =
       '<p class="metadata-empty">No premium scoped applications found for this media company.</p>';
+    return;
+  }
+
+  const renderSignature = buildPremiumServicesRenderSignature(programmer, services);
+  if (
+    renderSignature &&
+    String(els.premiumServicesContainer.dataset.renderSignature || "") === renderSignature
+  ) {
+    refreshExistingPremiumServiceSections(programmer, services);
+    refreshMvpdWorkspaceTools();
+    refreshRestV2LoginPanels();
     return;
   }
 
@@ -50448,6 +50528,7 @@ function renderPremiumServices(services, programmer = null, options = {}) {
     const section = createPremiumServiceSection(programmer, serviceKey, appInfo);
     els.premiumServicesContainer.appendChild(section);
   }
+  els.premiumServicesContainer.dataset.renderSignature = renderSignature;
   refreshMvpdWorkspaceTools();
   refreshRestV2LoginPanels();
 }
