@@ -1064,6 +1064,7 @@ test("media-company selection and vault rehydrate share the same programmer hydr
   const selectProgrammerSource = extractFunctionSource(popupSource, "selectProgrammerForController");
   const premiumDetectionSource = extractFunctionSource(popupSource, "findPremiumServiceApplications");
   const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+  const applySnapshotSource = extractFunctionSource(popupSource, "applyGlobalSelectionSnapshot");
   const devtoolsRehydrateSource = extractFunctionSource(popupSource, "rehydratePassVaultMediaCompanyFromDevtools");
   const mediaCompanyChangeBlock = popupSource.match(
     /els\.mediaCompanySelect\.addEventListener\("change",[\s\S]*?void hydrateProgrammerSelection\(selectedProgrammer,\s*\{[\s\S]*?controllerReason,[\s\S]*?\}\);[\s\S]*?\}\);/
@@ -1078,15 +1079,14 @@ test("media-company selection and vault rehydrate share the same programmer hydr
   assert.match(hydrateSelectionSource, /ensureSelectedProgrammerApplicationsLoaded\(selectedProgrammer,\s*\{/);
   assert.match(hydrateSelectionSource, /await refreshProgrammerPanels\(\{/);
   assert.match(hydrateSelectionSource, /programmerApplicationsPromise,/);
-  assert.match(refreshPanelsSource, /const selectedRequestorId = String\(state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
-  assert.match(
-    premiumDetectionSource,
-    /services\.esm =[\s\S]*selectPreferredEsmAppForRequestor\(services\.esmApps,\s*normalizedRequestorId,\s*normalizedProgrammerId\)[\s\S]*services\.esmApps\[0\]/
-  );
-  assert.match(
-    premiumDetectionSource,
-    /services\.restV2 =[\s\S]*selectPreferredRestV2AppForRequestor\(services\.restV2Apps,\s*normalizedRequestorId,\s*normalizedProgrammerId\)[\s\S]*services\.restV2Apps\[0\]/
-  );
+  assert.doesNotMatch(refreshPanelsSource, /const selectedRequestorId = String\(state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
+  assert.doesNotMatch(refreshPanelsSource, /requestorId:\s*selectedRequestorId/);
+  assert.doesNotMatch(premiumDetectionSource, /selectPreferredEsmAppForRequestor\(/);
+  assert.doesNotMatch(premiumDetectionSource, /selectPreferredRestV2AppForRequestor\(/);
+  assert.match(premiumDetectionSource, /services\.esm = services\.esmApps\[0\] \|\| null;/);
+  assert.match(premiumDetectionSource, /services\.restV2 = services\.restV2Apps\[0\] \|\| null;/);
+  assert.doesNotMatch(applySnapshotSource, /autoSelectFirstRequestor/);
+  assert.doesNotMatch(applySnapshotSource, /fallbackRequestorId/);
   assert.match(refreshPanelsSource, /options\.programmerApplicationsPromise && typeof options\.programmerApplicationsPromise\.then === "function"/);
   assert.match(devtoolsRehydrateSource, /await hydrateProgrammerSelection\(programmer,\s*\{[\s\S]*forcePremiumRefresh:\s*true,/);
   assert.doesNotMatch(devtoolsRehydrateSource, /clearSelectedProgrammerUiForVaultRehydrate\(/);
@@ -1094,13 +1094,13 @@ test("media-company selection and vault rehydrate share the same programmer hydr
   assert.ok(mediaCompanyChangeBlock);
 });
 
-test("requestor change waits for requestor-aware premium hydration before loading MVPDs", () => {
+test("requestor change waits for programmer refresh before loading MVPDs", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const requestorChangeBlock = popupSource.match(
     /els\.requestorSelect\.addEventListener\("change",[\s\S]*?await refreshProgrammerPanels\(\{[\s\S]*controllerReason:\s*"requestor-change"[\s\S]*\}\);[\s\S]*?await populateMvpdSelectForRequestor\(state\.selectedRequestorId\);[\s\S]*?\}\);/
   );
 
-  assert.ok(requestorChangeBlock, "requestor change handler should await requestor-aware hydration before MVPD load");
+  assert.ok(requestorChangeBlock, "requestor change handler should await programmer refresh before MVPD load");
 });
 
 test("active auth and bootstrap flows no longer fall back to cookie-session activation", () => {
@@ -1488,7 +1488,8 @@ test("media company selection uses cached live AdobePass apps or direct applicat
   assert.doesNotMatch(refreshPanelsSource, /hydrateProgrammerFromPassVault\(/);
   assert.match(refreshPanelsSource, /buildPassVaultRuntimeServicesSnapshot\(vaultRecord\)/);
   assert.match(refreshPanelsSource, /buildPassVaultApplicationsSnapshotFromRegisteredApplications/);
-  assert.match(ensurePremiumAppsSource, /const selectedRequestorId = String\(options\?\.requestorId \|\| state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /const selectedRequestorId = String\(options\?\.requestorId \|\| state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /requestorId:/);
   assert.match(ensurePremiumAppsSource, /const cachedApplications = getCurrentProgrammerApplicationsSnapshot\(programmer\.programmerId\)/);
   assert.match(ensurePremiumAppsSource, /!isPassVaultBackedValue\(cachedApplications\)/);
   assert.match(ensurePremiumAppsSource, /phase: "premium-service-runtime-hit"/);
@@ -1876,12 +1877,12 @@ test("premium UI waits for DCR-ready selected services and pass-vault compilatio
   assert.match(loadEsmSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*resolvedAppInfo\)/);
 });
 
-test("pass vault compilation uses normalized registered-app order, keeps sticky selected apps, and hydrates only the selected service apps", () => {
+test("pass vault compilation uses normalized registered-app order, resolves selected service apps, and hydrates only the selected service apps", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
   const orderedCandidatesSource = extractFunctionSource(popupSource, "buildOrderedPremiumServiceCandidates");
   const mergeServicesSource = extractFunctionSource(popupSource, "mergeDetectedPassVaultServices");
-  const stickySelectionSource = extractFunctionSource(popupSource, "selectStickyPremiumServiceCandidate");
+  const resolvedSelectionSource = extractFunctionSource(popupSource, "selectResolvedPremiumServiceCandidate");
   const esmSelectionSource = extractFunctionSource(popupSource, "selectPreferredEsmAppForRequestor");
   const credentialTasksSource = extractFunctionSource(popupSource, "getPassVaultCredentialTasks");
   const collectCandidatesSource = extractFunctionSource(popupSource, "collectPassVaultServiceCredentialCandidates");
@@ -1897,13 +1898,13 @@ test("pass vault compilation uses normalized registered-app order, keeps sticky 
   assert.match(mergeServicesSource, /restV2Apps = mergeUniquePremiumServiceAppInfos\(/);
   assert.match(mergeServicesSource, /esmApps = mergeUniquePremiumServiceAppInfos\(/);
   assert.match(mergeServicesSource, /degradationApps = mergeUniquePremiumServiceAppInfos\(/);
-  assert.match(stickySelectionSource, /if \(currentMatch && !normalizedRequestorId\) \{/);
-  assert.match(stickySelectionSource, /const currentRank = getPassVaultServiceProvisioningRank\(programmerId,\s*currentMatch\)/);
-  assert.match(stickySelectionSource, /const preferredRank = getPassVaultServiceProvisioningRank\(programmerId,\s*preferredMatch\)/);
-  assert.match(mergeServicesSource, /restV2: selectStickyPremiumServiceCandidate\(/);
-  assert.match(mergeServicesSource, /esm: selectStickyPremiumServiceCandidate\(/);
-  assert.match(mergeServicesSource, /degradation: selectStickyPremiumServiceCandidate\(/);
-  assert.match(mergeServicesSource, /resetTempPass: selectStickyPremiumServiceCandidate\(/);
+  assert.doesNotMatch(resolvedSelectionSource, /normalizedRequestorId/);
+  assert.match(resolvedSelectionSource, /const currentRank = getPassVaultServiceProvisioningRank\(programmerId,\s*currentMatch\)/);
+  assert.match(resolvedSelectionSource, /const preferredRank = getPassVaultServiceProvisioningRank\(programmerId,\s*preferredMatch\)/);
+  assert.match(mergeServicesSource, /restV2: selectResolvedPremiumServiceCandidate\(/);
+  assert.match(mergeServicesSource, /esm: selectResolvedPremiumServiceCandidate\(/);
+  assert.match(mergeServicesSource, /degradation: selectResolvedPremiumServiceCandidate\(/);
+  assert.match(mergeServicesSource, /resetTempPass: selectResolvedPremiumServiceCandidate\(/);
   assert.match(credentialTasksSource, /pushTask\("restV2",\s*services\?\.restV2\?\.guid \? \[services\.restV2\] : \[\]\)/);
   assert.match(credentialTasksSource, /pushTask\("esm",\s*services\?\.esm\?\.guid \? \[services\.esm\] : \[\]\)/);
   assert.match(credentialTasksSource, /pushTask\("degradation",\s*services\?\.degradation\?\.guid \? \[services\.degradation\] : \[\]\)/);
@@ -1976,7 +1977,7 @@ test("ESM recovery excludes the failed app, promotes the recovered app, and lock
   assert.match(recoverSelectionSource, /const excludedGuid = String\(options\?\.excludedGuid \|\| ""\)\.trim\(\);/);
   assert.match(
     recoverSelectionSource,
-    /collectEsmAppCandidatesFromPremiumApps\(services\)\.filter\(\s*\(appInfo\) => String\(appInfo\?\.guid \|\| ""\)\.trim\(\) !== excludedGuid\s*\)/
+    /collectEsmAppCandidatesFromPremiumApps\(services\)\.find\(\s*\(appInfo\) => String\(appInfo\?\.guid \|\| ""\)\.trim\(\) !== excludedGuid\s*\)/
   );
   assert.match(recoverSelectionSource, /esm:\s*recoveredAppInfo,/);
   assert.match(recoverSelectionSource, /esmApps:\s*collectEsmAppCandidatesFromPremiumApps\(/);

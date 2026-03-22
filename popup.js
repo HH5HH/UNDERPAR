@@ -720,7 +720,6 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
   const controllerReason = String(options?.controllerReason || "").trim();
   const requestToken = Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0));
   const forceRefresh = options?.forceRefresh === true;
-  const requestorId = String(options?.requestorId || state.selectedRequestorId || "").trim();
   const seedServices =
     services && typeof services === "object" && !Array.isArray(services)
       ? services
@@ -729,7 +728,6 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
   const workPromise = (async () => {
     const compileResult = await queuePassVaultProgrammerCompilation(programmer, seedServices, {
       forceRefresh,
-      requestorId,
     }).catch(() => null);
     let runtimeServices =
       (compileResult?.services && typeof compileResult.services === "object" ? compileResult.services : null) ||
@@ -8776,7 +8774,7 @@ function mergeUniquePremiumServiceAppInfos(...collections) {
   return merged;
 }
 
-function selectStickyPremiumServiceCandidate(candidates = [], currentApp = null, preferredApp = null, programmerId = "", options = {}) {
+function selectResolvedPremiumServiceCandidate(candidates = [], currentApp = null, preferredApp = null, programmerId = "") {
   const normalizedCandidates = Array.isArray(candidates) ? candidates.filter((appInfo) => appInfo?.guid) : [];
   if (normalizedCandidates.length === 0) {
     return null;
@@ -8785,10 +8783,6 @@ function selectStickyPremiumServiceCandidate(candidates = [], currentApp = null,
   const currentGuid = String(currentApp?.guid || "").trim();
   const currentMatch =
     currentGuid ? normalizedCandidates.find((appInfo) => String(appInfo?.guid || "").trim() === currentGuid) || null : null;
-  const normalizedRequestorId = String(options?.requestorId || "").trim();
-  if (currentMatch && !normalizedRequestorId) {
-    return currentMatch;
-  }
 
   const preferredGuid = String(preferredApp?.guid || "").trim();
   const preferredMatch =
@@ -8808,10 +8802,8 @@ function selectStickyPremiumServiceCandidate(candidates = [], currentApp = null,
 
 function mergeDetectedPassVaultServices(programmer, services = null, applicationsSnapshot = {}, options = {}) {
   const programmerId = String(programmer?.programmerId || "").trim();
-  const requestorId = String(options?.requestorId || "").trim();
   const detectedServices = findPremiumServiceApplications(programmer?.applications || [], applicationsSnapshot, {
     programmerId,
-    requestorId,
   });
   const currentServices = services && typeof services === "object" ? services : {};
   const restV2Apps = mergeUniquePremiumServiceAppInfos(
@@ -8831,59 +8823,37 @@ function mergeDetectedPassVaultServices(programmer, services = null, application
     detectedServices?.degradation,
     currentServices?.degradationApps,
     currentServices?.degradation
-  ).sort(compareDegradationAppPriority);
+  );
   const resetTempPassApps = mergeUniquePremiumServiceAppInfos(
     detectedServices?.resetTempPassApps,
     detectedServices?.resetTempPass,
     currentServices?.resetTempPassApps,
     currentServices?.resetTempPass
   );
-  const preferredRestV2 =
-    selectPreferredRestV2AppForRequestor(restV2Apps, requestorId, programmerId) || restV2Apps[0] || null;
-  const preferredEsm =
-    selectPreferredEsmAppForRequestor(esmApps, requestorId, programmerId) || esmApps[0] || null;
-  const preferredDegradation =
-    (requestorId
-      ? degradationApps.find((appInfo) => appSupportsServiceProvider(appInfo, requestorId, programmerId))
-      : null) ||
-    degradationApps[0] ||
-    null;
-  const preferredResetTempPass =
-    (requestorId
-      ? resetTempPassApps.find((appInfo) => appSupportsServiceProvider(appInfo, requestorId, programmerId))
-      : null) ||
-    resetTempPassApps[0] ||
-    null;
+  const preferredRestV2 = restV2Apps[0] || null;
+  const preferredEsm = esmApps[0] || null;
+  const preferredDegradation = degradationApps[0] || null;
+  const preferredResetTempPass = resetTempPassApps[0] || null;
 
   return {
     ...currentServices,
     restV2Apps,
-    restV2: selectStickyPremiumServiceCandidate(restV2Apps, currentServices?.restV2 || null, preferredRestV2, programmerId, {
-      requestorId,
-    }),
+    restV2: selectResolvedPremiumServiceCandidate(restV2Apps, currentServices?.restV2 || null, preferredRestV2, programmerId),
     esmApps,
-    esm: selectStickyPremiumServiceCandidate(esmApps, currentServices?.esm || null, preferredEsm, programmerId, {
-      requestorId,
-    }),
+    esm: selectResolvedPremiumServiceCandidate(esmApps, currentServices?.esm || null, preferredEsm, programmerId),
     degradationApps,
-    degradation: selectStickyPremiumServiceCandidate(
+    degradation: selectResolvedPremiumServiceCandidate(
       degradationApps,
       currentServices?.degradation || null,
       preferredDegradation,
-      programmerId,
-      {
-        requestorId,
-      }
+      programmerId
     ),
     resetTempPassApps,
-    resetTempPass: selectStickyPremiumServiceCandidate(
+    resetTempPass: selectResolvedPremiumServiceCandidate(
       resetTempPassApps,
       currentServices?.resetTempPass || null,
       preferredResetTempPass,
-      programmerId,
-      {
-        requestorId,
-      }
+      programmerId
     ),
   };
 }
@@ -8899,9 +8869,7 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
       ? options.requiredServiceKeys
       : PREMIUM_REQUIRED_SERVICE_KEYS;
   let applicationsSnapshot = getCurrentProgrammerApplicationsSnapshot(programmerId) || {};
-  let resolvedServices = mergeDetectedPassVaultServices(programmer, services, applicationsSnapshot, {
-    requestorId: String(options?.requestorId || "").trim(),
-  });
+  let resolvedServices = mergeDetectedPassVaultServices(programmer, services, applicationsSnapshot);
 
   const missingServiceKeys = getMissingRequiredPremiumServiceKeys(resolvedServices, requiredServiceKeys);
   if (missingServiceKeys.length > 0 && Object.keys(applicationsSnapshot || {}).length > 0) {
@@ -10105,13 +10073,10 @@ async function applyGlobalSelectionSnapshot(snapshot = null, options = {}) {
 
   const availableRequestorIds = Array.isArray(programmer.requestorIds) ? programmer.requestorIds : [];
   const explicitRequestorId = String(snapshot?.requestorId || "").trim();
-  const fallbackRequestorId =
-    options?.autoSelectFirstRequestor === true ? String(availableRequestorIds[0] || "").trim() : "";
-  const requestorId = firstNonEmptyString([explicitRequestorId, fallbackRequestorId]);
-  if (requestorId && availableRequestorIds.includes(requestorId)) {
-    state.selectedRequestorId = requestorId;
+  if (explicitRequestorId && availableRequestorIds.includes(explicitRequestorId)) {
+    state.selectedRequestorId = explicitRequestorId;
     if (els.requestorSelect) {
-      els.requestorSelect.value = requestorId;
+      els.requestorSelect.value = explicitRequestorId;
     }
     result.requestorRestored = true;
   }
@@ -10123,7 +10088,7 @@ async function applyGlobalSelectionSnapshot(snapshot = null, options = {}) {
   });
 
   if (result.requestorRestored) {
-    await populateMvpdSelectForRequestor(requestorId);
+    await populateMvpdSelectForRequestor(explicitRequestorId);
   }
 
   const explicitMvpdId = String(snapshot?.mvpdId || "").trim();
@@ -10296,7 +10261,6 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
         restoreResult = await applyGlobalSelectionSnapshot(selectionSnapshot, {
           controllerReason: "environment-switch",
           mvpdControllerReason: "environment-switch-mvpd-restore",
-          autoSelectFirstRequestor: options?.autoSelectFirstRequestor === true,
           autoSelectFirstMvpd: options?.autoSelectFirstMvpd === true,
         });
       }
@@ -47500,14 +47464,12 @@ async function applyDegradationQuickSetPreset(panelState, presetKey = "", option
       source: "degradation-quick-set",
       restoreSelection: true,
       selectionSnapshot,
-      autoSelectFirstRequestor: true,
       autoSelectFirstMvpd: options?.autoSelectFirstMvpd === true,
     });
   } else {
     restoreResult = await applyGlobalSelectionSnapshot(selectionSnapshot, {
       controllerReason: "degradation-quick-set",
       mvpdControllerReason: "degradation-quick-set-mvpd-restore",
-      autoSelectFirstRequestor: true,
       autoSelectFirstMvpd: options?.autoSelectFirstMvpd === true,
     });
   }
@@ -60501,7 +60463,6 @@ async function refreshProgrammerPanels(options = {}) {
   const forcePremiumRefresh = options.forcePremiumRefresh === true;
   const skipCmBootstrap = options.skipCmBootstrap === true;
   const controllerReason = String(options?.controllerReason || "").trim();
-  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const requestToken = ++state.premiumPanelRequestToken;
   const cmMvpdSelectionKey = buildCurrentCmMvpdSelectionKey(programmer);
   if (forcePremiumRefresh) {
@@ -60531,7 +60492,6 @@ async function refreshProgrammerPanels(options = {}) {
       forceRefresh: forcePremiumRefresh,
       allowTemporaryPageContextTab: false,
       preferredTabId: retainedConsoleTabId,
-      requestorId: selectedRequestorId,
       applicationsData,
     })
   );
@@ -60741,7 +60701,6 @@ async function refreshProgrammerPanels(options = {}) {
           forceRefresh: forcePremiumRefresh,
           controllerReason: controllerReason || "panel-selection",
           requestToken,
-          requestorId: selectedRequestorId,
         }).catch(() => null);
     const earlyHydratedServices = await settlePromiseWithin(
       serviceHydrationPromise,
@@ -63389,8 +63348,6 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
 }
 
 function findPremiumServiceApplications(applicationsArray, applicationsData, options = {}) {
-  const normalizedProgrammerId = String(options?.programmerId || "").trim();
-  const normalizedRequestorId = String(options?.requestorId || "").trim();
   const services = {
     degradation: null,
     degradationApps: [],
@@ -63420,35 +63377,14 @@ function findPremiumServiceApplications(applicationsArray, applicationsData, opt
   }
 
   if (services.degradationApps.length > 0) {
-    services.degradationApps.sort(compareDegradationAppPriority);
-    services.degradation =
-      (normalizedRequestorId
-        ? services.degradationApps.find((appInfo) =>
-            appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)
-          )
-        : null) ||
-      services.degradationApps[0] ||
-      null;
+    services.degradation = services.degradationApps[0] || null;
   } else {
     services.degradation = null;
   }
 
-  services.esm =
-    selectPreferredEsmAppForRequestor(services.esmApps, normalizedRequestorId, normalizedProgrammerId) ||
-    services.esmApps[0] ||
-    null;
-  services.resetTempPass =
-    (normalizedRequestorId
-      ? services.resetTempPassApps.find((appInfo) =>
-          appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)
-        )
-      : null) ||
-    services.resetTempPassApps[0] ||
-    null;
-  services.restV2 =
-    selectPreferredRestV2AppForRequestor(services.restV2Apps, normalizedRequestorId, normalizedProgrammerId) ||
-    services.restV2Apps[0] ||
-    null;
+  services.esm = services.esmApps[0] || null;
+  services.resetTempPass = services.resetTempPassApps[0] || null;
+  services.restV2 = services.restV2Apps[0] || null;
 
   return services;
 }
@@ -64456,7 +64392,6 @@ async function recoverEsmServiceSelection(programmerId = "", options = {}) {
   if (!normalizedProgrammerId) {
     return null;
   }
-  const preferredRequestorId = String(options?.requestorId || "").trim();
   const excludedGuid = String(options?.excludedGuid || "").trim();
   const programmer =
     state.programmers.find((item) => String(item?.programmerId || "").trim() === normalizedProgrammerId) || null;
@@ -64467,7 +64402,6 @@ async function recoverEsmServiceSelection(programmerId = "", options = {}) {
   const services =
     (await primeProgrammerServiceHydration(programmer, getRuntimePremiumServicesSeed(normalizedProgrammerId), {
       forceRefresh: true,
-      requestorId: preferredRequestorId,
       controllerReason: "esm-auto-recovery",
     }).catch(() => null)) ||
     getCurrentPremiumAppsSnapshot(normalizedProgrammerId) ||
@@ -64476,12 +64410,8 @@ async function recoverEsmServiceSelection(programmerId = "", options = {}) {
     setCurrentPremiumAppsSnapshot(normalizedProgrammerId, services);
   }
   const recoveredAppInfo =
-    selectPreferredEsmAppForRequestor(
-      collectEsmAppCandidatesFromPremiumApps(services).filter(
-        (appInfo) => String(appInfo?.guid || "").trim() !== excludedGuid
-      ),
-      preferredRequestorId,
-      normalizedProgrammerId
+    collectEsmAppCandidatesFromPremiumApps(services).find(
+      (appInfo) => String(appInfo?.guid || "").trim() !== excludedGuid
     ) ||
     (hasEsmScopedApp(services) && String(services?.esm?.guid || "").trim() !== excludedGuid ? services.esm : null);
   const nextServices =
@@ -64661,7 +64591,6 @@ async function recoverPremiumServiceSelection(programmerId = "", appInfo = null,
   const services =
     (await primeProgrammerServiceHydration(programmer, getRuntimePremiumServicesSeed(normalizedProgrammerId), {
       forceRefresh: true,
-      requestorId,
       controllerReason: `${serviceKey}-auto-recovery`,
     }).catch(() => null)) ||
     getCurrentPremiumAppsSnapshot(normalizedProgrammerId) ||
@@ -64942,7 +64871,6 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
   const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
   const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const pageContextTargetRef = { target: null };
-  const selectedRequestorId = String(options?.requestorId || state.selectedRequestorId || "").trim();
   if (forceRefresh) {
     state.premiumAppsByProgrammerId.delete(programmer.programmerId);
     state.applicationsByProgrammerId.delete(programmer.programmerId);
@@ -64963,7 +64891,6 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
   const buildLivePremiumServices = (applicationsData = {}, existingServices = null) => {
     const premiumApps = findPremiumServiceApplications(programmer.applications || [], applicationsData, {
       programmerId: programmer.programmerId,
-      requestorId: selectedRequestorId,
     });
     return applyPremiumServiceRuntimeSummary(
       programmer,
@@ -65010,7 +64937,6 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       {
         phase: "premium-service-provisioning-hydration-request",
         programmerId: String(programmer.programmerId || ""),
-        requestorId: selectedRequestorId,
         missingProvisionableKeys,
       },
       {
@@ -65032,7 +64958,6 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       {
         phase: "premium-service-provisioning-hydration-complete",
         programmerId: String(programmer.programmerId || ""),
-        requestorId: selectedRequestorId,
         missingProvisionableKeys,
         remainingMissingProvisionableKeys: getMissingProvisionablePremiumServiceKeys(
           programmer.programmerId,
@@ -65060,7 +64985,6 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       {
         phase: "premium-service-runtime-hit",
         programmerId: String(programmer.programmerId || ""),
-        requestorId: selectedRequestorId,
         applicationCount: Object.keys(provisionedApplications || {}).length,
       },
       {
@@ -65088,7 +65012,6 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
     let premiumApps = findPremiumServiceApplications(programmer.applications || [], resolvedApplications, {
       programmerId: programmer.programmerId,
-      requestorId: selectedRequestorId,
     });
     const provisionedResult = await ensureProvisionablePremiumServices(resolvedApplications, existing);
     resolvedApplications = provisionedResult?.applications || resolvedApplications;
@@ -65098,7 +65021,6 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       {
         phase: "premium-service-decision",
         programmerId: String(programmer.programmerId || ""),
-        requestorId: selectedRequestorId,
         hasDegradation: Boolean(premiumApps?.degradation?.guid),
         hasEsm: Boolean(premiumApps?.esm?.guid),
         hasResetTempPass: Boolean(premiumApps?.resetTempPass?.guid),
@@ -72604,7 +72526,6 @@ async function loadMvpdsFromRestV2(requestorId) {
             (await primeProgrammerServiceHydration(programmer, premiumApps, {
               forceRefresh: false,
               controllerReason: "requestor-restv2-load",
-              requestorId,
             }).catch(() => null)) ||
             getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
             premiumApps;
