@@ -8141,18 +8141,18 @@ function collectPassVaultServiceCredentialCandidates(programmerId = "", serviceK
 
   if (normalizedServiceKey === "restV2") {
     pushCandidate(services?.restV2 || null);
-    if (Array.isArray(services?.restV2Apps)) {
-      services.restV2Apps.forEach((appInfo) => pushCandidate(appInfo));
+    if (candidates.length === 0 && Array.isArray(services?.restV2Apps)) {
+      pushCandidate(services.restV2Apps[0] || null);
     }
   } else if (normalizedServiceKey === "esm") {
     pushCandidate(services?.esm || null);
-    if (Array.isArray(services?.esmApps)) {
-      services.esmApps.forEach((appInfo) => pushCandidate(appInfo));
+    if (candidates.length === 0 && Array.isArray(services?.esmApps)) {
+      pushCandidate(services.esmApps[0] || null);
     }
   } else if (normalizedServiceKey === "degradation") {
     pushCandidate(services?.degradation || null);
-    if (Array.isArray(services?.degradationApps)) {
-      services.degradationApps.forEach((appInfo) => pushCandidate(appInfo));
+    if (candidates.length === 0 && Array.isArray(services?.degradationApps)) {
+      pushCandidate(services.degradationApps[0] || null);
     }
   }
 
@@ -8208,11 +8208,7 @@ function hasPassVaultCredentialCoverageForServices(programmerId = "", services =
     return true;
   }
 
-  return tasks.every((task) =>
-    (Array.isArray(task?.appCandidates) ? task.appCandidates : []).some((appInfo) =>
-      hasPassVaultServiceClientCredentials(normalizedProgrammerId, appInfo)
-    )
-  );
+  return tasks.every((task) => hasPassVaultServiceClientCredentials(normalizedProgrammerId, task?.appInfo || null));
 }
 
 function buildPassVaultRuntimeServicesSnapshot(record = null) {
@@ -8823,34 +8819,24 @@ async function resolveMissingPassVaultServiceMappings(programmer, services = nul
     Array.isArray(options?.requiredServiceKeys) && options.requiredServiceKeys.length > 0
       ? options.requiredServiceKeys
       : PREMIUM_REQUIRED_SERVICE_KEYS;
-  const forceRefresh = options?.forceRefresh === true;
-  const requestTimeoutMs = Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS));
-  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
   let applicationsSnapshot = getCurrentProgrammerApplicationsSnapshot(programmerId) || {};
   let resolvedServices = mergeDetectedPassVaultServices(programmer, services, applicationsSnapshot, {
     requestorId: String(options?.requestorId || "").trim(),
   });
 
   const missingServiceKeys = getMissingRequiredPremiumServiceKeys(resolvedServices, requiredServiceKeys);
-  if (missingServiceKeys.length === 0 || Object.keys(applicationsSnapshot || {}).length === 0) {
-    return resolvedServices;
+  if (missingServiceKeys.length > 0 && Object.keys(applicationsSnapshot || {}).length > 0) {
+    emitPremiumDecisionDebugEvent(
+      {
+        phase: "premium-service-detection-incomplete",
+        programmerId,
+        missingServiceKeys,
+      },
+      {
+        programmer,
+      }
+    );
   }
-
-  applicationsSnapshot =
-    (await hydrateApplicationScopesForProgrammer(programmer, applicationsSnapshot, {
-      forceRefresh,
-      requiredServiceKeys: missingServiceKeys,
-      stopWhenResolved: true,
-      requestTimeoutMs,
-      preferredTabId,
-      allowTemporaryPageContextTab,
-    }).catch(() => applicationsSnapshot)) || applicationsSnapshot;
-
-  setCurrentProgrammerApplicationsSnapshot(programmerId, applicationsSnapshot);
-  resolvedServices = mergeDetectedPassVaultServices(programmer, resolvedServices, applicationsSnapshot, {
-    requestorId: String(options?.requestorId || "").trim(),
-  });
   return resolvedServices;
 }
 
@@ -8892,40 +8878,39 @@ async function hydratePassVaultServiceCredentials(programmer, services = null, o
 
   const results = await Promise.all(
     tasks.map(async (task) => {
-      const appCandidates = Array.isArray(task?.appCandidates) ? task.appCandidates : [];
-      let lastError = "";
-      let lastGuid = "";
-      for (const appInfo of appCandidates) {
-        const guid = String(appInfo?.guid || "").trim();
-        if (!guid) {
-          continue;
-        }
-        lastGuid = guid;
-        try {
-          await ensureDcrAccessToken(programmer.programmerId, appInfo, forceRefresh, {
-            service: task.serviceKey,
-            requiredServiceScope: getPassVaultRequiredScopeForService(task.serviceKey, appInfo),
-            scope: getPassVaultRequiredScopeForService(task.serviceKey, appInfo),
-            appGuid: guid,
-            allowProvisioning: true,
-            lockAppSelection: true,
-          });
-          promoteResolvedServiceApp(task.serviceKey, appInfo);
-          return {
-            serviceKey: task.serviceKey,
-            appGuid: guid,
-            cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, guid) || null),
-          };
-        } catch (error) {
-          lastError = error instanceof Error ? error.message : String(error);
-        }
+      const appInfo = task?.appInfo || null;
+      const guid = String(appInfo?.guid || "").trim();
+      if (!guid) {
+        return {
+          serviceKey: task?.serviceKey || "",
+          appGuid: "",
+          cache: null,
+          error: "Registered application details are missing.",
+        };
       }
-      return {
-        serviceKey: task.serviceKey,
-        appGuid: lastGuid,
-        cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, lastGuid) || null),
-        error: lastError,
-      };
+      try {
+        await ensureDcrAccessToken(programmer.programmerId, appInfo, forceRefresh, {
+          service: task.serviceKey,
+          requiredServiceScope: getPassVaultRequiredScopeForService(task.serviceKey, appInfo),
+          scope: getPassVaultRequiredScopeForService(task.serviceKey, appInfo),
+          appGuid: guid,
+          allowProvisioning: true,
+          lockAppSelection: true,
+        });
+        promoteResolvedServiceApp(task.serviceKey, appInfo);
+        return {
+          serviceKey: task.serviceKey,
+          appGuid: guid,
+          cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, guid) || null),
+        };
+      } catch (error) {
+        return {
+          serviceKey: task.serviceKey,
+          appGuid: guid,
+          cache: normalizeUnderparVaultDcrCache(loadDcrCache(programmer.programmerId, guid) || null),
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     })
   );
 
@@ -52564,15 +52549,11 @@ function collectUnderparUnifiedShellOrganizations(parsedPayload = null, options 
 }
 
 function resolveRestrictedPickerSelectedOrg(preferredOrg = null, sessionData = null) {
-  const preferredOrganization = preferredOrg && typeof preferredOrg === "object" ? preferredOrg : null;
+  const activeOrganization = preferredOrg && typeof preferredOrg === "object" ? preferredOrg : null;
   const session = sessionData && typeof sessionData === "object" ? sessionData : null;
   const profile = resolveLoginProfile(session);
   const requestedTargetOrganization = normalizeRequestedTargetOrganization(session?.targetOrganization);
   const targetSelectedOrg = firstNonEmptyString([
-    preferredOrganization?.tenantId,
-    preferredOrganization?.id && !/@adobeorg$/i.test(String(preferredOrganization?.id || "").trim())
-      ? preferredOrganization.id
-      : "",
     requestedTargetOrganization?.tenantId,
     requestedTargetOrganization?.id && !/@adobeorg$/i.test(String(requestedTargetOrganization?.id || "").trim())
       ? requestedTargetOrganization.id
@@ -52587,11 +52568,6 @@ function resolveRestrictedPickerSelectedOrg(preferredOrg = null, sessionData = n
     return previousSelectedOrg;
   }
 
-  const activeOrganization = buildRestrictedOrganizationContext(
-    resolveCachedOrganizationsFromLoginData(session),
-    session,
-    preferredOrganization
-  ).activeOrganization;
   const activeId = firstNonEmptyString([activeOrganization?.tenantId, activeOrganization?.id]);
   if (activeId && !/@adobeorg$/i.test(activeId)) {
     return activeId;
@@ -52614,13 +52590,11 @@ function resolveRestrictedPickerSelectedOrg(preferredOrg = null, sessionData = n
     }
   }
 
-  const verifiedClaim = extractVerifiedCustomerOrganizationClaim(session);
   return firstNonEmptyString([
     previousSelectedOrg,
     activeId,
     profile?.tenantId,
     profile?.tenant_id,
-    verifiedClaim?.id && !/@adobeorg$/i.test(verifiedClaim.id) ? verifiedClaim.id : "",
   ]);
 }
 
@@ -52629,9 +52603,7 @@ function buildOrganizationContextFromSession(sessionData = null) {
   return buildRestrictedOrganizationContext(
     resolveCachedOrganizationsFromLoginData(currentSession),
     currentSession,
-    currentSession?.targetOrganization && typeof currentSession.targetOrganization === "object"
-      ? currentSession.targetOrganization
-      : null
+    null
   );
 }
 
@@ -54142,12 +54114,7 @@ function buildRestrictedOrganizationContext(organizations, sessionData = null, p
     ...storedOrganizations,
     ...authoritativeProvidedOrganizations,
   ];
-  const optionOrganizations = [
-    ...returnedOrganizations,
-    ...(preferredOrg && typeof preferredOrg === "object"
-      ? [preferredOrg.raw && typeof preferredOrg.raw === "object" ? preferredOrg.raw : preferredOrg]
-      : []),
-  ];
+  const optionOrganizations = [...returnedOrganizations];
 
   const options = collectRestrictedOrganizationCandidates({
     profile,
@@ -61239,6 +61206,58 @@ function normalizeApplicationsResponse(payload) {
   return [];
 }
 
+function normalizeRegisteredApplicationRuntimeRecord(item = null) {
+  const source = item && typeof item === "object" && !Array.isArray(item) ? item : null;
+  if (!source) {
+    return null;
+  }
+
+  const guid = resolveApplicationGuidFromEntityData(source);
+  const rawEnvelope =
+    source?.__rawEnvelope && typeof source.__rawEnvelope === "object" && !Array.isArray(source.__rawEnvelope)
+      ? source.__rawEnvelope
+      : null;
+  const envelopeEntityData =
+    rawEnvelope?.entityData && typeof rawEnvelope.entityData === "object" && !Array.isArray(rawEnvelope.entityData)
+      ? rawEnvelope.entityData
+      : null;
+  const appDataSource =
+    source?.appData && typeof source.appData === "object" && !Array.isArray(source.appData) ? source.appData : source;
+  const appData = {
+    ...(envelopeEntityData ? envelopeEntityData : {}),
+    ...(appDataSource && typeof appDataSource === "object" ? appDataSource : {}),
+  };
+  delete appData.appData;
+
+  const appName = firstNonEmptyString([
+    source?.name,
+    source?.displayName,
+    source?.label,
+    appData?.name,
+    appData?.displayName,
+    appData?.label,
+    guid ? `Registered Application ${guid}` : "",
+  ]);
+  const scopes = uniqueSorted(
+    (Array.isArray(source?.scopes) ? source.scopes : []).concat(getScopesFromApplication(appData))
+  );
+  const softwareStatement = firstNonEmptyString([
+    String(source?.softwareStatement || "").trim(),
+    extractSoftwareStatementFromAppData(appData),
+  ]);
+
+  return {
+    ...source,
+    ...(guid ? { id: guid, guid } : {}),
+    ...(appName ? { name: appName, displayName: firstNonEmptyString([source?.displayName, appName]), label: firstNonEmptyString([source?.label, appName]) } : {}),
+    clientId: firstNonEmptyString([source?.clientId, source?.client_id, appData?.clientId, appData?.client_id]),
+    type: firstNonEmptyString([source?.type, source?.applicationType, appData?.type, appData?.applicationType]),
+    ...(scopes.length > 0 ? { scopes } : {}),
+    ...(softwareStatement ? { softwareStatement } : {}),
+    appData,
+  };
+}
+
 function getAdobeConsoleRequestHeaders(accessToken = "") {
   const headers = {
     Accept: "application/json, text/plain, */*",
@@ -62617,10 +62636,11 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
     if (!guid) {
       return;
     }
-    byGuid[guid] = {
-      ...(item && typeof item === "object" ? item : {}),
-      id: guid,
-    };
+    byGuid[guid] =
+      normalizeRegisteredApplicationRuntimeRecord(item) || {
+        ...(item && typeof item === "object" ? item : {}),
+        id: guid,
+      };
   });
 
   setCurrentProgrammerApplicationsSnapshot(programmerId, byGuid);
@@ -63176,9 +63196,6 @@ async function enrichPremiumAppsWithSoftwareStatements(premiumApps) {
   pushApp(premiumApps?.degradation);
   pushApp(premiumApps?.esm);
   pushApp(premiumApps?.restV2);
-  if (Array.isArray(premiumApps?.restV2Apps)) {
-    premiumApps.restV2Apps.forEach((appInfo) => pushApp(appInfo));
-  }
 
   const hasServiceProviderHints = (appInfo) => {
     const appData = appInfo?.appData;

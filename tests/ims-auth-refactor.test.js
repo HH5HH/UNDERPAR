@@ -992,6 +992,7 @@ test("programmer application hydration uses direct applications queries and norm
   const fetchRegisteredApplicationsSource = extractFunctionSource(popupSource, "fetchProgrammerRegisteredApplications");
   const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
   const ensureApplicationsSource = extractFunctionSource(popupSource, "ensureSelectedProgrammerApplicationsLoaded");
+  const normalizeRuntimeRecordSource = extractFunctionSource(popupSource, "normalizeRegisteredApplicationRuntimeRecord");
 
   assert.match(fetchRegisteredApplicationsSource, /Registered Applications request is missing console context\./);
   assert.match(fetchRegisteredApplicationsSource, /configurationVersion <= 0/);
@@ -1003,10 +1004,14 @@ test("programmer application hydration uses direct applications queries and norm
   assert.match(fetchApplicationsSource, /const cachedApplicationsAreLive =/);
   assert.match(fetchApplicationsSource, /!isPassVaultBackedValue\(cachedApplications\)/);
   assert.match(fetchApplicationsSource, /Array\.isArray\(result\?\.applications\) \? result\.applications : \[\]/);
+  assert.match(fetchApplicationsSource, /normalizeRegisteredApplicationRuntimeRecord\(item\)/);
   assert.match(fetchApplicationsSource, /setCurrentProgrammerApplicationsSnapshot\(programmerId,\s*byGuid\)/);
   assert.match(ensureApplicationsSource, /fetchApplicationsForProgrammer\(programmerId,\s*options\)/);
   assert.match(ensureApplicationsSource, /setCurrentProgrammerApplicationsSnapshot\(programmerId,\s*normalizedApplications\)/);
   assert.match(ensureApplicationsSource, /state\.programmerApplicationsLoadPromiseByProgrammerId\.set\(programmerId,\s*loadPromise\)/);
+  assert.match(normalizeRuntimeRecordSource, /const appData = \{/);
+  assert.match(normalizeRuntimeRecordSource, /getScopesFromApplication\(appData\)/);
+  assert.match(normalizeRuntimeRecordSource, /extractSoftwareStatementFromAppData\(appData\)/);
   assert.doesNotMatch(fetchApplicationsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback\(urlCandidates,\s*"Applications load"/);
   assert.doesNotMatch(fetchApplicationsSource, /buildRegisteredApplicationBulkRetrieveRequest/);
   assert.doesNotMatch(fetchApplicationsSource, /getPassVaultMediaCompanyRecord\(programmerId\)/);
@@ -1804,7 +1809,9 @@ test("premium app details still retain software statements while compile-time ma
   const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
 
   assert.match(resolveMappingsSource, /mergeDetectedPassVaultServices\(programmer,\s*services,\s*applicationsSnapshot/);
-  assert.match(resolveMappingsSource, /hydrateApplicationScopesForProgrammer\(programmer,\s*applicationsSnapshot,\s*\{/);
+  assert.match(resolveMappingsSource, /const missingServiceKeys = getMissingRequiredPremiumServiceKeys\(resolvedServices,\s*requiredServiceKeys\);/);
+  assert.match(resolveMappingsSource, /phase: "premium-service-detection-incomplete"/);
+  assert.doesNotMatch(resolveMappingsSource, /hydrateApplicationScopesForProgrammer\(programmer,\s*applicationsSnapshot,\s*\{/);
   assert.doesNotMatch(resolveMappingsSource, /fetchApplicationDetailsByGuid\(/);
   assert.doesNotMatch(resolveMappingsSource, /fetchSoftwareStatementForAppGuid\(/);
   assert.doesNotMatch(resolveMappingsSource, /validateSelectedServiceKeys/);
@@ -1820,6 +1827,7 @@ test("pass vault compilation detects premium apps first, preserves detected orde
   const esmSelectionSource = extractFunctionSource(popupSource, "selectPreferredEsmAppForRequestor");
   const credentialTasksSource = extractFunctionSource(popupSource, "getPassVaultCredentialTasks");
   const collectCandidatesSource = extractFunctionSource(popupSource, "collectPassVaultServiceCredentialCandidates");
+  const credentialCoverageSource = extractFunctionSource(popupSource, "hasPassVaultCredentialCoverageForServices");
   const hydrateCredentialsSource = extractFunctionSource(popupSource, "hydratePassVaultServiceCredentials");
   const resolveMappingsSource = extractFunctionSource(popupSource, "resolveMissingPassVaultServiceMappings");
   const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
@@ -1832,11 +1840,14 @@ test("pass vault compilation detects premium apps first, preserves detected orde
   assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"esm",\s*services\)/);
   assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"degradation",\s*services\)/);
   assert.doesNotMatch(collectCandidatesSource, /getPassVaultServiceProvisioningRank/);
-  assert.match(hydrateCredentialsSource, /for \(const appInfo of appCandidates\)/);
+  assert.doesNotMatch(collectCandidatesSource, /forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
+  assert.match(credentialCoverageSource, /hasPassVaultServiceClientCredentials\(normalizedProgrammerId,\s*task\?\.appInfo \|\| null\)/);
+  assert.match(hydrateCredentialsSource, /const appInfo = task\?\.appInfo \|\| null;/);
+  assert.doesNotMatch(hydrateCredentialsSource, /for \(const appInfo of appCandidates\)/);
   assert.match(hydrateCredentialsSource, /promoteResolvedServiceApp\(task\.serviceKey,\s*appInfo\)/);
   assert.doesNotMatch(esmSelectionSource, /pickHighestRankedPassVaultServiceCandidate/);
   assert.match(esmSelectionSource, /return candidates\[0\] \|\| null;/);
-  assert.match(resolveMappingsSource, /if \(missingServiceKeys\.length === 0 \|\| Object\.keys\(applicationsSnapshot \|\| \{\}\)\.length === 0\) \{\s*return resolvedServices;\s*\}/);
+  assert.doesNotMatch(resolveMappingsSource, /hydrateApplicationScopesForProgrammer/);
   assert.match(compileSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
   assert.match(compileSource, /label:\s*"Saving premium services to VAULT\.\.\."/);
   assert.match(compileSource, /label:\s*"Finishing premium service hydration\.\.\."/);
@@ -2450,7 +2461,7 @@ test("restricted org context does not let the requested target org override the 
 
   assert.equal(organizationContext.activeOrganization.orgId, "wfadoberm");
   assert.equal(organizationContext.activeOrganization.label, "Workfront AdobeRM | wfadoberm");
-  assert.equal(organizationContext.options.some((option) => option.orgId === "adobepass"), true);
+  assert.equal(organizationContext.options.some((option) => option.orgId === "adobepass"), false);
 });
 
 test("restricted org context does not persist picker-only target orgs into detected org state", () => {
@@ -2499,7 +2510,7 @@ test("restricted org context does not persist picker-only target orgs into detec
 
   assert.equal(organizationContext.activeOrganization.orgId, "wfadoberm");
   assert.equal(organizationContext.detectedOrganizations.some((option) => option.orgId === "adobepass"), false);
-  assert.equal(organizationContext.options.some((option) => option.orgId === "adobepass"), true);
+  assert.equal(organizationContext.options.some((option) => option.orgId === "adobepass"), false);
 });
 
 test("restricted org context prefers returned session payload org over stale detected candidates when no verified claim is available", () => {
@@ -2591,6 +2602,8 @@ test("restricted org picker merges IMS orgs with profile claims and configured Z
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const buildOptionsSource = extractFunctionSource(popupSource, "buildRestrictedOrgOptions");
   const buildContextSource = extractFunctionSource(popupSource, "buildRestrictedOrganizationContext");
+  const buildContextFromSessionSource = extractFunctionSource(popupSource, "buildOrganizationContextFromSession");
+  const resolveSelectedOrgSource = extractFunctionSource(popupSource, "resolveRestrictedPickerSelectedOrg");
   const collectCandidatesSource = extractFunctionSource(popupSource, "collectRestrictedOrganizationCandidates");
   const ensureRestrictedOptionsSource = extractFunctionSource(popupSource, "ensureRestrictedOrgOptionsFromToken");
   const resolveCachedOrganizationsSource = extractFunctionSource(popupSource, "resolveCachedOrganizationsFromLoginData");
@@ -2607,7 +2620,7 @@ test("restricted org picker merges IMS orgs with profile claims and configured Z
   assert.match(buildContextSource, /const providedCanonicalOrganizations = hasCanonicalRestrictedStoredOrganizations\(providedOrganizations\)/);
   assert.match(buildContextSource, /collectAuthoritativeRestrictedOrganizations/);
   assert.match(buildContextSource, /const returnedOrganizations = \[/);
-  assert.match(buildContextSource, /const optionOrganizations = \[/);
+  assert.match(buildContextSource, /const optionOrganizations = \[\.\.\.returnedOrganizations\];/);
   assert.match(buildContextSource, /\.\.\.storedOrganizations,/);
   assert.match(buildContextSource, /const authoritativeProvidedOrganizations =/);
   assert.match(buildContextSource, /collectAuthoritativeRestrictedOrganizations\(providedOrganizations\)/);
@@ -2616,6 +2629,10 @@ test("restricted org picker merges IMS orgs with profile claims and configured Z
   assert.match(buildContextSource, /organizations: returnedOrganizations,/);
   assert.match(buildContextSource, /configuredOrganizations: \[\]/);
   assert.match(buildContextSource, /organizationCandidates: activeOrganizationCandidates/);
+  assert.doesNotMatch(buildContextSource, /preferredOrg\.raw/);
+  assert.doesNotMatch(buildContextFromSessionSource, /currentSession\?\.targetOrganization/);
+  assert.doesNotMatch(resolveSelectedOrgSource, /preferredOrganization\?\.tenantId/);
+  assert.doesNotMatch(resolveSelectedOrgSource, /verifiedClaim/);
   const matchesAdobePassSource = extractFunctionSource(popupSource, "matchesAdobePassOrg");
   assert.doesNotMatch(matchesAdobePassSource, /objectContainsAdobePass/);
   const verifyTargetSource = extractFunctionSource(popupSource, "verifyTargetOrganizationSelection");
