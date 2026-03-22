@@ -1787,13 +1787,12 @@ test("CM tenant bundle loader no longer returns stale bundle data after a live f
   assert.doesNotMatch(bundleSource, /fallbackEntry\?\.bundle/);
 });
 
-test("missing DCR credentials trigger on-demand pass vault compilation instead of requiring manual re-selection", () => {
+test("missing DCR credentials no longer trigger full pass vault compilation from inside token acquisition", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
 
-  assert.match(ensureDcrSource, /queuePassVaultProgrammerCompilation\(/);
-  assert.match(ensureDcrSource, /dcr-registration-trigger-vault-compile/);
-  assert.doesNotMatch(ensureDcrSource, /Re-select the media company to hydrate its registered applications first/);
+  assert.doesNotMatch(ensureDcrSource, /queuePassVaultProgrammerCompilation\(/);
+  assert.doesNotMatch(ensureDcrSource, /dcr-registration-trigger-vault-compile/);
   assert.match(ensureDcrSource, /UnderPAR could not auto-hydrate DCR credentials/);
 });
 
@@ -1865,6 +1864,7 @@ test("degradation selection and DCR auth recovery no longer stay pinned to inval
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const resolveDegradationSource = extractFunctionSource(popupSource, "resolveDegradationAppCandidates");
   const recoverSource = extractFunctionSource(popupSource, "ensureDcrAccessTokenWithServiceRecovery");
+  const recoverSelectionSource = extractFunctionSource(popupSource, "recoverPremiumServiceSelection");
   const clickDgrAuthSource = extractFunctionSource(popupSource, "resolveClickDgrAuthContext");
   const degradationCurlSource = extractFunctionSource(popupSource, "degradationBuildCurlCommand");
 
@@ -1873,6 +1873,9 @@ test("degradation selection and DCR auth recovery no longer stay pinned to inval
   assert.match(resolveDegradationSource, /return compareDegradationAppPriority\(leftApp,\s*rightApp\);/);
   assert.match(recoverSource, /shouldAttemptAlternatePremiumServiceRecovery\(error,\s*resolvedAppInfo,\s*debugMeta\)/);
   assert.match(recoverSource, /recoverPremiumServiceSelection\(programmerId,\s*resolvedAppInfo,\s*debugMeta\)/);
+  assert.match(recoverSelectionSource, /primeProgrammerServiceHydration\(programmer,\s*getRuntimePremiumServicesSeed\(normalizedProgrammerId\),\s*\{/);
+  assert.doesNotMatch(recoverSelectionSource, /queuePassVaultProgrammerCompilation\(/);
+  assert.doesNotMatch(recoverSelectionSource, /finalizePassVaultProgrammerHydration\(/);
   assert.match(clickDgrAuthSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
   assert.match(degradationCurlSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
 });
@@ -1943,6 +1946,8 @@ test("premium panel rendering no longer waits for every DCR client before leavin
 
   assert.match(primeSource, /const uiReady = isProgrammerPremiumUiReady\(programmerId,\s*runtimeServices\)/);
   assert.match(primeSource, /if \(\s*uiReady &&/);
+  assert.doesNotMatch(primeSource, /finalizePassVaultProgrammerHydration\(/);
+  assert.doesNotMatch(primeSource, /hydrateProgrammerFromPassVault\(/);
   assert.match(refreshSource, /const uiReady = isProgrammerPremiumUiReady\(programmer\.programmerId,\s*resolvedServices\)/);
   assert.match(refreshSource, /const provisionalUiReady = isProgrammerPremiumUiReady\(programmer\.programmerId,\s*provisionalServices\)/);
   assert.doesNotMatch(refreshSource, /const provisionalRuntimeReady = isProgrammerRuntimeServicesReady/);
