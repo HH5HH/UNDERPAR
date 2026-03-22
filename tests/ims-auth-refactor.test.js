@@ -1889,6 +1889,17 @@ test("REST V2 app selection preserves detected order while still reusing request
   assert.match(fetchWithPremiumAuthSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
 });
 
+test("premium API usage provisions service clients on demand and ESM direct auth helpers no longer stay cache-only", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const fetchWithPremiumAuthSource = extractFunctionSource(popupSource, "fetchWithPremiumAuth");
+  const clickEsmAuthSource = extractFunctionSource(popupSource, "resolveClickEsmAuthContext");
+  const recordingSource = extractFunctionSource(popupSource, "startEsmWorkspaceEsmRecording");
+
+  assert.match(fetchWithPremiumAuthSource, /allowProvisioning:\s*debugMeta\?\.allowProvisioning !== false/);
+  assert.match(clickEsmAuthSource, /allowProvisioning:\s*true/);
+  assert.match(recordingSource, /allowProvisioning:\s*true/);
+});
+
 test("degradation selection and DCR auth recovery no longer stay pinned to invalid apps", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const resolveDegradationSource = extractFunctionSource(popupSource, "resolveDegradationAppCandidates");

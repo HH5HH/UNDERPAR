@@ -27097,6 +27097,7 @@ async function resolveClickEsmAuthContext(context, requestToken, options = {}) {
       appGuid: String(appInfo?.guid || ""),
       appName: String(appInfo?.appName || appInfo?.guid || ""),
       source: String(options.source || "sidepanel"),
+      allowProvisioning: true,
     });
     appInfo = tokenResult?.appInfo || appInfo;
     accessToken = String(tokenResult?.accessToken || "");
@@ -32234,6 +32235,7 @@ async function startEsmWorkspaceEsmRecording(esmWorkspaceState, requestToken) {
         requestorId: recordingContext.requestorId,
         mvpd: recordingContext.mvpd,
         service: "esm",
+        allowProvisioning: true,
       });
       emitEsmWorkspaceDebugEvent(flowId, {
         phase: "access-token-ready",
@@ -64522,7 +64524,10 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
     programmerId,
     resolvedAppInfo,
     forceFreshDcrToken,
-    debugMeta
+    {
+      ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+      allowProvisioning: debugMeta?.allowProvisioning !== false,
+    }
   );
   resolvedAppInfo = tokenResult?.appInfo || resolvedAppInfo;
   const token = tokenResult?.accessToken || "";
