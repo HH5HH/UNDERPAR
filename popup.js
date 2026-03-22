@@ -8108,6 +8108,31 @@ function getPassVaultServiceProvisioningRank(programmerId = "", appInfo = null) 
   return 1;
 }
 
+function pickHighestRankedPassVaultServiceCandidate(appInfos = [], programmerId = "", options = {}) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const candidates = Array.isArray(appInfos) ? appInfos.filter((appInfo) => appInfo?.guid) : [];
+  const useDegradationTieBreak = options?.degradationTieBreak === true;
+  let bestCandidate = null;
+  let bestRank = -1;
+
+  candidates.forEach((candidate) => {
+    const candidateRank = getPassVaultServiceProvisioningRank(normalizedProgrammerId, candidate);
+    if (!bestCandidate || candidateRank > bestRank) {
+      bestCandidate = candidate;
+      bestRank = candidateRank;
+      return;
+    }
+    if (candidateRank !== bestRank) {
+      return;
+    }
+    if (useDegradationTieBreak && compareDegradationAppPriority(candidate, bestCandidate) < 0) {
+      bestCandidate = candidate;
+    }
+  });
+
+  return bestCandidate;
+}
+
 function collectPassVaultServiceCredentialCandidates(programmerId = "", serviceKey = "", services = null) {
   const normalizedProgrammerId = String(programmerId || "").trim();
   const normalizedServiceKey = String(serviceKey || "").trim();
@@ -8139,24 +8164,27 @@ function collectPassVaultServiceCredentialCandidates(programmerId = "", serviceK
     }
   }
 
-  return candidates.sort((leftApp, rightApp) => {
-    const rankDelta =
-      getPassVaultServiceProvisioningRank(normalizedProgrammerId, rightApp) -
-      getPassVaultServiceProvisioningRank(normalizedProgrammerId, leftApp);
-    if (rankDelta !== 0) {
-      return rankDelta;
-    }
-    if (normalizedServiceKey === "degradation") {
-      return compareDegradationAppPriority(leftApp, rightApp);
-    }
-    return String(leftApp?.appName || leftApp?.guid || "").localeCompare(
-      String(rightApp?.appName || rightApp?.guid || ""),
-      undefined,
-      {
-        sensitivity: "base",
+  return candidates
+    .map((appInfo, index) => ({
+      appInfo,
+      index,
+    }))
+    .sort((leftEntry, rightEntry) => {
+      const rankDelta =
+        getPassVaultServiceProvisioningRank(normalizedProgrammerId, rightEntry.appInfo) -
+        getPassVaultServiceProvisioningRank(normalizedProgrammerId, leftEntry.appInfo);
+      if (rankDelta !== 0) {
+        return rankDelta;
       }
-    );
-  });
+      if (normalizedServiceKey === "degradation") {
+        const degradationDelta = compareDegradationAppPriority(leftEntry.appInfo, rightEntry.appInfo);
+        if (degradationDelta !== 0) {
+          return degradationDelta;
+        }
+      }
+      return leftEntry.index - rightEntry.index;
+    })
+    .map((entry) => entry.appInfo);
 }
 
 function getPassVaultCredentialTasks(programmerId = "", services = null) {
@@ -8558,23 +8586,8 @@ function selectPreferredEsmAppForRequestor(esmApps = [], requestorId = "", progr
   }
   const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedProgrammerId = String(programmerId || "").trim();
-  const selectBestCandidate = (appInfos = []) => {
-    const rankedCandidates = (Array.isArray(appInfos) ? appInfos : [])
-      .filter((appInfo) => appInfo?.guid)
-      .slice()
-      .sort((left, right) => {
-        const rankDelta =
-          getPassVaultServiceProvisioningRank(normalizedProgrammerId, right) -
-          getPassVaultServiceProvisioningRank(normalizedProgrammerId, left);
-        if (rankDelta !== 0) {
-          return rankDelta;
-        }
-        return String(left?.appName || left?.guid || "").localeCompare(String(right?.appName || right?.guid || ""), undefined, {
-          sensitivity: "base",
-        });
-      });
-    return rankedCandidates[0] || null;
-  };
+  const selectBestCandidate = (appInfos = []) =>
+    pickHighestRankedPassVaultServiceCandidate(appInfos, normalizedProgrammerId);
   if (normalizedRequestorId) {
     const mapped = selectBestCandidate(
       candidates.filter((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId))
@@ -61050,19 +61063,17 @@ function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", prog
     return 1;
   };
   const selectBestCandidate = (appInfos = []) => {
-    const rankedCandidates = (Array.isArray(appInfos) ? appInfos : [])
-      .filter((appInfo) => appInfo?.guid)
-      .slice()
-      .sort((left, right) => {
-        const rankDelta = getProvisioningRank(right) - getProvisioningRank(left);
-        if (rankDelta !== 0) {
-          return rankDelta;
-        }
-        return String(left?.appName || left?.guid || "").localeCompare(String(right?.appName || right?.guid || ""), undefined, {
-          sensitivity: "base",
-        });
-      });
-    return rankedCandidates[0] || null;
+    const filteredCandidates = Array.isArray(appInfos) ? appInfos.filter((appInfo) => appInfo?.guid) : [];
+    let bestCandidate = null;
+    let bestRank = -1;
+    filteredCandidates.forEach((candidate) => {
+      const candidateRank = getProvisioningRank(candidate);
+      if (!bestCandidate || candidateRank > bestRank) {
+        bestCandidate = candidate;
+        bestRank = candidateRank;
+      }
+    });
+    return bestCandidate;
   };
   const cachedAuthContext = normalizedRequestorId ? getRequestorScopedRestV2AuthContext(normalizedRequestorId) : null;
   if (
@@ -72316,7 +72327,7 @@ async function loadMvpdsFromRestV2(requestorId) {
           forceOverwrite: false,
           forceDcrRestore: true,
         }).catch(() => null);
-        const premiumApps = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+        let premiumApps = getCurrentPremiumAppsSnapshot(programmer.programmerId);
         if (!premiumApps) {
           const selectedProgrammer = resolveSelectedProgrammer();
           if (String(selectedProgrammer?.programmerId || "").trim() === String(programmer?.programmerId || "").trim()) {
@@ -72326,7 +72337,27 @@ async function loadMvpdsFromRestV2(requestorId) {
           }
           continue;
         }
-        const restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+        let restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+        const requestorPreferredApp = selectPreferredRestV2AppForRequestor(
+          restV2Apps,
+          requestorId,
+          programmer.programmerId
+        );
+        const requiresRuntimeHydration =
+          !isProgrammerRuntimeServicesReady(programmer.programmerId, premiumApps) ||
+          !requestorPreferredApp?.guid ||
+          !hasPassVaultServiceClientCredentials(programmer.programmerId, requestorPreferredApp);
+        if (requiresRuntimeHydration) {
+          premiumApps =
+            (await primeProgrammerServiceHydration(programmer, premiumApps, {
+              forceRefresh: false,
+              controllerReason: "requestor-restv2-load",
+              requestorId,
+            }).catch(() => null)) ||
+            getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
+            premiumApps;
+          restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+        }
         if (restV2Apps.length === 0) {
           continue;
         }
@@ -73877,8 +73908,10 @@ function registerEventHandlers() {
     state.selectedRequestorId = nextRequestorId;
     state.selectedMvpdId = "";
     emitGlobalSelectorChangeLog("Requestor ID", state.selectedRequestorId, state.selectedRequestorId);
-    void refreshProgrammerPanels();
-    void populateMvpdSelectForRequestor(state.selectedRequestorId);
+    await refreshProgrammerPanels({
+      controllerReason: "requestor-change",
+    });
+    await populateMvpdSelectForRequestor(state.selectedRequestorId);
     const esmWorkspaceState = getActiveEsmWorkspaceState();
     if (esmWorkspaceState) {
       esmWorkspaceBroadcastControllerState(esmWorkspaceState);

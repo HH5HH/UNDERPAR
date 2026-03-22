@@ -1088,6 +1088,15 @@ test("media-company selection and vault rehydrate share the same programmer hydr
   assert.ok(mediaCompanyChangeBlock);
 });
 
+test("requestor change waits for requestor-aware premium hydration before loading MVPDs", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const requestorChangeBlock = popupSource.match(
+    /els\.requestorSelect\.addEventListener\("change",[\s\S]*?await refreshProgrammerPanels\(\{[\s\S]*controllerReason:\s*"requestor-change"[\s\S]*\}\);[\s\S]*?await populateMvpdSelectForRequestor\(state\.selectedRequestorId\);[\s\S]*?\}\);/
+  );
+
+  assert.ok(requestorChangeBlock, "requestor change handler should await requestor-aware hydration before MVPD load");
+});
+
 test("active auth and bootstrap flows no longer fall back to cookie-session activation", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const signInSource = extractFunctionSource(popupSource, "signInInteractive");
@@ -1815,7 +1824,8 @@ test("pass vault compilation provisions the first DCR-usable app per premium ser
   assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"degradation",\s*services\)/);
   assert.match(hydrateCredentialsSource, /for \(const appInfo of appCandidates\)/);
   assert.match(hydrateCredentialsSource, /promoteResolvedServiceApp\(task\.serviceKey,\s*appInfo\)/);
-  assert.match(esmSelectionSource, /getPassVaultServiceProvisioningRank\(normalizedProgrammerId,\s*right\)/);
+  assert.match(esmSelectionSource, /pickHighestRankedPassVaultServiceCandidate\(appInfos,\s*normalizedProgrammerId\)/);
+  assert.doesNotMatch(esmSelectionSource, /localeCompare/);
   assert.match(esmSelectionSource, /return selectBestCandidate\(candidates\)/);
   assert.match(resolveMappingsSource, /if \(missingServiceKeys\.length === 0\) \{\s*return resolvedServices;\s*\}/);
   assert.match(resolveMappingsSource, /if \(missingServiceKeys\.length === 0\) \{\s*break;\s*\}/);
@@ -1827,11 +1837,17 @@ test("pass vault compilation provisions the first DCR-usable app per premium ser
 test("REST V2 app selection prefers DCR-ready or software-statement-ready candidates before falling back", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const selectRestV2Source = extractFunctionSource(popupSource, "selectPreferredRestV2AppForRequestor");
+  const loadMvpdsSource = extractFunctionSource(popupSource, "loadMvpdsFromRestV2");
 
   assert.match(selectRestV2Source, /hasPassVaultServiceClientCredentials\(normalizedProgrammerId, appInfo\)/);
   assert.match(selectRestV2Source, /extractSoftwareStatementFromAppData\(appInfo\?\.appData \|\| null\)/);
   assert.match(selectRestV2Source, /const mappedCandidates = candidates\.filter\(\(appInfo\) =>/);
+  assert.doesNotMatch(selectRestV2Source, /localeCompare/);
   assert.match(selectRestV2Source, /return selectBestCandidate\(candidates\)/);
+  assert.match(loadMvpdsSource, /const requestorPreferredApp = selectPreferredRestV2AppForRequestor\(/);
+  assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
+  assert.match(loadMvpdsSource, /await primeProgrammerServiceHydration\(programmer,\s*premiumApps,\s*\{/);
+  assert.match(loadMvpdsSource, /requestorId,/);
 });
 
 test("activation leaves the global selectors user-owned and premium hydration starts only after explicit selection", () => {
