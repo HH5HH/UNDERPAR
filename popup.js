@@ -6995,74 +6995,6 @@ function buildProgrammerEntitiesFromPassVault(vault = null, environmentKey = get
   return entities;
 }
 
-function buildProgrammerEntitiesFromConsoleBootstrap(bootstrapState = null) {
-  const extendedProfile =
-    bootstrapState?.extendedProfile && typeof bootstrapState.extendedProfile === "object"
-      ? bootstrapState.extendedProfile
-      : bootstrapState && typeof bootstrapState === "object"
-        ? bootstrapState
-        : null;
-  const accessibleRootEntities = [
-    extendedProfile?.accessibleRootEntities,
-    extendedProfile?.profile?.accessibleRootEntities,
-    extendedProfile?.userExtendedProfile?.accessibleRootEntities,
-  ].find((candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate));
-  if (!accessibleRootEntities) {
-    return [];
-  }
-
-  const entities = [];
-  const seen = new Set();
-  Object.entries(accessibleRootEntities).forEach(([entityType, entityMap]) => {
-    if (!/programmer/i.test(String(entityType || "").trim())) {
-      return;
-    }
-    if (!entityMap || typeof entityMap !== "object" || Array.isArray(entityMap)) {
-      return;
-    }
-
-    Object.entries(entityMap).forEach(([entityKey, accessLevel]) => {
-      const normalizedEntityKey = String(entityKey || "").trim();
-      if (!normalizedEntityKey) {
-        return;
-      }
-
-      const programmerMatch = normalizedEntityKey.match(/^@?Programmer:(.+)$/i);
-      const programmerId = String(programmerMatch ? programmerMatch[1] : normalizedEntityKey)
-        .replace(/^@+/, "")
-        .trim();
-      if (!programmerId || programmerId === "*" || programmerId.toLowerCase() === "all") {
-        return;
-      }
-
-      const dedupeKey = programmerId.toLowerCase();
-      if (seen.has(dedupeKey)) {
-        return;
-      }
-      seen.add(dedupeKey);
-
-      const permission = String(accessLevel || "").trim().toUpperCase();
-      entities.push({
-        key: normalizedEntityKey || `Programmer:${programmerId}`,
-        entityData: {
-          id: programmerId,
-          displayName: programmerId,
-          mediaCompanyName: programmerId,
-          contentProviders: [],
-          applications: [],
-          permissions: permission ? [permission] : [],
-        },
-      });
-    });
-  });
-
-  entities.sort((left, right) => {
-    const leftId = String(left?.entityData?.id || "").trim();
-    const rightId = String(right?.entityData?.id || "").trim();
-    return leftId.localeCompare(rightId, undefined, { sensitivity: "base" });
-  });
-  return entities;
-}
 
 function getPassVaultRegisteredApplicationRecord(programmerId = "", appGuid = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
   const normalizedAppGuid = String(appGuid || "").trim();
@@ -9851,7 +9783,6 @@ function applyAdobePassEnvironment(environment = null) {
   state.consoleContextPromise = null;
   state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
-  state.consoleBootstrapPromise = null;
   if (environmentChanged) {
     clearEnvironmentAwareRegisteredAppState("environment-change");
     clearDegradationWorkspaceRecordingState("environment-change");
@@ -11791,7 +11722,6 @@ const state = {
   consoleContextPromise: null,
   consoleCsrfToken: "",
   consoleBootstrapState: null,
-  consoleBootstrapPromise: null,
   isBootstrapping: false,
   sessionBootstrapGeneration: 0,
   environmentSwitchPromise: null,
@@ -51128,7 +51058,6 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.consoleContextReady = false;
   state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
-  state.consoleBootstrapPromise = null;
   state.esmWorkspaceWorkspaceTabId = 0;
   state.esmWorkspaceWorkspaceWindowId = 0;
   state.esmWorkspaceWorkspaceTabIdByWindowId.clear();
@@ -59352,7 +59281,6 @@ async function resetToSignedOutState(options = {}) {
   state.consoleContextReady = false;
   state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
-  state.consoleBootstrapPromise = null;
   state.mvpdCacheByRequestor.clear();
   state.sessionMonitorConsecutiveInactiveDetections = 0;
   state.sessionMonitorLastProbeSource = "unknown";
@@ -62248,15 +62176,7 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
           ];
 
     const channels = channelsResult.ok ? channelsResult.value : [];
-    const fallbackProgrammers = buildProgrammerEntitiesFromConsoleBootstrap({
-      extendedProfile,
-      profile: extendedProfile,
-    });
-    const programmers = programmersResult.ok
-      ? programmersResult.value
-      : fallbackProgrammers.length > 0
-        ? fallbackProgrammers
-        : [];
+    const programmers = programmersResult.ok ? programmersResult.value : [];
     const roles = extractAdobeConsoleGrantedAuthorities(extendedProfile);
     const errors = {
       extendedProfile: extendedProfileResult.ok ? "" : serializeError(extendedProfileResult.error),
@@ -62505,189 +62425,6 @@ function captureAdobeConsoleResponseState(response = null) {
   if (csrfToken) {
     state.consoleCsrfToken = csrfToken;
   }
-}
-
-async function fetchAdobeConsoleBootstrapState(accessToken = "", options = {}) {
-  const normalizedAccessToken = normalizeBearerTokenValue(accessToken);
-  if (!normalizedAccessToken || !isProbablyJwt(normalizedAccessToken)) {
-    return null;
-  }
-
-  const timeoutMs = Math.max(1000, Number(options.timeoutMs || PROGRAMMERS_FETCH_TIMEOUT_MS));
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const pageContextTargetRef =
-    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
-      ? options.pageContextTargetRef
-      : null;
-  let csrfToken = firstNonEmptyString([state.consoleCsrfToken, "NO-TOKEN"]);
-  const buildCommonRequestOptions = () => ({
-    timeoutMs,
-    accessToken: normalizedAccessToken,
-    allowTemporaryPageContextTab,
-    preferredTabId,
-    pageContextTargetRef,
-    headers: {
-      Authorization: `bearer ${normalizedAccessToken}`,
-      "X-CSRF-Token": firstNonEmptyString([csrfToken, state.consoleCsrfToken, "NO-TOKEN"]),
-    },
-  });
-
-  const extendedProfileResult = await settle(() =>
-    fetchAdobeConsoleJsonWithLoginButtonFallback(
-      [`${ADOBE_CONSOLE_BASE}/rest/api/user/extendedProfile`],
-      "Console extended profile",
-      buildCommonRequestOptions()
-    )
-  );
-  if (extendedProfileResult.ok) {
-    const responseHeaders =
-      extendedProfileResult.value?.headers && typeof extendedProfileResult.value.headers === "object"
-        ? extendedProfileResult.value.headers
-        : {};
-    const nextCsrfToken = String(
-      firstNonEmptyString([
-        responseHeaders["x-csrf-token"],
-        responseHeaders["X-CSRF-Token"],
-        csrfToken,
-        state.consoleCsrfToken,
-      ]) || ""
-    ).trim();
-    if (nextCsrfToken) {
-      csrfToken = nextCsrfToken;
-      state.consoleCsrfToken = nextCsrfToken;
-    }
-  }
-  const configurationVersionResult = await settle(() =>
-    fetchAdobeConsoleJsonWithLoginButtonFallback(
-      [`${ADOBE_CONSOLE_BASE}/rest/api/config/latestActivatedConsoleConfigurationVersion`],
-      "Console configuration version",
-      buildCommonRequestOptions()
-    )
-  );
-  const extendedProfileResponse = extendedProfileResult.ok ? extendedProfileResult.value : null;
-  const configurationVersionResponse = configurationVersionResult.ok ? configurationVersionResult.value : null;
-
-  const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(configurationVersionResponse?.parsed, 0);
-  const extendedProfile =
-    extendedProfileResponse?.parsed && typeof extendedProfileResponse.parsed === "object"
-      ? extendedProfileResponse.parsed
-      : null;
-  const configurationVersionError = !configurationVersionResult.ok
-    ? configurationVersionResult.error instanceof Error
-      ? configurationVersionResult.error.message
-      : String(configurationVersionResult.error)
-    : !(configurationVersion > 0)
-      ? "Console configuration version did not resolve."
-      : "";
-  const extendedProfileError = !extendedProfileResult.ok
-    ? extendedProfileResult.error instanceof Error
-      ? extendedProfileResult.error.message
-      : String(extendedProfileResult.error)
-    : !extendedProfile
-      ? "Console extended profile did not resolve."
-      : "";
-  if (!extendedProfile) {
-    throw new Error(extendedProfileError || "Console extended profile did not resolve.");
-  }
-
-  return {
-    accessToken: normalizedAccessToken,
-    fetchedAt: Date.now(),
-    extendedProfile,
-    grantedAuthorities: extractAdobeConsoleGrantedAuthorities(extendedProfile),
-    configurationVersion,
-    channels: Array.isArray(state.consoleBootstrapState?.channels) ? state.consoleBootstrapState.channels : [],
-    errors: {
-      extendedProfile: extendedProfileError,
-      configurationVersion: configurationVersionError,
-    },
-  };
-}
-
-async function ensureConsoleBootstrapState(accessToken = "", options = {}) {
-  const normalizedAccessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([accessToken, getPreferredAdobeConsoleAccessTokenCandidate()])
-  );
-  if (!normalizedAccessToken || !isProbablyJwt(normalizedAccessToken)) {
-    setUnderparDiagnosticMarker("console_bootstrap", {
-      status: "skipped",
-      phase: "no-access-token",
-    });
-    return null;
-  }
-
-  const forceRefresh = options.forceRefresh === true;
-  const existingBootstrapState =
-    state.consoleBootstrapState && typeof state.consoleBootstrapState === "object" ? state.consoleBootstrapState : null;
-  if (
-    !forceRefresh &&
-    existingBootstrapState &&
-    normalizeBearerTokenValue(existingBootstrapState.accessToken || "") === normalizedAccessToken
-  ) {
-    const existingConfigurationVersion = mvpdWorkspaceExtractConfigurationVersion(existingBootstrapState, 0);
-    if (existingConfigurationVersion > 0 || existingBootstrapState.extendedProfile) {
-      setUnderparDiagnosticMarker("console_bootstrap", {
-        status: "cache-hit",
-        phase: "reuse",
-        configurationVersion: existingConfigurationVersion,
-        authoritiesCount: Array.isArray(existingBootstrapState?.grantedAuthorities)
-          ? existingBootstrapState.grantedAuthorities.length
-          : 0,
-      });
-      return existingBootstrapState;
-    }
-  }
-
-  if (state.consoleBootstrapPromise) {
-    setUnderparDiagnosticMarker("console_bootstrap", {
-      status: "pending",
-      phase: "reuse-promise",
-    });
-    return state.consoleBootstrapPromise;
-  }
-
-  let promise;
-  promise = (async () => {
-    setUnderparDiagnosticMarker("console_bootstrap", {
-      status: "pending",
-      phase: "fetch",
-      forceRefresh,
-    });
-    try {
-      const bootstrapState = await fetchAdobeConsoleBootstrapState(normalizedAccessToken, options);
-      if (bootstrapState) {
-        state.consoleBootstrapState = bootstrapState;
-        PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
-        setUnderparDiagnosticMarker("console_bootstrap", {
-          status: "success",
-          phase: "complete",
-          configurationVersion: Number(bootstrapState?.configurationVersion || 0),
-          authoritiesCount: Array.isArray(bootstrapState?.grantedAuthorities)
-            ? bootstrapState.grantedAuthorities.length
-            : 0,
-          hasExtendedProfile: Boolean(bootstrapState?.extendedProfile),
-        });
-      }
-      return bootstrapState;
-    } catch (error) {
-      const resolvedError = error instanceof Error ? error : new Error(String(error));
-      setUnderparDiagnosticMarker("console_bootstrap", {
-        status: "error",
-        phase: "failed",
-        forceRefresh,
-        error: resolvedError.message,
-      });
-      throw resolvedError;
-    } finally {
-      if (state.consoleBootstrapPromise === promise) {
-        state.consoleBootstrapPromise = null;
-      }
-    }
-  })();
-
-  state.consoleBootstrapPromise = promise;
-  return promise;
 }
 
 function shouldAllowInteractiveConsoleBootstrapForActivation(source = "", explicitAllow = false) {
@@ -67877,33 +67614,6 @@ async function resolveAdobeConsolePageContextTarget(requestUrl = "", options = {
   };
 }
 
-async function withAdobeConsolePageContextTarget(requestUrl = "", options = {}, work = null) {
-  const handler = typeof work === "function" ? work : null;
-  if (!handler) {
-    return null;
-  }
-
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const allowTemporaryTab = options.allowTemporaryTab === true;
-  const target = await resolveAdobeConsolePageContextTarget(requestUrl, {
-    preferredTabId,
-    allowTemporaryTab,
-  }).catch(() => null);
-  const resolvedTabId = Number(target?.tabId || 0);
-
-  try {
-    return await handler({
-      preferredTabId: resolvedTabId > 0 ? resolvedTabId : preferredTabId,
-      allowTemporaryPageContextTab: resolvedTabId > 0 ? false : allowTemporaryTab,
-      temporaryTarget: target?.temporaryTarget || null,
-    });
-  } finally {
-    if (target?.temporaryTarget) {
-      await closeTemporaryAdobePageContextTarget(target.temporaryTarget);
-    }
-  }
-}
-
 async function sleep(ms = 0) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, Math.max(0, Number(ms || 0)));
@@ -72847,194 +72557,6 @@ async function fetchConsoleChannelsFromApi(options = {}) {
     preferShellAccessToken: false,
   });
   return normalizeConsoleChannelsResponse(payload?.parsed || payload);
-}
-
-async function loadProgrammersData(accessToken = "", options = {}) {
-  const normalizedAccessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([accessToken, getPreferredAdobeConsoleAccessTokenCandidate(), state.loginData?.accessToken])
-  );
-  const allowRestrictedSession = options.allowRestrictedSession === true;
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
-  const preserveExistingOnFailure = options.preserveExistingOnFailure === true;
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const pageContextTargetRef = { target: null };
-  const preserveExistingState = preserveExistingOnFailure && Array.isArray(state.programmers) && state.programmers.length > 0;
-  if ((!state.loginData && !normalizedAccessToken) || (state.restricted && !allowRestrictedSession)) {
-    setUnderparDiagnosticMarker("programmers", {
-      status: "skipped",
-      phase: "no-session",
-    });
-    resetWorkflowForLoggedOut();
-    return;
-  }
-
-  state.programmersLoadInFlight = preserveExistingState ? false : true;
-  syncMediaCompanySelectAvailability();
-
-  try {
-    setUnderparDiagnosticMarker("programmers", {
-      status: "pending",
-      phase: "console-bootstrap",
-      forceRefresh: options.forceRefresh === true,
-      allowInteractiveAuthBootstrap: false,
-    });
-
-    const bootstrapState = await ensureConsoleBootstrapState(normalizedAccessToken, {
-      forceRefresh: options.forceRefresh === true,
-      allowInteractiveAuthBootstrap: false,
-      allowTemporaryPageContextTab,
-      preferredTabId,
-      pageContextTargetRef,
-    });
-    const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(bootstrapState, 0);
-
-    if (!bootstrapState?.extendedProfile) {
-      if (!preserveExistingState) {
-        applyProgrammerEntities([]);
-      }
-      setUnderparDiagnosticMarker("programmers", {
-        status: "error",
-        phase: "console-bootstrap-incomplete",
-        code: "PROGRAMMERS_LOAD_FAILED",
-      });
-      throw createProgrammersError(
-        "UnderPAR could not complete Adobe Pass console bootstrap before loading media companies.",
-        "PROGRAMMERS_LOAD_FAILED"
-      );
-    }
-
-    const grantedAuthorities = Array.isArray(bootstrapState.grantedAuthorities) ? bootstrapState.grantedAuthorities : [];
-    if (grantedAuthorities.length > 0 && !hasAdobeConsoleProgrammerAccess(grantedAuthorities)) {
-      if (!preserveExistingState) {
-        applyProgrammerEntities([]);
-      }
-      setUnderparDiagnosticMarker("programmers", {
-        status: "denied",
-        phase: "authority-check",
-        code: "PROGRAMMERS_ACCESS_DENIED",
-      });
-      throw createProgrammersError("Adobe Pass console access is denied for this account.", "PROGRAMMERS_ACCESS_DENIED");
-    }
-
-    const resolvedConsoleAccessToken = normalizeBearerTokenValue(
-      firstNonEmptyString([bootstrapState?.accessToken, normalizedAccessToken])
-    );
-    const configurationVersionMissingError = new Error("Console did not return an activated configuration version.");
-    const [entitiesResult, channelsResult] =
-      configurationVersion > 0
-        ? await Promise.all([
-            settle(() =>
-              fetchProgrammersFromApi({
-                accessToken: resolvedConsoleAccessToken,
-                configurationVersion,
-                requireEntities: false,
-                allowTemporaryPageContextTab,
-                pageContextTargetRef,
-                preferredTabId,
-              })
-            ),
-            settle(() =>
-              fetchConsoleChannelsFromApi({
-                accessToken: resolvedConsoleAccessToken,
-                configurationVersion,
-                allowTemporaryPageContextTab,
-                pageContextTargetRef,
-                preferredTabId,
-              })
-            ),
-          ])
-        : [
-            {
-              ok: false,
-              error: configurationVersionMissingError,
-            },
-            {
-              ok: false,
-              error: configurationVersionMissingError,
-            },
-          ];
-    const channels = channelsResult.ok ? channelsResult.value : [];
-    const fallbackEntities = buildProgrammerEntitiesFromConsoleBootstrap(bootstrapState);
-    const entities = entitiesResult.ok
-      ? entitiesResult.value
-      : fallbackEntities.length > 0
-        ? fallbackEntities
-        : [];
-    if (!entitiesResult.ok) {
-      log("Adobe Pass programmers fetch failed during programmer hydration", {
-        error: entitiesResult.error instanceof Error ? entitiesResult.error.message : String(entitiesResult.error),
-        configurationVersion,
-      });
-    }
-    if (!channelsResult.ok) {
-      log("Adobe Pass channels fetch failed during programmer hydration", {
-        error: channelsResult.error instanceof Error ? channelsResult.error.message : String(channelsResult.error),
-      });
-    }
-
-    state.consoleBootstrapState = {
-      ...(bootstrapState && typeof bootstrapState === "object" ? bootstrapState : {}),
-      channels: Array.isArray(channels) ? channels : [],
-      errors: {
-        ...((bootstrapState?.errors && typeof bootstrapState.errors === "object") ? bootstrapState.errors : {}),
-        channels: channelsResult.ok
-          ? ""
-          : channelsResult.error instanceof Error
-            ? channelsResult.error.message
-            : String(channelsResult.error || ""),
-        programmers: entitiesResult.ok
-          ? ""
-          : entitiesResult.error instanceof Error
-            ? entitiesResult.error.message
-            : String(entitiesResult.error || ""),
-      },
-    };
-
-    applyProgrammerEntities(Array.isArray(entities) ? entities : []);
-    await persistAuthenticatedConsoleHydrationSnapshot().catch(() => null);
-    const programmerPhase = entitiesResult.ok
-      ? "loaded"
-      : configurationVersion > 0
-        ? "bootstrap-fallback"
-        : "limited";
-    const programmerStatus = state.programmers.length > 0
-      ? entitiesResult.ok
-        ? "success"
-        : "partial"
-      : entitiesResult.ok
-        ? "empty"
-        : "partial";
-    setUnderparDiagnosticMarker("programmers", {
-      status: programmerStatus,
-      phase: programmerPhase,
-      count: Number(state.programmers.length || 0),
-      endpoint: String(state.programmersApiEndpoint || "").trim(),
-      configurationVersion,
-    });
-    if (state.programmers.length === 0) {
-      clearStatusUnlessCmTenantsPrecheckBlocked();
-    }
-    return true;
-  } catch (error) {
-    if (!preserveExistingState) {
-      applyProgrammerEntities([]);
-    }
-    const resolvedError = error instanceof Error ? error : new Error(String(error));
-    const errorCode = String(resolvedError?.code || "").trim();
-    setUnderparDiagnosticMarker("programmers", {
-      status: errorCode === "PROGRAMMERS_ACCESS_DENIED" ? "denied" : "error",
-      phase: "entity-fetch",
-      endpoint: String(state.programmersApiEndpoint || "").trim(),
-      code: errorCode || "PROGRAMMERS_LOAD_FAILED",
-      error: resolvedError.message,
-    });
-    throw resolvedError;
-  } finally {
-    await closeTemporaryAdobePageContextTarget(pageContextTargetRef?.target?.temporaryTarget || null).catch(() => null);
-    pageContextTargetRef.target = null;
-    state.programmersLoadInFlight = false;
-    syncMediaCompanySelectAvailability();
-  }
 }
 
 function resetProgrammerRuntimeState() {

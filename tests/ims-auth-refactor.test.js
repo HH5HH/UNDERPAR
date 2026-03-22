@@ -316,21 +316,6 @@ function loadPopupRestrictedSelectedOrgHelper() {
   return context.module.exports;
 }
 
-function loadPopupBootstrapProgrammersHelper() {
-  const filePath = path.join(ROOT, "popup.js");
-  const source = fs.readFileSync(filePath, "utf8");
-  const script = [
-    extractFunctionSource(source, "buildProgrammerEntitiesFromConsoleBootstrap"),
-    "module.exports = { buildProgrammerEntitiesFromConsoleBootstrap };",
-  ].join("\n\n");
-  const context = {
-    module: { exports: {} },
-    exports: {},
-  };
-  vm.runInNewContext(script, context, { filename: filePath });
-  return context.module.exports;
-}
-
 function loadPopupImsAuthLaunchHelper() {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -1166,20 +1151,22 @@ test("session monitor is disabled so UnderPAR never auto-refreshes Adobe auth", 
   assert.doesNotMatch(popupSource, /function attemptSessionAutoBootstrap/);
 });
 
-test("console configuration version is sourced dynamically from direct console bootstrap state", () => {
+test("console configuration version is sourced dynamically from the direct console context path", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
+  const buildConsoleContextSource = extractFunctionSource(popupSource, "buildConsoleContext");
   const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
-  const fetchBootstrapSource = extractFunctionSource(popupSource, "fetchAdobeConsoleBootstrapState");
   const configExtractorSource = extractFunctionSource(popupSource, "mvpdWorkspaceExtractConfigurationVersion");
   const consoleHeaderSource = extractFunctionSource(popupSource, "getAdobeConsoleRequestHeaders");
-  const bootstrapEnsureSource = extractFunctionSource(popupSource, "ensureConsoleBootstrapState");
   const fetchConsoleSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithAuthVariants");
   const loginButtonFallbackSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithLoginButtonFallback");
 
   assert.equal(/configurationVersion=3522/.test(popupSource), false);
   assert.match(popupSource, /function appendAdobeConsoleConfigurationVersion/);
   assert.match(popupSource, /consoleBootstrapState/);
+  assert.doesNotMatch(popupSource, /function loadProgrammersData\(/);
+  assert.doesNotMatch(popupSource, /function fetchAdobeConsoleBootstrapState\(/);
+  assert.doesNotMatch(popupSource, /function ensureConsoleBootstrapState\(/);
+  assert.doesNotMatch(popupSource, /function buildProgrammerEntitiesFromConsoleBootstrap\(/);
   assert.match(configExtractorSource, /payload\.configurationVersion/);
   assert.match(configExtractorSource, /payload\.configurationInfo/);
   assert.doesNotMatch(configExtractorSource, /for \(const nestedValue of Object\.values\(payload\)\)/);
@@ -1188,30 +1175,22 @@ test("console configuration version is sourced dynamically from direct console b
   assert.match(consoleHeaderSource, /headers\.Authorization = `bearer \$\{accessToken\}`;/);
   assert.doesNotMatch(consoleHeaderSource, /Origin:/);
   assert.doesNotMatch(consoleHeaderSource, /Referer:/);
-  assert.match(bootstrapEnsureSource, /getPreferredAdobeConsoleAccessTokenCandidate\(\)/);
-  assert.match(loadProgrammersSource, /bootstrapState = await ensureConsoleBootstrapState/);
-  assert.match(loadProgrammersSource, /allowInteractiveAuthBootstrap:\s*false/);
-  assert.match(loadProgrammersSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
-  assert.match(fetchBootstrapSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
-  assert.doesNotMatch(fetchBootstrapSource, /fetchAdobeConsoleJsonViaShellPageContext/);
   assert.match(loginButtonFallbackSource, /fetchAdobeConsoleJsonWithAuthVariants/);
   assert.match(loginButtonFallbackSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
   assert.match(loginButtonFallbackSource, /preferShellAccessToken:\s*false/);
-  assert.match(fetchBootstrapSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
-  assert.match(fetchBootstrapSource, /const preferredTabId = Number\(options\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
-  assert.match(fetchBootstrapSource, /const pageContextTargetRef =/);
-  assert.match(fetchBootstrapSource, /allowTemporaryPageContextTab,/);
-  assert.match(fetchBootstrapSource, /preferredTabId,/);
-  assert.match(fetchBootstrapSource, /const extendedProfileResult = await settle/);
-  assert.match(fetchBootstrapSource, /const configurationVersionResult = await settle/);
-  assert.match(fetchBootstrapSource, /rest\/api\/user\/extendedProfile/);
-  assert.match(fetchBootstrapSource, /rest\/api\/config\/latestActivatedConsoleConfigurationVersion/);
-  assert.match(fetchBootstrapSource, /throw new Error\(extendedProfileError \|\| "Console extended profile did not resolve\."\)/);
-  assert.doesNotMatch(fetchBootstrapSource, /error\.bootstrapSnapshot = \{/);
-  assert.match(loadProgrammersSource, /const configurationVersion = mvpdWorkspaceExtractConfigurationVersion\(bootstrapState, 0\)/);
-  assert.match(loadProgrammersSource, /if \(!bootstrapState\?\.extendedProfile\)/);
-  assert.doesNotMatch(loadProgrammersSource, /bootstrapSnapshot/);
-  assert.match(loadProgrammersSource, /grantedAuthorities\.length > 0 && !hasAdobeConsoleProgrammerAccess\(grantedAuthorities\)/);
+  assert.match(buildConsoleContextSource, /const allowTemporaryPageContextTab = options\?\.allowTemporaryPageContextTab === true;/);
+  assert.match(buildConsoleContextSource, /const preferredTabId = Number\(options\?\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
+  assert.match(buildConsoleContextSource, /const pageContextTargetRef = \{ target: null \};/);
+  assert.match(buildConsoleContextSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
+  assert.match(buildConsoleContextSource, /rest\/api\/user\/extendedProfile/);
+  assert.match(buildConsoleContextSource, /rest\/api\/config\/latestActivatedConsoleConfigurationVersion/);
+  assert.match(buildConsoleContextSource, /const configurationVersionMissingError = configurationVersion > 0/);
+  assert.match(buildConsoleContextSource, /configurationVersion > 0\s*\?\s*await Promise\.all/);
+  assert.match(buildConsoleContextSource, /fetchProgrammersFromApi\(\{/);
+  assert.match(buildConsoleContextSource, /fetchConsoleChannelsFromApi\(\{/);
+  assert.match(buildConsoleContextSource, /const programmers = programmersResult\.ok \? programmersResult\.value : \[\];/);
+  assert.doesNotMatch(buildConsoleContextSource, /fallbackProgrammers/);
+  assert.doesNotMatch(buildConsoleContextSource, /accessibleRootEntities/);
   assert.match(fetchConsoleSource, /getAdobeConsoleRequestHeaders\(activeAccessToken\)/);
   assert.doesNotMatch(fetchConsoleSource, /const getHeaderVariants = \(\) =>/);
   assert.doesNotMatch(fetchConsoleSource, /getAdobeConsoleRequestHeaders\(""\)/);
@@ -1224,16 +1203,11 @@ test("console configuration version is sourced dynamically from direct console b
   assert.match(fetchProgrammersSource, /allowTemporaryPageContextTab,/);
   assert.doesNotMatch(fetchProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext/);
   assert.doesNotMatch(fetchProgrammersSource, /preferShellAccessToken:\s*true/);
-  assert.match(loadProgrammersSource, /const resolvedConsoleAccessToken = normalizeBearerTokenValue\(/);
-  assert.match(loadProgrammersSource, /firstNonEmptyString\(\[bootstrapState\?\.accessToken,\s*normalizedAccessToken\]\)/);
-  assert.match(loadProgrammersSource, /const configurationVersionMissingError = new Error\("Console did not return an activated configuration version\."\);/);
-  assert.match(loadProgrammersSource, /configurationVersion > 0\s*\?\s*await Promise\.all/);
 });
 
 test("console bootstrap carries the rolling CSRF token through direct UnderPAR console requests like LoginButton", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const buildConsoleContextSource = extractFunctionSource(popupSource, "buildConsoleContext");
-  const fetchBootstrapSource = extractFunctionSource(popupSource, "fetchAdobeConsoleBootstrapState");
   const fetchConsoleSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithAuthVariants");
 
   assert.match(
@@ -1244,7 +1218,8 @@ test("console bootstrap carries the rolling CSRF token through direct UnderPAR c
     buildConsoleContextSource,
     /"X-CSRF-Token": firstNonEmptyString\(\[csrfToken,\s*state\.consoleCsrfToken,\s*"NO-TOKEN"\]\),/
   );
-  assert.match(fetchBootstrapSource, /let csrfToken = firstNonEmptyString\(\[state\.consoleCsrfToken,\s*"NO-TOKEN"\]\);/);
+  assert.match(buildConsoleContextSource, /const nextCsrfToken = String\(/);
+  assert.match(buildConsoleContextSource, /state\.consoleCsrfToken = nextCsrfToken;/);
   assert.match(fetchConsoleSource, /headers:\s*toDebugHeadersObject\(response\.headers \|\| new Headers\(\)\),/);
 });
 
@@ -1261,83 +1236,28 @@ test("programmer endpoint access_denied responses stay on the limited console pa
   assert.doesNotMatch(fetchProgrammersSource, /PROGRAMMERS_ENDPOINT_FAILED/);
 });
 
-test("programmer access stays limited and initial load prefers console bootstrap fallback over vault reuse", () => {
+test("programmer access stays limited and no longer fabricates bootstrap fallback media companies or vault reuse", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
+  const buildConsoleContextSource = extractFunctionSource(popupSource, "buildConsoleContext");
 
-  assert.doesNotMatch(loadProgrammersSource, /buildProgrammerEntitiesFromPassVault\(/);
-  assert.doesNotMatch(loadProgrammersSource, /phase: "vault-fallback"/);
-  assert.doesNotMatch(loadProgrammersSource, /Using vaulted media companies/);
-  assert.match(loadProgrammersSource, /buildProgrammerEntitiesFromConsoleBootstrap\(/);
-  assert.match(loadProgrammersSource, /const programmerPhase = entitiesResult\.ok/);
-  assert.match(loadProgrammersSource, /configurationVersion > 0\s*\?\s*"bootstrap-fallback"\s*:\s*"limited"/);
-  assert.match(loadProgrammersSource, /const entities = entitiesResult\.ok/);
-  assert.match(loadProgrammersSource, /fallbackEntities\.length > 0/);
-  assert.doesNotMatch(loadProgrammersSource, /throw entitiesResult\.error;/);
+  assert.doesNotMatch(popupSource, /function loadProgrammersData\(/);
+  assert.doesNotMatch(buildConsoleContextSource, /buildProgrammerEntitiesFromPassVault\(/);
+  assert.doesNotMatch(buildConsoleContextSource, /phase: "vault-fallback"/);
+  assert.doesNotMatch(buildConsoleContextSource, /Using vaulted media companies/);
+  assert.doesNotMatch(popupSource, /buildProgrammerEntitiesFromConsoleBootstrap\(/);
+  assert.match(buildConsoleContextSource, /const programmers = programmersResult\.ok \? programmersResult\.value : \[\];/);
+  assert.doesNotMatch(buildConsoleContextSource, /fallbackProgrammers/);
+  assert.doesNotMatch(buildConsoleContextSource, /accessibleRootEntities/);
 });
 
-test("console bootstrap accessible root entities can seed media companies when Programmer listing is denied", () => {
-  const { buildProgrammerEntitiesFromConsoleBootstrap } = loadPopupBootstrapProgrammersHelper();
+test("legacy programmer bootstrap fallback helpers are removed from source", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
 
-  assert.equal(
-    JSON.stringify(
-      buildProgrammerEntitiesFromConsoleBootstrap({
-        extendedProfile: {
-          accessibleRootEntities: {
-            "com.adobe.pass.model.olca.actor.Programmer": {
-              "Programmer:Adobe": "WRITE",
-              "Programmer:*": "READ",
-            },
-            "com.adobe.pass.model.olca.actor.Mvpd": {
-              "Mvpd:*": "READ",
-            },
-          },
-        },
-      })
-    ),
-    JSON.stringify([
-      {
-        key: "Programmer:Adobe",
-        entityData: {
-          id: "Adobe",
-          displayName: "Adobe",
-          mediaCompanyName: "Adobe",
-          contentProviders: [],
-          applications: [],
-          permissions: ["WRITE"],
-        },
-      },
-    ])
-  );
-
-  assert.equal(
-    JSON.stringify(
-      buildProgrammerEntitiesFromConsoleBootstrap({
-        extendedProfile: {
-          profile: {
-            accessibleRootEntities: {
-              "com.adobe.pass.model.olca.actor.Programmer": {
-                "@Programmer:NestedAdobe": "READ",
-              },
-            },
-          },
-        },
-      })
-    ),
-    JSON.stringify([
-      {
-        key: "@Programmer:NestedAdobe",
-        entityData: {
-          id: "NestedAdobe",
-          displayName: "NestedAdobe",
-          mediaCompanyName: "NestedAdobe",
-          contentProviders: [],
-          applications: [],
-          permissions: ["READ"],
-        },
-      },
-    ])
-  );
+  assert.doesNotMatch(popupSource, /function buildProgrammerEntitiesFromConsoleBootstrap\(/);
+  assert.doesNotMatch(popupSource, /function fetchAdobeConsoleBootstrapState\(/);
+  assert.doesNotMatch(popupSource, /function ensureConsoleBootstrapState\(/);
+  assert.doesNotMatch(popupSource, /function withAdobeConsolePageContextTarget\(/);
+  assert.doesNotMatch(popupSource, /function loadProgrammersData\(/);
 });
 
 test("programmer discovery stays on deterministic entity endpoints and console role extraction handles authority objects", () => {
@@ -1420,15 +1340,15 @@ test("experience cloud auth redirect detection accepts plain-object headers from
 
 test("programmer load stays on direct console requests while allowing LoginButton-style fallback targets", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const loadProgrammersSource = extractFunctionSource(popupSource, "loadProgrammersData");
+  const buildConsoleContextSource = extractFunctionSource(popupSource, "buildConsoleContext");
   const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
   const fetchChannelsSource = extractFunctionSource(popupSource, "fetchConsoleChannelsFromApi");
   const fetchRegisteredApplicationsSource = extractFunctionSource(popupSource, "fetchProgrammerRegisteredApplications");
   const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
 
-  assert.doesNotMatch(loadProgrammersSource, /withAdobeConsolePageContextTarget\(/);
-  assert.doesNotMatch(loadProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext\(/);
-  assert.match(loadProgrammersSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.doesNotMatch(popupSource, /function withAdobeConsolePageContextTarget\(/);
+  assert.doesNotMatch(buildConsoleContextSource, /fetchAdobeConsoleJsonViaShellPageContext\(/);
+  assert.match(buildConsoleContextSource, /const allowTemporaryPageContextTab = options\?\.allowTemporaryPageContextTab === true;/);
   assert.match(fetchProgrammersSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
   assert.match(fetchChannelsSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
   assert.match(fetchRegisteredApplicationsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
