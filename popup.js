@@ -8220,6 +8220,42 @@ function buildPassVaultHydrationRegisteredApplications(applicationsData = {}) {
   return applications;
 }
 
+function buildPassVaultCompactRegisteredApplication(application = null) {
+  if (!application || typeof application !== "object") {
+    return null;
+  }
+
+  const normalizedApplication = {
+    key: firstNonEmptyString([application?.key, application?.id, application?.guid]),
+    id: firstNonEmptyString([application?.id, application?.guid, application?.key]),
+    guid: firstNonEmptyString([application?.guid, application?.id, application?.key]),
+    name: firstNonEmptyString([application?.name, application?.displayName]),
+    label: firstNonEmptyString([application?.label, application?.name, application?.displayName, application?.guid, application?.id]),
+    clientId: firstNonEmptyString([application?.clientId]),
+    scopes: (Array.isArray(application?.scopes) ? application.scopes : []).map((scope) => normalizeScope(scope)).filter(Boolean),
+    scopeLabels: Array.isArray(application?.scopeLabels) ? application.scopeLabels.filter(Boolean) : [],
+    type: firstNonEmptyString([application?.type]),
+    softwareStatement: firstNonEmptyString([
+      application?.softwareStatement,
+      extractSoftwareStatementFromAppData(application?.appData || null),
+      extractSoftwareStatementFromAppData(application?.raw || null),
+      extractSoftwareStatementFromAppData(application),
+    ]),
+    raw:
+      application?.raw && typeof application.raw === "object" && !Array.isArray(application.raw)
+        ? cloneJsonLikeValue(application.raw, null)
+        : null,
+    appData:
+      application?.appData && typeof application.appData === "object" && !Array.isArray(application.appData)
+        ? cloneJsonLikeValue(application.appData, null)
+        : application?.raw && typeof application.raw === "object" && !Array.isArray(application.raw)
+          ? cloneJsonLikeValue(application.raw, null)
+          : null,
+  };
+
+  return normalizedApplication.guid || normalizedApplication.id || normalizedApplication.key ? normalizedApplication : null;
+}
+
 function registeredApplicationMatchesNativeRequiredScope(application = null, requiredScope = "") {
   const normalizedRequiredScope = normalizeScope(requiredScope);
   if (!application || !normalizedRequiredScope) {
@@ -8262,6 +8298,16 @@ function buildPassVaultExistingHydrationServiceRecord(programmerId = "", existin
   };
 }
 
+function buildPassVaultCompactRegisteredApplicationIdentity(application = null) {
+  return firstNonEmptyString([application?.guid, application?.id, application?.key]);
+}
+
+function compactPassVaultRegisteredApplicationsMatch(left = null, right = null) {
+  const leftIdentity = buildPassVaultCompactRegisteredApplicationIdentity(left);
+  const rightIdentity = buildPassVaultCompactRegisteredApplicationIdentity(right);
+  return Boolean(leftIdentity) && leftIdentity === rightIdentity;
+}
+
 function resolvePassVaultHydrationServiceApplication({
   definition = null,
   programmerId = "",
@@ -8273,7 +8319,8 @@ function resolvePassVaultHydrationServiceApplication({
     return null;
   }
 
-  const matchingApplication = (Array.isArray(registeredApplications) ? registeredApplications : []).find((application) =>
+  const normalizedApplications = Array.isArray(registeredApplications) ? registeredApplications : [];
+  const matchingApplication = normalizedApplications.find((application) =>
     registeredApplicationMatchesNativeRequiredScope(application, normalizedDefinition.requiredScope)
   );
   const existingService = buildPassVaultExistingHydrationServiceRecord(
@@ -8282,7 +8329,9 @@ function resolvePassVaultHydrationServiceApplication({
     normalizedDefinition.serviceKey
   );
 
-  return matchingApplication || existingService?.registeredApplication || null;
+  return buildPassVaultCompactRegisteredApplication(
+    matchingApplication || (normalizedApplications.length === 0 ? existingService?.registeredApplication : null)
+  );
 }
 
 function buildPassVaultServiceHydrationEntries({
@@ -8306,11 +8355,8 @@ function buildPassVaultServiceHydrationEntries({
       existingRecord,
     });
     const appGuid = String(registeredApplication?.guid || "").trim();
-    const existingGuid = String(existingService?.registeredApplication?.guid || "").trim();
     const client =
-      appGuid &&
-      existingGuid &&
-      appGuid === existingGuid &&
+      compactPassVaultRegisteredApplicationsMatch(registeredApplication, existingService?.registeredApplication) &&
       existingService?.client &&
       typeof existingService.client === "object"
         ? {
@@ -8393,6 +8439,12 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
 
   const programmerId = String(hydrationContext?.programmerId || "").trim();
   const guid = String(registeredApplication?.guid || "").trim();
+  const applicationLabel = firstNonEmptyString([
+    registeredApplication?.name,
+    registeredApplication?.label,
+    registeredApplication?.appName,
+    guid,
+  ]);
   const now = Date.now();
   const requiredScope = getPassVaultRequiredScopeForService(normalizedDefinition.serviceKey, registeredApplication);
   const nextClient =
@@ -8427,7 +8479,7 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
         client: normalizeUnderparVaultCredentialEntry({
           ...nextClient,
           updatedAt: now,
-          error: `No software statement found on app ${registeredApplication?.appName || guid}`,
+          error: `No software statement found on app ${applicationLabel}`,
         }),
         status: "partial",
       };
@@ -62887,9 +62939,10 @@ async function fetchApplicationRawByGuid(guid, options = {}) {
   }
   const requestOptions = options && typeof options === "object" ? options : {};
   const bulkRetrieveRequest = buildRegisteredApplicationBulkRetrieveRequest([guid], requestOptions.configurationVersion);
+  let bulkFallback = null;
   if (bulkRetrieveRequest) {
     const bulkPayload =
-      (await fetchAdobeConsoleJsonWithAuthVariants([bulkRetrieveRequest.url], "Application raw fetch", {
+      (await fetchAdobeConsoleJsonWithLoginButtonFallback([bulkRetrieveRequest.url], "Application raw fetch", {
         ...requestOptions,
         method: "POST",
         headers: {
@@ -62899,37 +62952,42 @@ async function fetchApplicationRawByGuid(guid, options = {}) {
         body: bulkRetrieveRequest.body,
         preferAuthenticatedHeaders: requestOptions.preferAuthenticatedHeaders !== false,
       }).catch(() => null)) ||
-      (await fetchAdobeConsoleJsonWithShellPageContextVariants([bulkRetrieveRequest.url], "Application raw fetch", {
-        ...requestOptions,
-        method: "POST",
-        headers: {
-          ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
-          "Content-Type": "application/json",
-        },
-        body: bulkRetrieveRequest.body,
-        preferShellAccessToken: true,
-      }).catch(() => null));
+      null;
     if (bulkPayload) {
       const bulkEntities = normalizeApplicationsResponse(bulkPayload?.parsed || bulkPayload);
       const bulkEntity =
         bulkEntities.find((item) => resolveApplicationGuidFromEntityData(item) === String(guid || "").trim()) || bulkEntities[0] || null;
       if (bulkEntity && typeof bulkEntity === "object") {
-        return {
+        bulkFallback = {
           text: String(bulkPayload?.text || ""),
           parsed: bulkEntity,
         };
+        const bulkStatement = firstNonEmptyString([
+          extractSoftwareStatementFromAppData(bulkEntity),
+          extractSoftwareStatementFromText(bulkPayload?.text || ""),
+        ]);
+        if (bulkStatement) {
+          return bulkFallback;
+        }
       }
     }
   }
+
   const urlCandidates = buildRegisteredApplicationDetailUrlCandidates(guid);
-  const payload =
-    (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application raw fetch", requestOptions)) ||
-    (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application raw fetch", requestOptions).catch(() => null));
-  const parsed = normalizeRegisteredApplicationDetailPayload(payload?.parsed || null);
-  return {
-    text: String(payload?.text || ""),
-    parsed: parsed && typeof parsed === "object" ? parsed : null,
-  };
+  for (const candidateUrl of urlCandidates) {
+    const payload = await fetchAdobeConsoleJsonWithLoginButtonFallback([candidateUrl], "Application raw fetch", requestOptions).catch(
+      () => null
+    );
+    const parsed = normalizeRegisteredApplicationDetailPayload(payload?.parsed || null);
+    if (parsed && typeof parsed === "object") {
+      return {
+        text: String(payload?.text || ""),
+        parsed,
+      };
+    }
+  }
+
+  return bulkFallback || { text: "", parsed: null };
 }
 
 async function fetchSoftwareStatementForAppGuid(guid, options = {}) {
