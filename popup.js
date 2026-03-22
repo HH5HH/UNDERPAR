@@ -62873,6 +62873,33 @@ function hasResolvedRequiredPremiumServices(services = null, requiredKeys = PREM
   });
 }
 
+function hasProvisionablePremiumServiceCandidate(programmerId = "", serviceKey = "", services = null) {
+  const candidates = collectPassVaultServiceCredentialCandidates(programmerId, serviceKey, services);
+  return candidates.some((appInfo) => getPassVaultServiceProvisioningRank(programmerId, appInfo) >= 2);
+}
+
+function getMissingProvisionablePremiumServiceKeys(
+  programmerId = "",
+  services = null,
+  requiredKeys = PREMIUM_REQUIRED_SERVICE_KEYS
+) {
+  const keys = Array.isArray(requiredKeys) && requiredKeys.length > 0 ? requiredKeys : PREMIUM_REQUIRED_SERVICE_KEYS;
+  return keys.filter((key) => {
+    if (!String(services?.[key]?.guid || "").trim()) {
+      return true;
+    }
+    return !hasProvisionablePremiumServiceCandidate(programmerId, key, services);
+  });
+}
+
+function hasProvisionableRequiredPremiumServices(
+  programmerId = "",
+  services = null,
+  requiredKeys = PREMIUM_REQUIRED_SERVICE_KEYS
+) {
+  return getMissingProvisionablePremiumServiceKeys(programmerId, services, requiredKeys).length === 0;
+}
+
 async function hydrateApplicationScopesForProgrammer(programmer, applicationsData, options = {}) {
   const byGuid =
     applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData)
@@ -62885,6 +62912,7 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
       ? options.requiredServiceKeys
       : PREMIUM_REQUIRED_SERVICE_KEYS;
   const stopWhenResolved = options.stopWhenResolved === true;
+  const stopWhenProvisionable = options.stopWhenProvisionable === true;
 
   const guidOrder = getProgrammerRegisteredApplicationGuids(programmer, byGuid);
   if (guidOrder.length === 0) {
@@ -62936,7 +62964,14 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
   let resolutionSatisfied =
     stopWhenResolved &&
     hasResolvedRequiredPremiumServices(findPremiumServiceApplications(programmer.applications || [], byGuid), requiredServiceKeys);
-  if (resolutionSatisfied) {
+  let provisioningSatisfied =
+    stopWhenProvisionable &&
+    hasProvisionableRequiredPremiumServices(
+      programmerId,
+      findPremiumServiceApplications(programmer.applications || [], byGuid),
+      requiredServiceKeys
+    );
+  if (resolutionSatisfied || provisioningSatisfied) {
     return byGuid;
   }
 
@@ -62950,6 +62985,7 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
       retryAfterMs,
       requestTimeoutMs,
       stopWhenResolved,
+      stopWhenProvisionable,
     },
     {
       programmer,
@@ -63026,12 +63062,19 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
         requiredServiceKeys
       );
     }
+    if (stopWhenProvisionable && !provisioningSatisfied) {
+      provisioningSatisfied = hasProvisionableRequiredPremiumServices(
+        programmerId,
+        findPremiumServiceApplications(programmer.applications || [], byGuid),
+        requiredServiceKeys
+      );
+    }
   };
 
   const workers = Array.from({ length: Math.min(concurrency, hydrationGuids.length) }, () =>
     (async () => {
       while (true) {
-        if (stopWhenResolved && resolutionSatisfied) {
+        if ((stopWhenResolved && resolutionSatisfied) || (stopWhenProvisionable && provisioningSatisfied)) {
           break;
         }
         const currentIndex = counters.index;
@@ -63055,7 +63098,9 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
       scopedCount,
       concurrency,
       stopWhenResolved,
+      stopWhenProvisionable,
       resolutionSatisfied,
+      provisioningSatisfied,
     },
     {
       programmer,
@@ -64804,15 +64849,78 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       }
     );
   };
+  const ensureProvisionablePremiumServices = async (applicationsData = {}, existingServices = null) => {
+    let resolvedApplications =
+      applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
+    let services = buildLivePremiumServices(resolvedApplications, existingServices);
+    const missingProvisionableKeys = getMissingProvisionablePremiumServiceKeys(
+      programmer.programmerId,
+      services,
+      PREMIUM_REQUIRED_SERVICE_KEYS
+    );
+    if (missingProvisionableKeys.length === 0) {
+      return {
+        applications: resolvedApplications,
+        services,
+      };
+    }
+
+    emitPremiumDecisionDebugEvent(
+      {
+        phase: "premium-service-provisioning-hydration-request",
+        programmerId: String(programmer.programmerId || ""),
+        requestorId: selectedRequestorId,
+        missingProvisionableKeys,
+      },
+      {
+        programmer,
+      }
+    );
+
+    resolvedApplications = await hydrateApplicationScopesForProgrammer(programmer, resolvedApplications, {
+      forceRefresh,
+      requiredServiceKeys: missingProvisionableKeys,
+      stopWhenProvisionable: true,
+      requestTimeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+      allowTemporaryPageContextTab,
+      preferredTabId,
+    });
+    services = buildLivePremiumServices(resolvedApplications, existingServices);
+
+    emitPremiumDecisionDebugEvent(
+      {
+        phase: "premium-service-provisioning-hydration-complete",
+        programmerId: String(programmer.programmerId || ""),
+        requestorId: selectedRequestorId,
+        missingProvisionableKeys,
+        remainingMissingProvisionableKeys: getMissingProvisionablePremiumServiceKeys(
+          programmer.programmerId,
+          services,
+          PREMIUM_REQUIRED_SERVICE_KEYS
+        ),
+      },
+      {
+        programmer,
+      }
+    );
+
+    return {
+      applications: resolvedApplications,
+      services,
+    };
+  };
   if (!forceRefresh && cachedApplicationsAreLive) {
-    const recomputedServices = buildLivePremiumServices(cachedApplications, existing);
+    const provisionedResult = await ensureProvisionablePremiumServices(cachedApplications, existing);
+    const provisionedApplications = provisionedResult?.applications || cachedApplications;
+    const recomputedServices = provisionedResult?.services || buildLivePremiumServices(cachedApplications, existing);
+    setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, provisionedApplications);
     setCurrentPremiumAppsSnapshot(programmer.programmerId, recomputedServices);
     emitPremiumDecisionDebugEvent(
       {
         phase: "premium-service-runtime-hit",
         programmerId: String(programmer.programmerId || ""),
         requestorId: selectedRequestorId,
-        applicationCount: Object.keys(cachedApplications || {}).length,
+        applicationCount: Object.keys(provisionedApplications || {}).length,
       },
       {
         programmer,
@@ -64835,12 +64943,15 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
         pageContextTargetRef,
         preferredTabId,
       }));
-    const resolvedApplications =
+    let resolvedApplications =
       applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
-    const premiumApps = findPremiumServiceApplications(programmer.applications || [], resolvedApplications, {
+    let premiumApps = findPremiumServiceApplications(programmer.applications || [], resolvedApplications, {
       programmerId: programmer.programmerId,
       requestorId: selectedRequestorId,
     });
+    const provisionedResult = await ensureProvisionablePremiumServices(resolvedApplications, existing);
+    resolvedApplications = provisionedResult?.applications || resolvedApplications;
+    premiumApps = provisionedResult?.services || premiumApps;
     setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, resolvedApplications);
     emitPremiumDecisionDebugEvent(
       {

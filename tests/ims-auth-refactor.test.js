@@ -1821,6 +1821,29 @@ test("premium app details still retain software statements while compile-time ma
   assert.match(ensureDcrSource, /extractSoftwareStatementFromAppData\(resolvedAppInfo\?\.appData \|\| null\)/);
 });
 
+test("live premium app loading performs bounded scope hydration until missing DCR service candidates become provisionable", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const ensurePremiumAppsSource = extractFunctionSource(popupSource, "ensurePremiumAppsForProgrammer");
+  const hydrateScopesSource = extractFunctionSource(popupSource, "hydrateApplicationScopesForProgrammer");
+  const missingProvisionableSource = extractFunctionSource(popupSource, "getMissingProvisionablePremiumServiceKeys");
+
+  assert.match(missingProvisionableSource, /hasProvisionablePremiumServiceCandidate\(programmerId,\s*key,\s*services\)/);
+  assert.match(ensurePremiumAppsSource, /const ensureProvisionablePremiumServices = async/);
+  assert.match(
+    ensurePremiumAppsSource,
+    /getMissingProvisionablePremiumServiceKeys\(\s*programmer\.programmerId,\s*services,\s*PREMIUM_REQUIRED_SERVICE_KEYS\s*\)/
+  );
+  assert.match(ensurePremiumAppsSource, /phase:\s*"premium-service-provisioning-hydration-request"/);
+  assert.match(ensurePremiumAppsSource, /hydrateApplicationScopesForProgrammer\(programmer,\s*resolvedApplications,\s*\{/);
+  assert.match(ensurePremiumAppsSource, /requiredServiceKeys:\s*missingProvisionableKeys/);
+  assert.match(ensurePremiumAppsSource, /stopWhenProvisionable:\s*true/);
+  assert.match(ensurePremiumAppsSource, /phase:\s*"premium-service-provisioning-hydration-complete"/);
+  assert.match(hydrateScopesSource, /const stopWhenProvisionable = options\.stopWhenProvisionable === true;/);
+  assert.match(hydrateScopesSource, /hasProvisionableRequiredPremiumServices\(/);
+  assert.match(hydrateScopesSource, /stopWhenProvisionable,/);
+  assert.match(hydrateScopesSource, /provisioningSatisfied,/);
+});
+
 test("pass vault compilation detects premium apps first, preserves detected order, and hydrates only the selected service candidates", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const mergeServicesSource = extractFunctionSource(popupSource, "mergeDetectedPassVaultServices");
