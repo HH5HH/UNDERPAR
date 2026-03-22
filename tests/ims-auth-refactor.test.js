@@ -1797,54 +1797,63 @@ test("missing DCR credentials trigger on-demand pass vault compilation instead o
   assert.match(ensureDcrSource, /UnderPAR could not auto-hydrate DCR credentials/);
 });
 
-test("selected premium apps are revalidated for DCR usability and software statements survive into the pass vault runtime snapshot", () => {
+test("premium app details still retain software statements while compile-time mapping now stays scope-driven", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
+  const resolveMappingsSource = extractFunctionSource(popupSource, "resolveMissingPassVaultServiceMappings");
   const sanitizeApplicationSource = extractFunctionSource(popupSource, "sanitizePassVaultApplicationData");
   const runtimeAppInfoSource = extractFunctionSource(popupSource, "buildPassVaultRuntimeAppInfoFromRecord");
   const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
 
-  assert.match(compileSource, /validateSelectedServiceKeys:\s*PREMIUM_REQUIRED_SERVICE_KEYS/);
+  assert.match(resolveMappingsSource, /mergeDetectedPassVaultServices\(programmer,\s*services,\s*applicationsSnapshot/);
+  assert.match(resolveMappingsSource, /hydrateApplicationScopesForProgrammer\(programmer,\s*applicationsSnapshot,\s*\{/);
+  assert.doesNotMatch(resolveMappingsSource, /fetchApplicationDetailsByGuid\(/);
+  assert.doesNotMatch(resolveMappingsSource, /fetchSoftwareStatementForAppGuid\(/);
+  assert.doesNotMatch(resolveMappingsSource, /validateSelectedServiceKeys/);
   assert.match(sanitizeApplicationSource, /const softwareStatement = extractSoftwareStatementFromAppData\(source\);/);
   assert.match(sanitizeApplicationSource, /if \(softwareStatement\) \{\s*sanitized\.softwareStatement = softwareStatement;\s*\}/);
   assert.match(runtimeAppInfoSource, /softwareStatement:\s*firstNonEmptyString\(\[/);
   assert.match(ensureDcrSource, /extractSoftwareStatementFromAppData\(resolvedAppInfo\?\.appData \|\| null\)/);
 });
 
-test("pass vault compilation provisions the first DCR-usable app per premium service and stops scanning once required services are resolved", () => {
+test("pass vault compilation detects premium apps first, preserves detected order, and hydrates only the selected service candidates", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const mergeServicesSource = extractFunctionSource(popupSource, "mergeDetectedPassVaultServices");
   const esmSelectionSource = extractFunctionSource(popupSource, "selectPreferredEsmAppForRequestor");
   const credentialTasksSource = extractFunctionSource(popupSource, "getPassVaultCredentialTasks");
+  const collectCandidatesSource = extractFunctionSource(popupSource, "collectPassVaultServiceCredentialCandidates");
   const hydrateCredentialsSource = extractFunctionSource(popupSource, "hydratePassVaultServiceCredentials");
   const resolveMappingsSource = extractFunctionSource(popupSource, "resolveMissingPassVaultServiceMappings");
   const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
 
+  assert.match(mergeServicesSource, /const detectedServices = findPremiumServiceApplications\(programmer\?\.applications \|\| \[\],\s*applicationsSnapshot/);
+  assert.match(mergeServicesSource, /restV2Apps = mergeUniquePremiumServiceAppInfos\(/);
+  assert.match(mergeServicesSource, /esmApps = mergeUniquePremiumServiceAppInfos\(/);
+  assert.match(mergeServicesSource, /degradationApps = mergeUniquePremiumServiceAppInfos\(/);
   assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"restV2",\s*services\)/);
   assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"esm",\s*services\)/);
   assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"degradation",\s*services\)/);
+  assert.doesNotMatch(collectCandidatesSource, /getPassVaultServiceProvisioningRank/);
   assert.match(hydrateCredentialsSource, /for \(const appInfo of appCandidates\)/);
   assert.match(hydrateCredentialsSource, /promoteResolvedServiceApp\(task\.serviceKey,\s*appInfo\)/);
-  assert.match(esmSelectionSource, /pickHighestRankedPassVaultServiceCandidate\(appInfos,\s*normalizedProgrammerId\)/);
-  assert.doesNotMatch(esmSelectionSource, /localeCompare/);
-  assert.match(esmSelectionSource, /return selectBestCandidate\(candidates\)/);
-  assert.match(resolveMappingsSource, /if \(missingServiceKeys\.length === 0\) \{\s*return resolvedServices;\s*\}/);
-  assert.match(resolveMappingsSource, /if \(missingServiceKeys\.length === 0\) \{\s*break;\s*\}/);
+  assert.doesNotMatch(esmSelectionSource, /pickHighestRankedPassVaultServiceCandidate/);
+  assert.match(esmSelectionSource, /return candidates\[0\] \|\| null;/);
+  assert.match(resolveMappingsSource, /if \(missingServiceKeys\.length === 0 \|\| Object\.keys\(applicationsSnapshot \|\| \{\}\)\.length === 0\) \{\s*return resolvedServices;\s*\}/);
   assert.match(compileSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
   assert.match(compileSource, /label:\s*"Saving premium services to VAULT\.\.\."/);
   assert.match(compileSource, /label:\s*"Finishing premium service hydration\.\.\."/);
 });
 
-test("REST V2 app selection prefers DCR-ready or software-statement-ready candidates before falling back", () => {
+test("REST V2 app selection preserves detected order while still reusing requestor-scoped app context", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const selectRestV2Source = extractFunctionSource(popupSource, "selectPreferredRestV2AppForRequestor");
   const loadMvpdsSource = extractFunctionSource(popupSource, "loadMvpdsFromRestV2");
   const fetchWithPremiumAuthSource = extractFunctionSource(popupSource, "fetchWithPremiumAuth");
 
-  assert.match(selectRestV2Source, /hasPassVaultServiceClientCredentials\(normalizedProgrammerId, appInfo\)/);
-  assert.match(selectRestV2Source, /extractSoftwareStatementFromAppData\(appInfo\?\.appData \|\| null\)/);
-  assert.match(selectRestV2Source, /const mappedCandidates = candidates\.filter\(\(appInfo\) =>/);
-  assert.doesNotMatch(selectRestV2Source, /localeCompare/);
-  assert.match(selectRestV2Source, /return selectBestCandidate\(candidates\)/);
+  assert.match(selectRestV2Source, /const cachedAuthContext = normalizedRequestorId \? getRequestorScopedRestV2AuthContext\(normalizedRequestorId\) : null;/);
+  assert.match(selectRestV2Source, /const cachedMatch = candidates\.find\(\(item\) => item\.guid === cachedAuthContext\.preferredAppGuid\) \|\| null;/);
+  assert.match(selectRestV2Source, /const mapped =\s*candidates\.find\(\(appInfo\) => appSupportsServiceProvider\(appInfo,\s*normalizedRequestorId,\s*normalizedProgrammerId\)\)/);
+  assert.doesNotMatch(selectRestV2Source, /getProvisioningRank/);
+  assert.match(selectRestV2Source, /return candidates\[0\] \|\| null;/);
   assert.match(loadMvpdsSource, /const requestorPreferredApp = selectPreferredRestV2AppForRequestor\(/);
   assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
   assert.match(loadMvpdsSource, /await primeProgrammerServiceHydration\(programmer,\s*premiumApps,\s*\{/);
@@ -1859,8 +1868,9 @@ test("degradation selection and DCR auth recovery no longer stay pinned to inval
   const clickDgrAuthSource = extractFunctionSource(popupSource, "resolveClickDgrAuthContext");
   const degradationCurlSource = extractFunctionSource(popupSource, "degradationBuildCurlCommand");
 
-  assert.match(resolveDegradationSource, /getPassVaultServiceProvisioningRank\(normalizedProgrammerId,\s*rightApp\)/);
   assert.match(resolveDegradationSource, /if \(normalizedPreferredGuid && normalizedGuid === normalizedPreferredGuid\) \{\s*score \+= 50;/);
+  assert.doesNotMatch(resolveDegradationSource, /getPassVaultServiceProvisioningRank/);
+  assert.match(resolveDegradationSource, /return compareDegradationAppPriority\(leftApp,\s*rightApp\);/);
   assert.match(recoverSource, /shouldAttemptAlternatePremiumServiceRecovery\(error,\s*resolvedAppInfo,\s*debugMeta\)/);
   assert.match(recoverSource, /recoverPremiumServiceSelection\(programmerId,\s*resolvedAppInfo,\s*debugMeta\)/);
   assert.match(clickDgrAuthSource, /ensureDcrAccessTokenWithServiceRecovery\(/);

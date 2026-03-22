@@ -8134,7 +8134,6 @@ function pickHighestRankedPassVaultServiceCandidate(appInfos = [], programmerId 
 }
 
 function collectPassVaultServiceCredentialCandidates(programmerId = "", serviceKey = "", services = null) {
-  const normalizedProgrammerId = String(programmerId || "").trim();
   const normalizedServiceKey = String(serviceKey || "").trim();
   const candidates = [];
   const seen = new Set();
@@ -8164,27 +8163,7 @@ function collectPassVaultServiceCredentialCandidates(programmerId = "", serviceK
     }
   }
 
-  return candidates
-    .map((appInfo, index) => ({
-      appInfo,
-      index,
-    }))
-    .sort((leftEntry, rightEntry) => {
-      const rankDelta =
-        getPassVaultServiceProvisioningRank(normalizedProgrammerId, rightEntry.appInfo) -
-        getPassVaultServiceProvisioningRank(normalizedProgrammerId, leftEntry.appInfo);
-      if (rankDelta !== 0) {
-        return rankDelta;
-      }
-      if (normalizedServiceKey === "degradation") {
-        const degradationDelta = compareDegradationAppPriority(leftEntry.appInfo, rightEntry.appInfo);
-        if (degradationDelta !== 0) {
-          return degradationDelta;
-        }
-      }
-      return leftEntry.index - rightEntry.index;
-    })
-    .map((entry) => entry.appInfo);
+  return candidates;
 }
 
 function getPassVaultCredentialTasks(programmerId = "", services = null) {
@@ -8586,17 +8565,15 @@ function selectPreferredEsmAppForRequestor(esmApps = [], requestorId = "", progr
   }
   const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedProgrammerId = String(programmerId || "").trim();
-  const selectBestCandidate = (appInfos = []) =>
-    pickHighestRankedPassVaultServiceCandidate(appInfos, normalizedProgrammerId);
   if (normalizedRequestorId) {
-    const mapped = selectBestCandidate(
-      candidates.filter((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId))
-    );
+    const mapped =
+      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) ||
+      null;
     if (mapped) {
       return mapped;
     }
   }
-  return selectBestCandidate(candidates) || (candidates.length === 1 ? candidates[0] : null);
+  return candidates[0] || null;
 }
 
 function resolveLatestPremiumServiceAppInfo(programmerId = "", fallbackAppInfo = null, debugMeta = null) {
@@ -8659,84 +8636,6 @@ function getMissingRequiredPremiumServiceKeys(services = null, requiredServiceKe
     }
     return false;
   });
-}
-
-function dropPremiumServiceAppFromResolvedServices(services = null, serviceKey = "", guid = "") {
-  const normalizedServiceKey = String(serviceKey || "").trim();
-  const normalizedGuid = String(guid || "").trim();
-  if (!services || typeof services !== "object" || !normalizedServiceKey || !normalizedGuid) {
-    return;
-  }
-
-  if (normalizedServiceKey === "restV2") {
-    const filteredApps = (Array.isArray(services.restV2Apps) ? services.restV2Apps : []).filter(
-      (appInfo) => String(appInfo?.guid || "").trim() !== normalizedGuid
-    );
-    services.restV2Apps = filteredApps;
-    if (String(services?.restV2?.guid || "").trim() === normalizedGuid) {
-      services.restV2 = filteredApps[0] || null;
-    }
-    return;
-  }
-
-  if (normalizedServiceKey === "esm") {
-    services.esmApps = (Array.isArray(services.esmApps) ? services.esmApps : []).filter(
-      (appInfo) => String(appInfo?.guid || "").trim() !== normalizedGuid
-    );
-    if (String(services?.esm?.guid || "").trim() === normalizedGuid) {
-      services.esm = services.esmApps[0] || null;
-    }
-    return;
-  }
-
-  if (normalizedServiceKey === "degradation") {
-    const filteredApps = (Array.isArray(services.degradationApps) ? services.degradationApps : []).filter(
-      (appInfo) => String(appInfo?.guid || "").trim() !== normalizedGuid
-    );
-    services.degradationApps = filteredApps;
-    if (String(services?.degradation?.guid || "").trim() === normalizedGuid) {
-      services.degradation = filteredApps[0] || null;
-    }
-  }
-}
-
-async function validateResolvedPremiumServiceSelection(programmer, serviceKey = "", appInfo = null, options = {}) {
-  const normalizedServiceKey = String(serviceKey || "").trim();
-  if (!programmer?.programmerId || !normalizedServiceKey || !appInfo?.guid) {
-    return false;
-  }
-
-  const requestTimeoutMs = Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS));
-  const forceRefresh = options?.forceRefresh === true;
-  const requiredScope = getPassVaultRequiredScopeForService(normalizedServiceKey, appInfo);
-  if (!requiredScope) {
-    return false;
-  }
-
-  try {
-    if (normalizedServiceKey === "esm") {
-      return await probeEsmServiceAccess(programmer.programmerId, appInfo, {
-        forceRefresh,
-        requestTimeoutMs,
-        lockAppSelection: true,
-      });
-    }
-
-    await ensureDcrAccessToken(programmer.programmerId, appInfo, forceRefresh, {
-      service: normalizedServiceKey,
-      scope: requiredScope,
-      requiredServiceScope: requiredScope,
-      appGuid: String(appInfo?.guid || ""),
-      appName: String(appInfo?.appName || appInfo?.guid || ""),
-      allowProvisioning: true,
-      strictScopeValidation: true,
-      tokenAttemptMode: "scoped-only",
-      lockAppSelection: true,
-    });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function appendPinnedEsmMediaCompanyQueryParam(rawUrl = "", mediaCompanyId = "") {
@@ -8846,280 +8745,119 @@ async function probeEsmServiceAccess(programmerId = "", appInfo = null, options 
   return true;
 }
 
+function mergeUniquePremiumServiceAppInfos(...collections) {
+  const merged = [];
+  const seen = new Set();
+
+  collections.forEach((collection) => {
+    const items = Array.isArray(collection) ? collection : [collection];
+    items.forEach((appInfo) => {
+      const guid = String(appInfo?.guid || "").trim();
+      if (!guid || seen.has(guid)) {
+        return;
+      }
+      seen.add(guid);
+      merged.push(appInfo);
+    });
+  });
+
+  return merged;
+}
+
+function mergeDetectedPassVaultServices(programmer, services = null, applicationsSnapshot = {}, options = {}) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  const requestorId = String(options?.requestorId || "").trim();
+  const detectedServices = findPremiumServiceApplications(programmer?.applications || [], applicationsSnapshot, {
+    programmerId,
+    requestorId,
+  });
+  const currentServices = services && typeof services === "object" ? services : {};
+  const restV2Apps = mergeUniquePremiumServiceAppInfos(
+    detectedServices?.restV2Apps,
+    detectedServices?.restV2,
+    currentServices?.restV2Apps,
+    currentServices?.restV2
+  );
+  const esmApps = mergeUniquePremiumServiceAppInfos(
+    detectedServices?.esmApps,
+    detectedServices?.esm,
+    currentServices?.esmApps,
+    currentServices?.esm
+  );
+  const degradationApps = mergeUniquePremiumServiceAppInfos(
+    detectedServices?.degradationApps,
+    detectedServices?.degradation,
+    currentServices?.degradationApps,
+    currentServices?.degradation
+  ).sort(compareDegradationAppPriority);
+  const resetTempPassApps = mergeUniquePremiumServiceAppInfos(
+    detectedServices?.resetTempPassApps,
+    detectedServices?.resetTempPass,
+    currentServices?.resetTempPassApps,
+    currentServices?.resetTempPass
+  );
+
+  return {
+    ...currentServices,
+    restV2Apps,
+    restV2: selectPreferredRestV2AppForRequestor(restV2Apps, requestorId, programmerId) || null,
+    esmApps,
+    esm: selectPreferredEsmAppForRequestor(esmApps, requestorId, programmerId) || null,
+    degradationApps,
+    degradation:
+      (requestorId
+        ? degradationApps.find((appInfo) => appSupportsServiceProvider(appInfo, requestorId, programmerId))
+        : null) ||
+      degradationApps[0] ||
+      null,
+    resetTempPassApps,
+    resetTempPass:
+      (requestorId
+        ? resetTempPassApps.find((appInfo) => appSupportsServiceProvider(appInfo, requestorId, programmerId))
+        : null) ||
+      resetTempPassApps[0] ||
+      null,
+  };
+}
+
 async function resolveMissingPassVaultServiceMappings(programmer, services = null, options = {}) {
   if (!programmer?.programmerId) {
     return services && typeof services === "object" ? services : {};
   }
 
-  const resolvedServices = {
-    ...(services && typeof services === "object" ? services : {}),
-    restV2Apps: Array.isArray(services?.restV2Apps) ? services.restV2Apps.filter((appInfo) => appInfo?.guid) : [],
-    esmApps: Array.isArray(services?.esmApps) ? services.esmApps.filter((appInfo) => appInfo?.guid) : [],
-    degradationApps: Array.isArray(services?.degradationApps) ? services.degradationApps.filter((appInfo) => appInfo?.guid) : [],
-  };
-  if (resolvedServices.degradation?.guid && resolvedServices.degradationApps.every((appInfo) => appInfo?.guid !== resolvedServices.degradation.guid)) {
-    resolvedServices.degradationApps.push(resolvedServices.degradation);
-  }
-  if (resolvedServices.esm?.guid && resolvedServices.esmApps.every((appInfo) => appInfo?.guid !== resolvedServices.esm.guid)) {
-    resolvedServices.esmApps.push(resolvedServices.esm);
-  }
-  if (resolvedServices.restV2?.guid && resolvedServices.restV2Apps.every((appInfo) => appInfo?.guid !== resolvedServices.restV2.guid)) {
-    resolvedServices.restV2Apps.push(resolvedServices.restV2);
-  }
-
-  const validateSelectedServiceKeys = new Set(
-    (
-      Array.isArray(options?.validateSelectedServiceKeys) && options.validateSelectedServiceKeys.length > 0
-        ? options.validateSelectedServiceKeys
-        : []
-    )
-      .map((serviceKey) => String(serviceKey || "").trim())
-      .filter(Boolean)
-  );
-  const validateExistingSelections = options?.validateExistingSelections === true || validateSelectedServiceKeys.size > 0;
-  if (validateExistingSelections) {
-    const serviceKeysToValidate =
-      validateSelectedServiceKeys.size > 0
-        ? [...validateSelectedServiceKeys]
-        : ["restV2", "esm", "degradation"];
-    for (const serviceKey of serviceKeysToValidate) {
-      const currentAppInfo =
-        serviceKey === "restV2"
-          ? resolvedServices?.restV2 || null
-          : serviceKey === "esm"
-            ? resolvedServices?.esm || null
-            : resolvedServices?.degradation || null;
-      if (!currentAppInfo?.guid) {
-        continue;
-      }
-      const selectionValid = await validateResolvedPremiumServiceSelection(programmer, serviceKey, currentAppInfo, options);
-      if (!selectionValid) {
-        dropPremiumServiceAppFromResolvedServices(resolvedServices, serviceKey, currentAppInfo.guid);
-      }
-    }
-  }
-
-  let missingServiceKeys = getMissingRequiredPremiumServiceKeys(resolvedServices, options?.requiredServiceKeys);
-  if (missingServiceKeys.length === 0) {
-    return resolvedServices;
-  }
-
-  const applicationsSnapshot = getCurrentProgrammerApplicationsSnapshot(programmer.programmerId) || {};
-  const guidOrder = getProgrammerRegisteredApplicationGuids(programmer, applicationsSnapshot);
-  if (guidOrder.length === 0) {
-    return resolvedServices;
-  }
-
-  const appRefsByGuid = new Map();
-  if (Array.isArray(programmer.applications)) {
-    programmer.applications.forEach((appRef, index) => {
-      const guid = extractApplicationGuid(appRef);
-      if (guid && !appRefsByGuid.has(guid)) {
-        appRefsByGuid.set(guid, {
-          index,
-          appRef,
-        });
-      }
-    });
-  }
-
+  const programmerId = String(programmer.programmerId || "").trim();
+  const requiredServiceKeys =
+    Array.isArray(options?.requiredServiceKeys) && options.requiredServiceKeys.length > 0
+      ? options.requiredServiceKeys
+      : PREMIUM_REQUIRED_SERVICE_KEYS;
   const forceRefresh = options?.forceRefresh === true;
   const requestTimeoutMs = Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS));
-  const preferredRequestorId = String(options?.requestorId || "").trim();
-  const appAdvertisesServiceScope = (serviceKey, appInfo) => {
-    const requiredScope = normalizeScope(getPassVaultRequiredScopeForService(serviceKey, appInfo));
-    if (!requiredScope) {
-      return false;
-    }
-    return (Array.isArray(appInfo?.scopes) ? appInfo.scopes : [])
-      .map((scope) => normalizeScope(scope))
-      .filter(Boolean)
-      .includes(requiredScope);
-  };
-  const pushUniqueServiceApp = (serviceKey, appInfo) => {
-    if (!appInfo?.guid) {
-      return;
-    }
-    if (serviceKey === "restV2") {
-      if (resolvedServices.restV2Apps.every((entry) => entry?.guid !== appInfo.guid)) {
-        resolvedServices.restV2Apps.push(appInfo);
-      }
-      if (!resolvedServices.restV2?.guid) {
-        resolvedServices.restV2 = appInfo;
-      }
-      return;
-    }
-    if (serviceKey === "degradation") {
-      if (resolvedServices.degradationApps.every((entry) => entry?.guid !== appInfo.guid)) {
-        resolvedServices.degradationApps.push(appInfo);
-      }
-      resolvedServices.degradationApps.sort(compareDegradationAppPriority);
-      resolvedServices.degradation = resolvedServices.degradationApps[0] || null;
-      return;
-    }
-    if (serviceKey === "esm") {
-      if (resolvedServices.esmApps.every((entry) => entry?.guid !== appInfo.guid)) {
-        resolvedServices.esmApps.push(appInfo);
-      }
-      const preferredEsmApp = selectPreferredEsmAppForRequestor(
-        collectEsmAppCandidatesFromPremiumApps(resolvedServices),
-        preferredRequestorId,
-        programmer.programmerId
-      );
-      if (preferredEsmApp?.guid) {
-        resolvedServices.esm = preferredEsmApp;
-      } else if (!resolvedServices.esm?.guid) {
-        resolvedServices.esm = appInfo;
-      }
-    }
-  };
+  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
+  let applicationsSnapshot = getCurrentProgrammerApplicationsSnapshot(programmerId) || {};
+  let resolvedServices = mergeDetectedPassVaultServices(programmer, services, applicationsSnapshot, {
+    requestorId: String(options?.requestorId || "").trim(),
+  });
 
-  for (const guid of guidOrder) {
-    missingServiceKeys = getMissingRequiredPremiumServiceKeys(resolvedServices, options?.requiredServiceKeys);
-    if (missingServiceKeys.length === 0) {
-      break;
-    }
-
-    const existingAppData =
-      applicationsSnapshot?.[guid] && typeof applicationsSnapshot[guid] === "object" && !Array.isArray(applicationsSnapshot[guid])
-        ? applicationsSnapshot[guid]
-        : { id: guid };
-    let mergedAppData = {
-      ...existingAppData,
-      id: existingAppData.id || guid,
-    };
-
-    const hasSoftwareStatement = () => Boolean(String(extractSoftwareStatementFromAppData(mergedAppData) || "").trim());
-    if (!hasSoftwareStatement()) {
-      try {
-        const details = await fetchApplicationDetailsByGuid(guid, {
-          timeoutMs: requestTimeoutMs,
-          preferAuthenticatedHeaders: true,
-        });
-        if (details && typeof details === "object") {
-          mergedAppData = {
-            ...mergedAppData,
-            ...details,
-            id: details.id || mergedAppData.id || guid,
-          };
-        }
-      } catch {
-        // Best-effort detail enrichment.
-      }
-    }
-    if (!hasSoftwareStatement()) {
-      try {
-        const softwareStatement = await fetchSoftwareStatementForAppGuid(guid, {
-          timeoutMs: requestTimeoutMs,
-          preferAuthenticatedHeaders: true,
-        });
-        if (softwareStatement) {
-          mergedAppData.softwareStatement = softwareStatement;
-          if (!mergedAppData.software_statement) {
-            mergedAppData.software_statement = softwareStatement;
-          }
-        }
-      } catch {
-        // Best-effort software statement enrichment.
-      }
-    }
-
-    const refMeta = appRefsByGuid.get(guid) || {};
-    let baseScopes = getScopesFromApplication(mergedAppData);
-    const candidateBase = {
-      index: Number.isFinite(refMeta.index) ? refMeta.index : Number.MAX_SAFE_INTEGER,
-      guid,
-      appRef: refMeta.appRef || `@RegisteredApplication:${guid}`,
-      appData: mergedAppData,
-      appName: mergedAppData.name || mergedAppData.displayName || guid,
-      scopes: Array.isArray(baseScopes) ? baseScopes.slice() : [],
-      softwareStatement: extractSoftwareStatementFromAppData(mergedAppData),
-    };
-    if (!candidateBase.softwareStatement) {
-      applicationsSnapshot[guid] = {
-        ...mergedAppData,
-        __underparScopeHydratedAt: Date.now(),
-      };
-      continue;
-    }
-
-    for (const serviceKey of missingServiceKeys.slice()) {
-      const requiredScope = getPassVaultRequiredScopeForService(serviceKey, candidateBase);
-      if (!requiredScope) {
-        continue;
-      }
-      try {
-        if (serviceKey === "esm") {
-          const probePassed = await probeEsmServiceAccess(programmer.programmerId, candidateBase, {
-            forceRefresh,
-            requestTimeoutMs,
-            lockAppSelection: true,
-          });
-          if (!probePassed) {
-            continue;
-          }
-        } else {
-          await ensureDcrAccessToken(programmer.programmerId, candidateBase, forceRefresh, {
-            service: serviceKey,
-            requiredServiceScope: requiredScope,
-            scope: requiredScope,
-            appGuid: guid,
-            allowProvisioning: true,
-            strictScopeValidation: true,
-            tokenAttemptMode: "scoped-only",
-            lockAppSelection: true,
-          });
-        }
-      } catch {
-        continue;
-      }
-
-      const resolvedScopes = uniqueSorted((Array.isArray(candidateBase.scopes) ? candidateBase.scopes : []).concat(requiredScope));
-      candidateBase.scopes = resolvedScopes;
-      baseScopes = resolvedScopes;
-      pushUniqueServiceApp(serviceKey, {
-        ...candidateBase,
-        scopes: resolvedScopes.slice(),
-      });
-    }
-
-    const scopedCandidate = {
-      ...candidateBase,
-      scopes: Array.isArray(baseScopes) ? baseScopes.slice() : [],
-    };
-    if (appAdvertisesServiceScope("restV2", scopedCandidate)) {
-      pushUniqueServiceApp("restV2", scopedCandidate);
-    }
-    if (appAdvertisesServiceScope("esm", scopedCandidate)) {
-      pushUniqueServiceApp("esm", scopedCandidate);
-    }
-    if (appAdvertisesServiceScope("degradation", scopedCandidate)) {
-      pushUniqueServiceApp("degradation", scopedCandidate);
-    }
-
-    applicationsSnapshot[guid] = {
-      ...mergedAppData,
-      id: mergedAppData.id || guid,
-      ...(baseScopes.length > 0 ? { scopes: baseScopes.slice(), scope: baseScopes.join(" ") } : {}),
-      __underparScopeHydratedAt: Date.now(),
-    };
-    if (getMissingRequiredPremiumServiceKeys(resolvedServices, options?.requiredServiceKeys).length === 0) {
-      break;
-    }
+  const missingServiceKeys = getMissingRequiredPremiumServiceKeys(resolvedServices, requiredServiceKeys);
+  if (missingServiceKeys.length === 0 || Object.keys(applicationsSnapshot || {}).length === 0) {
+    return resolvedServices;
   }
 
-  const preferredEsmApp = selectPreferredEsmAppForRequestor(
-    collectEsmAppCandidatesFromPremiumApps(resolvedServices),
-    preferredRequestorId,
-    programmer.programmerId
-  );
-  if (preferredEsmApp?.guid) {
-    resolvedServices.esm = preferredEsmApp;
-  } else if (!resolvedServices.esm?.guid && resolvedServices.esmApps[0]?.guid) {
-    resolvedServices.esm = resolvedServices.esmApps[0];
-  }
+  applicationsSnapshot =
+    (await hydrateApplicationScopesForProgrammer(programmer, applicationsSnapshot, {
+      forceRefresh,
+      requiredServiceKeys: missingServiceKeys,
+      stopWhenResolved: true,
+      requestTimeoutMs,
+      preferredTabId,
+      allowTemporaryPageContextTab,
+    }).catch(() => applicationsSnapshot)) || applicationsSnapshot;
 
-  setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, applicationsSnapshot);
+  setCurrentProgrammerApplicationsSnapshot(programmerId, applicationsSnapshot);
+  resolvedServices = mergeDetectedPassVaultServices(programmer, resolvedServices, applicationsSnapshot, {
+    requestorId: String(options?.requestorId || "").trim(),
+  });
   return resolvedServices;
 }
 
@@ -46471,12 +46209,6 @@ function resolveDegradationAppCandidates(programmerId = "", seedAppInfo = null, 
     if (affinityDelta !== 0) {
       return affinityDelta;
     }
-    const provisioningDelta =
-      getPassVaultServiceProvisioningRank(normalizedProgrammerId, rightApp) -
-      getPassVaultServiceProvisioningRank(normalizedProgrammerId, leftApp);
-    if (provisioningDelta !== 0) {
-      return provisioningDelta;
-    }
     return compareDegradationAppPriority(leftApp, rightApp);
   });
 }
@@ -61070,37 +60802,6 @@ function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", prog
 
   const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedProgrammerId = String(programmerId || "").trim();
-  const getProvisioningRank = (appInfo) => {
-    const guid = String(appInfo?.guid || "").trim();
-    if (!guid) {
-      return 0;
-    }
-    if (hasPassVaultServiceClientCredentials(normalizedProgrammerId, appInfo)) {
-      return 3;
-    }
-    const softwareStatement = firstNonEmptyString([
-      String(appInfo?.softwareStatement || "").trim(),
-      extractSoftwareStatementFromAppData(appInfo?.appData || null),
-      extractSoftwareStatementFromAppData(appInfo),
-    ]);
-    if (softwareStatement) {
-      return 2;
-    }
-    return 1;
-  };
-  const selectBestCandidate = (appInfos = []) => {
-    const filteredCandidates = Array.isArray(appInfos) ? appInfos.filter((appInfo) => appInfo?.guid) : [];
-    let bestCandidate = null;
-    let bestRank = -1;
-    filteredCandidates.forEach((candidate) => {
-      const candidateRank = getProvisioningRank(candidate);
-      if (!bestCandidate || candidateRank > bestRank) {
-        bestCandidate = candidate;
-        bestRank = candidateRank;
-      }
-    });
-    return bestCandidate;
-  };
   const cachedAuthContext = normalizedRequestorId ? getRequestorScopedRestV2AuthContext(normalizedRequestorId) : null;
   if (
     cachedAuthContext &&
@@ -61108,22 +60809,21 @@ function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", prog
     (!normalizedProgrammerId || String(cachedAuthContext.programmerId || "").trim() === normalizedProgrammerId)
   ) {
     const cachedMatch = candidates.find((item) => item.guid === cachedAuthContext.preferredAppGuid) || null;
-    if (cachedMatch && getProvisioningRank(cachedMatch) > 1) {
+    if (cachedMatch) {
       return cachedMatch;
     }
   }
 
   if (normalizedRequestorId) {
-    const mappedCandidates = candidates.filter((appInfo) =>
-      appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)
-    );
-    const mapped = selectBestCandidate(mappedCandidates);
+    const mapped =
+      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) ||
+      null;
     if (mapped) {
       return mapped;
     }
   }
 
-  return selectBestCandidate(candidates) || (candidates.length === 1 ? candidates[0] : null);
+  return candidates[0] || null;
 }
 
 function normalizeScope(scope) {
