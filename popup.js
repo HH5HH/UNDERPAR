@@ -189,6 +189,15 @@ const PREMIUM_SERVICE_SCOPE_RULES = Object.freeze([
   { key: "resetTempPass", label: "Reset TempPASS", scope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE },
 ]);
 const PREMIUM_SERVICE_CONCURRENCY_LABEL = "Concurrency Monitoring";
+const REGISTERED_APPLICATION_SCOPE_LABELS = Object.freeze({
+  "api:client:v2": "REST API V2",
+  "analytics:client": "ESM",
+  "decisions:owner": "degradation",
+  "temporary:passes:owner": "reset TempPass",
+  "mvpd_status:client": "MVPD Status Service",
+  "idp:owner": "Proxy MVPD push",
+  "cmu:analytics:client": "CMU",
+});
 const PREMIUM_SERVICE_RESET_TEMPPASS_REMINDER_PREFIX = "TODO: implement RESET TempPASS support";
 const DEGRADATION_SCOPE_CANDIDATES = [PREMIUM_SERVICE_SCOPE_BY_KEY.degradation];
 const KNOWN_PREMIUM_SERVICE_SCOPES = Array.from(
@@ -199,6 +208,11 @@ const KNOWN_PREMIUM_SERVICE_SCOPES = Array.from(
   )
 );
 const REST_V2_SCOPE = PREMIUM_SERVICE_SCOPE_BY_KEY.restV2;
+const UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS = Object.freeze([
+  { serviceKey: "restV2", label: "REST V2", requiredScope: REST_V2_SCOPE },
+  { serviceKey: "esm", label: "ESM", requiredScope: PREMIUM_SERVICE_SCOPE_BY_KEY.esm },
+  { serviceKey: "degradation", label: "DEGRADATION", requiredScope: PREMIUM_SERVICE_SCOPE_BY_KEY.degradation },
+]);
 const PREMIUM_SERVICE_SCOPE_ALIAS_BY_LABEL = Object.freeze({
   degredation: PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
   degradation: PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
@@ -721,6 +735,10 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
   const requestToken = Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0));
   const forceRefresh = options?.forceRefresh === true;
   const renderOnReady = options?.renderOnReady !== false;
+  const applicationsData =
+    options?.applicationsData && typeof options.applicationsData === "object" && !Array.isArray(options.applicationsData)
+      ? options.applicationsData
+      : null;
   const seedServices =
     services && typeof services === "object" && !Array.isArray(services)
       ? services
@@ -729,6 +747,8 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
   const workPromise = (async () => {
     const compileResult = await queuePassVaultProgrammerCompilation(programmer, seedServices, {
       forceRefresh,
+      preferredTabId: Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+      applicationsData,
     });
     let runtimeServices =
       (compileResult?.services && typeof compileResult.services === "object" ? compileResult.services : null) ||
@@ -6309,11 +6329,21 @@ function compactPassVaultRegisteredApplications(registeredApplicationsByGuid = {
         String(sanitizedApplicationData?.displayName || "").trim(),
         guid,
       ]),
-      scopes: uniqueSorted(
-        (Array.isArray(rawApplicationRecord?.scopes) ? rawApplicationRecord.scopes : []).concat(
-          getDetectionScopesFromApplication(sanitizedApplicationData)
-        )
-      ),
+      scopes: (() => {
+        const nativeScopes = uniqueSorted(
+          (Array.isArray(sanitizedApplicationData?.scopes) ? sanitizedApplicationData.scopes : [])
+            .map((scope) => normalizeScope(scope))
+            .filter(Boolean)
+        );
+        if (nativeScopes.length > 0) {
+          return nativeScopes;
+        }
+        return uniqueSorted(
+          (Array.isArray(rawApplicationRecord?.scopes) ? rawApplicationRecord.scopes : [])
+            .map((scope) => normalizeScope(scope))
+            .filter(Boolean)
+        );
+      })(),
       serviceKeys: uniqueSorted(Array.isArray(rawApplicationRecord?.serviceKeys) ? rawApplicationRecord.serviceKeys : []),
       dcrCache: normalizeUnderparVaultDcrCache(rawApplicationRecord?.dcrCache || null),
       serviceCredentialsByServiceKey: normalizedCredentialEntries,
@@ -6354,9 +6384,15 @@ function buildPassVaultRuntimeAppInfoFromRecord(record = null, guid = "", applic
     )
   );
   const scopes = uniqueSorted(
-    (Array.isArray(applicationRecord?.scopes) ? applicationRecord.scopes : []).concat(
-      getDetectionScopesFromApplication(appData)
+    (
+      Array.isArray(appData?.scopes) && appData.scopes.length > 0
+        ? appData.scopes
+        : Array.isArray(applicationRecord?.scopes)
+          ? applicationRecord.scopes
+          : []
     )
+      .map((scope) => normalizeScope(scope))
+      .filter(Boolean)
   );
   return {
     guid: normalizedGuid,
@@ -7370,9 +7406,15 @@ function buildPassVaultApplicationRecord(programmerId = "", guid = "", appData =
       normalizedGuid,
     ]),
     scopes: uniqueSorted(
-      (Array.isArray(existingRecord?.scopes) ? existingRecord.scopes : []).concat(
-        getDetectionScopesFromApplication(normalizedAppData)
+      (
+        Array.isArray(normalizedAppData?.scopes) && normalizedAppData.scopes.length > 0
+          ? normalizedAppData.scopes
+          : Array.isArray(existingRecord?.scopes)
+            ? existingRecord.scopes
+            : []
       )
+        .map((scope) => normalizeScope(scope))
+        .filter(Boolean)
     ),
     serviceKeys: uniqueSorted(derivedServiceKeys),
     dcrCache: normalizeUnderparVaultDcrCache(loadDcrCache(programmerId, normalizedGuid) || existingRecord?.dcrCache || null),
@@ -8186,6 +8228,505 @@ function collectPassVaultServiceCredentialCandidates(programmerId = "", serviceK
   return candidates;
 }
 
+function buildPassVaultHydrationRegisteredApplications(applicationsData = {}) {
+  const source =
+    applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
+  const applications = Object.values(source)
+    .map((item) => {
+      const application = normalizeRegisteredApplicationRuntimeRecord(item);
+      if (!application || typeof application !== "object") {
+        return null;
+      }
+
+      const appData =
+        application?.appData && typeof application.appData === "object" && !Array.isArray(application.appData)
+          ? application.appData
+          : application?.raw && typeof application.raw === "object" && !Array.isArray(application.raw)
+            ? application.raw
+            : application;
+      const rawScopes = Array.isArray(appData?.scopes)
+        ? appData.scopes.map((scope) => String(scope || "").trim()).filter(Boolean)
+        : [];
+      const scopeLabels = buildRegisteredApplicationScopeLabels(rawScopes);
+      const appName = firstNonEmptyString([
+        appData?.displayName,
+        appData?.name,
+        appData?.clientId,
+        appData?.label,
+        appData?.title,
+        application?.name,
+        application?.label,
+        application?.guid,
+        application?.id,
+      ]);
+
+      return {
+        ...application,
+        key: firstNonEmptyString([application?.key, application?.id, application?.guid]),
+        id: firstNonEmptyString([application?.id, application?.guid, application?.key]),
+        guid: firstNonEmptyString([application?.guid, application?.id, application?.key]),
+        name: appName,
+        label: buildRegisteredApplicationLabel(appName, scopeLabels, appName),
+        clientId: firstNonEmptyString([appData?.clientId, appData?.client_id, application?.clientId]),
+        scopes: rawScopes.map((scope) => normalizeScope(scope)).filter(Boolean),
+        scopeLabels,
+        type: firstNonEmptyString([appData?.type, appData?.applicationType, application?.type]),
+        softwareStatement: firstNonEmptyString([
+          extractSoftwareStatementFromAppData(appData),
+          application?.softwareStatement,
+        ]),
+        raw: appData,
+        appData,
+      };
+    })
+    .filter((item) => item && typeof item === "object");
+
+  applications.sort((left, right) => {
+    const leftLabel = firstNonEmptyString([left?.name, left?.label, left?.id]);
+    const rightLabel = firstNonEmptyString([right?.name, right?.label, right?.id]);
+    return leftLabel.localeCompare(rightLabel, undefined, {
+      sensitivity: "base",
+    });
+  });
+
+  return applications;
+}
+
+function registeredApplicationMatchesNativeRequiredScope(application = null, requiredScope = "") {
+  const normalizedRequiredScope = normalizeScope(requiredScope);
+  if (!application || !normalizedRequiredScope) {
+    return false;
+  }
+
+  return (Array.isArray(application?.scopes) ? application.scopes : [])
+    .map((scope) => normalizeScope(scope))
+    .filter(Boolean)
+    .includes(normalizedRequiredScope);
+}
+
+function buildPassVaultExistingHydrationServiceRecord(programmerId = "", existingRecord = null, serviceKey = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  if (!normalizedProgrammerId || !existingRecord || typeof existingRecord !== "object" || !normalizedServiceKey) {
+    return null;
+  }
+
+  const runtimeServices = buildPassVaultRuntimeServicesSnapshot(existingRecord) || {};
+  const registeredApplication =
+    runtimeServices?.[normalizedServiceKey] && typeof runtimeServices[normalizedServiceKey] === "object"
+      ? cloneJsonLikeValue(runtimeServices[normalizedServiceKey], null)
+      : null;
+  const guid = String(registeredApplication?.guid || "").trim();
+  if (!guid) {
+    return null;
+  }
+
+  const applicationRecord = getPassVaultRegisteredApplicationsByGuid(existingRecord)?.[guid] || null;
+  const client =
+    normalizeUnderparVaultCredentialEntry(loadDcrCache(normalizedProgrammerId, guid) || null) ||
+    normalizeUnderparVaultCredentialEntry(applicationRecord?.serviceCredentialsByServiceKey?.[normalizedServiceKey] || null) ||
+    normalizeUnderparVaultCredentialEntry(applicationRecord?.dcrCache || null) ||
+    null;
+
+  return {
+    registeredApplication,
+    client,
+  };
+}
+
+function resolvePassVaultHydrationServiceApplication({
+  definition = null,
+  programmerId = "",
+  registeredApplications = [],
+  existingRecord = null,
+} = {}) {
+  const normalizedDefinition = definition && typeof definition === "object" ? definition : null;
+  if (!normalizedDefinition) {
+    return null;
+  }
+
+  const matchingApplication = (Array.isArray(registeredApplications) ? registeredApplications : []).find((application) =>
+    registeredApplicationMatchesNativeRequiredScope(application, normalizedDefinition.requiredScope)
+  );
+  const existingService = buildPassVaultExistingHydrationServiceRecord(
+    programmerId,
+    existingRecord,
+    normalizedDefinition.serviceKey
+  );
+
+  return matchingApplication || existingService?.registeredApplication || null;
+}
+
+function buildPassVaultServiceHydrationEntries({
+  programmer = null,
+  registeredApplications = [],
+  existingRecord = null,
+} = {}) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  const entries = {};
+
+  UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.forEach((definition) => {
+    const existingService = buildPassVaultExistingHydrationServiceRecord(
+      programmerId,
+      existingRecord,
+      definition.serviceKey
+    );
+    const registeredApplication = resolvePassVaultHydrationServiceApplication({
+      definition,
+      programmerId,
+      registeredApplications,
+      existingRecord,
+    });
+    const appGuid = String(registeredApplication?.guid || "").trim();
+    const existingGuid = String(existingService?.registeredApplication?.guid || "").trim();
+    const client =
+      appGuid &&
+      existingGuid &&
+      appGuid === existingGuid &&
+      existingService?.client &&
+      typeof existingService.client === "object"
+        ? {
+            ...existingService.client,
+          }
+        : null;
+
+    entries[definition.serviceKey] = {
+      key: definition.serviceKey,
+      label: definition.label,
+      available: Boolean(registeredApplication),
+      requiredScope: definition.requiredScope,
+      registeredApplication: registeredApplication ? cloneJsonLikeValue(registeredApplication, null) : null,
+      client,
+      status: registeredApplication ? (client?.clientId && client?.clientSecret ? "ready" : "pending") : "unavailable",
+    };
+  });
+
+  return entries;
+}
+
+function serviceClientNeedsPassVaultRefresh(client = null, requiredScope = "", serviceKey = "") {
+  const currentClient = normalizeUnderparVaultDcrCache(client || null);
+  if (!currentClient?.clientId || !currentClient?.clientSecret) {
+    return true;
+  }
+  if (!currentClient?.accessToken) {
+    return true;
+  }
+
+  const tokenClaims = parseJwtPayload(String(currentClient.accessToken || "")) || {};
+  const expiresAtMs = Number(tokenClaims?.exp || 0) > 0
+    ? Number(tokenClaims.exp) * 1000
+    : Number(currentClient.tokenExpiresAt || 0);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now() + 60 * 1000) {
+    return true;
+  }
+
+  const normalizedRequiredScope = normalizeScope(requiredScope);
+  if (!normalizedRequiredScope) {
+    return false;
+  }
+
+  const tokenScope = firstNonEmptyString([currentClient.tokenScope, tokenClaims?.scope]);
+  const strictScopeValidation = String(serviceKey || "").trim() === "esm";
+  const scopeSatisfied = tokenScopeSatisfiesRequiredScope(
+    tokenScope,
+    String(currentClient.accessToken || ""),
+    normalizedRequiredScope,
+    {
+      strictUnknown: strictScopeValidation,
+      requestedScopeHint: String(currentClient.tokenRequestedScope || currentClient.serviceScope || ""),
+    }
+  );
+  if (scopeSatisfied) {
+    return false;
+  }
+
+  return !shouldAllowImplicitEsmTokenScope(
+    normalizedRequiredScope,
+    String(serviceKey || ""),
+    String(currentClient.accessToken || ""),
+    String(currentClient.tokenRequestedScope || currentClient.serviceScope || "")
+  );
+}
+
+async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, definition = null, hydrationContext = {}) {
+  const normalizedDefinition = definition && typeof definition === "object" ? definition : null;
+  const currentRecord = serviceRecord && typeof serviceRecord === "object" ? serviceRecord : {};
+  let registeredApplication =
+    currentRecord?.registeredApplication && typeof currentRecord.registeredApplication === "object"
+      ? cloneJsonLikeValue(currentRecord.registeredApplication, null)
+      : null;
+  if (!normalizedDefinition || !registeredApplication) {
+    return {
+      ...currentRecord,
+      status: "unavailable",
+    };
+  }
+
+  const programmerId = String(hydrationContext?.programmerId || "").trim();
+  const guid = String(registeredApplication?.guid || "").trim();
+  const now = Date.now();
+  const requiredScope = getPassVaultRequiredScopeForService(normalizedDefinition.serviceKey, registeredApplication);
+  const nextClient =
+    normalizeUnderparVaultDcrCache(currentRecord?.client || null) || createEmptyUnderparVaultCredential();
+
+  nextClient.serviceScope = String(requiredScope || nextClient.serviceScope || "").trim();
+
+  if (!nextClient.clientId || !nextClient.clientSecret) {
+    registeredApplication =
+      (await enrichRegisteredApplicationForHydration(registeredApplication, {
+        timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+        preferAuthenticatedHeaders: true,
+        preferredTabId: Number(hydrationContext?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+        allowTemporaryPageContextTab: hydrationContext?.allowTemporaryPageContextTab === true,
+        pageContextTargetRef:
+          hydrationContext?.pageContextTargetRef && typeof hydrationContext.pageContextTargetRef === "object"
+            ? hydrationContext.pageContextTargetRef
+            : null,
+      }).catch(() => registeredApplication)) || registeredApplication;
+
+    const softwareStatement = firstNonEmptyString([
+      registeredApplication?.softwareStatement,
+      extractSoftwareStatementFromAppData(registeredApplication?.appData || null),
+      extractSoftwareStatementFromAppData(registeredApplication),
+    ]);
+    if (!softwareStatement) {
+      return {
+        ...currentRecord,
+        available: true,
+        requiredScope,
+        registeredApplication,
+        client: normalizeUnderparVaultCredentialEntry({
+          ...nextClient,
+          updatedAt: now,
+          error: `No software statement found on app ${registeredApplication?.appName || guid}`,
+        }),
+        status: "partial",
+      };
+    }
+
+    try {
+      const registeredClient = await registerClientWithSoftwareStatement(softwareStatement);
+      nextClient.clientId = registeredClient.clientId;
+      nextClient.clientSecret = registeredClient.clientSecret;
+      nextClient.updatedAt = now;
+      nextClient.error = "";
+      if (programmerId && guid) {
+        saveDcrCache(programmerId, guid, nextClient);
+      }
+    } catch (error) {
+      return {
+        ...currentRecord,
+        available: true,
+        requiredScope,
+        registeredApplication,
+        client: normalizeUnderparVaultCredentialEntry({
+          ...nextClient,
+          updatedAt: now,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+        status: "partial",
+      };
+    }
+  }
+
+  if (hydrationContext?.forceRefresh === true || serviceClientNeedsPassVaultRefresh(nextClient, requiredScope, normalizedDefinition.serviceKey)) {
+    try {
+      const strictScopeValidation = normalizedDefinition.serviceKey === "esm";
+      const tokenAttemptMode = strictScopeValidation ? "scoped-only" : "default";
+      const token = await requestClientCredentialsToken(
+        nextClient.clientId,
+        nextClient.clientSecret,
+        {
+          service: normalizedDefinition.serviceKey,
+          scope: normalizedDefinition.serviceKey,
+          requiredServiceScope: requiredScope,
+          appGuid: guid,
+          appName: String(registeredApplication?.appName || guid || ""),
+        },
+        requiredScope,
+        {
+          strictScopeValidation,
+          tokenAttemptMode,
+        }
+      );
+      nextClient.accessToken = token.accessToken;
+      nextClient.tokenExpiresAt = token.tokenExpiresAt;
+      nextClient.tokenScope = String(token.tokenScope || "");
+      nextClient.tokenRequestedScope = String(token.attemptedScope || requiredScope || "").trim();
+      nextClient.serviceScope = String(requiredScope || "").trim();
+      nextClient.updatedAt = now;
+      nextClient.error = "";
+      if (programmerId && guid) {
+        saveDcrCache(programmerId, guid, nextClient);
+      }
+    } catch (error) {
+      return {
+        ...currentRecord,
+        available: true,
+        requiredScope,
+        registeredApplication,
+        client: normalizeUnderparVaultCredentialEntry({
+          ...nextClient,
+          updatedAt: now,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+        status: "partial",
+      };
+    }
+  } else if (programmerId && guid) {
+    saveDcrCache(programmerId, guid, nextClient);
+  }
+
+  return {
+    ...currentRecord,
+    available: true,
+    requiredScope,
+    registeredApplication,
+    client: normalizeUnderparVaultCredentialEntry({
+      ...nextClient,
+      updatedAt: now,
+      error: "",
+    }),
+    status: "ready",
+  };
+}
+
+async function hydratePassVaultServiceEntries(entries = {}, serviceKeys = null, hydrationContext = {}) {
+  const nextEntries = entries && typeof entries === "object" ? { ...entries } : {};
+  const requestedServiceKeys = new Set(
+    (Array.isArray(serviceKeys) ? serviceKeys : [])
+      .map((serviceKey) => String(serviceKey || "").trim())
+      .filter(Boolean)
+  );
+  const definitionsToHydrate = requestedServiceKeys.size > 0
+    ? UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.filter((definition) => requestedServiceKeys.has(definition.serviceKey))
+    : UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS;
+  const pageContextTargetRef =
+    hydrationContext?.pageContextTargetRef && typeof hydrationContext.pageContextTargetRef === "object"
+      ? hydrationContext.pageContextTargetRef
+      : { target: null };
+
+  try {
+    for (const definition of definitionsToHydrate) {
+      nextEntries[definition.serviceKey] = await hydratePassVaultServiceRecordWithContext(
+        nextEntries[definition.serviceKey],
+        definition,
+        {
+          ...hydrationContext,
+          pageContextTargetRef,
+        }
+      );
+    }
+  } finally {
+    await closeTemporaryAdobePageContextTarget(pageContextTargetRef?.target?.temporaryTarget || null).catch(() => null);
+  }
+
+  return nextEntries;
+}
+
+function mergeHydratedServiceEntriesIntoApplicationsData(applicationsData = {}, hydratedServiceEntries = {}) {
+  const nextApplications =
+    applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData)
+      ? cloneJsonLikeValue(applicationsData, {})
+      : {};
+
+  Object.values(hydratedServiceEntries || {}).forEach((serviceRecord) => {
+    const registeredApplication =
+      serviceRecord?.registeredApplication && typeof serviceRecord.registeredApplication === "object"
+        ? serviceRecord.registeredApplication
+        : null;
+    const guid = String(registeredApplication?.guid || "").trim();
+    if (!guid) {
+      return;
+    }
+
+    const existingApplication =
+      nextApplications?.[guid] && typeof nextApplications[guid] === "object" && !Array.isArray(nextApplications[guid])
+        ? nextApplications[guid]
+        : null;
+    const mergedApplication = mergeHydratedRegisteredApplication(
+      existingApplication || registeredApplication,
+      registeredApplication?.appData || registeredApplication,
+      registeredApplication?.softwareStatement || ""
+    );
+    const fetchOrder = Number(existingApplication?.__underparFetchOrder);
+
+    nextApplications[guid] =
+      normalizeRegisteredApplicationRuntimeRecord({
+        ...(existingApplication || {}),
+        ...(mergedApplication || {}),
+        appData: {
+          ...(existingApplication?.appData && typeof existingApplication.appData === "object" ? existingApplication.appData : {}),
+          ...(mergedApplication?.appData && typeof mergedApplication.appData === "object" ? mergedApplication.appData : {}),
+        },
+        softwareStatement: firstNonEmptyString([
+          mergedApplication?.softwareStatement,
+          existingApplication?.softwareStatement,
+        ]),
+        ...(Number.isFinite(fetchOrder) && fetchOrder >= 0 ? { __underparFetchOrder: fetchOrder } : {}),
+      }) || existingApplication || mergedApplication;
+  });
+
+  return nextApplications;
+}
+
+function buildPassVaultDirectPremiumServicesSnapshot(
+  programmer = null,
+  registeredApplications = [],
+  hydratedServiceEntries = {},
+  options = {}
+) {
+  const normalizedApplications = Array.isArray(registeredApplications) ? registeredApplications.filter((app) => app?.guid) : [];
+  const restV2Apps = normalizedApplications.filter((application) =>
+    registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE)
+  );
+  const esmApps = normalizedApplications.filter((application) =>
+    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_SCOPE_BY_KEY.esm)
+  );
+  const degradationApps = normalizedApplications.filter((application) =>
+    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_SCOPE_BY_KEY.degradation)
+  );
+  const resetTempPassApps = normalizedApplications.filter((application) =>
+    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)
+  );
+
+  return applyPremiumServiceRuntimeSummary(
+    programmer,
+    {
+      restV2Apps,
+      restV2: hydratedServiceEntries?.restV2?.registeredApplication || restV2Apps[0] || null,
+      esmApps,
+      esm: hydratedServiceEntries?.esm?.registeredApplication || esmApps[0] || null,
+      degradationApps,
+      degradation: hydratedServiceEntries?.degradation?.registeredApplication || degradationApps[0] || null,
+      resetTempPassApps,
+      resetTempPass: resetTempPassApps[0] || null,
+      cm: options?.cmServiceSnapshot ?? null,
+      cmMvpd: options?.cmMvpdServiceSnapshot ?? null,
+      cmMvpdSelectionKey: String(options?.cmMvpdSelectionKey || "").trim(),
+      __underparLiveHydrated: true,
+      __underparLiveHydratedAt: Date.now(),
+    },
+    {
+      cmCatalog: state.cmTenantsCatalog,
+    }
+  );
+}
+
+function buildPassVaultDirectCredentialResults(hydratedServiceEntries = {}) {
+  return UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.map((definition) => {
+    const serviceRecord = hydratedServiceEntries?.[definition.serviceKey] || null;
+    const guid = String(serviceRecord?.registeredApplication?.guid || "").trim();
+    return {
+      serviceKey: definition.serviceKey,
+      appGuid: guid,
+      cache: normalizeUnderparVaultDcrCache(serviceRecord?.client || null),
+      error: String(serviceRecord?.client?.error || "").trim(),
+    };
+  }).filter((result) => String(result?.appGuid || "").trim());
+}
+
 function getPassVaultCredentialTasks(programmerId = "", services = null) {
   const tasks = [];
   const seen = new Set();
@@ -8963,18 +9504,50 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
   }
 
   const compilePromise = (async () => {
+    const applicationsData =
+      options?.applicationsData && typeof options.applicationsData === "object" && !Array.isArray(options.applicationsData)
+        ? options.applicationsData
+        : getCurrentProgrammerApplicationsSnapshot(programmerId) || {};
+    const existingRecord = getPassVaultMediaCompanyRecord(programmerId);
+    const currentServices =
+      services && typeof services === "object" && !Array.isArray(services)
+        ? services
+        : getCurrentPremiumAppsSnapshot(programmerId) || buildPassVaultRuntimeServicesSnapshot(existingRecord) || {};
+    const cmServiceSnapshot =
+      currentServices?.cm ??
+      state.cmServiceByProgrammerId.get(programmerId) ??
+      buildPassVaultRuntimeCmServiceSnapshot(existingRecord) ??
+      null;
+    const cmMvpdSelectionKey = buildCurrentCmMvpdSelectionKey(programmer);
+    const cmMvpdServiceSnapshot = cmMvpdSelectionKey
+      ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || currentServices?.cmMvpd || null
+      : currentServices?.cmMvpd || null;
+    const registeredApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
+
     setProgrammerPremiumHydrationProgress(programmerId, {
       step: "detect",
       label: "Detecting premium services...",
     });
-    const resolvedServices = await resolveMissingPassVaultServiceMappings(programmer, services, {
-      forceRefresh,
-      requiredServiceKeys: PREMIUM_REQUIRED_SERVICE_KEYS,
-      requestTimeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
-      validateSelectedServiceKeys: PREMIUM_REQUIRED_SERVICE_KEYS,
+
+    setCurrentProgrammerApplicationsSnapshot(programmerId, applicationsData);
+    const serviceEntries = buildPassVaultServiceHydrationEntries({
+      programmer,
+      registeredApplications,
+      existingRecord,
     });
-    setCurrentPremiumAppsSnapshot(programmer.programmerId, resolvedServices);
-    const detectedServiceLabels = getDetectedPremiumServiceLabels(resolvedServices);
+    const provisionalServices = buildPassVaultDirectPremiumServicesSnapshot(
+      programmer,
+      registeredApplications,
+      serviceEntries,
+      {
+        cmServiceSnapshot,
+        cmMvpdServiceSnapshot,
+        cmMvpdSelectionKey,
+      }
+    );
+    setCurrentPremiumAppsSnapshot(programmerId, provisionalServices);
+    const detectedServiceLabels = getDetectedPremiumServiceLabels(provisionalServices);
+
     setProgrammerPremiumHydrationProgress(programmerId, {
       step: "register",
       label:
@@ -8983,20 +9556,36 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
           : "Registering premium service clients...",
       detectedServiceLabels,
     });
-    const credentialResults = await hydratePassVaultServiceCredentials(programmer, resolvedServices, {
+
+    const hydratedServiceEntries = await hydratePassVaultServiceEntries(serviceEntries, PREMIUM_REQUIRED_SERVICE_KEYS, {
+      programmerId,
       forceRefresh,
+      preferredTabId: Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+      allowTemporaryPageContextTab: options?.allowTemporaryPageContextTab === true,
     });
-    const mergedServices = mergeProgrammerPremiumServicesWithCm(
-      programmer.programmerId,
-      resolvedServices,
-      state.cmServiceByProgrammerId.get(programmer.programmerId) || resolvedServices?.cm || null
+    const hydratedApplications = mergeHydratedServiceEntriesIntoApplicationsData(applicationsData, hydratedServiceEntries);
+    const hydratedRegisteredApplications = buildPassVaultHydrationRegisteredApplications(hydratedApplications);
+    const credentialResults = buildPassVaultDirectCredentialResults(hydratedServiceEntries);
+    const mergedServices = buildPassVaultDirectPremiumServicesSnapshot(
+      programmer,
+      hydratedRegisteredApplications,
+      hydratedServiceEntries,
+      {
+        cmServiceSnapshot,
+        cmMvpdServiceSnapshot,
+        cmMvpdSelectionKey,
+      }
     );
+
+    setCurrentProgrammerApplicationsSnapshot(programmerId, hydratedApplications);
     setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
+
     setProgrammerPremiumHydrationProgress(programmerId, {
       step: "vault",
       label: "Saving premium services to VAULT...",
       detectedServiceLabels,
     });
+
     const usageWarmResult = {
       ok: true,
       skipped: true,
@@ -60577,35 +61166,24 @@ async function refreshProgrammerPanels(options = {}) {
       return;
     }
 
-    let resolvedServices = await ensurePremiumAppsForProgrammer(programmer, {
+    setCurrentProgrammerApplicationsSnapshot(programmerId, applicationsData);
+    const premiumHydrationPromise = primeProgrammerServiceHydration(programmer, provisionalServices, {
       forceRefresh: forcePremiumRefresh,
-      allowTemporaryPageContextTab: false,
+      controllerReason: controllerReason || "panel-selection",
+      requestToken,
+      renderOnReady: false,
       preferredTabId: retainedConsoleTabId,
       applicationsData,
     });
-    if (!selectionStillCurrent()) {
-      return;
-    }
 
     await cmSelectionBootstrapPromise;
     if (!selectionStillCurrent()) {
       return;
     }
 
-    resolvedServices = updateSelectionServicesSnapshot(resolvedServices, cachedCmService, cachedCmMvpdService);
-    if (
-      hasDetectedDcrPremiumServices(resolvedServices) &&
-      !isProgrammerRuntimeServicesReady(programmerId, resolvedServices)
-    ) {
-      resolvedServices = await primeProgrammerServiceHydration(programmer, resolvedServices, {
-        forceRefresh: forcePremiumRefresh,
-        controllerReason: controllerReason || "panel-selection",
-        requestToken,
-        renderOnReady: false,
-      });
-      if (!selectionStillCurrent()) {
-        return;
-      }
+    let resolvedServices = await premiumHydrationPromise;
+    if (!selectionStillCurrent()) {
+      return;
     }
 
     const resolvedCmService = skipCmBootstrap
@@ -61039,17 +61617,26 @@ function getDetectionScopesFromApplication(appData) {
 
   const rawCandidates = [];
   const seenObjects = new Set();
-  [
-    appData?.scopes,
-    appData?.scope,
-    appData?.scopeSet,
-    appData?.scopeList,
-    appData?.permissions,
-  ].forEach((value) => {
+  [appData?.scopes].forEach((value) => {
     collectScopeValuesFromValue(value, rawCandidates, seenObjects);
   });
 
   return Array.from(new Set(rawCandidates.map((scope) => normalizeScope(scope)).filter(Boolean)));
+}
+
+function buildRegisteredApplicationScopeLabels(scopes = []) {
+  const normalizedScopes = Array.isArray(scopes)
+    ? scopes.map((scope) => String(scope || "").trim()).filter(Boolean)
+    : [];
+  return ["DEFAULT", ...normalizedScopes.map((scope) => REGISTERED_APPLICATION_SCOPE_LABELS[scope] || scope)].filter(
+    Boolean
+  );
+}
+
+function buildRegisteredApplicationLabel(name = "", scopeLabels = [], fallbackLabel = "") {
+  const normalizedName = firstNonEmptyString([name]);
+  const scopeSummary = (Array.isArray(scopeLabels) ? scopeLabels : []).filter(Boolean).join(", ");
+  return scopeSummary ? `${normalizedName} | ${scopeSummary}` : firstNonEmptyString([fallbackLabel, normalizedName]);
 }
 
 function collectKnownScopeMatchesFromSerializedValue(value, target = new Set(), seenObjects = new Set()) {
@@ -61385,32 +61972,51 @@ function normalizeRegisteredApplicationRuntimeRecord(item = null) {
   };
   delete appData.appData;
 
+  const id = firstNonEmptyString([guid, source?.id, source?.key]);
+  const key = firstNonEmptyString([id, source?.key]);
+  const rawScopes = (
+    Array.isArray(appData?.scopes) && appData.scopes.length > 0
+      ? appData.scopes
+      : Array.isArray(source?.scopes)
+        ? source.scopes
+        : []
+  )
+    .map((scope) => String(scope || "").trim())
+    .filter(Boolean);
+  const scopeLabels = buildRegisteredApplicationScopeLabels(rawScopes);
   const appName = firstNonEmptyString([
-    source?.name,
-    source?.displayName,
-    source?.label,
-    appData?.name,
     appData?.displayName,
+    appData?.name,
+    appData?.clientId,
     appData?.label,
-    guid ? `Registered Application ${guid}` : "",
+    appData?.title,
+    source?.displayName,
+    source?.name,
+    source?.clientId,
+    source?.label,
+    source?.title,
+    id ? `Registered Application ${id}` : "",
   ]);
-  const scopes = uniqueSorted(
-    (Array.isArray(source?.scopes) ? source.scopes : []).concat(getDetectionScopesFromApplication(appData))
-  );
   const softwareStatement = firstNonEmptyString([
-    String(source?.softwareStatement || "").trim(),
     extractSoftwareStatementFromAppData(appData),
+    String(source?.softwareStatement || "").trim(),
   ]);
   const fetchOrder = Number(source?.__underparFetchOrder);
 
   return {
     ...source,
-    ...(guid ? { id: guid, guid } : {}),
-    ...(appName ? { name: appName, displayName: firstNonEmptyString([source?.displayName, appName]), label: firstNonEmptyString([source?.label, appName]) } : {}),
-    clientId: firstNonEmptyString([source?.clientId, source?.client_id, appData?.clientId, appData?.client_id]),
+    ...(id ? { id, key, guid: firstNonEmptyString([guid, id]) } : {}),
+    ...(appName
+      ? {
+          name: appName,
+          displayName: firstNonEmptyString([appData?.displayName, source?.displayName, appName]),
+          label: buildRegisteredApplicationLabel(appName, scopeLabels, firstNonEmptyString([source?.label, appName])),
+        }
+      : {}),
+    clientId: firstNonEmptyString([appData?.clientId, appData?.client_id, source?.clientId, source?.client_id]),
     type: firstNonEmptyString([source?.type, source?.applicationType, appData?.type, appData?.applicationType]),
     ...(Number.isFinite(fetchOrder) && fetchOrder >= 0 ? { __underparFetchOrder: fetchOrder } : {}),
-    ...(scopes.length > 0 ? { scopes } : {}),
+    ...(rawScopes.length > 0 ? { scopes: rawScopes, scopeLabels } : { scopeLabels }),
     ...(softwareStatement ? { softwareStatement } : {}),
     raw:
       source?.raw && typeof source.raw === "object" && !Array.isArray(source.raw)
@@ -63417,7 +64023,7 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
     }
 
     const scopes = uniqueSorted(
-      (Array.isArray(appData?.scopes) ? appData.scopes : []).concat(getDetectionScopesFromApplication(appData))
+      (Array.isArray(appData?.scopes) ? appData.scopes : []).map((scope) => normalizeScope(scope)).filter(Boolean)
     );
     if (scopes.length === 0) {
       continue;
