@@ -1019,7 +1019,12 @@ test("programmer application hydration uses direct applications queries and norm
   assert.match(ensureApplicationsSource, /fetchApplicationsForProgrammer\(programmerId,\s*options\)/);
   assert.match(ensureApplicationsSource, /setCurrentProgrammerApplicationsSnapshot\(programmerId,\s*normalizedApplications\)/);
   assert.match(ensureApplicationsSource, /state\.programmerApplicationsLoadPromiseByProgrammerId\.set\(programmerId,\s*loadPromise\)/);
-  assert.match(detectionScopesSource, /return getExplicitScopesFromApplication\(appData\);/);
+  assert.match(detectionScopesSource, /appData\?\.scopes/);
+  assert.match(detectionScopesSource, /appData\?\.scope/);
+  assert.match(detectionScopesSource, /appData\?\.scopeSet/);
+  assert.match(detectionScopesSource, /appData\?\.scopeList/);
+  assert.match(detectionScopesSource, /appData\?\.permissions/);
+  assert.doesNotMatch(detectionScopesSource, /return getExplicitScopesFromApplication\(appData\);/);
   assert.match(normalizeRuntimeRecordSource, /const appData = \{/);
   assert.match(normalizeRuntimeRecordSource, /getDetectionScopesFromApplication\(appData\)/);
   assert.doesNotMatch(normalizeRuntimeRecordSource, /getScopesFromApplication\(appData\)/);
@@ -1834,6 +1839,29 @@ test("premium app details still retain software statements while compile-time ma
   assert.match(sanitizeApplicationSource, /if \(softwareStatement\) \{\s*sanitized\.softwareStatement = softwareStatement;\s*\}/);
   assert.match(runtimeAppInfoSource, /softwareStatement:\s*firstNonEmptyString\(\[/);
   assert.match(ensureDcrSource, /extractSoftwareStatementFromAppData\(resolvedAppInfo\?\.appData \|\| null\)/);
+});
+
+test("selected premium app hydration mirrors LoginButton detail and software-statement enrichment before DCR register", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const orderedCandidatesSource = extractFunctionSource(popupSource, "buildOrderedPremiumServiceCandidates");
+  const statementSource = extractFunctionSource(popupSource, "extractSoftwareStatementFromAppData");
+  const detailPayloadSource = extractFunctionSource(popupSource, "normalizeRegisteredApplicationDetailPayload");
+  const detailUrlsSource = extractFunctionSource(popupSource, "buildRegisteredApplicationDetailUrlCandidates");
+  const enrichSource = extractFunctionSource(popupSource, "enrichRegisteredApplicationForHydration");
+  const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
+
+  assert.match(orderedCandidatesSource, /Array\.isArray\(appData\?\.scopes\) \? appData\.scopes : \[\]/);
+  assert.match(orderedCandidatesSource, /getDetectionScopesFromApplication\(appData\)/);
+  assert.doesNotMatch(orderedCandidatesSource, /getScopesFromApplication\(appData\)/);
+  assert.match(statementSource, /appData\?\.raw\?\.softwareStatement/);
+  assert.match(statementSource, /const stack = \[appData\];/);
+  assert.match(statementSource, /if \(isProbablyJwt\(normalizedValue\)\) \{\s*return normalizedValue;\s*\}/);
+  assert.match(detailPayloadSource, /payload\.entityData/);
+  assert.match(detailUrlsSource, /appendAdobeConsoleConfigurationVersion\(`\$\{ADOBE_CONSOLE_BASE\}\/rest\/api\/applications\/\$\{encodedGuid\}`\)/);
+  assert.match(detailUrlsSource, /appendAdobeConsoleConfigurationVersion\(`\$\{ADOBE_CONSOLE_BASE\}\/rest\/api\/entity\/RegisteredApplication\/\$\{encodedGuid\}`\)/);
+  assert.match(enrichSource, /fetchApplicationDetailsByGuid\(guid,\s*requestOptions\)/);
+  assert.match(enrichSource, /fetchSoftwareStatementForAppGuid\(guid,\s*requestOptions\)/);
+  assert.match(ensureDcrSource, /enrichRegisteredApplicationForHydration\(resolvedAppInfo,\s*\{/);
 });
 
 test("live premium app loading stays on direct registered-application detection and leaves selected-app enrichment to DCR hydration", () => {

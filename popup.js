@@ -61003,12 +61003,13 @@ function collectScopeValuesFromValue(value, target = [], seenObjects = new Set()
       return target;
     }
     seenObjects.add(value);
-    if (typeof value.value === "string") {
-      collectScopeValuesFromValue(value.value, target, seenObjects);
-    }
-    Object.values(value).forEach((item) => {
-      collectScopeValuesFromValue(item, target, seenObjects);
-    });
+    collectScopeValuesFromValue(value.key, target, seenObjects);
+    collectScopeValuesFromValue(value.value, target, seenObjects);
+    collectScopeValuesFromValue(value.scope, target, seenObjects);
+    collectScopeValuesFromValue(value.scopes, target, seenObjects);
+    collectScopeValuesFromValue(value.scopeSet, target, seenObjects);
+    collectScopeValuesFromValue(value.scopeList, target, seenObjects);
+    collectScopeValuesFromValue(value.permissions, target, seenObjects);
     return target;
   }
   if (typeof value === "string") {
@@ -61036,7 +61037,19 @@ function getDetectionScopesFromApplication(appData) {
     return [];
   }
 
-  return getExplicitScopesFromApplication(appData);
+  const rawCandidates = [];
+  const seenObjects = new Set();
+  [
+    appData?.scopes,
+    appData?.scope,
+    appData?.scopeSet,
+    appData?.scopeList,
+    appData?.permissions,
+  ].forEach((value) => {
+    collectScopeValuesFromValue(value, rawCandidates, seenObjects);
+  });
+
+  return Array.from(new Set(rawCandidates.map((scope) => normalizeScope(scope)).filter(Boolean)));
 }
 
 function collectKnownScopeMatchesFromSerializedValue(value, target = new Set(), seenObjects = new Set()) {
@@ -61212,6 +61225,10 @@ function extractJwtAndUrls(value) {
 }
 
 function extractSoftwareStatementFromAppData(appData) {
+  if (!appData || typeof appData !== "object") {
+    return "";
+  }
+
   const directCandidates = [
     appData?.softwareStatement,
     appData?.software_statement,
@@ -61235,27 +61252,49 @@ function extractSoftwareStatementFromAppData(appData) {
     appData?.__rawEnvelope?.entityData?.clientApplication?.software_statement,
     appData?.__rawEnvelope?.entityData?.registeredClient?.softwareStatement,
     appData?.__rawEnvelope?.entityData?.registeredClient?.software_statement,
+    appData?.raw?.softwareStatement,
+    appData?.raw?.software_statement,
+    appData?.raw?.client?.softwareStatement,
+    appData?.raw?.client?.software_statement,
   ];
 
-  let fallbackCandidate = "";
   for (const candidate of directCandidates) {
-    if (typeof candidate !== "string" || candidate.trim() === "") {
-      continue;
-    }
-    const trimmed = candidate.trim();
-    if (isProbablyJwt(trimmed)) {
-      return trimmed;
-    }
-    if (!fallbackCandidate) {
-      fallbackCandidate = trimmed;
+    const normalizedCandidate = String(candidate || "").trim();
+    if (isProbablyJwt(normalizedCandidate)) {
+      return normalizedCandidate;
     }
   }
 
-  const extracted = extractJwtAndUrls(appData);
-  if (extracted.jwt && extracted.jwtScore > 0) {
-    return extracted.jwt;
+  const seenObjects = new Set();
+  const stack = [appData];
+  while (stack.length > 0) {
+    const currentNode = stack.pop();
+    if (typeof currentNode === "string") {
+      const normalizedValue = currentNode.trim();
+      if (isProbablyJwt(normalizedValue)) {
+        return normalizedValue;
+      }
+      continue;
+    }
+
+    if (!currentNode || typeof currentNode !== "object" || seenObjects.has(currentNode)) {
+      continue;
+    }
+    seenObjects.add(currentNode);
+
+    if (Array.isArray(currentNode)) {
+      currentNode.forEach((value) => {
+        stack.push(value);
+      });
+      continue;
+    }
+
+    Object.values(currentNode).forEach((value) => {
+      stack.push(value);
+    });
   }
-  return fallbackCandidate || "";
+
+  return "";
 }
 
 function extractSoftwareStatementFromText(text = "") {
@@ -61373,8 +61412,138 @@ function normalizeRegisteredApplicationRuntimeRecord(item = null) {
     ...(Number.isFinite(fetchOrder) && fetchOrder >= 0 ? { __underparFetchOrder: fetchOrder } : {}),
     ...(scopes.length > 0 ? { scopes } : {}),
     ...(softwareStatement ? { softwareStatement } : {}),
+    raw:
+      source?.raw && typeof source.raw === "object" && !Array.isArray(source.raw)
+        ? source.raw
+        : appData,
     appData,
   };
+}
+
+function normalizeRegisteredApplicationDetailPayload(payload = null) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const entityData =
+    payload.entityData && typeof payload.entityData === "object" && !Array.isArray(payload.entityData)
+      ? payload.entityData
+      : payload;
+  if (!entityData || typeof entityData !== "object" || Array.isArray(entityData)) {
+    return null;
+  }
+
+  return {
+    ...entityData,
+    ...(payload !== entityData ? { __rawEnvelope: payload } : {}),
+  };
+}
+
+function buildRegisteredApplicationDetailUrlCandidates(guid = "") {
+  const normalizedGuid = String(guid || "").trim();
+  if (!normalizedGuid) {
+    return [];
+  }
+
+  const encodedGuid = encodeURIComponent(normalizedGuid);
+  return uniquePreserveOrder([
+    appendAdobeConsoleConfigurationVersion(`${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`),
+    `${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`,
+    appendAdobeConsoleConfigurationVersion(`${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`),
+    `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`,
+  ]);
+}
+
+function mergeHydratedRegisteredApplication(appInfo = null, detailData = null, softwareStatement = "") {
+  const baseAppInfo = appInfo && typeof appInfo === "object" && !Array.isArray(appInfo) ? appInfo : {};
+  const normalizedDetail =
+    detailData && typeof detailData === "object" && !Array.isArray(detailData)
+      ? normalizeRegisteredApplicationDetailPayload(detailData) || detailData
+      : null;
+  const mergedAppData = {
+    ...(baseAppInfo?.appData && typeof baseAppInfo.appData === "object" && !Array.isArray(baseAppInfo.appData)
+      ? baseAppInfo.appData
+      : {}),
+    ...(normalizedDetail && typeof normalizedDetail === "object" ? normalizedDetail : {}),
+  };
+  const mergedRecord =
+    normalizeRegisteredApplicationRuntimeRecord({
+      ...baseAppInfo,
+      ...(normalizedDetail && typeof normalizedDetail === "object" ? normalizedDetail : {}),
+      appData: mergedAppData,
+      softwareStatement: firstNonEmptyString([
+        softwareStatement,
+        extractSoftwareStatementFromAppData(normalizedDetail),
+        baseAppInfo?.softwareStatement,
+        extractSoftwareStatementFromAppData(mergedAppData),
+      ]),
+    }) || {
+      ...baseAppInfo,
+      appData: mergedAppData,
+    };
+  const guid = firstNonEmptyString([
+    mergedRecord?.guid,
+    mergedRecord?.id,
+    resolveApplicationGuidFromEntityData(normalizedDetail),
+    resolveApplicationGuidFromEntityData(baseAppInfo),
+  ]);
+
+  return {
+    ...baseAppInfo,
+    ...mergedRecord,
+    ...(guid
+      ? { guid, id: guid, appRef: firstNonEmptyString([baseAppInfo?.appRef, mergedRecord?.appRef, `@RegisteredApplication:${guid}`]) }
+      : {}),
+    appData: mergedAppData,
+    softwareStatement: firstNonEmptyString([
+      mergedRecord?.softwareStatement,
+      softwareStatement,
+      extractSoftwareStatementFromAppData(mergedAppData),
+      baseAppInfo?.softwareStatement,
+    ]),
+  };
+}
+
+async function enrichRegisteredApplicationForHydration(appInfo = null, options = {}) {
+  const currentAppInfo =
+    appInfo && typeof appInfo === "object" && !Array.isArray(appInfo) ? mergeHydratedRegisteredApplication(appInfo) : null;
+  if (!currentAppInfo) {
+    return null;
+  }
+
+  const guid = firstNonEmptyString([
+    currentAppInfo?.guid,
+    currentAppInfo?.id,
+    resolveApplicationGuidFromEntityData(currentAppInfo?.appData || null),
+  ]);
+  if (!guid || firstNonEmptyString([currentAppInfo?.softwareStatement])) {
+    return currentAppInfo;
+  }
+
+  let nextAppInfo = currentAppInfo;
+  const requestOptions = options && typeof options === "object" ? options : {};
+
+  try {
+    const details = await fetchApplicationDetailsByGuid(guid, requestOptions);
+    if (details && typeof details === "object") {
+      nextAppInfo = mergeHydratedRegisteredApplication(nextAppInfo, details);
+    }
+  } catch {
+    // Continue to software statement fallback.
+  }
+
+  if (!firstNonEmptyString([nextAppInfo?.softwareStatement])) {
+    try {
+      const softwareStatement = await fetchSoftwareStatementForAppGuid(guid, requestOptions);
+      if (softwareStatement) {
+        nextAppInfo = mergeHydratedRegisteredApplication(nextAppInfo, null, softwareStatement);
+      }
+    } catch {
+      // Ignore statement fetch failures and return the best hydrated record.
+    }
+  }
+
+  return nextAppInfo;
 }
 
 function getRegisteredApplicationSortLabel(appData = null) {
@@ -62520,27 +62689,15 @@ async function fetchApplicationDetailsByGuid(guid, options = {}) {
       return bulkEntity;
     }
   }
-  const encodedGuid = encodeURIComponent(guid);
-  const urlCandidates = uniquePreserveOrder([
-    `${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`,
-    appendAdobeConsoleConfigurationVersion(`${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`),
-    `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`,
-  ]);
+  const urlCandidates = buildRegisteredApplicationDetailUrlCandidates(guid);
   const payload =
     (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application detail", requestOptions)) ||
     (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application detail", requestOptions).catch(() => null));
-  const parsed = payload?.parsed ?? null;
-  const entityData =
-    parsed?.entityData && typeof parsed.entityData === "object" && !Array.isArray(parsed.entityData)
-      ? parsed.entityData
-      : parsed;
-  if (!entityData || typeof entityData !== "object") {
+  const parsed = normalizeRegisteredApplicationDetailPayload(payload?.parsed ?? null);
+  if (!parsed || typeof parsed !== "object") {
     return null;
   }
-  return {
-    ...entityData,
-    ...(parsed && typeof parsed === "object" && parsed !== entityData ? { __rawEnvelope: parsed } : {}),
-  };
+  return parsed;
 }
 
 async function fetchApplicationRawByGuid(guid, options = {}) {
@@ -62583,27 +62740,11 @@ async function fetchApplicationRawByGuid(guid, options = {}) {
       }
     }
   }
-  const encodedGuid = encodeURIComponent(guid);
-  const urlCandidates = uniquePreserveOrder([
-    `${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`,
-    appendAdobeConsoleConfigurationVersion(`${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`),
-    `${ADOBE_CONSOLE_BASE}/rest/api/entity/RegisteredApplication/${encodedGuid}`,
-  ]);
+  const urlCandidates = buildRegisteredApplicationDetailUrlCandidates(guid);
   const payload =
     (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application raw fetch", requestOptions)) ||
     (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application raw fetch", requestOptions).catch(() => null));
-  const rawParsed = payload?.parsed || null;
-  const parsedEntity =
-    rawParsed?.entityData && typeof rawParsed.entityData === "object" && !Array.isArray(rawParsed.entityData)
-      ? rawParsed.entityData
-      : rawParsed;
-  const parsed =
-    parsedEntity && typeof parsedEntity === "object"
-      ? {
-          ...parsedEntity,
-          ...(rawParsed && typeof rawParsed === "object" && rawParsed !== parsedEntity ? { __rawEnvelope: rawParsed } : {}),
-        }
-      : null;
+  const parsed = normalizeRegisteredApplicationDetailPayload(payload?.parsed || null);
   return {
     text: String(payload?.text || ""),
     parsed: parsed && typeof parsed === "object" ? parsed : null,
@@ -63275,7 +63416,9 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
       continue;
     }
 
-    const scopes = getScopesFromApplication(appData);
+    const scopes = uniqueSorted(
+      (Array.isArray(appData?.scopes) ? appData.scopes : []).concat(getDetectionScopesFromApplication(appData))
+    );
     if (scopes.length === 0) {
       continue;
     }
@@ -64189,16 +64332,14 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
       }
 
       try {
-        const details = await fetchApplicationDetailsByGuid(resolvedAppInfo.guid);
-        if (details && typeof details === "object") {
-          resolvedAppInfo.appData = {
-            ...(resolvedAppInfo?.appData && typeof resolvedAppInfo.appData === "object" ? resolvedAppInfo.appData : {}),
-            ...details,
-          };
-        }
-        const extracted = extractSoftwareStatementFromAppData(details);
-        if (extracted) {
-          resolvedAppInfo.softwareStatement = extracted;
+        const hydratedAppInfo = await enrichRegisteredApplicationForHydration(resolvedAppInfo, {
+          timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+          preferAuthenticatedHeaders: true,
+          preferredTabId: Number(getRetainedAuthPopupBootstrapTabId() || 0),
+          allowTemporaryPageContextTab: true,
+        });
+        if (hydratedAppInfo && typeof hydratedAppInfo === "object") {
+          resolvedAppInfo = hydratedAppInfo;
         }
       } catch {
         // Continue to direct software statement fallback.
@@ -64206,7 +64347,12 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
 
       if (!resolvedAppInfo.softwareStatement) {
         try {
-          resolvedAppInfo.softwareStatement = await fetchSoftwareStatementForAppGuid(resolvedAppInfo.guid);
+          resolvedAppInfo.softwareStatement = await fetchSoftwareStatementForAppGuid(resolvedAppInfo.guid, {
+            timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+            preferAuthenticatedHeaders: true,
+            preferredTabId: Number(getRetainedAuthPopupBootstrapTabId() || 0),
+            allowTemporaryPageContextTab: true,
+          });
         } catch {
           // Continue and fail below if still missing.
         }
