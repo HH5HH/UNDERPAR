@@ -64271,6 +64271,7 @@ async function recoverEsmServiceSelection(programmerId = "", options = {}) {
     return null;
   }
   const preferredRequestorId = String(options?.requestorId || "").trim();
+  const excludedGuid = String(options?.excludedGuid || "").trim();
   const programmer =
     state.programmers.find((item) => String(item?.programmerId || "").trim() === normalizedProgrammerId) || null;
   if (!programmer) {
@@ -64288,21 +64289,44 @@ async function recoverEsmServiceSelection(programmerId = "", options = {}) {
   if (services) {
     setCurrentPremiumAppsSnapshot(normalizedProgrammerId, services);
   }
-  if (String(resolveSelectedProgrammer()?.programmerId || "").trim() === normalizedProgrammerId && services) {
-    renderPremiumServices(services, programmer, {
+  const recoveredAppInfo =
+    selectPreferredEsmAppForRequestor(
+      collectEsmAppCandidatesFromPremiumApps(services).filter(
+        (appInfo) => String(appInfo?.guid || "").trim() !== excludedGuid
+      ),
+      preferredRequestorId,
+      normalizedProgrammerId
+    ) ||
+    (hasEsmScopedApp(services) && String(services?.esm?.guid || "").trim() !== excludedGuid ? services.esm : null);
+  const nextServices =
+    services && recoveredAppInfo?.guid
+      ? {
+          ...services,
+          esm: recoveredAppInfo,
+          esmApps: collectEsmAppCandidatesFromPremiumApps(
+            {
+              ...services,
+              esm: null,
+              esmApps: Array.isArray(services?.esmApps)
+                ? services.esmApps.filter((appInfo) => String(appInfo?.guid || "").trim() !== excludedGuid)
+                : [],
+            },
+            recoveredAppInfo
+          ),
+        }
+      : services;
+  if (nextServices) {
+    setCurrentPremiumAppsSnapshot(normalizedProgrammerId, nextServices);
+  }
+  if (String(resolveSelectedProgrammer()?.programmerId || "").trim() === normalizedProgrammerId && nextServices) {
+    renderPremiumServices(nextServices, programmer, {
       controllerReason: "esm-auto-recovery",
     });
   }
   return {
     programmer,
-    services,
-    appInfo:
-      selectPreferredEsmAppForRequestor(
-        collectEsmAppCandidatesFromPremiumApps(services),
-        preferredRequestorId,
-        normalizedProgrammerId
-      ) ||
-      (hasEsmScopedApp(services) ? services.esm : null),
+    services: nextServices,
+    appInfo: recoveredAppInfo,
   };
 }
 
@@ -64322,13 +64346,17 @@ async function ensureDcrAccessTokenWithEsmRecovery(programmerId, appInfo, forceR
     }
     const recovered = await recoverEsmServiceSelection(programmerId, {
       requestorId: String(debugMeta?.requestorId || "").trim(),
+      excludedGuid: String(resolvedAppInfo?.guid || "").trim(),
     });
     const recoveredAppInfo = recovered?.appInfo || null;
-    if (!recoveredAppInfo?.guid) {
+    if (!recoveredAppInfo?.guid || String(recoveredAppInfo.guid || "").trim() === String(resolvedAppInfo?.guid || "").trim()) {
       throw error;
     }
     return {
-      accessToken: await ensureDcrAccessToken(programmerId, recoveredAppInfo, true, debugMeta),
+      accessToken: await ensureDcrAccessToken(programmerId, recoveredAppInfo, true, {
+        ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+        lockAppSelection: true,
+      }),
       appInfo: recoveredAppInfo,
       services: recovered?.services || null,
       recovered: true,

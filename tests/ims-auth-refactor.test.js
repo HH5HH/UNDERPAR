@@ -1900,6 +1900,26 @@ test("premium API usage provisions service clients on demand and ESM direct auth
   assert.match(recordingSource, /allowProvisioning:\s*true/);
 });
 
+test("ESM recovery excludes the failed app, promotes the recovered app, and locks the retry selection", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const recoverSelectionSource = extractFunctionSource(popupSource, "recoverEsmServiceSelection");
+  const recoverSource = extractFunctionSource(popupSource, "ensureDcrAccessTokenWithEsmRecovery");
+
+  assert.match(recoverSelectionSource, /const excludedGuid = String\(options\?\.excludedGuid \|\| ""\)\.trim\(\);/);
+  assert.match(
+    recoverSelectionSource,
+    /collectEsmAppCandidatesFromPremiumApps\(services\)\.filter\(\s*\(appInfo\) => String\(appInfo\?\.guid \|\| ""\)\.trim\(\) !== excludedGuid\s*\)/
+  );
+  assert.match(recoverSelectionSource, /esm:\s*recoveredAppInfo,/);
+  assert.match(recoverSelectionSource, /esmApps:\s*collectEsmAppCandidatesFromPremiumApps\(/);
+  assert.match(recoverSource, /excludedGuid:\s*String\(resolvedAppInfo\?\.guid \|\| ""\)\.trim\(\)/);
+  assert.match(
+    recoverSource,
+    /if \(!recoveredAppInfo\?\.guid \|\| String\(recoveredAppInfo\.guid \|\| ""\)\.trim\(\) === String\(resolvedAppInfo\?\.guid \|\| ""\)\.trim\(\)\)/
+  );
+  assert.match(recoverSource, /lockAppSelection:\s*true/);
+});
+
 test("degradation selection and DCR auth recovery no longer stay pinned to invalid apps", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const resolveDegradationSource = extractFunctionSource(popupSource, "resolveDegradationAppCandidates");
