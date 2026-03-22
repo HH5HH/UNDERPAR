@@ -720,6 +720,7 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
   const controllerReason = String(options?.controllerReason || "").trim();
   const requestToken = Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0));
   const forceRefresh = options?.forceRefresh === true;
+  const renderOnReady = options?.renderOnReady !== false;
   const seedServices =
     services && typeof services === "object" && !Array.isArray(services)
       ? services
@@ -728,7 +729,7 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
   const workPromise = (async () => {
     const compileResult = await queuePassVaultProgrammerCompilation(programmer, seedServices, {
       forceRefresh,
-    }).catch(() => null);
+    });
     let runtimeServices =
       (compileResult?.services && typeof compileResult.services === "object" ? compileResult.services : null) ||
       getCurrentPremiumAppsSnapshot(programmerId) ||
@@ -751,6 +752,7 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
     const uiReady = shouldRenderPremiumServicesUi(programmerId, runtimeServices);
     const selectedProgrammerId = String(resolveSelectedProgrammer()?.programmerId || "").trim();
     if (
+      renderOnReady &&
       uiReady &&
       selectedProgrammerId === programmerId &&
       requestToken === Number(state.premiumPanelRequestToken || 0)
@@ -8789,14 +8791,6 @@ function selectResolvedPremiumServiceCandidate(candidates = [], currentApp = nul
     preferredGuid
       ? normalizedCandidates.find((appInfo) => String(appInfo?.guid || "").trim() === preferredGuid) || preferredApp
       : null;
-  if (currentMatch && preferredMatch) {
-    const currentRank = getPassVaultServiceProvisioningRank(programmerId, currentMatch);
-    const preferredRank = getPassVaultServiceProvisioningRank(programmerId, preferredMatch);
-    if (currentRank > preferredRank) {
-      return currentMatch;
-    }
-  }
-
   return preferredMatch || currentMatch || normalizedCandidates[0] || null;
 }
 
@@ -9039,6 +9033,11 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       const cache = normalizeUnderparVaultDcrCache(result?.cache || null);
       return !(cache?.clientId && cache?.clientSecret);
     }).length;
+    const firstFailure =
+      credentialResults.find((result) => {
+        const cache = normalizeUnderparVaultDcrCache(result?.cache || null);
+        return !(cache?.clientId && cache?.clientSecret);
+      }) || null;
     const credentialWarningCount = credentialResults.filter((result) => String(result?.error || "").trim()).length;
     const warningCount = credentialWarningCount;
     const hydrationStatus = failedCount > 0 ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_COMPLETE;
@@ -9047,6 +9046,14 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       hydrationStatus,
       serviceCredentialResults: credentialResults,
     });
+    if (firstFailure) {
+      throw new Error(
+        firstNonEmptyString([
+          String(firstFailure?.error || "").trim(),
+          `UnderPAR could not hydrate ${String(firstFailure?.serviceKey || "premium service").trim()}.`,
+        ])
+      );
+    }
     if (hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE) {
       clearProgrammerPremiumHydrationProgress(programmerId);
     } else {
@@ -60477,6 +60484,7 @@ async function refreshProgrammerPanels(options = {}) {
     renderPremiumServices(null, null, { controllerReason });
     return;
   }
+  const programmerId = String(programmer?.programmerId || "").trim();
   const retainedConsoleTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
   const programmerApplicationsPromise =
     options.programmerApplicationsPromise && typeof options.programmerApplicationsPromise.then === "function"
@@ -60487,16 +60495,8 @@ async function refreshProgrammerPanels(options = {}) {
           preferredTabId: retainedConsoleTabId,
           requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
         });
-  const premiumAppsPromise = Promise.resolve(programmerApplicationsPromise).then((applicationsData) =>
-    ensurePremiumAppsForProgrammer(programmer, {
-      forceRefresh: forcePremiumRefresh,
-      allowTemporaryPageContextTab: false,
-      preferredTabId: retainedConsoleTabId,
-      applicationsData,
-    })
-  );
-  setProgrammerWorkspaceHydrationReady(programmer.programmerId, false);
-  clearProgrammerPremiumHydrationProgress(programmer.programmerId);
+  setProgrammerWorkspaceHydrationReady(programmerId, false);
+  clearProgrammerPremiumHydrationProgress(programmerId);
   esmWorkspaceBroadcastSelectedControllerState(programmer, null, 0, { controllerReason });
   cmBroadcastSelectedControllerState(programmer, null, 0, {
     controllerReason,
@@ -60505,7 +60505,7 @@ async function refreshProgrammerPanels(options = {}) {
   });
   mvpdWorkspaceBroadcastSelectedControllerState(programmer, null);
 
-  let provisionalServices = forcePremiumRefresh ? null : getCurrentPremiumAppsSnapshot(programmer.programmerId);
+  let provisionalServices = forcePremiumRefresh ? null : getCurrentPremiumAppsSnapshot(programmerId);
   const mergeSelectionServices = (baseServices = null, nextCmService = null, nextCmMvpdService = null) => ({
     ...(baseServices && typeof baseServices === "object" ? baseServices : {}),
     cm: selectPreferredCmRuntimeService(baseServices?.cm, nextCmService),
@@ -60520,45 +60520,31 @@ async function refreshProgrammerPanels(options = {}) {
         cmCatalog: state.cmTenantsCatalog,
       }
     );
-  const applySelectionServicesSnapshot = (baseServices = null, nextCmService = null, nextCmMvpdService = null, options = {}) => {
+  const updateSelectionServicesSnapshot = (baseServices = null, nextCmService = null, nextCmMvpdService = null) => {
     const resolvedServices = summarizeSelectionServices(baseServices, nextCmService, nextCmMvpdService);
-    setCurrentPremiumAppsSnapshot(programmer.programmerId, resolvedServices);
-    const runtimeReady = isProgrammerRuntimeServicesReady(programmer.programmerId, resolvedServices);
-    const uiReady = shouldRenderPremiumServicesUi(programmer.programmerId, resolvedServices);
-    const shouldMarkHydrated =
-      options.markHydrated === true ||
-      (options.markHydrated !== false && runtimeReady);
-    if (shouldMarkHydrated) {
-      setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
-    }
+    setCurrentPremiumAppsSnapshot(programmerId, resolvedServices);
     provisionalServices = resolvedServices;
     emitPremiumServiceDecisionLogs(programmer, resolvedServices);
-    if (uiReady) {
-      clearProgrammerPremiumHydrationProgress(programmer.programmerId);
-      renderPremiumServices(resolvedServices, programmer, { controllerReason });
-    } else {
-      renderPremiumServicesLoading(programmer, {
-        controllerReason,
-        hydrationProgress: getProgrammerPremiumHydrationProgress(programmer.programmerId),
-      });
-    }
     return resolvedServices;
   };
   const computePersistedHydrationStatus = (services = null) => {
-    return isProgrammerRuntimeServicesReady(programmer.programmerId, services)
+    return isProgrammerRuntimeServicesReady(programmerId, services)
       ? UNDERPAR_VAULT_STATUS_COMPLETE
       : UNDERPAR_VAULT_STATUS_PARTIAL;
   };
+  const selectionStillCurrent = () =>
+    requestToken === state.premiumPanelRequestToken &&
+    String(resolveSelectedProgrammer()?.programmerId || "").trim() === programmerId;
 
   if (!provisionalServices && !forcePremiumRefresh) {
-    const vaultRecord = getPassVaultMediaCompanyRecord(programmer.programmerId);
+    const vaultRecord = getPassVaultMediaCompanyRecord(programmerId);
     const vaultedServices = markPassVaultBackedValue(
       buildPassVaultRuntimeServicesSnapshot(vaultRecord),
       vaultRecord
     );
     if (vaultedServices) {
       provisionalServices = vaultedServices;
-      setCurrentPremiumAppsSnapshot(programmer.programmerId, vaultedServices);
+      setCurrentPremiumAppsSnapshot(programmerId, vaultedServices);
 
       const vaultedApplications = markPassVaultBackedValue(
         buildPassVaultApplicationsSnapshotFromRegisteredApplications(
@@ -60571,174 +60557,141 @@ async function refreshProgrammerPanels(options = {}) {
         typeof vaultedApplications === "object" &&
         !Array.isArray(vaultedApplications) &&
         Object.keys(vaultedApplications).length > 0 &&
-        !getCurrentProgrammerApplicationsSnapshot(programmer.programmerId)
+        !getCurrentProgrammerApplicationsSnapshot(programmerId)
       ) {
-        setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, vaultedApplications);
+        setCurrentProgrammerApplicationsSnapshot(programmerId, vaultedApplications);
       }
     }
   }
 
-  const provisionalUiReady = shouldRenderPremiumServicesUi(programmer.programmerId, provisionalServices);
-  if (provisionalServices && provisionalUiReady) {
-    provisionalServices = summarizeSelectionServices(
-      provisionalServices,
-      state.cmServiceByProgrammerId.get(programmer.programmerId) || null,
-      cmMvpdSelectionKey ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null : null
-    );
-    setCurrentPremiumAppsSnapshot(programmer.programmerId, provisionalServices);
-    clearProgrammerPremiumHydrationProgress(programmer.programmerId);
-    emitPremiumServiceDecisionLogs(programmer, provisionalServices);
-    renderPremiumServices(provisionalServices, programmer, { controllerReason });
-  } else {
-    setProgrammerPremiumHydrationProgress(programmer.programmerId, {
-      step: "detect",
-      label: "Detecting premium services...",
-    });
-    renderPremiumServicesLoading(programmer, { controllerReason });
+  const cachedCmService =
+    state.cmServiceByProgrammerId.get(programmerId) ||
+    provisionalServices?.cm ||
+    buildPassVaultRuntimeCmServiceSnapshot(getPassVaultMediaCompanyRecord(programmerId)) ||
+    null;
+  const cachedCmMvpdService = cmMvpdSelectionKey
+    ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || provisionalServices?.cmMvpd || null
+    : provisionalServices?.cmMvpd || null;
+  const reusableServices =
+    !forcePremiumRefresh &&
+    provisionalServices &&
+    shouldRenderPremiumServicesUi(programmerId, provisionalServices) &&
+    !shouldForceLivePassVaultProgrammerHydration(programmerId)
+      ? updateSelectionServicesSnapshot(provisionalServices, cachedCmService, cachedCmMvpdService)
+      : null;
+  if (reusableServices) {
+    clearProgrammerPremiumHydrationProgress(programmerId);
+    setProgrammerWorkspaceHydrationReady(programmerId, true);
+    renderPremiumServices(reusableServices, programmer, { controllerReason });
+    return;
   }
+
+  setProgrammerPremiumHydrationProgress(programmerId, {
+    step: "detect",
+    label: "Detecting premium services...",
+  });
+  renderPremiumServicesLoading(programmer, { controllerReason });
 
   try {
-    const cachedCmSelectionService =
-      provisionalServices?.cm ||
-      state.cmServiceByProgrammerId.get(programmer.programmerId) ||
-      buildPassVaultRuntimeCmServiceSnapshot(getPassVaultMediaCompanyRecord(programmer.programmerId)) ||
-      null;
-    const cmSelectionBootstrapResult = skipCmBootstrap
-      ? { ok: true, value: state.cmTenantsCatalog }
-      : await settle(() =>
-          ensureCmTenantsPrecheckForActiveSession(`panel-selection:${programmer.programmerId}`, {
-            forceRefresh: forcePremiumRefresh,
-            allowTemporaryPageContextTab: false,
-          })
-        );
-    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+    const cmSelectionBootstrapPromise = skipCmBootstrap
+      ? Promise.resolve(state.cmTenantsCatalog)
+      : ensureCmTenantsPrecheckForActiveSession(`panel-selection:${programmerId}`, {
+          forceRefresh: forcePremiumRefresh,
+          allowTemporaryPageContextTab: false,
+        }).catch(() => null);
+    const applicationsData = await programmerApplicationsPromise;
+    if (!selectionStillCurrent()) {
       return;
     }
 
-    const cmBootstrapBlocked = !cmSelectionBootstrapResult.ok;
-    const cmServicePromise = skipCmBootstrap
-      ? Promise.resolve(cachedCmSelectionService)
-      : cmBootstrapBlocked
-        ? Promise.resolve(cachedCmSelectionService)
-      : ensureCmServiceForProgrammer(programmer, {
-          forceRefresh: forcePremiumRefresh,
-        }).catch(() => null);
-    const cmMvpdServicePromise = skipCmBootstrap
-      ? Promise.resolve(
-          cmMvpdSelectionKey ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null : null
-        )
-      : cmBootstrapBlocked
-        ? Promise.resolve(
-            cmMvpdSelectionKey ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null : null
-          )
-      : ensureCmServiceForSelectedMvpd(programmer, {
-          forceRefresh: forcePremiumRefresh,
-        }).catch(() => null);
-
-    const cachedCmService = state.cmServiceByProgrammerId.get(programmer.programmerId) || null;
-    const cachedCmMvpdService = cmMvpdSelectionKey
-      ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null
-      : null;
-    const earlyPremiumAppsRenderPromise = Promise.resolve(premiumAppsPromise)
-      .then((premiumApps) => {
-        if (
-          requestToken !== state.premiumPanelRequestToken ||
-          resolveSelectedProgrammer()?.programmerId !== programmer.programmerId
-        ) {
-          return null;
-        }
-
-        const currentServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || provisionalServices;
-        const currentCmService = state.cmServiceByProgrammerId.get(programmer.programmerId) || currentServices?.cm || cachedCmService;
-        const currentCmMvpdService =
-          (cmMvpdSelectionKey ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || null : null) ||
-          currentServices?.cmMvpd ||
-          cachedCmMvpdService;
-        const mergedPremiumServices = applySelectionServicesSnapshot(
-          {
-            ...(currentServices && typeof currentServices === "object" ? currentServices : {}),
-            ...(premiumApps && typeof premiumApps === "object" ? premiumApps : {}),
-          },
-          currentCmService,
-          currentCmMvpdService
-        );
-        void persistPassVaultProgrammerRecord(programmer, mergedPremiumServices, {
-          source: "live",
-          hydrationStatus: computePersistedHydrationStatus(mergedPremiumServices),
-        }).catch(() => {});
-        return mergedPremiumServices;
-      })
-      .catch(() => null);
-    const [initialCmService, initialCmMvpdService] = await Promise.all([
-      settlePromiseWithin(cmServicePromise, PREMIUM_CM_RENDER_GRACE_MS, cachedCmService),
-      settlePromiseWithin(cmMvpdServicePromise, PREMIUM_CM_RENDER_GRACE_MS, cachedCmMvpdService),
-    ]);
-    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+    let resolvedServices = await ensurePremiumAppsForProgrammer(programmer, {
+      forceRefresh: forcePremiumRefresh,
+      allowTemporaryPageContextTab: false,
+      preferredTabId: retainedConsoleTabId,
+      applicationsData,
+    });
+    if (!selectionStillCurrent()) {
       return;
     }
 
-    const initialMergedServices = applySelectionServicesSnapshot(
-      getCurrentPremiumAppsSnapshot(programmer.programmerId) || provisionalServices,
-      initialCmService,
-      initialCmMvpdService
-    );
+    await cmSelectionBootstrapPromise;
+    if (!selectionStillCurrent()) {
+      return;
+    }
 
-    const mergedPremiumServices =
-      (await earlyPremiumAppsRenderPromise) ||
-      getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
-      initialMergedServices;
+    resolvedServices = updateSelectionServicesSnapshot(resolvedServices, cachedCmService, cachedCmMvpdService);
     if (
-      requestToken !== state.premiumPanelRequestToken ||
-      resolveSelectedProgrammer()?.programmerId !== programmer.programmerId
+      hasDetectedDcrPremiumServices(resolvedServices) &&
+      !isProgrammerRuntimeServicesReady(programmerId, resolvedServices)
     ) {
-      return;
-    }
-    provisionalServices = mergedPremiumServices;
-
-    const serviceHydrationPromise = isProgrammerRuntimeServicesReady(programmer.programmerId, mergedPremiumServices)
-      ? Promise.resolve(mergedPremiumServices)
-      : primeProgrammerServiceHydration(programmer, mergedPremiumServices, {
-          forceRefresh: forcePremiumRefresh,
-          controllerReason: controllerReason || "panel-selection",
-          requestToken,
-        }).catch(() => null);
-    const earlyHydratedServices = await settlePromiseWithin(
-      serviceHydrationPromise,
-      PREMIUM_PROGRAMMER_HYDRATION_GRACE_MS,
-      null
-    );
-    if (
-      requestToken !== state.premiumPanelRequestToken ||
-      resolveSelectedProgrammer()?.programmerId !== programmer.programmerId
-    ) {
-      return;
-    }
-    if (earlyHydratedServices && typeof earlyHydratedServices === "object") {
-      provisionalServices = applySelectionServicesSnapshot(
-        earlyHydratedServices,
-        state.cmServiceByProgrammerId.get(programmer.programmerId) || earlyHydratedServices?.cm || null,
-        cmMvpdSelectionKey
-          ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || earlyHydratedServices?.cmMvpd || null
-          : earlyHydratedServices?.cmMvpd || null
-      );
-    }
-
-    const cmHydrationPromise = !skipCmBootstrap && !cmBootstrapBlocked && shouldShowCmService(mergedPremiumServices?.cm)
-      ? ensureCmHydratedForProgrammer(programmer, mergedPremiumServices, {
-          forceRefresh: forcePremiumRefresh,
-          reason: "panel-selection",
-        }).catch(() => null)
-      : Promise.resolve(null);
-    void Promise.allSettled([cmServicePromise, cmMvpdServicePromise, cmHydrationPromise]).then((results) => {
-      if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+      resolvedServices = await primeProgrammerServiceHydration(programmer, resolvedServices, {
+        forceRefresh: forcePremiumRefresh,
+        controllerReason: controllerReason || "panel-selection",
+        requestToken,
+        renderOnReady: false,
+      });
+      if (!selectionStillCurrent()) {
         return;
       }
-      const currentServices = getCurrentPremiumAppsSnapshot(programmer.programmerId) || mergedPremiumServices;
-      const resolvedCmService = selectPreferredCmRuntimeService(
+    }
+
+    const resolvedCmService = skipCmBootstrap
+      ? cachedCmService
+      : state.cmServiceByProgrammerId.get(programmerId) || cachedCmService;
+    const resolvedCmMvpdService = skipCmBootstrap
+      ? cachedCmMvpdService
+      : cmMvpdSelectionKey
+        ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || cachedCmMvpdService
+        : cachedCmMvpdService;
+    const finalServices = updateSelectionServicesSnapshot(
+      resolvedServices,
+      resolvedCmService,
+      resolvedCmMvpdService
+    );
+    const runtimeReady = isProgrammerRuntimeServicesReady(programmerId, finalServices);
+    const uiReady = shouldRenderPremiumServicesUi(programmerId, finalServices);
+    if (!uiReady) {
+      throw new Error("UnderPAR could not finish premium service hydration.");
+    }
+
+    clearProgrammerPremiumHydrationProgress(programmerId);
+    setProgrammerWorkspaceHydrationReady(programmerId, runtimeReady);
+    renderPremiumServices(finalServices, programmer, { controllerReason });
+    void persistPassVaultProgrammerRecord(programmer, finalServices, {
+      source: "live",
+      hydrationStatus: computePersistedHydrationStatus(finalServices),
+    }).catch(() => {});
+
+    const cmHydrationPromise =
+      !skipCmBootstrap && shouldShowCmService(finalServices?.cm)
+        ? ensureCmHydratedForProgrammer(programmer, finalServices, {
+            forceRefresh: forcePremiumRefresh,
+            reason: "panel-selection",
+          }).catch(() => null)
+        : Promise.resolve(null);
+    const cmServicePromise =
+      skipCmBootstrap || !shouldShowCmService(finalServices?.cm)
+        ? Promise.resolve(resolvedCmService)
+        : ensureCmServiceForProgrammer(programmer, {
+            forceRefresh: forcePremiumRefresh,
+          }).catch(() => resolvedCmService);
+    const cmMvpdServicePromise =
+      skipCmBootstrap || !cmMvpdSelectionKey
+        ? Promise.resolve(resolvedCmMvpdService)
+        : ensureCmServiceForSelectedMvpd(programmer, {
+            forceRefresh: forcePremiumRefresh,
+          }).catch(() => resolvedCmMvpdService);
+
+    void Promise.allSettled([cmServicePromise, cmMvpdServicePromise, cmHydrationPromise]).then((results) => {
+      if (!selectionStillCurrent()) {
+        return;
+      }
+      const currentServices = getCurrentPremiumAppsSnapshot(programmerId) || finalServices;
+      const refreshedCmService = selectPreferredCmRuntimeService(
         currentServices?.cm,
         results[0]?.status === "fulfilled" ? results[0].value : null
       );
-      const resolvedCmMvpdService = selectPreferredCmRuntimeService(
+      const refreshedCmMvpdService = selectPreferredCmRuntimeService(
         currentServices?.cmMvpd,
         results[1]?.status === "fulfilled" ? results[1].value : null
       );
@@ -60746,18 +60699,19 @@ async function refreshProgrammerPanels(options = {}) {
         results[2]?.status === "fulfilled" && results[2].value?.services && typeof results[2].value.services === "object"
           ? results[2].value.services
           : null;
-      const finalServices = applySelectionServicesSnapshot(
+      const nextServices = updateSelectionServicesSnapshot(
         hydratedCmServices || currentServices,
-        resolvedCmService,
-        resolvedCmMvpdService
+        refreshedCmService,
+        refreshedCmMvpdService
       );
-      void persistPassVaultProgrammerRecord(programmer, finalServices, {
+      renderPremiumServices(nextServices, programmer, { controllerReason });
+      void persistPassVaultProgrammerRecord(programmer, nextServices, {
         source: "live",
-        hydrationStatus: computePersistedHydrationStatus(finalServices),
+        hydrationStatus: computePersistedHydrationStatus(nextServices),
       }).catch(() => {});
     });
   } catch (error) {
-    if (requestToken !== state.premiumPanelRequestToken || resolveSelectedProgrammer()?.programmerId !== programmer.programmerId) {
+    if (!selectionStillCurrent()) {
       return;
     }
     if (provisionalServices && typeof provisionalServices === "object") {
@@ -60771,7 +60725,7 @@ async function refreshProgrammerPanels(options = {}) {
         setStatus(message, "error");
       }
       emitPremiumServiceDecisionLogs(programmer, provisionalServices);
-      if (shouldRenderPremiumServicesUi(programmer.programmerId, provisionalServices)) {
+      if (shouldRenderPremiumServicesUi(programmerId, provisionalServices)) {
         renderPremiumServices(provisionalServices, programmer, { controllerReason });
       } else {
         renderPremiumServicesError(error, { controllerReason });
@@ -64917,75 +64871,15 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
       }
     );
   };
-  const ensureProvisionablePremiumServices = async (applicationsData = {}, existingServices = null) => {
-    let resolvedApplications =
-      applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
-    let services = buildLivePremiumServices(resolvedApplications, existingServices);
-    const missingProvisionableKeys = getMissingProvisionablePremiumServiceKeys(
-      programmer.programmerId,
-      services,
-      PREMIUM_REQUIRED_SERVICE_KEYS
-    );
-    if (missingProvisionableKeys.length === 0) {
-      return {
-        applications: resolvedApplications,
-        services,
-      };
-    }
-
-    emitPremiumDecisionDebugEvent(
-      {
-        phase: "premium-service-provisioning-hydration-request",
-        programmerId: String(programmer.programmerId || ""),
-        missingProvisionableKeys,
-      },
-      {
-        programmer,
-      }
-    );
-
-    resolvedApplications = await hydrateApplicationScopesForProgrammer(programmer, resolvedApplications, {
-      forceRefresh,
-      requiredServiceKeys: missingProvisionableKeys,
-      stopWhenProvisionable: true,
-      requestTimeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
-      allowTemporaryPageContextTab,
-      preferredTabId,
-    });
-    services = buildLivePremiumServices(resolvedApplications, existingServices);
-
-    emitPremiumDecisionDebugEvent(
-      {
-        phase: "premium-service-provisioning-hydration-complete",
-        programmerId: String(programmer.programmerId || ""),
-        missingProvisionableKeys,
-        remainingMissingProvisionableKeys: getMissingProvisionablePremiumServiceKeys(
-          programmer.programmerId,
-          services,
-          PREMIUM_REQUIRED_SERVICE_KEYS
-        ),
-      },
-      {
-        programmer,
-      }
-    );
-
-    return {
-      applications: resolvedApplications,
-      services,
-    };
-  };
   if (!forceRefresh && cachedApplicationsAreLive) {
-    const provisionedResult = await ensureProvisionablePremiumServices(cachedApplications, existing);
-    const provisionedApplications = provisionedResult?.applications || cachedApplications;
-    const recomputedServices = provisionedResult?.services || buildLivePremiumServices(cachedApplications, existing);
-    setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, provisionedApplications);
+    const recomputedServices = buildLivePremiumServices(cachedApplications, existing);
+    setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, cachedApplications);
     setCurrentPremiumAppsSnapshot(programmer.programmerId, recomputedServices);
     emitPremiumDecisionDebugEvent(
       {
         phase: "premium-service-runtime-hit",
         programmerId: String(programmer.programmerId || ""),
-        applicationCount: Object.keys(provisionedApplications || {}).length,
+        applicationCount: Object.keys(cachedApplications || {}).length,
       },
       {
         programmer,
@@ -65008,14 +64902,9 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
         pageContextTargetRef,
         preferredTabId,
       }));
-    let resolvedApplications =
+    const resolvedApplications =
       applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
-    let premiumApps = findPremiumServiceApplications(programmer.applications || [], resolvedApplications, {
-      programmerId: programmer.programmerId,
-    });
-    const provisionedResult = await ensureProvisionablePremiumServices(resolvedApplications, existing);
-    resolvedApplications = provisionedResult?.applications || resolvedApplications;
-    premiumApps = provisionedResult?.services || premiumApps;
+    const premiumApps = buildLivePremiumServices(resolvedApplications, existing);
     setCurrentProgrammerApplicationsSnapshot(programmer.programmerId, resolvedApplications);
     emitPremiumDecisionDebugEvent(
       {
@@ -65037,10 +64926,8 @@ async function ensurePremiumAppsForProgrammer(programmer, options = {}) {
         programmer,
       }
     );
-    const existingServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
-    const mergedServices = buildLivePremiumServices(resolvedApplications, existingServices);
-    setCurrentPremiumAppsSnapshot(programmer.programmerId, mergedServices);
-    return mergedServices;
+    setCurrentPremiumAppsSnapshot(programmer.programmerId, premiumApps);
+    return premiumApps;
   })();
 
   state.premiumAppsLoadPromiseByProgrammerId.set(programmer.programmerId, loadPromise);

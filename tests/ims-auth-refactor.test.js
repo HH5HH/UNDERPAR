@@ -962,26 +962,34 @@ test("selected media company refresh starts direct premium hydration immediately
     refreshPanelsSource,
     /const programmerApplicationsPromise =[\s\S]*options\.programmerApplicationsPromise[\s\S]*ensureSelectedProgrammerApplicationsLoaded\(programmer,/
   );
-  assert.match(refreshPanelsSource, /const premiumAppsPromise = Promise\.resolve\(programmerApplicationsPromise\)\.then\(\(applicationsData\) =>/);
+  assert.match(refreshPanelsSource, /const programmerId = String\(programmer\?\.programmerId \|\| ""\)\.trim\(\);/);
+  assert.match(refreshPanelsSource, /const cmSelectionBootstrapPromise = skipCmBootstrap/);
+  assert.match(refreshPanelsSource, /const applicationsData = await programmerApplicationsPromise;/);
+  assert.match(refreshPanelsSource, /let resolvedServices = await ensurePremiumAppsForProgrammer\(programmer,\s*\{/);
   assert.match(refreshPanelsSource, /applicationsData,/);
-  assert.match(refreshPanelsSource, /ensureCmTenantsPrecheckForActiveSession\(`panel-selection:\$\{programmer\.programmerId\}`/);
-  assert.ok(refreshPanelsSource.indexOf("const programmerApplicationsPromise = ensureSelectedProgrammerApplicationsLoaded(") <
-    refreshPanelsSource.indexOf("const cmSelectionBootstrapResult ="));
-  assert.ok(refreshPanelsSource.indexOf("const premiumAppsPromise = Promise.resolve(programmerApplicationsPromise)") <
-    refreshPanelsSource.indexOf("const cmSelectionBootstrapResult ="));
+  assert.match(refreshPanelsSource, /ensureCmTenantsPrecheckForActiveSession\(`panel-selection:\$\{programmerId\}`/);
+  assert.ok(
+    refreshPanelsSource.indexOf("const applicationsData = await programmerApplicationsPromise;") <
+      refreshPanelsSource.indexOf("let resolvedServices = await ensurePremiumAppsForProgrammer(")
+  );
+  assert.ok(
+    refreshPanelsSource.indexOf("let resolvedServices = await ensurePremiumAppsForProgrammer(") <
+      refreshPanelsSource.indexOf("resolvedServices = await primeProgrammerServiceHydration(")
+  );
   assert.doesNotMatch(refreshPanelsSource, /hydrateProgrammerFromPassVault\(/);
   assert.match(refreshPanelsSource, /buildPassVaultRuntimeServicesSnapshot\(vaultRecord\)/);
   assert.match(refreshPanelsSource, /allowTemporaryPageContextTab:\s*false/);
   assert.doesNotMatch(refreshPanelsSource, /withAdobeConsolePageContextTarget\(/);
-  assert.match(refreshPanelsSource, /const cmServicePromise = skipCmBootstrap/);
-  assert.match(refreshPanelsSource, /const cmMvpdServicePromise = skipCmBootstrap/);
-  assert.match(refreshPanelsSource, /const resolvedCmService = selectPreferredCmRuntimeService\(/);
-  assert.match(refreshPanelsSource, /const resolvedCmMvpdService = selectPreferredCmRuntimeService\(/);
-  assert.match(refreshPanelsSource, /const serviceHydrationPromise = isProgrammerRuntimeServicesReady\(programmer\.programmerId,\s*mergedPremiumServices\)/);
-  assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*mergedPremiumServices,\s*\{/);
-  assert.match(refreshPanelsSource, /settlePromiseWithin\(\s*serviceHydrationPromise,\s*PREMIUM_PROGRAMMER_HYDRATION_GRACE_MS,/);
-  assert.match(refreshPanelsSource, /shouldRenderPremiumServicesUi\(programmer\.programmerId,\s*resolvedServices\)/);
-  assert.doesNotMatch(refreshPanelsSource, /markHydrated:\s*true/);
+  assert.match(refreshPanelsSource, /const resolvedCmService = skipCmBootstrap/);
+  assert.match(refreshPanelsSource, /const resolvedCmMvpdService = skipCmBootstrap/);
+  assert.match(
+    refreshPanelsSource,
+    /hasDetectedDcrPremiumServices\(resolvedServices\) &&[\s\S]*!isProgrammerRuntimeServicesReady\(programmerId,\s*resolvedServices\)/
+  );
+  assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*resolvedServices,\s*\{/);
+  assert.match(refreshPanelsSource, /renderOnReady:\s*false/);
+  assert.match(refreshPanelsSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*finalServices\);/);
+  assert.match(refreshPanelsSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*finalServices\);/);
   assert.match(ensureApplicationsSource, /state\.programmerApplicationsLoadPromiseByProgrammerId/);
   assert.match(selectPreferredCmRuntimeServiceSource, /resolvedVisible && !currentVisible/);
   assert.match(selectPreferredCmRuntimeServiceSource, /currentRetry && !resolvedRetry/);
@@ -1484,7 +1492,6 @@ test("media company selection uses cached live AdobePass apps or direct applicat
     refreshPanelsSource,
     /const programmerApplicationsPromise =[\s\S]*options\.programmerApplicationsPromise[\s\S]*ensureSelectedProgrammerApplicationsLoaded\(programmer,/
   );
-  assert.match(refreshPanelsSource, /const premiumAppsPromise = Promise\.resolve\(programmerApplicationsPromise\)\.then\(\(applicationsData\) =>/);
   assert.doesNotMatch(refreshPanelsSource, /hydrateProgrammerFromPassVault\(/);
   assert.match(refreshPanelsSource, /buildPassVaultRuntimeServicesSnapshot\(vaultRecord\)/);
   assert.match(refreshPanelsSource, /buildPassVaultApplicationsSnapshotFromRegisteredApplications/);
@@ -1497,6 +1504,9 @@ test("media company selection uses cached live AdobePass apps or direct applicat
   assert.doesNotMatch(ensurePremiumAppsSource, /existing\?\.__underparLiveHydrated === true/);
   assert.match(ensurePremiumAppsSource, /const preloadedApplications =/);
   assert.match(ensurePremiumAppsSource, /preloadedApplications \|\|/);
+  assert.match(ensurePremiumAppsSource, /const premiumApps = buildLivePremiumServices\(resolvedApplications,\s*existing\);/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /ensureProvisionablePremiumServices/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /hydrateApplicationScopesForProgrammer\(programmer,\s*resolvedApplications/);
   assert.match(fetchRegisteredApplicationsSource, /appendAdobeConsoleConfigurationVersion\(/);
   assert.match(fetchApplicationsSource, /fetchProgrammerRegisteredApplications\(currentSession,\s*programmerId,\s*options\)/);
   assert.match(ensureApplicationsSource, /const cachedApplicationsAreLive =/);
@@ -1511,9 +1521,9 @@ test("media company selection uses cached live AdobePass apps or direct applicat
     /const retainedConsoleTabId = Number\(options\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/
   );
   assert.match(refreshPanelsSource, /preferredTabId:\s*retainedConsoleTabId/);
-  assert.match(refreshPanelsSource, /const earlyPremiumAppsRenderPromise = Promise\.resolve\(premiumAppsPromise\)/);
-  assert.match(refreshPanelsSource, /applySelectionServicesSnapshot\(/);
-  assert.match(refreshPanelsSource, /await earlyPremiumAppsRenderPromise/);
+  assert.match(refreshPanelsSource, /const applicationsData = await programmerApplicationsPromise;/);
+  assert.match(refreshPanelsSource, /let resolvedServices = await ensurePremiumAppsForProgrammer\(programmer,\s*\{/);
+  assert.match(refreshPanelsSource, /const reusableServices =/);
   assert.match(refreshPanelsSource, /const suppressAccessDeniedStatus =/);
   assert.match(refreshPanelsSource, /clearStatusUnlessCmTenantsPrecheckBlocked\(\);/);
   assert.doesNotMatch(refreshPanelsSource, /withAdobeConsolePageContextTarget\(/);
@@ -1823,7 +1833,7 @@ test("premium app details still retain software statements while compile-time ma
   assert.match(ensureDcrSource, /extractSoftwareStatementFromAppData\(resolvedAppInfo\?\.appData \|\| null\)/);
 });
 
-test("live premium app loading performs bounded scope hydration until missing DCR service candidates become provisionable", () => {
+test("live premium app loading stays on direct registered-application detection and leaves selected-app enrichment to DCR hydration", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const ensurePremiumAppsSource = extractFunctionSource(popupSource, "ensurePremiumAppsForProgrammer");
   const hydrateScopesSource = extractFunctionSource(popupSource, "hydrateApplicationScopesForProgrammer");
@@ -1836,16 +1846,12 @@ test("live premium app loading performs bounded scope hydration until missing DC
   assert.match(provisionableCandidateSource, /services\?\.esm \|\| null/);
   assert.match(provisionableCandidateSource, /services\?\.degradation \|\| null/);
   assert.doesNotMatch(provisionableCandidateSource, /collectPassVaultServiceCredentialCandidates/);
-  assert.match(ensurePremiumAppsSource, /const ensureProvisionablePremiumServices = async/);
-  assert.match(
-    ensurePremiumAppsSource,
-    /getMissingProvisionablePremiumServiceKeys\(\s*programmer\.programmerId,\s*services,\s*PREMIUM_REQUIRED_SERVICE_KEYS\s*\)/
-  );
-  assert.match(ensurePremiumAppsSource, /phase:\s*"premium-service-provisioning-hydration-request"/);
-  assert.match(ensurePremiumAppsSource, /hydrateApplicationScopesForProgrammer\(programmer,\s*resolvedApplications,\s*\{/);
-  assert.match(ensurePremiumAppsSource, /requiredServiceKeys:\s*missingProvisionableKeys/);
-  assert.match(ensurePremiumAppsSource, /stopWhenProvisionable:\s*true/);
-  assert.match(ensurePremiumAppsSource, /phase:\s*"premium-service-provisioning-hydration-complete"/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /const ensureProvisionablePremiumServices = async/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /premium-service-provisioning-hydration-request/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /premium-service-provisioning-hydration-complete/);
+  assert.doesNotMatch(ensurePremiumAppsSource, /hydrateApplicationScopesForProgrammer\(programmer,\s*resolvedApplications,\s*\{/);
+  assert.match(ensurePremiumAppsSource, /const premiumApps = buildLivePremiumServices\(resolvedApplications,\s*existing\);/);
+  assert.match(ensurePremiumAppsSource, /setCurrentPremiumAppsSnapshot\(programmer\.programmerId,\s*premiumApps\);/);
   assert.match(hydrateScopesSource, /const stopWhenProvisionable = options\.stopWhenProvisionable === true;/);
   assert.match(hydrateScopesSource, /const selectedProvisioningGuids = new Set/);
   assert.match(hydrateScopesSource, /const needsProvisioningHydration =/);
@@ -1867,10 +1873,17 @@ test("premium UI waits for DCR-ready selected services and pass-vault compilatio
 
   assert.match(renderReadinessSource, /hasDetectedDcrPremiumServices\(services\)/);
   assert.match(renderReadinessSource, /return isProgrammerRuntimeServicesReady\(programmerId,\s*services\);/);
-  assert.match(refreshPanelsSource, /const uiReady = shouldRenderPremiumServicesUi\(programmer\.programmerId,\s*resolvedServices\);/);
-  assert.match(refreshPanelsSource, /const provisionalUiReady = shouldRenderPremiumServicesUi\(programmer\.programmerId,\s*provisionalServices\);/);
-  assert.match(refreshPanelsSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmer\.programmerId,\s*resolvedServices\);/);
+  assert.match(refreshPanelsSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*finalServices\);/);
+  assert.match(refreshPanelsSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*finalServices\);/);
+  assert.match(
+    refreshPanelsSource,
+    /hasDetectedDcrPremiumServices\(resolvedServices\) &&[\s\S]*!isProgrammerRuntimeServicesReady\(programmerId,\s*resolvedServices\)/
+  );
+  assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*resolvedServices,\s*\{/);
+  assert.match(refreshPanelsSource, /renderOnReady:\s*false/);
   assert.match(compileSource, /const credentialResults = await hydratePassVaultServiceCredentials\(programmer,\s*resolvedServices,\s*\{/);
+  assert.match(compileSource, /const firstFailure =/);
+  assert.match(compileSource, /throw new Error\(/);
   assert.match(compileSource, /void ensureCmHydratedForProgrammer\(programmer,\s*mergedServices,\s*\{/);
   assert.doesNotMatch(compileSource, /Promise\.all\(\[\s*hydratePassVaultServiceCredentials/);
   assert.match(runtimeReadySource, /hasPassVaultCredentialCoverageForServices\(normalizedProgrammerId,\s*resolvedServices\)/);
@@ -1899,8 +1912,9 @@ test("pass vault compilation uses normalized registered-app order, resolves sele
   assert.match(mergeServicesSource, /esmApps = mergeUniquePremiumServiceAppInfos\(/);
   assert.match(mergeServicesSource, /degradationApps = mergeUniquePremiumServiceAppInfos\(/);
   assert.doesNotMatch(resolvedSelectionSource, /normalizedRequestorId/);
-  assert.match(resolvedSelectionSource, /const currentRank = getPassVaultServiceProvisioningRank\(programmerId,\s*currentMatch\)/);
-  assert.match(resolvedSelectionSource, /const preferredRank = getPassVaultServiceProvisioningRank\(programmerId,\s*preferredMatch\)/);
+  assert.doesNotMatch(resolvedSelectionSource, /const currentRank = getPassVaultServiceProvisioningRank/);
+  assert.doesNotMatch(resolvedSelectionSource, /const preferredRank = getPassVaultServiceProvisioningRank/);
+  assert.match(resolvedSelectionSource, /return preferredMatch \|\| currentMatch \|\| normalizedCandidates\[0\] \|\| null;/);
   assert.match(mergeServicesSource, /restV2: selectResolvedPremiumServiceCandidate\(/);
   assert.match(mergeServicesSource, /esm: selectResolvedPremiumServiceCandidate\(/);
   assert.match(mergeServicesSource, /degradation: selectResolvedPremiumServiceCandidate\(/);
@@ -1921,7 +1935,7 @@ test("pass vault compilation uses normalized registered-app order, resolves sele
   assert.doesNotMatch(resolveMappingsSource, /hydrateApplicationScopesForProgrammer/);
   assert.match(compileSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
   assert.match(compileSource, /label:\s*"Saving premium services to VAULT\.\.\."/);
-  assert.match(compileSource, /label:\s*"Finishing premium service hydration\.\.\."/);
+  assert.match(compileSource, /const firstFailure =/);
 });
 
 test("premium services reuse the mounted DOM when the selected service signature has not changed", () => {
@@ -2020,7 +2034,8 @@ test("activation leaves the global selectors user-owned and premium hydration st
     refreshSource,
     /const programmerApplicationsPromise =[\s\S]*options\.programmerApplicationsPromise[\s\S]*ensureSelectedProgrammerApplicationsLoaded\(programmer,/
   );
-  assert.match(refreshSource, /const premiumAppsPromise = Promise\.resolve\(programmerApplicationsPromise\)\.then\(\(applicationsData\) =>/);
+  assert.match(refreshSource, /const applicationsData = await programmerApplicationsPromise;/);
+  assert.match(refreshSource, /let resolvedServices = await ensurePremiumAppsForProgrammer\(programmer,\s*\{/);
   assert.match(refreshSource, /buildPassVaultRuntimeServicesSnapshot\(vaultRecord\)/);
   assert.doesNotMatch(activateSessionSource, /restorePreferredProgrammerSelectionForActivation\(/);
   assert.doesNotMatch(activateSessionSource, /captureAdobePassEnvironmentSwitchSelectionSnapshot\(\)/);
@@ -2043,11 +2058,11 @@ test("premium detection uses LoginButton-style app scopes plus CM tenant catalog
   assert.match(applySummarySource, /findCmTenantMatchesForProgrammer\(programmer,\s*cmCatalog\.tenants\)/);
   assert.match(applySummarySource, /PREMIUM_SERVICE_SCOPE_RULES\.forEach/);
   assert.match(applySummarySource, /syntheticSource:\s*"cm-catalog"/);
-  assert.match(refreshPanelsSource, /const earlyPremiumAppsRenderPromise = Promise\.resolve\(premiumAppsPromise\)/);
-  assert.match(refreshPanelsSource, /if \(provisionalServices && provisionalUiReady\)/);
-  assert.match(refreshPanelsSource, /setProgrammerPremiumHydrationProgress\(programmer\.programmerId,\s*\{\s*step:\s*"detect"/);
-  assert.match(refreshPanelsSource, /renderPremiumServicesLoading\(programmer,\s*\{\s*controllerReason,\s*hydrationProgress:/);
-  assert.match(refreshPanelsSource, /await earlyPremiumAppsRenderPromise/);
+  assert.match(refreshPanelsSource, /const reusableServices =/);
+  assert.match(refreshPanelsSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
+  assert.match(refreshPanelsSource, /renderPremiumServicesLoading\(programmer,\s*\{\s*controllerReason\s*\}\);/);
+  assert.match(refreshPanelsSource, /await cmSelectionBootstrapPromise;/);
+  assert.match(refreshPanelsSource, /renderPremiumServices\(finalServices,\s*programmer,\s*\{\s*controllerReason\s*\}\);/);
   assert.match(premiumDecisionSource, /has Reset TempPASS/);
   assert.match(premiumDecisionSource, /emitResetTempPassSupportReminder/);
   assert.match(popupSource, /reset_temp_pass_reminder=/);
@@ -2079,14 +2094,14 @@ test("premium panel rendering waits for DCR-ready services and keeps workspace h
 
   assert.match(primeSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*runtimeServices\)/);
   assert.match(primeSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*runtimeServices\)/);
-  assert.match(primeSource, /if \(\s*uiReady &&/);
+  assert.match(primeSource, /renderOnReady &&[\s\S]*uiReady &&/);
   assert.match(primeSource, /if \(runtimeReady\) \{\s*setProgrammerWorkspaceHydrationReady\(programmerId,\s*true\);/);
   assert.doesNotMatch(primeSource, /finalizePassVaultProgrammerHydration\(/);
   assert.doesNotMatch(primeSource, /hydrateProgrammerFromPassVault\(/);
-  assert.match(refreshSource, /const uiReady = shouldRenderPremiumServicesUi\(programmer\.programmerId,\s*resolvedServices\)/);
-  assert.match(refreshSource, /const provisionalUiReady = shouldRenderPremiumServicesUi\(programmer\.programmerId,\s*provisionalServices\)/);
-  assert.match(refreshSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmer\.programmerId,\s*resolvedServices\);/);
-  assert.match(refreshSource, /options\.markHydrated !== false && runtimeReady/);
+  assert.match(refreshSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*finalServices\);/);
+  assert.match(refreshSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*finalServices\);/);
+  assert.match(refreshSource, /setProgrammerWorkspaceHydrationReady\(programmerId,\s*runtimeReady\);/);
+  assert.doesNotMatch(refreshSource, /options\.markHydrated !== false && runtimeReady/);
   assert.doesNotMatch(refreshSource, /const provisionalRuntimeReady = isProgrammerRuntimeServicesReady/);
   assert.match(compileSource, /const credentialResults = await hydratePassVaultServiceCredentials/);
   assert.match(compileSource, /void ensureCmHydratedForProgrammer\(programmer,\s*mergedServices,\s*\{/);
