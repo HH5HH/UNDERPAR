@@ -964,12 +964,18 @@ test("selected media company refresh starts direct premium hydration immediately
     refreshPanelsSource.indexOf("const premiumHydrationPromise = primeProgrammerServiceHydration(") <
       refreshPanelsSource.indexOf("let resolvedServices = await premiumHydrationPromise;")
   );
+  assert.doesNotMatch(refreshPanelsSource, /await cmSelectionBootstrapPromise;/);
+  assert.ok(
+    refreshPanelsSource.indexOf("let resolvedServices = await premiumHydrationPromise;") <
+      refreshPanelsSource.indexOf("const cmSelectionReadyPromise = skipCmBootstrap")
+  );
   assert.doesNotMatch(refreshPanelsSource, /hydrateProgrammerFromPassVault\(/);
   assert.match(refreshPanelsSource, /buildPassVaultRuntimeServicesSnapshot\(vaultRecord\)/);
   assert.match(refreshPanelsSource, /allowTemporaryPageContextTab:\s*false/);
   assert.doesNotMatch(refreshPanelsSource, /withAdobeConsolePageContextTarget\(/);
-  assert.match(refreshPanelsSource, /const resolvedCmService = skipCmBootstrap/);
-  assert.match(refreshPanelsSource, /const resolvedCmMvpdService = skipCmBootstrap/);
+  assert.match(refreshPanelsSource, /const cmServicePromise = skipCmBootstrap/);
+  assert.match(refreshPanelsSource, /const cmMvpdServicePromise =/);
+  assert.match(refreshPanelsSource, /const cmHydrationPromise = Promise\.allSettled\(\[cmServicePromise,\s*cmMvpdServicePromise\]\)/);
   assert.match(refreshPanelsSource, /let resolvedServices = await premiumHydrationPromise;/);
   assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*provisionalServices,\s*\{/);
   assert.match(refreshPanelsSource, /renderOnReady:\s*false/);
@@ -2041,11 +2047,27 @@ test("premium detection uses LoginButton-style app scopes plus CM tenant catalog
   assert.match(refreshPanelsSource, /const reusableServices =/);
   assert.match(refreshPanelsSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
   assert.match(refreshPanelsSource, /renderPremiumServicesLoading\(programmer,\s*\{\s*controllerReason\s*\}\);/);
-  assert.match(refreshPanelsSource, /await cmSelectionBootstrapPromise;/);
+  assert.match(refreshPanelsSource, /const cmSelectionReadyPromise = skipCmBootstrap/);
   assert.match(refreshPanelsSource, /renderPremiumServices\(finalServices,\s*programmer,\s*\{\s*controllerReason\s*\}\);/);
   assert.match(premiumDecisionSource, /has Reset TempPASS/);
   assert.match(premiumDecisionSource, /emitResetTempPassSupportReminder/);
+  assert.match(premiumDecisionSource, /buildPremiumServiceDecisionLogSignature\(programmer,\s*services\)/);
   assert.match(popupSource, /reset_temp_pass_reminder=/);
+});
+
+test("DCR register and token flows now mirror LoginButton's compact form/query contract", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const registerSource = extractFunctionSource(popupSource, "registerClientWithSoftwareStatement");
+  const tokenSource = extractFunctionSource(popupSource, "requestClientCredentialsToken");
+
+  assert.match(registerSource, /grant_types:\s*\["client_credentials"\]/);
+  assert.match(registerSource, /token_endpoint_auth_method:\s*"client_secret_post"/);
+  assert.match(registerSource, /new URLSearchParams\(\{\s*software_statement: normalizedSoftwareStatement,\s*\}\)\.toString\(\)/);
+  assert.match(tokenSource, /const attempts = \["form", "query"\];/);
+  assert.doesNotMatch(tokenSource, /DEGRADATION_SCOPE_CANDIDATES/);
+  assert.doesNotMatch(tokenSource, /addTokenAttempt\(/);
+  assert.doesNotMatch(tokenSource, /minimal === true/);
+  assert.match(tokenSource, /body\.set\("scope", normalizedAttemptScope\)/);
 });
 
 test("premium runtime readiness still depends on DCR-ready premium apps while UI rendering stays single-line", () => {

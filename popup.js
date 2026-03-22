@@ -8024,6 +8024,7 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.cmUsageWarmStateByProgrammerId.clear();
   state.premiumAutoRefreshMetaByKey.clear();
   state.premiumServiceReminderLogKeys.clear();
+  state.premiumServiceDecisionSignatureByProgrammerKey.clear();
   state.premiumPanelRequestToken = 0;
   state.dcrEnsureTokenPromiseByKey.clear();
   state.premiumServiceRecoveryPromiseByProgrammerKey.clear();
@@ -11748,6 +11749,7 @@ const state = {
   premiumSectionCollapsedByKey: new Map(),
   premiumAutoRefreshMetaByKey: new Map(),
   premiumServiceReminderLogKeys: new Set(),
+  premiumServiceDecisionSignatureByProgrammerKey: new Map(),
   premiumPanelRequestToken: 0,
   authenticatedHydrationToken: 0,
   programmersLoadInFlight: false,
@@ -13113,9 +13115,44 @@ function emitResetTempPassSupportReminder(programmer, services = null) {
   appendDebugLogEntry("premium", reminderMessage, details, { level: "info" });
 }
 
+function buildPremiumServiceDecisionLogSignature(programmer, services = null) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  const scopedKey = getEnvironmentScopedProgrammerKey(programmerId);
+  if (!scopedKey) {
+    return "";
+  }
+
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  const selectedMvpdId = String(state.selectedMvpdId || "").trim();
+  const selectedMvpdLabel = selectedMvpdId
+    ? String(getRestV2MvpdPickerLabel(selectedRequestorId, selectedMvpdId) || selectedMvpdId).trim()
+    : "";
+
+  return [
+    scopedKey,
+    `restV2:${Boolean(services?.restV2)}`,
+    `esm:${Boolean(services?.esm)}`,
+    `degradation:${Boolean(services?.degradation)}`,
+    `resetTempPass:${Boolean(hasResetTempPassAvailable(services))}`,
+    `cm:${Boolean(shouldShowCmService(services?.cm))}`,
+    `cmMvpd:${Boolean(shouldShowCmService(services?.cmMvpd))}`,
+    `mvpd:${selectedMvpdLabel || selectedMvpdId || "none"}`,
+  ].join("|");
+}
+
 function emitPremiumServiceDecisionLogs(programmer, services = null) {
   if (!programmer) {
     return;
+  }
+
+  const programmerId = String(programmer?.programmerId || "").trim();
+  const scopedKey = getEnvironmentScopedProgrammerKey(programmerId);
+  const nextSignature = buildPremiumServiceDecisionLogSignature(programmer, services);
+  if (scopedKey && nextSignature && state.premiumServiceDecisionSignatureByProgrammerKey.get(scopedKey) === nextSignature) {
+    return;
+  }
+  if (scopedKey && nextSignature) {
+    state.premiumServiceDecisionSignatureByProgrammerKey.set(scopedKey, nextSignature);
   }
 
   const mediaCompanyLabel = String(
@@ -51082,6 +51119,7 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.restV2PopupCloseProbeInFlightBySelectionKey.clear();
   state.premiumAutoRefreshMetaByKey.clear();
   state.premiumServiceReminderLogKeys.clear();
+  state.premiumServiceDecisionSignatureByProgrammerKey.clear();
   state.premiumPanelRequestToken = 0;
   state.authenticatedHydrationToken = 0;
   state.programmersLoadInFlight = false;
@@ -60994,29 +61032,12 @@ async function refreshProgrammerPanels(options = {}) {
       applicationsData,
     });
 
-    await cmSelectionBootstrapPromise;
-    if (!selectionStillCurrent()) {
-      return;
-    }
-
     let resolvedServices = await premiumHydrationPromise;
     if (!selectionStillCurrent()) {
       return;
     }
 
-    const resolvedCmService = skipCmBootstrap
-      ? cachedCmService
-      : state.cmServiceByProgrammerId.get(programmerId) || cachedCmService;
-    const resolvedCmMvpdService = skipCmBootstrap
-      ? cachedCmMvpdService
-      : cmMvpdSelectionKey
-        ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || cachedCmMvpdService
-        : cachedCmMvpdService;
-    const finalServices = updateSelectionServicesSnapshot(
-      resolvedServices,
-      resolvedCmService,
-      resolvedCmMvpdService
-    );
+    const finalServices = updateSelectionServicesSnapshot(resolvedServices, cachedCmService, cachedCmMvpdService);
     const runtimeReady = isProgrammerRuntimeServicesReady(programmerId, finalServices);
     const uiReady = shouldRenderPremiumServicesUi(programmerId, finalServices);
     if (!uiReady) {
@@ -61031,25 +61052,45 @@ async function refreshProgrammerPanels(options = {}) {
       hydrationStatus: computePersistedHydrationStatus(finalServices),
     }).catch(() => {});
 
-    const cmHydrationPromise =
-      !skipCmBootstrap && shouldShowCmService(finalServices?.cm)
-        ? ensureCmHydratedForProgrammer(programmer, finalServices, {
+    const cmSelectionReadyPromise = skipCmBootstrap
+      ? Promise.resolve(null)
+      : Promise.resolve(cmSelectionBootstrapPromise).catch(() => null);
+    const cmServicePromise = skipCmBootstrap
+      ? Promise.resolve(cachedCmService)
+      : cmSelectionReadyPromise.then(() =>
+          ensureCmServiceForProgrammer(programmer, {
             forceRefresh: forcePremiumRefresh,
-            reason: "panel-selection",
-          }).catch(() => null)
-        : Promise.resolve(null);
-    const cmServicePromise =
-      skipCmBootstrap || !shouldShowCmService(finalServices?.cm)
-        ? Promise.resolve(resolvedCmService)
-        : ensureCmServiceForProgrammer(programmer, {
-            forceRefresh: forcePremiumRefresh,
-          }).catch(() => resolvedCmService);
+          }).catch(() => state.cmServiceByProgrammerId.get(programmerId) || cachedCmService)
+        );
     const cmMvpdServicePromise =
       skipCmBootstrap || !cmMvpdSelectionKey
-        ? Promise.resolve(resolvedCmMvpdService)
-        : ensureCmServiceForSelectedMvpd(programmer, {
-            forceRefresh: forcePremiumRefresh,
-          }).catch(() => resolvedCmMvpdService);
+        ? Promise.resolve(cachedCmMvpdService)
+        : cmSelectionReadyPromise.then(() =>
+            ensureCmServiceForSelectedMvpd(programmer, {
+              forceRefresh: forcePremiumRefresh,
+            }).catch(() => state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || cachedCmMvpdService)
+          );
+    const cmHydrationPromise = Promise.allSettled([cmServicePromise, cmMvpdServicePromise]).then((cmResults) => {
+      const nextCmService = selectPreferredCmRuntimeService(
+        finalServices?.cm,
+        cmResults[0]?.status === "fulfilled" ? cmResults[0].value : cachedCmService
+      );
+      const nextCmMvpdService = selectPreferredCmRuntimeService(
+        finalServices?.cmMvpd,
+        cmResults[1]?.status === "fulfilled" ? cmResults[1].value : cachedCmMvpdService
+      );
+      if (skipCmBootstrap || !shouldShowCmService(nextCmService)) {
+        return null;
+      }
+      return ensureCmHydratedForProgrammer(
+        programmer,
+        mergeSelectionServices(finalServices, nextCmService, nextCmMvpdService),
+        {
+          forceRefresh: forcePremiumRefresh,
+          reason: "panel-selection",
+        }
+      ).catch(() => null);
+    });
 
     void Promise.allSettled([cmServicePromise, cmMvpdServicePromise, cmHydrationPromise]).then((results) => {
       if (!selectionStillCurrent()) {
@@ -63775,123 +63816,67 @@ function extractDcrAccessTokenValue(payload) {
 }
 
 async function registerClientWithSoftwareStatement(softwareStatement) {
-  const dcrDeviceInfo = buildDcrDeviceInfo();
-  const attempts = [];
+  const normalizedSoftwareStatement = String(softwareStatement || "").trim();
+  if (!normalizedSoftwareStatement) {
+    throw new Error("Registered application software statement is unavailable.");
+  }
 
-  attempts.push(async () => {
-    const response = await fetchWithRateLimitRetry(
-      () =>
-        fetch(`${ADOBE_SP_BASE}/o/client/register`, {
-          method: "POST",
-          mode: "cors",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            software_statement: softwareStatement,
-          }),
-        }),
-      "DCR JSON register (minimal)",
-      {
-        onRetry: ({ attempt, maxRetries, delayMs }) => {
-          const delaySeconds = Math.max(1, Math.ceil(delayMs / 1000));
-          setStatus(
-            `DCR registration rate-limited. Retrying in ${delaySeconds}s (${attempt}/${maxRetries})...`,
-            "info"
-          );
-        },
-      }
-    );
-
-    const text = await response.text().catch(() => "");
-    const parsed = parseJsonOrFormText(text, {});
-    if (!response.ok) {
-      const reason = normalizeHttpErrorMessage(text) || response.statusText;
-      throw new Error(`DCR JSON register minimal failed (${response.status}): ${reason}`);
-    }
-    return parsed || {};
-  });
-
-  attempts.push(async () => {
-    const response = await fetchWithRateLimitRetry(
-      () =>
-        fetch(`${ADOBE_SP_BASE}/o/client/register`, {
-          method: "POST",
-          mode: "cors",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            "X-Device-Info": dcrDeviceInfo,
-          },
-          body: JSON.stringify({
-            software_statement: softwareStatement,
-            redirect_uri: chrome.identity.getRedirectURL("ims-callback"),
-            grant_types: ["client_credentials"],
-            token_endpoint_auth_method: "client_secret_post",
-          }),
-        }),
-      "DCR JSON register",
-      {
-        onRetry: ({ attempt, maxRetries, delayMs }) => {
-          const delaySeconds = Math.max(1, Math.ceil(delayMs / 1000));
-          setStatus(
-            `DCR registration rate-limited. Retrying in ${delaySeconds}s (${attempt}/${maxRetries})...`,
-            "info"
-          );
-        },
-      }
-    );
-
-    const text = await response.text().catch(() => "");
-    const parsed = parseJsonOrFormText(text, {});
-    if (!response.ok) {
-      const reason = normalizeHttpErrorMessage(text) || response.statusText;
-      throw new Error(`DCR JSON register failed (${response.status}): ${reason}`);
-    }
-    return parsed || {};
-  });
-
-  attempts.push(async () => {
-    const body = new URLSearchParams();
-    body.set("software_statement", softwareStatement);
-    body.set("redirect_uri", chrome.identity.getRedirectURL("ims-callback"));
-    const response = await fetchWithRateLimitRetry(
-      () =>
-        fetch(`${ADOBE_SP_BASE}/o/client/register`, {
-          method: "POST",
-          mode: "cors",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-            "X-Device-Info": dcrDeviceInfo,
-          },
-          body: body.toString(),
-        }),
-      "DCR form register",
-      {
-        onRetry: ({ attempt, maxRetries, delayMs }) => {
-          const delaySeconds = Math.max(1, Math.ceil(delayMs / 1000));
-          setStatus(
-            `DCR registration rate-limited. Retrying in ${delaySeconds}s (${attempt}/${maxRetries})...`,
-            "info"
-          );
-        },
-      }
-    );
-
-    const text = await response.text().catch(() => "");
-    const parsed = parseJsonOrFormText(text, {});
-    if (!response.ok) {
-      const reason = normalizeHttpErrorMessage(text) || response.statusText;
-      throw new Error(`DCR form register failed (${response.status}): ${reason}`);
-    }
-    return parsed || {};
-  });
+  const requestUrl = `${ADOBE_SP_BASE}/o/client/register`;
+  const attempts = [
+    {
+      label: "DCR JSON register",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        software_statement: normalizedSoftwareStatement,
+        grant_types: ["client_credentials"],
+        token_endpoint_auth_method: "client_secret_post",
+      }),
+    },
+    {
+      label: "DCR form register",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        software_statement: normalizedSoftwareStatement,
+      }).toString(),
+    },
+  ];
 
   let lastError = "DCR registration failed.";
   for (const attempt of attempts) {
     try {
-      const data = await attempt();
+      const response = await fetchWithRateLimitRetry(
+        () =>
+          fetch(requestUrl, {
+            method: "POST",
+            mode: "cors",
+            headers: attempt.headers,
+            body: attempt.body,
+          }),
+        attempt.label,
+        {
+          onRetry: ({ attempt: retryAttempt, maxRetries, delayMs }) => {
+            const delaySeconds = Math.max(1, Math.ceil(delayMs / 1000));
+            setStatus(
+              `DCR registration rate-limited. Retrying in ${delaySeconds}s (${retryAttempt}/${maxRetries})...`,
+              "info"
+            );
+          },
+        }
+      );
+
+      const text = await response.text().catch(() => "");
+      const data = parseJsonOrFormText(text, {}) || {};
+      if (!response.ok) {
+        const reason = normalizeHttpErrorMessage(text) || response.statusText;
+        throw new Error(`${attempt.label} failed (${response.status}): ${reason}`);
+      }
+
       const clientId = firstNonEmptyString([
         String(data?.client_id || "").trim(),
         String(data?.clientId || "").trim(),
@@ -63925,22 +63910,9 @@ async function requestClientCredentialsToken(clientId, clientSecret, debugMeta =
   const normalizedServiceHint = normalizeScope(firstNonEmptyString([debugMeta?.service, debugMeta?.scope]));
   const strictScopeValidation = options?.strictScopeValidation === true;
   const tokenAttemptMode = options?.tokenAttemptMode === "scoped-only" ? "scoped-only" : "default";
-  const scopeAttemptOrder = [];
-  const appendScopeAttempt = (scopeValue) => {
-    const normalized = normalizeScope(scopeValue);
-    if (!normalized) {
-      return;
-    }
-    if (!scopeAttemptOrder.includes(normalized)) {
-      scopeAttemptOrder.push(normalized);
-    }
-  };
-  if (normalizedRequestedScope) {
-    appendScopeAttempt(normalizedRequestedScope);
-  }
-  if (normalizedServiceHint.includes("degradation")) {
-    DEGRADATION_SCOPE_CANDIDATES.forEach((candidate) => appendScopeAttempt(candidate));
-  }
+  const normalizedAttemptScope = normalizeScope(
+    tokenAttemptMode === "scoped-only" ? normalizedRequestedScope : normalizedRequestedScope
+  );
   const createTokenAttemptId = (transport) =>
     `token-${String(transport || "attempt")}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const emitTokenDebugEvent = (phase, details = {}) => {
@@ -63956,59 +63928,46 @@ async function requestClientCredentialsToken(clientId, clientSecret, debugMeta =
     });
   };
 
-  const attempts = [];
-  const addTokenAttempt = (transport = "query", scopeValue = "", options = {}) => {
-    const minimal = options?.minimal === true;
-    const normalizedAttemptScope = normalizeScope(scopeValue);
-    attempts.push(async () => {
-      const attemptId = createTokenAttemptId(minimal ? `${transport}-minimal` : transport);
-      const requestHeaders =
-        transport === "form"
-          ? minimal
-            ? {
-                "Content-Type": "application/x-www-form-urlencoded",
-              }
-            : {
-                "Content-Type": "application/x-www-form-urlencoded",
-                Accept: "application/json",
-              }
-          : {
-              ...(minimal ? {} : { Accept: "application/json" }),
-            };
+  const attempts = ["form", "query"];
+  let lastError = `Unable to reach ${tokenEndpointUrl}.`;
+  for (const transport of attempts) {
+    const attemptId = createTokenAttemptId(transport);
+    const requestHeaders =
+      transport === "form"
+        ? {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+          }
+        : {
+            Accept: "application/json",
+          };
+    const body = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: String(clientId || "").trim(),
+      client_secret: String(clientSecret || "").trim(),
+    });
+    if (normalizedAttemptScope) {
+      body.set("scope", normalizedAttemptScope);
+    }
 
-      let requestUrl = tokenEndpointUrl;
-      let requestBodyPreview = "";
-      if (transport === "query") {
-        const queryParams = new URLSearchParams();
-        queryParams.set("grant_type", "client_credentials");
-        queryParams.set("client_id", clientId);
-        queryParams.set("client_secret", clientSecret);
-        if (!minimal && scopeValue) {
-          queryParams.set("scope", scopeValue);
-        }
-        requestUrl = `${tokenEndpointUrl}?${queryParams.toString()}`;
-      } else {
-        const body = new URLSearchParams();
-        body.set("grant_type", "client_credentials");
-        body.set("client_id", clientId);
-        body.set("client_secret", clientSecret);
-        if (!minimal && scopeValue) {
-          body.set("scope", scopeValue);
-        }
-        requestBodyPreview = body.toString();
-      }
+    const requestBodyPreview = transport === "form" ? body.toString() : "";
+    const requestUrl = transport === "query" ? `${tokenEndpointUrl}?${body.toString()}` : tokenEndpointUrl;
 
-      emitTokenDebugEvent("token-request-attempt", {
-        attemptId,
-        transport,
-        method: "POST",
-        url: requestUrl,
-        requestHeaders,
-        requestBodyPreview,
-        oauthScope: scopeValue,
-      });
+    emitTokenDebugEvent("token-request-attempt", {
+      attemptId,
+      transport,
+      method: "POST",
+      url: requestUrl,
+      requestHeaders,
+      requestBodyPreview,
+      oauthScope: normalizedAttemptScope,
+    });
 
-      const response = await fetchWithRateLimitRetry(
+    let response;
+    let text = "";
+    let parsed = {};
+    try {
+      response = await fetchWithRateLimitRetry(
         () =>
           fetch(requestUrl, {
             method: "POST",
@@ -64027,35 +63986,27 @@ async function requestClientCredentialsToken(clientId, clientSecret, debugMeta =
           },
         }
       );
-      const text = await response.text().catch(() => "");
-      const parsed = parseJsonOrFormText(text, {});
-      if (!response.ok) {
-        const reason = normalizeHttpErrorMessage(text) || response.statusText;
-        emitTokenDebugEvent("token-request-attempt-failed", {
-          attemptId,
-          transport,
-          method: "POST",
-          url: requestUrl,
-          requestHeaders,
-          requestBodyPreview,
-          status: Number(response.status || 0),
-          statusText: String(response.statusText || ""),
-          responseHeaders: toDebugHeadersObject(response.headers),
-          responsePreview: text ? truncateDebugText(text, 4000) : "",
-          error: reason,
-          oauthScope: scopeValue,
-        });
-        throw new Error(
-          `DCR token ${transport === "form" ? "form" : "query"} failed (${response.status}): ${reason}`
-        );
-      }
-      const responseSummary = JSON.stringify({
-        token_type: String(parsed?.token_type || parsed?.tokenType || ""),
-        expires_in: Number(parsed?.expires_in || parsed?.expiresIn || 0),
-        scope: String(parsed?.scope || ""),
-        has_access_token: Boolean(extractDcrAccessTokenValue(parsed)),
+      text = await response.text().catch(() => "");
+      parsed = parseJsonOrFormText(text, {}) || {};
+    } catch (error) {
+      lastError = error?.message || String(error);
+      emitTokenDebugEvent("token-request-attempt-failed", {
+        attemptId,
+        transport,
+        method: "POST",
+        url: requestUrl,
+        requestHeaders,
+        requestBodyPreview,
+        error: lastError,
+        oauthScope: normalizedAttemptScope,
       });
-      emitTokenDebugEvent("token-request-attempt-succeeded", {
+      continue;
+    }
+
+    if (!response.ok) {
+      const reason = normalizeHttpErrorMessage(text) || response.statusText;
+      lastError = `${tokenEndpointUrl} returned ${response.status}${reason ? `: ${reason}` : ""}`;
+      emitTokenDebugEvent("token-request-attempt-failed", {
         attemptId,
         transport,
         method: "POST",
@@ -64065,87 +64016,119 @@ async function requestClientCredentialsToken(clientId, clientSecret, debugMeta =
         status: Number(response.status || 0),
         statusText: String(response.statusText || ""),
         responseHeaders: toDebugHeadersObject(response.headers),
-        responsePreview: responseSummary,
-        oauthScope: scopeValue,
+        responsePreview: text ? truncateDebugText(text, 4000) : "",
+        error: reason,
+        oauthScope: normalizedAttemptScope,
       });
-      return {
-        payload: parsed || {},
-        attemptedScope: normalizedAttemptScope,
-      };
-    });
-  };
+      continue;
+    }
 
-  if (tokenAttemptMode !== "scoped-only") {
-    scopeAttemptOrder.push("");
-    // Mirror the known-working premium flow first: form token call without scope.
-    addTokenAttempt("form", "", { minimal: true });
-  }
-  scopeAttemptOrder.forEach((scopeValue) => addTokenAttempt("query", scopeValue));
-  scopeAttemptOrder.forEach((scopeValue) => addTokenAttempt("form", scopeValue));
+    const accessToken = extractDcrAccessTokenValue(parsed);
+    if (!accessToken) {
+      lastError = "DCR token response did not return an access_token.";
+      emitTokenDebugEvent("token-request-attempt-failed", {
+        attemptId,
+        transport,
+        method: "POST",
+        url: requestUrl,
+        requestHeaders,
+        requestBodyPreview,
+        status: Number(response.status || 0),
+        statusText: String(response.statusText || ""),
+        responseHeaders: toDebugHeadersObject(response.headers),
+        responsePreview: text ? truncateDebugText(text, 4000) : "",
+        error: lastError,
+        oauthScope: normalizedAttemptScope,
+      });
+      continue;
+    }
 
-  let lastError = "Token request failed.";
-  for (const attempt of attempts) {
-    try {
-      const attemptResult = await attempt();
-      const data = attemptResult?.payload || {};
-      const attemptedScope = normalizeScope(firstNonEmptyString([attemptResult?.attemptedScope]));
-      const accessToken = extractDcrAccessTokenValue(data);
-      if (!accessToken) {
-        throw new Error("Token response missing access_token.");
+    const expiresInSeconds = Number(
+      parsed?.expires_in ||
+        parsed?.expiresIn ||
+        parsed?.token?.expires_in ||
+        parsed?.token?.expiresIn ||
+        0
+    );
+    const ttlSeconds = Number.isFinite(expiresInSeconds) && expiresInSeconds > 0 ? expiresInSeconds : 6 * 60 * 60;
+    const tokenClaims = parseJwtPayload(accessToken);
+    const tokenScope = firstNonEmptyString([
+      String(parsed?.scope || "").trim(),
+      String(parsed?.token?.scope || "").trim(),
+      String(tokenClaims?.scope || "").trim(),
+      normalizedAttemptScope,
+    ]);
+    const scopeSatisfied = tokenScopeSatisfiesRequiredScope(
+      tokenScope,
+      accessToken,
+      normalizedRequestedScope,
+      {
+        strictUnknown: strictScopeValidation,
+        requestedScopeHint: normalizedAttemptScope,
       }
-
-      const expiresInSeconds = Number(
-        data?.expires_in ||
-          data?.expiresIn ||
-          data?.token?.expires_in ||
-          data?.token?.expiresIn ||
-          0
-      );
-      const ttlSeconds = Number.isFinite(expiresInSeconds) && expiresInSeconds > 0 ? expiresInSeconds : 6 * 60 * 60;
-      const tokenClaims = parseJwtPayload(accessToken);
-      const tokenScope = firstNonEmptyString([
-        String(data?.scope || "").trim(),
-        String(data?.token?.scope || "").trim(),
-        String(tokenClaims?.scope || "").trim(),
-      ]);
-      const scopeSatisfied = tokenScopeSatisfiesRequiredScope(
-        tokenScope,
-        accessToken,
-        normalizedRequestedScope,
-        {
-          strictUnknown: strictScopeValidation,
-          requestedScopeHint: attemptedScope,
-        }
-      );
-      const allowImplicitScope = shouldAllowImplicitEsmTokenScope(
-        normalizedRequestedScope,
-        normalizedServiceHint,
-        accessToken,
-        attemptedScope
-      );
-      if (!scopeSatisfied && !allowImplicitScope) {
-        throw new Error(`Token response missing required scope "${normalizedRequestedScope}".`);
-      }
-      if (!scopeSatisfied && allowImplicitScope) {
-        emitTokenDebugEvent("token-response-implicit-esm-scope", {
-          oauthScope: tokenScope,
-          requestedScope: normalizedRequestedScope,
-          attemptedScope,
-        });
-      }
-      emitTokenDebugEvent("token-response", {
-        ttlSeconds,
+    );
+    const allowImplicitScope = shouldAllowImplicitEsmTokenScope(
+      normalizedRequestedScope,
+      normalizedServiceHint,
+      accessToken,
+      normalizedAttemptScope
+    );
+    if (!scopeSatisfied && !allowImplicitScope) {
+      lastError = `Token response missing required scope "${normalizedRequestedScope}".`;
+      emitTokenDebugEvent("token-request-attempt-failed", {
+        attemptId,
+        transport,
+        method: "POST",
+        url: requestUrl,
+        requestHeaders,
+        requestBodyPreview,
+        status: Number(response.status || 0),
+        statusText: String(response.statusText || ""),
+        responseHeaders: toDebugHeadersObject(response.headers),
+        responsePreview: text ? truncateDebugText(text, 4000) : "",
+        error: lastError,
         oauthScope: tokenScope,
       });
-      return {
-        accessToken,
-        tokenExpiresAt: Date.now() + ttlSeconds * 1000,
-        tokenScope,
-        attemptedScope,
-      };
-    } catch (error) {
-      lastError = error?.message || String(error);
+      continue;
     }
+    if (!scopeSatisfied && allowImplicitScope) {
+      emitTokenDebugEvent("token-response-implicit-esm-scope", {
+        oauthScope: tokenScope,
+        requestedScope: normalizedRequestedScope,
+        attemptedScope: normalizedAttemptScope,
+      });
+    }
+
+    const responseSummary = JSON.stringify({
+      token_type: String(parsed?.token_type || parsed?.tokenType || ""),
+      expires_in: Number(parsed?.expires_in || parsed?.expiresIn || 0),
+      scope: String(tokenScope || ""),
+      has_access_token: true,
+    });
+    emitTokenDebugEvent("token-request-attempt-succeeded", {
+      attemptId,
+      transport,
+      method: "POST",
+      url: requestUrl,
+      requestHeaders,
+      requestBodyPreview,
+      status: Number(response.status || 0),
+      statusText: String(response.statusText || ""),
+      responseHeaders: toDebugHeadersObject(response.headers),
+      responsePreview: responseSummary,
+      oauthScope: tokenScope,
+    });
+    emitTokenDebugEvent("token-response", {
+      ttlSeconds,
+      oauthScope: tokenScope,
+    });
+
+    return {
+      accessToken,
+      tokenExpiresAt: Date.now() + ttlSeconds * 1000,
+      tokenScope,
+      attemptedScope: normalizedAttemptScope,
+    };
   }
 
   emitTokenDebugEvent("token-request-failed", {
@@ -72649,6 +72632,7 @@ function resetProgrammerRuntimeState() {
   state.premiumSectionCollapsedByKey.clear();
   state.premiumAutoRefreshMetaByKey.clear();
   state.premiumServiceReminderLogKeys.clear();
+  state.premiumServiceDecisionSignatureByProgrammerKey.clear();
   state.premiumPanelRequestToken = 0;
   state.restV2PrewarmedAppsByProgrammerId.clear();
   clearRestV2PreparedLoginState();
