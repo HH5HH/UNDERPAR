@@ -35901,13 +35901,7 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
   }
   let currentServices = programmer?.programmerId ? getCurrentPremiumAppsSnapshot(programmer.programmerId) : null;
   let resolvedAppInfo = hasEsmScopedApp(currentServices) ? currentServices.esm : appInfo;
-  if (
-    programmer?.programmerId &&
-    (
-      !resolvedAppInfo?.guid ||
-      !hasPassVaultServiceClientCredentials(programmer.programmerId, resolvedAppInfo)
-    )
-  ) {
+  if (programmer?.programmerId && !resolvedAppInfo?.guid) {
     const inFlightHydration = getProgrammerServiceHydrationPromise(programmer.programmerId);
     if (inFlightHydration) {
       const hydratedServices = await inFlightHydration.catch(() => null);
@@ -35918,13 +35912,7 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
       resolvedAppInfo = hasEsmScopedApp(currentServices) ? currentServices.esm : resolvedAppInfo;
     }
   }
-  if (
-    programmer?.programmerId &&
-    (
-      !resolvedAppInfo?.guid ||
-      !hasPassVaultServiceClientCredentials(programmer.programmerId, resolvedAppInfo)
-    )
-  ) {
+  if (programmer?.programmerId && !resolvedAppInfo?.guid) {
     const hydratedServices =
       (await getProgrammerServiceHydrationPromise(programmer.programmerId)?.catch(() => null)) ||
       (await primeProgrammerServiceHydration(programmer, currentServices, {
@@ -50292,14 +50280,15 @@ async function loadDegradationService(programmer, appInfo, section, contentEleme
     return;
   }
   let currentServices = programmer?.programmerId ? getCurrentPremiumAppsSnapshot(programmer.programmerId) : null;
-  let resolvedAppInfo = appInfo;
-  if (
-    programmer?.programmerId &&
-    (
-      !resolvedAppInfo?.guid ||
-      !hasPassVaultServiceClientCredentials(programmer.programmerId, resolvedAppInfo)
-    )
-  ) {
+  let resolvedAppInfo = resolveDegradationAppCandidates(
+    String(programmer?.programmerId || "").trim(),
+    currentServices?.degradation || appInfo,
+    {
+      preferredGuid: String(appInfo?.guid || "").trim(),
+      requestorId: String(state.selectedRequestorId || "").trim(),
+    }
+  )[0] || appInfo;
+  if (programmer?.programmerId && !resolvedAppInfo?.guid) {
     const inFlightHydration = getProgrammerServiceHydrationPromise(programmer.programmerId);
     if (inFlightHydration) {
       const hydratedServices = await inFlightHydration.catch(() => null);
@@ -50319,13 +50308,7 @@ async function loadDegradationService(programmer, appInfo, section, contentEleme
       resolvedAppInfo = hydratedCandidates[0] || resolvedAppInfo;
     }
   }
-  if (
-    programmer?.programmerId &&
-    (
-      !resolvedAppInfo?.guid ||
-      !hasPassVaultServiceClientCredentials(programmer.programmerId, resolvedAppInfo)
-    )
-  ) {
+  if (programmer?.programmerId && !resolvedAppInfo?.guid) {
     const hydratedServices =
       (await getProgrammerServiceHydrationPromise(programmer.programmerId)?.catch(() => null)) ||
       (await primeProgrammerServiceHydration(programmer, currentServices, {
@@ -61041,12 +61024,15 @@ async function refreshProgrammerPanels(options = {}) {
   const cachedCmMvpdService = cmMvpdSelectionKey
     ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || provisionalServices?.cmMvpd || null
     : provisionalServices?.cmMvpd || null;
-  const reusableServices =
+  const provisionalUiServices =
     !forcePremiumRefresh &&
     provisionalServices &&
-    shouldRenderPremiumServicesUi(programmerId, provisionalServices) &&
-    !shouldForceLivePassVaultProgrammerHydration(programmerId)
+    shouldRenderPremiumServicesUi(programmerId, provisionalServices)
       ? updateSelectionServicesSnapshot(provisionalServices, cachedCmService, cachedCmMvpdService)
+      : null;
+  const reusableServices =
+    provisionalUiServices && !shouldForceLivePassVaultProgrammerHydration(programmerId)
+      ? provisionalUiServices
       : null;
   if (reusableServices) {
     clearProgrammerPremiumHydrationProgress(programmerId);
@@ -61055,11 +61041,19 @@ async function refreshProgrammerPanels(options = {}) {
     return;
   }
 
+  if (provisionalUiServices) {
+    const provisionalRuntimeReady = isProgrammerRuntimeServicesReady(programmerId, provisionalUiServices);
+    setProgrammerWorkspaceHydrationReady(programmerId, provisionalRuntimeReady);
+    renderPremiumServices(provisionalUiServices, programmer, { controllerReason });
+  }
+
   setProgrammerPremiumHydrationProgress(programmerId, {
     step: "detect",
     label: "Detecting premium services...",
   });
-  renderPremiumServicesLoading(programmer, { controllerReason });
+  if (!provisionalUiServices) {
+    renderPremiumServicesLoading(programmer, { controllerReason });
+  }
 
   try {
     const cmSelectionBootstrapPromise = skipCmBootstrap

@@ -1460,7 +1460,16 @@ test("media company selection uses cached live AdobePass apps or direct applicat
   assert.match(refreshPanelsSource, /preferredTabId:\s*retainedConsoleTabId/);
   assert.match(refreshPanelsSource, /const applicationsData = await programmerApplicationsPromise;/);
   assert.match(refreshPanelsSource, /let resolvedServices = await premiumHydrationPromise;/);
+  assert.match(refreshPanelsSource, /const provisionalUiServices =/);
   assert.match(refreshPanelsSource, /const reusableServices =/);
+  assert.match(
+    refreshPanelsSource,
+    /if \(provisionalUiServices\) \{\s*const provisionalRuntimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*provisionalUiServices\);/
+  );
+  assert.match(
+    refreshPanelsSource,
+    /if \(!provisionalUiServices\) \{\s*renderPremiumServicesLoading\(programmer,\s*\{\s*controllerReason\s*\}\);/
+  );
   assert.match(refreshPanelsSource, /const suppressAccessDeniedStatus =/);
   assert.match(refreshPanelsSource, /clearStatusUnlessCmTenantsPrecheckBlocked\(\);/);
   assert.doesNotMatch(refreshPanelsSource, /withAdobeConsolePageContextTarget\(/);
@@ -1869,7 +1878,7 @@ test("premium UI renders on detected services while runtime readiness stays DCR-
   assert.match(compileSource, /void ensureCmHydratedForProgrammer\(programmer,\s*mergedServices,\s*\{/);
   assert.doesNotMatch(compileSource, /Promise\.all\(\[\s*hydratePassVaultServiceCredentials/);
   assert.match(runtimeReadySource, /hasPassVaultCredentialCoverageForServices\(normalizedProgrammerId,\s*resolvedServices\)/);
-  assert.match(loadEsmSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*resolvedAppInfo\)/);
+  assert.match(loadEsmSource, /if \(programmer\?\.programmerId && !resolvedAppInfo\?\.guid\) \{/);
 });
 
 test("pass vault compilation uses LoginButton-style registered-app ordering, resolves selected service apps, and hydrates only the selected service apps", () => {
@@ -2064,9 +2073,17 @@ test("premium detection uses LoginButton-style app scopes plus CM tenant catalog
   assert.match(applySummarySource, /findCmTenantMatchesForProgrammer\(programmer,\s*cmCatalog\.tenants\)/);
   assert.match(applySummarySource, /PREMIUM_SERVICE_SCOPE_RULES\.forEach/);
   assert.match(applySummarySource, /syntheticSource:\s*"cm-catalog"/);
+  assert.match(refreshPanelsSource, /const provisionalUiServices =/);
   assert.match(refreshPanelsSource, /const reusableServices =/);
   assert.match(refreshPanelsSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
-  assert.match(refreshPanelsSource, /renderPremiumServicesLoading\(programmer,\s*\{\s*controllerReason\s*\}\);/);
+  assert.match(
+    refreshPanelsSource,
+    /if \(provisionalUiServices\) \{\s*const provisionalRuntimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*provisionalUiServices\);/
+  );
+  assert.match(
+    refreshPanelsSource,
+    /if \(!provisionalUiServices\) \{\s*renderPremiumServicesLoading\(programmer,\s*\{\s*controllerReason\s*\}\);/
+  );
   assert.match(refreshPanelsSource, /renderPremiumServices\(provisionalServices,\s*programmer,\s*\{\s*controllerReason\s*\}\);/);
   assert.match(refreshPanelsSource, /const cmSelectionReadyPromise = skipCmBootstrap/);
   assert.match(refreshPanelsSource, /renderPremiumServices\(finalServices,\s*programmer,\s*\{\s*controllerReason\s*\}\);/);
@@ -2141,26 +2158,29 @@ test("no-selection authenticated state tells the user to choose a Media Company 
   );
 });
 
-test("ESM and DEGRADATION panel loaders wait for ready DCR clients when the selected app is not hydrated yet", () => {
+test("ESM and DEGRADATION panel loaders mount immediately from detected apps and only fall back to hydration when no app is selected yet", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const esmSource = extractFunctionSource(popupSource, "loadEsmWorkspaceService");
   const cmSource = extractFunctionSource(popupSource, "loadCmService");
   const degradationSource = extractFunctionSource(popupSource, "loadDegradationService");
 
   assert.match(esmSource, /getProgrammerServiceHydrationPromise\(programmer\.programmerId\)/);
-  assert.match(esmSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*resolvedAppInfo\)/);
+  assert.match(esmSource, /if \(programmer\?\.programmerId && !resolvedAppInfo\?\.guid\) \{/);
   assert.match(esmSource, /const inFlightHydration = getProgrammerServiceHydrationPromise\(programmer\.programmerId\);/);
   assert.match(esmSource, /primeProgrammerServiceHydration\(programmer, currentServices/);
   assert.match(cmSource, /primeProgrammerServiceHydration\(programmer, latestServices/);
-  assert.match(degradationSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*resolvedAppInfo\)/);
+  assert.match(degradationSource, /let resolvedAppInfo = resolveDegradationAppCandidates\(/);
+  assert.match(degradationSource, /if \(programmer\?\.programmerId && !resolvedAppInfo\?\.guid\) \{/);
   assert.match(degradationSource, /const inFlightHydration = getProgrammerServiceHydrationPromise\(programmer\.programmerId\);/);
   assert.match(degradationSource, /primeProgrammerServiceHydration\(programmer, currentServices/);
+  assert.doesNotMatch(esmSource, /hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*resolvedAppInfo\)/);
+  assert.doesNotMatch(degradationSource, /hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*resolvedAppInfo\)/);
   assert.ok(
-    esmSource.indexOf("!hasPassVaultServiceClientCredentials(programmer.programmerId, resolvedAppInfo)") <
+    esmSource.indexOf("if (programmer?.programmerId && !resolvedAppInfo?.guid) {") <
       esmSource.indexOf("const inFlightHydration = getProgrammerServiceHydrationPromise(programmer.programmerId);")
   );
   assert.ok(
-    degradationSource.indexOf("!hasPassVaultServiceClientCredentials(programmer.programmerId, resolvedAppInfo)") <
+    degradationSource.indexOf("if (programmer?.programmerId && !resolvedAppInfo?.guid) {") <
       degradationSource.indexOf("const inFlightHydration = getProgrammerServiceHydrationPromise(programmer.programmerId);")
   );
 });
