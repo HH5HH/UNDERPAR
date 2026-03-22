@@ -8776,6 +8776,36 @@ function mergeUniquePremiumServiceAppInfos(...collections) {
   return merged;
 }
 
+function selectStickyPremiumServiceCandidate(candidates = [], currentApp = null, preferredApp = null, programmerId = "", options = {}) {
+  const normalizedCandidates = Array.isArray(candidates) ? candidates.filter((appInfo) => appInfo?.guid) : [];
+  if (normalizedCandidates.length === 0) {
+    return null;
+  }
+
+  const currentGuid = String(currentApp?.guid || "").trim();
+  const currentMatch =
+    currentGuid ? normalizedCandidates.find((appInfo) => String(appInfo?.guid || "").trim() === currentGuid) || null : null;
+  const normalizedRequestorId = String(options?.requestorId || "").trim();
+  if (currentMatch && !normalizedRequestorId) {
+    return currentMatch;
+  }
+
+  const preferredGuid = String(preferredApp?.guid || "").trim();
+  const preferredMatch =
+    preferredGuid
+      ? normalizedCandidates.find((appInfo) => String(appInfo?.guid || "").trim() === preferredGuid) || preferredApp
+      : null;
+  if (currentMatch && preferredMatch) {
+    const currentRank = getPassVaultServiceProvisioningRank(programmerId, currentMatch);
+    const preferredRank = getPassVaultServiceProvisioningRank(programmerId, preferredMatch);
+    if (currentRank > preferredRank) {
+      return currentMatch;
+    }
+  }
+
+  return preferredMatch || currentMatch || normalizedCandidates[0] || null;
+}
+
 function mergeDetectedPassVaultServices(programmer, services = null, applicationsSnapshot = {}, options = {}) {
   const programmerId = String(programmer?.programmerId || "").trim();
   const requestorId = String(options?.requestorId || "").trim();
@@ -8808,27 +8838,53 @@ function mergeDetectedPassVaultServices(programmer, services = null, application
     currentServices?.resetTempPassApps,
     currentServices?.resetTempPass
   );
+  const preferredRestV2 =
+    selectPreferredRestV2AppForRequestor(restV2Apps, requestorId, programmerId) || restV2Apps[0] || null;
+  const preferredEsm =
+    selectPreferredEsmAppForRequestor(esmApps, requestorId, programmerId) || esmApps[0] || null;
+  const preferredDegradation =
+    (requestorId
+      ? degradationApps.find((appInfo) => appSupportsServiceProvider(appInfo, requestorId, programmerId))
+      : null) ||
+    degradationApps[0] ||
+    null;
+  const preferredResetTempPass =
+    (requestorId
+      ? resetTempPassApps.find((appInfo) => appSupportsServiceProvider(appInfo, requestorId, programmerId))
+      : null) ||
+    resetTempPassApps[0] ||
+    null;
 
   return {
     ...currentServices,
     restV2Apps,
-    restV2: selectPreferredRestV2AppForRequestor(restV2Apps, requestorId, programmerId) || null,
+    restV2: selectStickyPremiumServiceCandidate(restV2Apps, currentServices?.restV2 || null, preferredRestV2, programmerId, {
+      requestorId,
+    }),
     esmApps,
-    esm: selectPreferredEsmAppForRequestor(esmApps, requestorId, programmerId) || null,
+    esm: selectStickyPremiumServiceCandidate(esmApps, currentServices?.esm || null, preferredEsm, programmerId, {
+      requestorId,
+    }),
     degradationApps,
-    degradation:
-      (requestorId
-        ? degradationApps.find((appInfo) => appSupportsServiceProvider(appInfo, requestorId, programmerId))
-        : null) ||
-      degradationApps[0] ||
-      null,
+    degradation: selectStickyPremiumServiceCandidate(
+      degradationApps,
+      currentServices?.degradation || null,
+      preferredDegradation,
+      programmerId,
+      {
+        requestorId,
+      }
+    ),
     resetTempPassApps,
-    resetTempPass:
-      (requestorId
-        ? resetTempPassApps.find((appInfo) => appSupportsServiceProvider(appInfo, requestorId, programmerId))
-        : null) ||
-      resetTempPassApps[0] ||
-      null,
+    resetTempPass: selectStickyPremiumServiceCandidate(
+      resetTempPassApps,
+      currentServices?.resetTempPass || null,
+      preferredResetTempPass,
+      programmerId,
+      {
+        requestorId,
+      }
+    ),
   };
 }
 
@@ -61382,6 +61438,7 @@ function normalizeRegisteredApplicationRuntimeRecord(item = null) {
     String(source?.softwareStatement || "").trim(),
     extractSoftwareStatementFromAppData(appData),
   ]);
+  const fetchOrder = Number(source?.__underparFetchOrder);
 
   return {
     ...source,
@@ -61389,6 +61446,7 @@ function normalizeRegisteredApplicationRuntimeRecord(item = null) {
     ...(appName ? { name: appName, displayName: firstNonEmptyString([source?.displayName, appName]), label: firstNonEmptyString([source?.label, appName]) } : {}),
     clientId: firstNonEmptyString([source?.clientId, source?.client_id, appData?.clientId, appData?.client_id]),
     type: firstNonEmptyString([source?.type, source?.applicationType, appData?.type, appData?.applicationType]),
+    ...(Number.isFinite(fetchOrder) && fetchOrder >= 0 ? { __underparFetchOrder: fetchOrder } : {}),
     ...(scopes.length > 0 ? { scopes } : {}),
     ...(softwareStatement ? { softwareStatement } : {}),
     appData,
@@ -62768,15 +62826,19 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
   }
 
   const byGuid = {};
-  (Array.isArray(result?.applications) ? result.applications : []).forEach((item) => {
+  (Array.isArray(result?.applications) ? result.applications : []).forEach((item, index) => {
     const guid = resolveApplicationGuidFromEntityData(item);
     if (!guid) {
       return;
     }
     byGuid[guid] =
-      normalizeRegisteredApplicationRuntimeRecord(item) || {
+      normalizeRegisteredApplicationRuntimeRecord({
+        ...(item && typeof item === "object" ? item : {}),
+        __underparFetchOrder: index,
+      }) || {
         ...(item && typeof item === "object" ? item : {}),
         id: guid,
+        __underparFetchOrder: index,
       };
   });
 
@@ -63286,25 +63348,8 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
     });
   }
 
-  const orderedEntries = [];
-  const seenGuids = new Set();
-  if (appRefsByGuid.size > 0) {
-    [...appRefsByGuid.entries()]
-      .sort((left, right) => Number(left[1]?.index || 0) - Number(right[1]?.index || 0))
-      .forEach(([guid]) => {
-        seenGuids.add(guid);
-        orderedEntries.push([guid, applicationsData?.[guid]]);
-      });
-  }
-  Object.entries(applicationsData || {}).forEach(([guid, appData]) => {
-    if (!guid || seenGuids.has(guid)) {
-      return;
-    }
-    orderedEntries.push([guid, appData]);
-  });
-
   const candidates = [];
-  for (const [guid, appData] of orderedEntries) {
+  for (const [guid, appData] of Object.entries(applicationsData || {})) {
     if (!guid || !appData || typeof appData !== "object") {
       continue;
     }
@@ -63315,8 +63360,10 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
     }
 
     const refMeta = appRefsByGuid.get(guid) || {};
+    const fetchOrder = Number(appData?.__underparFetchOrder);
     candidates.push({
       index: Number.isFinite(refMeta.index) ? refMeta.index : Number.MAX_SAFE_INTEGER,
+      fetchOrder: Number.isFinite(fetchOrder) && fetchOrder >= 0 ? fetchOrder : Number.MAX_SAFE_INTEGER,
       guid,
       appRef: refMeta.appRef || `@RegisteredApplication:${guid}`,
       appData,
@@ -63327,6 +63374,9 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
   }
 
   candidates.sort((left, right) => {
+    if (left.fetchOrder !== right.fetchOrder) {
+      return left.fetchOrder - right.fetchOrder;
+    }
     if (left.index !== right.index) {
       return left.index - right.index;
     }

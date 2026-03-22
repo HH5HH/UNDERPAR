@@ -1004,7 +1004,8 @@ test("programmer application hydration uses direct applications queries and norm
   assert.match(fetchApplicationsSource, /const cachedApplicationsAreLive =/);
   assert.match(fetchApplicationsSource, /!isPassVaultBackedValue\(cachedApplications\)/);
   assert.match(fetchApplicationsSource, /Array\.isArray\(result\?\.applications\) \? result\.applications : \[\]/);
-  assert.match(fetchApplicationsSource, /normalizeRegisteredApplicationRuntimeRecord\(item\)/);
+  assert.match(fetchApplicationsSource, /normalizeRegisteredApplicationRuntimeRecord\(\{/);
+  assert.match(fetchApplicationsSource, /__underparFetchOrder: index/);
   assert.match(fetchApplicationsSource, /setCurrentProgrammerApplicationsSnapshot\(programmerId,\s*byGuid\)/);
   assert.match(ensureApplicationsSource, /fetchApplicationsForProgrammer\(programmerId,\s*options\)/);
   assert.match(ensureApplicationsSource, /setCurrentProgrammerApplicationsSnapshot\(programmerId,\s*normalizedApplications\)/);
@@ -1875,9 +1876,12 @@ test("premium UI waits for DCR-ready selected services and pass-vault compilatio
   assert.match(loadEsmSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*resolvedAppInfo\)/);
 });
 
-test("pass vault compilation detects premium apps first, preserves detected order, and hydrates only the selected service apps", () => {
+test("pass vault compilation uses normalized registered-app order, keeps sticky selected apps, and hydrates only the selected service apps", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
+  const orderedCandidatesSource = extractFunctionSource(popupSource, "buildOrderedPremiumServiceCandidates");
   const mergeServicesSource = extractFunctionSource(popupSource, "mergeDetectedPassVaultServices");
+  const stickySelectionSource = extractFunctionSource(popupSource, "selectStickyPremiumServiceCandidate");
   const esmSelectionSource = extractFunctionSource(popupSource, "selectPreferredEsmAppForRequestor");
   const credentialTasksSource = extractFunctionSource(popupSource, "getPassVaultCredentialTasks");
   const collectCandidatesSource = extractFunctionSource(popupSource, "collectPassVaultServiceCredentialCandidates");
@@ -1886,10 +1890,20 @@ test("pass vault compilation detects premium apps first, preserves detected orde
   const resolveMappingsSource = extractFunctionSource(popupSource, "resolveMissingPassVaultServiceMappings");
   const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
 
+  assert.match(fetchApplicationsSource, /__underparFetchOrder: index/);
+  assert.match(orderedCandidatesSource, /const fetchOrder = Number\(appData\?\.__underparFetchOrder\)/);
+  assert.match(orderedCandidatesSource, /if \(left\.fetchOrder !== right\.fetchOrder\) \{/);
   assert.match(mergeServicesSource, /const detectedServices = findPremiumServiceApplications\(programmer\?\.applications \|\| \[\],\s*applicationsSnapshot/);
   assert.match(mergeServicesSource, /restV2Apps = mergeUniquePremiumServiceAppInfos\(/);
   assert.match(mergeServicesSource, /esmApps = mergeUniquePremiumServiceAppInfos\(/);
   assert.match(mergeServicesSource, /degradationApps = mergeUniquePremiumServiceAppInfos\(/);
+  assert.match(stickySelectionSource, /if \(currentMatch && !normalizedRequestorId\) \{/);
+  assert.match(stickySelectionSource, /const currentRank = getPassVaultServiceProvisioningRank\(programmerId,\s*currentMatch\)/);
+  assert.match(stickySelectionSource, /const preferredRank = getPassVaultServiceProvisioningRank\(programmerId,\s*preferredMatch\)/);
+  assert.match(mergeServicesSource, /restV2: selectStickyPremiumServiceCandidate\(/);
+  assert.match(mergeServicesSource, /esm: selectStickyPremiumServiceCandidate\(/);
+  assert.match(mergeServicesSource, /degradation: selectStickyPremiumServiceCandidate\(/);
+  assert.match(mergeServicesSource, /resetTempPass: selectStickyPremiumServiceCandidate\(/);
   assert.match(credentialTasksSource, /pushTask\("restV2",\s*services\?\.restV2\?\.guid \? \[services\.restV2\] : \[\]\)/);
   assert.match(credentialTasksSource, /pushTask\("esm",\s*services\?\.esm\?\.guid \? \[services\.esm\] : \[\]\)/);
   assert.match(credentialTasksSource, /pushTask\("degradation",\s*services\?\.degradation\?\.guid \? \[services\.degradation\] : \[\]\)/);
