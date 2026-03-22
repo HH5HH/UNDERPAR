@@ -669,13 +669,7 @@ function isProgrammerRuntimeServicesReady(programmerId = "", services = null) {
 }
 
 function shouldRenderPremiumServicesUi(programmerId = "", services = null) {
-  if (!isProgrammerPremiumUiReady(programmerId, services)) {
-    return false;
-  }
-  if (!hasDetectedDcrPremiumServices(services)) {
-    return true;
-  }
-  return isProgrammerRuntimeServicesReady(programmerId, services);
+  return isProgrammerPremiumUiReady(programmerId, services);
 }
 
 function getProgrammerServiceHydrationPromise(
@@ -757,7 +751,9 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
       selectedProgrammerId === programmerId &&
       requestToken === Number(state.premiumPanelRequestToken || 0)
     ) {
-      setProgrammerWorkspaceHydrationReady(programmerId, true);
+      if (runtimeReady) {
+        setProgrammerWorkspaceHydrationReady(programmerId, true);
+      }
       emitPremiumServiceDecisionLogs(programmer, runtimeServices);
       renderPremiumServices(runtimeServices, programmer, { controllerReason });
     }
@@ -60505,10 +60501,11 @@ async function refreshProgrammerPanels(options = {}) {
   const applySelectionServicesSnapshot = (baseServices = null, nextCmService = null, nextCmMvpdService = null, options = {}) => {
     const resolvedServices = summarizeSelectionServices(baseServices, nextCmService, nextCmMvpdService);
     setCurrentPremiumAppsSnapshot(programmer.programmerId, resolvedServices);
+    const runtimeReady = isProgrammerRuntimeServicesReady(programmer.programmerId, resolvedServices);
     const uiReady = shouldRenderPremiumServicesUi(programmer.programmerId, resolvedServices);
     const shouldMarkHydrated =
       options.markHydrated === true ||
-      (options.markHydrated !== false && uiReady);
+      (options.markHydrated !== false && runtimeReady);
     if (shouldMarkHydrated) {
       setProgrammerWorkspaceHydrationReady(programmer.programmerId, true);
     }
@@ -60753,7 +60750,7 @@ async function refreshProgrammerPanels(options = {}) {
         setStatus(message, "error");
       }
       emitPremiumServiceDecisionLogs(programmer, provisionalServices);
-      if (isProgrammerRuntimeServicesReady(programmer.programmerId, provisionalServices)) {
+      if (shouldRenderPremiumServicesUi(programmer.programmerId, provisionalServices)) {
         renderPremiumServices(provisionalServices, programmer, { controllerReason });
       } else {
         renderPremiumServicesError(error, { controllerReason });
