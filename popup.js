@@ -61277,6 +61277,36 @@ function extractSoftwareStatementFromAppData(appData) {
   return fallbackCandidate || "";
 }
 
+function extractSoftwareStatementFromText(text = "") {
+  const normalizedText = String(text || "").trim();
+  if (!normalizedText) {
+    return "";
+  }
+
+  if (isProbablyJwt(normalizedText)) {
+    return normalizedText;
+  }
+
+  try {
+    const parsed = JSON.parse(normalizedText);
+    if (parsed && typeof parsed === "object") {
+      const extracted = extractSoftwareStatementFromAppData(parsed);
+      if (extracted) {
+        return extracted;
+      }
+      const dereferenced = extractJwtAndUrls(parsed);
+      if (dereferenced.jwt && dereferenced.jwtScore > 0) {
+        return dereferenced.jwt;
+      }
+    }
+  } catch {
+    // Fall through to direct token extraction.
+  }
+
+  const match = normalizedText.match(/[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/);
+  return match && isProbablyJwt(match[0]) ? match[0] : "";
+}
+
 function normalizeApplicationsResponse(payload) {
   const normalizeEntity = (item) => {
     const entity = item?.entityData || item;
@@ -61364,6 +61394,19 @@ function normalizeRegisteredApplicationRuntimeRecord(item = null) {
     ...(softwareStatement ? { softwareStatement } : {}),
     appData,
   };
+}
+
+function getRegisteredApplicationSortLabel(appData = null) {
+  return firstNonEmptyString([
+    appData?.name,
+    appData?.displayName,
+    appData?.label,
+    appData?.appData?.name,
+    appData?.appData?.displayName,
+    appData?.appData?.label,
+    appData?.guid,
+    appData?.id,
+  ]);
 }
 
 function getAdobeConsoleRequestHeaders(accessToken = "") {
@@ -62638,9 +62681,9 @@ async function fetchSoftwareStatementForAppGuid(guid, options = {}) {
           continue;
         }
         const content = await response.text();
-        const match = String(content || "").match(/[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/);
-        if (match && isProbablyJwt(match[0])) {
-          return match[0];
+        const candidateStatement = extractSoftwareStatementFromText(content);
+        if (candidateStatement) {
+          return candidateStatement;
         }
       } catch {
         // Ignore dereference errors and continue.
@@ -62648,15 +62691,9 @@ async function fetchSoftwareStatementForAppGuid(guid, options = {}) {
     }
   }
 
-  const rawText = String(rawPayload?.text || "").trim();
-  if (isProbablyJwt(rawText)) {
-    return rawText;
-  }
-  if (/software/i.test(rawText) && /statement/i.test(rawText)) {
-    const rawTextMatch = rawText.match(/[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/);
-    if (rawTextMatch && isProbablyJwt(rawTextMatch[0])) {
-      return rawTextMatch[0];
-    }
+  const rawTextStatement = extractSoftwareStatementFromText(rawPayload?.text || "");
+  if (rawTextStatement) {
+    return rawTextStatement;
   }
 
   return "";
@@ -63251,16 +63288,6 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
     return [];
   }
 
-  const appRefsByGuid = new Map();
-  if (Array.isArray(applicationsArray)) {
-    applicationsArray.forEach((appRef, index) => {
-      const guid = extractApplicationGuid(appRef);
-      if (guid && !appRefsByGuid.has(guid)) {
-        appRefsByGuid.set(guid, { index, appRef });
-      }
-    });
-  }
-
   const candidates = [];
   for (const [guid, appData] of Object.entries(applicationsData || {})) {
     if (!guid || !appData || typeof appData !== "object") {
@@ -63271,14 +63298,9 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
     if (scopes.length === 0) {
       continue;
     }
-
-    const refMeta = appRefsByGuid.get(guid) || {};
-    const fetchOrder = Number(appData?.__underparFetchOrder);
     candidates.push({
-      index: Number.isFinite(refMeta.index) ? refMeta.index : Number.MAX_SAFE_INTEGER,
-      fetchOrder: Number.isFinite(fetchOrder) && fetchOrder >= 0 ? fetchOrder : Number.MAX_SAFE_INTEGER,
       guid,
-      appRef: refMeta.appRef || `@RegisteredApplication:${guid}`,
+      appRef: `@RegisteredApplication:${guid}`,
       appData,
       appName: appData.name || appData.displayName || guid,
       scopes,
@@ -63287,13 +63309,15 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
   }
 
   candidates.sort((left, right) => {
-    if (left.fetchOrder !== right.fetchOrder) {
-      return left.fetchOrder - right.fetchOrder;
+    const leftLabel = firstNonEmptyString([getRegisteredApplicationSortLabel(left.appData), left.appName, left.guid]);
+    const rightLabel = firstNonEmptyString([getRegisteredApplicationSortLabel(right.appData), right.appName, right.guid]);
+    const labelComparison = leftLabel.localeCompare(rightLabel, undefined, {
+      sensitivity: "base",
+    });
+    if (labelComparison !== 0) {
+      return labelComparison;
     }
-    if (left.index !== right.index) {
-      return left.index - right.index;
-    }
-    return String(left.appName || left.guid).localeCompare(String(right.appName || right.guid), undefined, {
+    return String(left.guid || "").localeCompare(String(right.guid || ""), undefined, {
       sensitivity: "base",
     });
   });

@@ -1890,10 +1890,11 @@ test("premium UI waits for DCR-ready selected services and pass-vault compilatio
   assert.match(loadEsmSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*resolvedAppInfo\)/);
 });
 
-test("pass vault compilation uses normalized registered-app order, resolves selected service apps, and hydrates only the selected service apps", () => {
+test("pass vault compilation uses LoginButton-style registered-app ordering, resolves selected service apps, and hydrates only the selected service apps", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
   const orderedCandidatesSource = extractFunctionSource(popupSource, "buildOrderedPremiumServiceCandidates");
+  const sortLabelSource = extractFunctionSource(popupSource, "getRegisteredApplicationSortLabel");
   const mergeServicesSource = extractFunctionSource(popupSource, "mergeDetectedPassVaultServices");
   const resolvedSelectionSource = extractFunctionSource(popupSource, "selectResolvedPremiumServiceCandidate");
   const esmSelectionSource = extractFunctionSource(popupSource, "selectPreferredEsmAppForRequestor");
@@ -1903,10 +1904,17 @@ test("pass vault compilation uses normalized registered-app order, resolves sele
   const hydrateCredentialsSource = extractFunctionSource(popupSource, "hydratePassVaultServiceCredentials");
   const resolveMappingsSource = extractFunctionSource(popupSource, "resolveMissingPassVaultServiceMappings");
   const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
+  const statementTextSource = extractFunctionSource(popupSource, "extractSoftwareStatementFromText");
+  const fetchStatementSource = extractFunctionSource(popupSource, "fetchSoftwareStatementForAppGuid");
 
   assert.match(fetchApplicationsSource, /__underparFetchOrder: index/);
-  assert.match(orderedCandidatesSource, /const fetchOrder = Number\(appData\?\.__underparFetchOrder\)/);
-  assert.match(orderedCandidatesSource, /if \(left\.fetchOrder !== right\.fetchOrder\) \{/);
+  assert.match(sortLabelSource, /return firstNonEmptyString\(\[/);
+  assert.doesNotMatch(orderedCandidatesSource, /const fetchOrder = Number\(appData\?\.__underparFetchOrder\)/);
+  assert.doesNotMatch(orderedCandidatesSource, /if \(left\.fetchOrder !== right\.fetchOrder\) \{/);
+  assert.doesNotMatch(orderedCandidatesSource, /if \(left\.index !== right\.index\) \{/);
+  assert.match(orderedCandidatesSource, /const leftLabel = firstNonEmptyString\(\[getRegisteredApplicationSortLabel\(left\.appData\), left\.appName, left\.guid\]\)/);
+  assert.match(orderedCandidatesSource, /const rightLabel = firstNonEmptyString\(\[getRegisteredApplicationSortLabel\(right\.appData\), right\.appName, right\.guid\]\)/);
+  assert.match(orderedCandidatesSource, /const labelComparison = leftLabel\.localeCompare\(rightLabel, undefined, \{/);
   assert.match(mergeServicesSource, /const detectedServices = findPremiumServiceApplications\(programmer\?\.applications \|\| \[\],\s*applicationsSnapshot/);
   assert.match(mergeServicesSource, /restV2Apps = mergeUniquePremiumServiceAppInfos\(/);
   assert.match(mergeServicesSource, /esmApps = mergeUniquePremiumServiceAppInfos\(/);
@@ -1936,6 +1944,9 @@ test("pass vault compilation uses normalized registered-app order, resolves sele
   assert.match(compileSource, /setProgrammerPremiumHydrationProgress\(programmerId,\s*\{\s*step:\s*"detect"/);
   assert.match(compileSource, /label:\s*"Saving premium services to VAULT\.\.\."/);
   assert.match(compileSource, /const firstFailure =/);
+  assert.match(statementTextSource, /const parsed = JSON\.parse\(normalizedText\)/);
+  assert.match(fetchStatementSource, /const candidateStatement = extractSoftwareStatementFromText\(content\);/);
+  assert.match(fetchStatementSource, /const rawTextStatement = extractSoftwareStatementFromText\(rawPayload\?\.text \|\| ""\);/);
 });
 
 test("premium services reuse the mounted DOM when the selected service signature has not changed", () => {
