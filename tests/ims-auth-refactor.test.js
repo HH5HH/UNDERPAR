@@ -1000,6 +1000,7 @@ test("programmer application hydration uses direct applications queries and norm
   const fetchRegisteredApplicationsSource = extractFunctionSource(popupSource, "fetchProgrammerRegisteredApplications");
   const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
   const ensureApplicationsSource = extractFunctionSource(popupSource, "ensureSelectedProgrammerApplicationsLoaded");
+  const detectionScopesSource = extractFunctionSource(popupSource, "getDetectionScopesFromApplication");
   const normalizeRuntimeRecordSource = extractFunctionSource(popupSource, "normalizeRegisteredApplicationRuntimeRecord");
 
   assert.match(fetchRegisteredApplicationsSource, /Registered Applications request is missing console context\./);
@@ -1018,8 +1019,10 @@ test("programmer application hydration uses direct applications queries and norm
   assert.match(ensureApplicationsSource, /fetchApplicationsForProgrammer\(programmerId,\s*options\)/);
   assert.match(ensureApplicationsSource, /setCurrentProgrammerApplicationsSnapshot\(programmerId,\s*normalizedApplications\)/);
   assert.match(ensureApplicationsSource, /state\.programmerApplicationsLoadPromiseByProgrammerId\.set\(programmerId,\s*loadPromise\)/);
+  assert.match(detectionScopesSource, /return getExplicitScopesFromApplication\(appData\);/);
   assert.match(normalizeRuntimeRecordSource, /const appData = \{/);
-  assert.match(normalizeRuntimeRecordSource, /getScopesFromApplication\(appData\)/);
+  assert.match(normalizeRuntimeRecordSource, /getDetectionScopesFromApplication\(appData\)/);
+  assert.doesNotMatch(normalizeRuntimeRecordSource, /getScopesFromApplication\(appData\)/);
   assert.match(normalizeRuntimeRecordSource, /extractSoftwareStatementFromAppData\(appData\)/);
   assert.doesNotMatch(fetchApplicationsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback\(urlCandidates,\s*"Applications load"/);
   assert.doesNotMatch(fetchApplicationsSource, /buildRegisteredApplicationBulkRetrieveRequest/);
@@ -1896,7 +1899,6 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   const orderedCandidatesSource = extractFunctionSource(popupSource, "buildOrderedPremiumServiceCandidates");
   const sortLabelSource = extractFunctionSource(popupSource, "getRegisteredApplicationSortLabel");
   const mergeServicesSource = extractFunctionSource(popupSource, "mergeDetectedPassVaultServices");
-  const resolvedSelectionSource = extractFunctionSource(popupSource, "selectResolvedPremiumServiceCandidate");
   const esmSelectionSource = extractFunctionSource(popupSource, "selectPreferredEsmAppForRequestor");
   const credentialTasksSource = extractFunctionSource(popupSource, "getPassVaultCredentialTasks");
   const collectCandidatesSource = extractFunctionSource(popupSource, "collectPassVaultServiceCredentialCandidates");
@@ -1916,17 +1918,14 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(orderedCandidatesSource, /const rightLabel = firstNonEmptyString\(\[getRegisteredApplicationSortLabel\(right\.appData\), right\.appName, right\.guid\]\)/);
   assert.match(orderedCandidatesSource, /const labelComparison = leftLabel\.localeCompare\(rightLabel, undefined, \{/);
   assert.match(mergeServicesSource, /const detectedServices = findPremiumServiceApplications\(programmer\?\.applications \|\| \[\],\s*applicationsSnapshot/);
-  assert.match(mergeServicesSource, /restV2Apps = mergeUniquePremiumServiceAppInfos\(/);
-  assert.match(mergeServicesSource, /esmApps = mergeUniquePremiumServiceAppInfos\(/);
-  assert.match(mergeServicesSource, /degradationApps = mergeUniquePremiumServiceAppInfos\(/);
-  assert.doesNotMatch(resolvedSelectionSource, /normalizedRequestorId/);
-  assert.doesNotMatch(resolvedSelectionSource, /const currentRank = getPassVaultServiceProvisioningRank/);
-  assert.doesNotMatch(resolvedSelectionSource, /const preferredRank = getPassVaultServiceProvisioningRank/);
-  assert.match(resolvedSelectionSource, /return preferredMatch \|\| currentMatch \|\| normalizedCandidates\[0\] \|\| null;/);
-  assert.match(mergeServicesSource, /restV2: selectResolvedPremiumServiceCandidate\(/);
-  assert.match(mergeServicesSource, /esm: selectResolvedPremiumServiceCandidate\(/);
-  assert.match(mergeServicesSource, /degradation: selectResolvedPremiumServiceCandidate\(/);
-  assert.match(mergeServicesSource, /resetTempPass: selectResolvedPremiumServiceCandidate\(/);
+  assert.match(mergeServicesSource, /restV2Apps = mergeUniquePremiumServiceAppInfos\(detectedServices\?\.restV2Apps,\s*detectedServices\?\.restV2\)/);
+  assert.match(mergeServicesSource, /esmApps = mergeUniquePremiumServiceAppInfos\(detectedServices\?\.esmApps,\s*detectedServices\?\.esm\)/);
+  assert.match(mergeServicesSource, /degradationApps = mergeUniquePremiumServiceAppInfos\(detectedServices\?\.degradationApps,\s*detectedServices\?\.degradation\)/);
+  assert.match(mergeServicesSource, /resetTempPassApps = mergeUniquePremiumServiceAppInfos\(/);
+  assert.match(mergeServicesSource, /restV2:\s*restV2Apps\[0\] \|\| null,/);
+  assert.match(mergeServicesSource, /esm:\s*esmApps\[0\] \|\| null,/);
+  assert.match(mergeServicesSource, /degradation:\s*degradationApps\[0\] \|\| null,/);
+  assert.match(mergeServicesSource, /resetTempPass:\s*resetTempPassApps\[0\] \|\| null,/);
   assert.match(credentialTasksSource, /pushTask\("restV2",\s*services\?\.restV2\?\.guid \? \[services\.restV2\] : \[\]\)/);
   assert.match(credentialTasksSource, /pushTask\("esm",\s*services\?\.esm\?\.guid \? \[services\.esm\] : \[\]\)/);
   assert.match(credentialTasksSource, /pushTask\("degradation",\s*services\?\.degradation\?\.guid \? \[services\.degradation\] : \[\]\)/);

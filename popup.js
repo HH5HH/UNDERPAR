@@ -6134,7 +6134,7 @@ function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackNam
     String(fallbackName || "").trim(),
     String(guid || "").trim(),
   ]);
-  const scopes = getScopesFromApplication(source);
+  const scopes = getDetectionScopesFromApplication(source);
   const claimServiceProviders = collectPassVaultServiceProviderHintsFromAppData(source);
   const serviceProviders = sanitizePassVaultHintList(
     source?.serviceProviders,
@@ -6311,7 +6311,7 @@ function compactPassVaultRegisteredApplications(registeredApplicationsByGuid = {
       ]),
       scopes: uniqueSorted(
         (Array.isArray(rawApplicationRecord?.scopes) ? rawApplicationRecord.scopes : []).concat(
-          getScopesFromApplication(sanitizedApplicationData)
+          getDetectionScopesFromApplication(sanitizedApplicationData)
         )
       ),
       serviceKeys: uniqueSorted(Array.isArray(rawApplicationRecord?.serviceKeys) ? rawApplicationRecord.serviceKeys : []),
@@ -6354,7 +6354,9 @@ function buildPassVaultRuntimeAppInfoFromRecord(record = null, guid = "", applic
     )
   );
   const scopes = uniqueSorted(
-    (Array.isArray(applicationRecord?.scopes) ? applicationRecord.scopes : []).concat(getScopesFromApplication(appData))
+    (Array.isArray(applicationRecord?.scopes) ? applicationRecord.scopes : []).concat(
+      getDetectionScopesFromApplication(appData)
+    )
   );
   return {
     guid: normalizedGuid,
@@ -6553,7 +6555,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
       ]),
       scopes: uniqueSorted(
         (Array.isArray(rawApplicationRecord?.scopes) ? rawApplicationRecord.scopes : []).concat(
-          getScopesFromApplication(sanitizedApplicationData)
+          getDetectionScopesFromApplication(sanitizedApplicationData)
         )
       ),
       serviceKeys: derivedServiceKeys,
@@ -7368,7 +7370,9 @@ function buildPassVaultApplicationRecord(programmerId = "", guid = "", appData =
       normalizedGuid,
     ]),
     scopes: uniqueSorted(
-      (Array.isArray(existingRecord?.scopes) ? existingRecord.scopes : []).concat(getScopesFromApplication(normalizedAppData))
+      (Array.isArray(existingRecord?.scopes) ? existingRecord.scopes : []).concat(
+        getDetectionScopesFromApplication(normalizedAppData)
+      )
     ),
     serviceKeys: uniqueSorted(derivedServiceKeys),
     dcrCache: normalizeUnderparVaultDcrCache(loadDcrCache(programmerId, normalizedGuid) || existingRecord?.dcrCache || null),
@@ -8800,55 +8804,24 @@ function mergeDetectedPassVaultServices(programmer, services = null, application
     programmerId,
   });
   const currentServices = services && typeof services === "object" ? services : {};
-  const restV2Apps = mergeUniquePremiumServiceAppInfos(
-    detectedServices?.restV2Apps,
-    detectedServices?.restV2,
-    currentServices?.restV2Apps,
-    currentServices?.restV2
-  );
-  const esmApps = mergeUniquePremiumServiceAppInfos(
-    detectedServices?.esmApps,
-    detectedServices?.esm,
-    currentServices?.esmApps,
-    currentServices?.esm
-  );
-  const degradationApps = mergeUniquePremiumServiceAppInfos(
-    detectedServices?.degradationApps,
-    detectedServices?.degradation,
-    currentServices?.degradationApps,
-    currentServices?.degradation
-  );
+  const restV2Apps = mergeUniquePremiumServiceAppInfos(detectedServices?.restV2Apps, detectedServices?.restV2);
+  const esmApps = mergeUniquePremiumServiceAppInfos(detectedServices?.esmApps, detectedServices?.esm);
+  const degradationApps = mergeUniquePremiumServiceAppInfos(detectedServices?.degradationApps, detectedServices?.degradation);
   const resetTempPassApps = mergeUniquePremiumServiceAppInfos(
     detectedServices?.resetTempPassApps,
-    detectedServices?.resetTempPass,
-    currentServices?.resetTempPassApps,
-    currentServices?.resetTempPass
+    detectedServices?.resetTempPass
   );
-  const preferredRestV2 = restV2Apps[0] || null;
-  const preferredEsm = esmApps[0] || null;
-  const preferredDegradation = degradationApps[0] || null;
-  const preferredResetTempPass = resetTempPassApps[0] || null;
 
   return {
     ...currentServices,
     restV2Apps,
-    restV2: selectResolvedPremiumServiceCandidate(restV2Apps, currentServices?.restV2 || null, preferredRestV2, programmerId),
+    restV2: restV2Apps[0] || null,
     esmApps,
-    esm: selectResolvedPremiumServiceCandidate(esmApps, currentServices?.esm || null, preferredEsm, programmerId),
+    esm: esmApps[0] || null,
     degradationApps,
-    degradation: selectResolvedPremiumServiceCandidate(
-      degradationApps,
-      currentServices?.degradation || null,
-      preferredDegradation,
-      programmerId
-    ),
+    degradation: degradationApps[0] || null,
     resetTempPassApps,
-    resetTempPass: selectResolvedPremiumServiceCandidate(
-      resetTempPassApps,
-      currentServices?.resetTempPass || null,
-      preferredResetTempPass,
-      programmerId
-    ),
+    resetTempPass: resetTempPassApps[0] || null,
   };
 }
 
@@ -61058,6 +61031,14 @@ function getExplicitScopesFromApplication(appData) {
   return Array.from(new Set(rawCandidates.map((scope) => normalizeScope(scope)).filter(Boolean)));
 }
 
+function getDetectionScopesFromApplication(appData) {
+  if (!appData || typeof appData !== "object") {
+    return [];
+  }
+
+  return getExplicitScopesFromApplication(appData);
+}
+
 function collectKnownScopeMatchesFromSerializedValue(value, target = new Set(), seenObjects = new Set()) {
   if (value == null) {
     return target;
@@ -61375,7 +61356,7 @@ function normalizeRegisteredApplicationRuntimeRecord(item = null) {
     guid ? `Registered Application ${guid}` : "",
   ]);
   const scopes = uniqueSorted(
-    (Array.isArray(source?.scopes) ? source.scopes : []).concat(getScopesFromApplication(appData))
+    (Array.isArray(source?.scopes) ? source.scopes : []).concat(getDetectionScopesFromApplication(appData))
   );
   const softwareStatement = firstNonEmptyString([
     String(source?.softwareStatement || "").trim(),
