@@ -683,13 +683,7 @@ function isProgrammerRuntimeServicesReady(programmerId = "", services = null) {
 }
 
 function shouldRenderPremiumServicesUi(programmerId = "", services = null) {
-  if (!isProgrammerPremiumUiReady(programmerId, services)) {
-    return false;
-  }
-  if (!hasDetectedDcrPremiumServices(services)) {
-    return true;
-  }
-  return isProgrammerRuntimeServicesReady(programmerId, services);
+  return isProgrammerPremiumUiReady(programmerId, services);
 }
 
 function getProgrammerServiceHydrationPromise(
@@ -61080,6 +61074,34 @@ async function refreshProgrammerPanels(options = {}) {
     }
 
     setCurrentProgrammerApplicationsSnapshot(programmerId, applicationsData);
+    const existingRecord = getPassVaultMediaCompanyRecord(programmerId);
+    const registeredApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
+    provisionalServices = updateSelectionServicesSnapshot(
+      buildPassVaultDirectPremiumServicesSnapshot(
+        programmer,
+        registeredApplications,
+        buildPassVaultServiceHydrationEntries({
+          programmer,
+          registeredApplications,
+          existingRecord,
+        }),
+        {
+          cmServiceSnapshot: cachedCmService,
+          cmMvpdServiceSnapshot: cachedCmMvpdService,
+          cmMvpdSelectionKey,
+        }
+      ),
+      cachedCmService,
+      cachedCmMvpdService
+    );
+    if (!selectionStillCurrent()) {
+      return;
+    }
+
+    const provisionalRuntimeReady = isProgrammerRuntimeServicesReady(programmerId, provisionalServices);
+    setProgrammerWorkspaceHydrationReady(programmerId, provisionalRuntimeReady);
+    renderPremiumServices(provisionalServices, programmer, { controllerReason });
+
     const premiumHydrationPromise = primeProgrammerServiceHydration(programmer, provisionalServices, {
       forceRefresh: forcePremiumRefresh,
       controllerReason: controllerReason || "panel-selection",
