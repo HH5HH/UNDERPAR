@@ -669,7 +669,13 @@ function isProgrammerRuntimeServicesReady(programmerId = "", services = null) {
 }
 
 function shouldRenderPremiumServicesUi(programmerId = "", services = null) {
-  return isProgrammerPremiumUiReady(programmerId, services);
+  if (!isProgrammerPremiumUiReady(programmerId, services)) {
+    return false;
+  }
+  if (!hasDetectedDcrPremiumServices(services)) {
+    return true;
+  }
+  return isProgrammerRuntimeServicesReady(programmerId, services);
 }
 
 function getProgrammerServiceHydrationPromise(
@@ -8197,9 +8203,9 @@ function getPassVaultCredentialTasks(programmerId = "", services = null) {
     });
   };
 
-  pushTask("restV2", collectPassVaultServiceCredentialCandidates(programmerId, "restV2", services));
-  pushTask("esm", collectPassVaultServiceCredentialCandidates(programmerId, "esm", services));
-  pushTask("degradation", collectPassVaultServiceCredentialCandidates(programmerId, "degradation", services));
+  pushTask("restV2", services?.restV2?.guid ? [services.restV2] : []);
+  pushTask("esm", services?.esm?.guid ? [services.esm] : []);
+  pushTask("degradation", services?.degradation?.guid ? [services.degradation] : []);
   return tasks;
 }
 
@@ -62922,8 +62928,20 @@ function hasResolvedRequiredPremiumServices(services = null, requiredKeys = PREM
 }
 
 function hasProvisionablePremiumServiceCandidate(programmerId = "", serviceKey = "", services = null) {
-  const candidates = collectPassVaultServiceCredentialCandidates(programmerId, serviceKey, services);
-  return candidates.some((appInfo) => getPassVaultServiceProvisioningRank(programmerId, appInfo) >= 2);
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  if (!services || typeof services !== "object" || !normalizedServiceKey) {
+    return false;
+  }
+
+  const selectedApp =
+    normalizedServiceKey === "restV2"
+      ? services?.restV2 || null
+      : normalizedServiceKey === "esm"
+        ? services?.esm || null
+        : normalizedServiceKey === "degradation"
+          ? services?.degradation || null
+          : null;
+  return getPassVaultServiceProvisioningRank(programmerId, selectedApp) >= 2;
 }
 
 function getMissingProvisionablePremiumServiceKeys(
@@ -62961,6 +62979,23 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
       : PREMIUM_REQUIRED_SERVICE_KEYS;
   const stopWhenResolved = options.stopWhenResolved === true;
   const stopWhenProvisionable = options.stopWhenProvisionable === true;
+  const currentDetectedServices = findPremiumServiceApplications(programmer.applications || [], byGuid);
+  const selectedProvisioningGuids = new Set(
+    requiredServiceKeys
+      .map((serviceKey) => {
+        if (serviceKey === "restV2") {
+          return String(currentDetectedServices?.restV2?.guid || "").trim();
+        }
+        if (serviceKey === "esm") {
+          return String(currentDetectedServices?.esm?.guid || "").trim();
+        }
+        if (serviceKey === "degradation") {
+          return String(currentDetectedServices?.degradation?.guid || "").trim();
+        }
+        return "";
+      })
+      .filter(Boolean)
+  );
 
   const guidOrder = getProgrammerRegisteredApplicationGuids(programmer, byGuid);
   if (guidOrder.length === 0) {
@@ -62978,10 +63013,14 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
     const hydratedAt = Number(current?.__underparScopeHydratedAt || 0);
     const alreadyHydrated = hydratedAt > 0;
     const isFreshHydration = alreadyHydrated && now - hydratedAt < retryAfterMs;
-    if (!forceRefresh && currentScopes.length > 0) {
+    const needsProvisioningHydration =
+      stopWhenProvisionable &&
+      selectedProvisioningGuids.has(guid) &&
+      getPassVaultServiceProvisioningRank(programmerId, current) < 2;
+    if (!forceRefresh && currentScopes.length > 0 && !needsProvisioningHydration) {
       continue;
     }
-    if (!forceRefresh && isFreshHydration) {
+    if (!forceRefresh && isFreshHydration && !needsProvisioningHydration) {
       continue;
     }
     pendingGuids.push(guid);
@@ -63074,7 +63113,11 @@ async function hydrateApplicationScopesForProgrammer(programmer, applicationsDat
     }
 
     let scopes = getScopesFromApplication(merged);
-    if (scopes.length === 0) {
+    const needsProvisioningHydration =
+      stopWhenProvisionable &&
+      selectedProvisioningGuids.has(guid) &&
+      getPassVaultServiceProvisioningRank(programmerId, merged) < 2;
+    if (scopes.length === 0 || needsProvisioningHydration) {
       try {
         const softwareStatement = await withTimeout(() =>
           fetchSoftwareStatementForAppGuid(guid, {

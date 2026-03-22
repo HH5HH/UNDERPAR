@@ -1826,8 +1826,14 @@ test("live premium app loading performs bounded scope hydration until missing DC
   const ensurePremiumAppsSource = extractFunctionSource(popupSource, "ensurePremiumAppsForProgrammer");
   const hydrateScopesSource = extractFunctionSource(popupSource, "hydrateApplicationScopesForProgrammer");
   const missingProvisionableSource = extractFunctionSource(popupSource, "getMissingProvisionablePremiumServiceKeys");
+  const provisionableCandidateSource = extractFunctionSource(popupSource, "hasProvisionablePremiumServiceCandidate");
 
   assert.match(missingProvisionableSource, /hasProvisionablePremiumServiceCandidate\(programmerId,\s*key,\s*services\)/);
+  assert.match(provisionableCandidateSource, /normalizedServiceKey === "restV2"/);
+  assert.match(provisionableCandidateSource, /services\?\.restV2 \|\| null/);
+  assert.match(provisionableCandidateSource, /services\?\.esm \|\| null/);
+  assert.match(provisionableCandidateSource, /services\?\.degradation \|\| null/);
+  assert.doesNotMatch(provisionableCandidateSource, /collectPassVaultServiceCredentialCandidates/);
   assert.match(ensurePremiumAppsSource, /const ensureProvisionablePremiumServices = async/);
   assert.match(
     ensurePremiumAppsSource,
@@ -1839,12 +1845,17 @@ test("live premium app loading performs bounded scope hydration until missing DC
   assert.match(ensurePremiumAppsSource, /stopWhenProvisionable:\s*true/);
   assert.match(ensurePremiumAppsSource, /phase:\s*"premium-service-provisioning-hydration-complete"/);
   assert.match(hydrateScopesSource, /const stopWhenProvisionable = options\.stopWhenProvisionable === true;/);
+  assert.match(hydrateScopesSource, /const selectedProvisioningGuids = new Set/);
+  assert.match(hydrateScopesSource, /const needsProvisioningHydration =/);
+  assert.match(hydrateScopesSource, /selectedProvisioningGuids\.has\(guid\)/);
+  assert.match(hydrateScopesSource, /isFreshHydration && !needsProvisioningHydration/);
+  assert.match(hydrateScopesSource, /if \(scopes\.length === 0 \|\| needsProvisioningHydration\)/);
   assert.match(hydrateScopesSource, /hasProvisionableRequiredPremiumServices\(/);
   assert.match(hydrateScopesSource, /stopWhenProvisionable,/);
   assert.match(hydrateScopesSource, /provisioningSatisfied,/);
 });
 
-test("premium UI renders on detected services while pass-vault compilation still returns before CM background hydration", () => {
+test("premium UI waits for DCR-ready selected services and pass-vault compilation still returns before CM background hydration", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const renderReadinessSource = extractFunctionSource(popupSource, "shouldRenderPremiumServicesUi");
   const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
@@ -1852,7 +1863,8 @@ test("premium UI renders on detected services while pass-vault compilation still
   const loadEsmSource = extractFunctionSource(popupSource, "loadEsmWorkspaceService");
   const runtimeReadySource = extractFunctionSource(popupSource, "isProgrammerRuntimeServicesReady");
 
-  assert.match(renderReadinessSource, /return isProgrammerPremiumUiReady\(programmerId,\s*services\);/);
+  assert.match(renderReadinessSource, /hasDetectedDcrPremiumServices\(services\)/);
+  assert.match(renderReadinessSource, /return isProgrammerRuntimeServicesReady\(programmerId,\s*services\);/);
   assert.match(refreshPanelsSource, /const uiReady = shouldRenderPremiumServicesUi\(programmer\.programmerId,\s*resolvedServices\);/);
   assert.match(refreshPanelsSource, /const provisionalUiReady = shouldRenderPremiumServicesUi\(programmer\.programmerId,\s*provisionalServices\);/);
   assert.match(refreshPanelsSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmer\.programmerId,\s*resolvedServices\);/);
@@ -1863,7 +1875,7 @@ test("premium UI renders on detected services while pass-vault compilation still
   assert.match(loadEsmSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*resolvedAppInfo\)/);
 });
 
-test("pass vault compilation detects premium apps first, preserves detected order, and hydrates only the selected service candidates", () => {
+test("pass vault compilation detects premium apps first, preserves detected order, and hydrates only the selected service apps", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const mergeServicesSource = extractFunctionSource(popupSource, "mergeDetectedPassVaultServices");
   const esmSelectionSource = extractFunctionSource(popupSource, "selectPreferredEsmAppForRequestor");
@@ -1878,9 +1890,9 @@ test("pass vault compilation detects premium apps first, preserves detected orde
   assert.match(mergeServicesSource, /restV2Apps = mergeUniquePremiumServiceAppInfos\(/);
   assert.match(mergeServicesSource, /esmApps = mergeUniquePremiumServiceAppInfos\(/);
   assert.match(mergeServicesSource, /degradationApps = mergeUniquePremiumServiceAppInfos\(/);
-  assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"restV2",\s*services\)/);
-  assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"esm",\s*services\)/);
-  assert.match(credentialTasksSource, /collectPassVaultServiceCredentialCandidates\(programmerId,\s*"degradation",\s*services\)/);
+  assert.match(credentialTasksSource, /pushTask\("restV2",\s*services\?\.restV2\?\.guid \? \[services\.restV2\] : \[\]\)/);
+  assert.match(credentialTasksSource, /pushTask\("esm",\s*services\?\.esm\?\.guid \? \[services\.esm\] : \[\]\)/);
+  assert.match(credentialTasksSource, /pushTask\("degradation",\s*services\?\.degradation\?\.guid \? \[services\.degradation\] : \[\]\)/);
   assert.doesNotMatch(collectCandidatesSource, /getPassVaultServiceProvisioningRank/);
   assert.match(collectCandidatesSource, /services\.restV2Apps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
   assert.match(collectCandidatesSource, /services\.esmApps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
@@ -2035,7 +2047,8 @@ test("premium runtime readiness still depends on DCR-ready premium apps while UI
   const loadingSource = extractFunctionSource(popupSource, "renderPremiumServicesLoading");
 
   assert.match(runtimeReadySource, /hasPassVaultCredentialCoverageForServices\(normalizedProgrammerId,\s*resolvedServices\)/);
-  assert.match(renderReadySource, /return isProgrammerPremiumUiReady\(programmerId,\s*services\);/);
+  assert.match(renderReadySource, /hasDetectedDcrPremiumServices\(services\)/);
+  assert.match(renderReadySource, /return isProgrammerRuntimeServicesReady\(programmerId,\s*services\);/);
   assert.match(progressSource, /!shouldRenderPremiumServicesUi\(String\(programmerId \|\| ""\)\.trim\(\), getCurrentPremiumAppsSnapshot\(programmerId\)\)/);
   assert.match(primeSource, /if \(runtimeReady\) \{\s*setProgrammerWorkspaceHydrationReady\(programmerId,\s*true\);/);
   assert.doesNotMatch(runtimeReadySource, /isCmRuntimeRenderReady/);
@@ -2043,7 +2056,7 @@ test("premium runtime readiness still depends on DCR-ready premium apps while UI
   assert.doesNotMatch(loadingSource, /detailLines/);
 });
 
-test("premium panel rendering no longer waits for DCR-ready services but still keeps workspace hydration tied to runtime readiness", () => {
+test("premium panel rendering waits for DCR-ready services and keeps workspace hydration tied to runtime readiness", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const primeSource = extractFunctionSource(popupSource, "primeProgrammerServiceHydration");
   const refreshSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
