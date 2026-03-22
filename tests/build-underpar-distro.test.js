@@ -75,18 +75,18 @@ test("distribution build emits the canonical latest archive and folder name", (t
   assert.equal(packageMetadata.version, "1.0.0");
   assert.equal(packageMetadata.version_name, "1.0.0");
   assert.equal(packageMetadata.package_path, "underpar_distro.zip");
-  assert.equal(packageMetadata.archive_manifest_path, "underpar-distro/manifest.json");
+  assert.equal(packageMetadata.archive_manifest_path, "underpar_distro/manifest.json");
   assert.ok(archiveEntries.length > 0);
   assert.ok(
-    archiveEntries.every((entry) => entry === "underpar-distro/" || entry.startsWith("underpar-distro/"))
+    archiveEntries.every((entry) => entry === "underpar_distro/" || entry.startsWith("underpar_distro/"))
   );
-  assert.ok(archiveEntries.includes("underpar-distro/manifest.json"));
-  assert.ok(archiveEntries.includes("underpar-distro/background.js"));
-  assert.ok(!archiveEntries.includes("underpar-distro/underpar_distro.version.json"));
-  assert.ok(!archiveEntries.includes("underpar-distro/AGENTS.md"));
-  assert.ok(!archiveEntries.includes("underpar-distro/.githooks/pre-commit"));
-  assert.ok(!archiveEntries.includes("underpar-distro/scripts/build_underpar_distro.sh"));
-  assert.ok(!archiveEntries.includes("underpar-distro/tests/noop.test.js"));
+  assert.ok(archiveEntries.includes("underpar_distro/manifest.json"));
+  assert.ok(archiveEntries.includes("underpar_distro/background.js"));
+  assert.ok(!archiveEntries.includes("underpar_distro/underpar_distro.version.json"));
+  assert.ok(!archiveEntries.includes("underpar_distro/AGENTS.md"));
+  assert.ok(!archiveEntries.includes("underpar_distro/.githooks/pre-commit"));
+  assert.ok(!archiveEntries.includes("underpar_distro/scripts/build_underpar_distro.sh"));
+  assert.ok(!archiveEntries.includes("underpar_distro/tests/noop.test.js"));
 });
 
 test("distribution build packages staged tracked files even when the worktree copy is missing", (t) => {
@@ -117,10 +117,10 @@ test("distribution build packages staged tracked files even when the worktree co
     .trim()
     .split(/\n+/)
     .filter(Boolean);
-  const backgroundSource = runCommand("unzip", ["-p", artifactPath, "underpar-distro/background.js"], repoDir);
+  const backgroundSource = runCommand("unzip", ["-p", artifactPath, "underpar_distro/background.js"], repoDir);
   const packageMetadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
 
-  assert.ok(archiveEntries.includes("underpar-distro/background.js"));
+  assert.ok(archiveEntries.includes("underpar_distro/background.js"));
   assert.equal(backgroundSource, 'console.log("underpar");\n');
   assert.equal(packageMetadata.version, "1.0.0");
 });
@@ -150,8 +150,8 @@ test("distribution build prefers current tracked worktree content over stale ind
   fs.writeFileSync(path.join(repoDir, "manifest.json"), '{ "version": "1.0.2" }\n');
 
   runCommand("bash", ["scripts/build_underpar_distro.sh"], repoDir);
-  const packagedManifest = runCommand("unzip", ["-p", artifactPath, "underpar-distro/manifest.json"], repoDir);
-  const packagedBackground = runCommand("unzip", ["-p", artifactPath, "underpar-distro/background.js"], repoDir);
+  const packagedManifest = runCommand("unzip", ["-p", artifactPath, "underpar_distro/manifest.json"], repoDir);
+  const packagedBackground = runCommand("unzip", ["-p", artifactPath, "underpar_distro/background.js"], repoDir);
   const packageMetadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
 
   assert.equal(packagedManifest, '{ "version": "1.0.2" }\n');

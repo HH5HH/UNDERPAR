@@ -5,8 +5,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output_path="$repo_root/underpar_distro.zip"
 metadata_path="$repo_root/underpar_distro.version.json"
-archive_root_name="underpar-distro"
-staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/underpar-distro.XXXXXX")"
+archive_root_name="underpar_distro"
+staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/underpar_distro.XXXXXX")"
 
 cleanup() {
   rm -rf "$staging_dir"
@@ -34,8 +34,8 @@ const metadata = {
   version,
   version_name: versionName,
   package_path: "underpar_distro.zip",
-  archive_root: "underpar-distro",
-  archive_manifest_path: "underpar-distro/manifest.json",
+  archive_root: "underpar_distro",
+  archive_manifest_path: "underpar_distro/manifest.json",
 };
 
 fs.writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);

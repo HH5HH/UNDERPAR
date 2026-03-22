@@ -11,7 +11,7 @@ cd "$ROOT"
 MANIFEST_PATH="manifest.json"
 PACKAGE_PATH="underpar_distro.zip"
 PACKAGE_METADATA_PATH="underpar_distro.version.json"
-PACKAGE_ARCHIVE_MANIFEST_PATH="underpar-distro/manifest.json"
+PACKAGE_ARCHIVE_MANIFEST_PATH="underpar_distro/manifest.json"
 
 usage() {
   cat <<USAGE

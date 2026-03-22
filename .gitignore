@@ -1,0 +1,3 @@
+.DS_Store
+ups/data/*.json
+!ups/data/.gitkeep

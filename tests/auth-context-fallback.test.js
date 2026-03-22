@@ -92,6 +92,9 @@ function loadAuthHelpers(seed = {}) {
   const script = [
     "const state = globalThis.__seed.state || {};",
     "const getPreferredPrimaryImsAccessTokenCandidate = globalThis.__seed.getPreferredPrimaryImsAccessTokenCandidate || (() => '');",
+    "function resolveCachedOrganizationsFromLoginData(loginData = {}) { return Array.isArray(loginData?.organizations) ? loginData.organizations : []; }",
+    "function buildRestrictedOrganizationContext() { return { options: [], activeOrganization: null }; }",
+    "function extractVerifiedCustomerOrganizationClaim(loginData = {}) { return loginData && loginData.verifiedClaim && typeof loginData.verifiedClaim === 'object' ? loginData.verifiedClaim : { id: '', rawId: '', source: 'unavailable' }; }",
     extractFunctionSource(source, "parseJsonText"),
     extractFunctionSource(source, "decodeBase64UrlText"),
     extractLastFunctionSource(source, "parseJwtPayload"),
@@ -151,14 +154,12 @@ test("session completeness accepts IMS auth identifiers when profile email field
     imsSession: {
       userId: "FC74713E66B412C20A495FE9@7ad01f61631c04d0495ef7.e",
       authId: "F10A3319554D1E107F000101@adobe.com",
+      orgId: "wfadoberm",
+      orgName: "Workfront AdobeRM",
     },
     sessionKeys: {
       userId: "FC74713E66B412C20A495FE9@7ad01f61631c04d0495ef7.e",
       authId: "F10A3319554D1E107F000101@adobe.com",
-    },
-    adobePassOrg: {
-      orgId: "@adobepass",
-      name: "@AdobePass",
     },
   };
 
@@ -181,14 +182,12 @@ test("session completeness accepts authId-only principal without profile name or
     imsSession: {
       authId: "F10A3319554D1E107F000101@adobe.com",
       sessionId: "ims-session-1",
+      orgId: "wfadoberm",
+      orgName: "Workfront AdobeRM",
     },
     sessionKeys: {
       authId: "F10A3319554D1E107F000101@adobe.com",
       sessionId: "ims-session-1",
-    },
-    adobePassOrg: {
-      orgId: "@adobepass",
-      name: "@AdobePass",
     },
   };
 
@@ -257,13 +256,11 @@ test("login auth context prefers authId as principal and keeps org/session ident
       tokenId: "ims-token-456",
       clientId: "AdobePass1",
       scope: "openid,AdobeID",
+      orgId: "wfadoberm",
+      orgName: "Workfront AdobeRM",
     },
     sessionKeys: {
       accessTokenFingerprint: "fingerprint-123",
-    },
-    adobePassOrg: {
-      orgId: "@adobepass",
-      name: "@AdobePass",
     },
     expiresAt: 1770000000000,
   };
@@ -274,8 +271,8 @@ test("login auth context prefers authId as principal and keeps org/session ident
   assert.equal(authContext.authId, "F10A3319554D1E107F000101@adobe.com");
   assert.equal(authContext.userId, "FC74713E66B412C20A495FE9@7ad01f61631c04d0495ef7.e");
   assert.equal(authContext.displayName, "Bishwajit Choudhary");
-  assert.equal(authContext.orgId, "@adobepass");
-  assert.equal(authContext.orgName, "@AdobePass");
+  assert.equal(authContext.orgId, "wfadoberm");
+  assert.equal(authContext.orgName, "Workfront AdobeRM");
   assert.equal(authContext.sessionId, "ims-session-123");
   assert.equal(authContext.tokenId, "ims-token-456");
   assert.equal(authContext.clientId, "AdobePass1");
