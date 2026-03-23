@@ -54319,17 +54319,12 @@ function createHrContextSection(programmer, sectionKey, services = null, options
   const toggleButton = section.querySelector(".service-box-header");
   const container = section.querySelector(".service-box-container");
   if (detailsElement && toggleButton && container) {
-    const syncOpenState = () => {
-      const collapsed = detailsElement.open !== true;
-      toggleButton.classList.toggle("collapsed", collapsed);
-      toggleButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      container.classList.toggle("collapsed", collapsed);
-      container.hidden = collapsed;
-      container.setAttribute("aria-hidden", collapsed ? "true" : "false");
+    const syncOpenState = (collapsed) => {
+      detailsElement.open = collapsed !== true;
       setPremiumSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
     };
-    detailsElement.addEventListener("toggle", syncOpenState);
-    syncOpenState();
+    wireCollapsibleSection(toggleButton, container, initialCollapsed, syncOpenState);
+    syncOpenState(initialCollapsed);
   }
 
   return section;

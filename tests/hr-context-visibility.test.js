@@ -127,6 +127,7 @@ test("HR context reveals only when the selected media company has detected premi
 test("sidepanel seeds the HR context container hidden and popup runtime uses unlabeled top and bottom separators", () => {
   const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const createHrContextSectionSource = extractFunctionSource(popupSource, "createHrContextSection");
 
   assert.match(sidepanelHtml, /id="hr-services-container"\s+class="hr-services-container"\s+hidden/);
   assert.match(popupSource, /topDivider\.className = "hr-context-divider"/);
@@ -134,6 +135,9 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.doesNotMatch(popupSource, /hr-context-divider-label/);
   assert.doesNotMatch(popupSource, />HR</);
   assert.doesNotMatch(popupSource, /textContent = "- HR -"/);
+  assert.match(createHrContextSectionSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed, syncOpenState\)/);
+  assert.match(createHrContextSectionSource, /detailsElement\.open = collapsed !== true/);
+  assert.doesNotMatch(createHrContextSectionSource, /detailsElement\.addEventListener\("toggle"/);
 });
 
 test("detected service pills are wired to documentation urls for the learning flow", () => {
