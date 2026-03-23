@@ -135,11 +135,15 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.doesNotMatch(popupSource, /hr-context-divider-label/);
   assert.doesNotMatch(popupSource, />HR</);
   assert.doesNotMatch(popupSource, /textContent = "- HR -"/);
-  assert.match(createHrContextSectionSource, /<button\s+type="button"/);
-  assert.match(createHrContextSectionSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed,/);
+  assert.match(createHrContextSectionSource, /class="metadata-header service-box-header hr-context-static-header"/);
+  assert.doesNotMatch(createHrContextSectionSource, /<button\s+type="button"/);
+  assert.doesNotMatch(createHrContextSectionSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed,/);
   assert.doesNotMatch(createHrContextSectionSource, /<details class="service-box-details"/);
   assert.doesNotMatch(createHrContextSectionSource, /detailsElement\.open = collapsed !== true/);
   assert.doesNotMatch(createHrContextSectionSource, /detailsElement\.addEventListener\("toggle"/);
+  assert.match(createHrContextSectionSource, /<div class="metadata-container service-box-container">/);
+  assert.doesNotMatch(createHrContextSectionSource, /service-box-container collapsed/);
+  assert.doesNotMatch(createHrContextSectionSource, /service-box-container" hidden/);
   assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
   assert.match(popupSource, /if \(handleCollapsibleToggleEvent\(event\)\) \{\s*return;\s*\}/);
   assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
@@ -217,7 +221,13 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(openRestV2InteractiveDocsEntrySource, /hydrateRestV2InteractiveDocsTab/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /document\.getElementById\(`operation\/\$\{operationId\}`\)/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /\[data-cy="try-it"\]/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /\[data-cy="send-button"\]/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /"resend"/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /element\?\.CodeMirror/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /CodeMirror\.setValue/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /formatEditorBodyValue/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /normalizedFieldName === "body\.SAMLResponse"/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /normalizedFieldName === "body\.resources"/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /querySelector\("textarea"\)/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry/);
   assert.match(popupCss, /\.hr-rest-v2-docs-grid/);
@@ -322,6 +332,9 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   );
   assert.equal(resumeSessionPlan.fieldValues["path.code"], "session-code-123");
   assert.equal(resumeSessionPlan.fieldValues["header.Content-Type"], "application/x-www-form-urlencoded");
+  assert.equal(resumeSessionPlan.fieldValues["body.mvpd"], "Comcast_SSO");
+  assert.equal(resumeSessionPlan.fieldValues["body.domainName"], "experience.example.test");
+  assert.equal(resumeSessionPlan.fieldValues["body.redirectUrl"], "https://experience.example.test/callback");
 
   const sessionStatusPlan = buildRestV2InteractiveDocsHydrationPlan(
     {

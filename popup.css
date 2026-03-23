@@ -2355,6 +2355,11 @@ select:disabled {
   background: var(--service-header-gradient);
 }
 
+.hr-context-section .metadata-header.service-box-header.hr-context-static-header {
+  padding-right: 14px;
+  cursor: default;
+}
+
 .premium-service-section .service-box-details,
 .hr-context-section .service-box-details {
   display: block;

@@ -53957,6 +53957,44 @@ async function openPremiumServiceDocumentation(serviceKey = "", requestedUrl = "
 
 async function runRestV2InteractiveDocsHydrator(config = {}) {
   const normalize = (value) => String(value || "").trim();
+  const formatEditorBodyValue = (fieldName, rawValue) => {
+    const normalizedFieldName = normalize(fieldName);
+    if (normalizedFieldName === "body.resources") {
+      const resources = Array.isArray(rawValue)
+        ? rawValue.map((item) => String(item || "").trim()).filter(Boolean)
+        : [String(rawValue || "").trim()].filter(Boolean);
+      return JSON.stringify({ resources }, null, 2);
+    }
+    if (normalizedFieldName === "body.SAMLResponse") {
+      return JSON.stringify({ SAMLResponse: String(rawValue ?? "") }, null, 2);
+    }
+    if (Array.isArray(rawValue) || (rawValue && typeof rawValue === "object")) {
+      return JSON.stringify(rawValue, null, 2);
+    }
+    return String(rawValue ?? "");
+  };
+  const findActionButton = (scope, matchers = []) => {
+    if (!scope) {
+      return null;
+    }
+    const buttons = Array.from(scope.querySelectorAll("button"));
+    return (
+      buttons.find((button) =>
+        matchers.some((matcher) => {
+          if (typeof matcher === "string") {
+            return normalize(button.textContent).toLowerCase() === matcher;
+          }
+          if (matcher instanceof RegExp) {
+            return matcher.test(normalize(button.textContent));
+          }
+          if (typeof matcher === "function") {
+            return matcher(button);
+          }
+          return false;
+        })
+      ) || null
+    );
+  };
   const sleepFor = (ms = 0) =>
     new Promise((resolve) => {
       window.setTimeout(resolve, Math.max(0, Number(ms || 0)));
@@ -53972,9 +54010,18 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     }
     return null;
   };
-  const setElementValue = (element, rawValue) => {
+  const setElementValue = (element, rawValue, fieldName = "") => {
     if (!element) {
       return false;
+    }
+    if (element?.CodeMirror && typeof element.CodeMirror.setValue === "function") {
+      element.CodeMirror.setValue(formatEditorBodyValue(fieldName, rawValue));
+      if (typeof element.CodeMirror.save === "function") {
+        element.CodeMirror.save();
+      }
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
     }
     if (element instanceof HTMLSelectElement) {
       const targetValue = normalize(rawValue);
@@ -54041,10 +54088,14 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       return byName;
     }
     if (normalizedFieldName === "body.resources") {
-      return operation.querySelector("textarea");
+      return operation.querySelector(".CodeMirror") || operation.querySelector("textarea");
     }
     if (normalizedFieldName === "body.SAMLResponse") {
-      return operation.querySelector("textarea") || operation.querySelector('input[type="text"], input:not([type])');
+      return (
+        operation.querySelector(".CodeMirror") ||
+        operation.querySelector("textarea") ||
+        operation.querySelector('input[type="text"], input:not([type])')
+      );
     }
     return null;
   };
@@ -54076,9 +54127,7 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
   });
   await sleepFor(200);
 
-  const requestButton = Array.from(operationElement.querySelectorAll("button")).find(
-    (button) => normalize(button.textContent).toLowerCase() === "request"
-  );
+  const requestButton = findActionButton(operationElement, ["request", "edit request"]);
   if (requestButton) {
     requestButton.click();
     await sleepFor(80);
@@ -54092,9 +54141,8 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
   const sendButton =
     (await waitFor(
       () =>
-        Array.from(operationElement.querySelectorAll("button")).find(
-          (button) => normalize(button.textContent).toLowerCase() === "send"
-        ) || null,
+        operationElement.querySelector('[data-cy="send-button"]') ||
+        findActionButton(operationElement, ["send", "resend"]),
       config?.timeoutMs || 18000,
       140
     )) || null;
@@ -54108,7 +54156,7 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       missingControls.push(fieldName);
       continue;
     }
-    if (setElementValue(control, rawValue)) {
+    if (setElementValue(control, rawValue, fieldName)) {
       filledFields.push(fieldName);
     } else {
       missingControls.push(fieldName);
@@ -54294,33 +54342,22 @@ function createHrContextSection(programmer, sectionKey, services = null, options
   const title = HR_CONTEXT_SECTION_TITLE_BY_KEY[sectionKey] || String(sectionKey || "").trim().toUpperCase();
   const context = getHrContextSummary(programmer);
   const hoverMessage = `${title} guidance for ${context.compositeLabel}`;
-  const initialCollapsed = getPremiumSectionCollapsed(programmer?.programmerId, sectionKey);
   const section = document.createElement("article");
   section.className = `metadata-section hr-context-section hr-context-section--${sectionKey}`;
   section.innerHTML = `
-    <button
-      type="button"
-      class="metadata-header service-box-header"
+    <div
+      class="metadata-header service-box-header hr-context-static-header"
       title="${escapeHtml(hoverMessage)}"
       aria-label="${escapeHtml(hoverMessage)}"
     >
       <span>${escapeHtml(title)}</span>
-      <span class="collapse-icon">▼</span>
-    </button>
+    </div>
     <div class="metadata-container service-box-container">
       <div class="hr-context-content">
         ${buildHrContextSectionBodyHtml(sectionKey, programmer, services, options)}
       </div>
     </div>
   `;
-
-  const toggleButton = section.querySelector(".service-box-header");
-  const container = section.querySelector(".service-box-container");
-  if (toggleButton && container) {
-    wireCollapsibleSection(toggleButton, container, initialCollapsed, (collapsed) => {
-      setPremiumSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
-    });
-  }
 
   return section;
 }
