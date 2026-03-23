@@ -54378,39 +54378,41 @@ function createHrContextSection(programmer, sectionKey, services = null, options
   const section = document.createElement("article");
   section.className = `metadata-section hr-context-section hr-context-section--${sectionKey}`;
   const initialCollapsed = getHrContextSectionCollapsed(programmer?.programmerId, sectionKey);
+  const sectionBodyId = `hr-context-${String(programmer?.programmerId || "__global__")
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi, "-")}-${String(sectionKey || "")
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi, "-")}-body`;
   section.innerHTML = `
-    <details class="service-box-details"${initialCollapsed ? "" : " open"}>
-      <summary
-        class="metadata-header service-box-header"
-        title="${escapeHtml(hoverMessage)}"
-        aria-label="${escapeHtml(hoverMessage)}"
-      >
-        <span>${escapeHtml(title)}</span>
-        <span class="collapse-icon">▼</span>
-      </summary>
-      <div class="metadata-container service-box-container">
-        <div class="hr-context-content">
-          ${buildHrContextSectionBodyHtml(sectionKey, programmer, services, options)}
-        </div>
+    <button
+      type="button"
+      class="metadata-header service-box-header"
+      title="${escapeHtml(hoverMessage)}"
+      aria-label="${escapeHtml(hoverMessage)}"
+      aria-controls="${escapeHtml(sectionBodyId)}"
+      aria-expanded="${initialCollapsed ? "false" : "true"}"
+    >
+      <span>${escapeHtml(title)}</span>
+      <span class="collapse-icon">▼</span>
+    </button>
+    <div
+      id="${escapeHtml(sectionBodyId)}"
+      class="metadata-container service-box-container${initialCollapsed ? " collapsed" : ""}"
+      ${initialCollapsed ? "hidden" : ""}
+      aria-hidden="${initialCollapsed ? "true" : "false"}"
+    >
+      <div class="hr-context-content">
+        ${buildHrContextSectionBodyHtml(sectionKey, programmer, services, options)}
       </div>
-    </details>
+    </div>
   `;
 
-  const detailsElement = section.querySelector(".service-box-details");
   const toggleButton = section.querySelector(".service-box-header");
   const container = section.querySelector(".service-box-container");
-  if (detailsElement && toggleButton && container) {
-    const syncOpenState = () => {
-      const collapsed = detailsElement.open !== true;
-      toggleButton.classList.toggle("collapsed", collapsed);
-      toggleButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      container.classList.toggle("collapsed", collapsed);
-      container.hidden = collapsed;
-      container.setAttribute("aria-hidden", collapsed ? "true" : "false");
+  if (toggleButton && container) {
+    wireCollapsibleSection(toggleButton, container, initialCollapsed, (collapsed) => {
       setHrContextSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
-    };
-    detailsElement.addEventListener("toggle", syncOpenState);
-    syncOpenState();
+    });
   }
 
   return section;

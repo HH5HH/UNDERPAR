@@ -160,11 +160,10 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.doesNotMatch(popupSource, /hr-context-divider-label/);
   assert.doesNotMatch(popupSource, />HR</);
   assert.doesNotMatch(popupSource, /textContent = "- HR -"/);
-  assert.match(createHrContextSectionSource, /<details class="service-box-details"/);
-  assert.match(createHrContextSectionSource, /<summary\s+class="metadata-header service-box-header"/);
+  assert.match(createHrContextSectionSource, /<button\s+type="button"\s+class="metadata-header service-box-header"/);
+  assert.match(createHrContextSectionSource, /aria-controls="\$\{escapeHtml\(sectionBodyId\)\}"/);
   assert.match(createHrContextSectionSource, /<span class="collapse-icon">▼<\/span>/);
-  assert.doesNotMatch(createHrContextSectionSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed,/);
-  assert.match(createHrContextSectionSource, /detailsElement\.addEventListener\("toggle", syncOpenState\)/);
+  assert.match(createHrContextSectionSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed, \(collapsed\) => \{/);
   assert.match(createHrContextSectionSource, /setHrContextSectionCollapsed\(programmer\?\.programmerId, sectionKey, collapsed\)/);
   assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
   assert.match(popupSource, /if \(handleCollapsibleToggleEvent\(event\)\) \{\s*return;\s*\}/);
