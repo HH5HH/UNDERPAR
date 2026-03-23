@@ -8797,6 +8797,28 @@ function buildPassVaultDirectCredentialResults(hydratedServiceEntries = {}) {
   }).filter((result) => String(result?.appGuid || "").trim());
 }
 
+function getPassVaultCredentialResultsForServiceKeys(
+  credentialResults = [],
+  serviceKeys = PREMIUM_REQUIRED_SERVICE_KEYS
+) {
+  const requestedServiceKeys = new Set(
+    (Array.isArray(serviceKeys) && serviceKeys.length > 0 ? serviceKeys : PREMIUM_REQUIRED_SERVICE_KEYS)
+      .map((serviceKey) => String(serviceKey || "").trim())
+      .filter(Boolean)
+  );
+  if (requestedServiceKeys.size === 0) {
+    return [];
+  }
+  return (Array.isArray(credentialResults) ? credentialResults : []).filter((result) =>
+    requestedServiceKeys.has(String(result?.serviceKey || "").trim())
+  );
+}
+
+function passVaultCredentialResultHasClientCredentials(result = null) {
+  const cache = normalizeUnderparVaultDcrCache(result?.cache || null);
+  return Boolean(cache?.clientId && cache?.clientSecret);
+}
+
 function getPassVaultCredentialTasks(programmerId = "", services = null) {
   const tasks = [];
   const seen = new Set();
@@ -9581,15 +9603,13 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       skipped: true,
       error: "",
     };
-    const failedCount = credentialResults.filter((result) => {
-      const cache = normalizeUnderparVaultDcrCache(result?.cache || null);
-      return !(cache?.clientId && cache?.clientSecret);
-    }).length;
+    const blockingCredentialResults = getPassVaultCredentialResultsForServiceKeys(
+      credentialResults,
+      PREMIUM_REQUIRED_SERVICE_KEYS
+    );
+    const failedCount = blockingCredentialResults.filter((result) => !passVaultCredentialResultHasClientCredentials(result)).length;
     const firstFailure =
-      credentialResults.find((result) => {
-        const cache = normalizeUnderparVaultDcrCache(result?.cache || null);
-        return !(cache?.clientId && cache?.clientSecret);
-      }) || null;
+      blockingCredentialResults.find((result) => !passVaultCredentialResultHasClientCredentials(result)) || null;
     const credentialWarningCount = credentialResults.filter((result) => String(result?.error || "").trim()).length;
     const warningCount = credentialWarningCount;
     const hydrationStatus = failedCount > 0 ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_COMPLETE;
@@ -63109,6 +63129,7 @@ async function refreshProgrammerPanels(options = {}) {
   if (reusableServices) {
     clearProgrammerPremiumHydrationProgress(programmerId);
     setProgrammerWorkspaceHydrationReady(programmerId, true);
+    clearStatusUnlessCmTenantsPrecheckBlocked();
     renderPremiumServices(reusableServices, programmer, { controllerReason });
     return;
   }
@@ -63191,6 +63212,7 @@ async function refreshProgrammerPanels(options = {}) {
 
     clearProgrammerPremiumHydrationProgress(programmerId);
     setProgrammerWorkspaceHydrationReady(programmerId, runtimeReady);
+    clearStatusUnlessCmTenantsPrecheckBlocked();
     renderPremiumServices(finalServices, programmer, { controllerReason });
     void persistPassVaultProgrammerRecord(programmer, finalServices, {
       source: "live",

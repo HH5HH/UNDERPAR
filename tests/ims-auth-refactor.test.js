@@ -2188,6 +2188,35 @@ test("premium panel rendering unlocks on detected services and keeps workspace h
   assert.match(compileSource, /void ensureCmHydratedForProgrammer\(programmer,\s*mergedServices,\s*\{/);
 });
 
+test("optional TempPASS credential misses stay non-blocking and successful panel hydration clears stale top-level status", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
+  const refreshSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+  const credentialFilterSource = extractFunctionSource(popupSource, "getPassVaultCredentialResultsForServiceKeys");
+  const credentialReadySource = extractFunctionSource(popupSource, "passVaultCredentialResultHasClientCredentials");
+
+  assert.match(
+    compileSource,
+    /const blockingCredentialResults = getPassVaultCredentialResultsForServiceKeys\(\s*credentialResults,\s*PREMIUM_REQUIRED_SERVICE_KEYS\s*\);/
+  );
+  assert.match(compileSource, /const failedCount = blockingCredentialResults\.filter\(\(result\) => !passVaultCredentialResultHasClientCredentials\(result\)\)\.length;/);
+  assert.match(
+    compileSource,
+    /const firstFailure =\s*blockingCredentialResults\.find\(\(result\) => !passVaultCredentialResultHasClientCredentials\(result\)\) \|\| null;/
+  );
+  assert.doesNotMatch(compileSource, /const failedCount = credentialResults\.filter/);
+  assert.match(
+    credentialFilterSource,
+    /const requestedServiceKeys = new Set\(\s*\(Array\.isArray\(serviceKeys\) && serviceKeys\.length > 0 \? serviceKeys : PREMIUM_REQUIRED_SERVICE_KEYS\)/
+  );
+  assert.match(credentialReadySource, /const cache = normalizeUnderparVaultDcrCache\(result\?\.cache \|\| null\);/);
+  assert.match(refreshSource, /if \(reusableServices\) \{[\s\S]*clearStatusUnlessCmTenantsPrecheckBlocked\(\);[\s\S]*renderPremiumServices\(reusableServices,/);
+  assert.match(
+    refreshSource,
+    /clearProgrammerPremiumHydrationProgress\(programmerId\);[\s\S]*setProgrammerWorkspaceHydrationReady\(programmerId,\s*runtimeReady\);[\s\S]*clearStatusUnlessCmTenantsPrecheckBlocked\(\);[\s\S]*renderPremiumServices\(finalServices,/
+  );
+});
+
 test("no-selection authenticated state tells the user to choose a Media Company instead of implying hydration failure", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const renderPremiumServicesSource = extractFunctionSource(popupSource, "renderPremiumServices");
