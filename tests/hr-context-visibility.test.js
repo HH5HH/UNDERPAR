@@ -153,6 +153,7 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const applyServiceBoxSectionShellSource = extractFunctionSource(popupSource, "applyServiceBoxSectionShell");
+  const wireHrContextSectionActionsSource = extractFunctionSource(popupSource, "wireHrContextSectionActions");
   const createPremiumServiceSectionSource = extractFunctionSource(popupSource, "createPremiumServiceSection");
   const createHrContextSectionSource = extractFunctionSource(popupSource, "createHrContextSection");
 
@@ -166,14 +167,15 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.match(applyServiceBoxSectionShellSource, /<summary\s+class="metadata-header service-box-header"/);
   assert.match(applyServiceBoxSectionShellSource, /<span class="collapse-icon">▼<\/span>/);
   assert.match(applyServiceBoxSectionShellSource, /detailsElement\.addEventListener\("toggle", syncOpenState\)/);
+  assert.match(wireHrContextSectionActionsSource, /section\.addEventListener\("click", \(event\) => \{/);
+  assert.match(wireHrContextSectionActionsSource, /openRestV2InteractiveDocsEntry/);
+  assert.match(wireHrContextSectionActionsSource, /openPremiumServiceDocumentation/);
   assert.match(createPremiumServiceSectionSource, /applyServiceBoxSectionShell\(section,\s*\{/);
   assert.match(createHrContextSectionSource, /applyServiceBoxSectionShell\(section,\s*\{/);
+  assert.match(createHrContextSectionSource, /wireHrContextSectionActions\(section\)/);
   assert.match(createHrContextSectionSource, /setHrContextSectionCollapsed\(programmer\?\.programmerId, sectionKey, collapsed\)/);
-  assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
-  assert.doesNotMatch(popupSource, /if \(handleCollapsibleToggleEvent\(event\)\) \{\s*return;\s*\}/);
+  assert.doesNotMatch(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
   assert.doesNotMatch(popupSource, /els\.hrServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
-  assert.match(popupSource, /restV2DocsButton/);
-  assert.match(popupSource, /serviceDocButton/);
 });
 
 test("detected service pills are wired to documentation urls for the learning flow", () => {
@@ -200,6 +202,19 @@ test("detected service pills are wired to documentation urls for the learning fl
   assert.match(popupSource, /openPremiumServiceDocumentation/);
   assert.match(openPremiumServiceDocumentationSource, /chrome\.tabs\.create/);
   assert.doesNotMatch(openPremiumServiceDocumentationSource, /chrome\.tabs\.update/);
+});
+
+test("service shells align the collapse arrow and racing stripes on a shared header rail", () => {
+  const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
+  assert.match(popupCss, /--service-header-rail-center-y:\s*17px;/);
+  assert.match(
+    popupCss,
+    /\.premium-service-section \.metadata-header \.collapse-icon,\s*\.hr-context-section \.metadata-header \.collapse-icon\s*\{[\s\S]*?top:\s*var\(--service-header-rail-center-y\);/
+  );
+  assert.match(
+    popupCss,
+    /body\.underpar-up-tab \.premium-service-section::after,\s*body\.underpar-up-tab \.hr-context-section::after\s*\{[\s\S]*?top:\s*var\(--service-header-rail-center-y\);[\s\S]*?transform:\s*translateY\(-50%\);/
+  );
 });
 
 test("REST V2 learning card exposes every interactive doc operation across all six sections", () => {

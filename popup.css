@@ -1917,6 +1917,7 @@ select:disabled {
   --service-header-stripe-width: 78px;
   --service-header-stripe-gap: 8px;
   --service-header-arrow-width: 14px;
+  --service-header-rail-center-y: 17px;
   --service-header-arrow-right: 16px;
   --service-header-stripe-right: calc(
     var(--service-header-arrow-right) + var(--service-header-arrow-width) + var(--service-header-stripe-gap)
@@ -2421,7 +2422,7 @@ select:disabled {
 .premium-service-section .metadata-header .collapse-icon,
 .hr-context-section .metadata-header .collapse-icon {
   position: absolute;
-  top: 50%;
+  top: var(--service-header-rail-center-y);
   right: var(--service-header-arrow-right);
   min-width: var(--service-header-arrow-width);
   text-align: center;
@@ -6245,7 +6246,7 @@ body.underpar-up-tab .premium-service-section::after,
 body.underpar-up-tab .hr-context-section::after {
   content: "";
   position: absolute;
-  top: 14px;
+  top: var(--service-header-rail-center-y);
   right: var(--service-header-stripe-right);
   width: var(--service-header-stripe-width);
   height: 6px;
@@ -6261,6 +6262,7 @@ body.underpar-up-tab .hr-context-section::after {
   );
   box-shadow: 0 0 18px rgba(var(--service-zip-900), 0.22);
   pointer-events: none;
+  transform: translateY(-50%);
 }
 
 body.underpar-up-tab .premium-service-section .service-box-details[open] > .service-box-container,

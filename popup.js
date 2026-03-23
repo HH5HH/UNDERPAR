@@ -52939,6 +52939,45 @@ function applyServiceBoxSectionShell(section, options = {}) {
   };
 }
 
+function wireHrContextSectionActions(section) {
+  if (!section || section.__underparHrActionsBound === true) {
+    return;
+  }
+
+  section.addEventListener("click", (event) => {
+    if (event.defaultPrevented) {
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) {
+      return;
+    }
+    const restV2DocsButton = target.closest("[data-restv2-doc-entry-key]");
+    if (restV2DocsButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      void openRestV2InteractiveDocsEntry(
+        String(restV2DocsButton.getAttribute("data-restv2-doc-entry-key") || ""),
+        String(restV2DocsButton.getAttribute("data-restv2-doc-url") || "")
+      );
+      return;
+    }
+
+    const serviceDocButton = target.closest("[data-service-doc-key][data-service-doc-url]");
+    if (!serviceDocButton) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    void openPremiumServiceDocumentation(
+      String(serviceDocButton.getAttribute("data-service-doc-key") || ""),
+      String(serviceDocButton.getAttribute("data-service-doc-url") || "")
+    );
+  });
+
+  section.__underparHrActionsBound = true;
+}
+
 function createPremiumServiceSection(programmer, serviceKey, appInfo) {
   const title = PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey;
   const servicesForProgrammer =
@@ -54428,6 +54467,7 @@ function createHrContextSection(programmer, sectionKey, services = null, options
       setHrContextSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
     },
   });
+  wireHrContextSectionActions(section);
 
   return section;
 }
@@ -76894,36 +76934,6 @@ function registerEventHandlers() {
         return;
       }
       handleCollapsibleToggleEvent(event);
-    });
-  }
-
-  if (els.hrServicesContainer) {
-    els.hrServicesContainer.addEventListener("click", (event) => {
-      if (event.defaultPrevented) {
-        return;
-      }
-      const restV2DocsButton =
-        event.target instanceof Element ? event.target.closest("[data-restv2-doc-entry-key]") : null;
-      if (restV2DocsButton) {
-        event.preventDefault();
-        event.stopPropagation();
-        void openRestV2InteractiveDocsEntry(
-          String(restV2DocsButton.getAttribute("data-restv2-doc-entry-key") || ""),
-          String(restV2DocsButton.getAttribute("data-restv2-doc-url") || "")
-        );
-        return;
-      }
-      const serviceDocButton =
-        event.target instanceof Element ? event.target.closest("[data-service-doc-key][data-service-doc-url]") : null;
-      if (!serviceDocButton) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      void openPremiumServiceDocumentation(
-        String(serviceDocButton.getAttribute("data-service-doc-key") || ""),
-        String(serviceDocButton.getAttribute("data-service-doc-url") || "")
-      );
     });
   }
 
