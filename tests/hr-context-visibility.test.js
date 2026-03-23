@@ -152,6 +152,8 @@ test("HR context reveals only when the selected media company has detected premi
 test("sidepanel seeds the HR context container hidden and popup runtime uses unlabeled top and bottom separators", () => {
   const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const applyServiceBoxSectionShellSource = extractFunctionSource(popupSource, "applyServiceBoxSectionShell");
+  const createPremiumServiceSectionSource = extractFunctionSource(popupSource, "createPremiumServiceSection");
   const createHrContextSectionSource = extractFunctionSource(popupSource, "createHrContextSection");
 
   assert.match(sidepanelHtml, /id="hr-services-container"\s+class="hr-services-container"\s+hidden/);
@@ -160,10 +162,12 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.doesNotMatch(popupSource, /hr-context-divider-label/);
   assert.doesNotMatch(popupSource, />HR</);
   assert.doesNotMatch(popupSource, /textContent = "- HR -"/);
-  assert.match(createHrContextSectionSource, /<button\s+type="button"\s+class="metadata-header service-box-header"/);
-  assert.match(createHrContextSectionSource, /aria-controls="\$\{escapeHtml\(sectionBodyId\)\}"/);
-  assert.match(createHrContextSectionSource, /<span class="collapse-icon">▼<\/span>/);
-  assert.match(createHrContextSectionSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed, \(collapsed\) => \{/);
+  assert.match(applyServiceBoxSectionShellSource, /<details class="service-box-details"/);
+  assert.match(applyServiceBoxSectionShellSource, /<summary\s+class="metadata-header service-box-header"/);
+  assert.match(applyServiceBoxSectionShellSource, /<span class="collapse-icon">▼<\/span>/);
+  assert.match(applyServiceBoxSectionShellSource, /detailsElement\.addEventListener\("toggle", syncOpenState\)/);
+  assert.match(createPremiumServiceSectionSource, /applyServiceBoxSectionShell\(section,\s*\{/);
+  assert.match(createHrContextSectionSource, /applyServiceBoxSectionShell\(section,\s*\{/);
   assert.match(createHrContextSectionSource, /setHrContextSectionCollapsed\(programmer\?\.programmerId, sectionKey, collapsed\)/);
   assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
   assert.doesNotMatch(popupSource, /if \(handleCollapsibleToggleEvent\(event\)\) \{\s*return;\s*\}/);

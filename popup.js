@@ -52876,6 +52876,69 @@ async function loadTempPassService(programmer, appInfo, section, contentElement,
   }
 }
 
+function applyServiceBoxSectionShell(section, options = {}) {
+  if (!section) {
+    return {
+      detailsElement: null,
+      toggleButton: null,
+      container: null,
+      contentElement: null,
+    };
+  }
+
+  const title = String(options?.title || "").trim();
+  const hoverMessage = String(options?.hoverMessage || "").trim();
+  const initialCollapsed = options?.initialCollapsed === true;
+  const contentClassName = String(options?.contentClassName || "service-content").trim() || "service-content";
+  const bodyHtml = String(options?.bodyHtml || "");
+  const onCollapsedChange = typeof options?.onCollapsedChange === "function" ? options.onCollapsedChange : null;
+
+  section.innerHTML = `
+    <details class="service-box-details"${initialCollapsed ? "" : " open"}>
+      <summary
+        class="metadata-header service-box-header"
+        title="${escapeHtml(hoverMessage)}"
+        aria-label="${escapeHtml(hoverMessage)}"
+      >
+        <span>${escapeHtml(title)}</span>
+        <span class="collapse-icon">▼</span>
+      </summary>
+      <div class="metadata-container service-box-container">
+        <div class="${escapeHtml(contentClassName)}" data-service-box-content="true">
+          ${bodyHtml}
+        </div>
+      </div>
+    </details>
+  `;
+
+  const detailsElement = section.querySelector(".service-box-details");
+  const toggleButton = section.querySelector(".service-box-header");
+  const container = section.querySelector(".service-box-container");
+  const contentElement = section.querySelector('[data-service-box-content="true"]');
+  if (detailsElement && toggleButton && container) {
+    const syncOpenState = () => {
+      const collapsed = detailsElement.open !== true;
+      toggleButton.classList.toggle("collapsed", collapsed);
+      toggleButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      container.classList.toggle("collapsed", collapsed);
+      container.hidden = collapsed;
+      container.setAttribute("aria-hidden", collapsed ? "true" : "false");
+      if (onCollapsedChange) {
+        onCollapsedChange(collapsed);
+      }
+    };
+    detailsElement.addEventListener("toggle", syncOpenState);
+    syncOpenState();
+  }
+
+  return {
+    detailsElement,
+    toggleButton,
+    container,
+    contentElement,
+  };
+}
+
 function createPremiumServiceSection(programmer, serviceKey, appInfo) {
   const title = PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey;
   const servicesForProgrammer =
@@ -52955,42 +53018,19 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
   const sectionLabel =
     serviceKey === "cm" || serviceKey === "cmMvpd" ? String(title || serviceKey).toUpperCase() : title;
   const initialCollapsed = getPremiumSectionCollapsed(programmer?.programmerId, serviceKey);
-  section.innerHTML = `
-    <details class="service-box-details"${initialCollapsed ? "" : " open"}>
-      <summary
-        class="metadata-header service-box-header"
-        title="${escapeHtml(serviceHoverMessage)}"
-        aria-label="${escapeHtml(serviceHoverMessage)}"
-      >
-        <span>${escapeHtml(sectionLabel)}</span>
-        <span class="collapse-icon">▼</span>
-      </summary>
-      <div class="metadata-container service-box-container">
-        <div class="service-content">
-          ${restV2LoginToolHtml}
-          ${serviceBodyHtml}
-        </div>
-      </div>
-    </details>
-  `;
-
-  const detailsElement = section.querySelector(".service-box-details");
-  const toggleButton = section.querySelector(".service-box-header");
-  const container = section.querySelector(".service-box-container");
-  const contentElement = section.querySelector(".service-content");
-  if (detailsElement && toggleButton && container) {
-    const syncOpenState = () => {
-      const collapsed = detailsElement.open !== true;
-      toggleButton.classList.toggle("collapsed", collapsed);
-      toggleButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      container.classList.toggle("collapsed", collapsed);
-      container.hidden = collapsed;
-      container.setAttribute("aria-hidden", collapsed ? "true" : "false");
+  const { detailsElement, contentElement } = applyServiceBoxSectionShell(section, {
+    title: sectionLabel,
+    hoverMessage: serviceHoverMessage,
+    initialCollapsed,
+    contentClassName: "service-content",
+    bodyHtml: `
+      ${restV2LoginToolHtml}
+      ${serviceBodyHtml}
+    `,
+    onCollapsedChange: (collapsed) => {
       setPremiumSectionCollapsed(programmer?.programmerId, serviceKey, collapsed);
-    };
-    detailsElement.addEventListener("toggle", syncOpenState);
-    syncOpenState();
-  }
+    },
+  });
 
   if (serviceKey === "esmWorkspace") {
     section.__underparRefreshEsmWorkspace = () => {
@@ -54378,42 +54418,16 @@ function createHrContextSection(programmer, sectionKey, services = null, options
   const section = document.createElement("article");
   section.className = `metadata-section hr-context-section hr-context-section--${sectionKey}`;
   const initialCollapsed = getHrContextSectionCollapsed(programmer?.programmerId, sectionKey);
-  const sectionBodyId = `hr-context-${String(programmer?.programmerId || "__global__")
-    .trim()
-    .replace(/[^a-z0-9_-]+/gi, "-")}-${String(sectionKey || "")
-    .trim()
-    .replace(/[^a-z0-9_-]+/gi, "-")}-body`;
-  section.innerHTML = `
-    <button
-      type="button"
-      class="metadata-header service-box-header"
-      title="${escapeHtml(hoverMessage)}"
-      aria-label="${escapeHtml(hoverMessage)}"
-      aria-controls="${escapeHtml(sectionBodyId)}"
-      aria-expanded="${initialCollapsed ? "false" : "true"}"
-    >
-      <span>${escapeHtml(title)}</span>
-      <span class="collapse-icon">▼</span>
-    </button>
-    <div
-      id="${escapeHtml(sectionBodyId)}"
-      class="metadata-container service-box-container${initialCollapsed ? " collapsed" : ""}"
-      ${initialCollapsed ? "hidden" : ""}
-      aria-hidden="${initialCollapsed ? "true" : "false"}"
-    >
-      <div class="hr-context-content">
-        ${buildHrContextSectionBodyHtml(sectionKey, programmer, services, options)}
-      </div>
-    </div>
-  `;
-
-  const toggleButton = section.querySelector(".service-box-header");
-  const container = section.querySelector(".service-box-container");
-  if (toggleButton && container) {
-    wireCollapsibleSection(toggleButton, container, initialCollapsed, (collapsed) => {
+  applyServiceBoxSectionShell(section, {
+    title,
+    hoverMessage,
+    initialCollapsed,
+    contentClassName: "hr-context-content",
+    bodyHtml: buildHrContextSectionBodyHtml(sectionKey, programmer, services, options),
+    onCollapsedChange: (collapsed) => {
       setHrContextSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
-    });
-  }
+    },
+  });
 
   return section;
 }
