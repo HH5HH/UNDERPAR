@@ -258,6 +258,64 @@ const HR_CONTEXT_SECTION_TITLE_BY_KEY = {
   health: "HEALTH",
   learning: "LEARNING",
 };
+const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
+  {
+    key: "configuration",
+    label: "Configuration",
+    methodLabel: "GET",
+    operationSummary: "Retrieve service provider configuration",
+    tagAnchor: "tag/1.-Configuration",
+    operationAnchor: "operation/handleRequestUsingGET",
+    operationId: "handleRequestUsingGET",
+  },
+  {
+    key: "sessions",
+    label: "Sessions",
+    methodLabel: "POST",
+    operationSummary: "Create authentication session",
+    tagAnchor: "tag/2.-Sessions",
+    operationAnchor: "operation/createSessionUsingPOST",
+    operationId: "createSessionUsingPOST",
+  },
+  {
+    key: "profiles",
+    label: "Profiles",
+    methodLabel: "GET",
+    operationSummary: "Retrieve profiles",
+    tagAnchor: "tag/3.-Profiles",
+    operationAnchor: "operation/getProfilesUsingGET_1",
+    operationId: "getProfilesUsingGET_1",
+  },
+  {
+    key: "decisions",
+    label: "Decisions",
+    methodLabel: "POST",
+    operationSummary: "Retrieve preauthorization decisions",
+    tagAnchor: "tag/4.-Decisions",
+    operationAnchor: "operation/retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
+    operationId: "retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
+  },
+  {
+    key: "logout",
+    label: "Logout",
+    methodLabel: "GET",
+    operationSummary: "Initiate logout for specific MVPD",
+    tagAnchor: "tag/5.-Logout",
+    operationAnchor: "operation/getLogoutForMvpdUsingGET",
+    operationId: "getLogoutForMvpdUsingGET",
+  },
+  {
+    key: "partnerSso",
+    label: "Partner Single Sign-On",
+    methodLabel: "POST",
+    operationSummary: "Retrieve partner authentication request",
+    tagAnchor: "tag/6.-Partner-Single-Sign-On",
+    operationAnchor: "operation/retrieveVerificationTokenUsingPOST",
+    operationId: "retrieveVerificationTokenUsingPOST",
+  },
+]);
+const REST_V2_INTERACTIVE_DEFAULT_RESOURCE_IDS = Object.freeze(["sample-resource-id"]);
+const REST_V2_INTERACTIVE_DEFAULT_PARTNER = "Apple";
 const REST_V2_DEVICE_ID_STORAGE_KEY = "underpar_restv2_device_id_v1";
 const LEGACY_REST_V2_DEVICE_ID_STORAGE_KEY = "mincloudlogin_restv2_device_id_v1";
 const REST_V2_DEFAULT_DOMAIN = "adobe.com";
@@ -53075,6 +53133,323 @@ function buildHrServiceListHtml(entries, fallbackText = "") {
   return buildMetadataItemHtml("Detected Adobe PASS Services", fallbackText);
 }
 
+function buildRestV2InteractiveDocsUrl(anchor = "") {
+  const baseUrl = String(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY.restV2 || "").trim();
+  const normalizedAnchor = String(anchor || "").trim().replace(/^#/, "");
+  if (!baseUrl || !normalizedAnchor) {
+    return baseUrl;
+  }
+  return `${baseUrl}#${normalizedAnchor}`;
+}
+
+function getRestV2InteractiveDocsEntry(entryKey = "") {
+  const normalizedEntryKey = String(entryKey || "").trim().toLowerCase();
+  if (!normalizedEntryKey) {
+    return null;
+  }
+  return (
+    REST_V2_INTERACTIVE_DOC_ENTRIES.find((entry) => String(entry?.key || "").trim().toLowerCase() === normalizedEntryKey) || null
+  );
+}
+
+function getFirstCachedMvpdIdForRequestor(requestorId = "") {
+  const cache = getRequestorScopedMvpdCache(requestorId);
+  if (!cache || typeof cache?.keys !== "function") {
+    return "";
+  }
+  const firstEntry = cache.keys().next();
+  return String(firstEntry?.value || "").trim();
+}
+
+function findRestV2PreauthorizeHistoryEntryForLearning(programmerId = "", requestorId = "", mvpd = "") {
+  const history = getRestV2PreauthorizeHistoryForProgrammer(programmerId);
+  const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
+  const normalizedMvpd = String(mvpd || "").trim().toLowerCase();
+  if (normalizedRequestorId || normalizedMvpd) {
+    const exactMatch = history.find((entry) => {
+      const entryRequestorId = String(entry?.requestorId || entry?.serviceProviderId || "").trim().toLowerCase();
+      const entryMvpd = String(entry?.mvpd || "").trim().toLowerCase();
+      const requestorMatch = normalizedRequestorId ? entryRequestorId === normalizedRequestorId : true;
+      const mvpdMatch = normalizedMvpd ? entryMvpd === normalizedMvpd : true;
+      return requestorMatch && mvpdMatch;
+    });
+    if (exactMatch) {
+      return exactMatch;
+    }
+  }
+  return history[0] || null;
+}
+
+function buildRestV2InteractiveDocsContext(programmer = null) {
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer();
+  if (!resolvedProgrammer?.programmerId) {
+    return {
+      ok: false,
+      error: "Select a Media Company first.",
+    };
+  }
+
+  const programmerId = String(resolvedProgrammer.programmerId || "").trim();
+  const requestorId = firstNonEmptyString([
+    String(state.selectedRequestorId || "").trim(),
+    programmerId,
+  ]);
+  if (!requestorId) {
+    return {
+      ok: false,
+      error: "UnderPAR could not resolve a REST V2 service provider from the current selection.",
+    };
+  }
+
+  const services = getCurrentPremiumAppsSnapshot(programmerId) || null;
+  const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(services);
+  const preferredApp =
+    selectPreferredRestV2AppForRequestor(restV2Candidates, requestorId, programmerId) ||
+    services?.restV2 ||
+    restV2Candidates[0] ||
+    null;
+  if (!preferredApp?.guid) {
+    return {
+      ok: false,
+      error: `No REST V2 scoped app is mapped to ${requestorId}.`,
+    };
+  }
+
+  const selectedMvpd = String(state.selectedMvpdId || "").trim();
+  const harvest = getRestV2ProfileHarvestForContext({
+    programmerId,
+    requestorId,
+    mvpd: selectedMvpd,
+  });
+  const harvestContext = buildRestV2ContextFromHarvest(harvest);
+  const fallbackMvpd = firstNonEmptyString([
+    selectedMvpd,
+    String(harvest?.mvpd || "").trim(),
+    getFirstCachedMvpdIdForRequestor(requestorId),
+  ]);
+  const mvpdMeta =
+    getRestV2MvpdMeta(requestorId, fallbackMvpd) ||
+    (String(harvest?.mvpdName || "").trim() && fallbackMvpd
+      ? {
+          id: fallbackMvpd,
+          name: String(harvest.mvpdName || "").trim(),
+        }
+      : null);
+  const preauthorizeHistory = findRestV2PreauthorizeHistoryEntryForLearning(programmerId, requestorId, fallbackMvpd);
+  const resourceIds = Array.isArray(preauthorizeHistory?.resourceIds)
+    ? preauthorizeHistory.resourceIds.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const redirectUrl =
+    firstNonEmptyString([
+      String(harvest?.redirectUrl || "").trim(),
+      REST_V2_REDIRECT_CANDIDATES[0],
+      `${String(ADOBE_SP_BASE || "").trim()}/api.html`,
+    ]) || "";
+  const domainName = firstNonEmptyString([
+    String(harvest?.domainName || "").trim(),
+    REST_V2_DEFAULT_DOMAIN,
+  ]);
+  const partnerFrameworkStatus = String(resolveRestV2PartnerFrameworkStatusFromContext(harvestContext || harvest) || "").trim();
+  const partner = firstNonEmptyString([
+    String(resolveRestV2PartnerNameFromContext(harvestContext || harvest) || "").trim(),
+    String(harvest?.sessionPartner || "").trim(),
+    REST_V2_INTERACTIVE_DEFAULT_PARTNER,
+  ]);
+  return {
+    ok: true,
+    programmerId,
+    programmerName: String(resolvedProgrammer.programmerName || "").trim(),
+    requestorId,
+    serviceProviderId: requestorId,
+    mvpd: String(fallbackMvpd || "").trim(),
+    mvpdMeta,
+    appInfo: preferredApp,
+    services,
+    harvest: harvest || null,
+    harvestContext: harvestContext || null,
+    resourceIds,
+    redirectUrl: String(redirectUrl || "").trim(),
+    domainName: String(domainName || "").trim(),
+    partnerFrameworkStatus,
+    partner: String(partner || "").trim(),
+  };
+}
+
+function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "") {
+  const resolvedEntry = entry && typeof entry === "object" ? entry : null;
+  const resolvedContext = context && typeof context === "object" ? context : null;
+  if (!resolvedEntry?.key || !resolvedContext?.serviceProviderId) {
+    throw new Error("REST V2 learning hydration is missing entry or selection context.");
+  }
+
+  const deviceHeaders = buildRestV2Headers(resolvedContext.serviceProviderId, {});
+  const headers = {
+    "path.serviceProvider": String(resolvedContext.serviceProviderId || "").trim(),
+    "header.Authorization": accessToken ? `Bearer ${String(accessToken || "").trim()}` : "",
+    "header.Accept": "application/json",
+    "header.User-Agent": typeof navigator !== "undefined" ? String(navigator.userAgent || "").trim() : "UnderPAR",
+    "header.AP-Device-Identifier": String(deviceHeaders["AP-Device-Identifier"] || "").trim(),
+    "header.X-Device-Info": String(deviceHeaders["X-Device-Info"] || "").trim(),
+  };
+  const fieldValues = {
+    server: String(REST_V2_BASE || "").trim(),
+    ...headers,
+  };
+  const requiredFields = ["path.serviceProvider", "header.Authorization"];
+  const notes = [];
+
+  switch (resolvedEntry.key) {
+    case "configuration":
+      break;
+    case "sessions": {
+      if (resolvedContext.mvpd) {
+        fieldValues["body.mvpd"] = String(resolvedContext.mvpd || "").trim();
+      } else {
+        requiredFields.push("body.mvpd");
+      }
+      fieldValues["body.domainName"] = String(resolvedContext.domainName || "").trim();
+      fieldValues["body.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
+      fieldValues["header.Content-Type"] = "application/x-www-form-urlencoded";
+      break;
+    }
+    case "profiles": {
+      if (resolvedContext.partnerFrameworkStatus) {
+        fieldValues["header.AP-Partner-Framework-Status"] = String(resolvedContext.partnerFrameworkStatus || "").trim();
+      }
+      break;
+    }
+    case "decisions": {
+      if (resolvedContext.mvpd) {
+        fieldValues["path.mvpd"] = String(resolvedContext.mvpd || "").trim();
+      } else {
+        requiredFields.push("path.mvpd");
+      }
+      const resourceIds =
+        Array.isArray(resolvedContext.resourceIds) && resolvedContext.resourceIds.length > 0
+          ? resolvedContext.resourceIds
+          : REST_V2_INTERACTIVE_DEFAULT_RESOURCE_IDS.slice();
+      if (
+        (!Array.isArray(resolvedContext.resourceIds) || resolvedContext.resourceIds.length === 0) &&
+        resourceIds.length > 0
+      ) {
+        notes.push("Using UnderPAR sample resourceIds for the Decisions form.");
+      }
+      fieldValues["body.resources"] = resourceIds.slice();
+      fieldValues["header.Content-Type"] = "application/json";
+      if (resolvedContext.partnerFrameworkStatus) {
+        fieldValues["header.AP-Partner-Framework-Status"] = String(resolvedContext.partnerFrameworkStatus || "").trim();
+      }
+      requiredFields.push("body.resources");
+      break;
+    }
+    case "logout": {
+      if (resolvedContext.mvpd) {
+        fieldValues["path.mvpd"] = String(resolvedContext.mvpd || "").trim();
+      } else {
+        requiredFields.push("path.mvpd");
+      }
+      fieldValues["query.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
+      break;
+    }
+    case "partnerSso": {
+      fieldValues["path.partner"] = String(resolvedContext.partner || REST_V2_INTERACTIVE_DEFAULT_PARTNER).trim();
+      if (!String(resolvedContext.partner || "").trim()) {
+        notes.push(`Using default partner "${REST_V2_INTERACTIVE_DEFAULT_PARTNER}" for Partner SSO.`);
+      }
+      fieldValues["body.domainName"] = String(resolvedContext.domainName || "").trim();
+      fieldValues["body.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
+      fieldValues["header.Content-Type"] = "application/x-www-form-urlencoded";
+      requiredFields.push("path.partner", "body.domainName", "body.redirectUrl");
+      break;
+    }
+    default:
+      break;
+  }
+
+  const normalizedFieldValues = Object.entries(fieldValues).reduce((result, [key, value]) => {
+    if (Array.isArray(value)) {
+      if (value.length > 0) {
+        result[key] = value.slice();
+      }
+      return result;
+    }
+    const normalizedValue = String(value || "").trim();
+    if (normalizedValue) {
+      result[key] = normalizedValue;
+    }
+    return result;
+  }, {});
+
+  const missingRequiredFields = requiredFields.filter((fieldName) => {
+    if (!fieldName) {
+      return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(normalizedFieldValues, fieldName)) {
+      return false;
+    }
+    return true;
+  });
+
+  return {
+    entryKey: String(resolvedEntry.key || "").trim(),
+    docsUrl: buildRestV2InteractiveDocsUrl(resolvedEntry.operationAnchor || resolvedEntry.tagAnchor || ""),
+    operationId: String(resolvedEntry.operationId || "").trim(),
+    operationSummary: String(resolvedEntry.operationSummary || resolvedEntry.label || "").trim(),
+    fieldValues: normalizedFieldValues,
+    requiredFields,
+    missingRequiredFields,
+    notes,
+  };
+}
+
+function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null) {
+  if (!services?.restV2) {
+    return "";
+  }
+  const docsUrl = buildRestV2InteractiveDocsUrl();
+  const context = getHrContextSummary(programmer);
+  const actionLabel = `Open REST API V2 interactive docs in main content for ${context.compositeLabel}`;
+  return `
+    <article class="metadata-item hr-rest-v2-docs-card">
+      <div class="hr-rest-v2-docs-head">
+        <a
+          href="${escapeHtml(docsUrl)}"
+          class="hr-rest-v2-docs-title"
+          data-service-doc-key="restV2"
+          data-service-doc-url="${escapeHtml(docsUrl)}"
+          title="${escapeHtml(actionLabel)}"
+          aria-label="${escapeHtml(actionLabel)}"
+        >
+          REST API V2 Interactive Docs
+        </a>
+        <p class="hr-rest-v2-docs-subtitle">Quick jump from UnderPAR</p>
+      </div>
+      <div class="hr-rest-v2-docs-grid">
+        ${REST_V2_INTERACTIVE_DOC_ENTRIES.map((entry) => {
+          const entryUrl = buildRestV2InteractiveDocsUrl(entry.operationAnchor || entry.tagAnchor || "");
+          const entryActionLabel = `Open and hydrate ${entry.label} in Adobe PASS REST API V2 interactive docs`;
+          return `
+            <button
+              type="button"
+              class="hr-rest-v2-doc-entry"
+              data-restv2-doc-entry-key="${escapeHtml(entry.key)}"
+              data-restv2-doc-url="${escapeHtml(entryUrl)}"
+              title="${escapeHtml(entryActionLabel)}"
+              aria-label="${escapeHtml(entryActionLabel)}"
+            >
+              <span class="hr-rest-v2-doc-entry-topline">
+                <span class="hr-rest-v2-doc-entry-label">${escapeHtml(entry.label)}</span>
+                <span class="hr-rest-v2-doc-entry-method">${escapeHtml(entry.methodLabel || "")}</span>
+              </span>
+              <span class="hr-rest-v2-doc-entry-summary">${escapeHtml(entry.operationSummary || "")}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </article>
+  `;
+}
+
 function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services = null, options = {}) {
   const context = getHrContextSummary(programmer);
   const contextItemHtml = buildMetadataItemHtml("Context", context.compositeLabel);
@@ -53097,10 +53472,13 @@ function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services =
     fallbackSummary = "Select a media company to view detected services.";
   }
   const howtoSubject = detectedServiceSummary || fallbackSummary;
+  const restV2DocsPanelHtml = buildRestV2InteractiveDocsPanelHtml(programmer, services);
+  const docsItemHtml = restV2DocsPanelHtml ? "" : buildMetadataItemHtml("Docs", `HOWTO: ${howtoSubject} quick docs coming soon...`);
   return `
     ${contextItemHtml}
     ${buildHrServiceListHtml(detectedServiceEntries, fallbackSummary)}
-    ${buildMetadataItemHtml("Docs", `HOWTO: ${howtoSubject} quick docs coming soon...`)}
+    ${restV2DocsPanelHtml}
+    ${docsItemHtml}
   `;
 }
 
@@ -53142,6 +53520,333 @@ async function openPremiumServiceDocumentation(serviceKey = "", requestedUrl = "
       error: error instanceof Error ? error.message : String(error || "Unable to open service documentation."),
     };
   }
+}
+
+async function runRestV2InteractiveDocsHydrator(config = {}) {
+  const normalize = (value) => String(value || "").trim();
+  const sleepFor = (ms = 0) =>
+    new Promise((resolve) => {
+      window.setTimeout(resolve, Math.max(0, Number(ms || 0)));
+    });
+  const waitFor = async (resolver, timeoutMs = 15000, intervalMs = 120) => {
+    const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0) || 15000);
+    while (Date.now() < deadline) {
+      const resolved = resolver();
+      if (resolved) {
+        return resolved;
+      }
+      await sleepFor(intervalMs);
+    }
+    return null;
+  };
+  const setElementValue = (element, rawValue) => {
+    if (!element) {
+      return false;
+    }
+    if (element instanceof HTMLSelectElement) {
+      const targetValue = normalize(rawValue);
+      const options = Array.from(element.options || []);
+      const matchedOption =
+        options.find((option) => normalize(option.value) === targetValue) ||
+        options.find((option) => normalize(option.textContent) === targetValue) ||
+        options.find((option) => normalize(option.value).toLowerCase() === targetValue.toLowerCase()) ||
+        options.find((option) => normalize(option.textContent).toLowerCase() === targetValue.toLowerCase());
+      if (!matchedOption) {
+        return false;
+      }
+      element.value = matchedOption.value;
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+
+    const valueText =
+      element instanceof HTMLTextAreaElement && Array.isArray(rawValue)
+        ? JSON.stringify(rawValue, null, 2)
+        : Array.isArray(rawValue)
+          ? rawValue.join(", ")
+          : String(rawValue ?? "");
+
+    if (element instanceof HTMLInputElement) {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+      if (descriptor?.set) {
+        descriptor.set.call(element, valueText);
+      } else {
+        element.value = valueText;
+      }
+    } else if (element instanceof HTMLTextAreaElement) {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+      if (descriptor?.set) {
+        descriptor.set.call(element, valueText);
+      } else {
+        element.value = valueText;
+      }
+    } else {
+      element.value = valueText;
+    }
+
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    element.dispatchEvent(new Event("blur", { bubbles: true }));
+    return true;
+  };
+  const findControl = (operation, fieldName) => {
+    const normalizedFieldName = normalize(fieldName);
+    if (!operation || !normalizedFieldName) {
+      return null;
+    }
+    if (normalizedFieldName === "server") {
+      return operation.querySelector("select");
+    }
+    const byId = document.getElementById(normalizedFieldName);
+    if (byId && operation.contains(byId)) {
+      return byId;
+    }
+    const escapedName = normalizedFieldName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const byName = operation.querySelector(`[name="${escapedName}"]`);
+    if (byName) {
+      return byName;
+    }
+    if (normalizedFieldName === "body.resources") {
+      return operation.querySelector("textarea");
+    }
+    return null;
+  };
+
+  const operationId = normalize(config?.operationId);
+  if (!operationId) {
+    return {
+      ok: false,
+      error: "REST V2 docs hydrator is missing an operation id.",
+    };
+  }
+
+  const operationElement = await waitFor(() => document.getElementById(`operation/${operationId}`), config?.timeoutMs || 18000, 140);
+  if (!operationElement) {
+    return {
+      ok: false,
+      error: `REST V2 docs did not render operation/${operationId}.`,
+    };
+  }
+
+  if (location.hash !== `#operation/${operationId}`) {
+    location.hash = `#operation/${operationId}`;
+    await sleepFor(120);
+  }
+
+  operationElement.scrollIntoView({
+    behavior: "auto",
+    block: "center",
+  });
+  await sleepFor(200);
+
+  const requestButton = Array.from(operationElement.querySelectorAll("button")).find(
+    (button) => normalize(button.textContent).toLowerCase() === "request"
+  );
+  if (requestButton) {
+    requestButton.click();
+    await sleepFor(80);
+  }
+
+  const tryItButton = operationElement.querySelector('[data-cy="try-it"]');
+  if (tryItButton instanceof HTMLElement) {
+    tryItButton.click();
+  }
+
+  const sendButton =
+    (await waitFor(
+      () =>
+        Array.from(operationElement.querySelectorAll("button")).find(
+          (button) => normalize(button.textContent).toLowerCase() === "send"
+        ) || null,
+      config?.timeoutMs || 18000,
+      140
+    )) || null;
+  const normalizedFieldValues = config?.fieldValues && typeof config.fieldValues === "object" ? config.fieldValues : {};
+  const filledFields = [];
+  const missingControls = [];
+
+  for (const [fieldName, rawValue] of Object.entries(normalizedFieldValues)) {
+    const control = findControl(operationElement, fieldName);
+    if (!control) {
+      missingControls.push(fieldName);
+      continue;
+    }
+    if (setElementValue(control, rawValue)) {
+      filledFields.push(fieldName);
+    } else {
+      missingControls.push(fieldName);
+    }
+  }
+
+  const requiredFields = Array.isArray(config?.requiredFields) ? config.requiredFields.map((item) => normalize(item)).filter(Boolean) : [];
+  const missingRequiredFields = Array.isArray(config?.missingRequiredFields)
+    ? config.missingRequiredFields.map((item) => normalize(item)).filter(Boolean)
+    : [];
+  const unresolvedRequiredFields = [...new Set([...missingRequiredFields, ...missingControls.filter((item) => requiredFields.includes(item))])];
+  const firstPendingField = unresolvedRequiredFields[0] || missingControls[0] || "";
+  const firstPendingControl = firstPendingField ? findControl(operationElement, firstPendingField) : null;
+  if (firstPendingControl instanceof HTMLElement) {
+    firstPendingControl.focus();
+  } else if (sendButton instanceof HTMLElement) {
+    sendButton.focus();
+  }
+
+  return {
+    ok: unresolvedRequiredFields.length === 0,
+    operationId,
+    operationTitle: normalize(operationElement.querySelector("h2")?.textContent),
+    filledFields,
+    missingControls,
+    unresolvedRequiredFields,
+    sendButtonFound: Boolean(sendButton),
+    currentHash: normalize(location.hash),
+  };
+}
+
+async function hydrateRestV2InteractiveDocsTab(tabId, plan = null) {
+  const normalizedTabId = Number(tabId || 0);
+  if (!chrome.scripting?.executeScript) {
+    throw new Error("Chrome scripting is unavailable. Reload UnderPAR and retry.");
+  }
+  if (normalizedTabId <= 0) {
+    throw new Error("REST V2 docs hydrator is missing a usable tab target.");
+  }
+  const executionResults = await chrome.scripting.executeScript({
+    target: { tabId: normalizedTabId },
+    world: "MAIN",
+    args: [
+      {
+        operationId: String(plan?.operationId || "").trim(),
+        requiredFields: Array.isArray(plan?.requiredFields) ? plan.requiredFields.slice() : [],
+        missingRequiredFields: Array.isArray(plan?.missingRequiredFields) ? plan.missingRequiredFields.slice() : [],
+        fieldValues: plan?.fieldValues && typeof plan.fieldValues === "object" ? { ...plan.fieldValues } : {},
+        timeoutMs: 18000,
+      },
+    ],
+    func: runRestV2InteractiveDocsHydrator,
+  });
+  const result = executionResults?.[0]?.result && typeof executionResults[0].result === "object" ? executionResults[0].result : null;
+  if (!result) {
+    throw new Error("REST V2 docs hydration returned no result.");
+  }
+  if (result.ok !== true && result.error) {
+    throw new Error(String(result.error || "REST V2 docs hydration failed."));
+  }
+  return result;
+}
+
+async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") {
+  const entry = getRestV2InteractiveDocsEntry(entryKey);
+  if (!entry) {
+    setStatus("UnderPAR could not resolve the requested REST V2 learning entry.", "error");
+    return {
+      ok: false,
+      error: "missing-restv2-learning-entry",
+    };
+  }
+
+  const context = buildRestV2InteractiveDocsContext(resolveSelectedProgrammer());
+  if (!context?.ok) {
+    setStatus(String(context?.error || "REST V2 learning needs a Media Company selection."), "error");
+    return {
+      ok: false,
+      error: String(context?.error || "missing-restv2-learning-context"),
+    };
+  }
+
+  setStatus(`Opening ${entry.label} interactive docs with UnderPAR context...`, "info");
+
+  let tokenResult;
+  try {
+    tokenResult = await ensureDcrAccessTokenWithServiceRecovery(context.programmerId, context.appInfo, false, {
+      requestorId: context.requestorId,
+      service: "rest-v2-learning",
+      scope: `rest-v2-learning-${String(entry.key || "").trim()}`,
+      requiredServiceScope: REST_V2_SCOPE,
+      allowProvisioning: true,
+      lockAppSelection: true,
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    setStatus(reason, "error");
+    return {
+      ok: false,
+      error: reason,
+    };
+  }
+
+  const resolvedContext = {
+    ...context,
+    appInfo: tokenResult?.appInfo || context.appInfo,
+  };
+  const plan = buildRestV2InteractiveDocsHydrationPlan(entry, resolvedContext, String(tokenResult?.accessToken || "").trim());
+  const targetUrl = String(requestedUrl || plan.docsUrl || buildRestV2InteractiveDocsUrl(entry.operationAnchor || "")).trim();
+  const opened = await openPremiumServiceDocumentation("restV2", targetUrl);
+  if (opened?.ok !== true) {
+    return opened;
+  }
+
+  const tabId = Number(opened?.tabId || 0);
+  if (tabId <= 0) {
+    setStatus(`Opened ${entry.label} docs, but UnderPAR could not target the tab for hydration.`, "error");
+    return {
+      ok: false,
+      error: "missing-restv2-doc-tab",
+    };
+  }
+
+  await waitForTabCompletion(tabId, 20000, {
+    expectedUrl: PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY.restV2,
+  }).catch(() => null);
+
+  let hydrationResult = null;
+  let lastHydrationError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      hydrationResult = await hydrateRestV2InteractiveDocsTab(tabId, plan);
+      break;
+    } catch (error) {
+      lastHydrationError = error instanceof Error ? error : new Error(String(error));
+      await sleep(220 * attempt);
+    }
+  }
+
+  if (!hydrationResult) {
+    const reason = String(lastHydrationError?.message || "REST V2 docs hydration failed.").trim();
+    setStatus(`Opened ${entry.label} docs, but UnderPAR could not hydrate the interactive form: ${reason}`, "error");
+    return {
+      ok: false,
+      error: reason,
+      tabId,
+      windowId: Number(opened?.windowId || 0),
+      url: targetUrl,
+    };
+  }
+
+  const unresolvedRequiredFields = Array.isArray(hydrationResult.unresolvedRequiredFields)
+    ? hydrationResult.unresolvedRequiredFields.filter(Boolean)
+    : [];
+  if (unresolvedRequiredFields.length > 0) {
+    setStatus(
+      `Opened ${entry.label} docs with partial UnderPAR context. Fill ${unresolvedRequiredFields.join(", ")} before Send.`,
+      "info"
+    );
+  } else if (Array.isArray(plan.notes) && plan.notes.length > 0) {
+    setStatus(`Opened ${entry.label} docs with UnderPAR context. ${plan.notes[0]}`, "info");
+  } else {
+    setStatus(`Opened ${entry.label} docs with UnderPAR context and focused Send.`, "success");
+  }
+
+  return {
+    ok: unresolvedRequiredFields.length === 0,
+    partial: unresolvedRequiredFields.length > 0,
+    tabId,
+    windowId: Number(opened?.windowId || 0),
+    url: targetUrl,
+    hydrationResult,
+    plan,
+  };
 }
 
 function createHrContextSection(programmer, sectionKey, services = null, options = {}) {
@@ -75658,6 +76363,17 @@ function registerEventHandlers() {
   if (els.hrServicesContainer) {
     els.hrServicesContainer.addEventListener("click", (event) => {
       if (event.defaultPrevented) {
+        return;
+      }
+      const restV2DocsButton =
+        event.target instanceof Element ? event.target.closest("[data-restv2-doc-entry-key]") : null;
+      if (restV2DocsButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        void openRestV2InteractiveDocsEntry(
+          String(restV2DocsButton.getAttribute("data-restv2-doc-entry-key") || ""),
+          String(restV2DocsButton.getAttribute("data-restv2-doc-url") || "")
+        );
         return;
       }
       const serviceDocButton =

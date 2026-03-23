@@ -142,6 +142,42 @@ test("detected service pills are wired to documentation urls for the learning fl
   assert.doesNotMatch(openPremiumServiceDocumentationSource, /chrome\.tabs\.update/);
 });
 
+test("REST V2 learning card exposes six interactive doc hydrators backed by the customer docs", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
+  const openRestV2InteractiveDocsEntrySource = extractFunctionSource(popupSource, "openRestV2InteractiveDocsEntry");
+  const runRestV2InteractiveDocsHydratorSource = extractFunctionSource(popupSource, "runRestV2InteractiveDocsHydrator");
+
+  assert.match(popupSource, /const REST_V2_INTERACTIVE_DOC_ENTRIES = Object\.freeze\(\[/);
+  assert.match(popupSource, /label: "Configuration"/);
+  assert.match(popupSource, /label: "Sessions"/);
+  assert.match(popupSource, /label: "Profiles"/);
+  assert.match(popupSource, /label: "Decisions"/);
+  assert.match(popupSource, /label: "Logout"/);
+  assert.match(popupSource, /label: "Partner Single Sign-On"/);
+  assert.match(popupSource, /operationId: "handleRequestUsingGET"/);
+  assert.match(popupSource, /operationId: "createSessionUsingPOST"/);
+  assert.match(popupSource, /operationId: "getProfilesUsingGET_1"/);
+  assert.match(popupSource, /operationId: "retrievePreAuthorizeDecisionsForMvpdUsingPOST_1"/);
+  assert.match(popupSource, /operationId: "getLogoutForMvpdUsingGET"/);
+  assert.match(popupSource, /operationId: "retrieveVerificationTokenUsingPOST"/);
+  assert.match(popupSource, /data-restv2-doc-entry-key/);
+  assert.match(popupSource, /REST API V2 Interactive Docs/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /ensureDcrAccessTokenWithServiceRecovery/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /openPremiumServiceDocumentation\("restV2"/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /waitForTabCompletion/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /hydrateRestV2InteractiveDocsTab/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /document\.getElementById\(`operation\/\$\{operationId\}`\)/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /\[data-cy="try-it"\]/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /querySelector\("textarea"\)/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-entry/);
+  assert.match(popupCss, /\.hr-rest-v2-docs-grid/);
+  assert.match(
+    popupSource,
+    /const docsItemHtml = restV2DocsPanelHtml \? "" : buildMetadataItemHtml\("Docs", `HOWTO: \$\{howtoSubject\} quick docs coming soon\.\.\.`\);/
+  );
+});
+
 test("premium service sections and HR service pills keep their theme class wiring", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
 
