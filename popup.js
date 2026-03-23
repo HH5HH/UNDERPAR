@@ -76888,9 +76888,6 @@ function registerEventHandlers() {
       if (event.defaultPrevented) {
         return;
       }
-      if (handleCollapsibleToggleEvent(event)) {
-        return;
-      }
       const restV2DocsButton =
         event.target instanceof Element ? event.target.closest("[data-restv2-doc-entry-key]") : null;
       if (restV2DocsButton) {
@@ -76913,16 +76910,6 @@ function registerEventHandlers() {
         String(serviceDocButton.getAttribute("data-service-doc-key") || ""),
         String(serviceDocButton.getAttribute("data-service-doc-url") || "")
       );
-    });
-
-    els.hrServicesContainer.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-      if (event.defaultPrevented) {
-        return;
-      }
-      handleCollapsibleToggleEvent(event);
     });
   }
 

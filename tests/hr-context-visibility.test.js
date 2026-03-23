@@ -166,8 +166,10 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.match(createHrContextSectionSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed, \(collapsed\) => \{/);
   assert.match(createHrContextSectionSource, /setHrContextSectionCollapsed\(programmer\?\.programmerId, sectionKey, collapsed\)/);
   assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
-  assert.match(popupSource, /if \(handleCollapsibleToggleEvent\(event\)\) \{\s*return;\s*\}/);
-  assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
+  assert.doesNotMatch(popupSource, /if \(handleCollapsibleToggleEvent\(event\)\) \{\s*return;\s*\}/);
+  assert.doesNotMatch(popupSource, /els\.hrServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
+  assert.match(popupSource, /restV2DocsButton/);
+  assert.match(popupSource, /serviceDocButton/);
 });
 
 test("detected service pills are wired to documentation urls for the learning flow", () => {
