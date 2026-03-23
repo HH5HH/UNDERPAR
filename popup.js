@@ -54298,33 +54298,28 @@ function createHrContextSection(programmer, sectionKey, services = null, options
   const section = document.createElement("article");
   section.className = `metadata-section hr-context-section hr-context-section--${sectionKey}`;
   section.innerHTML = `
-    <details class="service-box-details"${initialCollapsed ? "" : " open"}>
-      <summary
-        class="metadata-header service-box-header"
-        title="${escapeHtml(hoverMessage)}"
-        aria-label="${escapeHtml(hoverMessage)}"
-      >
-        <span>${escapeHtml(title)}</span>
-        <span class="collapse-icon">▼</span>
-      </summary>
-      <div class="metadata-container service-box-container">
-        <div class="hr-context-content">
-          ${buildHrContextSectionBodyHtml(sectionKey, programmer, services, options)}
-        </div>
+    <button
+      type="button"
+      class="metadata-header service-box-header"
+      title="${escapeHtml(hoverMessage)}"
+      aria-label="${escapeHtml(hoverMessage)}"
+    >
+      <span>${escapeHtml(title)}</span>
+      <span class="collapse-icon">▼</span>
+    </button>
+    <div class="metadata-container service-box-container">
+      <div class="hr-context-content">
+        ${buildHrContextSectionBodyHtml(sectionKey, programmer, services, options)}
       </div>
-    </details>
+    </div>
   `;
 
-  const detailsElement = section.querySelector(".service-box-details");
   const toggleButton = section.querySelector(".service-box-header");
   const container = section.querySelector(".service-box-container");
-  if (detailsElement && toggleButton && container) {
-    const syncOpenState = (collapsed) => {
-      detailsElement.open = collapsed !== true;
+  if (toggleButton && container) {
+    wireCollapsibleSection(toggleButton, container, initialCollapsed, (collapsed) => {
       setPremiumSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
-    };
-    wireCollapsibleSection(toggleButton, container, initialCollapsed, syncOpenState);
-    syncOpenState(initialCollapsed);
+    });
   }
 
   return section;

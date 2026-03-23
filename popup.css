@@ -2449,7 +2449,7 @@ select:disabled {
 }
 
 .premium-service-section .service-box-details[open] > .service-box-container,
-.hr-context-section .service-box-details[open] > .service-box-container {
+.hr-context-section .service-box-container:not(.collapsed) {
   border-left: 4px solid var(--service-open-border);
   background: linear-gradient(
     180deg,
@@ -5730,7 +5730,7 @@ select:disabled {
 }
 
 .premium-service-section .service-box-details[open] > .service-box-container,
-.hr-context-section .service-box-details[open] > .service-box-container {
+.hr-context-section .service-box-container:not(.collapsed) {
   border-left: 4px solid var(--service-open-border);
   background: linear-gradient(180deg, var(--service-open-bg-top) 0%, var(--service-open-bg-mid) 28%, var(--service-open-bg-base) 100%);
   box-shadow:
@@ -6264,7 +6264,7 @@ body.underpar-up-tab .hr-context-section::after {
 }
 
 body.underpar-up-tab .premium-service-section .service-box-details[open] > .service-box-container,
-body.underpar-up-tab .hr-context-section .service-box-details[open] > .service-box-container {
+body.underpar-up-tab .hr-context-section .service-box-container:not(.collapsed) {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     inset 0 0 0 1px rgba(var(--service-zip-1100), 0.12),
