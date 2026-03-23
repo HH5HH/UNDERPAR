@@ -2616,6 +2616,64 @@ select:disabled {
 }
 
 .hr-rest-v2-docs-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hr-rest-v2-doc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(var(--service-rest-v2-zip-900), 0.12);
+}
+
+.hr-rest-v2-doc-section:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.hr-rest-v2-doc-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.hr-rest-v2-doc-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: rgba(var(--service-rest-v2-zip-1100), 0.94);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hr-rest-v2-doc-section-title::after {
+  content: "↗";
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.78;
+}
+
+.hr-rest-v2-doc-section-count {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(var(--service-rest-v2-zip-900), 0.08);
+  color: rgba(var(--service-rest-v2-zip-1100), 0.82);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hr-rest-v2-doc-section-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 8px;

@@ -76,8 +76,6 @@ function loadRestV2LearningPlanBuilder() {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
   const script = [
-    'const REST_V2_INTERACTIVE_DEFAULT_RESOURCE_IDS = Object.freeze(["sample-resource-id"]);',
-    'const REST_V2_INTERACTIVE_DEFAULT_PARTNER = "Apple";',
     'const REST_V2_BASE = "https://api.example.test";',
     'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
     'function buildRestV2Headers() { return { "AP-Device-Identifier": "device-123", "X-Device-Info": "device-info-123" }; }',
@@ -164,7 +162,7 @@ test("detected service pills are wired to documentation urls for the learning fl
   assert.doesNotMatch(openPremiumServiceDocumentationSource, /chrome\.tabs\.update/);
 });
 
-test("REST V2 learning card exposes six interactive doc hydrators backed by the customer docs", () => {
+test("REST V2 learning card exposes every interactive doc operation across all six sections", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
   const buildRestV2InteractiveDocsContextSource = extractFunctionSource(popupSource, "buildRestV2InteractiveDocsContext");
@@ -173,34 +171,49 @@ test("REST V2 learning card exposes six interactive doc hydrators backed by the 
   const runRestV2InteractiveDocsHydratorSource = extractFunctionSource(popupSource, "runRestV2InteractiveDocsHydrator");
 
   assert.match(popupSource, /const REST_V2_INTERACTIVE_DOC_ENTRIES = Object\.freeze\(\[/);
-  assert.match(popupSource, /label: "Configuration"/);
-  assert.match(popupSource, /label: "Sessions"/);
-  assert.match(popupSource, /label: "Profiles"/);
-  assert.match(popupSource, /label: "Decisions"/);
-  assert.match(popupSource, /label: "Logout"/);
-  assert.match(popupSource, /label: "Partner Single Sign-On"/);
+  assert.match(popupSource, /sectionLabel: "1\. Configuration"/);
+  assert.match(popupSource, /sectionLabel: "2\. Sessions"/);
+  assert.match(popupSource, /sectionLabel: "3\. Profiles"/);
+  assert.match(popupSource, /sectionLabel: "4\. Decisions"/);
+  assert.match(popupSource, /sectionLabel: "5\. Logout"/);
+  assert.match(popupSource, /sectionLabel: "6\. Partner Single Sign-On"/);
   assert.match(popupSource, /operationId: "handleRequestUsingGET"/);
+  assert.match(popupSource, /operationId: "startAuthenticationUsingGET"/);
   assert.match(popupSource, /operationId: "createSessionUsingPOST"/);
+  assert.match(popupSource, /operationId: "resumeSessionUsingPOST"/);
+  assert.match(popupSource, /operationId: "getSessionStatusUsingGET_1"/);
+  assert.match(popupSource, /operationId: "getProfileForCodeUsingGET_1"/);
   assert.match(popupSource, /operationId: "getProfilesUsingGET_1"/);
+  assert.match(popupSource, /operationId: "getProfileForMvpdUsingGET"/);
+  assert.match(popupSource, /operationId: "retrieveAuthorizeDecisionsForMvpdUsingPOST"/);
   assert.match(popupSource, /operationId: "retrievePreAuthorizeDecisionsForMvpdUsingPOST_1"/);
   assert.match(popupSource, /operationId: "getLogoutForMvpdUsingGET"/);
+  assert.match(popupSource, /operationId: "createPartnerProfileUsingPOST"/);
   assert.match(popupSource, /operationId: "retrieveVerificationTokenUsingPOST"/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2LearningRequestorContext/);
   assert.match(buildRestV2InteractiveDocsContextSource, /Select a Content Provider first\./);
-  assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /String\(state\.selectedRequestorId \|\| ""\)\.trim\(\),\s*programmerId/);
+  assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_REDIRECT_CANDIDATES/);
+  assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_DEFAULT_DOMAIN/);
+  assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /getFirstCachedMvpdIdForRequestor/);
   assert.match(resolveRestV2LearningRequestorContextSource, /candidates\.length === 1/);
   assert.doesNotMatch(resolveRestV2LearningRequestorContextSource, /requestorId:\s*programmerId/);
   assert.match(popupSource, /data-restv2-doc-entry-key/);
   assert.match(popupSource, /REST API V2 Interactive Docs/);
+  assert.match(popupSource, /getRestV2InteractiveDocsSections/);
   assert.match(openRestV2InteractiveDocsEntrySource, /ensureDcrAccessTokenWithServiceRecovery/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /prepareRestV2InteractiveDocsContextForEntry/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /entry\.requiresAccessToken !== false/);
   assert.match(openRestV2InteractiveDocsEntrySource, /openPremiumServiceDocumentation\("restV2"/);
   assert.match(openRestV2InteractiveDocsEntrySource, /waitForTabCompletion/);
   assert.match(openRestV2InteractiveDocsEntrySource, /hydrateRestV2InteractiveDocsTab/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /document\.getElementById\(`operation\/\$\{operationId\}`\)/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /\[data-cy="try-it"\]/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /normalizedFieldName === "body\.SAMLResponse"/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /querySelector\("textarea"\)/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry/);
   assert.match(popupCss, /\.hr-rest-v2-docs-grid/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-section/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-section-grid/);
   assert.match(
     popupSource,
     /const docsItemHtml = restV2DocsPanelHtml \? "" : buildMetadataItemHtml\("Docs", `HOWTO: \$\{howtoSubject\} quick docs coming soon\.\.\.`\);/
@@ -215,16 +228,24 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     serviceProviderId: "turner-requestor",
     requestorId: "turner-requestor",
     requestorAutoResolved: false,
+    sessionCode: "session-code-123",
     mvpd: "Comcast_SSO",
     resourceIds: ["urn:resource:turner"],
     redirectUrl: "https://experience.example.test/callback",
     domainName: "experience.example.test",
     partner: "Roku",
     partnerFrameworkStatus: "none",
+    samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+    samlSource: "tab-network:body",
   };
 
   const configurationPlan = buildRestV2InteractiveDocsHydrationPlan(
-    { key: "configuration", operationId: "handleRequestUsingGET", operationAnchor: "operation/handleRequestUsingGET" },
+    {
+      key: "configuration-service-provider",
+      operationId: "handleRequestUsingGET",
+      operationAnchor: "operation/handleRequestUsingGET",
+      requiresAccessToken: true,
+    },
     baseContext,
     accessToken
   );
@@ -232,34 +253,163 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(configurationPlan.fieldValues["path.serviceProvider"], "turner-requestor");
   assert.equal(configurationPlan.fieldValues["header.Authorization"], `Bearer ${accessToken}`);
   assert.equal(configurationPlan.fieldValues["header.Accept"], "application/json");
-  assert.equal(configurationPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
-  assert.equal(configurationPlan.fieldValues["header.X-Device-Info"], "device-info-123");
+  assert.equal(Object.prototype.hasOwnProperty.call(configurationPlan.fieldValues, "header.AP-Device-Identifier"), false);
 
-  const sessionsPlan = buildRestV2InteractiveDocsHydrationPlan(
-    { key: "sessions", operationId: "createSessionUsingPOST", operationAnchor: "operation/createSessionUsingPOST" },
-    { ...baseContext, mvpd: "" },
-    accessToken
-  );
-  assert.deepEqual(toArray(sessionsPlan.requiredFields), ["path.serviceProvider", "header.Authorization"]);
-  assert.equal(sessionsPlan.fieldValues["header.Content-Type"], "application/x-www-form-urlencoded");
-  assert.equal(sessionsPlan.fieldValues["body.domainName"], "experience.example.test");
-  assert.equal(sessionsPlan.fieldValues["body.redirectUrl"], "https://experience.example.test/callback");
-  assert.equal(Object.prototype.hasOwnProperty.call(sessionsPlan.fieldValues, "body.mvpd"), false);
-  assert.deepEqual(toArray(sessionsPlan.missingRequiredFields), []);
-
-  const profilesPlan = buildRestV2InteractiveDocsHydrationPlan(
-    { key: "profiles", operationId: "getProfilesUsingGET_1", operationAnchor: "operation/getProfilesUsingGET_1" },
+  const startAuthenticationPlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "sessions-start-authentication",
+      operationId: "startAuthenticationUsingGET",
+      operationAnchor: "operation/startAuthenticationUsingGET",
+      requiresAccessToken: false,
+      usesSessionCode: true,
+      requireSessionCode: true,
+    },
     baseContext,
     accessToken
   );
+  assert.deepEqual(toArray(startAuthenticationPlan.requiredFields), ["path.serviceProvider", "path.code"]);
+  assert.equal(startAuthenticationPlan.fieldValues["path.code"], "session-code-123");
+  assert.equal(Object.prototype.hasOwnProperty.call(startAuthenticationPlan.fieldValues, "header.Authorization"), false);
+
+  const createSessionPlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "sessions-create-session",
+      operationId: "createSessionUsingPOST",
+      operationAnchor: "operation/createSessionUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      contentType: "application/x-www-form-urlencoded",
+      usesBodyMvpd: true,
+      usesBodyDomainName: true,
+      usesBodyRedirectUrl: true,
+    },
+    { ...baseContext, mvpd: "" },
+    accessToken
+  );
+  assert.deepEqual(toArray(createSessionPlan.requiredFields), ["path.serviceProvider", "header.Authorization"]);
+  assert.equal(createSessionPlan.fieldValues["header.Content-Type"], "application/x-www-form-urlencoded");
+  assert.equal(createSessionPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+  assert.equal(createSessionPlan.fieldValues["header.X-Device-Info"], "device-info-123");
+  assert.equal(createSessionPlan.fieldValues["body.domainName"], "experience.example.test");
+  assert.equal(createSessionPlan.fieldValues["body.redirectUrl"], "https://experience.example.test/callback");
+  assert.equal(Object.prototype.hasOwnProperty.call(createSessionPlan.fieldValues, "body.mvpd"), false);
+  assert.deepEqual(toArray(createSessionPlan.missingRequiredFields), []);
+
+  const resumeSessionPlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "sessions-resume-session",
+      operationId: "resumeSessionUsingPOST",
+      operationAnchor: "operation/resumeSessionUsingPOST",
+      requiresAccessToken: true,
+      contentType: "application/x-www-form-urlencoded",
+      usesSessionCode: true,
+      requireSessionCode: true,
+      usesBodyMvpd: true,
+      usesBodyDomainName: true,
+      usesBodyRedirectUrl: true,
+    },
+    baseContext,
+    accessToken
+  );
+  assert.equal(resumeSessionPlan.fieldValues["path.code"], "session-code-123");
+  assert.equal(resumeSessionPlan.fieldValues["header.Content-Type"], "application/x-www-form-urlencoded");
+
+  const sessionStatusPlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "sessions-session-status",
+      operationId: "getSessionStatusUsingGET_1",
+      operationAnchor: "operation/getSessionStatusUsingGET_1",
+      requiresAccessToken: true,
+      usesSessionCode: true,
+      requireSessionCode: true,
+    },
+    baseContext,
+    accessToken
+  );
+  assert.equal(sessionStatusPlan.fieldValues["path.code"], "session-code-123");
+
+  const profilesByCodePlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "profiles-by-code",
+      operationId: "getProfileForCodeUsingGET_1",
+      operationAnchor: "operation/getProfileForCodeUsingGET_1",
+      requiresAccessToken: true,
+      usesSessionCode: true,
+      requireSessionCode: true,
+    },
+    baseContext,
+    accessToken
+  );
+  assert.equal(profilesByCodePlan.fieldValues["path.code"], "session-code-123");
+
+  const profilesPlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "profiles-all",
+      operationId: "getProfilesUsingGET_1",
+      operationAnchor: "operation/getProfilesUsingGET_1",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerFrameworkStatus: true,
+    },
+    baseContext,
+    accessToken
+  );
+  assert.equal(profilesPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+  assert.equal(profilesPlan.fieldValues["header.X-Device-Info"], "device-info-123");
   assert.equal(profilesPlan.fieldValues["header.AP-Partner-Framework-Status"], "none");
   assert.deepEqual(toArray(profilesPlan.requiredFields), ["path.serviceProvider", "header.Authorization"]);
 
+  const profilesByMvpdPlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "profiles-by-mvpd",
+      operationId: "getProfileForMvpdUsingGET",
+      operationAnchor: "operation/getProfileForMvpdUsingGET",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesMvpdPath: true,
+      requireMvpdPath: true,
+      usesPartnerFrameworkStatus: true,
+    },
+    baseContext,
+    accessToken
+  );
+  assert.equal(profilesByMvpdPlan.fieldValues["path.mvpd"], "Comcast_SSO");
+  assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+
+  const authorizePlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "decisions-authorize",
+      operationId: "retrieveAuthorizeDecisionsForMvpdUsingPOST",
+      operationAnchor: "operation/retrieveAuthorizeDecisionsForMvpdUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesMvpdPath: true,
+      requireMvpdPath: true,
+      usesBodyResources: true,
+      requireBodyResources: true,
+      usesPartnerFrameworkStatus: true,
+      contentType: "application/json",
+    },
+    baseContext,
+    accessToken
+  );
+  assert.equal(authorizePlan.fieldValues["path.mvpd"], "Comcast_SSO");
+  assert.equal(authorizePlan.fieldValues["header.Content-Type"], "application/json");
+  assert.deepEqual(toArray(authorizePlan.fieldValues["body.resources"]), ["urn:resource:turner"]);
+
   const decisionsPlan = buildRestV2InteractiveDocsHydrationPlan(
     {
-      key: "decisions",
+      key: "decisions-preauthorize",
       operationId: "retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
       operationAnchor: "operation/retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesMvpdPath: true,
+      requireMvpdPath: true,
+      usesBodyResources: true,
+      requireBodyResources: true,
+      usesPartnerFrameworkStatus: true,
+      contentType: "application/json",
     },
     baseContext,
     accessToken
@@ -270,18 +420,59 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.deepEqual(toArray(decisionsPlan.missingRequiredFields), []);
 
   const logoutPlan = buildRestV2InteractiveDocsHydrationPlan(
-    { key: "logout", operationId: "getLogoutForMvpdUsingGET", operationAnchor: "operation/getLogoutForMvpdUsingGET" },
+    {
+      key: "logout-by-mvpd",
+      operationId: "getLogoutForMvpdUsingGET",
+      operationAnchor: "operation/getLogoutForMvpdUsingGET",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesMvpdPath: true,
+      requireMvpdPath: true,
+      usesQueryRedirectUrl: true,
+    },
     baseContext,
     accessToken
   );
   assert.equal(logoutPlan.fieldValues["path.mvpd"], "Comcast_SSO");
   assert.equal(logoutPlan.fieldValues["query.redirectUrl"], "https://experience.example.test/callback");
 
+  const partnerProfilePlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    baseContext,
+    accessToken
+  );
+  assert.equal(partnerProfilePlan.fieldValues["path.partner"], "Roku");
+  assert.equal(partnerProfilePlan.fieldValues["body.SAMLResponse"], "PHNhbWxwOlJlc3BvbnNlPg==");
+  assert.equal(partnerProfilePlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+  assert.match(String(partnerProfilePlan.notes[0] || ""), /SAMLResponse captured from/);
+
   const partnerSsoPlan = buildRestV2InteractiveDocsHydrationPlan(
     {
-      key: "partnerSso",
+      key: "partner-sso-verification-token",
       operationId: "retrieveVerificationTokenUsingPOST",
       operationAnchor: "operation/retrieveVerificationTokenUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      usesBodyDomainName: true,
+      requireBodyDomainName: true,
+      usesBodyRedirectUrl: true,
+      requireBodyRedirectUrl: true,
+      contentType: "application/x-www-form-urlencoded",
     },
     baseContext,
     accessToken
@@ -289,14 +480,33 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(partnerSsoPlan.fieldValues["path.partner"], "Roku");
   assert.equal(partnerSsoPlan.fieldValues["body.domainName"], "experience.example.test");
   assert.equal(partnerSsoPlan.fieldValues["body.redirectUrl"], "https://experience.example.test/callback");
-  assert.deepEqual(toArray(partnerSsoPlan.requiredFields), [
-    "path.serviceProvider",
-    "header.Authorization",
-    "path.partner",
+  assert.deepEqual(toArray(partnerSsoPlan.requiredFields).sort(), [
     "body.domainName",
     "body.redirectUrl",
-  ]);
+    "header.Authorization",
+    "path.serviceProvider",
+    "path.partner",
+  ].sort());
   assert.deepEqual(toArray(partnerSsoPlan.missingRequiredFields), []);
+
+  const missingDynamicContextPlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    { ...baseContext, partner: "", samlResponse: "" },
+    accessToken
+  );
+  assert.deepEqual(toArray(missingDynamicContextPlan.missingRequiredFields).sort(), ["body.SAMLResponse", "path.partner"].sort());
+  assert.match(missingDynamicContextPlan.notes.join(" "), /Partner SSO/);
 });
 
 test("premium service sections and HR service pills keep their theme class wiring", () => {

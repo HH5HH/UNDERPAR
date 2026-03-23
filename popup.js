@@ -263,62 +263,219 @@ const HR_CONTEXT_SECTION_TITLE_BY_KEY = {
 };
 const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
   {
-    key: "configuration",
-    label: "Configuration",
+    key: "configuration-service-provider",
+    sectionKey: "configuration",
+    sectionLabel: "1. Configuration",
+    label: "Service Provider Configuration",
     methodLabel: "GET",
     operationSummary: "Retrieve service provider configuration",
     tagAnchor: "tag/1.-Configuration",
     operationAnchor: "operation/handleRequestUsingGET",
     operationId: "handleRequestUsingGET",
+    requiresAccessToken: true,
   },
   {
-    key: "sessions",
-    label: "Sessions",
+    key: "sessions-start-authentication",
+    sectionKey: "sessions",
+    sectionLabel: "2. Sessions",
+    label: "Start Authentication",
+    methodLabel: "GET",
+    operationSummary: "Perform authentication in user agent",
+    tagAnchor: "tag/2.-Sessions",
+    operationAnchor: "operation/startAuthenticationUsingGET",
+    operationId: "startAuthenticationUsingGET",
+    requiresAccessToken: false,
+    usesSessionCode: true,
+    requireSessionCode: true,
+  },
+  {
+    key: "sessions-create-session",
+    sectionKey: "sessions",
+    sectionLabel: "2. Sessions",
+    label: "Create Session",
     methodLabel: "POST",
     operationSummary: "Create authentication session",
     tagAnchor: "tag/2.-Sessions",
     operationAnchor: "operation/createSessionUsingPOST",
     operationId: "createSessionUsingPOST",
+    requiresAccessToken: true,
+    usesDeviceHeaders: true,
+    contentType: "application/x-www-form-urlencoded",
+    usesBodyMvpd: true,
+    usesBodyDomainName: true,
+    usesBodyRedirectUrl: true,
   },
   {
-    key: "profiles",
-    label: "Profiles",
+    key: "sessions-resume-session",
+    sectionKey: "sessions",
+    sectionLabel: "2. Sessions",
+    label: "Resume Session",
+    methodLabel: "POST",
+    operationSummary: "Resume authentication session",
+    tagAnchor: "tag/2.-Sessions",
+    operationAnchor: "operation/resumeSessionUsingPOST",
+    operationId: "resumeSessionUsingPOST",
+    requiresAccessToken: true,
+    contentType: "application/x-www-form-urlencoded",
+    usesSessionCode: true,
+    requireSessionCode: true,
+    usesBodyMvpd: true,
+    usesBodyDomainName: true,
+    usesBodyRedirectUrl: true,
+  },
+  {
+    key: "sessions-session-status",
+    sectionKey: "sessions",
+    sectionLabel: "2. Sessions",
+    label: "Session Status",
+    methodLabel: "GET",
+    operationSummary: "Retrieve authentication session using code",
+    tagAnchor: "tag/2.-Sessions",
+    operationAnchor: "operation/getSessionStatusUsingGET_1",
+    operationId: "getSessionStatusUsingGET_1",
+    requiresAccessToken: true,
+    usesSessionCode: true,
+    requireSessionCode: true,
+  },
+  {
+    key: "profiles-by-code",
+    sectionKey: "profiles",
+    sectionLabel: "3. Profiles",
+    label: "Profiles by Code",
+    methodLabel: "GET",
+    operationSummary: "Retrieve profiles for specific code",
+    tagAnchor: "tag/3.-Profiles",
+    operationAnchor: "operation/getProfileForCodeUsingGET_1",
+    operationId: "getProfileForCodeUsingGET_1",
+    requiresAccessToken: true,
+    usesSessionCode: true,
+    requireSessionCode: true,
+  },
+  {
+    key: "profiles-all",
+    sectionKey: "profiles",
+    sectionLabel: "3. Profiles",
+    label: "All Profiles",
     methodLabel: "GET",
     operationSummary: "Retrieve profiles",
     tagAnchor: "tag/3.-Profiles",
     operationAnchor: "operation/getProfilesUsingGET_1",
     operationId: "getProfilesUsingGET_1",
+    requiresAccessToken: true,
+    usesDeviceHeaders: true,
+    usesPartnerFrameworkStatus: true,
   },
   {
-    key: "decisions",
-    label: "Decisions",
+    key: "profiles-by-mvpd",
+    sectionKey: "profiles",
+    sectionLabel: "3. Profiles",
+    label: "Profile by MVPD",
+    methodLabel: "GET",
+    operationSummary: "Retrieve profile for specific MVPD",
+    tagAnchor: "tag/3.-Profiles",
+    operationAnchor: "operation/getProfileForMvpdUsingGET",
+    operationId: "getProfileForMvpdUsingGET",
+    requiresAccessToken: true,
+    usesDeviceHeaders: true,
+    usesMvpdPath: true,
+    requireMvpdPath: true,
+    usesPartnerFrameworkStatus: true,
+  },
+  {
+    key: "decisions-authorize",
+    sectionKey: "decisions",
+    sectionLabel: "4. Decisions",
+    label: "Authorize",
+    methodLabel: "POST",
+    operationSummary: "Retrieve authorization decisions",
+    tagAnchor: "tag/4.-Decisions",
+    operationAnchor: "operation/retrieveAuthorizeDecisionsForMvpdUsingPOST",
+    operationId: "retrieveAuthorizeDecisionsForMvpdUsingPOST",
+    requiresAccessToken: true,
+    usesDeviceHeaders: true,
+    usesMvpdPath: true,
+    requireMvpdPath: true,
+    usesBodyResources: true,
+    requireBodyResources: true,
+    usesPartnerFrameworkStatus: true,
+    contentType: "application/json",
+  },
+  {
+    key: "decisions-preauthorize",
+    sectionKey: "decisions",
+    sectionLabel: "4. Decisions",
+    label: "Preauthorize",
     methodLabel: "POST",
     operationSummary: "Retrieve preauthorization decisions",
     tagAnchor: "tag/4.-Decisions",
     operationAnchor: "operation/retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
     operationId: "retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
+    requiresAccessToken: true,
+    usesDeviceHeaders: true,
+    usesMvpdPath: true,
+    requireMvpdPath: true,
+    usesBodyResources: true,
+    requireBodyResources: true,
+    usesPartnerFrameworkStatus: true,
+    contentType: "application/json",
   },
   {
-    key: "logout",
-    label: "Logout",
+    key: "logout-by-mvpd",
+    sectionKey: "logout",
+    sectionLabel: "5. Logout",
+    label: "Logout for MVPD",
     methodLabel: "GET",
     operationSummary: "Initiate logout for specific MVPD",
     tagAnchor: "tag/5.-Logout",
     operationAnchor: "operation/getLogoutForMvpdUsingGET",
     operationId: "getLogoutForMvpdUsingGET",
+    requiresAccessToken: true,
+    usesDeviceHeaders: true,
+    usesMvpdPath: true,
+    requireMvpdPath: true,
+    usesQueryRedirectUrl: true,
   },
   {
-    key: "partnerSso",
-    label: "Partner Single Sign-On",
+    key: "partner-sso-create-profile",
+    sectionKey: "partnerSso",
+    sectionLabel: "6. Partner Single Sign-On",
+    label: "Create Partner Profile",
+    methodLabel: "POST",
+    operationSummary: "Retrieve profile using partner authentication response",
+    tagAnchor: "tag/6.-Partner-Single-Sign-On",
+    operationAnchor: "operation/createPartnerProfileUsingPOST",
+    operationId: "createPartnerProfileUsingPOST",
+    requiresAccessToken: true,
+    usesDeviceHeaders: true,
+    usesPartnerPath: true,
+    requirePartnerPath: true,
+    usesPartnerFrameworkStatus: true,
+    usesBodySamlResponse: true,
+    requireBodySamlResponse: true,
+    contentType: "application/x-www-form-urlencoded",
+  },
+  {
+    key: "partner-sso-verification-token",
+    sectionKey: "partnerSso",
+    sectionLabel: "6. Partner Single Sign-On",
+    label: "Retrieve Verification Token",
     methodLabel: "POST",
     operationSummary: "Retrieve partner authentication request",
     tagAnchor: "tag/6.-Partner-Single-Sign-On",
     operationAnchor: "operation/retrieveVerificationTokenUsingPOST",
     operationId: "retrieveVerificationTokenUsingPOST",
+    requiresAccessToken: true,
+    usesDeviceHeaders: true,
+    usesPartnerPath: true,
+    requirePartnerPath: true,
+    usesPartnerFrameworkStatus: true,
+    usesBodyDomainName: true,
+    requireBodyDomainName: true,
+    usesBodyRedirectUrl: true,
+    requireBodyRedirectUrl: true,
+    contentType: "application/x-www-form-urlencoded",
   },
 ]);
-const REST_V2_INTERACTIVE_DEFAULT_RESOURCE_IDS = Object.freeze(["sample-resource-id"]);
-const REST_V2_INTERACTIVE_DEFAULT_PARTNER = "Apple";
 const REST_V2_DEVICE_ID_STORAGE_KEY = "underpar_restv2_device_id_v1";
 const LEGACY_REST_V2_DEVICE_ID_STORAGE_KEY = "mincloudlogin_restv2_device_id_v1";
 const REST_V2_DEFAULT_DOMAIN = "adobe.com";
@@ -53174,6 +53331,73 @@ function getRestV2InteractiveDocsEntry(entryKey = "") {
   );
 }
 
+function getRestV2InteractiveDocsSections() {
+  const sections = [];
+  const byKey = new Map();
+  REST_V2_INTERACTIVE_DOC_ENTRIES.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const sectionKey = String(entry.sectionKey || "").trim();
+    if (!sectionKey) {
+      return;
+    }
+    if (!byKey.has(sectionKey)) {
+      const section = {
+        sectionKey,
+        sectionLabel: String(entry.sectionLabel || sectionKey).trim(),
+        tagAnchor: String(entry.tagAnchor || "").trim(),
+        entries: [],
+      };
+      byKey.set(sectionKey, section);
+      sections.push(section);
+    }
+    byKey.get(sectionKey).entries.push(entry);
+  });
+  return sections;
+}
+
+function resolveRestV2LearningRecordingContext(programmerId = "", requestorId = "", mvpd = "") {
+  const recordingContext = buildRestV2SelectionContextFromRecordingContext(state.restV2RecordingContext);
+  if (!recordingContext?.ok) {
+    return null;
+  }
+  const normalizedProgrammerId = String(programmerId || "").trim().toLowerCase();
+  const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
+  const normalizedMvpd = String(mvpd || "").trim();
+  if (
+    normalizedProgrammerId &&
+    String(recordingContext.programmerId || "").trim().toLowerCase() !== normalizedProgrammerId
+  ) {
+    return null;
+  }
+  if (
+    normalizedRequestorId &&
+    String(recordingContext.requestorId || recordingContext.serviceProviderId || "").trim().toLowerCase() !== normalizedRequestorId
+  ) {
+    return null;
+  }
+  if (!normalizedMvpd) {
+    return recordingContext;
+  }
+  const allowSsoAlias = isRestV2LikelyPartnerSsoContext(recordingContext);
+  return isRestV2MvpdMatch(String(recordingContext.mvpd || "").trim(), normalizedMvpd, {
+    allowSsoAlias,
+  })
+    ? recordingContext
+    : null;
+}
+
+function collectRestV2LearningResourceIds(harvest = null, preauthorizeHistory = null) {
+  const primaryCheck = getRestV2ProfilePreauthzChecks(harvest)[0] || null;
+  const candidates = Array.isArray(primaryCheck?.resourceIds)
+    ? primaryCheck.resourceIds
+    : Array.isArray(preauthorizeHistory?.resourceIds)
+      ? preauthorizeHistory.resourceIds
+      : [];
+  return candidates.map((item) => String(item || "").trim()).filter(Boolean);
+}
+
 function getFirstCachedMvpdIdForRequestor(requestorId = "") {
   const cache = getRequestorScopedMvpdCache(requestorId);
   if (!cache || typeof cache?.keys !== "function") {
@@ -53293,19 +53517,26 @@ function buildRestV2InteractiveDocsContext(programmer = null) {
   }
 
   const selectedMvpd = String(state.selectedMvpdId || "").trim();
+  const activeRecordingContext = resolveRestV2LearningRecordingContext(programmerId, requestorId, selectedMvpd);
+  const harvestLookupMvpd = firstNonEmptyString([
+    selectedMvpd,
+    String(activeRecordingContext?.mvpd || "").trim(),
+  ]);
   const harvest = getRestV2ProfileHarvestForContext({
     programmerId,
     requestorId,
-    mvpd: selectedMvpd,
+    mvpd: harvestLookupMvpd,
   });
   const harvestContext = buildRestV2ContextFromHarvest(harvest);
   const fallbackMvpd = firstNonEmptyString([
     selectedMvpd,
+    String(activeRecordingContext?.mvpd || "").trim(),
+    String(harvestContext?.mvpd || "").trim(),
     String(harvest?.mvpd || "").trim(),
-    getFirstCachedMvpdIdForRequestor(requestorId),
   ]);
   const mvpdMeta =
     getRestV2MvpdMeta(requestorId, fallbackMvpd) ||
+    activeRecordingContext?.mvpdMeta ||
     (String(harvest?.mvpdName || "").trim() && fallbackMvpd
       ? {
           id: fallbackMvpd,
@@ -53313,24 +53544,62 @@ function buildRestV2InteractiveDocsContext(programmer = null) {
         }
       : null);
   const preauthorizeHistory = findRestV2PreauthorizeHistoryEntryForLearning(programmerId, requestorId, fallbackMvpd);
-  const resourceIds = Array.isArray(preauthorizeHistory?.resourceIds)
-    ? preauthorizeHistory.resourceIds.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-  const redirectUrl =
+  const resourceIds = collectRestV2LearningResourceIds(harvest, preauthorizeHistory);
+  const sessionUrl = normalizeAdobeNavigationUrl(
     firstNonEmptyString([
-      String(harvest?.redirectUrl || "").trim(),
-      REST_V2_REDIRECT_CANDIDATES[0],
-      `${String(ADOBE_SP_BASE || "").trim()}/api.html`,
-    ]) || "";
-  const domainName = firstNonEmptyString([
-    String(harvest?.domainName || "").trim(),
-    REST_V2_DEFAULT_DOMAIN,
+      String(activeRecordingContext?.sessionUrl || "").trim(),
+      String(harvestContext?.sessionUrl || "").trim(),
+      String(harvest?.sessionUrl || "").trim(),
+    ])
+  );
+  const loginUrl = normalizeAdobeNavigationUrl(
+    firstNonEmptyString([
+      String(activeRecordingContext?.loginUrl || "").trim(),
+      String(harvestContext?.loginUrl || "").trim(),
+      String(harvest?.loginUrl || "").trim(),
+    ])
+  );
+  const sessionCodeCandidates = collectRestV2SessionCodeCandidates(
+    [
+      String(activeRecordingContext?.sessionCode || "").trim(),
+      ...(Array.isArray(activeRecordingContext?.sessionCodeCandidates) ? activeRecordingContext.sessionCodeCandidates : []),
+      String(harvestContext?.sessionCode || "").trim(),
+      ...(Array.isArray(harvestContext?.sessionCodeCandidates) ? harvestContext.sessionCodeCandidates : []),
+      String(harvest?.sessionCode || "").trim(),
+      ...(Array.isArray(harvest?.sessionCodeCandidates) ? harvest.sessionCodeCandidates : []),
+      sessionUrl,
+      loginUrl,
+    ],
+    requestorId
+  );
+  const sessionCode = firstNonEmptyString([
+    String(activeRecordingContext?.sessionCode || "").trim(),
+    String(harvestContext?.sessionCode || "").trim(),
+    String(harvest?.sessionCode || "").trim(),
+    sessionCodeCandidates[0],
   ]);
-  const partnerFrameworkStatus = String(resolveRestV2PartnerFrameworkStatusFromContext(harvestContext || harvest) || "").trim();
+  const redirectUrl = normalizeAdobeNavigationUrl(
+    firstNonEmptyString([
+      String(activeRecordingContext?.redirectUrl || "").trim(),
+      String(harvest?.redirectUrl || "").trim(),
+    ])
+  );
+  const domainName = firstNonEmptyString([
+    String(activeRecordingContext?.domainName || "").trim(),
+    String(harvest?.domainName || "").trim(),
+  ]);
+  const partnerFrameworkStatus = firstNonEmptyString([
+    String(activeRecordingContext?.partnerFrameworkStatus || "").trim(),
+    String(resolveRestV2PartnerFrameworkStatusFromContext(harvestContext || harvest) || "").trim(),
+  ]);
   const partner = firstNonEmptyString([
+    String(resolveRestV2PartnerNameFromContext(activeRecordingContext) || "").trim(),
     String(resolveRestV2PartnerNameFromContext(harvestContext || harvest) || "").trim(),
     String(harvest?.sessionPartner || "").trim(),
-    REST_V2_INTERACTIVE_DEFAULT_PARTNER,
+  ]);
+  const flowId = firstNonEmptyString([
+    state.restV2RecordingActive === true ? String(state.restV2DebugFlowId || "").trim() : "",
+    resolveRestV2DebugFlowIdForHarvest(harvest),
   ]);
   return {
     ok: true,
@@ -53343,14 +53612,53 @@ function buildRestV2InteractiveDocsContext(programmer = null) {
     mvpdMeta,
     appInfo: preferredApp,
     services,
+    activeRecordingContext: activeRecordingContext || null,
     harvest: harvest || null,
     harvestContext: harvestContext || null,
     resourceIds,
+    sessionUrl,
+    loginUrl,
+    sessionCode: String(sessionCode || "").trim(),
+    sessionCodeCandidates,
     redirectUrl: String(redirectUrl || "").trim(),
     domainName: String(domainName || "").trim(),
-    partnerFrameworkStatus,
+    partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
     partner: String(partner || "").trim(),
+    flowId: String(flowId || "").trim(),
   };
+}
+
+async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context = null) {
+  const resolvedEntry = entry && typeof entry === "object" ? entry : null;
+  const resolvedContext = context && typeof context === "object" ? context : null;
+  if (!resolvedEntry?.key || !resolvedContext?.ok) {
+    return resolvedContext;
+  }
+  const preparedContext = {
+    ...resolvedContext,
+  };
+  if (resolvedEntry.usesBodySamlResponse !== true || String(preparedContext.samlResponse || "").trim()) {
+    return preparedContext;
+  }
+  const flowId = firstNonEmptyString([
+    String(preparedContext.flowId || "").trim(),
+    resolveRestV2DebugFlowIdForHarvest(preparedContext.harvest),
+  ]);
+  if (!flowId) {
+    return preparedContext;
+  }
+  preparedContext.flowId = flowId;
+  try {
+    const flowSnapshot = await getRestV2DebugFlowSnapshot(flowId);
+    const samlDetails = extractRestV2SamlResponseFromDebugFlow(flowSnapshot);
+    if (String(samlDetails?.samlResponse || "").trim()) {
+      preparedContext.samlResponse = String(samlDetails.samlResponse || "").trim();
+      preparedContext.samlSource = String(samlDetails.source || "").trim();
+    }
+  } catch {
+    // Leave samlResponse empty and allow the docs form to remain partially hydrated.
+  }
+  return preparedContext;
 }
 
 function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "") {
@@ -53360,89 +53668,96 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     throw new Error("REST V2 learning hydration is missing entry or selection context.");
   }
 
-  const deviceHeaders = buildRestV2Headers(resolvedContext.serviceProviderId, {});
-  const headers = {
-    "path.serviceProvider": String(resolvedContext.serviceProviderId || "").trim(),
-    "header.Authorization": accessToken ? `Bearer ${String(accessToken || "").trim()}` : "",
-    "header.Accept": "application/json",
-    "header.User-Agent": typeof navigator !== "undefined" ? String(navigator.userAgent || "").trim() : "UnderPAR",
-    "header.AP-Device-Identifier": String(deviceHeaders["AP-Device-Identifier"] || "").trim(),
-    "header.X-Device-Info": String(deviceHeaders["X-Device-Info"] || "").trim(),
-  };
   const fieldValues = {
     server: String(REST_V2_BASE || "").trim(),
-    ...headers,
+    "path.serviceProvider": String(resolvedContext.serviceProviderId || "").trim(),
+    "header.Accept": "application/json",
+    "header.User-Agent": typeof navigator !== "undefined" ? String(navigator.userAgent || "").trim() : "UnderPAR",
   };
-  const requiredFields = ["path.serviceProvider", "header.Authorization"];
+  const requiredFields = ["path.serviceProvider"];
   const notes = [];
   if (resolvedContext.requestorAutoResolved === true && String(resolvedContext.requestorId || "").trim()) {
     notes.push(`Using the only REST V2 RequestorId mapped in UnderPAR: ${String(resolvedContext.requestorId || "").trim()}.`);
   }
-
-  switch (resolvedEntry.key) {
-    case "configuration":
-      break;
-    case "sessions": {
-      if (resolvedContext.mvpd) {
-        fieldValues["body.mvpd"] = String(resolvedContext.mvpd || "").trim();
-      }
+  if (resolvedEntry.requiresAccessToken !== false) {
+    fieldValues["header.Authorization"] = accessToken ? `Bearer ${String(accessToken || "").trim()}` : "";
+    requiredFields.push("header.Authorization");
+  }
+  if (resolvedEntry.usesDeviceHeaders === true) {
+    const deviceHeaders = buildRestV2Headers(resolvedContext.serviceProviderId, {});
+    fieldValues["header.AP-Device-Identifier"] = String(deviceHeaders["AP-Device-Identifier"] || "").trim();
+    fieldValues["header.X-Device-Info"] = String(deviceHeaders["X-Device-Info"] || "").trim();
+  }
+  if (resolvedEntry.contentType) {
+    fieldValues["header.Content-Type"] = String(resolvedEntry.contentType || "").trim();
+  }
+  if (resolvedEntry.usesPartnerFrameworkStatus === true && String(resolvedContext.partnerFrameworkStatus || "").trim()) {
+    fieldValues["header.AP-Partner-Framework-Status"] = String(resolvedContext.partnerFrameworkStatus || "").trim();
+  }
+  if (resolvedEntry.usesSessionCode === true) {
+    if (String(resolvedContext.sessionCode || "").trim()) {
+      fieldValues["path.code"] = String(resolvedContext.sessionCode || "").trim();
+    }
+    if (resolvedEntry.requireSessionCode === true) {
+      requiredFields.push("path.code");
+    }
+  }
+  if (resolvedEntry.usesMvpdPath === true) {
+    if (String(resolvedContext.mvpd || "").trim()) {
+      fieldValues["path.mvpd"] = String(resolvedContext.mvpd || "").trim();
+    }
+    if (resolvedEntry.requireMvpdPath === true) {
+      requiredFields.push("path.mvpd");
+    }
+  }
+  if (resolvedEntry.usesBodyMvpd === true && String(resolvedContext.mvpd || "").trim()) {
+    fieldValues["body.mvpd"] = String(resolvedContext.mvpd || "").trim();
+  }
+  if (resolvedEntry.usesBodyDomainName === true) {
+    if (String(resolvedContext.domainName || "").trim()) {
       fieldValues["body.domainName"] = String(resolvedContext.domainName || "").trim();
+    }
+    if (resolvedEntry.requireBodyDomainName === true) {
+      requiredFields.push("body.domainName");
+    }
+  }
+  if (resolvedEntry.usesBodyRedirectUrl === true) {
+    if (String(resolvedContext.redirectUrl || "").trim()) {
       fieldValues["body.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
-      fieldValues["header.Content-Type"] = "application/x-www-form-urlencoded";
-      break;
     }
-    case "profiles": {
-      if (resolvedContext.partnerFrameworkStatus) {
-        fieldValues["header.AP-Partner-Framework-Status"] = String(resolvedContext.partnerFrameworkStatus || "").trim();
-      }
-      break;
+    if (resolvedEntry.requireBodyRedirectUrl === true) {
+      requiredFields.push("body.redirectUrl");
     }
-    case "decisions": {
-      if (resolvedContext.mvpd) {
-        fieldValues["path.mvpd"] = String(resolvedContext.mvpd || "").trim();
-      } else {
-        requiredFields.push("path.mvpd");
-      }
-      const resourceIds =
-        Array.isArray(resolvedContext.resourceIds) && resolvedContext.resourceIds.length > 0
-          ? resolvedContext.resourceIds
-          : REST_V2_INTERACTIVE_DEFAULT_RESOURCE_IDS.slice();
-      if (
-        (!Array.isArray(resolvedContext.resourceIds) || resolvedContext.resourceIds.length === 0) &&
-        resourceIds.length > 0
-      ) {
-        notes.push("Using UnderPAR sample resourceIds for the Decisions form.");
-      }
-      fieldValues["body.resources"] = resourceIds.slice();
-      fieldValues["header.Content-Type"] = "application/json";
-      if (resolvedContext.partnerFrameworkStatus) {
-        fieldValues["header.AP-Partner-Framework-Status"] = String(resolvedContext.partnerFrameworkStatus || "").trim();
-      }
+  }
+  if (resolvedEntry.usesQueryRedirectUrl === true && String(resolvedContext.redirectUrl || "").trim()) {
+    fieldValues["query.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
+  }
+  if (resolvedEntry.usesPartnerPath === true) {
+    if (String(resolvedContext.partner || "").trim()) {
+      fieldValues["path.partner"] = String(resolvedContext.partner || "").trim();
+    }
+    if (resolvedEntry.requirePartnerPath === true) {
+      requiredFields.push("path.partner");
+    }
+  }
+  if (resolvedEntry.usesBodyResources === true) {
+    if (Array.isArray(resolvedContext.resourceIds) && resolvedContext.resourceIds.length > 0) {
+      fieldValues["body.resources"] = resolvedContext.resourceIds.slice();
+    }
+    if (resolvedEntry.requireBodyResources === true) {
       requiredFields.push("body.resources");
-      break;
     }
-    case "logout": {
-      if (resolvedContext.mvpd) {
-        fieldValues["path.mvpd"] = String(resolvedContext.mvpd || "").trim();
-      } else {
-        requiredFields.push("path.mvpd");
-      }
-      fieldValues["query.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
-      break;
+  }
+  if (resolvedEntry.usesBodySamlResponse === true) {
+    if (String(resolvedContext.samlResponse || "").trim()) {
+      fieldValues["body.SAMLResponse"] = String(resolvedContext.samlResponse || "").trim();
     }
-    case "partnerSso": {
-      fieldValues["path.partner"] = String(resolvedContext.partner || REST_V2_INTERACTIVE_DEFAULT_PARTNER).trim();
-      if (!String(resolvedContext.partner || "").trim()) {
-        notes.push(`Using default partner "${REST_V2_INTERACTIVE_DEFAULT_PARTNER}" for Partner SSO.`);
-      }
-      fieldValues["body.domainName"] = String(resolvedContext.domainName || "").trim();
-      fieldValues["body.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
-      fieldValues["header.Content-Type"] = "application/x-www-form-urlencoded";
-      requiredFields.push("path.partner", "body.domainName", "body.redirectUrl");
-      break;
+    if (resolvedEntry.requireBodySamlResponse === true) {
+      requiredFields.push("body.SAMLResponse");
     }
-    default:
-      break;
+    if (String(resolvedContext.samlSource || "").trim()) {
+      notes.push(`Using SAMLResponse captured from ${String(resolvedContext.samlSource || "").trim()}.`);
+    }
   }
 
   const normalizedFieldValues = Object.entries(fieldValues).reduce((result, [key, value]) => {
@@ -53468,6 +53783,21 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     }
     return true;
   });
+  if (missingRequiredFields.includes("path.code")) {
+    notes.push("Run LOGIN first to capture a REST V2 session code for this selection.");
+  }
+  if (missingRequiredFields.includes("body.resources")) {
+    notes.push("Run a real authorize or preauthorize check first, or enter real resourceIds before Send.");
+  }
+  if (missingRequiredFields.includes("path.partner")) {
+    notes.push("Run a real Partner SSO flow first, or choose the correct partner before Send.");
+  }
+  if (missingRequiredFields.includes("body.domainName") || missingRequiredFields.includes("body.redirectUrl")) {
+    notes.push("UnderPAR needs a real redirectUrl and domainName from a recent REST V2 session for this operation.");
+  }
+  if (missingRequiredFields.includes("body.SAMLResponse")) {
+    notes.push("Complete a Partner SSO login first so UnderPAR can capture SAMLResponse for this selection.");
+  }
 
   return {
     entryKey: String(resolvedEntry.key || "").trim(),
@@ -53486,6 +53816,7 @@ function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null)
     return "";
   }
   const docsUrl = buildRestV2InteractiveDocsUrl();
+  const sections = getRestV2InteractiveDocsSections();
   const context = getHrContextSummary(programmer);
   const actionLabel = `Open REST API V2 interactive docs in main content for ${context.compositeLabel}`;
   return `
@@ -53501,27 +53832,50 @@ function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null)
         >
           REST API V2 Interactive Docs
         </a>
-        <p class="hr-rest-v2-docs-subtitle">Quick jump from UnderPAR</p>
+        <p class="hr-rest-v2-docs-subtitle">Every customer-facing REST V2 operation, hydrated from UnderPAR context when available.</p>
       </div>
       <div class="hr-rest-v2-docs-grid">
-        ${REST_V2_INTERACTIVE_DOC_ENTRIES.map((entry) => {
-          const entryUrl = buildRestV2InteractiveDocsUrl(entry.operationAnchor || entry.tagAnchor || "");
-          const entryActionLabel = `Open and hydrate ${entry.label} in Adobe PASS REST API V2 interactive docs`;
+        ${sections.map((section) => {
+          const sectionUrl = buildRestV2InteractiveDocsUrl(section.tagAnchor || "");
+          const sectionActionLabel = `Open ${section.sectionLabel} in Adobe PASS REST API V2 interactive docs`;
           return `
-            <button
-              type="button"
-              class="hr-rest-v2-doc-entry"
-              data-restv2-doc-entry-key="${escapeHtml(entry.key)}"
-              data-restv2-doc-url="${escapeHtml(entryUrl)}"
-              title="${escapeHtml(entryActionLabel)}"
-              aria-label="${escapeHtml(entryActionLabel)}"
-            >
-              <span class="hr-rest-v2-doc-entry-topline">
-                <span class="hr-rest-v2-doc-entry-label">${escapeHtml(entry.label)}</span>
-                <span class="hr-rest-v2-doc-entry-method">${escapeHtml(entry.methodLabel || "")}</span>
-              </span>
-              <span class="hr-rest-v2-doc-entry-summary">${escapeHtml(entry.operationSummary || "")}</span>
-            </button>
+            <section class="hr-rest-v2-doc-section">
+              <div class="hr-rest-v2-doc-section-head">
+                <a
+                  href="${escapeHtml(sectionUrl)}"
+                  class="hr-rest-v2-doc-section-title"
+                  data-service-doc-key="restV2"
+                  data-service-doc-url="${escapeHtml(sectionUrl)}"
+                  title="${escapeHtml(sectionActionLabel)}"
+                  aria-label="${escapeHtml(sectionActionLabel)}"
+                >
+                  ${escapeHtml(section.sectionLabel)}
+                </a>
+                <span class="hr-rest-v2-doc-section-count">${escapeHtml(String(section.entries.length))} ${section.entries.length === 1 ? "Op" : "Ops"}</span>
+              </div>
+              <div class="hr-rest-v2-doc-section-grid">
+                ${section.entries.map((entry) => {
+                  const entryUrl = buildRestV2InteractiveDocsUrl(entry.operationAnchor || entry.tagAnchor || "");
+                  const entryActionLabel = `Open and hydrate ${entry.label} in Adobe PASS REST API V2 interactive docs`;
+                  return `
+                    <button
+                      type="button"
+                      class="hr-rest-v2-doc-entry"
+                      data-restv2-doc-entry-key="${escapeHtml(entry.key)}"
+                      data-restv2-doc-url="${escapeHtml(entryUrl)}"
+                      title="${escapeHtml(entryActionLabel)}"
+                      aria-label="${escapeHtml(entryActionLabel)}"
+                    >
+                      <span class="hr-rest-v2-doc-entry-topline">
+                        <span class="hr-rest-v2-doc-entry-label">${escapeHtml(entry.label)}</span>
+                        <span class="hr-rest-v2-doc-entry-method">${escapeHtml(entry.methodLabel || "")}</span>
+                      </span>
+                      <span class="hr-rest-v2-doc-entry-summary">${escapeHtml(entry.operationSummary || "")}</span>
+                    </button>
+                  `;
+                }).join("")}
+              </div>
+            </section>
           `;
         }).join("")}
       </div>
@@ -53689,6 +54043,9 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     if (normalizedFieldName === "body.resources") {
       return operation.querySelector("textarea");
     }
+    if (normalizedFieldName === "body.SAMLResponse") {
+      return operation.querySelector("textarea") || operation.querySelector('input[type="text"], input:not([type])');
+    }
     return null;
   };
 
@@ -53836,29 +54193,34 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
 
   setStatus(`Opening ${entry.label} interactive docs with UnderPAR context...`, "info");
 
-  let tokenResult;
-  try {
-    tokenResult = await ensureDcrAccessTokenWithServiceRecovery(context.programmerId, context.appInfo, false, {
-      requestorId: context.requestorId,
-      service: "rest-v2-learning",
-      scope: `rest-v2-learning-${String(entry.key || "").trim()}`,
-      requiredServiceScope: REST_V2_SCOPE,
-      allowProvisioning: true,
-      lockAppSelection: true,
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    setStatus(reason, "error");
-    return {
-      ok: false,
-      error: reason,
-    };
+  let tokenResult = {
+    accessToken: "",
+    appInfo: context.appInfo,
+  };
+  if (entry.requiresAccessToken !== false) {
+    try {
+      tokenResult = await ensureDcrAccessTokenWithServiceRecovery(context.programmerId, context.appInfo, false, {
+        requestorId: context.requestorId,
+        service: "rest-v2-learning",
+        scope: `rest-v2-learning-${String(entry.key || "").trim()}`,
+        requiredServiceScope: REST_V2_SCOPE,
+        allowProvisioning: true,
+        lockAppSelection: true,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      setStatus(reason, "error");
+      return {
+        ok: false,
+        error: reason,
+      };
+    }
   }
 
-  const resolvedContext = {
+  const resolvedContext = await prepareRestV2InteractiveDocsContextForEntry(entry, {
     ...context,
     appInfo: tokenResult?.appInfo || context.appInfo,
-  };
+  });
   const plan = buildRestV2InteractiveDocsHydrationPlan(entry, resolvedContext, String(tokenResult?.accessToken || "").trim());
   const targetUrl = String(requestedUrl || plan.docsUrl || buildRestV2InteractiveDocsUrl(entry.operationAnchor || "")).trim();
   const opened = await openPremiumServiceDocumentation("restV2", targetUrl);
