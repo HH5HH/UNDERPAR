@@ -166,6 +166,9 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.match(applyServiceBoxSectionShellSource, /<details class="service-box-details"/);
   assert.match(applyServiceBoxSectionShellSource, /<summary\s+class="metadata-header service-box-header"/);
   assert.match(applyServiceBoxSectionShellSource, /<span class="collapse-icon">▼<\/span>/);
+  assert.match(applyServiceBoxSectionShellSource, /toggleButton\.addEventListener\("click", \(event\) => \{/);
+  assert.match(applyServiceBoxSectionShellSource, /toggleButton\.addEventListener\("keydown", \(event\) => \{/);
+  assert.match(applyServiceBoxSectionShellSource, /setOpenState\(detailsElement\.open !== true\)/);
   assert.match(applyServiceBoxSectionShellSource, /detailsElement\.addEventListener\("toggle", syncOpenState\)/);
   assert.match(wireHrContextSectionActionsSource, /section\.addEventListener\("click", \(event\) => \{/);
   assert.match(wireHrContextSectionActionsSource, /openRestV2InteractiveDocsEntry/);

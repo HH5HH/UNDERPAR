@@ -52916,6 +52916,9 @@ function applyServiceBoxSectionShell(section, options = {}) {
   const container = section.querySelector(".service-box-container");
   const contentElement = section.querySelector('[data-service-box-content="true"]');
   if (detailsElement && toggleButton && container) {
+    const setOpenState = (nextOpen) => {
+      detailsElement.open = nextOpen === true;
+    };
     const syncOpenState = () => {
       const collapsed = detailsElement.open !== true;
       toggleButton.classList.toggle("collapsed", collapsed);
@@ -52927,6 +52930,19 @@ function applyServiceBoxSectionShell(section, options = {}) {
         onCollapsedChange(collapsed);
       }
     };
+    toggleButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpenState(detailsElement.open !== true);
+    });
+    toggleButton.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setOpenState(detailsElement.open !== true);
+    });
     detailsElement.addEventListener("toggle", syncOpenState);
     syncOpenState();
   }
