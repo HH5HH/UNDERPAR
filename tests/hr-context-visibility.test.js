@@ -72,6 +72,28 @@ function loadHrVisibilityHelpers(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2LearningPlanBuilder() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    'const REST_V2_INTERACTIVE_DEFAULT_RESOURCE_IDS = Object.freeze(["sample-resource-id"]);',
+    'const REST_V2_INTERACTIVE_DEFAULT_PARTNER = "Apple";',
+    'const REST_V2_BASE = "https://api.example.test";',
+    'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
+    'function buildRestV2Headers() { return { "AP-Device-Identifier": "device-123", "X-Device-Info": "device-info-123" }; }',
+    extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
+    extractFunctionSource(source, "buildRestV2InteractiveDocsHydrationPlan"),
+    "module.exports = { buildRestV2InteractiveDocsHydrationPlan };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    navigator: { userAgent: "UnderPAR test" },
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("HR context stays hidden without a selected media company or detected premium services", () => {
   const state = {
     programmerWorkspaceHydrationReadyByKey: new Map([["production|fox", true], ["staging|fox", false]]),
@@ -183,6 +205,98 @@ test("REST V2 learning card exposes six interactive doc hydrators backed by the 
     popupSource,
     /const docsItemHtml = restV2DocsPanelHtml \? "" : buildMetadataItemHtml\("Docs", `HOWTO: \$\{howtoSubject\} quick docs coming soon\.\.\.`\);/
   );
+});
+
+test("REST V2 learning hydration plans honor the selected customer-doc operation contracts", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const accessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
+  const toArray = (value) => Array.from(value || []);
+  const baseContext = {
+    serviceProviderId: "turner-requestor",
+    requestorId: "turner-requestor",
+    requestorAutoResolved: false,
+    mvpd: "Comcast_SSO",
+    resourceIds: ["urn:resource:turner"],
+    redirectUrl: "https://experience.example.test/callback",
+    domainName: "experience.example.test",
+    partner: "Roku",
+    partnerFrameworkStatus: "none",
+  };
+
+  const configurationPlan = buildRestV2InteractiveDocsHydrationPlan(
+    { key: "configuration", operationId: "handleRequestUsingGET", operationAnchor: "operation/handleRequestUsingGET" },
+    baseContext,
+    accessToken
+  );
+  assert.deepEqual(toArray(configurationPlan.requiredFields), ["path.serviceProvider", "header.Authorization"]);
+  assert.equal(configurationPlan.fieldValues["path.serviceProvider"], "turner-requestor");
+  assert.equal(configurationPlan.fieldValues["header.Authorization"], `Bearer ${accessToken}`);
+  assert.equal(configurationPlan.fieldValues["header.Accept"], "application/json");
+  assert.equal(configurationPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+  assert.equal(configurationPlan.fieldValues["header.X-Device-Info"], "device-info-123");
+
+  const sessionsPlan = buildRestV2InteractiveDocsHydrationPlan(
+    { key: "sessions", operationId: "createSessionUsingPOST", operationAnchor: "operation/createSessionUsingPOST" },
+    { ...baseContext, mvpd: "" },
+    accessToken
+  );
+  assert.deepEqual(toArray(sessionsPlan.requiredFields), ["path.serviceProvider", "header.Authorization"]);
+  assert.equal(sessionsPlan.fieldValues["header.Content-Type"], "application/x-www-form-urlencoded");
+  assert.equal(sessionsPlan.fieldValues["body.domainName"], "experience.example.test");
+  assert.equal(sessionsPlan.fieldValues["body.redirectUrl"], "https://experience.example.test/callback");
+  assert.equal(Object.prototype.hasOwnProperty.call(sessionsPlan.fieldValues, "body.mvpd"), false);
+  assert.deepEqual(toArray(sessionsPlan.missingRequiredFields), []);
+
+  const profilesPlan = buildRestV2InteractiveDocsHydrationPlan(
+    { key: "profiles", operationId: "getProfilesUsingGET_1", operationAnchor: "operation/getProfilesUsingGET_1" },
+    baseContext,
+    accessToken
+  );
+  assert.equal(profilesPlan.fieldValues["header.AP-Partner-Framework-Status"], "none");
+  assert.deepEqual(toArray(profilesPlan.requiredFields), ["path.serviceProvider", "header.Authorization"]);
+
+  const decisionsPlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "decisions",
+      operationId: "retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
+      operationAnchor: "operation/retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
+    },
+    baseContext,
+    accessToken
+  );
+  assert.equal(decisionsPlan.fieldValues["path.mvpd"], "Comcast_SSO");
+  assert.equal(decisionsPlan.fieldValues["header.Content-Type"], "application/json");
+  assert.deepEqual(toArray(decisionsPlan.fieldValues["body.resources"]), ["urn:resource:turner"]);
+  assert.deepEqual(toArray(decisionsPlan.missingRequiredFields), []);
+
+  const logoutPlan = buildRestV2InteractiveDocsHydrationPlan(
+    { key: "logout", operationId: "getLogoutForMvpdUsingGET", operationAnchor: "operation/getLogoutForMvpdUsingGET" },
+    baseContext,
+    accessToken
+  );
+  assert.equal(logoutPlan.fieldValues["path.mvpd"], "Comcast_SSO");
+  assert.equal(logoutPlan.fieldValues["query.redirectUrl"], "https://experience.example.test/callback");
+
+  const partnerSsoPlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partnerSso",
+      operationId: "retrieveVerificationTokenUsingPOST",
+      operationAnchor: "operation/retrieveVerificationTokenUsingPOST",
+    },
+    baseContext,
+    accessToken
+  );
+  assert.equal(partnerSsoPlan.fieldValues["path.partner"], "Roku");
+  assert.equal(partnerSsoPlan.fieldValues["body.domainName"], "experience.example.test");
+  assert.equal(partnerSsoPlan.fieldValues["body.redirectUrl"], "https://experience.example.test/callback");
+  assert.deepEqual(toArray(partnerSsoPlan.requiredFields), [
+    "path.serviceProvider",
+    "header.Authorization",
+    "path.partner",
+    "body.domainName",
+    "body.redirectUrl",
+  ]);
+  assert.deepEqual(toArray(partnerSsoPlan.missingRequiredFields), []);
 });
 
 test("premium service sections and HR service pills keep their theme class wiring", () => {

@@ -53385,8 +53385,6 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     case "sessions": {
       if (resolvedContext.mvpd) {
         fieldValues["body.mvpd"] = String(resolvedContext.mvpd || "").trim();
-      } else {
-        requiredFields.push("body.mvpd");
       }
       fieldValues["body.domainName"] = String(resolvedContext.domainName || "").trim();
       fieldValues["body.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
