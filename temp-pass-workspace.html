@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UP TempPASS Workspace</title>
+    <link rel="stylesheet" href="temp-pass-workspace.css" />
+  </head>
+  <body>
+    <main class="temp-pass-workspace-app">
+      <header class="temp-pass-workspace-header">
+        <div class="temp-pass-workspace-title-wrap">
+          <div id="page-env-badge" class="page-env-badge" title="Environment">
+            <span class="page-env-badge-label">ENV</span>
+            <span id="page-env-badge-value" class="page-env-badge-value" aria-hidden="true"></span>
+          </div>
+          <p id="workspace-controller-state" class="workspace-controller-state">
+            Waiting for UnderPAR side panel controller...
+          </p>
+          <p id="workspace-filter-state" class="workspace-filter-state"></p>
+        </div>
+        <div class="workspace-actions">
+          <button id="workspace-clear-all" class="workspace-icon-btn" type="button" title="Clear results" aria-label="Clear results">
+            <span class="workspace-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M7 7 17 17" />
+                <path d="M17 7 7 17" />
+              </svg>
+            </span>
+          </button>
+        </div>
+      </header>
+
+      <p id="workspace-status" class="workspace-status" aria-live="polite" hidden></p>
+
+      <section class="temp-pass-shell">
+        <article class="temp-pass-form-card">
+          <div class="temp-pass-form-head">
+            <div>
+              <p class="temp-pass-card-eyebrow">Premium Service</p>
+              <h1 class="temp-pass-card-title">TempPASS Workspace</h1>
+            </div>
+            <div class="temp-pass-app-pills">
+              <span id="workspace-rest-app-pill" class="temp-pass-app-pill">REST V2 app unavailable</span>
+              <span id="workspace-reset-app-pill" class="temp-pass-app-pill">Reset app unavailable</span>
+            </div>
+          </div>
+
+          <div class="temp-pass-form-grid">
+            <label class="temp-pass-field">
+              <span class="temp-pass-field-label">RequestorId</span>
+              <input id="workspace-requestor" type="text" readonly />
+            </label>
+
+            <label class="temp-pass-field">
+              <span class="temp-pass-field-label">TempPASS MVPD</span>
+              <input id="workspace-temp-pass-mvpd" type="text" placeholder="TempPass or flexibleTempPass" />
+            </label>
+
+            <label class="temp-pass-field temp-pass-field--wide">
+              <span class="temp-pass-field-label">Device ID</span>
+              <input id="workspace-device-id" type="text" placeholder="UUID for current device reset" />
+            </label>
+
+            <label class="temp-pass-field temp-pass-field--wide">
+              <span class="temp-pass-field-label">Generic Key Hash</span>
+              <input id="workspace-generic-key" type="text" placeholder="SHA-256 or programmer-defined identifier hash" />
+            </label>
+
+            <label class="temp-pass-field temp-pass-field--wide">
+              <span class="temp-pass-field-label">Resources</span>
+              <textarea id="workspace-resource-ids" rows="4" placeholder="One resource per line or comma-separated"></textarea>
+            </label>
+
+            <label class="temp-pass-field temp-pass-field--wide">
+              <span class="temp-pass-field-label">Promotional Identity JSON</span>
+              <textarea
+                id="workspace-identity-json"
+                rows="4"
+                placeholder='{"email":"user@domain.com"}'
+              ></textarea>
+            </label>
+          </div>
+
+          <div class="temp-pass-toggle-row">
+            <label class="temp-pass-toggle">
+              <input id="workspace-reset-all-devices" type="checkbox" />
+              <span>Reset all devices</span>
+            </label>
+            <label class="temp-pass-toggle">
+              <input id="workspace-reset-all-generic" type="checkbox" />
+              <span>Reset all generic identities</span>
+            </label>
+          </div>
+
+          <p class="temp-pass-form-note">
+            Profiles and Authorize use the REST API V2 DCR app. Reset actions use the dedicated Reset TempPASS DCR app when available.
+          </p>
+
+          <div class="temp-pass-action-grid">
+            <button id="workspace-run-profiles" class="temp-pass-action-btn" type="button">PROFILE</button>
+            <button id="workspace-run-authorize" class="temp-pass-action-btn temp-pass-action-btn--strong" type="button">AUTHORIZE</button>
+            <button id="workspace-run-reset-device" class="temp-pass-action-btn" type="button">RESET DEVICE</button>
+            <button id="workspace-run-reset-generic" class="temp-pass-action-btn" type="button">RESET GENERIC</button>
+          </div>
+        </article>
+
+        <section id="workspace-cards" class="temp-pass-results"></section>
+      </section>
+    </main>
+
+    <script src="underpar-environment.js"></script>
+    <script src="temp-pass-workspace.js"></script>
+  </body>
+</html>

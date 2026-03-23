@@ -51,7 +51,7 @@ function loadHrVisibilityHelpers(seed = {}) {
   const source = fs.readFileSync(filePath, "utf8");
   const script = [
     'const DEFAULT_ADOBEPASS_ENVIRONMENT = { key: "production" };',
-    'const PREMIUM_SERVICE_DISPLAY_ORDER = ["restV2", "esmWorkspace", "degradation", "cm", "cmMvpd"];',
+    'const PREMIUM_SERVICE_DISPLAY_ORDER = ["restV2", "esmWorkspace", "degradation", "resetTempPass", "cm", "cmMvpd"];',
     "const state = globalThis.__seed.state || { programmerWorkspaceHydrationReadyByKey: new Map() };",
     "function getActiveAdobePassEnvironmentKey() { return globalThis.__seed.environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key; }",
     extractFunctionSource(source, "getEnvironmentScopedProgrammerKey"),
@@ -129,6 +129,10 @@ test("detected service pills are wired to documentation urls for the learning fl
     popupSource,
     /https:\/\/tve\.zendesk\.com\/hc\/en-us\/articles\/33912526308372-Adobe-Pass-Authentication-Degradation-API-v3/
   );
+  assert.match(
+    popupSource,
+    /https:\/\/experienceleague\.adobe\.com\/en\/docs\/pass\/authentication\/integration-guide-programmers\/features-premium\/temporary-access\/temp-pass-feature/
+  );
   assert.match(popupSource, /https:\/\/developer\.adobe\.com\/adobe-pass\/api\/rest_api_v2\/interactive\//);
   assert.match(popupSource, /https:\/\/streams-stage\.adobeprimetime\.com\/swagger-ui\/index\.html/);
   assert.match(popupSource, /data-service-doc-key/);
@@ -146,6 +150,7 @@ test("premium service sections and HR service pills keep their theme class wirin
   assert.match(popupSource, /cmMvpd:\s*"service-cm-mvpd"/);
   assert.match(popupSource, /degradation:\s*"service-degradation"/);
   assert.match(popupSource, /esmWorkspace:\s*"service-esm"/);
+  assert.match(popupSource, /resetTempPass:\s*"service-temp-pass"/);
   assert.match(popupSource, /restV2:\s*"service-rest-v2"/);
   assert.match(popupSource, /premium-service-section \$\{PREMIUM_SERVICE_THEME_CLASS_BY_KEY\[serviceKey\] \|\| ""\}/);
   assert.match(popupSource, /hr-context-service-pill--\$\{themeClass\}/);

@@ -63,11 +63,16 @@ function loadGetLatestHelpers(seed = {}) {
     'const UPDATE_CHECK_TTL_MS = 10 * 60 * 1000;',
     "const chrome = globalThis.__seed.chrome;",
     "const fetch = globalThis.__seed.fetch;",
-    "const updateState = globalThis.__seed.updateState || { currentVersion: '', latestVersion: '', latestCommitSha: '', updateAvailable: false, lastCheckedAt: 0, checkError: '', inFlight: null };",
+    "const updateState = globalThis.__seed.updateState || { currentVersion: '', latestVersion: '', latestCommitSha: '', latestSource: '', localPackageVersion: '', updateAvailable: false, lastCheckedAt: 0, checkError: '', inFlight: null };",
     extractFunctionSource(source, "getUnderparBuildVersion"),
     extractFunctionSource(source, "parseVersionPart"),
     extractFunctionSource(source, "compareVersions"),
     extractFunctionSource(source, "extractVersionFromManifestObject"),
+    extractFunctionSource(source, "extractUpdateLookupErrorMessage"),
+    extractFunctionSource(source, "extractUpdateLookupHost"),
+    extractFunctionSource(source, "buildUpdateLookupError"),
+    extractFunctionSource(source, "buildUpdateLookupAttemptsError"),
+    extractFunctionSource(source, "fetchUpdateLookupJson"),
     extractFunctionSource(source, "buildLatestUnderparPackageMetadataRawUrl"),
     extractFunctionSource(source, "buildLatestUnderparPackageMetadataApiUrl"),
     extractFunctionSource(source, "fetchLatestUnderparVersionFromRaw"),
@@ -82,6 +87,9 @@ function loadGetLatestHelpers(seed = {}) {
     extractFunctionSource(source, "withCacheBust"),
     extractFunctionSource(source, "buildLatestUnderparPackageUrl"),
     extractFunctionSource(source, "buildLocalUnderparPackageUrl"),
+    extractFunctionSource(source, "buildLocalUnderparPackageMetadataUrl"),
+    extractFunctionSource(source, "fetchLocalUnderparPackageVersion"),
+    extractFunctionSource(source, "resolveLatestUnderparPackageState"),
     extractFunctionSource(source, "shouldPreferLocalUnderparPackage"),
     extractFunctionSource(source, "sanitizeLatestPackageFileSegment"),
     extractFunctionSource(source, "buildLatestUnderparPackageFileName"),
@@ -96,6 +104,7 @@ function loadGetLatestHelpers(seed = {}) {
     exports: {},
     __seed: seed,
     atob: (value) => Buffer.from(String(value || ""), "base64").toString("utf8"),
+    URL,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -143,7 +152,27 @@ function createSeed(options = {}) {
       const targetUrl = String(url || "");
       calls.fetch.push(targetUrl);
       if (responseByUrl.has(targetUrl)) {
-        return responseByUrl.get(targetUrl);
+        const mapped = responseByUrl.get(targetUrl);
+        if (mapped instanceof Error) {
+          throw mapped;
+        }
+        return mapped;
+      }
+      try {
+        const parsed = new URL(targetUrl);
+        if (parsed.searchParams.has("cacheBust")) {
+          parsed.searchParams.delete("cacheBust");
+          const normalizedUrl = parsed.toString();
+          if (responseByUrl.has(normalizedUrl)) {
+            const mapped = responseByUrl.get(normalizedUrl);
+            if (mapped instanceof Error) {
+              throw mapped;
+            }
+            return mapped;
+          }
+        }
+      } catch {
+        // Ignore parse failures and fall through to the default 404 response.
       }
       return {
         ok: false,
@@ -157,6 +186,8 @@ function createSeed(options = {}) {
       currentVersion: "",
       latestVersion: "",
       latestCommitSha: "",
+      latestSource: "",
+      localPackageVersion: "",
       updateAvailable: false,
       lastCheckedAt: 0,
       checkError: "",
@@ -251,7 +282,7 @@ test("openUnderparGetLatestFlow uses the commit-pinned manifest version when mai
   );
 });
 
-test("openUnderparGetLatestFlow prefers the local runtime package when the loaded build is newer than GitHub main", async () => {
+test("openUnderparGetLatestFlow reports no newer package when the loaded build is newer than GitHub main", async () => {
   const seed = createSeed({
     currentVersion: "1.12.88",
     responseByUrl: {
@@ -276,10 +307,108 @@ test("openUnderparGetLatestFlow prefers the local runtime package when the loade
   const response = await helpers.openUnderparGetLatestFlow();
 
   assert.equal(response.ok, true);
+  assert.equal(response.noNewerPackage, true);
+  assert.equal(String(response.latestSource || ""), "github-remote");
+  assert.match(String(response.infoMessage || ""), /newer than published GitHub latest/i);
+  assert.equal(seed.calls.downloadsDownload.length, 0);
+  assert.equal(seed.calls.tabsCreate.length, 0);
+});
+
+test("openUnderparGetLatestFlow opens the bundled package when the bundled distro already matches the current build", async () => {
+  const latestSha = "89abcdef0123456789abcdef0123456789abcdef";
+  const seed = createSeed({
+    currentVersion: "1.16.39",
+    responseByUrl: {
+      "chrome-extension://underpar/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.39" };
+        },
+      },
+      [`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/underpar_distro.version.json`]: {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.39" };
+        },
+      },
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.39" };
+        },
+      },
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: latestSha } };
+        },
+      },
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.openUnderparGetLatestFlow();
+
+  assert.equal(response.ok, true);
+  assert.equal(response.noNewerPackage, false);
   assert.equal(String(response.downloadSource || ""), "local-runtime");
-  assert.equal(seed.calls.downloadsDownload.length, 1);
-  assert.equal(String(seed.calls.downloadsDownload[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
-  assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.12.88.zip");
+  assert.equal(String(response.latestVersion || ""), "1.16.39");
+  assert.equal(String(response.localPackageVersion || ""), "1.16.39");
+  assert.equal(response.downloadStarted, false);
+  assert.equal(response.downloadTabOpened, true);
+  assert.equal(seed.calls.downloadsDownload.length, 0);
+  assert.equal(seed.calls.tabsCreate.length, 2);
+  assert.equal(String(seed.calls.tabsCreate[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
+  assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
+});
+
+test("openUnderparGetLatestFlow prefers the local runtime package when local distro metadata is newer than GitHub main", async () => {
+  const seed = createSeed({
+    currentVersion: "1.16.29",
+    responseByUrl: {
+      "chrome-extension://underpar/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.33" };
+        },
+      },
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.29" };
+        },
+      },
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: "0123456789abcdef0123456789abcdef01234567" } };
+        },
+      },
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.openUnderparGetLatestFlow();
+
+  assert.equal(response.ok, true);
+  assert.equal(String(response.latestVersion || ""), "1.16.33");
+  assert.equal(String(response.latestSource || ""), "local-runtime");
+  assert.equal(String(response.downloadSource || ""), "local-runtime");
+  assert.equal(String(response.localPackageVersion || ""), "1.16.33");
+  assert.equal(response.downloadStarted, false);
+  assert.equal(response.downloadTabOpened, true);
+  assert.equal(String(response.downloadFileName || ""), "UnderPAR-v1.16.33.zip");
+  assert.equal(seed.calls.downloadsDownload.length, 0);
+  assert.equal(seed.calls.tabsCreate.length, 2);
+  assert.equal(String(seed.calls.tabsCreate[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
+  assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
 });
 
 test("openUnderparGetLatestFlow falls back to main underpar_distro.zip with cache bust when SHA lookup fails", async () => {
@@ -330,6 +459,38 @@ test("openUnderparGetLatestFlow ignores stale cached SHA when latest metadata re
   assert.match(downloadUrl, /\/main\/underpar_distro\.zip\?cacheBust=\d+$/);
   assert.doesNotMatch(downloadUrl, new RegExp(`/${staleSha}/underpar_distro\\.zip`));
   assert.match(String(seed.calls.downloadsDownload[0]?.filename || ""), /^UnderPAR-vlatest\.zip$/);
+});
+
+test("openUnderparGetLatestFlow avoids stale local-runtime fallback when bundled distro metadata lags behind the loaded build", async () => {
+  const seed = createSeed({
+    currentVersion: "1.16.36",
+    responseByUrl: {
+      "chrome-extension://underpar/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.34" };
+        },
+      },
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": new TypeError("Failed to fetch"),
+      "https://api.github.com/repos/HH5HH/UNDERPAR/commits/main": new TypeError("Failed to fetch"),
+      "https://api.github.com/repos/HH5HH/UNDERPAR/contents/underpar_distro.version.json?ref=main": new TypeError("Failed to fetch"),
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": new TypeError("Failed to fetch"),
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.openUnderparGetLatestFlow();
+
+  assert.equal(response.ok, true);
+  assert.equal(String(response.downloadSource || ""), "github-remote");
+  assert.equal(String(response.latestSource || ""), "github-remote");
+  assert.equal(String(response.localPackageVersion || ""), "1.16.34");
+  assert.match(String(response.checkError || ""), /Latest version lookup failed/);
+  assert.match(String(response.checkError || ""), /api\.github\.com|raw\.githubusercontent\.com/);
+  assert.equal(seed.calls.downloadsDownload.length, 1);
+  assert.match(String(seed.calls.downloadsDownload[0]?.url || ""), /\/main\/underpar_distro\.zip\?cacheBust=\d+$/);
+  assert.equal(String(seed.calls.downloadsDownload[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip"), false);
 });
 
 test("openUnderparGetLatestFlow falls back to opening the package tab when downloads API fails", async () => {
@@ -402,6 +563,67 @@ test("refreshUpdateState reports the downloadable package version instead of a n
   assert.equal(String(response.latestVersion || ""), "1.13.61");
   assert.equal(response.updateAvailable, false);
   assert.equal(seed.calls.fetch.includes("https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/manifest.json"), false);
+});
+
+test("refreshUpdateState reports stage-specific GitHub lookup failures instead of a generic connectivity diagnosis", async () => {
+  const seed = createSeed({
+    currentVersion: "1.16.36",
+    responseByUrl: {
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": new TypeError("Failed to fetch"),
+      "https://api.github.com/repos/HH5HH/UNDERPAR/commits/main": new TypeError("Failed to fetch"),
+      "https://api.github.com/repos/HH5HH/UNDERPAR/contents/underpar_distro.version.json?ref=main": new TypeError("Failed to fetch"),
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": new TypeError("net::ERR_NAME_NOT_RESOLVED"),
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.refreshUpdateState({ force: true });
+
+  assert.equal(String(response.latestVersion || ""), "");
+  assert.equal(response.updateAvailable, false);
+  assert.match(String(response.checkError || ""), /Latest version lookup failed/);
+  assert.match(String(response.checkError || ""), /GitHub API package metadata lookup|GitHub raw package metadata lookup/);
+  assert.match(String(response.checkError || ""), /api\.github\.com|raw\.githubusercontent\.com/);
+  assert.doesNotMatch(String(response.checkError || ""), /not connected to the internet/i);
+});
+
+test("refreshUpdateState reports the local runtime distro version when it is newer than GitHub main", async () => {
+  const latestSha = "fedcba9876543210fedcba9876543210fedcba98";
+  const seed = createSeed({
+    currentVersion: "1.16.29",
+    responseByUrl: {
+      "chrome-extension://underpar/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.33" };
+        },
+      },
+      [`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/underpar_distro.version.json`]: {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.29" };
+        },
+      },
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: latestSha } };
+        },
+      },
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.refreshUpdateState({ force: true });
+
+  assert.equal(String(response.latestVersion || ""), "1.16.33");
+  assert.equal(String(response.latestCommitSha || ""), "");
+  assert.equal(String(response.latestSource || ""), "local-runtime");
+  assert.equal(String(response.localPackageVersion || ""), "1.16.33");
+  assert.equal(response.updateAvailable, true);
 });
 
 test("UnderPAR avatar menu exposes a Get Latest action wired to the background flow", () => {

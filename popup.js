@@ -130,7 +130,6 @@ const DEFAULT_ADOBEPASS_ENVIRONMENT = UNDERPAR_ENVIRONMENT_REGISTRY?.getDefaultE
   esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/",
   cmReportsBase: "https://cm-reports.adobeprimetime.com",
 };
-let CONSOLE_AUTH_CALLBACK_PREFIX = String(DEFAULT_ADOBEPASS_ENVIRONMENT.consoleCallbackPrefix || "");
 let ADOBE_CONSOLE_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "");
 let ADOBE_MGMT_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase || "");
 let ADOBE_SP_BASE = String(DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "");
@@ -141,7 +140,6 @@ const ADOBE_CONSOLE_RUNTIME_REFERER = `${ADOBE_CONSOLE_RUNTIME_ORIGIN}/`;
 const ADOBE_PASS_CONSOLE_APP_SLUG = "AdobePass-adobepass-unifiedshell-console-client";
 const CONSOLE_PAGE_CONTEXT_ALLOWED_ORIGINS = [ADOBE_CONSOLE_RUNTIME_ORIGIN];
 const ADOBE_PAGE_CONTEXT_TIMEOUT_MS = 12 * 1000;
-let activeAuthPopupBootstrapContext = null;
 let underparStateRef = null;
 let PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
 let underparTrackedFetchOriginal = null;
@@ -175,7 +173,7 @@ const UNDERPAR_VAULT_STATUS_PENDING = "pending";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
 const UNDERPAR_VAULT_STATUS_PARTIAL = "partial";
 const UNDERPAR_VAULT_DCR_COMPILE_CONCURRENCY = 2;
-const PREMIUM_SERVICE_DISPLAY_ORDER = ["restV2", "esmWorkspace", "degradation", "cm", "cmMvpd"];
+const PREMIUM_SERVICE_DISPLAY_ORDER = ["restV2", "esmWorkspace", "degradation", "resetTempPass", "cm", "cmMvpd"];
 const PREMIUM_SERVICE_SCOPE_BY_KEY = {
   degradation: "decisions:owner",
   esm: "analytics:client",
@@ -198,7 +196,6 @@ const REGISTERED_APPLICATION_SCOPE_LABELS = Object.freeze({
   "idp:owner": "Proxy MVPD push",
   "cmu:analytics:client": "CMU",
 });
-const PREMIUM_SERVICE_RESET_TEMPPASS_REMINDER_PREFIX = "TODO: implement RESET TempPASS support";
 const DEGRADATION_SCOPE_CANDIDATES = [PREMIUM_SERVICE_SCOPE_BY_KEY.degradation];
 const KNOWN_PREMIUM_SERVICE_SCOPES = Array.from(
   new Set(
@@ -212,6 +209,7 @@ const UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS = Object.freeze([
   { serviceKey: "restV2", label: "REST V2", requiredScope: REST_V2_SCOPE },
   { serviceKey: "esm", label: "ESM", requiredScope: PREMIUM_SERVICE_SCOPE_BY_KEY.esm },
   { serviceKey: "degradation", label: "DEGRADATION", requiredScope: PREMIUM_SERVICE_SCOPE_BY_KEY.degradation },
+  { serviceKey: "resetTempPass", label: "TempPASS", requiredScope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE },
 ]);
 const PREMIUM_SERVICE_SCOPE_ALIAS_BY_LABEL = Object.freeze({
   degredation: PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
@@ -228,6 +226,7 @@ const PREMIUM_SERVICE_TITLE_BY_KEY = {
   cmMvpd: "Concurrency Monitoring (MVPD)",
   degradation: "DEGRADATION",
   esmWorkspace: "ESM",
+  resetTempPass: "TempPASS",
   restV2: "REST V2",
 };
 const PREMIUM_SERVICE_THEME_CLASS_BY_KEY = {
@@ -235,6 +234,7 @@ const PREMIUM_SERVICE_THEME_CLASS_BY_KEY = {
   cmMvpd: "service-cm-mvpd",
   degradation: "service-degradation",
   esmWorkspace: "service-esm",
+  resetTempPass: "service-temp-pass",
   restV2: "service-rest-v2",
 };
 const ADOBE_CONSOLE_PROGRAMMER_ACCESS_ROLES = Object.freeze([
@@ -249,6 +249,8 @@ const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = {
   degradation: "https://tve.zendesk.com/hc/en-us/articles/33912526308372-Adobe-Pass-Authentication-Degradation-API-v3",
   esmWorkspace:
     "https://experienceleague.adobe.com/en/docs/pass/authentication/integration-guide-programmers/features-premium/esm/entitlement-service-monitoring-api",
+  resetTempPass:
+    "https://experienceleague.adobe.com/en/docs/pass/authentication/integration-guide-programmers/features-premium/temporary-access/temp-pass-feature",
   restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/",
 };
 const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["health", "learning"];
@@ -277,7 +279,6 @@ const DEBUG_FLOW_STORAGE_INDEX_KEY = "underpardebug_flow_index_v1";
 const LEGACY_DEBUG_FLOW_STORAGE_INDEX_KEY = "minclouddebug_flow_index_v1";
 const DEBUG_FLOW_STORAGE_PREFIX = "underpardebug_flow_v1:";
 const LEGACY_DEBUG_FLOW_STORAGE_PREFIX = "minclouddebug_flow_v1:";
-const AUTH_WINDOW_TIMEOUT_MS = 180000;
 const IMS_RELAY_MESSAGE_TIMEOUT_MS = 15000;
 const PROGRAMMERS_FETCH_TIMEOUT_MS = 15000;
 const NON_INTERACTIVE_AUTH_TIMEOUT_MS = 12000;
@@ -741,7 +742,7 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
   const workPromise = (async () => {
     const compileResult = await queuePassVaultProgrammerCompilation(programmer, seedServices, {
       forceRefresh,
-      preferredTabId: Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+      preferredTabId: Number(options?.preferredTabId || 0),
       applicationsData,
     });
     let runtimeServices =
@@ -6237,7 +6238,7 @@ function buildPassVaultRetainedApplicationGuidSet(registeredApplicationsByGuid =
   const retainedGuids = new Set();
   const serviceSummaries = services && typeof services === "object" ? services : {};
 
-  ["restV2", "esm", "degradation"].forEach((serviceKey) => {
+  ["restV2", "esm", "degradation", "resetTempPass"].forEach((serviceKey) => {
     const summary = serviceSummaries?.[serviceKey];
     if (!summary || typeof summary !== "object") {
       return;
@@ -6508,7 +6509,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
       ? cloneJsonLikeValue(record.services, {})
       : buildPassVaultServicesSummary(legacyPremiumServicesSnapshot, legacyCmServiceSnapshot);
   const legacyServiceGuids = new Set();
-  ["restV2", "esm", "degradation"].forEach((serviceKey) => {
+  ["restV2", "esm", "degradation", "resetTempPass"].forEach((serviceKey) => {
     const appGuids = Array.isArray(legacyServiceSummary?.[serviceKey]?.appGuids)
       ? legacyServiceSummary[serviceKey].appGuids
       : buildPassVaultServiceGuids(serviceKey, legacyPremiumServicesSnapshot);
@@ -6554,7 +6555,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
         ? rawApplicationRecord.serviceCredentialsByServiceKey
         : {};
     const derivedServiceKeys = uniqueSorted(
-      ["restV2", "esm", "degradation"].filter((serviceKey) => {
+      ["restV2", "esm", "degradation", "resetTempPass"].filter((serviceKey) => {
         const serviceSummary = legacyServiceSummary?.[serviceKey];
         const primaryGuid = String(serviceSummary?.primaryGuid || "").trim();
         if (primaryGuid && primaryGuid === guid) {
@@ -6657,6 +6658,22 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
       requiredScope: firstNonEmptyString([
         legacyServiceSummary?.degradation?.requiredScope,
         PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
+      ]),
+    },
+    resetTempPass: {
+      available: legacyServiceSummary?.resetTempPass?.available === true || derivedServices.resetTempPass.available === true,
+      primaryGuid: firstNonEmptyString([
+        legacyServiceSummary?.resetTempPass?.primaryGuid,
+        derivedServices.resetTempPass.primaryGuid,
+      ]),
+      appGuids: uniqueSorted(
+        (Array.isArray(legacyServiceSummary?.resetTempPass?.appGuids) ? legacyServiceSummary.resetTempPass.appGuids : []).concat(
+          derivedServices.resetTempPass.appGuids
+        )
+      ),
+      requiredScope: firstNonEmptyString([
+        legacyServiceSummary?.resetTempPass?.requiredScope,
+        PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE,
       ]),
     },
     cm: {
@@ -7078,7 +7095,7 @@ function choosePassVaultRuntimeDcrCache(applicationRecord = null) {
     typeof applicationRecord.serviceCredentialsByServiceKey === "object"
       ? applicationRecord.serviceCredentialsByServiceKey
       : {};
-  const orderedServiceKeys = ["restV2", "esm", "degradation"];
+  const orderedServiceKeys = ["restV2", "esm", "degradation", "resetTempPass"];
   for (const serviceKey of orderedServiceKeys) {
     const credential = normalizeUnderparVaultCredentialEntry(serviceCredentials?.[serviceKey] || null);
     if (credential && (credential.clientId || credential.clientSecret || credential.accessToken)) {
@@ -7199,6 +7216,18 @@ function buildPassVaultServiceGuids(serviceKey = "", premiumServicesSnapshot = n
         .filter(Boolean)
     );
   }
+  if (serviceKey === "resetTempPass") {
+    const apps = Array.isArray(premiumServicesSnapshot?.resetTempPassApps)
+      ? premiumServicesSnapshot.resetTempPassApps
+      : premiumServicesSnapshot?.resetTempPass?.guid
+        ? [premiumServicesSnapshot.resetTempPass]
+        : [];
+    return uniqueSorted(
+      apps
+        .map((appInfo) => String(appInfo?.guid || "").trim())
+        .filter(Boolean)
+    );
+  }
   return [];
 }
 
@@ -7209,7 +7238,7 @@ function resolvePassVaultServiceKeysForGuid(guid = "", premiumServicesSnapshot =
   }
 
   const serviceKeys = [];
-  ["restV2", "esm", "degradation"].forEach((serviceKey) => {
+  ["restV2", "esm", "degradation", "resetTempPass"].forEach((serviceKey) => {
     if (buildPassVaultServiceGuids(serviceKey, premiumServicesSnapshot).includes(normalizedGuid)) {
       serviceKeys.push(serviceKey);
     }
@@ -7221,6 +7250,7 @@ function buildPassVaultServicesSummary(premiumServicesSnapshot = null, cmService
   const restV2Guids = buildPassVaultServiceGuids("restV2", premiumServicesSnapshot);
   const esmGuids = buildPassVaultServiceGuids("esm", premiumServicesSnapshot);
   const degradationGuids = buildPassVaultServiceGuids("degradation", premiumServicesSnapshot);
+  const resetTempPassGuids = buildPassVaultServiceGuids("resetTempPass", premiumServicesSnapshot);
   const matchedTenants = Array.isArray(cmServiceSnapshot?.matchedTenants)
     ? cloneJsonLikeValue(cmServiceSnapshot.matchedTenants, [])
     : [];
@@ -7243,6 +7273,12 @@ function buildPassVaultServicesSummary(premiumServicesSnapshot = null, cmService
       primaryGuid: String(premiumServicesSnapshot?.degradation?.guid || degradationGuids[0] || "").trim(),
       appGuids: degradationGuids,
       requiredScope: PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
+    },
+    resetTempPass: {
+      available: resetTempPassGuids.length > 0,
+      primaryGuid: String(premiumServicesSnapshot?.resetTempPass?.guid || resetTempPassGuids[0] || "").trim(),
+      appGuids: resetTempPassGuids,
+      requiredScope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE,
     },
     cm: {
       available: matchedTenants.length > 0,
@@ -7275,6 +7311,12 @@ function buildEmptyPassVaultServicesSummary() {
       primaryGuid: "",
       appGuids: [],
       requiredScope: PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
+    },
+    resetTempPass: {
+      available: false,
+      primaryGuid: "",
+      appGuids: [],
+      requiredScope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE,
     },
     cm: {
       available: false,
@@ -7819,7 +7861,7 @@ function passVaultProgrammerRecordHasHydrationResults(record = null) {
   }
 
   const serviceSummaries = record?.services && typeof record.services === "object" ? record.services : {};
-  return ["restV2", "esm", "degradation", "cm"].some((serviceKey) => {
+  return ["restV2", "esm", "degradation", "resetTempPass", "cm"].some((serviceKey) => {
     const summary = serviceSummaries?.[serviceKey];
     if (!summary || typeof summary !== "object") {
       return false;
@@ -8483,7 +8525,7 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
       (await enrichRegisteredApplicationForHydration(registeredApplication, {
         timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
         preferAuthenticatedHeaders: true,
-        preferredTabId: Number(hydrationContext?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+        preferredTabId: Number(hydrationContext?.preferredTabId || 0),
         allowTemporaryPageContextTab: hydrationContext?.allowTemporaryPageContextTab === true,
         pageContextTargetRef:
           hydrationContext?.pageContextTargetRef && typeof hydrationContext.pageContextTargetRef === "object"
@@ -8729,7 +8771,7 @@ function buildPassVaultDirectPremiumServicesSnapshot(
       degradationApps,
       degradation: hydratedServiceEntries?.degradation?.registeredApplication || degradationApps[0] || null,
       resetTempPassApps,
-      resetTempPass: resetTempPassApps[0] || null,
+      resetTempPass: hydratedServiceEntries?.resetTempPass?.registeredApplication || resetTempPassApps[0] || null,
       cm: options?.cmServiceSnapshot ?? null,
       cmMvpd: options?.cmMvpdServiceSnapshot ?? null,
       cmMvpdSelectionKey: String(options?.cmMvpdSelectionKey || "").trim(),
@@ -8861,6 +8903,13 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   const esmApps = getPassVaultServiceAppGuidsFromRecord(record, "esm")
     .map((guid) => resolveAppInfo(guid))
     .filter(Boolean);
+  const resetTempPassApps = uniqueSorted(
+    getPassVaultServiceAppGuidsFromRecord(record, "resetTempPass").concat(
+      buildPassVaultServiceGuids("resetTempPass", detectedServices)
+    )
+  )
+    .map((guid) => resolveAppInfo(guid))
+    .filter(Boolean);
   const esmApp = selectPrimaryApp("esm", esmApps);
   const cmServiceSnapshot = buildPassVaultRuntimeCmServiceSnapshot(record);
 
@@ -8871,8 +8920,8 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
     esmApps,
     degradation: selectPrimaryApp("degradation", degradationApps),
     degradationApps,
-    resetTempPass: detectedServices?.resetTempPass || null,
-    resetTempPassApps: Array.isArray(detectedServices?.resetTempPassApps) ? detectedServices.resetTempPassApps : [],
+    resetTempPass: selectPrimaryApp("resetTempPass", resetTempPassApps),
+    resetTempPassApps,
     cm: cmServiceSnapshot,
     cmMvpd: null,
     cmMvpdSelectionKey: "",
@@ -8969,6 +9018,13 @@ function hasPassVaultScopedServiceSummaryMismatch(record = null) {
     Array.isArray(detectedServices?.degradationApps) &&
     detectedServices.degradationApps.length > 0 &&
     (Array.isArray(serviceSummaries?.degradation?.appGuids) ? serviceSummaries.degradation.appGuids.length : 0) === 0
+  ) {
+    return true;
+  }
+  if (
+    Array.isArray(detectedServices?.resetTempPassApps) &&
+    detectedServices.resetTempPassApps.length > 0 &&
+    (Array.isArray(serviceSummaries?.resetTempPass?.appGuids) ? serviceSummaries.resetTempPass.appGuids.length : 0) === 0
   ) {
     return true;
   }
@@ -9076,6 +9132,9 @@ function getPassVaultRequiredScopeForService(serviceKey = "", appInfo = null) {
   if (serviceKey === "esm") {
     return PREMIUM_SERVICE_SCOPE_BY_KEY.esm;
   }
+  if (serviceKey === "resetTempPass") {
+    return PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE;
+  }
   if (serviceKey === "restV2") {
     return REST_V2_SCOPE;
   }
@@ -9090,6 +9149,9 @@ function resolvePremiumServiceKeyForAuth(appInfo = null, debugMeta = null) {
   if (explicitRequiredScope === normalizeScope(PREMIUM_SERVICE_SCOPE_BY_KEY.esm)) {
     return "esm";
   }
+  if (explicitRequiredScope === normalizeScope(PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)) {
+    return "resetTempPass";
+  }
   if (explicitRequiredScope === normalizeScope(getPreferredDegradationScopeForApp(appInfo) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation)) {
     return "degradation";
   }
@@ -9097,6 +9159,9 @@ function resolvePremiumServiceKeyForAuth(appInfo = null, debugMeta = null) {
   const serviceHint = normalizeScope(firstNonEmptyString([debugMeta?.service, debugMeta?.scope]));
   if (serviceHint.includes("degradation")) {
     return "degradation";
+  }
+  if (serviceHint.includes("temppass") || serviceHint.includes("temp-pass") || serviceHint.includes("temporary")) {
+    return "resetTempPass";
   }
   if (serviceHint.includes("esm")) {
     return "esm";
@@ -9110,6 +9175,9 @@ function resolvePremiumServiceKeyForAuth(appInfo = null, debugMeta = null) {
     .filter(Boolean);
   if (normalizedAppScopes.includes(normalizeScope(PREMIUM_SERVICE_SCOPE_BY_KEY.esm))) {
     return "esm";
+  }
+  if (normalizedAppScopes.includes(normalizeScope(PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE))) {
+    return "resetTempPass";
   }
   if (normalizedAppScopes.includes(normalizeScope(REST_V2_SCOPE))) {
     return "restV2";
@@ -9141,6 +9209,43 @@ function collectEsmAppCandidatesFromPremiumApps(premiumApps = null, fallbackAppI
   }
   pushCandidate(premiumApps?.esm || null);
   return candidates;
+}
+
+function collectResetTempPassAppCandidatesFromPremiumApps(premiumApps = null, fallbackAppInfo = null) {
+  const candidates = [];
+  const seen = new Set();
+  const pushCandidate = (appInfo) => {
+    const guid = String(appInfo?.guid || "").trim();
+    if (!guid || seen.has(guid)) {
+      return;
+    }
+    seen.add(guid);
+    candidates.push(appInfo);
+  };
+  pushCandidate(fallbackAppInfo);
+  if (Array.isArray(premiumApps?.resetTempPassApps)) {
+    premiumApps.resetTempPassApps.forEach((appInfo) => pushCandidate(appInfo));
+  }
+  pushCandidate(premiumApps?.resetTempPass || null);
+  return candidates;
+}
+
+function selectPreferredResetTempPassAppForRequestor(resetTempPassApps = [], requestorId = "", programmerId = "") {
+  const candidates = Array.isArray(resetTempPassApps) ? resetTempPassApps.filter((item) => item?.guid) : [];
+  if (candidates.length === 0) {
+    return null;
+  }
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (normalizedRequestorId) {
+    const mapped =
+      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) ||
+      null;
+    if (mapped) {
+      return mapped;
+    }
+  }
+  return candidates[0] || null;
 }
 
 function selectPreferredEsmAppForRequestor(esmApps = [], requestorId = "", programmerId = "") {
@@ -9195,6 +9300,12 @@ function resolveLatestPremiumServiceAppInfo(programmerId = "", fallbackAppInfo =
     return selectPreferredRestV2AppForRequestor(candidates, requestorId, normalizedProgrammerId) || fallbackAppInfo;
   }
 
+  if (serviceKey === "resetTempPass") {
+    const requestorId = String(debugMeta?.requestorId || "").trim();
+    const candidates = collectResetTempPassAppCandidatesFromPremiumApps(services, fallbackAppInfo);
+    return selectPreferredResetTempPassAppForRequestor(candidates, requestorId, normalizedProgrammerId) || fallbackAppInfo;
+  }
+
   if (serviceKey === "degradation") {
     const requestorId = String(debugMeta?.requestorId || "").trim();
     const candidates = resolveDegradationAppCandidates(normalizedProgrammerId, services?.degradation || fallbackAppInfo, {
@@ -9218,6 +9329,9 @@ function getMissingRequiredPremiumServiceKeys(services = null, requiredServiceKe
     }
     if (serviceKey === "degradation") {
       return !Boolean(String(services?.degradation?.guid || "").trim());
+    }
+    if (serviceKey === "resetTempPass") {
+      return !Boolean(String(services?.resetTempPass?.guid || "").trim());
     }
     return false;
   });
@@ -9436,7 +9550,7 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
     const hydratedServiceEntries = await hydratePassVaultServiceEntries(serviceEntries, PREMIUM_REQUIRED_SERVICE_KEYS, {
       programmerId,
       forceRefresh,
-      preferredTabId: Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+      preferredTabId: Number(options?.preferredTabId || 0),
       allowTemporaryPageContextTab: options?.allowTemporaryPageContextTab === true,
     });
     const hydratedApplications = mergeHydratedServiceEntriesIntoApplicationsData(applicationsData, hydratedServiceEntries);
@@ -9866,7 +9980,6 @@ function applyAdobePassEnvironment(environment = null) {
   const environmentChanged = previousEnvironmentKey !== nextEnvironmentKey;
   state.adobePassEnvironment = resolved;
   state.adobePassEnvironmentKey = nextEnvironmentKey;
-  CONSOLE_AUTH_CALLBACK_PREFIX = String(resolved.consoleCallbackPrefix || `${resolved.consoleBase}/oauth2/callback`);
   ADOBE_CONSOLE_BASE = String(resolved.consoleBase || "");
   CM_CONSOLE_APP_ORIGIN = String(resolved.cmConsoleOrigin || "https://experience.adobe.com");
   CM_CONSOLE_APP_REFERER = `${CM_CONSOLE_APP_ORIGIN.replace(/\/+$/, "")}/`;
@@ -9883,8 +9996,6 @@ function applyAdobePassEnvironment(environment = null) {
   clickDgrTemplateHtml = "";
   clickDgrTemplatePromise = null;
   state.programmersApiEndpoint = null;
-  state.consoleContextReady = false;
-  state.consoleContextPromise = null;
   state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
   if (environmentChanged) {
@@ -10042,7 +10153,7 @@ async function hydrateProgrammerSelection(programmer = null, options = {}) {
   const forcePremiumRefresh = options.forcePremiumRefresh === true;
   const skipCmBootstrap = options.skipCmBootstrap === true;
   const selectedProgrammer = selectProgrammerForController(programmer, controllerReason);
-  const retainedConsoleTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const retainedConsoleTabId = Number(options?.preferredTabId || 0);
   const programmerApplicationsPromise = selectedProgrammer?.programmerId
     ? ensureSelectedProgrammerApplicationsLoaded(selectedProgrammer, {
         forceRefresh: forcePremiumRefresh,
@@ -10183,6 +10294,17 @@ async function refreshOpenWorkspacesForEnvironmentSwitch(programmer = null, serv
     void restWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
   }
 
+  const tempPassSelectionContext = tempPassWorkspaceGetSelectionContext(programmer, services);
+  const tempPassWindowIds = collectBoundWorkspaceWindowIds(
+    state.tempPassWorkspaceWindowId,
+    state.tempPassWorkspaceTabIdByWindowId
+  );
+  for (const targetWindowId of tempPassWindowIds) {
+    tempPassWorkspaceBroadcastControllerState(programmer, services, targetWindowId);
+    tempPassWorkspaceBroadcastResults(tempPassSelectionContext.selectionKey, targetWindowId);
+    void tempPassWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
+  }
+
   const degradationSelectionContext = degradationWorkspaceGetSelectionContext(programmer, services);
   const degradationWindowIds = collectBoundWorkspaceWindowIds(
     state.degradationWorkspaceWindowId,
@@ -10248,6 +10370,8 @@ function collectKnownUnderparWorkspaceTabIds() {
   pushMapTabIds(state.mvpdWorkspaceTabIdByWindowId);
   pushCandidateTabId(state.restWorkspaceTabId);
   pushMapTabIds(state.restWorkspaceTabIdByWindowId);
+  pushCandidateTabId(state.tempPassWorkspaceTabId);
+  pushMapTabIds(state.tempPassWorkspaceTabIdByWindowId);
   pushCandidateTabId(state.degradationWorkspaceTabId);
   pushMapTabIds(state.degradationWorkspaceTabIdByWindowId);
   pushCandidateTabId(state.bobtoolsWorkspaceTabId);
@@ -10315,6 +10439,7 @@ async function closeOpenUnderparWorkspaceTabs(options = {}) {
     cmUnbindWorkspaceTab(closedTabId);
     mvpdWorkspaceUnbindWorkspaceTab(closedTabId);
     restWorkspaceUnbindWorkspaceTab(closedTabId);
+    tempPassWorkspaceUnbindWorkspaceTab(closedTabId);
     degradationWorkspaceUnbindWorkspaceTab(closedTabId);
     bobtoolsWorkspaceUnbindWorkspaceTab(closedTabId);
   }
@@ -10927,6 +11052,9 @@ const LEGACY_MVPD_WORKSPACE_MESSAGE_TYPE = "mincloud:mvpd-workspace";
 const REST_WORKSPACE_PATH = "rest-workspace.html";
 const REST_WORKSPACE_MESSAGE_TYPE = "underpar:rest-workspace";
 const LEGACY_REST_WORKSPACE_MESSAGE_TYPE = "mincloud:rest-workspace";
+const TEMP_PASS_WORKSPACE_PATH = "temp-pass-workspace.html";
+const TEMP_PASS_WORKSPACE_MESSAGE_TYPE = "underpar:temp-pass-workspace";
+const LEGACY_TEMP_PASS_WORKSPACE_MESSAGE_TYPE = "mincloud:temp-pass-workspace";
 const DEGRADATION_WORKSPACE_PATH = "degradation-workspace.html";
 const DEGRADATION_WORKSPACE_MESSAGE_TYPE = "underpar:degradation-workspace";
 const LEGACY_DEGRADATION_WORKSPACE_MESSAGE_TYPE = "mincloud:degradation-workspace";
@@ -10940,6 +11068,7 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   CM_WORKSPACE_PATH,
   MVPD_WORKSPACE_PATH,
   REST_WORKSPACE_PATH,
+  TEMP_PASS_WORKSPACE_PATH,
   DEGRADATION_WORKSPACE_PATH,
   BOBTOOLS_WORKSPACE_PATH,
 ]);
@@ -11564,6 +11693,7 @@ const BLONDIE_TIME_WORKSPACE_MESSAGE_TYPES = new Set([BLONDIE_TIME_WORKSPACE_MES
 const MEG_WORKSPACE_MESSAGE_TYPES = new Set([MEG_WORKSPACE_MESSAGE_TYPE, LEGACY_MEG_WORKSPACE_MESSAGE_TYPE]);
 const MVPD_WORKSPACE_MESSAGE_TYPES = new Set([MVPD_WORKSPACE_MESSAGE_TYPE, LEGACY_MVPD_WORKSPACE_MESSAGE_TYPE]);
 const REST_WORKSPACE_MESSAGE_TYPES = new Set([REST_WORKSPACE_MESSAGE_TYPE, LEGACY_REST_WORKSPACE_MESSAGE_TYPE]);
+const TEMP_PASS_WORKSPACE_MESSAGE_TYPES = new Set([TEMP_PASS_WORKSPACE_MESSAGE_TYPE, LEGACY_TEMP_PASS_WORKSPACE_MESSAGE_TYPE]);
 const DEGRADATION_WORKSPACE_MESSAGE_TYPES = new Set([
   DEGRADATION_WORKSPACE_MESSAGE_TYPE,
   LEGACY_DEGRADATION_WORKSPACE_MESSAGE_TYPE,
@@ -11690,6 +11820,7 @@ const DEGRADATION_CHEAT_SHEET_CALL_SPECS = Object.freeze([
   },
 ]);
 const DEGRADATION_API_VERSION = "3.0";
+const MEDIA_COMPANY_SELECTION_DEBOUNCE_MS = 180;
 
 const state = {
   adobePassEnvironment: resolveAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key),
@@ -11736,6 +11867,9 @@ const state = {
   selectedRequestorId: "",
   selectedMvpdId: "",
   selectedProgrammerKey: "",
+  mediaCompanyOptionHydrationDeferred: false,
+  mediaCompanySelectionHydrationTimerId: 0,
+  pendingMediaCompanySelectionControllerReason: "",
   programmersApiEndpoint: null,
   refreshTimeoutId: null,
   silentRefreshPromise: null,
@@ -11823,8 +11957,6 @@ const state = {
   underparEsmDeeplinkStorageListenerBound: false,
   upDevtoolsVaultActionListenerBound: false,
   pendingUnderparEsmDeeplinkPromise: null,
-  consoleContextReady: false,
-  consoleContextPromise: null,
   consoleCsrfToken: "",
   consoleBootstrapState: null,
   isBootstrapping: false,
@@ -11899,6 +12031,13 @@ const state = {
   restWorkspaceLastSelectionKey: "",
   restWorkspaceLastReportBySelectionKey: new Map(),
   restWorkspaceLastQueryContextBySelectionKey: new Map(),
+  tempPassWorkspaceTabId: 0,
+  tempPassWorkspaceWindowId: 0,
+  tempPassWorkspaceTabIdByWindowId: new Map(),
+  tempPassWorkspaceRuntimeListenerBound: false,
+  tempPassWorkspaceTabWatcherBound: false,
+  tempPassWorkspaceLastSelectionKey: "",
+  tempPassWorkspaceResultsBySelectionKey: new Map(),
   degradationWorkspaceTabId: 0,
   degradationWorkspaceWindowId: 0,
   degradationWorkspaceTabIdByWindowId: new Map(),
@@ -11965,9 +12104,6 @@ const els = {
   restrictedView: document.getElementById("restricted-view"),
   restrictedOrgSelect: document.getElementById("restricted-org-select"),
   restrictedOrgHint: document.getElementById("restricted-org-hint"),
-  restrictedOrgSwitchBtn: document.getElementById("restricted-org-switch-btn"),
-  restrictedSignInBtn: document.getElementById("restricted-sign-in-btn"),
-  restrictedSignOutBtn: document.getElementById("restricted-sign-out-btn"),
   restrictedLoginState: document.getElementById("restricted-login-state"),
   restrictedOrgState: document.getElementById("restricted-org-state"),
   restrictedRecoveryState: document.getElementById("restricted-recovery-state"),
@@ -12647,10 +12783,9 @@ function composeUnderparDebugConsoleOutput() {
       degradation: Boolean(selectedServices?.degradation),
       cm: Boolean(selectedServices?.cm),
       cmMvpd: Boolean(selectedServices?.cmMvpd),
-      resetTempPass: Boolean(selectedServices?.resetTempPassAvailable || selectedServices?.resetTempPass),
+      resetTempPass: Boolean(hasResetTempPassAvailable(selectedServices)),
     }) || "n/a"}`,
     `premium_services_summary=${String(firstNonEmptyString([selectedServices?.premiumServicesSummary]) || "n/a").trim() || "n/a"}`,
-    `reset_temp_pass_reminder=${String(selectedServices?.resetTempPassReminder || "n/a").trim() || "n/a"}`,
   ]);
 
   pushDebugSection(lines, "cm", [
@@ -13102,68 +13237,13 @@ function applyPremiumServiceRuntimeSummary(programmer = null, services = null, o
     });
   }
 
-  const resetTempPassAvailable = hasResetTempPassAvailable(currentServices);
-  const resetTempPassAppName = firstNonEmptyString([
-    currentServices?.resetTempPass?.appName,
-    currentServices?.resetTempPass?.name,
-    currentServices?.resetTempPass?.displayName,
-    currentServices?.resetTempPass?.guid,
-    Array.isArray(currentServices?.resetTempPassApps)
-      ? firstNonEmptyString(
-          currentServices.resetTempPassApps.flatMap((appInfo) => [
-            appInfo?.appName,
-            appInfo?.name,
-            appInfo?.displayName,
-            appInfo?.guid,
-          ])
-        )
-      : "",
-  ]);
-  const mediaCompanyLabel = firstNonEmptyString([
-    programmer?.mediaCompanyName,
-    programmer?.programmerName,
-    programmer?.programmerId,
-    "this media company",
-  ]);
-  const resetTempPassReminder = resetTempPassAvailable
-    ? `${PREMIUM_SERVICE_RESET_TEMPPASS_REMINDER_PREFIX} for ${mediaCompanyLabel}${resetTempPassAppName ? ` using ${resetTempPassAppName}` : ""}.`
-    : "";
-
   return {
     ...currentServices,
     ...(resolvedCmService ? { cm: resolvedCmService } : {}),
     detectedPremiumServiceLabels: labels,
     detectedPremiumServiceItems: items,
     premiumServicesSummary: labels.length > 0 ? labels.join(" | ") : "No premium services detected",
-    resetTempPassAvailable,
-    resetTempPassAppName,
-    resetTempPassReminder,
   };
-}
-
-function emitResetTempPassSupportReminder(programmer, services = null) {
-  const programmerId = String(programmer?.programmerId || "").trim();
-  if (!programmerId || !hasResetTempPassAvailable(services)) {
-    return;
-  }
-
-  const reminderKey = getEnvironmentScopedProgrammerKey(programmerId);
-  if (!reminderKey || state.premiumServiceReminderLogKeys.has(reminderKey)) {
-    return;
-  }
-  state.premiumServiceReminderLogKeys.add(reminderKey);
-
-  const reminderMessage =
-    String(services?.resetTempPassReminder || "").trim() ||
-    `${PREMIUM_SERVICE_RESET_TEMPPASS_REMINDER_PREFIX} for ${String(programmer?.programmerName || programmerId).trim()}.`;
-  const details = {
-    programmerId,
-    programmerName: String(programmer?.programmerName || programmer?.mediaCompanyName || "").trim(),
-    applicationName: String(services?.resetTempPassAppName || services?.resetTempPass?.appName || "").trim(),
-    scope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE,
-  };
-  console.log(`[UnderPAR Reminder] ${reminderMessage}`, details);
-  appendDebugLogEntry("premium", reminderMessage, details, { level: "info" });
 }
 
 function buildPremiumServiceDecisionLogSignature(programmer, services = null) {
@@ -13233,9 +13313,6 @@ function emitPremiumServiceDecisionLogs(programmer, services = null) {
   logDecisionPoint(`Decision | ${mediaCompanyLabel} has Reset TempPASS = ${hasResetTempPass ? "YES" : "NO"}`);
   logDecisionPoint(`Decision | ${mediaCompanyLabel} has Concurency Monitorring = ${hasCm ? "YES" : "NO"}`);
   logDecisionPoint(`Decision | ${mvpdDecisionLabel} has Concurency Monitorring = ${hasMvpdCm ? "YES" : "NO"}`);
-  if (hasResetTempPass) {
-    emitResetTempPassSupportReminder(programmer, services);
-  }
 }
 
 function setStatus(message = "", type = "info") {
@@ -13518,9 +13595,9 @@ function shouldShowLoggedOutAuthActivity() {
 
 function syncGlobalNetworkActivityIndicator() {
   const networkActivityCount = getGlobalNetworkActivityCount();
-  const shouldShowBusy = shouldRunExperienceCloudSessionMonitor()
-    ? state.busy === true || networkActivityCount > 0
-    : shouldShowLoggedOutAuthActivity();
+  const shouldShowBusy =
+    networkActivityCount > 0 ||
+    (shouldRunExperienceCloudSessionMonitor() ? state.busy === true : shouldShowLoggedOutAuthActivity());
   const shouldShowBlockingBusy = shouldShowBlockingBusyCursor();
   if (document?.body) {
     document.body.classList.toggle("net-busy", shouldShowBlockingBusy);
@@ -14748,73 +14825,6 @@ function extractAuthorizationCodeUrl(payload) {
   } catch {
     return "";
   }
-}
-
-function isConsoleAuthWindowSuccessUrl(url) {
-  const candidate = String(url || "").trim();
-  if (!candidate) {
-    return false;
-  }
-
-  try {
-    const parsed = new URL(candidate);
-    if (!/(^|\.)console\.auth\.adobe\.com$/i.test(parsed.hostname)) {
-      return false;
-    }
-
-    if (parsed.pathname.startsWith("/oauth2/callback")) {
-      return true;
-    }
-    if (parsed.pathname.startsWith("/rest/api/")) {
-      return true;
-    }
-    if (parsed.searchParams.has("authorization_code") || parsed.searchParams.has("code")) {
-      return true;
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
-}
-
-async function ensureConsoleSecurityContext(authorizationCodeUrl, options = {}) {
-  if (!authorizationCodeUrl) {
-    return false;
-  }
-
-  if (options?.allowInteractive !== true) {
-    log("Console security context bootstrap skipped: interactive auth not allowed.", {
-      authorizationCodeUrl,
-    });
-    return false;
-  }
-
-  if (state.consoleContextReady) {
-    return true;
-  }
-
-  if (state.consoleContextPromise) {
-    return state.consoleContextPromise;
-  }
-
-  state.consoleContextPromise = (async () => {
-    try {
-      await runAuthInPopupWindow(authorizationCodeUrl, CONSOLE_AUTH_CALLBACK_PREFIX, {
-        successUrlMatcher: isConsoleAuthWindowSuccessUrl,
-      });
-      state.consoleContextReady = true;
-      log("Console security context established.");
-      return true;
-    } catch (error) {
-      log("Console security context bootstrap failed", error?.message || String(error));
-      return false;
-    } finally {
-      state.consoleContextPromise = null;
-    }
-  })();
-
-  return state.consoleContextPromise;
 }
 
 function buildDcrDeviceInfo() {
@@ -16523,6 +16533,396 @@ async function fetchRestV2ProfilesForHarvest(harvest, options = {}) {
       ]) || `HTTP ${result.status}`;
     result.error = errorMessage;
     throw Object.assign(new Error(`${actionLabel} failed (${result.status}): ${errorMessage}`), { underparResult: result });
+  }
+
+  return result;
+}
+
+function buildTempPassResultId(actionKey = "") {
+  const actionLabel = String(actionKey || "temp-pass").trim().toLowerCase() || "temp-pass";
+  if (globalThis.crypto?.randomUUID) {
+    return `${actionLabel}-${globalThis.crypto.randomUUID()}`;
+  }
+  return `${actionLabel}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function resolveTempPassIdentityPayload(value = "") {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return {
+      rawJson: "",
+      headerValue: "",
+      preview: "",
+    };
+  }
+
+  let parsed = parseJsonText(rawValue, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    const decoded = decodeBase64TextSafe(rawValue);
+    parsed = parseJsonText(decoded, null);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("TempPASS identity must be a JSON object or base64-encoded JSON object.");
+  }
+
+  const canonical = JSON.stringify(parsed);
+  return {
+    rawJson: canonical,
+    headerValue: base64EncodeUtf8(canonical),
+    preview: truncateDebugText(canonical, 320),
+  };
+}
+
+function buildTempPassRequestHeaders(requestorId = "", options = {}) {
+  const headers = buildRestV2Headers(requestorId, {
+    Accept: "application/json",
+    ...(options?.extraHeaders && typeof options.extraHeaders === "object" ? options.extraHeaders : {}),
+  });
+  const identityHeaderValue = String(options?.identityHeaderValue || "").trim();
+  if (identityHeaderValue) {
+    headers["AP-TempPass-Identity"] = identityHeaderValue;
+  }
+  return headers;
+}
+
+function resolveTempPassRestV2AppInfo(programmerId = "", requestorId = "", services = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const premiumApps =
+    services && typeof services === "object"
+      ? services
+      : normalizedProgrammerId
+        ? getCurrentPremiumAppsSnapshot(normalizedProgrammerId)
+        : null;
+  if (!premiumApps) {
+    return null;
+  }
+  const candidates = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+  return selectPreferredRestV2AppForRequestor(candidates, normalizedRequestorId, normalizedProgrammerId) || null;
+}
+
+function resolveTempPassResetAppInfo(programmerId = "", requestorId = "", services = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const premiumApps =
+    services && typeof services === "object"
+      ? services
+      : normalizedProgrammerId
+        ? getCurrentPremiumAppsSnapshot(normalizedProgrammerId)
+        : null;
+  if (!premiumApps) {
+    return null;
+  }
+  const candidates = collectResetTempPassAppCandidatesFromPremiumApps(premiumApps);
+  return selectPreferredResetTempPassAppForRequestor(candidates, normalizedRequestorId, normalizedProgrammerId) || null;
+}
+
+function buildTempPassDebugMeta(payload = {}, options = {}) {
+  return {
+    requestorId: String(payload?.requestorId || "").trim(),
+    mvpd: String(payload?.tempPassMvpd || payload?.mvpd || "").trim(),
+    service: String(options?.service || "temp-pass").trim(),
+    scope: String(options?.scope || "temp-pass").trim(),
+    endpointUrl: String(options?.endpointUrl || "").trim(),
+    requiredServiceScope: String(options?.requiredServiceScope || "").trim(),
+    workspaceKey: "temp-pass-workspace",
+    workspaceOrigin: "TempPASS Workspace",
+  };
+}
+
+async function fetchTempPassProfilesForSelection(payload = {}, services = null) {
+  const programmerId = String(payload?.programmerId || "").trim();
+  const requestorId = String(payload?.requestorId || "").trim();
+  const tempPassMvpd = String(payload?.tempPassMvpd || "").trim();
+  if (!programmerId || !requestorId || !tempPassMvpd) {
+    throw new Error("TempPASS profile lookup requires programmer, requestor, and TempPASS MVPD values.");
+  }
+
+  const restApp = resolveTempPassRestV2AppInfo(programmerId, requestorId, services);
+  if (!restApp?.guid) {
+    throw new Error("No REST V2 registered application is available for the selected RequestorId.");
+  }
+
+  const identityPayload = resolveTempPassIdentityPayload(payload?.identityJson || "");
+  const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(requestorId)}/profiles/${encodeURIComponent(tempPassMvpd)}`;
+  const response = await fetchWithPremiumAuth(
+    programmerId,
+    restApp,
+    endpointUrl,
+    {
+      method: "GET",
+      mode: "cors",
+      headers: buildTempPassRequestHeaders(requestorId, {
+        identityHeaderValue: identityPayload.headerValue,
+      }),
+    },
+    "refresh",
+    buildTempPassDebugMeta(payload, {
+      service: "temp-pass-profiles",
+      scope: "temp-pass-profiles",
+      endpointUrl,
+      requiredServiceScope: REST_V2_SCOPE,
+    })
+  );
+
+  const responseText = await response.text().catch(() => "");
+  const parsedPayload = parseJsonText(responseText, null);
+  const profileRows = extractRestV2ProfileRowsFromPayload(parsedPayload || {}, {
+    mvpd: tempPassMvpd,
+    requestorId,
+  });
+  const checkedAt = Date.now();
+  const result = {
+    resultId: buildTempPassResultId("profiles"),
+    checkedAt,
+    checkedAtLabel: formatTimestampLabel(checkedAt),
+    ok: response.ok === true,
+    status: Number(response.status || 0),
+    statusText: String(response.statusText || "").trim(),
+    actionKey: "profiles",
+    actionLabel: "Profiles",
+    resultType: "profiles",
+    selectionKey: String(payload?.selectionKey || "").trim(),
+    programmerId,
+    programmerName: String(payload?.programmerName || "").trim(),
+    requestorId,
+    tempPassMvpd,
+    identityPresent: Boolean(identityPayload.headerValue),
+    identityPreview: String(identityPayload.preview || "").trim(),
+    endpointUrl,
+    method: "GET",
+    appGuid: String(restApp?.guid || "").trim(),
+    appName: String(restApp?.appName || restApp?.guid || "").trim(),
+    profileRows,
+    profileCount: profileRows.length,
+    responsePreview: truncateDebugText(responseText, 3000),
+    responsePayload: parsedPayload ?? responseText,
+    error: "",
+  };
+
+  if (!response.ok) {
+    const errorMessage =
+      firstNonEmptyString([
+        parsedPayload?.code,
+        parsedPayload?.details,
+        parsedPayload?.message,
+        normalizeHttpErrorMessage(responseText),
+        result.statusText,
+      ]) || `HTTP ${result.status}`;
+    result.error = errorMessage;
+    throw Object.assign(new Error(`TempPASS Profiles failed (${result.status}): ${errorMessage}`), {
+      underparResult: result,
+    });
+  }
+
+  return result;
+}
+
+async function fetchTempPassAuthorizeForSelection(payload = {}, services = null) {
+  const programmerId = String(payload?.programmerId || "").trim();
+  const requestorId = String(payload?.requestorId || "").trim();
+  const tempPassMvpd = String(payload?.tempPassMvpd || "").trim();
+  const resourceIds = Array.isArray(payload?.resourceIds)
+    ? payload.resourceIds.map((item) => String(item || "").trim()).filter(Boolean)
+    : parseRestV2ResourceIdInput(payload?.resourceIds || "");
+  if (!programmerId || !requestorId || !tempPassMvpd) {
+    throw new Error("TempPASS authorization requires programmer, requestor, and TempPASS MVPD values.");
+  }
+  if (resourceIds.length === 0) {
+    throw new Error("Enter at least one resource for TempPASS authorization.");
+  }
+
+  const restApp = resolveTempPassRestV2AppInfo(programmerId, requestorId, services);
+  if (!restApp?.guid) {
+    throw new Error("No REST V2 registered application is available for the selected RequestorId.");
+  }
+
+  const identityPayload = resolveTempPassIdentityPayload(payload?.identityJson || "");
+  const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(requestorId)}/decisions/authorize/${encodeURIComponent(tempPassMvpd)}`;
+  const response = await fetchWithPremiumAuth(
+    programmerId,
+    restApp,
+    endpointUrl,
+    {
+      method: "POST",
+      mode: "cors",
+      headers: buildTempPassRequestHeaders(requestorId, {
+        identityHeaderValue: identityPayload.headerValue,
+        extraHeaders: {
+          "Content-Type": "application/json",
+        },
+      }),
+      body: JSON.stringify({
+        resources: resourceIds,
+      }),
+    },
+    "refresh",
+    buildTempPassDebugMeta(payload, {
+      service: "temp-pass-authorize",
+      scope: "temp-pass-authorize",
+      endpointUrl,
+      requiredServiceScope: REST_V2_SCOPE,
+    })
+  );
+
+  const responseText = await response.text().catch(() => "");
+  const parsedPayload = parseJsonText(responseText, null);
+  const decisionRows = applyRestV2TopLevelErrorToDecisionRows(
+    extractRestV2PreauthorizeDecisionRows(parsedPayload, resourceIds),
+    parsedPayload
+  );
+  const decisionSummary = summarizeRestV2PreauthorizeRows(decisionRows, resourceIds);
+  const checkedAt = Date.now();
+  const result = {
+    resultId: buildTempPassResultId("authorize"),
+    checkedAt,
+    checkedAtLabel: formatTimestampLabel(checkedAt),
+    ok: response.ok === true,
+    status: Number(response.status || 0),
+    statusText: String(response.statusText || "").trim(),
+    actionKey: "authorize",
+    actionLabel: "Authorize",
+    resultType: "authorize",
+    selectionKey: String(payload?.selectionKey || "").trim(),
+    programmerId,
+    programmerName: String(payload?.programmerName || "").trim(),
+    requestorId,
+    tempPassMvpd,
+    identityPresent: Boolean(identityPayload.headerValue),
+    identityPreview: String(identityPayload.preview || "").trim(),
+    endpointUrl,
+    method: "POST",
+    appGuid: String(restApp?.guid || "").trim(),
+    appName: String(restApp?.appName || restApp?.guid || "").trim(),
+    resourceIds,
+    decisionRows,
+    permitCount: decisionSummary.permitCount,
+    denyCount: decisionSummary.denyCount,
+    unknownCount: decisionSummary.unknownCount,
+    allRequestedPermitted: decisionSummary.allRequestedPermitted,
+    responsePreview: truncateDebugText(responseText, 3000),
+    responsePayload: parsedPayload ?? responseText,
+    error: "",
+  };
+
+  if (!response.ok) {
+    const errorMessage =
+      firstNonEmptyString([
+        parsedPayload?.code,
+        parsedPayload?.details,
+        parsedPayload?.message,
+        normalizeHttpErrorMessage(responseText),
+        result.statusText,
+      ]) || `HTTP ${result.status}`;
+    result.error = errorMessage;
+    throw Object.assign(new Error(`TempPASS Authorize failed (${result.status}): ${errorMessage}`), {
+      underparResult: result,
+    });
+  }
+
+  return result;
+}
+
+async function resetTempPassForSelection(payload = {}, services = null) {
+  const programmerId = String(payload?.programmerId || "").trim();
+  const requestorId = String(payload?.requestorId || "").trim();
+  const tempPassMvpd = String(payload?.tempPassMvpd || "").trim();
+  const actionKey = String(payload?.actionKey || "").trim().toLowerCase();
+  const resetMode = actionKey === "reset-generic" ? "generic" : "device";
+  const deviceId = String(payload?.deviceId || "").trim();
+  const genericKey = String(payload?.genericKey || "").trim();
+  const resetAllDevices = payload?.resetAllDevices === true;
+  const resetAllGeneric = payload?.resetAllGeneric === true;
+  if (!programmerId || !requestorId || !tempPassMvpd) {
+    throw new Error("TempPASS reset requires programmer, requestor, and TempPASS MVPD values.");
+  }
+  if (resetMode === "device" && !resetAllDevices && !deviceId) {
+    throw new Error("Enter a device identifier or explicitly enable reset-all-devices.");
+  }
+  if (resetMode === "generic" && !resetAllGeneric && !genericKey) {
+    throw new Error("Enter a generic key hash or explicitly enable reset-all-generic.");
+  }
+
+  const resetApp = resolveTempPassResetAppInfo(programmerId, requestorId, services);
+  if (!resetApp?.guid) {
+    throw new Error("No Reset TempPASS registered application is available for the selected RequestorId.");
+  }
+
+  const endpointPath = resetMode === "generic" ? "/reset-tempass/v3/reset/generic" : "/reset-tempass/v3/reset";
+  const endpointUrl = new URL(endpointPath, getActiveAdobePassEnvironment()?.mgmtBase || ADOBE_MGMT_BASE);
+  endpointUrl.searchParams.set("requestor_id", requestorId);
+  endpointUrl.searchParams.set("mvpd_id", tempPassMvpd);
+  if (resetMode === "device") {
+    endpointUrl.searchParams.set("device_id", resetAllDevices ? "all" : deviceId);
+  } else if (!resetAllGeneric && genericKey) {
+    endpointUrl.searchParams.set("key", genericKey);
+  }
+
+  const response = await fetchWithPremiumAuth(
+    programmerId,
+    resetApp,
+    endpointUrl.toString(),
+    {
+      method: "DELETE",
+      mode: "cors",
+      headers: {
+        Accept: "application/json",
+      },
+    },
+    "refresh",
+    buildTempPassDebugMeta(payload, {
+      service: "reset-temp-pass",
+      scope: resetMode === "generic" ? "reset-temp-pass-generic" : "reset-temp-pass-device",
+      endpointUrl: endpointUrl.toString(),
+      requiredServiceScope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE,
+    })
+  );
+
+  const responseText = await response.text().catch(() => "");
+  const parsedPayload = parseJsonText(responseText, null);
+  const checkedAt = Date.now();
+  const result = {
+    resultId: buildTempPassResultId(actionKey || "reset"),
+    checkedAt,
+    checkedAtLabel: formatTimestampLabel(checkedAt),
+    ok: response.ok === true,
+    status: Number(response.status || 0),
+    statusText: String(response.statusText || "").trim(),
+    actionKey: resetMode === "generic" ? "reset-generic" : "reset-device",
+    actionLabel: resetMode === "generic" ? "Reset Generic" : "Reset Device",
+    resultType: "reset",
+    resetMode,
+    selectionKey: String(payload?.selectionKey || "").trim(),
+    programmerId,
+    programmerName: String(payload?.programmerName || "").trim(),
+    requestorId,
+    tempPassMvpd,
+    endpointUrl: endpointUrl.toString(),
+    method: "DELETE",
+    appGuid: String(resetApp?.guid || "").trim(),
+    appName: String(resetApp?.appName || resetApp?.guid || "").trim(),
+    deviceId: resetMode === "device" ? (resetAllDevices ? "all" : deviceId) : "",
+    genericKey: resetMode === "generic" ? (resetAllGeneric ? "" : genericKey) : "",
+    resetAllDevices,
+    resetAllGeneric,
+    responsePreview: truncateDebugText(responseText || "204 No Content", 3000),
+    responsePayload: parsedPayload ?? responseText,
+    error: "",
+  };
+
+  if (!response.ok) {
+    const errorMessage =
+      firstNonEmptyString([
+        parsedPayload?.code,
+        parsedPayload?.details,
+        parsedPayload?.message,
+        normalizeHttpErrorMessage(responseText),
+        result.statusText,
+      ]) || `HTTP ${result.status}`;
+    result.error = errorMessage;
+    throw Object.assign(new Error(`${result.actionLabel} failed (${result.status}): ${errorMessage}`), {
+      underparResult: result,
+    });
   }
 
   return result;
@@ -19764,6 +20164,8 @@ function pulseChromeWindowFront(windowId, delayMs = 120) {
 }
 
 async function openRestV2LoginPopupWindow() {
+  ensureRestV2LoginTabWatcher();
+  ensureRestV2BobtoolsRedirectWatcher();
   const createData = {
     url: "about:blank",
     focused: true,
@@ -31900,6 +32302,8 @@ function esmWorkspaceBroadcastControllerState(esmWorkspaceState, targetWindowId 
 }
 
 async function esmWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureEsmWorkspaceRuntimeListener();
+  ensureEsmWorkspaceWorkspaceTabWatcher();
   const shouldActivate = options.activate !== false;
   const requestedWindowId = Number(options.windowId || 0);
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
@@ -32001,6 +32405,8 @@ function blondieTimeWorkspaceBroadcastControllerState(esmWorkspaceState, targetW
 }
 
 async function blondieTimeWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureBlondieTimeWorkspaceRuntimeListener();
+  ensureBlondieTimeWorkspaceTabWatcher();
   const shouldActivate = options.activate !== false;
   const requestedWindowId = Number(options.windowId || 0);
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
@@ -32109,6 +32515,8 @@ function megWorkspaceBroadcastControllerState(esmWorkspaceState, targetWindowId 
 }
 
 async function megWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureMegWorkspaceRuntimeListener();
+  ensureMegWorkspaceWorkspaceTabWatcher();
   const shouldActivate = options.activate !== false;
   const requestedWindowId = Number(options.windowId || 0);
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
@@ -36427,6 +36835,8 @@ function cmBroadcastControllerState(cmState, targetWindowId = 0) {
 }
 
 async function cmEnsureWorkspaceTab(options = {}) {
+  ensureCmRuntimeListener();
+  ensureCmWorkspaceTabWatcher();
   const shouldActivate = options.activate !== false;
   const requestedWindowId = Number(options.windowId || 0);
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
@@ -40029,6 +40439,8 @@ function mvpdWorkspaceBroadcastSelectedControllerState(programmer = null, servic
 }
 
 async function mvpdWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureMvpdWorkspaceRuntimeListener();
+  ensureMvpdWorkspaceTabWatcher();
   const shouldActivate = options.activate !== false;
   const requestedWindowId = Number(options.windowId || 0);
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
@@ -40521,6 +40933,931 @@ function mvpdWorkspaceCollectEntityRefs(value, outputSet = new Set(), options = 
   return outputSet;
 }
 
+const MVPD_WORKSPACE_MVPD_DATA_FIELDS = ["id", "displayName", "logoUrl"];
+const MVPD_WORKSPACE_AUTHN_FIELDS = [
+  "owner",
+  "manglers",
+  "pipelineStageList",
+  "userMetadataParser",
+  "userMetadataKeys",
+  "use10a",
+  "certificates",
+  "clientData",
+  "configuration",
+  "authenticationProviderType",
+  "displayName",
+  "id",
+  "sessionAttributes",
+  "credentialsExtractor",
+  "defaultTokenTtl",
+  "authorizationEndpoint",
+  "oAuth2EndpointConfiguration",
+  "accessTokenURL",
+  "oAuthConsumerCredentials",
+  "requestTokenURL",
+  "userAuthorizationURL",
+];
+const MVPD_WORKSPACE_AUTHZ_FIELDS = [
+  "owner",
+  "manglers",
+  "pipelineStageList",
+  "transportBinding",
+  "certificates",
+  "preFlightConfiguration",
+  "samlMetadataInfo",
+  "authorizationProviderType",
+  "displayName",
+  "id",
+  "wantQueryRequestSigning",
+  "subjectConfirmationKeyNames",
+  "mvpdResourceFormat",
+  "customInInterceptorBeans",
+  "customOutInterceptorBeans",
+  "connectionTimeout",
+  "receiveTimeout",
+  "defaultTokenTtl",
+  "endpoint",
+  "authorizationEndpoint",
+  "clientCredentials",
+  "oAuth2EndpointConfiguration",
+  "oAuthConsumerCredentials",
+  "keyStoreEntryAlias",
+  "mutualSslKeyStoreEntryAlias",
+  "wsdlName",
+  "userMetadataParser",
+  "selfSignedCertificates",
+  "customAuthorizer",
+  "overrideLocalExtendedMetadataConfiguration",
+  "authorizationProfile",
+];
+const MVPD_WORKSPACE_LOGOUT_FIELDS = [
+  "manglers",
+  "owner",
+  "pipelineStageList",
+  "certificates",
+  "clientData",
+  "configuration",
+  "displayName",
+  "id",
+  "sloProgrammerIdentifier",
+  "idpSloQueryParam",
+  "includeAccessToken",
+  "mvpdApplicationNameQueryParam",
+  "mvpdLogoutIdentifier",
+  "logoutEndpoint",
+  "overrideLocalExtendedMetadataConfiguration",
+  "samlMetadataInfo",
+  "mvpdRedirectURIParamName",
+  "oAuth2EndpointConfiguration",
+  "spSloCompletedQueryParam",
+  "spSloCompletedQueryParamValue",
+  "spSloQueryParam",
+  "appendRedirectUrl",
+  "appendRequestorIdAs",
+  "mvpdLogoutRedirectUrl",
+];
+const MVPD_WORKSPACE_DOS_FIELDS = ["failedAttempts", "deltaTime", "banInterval", "enabled"];
+const MVPD_WORKSPACE_PREFLIGHT_FIELDS = ["isolated", "executorWaitTimeout", "type", "maxNumberOfResources"];
+const MVPD_WORKSPACE_PREFLIGHT_ENDPOINT_FIELDS = [
+  "authenticationScheme",
+  "keyStoreEntryAlias",
+  "mutualSslKeyStoreEntryAlias",
+  "connectionTimeout",
+  "receiveTimeout",
+  "endpointUrl",
+];
+const MVPD_WORKSPACE_MVPD_ADDITIONAL_SKIP_KEYS = new Set([
+  ...MVPD_WORKSPACE_MVPD_DATA_FIELDS,
+  "userMetadataKeys",
+  "clientData",
+  "proxiedMvpds",
+  "platformSettings",
+  "authenticationProviderConfigs",
+  "authorizationProviderConfigs",
+  "logoutProviderConfigs",
+]);
+const MVPD_WORKSPACE_ENDPOINT_ADDITIONAL_SKIP_KEYS = new Set([
+  ...MVPD_WORKSPACE_AUTHN_FIELDS,
+  ...MVPD_WORKSPACE_AUTHZ_FIELDS,
+  ...MVPD_WORKSPACE_LOGOUT_FIELDS,
+  "dosProtection",
+  "preFlightConfiguration",
+  "userMetadataKeys",
+  "samlMetadataInfo",
+  "overrideLocalExtendedMetadataConfiguration",
+  "oAuth2EndpointConfiguration",
+]);
+
+function mvpdWorkspaceGetEntityData(entity = null) {
+  if (!entity || typeof entity !== "object") {
+    return null;
+  }
+  return entity?.entityData && typeof entity.entityData === "object" ? entity.entityData : entity;
+}
+
+function mvpdWorkspaceHasMeaningfulValue(value) {
+  if (value == null) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return value.trim() !== "";
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  if (typeof value === "object") {
+    return Object.keys(value).length > 0;
+  }
+  return String(value).trim() !== "";
+}
+
+function mvpdWorkspaceReadFieldValue(source = null, pathExpression = "") {
+  const path = String(pathExpression || "").trim();
+  if (!source || typeof source !== "object" || !path) {
+    return undefined;
+  }
+  const segments = path
+    .split(".")
+    .map((segment) => String(segment || "").trim())
+    .filter(Boolean);
+  if (segments.length === 0) {
+    return undefined;
+  }
+  let current = source;
+  for (const segment of segments) {
+    if (!current || typeof current !== "object" || !Object.prototype.hasOwnProperty.call(current, segment)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return current;
+}
+
+function mvpdWorkspaceDeduplicateEntries(entries = [], maxEntries = 320) {
+  const output = [];
+  const seen = new Set();
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    if (output.length >= maxEntries) {
+      return;
+    }
+    const source = String(entry?.source || "").trim();
+    const path = String(entry?.path || "").trim();
+    const value = String(entry?.value || "").trim();
+    if (!path || !value) {
+      return;
+    }
+    const key = `${source}|${path}|${value}`.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    output.push({
+      source,
+      path,
+      value,
+    });
+  });
+  return output;
+}
+
+function mvpdWorkspaceCollectValueEntries(sourceKey, fieldPath, value, options = {}) {
+  const path = String(fieldPath || "").trim();
+  if (!path || !mvpdWorkspaceHasMeaningfulValue(value)) {
+    return [];
+  }
+  if (value == null || ["string", "number", "boolean"].includes(typeof value)) {
+    const normalizedValue = mvpdWorkspaceNormalizeFlatValue(value);
+    return normalizedValue
+      ? [
+          {
+            source: String(sourceKey || "").trim(),
+            path,
+            value: normalizedValue,
+          },
+        ]
+      : [];
+  }
+  const flattened = [];
+  flattenPrimitiveFields(value, path, flattened, {
+    depth: 0,
+    maxDepth: Math.max(2, Number(options.maxDepth || 6)),
+    maxEntries: Math.max(20, Number(options.maxEntries || 160)),
+    seen: new WeakSet(),
+  });
+  return flattened
+    .map((entry) => {
+      const entryPath = String(entry?.key || "").trim();
+      const entryValue = mvpdWorkspaceNormalizeFlatValue(entry?.value);
+      if (!entryPath || !entryValue) {
+        return null;
+      }
+      return {
+        source: String(sourceKey || "").trim(),
+        path: entryPath,
+        value: entryValue,
+      };
+    })
+    .filter(Boolean);
+}
+
+function mvpdWorkspaceBuildFieldEntries(sourceKey, entityData = null, fieldNames = [], options = {}) {
+  if (!entityData || typeof entityData !== "object") {
+    return [];
+  }
+  const entries = [];
+  (Array.isArray(fieldNames) ? fieldNames : []).forEach((fieldName) => {
+    const path = String(fieldName || "").trim();
+    if (!path) {
+      return;
+    }
+    const value = mvpdWorkspaceReadFieldValue(entityData, path);
+    if (!mvpdWorkspaceHasMeaningfulValue(value)) {
+      return;
+    }
+    entries.push(
+      ...mvpdWorkspaceCollectValueEntries(sourceKey, path, value, {
+        maxEntries: Number(options.maxEntries || 160),
+        maxDepth: Number(options.maxDepth || 6),
+      })
+    );
+  });
+  return mvpdWorkspaceDeduplicateEntries(entries, Math.max(40, Number(options.maxEntries || 240)));
+}
+
+function mvpdWorkspaceBuildAdditionalEntries(sourceKey, entityData = null, coveredKeys = new Set(), options = {}) {
+  if (!entityData || typeof entityData !== "object") {
+    return [];
+  }
+  const covered =
+    coveredKeys instanceof Set
+      ? new Set([...coveredKeys].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean))
+      : new Set();
+  return mvpdWorkspaceCollectFlatEntries(sourceKey, entityData, {
+    maxEntries: Math.max(40, Number(options.maxEntries || 320)),
+    maxDepth: Math.max(2, Number(options.maxDepth || 7)),
+  }).filter((entry) => {
+    const topLevelKey = String(entry?.path || "")
+      .split(/[\[.]/, 1)[0]
+      .trim()
+      .toLowerCase();
+    if (!topLevelKey) {
+      return false;
+    }
+    if (topLevelKey.startsWith("__underpar")) {
+      return false;
+    }
+    return !covered.has(topLevelKey);
+  });
+}
+
+function mvpdWorkspaceFindEntityByRef(payload = null, entityRef = "") {
+  const normalizedRef = mvpdWorkspaceNormalizeEntityRef(entityRef).trim();
+  if (!normalizedRef) {
+    return null;
+  }
+  const normalizedLower = normalizedRef.toLowerCase();
+  const directMatch = mvpdWorkspaceExtractEntityList(payload).find(
+    (entity) => mvpdWorkspaceNormalizeEntityRef(entity?.key).trim().toLowerCase() === normalizedLower
+  );
+  if (directMatch) {
+    return directMatch;
+  }
+  const split = mvpdWorkspaceSplitEntityRef(normalizedRef);
+  return mvpdWorkspaceFindEntityById(payload, split.id, split.type);
+}
+
+function mvpdWorkspaceCollectReferenceValues(outputSet = new Set(), value = null) {
+  if (!(outputSet instanceof Set) || value == null) {
+    return outputSet;
+  }
+  if (typeof value === "string") {
+    const normalized = mvpdWorkspaceNormalizeEntityRef(value).replace(/[),.;]+$/g, "");
+    if (/^[A-Z][A-Za-z0-9]+:[^\s]+$/.test(normalized)) {
+      outputSet.add(normalized);
+    }
+    return outputSet;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry) => mvpdWorkspaceCollectReferenceValues(outputSet, entry));
+    return outputSet;
+  }
+  if (typeof value === "object") {
+    Object.values(value).forEach((entry) => mvpdWorkspaceCollectReferenceValues(outputSet, entry));
+  }
+  return outputSet;
+}
+
+function mvpdWorkspaceCollectConsolePrimaryEntityRefs(mvpdEntityData = null, integrationEntityData = null) {
+  const refs = new Set();
+  const collectFrom = (value) => {
+    mvpdWorkspaceCollectReferenceValues(refs, value);
+  };
+  if (mvpdEntityData && typeof mvpdEntityData === "object") {
+    collectFrom(mvpdEntityData.authenticationProviderConfigs);
+    collectFrom(mvpdEntityData.authorizationProviderConfigs);
+    collectFrom(mvpdEntityData.logoutProviderConfigs);
+    collectFrom(mvpdEntityData.platformSettings);
+    collectFrom(mvpdEntityData.proxiedMvpds);
+  }
+  if (integrationEntityData && typeof integrationEntityData === "object") {
+    collectFrom(integrationEntityData.platformConfigurations);
+    collectFrom(integrationEntityData.platformTraitConfigurations);
+  }
+  return [...refs];
+}
+
+function mvpdWorkspaceCollectConsoleExtensionEntityRefs(entities = []) {
+  const refs = new Set();
+  (Array.isArray(entities) ? entities : []).forEach((entity) => {
+    const entityData = mvpdWorkspaceGetEntityData(entity);
+    if (!entityData) {
+      return;
+    }
+    mvpdWorkspaceCollectReferenceValues(refs, entityData.overrideLocalExtendedMetadataConfiguration);
+    mvpdWorkspaceCollectReferenceValues(refs, entityData.samlMetadataInfo);
+    mvpdWorkspaceCollectReferenceValues(refs, entityData.oAuth2EndpointConfiguration);
+  });
+  return [...refs];
+}
+
+function mvpdWorkspaceResolveUserMetadataDescription(tooltipsPayload = null, metadataKey = "") {
+  const key = String(metadataKey || "").trim();
+  if (!key || !tooltipsPayload || typeof tooltipsPayload !== "object") {
+    return "";
+  }
+  const directValue = tooltipsPayload[key];
+  if (typeof directValue === "string") {
+    return directValue.trim();
+  }
+  if (directValue && typeof directValue === "object") {
+    return firstNonEmptyString([
+      directValue.description,
+      directValue.tooltip,
+      directValue.message,
+      directValue.value,
+      directValue.text,
+    ]);
+  }
+  return "";
+}
+
+function mvpdWorkspaceBuildUserMetadataEntries(sourceKey, userMetadataKeys = [], tooltipsPayload = null) {
+  const entries = [];
+  (Array.isArray(userMetadataKeys) ? userMetadataKeys : []).forEach((item, index) => {
+    const metadata =
+      typeof item === "string"
+        ? {
+            key: item,
+          }
+        : item && typeof item === "object"
+          ? item
+          : null;
+    if (!metadata) {
+      return;
+    }
+    const key = String(metadata.key || metadata.id || metadata.name || "").trim();
+    if (!key) {
+      return;
+    }
+    const pathBase = `userMetadataKeys.${key || index}`;
+    entries.push({
+      source: String(sourceKey || "").trim(),
+      path: `${pathBase}.key`,
+      value: key,
+    });
+    const description = firstNonEmptyString([
+      metadata.description,
+      mvpdWorkspaceResolveUserMetadataDescription(tooltipsPayload, key),
+    ]);
+    if (description) {
+      entries.push({
+        source: String(sourceKey || "").trim(),
+        path: `${pathBase}.description`,
+        value: description,
+      });
+    }
+    if (typeof metadata.encrypted === "boolean") {
+      entries.push({
+        source: String(sourceKey || "").trim(),
+        path: `${pathBase}.encrypted`,
+        value: String(metadata.encrypted),
+      });
+    }
+    if (typeof metadata.enabled === "boolean") {
+      entries.push({
+        source: String(sourceKey || "").trim(),
+        path: `${pathBase}.enabled`,
+        value: String(metadata.enabled),
+      });
+    }
+  });
+  return mvpdWorkspaceDeduplicateEntries(entries, 320);
+}
+
+function mvpdWorkspaceExtractManglerIds(entityData = null) {
+  if (!entityData?.manglers || typeof entityData.manglers !== "object") {
+    return [];
+  }
+  const output = [];
+  const seen = new Set();
+  Object.values(entityData.manglers).forEach((group) => {
+    if (!group || typeof group !== "object") {
+      return;
+    }
+    Object.values(group).forEach((value) => {
+      const id = String(value || "").trim();
+      if (!id || seen.has(id)) {
+        return;
+      }
+      seen.add(id);
+      output.push(id);
+    });
+  });
+  return output;
+}
+
+function mvpdWorkspaceExtractDynamicRuleProperties(manglersPayload = null, entityDataList = []) {
+  const propertiesByName = new Map();
+  const seenManglerIds = new Set();
+  (Array.isArray(entityDataList) ? entityDataList : []).forEach((entityData) => {
+    mvpdWorkspaceExtractManglerIds(entityData).forEach((manglerId) => {
+      if (!manglerId || seenManglerIds.has(manglerId)) {
+        return;
+      }
+      seenManglerIds.add(manglerId);
+      const requirements = Array.isArray(manglersPayload?.[manglerId]) ? manglersPayload[manglerId] : [];
+      requirements.forEach((requirement) => {
+        const configurationProperties = Array.isArray(requirement?.configurationProperties)
+          ? requirement.configurationProperties
+          : [];
+        configurationProperties.forEach((property) => {
+          const propertyName = String(property?.propertyName || "").trim();
+          if (!propertyName) {
+            return;
+          }
+          if (!propertiesByName.has(propertyName)) {
+            propertiesByName.set(propertyName, {
+              propertyName,
+              propertyType: String(property?.propertyType || "").trim(),
+              manglerIds: new Set(),
+            });
+          }
+          const nextEntry = propertiesByName.get(propertyName);
+          if (String(property?.propertyType || "").trim() && !nextEntry.propertyType) {
+            nextEntry.propertyType = String(property.propertyType || "").trim();
+          }
+          nextEntry.manglerIds.add(manglerId);
+        });
+      });
+    });
+  });
+  return [...propertiesByName.values()]
+    .map((entry) => ({
+      propertyName: entry.propertyName,
+      propertyType: String(entry.propertyType || "").trim(),
+      manglerIds: [...entry.manglerIds].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+    }))
+    .sort((left, right) =>
+      left.propertyName.localeCompare(right.propertyName, undefined, {
+        sensitivity: "base",
+        numeric: true,
+      })
+    );
+}
+
+function mvpdWorkspaceReadDynamicRuleValue(entityData = null, propertyName = "") {
+  if (!entityData || typeof entityData !== "object") {
+    return undefined;
+  }
+  const configDefault = entityData?.configuration?.default;
+  if (configDefault && typeof configDefault === "object" && Object.prototype.hasOwnProperty.call(configDefault, propertyName)) {
+    return configDefault[propertyName];
+  }
+  const clientData = entityData?.clientData;
+  if (clientData && typeof clientData === "object" && Object.prototype.hasOwnProperty.call(clientData, propertyName)) {
+    return clientData[propertyName];
+  }
+  return undefined;
+}
+
+function mvpdWorkspaceBuildDynamicRuleEntries(sourceKey, mvpdEntityData = null, endpointEntityData = null, manglersPayload = null) {
+  const sourceLabel = String(sourceKey || "").trim();
+  if (!sourceLabel) {
+    return [];
+  }
+  const dynamicProperties = mvpdWorkspaceExtractDynamicRuleProperties(manglersPayload, [mvpdEntityData, endpointEntityData]);
+  if (dynamicProperties.length === 0) {
+    return [];
+  }
+  const entries = [];
+  dynamicProperties.forEach((property) => {
+    const propertyName = String(property?.propertyName || "").trim();
+    if (!propertyName) {
+      return;
+    }
+    const pathBase = `dynamicRules.${propertyName}`;
+    if (property.propertyType) {
+      entries.push({
+        source: sourceLabel,
+        path: `${pathBase}.propertyType`,
+        value: property.propertyType,
+      });
+    }
+    if (Array.isArray(property.manglerIds) && property.manglerIds.length > 0) {
+      entries.push({
+        source: sourceLabel,
+        path: `${pathBase}.manglerIds`,
+        value: property.manglerIds.join(", "),
+      });
+    }
+    const mvpdValue = mvpdWorkspaceReadDynamicRuleValue(mvpdEntityData, propertyName);
+    const endpointValue = mvpdWorkspaceReadDynamicRuleValue(endpointEntityData, propertyName);
+    if (mvpdWorkspaceHasMeaningfulValue(mvpdValue)) {
+      entries.push(...mvpdWorkspaceCollectValueEntries(sourceLabel, `${pathBase}.mvpd`, mvpdValue, { maxEntries: 80, maxDepth: 4 }));
+    }
+    if (mvpdWorkspaceHasMeaningfulValue(endpointValue)) {
+      entries.push(
+        ...mvpdWorkspaceCollectValueEntries(sourceLabel, `${pathBase}.endpoint`, endpointValue, {
+          maxEntries: 80,
+          maxDepth: 4,
+        })
+      );
+    }
+    const hasEndpointValue = mvpdWorkspaceHasMeaningfulValue(endpointValue);
+    const resolvedValue = hasEndpointValue ? endpointValue : mvpdValue;
+    if (mvpdWorkspaceHasMeaningfulValue(resolvedValue)) {
+      entries.push(
+        ...mvpdWorkspaceCollectValueEntries(sourceLabel, `${pathBase}.resolved`, resolvedValue, {
+          maxEntries: 80,
+          maxDepth: 4,
+        })
+      );
+      entries.push({
+        source: sourceLabel,
+        path: `${pathBase}.resolvedLevel`,
+        value: hasEndpointValue ? "ENDPOINT" : "MVPD",
+      });
+    }
+  });
+  return mvpdWorkspaceDeduplicateEntries(entries, 640);
+}
+
+function mvpdWorkspaceBuildResolvedReferenceEntries(sourceKey, payload = null, refs = [], options = {}) {
+  const entries = [];
+  const seenRefs = new Set();
+  (Array.isArray(refs) ? refs : []).forEach((ref) => {
+    const normalizedRef = mvpdWorkspaceNormalizeEntityRef(ref).trim();
+    if (!normalizedRef || seenRefs.has(normalizedRef.toLowerCase())) {
+      return;
+    }
+    seenRefs.add(normalizedRef.toLowerCase());
+    const entity = mvpdWorkspaceFindEntityByRef(payload, normalizedRef);
+    const entityData = mvpdWorkspaceGetEntityData(entity);
+    if (!entityData) {
+      return;
+    }
+    const entityLabel = firstNonEmptyString([entityData.displayName, entityData.id, normalizedRef]);
+    const entrySource = `${String(sourceKey || "").trim()} | ${entityLabel || normalizedRef}`;
+    entries.push({
+      source: entrySource,
+      path: "entityRef",
+      value: normalizedRef,
+    });
+    entries.push(
+      ...mvpdWorkspaceCollectFlatEntries(entrySource, entityData, {
+        maxEntries: Math.max(30, Number(options.maxEntries || 220)),
+        maxDepth: Math.max(2, Number(options.maxDepth || 6)),
+      })
+    );
+  });
+  return mvpdWorkspaceDeduplicateEntries(entries, Math.max(60, Number(options.maxEntries || 320)));
+}
+
+function mvpdWorkspaceBuildMatchSummaryEntries(
+  context = null,
+  selectedProgrammerEntity = null,
+  selectedServiceProviderEntity = null,
+  selectedMvpdEntity = null,
+  selectedMvpdProxyEntity = null,
+  selectedIntegrationRef = "",
+  selectedIntegrationEntity = null,
+  loadedTmsMapIds = []
+) {
+  const entries = [];
+  const pushEntitySummary = (label, entity) => {
+    const entityData = mvpdWorkspaceGetEntityData(entity);
+    if (!entityData) {
+      return;
+    }
+    const entityKey = mvpdWorkspaceNormalizeEntityRef(entity?.key || "");
+    const basePath = String(label || "").trim();
+    if (entityKey) {
+      entries.push({
+        source: "selection",
+        path: `${basePath}.entityRef`,
+        value: entityKey,
+      });
+    }
+    const idValue = firstNonEmptyString([entityData.id]);
+    if (idValue) {
+      entries.push({
+        source: "selection",
+        path: `${basePath}.id`,
+        value: idValue,
+      });
+    }
+    const displayName = firstNonEmptyString([entityData.displayName, entityData.name]);
+    if (displayName) {
+      entries.push({
+        source: "selection",
+        path: `${basePath}.displayName`,
+        value: displayName,
+      });
+    }
+  };
+  if (context?.requestorId) {
+    entries.push({
+      source: "selection",
+      path: "requestor.id",
+      value: String(context.requestorId || ""),
+    });
+  }
+  if (context?.mvpdId) {
+    entries.push({
+      source: "selection",
+      path: "mvpd.id",
+      value: String(context.mvpdId || ""),
+    });
+  }
+  pushEntitySummary("programmer", selectedProgrammerEntity);
+  pushEntitySummary("serviceProvider", selectedServiceProviderEntity);
+  pushEntitySummary("mvpd", selectedMvpdEntity);
+  if (
+    selectedMvpdProxyEntity &&
+    String(selectedMvpdProxyEntity?.key || "").trim() &&
+    String(selectedMvpdProxyEntity?.key || "").trim() !== String(selectedMvpdEntity?.key || "").trim()
+  ) {
+    pushEntitySummary("mvpdProxy", selectedMvpdProxyEntity);
+  }
+  if (selectedIntegrationRef) {
+    entries.push({
+      source: "selection",
+      path: "integration.entityRef",
+      value: mvpdWorkspaceNormalizeEntityRef(selectedIntegrationRef),
+    });
+  }
+  pushEntitySummary("integration", selectedIntegrationEntity);
+  if (Array.isArray(loadedTmsMapIds) && loadedTmsMapIds.length > 0) {
+    entries.push({
+      source: "selection",
+      path: "tmsMaps.loaded",
+      value: loadedTmsMapIds.join(", "),
+    });
+  }
+  return mvpdWorkspaceDeduplicateEntries(entries, 120);
+}
+
+function mvpdWorkspaceAppendSection(sections = [], id = "", title = "", entries = [], subtitle = "") {
+  const normalizedEntries = mvpdWorkspaceDeduplicateEntries(entries, 800);
+  if (!Array.isArray(sections) || !title || normalizedEntries.length === 0) {
+    return;
+  }
+  sections.push({
+    id: String(id || title).trim(),
+    title: String(title || "").trim(),
+    subtitle: String(subtitle || "").trim(),
+    entries: normalizedEntries,
+  });
+}
+
+function mvpdWorkspaceCollectCertificatesPayload(endpointEntities = []) {
+  const payload = {};
+  (Array.isArray(endpointEntities) ? endpointEntities : []).forEach((entity) => {
+    const entityData = mvpdWorkspaceGetEntityData(entity);
+    const certificates = entityData?.certificates;
+    if (!certificates || typeof certificates !== "object") {
+      return;
+    }
+    Object.entries(certificates).forEach(([id, certificateRecord]) => {
+      const record = certificateRecord && typeof certificateRecord === "object" ? certificateRecord : null;
+      if (!record?.certificate || payload[id]) {
+        return;
+      }
+      payload[id] = record;
+    });
+  });
+  return payload;
+}
+
+function mvpdWorkspaceBuildCertificateEntries(sourceKey, endpointEntityData = null, certificateDetailsPayload = null) {
+  const certificates = endpointEntityData?.certificates;
+  if (!certificates || typeof certificates !== "object") {
+    return [];
+  }
+  const entries = [];
+  Object.keys(certificates).forEach((certificateId) => {
+    const details = certificateDetailsPayload?.[certificateId];
+    if (!details || typeof details !== "object") {
+      return;
+    }
+    const entrySource = `${String(sourceKey || "").trim()} | Certificate ${certificateId}`;
+    entries.push({
+      source: entrySource,
+      path: "certificateId",
+      value: certificateId,
+    });
+    entries.push(
+      ...mvpdWorkspaceCollectValueEntries(entrySource, "certificateDetails", details, {
+        maxEntries: 80,
+        maxDepth: 4,
+      })
+    );
+  });
+  return mvpdWorkspaceDeduplicateEntries(entries, 320);
+}
+
+function mvpdWorkspaceResolveEndpointLabel(endpointEntity = null, fallbackLabel = "") {
+  const entityData = mvpdWorkspaceGetEntityData(endpointEntity);
+  return firstNonEmptyString([entityData?.displayName, entityData?.id, fallbackLabel, endpointEntity?.key]);
+}
+
+function mvpdWorkspaceResolveResourceChipState(allEntries = [], displayedCalls = [], context = null) {
+  const resolveTmsMapIdFromCall = (call = null) => {
+    const labelMatch = String(call?.label || "")
+      .trim()
+      .match(/^TMSID Map \((.+)\)$/i);
+    if (labelMatch && labelMatch[1]) {
+      return String(labelMatch[1]).trim();
+    }
+    const urlMatch = String(call?.url || "")
+      .trim()
+      .match(/\/TMSIdMap\/([^/?#]+)/i);
+    return urlMatch && urlMatch[1] ? decodeURIComponent(urlMatch[1]) : "";
+  };
+
+  const tmsMapIdBySourceKey = new Map();
+  const loadedTmsMapIds = [
+    ...new Set(
+      (Array.isArray(displayedCalls) ? displayedCalls : [])
+        .filter((call) => call?.ok && String(call?.key || "").startsWith("tmsIdMap_"))
+        .map((call) => {
+          const callKey = String(call?.key || "").trim();
+          const mapId = resolveTmsMapIdFromCall(call);
+          if (callKey && mapId) {
+            tmsMapIdBySourceKey.set(callKey, mapId);
+          }
+          return mapId;
+        })
+        .filter(Boolean)
+    ),
+  ];
+  const fallbackResourceIds = mvpdWorkspaceFilterChipValues(
+    mvpdWorkspaceCollectChipValues(
+      allEntries,
+      /(authzresourcerequestor|resource([._-]?ids?)?|entitle([._-]?ids?)?)/i,
+      null,
+      180
+    ),
+    180
+  ).filter((value) => mvpdWorkspaceIsLikelyResourceId(value));
+  const tmsIdsFromNames = mvpdWorkspaceFilterChipValues(
+    mvpdWorkspaceCollectChipValues(allEntries, /(tms([._-]?ids?)?)/i, /tms/i, 240),
+    240
+  );
+  const tmsIdsFromMaps = (Array.isArray(allEntries) ? allEntries : [])
+    .filter((entry) => {
+      const source = String(entry?.source || "").toLowerCase();
+      const path = String(entry?.path || "");
+      return source.includes("tmsidmap") && /(^|[.])mapping[.]/i.test(path);
+    })
+    .map((entry) => String(entry?.value || "").trim())
+    .filter((value) => Boolean(value))
+    .slice(0, 240);
+  const tmsIds = mvpdWorkspaceFilterChipValues([...new Set([...tmsIdsFromNames, ...tmsIdsFromMaps])], 240);
+  const tmsLabelByValueByMapId = new Map();
+  (Array.isArray(allEntries) ? allEntries : []).forEach((entry) => {
+    const sourceKey = String(entry?.source || "").trim();
+    if (!sourceKey.startsWith("tmsIdMap_")) {
+      return;
+    }
+    const mapId = firstNonEmptyString([tmsMapIdBySourceKey.get(sourceKey), sourceKey.replace(/^tmsIdMap_/i, "")]);
+    const path = String(entry?.path || "").trim();
+    const labelMatch = path.match(/(?:^|[.])mapping[.]([^.\[]+)$/i);
+    const mappedLabel = labelMatch && labelMatch[1] ? String(labelMatch[1]).trim() : "";
+    const mappedValue = String(entry?.value || "").trim();
+    if (!mapId || !mappedLabel || !mappedValue) {
+      return;
+    }
+    const mapIdKey = String(mapId).trim().toLowerCase();
+    if (!mapIdKey) {
+      return;
+    }
+    if (!tmsLabelByValueByMapId.has(mapIdKey)) {
+      tmsLabelByValueByMapId.set(mapIdKey, new Map());
+    }
+    const valueToLabel = tmsLabelByValueByMapId.get(mapIdKey);
+    const valueKey = mappedValue.toLowerCase();
+    if (!valueToLabel.has(valueKey)) {
+      valueToLabel.set(valueKey, {
+        label: mappedLabel,
+        value: mappedValue,
+      });
+    }
+  });
+  const preferredTmsMapOrder = [];
+  const selectedMvpdMapKey = String(context?.mvpdId || "").trim().toLowerCase();
+  if (selectedMvpdMapKey) {
+    preferredTmsMapOrder.push(selectedMvpdMapKey);
+  }
+  if (!preferredTmsMapOrder.includes("default")) {
+    preferredTmsMapOrder.push("default");
+  }
+  loadedTmsMapIds.forEach((mapId) => {
+    const mapKey = String(mapId || "").trim().toLowerCase();
+    if (mapKey && !preferredTmsMapOrder.includes(mapKey)) {
+      preferredTmsMapOrder.push(mapKey);
+    }
+  });
+  const tmsLabelByValue = new Map();
+  preferredTmsMapOrder.forEach((mapKey) => {
+    const valueToLabel = tmsLabelByValueByMapId.get(mapKey);
+    if (!(valueToLabel instanceof Map)) {
+      return;
+    }
+    valueToLabel.forEach((entry, valueKey) => {
+      if (!tmsLabelByValue.has(valueKey)) {
+        tmsLabelByValue.set(valueKey, entry);
+      }
+    });
+  });
+  const selectedMapEntries = tmsLabelByValueByMapId.get(selectedMvpdMapKey);
+  const defaultMapEntries = tmsLabelByValueByMapId.get("default");
+  const activeTmsMapKey = (() => {
+    if (selectedMvpdMapKey && selectedMapEntries instanceof Map && selectedMapEntries.size > 0) {
+      return selectedMvpdMapKey;
+    }
+    if (defaultMapEntries instanceof Map && defaultMapEntries.size > 0) {
+      return "default";
+    }
+    for (const mapKey of preferredTmsMapOrder) {
+      const entries = tmsLabelByValueByMapId.get(mapKey);
+      if (entries instanceof Map && entries.size > 0) {
+        return mapKey;
+      }
+    }
+    return "";
+  })();
+  const activeTmsMapEntries = activeTmsMapKey ? tmsLabelByValueByMapId.get(activeTmsMapKey) : null;
+  const translatedResourceIdChipsFromActiveMap =
+    activeTmsMapEntries instanceof Map
+      ? mvpdWorkspaceBuildMappedChipValues(
+          [...activeTmsMapEntries.values()].map((entry) => {
+            const label = String(entry?.label || "").trim();
+            const rawValue = String(entry?.value || "").trim();
+            return {
+              label: label || rawValue,
+              rawValue,
+            };
+          }),
+          1200
+        )
+      : [];
+  const translatedFallbackResourceIdChips = mvpdWorkspaceBuildMappedChipValues(
+    fallbackResourceIds.map((resourceId) => {
+      const rawValue = String(resourceId || "").trim();
+      if (!rawValue) {
+        return null;
+      }
+      const translatedEntry = tmsLabelByValue.get(rawValue.toLowerCase()) || null;
+      const translatedLabel = String(translatedEntry?.label || "").trim();
+      return {
+        label: translatedLabel || rawValue,
+        rawValue,
+      };
+    }),
+    1200
+  );
+  const finalResourceIdChips =
+    translatedResourceIdChipsFromActiveMap.length > 0 ? translatedResourceIdChipsFromActiveMap : translatedFallbackResourceIdChips;
+  const finalResourceIds = finalResourceIdChips.map((entry) => String(entry?.label || "").trim());
+  const finalResourceIdsRaw =
+    finalResourceIdChips.length > 0
+      ? finalResourceIdChips.map((entry) => String(entry?.rawValue || entry?.label || "").trim()).filter(Boolean)
+      : fallbackResourceIds;
+
+  return {
+    loadedTmsMapIds,
+    tmsIds,
+    finalResourceIdChips,
+    finalResourceIds,
+    finalResourceIdsRaw,
+    activeTmsMapKey,
+  };
+}
+
 async function mvpdWorkspaceFetchCall(key, label, urlCandidates, requestInit = null, debugContext = null) {
   const startedAt = Date.now();
   const method = String(requestInit?.method || "GET")
@@ -40643,6 +41980,16 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
       ],
     },
     {
+      key: "tooltips",
+      label: "Tooltips",
+      urls: [`${ADOBE_CONSOLE_BASE}/${withVersion("rest/api/config/tooltips")}`],
+    },
+    {
+      key: "manglers",
+      label: "Manglers",
+      urls: [`${ADOBE_CONSOLE_BASE}/${withVersion("rest/api/config/manglers")}`],
+    },
+    {
       key: "mvpdCatalog",
       label: "MVPD Catalog",
       urls: [`${ADOBE_CONSOLE_BASE}/${withVersion("rest/api/entity/Mvpd")}`],
@@ -40680,6 +42027,9 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
     )
   );
   const phaseOneCallByKey = new Map(phaseOneCalls.map((call) => [call.key, call]));
+  const localConfigurationPayload = phaseOneCallByKey.get("localConfiguration")?.parsed || null;
+  const tooltipsPayload = phaseOneCallByKey.get("tooltips")?.parsed || null;
+  const manglersPayload = phaseOneCallByKey.get("manglers")?.parsed || null;
   const catalogMvpdPayload = phaseOneCallByKey.get("mvpdCatalog")?.parsed || null;
   const catalogMvpdProxyPayload = phaseOneCallByKey.get("mvpdProxyCatalog")?.parsed || null;
   const catalogServiceProviderPayload = phaseOneCallByKey.get("serviceProviderCatalog")?.parsed || null;
@@ -40687,10 +42037,10 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
   const catalogIntegrationPayload = phaseOneCallByKey.get("integrationConfigurationCatalog")?.parsed || null;
   const tmsRootPayload = phaseOneCallByKey.get("tmsIdMapRoot")?.parsed || null;
 
-  const selectedMvpdEntity =
+  const selectedCatalogMvpdEntity =
     mvpdWorkspaceFindEntityById(catalogMvpdPayload, context.mvpdId, "mvpd") ||
     mvpdWorkspaceFindEntityById(catalogMvpdPayload, context.mvpdId);
-  const selectedMvpdProxyEntity =
+  const selectedCatalogMvpdProxyEntity =
     mvpdWorkspaceFindEntityById(catalogMvpdProxyPayload, context.mvpdId, "mvpdproxy") ||
     mvpdWorkspaceFindEntityById(catalogMvpdProxyPayload, context.mvpdId);
   const selectedServiceProviderEntity =
@@ -40699,6 +42049,13 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
   const selectedProgrammerEntity =
     mvpdWorkspaceFindEntityById(catalogProgrammerPayload, context.programmerId, "programmer") ||
     mvpdWorkspaceFindEntityById(catalogProgrammerPayload, context.programmerId);
+  const selectedMvpdEntity = selectedCatalogMvpdEntity || selectedCatalogMvpdProxyEntity || null;
+  const selectedMvpdProxyEntity =
+    selectedCatalogMvpdProxyEntity &&
+    String(selectedCatalogMvpdProxyEntity?.key || "").trim() !== String(selectedMvpdEntity?.key || "").trim()
+      ? selectedCatalogMvpdProxyEntity
+      : null;
+  const selectedMvpdData = mvpdWorkspaceGetEntityData(selectedMvpdEntity);
 
   const selectedIntegrationRef = mvpdWorkspaceFindIntegrationRefFromServiceProvider(selectedServiceProviderEntity, context.mvpdId);
   const selectedIntegrationRefSplit = mvpdWorkspaceSplitEntityRef(selectedIntegrationRef);
@@ -40709,6 +42066,7 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
       selectedIntegrationRef,
       selectedServiceProviderEntity
     ) || null;
+  const selectedIntegrationData = mvpdWorkspaceGetEntityData(selectedIntegrationEntity);
 
   const phaseTwoCallSpecs = [];
   if (selectedIntegrationRefSplit.type && selectedIntegrationRefSplit.id) {
@@ -40720,113 +42078,6 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
           `rest/api/entity/${selectedIntegrationRefSplit.type}/${encodeURIComponent(selectedIntegrationRefSplit.id)}`
         )}`,
       ],
-    });
-  }
-
-  const tmsEntityIds = new Set();
-  const selectedMvpdId = String(context.mvpdId || "").trim().toLowerCase();
-  const addSelectedTmsEntityRef = (entityRef = "") => {
-    const normalizedRef = mvpdWorkspaceNormalizeEntityRef(entityRef);
-    if (!normalizedRef) {
-      return;
-    }
-    const split = mvpdWorkspaceSplitEntityRef(normalizedRef);
-    if (String(split.type || "").toLowerCase() !== "tmsidmap" || !split.id) {
-      return;
-    }
-    const candidateId = String(split.id || "").trim().toLowerCase();
-    if (!candidateId) {
-      return;
-    }
-    if (candidateId === "default" || (selectedMvpdId && candidateId === selectedMvpdId)) {
-      tmsEntityIds.add(`TMSIdMap:${split.id}`);
-    }
-  };
-  const rootEntityIds = Array.isArray(tmsRootPayload?.entityData?.rootEntityIds)
-    ? tmsRootPayload.entityData.rootEntityIds
-    : [];
-  rootEntityIds.forEach((entityId) => addSelectedTmsEntityRef(entityId));
-  if (context.mvpdId) {
-    tmsEntityIds.add(`TMSIdMap:${context.mvpdId}`);
-  }
-  tmsEntityIds.add("TMSIdMap:default");
-  const tmsEntityRefs = new Set();
-  mvpdWorkspaceCollectEntityRefs(selectedMvpdEntity?.entityData || null, tmsEntityRefs, {
-    maxRefs: 160,
-    maxDepth: 6,
-  });
-  mvpdWorkspaceCollectEntityRefs(selectedMvpdProxyEntity?.entityData || null, tmsEntityRefs, {
-    maxRefs: 160,
-    maxDepth: 6,
-  });
-  mvpdWorkspaceCollectEntityRefs(selectedIntegrationEntity?.entityData || null, tmsEntityRefs, {
-    maxRefs: 160,
-    maxDepth: 6,
-  });
-  [...tmsEntityRefs].forEach((entityRef) => addSelectedTmsEntityRef(entityRef));
-  const tmsKeySeen = new Set();
-  [...tmsEntityIds].forEach((entityId) => {
-    const split = mvpdWorkspaceSplitEntityRef(entityId);
-    if (String(split.type || "").toLowerCase() !== "tmsidmap" || !split.id) {
-      return;
-    }
-    const safeId = String(split.id || "default")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "");
-    const key = `tmsIdMap_${safeId || "default"}`;
-    if (tmsKeySeen.has(key)) {
-      return;
-    }
-    tmsKeySeen.add(key);
-    phaseTwoCallSpecs.push({
-      key,
-      label: `TMSID Map (${split.id})`,
-      urls: [
-        `${ADOBE_CONSOLE_BASE}/${withVersion(`rest/api/entity/TMSIdMap/${encodeURIComponent(split.id)}`)}`,
-      ],
-    });
-  });
-
-  const bulkEntityRefs = new Set();
-  mvpdWorkspaceCollectEntityRefs(selectedIntegrationEntity?.entityData || null, bulkEntityRefs, {
-    maxRefs: 240,
-    maxDepth: 6,
-  });
-  if (bulkEntityRefs.size === 0) {
-    mvpdWorkspaceCollectEntityRefs(selectedMvpdEntity?.entityData || null, bulkEntityRefs, {
-      maxRefs: 240,
-      maxDepth: 6,
-    });
-    mvpdWorkspaceCollectEntityRefs(selectedMvpdProxyEntity?.entityData || null, bulkEntityRefs, {
-      maxRefs: 240,
-      maxDepth: 6,
-    });
-  }
-  if (selectedIntegrationRef) {
-    bulkEntityRefs.add(mvpdWorkspaceNormalizeEntityRef(selectedIntegrationRef));
-  }
-  const bulkEntities = [...bulkEntityRefs]
-    .map((entry) => mvpdWorkspaceNormalizeEntityRef(entry))
-    .filter((entry) => /^[A-Z][A-Za-z0-9]+:[^\s]+$/.test(entry))
-    .slice(0, 220);
-  if (bulkEntities.length > 0) {
-    const payload = {
-      entities: bulkEntities,
-      ...(configurationVersion > 0 ? { configVersion: configurationVersion } : {}),
-    };
-    phaseTwoCallSpecs.push({
-      key: "bulkRetrieveSelected",
-      label: "Bulk Retrieve (Selected MVPD References)",
-      urls: [`${ADOBE_CONSOLE_BASE}/rest/api/entity/bulkRetrieve`],
-      requestInit: {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      },
     });
   }
 
@@ -40855,46 +42106,224 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
       ) ||
       selectedIntegrationEntity;
   }
-
-  const allCalls = [versionCall, ...phaseOneCalls, ...phaseTwoCalls];
-  const callKeysAllowedInWorkspace = new Set([
-    "localConfiguration",
-    "mvpdCatalog",
-    "mvpdProxyCatalog",
-    "serviceProviderCatalog",
-    "programmerCatalog",
-    "integrationConfigurationCatalog",
-    "tmsIdMapRoot",
-    "integrationConfigurationEntity",
-    "bulkRetrieveSelected",
-  ]);
-  const displayedCalls = allCalls.filter((call) => {
-    const callKey = String(call?.key || "").trim();
-    return callKeysAllowedInWorkspace.has(callKey) || callKey.startsWith("tmsIdMap_");
+  const selectedIntegrationDataResolved = mvpdWorkspaceGetEntityData(selectedIntegrationEntity);
+  const primaryRelatedRefs = mvpdWorkspaceCollectConsolePrimaryEntityRefs(selectedMvpdData, selectedIntegrationDataResolved);
+  const tmsEntityIds = new Set();
+  const selectedMvpdId = String(context.mvpdId || "").trim().toLowerCase();
+  const addSelectedTmsEntityRef = (entityRef = "") => {
+    const normalizedRef = mvpdWorkspaceNormalizeEntityRef(entityRef);
+    if (!normalizedRef) {
+      return;
+    }
+    const split = mvpdWorkspaceSplitEntityRef(normalizedRef);
+    if (String(split.type || "").toLowerCase() !== "tmsidmap" || !split.id) {
+      return;
+    }
+    const candidateId = String(split.id || "").trim().toLowerCase();
+    if (!candidateId) {
+      return;
+    }
+    if (candidateId === "default" || (selectedMvpdId && candidateId === selectedMvpdId)) {
+      tmsEntityIds.add(`TMSIdMap:${split.id}`);
+    }
+  };
+  const rootEntityIds = Array.isArray(tmsRootPayload?.entityData?.rootEntityIds)
+    ? tmsRootPayload.entityData.rootEntityIds
+    : [];
+  rootEntityIds.forEach((entityId) => addSelectedTmsEntityRef(entityId));
+  if (context.mvpdId) {
+    tmsEntityIds.add(`TMSIdMap:${context.mvpdId}`);
+  }
+  tmsEntityIds.add("TMSIdMap:default");
+  const tmsEntityRefs = new Set();
+  mvpdWorkspaceCollectEntityRefs(selectedMvpdData || null, tmsEntityRefs, {
+    maxRefs: 160,
+    maxDepth: 6,
   });
-  const allEntries = [];
-  const sourceSamples = [];
-  const selectionNeedles = [
-    String(context.mvpdId || ""),
-    String(context.requestorId || ""),
-    String(selectedIntegrationRefSplit.id || ""),
-    String(selectedIntegrationEntity?.entityData?.id || ""),
-    String(mvpdWorkspaceNormalizeEntityRef(selectedIntegrationRef) || ""),
-    String(selectedServiceProviderEntity?.entityData?.id || ""),
-  ]
-    .map((value) => value.trim().toLowerCase())
+  mvpdWorkspaceCollectEntityRefs(selectedMvpdProxyEntity?.entityData || null, tmsEntityRefs, {
+    maxRefs: 160,
+    maxDepth: 6,
+  });
+  mvpdWorkspaceCollectEntityRefs(selectedIntegrationDataResolved || null, tmsEntityRefs, {
+    maxRefs: 160,
+    maxDepth: 6,
+  });
+  [...tmsEntityRefs].forEach((entityRef) => addSelectedTmsEntityRef(entityRef));
+
+  const phaseThreeCallSpecs = [];
+  const tmsKeySeen = new Set();
+  [...tmsEntityIds].forEach((entityId) => {
+    const split = mvpdWorkspaceSplitEntityRef(entityId);
+    if (String(split.type || "").toLowerCase() !== "tmsidmap" || !split.id) {
+      return;
+    }
+    const safeId = String(split.id || "default")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    const key = `tmsIdMap_${safeId || "default"}`;
+    if (tmsKeySeen.has(key)) {
+      return;
+    }
+    tmsKeySeen.add(key);
+    phaseThreeCallSpecs.push({
+      key,
+      label: `TMSID Map (${split.id})`,
+      urls: [
+        `${ADOBE_CONSOLE_BASE}/${withVersion(`rest/api/entity/TMSIdMap/${encodeURIComponent(split.id)}`)}`,
+      ],
+    });
+  });
+
+  const bulkEntities = [...new Set(primaryRelatedRefs)]
+    .map((entry) => mvpdWorkspaceNormalizeEntityRef(entry))
+    .filter((entry) => /^[A-Z][A-Za-z0-9]+:[^\s]+$/.test(entry))
+    .slice(0, 220);
+  if (bulkEntities.length > 0) {
+    const payload = {
+      entities: bulkEntities,
+      ...(configurationVersion > 0 ? { configVersion: configurationVersion } : {}),
+    };
+    phaseThreeCallSpecs.push({
+      key: "bulkRetrieveSelected",
+      label: "Bulk Retrieve (Selected MVPD References)",
+      urls: [`${ADOBE_CONSOLE_BASE}/rest/api/entity/bulkRetrieve`],
+      requestInit: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    });
+  }
+
+  const phaseThreeCalls =
+    phaseThreeCallSpecs.length > 0
+      ? await Promise.all(
+          phaseThreeCallSpecs.map((spec) =>
+            mvpdWorkspaceFetchCall(spec.key, spec.label, spec.urls, spec.requestInit || null, mvpdDebugContext)
+          )
+        )
+      : [];
+
+  const primaryBulkPayload = phaseThreeCalls.find((call) => call.key === "bulkRetrieveSelected")?.parsed || null;
+  const primaryRelatedPayload = {
+    entities: [
+      ...mvpdWorkspaceExtractEntityList(selectedMvpdEntity),
+      ...mvpdWorkspaceExtractEntityList(selectedMvpdProxyEntity),
+      ...mvpdWorkspaceExtractEntityList(selectedServiceProviderEntity),
+      ...mvpdWorkspaceExtractEntityList(selectedProgrammerEntity),
+      ...mvpdWorkspaceExtractEntityList(selectedIntegrationEntity),
+      ...mvpdWorkspaceExtractEntityList(primaryBulkPayload),
+    ],
+  };
+  const primaryRelatedEntities = primaryRelatedRefs
+    .map((entityRef) => mvpdWorkspaceFindEntityByRef(primaryRelatedPayload, entityRef))
     .filter(Boolean);
-  const bulkEntryMatchesSelection = (entry) => {
-    if (!entry) {
-      return false;
-    }
-    const haystack = `${String(entry.path || "")} ${String(entry.value || "")}`.toLowerCase();
-    if (!haystack) {
-      return false;
-    }
-    return selectionNeedles.some((needle) => needle && haystack.includes(needle));
+  const extensionEntityRefs = mvpdWorkspaceCollectConsoleExtensionEntityRefs(primaryRelatedEntities)
+    .map((entry) => mvpdWorkspaceNormalizeEntityRef(entry))
+    .filter((entry) => /^[A-Z][A-Za-z0-9]+:[^\s]+$/.test(entry))
+    .slice(0, 220);
+  const certificatesPayload = mvpdWorkspaceCollectCertificatesPayload(primaryRelatedEntities);
+  const phaseFourCallSpecs = [];
+  if (extensionEntityRefs.length > 0) {
+    phaseFourCallSpecs.push({
+      key: "bulkRetrieveSelectedExtensions",
+      label: "Bulk Retrieve (Endpoint Extensions)",
+      urls: [`${ADOBE_CONSOLE_BASE}/rest/api/entity/bulkRetrieve`],
+      requestInit: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          entities: extensionEntityRefs,
+          ...(configurationVersion > 0 ? { configVersion: configurationVersion } : {}),
+        }),
+      },
+    });
+  }
+  if (Object.keys(certificatesPayload).length > 0) {
+    phaseFourCallSpecs.push({
+      key: "certificatesSelected",
+      label: "Certificates Details",
+      urls: [`${ADOBE_CONSOLE_BASE}/${withVersion("rest/api/certificates/details")}`],
+      requestInit: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(certificatesPayload),
+      },
+    });
+  }
+  const phaseFourCalls =
+    phaseFourCallSpecs.length > 0
+      ? await Promise.all(
+          phaseFourCallSpecs.map((spec) =>
+            mvpdWorkspaceFetchCall(spec.key, spec.label, spec.urls, spec.requestInit || null, mvpdDebugContext)
+          )
+        )
+      : [];
+  const extensionBulkPayload = phaseFourCalls.find((call) => call.key === "bulkRetrieveSelectedExtensions")?.parsed || null;
+  const certificateDetailsPayload = phaseFourCalls.find((call) => call.key === "certificatesSelected")?.parsed || null;
+  const combinedEntityPayload = {
+    entities: [
+      ...mvpdWorkspaceExtractEntityList(selectedMvpdEntity),
+      ...mvpdWorkspaceExtractEntityList(selectedMvpdProxyEntity),
+      ...mvpdWorkspaceExtractEntityList(selectedServiceProviderEntity),
+      ...mvpdWorkspaceExtractEntityList(selectedProgrammerEntity),
+      ...mvpdWorkspaceExtractEntityList(selectedIntegrationEntity),
+      ...mvpdWorkspaceExtractEntityList(primaryBulkPayload),
+      ...mvpdWorkspaceExtractEntityList(extensionBulkPayload),
+    ],
   };
 
+  const authnEndpointRefs = Array.isArray(selectedMvpdData?.authenticationProviderConfigs)
+    ? selectedMvpdData.authenticationProviderConfigs
+    : [];
+  const authzEndpointRefs = Array.isArray(selectedMvpdData?.authorizationProviderConfigs)
+    ? selectedMvpdData.authorizationProviderConfigs
+    : [];
+  const logoutEndpointRefs = Array.isArray(selectedMvpdData?.logoutProviderConfigs)
+    ? selectedMvpdData.logoutProviderConfigs
+    : [];
+  const platformSettingRefs =
+    selectedMvpdData?.platformSettings && typeof selectedMvpdData.platformSettings === "object"
+      ? Object.values(selectedMvpdData.platformSettings)
+      : [];
+  const proxiedMvpdRefs =
+    selectedMvpdData?.proxiedMvpds && typeof selectedMvpdData.proxiedMvpds === "object"
+      ? Object.values(selectedMvpdData.proxiedMvpds)
+      : [];
+  const integrationPlatformConfigurationRefs =
+    selectedIntegrationEntity?.entityData?.platformConfigurations &&
+    typeof selectedIntegrationEntity.entityData.platformConfigurations === "object"
+      ? Object.values(selectedIntegrationEntity.entityData.platformConfigurations)
+      : [];
+  const integrationPlatformTraitRefs =
+    selectedIntegrationEntity?.entityData?.platformTraitConfigurations &&
+    typeof selectedIntegrationEntity.entityData.platformTraitConfigurations === "object"
+      ? Object.values(selectedIntegrationEntity.entityData.platformTraitConfigurations)
+      : [];
+  const resolveEntityArray = (refs = []) =>
+    (Array.isArray(refs) ? refs : [])
+      .map((ref) => mvpdWorkspaceFindEntityByRef(combinedEntityPayload, ref))
+      .filter(Boolean);
+  const authnEndpoints = resolveEntityArray(authnEndpointRefs);
+  const authzEndpoints = resolveEntityArray(authzEndpointRefs);
+  const logoutEndpoints = resolveEntityArray(logoutEndpointRefs);
+  const platformSettingEntities = resolveEntityArray(platformSettingRefs);
+  const proxiedMvpdEntities = resolveEntityArray(proxiedMvpdRefs);
+  const integrationPlatformConfigurationEntities = resolveEntityArray(integrationPlatformConfigurationRefs);
+  const integrationPlatformTraitEntities = resolveEntityArray(integrationPlatformTraitRefs);
+
+  const allCalls = [versionCall, ...phaseOneCalls, ...phaseTwoCalls, ...phaseThreeCalls, ...phaseFourCalls];
+  const displayedCalls = allCalls;
+  const allEntries = [];
+  const sourceSamples = [];
   const addSourceEntries = (sourceKey, label, payload, maxEntries = 800, maxDepth = 6, entryFilter = null) => {
     if (payload == null) {
       return;
@@ -40916,228 +42345,33 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
       entries: sourceEntries.slice(0, 80),
     });
   };
+  const pushSection = (id, title, entries, subtitle = "") => {
+    const normalizedEntries = mvpdWorkspaceDeduplicateEntries(entries, 800);
+    if (normalizedEntries.length === 0) {
+      return;
+    }
+    allEntries.push(...normalizedEntries);
+    mvpdWorkspaceAppendSection(sections, id, title, normalizedEntries, subtitle);
+  };
 
   displayedCalls
     .filter((call) => call?.ok)
     .forEach((call) => {
       const callKey = String(call?.key || "").trim();
-      const includeCallEntries =
-        callKey === "integrationConfigurationEntity" || callKey === "bulkRetrieveSelected" || callKey.startsWith("tmsIdMap_");
-      if (!includeCallEntries) {
+      if (!callKey || !(callKey.startsWith("tmsIdMap_") || callKey === "bulkRetrieveSelected" || callKey === "bulkRetrieveSelectedExtensions" || callKey === "certificatesSelected" || callKey === "manglers" || callKey === "tooltips" || callKey === "localConfiguration")) {
         return;
       }
-      const maxEntries = callKey === "bulkRetrieveSelected" ? 1400 : callKey.startsWith("tmsIdMap_") ? 1100 : 900;
-      addSourceEntries(
-        callKey,
-        call.label,
-        call.parsed,
-        maxEntries,
-        6,
-        callKey === "bulkRetrieveSelected" ? bulkEntryMatchesSelection : null
-      );
+      const maxEntries = callKey.startsWith("tmsIdMap_") ? 1100 : callKey === "certificatesSelected" ? 600 : 900;
+      addSourceEntries(callKey, call.label, call.parsed, maxEntries, 6, null);
     });
-
-  addSourceEntries("selectedProgrammer", "Selected Programmer Entity", selectedProgrammerEntity, 320, 6);
-  addSourceEntries("selectedServiceProvider", "Selected Service Provider Entity", selectedServiceProviderEntity, 500, 7);
-  addSourceEntries("selectedMvpd", "Selected MVPD Entity", selectedMvpdEntity, 700, 8);
-  addSourceEntries("selectedMvpdProxy", "Selected MVPD Proxy Entity", selectedMvpdProxyEntity, 700, 8);
-  addSourceEntries("selectedIntegration", "Selected Integration Configuration", selectedIntegrationEntity, 700, 8);
-
-  const mvpdNeedle = context.mvpdId.toLowerCase();
-  const mvpdMatches = mvpdWorkspaceCollectSectionEntries(
-    allEntries.filter((entry) => `${entry.path} ${entry.value}`.toLowerCase().includes(mvpdNeedle)),
-    /./,
-    220
-  );
-  const generalEntries = mvpdWorkspaceCollectSectionEntries(
-    allEntries,
-    /(general|display|branding|idp|mvpd|clientdata|key|provider|settings)/i,
-    180
-  );
-  const authenticationEntries = mvpdWorkspaceCollectSectionEntries(
-    allEntries,
-    /(authentication|authn|token|session|login|sso)/i,
-    180
-  );
-  const authorizationEntries = mvpdWorkspaceCollectSectionEntries(
-    allEntries,
-    /(authorization|authz|entitlement|resource|decision|preauthorize|authorize)/i,
-    220
-  );
-  const logoutEntries = mvpdWorkspaceCollectSectionEntries(
-    allEntries,
-    /(logout|logoff|signout)/i,
-    120
-  );
-  const samlEntries = mvpdWorkspaceCollectSectionEntries(
-    allEntries,
-    /(saml|metadata|assertion|certificate|acs)/i,
-    200
-  );
-  const resolveTmsMapIdFromCall = (call = null) => {
-    const labelMatch = String(call?.label || "")
-      .trim()
-      .match(/^TMSID Map \((.+)\)$/i);
-    if (labelMatch && labelMatch[1]) {
-      return String(labelMatch[1]).trim();
-    }
-    const urlMatch = String(call?.url || "")
-      .trim()
-      .match(/\/TMSIdMap\/([^/?#]+)/i);
-    return urlMatch && urlMatch[1] ? decodeURIComponent(urlMatch[1]) : "";
-  };
-  const tmsMapIdBySourceKey = new Map();
-  const loadedTmsMapIds = [...new Set(
-    displayedCalls
-      .filter((call) => call?.ok && String(call?.key || "").startsWith("tmsIdMap_"))
-      .map((call) => {
-        const callKey = String(call?.key || "").trim();
-        const mapId = resolveTmsMapIdFromCall(call);
-        if (callKey && mapId) {
-          tmsMapIdBySourceKey.set(callKey, mapId);
-        }
-        return mapId;
-      })
-      .filter(Boolean)
-  )];
-  const fallbackResourceIds = mvpdWorkspaceFilterChipValues(
-    mvpdWorkspaceCollectChipValues(
-      allEntries,
-      /(authzresourcerequestor|resource([._-]?ids?)?|entitle([._-]?ids?)?)/i,
-      null,
-      180
-    ),
-    180
-  ).filter((value) => mvpdWorkspaceIsLikelyResourceId(value));
-  const tmsIdsFromNames = mvpdWorkspaceFilterChipValues(
-    mvpdWorkspaceCollectChipValues(allEntries, /(tms([._-]?ids?)?)/i, /tms/i, 240),
-    240
-  );
-  const tmsIdsFromMaps = allEntries
-    .filter((entry) => {
-      const source = String(entry?.source || "").toLowerCase();
-      const path = String(entry?.path || "");
-      return source.includes("tmsidmap") && /(^|[.])mapping[.]/i.test(path);
-    })
-    .map((entry) => String(entry?.value || "").trim())
-    .filter((value) => Boolean(value))
-    .slice(0, 240);
-  const tmsIds = mvpdWorkspaceFilterChipValues([...new Set([...tmsIdsFromNames, ...tmsIdsFromMaps])], 240);
-  const tmsLabelByValueByMapId = new Map();
-  allEntries.forEach((entry) => {
-    const sourceKey = String(entry?.source || "").trim();
-    if (!sourceKey.startsWith("tmsIdMap_")) {
-      return;
-    }
-    const mapId = firstNonEmptyString([tmsMapIdBySourceKey.get(sourceKey), sourceKey.replace(/^tmsIdMap_/i, "")]);
-    const path = String(entry?.path || "").trim();
-    const labelMatch = path.match(/(?:^|[.])mapping[.]([^.\[]+)$/i);
-    const mappedLabel = labelMatch && labelMatch[1] ? String(labelMatch[1]).trim() : "";
-    const mappedValue = String(entry?.value || "").trim();
-    if (!mapId || !mappedLabel || !mappedValue) {
-      return;
-    }
-    const mapIdKey = String(mapId).trim().toLowerCase();
-    if (!mapIdKey) {
-      return;
-    }
-    if (!tmsLabelByValueByMapId.has(mapIdKey)) {
-      tmsLabelByValueByMapId.set(mapIdKey, new Map());
-    }
-    const valueToLabel = tmsLabelByValueByMapId.get(mapIdKey);
-    const valueKey = mappedValue.toLowerCase();
-    if (!valueToLabel.has(valueKey)) {
-      valueToLabel.set(valueKey, {
-        label: mappedLabel,
-        value: mappedValue,
-      });
-    }
-  });
-  const preferredTmsMapOrder = [];
-  const selectedMvpdMapKey = String(context.mvpdId || "").trim().toLowerCase();
-  if (selectedMvpdMapKey) {
-    preferredTmsMapOrder.push(selectedMvpdMapKey);
-  }
-  if (!preferredTmsMapOrder.includes("default")) {
-    preferredTmsMapOrder.push("default");
-  }
-  loadedTmsMapIds.forEach((mapId) => {
-    const mapKey = String(mapId || "").trim().toLowerCase();
-    if (mapKey && !preferredTmsMapOrder.includes(mapKey)) {
-      preferredTmsMapOrder.push(mapKey);
-    }
-  });
-  const tmsLabelByValue = new Map();
-  preferredTmsMapOrder.forEach((mapKey) => {
-    const valueToLabel = tmsLabelByValueByMapId.get(mapKey);
-    if (!(valueToLabel instanceof Map)) {
-      return;
-    }
-    valueToLabel.forEach((entry, valueKey) => {
-      if (!tmsLabelByValue.has(valueKey)) {
-        tmsLabelByValue.set(valueKey, entry);
-      }
-    });
-  });
-  const selectedMapEntries = tmsLabelByValueByMapId.get(selectedMvpdMapKey);
-  const defaultMapEntries = tmsLabelByValueByMapId.get("default");
-  const activeTmsMapKey = (() => {
-    if (selectedMvpdMapKey && selectedMapEntries instanceof Map && selectedMapEntries.size > 0) {
-      return selectedMvpdMapKey;
-    }
-    if (defaultMapEntries instanceof Map && defaultMapEntries.size > 0) {
-      return "default";
-    }
-    for (const mapKey of preferredTmsMapOrder) {
-      const entries = tmsLabelByValueByMapId.get(mapKey);
-      if (entries instanceof Map && entries.size > 0) {
-        return mapKey;
-      }
-    }
-    return "";
-  })();
-  const activeTmsMapEntries = activeTmsMapKey ? tmsLabelByValueByMapId.get(activeTmsMapKey) : null;
-  const translatedResourceIdChipsFromActiveMap =
-    activeTmsMapEntries instanceof Map
-      ? mvpdWorkspaceBuildMappedChipValues(
-          [...activeTmsMapEntries.values()].map((entry) => {
-            const label = String(entry?.label || "").trim();
-            const rawValue = String(entry?.value || "").trim();
-            return {
-              label: label || rawValue,
-              rawValue,
-            };
-          }),
-          1200
-        )
-      : [];
-  const translatedResourceIdsFromActiveMap = translatedResourceIdChipsFromActiveMap.map((entry) => String(entry?.label || "").trim());
-  const rawResourceIdsFromActiveMap = translatedResourceIdChipsFromActiveMap
-    .map((entry) => String(entry?.rawValue || "").trim())
-    .filter(Boolean);
-  const translatedFallbackResourceIdChips = mvpdWorkspaceBuildMappedChipValues(
-    fallbackResourceIds.map((resourceId) => {
-      const rawValue = String(resourceId || "").trim();
-      if (!rawValue) {
-        return null;
-      }
-      const translatedEntry = tmsLabelByValue.get(rawValue.toLowerCase()) || null;
-      const translatedLabel = String(translatedEntry?.label || "").trim();
-      return {
-        label: translatedLabel || rawValue,
-        rawValue,
-      };
-    }),
-    1200
-  );
-  const translatedFallbackResourceIds = translatedFallbackResourceIdChips.map((entry) => String(entry?.label || "").trim());
-  const finalResourceIdChips =
-    translatedResourceIdChipsFromActiveMap.length > 0 ? translatedResourceIdChipsFromActiveMap : translatedFallbackResourceIdChips;
-  const finalResourceIds = finalResourceIdChips.map((entry) => String(entry?.label || "").trim());
-  const finalResourceIdsRaw =
-    finalResourceIdChips.length > 0
-      ? finalResourceIdChips.map((entry) => String(entry?.rawValue || entry?.label || "").trim()).filter(Boolean)
-      : fallbackResourceIds;
+  const {
+    loadedTmsMapIds,
+    tmsIds,
+    finalResourceIdChips,
+    finalResourceIds,
+    finalResourceIdsRaw,
+    activeTmsMapKey,
+  } = mvpdWorkspaceResolveResourceChipState(allEntries, displayedCalls, context);
 
   const completedCalls = displayedCalls.filter((call) => call?.ok).length;
   const failedCalls = displayedCalls.length - completedCalls;
@@ -41162,14 +42396,267 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
     getRestV2MvpdMeta(context.requestorId, context.mvpdId),
     { separator: " x " }
   );
-  const sections = [
-    { id: "mvpd-match", title: "Selected MVPD Matches", entries: mvpdMatches },
-    { id: "general", title: "General Settings", entries: generalEntries },
-    { id: "authentication", title: "Authentication", entries: authenticationEntries },
-    { id: "authorization", title: "Authorization Settings", entries: authorizationEntries },
-    { id: "logout", title: "Logout", entries: logoutEntries },
-    { id: "saml", title: "SAML Metadata Settings", entries: samlEntries },
-  ].filter((section) => Array.isArray(section.entries) && section.entries.length > 0);
+  const sections = [];
+
+  pushSection(
+    "mvpd-match",
+    "Selected MVPD Matches",
+    mvpdWorkspaceBuildMatchSummaryEntries(
+      context,
+      selectedProgrammerEntity,
+      selectedServiceProviderEntity,
+      selectedMvpdEntity,
+      selectedMvpdProxyEntity,
+      selectedIntegrationRef,
+      selectedIntegrationEntity,
+      loadedTmsMapIds
+    )
+  );
+
+  if (selectedMvpdData) {
+    pushSection(
+      "general-mvpd-data",
+      "General Settings | MVPD Data",
+      mvpdWorkspaceBuildFieldEntries("Selected MVPD", selectedMvpdData, MVPD_WORKSPACE_MVPD_DATA_FIELDS, {
+        maxEntries: 120,
+        maxDepth: 4,
+      })
+    );
+    pushSection(
+      "general-user-metadata",
+      "General Settings | User Metadata Keys",
+      mvpdWorkspaceBuildUserMetadataEntries("Selected MVPD", selectedMvpdData.userMetadataKeys, tooltipsPayload)
+    );
+    pushSection(
+      "general-client-data",
+      "General Settings | Client Data",
+      mvpdWorkspaceCollectValueEntries("Selected MVPD", "clientData", selectedMvpdData.clientData, {
+        maxEntries: 220,
+        maxDepth: 5,
+      })
+    );
+    pushSection(
+      "general-platform-settings",
+      "General Settings | Platform Settings",
+      mvpdWorkspaceBuildResolvedReferenceEntries("Selected MVPD", combinedEntityPayload, platformSettingRefs, {
+        maxEntries: 260,
+        maxDepth: 6,
+      })
+    );
+    pushSection(
+      "general-proxied-mvpds",
+      "General Settings | Proxied MVPDs",
+      proxiedMvpdEntities.length > 0
+        ? proxiedMvpdEntities.flatMap((entity) => {
+            const entityData = mvpdWorkspaceGetEntityData(entity);
+            const entityLabel = mvpdWorkspaceResolveEndpointLabel(entity, "proxied-mvpd");
+            return mvpdWorkspaceDeduplicateEntries(
+              [
+                {
+                  source: `Proxied MVPD | ${entityLabel}`,
+                  path: "entityRef",
+                  value: mvpdWorkspaceNormalizeEntityRef(entity?.key || ""),
+                },
+                ...mvpdWorkspaceCollectFlatEntries(`Proxied MVPD | ${entityLabel}`, entityData, {
+                  maxEntries: 220,
+                  maxDepth: 6,
+                }),
+              ],
+              260
+            );
+          })
+        : mvpdWorkspaceCollectValueEntries("Selected MVPD", "proxiedMvpds", selectedMvpdData.proxiedMvpds, {
+            maxEntries: 160,
+            maxDepth: 5,
+          })
+    );
+    pushSection(
+      "general-additional-fields",
+      "General Settings | Additional MVPD Fields",
+      mvpdWorkspaceBuildAdditionalEntries("Selected MVPD", selectedMvpdData, MVPD_WORKSPACE_MVPD_ADDITIONAL_SKIP_KEYS, {
+        maxEntries: 320,
+        maxDepth: 7,
+      })
+    );
+  }
+
+  const selectedServiceProviderData = mvpdWorkspaceGetEntityData(selectedServiceProviderEntity);
+  if (selectedServiceProviderData) {
+    pushSection(
+      "selection-service-provider",
+      "Selection Context | Service Provider",
+      mvpdWorkspaceCollectFlatEntries("Selected Service Provider", selectedServiceProviderData, {
+        maxEntries: 260,
+        maxDepth: 6,
+      })
+    );
+  }
+
+  if (selectedIntegrationDataResolved) {
+    pushSection(
+      "selection-integration",
+      "Selection Context | Integration Configuration",
+      mvpdWorkspaceCollectFlatEntries("Selected Integration", selectedIntegrationDataResolved, {
+        maxEntries: 320,
+        maxDepth: 7,
+      })
+    );
+    pushSection(
+      "selection-integration-platform-configurations",
+      "Selection Context | Integration Platform Configurations",
+      integrationPlatformConfigurationEntities.flatMap((entity) => {
+        const entityData = mvpdWorkspaceGetEntityData(entity);
+        const entityLabel = mvpdWorkspaceResolveEndpointLabel(entity, "platform-configuration");
+        return mvpdWorkspaceCollectFlatEntries(`Integration Platform Configuration | ${entityLabel}`, entityData, {
+          maxEntries: 220,
+          maxDepth: 6,
+        });
+      })
+    );
+    pushSection(
+      "selection-integration-platform-traits",
+      "Selection Context | Integration Platform Traits",
+      integrationPlatformTraitEntities.flatMap((entity) => {
+        const entityData = mvpdWorkspaceGetEntityData(entity);
+        const entityLabel = mvpdWorkspaceResolveEndpointLabel(entity, "platform-trait");
+        return mvpdWorkspaceCollectFlatEntries(`Integration Platform Trait | ${entityLabel}`, entityData, {
+          maxEntries: 220,
+          maxDepth: 6,
+        });
+      })
+    );
+  }
+
+  const buildEndpointSections = (kind, endpointEntities, endpointRefs = [], fieldNames = [], extraBuilders = null) => {
+    (Array.isArray(endpointEntities) ? endpointEntities : []).forEach((endpointEntity, index) => {
+      const endpointData = mvpdWorkspaceGetEntityData(endpointEntity);
+      if (!endpointData) {
+        return;
+      }
+      const fallbackLabel = String(endpointRefs[index] || `${kind.toLowerCase()}-endpoint-${index + 1}`).trim();
+      const endpointLabel = mvpdWorkspaceResolveEndpointLabel(endpointEntity, fallbackLabel);
+      const sectionSeed = `${kind.toLowerCase()}-${endpointLabel}`;
+      const sourceLabel = `${kind} | ${endpointLabel}`;
+      const samlRefs = [
+        endpointData?.samlMetadataInfo,
+        endpointData?.overrideLocalExtendedMetadataConfiguration,
+      ].filter(Boolean);
+      const oauthRefs = [endpointData?.oAuth2EndpointConfiguration].filter(Boolean);
+      pushSection(
+        `${sectionSeed}-general`,
+        `${kind} | ${endpointLabel} | General Data`,
+        mvpdWorkspaceBuildFieldEntries(sourceLabel, endpointData, fieldNames, {
+          maxEntries: 260,
+          maxDepth: 6,
+        })
+      );
+      pushSection(
+        `${sectionSeed}-user-metadata`,
+        `${kind} | ${endpointLabel} | User Metadata Keys`,
+        mvpdWorkspaceBuildUserMetadataEntries(sourceLabel, endpointData.userMetadataKeys, tooltipsPayload)
+      );
+      pushSection(
+        `${sectionSeed}-dynamic-rules`,
+        `${kind} | ${endpointLabel} | Dynamic Rules`,
+        mvpdWorkspaceBuildDynamicRuleEntries(sourceLabel, selectedMvpdData, endpointData, manglersPayload)
+      );
+      if (typeof extraBuilders === "function") {
+        extraBuilders({
+          endpointEntity,
+          endpointData,
+          endpointLabel,
+          sectionSeed,
+          sourceLabel,
+        });
+      }
+      pushSection(
+        `${sectionSeed}-saml`,
+        `${kind} | ${endpointLabel} | SAML Metadata`,
+        [
+          ...mvpdWorkspaceBuildFieldEntries(sourceLabel, endpointData, [
+            "samlMetadataInfo",
+            "overrideLocalExtendedMetadataConfiguration",
+            "keyStoreEntryAlias",
+            "mutualSslKeyStoreEntryAlias",
+            "signingKeyAlias",
+            "encryptionKeyAlias",
+            "tlsKey",
+          ]),
+          ...mvpdWorkspaceBuildResolvedReferenceEntries(sourceLabel, combinedEntityPayload, samlRefs, {
+            maxEntries: 260,
+            maxDepth: 6,
+          }),
+        ]
+      );
+      pushSection(
+        `${sectionSeed}-related`,
+        `${kind} | ${endpointLabel} | Related Entities`,
+        mvpdWorkspaceBuildResolvedReferenceEntries(sourceLabel, combinedEntityPayload, oauthRefs, {
+          maxEntries: 260,
+          maxDepth: 6,
+        })
+      );
+      pushSection(
+        `${sectionSeed}-certificates`,
+        `${kind} | ${endpointLabel} | Certificates`,
+        mvpdWorkspaceBuildCertificateEntries(sourceLabel, endpointData, certificateDetailsPayload)
+      );
+      pushSection(
+        `${sectionSeed}-additional`,
+        `${kind} | ${endpointLabel} | Additional Fields`,
+        mvpdWorkspaceBuildAdditionalEntries(sourceLabel, endpointData, MVPD_WORKSPACE_ENDPOINT_ADDITIONAL_SKIP_KEYS, {
+          maxEntries: 320,
+          maxDepth: 7,
+        })
+      );
+    });
+  };
+
+  buildEndpointSections("Authentication", authnEndpoints, authnEndpointRefs, MVPD_WORKSPACE_AUTHN_FIELDS);
+  buildEndpointSections(
+    "Authorization",
+    authzEndpoints,
+    authzEndpointRefs,
+    MVPD_WORKSPACE_AUTHZ_FIELDS,
+    ({ endpointData, endpointLabel, sectionSeed, sourceLabel }) => {
+      const preflight = endpointData?.preFlightConfiguration;
+      const preflightEndpoint = preflight?.preAuthorizationEndpoint;
+      pushSection(
+        `${sectionSeed}-preflight`,
+        `Authorization | ${endpointLabel} | Preflight Configuration`,
+        [
+          ...mvpdWorkspaceBuildFieldEntries(sourceLabel, preflight, MVPD_WORKSPACE_PREFLIGHT_FIELDS, {
+            maxEntries: 80,
+            maxDepth: 4,
+          }),
+          ...(typeof preflightEndpoint === "string"
+            ? [
+                {
+                  source: sourceLabel,
+                  path: "preFlightConfiguration.preAuthorizationEndpoint",
+                  value: mvpdWorkspaceNormalizeFlatValue(preflightEndpoint),
+                },
+              ]
+            : mvpdWorkspaceBuildFieldEntries(sourceLabel, preflightEndpoint, MVPD_WORKSPACE_PREFLIGHT_ENDPOINT_FIELDS, {
+                maxEntries: 120,
+                maxDepth: 5,
+              }).map((entry) => ({
+                ...entry,
+                path: `preFlightConfiguration.preAuthorizationEndpoint.${entry.path}`,
+              }))),
+        ]
+      );
+      pushSection(
+        `${sectionSeed}-dos`,
+        `Authorization | ${endpointLabel} | DOS Protection`,
+        mvpdWorkspaceBuildFieldEntries(sourceLabel, endpointData?.dosProtection, MVPD_WORKSPACE_DOS_FIELDS, {
+          maxEntries: 80,
+          maxDepth: 4,
+        })
+      );
+    }
+  );
+  buildEndpointSections("Logout", logoutEndpoints, logoutEndpointRefs, MVPD_WORKSPACE_LOGOUT_FIELDS);
 
   return {
     programmerId: context.programmerId,
@@ -41990,6 +43477,11 @@ function refreshMvpdWorkspaceTools(options = {}) {
     const selectionContext = restWorkspaceGetSelectionContextFromCurrentSelection(selectedProgrammer);
     restWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext);
   }
+  if (tempPassWorkspaceHasOpenTab()) {
+    const selectionContext = tempPassWorkspaceGetSelectionContext(selectedProgrammer, selectedServices);
+    tempPassWorkspaceBroadcastControllerState(selectedProgrammer, selectedServices, 0);
+    tempPassWorkspaceBroadcastResults(selectionContext.selectionKey);
+  }
   if (degradationWorkspaceHasOpenTab()) {
     const selectionContext = degradationWorkspaceGetSelectionContext(selectedProgrammer, selectedServices);
     degradationWorkspaceBroadcastControllerState(selectedProgrammer, selectedServices, 0, {
@@ -42307,6 +43799,8 @@ function degradationWorkspaceHasOpenTab() {
 }
 
 async function degradationWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureDegradationWorkspaceRuntimeListener();
+  ensureDegradationWorkspaceTabWatcher();
   const shouldActivate = options.activate !== false;
   const requestedWindowId = Number(options.windowId || 0);
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
@@ -43610,6 +45104,8 @@ function restWorkspaceHasOpenTab() {
 }
 
 async function restWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureRestWorkspaceRuntimeListener();
+  ensureRestWorkspaceTabWatcher();
   const shouldActivate = options.activate !== false;
   const requestedWindowId = Number(options.windowId || 0);
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
@@ -43859,6 +45355,553 @@ function ensureRestWorkspaceTabWatcher() {
     }
   });
   state.restWorkspaceTabWatcherBound = true;
+}
+
+function buildTempPassWorkspaceSelectionKey(context = null) {
+  const environmentKey = firstNonEmptyString([
+    context?.environmentKey,
+    context?.adobePassEnvironmentKey,
+    getActiveAdobePassEnvironmentKey(),
+    DEFAULT_ADOBEPASS_ENVIRONMENT.key,
+  ]);
+  const programmerId = String(context?.programmerId || "").trim();
+  const requestorId = String(context?.requestorId || "").trim();
+  if (!programmerId) {
+    return "";
+  }
+  return [environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key, programmerId, requestorId || "*"].join("|");
+}
+
+function parseTempPassWorkspaceSelectionKey(selectionKey = "") {
+  const [environmentKey = "", programmerId = "", requestorId = ""] = String(selectionKey || "").trim().split("|");
+  return {
+    environmentKey: String(environmentKey || "").trim(),
+    programmerId: String(programmerId || "").trim(),
+    requestorId: String(requestorId || "").trim() === "*" ? "" : String(requestorId || "").trim(),
+  };
+}
+
+function normalizeTempPassWorkspaceSelectionKey(selectionKey = "", context = null) {
+  const parsed = parseTempPassWorkspaceSelectionKey(selectionKey);
+  return buildTempPassWorkspaceSelectionKey({
+    environmentKey: firstNonEmptyString([context?.environmentKey, context?.adobePassEnvironmentKey, parsed.environmentKey]),
+    programmerId: firstNonEmptyString([context?.programmerId, parsed.programmerId]),
+    requestorId: firstNonEmptyString([context?.requestorId, parsed.requestorId]),
+  });
+}
+
+function tempPassWorkspaceGetSelectionContext(programmer = null, services = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const adobePassEnvironment = {
+    ...getActiveAdobePassEnvironment(),
+  };
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const programmerName = String(resolvedProgrammer?.programmerName || resolvedProgrammer?.mediaCompanyName || "").trim();
+  const requestorId = String(state.selectedRequestorId || "").trim();
+  const resolvedServices =
+    services && typeof services === "object"
+      ? services
+      : programmerId
+        ? getCurrentPremiumAppsSnapshot(programmerId)
+        : null;
+  const restApp = resolveTempPassRestV2AppInfo(programmerId, requestorId, resolvedServices);
+  const resetApp = resolveTempPassResetAppInfo(programmerId, requestorId, resolvedServices);
+  const selectionContext = {
+    adobePassEnvironment,
+    programmerId,
+    programmerName,
+    requestorId,
+    deviceId: getStableRestV2DeviceIdentifier(),
+    profilesReady: Boolean(programmerId && requestorId && restApp?.guid),
+    authorizeReady: Boolean(programmerId && requestorId && restApp?.guid),
+    resetReady: Boolean(programmerId && requestorId && resetApp?.guid),
+    tempPassReady: Boolean(programmerId && requestorId && (restApp?.guid || resetApp?.guid)),
+    restAppGuid: String(restApp?.guid || "").trim(),
+    restAppName: String(restApp?.appName || restApp?.guid || "").trim(),
+    resetAppGuid: String(resetApp?.guid || "").trim(),
+    resetAppName: String(resetApp?.appName || resetApp?.guid || "").trim(),
+  };
+  selectionContext.selectionKey = buildTempPassWorkspaceSelectionKey(selectionContext);
+  return selectionContext;
+}
+
+function tempPassWorkspaceGetSelectedControllerStatePayload(programmer = null, services = null, selectionContext = null) {
+  const context =
+    selectionContext && typeof selectionContext === "object"
+      ? selectionContext
+      : tempPassWorkspaceGetSelectionContext(programmer, services);
+  return {
+    controllerOnline: true,
+    tempPassReady: context.tempPassReady === true,
+    profilesReady: context.profilesReady === true,
+    authorizeReady: context.authorizeReady === true,
+    resetReady: context.resetReady === true,
+    programmerId: String(context?.programmerId || "").trim(),
+    programmerName: String(context?.programmerName || "").trim(),
+    requestorId: String(context?.requestorId || "").trim(),
+    selectionKey: normalizeTempPassWorkspaceSelectionKey(String(context?.selectionKey || "").trim(), context),
+    deviceId: String(context?.deviceId || "").trim(),
+    restAppGuid: String(context?.restAppGuid || "").trim(),
+    restAppName: String(context?.restAppName || "").trim(),
+    resetAppGuid: String(context?.resetAppGuid || "").trim(),
+    resetAppName: String(context?.resetAppName || "").trim(),
+    adobePassEnvironment:
+      context?.adobePassEnvironment && typeof context.adobePassEnvironment === "object"
+        ? { ...context.adobePassEnvironment }
+        : { ...getActiveAdobePassEnvironment() },
+    updatedAt: Date.now(),
+  };
+}
+
+function tempPassWorkspaceGetWorkspaceUrl() {
+  return chrome.runtime.getURL(TEMP_PASS_WORKSPACE_PATH);
+}
+
+function tempPassWorkspaceIsWorkspaceTab(tabLike) {
+  return String(tabLike?.url || "").startsWith(tempPassWorkspaceGetWorkspaceUrl());
+}
+
+function tempPassWorkspaceBindWorkspaceTab(windowId, tabId) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId > 0 && normalizedTabId > 0) {
+    state.tempPassWorkspaceTabIdByWindowId.set(normalizedWindowId, normalizedTabId);
+  }
+  if (normalizedWindowId > 0) {
+    state.tempPassWorkspaceWindowId = normalizedWindowId;
+  }
+  if (normalizedTabId > 0) {
+    state.tempPassWorkspaceTabId = normalizedTabId;
+  }
+}
+
+function tempPassWorkspaceUnbindWorkspaceTab(tabId) {
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedTabId > 0) {
+    for (const [windowId, mappedTabId] of state.tempPassWorkspaceTabIdByWindowId.entries()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        state.tempPassWorkspaceTabIdByWindowId.delete(windowId);
+      }
+    }
+  }
+  if (!normalizedTabId || Number(state.tempPassWorkspaceTabId || 0) === normalizedTabId) {
+    state.tempPassWorkspaceTabId = 0;
+    state.tempPassWorkspaceWindowId = 0;
+  }
+}
+
+function tempPassWorkspaceGetBoundWorkspaceTabId(windowId) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId > 0) {
+    const mapped = Number(state.tempPassWorkspaceTabIdByWindowId.get(normalizedWindowId) || 0);
+    if (mapped > 0) {
+      return mapped;
+    }
+  }
+  return Number(state.tempPassWorkspaceTabId || 0);
+}
+
+async function tempPassWorkspaceSendWorkspaceMessage(event, payload = {}, options = {}) {
+  const targetWindowId = Number(options.targetWindowId || 0);
+  try {
+    const message = {
+      type: TEMP_PASS_WORKSPACE_MESSAGE_TYPE,
+      channel: "workspace-event",
+      event: String(event || ""),
+      payload,
+    };
+    if (targetWindowId > 0) {
+      message.targetWindowId = targetWindowId;
+    }
+    await chrome.runtime.sendMessage(message);
+  } catch {
+    // Ignore when TempPASS workspace listener is inactive.
+  }
+}
+
+function tempPassWorkspaceBroadcastControllerState(programmer = null, services = null, targetWindowId = 0) {
+  const resolvedWindowId = Number(targetWindowId || 0) || Number(state.tempPassWorkspaceWindowId || 0);
+  void tempPassWorkspaceSendWorkspaceMessage(
+    "controller-state",
+    tempPassWorkspaceGetSelectedControllerStatePayload(programmer, services),
+    {
+      targetWindowId: resolvedWindowId,
+    }
+  );
+}
+
+function tempPassWorkspaceTrimCacheMaps(limit = 60) {
+  const maxSize = Math.max(8, Number(limit || 60));
+  while (state.tempPassWorkspaceResultsBySelectionKey.size > maxSize) {
+    const firstKey = state.tempPassWorkspaceResultsBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.tempPassWorkspaceResultsBySelectionKey.delete(firstKey);
+  }
+}
+
+function tempPassWorkspaceStoreResult(resultPayload = null) {
+  const clonedResult = cloneJsonLikeValue(resultPayload, null);
+  if (!clonedResult || typeof clonedResult !== "object") {
+    return "";
+  }
+  const selectionKey = firstNonEmptyString([
+    normalizeTempPassWorkspaceSelectionKey(clonedResult.selectionKey, clonedResult),
+    normalizeTempPassWorkspaceSelectionKey(state.tempPassWorkspaceLastSelectionKey),
+  ]);
+  if (!selectionKey) {
+    return "";
+  }
+  clonedResult.selectionKey = selectionKey;
+  if (!Number.isFinite(Number(clonedResult.checkedAt || 0)) || Number(clonedResult.checkedAt || 0) <= 0) {
+    clonedResult.checkedAt = Date.now();
+  }
+  const existingResults = Array.isArray(state.tempPassWorkspaceResultsBySelectionKey.get(selectionKey))
+    ? state.tempPassWorkspaceResultsBySelectionKey.get(selectionKey)
+    : [];
+  const resultId = String(clonedResult.resultId || "").trim();
+  const mergedResults = [clonedResult];
+  existingResults.forEach((item) => {
+    if (resultId && String(item?.resultId || "").trim() === resultId) {
+      return;
+    }
+    mergedResults.push(item);
+  });
+  mergedResults.sort((left, right) => Number(right?.checkedAt || 0) - Number(left?.checkedAt || 0));
+  state.tempPassWorkspaceResultsBySelectionKey.set(selectionKey, mergedResults.slice(0, 40));
+  state.tempPassWorkspaceLastSelectionKey = selectionKey;
+  tempPassWorkspaceTrimCacheMaps(60);
+  return selectionKey;
+}
+
+function tempPassWorkspaceGetResults(selectionKey = "") {
+  const normalizedSelectionKey = normalizeTempPassWorkspaceSelectionKey(selectionKey);
+  if (normalizedSelectionKey) {
+    if (state.tempPassWorkspaceResultsBySelectionKey.has(normalizedSelectionKey)) {
+      return cloneJsonLikeValue(state.tempPassWorkspaceResultsBySelectionKey.get(normalizedSelectionKey), []);
+    }
+    return [];
+  }
+  const fallbackSelectionKey = normalizeTempPassWorkspaceSelectionKey(state.tempPassWorkspaceLastSelectionKey);
+  if (fallbackSelectionKey && state.tempPassWorkspaceResultsBySelectionKey.has(fallbackSelectionKey)) {
+    return cloneJsonLikeValue(state.tempPassWorkspaceResultsBySelectionKey.get(fallbackSelectionKey), []);
+  }
+  for (const results of state.tempPassWorkspaceResultsBySelectionKey.values()) {
+    return cloneJsonLikeValue(results, []);
+  }
+  return [];
+}
+
+function tempPassWorkspaceBroadcastResults(selectionKey = "", targetWindowId = 0) {
+  const resolvedWindowId = Number(targetWindowId || 0) || Number(state.tempPassWorkspaceWindowId || 0);
+  const resolvedSelectionKey = firstNonEmptyString([
+    normalizeTempPassWorkspaceSelectionKey(selectionKey),
+    normalizeTempPassWorkspaceSelectionKey(state.tempPassWorkspaceLastSelectionKey),
+  ]);
+  void tempPassWorkspaceSendWorkspaceMessage(
+    "results-sync",
+    {
+      selectionKey: resolvedSelectionKey,
+      results: tempPassWorkspaceGetResults(resolvedSelectionKey),
+      updatedAt: Date.now(),
+    },
+    {
+      targetWindowId: resolvedWindowId,
+    }
+  );
+}
+
+function tempPassWorkspaceHasOpenTab() {
+  return Number(state.tempPassWorkspaceTabId || 0) > 0 || state.tempPassWorkspaceTabIdByWindowId.size > 0;
+}
+
+async function tempPassWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureTempPassWorkspaceRuntimeListener();
+  ensureTempPassWorkspaceTabWatcher();
+  const shouldActivate = options.activate !== false;
+  const requestedWindowId = Number(options.windowId || 0);
+  const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
+  const useWindowFilter = targetWindowId > 0;
+  let workspaceTab = null;
+
+  const boundTabId = tempPassWorkspaceGetBoundWorkspaceTabId(targetWindowId);
+  if (boundTabId > 0) {
+    try {
+      const existing = await chrome.tabs.get(boundTabId);
+      if (tempPassWorkspaceIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
+        workspaceTab = existing;
+      }
+    } catch {
+      tempPassWorkspaceUnbindWorkspaceTab(boundTabId);
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    try {
+      const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
+      workspaceTab = allTabs.find((tab) => tempPassWorkspaceIsWorkspaceTab(tab)) || null;
+    } catch {
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    workspaceTab = await chrome.tabs.create({
+      url: tempPassWorkspaceGetWorkspaceUrl(),
+      active: shouldActivate,
+      ...(useWindowFilter ? { windowId: targetWindowId } : {}),
+    });
+  } else if (shouldActivate && workspaceTab.id) {
+    try {
+      workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
+      if (Number(workspaceTab?.windowId || 0) > 0) {
+        await chrome.windows.update(Number(workspaceTab.windowId), { focused: true });
+      }
+    } catch {
+      // Ignore activation failures.
+    }
+  }
+
+  tempPassWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  return workspaceTab;
+}
+
+function buildTempPassWorkspaceErrorResult(payload = {}, message = "") {
+  const selectionKey = normalizeTempPassWorkspaceSelectionKey(payload?.selectionKey, payload);
+  const checkedAt = Date.now();
+  return {
+    resultId: buildTempPassResultId(payload?.actionKey || "temp-pass-error"),
+    checkedAt,
+    checkedAtLabel: formatTimestampLabel(checkedAt),
+    ok: false,
+    status: 0,
+    statusText: "",
+    actionKey: String(payload?.actionKey || "").trim().toLowerCase(),
+    actionLabel: firstNonEmptyString([payload?.actionLabel, payload?.actionKey, "TempPASS"]),
+    resultType: String(payload?.actionKey || "temp-pass").trim().toLowerCase(),
+    selectionKey,
+    programmerId: String(payload?.programmerId || "").trim(),
+    programmerName: String(payload?.programmerName || "").trim(),
+    requestorId: String(payload?.requestorId || "").trim(),
+    tempPassMvpd: String(payload?.tempPassMvpd || "").trim(),
+    resourceIds: Array.isArray(payload?.resourceIds) ? payload.resourceIds.slice(0, 24) : [],
+    deviceId: String(payload?.deviceId || "").trim(),
+    genericKey: String(payload?.genericKey || "").trim(),
+    resetAllDevices: payload?.resetAllDevices === true,
+    resetAllGeneric: payload?.resetAllGeneric === true,
+    endpointUrl: String(payload?.endpointUrl || "").trim(),
+    method: String(payload?.method || "").trim().toUpperCase(),
+    appGuid: String(payload?.appGuid || "").trim(),
+    appName: String(payload?.appName || "").trim(),
+    responsePreview: "",
+    responsePayload: null,
+    error: String(message || "TempPASS request failed.").trim() || "TempPASS request failed.",
+  };
+}
+
+function normalizeTempPassWorkspaceRequestPayload(input = {}, selectionContext = null, programmer = null) {
+  const context =
+    selectionContext && typeof selectionContext === "object"
+      ? selectionContext
+      : tempPassWorkspaceGetSelectionContext(programmer);
+  const rawResourceIds = Array.isArray(input?.resourceIds) ? input.resourceIds : parseRestV2ResourceIdInput(input?.resourceIds || "");
+  return {
+    actionKey: String(input?.actionKey || "").trim().toLowerCase(),
+    selectionKey: normalizeTempPassWorkspaceSelectionKey(input?.selectionKey, context),
+    programmerId: String(context?.programmerId || programmer?.programmerId || "").trim(),
+    programmerName: String(context?.programmerName || programmer?.programmerName || "").trim(),
+    requestorId: String(context?.requestorId || input?.requestorId || "").trim(),
+    tempPassMvpd: String(input?.tempPassMvpd || input?.mvpd || "").trim(),
+    identityJson: String(input?.identityJson || "").trim(),
+    resourceIds: rawResourceIds,
+    deviceId: String(input?.deviceId || context?.deviceId || "").trim(),
+    genericKey: String(input?.genericKey || "").trim(),
+    resetAllDevices: input?.resetAllDevices === true,
+    resetAllGeneric: input?.resetAllGeneric === true,
+  };
+}
+
+async function handleTempPassWorkspaceAction(message, sender = null) {
+  const action = String(message?.action || "").trim().toLowerCase();
+  const senderWindowId = Number(sender?.tab?.windowId || 0);
+  const senderTabId = Number(sender?.tab?.id || 0);
+  const mappedSenderTabId =
+    senderWindowId > 0 ? Number(state.tempPassWorkspaceTabIdByWindowId.get(senderWindowId) || 0) : 0;
+  if (senderWindowId > 0 && senderTabId > 0 && mappedSenderTabId > 0 && senderTabId !== mappedSenderTabId) {
+    return { ok: false, error: "This is not the bound TempPASS workspace tab for the window." };
+  }
+  if (senderWindowId > 0 && senderTabId > 0 && (!mappedSenderTabId || mappedSenderTabId <= 0)) {
+    tempPassWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+  }
+
+  if (action === "workspace-ready") {
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectedServices = selectedProgrammer?.programmerId
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
+      : null;
+    const selectionContext = tempPassWorkspaceGetSelectionContext(selectedProgrammer, selectedServices);
+    if (senderWindowId > 0) {
+      tempPassWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+    }
+    tempPassWorkspaceBroadcastControllerState(selectedProgrammer, selectedServices, senderWindowId);
+    tempPassWorkspaceBroadcastResults(selectionContext.selectionKey, senderWindowId);
+    return { ok: true };
+  }
+
+  if (action === "open-workspace") {
+    const workspaceTab = await tempPassWorkspaceEnsureWorkspaceTab({
+      activate: true,
+      windowId: senderWindowId || undefined,
+    });
+    const targetWindowId = Number(workspaceTab?.windowId || senderWindowId || state.tempPassWorkspaceWindowId || 0);
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectedServices = selectedProgrammer?.programmerId
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
+      : null;
+    const selectionContext = tempPassWorkspaceGetSelectionContext(selectedProgrammer, selectedServices);
+    tempPassWorkspaceBroadcastControllerState(selectedProgrammer, selectedServices, targetWindowId);
+    tempPassWorkspaceBroadcastResults(selectionContext.selectionKey, targetWindowId);
+    return { ok: true };
+  }
+
+  if (action === "run-request") {
+    const selectedProgrammer = resolveSelectedProgrammer();
+    if (!selectedProgrammer?.programmerId) {
+      return { ok: false, error: "Select a Media Company in UnderPAR before using TempPASS." };
+    }
+    const selectedServices = getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId) || null;
+    const selectionContext = tempPassWorkspaceGetSelectionContext(selectedProgrammer, selectedServices);
+    const requestPayload = normalizeTempPassWorkspaceRequestPayload(
+      message?.request && typeof message.request === "object" ? message.request : {},
+      selectionContext,
+      selectedProgrammer
+    );
+    if (!requestPayload.requestorId) {
+      return { ok: false, error: "Select a RequestorId in UnderPAR before using TempPASS." };
+    }
+    if (!requestPayload.actionKey) {
+      return { ok: false, error: "No TempPASS action was provided." };
+    }
+
+    const targetWindowId = Number(senderWindowId || state.tempPassWorkspaceWindowId || 0);
+    void tempPassWorkspaceSendWorkspaceMessage(
+      "request-start",
+      {
+        actionKey: requestPayload.actionKey,
+        selectionKey: requestPayload.selectionKey,
+        startedAt: Date.now(),
+      },
+      { targetWindowId }
+    );
+
+    try {
+      let result = null;
+      if (requestPayload.actionKey === "profiles") {
+        result = await fetchTempPassProfilesForSelection(requestPayload, selectedServices);
+      } else if (requestPayload.actionKey === "authorize") {
+        result = await fetchTempPassAuthorizeForSelection(requestPayload, selectedServices);
+      } else if (requestPayload.actionKey === "reset-device" || requestPayload.actionKey === "reset-generic") {
+        result = await resetTempPassForSelection(requestPayload, selectedServices);
+      } else {
+        throw new Error(`Unsupported TempPASS action: ${requestPayload.actionKey}`);
+      }
+      const selectionKey = tempPassWorkspaceStoreResult(result);
+      tempPassWorkspaceBroadcastResults(selectionKey, targetWindowId);
+      void tempPassWorkspaceSendWorkspaceMessage("result-result", result, { targetWindowId });
+      return {
+        ok: true,
+        result,
+      };
+    } catch (error) {
+      const fallbackResult =
+        cloneJsonLikeValue(error?.underparResult, null) ||
+        buildTempPassWorkspaceErrorResult(
+          requestPayload,
+          error instanceof Error ? error.message : String(error)
+        );
+      const selectionKey = tempPassWorkspaceStoreResult(fallbackResult);
+      tempPassWorkspaceBroadcastResults(selectionKey, targetWindowId);
+      void tempPassWorkspaceSendWorkspaceMessage("result-result", fallbackResult, { targetWindowId });
+      return {
+        ok: false,
+        error: String(fallbackResult?.error || error?.message || "TempPASS request failed."),
+        result: fallbackResult,
+      };
+    }
+  }
+
+  if (action === "clear-all") {
+    const selectionKey = normalizeTempPassWorkspaceSelectionKey(
+      firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey])
+    );
+    if (selectionKey) {
+      state.tempPassWorkspaceResultsBySelectionKey.delete(selectionKey);
+      if (state.tempPassWorkspaceLastSelectionKey === selectionKey) {
+        state.tempPassWorkspaceLastSelectionKey = "";
+      }
+    } else {
+      state.tempPassWorkspaceResultsBySelectionKey.clear();
+      state.tempPassWorkspaceLastSelectionKey = "";
+    }
+    const targetWindowId = Number(senderWindowId || state.tempPassWorkspaceWindowId || 0);
+    void tempPassWorkspaceSendWorkspaceMessage("workspace-clear", {}, { targetWindowId });
+    return { ok: true };
+  }
+
+  return { ok: false, error: `Unsupported TempPASS workspace action: ${action}` };
+}
+
+function ensureTempPassWorkspaceRuntimeListener() {
+  if (state.tempPassWorkspaceRuntimeListenerBound) {
+    return;
+  }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!TEMP_PASS_WORKSPACE_MESSAGE_TYPES.has(String(message?.type || "")) || message?.channel !== "workspace-action") {
+      return false;
+    }
+    void handleTempPassWorkspaceAction(message, sender)
+      .then((result) => {
+        sendResponse(result && typeof result === "object" ? result : { ok: true });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+    return true;
+  });
+  state.tempPassWorkspaceRuntimeListenerBound = true;
+}
+
+function ensureTempPassWorkspaceTabWatcher() {
+  if (state.tempPassWorkspaceTabWatcherBound) {
+    return;
+  }
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    tempPassWorkspaceUnbindWorkspaceTab(tabId);
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    const normalizedTabId = Number(tabId || 0);
+    if (!normalizedTabId || !changeInfo?.url) {
+      return;
+    }
+    if (tempPassWorkspaceIsWorkspaceTab(tab)) {
+      tempPassWorkspaceBindWorkspaceTab(tab?.windowId, normalizedTabId);
+      return;
+    }
+    const boundTabId = Number(state.tempPassWorkspaceTabId || 0);
+    let isMappedTab = false;
+    for (const mappedTabId of state.tempPassWorkspaceTabIdByWindowId.values()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        isMappedTab = true;
+        break;
+      }
+    }
+    if (isMappedTab || normalizedTabId === boundTabId) {
+      tempPassWorkspaceUnbindWorkspaceTab(normalizedTabId);
+    }
+  });
+  state.tempPassWorkspaceTabWatcherBound = true;
 }
 
 function getUnderparActiveUserLabel() {
@@ -44697,6 +46740,8 @@ function bobtoolsWorkspaceBroadcastProfiles(programmer = null, options = {}) {
 }
 
 async function bobtoolsWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureBobtoolsWorkspaceRuntimeListener();
+  ensureBobtoolsWorkspaceTabWatcher();
   const shouldActivate = options.activate !== false;
   const requestedWindowId = Number(options.windowId || 0);
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
@@ -50406,6 +52451,162 @@ async function loadDegradationService(programmer, appInfo, section, contentEleme
   }
 }
 
+function tempPassBuildControllerHtml(programmer, context = {}) {
+  const requestorId = String(state.selectedRequestorId || "").trim();
+  const hasRestApp = Boolean(String(context?.restApp?.guid || "").trim());
+  const hasResetApp = Boolean(String(context?.resetApp?.guid || "").trim());
+  const restAppLabel = firstNonEmptyString([
+    context?.restApp?.appName,
+    context?.restApp?.guid,
+    requestorId ? "REST V2 app unavailable for selected RequestorId" : "Select RequestorId to resolve REST V2 app",
+  ]);
+  const resetAppLabel = firstNonEmptyString([
+    context?.resetApp?.appName,
+    context?.resetApp?.guid,
+    "No Reset TempPASS app detected",
+  ]);
+  const deviceId = String(context?.deviceId || getStableRestV2DeviceIdentifier() || "").trim();
+  const canOpenWorkspace = Boolean(requestorId && (hasRestApp || hasResetApp));
+  let helperText = "Select a RequestorId above to enable TempPASS workspace actions.";
+  if (requestorId && hasRestApp && hasResetApp) {
+    helperText = "Workspace uses the current UnderPAR RequestorId with PROFILE, AUTHORIZE, and reset actions ready.";
+  } else if (requestorId && hasRestApp) {
+    helperText = "Workspace opens with PROFILE and AUTHORIZE ready. Reset actions stay disabled until a Reset TempPASS app is available.";
+  } else if (requestorId && hasResetApp) {
+    helperText = "Workspace opens with reset actions ready. PROFILE and AUTHORIZE stay disabled until a REST V2 app is available.";
+  } else if (requestorId) {
+    helperText = "No TempPASS DCR apps are available for the selected RequestorId.";
+  }
+  return `
+    <div class="temp-pass-panel">
+      <div class="temp-pass-meta-grid">
+        ${buildMetadataItemHtml("RequestorId", requestorId || "Not selected")}
+        ${buildMetadataItemHtml("REST V2 App", restAppLabel)}
+        ${buildMetadataItemHtml("Reset App", resetAppLabel)}
+        ${buildMetadataItemHtml("Device ID", deviceId || "Unavailable")}
+      </div>
+      <div class="temp-pass-panel-actions">
+        <button type="button" class="temp-pass-open-workspace-btn"${canOpenWorkspace ? "" : " disabled"}>OPEN WORKSPACE</button>
+      </div>
+      <p class="temp-pass-panel-hint">${escapeHtml(helperText)}</p>
+      <p class="temp-pass-panel-status" hidden></p>
+    </div>
+  `;
+}
+
+function tempPassSetControllerStatus(panelState = null, message = "", type = "info") {
+  const statusElement = panelState?.statusElement || null;
+  if (!statusElement) {
+    return;
+  }
+  const text = String(message || "").trim();
+  statusElement.textContent = text;
+  statusElement.hidden = text.length === 0;
+  statusElement.classList.remove("success", "error");
+  if (type === "success" || type === "error") {
+    statusElement.classList.add(type);
+  }
+}
+
+async function tempPassOpenWorkspaceFromPanel(panelState = null, options = {}) {
+  if (!panelState?.programmer?.programmerId) {
+    throw new Error("Select a Media Company before opening TempPASS Workspace.");
+  }
+  const workspaceTab = await tempPassWorkspaceEnsureWorkspaceTab({
+    activate: options.activate !== false,
+    windowId: panelState?.controllerWindowId || undefined,
+  });
+  const targetWindowId = Number(workspaceTab?.windowId || state.tempPassWorkspaceWindowId || 0);
+  const services = getCurrentPremiumAppsSnapshot(panelState.programmer.programmerId) || {
+    restV2: panelState.restApp || null,
+    resetTempPass: panelState.resetApp || null,
+  };
+  const selectionContext = tempPassWorkspaceGetSelectionContext(panelState.programmer, services);
+  tempPassWorkspaceBroadcastControllerState(panelState.programmer, services, targetWindowId);
+  tempPassWorkspaceBroadcastResults(selectionContext.selectionKey, targetWindowId);
+  return {
+    workspaceTab,
+    targetWindowId,
+    selectionContext,
+  };
+}
+
+function wireTempPassPanelInteractions(panelState = null) {
+  if (!panelState?.openWorkspaceButton) {
+    return;
+  }
+  panelState.openWorkspaceButton.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    tempPassSetControllerStatus(panelState, "");
+    try {
+      await tempPassOpenWorkspaceFromPanel(panelState, {
+        activate: true,
+      });
+      tempPassSetControllerStatus(panelState, "TempPASS Workspace opened.", "success");
+    } catch (error) {
+      tempPassSetControllerStatus(panelState, error instanceof Error ? error.message : String(error), "error");
+    }
+  });
+}
+
+async function loadTempPassService(programmer, appInfo, section, contentElement, requestToken) {
+  if (!contentElement) {
+    return;
+  }
+  const programmerId = String(programmer?.programmerId || "").trim();
+  if (!programmerId) {
+    contentElement.innerHTML = "";
+    return;
+  }
+
+  section.__underparTempPassState = null;
+  section.__underparTempPassRequestToken = Number(requestToken || 0);
+
+  try {
+    const currentServices = getCurrentPremiumAppsSnapshot(programmerId) || {
+      resetTempPass: appInfo || null,
+    };
+    const requestorId = String(state.selectedRequestorId || "").trim();
+    const resetApp = resolveTempPassResetAppInfo(programmerId, requestorId, currentServices) || appInfo || null;
+    const restApp = resolveTempPassRestV2AppInfo(programmerId, requestorId, currentServices) || null;
+    if (!resetApp?.guid && !restApp?.guid) {
+      contentElement.innerHTML = '<div class="service-error">No TempPASS DCR applications were found for this media company.</div>';
+      return;
+    }
+    const controllerWindowId = await esmWorkspaceGetCurrentWindowId();
+    if (Number(section.__underparTempPassRequestToken || 0) !== Number(requestToken || 0)) {
+      return;
+    }
+
+    contentElement.innerHTML = tempPassBuildControllerHtml(programmer, {
+      restApp,
+      resetApp,
+      deviceId: getStableRestV2DeviceIdentifier(),
+    });
+    const panelState = {
+      section,
+      contentElement,
+      programmer,
+      requestToken: Number(requestToken || 0),
+      controllerWindowId: Number(controllerWindowId || 0),
+      restApp,
+      resetApp,
+      openWorkspaceButton: contentElement.querySelector(".temp-pass-open-workspace-btn"),
+      statusElement: contentElement.querySelector(".temp-pass-panel-status"),
+    };
+    section.__underparTempPassState = panelState;
+    wireTempPassPanelInteractions(panelState);
+    ensureTempPassWorkspaceRuntimeListener();
+    ensureTempPassWorkspaceTabWatcher();
+    tempPassWorkspaceBroadcastControllerState(programmer, currentServices);
+  } catch (error) {
+    contentElement.innerHTML = `<div class="service-error">${escapeHtml(
+      error instanceof Error ? error.message : String(error)
+    )}</div>`;
+  }
+}
+
 function createPremiumServiceSection(programmer, serviceKey, appInfo) {
   const title = PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey;
   const servicesForProgrammer =
@@ -50415,6 +52616,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
   const serviceScopedAppByKey = {
     esmWorkspace: servicesForProgrammer?.esm || null,
     degradation: servicesForProgrammer?.degradation || null,
+    resetTempPass: servicesForProgrammer?.resetTempPass || null,
     restV2: servicesForProgrammer?.restV2 || null,
   };
   const resolvedServiceApp =
@@ -50426,6 +52628,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
     restV2: "REST",
     esmWorkspace: "ESM",
     degradation: "DEGRADATION",
+    resetTempPass: "TempPASS",
   };
   const serviceHoverMessage = hoverServiceLabelByKey[serviceKey]
     ? `${hoverServiceLabelByKey[serviceKey]} premium service is powered by registered application '${registeredAppLabel}'.`
@@ -50473,7 +52676,11 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
         `
       : "";
   const serviceBodyHtml =
-    serviceKey === "esmWorkspace" || serviceKey === "degradation" || serviceKey === "cm" || serviceKey === "cmMvpd"
+    serviceKey === "esmWorkspace" ||
+    serviceKey === "degradation" ||
+    serviceKey === "resetTempPass" ||
+    serviceKey === "cm" ||
+    serviceKey === "cmMvpd"
       ? ""
       : buildPremiumServiceSummaryHtml(programmer, serviceKey, appInfo);
   const sectionLabel =
@@ -50528,6 +52735,12 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
       return loadDegradationService(programmer, appInfo, section, contentElement, requestToken);
     };
     void section.__underparRefreshDegradation();
+  } else if (serviceKey === "resetTempPass") {
+    section.__underparRefreshTempPass = () => {
+      const requestToken = state.premiumPanelRequestToken;
+      return loadTempPassService(programmer, appInfo, section, contentElement, requestToken);
+    };
+    void section.__underparRefreshTempPass();
   } else if (serviceKey === "cm" || serviceKey === "cmMvpd") {
     section.__underparRefreshCm = () => {
       if (section.__underparCmLoadPending) {
@@ -50660,6 +52873,14 @@ function refreshExistingPremiumServiceSections(programmer, services = null) {
       syncMvpdWorkspaceToolForSection(section, programmer, services);
       return;
     }
+    if (serviceKey === "resetTempPass" && typeof section.__underparRefreshTempPass === "function") {
+      void section.__underparRefreshTempPass();
+      return;
+    }
+    if (serviceKey === "degradation" && typeof section.__underparRefreshDegradation === "function") {
+      void section.__underparRefreshDegradation();
+      return;
+    }
     if ((serviceKey === "cm" || serviceKey === "cmMvpd") && typeof section.__underparRefreshCm === "function") {
       void section.__underparRefreshCm();
     }
@@ -50684,6 +52905,7 @@ function renderPremiumServicesLoading(programmer, options = {}) {
     cmContainerVisible: null,
   });
   mvpdWorkspaceBroadcastSelectedControllerState(programmer, null);
+  tempPassWorkspaceBroadcastControllerState(programmer, null, 0);
   degradationWorkspaceBroadcastControllerState(programmer, null, 0, {
     controllerReason,
   });
@@ -50720,6 +52942,7 @@ function renderPremiumServicesError(error, options = {}) {
     cmContainerVisible: null,
   });
   mvpdWorkspaceBroadcastSelectedControllerState(resolveSelectedProgrammer(), null);
+  tempPassWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), null, 0);
   degradationWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), null, 0, {
     controllerReason,
   });
@@ -51133,6 +53356,11 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.restWorkspaceLastSelectionKey = "";
   state.restWorkspaceLastReportBySelectionKey.clear();
   state.restWorkspaceLastQueryContextBySelectionKey.clear();
+  state.tempPassWorkspaceTabId = 0;
+  state.tempPassWorkspaceWindowId = 0;
+  state.tempPassWorkspaceTabIdByWindowId.clear();
+  state.tempPassWorkspaceLastSelectionKey = "";
+  state.tempPassWorkspaceResultsBySelectionKey.clear();
   state.degradationWorkspaceTabId = 0;
   state.degradationWorkspaceWindowId = 0;
   state.degradationWorkspaceTabIdByWindowId.clear();
@@ -51179,7 +53407,6 @@ function resetWorkflowForLoggedOut(options = {}) {
   clearDegradationWorkspaceRecordingState("logout-reset");
   clearDegradationWorkspaceActivityDebugFlow("logout-reset", { stopFlow: true });
   clearCmWorkspaceActivityDebugFlow("logout-reset", { stopFlow: true });
-  state.consoleContextReady = false;
   state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
   state.esmWorkspaceWorkspaceTabId = 0;
@@ -51277,6 +53504,27 @@ function resetWorkflowForLoggedOut(options = {}) {
     updatedAt: Date.now(),
   });
   void restWorkspaceSendWorkspaceMessage("workspace-clear", {});
+  void tempPassWorkspaceSendWorkspaceMessage("controller-state", {
+    controllerOnline: false,
+    tempPassReady: false,
+    profilesReady: false,
+    authorizeReady: false,
+    resetReady: false,
+    programmerId: "",
+    programmerName: "",
+    requestorId: "",
+    selectionKey: "",
+    deviceId: "",
+    restAppGuid: "",
+    restAppName: "",
+    resetAppGuid: "",
+    resetAppName: "",
+    adobePassEnvironment: {
+      ...getActiveAdobePassEnvironment(),
+    },
+    updatedAt: Date.now(),
+  });
+  void tempPassWorkspaceSendWorkspaceMessage("workspace-clear", {});
   void degradationWorkspaceSendWorkspaceMessage("controller-state", {
     controllerOnline: false,
     slack: getUnderparWorkspaceSlackStatePayload(),
@@ -51751,215 +53999,6 @@ async function getTabByIdSafe(tabId) {
   }
 }
 
-async function releaseAuthPopupBootstrapContext(reason = "unknown") {
-  const context = activeAuthPopupBootstrapContext;
-  activeAuthPopupBootstrapContext = null;
-  if (!context || typeof context !== "object") {
-    return;
-  }
-
-  const tabId = Number(context?.tabId || 0);
-  const windowId = Number(context?.windowId || 0);
-  const debuggerSession = context?.debuggerSession || null;
-
-  if (debuggerSession?.detach) {
-    try {
-      await debuggerSession.detach();
-    } catch {
-      // Ignore debugger detach failures during retained popup cleanup.
-    }
-  }
-
-  if (windowId > 0) {
-    try {
-      await chrome.windows.remove(windowId);
-      return;
-    } catch {
-      // Fall through to tab cleanup when the window is already gone.
-    }
-  }
-
-  if (tabId > 0) {
-    try {
-      await chrome.tabs.remove(tabId);
-    } catch {
-      // Ignore retained popup cleanup failures.
-    }
-  }
-
-  log("Released retained auth popup", {
-    reason: String(reason || "unknown"),
-    tabId,
-    windowId,
-  });
-}
-
-async function retainAuthPopupBootstrapContext(context = {}) {
-  const tabId = Number(context?.tabId || 0);
-  const windowId = Number(context?.windowId || 0);
-  if (!Number.isInteger(tabId) || tabId <= 0 || !Number.isInteger(windowId) || windowId <= 0) {
-    return null;
-  }
-
-  await releaseAuthPopupBootstrapContext("superseded");
-  activeAuthPopupBootstrapContext = {
-    tabId,
-    windowId,
-    debuggerSession: context?.debuggerSession || null,
-    requestId: String(context?.requestId || "").trim(),
-    retainedAt: Date.now(),
-  };
-  log("Retained auth popup for CM bootstrap", {
-    tabId,
-    windowId,
-    requestId: String(context?.requestId || "").trim(),
-  });
-  return activeAuthPopupBootstrapContext;
-}
-
-function getRetainedAuthPopupBootstrapTabId() {
-  return Number(activeAuthPopupBootstrapContext?.tabId || 0);
-}
-
-async function maybeReleaseRetainedAuthPopupBootstrapContext(preferredTabId = 0, reason = "unknown") {
-  const retainedTabId = getRetainedAuthPopupBootstrapTabId();
-  if (!Number.isInteger(retainedTabId) || retainedTabId <= 0) {
-    return false;
-  }
-  const normalizedPreferredTabId = Number(preferredTabId || 0);
-  if (Number.isInteger(normalizedPreferredTabId) && normalizedPreferredTabId > 0 && normalizedPreferredTabId !== retainedTabId) {
-    return false;
-  }
-  await releaseAuthPopupBootstrapContext(reason);
-  return true;
-}
-
-async function runAuthInPopupWindow(authUrl, redirectUri, options = {}) {
-  if (!chrome.windows?.create || !chrome.tabs?.query || !chrome.tabs?.onUpdated) {
-    throw new Error("Chrome popup tab monitoring is unavailable. Add the tabs permission and reload the extension.");
-  }
-
-  const successUrlMatcher = typeof options.successUrlMatcher === "function" ? options.successUrlMatcher : null;
-  const popupWindow = await chrome.windows.create({
-    url: authUrl,
-    type: "popup",
-    focused: true,
-    width: 560,
-    height: 760,
-  });
-  const popupWindowId = Number(popupWindow?.id || 0);
-  if (!popupWindowId) {
-    throw new Error("Unable to open the Adobe sign-in popup.");
-  }
-
-  const closePopupWindow = async () => {
-    if (!popupWindowId || !chrome.windows?.remove) {
-      return;
-    }
-    try {
-      await chrome.windows.remove(popupWindowId);
-    } catch {
-      // Ignore already-closed popup windows.
-    }
-  };
-
-  const popupTabs = await chrome.tabs.query({
-    windowId: popupWindowId,
-  });
-  const popupTabId = Number(popupTabs.find((tab) => Number.isFinite(tab?.id))?.id || 0);
-  if (!popupTabId) {
-    await closePopupWindow();
-    throw new Error("Unable to monitor the Adobe sign-in popup tab.");
-  }
-
-  return await new Promise((resolve, reject) => {
-    let settled = false;
-    const timeoutId = window.setTimeout(() => {
-      void fail(new Error("Adobe sign-in popup timed out before UnderPAR received the redirect."));
-    }, AUTH_WINDOW_TIMEOUT_MS);
-
-    const cleanup = () => {
-      window.clearTimeout(timeoutId);
-      chrome.tabs.onUpdated.removeListener(handleUpdated);
-      chrome.tabs.onRemoved.removeListener(handleTabRemoved);
-      chrome.windows.onRemoved.removeListener(handleWindowRemoved);
-    };
-
-    const succeed = async (callbackUrl) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      await closePopupWindow();
-      resolve({
-        responseUrl: String(callbackUrl || ""),
-        capturedAvatarUrl: "",
-        authPopupTabId: 0,
-        authPopupWindowId: 0,
-      });
-    };
-
-    const fail = async (error) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      await closePopupWindow();
-      reject(error);
-    };
-
-    const maybeCaptureRedirect = (candidateUrl) => {
-      const normalizedCandidate = String(candidateUrl || "").trim();
-      if (!normalizedCandidate) {
-        return false;
-      }
-      if (redirectUri && normalizedCandidate.startsWith(redirectUri)) {
-        void succeed(normalizedCandidate);
-        return true;
-      }
-      if (successUrlMatcher && successUrlMatcher(normalizedCandidate)) {
-        void succeed(normalizedCandidate);
-        return true;
-      }
-      return false;
-    };
-
-    const handleUpdated = (tabId, changeInfo, tab) => {
-      if (tabId !== popupTabId) {
-        return;
-      }
-      maybeCaptureRedirect(firstNonEmptyString([changeInfo?.url, tab?.pendingUrl, tab?.url]));
-    };
-
-    const handleTabRemoved = (tabId) => {
-      if (tabId !== popupTabId) {
-        return;
-      }
-      void fail(new Error("Adobe sign-in popup was closed before UnderPAR received the redirect."));
-    };
-
-    const handleWindowRemoved = (windowId) => {
-      if (windowId !== popupWindowId) {
-        return;
-      }
-      void fail(new Error("Adobe sign-in popup window was closed before UnderPAR received the redirect."));
-    };
-
-    chrome.tabs.onUpdated.addListener(handleUpdated);
-    chrome.tabs.onRemoved.addListener(handleTabRemoved);
-    chrome.windows.onRemoved.addListener(handleWindowRemoved);
-
-    void chrome.tabs
-      .get(popupTabId)
-      .then((tab) => {
-        maybeCaptureRedirect(firstNonEmptyString([tab?.pendingUrl, tab?.url]));
-      })
-      .catch(() => {});
-  });
-}
-
 function buildUnderparImsAuthError(parsed, text, fallbackMessage = "Adobe IMS request failed.") {
   const payload = parsed && typeof parsed === "object" ? parsed : {};
   const code = firstNonEmptyString([
@@ -52409,10 +54448,7 @@ async function runUnderparPkceLogin(options = {}) {
     let capturedAvatarUrl = "";
     let authPopupTabId = 0;
     if (interactive) {
-      const popupResult = await runAuthInPopupWindow(authorizeUrl, redirectUri);
-      responseUrl = String(firstNonEmptyString([popupResult?.responseUrl]) || "");
-      capturedAvatarUrl = normalizeAvatarCandidate(firstNonEmptyString([popupResult?.capturedAvatarUrl]));
-      authPopupTabId = Number(popupResult?.authPopupTabId || 0);
+      responseUrl = String(await launchUnderparImsAuthorizationFlow(authorizeUrl, true));
     } else {
       responseUrl = String(await launchUnderparImsAuthorizationFlow(authorizeUrl, false));
     }
@@ -58209,7 +60245,7 @@ function syncAvatarMenuUpdateAction() {
   button.disabled = state.updateCheckPending === true;
   button.textContent = "Get Latest";
   const title = updateAvailable
-    ? `Open UnderPAR ${latestVersion ? `v${latestVersion}` : "latest"} from GitHub and chrome://extensions${currentVersion ? ` (current v${currentVersion})` : ""}`
+    ? `Open UnderPAR ${latestVersion ? `v${latestVersion}` : "latest"} package and chrome://extensions${currentVersion ? ` (current v${currentVersion})` : ""}`
     : `Download the latest UnderPAR package and open chrome://extensions${currentVersion ? ` (current v${currentVersion})` : ""}`;
   button.title = title;
   button.setAttribute("aria-label", title);
@@ -58293,6 +60329,13 @@ async function triggerGetLatestWorkflow() {
     }
     syncAvatarMenuUpdateAction();
     syncSignInUpdateIndicator();
+    if (response?.noNewerPackage === true) {
+      setStatus(
+        String(response?.infoMessage || "No newer UnderPAR package is currently published."),
+        "info"
+      );
+      return;
+    }
     const downloadLabel = String(response?.downloadFileName || "").trim() || "latest UnderPAR package";
     if (response?.downloadStarted === true && response?.extensionsOpened === true) {
       setStatus(`Started ${downloadLabel} download and opened chrome://extensions.`, "success");
@@ -59402,7 +61445,6 @@ async function resetToSignedOutState(options = {}) {
   state.restricted = false;
   state.sessionReady = false;
   state.programmersApiEndpoint = null;
-  state.consoleContextReady = false;
   state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
   state.mvpdCacheByRequestor.clear();
@@ -59553,9 +61595,7 @@ function resetWorkflowForAuthenticatedHydration() {
 async function hydrateAuthenticatedAdobePassSession(source = "session", options = {}) {
   const normalizedSource = String(source || "session").trim() || "session";
   const hydrationToken = ++state.authenticatedHydrationToken;
-  const preferredCmBootstrapTabId = Number(
-    options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0
-  );
+  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || 0);
   const allowBackgroundTemporaryPageContextTab = options.allowBackgroundTemporaryPageContextTab === true;
   const preserveExistingOnFailure = options.preserveExistingOnFailure === true;
   state.programmersLoadInFlight = preserveExistingOnFailure ? false : true;
@@ -59598,10 +61638,6 @@ async function hydrateAuthenticatedAdobePassSession(source = "session", options 
       hydratedLoginData = hydrationResult.value;
     }
   }
-  await maybeReleaseRetainedAuthPopupBootstrapContext(
-    preferredCmBootstrapTabId,
-    `post-login-hydration-complete:${normalizedSource}`
-  ).catch(() => null);
   if (hydrationToken !== state.authenticatedHydrationToken) {
     return false;
   }
@@ -59721,7 +61757,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     normalizedSource,
     allowTemporaryPageContextTab
   );
-  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || 0);
   setUnderparDiagnosticMarker("activation", {
     status: "pending",
     source: normalizedSource,
@@ -59998,7 +62034,7 @@ async function awaitCmBootstrapForExplicitActivation(reason = "session", options
     return await ensureCmTenantsPrecheckForActiveSession(`explicit-activation:${String(reason || "session")}`, {
       forceRefresh: options.forceRefresh === true,
       allowTemporaryPageContextTab: options.allowTemporaryPageContextTab === true,
-      preferredCmBootstrapTabId: Number(options.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+      preferredCmBootstrapTabId: Number(options.preferredCmBootstrapTabId || 0),
     });
   } catch (error) {
     const resolvedError = error instanceof Error ? error : new Error(String(error));
@@ -60340,10 +62376,66 @@ function uniquePreserveOrder(values = []) {
   return output;
 }
 
-function applyMediaCompanyOptionHydrationState() {
+function isMediaCompanySelectInteracting() {
+  return Boolean(els?.mediaCompanySelect && document?.activeElement === els.mediaCompanySelect);
+}
+
+function clearPendingMediaCompanySelectionHydration() {
+  const timerId = Number(state.mediaCompanySelectionHydrationTimerId || 0);
+  if (timerId > 0) {
+    window.clearTimeout(timerId);
+  }
+  state.mediaCompanySelectionHydrationTimerId = 0;
+}
+
+function flushPendingMediaCompanyOptionHydrationState() {
+  if (state.mediaCompanyOptionHydrationDeferred !== true) {
+    return false;
+  }
+  applyMediaCompanyOptionHydrationState({ allowDefer: false });
+  return true;
+}
+
+function flushPendingMediaCompanySelectionHydration() {
+  const controllerReason = String(state.pendingMediaCompanySelectionControllerReason || "").trim();
+  if (!controllerReason && Number(state.mediaCompanySelectionHydrationTimerId || 0) <= 0) {
+    return false;
+  }
+  clearPendingMediaCompanySelectionHydration();
+  state.pendingMediaCompanySelectionControllerReason = "";
+  const selectedProgrammer = resolveSelectedProgrammer();
+  void hydrateProgrammerSelection(selectedProgrammer, {
+    controllerReason: controllerReason || "media-company-change",
+  }).catch((error) => {
+    setStatus(error instanceof Error ? error.message : String(error), "error");
+  });
+  return true;
+}
+
+function scheduleMediaCompanySelectionHydration(controllerReason = "media-company-change") {
+  state.pendingMediaCompanySelectionControllerReason =
+    String(controllerReason || "media-company-change").trim() || "media-company-change";
+  clearPendingMediaCompanySelectionHydration();
+  const delayMs = isMediaCompanySelectInteracting() ? MEDIA_COMPANY_SELECTION_DEBOUNCE_MS : 0;
+  if (delayMs <= 0) {
+    flushPendingMediaCompanySelectionHydration();
+    return;
+  }
+  state.mediaCompanySelectionHydrationTimerId = window.setTimeout(() => {
+    state.mediaCompanySelectionHydrationTimerId = 0;
+    flushPendingMediaCompanySelectionHydration();
+  }, delayMs);
+}
+
+function applyMediaCompanyOptionHydrationState(options = {}) {
   if (!els.mediaCompanySelect) {
     return;
   }
+  if (options?.allowDefer !== false && isMediaCompanySelectInteracting()) {
+    state.mediaCompanyOptionHydrationDeferred = true;
+    return;
+  }
+  state.mediaCompanyOptionHydrationDeferred = false;
 
   const programmerByKey = new Map(
     (Array.isArray(state.programmers) ? state.programmers : []).map((programmer) => [String(programmer?.key || "").trim(), programmer])
@@ -60487,8 +62579,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
   const forceRefresh = options?.forceRefresh === true;
   const normalizedReason = String(reason || "session").trim() || "session";
   const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const releaseRetainedAuthPopupContext = options?.releaseRetainedAuthPopupContext !== false;
+  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || 0);
   if (state.restricted || !state.loginData) {
     setUnderparDiagnosticMarker("cm_precheck", {
       status: "skipped",
@@ -60619,12 +62710,6 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
         sourceUrl: String(catalog?.sourceUrl || ""),
         tokenClientId: String(parseJwtPayload(hydratedToken)?.client_id || ""),
       });
-      if (releaseRetainedAuthPopupContext) {
-        await maybeReleaseRetainedAuthPopupBootstrapContext(
-          preferredCmBootstrapTabId,
-          `cm-global-hydrate-complete:${reason}`
-        );
-      }
       return catalog;
     } catch (error) {
       const resolvedError = error instanceof Error ? error : new Error(String(error));
@@ -60691,8 +62776,7 @@ async function persistResolvedCmGlobalAuthState(accessToken = "", source = "unkn
 
 async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session", options = {}) {
   const forceRefresh = options?.forceRefresh === true;
-  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const releaseRetainedAuthPopupContext = options?.releaseRetainedAuthPopupContext !== false;
+  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || 0);
   if (state.restricted || !state.loginData) {
     return "";
   }
@@ -60704,12 +62788,6 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
     (!forceRefresh || isAccessTokenFreshEnough(existingToken, 45 * 1000))
   ) {
     await persistResolvedCmGlobalAuthState(existingToken, `existing:${reason}`).catch(() => null);
-    if (releaseRetainedAuthPopupContext) {
-      await maybeReleaseRetainedAuthPopupBootstrapContext(
-        preferredCmBootstrapTabId,
-        `cm-global-hydrate-token-reuse:${reason}`
-      );
-    }
     emitCmDebugEvent({
       phase: "cm-global-hydrate-token-reuse",
       reason: String(reason || ""),
@@ -60732,12 +62810,6 @@ async function hydrateGlobalCmConsoleBootstrapForActiveSession(reason = "session
   const hydratedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(tokenResult || {}, {}));
   if (hydratedToken && tokenSupportsCmConsoleRequests(hydratedToken)) {
     await persistResolvedCmGlobalAuthState(hydratedToken, `post-login:${reason}`).catch(() => null);
-    if (releaseRetainedAuthPopupContext) {
-      await maybeReleaseRetainedAuthPopupBootstrapContext(
-        preferredCmBootstrapTabId,
-        `cm-global-hydrate-token-ready:${reason}`
-      );
-    }
     emitCmDebugEvent({
       phase: "cm-global-hydrate-token-ready",
       reason: String(reason || ""),
@@ -60937,7 +63009,7 @@ async function refreshProgrammerPanels(options = {}) {
     return;
   }
   const programmerId = String(programmer?.programmerId || "").trim();
-  const retainedConsoleTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const retainedConsoleTabId = Number(options.preferredTabId || 0);
   const programmerApplicationsPromise =
     options.programmerApplicationsPromise && typeof options.programmerApplicationsPromise.then === "function"
       ? options.programmerApplicationsPromise
@@ -62161,8 +64233,7 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
   const accessToken = normalizeBearerTokenValue(firstNonEmptyString([currentSession?.accessToken]));
   const hydratedAt = new Date().toISOString();
   const programmerAccess = resolveProgrammerAccessContext(currentSession);
-  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
+  const preferredTabId = Number(options?.preferredTabId || 0);
   const pageContextTargetRef = { target: null };
   let csrfToken = firstNonEmptyString([previousConsole?.csrfToken, state.consoleCsrfToken, "NO-TOKEN"]);
   let transport = firstNonEmptyString([previousConsole?.transport]);
@@ -62267,7 +64338,6 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
   const buildCommonRequestOptions = () => ({
     timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
     accessToken,
-    allowTemporaryPageContextTab,
     preferredTabId,
     pageContextTargetRef,
     headers: {
@@ -62314,7 +64384,6 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
               fetchConsoleChannelsFromApi({
                 accessToken,
                 configurationVersion,
-                allowTemporaryPageContextTab,
                 pageContextTargetRef,
                 preferredTabId,
               })
@@ -62324,7 +64393,6 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
                 accessToken,
                 configurationVersion,
                 requireEntities: false,
-                allowTemporaryPageContextTab,
                 pageContextTargetRef,
                 preferredTabId,
               })
@@ -62536,12 +64604,11 @@ async function hydratePostLoginSessionData(session, options = {}) {
   }
 
   const normalizedReason = String(options?.reason || "post-login").trim() || "post-login";
-  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const preferredTabId = Number(options?.preferredTabId || 0);
   const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
   const [nextConsoleContext, nextCmContext, nextUnifiedShellContext] = await Promise.all([
     buildConsoleContext(currentSession, normalizedReason, {
       preferredTabId,
-      allowTemporaryPageContextTab,
       forceRefresh: options?.forceRefresh === true,
     }),
     buildCmContext(currentSession, normalizedReason, {
@@ -62861,12 +64928,8 @@ async function fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, 
   }
 
   const options = requestOptions && typeof requestOptions === "object" ? requestOptions : {};
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const timeoutMs = Math.max(
-    allowTemporaryPageContextTab ? 9000 : 2000,
-    Number(options.timeoutMs || 0) || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS
-  );
+  const preferredTabId = Number(options.preferredTabId || 0);
+  const timeoutMs = Math.max(2000, Number(options.timeoutMs || 0) || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS);
   const accessToken = normalizeBearerTokenValue(
     firstNonEmptyString([options.accessToken, getPreferredAdobeConsoleAccessTokenCandidate()])
   );
@@ -62884,19 +64947,15 @@ async function fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, 
         ? options.body
         : JSON.stringify(options.body)
       : undefined;
-  const credentials = String(options.credentials || "include");
 
   for (const url of urls) {
     const response = await fetchAdobeConsoleJsonViaShellPageContext(url, {
       method,
       headers,
       body,
-      credentials,
       accessToken,
       pageContextTargetRef,
       preferredTabId,
-      preferShellAccessToken: options.preferShellAccessToken !== false,
-      allowTemporaryTab: allowTemporaryPageContextTab,
       timeoutMs,
     }).catch(() => null);
     if (!response?.ok) {
@@ -62919,7 +64978,6 @@ async function fetchAdobeConsoleJsonWithLoginButtonFallback(urlCandidates, conte
   const options = requestOptions && typeof requestOptions === "object" ? requestOptions : {};
   const directResult = await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel, {
     ...options,
-    preferShellAccessToken: false,
     preferAuthenticatedHeaders: options.preferAuthenticatedHeaders !== false,
   }).catch((error) => {
     return {
@@ -62932,12 +64990,10 @@ async function fetchAdobeConsoleJsonWithLoginButtonFallback(urlCandidates, conte
 
   const pageContextResult = await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, contextLabel, {
     ...options,
-    allowTemporaryPageContextTab: options.allowTemporaryPageContextTab === true,
     pageContextTargetRef:
       options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
         ? options.pageContextTargetRef
         : null,
-    preferShellAccessToken: false,
   }).catch(() => null);
   if (pageContextResult) {
     return pageContextResult;
@@ -62996,27 +65052,16 @@ async function fetchRegisteredApplicationsByEntityRefs(entityRefs = [], contextL
     return [];
   }
 
-  const payload =
-    (await fetchAdobeConsoleJsonWithAuthVariants([bulkRetrieveRequest.url], contextLabel, {
-      ...requestOptions,
-      method: "POST",
-      headers: {
-        ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
-        "Content-Type": "application/json",
-      },
-      body: bulkRetrieveRequest.body,
-      preferAuthenticatedHeaders: requestOptions.preferAuthenticatedHeaders !== false,
-    })) ||
-    (await fetchAdobeConsoleJsonWithShellPageContextVariants([bulkRetrieveRequest.url], contextLabel, {
-      ...requestOptions,
-      method: "POST",
-      headers: {
-        ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
-        "Content-Type": "application/json",
-      },
-      body: bulkRetrieveRequest.body,
-      preferShellAccessToken: true,
-    }).catch(() => null));
+  const payload = await fetchAdobeConsoleJsonWithLoginButtonFallback([bulkRetrieveRequest.url], contextLabel, {
+    ...requestOptions,
+    method: "POST",
+    headers: {
+      ...(requestOptions.headers && typeof requestOptions.headers === "object" ? requestOptions.headers : {}),
+      "Content-Type": "application/json",
+    },
+    body: bulkRetrieveRequest.body,
+    preferAuthenticatedHeaders: requestOptions.preferAuthenticatedHeaders !== false,
+  });
 
   return normalizeApplicationsResponse(payload?.parsed || payload);
 }
@@ -63037,9 +65082,7 @@ async function fetchApplicationDetailsByGuid(guid, options = {}) {
     }
   }
   const urlCandidates = buildRegisteredApplicationDetailUrlCandidates(guid);
-  const payload =
-    (await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, "Application detail", requestOptions)) ||
-    (await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, "Application detail", requestOptions).catch(() => null));
+  const payload = await fetchAdobeConsoleJsonWithLoginButtonFallback(urlCandidates, "Application detail", requestOptions);
   const parsed = normalizeRegisteredApplicationDetailPayload(payload?.parsed ?? null);
   if (!parsed || typeof parsed !== "object") {
     return null;
@@ -63341,8 +65384,7 @@ async function fetchProgrammerRegisteredApplications(session, programmerId, opti
     options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
       ? options.pageContextTargetRef
       : null;
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
+  const preferredTabId = Number(options.preferredTabId || 0);
   const requestTimeoutMs = Math.max(1000, Number(options.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS));
 
   if (!accessToken || !baseUrl || configurationVersion <= 0 || !normalizedProgrammerId) {
@@ -63360,7 +65402,6 @@ async function fetchProgrammerRegisteredApplications(session, programmerId, opti
     accessToken,
     preferAuthenticatedHeaders: true,
     preferredTabId,
-    allowTemporaryPageContextTab,
     pageContextTargetRef,
   });
 
@@ -64276,7 +66317,7 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
         const hydratedAppInfo = await enrichRegisteredApplicationForHydration(resolvedAppInfo, {
           timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
           preferAuthenticatedHeaders: true,
-          preferredTabId: Number(getRetainedAuthPopupBootstrapTabId() || 0),
+          preferredTabId: 0,
           allowTemporaryPageContextTab: true,
         });
         if (hydratedAppInfo && typeof hydratedAppInfo === "object") {
@@ -64291,7 +66332,7 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
           resolvedAppInfo.softwareStatement = await fetchSoftwareStatementForAppGuid(resolvedAppInfo.guid, {
             timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
             preferAuthenticatedHeaders: true,
-            preferredTabId: Number(getRetainedAuthPopupBootstrapTabId() || 0),
+            preferredTabId: 0,
             allowTemporaryPageContextTab: true,
           });
         } catch {
@@ -66808,7 +68849,7 @@ async function resolveQualifiedCmConsoleAccessToken(session = null, previousToke
     previousToken,
   ]).filter((value) => isProbablyJwt(value));
   const userIdCandidates = collectCmConsoleUserIdCandidates(currentSession);
-  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const preferredTabId = Number(options?.preferredTabId || 0);
   const allowTemporaryTab = options?.allowTemporaryTab !== false;
   let lastError = null;
 
@@ -67087,7 +69128,7 @@ async function buildCmContext(session, reason = "post-login", options = {}) {
 
   const cmuTokenResult = await settle(() =>
     resolveQualifiedCmConsoleAccessToken(currentSession, firstNonEmptyString([currentSession?.cmConsoleAccessToken]), {
-      preferredTabId: Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+      preferredTabId: Number(options?.preferredTabId || 0),
       allowTemporaryTab: options?.allowTemporaryTab !== false,
     })
   );
@@ -67220,7 +69261,7 @@ async function requestQualifiedCmConsoleToken(options = {}) {
       currentSession,
       firstNonEmptyString([options?.seedToken, currentSession?.cmConsoleAccessToken]),
       {
-        preferredTabId: Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+        preferredTabId: Number(options?.preferredTabId || 0),
         allowTemporaryTab: options?.allowTemporaryPageContextTab !== false,
       }
     );
@@ -67271,7 +69312,7 @@ async function requestCmTokenViaImsCheck(seedToken = "", options = {}) {
     currentSession?.accessToken,
   ]).filter((value) => isProbablyJwt(value));
   const userIdCandidates = collectCmConsoleUserIdCandidates(currentSession, seedToken);
-  const preferredTabId = Number(options?.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const preferredTabId = Number(options?.preferredTabId || 0);
   const allowTemporaryTab = options?.allowTemporaryPageContextTab !== false;
 
   for (const userIdCandidate of userIdCandidates) {
@@ -67687,44 +69728,18 @@ async function resolveReusableAdobePageContextTab(preferredTabId = 0) {
   return null;
 }
 
-function getAdobeConsolePageContextBootstrapUrl(requestUrl = "") {
-  const normalizedUrl = String(requestUrl || "").trim();
-  const isProgrammersRequest = /\/entity\/Programmer(?:[/?#]|$)/i.test(normalizedUrl);
-  const isApplicationsRequest =
-    /\/applications(?:[/?#]|$)/i.test(normalizedUrl) ||
-    /\/entity\/bulkRetrieve(?:[/?#]|$)/i.test(normalizedUrl) ||
-    /\/entity\/RegisteredApplication(?:[/?#]|$)/i.test(normalizedUrl) ||
-    /\/registeredApplications(?:[/?#]|$)/i.test(normalizedUrl) ||
-    /\/registered-applications(?:[/?#]|$)/i.test(normalizedUrl);
-  const isProgrammersRuntimeRequest =
-    isProgrammersRequest ||
-    isApplicationsRequest ||
-    /\/config\/history(?:[/?#]|$)/i.test(normalizedUrl);
-  return buildAdobePassConsoleBootstrapUrl(
-    getActiveAdobePassEnvironment(),
-    isProgrammersRuntimeRequest ? "programmers" : "programmers"
-  );
-}
-
-async function resolveAdobeConsolePageContextTarget(requestUrl = "", options = {}) {
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
-  const allowTemporaryTab = options.allowTemporaryTab === true;
+async function resolveAdobeConsolePageContextTarget(options = {}) {
+  const preferredTabId = Number(options.preferredTabId || 0);
 
   let tab = await resolveReusableAdobePageContextTab(preferredTabId);
   if (!tab?.id) {
     tab = await findExistingAdobeConsoleTab();
   }
 
-  let temporaryTarget = null;
-  if (!tab?.id && allowTemporaryTab) {
-    temporaryTarget = await openTemporaryAdobePageContextTarget(getAdobeConsolePageContextBootstrapUrl(requestUrl));
-    tab = temporaryTarget?.tab || null;
-  }
-
   return {
     tab: tab || null,
     tabId: Number(tab?.id || 0),
-    temporaryTarget,
+    temporaryTarget: null,
   };
 }
 
@@ -67962,8 +69977,7 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
     return null;
   }
 
-  const allowTemporaryTab = options.allowTemporaryTab !== false;
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const preferredTabId = Number(options.preferredTabId || 0);
   const timeoutMs = Math.max(2000, Number(options.timeoutMs || PROGRAMMERS_FETCH_TIMEOUT_MS));
   const requestMethod = String(options.method || "GET")
     .trim()
@@ -67975,7 +69989,6 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
         ? options.body
         : JSON.stringify(options.body)
       : undefined;
-  const requestCredentials = String(options.credentials || "include");
   const pageContextTargetRef =
     options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
       ? options.pageContextTargetRef
@@ -67995,9 +70008,8 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
       ? pageContextTargetRef.target
       : null;
   if (Number(target?.tabId || 0) <= 0) {
-    target = await resolveAdobeConsolePageContextTarget(normalizedUrl, {
+    target = await resolveAdobeConsolePageContextTarget({
       preferredTabId,
-      allowTemporaryTab,
     }).catch(() => null);
     if (pageContextTargetRef && target) {
       pageContextTargetRef.target = target;
@@ -68051,7 +70063,7 @@ async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
   }
 
   const requireFresh = options.requireFresh === true;
-  const preferredTabId = Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const preferredTabId = Number(options.preferredTabId || 0);
   let accessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken, getPreferredCmRequestAccessTokenCandidate()]));
   if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
     accessToken = normalizeBearerTokenValue(
@@ -68526,7 +70538,7 @@ async function ensureCmApiAccessToken(options = {}) {
         state.loginData,
         firstNonEmptyString([state.loginData?.cmConsoleAccessToken, getPreferredPrimaryImsAccessTokenCandidate()]),
         {
-          preferredTabId: Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0),
+          preferredTabId: Number(options?.preferredCmBootstrapTabId || 0),
           allowTemporaryTab: options?.allowTemporaryPageContextTab !== false,
         }
       );
@@ -68929,7 +70941,7 @@ async function hydrateCmTenantsCatalogFromStorage(options = {}) {
 function prefetchCmTenantsCatalogInBackground(reason = "background", options = {}) {
   const forceRefresh = options?.forceRefresh === true;
   const allowTemporaryPageContextTab = options?.allowTemporaryPageContextTab === true;
-  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || getRetainedAuthPopupBootstrapTabId() || 0);
+  const preferredCmBootstrapTabId = Number(options?.preferredCmBootstrapTabId || 0);
   if (state.restricted || !state.sessionReady) {
     return;
   }
@@ -72594,7 +74606,6 @@ async function fetchProgrammersFromApi(options = {}) {
     ])
   );
   const requireEntities = options.requireEntities !== false;
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
   const pageContextTargetRef =
     options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
       ? options.pageContextTargetRef
@@ -72618,10 +74629,8 @@ async function fetchProgrammersFromApi(options = {}) {
         timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
         accessToken,
         preferAuthenticatedHeaders: true,
-        preferredTabId: Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
-        allowTemporaryPageContextTab,
+        preferredTabId: Number(options.preferredTabId || 0),
         pageContextTargetRef,
-        preferShellAccessToken: false,
       });
       const normalizedEntities = normalizeProgrammersResponse(payload?.parsed || payload);
       if (requireEntities && normalizedEntities.length === 0) {
@@ -72648,7 +74657,6 @@ async function fetchConsoleChannelsFromApi(options = {}) {
       getPreferredAdobeConsoleAccessTokenCandidate(),
     ])
   );
-  const allowTemporaryPageContextTab = options.allowTemporaryPageContextTab === true;
   const pageContextTargetRef =
     options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
       ? options.pageContextTargetRef
@@ -72665,10 +74673,8 @@ async function fetchConsoleChannelsFromApi(options = {}) {
     timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
     accessToken,
     preferAuthenticatedHeaders: true,
-    preferredTabId: Number(options.preferredTabId || getRetainedAuthPopupBootstrapTabId() || 0),
-    allowTemporaryPageContextTab,
+    preferredTabId: Number(options.preferredTabId || 0),
     pageContextTargetRef,
-    preferShellAccessToken: false,
   });
   return normalizeConsoleChannelsResponse(payload?.parsed || payload);
 }
@@ -73039,7 +75045,6 @@ async function signInInteractive(options = {}) {
     requestedTargetOrganization ||
     null;
   cancelPendingBootstrapSession();
-  await releaseAuthPopupBootstrapContext("interactive-signin-reset");
   state.sessionMonitorSuppressed = false;
   setBusy(true, "Signing in...");
   setStatus("", "info");
@@ -73146,9 +75151,6 @@ async function signInInteractive(options = {}) {
     });
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
-    if (!(state.sessionReady && state.loginData && !state.restricted)) {
-      await releaseAuthPopupBootstrapContext("interactive-signin-complete");
-    }
     setBusy(false);
     render();
   }
@@ -73312,7 +75314,6 @@ async function onRestrictedOrgSwitch() {
   let activationSucceeded = false;
   try {
     cancelPendingBootstrapSession();
-    await releaseAuthPopupBootstrapContext("restricted-org-switch-reset");
     state.sessionMonitorSuppressed = false;
     setStatus("Resetting Adobe sign-in session before re-authenticating...", "info");
     await runUnderparImsBrowserLogout({
@@ -73391,9 +75392,6 @@ async function onRestrictedOrgSwitch() {
     });
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
-    if (!activationSucceeded) {
-      await releaseAuthPopupBootstrapContext("restricted-org-switch-complete");
-    }
     state.restrictedOrgSwitchBusy = false;
     render();
   }
@@ -73573,24 +75571,6 @@ function registerEventHandlers() {
     });
   }
 
-  if (els.restrictedOrgSwitchBtn) {
-    els.restrictedOrgSwitchBtn.addEventListener("click", () => {
-      void onRestrictedOrgSwitch();
-    });
-  }
-
-  if (els.restrictedSignInBtn) {
-    els.restrictedSignInBtn.addEventListener("click", () => {
-      void onRestrictedSignInAgain();
-    });
-  }
-
-  if (els.restrictedSignOutBtn) {
-    els.restrictedSignOutBtn.addEventListener("click", () => {
-      void onRestrictedSignOut();
-    });
-  }
-
   if (els.signOutBtn) {
     els.signOutBtn.addEventListener("click", () => {
       void signOutAndResetSession();
@@ -73672,6 +75652,21 @@ function registerEventHandlers() {
     });
   }
 
+  els.mediaCompanySelect.addEventListener("blur", () => {
+    flushPendingMediaCompanySelectionHydration();
+    flushPendingMediaCompanyOptionHydrationState();
+  });
+
+  els.mediaCompanySelect.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    window.setTimeout(() => {
+      flushPendingMediaCompanySelectionHydration();
+      flushPendingMediaCompanyOptionHydrationState();
+    }, 0);
+  });
+
   els.mediaCompanySelect.addEventListener("change", (event) => {
     state.selectedProgrammerKey = String(event.target.value || "");
     const controllerReason = "media-company-change";
@@ -73683,9 +75678,7 @@ function registerEventHandlers() {
         ? `${String(selectedProgrammer.programmerName || "").trim()} - ${String(selectedProgrammer.programmerId || "").trim()}`
         : ""
     );
-    void hydrateProgrammerSelection(selectedProgrammer, {
-      controllerReason,
-    });
+    scheduleMediaCompanySelectionHydration(controllerReason);
   });
 
   els.requestorSelect.addEventListener("change", async (event) => {
@@ -73868,12 +75861,66 @@ async function settleUnderparInitStep(label = "", task = null, fallbackValue = n
   }
 }
 
+let underparDeferredStartupTasksScheduled = false;
+let underparDeferredStartupTasksPromise = null;
+
+async function runUnderparDeferredStartupTasks() {
+  const startupSteps = [
+    ["Global network fetch tracker", () => installGlobalNetworkFetchTracker()],
+    ["ESM workspace runtime listener", () => ensureEsmWorkspaceRuntimeListener()],
+    ["ESM workspace tab watcher", () => ensureEsmWorkspaceWorkspaceTabWatcher()],
+    ["BlondieTime workspace runtime listener", () => ensureBlondieTimeWorkspaceRuntimeListener()],
+    ["BlondieTime workspace tab watcher", () => ensureBlondieTimeWorkspaceTabWatcher()],
+    ["MEG workspace runtime listener", () => ensureMegWorkspaceRuntimeListener()],
+    ["MEG workspace tab watcher", () => ensureMegWorkspaceWorkspaceTabWatcher()],
+    ["UP Devtools VAULT action listener", () => ensureUpDevtoolsVaultActionListener()],
+    ["CM runtime listener", () => ensureCmRuntimeListener()],
+    ["CM workspace tab watcher", () => ensureCmWorkspaceTabWatcher()],
+    ["MVPD workspace runtime listener", () => ensureMvpdWorkspaceRuntimeListener()],
+    ["MVPD workspace tab watcher", () => ensureMvpdWorkspaceTabWatcher()],
+    ["REST workspace runtime listener", () => ensureRestWorkspaceRuntimeListener()],
+    ["REST workspace tab watcher", () => ensureRestWorkspaceTabWatcher()],
+    ["Degradation workspace runtime listener", () => ensureDegradationWorkspaceRuntimeListener()],
+    ["Degradation workspace tab watcher", () => ensureDegradationWorkspaceTabWatcher()],
+    ["Bobtools workspace runtime listener", () => ensureBobtoolsWorkspaceRuntimeListener()],
+    ["Bobtools workspace tab watcher", () => ensureBobtoolsWorkspaceTabWatcher()],
+    ["REST V2 login tab watcher", () => ensureRestV2LoginTabWatcher()],
+    ["REST V2 Bobtools redirect watcher", () => ensureRestV2BobtoolsRedirectWatcher()],
+    ["AdobePASS environment storage listener", () => registerAdobePassEnvironmentStorageListener()],
+    ["Pass VAULT storage listener", () => registerPassVaultStorageListener()],
+    ["UnderPAR ESM deeplink storage listener", () => registerUnderparEsmDeeplinkStorageListener()],
+    ["Sidepanel controller bridge", () => startSidepanelControllerBridge()],
+  ];
+
+  for (const [label, task] of startupSteps) {
+    await settleUnderparInitStep(label, task);
+  }
+
+  window.setTimeout(() => {
+    void settleUnderparInitStep("Avatar menu update state", () => loadAvatarMenuUpdateState(false));
+  }, 750);
+}
+
+function scheduleUnderparDeferredStartupTasks() {
+  if (underparDeferredStartupTasksScheduled) {
+    return;
+  }
+  underparDeferredStartupTasksScheduled = true;
+  window.setTimeout(() => {
+    if (underparDeferredStartupTasksPromise) {
+      return;
+    }
+    underparDeferredStartupTasksPromise = runUnderparDeferredStartupTasks().finally(() => {
+      underparDeferredStartupTasksPromise = null;
+    });
+  }, 0);
+}
+
 async function init() {
   if (ENABLE_IMS_AVATAR_RENDERING !== true) {
     purgeAvatarCaches();
   }
   registerCoreInteractionHandlers();
-  installGlobalNetworkFetchTracker();
   syncGlobalNetworkActivityIndicator();
   renderBuildInfo();
   renderDebugConsole();
@@ -73898,34 +75945,11 @@ async function init() {
       spBase: String(environment?.spBase || ""),
     },
   });
-  await settleUnderparInitStep("ESM workspace runtime listener", () => ensureEsmWorkspaceRuntimeListener());
-  await settleUnderparInitStep("ESM workspace tab watcher", () => ensureEsmWorkspaceWorkspaceTabWatcher());
-  await settleUnderparInitStep("BlondieTime workspace runtime listener", () => ensureBlondieTimeWorkspaceRuntimeListener());
-  await settleUnderparInitStep("BlondieTime workspace tab watcher", () => ensureBlondieTimeWorkspaceTabWatcher());
-  await settleUnderparInitStep("MEG workspace runtime listener", () => ensureMegWorkspaceRuntimeListener());
-  await settleUnderparInitStep("MEG workspace tab watcher", () => ensureMegWorkspaceWorkspaceTabWatcher());
-  await settleUnderparInitStep("UP Devtools VAULT action listener", () => ensureUpDevtoolsVaultActionListener());
-  await settleUnderparInitStep("CM runtime listener", () => ensureCmRuntimeListener());
-  await settleUnderparInitStep("CM workspace tab watcher", () => ensureCmWorkspaceTabWatcher());
-  await settleUnderparInitStep("MVPD workspace runtime listener", () => ensureMvpdWorkspaceRuntimeListener());
-  await settleUnderparInitStep("MVPD workspace tab watcher", () => ensureMvpdWorkspaceTabWatcher());
-  await settleUnderparInitStep("REST workspace runtime listener", () => ensureRestWorkspaceRuntimeListener());
-  await settleUnderparInitStep("REST workspace tab watcher", () => ensureRestWorkspaceTabWatcher());
-  await settleUnderparInitStep("Degradation workspace runtime listener", () => ensureDegradationWorkspaceRuntimeListener());
-  await settleUnderparInitStep("Degradation workspace tab watcher", () => ensureDegradationWorkspaceTabWatcher());
-  await settleUnderparInitStep("Bobtools workspace runtime listener", () => ensureBobtoolsWorkspaceRuntimeListener());
-  await settleUnderparInitStep("Bobtools workspace tab watcher", () => ensureBobtoolsWorkspaceTabWatcher());
-  await settleUnderparInitStep("REST V2 login tab watcher", () => ensureRestV2LoginTabWatcher());
-  await settleUnderparInitStep("REST V2 Bobtools redirect watcher", () => ensureRestV2BobtoolsRedirectWatcher());
-  await settleUnderparInitStep("AdobePASS environment storage listener", () => registerAdobePassEnvironmentStorageListener());
-  await settleUnderparInitStep("Pass VAULT storage listener", () => registerPassVaultStorageListener());
-  await settleUnderparInitStep("UnderPAR ESM deeplink storage listener", () => registerUnderparEsmDeeplinkStorageListener());
   await settleUnderparInitStep("Pass VAULT load", () => ensurePassVaultLoaded({ forceReload: false }));
   void renderBuildInfo();
-  await settleUnderparInitStep("Sidepanel controller bridge", () => startSidepanelControllerBridge());
   await settleUnderparInitStep("Session bootstrap", () => bootstrapSession("startup"));
   render();
-  void loadAvatarMenuUpdateState(false);
+  scheduleUnderparDeferredStartupTasks();
 }
 
 void init();

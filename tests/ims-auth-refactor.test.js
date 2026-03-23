@@ -469,14 +469,14 @@ test("legacy helper login surface is no longer shipped", () => {
   }
 });
 
-test("interactive UnderPAR IMS login now uses the monitored browser popup transport", () => {
+test("interactive UnderPAR IMS login now uses the chrome.identity web auth transport", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const retrySource = extractFunctionSource(popupSource, "runUnderparPkceLogin");
 
-  assert.match(retrySource, /if \(interactive\) \{\s*const popupResult = await runAuthInPopupWindow\(authorizeUrl, redirectUri\);/);
-  assert.match(retrySource, /responseUrl = String\(firstNonEmptyString\(\[popupResult\?\.responseUrl\]\) \|\| ""\);/);
+  assert.match(retrySource, /if \(interactive\) \{\s*responseUrl = String\(await launchUnderparImsAuthorizationFlow\(authorizeUrl, true\)\);/);
   assert.match(retrySource, /responseUrl = String\(await launchUnderparImsAuthorizationFlow\(authorizeUrl, false\)\);/);
   assert.doesNotMatch(retrySource, /launchUnderparImsAuthorizationFlow\(authorizeUrl, interactive\)/);
+  assert.doesNotMatch(popupSource, /runAuthInPopupWindow/);
 });
 
 test("header UP button no longer launches sign-in when logged out", async () => {
@@ -766,14 +766,13 @@ test("sign out path revokes Adobe tokens before clearing session state", () => {
   assert.match(popupSource, /revokeUnderparLoginTokensForLogout\(state\.loginData\)/);
 });
 
-test("interactive Adobe auth popup no longer attaches the debugger or retains the callback window", () => {
+test("interactive Adobe auth no longer ships the legacy popup monitor transport or console security-context bootstrap", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const popupTransportSource = extractFunctionSource(popupSource, "runAuthInPopupWindow");
   const signInSource = extractFunctionSource(popupSource, "signInInteractive");
 
-  assert.equal(/chrome\.debugger/.test(popupTransportSource), false);
-  assert.equal(/keepWindowOpenForBootstrap/.test(popupTransportSource), false);
-  assert.equal(/retainAuthPopupBootstrapContext/.test(popupTransportSource), false);
+  assert.equal(/function runAuthInPopupWindow\(/.test(popupSource), false);
+  assert.equal(/function ensureConsoleSecurityContext\(/.test(popupSource), false);
+  assert.equal(/function isConsoleAuthWindowSuccessUrl\(/.test(popupSource), false);
   assert.equal(/keepAuthWindowOpenForBootstrap/.test(signInSource), false);
 });
 
@@ -794,11 +793,15 @@ test("interactive login and org switching keep normal activation without legacy 
   assert.doesNotMatch(restrictedSwitchSource, /await awaitCmBootstrapForExplicitActivation\("restricted-org-switch"/);
   assert.match(signInSource, /allowTemporaryPageContextTab:\s*true/);
   assert.match(restrictedSwitchSource, /runUnderparImsBrowserLogout\(/);
-  assert.match(signInSource, /if \(!\(state\.sessionReady && state\.loginData && !state\.restricted\)\) \{\s*await releaseAuthPopupBootstrapContext\("interactive-signin-complete"\);/);
+  assert.doesNotMatch(signInSource, /releaseAuthPopupBootstrapContext\(/);
   assert.match(refreshSource, /allowTemporaryPageContextTab:\s*usedInteractiveLogin/);
   assert.match(restrictedSwitchSource, /allowTemporaryPageContextTab:\s*true/);
   assert.doesNotMatch(signInSource, /extraParams:/);
   assert.doesNotMatch(restrictedSwitchSource, /extraParams:/);
+  assert.doesNotMatch(
+    popupSource,
+    /function (?:releaseAuthPopupBootstrapContext|retainAuthPopupBootstrapContext|maybeReleaseRetainedAuthPopupBootstrapContext|getRetainedAuthPopupBootstrapTabId)\(/
+  );
   assert.doesNotMatch(popupSource, /function buildPreferredOrgSwitchStrategy\(/);
   assert.doesNotMatch(popupSource, /function buildOrgSwitchStrategies\(/);
   assert.doesNotMatch(popupSource, /function attemptInteractiveAdobePassRecovery\(/);
@@ -1079,19 +1082,34 @@ test("media-company selection and vault rehydrate share the same programmer hydr
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const hydrateSelectionSource = extractFunctionSource(popupSource, "hydrateProgrammerSelection");
   const selectProgrammerSource = extractFunctionSource(popupSource, "selectProgrammerForController");
+  const scheduleSelectionSource = extractFunctionSource(popupSource, "scheduleMediaCompanySelectionHydration");
+  const flushSelectionSource = extractFunctionSource(popupSource, "flushPendingMediaCompanySelectionHydration");
+  const optionHydrationSource = extractFunctionSource(popupSource, "applyMediaCompanyOptionHydrationState");
   const premiumDetectionSource = extractFunctionSource(popupSource, "findPremiumServiceApplications");
   const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
   const applySnapshotSource = extractFunctionSource(popupSource, "applyGlobalSelectionSnapshot");
   const devtoolsRehydrateSource = extractFunctionSource(popupSource, "rehydratePassVaultMediaCompanyFromDevtools");
   const mediaCompanyChangeBlock = popupSource.match(
-    /els\.mediaCompanySelect\.addEventListener\("change",[\s\S]*?void hydrateProgrammerSelection\(selectedProgrammer,\s*\{[\s\S]*?controllerReason,[\s\S]*?\}\);[\s\S]*?\}\);/
+    /els\.mediaCompanySelect\.addEventListener\("change",[\s\S]*?scheduleMediaCompanySelectionHydration\(controllerReason\);[\s\S]*?\}\);/
   );
 
   assert.match(hydrateSelectionSource, /selectProgrammerForController\(programmer,\s*controllerReason\)/);
+  assert.match(scheduleSelectionSource, /const delayMs = isMediaCompanySelectInteracting\(\) \? MEDIA_COMPANY_SELECTION_DEBOUNCE_MS : 0;/);
+  assert.match(scheduleSelectionSource, /flushPendingMediaCompanySelectionHydration\(\);/);
+  assert.match(flushSelectionSource, /void hydrateProgrammerSelection\(selectedProgrammer,\s*\{/);
+  assert.match(optionHydrationSource, /if \(options\?\.allowDefer !== false && isMediaCompanySelectInteracting\(\)\) \{/);
+  assert.match(
+    popupSource,
+    /els\.mediaCompanySelect\.addEventListener\("blur",[\s\S]*?flushPendingMediaCompanySelectionHydration\(\);[\s\S]*?flushPendingMediaCompanyOptionHydrationState\(\);[\s\S]*?\}\);/
+  );
+  assert.match(
+    popupSource,
+    /els\.mediaCompanySelect\.addEventListener\("keydown",[\s\S]*?event\.key !== "Enter"[\s\S]*?flushPendingMediaCompanySelectionHydration\(\);[\s\S]*?flushPendingMediaCompanyOptionHydrationState\(\);[\s\S]*?\}\);/
+  );
   assert.match(selectProgrammerSource, /populateRequestorSelect\(\);/);
   assert.doesNotMatch(selectProgrammerSource, /populateMvpdSelectForRequestor\(/);
   assert.doesNotMatch(selectProgrammerSource, /getFirstSelectableOptionValue\(els\.requestorSelect\)/);
-  assert.match(hydrateSelectionSource, /const retainedConsoleTabId = Number\(options\?\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
+  assert.match(hydrateSelectionSource, /const retainedConsoleTabId = Number\(options\?\.preferredTabId \|\| 0\);/);
   assert.match(hydrateSelectionSource, /const programmerApplicationsPromise = selectedProgrammer\?\.programmerId/);
   assert.match(hydrateSelectionSource, /ensureSelectedProgrammerApplicationsLoaded\(selectedProgrammer,\s*\{/);
   assert.match(hydrateSelectionSource, /await refreshProgrammerPanels\(\{/);
@@ -1174,6 +1192,8 @@ test("console configuration version is sourced dynamically from the direct conso
   const consoleHeaderSource = extractFunctionSource(popupSource, "getAdobeConsoleRequestHeaders");
   const fetchConsoleSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithAuthVariants");
   const loginButtonFallbackSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithLoginButtonFallback");
+  const shellPageContextSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithShellPageContextVariants");
+  const pageContextFetchSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonViaShellPageContext");
 
   assert.equal(/configurationVersion=3522/.test(popupSource), false);
   assert.match(popupSource, /function appendAdobeConsoleConfigurationVersion/);
@@ -1192,9 +1212,12 @@ test("console configuration version is sourced dynamically from the direct conso
   assert.doesNotMatch(consoleHeaderSource, /Referer:/);
   assert.match(loginButtonFallbackSource, /fetchAdobeConsoleJsonWithAuthVariants/);
   assert.match(loginButtonFallbackSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
-  assert.match(loginButtonFallbackSource, /preferShellAccessToken:\s*false/);
-  assert.match(buildConsoleContextSource, /const allowTemporaryPageContextTab = options\?\.allowTemporaryPageContextTab === true;/);
-  assert.match(buildConsoleContextSource, /const preferredTabId = Number\(options\?\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/);
+  assert.doesNotMatch(loginButtonFallbackSource, /preferShellAccessToken/);
+  assert.doesNotMatch(loginButtonFallbackSource, /allowTemporaryPageContextTab/);
+  assert.doesNotMatch(shellPageContextSource, /allowTemporaryPageContextTab/);
+  assert.doesNotMatch(pageContextFetchSource, /allowTemporaryTab/);
+  assert.doesNotMatch(buildConsoleContextSource, /allowTemporaryPageContextTab/);
+  assert.match(buildConsoleContextSource, /const preferredTabId = Number\(options\?\.preferredTabId \|\| 0\);/);
   assert.match(buildConsoleContextSource, /const pageContextTargetRef = \{ target: null \};/);
   assert.match(buildConsoleContextSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
   assert.match(buildConsoleContextSource, /rest\/api\/user\/extendedProfile/);
@@ -1212,12 +1235,12 @@ test("console configuration version is sourced dynamically from the direct conso
   assert.doesNotMatch(fetchConsoleSource, /refreshSessionNoTouch\(\)/);
   assert.doesNotMatch(fetchProgrammersSource, /state\.loginData\?\.experienceCloudAccessToken/);
   assert.doesNotMatch(fetchProgrammersSource, /getPreferredExperienceCloudConsoleAccessTokenCandidate\(\)/);
-  assert.match(fetchProgrammersSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
   assert.match(fetchProgrammersSource, /getPreferredPrimaryImsAccessTokenCandidate\(\)/);
   assert.match(fetchProgrammersSource, /fetchAdobeConsoleJsonWithLoginButtonFallback\(\[endpoint\],\s*"Media company load"/);
-  assert.match(fetchProgrammersSource, /allowTemporaryPageContextTab,/);
   assert.doesNotMatch(fetchProgrammersSource, /fetchAdobeConsoleJsonViaShellPageContext/);
-  assert.doesNotMatch(fetchProgrammersSource, /preferShellAccessToken:\s*true/);
+  assert.doesNotMatch(fetchProgrammersSource, /allowTemporaryPageContextTab/);
+  assert.doesNotMatch(fetchProgrammersSource, /preferShellAccessToken/);
+  assert.doesNotMatch(popupSource, /getRetainedAuthPopupBootstrapTabId/);
 });
 
 test("console bootstrap carries the rolling CSRF token through direct UnderPAR console requests like LoginButton", () => {
@@ -1359,27 +1382,30 @@ test("programmer load stays on direct console requests while allowing LoginButto
   const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
   const fetchChannelsSource = extractFunctionSource(popupSource, "fetchConsoleChannelsFromApi");
   const fetchRegisteredApplicationsSource = extractFunctionSource(popupSource, "fetchProgrammerRegisteredApplications");
+  const fetchApplicationDetailsSource = extractFunctionSource(popupSource, "fetchApplicationDetailsByGuid");
   const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
 
   assert.doesNotMatch(popupSource, /function withAdobeConsolePageContextTarget\(/);
   assert.doesNotMatch(buildConsoleContextSource, /fetchAdobeConsoleJsonViaShellPageContext\(/);
-  assert.match(buildConsoleContextSource, /const allowTemporaryPageContextTab = options\?\.allowTemporaryPageContextTab === true;/);
-  assert.match(fetchProgrammersSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
-  assert.match(fetchChannelsSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.doesNotMatch(buildConsoleContextSource, /allowTemporaryPageContextTab/);
+  assert.doesNotMatch(fetchProgrammersSource, /allowTemporaryPageContextTab/);
+  assert.doesNotMatch(fetchChannelsSource, /allowTemporaryPageContextTab/);
   assert.match(fetchRegisteredApplicationsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
-  assert.match(fetchRegisteredApplicationsSource, /const allowTemporaryPageContextTab = options\.allowTemporaryPageContextTab === true;/);
+  assert.match(fetchApplicationDetailsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
   assert.match(fetchRegisteredApplicationsSource, /preferredTabId,/);
   assert.match(fetchApplicationsSource, /fetchProgrammerRegisteredApplications\(currentSession,\s*programmerId,\s*options\)/);
   assert.doesNotMatch(fetchProgrammersSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
   assert.doesNotMatch(fetchChannelsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
   assert.doesNotMatch(fetchRegisteredApplicationsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
+  assert.doesNotMatch(fetchApplicationDetailsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
+  assert.doesNotMatch(fetchRegisteredApplicationsSource, /fetchAdobeConsoleJsonWithAuthVariants/);
+  assert.doesNotMatch(fetchApplicationDetailsSource, /fetchAdobeConsoleJsonWithAuthVariants/);
   assert.doesNotMatch(fetchApplicationsSource, /buildRegisteredApplicationBulkRetrieveRequest/);
 });
 
 test("console page-context target resolution matches LoginButton behavior", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const cmBootstrapUrlSource = extractFunctionSource(popupSource, "getCmConsoleBootstrapUrl");
-  const bootstrapUrlSource = extractFunctionSource(popupSource, "buildAdobePassConsoleBootstrapUrl");
   const consoleUrlSource = extractFunctionSource(popupSource, "isAdobePassConsoleAppUrl");
   const findConsoleTabSource = extractFunctionSource(popupSource, "findExistingAdobeConsoleTab");
   const openTemporarySource = extractFunctionSource(popupSource, "openTemporaryAdobePageContextTarget");
@@ -1390,8 +1416,6 @@ test("console page-context target resolution matches LoginButton behavior", () =
 
   assert.match(cmBootstrapUrlSource, /cm-console\/cmu\/year/);
   assert.match(cmBootstrapUrlSource, /ADOBEPASS_ORG_HANDLE/);
-  assert.match(bootstrapUrlSource, /ADOBE_CONSOLE_RUNTIME_ORIGIN/);
-  assert.match(bootstrapUrlSource, /\/solutions\/\$\{ADOBE_PASS_CONSOLE_APP_SLUG\}\//);
   assert.match(consoleUrlSource, /ADOBE_PASS_CONSOLE_APP_SLUG/);
   assert.doesNotMatch(consoleUrlSource, /consoleShellUrl/);
   assert.doesNotMatch(consoleUrlSource, /consoleProgrammersUrl/);
@@ -1404,10 +1428,13 @@ test("console page-context target resolution matches LoginButton behavior", () =
   assert.doesNotMatch(resolveReusableSource, /isExperienceAdobeTabUrl\(preferredUrl\)/);
   assert.match(resolveReusableSource, /isAuthFlowUrl\(preferredUrl\)/);
   assert.match(resolveReusableSource, /waitForTabCompletion/);
+  assert.doesNotMatch(popupSource, /function getAdobeConsolePageContextBootstrapUrl\(/);
   assert.match(resolveTargetSource, /tab = await findExistingAdobeConsoleTab\(\);/);
   assert.doesNotMatch(resolveTargetSource, /findExistingExperienceCloudAdobeTab\(\)/);
-  assert.match(resolveTargetSource, /const allowTemporaryTab = options\.allowTemporaryTab === true;/);
-  assert.match(resolveTargetSource, /temporaryTarget = await openTemporaryAdobePageContextTarget\(getAdobeConsolePageContextBootstrapUrl\(requestUrl\)\);/);
+  assert.doesNotMatch(resolveTargetSource, /allowTemporaryTab/);
+  assert.doesNotMatch(resolveTargetSource, /openTemporaryAdobePageContextTarget/);
+  assert.doesNotMatch(resolveTargetSource, /requestUrl/);
+  assert.match(resolveTargetSource, /temporaryTarget:\s*null/);
   assert.match(findExperienceTargetSource, /url\.includes\("\/#\/@adobepass\/cm-console\/"\)/);
   assert.match(findExperienceTargetSource, /isExperienceAdobeTabUrl\(url\)/);
   assert.match(resolveExperienceTargetSource, /openTemporaryAdobePageContextTarget/);
@@ -1455,7 +1482,7 @@ test("media company selection uses cached live AdobePass apps or direct applicat
   assert.match(refreshPanelsSource, /allowTemporaryPageContextTab:\s*false/);
   assert.match(
     refreshPanelsSource,
-    /const retainedConsoleTabId = Number\(options\.preferredTabId \|\| getRetainedAuthPopupBootstrapTabId\(\) \|\| 0\);/
+    /const retainedConsoleTabId = Number\(options\.preferredTabId \|\| 0\);/
   );
   assert.match(refreshPanelsSource, /preferredTabId:\s*retainedConsoleTabId/);
   assert.match(refreshPanelsSource, /const applicationsData = await programmerApplicationsPromise;/);
@@ -1607,7 +1634,7 @@ test("interactive recovery paths force Adobe IMS to show the login chooser witho
   assert.match(signInSource, /if \(loginOptions\?\.forceBrowserLogout === true\)/);
   assert.match(signInSource, /await runUnderparImsBrowserLogout\(/);
   assert.match(signInSource, /allowTemporaryPageContextTab:\s*true/);
-  assert.match(signInSource, /if \(!\(state\.sessionReady && state\.loginData && !state\.restricted\)\) \{\s*await releaseAuthPopupBootstrapContext\("interactive-signin-complete"\);/);
+  assert.doesNotMatch(signInSource, /releaseAuthPopupBootstrapContext\(/);
   assert.doesNotMatch(signInSource, /minimumGrantedScope/);
   assert.doesNotMatch(signInSource, /requiredActivationScope/);
   assert.doesNotMatch(signInSource, /resolveTargetOrganizationForLogin\(\)/);
@@ -2060,7 +2087,7 @@ test("activation leaves the global selectors user-owned and premium hydration st
   assert.match(activateSessionSource, /void hydrateAuthenticatedAdobePassSession\(normalizedSource,/);
 });
 
-test("premium detection uses LoginButton-style app scopes plus CM tenant catalog and emits Reset TempPASS reminders", () => {
+test("premium detection promotes TempPASS as a first-class premium workspace alongside CM tenant catalog detection", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const findPremiumAppsSource = extractFunctionSource(popupSource, "findPremiumServiceApplications");
   const applySummarySource = extractFunctionSource(popupSource, "applyPremiumServiceRuntimeSummary");
@@ -2088,9 +2115,22 @@ test("premium detection uses LoginButton-style app scopes plus CM tenant catalog
   assert.match(refreshPanelsSource, /const cmSelectionReadyPromise = skipCmBootstrap/);
   assert.match(refreshPanelsSource, /renderPremiumServices\(finalServices,\s*programmer,\s*\{\s*controllerReason\s*\}\);/);
   assert.match(premiumDecisionSource, /has Reset TempPASS/);
-  assert.match(premiumDecisionSource, /emitResetTempPassSupportReminder/);
   assert.match(premiumDecisionSource, /buildPremiumServiceDecisionLogSignature\(programmer,\s*services\)/);
-  assert.match(popupSource, /reset_temp_pass_reminder=/);
+  assert.match(
+    popupSource,
+    /const PREMIUM_SERVICE_DISPLAY_ORDER = \["restV2", "esmWorkspace", "degradation", "resetTempPass", "cm", "cmMvpd"\];/
+  );
+  assert.match(
+    popupSource,
+    /const UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS = Object\.freeze\(\[[\s\S]*\{ serviceKey: "resetTempPass", label: "TempPASS", requiredScope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE \}/
+  );
+  assert.match(popupSource, /const TEMP_PASS_WORKSPACE_PATH = "temp-pass-workspace\.html";/);
+  assert.match(popupSource, /const TEMP_PASS_WORKSPACE_MESSAGE_TYPE = "underpar:temp-pass-workspace";/);
+  assert.match(popupSource, /function tempPassBuildControllerHtml\(programmer, context = \{\}\)/);
+  assert.match(popupSource, /function loadTempPassService\(programmer, appInfo, section, contentElement, requestToken\)/);
+  assert.match(popupSource, /serviceKey === "resetTempPass"/);
+  assert.doesNotMatch(popupSource, /TODO: implement RESET TempPASS support/);
+  assert.doesNotMatch(popupSource, /reset_temp_pass_reminder=/);
 });
 
 test("DCR register and token flows now mirror LoginButton's compact form/query contract", () => {
@@ -3220,13 +3260,19 @@ test("popup and sidepanel both ship the generic restricted org picker surface", 
     assert.match(restrictedSection, /id="restricted-view"/);
     assert.match(restrictedSection, /class="restricted-view-card"/);
     assert.match(restrictedSection, /id="restricted-org-select"/);
+    assert.match(restrictedSection, /<label for="restricted-org-select">Adobe Org<\/label>/);
     assert.match(restrictedSection, /Adobe Org/);
+    assert.doesNotMatch(restrictedSection, /Choose the Adobe org you want UnderPAR to use for this session\./);
     assert.doesNotMatch(restrictedSection, /Adobe Org Picker/);
     assert.doesNotMatch(restrictedSection, /Adobe Org Profile/);
     assert.doesNotMatch(restrictedSection, /Sign In Again/);
     assert.doesNotMatch(restrictedSection, /Sign Out/);
     assert.doesNotMatch(restrictedSection, /Switch Org/);
     assert.doesNotMatch(restrictedSection, /For @AdobePass only/);
+    assert.doesNotMatch(restrictedSection, /restricted-view-title/);
+    assert.doesNotMatch(restrictedSection, /restricted-view-copy/);
+    assert.doesNotMatch(restrictedSection, /restricted-view-context/);
+    assert.doesNotMatch(restrictedSection, /restricted-org-hint/);
   }
 
   assert.match(renderRestrictedSource, /!els\.restrictedOrgSelect/);
@@ -3439,9 +3485,9 @@ test("CM tenant background prefetch is guarded by the shared precheck promise in
   assert.match(precheckSource, /if \(!forceRefresh && state\.cmTenantsPrecheckPromise\)/);
   assert.match(precheckSource, /state\.cmTenantsPrecheckPromise = precheckPromise/);
   assert.match(precheckSource, /const effectiveAllowTemporaryPageContextTab = allowTemporaryPageContextTab;/);
-  assert.match(precheckSource, /const releaseRetainedAuthPopupContext = options\?\.releaseRetainedAuthPopupContext !== false;/);
-  assert.match(precheckSource, /if \(releaseRetainedAuthPopupContext\) \{\s*await maybeReleaseRetainedAuthPopupBootstrapContext/);
-  assert.doesNotMatch(precheckSource, /preferredCmBootstrapTabId <= 0 && getRetainedAuthPopupBootstrapTabId\(\) <= 0/);
+  assert.doesNotMatch(precheckSource, /releaseRetainedAuthPopupContext/);
+  assert.doesNotMatch(precheckSource, /maybeReleaseRetainedAuthPopupBootstrapContext/);
+  assert.doesNotMatch(precheckSource, /getRetainedAuthPopupBootstrapTabId/);
   assert.match(
     hydrateSource,
     /allowTemporaryPageContextTab:\s*allowBackgroundTemporaryPageContextTab/

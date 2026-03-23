@@ -22,6 +22,7 @@ const UNDERPAR_ESM_WORKSPACE_PATH = "esm-workspace.html";
 const UNDERPAR_ESM_DEEPLINK_BRIDGE_PATH = "esm-deeplink-bridge.html";
 const UNDERPAR_BLONDIE_TIME_WORKSPACE_PATH = "blondie-time-workspace.html";
 const UNDERPAR_BLONDIE_TIME_DEEPLINK_BRIDGE_PATH = "blondie-time-deeplink-bridge.html";
+const UNDERPAR_TEMP_PASS_WORKSPACE_PATH = "temp-pass-workspace.html";
 const UNDERPAR_DEGRADATION_WORKSPACE_PATH = "degradation-workspace.html";
 const UNDERPAR_CM_WORKSPACE_PATH = "cm-workspace.html";
 const AVATAR_SIZE_PREFERENCES = [128, 64, 256, 32];
@@ -89,6 +90,7 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   "cm-workspace.html",
   "mvpd-workspace.html",
   "rest-workspace.html",
+  "temp-pass-workspace.html",
   "degradation-workspace.html",
   "bobtools-workspace.html",
 ]);
@@ -131,6 +133,9 @@ const BUILD_FINGERPRINT_FILES = [
   "rest-workspace.html",
   "rest-workspace.css",
   "rest-workspace.js",
+  "temp-pass-workspace.html",
+  "temp-pass-workspace.css",
+  "temp-pass-workspace.js",
   "degradation-workspace.html",
   "degradation-workspace.css",
   "degradation-workspace.js",
@@ -149,6 +154,7 @@ const debugState = {
   debuggerAttachedTabIds: new Set(),
   persistTimerByFlowId: new Map(),
   persistIndexTimerId: 0,
+  webRequestListenersBound: false,
 };
 
 const controllerBridgeState = {
@@ -162,6 +168,8 @@ const updateState = {
   currentVersion: "",
   latestVersion: "",
   latestCommitSha: "",
+  latestSource: "",
+  localPackageVersion: "",
   updateAvailable: false,
   lastCheckedAt: 0,
   checkError: "",
@@ -2059,6 +2067,65 @@ function extractVersionFromManifestObject(manifest) {
   return version;
 }
 
+function extractUpdateLookupErrorMessage(error = null) {
+  if (error instanceof Error) {
+    return String(error.message || "").trim() || "Unknown error";
+  }
+  return String(error || "").trim() || "Unknown error";
+}
+
+function extractUpdateLookupHost(url = "") {
+  try {
+    return String(new URL(String(url || "")).host || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function buildUpdateLookupError(stageLabel = "", url = "", error = null) {
+  const normalizedStageLabel = String(stageLabel || "").trim() || "Update lookup";
+  const host = extractUpdateLookupHost(url);
+  const detail = extractUpdateLookupErrorMessage(error);
+  const wrappedError = new Error(`${normalizedStageLabel}${host ? ` (${host})` : ""} failed: ${detail}`);
+  wrappedError.stageLabel = normalizedStageLabel;
+  wrappedError.url = String(url || "").trim();
+  wrappedError.host = host;
+  wrappedError.causeMessage = detail;
+  return wrappedError;
+}
+
+function buildUpdateLookupAttemptsError(summaryLabel = "", errors = []) {
+  const normalizedLabel = String(summaryLabel || "").trim() || "Update lookup failed";
+  const parts = [];
+  const seen = new Set();
+  (Array.isArray(errors) ? errors : []).forEach((error) => {
+    const message = extractUpdateLookupErrorMessage(error);
+    if (!message || seen.has(message)) {
+      return;
+    }
+    seen.add(message);
+    parts.push(message);
+  });
+  return new Error(parts.length > 0 ? `${normalizedLabel}: ${parts.join(" | ")}` : normalizedLabel);
+}
+
+async function fetchUpdateLookupJson(url = "", stageLabel = "") {
+  let response = null;
+  try {
+    response = await fetch(url, { cache: "no-store" });
+  } catch (error) {
+    throw buildUpdateLookupError(stageLabel, url, error);
+  }
+  if (!response?.ok) {
+    throw buildUpdateLookupError(stageLabel, url, new Error(`HTTP ${Number(response?.status || 0)}`));
+  }
+  try {
+    return await response.json();
+  } catch (error) {
+    throw buildUpdateLookupError(stageLabel, url, error);
+  }
+}
+
 function buildLatestUnderparPackageMetadataRawUrl(ref = "") {
   const normalizedRef = String(ref || "").trim().toLowerCase();
   const metadataRef = /^[a-f0-9]{40}$/.test(normalizedRef) ? normalizedRef : "";
@@ -2076,31 +2143,33 @@ function buildLatestUnderparPackageMetadataApiUrl(ref = "") {
 }
 
 async function fetchLatestUnderparVersionFromRaw(ref = "") {
-  const response = await fetch(buildLatestUnderparPackageMetadataRawUrl(ref), { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+  const metadataUrl = buildLatestUnderparPackageMetadataRawUrl(ref);
+  const manifest = await fetchUpdateLookupJson(metadataUrl, "GitHub raw package metadata lookup");
+  try {
+    return extractVersionFromManifestObject(manifest);
+  } catch (error) {
+    throw buildUpdateLookupError("GitHub raw package metadata parsing", metadataUrl, error);
   }
-  const manifest = await response.json();
-  return extractVersionFromManifestObject(manifest);
 }
 
 async function fetchLatestUnderparVersionFromGithubApi(ref = "") {
-  const response = await fetch(buildLatestUnderparPackageMetadataApiUrl(ref), { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  const payload = await response.json();
+  const metadataUrl = buildLatestUnderparPackageMetadataApiUrl(ref);
+  const payload = await fetchUpdateLookupJson(metadataUrl, "GitHub API package metadata lookup");
   const encoded = payload?.content ? String(payload.content).replace(/\s+/g, "") : "";
   if (!encoded) {
-    throw new Error("GitHub API content unavailable");
+    throw buildUpdateLookupError("GitHub API package metadata lookup", metadataUrl, new Error("GitHub API content unavailable"));
   }
   let decoded = "";
   try {
     decoded = atob(encoded);
   } catch {
-    throw new Error("GitHub API manifest decode failed");
+    throw buildUpdateLookupError("GitHub API package metadata decoding", metadataUrl, new Error("GitHub API manifest decode failed"));
   }
-  return extractVersionFromManifestObject(JSON.parse(decoded));
+  try {
+    return extractVersionFromManifestObject(JSON.parse(decoded));
+  } catch (error) {
+    throw buildUpdateLookupError("GitHub API package metadata parsing", metadataUrl, error);
+  }
 }
 
 async function fetchLatestUnderparVersion(ref = "") {
@@ -2113,15 +2182,15 @@ async function fetchLatestUnderparVersion(ref = "") {
         () => fetchLatestUnderparVersionFromRaw(),
       ]
     : [fetchLatestUnderparVersionFromGithubApi, fetchLatestUnderparVersionFromRaw];
-  let lastError = null;
+  const errors = [];
   for (const resolver of resolvers) {
     try {
       return await resolver();
     } catch (error) {
-      lastError = error;
+      errors.push(error);
     }
   }
-  throw lastError || new Error("Latest version unavailable");
+  throw buildUpdateLookupAttemptsError("Latest version lookup failed", errors);
 }
 
 function normalizeCommitSha(value) {
@@ -2138,41 +2207,33 @@ function extractCommitShaFromCommitPayload(payload) {
 }
 
 async function fetchLatestUnderparCommitShaFromRefApi() {
-  const response = await fetch(UNDERPAR_LATEST_REF_API_URL, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  const payload = await response.json();
+  const payload = await fetchUpdateLookupJson(UNDERPAR_LATEST_REF_API_URL, "GitHub ref lookup");
   const sha = extractCommitShaFromRefPayload(payload);
   if (!sha) {
-    throw new Error("Git ref API commit SHA unavailable");
+    throw buildUpdateLookupError("GitHub ref lookup", UNDERPAR_LATEST_REF_API_URL, new Error("Git ref API commit SHA unavailable"));
   }
   return sha;
 }
 
 async function fetchLatestUnderparCommitShaFromCommitApi() {
-  const response = await fetch(UNDERPAR_LATEST_COMMIT_API_URL, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  const payload = await response.json();
+  const payload = await fetchUpdateLookupJson(UNDERPAR_LATEST_COMMIT_API_URL, "GitHub commit lookup");
   const sha = extractCommitShaFromCommitPayload(payload);
   if (!sha) {
-    throw new Error("Commit API SHA unavailable");
+    throw buildUpdateLookupError("GitHub commit lookup", UNDERPAR_LATEST_COMMIT_API_URL, new Error("Commit API SHA unavailable"));
   }
   return sha;
 }
 
 async function fetchLatestUnderparCommitSha() {
-  let lastError = null;
+  const errors = [];
   for (const resolver of [fetchLatestUnderparCommitShaFromRefApi, fetchLatestUnderparCommitShaFromCommitApi]) {
     try {
       return await resolver();
     } catch (error) {
-      lastError = error;
+      errors.push(error);
     }
   }
-  throw lastError || new Error("Latest commit SHA unavailable");
+  throw buildUpdateLookupAttemptsError("Latest commit SHA lookup failed", errors);
 }
 
 function withCacheBust(url) {
@@ -2201,13 +2262,71 @@ function buildLocalUnderparPackageUrl() {
   }
 }
 
-function shouldPreferLocalUnderparPackage(currentVersion = "", latestVersion = "") {
+function buildLocalUnderparPackageMetadataUrl() {
+  try {
+    const runtimeUrl = chrome.runtime?.getURL ? chrome.runtime.getURL(UNDERPAR_PACKAGE_METADATA_PATH) : "";
+    return withCacheBust(runtimeUrl);
+  } catch {
+    return "";
+  }
+}
+
+async function fetchLocalUnderparPackageVersion() {
+  const metadataUrl = buildLocalUnderparPackageMetadataUrl();
+  if (!metadataUrl) {
+    return "";
+  }
+  try {
+    const response = await fetch(metadataUrl, { cache: "no-store" });
+    if (!response.ok) {
+      return "";
+    }
+    const metadata = await response.json();
+    return extractVersionFromManifestObject(metadata);
+  } catch {
+    return "";
+  }
+}
+
+function resolveLatestUnderparPackageState(
+  currentVersion = "",
+  remoteLatestVersion = "",
+  remoteLatestCommitSha = "",
+  localPackageVersion = "",
+  options = {}
+) {
+  const normalizedCurrent = String(currentVersion || "").trim();
+  const normalizedRemote = String(remoteLatestVersion || "").trim();
+  const normalizedLocal = String(localPackageVersion || "").trim();
+  const allowCurrentAsLocalFallback = options?.allowCurrentAsLocalFallback === true;
+  const localCandidateVersion = normalizedLocal || (allowCurrentAsLocalFallback ? normalizedCurrent : "");
+  const localCandidateIsCurrentOrNewer =
+    Boolean(localCandidateVersion) && (!normalizedCurrent || compareVersions(localCandidateVersion, normalizedCurrent) >= 0);
+  const preferLocalPackage =
+    localCandidateIsCurrentOrNewer && (!normalizedRemote || compareVersions(localCandidateVersion, normalizedRemote) > 0);
+  const latestVersion = preferLocalPackage ? localCandidateVersion : normalizedRemote;
+  const latestSource = preferLocalPackage ? "local-runtime" : normalizedRemote ? "github-remote" : "";
+  return {
+    latestVersion,
+    latestCommitSha: latestSource === "github-remote" ? normalizeCommitSha(remoteLatestCommitSha) : "",
+    latestSource,
+    localPackageVersion: normalizedLocal,
+    preferLocalPackage,
+    updateAvailable: Boolean(latestVersion) && compareVersions(normalizedCurrent, latestVersion) < 0,
+  };
+}
+
+function shouldPreferLocalUnderparPackage(currentVersion = "", latestVersion = "", localPackageVersion = "") {
   const normalizedCurrent = String(currentVersion || "").trim();
   const normalizedLatest = String(latestVersion || "").trim();
-  if (!normalizedCurrent || !normalizedLatest) {
-    return false;
+  const normalizedLocal = String(localPackageVersion || "").trim();
+  if (normalizedLocal) {
+    if (normalizedCurrent && compareVersions(normalizedLocal, normalizedCurrent) < 0) {
+      return false;
+    }
+    return !normalizedLatest || compareVersions(normalizedLocal, normalizedLatest) >= 0;
   }
-  return compareVersions(normalizedCurrent, normalizedLatest) > 0;
+  return false;
 }
 
 function sanitizeLatestPackageFileSegment(value = "", fallback = "latest") {
@@ -2270,6 +2389,8 @@ function getUpdateStatePayload() {
     currentVersion: updateState.currentVersion || getUnderparBuildVersion(),
     latestVersion: updateState.latestVersion || "",
     latestCommitSha: updateState.latestCommitSha || "",
+    latestSource: updateState.latestSource || "",
+    localPackageVersion: updateState.localPackageVersion || "",
     updateAvailable: updateState.updateAvailable === true,
     checkedAt: Number(updateState.lastCheckedAt || 0),
     checkError: updateState.checkError || "",
@@ -2294,20 +2415,34 @@ async function refreshUpdateState(options = {}) {
     const previous = {
       latestVersion: updateState.latestVersion,
       latestCommitSha: updateState.latestCommitSha,
+      latestSource: updateState.latestSource,
+      localPackageVersion: updateState.localPackageVersion,
       updateAvailable: updateState.updateAvailable === true,
       checkError: updateState.checkError,
     };
+    const localPackageVersion = await fetchLocalUnderparPackageVersion().catch(() => "");
     try {
       const latestCommitSha = await fetchLatestUnderparCommitSha().catch(() => "");
-      const latestVersion = await fetchLatestUnderparVersion(latestCommitSha);
-      updateState.latestVersion = latestVersion;
-      updateState.latestCommitSha = normalizeCommitSha(latestCommitSha);
-      updateState.updateAvailable = compareVersions(currentVersion, latestVersion) < 0;
+      const remoteLatestVersion = await fetchLatestUnderparVersion(latestCommitSha);
+      const resolvedState = resolveLatestUnderparPackageState(
+        currentVersion,
+        remoteLatestVersion,
+        latestCommitSha,
+        localPackageVersion
+      );
+      updateState.latestVersion = resolvedState.latestVersion;
+      updateState.latestCommitSha = resolvedState.latestCommitSha;
+      updateState.latestSource = resolvedState.latestSource;
+      updateState.localPackageVersion = resolvedState.localPackageVersion;
+      updateState.updateAvailable = resolvedState.updateAvailable === true;
       updateState.checkError = "";
     } catch (error) {
-      updateState.latestVersion = previous.latestVersion || "";
-      updateState.latestCommitSha = previous.latestCommitSha || "";
-      updateState.updateAvailable = previous.updateAvailable === true;
+      const resolvedState = resolveLatestUnderparPackageState(currentVersion, "", "", localPackageVersion);
+      updateState.latestVersion = resolvedState.latestVersion;
+      updateState.latestCommitSha = resolvedState.latestCommitSha;
+      updateState.latestSource = resolvedState.latestSource;
+      updateState.localPackageVersion = resolvedState.localPackageVersion;
+      updateState.updateAvailable = resolvedState.updateAvailable === true;
       updateState.checkError = error instanceof Error ? error.message : "Version check failed";
     } finally {
       updateState.lastCheckedAt = Date.now();
@@ -2317,6 +2452,8 @@ async function refreshUpdateState(options = {}) {
     const changed =
       previous.latestVersion !== updateState.latestVersion ||
       previous.latestCommitSha !== updateState.latestCommitSha ||
+      previous.latestSource !== updateState.latestSource ||
+      previous.localPackageVersion !== updateState.localPackageVersion ||
       previous.updateAvailable !== (updateState.updateAvailable === true) ||
       previous.checkError !== updateState.checkError;
     return { ...payload, changed };
@@ -2328,15 +2465,27 @@ async function refreshUpdateState(options = {}) {
 async function openUnderparGetLatestFlow() {
   await refreshUpdateState({ force: true }).catch(() => {});
   const currentVersion = getUnderparBuildVersion();
-  const useFreshLatestMetadata = !updateState.checkError;
-  const latestVersion = useFreshLatestMetadata ? updateState.latestVersion || "" : "";
-  const latestCommitSha = useFreshLatestMetadata ? updateState.latestCommitSha || "" : "";
-  const preferLocalPackage = shouldPreferLocalUnderparPackage(currentVersion, latestVersion);
+  const latestVersion = String(updateState.latestVersion || "").trim();
+  const latestCommitSha = String(updateState.latestCommitSha || "").trim();
+  const latestSource = String(updateState.latestSource || "").trim();
+  const localPackageVersion = String(updateState.localPackageVersion || "").trim();
+  const currentVsLatest = latestVersion ? compareVersions(currentVersion, latestVersion) : 0;
+  const currentVsLocal = localPackageVersion ? compareVersions(currentVersion, localPackageVersion) : 0;
+  const preferLocalPackage =
+    shouldPreferLocalUnderparPackage(currentVersion, latestVersion, localPackageVersion) &&
+    Boolean(localPackageVersion) &&
+    currentVsLocal <= 0;
+  const hasKnownRemoteUpdate = Boolean(latestVersion) && currentVsLatest < 0;
+  const noNewerPublishedPackage =
+    Boolean(latestVersion) &&
+    currentVsLatest > 0 &&
+    (!localPackageVersion || currentVsLocal > 0);
+  const localDownloadVersion = String(localPackageVersion || currentVersion || latestVersion || "").trim();
   const downloadUrl = preferLocalPackage
     ? buildLocalUnderparPackageUrl()
     : buildLatestUnderparPackageUrl(latestCommitSha);
   const downloadFileName = preferLocalPackage
-    ? buildLatestUnderparPackageFileName(currentVersion, "")
+    ? buildLatestUnderparPackageFileName(localDownloadVersion, "")
     : buildLatestUnderparPackageFileName(latestVersion, latestCommitSha);
   const result = {
     ok: false,
@@ -2345,6 +2494,8 @@ async function openUnderparGetLatestFlow() {
     currentVersion,
     latestVersion,
     latestCommitSha,
+    latestSource: preferLocalPackage ? "local-runtime" : latestSource || "github-remote",
+    localPackageVersion,
     updateAvailable: updateState.updateAvailable === true,
     checkError: updateState.checkError || "",
     downloadSource: preferLocalPackage ? "local-runtime" : "github-remote",
@@ -2352,24 +2503,49 @@ async function openUnderparGetLatestFlow() {
     downloadStarted: false,
     downloadTabOpened: false,
     extensionsOpened: false,
+    downloadError: "",
+    downloadTabError: "",
+    noNewerPackage: false,
+    infoMessage: "",
   };
+  if (noNewerPublishedPackage) {
+    result.ok = true;
+    result.noNewerPackage = true;
+    result.infoMessage = `Loaded UnderPAR v${currentVersion || "current"} is newer than published GitHub latest v${latestVersion || "remote"}.`;
+    return result;
+  }
   try {
     if (!downloadUrl) {
       throw new Error("No UnderPAR package URL available");
     }
-    const createdDownloadId = await startLatestPackageDownload({
-      url: downloadUrl,
-      filename: downloadFileName,
-      conflictAction: "uniquify",
-      saveAs: false,
-    });
-    result.downloadId = Number(createdDownloadId || 0);
-    result.downloadStarted = true;
-  } catch {
+    if (preferLocalPackage) {
+      await chrome.tabs.create({ url: downloadUrl });
+      result.downloadTabOpened = true;
+    } else {
+      const createdDownloadId = await startLatestPackageDownload({
+        url: downloadUrl,
+        filename: downloadFileName,
+        conflictAction: "uniquify",
+        saveAs: false,
+      });
+      result.downloadId = Number(createdDownloadId || 0);
+      result.downloadStarted = true;
+    }
+  } catch (error) {
+    result.downloadError = buildUpdateLookupError(
+      preferLocalPackage ? "Local runtime package download" : "Remote UnderPAR package download",
+      downloadUrl,
+      error
+    ).message;
     try {
       await chrome.tabs.create({ url: downloadUrl });
       result.downloadTabOpened = true;
-    } catch {
+    } catch (tabError) {
+      result.downloadTabError = buildUpdateLookupError(
+        preferLocalPackage ? "Local runtime package tab open" : "Remote UnderPAR package tab open",
+        downloadUrl,
+        tabError
+      ).message;
       // Continue so Chrome extensions can still open.
     }
   }
@@ -2381,9 +2557,14 @@ async function openUnderparGetLatestFlow() {
   }
   result.ok = result.downloadStarted || result.downloadTabOpened;
   if (!result.ok) {
-    result.error = preferLocalPackage
-      ? `Loaded UnderPAR v${currentVersion || "current"} is newer than GitHub latest v${latestVersion || "remote"}, but the local ${UNDERPAR_LOCAL_PACKAGE_PATH} package could not be opened.`
-      : "Unable to open update links";
+    const failureParts = [result.downloadError, result.downloadTabError, result.checkError].filter(Boolean);
+    result.error =
+      failureParts[0] ||
+      (preferLocalPackage
+        ? `Bundled UnderPAR package v${localPackageVersion || currentVersion || "local"} could not be opened from the extension runtime.`
+        : "Unable to open update links");
+  } else if (preferLocalPackage && !hasKnownRemoteUpdate) {
+    result.infoMessage = `Opened bundled UnderPAR package v${localPackageVersion || currentVersion || "local"} from the current runtime.`;
   }
   return result;
 }
@@ -2666,6 +2847,7 @@ async function restoreDebugStateFromStorage() {
   } catch {
     // Ignore restore failures.
   }
+  syncWebRequestListenerState();
 }
 
 async function restoreFlowForTabFromStorage(tabId) {
@@ -2969,6 +3151,98 @@ function shouldAllowNetworkCaptureForFlow(flow, tabId) {
   return isUpPanelVisibleForTab(normalizedTabId);
 }
 
+function hasActiveWebRequestCaptureFlow() {
+  for (const [tabId, flowId] of debugState.flowIdByTabId.entries()) {
+    const flow = getFlowById(flowId);
+    if (shouldAllowNetworkCaptureForFlow(flow, tabId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function addWebRequestListenerIfNeeded(event, listener, extraInfoSpec = undefined) {
+  if (!event?.addListener || !event?.hasListener) {
+    return;
+  }
+  if (event.hasListener(listener)) {
+    return;
+  }
+  if (Array.isArray(extraInfoSpec) && extraInfoSpec.length > 0) {
+    event.addListener(listener, WEB_REQUEST_FILTER, extraInfoSpec);
+    return;
+  }
+  event.addListener(listener, WEB_REQUEST_FILTER);
+}
+
+function removeWebRequestListenerIfPresent(event, listener) {
+  if (!event?.removeListener || !event?.hasListener) {
+    return;
+  }
+  if (!event.hasListener(listener)) {
+    return;
+  }
+  event.removeListener(listener);
+}
+
+function bindWebRequestListeners() {
+  if (!chrome.webRequest) {
+    return false;
+  }
+  addWebRequestListenerIfNeeded(chrome.webRequest.onBeforeRequest, handleWebRequestBeforeRequest, ["requestBody"]);
+  addWebRequestListenerIfNeeded(chrome.webRequest.onBeforeSendHeaders, handleWebRequestBeforeSendHeaders, [
+    "requestHeaders",
+    "extraHeaders",
+  ]);
+  addWebRequestListenerIfNeeded(chrome.webRequest.onHeadersReceived, handleWebRequestHeadersReceived, [
+    "responseHeaders",
+    "extraHeaders",
+  ]);
+  addWebRequestListenerIfNeeded(chrome.webRequest.onBeforeRedirect, handleWebRequestBeforeRedirect, [
+    "responseHeaders",
+    "extraHeaders",
+  ]);
+  addWebRequestListenerIfNeeded(chrome.webRequest.onCompleted, handleWebRequestCompleted, [
+    "responseHeaders",
+    "extraHeaders",
+  ]);
+  addWebRequestListenerIfNeeded(chrome.webRequest.onErrorOccurred, handleWebRequestError);
+  debugState.webRequestListenersBound = true;
+  return true;
+}
+
+function unbindWebRequestListeners() {
+  if (!chrome.webRequest) {
+    debugState.webRequestListenersBound = false;
+    return false;
+  }
+  removeWebRequestListenerIfPresent(chrome.webRequest.onBeforeRequest, handleWebRequestBeforeRequest);
+  removeWebRequestListenerIfPresent(chrome.webRequest.onBeforeSendHeaders, handleWebRequestBeforeSendHeaders);
+  removeWebRequestListenerIfPresent(chrome.webRequest.onHeadersReceived, handleWebRequestHeadersReceived);
+  removeWebRequestListenerIfPresent(chrome.webRequest.onBeforeRedirect, handleWebRequestBeforeRedirect);
+  removeWebRequestListenerIfPresent(chrome.webRequest.onCompleted, handleWebRequestCompleted);
+  removeWebRequestListenerIfPresent(chrome.webRequest.onErrorOccurred, handleWebRequestError);
+  debugState.webRequestListenersBound = false;
+  return true;
+}
+
+function syncWebRequestListenerState() {
+  if (!chrome.webRequest) {
+    debugState.webRequestListenersBound = false;
+    return false;
+  }
+  const listenersBound = Boolean(chrome.webRequest.onBeforeRequest?.hasListener?.(handleWebRequestBeforeRequest));
+  debugState.webRequestListenersBound = listenersBound;
+  const shouldBind = hasActiveWebRequestCaptureFlow();
+  if (shouldBind === listenersBound) {
+    return listenersBound;
+  }
+  if (shouldBind) {
+    return bindWebRequestListeners();
+  }
+  return unbindWebRequestListeners();
+}
+
 function consumeRuntimeLastError() {
   try {
     const runtimeError = chrome.runtime?.lastError;
@@ -3149,22 +3423,29 @@ function appendFlowEvent(flow, event) {
 async function syncDebuggerAttachmentForTab(tabId, reason = "") {
   const normalizedTabId = normalizeTabId(tabId);
   if (!normalizedTabId) {
+    syncWebRequestListenerState();
     return;
   }
-  const flow = getFlowByTabId(normalizedTabId);
-  if (!flow) {
-    if (debugState.debuggerAttachedTabIds.has(normalizedTabId)) {
-      await detachDebuggerForTab(normalizedTabId, reason || "flow-missing");
+
+  try {
+    const flow = getFlowByTabId(normalizedTabId);
+    if (!flow) {
+      if (debugState.debuggerAttachedTabIds.has(normalizedTabId)) {
+        await detachDebuggerForTab(normalizedTabId, reason || "flow-missing");
+      }
+      return;
     }
-    return;
-  }
-  const shouldAttach = shouldAllowNetworkCaptureForFlow(flow, normalizedTabId);
-  if (shouldAttach) {
-    await ensureDebuggerAttachedForTab(normalizedTabId, flow);
-    return;
-  }
-  if (debugState.debuggerAttachedTabIds.has(normalizedTabId)) {
-    await detachDebuggerForTab(normalizedTabId, reason || "network-capture-disabled");
+
+    const shouldAttach = shouldAllowNetworkCaptureForFlow(flow, normalizedTabId);
+    if (shouldAttach) {
+      await ensureDebuggerAttachedForTab(normalizedTabId, flow);
+      return;
+    }
+    if (debugState.debuggerAttachedTabIds.has(normalizedTabId)) {
+      await detachDebuggerForTab(normalizedTabId, reason || "network-capture-disabled");
+    }
+  } finally {
+    syncWebRequestListenerState();
   }
 }
 
@@ -3648,6 +3929,9 @@ function getFlowForWebRequest(details) {
   }
   const flow = getFlowByTabId(tabId);
   if (!flow) {
+    return null;
+  }
+  if (!shouldAllowNetworkCaptureForFlow(flow, tabId)) {
     return null;
   }
   if (shouldIgnoreUrlForFlow(flow, String(details?.url || ""))) {
@@ -4162,8 +4446,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const snapshot = serializeFlow(flow);
 
     if (flow.tabId) {
-      debugState.flowIdByTabId.delete(flow.tabId);
-      void detachDebuggerForTab(flow.tabId, "flow-stop");
+      const activeTabId = flow.tabId;
+      debugState.flowIdByTabId.delete(activeTabId);
+      void syncDebuggerAttachmentForTab(activeTabId, "flow-stop");
       flow.tabId = 0;
     }
     scheduleFlowPersist(flow);
@@ -4371,33 +4656,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
   debugState.flowIdByTabId.delete(normalizedTabId);
   scheduleFlowIndexPersist();
-  void detachDebuggerForTab(normalizedTabId, "tab-removed");
+  void syncDebuggerAttachmentForTab(normalizedTabId, "tab-removed");
   void stopBlondieTimeForClosedWorkspaceTab(normalizedTabId);
 });
 
 chrome.debugger.onEvent.addListener(handleDebuggerEvent);
 chrome.debugger.onDetach.addListener(handleDebuggerDetach);
-
-if (chrome.webRequest) {
-  chrome.webRequest.onBeforeRequest.addListener(handleWebRequestBeforeRequest, WEB_REQUEST_FILTER, ["requestBody"]);
-  chrome.webRequest.onBeforeSendHeaders.addListener(handleWebRequestBeforeSendHeaders, WEB_REQUEST_FILTER, [
-    "requestHeaders",
-    "extraHeaders",
-  ]);
-  chrome.webRequest.onHeadersReceived.addListener(handleWebRequestHeadersReceived, WEB_REQUEST_FILTER, [
-    "responseHeaders",
-    "extraHeaders",
-  ]);
-  chrome.webRequest.onBeforeRedirect.addListener(handleWebRequestBeforeRedirect, WEB_REQUEST_FILTER, [
-    "responseHeaders",
-    "extraHeaders",
-  ]);
-  chrome.webRequest.onCompleted.addListener(handleWebRequestCompleted, WEB_REQUEST_FILTER, [
-    "responseHeaders",
-    "extraHeaders",
-  ]);
-  chrome.webRequest.onErrorOccurred.addListener(handleWebRequestError, WEB_REQUEST_FILTER);
-}
 
 void configureSidePanelBehavior();
 void ensureBlondieTimeRuntimeConsistency();
@@ -4408,4 +4672,7 @@ void ensureUnderparDegradationDeeplinkRedirectRule();
 void ensureUnderparCmDeeplinkRedirectRule();
 void updateActionBadge();
 void syncBuildInfo("serviceWorkerStart");
-void restoreDebugStateFromStorage().then(() => reattachDebuggersFromState());
+void restoreDebugStateFromStorage().then(() => {
+  syncWebRequestListenerState();
+  return reattachDebuggersFromState();
+});
