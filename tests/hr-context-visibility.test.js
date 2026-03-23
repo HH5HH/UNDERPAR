@@ -145,6 +145,8 @@ test("detected service pills are wired to documentation urls for the learning fl
 test("REST V2 learning card exposes six interactive doc hydrators backed by the customer docs", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
+  const buildRestV2InteractiveDocsContextSource = extractFunctionSource(popupSource, "buildRestV2InteractiveDocsContext");
+  const resolveRestV2LearningRequestorContextSource = extractFunctionSource(popupSource, "resolveRestV2LearningRequestorContext");
   const openRestV2InteractiveDocsEntrySource = extractFunctionSource(popupSource, "openRestV2InteractiveDocsEntry");
   const runRestV2InteractiveDocsHydratorSource = extractFunctionSource(popupSource, "runRestV2InteractiveDocsHydrator");
 
@@ -161,6 +163,11 @@ test("REST V2 learning card exposes six interactive doc hydrators backed by the 
   assert.match(popupSource, /operationId: "retrievePreAuthorizeDecisionsForMvpdUsingPOST_1"/);
   assert.match(popupSource, /operationId: "getLogoutForMvpdUsingGET"/);
   assert.match(popupSource, /operationId: "retrieveVerificationTokenUsingPOST"/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2LearningRequestorContext/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /Select a Content Provider first\./);
+  assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /String\(state\.selectedRequestorId \|\| ""\)\.trim\(\),\s*programmerId/);
+  assert.match(resolveRestV2LearningRequestorContextSource, /candidates\.length === 1/);
+  assert.doesNotMatch(resolveRestV2LearningRequestorContextSource, /requestorId:\s*programmerId/);
   assert.match(popupSource, /data-restv2-doc-entry-key/);
   assert.match(popupSource, /REST API V2 Interactive Docs/);
   assert.match(openRestV2InteractiveDocsEntrySource, /ensureDcrAccessTokenWithServiceRecovery/);

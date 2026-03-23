@@ -53202,6 +53202,62 @@ function findRestV2PreauthorizeHistoryEntryForLearning(programmerId = "", reques
   return history[0] || null;
 }
 
+function collectRestV2LearningRequestorCandidates(programmer = null, services = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : null;
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const programmerKey = normalizeEntityToken(programmerId);
+  const candidates = [];
+  const seen = new Set();
+  const pushCandidate = (value) => {
+    const candidateId = extractEntityIdFromToken(value);
+    const normalizedCandidate = normalizeEntityToken(candidateId);
+    if (!candidateId || !normalizedCandidate || normalizedCandidate === programmerKey || seen.has(normalizedCandidate)) {
+      return;
+    }
+    seen.add(normalizedCandidate);
+    candidates.push(candidateId);
+  };
+
+  (Array.isArray(resolvedProgrammer?.requestorIds) ? resolvedProgrammer.requestorIds : []).forEach((requestorId) => {
+    pushCandidate(requestorId);
+  });
+
+  const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(services);
+  restV2Candidates.forEach((appInfo) => {
+    collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId).forEach((candidate) => {
+      pushCandidate(candidate);
+    });
+  });
+
+  return candidates;
+}
+
+function resolveRestV2LearningRequestorContext(programmer = null, services = null) {
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  if (selectedRequestorId) {
+    return {
+      requestorId: selectedRequestorId,
+      autoResolved: false,
+      candidateCount: 1,
+    };
+  }
+
+  const candidates = collectRestV2LearningRequestorCandidates(programmer, services);
+  if (candidates.length === 1) {
+    return {
+      requestorId: String(candidates[0] || "").trim(),
+      autoResolved: true,
+      candidateCount: 1,
+    };
+  }
+
+  return {
+    requestorId: "",
+    autoResolved: false,
+    candidateCount: candidates.length,
+  };
+}
+
 function buildRestV2InteractiveDocsContext(programmer = null) {
   const resolvedProgrammer = programmer || resolveSelectedProgrammer();
   if (!resolvedProgrammer?.programmerId) {
@@ -53212,18 +53268,17 @@ function buildRestV2InteractiveDocsContext(programmer = null) {
   }
 
   const programmerId = String(resolvedProgrammer.programmerId || "").trim();
-  const requestorId = firstNonEmptyString([
-    String(state.selectedRequestorId || "").trim(),
-    programmerId,
-  ]);
+  const services = getCurrentPremiumAppsSnapshot(programmerId) || null;
+  const requestorContext = resolveRestV2LearningRequestorContext(resolvedProgrammer, services);
+  const requestorId = String(requestorContext.requestorId || "").trim();
   if (!requestorId) {
     return {
       ok: false,
-      error: "UnderPAR could not resolve a REST V2 service provider from the current selection.",
+      error:
+        "Select a Content Provider first. REST V2 interactive docs require a valid RequestorId/service provider, not just a Media Company.",
     };
   }
 
-  const services = getCurrentPremiumAppsSnapshot(programmerId) || null;
   const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(services);
   const preferredApp =
     selectPreferredRestV2AppForRequestor(restV2Candidates, requestorId, programmerId) ||
@@ -53282,6 +53337,7 @@ function buildRestV2InteractiveDocsContext(programmer = null) {
     programmerId,
     programmerName: String(resolvedProgrammer.programmerName || "").trim(),
     requestorId,
+    requestorAutoResolved: requestorContext.autoResolved === true,
     serviceProviderId: requestorId,
     mvpd: String(fallbackMvpd || "").trim(),
     mvpdMeta,
@@ -53319,6 +53375,9 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   };
   const requiredFields = ["path.serviceProvider", "header.Authorization"];
   const notes = [];
+  if (resolvedContext.requestorAutoResolved === true && String(resolvedContext.requestorId || "").trim()) {
+    notes.push(`Using the only REST V2 RequestorId mapped in UnderPAR: ${String(resolvedContext.requestorId || "").trim()}.`);
+  }
 
   switch (resolvedEntry.key) {
     case "configuration":
