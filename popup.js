@@ -146,6 +146,8 @@ let underparTrackedFetchOriginal = null;
 const DCR_CACHE_PREFIX = "underpar_dcr_cache_v1";
 const LEGACY_DCR_CACHE_PREFIX = "mincloudlogin_dcr_cache_v1";
 const UNDERPAR_VAULT_STORAGE_KEY = "underpar_vault_v1";
+const CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v2";
+const LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v1";
 const UNDERPAR_VAULT_SCHEMA_VERSION = 1;
 const UNDERPAR_SLACKTIVATION_SCHEMA_VERSION = 1;
 const UNDERPAR_ESM_DEEPLINK_STORAGE_KEY = "underpar_pending_esm_deeplink_v1";
@@ -187,6 +189,7 @@ const PREMIUM_SERVICE_SCOPE_RULES = Object.freeze([
   { key: "resetTempPass", label: "Reset TempPASS", scope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE },
 ]);
 const PREMIUM_SERVICE_CONCURRENCY_LABEL = "Concurrency Monitoring";
+const underparVaultStore = globalThis.UnderparVaultStore || null;
 const REGISTERED_APPLICATION_SCOPE_LABELS = Object.freeze({
   "api:client:v2": "REST API V2",
   "analytics:client": "ESM",
@@ -959,6 +962,14 @@ function createEmptyUnderparVaultPayload() {
   };
 }
 
+function canUseUnderparVaultIndexedDb() {
+  return Boolean(
+    underparVaultStore &&
+      typeof underparVaultStore.readAggregatePayload === "function" &&
+      (typeof underparVaultStore.isSupported !== "function" || underparVaultStore.isSupported() === true)
+  );
+}
+
 function buildPassVaultCmGlobalAuthRecord(value = null) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const clientId = String(firstNonEmptyString([source?.clientId, CM_IMS_PRIMARY_CLIENT_ID]) || CM_IMS_PRIMARY_CLIENT_ID).trim();
@@ -967,13 +978,7 @@ function buildPassVaultCmGlobalAuthRecord(value = null) {
   const scope = compactStorageString(firstNonEmptyString([source?.scope]), 2048);
   const expiresAt = Math.max(0, Number(source?.expiresAt || 0));
   const updatedAt = Math.max(0, Number(source?.updatedAt || source?.refreshedAt || 0));
-  const tokenFingerprint = String(source?.tokenFingerprint || "").trim();
-  const imsSession =
-    source?.imsSession && typeof source.imsSession === "object"
-      ? compactImsSessionForStorage(source.imsSession)
-      : null;
-
-  if (!clientId && !tokenClientId && !userId && !scope && !expiresAt && !updatedAt && !tokenFingerprint && !imsSession) {
+  if (!clientId && !tokenClientId && !userId && !scope && !expiresAt && !updatedAt) {
     return null;
   }
 
@@ -984,8 +989,6 @@ function buildPassVaultCmGlobalAuthRecord(value = null) {
     scope,
     expiresAt,
     updatedAt: updatedAt || Date.now(),
-    tokenFingerprint,
-    imsSession,
   };
 }
 
@@ -7015,6 +7018,19 @@ function getPassVaultCmGlobalAuthFromVault(vault = null, environmentKey = getAct
   return buildPassVaultCmGlobalAuthRecord(environmentRecord?.cmGlobal || environmentRecord?.cmConsole || null);
 }
 
+async function clearLegacyUnderparVaultChromeStorageKeys() {
+  if (!chrome?.storage?.local?.remove) {
+    return;
+  }
+  await chrome.storage.local
+    .remove([
+      UNDERPAR_VAULT_STORAGE_KEY,
+      CM_TENANTS_CATALOG_STORAGE_KEY,
+      LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY,
+    ])
+    .catch(() => {});
+}
+
 function getPassVaultMediaCompanyRecord(programmerId = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
   return getPassVaultMediaCompanyRecordFromVault(state.passVault, programmerId, environmentKey);
 }
@@ -7099,33 +7115,33 @@ async function ensurePassVaultLoaded(options = {}) {
   }
 
   const loadPromise = (async () => {
-    if (!chrome?.storage?.local?.get) {
-      const emptyVault = createEmptyUnderparVaultPayload();
-      setUnderparVaultSavedQueries(emptyVault, readLegacySavedEsmQueryEntriesFromLocalStorage());
-      state.passVault = emptyVault;
-      rebuildPassVaultProgrammerStatusIndex(emptyVault);
-      return emptyVault;
-    }
-
-    const payload = await chrome.storage.local.get(UNDERPAR_VAULT_STORAGE_KEY).catch(() => ({}));
-    const storedVault = payload?.[UNDERPAR_VAULT_STORAGE_KEY] || null;
-    const normalizedVault = normalizeUnderparVaultPayload(storedVault);
     const legacySavedQueries = readLegacySavedEsmQueryEntriesFromLocalStorage();
+    const normalizedVault = normalizeUnderparVaultPayload(
+      canUseUnderparVaultIndexedDb()
+        ? await underparVaultStore.readAggregatePayload().catch(() => createEmptyUnderparVaultPayload())
+        : createEmptyUnderparVaultPayload()
+    );
+    let shouldPersist = false;
+
     if (Object.keys(legacySavedQueries).length > 0) {
       setUnderparVaultSavedQueries(normalizedVault, {
         ...legacySavedQueries,
         ...getUnderparVaultSavedQueries(normalizedVault),
       });
       normalizedVault.updatedAt = Date.now();
+      shouldPersist = true;
     }
+
     state.passVault = normalizedVault;
     rebuildPassVaultProgrammerStatusIndex(normalizedVault);
     try {
-      if (chrome?.storage?.local?.set && JSON.stringify(storedVault) !== JSON.stringify(normalizedVault)) {
+      if (shouldPersist) {
         await persistPassVaultPayloadToStorage(normalizedVault, { silent: true });
+      } else {
+        await clearLegacyUnderparVaultChromeStorageKeys();
       }
     } catch (_error) {
-      // Ignore vault cleanup write failures during initial load.
+      // Ignore cleanup write failures during initial load.
     }
     return normalizedVault;
   })().finally(() => {
@@ -7454,24 +7470,27 @@ async function persistPassVaultPayloadToStorage(vault = null, options = {}) {
   const persistableVault = normalizeUnderparVaultPayload(vault || createEmptyUnderparVaultPayload());
   state.passVault = persistableVault;
   rebuildPassVaultProgrammerStatusIndex(persistableVault);
-  if (!chrome?.storage?.local?.set) {
+  if (!canUseUnderparVaultIndexedDb()) {
+    console.warn("UnderPAR VAULT IndexedDB helper is unavailable.");
+    if (options?.silent !== true) {
+      setStatus("UnderPAR VAULT storage is unavailable in this build.", "error");
+    }
     return persistableVault;
   }
 
   const marker = trackPendingPassVaultStorageWrite(persistableVault);
   try {
-    await chrome.storage.local.set({
-      [UNDERPAR_VAULT_STORAGE_KEY]: persistableVault,
-    });
+    await underparVaultStore.writeAggregatePayload(persistableVault);
+    void clearLegacyUnderparVaultChromeStorageKeys();
   } catch (error) {
     if (marker) {
       state.passVaultPendingStorageWriteMarkers.delete(marker);
     }
     const message = String(error?.message || error || "").trim();
     if (message.toLowerCase().includes("quota")) {
-      console.warn("UnderPAR VAULT persistence hit the Chrome storage quota.", error);
+      console.warn("UnderPAR VAULT persistence hit the browser storage quota.", error);
       if (options?.silent !== true) {
-        setStatus("UnderPAR VAULT hit the Chrome storage quota. Only service-linked PASS data will be retained.", "error");
+        setStatus("UnderPAR VAULT persistence hit browser storage quota.", "error");
       }
       return persistableVault;
     }
@@ -7600,7 +7619,6 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
     registeredApplicationsByGuid,
     servicesSummary
   );
-  const cmTenantBundlesByTenantKey = buildPassVaultStoredCmTenantBundlesByTenantKey(cmServiceSnapshot, existingRecord);
 
   return {
     programmerId,
@@ -7620,7 +7638,6 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
     registeredApplicationCount,
     registeredApplicationsByGuid: compactedRegisteredApplicationsByGuid,
     services: servicesSummary,
-    cmTenantBundlesByTenantKey,
   };
 }
 
@@ -8148,6 +8165,9 @@ async function purgePassVaultFromDevtools() {
     purgeAvatarCaches();
     purgeDcrCaches();
     purgeLegacySavedEsmQueryEntriesFromLocalStorage();
+    if (canUseUnderparVaultIndexedDb()) {
+      await underparVaultStore.clear().catch(() => false);
+    }
     if (chrome?.storage?.local?.remove) {
       await chrome.storage.local.remove([
         UNDERPAR_VAULT_STORAGE_KEY,
@@ -10978,19 +10998,12 @@ function registerAdobePassEnvironmentStorageListener() {
 }
 
 function registerPassVaultStorageListener() {
-  if (state.passVaultStorageListenerBound || !chrome?.storage?.onChanged?.addListener) {
+  if (state.passVaultStorageListenerBound) {
     return;
   }
 
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes || !Object.prototype.hasOwnProperty.call(changes, UNDERPAR_VAULT_STORAGE_KEY)) {
-      return;
-    }
-
-    const previousVault = normalizeUnderparVaultPayload(changes?.[UNDERPAR_VAULT_STORAGE_KEY]?.oldValue || null);
-    const previousClientId = String(getActiveUnderparImsRuntimeConfig(previousVault)?.clientId || "").trim();
-    state.passVault = normalizeUnderparVaultPayload(changes?.[UNDERPAR_VAULT_STORAGE_KEY]?.newValue || null);
-    const nextClientId = String(getActiveUnderparImsRuntimeConfig(state.passVault)?.clientId || "").trim();
+  const applyPassVaultSync = (vaultPayload = null) => {
+    state.passVault = normalizeUnderparVaultPayload(vaultPayload);
     rebuildPassVaultProgrammerStatusIndex(state.passVault);
     refreshAllEsmWorkspaceMegSavedQuerySelectors();
     if (consumePendingPassVaultStorageWrite(state.passVault)) {
@@ -11013,9 +11026,20 @@ function registerPassVaultStorageListener() {
         });
       }
     });
-  });
+  };
 
-  state.passVaultStorageListenerBound = true;
+  if (canUseUnderparVaultIndexedDb() && typeof underparVaultStore.subscribe === "function") {
+    underparVaultStore.subscribe(() => {
+      void underparVaultStore
+        .readAggregatePayload()
+        .then((vaultPayload) => {
+          applyPassVaultSync(vaultPayload);
+        })
+        .catch(() => {});
+    });
+    state.passVaultStorageListenerBound = true;
+    return;
+  }
 }
 
 function registerUnderparEsmDeeplinkStorageListener() {
@@ -11682,8 +11706,6 @@ const CM_BOOTSTRAP_PARALLELISM = 6;
 const CM_BOOTSTRAP_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const CM_EMPTY_MATCH_CACHE_MAX_AGE_MS = 2 * 60 * 1000;
 const CM_USAGE_WARM_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
-const CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v2";
-const LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY = "underpar_cm_tenants_catalog_v1";
 const CM_V2_OPERATION_DEFINITIONS = [
   {
     key: "metadata",
@@ -71514,7 +71536,6 @@ function buildCmTenantsCatalogPersistPayload(catalog = null) {
     tenantName: String(tenant?.tenantName || "").trim(),
     aliases: uniqueSorted(Array.isArray(tenant?.aliases) ? tenant.aliases : []).slice(0, 32),
     links: uniqueSorted(Array.isArray(tenant?.links) ? tenant.links : []).slice(0, 12),
-    raw: tenant?.raw && typeof tenant.raw === "object" ? tenant.raw : null,
     sourceUrl: String(tenant?.sourceUrl || "").trim(),
   }));
   return {

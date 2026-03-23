@@ -35,10 +35,10 @@ const vaultSlacktivateContent = document.getElementById("vault-slacktivate-conte
 const vaultSlacktivateInput = document.getElementById("vault-slacktivate-input");
 const UP_DEVTOOLS_STATUS_PORT_NAME = "underpar-up-devtools-status";
 const FALLBACK_STORAGE_KEY = "underpar_adobepass_environment_v1";
-const UNDERPAR_VAULT_STORAGE_KEY = "underpar_vault_v1";
-const UNDERPAR_VAULT_CSV_SCHEMA = "underpar-pass-vault-csv-v5";
+const UNDERPAR_VAULT_CSV_SCHEMA = "underpar-pass-vault-csv-v6";
 const UNDERPAR_VAULT_SUPPORTED_CSV_SCHEMAS = new Set([
   UNDERPAR_VAULT_CSV_SCHEMA,
+  "underpar-pass-vault-csv-v5",
   "underpar-pass-vault-csv-v4",
 ]);
 const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 3;
@@ -54,6 +54,7 @@ const VAULT_REQUIRED_SCOPE_BY_SERVICE_KEY = Object.freeze({
   esm: "analytics:client",
   degradation: "decisions:owner",
 });
+const underparVaultStore = globalThis.UnderparVaultStore || null;
 const FALLBACK_DEFAULT_KEY = "release-production";
 const FALLBACK_ENVIRONMENTS = Object.freeze([
   {
@@ -388,6 +389,14 @@ function firstNonEmptyString(values = []) {
     }
   }
   return "";
+}
+
+function canUseUnderparVaultIndexedDb() {
+  return Boolean(
+    underparVaultStore &&
+      typeof underparVaultStore.readAggregatePayload === "function" &&
+      (typeof underparVaultStore.isSupported !== "function" || underparVaultStore.isSupported() === true)
+  );
 }
 
 function uniqueSorted(values = []) {
@@ -1162,13 +1171,7 @@ function normalizeVaultCmGlobalRecord(value = null) {
   const scope = String(value?.scope || "").trim();
   const expiresAt = Math.max(0, Number(value?.expiresAt || 0));
   const updatedAt = Math.max(0, Number(value?.updatedAt || value?.refreshedAt || 0));
-  const tokenFingerprint = String(value?.tokenFingerprint || "").trim();
-  const imsSession =
-    value?.imsSession && typeof value.imsSession === "object" && !Array.isArray(value.imsSession)
-      ? cloneJsonLikeValue(value.imsSession, null)
-      : null;
-
-  if (!clientId && !tokenClientId && !userId && !scope && !expiresAt && !updatedAt && !tokenFingerprint && !imsSession) {
+  if (!clientId && !tokenClientId && !userId && !scope && !expiresAt && !updatedAt) {
     return null;
   }
 
@@ -1179,8 +1182,6 @@ function normalizeVaultCmGlobalRecord(value = null) {
     scope,
     expiresAt,
     updatedAt: updatedAt || Date.now(),
-    tokenFingerprint,
-    imsSession,
   };
 }
 
@@ -1926,7 +1927,7 @@ async function collectVaultSnapshot() {
     globalThis.sessionStorage
   );
   const areaSnapshots = [chromeLocalSnapshot, chromeSessionSnapshot, localStorageSnapshot, sessionStorageSnapshot];
-  const vaultPayload = normalizeVaultPayload(chromeLocalSnapshot?.payload?.[UNDERPAR_VAULT_STORAGE_KEY] || null);
+  const vaultPayload = await readStoredVaultPayload();
   return {
     collectedAt: Date.now(),
     areaSnapshots,
@@ -2314,12 +2315,11 @@ function buildVaultPassRecordsMarkup(summary = null) {
 }
 
 async function readStoredVaultPayload() {
-  if (!chrome?.storage?.local?.get) {
+  if (!canUseUnderparVaultIndexedDb()) {
     return normalizeVaultPayload(null);
   }
   try {
-    const payload = await chrome.storage.local.get(UNDERPAR_VAULT_STORAGE_KEY);
-    return normalizeVaultPayload(payload?.[UNDERPAR_VAULT_STORAGE_KEY] || null);
+    return normalizeVaultPayload(await underparVaultStore.readAggregatePayload());
   } catch {
     return normalizeVaultPayload(null);
   }
@@ -2457,9 +2457,7 @@ function createVaultExportRowSkeleton() {
     "CM IMS User ID": "",
     "CM IMS Scope": "",
     "CM IMS Expires At": "",
-    "CM IMS Token Fingerprint": "",
     "CM IMS Updated At": "",
-    "CM IMS Session": "",
     "Saved Query Name": "",
     "Saved Query URL": "",
     "Slack Workspace Origin": "",
@@ -2551,9 +2549,7 @@ function buildVaultExportRows(vaultPayload = null) {
         "CM IMS User ID": String(normalizedRecord.userId || "").trim(),
         "CM IMS Scope": String(normalizedRecord.scope || "").trim(),
         "CM IMS Expires At": Number(normalizedRecord.expiresAt || 0) || "",
-        "CM IMS Token Fingerprint": String(normalizedRecord.tokenFingerprint || "").trim(),
         "CM IMS Updated At": Number(normalizedRecord.updatedAt || 0) || "",
-        "CM IMS Session": normalizedRecord.imsSession ? JSON.stringify(normalizedRecord.imsSession) : "",
       });
     });
 
@@ -3020,18 +3016,16 @@ function hydrateLegacyDcrCachesFromVault(vaultPayload = null) {
 }
 
 async function persistImportedVaultPayload(vaultPayload = null) {
-  if (!chrome?.storage?.local?.set) {
-    throw new Error("Chrome local storage is unavailable in the UnderPAR panel.");
-  }
   const normalizedVault = normalizeVaultPayload(vaultPayload);
+  if (!canUseUnderparVaultIndexedDb()) {
+    throw new Error("UnderPAR VAULT IndexedDB is unavailable in the UnderPAR panel.");
+  }
   try {
-    await chrome.storage.local.set({
-      [UNDERPAR_VAULT_STORAGE_KEY]: normalizedVault,
-    });
+    await underparVaultStore.writeAggregatePayload(normalizedVault);
   } catch (error) {
     const message = String(error?.message || error || "").trim();
     if (message.toLowerCase().includes("quota")) {
-      throw new Error("Chrome local storage quota exceeded. UnderPAR VAULT now stores only service-linked PASS records; purge or re-hydrate before importing again.");
+      throw new Error("Browser storage quota exceeded while importing the UnderPAR VAULT.");
     }
     throw error;
   }
@@ -3133,24 +3127,13 @@ async function handleVaultImportFile(file) {
         if (!environmentKey) {
           return;
         }
-        let imsSession = null;
-        const rawImsSession = String(row?.["CM IMS Session"] || "").trim();
-        if (rawImsSession) {
-          try {
-            imsSession = JSON.parse(rawImsSession);
-          } catch {
-            imsSession = null;
-          }
-        }
         const record = normalizeVaultCmGlobalRecord({
           clientId: row?.["CM IMS Client ID"],
           tokenClientId: row?.["CM IMS Token Client ID"],
           userId: row?.["CM IMS User ID"],
           scope: row?.["CM IMS Scope"],
           expiresAt: row?.["CM IMS Expires At"],
-          tokenFingerprint: row?.["CM IMS Token Fingerprint"],
           updatedAt: row?.["CM IMS Updated At"],
-          imsSession,
         });
         if (record) {
           importedCmGlobalsByEnvironment[environmentKey] = record;

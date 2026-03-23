@@ -16,6 +16,10 @@ test("popup runtime source parses as valid JavaScript", () => {
   assertParses("popup.js");
 });
 
+test("vault store helper source parses as valid JavaScript", () => {
+  assertParses("underpar-vault-store.js");
+});
+
 test("background runtime source parses as valid JavaScript", () => {
   assertParses("background.js");
 });

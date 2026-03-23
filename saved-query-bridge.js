@@ -1,7 +1,7 @@
 const SAVED_QUERY_STORAGE_PREFIX = "underpar:saved-esm-query:";
 const SAVED_QUERY_BRIDGE_MESSAGE_TYPE = "underpar:meg-saved-query-bridge";
 const SAVED_QUERY_BRIDGE_RESPONSE_TYPE = `${SAVED_QUERY_BRIDGE_MESSAGE_TYPE}:response`;
-const UNDERPAR_VAULT_STORAGE_KEY = "underpar_vault_v1";
+const underparVaultStore = globalThis.UnderparVaultStore || null;
 const MEG_WORKSPACE_MESSAGE_TYPE = "underpar:meg-workspace";
 const UNDERPAR_ESM_DEEPLINK_WORKSPACE_PATH = "esm-workspace.html";
 const UNDERPAR_ESM_DEEPLINK_BRIDGE_PATH = "esm-deeplink-bridge.html";
@@ -33,6 +33,14 @@ function firstNonEmptyString(values = []) {
     }
   }
   return "";
+}
+
+function canUseUnderparVaultIndexedDb() {
+  return Boolean(
+    underparVaultStore &&
+      typeof underparVaultStore.readAggregatePayload === "function" &&
+      (typeof underparVaultStore.isSupported !== "function" || underparVaultStore.isSupported() === true)
+  );
 }
 
 function sanitizeHarFileSegment(value, fallback = "capture") {
@@ -790,22 +798,23 @@ function normalizeVaultPayload(payload = null) {
 }
 
 async function readVaultPayload() {
-  if (!chrome?.storage?.local?.get) {
+  if (!canUseUnderparVaultIndexedDb()) {
     return normalizeVaultPayload(null);
   }
-  const payload = await chrome.storage.local.get(UNDERPAR_VAULT_STORAGE_KEY).catch(() => ({}));
-  return normalizeVaultPayload(payload?.[UNDERPAR_VAULT_STORAGE_KEY] || null);
+  try {
+    return normalizeVaultPayload(await underparVaultStore.readAggregatePayload());
+  } catch {
+    return normalizeVaultPayload(null);
+  }
 }
 
 async function writeVaultPayload(vaultPayload = null) {
-  if (!chrome?.storage?.local?.set) {
-    throw new Error("Chrome local storage is unavailable.");
-  }
   const normalizedVault = normalizeVaultPayload(vaultPayload);
   normalizedVault.updatedAt = Date.now();
-  await chrome.storage.local.set({
-    [UNDERPAR_VAULT_STORAGE_KEY]: normalizedVault,
-  });
+  if (!canUseUnderparVaultIndexedDb()) {
+    throw new Error("UnderPAR VAULT IndexedDB is unavailable.");
+  }
+  await underparVaultStore.writeAggregatePayload(normalizedVault);
   return normalizedVault;
 }
 

@@ -1,3 +1,9 @@
+try {
+  importScripts("underpar-vault-store.js");
+} catch (_error) {
+  // Ignore helper bootstrap failures; VAULT-backed lookups will stay unavailable.
+}
+
 const BUILD_INFO_KEY = "underpar_build_info";
 const LEGACY_BUILD_INFO_KEY = "mincloudlogin_build_info";
 const AVATAR_MAX_DATAURL_BYTES = 6000000;
@@ -60,7 +66,6 @@ const UP_DEVTOOLS_STATUS_PORT_NAME = "underpar-up-devtools-status";
 const DEBUG_FLOW_PERSIST_MAX = 8;
 const DEBUG_FLOW_PERSIST_DEBOUNCE_MS = 250;
 const IMS_RELAY_FETCH_TIMEOUT_MS = 15000;
-const UNDERPAR_VAULT_STORAGE_KEY = "underpar_vault_v1";
 const UNDERPAR_GITHUB_OWNER = "HH5HH";
 const UNDERPAR_GITHUB_REPO = "UNDERPAR";
 const UNDERPAR_LATEST_REF_API_URL =
@@ -105,6 +110,7 @@ const BUILD_FINGERPRINT_FILES = [
   "manifest.json",
   "background.js",
   "underpar-environment.js",
+  "underpar-vault-store.js",
   "popup.js",
   "popup.html",
   "sidepanel.html",
@@ -1466,20 +1472,24 @@ function readObjectPathValue(source, path) {
 }
 
 async function loadUnderparImsClientIdFromVault() {
-  if (!chrome?.storage?.local?.get) {
-    return "";
+  const vaultStore = globalThis.UnderparVaultStore || null;
+  if (
+    vaultStore &&
+    typeof vaultStore.readAggregatePayload === "function" &&
+    (typeof vaultStore.isSupported !== "function" || vaultStore.isSupported() === true)
+  ) {
+    try {
+      const vault = await vaultStore.readAggregatePayload();
+      return (
+        readObjectPathValue(vault, "underpar.globals.adobeIms.clientId") ||
+        readObjectPathValue(vault, "underpar.globals.ims.clientId") ||
+        ""
+      );
+    } catch {
+      return "";
+    }
   }
-  try {
-    const stored = await chrome.storage.local.get(UNDERPAR_VAULT_STORAGE_KEY);
-    const vault = stored?.[UNDERPAR_VAULT_STORAGE_KEY] || null;
-    return (
-      readObjectPathValue(vault, "underpar.globals.adobeIms.clientId") ||
-      readObjectPathValue(vault, "underpar.globals.ims.clientId") ||
-      ""
-    );
-  } catch {
-    return "";
-  }
+  return "";
 }
 
 async function getBackgroundImsAvatarClientIdCandidates(accessToken = "") {
