@@ -2324,7 +2324,7 @@ function shouldPreferLocalUnderparPackage(currentVersion = "", latestVersion = "
     if (normalizedCurrent && compareVersions(normalizedLocal, normalizedCurrent) < 0) {
       return false;
     }
-    return !normalizedLatest || compareVersions(normalizedLocal, normalizedLatest) >= 0;
+    return !normalizedLatest || compareVersions(normalizedLocal, normalizedLatest) > 0;
   }
   return false;
 }
@@ -2472,9 +2472,7 @@ async function openUnderparGetLatestFlow() {
   const currentVsLatest = latestVersion ? compareVersions(currentVersion, latestVersion) : 0;
   const currentVsLocal = localPackageVersion ? compareVersions(currentVersion, localPackageVersion) : 0;
   const preferLocalPackage =
-    shouldPreferLocalUnderparPackage(currentVersion, latestVersion, localPackageVersion) &&
-    Boolean(localPackageVersion) &&
-    currentVsLocal <= 0;
+    latestSource === "local-runtime" && Boolean(localPackageVersion) && currentVsLocal <= 0;
   const hasKnownRemoteUpdate = Boolean(latestVersion) && currentVsLatest < 0;
   const noNewerPublishedPackage =
     Boolean(latestVersion) &&

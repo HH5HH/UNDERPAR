@@ -314,7 +314,7 @@ test("openUnderparGetLatestFlow reports no newer package when the loaded build i
   assert.equal(seed.calls.tabsCreate.length, 0);
 });
 
-test("openUnderparGetLatestFlow opens the bundled package when the bundled distro already matches the current build", async () => {
+test("openUnderparGetLatestFlow downloads the remote GitHub package when bundled and remote versions match", async () => {
   const latestSha = "89abcdef0123456789abcdef0123456789abcdef";
   const seed = createSeed({
     currentVersion: "1.16.39",
@@ -355,15 +355,20 @@ test("openUnderparGetLatestFlow opens the bundled package when the bundled distr
 
   assert.equal(response.ok, true);
   assert.equal(response.noNewerPackage, false);
-  assert.equal(String(response.downloadSource || ""), "local-runtime");
+  assert.equal(String(response.downloadSource || ""), "github-remote");
+  assert.equal(String(response.latestSource || ""), "github-remote");
   assert.equal(String(response.latestVersion || ""), "1.16.39");
   assert.equal(String(response.localPackageVersion || ""), "1.16.39");
-  assert.equal(response.downloadStarted, false);
-  assert.equal(response.downloadTabOpened, true);
-  assert.equal(seed.calls.downloadsDownload.length, 0);
-  assert.equal(seed.calls.tabsCreate.length, 2);
-  assert.equal(String(seed.calls.tabsCreate[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
-  assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
+  assert.equal(response.downloadStarted, true);
+  assert.equal(response.downloadTabOpened, false);
+  assert.equal(seed.calls.downloadsDownload.length, 1);
+  assert.equal(seed.calls.tabsCreate.length, 1);
+  assert.match(
+    String(seed.calls.downloadsDownload[0]?.url || ""),
+    new RegExp(`/${latestSha}/underpar_distro\\.zip\\?cacheBust=\\d+$`)
+  );
+  assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.16.39-89abcde.zip");
+  assert.equal(String(seed.calls.tabsCreate[0]?.url || ""), "chrome://extensions");
 });
 
 test("openUnderparGetLatestFlow prefers the local runtime package when local distro metadata is newer than GitHub main", async () => {
