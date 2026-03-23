@@ -166,10 +166,12 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.match(applyServiceBoxSectionShellSource, /<details class="service-box-details"/);
   assert.match(applyServiceBoxSectionShellSource, /<summary\s+class="metadata-header service-box-header"/);
   assert.match(applyServiceBoxSectionShellSource, /<span class="collapse-icon">▼<\/span>/);
-  assert.match(applyServiceBoxSectionShellSource, /toggleButton\.addEventListener\("click", \(event\) => \{/);
-  assert.match(applyServiceBoxSectionShellSource, /toggleButton\.addEventListener\("keydown", \(event\) => \{/);
-  assert.match(applyServiceBoxSectionShellSource, /setOpenState\(detailsElement\.open !== true\)/);
-  assert.match(applyServiceBoxSectionShellSource, /detailsElement\.addEventListener\("toggle", syncOpenState\)/);
+  assert.match(applyServiceBoxSectionShellSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed, \(collapsed\) => \{/);
+  assert.match(applyServiceBoxSectionShellSource, /syncShellDetailsState\(collapsed\)/);
+  assert.match(applyServiceBoxSectionShellSource, /syncShellDetailsState\(initialCollapsed\)/);
+  assert.doesNotMatch(applyServiceBoxSectionShellSource, /toggleButton\.addEventListener\("click", \(event\) => \{/);
+  assert.doesNotMatch(applyServiceBoxSectionShellSource, /toggleButton\.addEventListener\("keydown", \(event\) => \{/);
+  assert.doesNotMatch(applyServiceBoxSectionShellSource, /detailsElement\.addEventListener\("toggle", syncOpenState\)/);
   assert.match(wireHrContextSectionActionsSource, /section\.addEventListener\("click", \(event\) => \{/);
   assert.match(wireHrContextSectionActionsSource, /openRestV2InteractiveDocsEntry/);
   assert.match(wireHrContextSectionActionsSource, /openPremiumServiceDocumentation/);
@@ -218,6 +220,15 @@ test("service shells align the collapse arrow and racing stripes on a shared hea
     popupCss,
     /body\.underpar-up-tab \.premium-service-section::after,\s*body\.underpar-up-tab \.hr-context-section::after\s*\{[\s\S]*?top:\s*var\(--service-header-rail-center-y\);[\s\S]*?transform:\s*translateY\(-50%\);/
   );
+  assert.match(
+    popupCss,
+    /\.premium-service-section \.metadata-header\.service-box-header\.collapsed \.collapse-icon,\s*\.hr-context-section \.metadata-header\.service-box-header\.collapsed \.collapse-icon\s*\{/
+  );
+  assert.match(
+    popupCss,
+    /\.premium-service-section \.service-box-container:not\(\.collapsed\),\s*\.hr-context-section \.service-box-container:not\(\.collapsed\)\s*\{/
+  );
+  assert.doesNotMatch(popupCss, /\.service-box-details\[open\]/);
 });
 
 test("REST V2 learning card exposes every interactive doc operation across all six sections", () => {

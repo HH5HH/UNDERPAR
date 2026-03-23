@@ -52916,35 +52916,16 @@ function applyServiceBoxSectionShell(section, options = {}) {
   const container = section.querySelector(".service-box-container");
   const contentElement = section.querySelector('[data-service-box-content="true"]');
   if (detailsElement && toggleButton && container) {
-    const setOpenState = (nextOpen) => {
-      detailsElement.open = nextOpen === true;
+    const syncShellDetailsState = (collapsed) => {
+      detailsElement.open = collapsed !== true;
     };
-    const syncOpenState = () => {
-      const collapsed = detailsElement.open !== true;
-      toggleButton.classList.toggle("collapsed", collapsed);
-      toggleButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      container.classList.toggle("collapsed", collapsed);
-      container.hidden = collapsed;
-      container.setAttribute("aria-hidden", collapsed ? "true" : "false");
+    wireCollapsibleSection(toggleButton, container, initialCollapsed, (collapsed) => {
+      syncShellDetailsState(collapsed);
       if (onCollapsedChange) {
         onCollapsedChange(collapsed);
       }
-    };
-    toggleButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setOpenState(detailsElement.open !== true);
     });
-    toggleButton.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      setOpenState(detailsElement.open !== true);
-    });
-    detailsElement.addEventListener("toggle", syncOpenState);
-    syncOpenState();
+    syncShellDetailsState(initialCollapsed);
   }
 
   return {
