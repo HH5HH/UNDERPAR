@@ -92,6 +92,31 @@ function loadRestV2LearningPlanBuilder() {
   return context.module.exports;
 }
 
+function loadRestV2LearningEntryOpener(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
+    "const __calls = globalThis.__seed.calls;",
+    "const __statuses = globalThis.__seed.statuses;",
+    "function setStatus(message, type) { __statuses.push({ message: String(message || ''), type: String(type || '') }); }",
+    "function getRestV2InteractiveDocsEntry() { return globalThis.__seed.entry; }",
+    "function resolveSelectedProgrammer() { return globalThis.__seed.programmer || null; }",
+    "function buildRestV2InteractiveDocsContext() { return globalThis.__seed.context; }",
+    "async function openPremiumServiceDocumentation(serviceKey, url) { __calls.push({ serviceKey, url }); return { ok: true, tabId: 7, windowId: 9, url }; }",
+    extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
+    extractFunctionSource(source, "openRestV2InteractiveDocsEntry"),
+    "module.exports = { openRestV2InteractiveDocsEntry };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("HR context stays hidden without a selected media company or detected premium services", () => {
   const state = {
     programmerWorkspaceHydrationReadyByKey: new Map([["production|fox", true], ["staging|fox", false]]),
@@ -135,15 +160,12 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.doesNotMatch(popupSource, /hr-context-divider-label/);
   assert.doesNotMatch(popupSource, />HR</);
   assert.doesNotMatch(popupSource, /textContent = "- HR -"/);
-  assert.match(createHrContextSectionSource, /class="metadata-header service-box-header hr-context-static-header"/);
-  assert.doesNotMatch(createHrContextSectionSource, /<button\s+type="button"/);
+  assert.match(createHrContextSectionSource, /<details class="service-box-details"/);
+  assert.match(createHrContextSectionSource, /<summary\s+class="metadata-header service-box-header"/);
+  assert.match(createHrContextSectionSource, /<span class="collapse-icon">▼<\/span>/);
   assert.doesNotMatch(createHrContextSectionSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed,/);
-  assert.doesNotMatch(createHrContextSectionSource, /<details class="service-box-details"/);
-  assert.doesNotMatch(createHrContextSectionSource, /detailsElement\.open = collapsed !== true/);
-  assert.doesNotMatch(createHrContextSectionSource, /detailsElement\.addEventListener\("toggle"/);
-  assert.match(createHrContextSectionSource, /<div class="metadata-container service-box-container">/);
-  assert.doesNotMatch(createHrContextSectionSource, /service-box-container collapsed/);
-  assert.doesNotMatch(createHrContextSectionSource, /service-box-container" hidden/);
+  assert.match(createHrContextSectionSource, /detailsElement\.addEventListener\("toggle", syncOpenState\)/);
+  assert.match(createHrContextSectionSource, /setHrContextSectionCollapsed\(programmer\?\.programmerId, sectionKey, collapsed\)/);
   assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
   assert.match(popupSource, /if \(handleCollapsibleToggleEvent\(event\)\) \{\s*return;\s*\}/);
   assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
@@ -216,6 +238,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(openRestV2InteractiveDocsEntrySource, /ensureDcrAccessTokenWithServiceRecovery/);
   assert.match(openRestV2InteractiveDocsEntrySource, /prepareRestV2InteractiveDocsContextForEntry/);
   assert.match(openRestV2InteractiveDocsEntrySource, /entry\.requiresAccessToken !== false/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /const openPartialDocs = async \(message, type = "info"\) => \{/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /Opened \$\{entry\.label\} docs without full UnderPAR context\./);
   assert.match(openRestV2InteractiveDocsEntrySource, /openPremiumServiceDocumentation\("restV2"/);
   assert.match(openRestV2InteractiveDocsEntrySource, /waitForTabCompletion/);
   assert.match(openRestV2InteractiveDocsEntrySource, /hydrateRestV2InteractiveDocsTab/);
@@ -237,6 +261,39 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     popupSource,
     /const docsItemHtml = restV2DocsPanelHtml \? "" : buildMetadataItemHtml\("Docs", `HOWTO: \$\{howtoSubject\} quick docs coming soon\.\.\.`\);/
   );
+});
+
+test("REST V2 learning entries still open the customer docs when requestor context is missing", async () => {
+  const calls = [];
+  const statuses = [];
+  const { openRestV2InteractiveDocsEntry } = loadRestV2LearningEntryOpener({
+    calls,
+    statuses,
+    entry: {
+      key: "configuration-service-provider",
+      label: "Service Provider Configuration",
+      operationAnchor: "operation/handleRequestUsingGET",
+      tagAnchor: "tag/1.-Configuration",
+    },
+    programmer: {
+      programmerId: "Turner",
+    },
+    context: {
+      ok: false,
+      error: "Select a Content Provider first. REST V2 interactive docs require a valid RequestorId/service provider, not just a Media Company.",
+    },
+  });
+
+  const result = await openRestV2InteractiveDocsEntry("configuration-service-provider", "");
+  assert.equal(calls.length, 1);
+  assert.equal(String(calls[0]?.serviceKey || ""), "restV2");
+  assert.equal(
+    String(calls[0]?.url || ""),
+    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/handleRequestUsingGET"
+  );
+  assert.equal(result.partial, true);
+  assert.match(String(statuses[0]?.message || ""), /Opened Service Provider Configuration docs without full UnderPAR context\./);
+  assert.match(String(statuses[0]?.message || ""), /Select a Content Provider first\./);
 });
 
 test("REST V2 learning hydration plans honor the selected customer-doc operation contracts", () => {

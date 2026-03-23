@@ -15282,6 +15282,18 @@ function setPremiumSectionCollapsed(programmerId, serviceKey, isCollapsed) {
   state.premiumSectionCollapsedByKey.set(getPremiumCollapseKey("__global__", serviceKey), collapsed);
 }
 
+function getHrContextSectionCollapseKey(sectionKey = "") {
+  return `hr-context:${String(sectionKey || "").trim()}`;
+}
+
+function getHrContextSectionCollapsed(programmerId, sectionKey) {
+  return getPremiumSectionCollapsed(programmerId, getHrContextSectionCollapseKey(sectionKey));
+}
+
+function setHrContextSectionCollapsed(programmerId, sectionKey, isCollapsed) {
+  setPremiumSectionCollapsed(programmerId, getHrContextSectionCollapseKey(sectionKey), isCollapsed);
+}
+
 function applyCollapsibleState(toggleButton, containerElement, isCollapsed) {
   if (!toggleButton || !containerElement) {
     return;
@@ -54229,14 +54241,32 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
       error: "missing-restv2-learning-entry",
     };
   }
+  const targetUrl = String(requestedUrl || buildRestV2InteractiveDocsUrl(entry.operationAnchor || entry.tagAnchor || "")).trim();
+  const openPartialDocs = async (message, type = "info") => {
+    const opened = await openPremiumServiceDocumentation("restV2", targetUrl);
+    if (opened?.ok !== true) {
+      return opened;
+    }
+    const guidance = String(message || "").trim();
+    setStatus(
+      guidance
+        ? `Opened ${entry.label} docs without full UnderPAR context. ${guidance}`
+        : `Opened ${entry.label} docs without full UnderPAR context.`,
+      type
+    );
+    return {
+      ok: false,
+      partial: true,
+      error: guidance || "partial-restv2-learning-context",
+      tabId: Number(opened?.tabId || 0),
+      windowId: Number(opened?.windowId || 0),
+      url: String(opened?.url || targetUrl).trim(),
+    };
+  };
 
   const context = buildRestV2InteractiveDocsContext(resolveSelectedProgrammer());
   if (!context?.ok) {
-    setStatus(String(context?.error || "REST V2 learning needs a Media Company selection."), "error");
-    return {
-      ok: false,
-      error: String(context?.error || "missing-restv2-learning-context"),
-    };
+    return openPartialDocs(String(context?.error || "REST V2 learning needs a Media Company selection."));
   }
 
   setStatus(`Opening ${entry.label} interactive docs with UnderPAR context...`, "info");
@@ -54257,20 +54287,23 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      setStatus(reason, "error");
-      return {
-        ok: false,
-        error: reason,
-      };
+      return openPartialDocs(reason, "error");
     }
   }
 
-  const resolvedContext = await prepareRestV2InteractiveDocsContextForEntry(entry, {
-    ...context,
-    appInfo: tokenResult?.appInfo || context.appInfo,
-  });
-  const plan = buildRestV2InteractiveDocsHydrationPlan(entry, resolvedContext, String(tokenResult?.accessToken || "").trim());
-  const targetUrl = String(requestedUrl || plan.docsUrl || buildRestV2InteractiveDocsUrl(entry.operationAnchor || "")).trim();
+  let resolvedContext = null;
+  let plan = null;
+  try {
+    resolvedContext = await prepareRestV2InteractiveDocsContextForEntry(entry, {
+      ...context,
+      appInfo: tokenResult?.appInfo || context.appInfo,
+    });
+    plan = buildRestV2InteractiveDocsHydrationPlan(entry, resolvedContext, String(tokenResult?.accessToken || "").trim());
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return openPartialDocs(reason, "error");
+  }
+
   const opened = await openPremiumServiceDocumentation("restV2", targetUrl);
   if (opened?.ok !== true) {
     return opened;
@@ -54344,20 +54377,41 @@ function createHrContextSection(programmer, sectionKey, services = null, options
   const hoverMessage = `${title} guidance for ${context.compositeLabel}`;
   const section = document.createElement("article");
   section.className = `metadata-section hr-context-section hr-context-section--${sectionKey}`;
+  const initialCollapsed = getHrContextSectionCollapsed(programmer?.programmerId, sectionKey);
   section.innerHTML = `
-    <div
-      class="metadata-header service-box-header hr-context-static-header"
-      title="${escapeHtml(hoverMessage)}"
-      aria-label="${escapeHtml(hoverMessage)}"
-    >
-      <span>${escapeHtml(title)}</span>
-    </div>
-    <div class="metadata-container service-box-container">
-      <div class="hr-context-content">
-        ${buildHrContextSectionBodyHtml(sectionKey, programmer, services, options)}
+    <details class="service-box-details"${initialCollapsed ? "" : " open"}>
+      <summary
+        class="metadata-header service-box-header"
+        title="${escapeHtml(hoverMessage)}"
+        aria-label="${escapeHtml(hoverMessage)}"
+      >
+        <span>${escapeHtml(title)}</span>
+        <span class="collapse-icon">▼</span>
+      </summary>
+      <div class="metadata-container service-box-container">
+        <div class="hr-context-content">
+          ${buildHrContextSectionBodyHtml(sectionKey, programmer, services, options)}
+        </div>
       </div>
-    </div>
+    </details>
   `;
+
+  const detailsElement = section.querySelector(".service-box-details");
+  const toggleButton = section.querySelector(".service-box-header");
+  const container = section.querySelector(".service-box-container");
+  if (detailsElement && toggleButton && container) {
+    const syncOpenState = () => {
+      const collapsed = detailsElement.open !== true;
+      toggleButton.classList.toggle("collapsed", collapsed);
+      toggleButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      container.classList.toggle("collapsed", collapsed);
+      container.hidden = collapsed;
+      container.setAttribute("aria-hidden", collapsed ? "true" : "false");
+      setHrContextSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
+    };
+    detailsElement.addEventListener("toggle", syncOpenState);
+    syncOpenState();
+  }
 
   return section;
 }
