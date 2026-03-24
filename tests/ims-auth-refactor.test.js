@@ -3041,6 +3041,23 @@ test("avatar menu display name mirrors the LoginButton org hotlink", () => {
   assert.match(renderAvatarMenuSource, /els\.avatarMenuName\.title = buildExperienceOrgTitle\(activeOrganization\);/);
 });
 
+test("avatar menu hides AdobePASS-only CM diagnostics unless the active IMS org is AdobePASS", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const buildEntriesSource = extractFunctionSource(popupSource, "buildAvatarMenuEntries");
+  const activeCmSummarySource = extractFunctionSource(popupSource, "getAvatarMenuActiveCmSummaryState");
+  const cmSummarySource = extractFunctionSource(popupSource, "getAvatarMenuCmSummaryState");
+  const renderAvatarMenuSource = extractFunctionSource(popupSource, "renderAvatarMenu");
+
+  assert.match(buildEntriesSource, /const adobePassWorkflowActive = shouldHydrateAdobePassWorkflowForSession\(loginData\);/);
+  assert.match(buildEntriesSource, /if \(adobePassWorkflowActive\) \{\s*const cmConsoleAccessToken = getPreferredCmAccessTokenCandidate\(\);/s);
+  assert.doesNotMatch(buildEntriesSource, /pushEntry\("cm-console-ui access token".*?\);\s*pushEntry\("Profile Image URL"/s);
+  assert.match(activeCmSummarySource, /if \(!shouldHydrateAdobePassWorkflowForSession\(state\.loginData\)\) \{\s*return null;\s*\}/);
+  assert.match(cmSummarySource, /if \(!shouldHydrateAdobePassWorkflowForSession\(state\.loginData\)\) \{\s*return null;\s*\}/);
+  assert.match(renderAvatarMenuSource, /const adobePassWorkflowActive = shouldHydrateAdobePassWorkflowForSession\(state\.loginData\);/);
+  assert.match(renderAvatarMenuSource, /if \(adobePassWorkflowActive\) \{\s*const cmSummary = getAvatarMenuCmSummaryState\(\);/s);
+  assert.match(renderAvatarMenuSource, /els\.avatarMenuSystem\.hidden = true;/);
+});
+
 test("activation only trusts explicit target-org selection and restricted retry no longer reuses hidden config", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activationPrepSource = extractFunctionSource(popupSource, "enforceAdobePassAccess");

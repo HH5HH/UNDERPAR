@@ -63725,6 +63725,7 @@ function collectProfileImageCandidatesForMenu(profile) {
 
 function buildAvatarMenuEntries(loginData) {
   const profile = resolveLoginProfile(loginData) || {};
+  const adobePassWorkflowActive = shouldHydrateAdobePassWorkflowForSession(loginData);
   const authContext =
     loginData?.authContext && typeof loginData.authContext === "object"
       ? loginData.authContext
@@ -63755,23 +63756,25 @@ function buildAvatarMenuEntries(loginData) {
   pushEntry("Adobe Auth ID", getLoginAuthId(loginData));
   pushEntry("Organization", getOrgDisplayName(loginData));
   pushEntry("Organization ID", authContext?.orgId);
-  const cmConsoleAccessToken = getPreferredCmAccessTokenCandidate();
-  const cmConsoleClaims = parseJwtPayload(cmConsoleAccessToken) || {};
-  const cmConsoleClientId = String(firstNonEmptyString([cmConsoleClaims.client_id, cmConsoleClaims.clientId]) || "")
-    .trim()
-    .toLowerCase();
-  const hasCmConsoleToken = Boolean(cmConsoleAccessToken && isCmConsoleClientId(cmConsoleClientId));
-  const cmConsoleStatusText = hasCmConsoleToken
-    ? cmConsoleAccessToken
-    : state.cmAuthBootstrapPromise || state.cmTenantsPrecheckPending
-      ? "Hydrating cm-console-ui bearer..."
-      : state.cmTenantsPrecheckLastError
-        ? `Unavailable: ${String(state.cmTenantsPrecheckLastError || "").trim()}`
-        : "Unavailable: cm-console-ui bearer has not been hydrated yet.";
-  pushEntry("cm-console-ui access token", cmConsoleStatusText, {
-    multiline: true,
-    copyValue: hasCmConsoleToken ? cmConsoleAccessToken : "",
-  });
+  if (adobePassWorkflowActive) {
+    const cmConsoleAccessToken = getPreferredCmAccessTokenCandidate();
+    const cmConsoleClaims = parseJwtPayload(cmConsoleAccessToken) || {};
+    const cmConsoleClientId = String(firstNonEmptyString([cmConsoleClaims.client_id, cmConsoleClaims.clientId]) || "")
+      .trim()
+      .toLowerCase();
+    const hasCmConsoleToken = Boolean(cmConsoleAccessToken && isCmConsoleClientId(cmConsoleClientId));
+    const cmConsoleStatusText = hasCmConsoleToken
+      ? cmConsoleAccessToken
+      : state.cmAuthBootstrapPromise || state.cmTenantsPrecheckPending
+        ? "Hydrating cm-console-ui bearer..."
+        : state.cmTenantsPrecheckLastError
+          ? `Unavailable: ${String(state.cmTenantsPrecheckLastError || "").trim()}`
+          : "Unavailable: cm-console-ui bearer has not been hydrated yet.";
+    pushEntry("cm-console-ui access token", cmConsoleStatusText, {
+      multiline: true,
+      copyValue: hasCmConsoleToken ? cmConsoleAccessToken : "",
+    });
+  }
   pushEntry("Profile Image URL", profileImageLabel);
   const allProfileImageCandidates = collectProfileImageCandidatesForMenu(profile);
   const allProfileImageLines =
@@ -65195,6 +65198,9 @@ function getAvatarMenuCmMatchedTenantSummaryFromService(service = null) {
 }
 
 function getAvatarMenuActiveCmSummaryState() {
+  if (!shouldHydrateAdobePassWorkflowForSession(state.loginData)) {
+    return null;
+  }
   const selectedProgrammer = resolveSelectedProgrammer();
   const selectedProgrammerId = String(selectedProgrammer?.programmerId || "").trim();
   const selectedRuntimeService = selectedProgrammerId ? getCurrentPremiumAppsSnapshot(selectedProgrammerId)?.cm || null : null;
@@ -65239,6 +65245,9 @@ function getAvatarMenuActiveCmSummaryState() {
 }
 
 function getAvatarMenuCmSummaryState() {
+  if (!shouldHydrateAdobePassWorkflowForSession(state.loginData)) {
+    return null;
+  }
   const activeSummary = getAvatarMenuActiveCmSummaryState();
   const catalog =
     state.cmTenantsCatalog && Array.isArray(state.cmTenantsCatalog.tenants) ? state.cmTenantsCatalog : null;
@@ -65428,6 +65437,7 @@ function renderAvatarMenu() {
   const name = getLoginDisplayName(state.loginData);
   const principalId = getLoginPrincipalId(state.loginData) || "No principal available";
   const activeOrganization = getLoginActiveOrganization(state.loginData);
+  const adobePassWorkflowActive = shouldHydrateAdobePassWorkflowForSession(state.loginData);
 
   els.avatarMenuImage.style.backgroundImage = "";
   els.avatarMenuImage.classList.remove("avatar-loading");
@@ -65513,23 +65523,27 @@ function renderAvatarMenu() {
   }
 
   if (els.avatarMenuSystem) {
-    const cmSummary = getAvatarMenuCmSummaryState();
-    const cmValue = String(cmSummary?.text || "")
-      .replace(/^CM\s*:\s*/i, "")
-      .trim();
-    const systemRow = document.createElement("div");
-    systemRow.className = "avatar-menu-row";
-    const systemKey = document.createElement("span");
-    systemKey.className = "avatar-menu-key";
-    systemKey.textContent = "CM";
-    const systemValue = document.createElement("span");
-    systemValue.className = "avatar-menu-value";
-    systemValue.textContent = cmValue || "-- Tenants";
-    systemRow.appendChild(systemKey);
-    systemRow.appendChild(systemValue);
     els.avatarMenuSystem.innerHTML = "";
-    els.avatarMenuSystem.appendChild(systemRow);
-    els.avatarMenuSystem.hidden = false;
+    if (adobePassWorkflowActive) {
+      const cmSummary = getAvatarMenuCmSummaryState();
+      const cmValue = String(cmSummary?.text || "")
+        .replace(/^CM\s*:\s*/i, "")
+        .trim();
+      const systemRow = document.createElement("div");
+      systemRow.className = "avatar-menu-row";
+      const systemKey = document.createElement("span");
+      systemKey.className = "avatar-menu-key";
+      systemKey.textContent = "CM";
+      const systemValue = document.createElement("span");
+      systemValue.className = "avatar-menu-value";
+      systemValue.textContent = cmValue || "-- Tenants";
+      systemRow.appendChild(systemKey);
+      systemRow.appendChild(systemValue);
+      els.avatarMenuSystem.appendChild(systemRow);
+      els.avatarMenuSystem.hidden = false;
+    } else {
+      els.avatarMenuSystem.hidden = true;
+    }
   }
 
   syncAvatarMenuUpdateAction();
