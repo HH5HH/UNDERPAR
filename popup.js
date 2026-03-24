@@ -62340,7 +62340,7 @@ function isAuthenticatedOrgSwitchOnlySession(sessionData = state.loginData) {
     currentSession &&
     state.sessionReady === true &&
     state.restricted !== true &&
-    shouldOfferAdobePassRecoveryForSession(currentSession)
+    !shouldHydrateAdobePassWorkflowForSession(currentSession)
   );
 }
 
@@ -62381,12 +62381,14 @@ function syncAuthenticatedOrgSwitchOnlyContext(sessionData = null) {
       organizations,
       detectedOrganizations,
     },
-    {
-      recoveryLabel: firstNonEmptyString([
-        resolveProgrammerAccessContext(currentSession).reason,
-        state.restrictedRecoveryLabel,
-      ]),
-    }
+    shouldOfferAdobePassRecoveryForSession(currentSession)
+      ? {
+          recoveryLabel: firstNonEmptyString([
+            resolveProgrammerAccessContext(currentSession).reason,
+            state.restrictedRecoveryLabel,
+          ]),
+        }
+      : {}
   );
 }
 
@@ -66610,7 +66612,7 @@ async function applyActiveLoginSession(loginData, options = {}) {
   state.sessionMonitorConsecutiveInactiveDetections = 0;
   state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
   state.sessionReady = true;
-  if (shouldOfferAdobePassRecoveryForSession(loginData)) {
+  if (!shouldHydrateAdobePassWorkflowForSession(loginData)) {
     syncAuthenticatedOrgSwitchOnlyContext(loginData);
   } else {
     clearRestrictedOrgOptions();
@@ -66898,6 +66900,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
   resolvedLoginData.orgVerification = targetOrganizationVerification;
   const shouldHydrateAdobePassWorkflow = shouldHydrateAdobePassWorkflowForSession(resolvedLoginData);
   const sessionRequiresOrgSelection = shouldOfferAdobePassRecoveryForSession(resolvedLoginData);
+  const authenticatedOrgPickerOnly = !shouldHydrateAdobePassWorkflow;
 
   const sessionProfileCompleteness = getSessionProfileCompleteness(resolvedLoginData);
   if (!sessionProfileCompleteness.complete) {
@@ -66932,6 +66935,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
 
   if (
     resolvedLoginData?.targetOrganization &&
+    shouldOfferAdobePassRecoveryForSession(resolvedLoginData) &&
     !isSuccessfulTargetOrganizationVerification(targetOrganizationVerification)
   ) {
     const verificationFailureMessage = `${targetOrganizationVerification.message} UnderPAR kept the prior session so it does not misrepresent the selected Adobe profile.`;
@@ -66945,7 +66949,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
       error: verificationFailureMessage,
     });
     if (state.sessionReady && state.loginData) {
-      if (shouldOfferAdobePassRecoveryForSession(state.loginData)) {
+      if (!shouldHydrateAdobePassWorkflowForSession(state.loginData)) {
         syncAuthenticatedOrgSwitchOnlyContext(state.loginData);
         updateRestrictedContext(state.loginData, {
           recoveryLabel: verificationFailureMessage,
@@ -66961,7 +66965,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     return false;
   }
 
-  if (sessionRequiresOrgSelection) {
+  if (authenticatedOrgPickerOnly) {
     resolvedLoginData = buildNormalizedLoginData(
       {
         ...resolvedLoginData,
@@ -67662,7 +67666,7 @@ function syncMediaCompanySelectAvailability() {
     state.sessionReady === true &&
     Boolean(state.loginData) &&
     state.restricted !== true &&
-    shouldOfferAdobePassRecoveryForSession(state.loginData);
+    !shouldHydrateAdobePassWorkflowForSession(state.loginData);
 
   if (!state.sessionReady || !state.loginData || state.restricted || sessionRequiresOrgSwitchOnly) {
     els.mediaCompanySelect.disabled = true;

@@ -853,6 +853,7 @@ test("generic non-AdobePass sessions stay IMS-only until AdobePass is explicitly
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activateSource = extractFunctionSource(popupSource, "activateSession");
   const applySessionSource = extractFunctionSource(popupSource, "applyActiveLoginSession");
+  const orgSwitchOnlySource = extractFunctionSource(popupSource, "isAuthenticatedOrgSwitchOnlySession");
   const renderSource = extractFunctionSource(popupSource, "render");
   const restrictedSwitchSource = extractFunctionSource(popupSource, "onRestrictedOrgSwitch");
 
@@ -863,9 +864,11 @@ test("generic non-AdobePass sessions stay IMS-only until AdobePass is explicitly
   assert.match(popupSource, /function shouldOfferAdobePassRecoveryForSession\(sessionData = null\)/);
   assert.match(activateSource, /const shouldHydrateAdobePassWorkflow = shouldHydrateAdobePassWorkflowForSession\(resolvedLoginData\);/);
   assert.match(activateSource, /const sessionRequiresOrgSelection = shouldOfferAdobePassRecoveryForSession\(resolvedLoginData\);/);
+  assert.match(activateSource, /const authenticatedOrgPickerOnly = !shouldHydrateAdobePassWorkflow;/);
   assert.match(activateSource, /} else if \(shouldHydrateAdobePassWorkflow\) \{\s*resetWorkflowForAuthenticatedHydration\(\);\s*\} else \{\s*resetWorkflowForAuthenticatedImsSession\(\);/s);
   assert.match(activateSource, /if \(shouldHydrateAdobePassWorkflow\) \{\s*void hydrateAuthenticatedAdobePassSession\(/s);
-  assert.match(applySessionSource, /if \(shouldOfferAdobePassRecoveryForSession\(loginData\)\) \{\s*syncAuthenticatedOrgSwitchOnlyContext\(loginData\);\s*\} else \{\s*clearRestrictedOrgOptions\(\);/s);
+  assert.match(applySessionSource, /if \(!shouldHydrateAdobePassWorkflowForSession\(loginData\)\) \{\s*syncAuthenticatedOrgSwitchOnlyContext\(loginData\);\s*\} else \{\s*clearRestrictedOrgOptions\(\);/s);
+  assert.match(orgSwitchOnlySource, /!shouldHydrateAdobePassWorkflowForSession\(currentSession\)/);
   assert.match(renderSource, /const authenticatedOrgSwitchOnly = isAuthenticatedOrgSwitchOnlySession\(\);/);
   assert.match(renderSource, /const adobePassWorkflowActive =[\s\S]*shouldHydrateAdobePassWorkflowForSession\(state\.loginData\);/);
   assert.match(renderSource, /els\.restrictedView\.hidden = !authenticatedOrgSwitchOnly;/);
@@ -3186,11 +3189,11 @@ test("activation rejects mismatched org-switch results before replacing the curr
   assert.match(activationSource, /resolvedLoginData\.orgVerification = targetOrganizationVerification;/);
   assert.match(
     activationSource,
-    /resolvedLoginData\?\.targetOrganization &&\s*!isSuccessfulTargetOrganizationVerification\(targetOrganizationVerification\)/
+    /resolvedLoginData\?\.targetOrganization &&\s*shouldOfferAdobePassRecoveryForSession\(resolvedLoginData\) &&\s*!isSuccessfulTargetOrganizationVerification\(targetOrganizationVerification\)/
   );
   assert.match(activationSource, /UnderPAR kept the prior session so it does not misrepresent the selected Adobe profile\./);
   assert.match(activationSource, /phase:\s*"org-verification-mismatch"/);
-  assert.match(activationSource, /if \(shouldOfferAdobePassRecoveryForSession\(state\.loginData\)\) \{\s*syncAuthenticatedOrgSwitchOnlyContext\(state\.loginData\);/s);
+  assert.match(activationSource, /if \(!shouldHydrateAdobePassWorkflowForSession\(state\.loginData\)\) \{\s*syncAuthenticatedOrgSwitchOnlyContext\(state\.loginData\);/s);
   assert.match(activationSource, /updateRestrictedContext\(state\.loginData,\s*\{\s*recoveryLabel: verificationFailureMessage,/s);
 });
 
@@ -3490,7 +3493,8 @@ test("stored session restore persists and reuses hydrated console state before b
   assert.match(persistStoredSource, /if \(!shouldHydrateAdobePassWorkflowForSession\(state\.loginData\)\) \{\s*return false;\s*\}/);
   assert.match(activateSource, /normalizedSource === "stored" && shouldHydrateAdobePassWorkflow && !sessionRequiresOrgSelection/);
   assert.match(activateSource, /restoreStoredAuthenticatedConsoleHydration\(resolvedLoginData\)/);
-  assert.match(activateSource, /if \(sessionRequiresOrgSelection\) \{\s*resolvedLoginData = buildNormalizedLoginData\(/s);
+  assert.match(activateSource, /const authenticatedOrgPickerOnly = !shouldHydrateAdobePassWorkflow;/);
+  assert.match(activateSource, /if \(authenticatedOrgPickerOnly\) \{\s*resolvedLoginData = buildNormalizedLoginData\(/s);
   assert.match(activateSource, /resetBootstrapTokens: true,/);
   assert.match(activateSource, /const allowBackgroundTemporaryPageContextTab = restoredAuthenticatedConsoleHydration/);
   assert.match(activateSource, /preserveExistingOnFailure: restoredAuthenticatedConsoleHydration/);
@@ -3518,7 +3522,7 @@ test("CM precheck reset clears stale pending state before background bootstrap b
   assert.equal(helpers.getSyncCalls(), 1);
 });
 
-test("media company select availability disables before session activation and re-enables immediately after activation", () => {
+test("media company select availability stays disabled for IMS-only org-switch sessions and re-enables only for AdobePASS-ready sessions", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const applySessionSource = extractFunctionSource(popupSource, "applyActiveLoginSession");
   const helpers = loadPopupMediaCompanyAvailabilityHelper();
@@ -3534,6 +3538,14 @@ test("media company select availability disables before session activation and r
   helpers.setState({
     sessionReady: true,
     loginData: { accessToken: "token" },
+    restricted: false,
+  });
+  helpers.syncMediaCompanySelectAvailability();
+  assert.equal(helpers.getSelect().disabled, true);
+
+  helpers.setState({
+    sessionReady: true,
+    loginData: { accessToken: "token", activeAdobePass: true },
     restricted: false,
   });
   helpers.syncMediaCompanySelectAvailability();
