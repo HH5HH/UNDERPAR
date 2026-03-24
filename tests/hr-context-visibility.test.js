@@ -117,6 +117,33 @@ function loadRestV2LearningEntryOpener(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2InteractiveDocsContextBuilder(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "const state = globalThis.__seed.state || { selectedRequestorId: '', selectedMvpdId: '' };",
+    "function resolveSelectedProgrammer() { return globalThis.__seed.programmer || null; }",
+    "function getCurrentPremiumAppsSnapshot() { return globalThis.__seed.services || null; }",
+    "function resolveRestV2LearningRequestorContext() { return globalThis.__seed.requestorContext || { requestorId: '', autoResolved: false, candidateCount: 0 }; }",
+    "function collectRestV2AppCandidatesFromPremiumApps() { return globalThis.__seed.restV2Candidates || []; }",
+    "function resolveRestV2AppForServiceProvider(restV2Apps, serviceProviderId) { return typeof globalThis.__seed.resolveApp === 'function' ? globalThis.__seed.resolveApp(restV2Apps, serviceProviderId) : (Array.isArray(restV2Apps) ? restV2Apps[0] || null : null); }",
+    "function normalizeEntityToken(value = '') { return String(value || '').trim().toLowerCase(); }",
+    "function sanitizePassVaultHintValue(...values) { for (const value of values) { if (value == null) { continue; } if (Array.isArray(value)) { const nested = sanitizePassVaultHintValue(...value); if (nested) { return nested; } continue; } if (typeof value === 'object') { const nested = sanitizePassVaultHintValue(value.value, value.id, value.key, value.guid); if (nested) { return nested; } continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function extractPassVaultPrimaryRequestorHintFromAppData(appData = null) { return String(appData?.primaryRequestor || '').trim(); }",
+    "function collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId) { return typeof globalThis.__seed.collectCandidates === 'function' ? globalThis.__seed.collectCandidates(appInfo, programmerId) : []; }",
+    extractFunctionSource(source, "resolveRestV2InteractiveDocsAppRequestorContext"),
+    extractFunctionSource(source, "buildRestV2InteractiveDocsContext"),
+    "module.exports = { buildRestV2InteractiveDocsContext };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("HR context stays hidden without a selected media company or detected premium services", () => {
   const state = {
     programmerWorkspaceHydrationReadyByKey: new Map([["production|fox", true], ["staging|fox", false]]),
@@ -271,6 +298,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /operationId: "retrieveVerificationTokenUsingPOST"/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2LearningRequestorContext/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolvedEntry\?\.operationId === "handleRequestUsingGET"/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2InteractiveDocsAppRequestorContext/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2AppForServiceProvider/);
   assert.match(buildRestV2InteractiveDocsContextSource, /Select a Content Provider first\./);
   assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_REDIRECT_CANDIDATES/);
@@ -343,13 +371,66 @@ test("REST V2 learning entries still open the customer docs when requestor conte
   assert.match(String(statuses[0]?.message || ""), /Select a Content Provider first\./);
 });
 
+test("REST V2 configuration context resolves the app requestor when only the media company is selected", () => {
+  const seededApp = {
+    guid: "rest-guid",
+    appData: {
+      requestor: "turner",
+      serviceProviders: ["turner", "turner-alt"],
+    },
+  };
+  const { buildRestV2InteractiveDocsContext } = loadRestV2InteractiveDocsContextBuilder({
+    programmer: {
+      programmerId: "Turner",
+      programmerName: "Turner",
+    },
+    services: {
+      restV2: seededApp,
+    },
+    restV2Candidates: [seededApp],
+    requestorContext: {
+      requestorId: "",
+      autoResolved: false,
+      candidateCount: 2,
+    },
+    collectCandidates(appInfo) {
+      if (appInfo?.guid === "rest-guid") {
+        return ["Turner", "turner", "turner-alt"];
+      }
+      return [];
+    },
+    resolveApp(restV2Apps, serviceProviderId) {
+      return (Array.isArray(restV2Apps) ? restV2Apps : []).find((appInfo) => {
+        const requestorId = String(appInfo?.appData?.requestor || "").trim();
+        return requestorId === String(serviceProviderId || "").trim();
+      }) || null;
+    },
+  });
+
+  const result = buildRestV2InteractiveDocsContext(
+    {
+      programmerId: "Turner",
+      programmerName: "Turner",
+    },
+    {
+      operationId: "handleRequestUsingGET",
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.requestorId, "turner");
+  assert.equal(result.serviceProviderId, "turner");
+  assert.equal(result.requestorAutoResolved, true);
+  assert.equal(result.appInfo?.guid, "rest-guid");
+});
+
 test("REST V2 learning hydration plans honor the selected customer-doc operation contracts", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const accessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
   const toArray = (value) => Array.from(value || []);
   const baseContext = {
-    serviceProviderId: "turner-requestor",
-    requestorId: "turner-requestor",
+    serviceProviderId: "turner",
+    requestorId: "turner",
     requestorAutoResolved: false,
     sessionCode: "session-code-123",
     mvpd: "Comcast_SSO",
@@ -373,7 +454,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     accessToken
   );
   assert.deepEqual(toArray(configurationPlan.requiredFields), ["path.serviceProvider", "header.Authorization"]);
-  assert.equal(configurationPlan.fieldValues["path.serviceProvider"], "turner-requestor");
+  assert.equal(configurationPlan.fieldValues["path.serviceProvider"], "turner");
   assert.equal(configurationPlan.fieldValues["header.Authorization"], `Bearer ${accessToken}`);
   assert.equal(configurationPlan.fieldValues["header.Accept"], "application/json");
   assert.equal(Object.prototype.hasOwnProperty.call(configurationPlan.fieldValues, "header.AP-Device-Identifier"), false);

@@ -53568,13 +53568,13 @@ function findRestV2PreauthorizeHistoryEntryForLearning(programmerId = "", reques
 function collectRestV2LearningRequestorCandidates(programmer = null, services = null) {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : null;
   const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
-  const programmerKey = normalizeEntityToken(programmerId);
   const candidates = [];
   const seen = new Set();
   const pushCandidate = (value) => {
     const candidateId = extractEntityIdFromToken(value);
     const normalizedCandidate = normalizeEntityToken(candidateId);
-    if (!candidateId || !normalizedCandidate || normalizedCandidate === programmerKey || seen.has(normalizedCandidate)) {
+    const matchesProgrammerId = candidateId === programmerId;
+    if (!candidateId || !normalizedCandidate || matchesProgrammerId || seen.has(normalizedCandidate)) {
       return;
     }
     seen.add(normalizedCandidate);
@@ -53621,6 +53621,40 @@ function resolveRestV2LearningRequestorContext(programmer = null, services = nul
   };
 }
 
+function resolveRestV2InteractiveDocsAppRequestorContext(appInfo = null, programmerId = "") {
+  const primaryRequestorId = sanitizePassVaultHintValue(
+    appInfo?.appData?.requestor,
+    appInfo?.appData?.serviceProvider,
+    extractPassVaultPrimaryRequestorHintFromAppData(appInfo?.appData, appInfo?.softwareStatement)
+  );
+  if (primaryRequestorId && primaryRequestorId !== programmerId) {
+    return {
+      requestorId: primaryRequestorId,
+      autoResolved: true,
+      candidateCount: 1,
+    };
+  }
+
+  const candidates = collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId).filter((candidate) => {
+    const candidateId = String(candidate || "").trim();
+    const normalizedCandidateId = normalizeEntityToken(candidateId);
+    return candidateId && normalizedCandidateId && candidateId !== programmerId;
+  });
+  if (candidates.length === 1) {
+    return {
+      requestorId: String(candidates[0] || "").trim(),
+      autoResolved: true,
+      candidateCount: 1,
+    };
+  }
+
+  return {
+    requestorId: "",
+    autoResolved: false,
+    candidateCount: candidates.length,
+  };
+}
+
 function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
   const resolvedProgrammer = programmer || resolveSelectedProgrammer();
   const resolvedEntry = entry && typeof entry === "object" ? entry : null;
@@ -53638,12 +53672,19 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
   if (!requestorId) {
     if (resolvedEntry?.operationId === "handleRequestUsingGET") {
       const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(services);
-      const serviceProviderId = programmerId;
+      const seededApp = services?.restV2 || restV2Candidates[0] || null;
+      const appRequestorContext = resolveRestV2InteractiveDocsAppRequestorContext(seededApp, programmerId);
+      const serviceProviderId = String(appRequestorContext.requestorId || "").trim();
+      if (!serviceProviderId) {
+        return {
+          ok: false,
+          error:
+            "Select a Content Provider first. UnderPAR could not resolve a REST V2 service provider from the mapped application.",
+        };
+      }
       const preferredApp =
         resolveRestV2AppForServiceProvider(restV2Candidates, serviceProviderId, programmerId) ||
-        services?.restV2 ||
-        restV2Candidates[0] ||
-        null;
+        seededApp;
       if (!preferredApp?.guid) {
         return {
           ok: false,
@@ -53654,8 +53695,8 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
         ok: true,
         programmerId,
         programmerName: String(resolvedProgrammer.programmerName || "").trim(),
-        requestorId: "",
-        requestorAutoResolved: false,
+        requestorId: serviceProviderId,
+        requestorAutoResolved: appRequestorContext.autoResolved === true,
         serviceProviderId,
         mvpd: "",
         mvpdMeta: null,
