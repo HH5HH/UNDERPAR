@@ -264,6 +264,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /operationId: "createPartnerProfileUsingPOST"/);
   assert.match(popupSource, /operationId: "retrieveVerificationTokenUsingPOST"/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2LearningRequestorContext/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /resolvedEntry\?\.operationId === "handleRequestUsingGET"/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2AppForServiceProvider/);
   assert.match(buildRestV2InteractiveDocsContextSource, /Select a Content Provider first\./);
   assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_REDIRECT_CANDIDATES/);
   assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_DEFAULT_DOMAIN/);
@@ -275,6 +277,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /getRestV2InteractiveDocsSections/);
   assert.match(openRestV2InteractiveDocsEntrySource, /ensureDcrAccessTokenWithServiceRecovery/);
   assert.match(openRestV2InteractiveDocsEntrySource, /prepareRestV2InteractiveDocsContextForEntry/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /buildRestV2InteractiveDocsContext\(resolveSelectedProgrammer\(\), entry\)/);
   assert.match(openRestV2InteractiveDocsEntrySource, /entry\.requiresAccessToken !== false/);
   assert.match(openRestV2InteractiveDocsEntrySource, /const openPartialDocs = async \(message, type = "info"\) => \{/);
   assert.match(openRestV2InteractiveDocsEntrySource, /Opened \$\{entry\.label\} docs without full UnderPAR context\./);

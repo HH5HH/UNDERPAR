@@ -53608,8 +53608,9 @@ function resolveRestV2LearningRequestorContext(programmer = null, services = nul
   };
 }
 
-function buildRestV2InteractiveDocsContext(programmer = null) {
+function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
   const resolvedProgrammer = programmer || resolveSelectedProgrammer();
+  const resolvedEntry = entry && typeof entry === "object" ? entry : null;
   if (!resolvedProgrammer?.programmerId) {
     return {
       ok: false,
@@ -53622,6 +53623,46 @@ function buildRestV2InteractiveDocsContext(programmer = null) {
   const requestorContext = resolveRestV2LearningRequestorContext(resolvedProgrammer, services);
   const requestorId = String(requestorContext.requestorId || "").trim();
   if (!requestorId) {
+    if (resolvedEntry?.operationId === "handleRequestUsingGET") {
+      const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(services);
+      const serviceProviderId = programmerId;
+      const preferredApp =
+        resolveRestV2AppForServiceProvider(restV2Candidates, serviceProviderId, programmerId) ||
+        services?.restV2 ||
+        restV2Candidates[0] ||
+        null;
+      if (!preferredApp?.guid) {
+        return {
+          ok: false,
+          error: `No REST V2 scoped app is mapped to ${serviceProviderId}.`,
+        };
+      }
+      return {
+        ok: true,
+        programmerId,
+        programmerName: String(resolvedProgrammer.programmerName || "").trim(),
+        requestorId: "",
+        requestorAutoResolved: false,
+        serviceProviderId,
+        mvpd: "",
+        mvpdMeta: null,
+        appInfo: preferredApp,
+        services,
+        activeRecordingContext: null,
+        harvest: null,
+        harvestContext: null,
+        resourceIds: [],
+        sessionUrl: "",
+        loginUrl: "",
+        sessionCode: "",
+        sessionCodeCandidates: [],
+        redirectUrl: "",
+        domainName: "",
+        partnerFrameworkStatus: "",
+        partner: "",
+        flowId: "",
+      };
+    }
     return {
       ok: false,
       error:
@@ -54594,7 +54635,7 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
     };
   };
 
-  const context = buildRestV2InteractiveDocsContext(resolveSelectedProgrammer());
+  const context = buildRestV2InteractiveDocsContext(resolveSelectedProgrammer(), entry);
   if (!context?.ok) {
     return openPartialDocs(String(context?.error || "REST V2 learning needs a Media Company selection."));
   }
