@@ -40583,7 +40583,9 @@ function cmuUsageWireInteractions(cmState, cmuUsageState, requestToken) {
     }
   };
 
-  cmuUsageState.treeHeadElement?.addEventListener("click", () => {
+  cmuUsageState.treeHeadElement?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     toggleTree();
   });
   cmuUsageState.treeLoadAllButton?.addEventListener("click", async (event) => {
@@ -55861,6 +55863,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
     title: sectionLabel,
     hoverMessage: serviceHoverMessage,
     initialCollapsed,
+    useNativeDetailsToggle: serviceKey === "cm" || serviceKey === "cmMvpd",
     contentClassName: "service-content",
     bodyHtml: `
       ${restV2LoginToolHtml}

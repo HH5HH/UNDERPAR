@@ -326,10 +326,18 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.match(wireHrContextSectionActionsSource, /openRestV2InteractiveDocsEntry/);
   assert.match(wireHrContextSectionActionsSource, /openPremiumServiceDocumentation/);
   assert.match(createPremiumServiceSectionSource, /applyServiceBoxSectionShell\(section,\s*\{/);
+  assert.match(
+    createPremiumServiceSectionSource,
+    /useNativeDetailsToggle:\s*serviceKey === "cm" \|\| serviceKey === "cmMvpd"/
+  );
   assert.match(createHrContextSectionSource, /applyServiceBoxSectionShell\(section,\s*\{/);
   assert.match(createHrContextSectionSource, /wireHrContextSectionActions\(section\)/);
   assert.match(createHrContextSectionSource, /setHrContextSectionCollapsed\(programmer\?\.programmerId, sectionKey, collapsed\)/);
   assert.doesNotMatch(createHrContextSectionSource, /useNativeDetailsToggle:\s*true/);
+  assert.match(
+    popupSource,
+    /cmuUsageState\.treeHeadElement\?\.addEventListener\("click", \(event\) => \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?toggleTree\(\);[\s\S]*?\}\);/
+  );
   assert.match(buildHrSectionsRenderSignatureSource, /state\.selectedRequestorId/);
   assert.match(buildHrSectionsRenderSignatureSource, /state\.selectedMvpdId/);
   assert.match(renderHrSectionsSource, /els\.hrServicesContainer\.dataset\.renderSignature/);
