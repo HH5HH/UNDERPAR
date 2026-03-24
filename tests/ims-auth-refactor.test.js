@@ -1550,6 +1550,8 @@ test("console endpoint bootstrap initializes underparStateRef before top-level p
 test("DEBUG INFO and logged-out controls bind before async init and keep a safe fallback snapshot", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const initSource = extractFunctionSource(popupSource, "init");
+  const ensurePassVaultLoadedSource = extractFunctionSource(popupSource, "ensurePassVaultLoaded");
+  const resetLoggedOutSource = extractFunctionSource(popupSource, "resetWorkflowForLoggedOut");
   const renderDebugSource = extractFunctionSource(popupSource, "renderDebugConsole");
   const copyDebugSource = extractFunctionSource(popupSource, "copyDebugConsoleToClipboard");
   const statusSource = extractFunctionSource(popupSource, "setStatus");
@@ -1566,6 +1568,10 @@ test("DEBUG INFO and logged-out controls bind before async init and keep a safe 
   assert.match(renderDebugSource, /setTextOutput\(els\.logOutput,\s*getUnderparDebugConsoleSnapshot\(\)\);/);
   assert.match(copyDebugSource, /els\.logOutput\?\.value \|\| getUnderparDebugConsoleSnapshot\(\)/);
   assert.match(statusSource, /appendDebugStatusHistoryEntry\(normalizedMessage,\s*normalizedType,\s*"status"\)/);
+  assert.match(popupSource, /passVaultLoaded:\s*false,/);
+  assert.match(ensurePassVaultLoadedSource, /if \(!forceReload && state\.passVault && state\.passVaultLoaded === true\) \{/);
+  assert.match(ensurePassVaultLoadedSource, /state\.passVaultLoaded = loadedPersistedVault;/);
+  assert.match(resetLoggedOutSource, /state\.passVaultLoaded = state\.passVaultLoaded === true && preservePassVault;/);
   assert.match(initSource, /registerCoreInteractionHandlers\(\);/);
   assert.match(initSource, /registerEventHandlers\(\);/);
   assert.match(initSource, /await settleUnderparInitStep\("Initial shell render", \(\) => render\(\)\);/);

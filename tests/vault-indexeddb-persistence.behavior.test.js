@@ -57,7 +57,7 @@ test("popup VAULT persistence uses IndexedDB and does not persist CM tenant bund
   const programmerRecordSource = extractFunctionSource(popupSource, "buildPassVaultProgrammerRecord");
   const cmGlobalSource = extractFunctionSource(popupSource, "buildPassVaultCmGlobalAuthRecord");
 
-  assert.match(loadSource, /underparVaultStore\.readAggregatePayload\(\)/);
+  assert.match(loadSource, /underparVaultStore\s*\.\s*readAggregatePayload\(\)/);
   assert.doesNotMatch(loadSource, /readLegacyUnderparVaultPayloadFromChromeStorage/);
   assert.doesNotMatch(loadSource, /readLegacyCmTenantsCatalogFromChromeStorageOnly/);
   assert.doesNotMatch(loadSource, /chrome\.storage\.local\.get\(UNDERPAR_VAULT_STORAGE_KEY\)/);

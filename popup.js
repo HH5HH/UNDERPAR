@@ -7264,7 +7264,7 @@ function enqueuePassVaultPersist(taskFactory) {
 
 async function ensurePassVaultLoaded(options = {}) {
   const forceReload = options?.forceReload === true;
-  if (!forceReload && state.passVault) {
+  if (!forceReload && state.passVault && state.passVaultLoaded === true) {
     return state.passVault;
   }
   if (!forceReload && state.passVaultLoadPromise) {
@@ -7273,11 +7273,17 @@ async function ensurePassVaultLoaded(options = {}) {
 
   const loadPromise = (async () => {
     const legacySavedQueries = readLegacySavedEsmQueryEntriesFromLocalStorage();
-    const normalizedVault = normalizeUnderparVaultPayload(
-      canUseUnderparVaultIndexedDb()
-        ? await underparVaultStore.readAggregatePayload().catch(() => createEmptyUnderparVaultPayload())
-        : createEmptyUnderparVaultPayload()
-    );
+    let loadedPersistedVault = !canUseUnderparVaultIndexedDb();
+    const persistedPayload = canUseUnderparVaultIndexedDb()
+      ? await underparVaultStore
+          .readAggregatePayload()
+          .then((payload) => {
+            loadedPersistedVault = true;
+            return payload;
+          })
+          .catch(() => createEmptyUnderparVaultPayload())
+      : createEmptyUnderparVaultPayload();
+    const normalizedVault = normalizeUnderparVaultPayload(persistedPayload);
     let shouldPersist = false;
 
     if (Object.keys(legacySavedQueries).length > 0) {
@@ -7290,6 +7296,7 @@ async function ensurePassVaultLoaded(options = {}) {
     }
 
     state.passVault = normalizedVault;
+    state.passVaultLoaded = loadedPersistedVault;
     rebuildPassVaultProgrammerStatusIndex(normalizedVault);
     try {
       if (shouldPersist) {
@@ -7626,6 +7633,7 @@ function buildPassVaultApplicationRecord(programmerId = "", guid = "", appData =
 async function persistPassVaultPayloadToStorage(vault = null, options = {}) {
   const persistableVault = normalizeUnderparVaultPayload(vault || createEmptyUnderparVaultPayload());
   state.passVault = persistableVault;
+  state.passVaultLoaded = true;
   rebuildPassVaultProgrammerStatusIndex(persistableVault);
   if (!canUseUnderparVaultIndexedDb()) {
     console.warn("UnderPAR VAULT IndexedDB helper is unavailable.");
@@ -8297,6 +8305,7 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.dcrEnsureTokenPromiseByKey.clear();
   state.premiumServiceRecoveryPromiseByProgrammerKey.clear();
   state.passVault = createEmptyUnderparVaultPayload();
+  state.passVaultLoaded = false;
   state.passVaultLoadPromise = null;
   state.passVaultPersistPromise = null;
   state.passVaultPendingStorageWriteMarkers.clear();
@@ -11182,6 +11191,7 @@ function registerPassVaultStorageListener() {
 
   const applyPassVaultSync = (vaultPayload = null) => {
     state.passVault = normalizeUnderparVaultPayload(vaultPayload);
+    state.passVaultLoaded = true;
     rebuildPassVaultProgrammerStatusIndex(state.passVault);
     refreshAllEsmWorkspaceMegSavedQuerySelectors();
     if (consumePendingPassVaultStorageWrite(state.passVault)) {
@@ -12406,6 +12416,7 @@ const state = {
   dcrEnsureTokenPromiseByKey: new Map(),
   premiumServiceRecoveryPromiseByProgrammerKey: new Map(),
   passVault: null,
+  passVaultLoaded: false,
   passVaultLoadPromise: null,
   passVaultPersistPromise: null,
   passVaultPendingStorageWriteMarkers: new Set(),
@@ -58345,6 +58356,7 @@ function resetWorkflowForLoggedOut(options = {}) {
     setZipKeyImportFeedback("", "info");
   }
   state.passVault = nextPassVault;
+  state.passVaultLoaded = state.passVaultLoaded === true && preservePassVault;
   state.passVaultLoadPromise = null;
   state.passVaultPersistPromise = null;
   state.passVaultPendingStorageWriteMarkers.clear();
