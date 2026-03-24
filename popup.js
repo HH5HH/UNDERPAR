@@ -10362,6 +10362,7 @@ function prepareAdobePassEnvironmentSwitchUi(targetEnvironment = null) {
   els.mvpdSelect.innerHTML = '<option value="">-- Reloading MVPD menu... --</option>';
   setHrContextSectionsVisibility(false);
   if (els.premiumServicesContainer) {
+    delete els.premiumServicesContainer.dataset.renderSignature;
     els.premiumServicesContainer.innerHTML = `<p class="metadata-empty">Switching to ${escapeHtml(
       environmentLabel
     )}...</p>`;
@@ -56337,6 +56338,34 @@ function buildHrSectionsRenderSignature(programmer = null, services = null, opti
   ].join("|");
 }
 
+function hasRenderablePremiumServiceSections(services = null) {
+  if (!els.premiumServicesContainer) {
+    return false;
+  }
+  const expectedKeys = getDetectedPremiumServiceKeys(services);
+  if (expectedKeys.length === 0) {
+    return false;
+  }
+  const sections = Array.from(els.premiumServicesContainer.querySelectorAll(".premium-service-section"));
+  if (sections.length !== expectedKeys.length) {
+    return false;
+  }
+  const actualKeys = sections.map((section) => String(section?.dataset?.serviceKey || "").trim());
+  return expectedKeys.every((serviceKey, index) => actualKeys[index] === serviceKey);
+}
+
+function hasRenderableHrContextSections() {
+  if (!els.hrServicesContainer) {
+    return false;
+  }
+  const sections = Array.from(els.hrServicesContainer.querySelectorAll(".hr-context-section"));
+  if (sections.length !== HR_CONTEXT_SECTION_DISPLAY_ORDER.length) {
+    return false;
+  }
+  const actualKeys = sections.map((section) => String(section?.dataset?.hrSectionKey || "").trim());
+  return HR_CONTEXT_SECTION_DISPLAY_ORDER.every((sectionKey, index) => actualKeys[index] === sectionKey);
+}
+
 function refreshExistingPremiumServiceSections(programmer, services = null) {
   if (!els.premiumServicesContainer || !programmer?.programmerId || !services || typeof services !== "object") {
     return;
@@ -56507,6 +56536,7 @@ function setHrContextSectionsVisibility(visible = false) {
   els.hrServicesContainer.hidden = !shouldShow;
   els.hrServicesContainer.setAttribute("aria-hidden", shouldShow ? "false" : "true");
   if (!shouldShow) {
+    delete els.hrServicesContainer.dataset.renderSignature;
     els.hrServicesContainer.innerHTML = "";
   }
 }
@@ -58513,6 +58543,7 @@ function createHrContextSection(programmer, sectionKey, services = null, options
   const hoverMessage = `${title} guidance for ${context.compositeLabel}`;
   const section = document.createElement("article");
   section.className = `metadata-section hr-context-section hr-context-section--${sectionKey}`;
+  section.dataset.hrSectionKey = String(sectionKey || "").trim();
   const initialCollapsed = getHrContextSectionCollapsed(programmer?.programmerId, sectionKey);
   applyServiceBoxSectionShell(section, {
     title,
@@ -58546,7 +58577,8 @@ function renderHrSections(services, programmer = null, options = {}) {
   const renderSignature = buildHrSectionsRenderSignature(programmer, services, options);
   if (
     renderSignature &&
-    String(els.hrServicesContainer.dataset.renderSignature || "") === renderSignature
+    String(els.hrServicesContainer.dataset.renderSignature || "") === renderSignature &&
+    hasRenderableHrContextSections()
   ) {
     setHrContextSectionsVisibility(true);
     return;
@@ -58648,7 +58680,8 @@ function renderPremiumServices(services, programmer = null, options = {}) {
   const renderSignature = buildPremiumServicesRenderSignature(programmer, services);
   if (
     renderSignature &&
-    String(els.premiumServicesContainer.dataset.renderSignature || "") === renderSignature
+    String(els.premiumServicesContainer.dataset.renderSignature || "") === renderSignature &&
+    hasRenderablePremiumServiceSections(services)
   ) {
     refreshExistingPremiumServiceSections(programmer, services);
     refreshMvpdWorkspaceTools();

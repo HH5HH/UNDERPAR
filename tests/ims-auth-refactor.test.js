@@ -2213,15 +2213,74 @@ test("premium services reuse the mounted DOM when the selected service signature
   const renderSource = extractFunctionSource(popupSource, "renderPremiumServices");
   const signatureSource = extractFunctionSource(popupSource, "buildPremiumServicesRenderSignature");
   const refreshExistingSource = extractFunctionSource(popupSource, "refreshExistingPremiumServiceSections");
+  const hasRenderableSource = extractFunctionSource(popupSource, "hasRenderablePremiumServiceSections");
 
   assert.match(signatureSource, /const selectedRequestorId = String\(state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
   assert.match(signatureSource, /const selectedMvpdId = String\(state\.selectedMvpdId \|\| ""\)\.trim\(\);/);
   assert.match(renderSource, /const renderSignature = buildPremiumServicesRenderSignature\(programmer,\s*services\);/);
   assert.match(renderSource, /els\.premiumServicesContainer\.dataset\.renderSignature/);
+  assert.match(renderSource, /hasRenderablePremiumServiceSections\(services\)/);
   assert.match(renderSource, /refreshExistingPremiumServiceSections\(programmer,\s*services\)/);
+  assert.match(hasRenderableSource, /querySelectorAll\("\.premium-service-section"\)/);
+  assert.match(hasRenderableSource, /expectedKeys\.every\(\(serviceKey,\s*index\) => actualKeys\[index\] === serviceKey\)/);
   assert.match(refreshExistingSource, /syncRestV2LoginPanel\(section,\s*programmer,\s*serviceApp\)/);
   assert.match(refreshExistingSource, /syncMvpdWorkspaceToolForSection\(section,\s*programmer,\s*services\)/);
   assert.match(refreshExistingSource, /section\.__underparRefreshCm/);
+});
+
+test("premium and HR render reuse requires intact mounted section shells after environment churn", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const renderPremiumSource = extractFunctionSource(popupSource, "renderPremiumServices");
+  const renderHrSource = extractFunctionSource(popupSource, "renderHrSections");
+  const createHrSource = extractFunctionSource(popupSource, "createHrContextSection");
+  const prepareSwitchSource = extractFunctionSource(popupSource, "prepareAdobePassEnvironmentSwitchUi");
+  const hrVisibilitySource = extractFunctionSource(popupSource, "setHrContextSectionsVisibility");
+
+  assert.match(prepareSwitchSource, /delete els\.premiumServicesContainer\.dataset\.renderSignature/);
+  assert.match(hrVisibilitySource, /delete els\.hrServicesContainer\.dataset\.renderSignature/);
+  assert.match(renderPremiumSource, /hasRenderablePremiumServiceSections\(services\)/);
+  assert.match(renderHrSource, /hasRenderableHrContextSections\(\)/);
+  assert.match(createHrSource, /section\.dataset\.hrSectionKey = String\(sectionKey \|\| ""\)\.trim\(\);/);
+
+  const script = [
+    'const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["learning", "health"];',
+    extractFunctionSource(popupSource, "hasRenderablePremiumServiceSections"),
+    extractFunctionSource(popupSource, "hasRenderableHrContextSections"),
+    "module.exports = { hasRenderablePremiumServiceSections, hasRenderableHrContextSections };",
+  ].join("\n\n");
+
+  const premiumSections = [
+    { dataset: { serviceKey: "restV2" } },
+    { dataset: { serviceKey: "esmWorkspace" } },
+  ];
+  const hrSections = [
+    { dataset: { hrSectionKey: "learning" } },
+    { dataset: { hrSectionKey: "health" } },
+  ];
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    els: {
+      premiumServicesContainer: {
+        querySelectorAll: () => premiumSections,
+      },
+      hrServicesContainer: {
+        querySelectorAll: () => hrSections,
+      },
+    },
+    getDetectedPremiumServiceKeys: (services = null) => (Array.isArray(services?.expectedKeys) ? services.expectedKeys.slice() : []),
+  };
+  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
+  const { hasRenderablePremiumServiceSections, hasRenderableHrContextSections } = context.module.exports;
+
+  assert.equal(hasRenderablePremiumServiceSections({ expectedKeys: ["restV2", "esmWorkspace"] }), true);
+  assert.equal(hasRenderablePremiumServiceSections({ expectedKeys: ["esmWorkspace", "restV2"] }), false);
+  premiumSections.pop();
+  assert.equal(hasRenderablePremiumServiceSections({ expectedKeys: ["restV2", "esmWorkspace"] }), false);
+
+  assert.equal(hasRenderableHrContextSections(), true);
+  hrSections[1].dataset.hrSectionKey = "learning";
+  assert.equal(hasRenderableHrContextSections(), false);
 });
 
 test("REST V2 app selection preserves detected order while still reusing requestor-scoped app context", () => {
