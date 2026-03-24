@@ -52892,6 +52892,7 @@ function applyServiceBoxSectionShell(section, options = {}) {
   const contentClassName = String(options?.contentClassName || "service-content").trim() || "service-content";
   const bodyHtml = String(options?.bodyHtml || "");
   const onCollapsedChange = typeof options?.onCollapsedChange === "function" ? options.onCollapsedChange : null;
+  const useNativeDetailsToggle = options?.useNativeDetailsToggle === true;
 
   section.innerHTML = `
     <details class="service-box-details"${initialCollapsed ? "" : " open"}>
@@ -52916,16 +52917,30 @@ function applyServiceBoxSectionShell(section, options = {}) {
   const container = section.querySelector(".service-box-container");
   const contentElement = section.querySelector('[data-service-box-content="true"]');
   if (detailsElement && toggleButton && container) {
-    const syncShellDetailsState = (collapsed) => {
-      detailsElement.open = collapsed !== true;
-    };
-    wireCollapsibleSection(toggleButton, container, initialCollapsed, (collapsed) => {
-      syncShellDetailsState(collapsed);
+    const persistShellCollapsedState = (collapsed) => {
+      applyCollapsibleState(toggleButton, container, collapsed);
       if (onCollapsedChange) {
         onCollapsedChange(collapsed);
       }
-    });
-    syncShellDetailsState(initialCollapsed);
+    };
+    const isSummaryToggle =
+      toggleButton instanceof Element && String(toggleButton.tagName || "").trim().toLowerCase() === "summary";
+    if (isSummaryToggle && useNativeDetailsToggle) {
+      detailsElement.open = initialCollapsed !== true;
+      applyCollapsibleState(toggleButton, container, initialCollapsed);
+      detailsElement.addEventListener("toggle", () => {
+        persistShellCollapsedState(detailsElement.open !== true);
+      });
+    } else {
+      const syncShellDetailsState = (collapsed) => {
+        detailsElement.open = collapsed !== true;
+      };
+      wireCollapsibleSection(toggleButton, container, initialCollapsed, (collapsed) => {
+        syncShellDetailsState(collapsed);
+        persistShellCollapsedState(collapsed);
+      });
+      syncShellDetailsState(initialCollapsed);
+    }
   }
 
   return {
@@ -54045,6 +54060,65 @@ async function openPremiumServiceDocumentation(serviceKey = "", requestedUrl = "
 
 async function runRestV2InteractiveDocsHydrator(config = {}) {
   const normalize = (value) => String(value || "").trim();
+  const parseFieldReference = (fieldName = "") => {
+    const normalizedFieldName = normalize(fieldName);
+    const dotIndex = normalizedFieldName.indexOf(".");
+    if (dotIndex < 0) {
+      return {
+        scope: "",
+        name: normalizedFieldName,
+      };
+    }
+    return {
+      scope: normalize(normalizedFieldName.slice(0, dotIndex)).toLowerCase(),
+      name: normalize(normalizedFieldName.slice(dotIndex + 1)),
+    };
+  };
+  const collectDescendants = (root) => {
+    if (!root || typeof root.querySelectorAll !== "function") {
+      return [];
+    }
+    try {
+      return Array.from(root.querySelectorAll("*"));
+    } catch {
+      return [];
+    }
+  };
+  const isFormControlElement = (element) =>
+    Boolean(element?.CodeMirror) ||
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement;
+  const getElementTextHaystack = (element, options = {}) => {
+    if (!element) {
+      return "";
+    }
+    const includeParentText = options?.includeParentText === true;
+    const parts = [
+      normalize(element.textContent),
+      normalize(element.getAttribute?.("data-param-name")),
+      normalize(element.getAttribute?.("data-param-in")),
+      normalize(element.getAttribute?.("data-name")),
+      normalize(element.getAttribute?.("name")),
+      normalize(element.getAttribute?.("aria-label")),
+      normalize(element.getAttribute?.("placeholder")),
+      normalize(element.id),
+      normalize(element.className),
+    ];
+    if (includeParentText) {
+      parts.push(normalize(element.parentElement?.textContent));
+    }
+    return parts.filter(Boolean).join(" ").toLowerCase();
+  };
+  const findEmbeddedControlWithin = (element) => {
+    if (!element) {
+      return null;
+    }
+    if (isFormControlElement(element)) {
+      return element;
+    }
+    return collectDescendants(element).find((candidate) => isFormControlElement(candidate)) || null;
+  };
   const formatEditorBodyValue = (fieldName, rawValue) => {
     const normalizedFieldName = normalize(fieldName);
     if (normalizedFieldName === "body.resources") {
@@ -54097,6 +54171,25 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       await sleepFor(intervalMs);
     }
     return null;
+  };
+  const tryParseJsonText = (value, fallback = null) => {
+    try {
+      return JSON.parse(String(value || ""));
+    } catch {
+      return fallback;
+    }
+  };
+  const getElementCurrentValue = (element) => {
+    if (!element) {
+      return "";
+    }
+    if (element?.CodeMirror && typeof element.CodeMirror.getValue === "function") {
+      return String(element.CodeMirror.getValue() || "");
+    }
+    if (typeof element.value === "string") {
+      return element.value;
+    }
+    return "";
   };
   const setElementValue = (element, rawValue, fieldName = "") => {
     if (!element) {
@@ -54158,6 +54251,86 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     element.dispatchEvent(new Event("blur", { bubbles: true }));
     return true;
   };
+  const findLabeledControl = (operation, fieldName) => {
+    const { scope, name } = parseFieldReference(fieldName);
+    const normalizedName = String(name || "").trim().toLowerCase();
+    if (!operation || !normalizedName) {
+      return null;
+    }
+    const descendants = collectDescendants(operation);
+    const candidates = descendants.filter((element) => {
+      const haystack = getElementTextHaystack(element);
+      if (!haystack || !haystack.includes(normalizedName)) {
+        return false;
+      }
+      if (!scope) {
+        return true;
+      }
+      const dataScope = normalize(element.getAttribute?.("data-param-in")).toLowerCase();
+      return !dataScope || dataScope === scope || haystack.includes(scope);
+    });
+    for (const candidate of candidates) {
+      const control = findEmbeddedControlWithin(candidate);
+      if (control) {
+        return control;
+      }
+    }
+    return null;
+  };
+  const findRequestBodyEditor = (operation) => {
+    if (!operation) {
+      return null;
+    }
+    const descendants = collectDescendants(operation);
+    const bodyCandidates = descendants.filter((element) => {
+      if (!isFormControlElement(element)) {
+        return false;
+      }
+      if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) {
+        return false;
+      }
+      return true;
+    });
+    const prioritized = bodyCandidates.find((element) => {
+      const haystack = getElementTextHaystack(element, { includeParentText: true });
+      return haystack.includes("request body") || haystack.includes("body-param") || haystack.includes("body");
+    });
+    return prioritized || bodyCandidates[0] || null;
+  };
+  const buildRequestBodyEditorValue = (bodyEntries, editorElement, normalizedFieldValues) => {
+    const contentType = String(
+      normalizedFieldValues?.["header.Content-Type"] || config?.contentType || ""
+    )
+      .trim()
+      .toLowerCase();
+    const bodyRecord = {};
+    bodyEntries.forEach(([fieldName, rawValue]) => {
+      const { name } = parseFieldReference(fieldName);
+      if (!name) {
+        return;
+      }
+      bodyRecord[name] = Array.isArray(rawValue) ? rawValue.slice() : String(rawValue ?? "");
+    });
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      const params = new URLSearchParams();
+      Object.entries(bodyRecord).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          value.forEach((item) => params.append(key, String(item ?? "")));
+          return;
+        }
+        params.set(key, String(value ?? ""));
+      });
+      return params.toString();
+    }
+    const existingValue = getElementCurrentValue(editorElement);
+    const existingObject = tryParseJsonText(existingValue, null);
+    const mergedObject =
+      existingObject && typeof existingObject === "object" && !Array.isArray(existingObject) ? { ...existingObject } : {};
+    Object.entries(bodyRecord).forEach(([key, value]) => {
+      mergedObject[key] = value;
+    });
+    return JSON.stringify(mergedObject, null, 2);
+  };
   const findControl = (operation, fieldName) => {
     const normalizedFieldName = normalize(fieldName);
     if (!operation || !normalizedFieldName) {
@@ -54174,6 +54347,10 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     const byName = operation.querySelector(`[name="${escapedName}"]`);
     if (byName) {
       return byName;
+    }
+    const byLabel = findLabeledControl(operation, normalizedFieldName);
+    if (byLabel) {
+      return byLabel;
     }
     if (normalizedFieldName === "body.resources") {
       return operation.querySelector(".CodeMirror") || operation.querySelector("textarea");
@@ -54215,32 +54392,66 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
   });
   await sleepFor(200);
 
+  const normalizedFieldValues = config?.fieldValues && typeof config.fieldValues === "object" ? config.fieldValues : {};
+  const fieldNames = Object.keys(normalizedFieldValues);
+  const hasInteractiveControlsMounted = () => {
+    const hasTargetControl =
+      fieldNames.length === 0 ||
+      fieldNames.some((fieldName) => {
+        if (fieldName.startsWith("body.")) {
+          return Boolean(findControl(operationElement, fieldName) || findRequestBodyEditor(operationElement));
+        }
+        return Boolean(findControl(operationElement, fieldName));
+      });
+    const hasAnyGenericControl = collectDescendants(operationElement).some((element) => isFormControlElement(element));
+    return hasTargetControl || hasAnyGenericControl;
+  };
   const requestButton = findActionButton(operationElement, ["request", "edit request"]);
   if (requestButton) {
     requestButton.click();
-    await sleepFor(80);
+    await sleepFor(120);
   }
 
-  const tryItButton = operationElement.querySelector('[data-cy="try-it"]');
-  if (tryItButton instanceof HTMLElement) {
+  const sendButtonSelector = () =>
+    operationElement.querySelector('[data-cy="send-button"]') || findActionButton(operationElement, ["send", "resend"]);
+  const tryItButton = await waitFor(
+    () => operationElement.querySelector('[data-cy="try-it"]') || findActionButton(operationElement, [/^try it$/i]),
+    config?.timeoutMs || 18000,
+    140
+  );
+  if (tryItButton instanceof HTMLElement && (!sendButtonSelector() || !hasInteractiveControlsMounted())) {
     tryItButton.click();
   }
-
-  const sendButton =
-    (await waitFor(
-      () =>
-        operationElement.querySelector('[data-cy="send-button"]') ||
-        findActionButton(operationElement, ["send", "resend"]),
-      config?.timeoutMs || 18000,
-      140
-    )) || null;
-  const normalizedFieldValues = config?.fieldValues && typeof config.fieldValues === "object" ? config.fieldValues : {};
+  const interactiveState =
+    (await waitFor(() => {
+      const sendButton = sendButtonSelector();
+      if (!sendButton) {
+        return null;
+      }
+      return hasInteractiveControlsMounted()
+        ? {
+            sendButton,
+          }
+        : null;
+    }, config?.timeoutMs || 18000, 140)) || null;
+  const sendButton = interactiveState?.sendButton || sendButtonSelector() || null;
   const filledFields = [];
   const missingControls = [];
+  const bodyEditorEntries = [];
+  const sharedBodyEditor = findRequestBodyEditor(operationElement);
 
   for (const [fieldName, rawValue] of Object.entries(normalizedFieldValues)) {
+    const normalizedFieldName = normalize(fieldName);
     const control = findControl(operationElement, fieldName);
+    if (normalizedFieldName.startsWith("body.") && control && sharedBodyEditor && control === sharedBodyEditor) {
+      bodyEditorEntries.push([fieldName, rawValue]);
+      continue;
+    }
     if (!control) {
+      if (normalizedFieldName.startsWith("body.")) {
+        bodyEditorEntries.push([fieldName, rawValue]);
+        continue;
+      }
       missingControls.push(fieldName);
       continue;
     }
@@ -54248,6 +54459,26 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       filledFields.push(fieldName);
     } else {
       missingControls.push(fieldName);
+    }
+  }
+  if (bodyEditorEntries.length > 0) {
+    const bodyEditor =
+      (await waitFor(() => findRequestBodyEditor(operationElement), Math.min(config?.timeoutMs || 18000, 4000), 140)) || null;
+    if (bodyEditor) {
+      const bodyEditorValue = buildRequestBodyEditorValue(bodyEditorEntries, bodyEditor, normalizedFieldValues);
+      if (setElementValue(bodyEditor, bodyEditorValue, "body")) {
+        bodyEditorEntries.forEach(([fieldName]) => {
+          filledFields.push(fieldName);
+        });
+      } else {
+        bodyEditorEntries.forEach(([fieldName]) => {
+          missingControls.push(fieldName);
+        });
+      }
+    } else {
+      bodyEditorEntries.forEach(([fieldName]) => {
+        missingControls.push(fieldName);
+      });
     }
   }
 

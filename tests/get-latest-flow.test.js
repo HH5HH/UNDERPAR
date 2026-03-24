@@ -407,13 +407,14 @@ test("openUnderparGetLatestFlow prefers the local runtime package when local dis
   assert.equal(String(response.latestSource || ""), "local-runtime");
   assert.equal(String(response.downloadSource || ""), "local-runtime");
   assert.equal(String(response.localPackageVersion || ""), "1.16.33");
-  assert.equal(response.downloadStarted, false);
-  assert.equal(response.downloadTabOpened, true);
+  assert.equal(response.downloadStarted, true);
+  assert.equal(response.downloadTabOpened, false);
   assert.equal(String(response.downloadFileName || ""), "UnderPAR-v1.16.33.zip");
-  assert.equal(seed.calls.downloadsDownload.length, 0);
-  assert.equal(seed.calls.tabsCreate.length, 2);
-  assert.equal(String(seed.calls.tabsCreate[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
-  assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
+  assert.equal(seed.calls.downloadsDownload.length, 1);
+  assert.equal(seed.calls.tabsCreate.length, 1);
+  assert.equal(String(seed.calls.downloadsDownload[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
+  assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.16.33.zip");
+  assert.equal(String(seed.calls.tabsCreate[0]?.url || ""), "chrome://extensions");
 });
 
 test("openUnderparGetLatestFlow falls back to main underpar_distro.zip with cache bust when SHA lookup fails", async () => {
@@ -530,6 +531,50 @@ test("openUnderparGetLatestFlow falls back to opening the package tab when downl
   assert.equal(seed.calls.downloadsDownload.length, 1);
   assert.equal(seed.calls.tabsCreate.length, 2);
   assert.match(String(seed.calls.tabsCreate[0]?.url || ""), new RegExp(`/${latestSha}/underpar_distro\\.zip\\?cacheBust=\\d+$`));
+  assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
+});
+
+test("openUnderparGetLatestFlow falls back to opening the bundled package tab when local-runtime downloads fail", async () => {
+  const seed = createSeed({
+    currentVersion: "1.16.29",
+    downloadShouldFail: true,
+    responseByUrl: {
+      "chrome-extension://underpar/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.33" };
+        },
+      },
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.16.29" };
+        },
+      },
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: "0123456789abcdef0123456789abcdef01234567" } };
+        },
+      },
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.openUnderparGetLatestFlow();
+
+  assert.equal(response.ok, true);
+  assert.equal(String(response.latestSource || ""), "local-runtime");
+  assert.equal(String(response.downloadSource || ""), "local-runtime");
+  assert.equal(response.downloadStarted, false);
+  assert.equal(response.downloadTabOpened, true);
+  assert.equal(seed.calls.downloadsDownload.length, 1);
+  assert.equal(seed.calls.tabsCreate.length, 2);
+  assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.16.33.zip");
+  assert.equal(String(seed.calls.tabsCreate[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
   assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
 });
 

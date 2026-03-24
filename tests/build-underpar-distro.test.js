@@ -158,3 +158,23 @@ test("distribution build prefers current tracked worktree content over stale ind
   assert.equal(packagedBackground, 'console.log("fresh-worktree");\n');
   assert.equal(packageMetadata.version, "1.0.2");
 });
+
+test("tracked distro artifacts stay in sync with the repo manifest version", () => {
+  const manifestPath = path.join(ROOT, "manifest.json");
+  const metadataPath = path.join(ROOT, "underpar_distro.version.json");
+  const artifactPath = path.join(ROOT, "underpar_distro.zip");
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const packageMetadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+  const packagedManifest = JSON.parse(
+    runCommand("unzip", ["-p", artifactPath, "underpar_distro/manifest.json"], ROOT)
+  );
+
+  const manifestVersion = String(manifest.version || "").trim();
+  const manifestVersionName = String(manifest.version_name || manifestVersion).trim() || manifestVersion;
+
+  assert.equal(packageMetadata.version, manifestVersion);
+  assert.equal(String(packageMetadata.version_name || packageMetadata.version || "").trim(), manifestVersion);
+  assert.equal(packagedManifest.version, manifestVersion);
+  assert.equal(String(packagedManifest.version_name || packagedManifest.version || "").trim(), manifestVersionName);
+});

@@ -179,6 +179,7 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.match(createHrContextSectionSource, /applyServiceBoxSectionShell\(section,\s*\{/);
   assert.match(createHrContextSectionSource, /wireHrContextSectionActions\(section\)/);
   assert.match(createHrContextSectionSource, /setHrContextSectionCollapsed\(programmer\?\.programmerId, sectionKey, collapsed\)/);
+  assert.doesNotMatch(createHrContextSectionSource, /useNativeDetailsToggle:\s*true/);
   assert.match(popupSource, /els\.premiumServicesContainer\.addEventListener\("click", \(event\) => \{/);
   assert.match(popupSource, /els\.premiumServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
   assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);

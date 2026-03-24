@@ -2526,19 +2526,14 @@ async function openUnderparGetLatestFlow() {
     if (!downloadUrl) {
       throw new Error("No UnderPAR package URL available");
     }
-    if (preferLocalPackage) {
-      await chrome.tabs.create({ url: downloadUrl });
-      result.downloadTabOpened = true;
-    } else {
-      const createdDownloadId = await startLatestPackageDownload({
-        url: downloadUrl,
-        filename: downloadFileName,
-        conflictAction: "uniquify",
-        saveAs: false,
-      });
-      result.downloadId = Number(createdDownloadId || 0);
-      result.downloadStarted = true;
-    }
+    const createdDownloadId = await startLatestPackageDownload({
+      url: downloadUrl,
+      filename: downloadFileName,
+      conflictAction: "uniquify",
+      saveAs: false,
+    });
+    result.downloadId = Number(createdDownloadId || 0);
+    result.downloadStarted = true;
   } catch (error) {
     result.downloadError = buildUpdateLookupError(
       preferLocalPackage ? "Local runtime package download" : "Remote UnderPAR package download",
@@ -2572,7 +2567,9 @@ async function openUnderparGetLatestFlow() {
         ? `Bundled UnderPAR package v${localPackageVersion || currentVersion || "local"} could not be opened from the extension runtime.`
         : "Unable to open update links");
   } else if (preferLocalPackage && !hasKnownRemoteUpdate) {
-    result.infoMessage = `Opened bundled UnderPAR package v${localPackageVersion || currentVersion || "local"} from the current runtime.`;
+    result.infoMessage = result.downloadStarted
+      ? `Downloaded bundled UnderPAR package v${localPackageVersion || currentVersion || "local"} from the current runtime.`
+      : `Opened bundled UnderPAR package v${localPackageVersion || currentVersion || "local"} from the current runtime.`;
   }
   return result;
 }
