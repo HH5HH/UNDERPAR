@@ -187,6 +187,27 @@ function loadRestV2LearningResourceHelpers(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2LearningDomainResolver(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "const state = globalThis.__seed.state || { consoleBootstrapState: null };",
+    "function normalizeEntityToken(value = '') { return String(value || '').trim().toLowerCase(); }",
+    "function extractEntityIdFromToken(value = '') { const text = String(value || '').trim(); const prefixed = text.match(/^@[^:]+:(.+)$/); return prefixed ? String(prefixed[1] || '').trim() : text; }",
+    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    extractFunctionSource(source, "collectRestV2LearningRequestorDomainNames"),
+    extractFunctionSource(source, "resolveRestV2LearningRequestorDomainName"),
+    "module.exports = { collectRestV2LearningRequestorDomainNames, resolveRestV2LearningRequestorDomainName };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("HR context stays hidden without a selected media company or detected premium services", () => {
   const state = {
     programmerWorkspaceHydrationReadyByKey: new Map([["production|fox", true], ["staging|fox", false]]),
@@ -321,6 +342,10 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   );
   const collectRestV2LearningResourceIdsSource = extractFunctionSource(popupSource, "collectRestV2LearningResourceIds");
   const sampleRestV2LearningResourceIdsSource = extractFunctionSource(popupSource, "sampleRestV2LearningResourceIds");
+  const collectRestV2LearningRequestorDomainNamesSource = extractFunctionSource(
+    popupSource,
+    "collectRestV2LearningRequestorDomainNames"
+  );
   const summarizeRestV2InteractiveDocsActivationLockReasonSource = extractFunctionSource(
     popupSource,
     "summarizeRestV2InteractiveDocsActivationLockReason"
@@ -353,13 +378,25 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsContextSource, /resolvedEntry\?\.operationId === "handleRequestUsingGET"/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2InteractiveDocsAppRequestorContext/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2AppForServiceProvider/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2LearningRequestorDomainName/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /buildRestV2InteractiveDocsUrl\(resolvedEntry\.operationAnchor/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsContext/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsHydrationPlan/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /body\.resources/);
   assert.match(collectRestV2LearningResourceIdsSource, /getRestV2ProfilePreauthzChecks\(harvest\)/);
   assert.match(sampleRestV2LearningResourceIdsSource, /Math\.random/);
+  assert.match(collectRestV2LearningRequestorDomainNamesSource, /state\?\.consoleBootstrapState\?\.channels/);
+  assert.match(collectRestV2LearningRequestorDomainNamesSource, /candidate\?\.raw\?\.domains/);
   assert.match(summarizeRestV2InteractiveDocsActivationLockReasonSource, /Run LOGIN first to capture a REST V2 session code\./);
   assert.match(summarizeRestV2InteractiveDocsActivationLockReasonSource, /Run PREAUTHORIZE or AUTHORIZE first to capture resourceIds\./);
+  assert.match(
+    summarizeRestV2InteractiveDocsActivationLockReasonSource,
+    /UnderPAR could not resolve the first configured Channel domain for this RequestorId\./
+  );
+  assert.match(
+    summarizeRestV2InteractiveDocsActivationLockReasonSource,
+    /UnderPAR could not resolve this operation's docs redirectUrl\./
+  );
   assert.match(buildRestV2InteractiveDocsContextSource, /Select a Content Provider first\./);
   assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_REDIRECT_CANDIDATES/);
   assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_DEFAULT_DOMAIN/);
@@ -487,6 +524,63 @@ test("REST V2 configuration context resolves the app requestor when only the med
   assert.equal(result.serviceProviderId, "turner");
   assert.equal(result.requestorAutoResolved, true);
   assert.equal(result.appInfo?.guid, "rest-guid");
+});
+
+test("REST V2 learning resolves the first configured channel domain for the selected requestor", () => {
+  const { collectRestV2LearningRequestorDomainNames, resolveRestV2LearningRequestorDomainName } =
+    loadRestV2LearningDomainResolver({
+      state: {
+        consoleBootstrapState: {
+          channels: [
+            {
+              id: "turner",
+              raw: {
+                domains: [
+                  { domainName: "turner.example.test" },
+                  { domainName: "turner-alt.example.test" },
+                ],
+              },
+            },
+            {
+              id: "fox",
+              raw: {
+                domains: [{ domainName: "fox.example.test" }],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+  const collected = Array.from(
+    collectRestV2LearningRequestorDomainNames(
+      {
+        requestorOptions: [
+          {
+            id: "turner",
+            raw: {
+              domains: [
+                { domainName: "turner.example.test" },
+                { domainName: "turner-alt.example.test" },
+              ],
+            },
+          },
+        ],
+      },
+      "Turner"
+    )
+  );
+
+  assert.deepEqual(collected, ["turner.example.test", "turner-alt.example.test"]);
+  assert.equal(
+    resolveRestV2LearningRequestorDomainName(
+      {
+        requestorOptions: [],
+      },
+      "@ServiceProvider:turner"
+    ),
+    "turner.example.test"
+  );
 });
 
 test("REST V2 learning resource helpers merge the requestor x MVPD pool and sample ten unique ids", () => {
@@ -617,7 +711,7 @@ test("REST V2 learning activation locks operations until UnderPAR has the requir
   });
   assert.equal(createSessionState.ready, false);
   assert.match(createSessionState.reason, /Select an MVPD/);
-  assert.match(createSessionState.reason, /redirectUrl and domainName/);
+  assert.match(createSessionState.reason, /Channel domain/);
 
   const startAuthenticationState = buildRestV2InteractiveDocsEntryActivationState({
     key: "sessions-start-authentication",
@@ -775,7 +869,10 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(createSessionPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
   assert.equal(createSessionPlan.fieldValues["header.X-Device-Info"], "device-info-123");
   assert.equal(createSessionPlan.fieldValues["body.domainName"], "experience.example.test");
-  assert.equal(createSessionPlan.fieldValues["body.redirectUrl"], "https://experience.example.test/callback");
+  assert.equal(
+    createSessionPlan.fieldValues["body.redirectUrl"],
+    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/createSessionUsingPOST"
+  );
   assert.equal(Object.prototype.hasOwnProperty.call(createSessionPlan.fieldValues, "body.mvpd"), false);
   assert.deepEqual(toArray(createSessionPlan.missingRequiredFields), []);
 
@@ -799,7 +896,10 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(resumeSessionPlan.fieldValues["header.Content-Type"], "application/x-www-form-urlencoded");
   assert.equal(resumeSessionPlan.fieldValues["body.mvpd"], "Comcast_SSO");
   assert.equal(resumeSessionPlan.fieldValues["body.domainName"], "experience.example.test");
-  assert.equal(resumeSessionPlan.fieldValues["body.redirectUrl"], "https://experience.example.test/callback");
+  assert.equal(
+    resumeSessionPlan.fieldValues["body.redirectUrl"],
+    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/resumeSessionUsingPOST"
+  );
 
   const sessionStatusPlan = buildRestV2InteractiveDocsHydrationPlan(
     {
@@ -921,7 +1021,10 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     accessToken
   );
   assert.equal(logoutPlan.fieldValues["path.mvpd"], "Comcast_SSO");
-  assert.equal(logoutPlan.fieldValues["query.redirectUrl"], "https://experience.example.test/callback");
+  assert.equal(
+    logoutPlan.fieldValues["query.redirectUrl"],
+    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/getLogoutForMvpdUsingGET"
+  );
 
   const partnerProfilePlan = buildRestV2InteractiveDocsHydrationPlan(
     {
@@ -966,7 +1069,10 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   );
   assert.equal(partnerSsoPlan.fieldValues["path.partner"], "Roku");
   assert.equal(partnerSsoPlan.fieldValues["body.domainName"], "experience.example.test");
-  assert.equal(partnerSsoPlan.fieldValues["body.redirectUrl"], "https://experience.example.test/callback");
+  assert.equal(
+    partnerSsoPlan.fieldValues["body.redirectUrl"],
+    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/retrieveVerificationTokenUsingPOST"
+  );
   assert.deepEqual(toArray(partnerSsoPlan.requiredFields).sort(), [
     "body.domainName",
     "body.redirectUrl",

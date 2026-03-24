@@ -53606,6 +53606,69 @@ function getFirstCachedMvpdIdForRequestor(requestorId = "") {
   return String(firstEntry?.value || "").trim();
 }
 
+function collectRestV2LearningRequestorDomainNames(programmer = null, requestorId = "") {
+  const normalizedRequestorId = normalizeEntityToken(extractEntityIdFromToken(requestorId));
+  if (!normalizedRequestorId) {
+    return [];
+  }
+
+  const domainNames = [];
+  const appendDomainName = (value) => {
+    if (value == null) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => appendDomainName(item));
+      return;
+    }
+    if (typeof value === "object") {
+      appendDomainName(value.domainName);
+      appendDomainName(value.domain);
+      appendDomainName(value.name);
+      return;
+    }
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    if (normalizeEntityToken(normalizedValue) === "all-domains") {
+      return;
+    }
+    domainNames.push(normalizedValue);
+  };
+
+  const matchesRequestor = (candidate = null) => {
+    const candidateIds = [
+      candidate?.id,
+      candidate?.key,
+      candidate?.raw?.id,
+      candidate?.entityData?.id,
+    ]
+      .map((value) => normalizeEntityToken(extractEntityIdFromToken(value)))
+      .filter(Boolean);
+    return candidateIds.includes(normalizedRequestorId);
+  };
+
+  const channelCandidates = [
+    ...(Array.isArray(programmer?.requestorOptions) ? programmer.requestorOptions : []),
+    ...(Array.isArray(state?.consoleBootstrapState?.channels) ? state.consoleBootstrapState.channels : []),
+  ];
+  channelCandidates.forEach((candidate) => {
+    if (!matchesRequestor(candidate)) {
+      return;
+    }
+    appendDomainName(candidate?.domains);
+    appendDomainName(candidate?.raw?.domains);
+    appendDomainName(candidate?.entityData?.domains);
+  });
+
+  return uniquePreserveOrder(domainNames);
+}
+
+function resolveRestV2LearningRequestorDomainName(programmer = null, requestorId = "") {
+  return String(collectRestV2LearningRequestorDomainNames(programmer, requestorId)[0] || "").trim();
+}
+
 function findRestV2PreauthorizeHistoryEntriesForLearning(programmerId = "", requestorId = "", mvpd = "") {
   const history = getRestV2PreauthorizeHistoryForProgrammer(programmerId);
   const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
@@ -53871,13 +53934,20 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     String(harvest?.sessionCode || "").trim(),
     sessionCodeCandidates[0],
   ]);
+  const operationRedirectUrl =
+    resolvedEntry?.usesBodyRedirectUrl === true || resolvedEntry?.usesQueryRedirectUrl === true
+      ? buildRestV2InteractiveDocsUrl(resolvedEntry.operationAnchor || resolvedEntry.tagAnchor || "")
+      : "";
   const redirectUrl = normalizeAdobeNavigationUrl(
     firstNonEmptyString([
+      String(operationRedirectUrl || "").trim(),
       String(activeRecordingContext?.redirectUrl || "").trim(),
       String(harvest?.redirectUrl || "").trim(),
     ])
   );
+  const requestorDomainName = resolveRestV2LearningRequestorDomainName(resolvedProgrammer, requestorId);
   const domainName = firstNonEmptyString([
+    String(requestorDomainName || "").trim(),
     String(activeRecordingContext?.domainName || "").trim(),
     String(harvest?.domainName || "").trim(),
   ]);
@@ -53961,6 +54031,11 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (!resolvedEntry?.key || !resolvedContext?.serviceProviderId) {
     throw new Error("REST V2 learning hydration is missing entry or selection context.");
   }
+  const operationDocsUrl = buildRestV2InteractiveDocsUrl(resolvedEntry.operationAnchor || resolvedEntry.tagAnchor || "");
+  const redirectUrlValue =
+    resolvedEntry.usesBodyRedirectUrl === true || resolvedEntry.usesQueryRedirectUrl === true
+      ? String(operationDocsUrl || resolvedContext.redirectUrl || "").trim()
+      : String(resolvedContext.redirectUrl || "").trim();
 
   const fieldValues = {
     server: String(REST_V2_BASE || "").trim(),
@@ -54016,15 +54091,15 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     }
   }
   if (resolvedEntry.usesBodyRedirectUrl === true) {
-    if (String(resolvedContext.redirectUrl || "").trim()) {
-      fieldValues["body.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
+    if (redirectUrlValue) {
+      fieldValues["body.redirectUrl"] = redirectUrlValue;
     }
     if (resolvedEntry.requireBodyRedirectUrl === true) {
       requiredFields.push("body.redirectUrl");
     }
   }
-  if (resolvedEntry.usesQueryRedirectUrl === true && String(resolvedContext.redirectUrl || "").trim()) {
-    fieldValues["query.redirectUrl"] = String(resolvedContext.redirectUrl || "").trim();
+  if (resolvedEntry.usesQueryRedirectUrl === true && redirectUrlValue) {
+    fieldValues["query.redirectUrl"] = redirectUrlValue;
   }
   if (resolvedEntry.usesPartnerPath === true) {
     if (String(resolvedContext.partner || "").trim()) {
@@ -54095,8 +54170,11 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (missingRequiredFields.includes("path.partner")) {
     notes.push("Run a real Partner SSO flow first, or choose the correct partner before Send.");
   }
-  if (missingRequiredFields.includes("body.domainName") || missingRequiredFields.includes("body.redirectUrl")) {
-    notes.push("UnderPAR needs a real redirectUrl and domainName from a recent REST V2 session for this operation.");
+  if (missingRequiredFields.includes("body.domainName")) {
+    notes.push("UnderPAR could not resolve the first configured Channel domain for this RequestorId.");
+  }
+  if (missingRequiredFields.includes("body.redirectUrl") || missingRequiredFields.includes("query.redirectUrl")) {
+    notes.push("UnderPAR could not resolve this operation's docs redirectUrl.");
   }
   if (missingRequiredFields.includes("body.SAMLResponse")) {
     notes.push("Complete a Partner SSO login first so UnderPAR can capture SAMLResponse for this selection.");
@@ -54104,7 +54182,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
 
   return {
     entryKey: String(resolvedEntry.key || "").trim(),
-    docsUrl: buildRestV2InteractiveDocsUrl(resolvedEntry.operationAnchor || resolvedEntry.tagAnchor || ""),
+    docsUrl: operationDocsUrl,
     operationId: String(resolvedEntry.operationId || "").trim(),
     operationSummary: String(resolvedEntry.operationSummary || resolvedEntry.label || "").trim(),
     fieldValues: normalizedFieldValues,
@@ -54128,8 +54206,11 @@ function summarizeRestV2InteractiveDocsActivationLockReason(pendingFields = [], 
   if (hasPendingField("path.mvpd", "body.mvpd")) {
     messages.push("Select an MVPD and complete LOGIN first.");
   }
-  if (hasPendingField("body.domainName", "body.redirectUrl", "query.redirectUrl")) {
-    messages.push("Run LOGIN first to capture redirectUrl and domainName.");
+  if (hasPendingField("body.domainName")) {
+    messages.push("UnderPAR could not resolve the first configured Channel domain for this RequestorId.");
+  }
+  if (hasPendingField("body.redirectUrl", "query.redirectUrl")) {
+    messages.push("UnderPAR could not resolve this operation's docs redirectUrl.");
   }
   if (hasPendingField("body.resources")) {
     messages.push("Run PREAUTHORIZE or AUTHORIZE first to capture resourceIds.");
@@ -54190,6 +54271,24 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
   }
 
   const pendingFields = [];
+  const planFieldValues = plan?.fieldValues && typeof plan.fieldValues === "object" ? plan.fieldValues : {};
+  const hasPlannedValue = (fieldName = "") => {
+    const normalizedFieldName = String(fieldName || "").trim();
+    if (!normalizedFieldName || !Object.prototype.hasOwnProperty.call(planFieldValues, normalizedFieldName)) {
+      return false;
+    }
+    const value = planFieldValues[normalizedFieldName];
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return String(value || "").trim().length > 0;
+  };
+  const hasContextValue = (value) => {
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return String(value || "").trim().length > 0;
+  };
   const pushPendingField = (fieldName, satisfied) => {
     const normalizedFieldName = String(fieldName || "").trim();
     if (!normalizedFieldName || satisfied || pendingFields.includes(normalizedFieldName)) {
@@ -54205,25 +54304,38 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
     pushPendingField(fieldName, false);
   });
 
-  pushPendingField("path.code", resolvedEntry.usesSessionCode !== true || String(context.sessionCode || "").trim());
+  pushPendingField("path.code", resolvedEntry.usesSessionCode !== true || hasPlannedValue("path.code") || hasContextValue(context.sessionCode));
   pushPendingField(
     resolvedEntry.usesMvpdPath === true ? "path.mvpd" : "body.mvpd",
-    (resolvedEntry.usesMvpdPath !== true && resolvedEntry.usesBodyMvpd !== true) || String(context.mvpd || "").trim()
+    (resolvedEntry.usesMvpdPath !== true && resolvedEntry.usesBodyMvpd !== true) ||
+      hasPlannedValue("path.mvpd") ||
+      hasPlannedValue("body.mvpd") ||
+      hasContextValue(context.mvpd)
   );
-  pushPendingField("body.domainName", resolvedEntry.usesBodyDomainName !== true || String(context.domainName || "").trim());
+  pushPendingField(
+    "body.domainName",
+    resolvedEntry.usesBodyDomainName !== true || hasPlannedValue("body.domainName") || hasContextValue(context.domainName)
+  );
   pushPendingField(
     resolvedEntry.usesBodyRedirectUrl === true ? "body.redirectUrl" : "query.redirectUrl",
     (resolvedEntry.usesBodyRedirectUrl !== true && resolvedEntry.usesQueryRedirectUrl !== true) ||
-      String(context.redirectUrl || "").trim()
+      hasPlannedValue("body.redirectUrl") ||
+      hasPlannedValue("query.redirectUrl") ||
+      hasContextValue(context.redirectUrl)
   );
-  pushPendingField("path.partner", resolvedEntry.usesPartnerPath !== true || String(context.partner || "").trim());
+  pushPendingField("path.partner", resolvedEntry.usesPartnerPath !== true || hasPlannedValue("path.partner") || hasContextValue(context.partner));
   pushPendingField(
     "body.resources",
-    resolvedEntry.usesBodyResources !== true || (Array.isArray(context.resourceIds) && context.resourceIds.length > 0)
+    resolvedEntry.usesBodyResources !== true ||
+      hasPlannedValue("body.resources") ||
+      (Array.isArray(context.resourceIds) && context.resourceIds.length > 0)
   );
   pushPendingField(
     "body.SAMLResponse",
-    resolvedEntry.usesBodySamlResponse !== true || String(context.samlResponse || "").trim() || String(context.flowId || "").trim()
+    resolvedEntry.usesBodySamlResponse !== true ||
+      hasPlannedValue("body.SAMLResponse") ||
+      hasContextValue(context.samlResponse) ||
+      hasContextValue(context.flowId)
   );
 
   return {

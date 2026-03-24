@@ -258,5 +258,19 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     const plan = buildPlan(entry, sampleContext, "test-token");
     assert.equal(plan.operationId, entry.operationId);
     assert.equal(plan.docsUrl.endsWith(`#${entry.operationAnchor}`), true, `${entry.operationId} docs anchor drifted`);
+    if (entry.usesBodyRedirectUrl === true) {
+      assert.equal(
+        plan.fieldValues["body.redirectUrl"],
+        plan.docsUrl,
+        `${entry.operationId} body.redirectUrl must use the clicked docs operation url`
+      );
+    }
+    if (entry.usesQueryRedirectUrl === true) {
+      assert.equal(
+        plan.fieldValues["query.redirectUrl"],
+        plan.docsUrl,
+        `${entry.operationId} query.redirectUrl must use the clicked docs operation url`
+      );
+    }
   }
 });
