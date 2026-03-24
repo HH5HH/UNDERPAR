@@ -20593,7 +20593,7 @@ async function fetchHealthSplunkPreviewReportBySid(queryContext = null, tableDef
       totalRowsFromMeta,
     });
 
-    if (report.rows.length === 0 && totalRowsFromMeta > 0) {
+    if (report.rows.length === 0) {
       const resultsParams = new URLSearchParams({
         output_mode: "json",
         count: String(HEALTH_SPLUNK_TABLE_FETCH_LIMIT),
@@ -20677,6 +20677,9 @@ async function runHealthSplunkTableSearch(queryContext = null, tableDefinition =
     search: normalizeSplunkJobSearchQuery(compiledTable.query),
     earliest_time: String(queryContext?.earliest || SPLUNK_SEARCH_EARLIEST).trim() || SPLUNK_SEARCH_EARLIEST,
     latest_time: String(queryContext?.latest || SPLUNK_SEARCH_LATEST).trim() || SPLUNK_SEARCH_LATEST,
+    preview: "true",
+    provenance: `UI:dashboard:${HEALTH_SPLUNK_DASHBOARD_VIEW_NAME}`,
+    label: String(compiledTable.key || compiledTable.title || "health-splunk-table").trim(),
     output_mode: "json",
   }).toString();
   const createCandidates = [
@@ -20856,54 +20859,47 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
     );
   }
 
-  const definitionResolution = await resolveHealthSplunkTableDefinitions(queryContext, sessionEvents, relayOptions, session);
-  const resolvedTables = Array.isArray(definitionResolution?.tables) && definitionResolution.tables.length > 0
-    ? definitionResolution.tables
-    : placeholderTables;
-  if (definitionResolution?.authRequired === true) {
-    const authTables = resolvedTables.map((entry) =>
-      buildHealthSplunkTableResult(queryContext, entry, {
-        ok: false,
-        authRequired: true,
-        error: String(definitionResolution?.error || "Splunk session is not active.").trim() || "Splunk session is not active.",
-        networkEvents: sessionEvents,
-      })
-    );
-    return finalizeReport(
-      buildHealthSplunkDashboardReportPayload(queryContext, authTables, {
-        error: String(definitionResolution?.error || "Splunk session is not active.").trim() || "Splunk session is not active.",
-      })
-    );
-  }
-
-  const tableResults = [];
-  for (const tableDefinition of resolvedTables) {
-    const tableResult = await runHealthSplunkTableSearch(queryContext, tableDefinition, {
+  const resolvedTables = placeholderTables.slice();
+  const tableResults = new Array(resolvedTables.length);
+  const tablePromises = resolvedTables.map((tableDefinition, index) =>
+    runHealthSplunkTableSearch(queryContext, tableDefinition, {
       relayOptions,
-    });
-    tableResults.push(tableResult);
-    void healthWorkspaceSendWorkspaceMessage(
-      "table-result",
-      {
-        selectionKey: queryContext.selectionKey,
-        queryContext,
-        table: tableResult,
-        completedTables: tableResults.length,
-        totalTables: resolvedTables.length,
-      },
-      {
-        targetWindowId,
-      }
-    );
-  }
+    })
+      .then((tableResult) => ({ index, tableResult }))
+      .catch((error) => ({
+        index,
+        tableResult: buildHealthSplunkTableResult(queryContext, tableDefinition, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      }))
+  );
+
+  await Promise.all(
+    tablePromises.map(async (tablePromise) => {
+      const { index, tableResult } = await tablePromise;
+      tableResults[index] = tableResult;
+      const completedTables = tableResults.filter(Boolean).length;
+      void healthWorkspaceSendWorkspaceMessage(
+        "table-result",
+        {
+          selectionKey: queryContext.selectionKey,
+          queryContext,
+          table: tableResult,
+          completedTables,
+          totalTables: resolvedTables.length,
+        },
+        {
+          targetWindowId,
+        }
+      );
+    })
+  );
 
   return finalizeReport(
-    buildHealthSplunkDashboardReportPayload(queryContext, tableResults, {
-      fallbackUsed: definitionResolution?.fallbackUsed === true,
-      error: firstNonEmptyString([
-        definitionResolution?.fallbackUsed === true ? String(definitionResolution?.error || "").trim() : "",
-        "One or more HEALTH Splunk tables failed to load.",
-      ]),
+    buildHealthSplunkDashboardReportPayload(queryContext, tableResults.filter(Boolean), {
+      fallbackUsed: false,
+      error: "One or more HEALTH Splunk tables failed to load.",
     })
   );
 }

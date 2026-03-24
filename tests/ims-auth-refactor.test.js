@@ -1305,6 +1305,7 @@ test("health splunk prefers the live dashboard deeplink and normalizes dashboard
   const normalizeJobSource = extractFunctionSource(popupSource, "normalizeSplunkJobSearchQuery");
   const healthQueryContextSource = extractFunctionSource(popupSource, "buildHealthSplunkQueryContext");
   const tableSearchSource = extractFunctionSource(popupSource, "runHealthSplunkTableSearch");
+  const dashboardRunSource = extractFunctionSource(popupSource, "runHealthSplunkDashboardForSelection");
   const restSearchSource = extractFunctionSource(popupSource, "runSplunkSearchForQueryContext");
   const dashboardDefinitionSource = extractFunctionSource(popupSource, "parseHealthSplunkTableDefinitionsFromDashboardDefinition");
 
@@ -1315,9 +1316,58 @@ test("health splunk prefers the live dashboard deeplink and normalizes dashboard
   assert.match(healthQueryContextSource, /url\.searchParams\.set\("form\.environment", environmentIndex\);/);
   assert.match(normalizeJobSource, /return `search \$\{normalizedSearch\}`;/);
   assert.match(tableSearchSource, /search: normalizeSplunkJobSearchQuery\(compiledTable\.query\),/);
+  assert.match(tableSearchSource, /preview:\s*"true"/);
+  assert.match(tableSearchSource, /provenance:\s*`UI:dashboard:\$\{HEALTH_SPLUNK_DASHBOARD_VIEW_NAME\}`/);
+  assert.match(tableSearchSource, /label:\s*String\(compiledTable\.key \|\| compiledTable\.title \|\| "health-splunk-table"\)\.trim\(\)/);
   assert.match(restSearchSource, /search: normalizeSplunkJobSearchQuery\(queryContext\.search\),/);
   assert.match(dashboardDefinitionSource, /const dataSourceRef = String\(dataSource\?\.options\?\.ref \|\| ""\)\.trim\(\);/);
   assert.match(dashboardDefinitionSource, /const queryTemplate = firstNonEmptyString\(\[dataSource\?\.options\?\.query,\s*matchedFallback\?\.queryTemplate\]\);/);
+  assert.doesNotMatch(dashboardRunSource, /resolveHealthSplunkTableDefinitions\(/);
+  assert.match(dashboardRunSource, /const resolvedTables = placeholderTables\.slice\(\);/);
+  assert.match(dashboardRunSource, /await Promise\.all\(/);
+});
+
+test("health splunk preview parser reads dashboard-studio json_cols rows from HAR-style payloads", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : []) { const text = String(value ?? '').trim(); if (text) { return text; } } return ''; }",
+    extractFunctionSource(popupSource, "normalizeSplunkCellValue"),
+    extractFunctionSource(popupSource, "extractSplunkRowsFromResponsePayload"),
+    extractFunctionSource(popupSource, "extractSplunkFieldsFromResponsePayload"),
+    extractFunctionSource(popupSource, "collectSplunkColumnOrder"),
+    extractFunctionSource(popupSource, "buildSplunkRowDedupeKey"),
+    extractFunctionSource(popupSource, "dedupeSplunkRows"),
+    extractFunctionSource(popupSource, "normalizeSplunkRows"),
+    extractFunctionSource(popupSource, "parseSplunkPreviewRowsPayload"),
+    "module.exports = { parseSplunkPreviewRowsPayload };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
+  const { parseSplunkPreviewRowsPayload } = context.module.exports;
+
+  const parsed = parseSplunkPreviewRowsPayload({
+    preview: false,
+    fields: [{ name: "serviceProvider" }, { name: "access_token" }, { name: "count" }],
+    columns: [["MML", "MML"], ["token-a", "token-b"], ["7", "3"]],
+  });
+
+  assert.deepEqual(Array.from(parsed.columns || []), ["serviceProvider", "access_token", "count"]);
+  assert.equal(parsed.totalRows, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(parsed.rows)), [
+    {
+      serviceProvider: "MML",
+      access_token: "token-a",
+      count: "7",
+    },
+    {
+      serviceProvider: "MML",
+      access_token: "token-b",
+      count: "3",
+    },
+  ]);
 });
 
 test("programmer endpoint access_denied responses stay on the limited console path", () => {
