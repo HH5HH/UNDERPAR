@@ -1295,6 +1295,27 @@ test("esm health tenant token requests stay on the console rest api base", () =>
   assert.doesNotMatch(tokenSource, /consoleBase\.replace\(\/\\\/\+\$\/, ""\)\}\$\{ESM_HEALTH_TENANT_TOKEN_PATH\}/);
 });
 
+test("health splunk prefers the live dashboard deeplink and normalizes dashboard queries for Splunk job APIs", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const landingSource = extractFunctionSource(popupSource, "getSplunkSearchLandingUrl");
+  const normalizeJobSource = extractFunctionSource(popupSource, "normalizeSplunkJobSearchQuery");
+  const healthQueryContextSource = extractFunctionSource(popupSource, "buildHealthSplunkQueryContext");
+  const tableSearchSource = extractFunctionSource(popupSource, "runHealthSplunkTableSearch");
+  const restSearchSource = extractFunctionSource(popupSource, "runSplunkSearchForQueryContext");
+  const dashboardDefinitionSource = extractFunctionSource(popupSource, "parseHealthSplunkTableDefinitionsFromDashboardDefinition");
+
+  assert.match(landingSource, /const dashboardUrl = String\(queryContext\?\.dashboardUrl \|\| ""\)\.trim\(\);/);
+  assert.match(landingSource, /if \(dashboardUrl\) {\s*return dashboardUrl;\s*}/);
+  assert.match(healthQueryContextSource, /new URL\(`\$\{SPLUNK_BASE_URL\}\/en-US\/app\/app_adobepass\/\$\{HEALTH_SPLUNK_DASHBOARD_VIEW_NAME\}`\)/);
+  assert.match(healthQueryContextSource, /url\.searchParams\.set\("form\.serviceProvider", requestorId\);/);
+  assert.match(healthQueryContextSource, /url\.searchParams\.set\("form\.environment", environmentIndex\);/);
+  assert.match(normalizeJobSource, /return `search \$\{normalizedSearch\}`;/);
+  assert.match(tableSearchSource, /search: normalizeSplunkJobSearchQuery\(compiledTable\.query\),/);
+  assert.match(restSearchSource, /search: normalizeSplunkJobSearchQuery\(queryContext\.search\),/);
+  assert.match(dashboardDefinitionSource, /const dataSourceRef = String\(dataSource\?\.options\?\.ref \|\| ""\)\.trim\(\);/);
+  assert.match(dashboardDefinitionSource, /const queryTemplate = firstNonEmptyString\(\[dataSource\?\.options\?\.query,\s*matchedFallback\?\.queryTemplate\]\);/);
+});
+
 test("programmer endpoint access_denied responses stay on the limited console path", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const helperSource = extractFunctionSource(popupSource, "isAdobeConsoleAccessDeniedResponse");
@@ -3433,6 +3454,17 @@ test("sidepanel requestor picker spans the same full workflow width as media com
     popupCss,
     /\.premium-service-section \.service-box-details,\s*\.hr-context-section \.service-box-details\s*\{[\s\S]*?display:\s*block;[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;/
   );
+});
+
+test("health status action pills shrink-wrap their labels like the rest of UnderPAR", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
+  const healthStatusSource = extractFunctionSource(popupSource, "buildHrContextHealthStatusItemHtml");
+
+  assert.match(healthStatusSource, />ESM<\/button>/);
+  assert.match(healthStatusSource, />SPLUNK<\/button>/);
+  assert.match(popupCss, /\.hr-health-action-row\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?align-self:\s*flex-start;/);
+  assert.match(popupCss, /\.hr-health-action-btn\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?flex:\s*0 0 auto;[\s\S]*?white-space:\s*nowrap;/);
 });
 
 test("requestor and MVPD selectors ship blank default options instead of placeholder copy", () => {

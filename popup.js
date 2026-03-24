@@ -18671,7 +18671,38 @@ function buildSplunkSearchQueryForUpstreamUserId(upstreamUserId = "") {
   return `search index=${getSplunkSearchIndexForEnvironment()} "${escaped}"`;
 }
 
+function normalizeSplunkJobSearchQuery(search = "") {
+  const normalizedSearch = String(search || "").trim();
+  if (!normalizedSearch) {
+    return "";
+  }
+  const normalizedLower = normalizedSearch.toLowerCase();
+  const commandPrefixes = [
+    "search ",
+    "|",
+    "savedsearch ",
+    "tstats ",
+    "mstats ",
+    "from ",
+    "metadata ",
+    "inputlookup ",
+    "makeresults ",
+    "multisearch ",
+    "union ",
+    "pivot ",
+    "loadjob ",
+  ];
+  if (commandPrefixes.some((prefix) => normalizedLower.startsWith(prefix))) {
+    return normalizedSearch;
+  }
+  return `search ${normalizedSearch}`;
+}
+
 function getSplunkSearchLandingUrl(queryContext = null) {
+  const dashboardUrl = String(queryContext?.dashboardUrl || "").trim();
+  if (dashboardUrl) {
+    return dashboardUrl;
+  }
   const baseUrl = new URL(`${SPLUNK_BASE_URL}${SPLUNK_APP_SEARCH_PATH}`);
   const searchExpression = firstNonEmptyString([
     queryContext?.search,
@@ -19866,7 +19897,7 @@ async function runSplunkSearchForQueryContext(rawQueryContext = null, options = 
     }
 
     const createBody = new URLSearchParams({
-      search: queryContext.search,
+      search: normalizeSplunkJobSearchQuery(queryContext.search),
       earliest_time: queryContext.earliest,
       latest_time: queryContext.latest,
       output_mode: "json",
@@ -20226,18 +20257,17 @@ function parseHealthSplunkTableDefinitionsFromDashboardDefinition(definition = n
       return;
     }
     const dataSource = dataSources[primaryDataSourceKey];
-    const queryTemplate = String(dataSource?.options?.query || "").trim();
-    if (!queryTemplate) {
-      return;
-    }
     const title = String(viz?.title || dataSource?.name || "").trim();
     const normalizedTitle = normalizeHealthSplunkReportTitle(title);
+    const dataSourceRef = String(dataSource?.options?.ref || "").trim();
     const matchedFallback = HEALTH_SPLUNK_TABLE_DEFINITIONS.find(
       (entry) =>
         normalizeHealthSplunkReportTitle(entry.title) === normalizedTitle ||
-        normalizeHealthSplunkReportTitle(dataSource?.name) === normalizeHealthSplunkReportTitle(entry.title)
+        normalizeHealthSplunkReportTitle(dataSource?.name) === normalizeHealthSplunkReportTitle(entry.title) ||
+        normalizeHealthSplunkReportTitle(dataSourceRef) === normalizeHealthSplunkReportTitle(entry.title)
     );
-    if (!matchedFallback) {
+    const queryTemplate = firstNonEmptyString([dataSource?.options?.query, matchedFallback?.queryTemplate]);
+    if (!queryTemplate || !matchedFallback) {
       return;
     }
     tables.push({
@@ -20644,7 +20674,7 @@ async function runHealthSplunkTableSearch(queryContext = null, tableDefinition =
 
   const relayOptions = options?.relayOptions && typeof options.relayOptions === "object" ? options.relayOptions : {};
   const createBody = new URLSearchParams({
-    search: compiledTable.query,
+    search: normalizeSplunkJobSearchQuery(compiledTable.query),
     earliest_time: String(queryContext?.earliest || SPLUNK_SEARCH_EARLIEST).trim() || SPLUNK_SEARCH_EARLIEST,
     latest_time: String(queryContext?.latest || SPLUNK_SEARCH_LATEST).trim() || SPLUNK_SEARCH_LATEST,
     output_mode: "json",
@@ -57301,9 +57331,7 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
             data-health-action="esm"
             title="Open ESM HEALTH dashboard"
             aria-label="Open ESM HEALTH dashboard"
-          >
-            ESM
-          </button>
+          >ESM</button>
           <button
             type="button"
             class="hr-health-action-btn hr-health-action-btn--accent"
@@ -57319,9 +57347,7 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
                 : "Select a RequestorId to unlock HEALTH SPLUNK"
             )}"
             ${healthReady ? "" : "disabled"}
-          >
-            SPLUNK
-          </button>
+          >SPLUNK</button>
         </div>
       </div>
     </article>

@@ -2615,7 +2615,7 @@ select:disabled {
 .hr-health-status-value .metadata-value {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .hr-health-status-copy {
@@ -2633,23 +2633,35 @@ select:disabled {
 }
 
 .hr-health-action-row {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  width: auto;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .hr-health-action-btn {
   appearance: none;
-  min-height: 32px;
-  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 1px solid var(--s2-action-border-default);
   background: var(--s2-action-bg-default);
   color: var(--s2-action-text-default);
   font-size: 11px;
   font-weight: 800;
+  line-height: 1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
   cursor: pointer;
   transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
