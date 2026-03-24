@@ -53235,6 +53235,19 @@ function buildPremiumServicesRenderSignature(programmer = null, services = null)
   return [programmerId, selectedRequestorId, selectedMvpdId, ...serviceSegments].join("|");
 }
 
+function buildHrSectionsRenderSignature(programmer = null, services = null, options = {}) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  if (!programmerId || !services || typeof services !== "object") {
+    return "";
+  }
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  const selectedMvpdId = String(state.selectedMvpdId || "").trim();
+  const availableKeys = getDetectedPremiumServiceKeys(services);
+  const errorText = String(options?.error || "").trim();
+  const loadingFlag = options?.loading === true ? "loading" : "ready";
+  return [programmerId, selectedRequestorId, selectedMvpdId, loadingFlag, errorText, ...availableKeys].join("|");
+}
+
 function refreshExistingPremiumServiceSections(programmer, services = null) {
   if (!els.premiumServicesContainer || !programmer?.programmerId || !services || typeof services !== "object") {
     return;
@@ -54770,7 +54783,17 @@ function renderHrSections(services, programmer = null, options = {}) {
   }
 
   if (!shouldRevealHrContextSections(programmer, services)) {
+    delete els.hrServicesContainer.dataset.renderSignature;
     setHrContextSectionsVisibility(false);
+    return;
+  }
+
+  const renderSignature = buildHrSectionsRenderSignature(programmer, services, options);
+  if (
+    renderSignature &&
+    String(els.hrServicesContainer.dataset.renderSignature || "") === renderSignature
+  ) {
+    setHrContextSectionsVisibility(true);
     return;
   }
 
@@ -54787,6 +54810,7 @@ function renderHrSections(services, programmer = null, options = {}) {
   bottomDivider.className = "hr-context-divider";
   bottomDivider.setAttribute("aria-hidden", "true");
   els.hrServicesContainer.appendChild(bottomDivider);
+  els.hrServicesContainer.dataset.renderSignature = renderSignature;
 }
 
 function renderPremiumServices(services, programmer = null, options = {}) {

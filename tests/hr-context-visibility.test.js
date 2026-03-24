@@ -153,9 +153,11 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const applyServiceBoxSectionShellSource = extractFunctionSource(popupSource, "applyServiceBoxSectionShell");
+  const buildHrSectionsRenderSignatureSource = extractFunctionSource(popupSource, "buildHrSectionsRenderSignature");
   const wireHrContextSectionActionsSource = extractFunctionSource(popupSource, "wireHrContextSectionActions");
   const createPremiumServiceSectionSource = extractFunctionSource(popupSource, "createPremiumServiceSection");
   const createHrContextSectionSource = extractFunctionSource(popupSource, "createHrContextSection");
+  const renderHrSectionsSource = extractFunctionSource(popupSource, "renderHrSections");
 
   assert.match(sidepanelHtml, /id="hr-services-container"\s+class="hr-services-container"\s+hidden/);
   assert.match(popupSource, /topDivider\.className = "hr-context-divider"/);
@@ -181,6 +183,10 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.match(createHrContextSectionSource, /wireHrContextSectionActions\(section\)/);
   assert.match(createHrContextSectionSource, /setHrContextSectionCollapsed\(programmer\?\.programmerId, sectionKey, collapsed\)/);
   assert.doesNotMatch(createHrContextSectionSource, /useNativeDetailsToggle:\s*true/);
+  assert.match(buildHrSectionsRenderSignatureSource, /state\.selectedRequestorId/);
+  assert.match(buildHrSectionsRenderSignatureSource, /state\.selectedMvpdId/);
+  assert.match(renderHrSectionsSource, /els\.hrServicesContainer\.dataset\.renderSignature/);
+  assert.match(renderHrSectionsSource, /buildHrSectionsRenderSignature\(programmer, services, options\)/);
   assert.match(popupSource, /els\.premiumServicesContainer\.addEventListener\("click", \(event\) => \{/);
   assert.match(popupSource, /els\.premiumServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
   assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
