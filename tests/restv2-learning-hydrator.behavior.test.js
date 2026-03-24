@@ -514,6 +514,206 @@ test("REST V2 docs hydrator merges body fields into a JSON request-body editor w
   assert.deepEqual(Array.from(result.unresolvedRequiredFields), []);
 });
 
+test("REST V2 docs hydrator waits for a delayed live-style request-body editor before hydrating body resources", async () => {
+  const harness = createDomHarness("retrieveAuthorizeDecisionsForMvpdUsingPOST");
+  const { createElement, operationElement } = harness;
+  const tryItButton = operationElement.appendChild(
+    createElement("button", {
+      textContent: "Try it",
+      attributes: { "data-cy": "try-it" },
+    })
+  );
+  const refs = {};
+  let editorValue = JSON.stringify({ resources: ["string"] }, null, 2);
+  tryItButton.onClick = () => {
+    setTimeout(() => {
+      refs.sendButton = operationElement.appendChild(
+        createElement("button", {
+          textContent: "Send",
+          attributes: { "data-cy": "send-button" },
+        })
+      );
+      refs.serviceProviderInput = operationElement.appendChild(
+        createElement("input", {
+          type: "text",
+          attributes: { name: "path.serviceProvider" },
+        })
+      );
+      refs.mvpdInput = operationElement.appendChild(
+        createElement("input", {
+          type: "text",
+          attributes: { name: "path.mvpd" },
+        })
+      );
+    }, 25);
+    setTimeout(() => {
+      const bodyWrapper = operationElement.appendChild(
+        createElement("div", {
+          attributes: { "data-cy": "console-request-body" },
+        })
+      );
+      const reactCodeMirror = bodyWrapper.appendChild(
+        createElement("div", {
+          className: "react-codemirror2",
+        })
+      );
+      refs.editorElement = reactCodeMirror.appendChild(
+        createElement("div", {
+          className: "CodeMirror cm-s-material",
+          attributes: { "aria-label": "Request body" },
+        })
+      );
+      refs.editorElement.appendChild(
+        createElement("textarea", {
+          attributes: {
+            tabindex: "0",
+            style: "position: absolute; bottom: -1em; width: 1000px; height: 1em;",
+          },
+        })
+      );
+      refs.editorElement.CodeMirror = {
+        getValue() {
+          return editorValue;
+        },
+        setValue(nextValue) {
+          editorValue = String(nextValue || "");
+        },
+        save() {},
+      };
+    }, 4200);
+  };
+
+  const runRestV2InteractiveDocsHydrator = loadHydrator({
+    document: harness.document,
+    location: harness.location,
+    window: harness.window,
+    Event: harness.Event,
+    HTMLElement: harness.HTMLElement,
+    HTMLInputElement: harness.HTMLInputElement,
+    HTMLSelectElement: harness.HTMLSelectElement,
+    HTMLTextAreaElement: harness.HTMLTextAreaElement,
+  });
+
+  const result = await runRestV2InteractiveDocsHydrator({
+    operationId: "retrieveAuthorizeDecisionsForMvpdUsingPOST",
+    fieldValues: {
+      "path.serviceProvider": "Turner",
+      "path.mvpd": "Comcast_SSO",
+      "header.Content-Type": "application/json",
+      "body.resources": ["1234", "NBALP", "TMSIDX"],
+    },
+    requiredFields: ["path.serviceProvider", "path.mvpd", "body.resources"],
+    missingRequiredFields: [],
+    timeoutMs: 6000,
+  });
+
+  assert.equal(tryItButton.clicked, true);
+  assert.equal(refs.serviceProviderInput.value, "Turner");
+  assert.equal(refs.mvpdInput.value, "Comcast_SSO");
+  assert.deepEqual(JSON.parse(editorValue), {
+    resources: ["1234", "NBALP", "TMSIDX"],
+  });
+  assert.equal(refs.sendButton.focused, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.filledFields.includes("body.resources"), true);
+  assert.deepEqual(Array.from(result.unresolvedRequiredFields), []);
+});
+
+test("REST V2 docs hydrator prefers the request-body editor over a mislabeled nearby select for body resources", async () => {
+  const harness = createDomHarness("retrieveAuthorizeDecisionsForMvpdUsingPOST");
+  const { createElement, operationElement } = harness;
+  const sendButton = operationElement.appendChild(
+    createElement("button", {
+      textContent: "Send",
+      attributes: { "data-cy": "send-button" },
+    })
+  );
+  operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "path.serviceProvider" },
+    })
+  );
+  operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "path.mvpd" },
+    })
+  );
+  const bodyWrapper = operationElement.appendChild(
+    createElement("div", {
+      textContent: "Target server Body resources",
+      attributes: { "data-cy": "console-request-body" },
+    })
+  );
+  const misleadingSelect = bodyWrapper.appendChild(
+    createElement("select", {
+      className: "dropdown-select",
+      value: "https://sp.auth.adobe.com/api/v2",
+    })
+  );
+  misleadingSelect.appendChild(
+    createElement("option", {
+      value: "https://sp.auth.adobe.com/api/v2",
+      textContent: "https://sp.auth.adobe.com/api/v2",
+    })
+  );
+  const reactCodeMirror = bodyWrapper.appendChild(
+    createElement("div", {
+      className: "react-codemirror2",
+    })
+  );
+  const editorElement = reactCodeMirror.appendChild(
+    createElement("div", {
+      className: "CodeMirror cm-s-material",
+      attributes: { "aria-label": "Request body" },
+    })
+  );
+  let editorValue = JSON.stringify({ resources: ["string"] }, null, 2);
+  editorElement.CodeMirror = {
+    getValue() {
+      return editorValue;
+    },
+    setValue(nextValue) {
+      editorValue = String(nextValue || "");
+    },
+    save() {},
+  };
+
+  const runRestV2InteractiveDocsHydrator = loadHydrator({
+    document: harness.document,
+    location: harness.location,
+    window: harness.window,
+    Event: harness.Event,
+    HTMLElement: harness.HTMLElement,
+    HTMLInputElement: harness.HTMLInputElement,
+    HTMLSelectElement: harness.HTMLSelectElement,
+    HTMLTextAreaElement: harness.HTMLTextAreaElement,
+  });
+
+  const result = await runRestV2InteractiveDocsHydrator({
+    operationId: "retrieveAuthorizeDecisionsForMvpdUsingPOST",
+    fieldValues: {
+      "path.serviceProvider": "Turner",
+      "path.mvpd": "Comcast_SSO",
+      "header.Content-Type": "application/json",
+      "body.resources": ["1234", "NBALP", "TMSIDX"],
+    },
+    requiredFields: ["path.serviceProvider", "path.mvpd", "body.resources"],
+    missingRequiredFields: [],
+    timeoutMs: 1200,
+  });
+
+  assert.equal(misleadingSelect.value, "https://sp.auth.adobe.com/api/v2");
+  assert.deepEqual(JSON.parse(editorValue), {
+    resources: ["1234", "NBALP", "TMSIDX"],
+  });
+  assert.equal(sendButton.focused, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.filledFields.includes("body.resources"), true);
+  assert.deepEqual(Array.from(result.unresolvedRequiredFields), []);
+});
+
 test("REST V2 docs hydrator serializes form-encoded body fields into a textarea request editor", async () => {
   const harness = createDomHarness("createSessionUsingPOST");
   const { createElement, operationElement } = harness;

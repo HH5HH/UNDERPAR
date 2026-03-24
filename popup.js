@@ -54890,6 +54890,15 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     if (!operation) {
       return null;
     }
+    const explicitBodyEditor =
+      operation.querySelector('[data-cy="console-request-body"] .CodeMirror') ||
+      operation.querySelector('[data-cy="console-request-body"] textarea') ||
+      operation.querySelector('[data-cy="console-request-body"] .react-codemirror2') ||
+      operation.querySelector(".react-codemirror2 .CodeMirror") ||
+      operation.querySelector(".react-codemirror2");
+    if (explicitBodyEditor) {
+      return findEmbeddedControlWithin(explicitBodyEditor) || explicitBodyEditor;
+    }
     const descendants = collectDescendants(operation);
     const bodyCandidates = descendants.filter((element) => {
       if (!isFormControlElement(element)) {
@@ -54957,19 +54966,15 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     if (byName) {
       return byName;
     }
+    if (normalizedFieldName === "body.resources") {
+      return findRequestBodyEditor(operation);
+    }
+    if (normalizedFieldName === "body.SAMLResponse") {
+      return findRequestBodyEditor(operation) || operation.querySelector('input[type="text"], input:not([type])');
+    }
     const byLabel = findLabeledControl(operation, normalizedFieldName);
     if (byLabel) {
       return byLabel;
-    }
-    if (normalizedFieldName === "body.resources") {
-      return operation.querySelector(".CodeMirror") || operation.querySelector("textarea");
-    }
-    if (normalizedFieldName === "body.SAMLResponse") {
-      return (
-        operation.querySelector(".CodeMirror") ||
-        operation.querySelector("textarea") ||
-        operation.querySelector('input[type="text"], input:not([type])')
-      );
     }
     return null;
   };
@@ -55004,16 +55009,15 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
   const normalizedFieldValues = config?.fieldValues && typeof config.fieldValues === "object" ? config.fieldValues : {};
   const fieldNames = Object.keys(normalizedFieldValues);
   const hasInteractiveControlsMounted = () => {
-    const hasTargetControl =
-      fieldNames.length === 0 ||
-      fieldNames.some((fieldName) => {
-        if (fieldName.startsWith("body.")) {
-          return Boolean(findControl(operationElement, fieldName) || findRequestBodyEditor(operationElement));
-        }
-        return Boolean(findControl(operationElement, fieldName));
-      });
-    const hasAnyGenericControl = collectDescendants(operationElement).some((element) => isFormControlElement(element));
-    return hasTargetControl || hasAnyGenericControl;
+    if (fieldNames.length === 0) {
+      return collectDescendants(operationElement).some((element) => isFormControlElement(element));
+    }
+    return fieldNames.every((fieldName) => {
+      if (fieldName.startsWith("body.")) {
+        return Boolean(findControl(operationElement, fieldName) || findRequestBodyEditor(operationElement));
+      }
+      return Boolean(findControl(operationElement, fieldName));
+    });
   };
   const requestButton = findActionButton(operationElement, ["request", "edit request"]);
   if (requestButton) {
@@ -55072,7 +55076,7 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
   }
   if (bodyEditorEntries.length > 0) {
     const bodyEditor =
-      (await waitFor(() => findRequestBodyEditor(operationElement), Math.min(config?.timeoutMs || 18000, 4000), 140)) || null;
+      (await waitFor(() => findRequestBodyEditor(operationElement), config?.timeoutMs || 18000, 140)) || null;
     if (bodyEditor) {
       const bodyEditorValue = buildRequestBodyEditorValue(bodyEditorEntries, bodyEditor, normalizedFieldValues);
       if (setElementValue(bodyEditor, bodyEditorValue, "body")) {

@@ -506,7 +506,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(runRestV2InteractiveDocsHydratorSource, /formatEditorBodyValue/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /normalizedFieldName === "body\.SAMLResponse"/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /normalizedFieldName === "body\.resources"/);
-  assert.match(runRestV2InteractiveDocsHydratorSource, /querySelector\("textarea"\)/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /console-request-body/);
+  assert.match(runRestV2InteractiveDocsHydratorSource, /textarea/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry-readiness/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry-state-badge--locked/);
