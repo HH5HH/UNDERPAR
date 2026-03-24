@@ -185,9 +185,16 @@ function renderTableCard(table = null) {
   const title = String(table?.title || "HEALTH Table").trim();
   const checkedAtLabel = formatDateTime(table?.checkedAt);
   const sid = String(table?.sid || "").trim();
+  const columns = Array.isArray(table?.columns) ? table.columns.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const hasRows = columns.length > 0 && rows.length > 0;
+  const hasError = table?.ok !== true && String(table?.error || "").trim();
+  const isPending = table?.pending === true;
   const displayedRows = Number(table?.displayedRows || 0);
   const totalRows = Math.max(Number(table?.totalRows || 0), displayedRows);
   const rowSummary = totalRows > displayedRows ? `${displayedRows} shown of ${totalRows} rows` : `${displayedRows} row${displayedRows === 1 ? "" : "s"}`;
+  const sectionStateLabel = isPending ? "Pending" : hasRows ? rowSummary : hasError ? "Issue" : "No rows";
+  const defaultOpen = isPending || hasRows || hasError;
   const queryMarkup = String(table?.query || "").trim()
     ? `
       <details class="health-report-query">
@@ -197,16 +204,23 @@ function renderTableCard(table = null) {
     `
     : "";
   return `
-    <article class="rest-report-card health-report-card">
-      <header class="rest-report-head">
-        <p class="rest-report-title">${escapeHtml(title)}</p>
-        <p class="rest-report-meta"><strong>Checked:</strong> ${escapeHtml(checkedAtLabel)} | <strong>SID:</strong> ${escapeHtml(
-          sid || "N/A"
-        )} | <strong>Rows:</strong> ${escapeHtml(rowSummary)}</p>
-      </header>
-      ${queryMarkup}
-      ${renderTableMarkup(table)}
-    </article>
+    <details class="rest-report-card health-report-card health-report-collapsible${hasRows || isPending || hasError ? "" : " is-empty"}"${
+      defaultOpen ? " open" : ""
+    }>
+      <summary class="health-report-summary">
+        <div class="health-report-summary-copy">
+          <p class="rest-report-title">${escapeHtml(title)}</p>
+          <p class="rest-report-meta"><strong>Checked:</strong> ${escapeHtml(checkedAtLabel)} | <strong>SID:</strong> ${escapeHtml(
+            sid || "N/A"
+          )} | <strong>Rows:</strong> ${escapeHtml(rowSummary)}</p>
+        </div>
+        <span class="health-report-summary-pill">${escapeHtml(sectionStateLabel)}</span>
+      </summary>
+      <div class="health-report-card-body">
+        ${queryMarkup}
+        ${renderTableMarkup(table)}
+      </div>
+    </details>
   `;
 }
 

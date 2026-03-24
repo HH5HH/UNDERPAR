@@ -1328,11 +1328,11 @@ test("esm health treats an unavailable uniques dataset as optional instead of fa
 
   assert.match(reportPayloadSource, /const ignoredSections = new Set\(/);
   assert.match(reportPayloadSource, /const effectiveSections = requestedSections\.filter\(\(key\) => !ignoredSections\.has\(key\)\);/);
-  assert.match(runSource, /const uniquesUnsupported =\s*normalizeEsmHealthGranularity\(queryContext\.granularity\) === "day" && Number\(uniquesResult\?\.status \|\| 0\) === 404;/);
+  assert.match(runSource, /const uniquesUnsupported = Number\(uniquesResult\?\.status \|\| 0\) === 404;/);
   assert.match(runSource, /ignoredSections\.push\("uniques"\);/);
 
   const script = [
-    'function normalizeEsmHealthGranularity(value = "") { return String(value || "").trim().toLowerCase() === "day" ? "day" : "month"; }',
+    'function normalizeEsmHealthGranularity(value = "") { const normalized = String(value || "").trim().toLowerCase(); return normalized === "hour" || normalized === "day" || normalized === "month" ? normalized : "hour"; }',
     "function buildEsmHealthSummary() { return {}; }",
     extractFunctionSource(popupSource, "buildEsmHealthDashboardReportPayload"),
     "module.exports = { buildEsmHealthDashboardReportPayload };",
@@ -1357,9 +1357,111 @@ test("esm health treats an unavailable uniques dataset as optional instead of fa
 
   assert.equal(report.ok, true);
   assert.equal(report.partial, false);
-  assert.equal(report.loadedSections, 4);
-  assert.equal(report.totalSections, 4);
+  assert.equal(report.loadedSections, 7);
+  assert.equal(report.totalSections, 7);
   assert.equal(report.error, "");
+});
+
+test("esm health now builds supported ordered report paths and drops broken metric-bundle breakdown calls", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const runSource = extractFunctionSource(popupSource, "runEsmHealthDashboardForSelection");
+
+  assert.match(
+    runSource,
+    /const breakdownGranularity = "day";/
+  );
+  assert.match(
+    runSource,
+    /const scopeBreakdownPath = buildEsmHealthReportPath\(breakdownGranularity, \["requestor-id", "proxy", "mvpd", "platform"\]\);/
+  );
+  assert.match(
+    runSource,
+    /const applicationBreakdownPath = buildEsmHealthReportPath\(breakdownGranularity, \[\s*"requestor-id",\s*"proxy",\s*"mvpd",\s*"platform",\s*"application-name",\s*"application-version",\s*\]\);/
+  );
+  assert.match(
+    runSource,
+    /const apiBreakdownPath = buildEsmHealthReportPath\(breakdownGranularity, \[\s*"requestor-id",\s*"platform",\s*"application-name",\s*"application-version",\s*"api",\s*\]\);/
+  );
+  assert.match(
+    runSource,
+    /const sdkBreakdownPath = buildEsmHealthReportPath\(breakdownGranularity, \[\s*"requestor-id",\s*"proxy",\s*"mvpd",\s*"platform",\s*"nsdk",\s*"nsdk-version",\s*\]\);/
+  );
+  assert.doesNotMatch(runSource, /metrics:\s*ESM_HEALTH_METRICS\./);
+  assert.doesNotMatch(runSource, /`mvpd\/\$\{dayPath\}`/);
+  assert.doesNotMatch(runSource, /`requestor-id\/\$\{dayPath\}`/);
+  assert.doesNotMatch(runSource, /`platform\/\$\{dayPath\}`/);
+
+  const script = [
+    'const ESM_HEALTH_DEFAULT_GRANULARITY = "hour";',
+    'const ESM_HEALTH_GRANULARITY_PATH_BY_KEY = Object.freeze({ month: "year/month.json", day: "year/month/day.json", hour: "year/month/day/hour.json" });',
+    "function uniquePreserveOrder(values = []) { const seen = new Set(); const output = []; for (const value of Array.isArray(values) ? values : []) { const text = String(value || '').trim(); if (!text || seen.has(text)) { continue; } seen.add(text); output.push(text); } return output; }",
+    extractFunctionSource(popupSource, "normalizeEsmHealthIsoDate"),
+    extractFunctionSource(popupSource, "normalizeEsmHealthFilterList"),
+    extractFunctionSource(popupSource, "normalizeEsmHealthGranularity"),
+    extractFunctionSource(popupSource, "shiftEsmHealthIsoDate"),
+    extractFunctionSource(popupSource, "buildEsmHealthReportPath"),
+    extractFunctionSource(popupSource, "getEsmHealthPacificDateParts"),
+    extractFunctionSource(popupSource, "getEsmHealthDefaultDateRange"),
+    "module.exports = { buildEsmHealthReportPath, getEsmHealthDefaultDateRange };",
+  ].join("\n\n");
+
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Intl,
+    Date,
+  };
+  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
+  const { buildEsmHealthReportPath, getEsmHealthDefaultDateRange } = context.module.exports;
+
+  assert.equal(
+    buildEsmHealthReportPath("day", ["requestor-id", "proxy", "mvpd", "platform"]),
+    "year/month/day/requestor-id/proxy/mvpd/platform.json"
+  );
+  assert.equal(
+    buildEsmHealthReportPath("day", ["requestor-id", "proxy", "mvpd", "platform", "application-name", "application-version"]),
+    "year/month/day/requestor-id/proxy/mvpd/platform/application-name/application-version.json"
+  );
+  assert.equal(
+    buildEsmHealthReportPath("day", ["requestor-id", "platform", "application-name", "application-version", "api"]),
+    "year/month/day/requestor-id/platform/application-name/application-version/api.json"
+  );
+  assert.equal(buildEsmHealthReportPath("hour", ["requestor-id", "platform"]), "year/month/day/hour/requestor-id/platform.json");
+
+  const esmCatalog = JSON.parse(fs.readFileSync(path.join(ROOT, "click-esm-endpoints.json"), "utf8"));
+  const esmCatalogEntries = Array.isArray(esmCatalog?.endpoints) ? esmCatalog.endpoints : [];
+  const catalogPaths = new Set(
+    esmCatalogEntries
+      .map((entry) => String(entry?.url || "").trim())
+      .filter(Boolean)
+      .map((url) => url.replace(/^https:\/\/mgmt\.auth\.adobe\.com\/esm\/v3\/media-company\//, "").replace(/\/+$/g, ""))
+  );
+  assert.ok(catalogPaths.has("year/month/day/requestor-id/proxy/mvpd/platform"));
+  assert.ok(catalogPaths.has("year/month/day/requestor-id/proxy/mvpd/platform/application-name/application-version"));
+  assert.ok(catalogPaths.has("year/month/day/requestor-id/platform/application-name/application-version/api"));
+  assert.ok(catalogPaths.has("year/month/day/requestor-id/proxy/mvpd/platform/nsdk/nsdk-version"));
+
+  const range = getEsmHealthDefaultDateRange(Date.UTC(2026, 2, 24, 20, 0, 0));
+  assert.equal(range.start, "2026-03-23");
+  assert.equal(range.end, "2026-03-24");
+});
+
+test("health workspaces render full-width collapsible report sections and expose the richer ESM health breakdowns", () => {
+  const healthWorkspaceSource = fs.readFileSync(path.join(ROOT, "health-workspace.js"), "utf8");
+  const healthWorkspaceCss = fs.readFileSync(path.join(ROOT, "health-workspace.css"), "utf8");
+  const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
+  const esmHealthWorkspaceCss = fs.readFileSync(path.join(ROOT, "esm-health-workspace.css"), "utf8");
+
+  assert.match(healthWorkspaceSource, /<details class="rest-report-card health-report-card health-report-collapsible/);
+  assert.match(healthWorkspaceCss, /\.health-report-grid\s*\{\s*display:\s*flex;/);
+  assert.match(healthWorkspaceCss, /\.health-report-summary\s*\{/);
+
+  assert.match(esmHealthWorkspaceSource, /"Application Versions"/);
+  assert.match(esmHealthWorkspaceSource, /"API Entry Points"/);
+  assert.match(esmHealthWorkspaceSource, /"SDK Versions"/);
+  assert.match(esmHealthWorkspaceSource, /renderInsightCards\(report\)/);
+  assert.match(esmHealthWorkspaceCss, /\.esm-health-table-grid\s*\{\s*display:\s*flex;/);
+  assert.match(esmHealthWorkspaceCss, /\.esm-health-section-summary\s*\{/);
 });
 
 test("esm workspace waits for workspace-ready and resolves the live premium request token before running JellyBeans", () => {

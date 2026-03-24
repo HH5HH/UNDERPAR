@@ -11402,9 +11402,9 @@ const REST_V2_SPLUNK_INLINE_MAX_COLUMNS = 14;
 const HEALTH_SPLUNK_DASHBOARD_VIEW_NAME = "live_rest_api_sev2_dashboard";
 const HEALTH_SPLUNK_TABLE_FETCH_LIMIT = 10;
 const ESM_HEALTH_API_REQUEST_TIMEOUT_MS = 30000;
-const ESM_HEALTH_BREAKDOWN_LIMIT = 250;
+const ESM_HEALTH_BREAKDOWN_LIMIT = 500;
 const ESM_HEALTH_TOP_ROW_LIMIT = 10;
-const ESM_HEALTH_DEFAULT_GRANULARITY = "day";
+const ESM_HEALTH_DEFAULT_GRANULARITY = "hour";
 const ESM_HEALTH_GRANULARITY_PATH_BY_KEY = Object.freeze({
   month: "year/month.json",
   day: "year/month/day.json",
@@ -20986,9 +20986,35 @@ function getEsmHealthPacificDateParts(timestamp = Date.now()) {
 function getEsmHealthDefaultDateRange(nowMs = Date.now()) {
   const pacific = getEsmHealthPacificDateParts(nowMs);
   return {
-    start: `${pacific.year}-${pacific.month}-01`,
+    start: shiftEsmHealthIsoDate(pacific.iso, -1) || pacific.iso,
     end: pacific.iso,
   };
+}
+
+function shiftEsmHealthIsoDate(isoDate = "", dayDelta = 0) {
+  const normalized = normalizeEsmHealthIsoDate(isoDate);
+  const delta = Number(dayDelta || 0);
+  if (!normalized || !Number.isFinite(delta) || delta === 0) {
+    return normalized;
+  }
+  const parsed = new Date(`${normalized}T12:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) {
+    return normalized;
+  }
+  parsed.setUTCDate(parsed.getUTCDate() + delta);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function buildEsmHealthReportPath(granularity = "", dimensionSegments = []) {
+  const normalizedGranularity = normalizeEsmHealthGranularity(granularity);
+  const basePath = String(
+    ESM_HEALTH_GRANULARITY_PATH_BY_KEY[normalizedGranularity] ||
+      ESM_HEALTH_GRANULARITY_PATH_BY_KEY[ESM_HEALTH_DEFAULT_GRANULARITY] ||
+      ESM_HEALTH_GRANULARITY_PATH_BY_KEY.day ||
+      ""
+  ).replace(/\.json$/i, "");
+  const normalizedSegments = normalizeEsmHealthFilterList(dimensionSegments);
+  return `${[basePath, ...normalizedSegments].filter(Boolean).join("/")}.json`;
 }
 
 function resolveEsmHealthDateRange(startValue = "", endValue = "") {
@@ -21118,13 +21144,16 @@ function computeEsmHealthDerivedMetrics(source = null) {
   const clientlessFailures = Math.max(0, Number(source?.clientlessFailures || 0));
   const authzLatencyDenominator = authzSuccessful + authzFailed;
   const clientlessFailureDenominator = clientlessFailures + clientlessTokens;
+  const issueEvents = authnFailed + authzFailed + authzRejected + clientlessFailures;
   return {
     authnConversion: authnAttempts > 0 ? authnSuccessful / authnAttempts : null,
+    authnFailureRate: authnAttempts > 0 ? authnFailed / authnAttempts : null,
     authzConversion: authzAttempts > 0 ? authzSuccessful / authzAttempts : null,
     authzErrorRate: authzAttempts > 0 ? (authzFailed + authzRejected) / authzAttempts : null,
     avgAuthzLatency: authzLatencyDenominator > 0 ? authzLatency / authzLatencyDenominator : null,
     playRequests: mediaTokens,
     clientlessFailureRate: clientlessFailureDenominator > 0 ? clientlessFailures / clientlessFailureDenominator : null,
+    issueEvents,
   };
 }
 
@@ -21247,14 +21276,35 @@ function aggregateEsmHealthUniqueRows(rows = []) {
   return Array.from(buckets.values()).sort((left, right) => Number(left?.timestamp || 0) - Number(right?.timestamp || 0));
 }
 
-function aggregateEsmHealthBreakdownRows(rows = [], dimensionKey = "", limit = ESM_HEALTH_TOP_ROW_LIMIT) {
-  const normalizedDimensionKey = String(dimensionKey || "").trim();
+function aggregateEsmHealthBreakdownRows(rows = [], dimensionKeys = [], limit = ESM_HEALTH_TOP_ROW_LIMIT, options = {}) {
+  const normalizedDimensionKeys = uniquePreserveOrder(
+    (Array.isArray(dimensionKeys) ? dimensionKeys : [dimensionKeys])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  const buildLabel =
+    typeof options?.buildLabel === "function"
+      ? options.buildLabel
+      : (values) =>
+          normalizedDimensionKeys
+            .map((key) => String(values?.[key] || "").trim())
+            .filter(Boolean)
+            .join(" / ");
   const buckets = new Map();
   (Array.isArray(rows) ? rows : []).forEach((row) => {
-    const dimensionValue = String(row?.[normalizedDimensionKey] || "").trim() || "(unknown)";
-    if (!buckets.has(dimensionValue)) {
-      buckets.set(dimensionValue, {
-        label: dimensionValue,
+    const dimensionValues = {};
+    normalizedDimensionKeys.forEach((key) => {
+      dimensionValues[key] = String(row?.[key] || "").trim() || "(unknown)";
+    });
+    const bucketKey =
+      normalizedDimensionKeys.length > 0
+        ? normalizedDimensionKeys.map((key) => String(dimensionValues[key] || "").trim() || "(unknown)").join("\u001f")
+        : "(aggregate)";
+    const bucketLabel = String(buildLabel(dimensionValues, row) || "").trim() || "(unknown)";
+    if (!buckets.has(bucketKey)) {
+      buckets.set(bucketKey, {
+        label: bucketLabel,
+        ...dimensionValues,
         authnAttempts: 0,
         authnSuccessful: 0,
         authnFailed: 0,
@@ -21268,7 +21318,7 @@ function aggregateEsmHealthBreakdownRows(rows = [], dimensionKey = "", limit = E
         clientlessFailures: 0,
       });
     }
-    const bucket = buckets.get(dimensionValue);
+    const bucket = buckets.get(bucketKey);
     bucket.authnAttempts += getEsmHealthMetricNumber(row, "authn-attempts");
     bucket.authnSuccessful += getEsmHealthMetricNumber(row, "authn-successful");
     bucket.authnFailed += getEsmHealthMetricNumber(row, "authn-failed");
@@ -21288,6 +21338,10 @@ function aggregateEsmHealthBreakdownRows(rows = [], dimensionKey = "", limit = E
       ...computeEsmHealthDerivedMetrics(entry),
     }))
     .sort((left, right) => {
+      const issueDelta = Number(right?.issueEvents || 0) - Number(left?.issueEvents || 0);
+      if (issueDelta !== 0) {
+        return issueDelta;
+      }
       const mediaDelta = Number(right?.mediaTokens || 0) - Number(left?.mediaTokens || 0);
       if (mediaDelta !== 0) {
         return mediaDelta;
@@ -21305,10 +21359,16 @@ function aggregateEsmHealthBreakdownRows(rows = [], dimensionKey = "", limit = E
         sensitivity: "base",
       });
     })
-    .slice(0, Math.max(1, Number(limit || ESM_HEALTH_TOP_ROW_LIMIT)));
+    .slice(0, Math.max(1, Number(limit || ESM_HEALTH_TOP_ROW_LIMIT)))
+    .map((entry, index) => {
+      if (typeof options?.mapRow === "function") {
+        return options.mapRow(entry, index);
+      }
+      return entry;
+    });
 }
 
-function buildEsmHealthSummary(backboneSeries = [], uniqueSeries = []) {
+function buildEsmHealthSummary(backboneSeries = [], uniqueSeries = [], breakdowns = {}) {
   const totals = {
     authnAttempts: 0,
     authnSuccessful: 0,
@@ -21336,6 +21396,12 @@ function buildEsmHealthSummary(backboneSeries = [], uniqueSeries = []) {
     totals.clientlessFailures += Number(entry?.clientlessFailures || 0);
   });
   const latestUniqueBucket = Array.isArray(uniqueSeries) && uniqueSeries.length > 0 ? uniqueSeries[uniqueSeries.length - 1] : null;
+  const mvpdRows = Array.isArray(breakdowns?.mvpdRows) ? breakdowns.mvpdRows : [];
+  const requestorRows = Array.isArray(breakdowns?.requestorRows) ? breakdowns.requestorRows : [];
+  const platformRows = Array.isArray(breakdowns?.platformRows) ? breakdowns.platformRows : [];
+  const applicationRows = Array.isArray(breakdowns?.applicationRows) ? breakdowns.applicationRows : [];
+  const apiRows = Array.isArray(breakdowns?.apiRows) ? breakdowns.apiRows : [];
+  const sdkRows = Array.isArray(breakdowns?.sdkRows) ? breakdowns.sdkRows : [];
   return {
     ...totals,
     ...computeEsmHealthDerivedMetrics(totals),
@@ -21343,7 +21409,27 @@ function buildEsmHealthSummary(backboneSeries = [], uniqueSeries = []) {
     latestUniqueSessions: Number(latestUniqueBucket?.uniqueSessions || 0),
     latestUniqueLabel: String(latestUniqueBucket?.label || "").trim(),
     seriesPoints: Array.isArray(backboneSeries) ? backboneSeries.length : 0,
+    activeMvpds: mvpdRows.length,
+    activeRequestors: requestorRows.length,
+    activePlatforms: platformRows.length,
+    activeApplications: applicationRows.length,
+    activeApis: apiRows.length,
+    activeSdkVersions: sdkRows.length,
+    topMvpdLabel: String(mvpdRows[0]?.mvpd || mvpdRows[0]?.label || "").trim(),
+    topRequestorLabel: String(requestorRows[0]?.requestorId || requestorRows[0]?.label || "").trim(),
+    topPlatformLabel: String(platformRows[0]?.platform || platformRows[0]?.label || "").trim(),
+    topApplicationLabel: String(applicationRows[0]?.applicationLabel || applicationRows[0]?.label || "").trim(),
+    topApiLabel: String(apiRows[0]?.api || apiRows[0]?.label || "").trim(),
+    topSdkLabel: String(sdkRows[0]?.sdkVersionLabel || sdkRows[0]?.label || "").trim(),
   };
+}
+
+function addEsmHealthTrafficShare(rows = [], totalPlayRequests = 0) {
+  const total = Math.max(0, Number(totalPlayRequests || 0));
+  return (Array.isArray(rows) ? rows : []).map((entry) => ({
+    ...entry,
+    trafficShare: total > 0 ? Number(entry?.mediaTokens || 0) / total : null,
+  }));
 }
 
 function getHealthWorkspacePremiumContextSnapshot(programmerId = "") {
@@ -21648,10 +21734,7 @@ function buildEsmHealthDashboardReportPayload(queryContext = null, data = null, 
       .map((value) => String(value || "").trim())
       .filter(Boolean)
   );
-  const requestedSections = ["backbone", "mvpd", "requestor", "platform"];
-  if (normalizeEsmHealthGranularity(queryContext?.granularity) === "day") {
-    requestedSections.splice(1, 0, "uniques");
-  }
+  const requestedSections = ["backbone", "uniques", "mvpd", "requestor", "platform", "applications", "apis", "sdkVersions"];
   const effectiveSections = requestedSections.filter((key) => !ignoredSections.has(key));
   const failedSections = effectiveSections.filter((key) => Boolean(String(sectionErrors?.[key] || "").trim()));
   const loadedSections = effectiveSections.length - failedSections.length;
@@ -21660,7 +21743,17 @@ function buildEsmHealthDashboardReportPayload(queryContext = null, data = null, 
   const mvpdRows = Array.isArray(data?.mvpdRows) ? data.mvpdRows : [];
   const requestorRows = Array.isArray(data?.requestorRows) ? data.requestorRows : [];
   const platformRows = Array.isArray(data?.platformRows) ? data.platformRows : [];
-  const summary = buildEsmHealthSummary(backboneSeries, uniqueSeries);
+  const applicationRows = Array.isArray(data?.applicationRows) ? data.applicationRows : [];
+  const apiRows = Array.isArray(data?.apiRows) ? data.apiRows : [];
+  const sdkRows = Array.isArray(data?.sdkRows) ? data.sdkRows : [];
+  const summary = buildEsmHealthSummary(backboneSeries, uniqueSeries, {
+    mvpdRows,
+    requestorRows,
+    platformRows,
+    applicationRows,
+    apiRows,
+    sdkRows,
+  });
   return {
     ok: failedSections.length === 0 && loadedSections > 0,
     partial: failedSections.length > 0 && loadedSections > 0,
@@ -21673,6 +21766,9 @@ function buildEsmHealthDashboardReportPayload(queryContext = null, data = null, 
     mvpdRows,
     requestorRows,
     platformRows,
+    applicationRows,
+    apiRows,
+    sdkRows,
     sectionErrors,
     loadedSections,
     totalSections: effectiveSections.length,
@@ -21736,13 +21832,14 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
     const tokenError = error instanceof Error ? error.message : String(error);
     const tokenSectionErrors = {
       backbone: tokenError,
+      uniques: tokenError,
       mvpd: tokenError,
       requestor: tokenError,
       platform: tokenError,
+      applications: tokenError,
+      apis: tokenError,
+      sdkVersions: tokenError,
     };
-    if (normalizeEsmHealthGranularity(queryContext.granularity) === "day") {
-      tokenSectionErrors.uniques = tokenError;
-    }
     return finalizeReport(
       buildEsmHealthDashboardReportPayload(
         queryContext,
@@ -21756,52 +21853,66 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
     );
   }
 
-  const backbonePath = String(
-    ESM_HEALTH_GRANULARITY_PATH_BY_KEY[normalizeEsmHealthGranularity(queryContext.granularity)] ||
-      ESM_HEALTH_GRANULARITY_PATH_BY_KEY[ESM_HEALTH_DEFAULT_GRANULARITY]
-  );
-  const dayPath = ESM_HEALTH_GRANULARITY_PATH_BY_KEY.day;
+  const backbonePath = buildEsmHealthReportPath(queryContext.granularity);
+  const breakdownGranularity = "day";
+  const scopeBreakdownPath = buildEsmHealthReportPath(breakdownGranularity, ["requestor-id", "proxy", "mvpd", "platform"]);
+  const applicationBreakdownPath = buildEsmHealthReportPath(breakdownGranularity, [
+    "requestor-id",
+    "proxy",
+    "mvpd",
+    "platform",
+    "application-name",
+    "application-version",
+  ]);
+  const apiBreakdownPath = buildEsmHealthReportPath(breakdownGranularity, [
+    "requestor-id",
+    "platform",
+    "application-name",
+    "application-version",
+    "api",
+  ]);
+  const sdkBreakdownPath = buildEsmHealthReportPath(breakdownGranularity, [
+    "requestor-id",
+    "proxy",
+    "mvpd",
+    "platform",
+    "nsdk",
+    "nsdk-version",
+  ]);
+  const uniquesPath = buildEsmHealthReportPath("day", ["requestor-id", "proxy", "mvpd", "platform", "dc"]);
   const requestPromises = {
     backbone: fetchEsmHealthJson(queryContext, backbonePath, {
       authState,
-      metrics: ESM_HEALTH_METRICS.backbone,
     }),
-    uniques:
-      normalizeEsmHealthGranularity(queryContext.granularity) === "day"
-        ? fetchEsmHealthJson(queryContext, `dc/${dayPath}`, {
-            authState,
-            metrics: ESM_HEALTH_METRICS.uniques,
-          })
-        : Promise.resolve({ ok: true, rows: [], skipped: true }),
-    mvpd: fetchEsmHealthJson(queryContext, `mvpd/${dayPath}`, {
+    uniques: fetchEsmHealthJson(queryContext, uniquesPath, {
       authState,
-      metrics: ESM_HEALTH_METRICS.mvpd,
       limit: ESM_HEALTH_BREAKDOWN_LIMIT,
-      requestorIds: queryContext.requestorIds,
-      mvpdIds: queryContext.baseMvpdIds,
-      platforms: queryContext.platforms,
     }),
-    requestor: fetchEsmHealthJson(queryContext, `requestor-id/${dayPath}`, {
+    scope: fetchEsmHealthJson(queryContext, scopeBreakdownPath, {
       authState,
-      metrics: ESM_HEALTH_METRICS.requestor,
       limit: ESM_HEALTH_BREAKDOWN_LIMIT,
-      requestorIds: queryContext.baseRequestorIds,
-      mvpdIds: queryContext.mvpdIds,
-      platforms: queryContext.platforms,
     }),
-    platform: fetchEsmHealthJson(queryContext, `platform/${dayPath}`, {
+    applications: fetchEsmHealthJson(queryContext, applicationBreakdownPath, {
       authState,
-      metrics: ESM_HEALTH_METRICS.platform,
+      limit: ESM_HEALTH_BREAKDOWN_LIMIT,
+    }),
+    apis: fetchEsmHealthJson(queryContext, apiBreakdownPath, {
+      authState,
+      limit: ESM_HEALTH_BREAKDOWN_LIMIT,
+    }),
+    sdk: fetchEsmHealthJson(queryContext, sdkBreakdownPath, {
+      authState,
       limit: ESM_HEALTH_BREAKDOWN_LIMIT,
     }),
   };
 
-  const [backboneResult, uniquesResult, mvpdResult, requestorResult, platformResult] = await Promise.all([
+  const [backboneResult, uniquesResult, scopeResult, applicationsResult, apiResult, sdkResult] = await Promise.all([
     requestPromises.backbone,
     requestPromises.uniques,
-    requestPromises.mvpd,
-    requestPromises.requestor,
-    requestPromises.platform,
+    requestPromises.scope,
+    requestPromises.applications,
+    requestPromises.apis,
+    requestPromises.sdk,
   ]);
 
   const sectionErrors = {};
@@ -21813,42 +21924,107 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
     sectionErrors.backbone = String(backboneResult.error || "Unable to load ESM HEALTH overview data.").trim();
   }
 
-  const uniquesUnsupported =
-    normalizeEsmHealthGranularity(queryContext.granularity) === "day" && Number(uniquesResult?.status || 0) === 404;
-  const uniqueSeries =
-    normalizeEsmHealthGranularity(queryContext.granularity) === "day" && uniquesResult.ok
-      ? aggregateEsmHealthUniqueRows(uniquesResult.rows)
-      : [];
+  const uniquesUnsupported = Number(uniquesResult?.status || 0) === 404;
+  const uniqueSeries = uniquesResult.ok ? aggregateEsmHealthUniqueRows(uniquesResult.rows) : [];
   if (uniquesUnsupported) {
     ignoredSections.push("uniques");
-  } else if (normalizeEsmHealthGranularity(queryContext.granularity) === "day" && !uniquesResult.ok) {
+  } else if (!uniquesResult.ok) {
     sectionErrors.uniques = String(uniquesResult.error || "Unable to load ESM HEALTH uniques.").trim();
   }
 
-  const mvpdRows = mvpdResult.ok ? aggregateEsmHealthBreakdownRows(mvpdResult.rows, "mvpd", ESM_HEALTH_TOP_ROW_LIMIT) : [];
-  if (!mvpdResult.ok) {
-    sectionErrors.mvpd = String(mvpdResult.error || "Unable to load ESM HEALTH MVPD breakdown.").trim();
+  const scopeRows = scopeResult.ok ? (Array.isArray(scopeResult.rows) ? scopeResult.rows : []) : [];
+  if (!scopeResult.ok) {
+    const scopeError = String(scopeResult.error || "Unable to load ESM HEALTH scope breakdowns.").trim();
+    sectionErrors.mvpd = scopeError;
+    sectionErrors.requestor = scopeError;
+    sectionErrors.platform = scopeError;
   }
-
-  const requestorRows = requestorResult.ok
-    ? aggregateEsmHealthBreakdownRows(requestorResult.rows, "requestor-id", ESM_HEALTH_TOP_ROW_LIMIT).map((entry) => ({
-        ...entry,
-        requestorId: entry.label,
-      }))
+  const mvpdRows = scopeRows.length > 0
+    ? aggregateEsmHealthBreakdownRows(scopeRows, ["mvpd"], ESM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          mvpd: entry.label,
+        }),
+      })
     : [];
-  if (!requestorResult.ok) {
-    sectionErrors.requestor = String(requestorResult.error || "Unable to load ESM HEALTH RequestorId breakdown.").trim();
-  }
-
-  const platformRows = platformResult.ok
-    ? aggregateEsmHealthBreakdownRows(platformResult.rows, "platform", ESM_HEALTH_TOP_ROW_LIMIT).map((entry) => ({
-        ...entry,
-        platform: entry.label,
-      }))
+  const requestorRows = scopeRows.length > 0
+    ? aggregateEsmHealthBreakdownRows(scopeRows, ["requestor-id"], ESM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          requestorId: entry.label,
+        }),
+      })
     : [];
-  if (!platformResult.ok) {
-    sectionErrors.platform = String(platformResult.error || "Unable to load ESM HEALTH platform breakdown.").trim();
+  const platformRows = scopeRows.length > 0
+    ? aggregateEsmHealthBreakdownRows(scopeRows, ["platform"], ESM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          platform: entry.label,
+        }),
+      })
+    : [];
+
+  const applicationScopeRows = applicationsResult.ok ? (Array.isArray(applicationsResult.rows) ? applicationsResult.rows : []) : [];
+  if (!applicationsResult.ok) {
+    sectionErrors.applications = String(applicationsResult.error || "Unable to load ESM HEALTH app breakdowns.").trim();
   }
+  const applicationRows = applicationScopeRows.length > 0
+    ? aggregateEsmHealthBreakdownRows(
+        applicationScopeRows,
+        ["application-name", "application-version"],
+        ESM_HEALTH_TOP_ROW_LIMIT,
+        {
+          buildLabel: (values) =>
+            [String(values?.["application-name"] || "").trim(), String(values?.["application-version"] || "").trim()]
+              .filter(Boolean)
+              .join(" · "),
+          mapRow: (entry) => ({
+            ...entry,
+            applicationName: String(entry?.["application-name"] || "").trim(),
+            applicationVersion: String(entry?.["application-version"] || "").trim(),
+            applicationLabel: entry.label,
+          }),
+        }
+      )
+    : [];
+  const apiScopeRows = apiResult.ok ? (Array.isArray(apiResult.rows) ? apiResult.rows : []) : [];
+  if (!apiResult.ok) {
+    sectionErrors.apis = String(apiResult.error || "Unable to load ESM HEALTH API breakdowns.").trim();
+  }
+  const apiRows = apiScopeRows.length > 0
+    ? aggregateEsmHealthBreakdownRows(apiScopeRows, ["api"], ESM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          api: entry.label,
+        }),
+      })
+    : [];
+
+  const sdkScopeRows = sdkResult.ok ? (Array.isArray(sdkResult.rows) ? sdkResult.rows : []) : [];
+  if (!sdkResult.ok) {
+    sectionErrors.sdkVersions = String(sdkResult.error || "Unable to load ESM HEALTH SDK breakdowns.").trim();
+  }
+  const sdkRows = sdkScopeRows.length > 0
+    ? aggregateEsmHealthBreakdownRows(
+        sdkScopeRows,
+        ["nsdk", "nsdk-version"],
+        ESM_HEALTH_TOP_ROW_LIMIT,
+        {
+          buildLabel: (values) =>
+            [String(values?.nsdk || "").trim(), String(values?.["nsdk-version"] || "").trim()]
+              .filter(Boolean)
+              .join(" · "),
+          mapRow: (entry) => ({
+            ...entry,
+            sdkName: String(entry?.nsdk || "").trim(),
+            sdkVersion: String(entry?.["nsdk-version"] || "").trim(),
+            sdkVersionLabel: entry.label,
+          }),
+        }
+      )
+    : [];
+
+  const totalPlayRequests = backboneSeries.reduce((sum, entry) => sum + Number(entry?.mediaTokens || entry?.playRequests || 0), 0);
 
   return finalizeReport(
     buildEsmHealthDashboardReportPayload(
@@ -21856,12 +22032,12 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
       {
         backboneSeries,
         uniqueSeries,
-        mvpdRows: mvpdRows.map((entry) => ({
-          ...entry,
-          mvpd: entry.label,
-        })),
-        requestorRows,
-        platformRows,
+        mvpdRows: addEsmHealthTrafficShare(mvpdRows, totalPlayRequests),
+        requestorRows: addEsmHealthTrafficShare(requestorRows, totalPlayRequests),
+        platformRows: addEsmHealthTrafficShare(platformRows, totalPlayRequests),
+        applicationRows: addEsmHealthTrafficShare(applicationRows, totalPlayRequests),
+        apiRows: addEsmHealthTrafficShare(apiRows, totalPlayRequests),
+        sdkRows: addEsmHealthTrafficShare(sdkRows, totalPlayRequests),
         sectionErrors,
         ignoredSections,
       },

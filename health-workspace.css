@@ -15,18 +15,68 @@
 }
 
 .health-report-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 14px;
-  align-items: start;
 }
 
 .health-report-card {
   min-width: 0;
 }
 
-.health-report-card .rest-report-head {
+.health-report-collapsible {
+  overflow: hidden;
+}
+
+.health-report-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--legacy-border);
+  background: linear-gradient(166deg, rgba(44, 44, 44, 0.98), rgba(34, 34, 34, 0.96));
+}
+
+.health-report-summary::-webkit-details-marker {
+  display: none;
+}
+
+.health-report-summary-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+}
+
+.health-report-summary-copy p {
+  margin: 0;
+}
+
+.health-report-summary-pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 171, 180, 0.26);
+  background: rgba(16, 16, 16, 0.78);
+  color: var(--legacy-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.health-report-collapsible.is-empty .health-report-summary-pill {
+  color: var(--legacy-muted);
+}
+
+.health-report-card-body {
+  display: flex;
+  flex-direction: column;
 }
 
 .health-report-query {
@@ -71,7 +121,8 @@
 }
 
 @media (max-width: 840px) {
-  .health-report-grid {
-    grid-template-columns: 1fr;
+  .health-report-summary {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

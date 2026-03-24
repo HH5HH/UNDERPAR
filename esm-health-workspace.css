@@ -158,6 +158,11 @@
   letter-spacing: -0.03em;
 }
 
+.esm-health-kpi-value--compact {
+  font-size: clamp(17px, 1.7vw, 22px);
+  line-height: 1.15;
+}
+
 .esm-health-kpi-label {
   margin: 0;
   font-size: 11px;
@@ -172,6 +177,21 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 14px;
+}
+
+.esm-health-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.esm-health-insight-card {
+  min-width: 0;
+}
+
+.esm-health-table-grid {
+  display: flex;
+  flex-direction: column;
 }
 
 .esm-health-chart-summary {
@@ -252,7 +272,7 @@
 .esm-health-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 620px;
+  min-width: 860px;
 }
 
 .esm-health-table th,
@@ -310,6 +330,61 @@
   color: var(--legacy-muted);
 }
 
+.esm-health-section-card {
+  overflow: hidden;
+}
+
+.esm-health-section-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--legacy-border);
+  background: linear-gradient(166deg, rgba(44, 44, 44, 0.98), rgba(34, 34, 34, 0.96));
+}
+
+.esm-health-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.esm-health-section-summary-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.esm-health-section-summary-copy p {
+  margin: 0;
+}
+
+.esm-health-section-summary-pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 171, 180, 0.26);
+  background: rgba(16, 16, 16, 0.78);
+  color: var(--legacy-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.esm-health-section-card.is-empty .esm-health-section-summary-pill {
+  color: var(--legacy-muted);
+}
+
+.esm-health-section-body {
+  display: flex;
+  flex-direction: column;
+}
+
 .esm-health-section-error {
   color: var(--legacy-danger);
 }
@@ -328,7 +403,7 @@
   .esm-health-filter-form,
   .esm-health-kpi-grid,
   .esm-health-chart-grid,
-  .esm-health-table-grid,
+  .esm-health-insight-grid,
   .esm-health-reach-grid {
     grid-template-columns: 1fr;
   }
@@ -345,5 +420,10 @@
   .workspace-text-btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .esm-health-section-summary {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

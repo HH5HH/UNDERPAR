@@ -15,7 +15,7 @@ const state = {
   selectionKey: "",
   defaultStart: "",
   defaultEnd: "",
-  defaultGranularity: "day",
+  defaultGranularity: "hour",
   timezoneLabel: "PST effective",
   platformOptions: [],
   loading: false,
@@ -25,7 +25,7 @@ const state = {
     controllerSelectionKey: "",
     start: "",
     end: "",
-    granularity: "day",
+    granularity: "hour",
     baseRequestorIds: [],
     baseMvpdIds: [],
     drilldownRequestorIds: [],
@@ -393,6 +393,69 @@ function renderChartCard(title, latestValue, summary, series, valueAccessor, for
   `;
 }
 
+function renderInsightCard(label = "", value = "", copy = "") {
+  return `
+    <article class="rest-report-card esm-health-insight-card">
+      <header class="rest-report-head">
+        <p class="esm-health-kpi-label">${escapeHtml(label)}</p>
+        <p class="esm-health-kpi-value esm-health-kpi-value--compact">${escapeHtml(String(value || "").trim() || "N/A")}</p>
+        <p class="esm-health-overview-copy">${escapeHtml(String(copy || "").trim() || "No additional insight available.")}</p>
+      </header>
+    </article>
+  `;
+}
+
+function renderInsightCards(report = null) {
+  const summary = report?.summary && typeof report.summary === "object" ? report.summary : {};
+  const cards = [];
+  if (String(summary?.topPlatformLabel || "").trim()) {
+    cards.push(
+      renderInsightCard(
+        "Platform Lead",
+        summary.topPlatformLabel,
+        `${formatCompactNumber(report?.platformRows?.[0]?.mediaTokens || 0)} play requests | ${formatPercent(
+          report?.platformRows?.[0]?.trafficShare
+        )} of active traffic`
+      )
+    );
+  }
+  if (String(summary?.topApplicationLabel || "").trim()) {
+    cards.push(
+      renderInsightCard(
+        "App Lead",
+        summary.topApplicationLabel,
+        `${formatCompactNumber(report?.applicationRows?.[0]?.issueEvents || 0)} issue events across the active slice`
+      )
+    );
+  }
+  if (String(summary?.topApiLabel || "").trim()) {
+    cards.push(
+      renderInsightCard(
+        "API Focus",
+        summary.topApiLabel,
+        `${formatCompactNumber(report?.apiRows?.[0]?.mediaTokens || 0)} play requests | ${formatPercent(
+          report?.apiRows?.[0]?.authzConversion
+        )} authZ conversion`
+      )
+    );
+  }
+  if (String(summary?.topSdkLabel || "").trim()) {
+    cards.push(
+      renderInsightCard(
+        "SDK Focus",
+        summary.topSdkLabel,
+        `${formatCompactNumber(report?.sdkRows?.[0]?.mediaTokens || 0)} play requests | ${formatPercent(
+          report?.sdkRows?.[0]?.authzErrorRate
+        )} authZ error rate`
+      )
+    );
+  }
+  if (cards.length === 0) {
+    return "";
+  }
+  return `<section class="esm-health-insight-grid">${cards.join("")}</section>`;
+}
+
 function renderReachCard(report = null) {
   const uniqueSeries = Array.isArray(report?.uniqueSeries) ? report.uniqueSeries : [];
   const latest = uniqueSeries.length > 0 ? uniqueSeries[uniqueSeries.length - 1] : null;
@@ -423,21 +486,12 @@ function renderReachCard(report = null) {
 }
 
 function renderBreakdownTable(title, copy, rows = [], columns = [], errorText = "") {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return `
-      <article class="rest-report-card esm-health-table-card">
-        <header class="rest-report-head">
-          <p class="rest-report-title">${escapeHtml(title)}</p>
-        </header>
-        <p class="esm-health-table-copy ${errorText ? "esm-health-section-error" : ""}">${escapeHtml(
-          errorText || "No rows returned for this hotspot view."
-        )}</p>
-      </article>
-    `;
-  }
-
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  const hasRows = normalizedRows.length > 0;
+  const defaultOpen = hasRows || Boolean(String(errorText || "").trim());
+  const stateLabel = hasRows ? `${normalizedRows.length} row${normalizedRows.length === 1 ? "" : "s"}` : errorText ? "Issue" : "No rows";
   const headerHtml = columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("");
-  const bodyHtml = rows
+  const bodyHtml = normalizedRows
     .map((row) => {
       const cells = columns
         .map((column) => {
@@ -465,20 +519,35 @@ function renderBreakdownTable(title, copy, rows = [], columns = [], errorText = 
     .join("");
 
   return `
-    <article class="rest-report-card esm-health-table-card">
-      <header class="rest-report-head">
-        <p class="rest-report-title">${escapeHtml(title)}</p>
-      </header>
-      <p class="esm-health-table-copy ${errorText ? "esm-health-section-error" : ""}">${escapeHtml(copy)}</p>
-      <div class="esm-health-table-wrap">
-        <table class="esm-health-table">
-          <thead>
-            <tr>${headerHtml}</tr>
-          </thead>
-          <tbody>${bodyHtml}</tbody>
-        </table>
+    <details class="rest-report-card esm-health-table-card esm-health-section-card${hasRows ? "" : " is-empty"}"${
+      defaultOpen ? " open" : ""
+    }>
+      <summary class="esm-health-section-summary">
+        <div class="esm-health-section-summary-copy">
+          <p class="rest-report-title">${escapeHtml(title)}</p>
+          <p class="rest-report-meta">${escapeHtml(copy)}</p>
+        </div>
+        <span class="esm-health-section-summary-pill">${escapeHtml(stateLabel)}</span>
+      </summary>
+      <div class="esm-health-section-body">
+        ${
+          hasRows
+            ? `
+              <div class="esm-health-table-wrap">
+                <table class="esm-health-table">
+                  <thead>
+                    <tr>${headerHtml}</tr>
+                  </thead>
+                  <tbody>${bodyHtml}</tbody>
+                </table>
+              </div>
+            `
+            : `<p class="esm-health-table-copy ${errorText ? "esm-health-section-error" : ""}">${escapeHtml(
+                errorText || "No rows returned for this hotspot view."
+              )}</p>`
+        }
       </div>
-    </article>
+    </details>
   `;
 }
 
@@ -569,7 +638,27 @@ function renderReport() {
           )}</p>
         </header>
       </article>
+      <article class="rest-report-card esm-health-kpi-card">
+        <header class="rest-report-head">
+          <p class="esm-health-kpi-label">Unique Sessions</p>
+          <p class="esm-health-kpi-value">${escapeHtml(formatCompactNumber(summary.latestUniqueSessions || 0))}</p>
+          <p class="esm-health-overview-copy">${escapeHtml(
+            `${formatCompactNumber(summary.latestUniqueAccounts || 0)} accounts | ${summary.latestUniqueLabel || "Daily uniques"}`
+          )}</p>
+        </header>
+      </article>
+      <article class="rest-report-card esm-health-kpi-card">
+        <header class="rest-report-head">
+          <p class="esm-health-kpi-label">App Versions</p>
+          <p class="esm-health-kpi-value">${escapeHtml(formatCompactNumber(summary.activeApplications || 0))}</p>
+          <p class="esm-health-overview-copy">${escapeHtml(
+            `${formatCompactNumber(summary.activeApis || 0)} API slices | ${formatCompactNumber(summary.activeSdkVersions || 0)} SDK slices`
+          )}</p>
+        </header>
+      </article>
     </section>
+
+    ${renderInsightCards(report)}
 
     <section class="esm-health-chart-grid">
       ${renderChartCard(
@@ -578,6 +667,24 @@ function renderReport() {
         "Daily or hourly media token volume across the selected health window.",
         backboneSeries,
         (entry) => Number(entry?.playRequests || entry?.mediaTokens || 0),
+        formatCompactNumber,
+        String(report?.sectionErrors?.backbone || "").trim()
+      )}
+      ${renderChartCard(
+        "Successful Authentications",
+        latestBackbone?.authnSuccessful,
+        "Absolute authN success volume over time.",
+        backboneSeries,
+        (entry) => Number(entry?.authnSuccessful || 0),
+        formatCompactNumber,
+        String(report?.sectionErrors?.backbone || "").trim()
+      )}
+      ${renderChartCard(
+        "Successful Authorizations",
+        latestBackbone?.authzSuccessful,
+        "Absolute authZ success volume over time.",
+        backboneSeries,
+        (entry) => Number(entry?.authzSuccessful || 0),
         formatCompactNumber,
         String(report?.sectionErrors?.backbone || "").trim()
       )}
@@ -613,52 +720,97 @@ function renderReport() {
 
     <section class="esm-health-table-grid">
       ${renderBreakdownTable(
-        "Top MVPDs",
-        "Click an MVPD to re-run Overview and RequestorId hotspots with that MVPD applied.",
+        "Platform Hotspots",
+        "Sorted by issue load first, then traffic. Click a platform to narrow the dashboard further.",
+        Array.isArray(report?.platformRows) ? report.platformRows : [],
+        [
+          { key: "platform", label: "Platform", drillType: "platform" },
+          { key: "trafficShare", label: "Traffic Share", type: "percent" },
+          { key: "mediaTokens", label: "Play Requests", type: "number" },
+          { key: "issueEvents", label: "Issue Events", type: "number" },
+          { key: "authnConversion", label: "AuthN Conv", type: "percent" },
+          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+          { key: "clientlessFailureRate", label: "Clientless Failure", type: "percent" },
+        ],
+        String(report?.sectionErrors?.platform || "").trim()
+      )}
+      ${renderBreakdownTable(
+        "Application Versions",
+        "Highest-impact DCR app versions in the active health slice.",
+        Array.isArray(report?.applicationRows) ? report.applicationRows : [],
+        [
+          { key: "applicationLabel", label: "Application Version" },
+          { key: "trafficShare", label: "Traffic Share", type: "percent" },
+          { key: "mediaTokens", label: "Play Requests", type: "number" },
+          { key: "issueEvents", label: "Issue Events", type: "number" },
+          { key: "authnConversion", label: "AuthN Conv", type: "percent" },
+          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+        ],
+        String(report?.sectionErrors?.applications || "").trim()
+      )}
+      ${renderBreakdownTable(
+        "API Entry Points",
+        "Migration visibility for the active app/device slice. Watch which API entry points carry the load and the failures.",
+        Array.isArray(report?.apiRows) ? report.apiRows : [],
+        [
+          { key: "api", label: "API" },
+          { key: "trafficShare", label: "Traffic Share", type: "percent" },
+          { key: "mediaTokens", label: "Play Requests", type: "number" },
+          { key: "issueEvents", label: "Issue Events", type: "number" },
+          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+        ],
+        String(report?.sectionErrors?.apis || "").trim()
+      )}
+      ${renderBreakdownTable(
+        "SDK Versions",
+        "Adobe Pass SDK distribution for the current slice. Use this to spot older client populations before API v2 migration work.",
+        Array.isArray(report?.sdkRows) ? report.sdkRows : [],
+        [
+          { key: "sdkVersionLabel", label: "SDK Version" },
+          { key: "trafficShare", label: "Traffic Share", type: "percent" },
+          { key: "mediaTokens", label: "Play Requests", type: "number" },
+          { key: "issueEvents", label: "Issue Events", type: "number" },
+          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+        ],
+        String(report?.sectionErrors?.sdkVersions || "").trim()
+      )}
+      ${renderBreakdownTable(
+        "MVPD Hotspots",
+        "Sorted by issue load first, then traffic. Click an MVPD to re-run the dashboard with that MVPD applied.",
         Array.isArray(report?.mvpdRows) ? report.mvpdRows : [],
         [
           { key: "mvpd", label: "MVPD", drillType: "mvpd" },
+          { key: "trafficShare", label: "Traffic Share", type: "percent" },
           { key: "mediaTokens", label: "Play Requests", type: "number" },
-          { key: "authzAttempts", label: "AuthZ Attempts", type: "number" },
+          { key: "issueEvents", label: "Issue Events", type: "number" },
           { key: "authzSuccessful", label: "AuthZ Success", type: "number" },
-          { key: "authzFailed", label: "AuthZ Failed", type: "number" },
           { key: "authzRejected", label: "Rejected", type: "number" },
-          { key: "authzConversion", label: "Conversion", type: "percent" },
+          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
           { key: "authzErrorRate", label: "Error Rate", type: "percent" },
           { key: "avgAuthzLatency", label: "Avg Latency", type: "latency" },
         ],
         String(report?.sectionErrors?.mvpd || "").trim()
       )}
       ${renderBreakdownTable(
-        "Top RequestorIds",
-        "Click a RequestorId to re-run Overview and MVPD hotspots with that RequestorId applied.",
+        "RequestorIds",
+        "Cross-requestor comparison for the active media company. Click a RequestorId to re-run the dashboard with that RequestorId applied.",
         Array.isArray(report?.requestorRows) ? report.requestorRows : [],
         [
           { key: "requestorId", label: "RequestorId", drillType: "requestor" },
+          { key: "trafficShare", label: "Traffic Share", type: "percent" },
           { key: "mediaTokens", label: "Play Requests", type: "number" },
-          { key: "authnAttempts", label: "AuthN Attempts", type: "number" },
+          { key: "issueEvents", label: "Issue Events", type: "number" },
           { key: "authnSuccessful", label: "AuthN Success", type: "number" },
-          { key: "authzAttempts", label: "AuthZ Attempts", type: "number" },
           { key: "authzSuccessful", label: "AuthZ Success", type: "number" },
-          { key: "authzFailed", label: "AuthZ Failed", type: "number" },
           { key: "authnConversion", label: "AuthN Conv", type: "percent" },
           { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
         ],
         String(report?.sectionErrors?.requestor || "").trim()
-      )}
-      ${renderBreakdownTable(
-        "Top Platforms",
-        "Platform mix for the active health slice. Click a platform to narrow the dashboard further.",
-        Array.isArray(report?.platformRows) ? report.platformRows : [],
-        [
-          { key: "platform", label: "Platform", drillType: "platform" },
-          { key: "mediaTokens", label: "Play Requests", type: "number" },
-          { key: "authzAttempts", label: "AuthZ Attempts", type: "number" },
-          { key: "authzSuccessful", label: "AuthZ Success", type: "number" },
-          { key: "authzFailed", label: "AuthZ Failed", type: "number" },
-          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
-        ],
-        String(report?.sectionErrors?.platform || "").trim()
       )}
     </section>
   `;
