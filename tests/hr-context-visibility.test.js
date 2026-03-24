@@ -163,6 +163,30 @@ function loadRestV2LearningActivationEvaluator(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2LearningResourceHelpers(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function getRestV2ProfilePreauthzChecks(harvest = null) { return Array.isArray(harvest?.preauthzChecks) ? harvest.preauthzChecks : []; }",
+    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    extractFunctionSource(source, "collectRestV2LearningResourceIds"),
+    extractFunctionSource(source, "sampleRestV2LearningResourceIds"),
+    "module.exports = { collectRestV2LearningResourceIds, sampleRestV2LearningResourceIds };",
+  ].join("\n\n");
+  const mathObject = seed.math
+    ? Object.assign(Object.create(Math), {
+        random: seed.math.random,
+      })
+    : Math;
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Math: mathObject,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("HR context stays hidden without a selected media company or detected premium services", () => {
   const state = {
     programmerWorkspaceHydrationReadyByKey: new Map([["production|fox", true], ["staging|fox", false]]),
@@ -295,6 +319,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     popupSource,
     "buildRestV2InteractiveDocsEntryActivationState"
   );
+  const collectRestV2LearningResourceIdsSource = extractFunctionSource(popupSource, "collectRestV2LearningResourceIds");
+  const sampleRestV2LearningResourceIdsSource = extractFunctionSource(popupSource, "sampleRestV2LearningResourceIds");
   const summarizeRestV2InteractiveDocsActivationLockReasonSource = extractFunctionSource(
     popupSource,
     "summarizeRestV2InteractiveDocsActivationLockReason"
@@ -330,6 +356,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsContext/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsHydrationPlan/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /body\.resources/);
+  assert.match(collectRestV2LearningResourceIdsSource, /getRestV2ProfilePreauthzChecks\(harvest\)/);
+  assert.match(sampleRestV2LearningResourceIdsSource, /Math\.random/);
   assert.match(summarizeRestV2InteractiveDocsActivationLockReasonSource, /Run LOGIN first to capture a REST V2 session code\./);
   assert.match(summarizeRestV2InteractiveDocsActivationLockReasonSource, /Run PREAUTHORIZE or AUTHORIZE first to capture resourceIds\./);
   assert.match(buildRestV2InteractiveDocsContextSource, /Select a Content Provider first\./);
@@ -372,6 +400,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   );
   assert.match(popupSource, /data-restv2-doc-state/);
   assert.match(popupSource, /SETUP NEEDED/);
+  assert.match(popupSource, /Using \$\{selectedCount\} random resourceIds from the selected MVPD pool/);
 });
 
 test("REST V2 learning entries still open the customer docs when requestor context is missing", async () => {
@@ -458,6 +487,64 @@ test("REST V2 configuration context resolves the app requestor when only the med
   assert.equal(result.serviceProviderId, "turner");
   assert.equal(result.requestorAutoResolved, true);
   assert.equal(result.appInfo?.guid, "rest-guid");
+});
+
+test("REST V2 learning resource helpers merge the requestor x MVPD pool and sample ten unique ids", () => {
+  const randomValues = [0.91, 0.18, 0.77, 0.06, 0.64, 0.41, 0.23, 0.88, 0.35, 0.52, 0.11, 0.69];
+  let randomIndex = 0;
+  const { collectRestV2LearningResourceIds, sampleRestV2LearningResourceIds } = loadRestV2LearningResourceHelpers({
+    math: {
+      random() {
+        const value = randomValues[randomIndex % randomValues.length];
+        randomIndex += 1;
+        return value;
+      },
+    },
+  });
+
+  const pool = collectRestV2LearningResourceIds(
+    {
+      preauthzChecks: [
+        { resourceIds: ["urn:resource:001", "urn:resource:002", "urn:resource:003"] },
+        { resourceIds: ["urn:resource:003", "urn:resource:004"] },
+      ],
+    },
+    [
+      { resourceIds: ["urn:resource:004", "urn:resource:005", "urn:resource:006"] },
+      { resourceIds: ["urn:resource:006", "urn:resource:007", "urn:resource:008"] },
+      {
+        resourceIds: [
+          "urn:resource:009",
+          "urn:resource:010",
+          "urn:resource:011",
+          "urn:resource:012",
+          "urn:resource:001",
+        ],
+      },
+    ]
+  );
+
+  assert.deepEqual(Array.from(pool), [
+    "urn:resource:001",
+    "urn:resource:002",
+    "urn:resource:003",
+    "urn:resource:004",
+    "urn:resource:005",
+    "urn:resource:006",
+    "urn:resource:007",
+    "urn:resource:008",
+    "urn:resource:009",
+    "urn:resource:010",
+    "urn:resource:011",
+    "urn:resource:012",
+  ]);
+
+  const sampled = Array.from(sampleRestV2LearningResourceIds(pool, 10));
+  assert.equal(sampled.length, 10);
+  assert.equal(new Set(sampled).size, 10);
+  sampled.forEach((resourceId) => {
+    assert.equal(pool.includes(resourceId), true);
+  });
 });
 
 test("REST V2 learning activation locks operations until UnderPAR has the required runtime context", () => {

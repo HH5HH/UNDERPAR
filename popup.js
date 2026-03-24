@@ -53555,13 +53555,46 @@ function resolveRestV2LearningRecordingContext(programmerId = "", requestorId = 
 }
 
 function collectRestV2LearningResourceIds(harvest = null, preauthorizeHistory = null) {
-  const primaryCheck = getRestV2ProfilePreauthzChecks(harvest)[0] || null;
-  const candidates = Array.isArray(primaryCheck?.resourceIds)
-    ? primaryCheck.resourceIds
-    : Array.isArray(preauthorizeHistory?.resourceIds)
-      ? preauthorizeHistory.resourceIds
-      : [];
-  return candidates.map((item) => String(item || "").trim()).filter(Boolean);
+  const sourceValues = [];
+  const appendValues = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach((item) => appendValues(item));
+      return;
+    }
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      sourceValues.push(normalized);
+    }
+  };
+
+  getRestV2ProfilePreauthzChecks(harvest).forEach((check) => {
+    appendValues(check?.resourceIds);
+  });
+
+  (Array.isArray(preauthorizeHistory) ? preauthorizeHistory : [preauthorizeHistory]).forEach((entry) => {
+    appendValues(entry?.resourceIds);
+  });
+
+  return uniquePreserveOrder(sourceValues);
+}
+
+function sampleRestV2LearningResourceIds(resourceIds = [], maxCount = 10) {
+  const uniqueIds = uniquePreserveOrder(
+    (Array.isArray(resourceIds) ? resourceIds : []).map((item) => String(item || "").trim()).filter(Boolean)
+  );
+  const limit = Math.max(1, Number(maxCount || 0) || 10);
+  if (uniqueIds.length <= limit) {
+    return uniqueIds;
+  }
+
+  const shuffled = uniqueIds.slice();
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const temp = shuffled[index];
+    shuffled[index] = shuffled[swapIndex];
+    shuffled[swapIndex] = temp;
+  }
+  return shuffled.slice(0, limit);
 }
 
 function getFirstCachedMvpdIdForRequestor(requestorId = "") {
@@ -53573,23 +53606,27 @@ function getFirstCachedMvpdIdForRequestor(requestorId = "") {
   return String(firstEntry?.value || "").trim();
 }
 
-function findRestV2PreauthorizeHistoryEntryForLearning(programmerId = "", requestorId = "", mvpd = "") {
+function findRestV2PreauthorizeHistoryEntriesForLearning(programmerId = "", requestorId = "", mvpd = "") {
   const history = getRestV2PreauthorizeHistoryForProgrammer(programmerId);
   const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
   const normalizedMvpd = String(mvpd || "").trim().toLowerCase();
   if (normalizedRequestorId || normalizedMvpd) {
-    const exactMatch = history.find((entry) => {
+    const exactMatches = history.filter((entry) => {
       const entryRequestorId = String(entry?.requestorId || entry?.serviceProviderId || "").trim().toLowerCase();
       const entryMvpd = String(entry?.mvpd || "").trim().toLowerCase();
       const requestorMatch = normalizedRequestorId ? entryRequestorId === normalizedRequestorId : true;
       const mvpdMatch = normalizedMvpd ? entryMvpd === normalizedMvpd : true;
       return requestorMatch && mvpdMatch;
     });
-    if (exactMatch) {
-      return exactMatch;
+    if (exactMatches.length > 0) {
+      return exactMatches;
     }
   }
-  return history[0] || null;
+  return history.slice(0, 1);
+}
+
+function findRestV2PreauthorizeHistoryEntryForLearning(programmerId = "", requestorId = "", mvpd = "") {
+  return findRestV2PreauthorizeHistoryEntriesForLearning(programmerId, requestorId, mvpd)[0] || null;
 }
 
 function collectRestV2LearningRequestorCandidates(programmer = null, services = null) {
@@ -53733,6 +53770,7 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
         harvest: null,
         harvestContext: null,
         resourceIds: [],
+        resourceIdPool: [],
         sessionUrl: "",
         loginUrl: "",
         sessionCode: "",
@@ -53791,8 +53829,15 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
           name: String(harvest.mvpdName || "").trim(),
         }
       : null);
-  const preauthorizeHistory = findRestV2PreauthorizeHistoryEntryForLearning(programmerId, requestorId, fallbackMvpd);
-  const resourceIds = collectRestV2LearningResourceIds(harvest, preauthorizeHistory);
+  const preauthorizeHistoryEntries = findRestV2PreauthorizeHistoryEntriesForLearning(programmerId, requestorId, fallbackMvpd);
+  const quickResourceOptions = bobtoolsWorkspaceResolveQuickResourceOptions(programmerId, requestorId, fallbackMvpd);
+  const resourceIdPool = collectRestV2LearningResourceIds(harvest, [
+    ...preauthorizeHistoryEntries,
+    {
+      resourceIds: Array.isArray(quickResourceOptions?.resourceIds) ? quickResourceOptions.resourceIds : [],
+    },
+  ]);
+  const resourceIds = sampleRestV2LearningResourceIds(resourceIdPool, 10);
   const sessionUrl = normalizeAdobeNavigationUrl(
     firstNonEmptyString([
       String(activeRecordingContext?.sessionUrl || "").trim(),
@@ -53864,6 +53909,7 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     harvest: harvest || null,
     harvestContext: harvestContext || null,
     resourceIds,
+    resourceIdPool,
     sessionUrl,
     loginUrl,
     sessionCode: String(sessionCode || "").trim(),
@@ -53991,6 +54037,15 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (resolvedEntry.usesBodyResources === true) {
     if (Array.isArray(resolvedContext.resourceIds) && resolvedContext.resourceIds.length > 0) {
       fieldValues["body.resources"] = resolvedContext.resourceIds.slice();
+      const poolCount = Array.isArray(resolvedContext.resourceIdPool) ? resolvedContext.resourceIdPool.length : 0;
+      const selectedCount = resolvedContext.resourceIds.length;
+      if (selectedCount > 0) {
+        notes.push(
+          poolCount > selectedCount
+            ? `Using ${selectedCount} random resourceIds from the selected MVPD pool (${poolCount} available).`
+            : `Using ${selectedCount} resourceIds from the selected MVPD pool.`
+        );
+      }
     }
     if (resolvedEntry.requireBodyResources === true) {
       requiredFields.push("body.resources");
