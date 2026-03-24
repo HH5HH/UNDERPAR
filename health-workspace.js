@@ -229,9 +229,14 @@ function renderReport() {
         "Using UnderPAR fallback HEALTH queries extracted from the live dashboard.",
       ])
     : "";
-  const summaryCopy = report
-    ? `${Number(report?.successCount || 0)} of ${Number(report?.totalTables || renderableTables.length)} tables loaded.`
-    : `Loaded ${renderableTables.length} HEALTH tables.`;
+  const summaryCopy = report?.pending === true
+    ? firstNonEmptyString([
+        report?.pendingMessage,
+        "Waiting for Splunk sign-in/MFA to complete in the opened tab.",
+      ])
+    : report
+      ? `${Number(report?.successCount || 0)} of ${Number(report?.totalTables || renderableTables.length)} tables loaded.`
+      : `Loaded ${renderableTables.length} HEALTH tables.`;
 
   els.cardsHost.innerHTML = `
     <article class="rest-report-card health-report-overview">
@@ -317,6 +322,15 @@ function handleReportResult(payload = {}) {
   }
   if (state.report.ok === true) {
     setStatus(`Loaded ${Number(state.report?.successCount || 0)} HEALTH tables.`);
+    return;
+  }
+  if (state.report.pending === true) {
+    setStatus(
+      firstNonEmptyString([
+        state.report?.pendingMessage,
+        "Waiting for Splunk sign-in/MFA to complete in the opened tab.",
+      ])
+    );
     return;
   }
   if (state.report.partial === true) {

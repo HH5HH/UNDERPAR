@@ -1285,20 +1285,37 @@ test("console bootstrap carries the rolling CSRF token through direct UnderPAR c
   assert.match(fetchConsoleSource, /headers:\s*toDebugHeadersObject\(response\.headers \|\| new Headers\(\)\),/);
 });
 
-test("esm health tenant token requests stay on the console rest api base", () => {
+test("esm health reuses the hydrated ESM premium service auth context instead of a console tenant-token helper", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const restApiUrlSource = extractFunctionSource(popupSource, "buildAdobeConsoleRestApiUrl");
-  const tokenSource = extractFunctionSource(popupSource, "fetchEsmHealthTenantDataToken");
+  const ensurePremiumSource = extractFunctionSource(popupSource, "ensureHealthWorkspacePremiumContext");
+  const resolveAuthSource = extractFunctionSource(popupSource, "resolveEsmHealthPremiumAuthContext");
+  const fetchSource = extractFunctionSource(popupSource, "fetchEsmHealthJson");
 
-  assert.match(restApiUrlSource, /return `\$\{normalizedConsoleBase\}\/rest\/api\/\$\{normalizedPath\}`;/);
-  assert.match(tokenSource, /const tokenUrl = buildAdobeConsoleRestApiUrl\(ESM_HEALTH_TENANT_TOKEN_PATH,\s*consoleBase\);/);
-  assert.match(tokenSource, /resolveAdobeConsolePageContextTarget\(/);
-  assert.match(tokenSource, /openTemporaryAdobePageContextTarget\(\s*buildAdobePassConsoleBootstrapUrl\(environment,\s*"programmers"\)\s*\)/);
-  assert.match(tokenSource, /fetchAdobeConsoleJsonViaShellPageContext\(tokenUrl,/);
-  assert.match(tokenSource, /const csrfToken = String\(state\.consoleCsrfToken \|\| ""\)\.trim\(\);/);
-  assert.doesNotMatch(tokenSource, /"X-CSRF-Token": firstNonEmptyString\(\[state\.consoleCsrfToken,\s*"NO-TOKEN"\]\)/);
-  assert.match(tokenSource, /closeTemporaryAdobePageContextTarget\(pageContextTargetRef\?\.target\?\.temporaryTarget \|\| null\)/);
-  assert.doesNotMatch(tokenSource, /consoleBase\.replace\(\/\\\/\+\$\/, ""\)\}\$\{ESM_HEALTH_TENANT_TOKEN_PATH\}/);
+  assert.match(ensurePremiumSource, /const hydrationPromise = getProgrammerServiceHydrationPromise\(normalizedProgrammerId\);/);
+  assert.match(ensurePremiumSource, /primeProgrammerServiceHydration\(/);
+  assert.match(resolveAuthSource, /const premiumContext = await ensureHealthWorkspacePremiumContext\(programmerId,/);
+  assert.match(resolveAuthSource, /const esmCandidates = collectEsmAppCandidatesFromPremiumApps\(services,\s*services\?\.esm \|\| null\);/);
+  assert.match(resolveAuthSource, /selectPreferredEsmAppForRequestor\(esmCandidates,\s*requestorId,\s*programmerId\)/);
+  assert.match(resolveAuthSource, /ensureDcrAccessTokenWithEsmRecovery\(programmerId,\s*appInfo,\s*options\?\.forceRefresh === true,/);
+  assert.match(resolveAuthSource, /allowProvisioning:\s*false,/);
+  assert.match(fetchSource, /const authContext = await resolveEsmHealthPremiumAuthContext\(queryContext,\s*\{/);
+  assert.doesNotMatch(fetchSource, /fetchEsmHealthTenantDataToken\(/);
+  assert.doesNotMatch(popupSource, /const ESM_HEALTH_TENANT_TOKEN_PATH =/);
+});
+
+test("health workspace readiness now keys off hydrated premium-service context", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const esmControllerSource = extractFunctionSource(popupSource, "esmHealthWorkspaceGetSelectedControllerStatePayload");
+  const healthControllerSource = extractFunctionSource(popupSource, "healthWorkspaceGetSelectedControllerStatePayload");
+  const statusItemSource = extractFunctionSource(popupSource, "buildHrContextHealthStatusItemHtml");
+
+  assert.match(esmControllerSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(context\?\.programmerId \|\| ""\)\.trim\(\)\);/);
+  assert.match(esmControllerSource, /esmHealthReady: Boolean\(context\?\.programmerId && premiumContext\?\.hydrationReady && premiumContext\?\.esmAvailable\)/);
+  assert.match(healthControllerSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(context\?\.programmerId \|\| ""\)\.trim\(\)\);/);
+  assert.match(healthControllerSource, /healthReady: Boolean\(context\?\.programmerId && context\?\.requestorId && premiumContext\?\.hydrationReady\)/);
+  assert.match(statusItemSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(selectionContext\?\.programmerId \|\| ""\)\.trim\(\)\);/);
+  assert.match(statusItemSource, /const esmReady = Boolean\(selectionContext\?\.programmerId && premiumContext\?\.hydrationReady && premiumContext\?\.esmAvailable\)/);
+  assert.match(statusItemSource, /premiumContext\?\.hydrationReady \? "Premium hydrated" : "Hydrating premium services"/);
 });
 
 test("esm workspace waits for workspace-ready and resolves the live premium request token before running JellyBeans", () => {
@@ -1361,6 +1378,24 @@ test("health splunk prefers the live dashboard deeplink and normalizes dashboard
   assert.doesNotMatch(dashboardRunSource, /resolveHealthSplunkTableDefinitions\(/);
   assert.match(dashboardRunSource, /const resolvedTables = placeholderTables\.slice\(\);/);
   assert.match(dashboardRunSource, /await Promise\.all\(/);
+});
+
+test("health splunk keeps auth wait in a pending state instead of hard-failing the workspace", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const tableResultSource = extractFunctionSource(popupSource, "buildHealthSplunkTableResult");
+  const reportPayloadSource = extractFunctionSource(popupSource, "buildHealthSplunkDashboardReportPayload");
+  const dashboardRunSource = extractFunctionSource(popupSource, "runHealthSplunkDashboardForSelection");
+  const workspaceSource = fs.readFileSync(path.join(ROOT, "health-workspace.js"), "utf8");
+
+  assert.match(tableResultSource, /pending:\s*options\.pending === true,/);
+  assert.match(tableResultSource, /authPending:\s*options\.authPending === true,/);
+  assert.match(reportPayloadSource, /const pendingCount = tables\.filter\(\(entry\) => entry\?\.pending === true\)\.length;/);
+  assert.match(reportPayloadSource, /pending,\s*\n\s*authPending:/);
+  assert.match(reportPayloadSource, /pendingMessage:\s*pending/);
+  assert.match(dashboardRunSource, /pending:\s*true,/);
+  assert.match(dashboardRunSource, /authPending:\s*true,/);
+  assert.match(dashboardRunSource, /pendingMessage: firstNonEmptyString\(\[/);
+  assert.match(workspaceSource, /if \(state\.report\.pending === true\) {/);
 });
 
 test("health splunk preview parser reads dashboard-studio json_cols rows from HAR-style payloads", () => {

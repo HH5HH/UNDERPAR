@@ -11400,9 +11400,7 @@ const REST_V2_SPLUNK_INLINE_MAX_ROWS = 80;
 const REST_V2_SPLUNK_INLINE_MAX_COLUMNS = 14;
 const HEALTH_SPLUNK_DASHBOARD_VIEW_NAME = "live_rest_api_sev2_dashboard";
 const HEALTH_SPLUNK_TABLE_FETCH_LIMIT = 10;
-const ESM_HEALTH_TENANT_TOKEN_PATH = "/esm/tenant-data-token";
 const ESM_HEALTH_API_REQUEST_TIMEOUT_MS = 30000;
-const ESM_HEALTH_CONSOLE_REQUEST_TIMEOUT_MS = 15000;
 const ESM_HEALTH_BREAKDOWN_LIMIT = 250;
 const ESM_HEALTH_TOP_ROW_LIMIT = 10;
 const ESM_HEALTH_DEFAULT_GRANULARITY = "day";
@@ -20409,7 +20407,9 @@ function buildHealthSplunkTableResult(queryContext = null, tableDefinition = nul
   const totalRowsCandidate = Math.max(Number(options.totalRows || 0), rows.length);
   return {
     ok: options.ok !== false,
+    pending: options.pending === true,
     authRequired: options.authRequired === true,
+    authPending: options.authPending === true,
     key: String(tableDefinition?.key || "").trim(),
     title: String(tableDefinition?.title || "").trim(),
     query: String(tableDefinition?.query || "").trim(),
@@ -20748,12 +20748,16 @@ async function runHealthSplunkTableSearch(queryContext = null, tableDefinition =
 function buildHealthSplunkDashboardReportPayload(queryContext = null, tableResults = [], options = {}) {
   const tables = Array.isArray(tableResults) ? tableResults.map((entry) => cloneJsonLikeValue(entry, null)).filter(Boolean) : [];
   const successCount = tables.filter((entry) => entry?.ok === true).length;
-  const errorCount = tables.filter((entry) => entry?.ok !== true).length;
+  const pendingCount = tables.filter((entry) => entry?.pending === true).length;
+  const errorCount = tables.filter((entry) => entry?.pending !== true && entry?.ok !== true).length;
   const tableCount = tables.length;
   const fallbackUsed = options?.fallbackUsed === true;
+  const pending = pendingCount > 0 && successCount === 0 && errorCount === 0;
   return {
-    ok: errorCount === 0 && tableCount > 0,
-    partial: successCount > 0 && errorCount > 0,
+    ok: errorCount === 0 && pendingCount === 0 && tableCount > 0,
+    partial: successCount > 0 && (errorCount > 0 || pendingCount > 0),
+    pending,
+    authPending: options?.authPending === true || tables.some((entry) => entry?.authPending === true),
     fallbackUsed,
     fallbackMessage: fallbackUsed
       ? "Dashboard definition lookup failed. Using UnderPAR fallback HEALTH queries extracted from the live dashboard."
@@ -20763,9 +20767,16 @@ function buildHealthSplunkDashboardReportPayload(queryContext = null, tableResul
     queryContext,
     totalTables: tableCount,
     successCount,
+    pendingCount,
     errorCount,
     tables,
-    error: errorCount === 0 ? "" : String(options?.error || "One or more HEALTH Splunk tables failed to load.").trim(),
+    pendingMessage: pending
+      ? String(options?.pendingMessage || "Waiting for Splunk sign-in/MFA to complete in the opened tab.").trim()
+      : "",
+    error:
+      errorCount === 0 || pending
+        ? ""
+        : String(options?.error || "One or more HEALTH Splunk tables failed to load.").trim(),
   };
 }
 
@@ -20780,6 +20791,11 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
       ok: false,
     };
   }
+
+  await ensureHealthWorkspacePremiumContext(queryContext.programmerId, {
+    controllerReason: "health-splunk-dashboard",
+    requestToken: Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0)),
+  }).catch(() => null);
 
   const openWorkspace = options.openWorkspace !== false;
   const activateWorkspace = options.activateWorkspace !== false;
@@ -20840,20 +20856,23 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
     const authTables = placeholderTables.map((entry) =>
       buildHealthSplunkTableResult(queryContext, entry, {
         ok: false,
+        pending: true,
         authRequired: true,
+        authPending: true,
         endpointUrl: `${SPLUNK_SPLUNKD_BASE}/services/authentication/current-context`,
         status: Number(session?.probe?.status || 0),
         statusText: String(session?.probe?.statusText || "").trim(),
-        error: firstNonEmptyString([
-          sessionReady?.error,
-          "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
-        ]),
+        error: "",
         networkEvents: sessionEvents,
       })
     );
     return finalizeReport(
       buildHealthSplunkDashboardReportPayload(queryContext, authTables, {
-        error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+        authPending: true,
+        pendingMessage: firstNonEmptyString([
+          sessionReady?.error,
+          "Waiting for Splunk sign-in/MFA to complete in the opened tab.",
+        ]),
       })
     );
   }
@@ -21326,108 +21345,143 @@ function buildEsmHealthSummary(backboneSeries = [], uniqueSeries = []) {
   };
 }
 
-function extractEsmHealthTokenValue(payload = null, fallbackText = "") {
-  return normalizeBearerTokenValue(
-    firstNonEmptyString([
-      typeof payload === "string" ? payload : "",
-      payload?.token,
-      payload?.accessToken,
-      payload?.access_token,
-      payload?.jwt,
-      payload?.value,
-      fallbackText,
-    ])
-  );
+function getHealthWorkspacePremiumContextSnapshot(programmerId = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return {
+      programmerId: "",
+      services: null,
+      hydrationReady: false,
+      esmAvailable: false,
+    };
+  }
+
+  const services =
+    getCurrentPremiumAppsSnapshot(normalizedProgrammerId) ||
+    getRuntimePremiumServicesSeed(normalizedProgrammerId) ||
+    null;
+  const hydrationReady =
+    isProgrammerWorkspaceHydrationReady(normalizedProgrammerId) ||
+    isProgrammerRuntimeServicesReady(normalizedProgrammerId, services);
+
+  return {
+    programmerId: normalizedProgrammerId,
+    services,
+    hydrationReady,
+    esmAvailable: hasEsmScopedApp(services),
+  };
 }
 
-async function fetchEsmHealthTenantDataToken(queryContext = null) {
-  const environment = getActiveAdobePassEnvironment();
-  const consoleBase = String(environment?.consoleBase || ADOBE_CONSOLE_BASE || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase).trim();
-  const tokenUrl = buildAdobeConsoleRestApiUrl(ESM_HEALTH_TENANT_TOKEN_PATH, consoleBase);
-  const accessToken = normalizeBearerTokenValue(getPreferredAdobeConsoleAccessTokenCandidate());
-  const pageContextTargetRef = { target: null };
-  try {
-    if (accessToken && isProbablyJwt(accessToken) && chrome.scripting?.executeScript) {
-      let pageContextTarget =
-        pageContextTargetRef?.target && typeof pageContextTargetRef.target === "object"
-          ? pageContextTargetRef.target
-          : null;
-      if (Number(pageContextTarget?.tabId || 0) <= 0) {
-        pageContextTarget = await resolveAdobeConsolePageContextTarget({
-          preferredTabId: 0,
-        }).catch(() => null);
-      }
-      if (Number(pageContextTarget?.tabId || 0) <= 0) {
-        const temporaryTarget = await openTemporaryAdobePageContextTarget(
-          buildAdobePassConsoleBootstrapUrl(environment, "programmers")
-        ).catch(() => null);
-        if (temporaryTarget?.tabId) {
-          pageContextTarget = {
-            tab: temporaryTarget.tab || null,
-            tabId: Number(temporaryTarget.tabId || temporaryTarget?.tab?.id || 0),
-            temporaryTarget,
-          };
-        }
-      }
-      if (pageContextTarget && typeof pageContextTarget === "object") {
-        pageContextTargetRef.target = pageContextTarget;
-      }
-      const pageContextResult = await fetchAdobeConsoleJsonViaShellPageContext(tokenUrl, {
-        method: "GET",
-        timeoutMs: ESM_HEALTH_CONSOLE_REQUEST_TIMEOUT_MS,
-        accessToken,
-        pageContextTargetRef,
-        headers: (() => {
-          const pageContextHeaders = {
-            Authorization: `bearer ${accessToken}`,
-          };
-          const csrfToken = String(state.consoleCsrfToken || "").trim();
-          if (csrfToken) {
-            pageContextHeaders["X-CSRF-Token"] = csrfToken;
-          }
-          return pageContextHeaders;
-        })(),
-      }).catch(() => null);
-      const pageContextToken = extractEsmHealthTokenValue(pageContextResult?.parsed, pageContextResult?.text);
-      if (pageContextToken && isProbablyJwt(pageContextToken)) {
-        return {
-          token: pageContextToken,
-          sourceUrl: String(pageContextResult?.url || tokenUrl),
-          status: Number(pageContextResult?.status || 200),
-        };
-      }
-    }
-    const result = await fetchAdobeConsoleJsonWithLoginButtonFallback([tokenUrl], "ESM HEALTH token", {
-      method: "GET",
-      credentials: "include",
-      mode: "cors",
-      timeoutMs: ESM_HEALTH_CONSOLE_REQUEST_TIMEOUT_MS,
-    });
-    const token = extractEsmHealthTokenValue(result?.parsed, result?.text);
-    if (!token || !isProbablyJwt(token)) {
-      throw new Error("ESM tenant token response did not include a valid bearer.");
-    }
+async function ensureHealthWorkspacePremiumContext(programmerId = "", options = {}) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
     return {
-      token,
-      sourceUrl: String(result?.url || tokenUrl),
-      status: Number(result?.status || 0),
+      programmer: null,
+      services: null,
+      hydrationReady: false,
+      esmAvailable: false,
     };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (
-      message.includes("missing a valid IMS bearer") ||
-      message.toLowerCase().includes("sign in") ||
-      message.toLowerCase().includes("login")
-    ) {
-      throw new Error("Adobe Pass sign-in is required before loading ESM HEALTH.");
-    }
-    if (isAdobeConsoleAccessDeniedMessage(message)) {
-      throw new Error("Current Adobe Pass session does not have access to ESM HEALTH.");
-    }
-    throw new Error(`ESM HEALTH token request failed. ${message}`);
-  } finally {
-    await closeTemporaryAdobePageContextTarget(pageContextTargetRef?.target?.temporaryTarget || null).catch(() => null);
   }
+
+  const programmer =
+    findProgrammerByProgrammerId(normalizedProgrammerId) ||
+    (resolveSelectedProgrammer()?.programmerId === normalizedProgrammerId ? resolveSelectedProgrammer() : null);
+  if (!programmer?.programmerId) {
+    return {
+      programmer: null,
+      services: null,
+      hydrationReady: false,
+      esmAvailable: false,
+    };
+  }
+
+  let snapshot = getHealthWorkspacePremiumContextSnapshot(normalizedProgrammerId);
+  const hydrationPromise = getProgrammerServiceHydrationPromise(normalizedProgrammerId);
+  if (hydrationPromise) {
+    const hydratedServices = await hydrationPromise.catch(() => snapshot.services || null);
+    snapshot = getHealthWorkspacePremiumContextSnapshot(normalizedProgrammerId);
+    if (!snapshot.services && hydratedServices && typeof hydratedServices === "object") {
+      snapshot.services = hydratedServices;
+      snapshot.esmAvailable = hasEsmScopedApp(hydratedServices);
+      snapshot.hydrationReady = isProgrammerRuntimeServicesReady(normalizedProgrammerId, hydratedServices);
+    }
+  } else if (!snapshot.services || !snapshot.hydrationReady || (options?.forceRefresh === true && programmer)) {
+    const hydratedServices = await primeProgrammerServiceHydration(
+      programmer,
+      snapshot.services || getRuntimePremiumServicesSeed(normalizedProgrammerId) || null,
+      {
+        forceRefresh: options?.forceRefresh === true,
+        controllerReason: String(options?.controllerReason || "health-workspace").trim() || "health-workspace",
+        requestToken: Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0)),
+      }
+    ).catch(() => snapshot.services || null);
+    snapshot = getHealthWorkspacePremiumContextSnapshot(normalizedProgrammerId);
+    if (!snapshot.services && hydratedServices && typeof hydratedServices === "object") {
+      snapshot.services = hydratedServices;
+      snapshot.esmAvailable = hasEsmScopedApp(hydratedServices);
+      snapshot.hydrationReady = isProgrammerRuntimeServicesReady(normalizedProgrammerId, hydratedServices);
+    }
+  }
+
+  return {
+    programmer,
+    services: snapshot.services,
+    hydrationReady: snapshot.hydrationReady,
+    esmAvailable: snapshot.esmAvailable,
+  };
+}
+
+async function resolveEsmHealthPremiumAuthContext(queryContext = null, options = {}) {
+  const normalizedQueryContext = buildEsmHealthDashboardQueryContext(queryContext);
+  const programmerId = String(normalizedQueryContext?.programmerId || "").trim();
+  if (!programmerId) {
+    throw new Error("Select a Media Company before running ESM HEALTH.");
+  }
+
+  const premiumContext = await ensureHealthWorkspacePremiumContext(programmerId, {
+    controllerReason: "esm-health-dashboard",
+    requestToken: Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0)),
+    forceRefresh: options?.forceRefresh === true,
+  });
+  const services =
+    premiumContext?.services ||
+    getCurrentPremiumAppsSnapshot(programmerId) ||
+    getRuntimePremiumServicesSeed(programmerId) ||
+    null;
+  if (!hasEsmScopedApp(services)) {
+    throw new Error("Selected Media Company does not have an ESM premium service.");
+  }
+
+  const requestorIds = normalizeEsmHealthFilterList(normalizedQueryContext?.requestorIds);
+  const mvpdIds = normalizeEsmHealthFilterList(normalizedQueryContext?.mvpdIds);
+  const requestorId = String(requestorIds[0] || normalizedQueryContext?.baseRequestorIds?.[0] || "").trim();
+  const mvpd = String(mvpdIds[0] || normalizedQueryContext?.baseMvpdIds?.[0] || "").trim();
+  const esmCandidates = collectEsmAppCandidatesFromPremiumApps(services, services?.esm || null);
+  const appInfo = selectPreferredEsmAppForRequestor(esmCandidates, requestorId, programmerId) || services?.esm || null;
+  if (!appInfo?.guid) {
+    throw new Error("ESM application details are required before loading ESM HEALTH.");
+  }
+
+  const tokenResult = await ensureDcrAccessTokenWithEsmRecovery(programmerId, appInfo, options?.forceRefresh === true, {
+    service: "esm-health",
+    scope: PREMIUM_SERVICE_SCOPE_BY_KEY.esm,
+    requiredServiceScope: PREMIUM_SERVICE_SCOPE_BY_KEY.esm,
+    requestorIds,
+    mvpdIds,
+    requestorId,
+    mvpd,
+    appGuid: String(appInfo?.guid || ""),
+    appName: String(appInfo?.appName || appInfo?.guid || ""),
+    allowProvisioning: false,
+  });
+
+  return {
+    programmer: premiumContext?.programmer || findProgrammerByProgrammerId(programmerId) || null,
+    services,
+    appInfo: tokenResult?.appInfo || appInfo,
+    accessToken: normalizeBearerTokenValue(tokenResult?.accessToken || ""),
+    hydrationReady: premiumContext?.hydrationReady === true,
+  };
 }
 
 function buildEsmHealthRequestUrl(pathname = "", queryContext = null, options = {}) {
@@ -21501,9 +21555,14 @@ async function fetchEsmHealthJson(queryContext = null, pathname = "", options = 
   const requestUrl = buildEsmHealthRequestUrl(pathname, queryContext, options);
   const authState = options?.authState && typeof options.authState === "object" ? options.authState : {};
   const requestOnce = async (forceRefresh = false) => {
-    if (forceRefresh === true || !normalizeBearerTokenValue(authState.token)) {
-      const tokenResult = await fetchEsmHealthTenantDataToken(queryContext);
-      authState.token = tokenResult.token;
+    if (forceRefresh === true || !isAccessTokenFreshEnough(authState.accessToken, 60 * 1000)) {
+      const authContext = await resolveEsmHealthPremiumAuthContext(queryContext, {
+        forceRefresh,
+      });
+      authState.accessToken = normalizeBearerTokenValue(authContext?.accessToken || "");
+      authState.appInfo =
+        authContext?.appInfo && typeof authContext.appInfo === "object" ? cloneJsonLikeValue(authContext.appInfo, null) : null;
+      authState.programmerId = String(authContext?.programmer?.programmerId || queryContext?.programmerId || "").trim();
     }
     const response = await fetchWithAbortTimeout(
       requestUrl,
@@ -21514,7 +21573,7 @@ async function fetchEsmHealthJson(queryContext = null, pathname = "", options = 
         referrerPolicy: "no-referrer",
         headers: {
           Accept: "application/json, text/plain, */*",
-          Authorization: `Bearer ${String(authState.token || "").trim()}`,
+          Authorization: `Bearer ${String(authState.accessToken || "").trim()}`,
         },
       },
       ESM_HEALTH_API_REQUEST_TIMEOUT_MS
@@ -21654,8 +21713,13 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
 
   const authState = {};
   try {
-    const tokenResult = await fetchEsmHealthTenantDataToken(queryContext);
-    authState.token = tokenResult.token;
+    const authContext = await resolveEsmHealthPremiumAuthContext(queryContext, {
+      requestToken: Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0)),
+    });
+    authState.accessToken = normalizeBearerTokenValue(authContext?.accessToken || "");
+    authState.appInfo =
+      authContext?.appInfo && typeof authContext.appInfo === "object" ? cloneJsonLikeValue(authContext.appInfo, null) : null;
+    authState.programmerId = String(authContext?.programmer?.programmerId || queryContext?.programmerId || "").trim();
   } catch (error) {
     const tokenError = error instanceof Error ? error.message : String(error);
     const tokenSectionErrors = {
@@ -47812,9 +47876,10 @@ function esmHealthWorkspaceGetSelectedControllerStatePayload(programmer = null, 
     selectionContext && typeof selectionContext === "object"
       ? selectionContext
       : esmHealthWorkspaceGetSelectionContext(programmer);
+  const premiumContext = getHealthWorkspacePremiumContextSnapshot(String(context?.programmerId || "").trim());
   return {
     controllerOnline: true,
-    esmHealthReady: Boolean(context?.programmerId),
+    esmHealthReady: Boolean(context?.programmerId && premiumContext?.hydrationReady && premiumContext?.esmAvailable),
     programmerId: String(context?.programmerId || "").trim(),
     programmerName: String(context?.programmerName || "").trim(),
     mediaCompany: String(context?.mediaCompany || context?.programmerId || "").trim(),
@@ -48241,9 +48306,10 @@ function healthWorkspaceGetSelectedControllerStatePayload(programmer = null, sel
     selectionContext && typeof selectionContext === "object"
       ? selectionContext
       : healthWorkspaceGetSelectionContext(programmer);
+  const premiumContext = getHealthWorkspacePremiumContextSnapshot(String(context?.programmerId || "").trim());
   return {
     controllerOnline: true,
-    healthReady: Boolean(context?.programmerId && context?.requestorId),
+    healthReady: Boolean(context?.programmerId && context?.requestorId && premiumContext?.hydrationReady),
     programmerId: String(context?.programmerId || "").trim(),
     programmerName: String(context?.programmerName || "").trim(),
     requestorId: String(context?.requestorId || "").trim(),
@@ -57565,15 +57631,22 @@ function wireRestV2InteractiveDocsSectionCollapsibles(section, programmer = null
 function buildHrContextHealthStatusItemHtml(programmer = null) {
   const context = getHrContextSummary(programmer);
   const selectionContext = healthWorkspaceGetSelectionContext(programmer);
-  const healthReady = Boolean(selectionContext?.programmerId && selectionContext?.requestorId);
-  const headline = healthReady
-    ? `Run ESM HEALTH or HEALTH SPLUNK for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
-    : context.hasProgrammerContext
-      ? "Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
-      : "Select a Media Company and RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH.";
+  const premiumContext = getHealthWorkspacePremiumContextSnapshot(String(selectionContext?.programmerId || "").trim());
+  const esmReady = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && premiumContext?.esmAvailable);
+  const healthReady = Boolean(selectionContext?.programmerId && selectionContext?.requestorId && premiumContext?.hydrationReady);
+  const headline = !selectionContext?.programmerId
+    ? "Select a Media Company and RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
+    : !premiumContext?.hydrationReady
+      ? `Preparing HEALTH workspaces for ${selectionContext.programmerName || selectionContext.programmerId}...`
+      : healthReady
+        ? `Run ESM HEALTH or HEALTH SPLUNK for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
+        : context.hasProgrammerContext
+          ? "Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
+          : "Select a Media Company and RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH.";
   const metaTokens = [
     selectionContext?.requestorId ? `RequestorId ${selectionContext.requestorId}` : "RequestorId not selected",
     selectionContext?.environmentLabel ? `Env ${selectionContext.environmentLabel}` : "",
+    premiumContext?.hydrationReady ? "Premium hydrated" : "Hydrating premium services",
   ].filter(Boolean);
 
   return `
@@ -57587,20 +57660,29 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
             type="button"
             class="hr-health-action-btn hr-health-action-btn--secondary"
             data-health-action="esm"
-            title="Open ESM HEALTH dashboard"
-            aria-label="Open ESM HEALTH dashboard"
+            title="${escapeHtml(
+              esmReady ? "Open ESM HEALTH dashboard" : "UnderPAR is still hydrating the ESM HEALTH context"
+            )}"
+            aria-label="${escapeHtml(
+              esmReady ? "Open ESM HEALTH dashboard" : "UnderPAR is still hydrating the ESM HEALTH context"
+            )}"
+            ${esmReady ? "" : "disabled"}
           >ESM</button>
           <button
             type="button"
             class="hr-health-action-btn hr-health-action-btn--accent"
             data-health-action="splunk"
             title="${escapeHtml(
-              healthReady
+              !premiumContext?.hydrationReady
+                ? "UnderPAR is still hydrating the HEALTH Splunk context"
+                : healthReady
                 ? `Open HEALTH Splunk workspace for ${selectionContext.requestorId}`
                 : "Select a RequestorId to unlock HEALTH SPLUNK"
             )}"
             aria-label="${escapeHtml(
-              healthReady
+              !premiumContext?.hydrationReady
+                ? "UnderPAR is still hydrating the HEALTH Splunk context"
+                : healthReady
                 ? `Open HEALTH Splunk workspace for ${selectionContext.requestorId}`
                 : "Select a RequestorId to unlock HEALTH SPLUNK"
             )}"
@@ -57619,13 +57701,22 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
   }
 
   if (normalizedAction === "esm") {
+    const programmerId = String(programmer?.programmerId || "").trim();
+    const premiumContext = await ensureHealthWorkspacePremiumContext(programmerId, {
+      controllerReason: "hr-health-esm",
+      requestToken: Math.max(0, Number(state.premiumPanelRequestToken || 0)),
+    });
     const queryContext = buildEsmHealthDashboardQueryContext({
-      programmerId: String(programmer?.programmerId || "").trim(),
+      programmerId,
       programmerName: String(programmer?.programmerName || programmer?.mediaCompanyName || "").trim(),
       requestSource: "hr-health-esm",
     });
     if (!queryContext.programmerId) {
       setStatus("Select a Media Company before running ESM HEALTH.", "error");
+      return;
+    }
+    if (!premiumContext?.esmAvailable) {
+      setStatus("Selected Media Company does not have an ESM premium service.", "error");
       return;
     }
     setStatus(`Loading ESM HEALTH for ${buildEsmHealthStatusMessage(queryContext)}...`);
@@ -57650,8 +57741,13 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
     return;
   }
 
+  const programmerId = String(programmer?.programmerId || "").trim();
+  await ensureHealthWorkspacePremiumContext(programmerId, {
+    controllerReason: "hr-health-splunk",
+    requestToken: Math.max(0, Number(state.premiumPanelRequestToken || 0)),
+  });
   const queryContext = buildHealthSplunkQueryContext({
-    programmerId: String(programmer?.programmerId || "").trim(),
+    programmerId,
     programmerName: String(programmer?.programmerName || "").trim(),
     requestSource: "hr-health-splunk",
   });
@@ -57669,6 +57765,10 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
   });
   if (report?.ok === true) {
     setStatus(`Loaded ${Number(report?.successCount || 0)} HEALTH Splunk tables.`, "success");
+    return;
+  }
+  if (report?.pending === true) {
+    setStatus(String(report?.pendingMessage || "Waiting for Splunk sign-in/MFA to complete in the opened tab."));
     return;
   }
   if (report?.partial === true) {
