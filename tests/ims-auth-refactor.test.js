@@ -413,8 +413,13 @@ function loadPopupMediaCompanyAvailabilityHelper() {
   const script = [
     "const state = { sessionReady: false, loginData: null, restricted: false };",
     'const els = { mediaCompanySelect: { disabled: false, options: [{ textContent: "" }, { value: "abc" }] } };',
+    "function matchesAdobePassOrg(value = null) { return Boolean(value && value.isAdobePass === true); }",
+    "function resolveProgrammerAccessContext(sessionData = null) { return sessionData && sessionData.activeAdobePass === true ? { activeIsAdobePass: true } : { activeIsAdobePass: false }; }",
     extractFunctionSource(source, "getMediaCompanySelectDefaultLabel"),
     extractFunctionSource(source, "isMediaCompanySelectionLockedByCmPrecheck"),
+    extractFunctionSource(source, "hasRequestedAdobePassTargetOrganization"),
+    extractFunctionSource(source, "shouldHydrateAdobePassWorkflowForSession"),
+    extractFunctionSource(source, "shouldOfferAdobePassRecoveryForSession"),
     extractFunctionSource(source, "syncMediaCompanySelectAvailability"),
     "function setState(nextState = {}) { Object.assign(state, nextState || {}); }",
     "function getSelect() { return els.mediaCompanySelect; }",
@@ -844,7 +849,7 @@ test("session activation delegates background hydration to the shared LoginButto
   assert.doesNotMatch(activateSource, /refreshProgrammerPanels\(\{[\s\S]*session-activated:/);
 });
 
-test("authenticated non-AdobePass sessions stay on the populated org picker instead of flipping into restricted logout state", () => {
+test("generic non-AdobePass sessions stay IMS-only until AdobePass is explicitly requested", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activateSource = extractFunctionSource(popupSource, "activateSession");
   const applySessionSource = extractFunctionSource(popupSource, "applyActiveLoginSession");
@@ -853,14 +858,18 @@ test("authenticated non-AdobePass sessions stay on the populated org picker inst
 
   assert.doesNotMatch(activateSource, /if \(!enforced\.allowed \|\| !enforced\.loginData\)/);
   assert.match(activateSource, /if \(!enforced\?\.loginData\) \{/);
-  assert.match(activateSource, /const sessionRequiresOrgSelection = resolveProgrammerAccessContext\(resolvedLoginData\)\.eligible !== true;/);
-  assert.match(
-    applySessionSource,
-    /if \(resolveProgrammerAccessContext\(loginData\)\.eligible !== true\) \{\s*syncAuthenticatedOrgSwitchOnlyContext\(loginData\);\s*\} else \{\s*clearRestrictedOrgOptions\(\);/s
-  );
+  assert.match(popupSource, /function hasRequestedAdobePassTargetOrganization\(sessionData = null\)/);
+  assert.match(popupSource, /function shouldHydrateAdobePassWorkflowForSession\(sessionData = null\)/);
+  assert.match(popupSource, /function shouldOfferAdobePassRecoveryForSession\(sessionData = null\)/);
+  assert.match(activateSource, /const shouldHydrateAdobePassWorkflow = shouldHydrateAdobePassWorkflowForSession\(resolvedLoginData\);/);
+  assert.match(activateSource, /const sessionRequiresOrgSelection = shouldOfferAdobePassRecoveryForSession\(resolvedLoginData\);/);
+  assert.match(activateSource, /} else if \(shouldHydrateAdobePassWorkflow\) \{\s*resetWorkflowForAuthenticatedHydration\(\);\s*\} else \{\s*resetWorkflowForAuthenticatedImsSession\(\);/s);
+  assert.match(activateSource, /if \(shouldHydrateAdobePassWorkflow\) \{\s*void hydrateAuthenticatedAdobePassSession\(/s);
+  assert.match(applySessionSource, /if \(shouldOfferAdobePassRecoveryForSession\(loginData\)\) \{\s*syncAuthenticatedOrgSwitchOnlyContext\(loginData\);\s*\} else \{\s*clearRestrictedOrgOptions\(\);/s);
   assert.match(renderSource, /const authenticatedOrgSwitchOnly = isAuthenticatedOrgSwitchOnlySession\(\);/);
+  assert.match(renderSource, /const adobePassWorkflowActive =[\s\S]*shouldHydrateAdobePassWorkflowForSession\(state\.loginData\);/);
   assert.match(renderSource, /els\.restrictedView\.hidden = !authenticatedOrgSwitchOnly;/);
-  assert.match(renderSource, /els\.workflow\.hidden = authenticatedOrgSwitchOnly \|\| !\(state\.sessionReady && state\.loginData\);/);
+  assert.match(renderSource, /els\.workflow\.hidden = authenticatedOrgSwitchOnly \|\| !adobePassWorkflowActive;/);
   assert.match(renderSource, /if \(authenticatedOrgSwitchOnly\) \{\s*renderRestrictedView\(\);/s);
   assert.match(
     restrictedSwitchSource,
@@ -868,13 +877,24 @@ test("authenticated non-AdobePass sessions stay on the populated org picker inst
   );
 });
 
-test("CM precheck treats authenticated org-selection-required sessions as gated instead of failed", () => {
+test("AdobePASS console and CM precheck stay skipped for generic IMS sessions and gated only for explicit AdobePass recovery", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const consoleBootstrapSource = extractFunctionSource(popupSource, "buildConsoleContext");
+  const cmContextSource = extractFunctionSource(popupSource, "buildCmContext");
   const precheckSource = extractFunctionSource(popupSource, "ensureCmTenantsPrecheckForActiveSession");
   const applyHydratedSource = extractFunctionSource(popupSource, "applyHydratedSessionContextsToState");
 
-  assert.match(precheckSource, /if \(resolveProgrammerAccessContext\(state\.loginData\)\.eligible !== true\) \{/);
-  assert.match(precheckSource, /status:\s*"restricted",[\s\S]*phase:\s*"org-selection-required"/);
+  assert.match(consoleBootstrapSource, /const explicitAdobePassRecoveryRequested = shouldOfferAdobePassRecoveryForSession\(currentSession\);/);
+  assert.match(consoleBootstrapSource, /if \(!shouldHydrateAdobePassWorkflowForSession\(currentSession\)\) \{/);
+  assert.match(consoleBootstrapSource, /status:\s*explicitAdobePassRecoveryRequested \? "restricted" : "skipped"/);
+  assert.match(consoleBootstrapSource, /phase:\s*explicitAdobePassRecoveryRequested \? "org-selection-required" : "non-adobepass-org"/);
+  assert.match(cmContextSource, /const explicitAdobePassRecoveryRequested = shouldOfferAdobePassRecoveryForSession\(currentSession\);/);
+  assert.match(cmContextSource, /if \(!shouldHydrateAdobePassWorkflowForSession\(currentSession\)\) \{/);
+  assert.match(cmContextSource, /reportsStatus:\s*explicitAdobePassRecoveryRequested \? "org-selection-required" : "skipped"/);
+  assert.match(precheckSource, /const explicitAdobePassRecoveryRequested = shouldOfferAdobePassRecoveryForSession\(state\.loginData\);/);
+  assert.match(precheckSource, /if \(!shouldHydrateAdobePassWorkflowForSession\(state\.loginData\)\) \{/);
+  assert.match(precheckSource, /status:\s*explicitAdobePassRecoveryRequested \? "restricted" : "skipped"/);
+  assert.match(precheckSource, /phase:\s*explicitAdobePassRecoveryRequested \? "org-selection-required" : "non-adobepass-org"/);
   assert.match(applyHydratedSource, /const cmRequiresOrgSelection = cmContext\?\.status === "org-selection-required";/);
   assert.match(
     applyHydratedSource,
@@ -2997,11 +3017,16 @@ test("avatar menu no longer triggers background CM tenant hydration", () => {
 
 test("avatar menu display name mirrors the LoginButton org hotlink", () => {
   const popupHtml = fs.readFileSync(path.join(ROOT, "popup.html"), "utf8");
+  const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const renderAvatarMenuSource = extractFunctionSource(popupSource, "renderAvatarMenu");
 
   assert.match(
     popupHtml,
+    /id="avatar-menu-name"[\s\S]*class="avatar-menu-name avatar-menu-name-link"[\s\S]*href="https:\/\/experience\.adobe\.com"[\s\S]*target="_blank"[\s\S]*rel="noreferrer"/
+  );
+  assert.match(
+    sidepanelHtml,
     /id="avatar-menu-name"[\s\S]*class="avatar-menu-name avatar-menu-name-link"[\s\S]*href="https:\/\/experience\.adobe\.com"[\s\S]*target="_blank"[\s\S]*rel="noreferrer"/
   );
   assert.match(popupSource, /function getLoginActiveOrganization\(loginData\)/);
@@ -3143,8 +3168,11 @@ test("programmer access denial keeps the session authenticated and drops into th
 
   assert.doesNotMatch(activationSource, /attemptInteractiveAdobePassRecovery/);
   assert.doesNotMatch(activationSource, /if \(!enforced\.allowed \|\| !enforced\.loginData\) \{/);
-  assert.match(activationSource, /const sessionRequiresOrgSelection = resolveProgrammerAccessContext\(resolvedLoginData\)\.eligible !== true;/);
-  assert.match(activationSource, /phase: sessionRequiresOrgSelection \? "org-selection-required" : "post-login-hydration"/);
+  assert.match(activationSource, /const sessionRequiresOrgSelection = shouldOfferAdobePassRecoveryForSession\(resolvedLoginData\);/);
+  assert.match(
+    activationSource,
+    /phase: sessionRequiresOrgSelection\s*\?\s*"org-selection-required"\s*:\s*shouldHydrateAdobePassWorkflow\s*\?\s*"post-login-hydration"\s*:\s*"ims-session-ready"/
+  );
   assert.doesNotMatch(activationSource, /state\.restricted = true;/);
 });
 
@@ -3162,7 +3190,7 @@ test("activation rejects mismatched org-switch results before replacing the curr
   );
   assert.match(activationSource, /UnderPAR kept the prior session so it does not misrepresent the selected Adobe profile\./);
   assert.match(activationSource, /phase:\s*"org-verification-mismatch"/);
-  assert.match(activationSource, /syncAuthenticatedOrgSwitchOnlyContext\(state\.loginData\)/);
+  assert.match(activationSource, /if \(shouldOfferAdobePassRecoveryForSession\(state\.loginData\)\) \{\s*syncAuthenticatedOrgSwitchOnlyContext\(state\.loginData\);/s);
   assert.match(activationSource, /updateRestrictedContext\(state\.loginData,\s*\{\s*recoveryLabel: verificationFailureMessage,/s);
 });
 
@@ -3458,9 +3486,9 @@ test("stored session restore persists and reuses hydrated console state before b
   assert.match(loadStoredSource, /resetBootstrapTokens: true,/);
   assert.doesNotMatch(loadStoredSource, /experienceCloudAccessToken:/);
   assert.doesNotMatch(loadStoredSource, /cmConsoleAccessToken:/);
-  assert.match(restoreStoredSource, /if \(resolveProgrammerAccessContext\(loginData\)\.eligible !== true\) \{\s*return false;\s*\}/);
-  assert.match(persistStoredSource, /if \(resolveProgrammerAccessContext\(state\.loginData\)\.eligible !== true\) \{\s*return false;\s*\}/);
-  assert.match(activateSource, /normalizedSource === "stored" && !sessionRequiresOrgSelection/);
+  assert.match(restoreStoredSource, /if \(!shouldHydrateAdobePassWorkflowForSession\(loginData\)\) \{\s*return false;\s*\}/);
+  assert.match(persistStoredSource, /if \(!shouldHydrateAdobePassWorkflowForSession\(state\.loginData\)\) \{\s*return false;\s*\}/);
+  assert.match(activateSource, /normalizedSource === "stored" && shouldHydrateAdobePassWorkflow && !sessionRequiresOrgSelection/);
   assert.match(activateSource, /restoreStoredAuthenticatedConsoleHydration\(resolvedLoginData\)/);
   assert.match(activateSource, /if \(sessionRequiresOrgSelection\) \{\s*resolvedLoginData = buildNormalizedLoginData\(/s);
   assert.match(activateSource, /resetBootstrapTokens: true,/);

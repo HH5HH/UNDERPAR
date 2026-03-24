@@ -60255,6 +60255,31 @@ function resolveProgrammerAccessContext(sessionData = null) {
   return resolveAdobePassAccessContext(sessionData);
 }
 
+function hasRequestedAdobePassTargetOrganization(sessionData = null) {
+  const currentSession = sessionData && typeof sessionData === "object" ? sessionData : null;
+  const targetOrganization =
+    currentSession?.targetOrganization && typeof currentSession.targetOrganization === "object"
+      ? currentSession.targetOrganization
+      : null;
+  return matchesAdobePassOrg(targetOrganization);
+}
+
+function shouldHydrateAdobePassWorkflowForSession(sessionData = null) {
+  const currentSession = sessionData && typeof sessionData === "object" ? sessionData : null;
+  if (!currentSession?.accessToken) {
+    return false;
+  }
+  return resolveProgrammerAccessContext(currentSession).activeIsAdobePass === true;
+}
+
+function shouldOfferAdobePassRecoveryForSession(sessionData = null) {
+  const currentSession = sessionData && typeof sessionData === "object" ? sessionData : null;
+  if (!currentSession) {
+    return false;
+  }
+  return hasRequestedAdobePassTargetOrganization(currentSession) && !shouldHydrateAdobePassWorkflowForSession(currentSession);
+}
+
 function findAdobePassOrganizationCandidate(organizations = []) {
   return findAdobePassOrg(Array.isArray(organizations) ? organizations : []) || null;
 }
@@ -62315,7 +62340,7 @@ function isAuthenticatedOrgSwitchOnlySession(sessionData = state.loginData) {
     currentSession &&
     state.sessionReady === true &&
     state.restricted !== true &&
-    resolveProgrammerAccessContext(currentSession).eligible !== true
+    shouldOfferAdobePassRecoveryForSession(currentSession)
   );
 }
 
@@ -66585,7 +66610,7 @@ async function applyActiveLoginSession(loginData, options = {}) {
   state.sessionMonitorConsecutiveInactiveDetections = 0;
   state.sessionMonitorInactivityGuardUntil = Date.now() + IMS_SESSION_MONITOR_INACTIVITY_GUARD_MS;
   state.sessionReady = true;
-  if (resolveProgrammerAccessContext(loginData).eligible !== true) {
+  if (shouldOfferAdobePassRecoveryForSession(loginData)) {
     syncAuthenticatedOrgSwitchOnlyContext(loginData);
   } else {
     clearRestrictedOrgOptions();
@@ -66624,16 +66649,46 @@ function resetWorkflowForAuthenticatedHydration() {
   syncGlobalQuickLaunchButtons();
 }
 
+function resetWorkflowForAuthenticatedImsSession() {
+  applyProgrammerEntities([]);
+  state.programmersLoadInFlight = false;
+  if (els.mediaCompanySelect) {
+    els.mediaCompanySelect.disabled = true;
+    els.mediaCompanySelect.innerHTML = `<option value="">${escapeHtml(getMediaCompanySelectDefaultLabel())}</option>`;
+  }
+  if (els.requestorSelect) {
+    els.requestorSelect.disabled = true;
+    els.requestorSelect.innerHTML = '<option value=""></option>';
+  }
+  if (els.mvpdSelect) {
+    els.mvpdSelect.disabled = true;
+    els.mvpdSelect.innerHTML = '<option value=""></option>';
+  }
+  renderPremiumServices(null, null, {
+    controllerReason: "ims-session-only",
+  });
+  syncMediaCompanySelectAvailability();
+  syncGlobalQuickLaunchButtons();
+}
+
 async function hydrateAuthenticatedAdobePassSession(source = "session", options = {}) {
   const normalizedSource = String(source || "session").trim() || "session";
   const hydrationToken = ++state.authenticatedHydrationToken;
   const preferredCmBootstrapTabId = Number(options.preferredCmBootstrapTabId || 0);
   const allowBackgroundTemporaryPageContextTab = options.allowBackgroundTemporaryPageContextTab === true;
   const preserveExistingOnFailure = options.preserveExistingOnFailure === true;
+  const currentLoginData = state.loginData && typeof state.loginData === "object" ? state.loginData : null;
+  if (!shouldHydrateAdobePassWorkflowForSession(currentLoginData)) {
+    state.programmersLoadInFlight = false;
+    syncMediaCompanySelectAvailability();
+    syncGlobalQuickLaunchButtons();
+    render();
+    return false;
+  }
+
   state.programmersLoadInFlight = preserveExistingOnFailure ? false : true;
   syncMediaCompanySelectAvailability();
 
-  const currentLoginData = state.loginData && typeof state.loginData === "object" ? state.loginData : null;
   let hydrationResult = await settle(() =>
     hydratePostLoginSessionData(currentLoginData, {
       reason: `activation:${normalizedSource}`,
@@ -66689,7 +66744,7 @@ async function hydrateAuthenticatedAdobePassSession(source = "session", options 
       preserveExistingOnFailure,
       reason: `activation:${normalizedSource}`,
     });
-    if (resolveProgrammerAccessContext(hydratedLoginData).eligible !== true) {
+    if (shouldOfferAdobePassRecoveryForSession(hydratedLoginData)) {
       syncAuthenticatedOrgSwitchOnlyContext(hydratedLoginData);
     } else {
       clearRestrictedOrgOptions();
@@ -66834,7 +66889,6 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
       resetBootstrapTokens: false,
     }
   );
-  const sessionRequiresOrgSelection = resolveProgrammerAccessContext(resolvedLoginData).eligible !== true;
   const targetOrganizationVerification = verifyTargetOrganizationSelection(
     resolvedLoginData,
     resolvedLoginData?.targetOrganization && typeof resolvedLoginData.targetOrganization === "object"
@@ -66842,6 +66896,8 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
       : null
   );
   resolvedLoginData.orgVerification = targetOrganizationVerification;
+  const shouldHydrateAdobePassWorkflow = shouldHydrateAdobePassWorkflowForSession(resolvedLoginData);
+  const sessionRequiresOrgSelection = shouldOfferAdobePassRecoveryForSession(resolvedLoginData);
 
   const sessionProfileCompleteness = getSessionProfileCompleteness(resolvedLoginData);
   if (!sessionProfileCompleteness.complete) {
@@ -66889,7 +66945,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
       error: verificationFailureMessage,
     });
     if (state.sessionReady && state.loginData) {
-      if (resolveProgrammerAccessContext(state.loginData).eligible !== true) {
+      if (shouldOfferAdobePassRecoveryForSession(state.loginData)) {
         syncAuthenticatedOrgSwitchOnlyContext(state.loginData);
         updateRestrictedContext(state.loginData, {
           recoveryLabel: verificationFailureMessage,
@@ -66926,7 +66982,7 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     firstNonEmptyString([resolvedLoginData?.cmConsoleAccessToken || ""])
   );
   const restoredAuthenticatedConsoleHydration =
-    normalizedSource === "stored" && !sessionRequiresOrgSelection
+    normalizedSource === "stored" && shouldHydrateAdobePassWorkflow && !sessionRequiresOrgSelection
       ? restoreStoredAuthenticatedConsoleHydration(resolvedLoginData)
       : false;
   const allowBackgroundTemporaryPageContextTab = restoredAuthenticatedConsoleHydration
@@ -66936,14 +66992,20 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     state.programmersLoadInFlight = false;
     syncMediaCompanySelectAvailability();
     syncGlobalQuickLaunchButtons();
-  } else {
+  } else if (shouldHydrateAdobePassWorkflow) {
     resetWorkflowForAuthenticatedHydration();
+  } else {
+    resetWorkflowForAuthenticatedImsSession();
   }
   render();
   setUnderparDiagnosticMarker("activation", {
     status: "pending",
     source: normalizedSource,
-    phase: sessionRequiresOrgSelection ? "org-selection-required" : "post-login-hydration",
+    phase: sessionRequiresOrgSelection
+      ? "org-selection-required"
+      : shouldHydrateAdobePassWorkflow
+        ? "post-login-hydration"
+        : "ims-session-ready",
     programmersCount: 0,
     criticalPathMs: Math.max(0, Date.now() - activationStartedAt),
   });
@@ -66951,44 +67013,49 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     expiresAt: resolvedLoginData.expiresAt,
     org: firstNonEmptyString([resolvedLoginData?.authContext?.orgId]),
     orgSelectionRequired: sessionRequiresOrgSelection,
+    adobePassWorkflowActive: shouldHydrateAdobePassWorkflow,
     criticalPathMs: Math.max(0, Date.now() - activationStartedAt),
-    cmHydrationMode: allowBackgroundTemporaryPageContextTab
-      ? "activation-critical-path-temporary-tab-allowed"
-      : "activation-background",
+    cmHydrationMode: !shouldHydrateAdobePassWorkflow
+      ? "skipped-non-adobepass-org"
+      : allowBackgroundTemporaryPageContextTab
+        ? "activation-critical-path-temporary-tab-allowed"
+        : "activation-background",
   });
-  void hydrateAuthenticatedAdobePassSession(normalizedSource, {
-    activationStartedAt,
-    consoleAccessToken: normalizeBearerTokenValue(
-      firstNonEmptyString([
-        resolvedLoginData?.accessToken,
-        getPreferredPrimaryImsAccessTokenCandidate(),
-        getPreferredAdobeConsoleAccessTokenCandidate(),
-      ])
-    ),
-    forceRefresh: true,
-    allowBackgroundTemporaryPageContextTab,
-    preferredCmBootstrapTabId,
-    preserveExistingOnFailure: restoredAuthenticatedConsoleHydration,
-  }).catch((error) => {
-    const resolvedError = error instanceof Error ? error : new Error(String(error));
-    if (state.restricted || !state.sessionReady || !state.loginData) {
-      return;
-    }
-    state.programmersLoadInFlight = false;
-    syncMediaCompanySelectAvailability();
-    setUnderparDiagnosticMarker("activation", {
-      status: "warning",
-      source: normalizedSource,
-      phase: "background-hydration-failed",
-      error: resolvedError.message,
+  if (shouldHydrateAdobePassWorkflow) {
+    void hydrateAuthenticatedAdobePassSession(normalizedSource, {
+      activationStartedAt,
+      consoleAccessToken: normalizeBearerTokenValue(
+        firstNonEmptyString([
+          resolvedLoginData?.accessToken,
+          getPreferredPrimaryImsAccessTokenCandidate(),
+          getPreferredAdobeConsoleAccessTokenCandidate(),
+        ])
+      ),
+      forceRefresh: true,
+      allowBackgroundTemporaryPageContextTab,
+      preferredCmBootstrapTabId,
+      preserveExistingOnFailure: restoredAuthenticatedConsoleHydration,
+    }).catch((error) => {
+      const resolvedError = error instanceof Error ? error : new Error(String(error));
+      if (state.restricted || !state.sessionReady || !state.loginData) {
+        return;
+      }
+      state.programmersLoadInFlight = false;
+      syncMediaCompanySelectAvailability();
+      setUnderparDiagnosticMarker("activation", {
+        status: "warning",
+        source: normalizedSource,
+        phase: "background-hydration-failed",
+        error: resolvedError.message,
+      });
+      if (!(normalizedSource === "stored" || restoredAuthenticatedConsoleHydration)) {
+        setStatus(resolvedError.message, "error");
+      } else {
+        clearStatusUnlessCmTenantsPrecheckBlocked();
+      }
+      render();
     });
-    if (!(normalizedSource === "stored" || restoredAuthenticatedConsoleHydration)) {
-      setStatus(resolvedError.message, "error");
-    } else {
-      clearStatusUnlessCmTenantsPrecheckBlocked();
-    }
-    render();
-  });
+  }
   return true;
 }
 
@@ -67595,8 +67662,7 @@ function syncMediaCompanySelectAvailability() {
     state.sessionReady === true &&
     Boolean(state.loginData) &&
     state.restricted !== true &&
-    typeof resolveProgrammerAccessContext === "function" &&
-    resolveProgrammerAccessContext(state.loginData).eligible !== true;
+    shouldOfferAdobePassRecoveryForSession(state.loginData);
 
   if (!state.sessionReady || !state.loginData || state.restricted || sessionRequiresOrgSwitchOnly) {
     els.mediaCompanySelect.disabled = true;
@@ -67620,14 +67686,15 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     });
     return null;
   }
-  if (resolveProgrammerAccessContext(state.loginData).eligible !== true) {
+  const explicitAdobePassRecoveryRequested = shouldOfferAdobePassRecoveryForSession(state.loginData);
+  if (!shouldHydrateAdobePassWorkflowForSession(state.loginData)) {
     state.cmTenantsPrecheckPending = false;
     state.cmTenantsPrecheckComplete = false;
     state.cmTenantsPrecheckLastError = "";
     setUnderparDiagnosticMarker("cm_precheck", {
-      status: "restricted",
+      status: explicitAdobePassRecoveryRequested ? "restricted" : "skipped",
       reason: normalizedReason,
-      phase: "org-selection-required",
+      phase: explicitAdobePassRecoveryRequested ? "org-selection-required" : "non-adobepass-org",
     });
     syncMediaCompanySelectAvailability();
     return null;
@@ -69328,10 +69395,11 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
     };
   }
 
-  if (!programmerAccess.eligible) {
+  const explicitAdobePassRecoveryRequested = shouldOfferAdobePassRecoveryForSession(currentSession);
+  if (!shouldHydrateAdobePassWorkflowForSession(currentSession)) {
     setUnderparDiagnosticMarker("console_bootstrap", {
-      status: "restricted",
-      phase: "org-selection-required",
+      status: explicitAdobePassRecoveryRequested ? "restricted" : "skipped",
+      phase: explicitAdobePassRecoveryRequested ? "org-selection-required" : "non-adobepass-org",
       configurationVersion: 0,
       authoritiesCount: 0,
       hasExtendedProfile: false,
@@ -69352,7 +69420,7 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
       programmers: [],
       hydratedAt,
       programmerAccess,
-      status: "org-selection-required",
+      status: explicitAdobePassRecoveryRequested ? "org-selection-required" : "skipped",
       errors: {
         extendedProfile: "",
         configurationVersion: "",
@@ -74126,7 +74194,8 @@ async function buildCmContext(session, reason = "post-login", options = {}) {
     };
   }
 
-  if (!programmerAccess.eligible) {
+  const explicitAdobePassRecoveryRequested = shouldOfferAdobePassRecoveryForSession(currentSession);
+  if (!shouldHydrateAdobePassWorkflowForSession(currentSession)) {
     return {
       baseUrl: CM_BASE_URL,
       reportsBaseUrl: CM_REPORTS_BASE_URL,
@@ -74142,12 +74211,12 @@ async function buildCmContext(session, reason = "post-login", options = {}) {
       cmuTokenExpiresAt: "",
       cmuTokenHeaderName: CMU_TOKEN_HEADER_NAME,
       cmuTokenHeaderValue: "",
-      reportsStatus: "org-selection-required",
+      reportsStatus: explicitAdobePassRecoveryRequested ? "org-selection-required" : "skipped",
       reportsSummary: null,
       tenants: [],
       tenantsSourceUrl,
       hydratedAt,
-      status: "org-selection-required",
+      status: explicitAdobePassRecoveryRequested ? "org-selection-required" : "skipped",
       errors: {
         cmuToken: "",
         tenants: "",
@@ -79832,7 +79901,7 @@ function applyProgrammerEntities(entities) {
 }
 
 function restoreStoredAuthenticatedConsoleHydration(loginData = null) {
-  if (resolveProgrammerAccessContext(loginData).eligible !== true) {
+  if (!shouldHydrateAdobePassWorkflowForSession(loginData)) {
     return false;
   }
   const snapshot = normalizeStoredConsoleHydrationSnapshot(loginData?.consoleHydration);
@@ -79873,7 +79942,7 @@ async function persistAuthenticatedConsoleHydrationSnapshot() {
   if (!state.sessionReady || state.restricted || !state.loginData?.accessToken) {
     return false;
   }
-  if (resolveProgrammerAccessContext(state.loginData).eligible !== true) {
+  if (!shouldHydrateAdobePassWorkflowForSession(state.loginData)) {
     return false;
   }
 
@@ -79989,6 +80058,8 @@ function render() {
   syncZipKeyImportView();
   renderDebugConsole();
   const authenticatedOrgSwitchOnly = isAuthenticatedOrgSwitchOnlySession();
+  const adobePassWorkflowActive =
+    state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);
 
   if (state.restricted) {
     clearResolvedAvatar();
@@ -80029,7 +80100,7 @@ function render() {
     els.signInView.hidden = Boolean(state.sessionReady && state.loginData);
   }
   els.restrictedView.hidden = !authenticatedOrgSwitchOnly;
-  els.workflow.hidden = authenticatedOrgSwitchOnly || !(state.sessionReady && state.loginData);
+  els.workflow.hidden = authenticatedOrgSwitchOnly || !adobePassWorkflowActive;
 
   if (!state.sessionReady || !state.loginData) {
     const authActionLabel = "UnderPAR activity";
