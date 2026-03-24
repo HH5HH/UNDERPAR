@@ -144,6 +144,25 @@ function loadRestV2InteractiveDocsContextBuilder(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2LearningActivationEvaluator(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function buildRestV2InteractiveDocsContext(programmer, entry) { return (globalThis.__seed.contextByEntryKey && globalThis.__seed.contextByEntryKey[String(entry?.key || '')]) || globalThis.__seed.context || { ok: false, error: 'missing-context' }; }",
+    "function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = '') { return typeof globalThis.__seed.planBuilder === 'function' ? globalThis.__seed.planBuilder(entry, context, accessToken) : { missingRequiredFields: [], notes: [] }; }",
+    extractFunctionSource(source, "summarizeRestV2InteractiveDocsActivationLockReason"),
+    extractFunctionSource(source, "buildRestV2InteractiveDocsEntryActivationState"),
+    "module.exports = { buildRestV2InteractiveDocsEntryActivationState };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("HR context stays hidden without a selected media company or detected premium services", () => {
   const state = {
     programmerWorkspaceHydrationReadyByKey: new Map([["production|fox", true], ["staging|fox", false]]),
@@ -272,6 +291,14 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
   const buildRestV2InteractiveDocsContextSource = extractFunctionSource(popupSource, "buildRestV2InteractiveDocsContext");
+  const buildRestV2InteractiveDocsEntryActivationStateSource = extractFunctionSource(
+    popupSource,
+    "buildRestV2InteractiveDocsEntryActivationState"
+  );
+  const summarizeRestV2InteractiveDocsActivationLockReasonSource = extractFunctionSource(
+    popupSource,
+    "summarizeRestV2InteractiveDocsActivationLockReason"
+  );
   const resolveRestV2LearningRequestorContextSource = extractFunctionSource(popupSource, "resolveRestV2LearningRequestorContext");
   const openRestV2InteractiveDocsEntrySource = extractFunctionSource(popupSource, "openRestV2InteractiveDocsEntry");
   const runRestV2InteractiveDocsHydratorSource = extractFunctionSource(popupSource, "runRestV2InteractiveDocsHydrator");
@@ -300,6 +327,11 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsContextSource, /resolvedEntry\?\.operationId === "handleRequestUsingGET"/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2InteractiveDocsAppRequestorContext/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2AppForServiceProvider/);
+  assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsContext/);
+  assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsHydrationPlan/);
+  assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /body\.resources/);
+  assert.match(summarizeRestV2InteractiveDocsActivationLockReasonSource, /Run LOGIN first to capture a REST V2 session code\./);
+  assert.match(summarizeRestV2InteractiveDocsActivationLockReasonSource, /Run PREAUTHORIZE or AUTHORIZE first to capture resourceIds\./);
   assert.match(buildRestV2InteractiveDocsContextSource, /Select a Content Provider first\./);
   assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_REDIRECT_CANDIDATES/);
   assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_DEFAULT_DOMAIN/);
@@ -329,6 +361,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(runRestV2InteractiveDocsHydratorSource, /normalizedFieldName === "body\.resources"/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /querySelector\("textarea"\)/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-entry-readiness/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-entry-state-badge--locked/);
   assert.match(popupCss, /\.hr-rest-v2-docs-grid/);
   assert.match(popupCss, /\.hr-rest-v2-doc-section/);
   assert.match(popupCss, /\.hr-rest-v2-doc-section-grid/);
@@ -336,6 +370,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     popupSource,
     /const docsItemHtml = restV2DocsPanelHtml \? "" : buildMetadataItemHtml\("Docs", `HOWTO: \$\{howtoSubject\} quick docs coming soon\.\.\.`\);/
   );
+  assert.match(popupSource, /data-restv2-doc-state/);
+  assert.match(popupSource, /SETUP NEEDED/);
 });
 
 test("REST V2 learning entries still open the customer docs when requestor context is missing", async () => {
@@ -422,6 +458,163 @@ test("REST V2 configuration context resolves the app requestor when only the med
   assert.equal(result.serviceProviderId, "turner");
   assert.equal(result.requestorAutoResolved, true);
   assert.equal(result.appInfo?.guid, "rest-guid");
+});
+
+test("REST V2 learning activation locks operations until UnderPAR has the required runtime context", () => {
+  const { buildRestV2InteractiveDocsEntryActivationState } = loadRestV2LearningActivationEvaluator({
+    contextByEntryKey: {
+      "configuration-service-provider": {
+        ok: true,
+        serviceProviderId: "turner",
+        requestorId: "turner",
+        appInfo: { guid: "rest-guid" },
+      },
+      "profiles-all": {
+        ok: true,
+        serviceProviderId: "turner",
+        requestorId: "turner",
+        appInfo: { guid: "rest-guid" },
+      },
+      "sessions-create-session": {
+        ok: true,
+        serviceProviderId: "turner",
+        requestorId: "turner",
+        mvpd: "",
+        domainName: "",
+        redirectUrl: "",
+        appInfo: { guid: "rest-guid" },
+      },
+      "sessions-start-authentication": {
+        ok: true,
+        serviceProviderId: "turner",
+        requestorId: "turner",
+        sessionCode: "",
+        appInfo: { guid: "rest-guid" },
+      },
+      "decisions-preauthorize": {
+        ok: true,
+        serviceProviderId: "turner",
+        requestorId: "turner",
+        mvpd: "Comcast_SSO",
+        resourceIds: [],
+        appInfo: { guid: "rest-guid" },
+      },
+    },
+    planBuilder() {
+      return {
+        missingRequiredFields: [],
+        notes: [],
+      };
+    },
+  });
+
+  const configurationState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "configuration-service-provider",
+    requiresAccessToken: true,
+  });
+  assert.equal(configurationState.ready, true);
+
+  const profilesAllState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "profiles-all",
+    requiresAccessToken: true,
+    usesDeviceHeaders: true,
+  });
+  assert.equal(profilesAllState.ready, true);
+
+  const createSessionState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "sessions-create-session",
+    requiresAccessToken: true,
+    usesBodyMvpd: true,
+    usesBodyDomainName: true,
+    usesBodyRedirectUrl: true,
+  });
+  assert.equal(createSessionState.ready, false);
+  assert.match(createSessionState.reason, /Select an MVPD/);
+  assert.match(createSessionState.reason, /redirectUrl and domainName/);
+
+  const startAuthenticationState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "sessions-start-authentication",
+    usesSessionCode: true,
+    requireSessionCode: true,
+  });
+  assert.equal(startAuthenticationState.ready, false);
+  assert.match(startAuthenticationState.reason, /session code/);
+
+  const preauthorizeState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "decisions-preauthorize",
+    usesMvpdPath: true,
+    requireMvpdPath: true,
+    usesBodyResources: true,
+    requireBodyResources: true,
+  });
+  assert.equal(preauthorizeState.ready, false);
+  assert.match(preauthorizeState.reason, /resourceIds/);
+});
+
+test("REST V2 learning activation unlocks login-derived operations after UnderPAR captures a real flow", () => {
+  const readyContext = {
+    ok: true,
+    serviceProviderId: "turner",
+    requestorId: "turner",
+    mvpd: "Comcast_SSO",
+    domainName: "experience.example.test",
+    redirectUrl: "https://experience.example.test/callback",
+    sessionCode: "session-code-123",
+    resourceIds: ["urn:adobe:test-resource"],
+    partner: "Roku",
+    flowId: "flow-123",
+    appInfo: { guid: "rest-guid" },
+  };
+  const { buildRestV2InteractiveDocsEntryActivationState } = loadRestV2LearningActivationEvaluator({
+    context: readyContext,
+    planBuilder() {
+      return {
+        missingRequiredFields: [],
+        notes: [],
+      };
+    },
+  });
+
+  const createSessionState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "sessions-create-session",
+    requiresAccessToken: true,
+    usesBodyMvpd: true,
+    usesBodyDomainName: true,
+    usesBodyRedirectUrl: true,
+  });
+  assert.equal(createSessionState.ready, true);
+
+  const authorizeState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "decisions-authorize",
+    requiresAccessToken: true,
+    usesMvpdPath: true,
+    requireMvpdPath: true,
+    usesBodyResources: true,
+    requireBodyResources: true,
+  });
+  assert.equal(authorizeState.ready, true);
+
+  const verificationTokenState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "partner-sso-verification-token",
+    requiresAccessToken: true,
+    usesPartnerPath: true,
+    requirePartnerPath: true,
+    usesBodyDomainName: true,
+    requireBodyDomainName: true,
+    usesBodyRedirectUrl: true,
+    requireBodyRedirectUrl: true,
+  });
+  assert.equal(verificationTokenState.ready, true);
+
+  const createPartnerProfileState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "partner-sso-create-profile",
+    requiresAccessToken: true,
+    usesPartnerPath: true,
+    requirePartnerPath: true,
+    usesBodySamlResponse: true,
+    requireBodySamlResponse: true,
+  });
+  assert.equal(createPartnerProfileState.ready, true);
 });
 
 test("REST V2 learning hydration plans honor the selected customer-doc operation contracts", () => {

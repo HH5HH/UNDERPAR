@@ -53235,6 +53235,22 @@ function buildPremiumServicesRenderSignature(programmer = null, services = null)
   return [programmerId, selectedRequestorId, selectedMvpdId, ...serviceSegments].join("|");
 }
 
+function buildRestV2InteractiveDocsPanelSignature(programmer = null, services = null) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  if (!programmerId || !services?.restV2) {
+    return "";
+  }
+  return getRestV2InteractiveDocsSections()
+    .flatMap((section) =>
+      section.entries.map((entry) => {
+        const activationState = buildRestV2InteractiveDocsEntryActivationState(entry, programmer, services);
+        const pendingFields = Array.isArray(activationState?.pendingFields) ? activationState.pendingFields.join(",") : "";
+        return `${String(entry?.key || "").trim()}:${activationState?.ready === true ? "1" : "0"}:${pendingFields}`;
+      })
+    )
+    .join("|");
+}
+
 function buildHrSectionsRenderSignature(programmer = null, services = null, options = {}) {
   const programmerId = String(programmer?.programmerId || "").trim();
   if (!programmerId || !services || typeof services !== "object") {
@@ -53245,7 +53261,18 @@ function buildHrSectionsRenderSignature(programmer = null, services = null, opti
   const availableKeys = getDetectedPremiumServiceKeys(services);
   const errorText = String(options?.error || "").trim();
   const loadingFlag = options?.loading === true ? "loading" : "ready";
-  return [programmerId, selectedRequestorId, selectedMvpdId, loadingFlag, errorText, ...availableKeys].join("|");
+  const restV2LearningSignature = availableKeys.includes("restV2")
+    ? buildRestV2InteractiveDocsPanelSignature(programmer, services)
+    : "";
+  return [
+    programmerId,
+    selectedRequestorId,
+    selectedMvpdId,
+    loadingFlag,
+    errorText,
+    ...availableKeys,
+    restV2LearningSignature,
+  ].join("|");
 }
 
 function refreshExistingPremiumServiceSections(programmer, services = null) {
@@ -54032,12 +54059,146 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   };
 }
 
+function summarizeRestV2InteractiveDocsActivationLockReason(pendingFields = [], plan = null) {
+  const normalizedPendingFields = Array.isArray(pendingFields)
+    ? pendingFields.map((fieldName) => String(fieldName || "").trim()).filter(Boolean)
+    : [];
+  const hasPendingField = (...candidates) =>
+    candidates.some((candidate) => normalizedPendingFields.includes(String(candidate || "").trim()));
+  const messages = [];
+
+  if (hasPendingField("path.code")) {
+    messages.push("Run LOGIN first to capture a REST V2 session code.");
+  }
+  if (hasPendingField("path.mvpd", "body.mvpd")) {
+    messages.push("Select an MVPD and complete LOGIN first.");
+  }
+  if (hasPendingField("body.domainName", "body.redirectUrl", "query.redirectUrl")) {
+    messages.push("Run LOGIN first to capture redirectUrl and domainName.");
+  }
+  if (hasPendingField("body.resources")) {
+    messages.push("Run PREAUTHORIZE or AUTHORIZE first to capture resourceIds.");
+  }
+  if (hasPendingField("path.partner")) {
+    messages.push("Run a Partner SSO flow first to capture partner context.");
+  }
+  if (hasPendingField("body.SAMLResponse")) {
+    messages.push("Complete Partner SSO login first to capture SAMLResponse.");
+  }
+  if (messages.length === 0 && Array.isArray(plan?.notes)) {
+    const fallbackNote = String(plan.notes.find((note) => String(note || "").trim()) || "").trim();
+    if (fallbackNote) {
+      messages.push(fallbackNote);
+    }
+  }
+
+  return messages.length > 0
+    ? messages.slice(0, 2).join(" ")
+    : "UnderPAR needs more runtime context before this call can fire.";
+}
+
+function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null, services = null) {
+  const resolvedEntry = entry && typeof entry === "object" ? entry : null;
+  if (!resolvedEntry?.key) {
+    return {
+      ready: false,
+      pendingFields: [],
+      reason: "This REST V2 learning entry is not configured.",
+      context: null,
+      plan: null,
+    };
+  }
+
+  const context = buildRestV2InteractiveDocsContext(programmer, resolvedEntry);
+  if (!context?.ok) {
+    return {
+      ready: false,
+      pendingFields: [],
+      reason: String(context?.error || "REST V2 learning needs more UnderPAR context.").trim(),
+      context,
+      plan: null,
+    };
+  }
+
+  let plan = null;
+  try {
+    const previewAccessToken = resolvedEntry.requiresAccessToken !== false ? "__underpar_learning_preview_token__" : "";
+    plan = buildRestV2InteractiveDocsHydrationPlan(resolvedEntry, context, previewAccessToken);
+  } catch (error) {
+    return {
+      ready: false,
+      pendingFields: [],
+      reason: error instanceof Error ? error.message : String(error || "REST V2 learning plan failed."),
+      context,
+      plan: null,
+    };
+  }
+
+  const pendingFields = [];
+  const pushPendingField = (fieldName, satisfied) => {
+    const normalizedFieldName = String(fieldName || "").trim();
+    if (!normalizedFieldName || satisfied || pendingFields.includes(normalizedFieldName)) {
+      return;
+    }
+    pendingFields.push(normalizedFieldName);
+  };
+
+  (Array.isArray(plan?.missingRequiredFields) ? plan.missingRequiredFields : []).forEach((fieldName) => {
+    if (String(fieldName || "").trim() === "header.Authorization") {
+      return;
+    }
+    pushPendingField(fieldName, false);
+  });
+
+  pushPendingField("path.code", resolvedEntry.usesSessionCode !== true || String(context.sessionCode || "").trim());
+  pushPendingField(
+    resolvedEntry.usesMvpdPath === true ? "path.mvpd" : "body.mvpd",
+    (resolvedEntry.usesMvpdPath !== true && resolvedEntry.usesBodyMvpd !== true) || String(context.mvpd || "").trim()
+  );
+  pushPendingField("body.domainName", resolvedEntry.usesBodyDomainName !== true || String(context.domainName || "").trim());
+  pushPendingField(
+    resolvedEntry.usesBodyRedirectUrl === true ? "body.redirectUrl" : "query.redirectUrl",
+    (resolvedEntry.usesBodyRedirectUrl !== true && resolvedEntry.usesQueryRedirectUrl !== true) ||
+      String(context.redirectUrl || "").trim()
+  );
+  pushPendingField("path.partner", resolvedEntry.usesPartnerPath !== true || String(context.partner || "").trim());
+  pushPendingField(
+    "body.resources",
+    resolvedEntry.usesBodyResources !== true || (Array.isArray(context.resourceIds) && context.resourceIds.length > 0)
+  );
+  pushPendingField(
+    "body.SAMLResponse",
+    resolvedEntry.usesBodySamlResponse !== true || String(context.samlResponse || "").trim() || String(context.flowId || "").trim()
+  );
+
+  return {
+    ready: pendingFields.length === 0,
+    pendingFields,
+    reason:
+      pendingFields.length === 0
+        ? "Ready to hydrate UnderPAR context and focus Send."
+        : summarizeRestV2InteractiveDocsActivationLockReason(pendingFields, plan),
+    context,
+    plan,
+  };
+}
+
 function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null) {
   if (!services?.restV2) {
     return "";
   }
   const docsUrl = buildRestV2InteractiveDocsUrl();
-  const sections = getRestV2InteractiveDocsSections();
+  const sections = getRestV2InteractiveDocsSections().map((section) => {
+    const entries = section.entries.map((entry) => ({
+      ...entry,
+      activationState: buildRestV2InteractiveDocsEntryActivationState(entry, programmer, services),
+    }));
+    return {
+      ...section,
+      entries,
+      readyCount: entries.filter((entry) => entry.activationState?.ready === true).length,
+    };
+  });
   const context = getHrContextSummary(programmer);
   const actionLabel = `Open REST API V2 interactive docs in main content for ${context.compositeLabel}`;
   return `
@@ -54072,26 +54233,37 @@ function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null)
                 >
                   ${escapeHtml(section.sectionLabel)}
                 </a>
-                <span class="hr-rest-v2-doc-section-count">${escapeHtml(String(section.entries.length))} ${section.entries.length === 1 ? "Op" : "Ops"}</span>
+                <span class="hr-rest-v2-doc-section-count">${escapeHtml(`${section.readyCount}/${section.entries.length} Ready`)}</span>
               </div>
               <div class="hr-rest-v2-doc-section-grid">
                 ${section.entries.map((entry) => {
                   const entryUrl = buildRestV2InteractiveDocsUrl(entry.operationAnchor || entry.tagAnchor || "");
-                  const entryActionLabel = `Open and hydrate ${entry.label} in Adobe PASS REST API V2 interactive docs`;
+                  const activationState = entry.activationState || {};
+                  const isReady = activationState.ready === true;
+                  const entryActionLabel = isReady
+                    ? `Open and hydrate ${entry.label} in Adobe PASS REST API V2 interactive docs`
+                    : `${entry.label} is locked. ${String(activationState.reason || "").trim()}`;
+                  const readinessLabel = isReady ? "READY NOW" : "SETUP NEEDED";
                   return `
                     <button
                       type="button"
-                      class="hr-rest-v2-doc-entry"
+                      class="hr-rest-v2-doc-entry ${isReady ? "is-ready" : "is-locked"}"
                       data-restv2-doc-entry-key="${escapeHtml(entry.key)}"
                       data-restv2-doc-url="${escapeHtml(entryUrl)}"
+                      data-restv2-doc-state="${isReady ? "ready" : "locked"}"
                       title="${escapeHtml(entryActionLabel)}"
                       aria-label="${escapeHtml(entryActionLabel)}"
+                      ${isReady ? "" : "disabled"}
                     >
                       <span class="hr-rest-v2-doc-entry-topline">
                         <span class="hr-rest-v2-doc-entry-label">${escapeHtml(entry.label)}</span>
                         <span class="hr-rest-v2-doc-entry-method">${escapeHtml(entry.methodLabel || "")}</span>
                       </span>
                       <span class="hr-rest-v2-doc-entry-summary">${escapeHtml(entry.operationSummary || "")}</span>
+                      <span class="hr-rest-v2-doc-entry-readiness">
+                        <span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--${isReady ? "ready" : "locked"}">${escapeHtml(readinessLabel)}</span>
+                        <span class="hr-rest-v2-doc-entry-state-text">${escapeHtml(String(activationState.reason || "").trim())}</span>
+                      </span>
                     </button>
                   `;
                 }).join("")}
