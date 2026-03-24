@@ -97,6 +97,27 @@ function loadPlanBuilder() {
   return context.module.exports.buildRestV2InteractiveDocsHydrationPlan;
 }
 
+function loadRedirectCandidateHelpers() {
+  const source = fs.readFileSync(POPUP_PATH, "utf8");
+  const script = [
+    'const DEFAULT_ADOBEPASS_ENVIRONMENT = { spBase: "https://sp.auth-staging.adobe.com" };',
+    'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
+    'const REST_V2_DEFAULT_DOMAIN = "adobe.com";',
+    "function uniqueSorted(values = []) { return Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || '').trim()).filter(Boolean))).sort(); }",
+    extractFunctionSource(source, "buildRestV2RedirectCandidatesForSpBase"),
+    'let REST_V2_REDIRECT_CANDIDATES = buildRestV2RedirectCandidatesForSpBase("https://sp.auth-staging.adobe.com");',
+    extractFunctionSource(source, "buildRestV2SessionCreatePayloadCandidates"),
+    "module.exports = { buildRestV2RedirectCandidatesForSpBase, buildRestV2SessionCreatePayloadCandidates };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    URLSearchParams,
+  };
+  vm.runInNewContext(script, context, { filename: POPUP_PATH });
+  return context.module.exports;
+}
+
 function loadSpecOperations() {
   if (!fs.existsSync(SPEC_PATH)) {
     return null;
@@ -273,4 +294,26 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
       );
     }
   }
+});
+
+test("REST V2 redirect candidates use the interactive docs URL instead of legacy api.html targets", () => {
+  const popupSource = fs.readFileSync(POPUP_PATH, "utf8");
+  assert.doesNotMatch(popupSource, /apitest\/api\.html/);
+  assert.doesNotMatch(popupSource, /spBase\}\/api\.html/);
+
+  const { buildRestV2RedirectCandidatesForSpBase, buildRestV2SessionCreatePayloadCandidates } = loadRedirectCandidateHelpers();
+  const redirectCandidates = Array.from(buildRestV2RedirectCandidatesForSpBase("https://sp.auth-staging.adobe.com"));
+  assert.deepEqual(redirectCandidates, ["https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/"]);
+
+  const payloadCandidates = Array.from(buildRestV2SessionCreatePayloadCandidates("Comcast_SSO"));
+  assert.equal(payloadCandidates.length, 3);
+  assert.equal(
+    payloadCandidates[0].redirectUrl,
+    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/"
+  );
+  assert.match(
+    payloadCandidates[0].body,
+    /redirectUrl=https%3A%2F%2Fdeveloper\.adobe\.com%2Fadobe-pass%2Fapi%2Frest_api_v2%2Finteractive%2F/
+  );
+  assert.equal(payloadCandidates.some((candidate) => /api\.html/.test(String(candidate?.redirectUrl || ""))), false);
 });

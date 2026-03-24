@@ -647,11 +647,8 @@ function buildChannelEndpointsForConsoleBase(consoleBase = "") {
 }
 
 function buildRestV2RedirectCandidatesForSpBase(spBase = "") {
-  const normalizedSpBase = String(spBase || DEFAULT_ADOBEPASS_ENVIRONMENT.spBase || "").trim();
-  return uniqueSorted([
-    `${normalizedSpBase}/apitest/api.html`,
-    `${normalizedSpBase}/api.html`,
-  ]);
+  const documentationUrl = String(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY.restV2 || "").trim();
+  return uniqueSorted([documentationUrl]);
 }
 
 function getActiveAdobePassEnvironment() {
@@ -26222,9 +26219,8 @@ async function executeRestV2LogoutFlow(context, flowId, options = {}) {
   const skipUserAgentAction = options?.skipUserAgentAction === true;
   result.attempted = true;
   const redirectUrl = firstNonEmptyString([
-    REST_V2_REDIRECT_CANDIDATES[1],
     REST_V2_REDIRECT_CANDIDATES[0],
-    `${ADOBE_SP_BASE}/api.html`,
+    String(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY.restV2 || "").trim(),
   ]);
   const logoutEndpoint = `${REST_V2_BASE}/${encodeURIComponent(context.serviceProviderId)}/logout/${encodeURIComponent(
     context.mvpd
