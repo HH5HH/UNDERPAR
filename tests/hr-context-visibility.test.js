@@ -342,10 +342,10 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.match(buildHrSectionsRenderSignatureSource, /state\.selectedMvpdId/);
   assert.match(renderHrSectionsSource, /els\.hrServicesContainer\.dataset\.renderSignature/);
   assert.match(renderHrSectionsSource, /buildHrSectionsRenderSignature\(programmer, services, options\)/);
-  assert.match(popupSource, /els\.premiumServicesContainer\.addEventListener\("click", \(event\) => \{/);
-  assert.match(popupSource, /els\.premiumServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
-  assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
-  assert.match(popupSource, /els\.hrServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
+  assert.doesNotMatch(popupSource, /els\.premiumServicesContainer\.addEventListener\("click", \(event\) => \{/);
+  assert.doesNotMatch(popupSource, /els\.premiumServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
+  assert.doesNotMatch(popupSource, /els\.hrServicesContainer\.addEventListener\("click", \(event\) => \{/);
+  assert.doesNotMatch(popupSource, /els\.hrServicesContainer\.addEventListener\("keydown", \(event\) => \{/);
 });
 
 test("detected service pills are wired to documentation urls for the learning flow", () => {

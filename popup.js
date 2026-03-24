@@ -81175,44 +81175,6 @@ function registerEventHandlers() {
     });
   }
 
-  if (els.premiumServicesContainer) {
-    els.premiumServicesContainer.addEventListener("click", (event) => {
-      if (event.defaultPrevented) {
-        return;
-      }
-      handleCollapsibleToggleEvent(event);
-    });
-
-    els.premiumServicesContainer.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-      if (event.defaultPrevented) {
-        return;
-      }
-      handleCollapsibleToggleEvent(event);
-    });
-  }
-
-  if (els.hrServicesContainer) {
-    els.hrServicesContainer.addEventListener("click", (event) => {
-      if (event.defaultPrevented) {
-        return;
-      }
-      handleCollapsibleToggleEvent(event);
-    });
-
-    els.hrServicesContainer.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-      if (event.defaultPrevented) {
-        return;
-      }
-      handleCollapsibleToggleEvent(event);
-    });
-  }
-
   els.mediaCompanySelect.addEventListener("blur", () => {
     flushPendingMediaCompanySelectionHydration();
     flushPendingMediaCompanyOptionHydrationState();
