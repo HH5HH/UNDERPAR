@@ -12465,6 +12465,8 @@ const state = {
   esmWorkspaceWorkspaceTabId: 0,
   esmWorkspaceWorkspaceWindowId: 0,
   esmWorkspaceWorkspaceTabIdByWindowId: new Map(),
+  esmWorkspaceReadyByWindowId: new Map(),
+  esmWorkspaceReadyWaitersByWindowId: new Map(),
   esmWorkspaceControllerStateVersion: 0,
   esmWorkspaceRuntimeListenerBound: false,
   esmWorkspaceWorkspaceTabWatcherBound: false,
@@ -21375,10 +21377,16 @@ async function fetchEsmHealthTenantDataToken(queryContext = null) {
         timeoutMs: ESM_HEALTH_CONSOLE_REQUEST_TIMEOUT_MS,
         accessToken,
         pageContextTargetRef,
-        headers: {
-          Authorization: `bearer ${accessToken}`,
-          "X-CSRF-Token": firstNonEmptyString([state.consoleCsrfToken, "NO-TOKEN"]),
-        },
+        headers: (() => {
+          const pageContextHeaders = {
+            Authorization: `bearer ${accessToken}`,
+          };
+          const csrfToken = String(state.consoleCsrfToken || "").trim();
+          if (csrfToken) {
+            pageContextHeaders["X-CSRF-Token"] = csrfToken;
+          }
+          return pageContextHeaders;
+        })(),
       }).catch(() => null);
       const pageContextToken = extractEsmHealthTokenValue(pageContextResult?.parsed, pageContextResult?.text);
       if (pageContextToken && isProbablyJwt(pageContextToken)) {
@@ -28314,6 +28322,23 @@ function isEsmServiceRequestActive(section, requestToken, programmerId) {
   return Boolean(selected && selected.programmerId === programmerId);
 }
 
+function resolveCurrentPremiumPanelRequestToken(programmerId = "", fallbackToken = 0) {
+  const normalizedFallbackToken = Math.max(0, Number(fallbackToken || 0));
+  const normalizedCurrentToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
+  if (normalizedCurrentToken <= 0) {
+    return normalizedFallbackToken;
+  }
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return normalizedCurrentToken;
+  }
+  const selectedProgrammerId = String(resolveSelectedProgrammer()?.programmerId || "").trim();
+  if (!selectedProgrammerId || selectedProgrammerId !== normalizedProgrammerId) {
+    return normalizedFallbackToken;
+  }
+  return normalizedCurrentToken;
+}
+
 const CLICK_ESM_ZOOM_OPTIONS = ["", "YR", "MO", "DAY", "HR", "MIN"];
 const CLICK_ESM_ZOOM_TOKEN_BY_KEY = {
   YR: "/year",
@@ -33619,17 +33644,115 @@ function esmWorkspaceBindWorkspaceTab(windowId, tabId) {
   void persistEsmWorkspaceBindingSnapshot();
 }
 
+function esmMarkWorkspaceReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  state.esmWorkspaceReadyByWindowId.set(normalizedWindowId, {
+    tabId: normalizedTabId,
+    readyAt: Date.now(),
+  });
+  const waiters = state.esmWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+  if (Array.isArray(waiters) && waiters.length > 0) {
+    state.esmWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+    waiters.forEach((waiter) => {
+      try {
+        if (waiter?.timerId) {
+          clearTimeout(waiter.timerId);
+        }
+      } catch {
+        // Ignore cleanup failures.
+      }
+      try {
+        waiter?.resolve?.(true);
+      } catch {
+        // Ignore waiter resolution failures.
+      }
+    });
+  }
+}
+
+function esmInvalidateWorkspaceReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  const existingReady = state.esmWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!existingReady) {
+    return;
+  }
+  if (!normalizedTabId || Number(existingReady?.tabId || 0) <= 0 || Number(existingReady?.tabId || 0) === normalizedTabId) {
+    state.esmWorkspaceReadyByWindowId.delete(normalizedWindowId);
+  }
+}
+
+function esmIsWorkspaceReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  const readyInfo = state.esmWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!readyInfo) {
+    return false;
+  }
+  if (normalizedTabId > 0 && Number(readyInfo?.tabId || 0) > 0 && Number(readyInfo.tabId) !== normalizedTabId) {
+    return false;
+  }
+  return true;
+}
+
+async function esmWaitForWorkspaceReady(windowId, tabId = 0, timeoutMs = 6000) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  if (esmIsWorkspaceReady(normalizedWindowId, normalizedTabId)) {
+    return true;
+  }
+  return new Promise((resolve) => {
+    const waiter = {
+      resolve,
+      timerId: setTimeout(() => {
+        const waiters = state.esmWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+        if (Array.isArray(waiters)) {
+          state.esmWorkspaceReadyWaitersByWindowId.set(
+            normalizedWindowId,
+            waiters.filter((entry) => entry !== waiter)
+          );
+          if ((state.esmWorkspaceReadyWaitersByWindowId.get(normalizedWindowId) || []).length === 0) {
+            state.esmWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+          }
+        }
+        resolve(false);
+      }, Math.max(500, Number(timeoutMs || 0) || 6000)),
+    };
+    const existingWaiters = state.esmWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+    if (Array.isArray(existingWaiters)) {
+      existingWaiters.push(waiter);
+    } else {
+      state.esmWorkspaceReadyWaitersByWindowId.set(normalizedWindowId, [waiter]);
+    }
+  });
+}
+
 function esmWorkspaceUnbindWorkspaceTab(tabId) {
   const normalizedTabId = Number(tabId || 0);
   if (normalizedTabId > 0) {
     for (const [windowId, mappedTabId] of state.esmWorkspaceWorkspaceTabIdByWindowId.entries()) {
       if (Number(mappedTabId || 0) === normalizedTabId) {
+        esmInvalidateWorkspaceReady(windowId, normalizedTabId);
         state.esmWorkspaceWorkspaceTabIdByWindowId.delete(windowId);
       }
     }
   }
 
   if (!normalizedTabId || Number(state.esmWorkspaceWorkspaceTabId || 0) === normalizedTabId) {
+    esmInvalidateWorkspaceReady(state.esmWorkspaceWorkspaceWindowId, normalizedTabId);
     state.esmWorkspaceWorkspaceTabId = 0;
     const fallbackEntry = state.esmWorkspaceWorkspaceTabIdByWindowId.entries().next().value || [];
     state.esmWorkspaceWorkspaceWindowId = Number(fallbackEntry[0] || 0);
@@ -34545,6 +34668,8 @@ async function esmWorkspaceEnsureWorkspaceTab(options = {}) {
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
   const useWindowFilter = targetWindowId > 0;
   let workspaceTab = null;
+  let createdWorkspaceTab = false;
+  let reusedReadyCandidate = false;
 
   const boundTabId = esmWorkspaceGetBoundWorkspaceTabId(targetWindowId);
   if (boundTabId > 0) {
@@ -34552,6 +34677,7 @@ async function esmWorkspaceEnsureWorkspaceTab(options = {}) {
       const existing = await chrome.tabs.get(boundTabId);
       if (esmWorkspaceIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
         workspaceTab = existing;
+        reusedReadyCandidate = String(existing?.status || "").trim().toLowerCase() === "complete";
       }
     } catch {
       esmWorkspaceUnbindWorkspaceTab(boundTabId);
@@ -34563,6 +34689,7 @@ async function esmWorkspaceEnsureWorkspaceTab(options = {}) {
     try {
       const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
       workspaceTab = allTabs.find((tab) => esmWorkspaceIsWorkspaceTab(tab)) || null;
+      reusedReadyCandidate = String(workspaceTab?.status || "").trim().toLowerCase() === "complete";
     } catch {
       workspaceTab = null;
     }
@@ -34574,6 +34701,7 @@ async function esmWorkspaceEnsureWorkspaceTab(options = {}) {
       active: shouldActivate,
       ...(useWindowFilter ? { windowId: targetWindowId } : {}),
     });
+    createdWorkspaceTab = Boolean(workspaceTab?.id);
   } else if (shouldActivate && workspaceTab.id) {
     try {
       workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
@@ -34586,6 +34714,11 @@ async function esmWorkspaceEnsureWorkspaceTab(options = {}) {
   }
 
   esmWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  if (createdWorkspaceTab) {
+    esmInvalidateWorkspaceReady(workspaceTab?.windowId, workspaceTab?.id);
+  } else if (reusedReadyCandidate || esmIsWorkspaceReady(workspaceTab?.windowId, workspaceTab?.id)) {
+    esmMarkWorkspaceReady(workspaceTab?.windowId, workspaceTab?.id);
+  }
   return workspaceTab;
 }
 
@@ -36530,10 +36663,19 @@ async function esmWorkspaceRunEndpointFromUi(esmWorkspaceState, endpoint, reques
     return;
   }
   try {
+    const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+      esmWorkspaceState?.programmer?.programmerId,
+      requestToken || esmWorkspaceState?.requestToken || 0
+    );
+    esmWorkspaceState.requestToken = liveRequestToken;
+    if (!isEsmServiceRequestActive(esmWorkspaceState.section, liveRequestToken, esmWorkspaceState.programmer?.programmerId)) {
+      return;
+    }
     const workspaceTab = await esmWorkspaceEnsureWorkspaceTab({ activate: true, windowId: esmWorkspaceState.controllerWindowId });
     const targetWindowId = Number(workspaceTab?.windowId || esmWorkspaceState.controllerWindowId || state.esmWorkspaceWorkspaceWindowId || 0);
+    await esmWaitForWorkspaceReady(targetWindowId, Number(workspaceTab?.id || 0), 6000).catch(() => false);
     esmWorkspaceBroadcastControllerState(esmWorkspaceState, targetWindowId);
-    await esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, generateRequestId(), requestToken, {
+    await esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, generateRequestId(), liveRequestToken, {
       emitStart: true,
       requestSource,
       targetWindowId,
@@ -36810,6 +36952,14 @@ async function esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, request
   if (!esmWorkspaceState || !normalizedRequestPath) {
     throw new Error("ESM request path is required.");
   }
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+    esmWorkspaceState?.programmer?.programmerId,
+    requestToken || esmWorkspaceState?.requestToken || 0
+  );
+  esmWorkspaceState.requestToken = liveRequestToken;
+  if (!isEsmServiceRequestActive(esmWorkspaceState.section, liveRequestToken, esmWorkspaceState.programmer?.programmerId)) {
+    throw new Error("ESM controller is no longer active for the selected media company.");
+  }
   const targetWindowId = Number(options?.targetWindowId || esmWorkspaceState.controllerWindowId || state.esmWorkspaceWorkspaceWindowId || 0);
   const environment = getActiveAdobePassEnvironment();
   const absoluteRequestUrl = megWorkspaceBuildAbsoluteServiceUrl(
@@ -36818,6 +36968,7 @@ async function esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, request
   );
   const workspaceTab = await esmWorkspaceEnsureWorkspaceTab({ activate: true, windowId: targetWindowId });
   const resolvedTargetWindowId = Number(workspaceTab?.windowId || targetWindowId || state.esmWorkspaceWorkspaceWindowId || 0);
+  await esmWaitForWorkspaceReady(resolvedTargetWindowId, Number(workspaceTab?.id || 0), 6000).catch(() => false);
   esmWorkspaceBroadcastControllerState(esmWorkspaceState, resolvedTargetWindowId);
   const displayNodeLabel = String(options?.displayNodeLabel || "").trim();
   const endpoint =
@@ -36831,7 +36982,7 @@ async function esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, request
   if (!endpoint) {
     throw new Error("ESM request path is required.");
   }
-  await esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, generateRequestId(), requestToken, {
+  await esmWorkspaceRunEndpointToWorkspace(esmWorkspaceState, endpoint, generateRequestId(), liveRequestToken, {
     emitStart: true,
     requestSource: String(options?.requestSource || "workspace").trim() || "workspace",
     displayNodeLabel,
@@ -36849,9 +37000,14 @@ async function esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl
   if (!esmWorkspaceState || !normalizedSavedQueryUrl) {
     return;
   }
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+    esmWorkspaceState?.programmer?.programmerId,
+    requestToken || esmWorkspaceState?.requestToken || 0
+  );
+  esmWorkspaceState.requestToken = liveRequestToken;
 
   try {
-    await esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, normalizedSavedQueryUrl, requestToken, {
+    await esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, normalizedSavedQueryUrl, liveRequestToken, {
       requestSource: "saved-query",
       displayNodeLabel: savedQueryName,
     });
@@ -37102,6 +37258,11 @@ async function megWorkspaceOpenEndpointFromUi(esmWorkspaceState, endpoint, reque
   if (!esmWorkspaceState || !endpoint?.url) {
     return;
   }
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+    esmWorkspaceState?.programmer?.programmerId,
+    requestToken || esmWorkspaceState?.requestToken || 0
+  );
+  esmWorkspaceState.requestToken = liveRequestToken;
 
   const targetWindowId = Number(esmWorkspaceState.controllerWindowId || state.megWorkspaceWindowId || 0);
   try {
@@ -37121,7 +37282,7 @@ async function megWorkspaceOpenEndpointFromUi(esmWorkspaceState, endpoint, reque
       {
         ...selection,
         autoRun: true,
-        requestToken,
+        requestToken: liveRequestToken,
         requestedAt: Date.now(),
       },
       {
@@ -37137,6 +37298,11 @@ async function esmWorkspaceMakeClickEsmFromUi(esmWorkspaceState, requestToken, s
   if (!esmWorkspaceState) {
     return;
   }
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+    esmWorkspaceState?.programmer?.programmerId,
+    requestToken || esmWorkspaceState?.requestToken || 0
+  );
+  esmWorkspaceState.requestToken = liveRequestToken;
   const triggerButton = esmWorkspaceState.makeClickEsmButton;
   if (triggerButton) {
     triggerButton.disabled = true;
@@ -37146,11 +37312,14 @@ async function esmWorkspaceMakeClickEsmFromUi(esmWorkspaceState, requestToken, s
     if (!context) {
       throw new Error("Select a media company with ESM access to generate clickESM.");
     }
-    await makeClickEsmDownload(context, requestToken, { source });
+    await makeClickEsmDownload(context, liveRequestToken, { source });
   } catch (error) {
     setStatus(`Unable to generate clickESM: ${error instanceof Error ? error.message : String(error)}`, "error");
   } finally {
-    if (triggerButton && isEsmServiceRequestActive(esmWorkspaceState.section, requestToken, esmWorkspaceState.programmer?.programmerId)) {
+    if (
+      triggerButton &&
+      isEsmServiceRequestActive(esmWorkspaceState.section, liveRequestToken, esmWorkspaceState.programmer?.programmerId)
+    ) {
       triggerButton.disabled = false;
     }
   }
@@ -37465,6 +37634,14 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
   if (!esmWorkspaceState?.contentElement) {
     return;
   }
+  const getLiveRequestToken = () => {
+    const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+      esmWorkspaceState?.programmer?.programmerId,
+      esmWorkspaceState?.requestToken || requestToken || 0
+    );
+    esmWorkspaceState.requestToken = liveRequestToken;
+    return liveRequestToken;
+  };
 
   const toggleTreePanel = () => {
     const expanded = String(
@@ -37493,21 +37670,26 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
     esmWorkspaceState.loadAllBusy = true;
     esmWorkspaceSyncPanelLoadAllButtons(esmWorkspaceState, endpointIndexes);
     try {
-      await esmWorkspaceEnsureWorkspaceTab({
+      const workspaceTab = await esmWorkspaceEnsureWorkspaceTab({
         activate: true,
         windowId: Number(esmWorkspaceState.controllerWindowId || state.esmWorkspaceWorkspaceWindowId || 0),
       });
+      const targetWindowId = Number(
+        workspaceTab?.windowId || esmWorkspaceState.controllerWindowId || state.esmWorkspaceWorkspaceWindowId || 0
+      );
+      await esmWaitForWorkspaceReady(targetWindowId, Number(workspaceTab?.id || 0), 6000).catch(() => false);
       esmWorkspaceBroadcastControllerState(esmWorkspaceState);
 
       for (const endpoint of endpointQueue) {
-        if (!isEsmServiceRequestActive(esmWorkspaceState.section, requestToken, esmWorkspaceState.programmer?.programmerId)) {
+        const runRequestToken = getLiveRequestToken();
+        if (!isEsmServiceRequestActive(esmWorkspaceState.section, runRequestToken, esmWorkspaceState.programmer?.programmerId)) {
           break;
         }
         await esmWorkspaceRunEndpointToWorkspace(
           esmWorkspaceState,
           endpoint,
           generateRequestId(),
-          requestToken,
+          runRequestToken,
           {
             emitStart: true,
             requestSource: source,
@@ -37546,7 +37728,7 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
       void stopEsmWorkspaceEsmRecording(esmWorkspaceState);
       return;
     }
-    void startEsmWorkspaceEsmRecording(esmWorkspaceState, requestToken);
+    void startEsmWorkspaceEsmRecording(esmWorkspaceState, getLiveRequestToken());
   });
 
   esmWorkspaceState.resetButton?.addEventListener("click", () => {
@@ -37562,7 +37744,7 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
   esmWorkspaceState.makeClickEsmButton?.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    void esmWorkspaceMakeClickEsmFromUi(esmWorkspaceState, requestToken, "sidepanel");
+    void esmWorkspaceMakeClickEsmFromUi(esmWorkspaceState, getLiveRequestToken(), "sidepanel");
   });
 
   esmWorkspaceState.megSelectElement?.addEventListener("change", (event) => {
@@ -37580,7 +37762,7 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
     selectElement.value = "";
     selectElement.title = "Saved Queries";
     selectElement.setAttribute("aria-label", "Saved Queries");
-    void esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName);
+    void esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, getLiveRequestToken(), savedQueryName);
   });
 
   esmWorkspaceState.megToggleButton?.addEventListener("click", (event) => {
@@ -37600,7 +37782,7 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
     if (!endpoint) {
       return;
     }
-    void megWorkspaceOpenEndpointFromUi(esmWorkspaceState, endpoint, requestToken);
+    void megWorkspaceOpenEndpointFromUi(esmWorkspaceState, endpoint, getLiveRequestToken());
   });
 
   esmWorkspaceState.zoomFilterSelect?.addEventListener("change", () => {
@@ -37689,12 +37871,14 @@ async function handleEsmWorkspaceWorkspaceAction(message, sender = null) {
       if (senderWindowId > 0) {
         esmWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
       }
+      esmMarkWorkspaceReady(senderWindowId || Number(esmWorkspaceState.controllerWindowId || state.esmWorkspaceWorkspaceWindowId || 0), senderTabId);
       esmWorkspaceBroadcastControllerState(esmWorkspaceState, senderWindowId);
     } else {
       const selectedProgrammer = resolveSelectedProgrammer();
       const selectedServices = selectedProgrammer?.programmerId
         ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)
         : null;
+      esmMarkWorkspaceReady(senderWindowId || Number(state.esmWorkspaceWorkspaceWindowId || 0), senderTabId);
       esmWorkspaceBroadcastSelectedControllerState(selectedProgrammer, selectedServices, senderWindowId);
     }
     return { ok: true, controllerOnline: Boolean(esmWorkspaceState) };
@@ -40366,6 +40550,12 @@ async function cmuUsageRunRecordsFromUi(cmState, cmuUsageState, records, request
   if (!cmState || !cmuUsageState || queue.length === 0) {
     return;
   }
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+    cmState?.programmer?.programmerId,
+    requestToken || cmuUsageState?.requestToken || cmState?.requestToken || 0
+  );
+  cmState.requestToken = liveRequestToken;
+  cmuUsageState.requestToken = liveRequestToken;
   try {
     const requestSource = String(source || "").trim();
     emitCmDebugEvent(
@@ -40385,7 +40575,7 @@ async function cmuUsageRunRecordsFromUi(cmState, cmuUsageState, records, request
         },
       }
     );
-    await cmOpenRecordsInWorkspace(cmState, queue, requestToken, {
+    await cmOpenRecordsInWorkspace(cmState, queue, liveRequestToken, {
       activate: true,
       emitStart: true,
       forceRefetch: true,
@@ -40511,6 +40701,15 @@ function cmuUsageWireInteractions(cmState, cmuUsageState, requestToken) {
   if (!cmState || !cmuUsageState) {
     return;
   }
+  const getLiveRequestToken = () => {
+    const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+      cmState?.programmer?.programmerId,
+      cmuUsageState?.requestToken || cmState?.requestToken || requestToken || 0
+    );
+    cmState.requestToken = liveRequestToken;
+    cmuUsageState.requestToken = liveRequestToken;
+    return liveRequestToken;
+  };
   const applyFilters = ({ highlight = false, normalizeInput = false } = {}) => {
     const normalizedTerm = clickEsmNormalizeSearchTerm(cmuUsageState.searchInput?.value || "");
     const normalizedZoomFilter = String(cmuUsageState.zoomFilterSelect?.value || "").trim().toUpperCase();
@@ -40575,7 +40774,7 @@ function cmuUsageWireInteractions(cmState, cmuUsageState, requestToken) {
     cmuUsageSyncPanelLoadAllButtons(cmuUsageState, endpointIndexes);
     cmSetLoadAllButtonsBusy(cmState, [cmuUsageState.treeLoadAllButton], true);
     try {
-      await cmuUsageRunRecordsFromUi(cmState, cmuUsageState, records, requestToken, source);
+      await cmuUsageRunRecordsFromUi(cmState, cmuUsageState, records, getLiveRequestToken(), source);
     } finally {
       cmSetLoadAllButtonsBusy(cmState, [cmuUsageState.treeLoadAllButton], false);
       cmuUsageState.loadAllBusy = false;
@@ -41731,13 +41930,18 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
   if (!cmState || !record) {
     return;
   }
-  if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+    cmState?.programmer?.programmerId,
+    requestToken || cmState?.requestToken || 0
+  );
+  cmState.requestToken = liveRequestToken;
+  if (!isCmServiceRequestActive(cmState.section, liveRequestToken, cmState.programmer?.programmerId)) {
     return;
   }
 
   if (String(record?.kind || "").toLowerCase() === "cmv2-op") {
     const targetWorkspace = cmResolveWorkspaceTarget(cmState, options);
-    await cmRunOperationRecordToWorkspace(cmState, record, requestToken, {
+    await cmRunOperationRecordToWorkspace(cmState, record, liveRequestToken, {
       emitForm: options.emitForm !== false,
       execute: options.execute === true,
       formValues: options.formValues && typeof options.formValues === "object" ? options.formValues : {},
@@ -41813,7 +42017,7 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
     Number(options.targetWindowId || 0) ||
     Number(cmState.controllerWindowId || 0) ||
     Number(targetWorkspace === "mvpd" ? state.mvpdWorkspaceWindowId : state.cmWorkspaceWindowId || 0);
-  const workspaceReportContext = cmBuildWorkspaceReportContextPayload(cmState, requestToken);
+  const workspaceReportContext = cmBuildWorkspaceReportContextPayload(cmState, liveRequestToken);
   if (options.emitStart !== false) {
     cmSendReportWorkspaceMessage(
       targetWorkspace,
@@ -50855,7 +51059,7 @@ async function cmEnsureTargetWorkspaceTab(cmState, options = {}) {
   });
   cmBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
   const targetWindowId = Number(workspaceTab?.windowId || cmState?.controllerWindowId || state.cmWorkspaceWindowId || 0);
-  await cmWaitForWorkspaceReady(targetWindowId, Number(workspaceTab?.id || 0), 3000).catch(() => false);
+  await cmWaitForWorkspaceReady(targetWindowId, Number(workspaceTab?.id || 0), 6000).catch(() => false);
   return {
     targetWorkspace,
     workspaceTab,
@@ -50931,6 +51135,11 @@ async function cmOpenRecordsInWorkspace(cmState, records, requestToken, options 
   if (!cmState || queue.length === 0) {
     return 0;
   }
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+    cmState?.programmer?.programmerId,
+    requestToken || cmState?.requestToken || 0
+  );
+  cmState.requestToken = liveRequestToken;
   const workspaceInfo = await cmEnsureTargetWorkspaceTab(cmState, options);
   const workspaceTab = workspaceInfo?.workspaceTab || null;
   const targetWindowId = Number(workspaceInfo?.targetWindowId || cmState.controllerWindowId || 0);
@@ -50944,10 +51153,12 @@ async function cmOpenRecordsInWorkspace(cmState, records, requestToken, options 
 
   let openedCount = 0;
   for (const record of queue) {
-    if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
+    const runRequestToken = resolveCurrentPremiumPanelRequestToken(cmState?.programmer?.programmerId, liveRequestToken);
+    cmState.requestToken = runRequestToken;
+    if (!isCmServiceRequestActive(cmState.section, runRequestToken, cmState.programmer?.programmerId)) {
       break;
     }
-    await cmRunRecordToWorkspace(cmState, record, requestToken, {
+    await cmRunRecordToWorkspace(cmState, record, runRequestToken, {
       emitStart: options.emitStart !== false,
       forceRefetch: options.forceRefetch === true,
       cardId: String(record?.cardId || generateRequestId()),
@@ -56059,6 +56270,10 @@ function refreshExistingPremiumServiceSections(programmer, services = null) {
     }
     const serviceApp = serviceKey === "esmWorkspace" ? services?.esm || null : services?.[serviceKey] || null;
     section.dataset.appGuid = String(serviceApp?.guid || "").trim();
+    if (serviceKey === "esmWorkspace" && typeof section.__underparRefreshEsmWorkspace === "function") {
+      void section.__underparRefreshEsmWorkspace();
+      return;
+    }
     if (serviceKey === "restV2") {
       syncRestV2LoginPanel(section, programmer, serviceApp);
       syncMvpdWorkspaceToolForSection(section, programmer, services);
@@ -58365,6 +58580,8 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.cmLastHydratedAccessToken = "";
   state.cmTenantBundleByTenantKey.clear();
   state.cmTenantBundlePromiseByTenantKey.clear();
+  state.esmWorkspaceReadyByWindowId.clear();
+  state.esmWorkspaceReadyWaitersByWindowId.clear();
   state.cmWorkspaceTabId = 0;
   state.cmWorkspaceWindowId = 0;
   state.cmWorkspaceTabIdByWindowId.clear();

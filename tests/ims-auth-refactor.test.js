@@ -1295,8 +1295,44 @@ test("esm health tenant token requests stay on the console rest api base", () =>
   assert.match(tokenSource, /resolveAdobeConsolePageContextTarget\(/);
   assert.match(tokenSource, /openTemporaryAdobePageContextTarget\(\s*buildAdobePassConsoleBootstrapUrl\(environment,\s*"programmers"\)\s*\)/);
   assert.match(tokenSource, /fetchAdobeConsoleJsonViaShellPageContext\(tokenUrl,/);
+  assert.match(tokenSource, /const csrfToken = String\(state\.consoleCsrfToken \|\| ""\)\.trim\(\);/);
+  assert.doesNotMatch(tokenSource, /"X-CSRF-Token": firstNonEmptyString\(\[state\.consoleCsrfToken,\s*"NO-TOKEN"\]\)/);
   assert.match(tokenSource, /closeTemporaryAdobePageContextTarget\(pageContextTargetRef\?\.target\?\.temporaryTarget \|\| null\)/);
   assert.doesNotMatch(tokenSource, /consoleBase\.replace\(\/\\\/\+\$\/, ""\)\}\$\{ESM_HEALTH_TENANT_TOKEN_PATH\}/);
+});
+
+test("esm workspace waits for workspace-ready and resolves the live premium request token before running JellyBeans", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const ensureSource = extractFunctionSource(popupSource, "esmWorkspaceEnsureWorkspaceTab");
+  const runSource = extractFunctionSource(popupSource, "esmWorkspaceRunEndpointFromUi");
+  const workspaceActionSource = extractFunctionSource(popupSource, "handleEsmWorkspaceWorkspaceAction");
+
+  assert.match(popupSource, /function esmWaitForWorkspaceReady\(windowId,\s*tabId = 0,\s*timeoutMs = 6000\)/);
+  assert.match(ensureSource, /let createdWorkspaceTab = false;/);
+  assert.match(ensureSource, /let reusedReadyCandidate = false;/);
+  assert.match(ensureSource, /esmInvalidateWorkspaceReady\(workspaceTab\?\.windowId,\s*workspaceTab\?\.id\);/);
+  assert.match(ensureSource, /esmMarkWorkspaceReady\(workspaceTab\?\.windowId,\s*workspaceTab\?\.id\);/);
+  assert.match(runSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(/);
+  assert.match(runSource, /esmWorkspaceState\.requestToken = liveRequestToken;/);
+  assert.match(runSource, /await esmWaitForWorkspaceReady\(targetWindowId,\s*Number\(workspaceTab\?\.id \|\| 0\),\s*6000\)\.catch\(\(\) => false\);/);
+  assert.match(workspaceActionSource, /esmMarkWorkspaceReady\(senderWindowId \|\| Number\(esmWorkspaceState\.controllerWindowId \|\| state\.esmWorkspaceWorkspaceWindowId \|\| 0\),\s*senderTabId\);/);
+});
+
+test("premium service refresh and CMU actions keep ESM and CM JellyBeans on the live request token", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const refreshSource = extractFunctionSource(popupSource, "refreshExistingPremiumServiceSections");
+  const cmuSource = extractFunctionSource(popupSource, "cmuUsageRunRecordsFromUi");
+  const cmOpenSource = extractFunctionSource(popupSource, "cmOpenRecordsInWorkspace");
+  const cmRunSource = extractFunctionSource(popupSource, "cmRunRecordToWorkspace");
+
+  assert.match(refreshSource, /serviceKey === "esmWorkspace" && typeof section\.__underparRefreshEsmWorkspace === "function"/);
+  assert.match(cmuSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(/);
+  assert.match(cmuSource, /cmState\.requestToken = liveRequestToken;/);
+  assert.match(cmuSource, /cmuUsageState\.requestToken = liveRequestToken;/);
+  assert.match(cmOpenSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(/);
+  assert.match(cmOpenSource, /const runRequestToken = resolveCurrentPremiumPanelRequestToken\(cmState\?\.programmer\?\.programmerId,\s*liveRequestToken\);/);
+  assert.match(cmRunSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(/);
+  assert.match(cmRunSource, /const workspaceReportContext = cmBuildWorkspaceReportContextPayload\(cmState,\s*liveRequestToken\);/);
 });
 
 test("health splunk prefers the live dashboard deeplink and normalizes dashboard queries for Splunk job APIs", () => {
