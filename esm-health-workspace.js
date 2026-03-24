@@ -335,6 +335,7 @@ function applyControllerState(payload = {}) {
   const previousEnvironmentKey = String(state.environmentKey || "").trim();
   const previousWorkspaceContextKey = String(state.workspaceContextKey || "").trim();
   const previousRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
+  const previousEsmHealthReady = state.esmHealthReady === true;
   const controllerChanged =
     !state.query.initialized ||
     nextSelectionKey !== previousControllerSelectionKey ||
@@ -343,9 +344,19 @@ function applyControllerState(payload = {}) {
   const runtimeContextChanged =
     (nextWorkspaceContextKey && previousWorkspaceContextKey && nextWorkspaceContextKey !== previousWorkspaceContextKey) ||
     (nextRequestToken > 0 && previousRequestToken > 0 && nextRequestToken !== previousRequestToken);
+  const readinessActivated = !previousEsmHealthReady && payload?.esmHealthReady === true;
+  const hadLiveControllerContext =
+    Boolean(previousControllerSelectionKey || previousProgrammerId || previousEnvironmentKey || previousWorkspaceContextKey) ||
+    previousRequestToken > 0;
   const preservedDates = controllerChanged ? resolveDateInputRange(state.query.start, state.query.end) : { start: "", end: "" };
   const currentReportSelectionKey = getReportControllerSelectionKey(state.report);
   const shouldClearStaleReport = controllerChanged && currentReportSelectionKey && currentReportSelectionKey !== nextSelectionKey;
+  const shouldAutoRefreshForControllerUpdate =
+    (controllerChanged || runtimeContextChanged || readinessActivated) &&
+    hadLiveControllerContext &&
+    nextProgrammerId &&
+    payload?.esmHealthReady === true &&
+    !state.loading;
 
   state.controllerOnline = payload?.controllerOnline === true;
   state.esmHealthReady = payload?.esmHealthReady === true;
@@ -386,6 +397,9 @@ function applyControllerState(payload = {}) {
   }
   syncFilterControlsFromState();
   updateControllerBanner();
+  if (shouldAutoRefreshForControllerUpdate) {
+    void runDashboard("Refreshing ESM HEALTH dashboard for the selected UnderPAR context...");
+  }
 }
 
 function buildQueryContextPayload() {

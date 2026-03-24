@@ -125,7 +125,7 @@ function syncActionButtonsDisabled() {
 
 function updateControllerBanner() {
   if (els.controllerState) {
-    els.controllerState.textContent = `HEALTH Workspace | ${getProgrammerLabel()}`;
+    els.controllerState.textContent = `SPLUNK HEALTH Dashboard | ${getProgrammerLabel()}`;
   }
   if (els.filterState) {
     els.filterState.textContent = getFilterLabel();
@@ -372,7 +372,7 @@ function renderReport() {
   const renderableTables = getRenderableTables();
   if (renderableTables.length === 0) {
     els.cardsHost.innerHTML =
-      '<article class="rest-report-card"><p class="health-report-empty">No HEALTH Splunk report loaded yet.</p></article>';
+      '<article class="rest-report-card"><p class="health-report-empty">No SPLUNK HEALTH report loaded yet.</p></article>';
     return;
   }
 
@@ -385,12 +385,12 @@ function renderReport() {
       ])
     : report
       ? `${Number(report?.successCount || 0)} of ${Number(report?.totalTables || renderableTables.length)} tables loaded.`
-      : `Loaded ${renderableTables.length} HEALTH tables.`;
+      : `Loaded ${renderableTables.length} SPLUNK HEALTH tables.`;
 
   els.cardsHost.innerHTML = `
     <article class="rest-report-card health-report-overview">
       <header class="rest-report-head">
-        <p class="rest-report-title">HEALTH Splunk Report</p>
+        <p class="rest-report-title">SPLUNK HEALTH Dashboard</p>
         <p class="rest-report-meta"><strong>Checked:</strong> ${escapeHtml(checkedAtLabel)}</p>
         <p class="health-report-overview-copy">${escapeHtml(summaryCopy)}</p>
       </header>

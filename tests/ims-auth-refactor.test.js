@@ -1492,6 +1492,8 @@ test("health status UI stays pill-only and premium recording controls stay icon-
 test("esm health rebinds to the live controller context and only persists the date window across ENV x Media Company switches", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
+  const healthWorkspaceSource = fs.readFileSync(path.join(ROOT, "health-workspace.js"), "utf8");
+  const healthWorkspaceHtml = fs.readFileSync(path.join(ROOT, "health-workspace.html"), "utf8");
   const controllerPayloadSource = extractFunctionSource(popupSource, "esmHealthWorkspaceGetSelectedControllerStatePayload");
   const refreshActionSource = extractFunctionSource(popupSource, "handleEsmHealthWorkspaceAction");
   const runSource = extractFunctionSource(popupSource, "runEsmHealthDashboardForSelection");
@@ -1515,13 +1517,21 @@ test("esm health rebinds to the live controller context and only persists the da
   assert.match(esmHealthWorkspaceSource, /function doesWorkspaceEventMatchCurrentContext\(payload = \{\}\)/);
   assert.match(applyControllerSource, /const preservedDates = controllerChanged \? resolveDateInputRange\(state\.query\.start,\s*state\.query\.end\) : \{ start: "", end: "" \};/);
   assert.match(applyControllerSource, /const runtimeContextChanged =/);
+  assert.match(applyControllerSource, /const readinessActivated = !previousEsmHealthReady && payload\?\.esmHealthReady === true;/);
+  assert.match(applyControllerSource, /const shouldAutoRefreshForControllerUpdate =/);
   assert.match(applyControllerSource, /if \(controllerChanged\) \{/);
   assert.match(applyControllerSource, /state\.query\.start = preservedDates\.start;/);
   assert.match(applyControllerSource, /state\.query\.end = preservedDates\.end;/);
   assert.match(applyControllerSource, /state\.loading = false;/);
+  assert.match(applyControllerSource, /if \(shouldAutoRefreshForControllerUpdate\) \{\s*void runDashboard\("Refreshing ESM HEALTH dashboard for the selected UnderPAR context\.\.\."\);/);
   assert.match(handleWorkspaceEventSource, /if \(\(event === "report-start" \|\| event === "report-result"\) && !doesWorkspaceEventMatchCurrentContext\(payload\)\) \{/);
   assert.match(handleWorkspaceEventSource, /void runDashboard\("Refreshing ESM HEALTH dashboard for the selected UnderPAR context\.\.\."\);/);
   assert.match(rerunSource, /await runDashboard\("Refreshing ESM HEALTH dashboard\.\.\."\);/);
+  assert.match(healthWorkspaceSource, /SPLUNK HEALTH Dashboard \|/);
+  assert.match(healthWorkspaceSource, /No SPLUNK HEALTH report loaded yet\./);
+  assert.match(healthWorkspaceSource, /SPLUNK HEALTH Dashboard/);
+  assert.match(healthWorkspaceHtml, /UP SPLUNK HEALTH Workspace/);
+  assert.match(healthWorkspaceHtml, /Re-run latest SPLUNK HEALTH queries/);
 });
 
 test("esm workspace waits for workspace-ready and resolves the live premium request token before running JellyBeans", () => {
