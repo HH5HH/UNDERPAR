@@ -1292,6 +1292,10 @@ test("esm health tenant token requests stay on the console rest api base", () =>
 
   assert.match(restApiUrlSource, /return `\$\{normalizedConsoleBase\}\/rest\/api\/\$\{normalizedPath\}`;/);
   assert.match(tokenSource, /const tokenUrl = buildAdobeConsoleRestApiUrl\(ESM_HEALTH_TENANT_TOKEN_PATH,\s*consoleBase\);/);
+  assert.match(tokenSource, /resolveAdobeConsolePageContextTarget\(/);
+  assert.match(tokenSource, /openTemporaryAdobePageContextTarget\(\s*buildAdobePassConsoleBootstrapUrl\(environment,\s*"programmers"\)\s*\)/);
+  assert.match(tokenSource, /fetchAdobeConsoleJsonViaShellPageContext\(tokenUrl,/);
+  assert.match(tokenSource, /closeTemporaryAdobePageContextTarget\(pageContextTargetRef\?\.target\?\.temporaryTarget \|\| null\)/);
   assert.doesNotMatch(tokenSource, /consoleBase\.replace\(\/\\\/\+\$\/, ""\)\}\$\{ESM_HEALTH_TENANT_TOKEN_PATH\}/);
 });
 

@@ -21349,7 +21349,53 @@ async function fetchEsmHealthTenantDataToken(queryContext = null) {
   const environment = getActiveAdobePassEnvironment();
   const consoleBase = String(environment?.consoleBase || ADOBE_CONSOLE_BASE || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase).trim();
   const tokenUrl = buildAdobeConsoleRestApiUrl(ESM_HEALTH_TENANT_TOKEN_PATH, consoleBase);
+  const accessToken = normalizeBearerTokenValue(getPreferredAdobeConsoleAccessTokenCandidate());
+  const pageContextTargetRef = { target: null };
   try {
+    if (accessToken && isProbablyJwt(accessToken) && chrome.scripting?.executeScript) {
+      let pageContextTarget =
+        pageContextTargetRef?.target && typeof pageContextTargetRef.target === "object"
+          ? pageContextTargetRef.target
+          : null;
+      if (Number(pageContextTarget?.tabId || 0) <= 0) {
+        pageContextTarget = await resolveAdobeConsolePageContextTarget({
+          preferredTabId: 0,
+        }).catch(() => null);
+      }
+      if (Number(pageContextTarget?.tabId || 0) <= 0) {
+        const temporaryTarget = await openTemporaryAdobePageContextTarget(
+          buildAdobePassConsoleBootstrapUrl(environment, "programmers")
+        ).catch(() => null);
+        if (temporaryTarget?.tabId) {
+          pageContextTarget = {
+            tab: temporaryTarget.tab || null,
+            tabId: Number(temporaryTarget.tabId || temporaryTarget?.tab?.id || 0),
+            temporaryTarget,
+          };
+        }
+      }
+      if (pageContextTarget && typeof pageContextTarget === "object") {
+        pageContextTargetRef.target = pageContextTarget;
+      }
+      const pageContextResult = await fetchAdobeConsoleJsonViaShellPageContext(tokenUrl, {
+        method: "GET",
+        timeoutMs: ESM_HEALTH_CONSOLE_REQUEST_TIMEOUT_MS,
+        accessToken,
+        pageContextTargetRef,
+        headers: {
+          Authorization: `bearer ${accessToken}`,
+          "X-CSRF-Token": firstNonEmptyString([state.consoleCsrfToken, "NO-TOKEN"]),
+        },
+      }).catch(() => null);
+      const pageContextToken = extractEsmHealthTokenValue(pageContextResult?.parsed, pageContextResult?.text);
+      if (pageContextToken && isProbablyJwt(pageContextToken)) {
+        return {
+          token: pageContextToken,
+          sourceUrl: String(pageContextResult?.url || tokenUrl),
+          status: Number(pageContextResult?.status || 200),
+        };
+      }
+    }
     const result = await fetchAdobeConsoleJsonWithLoginButtonFallback([tokenUrl], "ESM HEALTH token", {
       method: "GET",
       credentials: "include",
@@ -21378,6 +21424,8 @@ async function fetchEsmHealthTenantDataToken(queryContext = null) {
       throw new Error("Current Adobe Pass session does not have access to ESM HEALTH.");
     }
     throw new Error(`ESM HEALTH token request failed. ${message}`);
+  } finally {
+    await closeTemporaryAdobePageContextTarget(pageContextTargetRef?.target?.temporaryTarget || null).catch(() => null);
   }
 }
 
