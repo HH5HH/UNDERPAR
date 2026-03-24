@@ -66,6 +66,22 @@ test("distribution build emits the canonical latest archive and folder name", (t
     .split(/\n+/)
     .filter(Boolean);
   const packageMetadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+  const packagedMetadata = JSON.parse(
+    runCommand("unzip", ["-p", artifactPath, "underpar_distro/underpar_distro.version.json"], repoDir)
+  );
+  const runtimeBundlePath = path.join(tempRoot, "inner-underpar-distro.zip");
+  fs.writeFileSync(
+    runtimeBundlePath,
+    execFileSync("unzip", ["-p", artifactPath, "underpar_distro/underpar_distro.zip"], {
+      cwd: repoDir,
+      encoding: null,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+  );
+  const runtimeBundleEntries = runCommand("unzip", ["-Z1", runtimeBundlePath], repoDir)
+    .trim()
+    .split(/\n+/)
+    .filter(Boolean);
 
   assert.equal(fs.realpathSync(outputPath), fs.realpathSync(artifactPath));
   assert.equal(fs.existsSync(path.join(repoDir, "UNDERPAR_DIST_v1.0.0.zip")), false);
@@ -82,11 +98,16 @@ test("distribution build emits the canonical latest archive and folder name", (t
   );
   assert.ok(archiveEntries.includes("underpar_distro/manifest.json"));
   assert.ok(archiveEntries.includes("underpar_distro/background.js"));
-  assert.ok(!archiveEntries.includes("underpar_distro/underpar_distro.version.json"));
+  assert.ok(archiveEntries.includes("underpar_distro/underpar_distro.version.json"));
+  assert.ok(archiveEntries.includes("underpar_distro/underpar_distro.zip"));
   assert.ok(!archiveEntries.includes("underpar_distro/AGENTS.md"));
   assert.ok(!archiveEntries.includes("underpar_distro/.githooks/pre-commit"));
   assert.ok(!archiveEntries.includes("underpar_distro/scripts/build_underpar_distro.sh"));
   assert.ok(!archiveEntries.includes("underpar_distro/tests/noop.test.js"));
+  assert.equal(packagedMetadata.version, "1.0.0");
+  assert.ok(runtimeBundleEntries.includes("manifest.json"));
+  assert.ok(runtimeBundleEntries.includes("underpar_distro.version.json"));
+  assert.ok(!runtimeBundleEntries.includes("underpar_distro.zip"));
 });
 
 test("distribution build packages staged tracked files even when the worktree copy is missing", (t) => {

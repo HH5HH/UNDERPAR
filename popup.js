@@ -15294,6 +15294,27 @@ function setHrContextSectionCollapsed(programmerId, sectionKey, isCollapsed) {
   setPremiumSectionCollapsed(programmerId, getHrContextSectionCollapseKey(sectionKey), isCollapsed);
 }
 
+function getRestV2InteractiveDocsSectionCollapseKey(sectionKey = "") {
+  return `rest-v2-learning:${String(sectionKey || "").trim()}`;
+}
+
+function getRestV2InteractiveDocsSectionCollapsed(programmerId, sectionKey) {
+  const scopedKey = getRestV2InteractiveDocsSectionCollapseKey(sectionKey);
+  const programmerScopedKey = getPremiumCollapseKey(programmerId, scopedKey);
+  if (state.premiumSectionCollapsedByKey.has(programmerScopedKey)) {
+    return Boolean(state.premiumSectionCollapsedByKey.get(programmerScopedKey));
+  }
+  const globalScopedKey = getPremiumCollapseKey("__global__", scopedKey);
+  if (state.premiumSectionCollapsedByKey.has(globalScopedKey)) {
+    return Boolean(state.premiumSectionCollapsedByKey.get(globalScopedKey));
+  }
+  return false;
+}
+
+function setRestV2InteractiveDocsSectionCollapsed(programmerId, sectionKey, isCollapsed) {
+  setPremiumSectionCollapsed(programmerId, getRestV2InteractiveDocsSectionCollapseKey(sectionKey), isCollapsed);
+}
+
 function applyCollapsibleState(toggleButton, containerElement, isCollapsed) {
   if (!toggleButton || !containerElement) {
     return;
@@ -54416,6 +54437,93 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
   };
 }
 
+function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null) {
+  const resolvedSection = section && typeof section === "object" ? section : null;
+  if (!resolvedSection?.sectionKey) {
+    return "";
+  }
+
+  const sectionKey = String(resolvedSection.sectionKey || "").trim();
+  const sectionLabel = String(resolvedSection.sectionLabel || sectionKey).trim();
+  const sectionUrl = buildRestV2InteractiveDocsUrl(resolvedSection.tagAnchor || "");
+  const sectionActionLabel = `Open ${sectionLabel} in Adobe PASS REST API V2 interactive docs`;
+  const toggleActionLabel = `Toggle ${sectionLabel} REST API V2 interactive docs section`;
+  const initialCollapsed = getRestV2InteractiveDocsSectionCollapsed(programmer?.programmerId, sectionKey);
+  const sectionDomId = `rest-v2-doc-section-${String(programmer?.programmerId || "global")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w-]+/g, "-")}-${sectionKey.toLowerCase().replace(/[^\w-]+/g, "-")}`;
+
+  return `
+    <section
+      class="hr-rest-v2-doc-section"
+      data-restv2-doc-section-key="${escapeHtml(sectionKey)}"
+      data-restv2-doc-section-initial-collapsed="${initialCollapsed ? "true" : "false"}"
+    >
+      <div class="hr-rest-v2-doc-section-head">
+        <button
+          type="button"
+          class="metadata-header service-box-header hr-rest-v2-doc-section-toggle"
+          aria-controls="${escapeHtml(sectionDomId)}"
+          title="${escapeHtml(toggleActionLabel)}"
+          aria-label="${escapeHtml(toggleActionLabel)}"
+        >
+          <span class="hr-rest-v2-doc-section-toggle-label">${escapeHtml(sectionLabel)}</span>
+          <span class="hr-rest-v2-doc-section-count">${escapeHtml(`${resolvedSection.readyCount}/${resolvedSection.entries.length} Ready`)}</span>
+          <span class="collapse-icon" aria-hidden="true">▼</span>
+        </button>
+        <a
+          href="${escapeHtml(sectionUrl)}"
+          class="hr-rest-v2-doc-section-link"
+          data-service-doc-key="restV2"
+          data-service-doc-url="${escapeHtml(sectionUrl)}"
+          title="${escapeHtml(sectionActionLabel)}"
+          aria-label="${escapeHtml(sectionActionLabel)}"
+        >
+          Open
+        </a>
+      </div>
+      <div class="metadata-container service-box-container hr-rest-v2-doc-section-shell" id="${escapeHtml(sectionDomId)}">
+        <div class="hr-rest-v2-doc-section-grid">
+          ${resolvedSection.entries
+            .map((entry) => {
+              const entryUrl = buildRestV2InteractiveDocsUrl(entry.operationAnchor || entry.tagAnchor || "");
+              const activationState = entry.activationState || {};
+              const isReady = activationState.ready === true;
+              const entryActionLabel = isReady
+                ? `Open and hydrate ${entry.label} in Adobe PASS REST API V2 interactive docs`
+                : `${entry.label} is locked. ${String(activationState.reason || "").trim()}`;
+              const readinessLabel = isReady ? "READY NOW" : "SETUP NEEDED";
+              return `
+                <button
+                  type="button"
+                  class="hr-rest-v2-doc-entry ${isReady ? "is-ready" : "is-locked"}"
+                  data-restv2-doc-entry-key="${escapeHtml(entry.key)}"
+                  data-restv2-doc-url="${escapeHtml(entryUrl)}"
+                  data-restv2-doc-state="${isReady ? "ready" : "locked"}"
+                  title="${escapeHtml(entryActionLabel)}"
+                  aria-label="${escapeHtml(entryActionLabel)}"
+                  ${isReady ? "" : "disabled"}
+                >
+                  <span class="hr-rest-v2-doc-entry-topline">
+                    <span class="hr-rest-v2-doc-entry-label">${escapeHtml(entry.label)}</span>
+                    <span class="hr-rest-v2-doc-entry-method">${escapeHtml(entry.methodLabel || "")}</span>
+                  </span>
+                  <span class="hr-rest-v2-doc-entry-summary">${escapeHtml(entry.operationSummary || "")}</span>
+                  <span class="hr-rest-v2-doc-entry-readiness">
+                    <span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--${isReady ? "ready" : "locked"}">${escapeHtml(readinessLabel)}</span>
+                    <span class="hr-rest-v2-doc-entry-state-text">${escapeHtml(String(activationState.reason || "").trim())}</span>
+                  </span>
+                </button>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null) {
   if (!services?.restV2) {
     return "";
@@ -54450,63 +54558,41 @@ function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null)
         <p class="hr-rest-v2-docs-subtitle">Every customer-facing REST V2 operation, hydrated from UnderPAR context when available.</p>
       </div>
       <div class="hr-rest-v2-docs-grid">
-        ${sections.map((section) => {
-          const sectionUrl = buildRestV2InteractiveDocsUrl(section.tagAnchor || "");
-          const sectionActionLabel = `Open ${section.sectionLabel} in Adobe PASS REST API V2 interactive docs`;
-          return `
-            <section class="hr-rest-v2-doc-section">
-              <div class="hr-rest-v2-doc-section-head">
-                <a
-                  href="${escapeHtml(sectionUrl)}"
-                  class="hr-rest-v2-doc-section-title"
-                  data-service-doc-key="restV2"
-                  data-service-doc-url="${escapeHtml(sectionUrl)}"
-                  title="${escapeHtml(sectionActionLabel)}"
-                  aria-label="${escapeHtml(sectionActionLabel)}"
-                >
-                  ${escapeHtml(section.sectionLabel)}
-                </a>
-                <span class="hr-rest-v2-doc-section-count">${escapeHtml(`${section.readyCount}/${section.entries.length} Ready`)}</span>
-              </div>
-              <div class="hr-rest-v2-doc-section-grid">
-                ${section.entries.map((entry) => {
-                  const entryUrl = buildRestV2InteractiveDocsUrl(entry.operationAnchor || entry.tagAnchor || "");
-                  const activationState = entry.activationState || {};
-                  const isReady = activationState.ready === true;
-                  const entryActionLabel = isReady
-                    ? `Open and hydrate ${entry.label} in Adobe PASS REST API V2 interactive docs`
-                    : `${entry.label} is locked. ${String(activationState.reason || "").trim()}`;
-                  const readinessLabel = isReady ? "READY NOW" : "SETUP NEEDED";
-                  return `
-                    <button
-                      type="button"
-                      class="hr-rest-v2-doc-entry ${isReady ? "is-ready" : "is-locked"}"
-                      data-restv2-doc-entry-key="${escapeHtml(entry.key)}"
-                      data-restv2-doc-url="${escapeHtml(entryUrl)}"
-                      data-restv2-doc-state="${isReady ? "ready" : "locked"}"
-                      title="${escapeHtml(entryActionLabel)}"
-                      aria-label="${escapeHtml(entryActionLabel)}"
-                      ${isReady ? "" : "disabled"}
-                    >
-                      <span class="hr-rest-v2-doc-entry-topline">
-                        <span class="hr-rest-v2-doc-entry-label">${escapeHtml(entry.label)}</span>
-                        <span class="hr-rest-v2-doc-entry-method">${escapeHtml(entry.methodLabel || "")}</span>
-                      </span>
-                      <span class="hr-rest-v2-doc-entry-summary">${escapeHtml(entry.operationSummary || "")}</span>
-                      <span class="hr-rest-v2-doc-entry-readiness">
-                        <span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--${isReady ? "ready" : "locked"}">${escapeHtml(readinessLabel)}</span>
-                        <span class="hr-rest-v2-doc-entry-state-text">${escapeHtml(String(activationState.reason || "").trim())}</span>
-                      </span>
-                    </button>
-                  `;
-                }).join("")}
-              </div>
-            </section>
-          `;
-        }).join("")}
+        ${sections.map((section) => buildRestV2InteractiveDocsSectionHtml(section, programmer)).join("")}
       </div>
     </article>
   `;
+}
+
+function wireRestV2InteractiveDocsSectionCollapsibles(section, programmer = null) {
+  if (!section) {
+    return;
+  }
+
+  const collapsibleSections = section.querySelectorAll("[data-restv2-doc-section-key]");
+  collapsibleSections.forEach((sectionElement) => {
+    if (!(sectionElement instanceof HTMLElement)) {
+      return;
+    }
+
+    const sectionKey = String(sectionElement.dataset.restv2DocSectionKey || "").trim();
+    if (!sectionKey) {
+      return;
+    }
+
+    const toggleButton = sectionElement.querySelector(".hr-rest-v2-doc-section-toggle");
+    const containerElement = sectionElement.querySelector(".hr-rest-v2-doc-section-shell");
+    if (!(toggleButton instanceof HTMLElement) || !(containerElement instanceof HTMLElement)) {
+      return;
+    }
+
+    const initialCollapsedAttr = String(sectionElement.dataset.restv2DocSectionInitialCollapsed || "").trim().toLowerCase();
+    const initialCollapsed =
+      initialCollapsedAttr === "true" || getRestV2InteractiveDocsSectionCollapsed(programmer?.programmerId, sectionKey);
+    wireCollapsibleSection(toggleButton, containerElement, initialCollapsed, (collapsed) => {
+      setRestV2InteractiveDocsSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
+    });
+  });
 }
 
 function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services = null, options = {}) {
@@ -55218,6 +55304,9 @@ function createHrContextSection(programmer, sectionKey, services = null, options
       setHrContextSectionCollapsed(programmer?.programmerId, sectionKey, collapsed);
     },
   });
+  if (sectionKey === "learning") {
+    wireRestV2InteractiveDocsSectionCollapsibles(section, programmer);
+  }
   wireHrContextSectionActions(section);
 
   return section;

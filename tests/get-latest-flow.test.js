@@ -131,7 +131,12 @@ function createSeed(options = {}) {
       downloads: {
         async download(info = {}) {
           calls.downloadsDownload.push({ ...info });
-          if (options.downloadShouldFail === true) {
+          const failureSequence = Array.isArray(options.downloadFailureSequence) ? options.downloadFailureSequence : null;
+          const shouldFail =
+            failureSequence && failureSequence.length > 0
+              ? failureSequence.shift() === true
+              : options.downloadShouldFail === true;
+          if (shouldFail) {
             throw new Error("download failed");
           }
           return Number(options.downloadId || 91);
@@ -462,9 +467,11 @@ test("openUnderparGetLatestFlow ignores stale cached SHA when latest metadata re
   assert.notEqual(String(response.checkError || ""), "");
   assert.equal(seed.calls.downloadsDownload.length, 1);
   const downloadUrl = String(seed.calls.downloadsDownload[0]?.url || "");
-  assert.match(downloadUrl, /\/main\/underpar_distro\.zip\?cacheBust=\d+$/);
+  assert.equal(String(response.latestSource || ""), "local-runtime");
+  assert.equal(String(response.latestVersion || ""), "1.12.53");
+  assert.equal(downloadUrl.startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
   assert.doesNotMatch(downloadUrl, new RegExp(`/${staleSha}/underpar_distro\\.zip`));
-  assert.match(String(seed.calls.downloadsDownload[0]?.filename || ""), /^UnderPAR-vlatest\.zip$/);
+  assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.12.53.zip");
 });
 
 test("openUnderparGetLatestFlow avoids stale local-runtime fallback when bundled distro metadata lags behind the loaded build", async () => {
@@ -499,6 +506,67 @@ test("openUnderparGetLatestFlow avoids stale local-runtime fallback when bundled
   assert.equal(String(seed.calls.downloadsDownload[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip"), false);
 });
 
+test("openUnderparGetLatestFlow falls back to the bundled runtime package when GitHub lookup fails and local metadata is unavailable", async () => {
+  const seed = createSeed({
+    currentVersion: "1.17.4",
+    responseByUrl: {
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": new TypeError("Failed to fetch"),
+      "https://api.github.com/repos/HH5HH/UNDERPAR/commits/main": new TypeError("Failed to fetch"),
+      "https://api.github.com/repos/HH5HH/UNDERPAR/contents/underpar_distro.version.json?ref=main": new TypeError("Failed to fetch"),
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": new TypeError("Failed to fetch"),
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.openUnderparGetLatestFlow();
+
+  assert.equal(response.ok, true);
+  assert.equal(String(response.latestSource || ""), "local-runtime");
+  assert.equal(String(response.latestVersion || ""), "1.17.4");
+  assert.equal(String(response.downloadSource || ""), "local-runtime");
+  assert.equal(response.downloadStarted, true);
+  assert.equal(seed.calls.downloadsDownload.length, 1);
+  assert.equal(String(seed.calls.downloadsDownload[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
+  assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.17.4.zip");
+});
+
+test("openUnderparGetLatestFlow retries with the bundled runtime package when remote package download fails", async () => {
+  const latestSha = "fedcba9876543210fedcba9876543210fedcba98";
+  const seed = createSeed({
+    currentVersion: "1.17.4",
+    downloadFailureSequence: [true, false],
+    responseByUrl: {
+      "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.17.5" };
+        },
+      },
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: latestSha } };
+        },
+      },
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.openUnderparGetLatestFlow();
+
+  assert.equal(response.ok, true);
+  assert.equal(response.downloadStarted, true);
+  assert.equal(String(response.downloadSource || ""), "local-runtime");
+  assert.match(String(response.downloadError || ""), /Remote UnderPAR package download/);
+  assert.match(String(response.infoMessage || ""), /Downloaded bundled UnderPAR package v1\.17\.4 from the current runtime instead\./);
+  assert.equal(seed.calls.downloadsDownload.length, 2);
+  assert.match(String(seed.calls.downloadsDownload[0]?.url || ""), new RegExp(`/${latestSha}/underpar_distro\\.zip\\?cacheBust=\\d+$`));
+  assert.equal(String(seed.calls.downloadsDownload[1]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
+  assert.equal(String(seed.calls.downloadsDownload[1]?.filename || ""), "UnderPAR-v1.17.4.zip");
+});
+
 test("openUnderparGetLatestFlow falls back to opening the package tab when downloads API fails", async () => {
   const latestSha = "fedcba9876543210fedcba9876543210fedcba98";
   const seed = createSeed({
@@ -528,7 +596,7 @@ test("openUnderparGetLatestFlow falls back to opening the package tab when downl
   assert.equal(response.ok, true);
   assert.equal(response.downloadStarted, false);
   assert.equal(response.downloadTabOpened, true);
-  assert.equal(seed.calls.downloadsDownload.length, 1);
+  assert.equal(seed.calls.downloadsDownload.length, 2);
   assert.equal(seed.calls.tabsCreate.length, 2);
   assert.match(String(seed.calls.tabsCreate[0]?.url || ""), new RegExp(`/${latestSha}/underpar_distro\\.zip\\?cacheBust=\\d+$`));
   assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
@@ -629,7 +697,8 @@ test("refreshUpdateState reports stage-specific GitHub lookup failures instead o
   const helpers = loadGetLatestHelpers(seed);
   const response = await helpers.refreshUpdateState({ force: true });
 
-  assert.equal(String(response.latestVersion || ""), "");
+  assert.equal(String(response.latestVersion || ""), "1.16.36");
+  assert.equal(String(response.latestSource || ""), "local-runtime");
   assert.equal(response.updateAvailable, false);
   assert.match(String(response.checkError || ""), /Latest version lookup failed/);
   assert.match(String(response.checkError || ""), /GitHub API package metadata lookup|GitHub raw package metadata lookup/);

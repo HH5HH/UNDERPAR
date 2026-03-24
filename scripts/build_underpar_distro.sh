@@ -7,6 +7,7 @@ output_path="$repo_root/underpar_distro.zip"
 metadata_path="$repo_root/underpar_distro.version.json"
 archive_root_name="underpar_distro"
 staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/underpar_distro.XXXXXX")"
+inner_bundle_temp="$staging_dir/underpar_distro.runtime.zip"
 
 cleanup() {
   rm -rf "$staging_dir"
@@ -54,6 +55,8 @@ while IFS= read -r -d '' tracked_path; do
   fi
 done < <(git ls-files -z)
 
+cp -p "$metadata_path" "$staging_dir/$archive_root_name/underpar_distro.version.json"
+
 if [[ ! -d "$staging_dir/$archive_root_name" ]]; then
   echo "No repository files available to package." >&2
   exit 1
@@ -64,10 +67,16 @@ rm -rf \
   "$staging_dir/$archive_root_name/scripts" \
   "$staging_dir/$archive_root_name/tests"
 rm -f \
-  "$staging_dir/$archive_root_name/AGENTS.md" \
-  "$staging_dir/$archive_root_name/underpar_distro.version.json"
+  "$staging_dir/$archive_root_name/AGENTS.md"
 
 find "$staging_dir/$archive_root_name" \( -name '*.zip' -o -name '.DS_Store' \) -delete
+
+(
+  cd "$staging_dir/$archive_root_name"
+  zip -q -r -9 "$inner_bundle_temp" . -x 'underpar_distro.zip'
+)
+
+cp -p "$inner_bundle_temp" "$staging_dir/$archive_root_name/underpar_distro.zip"
 
 (
   cd "$staging_dir"

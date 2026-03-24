@@ -2447,7 +2447,9 @@ async function refreshUpdateState(options = {}) {
       updateState.updateAvailable = resolvedState.updateAvailable === true;
       updateState.checkError = "";
     } catch (error) {
-      const resolvedState = resolveLatestUnderparPackageState(currentVersion, "", "", localPackageVersion);
+      const resolvedState = resolveLatestUnderparPackageState(currentVersion, "", "", localPackageVersion, {
+        allowCurrentAsLocalFallback: true,
+      });
       updateState.latestVersion = resolvedState.latestVersion;
       updateState.latestCommitSha = resolvedState.latestCommitSha;
       updateState.latestSource = resolvedState.latestSource;
@@ -2479,16 +2481,18 @@ async function openUnderparGetLatestFlow() {
   const latestCommitSha = String(updateState.latestCommitSha || "").trim();
   const latestSource = String(updateState.latestSource || "").trim();
   const localPackageVersion = String(updateState.localPackageVersion || "").trim();
+  const effectiveLocalPackageVersion =
+    localPackageVersion || (latestSource === "local-runtime" ? String(latestVersion || currentVersion || "").trim() : "");
   const currentVsLatest = latestVersion ? compareVersions(currentVersion, latestVersion) : 0;
-  const currentVsLocal = localPackageVersion ? compareVersions(currentVersion, localPackageVersion) : 0;
+  const currentVsLocal = effectiveLocalPackageVersion ? compareVersions(currentVersion, effectiveLocalPackageVersion) : 0;
   const preferLocalPackage =
-    latestSource === "local-runtime" && Boolean(localPackageVersion) && currentVsLocal <= 0;
+    latestSource === "local-runtime" && Boolean(effectiveLocalPackageVersion) && currentVsLocal <= 0;
   const hasKnownRemoteUpdate = Boolean(latestVersion) && currentVsLatest < 0;
   const noNewerPublishedPackage =
     Boolean(latestVersion) &&
     currentVsLatest > 0 &&
-    (!localPackageVersion || currentVsLocal > 0);
-  const localDownloadVersion = String(localPackageVersion || currentVersion || latestVersion || "").trim();
+    (!effectiveLocalPackageVersion || currentVsLocal > 0);
+  const localDownloadVersion = String(effectiveLocalPackageVersion || currentVersion || latestVersion || "").trim();
   const downloadUrl = preferLocalPackage
     ? buildLocalUnderparPackageUrl()
     : buildLatestUnderparPackageUrl(latestCommitSha);
@@ -2540,15 +2544,43 @@ async function openUnderparGetLatestFlow() {
       downloadUrl,
       error
     ).message;
+    if (!preferLocalPackage && localDownloadVersion) {
+      const bundledDownloadUrl = buildLocalUnderparPackageUrl();
+      if (bundledDownloadUrl) {
+        try {
+          const createdDownloadId = await startLatestPackageDownload({
+            url: bundledDownloadUrl,
+            filename: buildLatestUnderparPackageFileName(localDownloadVersion, ""),
+            conflictAction: "uniquify",
+            saveAs: false,
+          });
+          result.downloadId = Number(createdDownloadId || 0);
+          result.downloadUrl = bundledDownloadUrl;
+          result.downloadFileName = buildLatestUnderparPackageFileName(localDownloadVersion, "");
+          result.downloadStarted = true;
+          result.downloadSource = "local-runtime";
+          result.infoMessage = `GitHub package download failed. Downloaded bundled UnderPAR package v${localDownloadVersion} from the current runtime instead.`;
+        } catch (bundledError) {
+          result.downloadTabError = buildUpdateLookupError(
+            "Local runtime package fallback download",
+            bundledDownloadUrl,
+            bundledError
+          ).message;
+        }
+      }
+    }
+  }
+  if (!result.downloadStarted) {
     try {
       await chrome.tabs.create({ url: downloadUrl });
       result.downloadTabOpened = true;
     } catch (tabError) {
-      result.downloadTabError = buildUpdateLookupError(
+      const tabOpenError = buildUpdateLookupError(
         preferLocalPackage ? "Local runtime package tab open" : "Remote UnderPAR package tab open",
         downloadUrl,
         tabError
       ).message;
+      result.downloadTabError = result.downloadTabError ? `${result.downloadTabError} | ${tabOpenError}` : tabOpenError;
       // Continue so Chrome extensions can still open.
     }
   }

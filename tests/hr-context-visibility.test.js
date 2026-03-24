@@ -240,6 +240,30 @@ function loadRestV2LearningDomainResolver(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2LearningCollapseHelpers(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    'const DEFAULT_ADOBEPASS_ENVIRONMENT = { key: "production" };',
+    "const state = globalThis.__seed.state || { premiumSectionCollapsedByKey: new Map() };",
+    "function getActiveAdobePassEnvironmentKey() { return globalThis.__seed.environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key; }",
+    "function getEnvironmentScopedProgrammerKey(programmerId, environmentKey) { return `${String(environmentKey || '').trim()}|${String(programmerId || '').trim()}`; }",
+    extractFunctionSource(source, "getPremiumCollapseKey"),
+    extractFunctionSource(source, "setPremiumSectionCollapsed"),
+    extractFunctionSource(source, "getRestV2InteractiveDocsSectionCollapseKey"),
+    extractFunctionSource(source, "getRestV2InteractiveDocsSectionCollapsed"),
+    extractFunctionSource(source, "setRestV2InteractiveDocsSectionCollapsed"),
+    "module.exports = { getRestV2InteractiveDocsSectionCollapsed, setRestV2InteractiveDocsSectionCollapsed };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("HR context stays hidden without a selected media company or detected premium services", () => {
   const state = {
     programmerWorkspaceHydrationReadyByKey: new Map([["production|fox", true], ["staging|fox", false]]),
@@ -372,6 +396,14 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     popupSource,
     "buildRestV2InteractiveDocsEntryActivationState"
   );
+  const buildRestV2InteractiveDocsSectionHtmlSource = extractFunctionSource(
+    popupSource,
+    "buildRestV2InteractiveDocsSectionHtml"
+  );
+  const wireRestV2InteractiveDocsSectionCollapsiblesSource = extractFunctionSource(
+    popupSource,
+    "wireRestV2InteractiveDocsSectionCollapsibles"
+  );
   const collectRestV2LearningResourceIdsSource = extractFunctionSource(popupSource, "collectRestV2LearningResourceIds");
   const sampleRestV2LearningResourceIdsSource = extractFunctionSource(popupSource, "sampleRestV2LearningResourceIds");
   const enrichRestV2LearningResourcesFromConsoleContextSource = extractFunctionSource(
@@ -422,6 +454,12 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsContext/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsHydrationPlan/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /body\.resources/);
+  assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /data-restv2-doc-section-key/);
+  assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /metadata-header service-box-header hr-rest-v2-doc-section-toggle/);
+  assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /service-box-container hr-rest-v2-doc-section-shell/);
+  assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /getRestV2InteractiveDocsSectionCollapsed/);
+  assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /wireCollapsibleSection/);
+  assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /setRestV2InteractiveDocsSectionCollapsed/);
   assert.match(collectRestV2LearningResourceIdsSource, /getRestV2ProfilePreauthzChecks\(harvest\)/);
   assert.match(sampleRestV2LearningResourceIdsSource, /Math\.random/);
   assert.match(collectRestV2LearningRequestorDomainNamesSource, /state\?\.consoleBootstrapState\?\.channels/);
@@ -474,6 +512,9 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupCss, /\.hr-rest-v2-doc-entry-state-badge--locked/);
   assert.match(popupCss, /\.hr-rest-v2-docs-grid/);
   assert.match(popupCss, /\.hr-rest-v2-doc-section/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-section-toggle/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-section-link/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-section-shell/);
   assert.match(popupCss, /\.hr-rest-v2-doc-section-grid/);
   assert.match(
     popupSource,
@@ -482,6 +523,17 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /data-restv2-doc-state/);
   assert.match(popupSource, /SETUP NEEDED/);
   assert.match(popupSource, /Using \$\{selectedCount\} random resourceIds from the selected MVPD pool/);
+});
+
+test("REST V2 learning subsection collapse state defaults open and persists per section", () => {
+  const { getRestV2InteractiveDocsSectionCollapsed, setRestV2InteractiveDocsSectionCollapsed } =
+    loadRestV2LearningCollapseHelpers();
+
+  assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "configuration"), false);
+  setRestV2InteractiveDocsSectionCollapsed("Turner", "configuration", true);
+  assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "configuration"), true);
+  assert.equal(getRestV2InteractiveDocsSectionCollapsed("Fox", "configuration"), true);
+  assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "sessions"), false);
 });
 
 test("REST V2 learning entries still open the customer docs when requestor context is missing", async () => {
