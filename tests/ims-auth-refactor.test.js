@@ -1293,10 +1293,12 @@ test("esm health reuses the hydrated ESM premium service auth context instead of
 
   assert.match(ensurePremiumSource, /const hydrationPromise = getProgrammerServiceHydrationPromise\(normalizedProgrammerId\);/);
   assert.match(ensurePremiumSource, /primeProgrammerServiceHydration\(/);
+  assert.match(ensurePremiumSource, /renderOnReady:\s*false,/);
   assert.match(resolveAuthSource, /const premiumContext = await ensureHealthWorkspacePremiumContext\(programmerId,/);
   assert.match(resolveAuthSource, /const esmCandidates = collectEsmAppCandidatesFromPremiumApps\(services,\s*services\?\.esm \|\| null\);/);
   assert.match(resolveAuthSource, /selectPreferredEsmAppForRequestor\(esmCandidates,\s*requestorId,\s*programmerId\)/);
   assert.match(resolveAuthSource, /ensureDcrAccessTokenWithEsmRecovery\(programmerId,\s*appInfo,\s*options\?\.forceRefresh === true,/);
+  assert.match(resolveAuthSource, /service:\s*"esm",/);
   assert.match(resolveAuthSource, /allowProvisioning:\s*false,/);
   assert.match(fetchSource, /const authContext = await resolveEsmHealthPremiumAuthContext\(queryContext,\s*\{/);
   assert.doesNotMatch(fetchSource, /fetchEsmHealthTenantDataToken\(/);
@@ -1315,7 +1317,49 @@ test("health workspace readiness now keys off hydrated premium-service context",
   assert.match(healthControllerSource, /healthReady: Boolean\(context\?\.programmerId && context\?\.requestorId && premiumContext\?\.hydrationReady\)/);
   assert.match(statusItemSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(selectionContext\?\.programmerId \|\| ""\)\.trim\(\)\);/);
   assert.match(statusItemSource, /const esmReady = Boolean\(selectionContext\?\.programmerId && premiumContext\?\.hydrationReady && premiumContext\?\.esmAvailable\)/);
-  assert.match(statusItemSource, /premiumContext\?\.hydrationReady \? "Premium hydrated" : "Hydrating premium services"/);
+  assert.match(statusItemSource, /const adobePassWorkflowActive =/);
+  assert.match(statusItemSource, /"Adobe Pass org required"/);
+});
+
+test("esm health treats an unavailable uniques dataset as optional instead of failing the whole dashboard", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const reportPayloadSource = extractFunctionSource(popupSource, "buildEsmHealthDashboardReportPayload");
+  const runSource = extractFunctionSource(popupSource, "runEsmHealthDashboardForSelection");
+
+  assert.match(reportPayloadSource, /const ignoredSections = new Set\(/);
+  assert.match(reportPayloadSource, /const effectiveSections = requestedSections\.filter\(\(key\) => !ignoredSections\.has\(key\)\);/);
+  assert.match(runSource, /const uniquesUnsupported =\s*normalizeEsmHealthGranularity\(queryContext\.granularity\) === "day" && Number\(uniquesResult\?\.status \|\| 0\) === 404;/);
+  assert.match(runSource, /ignoredSections\.push\("uniques"\);/);
+
+  const script = [
+    'function normalizeEsmHealthGranularity(value = "") { return String(value || "").trim().toLowerCase() === "day" ? "day" : "month"; }',
+    "function buildEsmHealthSummary() { return {}; }",
+    extractFunctionSource(popupSource, "buildEsmHealthDashboardReportPayload"),
+    "module.exports = { buildEsmHealthDashboardReportPayload };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
+  const { buildEsmHealthDashboardReportPayload } = context.module.exports;
+
+  const report = buildEsmHealthDashboardReportPayload(
+    { granularity: "day", selectionKey: "turner|day" },
+    {
+      sectionErrors: {
+        uniques: "ESM path not available for dc/year/month/day.",
+      },
+      ignoredSections: ["uniques"],
+      backboneSeries: [{ label: "2026-03-24" }],
+    }
+  );
+
+  assert.equal(report.ok, true);
+  assert.equal(report.partial, false);
+  assert.equal(report.loadedSections, 4);
+  assert.equal(report.totalSections, 4);
+  assert.equal(report.error, "");
 });
 
 test("esm workspace waits for workspace-ready and resolves the live premium request token before running JellyBeans", () => {

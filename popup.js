@@ -21347,7 +21347,9 @@ function buildEsmHealthSummary(backboneSeries = [], uniqueSeries = []) {
 
 function getHealthWorkspacePremiumContextSnapshot(programmerId = "") {
   const normalizedProgrammerId = String(programmerId || "").trim();
-  if (!normalizedProgrammerId) {
+  const adobePassWorkflowActive =
+    state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);
+  if (!normalizedProgrammerId || !adobePassWorkflowActive) {
     return {
       programmerId: "",
       services: null,
@@ -21374,7 +21376,9 @@ function getHealthWorkspacePremiumContextSnapshot(programmerId = "") {
 
 async function ensureHealthWorkspacePremiumContext(programmerId = "", options = {}) {
   const normalizedProgrammerId = String(programmerId || "").trim();
-  if (!normalizedProgrammerId) {
+  const adobePassWorkflowActive =
+    state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);
+  if (!normalizedProgrammerId || !adobePassWorkflowActive) {
     return {
       programmer: null,
       services: null,
@@ -21413,6 +21417,7 @@ async function ensureHealthWorkspacePremiumContext(programmerId = "", options = 
         forceRefresh: options?.forceRefresh === true,
         controllerReason: String(options?.controllerReason || "health-workspace").trim() || "health-workspace",
         requestToken: Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0)),
+        renderOnReady: false,
       }
     ).catch(() => snapshot.services || null);
     snapshot = getHealthWorkspacePremiumContextSnapshot(normalizedProgrammerId);
@@ -21463,7 +21468,7 @@ async function resolveEsmHealthPremiumAuthContext(queryContext = null, options =
   }
 
   const tokenResult = await ensureDcrAccessTokenWithEsmRecovery(programmerId, appInfo, options?.forceRefresh === true, {
-    service: "esm-health",
+    service: "esm",
     scope: PREMIUM_SERVICE_SCOPE_BY_KEY.esm,
     requiredServiceScope: PREMIUM_SERVICE_SCOPE_BY_KEY.esm,
     requestorIds,
@@ -21637,12 +21642,18 @@ async function fetchEsmHealthJson(queryContext = null, pathname = "", options = 
 
 function buildEsmHealthDashboardReportPayload(queryContext = null, data = null, options = {}) {
   const sectionErrors = data?.sectionErrors && typeof data.sectionErrors === "object" ? { ...data.sectionErrors } : {};
+  const ignoredSections = new Set(
+    (Array.isArray(data?.ignoredSections) ? data.ignoredSections : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
   const requestedSections = ["backbone", "mvpd", "requestor", "platform"];
   if (normalizeEsmHealthGranularity(queryContext?.granularity) === "day") {
     requestedSections.splice(1, 0, "uniques");
   }
-  const failedSections = requestedSections.filter((key) => Boolean(String(sectionErrors?.[key] || "").trim()));
-  const loadedSections = requestedSections.length - failedSections.length;
+  const effectiveSections = requestedSections.filter((key) => !ignoredSections.has(key));
+  const failedSections = effectiveSections.filter((key) => Boolean(String(sectionErrors?.[key] || "").trim()));
+  const loadedSections = effectiveSections.length - failedSections.length;
   const backboneSeries = Array.isArray(data?.backboneSeries) ? data.backboneSeries : [];
   const uniqueSeries = Array.isArray(data?.uniqueSeries) ? data.uniqueSeries : [];
   const mvpdRows = Array.isArray(data?.mvpdRows) ? data.mvpdRows : [];
@@ -21663,7 +21674,7 @@ function buildEsmHealthDashboardReportPayload(queryContext = null, data = null, 
     platformRows,
     sectionErrors,
     loadedSections,
-    totalSections: requestedSections.length,
+    totalSections: effectiveSections.length,
     error:
       failedSections.length > 0
         ? String(options?.error || "One or more ESM HEALTH datasets failed to load.").trim() ||
@@ -21793,6 +21804,7 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
   ]);
 
   const sectionErrors = {};
+  const ignoredSections = [];
   const backboneSeries = backboneResult.ok
     ? aggregateEsmHealthBackboneRows(backboneResult.rows, queryContext.granularity)
     : [];
@@ -21800,11 +21812,15 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
     sectionErrors.backbone = String(backboneResult.error || "Unable to load ESM HEALTH overview data.").trim();
   }
 
+  const uniquesUnsupported =
+    normalizeEsmHealthGranularity(queryContext.granularity) === "day" && Number(uniquesResult?.status || 0) === 404;
   const uniqueSeries =
     normalizeEsmHealthGranularity(queryContext.granularity) === "day" && uniquesResult.ok
       ? aggregateEsmHealthUniqueRows(uniquesResult.rows)
       : [];
-  if (normalizeEsmHealthGranularity(queryContext.granularity) === "day" && !uniquesResult.ok) {
+  if (uniquesUnsupported) {
+    ignoredSections.push("uniques");
+  } else if (normalizeEsmHealthGranularity(queryContext.granularity) === "day" && !uniquesResult.ok) {
     sectionErrors.uniques = String(uniquesResult.error || "Unable to load ESM HEALTH uniques.").trim();
   }
 
@@ -21846,6 +21862,7 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
         requestorRows,
         platformRows,
         sectionErrors,
+        ignoredSections,
       },
       {
         error: "One or more ESM HEALTH datasets failed to load.",
@@ -57632,10 +57649,14 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
   const context = getHrContextSummary(programmer);
   const selectionContext = healthWorkspaceGetSelectionContext(programmer);
   const premiumContext = getHealthWorkspacePremiumContextSnapshot(String(selectionContext?.programmerId || "").trim());
+  const adobePassWorkflowActive =
+    state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);
   const esmReady = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && premiumContext?.esmAvailable);
   const healthReady = Boolean(selectionContext?.programmerId && selectionContext?.requestorId && premiumContext?.hydrationReady);
   const headline = !selectionContext?.programmerId
     ? "Select a Media Company and RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
+    : !adobePassWorkflowActive
+      ? "Switch to the Adobe Pass org profile to unlock ESM HEALTH and HEALTH SPLUNK."
     : !premiumContext?.hydrationReady
       ? `Preparing HEALTH workspaces for ${selectionContext.programmerName || selectionContext.programmerId}...`
       : healthReady
@@ -57646,7 +57667,11 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
   const metaTokens = [
     selectionContext?.requestorId ? `RequestorId ${selectionContext.requestorId}` : "RequestorId not selected",
     selectionContext?.environmentLabel ? `Env ${selectionContext.environmentLabel}` : "",
-    premiumContext?.hydrationReady ? "Premium hydrated" : "Hydrating premium services",
+    adobePassWorkflowActive
+      ? premiumContext?.hydrationReady
+        ? "Premium hydrated"
+        : "Hydrating premium services"
+      : "Adobe Pass org required",
   ].filter(Boolean);
 
   return `
@@ -57697,6 +57722,11 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
 async function handleHrContextHealthAction(action = "", programmer = null) {
   const normalizedAction = String(action || "").trim().toLowerCase();
   if (!normalizedAction) {
+    return;
+  }
+
+  if (!shouldHydrateAdobePassWorkflowForSession(state.loginData)) {
+    setStatus("Switch to the Adobe Pass org profile before opening HEALTH workspaces.", "error");
     return;
   }
 
