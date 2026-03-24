@@ -1645,10 +1645,10 @@ body[aria-busy="true"] .auth-btn::before {
   width: 100%;
   max-width: 100%;
   align-self: stretch;
-  min-height: 260px;
+  min-height: 0;
   padding: 18px 16px 16px;
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   justify-content: flex-start;
   border-radius: 12px;
   background: var(--legacy-panel);
@@ -1658,6 +1658,7 @@ body[aria-busy="true"] .auth-btn::before {
 .restricted-view-card {
   width: 100%;
   min-width: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 0;
