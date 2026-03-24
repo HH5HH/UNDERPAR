@@ -52893,24 +52893,40 @@ function applyServiceBoxSectionShell(section, options = {}) {
   const bodyHtml = String(options?.bodyHtml || "");
   const onCollapsedChange = typeof options?.onCollapsedChange === "function" ? options.onCollapsedChange : null;
   const useNativeDetailsToggle = options?.useNativeDetailsToggle === true;
+  const shellBodyHtml = `
+    <div class="metadata-container service-box-container">
+      <div class="${escapeHtml(contentClassName)}" data-service-box-content="true">
+        ${bodyHtml}
+      </div>
+    </div>
+  `;
 
-  section.innerHTML = `
-    <details class="service-box-details"${initialCollapsed ? "" : " open"}>
-      <summary
+  section.innerHTML = useNativeDetailsToggle
+    ? `
+      <details class="service-box-details"${initialCollapsed ? "" : " open"}>
+        <summary
+          class="metadata-header service-box-header"
+          title="${escapeHtml(hoverMessage)}"
+          aria-label="${escapeHtml(hoverMessage)}"
+        >
+          <span>${escapeHtml(title)}</span>
+          <span class="collapse-icon">▼</span>
+        </summary>
+        ${shellBodyHtml}
+      </details>
+    `
+    : `
+      <button
+        type="button"
         class="metadata-header service-box-header"
         title="${escapeHtml(hoverMessage)}"
         aria-label="${escapeHtml(hoverMessage)}"
       >
         <span>${escapeHtml(title)}</span>
         <span class="collapse-icon">▼</span>
-      </summary>
-      <div class="metadata-container service-box-container">
-        <div class="${escapeHtml(contentClassName)}" data-service-box-content="true">
-          ${bodyHtml}
-        </div>
-      </div>
-    </details>
-  `;
+      </button>
+      ${shellBodyHtml}
+    `;
 
   const detailsElement = section.querySelector(".service-box-details");
   const toggleButton = section.querySelector(".service-box-header");
@@ -52941,6 +52957,13 @@ function applyServiceBoxSectionShell(section, options = {}) {
       });
       syncShellDetailsState(initialCollapsed);
     }
+  } else if (toggleButton && container) {
+    wireCollapsibleSection(toggleButton, container, initialCollapsed, (collapsed) => {
+      applyCollapsibleState(toggleButton, container, collapsed);
+      if (onCollapsedChange) {
+        onCollapsedChange(collapsed);
+      }
+    });
   }
 
   return {

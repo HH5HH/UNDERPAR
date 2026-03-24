@@ -165,6 +165,7 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.doesNotMatch(popupSource, /textContent = "- HR -"/);
   assert.match(applyServiceBoxSectionShellSource, /<details class="service-box-details"/);
   assert.match(applyServiceBoxSectionShellSource, /<summary\s+class="metadata-header service-box-header"/);
+  assert.match(applyServiceBoxSectionShellSource, /<button\s+type="button"\s+class="metadata-header service-box-header"/);
   assert.match(applyServiceBoxSectionShellSource, /<span class="collapse-icon">▼<\/span>/);
   assert.match(applyServiceBoxSectionShellSource, /wireCollapsibleSection\(toggleButton, container, initialCollapsed, \(collapsed\) => \{/);
   assert.match(applyServiceBoxSectionShellSource, /syncShellDetailsState\(collapsed\)/);
