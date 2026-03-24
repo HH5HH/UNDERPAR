@@ -1,0 +1,349 @@
+@import url("rest-workspace.css");
+
+.esm-health-filter-card {
+  overflow: hidden;
+}
+
+.esm-health-filter-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  padding: 14px;
+}
+
+.esm-health-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.esm-health-field--granularity {
+  grid-column: span 2;
+}
+
+.esm-health-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--legacy-muted);
+}
+
+.esm-health-date-input {
+  appearance: none;
+  min-height: 40px;
+  border-radius: 14px;
+  border: 1px solid var(--legacy-border);
+  background: rgba(16, 16, 16, 0.92);
+  color: var(--legacy-text);
+  padding: 0 12px;
+  font: inherit;
+}
+
+.esm-health-date-input:focus-visible {
+  outline: none;
+  border-color: rgba(166, 171, 180, 0.7);
+  box-shadow: 0 0 0 2px rgba(166, 171, 180, 0.18);
+}
+
+.esm-health-granularity-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.esm-health-granularity-btn,
+.workspace-text-btn {
+  appearance: none;
+  min-height: 38px;
+  border-radius: 999px;
+  border: 1px solid var(--legacy-border);
+  background: linear-gradient(180deg, rgba(50, 50, 50, 0.98), rgba(34, 34, 34, 0.98));
+  color: var(--legacy-text);
+  padding: 0 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.esm-health-granularity-btn:hover:not(:disabled),
+.workspace-text-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(189, 194, 203, 0.58);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.28);
+}
+
+.esm-health-granularity-btn.is-active,
+.workspace-text-btn--accent {
+  border-color: var(--legacy-accent);
+  background: linear-gradient(160deg, rgba(166, 171, 180, 0.98), rgba(144, 150, 160, 0.98));
+  color: #111111;
+}
+
+.esm-health-granularity-btn:disabled,
+.workspace-text-btn:disabled,
+.esm-health-date-input:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+
+.esm-health-help-copy {
+  margin: 0;
+  font-size: 11px;
+  color: var(--legacy-muted);
+}
+
+.esm-health-filter-actions {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.esm-health-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.esm-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 171, 180, 0.24);
+  background: rgba(27, 27, 27, 0.92);
+  color: var(--legacy-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.esm-health-pill--accent {
+  border-color: rgba(166, 171, 180, 0.58);
+  background: rgba(48, 48, 48, 0.96);
+}
+
+.esm-health-overview-copy,
+.esm-health-empty-copy {
+  margin: 0;
+  font-size: 12px;
+  color: var(--legacy-muted);
+}
+
+.esm-health-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.esm-health-kpi-card,
+.esm-health-chart-card,
+.esm-health-table-card {
+  min-width: 0;
+}
+
+.esm-health-kpi-value {
+  margin: 0;
+  font-size: clamp(20px, 2vw, 28px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.esm-health-kpi-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--legacy-muted);
+}
+
+.esm-health-chart-grid,
+.esm-health-table-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.esm-health-chart-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--legacy-text);
+}
+
+.esm-health-chart-meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--legacy-muted);
+}
+
+.esm-health-chart-wrap {
+  padding: 12px 14px 14px;
+}
+
+.esm-health-sparkline {
+  width: 100%;
+  height: 118px;
+  display: block;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    rgba(12, 12, 12, 0.72);
+  border: 1px solid rgba(166, 171, 180, 0.12);
+}
+
+.esm-health-sparkline .grid-line {
+  stroke: rgba(166, 171, 180, 0.12);
+  stroke-width: 1;
+}
+
+.esm-health-sparkline .area-fill {
+  fill: rgba(166, 171, 180, 0.18);
+}
+
+.esm-health-sparkline .line-stroke {
+  fill: none;
+  stroke: rgba(189, 194, 203, 0.94);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.esm-health-sparkline .point-dot {
+  fill: rgba(228, 232, 237, 0.98);
+}
+
+.esm-health-reach-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+
+.esm-health-reach-stat {
+  border-radius: 16px;
+  border: 1px solid rgba(166, 171, 180, 0.14);
+  background: rgba(16, 16, 16, 0.7);
+  padding: 12px;
+}
+
+.esm-health-reach-stat p {
+  margin: 0;
+}
+
+.esm-health-reach-value {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.esm-health-table-wrap {
+  overflow: auto;
+}
+
+.esm-health-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 620px;
+}
+
+.esm-health-table th,
+.esm-health-table td {
+  padding: 10px 12px;
+  border-top: 1px solid rgba(166, 171, 180, 0.12);
+  text-align: left;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.esm-health-table th {
+  position: sticky;
+  top: 0;
+  background: var(--legacy-table-head);
+  color: var(--legacy-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  z-index: 1;
+}
+
+.esm-health-table tbody tr:nth-child(odd) {
+  background: var(--legacy-table-row);
+}
+
+.esm-health-table tbody tr:nth-child(even) {
+  background: var(--legacy-table-alt);
+}
+
+.esm-health-table tbody tr:hover {
+  background: var(--legacy-hover);
+}
+
+.esm-health-table-drill-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--legacy-text);
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.esm-health-table-drill-btn:hover {
+  color: var(--legacy-accent-hover);
+}
+
+.esm-health-table-copy {
+  margin: 0;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  color: var(--legacy-muted);
+}
+
+.esm-health-section-error {
+  color: var(--legacy-danger);
+}
+
+@media (max-width: 1040px) {
+  .esm-health-filter-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .esm-health-field--granularity {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 720px) {
+  .esm-health-filter-form,
+  .esm-health-kpi-grid,
+  .esm-health-chart-grid,
+  .esm-health-table-grid,
+  .esm-health-reach-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .esm-health-field--granularity {
+    grid-column: span 1;
+  }
+
+  .esm-health-filter-actions {
+    justify-content: stretch;
+    flex-wrap: wrap;
+  }
+
+  .workspace-text-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

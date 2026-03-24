@@ -10549,6 +10549,23 @@ async function refreshOpenWorkspacesForEnvironmentSwitch(programmer = null, serv
     void restWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
   }
 
+  const esmHealthSelectionContext = esmHealthWorkspaceGetSelectionContext(programmer);
+  const esmHealthWindowIds = collectBoundWorkspaceWindowIds(
+    state.esmHealthWorkspaceWindowId,
+    state.esmHealthWorkspaceTabIdByWindowId
+  );
+  for (const targetWindowId of esmHealthWindowIds) {
+    esmHealthWorkspaceBroadcastControllerState(programmer, esmHealthSelectionContext, targetWindowId);
+    void esmHealthWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
+  }
+
+  const healthSelectionContext = healthWorkspaceGetSelectionContext(programmer);
+  const healthWindowIds = collectBoundWorkspaceWindowIds(state.healthWorkspaceWindowId, state.healthWorkspaceTabIdByWindowId);
+  for (const targetWindowId of healthWindowIds) {
+    healthWorkspaceBroadcastControllerState(programmer, healthSelectionContext, targetWindowId);
+    void healthWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
+  }
+
   const tempPassSelectionContext = tempPassWorkspaceGetSelectionContext(programmer, services);
   const tempPassWindowIds = collectBoundWorkspaceWindowIds(
     state.tempPassWorkspaceWindowId,
@@ -10625,6 +10642,10 @@ function collectKnownUnderparWorkspaceTabIds() {
   pushMapTabIds(state.mvpdWorkspaceTabIdByWindowId);
   pushCandidateTabId(state.restWorkspaceTabId);
   pushMapTabIds(state.restWorkspaceTabIdByWindowId);
+  pushCandidateTabId(state.esmHealthWorkspaceTabId);
+  pushMapTabIds(state.esmHealthWorkspaceTabIdByWindowId);
+  pushCandidateTabId(state.healthWorkspaceTabId);
+  pushMapTabIds(state.healthWorkspaceTabIdByWindowId);
   pushCandidateTabId(state.tempPassWorkspaceTabId);
   pushMapTabIds(state.tempPassWorkspaceTabIdByWindowId);
   pushCandidateTabId(state.degradationWorkspaceTabId);
@@ -11311,6 +11332,12 @@ const LEGACY_MVPD_WORKSPACE_MESSAGE_TYPE = "mincloud:mvpd-workspace";
 const REST_WORKSPACE_PATH = "rest-workspace.html";
 const REST_WORKSPACE_MESSAGE_TYPE = "underpar:rest-workspace";
 const LEGACY_REST_WORKSPACE_MESSAGE_TYPE = "mincloud:rest-workspace";
+const ESM_HEALTH_WORKSPACE_PATH = "esm-health-workspace.html";
+const ESM_HEALTH_WORKSPACE_MESSAGE_TYPE = "underpar:esm-health-workspace";
+const LEGACY_ESM_HEALTH_WORKSPACE_MESSAGE_TYPE = "mincloud:esm-health-workspace";
+const HEALTH_WORKSPACE_PATH = "health-workspace.html";
+const HEALTH_WORKSPACE_MESSAGE_TYPE = "underpar:health-workspace";
+const LEGACY_HEALTH_WORKSPACE_MESSAGE_TYPE = "mincloud:health-workspace";
 const TEMP_PASS_WORKSPACE_PATH = "temp-pass-workspace.html";
 const TEMP_PASS_WORKSPACE_MESSAGE_TYPE = "underpar:temp-pass-workspace";
 const LEGACY_TEMP_PASS_WORKSPACE_MESSAGE_TYPE = "mincloud:temp-pass-workspace";
@@ -11327,6 +11354,8 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   CM_WORKSPACE_PATH,
   MVPD_WORKSPACE_PATH,
   REST_WORKSPACE_PATH,
+  ESM_HEALTH_WORKSPACE_PATH,
+  HEALTH_WORKSPACE_PATH,
   TEMP_PASS_WORKSPACE_PATH,
   DEGRADATION_WORKSPACE_PATH,
   BOBTOOLS_WORKSPACE_PATH,
@@ -11348,6 +11377,180 @@ const SPLUNK_AUTH_WAIT_TIMEOUT_MS = 120000;
 const SPLUNK_AUTH_WAIT_INTERVAL_MS = 1200;
 const REST_V2_SPLUNK_INLINE_MAX_ROWS = 80;
 const REST_V2_SPLUNK_INLINE_MAX_COLUMNS = 14;
+const HEALTH_SPLUNK_DASHBOARD_VIEW_NAME = "live_rest_api_sev2_dashboard";
+const HEALTH_SPLUNK_TABLE_FETCH_LIMIT = 10;
+const ESM_HEALTH_TENANT_TOKEN_PATH = "/esm/tenant-data-token";
+const ESM_HEALTH_API_REQUEST_TIMEOUT_MS = 30000;
+const ESM_HEALTH_CONSOLE_REQUEST_TIMEOUT_MS = 15000;
+const ESM_HEALTH_BREAKDOWN_LIMIT = 250;
+const ESM_HEALTH_TOP_ROW_LIMIT = 10;
+const ESM_HEALTH_DEFAULT_GRANULARITY = "day";
+const ESM_HEALTH_GRANULARITY_PATH_BY_KEY = Object.freeze({
+  month: "year/month.json",
+  day: "year/month/day.json",
+  hour: "year/month/day/hour.json",
+});
+const ESM_HEALTH_PLATFORM_OPTIONS = Object.freeze([
+  "android",
+  "androidTV",
+  "firesOS",
+  "fireTablet",
+  "iOS",
+  "ipadOS",
+  "lgTV",
+  "nvidiaShieldTv",
+  "playstation",
+  "roku",
+  "tizen",
+  "tvOS",
+  "unknown",
+  "web",
+  "XBoxOne",
+]);
+const ESM_HEALTH_METRICS = Object.freeze({
+  backbone: [
+    "authn-attempts",
+    "authn-successful",
+    "authn-failed",
+    "authz-attempts",
+    "authz-successful",
+    "authz-failed",
+    "authz-rejected",
+    "authz-latency",
+    "media-tokens",
+    "clientless-tokens",
+    "clientless-failures",
+  ],
+  uniques: ["unique-accounts", "unique-sessions"],
+  mvpd: [
+    "authz-attempts",
+    "authz-successful",
+    "authz-failed",
+    "authz-rejected",
+    "authz-latency",
+    "media-tokens",
+  ],
+  requestor: [
+    "authn-attempts",
+    "authn-successful",
+    "authz-attempts",
+    "authz-successful",
+    "authz-failed",
+    "media-tokens",
+  ],
+  platform: [
+    "authz-attempts",
+    "authz-successful",
+    "authz-failed",
+    "media-tokens",
+  ],
+});
+const HEALTH_SPLUNK_TABLE_DEFINITIONS = Object.freeze([
+  {
+    key: "sev1_wrong_scopes",
+    title: "[Top 10] SEV1_DETECT_WRONG_SCOPES_REPORT",
+    queryTemplate: `index=$environment$ source="/var/log/tomcat9/catalina.out" "/api/v2/" "Access token scopes are not allowed to call endpoint"
+| rex field=_raw "Access token scopes are not allowed to call endpoint (?<endpoint>[^\\]]+)"
+| rex field=_raw "/api/v2/(?<serviceProvider>[^/]+)"
+| where serviceProvider="$serviceProvider$"
+| eval endpoint=coalesce(endpoint, "-"), serviceProvider=coalesce(serviceProvider, "-")
+| stats count by serviceProvider, endpoint
+| sort 0 serviceProvider, endpoint, mvpd, -count`,
+  },
+  {
+    key: "sev2_404_empty_incorrect_parameters",
+    title: "[Top 10] - SEV2_DETECT_404_EMPTY_INCORRECT_PARAMETERS_REPORT",
+    queryTemplate: `index=$environment$ source="/var/log/nginx/access.log" "/api/v2/"
+| search NOT "/favicon.ico"
+| rex field=_raw "request=\\"(?:GET|POST) (?<api_request>\\/api\\/v2\\/[^\\"?]+)"
+| rex field=_raw "/api/v2/(?:authenticate/)?(?<serviceProvider>[^/]+)"
+| eval serviceProvider=coalesce(serviceProvider, "-")
+| search status="404" AND serviceProvider="$serviceProvider$"
+| stats count by serviceProvider api_request status
+| sort 0 serviceProvider api_request -count`,
+  },
+  {
+    key: "sev2_400_null_undefined_parameters",
+    title: "[Top 10] - SEV2_DETECT_400_NULL_UNDEFINED_PARAMETERS_REPORT",
+    queryTemplate: `index=$environment$ source="/var/log/nginx/access.log" "/api/v2/"
+| rex field=_raw "request=\\"(?:GET|POST) (?<api_request>\\/api\\/v2\\/[^\\"?]+)"
+| rex field=_raw "/api/v2/(?<serviceProvider>[^/]+)"
+| rex field=_raw "/api/v2/authenticate/(?<serviceProvider>[^/]+)/(?<code>[^/\\"?]+)"
+| rex field=_raw "/sessions/(?<code>[^/\\"?]+)"
+| rex field=_raw "/profiles/code/(?<code>[^/\\"?]+)"
+| rex field=_raw "/profiles/(?<mvpd>[^/\\"?]+)"
+| rex field=_raw "/decisions/preauthorize/(?<mvpd>[^/\\"?]+)"
+| rex field=_raw "/decisions/authorize/(?<mvpd>[^/\\"?]+)"
+| rex field=_raw "/logout/(?<mvpd>[^/\\"?]+)"
+| search status="400" AND serviceProvider="$serviceProvider$"
+| eval serviceProvider=coalesce(serviceProvider, "-"), code=coalesce(code, "-"), mvpd=coalesce(mvpd, "-")
+| eval code=replace(code, "\\bHTTP\\b", ""), mvpd=replace(mvpd, "\\b(?:HTTP|code)\\b", "")
+| where like(lower(mvpd), "%null%") OR like(lower(mvpd), "%undefined%")
+   OR like(lower(code), "%null%") OR like(lower(code), "%undefined%")
+   OR like(lower(serviceProvider), "%null%") OR like(lower(serviceProvider), "%undefined%")
+| stats count by serviceProvider, mvpd, code, api_request, status
+| sort 0 serviceProvider api_request -count`,
+  },
+  {
+    key: "sev2_401_invalid_access_token",
+    title: "[Top 10] - SEV2_DETECT_401_INVALID_ACCESS_TOKEN_REPORT",
+    queryTemplate: `index=$environment$ source="/var/log/tomcat9/catalina.out" "/api/v2/" "was called with invalid token"
+| rex field=_raw "/api/v2/(?<serviceProvider>[^/]+)"
+| where serviceProvider="$serviceProvider$"
+| rex field=_raw "token=\\[(?<access_token>[^\\]]+)\\]"
+| eval serviceProvider=coalesce(serviceProvider, "-"), access_token=coalesce(access_token, "-")
+| stats count by serviceProvider, access_token
+| where count > 1
+| sort 0 serviceProvider -count`,
+  },
+  {
+    key: "sev2_adobe_error_codes",
+    title: "[Top 10] - SEV2_DETECT_ADOBE_ERROR_CODES_REPORT",
+    queryTemplate: `index=$environment$ (source="/var/log/tve/*/metrics.log" OR source="/var/log/tve/*/*/metrics.log") serviceProvider="$serviceProvider$"
+| search exception=* AND exCode=* AND exStatus=*
+| eval exCode=lower(trim(exCode))
+| where NOT exCode IN (
+    "preauthorization_denied_by_mvpd",
+    "authorization_denied_by_mvpd",
+    "authorization_denied_by_parental_controls",
+    "authorization_denied_by_hba_policies",
+    "authorization_denied_by_session_invalidated",
+    "identity_not_recognized_by_mvpd",
+    "network_received_error",
+    "network_connection_timeout",
+    "maximum_execution_time_exceeded"
+)
+| table _time, platform, ip, serviceProvider, mvpd, deviceId, clientId, event, exception, exCode, exStatus
+| sort 0 serviceProvider exCode deviceId _time`,
+  },
+  {
+    key: "sev2_mvpd_error_codes",
+    title: "[Top 10] - SEV2_DETECT_MVPD_ERROR_CODES_REPORT",
+    queryTemplate: `index=$environment$ (source="/var/log/tve/*/metrics.log" OR source="/var/log/tve/*/*/metrics.log") serviceProvider="$serviceProvider$"
+| search exception=* AND exCode=* AND exStatus=*
+| eval exCode=lower(trim(exCode))
+| where exCode IN (
+    "preauthorization_denied_by_mvpd",
+    "authorization_denied_by_mvpd",
+    "authorization_denied_by_parental_controls",
+    "authorization_denied_by_hba_policies",
+    "authorization_denied_by_session_invalidated",
+    "identity_not_recognized_by_mvpd"
+)
+| table _time, platform, ip, serviceProvider, mvpd, deviceId, clientId, event, exception, exCode, exStatus
+| sort 0 serviceProvider exCode deviceId _time`,
+  },
+  {
+    key: "sev2_network_error_codes",
+    title: "[Top 10] - SEV2_DETECT_NETWORK_ERROR_CODES_REPORT",
+    queryTemplate: `index=$environment$ (source="/var/log/tve/*/metrics.log" OR source="/var/log/tve/*/*/metrics.log") serviceProvider="$serviceProvider$"
+| search exception=* AND exCode=* AND exStatus=*
+| eval exCode=lower(trim(exCode))
+| where exCode IN ("network_received_error", "network_connection_timeout", "maximum_execution_time_exceeded")
+| table _time, platform, serviceProvider, mvpd, deviceId, clientId, event, exception, exCode, exStatus
+| sort 0 serviceProvider exCode deviceId _time`,
+  },
+]);
 const ESM_SOURCE_UTC_OFFSET_MINUTES = -8 * 60;
 const CLIENT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 const BLONDIE_TIME_LOGIC = globalThis.UnderParBlondieTimeLogic || null;
@@ -11950,6 +12153,11 @@ const BLONDIE_TIME_WORKSPACE_MESSAGE_TYPES = new Set([BLONDIE_TIME_WORKSPACE_MES
 const MEG_WORKSPACE_MESSAGE_TYPES = new Set([MEG_WORKSPACE_MESSAGE_TYPE, LEGACY_MEG_WORKSPACE_MESSAGE_TYPE]);
 const MVPD_WORKSPACE_MESSAGE_TYPES = new Set([MVPD_WORKSPACE_MESSAGE_TYPE, LEGACY_MVPD_WORKSPACE_MESSAGE_TYPE]);
 const REST_WORKSPACE_MESSAGE_TYPES = new Set([REST_WORKSPACE_MESSAGE_TYPE, LEGACY_REST_WORKSPACE_MESSAGE_TYPE]);
+const ESM_HEALTH_WORKSPACE_MESSAGE_TYPES = new Set([
+  ESM_HEALTH_WORKSPACE_MESSAGE_TYPE,
+  LEGACY_ESM_HEALTH_WORKSPACE_MESSAGE_TYPE,
+]);
+const HEALTH_WORKSPACE_MESSAGE_TYPES = new Set([HEALTH_WORKSPACE_MESSAGE_TYPE, LEGACY_HEALTH_WORKSPACE_MESSAGE_TYPE]);
 const TEMP_PASS_WORKSPACE_MESSAGE_TYPES = new Set([TEMP_PASS_WORKSPACE_MESSAGE_TYPE, LEGACY_TEMP_PASS_WORKSPACE_MESSAGE_TYPE]);
 const DEGRADATION_WORKSPACE_MESSAGE_TYPES = new Set([
   DEGRADATION_WORKSPACE_MESSAGE_TYPE,
@@ -12288,6 +12496,22 @@ const state = {
   restWorkspaceLastSelectionKey: "",
   restWorkspaceLastReportBySelectionKey: new Map(),
   restWorkspaceLastQueryContextBySelectionKey: new Map(),
+  esmHealthWorkspaceTabId: 0,
+  esmHealthWorkspaceWindowId: 0,
+  esmHealthWorkspaceTabIdByWindowId: new Map(),
+  esmHealthWorkspaceRuntimeListenerBound: false,
+  esmHealthWorkspaceTabWatcherBound: false,
+  esmHealthWorkspaceLastSelectionKey: "",
+  esmHealthWorkspaceLastReportBySelectionKey: new Map(),
+  esmHealthWorkspaceLastQueryContextBySelectionKey: new Map(),
+  healthWorkspaceTabId: 0,
+  healthWorkspaceWindowId: 0,
+  healthWorkspaceTabIdByWindowId: new Map(),
+  healthWorkspaceRuntimeListenerBound: false,
+  healthWorkspaceTabWatcherBound: false,
+  healthWorkspaceLastSelectionKey: "",
+  healthWorkspaceLastReportBySelectionKey: new Map(),
+  healthWorkspaceLastQueryContextBySelectionKey: new Map(),
   tempPassWorkspaceTabId: 0,
   tempPassWorkspaceWindowId: 0,
   tempPassWorkspaceTabIdByWindowId: new Map(),
@@ -19833,6 +20057,1633 @@ async function runSplunkSearchForQueryContext(rawQueryContext = null, options = 
     };
     return finalizeReport(errorPayload);
   }
+}
+
+function buildHealthSplunkQueryContext(rawContext = null) {
+  const context = rawContext && typeof rawContext === "object" ? rawContext : {};
+  const resolvedProgrammer = resolveSelectedProgrammer();
+  const environment = getActiveAdobePassEnvironment();
+  const programmerId = String(context.programmerId || resolvedProgrammer?.programmerId || "").trim();
+  const programmerName = String(context.programmerName || resolvedProgrammer?.programmerName || "").trim();
+  const requestorId = String(context.requestorId || state.selectedRequestorId || "").trim();
+  const earliest = String(context.earliest || SPLUNK_SEARCH_EARLIEST).trim() || SPLUNK_SEARCH_EARLIEST;
+  const latest = String(context.latest || SPLUNK_SEARCH_LATEST).trim() || SPLUNK_SEARCH_LATEST;
+  const environmentKey = String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const environmentLabel = firstNonEmptyString([environment?.label, environment?.shortCode, environmentKey]);
+  const environmentIndex = getSplunkSearchIndexForEnvironment(environment);
+  const selectionKey = buildHealthWorkspaceSelectionKey({
+    programmerId,
+    requestorId,
+  });
+  const dashboardUrl = (() => {
+    const url = new URL(`${SPLUNK_BASE_URL}/en-US/app/app_adobepass/${HEALTH_SPLUNK_DASHBOARD_VIEW_NAME}`);
+    url.searchParams.set("form.tr_NmSjmaI0.earliest", earliest);
+    url.searchParams.set("form.tr_NmSjmaI0.latest", latest);
+    url.searchParams.set("form.serviceProvider", requestorId);
+    url.searchParams.set("form.environment", environmentIndex);
+    return url.toString();
+  })();
+  return {
+    programmerId,
+    programmerName,
+    requestorId,
+    earliest,
+    latest,
+    environmentKey,
+    environmentLabel,
+    environmentIndex,
+    selectionKey,
+    dashboardUrl,
+    requestSource: String(context.requestSource || "health-splunk-dashboard").trim() || "health-splunk-dashboard",
+    search: buildHealthSplunkLoginSearch({
+      requestorId,
+      environmentIndex,
+    }),
+  };
+}
+
+function buildHealthSplunkStatusMessage(queryContext = null) {
+  const requestorId = String(queryContext?.requestorId || "").trim();
+  const environmentLabel = String(queryContext?.environmentLabel || "").trim();
+  if (requestorId && environmentLabel) {
+    return `${requestorId} | ${environmentLabel}`;
+  }
+  return requestorId || environmentLabel || "HEALTH Splunk";
+}
+
+function buildHealthSplunkLoginSearch(queryContext = null) {
+  const environmentIndex = String(queryContext?.environmentIndex || getSplunkSearchIndexForEnvironment()).trim();
+  const requestorId = String(queryContext?.requestorId || "").trim();
+  if (!environmentIndex) {
+    return "";
+  }
+  if (!requestorId) {
+    return `search index=${environmentIndex}`;
+  }
+  return `search index=${environmentIndex} "${requestorId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function getHealthSplunkPlaceholderTables(queryContext = null) {
+  return HEALTH_SPLUNK_TABLE_DEFINITIONS.map((entry) => ({
+    key: String(entry.key || "").trim(),
+    title: String(entry.title || "").trim(),
+    queryTemplate: String(entry.queryTemplate || "").trim(),
+    query: compileHealthSplunkSearchTemplate(entry.queryTemplate, queryContext),
+  }));
+}
+
+function escapeSplunkSearchTokenValue(value = "") {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function decodeHealthSplunkHtmlEntities(value = "") {
+  const entityMap = {
+    "&amp;": "&",
+    "&quot;": '"',
+    "&#39;": "'",
+    "&apos;": "'",
+    "&lt;": "<",
+    "&gt;": ">",
+    "&nbsp;": " ",
+    "&excl;": "!",
+  };
+  return String(value || "").replace(/&(amp|quot|#39|apos|lt|gt|nbsp|excl);/gi, (match) => entityMap[match] || match);
+}
+
+function compileHealthSplunkSearchTemplate(queryTemplate = "", queryContext = null) {
+  let compiled = decodeHealthSplunkHtmlEntities(String(queryTemplate || "").trim());
+  const replacements = {
+    environment: String(queryContext?.environmentIndex || getSplunkSearchIndexForEnvironment()).trim(),
+    serviceProvider: escapeSplunkSearchTokenValue(queryContext?.requestorId || ""),
+    "tr_NmSjmaI0.earliest": String(queryContext?.earliest || SPLUNK_SEARCH_EARLIEST).trim() || SPLUNK_SEARCH_EARLIEST,
+    "tr_NmSjmaI0.latest": String(queryContext?.latest || SPLUNK_SEARCH_LATEST).trim() || SPLUNK_SEARCH_LATEST,
+  };
+  Object.entries(replacements).forEach(([tokenName, tokenValue]) => {
+    const escapedTokenName = tokenName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    compiled = compiled.replace(new RegExp(`\\$${escapedTokenName}\\$`, "g"), String(tokenValue || ""));
+  });
+  return compiled.trim();
+}
+
+function extractSplunkDashboardDefinitionJson(value = null) {
+  const payload = value && typeof value === "object" ? value : parseJsonText(String(value || ""), null);
+  const dashboardXml = firstNonEmptyString([
+    payload?.entry?.[0]?.content?.["eai:data"],
+    payload?.entry?.[0]?.content?.eaiData,
+    payload?.content?.["eai:data"],
+    payload?.content?.eaiData,
+  ]);
+  if (!dashboardXml) {
+    return null;
+  }
+  const match = dashboardXml.match(/<definition><!\[CDATA\[([\s\S]*?)\]\]><\/definition>/i);
+  if (!match || !match[1]) {
+    return null;
+  }
+  return parseJsonText(match[1], null);
+}
+
+function normalizeHealthSplunkReportTitle(value = "") {
+  return String(value || "").trim().replace(/^\[Top 10\]\s*-?\s*/i, "").trim();
+}
+
+function parseHealthSplunkTableDefinitionsFromDashboardDefinition(definition = null, queryContext = null) {
+  const dataSources = definition?.dataSources && typeof definition.dataSources === "object" ? definition.dataSources : {};
+  const visualizations = definition?.visualizations && typeof definition.visualizations === "object" ? definition.visualizations : {};
+  const tables = [];
+
+  Object.values(visualizations).forEach((viz) => {
+    if (String(viz?.type || "").trim().toLowerCase() !== "splunk.table") {
+      return;
+    }
+    const primaryDataSourceKey = String(viz?.dataSources?.primary || "").trim();
+    if (!primaryDataSourceKey) {
+      return;
+    }
+    const dataSource = dataSources[primaryDataSourceKey];
+    const queryTemplate = String(dataSource?.options?.query || "").trim();
+    if (!queryTemplate) {
+      return;
+    }
+    const title = String(viz?.title || dataSource?.name || "").trim();
+    const normalizedTitle = normalizeHealthSplunkReportTitle(title);
+    const matchedFallback = HEALTH_SPLUNK_TABLE_DEFINITIONS.find(
+      (entry) =>
+        normalizeHealthSplunkReportTitle(entry.title) === normalizedTitle ||
+        normalizeHealthSplunkReportTitle(dataSource?.name) === normalizeHealthSplunkReportTitle(entry.title)
+    );
+    if (!matchedFallback) {
+      return;
+    }
+    tables.push({
+      key: String(matchedFallback.key || "").trim(),
+      title: title || String(matchedFallback.title || "").trim(),
+      queryTemplate,
+      query: compileHealthSplunkSearchTemplate(queryTemplate, queryContext),
+    });
+  });
+
+  const orderIndexByKey = new Map(HEALTH_SPLUNK_TABLE_DEFINITIONS.map((entry, index) => [String(entry.key || "").trim(), index]));
+  tables.sort((left, right) => {
+    const leftIndex = orderIndexByKey.get(String(left?.key || "").trim());
+    const rightIndex = orderIndexByKey.get(String(right?.key || "").trim());
+    return Number.isFinite(leftIndex) && Number.isFinite(rightIndex) ? leftIndex - rightIndex : 0;
+  });
+
+  return tables;
+}
+
+function extractSplunkCurrentUsername(value = null) {
+  return firstNonEmptyString([
+    value?.username,
+    value?.entry?.[0]?.content?.username,
+    value?.entry?.[0]?.name,
+    value?.entry?.[0]?.acl?.owner,
+    value?.entry?.[0]?.content?.realname,
+  ]);
+}
+
+async function resolveHealthSplunkTableDefinitions(queryContext = null, networkEvents = [], relayOptions = {}, session = null) {
+  const usernameCandidates = [];
+  const pushUsername = (value) => {
+    const normalized = String(value || "").trim();
+    if (normalized && !usernameCandidates.includes(normalized)) {
+      usernameCandidates.push(normalized);
+    }
+  };
+  pushUsername(extractSplunkCurrentUsername(session?.session?.probe?.parsed));
+  pushUsername(extractSplunkCurrentUsername(session?.probe?.parsed));
+  pushUsername(extractSplunkCurrentUsername(session?.parsed));
+  ["nobody", "-"].forEach(pushUsername);
+
+  let lastError = "";
+  for (const username of usernameCandidates) {
+    const dashboardDefinitionUrl = `${SPLUNK_SPLUNKD_BASE}/servicesNS/${encodeURIComponent(username)}/app_adobepass/data/ui/views/${encodeURIComponent(
+      HEALTH_SPLUNK_DASHBOARD_VIEW_NAME
+    )}?output_mode=json`;
+    const response = await runSplunkRelayRequest(
+      dashboardDefinitionUrl,
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "*/*",
+        },
+      },
+      networkEvents,
+      "health-dashboard-definition",
+      relayOptions
+    );
+    if (response.authRequired) {
+      return {
+        ok: false,
+        authRequired: true,
+        error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+        tables: getHealthSplunkPlaceholderTables(queryContext),
+      };
+    }
+    if (!response.ok) {
+      lastError = firstNonEmptyString([
+        normalizeHttpErrorMessage(response.text),
+        String(response.statusText || "").trim(),
+        `HTTP ${response.status || 0}`,
+      ]);
+      continue;
+    }
+    const definitionJson = extractSplunkDashboardDefinitionJson(response.parsed);
+    const tableDefinitions = parseHealthSplunkTableDefinitionsFromDashboardDefinition(definitionJson, queryContext);
+    if (Array.isArray(tableDefinitions) && tableDefinitions.length > 0) {
+      return {
+        ok: true,
+        authRequired: false,
+        tables: tableDefinitions,
+        fallbackUsed: false,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    authRequired: false,
+    error: lastError,
+    tables: getHealthSplunkPlaceholderTables(queryContext),
+    fallbackUsed: true,
+  };
+}
+
+function parseSplunkPreviewRowsPayload(payload = null) {
+  const fieldNames = (Array.isArray(payload?.fields) ? payload.fields : [])
+    .map((entry) => (typeof entry === "string" ? entry : entry?.name))
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  const columnArrays = Array.isArray(payload?.columns) ? payload.columns : [];
+  const previewRowCount = columnArrays.reduce(
+    (maxCount, columnValues) => Math.max(maxCount, Array.isArray(columnValues) ? columnValues.length : 0),
+    0
+  );
+  if (fieldNames.length > 0 && columnArrays.length > 0 && previewRowCount > 0) {
+    const rows = [];
+    for (let rowIndex = 0; rowIndex < previewRowCount; rowIndex += 1) {
+      const row = {};
+      fieldNames.forEach((fieldName, fieldIndex) => {
+        const columnValues = Array.isArray(columnArrays[fieldIndex]) ? columnArrays[fieldIndex] : [];
+        row[fieldName] = normalizeSplunkCellValue(columnValues[rowIndex]);
+      });
+      rows.push(row);
+    }
+    return {
+      columns: fieldNames,
+      rows,
+      totalRows: rows.length,
+    };
+  }
+
+  const directRows = extractSplunkRowsFromResponsePayload(payload);
+  const directFields = extractSplunkFieldsFromResponsePayload(payload);
+  const columnOrder = collectSplunkColumnOrder(directRows, directFields);
+  const uniqueRows = dedupeSplunkRows(directRows, columnOrder);
+  return {
+    columns: columnOrder,
+    rows: normalizeSplunkRows(uniqueRows, columnOrder),
+    totalRows: uniqueRows.length,
+  };
+}
+
+function buildHealthSplunkTableResult(queryContext = null, tableDefinition = null, options = {}) {
+  const columns = Array.isArray(options.columns) ? options.columns.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const rows = Array.isArray(options.rows) ? options.rows : [];
+  const totalRowsCandidate = Math.max(Number(options.totalRows || 0), rows.length);
+  return {
+    ok: options.ok !== false,
+    authRequired: options.authRequired === true,
+    key: String(tableDefinition?.key || "").trim(),
+    title: String(tableDefinition?.title || "").trim(),
+    query: String(tableDefinition?.query || "").trim(),
+    queryTemplate: String(tableDefinition?.queryTemplate || "").trim(),
+    selectionKey: String(queryContext?.selectionKey || "").trim(),
+    checkedAt: Date.now(),
+    queryContext,
+    sid: String(options.sid || "").trim(),
+    columns,
+    rows,
+    totalRows: totalRowsCandidate,
+    displayedRows: rows.length,
+    truncatedRows: totalRowsCandidate > rows.length,
+    endpointUrl: String(options.endpointUrl || "").trim(),
+    status: Number(options.status || 0),
+    statusText: String(options.statusText || "").trim(),
+    error: String(options.error || "").trim(),
+    networkEvents: Array.isArray(options.networkEvents) ? options.networkEvents : [],
+  };
+}
+
+function buildHealthSplunkPreviewReportPayload(
+  queryContext = null,
+  tableDefinition = null,
+  sid = "",
+  previewResponse = null,
+  networkEvents = [],
+  options = {}
+) {
+  const parsedPreview = parseSplunkPreviewRowsPayload(previewResponse?.parsed);
+  return buildHealthSplunkTableResult(queryContext, tableDefinition, {
+    ok: true,
+    sid,
+    columns: parsedPreview.columns,
+    rows: parsedPreview.rows,
+    totalRows: Math.max(Number(options.totalRowsFromMeta || 0), parsedPreview.totalRows),
+    endpointUrl: String(previewResponse?.url || "").trim(),
+    status: Number(previewResponse?.status || 0),
+    statusText: String(previewResponse?.statusText || "").trim(),
+    networkEvents,
+  });
+}
+
+async function fetchHealthSplunkPreviewReportBySid(queryContext = null, tableDefinition = null, sid = "", networkEvents = [], relayOptions = {}) {
+  const normalizedSid = String(sid || "").trim();
+  if (!normalizedSid) {
+    return {
+      ok: false,
+      error: "Unable to fetch HEALTH Splunk results: SID is missing.",
+      authRequired: false,
+      report: buildHealthSplunkTableResult(queryContext, tableDefinition, {
+        ok: false,
+        error: "Unable to fetch HEALTH Splunk results: SID is missing.",
+        networkEvents,
+      }),
+    };
+  }
+
+  const encodedSid = encodeURIComponent(normalizedSid);
+  const jobsBaseCandidates = [
+    `${SPLUNK_SPLUNKD_BASE}/services/search/v2/jobs`,
+    `${SPLUNK_SPLUNKD_BASE}/services/search/jobs`,
+  ];
+  let lastError = "";
+
+  for (const jobsBaseUrl of jobsBaseCandidates) {
+    const jobMetaUrl = `${jobsBaseUrl}/${encodedSid}?output_mode=json`;
+    const pollStartedAt = Date.now();
+    let jobMeta = null;
+    let latestStatus = parseSplunkJobStatus(null);
+
+    do {
+      jobMeta = await runSplunkRelayRequest(
+        jobMetaUrl,
+        {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "*/*",
+          },
+        },
+        networkEvents,
+        `health-table-${String(tableDefinition?.key || "").trim()}-job-status`,
+        relayOptions
+      );
+      if (jobMeta.authRequired) {
+        return {
+          ok: false,
+          authRequired: true,
+          error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+          report: buildHealthSplunkTableResult(queryContext, tableDefinition, {
+            ok: false,
+            authRequired: true,
+            sid: normalizedSid,
+            endpointUrl: jobMetaUrl,
+            status: Number(jobMeta?.status || 0),
+            statusText: String(jobMeta?.statusText || "").trim(),
+            error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+            networkEvents,
+          }),
+        };
+      }
+      if (!jobMeta.ok) {
+        lastError = firstNonEmptyString([
+          normalizeHttpErrorMessage(jobMeta.text),
+          String(jobMeta.statusText || "").trim(),
+          `HTTP ${jobMeta.status || 0}`,
+        ]);
+        break;
+      }
+      latestStatus = parseSplunkJobStatus(jobMeta.parsed);
+      if (latestStatus.isFailed) {
+        lastError = "Splunk search job failed before preview retrieval.";
+        break;
+      }
+      if (latestStatus.isDone) {
+        break;
+      }
+      await waitForDelay(SPLUNK_JOB_POLL_INTERVAL_MS);
+    } while (Date.now() - pollStartedAt < SPLUNK_JOB_POLL_TIMEOUT_MS);
+
+    if (!jobMeta?.ok) {
+      continue;
+    }
+
+    const totalRowsFromMeta = Math.max(
+      extractSplunkJobResultCount(jobMeta.parsed),
+      Number(latestStatus?.resultCount || 0),
+      Number(latestStatus?.eventCount || 0)
+    );
+    const previewParams = new URLSearchParams({
+      output_mode: "json_cols",
+      count: String(HEALTH_SPLUNK_TABLE_FETCH_LIMIT),
+      offset: "0",
+      progress: "true",
+      requestTotalCount: "true",
+      show_metadata: "true",
+    });
+    const previewUrl = `${jobsBaseUrl}/${encodedSid}/results_preview?${previewParams.toString()}`;
+    const previewResponse = await runSplunkRelayRequest(
+      previewUrl,
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "*/*",
+        },
+      },
+      networkEvents,
+      `health-table-${String(tableDefinition?.key || "").trim()}-results-preview`,
+      relayOptions
+    );
+    if (previewResponse.authRequired) {
+      return {
+        ok: false,
+        authRequired: true,
+        error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+        report: buildHealthSplunkTableResult(queryContext, tableDefinition, {
+          ok: false,
+          authRequired: true,
+          sid: normalizedSid,
+          endpointUrl: previewUrl,
+          status: Number(previewResponse?.status || 0),
+          statusText: String(previewResponse?.statusText || "").trim(),
+          error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+          networkEvents,
+        }),
+      };
+    }
+    if (!previewResponse.ok) {
+      lastError = firstNonEmptyString([
+        normalizeHttpErrorMessage(previewResponse.text),
+        String(previewResponse.statusText || "").trim(),
+        `HTTP ${previewResponse.status || 0}`,
+      ]);
+      continue;
+    }
+
+    let report = buildHealthSplunkPreviewReportPayload(queryContext, tableDefinition, normalizedSid, previewResponse, networkEvents, {
+      totalRowsFromMeta,
+    });
+
+    if (report.rows.length === 0 && totalRowsFromMeta > 0) {
+      const resultsParams = new URLSearchParams({
+        output_mode: "json",
+        count: String(HEALTH_SPLUNK_TABLE_FETCH_LIMIT),
+        offset: "0",
+      });
+      const resultsUrl = `${jobsBaseUrl}/${encodedSid}/results?${resultsParams.toString()}`;
+      const resultsResponse = await runSplunkRelayRequest(
+        resultsUrl,
+        {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "*/*",
+          },
+        },
+        networkEvents,
+        `health-table-${String(tableDefinition?.key || "").trim()}-results`,
+        relayOptions
+      );
+      if (resultsResponse.ok && !resultsResponse.authRequired) {
+        const resultRows = extractSplunkRowsFromResponsePayload(resultsResponse.parsed);
+        const resultFields = extractSplunkFieldsFromResponsePayload(resultsResponse.parsed);
+        const columnOrder = collectSplunkColumnOrder(resultRows, resultFields);
+        const uniqueRows = dedupeSplunkRows(resultRows, columnOrder);
+        report = buildHealthSplunkTableResult(queryContext, tableDefinition, {
+          ok: true,
+          sid: normalizedSid,
+          columns: columnOrder,
+          rows: normalizeSplunkRows(uniqueRows, columnOrder),
+          totalRows: Math.max(totalRowsFromMeta, uniqueRows.length),
+          endpointUrl: String(resultsResponse?.url || resultsUrl).trim(),
+          status: Number(resultsResponse?.status || 0),
+          statusText: String(resultsResponse?.statusText || "").trim(),
+          networkEvents,
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      authRequired: false,
+      error: "",
+      report,
+    };
+  }
+
+  return {
+    ok: false,
+    error: lastError || "Unable to fetch HEALTH Splunk preview results for search SID.",
+    authRequired: false,
+    report: buildHealthSplunkTableResult(queryContext, tableDefinition, {
+      ok: false,
+      sid: normalizedSid,
+      error: lastError || "Unable to fetch HEALTH Splunk preview results for search SID.",
+      networkEvents,
+    }),
+  };
+}
+
+async function runHealthSplunkTableSearch(queryContext = null, tableDefinition = null, options = {}) {
+  const compiledTable = {
+    key: String(tableDefinition?.key || "").trim(),
+    title: String(tableDefinition?.title || "").trim(),
+    queryTemplate: String(tableDefinition?.queryTemplate || "").trim(),
+    query: firstNonEmptyString([
+      tableDefinition?.query,
+      compileHealthSplunkSearchTemplate(tableDefinition?.queryTemplate, queryContext),
+    ]),
+  };
+  const networkEvents = [];
+  if (!compiledTable.key || !compiledTable.title || !compiledTable.query) {
+    return buildHealthSplunkTableResult(queryContext, compiledTable, {
+      ok: false,
+      error: "HEALTH Splunk table query is not configured.",
+      networkEvents,
+    });
+  }
+
+  const relayOptions = options?.relayOptions && typeof options.relayOptions === "object" ? options.relayOptions : {};
+  const createBody = new URLSearchParams({
+    search: compiledTable.query,
+    earliest_time: String(queryContext?.earliest || SPLUNK_SEARCH_EARLIEST).trim() || SPLUNK_SEARCH_EARLIEST,
+    latest_time: String(queryContext?.latest || SPLUNK_SEARCH_LATEST).trim() || SPLUNK_SEARCH_LATEST,
+    output_mode: "json",
+  }).toString();
+  const createCandidates = [
+    `${SPLUNK_SPLUNKD_BASE}/services/search/v2/jobs`,
+    `${SPLUNK_SPLUNKD_BASE}/services/search/jobs`,
+  ];
+  let lastError = "";
+
+  for (const createUrl of createCandidates) {
+    const response = await runSplunkRelayRequest(
+      createUrl,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "*/*",
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: createBody,
+      },
+      networkEvents,
+      `health-table-${compiledTable.key}-create-job`,
+      relayOptions
+    );
+    if (response.authRequired) {
+      return buildHealthSplunkTableResult(queryContext, compiledTable, {
+        ok: false,
+        authRequired: true,
+        endpointUrl: createUrl,
+        status: Number(response?.status || 0),
+        statusText: String(response?.statusText || "").trim(),
+        error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+        networkEvents,
+      });
+    }
+    if (!response.ok) {
+      lastError = firstNonEmptyString([
+        normalizeHttpErrorMessage(response.text),
+        String(response.statusText || "").trim(),
+        `HTTP ${response.status || 0}`,
+      ]);
+      continue;
+    }
+    const sid = extractSplunkJobSid(response.parsed);
+    if (!sid) {
+      lastError = "Splunk search job was created without a SID.";
+      continue;
+    }
+    const previewReport = await fetchHealthSplunkPreviewReportBySid(queryContext, compiledTable, sid, networkEvents, relayOptions);
+    if (previewReport.ok && previewReport.report) {
+      return previewReport.report;
+    }
+    if (previewReport.report) {
+      return previewReport.report;
+    }
+    lastError = firstNonEmptyString([previewReport.error, lastError]);
+  }
+
+  return buildHealthSplunkTableResult(queryContext, compiledTable, {
+    ok: false,
+    error: lastError || "Unable to create HEALTH Splunk search job.",
+    networkEvents,
+  });
+}
+
+function buildHealthSplunkDashboardReportPayload(queryContext = null, tableResults = [], options = {}) {
+  const tables = Array.isArray(tableResults) ? tableResults.map((entry) => cloneJsonLikeValue(entry, null)).filter(Boolean) : [];
+  const successCount = tables.filter((entry) => entry?.ok === true).length;
+  const errorCount = tables.filter((entry) => entry?.ok !== true).length;
+  const tableCount = tables.length;
+  const fallbackUsed = options?.fallbackUsed === true;
+  return {
+    ok: errorCount === 0 && tableCount > 0,
+    partial: successCount > 0 && errorCount > 0,
+    fallbackUsed,
+    fallbackMessage: fallbackUsed
+      ? "Dashboard definition lookup failed. Using UnderPAR fallback HEALTH queries extracted from the live dashboard."
+      : "",
+    selectionKey: String(queryContext?.selectionKey || "").trim(),
+    checkedAt: Date.now(),
+    queryContext,
+    totalTables: tableCount,
+    successCount,
+    errorCount,
+    tables,
+    error: errorCount === 0 ? "" : String(options?.error || "One or more HEALTH Splunk tables failed to load.").trim(),
+  };
+}
+
+async function runHealthSplunkDashboardForSelection(rawQueryContext = null, options = {}) {
+  const queryContext = buildHealthSplunkQueryContext(rawQueryContext);
+  if (!queryContext.programmerId || !queryContext.requestorId) {
+    const missingSelectionPayload = buildHealthSplunkDashboardReportPayload(queryContext, [], {
+      error: "Select a Media Company and RequestorId before running HEALTH Splunk.",
+    });
+    return {
+      ...missingSelectionPayload,
+      ok: false,
+    };
+  }
+
+  const openWorkspace = options.openWorkspace !== false;
+  const activateWorkspace = options.activateWorkspace !== false;
+  const forceLoginOnAuthFailure = options.forceLoginOnAuthFailure !== false;
+  let targetWindowId = Number(options.targetWindowId || 0);
+
+  if (openWorkspace) {
+    const workspaceTab = await healthWorkspaceEnsureWorkspaceTab({
+      activate: activateWorkspace,
+      windowId: targetWindowId || undefined,
+    });
+    targetWindowId = Number(workspaceTab?.windowId || targetWindowId || state.healthWorkspaceWindowId || 0);
+  }
+
+  healthWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), queryContext, targetWindowId);
+  const placeholderTables = getHealthSplunkPlaceholderTables(queryContext);
+  void healthWorkspaceSendWorkspaceMessage(
+    "report-start",
+    {
+      selectionKey: queryContext.selectionKey,
+      queryContext,
+      startedAt: Date.now(),
+      tables: placeholderTables.map((entry) => ({
+        key: entry.key,
+        title: entry.title,
+        query: entry.query,
+      })),
+    },
+    {
+      targetWindowId,
+    }
+  );
+
+  const finalizeReport = (payload) => {
+    healthWorkspaceStoreLatestReport(payload);
+    void healthWorkspaceSendWorkspaceMessage("report-result", payload, { targetWindowId });
+    return payload;
+  };
+
+  const sessionEvents = [];
+  const sessionReady = await ensureSplunkSessionReady(queryContext, sessionEvents, {
+    targetWindowId,
+    forceLoginOnAuthFailure,
+    timeoutMs: SPLUNK_AUTH_WAIT_TIMEOUT_MS,
+    pollIntervalMs: SPLUNK_AUTH_WAIT_INTERVAL_MS,
+  });
+  if (Number(sessionReady?.targetWindowId || 0) > 0) {
+    targetWindowId = Number(sessionReady.targetWindowId);
+  }
+  const splunkTab = sessionReady?.splunkTab || null;
+  const splunkTabId = Number(splunkTab?.tabId || splunkTab?.id || 0);
+  const relayOptions = {
+    tabId: splunkTabId,
+    allowTabRelay: true,
+  };
+  const session = sessionReady?.session || (await checkSplunkSessionActive(queryContext, sessionEvents, relayOptions));
+  if (!sessionReady?.ok || !session?.active) {
+    const authTables = placeholderTables.map((entry) =>
+      buildHealthSplunkTableResult(queryContext, entry, {
+        ok: false,
+        authRequired: true,
+        endpointUrl: `${SPLUNK_SPLUNKD_BASE}/services/authentication/current-context`,
+        status: Number(session?.probe?.status || 0),
+        statusText: String(session?.probe?.statusText || "").trim(),
+        error: firstNonEmptyString([
+          sessionReady?.error,
+          "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+        ]),
+        networkEvents: sessionEvents,
+      })
+    );
+    return finalizeReport(
+      buildHealthSplunkDashboardReportPayload(queryContext, authTables, {
+        error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
+      })
+    );
+  }
+
+  const definitionResolution = await resolveHealthSplunkTableDefinitions(queryContext, sessionEvents, relayOptions, session);
+  const resolvedTables = Array.isArray(definitionResolution?.tables) && definitionResolution.tables.length > 0
+    ? definitionResolution.tables
+    : placeholderTables;
+  if (definitionResolution?.authRequired === true) {
+    const authTables = resolvedTables.map((entry) =>
+      buildHealthSplunkTableResult(queryContext, entry, {
+        ok: false,
+        authRequired: true,
+        error: String(definitionResolution?.error || "Splunk session is not active.").trim() || "Splunk session is not active.",
+        networkEvents: sessionEvents,
+      })
+    );
+    return finalizeReport(
+      buildHealthSplunkDashboardReportPayload(queryContext, authTables, {
+        error: String(definitionResolution?.error || "Splunk session is not active.").trim() || "Splunk session is not active.",
+      })
+    );
+  }
+
+  const tableResults = [];
+  for (const tableDefinition of resolvedTables) {
+    const tableResult = await runHealthSplunkTableSearch(queryContext, tableDefinition, {
+      relayOptions,
+    });
+    tableResults.push(tableResult);
+    void healthWorkspaceSendWorkspaceMessage(
+      "table-result",
+      {
+        selectionKey: queryContext.selectionKey,
+        queryContext,
+        table: tableResult,
+        completedTables: tableResults.length,
+        totalTables: resolvedTables.length,
+      },
+      {
+        targetWindowId,
+      }
+    );
+  }
+
+  return finalizeReport(
+    buildHealthSplunkDashboardReportPayload(queryContext, tableResults, {
+      fallbackUsed: definitionResolution?.fallbackUsed === true,
+      error: firstNonEmptyString([
+        definitionResolution?.fallbackUsed === true ? String(definitionResolution?.error || "").trim() : "",
+        "One or more HEALTH Splunk tables failed to load.",
+      ]),
+    })
+  );
+}
+
+function normalizeEsmHealthGranularity(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(ESM_HEALTH_GRANULARITY_PATH_BY_KEY, normalized)
+    ? normalized
+    : ESM_HEALTH_DEFAULT_GRANULARITY;
+}
+
+function normalizeEsmHealthIsoDate(value = "") {
+  const normalized = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
+}
+
+function normalizeEsmHealthFilterList(values = []) {
+  const source = Array.isArray(values) ? values : [values];
+  return uniquePreserveOrder(
+    source
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean)
+  );
+}
+
+function getEsmHealthPacificDateParts(timestamp = Date.now()) {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = formatter.formatToParts(new Date(Number(timestamp || Date.now())));
+    const record = {};
+    parts.forEach((part) => {
+      if (part?.type && part.type !== "literal") {
+        record[part.type] = String(part.value || "").trim();
+      }
+    });
+    if (record.year && record.month && record.day) {
+      return {
+        year: record.year,
+        month: record.month,
+        day: record.day,
+        iso: `${record.year}-${record.month}-${record.day}`,
+      };
+    }
+  } catch {
+    // Fall through to UTC fallback.
+  }
+
+  const fallback = new Date(Number(timestamp || Date.now()));
+  const year = String(fallback.getUTCFullYear());
+  const month = String(fallback.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(fallback.getUTCDate()).padStart(2, "0");
+  return {
+    year,
+    month,
+    day,
+    iso: `${year}-${month}-${day}`,
+  };
+}
+
+function getEsmHealthDefaultDateRange(nowMs = Date.now()) {
+  const pacific = getEsmHealthPacificDateParts(nowMs);
+  return {
+    start: `${pacific.year}-${pacific.month}-01`,
+    end: pacific.iso,
+  };
+}
+
+function resolveEsmHealthDateRange(startValue = "", endValue = "") {
+  const defaults = getEsmHealthDefaultDateRange();
+  let start = normalizeEsmHealthIsoDate(startValue) || defaults.start;
+  let end = normalizeEsmHealthIsoDate(endValue) || defaults.end;
+  if (start > end) {
+    const originalStart = start;
+    start = end;
+    end = originalStart;
+  }
+  return {
+    start,
+    end,
+  };
+}
+
+function buildEsmHealthWorkspaceBaseSelectionKey(context = null) {
+  const environmentKey =
+    String(context?.environmentKey || getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+    DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const programmerId = String(context?.programmerId || "").trim();
+  if (!programmerId) {
+    return "";
+  }
+  const baseRequestorIds = normalizeEsmHealthFilterList(context?.baseRequestorIds);
+  const baseMvpdIds = normalizeEsmHealthFilterList(context?.baseMvpdIds);
+  return [environmentKey, programmerId, baseRequestorIds.join(",") || "*", baseMvpdIds.join(",") || "*"].join("|");
+}
+
+function buildEsmHealthWorkspaceSelectionKey(context = null) {
+  const baseKey = buildEsmHealthWorkspaceBaseSelectionKey(context);
+  if (!baseKey) {
+    return "";
+  }
+  const dateRange = resolveEsmHealthDateRange(context?.start, context?.end);
+  const granularity = normalizeEsmHealthGranularity(context?.granularity);
+  const drilldownRequestorIds = normalizeEsmHealthFilterList(context?.drilldownRequestorIds);
+  const drilldownMvpdIds = normalizeEsmHealthFilterList(context?.drilldownMvpdIds);
+  const platforms = normalizeEsmHealthFilterList(context?.platforms);
+  return [
+    baseKey,
+    dateRange.start,
+    dateRange.end,
+    granularity,
+    drilldownRequestorIds.join(",") || "*",
+    drilldownMvpdIds.join(",") || "*",
+    platforms.join(",") || "*",
+  ].join("|");
+}
+
+function buildEsmHealthDashboardQueryContext(rawContext = null) {
+  const context = rawContext && typeof rawContext === "object" ? rawContext : {};
+  const resolvedProgrammer = resolveSelectedProgrammer();
+  const environment = getActiveAdobePassEnvironment();
+  const programmerId = String(context.programmerId || resolvedProgrammer?.programmerId || "").trim();
+  const programmerName = firstNonEmptyString([
+    context.programmerName,
+    resolvedProgrammer?.programmerName,
+    resolvedProgrammer?.mediaCompanyName,
+  ]);
+  const baseRequestorIds = normalizeEsmHealthFilterList(
+    Object.prototype.hasOwnProperty.call(context, "baseRequestorIds") ? context.baseRequestorIds : [state.selectedRequestorId]
+  );
+  const baseMvpdIds = normalizeEsmHealthFilterList(
+    Object.prototype.hasOwnProperty.call(context, "baseMvpdIds") ? context.baseMvpdIds : [state.selectedMvpdId]
+  );
+  const drilldownRequestorIds = normalizeEsmHealthFilterList(context.drilldownRequestorIds);
+  const drilldownMvpdIds = normalizeEsmHealthFilterList(context.drilldownMvpdIds);
+  const platforms = normalizeEsmHealthFilterList(context.platforms);
+  const requestorIds = drilldownRequestorIds.length > 0 ? drilldownRequestorIds : baseRequestorIds;
+  const mvpdIds = drilldownMvpdIds.length > 0 ? drilldownMvpdIds : baseMvpdIds;
+  const dateRange = resolveEsmHealthDateRange(context.start, context.end);
+  const granularity = normalizeEsmHealthGranularity(context.granularity);
+  const environmentKey = String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const environmentLabel = firstNonEmptyString([environment?.label, environment?.shortCode, environmentKey]);
+  const queryContext = {
+    programmerId,
+    programmerName,
+    mediaCompany: programmerId,
+    environmentKey,
+    environmentLabel,
+    baseRequestorIds,
+    baseMvpdIds,
+    drilldownRequestorIds,
+    drilldownMvpdIds,
+    requestorIds,
+    mvpdIds,
+    platforms,
+    start: dateRange.start,
+    end: dateRange.end,
+    granularity,
+    timezoneLabel: "PST effective",
+    requestSource: String(context.requestSource || "esm-health-dashboard").trim() || "esm-health-dashboard",
+  };
+  queryContext.controllerSelectionKey = buildEsmHealthWorkspaceBaseSelectionKey(queryContext);
+  queryContext.selectionKey = buildEsmHealthWorkspaceSelectionKey(queryContext);
+  return queryContext;
+}
+
+function buildEsmHealthStatusMessage(queryContext = null) {
+  const environmentLabel = String(queryContext?.environmentLabel || "").trim();
+  const programmerId = String(queryContext?.programmerId || "").trim();
+  const requestorLabel = normalizeEsmHealthFilterList(queryContext?.requestorIds).join(", ");
+  const mvpdLabel = normalizeEsmHealthFilterList(queryContext?.mvpdIds).join(", ");
+  return [programmerId, requestorLabel ? `Requestor ${requestorLabel}` : "", mvpdLabel ? `MVPD ${mvpdLabel}` : "", environmentLabel]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function getEsmHealthMetricNumber(row = null, key = "") {
+  const parsed = Number(row?.[key] ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function computeEsmHealthDerivedMetrics(source = null) {
+  const authnAttempts = Math.max(0, Number(source?.authnAttempts || 0));
+  const authnSuccessful = Math.max(0, Number(source?.authnSuccessful || 0));
+  const authnFailed = Math.max(0, Number(source?.authnFailed || 0));
+  const authzAttempts = Math.max(0, Number(source?.authzAttempts || 0));
+  const authzSuccessful = Math.max(0, Number(source?.authzSuccessful || 0));
+  const authzFailed = Math.max(0, Number(source?.authzFailed || 0));
+  const authzRejected = Math.max(0, Number(source?.authzRejected || 0));
+  const authzLatency = Math.max(0, Number(source?.authzLatency || 0));
+  const mediaTokens = Math.max(0, Number(source?.mediaTokens || 0));
+  const clientlessTokens = Math.max(0, Number(source?.clientlessTokens || 0));
+  const clientlessFailures = Math.max(0, Number(source?.clientlessFailures || 0));
+  const authzLatencyDenominator = authzSuccessful + authzFailed;
+  const clientlessFailureDenominator = clientlessFailures + clientlessTokens;
+  return {
+    authnConversion: authnAttempts > 0 ? authnSuccessful / authnAttempts : null,
+    authzConversion: authzAttempts > 0 ? authzSuccessful / authzAttempts : null,
+    authzErrorRate: authzAttempts > 0 ? (authzFailed + authzRejected) / authzAttempts : null,
+    avgAuthzLatency: authzLatencyDenominator > 0 ? authzLatency / authzLatencyDenominator : null,
+    playRequests: mediaTokens,
+    clientlessFailureRate: clientlessFailureDenominator > 0 ? clientlessFailures / clientlessFailureDenominator : null,
+  };
+}
+
+function esmHealthPartsToUtcMs(row = null) {
+  const year = Number(row?.year ?? 1970);
+  const month = Number(row?.month ?? 1);
+  const day = Number(row?.day ?? 1);
+  const hour = Number(row?.hour ?? 0);
+  return (
+    Date.UTC(
+      Number.isFinite(year) ? year : 1970,
+      Number.isFinite(month) ? month - 1 : 0,
+      Number.isFinite(day) ? day : 1,
+      Number.isFinite(hour) ? hour : 0,
+      0,
+      0
+    ) -
+    ESM_SOURCE_UTC_OFFSET_MINUTES * 60 * 1000
+  );
+}
+
+function buildEsmHealthBucketMeta(row = null, granularity = ESM_HEALTH_DEFAULT_GRANULARITY) {
+  const year = Number(row?.year ?? 1970);
+  const month = Number(row?.month ?? 1);
+  const day = Number(row?.day ?? 1);
+  const hour = Number(row?.hour ?? 0);
+  const paddedMonth = String(Math.max(1, month)).padStart(2, "0");
+  const paddedDay = String(Math.max(1, day)).padStart(2, "0");
+  const paddedHour = String(Math.max(0, hour)).padStart(2, "0");
+  const normalizedGranularity = normalizeEsmHealthGranularity(granularity);
+  if (normalizedGranularity === "month") {
+    return {
+      key: `${year}-${paddedMonth}`,
+      label: `${paddedMonth}/${year}`,
+      timestamp: esmHealthPartsToUtcMs({ year, month, day: 1, hour: 0 }),
+    };
+  }
+  if (normalizedGranularity === "hour") {
+    return {
+      key: `${year}-${paddedMonth}-${paddedDay}T${paddedHour}`,
+      label: `${paddedMonth}/${paddedDay} ${paddedHour}:00`,
+      timestamp: esmHealthPartsToUtcMs({ year, month, day, hour }),
+    };
+  }
+  return {
+    key: `${year}-${paddedMonth}-${paddedDay}`,
+    label: `${paddedMonth}/${paddedDay}/${year}`,
+    timestamp: esmHealthPartsToUtcMs({ year, month, day, hour: 0 }),
+  };
+}
+
+function aggregateEsmHealthBackboneRows(rows = [], granularity = ESM_HEALTH_DEFAULT_GRANULARITY) {
+  const buckets = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const meta = buildEsmHealthBucketMeta(row, granularity);
+    if (!meta.key) {
+      return;
+    }
+    if (!buckets.has(meta.key)) {
+      buckets.set(meta.key, {
+        bucketKey: meta.key,
+        label: meta.label,
+        timestamp: meta.timestamp,
+        authnAttempts: 0,
+        authnSuccessful: 0,
+        authnFailed: 0,
+        authzAttempts: 0,
+        authzSuccessful: 0,
+        authzFailed: 0,
+        authzRejected: 0,
+        authzLatency: 0,
+        mediaTokens: 0,
+        clientlessTokens: 0,
+        clientlessFailures: 0,
+      });
+    }
+    const bucket = buckets.get(meta.key);
+    bucket.authnAttempts += getEsmHealthMetricNumber(row, "authn-attempts");
+    bucket.authnSuccessful += getEsmHealthMetricNumber(row, "authn-successful");
+    bucket.authnFailed += getEsmHealthMetricNumber(row, "authn-failed");
+    bucket.authzAttempts += getEsmHealthMetricNumber(row, "authz-attempts");
+    bucket.authzSuccessful += getEsmHealthMetricNumber(row, "authz-successful");
+    bucket.authzFailed += getEsmHealthMetricNumber(row, "authz-failed");
+    bucket.authzRejected += getEsmHealthMetricNumber(row, "authz-rejected");
+    bucket.authzLatency += getEsmHealthMetricNumber(row, "authz-latency");
+    bucket.mediaTokens += getEsmHealthMetricNumber(row, "media-tokens");
+    bucket.clientlessTokens += getEsmHealthMetricNumber(row, "clientless-tokens");
+    bucket.clientlessFailures += getEsmHealthMetricNumber(row, "clientless-failures");
+  });
+
+  return Array.from(buckets.values())
+    .sort((left, right) => Number(left?.timestamp || 0) - Number(right?.timestamp || 0))
+    .map((bucket) => ({
+      ...bucket,
+      ...computeEsmHealthDerivedMetrics(bucket),
+    }));
+}
+
+function aggregateEsmHealthUniqueRows(rows = []) {
+  const buckets = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const meta = buildEsmHealthBucketMeta(row, "day");
+    if (!meta.key) {
+      return;
+    }
+    if (!buckets.has(meta.key)) {
+      buckets.set(meta.key, {
+        bucketKey: meta.key,
+        label: meta.label,
+        timestamp: meta.timestamp,
+        uniqueAccounts: 0,
+        uniqueSessions: 0,
+      });
+    }
+    const bucket = buckets.get(meta.key);
+    bucket.uniqueAccounts += getEsmHealthMetricNumber(row, "unique-accounts");
+    bucket.uniqueSessions += getEsmHealthMetricNumber(row, "unique-sessions");
+  });
+
+  return Array.from(buckets.values()).sort((left, right) => Number(left?.timestamp || 0) - Number(right?.timestamp || 0));
+}
+
+function aggregateEsmHealthBreakdownRows(rows = [], dimensionKey = "", limit = ESM_HEALTH_TOP_ROW_LIMIT) {
+  const normalizedDimensionKey = String(dimensionKey || "").trim();
+  const buckets = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const dimensionValue = String(row?.[normalizedDimensionKey] || "").trim() || "(unknown)";
+    if (!buckets.has(dimensionValue)) {
+      buckets.set(dimensionValue, {
+        label: dimensionValue,
+        authnAttempts: 0,
+        authnSuccessful: 0,
+        authnFailed: 0,
+        authzAttempts: 0,
+        authzSuccessful: 0,
+        authzFailed: 0,
+        authzRejected: 0,
+        authzLatency: 0,
+        mediaTokens: 0,
+        clientlessTokens: 0,
+        clientlessFailures: 0,
+      });
+    }
+    const bucket = buckets.get(dimensionValue);
+    bucket.authnAttempts += getEsmHealthMetricNumber(row, "authn-attempts");
+    bucket.authnSuccessful += getEsmHealthMetricNumber(row, "authn-successful");
+    bucket.authnFailed += getEsmHealthMetricNumber(row, "authn-failed");
+    bucket.authzAttempts += getEsmHealthMetricNumber(row, "authz-attempts");
+    bucket.authzSuccessful += getEsmHealthMetricNumber(row, "authz-successful");
+    bucket.authzFailed += getEsmHealthMetricNumber(row, "authz-failed");
+    bucket.authzRejected += getEsmHealthMetricNumber(row, "authz-rejected");
+    bucket.authzLatency += getEsmHealthMetricNumber(row, "authz-latency");
+    bucket.mediaTokens += getEsmHealthMetricNumber(row, "media-tokens");
+    bucket.clientlessTokens += getEsmHealthMetricNumber(row, "clientless-tokens");
+    bucket.clientlessFailures += getEsmHealthMetricNumber(row, "clientless-failures");
+  });
+
+  return Array.from(buckets.values())
+    .map((entry) => ({
+      ...entry,
+      ...computeEsmHealthDerivedMetrics(entry),
+    }))
+    .sort((left, right) => {
+      const mediaDelta = Number(right?.mediaTokens || 0) - Number(left?.mediaTokens || 0);
+      if (mediaDelta !== 0) {
+        return mediaDelta;
+      }
+      const authzDelta = Number(right?.authzAttempts || 0) - Number(left?.authzAttempts || 0);
+      if (authzDelta !== 0) {
+        return authzDelta;
+      }
+      const authnDelta = Number(right?.authnAttempts || 0) - Number(left?.authnAttempts || 0);
+      if (authnDelta !== 0) {
+        return authnDelta;
+      }
+      return String(left?.label || "").localeCompare(String(right?.label || ""), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    })
+    .slice(0, Math.max(1, Number(limit || ESM_HEALTH_TOP_ROW_LIMIT)));
+}
+
+function buildEsmHealthSummary(backboneSeries = [], uniqueSeries = []) {
+  const totals = {
+    authnAttempts: 0,
+    authnSuccessful: 0,
+    authnFailed: 0,
+    authzAttempts: 0,
+    authzSuccessful: 0,
+    authzFailed: 0,
+    authzRejected: 0,
+    authzLatency: 0,
+    mediaTokens: 0,
+    clientlessTokens: 0,
+    clientlessFailures: 0,
+  };
+  (Array.isArray(backboneSeries) ? backboneSeries : []).forEach((entry) => {
+    totals.authnAttempts += Number(entry?.authnAttempts || 0);
+    totals.authnSuccessful += Number(entry?.authnSuccessful || 0);
+    totals.authnFailed += Number(entry?.authnFailed || 0);
+    totals.authzAttempts += Number(entry?.authzAttempts || 0);
+    totals.authzSuccessful += Number(entry?.authzSuccessful || 0);
+    totals.authzFailed += Number(entry?.authzFailed || 0);
+    totals.authzRejected += Number(entry?.authzRejected || 0);
+    totals.authzLatency += Number(entry?.authzLatency || 0);
+    totals.mediaTokens += Number(entry?.mediaTokens || 0);
+    totals.clientlessTokens += Number(entry?.clientlessTokens || 0);
+    totals.clientlessFailures += Number(entry?.clientlessFailures || 0);
+  });
+  const latestUniqueBucket = Array.isArray(uniqueSeries) && uniqueSeries.length > 0 ? uniqueSeries[uniqueSeries.length - 1] : null;
+  return {
+    ...totals,
+    ...computeEsmHealthDerivedMetrics(totals),
+    latestUniqueAccounts: Number(latestUniqueBucket?.uniqueAccounts || 0),
+    latestUniqueSessions: Number(latestUniqueBucket?.uniqueSessions || 0),
+    latestUniqueLabel: String(latestUniqueBucket?.label || "").trim(),
+    seriesPoints: Array.isArray(backboneSeries) ? backboneSeries.length : 0,
+  };
+}
+
+function extractEsmHealthTokenValue(payload = null, fallbackText = "") {
+  return normalizeBearerTokenValue(
+    firstNonEmptyString([
+      typeof payload === "string" ? payload : "",
+      payload?.token,
+      payload?.accessToken,
+      payload?.access_token,
+      payload?.jwt,
+      payload?.value,
+      fallbackText,
+    ])
+  );
+}
+
+async function fetchEsmHealthTenantDataToken(queryContext = null) {
+  const environment = getActiveAdobePassEnvironment();
+  const consoleBase = String(environment?.consoleBase || ADOBE_CONSOLE_BASE || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase).trim();
+  const tokenUrl = `${consoleBase.replace(/\/+$/, "")}${ESM_HEALTH_TENANT_TOKEN_PATH}`;
+  try {
+    const result = await fetchAdobeConsoleJsonWithLoginButtonFallback([tokenUrl], "ESM HEALTH token", {
+      method: "GET",
+      credentials: "include",
+      mode: "cors",
+      timeoutMs: ESM_HEALTH_CONSOLE_REQUEST_TIMEOUT_MS,
+    });
+    const token = extractEsmHealthTokenValue(result?.parsed, result?.text);
+    if (!token || !isProbablyJwt(token)) {
+      throw new Error("ESM tenant token response did not include a valid bearer.");
+    }
+    return {
+      token,
+      sourceUrl: String(result?.url || tokenUrl),
+      status: Number(result?.status || 0),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message.includes("missing a valid IMS bearer") ||
+      message.toLowerCase().includes("sign in") ||
+      message.toLowerCase().includes("login")
+    ) {
+      throw new Error("Adobe Pass sign-in is required before loading ESM HEALTH.");
+    }
+    if (isAdobeConsoleAccessDeniedMessage(message)) {
+      throw new Error("Current Adobe Pass session does not have access to ESM HEALTH.");
+    }
+    throw new Error(`ESM HEALTH token request failed. ${message}`);
+  }
+}
+
+function buildEsmHealthRequestUrl(pathname = "", queryContext = null, options = {}) {
+  const environment = getActiveAdobePassEnvironment();
+  const esmBase = String(environment?.esmBase || `${ADOBE_MGMT_BASE}/esm/v3/media-company/`).trim();
+  const parsed = new URL(String(pathname || "").replace(/^\/+/, ""), esmBase.endsWith("/") ? esmBase : `${esmBase}/`);
+  parsed.hash = "";
+  parsed.searchParams.set("media-company", String(queryContext?.mediaCompany || queryContext?.programmerId || "").trim());
+  parsed.searchParams.set("start", String(queryContext?.start || "").trim());
+  parsed.searchParams.set("end", String(queryContext?.end || "").trim());
+  const metrics = normalizeEsmHealthFilterList(options.metrics);
+  if (metrics.length > 0) {
+    parsed.searchParams.set("metrics", metrics.join(","));
+  }
+  const limit = Math.max(0, Number(options.limit || 0));
+  if (limit > 0) {
+    parsed.searchParams.set("limit", String(limit));
+  }
+  normalizeEsmHealthFilterList(
+    Object.prototype.hasOwnProperty.call(options, "requestorIds") ? options.requestorIds : queryContext?.requestorIds
+  ).forEach((value) => {
+    parsed.searchParams.append("requestor-id", value);
+  });
+  normalizeEsmHealthFilterList(
+    Object.prototype.hasOwnProperty.call(options, "mvpdIds") ? options.mvpdIds : queryContext?.mvpdIds
+  ).forEach((value) => {
+    parsed.searchParams.append("mvpd", value);
+  });
+  normalizeEsmHealthFilterList(
+    Object.prototype.hasOwnProperty.call(options, "platforms") ? options.platforms : queryContext?.platforms
+  ).forEach((value) => {
+    parsed.searchParams.append("platform", value);
+  });
+  return parsed.toString();
+}
+
+function extractEsmHealthReportRows(payload = null) {
+  if (Array.isArray(payload?.report)) {
+    return payload.report;
+  }
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  return [];
+}
+
+function buildEsmHealthRequestErrorMessage(status = 0, parsed = null, text = "", statusText = "", pathname = "") {
+  const normalizedStatus = Number(status || 0);
+  if (normalizedStatus === 404) {
+    return `ESM path not available for ${String(pathname || "").replace(/\.json$/i, "")}.`;
+  }
+  if (normalizedStatus === 401) {
+    return "ESM HEALTH bearer expired or is not authorized for the requested dataset.";
+  }
+  if (normalizedStatus === 403) {
+    return "ESM HEALTH access was denied for the requested dataset.";
+  }
+  return (
+    firstNonEmptyString([
+      parsed?.error?.message,
+      parsed?.error_description,
+      parsed?.message,
+      normalizeHttpErrorMessage(text),
+      statusText,
+      normalizedStatus > 0 ? `HTTP ${normalizedStatus}` : "",
+    ]) || "ESM HEALTH request failed."
+  );
+}
+
+async function fetchEsmHealthJson(queryContext = null, pathname = "", options = {}) {
+  const requestUrl = buildEsmHealthRequestUrl(pathname, queryContext, options);
+  const authState = options?.authState && typeof options.authState === "object" ? options.authState : {};
+  const requestOnce = async (forceRefresh = false) => {
+    if (forceRefresh === true || !normalizeBearerTokenValue(authState.token)) {
+      const tokenResult = await fetchEsmHealthTenantDataToken(queryContext);
+      authState.token = tokenResult.token;
+    }
+    const response = await fetchWithAbortTimeout(
+      requestUrl,
+      {
+        method: "GET",
+        mode: "cors",
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          Authorization: `Bearer ${String(authState.token || "").trim()}`,
+        },
+      },
+      ESM_HEALTH_API_REQUEST_TIMEOUT_MS
+    );
+    const text = await response.text().catch(() => "");
+    return {
+      response,
+      text,
+      parsed: parseJsonText(text, null),
+    };
+  };
+
+  try {
+    let attempt = await requestOnce(false);
+    if (Number(attempt?.response?.status || 0) === 401) {
+      attempt = await requestOnce(true);
+    }
+    const response = attempt.response;
+    if (!response.ok) {
+      return {
+        ok: false,
+        requestUrl,
+        status: Number(response.status || 0),
+        statusText: String(response.statusText || ""),
+        parsed: attempt.parsed,
+        text: attempt.text,
+        rows: [],
+        error: buildEsmHealthRequestErrorMessage(
+          response.status,
+          attempt.parsed,
+          attempt.text,
+          response.statusText,
+          pathname
+        ),
+      };
+    }
+    return {
+      ok: true,
+      requestUrl,
+      status: Number(response.status || 0),
+      statusText: String(response.statusText || ""),
+      parsed: attempt.parsed,
+      text: attempt.text,
+      rows: extractEsmHealthReportRows(attempt.parsed),
+      error: "",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      requestUrl,
+      status: 0,
+      statusText: "",
+      parsed: null,
+      text: "",
+      rows: [],
+      error:
+        normalizeHttpErrorMessage(error instanceof Error ? error.message : String(error)) || "ESM HEALTH request failed.",
+    };
+  }
+}
+
+function buildEsmHealthDashboardReportPayload(queryContext = null, data = null, options = {}) {
+  const sectionErrors = data?.sectionErrors && typeof data.sectionErrors === "object" ? { ...data.sectionErrors } : {};
+  const requestedSections = ["backbone", "mvpd", "requestor", "platform"];
+  if (normalizeEsmHealthGranularity(queryContext?.granularity) === "day") {
+    requestedSections.splice(1, 0, "uniques");
+  }
+  const failedSections = requestedSections.filter((key) => Boolean(String(sectionErrors?.[key] || "").trim()));
+  const loadedSections = requestedSections.length - failedSections.length;
+  const backboneSeries = Array.isArray(data?.backboneSeries) ? data.backboneSeries : [];
+  const uniqueSeries = Array.isArray(data?.uniqueSeries) ? data.uniqueSeries : [];
+  const mvpdRows = Array.isArray(data?.mvpdRows) ? data.mvpdRows : [];
+  const requestorRows = Array.isArray(data?.requestorRows) ? data.requestorRows : [];
+  const platformRows = Array.isArray(data?.platformRows) ? data.platformRows : [];
+  const summary = buildEsmHealthSummary(backboneSeries, uniqueSeries);
+  return {
+    ok: failedSections.length === 0 && loadedSections > 0,
+    partial: failedSections.length > 0 && loadedSections > 0,
+    checkedAt: Date.now(),
+    selectionKey: String(queryContext?.selectionKey || "").trim(),
+    queryContext,
+    summary,
+    backboneSeries,
+    uniqueSeries,
+    mvpdRows,
+    requestorRows,
+    platformRows,
+    sectionErrors,
+    loadedSections,
+    totalSections: requestedSections.length,
+    error:
+      failedSections.length > 0
+        ? String(options?.error || "One or more ESM HEALTH datasets failed to load.").trim() ||
+          "One or more ESM HEALTH datasets failed to load."
+        : "",
+  };
+}
+
+async function runEsmHealthDashboardForSelection(rawQueryContext = null, options = {}) {
+  const queryContext = buildEsmHealthDashboardQueryContext(rawQueryContext);
+  if (!queryContext.programmerId) {
+    return buildEsmHealthDashboardReportPayload(queryContext, { sectionErrors: { backbone: "Select a Media Company first." } }, {
+      error: "Select a Media Company before running ESM HEALTH.",
+    });
+  }
+
+  const openWorkspace = options.openWorkspace !== false;
+  const activateWorkspace = options.activateWorkspace !== false;
+  let targetWindowId = Number(options.targetWindowId || 0);
+
+  if (openWorkspace) {
+    const workspaceTab = await esmHealthWorkspaceEnsureWorkspaceTab({
+      activate: activateWorkspace,
+      windowId: targetWindowId || undefined,
+    });
+    targetWindowId = Number(workspaceTab?.windowId || targetWindowId || state.esmHealthWorkspaceWindowId || 0);
+  }
+
+  esmHealthWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), esmHealthWorkspaceGetSelectionContext(resolveSelectedProgrammer()), targetWindowId);
+  void esmHealthWorkspaceSendWorkspaceMessage(
+    "report-start",
+    {
+      selectionKey: queryContext.selectionKey,
+      queryContext,
+      startedAt: Date.now(),
+    },
+    {
+      targetWindowId,
+    }
+  );
+
+  const finalizeReport = (payload) => {
+    esmHealthWorkspaceStoreLatestReport(payload);
+    void esmHealthWorkspaceSendWorkspaceMessage("report-result", payload, { targetWindowId });
+    return payload;
+  };
+
+  const authState = {};
+  try {
+    const tokenResult = await fetchEsmHealthTenantDataToken(queryContext);
+    authState.token = tokenResult.token;
+  } catch (error) {
+    const tokenError = error instanceof Error ? error.message : String(error);
+    const tokenSectionErrors = {
+      backbone: tokenError,
+      mvpd: tokenError,
+      requestor: tokenError,
+      platform: tokenError,
+    };
+    if (normalizeEsmHealthGranularity(queryContext.granularity) === "day") {
+      tokenSectionErrors.uniques = tokenError;
+    }
+    return finalizeReport(
+      buildEsmHealthDashboardReportPayload(
+        queryContext,
+        {
+          sectionErrors: tokenSectionErrors,
+        },
+        {
+          error: tokenError,
+        }
+      )
+    );
+  }
+
+  const backbonePath = String(
+    ESM_HEALTH_GRANULARITY_PATH_BY_KEY[normalizeEsmHealthGranularity(queryContext.granularity)] ||
+      ESM_HEALTH_GRANULARITY_PATH_BY_KEY[ESM_HEALTH_DEFAULT_GRANULARITY]
+  );
+  const dayPath = ESM_HEALTH_GRANULARITY_PATH_BY_KEY.day;
+  const requestPromises = {
+    backbone: fetchEsmHealthJson(queryContext, backbonePath, {
+      authState,
+      metrics: ESM_HEALTH_METRICS.backbone,
+    }),
+    uniques:
+      normalizeEsmHealthGranularity(queryContext.granularity) === "day"
+        ? fetchEsmHealthJson(queryContext, `dc/${dayPath}`, {
+            authState,
+            metrics: ESM_HEALTH_METRICS.uniques,
+          })
+        : Promise.resolve({ ok: true, rows: [], skipped: true }),
+    mvpd: fetchEsmHealthJson(queryContext, `mvpd/${dayPath}`, {
+      authState,
+      metrics: ESM_HEALTH_METRICS.mvpd,
+      limit: ESM_HEALTH_BREAKDOWN_LIMIT,
+      requestorIds: queryContext.requestorIds,
+      mvpdIds: queryContext.baseMvpdIds,
+      platforms: queryContext.platforms,
+    }),
+    requestor: fetchEsmHealthJson(queryContext, `requestor-id/${dayPath}`, {
+      authState,
+      metrics: ESM_HEALTH_METRICS.requestor,
+      limit: ESM_HEALTH_BREAKDOWN_LIMIT,
+      requestorIds: queryContext.baseRequestorIds,
+      mvpdIds: queryContext.mvpdIds,
+      platforms: queryContext.platforms,
+    }),
+    platform: fetchEsmHealthJson(queryContext, `platform/${dayPath}`, {
+      authState,
+      metrics: ESM_HEALTH_METRICS.platform,
+      limit: ESM_HEALTH_BREAKDOWN_LIMIT,
+    }),
+  };
+
+  const [backboneResult, uniquesResult, mvpdResult, requestorResult, platformResult] = await Promise.all([
+    requestPromises.backbone,
+    requestPromises.uniques,
+    requestPromises.mvpd,
+    requestPromises.requestor,
+    requestPromises.platform,
+  ]);
+
+  const sectionErrors = {};
+  const backboneSeries = backboneResult.ok
+    ? aggregateEsmHealthBackboneRows(backboneResult.rows, queryContext.granularity)
+    : [];
+  if (!backboneResult.ok) {
+    sectionErrors.backbone = String(backboneResult.error || "Unable to load ESM HEALTH overview data.").trim();
+  }
+
+  const uniqueSeries =
+    normalizeEsmHealthGranularity(queryContext.granularity) === "day" && uniquesResult.ok
+      ? aggregateEsmHealthUniqueRows(uniquesResult.rows)
+      : [];
+  if (normalizeEsmHealthGranularity(queryContext.granularity) === "day" && !uniquesResult.ok) {
+    sectionErrors.uniques = String(uniquesResult.error || "Unable to load ESM HEALTH uniques.").trim();
+  }
+
+  const mvpdRows = mvpdResult.ok ? aggregateEsmHealthBreakdownRows(mvpdResult.rows, "mvpd", ESM_HEALTH_TOP_ROW_LIMIT) : [];
+  if (!mvpdResult.ok) {
+    sectionErrors.mvpd = String(mvpdResult.error || "Unable to load ESM HEALTH MVPD breakdown.").trim();
+  }
+
+  const requestorRows = requestorResult.ok
+    ? aggregateEsmHealthBreakdownRows(requestorResult.rows, "requestor-id", ESM_HEALTH_TOP_ROW_LIMIT).map((entry) => ({
+        ...entry,
+        requestorId: entry.label,
+      }))
+    : [];
+  if (!requestorResult.ok) {
+    sectionErrors.requestor = String(requestorResult.error || "Unable to load ESM HEALTH RequestorId breakdown.").trim();
+  }
+
+  const platformRows = platformResult.ok
+    ? aggregateEsmHealthBreakdownRows(platformResult.rows, "platform", ESM_HEALTH_TOP_ROW_LIMIT).map((entry) => ({
+        ...entry,
+        platform: entry.label,
+      }))
+    : [];
+  if (!platformResult.ok) {
+    sectionErrors.platform = String(platformResult.error || "Unable to load ESM HEALTH platform breakdown.").trim();
+  }
+
+  return finalizeReport(
+    buildEsmHealthDashboardReportPayload(
+      queryContext,
+      {
+        backboneSeries,
+        uniqueSeries,
+        mvpdRows: mvpdRows.map((entry) => ({
+          ...entry,
+          mvpd: entry.label,
+        })),
+        requestorRows,
+        platformRows,
+        sectionErrors,
+      },
+      {
+        error: "One or more ESM HEALTH datasets failed to load.",
+      }
+    )
+  );
 }
 
 async function runRestV2SplunkLookup(section, programmer, appInfo) {
@@ -45647,6 +47498,793 @@ function ensureRestWorkspaceTabWatcher() {
   state.restWorkspaceTabWatcherBound = true;
 }
 
+function esmHealthWorkspaceGetSelectionContext(programmer = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  return buildEsmHealthDashboardQueryContext({
+    programmerId: String(resolvedProgrammer?.programmerId || "").trim(),
+    programmerName: firstNonEmptyString([resolvedProgrammer?.programmerName, resolvedProgrammer?.mediaCompanyName]),
+  });
+}
+
+function esmHealthWorkspaceGetSelectedControllerStatePayload(programmer = null, selectionContext = null) {
+  const context =
+    selectionContext && typeof selectionContext === "object"
+      ? selectionContext
+      : esmHealthWorkspaceGetSelectionContext(programmer);
+  return {
+    controllerOnline: true,
+    esmHealthReady: Boolean(context?.programmerId),
+    programmerId: String(context?.programmerId || "").trim(),
+    programmerName: String(context?.programmerName || "").trim(),
+    mediaCompany: String(context?.mediaCompany || context?.programmerId || "").trim(),
+    requestorIds: normalizeEsmHealthFilterList(context?.baseRequestorIds),
+    mvpdIds: normalizeEsmHealthFilterList(context?.baseMvpdIds),
+    platforms: normalizeEsmHealthFilterList(context?.platforms),
+    environmentKey: String(context?.environmentKey || "").trim(),
+    environmentLabel: String(context?.environmentLabel || "").trim(),
+    selectionKey: String(context?.controllerSelectionKey || context?.selectionKey || "").trim(),
+    defaultStart: String(context?.start || "").trim(),
+    defaultEnd: String(context?.end || "").trim(),
+    defaultGranularity: normalizeEsmHealthGranularity(context?.granularity),
+    timezoneLabel: String(context?.timezoneLabel || "PST effective").trim(),
+    platformOptions: ESM_HEALTH_PLATFORM_OPTIONS.slice(),
+    updatedAt: Date.now(),
+  };
+}
+
+function esmHealthWorkspaceGetWorkspaceUrl() {
+  return chrome.runtime.getURL(ESM_HEALTH_WORKSPACE_PATH);
+}
+
+function esmHealthWorkspaceIsWorkspaceTab(tabLike) {
+  return String(tabLike?.url || "").startsWith(esmHealthWorkspaceGetWorkspaceUrl());
+}
+
+function esmHealthWorkspaceBindWorkspaceTab(windowId, tabId) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId > 0 && normalizedTabId > 0) {
+    state.esmHealthWorkspaceTabIdByWindowId.set(normalizedWindowId, normalizedTabId);
+  }
+  if (normalizedWindowId > 0) {
+    state.esmHealthWorkspaceWindowId = normalizedWindowId;
+  }
+  if (normalizedTabId > 0) {
+    state.esmHealthWorkspaceTabId = normalizedTabId;
+  }
+}
+
+function esmHealthWorkspaceUnbindWorkspaceTab(tabId) {
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedTabId > 0) {
+    for (const [windowId, mappedTabId] of state.esmHealthWorkspaceTabIdByWindowId.entries()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        state.esmHealthWorkspaceTabIdByWindowId.delete(windowId);
+      }
+    }
+  }
+  if (!normalizedTabId || Number(state.esmHealthWorkspaceTabId || 0) === normalizedTabId) {
+    state.esmHealthWorkspaceTabId = 0;
+    state.esmHealthWorkspaceWindowId = 0;
+  }
+}
+
+function esmHealthWorkspaceGetBoundWorkspaceTabId(windowId) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId > 0) {
+    const mapped = Number(state.esmHealthWorkspaceTabIdByWindowId.get(normalizedWindowId) || 0);
+    if (mapped > 0) {
+      return mapped;
+    }
+  }
+  return Number(state.esmHealthWorkspaceTabId || 0);
+}
+
+async function esmHealthWorkspaceSendWorkspaceMessage(event, payload = {}, options = {}) {
+  const targetWindowId = Number(options.targetWindowId || 0);
+  try {
+    const message = {
+      type: ESM_HEALTH_WORKSPACE_MESSAGE_TYPE,
+      channel: "workspace-event",
+      event: String(event || ""),
+      payload,
+    };
+    if (targetWindowId > 0) {
+      message.targetWindowId = targetWindowId;
+    }
+    await chrome.runtime.sendMessage(message);
+  } catch {
+    // Ignore when workspace listener is inactive.
+  }
+}
+
+function esmHealthWorkspaceBroadcastControllerState(programmer = null, selectionContext = null, targetWindowId = 0) {
+  const resolvedWindowId = Number(targetWindowId || 0) || Number(state.esmHealthWorkspaceWindowId || 0);
+  void esmHealthWorkspaceSendWorkspaceMessage(
+    "controller-state",
+    esmHealthWorkspaceGetSelectedControllerStatePayload(programmer, selectionContext),
+    {
+      targetWindowId: resolvedWindowId,
+    }
+  );
+}
+
+async function esmHealthWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureEsmHealthWorkspaceRuntimeListener();
+  ensureEsmHealthWorkspaceTabWatcher();
+  const shouldActivate = options.activate !== false;
+  const requestedWindowId = Number(options.windowId || 0);
+  const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
+  const useWindowFilter = targetWindowId > 0;
+  let workspaceTab = null;
+
+  const boundTabId = esmHealthWorkspaceGetBoundWorkspaceTabId(targetWindowId);
+  if (boundTabId > 0) {
+    try {
+      const existing = await chrome.tabs.get(boundTabId);
+      if (esmHealthWorkspaceIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
+        workspaceTab = existing;
+      }
+    } catch {
+      esmHealthWorkspaceUnbindWorkspaceTab(boundTabId);
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    try {
+      const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
+      workspaceTab = allTabs.find((tab) => esmHealthWorkspaceIsWorkspaceTab(tab)) || null;
+    } catch {
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    workspaceTab = await chrome.tabs.create({
+      url: esmHealthWorkspaceGetWorkspaceUrl(),
+      active: shouldActivate,
+      ...(useWindowFilter ? { windowId: targetWindowId } : {}),
+    });
+  } else if (shouldActivate && workspaceTab.id) {
+    try {
+      workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
+      if (Number(workspaceTab?.windowId || 0) > 0) {
+        await chrome.windows.update(Number(workspaceTab.windowId), { focused: true });
+      }
+    } catch {
+      // Ignore activation failures.
+    }
+  }
+
+  esmHealthWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  return workspaceTab;
+}
+
+function esmHealthWorkspaceTrimCacheMaps(limit = 40) {
+  const maxSize = Math.max(10, Number(limit || 40));
+  while (state.esmHealthWorkspaceLastReportBySelectionKey.size > maxSize) {
+    const firstKey = state.esmHealthWorkspaceLastReportBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.esmHealthWorkspaceLastReportBySelectionKey.delete(firstKey);
+  }
+  while (state.esmHealthWorkspaceLastQueryContextBySelectionKey.size > maxSize) {
+    const firstKey = state.esmHealthWorkspaceLastQueryContextBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.esmHealthWorkspaceLastQueryContextBySelectionKey.delete(firstKey);
+  }
+}
+
+function esmHealthWorkspaceStoreLatestReport(reportPayload = null) {
+  if (!reportPayload || typeof reportPayload !== "object") {
+    return "";
+  }
+  const selectionKey = firstNonEmptyString([
+    reportPayload.selectionKey,
+    buildEsmHealthWorkspaceSelectionKey(reportPayload.queryContext || null),
+  ]);
+  if (!selectionKey) {
+    return "";
+  }
+  const clonedReport = cloneJsonLikeValue(reportPayload, null);
+  if (clonedReport && typeof clonedReport === "object") {
+    state.esmHealthWorkspaceLastReportBySelectionKey.set(selectionKey, clonedReport);
+  }
+  const queryContext = cloneJsonLikeValue(reportPayload?.queryContext, null);
+  if (queryContext && typeof queryContext === "object") {
+    state.esmHealthWorkspaceLastQueryContextBySelectionKey.set(selectionKey, queryContext);
+  }
+  state.esmHealthWorkspaceLastSelectionKey = selectionKey;
+  esmHealthWorkspaceTrimCacheMaps(40);
+  return selectionKey;
+}
+
+function esmHealthWorkspaceGetLatestReport(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (normalizedSelectionKey && state.esmHealthWorkspaceLastReportBySelectionKey.has(normalizedSelectionKey)) {
+    return cloneJsonLikeValue(state.esmHealthWorkspaceLastReportBySelectionKey.get(normalizedSelectionKey), null);
+  }
+  if (normalizedSelectionKey) {
+    for (const report of state.esmHealthWorkspaceLastReportBySelectionKey.values()) {
+      const reportBaseSelectionKey = firstNonEmptyString([
+        report?.queryContext?.controllerSelectionKey,
+        buildEsmHealthWorkspaceBaseSelectionKey(report?.queryContext || null),
+      ]);
+      if (reportBaseSelectionKey && reportBaseSelectionKey === normalizedSelectionKey) {
+        return cloneJsonLikeValue(report, null);
+      }
+    }
+  }
+  const fallbackSelectionKey = String(state.esmHealthWorkspaceLastSelectionKey || "").trim();
+  if (fallbackSelectionKey && state.esmHealthWorkspaceLastReportBySelectionKey.has(fallbackSelectionKey)) {
+    return cloneJsonLikeValue(state.esmHealthWorkspaceLastReportBySelectionKey.get(fallbackSelectionKey), null);
+  }
+  for (const report of state.esmHealthWorkspaceLastReportBySelectionKey.values()) {
+    return cloneJsonLikeValue(report, null);
+  }
+  return null;
+}
+
+function esmHealthWorkspaceGetLatestQueryContext(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (normalizedSelectionKey && state.esmHealthWorkspaceLastQueryContextBySelectionKey.has(normalizedSelectionKey)) {
+    return cloneJsonLikeValue(state.esmHealthWorkspaceLastQueryContextBySelectionKey.get(normalizedSelectionKey), null);
+  }
+  if (normalizedSelectionKey) {
+    for (const queryContext of state.esmHealthWorkspaceLastQueryContextBySelectionKey.values()) {
+      const queryBaseSelectionKey = firstNonEmptyString([
+        queryContext?.controllerSelectionKey,
+        buildEsmHealthWorkspaceBaseSelectionKey(queryContext || null),
+      ]);
+      if (queryBaseSelectionKey && queryBaseSelectionKey === normalizedSelectionKey) {
+        return cloneJsonLikeValue(queryContext, null);
+      }
+    }
+  }
+  const fallbackSelectionKey = String(state.esmHealthWorkspaceLastSelectionKey || "").trim();
+  if (fallbackSelectionKey && state.esmHealthWorkspaceLastQueryContextBySelectionKey.has(fallbackSelectionKey)) {
+    return cloneJsonLikeValue(state.esmHealthWorkspaceLastQueryContextBySelectionKey.get(fallbackSelectionKey), null);
+  }
+  for (const queryContext of state.esmHealthWorkspaceLastQueryContextBySelectionKey.values()) {
+    return cloneJsonLikeValue(queryContext, null);
+  }
+  return null;
+}
+
+async function handleEsmHealthWorkspaceAction(message, sender = null) {
+  const action = String(message?.action || "").trim().toLowerCase();
+  const senderWindowId = Number(sender?.tab?.windowId || 0);
+  const senderTabId = Number(sender?.tab?.id || 0);
+  const mappedSenderTabId =
+    senderWindowId > 0 ? Number(state.esmHealthWorkspaceTabIdByWindowId.get(senderWindowId) || 0) : 0;
+  if (senderWindowId > 0 && senderTabId > 0 && mappedSenderTabId > 0 && senderTabId !== mappedSenderTabId) {
+    return { ok: false, error: "This is not the bound ESM HEALTH workspace tab for the window." };
+  }
+  if (senderWindowId > 0 && senderTabId > 0 && (!mappedSenderTabId || mappedSenderTabId <= 0)) {
+    esmHealthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+  }
+
+  if (action === "workspace-ready") {
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = esmHealthWorkspaceGetSelectionContext(selectedProgrammer);
+    if (senderWindowId > 0) {
+      esmHealthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+    }
+    esmHealthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
+    const latestReport = esmHealthWorkspaceGetLatestReport(selectionContext.controllerSelectionKey);
+    if (latestReport) {
+      void esmHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId: senderWindowId });
+    }
+    return { ok: true };
+  }
+
+  if (action === "open-workspace") {
+    const workspaceTab = await esmHealthWorkspaceEnsureWorkspaceTab({
+      activate: true,
+      windowId: senderWindowId || undefined,
+    });
+    const targetWindowId = Number(workspaceTab?.windowId || senderWindowId || state.esmHealthWorkspaceWindowId || 0);
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = esmHealthWorkspaceGetSelectionContext(selectedProgrammer);
+    esmHealthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, targetWindowId);
+    const latestReport = esmHealthWorkspaceGetLatestReport(selectionContext.controllerSelectionKey);
+    if (latestReport) {
+      void esmHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId });
+    }
+    return { ok: true };
+  }
+
+  if (action === "run-dashboard") {
+    const queryContext = buildEsmHealthDashboardQueryContext({
+      ...(message?.queryContext && typeof message.queryContext === "object" ? message.queryContext : {}),
+      requestSource: "esm-health-workspace-run",
+    });
+    const result = await runEsmHealthDashboardForSelection(queryContext, {
+      openWorkspace: true,
+      activateWorkspace: false,
+      targetWindowId: senderWindowId,
+    });
+    return result?.ok || result?.partial
+      ? { ok: true }
+      : { ok: false, error: String(result?.error || "Unable to load ESM HEALTH dashboard.").trim() };
+  }
+
+  if (action === "refresh-latest") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const queryContext = esmHealthWorkspaceGetLatestQueryContext(selectionKey);
+    if (!queryContext || typeof queryContext !== "object") {
+      return { ok: false, error: "No previous ESM HEALTH query context is available to refresh." };
+    }
+    const refreshed = await runEsmHealthDashboardForSelection(queryContext, {
+      openWorkspace: true,
+      activateWorkspace: false,
+      targetWindowId: senderWindowId,
+    });
+    return refreshed?.ok || refreshed?.partial
+      ? { ok: true }
+      : { ok: false, error: String(refreshed?.error || "Unable to refresh ESM HEALTH dashboard.").trim() };
+  }
+
+  if (action === "clear-all") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    if (selectionKey) {
+      state.esmHealthWorkspaceLastReportBySelectionKey.delete(selectionKey);
+      state.esmHealthWorkspaceLastQueryContextBySelectionKey.delete(selectionKey);
+      if (state.esmHealthWorkspaceLastSelectionKey === selectionKey) {
+        state.esmHealthWorkspaceLastSelectionKey = "";
+      }
+    } else {
+      state.esmHealthWorkspaceLastReportBySelectionKey.clear();
+      state.esmHealthWorkspaceLastQueryContextBySelectionKey.clear();
+      state.esmHealthWorkspaceLastSelectionKey = "";
+    }
+    const targetWindowId = Number(senderWindowId || state.esmHealthWorkspaceWindowId || 0);
+    void esmHealthWorkspaceSendWorkspaceMessage("workspace-clear", {}, { targetWindowId });
+    return { ok: true };
+  }
+
+  return { ok: false, error: `Unsupported ESM HEALTH workspace action: ${action}` };
+}
+
+function ensureEsmHealthWorkspaceRuntimeListener() {
+  if (state.esmHealthWorkspaceRuntimeListenerBound) {
+    return;
+  }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!ESM_HEALTH_WORKSPACE_MESSAGE_TYPES.has(String(message?.type || "")) || message?.channel !== "workspace-action") {
+      return false;
+    }
+    void handleEsmHealthWorkspaceAction(message, sender)
+      .then((result) => {
+        sendResponse(result && typeof result === "object" ? result : { ok: true });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+    return true;
+  });
+  state.esmHealthWorkspaceRuntimeListenerBound = true;
+}
+
+function ensureEsmHealthWorkspaceTabWatcher() {
+  if (state.esmHealthWorkspaceTabWatcherBound) {
+    return;
+  }
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    esmHealthWorkspaceUnbindWorkspaceTab(tabId);
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    const normalizedTabId = Number(tabId || 0);
+    if (!normalizedTabId || !changeInfo?.url) {
+      return;
+    }
+    if (esmHealthWorkspaceIsWorkspaceTab(tab)) {
+      esmHealthWorkspaceBindWorkspaceTab(tab?.windowId, normalizedTabId);
+      return;
+    }
+    const boundTabId = Number(state.esmHealthWorkspaceTabId || 0);
+    let isMappedTab = false;
+    for (const mappedTabId of state.esmHealthWorkspaceTabIdByWindowId.values()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        isMappedTab = true;
+        break;
+      }
+    }
+    if (isMappedTab || normalizedTabId === boundTabId) {
+      esmHealthWorkspaceUnbindWorkspaceTab(normalizedTabId);
+    }
+  });
+  state.esmHealthWorkspaceTabWatcherBound = true;
+}
+
+function buildHealthWorkspaceSelectionKey(context = null) {
+  const programmerId = String(context?.programmerId || "").trim();
+  const requestorId = String(context?.requestorId || "").trim();
+  if (!programmerId || !requestorId) {
+    return "";
+  }
+  return [programmerId, requestorId].join("|");
+}
+
+function healthWorkspaceGetSelectionContext(programmer = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const environment = getActiveAdobePassEnvironment();
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const programmerName = String(resolvedProgrammer?.programmerName || "").trim();
+  const requestorId = String(state.selectedRequestorId || "").trim();
+  const environmentKey = String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const environmentLabel = firstNonEmptyString([
+    environment?.label,
+    environment?.shortCode,
+    environmentKey,
+  ]);
+  const environmentIndex = getSplunkSearchIndexForEnvironment(environment);
+  const selectionContext = {
+    programmerId,
+    programmerName,
+    requestorId,
+    environmentKey,
+    environmentLabel,
+    environmentIndex,
+  };
+  selectionContext.selectionKey = buildHealthWorkspaceSelectionKey(selectionContext);
+  return selectionContext;
+}
+
+function healthWorkspaceGetSelectedControllerStatePayload(programmer = null, selectionContext = null) {
+  const context =
+    selectionContext && typeof selectionContext === "object"
+      ? selectionContext
+      : healthWorkspaceGetSelectionContext(programmer);
+  return {
+    controllerOnline: true,
+    healthReady: Boolean(context?.programmerId && context?.requestorId),
+    programmerId: String(context?.programmerId || "").trim(),
+    programmerName: String(context?.programmerName || "").trim(),
+    requestorId: String(context?.requestorId || "").trim(),
+    environmentKey: String(context?.environmentKey || "").trim(),
+    environmentLabel: String(context?.environmentLabel || "").trim(),
+    environmentIndex: String(context?.environmentIndex || "").trim(),
+    selectionKey: String(context?.selectionKey || "").trim(),
+    updatedAt: Date.now(),
+  };
+}
+
+function healthWorkspaceGetWorkspaceUrl() {
+  return chrome.runtime.getURL(HEALTH_WORKSPACE_PATH);
+}
+
+function healthWorkspaceIsWorkspaceTab(tabLike) {
+  return String(tabLike?.url || "").startsWith(healthWorkspaceGetWorkspaceUrl());
+}
+
+function healthWorkspaceBindWorkspaceTab(windowId, tabId) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId > 0 && normalizedTabId > 0) {
+    state.healthWorkspaceTabIdByWindowId.set(normalizedWindowId, normalizedTabId);
+  }
+  if (normalizedWindowId > 0) {
+    state.healthWorkspaceWindowId = normalizedWindowId;
+  }
+  if (normalizedTabId > 0) {
+    state.healthWorkspaceTabId = normalizedTabId;
+  }
+}
+
+function healthWorkspaceUnbindWorkspaceTab(tabId) {
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedTabId > 0) {
+    for (const [windowId, mappedTabId] of state.healthWorkspaceTabIdByWindowId.entries()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        state.healthWorkspaceTabIdByWindowId.delete(windowId);
+      }
+    }
+  }
+  if (!normalizedTabId || Number(state.healthWorkspaceTabId || 0) === normalizedTabId) {
+    state.healthWorkspaceTabId = 0;
+    state.healthWorkspaceWindowId = 0;
+  }
+}
+
+function healthWorkspaceGetBoundWorkspaceTabId(windowId) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId > 0) {
+    const mapped = Number(state.healthWorkspaceTabIdByWindowId.get(normalizedWindowId) || 0);
+    if (mapped > 0) {
+      return mapped;
+    }
+  }
+  return Number(state.healthWorkspaceTabId || 0);
+}
+
+async function healthWorkspaceSendWorkspaceMessage(event, payload = {}, options = {}) {
+  const targetWindowId = Number(options.targetWindowId || 0);
+  try {
+    const message = {
+      type: HEALTH_WORKSPACE_MESSAGE_TYPE,
+      channel: "workspace-event",
+      event: String(event || ""),
+      payload,
+    };
+    if (targetWindowId > 0) {
+      message.targetWindowId = targetWindowId;
+    }
+    await chrome.runtime.sendMessage(message);
+  } catch {
+    // Ignore when workspace listener is inactive.
+  }
+}
+
+function healthWorkspaceBroadcastControllerState(programmer = null, selectionContext = null, targetWindowId = 0) {
+  const resolvedWindowId = Number(targetWindowId || 0) || Number(state.healthWorkspaceWindowId || 0);
+  void healthWorkspaceSendWorkspaceMessage(
+    "controller-state",
+    healthWorkspaceGetSelectedControllerStatePayload(programmer, selectionContext),
+    {
+      targetWindowId: resolvedWindowId,
+    }
+  );
+}
+
+async function healthWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureHealthWorkspaceRuntimeListener();
+  ensureHealthWorkspaceTabWatcher();
+  const shouldActivate = options.activate !== false;
+  const requestedWindowId = Number(options.windowId || 0);
+  const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
+  const useWindowFilter = targetWindowId > 0;
+  let workspaceTab = null;
+
+  const boundTabId = healthWorkspaceGetBoundWorkspaceTabId(targetWindowId);
+  if (boundTabId > 0) {
+    try {
+      const existing = await chrome.tabs.get(boundTabId);
+      if (healthWorkspaceIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
+        workspaceTab = existing;
+      }
+    } catch {
+      healthWorkspaceUnbindWorkspaceTab(boundTabId);
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    try {
+      const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
+      workspaceTab = allTabs.find((tab) => healthWorkspaceIsWorkspaceTab(tab)) || null;
+    } catch {
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    workspaceTab = await chrome.tabs.create({
+      url: healthWorkspaceGetWorkspaceUrl(),
+      active: shouldActivate,
+      ...(useWindowFilter ? { windowId: targetWindowId } : {}),
+    });
+  } else if (shouldActivate && workspaceTab.id) {
+    try {
+      workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
+      if (Number(workspaceTab?.windowId || 0) > 0) {
+        await chrome.windows.update(Number(workspaceTab.windowId), { focused: true });
+      }
+    } catch {
+      // Ignore activation failures.
+    }
+  }
+
+  healthWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  return workspaceTab;
+}
+
+function healthWorkspaceTrimCacheMaps(limit = 40) {
+  const maxSize = Math.max(10, Number(limit || 40));
+  while (state.healthWorkspaceLastReportBySelectionKey.size > maxSize) {
+    const firstKey = state.healthWorkspaceLastReportBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.healthWorkspaceLastReportBySelectionKey.delete(firstKey);
+  }
+  while (state.healthWorkspaceLastQueryContextBySelectionKey.size > maxSize) {
+    const firstKey = state.healthWorkspaceLastQueryContextBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.healthWorkspaceLastQueryContextBySelectionKey.delete(firstKey);
+  }
+}
+
+function healthWorkspaceStoreLatestReport(reportPayload = null) {
+  if (!reportPayload || typeof reportPayload !== "object") {
+    return "";
+  }
+  const selectionKey = firstNonEmptyString([
+    reportPayload.selectionKey,
+    buildHealthWorkspaceSelectionKey(reportPayload.queryContext || null),
+  ]);
+  if (!selectionKey) {
+    return "";
+  }
+  const clonedReport = cloneJsonLikeValue(reportPayload, null);
+  if (clonedReport && typeof clonedReport === "object") {
+    state.healthWorkspaceLastReportBySelectionKey.set(selectionKey, clonedReport);
+  }
+  const queryContext = cloneJsonLikeValue(reportPayload?.queryContext, null);
+  if (queryContext && typeof queryContext === "object") {
+    state.healthWorkspaceLastQueryContextBySelectionKey.set(selectionKey, queryContext);
+  }
+  state.healthWorkspaceLastSelectionKey = selectionKey;
+  healthWorkspaceTrimCacheMaps(40);
+  return selectionKey;
+}
+
+function healthWorkspaceGetLatestReport(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (normalizedSelectionKey && state.healthWorkspaceLastReportBySelectionKey.has(normalizedSelectionKey)) {
+    return cloneJsonLikeValue(state.healthWorkspaceLastReportBySelectionKey.get(normalizedSelectionKey), null);
+  }
+  const fallbackSelectionKey = String(state.healthWorkspaceLastSelectionKey || "").trim();
+  if (fallbackSelectionKey && state.healthWorkspaceLastReportBySelectionKey.has(fallbackSelectionKey)) {
+    return cloneJsonLikeValue(state.healthWorkspaceLastReportBySelectionKey.get(fallbackSelectionKey), null);
+  }
+  for (const report of state.healthWorkspaceLastReportBySelectionKey.values()) {
+    return cloneJsonLikeValue(report, null);
+  }
+  return null;
+}
+
+function healthWorkspaceGetLatestQueryContext(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (normalizedSelectionKey && state.healthWorkspaceLastQueryContextBySelectionKey.has(normalizedSelectionKey)) {
+    return cloneJsonLikeValue(state.healthWorkspaceLastQueryContextBySelectionKey.get(normalizedSelectionKey), null);
+  }
+  const fallbackSelectionKey = String(state.healthWorkspaceLastSelectionKey || "").trim();
+  if (fallbackSelectionKey && state.healthWorkspaceLastQueryContextBySelectionKey.has(fallbackSelectionKey)) {
+    return cloneJsonLikeValue(state.healthWorkspaceLastQueryContextBySelectionKey.get(fallbackSelectionKey), null);
+  }
+  for (const queryContext of state.healthWorkspaceLastQueryContextBySelectionKey.values()) {
+    return cloneJsonLikeValue(queryContext, null);
+  }
+  return null;
+}
+
+async function handleHealthWorkspaceAction(message, sender = null) {
+  const action = String(message?.action || "").trim().toLowerCase();
+  const senderWindowId = Number(sender?.tab?.windowId || 0);
+  const senderTabId = Number(sender?.tab?.id || 0);
+  const mappedSenderTabId = senderWindowId > 0 ? Number(state.healthWorkspaceTabIdByWindowId.get(senderWindowId) || 0) : 0;
+  if (senderWindowId > 0 && senderTabId > 0 && mappedSenderTabId > 0 && senderTabId !== mappedSenderTabId) {
+    return { ok: false, error: "This is not the bound HEALTH workspace tab for the window." };
+  }
+  if (senderWindowId > 0 && senderTabId > 0 && (!mappedSenderTabId || mappedSenderTabId <= 0)) {
+    healthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+  }
+
+  if (action === "workspace-ready") {
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = healthWorkspaceGetSelectionContext(selectedProgrammer);
+    if (senderWindowId > 0) {
+      healthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+    }
+    healthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
+    const latestReport = healthWorkspaceGetLatestReport(selectionContext.selectionKey);
+    if (latestReport) {
+      void healthWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId: senderWindowId });
+    }
+    return { ok: true };
+  }
+
+  if (action === "open-workspace") {
+    const workspaceTab = await healthWorkspaceEnsureWorkspaceTab({
+      activate: true,
+      windowId: senderWindowId || undefined,
+    });
+    const targetWindowId = Number(workspaceTab?.windowId || senderWindowId || state.healthWorkspaceWindowId || 0);
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = healthWorkspaceGetSelectionContext(selectedProgrammer);
+    healthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, targetWindowId);
+    const latestReport = healthWorkspaceGetLatestReport(selectionContext.selectionKey);
+    if (latestReport) {
+      void healthWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId });
+    }
+    return { ok: true };
+  }
+
+  if (action === "refresh-latest") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const queryContext = healthWorkspaceGetLatestQueryContext(selectionKey);
+    if (!queryContext || typeof queryContext !== "object") {
+      return { ok: false, error: "No previous HEALTH Splunk query context is available to refresh." };
+    }
+    const refreshed = await runHealthSplunkDashboardForSelection(queryContext, {
+      openWorkspace: true,
+      activateWorkspace: true,
+      targetWindowId: senderWindowId,
+      requestSource: "health-workspace-refresh",
+      forceLoginOnAuthFailure: true,
+    });
+    return refreshed?.ok || refreshed?.partial ? { ok: true } : { ok: false, error: refreshed?.error || "Unable to refresh HEALTH Splunk results." };
+  }
+
+  if (action === "clear-all") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    if (selectionKey) {
+      state.healthWorkspaceLastReportBySelectionKey.delete(selectionKey);
+      state.healthWorkspaceLastQueryContextBySelectionKey.delete(selectionKey);
+      if (state.healthWorkspaceLastSelectionKey === selectionKey) {
+        state.healthWorkspaceLastSelectionKey = "";
+      }
+    } else {
+      state.healthWorkspaceLastReportBySelectionKey.clear();
+      state.healthWorkspaceLastQueryContextBySelectionKey.clear();
+      state.healthWorkspaceLastSelectionKey = "";
+    }
+    const targetWindowId = Number(senderWindowId || state.healthWorkspaceWindowId || 0);
+    void healthWorkspaceSendWorkspaceMessage("workspace-clear", {}, { targetWindowId });
+    return { ok: true };
+  }
+
+  return { ok: false, error: `Unsupported HEALTH workspace action: ${action}` };
+}
+
+function ensureHealthWorkspaceRuntimeListener() {
+  if (state.healthWorkspaceRuntimeListenerBound) {
+    return;
+  }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!HEALTH_WORKSPACE_MESSAGE_TYPES.has(String(message?.type || "")) || message?.channel !== "workspace-action") {
+      return false;
+    }
+    void handleHealthWorkspaceAction(message, sender)
+      .then((result) => {
+        sendResponse(result && typeof result === "object" ? result : { ok: true });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+    return true;
+  });
+  state.healthWorkspaceRuntimeListenerBound = true;
+}
+
+function ensureHealthWorkspaceTabWatcher() {
+  if (state.healthWorkspaceTabWatcherBound) {
+    return;
+  }
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    healthWorkspaceUnbindWorkspaceTab(tabId);
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    const normalizedTabId = Number(tabId || 0);
+    if (!normalizedTabId || !changeInfo?.url) {
+      return;
+    }
+    if (healthWorkspaceIsWorkspaceTab(tab)) {
+      healthWorkspaceBindWorkspaceTab(tab?.windowId, normalizedTabId);
+      return;
+    }
+    const boundTabId = Number(state.healthWorkspaceTabId || 0);
+    let isMappedTab = false;
+    for (const mappedTabId of state.healthWorkspaceTabIdByWindowId.values()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        isMappedTab = true;
+        break;
+      }
+    }
+    if (isMappedTab || normalizedTabId === boundTabId) {
+      healthWorkspaceUnbindWorkspaceTab(normalizedTabId);
+    }
+  });
+  state.healthWorkspaceTabWatcherBound = true;
+}
+
 function buildTempPassWorkspaceSelectionKey(context = null) {
   const environmentKey = firstNonEmptyString([
     context?.environmentKey,
@@ -53019,6 +55657,17 @@ function wireHrContextSectionActions(section) {
       return;
     }
 
+    const healthActionButton = target.closest("[data-health-action]");
+    if (healthActionButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      void handleHrContextHealthAction(
+        String(healthActionButton.getAttribute("data-health-action") || ""),
+        resolveSelectedProgrammer()
+      );
+      return;
+    }
+
     const serviceDocButton = target.closest("[data-service-doc-key][data-service-doc-url]");
     if (!serviceDocButton) {
       return;
@@ -54600,11 +57249,134 @@ function wireRestV2InteractiveDocsSectionCollapsibles(section, programmer = null
   });
 }
 
+function buildHrContextHealthStatusItemHtml(programmer = null) {
+  const context = getHrContextSummary(programmer);
+  const selectionContext = healthWorkspaceGetSelectionContext(programmer);
+  const healthReady = Boolean(selectionContext?.programmerId && selectionContext?.requestorId);
+  const headline = healthReady
+    ? `Run ESM HEALTH or HEALTH SPLUNK for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
+    : context.hasProgrammerContext
+      ? "Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
+      : "Select a Media Company and RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH.";
+  const metaTokens = [
+    selectionContext?.requestorId ? `RequestorId ${selectionContext.requestorId}` : "RequestorId not selected",
+    selectionContext?.environmentLabel ? `Env ${selectionContext.environmentLabel}` : "",
+  ].filter(Boolean);
+
+  return `
+    <article class="metadata-item hr-health-status-value">
+      <p class="metadata-key">Status</p>
+      <div class="metadata-value hr-health-status-body">
+        <p class="hr-health-status-copy">${escapeHtml(headline)}</p>
+        <p class="hr-health-status-meta">${escapeHtml(metaTokens.join(" · "))}</p>
+        <div class="hr-health-action-row">
+          <button
+            type="button"
+            class="hr-health-action-btn hr-health-action-btn--secondary"
+            data-health-action="esm"
+            title="Open ESM HEALTH dashboard"
+            aria-label="Open ESM HEALTH dashboard"
+          >
+            ESM
+          </button>
+          <button
+            type="button"
+            class="hr-health-action-btn hr-health-action-btn--accent"
+            data-health-action="splunk"
+            title="${escapeHtml(
+              healthReady
+                ? `Open HEALTH Splunk workspace for ${selectionContext.requestorId}`
+                : "Select a RequestorId to unlock HEALTH SPLUNK"
+            )}"
+            aria-label="${escapeHtml(
+              healthReady
+                ? `Open HEALTH Splunk workspace for ${selectionContext.requestorId}`
+                : "Select a RequestorId to unlock HEALTH SPLUNK"
+            )}"
+            ${healthReady ? "" : "disabled"}
+          >
+            SPLUNK
+          </button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+async function handleHrContextHealthAction(action = "", programmer = null) {
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  if (!normalizedAction) {
+    return;
+  }
+
+  if (normalizedAction === "esm") {
+    const queryContext = buildEsmHealthDashboardQueryContext({
+      programmerId: String(programmer?.programmerId || "").trim(),
+      programmerName: String(programmer?.programmerName || programmer?.mediaCompanyName || "").trim(),
+      requestSource: "hr-health-esm",
+    });
+    if (!queryContext.programmerId) {
+      setStatus("Select a Media Company before running ESM HEALTH.", "error");
+      return;
+    }
+    setStatus(`Loading ESM HEALTH for ${buildEsmHealthStatusMessage(queryContext)}...`);
+    const report = await runEsmHealthDashboardForSelection(queryContext, {
+      openWorkspace: true,
+      activateWorkspace: true,
+      requestSource: "hr-health-esm",
+    });
+    if (report?.ok === true) {
+      setStatus(`Loaded ESM HEALTH dashboard (${Number(report?.loadedSections || 0)}/${Number(report?.totalSections || 0)} sections).`, "success");
+      return;
+    }
+    if (report?.partial === true) {
+      setStatus(`Loaded ESM HEALTH dashboard with partial data (${Number(report?.loadedSections || 0)}/${Number(report?.totalSections || 0)} sections).`, "success");
+      return;
+    }
+    setStatus(String(report?.error || "Unable to load ESM HEALTH dashboard."), "error");
+    return;
+  }
+
+  if (normalizedAction !== "splunk") {
+    return;
+  }
+
+  const queryContext = buildHealthSplunkQueryContext({
+    programmerId: String(programmer?.programmerId || "").trim(),
+    programmerName: String(programmer?.programmerName || "").trim(),
+    requestSource: "hr-health-splunk",
+  });
+  if (!queryContext.programmerId || !queryContext.requestorId) {
+    setStatus("Select a Media Company and RequestorId before running HEALTH Splunk.", "error");
+    return;
+  }
+
+  setStatus(`Running HEALTH Splunk for ${buildHealthSplunkStatusMessage(queryContext)}...`);
+  const report = await runHealthSplunkDashboardForSelection(queryContext, {
+    openWorkspace: true,
+    activateWorkspace: true,
+    requestSource: "hr-health-splunk",
+    forceLoginOnAuthFailure: true,
+  });
+  if (report?.ok === true) {
+    setStatus(`Loaded ${Number(report?.successCount || 0)} HEALTH Splunk tables.`, "success");
+    return;
+  }
+  if (report?.partial === true) {
+    const loadedCount = Number(report?.successCount || 0);
+    const totalCount = Number(report?.totalTables || 0);
+    const fallbackNote = report?.fallbackUsed ? " Using fallback dashboard definitions." : "";
+    setStatus(`Loaded ${loadedCount}/${totalCount} HEALTH Splunk tables.${fallbackNote}`, "success");
+    return;
+  }
+  setStatus(String(report?.error || "Unable to load HEALTH Splunk tables."), "error");
+}
+
 function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services = null, options = {}) {
   const context = getHrContextSummary(programmer);
   const contextItemHtml = buildMetadataItemHtml("Context", context.compositeLabel);
   if (sectionKey === "health") {
-    return `${contextItemHtml}${buildMetadataItemHtml("Status", "TODO: pull ESM, CMU? Health, Splunk info soon...")}`;
+    return `${contextItemHtml}${buildHrContextHealthStatusItemHtml(programmer)}`;
   }
 
   const detectedServiceEntries = getDetectedPremiumServiceEntries(services);
@@ -55359,6 +58131,8 @@ function renderHrSections(services, programmer = null, options = {}) {
 
 function renderPremiumServices(services, programmer = null, options = {}) {
   renderHrSections(services, programmer);
+  esmHealthWorkspaceBroadcastControllerState(programmer);
+  healthWorkspaceBroadcastControllerState(programmer);
   if (!els.premiumServicesContainer) {
     return;
   }
@@ -55519,6 +58293,18 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.restWorkspaceLastSelectionKey = "";
   state.restWorkspaceLastReportBySelectionKey.clear();
   state.restWorkspaceLastQueryContextBySelectionKey.clear();
+  state.esmHealthWorkspaceTabId = 0;
+  state.esmHealthWorkspaceWindowId = 0;
+  state.esmHealthWorkspaceTabIdByWindowId.clear();
+  state.esmHealthWorkspaceLastSelectionKey = "";
+  state.esmHealthWorkspaceLastReportBySelectionKey.clear();
+  state.esmHealthWorkspaceLastQueryContextBySelectionKey.clear();
+  state.healthWorkspaceTabId = 0;
+  state.healthWorkspaceWindowId = 0;
+  state.healthWorkspaceTabIdByWindowId.clear();
+  state.healthWorkspaceLastSelectionKey = "";
+  state.healthWorkspaceLastReportBySelectionKey.clear();
+  state.healthWorkspaceLastQueryContextBySelectionKey.clear();
   state.tempPassWorkspaceTabId = 0;
   state.tempPassWorkspaceWindowId = 0;
   state.tempPassWorkspaceTabIdByWindowId.clear();
@@ -55667,6 +58453,39 @@ function resetWorkflowForLoggedOut(options = {}) {
     updatedAt: Date.now(),
   });
   void restWorkspaceSendWorkspaceMessage("workspace-clear", {});
+  void esmHealthWorkspaceSendWorkspaceMessage("controller-state", {
+    controllerOnline: false,
+    esmHealthReady: false,
+    programmerId: "",
+    programmerName: "",
+    mediaCompany: "",
+    requestorIds: [],
+    mvpdIds: [],
+    platforms: [],
+    environmentKey: "",
+    environmentLabel: "",
+    selectionKey: "",
+    defaultStart: "",
+    defaultEnd: "",
+    defaultGranularity: ESM_HEALTH_DEFAULT_GRANULARITY,
+    timezoneLabel: "PST effective",
+    platformOptions: ESM_HEALTH_PLATFORM_OPTIONS.slice(),
+    updatedAt: Date.now(),
+  });
+  void esmHealthWorkspaceSendWorkspaceMessage("workspace-clear", {});
+  void healthWorkspaceSendWorkspaceMessage("controller-state", {
+    controllerOnline: false,
+    healthReady: false,
+    programmerId: "",
+    programmerName: "",
+    requestorId: "",
+    environmentKey: "",
+    environmentLabel: "",
+    environmentIndex: "",
+    selectionKey: "",
+    updatedAt: Date.now(),
+  });
+  void healthWorkspaceSendWorkspaceMessage("workspace-clear", {});
   void tempPassWorkspaceSendWorkspaceMessage("controller-state", {
     controllerOnline: false,
     tempPassReady: false,

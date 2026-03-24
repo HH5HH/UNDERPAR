@@ -31,6 +31,8 @@ const UNDERPAR_BLONDIE_TIME_DEEPLINK_BRIDGE_PATH = "blondie-time-deeplink-bridge
 const UNDERPAR_TEMP_PASS_WORKSPACE_PATH = "temp-pass-workspace.html";
 const UNDERPAR_DEGRADATION_WORKSPACE_PATH = "degradation-workspace.html";
 const UNDERPAR_CM_WORKSPACE_PATH = "cm-workspace.html";
+const UNDERPAR_ESM_HEALTH_WORKSPACE_PATH = "esm-health-workspace.html";
+const UNDERPAR_HEALTH_WORKSPACE_PATH = "health-workspace.html";
 const AVATAR_SIZE_PREFERENCES = [128, 64, 256, 32];
 const AUTH_DEBUGGER_PROTOCOL_VERSION = "1.3";
 const DEBUG_TRACE_EVENT_LIMIT = 15000;
@@ -95,6 +97,8 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   "cm-workspace.html",
   "mvpd-workspace.html",
   "rest-workspace.html",
+  "esm-health-workspace.html",
+  "health-workspace.html",
   "temp-pass-workspace.html",
   "degradation-workspace.html",
   "bobtools-workspace.html",
@@ -139,6 +143,12 @@ const BUILD_FINGERPRINT_FILES = [
   "rest-workspace.html",
   "rest-workspace.css",
   "rest-workspace.js",
+  "esm-health-workspace.html",
+  "esm-health-workspace.css",
+  "esm-health-workspace.js",
+  "health-workspace.html",
+  "health-workspace.css",
+  "health-workspace.js",
   "temp-pass-workspace.html",
   "temp-pass-workspace.css",
   "temp-pass-workspace.js",
@@ -2302,41 +2312,21 @@ function resolveLatestUnderparPackageState(
   currentVersion = "",
   remoteLatestVersion = "",
   remoteLatestCommitSha = "",
-  localPackageVersion = "",
-  options = {}
+  localPackageVersion = ""
 ) {
   const normalizedCurrent = String(currentVersion || "").trim();
   const normalizedRemote = String(remoteLatestVersion || "").trim();
   const normalizedLocal = String(localPackageVersion || "").trim();
-  const allowCurrentAsLocalFallback = options?.allowCurrentAsLocalFallback === true;
-  const localCandidateVersion = normalizedLocal || (allowCurrentAsLocalFallback ? normalizedCurrent : "");
-  const localCandidateIsCurrentOrNewer =
-    Boolean(localCandidateVersion) && (!normalizedCurrent || compareVersions(localCandidateVersion, normalizedCurrent) >= 0);
-  const preferLocalPackage =
-    localCandidateIsCurrentOrNewer && (!normalizedRemote || compareVersions(localCandidateVersion, normalizedRemote) > 0);
-  const latestVersion = preferLocalPackage ? localCandidateVersion : normalizedRemote;
-  const latestSource = preferLocalPackage ? "local-runtime" : normalizedRemote ? "github-remote" : "";
+  const latestVersion = normalizedRemote;
+  const latestSource = normalizedRemote ? "github-remote" : "";
   return {
     latestVersion,
     latestCommitSha: latestSource === "github-remote" ? normalizeCommitSha(remoteLatestCommitSha) : "",
     latestSource,
     localPackageVersion: normalizedLocal,
-    preferLocalPackage,
+    preferLocalPackage: false,
     updateAvailable: Boolean(latestVersion) && compareVersions(normalizedCurrent, latestVersion) < 0,
   };
-}
-
-function shouldPreferLocalUnderparPackage(currentVersion = "", latestVersion = "", localPackageVersion = "") {
-  const normalizedCurrent = String(currentVersion || "").trim();
-  const normalizedLatest = String(latestVersion || "").trim();
-  const normalizedLocal = String(localPackageVersion || "").trim();
-  if (normalizedLocal) {
-    if (normalizedCurrent && compareVersions(normalizedLocal, normalizedCurrent) < 0) {
-      return false;
-    }
-    return !normalizedLatest || compareVersions(normalizedLocal, normalizedLatest) > 0;
-  }
-  return false;
 }
 
 function sanitizeLatestPackageFileSegment(value = "", fallback = "latest") {
@@ -2447,9 +2437,7 @@ async function refreshUpdateState(options = {}) {
       updateState.updateAvailable = resolvedState.updateAvailable === true;
       updateState.checkError = "";
     } catch (error) {
-      const resolvedState = resolveLatestUnderparPackageState(currentVersion, "", "", localPackageVersion, {
-        allowCurrentAsLocalFallback: true,
-      });
+      const resolvedState = resolveLatestUnderparPackageState(currentVersion, "", "", localPackageVersion);
       updateState.latestVersion = resolvedState.latestVersion;
       updateState.latestCommitSha = resolvedState.latestCommitSha;
       updateState.latestSource = resolvedState.latestSource;
@@ -2479,26 +2467,10 @@ async function openUnderparGetLatestFlow() {
   const currentVersion = getUnderparBuildVersion();
   const latestVersion = String(updateState.latestVersion || "").trim();
   const latestCommitSha = String(updateState.latestCommitSha || "").trim();
-  const latestSource = String(updateState.latestSource || "").trim();
   const localPackageVersion = String(updateState.localPackageVersion || "").trim();
-  const effectiveLocalPackageVersion =
-    localPackageVersion || (latestSource === "local-runtime" ? String(latestVersion || currentVersion || "").trim() : "");
   const currentVsLatest = latestVersion ? compareVersions(currentVersion, latestVersion) : 0;
-  const currentVsLocal = effectiveLocalPackageVersion ? compareVersions(currentVersion, effectiveLocalPackageVersion) : 0;
-  const preferLocalPackage =
-    latestSource === "local-runtime" && Boolean(effectiveLocalPackageVersion) && currentVsLocal <= 0;
-  const hasKnownRemoteUpdate = Boolean(latestVersion) && currentVsLatest < 0;
-  const noNewerPublishedPackage =
-    Boolean(latestVersion) &&
-    currentVsLatest > 0 &&
-    (!effectiveLocalPackageVersion || currentVsLocal > 0);
-  const localDownloadVersion = String(effectiveLocalPackageVersion || currentVersion || latestVersion || "").trim();
-  const downloadUrl = preferLocalPackage
-    ? buildLocalUnderparPackageUrl()
-    : buildLatestUnderparPackageUrl(latestCommitSha);
-  const downloadFileName = preferLocalPackage
-    ? buildLatestUnderparPackageFileName(localDownloadVersion, "")
-    : buildLatestUnderparPackageFileName(latestVersion, latestCommitSha);
+  const downloadUrl = buildLatestUnderparPackageUrl(latestCommitSha);
+  const downloadFileName = buildLatestUnderparPackageFileName(latestVersion, latestCommitSha);
   const result = {
     ok: false,
     downloadUrl,
@@ -2506,28 +2478,21 @@ async function openUnderparGetLatestFlow() {
     currentVersion,
     latestVersion,
     latestCommitSha,
-    latestSource: preferLocalPackage ? "local-runtime" : latestSource || "github-remote",
+    latestSource: "github-remote",
     localPackageVersion,
     updateAvailable: updateState.updateAvailable === true,
     checkError: updateState.checkError || "",
-    downloadSource: preferLocalPackage ? "local-runtime" : "github-remote",
+    downloadSource: "github-remote",
     downloadId: 0,
     downloadStarted: false,
     downloadTabOpened: false,
     extensionsOpened: false,
     downloadError: "",
     downloadTabError: "",
-    noNewerPackage: false,
     infoMessage: "",
   };
-  if (noNewerPublishedPackage) {
-    result.ok = true;
-    result.noNewerPackage = true;
-    result.infoMessage = `Loaded UnderPAR v${currentVersion || "current"} is newer than published GitHub latest v${latestVersion || "remote"}.`;
-    return result;
-  }
   try {
-    if (!downloadUrl) {
+    if (!downloadUrl || !latestVersion) {
       throw new Error("No UnderPAR package URL available");
     }
     const createdDownloadId = await startLatestPackageDownload({
@@ -2539,47 +2504,14 @@ async function openUnderparGetLatestFlow() {
     result.downloadId = Number(createdDownloadId || 0);
     result.downloadStarted = true;
   } catch (error) {
-    result.downloadError = buildUpdateLookupError(
-      preferLocalPackage ? "Local runtime package download" : "Remote UnderPAR package download",
-      downloadUrl,
-      error
-    ).message;
-    if (!preferLocalPackage && localDownloadVersion) {
-      const bundledDownloadUrl = buildLocalUnderparPackageUrl();
-      if (bundledDownloadUrl) {
-        try {
-          const createdDownloadId = await startLatestPackageDownload({
-            url: bundledDownloadUrl,
-            filename: buildLatestUnderparPackageFileName(localDownloadVersion, ""),
-            conflictAction: "uniquify",
-            saveAs: false,
-          });
-          result.downloadId = Number(createdDownloadId || 0);
-          result.downloadUrl = bundledDownloadUrl;
-          result.downloadFileName = buildLatestUnderparPackageFileName(localDownloadVersion, "");
-          result.downloadStarted = true;
-          result.downloadSource = "local-runtime";
-          result.infoMessage = `GitHub package download failed. Downloaded bundled UnderPAR package v${localDownloadVersion} from the current runtime instead.`;
-        } catch (bundledError) {
-          result.downloadTabError = buildUpdateLookupError(
-            "Local runtime package fallback download",
-            bundledDownloadUrl,
-            bundledError
-          ).message;
-        }
-      }
-    }
+    result.downloadError = buildUpdateLookupError("Remote UnderPAR package download", downloadUrl, error).message;
   }
   if (!result.downloadStarted) {
     try {
       await chrome.tabs.create({ url: downloadUrl });
       result.downloadTabOpened = true;
     } catch (tabError) {
-      const tabOpenError = buildUpdateLookupError(
-        preferLocalPackage ? "Local runtime package tab open" : "Remote UnderPAR package tab open",
-        downloadUrl,
-        tabError
-      ).message;
+      const tabOpenError = buildUpdateLookupError("Remote UnderPAR package tab open", downloadUrl, tabError).message;
       result.downloadTabError = result.downloadTabError ? `${result.downloadTabError} | ${tabOpenError}` : tabOpenError;
       // Continue so Chrome extensions can still open.
     }
@@ -2593,15 +2525,7 @@ async function openUnderparGetLatestFlow() {
   result.ok = result.downloadStarted || result.downloadTabOpened;
   if (!result.ok) {
     const failureParts = [result.downloadError, result.downloadTabError, result.checkError].filter(Boolean);
-    result.error =
-      failureParts[0] ||
-      (preferLocalPackage
-        ? `Bundled UnderPAR package v${localPackageVersion || currentVersion || "local"} could not be opened from the extension runtime.`
-        : "Unable to open update links");
-  } else if (preferLocalPackage && !hasKnownRemoteUpdate) {
-    result.infoMessage = result.downloadStarted
-      ? `Downloaded bundled UnderPAR package v${localPackageVersion || currentVersion || "local"} from the current runtime.`
-      : `Opened bundled UnderPAR package v${localPackageVersion || currentVersion || "local"} from the current runtime.`;
+    result.error = failureParts[0] || "Unable to open update links";
   }
   return result;
 }

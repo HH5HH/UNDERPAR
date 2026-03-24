@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UP ESM Health Dashboard</title>
+    <link id="workspace-style-link" rel="stylesheet" href="esm-health-workspace.css" />
+  </head>
+  <body>
+    <main id="workspace-app-root" class="workspace-app esm-health-app">
+      <header class="workspace-header">
+        <div class="workspace-title-wrap">
+          <p id="workspace-controller-state" class="workspace-controller-state">
+            Waiting for UnderPAR side panel controller...
+          </p>
+          <p id="workspace-filter-state" class="workspace-filter-state"></p>
+        </div>
+        <div class="workspace-actions">
+          <button
+            id="workspace-rerun-all"
+            class="workspace-icon-btn workspace-icon-btn--rerun"
+            type="button"
+            title="Re-run latest ESM HEALTH dashboard query"
+            aria-label="Re-run latest ESM HEALTH dashboard query"
+          >
+            <span class="workspace-icon workspace-icon--rerun-glyph" aria-hidden="true">f5</span>
+            <span id="workspace-rerun-indicator" class="workspace-net-indicator" aria-hidden="true" hidden></span>
+          </button>
+          <button
+            id="workspace-clear-all"
+            class="workspace-icon-btn"
+            type="button"
+            title="Clear"
+            aria-label="Clear"
+          >
+            <span class="workspace-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M7 7 17 17" />
+                <path d="M17 7 7 17" />
+              </svg>
+            </span>
+          </button>
+        </div>
+      </header>
+
+      <p id="workspace-status" class="workspace-status" aria-live="polite" hidden></p>
+
+      <section class="rest-report-card esm-health-filter-card">
+        <header class="rest-report-head">
+          <p class="rest-report-title">ESM HEALTH Filters</p>
+          <p class="rest-report-meta">Context comes from UnderPAR global pickers. Date range is native here. ESM is PST effective.</p>
+        </header>
+        <form id="workspace-filter-form" class="esm-health-filter-form">
+          <label class="esm-health-field">
+            <span class="esm-health-field-label">Start</span>
+            <input id="workspace-start-date" class="esm-health-date-input" type="date" />
+          </label>
+          <label class="esm-health-field">
+            <span class="esm-health-field-label">End</span>
+            <input id="workspace-end-date" class="esm-health-date-input" type="date" />
+          </label>
+          <div class="esm-health-field esm-health-field--granularity">
+            <span class="esm-health-field-label">Granularity</span>
+            <div id="workspace-granularity-group" class="esm-health-granularity-group" role="group" aria-label="Granularity">
+              <button type="button" class="esm-health-granularity-btn" data-granularity="day">Day</button>
+              <button type="button" class="esm-health-granularity-btn" data-granularity="hour">Hour</button>
+              <button type="button" class="esm-health-granularity-btn" data-granularity="month">Month</button>
+            </div>
+            <p class="esm-health-help-copy">Unique reach stays daily-only, even when the overview zoom changes.</p>
+          </div>
+          <div class="esm-health-filter-actions">
+            <button id="workspace-run-dashboard" class="workspace-text-btn workspace-text-btn--accent" type="submit">Run</button>
+            <button id="workspace-reset-filters" class="workspace-text-btn" type="button">Reset</button>
+          </div>
+        </form>
+        <div id="workspace-active-pills" class="esm-health-pill-row"></div>
+      </section>
+
+      <section id="workspace-cards" class="workspace-cards"></section>
+    </main>
+
+    <script src="underpar-environment.js"></script>
+    <script src="esm-health-workspace.js"></script>
+  </body>
+</html>
