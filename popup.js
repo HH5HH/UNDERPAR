@@ -54445,10 +54445,12 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
 
   const sectionKey = String(resolvedSection.sectionKey || "").trim();
   const sectionLabel = String(resolvedSection.sectionLabel || sectionKey).trim();
-  const sectionUrl = buildRestV2InteractiveDocsUrl(resolvedSection.tagAnchor || "");
-  const sectionActionLabel = `Open ${sectionLabel} in Adobe PASS REST API V2 interactive docs`;
   const toggleActionLabel = `Toggle ${sectionLabel} REST API V2 interactive docs section`;
   const initialCollapsed = getRestV2InteractiveDocsSectionCollapsed(programmer?.programmerId, sectionKey);
+  const totalEntries = Array.isArray(resolvedSection.entries) ? resolvedSection.entries.length : 0;
+  const readyCount = Number(resolvedSection.readyCount || 0);
+  const readinessLabel = `${readyCount}/${totalEntries} ready`;
+  const methodCountLabel = `${totalEntries} interactive method${totalEntries === 1 ? "" : "s"}`;
   const sectionDomId = `rest-v2-doc-section-${String(programmer?.programmerId || "global")
     .trim()
     .toLowerCase()
@@ -54460,29 +54462,22 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
       data-restv2-doc-section-key="${escapeHtml(sectionKey)}"
       data-restv2-doc-section-initial-collapsed="${initialCollapsed ? "true" : "false"}"
     >
-      <div class="hr-rest-v2-doc-section-head">
-        <button
-          type="button"
-          class="metadata-header service-box-header hr-rest-v2-doc-section-toggle"
-          aria-controls="${escapeHtml(sectionDomId)}"
-          title="${escapeHtml(toggleActionLabel)}"
-          aria-label="${escapeHtml(toggleActionLabel)}"
-        >
+      <button
+        type="button"
+        class="metadata-header service-box-header hr-rest-v2-doc-section-toggle"
+        aria-controls="${escapeHtml(sectionDomId)}"
+        title="${escapeHtml(toggleActionLabel)}"
+        aria-label="${escapeHtml(toggleActionLabel)}"
+      >
+        <span class="hr-rest-v2-doc-section-toggle-copy">
           <span class="hr-rest-v2-doc-section-toggle-label">${escapeHtml(sectionLabel)}</span>
-          <span class="hr-rest-v2-doc-section-count">${escapeHtml(`${resolvedSection.readyCount}/${resolvedSection.entries.length} Ready`)}</span>
-          <span class="collapse-icon" aria-hidden="true">▼</span>
-        </button>
-        <a
-          href="${escapeHtml(sectionUrl)}"
-          class="hr-rest-v2-doc-section-link"
-          data-service-doc-key="restV2"
-          data-service-doc-url="${escapeHtml(sectionUrl)}"
-          title="${escapeHtml(sectionActionLabel)}"
-          aria-label="${escapeHtml(sectionActionLabel)}"
-        >
-          Open
-        </a>
-      </div>
+          <span class="hr-rest-v2-doc-section-toggle-meta">
+            <span class="hr-rest-v2-doc-section-count">${escapeHtml(readinessLabel)}</span>
+            <span class="hr-rest-v2-doc-section-status">${escapeHtml(methodCountLabel)}</span>
+          </span>
+        </span>
+        <span class="collapse-icon" aria-hidden="true">▼</span>
+      </button>
       <div class="metadata-container service-box-container hr-rest-v2-doc-section-shell" id="${escapeHtml(sectionDomId)}">
         <div class="hr-rest-v2-doc-section-grid">
           ${resolvedSection.entries

@@ -456,8 +456,12 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /body\.resources/);
   assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /data-restv2-doc-section-key/);
   assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /metadata-header service-box-header hr-rest-v2-doc-section-toggle/);
+  assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /hr-rest-v2-doc-section-toggle-copy/);
+  assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /hr-rest-v2-doc-section-toggle-meta/);
+  assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /hr-rest-v2-doc-section-status/);
   assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /service-box-container hr-rest-v2-doc-section-shell/);
   assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /getRestV2InteractiveDocsSectionCollapsed/);
+  assert.doesNotMatch(buildRestV2InteractiveDocsSectionHtmlSource, /hr-rest-v2-doc-section-link/);
   assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /wireCollapsibleSection/);
   assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /setRestV2InteractiveDocsSectionCollapsed/);
   assert.match(collectRestV2LearningResourceIdsSource, /getRestV2ProfilePreauthzChecks\(harvest\)/);
@@ -514,7 +518,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupCss, /\.hr-rest-v2-docs-grid/);
   assert.match(popupCss, /\.hr-rest-v2-doc-section/);
   assert.match(popupCss, /\.hr-rest-v2-doc-section-toggle/);
-  assert.match(popupCss, /\.hr-rest-v2-doc-section-link/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-section-toggle-meta/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-section-status/);
   assert.match(popupCss, /\.hr-rest-v2-doc-section-shell/);
   assert.match(popupCss, /\.hr-rest-v2-doc-section-grid/);
   assert.match(
