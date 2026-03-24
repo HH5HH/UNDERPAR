@@ -30332,6 +30332,7 @@ async function resolveClickEsmAuthContext(context, requestToken, options = {}) {
   if (!programmer?.programmerId) {
     throw new Error("Media company is required to generate clickESM.");
   }
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(programmer.programmerId, requestToken);
 
   const selectedProgrammer = resolveSelectedProgrammer();
   if (!selectedProgrammer?.programmerId || selectedProgrammer.programmerId !== programmer.programmerId) {
@@ -30347,7 +30348,7 @@ async function resolveClickEsmAuthContext(context, requestToken, options = {}) {
 
   if (
     context?.section &&
-    !isEsmServiceRequestActive(context.section, requestToken, programmer.programmerId)
+    !isEsmServiceRequestActive(context.section, liveRequestToken, programmer.programmerId)
   ) {
     throw new Error("ESM controller is no longer active for the selected media company.");
   }
@@ -30647,6 +30648,7 @@ function resolveClickDgrSelectedAppContext(context, requestToken) {
   if (!programmer?.programmerId) {
     throw new Error("Media company is required to generate clickDGR.");
   }
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(programmer.programmerId, requestToken);
 
   const selectedProgrammer = resolveSelectedProgrammer();
   if (!selectedProgrammer?.programmerId || selectedProgrammer.programmerId !== programmer.programmerId) {
@@ -30655,7 +30657,7 @@ function resolveClickDgrSelectedAppContext(context, requestToken) {
 
   if (
     panelState?.section &&
-    !isDegradationServiceRequestActive(panelState.section, requestToken, programmer.programmerId)
+    !isDegradationServiceRequestActive(panelState.section, liveRequestToken, programmer.programmerId)
   ) {
     throw new Error("DEGRADATION controller is no longer active for the selected media company.");
   }
@@ -33071,6 +33073,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
   if (!programmer?.programmerId) {
     throw new Error("Media company is required to generate clickCMU.");
   }
+  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(programmer.programmerId, requestToken);
 
   const selectedProgrammer = resolveSelectedProgrammer();
   if (!selectedProgrammer?.programmerId || selectedProgrammer.programmerId !== programmer.programmerId) {
@@ -33079,7 +33082,7 @@ async function resolveClickCmuAuthContext(context, requestToken, options = {}) {
 
   if (
     context?.section &&
-    !isCmServiceRequestActive(context.section, requestToken, programmer.programmerId)
+    !isCmServiceRequestActive(context.section, liveRequestToken, programmer.programmerId)
   ) {
     throw new Error("CM controller is no longer active for the selected media company.");
   }
@@ -51470,6 +51473,17 @@ function renderCmServiceContent(programmer, resolvedCmService, section, contentE
   };
   section.__underparCmState = cmState;
   cmMountUsageJellyBeans(cmState, usageRecords, requestToken);
+  const getLiveRequestToken = () => {
+    const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
+      cmState?.programmer?.programmerId,
+      cmState?.requestToken || requestToken || 0
+    );
+    cmState.requestToken = liveRequestToken;
+    if (cmState.cmuUsageState && typeof cmState.cmuUsageState === "object") {
+      cmState.cmuUsageState.requestToken = liveRequestToken;
+    }
+    return liveRequestToken;
+  };
 
   const exportClickCmuButton = contentElement.querySelector(".cmu-jelly-make-clickcmu-btn");
   if (exportClickCmuButton) {
@@ -51497,7 +51511,7 @@ function renderCmServiceContent(programmer, resolvedCmService, section, contentE
           ? getRestV2MvpdPickerLabel(selectedRequestorId, selectedMvpdId, selectedMvpdMeta) || selectedMvpdId
           : String(firstNonEmptyString([matchedTenants?.[0]?.tenantName, resolvedMvpdScope || ""])).trim();
         const exportFileScopeLabel = String(selectedMvpdId || resolvedMvpdScope || "MVPD").trim();
-        await makeClickCmuDownload(clickCmuContext, requestToken, {
+        await makeClickCmuDownload(clickCmuContext, getLiveRequestToken(), {
           source: isMvpdService ? "mvpd-workspace" : "sidepanel",
           isMvpdWorkspaceExport: isMvpdService,
           mvpdId: isMvpdService ? selectedMvpdId : undefined,
@@ -51530,7 +51544,7 @@ function renderCmServiceContent(programmer, resolvedCmService, section, contentE
       if (!record) {
         return;
       }
-      await cmOpenRecordInWorkspace(cmState, record, requestToken, {
+      await cmOpenRecordInWorkspace(cmState, record, getLiveRequestToken(), {
         activate: true,
         emitStart: true,
         forceRefetch: false,
@@ -51578,7 +51592,7 @@ function renderCmServiceContent(programmer, resolvedCmService, section, contentE
       button.disabled = true;
       cmSetLoadAllButtonsBusy(cmState, [button], true);
       try {
-        const openedCount = await cmOpenRecordsInWorkspace(cmState, childRecords, requestToken, {
+        const openedCount = await cmOpenRecordsInWorkspace(cmState, childRecords, getLiveRequestToken(), {
           activate: true,
           emitStart: true,
           forceRefetch: false,
@@ -56411,6 +56425,63 @@ function shouldHydrateExistingPremiumServiceSection(section, serviceKey = "") {
   return false;
 }
 
+function rebindMountedPremiumServiceSectionState(
+  section,
+  programmer = null,
+  serviceKey = "",
+  serviceApp = null,
+  requestToken = state.premiumPanelRequestToken
+) {
+  const normalizedServiceKey = String(serviceKey || section?.dataset?.serviceKey || "").trim();
+  const normalizedRequestToken = Math.max(0, Number(requestToken || state.premiumPanelRequestToken || 0));
+  if (!section || !normalizedServiceKey || !programmer?.programmerId) {
+    return;
+  }
+
+  if (normalizedServiceKey === "esmWorkspace") {
+    const esmWorkspaceState = section.__underparEsmWorkspaceState;
+    if (esmWorkspaceState && typeof esmWorkspaceState === "object") {
+      esmWorkspaceState.programmer = programmer;
+      esmWorkspaceState.appInfo = serviceApp || esmWorkspaceState.appInfo || null;
+      esmWorkspaceState.requestToken = normalizedRequestToken;
+    }
+    return;
+  }
+
+  if (normalizedServiceKey === "degradation") {
+    const degradationState = section.__underparDegradationState;
+    if (degradationState && typeof degradationState === "object") {
+      degradationState.programmer = programmer;
+      degradationState.appInfo = serviceApp || degradationState.appInfo || null;
+      degradationState.requestToken = normalizedRequestToken;
+    }
+    return;
+  }
+
+  if (normalizedServiceKey === "resetTempPass") {
+    section.__underparTempPassRequestToken = normalizedRequestToken;
+    const tempPassState = section.__underparTempPassState;
+    if (tempPassState && typeof tempPassState === "object") {
+      tempPassState.programmer = programmer;
+      tempPassState.requestToken = normalizedRequestToken;
+      tempPassState.resetApp = serviceApp || tempPassState.resetApp || null;
+    }
+    return;
+  }
+
+  if (normalizedServiceKey === "cm" || normalizedServiceKey === "cmMvpd") {
+    const cmState = section.__underparCmState;
+    if (cmState && typeof cmState === "object") {
+      cmState.programmer = programmer;
+      cmState.cmService = serviceApp || cmState.cmService || null;
+      cmState.requestToken = normalizedRequestToken;
+      if (cmState.cmuUsageState && typeof cmState.cmuUsageState === "object") {
+        cmState.cmuUsageState.requestToken = normalizedRequestToken;
+      }
+    }
+  }
+}
+
 function refreshExistingPremiumServiceSections(programmer, services = null) {
   if (!els.premiumServicesContainer || !programmer?.programmerId || !services || typeof services !== "object") {
     return;
@@ -56427,6 +56498,13 @@ function refreshExistingPremiumServiceSections(programmer, services = null) {
     }
     const serviceApp = serviceKey === "esmWorkspace" ? services?.esm || null : services?.[serviceKey] || null;
     section.dataset.appGuid = String(serviceApp?.guid || "").trim();
+    rebindMountedPremiumServiceSectionState(
+      section,
+      programmer,
+      serviceKey,
+      serviceApp,
+      Number(state.premiumPanelRequestToken || 0)
+    );
     if (serviceKey === "esmWorkspace" && typeof section.__underparRefreshEsmWorkspace === "function") {
       if (shouldHydrateExistingPremiumServiceSection(section, serviceKey)) {
         void section.__underparRefreshEsmWorkspace();

@@ -1382,11 +1382,26 @@ test("esm workspace waits for workspace-ready and resolves the live premium requ
 test("premium service refresh and CMU actions keep ESM and CM JellyBeans on the live request token", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const refreshSource = extractFunctionSource(popupSource, "refreshExistingPremiumServiceSections");
+  const rebindSource = extractFunctionSource(popupSource, "rebindMountedPremiumServiceSectionState");
+  const cmRenderSource = extractFunctionSource(popupSource, "renderCmServiceContent");
   const cmuSource = extractFunctionSource(popupSource, "cmuUsageRunRecordsFromUi");
   const cmOpenSource = extractFunctionSource(popupSource, "cmOpenRecordsInWorkspace");
   const cmRunSource = extractFunctionSource(popupSource, "cmRunRecordToWorkspace");
+  const esmAuthSource = extractFunctionSource(popupSource, "resolveClickEsmAuthContext");
+  const dgrAuthSource = extractFunctionSource(popupSource, "resolveClickDgrSelectedAppContext");
+  const cmAuthSource = extractFunctionSource(popupSource, "resolveClickCmuAuthContext");
 
   assert.match(refreshSource, /serviceKey === "esmWorkspace" && typeof section\.__underparRefreshEsmWorkspace === "function"/);
+  assert.match(refreshSource, /rebindMountedPremiumServiceSectionState\(/);
+  assert.match(rebindSource, /esmWorkspaceState\.requestToken = normalizedRequestToken;/);
+  assert.match(rebindSource, /degradationState\.requestToken = normalizedRequestToken;/);
+  assert.match(rebindSource, /section\.__underparTempPassRequestToken = normalizedRequestToken;/);
+  assert.match(rebindSource, /cmState\.requestToken = normalizedRequestToken;/);
+  assert.match(rebindSource, /cmState\.cmuUsageState\.requestToken = normalizedRequestToken;/);
+  assert.match(cmRenderSource, /const getLiveRequestToken = \(\) => \{/);
+  assert.match(cmRenderSource, /await makeClickCmuDownload\(clickCmuContext,\s*getLiveRequestToken\(\),\s*\{/);
+  assert.match(cmRenderSource, /await cmOpenRecordInWorkspace\(cmState,\s*record,\s*getLiveRequestToken\(\),\s*\{/);
+  assert.match(cmRenderSource, /await cmOpenRecordsInWorkspace\(cmState,\s*childRecords,\s*getLiveRequestToken\(\),\s*\{/);
   assert.match(cmuSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(/);
   assert.match(cmuSource, /cmState\.requestToken = liveRequestToken;/);
   assert.match(cmuSource, /cmuUsageState\.requestToken = liveRequestToken;/);
@@ -1394,6 +1409,12 @@ test("premium service refresh and CMU actions keep ESM and CM JellyBeans on the 
   assert.match(cmOpenSource, /const runRequestToken = resolveCurrentPremiumPanelRequestToken\(cmState\?\.programmer\?\.programmerId,\s*liveRequestToken\);/);
   assert.match(cmRunSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(/);
   assert.match(cmRunSource, /const workspaceReportContext = cmBuildWorkspaceReportContextPayload\(cmState,\s*liveRequestToken\);/);
+  assert.match(esmAuthSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(programmer\.programmerId,\s*requestToken\);/);
+  assert.match(esmAuthSource, /!isEsmServiceRequestActive\(context\.section,\s*liveRequestToken,\s*programmer\.programmerId\)/);
+  assert.match(dgrAuthSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(programmer\.programmerId,\s*requestToken\);/);
+  assert.match(dgrAuthSource, /!isDegradationServiceRequestActive\(panelState\.section,\s*liveRequestToken,\s*programmer\.programmerId\)/);
+  assert.match(cmAuthSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(programmer\.programmerId,\s*requestToken\);/);
+  assert.match(cmAuthSource, /!isCmServiceRequestActive\(context\.section,\s*liveRequestToken,\s*programmer\.programmerId\)/);
 });
 
 test("health splunk prefers the live dashboard deeplink and normalizes dashboard queries for Splunk job APIs", () => {
