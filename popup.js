@@ -63441,6 +63441,41 @@ function getLoginDisplayName(loginData) {
   return firstNonEmptyString([loginData?.authContext?.displayName, resolveLoginDisplayNameValue(loginData), "Adobe User"]);
 }
 
+function getLoginActiveOrganization(loginData) {
+  const currentSession = loginData && typeof loginData === "object" ? loginData : {};
+  return buildRestrictedOrganizationContext(
+    resolveCachedOrganizationsFromLoginData(currentSession),
+    currentSession,
+    null
+  ).activeOrganization;
+}
+
+function normalizeExperienceOrgSlug(activeOrganization) {
+  const directId = String(activeOrganization?.id || "").trim();
+  if (directId) {
+    return encodeURIComponent(directId);
+  }
+
+  const normalizedName = String(activeOrganization?.name || "")
+    .replace(/^Adobe\s+IMS\s+Org\s+/i, "")
+    .trim();
+  if (!normalizedName) {
+    return "";
+  }
+
+  return encodeURIComponent(normalizedName.replace(/\s+/g, "-"));
+}
+
+function buildExperienceOrgUrl(activeOrganization) {
+  const orgSlug = normalizeExperienceOrgSlug(activeOrganization);
+  return orgSlug ? `https://experience.adobe.com/#/@${orgSlug}` : "https://experience.adobe.com";
+}
+
+function buildExperienceOrgTitle(activeOrganization) {
+  const orgSlug = normalizeExperienceOrgSlug(activeOrganization);
+  return orgSlug ? `Open Experience Cloud for ${orgSlug}` : "Open Experience Cloud";
+}
+
 function isProfileDisplayNamePlaceholder(displayName = "") {
   const normalized = String(displayName || "")
     .trim()
@@ -65365,6 +65400,7 @@ function renderAvatarMenu() {
 
   const name = getLoginDisplayName(state.loginData);
   const principalId = getLoginPrincipalId(state.loginData) || "No principal available";
+  const activeOrganization = getLoginActiveOrganization(state.loginData);
 
   els.avatarMenuImage.style.backgroundImage = "";
   els.avatarMenuImage.classList.remove("avatar-loading");
@@ -65373,6 +65409,8 @@ function renderAvatarMenu() {
   els.avatarMenuImage.setAttribute("aria-hidden", "false");
   els.avatarMenuImage.setAttribute("aria-label", "UnderPAR account badge");
   els.avatarMenuName.textContent = name;
+  els.avatarMenuName.href = buildExperienceOrgUrl(activeOrganization);
+  els.avatarMenuName.title = buildExperienceOrgTitle(activeOrganization);
   els.avatarMenuEmail.textContent = principalId;
   els.avatarMenuOrg.textContent = `Organization: ${getOrgDisplayName(state.loginData)}`;
 

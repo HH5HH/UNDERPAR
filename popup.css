@@ -1457,6 +1457,27 @@ body[aria-busy="true"] .auth-btn::before {
   font-size: 22px;
   line-height: 1.1;
   font-weight: 700;
+  white-space: normal;
+}
+
+.avatar-menu-name-link {
+  color: #f4f7fb;
+  text-decoration: none;
+  letter-spacing: 0.01em;
+  border-bottom: 1px solid rgba(255, 198, 78, 0.42);
+  transition:
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.avatar-menu-name-link:hover,
+.avatar-menu-name-link:focus-visible {
+  color: rgba(255, 210, 96, 0.98);
+  border-color: rgba(255, 198, 78, 0.9);
+}
+
+.avatar-menu-name-link:focus-visible {
+  outline: none;
 }
 
 .avatar-menu-email {

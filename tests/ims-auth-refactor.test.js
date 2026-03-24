@@ -2995,6 +2995,24 @@ test("avatar menu no longer triggers background CM tenant hydration", () => {
   assert.match(openAvatarMenuSource, /renderAvatarMenu\(\);/);
 });
 
+test("avatar menu display name mirrors the LoginButton org hotlink", () => {
+  const popupHtml = fs.readFileSync(path.join(ROOT, "popup.html"), "utf8");
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const renderAvatarMenuSource = extractFunctionSource(popupSource, "renderAvatarMenu");
+
+  assert.match(
+    popupHtml,
+    /id="avatar-menu-name"[\s\S]*class="avatar-menu-name avatar-menu-name-link"[\s\S]*href="https:\/\/experience\.adobe\.com"[\s\S]*target="_blank"[\s\S]*rel="noreferrer"/
+  );
+  assert.match(popupSource, /function getLoginActiveOrganization\(loginData\)/);
+  assert.match(popupSource, /function normalizeExperienceOrgSlug\(activeOrganization\)/);
+  assert.match(popupSource, /function buildExperienceOrgUrl\(activeOrganization\)/);
+  assert.match(popupSource, /function buildExperienceOrgTitle\(activeOrganization\)/);
+  assert.match(renderAvatarMenuSource, /const activeOrganization = getLoginActiveOrganization\(state\.loginData\);/);
+  assert.match(renderAvatarMenuSource, /els\.avatarMenuName\.href = buildExperienceOrgUrl\(activeOrganization\);/);
+  assert.match(renderAvatarMenuSource, /els\.avatarMenuName\.title = buildExperienceOrgTitle\(activeOrganization\);/);
+});
+
 test("activation only trusts explicit target-org selection and restricted retry no longer reuses hidden config", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const activationPrepSource = extractFunctionSource(popupSource, "enforceAdobePassAccess");
