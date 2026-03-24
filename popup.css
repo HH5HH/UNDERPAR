@@ -2615,31 +2615,16 @@ select:disabled {
 .hr-health-status-value .metadata-value {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.hr-health-status-copy {
-  margin: 0;
-  font-weight: 600;
-  color: rgb(var(--service-health-zip-1100));
-}
-
-.hr-health-status-meta {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: rgba(var(--service-health-zip-1100), 0.78);
+  gap: 0;
 }
 
 .hr-health-action-row {
-  display: inline-flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
-  align-self: flex-start;
-  gap: 6px;
-  width: auto;
-  max-width: 100%;
+  align-self: stretch;
+  gap: 10px;
+  width: 100%;
   margin: 0;
   padding: 0;
 }
@@ -2649,9 +2634,9 @@ select:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
+  width: 100%;
   min-height: 30px;
-  padding: 0 12px;
+  padding: 0 16px;
   border-radius: 999px;
   border: 1px solid var(--s2-action-border-default);
   background: var(--s2-action-bg-default);
@@ -3865,8 +3850,9 @@ select:disabled {
 
 .esm-workspace-record-toggle-btn {
   height: 32px;
-  min-width: 88px;
-  padding: 0 12px;
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
   border: 1px solid rgba(var(--underpar-success-1100), 0.84);
   border-radius: 999px;
   background: linear-gradient(160deg, rgb(var(--underpar-success-700)), rgb(var(--underpar-success-900)));
@@ -3876,7 +3862,7 @@ select:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 0;
   cursor: pointer;
   transition:
     background-color 0.15s ease,
@@ -3916,11 +3902,6 @@ select:disabled {
 .esm-workspace-record-toggle-btn:disabled {
   opacity: 0.68;
   cursor: default;
-}
-
-.esm-workspace-record-btn-label {
-  line-height: 1;
-  letter-spacing: 0.03em;
 }
 
 .esm-workspace-record-btn-icon {
@@ -5572,8 +5553,9 @@ select:disabled {
 
 .degradation-record-toggle-btn {
   height: 32px;
-  min-width: 150px;
-  padding: 0 12px;
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
   border: 1px solid rgba(var(--underpar-success-1100), 0.84);
   border-radius: 999px;
   background: linear-gradient(160deg, rgb(var(--underpar-success-700)), rgb(var(--underpar-success-900)));
@@ -5583,7 +5565,7 @@ select:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 0;
   cursor: pointer;
   transition:
     background-color 0.15s ease,
@@ -5629,11 +5611,6 @@ select:disabled {
 .degradation-record-toggle-btn:disabled {
   opacity: 0.68;
   cursor: default;
-}
-
-.degradation-record-btn-label {
-  line-height: 1;
-  letter-spacing: 0.03em;
 }
 
 .degradation-record-btn-icon {

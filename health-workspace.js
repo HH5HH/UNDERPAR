@@ -1,4 +1,5 @@
 const HEALTH_WORKSPACE_MESSAGE_TYPE = "underpar:health-workspace";
+const HEALTH_SPLUNK_ESM_BRIDGE_TABLE_KEY = "sev2_mvpd_error_codes";
 
 const state = {
   windowId: 0,
@@ -15,6 +16,8 @@ const state = {
   report: null,
   tableResultsByKey: new Map(),
   tableOrder: [],
+  esmBridgeResultsByTableKey: new Map(),
+  bridgeLoadSequence: 0,
 };
 
 const els = {
@@ -44,6 +47,17 @@ function firstNonEmptyString(values = []) {
     }
   }
   return "";
+}
+
+function normalizeStringArray(values = []) {
+  const source = Array.isArray(values) ? values : [values];
+  return Array.from(
+    new Set(
+      source
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean)
+    )
+  );
 }
 
 function formatDateTime(value) {
@@ -143,6 +157,31 @@ function setTableResult(table = null) {
   state.tableResultsByKey.set(key, table);
 }
 
+function isEsmBridgeTableKey(tableKey = "") {
+  return String(tableKey || "").trim() === HEALTH_SPLUNK_ESM_BRIDGE_TABLE_KEY;
+}
+
+function isEsmBridgeTable(table = null) {
+  return isEsmBridgeTableKey(table?.key);
+}
+
+function getEsmBridgeResult(tableKey = "") {
+  const normalizedTableKey = String(tableKey || "").trim();
+  return normalizedTableKey ? state.esmBridgeResultsByTableKey.get(normalizedTableKey) || null : null;
+}
+
+function setEsmBridgeResult(tableKey = "", payload = null) {
+  const normalizedTableKey = String(tableKey || "").trim();
+  if (!normalizedTableKey) {
+    return;
+  }
+  if (payload && typeof payload === "object") {
+    state.esmBridgeResultsByTableKey.set(normalizedTableKey, payload);
+    return;
+  }
+  state.esmBridgeResultsByTableKey.delete(normalizedTableKey);
+}
+
 function getRenderableTables() {
   if (Array.isArray(state.report?.tables) && state.report.tables.length > 0) {
     return state.report.tables.slice();
@@ -150,17 +189,20 @@ function getRenderableTables() {
   return state.tableOrder.map((key) => state.tableResultsByKey.get(key)).filter(Boolean);
 }
 
-function renderTableMarkup(table = null) {
+function renderTableMarkup(table = null, options = {}) {
   const columns = Array.isArray(table?.columns) ? table.columns.map((value) => String(value || "").trim()).filter(Boolean) : [];
   const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const tableClassName = String(options?.tableClassName || "").trim();
+  const emptyMessage = String(options?.emptyMessage || "No rows returned for this HEALTH table.").trim();
+  const pendingMessage = String(options?.pendingMessage || "Waiting for Splunk results...").trim();
   if (table?.pending === true) {
-    return '<p class="health-report-pending">Waiting for Splunk results...</p>';
+    return `<p class="health-report-pending">${escapeHtml(pendingMessage)}</p>`;
   }
   if (table?.ok !== true && String(table?.error || "").trim()) {
     return `<p class="health-report-empty error">${escapeHtml(String(table?.error || "").trim())}</p>`;
   }
   if (columns.length === 0 || rows.length === 0) {
-    return '<p class="health-report-empty">No rows returned for this HEALTH table.</p>';
+    return `<p class="health-report-empty">${escapeHtml(emptyMessage)}</p>`;
   }
   const headerHtml = columns.map((columnName) => `<th>${escapeHtml(columnName)}</th>`).join("");
   const bodyHtml = rows
@@ -171,13 +213,108 @@ function renderTableMarkup(table = null) {
     .join("");
   return `
     <div class="rest-report-table-wrap">
-      <table class="rest-report-table">
+      <table class="rest-report-table${tableClassName ? ` ${escapeHtml(tableClassName)}` : ""}">
         <thead>
           <tr>${headerHtml}</tr>
         </thead>
         <tbody>${bodyHtml}</tbody>
       </table>
     </div>
+  `;
+}
+
+function renderEsmBridgeAction(table = null) {
+  if (!isEsmBridgeTable(table)) {
+    return "";
+  }
+  const bridgeState = getEsmBridgeResult(table?.key);
+  const columns = Array.isArray(table?.columns) ? table.columns.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const hasRows = columns.length > 0 && rows.length > 0;
+  const isLoading = bridgeState?.loading === true;
+  const disabled = isLoading || !hasRows || table?.pending === true || table?.ok === false;
+  const label = isLoading ? "Loading..." : bridgeState?.ok === true ? "Refresh ESM" : "ESM xref";
+  const hoverText = !hasRows
+    ? "No Splunk rows are available to cross-reference into ESM."
+    : isLoading
+      ? "Loading ESM cross-reference rows for this Splunk report."
+      : "Cross-reference this Splunk MVPD error result set against the live ESM v3 event tree.";
+  return `
+    <button
+      type="button"
+      class="health-report-summary-action-btn"
+      data-health-esm-bridge-action="load"
+      data-health-esm-bridge-table-key="${escapeHtml(String(table?.key || "").trim())}"
+      title="${escapeHtml(hoverText)}"
+      aria-label="${escapeHtml(hoverText)}"
+      ${disabled ? "disabled" : ""}
+    >${escapeHtml(label)}</button>
+  `;
+}
+
+function renderEsmBridgeResult(table = null) {
+  if (!isEsmBridgeTable(table)) {
+    return "";
+  }
+  const bridgeState = getEsmBridgeResult(table?.key);
+  if (!bridgeState) {
+    return "";
+  }
+
+  const requestorIds = normalizeStringArray(bridgeState?.queryContext?.requestorIds);
+  const mvpdIds = normalizeStringArray(bridgeState?.queryContext?.mvpdIds);
+  const events = normalizeStringArray(bridgeState?.queryContext?.events);
+  const metaLine = [
+    bridgeState?.queryContext?.sourceWindowStart && bridgeState?.queryContext?.sourceWindowEnd
+      ? `${bridgeState.queryContext.sourceWindowStart} -> ${bridgeState.queryContext.sourceWindowEnd}`
+      : "",
+    requestorIds.length > 0 ? `Requestor ${requestorIds.join(", ")}` : "",
+    mvpdIds.length > 0 ? `MVPD ${mvpdIds.join(", ")}` : "",
+    events.length > 0 ? `Event ${events.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  const bridgeTable = {
+    ok: bridgeState.loading !== true && bridgeState.ok !== false,
+    pending: bridgeState.loading === true,
+    error: String(bridgeState?.error || "").trim(),
+    columns: Array.isArray(bridgeState?.columns) ? bridgeState.columns : [],
+    rows: Array.isArray(bridgeState?.rows) ? bridgeState.rows : [],
+  };
+
+  return `
+    <section class="health-report-bridge${bridgeState.loading === true ? " is-loading" : ""}">
+      <header class="health-report-bridge-head">
+        <div class="health-report-bridge-copy">
+          <p class="health-report-bridge-title">${escapeHtml(String(bridgeState?.title || "ESM xref").trim())}</p>
+          <p class="health-report-bridge-subtitle">${escapeHtml(
+            firstNonEmptyString([
+              bridgeState?.subtitle,
+              "Cross-referenced from Splunk MVPD error rows into the live ESM v3 event tree.",
+            ])
+          )}</p>
+          ${metaLine ? `<p class="health-report-bridge-meta">${escapeHtml(metaLine)}</p>` : ""}
+        </div>
+        <span class="health-report-bridge-pill">${
+          bridgeState.loading === true
+            ? "Loading"
+            : bridgeState.ok === true
+              ? `${Number(bridgeState?.totalRows || 0)} row${Number(bridgeState?.totalRows || 0) === 1 ? "" : "s"}`
+              : "Issue"
+        }</span>
+      </header>
+      ${renderTableMarkup(bridgeTable, {
+        tableClassName: "health-report-bridge-table",
+        emptyMessage: "No ESM rows matched the Splunk-scoped bridge query.",
+        pendingMessage: "Loading ESM cross-reference rows...",
+      })}
+      ${
+        bridgeState?.requestUrl
+          ? `<p class="health-report-bridge-query">${escapeHtml(String(bridgeState.requestUrl || "").trim())}</p>`
+          : ""
+      }
+    </section>
   `;
 }
 
@@ -214,11 +351,15 @@ function renderTableCard(table = null) {
             sid || "N/A"
           )} | <strong>Rows:</strong> ${escapeHtml(rowSummary)}</p>
         </div>
-        <span class="health-report-summary-pill">${escapeHtml(sectionStateLabel)}</span>
+        <div class="health-report-summary-actions">
+          ${renderEsmBridgeAction(table)}
+          <span class="health-report-summary-pill">${escapeHtml(sectionStateLabel)}</span>
+        </div>
       </summary>
       <div class="health-report-card-body">
         ${queryMarkup}
         ${renderTableMarkup(table)}
+        ${renderEsmBridgeResult(table)}
       </div>
     </details>
   `;
@@ -269,6 +410,7 @@ function handleReportStart(payload = {}) {
   state.report = null;
   state.tableResultsByKey.clear();
   state.tableOrder = [];
+  state.esmBridgeResultsByTableKey.clear();
   const tables = Array.isArray(payload?.tables) ? payload.tables : [];
   tables.forEach((table) => {
     const key = String(table?.key || "").trim();
@@ -316,6 +458,7 @@ function handleReportResult(payload = {}) {
   state.report = payload && typeof payload === "object" ? payload : null;
   state.tableResultsByKey.clear();
   state.tableOrder = [];
+  state.esmBridgeResultsByTableKey.clear();
   if (Array.isArray(state.report?.tables)) {
     state.report.tables.forEach((table) => {
       setTableResult(table);
@@ -352,6 +495,7 @@ function clearWorkspaceCards() {
   state.loading = false;
   state.tableResultsByKey.clear();
   state.tableOrder = [];
+  state.esmBridgeResultsByTableKey.clear();
   renderReport();
   syncActionButtonsDisabled();
 }
@@ -406,6 +550,67 @@ async function sendWorkspaceAction(action, payload = {}) {
   }
 }
 
+async function loadEsmBridgeForTable(tableKey = "") {
+  const normalizedTableKey = String(tableKey || "").trim();
+  if (!normalizedTableKey || state.loading || !isEsmBridgeTableKey(normalizedTableKey)) {
+    return;
+  }
+  const table = state.tableResultsByKey.get(normalizedTableKey) || null;
+  const columns = Array.isArray(table?.columns) ? table.columns.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  if (columns.length === 0 || rows.length === 0) {
+    return;
+  }
+
+  const requestId = state.bridgeLoadSequence + 1;
+  state.bridgeLoadSequence = requestId;
+  setEsmBridgeResult(normalizedTableKey, {
+    loading: true,
+    ok: false,
+    title: "ESM xref",
+    subtitle: "Cross-referencing the current Splunk MVPD error rows against ESM v3.",
+    queryContext: {},
+    columns: [],
+    rows: [],
+    totalRows: 0,
+    error: "",
+  });
+  renderReport();
+
+  const requestSelectionKey = String(state.selectionKey || "").trim();
+  const result = await sendWorkspaceAction("load-esm-bridge", {
+    selectionKey: requestSelectionKey,
+    tableKey: normalizedTableKey,
+  });
+  if (requestId !== state.bridgeLoadSequence || requestSelectionKey !== String(state.selectionKey || "").trim()) {
+    return;
+  }
+
+  const bridgePayload = result?.bridge && typeof result.bridge === "object"
+    ? result.bridge
+    : {
+        ok: false,
+        title: "ESM xref",
+        subtitle: "Cross-referenced from Splunk MVPD error rows into the live ESM v3 event tree.",
+        queryContext: {},
+        columns: [],
+        rows: [],
+        totalRows: 0,
+        error: String(result?.error || "Unable to load the ESM cross-reference.").trim(),
+      };
+  setEsmBridgeResult(normalizedTableKey, {
+    ...bridgePayload,
+    loading: false,
+    ok: result?.ok === true,
+  });
+  renderReport();
+  if (result?.ok) {
+    setStatus(`Loaded ESM xref (${Number(bridgePayload?.totalRows || 0)} row${Number(bridgePayload?.totalRows || 0) === 1 ? "" : "s"}).`);
+    return;
+  }
+  setStatus(String(result?.error || "Unable to load the ESM cross-reference."), "error");
+}
+
 async function rerunLatestReport() {
   if (state.loading) {
     return;
@@ -443,6 +648,17 @@ function registerEventHandlers() {
   if (els.clearButton) {
     els.clearButton.addEventListener("click", () => {
       clearWorkspace();
+    });
+  }
+  if (els.cardsHost) {
+    els.cardsHost.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target.closest("[data-health-esm-bridge-action]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void loadEsmBridgeForTable(target.dataset.healthEsmBridgeTableKey || "");
     });
   }
 

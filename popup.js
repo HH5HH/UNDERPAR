@@ -20678,6 +20678,202 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
   );
 }
 
+const HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_TABLE_KEY = "sev2_mvpd_error_codes";
+const HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_PATH = "year/month/day/hour/minute/event/requestor-id/proxy/mvpd/reason/dc.json";
+const HEALTH_SPLUNK_ESM_BRIDGE_DEFAULT_LIMIT = 500;
+
+function normalizeHealthSplunkEsmBridgeTimestamp(value = "") {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue) {
+    return null;
+  }
+  const timestampMs = Date.parse(normalizedValue);
+  if (!Number.isFinite(timestampMs)) {
+    return null;
+  }
+  return {
+    value: normalizedValue,
+    timestampMs,
+    iso: new Date(timestampMs).toISOString(),
+  };
+}
+
+function buildHealthSplunkEsmBridgeTimestampLabel(row = null) {
+  const year = String(row?.year || "").trim();
+  const month = String(row?.month || "").trim().padStart(2, "0");
+  const day = String(row?.day || "").trim().padStart(2, "0");
+  const hour = String(row?.hour || "").trim().padStart(2, "0") || "00";
+  const minute = String(row?.minute || "").trim().padStart(2, "0") || "00";
+  if (!year || !month || !day) {
+    return "";
+  }
+  return `${year}-${month}-${day} ${hour}:${minute}`;
+}
+
+function buildHealthSplunkEsmBridgeSourceMeta(queryContext = null, table = null) {
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const timestampCandidates = rows
+    .map((row) => normalizeHealthSplunkEsmBridgeTimestamp(row?._time))
+    .filter(Boolean)
+    .sort((left, right) => Number(left?.timestampMs || 0) - Number(right?.timestampMs || 0));
+  const requestorIds = uniquePreserveOrder([
+    ...rows.map((row) => String(row?.serviceProvider || "").trim()),
+    String(queryContext?.requestorId || "").trim(),
+  ]);
+  const mvpdIds = uniquePreserveOrder(
+    rows
+      .map((row) => String(row?.mvpd || "").trim())
+      .filter((value) => value && value !== "-" && value.toLowerCase() !== "all")
+  );
+  const events = uniquePreserveOrder(
+    rows
+      .map((row) => String(row?.event || "").trim())
+      .filter(Boolean)
+  );
+  return {
+    rowCount: rows.length,
+    requestorIds,
+    mvpdIds,
+    events,
+    start: timestampCandidates[0]?.iso || "",
+    end: timestampCandidates[timestampCandidates.length - 1]?.iso || "",
+    sourceWindowStart: timestampCandidates[0]?.value || "",
+    sourceWindowEnd: timestampCandidates[timestampCandidates.length - 1]?.value || "",
+  };
+}
+
+function buildHealthSplunkEsmBridgeQueryContext(queryContext = null, table = null) {
+  const sourceMeta = buildHealthSplunkEsmBridgeSourceMeta(queryContext, table);
+  return {
+    programmerId: String(queryContext?.programmerId || "").trim(),
+    programmerName: String(queryContext?.programmerName || "").trim(),
+    mediaCompany: String(queryContext?.programmerId || "").trim(),
+    environmentKey: String(queryContext?.environmentKey || "").trim(),
+    environmentLabel: String(queryContext?.environmentLabel || "").trim(),
+    requestorIds: sourceMeta.requestorIds,
+    mvpdIds: sourceMeta.mvpdIds,
+    events: sourceMeta.events,
+    start: sourceMeta.start,
+    end: sourceMeta.end,
+    sourceWindowStart: sourceMeta.sourceWindowStart,
+    sourceWindowEnd: sourceMeta.sourceWindowEnd,
+    sourceRowCount: sourceMeta.rowCount,
+    requestSource: "health-splunk-esm-bridge",
+  };
+}
+
+function buildHealthSplunkEsmBridgeRows(rows = []) {
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      timestamp: buildHealthSplunkEsmBridgeTimestampLabel(row),
+      "requestor-id": String(row?.["requestor-id"] || "").trim(),
+      mvpd: String(row?.mvpd || "").trim(),
+      event: String(row?.event || "").trim(),
+      proxy: String(row?.proxy || "").trim(),
+      reason: String(row?.reason || "").trim(),
+      dc: String(row?.dc || "").trim(),
+      count: String(row?.count ?? "").trim(),
+      __timestampMs: Date.UTC(
+        Number(row?.year || 0),
+        Math.max(0, Number(row?.month || 1) - 1),
+        Math.max(1, Number(row?.day || 1)),
+        Math.max(0, Number(row?.hour || 0)),
+        Math.max(0, Number(row?.minute || 0)),
+        0,
+        0
+      ),
+    }))
+    .sort((left, right) => {
+      const timestampDelta = Number(right?.__timestampMs || 0) - Number(left?.__timestampMs || 0);
+      if (timestampDelta !== 0) {
+        return timestampDelta;
+      }
+      return Number(right?.count || 0) - Number(left?.count || 0);
+    })
+    .map((row) => {
+      const { __timestampMs, ...displayRow } = row;
+      return displayRow;
+    });
+
+  return {
+    columns: ["timestamp", "requestor-id", "mvpd", "event", "proxy", "reason", "dc", "count"],
+    rows: normalizedRows,
+  };
+}
+
+async function runHealthSplunkEsmBridgeForTable(rawQueryContext = null, table = null) {
+  const tableKey = String(table?.key || "").trim();
+  const queryContext = buildHealthSplunkQueryContext(rawQueryContext);
+  if (tableKey !== HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_TABLE_KEY) {
+    return {
+      ok: false,
+      tableKey,
+      error: "This HEALTH Splunk table does not have an ESM bridge.",
+    };
+  }
+  if (!queryContext.programmerId) {
+    return {
+      ok: false,
+      tableKey,
+      error: "Select a Media Company before loading the ESM bridge.",
+    };
+  }
+
+  const bridgeContext = buildHealthSplunkEsmBridgeQueryContext(queryContext, table);
+  if (!bridgeContext.start || !bridgeContext.end) {
+    return {
+      ok: true,
+      tableKey,
+      title: "ESM xref",
+      subtitle: "No Splunk rows are available to scope the ESM bridge.",
+      queryContext: bridgeContext,
+      requestUrl: "",
+      columns: ["timestamp", "requestor-id", "mvpd", "event", "proxy", "reason", "dc", "count"],
+      rows: [],
+      totalRows: 0,
+      error: "",
+      loadedAt: Date.now(),
+    };
+  }
+  if (bridgeContext.requestorIds.length === 0) {
+    return {
+      ok: false,
+      tableKey,
+      error: "Unable to determine a RequestorId from the Splunk result set.",
+    };
+  }
+  if (bridgeContext.events.length === 0) {
+    return {
+      ok: false,
+      tableKey,
+      error: "Unable to determine an event from the Splunk result set.",
+    };
+  }
+
+  const bridgeFetchResult = await fetchEsmHealthJson(bridgeContext, HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_PATH, {
+    limit: HEALTH_SPLUNK_ESM_BRIDGE_DEFAULT_LIMIT,
+    requestorIds: bridgeContext.requestorIds,
+    mvpdIds: bridgeContext.mvpdIds,
+    events: bridgeContext.events,
+  });
+  const displayRows = buildHealthSplunkEsmBridgeRows(bridgeFetchResult.rows);
+  return {
+    ok: bridgeFetchResult.ok === true,
+    tableKey,
+    title: "ESM xref",
+    subtitle: "Cross-referenced from Splunk MVPD error rows into the live ESM v3 event tree.",
+    queryContext: bridgeContext,
+    requestUrl: String(bridgeFetchResult.requestUrl || "").trim(),
+    columns: displayRows.columns,
+    rows: displayRows.rows,
+    totalRows: displayRows.rows.length,
+    status: Number(bridgeFetchResult.status || 0),
+    statusText: String(bridgeFetchResult.statusText || "").trim(),
+    error: String(bridgeFetchResult.error || "").trim(),
+    loadedAt: Date.now(),
+  };
+}
+
 function normalizeEsmHealthGranularity(value = "") {
   const normalized = String(value || "").trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(ESM_HEALTH_GRANULARITY_PATH_BY_KEY, normalized)
@@ -21393,6 +21589,11 @@ function buildEsmHealthRequestUrl(pathname = "", queryContext = null, options = 
     Object.prototype.hasOwnProperty.call(options, "platforms") ? options.platforms : queryContext?.platforms
   ).forEach((value) => {
     parsed.searchParams.append("platform", value);
+  });
+  normalizeEsmHealthFilterList(
+    Object.prototype.hasOwnProperty.call(options, "events") ? options.events : queryContext?.events
+  ).forEach((value) => {
+    parsed.searchParams.append("event", value);
   });
   return parsed.toString();
 }
@@ -35406,7 +35607,6 @@ function syncEsmWorkspaceRecordingControls(esmWorkspaceState) {
   }
 
   const icon = toggleButton.querySelector(".esm-workspace-record-btn-icon");
-  const label = toggleButton.querySelector(".esm-workspace-record-btn-label");
   const setToggleState = (mode = "idle") => {
     const isRecording = mode === "recording" || mode === "stopping";
     const isStopping = mode === "stopping";
@@ -35414,10 +35614,6 @@ function syncEsmWorkspaceRecordingControls(esmWorkspaceState) {
     toggleButton.classList.toggle("is-recording", isRecording);
     toggleButton.classList.toggle("is-stopping", isStopping);
     toggleButton.classList.toggle("is-idle", !isRecording);
-
-    if (label) {
-      label.textContent = isRecording ? "STOP" : "ESM";
-    }
 
     if (icon) {
       icon.classList.remove("esm-workspace-record-btn-icon--record", "esm-workspace-record-btn-icon--stop");
@@ -36543,7 +36739,6 @@ function esmWorkspaceBuildShellHtml() {
             aria-label="Record ESM"
           >
             <span class="esm-workspace-record-btn-icon esm-workspace-record-btn-icon--record" aria-hidden="true"></span>
-            <span class="esm-workspace-record-btn-label">ESM</span>
           </button>
         </div>
       </div>
@@ -48596,6 +48791,37 @@ async function handleHealthWorkspaceAction(message, sender = null) {
     return refreshed?.ok || refreshed?.partial ? { ok: true } : { ok: false, error: refreshed?.error || "Unable to refresh HEALTH Splunk results." };
   }
 
+  if (action === "load-esm-bridge") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const tableKey = String(message?.tableKey || message?.table?.key || "").trim();
+    if (!tableKey) {
+      return { ok: false, error: "HEALTH table key is required for the ESM bridge." };
+    }
+    const latestReport = healthWorkspaceGetLatestReport(selectionKey);
+    const latestTable = Array.isArray(latestReport?.tables)
+      ? latestReport.tables.find((entry) => String(entry?.key || "").trim() === tableKey)
+      : null;
+    if (!latestTable) {
+      return { ok: false, error: "Unable to find the latest HEALTH Splunk table for the requested ESM bridge." };
+    }
+    const queryContext = latestReport?.queryContext || healthWorkspaceGetLatestQueryContext(selectionKey);
+    if (!queryContext || typeof queryContext !== "object") {
+      return { ok: false, error: "No HEALTH Splunk query context is available for the ESM bridge." };
+    }
+    const bridgeResult = await runHealthSplunkEsmBridgeForTable(queryContext, latestTable);
+    if (bridgeResult.ok) {
+      return {
+        ok: true,
+        bridge: bridgeResult,
+      };
+    }
+    return {
+      ok: false,
+      error: bridgeResult.error || "Unable to load the HEALTH Splunk ESM bridge.",
+      bridge: bridgeResult,
+    };
+  }
+
   if (action === "clear-all") {
     const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
     if (selectionKey) {
@@ -52435,16 +52661,12 @@ function syncDegradationWorkspaceRecordingControls(panelState) {
   }
 
   const icon = toggleButton.querySelector(".degradation-record-btn-icon");
-  const label = toggleButton.querySelector(".degradation-record-btn-label");
   const setToggleState = (mode = "idle") => {
     const isRecording = mode === "recording" || mode === "stopping";
     const isStopping = mode === "stopping";
     toggleButton.classList.toggle("is-recording", isRecording);
     toggleButton.classList.toggle("is-stopping", isStopping);
     toggleButton.classList.toggle("is-idle", !isRecording);
-    if (label) {
-      label.textContent = isRecording ? "STOP" : "DEGRADATION";
-    }
     if (icon) {
       icon.classList.remove("degradation-record-btn-icon--record", "degradation-record-btn-icon--stop");
       icon.classList.add(isRecording ? "degradation-record-btn-icon--stop" : "degradation-record-btn-icon--record");
@@ -55087,7 +55309,6 @@ function degradationBuildControllerHtml(programmer, appInfo) {
         aria-label="Record DEGRADATION"
       >
         <span class="degradation-record-btn-icon degradation-record-btn-icon--record" aria-hidden="true"></span>
-        <span class="degradation-record-btn-label">DEGRADATION</span>
       </button>
     </div>
     <div class="degradation-cheat-sheet-row degradation-utility-row"${requestorControlsHiddenAttr}>
@@ -57809,34 +58030,24 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
     state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);
   const esmReady = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && premiumContext?.esmAvailable);
   const healthReady = Boolean(selectionContext?.programmerId && selectionContext?.requestorId && premiumContext?.hydrationReady);
-  const headline = !selectionContext?.programmerId
-    ? "Select a Media Company and RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
+  const adobePassOrgRequiredLabel = "Adobe Pass org required";
+  const healthActionGroupLabel = !selectionContext?.programmerId
+    ? "HEALTH actions. Select a Media Company and RequestorId to unlock ESM HEALTH and HEALTH SPLUNK."
     : !adobePassWorkflowActive
-      ? "Switch to the Adobe Pass org profile to unlock ESM HEALTH and HEALTH SPLUNK."
-    : !premiumContext?.hydrationReady
-      ? `Preparing HEALTH workspaces for ${selectionContext.programmerName || selectionContext.programmerId}...`
-      : healthReady
-        ? `Run ESM HEALTH or HEALTH SPLUNK for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
-        : context.hasProgrammerContext
-          ? "Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
-          : "Select a Media Company and RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH.";
-  const metaTokens = [
-    selectionContext?.requestorId ? `RequestorId ${selectionContext.requestorId}` : "RequestorId not selected",
-    selectionContext?.environmentLabel ? `Env ${selectionContext.environmentLabel}` : "",
-    adobePassWorkflowActive
-      ? premiumContext?.hydrationReady
-        ? "Premium hydrated"
-        : "Hydrating premium services"
-      : "Adobe Pass org required",
-  ].filter(Boolean);
+      ? `HEALTH actions. ${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile to unlock ESM HEALTH and HEALTH SPLUNK.`
+      : !premiumContext?.hydrationReady
+        ? `HEALTH actions. Preparing HEALTH workspaces for ${selectionContext.programmerName || selectionContext.programmerId}.`
+        : healthReady
+          ? `HEALTH actions for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
+          : context.hasProgrammerContext
+            ? "HEALTH actions. Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
+            : "HEALTH actions. Select a Media Company and RequestorId to unlock ESM HEALTH and HEALTH SPLUNK.";
 
   return `
     <article class="metadata-item hr-health-status-value">
       <p class="metadata-key">Status</p>
       <div class="metadata-value hr-health-status-body">
-        <p class="hr-health-status-copy">${escapeHtml(headline)}</p>
-        <p class="hr-health-status-meta">${escapeHtml(metaTokens.join(" · "))}</p>
-        <div class="hr-health-action-row">
+        <div class="hr-health-action-row" role="group" aria-label="${escapeHtml(healthActionGroupLabel)}">
           <button
             type="button"
             class="hr-health-action-btn hr-health-action-btn--secondary"

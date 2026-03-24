@@ -1469,6 +1469,26 @@ test("health workspaces render full-width collapsible report sections and expose
   assert.match(esmHealthWorkspaceCss, /\.esm-health-section-summary\s*\{/);
 });
 
+test("health status UI stays pill-only and premium recording controls stay icon-only with hover labels", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
+  const healthStatusSource = extractFunctionSource(popupSource, "buildHrContextHealthStatusItemHtml");
+  const esmRecordingSource = extractFunctionSource(popupSource, "syncEsmWorkspaceRecordingControls");
+  const degradationRecordingSource = extractFunctionSource(popupSource, "syncDegradationWorkspaceRecordingControls");
+
+  assert.doesNotMatch(healthStatusSource, /hr-health-status-copy/);
+  assert.doesNotMatch(healthStatusSource, /hr-health-status-meta/);
+  assert.match(healthStatusSource, /<div class="hr-health-action-row" role="group"/);
+  assert.doesNotMatch(popupSource, /esm-workspace-record-btn-label/);
+  assert.doesNotMatch(popupSource, /degradation-record-btn-label/);
+  assert.doesNotMatch(esmRecordingSource, /label\.textContent/);
+  assert.doesNotMatch(degradationRecordingSource, /label\.textContent/);
+  assert.match(popupCss, /\.hr-health-action-row\s*\{\s*display:\s*grid;/);
+  assert.match(popupCss, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(popupCss, /\.esm-workspace-record-toggle-btn\s*\{[\s\S]*width:\s*36px;/);
+  assert.match(popupCss, /\.degradation-record-toggle-btn\s*\{[\s\S]*width:\s*36px;/);
+});
+
 test("esm health rebinds to the live controller context and only persists the date window across ENV x Media Company switches", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
@@ -1591,6 +1611,32 @@ test("health splunk stays on the scoped job-create and results-preview calls ins
   assert.match(dashboardRunSource, /const scopedTables = getHealthSplunkTableDefinitions\(queryContext\);/);
   assert.match(dashboardRunSource, /const resolvedTables = scopedTables\.slice\(\);/);
   assert.match(dashboardRunSource, /await Promise\.all\(/);
+});
+
+test("health splunk MVPD error rows can cross-reference into the live ESM event tree", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const healthWorkspaceSource = fs.readFileSync(path.join(ROOT, "health-workspace.js"), "utf8");
+  const healthWorkspaceCss = fs.readFileSync(path.join(ROOT, "health-workspace.css"), "utf8");
+  const bridgeRunSource = extractFunctionSource(popupSource, "runHealthSplunkEsmBridgeForTable");
+  const requestUrlSource = extractFunctionSource(popupSource, "buildEsmHealthRequestUrl");
+  const workspaceActionSource = extractFunctionSource(popupSource, "handleHealthWorkspaceAction");
+
+  assert.match(popupSource, /const HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_TABLE_KEY = "sev2_mvpd_error_codes";/);
+  assert.match(popupSource, /const HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_PATH = "year\/month\/day\/hour\/minute\/event\/requestor-id\/proxy\/mvpd\/reason\/dc\.json";/);
+  assert.match(bridgeRunSource, /fetchEsmHealthJson\(bridgeContext,\s*HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_PATH,\s*\{/);
+  assert.match(bridgeRunSource, /requestorIds:\s*bridgeContext\.requestorIds,/);
+  assert.match(bridgeRunSource, /mvpdIds:\s*bridgeContext\.mvpdIds,/);
+  assert.match(bridgeRunSource, /events:\s*bridgeContext\.events,/);
+  assert.match(requestUrlSource, /searchParams\.append\("event",\s*value\)/);
+  assert.match(workspaceActionSource, /if \(action === "load-esm-bridge"\) \{/);
+  assert.match(workspaceActionSource, /const latestReport = healthWorkspaceGetLatestReport\(selectionKey\);/);
+  assert.match(workspaceActionSource, /const bridgeResult = await runHealthSplunkEsmBridgeForTable\(queryContext,\s*latestTable\);/);
+  assert.match(healthWorkspaceSource, /const HEALTH_SPLUNK_ESM_BRIDGE_TABLE_KEY = "sev2_mvpd_error_codes";/);
+  assert.match(healthWorkspaceSource, /data-health-esm-bridge-action="load"/);
+  assert.match(healthWorkspaceSource, /function renderEsmBridgeResult\(table = null\)/);
+  assert.match(healthWorkspaceSource, /void loadEsmBridgeForTable\(target\.dataset\.healthEsmBridgeTableKey \|\| ""\);/);
+  assert.match(healthWorkspaceCss, /\.health-report-summary-action-btn\s*\{/);
+  assert.match(healthWorkspaceCss, /\.health-report-bridge\s*\{/);
 });
 
 test("health splunk keeps auth wait in a pending state instead of hard-failing the workspace", () => {
