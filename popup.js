@@ -65708,10 +65708,19 @@ async function enforceAdobePassAccess(loginData) {
       });
       if (Array.isArray(unifiedShellOrganizations) && unifiedShellOrganizations.length > 0) {
         pickerOrganizations = [...organizations, ...unifiedShellOrganizations];
-        updateRestrictedOrgOptions(pickerOrganizations, preferredOrganizationSeed, {
+        detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations(
+          {
+            ...profileSeedData,
+            profile: normalizedProfile,
+            organizations: pickerOrganizations,
+          },
+          pickerOrganizations
+        );
+        organizations = pickerOrganizations;
+        updateRestrictedOrgOptions(organizations, preferredOrganizationSeed, {
           ...profileSeedData,
           profile: normalizedProfile,
-          organizations: pickerOrganizations,
+          organizations,
           detectedOrganizations,
         });
         accessContext = resolveAdobePassAccessContext(

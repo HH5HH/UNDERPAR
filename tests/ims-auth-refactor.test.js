@@ -3056,6 +3056,11 @@ test("activation only trusts explicit target-org selection and restricted retry 
   assert.match(activationPrepSource, /fetchUnderparUnifiedShellOrganizations\(loginData\.accessToken/);
   assert.match(activationPrepSource, /const activeOrganizationSeed = buildRestrictedOrganizationContext\(/);
   assert.match(activationPrepSource, /activeOrganization: activeOrganizationSeed/);
+  assert.match(
+    activationPrepSource,
+    /detectedOrganizations = collectCanonicalRestrictedDetectedOrganizations\(\s*\{[\s\S]*organizations:\s*pickerOrganizations,[\s\S]*\},\s*pickerOrganizations\s*\);/s
+  );
+  assert.match(activationPrepSource, /organizations = pickerOrganizations;/);
   assert.match(activationPrepSource, /tokenHasReadOrganizationsScope/);
   assert.doesNotMatch(activationPrepSource, /selectedTargetOrganization \|\| loginData\?\.adobePassOrg/);
   assert.doesNotMatch(activationPrepSource, /findMatchingRestrictedOrganizationOption\(state\.restrictedOrgOptions, loginData\?\.adobePassOrg\)/);
