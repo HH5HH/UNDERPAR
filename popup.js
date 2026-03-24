@@ -53669,6 +53669,66 @@ function resolveRestV2LearningRequestorDomainName(programmer = null, requestorId
   return String(collectRestV2LearningRequestorDomainNames(programmer, requestorId)[0] || "").trim();
 }
 
+async function enrichRestV2LearningResourcesFromConsoleContext(context = null) {
+  const resolvedContext = context && typeof context === "object" ? context : null;
+  if (!resolvedContext?.programmerId) {
+    return resolvedContext;
+  }
+
+  const programmerId = String(resolvedContext.programmerId || "").trim();
+  const requestorId = firstNonEmptyString([
+    String(resolvedContext.requestorId || "").trim(),
+    String(resolvedContext.serviceProviderId || "").trim(),
+  ]);
+  const mvpdId = String(resolvedContext.mvpd || "").trim();
+  if (!programmerId || !requestorId || !mvpdId) {
+    return resolvedContext;
+  }
+
+  let quickResourceOptions = bobtoolsWorkspaceResolveQuickResourceOptions(programmerId, requestorId, mvpdId);
+  let consoleResourceIds = bobtoolsWorkspaceNormalizeQuickResourceIds(
+    Array.isArray(quickResourceOptions?.resourceIds) ? quickResourceOptions.resourceIds : []
+  );
+
+  if (consoleResourceIds.length === 0) {
+    try {
+      const snapshot = await mvpdWorkspaceEnsureSnapshot(
+        {
+          programmerId,
+          programmerName: String(resolvedContext.programmerName || "").trim(),
+          requestorId,
+          mvpdId,
+          isReady: true,
+        },
+        {
+          forceRefresh: false,
+        }
+      );
+      quickResourceOptions = bobtoolsWorkspaceResolveQuickResourceOptions(programmerId, requestorId, mvpdId);
+      consoleResourceIds = bobtoolsWorkspaceNormalizeQuickResourceIds(
+        Array.isArray(quickResourceOptions?.resourceIds) && quickResourceOptions.resourceIds.length > 0
+          ? quickResourceOptions.resourceIds
+          : Array.isArray(snapshot?.resourceIds) && snapshot.resourceIds.length > 0
+            ? snapshot.resourceIds
+            : snapshot?.resourceIdsRaw
+      );
+    } catch {
+      // Leave resourceIds as-is when console-backed resource hydration is unavailable.
+    }
+  }
+
+  if (consoleResourceIds.length === 0) {
+    return resolvedContext;
+  }
+
+  return {
+    ...resolvedContext,
+    resourceIdPool: consoleResourceIds.slice(),
+    resourceIds: sampleRestV2LearningResourceIds(consoleResourceIds, 10),
+    resourceIdPoolSource: "console-tms-map",
+  };
+}
+
 function findRestV2PreauthorizeHistoryEntriesForLearning(programmerId = "", requestorId = "", mvpd = "") {
   const history = getRestV2PreauthorizeHistoryForProgrammer(programmerId);
   const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
@@ -54002,7 +54062,13 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
     ...resolvedContext,
   };
   if (resolvedEntry.usesBodySamlResponse !== true || String(preparedContext.samlResponse || "").trim()) {
+    if (resolvedEntry.usesBodyResources === true) {
+      return enrichRestV2LearningResourcesFromConsoleContext(preparedContext);
+    }
     return preparedContext;
+  }
+  if (resolvedEntry.usesBodyResources === true) {
+    Object.assign(preparedContext, await enrichRestV2LearningResourcesFromConsoleContext(preparedContext));
   }
   const flowId = firstNonEmptyString([
     String(preparedContext.flowId || "").trim(),
@@ -77792,8 +77858,30 @@ function registerEventHandlers() {
       programmer: selectedProgrammer,
       services: selectedServices,
       forceRefresh: false,
-      onlyIfWorkspaceOpen: true,
+      onlyIfWorkspaceOpen: false,
       surfaceMissingSelectionError: false,
+    }).then((snapshotResult) => {
+      const expectedProgrammerId = String(selectedProgrammer?.programmerId || "").trim();
+      const expectedRequestorId = String(nextRequestorId || "").trim();
+      const expectedMvpdId = String(nextMvpdId || "").trim();
+      if (snapshotResult?.ok !== true) {
+        return;
+      }
+      if (
+        String(resolveSelectedProgrammer()?.programmerId || "").trim() !== expectedProgrammerId ||
+        String(state.selectedRequestorId || "").trim() !== expectedRequestorId ||
+        String(state.selectedMvpdId || "").trim() !== expectedMvpdId
+      ) {
+        return;
+      }
+      const currentServices = expectedProgrammerId
+        ? getCurrentPremiumAppsSnapshot(expectedProgrammerId) || selectedServices
+        : selectedServices;
+      if (currentServices && typeof currentServices === "object") {
+        renderPremiumServices(currentServices, selectedProgrammer, {
+          controllerReason: "mvpd-resource-snapshot",
+        });
+      }
     });
   });
 

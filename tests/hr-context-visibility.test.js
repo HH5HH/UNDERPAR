@@ -187,6 +187,38 @@ function loadRestV2LearningResourceHelpers(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2LearningContextPreparer(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    "function bobtoolsWorkspaceResolveQuickResourceOptions(programmerId, requestorId, mvpdId) { return typeof globalThis.__seed.resolveQuickResourceOptions === 'function' ? globalThis.__seed.resolveQuickResourceOptions(programmerId, requestorId, mvpdId) : { resourceIds: [] }; }",
+    "function bobtoolsWorkspaceNormalizeQuickResourceIds(values = [], maxItems = 320) { const normalizedMax = Number(maxItems || 0); const limit = Number.isFinite(normalizedMax) && normalizedMax > 0 ? normalizedMax : 320; const unique = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const text = String(value || '').trim(); if (!text) { return; } const key = text.toLowerCase(); if (seen.has(key)) { return; } seen.add(key); unique.push(text); }); return unique.slice(0, limit); }",
+    "async function mvpdWorkspaceEnsureSnapshot(selectionContext, options = {}) { return typeof globalThis.__seed.loadSnapshot === 'function' ? globalThis.__seed.loadSnapshot(selectionContext, options) : null; }",
+    extractFunctionSource(source, "sampleRestV2LearningResourceIds"),
+    extractFunctionSource(source, "enrichRestV2LearningResourcesFromConsoleContext"),
+    "function resolveRestV2DebugFlowIdForHarvest() { return ''; }",
+    "async function getRestV2DebugFlowSnapshot() { return null; }",
+    "function extractRestV2SamlResponseFromDebugFlow() { return {}; }",
+    extractFunctionSource(source, "prepareRestV2InteractiveDocsContextForEntry"),
+    "module.exports = { enrichRestV2LearningResourcesFromConsoleContext, prepareRestV2InteractiveDocsContextForEntry };",
+  ].join("\n\n");
+  const mathObject = seed.math
+    ? Object.assign(Object.create(Math), {
+        random: seed.math.random,
+      })
+    : Math;
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+    Math: mathObject,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadRestV2LearningDomainResolver(seed = {}) {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -342,6 +374,10 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   );
   const collectRestV2LearningResourceIdsSource = extractFunctionSource(popupSource, "collectRestV2LearningResourceIds");
   const sampleRestV2LearningResourceIdsSource = extractFunctionSource(popupSource, "sampleRestV2LearningResourceIds");
+  const enrichRestV2LearningResourcesFromConsoleContextSource = extractFunctionSource(
+    popupSource,
+    "enrichRestV2LearningResourcesFromConsoleContext"
+  );
   const collectRestV2LearningRequestorDomainNamesSource = extractFunctionSource(
     popupSource,
     "collectRestV2LearningRequestorDomainNames"
@@ -380,6 +416,9 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2AppForServiceProvider/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2LearningRequestorDomainName/);
   assert.match(buildRestV2InteractiveDocsContextSource, /buildRestV2InteractiveDocsUrl\(resolvedEntry\.operationAnchor/);
+  assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /mvpdWorkspaceEnsureSnapshot/);
+  assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /bobtoolsWorkspaceResolveQuickResourceOptions/);
+  assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /resourceIdPoolSource:\s*"console-tms-map"/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsContext/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /buildRestV2InteractiveDocsHydrationPlan/);
   assert.match(buildRestV2InteractiveDocsEntryActivationStateSource, /body\.resources/);
@@ -406,6 +445,11 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /data-restv2-doc-entry-key/);
   assert.match(popupSource, /REST API V2 Interactive Docs/);
   assert.match(popupSource, /getRestV2InteractiveDocsSections/);
+  assert.match(
+    popupSource,
+    /els\.mvpdSelect\.addEventListener\("change",[\s\S]*?mvpdWorkspaceRefreshSelectedSnapshot\(\{[\s\S]*?onlyIfWorkspaceOpen:\s*false,/
+  );
+  assert.match(popupSource, /controllerReason:\s*"mvpd-resource-snapshot"/);
   assert.match(openRestV2InteractiveDocsEntrySource, /ensureDcrAccessTokenWithServiceRecovery/);
   assert.match(openRestV2InteractiveDocsEntrySource, /prepareRestV2InteractiveDocsContextForEntry/);
   assert.match(openRestV2InteractiveDocsEntrySource, /buildRestV2InteractiveDocsContext\(resolveSelectedProgrammer\(\), entry\)/);
@@ -581,6 +625,55 @@ test("REST V2 learning resolves the first configured channel domain for the sele
     ),
     "turner.example.test"
   );
+});
+
+test("REST V2 learning enriches resource-bearing docs context from the console-backed MVPD resource pool", async () => {
+  const { enrichRestV2LearningResourcesFromConsoleContext, prepareRestV2InteractiveDocsContextForEntry } =
+    loadRestV2LearningContextPreparer({
+      loadSnapshot(selectionContext) {
+        return {
+          resourceIds: ["1234", "NBALP", "TMSIDX"],
+          resourceIdsRaw: ["1234-raw", "NBALP-raw", "TMSIDX-raw"],
+          selectionContext,
+        };
+      },
+    });
+
+  const enriched = await enrichRestV2LearningResourcesFromConsoleContext({
+    ok: true,
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "turner",
+    serviceProviderId: "turner",
+    mvpd: "Comcast_SSO",
+    resourceIds: [],
+    resourceIdPool: [],
+  });
+
+  assert.deepEqual(Array.from(enriched.resourceIdPool || []), ["1234", "NBALP", "TMSIDX"]);
+  assert.deepEqual(Array.from(enriched.resourceIds || []), ["1234", "NBALP", "TMSIDX"]);
+  assert.equal(enriched.resourceIdPoolSource, "console-tms-map");
+
+  const prepared = await prepareRestV2InteractiveDocsContextForEntry(
+    {
+      key: "decisions-authorize",
+      usesBodyResources: true,
+      usesBodySamlResponse: false,
+    },
+    {
+      ok: true,
+      programmerId: "Turner",
+      programmerName: "Turner",
+      requestorId: "turner",
+      serviceProviderId: "turner",
+      mvpd: "Comcast_SSO",
+      resourceIds: [],
+      resourceIdPool: [],
+    }
+  );
+
+  assert.deepEqual(Array.from(prepared.resourceIds || []), ["1234", "NBALP", "TMSIDX"]);
+  assert.equal(prepared.resourceIdPoolSource, "console-tms-map");
 });
 
 test("REST V2 learning resource helpers merge the requestor x MVPD pool and sample ten unique ids", () => {
