@@ -686,9 +686,16 @@ test("REST V2 learning resolves the first configured channel domain for the sele
 });
 
 test("REST V2 learning enriches resource-bearing docs context from the console-backed MVPD resource pool", async () => {
+  const snapshotCalls = [];
   const { enrichRestV2LearningResourcesFromConsoleContext, prepareRestV2InteractiveDocsContextForEntry } =
     loadRestV2LearningContextPreparer({
-      loadSnapshot(selectionContext) {
+      loadSnapshot(selectionContext, options = {}) {
+        snapshotCalls.push({
+          programmerId: selectionContext?.programmerId,
+          requestorId: selectionContext?.requestorId,
+          mvpdId: selectionContext?.mvpdId,
+          forceRefresh: options?.forceRefresh === true,
+        });
         return {
           resourceIds: ["1234", "NBALP", "TMSIDX"],
           resourceIdsRaw: ["1234-raw", "NBALP-raw", "TMSIDX-raw"],
@@ -711,6 +718,14 @@ test("REST V2 learning enriches resource-bearing docs context from the console-b
   assert.deepEqual(Array.from(enriched.resourceIdPool || []), ["1234", "NBALP", "TMSIDX"]);
   assert.deepEqual(Array.from(enriched.resourceIds || []), ["1234", "NBALP", "TMSIDX"]);
   assert.equal(enriched.resourceIdPoolSource, "console-tms-map");
+  assert.deepEqual(snapshotCalls, [
+    {
+      programmerId: "Turner",
+      requestorId: "turner",
+      mvpdId: "Comcast_SSO",
+      forceRefresh: false,
+    },
+  ]);
 
   const prepared = await prepareRestV2InteractiveDocsContextForEntry(
     {
@@ -732,6 +747,56 @@ test("REST V2 learning enriches resource-bearing docs context from the console-b
 
   assert.deepEqual(Array.from(prepared.resourceIds || []), ["1234", "NBALP", "TMSIDX"]);
   assert.equal(prepared.resourceIdPoolSource, "console-tms-map");
+});
+
+test("REST V2 learning force-refreshes the selected MVPD snapshot when cached resourceIds stay empty", async () => {
+  const snapshotCalls = [];
+  const { enrichRestV2LearningResourcesFromConsoleContext } = loadRestV2LearningContextPreparer({
+    loadSnapshot(selectionContext, options = {}) {
+      snapshotCalls.push({
+        programmerId: selectionContext?.programmerId,
+        requestorId: selectionContext?.requestorId,
+        mvpdId: selectionContext?.mvpdId,
+        forceRefresh: options?.forceRefresh === true,
+      });
+      return options?.forceRefresh === true
+        ? {
+            resourceIdsRaw: ["R1", "R2", "R3"],
+          }
+        : {
+            resourceIdsRaw: [],
+          };
+    },
+  });
+
+  const enriched = await enrichRestV2LearningResourcesFromConsoleContext({
+    ok: true,
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "turner",
+    serviceProviderId: "turner",
+    mvpd: "Comcast_SSO",
+    resourceIds: [],
+    resourceIdPool: [],
+  });
+
+  assert.deepEqual(Array.from(enriched.resourceIdPool || []), ["R1", "R2", "R3"]);
+  assert.deepEqual(Array.from(enriched.resourceIds || []), ["R1", "R2", "R3"]);
+  assert.equal(enriched.resourceIdPoolSource, "console-tms-map");
+  assert.deepEqual(snapshotCalls, [
+    {
+      programmerId: "Turner",
+      requestorId: "turner",
+      mvpdId: "Comcast_SSO",
+      forceRefresh: false,
+    },
+    {
+      programmerId: "Turner",
+      requestorId: "turner",
+      mvpdId: "Comcast_SSO",
+      forceRefresh: true,
+    },
+  ]);
 });
 
 test("REST V2 learning resource helpers merge the requestor x MVPD pool and sample ten unique ids", () => {

@@ -53690,7 +53690,7 @@ function resolveRestV2LearningRequestorDomainName(programmer = null, requestorId
   return String(collectRestV2LearningRequestorDomainNames(programmer, requestorId)[0] || "").trim();
 }
 
-async function enrichRestV2LearningResourcesFromConsoleContext(context = null) {
+async function enrichRestV2LearningResourcesFromConsoleContext(context = null, options = {}) {
   const resolvedContext = context && typeof context === "object" ? context : null;
   if (!resolvedContext?.programmerId) {
     return resolvedContext;
@@ -53711,7 +53711,7 @@ async function enrichRestV2LearningResourcesFromConsoleContext(context = null) {
     Array.isArray(quickResourceOptions?.resourceIds) ? quickResourceOptions.resourceIds : []
   );
 
-  if (consoleResourceIds.length === 0) {
+  const refreshSnapshotResources = async (forceRefresh = false) => {
     try {
       const snapshot = await mvpdWorkspaceEnsureSnapshot(
         {
@@ -53722,7 +53722,7 @@ async function enrichRestV2LearningResourcesFromConsoleContext(context = null) {
           isReady: true,
         },
         {
-          forceRefresh: false,
+          forceRefresh,
         }
       );
       quickResourceOptions = bobtoolsWorkspaceResolveQuickResourceOptions(programmerId, requestorId, mvpdId);
@@ -53733,9 +53733,19 @@ async function enrichRestV2LearningResourcesFromConsoleContext(context = null) {
             ? snapshot.resourceIds
             : snapshot?.resourceIdsRaw
       );
+      return snapshot;
     } catch {
       // Leave resourceIds as-is when console-backed resource hydration is unavailable.
+      return null;
     }
+  };
+
+  if (consoleResourceIds.length === 0) {
+    await refreshSnapshotResources(false);
+  }
+
+  if (consoleResourceIds.length === 0 && options?.forceRefresh !== false) {
+    await refreshSnapshotResources(true);
   }
 
   if (consoleResourceIds.length === 0) {
