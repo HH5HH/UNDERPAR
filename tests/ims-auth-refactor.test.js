@@ -170,9 +170,10 @@ function loadPopupConsoleConfigUrlHelper() {
     extractFunctionSource(source, "mvpdWorkspaceExtractConfigurationVersion"),
     extractFunctionSource(source, "getKnownAdobeConsoleConfigurationVersion"),
     extractFunctionSource(source, "appendAdobeConsoleConfigurationVersion"),
+    extractFunctionSource(source, "buildAdobeConsoleRestApiUrl"),
     extractFunctionSource(source, "buildProgrammerEndpointsForConsoleBase"),
     "function setBootstrapState(nextBootstrapState = null) { underparStateRef = nextBootstrapState && typeof nextBootstrapState === 'object' ? { consoleBootstrapState: nextBootstrapState } : null; }",
-    "module.exports = { mvpdWorkspaceExtractConfigurationVersion, getKnownAdobeConsoleConfigurationVersion, appendAdobeConsoleConfigurationVersion, buildProgrammerEndpointsForConsoleBase, setBootstrapState };",
+    "module.exports = { mvpdWorkspaceExtractConfigurationVersion, getKnownAdobeConsoleConfigurationVersion, appendAdobeConsoleConfigurationVersion, buildAdobeConsoleRestApiUrl, buildProgrammerEndpointsForConsoleBase, setBootstrapState };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
@@ -1284,6 +1285,16 @@ test("console bootstrap carries the rolling CSRF token through direct UnderPAR c
   assert.match(fetchConsoleSource, /headers:\s*toDebugHeadersObject\(response\.headers \|\| new Headers\(\)\),/);
 });
 
+test("esm health tenant token requests stay on the console rest api base", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const restApiUrlSource = extractFunctionSource(popupSource, "buildAdobeConsoleRestApiUrl");
+  const tokenSource = extractFunctionSource(popupSource, "fetchEsmHealthTenantDataToken");
+
+  assert.match(restApiUrlSource, /return `\$\{normalizedConsoleBase\}\/rest\/api\/\$\{normalizedPath\}`;/);
+  assert.match(tokenSource, /const tokenUrl = buildAdobeConsoleRestApiUrl\(ESM_HEALTH_TENANT_TOKEN_PATH,\s*consoleBase\);/);
+  assert.doesNotMatch(tokenSource, /consoleBase\.replace\(\/\\\/\+\$\/, ""\)\}\$\{ESM_HEALTH_TENANT_TOKEN_PATH\}/);
+});
+
 test("programmer endpoint access_denied responses stay on the limited console path", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const helperSource = extractFunctionSource(popupSource, "isAdobeConsoleAccessDeniedResponse");
@@ -1324,10 +1335,12 @@ test("legacy programmer bootstrap fallback helpers are removed from source", () 
 test("programmer discovery stays on deterministic entity endpoints and console role extraction handles authority objects", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const endpointBuilderSource = extractFunctionSource(popupSource, "buildProgrammerEndpointsForConsoleBase");
+  const restApiHelperSource = extractFunctionSource(popupSource, "buildAdobeConsoleRestApiUrl");
   const roleExtractorSource = extractFunctionSource(popupSource, "extractAdobeConsoleGrantedAuthorities");
   const roleValueSource = extractFunctionSource(popupSource, "extractAdobeConsoleGrantedAuthorityValue");
 
-  assert.match(endpointBuilderSource, /rest\/api\/entity\/Programmer/);
+  assert.match(restApiHelperSource, /return `\$\{normalizedConsoleBase\}\/rest\/api\/\$\{normalizedPath\}`;/);
+  assert.match(endpointBuilderSource, /buildAdobeConsoleRestApiUrl\("entity\/Programmer"/);
   assert.doesNotMatch(endpointBuilderSource, /rest\/api\/programmers/);
   assert.doesNotMatch(endpointBuilderSource, /rest\/api\/v1\/programmers/);
   assert.match(roleValueSource, /entry\.authority/);

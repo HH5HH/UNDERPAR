@@ -618,17 +618,31 @@ function appendAdobeConsoleConfigurationVersion(urlValue = "", configurationVers
   }
 }
 
+function buildAdobeConsoleRestApiUrl(pathname = "", consoleBase = "") {
+  const normalizedConsoleBase = String(consoleBase || ADOBE_CONSOLE_BASE || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "")
+    .trim()
+    .replace(/\/+$/, "");
+  const normalizedPath = String(pathname || "").trim().replace(/^\/+/, "");
+  if (!normalizedConsoleBase) {
+    return normalizedPath ? `/rest/api/${normalizedPath}` : "";
+  }
+  if (!normalizedPath) {
+    return `${normalizedConsoleBase}/rest/api`;
+  }
+  return `${normalizedConsoleBase}/rest/api/${normalizedPath}`;
+}
+
 function buildProgrammerEndpointsForConsoleBase(consoleBase = "") {
   const normalizedConsoleBase = String(consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "").trim();
   return uniquePreserveOrder([
-    appendAdobeConsoleConfigurationVersion(`${normalizedConsoleBase}/rest/api/entity/Programmer`),
+    appendAdobeConsoleConfigurationVersion(buildAdobeConsoleRestApiUrl("entity/Programmer", normalizedConsoleBase)),
   ]);
 }
 
 function buildChannelEndpointsForConsoleBase(consoleBase = "") {
   const normalizedConsoleBase = String(consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase || "").trim();
   return uniquePreserveOrder([
-    appendAdobeConsoleConfigurationVersion(`${normalizedConsoleBase}/rest/api/entity/ServiceProvider`),
+    appendAdobeConsoleConfigurationVersion(buildAdobeConsoleRestApiUrl("entity/ServiceProvider", normalizedConsoleBase)),
   ]);
 }
 
@@ -21304,7 +21318,7 @@ function extractEsmHealthTokenValue(payload = null, fallbackText = "") {
 async function fetchEsmHealthTenantDataToken(queryContext = null) {
   const environment = getActiveAdobePassEnvironment();
   const consoleBase = String(environment?.consoleBase || ADOBE_CONSOLE_BASE || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase).trim();
-  const tokenUrl = `${consoleBase.replace(/\/+$/, "")}${ESM_HEALTH_TENANT_TOKEN_PATH}`;
+  const tokenUrl = buildAdobeConsoleRestApiUrl(ESM_HEALTH_TENANT_TOKEN_PATH, consoleBase);
   try {
     const result = await fetchAdobeConsoleJsonWithLoginButtonFallback([tokenUrl], "ESM HEALTH token", {
       method: "GET",
