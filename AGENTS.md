@@ -32,3 +32,11 @@
 
 - UnderPAR enforces automatic patch version bump during commit via `.githooks/pre-commit`.
 - One-time hook setup command: `scripts/install_git_hooks.sh`
+
+## Get Latest Publication Rule
+
+- For any major UnderPAR update that needs user validation through `Get Latest`, local-only changes are not sufficient.
+- Publish-ready major updates must rebuild the distro, commit the release artifacts, and push `main` so GitHub `underpar_distro.version.json` and `underpar_distro.zip` reflect the new version.
+- Use: `scripts/publish_get_latest_release.sh --message "<commit message>"`
+- The publish flow is only valid from `main`. If the changes are not on `main`, say explicitly that `Get Latest` validation is not yet possible.
+- Do not close out a major update as `Get Latest`-testable until the remote `main` package metadata is updated.

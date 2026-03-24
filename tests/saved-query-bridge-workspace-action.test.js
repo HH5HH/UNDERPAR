@@ -109,6 +109,129 @@ test("saved query bridge proxies MEG workspace actions to the runtime listener",
   assert.equal(response.result?.format, "html");
 });
 
+test("saved query bridge preserves app-level vault globals when saving a record", async () => {
+  const source = fs.readFileSync(BRIDGE_PATH, "utf8");
+  let messageHandler = null;
+  let writtenVault = null;
+
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    URL,
+    URLSearchParams,
+    UnderparVaultStore: {
+      isSupported() {
+        return true;
+      },
+      async readAggregatePayload() {
+        return {
+          schemaVersion: 1,
+          updatedAt: 111,
+          underpar: {
+            globals: {
+              savedQueries: {},
+              cmImsByEnvironment: {
+                "release-production": {
+                  clientId: "cm-console-ui",
+                },
+              },
+              adobeIms: {
+                clientId: "underpar-client-id",
+                scope: "openid,AdobeID",
+                source: "ZIP.KEY",
+              },
+              slack: {
+                ready: true,
+                identity: {
+                  userId: "U123",
+                },
+              },
+            },
+            app: {
+              savedQueries: {},
+            },
+          },
+          pass: {
+            schemaVersion: 1,
+            environments: {},
+          },
+        };
+      },
+      async writeAggregatePayload(payload) {
+        writtenVault = payload;
+        return payload;
+      },
+    },
+    localStorage: {
+      length: 0,
+      key() {
+        return null;
+      },
+      getItem() {
+        return null;
+      },
+      setItem() {},
+      removeItem() {},
+    },
+    chrome: {
+      runtime: {
+        async sendMessage() {
+          return { ok: true };
+        },
+      },
+      storage: {
+        local: {
+          async get() {
+            return {};
+          },
+          async set() {},
+        },
+      },
+    },
+    window: {
+      addEventListener(type, handler) {
+        if (type === "message") {
+          messageHandler = handler;
+        }
+      },
+    },
+  };
+
+  vm.runInNewContext(source, context, { filename: BRIDGE_PATH });
+  assert.equal(typeof messageHandler, "function");
+
+  const response = await new Promise((resolve) => {
+    messageHandler({
+      data: {
+        type: "underpar:meg-saved-query-bridge",
+        requestId: "req-2",
+        action: "put-record",
+        payload: {
+          name: "Daily Health",
+          url: "/esm/v3/media-company/year/month/day/event",
+        },
+      },
+      source: {
+        postMessage(message) {
+          resolve(message);
+        },
+      },
+    });
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(writtenVault?.underpar?.globals?.adobeIms?.clientId, "underpar-client-id");
+  assert.equal(
+    writtenVault?.underpar?.globals?.cmImsByEnvironment?.["release-production"]?.clientId,
+    "cm-console-ui"
+  );
+  assert.equal(writtenVault?.underpar?.globals?.slack?.identity?.userId, "U123");
+  assert.equal(
+    writtenVault?.underpar?.globals?.savedQueries?.["Daily Health"],
+    "/esm/v3/media-company/year/month/day/event"
+  );
+});
+
 test("saved query bridge fallback derives chromiumapp esm deeplinks from chrome-extension bridge URLs", () => {
   const source = fs.readFileSync(BRIDGE_PATH, "utf8");
   const script = [

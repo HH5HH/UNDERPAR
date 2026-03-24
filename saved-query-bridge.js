@@ -701,6 +701,17 @@ function normalizeVaultSavedQueries(input = null) {
   return normalizedEntries;
 }
 
+function cloneJsonLikeValue(value, fallback = null) {
+  if (value === undefined) {
+    return fallback;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return fallback;
+  }
+}
+
 function ensureVaultGlobalContainers(vaultPayload = null) {
   const target = vaultPayload && typeof vaultPayload === "object" ? vaultPayload : {};
   if (!target.underpar || typeof target.underpar !== "object" || Array.isArray(target.underpar)) {
@@ -718,6 +729,19 @@ function ensureVaultGlobalContainers(vaultPayload = null) {
     Array.isArray(target.underpar.globals.savedQueries)
   ) {
     target.underpar.globals.savedQueries = {};
+  }
+  if (
+    !target.underpar.globals.cmImsByEnvironment ||
+    typeof target.underpar.globals.cmImsByEnvironment !== "object" ||
+    Array.isArray(target.underpar.globals.cmImsByEnvironment)
+  ) {
+    target.underpar.globals.cmImsByEnvironment = {};
+  }
+  if (!Object.prototype.hasOwnProperty.call(target.underpar.globals, "adobeIms")) {
+    target.underpar.globals.adobeIms = null;
+  }
+  if (!Object.prototype.hasOwnProperty.call(target.underpar.globals, "slack")) {
+    target.underpar.globals.slack = null;
   }
   if (
     !target.underpar.app.savedQueries ||
@@ -760,9 +784,80 @@ function getVaultSavedQueriesInput(vaultPayload = null) {
 function setVaultSavedQueries(vaultPayload = null, savedQueries = null) {
   const target = ensureVaultGlobalContainers(vaultPayload);
   const normalizedSavedQueries = normalizeVaultSavedQueries(savedQueries);
-  target.underpar.globals.savedQueries = JSON.parse(JSON.stringify(normalizedSavedQueries));
-  target.underpar.app.savedQueries = JSON.parse(JSON.stringify(normalizedSavedQueries));
+  target.underpar.globals.savedQueries = cloneJsonLikeValue(normalizedSavedQueries, {});
+  target.underpar.app.savedQueries = cloneJsonLikeValue(normalizedSavedQueries, {});
   return normalizedSavedQueries;
+}
+
+function getVaultCmImsByEnvironmentInput(vaultPayload = null) {
+  if (!vaultPayload || typeof vaultPayload !== "object") {
+    return {};
+  }
+  if (
+    vaultPayload?.underpar?.globals?.cmImsByEnvironment &&
+    typeof vaultPayload.underpar.globals.cmImsByEnvironment === "object" &&
+    !Array.isArray(vaultPayload.underpar.globals.cmImsByEnvironment)
+  ) {
+    return vaultPayload.underpar.globals.cmImsByEnvironment;
+  }
+  if (
+    vaultPayload?.underpar?.cmImsByEnvironment &&
+    typeof vaultPayload.underpar.cmImsByEnvironment === "object" &&
+    !Array.isArray(vaultPayload.underpar.cmImsByEnvironment)
+  ) {
+    return vaultPayload.underpar.cmImsByEnvironment;
+  }
+  return {};
+}
+
+function getVaultImsRuntimeConfigInput(vaultPayload = null) {
+  if (!vaultPayload || typeof vaultPayload !== "object") {
+    return null;
+  }
+  if (vaultPayload?.underpar?.globals && Object.prototype.hasOwnProperty.call(vaultPayload.underpar.globals, "adobeIms")) {
+    return vaultPayload.underpar.globals.adobeIms;
+  }
+  if (vaultPayload?.underpar?.globals && Object.prototype.hasOwnProperty.call(vaultPayload.underpar.globals, "ims")) {
+    return vaultPayload.underpar.globals.ims;
+  }
+  if (vaultPayload?.underpar && Object.prototype.hasOwnProperty.call(vaultPayload.underpar, "adobeIms")) {
+    return vaultPayload.underpar.adobeIms;
+  }
+  return null;
+}
+
+function setVaultImsRuntimeConfig(vaultPayload = null, value = null) {
+  const target = ensureVaultGlobalContainers(vaultPayload);
+  target.underpar.globals.adobeIms = cloneJsonLikeValue(value, null);
+  if (Object.prototype.hasOwnProperty.call(target.underpar.globals, "ims")) {
+    delete target.underpar.globals.ims;
+  }
+  return target.underpar.globals.adobeIms;
+}
+
+function getVaultSlacktivationInput(vaultPayload = null) {
+  if (!vaultPayload || typeof vaultPayload !== "object") {
+    return null;
+  }
+  if (vaultPayload?.underpar?.globals && Object.prototype.hasOwnProperty.call(vaultPayload.underpar.globals, "slack")) {
+    return vaultPayload.underpar.globals.slack;
+  }
+  if (vaultPayload?.underpar?.globals && Object.prototype.hasOwnProperty.call(vaultPayload.underpar.globals, "slacktivation")) {
+    return vaultPayload.underpar.globals.slacktivation;
+  }
+  if (vaultPayload?.underpar && Object.prototype.hasOwnProperty.call(vaultPayload.underpar, "slacktivation")) {
+    return vaultPayload.underpar.slacktivation;
+  }
+  return null;
+}
+
+function setVaultSlacktivationRecord(vaultPayload = null, value = null) {
+  const target = ensureVaultGlobalContainers(vaultPayload);
+  target.underpar.globals.slack = cloneJsonLikeValue(value, null);
+  if (Object.prototype.hasOwnProperty.call(target.underpar.globals, "slacktivation")) {
+    delete target.underpar.globals.slacktivation;
+  }
+  return target.underpar.globals.slack;
 }
 
 function normalizeVaultPayload(payload = null) {
@@ -772,6 +867,9 @@ function normalizeVaultPayload(payload = null) {
     underpar: {
       globals: {
         savedQueries: {},
+        cmImsByEnvironment: {},
+        adobeIms: null,
+        slack: null,
       },
       app: {
         savedQueries: {},
@@ -790,6 +888,9 @@ function normalizeVaultPayload(payload = null) {
   normalized.schemaVersion = Number(payload?.schemaVersion || 1) || 1;
   normalized.updatedAt = Number(payload?.updatedAt || Date.now()) || Date.now();
   setVaultSavedQueries(normalized, getVaultSavedQueriesInput(payload));
+  normalized.underpar.globals.cmImsByEnvironment = cloneJsonLikeValue(getVaultCmImsByEnvironmentInput(payload), {});
+  setVaultImsRuntimeConfig(normalized, getVaultImsRuntimeConfigInput(payload));
+  setVaultSlacktivationRecord(normalized, getVaultSlacktivationInput(payload));
   normalized.pass =
     payload?.pass && typeof payload.pass === "object" && !Array.isArray(payload.pass)
       ? payload.pass
