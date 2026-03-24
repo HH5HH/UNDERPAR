@@ -1451,6 +1451,7 @@ test("health workspaces render full-width collapsible report sections and expose
   const healthWorkspaceCss = fs.readFileSync(path.join(ROOT, "health-workspace.css"), "utf8");
   const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
   const esmHealthWorkspaceCss = fs.readFileSync(path.join(ROOT, "esm-health-workspace.css"), "utf8");
+  const esmHealthWorkspaceHtml = fs.readFileSync(path.join(ROOT, "esm-health-workspace.html"), "utf8");
 
   assert.match(healthWorkspaceSource, /<details class="rest-report-card health-report-card health-report-collapsible/);
   assert.match(healthWorkspaceCss, /\.health-report-grid\s*\{\s*display:\s*flex;/);
@@ -1460,8 +1461,47 @@ test("health workspaces render full-width collapsible report sections and expose
   assert.match(esmHealthWorkspaceSource, /"API Entry Points"/);
   assert.match(esmHealthWorkspaceSource, /"SDK Versions"/);
   assert.match(esmHealthWorkspaceSource, /renderInsightCards\(report\)/);
+  assert.match(esmHealthWorkspaceHtml, /<body class="spectrum spectrum--medium spectrum--dark">/);
+  assert.match(esmHealthWorkspaceHtml, /class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"/);
+  assert.match(esmHealthWorkspaceCss, /\.page-env-badge\s*\{/);
+  assert.match(esmHealthWorkspaceCss, /\.spectrum-Button--primary,\s*\.workspace-text-btn--accent,\s*\.esm-health-granularity-btn\.is-active\s*\{/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-table-grid\s*\{\s*display:\s*flex;/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-section-summary\s*\{/);
+});
+
+test("esm health rebinds to the live controller context and only persists the date window across ENV x Media Company switches", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
+  const controllerPayloadSource = extractFunctionSource(popupSource, "esmHealthWorkspaceGetSelectedControllerStatePayload");
+  const refreshActionSource = extractFunctionSource(popupSource, "handleEsmHealthWorkspaceAction");
+  const runSource = extractFunctionSource(popupSource, "runEsmHealthDashboardForSelection");
+  const rebaseSource = extractFunctionSource(popupSource, "rebaseEsmHealthDashboardQueryContextForCurrentSelection");
+  const applyControllerSource = extractFunctionSource(esmHealthWorkspaceSource, "applyControllerState");
+  const handleWorkspaceEventSource = extractFunctionSource(esmHealthWorkspaceSource, "handleWorkspaceEvent");
+  const rerunSource = extractFunctionSource(esmHealthWorkspaceSource, "rerunLatestReport");
+
+  assert.match(popupSource, /function buildEsmHealthWorkspaceControllerContextKey\(/);
+  assert.match(controllerPayloadSource, /premiumPanelRequestToken,/);
+  assert.match(controllerPayloadSource, /workspaceContextKey:\s*buildEsmHealthWorkspaceControllerContextKey\(context,\s*premiumPanelRequestToken\)/);
+  assert.match(rebaseSource, /const currentSelectionContext = esmHealthWorkspaceGetSelectionContext\(resolveSelectedProgrammer\(\)\);/);
+  assert.match(rebaseSource, /const sameControllerSelection =/);
+  assert.match(rebaseSource, /if \(sameControllerSelection\) \{/);
+  assert.match(refreshActionSource, /rebaseEsmHealthDashboardQueryContextForCurrentSelection\(queryContext,\s*\{/);
+  assert.match(runSource, /const premiumPanelRequestToken = Math\.max\(0,\s*Number\(options\?\.requestToken \|\| state\.premiumPanelRequestToken \|\| 0\)\);/);
+  assert.match(runSource, /const workspaceContextKey = buildEsmHealthWorkspaceControllerContextKey\(queryContext,\s*premiumPanelRequestToken\);/);
+  assert.match(runSource, /premiumPanelRequestToken,/);
+  assert.match(runSource, /workspaceContextKey,/);
+
+  assert.match(esmHealthWorkspaceSource, /function doesWorkspaceEventMatchCurrentContext\(payload = \{\}\)/);
+  assert.match(applyControllerSource, /const preservedDates = controllerChanged \? resolveDateInputRange\(state\.query\.start,\s*state\.query\.end\) : \{ start: "", end: "" \};/);
+  assert.match(applyControllerSource, /const runtimeContextChanged =/);
+  assert.match(applyControllerSource, /if \(controllerChanged\) \{/);
+  assert.match(applyControllerSource, /state\.query\.start = preservedDates\.start;/);
+  assert.match(applyControllerSource, /state\.query\.end = preservedDates\.end;/);
+  assert.match(applyControllerSource, /state\.loading = false;/);
+  assert.match(handleWorkspaceEventSource, /if \(\(event === "report-start" \|\| event === "report-result"\) && !doesWorkspaceEventMatchCurrentContext\(payload\)\) \{/);
+  assert.match(handleWorkspaceEventSource, /void runDashboard\("Refreshing ESM HEALTH dashboard for the selected UnderPAR context\.\.\."\);/);
+  assert.match(rerunSource, /await runDashboard\("Refreshing ESM HEALTH dashboard\.\.\."\);/);
 });
 
 test("esm workspace waits for workspace-ready and resolves the live premium request token before running JellyBeans", () => {

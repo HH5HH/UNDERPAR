@@ -13,6 +13,10 @@ const state = {
   environmentKey: "",
   environmentLabel: "",
   selectionKey: "",
+  premiumPanelRequestToken: 0,
+  workspaceContextKey: "",
+  controllerStateVersion: 0,
+  controllerStateUpdatedAt: 0,
   defaultStart: "",
   defaultEnd: "",
   defaultGranularity: "hour",
@@ -35,8 +39,10 @@ const state = {
 };
 
 const els = {
+  appRoot: document.getElementById("workspace-app-root"),
   controllerState: document.getElementById("workspace-controller-state"),
   filterState: document.getElementById("workspace-filter-state"),
+  contextCaption: document.getElementById("workspace-context-caption"),
   status: document.getElementById("workspace-status"),
   rerunIndicator: document.getElementById("workspace-rerun-indicator"),
   rerunAllButton: document.getElementById("workspace-rerun-all"),
@@ -49,6 +55,8 @@ const els = {
   resetButton: document.getElementById("workspace-reset-filters"),
   activePills: document.getElementById("workspace-active-pills"),
   cardsHost: document.getElementById("workspace-cards"),
+  pageEnvBadge: document.getElementById("page-env-badge"),
+  pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
 };
 
 function escapeHtml(value) {
@@ -85,6 +93,25 @@ function normalizeStringList(values = []) {
 function normalizeGranularity(value = "") {
   const normalized = String(value || "").trim().toLowerCase();
   return normalized === "hour" || normalized === "month" ? normalized : "day";
+}
+
+function normalizeIsoDateInput(value = "") {
+  const normalized = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
+}
+
+function resolveDateInputRange(startValue = "", endValue = "") {
+  let start = normalizeIsoDateInput(startValue);
+  let end = normalizeIsoDateInput(endValue);
+  if (start && end && start > end) {
+    const originalStart = start;
+    start = end;
+    end = originalStart;
+  }
+  return {
+    start,
+    end,
+  };
 }
 
 function formatDateTime(value) {
@@ -172,7 +199,9 @@ function updateGranularityButtons() {
   const buttons = els.granularityGroup?.querySelectorAll("[data-granularity]") || [];
   buttons.forEach((button) => {
     const value = String(button.getAttribute("data-granularity") || "").trim().toLowerCase();
-    button.classList.toggle("is-active", value === normalizeGranularity(state.query.granularity));
+    const isActive = value === normalizeGranularity(state.query.granularity);
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
     button.disabled = state.loading;
   });
 }
@@ -230,6 +259,31 @@ function syncActionButtonsDisabled() {
   updateGranularityButtons();
 }
 
+function renderWorkspaceEnvironmentBadge() {
+  if (!els.pageEnvBadge || !els.pageEnvBadgeValue) {
+    return;
+  }
+  const label = String(state.environmentLabel || state.environmentKey || "Production").trim() || "Production";
+  const title = `Environment: ${label}`;
+  els.pageEnvBadgeValue.textContent = label;
+  els.pageEnvBadgeValue.setAttribute("aria-hidden", "false");
+  els.pageEnvBadge.title = title;
+  els.pageEnvBadge.setAttribute("aria-label", title);
+}
+
+function getContextCaption() {
+  if (!state.controllerOnline) {
+    return "Waiting for the UnderPAR side panel to bind the live ESM controller context.";
+  }
+  if (!state.programmerId) {
+    return "Select an ENV x Media Company with ESM access in UnderPAR to hydrate this dashboard.";
+  }
+  if (!state.esmHealthReady) {
+    return "UnderPAR is still hydrating the ESM premium service for the selected ENV x Media Company.";
+  }
+  return "Bound to the live UnderPAR ESM context. Date range persists across ENV x Media Company switches; scoped drilldowns reset to the selected controller context.";
+}
+
 function updateControllerBanner() {
   if (els.controllerState) {
     els.controllerState.textContent = `ESM HEALTH Dashboard | ${getProgrammerLabel()}`;
@@ -237,6 +291,10 @@ function updateControllerBanner() {
   if (els.filterState) {
     els.filterState.textContent = getFilterLabel();
   }
+  if (els.contextCaption) {
+    els.contextCaption.textContent = getContextCaption();
+  }
+  renderWorkspaceEnvironmentBadge();
   syncActionButtonsDisabled();
 }
 
@@ -268,10 +326,26 @@ function syncFilterControlsFromState() {
 
 function applyControllerState(payload = {}) {
   const nextSelectionKey = String(payload?.selectionKey || "").trim();
+  const nextProgrammerId = String(payload?.programmerId || "").trim();
+  const nextEnvironmentKey = String(payload?.environmentKey || "").trim();
+  const nextWorkspaceContextKey = String(payload?.workspaceContextKey || "").trim();
+  const nextRequestToken = Math.max(0, Number(payload?.premiumPanelRequestToken || 0));
+  const previousControllerSelectionKey = String(state.query.controllerSelectionKey || "").trim();
+  const previousProgrammerId = String(state.programmerId || "").trim();
+  const previousEnvironmentKey = String(state.environmentKey || "").trim();
+  const previousWorkspaceContextKey = String(state.workspaceContextKey || "").trim();
+  const previousRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
   const controllerChanged =
     !state.query.initialized ||
-    nextSelectionKey !== String(state.query.controllerSelectionKey || "").trim() ||
-    String(payload?.programmerId || "").trim() !== String(state.programmerId || "").trim();
+    nextSelectionKey !== previousControllerSelectionKey ||
+    nextProgrammerId !== previousProgrammerId ||
+    nextEnvironmentKey !== previousEnvironmentKey;
+  const runtimeContextChanged =
+    (nextWorkspaceContextKey && previousWorkspaceContextKey && nextWorkspaceContextKey !== previousWorkspaceContextKey) ||
+    (nextRequestToken > 0 && previousRequestToken > 0 && nextRequestToken !== previousRequestToken);
+  const preservedDates = controllerChanged ? resolveDateInputRange(state.query.start, state.query.end) : { start: "", end: "" };
+  const currentReportSelectionKey = getReportControllerSelectionKey(state.report);
+  const shouldClearStaleReport = controllerChanged && currentReportSelectionKey && currentReportSelectionKey !== nextSelectionKey;
 
   state.controllerOnline = payload?.controllerOnline === true;
   state.esmHealthReady = payload?.esmHealthReady === true;
@@ -284,6 +358,10 @@ function applyControllerState(payload = {}) {
   state.environmentKey = String(payload?.environmentKey || "");
   state.environmentLabel = String(payload?.environmentLabel || "");
   state.selectionKey = nextSelectionKey;
+  state.premiumPanelRequestToken = Math.max(0, Number(payload?.premiumPanelRequestToken || state.premiumPanelRequestToken || 0));
+  state.workspaceContextKey = String(payload?.workspaceContextKey || "").trim();
+  state.controllerStateVersion = Math.max(0, Number(payload?.controllerStateVersion || state.controllerStateVersion || 0));
+  state.controllerStateUpdatedAt = Math.max(0, Number(payload?.updatedAt || Date.now() || 0));
   state.defaultStart = String(payload?.defaultStart || "");
   state.defaultEnd = String(payload?.defaultEnd || "");
   state.defaultGranularity = normalizeGranularity(payload?.defaultGranularity);
@@ -292,6 +370,19 @@ function applyControllerState(payload = {}) {
 
   if (controllerChanged) {
     resetQueryToControllerDefaults();
+    if (preservedDates.start) {
+      state.query.start = preservedDates.start;
+    }
+    if (preservedDates.end) {
+      state.query.end = preservedDates.end;
+    }
+    state.loading = false;
+  } else if (runtimeContextChanged) {
+    state.loading = false;
+  }
+  if (shouldClearStaleReport) {
+    state.report = null;
+    renderReport();
   }
   syncFilterControlsFromState();
   updateControllerBanner();
@@ -310,6 +401,49 @@ function buildQueryContextPayload() {
     end: String(state.query.end || "").trim(),
     granularity: normalizeGranularity(state.query.granularity),
   };
+}
+
+function getPayloadControllerSelectionKey(payload = {}) {
+  return firstNonEmptyString([
+    payload?.controllerSelectionKey,
+    payload?.queryContext?.controllerSelectionKey,
+    payload?.selectionKey,
+  ]);
+}
+
+function getReportControllerSelectionKey(report = null) {
+  return firstNonEmptyString([
+    report?.controllerSelectionKey,
+    report?.queryContext?.controllerSelectionKey,
+    report?.selectionKey,
+  ]);
+}
+
+function doesWorkspaceEventMatchCurrentContext(payload = {}) {
+  const incomingWorkspaceContextKey = String(payload?.workspaceContextKey || "").trim();
+  const currentWorkspaceContextKey = String(state.workspaceContextKey || "").trim();
+  if (incomingWorkspaceContextKey && currentWorkspaceContextKey && incomingWorkspaceContextKey !== currentWorkspaceContextKey) {
+    return false;
+  }
+  const incomingSelectionKey = String(getPayloadControllerSelectionKey(payload) || "").trim();
+  const currentSelectionKey = String(state.selectionKey || "").trim();
+  if (incomingSelectionKey && currentSelectionKey && incomingSelectionKey !== currentSelectionKey) {
+    return false;
+  }
+  const incomingProgrammerId = firstNonEmptyString([payload?.programmerId, payload?.queryContext?.programmerId]);
+  if (incomingProgrammerId && state.programmerId && incomingProgrammerId !== state.programmerId) {
+    return false;
+  }
+  const incomingEnvironmentKey = firstNonEmptyString([payload?.environmentKey, payload?.queryContext?.environmentKey]);
+  if (incomingEnvironmentKey && state.environmentKey && incomingEnvironmentKey !== state.environmentKey) {
+    return false;
+  }
+  const incomingRequestToken = Math.max(0, Number(payload?.premiumPanelRequestToken || 0));
+  const currentRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
+  if (incomingRequestToken > 0 && currentRequestToken > 0 && incomingRequestToken !== currentRequestToken) {
+    return false;
+  }
+  return true;
 }
 
 function syncQueryFromReport(payload = {}) {
@@ -862,6 +996,9 @@ function handleWorkspaceEvent(eventName, payload = {}) {
   if (!event) {
     return;
   }
+  if ((event === "report-start" || event === "report-result") && !doesWorkspaceEventMatchCurrentContext(payload)) {
+    return;
+  }
   if (event === "controller-state") {
     applyControllerState(payload);
     return;
@@ -875,10 +1012,10 @@ function handleWorkspaceEvent(eventName, payload = {}) {
     return;
   }
   if (event === "environment-switch-rerun") {
-    if (state.loading || !hasRenderableReport()) {
+    if (state.loading || !state.query.initialized || !state.programmerId || !state.esmHealthReady) {
       return;
     }
-    void rerunLatestReport();
+    void runDashboard("Refreshing ESM HEALTH dashboard for the selected UnderPAR context...");
     return;
   }
   if (event === "workspace-clear") {
@@ -928,21 +1065,11 @@ async function rerunLatestReport() {
   if (state.loading) {
     return;
   }
-  if (!hasRenderableReport()) {
+  if (!state.query.initialized) {
     setStatus("No previous ESM HEALTH report is available to refresh.", "error");
     return;
   }
-  state.loading = true;
-  syncActionButtonsDisabled();
-  setStatus("Refreshing ESM HEALTH dashboard...");
-  const result = await sendWorkspaceAction("refresh-latest", {
-    selectionKey: String(state.report?.selectionKey || "").trim(),
-  });
-  if (!result?.ok) {
-    state.loading = false;
-    syncActionButtonsDisabled();
-    setStatus(String(result?.error || "Unable to refresh ESM HEALTH dashboard."), "error");
-  }
+  await runDashboard("Refreshing ESM HEALTH dashboard...");
 }
 
 function clearWorkspace() {

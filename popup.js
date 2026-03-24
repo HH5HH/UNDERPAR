@@ -20821,6 +20821,16 @@ function buildEsmHealthWorkspaceSelectionKey(context = null) {
   ].join("|");
 }
 
+function buildEsmHealthWorkspaceControllerContextKey(context = null, premiumPanelRequestToken = state.premiumPanelRequestToken) {
+  const controllerSelectionKey = String(
+    context?.controllerSelectionKey || buildEsmHealthWorkspaceBaseSelectionKey(context)
+  ).trim();
+  if (!controllerSelectionKey) {
+    return "";
+  }
+  return `${controllerSelectionKey}::${Math.max(0, Number(premiumPanelRequestToken || 0))}`;
+}
+
 function buildEsmHealthDashboardQueryContext(rawContext = null) {
   const context = rawContext && typeof rawContext === "object" ? rawContext : {};
   const resolvedProgrammer = resolveSelectedProgrammer();
@@ -20868,6 +20878,28 @@ function buildEsmHealthDashboardQueryContext(rawContext = null) {
   queryContext.controllerSelectionKey = buildEsmHealthWorkspaceBaseSelectionKey(queryContext);
   queryContext.selectionKey = buildEsmHealthWorkspaceSelectionKey(queryContext);
   return queryContext;
+}
+
+function rebaseEsmHealthDashboardQueryContextForCurrentSelection(rawContext = null, options = {}) {
+  const sourceContext = rawContext && typeof rawContext === "object" ? rawContext : {};
+  const currentSelectionContext = esmHealthWorkspaceGetSelectionContext(resolveSelectedProgrammer());
+  const sameControllerSelection =
+    String(sourceContext?.controllerSelectionKey || "").trim() === String(currentSelectionContext?.controllerSelectionKey || "").trim();
+  const rebasedContext = {
+    ...currentSelectionContext,
+    start: String(sourceContext?.start || currentSelectionContext?.start || "").trim(),
+    end: String(sourceContext?.end || currentSelectionContext?.end || "").trim(),
+    requestSource:
+      String(options?.requestSource || sourceContext?.requestSource || "esm-health-dashboard").trim() ||
+      "esm-health-dashboard",
+  };
+  if (sameControllerSelection) {
+    rebasedContext.granularity = normalizeEsmHealthGranularity(sourceContext?.granularity);
+    rebasedContext.drilldownRequestorIds = normalizeEsmHealthFilterList(sourceContext?.drilldownRequestorIds);
+    rebasedContext.drilldownMvpdIds = normalizeEsmHealthFilterList(sourceContext?.drilldownMvpdIds);
+    rebasedContext.platforms = normalizeEsmHealthFilterList(sourceContext?.platforms);
+  }
+  return buildEsmHealthDashboardQueryContext(rebasedContext);
 }
 
 function buildEsmHealthStatusMessage(queryContext = null) {
@@ -21514,6 +21546,11 @@ function buildEsmHealthDashboardReportPayload(queryContext = null, data = null, 
     partial: failedSections.length > 0 && loadedSections > 0,
     checkedAt: Date.now(),
     selectionKey: String(queryContext?.selectionKey || "").trim(),
+    controllerSelectionKey: String(queryContext?.controllerSelectionKey || "").trim(),
+    programmerId: String(queryContext?.programmerId || "").trim(),
+    environmentKey: String(queryContext?.environmentKey || "").trim(),
+    premiumPanelRequestToken: Math.max(0, Number(options?.premiumPanelRequestToken || 0)),
+    workspaceContextKey: String(options?.workspaceContextKey || "").trim(),
     queryContext,
     summary,
     backboneSeries,
@@ -21545,6 +21582,8 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
 
   const openWorkspace = options.openWorkspace !== false;
   const activateWorkspace = options.activateWorkspace !== false;
+  const premiumPanelRequestToken = Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0));
+  const workspaceContextKey = buildEsmHealthWorkspaceControllerContextKey(queryContext, premiumPanelRequestToken);
   let targetWindowId = Number(options.targetWindowId || 0);
 
   if (openWorkspace) {
@@ -21560,6 +21599,11 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
     "report-start",
     {
       selectionKey: queryContext.selectionKey,
+      controllerSelectionKey: queryContext.controllerSelectionKey,
+      programmerId: queryContext.programmerId,
+      environmentKey: queryContext.environmentKey,
+      premiumPanelRequestToken,
+      workspaceContextKey,
       queryContext,
       startedAt: Date.now(),
     },
@@ -21569,6 +21613,13 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
   );
 
   const finalizeReport = (payload) => {
+    if (payload && typeof payload === "object") {
+      payload.premiumPanelRequestToken = premiumPanelRequestToken;
+      payload.workspaceContextKey = workspaceContextKey;
+      payload.controllerSelectionKey = String(payload.controllerSelectionKey || queryContext.controllerSelectionKey || "").trim();
+      payload.programmerId = String(payload.programmerId || queryContext.programmerId || "").trim();
+      payload.environmentKey = String(payload.environmentKey || queryContext.environmentKey || "").trim();
+    }
     esmHealthWorkspaceStoreLatestReport(payload);
     void esmHealthWorkspaceSendWorkspaceMessage("report-result", payload, { targetWindowId });
     return payload;
@@ -21577,7 +21628,7 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
   const authState = {};
   try {
     const authContext = await resolveEsmHealthPremiumAuthContext(queryContext, {
-      requestToken: Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0)),
+      requestToken: premiumPanelRequestToken,
     });
     authState.accessToken = normalizeBearerTokenValue(authContext?.accessToken || "");
     authState.appInfo =
@@ -21602,6 +21653,8 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
           sectionErrors: tokenSectionErrors,
         },
         {
+          premiumPanelRequestToken,
+          workspaceContextKey,
           error: tokenError,
         }
       )
@@ -21797,6 +21850,8 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
         ignoredSections,
       },
       {
+        premiumPanelRequestToken,
+        workspaceContextKey,
         error: "One or more ESM HEALTH datasets failed to load.",
       }
     )
@@ -47829,6 +47884,7 @@ function esmHealthWorkspaceGetSelectedControllerStatePayload(programmer = null, 
       ? selectionContext
       : esmHealthWorkspaceGetSelectionContext(programmer);
   const premiumContext = getHealthWorkspacePremiumContextSnapshot(String(context?.programmerId || "").trim());
+  const premiumPanelRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
   return {
     controllerOnline: true,
     esmHealthReady: Boolean(context?.programmerId && premiumContext?.hydrationReady && premiumContext?.esmAvailable),
@@ -47846,6 +47902,9 @@ function esmHealthWorkspaceGetSelectedControllerStatePayload(programmer = null, 
     defaultGranularity: normalizeEsmHealthGranularity(context?.granularity),
     timezoneLabel: String(context?.timezoneLabel || "PST effective").trim(),
     platformOptions: ESM_HEALTH_PLATFORM_OPTIONS.slice(),
+    premiumPanelRequestToken,
+    workspaceContextKey: buildEsmHealthWorkspaceControllerContextKey(context, premiumPanelRequestToken),
+    controllerStateVersion: nextEsmWorkspaceControllerStateVersion(),
     updatedAt: Date.now(),
   };
 }
@@ -48137,11 +48196,16 @@ async function handleEsmHealthWorkspaceAction(message, sender = null) {
     if (!queryContext || typeof queryContext !== "object") {
       return { ok: false, error: "No previous ESM HEALTH query context is available to refresh." };
     }
-    const refreshed = await runEsmHealthDashboardForSelection(queryContext, {
+    const refreshed = await runEsmHealthDashboardForSelection(
+      rebaseEsmHealthDashboardQueryContextForCurrentSelection(queryContext, {
+        requestSource: "esm-health-workspace-refresh",
+      }),
+      {
       openWorkspace: true,
       activateWorkspace: false,
       targetWindowId: senderWindowId,
-    });
+      }
+    );
     return refreshed?.ok || refreshed?.partial
       ? { ok: true }
       : { ok: false, error: String(refreshed?.error || "Unable to refresh ESM HEALTH dashboard.").trim() };
