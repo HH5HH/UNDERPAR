@@ -2214,6 +2214,7 @@ test("premium services reuse the mounted DOM when the selected service signature
   const signatureSource = extractFunctionSource(popupSource, "buildPremiumServicesRenderSignature");
   const refreshExistingSource = extractFunctionSource(popupSource, "refreshExistingPremiumServiceSections");
   const hasRenderableSource = extractFunctionSource(popupSource, "hasRenderablePremiumServiceSections");
+  const hydrateExistingSource = extractFunctionSource(popupSource, "shouldHydrateExistingPremiumServiceSection");
 
   assert.match(signatureSource, /const selectedRequestorId = String\(state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
   assert.match(signatureSource, /const selectedMvpdId = String\(state\.selectedMvpdId \|\| ""\)\.trim\(\);/);
@@ -2223,6 +2224,9 @@ test("premium services reuse the mounted DOM when the selected service signature
   assert.match(renderSource, /refreshExistingPremiumServiceSections\(programmer,\s*services\)/);
   assert.match(hasRenderableSource, /querySelectorAll\("\.premium-service-section"\)/);
   assert.match(hasRenderableSource, /expectedKeys\.every\(\(serviceKey,\s*index\) => actualKeys\[index\] === serviceKey\)/);
+  assert.match(refreshExistingSource, /shouldHydrateExistingPremiumServiceSection\(section,\s*serviceKey\)/);
+  assert.match(hydrateExistingSource, /!section\.__underparCmState && section\.__underparCmLoadPending !== true && !hasContent/);
+  assert.match(hydrateExistingSource, /!section\.__underparEsmWorkspaceState && section\.__underparEsmWorkspaceLoadPending !== true && !hasContent/);
   assert.match(refreshExistingSource, /syncRestV2LoginPanel\(section,\s*programmer,\s*serviceApp\)/);
   assert.match(refreshExistingSource, /syncMvpdWorkspaceToolForSection\(section,\s*programmer,\s*services\)/);
   assert.match(refreshExistingSource, /section\.__underparRefreshCm/);
@@ -2281,6 +2285,50 @@ test("premium and HR render reuse requires intact mounted section shells after e
   assert.equal(hasRenderableHrContextSections(), true);
   hrSections[1].dataset.hrSectionKey = "learning";
   assert.equal(hasRenderableHrContextSections(), false);
+});
+
+test("same-signature premium refresh preserves mounted stateful sections and only backfills missing content", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const script = [
+    extractFunctionSource(popupSource, "shouldHydrateExistingPremiumServiceSection"),
+    "module.exports = { shouldHydrateExistingPremiumServiceSection };",
+  ].join("\n\n");
+
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
+  const { shouldHydrateExistingPremiumServiceSection } = context.module.exports;
+
+  const mountedCmSection = {
+    __underparCmState: { ready: true },
+    __underparCmLoadPending: false,
+    querySelector: () => ({
+      childElementCount: 1,
+      textContent: "mounted",
+    }),
+  };
+  const emptyCmSection = {
+    __underparCmState: null,
+    __underparCmLoadPending: false,
+    querySelector: () => ({
+      childElementCount: 0,
+      textContent: "",
+    }),
+  };
+  const pendingEsmSection = {
+    __underparEsmWorkspaceState: null,
+    __underparEsmWorkspaceLoadPending: true,
+    querySelector: () => ({
+      childElementCount: 0,
+      textContent: "",
+    }),
+  };
+
+  assert.equal(shouldHydrateExistingPremiumServiceSection(mountedCmSection, "cm"), false);
+  assert.equal(shouldHydrateExistingPremiumServiceSection(emptyCmSection, "cm"), true);
+  assert.equal(shouldHydrateExistingPremiumServiceSection(pendingEsmSection, "esmWorkspace"), false);
 });
 
 test("REST V2 app selection preserves detected order while still reusing requestor-scoped app context", () => {

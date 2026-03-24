@@ -56171,20 +56171,38 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
 
   if (serviceKey === "esmWorkspace") {
     section.__underparRefreshEsmWorkspace = () => {
+      if (section.__underparEsmWorkspaceLoadPending) {
+        return Promise.resolve();
+      }
+      section.__underparEsmWorkspaceLoadPending = true;
       const requestToken = state.premiumPanelRequestToken;
-      return loadEsmWorkspaceService(programmer, appInfo, section, contentElement, requestToken);
+      return loadEsmWorkspaceService(programmer, appInfo, section, contentElement, requestToken).finally(() => {
+        section.__underparEsmWorkspaceLoadPending = false;
+      });
     };
     void section.__underparRefreshEsmWorkspace();
   } else if (serviceKey === "degradation") {
     section.__underparRefreshDegradation = () => {
+      if (section.__underparDegradationLoadPending) {
+        return Promise.resolve();
+      }
+      section.__underparDegradationLoadPending = true;
       const requestToken = state.premiumPanelRequestToken;
-      return loadDegradationService(programmer, appInfo, section, contentElement, requestToken);
+      return loadDegradationService(programmer, appInfo, section, contentElement, requestToken).finally(() => {
+        section.__underparDegradationLoadPending = false;
+      });
     };
     void section.__underparRefreshDegradation();
   } else if (serviceKey === "resetTempPass") {
     section.__underparRefreshTempPass = () => {
+      if (section.__underparTempPassLoadPending) {
+        return Promise.resolve();
+      }
+      section.__underparTempPassLoadPending = true;
       const requestToken = state.premiumPanelRequestToken;
-      return loadTempPassService(programmer, appInfo, section, contentElement, requestToken);
+      return loadTempPassService(programmer, appInfo, section, contentElement, requestToken).finally(() => {
+        section.__underparTempPassLoadPending = false;
+      });
     };
     void section.__underparRefreshTempPass();
   } else if (serviceKey === "cm" || serviceKey === "cmMvpd") {
@@ -56198,7 +56216,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
         serviceType: serviceKey,
       }).finally(() => {
         section.__underparCmLoadPending = false;
-        });
+      });
     };
     const mountCachedCmContent = () =>
       renderCachedCmServiceContent(
@@ -56366,6 +56384,33 @@ function hasRenderableHrContextSections() {
   return HR_CONTEXT_SECTION_DISPLAY_ORDER.every((sectionKey, index) => actualKeys[index] === sectionKey);
 }
 
+function shouldHydrateExistingPremiumServiceSection(section, serviceKey = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim().toLowerCase();
+  if (!section || !normalizedServiceKey) {
+    return false;
+  }
+
+  const contentElement =
+    typeof section.querySelector === "function" ? section.querySelector('[data-service-box-content="true"]') : null;
+  const hasContent = Boolean(
+    contentElement &&
+      (Number(contentElement.childElementCount || 0) > 0 || String(contentElement.textContent || "").trim())
+  );
+  if (normalizedServiceKey === "esmworkspace") {
+    return !section.__underparEsmWorkspaceState && section.__underparEsmWorkspaceLoadPending !== true && !hasContent;
+  }
+  if (normalizedServiceKey === "degradation") {
+    return !section.__underparDegradationState && section.__underparDegradationLoadPending !== true && !hasContent;
+  }
+  if (normalizedServiceKey === "resettemppass") {
+    return !section.__underparTempPassState && section.__underparTempPassLoadPending !== true && !hasContent;
+  }
+  if (normalizedServiceKey === "cm" || normalizedServiceKey === "cmmvpd") {
+    return !section.__underparCmState && section.__underparCmLoadPending !== true && !hasContent;
+  }
+  return false;
+}
+
 function refreshExistingPremiumServiceSections(programmer, services = null) {
   if (!els.premiumServicesContainer || !programmer?.programmerId || !services || typeof services !== "object") {
     return;
@@ -56383,7 +56428,9 @@ function refreshExistingPremiumServiceSections(programmer, services = null) {
     const serviceApp = serviceKey === "esmWorkspace" ? services?.esm || null : services?.[serviceKey] || null;
     section.dataset.appGuid = String(serviceApp?.guid || "").trim();
     if (serviceKey === "esmWorkspace" && typeof section.__underparRefreshEsmWorkspace === "function") {
-      void section.__underparRefreshEsmWorkspace();
+      if (shouldHydrateExistingPremiumServiceSection(section, serviceKey)) {
+        void section.__underparRefreshEsmWorkspace();
+      }
       return;
     }
     if (serviceKey === "restV2") {
@@ -56392,15 +56439,21 @@ function refreshExistingPremiumServiceSections(programmer, services = null) {
       return;
     }
     if (serviceKey === "resetTempPass" && typeof section.__underparRefreshTempPass === "function") {
-      void section.__underparRefreshTempPass();
+      if (shouldHydrateExistingPremiumServiceSection(section, serviceKey)) {
+        void section.__underparRefreshTempPass();
+      }
       return;
     }
     if (serviceKey === "degradation" && typeof section.__underparRefreshDegradation === "function") {
-      void section.__underparRefreshDegradation();
+      if (shouldHydrateExistingPremiumServiceSection(section, serviceKey)) {
+        void section.__underparRefreshDegradation();
+      }
       return;
     }
     if ((serviceKey === "cm" || serviceKey === "cmMvpd") && typeof section.__underparRefreshCm === "function") {
-      void section.__underparRefreshCm();
+      if (shouldHydrateExistingPremiumServiceSection(section, serviceKey)) {
+        void section.__underparRefreshCm();
+      }
     }
   });
 }
