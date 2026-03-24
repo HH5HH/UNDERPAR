@@ -237,12 +237,6 @@ function renderReport() {
 
   const report = state.report && typeof state.report === "object" ? state.report : null;
   const checkedAtLabel = formatDateTime(report?.checkedAt);
-  const fallbackCopy = report?.fallbackUsed === true
-    ? firstNonEmptyString([
-        report?.fallbackMessage,
-        "Using UnderPAR fallback HEALTH queries extracted from the live dashboard.",
-      ])
-    : "";
   const summaryCopy = report?.pending === true
     ? firstNonEmptyString([
         report?.pendingMessage,
@@ -258,7 +252,6 @@ function renderReport() {
         <p class="rest-report-title">HEALTH Splunk Report</p>
         <p class="rest-report-meta"><strong>Checked:</strong> ${escapeHtml(checkedAtLabel)}</p>
         <p class="health-report-overview-copy">${escapeHtml(summaryCopy)}</p>
-        ${fallbackCopy ? `<p class="health-report-overview-copy">${escapeHtml(fallbackCopy)}</p>` : ""}
       </header>
     </article>
     <section class="health-report-grid">
@@ -348,10 +341,7 @@ function handleReportResult(payload = {}) {
     return;
   }
   if (state.report.partial === true) {
-    const fallbackNote = state.report?.fallbackUsed === true ? " Using fallback dashboard definitions." : "";
-    setStatus(
-      `Loaded ${Number(state.report?.successCount || 0)}/${Number(state.report?.totalTables || 0)} HEALTH tables.${fallbackNote}`
-    );
+    setStatus(`Loaded ${Number(state.report?.successCount || 0)}/${Number(state.report?.totalTables || 0)} HEALTH tables.`);
     return;
   }
   setStatus(String(state.report?.error || "HEALTH Splunk query failed."), "error");

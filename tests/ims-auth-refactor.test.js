@@ -1519,31 +1519,37 @@ test("premium service refresh and CMU actions keep ESM and CM JellyBeans on the 
   assert.match(cmAuthSource, /!isCmServiceRequestActive\(context\.section,\s*liveRequestToken,\s*programmer\.programmerId\)/);
 });
 
-test("health splunk prefers the live dashboard deeplink and normalizes dashboard queries for Splunk job APIs", () => {
+test("health splunk stays on the scoped job-create and results-preview calls instead of recreating the dashboard transport", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const landingSource = extractFunctionSource(popupSource, "getSplunkSearchLandingUrl");
   const normalizeJobSource = extractFunctionSource(popupSource, "normalizeSplunkJobSearchQuery");
   const healthQueryContextSource = extractFunctionSource(popupSource, "buildHealthSplunkQueryContext");
+  const tableDefinitionsSource = extractFunctionSource(popupSource, "getHealthSplunkTableDefinitions");
+  const previewSource = extractFunctionSource(popupSource, "fetchHealthSplunkPreviewReportBySid");
   const tableSearchSource = extractFunctionSource(popupSource, "runHealthSplunkTableSearch");
   const dashboardRunSource = extractFunctionSource(popupSource, "runHealthSplunkDashboardForSelection");
   const restSearchSource = extractFunctionSource(popupSource, "runSplunkSearchForQueryContext");
-  const dashboardDefinitionSource = extractFunctionSource(popupSource, "parseHealthSplunkTableDefinitionsFromDashboardDefinition");
 
-  assert.match(landingSource, /const dashboardUrl = String\(queryContext\?\.dashboardUrl \|\| ""\)\.trim\(\);/);
-  assert.match(landingSource, /if \(dashboardUrl\) {\s*return dashboardUrl;\s*}/);
-  assert.match(healthQueryContextSource, /new URL\(`\$\{SPLUNK_BASE_URL\}\/en-US\/app\/app_adobepass\/\$\{HEALTH_SPLUNK_DASHBOARD_VIEW_NAME\}`\)/);
-  assert.match(healthQueryContextSource, /url\.searchParams\.set\("form\.serviceProvider", requestorId\);/);
-  assert.match(healthQueryContextSource, /url\.searchParams\.set\("form\.environment", environmentIndex\);/);
+  assert.match(healthQueryContextSource, /search:\s*buildHealthSplunkLoginSearch\(\{/);
+  assert.doesNotMatch(healthQueryContextSource, /dashboardUrl/);
+  assert.match(tableDefinitionsSource, /jobLabel:\s*String\(entry\.jobLabel \|\| ""\)\.trim\(\),/);
   assert.match(normalizeJobSource, /return `search \$\{normalizedSearch\}`;/);
+  assert.match(previewSource, /const previewUrl = `\$\{HEALTH_SPLUNK_RESULTS_PREVIEW_BASE_URL\}\/\$\{encodedSid\}\/results_preview\?/);
+  assert.match(previewSource, /if \(report\.rows\.length > 0 \|\| isHealthSplunkPreviewComplete\(previewResponse\.parsed\)\) {/);
+  assert.doesNotMatch(previewSource, /resultsUrl/);
+  assert.doesNotMatch(previewSource, /jobMetaUrl/);
   assert.match(tableSearchSource, /search: normalizeSplunkJobSearchQuery\(compiledTable\.query\),/);
+  assert.match(tableSearchSource, /sid:\s*""/);
+  assert.match(tableSearchSource, /check_risky_command:\s*"true"/);
   assert.match(tableSearchSource, /preview:\s*"true"/);
+  assert.match(tableSearchSource, /const createUrl = HEALTH_SPLUNK_JOB_CREATE_URL;/);
   assert.match(tableSearchSource, /provenance:\s*`UI:dashboard:\$\{HEALTH_SPLUNK_DASHBOARD_VIEW_NAME\}`/);
-  assert.match(tableSearchSource, /label:\s*String\(compiledTable\.key \|\| compiledTable\.title \|\| "health-splunk-table"\)\.trim\(\)/);
+  assert.match(tableSearchSource, /label:\s*String\(compiledTable\.jobLabel \|\| compiledTable\.key \|\| compiledTable\.title \|\| "health-splunk-table"\)\.trim\(\)/);
   assert.match(restSearchSource, /search: normalizeSplunkJobSearchQuery\(queryContext\.search\),/);
-  assert.match(dashboardDefinitionSource, /const dataSourceRef = String\(dataSource\?\.options\?\.ref \|\| ""\)\.trim\(\);/);
-  assert.match(dashboardDefinitionSource, /const queryTemplate = firstNonEmptyString\(\[dataSource\?\.options\?\.query,\s*matchedFallback\?\.queryTemplate\]\);/);
+  assert.doesNotMatch(popupSource, /function parseHealthSplunkTableDefinitionsFromDashboardDefinition/);
+  assert.doesNotMatch(popupSource, /function resolveHealthSplunkTableDefinitions/);
   assert.doesNotMatch(dashboardRunSource, /resolveHealthSplunkTableDefinitions\(/);
-  assert.match(dashboardRunSource, /const resolvedTables = placeholderTables\.slice\(\);/);
+  assert.match(dashboardRunSource, /const scopedTables = getHealthSplunkTableDefinitions\(queryContext\);/);
+  assert.match(dashboardRunSource, /const resolvedTables = scopedTables\.slice\(\);/);
   assert.match(dashboardRunSource, /await Promise\.all\(/);
 });
 
@@ -1559,10 +1565,12 @@ test("health splunk keeps auth wait in a pending state instead of hard-failing t
   assert.match(reportPayloadSource, /const pendingCount = tables\.filter\(\(entry\) => entry\?\.pending === true\)\.length;/);
   assert.match(reportPayloadSource, /pending,\s*\n\s*authPending:/);
   assert.match(reportPayloadSource, /pendingMessage:\s*pending/);
+  assert.doesNotMatch(reportPayloadSource, /fallbackUsed/);
   assert.match(dashboardRunSource, /pending:\s*true,/);
   assert.match(dashboardRunSource, /authPending:\s*true,/);
   assert.match(dashboardRunSource, /pendingMessage: firstNonEmptyString\(\[/);
   assert.match(workspaceSource, /if \(state\.report\.pending === true\) {/);
+  assert.doesNotMatch(workspaceSource, /fallbackUsed/);
 });
 
 test("health splunk preview parser reads dashboard-studio json_cols rows from HAR-style payloads", () => {

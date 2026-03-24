@@ -11400,6 +11400,8 @@ const SPLUNK_AUTH_WAIT_INTERVAL_MS = 1200;
 const REST_V2_SPLUNK_INLINE_MAX_ROWS = 80;
 const REST_V2_SPLUNK_INLINE_MAX_COLUMNS = 14;
 const HEALTH_SPLUNK_DASHBOARD_VIEW_NAME = "live_rest_api_sev2_dashboard";
+const HEALTH_SPLUNK_JOB_CREATE_URL = `${SPLUNK_SPLUNKD_BASE}/servicesNS/-/app_adobepass/search/jobs`;
+const HEALTH_SPLUNK_RESULTS_PREVIEW_BASE_URL = `${SPLUNK_SPLUNKD_BASE}/services/search/v2/jobs`;
 const HEALTH_SPLUNK_TABLE_FETCH_LIMIT = 10;
 const ESM_HEALTH_API_REQUEST_TIMEOUT_MS = 30000;
 const ESM_HEALTH_BREAKDOWN_LIMIT = 500;
@@ -11468,6 +11470,7 @@ const ESM_HEALTH_METRICS = Object.freeze({
 const HEALTH_SPLUNK_TABLE_DEFINITIONS = Object.freeze([
   {
     key: "sev1_wrong_scopes",
+    jobLabel: "ds_fZsO9GSi",
     title: "[Top 10] SEV1_DETECT_WRONG_SCOPES_REPORT",
     queryTemplate: `index=$environment$ source="/var/log/tomcat9/catalina.out" "/api/v2/" "Access token scopes are not allowed to call endpoint"
 | rex field=_raw "Access token scopes are not allowed to call endpoint (?<endpoint>[^\\]]+)"
@@ -11479,6 +11482,7 @@ const HEALTH_SPLUNK_TABLE_DEFINITIONS = Object.freeze([
   },
   {
     key: "sev2_404_empty_incorrect_parameters",
+    jobLabel: "ds_EwnFkVJw",
     title: "[Top 10] - SEV2_DETECT_404_EMPTY_INCORRECT_PARAMETERS_REPORT",
     queryTemplate: `index=$environment$ source="/var/log/nginx/access.log" "/api/v2/"
 | search NOT "/favicon.ico"
@@ -11491,6 +11495,7 @@ const HEALTH_SPLUNK_TABLE_DEFINITIONS = Object.freeze([
   },
   {
     key: "sev2_400_null_undefined_parameters",
+    jobLabel: "ds_noEqJxRq",
     title: "[Top 10] - SEV2_DETECT_400_NULL_UNDEFINED_PARAMETERS_REPORT",
     queryTemplate: `index=$environment$ source="/var/log/nginx/access.log" "/api/v2/"
 | rex field=_raw "request=\\"(?:GET|POST) (?<api_request>\\/api\\/v2\\/[^\\"?]+)"
@@ -11513,6 +11518,7 @@ const HEALTH_SPLUNK_TABLE_DEFINITIONS = Object.freeze([
   },
   {
     key: "sev2_401_invalid_access_token",
+    jobLabel: "ds_D5zvicMG",
     title: "[Top 10] - SEV2_DETECT_401_INVALID_ACCESS_TOKEN_REPORT",
     queryTemplate: `index=$environment$ source="/var/log/tomcat9/catalina.out" "/api/v2/" "was called with invalid token"
 | rex field=_raw "/api/v2/(?<serviceProvider>[^/]+)"
@@ -11525,6 +11531,7 @@ const HEALTH_SPLUNK_TABLE_DEFINITIONS = Object.freeze([
   },
   {
     key: "sev2_adobe_error_codes",
+    jobLabel: "ds_Hq5aFkXe",
     title: "[Top 10] - SEV2_DETECT_ADOBE_ERROR_CODES_REPORT",
     queryTemplate: `index=$environment$ (source="/var/log/tve/*/metrics.log" OR source="/var/log/tve/*/*/metrics.log") serviceProvider="$serviceProvider$"
 | search exception=* AND exCode=* AND exStatus=*
@@ -11545,6 +11552,7 @@ const HEALTH_SPLUNK_TABLE_DEFINITIONS = Object.freeze([
   },
   {
     key: "sev2_mvpd_error_codes",
+    jobLabel: "ds_wcCAsTpY",
     title: "[Top 10] - SEV2_DETECT_MVPD_ERROR_CODES_REPORT",
     queryTemplate: `index=$environment$ (source="/var/log/tve/*/metrics.log" OR source="/var/log/tve/*/*/metrics.log") serviceProvider="$serviceProvider$"
 | search exception=* AND exCode=* AND exStatus=*
@@ -11562,6 +11570,7 @@ const HEALTH_SPLUNK_TABLE_DEFINITIONS = Object.freeze([
   },
   {
     key: "sev2_network_error_codes",
+    jobLabel: "ds_viWWbh8X",
     title: "[Top 10] - SEV2_DETECT_NETWORK_ERROR_CODES_REPORT",
     queryTemplate: `index=$environment$ (source="/var/log/tve/*/metrics.log" OR source="/var/log/tve/*/*/metrics.log") serviceProvider="$serviceProvider$"
 | search exception=* AND exCode=* AND exStatus=*
@@ -20129,14 +20138,6 @@ function buildHealthSplunkQueryContext(rawContext = null) {
     programmerId,
     requestorId,
   });
-  const dashboardUrl = (() => {
-    const url = new URL(`${SPLUNK_BASE_URL}/en-US/app/app_adobepass/${HEALTH_SPLUNK_DASHBOARD_VIEW_NAME}`);
-    url.searchParams.set("form.tr_NmSjmaI0.earliest", earliest);
-    url.searchParams.set("form.tr_NmSjmaI0.latest", latest);
-    url.searchParams.set("form.serviceProvider", requestorId);
-    url.searchParams.set("form.environment", environmentIndex);
-    return url.toString();
-  })();
   return {
     programmerId,
     programmerName,
@@ -20147,7 +20148,6 @@ function buildHealthSplunkQueryContext(rawContext = null) {
     environmentLabel,
     environmentIndex,
     selectionKey,
-    dashboardUrl,
     requestSource: String(context.requestSource || "health-splunk-dashboard").trim() || "health-splunk-dashboard",
     search: buildHealthSplunkLoginSearch({
       requestorId,
@@ -20177,9 +20177,10 @@ function buildHealthSplunkLoginSearch(queryContext = null) {
   return `search index=${environmentIndex} "${requestorId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function getHealthSplunkPlaceholderTables(queryContext = null) {
+function getHealthSplunkTableDefinitions(queryContext = null) {
   return HEALTH_SPLUNK_TABLE_DEFINITIONS.map((entry) => ({
     key: String(entry.key || "").trim(),
+    jobLabel: String(entry.jobLabel || "").trim(),
     title: String(entry.title || "").trim(),
     queryTemplate: String(entry.queryTemplate || "").trim(),
     query: compileHealthSplunkSearchTemplate(entry.queryTemplate, queryContext),
@@ -20217,151 +20218,6 @@ function compileHealthSplunkSearchTemplate(queryTemplate = "", queryContext = nu
     compiled = compiled.replace(new RegExp(`\\$${escapedTokenName}\\$`, "g"), String(tokenValue || ""));
   });
   return compiled.trim();
-}
-
-function extractSplunkDashboardDefinitionJson(value = null) {
-  const payload = value && typeof value === "object" ? value : parseJsonText(String(value || ""), null);
-  const dashboardXml = firstNonEmptyString([
-    payload?.entry?.[0]?.content?.["eai:data"],
-    payload?.entry?.[0]?.content?.eaiData,
-    payload?.content?.["eai:data"],
-    payload?.content?.eaiData,
-  ]);
-  if (!dashboardXml) {
-    return null;
-  }
-  const match = dashboardXml.match(/<definition><!\[CDATA\[([\s\S]*?)\]\]><\/definition>/i);
-  if (!match || !match[1]) {
-    return null;
-  }
-  return parseJsonText(match[1], null);
-}
-
-function normalizeHealthSplunkReportTitle(value = "") {
-  return String(value || "").trim().replace(/^\[Top 10\]\s*-?\s*/i, "").trim();
-}
-
-function parseHealthSplunkTableDefinitionsFromDashboardDefinition(definition = null, queryContext = null) {
-  const dataSources = definition?.dataSources && typeof definition.dataSources === "object" ? definition.dataSources : {};
-  const visualizations = definition?.visualizations && typeof definition.visualizations === "object" ? definition.visualizations : {};
-  const tables = [];
-
-  Object.values(visualizations).forEach((viz) => {
-    if (String(viz?.type || "").trim().toLowerCase() !== "splunk.table") {
-      return;
-    }
-    const primaryDataSourceKey = String(viz?.dataSources?.primary || "").trim();
-    if (!primaryDataSourceKey) {
-      return;
-    }
-    const dataSource = dataSources[primaryDataSourceKey];
-    const title = String(viz?.title || dataSource?.name || "").trim();
-    const normalizedTitle = normalizeHealthSplunkReportTitle(title);
-    const dataSourceRef = String(dataSource?.options?.ref || "").trim();
-    const matchedFallback = HEALTH_SPLUNK_TABLE_DEFINITIONS.find(
-      (entry) =>
-        normalizeHealthSplunkReportTitle(entry.title) === normalizedTitle ||
-        normalizeHealthSplunkReportTitle(dataSource?.name) === normalizeHealthSplunkReportTitle(entry.title) ||
-        normalizeHealthSplunkReportTitle(dataSourceRef) === normalizeHealthSplunkReportTitle(entry.title)
-    );
-    const queryTemplate = firstNonEmptyString([dataSource?.options?.query, matchedFallback?.queryTemplate]);
-    if (!queryTemplate || !matchedFallback) {
-      return;
-    }
-    tables.push({
-      key: String(matchedFallback.key || "").trim(),
-      title: title || String(matchedFallback.title || "").trim(),
-      queryTemplate,
-      query: compileHealthSplunkSearchTemplate(queryTemplate, queryContext),
-    });
-  });
-
-  const orderIndexByKey = new Map(HEALTH_SPLUNK_TABLE_DEFINITIONS.map((entry, index) => [String(entry.key || "").trim(), index]));
-  tables.sort((left, right) => {
-    const leftIndex = orderIndexByKey.get(String(left?.key || "").trim());
-    const rightIndex = orderIndexByKey.get(String(right?.key || "").trim());
-    return Number.isFinite(leftIndex) && Number.isFinite(rightIndex) ? leftIndex - rightIndex : 0;
-  });
-
-  return tables;
-}
-
-function extractSplunkCurrentUsername(value = null) {
-  return firstNonEmptyString([
-    value?.username,
-    value?.entry?.[0]?.content?.username,
-    value?.entry?.[0]?.name,
-    value?.entry?.[0]?.acl?.owner,
-    value?.entry?.[0]?.content?.realname,
-  ]);
-}
-
-async function resolveHealthSplunkTableDefinitions(queryContext = null, networkEvents = [], relayOptions = {}, session = null) {
-  const usernameCandidates = [];
-  const pushUsername = (value) => {
-    const normalized = String(value || "").trim();
-    if (normalized && !usernameCandidates.includes(normalized)) {
-      usernameCandidates.push(normalized);
-    }
-  };
-  pushUsername(extractSplunkCurrentUsername(session?.session?.probe?.parsed));
-  pushUsername(extractSplunkCurrentUsername(session?.probe?.parsed));
-  pushUsername(extractSplunkCurrentUsername(session?.parsed));
-  ["nobody", "-"].forEach(pushUsername);
-
-  let lastError = "";
-  for (const username of usernameCandidates) {
-    const dashboardDefinitionUrl = `${SPLUNK_SPLUNKD_BASE}/servicesNS/${encodeURIComponent(username)}/app_adobepass/data/ui/views/${encodeURIComponent(
-      HEALTH_SPLUNK_DASHBOARD_VIEW_NAME
-    )}?output_mode=json`;
-    const response = await runSplunkRelayRequest(
-      dashboardDefinitionUrl,
-      {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "*/*",
-        },
-      },
-      networkEvents,
-      "health-dashboard-definition",
-      relayOptions
-    );
-    if (response.authRequired) {
-      return {
-        ok: false,
-        authRequired: true,
-        error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
-        tables: getHealthSplunkPlaceholderTables(queryContext),
-      };
-    }
-    if (!response.ok) {
-      lastError = firstNonEmptyString([
-        normalizeHttpErrorMessage(response.text),
-        String(response.statusText || "").trim(),
-        `HTTP ${response.status || 0}`,
-      ]);
-      continue;
-    }
-    const definitionJson = extractSplunkDashboardDefinitionJson(response.parsed);
-    const tableDefinitions = parseHealthSplunkTableDefinitionsFromDashboardDefinition(definitionJson, queryContext);
-    if (Array.isArray(tableDefinitions) && tableDefinitions.length > 0) {
-      return {
-        ok: true,
-        authRequired: false,
-        tables: tableDefinitions,
-        fallbackUsed: false,
-      };
-    }
-  }
-
-  return {
-    ok: true,
-    authRequired: false,
-    error: lastError,
-    tables: getHealthSplunkPlaceholderTables(queryContext),
-    fallbackUsed: true,
-  };
 }
 
 function parseSplunkPreviewRowsPayload(payload = null) {
@@ -20454,6 +20310,10 @@ function buildHealthSplunkPreviewReportPayload(
   });
 }
 
+function isHealthSplunkPreviewComplete(payload = null) {
+  return parseSplunkBoolean(payload?.preview) !== true;
+}
+
 async function fetchHealthSplunkPreviewReportBySid(queryContext = null, tableDefinition = null, sid = "", networkEvents = [], relayOptions = {}) {
   const normalizedSid = String(sid || "").trim();
   if (!normalizedSid) {
@@ -20470,86 +20330,20 @@ async function fetchHealthSplunkPreviewReportBySid(queryContext = null, tableDef
   }
 
   const encodedSid = encodeURIComponent(normalizedSid);
-  const jobsBaseCandidates = [
-    `${SPLUNK_SPLUNKD_BASE}/services/search/v2/jobs`,
-    `${SPLUNK_SPLUNKD_BASE}/services/search/jobs`,
-  ];
+  const previewParams = new URLSearchParams({
+    output_mode: "json_cols",
+    count: String(HEALTH_SPLUNK_TABLE_FETCH_LIMIT),
+    offset: "0",
+    progress: "true",
+    requestTotalCount: "true",
+    show_metadata: "true",
+  });
+  const previewUrl = `${HEALTH_SPLUNK_RESULTS_PREVIEW_BASE_URL}/${encodedSid}/results_preview?${previewParams.toString()}`;
+  const previewStartedAt = Date.now();
   let lastError = "";
+  let timedOut = false;
 
-  for (const jobsBaseUrl of jobsBaseCandidates) {
-    const jobMetaUrl = `${jobsBaseUrl}/${encodedSid}?output_mode=json`;
-    const pollStartedAt = Date.now();
-    let jobMeta = null;
-    let latestStatus = parseSplunkJobStatus(null);
-
-    do {
-      jobMeta = await runSplunkRelayRequest(
-        jobMetaUrl,
-        {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            Accept: "*/*",
-          },
-        },
-        networkEvents,
-        `health-table-${String(tableDefinition?.key || "").trim()}-job-status`,
-        relayOptions
-      );
-      if (jobMeta.authRequired) {
-        return {
-          ok: false,
-          authRequired: true,
-          error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
-          report: buildHealthSplunkTableResult(queryContext, tableDefinition, {
-            ok: false,
-            authRequired: true,
-            sid: normalizedSid,
-            endpointUrl: jobMetaUrl,
-            status: Number(jobMeta?.status || 0),
-            statusText: String(jobMeta?.statusText || "").trim(),
-            error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
-            networkEvents,
-          }),
-        };
-      }
-      if (!jobMeta.ok) {
-        lastError = firstNonEmptyString([
-          normalizeHttpErrorMessage(jobMeta.text),
-          String(jobMeta.statusText || "").trim(),
-          `HTTP ${jobMeta.status || 0}`,
-        ]);
-        break;
-      }
-      latestStatus = parseSplunkJobStatus(jobMeta.parsed);
-      if (latestStatus.isFailed) {
-        lastError = "Splunk search job failed before preview retrieval.";
-        break;
-      }
-      if (latestStatus.isDone) {
-        break;
-      }
-      await waitForDelay(SPLUNK_JOB_POLL_INTERVAL_MS);
-    } while (Date.now() - pollStartedAt < SPLUNK_JOB_POLL_TIMEOUT_MS);
-
-    if (!jobMeta?.ok) {
-      continue;
-    }
-
-    const totalRowsFromMeta = Math.max(
-      extractSplunkJobResultCount(jobMeta.parsed),
-      Number(latestStatus?.resultCount || 0),
-      Number(latestStatus?.eventCount || 0)
-    );
-    const previewParams = new URLSearchParams({
-      output_mode: "json_cols",
-      count: String(HEALTH_SPLUNK_TABLE_FETCH_LIMIT),
-      offset: "0",
-      progress: "true",
-      requestTotalCount: "true",
-      show_metadata: "true",
-    });
-    const previewUrl = `${jobsBaseUrl}/${encodedSid}/results_preview?${previewParams.toString()}`;
+  do {
     const previewResponse = await runSplunkRelayRequest(
       previewUrl,
       {
@@ -20586,68 +20380,32 @@ async function fetchHealthSplunkPreviewReportBySid(queryContext = null, tableDef
         String(previewResponse.statusText || "").trim(),
         `HTTP ${previewResponse.status || 0}`,
       ]);
-      continue;
+      break;
     }
 
-    let report = buildHealthSplunkPreviewReportPayload(queryContext, tableDefinition, normalizedSid, previewResponse, networkEvents, {
-      totalRowsFromMeta,
-    });
+    const report = buildHealthSplunkPreviewReportPayload(queryContext, tableDefinition, normalizedSid, previewResponse, networkEvents);
 
-    if (report.rows.length === 0) {
-      const resultsParams = new URLSearchParams({
-        output_mode: "json",
-        count: String(HEALTH_SPLUNK_TABLE_FETCH_LIMIT),
-        offset: "0",
-      });
-      const resultsUrl = `${jobsBaseUrl}/${encodedSid}/results?${resultsParams.toString()}`;
-      const resultsResponse = await runSplunkRelayRequest(
-        resultsUrl,
-        {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            Accept: "*/*",
-          },
-        },
-        networkEvents,
-        `health-table-${String(tableDefinition?.key || "").trim()}-results`,
-        relayOptions
-      );
-      if (resultsResponse.ok && !resultsResponse.authRequired) {
-        const resultRows = extractSplunkRowsFromResponsePayload(resultsResponse.parsed);
-        const resultFields = extractSplunkFieldsFromResponsePayload(resultsResponse.parsed);
-        const columnOrder = collectSplunkColumnOrder(resultRows, resultFields);
-        const uniqueRows = dedupeSplunkRows(resultRows, columnOrder);
-        report = buildHealthSplunkTableResult(queryContext, tableDefinition, {
-          ok: true,
-          sid: normalizedSid,
-          columns: columnOrder,
-          rows: normalizeSplunkRows(uniqueRows, columnOrder),
-          totalRows: Math.max(totalRowsFromMeta, uniqueRows.length),
-          endpointUrl: String(resultsResponse?.url || resultsUrl).trim(),
-          status: Number(resultsResponse?.status || 0),
-          statusText: String(resultsResponse?.statusText || "").trim(),
-          networkEvents,
-        });
-      }
+    if (report.rows.length > 0 || isHealthSplunkPreviewComplete(previewResponse.parsed)) {
+      return {
+        ok: true,
+        authRequired: false,
+        error: "",
+        report,
+      };
     }
 
-    return {
-      ok: true,
-      authRequired: false,
-      error: "",
-      report,
-    };
-  }
+    await waitForDelay(SPLUNK_JOB_POLL_INTERVAL_MS);
+  } while ((timedOut = Date.now() - previewStartedAt >= SPLUNK_JOB_POLL_TIMEOUT_MS) === false);
 
   return {
     ok: false,
-    error: lastError || "Unable to fetch HEALTH Splunk preview results for search SID.",
+    error: lastError || (timedOut ? "Timed out waiting for HEALTH Splunk preview results." : "Unable to fetch HEALTH Splunk preview results for search SID."),
     authRequired: false,
     report: buildHealthSplunkTableResult(queryContext, tableDefinition, {
       ok: false,
       sid: normalizedSid,
-      error: lastError || "Unable to fetch HEALTH Splunk preview results for search SID.",
+      endpointUrl: previewUrl,
+      error: lastError || (timedOut ? "Timed out waiting for HEALTH Splunk preview results." : "Unable to fetch HEALTH Splunk preview results for search SID."),
       networkEvents,
     }),
   };
@@ -20656,6 +20414,7 @@ async function fetchHealthSplunkPreviewReportBySid(queryContext = null, tableDef
 async function runHealthSplunkTableSearch(queryContext = null, tableDefinition = null, options = {}) {
   const compiledTable = {
     key: String(tableDefinition?.key || "").trim(),
+    jobLabel: String(tableDefinition?.jobLabel || "").trim(),
     title: String(tableDefinition?.title || "").trim(),
     queryTemplate: String(tableDefinition?.queryTemplate || "").trim(),
     query: firstNonEmptyString([
@@ -20678,70 +20437,72 @@ async function runHealthSplunkTableSearch(queryContext = null, tableDefinition =
     earliest_time: String(queryContext?.earliest || SPLUNK_SEARCH_EARLIEST).trim() || SPLUNK_SEARCH_EARLIEST,
     latest_time: String(queryContext?.latest || SPLUNK_SEARCH_LATEST).trim() || SPLUNK_SEARCH_LATEST,
     preview: "true",
+    sid: "",
+    check_risky_command: "true",
     provenance: `UI:dashboard:${HEALTH_SPLUNK_DASHBOARD_VIEW_NAME}`,
-    label: String(compiledTable.key || compiledTable.title || "health-splunk-table").trim(),
+    label: String(compiledTable.jobLabel || compiledTable.key || compiledTable.title || "health-splunk-table").trim(),
     output_mode: "json",
   }).toString();
-  const createCandidates = [
-    `${SPLUNK_SPLUNKD_BASE}/services/search/v2/jobs`,
-    `${SPLUNK_SPLUNKD_BASE}/services/search/jobs`,
-  ];
-  let lastError = "";
-
-  for (const createUrl of createCandidates) {
-    const response = await runSplunkRelayRequest(
-      createUrl,
-      {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          Accept: "*/*",
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          "X-Requested-With": "XMLHttpRequest",
-        },
-        body: createBody,
+  const createUrl = HEALTH_SPLUNK_JOB_CREATE_URL;
+  const response = await runSplunkRelayRequest(
+    createUrl,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "*/*",
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
       },
+      body: createBody,
+    },
+    networkEvents,
+    `health-table-${compiledTable.key}-create-job`,
+    relayOptions
+  );
+  if (response.authRequired) {
+    return buildHealthSplunkTableResult(queryContext, compiledTable, {
+      ok: false,
+      authRequired: true,
+      endpointUrl: createUrl,
+      status: Number(response?.status || 0),
+      statusText: String(response?.statusText || "").trim(),
+      error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
       networkEvents,
-      `health-table-${compiledTable.key}-create-job`,
-      relayOptions
-    );
-    if (response.authRequired) {
-      return buildHealthSplunkTableResult(queryContext, compiledTable, {
-        ok: false,
-        authRequired: true,
-        endpointUrl: createUrl,
-        status: Number(response?.status || 0),
-        statusText: String(response?.statusText || "").trim(),
-        error: "Splunk session is not active. Complete Splunk login in the opened tab and retry.",
-        networkEvents,
-      });
-    }
-    if (!response.ok) {
-      lastError = firstNonEmptyString([
+    });
+  }
+  if (!response.ok) {
+    return buildHealthSplunkTableResult(queryContext, compiledTable, {
+      ok: false,
+      endpointUrl: createUrl,
+      status: Number(response?.status || 0),
+      statusText: String(response?.statusText || "").trim(),
+      error: firstNonEmptyString([
         normalizeHttpErrorMessage(response.text),
         String(response.statusText || "").trim(),
         `HTTP ${response.status || 0}`,
-      ]);
-      continue;
-    }
-    const sid = extractSplunkJobSid(response.parsed);
-    if (!sid) {
-      lastError = "Splunk search job was created without a SID.";
-      continue;
-    }
-    const previewReport = await fetchHealthSplunkPreviewReportBySid(queryContext, compiledTable, sid, networkEvents, relayOptions);
-    if (previewReport.ok && previewReport.report) {
-      return previewReport.report;
-    }
-    if (previewReport.report) {
-      return previewReport.report;
-    }
-    lastError = firstNonEmptyString([previewReport.error, lastError]);
+        "Unable to create HEALTH Splunk search job.",
+      ]),
+      networkEvents,
+    });
+  }
+  const sid = extractSplunkJobSid(response.parsed);
+  if (!sid) {
+    return buildHealthSplunkTableResult(queryContext, compiledTable, {
+      ok: false,
+      endpointUrl: createUrl,
+      error: "Splunk search job was created without a SID.",
+      networkEvents,
+    });
+  }
+  const previewReport = await fetchHealthSplunkPreviewReportBySid(queryContext, compiledTable, sid, networkEvents, relayOptions);
+  if (previewReport.report) {
+    return previewReport.report;
   }
 
   return buildHealthSplunkTableResult(queryContext, compiledTable, {
     ok: false,
-    error: lastError || "Unable to create HEALTH Splunk search job.",
+    error: String(previewReport.error || "Unable to create HEALTH Splunk search job.").trim() || "Unable to create HEALTH Splunk search job.",
     networkEvents,
   });
 }
@@ -20752,17 +20513,12 @@ function buildHealthSplunkDashboardReportPayload(queryContext = null, tableResul
   const pendingCount = tables.filter((entry) => entry?.pending === true).length;
   const errorCount = tables.filter((entry) => entry?.pending !== true && entry?.ok !== true).length;
   const tableCount = tables.length;
-  const fallbackUsed = options?.fallbackUsed === true;
   const pending = pendingCount > 0 && successCount === 0 && errorCount === 0;
   return {
     ok: errorCount === 0 && pendingCount === 0 && tableCount > 0,
     partial: successCount > 0 && (errorCount > 0 || pendingCount > 0),
     pending,
     authPending: options?.authPending === true || tables.some((entry) => entry?.authPending === true),
-    fallbackUsed,
-    fallbackMessage: fallbackUsed
-      ? "Dashboard definition lookup failed. Using UnderPAR fallback HEALTH queries extracted from the live dashboard."
-      : "",
     selectionKey: String(queryContext?.selectionKey || "").trim(),
     checkedAt: Date.now(),
     queryContext,
@@ -20812,14 +20568,14 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
   }
 
   healthWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), queryContext, targetWindowId);
-  const placeholderTables = getHealthSplunkPlaceholderTables(queryContext);
+  const scopedTables = getHealthSplunkTableDefinitions(queryContext);
   void healthWorkspaceSendWorkspaceMessage(
     "report-start",
     {
       selectionKey: queryContext.selectionKey,
       queryContext,
       startedAt: Date.now(),
-      tables: placeholderTables.map((entry) => ({
+      tables: scopedTables.map((entry) => ({
         key: entry.key,
         title: entry.title,
         query: entry.query,
@@ -20854,7 +20610,7 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
   };
   const session = sessionReady?.session || (await checkSplunkSessionActive(queryContext, sessionEvents, relayOptions));
   if (!sessionReady?.ok || !session?.active) {
-    const authTables = placeholderTables.map((entry) =>
+    const authTables = scopedTables.map((entry) =>
       buildHealthSplunkTableResult(queryContext, entry, {
         ok: false,
         pending: true,
@@ -20878,7 +20634,7 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
     );
   }
 
-  const resolvedTables = placeholderTables.slice();
+  const resolvedTables = scopedTables.slice();
   const tableResults = new Array(resolvedTables.length);
   const tablePromises = resolvedTables.map((tableDefinition, index) =>
     runHealthSplunkTableSearch(queryContext, tableDefinition, {
@@ -20917,7 +20673,6 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
 
   return finalizeReport(
     buildHealthSplunkDashboardReportPayload(queryContext, tableResults.filter(Boolean), {
-      fallbackUsed: false,
       error: "One or more HEALTH Splunk tables failed to load.",
     })
   );
@@ -58141,8 +57896,7 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
   if (report?.partial === true) {
     const loadedCount = Number(report?.successCount || 0);
     const totalCount = Number(report?.totalTables || 0);
-    const fallbackNote = report?.fallbackUsed ? " Using fallback dashboard definitions." : "";
-    setStatus(`Loaded ${loadedCount}/${totalCount} HEALTH Splunk tables.${fallbackNote}`, "success");
+    setStatus(`Loaded ${loadedCount}/${totalCount} HEALTH Splunk tables.`, "success");
     return;
   }
   setStatus(String(report?.error || "Unable to load HEALTH Splunk tables."), "error");
