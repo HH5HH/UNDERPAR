@@ -59,6 +59,11 @@
   --danger-strong-rgb: 229, 116, 131;
   --workspace-net-indicator-track: rgba(var(--zip-accent-900), 0.3);
   --workspace-net-indicator-head: rgba(var(--zip-accent-1100), 0.96);
+  --cm-json-surface-top: rgba(17, 17, 17, 0.96);
+  --cm-json-surface-bottom: rgba(27, 27, 27, 0.98);
+  --cm-json-border: rgba(var(--zip-accent-1000), 0.22);
+  --cm-json-ink: rgb(238, 238, 238);
+  --cm-json-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   font-family: "Avenir Next", "Segoe UI Variable", "Gill Sans MT", "Trebuchet MS", sans-serif;
 }
 
@@ -1050,6 +1055,28 @@ body.workspace-locked .workspace-cards {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.esm-table td.cm-cell--json {
+  white-space: normal;
+  max-width: min(72ch, 52vw);
+}
+
+.cm-cell-json {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--cm-json-border);
+  border-radius: var(--s2-radius-strong);
+  background: linear-gradient(180deg, var(--cm-json-surface-top), var(--cm-json-surface-bottom));
+  box-shadow: var(--cm-json-shadow);
+  color: var(--cm-json-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
 }
 
 .esm-table thead th {

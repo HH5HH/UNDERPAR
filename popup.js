@@ -41107,7 +41107,10 @@ function cmBuildRestV2ProfileCorrelationRecords(context = null) {
             ProfileCheckHttpStatus: profileCheck ? Number(profileCheck.status || 0) : 0,
             ProfileCheckHttpText: profileCheck ? String(profileCheck.statusText || "").trim() : "",
             ProfileCheckError: profileCheck ? String(profileCheck.error || "").trim() : "",
-            ProfileCheckResponsePreview: profileCheck ? String(profileCheck.responsePreview || "").trim() : "",
+            ProfileCheckResponsePreview:
+              profileCheck && String(profileCheck.responsePreview || "").trim()
+                ? stringifyJsonForDisplay(profileCheck.responsePreview)
+                : "",
             ProfileCount: Number(profileHarvest.profileCount || profileCheck?.profileCount || 0),
             ProfileKeys: Array.isArray(profileHarvest.profileKeys) ? profileHarvest.profileKeys.join(", ") : "",
             HarvestedAt: capturedAtLabel,
@@ -41139,7 +41142,10 @@ function cmBuildRestV2ProfileCorrelationRecords(context = null) {
               ProfileCheckHttpStatus: profileCheck ? Number(profileCheck.status || 0) : 0,
               ProfileCheckHttpText: profileCheck ? String(profileCheck.statusText || "").trim() : "",
               ProfileCheckError: profileCheck ? String(profileCheck.error || "").trim() : "",
-              ProfileCheckResponsePreview: profileCheck ? String(profileCheck.responsePreview || "").trim() : "",
+              ProfileCheckResponsePreview:
+                profileCheck && String(profileCheck.responsePreview || "").trim()
+                  ? stringifyJsonForDisplay(profileCheck.responsePreview)
+                  : "",
               ProfileCount: Number(profileHarvest.profileCount || profileCheck?.profileCount || 0),
               ProfileKeys: Array.isArray(profileHarvest.profileKeys) ? profileHarvest.profileKeys.join(", ") : "",
               HarvestedAt: capturedAtLabel,
@@ -41321,7 +41327,9 @@ function cmBuildRestV2PreauthzCorrelationRecords(context = null) {
       denyCount: Number(entry?.denyCount || 0),
       unknownCount: Number(entry?.unknownCount || 0),
       resourceIds: (Array.isArray(entry?.resourceIds) ? entry.resourceIds : []).join(", "),
-      responsePreview: String(entry?.responsePreview || "").trim(),
+      responsePreview: String(entry?.responsePreview || "").trim()
+        ? stringifyJsonForDisplay(entry?.responsePreview)
+        : "",
       items,
       ...rowMeta,
     };

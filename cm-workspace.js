@@ -3032,11 +3032,90 @@ function sortRows(rows, sortStack, context = null) {
   });
 }
 
-function createCell(value) {
+function shouldTreatCmCellAsStructuredJson(text = "", columnName = "") {
+  const normalizedText = String(text || "").trim();
+  const normalizedColumn = normalizeCmColumnName(columnName);
+  if (!normalizedText) {
+    return false;
+  }
+  if (/json$/i.test(normalizedColumn)) {
+    return true;
+  }
+  return /(responsepreview|payloadpreview|requestpreview)$/i.test(normalizedColumn);
+}
+
+function formatCmCellDisplayValue(value, columnName = "") {
+  if (value == null) {
+    return {
+      text: "",
+      multiline: false,
+      json: false,
+    };
+  }
+
+  if (typeof value === "object") {
+    try {
+      const formatted = JSON.stringify(value, null, 2);
+      return {
+        text: formatted,
+        multiline: true,
+        json: true,
+      };
+    } catch {
+      const fallback = String(value);
+      return {
+        text: fallback,
+        multiline: fallback.includes("\n"),
+        json: false,
+      };
+    }
+  }
+
+  const text = String(value);
+  const trimmed = text.trim();
+  const parsedJson =
+    trimmed &&
+    ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]")))
+      ? safeJsonParse(trimmed, null)
+      : null;
+
+  if (parsedJson && typeof parsedJson === "object") {
+    try {
+      return {
+        text: JSON.stringify(parsedJson, null, 2),
+        multiline: true,
+        json: true,
+      };
+    } catch {
+      // Fall through to raw text rendering.
+    }
+  }
+
+  const looksStructuredJson = shouldTreatCmCellAsStructuredJson(text, columnName);
+  return {
+    text,
+    multiline: looksStructuredJson || text.includes("\n"),
+    json: looksStructuredJson,
+  };
+}
+
+function createCell(value, columnName = "") {
   const cell = document.createElement("td");
-  const text = value == null ? "" : String(value);
+  const display = formatCmCellDisplayValue(value, columnName);
+  const text = String(display?.text || "");
+
+  if (display?.json === true) {
+    cell.classList.add("cm-cell--multiline", "cm-cell--json");
+    const content = document.createElement("pre");
+    content.className = "cm-cell-json";
+    content.textContent = text;
+    cell.appendChild(content);
+    cell.title = "";
+    return cell;
+  }
+
   cell.textContent = text;
-  if (text.includes("\n")) {
+  if (display?.multiline === true) {
     cell.classList.add("cm-cell--multiline");
     cell.title = "";
   } else {
@@ -3048,12 +3127,12 @@ function createCell(value) {
 function createActionCell(row, header) {
   const actionKey = String(header || "").trim().toUpperCase();
   if (actionKey !== "VIEW") {
-    return createCell(getRowValueByColumn(row, header) ?? "");
+    return createCell(getRowValueByColumn(row, header) ?? "", header);
   }
 
   const targetRecordId = String(row?.__cmViewRecordId || "").trim();
   if (!targetRecordId) {
-    return createCell(getRowValueByColumn(row, header) ?? "");
+    return createCell(getRowValueByColumn(row, header) ?? "", header);
   }
 
   const cell = document.createElement("td");

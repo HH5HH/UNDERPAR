@@ -75,7 +75,13 @@ test("REST V2 preauthz correlation records pretty-print JSON payloads", () => {
       cmBuildRecordId: (kind, tenantId, entityId) => `${kind}:${tenantId}:${entityId}`,
       cmBuildCrossReferenceLabel: (requestorId, mvpd) => `${requestorId} x ${mvpd}`,
       cmColumnsFromPayload: (payload) => Object.keys((payload && payload.items && payload.items[0]) || {}),
-      stringifyJsonForDisplay: (value) => JSON.stringify(value || {}, null, 2),
+      stringifyJsonForDisplay: (value) => {
+        const normalized = String(value || "").trim();
+        if (!normalized) {
+          return "";
+        }
+        return JSON.stringify(typeof value === "string" ? JSON.parse(value) : value || {}, null, 2);
+      },
     }
   );
 
@@ -98,6 +104,7 @@ test("REST V2 preauthz correlation records pretty-print JSON payloads", () => {
         statusText: "OK",
         allRequestedPermitted: true,
         resourceIds: ["resource-1"],
+        responsePreview: '{"allowed":true,"reason":"permit"}',
         requestBody: { resource: "resource-1" },
         responsePayload: { allowed: true, reason: "permit" },
         decisionRows: [
@@ -115,8 +122,73 @@ test("REST V2 preauthz correlation records pretty-print JSON payloads", () => {
   assert.equal(records[0].kind, "restv2-preauthz-xref");
   assert.equal(records[0].title, "REST V2 Preauthorize");
   assert.match(records[0].subtitle, /Can I watch\? YES/);
+  assert.match(records[0].payload.responsePreview, /\n  "allowed": true/);
   assert.match(records[0].payload.items[0].ResponsePayloadJson, /\n  "allowed": true/);
   assert.match(records[0].payload.items[0].DecisionRawJson, /\n  "decision": "Permit"/);
+});
+
+test("REST V2 profile correlation records pretty-print profile check previews for CM workspace tables", () => {
+  const { cmBuildRestV2ProfileCorrelationRecords } = loadFunctions(
+    "popup.js",
+    ["cmBuildRestV2ProfileCorrelationRecords"],
+    {
+      cmBuildCrossReferenceRowMeta: () => ({
+        MediaCompany: "FOX",
+        Environment: "production",
+      }),
+      firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+      buildRestV2ProfileHarvestBucketKey: () => "harvest-1",
+      cmBuildRecordId: (kind, tenantId, entityId) => `${kind}:${tenantId}:${entityId}`,
+      cmBuildCrossReferenceLabel: (requestorId, mvpd) => `${requestorId} x ${mvpd}`,
+      cmColumnsFromPayload: (payload) => Object.keys((payload && payload.items && payload.items[0]) || {}),
+      getRestV2MvpdMeta: () => ({ id: "comcast", name: "Comcast" }),
+      getRestV2MvpdPickerLabel: () => "Comcast",
+      stringifyJsonForDisplay: (value) => {
+        if (!String(value || "").trim()) {
+          return "";
+        }
+        return JSON.stringify(typeof value === "string" ? JSON.parse(value) : value || {}, null, 2);
+      },
+    }
+  );
+
+  const records = cmBuildRestV2ProfileCorrelationRecords({
+    programmerId: "fox",
+    programmerName: "FOX",
+    requestorId: "FBC",
+    mvpd: "comcast",
+    mvpdMeta: { id: "comcast", name: "Comcast" },
+    mvpdLabel: "Comcast",
+    profileHarvestList: [
+      {
+        programmerId: "fox",
+        requestorId: "FBC",
+        serviceProviderId: "FBC",
+        mvpd: "comcast",
+        mvpdName: "Comcast",
+        profileCheckOutcome: "success",
+        profileCount: 1,
+        profileKeys: ["comcast"],
+        harvestedAt: Date.UTC(2026, 2, 24, 10, 0, 0),
+        profileUrl: "https://example.test/profiles",
+        profile: { subject: "viewer-1" },
+        profileResponsePayload: { profiles: { comcast: { subject: "viewer-1" } } },
+        profileAttributes: { tier: "gold" },
+        profileScalarFields: { type: "regular" },
+        profileCheck: {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          profileCount: 1,
+          responsePreview: '{"profiles":{"comcast":{"subject":"viewer-1"}}}',
+        },
+      },
+    ],
+  });
+
+  assert.equal(records.length, 1);
+  assert.match(records[0].payload.items[0].ProfileCheckResponsePreview, /\n  "profiles": \{/);
+  assert.match(records[0].payload.items[0].ProfileResponsePayloadJson, /\n  "profiles": \{/);
 });
 
 test("ESM health correlation record carries scoped requestor and mvpd context", () => {
@@ -175,23 +247,37 @@ test("CM workspace multiline cells preserve formatted JSON blocks", () => {
         tagName,
         textContent: "",
         title: "",
+        className: "",
+        children: [],
         classList: {
           values: [],
-          add(value) {
-            this.values.push(value);
+          add(...values) {
+            this.values.push(...values);
           },
+        },
+        appendChild(child) {
+          this.children.push(child);
         },
       };
     },
   };
-  const { createCell } = loadFunctions("cm-workspace.js", ["createCell"], {
+  const { createCell } = loadFunctions(
+    "cm-workspace.js",
+    ["safeJsonParse", "normalizeCmColumnName", "shouldTreatCmCellAsStructuredJson", "formatCmCellDisplayValue", "createCell"],
+    {
     document: documentStub,
   });
 
-  const multilineCell = createCell('{\n  "ok": true\n}');
-  assert.equal(multilineCell.textContent, '{\n  "ok": true\n}');
+  const multilineCell = createCell('{\n  "ok": true\n}', "ResponsePayloadJson");
   assert.equal(multilineCell.title, "");
-  assert.deepEqual(multilineCell.classList.values, ["cm-cell--multiline"]);
+  assert.deepEqual(multilineCell.classList.values, ["cm-cell--multiline", "cm-cell--json"]);
+  assert.equal(multilineCell.children[0].tagName, "pre");
+  assert.equal(multilineCell.children[0].textContent, '{\n  "ok": true\n}');
+
+  const singleLineJsonPreviewCell = createCell('{"profiles":{"comcast":{"subject":"viewer-1"}}}', "ProfileCheckResponsePreview");
+  assert.equal(singleLineJsonPreviewCell.title, "");
+  assert.deepEqual(singleLineJsonPreviewCell.classList.values, ["cm-cell--multiline", "cm-cell--json"]);
+  assert.match(singleLineJsonPreviewCell.children[0].textContent, /\n  "profiles": \{/);
 
   const singleLineCell = createCell("plain");
   assert.equal(singleLineCell.title, "plain");
