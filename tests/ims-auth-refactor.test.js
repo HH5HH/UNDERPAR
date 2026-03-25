@@ -1487,7 +1487,7 @@ test("health workspaces render full-width collapsible report sections and expose
   assert.match(esmHealthWorkspaceSource, /renderInsightCards\(report\)/);
   assert.match(esmHealthWorkspaceHtml, /<body class="spectrum spectrum--medium spectrum--dark">/);
   assert.match(esmHealthWorkspaceHtml, /class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"/);
-  assert.match(esmHealthWorkspaceCss, /\.page-env-badge\s*\{/);
+  assert.match(esmHealthWorkspaceCss, /@import url\("underpar-env-badge\.css"\);/);
   assert.match(esmHealthWorkspaceCss, /\.spectrum-Button--primary,\s*\.workspace-text-btn--accent,\s*\.esm-health-granularity-btn\.is-active\s*\{/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-table-grid\s*\{\s*display:\s*flex;/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-section-summary\s*\{/);

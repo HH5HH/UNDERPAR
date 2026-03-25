@@ -138,10 +138,13 @@ function renderWorkspaceEnvironmentBadge() {
     return;
   }
   const environment = resolveWorkspaceAdobePassEnvironment(state.adobePassEnvironment);
+  const environmentKey = String(environment?.key || "release-production").trim() || "release-production";
   const label = String(environment?.label || "").trim() || "Production";
   const title = buildWorkspaceEnvironmentTooltip(environment) || label;
   els.pageEnvBadgeValue.textContent = "";
   els.pageEnvBadgeValue.setAttribute("aria-hidden", "true");
+  els.pageEnvBadge.dataset.environmentKey = environmentKey;
+  els.pageEnvBadge.dataset.environmentLabel = label;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
 }
@@ -1929,6 +1932,10 @@ function handleWorkspaceEvent(eventName, payload = {}) {
     return;
   }
   if (event === "environment-switch-rerun") {
+    if (payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object") {
+      state.adobePassEnvironment = resolveWorkspaceAdobePassEnvironment(payload.adobePassEnvironment);
+      renderWorkspaceEnvironmentBadge();
+    }
     return;
   }
   if (event === "workspace-clear") {

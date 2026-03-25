@@ -545,6 +545,8 @@ function renderWorkspaceEnvironmentBadge() {
   const title = `Environment: ${label}`;
   els.pageEnvBadgeValue.textContent = label;
   els.pageEnvBadgeValue.setAttribute("aria-hidden", "false");
+  els.pageEnvBadge.dataset.environmentKey = String(state.environmentKey || "release-production").trim() || "release-production";
+  els.pageEnvBadge.dataset.environmentLabel = label;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
 }
@@ -1266,6 +1268,12 @@ function handleWorkspaceEvent(eventName, payload = {}) {
     return;
   }
   if (event === "environment-switch-rerun") {
+    const environment = payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object" ? payload.adobePassEnvironment : null;
+    if (environment) {
+      state.environmentKey = String(environment?.key || state.environmentKey || "").trim();
+      state.environmentLabel = String(environment?.label || state.environmentLabel || state.environmentKey || "").trim();
+      renderWorkspaceEnvironmentBadge();
+    }
     if (state.loading || !state.query.initialized || !state.programmerId || !state.esmHealthReady) {
       return;
     }

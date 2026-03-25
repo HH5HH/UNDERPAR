@@ -206,9 +206,12 @@ function renderWorkspaceEnvironmentBadge() {
     return;
   }
   const environment = resolveWorkspaceAdobePassEnvironment(state.adobePassEnvironment);
+  const environmentKey = String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
   const label = String(environment?.label || "").trim() || "Production";
   els.pageEnvBadgeValue.textContent = label;
   const title = [label, String(environment?.esmBase || environment?.mgmtBase || "").trim()].filter(Boolean).join("\n");
+  els.pageEnvBadge.dataset.environmentKey = environmentKey;
+  els.pageEnvBadge.dataset.environmentLabel = label;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title || label);
 }

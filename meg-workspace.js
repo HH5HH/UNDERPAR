@@ -322,11 +322,31 @@ function buildWorkspaceEnvironmentTooltip(environment) {
   return [`Environment : ${label}`, `ESM : ${esmBase}`].join("\n").trim();
 }
 
+function applyWorkspaceEnvironmentFromEventPayload(payload = {}) {
+  const incomingEnvironment =
+    payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object" ? payload.adobePassEnvironment : null;
+  if (!incomingEnvironment) {
+    return null;
+  }
+  state.adobePassEnvironment = {
+    ...DEFAULT_ADOBEPASS_ENVIRONMENT,
+    ...incomingEnvironment,
+  };
+  syncFloatingContext();
+  syncThemeScope();
+  return state.adobePassEnvironment;
+}
+
 function syncFloatingContext() {
   if (pageEnvBadge && pageEnvBadgeValue) {
+    const environmentKey = String(state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+    const environmentLabel =
+      String(state.adobePassEnvironment?.label || DEFAULT_ADOBEPASS_ENVIRONMENT.label).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.label;
     const title = buildWorkspaceEnvironmentTooltip(state.adobePassEnvironment) || "Data Environment";
     pageEnvBadgeValue.textContent = "";
     pageEnvBadgeValue.setAttribute("aria-hidden", "true");
+    pageEnvBadge.dataset.environmentKey = environmentKey;
+    pageEnvBadge.dataset.environmentLabel = environmentLabel;
     pageEnvBadge.title = title;
     pageEnvBadge.setAttribute("aria-label", title);
   }
@@ -3022,6 +3042,7 @@ function handleWorkspaceEvent(event, payload = {}) {
     return;
   }
   if (normalizedEvent === "environment-switch-rerun") {
+    applyWorkspaceEnvironmentFromEventPayload(payload);
     const currentContextKey = getMegControllerContextKey(
       state.programmerId,
       state.programmerName,

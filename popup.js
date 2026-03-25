@@ -83756,6 +83756,7 @@ function renderPageEnvironmentBadge() {
   }
   const environment = getActiveAdobePassEnvironment();
   const registry = getUnderParEnvironmentRegistry();
+  const environmentKey = String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
   const label = String(environment?.label || "").trim() || "Production";
   const title =
     String(
@@ -83765,6 +83766,8 @@ function renderPageEnvironmentBadge() {
     ).trim() || label;
   els.pageEnvBadgeValue.textContent = "";
   els.pageEnvBadgeValue.setAttribute("aria-hidden", "true");
+  els.pageEnvBadge.dataset.environmentKey = environmentKey;
+  els.pageEnvBadge.dataset.environmentLabel = label;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
 }

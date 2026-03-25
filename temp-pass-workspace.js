@@ -136,10 +136,12 @@ function renderWorkspaceEnvironmentBadge() {
     return;
   }
   const environment = resolveWorkspaceAdobePassEnvironment(state.adobePassEnvironment);
+  const environmentKey = String(environment?.key || "release-production").trim() || "release-production";
   const label = String(environment?.label || "Production").trim() || "Production";
   const title = buildWorkspaceEnvironmentTooltip(environment);
   els.pageEnvBadgeValue.textContent = "";
   els.pageEnvBadgeValue.setAttribute("aria-hidden", "true");
+  els.pageEnvBadge.dataset.environmentKey = environmentKey;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
   els.pageEnvBadge.dataset.environmentLabel = label;
@@ -472,6 +474,10 @@ function handleWorkspaceEvent(eventName, payload = {}) {
     return;
   }
   if (event === "environment-switch-rerun") {
+    if (payload?.adobePassEnvironment && typeof payload.adobePassEnvironment === "object") {
+      state.adobePassEnvironment = { ...payload.adobePassEnvironment };
+      renderWorkspaceEnvironmentBadge();
+    }
     state.activeAction = "";
     syncActionButtonsDisabled();
     setStatus("Environment changed. TempPASS context refreshed.");
