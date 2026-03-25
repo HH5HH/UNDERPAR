@@ -32977,7 +32977,9 @@ body[data-theme="dark"]{
     try {
       const parsed = new URL(raw, CM_REPORTS_BASE_URL);
       const searchParams = new URLSearchParams(parsed.search);
-      ["format", "limit", "metrics"].forEach((key) => searchParams.delete(key));
+      ["format", "limit", "metrics", "tenant", "tenant_id", "tenant-id", "orgId", "orgid"].forEach((key) =>
+        searchParams.delete(key)
+      );
       const nextQuery = searchParams.toString();
       return nextQuery ? "?" + nextQuery : "";
     } catch {
@@ -32987,7 +32989,9 @@ body[data-theme="dark"]{
       }
       const queryText = raw.slice(queryIndex + 1).trim();
       const searchParams = new URLSearchParams(queryText);
-      ["format", "limit", "metrics"].forEach((key) => searchParams.delete(key));
+      ["format", "limit", "metrics", "tenant", "tenant_id", "tenant-id", "orgId", "orgid"].forEach((key) =>
+        searchParams.delete(key)
+      );
       const nextQuery = searchParams.toString();
       return nextQuery ? "?" + nextQuery : "";
     }
@@ -33053,10 +33057,14 @@ body[data-theme="dark"]{
         return;
       }
       const compactLabel = getCompactCmuLabel(fullHref);
+      const visibleHref = getVisibleSystemRequestUrl(fullHref);
       if (!compactLabel) {
         return;
       }
       anchor.dataset.fullUrl = fullHref;
+      anchor.dataset.baselineHref = fullHref;
+      anchor.dataset.activeHref = fullHref;
+      anchor.href = visibleHref || fullHref;
       anchor.textContent = compactLabel;
     });
   }

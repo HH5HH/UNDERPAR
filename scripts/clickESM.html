@@ -8712,7 +8712,9 @@ function getVisibleSystemRequestUrl(value = "") {
   try {
     const parsed = new URL(raw, window.location.href);
     const searchParams = new URLSearchParams(parsed.search);
-    ["format", "limit", "metrics", "media-company"].forEach((key) => searchParams.delete(key));
+    ["format", "limit", "metrics", "media-company", "tenant", "tenant_id", "tenant-id", "orgId", "orgid"].forEach(
+      (key) => searchParams.delete(key)
+    );
     parsed.search = searchParams.toString() ? `?${searchParams.toString()}` : "";
     parsed.hash = "";
     return parsed.toString();
@@ -8725,7 +8727,9 @@ function getVisibleSystemRequestUrl(value = "") {
     const path = withoutHash.slice(0, queryIndex);
     const queryText = withoutHash.slice(queryIndex + 1).trim();
     const searchParams = new URLSearchParams(queryText);
-    ["format", "limit", "metrics", "media-company"].forEach((key) => searchParams.delete(key));
+    ["format", "limit", "metrics", "media-company", "tenant", "tenant_id", "tenant-id", "orgId", "orgid"].forEach(
+      (key) => searchParams.delete(key)
+    );
     const nextQuery = searchParams.toString();
     return nextQuery ? `${path}?${nextQuery}` : path;
   }
@@ -8784,7 +8788,9 @@ function initCmuEnvDisplayAndLabels() {
     if (!compactLabel) {
       return;
     }
-    anchor.dataset.fullUrl = visibleHref || fullHref;
+    anchor.dataset.fullUrl = fullHref;
+    anchor.dataset.baselineHref = fullHref;
+    anchor.dataset.activeHref = fullHref;
     anchor.href = visibleHref || fullHref;
     anchor.textContent = compactLabel;
   });
