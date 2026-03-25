@@ -1,3 +1,5 @@
+@import url("underpar-env-badge.css");
+
 :root {
   color-scheme: dark;
   --zip-accent-500: 135, 47, 0;
@@ -160,42 +162,6 @@ body::before {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.page-env-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  min-height: 26px;
-  padding: 3px 8px 3px 5px;
-  border: 1px solid rgba(144, 51, 0, 0.14);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86);
-  color: var(--bt-ink);
-}
-
-.page-env-badge-prefix {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--bt-accent-soft);
-  color: var(--bt-accent-strong);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.page-env-badge-sep {
-  display: none;
-}
-
-.page-env-badge-value {
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .bt-controller-bar {
@@ -1283,18 +1249,6 @@ body::before {
   .bt-session-panel-head {
     align-items: flex-start;
   }
-}
-
-/* ZIP dark x orange overrides for Blondie auxiliary surfaces. */
-.page-env-badge {
-  border-color: rgba(var(--zip-accent-1000), 0.24);
-  background: linear-gradient(180deg, rgba(44, 44, 44, 0.96), rgba(27, 27, 27, 0.96));
-  color: var(--bt-ink);
-}
-
-.page-env-badge-prefix {
-  background: linear-gradient(180deg, rgba(54, 37, 24, 0.98), rgba(34, 25, 18, 0.98));
-  color: var(--bt-accent-strong);
 }
 
 .workspace-blondie-time-stop {

@@ -1,3 +1,5 @@
+@import url("underpar-env-badge.css");
+
 :root {
   color-scheme: dark;
   --workspace-bg: #121212;
@@ -73,23 +75,7 @@ textarea {
 }
 
 .page-env-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   align-self: flex-start;
-  min-height: 28px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: linear-gradient(180deg, rgba(44, 44, 44, 0.96), rgba(24, 24, 24, 0.98));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.page-env-badge-label {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  color: var(--workspace-accent-strong);
 }
 
 .workspace-controller-state {

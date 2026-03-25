@@ -1,3 +1,5 @@
+@import url("underpar-env-badge.css");
+
 @import url("rest-workspace.css");
 
 :root {
@@ -155,43 +157,6 @@ body::before {
 
 .esm-health-hero-actions {
   align-self: center;
-}
-
-.page-env-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 4px 10px 4px 6px;
-  border: 1px solid rgba(24, 142, 220, 0.24);
-  border-radius: 999px;
-  background: rgba(9, 14, 20, 0.8);
-  color: var(--esm-health-ink);
-}
-
-.page-env-badge-prefix {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--esm-health-accent-soft);
-  color: var(--esm-health-accent-strong);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.page-env-badge-sep {
-  display: none;
-}
-
-.page-env-badge-value {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
 }
 
 .esm-health-filter-card {
