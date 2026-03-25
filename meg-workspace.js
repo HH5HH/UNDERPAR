@@ -339,14 +339,18 @@ function applyWorkspaceEnvironmentFromEventPayload(payload = {}) {
 
 function syncFloatingContext() {
   if (pageEnvBadge && pageEnvBadgeValue) {
+    const registry = globalThis.UnderParEnvironment || null;
     const environmentKey = String(state.adobePassEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
     const environmentLabel =
       String(state.adobePassEnvironment?.label || DEFAULT_ADOBEPASS_ENVIRONMENT.label).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.label;
+    const badgeLabel =
+      String(registry?.buildEnvironmentBadgeLabel?.(state.adobePassEnvironment) || `Release ${environmentLabel}`).trim() ||
+      `Release ${environmentLabel}`;
     const title = buildWorkspaceEnvironmentTooltip(state.adobePassEnvironment) || "Data Environment";
-    pageEnvBadgeValue.textContent = "";
-    pageEnvBadgeValue.setAttribute("aria-hidden", "true");
+    pageEnvBadgeValue.textContent = badgeLabel;
+    pageEnvBadgeValue.setAttribute("aria-hidden", "false");
     pageEnvBadge.dataset.environmentKey = environmentKey;
-    pageEnvBadge.dataset.environmentLabel = environmentLabel;
+    pageEnvBadge.dataset.environmentLabel = badgeLabel;
     pageEnvBadge.title = title;
     pageEnvBadge.setAttribute("aria-label", title);
   }
@@ -2590,7 +2594,12 @@ function ack(msg) {
 }
 
 function normalizeSavedQueryName(value = "") {
-  return String(value || "").replace(/\|+/g, " ").replace(/\s+/g, " ").trim();
+  let normalized = String(value || "").replace(/\|+/g, " ").replace(/\s+/g, " ").trim();
+  const duplicateParentheticalTailPattern = /(.*\S)\s+(\([^()]+\))\s+\2$/;
+  while (duplicateParentheticalTailPattern.test(normalized)) {
+    normalized = normalized.replace(duplicateParentheticalTailPattern, "$1 $2").trim();
+  }
+  return normalized;
 }
 
 function buildSavedQueryStorageKey(name = "") {
@@ -2663,7 +2672,7 @@ function parseSavedQueryRecord(storageKey = "", payload = "") {
 }
 
 function getSavedQueryRecords() {
-  const records = [];
+  const recordsByName = new Map();
   try {
     for (let index = 0; index < localStorage.length; index += 1) {
       const storageKey = String(localStorage.key(index) || "").trim();
@@ -2677,13 +2686,15 @@ function getSavedQueryRecords() {
         if (payload !== normalizedPayload) {
           localStorage.setItem(storageKey, normalizedPayload);
         }
-        records.push(record);
+        recordsByName.set(record.name, record);
       }
     }
   } catch (error) {
     ack(`Saved query localStorage read failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  return records.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  return [...recordsByName.values()].sort((left, right) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
+  );
 }
 
 function getSelectedSavedQueryOption() {
@@ -2707,6 +2718,9 @@ function resetSavedQueryPickerSelection() {
   }
   const restoreDefault = () => {
     savedQueryPicker.value = "";
+    if (typeof savedQueryPicker.selectedIndex === "number" || Array.isArray(savedQueryPicker.options)) {
+      savedQueryPicker.selectedIndex = 0;
+    }
     syncSavedQueryPickerTitle();
     syncSavedQueryButtonsDisabled();
   };
@@ -2716,7 +2730,7 @@ function resetSavedQueryPickerSelection() {
     // Ignore focus release failures.
   }
   if (typeof setTimeout === "function") {
-    setTimeout(restoreDefault, 0);
+    setTimeout(restoreDefault, 160);
     return;
   }
   restoreDefault();
@@ -2752,7 +2766,6 @@ function populateSavedQuerySelect(preferredStorageKey = "", records = state.save
   const defaultOption = document.createElement("option");
   defaultOption.textContent = "Saved Queries";
   defaultOption.value = "";
-  defaultOption.disabled = true;
   savedQueryPicker.appendChild(defaultOption);
 
   records.forEach((record) => {

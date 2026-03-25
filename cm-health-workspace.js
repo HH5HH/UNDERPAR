@@ -512,12 +512,16 @@ function renderWorkspaceEnvironmentBadge() {
   if (!els.pageEnvBadge || !els.pageEnvBadgeValue) {
     return;
   }
+  const registry = globalThis.UnderParEnvironment || null;
   const label = String(state.environmentLabel || state.environmentKey || "Production").trim() || "Production";
+  const badgeLabel =
+    String(registry?.buildEnvironmentBadgeLabel?.({ key: state.environmentKey, label }) || `Release ${label}`).trim() ||
+    `Release ${label}`;
   const title = `Environment: ${label}`;
-  els.pageEnvBadgeValue.textContent = label;
+  els.pageEnvBadgeValue.textContent = badgeLabel;
   els.pageEnvBadgeValue.setAttribute("aria-hidden", "false");
   els.pageEnvBadge.dataset.environmentKey = String(state.environmentKey || "release-production").trim() || "release-production";
-  els.pageEnvBadge.dataset.environmentLabel = label;
+  els.pageEnvBadge.dataset.environmentLabel = badgeLabel;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
 }

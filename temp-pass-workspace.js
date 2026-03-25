@@ -136,15 +136,18 @@ function renderWorkspaceEnvironmentBadge() {
     return;
   }
   const environment = resolveWorkspaceAdobePassEnvironment(state.adobePassEnvironment);
+  const registry = getWorkspaceEnvironmentRegistry();
   const environmentKey = String(environment?.key || "release-production").trim() || "release-production";
   const label = String(environment?.label || "Production").trim() || "Production";
+  const badgeLabel =
+    String(registry?.buildEnvironmentBadgeLabel?.(environment) || `Release ${label}`).trim() || `Release ${label}`;
   const title = buildWorkspaceEnvironmentTooltip(environment);
-  els.pageEnvBadgeValue.textContent = "";
-  els.pageEnvBadgeValue.setAttribute("aria-hidden", "true");
+  els.pageEnvBadgeValue.textContent = badgeLabel;
+  els.pageEnvBadgeValue.setAttribute("aria-hidden", "false");
   els.pageEnvBadge.dataset.environmentKey = environmentKey;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
-  els.pageEnvBadge.dataset.environmentLabel = label;
+  els.pageEnvBadge.dataset.environmentLabel = badgeLabel;
 }
 
 function getProgrammerLabel() {

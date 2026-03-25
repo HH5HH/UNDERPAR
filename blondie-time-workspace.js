@@ -206,12 +206,16 @@ function renderWorkspaceEnvironmentBadge() {
     return;
   }
   const environment = resolveWorkspaceAdobePassEnvironment(state.adobePassEnvironment);
+  const registry = getWorkspaceEnvironmentRegistry();
   const environmentKey = String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
   const label = String(environment?.label || "").trim() || "Production";
-  els.pageEnvBadgeValue.textContent = label;
+  const badgeLabel =
+    String(registry?.buildEnvironmentBadgeLabel?.(environment) || `Release ${label}`).trim() || `Release ${label}`;
+  els.pageEnvBadgeValue.textContent = badgeLabel;
+  els.pageEnvBadgeValue.setAttribute("aria-hidden", "false");
   const title = [label, String(environment?.esmBase || environment?.mgmtBase || "").trim()].filter(Boolean).join("\n");
   els.pageEnvBadge.dataset.environmentKey = environmentKey;
-  els.pageEnvBadge.dataset.environmentLabel = label;
+  els.pageEnvBadge.dataset.environmentLabel = badgeLabel;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title || label);
 }

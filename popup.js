@@ -12814,6 +12814,7 @@ const els = {
   authBtn: document.getElementById("auth-btn"),
   status: document.getElementById("status"),
   buildInfo: document.getElementById("build-info"),
+  pageEnvBadgeRow: document.querySelector(".page-env-badge-row"),
   pageEnvBadge: document.getElementById("page-env-badge"),
   pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
   signInView: document.getElementById("sign-in-view"),
@@ -33102,20 +33103,24 @@ body[data-theme="dark"]{
     const envDisplay = document.getElementById("envBaseDisplay");
     const envBadge = envDisplay?.closest(".env-badge");
     const envMessage = buildClickCmuEnvironmentBadgeMessage(ACTIVE_ADOBEPASS_ENVIRONMENT);
+    const envLabel =
+      String(globalThis.UnderParEnvironment?.buildEnvironmentBadgeLabel?.(ACTIVE_ADOBEPASS_ENVIRONMENT) || "").trim() ||
+      ("Release " + (String(ACTIVE_ADOBEPASS_ENVIRONMENT?.label || "Production").trim() || "Production"));
     const envBase =
       deriveCmuEnvBase(firstHref) ||
       \`\${String(
         ACTIVE_ADOBEPASS_ENVIRONMENT.cmReportsBase || DEFAULT_ADOBEPASS_ENVIRONMENT.cmReportsBase
       ).trim().replace(/\\/+$/, "")}/v2/\`;
     if (envDisplay) {
-      envDisplay.textContent = "";
+      envDisplay.textContent = envLabel;
       envDisplay.title = envMessage;
-      envDisplay.setAttribute("aria-hidden", "true");
+      envDisplay.setAttribute("aria-hidden", "false");
       envDisplay.dataset.baseUrl = envBase;
     }
     if (envBadge) {
       envBadge.title = envMessage;
       envBadge.setAttribute("aria-label", envMessage);
+      envBadge.dataset.environmentLabel = envLabel;
       envBadge.dataset.baseUrl = envBase;
     }
     anchors.forEach((anchor) => {
@@ -38154,7 +38159,12 @@ async function esmWorkspaceRunEndpointFromUi(esmWorkspaceState, endpoint, reques
 }
 
 function popupNormalizeSavedEsmQueryName(value = "") {
-  return String(value || "").replace(/\|+/g, " ").replace(/\s+/g, " ").trim();
+  let normalized = String(value || "").replace(/\|+/g, " ").replace(/\s+/g, " ").trim();
+  const duplicateParentheticalTailPattern = /(.*\S)\s+(\([^()]+\))\s+\2$/;
+  while (duplicateParentheticalTailPattern.test(normalized)) {
+    normalized = normalized.replace(duplicateParentheticalTailPattern, "$1 $2").trim();
+  }
+  return normalized;
 }
 
 function popupBuildSavedEsmQueryRecord(name = "", rawUrl = "") {
@@ -38264,8 +38274,20 @@ function purgeLegacySavedEsmQueryEntriesFromLocalStorage() {
   }
 }
 
+function normalizeSavedEsmQueryEntriesMap(source = {}) {
+  const normalizedEntries = {};
+  Object.entries(source && typeof source === "object" ? source : {}).forEach(([name, rawUrl]) => {
+    const record = popupBuildSavedEsmQueryRecord(name, rawUrl);
+    if (!record) {
+      return;
+    }
+    normalizedEntries[record.name] = record.url;
+  });
+  return normalizedEntries;
+}
+
 function getVaultSavedEsmQueryRecords(vault = null) {
-  return Object.entries(getUnderparVaultSavedQueries(vault))
+  return Object.entries(normalizeSavedEsmQueryEntriesMap(getUnderparVaultSavedQueries(vault)))
     .map(([name, rawUrl]) => {
       const record = popupBuildSavedEsmQueryRecord(name, rawUrl);
       if (!record) {
@@ -38281,10 +38303,10 @@ function getVaultSavedEsmQueryRecords(vault = null) {
 }
 
 function getMergedSavedEsmQueryEntries(vault = null) {
-  return {
+  return normalizeSavedEsmQueryEntriesMap({
     ...readLegacySavedEsmQueryEntriesFromLocalStorage(),
     ...getUnderparVaultSavedQueries(vault),
-  };
+  });
 }
 
 function popupGetSavedEsmQueryRecords() {
@@ -38598,7 +38620,6 @@ function esmWorkspaceSyncMegSavedQueryUi(esmWorkspaceState) {
   defaultOption.value = "";
   defaultOption.textContent = "Saved Queries";
   defaultOption.title = "Saved Queries";
-  defaultOption.disabled = true;
   selectElement.appendChild(defaultOption);
 
   if (records.length === 0) {
@@ -38630,6 +38651,9 @@ function resetEsmWorkspaceMegSavedQuerySelect(selectElement = null) {
   }
   const restoreDefault = () => {
     selectElement.value = "";
+    if (typeof selectElement.selectedIndex === "number" || Array.isArray(selectElement.options)) {
+      selectElement.selectedIndex = 0;
+    }
     selectElement.title = "Saved Queries";
     selectElement.setAttribute("aria-label", "Saved Queries");
   };
@@ -38639,7 +38663,7 @@ function resetEsmWorkspaceMegSavedQuerySelect(selectElement = null) {
     // Ignore focus release failures.
   }
   if (typeof setTimeout === "function") {
-    setTimeout(restoreDefault, 0);
+    setTimeout(restoreDefault, 160);
     return;
   }
   restoreDefault();
@@ -83758,18 +83782,27 @@ function renderPageEnvironmentBadge() {
   const registry = getUnderParEnvironmentRegistry();
   const environmentKey = String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
   const label = String(environment?.label || "").trim() || "Production";
+  const badgeLabel =
+    String(registry?.buildEnvironmentBadgeLabel?.(environment) || `Release ${label}`).trim() || `Release ${label}`;
   const title =
     String(
       registry?.buildEnvironmentBadgeTooltip?.(environment, "underpar") ||
         environment?.envBadgeTitle ||
         `Environment : ${label}`
     ).trim() || label;
-  els.pageEnvBadgeValue.textContent = "";
-  els.pageEnvBadgeValue.setAttribute("aria-hidden", "true");
+  els.pageEnvBadgeValue.textContent = badgeLabel;
+  els.pageEnvBadgeValue.setAttribute("aria-hidden", "false");
   els.pageEnvBadge.dataset.environmentKey = environmentKey;
-  els.pageEnvBadge.dataset.environmentLabel = label;
+  els.pageEnvBadge.dataset.environmentLabel = badgeLabel;
   els.pageEnvBadge.title = title;
   els.pageEnvBadge.setAttribute("aria-label", title);
+}
+
+function syncPageEnvironmentBadgeVisibility() {
+  if (!els.pageEnvBadgeRow) {
+    return;
+  }
+  els.pageEnvBadgeRow.hidden = !(state.sessionReady === true && Boolean(state.loginData));
 }
 
 function renderRestrictedView() {
@@ -83819,6 +83852,7 @@ function render() {
   void syncSidepanelControllerBridge();
   syncZipKeyImportView();
   renderDebugConsole();
+  syncPageEnvironmentBadgeVisibility();
   const authenticatedOrgSwitchOnly = isAuthenticatedOrgSwitchOnlySession();
   const adobePassWorkflowActive =
     state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);

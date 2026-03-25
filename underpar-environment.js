@@ -114,6 +114,12 @@
     return lines.join("\n");
   }
 
+  function buildEnvironmentBadgeLabel(environment) {
+    const resolved = buildEnvironmentDetails(environment);
+    const label = String(resolved?.label || "Production").trim() || "Production";
+    return `Release ${label}`;
+  }
+
   function cloneEnvironment(environment) {
     const resolved = buildEnvironmentDetails(environment);
     return {
@@ -234,6 +240,7 @@
     setStoredEnvironment,
     buildEnvironmentTooltip,
     buildEnvironmentBadgeTooltip,
+    buildEnvironmentBadgeLabel,
     rewriteServiceUrl,
   });
 })(typeof globalThis !== "undefined" ? globalThis : window);

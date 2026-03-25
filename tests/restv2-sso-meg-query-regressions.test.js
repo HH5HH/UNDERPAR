@@ -77,6 +77,21 @@ test("CM ESM Health Scope saved query names prefer the captured MVPD label witho
   assert.equal(name, "ESM Health Scope MML x Xfinity (Comcast_SSO)");
 });
 
+test("saved-query name normalization collapses repeated MVPD tails in popup and MEG workspace helpers", () => {
+  const popupHelpers = loadFunctions("popup.js", ["popupNormalizeSavedEsmQueryName"]);
+  const megHelpers = loadFunctions("meg-workspace.js", ["normalizeSavedQueryName"]);
+  const duplicatedName = "ESM Health Scope MML x Xfinity (Comcast_SSO) (Comcast_SSO)";
+
+  assert.equal(
+    popupHelpers.popupNormalizeSavedEsmQueryName(duplicatedName),
+    "ESM Health Scope MML x Xfinity (Comcast_SSO)"
+  );
+  assert.equal(
+    megHelpers.normalizeSavedQueryName(duplicatedName),
+    "ESM Health Scope MML x Xfinity (Comcast_SSO)"
+  );
+});
+
 test("REST V2 learning refresh helper rerenders only for the active RequestorId x MVPD selection", () => {
   let refreshCall = null;
   const { maybeRefreshRestV2InteractiveDocsForContext } = loadFunctions(
@@ -155,6 +170,14 @@ test("sidepanel ESM saved-query reset defers placeholder restore until after the
   assert.equal(selectElement["aria-label"], "Saved Queries");
 });
 
+test("saved-query pickers no longer force the placeholder option into a disabled state", () => {
+  const popupSource = read("popup.js");
+  const megSource = read("meg-workspace.js");
+
+  assert.doesNotMatch(popupSource, /defaultOption\.disabled\s*=\s*true;/);
+  assert.doesNotMatch(megSource, /defaultOption\.disabled\s*=\s*true;/);
+});
+
 test("MEG workspace saved-query reset clears the picker after the native menu closes", () => {
   const timers = [];
   const savedQueryPicker = {
@@ -191,4 +214,65 @@ test("MEG workspace saved-query reset clears the picker after the native menu cl
   assert.equal(savedQueryPicker.value, "");
   assert.equal(titleSyncCount, 1);
   assert.equal(disabledSyncCount, 1);
+});
+
+test("popup env badge stays hidden before auth and shows after auth", () => {
+  const els = {
+    pageEnvBadgeRow: {
+      hidden: false,
+    },
+  };
+  const state = {
+    sessionReady: false,
+    loginData: null,
+  };
+  const { syncPageEnvironmentBadgeVisibility } = loadFunctions("popup.js", ["syncPageEnvironmentBadgeVisibility"], {
+    els,
+    state,
+  });
+
+  syncPageEnvironmentBadgeVisibility();
+  assert.equal(els.pageEnvBadgeRow.hidden, true);
+
+  state.sessionReady = true;
+  state.loginData = { accessToken: "token" };
+  syncPageEnvironmentBadgeVisibility();
+  assert.equal(els.pageEnvBadgeRow.hidden, false);
+});
+
+test("popup env badge renders the console release label", () => {
+  const els = {
+    pageEnvBadge: {
+      dataset: {},
+      setAttribute(name, value) {
+        this[name] = value;
+      },
+    },
+    pageEnvBadgeValue: {
+      textContent: "",
+      setAttribute(name, value) {
+        this[name] = value;
+      },
+    },
+  };
+  const { renderPageEnvironmentBadge } = loadFunctions("popup.js", ["renderPageEnvironmentBadge"], {
+    els,
+    DEFAULT_ADOBEPASS_ENVIRONMENT: { key: "release-production" },
+    getActiveAdobePassEnvironment: () => ({
+      key: "release-staging",
+      label: "Staging",
+      envBadgeTitle: "Environment : Staging",
+    }),
+    getUnderParEnvironmentRegistry: () => ({
+      buildEnvironmentBadgeLabel: () => "Release Staging",
+      buildEnvironmentBadgeTooltip: () => "Environment : Staging\nAdobePASS Console : https://console.auth-staging.adobe.com",
+    }),
+  });
+
+  renderPageEnvironmentBadge();
+
+  assert.equal(els.pageEnvBadgeValue.textContent, "Release Staging");
+  assert.equal(els.pageEnvBadgeValue["aria-hidden"], "false");
+  assert.equal(els.pageEnvBadge.dataset.environmentKey, "release-staging");
+  assert.equal(els.pageEnvBadge.dataset.environmentLabel, "Release Staging");
 });

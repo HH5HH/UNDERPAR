@@ -253,11 +253,15 @@
     }
     const environment = resolveWorkspaceAdobePassEnvironment(payload?.adobePassEnvironment);
     const label = String(environment?.label || "").trim() || "Production";
+    const badgeLabel =
+      String(globalThis.UnderParEnvironment?.buildEnvironmentBadgeLabel?.(environment) || `Release ${label}`).trim() ||
+      `Release ${label}`;
     const title = buildWorkspaceEnvironmentTooltip(environment) || label;
-    els.pageEnvBadgeValue.textContent = "";
-    els.pageEnvBadgeValue.setAttribute("aria-hidden", "true");
+    els.pageEnvBadgeValue.textContent = badgeLabel;
+    els.pageEnvBadgeValue.setAttribute("aria-hidden", "false");
     els.pageEnvBadge.title = title;
     els.pageEnvBadge.setAttribute("aria-label", title);
+    els.pageEnvBadge.dataset.environmentLabel = badgeLabel;
   }
 
   function registerTopHandlers() {

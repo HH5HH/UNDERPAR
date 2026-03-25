@@ -30,8 +30,9 @@ test("shared env badge stylesheet defines the neutral console contract", () => {
   assert.match(source, /--underpar-env-badge-bg-top:\s*rgb\(248,\s*248,\s*248\);/i);
   assert.match(source, /--underpar-env-badge-bg-bottom:\s*rgb\(233,\s*233,\s*233\);/i);
   assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\)\s*\{[\s\S]*?border:\s*1px solid var\(--underpar-env-badge-border\);/i);
-  assert.match(source, /:is\(\.page-env-badge-prefix,\s*\.env-badge-prefix\)\s*\{[\s\S]*?text-transform:\s*uppercase;/i);
+  assert.match(source, /:is\(\.page-env-badge-prefix,\s*\.env-badge-prefix\)\s*\{[\s\S]*?display:\s*none;/i);
   assert.match(source, /:is\(\.page-env-badge-value,\s*\.env-badge-value\)\s*\{[\s\S]*?font-weight:\s*600;/i);
+  assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\):has\(:is\(\.page-env-badge-value,\s*\.env-badge-value\):empty\)\s*\{[\s\S]*?display:\s*none;/i);
 });
 
 test("temp pass workspace uses the shared env badge markup", () => {
@@ -40,6 +41,19 @@ test("temp pass workspace uses the shared env badge markup", () => {
   assert.doesNotMatch(html, /page-env-badge-label/);
   assert.match(html, /page-env-badge-prefix/);
   assert.match(html, /page-env-badge-sep/);
+});
+
+test("popup and sidepanel env badge rows stay hidden until post-login context exists", () => {
+  assert.match(read("popup.html"), /<div class="page-env-badge-row" hidden>/);
+  assert.match(read("sidepanel.html"), /<div class="page-env-badge-row" hidden>/);
+});
+
+test("environment registry exposes a console-style release badge label helper", () => {
+  const source = read("underpar-environment.js");
+
+  assert.match(source, /function buildEnvironmentBadgeLabel\(environment\)/);
+  assert.match(source, /return `Release \$\{label\}`;/);
+  assert.match(source, /buildEnvironmentBadgeLabel,/);
 });
 
 test("legacy env badge recolors are removed from popup, Blondie, and MEG overrides", () => {
@@ -62,10 +76,7 @@ test("standalone click views use the same neutral env badge treatment", () => {
       source,
       /\.env-badge\s*\{[\s\S]*?background:\s*linear-gradient\(180deg,\s*rgb\(248,\s*248,\s*248\)\s*0%,\s*rgb\(233,\s*233,\s*233\)\s*100%\);/i
     );
-    assert.match(
-      source,
-      /\.env-badge-prefix\s*\{[\s\S]*?background:\s*linear-gradient\(180deg,\s*rgb\(252,\s*252,\s*252\)\s*0%,\s*rgb\(239,\s*239,\s*239\)\s*100%\);/i
-    );
+    assert.match(source, /\.env-badge-prefix\s*\{[\s\S]*?display:\s*none;/i);
     assert.match(source, /\.env-badge-value\s*\{[\s\S]*?font-weight:\s*600;/i);
   });
 });
