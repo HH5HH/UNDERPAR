@@ -33,6 +33,7 @@ const UNDERPAR_DEGRADATION_WORKSPACE_PATH = "degradation-workspace.html";
 const UNDERPAR_CM_WORKSPACE_PATH = "cm-workspace.html";
 const UNDERPAR_ESM_HEALTH_WORKSPACE_PATH = "esm-health-workspace.html";
 const UNDERPAR_CM_HEALTH_WORKSPACE_PATH = "cm-health-workspace.html";
+const UNDERPAR_REGISTERED_APPLICATION_HEALTH_WORKSPACE_PATH = "registered-application-health-workspace.html";
 const UNDERPAR_HEALTH_WORKSPACE_PATH = "health-workspace.html";
 const AVATAR_SIZE_PREFERENCES = [128, 64, 256, 32];
 const AUTH_DEBUGGER_PROTOCOL_VERSION = "1.3";
@@ -100,6 +101,7 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   "rest-workspace.html",
   "esm-health-workspace.html",
   "cm-health-workspace.html",
+  "registered-application-health-workspace.html",
   "health-workspace.html",
   "temp-pass-workspace.html",
   "degradation-workspace.html",
@@ -151,6 +153,9 @@ const BUILD_FINGERPRINT_FILES = [
   "cm-health-workspace.html",
   "cm-health-workspace.css",
   "cm-health-workspace.js",
+  "registered-application-health-workspace.html",
+  "registered-application-health-workspace.css",
+  "registered-application-health-workspace.js",
   "health-workspace.html",
   "health-workspace.css",
   "health-workspace.js",

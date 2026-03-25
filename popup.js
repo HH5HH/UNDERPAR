@@ -10741,6 +10741,22 @@ async function refreshOpenWorkspacesForEnvironmentSwitch(programmer = null, serv
     void cmHealthWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
   }
 
+  const registeredApplicationHealthSelectionContext = registeredApplicationHealthWorkspaceGetSelectionContext(programmer);
+  const registeredApplicationHealthWindowIds = collectBoundWorkspaceWindowIds(
+    state.registeredApplicationHealthWorkspaceWindowId,
+    state.registeredApplicationHealthWorkspaceTabIdByWindowId
+  );
+  for (const targetWindowId of registeredApplicationHealthWindowIds) {
+    registeredApplicationHealthWorkspaceBroadcastControllerState(
+      programmer,
+      registeredApplicationHealthSelectionContext,
+      targetWindowId
+    );
+    void registeredApplicationHealthWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, {
+      targetWindowId,
+    });
+  }
+
   const healthSelectionContext = healthWorkspaceGetSelectionContext(programmer);
   const healthWindowIds = collectBoundWorkspaceWindowIds(state.healthWorkspaceWindowId, state.healthWorkspaceTabIdByWindowId);
   for (const targetWindowId of healthWindowIds) {
@@ -11543,6 +11559,10 @@ const LEGACY_ESM_HEALTH_WORKSPACE_MESSAGE_TYPE = "mincloud:esm-health-workspace"
 const CM_HEALTH_WORKSPACE_PATH = "cm-health-workspace.html";
 const CM_HEALTH_WORKSPACE_MESSAGE_TYPE = "underpar:cm-health-workspace";
 const LEGACY_CM_HEALTH_WORKSPACE_MESSAGE_TYPE = "mincloud:cm-health-workspace";
+const REGISTERED_APPLICATION_HEALTH_WORKSPACE_PATH = "registered-application-health-workspace.html";
+const REGISTERED_APPLICATION_HEALTH_WORKSPACE_MESSAGE_TYPE = "underpar:registered-application-health-workspace";
+const LEGACY_REGISTERED_APPLICATION_HEALTH_WORKSPACE_MESSAGE_TYPE =
+  "mincloud:registered-application-health-workspace";
 const HEALTH_WORKSPACE_PATH = "health-workspace.html";
 const HEALTH_WORKSPACE_MESSAGE_TYPE = "underpar:health-workspace";
 const LEGACY_HEALTH_WORKSPACE_MESSAGE_TYPE = "mincloud:health-workspace";
@@ -11564,6 +11584,7 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   REST_WORKSPACE_PATH,
   ESM_HEALTH_WORKSPACE_PATH,
   CM_HEALTH_WORKSPACE_PATH,
+  REGISTERED_APPLICATION_HEALTH_WORKSPACE_PATH,
   HEALTH_WORKSPACE_PATH,
   TEMP_PASS_WORKSPACE_PATH,
   DEGRADATION_WORKSPACE_PATH,
@@ -12397,6 +12418,10 @@ const CM_HEALTH_WORKSPACE_MESSAGE_TYPES = new Set([
   CM_HEALTH_WORKSPACE_MESSAGE_TYPE,
   LEGACY_CM_HEALTH_WORKSPACE_MESSAGE_TYPE,
 ]);
+const REGISTERED_APPLICATION_HEALTH_WORKSPACE_MESSAGE_TYPES = new Set([
+  REGISTERED_APPLICATION_HEALTH_WORKSPACE_MESSAGE_TYPE,
+  LEGACY_REGISTERED_APPLICATION_HEALTH_WORKSPACE_MESSAGE_TYPE,
+]);
 const HEALTH_WORKSPACE_MESSAGE_TYPES = new Set([HEALTH_WORKSPACE_MESSAGE_TYPE, LEGACY_HEALTH_WORKSPACE_MESSAGE_TYPE]);
 const TEMP_PASS_WORKSPACE_MESSAGE_TYPES = new Set([TEMP_PASS_WORKSPACE_MESSAGE_TYPE, LEGACY_TEMP_PASS_WORKSPACE_MESSAGE_TYPE]);
 const DEGRADATION_WORKSPACE_MESSAGE_TYPES = new Set([
@@ -12759,6 +12784,14 @@ const state = {
   cmHealthWorkspaceLastSelectionKey: "",
   cmHealthWorkspaceLastReportBySelectionKey: new Map(),
   cmHealthWorkspaceLastQueryContextBySelectionKey: new Map(),
+  registeredApplicationHealthWorkspaceTabId: 0,
+  registeredApplicationHealthWorkspaceWindowId: 0,
+  registeredApplicationHealthWorkspaceTabIdByWindowId: new Map(),
+  registeredApplicationHealthWorkspaceRuntimeListenerBound: false,
+  registeredApplicationHealthWorkspaceTabWatcherBound: false,
+  registeredApplicationHealthWorkspaceLastSelectionKey: "",
+  registeredApplicationHealthWorkspaceLastReportBySelectionKey: new Map(),
+  registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey: new Map(),
   healthWorkspaceTabId: 0,
   healthWorkspaceWindowId: 0,
   healthWorkspaceTabIdByWindowId: new Map(),
@@ -20941,6 +20974,353 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
       error: "One or more HEALTH Splunk tables failed to load.",
     })
   );
+}
+
+function buildRegisteredApplicationHealthWorkspaceSelectionKey(context = null) {
+  const programmerId = String(context?.programmerId || "").trim();
+  const environmentKey = String(context?.environmentKey || "").trim();
+  if (!programmerId || !environmentKey) {
+    return "";
+  }
+  return [environmentKey, programmerId].join("|");
+}
+
+function buildRegisteredApplicationHealthQueryContext(rawContext = null) {
+  const context = rawContext && typeof rawContext === "object" ? rawContext : {};
+  const resolvedProgrammer = resolveSelectedProgrammer();
+  const environment = getActiveAdobePassEnvironment();
+  const programmerId = String(context.programmerId || resolvedProgrammer?.programmerId || "").trim();
+  const programmerName = firstNonEmptyString([
+    context.programmerName,
+    resolvedProgrammer?.programmerName,
+    resolvedProgrammer?.mediaCompanyName,
+  ]);
+  const requestorId = String(
+    Object.prototype.hasOwnProperty.call(context, "requestorId") ? context.requestorId : state.selectedRequestorId
+  ).trim();
+  const environmentKey =
+    String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const environmentLabel = firstNonEmptyString([environment?.label, environment?.shortCode, environmentKey]);
+  const queryContext = {
+    programmerId,
+    programmerName,
+    mediaCompany: programmerId,
+    requestorId,
+    environmentKey,
+    environmentLabel,
+    requestSource:
+      String(context.requestSource || "registered-application-health-dashboard").trim() ||
+      "registered-application-health-dashboard",
+  };
+  queryContext.selectionKey = buildRegisteredApplicationHealthWorkspaceSelectionKey(queryContext);
+  queryContext.controllerSelectionKey = String(queryContext.selectionKey || "").trim();
+  return queryContext;
+}
+
+function rebaseRegisteredApplicationHealthQueryContextForCurrentSelection(rawContext = null, options = {}) {
+  const sourceContext = rawContext && typeof rawContext === "object" ? rawContext : {};
+  const currentSelectionContext = buildRegisteredApplicationHealthQueryContext({
+    programmerId: String(resolveSelectedProgrammer()?.programmerId || "").trim(),
+    programmerName: firstNonEmptyString([
+      resolveSelectedProgrammer()?.programmerName,
+      resolveSelectedProgrammer()?.mediaCompanyName,
+    ]),
+    requestorId: String(state.selectedRequestorId || "").trim(),
+  });
+  return buildRegisteredApplicationHealthQueryContext({
+    ...currentSelectionContext,
+    requestSource:
+      String(options?.requestSource || sourceContext?.requestSource || "registered-application-health-dashboard").trim() ||
+      "registered-application-health-dashboard",
+  });
+}
+
+function buildRegisteredApplicationHealthStatusMessage(queryContext = null) {
+  const programmerId = String(queryContext?.programmerId || "").trim();
+  const requestorId = String(queryContext?.requestorId || "").trim();
+  const environmentLabel = String(queryContext?.environmentLabel || "").trim();
+  return [programmerId, requestorId ? `Requestor ${requestorId}` : "", environmentLabel].filter(Boolean).join(" | ");
+}
+
+async function mapRegisteredApplicationHealthItemsWithConcurrency(items = [], mapper, concurrency = 4) {
+  const queue = Array.isArray(items) ? items.slice() : [];
+  const worker = typeof mapper === "function" ? mapper : async (value) => value;
+  const limit = Math.max(1, Math.min(8, Number(concurrency || 4) || 4));
+  const results = new Array(queue.length);
+  let cursor = 0;
+
+  const runNext = async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= queue.length) {
+        return;
+      }
+      results[index] = await worker(queue[index], index);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(limit, queue.length) }, () => runNext()));
+  return results;
+}
+
+function buildRegisteredApplicationHealthAppRecord(appInfo = null, queryContext = null, options = {}) {
+  const normalizedApp =
+    normalizeRegisteredApplicationRuntimeRecord(appInfo) ||
+    (appInfo && typeof appInfo === "object" && !Array.isArray(appInfo) ? appInfo : null);
+  if (!normalizedApp || typeof normalizedApp !== "object") {
+    return null;
+  }
+
+  const appData =
+    normalizedApp?.appData && typeof normalizedApp.appData === "object" && !Array.isArray(normalizedApp.appData)
+      ? normalizedApp.appData
+      : normalizedApp?.raw && typeof normalizedApp.raw === "object" && !Array.isArray(normalizedApp.raw)
+        ? normalizedApp.raw
+        : normalizedApp;
+  const guid = firstNonEmptyString([normalizedApp?.guid, normalizedApp?.id, normalizedApp?.key]);
+  const name = firstNonEmptyString([
+    normalizedApp?.name,
+    normalizedApp?.displayName,
+    appData?.displayName,
+    appData?.name,
+    normalizedApp?.label,
+    guid,
+  ]);
+  const label = firstNonEmptyString([normalizedApp?.label, name, guid]);
+  const softwareStatement = firstNonEmptyString([
+    normalizedApp?.softwareStatement,
+    extractSoftwareStatementFromAppData(appData),
+  ]);
+  const serviceProviderHints = sanitizePassVaultHintList(
+    normalizedApp?.serviceProviders,
+    normalizedApp?.requestors,
+    normalizedApp?.requestorIds,
+    normalizedApp?.requestor,
+    normalizedApp?.serviceProvider,
+    appData?.serviceProviders,
+    appData?.contentProviders,
+    appData?.requestors,
+    appData?.requestorIds,
+    appData?.requestor,
+    appData?.serviceProvider,
+    collectPassVaultServiceProviderHintsFromAppData(appData, softwareStatement),
+    collectPassVaultServiceProviderHintsFromAppData(normalizedApp, softwareStatement)
+  );
+  const requestorHint = sanitizePassVaultHintValue(
+    normalizedApp?.requestor,
+    normalizedApp?.serviceProvider,
+    appData?.requestor,
+    appData?.serviceProvider,
+    extractPassVaultPrimaryRequestorHintFromAppData(appData, softwareStatement),
+    extractPassVaultPrimaryRequestorHintFromAppData(normalizedApp, softwareStatement),
+    serviceProviderHints[0]
+  );
+  const scopes = uniqueSorted([
+    ...(Array.isArray(normalizedApp?.scopes) ? normalizedApp.scopes : []),
+    ...getScopesFromApplication(appData),
+    ...getScopesFromApplication(normalizedApp),
+  ]);
+  const scopeLabels = buildRegisteredApplicationScopeLabels(scopes).filter(Boolean);
+  const selectedRequestorId = String(queryContext?.requestorId || "").trim();
+  const selectedRequestorMatch =
+    Boolean(selectedRequestorId) &&
+    [requestorHint, ...serviceProviderHints].some(
+      (value) => String(value || "").trim().toLowerCase() === selectedRequestorId.toLowerCase()
+    );
+  const hydrationError = firstNonEmptyString([
+    options?.hydrationErrorsByGuid?.[guid],
+    options?.hydrationError,
+  ]);
+
+  return {
+    guid,
+    key: firstNonEmptyString([normalizedApp?.key, guid]),
+    name,
+    label,
+    clientId: firstNonEmptyString([normalizedApp?.clientId, appData?.clientId, appData?.client_id]),
+    type: firstNonEmptyString([normalizedApp?.type, appData?.type, appData?.applicationType]),
+    requestorHint,
+    serviceProviderHints,
+    serviceProviderSummary: serviceProviderHints.join(", "),
+    scopes,
+    scopeLabels,
+    scopeSummary: scopeLabels.filter((value) => value !== "DEFAULT").join(" | ") || scopeLabels.join(" | "),
+    softwareStatement,
+    softwareStatementPresent: Boolean(softwareStatement),
+    jwtDecoded: Boolean(softwareStatement && parseJwtPayload(softwareStatement)),
+    jwtState: !softwareStatement ? "missing" : parseJwtPayload(softwareStatement) ? "decoded" : "undecodable",
+    selectedRequestorMatch,
+    hydrationError,
+  };
+}
+
+function buildRegisteredApplicationHealthReportPayload(queryContext = null, applications = [], options = {}) {
+  const hydrationErrorsByGuid =
+    options?.hydrationErrorsByGuid && typeof options.hydrationErrorsByGuid === "object"
+      ? options.hydrationErrorsByGuid
+      : {};
+  const normalizedApplications = (Array.isArray(applications) ? applications : [])
+    .map((appInfo) =>
+      buildRegisteredApplicationHealthAppRecord(appInfo, queryContext, {
+        hydrationErrorsByGuid,
+      })
+    )
+    .filter(Boolean)
+    .sort((left, right) => {
+      const matchDelta = Number(right?.selectedRequestorMatch === true) - Number(left?.selectedRequestorMatch === true);
+      if (matchDelta !== 0) {
+        return matchDelta;
+      }
+      return firstNonEmptyString([left?.name, left?.guid]).localeCompare(firstNonEmptyString([right?.name, right?.guid]), undefined, {
+        sensitivity: "base",
+      });
+    });
+
+  const warnings = [
+    ...uniquePreserveOrder(
+      Object.entries(hydrationErrorsByGuid).map(([guid, message]) => {
+        const normalizedMessage = String(message || "").trim();
+        return guid && normalizedMessage ? `${guid}: ${normalizedMessage}` : normalizedMessage;
+      })
+    ),
+  ];
+  const applicationCount = normalizedApplications.length;
+
+  return {
+    ok: applicationCount > 0,
+    partial: warnings.length > 0 && applicationCount > 0,
+    selectionKey: String(queryContext?.selectionKey || "").trim(),
+    checkedAt: Date.now(),
+    queryContext,
+    totalApplications: applicationCount,
+    applications: normalizedApplications.map((appInfo) => cloneJsonLikeValue(appInfo, null)).filter(Boolean),
+    warnings,
+    error:
+      applicationCount > 0
+        ? ""
+        : String(options?.error || "No registered applications were returned for this Media Company.").trim(),
+  };
+}
+
+async function fetchRegisteredApplicationHealthDashboardReport(queryContext = null, options = {}) {
+  const programmerId = String(queryContext?.programmerId || "").trim();
+  if (!programmerId) {
+    return buildRegisteredApplicationHealthReportPayload(queryContext, [], {
+      error: "Select a Media Company before opening Registered Application Inspector.",
+    });
+  }
+
+  const applicationsData = await fetchApplicationsForProgrammer(programmerId, {
+    session: state.loginData,
+    forceRefresh: options?.forceRefresh === true,
+    preferredTabId: Number(options?.preferredTabId || 0),
+    requestTimeoutMs: Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS)),
+  });
+  const baseApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
+  const hydratedApplicationsData =
+    applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData)
+      ? { ...applicationsData }
+      : {};
+  const hydrationErrorsByGuid = {};
+
+  const hydratedApplications = await mapRegisteredApplicationHealthItemsWithConcurrency(
+    baseApplications,
+    async (application) => {
+      const guid = String(application?.guid || application?.id || "").trim();
+      if (!guid) {
+        return application;
+      }
+      try {
+        const hydrated = await enrichRegisteredApplicationForHydration(application, {
+          accessToken: firstNonEmptyString([state.loginData?.accessToken]),
+          preferredTabId: Number(options?.preferredTabId || 0),
+          timeoutMs: Math.max(1000, Number(options?.detailTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS)),
+          forceDetails: true,
+        });
+        hydratedApplicationsData[guid] = hydrated || application;
+        return hydrated || application;
+      } catch (error) {
+        hydrationErrorsByGuid[guid] = error instanceof Error ? error.message : String(error);
+        hydratedApplicationsData[guid] = application;
+        return application;
+      }
+    },
+    4
+  );
+
+  setCurrentProgrammerApplicationsSnapshot(programmerId, hydratedApplicationsData);
+  return buildRegisteredApplicationHealthReportPayload(queryContext, hydratedApplications, {
+    hydrationErrorsByGuid,
+  });
+}
+
+async function runRegisteredApplicationHealthDashboardForSelection(rawQueryContext = null, options = {}) {
+  const queryContext = buildRegisteredApplicationHealthQueryContext(rawQueryContext);
+  if (!queryContext.programmerId) {
+    const missingSelectionPayload = buildRegisteredApplicationHealthReportPayload(queryContext, [], {
+      error: "Select a Media Company before opening Registered Application Inspector.",
+    });
+    return {
+      ...missingSelectionPayload,
+      ok: false,
+    };
+  }
+  if (!shouldHydrateAdobePassWorkflowForSession(state.loginData)) {
+    const restrictedPayload = buildRegisteredApplicationHealthReportPayload(queryContext, [], {
+      error: "Switch to the Adobe Pass org profile before opening Registered Application Inspector.",
+    });
+    return {
+      ...restrictedPayload,
+      ok: false,
+    };
+  }
+
+  const openWorkspace = options.openWorkspace !== false;
+  const activateWorkspace = options.activateWorkspace !== false;
+  const forceRefresh = options.forceRefresh !== false;
+  let targetWindowId = Number(options.targetWindowId || 0);
+
+  if (openWorkspace) {
+    const workspaceTab = await registeredApplicationHealthWorkspaceEnsureWorkspaceTab({
+      activate: activateWorkspace,
+      windowId: targetWindowId || undefined,
+    });
+    targetWindowId = Number(
+      workspaceTab?.windowId || targetWindowId || state.registeredApplicationHealthWorkspaceWindowId || 0
+    );
+  }
+
+  registeredApplicationHealthWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), queryContext, targetWindowId);
+  void registeredApplicationHealthWorkspaceSendWorkspaceMessage(
+    "report-start",
+    {
+      selectionKey: queryContext.selectionKey,
+      queryContext,
+      startedAt: Date.now(),
+    },
+    { targetWindowId }
+  );
+
+  const finalizeReport = (payload) => {
+    registeredApplicationHealthWorkspaceStoreLatestReport(payload);
+    void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", payload, { targetWindowId });
+    return payload;
+  };
+
+  try {
+    const report = await fetchRegisteredApplicationHealthDashboardReport(queryContext, {
+      forceRefresh,
+      preferredTabId: Number(options?.preferredTabId || 0),
+    });
+    return finalizeReport(report);
+  } catch (error) {
+    return finalizeReport(
+      buildRegisteredApplicationHealthReportPayload(queryContext, [], {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    );
+  }
 }
 
 const HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_TABLE_KEY = "sev2_mvpd_error_codes";
@@ -51537,6 +51917,426 @@ function ensureHealthWorkspaceTabWatcher() {
   state.healthWorkspaceTabWatcherBound = true;
 }
 
+function registeredApplicationHealthWorkspaceGetSelectionContext(programmer = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  return buildRegisteredApplicationHealthQueryContext({
+    programmerId: String(resolvedProgrammer?.programmerId || "").trim(),
+    programmerName: firstNonEmptyString([resolvedProgrammer?.programmerName, resolvedProgrammer?.mediaCompanyName]),
+    requestorId: String(state.selectedRequestorId || "").trim(),
+  });
+}
+
+function registeredApplicationHealthWorkspaceGetSelectedControllerStatePayload(programmer = null, selectionContext = null) {
+  const context =
+    selectionContext && typeof selectionContext === "object"
+      ? selectionContext
+      : registeredApplicationHealthWorkspaceGetSelectionContext(programmer);
+  return {
+    controllerOnline: true,
+    registeredApplicationHealthReady: Boolean(
+      context?.programmerId && state.sessionReady === true && shouldHydrateAdobePassWorkflowForSession(state.loginData)
+    ),
+    programmerId: String(context?.programmerId || "").trim(),
+    programmerName: String(context?.programmerName || "").trim(),
+    requestorId: String(context?.requestorId || "").trim(),
+    environmentKey: String(context?.environmentKey || "").trim(),
+    environmentLabel: String(context?.environmentLabel || "").trim(),
+    selectionKey: String(context?.selectionKey || "").trim(),
+    updatedAt: Date.now(),
+  };
+}
+
+function registeredApplicationHealthWorkspaceGetWorkspaceUrl() {
+  return chrome.runtime.getURL(REGISTERED_APPLICATION_HEALTH_WORKSPACE_PATH);
+}
+
+function registeredApplicationHealthWorkspaceIsWorkspaceTab(tabLike) {
+  return String(tabLike?.url || "").startsWith(registeredApplicationHealthWorkspaceGetWorkspaceUrl());
+}
+
+function registeredApplicationHealthWorkspaceBindWorkspaceTab(windowId, tabId) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId > 0 && normalizedTabId > 0) {
+    state.registeredApplicationHealthWorkspaceTabIdByWindowId.set(normalizedWindowId, normalizedTabId);
+  }
+  if (normalizedWindowId > 0) {
+    state.registeredApplicationHealthWorkspaceWindowId = normalizedWindowId;
+  }
+  if (normalizedTabId > 0) {
+    state.registeredApplicationHealthWorkspaceTabId = normalizedTabId;
+  }
+}
+
+function registeredApplicationHealthWorkspaceUnbindWorkspaceTab(tabId) {
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedTabId > 0) {
+    for (const [windowId, mappedTabId] of state.registeredApplicationHealthWorkspaceTabIdByWindowId.entries()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        state.registeredApplicationHealthWorkspaceTabIdByWindowId.delete(windowId);
+      }
+    }
+  }
+  if (!normalizedTabId || Number(state.registeredApplicationHealthWorkspaceTabId || 0) === normalizedTabId) {
+    state.registeredApplicationHealthWorkspaceTabId = 0;
+    state.registeredApplicationHealthWorkspaceWindowId = 0;
+  }
+}
+
+function registeredApplicationHealthWorkspaceGetBoundWorkspaceTabId(windowId) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId > 0) {
+    const mapped = Number(state.registeredApplicationHealthWorkspaceTabIdByWindowId.get(normalizedWindowId) || 0);
+    if (mapped > 0) {
+      return mapped;
+    }
+  }
+  return Number(state.registeredApplicationHealthWorkspaceTabId || 0);
+}
+
+async function registeredApplicationHealthWorkspaceSendWorkspaceMessage(event, payload = {}, options = {}) {
+  const targetWindowId = Number(options.targetWindowId || 0);
+  try {
+    const message = {
+      type: REGISTERED_APPLICATION_HEALTH_WORKSPACE_MESSAGE_TYPE,
+      channel: "workspace-event",
+      event: String(event || ""),
+      payload,
+    };
+    if (targetWindowId > 0) {
+      message.targetWindowId = targetWindowId;
+    }
+    await chrome.runtime.sendMessage(message);
+  } catch {
+    // Ignore when workspace listener is inactive.
+  }
+}
+
+function registeredApplicationHealthWorkspaceBroadcastControllerState(programmer = null, selectionContext = null, targetWindowId = 0) {
+  const resolvedWindowId =
+    Number(targetWindowId || 0) || Number(state.registeredApplicationHealthWorkspaceWindowId || 0);
+  void registeredApplicationHealthWorkspaceSendWorkspaceMessage(
+    "controller-state",
+    registeredApplicationHealthWorkspaceGetSelectedControllerStatePayload(programmer, selectionContext),
+    {
+      targetWindowId: resolvedWindowId,
+    }
+  );
+}
+
+async function registeredApplicationHealthWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureRegisteredApplicationHealthWorkspaceRuntimeListener();
+  ensureRegisteredApplicationHealthWorkspaceTabWatcher();
+  const shouldActivate = options.activate !== false;
+  const requestedWindowId = Number(options.windowId || 0);
+  const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
+  const useWindowFilter = targetWindowId > 0;
+  let workspaceTab = null;
+
+  const boundTabId = registeredApplicationHealthWorkspaceGetBoundWorkspaceTabId(targetWindowId);
+  if (boundTabId > 0) {
+    try {
+      const existing = await chrome.tabs.get(boundTabId);
+      if (
+        registeredApplicationHealthWorkspaceIsWorkspaceTab(existing) &&
+        (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)
+      ) {
+        workspaceTab = existing;
+      }
+    } catch {
+      registeredApplicationHealthWorkspaceUnbindWorkspaceTab(boundTabId);
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    try {
+      const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
+      workspaceTab = allTabs.find((tab) => registeredApplicationHealthWorkspaceIsWorkspaceTab(tab)) || null;
+    } catch {
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    workspaceTab = await chrome.tabs.create({
+      url: registeredApplicationHealthWorkspaceGetWorkspaceUrl(),
+      active: shouldActivate,
+      ...(useWindowFilter ? { windowId: targetWindowId } : {}),
+    });
+  } else if (shouldActivate && workspaceTab.id) {
+    try {
+      workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
+      if (Number(workspaceTab?.windowId || 0) > 0) {
+        await chrome.windows.update(Number(workspaceTab.windowId), { focused: true });
+      }
+    } catch {
+      // Ignore activation failures.
+    }
+  }
+
+  registeredApplicationHealthWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  return workspaceTab;
+}
+
+function registeredApplicationHealthWorkspaceTrimCacheMaps(limit = 40) {
+  const maxSize = Math.max(10, Number(limit || 40));
+  while (state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.size > maxSize) {
+    const firstKey = state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.delete(firstKey);
+  }
+  while (state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.size > maxSize) {
+    const firstKey = state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.delete(firstKey);
+  }
+}
+
+function registeredApplicationHealthWorkspaceStoreLatestReport(reportPayload = null) {
+  if (!reportPayload || typeof reportPayload !== "object") {
+    return "";
+  }
+  const selectionKey = firstNonEmptyString([
+    reportPayload.selectionKey,
+    buildRegisteredApplicationHealthWorkspaceSelectionKey(reportPayload.queryContext || null),
+  ]);
+  if (!selectionKey) {
+    return "";
+  }
+  const clonedReport = cloneJsonLikeValue(reportPayload, null);
+  if (clonedReport && typeof clonedReport === "object") {
+    state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.set(selectionKey, clonedReport);
+  }
+  const queryContext = cloneJsonLikeValue(reportPayload?.queryContext, null);
+  if (queryContext && typeof queryContext === "object") {
+    state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.set(selectionKey, queryContext);
+  }
+  state.registeredApplicationHealthWorkspaceLastSelectionKey = selectionKey;
+  registeredApplicationHealthWorkspaceTrimCacheMaps(40);
+  return selectionKey;
+}
+
+function registeredApplicationHealthWorkspaceGetLatestReport(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (
+    normalizedSelectionKey &&
+    state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.has(normalizedSelectionKey)
+  ) {
+    return cloneJsonLikeValue(
+      state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.get(normalizedSelectionKey),
+      null
+    );
+  }
+  const fallbackSelectionKey = String(state.registeredApplicationHealthWorkspaceLastSelectionKey || "").trim();
+  if (
+    fallbackSelectionKey &&
+    state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.has(fallbackSelectionKey)
+  ) {
+    return cloneJsonLikeValue(
+      state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.get(fallbackSelectionKey),
+      null
+    );
+  }
+  for (const report of state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.values()) {
+    return cloneJsonLikeValue(report, null);
+  }
+  return null;
+}
+
+function registeredApplicationHealthWorkspaceGetLatestQueryContext(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (
+    normalizedSelectionKey &&
+    state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.has(normalizedSelectionKey)
+  ) {
+    return cloneJsonLikeValue(
+      state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.get(normalizedSelectionKey),
+      null
+    );
+  }
+  const fallbackSelectionKey = String(state.registeredApplicationHealthWorkspaceLastSelectionKey || "").trim();
+  if (
+    fallbackSelectionKey &&
+    state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.has(fallbackSelectionKey)
+  ) {
+    return cloneJsonLikeValue(
+      state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.get(fallbackSelectionKey),
+      null
+    );
+  }
+  for (const queryContext of state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.values()) {
+    return cloneJsonLikeValue(queryContext, null);
+  }
+  return null;
+}
+
+async function handleRegisteredApplicationHealthWorkspaceAction(message, sender = null) {
+  const action = String(message?.action || "").trim().toLowerCase();
+  const senderWindowId = Number(sender?.tab?.windowId || 0);
+  const senderTabId = Number(sender?.tab?.id || 0);
+  const mappedSenderTabId =
+    senderWindowId > 0 ? Number(state.registeredApplicationHealthWorkspaceTabIdByWindowId.get(senderWindowId) || 0) : 0;
+  if (senderWindowId > 0 && senderTabId > 0 && mappedSenderTabId > 0 && senderTabId !== mappedSenderTabId) {
+    return { ok: false, error: "This is not the bound Registered Application HEALTH workspace tab for the window." };
+  }
+  if (senderWindowId > 0 && senderTabId > 0 && (!mappedSenderTabId || mappedSenderTabId <= 0)) {
+    registeredApplicationHealthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+  }
+
+  if (action === "workspace-ready") {
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = registeredApplicationHealthWorkspaceGetSelectionContext(selectedProgrammer);
+    if (senderWindowId > 0) {
+      registeredApplicationHealthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+    }
+    registeredApplicationHealthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
+    const latestReport = registeredApplicationHealthWorkspaceGetLatestReport(selectionContext.selectionKey);
+    if (latestReport) {
+      void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, {
+        targetWindowId: senderWindowId,
+      });
+    }
+    return { ok: true };
+  }
+
+  if (action === "open-workspace") {
+    const workspaceTab = await registeredApplicationHealthWorkspaceEnsureWorkspaceTab({
+      activate: true,
+      windowId: senderWindowId || undefined,
+    });
+    const targetWindowId =
+      Number(workspaceTab?.windowId || senderWindowId || state.registeredApplicationHealthWorkspaceWindowId || 0);
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = registeredApplicationHealthWorkspaceGetSelectionContext(selectedProgrammer);
+    registeredApplicationHealthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, targetWindowId);
+    const latestReport = registeredApplicationHealthWorkspaceGetLatestReport(selectionContext.selectionKey);
+    if (latestReport) {
+      void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId });
+    }
+    return { ok: true };
+  }
+
+  if (action === "run-dashboard") {
+    const queryContext = buildRegisteredApplicationHealthQueryContext({
+      ...(message?.queryContext && typeof message.queryContext === "object" ? message.queryContext : {}),
+      requestSource: "registered-application-health-workspace-run",
+    });
+    const result = await runRegisteredApplicationHealthDashboardForSelection(queryContext, {
+      openWorkspace: true,
+      activateWorkspace: false,
+      forceRefresh: true,
+      targetWindowId: senderWindowId,
+    });
+    return result?.ok || result?.partial
+      ? { ok: true }
+      : { ok: false, error: String(result?.error || "Unable to load Registered Application Inspector.").trim() };
+  }
+
+  if (action === "refresh-latest") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const queryContext = registeredApplicationHealthWorkspaceGetLatestQueryContext(selectionKey);
+    if (!queryContext || typeof queryContext !== "object") {
+      return { ok: false, error: "No previous Registered Application Inspector query context is available to refresh." };
+    }
+    const refreshed = await runRegisteredApplicationHealthDashboardForSelection(
+      rebaseRegisteredApplicationHealthQueryContextForCurrentSelection(queryContext, {
+        requestSource: "registered-application-health-workspace-refresh",
+      }),
+      {
+        openWorkspace: true,
+        activateWorkspace: false,
+        forceRefresh: true,
+        targetWindowId: senderWindowId,
+      }
+    );
+    return refreshed?.ok || refreshed?.partial
+      ? { ok: true }
+      : {
+          ok: false,
+          error: String(refreshed?.error || "Unable to refresh Registered Application Inspector.").trim(),
+        };
+  }
+
+  if (action === "clear-all") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    if (selectionKey) {
+      state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.delete(selectionKey);
+      state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.delete(selectionKey);
+      if (state.registeredApplicationHealthWorkspaceLastSelectionKey === selectionKey) {
+        state.registeredApplicationHealthWorkspaceLastSelectionKey = "";
+      }
+    } else {
+      state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.clear();
+      state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.clear();
+      state.registeredApplicationHealthWorkspaceLastSelectionKey = "";
+    }
+    const targetWindowId = Number(senderWindowId || state.registeredApplicationHealthWorkspaceWindowId || 0);
+    void registeredApplicationHealthWorkspaceSendWorkspaceMessage("workspace-clear", {}, { targetWindowId });
+    return { ok: true };
+  }
+
+  return { ok: false, error: `Unsupported Registered Application HEALTH workspace action: ${action}` };
+}
+
+function ensureRegisteredApplicationHealthWorkspaceRuntimeListener() {
+  if (state.registeredApplicationHealthWorkspaceRuntimeListenerBound) {
+    return;
+  }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (
+      !REGISTERED_APPLICATION_HEALTH_WORKSPACE_MESSAGE_TYPES.has(String(message?.type || "")) ||
+      message?.channel !== "workspace-action"
+    ) {
+      return false;
+    }
+    void handleRegisteredApplicationHealthWorkspaceAction(message, sender)
+      .then((result) => {
+        sendResponse(result && typeof result === "object" ? result : { ok: true });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+    return true;
+  });
+  state.registeredApplicationHealthWorkspaceRuntimeListenerBound = true;
+}
+
+function ensureRegisteredApplicationHealthWorkspaceTabWatcher() {
+  if (state.registeredApplicationHealthWorkspaceTabWatcherBound) {
+    return;
+  }
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    registeredApplicationHealthWorkspaceUnbindWorkspaceTab(tabId);
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    const normalizedTabId = Number(tabId || 0);
+    if (!normalizedTabId || !changeInfo?.url) {
+      return;
+    }
+    if (registeredApplicationHealthWorkspaceIsWorkspaceTab(tab)) {
+      registeredApplicationHealthWorkspaceBindWorkspaceTab(tab?.windowId, normalizedTabId);
+      return;
+    }
+    const boundTabId = Number(state.registeredApplicationHealthWorkspaceTabId || 0);
+    let isMappedTab = false;
+    for (const mappedTabId of state.registeredApplicationHealthWorkspaceTabIdByWindowId.values()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        isMappedTab = true;
+        break;
+      }
+    }
+    if (isMappedTab || normalizedTabId === boundTabId) {
+      registeredApplicationHealthWorkspaceUnbindWorkspaceTab(normalizedTabId);
+    }
+  });
+  state.registeredApplicationHealthWorkspaceTabWatcherBound = true;
+}
+
 function buildTempPassWorkspaceSelectionKey(context = null) {
   const environmentKey = firstNonEmptyString([
     context?.environmentKey,
@@ -60698,23 +61498,24 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
     null;
   const adobePassWorkflowActive =
     state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);
+  const registeredApplicationReady = Boolean(selectionContext?.programmerId && adobePassWorkflowActive);
   const esmReady = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && premiumContext?.esmAvailable);
   const cmReady = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && shouldShowCmService(services?.cm));
   const healthReady = Boolean(selectionContext?.programmerId && selectionContext?.requestorId && premiumContext?.hydrationReady);
   const adobePassOrgRequiredLabel = "Adobe Pass org required";
   const healthActionGroupLabel = !selectionContext?.programmerId
-    ? "HEALTH actions. Select a Media Company and RequestorId to unlock ESM HEALTH, CM HEALTH, and HEALTH SPLUNK."
+    ? "HEALTH actions. Select a Media Company and RequestorId to unlock Registered Application Inspector, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK."
     : !adobePassWorkflowActive
-      ? `HEALTH actions. ${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile to unlock ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.`
+      ? `HEALTH actions. ${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile to unlock Registered Application Inspector, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.`
       : !premiumContext?.hydrationReady
         ? `HEALTH actions. Preparing HEALTH workspaces for ${selectionContext.programmerName || selectionContext.programmerId}.`
         : healthReady
           ? `HEALTH actions for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
           : esmReady || cmReady
-            ? `HEALTH actions for ${selectionContext.programmerName || selectionContext.programmerId} in ${selectionContext.environmentLabel}. Select a RequestorId to unlock HEALTH SPLUNK.`
+            ? `HEALTH actions for ${selectionContext.programmerName || selectionContext.programmerId} in ${selectionContext.environmentLabel}. Select a RequestorId to unlock HEALTH SPLUNK. Registered Application Inspector stays available.`
           : context.hasProgrammerContext
-            ? "HEALTH actions. Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
-            : "HEALTH actions. Select a Media Company and RequestorId to unlock ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.";
+            ? "HEALTH actions. Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH. Registered Application Inspector stays available."
+            : "HEALTH actions. Select a Media Company and RequestorId to unlock Registered Application Inspector, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.";
 
   return `
     <article class="metadata-item hr-health-status-value">
@@ -60753,6 +61554,22 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
             )}"
             ${cmReady ? "" : "disabled"}
           >CM</button>
+          <button
+            type="button"
+            class="hr-health-action-btn hr-health-action-btn--secondary"
+            data-health-action="registered-apps"
+            title="${escapeHtml(
+              registeredApplicationReady
+                ? `Open Registered Application Inspector for ${selectionContext.programmerName || selectionContext.programmerId}`
+                : `${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile before opening Registered Application Inspector.`
+            )}"
+            aria-label="${escapeHtml(
+              registeredApplicationReady
+                ? `Open Registered Application Inspector for ${selectionContext.programmerName || selectionContext.programmerId}`
+                : `${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile before opening Registered Application Inspector.`
+            )}"
+            ${registeredApplicationReady ? "" : "disabled"}
+          >REG APPS</button>
           <button
             type="button"
             class="hr-health-action-btn hr-health-action-btn--accent"
@@ -60866,6 +61683,48 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
       return;
     }
     setStatus(String(report?.error || "Unable to load CM HEALTH dashboard."), "error");
+    return;
+  }
+
+  if (normalizedAction === "registered-apps") {
+    const queryContext = buildRegisteredApplicationHealthQueryContext({
+      programmerId: String(programmer?.programmerId || "").trim(),
+      programmerName: String(programmer?.programmerName || programmer?.mediaCompanyName || "").trim(),
+      requestorId: String(state.selectedRequestorId || "").trim(),
+      requestSource: "hr-health-registered-apps",
+    });
+    if (!queryContext.programmerId) {
+      setStatus("Select a Media Company before opening Registered Application Inspector.", "error");
+      return;
+    }
+    setStatus(`Loading Registered Application Inspector for ${buildRegisteredApplicationHealthStatusMessage(queryContext)}...`);
+    const report = await runRegisteredApplicationHealthDashboardForSelection(queryContext, {
+      openWorkspace: true,
+      activateWorkspace: true,
+      forceRefresh: true,
+      requestSource: "hr-health-registered-apps",
+    });
+    if (report?.ok === true) {
+      setStatus(
+        `Loaded Registered Application Inspector (${Number(report?.totalApplications || 0)} app${
+          Number(report?.totalApplications || 0) === 1 ? "" : "s"
+        }).`,
+        "success"
+      );
+      return;
+    }
+    if (report?.partial === true) {
+      setStatus(
+        `Loaded Registered Application Inspector with ${Number(report?.totalApplications || 0)} app${
+          Number(report?.totalApplications || 0) === 1 ? "" : "s"
+        } and ${Array.isArray(report?.warnings) ? report.warnings.length : 0} warning${
+          Array.isArray(report?.warnings) && report.warnings.length === 1 ? "" : "s"
+        }.`,
+        "success"
+      );
+      return;
+    }
+    setStatus(String(report?.error || "Unable to load Registered Application Inspector."), "error");
     return;
   }
 
@@ -61674,6 +62533,7 @@ function renderHrSections(services, programmer = null, options = {}) {
 function renderPremiumServices(services, programmer = null, options = {}) {
   renderHrSections(services, programmer);
   esmHealthWorkspaceBroadcastControllerState(programmer);
+  registeredApplicationHealthWorkspaceBroadcastControllerState(programmer);
   healthWorkspaceBroadcastControllerState(programmer);
   if (!els.premiumServicesContainer) {
     return;
@@ -61852,6 +62712,12 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.cmHealthWorkspaceLastSelectionKey = "";
   state.cmHealthWorkspaceLastReportBySelectionKey.clear();
   state.cmHealthWorkspaceLastQueryContextBySelectionKey.clear();
+  state.registeredApplicationHealthWorkspaceTabId = 0;
+  state.registeredApplicationHealthWorkspaceWindowId = 0;
+  state.registeredApplicationHealthWorkspaceTabIdByWindowId.clear();
+  state.registeredApplicationHealthWorkspaceLastSelectionKey = "";
+  state.registeredApplicationHealthWorkspaceLastReportBySelectionKey.clear();
+  state.registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey.clear();
   state.healthWorkspaceTabId = 0;
   state.healthWorkspaceWindowId = 0;
   state.healthWorkspaceTabIdByWindowId.clear();
@@ -73006,7 +73872,8 @@ async function enrichRegisteredApplicationForHydration(appInfo = null, options =
     currentAppInfo?.id,
     resolveApplicationGuidFromEntityData(currentAppInfo?.appData || null),
   ]);
-  if (!guid || firstNonEmptyString([currentAppInfo?.softwareStatement])) {
+  const forceDetails = options?.forceDetails === true;
+  if (!guid || (!forceDetails && firstNonEmptyString([currentAppInfo?.softwareStatement]))) {
     return currentAppInfo;
   }
 
