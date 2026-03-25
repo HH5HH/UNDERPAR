@@ -163,6 +163,27 @@ function loadRestV2LearningActivationEvaluator(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2HarvestContextBuilder(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function normalizeAdobeNavigationUrl(value = '') { return String(value || '').trim(); }",
+    "function collectRestV2SessionCodeCandidates(values = []) { return (Array.isArray(values) ? values : [values]).map((value) => String(value || '').trim()).filter(Boolean); }",
+    "function getRequestorScopedMvpdCache(requestorId = '') { return typeof globalThis.__seed.getRequestorScopedMvpdCache === 'function' ? globalThis.__seed.getRequestorScopedMvpdCache(requestorId) : null; }",
+    "function resolveRestV2AppInfoForHarvest(harvest = null) { return typeof globalThis.__seed.resolveAppInfo === 'function' ? globalThis.__seed.resolveAppInfo(harvest) : { guid: String(harvest?.appGuid || ''), appName: String(harvest?.appName || harvest?.appGuid || '') }; }",
+    extractFunctionSource(source, "buildRestV2ContextFromHarvest"),
+    "module.exports = { buildRestV2ContextFromHarvest };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadRestV2LearningResourceHelpers(seed = {}) {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -1020,6 +1041,65 @@ test("REST V2 learning activation unlocks login-derived operations after UnderPA
     requireBodySamlResponse: true,
   });
   assert.equal(createPartnerProfileState.ready, true);
+});
+
+test("REST V2 learning activation clears stale plan-missing partner SSO fields when runtime fallback context already satisfies them", () => {
+  const { buildRestV2InteractiveDocsEntryActivationState } = loadRestV2LearningActivationEvaluator({
+    context: {
+      ok: true,
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      partner: "Apple",
+      flowId: "flow-123",
+      appInfo: { guid: "rest-guid" },
+    },
+    planBuilder() {
+      return {
+        missingRequiredFields: ["path.partner", "body.SAMLResponse"],
+        notes: [],
+      };
+    },
+  });
+
+  const createPartnerProfileState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "partner-sso-create-profile",
+    requiresAccessToken: true,
+    usesPartnerPath: true,
+    requirePartnerPath: true,
+    usesBodySamlResponse: true,
+    requireBodySamlResponse: true,
+  });
+
+  assert.equal(createPartnerProfileState.ready, true);
+  assert.deepEqual(Array.from(createPartnerProfileState.pendingFields || []), []);
+});
+
+test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING deeplink hydration", () => {
+  const { buildRestV2ContextFromHarvest } = loadRestV2HarvestContextBuilder();
+  const context = buildRestV2ContextFromHarvest({
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "turner",
+    serviceProviderId: "turner",
+    mvpd: "Comcast_SSO",
+    mvpdName: "Xfinity",
+    appGuid: "rest-guid",
+    appName: "REST V2",
+    sessionCode: "session-code-123",
+    sessionPartner: "Apple",
+    partner: "Apple",
+    partnerFrameworkStatus: "framework-status-token",
+    samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+    samlSource: "tab-network:body",
+    sessionUrl: "https://example.test/sessions/session-code-123",
+    loginUrl: "https://example.test/authenticate/turner/session-code-123",
+  });
+
+  assert.equal(context.ok, true);
+  assert.equal(context.partner, "Apple");
+  assert.equal(context.partnerFrameworkStatus, "framework-status-token");
+  assert.equal(context.samlResponse, "PHNhbWxwOlJlc3BvbnNlPg==");
+  assert.equal(context.samlSource, "tab-network:body");
 });
 
 test("REST V2 learning hydration plans honor the selected customer-doc operation contracts", () => {

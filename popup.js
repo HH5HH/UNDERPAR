@@ -16584,7 +16584,10 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     sessionCodeCandidates,
     sessionAction: String(harvest.sessionAction || "").trim(),
     sessionPartner: String(harvest.sessionPartner || "").trim(),
+    partner: String(firstNonEmptyString([harvest.partner, harvest.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(harvest.partnerFrameworkStatus || "").trim(),
+    samlResponse: String(harvest.samlResponse || "").trim(),
+    samlSource: String(harvest.samlSource || "").trim(),
     sessionUrl,
     loginUrl,
     appInfo,
@@ -24248,7 +24251,10 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     sessionCodeCandidates,
     sessionAction: String(firstNonEmptyString([options?.sessionAction, context?.sessionAction]) || "").trim(),
     sessionPartner: String(firstNonEmptyString([options?.sessionPartner, context?.sessionPartner]) || "").trim(),
+    partner: String(firstNonEmptyString([options?.partner, context?.partner, context?.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(options?.partnerFrameworkStatus || context?.partnerFrameworkStatus || "").trim(),
+    samlResponse: String(firstNonEmptyString([options?.samlResponse, context?.samlResponse]) || "").trim(),
+    samlSource: String(firstNonEmptyString([options?.samlSource, context?.samlSource]) || "").trim(),
     sessionResponseHeaders:
       options?.sessionResponseHeaders && typeof options.sessionResponseHeaders === "object"
         ? { ...options.sessionResponseHeaders }
@@ -25626,6 +25632,11 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     contextServiceProviderId
   );
   const sessionCode = firstNonEmptyString([String(context?.sessionCode || "").trim(), sessionCodeCandidates[0]]);
+  const partner = firstNonEmptyString([
+    String(context?.partner || "").trim(),
+    String(context?.sessionPartner || "").trim(),
+    resolveRestV2PartnerNameFromContext(context),
+  ]);
 
   return {
     harvestedAt,
@@ -25639,7 +25650,10 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     sessionCodeCandidates,
     sessionAction: String(context?.sessionAction || "").trim(),
     sessionPartner: String(context?.sessionPartner || "").trim(),
+    partner: String(partner || "").trim(),
     partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
+    samlResponse: String(context?.samlResponse || "").trim(),
+    samlSource: String(context?.samlSource || "").trim(),
     sessionUrl,
     loginUrl,
     profileUrl: String(profileCheckResult.url || "").trim(),
@@ -26443,6 +26457,10 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
   }
   const samlResponse = String(samlDetails?.samlResponse || "").trim();
   result.samlSource = String(samlDetails?.source || "").trim();
+  if (samlResponse) {
+    context.samlResponse = samlResponse;
+    context.samlSource = result.samlSource;
+  }
   if (!samlResponse) {
     result.error = "SAMLResponse was not captured from response body/request body.";
     setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
@@ -26512,6 +26530,7 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
         ]) || "Partner SSO profile creation failed.";
     }
     if (result.ok) {
+      context.partner = result.partner;
       context.partnerFrameworkStatus = partnerFrameworkStatus;
       context.sessionPartner = result.partner;
     }
@@ -51748,7 +51767,10 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
       : [],
     sessionAction: String(recordingContext.sessionAction || "").trim(),
     sessionPartner: String(recordingContext.sessionPartner || "").trim(),
+    partner: String(firstNonEmptyString([recordingContext.partner, recordingContext.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(recordingContext.partnerFrameworkStatus || "").trim(),
+    samlResponse: String(recordingContext.samlResponse || "").trim(),
+    samlSource: String(recordingContext.samlSource || "").trim(),
     sessionResponseHeaders:
       recordingContext?.sessionResponseHeaders && typeof recordingContext.sessionResponseHeaders === "object"
         ? { ...recordingContext.sessionResponseHeaders }
@@ -51795,7 +51817,10 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null) {
     sessionCodeCandidates,
     sessionAction: String(context.sessionAction || "").trim(),
     sessionPartner: String(context.sessionPartner || "").trim(),
+    partner: String(firstNonEmptyString([context.partner, context.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
+    samlResponse: String(context.samlResponse || "").trim(),
+    samlSource: String(context.samlSource || "").trim(),
     sessionUrl,
     loginUrl,
     harvestedAt: Date.now(),
@@ -59573,6 +59598,8 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
         domainName: "",
         partnerFrameworkStatus: "",
         partner: "",
+        samlResponse: "",
+        samlSource: "",
         flowId: "",
       };
     }
@@ -59689,7 +59716,20 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
   const partner = firstNonEmptyString([
     String(resolveRestV2PartnerNameFromContext(activeRecordingContext) || "").trim(),
     String(resolveRestV2PartnerNameFromContext(harvestContext || harvest) || "").trim(),
+    String(activeRecordingContext?.partner || "").trim(),
+    String(harvestContext?.partner || "").trim(),
+    String(harvest?.partner || "").trim(),
     String(harvest?.sessionPartner || "").trim(),
+  ]);
+  const samlResponse = firstNonEmptyString([
+    String(activeRecordingContext?.samlResponse || "").trim(),
+    String(harvestContext?.samlResponse || "").trim(),
+    String(harvest?.samlResponse || "").trim(),
+  ]);
+  const samlSource = firstNonEmptyString([
+    String(activeRecordingContext?.samlSource || "").trim(),
+    String(harvestContext?.samlSource || "").trim(),
+    String(harvest?.samlSource || "").trim(),
   ]);
   const flowId = firstNonEmptyString([
     state.restV2RecordingActive === true ? String(state.restV2DebugFlowId || "").trim() : "",
@@ -59719,6 +59759,8 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     domainName: String(domainName || "").trim(),
     partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
     partner: String(partner || "").trim(),
+    samlResponse: String(samlResponse || "").trim(),
+    samlSource: String(samlSource || "").trim(),
     flowId: String(flowId || "").trim(),
   };
 }
@@ -60007,7 +60049,11 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
     };
   }
 
-  const pendingFields = [];
+  const pendingFieldSet = new Set(
+    (Array.isArray(plan?.missingRequiredFields) ? plan.missingRequiredFields : [])
+      .map((fieldName) => String(fieldName || "").trim())
+      .filter((fieldName) => fieldName && fieldName !== "header.Authorization")
+  );
   const planFieldValues = plan?.fieldValues && typeof plan.fieldValues === "object" ? plan.fieldValues : {};
   const hasPlannedValue = (fieldName = "") => {
     const normalizedFieldName = String(fieldName || "").trim();
@@ -60026,54 +60072,55 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
     }
     return String(value || "").trim().length > 0;
   };
-  const pushPendingField = (fieldName, satisfied) => {
+  const syncPendingField = (fieldName, satisfied) => {
     const normalizedFieldName = String(fieldName || "").trim();
-    if (!normalizedFieldName || satisfied || pendingFields.includes(normalizedFieldName)) {
+    if (!normalizedFieldName) {
       return;
     }
-    pendingFields.push(normalizedFieldName);
+    if (satisfied) {
+      pendingFieldSet.delete(normalizedFieldName);
+      return;
+    }
+    pendingFieldSet.add(normalizedFieldName);
   };
 
-  (Array.isArray(plan?.missingRequiredFields) ? plan.missingRequiredFields : []).forEach((fieldName) => {
-    if (String(fieldName || "").trim() === "header.Authorization") {
-      return;
-    }
-    pushPendingField(fieldName, false);
-  });
-
-  pushPendingField("path.code", resolvedEntry.usesSessionCode !== true || hasPlannedValue("path.code") || hasContextValue(context.sessionCode));
-  pushPendingField(
+  syncPendingField("path.code", resolvedEntry.usesSessionCode !== true || hasPlannedValue("path.code") || hasContextValue(context.sessionCode));
+  syncPendingField(
     resolvedEntry.usesMvpdPath === true ? "path.mvpd" : "body.mvpd",
     (resolvedEntry.usesMvpdPath !== true && resolvedEntry.usesBodyMvpd !== true) ||
       hasPlannedValue("path.mvpd") ||
       hasPlannedValue("body.mvpd") ||
       hasContextValue(context.mvpd)
   );
-  pushPendingField(
+  syncPendingField(
     "body.domainName",
     resolvedEntry.usesBodyDomainName !== true || hasPlannedValue("body.domainName") || hasContextValue(context.domainName)
   );
-  pushPendingField(
+  syncPendingField(
     resolvedEntry.usesBodyRedirectUrl === true ? "body.redirectUrl" : "query.redirectUrl",
     (resolvedEntry.usesBodyRedirectUrl !== true && resolvedEntry.usesQueryRedirectUrl !== true) ||
       hasPlannedValue("body.redirectUrl") ||
       hasPlannedValue("query.redirectUrl") ||
       hasContextValue(context.redirectUrl)
   );
-  pushPendingField("path.partner", resolvedEntry.usesPartnerPath !== true || hasPlannedValue("path.partner") || hasContextValue(context.partner));
-  pushPendingField(
+  syncPendingField(
+    "path.partner",
+    resolvedEntry.usesPartnerPath !== true || hasPlannedValue("path.partner") || hasContextValue(context.partner)
+  );
+  syncPendingField(
     "body.resources",
     resolvedEntry.usesBodyResources !== true ||
       hasPlannedValue("body.resources") ||
       (Array.isArray(context.resourceIds) && context.resourceIds.length > 0)
   );
-  pushPendingField(
+  syncPendingField(
     "body.SAMLResponse",
     resolvedEntry.usesBodySamlResponse !== true ||
       hasPlannedValue("body.SAMLResponse") ||
       hasContextValue(context.samlResponse) ||
       hasContextValue(context.flowId)
   );
+  const pendingFields = [...pendingFieldSet];
 
   return {
     ready: pendingFields.length === 0,
