@@ -43001,6 +43001,56 @@ function cmResolveEsmHealthXrefRecordConfig(record = null, cmState = null) {
   };
 }
 
+function cmBuildEsmHealthXrefSavedQueryName(record = null, cmState = null) {
+  const payload = record?.payload && typeof record.payload === "object" ? record.payload : {};
+  const requestorId = String(
+    firstNonEmptyString([payload?.requestorId, cmState?.cmService?.requestorId, state.selectedRequestorId]) || ""
+  ).trim();
+  const mvpdId = String(firstNonEmptyString([payload?.mvpd, cmState?.cmService?.mvpdId, state.selectedMvpdId]) || "").trim();
+  const mvpdLabel = String(
+    firstNonEmptyString([payload?.mvpdLabel, getRestV2MvpdPickerLabel(requestorId, mvpdId), mvpdId]) || ""
+  ).trim();
+  const recordTitle = String(record?.title || "ESM Health Scope").trim() || "ESM Health Scope";
+  const scopeLabel = cmBuildCrossReferenceLabel(
+    requestorId,
+    mvpdId,
+    mvpdId && mvpdLabel
+      ? {
+          id: mvpdId,
+          name: mvpdLabel,
+        }
+      : null
+  );
+  return popupNormalizeSavedEsmQueryName([recordTitle, scopeLabel].filter(Boolean).join(" "));
+}
+
+async function cmPersistEsmHealthXrefSavedQuery(record = null, cmState = null, requestUrl = "") {
+  const fallbackRequestUrl = String(cmResolveEsmHealthXrefRecordConfig(record, cmState)?.requestUrl || "").trim();
+  const resolvedRequestUrl = String(firstNonEmptyString([requestUrl, fallbackRequestUrl]) || "").trim();
+  const savedQueryName = cmBuildEsmHealthXrefSavedQueryName(record, cmState);
+  const savedQueryUrl = String(
+    firstNonEmptyString([
+      normalizeUnderparEsmRequestPath(resolvedRequestUrl),
+      stripMegWorkspaceScopedQueryParams(resolvedRequestUrl),
+    ]) || ""
+  ).trim();
+  if (!savedQueryName || !savedQueryUrl) {
+    return {
+      ok: false,
+      savedQueryName,
+      savedQueryUrl,
+    };
+  }
+  const result = await popupPersistSavedEsmQueryRecord(savedQueryName, savedQueryUrl);
+  return {
+    ok: true,
+    savedQueryName,
+    savedQueryUrl,
+    storageKey: String(result?.storageKey || "").trim(),
+    existed: result?.existed === true,
+  };
+}
+
 async function cmFetchEsmHealthXrefReport(record = null, cmState = null) {
   const config = cmResolveEsmHealthXrefRecordConfig(record, cmState);
   const result = await fetchEsmHealthJson(config.queryContext, config.reportPath, {
@@ -43899,6 +43949,14 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
     }
   );
   if (recordKind === "esm-health-xref") {
+    try {
+      await cmPersistEsmHealthXrefSavedQuery(record, cmState, requestUrl);
+    } catch (error) {
+      setStatus(
+        `Unable to mirror CM ESM Health Scope into Saved Queries: ${error instanceof Error ? error.message : String(error)}`,
+        "error"
+      );
+    }
     try {
       const response = await cmFetchEsmHealthXrefReport(record, cmState);
       requestUrl = String(response.requestUrl || requestUrl || "").trim();
