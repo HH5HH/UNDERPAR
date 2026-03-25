@@ -12794,6 +12794,8 @@ const state = {
   registeredApplicationHealthWorkspaceLastSelectionKey: "",
   registeredApplicationHealthWorkspaceLastReportBySelectionKey: new Map(),
   registeredApplicationHealthWorkspaceLastQueryContextBySelectionKey: new Map(),
+  registeredApplicationHealthWorkspaceHydrationPromiseBySelectionAndGuid: new Map(),
+  registeredApplicationHealthWorkspaceBackgroundHydrationPromiseBySelectionKey: new Map(),
   healthWorkspaceTabId: 0,
   healthWorkspaceWindowId: 0,
   healthWorkspaceTabIdByWindowId: new Map(),
@@ -21132,6 +21134,8 @@ function buildRegisteredApplicationHealthAppRecord(appInfo = null, queryContext 
     softwareStatementPresent: Boolean(softwareStatement),
     jwtDecoded: Boolean(softwareStatement && parseJwtPayload(softwareStatement)),
     jwtState: !softwareStatement ? "missing" : parseJwtPayload(softwareStatement) ? "decoded" : "undecodable",
+    hydrated: Boolean(normalizedApp?.__underparHydrated === true || softwareStatement),
+    hydrationPending: !softwareStatement && !hydrationError,
     selectedRequestorMatch,
     hydrationError,
   };
@@ -21177,6 +21181,7 @@ function buildRegisteredApplicationHealthReportPayload(queryContext = null, appl
     queryContext,
     totalApplications: applicationCount,
     applications: normalizedApplications.map((appInfo) => cloneJsonLikeValue(appInfo, null)).filter(Boolean),
+    hydrationErrorsByGuid: cloneJsonLikeValue(hydrationErrorsByGuid, {}),
     warnings,
     error:
       applicationCount > 0
@@ -21201,6 +21206,264 @@ async function fetchRegisteredApplicationHealthDashboardReport(queryContext = nu
   });
   const baseApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
   return buildRegisteredApplicationHealthReportPayload(queryContext, baseApplications);
+}
+
+function registeredApplicationHealthReportHasPendingHydration(reportPayload = null) {
+  return (Array.isArray(reportPayload?.applications) ? reportPayload.applications : []).some(
+    (appInfo) => !String(appInfo?.softwareStatement || "").trim()
+  );
+}
+
+function buildRegisteredApplicationHealthHydrationRequestKey(queryContext = null, guid = "") {
+  const selectionKey = firstNonEmptyString([
+    queryContext?.selectionKey,
+    buildRegisteredApplicationHealthWorkspaceSelectionKey(queryContext),
+  ]);
+  const normalizedGuid = String(guid || "").trim();
+  return selectionKey && normalizedGuid ? `${selectionKey}::${normalizedGuid}` : "";
+}
+
+async function hydrateRegisteredApplicationHealthApplication(queryContext = null, guid = "", options = {}) {
+  const normalizedQueryContext = buildRegisteredApplicationHealthQueryContext(queryContext);
+  const programmerId = String(normalizedQueryContext?.programmerId || "").trim();
+  const normalizedGuid = String(guid || "").trim();
+  if (!programmerId || !normalizedGuid) {
+    return {
+      ok: false,
+      error: "Registered Application hydration requires both a Media Company and application guid.",
+      report: null,
+      application: null,
+    };
+  }
+
+  const targetWindowId = Number(options?.targetWindowId || 0);
+  const requestKey = buildRegisteredApplicationHealthHydrationRequestKey(normalizedQueryContext, normalizedGuid);
+  const existingPromise = requestKey
+    ? state.registeredApplicationHealthWorkspaceHydrationPromiseBySelectionAndGuid.get(requestKey)
+    : null;
+  if (existingPromise) {
+    const existingResult = await existingPromise;
+    if (options.broadcast !== false && existingResult?.report) {
+      void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", existingResult.report, {
+        targetWindowId,
+      });
+    }
+    return existingResult;
+  }
+
+  const emitLifecycle = options.emitLifecycle !== false;
+  const hydrationPromise = (async () => {
+    if (emitLifecycle) {
+      void registeredApplicationHealthWorkspaceSendWorkspaceMessage(
+        "application-hydration-start",
+        {
+          selectionKey: normalizedQueryContext.selectionKey,
+          guid: normalizedGuid,
+        },
+        { targetWindowId }
+      );
+    }
+
+    let nextApplicationsData = {
+      ...(getCurrentProgrammerApplicationsSnapshot(programmerId) || {}),
+    };
+    let nextHydrationErrorsByGuid =
+      cloneJsonLikeValue(
+        registeredApplicationHealthWorkspaceGetLatestReport(normalizedQueryContext.selectionKey)?.hydrationErrorsByGuid,
+        {}
+      ) || {};
+
+    try {
+      const applicationsData = await fetchApplicationsForProgrammer(programmerId, {
+        session: state.loginData,
+        forceRefresh: false,
+        preferredTabId: Number(options?.preferredTabId || 0),
+        requestTimeoutMs: Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS)),
+      });
+      nextApplicationsData = {
+        ...(applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {}),
+      };
+
+      const hydratedApp = await enrichRegisteredApplicationForHydration(
+        nextApplicationsData[normalizedGuid] || {
+          guid: normalizedGuid,
+          id: normalizedGuid,
+          key: normalizedGuid,
+        },
+        {
+          forceDetails: options?.forceDetails !== false,
+          preferredTabId: Number(options?.preferredTabId || 0),
+          requestTimeoutMs: Math.max(
+            1000,
+            Number(options?.detailTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS)
+          ),
+        }
+      );
+
+      if (hydratedApp && typeof hydratedApp === "object") {
+        hydratedApp.__underparHydrated = true;
+        nextApplicationsData[normalizedGuid] = hydratedApp;
+        setCurrentProgrammerApplicationsSnapshot(programmerId, nextApplicationsData);
+      }
+
+      delete nextHydrationErrorsByGuid[normalizedGuid];
+      const report = buildRegisteredApplicationHealthReportPayload(
+        normalizedQueryContext,
+        buildPassVaultHydrationRegisteredApplications(nextApplicationsData),
+        { hydrationErrorsByGuid: nextHydrationErrorsByGuid }
+      );
+      registeredApplicationHealthWorkspaceStoreLatestReport(report);
+      if (options.broadcast !== false) {
+        void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", report, {
+          targetWindowId,
+        });
+      }
+      return {
+        ok: true,
+        error: "",
+        report,
+        application:
+          (Array.isArray(report?.applications) ? report.applications : []).find(
+            (appInfo) => String(appInfo?.guid || "").trim() === normalizedGuid
+          ) || null,
+      };
+    } catch (error) {
+      const resolvedError = error instanceof Error ? error : new Error(String(error));
+      nextHydrationErrorsByGuid[normalizedGuid] = resolvedError.message;
+      const fallbackReport = buildRegisteredApplicationHealthReportPayload(
+        normalizedQueryContext,
+        buildPassVaultHydrationRegisteredApplications(nextApplicationsData),
+        {
+          hydrationErrorsByGuid: nextHydrationErrorsByGuid,
+          error: resolvedError.message,
+        }
+      );
+      registeredApplicationHealthWorkspaceStoreLatestReport(fallbackReport);
+      if (options.broadcastErrors !== false) {
+        void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", fallbackReport, {
+          targetWindowId,
+        });
+      }
+      return {
+        ok: false,
+        error: resolvedError.message,
+        report: fallbackReport,
+        application:
+          (Array.isArray(fallbackReport?.applications) ? fallbackReport.applications : []).find(
+            (appInfo) => String(appInfo?.guid || "").trim() === normalizedGuid
+          ) || null,
+      };
+    } finally {
+      if (emitLifecycle) {
+        void registeredApplicationHealthWorkspaceSendWorkspaceMessage(
+          "application-hydration-complete",
+          {
+            selectionKey: normalizedQueryContext.selectionKey,
+            guid: normalizedGuid,
+          },
+          { targetWindowId }
+        );
+      }
+      if (
+        requestKey &&
+        state.registeredApplicationHealthWorkspaceHydrationPromiseBySelectionAndGuid.get(requestKey) === hydrationPromise
+      ) {
+        state.registeredApplicationHealthWorkspaceHydrationPromiseBySelectionAndGuid.delete(requestKey);
+      }
+    }
+  })();
+
+  if (requestKey) {
+    state.registeredApplicationHealthWorkspaceHydrationPromiseBySelectionAndGuid.set(requestKey, hydrationPromise);
+  }
+  return hydrationPromise;
+}
+
+async function prefetchRegisteredApplicationHealthApplications(queryContext = null, options = {}) {
+  const normalizedQueryContext = buildRegisteredApplicationHealthQueryContext(queryContext);
+  const selectionKey = String(normalizedQueryContext?.selectionKey || "").trim();
+  if (!selectionKey || !String(normalizedQueryContext?.programmerId || "").trim()) {
+    return null;
+  }
+
+  if (state.registeredApplicationHealthWorkspaceBackgroundHydrationPromiseBySelectionKey.has(selectionKey)) {
+    return state.registeredApplicationHealthWorkspaceBackgroundHydrationPromiseBySelectionKey.get(selectionKey);
+  }
+
+  const latestReport = registeredApplicationHealthWorkspaceGetLatestReport(selectionKey);
+  const pendingGuids = uniquePreserveOrder(
+    (Array.isArray(latestReport?.applications) ? latestReport.applications : [])
+      .filter((appInfo) => !String(appInfo?.softwareStatement || "").trim())
+      .map((appInfo) => String(appInfo?.guid || "").trim())
+      .filter(Boolean)
+  );
+  if (pendingGuids.length === 0) {
+    return latestReport;
+  }
+
+  const targetWindowId = Number(options?.targetWindowId || 0);
+  const backgroundPromise = (async () => {
+    void registeredApplicationHealthWorkspaceSendWorkspaceMessage(
+      "background-hydration-start",
+      {
+        selectionKey,
+        pendingCount: pendingGuids.length,
+      },
+      { targetWindowId }
+    );
+    try {
+      const concurrency = Math.max(1, Math.min(4, pendingGuids.length));
+      let nextIndex = 0;
+      const worker = async () => {
+        while (nextIndex < pendingGuids.length) {
+          const guidIndex = nextIndex;
+          nextIndex += 1;
+          const pendingGuid = pendingGuids[guidIndex];
+          await hydrateRegisteredApplicationHealthApplication(normalizedQueryContext, pendingGuid, {
+            ...options,
+            broadcast: false,
+            broadcastErrors: false,
+            emitLifecycle: true,
+            forceDetails: true,
+            targetWindowId,
+          });
+        }
+      };
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      const refreshedReport = registeredApplicationHealthWorkspaceGetLatestReport(selectionKey);
+      if (refreshedReport) {
+        void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", refreshedReport, {
+          targetWindowId,
+        });
+      }
+      return refreshedReport;
+    } finally {
+      state.registeredApplicationHealthWorkspaceBackgroundHydrationPromiseBySelectionKey.delete(selectionKey);
+      void registeredApplicationHealthWorkspaceSendWorkspaceMessage(
+        "background-hydration-complete",
+        {
+          selectionKey,
+        },
+        { targetWindowId }
+      );
+    }
+  })();
+
+  state.registeredApplicationHealthWorkspaceBackgroundHydrationPromiseBySelectionKey.set(selectionKey, backgroundPromise);
+  return backgroundPromise;
+}
+
+function registeredApplicationHealthWorkspaceQueueBackgroundHydration(queryContext = null, options = {}) {
+  const normalizedQueryContext = buildRegisteredApplicationHealthQueryContext(queryContext);
+  const selectionKey = String(normalizedQueryContext?.selectionKey || "").trim();
+  if (!selectionKey) {
+    return;
+  }
+  const latestReport = registeredApplicationHealthWorkspaceGetLatestReport(selectionKey);
+  if (!registeredApplicationHealthReportHasPendingHydration(latestReport)) {
+    return;
+  }
+  void prefetchRegisteredApplicationHealthApplications(normalizedQueryContext, options).catch(() => {});
 }
 
 async function runRegisteredApplicationHealthDashboardForSelection(rawQueryContext = null, options = {}) {
@@ -21261,7 +21524,14 @@ async function runRegisteredApplicationHealthDashboardForSelection(rawQueryConte
       forceRefresh,
       preferredTabId: Number(options?.preferredTabId || 0),
     });
-    return finalizeReport(report);
+    const finalizedReport = finalizeReport(report);
+    if (finalizedReport?.ok || finalizedReport?.partial) {
+      registeredApplicationHealthWorkspaceQueueBackgroundHydration(queryContext, {
+        targetWindowId,
+        preferredTabId: Number(options?.preferredTabId || 0),
+      });
+    }
+    return finalizedReport;
   } catch (error) {
     return finalizeReport(
       buildRegisteredApplicationHealthReportPayload(queryContext, [], {
@@ -52537,6 +52807,9 @@ async function handleRegisteredApplicationHealthWorkspaceAction(message, sender 
       void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, {
         targetWindowId: senderWindowId,
       });
+      registeredApplicationHealthWorkspaceQueueBackgroundHydration(latestReport?.queryContext || selectionContext, {
+        targetWindowId: senderWindowId,
+      });
     }
     return { ok: true };
   }
@@ -52554,6 +52827,9 @@ async function handleRegisteredApplicationHealthWorkspaceAction(message, sender 
     const latestReport = registeredApplicationHealthWorkspaceGetLatestReport(selectionContext.selectionKey);
     if (latestReport) {
       void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId });
+      registeredApplicationHealthWorkspaceQueueBackgroundHydration(latestReport?.queryContext || selectionContext, {
+        targetWindowId,
+      });
     }
     return { ok: true };
   }
@@ -52597,6 +52873,56 @@ async function handleRegisteredApplicationHealthWorkspaceAction(message, sender 
           ok: false,
           error: String(refreshed?.error || "Unable to refresh Registered Application Health.").trim(),
         };
+  }
+
+  if (action === "hydrate-application") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const latestQueryContext =
+      registeredApplicationHealthWorkspaceGetLatestQueryContext(selectionKey) ||
+      (message?.queryContext && typeof message.queryContext === "object" ? cloneJsonLikeValue(message.queryContext, null) : null);
+    const guid = String(message?.guid || "").trim();
+    if (!latestQueryContext || typeof latestQueryContext !== "object") {
+      return { ok: false, error: "No Registered Application Health query context is available for hydration." };
+    }
+    const hydrated = await hydrateRegisteredApplicationHealthApplication(
+      rebaseRegisteredApplicationHealthQueryContextForCurrentSelection(latestQueryContext, {
+        requestSource: "registered-application-health-workspace-hydrate",
+      }),
+      guid,
+      {
+        targetWindowId: senderWindowId,
+        forceDetails: true,
+      }
+    );
+    return hydrated?.ok
+      ? {
+          ok: true,
+          application: cloneJsonLikeValue(hydrated?.application, null),
+          report: cloneJsonLikeValue(hydrated?.report, null),
+        }
+      : {
+          ok: false,
+          error: String(hydrated?.error || "Unable to hydrate this registered application.").trim(),
+          application: cloneJsonLikeValue(hydrated?.application, null),
+          report: cloneJsonLikeValue(hydrated?.report, null),
+        };
+  }
+
+  if (action === "prefetch-applications") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const latestQueryContext = registeredApplicationHealthWorkspaceGetLatestQueryContext(selectionKey);
+    if (!latestQueryContext || typeof latestQueryContext !== "object") {
+      return { ok: false, error: "No Registered Application Health query context is available for background hydration." };
+    }
+    void prefetchRegisteredApplicationHealthApplications(
+      rebaseRegisteredApplicationHealthQueryContextForCurrentSelection(latestQueryContext, {
+        requestSource: "registered-application-health-workspace-prefetch",
+      }),
+      {
+        targetWindowId: senderWindowId,
+      }
+    );
+    return { ok: true };
   }
 
   if (action === "clear-all") {

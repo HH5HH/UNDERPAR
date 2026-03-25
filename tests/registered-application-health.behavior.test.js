@@ -115,6 +115,7 @@ function loadWorkspaceDecodeFunctions(functionNames) {
   const source = fs.readFileSync(filePath, "utf8");
   const script = [
     "const state = { jwtDecodeCache: new Map() };",
+    extractFunctionSource(source, "getJwtInspectorUtility"),
     extractFunctionSource(source, "firstNonEmptyString"),
     extractFunctionSource(source, "uniqueStringArray"),
     extractFunctionSource(source, "tryParseJson"),
@@ -138,6 +139,7 @@ function loadWorkspaceDecodeFunctions(functionNames) {
     JSON,
     Date,
     Buffer,
+    UnderParJwtInspector: null,
     atob: (value) => Buffer.from(String(value || ""), "base64").toString("binary"),
     escape: global.escape,
   };
@@ -163,7 +165,10 @@ function loadWorkspaceControllerFunctions(initialState = {}) {
           selectionKey: "",
           loading: false,
           report: null,
-          jwtDecodeCache: new Map()
+          jwtDecodeCache: new Map(),
+          hydratingGuids: new Set(),
+          backgroundHydrationActive: false,
+          backgroundHydrationSelectionKey: ""
         },
         initialState
       );
@@ -178,8 +183,10 @@ function loadWorkspaceControllerFunctions(initialState = {}) {
     module: { exports: {} },
     exports: {},
     Map,
+    Set,
     initialState,
     closeJwtInspector: () => calls.push("close"),
+    setBackgroundHydrationState: () => calls.push("background"),
     updateControllerBanner: () => calls.push("update"),
     renderReport: () => calls.push("render"),
     runCurrentContextReport: (options = {}) => calls.push({ type: "run", options }),
@@ -436,7 +443,7 @@ test("registered application workspace treats ENV x MediaCompany changes as a ha
   assert.equal(state.report, null);
   assert.deepEqual(
     calls.map((entry) => (typeof entry === "string" ? entry : entry.type)),
-    ["close", "update", "render", "run"]
+    ["close", "background", "update", "render", "run"]
   );
   assert.deepEqual(normalizeRealmObject(calls.find((entry) => entry?.type === "run")?.options), {
     statusMessage: "Refreshing Registered Application Health for the selected UnderPAR context...",
@@ -484,6 +491,7 @@ test("registered application health sources wire the HEALTH action and workspace
   const manifestSource = read("manifest.json");
   const workspaceHtml = read("registered-application-health-workspace.html");
   const workspaceJs = read("registered-application-health-workspace.js");
+  const sharedJwtSource = read("underpar-jwt-inspector.js");
 
   assert.match(
     popupSource,
@@ -494,8 +502,13 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(manifestSource, /registered-application-health-workspace\.js/);
   assert.match(workspaceHtml, /JWT Inspector/);
   assert.match(workspaceHtml, /Paste any JWT, bearer value, or JSON body containing a JWT/);
+  assert.match(workspaceHtml, /underpar-jwt-inspector\.js/);
   assert.match(workspaceHtml, /id="workspace-cards"[\s\S]*regapp-jwt-utility-card/);
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
+  assert.match(workspaceJs, /data-software-statement-download-guid/);
+  assert.match(workspaceJs, /sendWorkspaceAction\("hydrate-application"/);
+  assert.match(workspaceJs, /sendWorkspaceAction\("prefetch-applications"/);
+  assert.doesNotMatch(workspaceJs, /Open JWT Inspector/);
   assert.doesNotMatch(workspaceJs, /Application Matrix/);
   assert.doesNotMatch(workspaceJs, /buildMetricCardsMarkup/);
   assert.doesNotMatch(workspaceJs, /renderMatrixTable/);
@@ -504,4 +517,8 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(workspaceJs, /const action = hasRenderableReport\(\) && preferRefresh \? "refresh-latest" : "run-dashboard";/);
   assert.match(popupSource, /const forceRefresh = options\.forceRefresh === true;/);
   assert.doesNotMatch(extractFunctionSource(popupSource, "fetchRegisteredApplicationHealthDashboardReport"), /enrichRegisteredApplicationForHydration/);
+  assert.match(popupSource, /if \(action === "hydrate-application"\)/);
+  assert.match(popupSource, /if \(action === "prefetch-applications"\)/);
+  assert.match(sharedJwtSource, /UnderParJwtInspector/);
+  assert.match(sharedJwtSource, /buildInspectorMarkup/);
 });

@@ -1,4 +1,5 @@
 @import url("underpar-env-badge.css");
+@import url("underpar-jwt-inspector.css");
 @import url("rest-workspace.css");
 
 .regapp-health-hero {
@@ -127,6 +128,12 @@
   color: rgba(255, 204, 199, 0.96);
 }
 
+.regapp-chip--info {
+  border-color: rgba(118, 164, 255, 0.34);
+  background: rgba(18, 35, 69, 0.82);
+  color: rgba(210, 227, 255, 0.96);
+}
+
 .regapp-chip-stack {
   display: flex;
   flex-wrap: wrap;
@@ -190,6 +197,42 @@
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.regapp-app-summary-btn {
+  appearance: none;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 190, 107, 0.34);
+  background:
+    linear-gradient(180deg, rgba(71, 46, 14, 0.98), rgba(47, 31, 9, 0.98)),
+    linear-gradient(90deg, rgba(255, 190, 107, 0.16), rgba(255, 190, 107, 0.08));
+  color: rgba(255, 233, 197, 0.96);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.regapp-app-summary-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(255, 190, 107, 0.58);
+  box-shadow: 0 10px 18px rgba(55, 32, 7, 0.28);
+}
+
+.regapp-app-summary-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 190, 107, 0.18);
+}
+
+.regapp-app-summary-btn:disabled {
+  opacity: 0.56;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
 }
 
 .regapp-app-card[open] .regapp-app-summary {

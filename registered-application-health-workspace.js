@@ -13,6 +13,9 @@ const state = {
   loading: false,
   report: null,
   jwtDecodeCache: new Map(),
+  hydratingGuids: new Set(),
+  backgroundHydrationActive: false,
+  backgroundHydrationSelectionKey: "",
 };
 
 const els = {
@@ -133,6 +136,12 @@ function setDecodeSummary(message = "", type = "info") {
   els.decodeSummary.classList.toggle("is-error", type === "error" && Boolean(text));
 }
 
+function getJwtInspectorUtility() {
+  return globalThis.UnderParJwtInspector && typeof globalThis.UnderParJwtInspector === "object"
+    ? globalThis.UnderParJwtInspector
+    : null;
+}
+
 function hasRenderableReport() {
   return Boolean(state.report);
 }
@@ -144,14 +153,15 @@ function canRunCurrentContextReport() {
 function syncActionButtonsDisabled() {
   const disableRerun = state.loading || !canRunCurrentContextReport();
   const disableClear = state.loading || !hasRenderableReport();
-  document.body.classList.toggle("net-busy", state.loading);
-  document.body.setAttribute("aria-busy", state.loading ? "true" : "false");
+  const networkBusy = state.loading || state.backgroundHydrationActive || state.hydratingGuids.size > 0;
+  document.body.classList.toggle("net-busy", networkBusy);
+  document.body.setAttribute("aria-busy", networkBusy ? "true" : "false");
   if (els.rerunAllButton) {
     els.rerunAllButton.disabled = disableRerun;
-    els.rerunAllButton.classList.toggle("net-busy", state.loading);
+    els.rerunAllButton.classList.toggle("net-busy", networkBusy);
   }
   if (els.rerunIndicator) {
-    els.rerunIndicator.hidden = !state.loading;
+    els.rerunIndicator.hidden = !networkBusy;
   }
   if (els.clearButton) {
     els.clearButton.disabled = disableClear;
@@ -228,6 +238,8 @@ function applyControllerState(payload = {}) {
   if (controllerChanged) {
     closeJwtInspector();
     state.loading = false;
+    state.hydratingGuids.clear();
+    setBackgroundHydrationState(false, previousSelectionKey);
   }
   if (shouldClearStaleReport) {
     state.report = null;
@@ -323,6 +335,10 @@ function extractJwtCandidateFromValue(value, seen = new Set()) {
 }
 
 function extractJwtCandidateFromText(rawText = "") {
+  const sharedInspector = getJwtInspectorUtility();
+  if (sharedInspector?.extractJwtCandidateFromText) {
+    return String(sharedInspector.extractJwtCandidateFromText(rawText) || "").trim();
+  }
   const normalized = String(rawText || "").trim();
   if (!normalized) {
     return "";
@@ -403,6 +419,10 @@ function buildJwtInspectionSummary(result = null) {
 }
 
 function decodeJwtToken(token = "") {
+  const sharedInspector = getJwtInspectorUtility();
+  if (sharedInspector?.decodeJwtToken) {
+    return sharedInspector.decodeJwtToken(token);
+  }
   const normalized = String(token || "").trim();
   const parts = normalized.split(".");
   const headerSection = decodeJwtSection(normalized, 0);
@@ -451,6 +471,76 @@ function getReportApplications() {
   return Array.isArray(state.report?.applications) ? state.report.applications : [];
 }
 
+function getApplicationByGuid(guid = "") {
+  const normalizedGuid = String(guid || "").trim();
+  if (!normalizedGuid) {
+    return null;
+  }
+  return getReportApplications().find((entry) => String(entry?.guid || "").trim() === normalizedGuid) || null;
+}
+
+function appNeedsHydration(app = null) {
+  if (!app || typeof app !== "object") {
+    return false;
+  }
+  return !String(app.softwareStatement || "").trim();
+}
+
+function buildSoftwareStatementDownloadFileName(app = null) {
+  const label = firstNonEmptyString([app?.name, app?.guid, "registered-application"]);
+  const sanitized = label.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "registered-application";
+  return `${sanitized}.jwt`;
+}
+
+function downloadSoftwareStatementToken(token = "", app = null) {
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken) {
+    setStatus("No software statement JWT is available to download.", "error");
+    return;
+  }
+  const blob = new Blob([normalizedToken], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = buildSoftwareStatementDownloadFileName(app);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+function setApplicationHydrationState(guid = "", active = false) {
+  const normalizedGuid = String(guid || "").trim();
+  if (!normalizedGuid) {
+    return;
+  }
+  if (active) {
+    state.hydratingGuids.add(normalizedGuid);
+  } else {
+    state.hydratingGuids.delete(normalizedGuid);
+  }
+  syncActionButtonsDisabled();
+  renderReport();
+}
+
+function setBackgroundHydrationState(active = false, selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (active) {
+    state.backgroundHydrationActive = true;
+    state.backgroundHydrationSelectionKey = normalizedSelectionKey || String(state.selectionKey || "").trim();
+  } else if (
+    !normalizedSelectionKey ||
+    !state.backgroundHydrationSelectionKey ||
+    normalizedSelectionKey === state.backgroundHydrationSelectionKey
+  ) {
+    state.backgroundHydrationActive = false;
+    state.backgroundHydrationSelectionKey = "";
+  }
+  syncActionButtonsDisabled();
+}
+
 function appMatchesSelectedRequestor(app = null) {
   const selectedRequestorId = String(state.requestorId || "").trim().toLowerCase();
   if (!selectedRequestorId) {
@@ -463,8 +553,9 @@ function appMatchesSelectedRequestor(app = null) {
 function decorateApplication(app = null, index = 0) {
   const token = String(app?.softwareStatement || "").trim();
   const inspection = token ? getDecodedJwt(token) : null;
-  const jwtState = !token ? "missing" : inspection?.valid === true ? "decoded" : "undecodable";
-  const jwtStateLabel = !token ? "Missing JWT" : inspection?.valid === true ? "Decoded" : "Needs Review";
+  const hydrating = state.hydratingGuids.has(String(app?.guid || "").trim());
+  const jwtState = hydrating ? "hydrating" : !token ? "missing" : inspection?.valid === true ? "decoded" : "undecodable";
+  const jwtStateLabel = hydrating ? "Hydrating" : !token ? "Missing JWT" : inspection?.valid === true ? "Decoded" : "Needs Review";
   return {
     index,
     app,
@@ -472,6 +563,7 @@ function decorateApplication(app = null, index = 0) {
     selectedRequestorMatch: appMatchesSelectedRequestor(app),
     jwtState,
     jwtStateLabel,
+    hydrating,
   };
 }
 
@@ -482,7 +574,13 @@ function getDecoratedApplications() {
 function buildJwtStateChip(jwtState = "", label = "") {
   const normalizedState = String(jwtState || "").trim().toLowerCase();
   const modifier =
-    normalizedState === "decoded" ? "success" : normalizedState === "missing" ? "warning" : "danger";
+    normalizedState === "decoded"
+      ? "success"
+      : normalizedState === "hydrating"
+        ? "info"
+        : normalizedState === "missing"
+          ? "warning"
+          : "danger";
   return `<span class="regapp-chip regapp-chip--${modifier}">${escapeHtml(label || normalizedState || "JWT")}</span>`;
 }
 
@@ -655,7 +753,14 @@ function renderJwtSummaryCards(inspection = null) {
   `;
 }
 
-function buildJwtInspectorMarkup(inspection = null) {
+function buildJwtInspectorMarkup(inspection = null, options = {}) {
+  const sharedInspector = getJwtInspectorUtility();
+  if (sharedInspector?.buildInspectorMarkup) {
+    return sharedInspector.buildInspectorMarkup(inspection, options);
+  }
+  if (options?.loading === true) {
+    return '<p class="regapp-empty-state">Hydrating software statement and decoding JWT claims for this registered application...</p>';
+  }
   if (!inspection?.token) {
     return '<p class="regapp-empty-state">No JWT is available to inspect.</p>';
   }
@@ -713,9 +818,12 @@ function renderApplicationCards(applications = []) {
           ]
             .filter(Boolean)
             .join("");
-          const defaultOpen = entry.selectedRequestorMatch || entry.jwtState !== "decoded" || entry.index === 0;
+          const defaultOpen = entry.selectedRequestorMatch || entry.index === 0;
+          const hasSoftwareStatement = Boolean(String(app.softwareStatement || "").trim());
           return `
-            <details class="rest-report-card regapp-app-card${entry.selectedRequestorMatch ? " is-selected-match" : ""}"${
+            <details
+              class="rest-report-card regapp-app-card${entry.selectedRequestorMatch ? " is-selected-match" : ""}"
+              data-regapp-guid="${escapeHtml(String(app.guid || "").trim())}"${
               defaultOpen ? " open" : ""
             }>
               <summary class="regapp-app-summary">
@@ -730,19 +838,20 @@ function renderApplicationCards(applications = []) {
                     }
                   </p>
                 </div>
-                <div class="regapp-app-summary-actions">${summaryBadges}</div>
+                <div class="regapp-app-summary-actions">
+                  ${summaryBadges}
+                  <button
+                    type="button"
+                    class="regapp-app-summary-btn"
+                    data-software-statement-download-guid="${escapeHtml(String(app.guid || "").trim())}"
+                  >${entry.hydrating ? "Hydrating..." : hasSoftwareStatement ? "Download SS" : "Fetch SS"}</button>
+                </div>
               </summary>
               <div class="regapp-app-body">
                 ${renderMetadataGrid(app, entry)}
-                ${buildJwtInspectorMarkup(entry.inspection || { token: "" })}
-                <div class="regapp-app-footer">
-                  <button
-                    type="button"
-                    class="regapp-app-footer-btn"
-                    data-jwt-inspect-guid="${escapeHtml(String(app.guid || "").trim())}"
-                    ${String(app.softwareStatement || "").trim() ? "" : "disabled"}
-                  >Open JWT Inspector</button>
-                </div>
+                ${entry.hydrating && !hasSoftwareStatement
+                  ? buildJwtInspectorMarkup(null, { loading: true })
+                  : buildJwtInspectorMarkup(entry.inspection || { token: "" })}
               </div>
             </details>
           `;
@@ -822,24 +931,67 @@ function inspectAdHocJwtInput() {
   });
 }
 
-function openApplicationInspectorByGuid(guid = "") {
+async function ensureApplicationHydrated(guid = "", options = {}) {
+  const normalizedGuid = String(guid || "").trim();
+  if (!normalizedGuid) {
+    return null;
+  }
+  const existingApp = getApplicationByGuid(normalizedGuid);
+  if (!appNeedsHydration(existingApp)) {
+    return existingApp;
+  }
+  if (state.hydratingGuids.has(normalizedGuid)) {
+    return existingApp;
+  }
+  setApplicationHydrationState(normalizedGuid, true);
+  const result = await sendWorkspaceAction("hydrate-application", {
+    selectionKey: String(state.selectionKey || "").trim(),
+    guid: normalizedGuid,
+    reason: firstNonEmptyString([options.reason, "expand"]),
+  });
+  setApplicationHydrationState(normalizedGuid, false);
+  if (!result?.ok) {
+    setStatus(String(result?.error || "Unable to hydrate this registered application."), "error");
+  }
+  return (
+    (result?.application && typeof result.application === "object" ? result.application : null) ||
+    getApplicationByGuid(normalizedGuid)
+  );
+}
+
+async function downloadSoftwareStatementByGuid(guid = "") {
   const normalizedGuid = String(guid || "").trim();
   if (!normalizedGuid) {
     return;
   }
-  const app = getReportApplications().find((entry) => String(entry?.guid || "").trim() === normalizedGuid) || null;
+  let app = getApplicationByGuid(normalizedGuid);
+  if (appNeedsHydration(app)) {
+    app = await ensureApplicationHydrated(normalizedGuid, { reason: "download" });
+  }
   const token = String(app?.softwareStatement || "").trim();
   if (!token) {
-    setStatus("This registered application does not have a software statement JWT to inspect.", "error");
+    setStatus("This registered application does not expose a downloadable software statement JWT.", "error");
     return;
   }
-  openJwtInspector(token, {
-    title: firstNonEmptyString([app?.name, app?.guid, "Registered Application"]),
-    subtitle: firstNonEmptyString([
-      app?.requestorHint,
-      app?.serviceProviderSummary,
-      "Decoded from the registered application software statement.",
-    ]),
+  downloadSoftwareStatementToken(token, app);
+  setStatus(`Downloaded software statement for ${firstNonEmptyString([app?.name, app?.guid, "registered application"])}.`);
+}
+
+function maybeQueueBackgroundHydration() {
+  const selectionKey = String(state.selectionKey || "").trim();
+  if (!selectionKey || !state.report || state.loading || state.backgroundHydrationActive) {
+    return;
+  }
+  const pendingApps = getReportApplications().filter((app) => appNeedsHydration(app));
+  if (pendingApps.length === 0) {
+    return;
+  }
+  setBackgroundHydrationState(true, selectionKey);
+  void sendWorkspaceAction("prefetch-applications", { selectionKey }).then((result) => {
+    if (!result?.ok) {
+      setBackgroundHydrationState(false, selectionKey);
+      setStatus(String(result?.error || "Unable to finish background registered application hydration."), "error");
+    }
   });
 }
 
@@ -849,6 +1001,8 @@ function handleReportStart(payload = {}) {
     return;
   }
   state.loading = true;
+  state.hydratingGuids.clear();
+  setBackgroundHydrationState(false, selectionKey || String(state.selectionKey || "").trim());
   syncActionButtonsDisabled();
   renderReport();
   setStatus("Inspecting registered applications...");
@@ -860,6 +1014,7 @@ function handleReportResult(payload = {}) {
     return;
   }
   state.loading = false;
+  state.hydratingGuids.clear();
   state.report = payload && typeof payload === "object" ? payload : null;
   state.jwtDecodeCache.clear();
   syncActionButtonsDisabled();
@@ -874,6 +1029,7 @@ function handleReportResult(payload = {}) {
         Number(state.report?.totalApplications || 0) === 1 ? "" : "s"
       }.`
     );
+    maybeQueueBackgroundHydration();
     return;
   }
   if (state.report.partial === true) {
@@ -882,6 +1038,7 @@ function handleReportResult(payload = {}) {
         Number(state.report?.totalApplications || 0) === 1 ? "" : "s"
       } with warnings.`
     );
+    maybeQueueBackgroundHydration();
     return;
   }
   setStatus(String(state.report?.error || "Registered Application Health failed."), "error");
@@ -890,6 +1047,8 @@ function handleReportResult(payload = {}) {
 function clearWorkspaceCards() {
   state.report = null;
   state.loading = false;
+  state.hydratingGuids.clear();
+  setBackgroundHydrationState(false, String(state.selectionKey || "").trim());
   state.jwtDecodeCache.clear();
   renderReport();
   syncActionButtonsDisabled();
@@ -910,6 +1069,42 @@ function handleWorkspaceEvent(eventName, payload = {}) {
   }
   if (event === "report-result") {
     handleReportResult(payload);
+    return;
+  }
+  if (event === "background-hydration-start") {
+    const selectionKey = String(payload?.selectionKey || "").trim();
+    if (!selectionKey || !state.selectionKey || selectionKey === state.selectionKey) {
+      setBackgroundHydrationState(true, selectionKey);
+    }
+    return;
+  }
+  if (event === "background-hydration-complete") {
+    const selectionKey = String(payload?.selectionKey || "").trim();
+    if (!selectionKey || !state.selectionKey || selectionKey === state.selectionKey) {
+      setBackgroundHydrationState(false, selectionKey);
+    }
+    return;
+  }
+  if (event === "application-hydration-start") {
+    const selectionKey = String(payload?.selectionKey || "").trim();
+    const guid = String(payload?.guid || "").trim();
+    if (!guid) {
+      return;
+    }
+    if (!selectionKey || !state.selectionKey || selectionKey === state.selectionKey) {
+      setApplicationHydrationState(guid, true);
+    }
+    return;
+  }
+  if (event === "application-hydration-complete") {
+    const selectionKey = String(payload?.selectionKey || "").trim();
+    const guid = String(payload?.guid || "").trim();
+    if (!guid) {
+      return;
+    }
+    if (!selectionKey || !state.selectionKey || selectionKey === state.selectionKey) {
+      setApplicationHydrationState(guid, false);
+    }
     return;
   }
   if (event === "environment-switch-rerun") {
@@ -1030,14 +1225,25 @@ function registerEventHandlers() {
   }
   if (els.cardsHost) {
     els.cardsHost.addEventListener("click", (event) => {
-      const inspectButton = event.target instanceof Element ? event.target.closest("[data-jwt-inspect-guid]") : null;
-      if (!(inspectButton instanceof HTMLElement)) {
+      const downloadButton =
+        event.target instanceof Element ? event.target.closest("[data-software-statement-download-guid]") : null;
+      if (downloadButton instanceof HTMLElement) {
+        event.preventDefault();
+        event.stopPropagation();
+        void downloadSoftwareStatementByGuid(downloadButton.dataset.softwareStatementDownloadGuid || "");
+      }
+    });
+    els.cardsHost.addEventListener("toggle", (event) => {
+      const details = event.target instanceof HTMLDetailsElement ? event.target : null;
+      if (!details || !details.open) {
         return;
       }
-      event.preventDefault();
-      event.stopPropagation();
-      openApplicationInspectorByGuid(inspectButton.dataset.jwtInspectGuid || "");
-    });
+      const guid = String(details.dataset.regappGuid || "").trim();
+      if (!guid) {
+        return;
+      }
+      void ensureApplicationHydrated(guid, { reason: "expand" });
+    }, true);
   }
   if (els.dialogCloseButton) {
     els.dialogCloseButton.addEventListener("click", () => {
