@@ -222,17 +222,18 @@ test("saved-query change handlers load the selected query before resetting the p
 
   assert.match(
     popupSource,
-    /megSavedQuerySelectElement\?\.addEventListener\("change", async \(event\) => \{[\s\S]*?await esmWorkspaceOpenSavedQueryFromUi\([\s\S]*?resetEsmWorkspaceMegSavedQuerySelect\(selectElement\);/m
+    /megSavedQuerySelectElement\?\.addEventListener\("change", async \(event\) => \{[\s\S]*?const executeSavedQuerySelection = async \(\) => \{[\s\S]*?await esmWorkspaceOpenSavedQueryFromUi\([\s\S]*?resetEsmWorkspaceMegSavedQuerySelect\(selectElement\);[\s\S]*?setTimeout\(\(\) => \{\s*void executeSavedQuerySelection\(\);/m
   );
   assert.match(
     megSource,
-    /savedQueryPicker\?\.addEventListener\("change", async \(\) => \{[\s\S]*?await loadSelectedSavedQuery\(selectedOption\);[\s\S]*?resetSavedQueryPickerSelection\(\);/m
+    /savedQueryPicker\?\.addEventListener\("change", async \(\) => \{[\s\S]*?const executeSavedQuerySelection = async \(\) => \{[\s\S]*?await loadSelectedSavedQuery\(selectedOption\);[\s\S]*?resetSavedQueryPickerSelection\(\);[\s\S]*?setTimeout\(\(\) => \{\s*void executeSavedQuerySelection\(\);/m
   );
 });
 
 test("debug-flow hydration helpers are wired into the partner SSO runtime paths", () => {
   const popupSource = read("popup.js");
 
+  assert.match(popupSource, /function extractRestV2PartnerFrameworkStatusFromText\(value = ""\)/);
   assert.match(popupSource, /function extractRestV2PartnerFrameworkStatusFromDebugFlow\(flow = null\)/);
   assert.match(popupSource, /function hydrateRestV2PartnerSsoContextFromDebugFlow\(context = null, flow = null\)/);
   assert.match(popupSource, /function hydrateRestV2PartnerSsoContextFromFlowId\(context = null, flowId = "", options = \{\}\)/);
@@ -246,11 +247,98 @@ test("debug-flow hydration helpers are wired into the partner SSO runtime paths"
   );
   assert.match(
     popupSource,
+    /extractRestV2PartnerFrameworkStatusFromText\(String\(event\?\.responsePreview \|\| ""\)\.trim\(\)\)/m
+  );
+  assert.match(
+    popupSource,
     /await hydrateRestV2PartnerSsoContextFromFlowId\(recordingContext, activeFlowId\);[\s\S]*?probeRestV2PostAuthProfiles\(recordingContext, activeFlowId/m
   );
   assert.match(
     popupSource,
     /await hydrateRestV2PartnerSsoContextFromFlowId\(recordingContext, flowId\);[\s\S]*?probeRestV2PostAuthProfiles\(recordingContext, flowId/m
+  );
+});
+
+test("partner framework status extraction falls back to debug-flow preview text", () => {
+  const validPartnerFrameworkStatus = "valid-partner-framework-status";
+  const getCaseInsensitiveObjectValue = (source = null, keyCandidates = []) => {
+    if (!source || typeof source !== "object") {
+      return "";
+    }
+    const candidates = (Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates])
+      .map((key) => String(key || "").trim().toLowerCase())
+      .filter(Boolean);
+    for (const [key, value] of Object.entries(source)) {
+      if (candidates.includes(String(key || "").trim().toLowerCase())) {
+        return String(value || "").trim();
+      }
+    }
+    return "";
+  };
+  const getCaseInsensitiveHeaderValue = (headersLike = null, keyCandidates = []) =>
+    getCaseInsensitiveObjectValue(headersLike, keyCandidates);
+  const { extractRestV2PartnerFrameworkStatusFromText, extractRestV2PartnerFrameworkStatusFromDebugFlow } = loadFunctions(
+    "popup.js",
+    ["extractRestV2PartnerFrameworkStatusFromText", "extractRestV2PartnerFrameworkStatusFromDebugFlow"],
+    {
+      ADOBE_SP_BASE: "https://sp.auth.adobe.com",
+      firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+      dedupeRestV2CandidateStrings: (values = []) => [...new Set((Array.isArray(values) ? values : [values]).map((value) => String(value || "").trim()).filter(Boolean))],
+      decodeURIComponentSafe: (value = "") => {
+        try {
+          return decodeURIComponent(String(value || "").trim());
+        } catch {
+          return "";
+        }
+      },
+      decodeBase64TextSafe: (value = "") => {
+        try {
+          return Buffer.from(String(value || "").trim(), "base64").toString("utf8");
+        } catch {
+          return "";
+        }
+      },
+      parseJsonText: (value = "", fallback = null) => {
+        try {
+          return JSON.parse(String(value || ""));
+        } catch {
+          return fallback;
+        }
+      },
+      getRestV2CaseInsensitiveObjectValue: getCaseInsensitiveObjectValue,
+      getRestV2CaseInsensitiveHeaderValue: getCaseInsensitiveHeaderValue,
+      resolveRestV2PartnerFrameworkStatusFromSessionData: (sessionData = null, responseHeaders = null) =>
+        getCaseInsensitiveObjectValue(sessionData, ["partnerFrameworkStatus"]) ||
+        getCaseInsensitiveHeaderValue(responseHeaders, ["AP-Partner-Framework-Status", "ap-partner-framework-status"]),
+      isRestV2PartnerFrameworkStatusUsable: (value = "") => String(value || "").trim() === validPartnerFrameworkStatus,
+      normalizeRestV2PartnerFrameworkStatusForRequest: (value = "") => String(value || "").trim(),
+    }
+  );
+
+  const responsePreview = JSON.stringify({
+    partnerFrameworkStatus: validPartnerFrameworkStatus,
+  });
+
+  assert.equal(extractRestV2PartnerFrameworkStatusFromText(responsePreview), validPartnerFrameworkStatus);
+  assert.equal(
+    extractRestV2PartnerFrameworkStatusFromDebugFlow({
+      events: [
+        {
+          responsePreview,
+        },
+      ],
+    }),
+    validPartnerFrameworkStatus
+  );
+});
+
+test("sidepanel MEG endpoint picker updates launch state without rebuilding the full option list in change", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(popupSource, /function esmWorkspaceSyncMegLaunchUi\(esmWorkspaceState\)/);
+  assert.match(
+    popupSource,
+    /megSelectElement\?\.addEventListener\("change", \(event\) => \{[\s\S]*?esmWorkspaceState\.megSelectedEndpointUrl = String\(event\.target\?\.value \|\| ""\)\.trim\(\);[\s\S]*?esmWorkspaceSyncMegLaunchUi\(esmWorkspaceState\);/m
   );
 });
 

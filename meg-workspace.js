@@ -3154,17 +3154,26 @@ function registerEventHandlers() {
     if (!selectedOption) {
       return;
     }
-    if (savedQueryPicker) {
-      savedQueryPicker.disabled = true;
-    }
-    try {
-      await loadSelectedSavedQuery(selectedOption);
-    } finally {
+    const executeSavedQuerySelection = async () => {
       if (savedQueryPicker) {
-        savedQueryPicker.disabled = false;
+        savedQueryPicker.disabled = true;
       }
-      resetSavedQueryPickerSelection();
+      try {
+        await loadSelectedSavedQuery(selectedOption);
+      } finally {
+        if (savedQueryPicker) {
+          savedQueryPicker.disabled = false;
+        }
+        resetSavedQueryPickerSelection();
+      }
+    };
+    if (typeof setTimeout === "function") {
+      setTimeout(() => {
+        void executeSavedQuerySelection();
+      }, 0);
+      return;
     }
+    await executeSavedQuerySelection();
   });
 
   btnSaveQuery?.addEventListener("click", () => {

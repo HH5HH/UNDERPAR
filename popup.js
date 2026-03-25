@@ -12726,6 +12726,8 @@ const state = {
   megWorkspaceTabId: 0,
   megWorkspaceWindowId: 0,
   megWorkspaceTabIdByWindowId: new Map(),
+  megWorkspaceReadyByWindowId: new Map(),
+  megWorkspaceReadyWaitersByWindowId: new Map(),
   megWorkspaceRuntimeListenerBound: false,
   megWorkspaceWorkspaceTabWatcherBound: false,
   megWorkspaceSelectionByWindowId: new Map(),
@@ -26918,6 +26920,87 @@ function extractRestV2SamlResponseFromDebugFlow(flow = null) {
   };
 }
 
+function extractRestV2PartnerFrameworkStatusFromText(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const extractFromObject = (candidate = null) => {
+    if (!candidate || typeof candidate !== "object") {
+      return "";
+    }
+    return firstNonEmptyString([
+      getRestV2CaseInsensitiveObjectValue(candidate, [
+        "ap-partner-framework-status",
+        "AP-Partner-Framework-Status",
+        "partnerFrameworkStatus",
+        "partner_framework_status",
+        "frameworkStatus",
+        "framework_status",
+      ]),
+      getRestV2CaseInsensitiveObjectValue(candidate?.headers, [
+        "ap-partner-framework-status",
+        "AP-Partner-Framework-Status",
+      ]),
+      getRestV2CaseInsensitiveObjectValue(candidate?.requestHeaders, [
+        "ap-partner-framework-status",
+        "AP-Partner-Framework-Status",
+      ]),
+      getRestV2CaseInsensitiveObjectValue(candidate?.responseHeaders, [
+        "ap-partner-framework-status",
+        "AP-Partner-Framework-Status",
+      ]),
+      resolveRestV2PartnerFrameworkStatusFromSessionData(candidate?.sessionData || null, candidate?.responseHeaders || null),
+      resolveRestV2PartnerFrameworkStatusFromSessionData(candidate?.sessionData || null, candidate?.sessionResponseHeaders || null),
+    ]);
+  };
+
+  const candidates = dedupeRestV2CandidateStrings([
+    raw,
+    decodeURIComponentSafe(raw),
+    decodeBase64TextSafe(raw),
+    decodeBase64TextSafe(decodeURIComponentSafe(raw)),
+  ]);
+
+  for (const candidate of candidates) {
+    if (isRestV2PartnerFrameworkStatusUsable(candidate)) {
+      return normalizeRestV2PartnerFrameworkStatusForRequest(candidate) || candidate;
+    }
+
+    const parsed = parseJsonText(candidate, null);
+    const extractedFromObject = extractFromObject(parsed);
+    if (isRestV2PartnerFrameworkStatusUsable(extractedFromObject)) {
+      return normalizeRestV2PartnerFrameworkStatusForRequest(extractedFromObject) || extractedFromObject;
+    }
+
+    try {
+      const parsedUrl = new URL(candidate, ADOBE_SP_BASE);
+      const extractedFromUrl = firstNonEmptyString([
+        parsedUrl.searchParams.get("AP-Partner-Framework-Status"),
+        parsedUrl.searchParams.get("ap-partner-framework-status"),
+        parsedUrl.searchParams.get("partnerFrameworkStatus"),
+        parsedUrl.searchParams.get("partner_framework_status"),
+      ]);
+      if (isRestV2PartnerFrameworkStatusUsable(extractedFromUrl)) {
+        return normalizeRestV2PartnerFrameworkStatusForRequest(extractedFromUrl) || extractedFromUrl;
+      }
+    } catch {
+      // Ignore malformed preview URLs.
+    }
+  }
+
+  const inlineMatch = raw.match(
+    /(?:AP-Partner-Framework-Status|partnerFrameworkStatus|partner_framework_status|frameworkStatus)["'=:\s]+([A-Za-z0-9+/_=%.-]{24,})/i
+  );
+  const inlineCandidate = String(inlineMatch?.[1] || "").trim();
+  if (isRestV2PartnerFrameworkStatusUsable(inlineCandidate)) {
+    return normalizeRestV2PartnerFrameworkStatusForRequest(inlineCandidate) || inlineCandidate;
+  }
+
+  return "";
+}
+
 function extractRestV2PartnerFrameworkStatusFromDebugFlow(flow = null) {
   const directCandidates = dedupeRestV2CandidateStrings([
     String(flow?.partnerFrameworkStatus || "").trim(),
@@ -26952,6 +27035,10 @@ function extractRestV2PartnerFrameworkStatusFromDebugFlow(flow = null) {
         "AP-Partner-Framework-Status",
         "ap-partner-framework-status",
       ]),
+      extractRestV2PartnerFrameworkStatusFromText(String(event?.responsePreview || "").trim()),
+      extractRestV2PartnerFrameworkStatusFromText(String(event?.bodyPreview || "").trim()),
+      extractRestV2PartnerFrameworkStatusFromText(String(event?.url || "").trim()),
+      extractRestV2PartnerFrameworkStatusFromText(String(event?.requestUrl || "").trim()),
     ]);
     if (isRestV2PartnerFrameworkStatusUsable(candidate)) {
       return candidate;
@@ -35805,17 +35892,115 @@ function megWorkspaceBindWorkspaceTab(windowId, tabId) {
   }
 }
 
+function megMarkWorkspaceReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  state.megWorkspaceReadyByWindowId.set(normalizedWindowId, {
+    tabId: normalizedTabId,
+    readyAt: Date.now(),
+  });
+  const waiters = state.megWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+  if (Array.isArray(waiters) && waiters.length > 0) {
+    state.megWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+    waiters.forEach((waiter) => {
+      try {
+        if (waiter?.timerId) {
+          clearTimeout(waiter.timerId);
+        }
+      } catch {
+        // Ignore cleanup failures.
+      }
+      try {
+        waiter?.resolve?.(true);
+      } catch {
+        // Ignore waiter resolution failures.
+      }
+    });
+  }
+}
+
+function megInvalidateWorkspaceReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  const existingReady = state.megWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!existingReady) {
+    return;
+  }
+  if (!normalizedTabId || Number(existingReady?.tabId || 0) <= 0 || Number(existingReady?.tabId || 0) === normalizedTabId) {
+    state.megWorkspaceReadyByWindowId.delete(normalizedWindowId);
+  }
+}
+
+function megIsWorkspaceReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  const readyInfo = state.megWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!readyInfo) {
+    return false;
+  }
+  if (normalizedTabId > 0 && Number(readyInfo?.tabId || 0) > 0 && Number(readyInfo.tabId) !== normalizedTabId) {
+    return false;
+  }
+  return true;
+}
+
+async function megWaitForWorkspaceReady(windowId, tabId = 0, timeoutMs = 6000) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  if (megIsWorkspaceReady(normalizedWindowId, normalizedTabId)) {
+    return true;
+  }
+  return new Promise((resolve) => {
+    const waiter = {
+      resolve,
+      timerId: setTimeout(() => {
+        const waiters = state.megWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+        if (Array.isArray(waiters)) {
+          state.megWorkspaceReadyWaitersByWindowId.set(
+            normalizedWindowId,
+            waiters.filter((entry) => entry !== waiter)
+          );
+          if ((state.megWorkspaceReadyWaitersByWindowId.get(normalizedWindowId) || []).length === 0) {
+            state.megWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+          }
+        }
+        resolve(false);
+      }, Math.max(500, Number(timeoutMs || 0) || 6000)),
+    };
+    const existingWaiters = state.megWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+    if (Array.isArray(existingWaiters)) {
+      existingWaiters.push(waiter);
+    } else {
+      state.megWorkspaceReadyWaitersByWindowId.set(normalizedWindowId, [waiter]);
+    }
+  });
+}
+
 function megWorkspaceUnbindWorkspaceTab(tabId) {
   const normalizedTabId = Number(tabId || 0);
   if (normalizedTabId > 0) {
     for (const [windowId, mappedTabId] of state.megWorkspaceTabIdByWindowId.entries()) {
       if (Number(mappedTabId || 0) === normalizedTabId) {
+        megInvalidateWorkspaceReady(windowId, normalizedTabId);
         state.megWorkspaceTabIdByWindowId.delete(windowId);
       }
     }
   }
 
   if (!normalizedTabId || Number(state.megWorkspaceTabId || 0) === normalizedTabId) {
+    megInvalidateWorkspaceReady(state.megWorkspaceWindowId, normalizedTabId);
     state.megWorkspaceTabId = 0;
     state.megWorkspaceWindowId = 0;
   }
@@ -36855,6 +37040,8 @@ async function megWorkspaceEnsureWorkspaceTab(options = {}) {
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
   const useWindowFilter = targetWindowId > 0;
   let workspaceTab = null;
+  let createdWorkspaceTab = false;
+  let reusedReadyCandidate = false;
 
   const boundTabId = megWorkspaceGetBoundWorkspaceTabId(targetWindowId);
   if (boundTabId > 0) {
@@ -36862,6 +37049,7 @@ async function megWorkspaceEnsureWorkspaceTab(options = {}) {
       const existing = await chrome.tabs.get(boundTabId);
       if (megWorkspaceIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
         workspaceTab = existing;
+        reusedReadyCandidate = String(existing?.status || "").trim().toLowerCase() === "complete";
       }
     } catch {
       megWorkspaceUnbindWorkspaceTab(boundTabId);
@@ -36873,6 +37061,7 @@ async function megWorkspaceEnsureWorkspaceTab(options = {}) {
     try {
       const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
       workspaceTab = allTabs.find((tab) => megWorkspaceIsWorkspaceTab(tab)) || null;
+      reusedReadyCandidate = String(workspaceTab?.status || "").trim().toLowerCase() === "complete";
     } catch {
       workspaceTab = null;
     }
@@ -36884,6 +37073,7 @@ async function megWorkspaceEnsureWorkspaceTab(options = {}) {
       active: shouldActivate,
       ...(useWindowFilter ? { windowId: targetWindowId } : {}),
     });
+    createdWorkspaceTab = Boolean(workspaceTab?.id);
   } else if (shouldActivate && workspaceTab.id) {
     try {
       workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
@@ -36896,6 +37086,11 @@ async function megWorkspaceEnsureWorkspaceTab(options = {}) {
   }
 
   megWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  if (createdWorkspaceTab) {
+    megInvalidateWorkspaceReady(workspaceTab?.windowId, workspaceTab?.id);
+  } else if (reusedReadyCandidate || megIsWorkspaceReady(workspaceTab?.windowId, workspaceTab?.id)) {
+    megMarkWorkspaceReady(workspaceTab?.windowId, workspaceTab?.id);
+  }
   return workspaceTab;
 }
 
@@ -39222,10 +39417,21 @@ function esmWorkspaceSyncMegSelectionUi(esmWorkspaceState) {
   const finalSelectedUrl = hasSelectedMatch ? nextSelectedUrl : String(options[0]?.url || "");
   selectElement.value = finalSelectedUrl;
   selectElement.disabled = false;
-  launchButton.disabled = !finalSelectedUrl;
-  launchButton.title = esmWorkspaceBuildMegLaunchTooltip(finalSelectedUrl);
-  launchButton.setAttribute("aria-label", esmWorkspaceBuildMegLaunchTooltip(finalSelectedUrl));
   esmWorkspaceState.megSelectedEndpointUrl = finalSelectedUrl;
+  esmWorkspaceSyncMegLaunchUi(esmWorkspaceState);
+}
+
+function esmWorkspaceSyncMegLaunchUi(esmWorkspaceState) {
+  const selectElement = esmWorkspaceState?.megSelectElement || null;
+  const launchButton = esmWorkspaceState?.megLaunchButton || null;
+  if (!selectElement || !launchButton) {
+    return;
+  }
+  const selectedUrl = String(selectElement.value || esmWorkspaceState?.megSelectedEndpointUrl || "").trim();
+  launchButton.disabled = !selectedUrl;
+  launchButton.title = esmWorkspaceBuildMegLaunchTooltip(selectedUrl);
+  launchButton.setAttribute("aria-label", esmWorkspaceBuildMegLaunchTooltip(selectedUrl));
+  esmWorkspaceState.megSelectedEndpointUrl = selectedUrl;
 }
 
 function esmWorkspaceSetMegPanelCollapsed(esmWorkspaceState, collapsed = true) {
@@ -39275,6 +39481,7 @@ async function megWorkspaceOpenEndpointFromUi(esmWorkspaceState, endpoint, reque
     });
     const resolvedWindowId = Number(workspaceTab?.windowId || targetWindowId || 0);
     megWorkspaceRememberSelection(resolvedWindowId, selection);
+    await megWaitForWorkspaceReady(resolvedWindowId, Number(workspaceTab?.id || 0), 6000).catch(() => false);
     megWorkspaceBroadcastControllerState(esmWorkspaceState, resolvedWindowId);
     await megWorkspaceSendWorkspaceMessage(
       "selection-change",
@@ -39748,7 +39955,13 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
 
   esmWorkspaceState.megSelectElement?.addEventListener("change", (event) => {
     esmWorkspaceState.megSelectedEndpointUrl = String(event.target?.value || "").trim();
-    esmWorkspaceSyncMegSelectionUi(esmWorkspaceState);
+    if (typeof setTimeout === "function") {
+      setTimeout(() => {
+        esmWorkspaceSyncMegLaunchUi(esmWorkspaceState);
+      }, 0);
+      return;
+    }
+    esmWorkspaceSyncMegLaunchUi(esmWorkspaceState);
   });
 
   esmWorkspaceState.megSavedQuerySelectElement?.addEventListener("change", async (event) => {
@@ -39758,17 +39971,26 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
       return;
     }
     const savedQueryName = String(selectElement?.selectedOptions?.[0]?.textContent || "").trim();
-    if (selectElement) {
-      selectElement.disabled = true;
-    }
-    try {
-      await esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, getLiveRequestToken(), savedQueryName);
-    } finally {
+    const executeSavedQuerySelection = async () => {
       if (selectElement) {
-        selectElement.disabled = false;
+        selectElement.disabled = true;
       }
-      resetEsmWorkspaceMegSavedQuerySelect(selectElement);
+      try {
+        await esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, getLiveRequestToken(), savedQueryName);
+      } finally {
+        if (selectElement) {
+          selectElement.disabled = false;
+        }
+        resetEsmWorkspaceMegSavedQuerySelect(selectElement);
+      }
+    };
+    if (typeof setTimeout === "function") {
+      setTimeout(() => {
+        void executeSavedQuerySelection();
+      }, 0);
+      return;
     }
+    await executeSavedQuerySelection();
   });
 
   esmWorkspaceState.megToggleButton?.addEventListener("click", (event) => {
@@ -40337,6 +40559,7 @@ async function handleMegWorkspaceWorkspaceAction(message, sender = null) {
     if (senderWindowId > 0) {
       megWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
     }
+    megMarkWorkspaceReady(senderWindowId || controllerWindowId || Number(state.megWorkspaceWindowId || 0), senderTabId);
     if (esmWorkspaceState) {
       megWorkspaceBroadcastControllerState(esmWorkspaceState, senderWindowId);
     } else {
@@ -61264,7 +61487,9 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   }
   if (missingRequiredFields.includes("header.AP-Partner-Framework-Status")) {
     notes.push(
-      "Complete a real partner-framework SSO flow first so UnderPAR can capture a valid AP-Partner-Framework-Status payload."
+      resolvedContext?.flowId
+        ? "UnderPAR has not captured a valid AP-Partner-Framework-Status payload for this recorded partner flow yet."
+        : "Complete a partner SSO flow so UnderPAR can capture a valid AP-Partner-Framework-Status payload for this selection."
     );
   }
   if (missingRequiredFields.includes("body.domainName")) {
@@ -61316,7 +61541,7 @@ function summarizeRestV2InteractiveDocsActivationLockReason(pendingFields = [], 
     messages.push("Run a Partner SSO flow first to capture partner context.");
   }
   if (hasPendingField("header.AP-Partner-Framework-Status")) {
-    messages.push("Run a real partner-framework SSO flow first to capture a valid AP-Partner-Framework-Status payload.");
+    messages.push("UnderPAR has not captured a valid AP-Partner-Framework-Status payload for this selection yet.");
   }
   if (hasPendingField("body.SAMLResponse")) {
     messages.push("Complete Partner SSO login first to capture SAMLResponse.");
@@ -62811,6 +63036,8 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.megWorkspaceTabId = 0;
   state.megWorkspaceWindowId = 0;
   state.megWorkspaceTabIdByWindowId.clear();
+  state.megWorkspaceReadyByWindowId.clear();
+  state.megWorkspaceReadyWaitersByWindowId.clear();
   state.megWorkspaceSelectionByWindowId.clear();
   state.megWorkspaceLastSelection = null;
   state.mvpdWorkspaceTabId = 0;

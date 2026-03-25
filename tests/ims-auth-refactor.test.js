@@ -1575,6 +1575,21 @@ test("esm workspace waits for workspace-ready and resolves the live premium requ
   assert.match(workspaceActionSource, /esmMarkWorkspaceReady\(senderWindowId \|\| Number\(esmWorkspaceState\.controllerWindowId \|\| state\.esmWorkspaceWorkspaceWindowId \|\| 0\),\s*senderTabId\);/);
 });
 
+test("MEG workspace waits for workspace-ready before the sidepanel launches a selection into it", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const ensureSource = extractFunctionSource(popupSource, "megWorkspaceEnsureWorkspaceTab");
+  const openSource = extractFunctionSource(popupSource, "megWorkspaceOpenEndpointFromUi");
+  const workspaceActionSource = extractFunctionSource(popupSource, "handleMegWorkspaceWorkspaceAction");
+
+  assert.match(popupSource, /function megWaitForWorkspaceReady\(windowId,\s*tabId = 0,\s*timeoutMs = 6000\)/);
+  assert.match(ensureSource, /let createdWorkspaceTab = false;/);
+  assert.match(ensureSource, /let reusedReadyCandidate = false;/);
+  assert.match(ensureSource, /megInvalidateWorkspaceReady\(workspaceTab\?\.windowId,\s*workspaceTab\?\.id\);/);
+  assert.match(ensureSource, /megMarkWorkspaceReady\(workspaceTab\?\.windowId,\s*workspaceTab\?\.id\);/);
+  assert.match(openSource, /await megWaitForWorkspaceReady\(resolvedWindowId,\s*Number\(workspaceTab\?\.id \|\| 0\),\s*6000\)\.catch\(\(\) => false\);/);
+  assert.match(workspaceActionSource, /megMarkWorkspaceReady\(senderWindowId \|\| controllerWindowId \|\| Number\(state\.megWorkspaceWindowId \|\| 0\),\s*senderTabId\);/);
+});
+
 test("premium service refresh and CMU actions keep ESM and CM JellyBeans on the live request token", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const refreshSource = extractFunctionSource(popupSource, "refreshExistingPremiumServiceSections");
