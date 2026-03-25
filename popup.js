@@ -21042,28 +21042,6 @@ function buildRegisteredApplicationHealthStatusMessage(queryContext = null) {
   return [programmerId, requestorId ? `Requestor ${requestorId}` : "", environmentLabel].filter(Boolean).join(" | ");
 }
 
-async function mapRegisteredApplicationHealthItemsWithConcurrency(items = [], mapper, concurrency = 4) {
-  const queue = Array.isArray(items) ? items.slice() : [];
-  const worker = typeof mapper === "function" ? mapper : async (value) => value;
-  const limit = Math.max(1, Math.min(8, Number(concurrency || 4) || 4));
-  const results = new Array(queue.length);
-  let cursor = 0;
-
-  const runNext = async () => {
-    while (true) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= queue.length) {
-        return;
-      }
-      results[index] = await worker(queue[index], index);
-    }
-  };
-
-  await Promise.all(Array.from({ length: Math.min(limit, queue.length) }, () => runNext()));
-  return results;
-}
-
 function buildRegisteredApplicationHealthAppRecord(appInfo = null, queryContext = null, options = {}) {
   const normalizedApp =
     normalizeRegisteredApplicationRuntimeRecord(appInfo) ||
@@ -21207,7 +21185,7 @@ async function fetchRegisteredApplicationHealthDashboardReport(queryContext = nu
   const programmerId = String(queryContext?.programmerId || "").trim();
   if (!programmerId) {
     return buildRegisteredApplicationHealthReportPayload(queryContext, [], {
-      error: "Select a Media Company before opening Registered Application Inspector.",
+      error: "Select a Media Company before opening Registered Application Health.",
     });
   }
 
@@ -21218,48 +21196,14 @@ async function fetchRegisteredApplicationHealthDashboardReport(queryContext = nu
     requestTimeoutMs: Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS)),
   });
   const baseApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
-  const hydratedApplicationsData =
-    applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData)
-      ? { ...applicationsData }
-      : {};
-  const hydrationErrorsByGuid = {};
-
-  const hydratedApplications = await mapRegisteredApplicationHealthItemsWithConcurrency(
-    baseApplications,
-    async (application) => {
-      const guid = String(application?.guid || application?.id || "").trim();
-      if (!guid) {
-        return application;
-      }
-      try {
-        const hydrated = await enrichRegisteredApplicationForHydration(application, {
-          accessToken: firstNonEmptyString([state.loginData?.accessToken]),
-          preferredTabId: Number(options?.preferredTabId || 0),
-          timeoutMs: Math.max(1000, Number(options?.detailTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS)),
-          forceDetails: true,
-        });
-        hydratedApplicationsData[guid] = hydrated || application;
-        return hydrated || application;
-      } catch (error) {
-        hydrationErrorsByGuid[guid] = error instanceof Error ? error.message : String(error);
-        hydratedApplicationsData[guid] = application;
-        return application;
-      }
-    },
-    4
-  );
-
-  setCurrentProgrammerApplicationsSnapshot(programmerId, hydratedApplicationsData);
-  return buildRegisteredApplicationHealthReportPayload(queryContext, hydratedApplications, {
-    hydrationErrorsByGuid,
-  });
+  return buildRegisteredApplicationHealthReportPayload(queryContext, baseApplications);
 }
 
 async function runRegisteredApplicationHealthDashboardForSelection(rawQueryContext = null, options = {}) {
   const queryContext = buildRegisteredApplicationHealthQueryContext(rawQueryContext);
   if (!queryContext.programmerId) {
     const missingSelectionPayload = buildRegisteredApplicationHealthReportPayload(queryContext, [], {
-      error: "Select a Media Company before opening Registered Application Inspector.",
+      error: "Select a Media Company before opening Registered Application Health.",
     });
     return {
       ...missingSelectionPayload,
@@ -21268,7 +21212,7 @@ async function runRegisteredApplicationHealthDashboardForSelection(rawQueryConte
   }
   if (!shouldHydrateAdobePassWorkflowForSession(state.loginData)) {
     const restrictedPayload = buildRegisteredApplicationHealthReportPayload(queryContext, [], {
-      error: "Switch to the Adobe Pass org profile before opening Registered Application Inspector.",
+      error: "Switch to the Adobe Pass org profile before opening Registered Application Health.",
     });
     return {
       ...restrictedPayload,
@@ -21278,7 +21222,7 @@ async function runRegisteredApplicationHealthDashboardForSelection(rawQueryConte
 
   const openWorkspace = options.openWorkspace !== false;
   const activateWorkspace = options.activateWorkspace !== false;
-  const forceRefresh = options.forceRefresh !== false;
+  const forceRefresh = options.forceRefresh === true;
   let targetWindowId = Number(options.targetWindowId || 0);
 
   if (openWorkspace) {
@@ -52377,19 +52321,19 @@ async function handleRegisteredApplicationHealthWorkspaceAction(message, sender 
     const result = await runRegisteredApplicationHealthDashboardForSelection(queryContext, {
       openWorkspace: true,
       activateWorkspace: false,
-      forceRefresh: true,
+      forceRefresh: false,
       targetWindowId: senderWindowId,
     });
     return result?.ok || result?.partial
       ? { ok: true }
-      : { ok: false, error: String(result?.error || "Unable to load Registered Application Inspector.").trim() };
+      : { ok: false, error: String(result?.error || "Unable to load Registered Application Health.").trim() };
   }
 
   if (action === "refresh-latest") {
     const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
     const queryContext = registeredApplicationHealthWorkspaceGetLatestQueryContext(selectionKey);
     if (!queryContext || typeof queryContext !== "object") {
-      return { ok: false, error: "No previous Registered Application Inspector query context is available to refresh." };
+      return { ok: false, error: "No previous Registered Application Health query context is available to refresh." };
     }
     const refreshed = await runRegisteredApplicationHealthDashboardForSelection(
       rebaseRegisteredApplicationHealthQueryContextForCurrentSelection(queryContext, {
@@ -52406,7 +52350,7 @@ async function handleRegisteredApplicationHealthWorkspaceAction(message, sender 
       ? { ok: true }
       : {
           ok: false,
-          error: String(refreshed?.error || "Unable to refresh Registered Application Inspector.").trim(),
+          error: String(refreshed?.error || "Unable to refresh Registered Application Health.").trim(),
         };
   }
 
@@ -61654,18 +61598,18 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
   const healthReady = Boolean(selectionContext?.programmerId && selectionContext?.requestorId && premiumContext?.hydrationReady);
   const adobePassOrgRequiredLabel = "Adobe Pass org required";
   const healthActionGroupLabel = !selectionContext?.programmerId
-    ? "HEALTH actions. Select a Media Company and RequestorId to unlock Registered Application Inspector, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK."
+    ? "HEALTH actions. Select a Media Company and RequestorId to unlock Registered Application Health, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK."
     : !adobePassWorkflowActive
-      ? `HEALTH actions. ${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile to unlock Registered Application Inspector, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.`
+      ? `HEALTH actions. ${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile to unlock Registered Application Health, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.`
       : !premiumContext?.hydrationReady
         ? `HEALTH actions. Preparing HEALTH workspaces for ${selectionContext.programmerName || selectionContext.programmerId}.`
         : healthReady
           ? `HEALTH actions for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
           : esmReady || cmReady
-            ? `HEALTH actions for ${selectionContext.programmerName || selectionContext.programmerId} in ${selectionContext.environmentLabel}. Select a RequestorId to unlock HEALTH SPLUNK. Registered Application Inspector stays available.`
+            ? `HEALTH actions for ${selectionContext.programmerName || selectionContext.programmerId} in ${selectionContext.environmentLabel}. Select a RequestorId to unlock HEALTH SPLUNK. Registered Application Health stays available.`
           : context.hasProgrammerContext
-            ? "HEALTH actions. Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH. Registered Application Inspector stays available."
-            : "HEALTH actions. Select a Media Company and RequestorId to unlock Registered Application Inspector, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.";
+            ? "HEALTH actions. Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH. Registered Application Health stays available."
+            : "HEALTH actions. Select a Media Company and RequestorId to unlock Registered Application Health, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.";
 
   return `
     <article class="metadata-item hr-health-status-value">
@@ -61710,13 +61654,13 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
             data-health-action="registered-apps"
             title="${escapeHtml(
               registeredApplicationReady
-                ? `Open Registered Application Inspector for ${selectionContext.programmerName || selectionContext.programmerId}`
-                : `${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile before opening Registered Application Inspector.`
+                ? `Open Registered Application Health for ${selectionContext.programmerName || selectionContext.programmerId}`
+                : `${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile before opening Registered Application Health.`
             )}"
             aria-label="${escapeHtml(
               registeredApplicationReady
-                ? `Open Registered Application Inspector for ${selectionContext.programmerName || selectionContext.programmerId}`
-                : `${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile before opening Registered Application Inspector.`
+                ? `Open Registered Application Health for ${selectionContext.programmerName || selectionContext.programmerId}`
+                : `${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile before opening Registered Application Health.`
             )}"
             ${registeredApplicationReady ? "" : "disabled"}
           >REG APPS</button>
@@ -61844,19 +61788,19 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
       requestSource: "hr-health-registered-apps",
     });
     if (!queryContext.programmerId) {
-      setStatus("Select a Media Company before opening Registered Application Inspector.", "error");
+      setStatus("Select a Media Company before opening Registered Application Health.", "error");
       return;
     }
-    setStatus(`Loading Registered Application Inspector for ${buildRegisteredApplicationHealthStatusMessage(queryContext)}...`);
+    setStatus(`Loading Registered Application Health for ${buildRegisteredApplicationHealthStatusMessage(queryContext)}...`);
     const report = await runRegisteredApplicationHealthDashboardForSelection(queryContext, {
       openWorkspace: true,
       activateWorkspace: true,
-      forceRefresh: true,
+      forceRefresh: false,
       requestSource: "hr-health-registered-apps",
     });
     if (report?.ok === true) {
       setStatus(
-        `Loaded Registered Application Inspector (${Number(report?.totalApplications || 0)} app${
+        `Loaded Registered Application Health (${Number(report?.totalApplications || 0)} app${
           Number(report?.totalApplications || 0) === 1 ? "" : "s"
         }).`,
         "success"
@@ -61865,7 +61809,7 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
     }
     if (report?.partial === true) {
       setStatus(
-        `Loaded Registered Application Inspector with ${Number(report?.totalApplications || 0)} app${
+        `Loaded Registered Application Health with ${Number(report?.totalApplications || 0)} app${
           Number(report?.totalApplications || 0) === 1 ? "" : "s"
         } and ${Array.isArray(report?.warnings) ? report.warnings.length : 0} warning${
           Array.isArray(report?.warnings) && report.warnings.length === 1 ? "" : "s"
@@ -61874,7 +61818,7 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
       );
       return;
     }
-    setStatus(String(report?.error || "Unable to load Registered Application Inspector."), "error");
+    setStatus(String(report?.error || "Unable to load Registered Application Health."), "error");
     return;
   }
 

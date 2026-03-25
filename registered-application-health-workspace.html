@@ -23,7 +23,7 @@
           </p>
           <p id="workspace-filter-state" class="workspace-filter-state"></p>
           <p class="regapp-health-context-caption">
-            Registered Application Inspector stays bound to the live UnderPAR Media Company selection and decodes JWTs locally.
+            Registered Application HEALTH stays bound to the live UnderPAR Media Company selection and decodes JWTs locally.
           </p>
         </div>
         <div class="workspace-actions regapp-health-hero-actions">
@@ -31,8 +31,8 @@
             id="workspace-rerun-all"
             class="workspace-icon-btn workspace-icon-btn--rerun"
             type="button"
-            title="Re-run latest Registered Application Inspector query"
-            aria-label="Re-run latest Registered Application Inspector query"
+            title="Re-run latest Registered Application HEALTH query"
+            aria-label="Re-run latest Registered Application HEALTH query"
           >
             <span class="workspace-icon workspace-icon--rerun-glyph" aria-hidden="true">f5</span>
             <span id="workspace-rerun-indicator" class="workspace-net-indicator" aria-hidden="true" hidden></span>
@@ -55,6 +55,8 @@
       </header>
 
       <p id="workspace-status" class="workspace-status" aria-live="polite" hidden></p>
+
+      <section id="workspace-cards" class="workspace-cards"></section>
 
       <section class="rest-report-card regapp-jwt-utility-card">
         <header class="rest-report-head">
@@ -90,8 +92,6 @@
           Paste any JWT-looking value and UnderPAR will decode it locally.
         </p>
       </section>
-
-      <section id="workspace-cards" class="workspace-cards"></section>
     </main>
 
     <dialog id="workspace-jwt-inspector-dialog" class="regapp-jwt-dialog">

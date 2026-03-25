@@ -80,18 +80,6 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function formatDateTime(value) {
-  const numeric = Number(value || 0);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
-    return "N/A";
-  }
-  try {
-    return new Date(numeric).toLocaleString();
-  } catch {
-    return "N/A";
-  }
-}
-
 function formatCount(value) {
   const numeric = Number(value || 0);
   if (!Number.isFinite(numeric)) {
@@ -190,7 +178,7 @@ function renderWorkspaceEnvironmentBadge() {
 
 function updateControllerBanner() {
   if (els.controllerState) {
-    els.controllerState.textContent = `Registered Application Inspector | ${getProgrammerLabel()}`;
+    els.controllerState.textContent = `Registered Application Health | ${getProgrammerLabel()}`;
   }
   if (els.filterState) {
     els.filterState.textContent = getFilterLabel();
@@ -251,7 +239,7 @@ function applyControllerState(payload = {}) {
   }
   if (shouldAutoRefreshForControllerUpdate) {
     void runCurrentContextReport({
-      statusMessage: "Refreshing Registered Application Inspector for the selected UnderPAR context...",
+      statusMessage: "Refreshing Registered Application Health for the selected UnderPAR context...",
       preferRefresh: false,
     });
   }
@@ -491,126 +479,11 @@ function getDecoratedApplications() {
   return getReportApplications().map((app, index) => decorateApplication(app, index));
 }
 
-function buildMetricCardsMarkup(applications = []) {
-  const totalApplications = applications.length;
-  const withStatements = applications.filter((entry) => String(entry?.app?.softwareStatement || "").trim()).length;
-  const decodedStatements = applications.filter((entry) => entry?.inspection?.valid === true).length;
-  const selectedMatches = applications.filter((entry) => entry?.selectedRequestorMatch === true).length;
-  return `
-    <div class="regapp-metric-grid">
-      <article class="regapp-metric-card">
-        <p class="regapp-metric-label">Registered Apps</p>
-        <p class="regapp-metric-value">${escapeHtml(formatCount(totalApplications))}</p>
-        <p class="regapp-metric-copy">All registered applications returned for the selected Media Company.</p>
-      </article>
-      <article class="regapp-metric-card">
-        <p class="regapp-metric-label">Software Statements</p>
-        <p class="regapp-metric-value">${escapeHtml(formatCount(withStatements))}</p>
-        <p class="regapp-metric-copy">Applications that currently expose a software statement JWT.</p>
-      </article>
-      <article class="regapp-metric-card">
-        <p class="regapp-metric-label">Decoded JWTs</p>
-        <p class="regapp-metric-value">${escapeHtml(formatCount(decodedStatements))}</p>
-        <p class="regapp-metric-copy">Statements UnderPAR could decode locally without leaving the workspace.</p>
-      </article>
-      <article class="regapp-metric-card">
-        <p class="regapp-metric-label">Selected RequestorId Matches</p>
-        <p class="regapp-metric-value">${escapeHtml(formatCount(selectedMatches))}</p>
-        <p class="regapp-metric-copy">Registered applications that claim the active RequestorId context.</p>
-      </article>
-    </div>
-  `;
-}
-
-function buildWarningsMarkup() {
-  const warnings = Array.isArray(state.report?.warnings) ? state.report.warnings : [];
-  if (warnings.length === 0) {
-    return "";
-  }
-  return `
-    <div class="regapp-warning-stack">
-      ${warnings
-        .map(
-          (warning) => `
-            <article class="regapp-warning-card">
-              <p class="regapp-warning-title">Hydration Warning</p>
-              <p class="regapp-warning-copy">${escapeHtml(String(warning || "").trim())}</p>
-            </article>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-}
-
 function buildJwtStateChip(jwtState = "", label = "") {
   const normalizedState = String(jwtState || "").trim().toLowerCase();
   const modifier =
     normalizedState === "decoded" ? "success" : normalizedState === "missing" ? "warning" : "danger";
   return `<span class="regapp-chip regapp-chip--${modifier}">${escapeHtml(label || normalizedState || "JWT")}</span>`;
-}
-
-function buildScopeChipsMarkup(values = []) {
-  const scopes = uniqueStringArray(values);
-  if (scopes.length === 0) {
-    return '<span class="regapp-chip">No scopes</span>';
-  }
-  return scopes.map((scope) => `<span class="regapp-chip">${escapeHtml(scope)}</span>`).join("");
-}
-
-function renderMatrixTable(applications = []) {
-  if (applications.length === 0) {
-    return '<p class="regapp-empty-state">No registered applications are loaded yet.</p>';
-  }
-  const rowsHtml = applications
-    .map((entry) => {
-      const app = entry.app || {};
-      const requestorSummary = firstNonEmptyString([
-        app.requestorHint,
-        Array.isArray(app.serviceProviderHints) ? app.serviceProviderHints.join(", ") : "",
-        "—",
-      ]);
-      const scopeSummary = Array.isArray(app.scopeLabels) && app.scopeLabels.length > 0 ? app.scopeLabels.join(", ") : "No scopes";
-      return `
-        <tr>
-          <td>
-            <div class="regapp-app-link">${escapeHtml(firstNonEmptyString([app.name, app.guid, "Registered Application"]))}</div>
-            <div class="regapp-app-link-meta">
-              ${buildJwtStateChip(entry.jwtState, entry.jwtStateLabel)}
-              ${entry.selectedRequestorMatch ? '<span class="regapp-chip regapp-chip--success">Selected RequestorId</span>' : ""}
-            </div>
-          </td>
-          <td>${escapeHtml(requestorSummary)}</td>
-          <td>${escapeHtml(firstNonEmptyString([app.clientId, "—"]))}</td>
-          <td>${escapeHtml(scopeSummary)}</td>
-          <td>
-            <button
-              type="button"
-              class="regapp-app-footer-btn"
-              data-jwt-inspect-guid="${escapeHtml(String(app.guid || "").trim())}"
-              ${String(app.softwareStatement || "").trim() ? "" : "disabled"}
-            >Inspect JWT</button>
-          </td>
-        </tr>
-      `;
-    })
-    .join("");
-  return `
-    <div class="rest-report-table-wrap">
-      <table class="rest-report-table regapp-matrix-table">
-        <thead>
-          <tr>
-            <th>Registered Application</th>
-            <th>Requestor / Service Provider</th>
-            <th>Client ID</th>
-            <th>Scopes</th>
-            <th>JWT</th>
-          </tr>
-        </thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-    </div>
-  `;
 }
 
 function renderMetadataGrid(app = {}, entry = null) {
@@ -884,7 +757,7 @@ function renderReport() {
     return;
   }
   if (!state.report) {
-    let emptyMessage = "No Registered Application Inspector report loaded yet.";
+    let emptyMessage = "No Registered Application Health report loaded yet.";
     if (state.loading && state.programmerId) {
       emptyMessage = "Loading registered applications for the selected ENV x Media Company...";
     } else if (!state.programmerId) {
@@ -899,40 +772,7 @@ function renderReport() {
   }
 
   const applications = getDecoratedApplications();
-  const checkedAtLabel = formatDateTime(state.report?.checkedAt);
-  const queryContext = state.report?.queryContext || {};
-  const selectedRequestorLabel = String(state.requestorId || queryContext?.requestorId || "").trim();
-
-  els.cardsHost.innerHTML = `
-    <article class="rest-report-card">
-      <header class="rest-report-head">
-        <p class="rest-report-title">Registered Application Inspector</p>
-        <p class="rest-report-meta">
-          <strong>Checked:</strong> ${escapeHtml(checkedAtLabel)}
-          ${
-            selectedRequestorLabel
-              ? ` | <strong>Selected RequestorId:</strong> ${escapeHtml(selectedRequestorLabel)}`
-              : ""
-          }
-        </p>
-        <p class="regapp-overview-copy">
-          Local JWT decoding for software statements across the active ${escapeHtml(
-            firstNonEmptyString([state.programmerName, state.programmerId, "Media Company"])
-          )} application catalog.
-        </p>
-      </header>
-      ${buildMetricCardsMarkup(applications)}
-      ${buildWarningsMarkup()}
-    </article>
-    <article class="rest-report-card">
-      <header class="rest-report-head">
-        <p class="rest-report-title">Application Matrix</p>
-        <p class="rest-report-meta">Fast scan of requestor hints, client IDs, scope coverage, and JWT availability.</p>
-      </header>
-      ${renderMatrixTable(applications)}
-    </article>
-    ${renderApplicationCards(applications)}
-  `;
+  els.cardsHost.innerHTML = renderApplicationCards(applications);
 }
 
 function openJwtInspector(token = "", options = {}) {
@@ -1025,7 +865,7 @@ function handleReportResult(payload = {}) {
   syncActionButtonsDisabled();
   renderReport();
   if (!state.report) {
-    setStatus("No Registered Application Inspector data returned.", "error");
+    setStatus("No Registered Application Health data returned.", "error");
     return;
   }
   if (state.report.ok === true) {
@@ -1044,7 +884,7 @@ function handleReportResult(payload = {}) {
     );
     return;
   }
-  setStatus(String(state.report?.error || "Registered Application Inspector failed."), "error");
+  setStatus(String(state.report?.error || "Registered Application Health failed."), "error");
 }
 
 function clearWorkspaceCards() {
@@ -1077,7 +917,7 @@ function handleWorkspaceEvent(eventName, payload = {}) {
       return;
     }
     void runCurrentContextReport({
-      statusMessage: "Refreshing Registered Application Inspector for the selected UnderPAR context...",
+      statusMessage: "Refreshing Registered Application Health for the selected UnderPAR context...",
       preferRefresh: false,
     });
     return;
@@ -1109,7 +949,7 @@ async function runCurrentContextReport(options = {}) {
     return;
   }
   if (!state.programmerId) {
-    setStatus("Select a Media Company before opening Registered Application Inspector.", "error");
+    setStatus("Select a Media Company before opening Registered Application Health.", "error");
     return;
   }
   if (!state.registeredApplicationHealthReady) {
@@ -1124,8 +964,8 @@ async function runCurrentContextReport(options = {}) {
     String(
       options.statusMessage ||
         (action === "refresh-latest"
-          ? "Refreshing Registered Application Inspector..."
-          : "Loading Registered Application Inspector...")
+          ? "Refreshing Registered Application Health..."
+          : "Loading Registered Application Health...")
     ).trim()
   );
   const result = await sendWorkspaceAction(action, {
@@ -1146,8 +986,8 @@ async function runCurrentContextReport(options = {}) {
       String(
         result?.error ||
           (action === "refresh-latest"
-            ? "Unable to refresh Registered Application Inspector."
-            : "Unable to load Registered Application Inspector.")
+            ? "Unable to refresh Registered Application Health."
+            : "Unable to load Registered Application Health.")
       ),
       "error"
     );
@@ -1236,7 +1076,7 @@ async function init() {
   renderReport();
   const result = await sendWorkspaceAction("workspace-ready");
   if (!result?.ok) {
-    setStatus(result?.error || "Unable to contact UnderPAR Registered Application HEALTH controller.", "error");
+    setStatus(result?.error || "Unable to contact UnderPAR Registered Application Health controller.", "error");
   }
 }
 

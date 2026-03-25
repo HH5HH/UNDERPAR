@@ -326,6 +326,55 @@ test("registered application health report payload prioritizes selected requesto
   assert.deepEqual(report.warnings, ["secondary-app: details endpoint timed out"]);
 });
 
+test("registered application health dashboard returns the catalog immediately without per-app detail hydration", async () => {
+  let fetchOptions = null;
+  const helpers = loadPopupFunctions(["fetchRegisteredApplicationHealthDashboardReport"], {
+    state: { loginData: { accessToken: "ims-token" } },
+    PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS: 15000,
+    fetchApplicationsForProgrammer: async (programmerId, options = {}) => {
+      fetchOptions = normalizeRealmObject({ programmerId, ...options });
+      return {
+        "app-guid": {
+          guid: "app-guid",
+          name: "Turner REST V2",
+        },
+      };
+    },
+    buildPassVaultHydrationRegisteredApplications: () => [
+      {
+        guid: "app-guid",
+        name: "Turner REST V2",
+      },
+    ],
+    buildRegisteredApplicationHealthReportPayload: (queryContext, applications = [], options = {}) => ({
+      queryContext,
+      applications: normalizeRealmObject(applications),
+      error: String(options?.error || "").trim(),
+    }),
+  });
+
+  const report = normalizeRealmObject(
+    await helpers.fetchRegisteredApplicationHealthDashboardReport({
+      programmerId: "Turner",
+      selectionKey: "release-production|Turner",
+    })
+  );
+
+  assert.deepEqual(fetchOptions, {
+    programmerId: "Turner",
+    session: { accessToken: "ims-token" },
+    forceRefresh: false,
+    preferredTabId: 0,
+    requestTimeoutMs: 15000,
+  });
+  assert.deepEqual(report.applications, [
+    {
+      guid: "app-guid",
+      name: "Turner REST V2",
+    },
+  ]);
+});
+
 test("registered application workspace decodes JWT payloads locally and extracts bearer tokens from raw input", () => {
   const helpers = loadWorkspaceDecodeFunctions(["extractJwtCandidateFromText", "decodeJwtToken"]);
   const token = [
@@ -390,7 +439,7 @@ test("registered application workspace treats ENV x MediaCompany changes as a ha
     ["close", "update", "render", "run"]
   );
   assert.deepEqual(normalizeRealmObject(calls.find((entry) => entry?.type === "run")?.options), {
-    statusMessage: "Refreshing Registered Application Inspector for the selected UnderPAR context...",
+    statusMessage: "Refreshing Registered Application Health for the selected UnderPAR context...",
     preferRefresh: false,
   });
 });
@@ -445,8 +494,14 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(manifestSource, /registered-application-health-workspace\.js/);
   assert.match(workspaceHtml, /JWT Inspector/);
   assert.match(workspaceHtml, /Paste any JWT, bearer value, or JSON body containing a JWT/);
+  assert.match(workspaceHtml, /id="workspace-cards"[\s\S]*regapp-jwt-utility-card/);
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
+  assert.doesNotMatch(workspaceJs, /Application Matrix/);
+  assert.doesNotMatch(workspaceJs, /buildMetricCardsMarkup/);
+  assert.doesNotMatch(workspaceJs, /renderMatrixTable/);
   assert.match(workspaceJs, /const disableRerun = state\.loading \|\| !canRunCurrentContextReport\(\);/);
   assert.match(workspaceJs, /if \(controllerChanged \|\| requestorChanged \|\| shouldClearStaleReport\) \{\s*renderReport\(\);/);
   assert.match(workspaceJs, /const action = hasRenderableReport\(\) && preferRefresh \? "refresh-latest" : "run-dashboard";/);
+  assert.match(popupSource, /const forceRefresh = options\.forceRefresh === true;/);
+  assert.doesNotMatch(extractFunctionSource(popupSource, "fetchRegisteredApplicationHealthDashboardReport"), /enrichRegisteredApplicationForHydration/);
 });
