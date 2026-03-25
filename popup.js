@@ -32506,6 +32506,71 @@ function deriveClickCmuZoomClass(endpointUrl = "") {
   return "zmYR";
 }
 
+function getClickCmuVisibleQueryString(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+    const searchParams = new URLSearchParams(parsed.search);
+    ["format", "limit", "metrics", "tenant", "tenant_id", "tenant-id", "orgId", "orgid"].forEach((key) =>
+      searchParams.delete(key)
+    );
+    const nextQuery = searchParams.toString();
+    return nextQuery ? `?${nextQuery}` : "";
+  } catch {
+    const queryIndex = raw.indexOf("?");
+    if (queryIndex < 0) {
+      return "";
+    }
+    const queryText = raw.slice(queryIndex + 1).trim();
+    const searchParams = new URLSearchParams(queryText);
+    ["format", "limit", "metrics", "tenant", "tenant_id", "tenant-id", "orgId", "orgid"].forEach((key) =>
+      searchParams.delete(key)
+    );
+    const nextQuery = searchParams.toString();
+    return nextQuery ? `?${nextQuery}` : "";
+  }
+}
+
+function getClickCmuVisibleRequestUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+    parsed.search = getClickCmuVisibleQueryString(parsed.toString());
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    const [withoutHash] = raw.split("#");
+    const queryIndex = withoutHash.indexOf("?");
+    if (queryIndex < 0) {
+      return withoutHash;
+    }
+    const path = withoutHash.slice(0, queryIndex);
+    const nextQuery = getClickCmuVisibleQueryString(withoutHash);
+    return nextQuery ? `${path}${nextQuery}` : path;
+  }
+}
+
+function getClickCmuCompactLabel(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+    const compactPath = String(parsed.pathname || "").replace(/^\/v2\//i, "").replace(/^\/+/, "");
+    return `${compactPath}${getClickCmuVisibleQueryString(parsed.toString())}`;
+  } catch {
+    const compactPath = raw.replace(/^https?:\/\/[^?#]+\/v2\//i, "").replace(/\?.*$/, "");
+    return `${compactPath}${getClickCmuVisibleQueryString(raw)}`;
+  }
+}
+
 function buildClickCmuEndpointDlMarkup(endpointCatalog = [], tenantScope = "") {
   return normalizeClickCmuEndpointCatalog(endpointCatalog, {
     tenantScope,
@@ -32513,14 +32578,16 @@ function buildClickCmuEndpointDlMarkup(endpointCatalog = [], tenantScope = "") {
   })
     .map((entry, index) => {
       const id = String(entry?.id || `cmu-${index + 1}`).trim() || `cmu-${index + 1}`;
-      const url = ensureCmUsageEndpointFormat(entry?.url, { tenantScope });
+      const fullUrl = ensureCmUsageEndpointFormat(entry?.url, { tenantScope });
+      const visibleHref = getClickCmuVisibleRequestUrl(fullUrl) || fullUrl;
+      const compactLabel = getClickCmuCompactLabel(fullUrl) || visibleHref || fullUrl;
       const label = String(entry?.label || "CMU Endpoint").trim() || "CMU Endpoint";
-      const zoomClass = deriveClickCmuZoomClass(url);
-      const columns = deriveClickCmuStaticColumns(entry, url);
+      const zoomClass = deriveClickCmuZoomClass(fullUrl);
+      const columns = deriveClickCmuStaticColumns(entry, fullUrl);
       const columnText = columns.length > 0 ? escapeHtml(columns.join("\n")) : "<em>No report columns</em>";
       return [
         "<dl>",
-        `  <dt><a href="${escapeHtml(url)}" class="${zoomClass}" title="${escapeHtml(label)}" data-endpoint-id="${escapeHtml(id)}" onclick="runEsm(this);return false;">${escapeHtml(url)}</a></dt>`,
+        `  <dt><a href="${escapeHtml(visibleHref)}" class="${zoomClass}" title="${escapeHtml(label)}" data-endpoint-id="${escapeHtml(id)}" data-full-url="${escapeHtml(fullUrl)}" data-baseline-href="${escapeHtml(fullUrl)}" data-active-href="${escapeHtml(fullUrl)}" onclick="runEsm(this);return false;">${escapeHtml(compactLabel)}</a></dt>`,
         `  <dd class="col-list">${columnText}</dd>`,
         '  <dd class="esm-table-host"></dd>',
         "</dl>",
@@ -33052,7 +33119,9 @@ body[data-theme="dark"]{
       envBadge.dataset.baseUrl = envBase;
     }
     anchors.forEach((anchor) => {
-      const fullHref = String(anchor?.href || "").trim();
+      const fullHref = String(
+        anchor?.dataset?.fullUrl || anchor?.dataset?.activeHref || anchor?.dataset?.baselineHref || anchor?.href || ""
+      ).trim();
       if (!fullHref) {
         return;
       }

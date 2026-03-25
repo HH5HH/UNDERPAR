@@ -53,6 +53,37 @@ function buildRuntimeHarness(relativePath) {
   return context.module.exports;
 }
 
+function buildMarkupHarness() {
+  const source = read("popup.js");
+  const script = [
+    extractFunctionSource(source, "getClickCmuVisibleQueryString"),
+    extractFunctionSource(source, "getClickCmuVisibleRequestUrl"),
+    extractFunctionSource(source, "getClickCmuCompactLabel"),
+    extractFunctionSource(source, "buildClickCmuEndpointDlMarkup"),
+    "module.exports = { getClickCmuVisibleQueryString, getClickCmuVisibleRequestUrl, getClickCmuCompactLabel, buildClickCmuEndpointDlMarkup };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    URL,
+    URLSearchParams,
+    CM_REPORTS_BASE_URL: "https://cm.adobe.test",
+    normalizeClickCmuEndpointCatalog: (entries = []) => entries,
+    buildClickCmuTemplatePathOrderMap: () => new Map(),
+    ensureCmUsageEndpointFormat: (value = "") => String(value || "").trim(),
+    deriveClickCmuZoomClass: () => "zmDAY",
+    deriveClickCmuStaticColumns: () => ["tenant", "mvpd"],
+    escapeHtml: (value = "") =>
+      String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;"),
+  };
+  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
+  return context.module.exports;
+}
+
 test("scripts/clickESM.html hides CM tenant scope parameters from visible clickCMU labels", () => {
   const api = buildRuntimeHarness("scripts/clickESM.html");
 
@@ -83,6 +114,26 @@ test("scripts/clickESM.html hides CM tenant scope parameters from visible clickC
   );
 });
 
+test("clickCMU static markup hides tenant scope from visible href/text while preserving the full scoped URL in data attributes", () => {
+  const { buildClickCmuEndpointDlMarkup } = buildMarkupHarness();
+
+  const markup = buildClickCmuEndpointDlMarkup([
+    {
+      id: "cmu-1",
+      label: "CMU Tenant Drilldown",
+      url: "https://cm.adobe.test/v2/year/tenant/month/day?tenant=Turner&requestor-id=MML&mvpd=Comcast_SSO&format=json&metrics=users",
+      columns: ["tenant", "mvpd"],
+    },
+  ]);
+
+  assert.match(markup, /href="https:\/\/cm\.adobe\.test\/v2\/year\/tenant\/month\/day\?requestor-id=MML&amp;mvpd=Comcast_SSO"/);
+  assert.match(markup, /data-full-url="https:\/\/cm\.adobe\.test\/v2\/year\/tenant\/month\/day\?tenant=Turner&amp;requestor-id=MML&amp;mvpd=Comcast_SSO&amp;format=json&amp;metrics=users"/);
+  assert.match(markup, /data-baseline-href="https:\/\/cm\.adobe\.test\/v2\/year\/tenant\/month\/day\?tenant=Turner&amp;requestor-id=MML&amp;mvpd=Comcast_SSO&amp;format=json&amp;metrics=users"/);
+  assert.match(markup, /data-active-href="https:\/\/cm\.adobe\.test\/v2\/year\/tenant\/month\/day\?tenant=Turner&amp;requestor-id=MML&amp;mvpd=Comcast_SSO&amp;format=json&amp;metrics=users"/);
+  assert.match(markup, />year\/tenant\/month\/day\?requestor-id=MML&amp;mvpd=Comcast_SSO</);
+  assert.doesNotMatch(markup, />[^<]*tenant=Turner[^<]*</);
+});
+
 test("popup clickCMU runtime keeps tenant scope internal while rendering clean visible links", () => {
   const popupSource = read("popup.js");
 
@@ -90,6 +141,7 @@ test("popup clickCMU runtime keeps tenant scope internal while rendering clean v
     popupSource,
     /\["format", "limit", "metrics", "tenant", "tenant_id", "tenant-id", "orgId", "orgid"\]/
   );
+  assert.match(popupSource, /data-full-url="\$\{escapeHtml\(fullUrl\)\}"/);
   assert.match(popupSource, /anchor\.dataset\.baselineHref = fullHref;/);
   assert.match(popupSource, /anchor\.dataset\.activeHref = fullHref;/);
   assert.match(popupSource, /anchor\.href = visibleHref \|\| fullHref;/);

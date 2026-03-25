@@ -8779,7 +8779,9 @@ function initCmuEnvDisplayAndLabels() {
     envBadge.dataset.baseUrl = envBase;
   }
   anchors.forEach((anchor) => {
-    const fullHref = String(anchor?.href || "").trim();
+    const fullHref = String(
+      anchor?.dataset?.fullUrl || anchor?.dataset?.activeHref || anchor?.dataset?.baselineHref || anchor?.href || ''
+    ).trim();
     if (!fullHref) {
       return;
     }
