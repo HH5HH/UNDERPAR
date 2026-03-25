@@ -88,6 +88,7 @@ function loadRestV2LearningPlanBuilder() {
     extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
+    extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsHydrationPlan"),
     "module.exports = { buildRestV2InteractiveDocsHydrationPlan };",
@@ -97,6 +98,9 @@ function loadRestV2LearningPlanBuilder() {
     exports: {},
     navigator: { userAgent: "UnderPAR test" },
     atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -248,8 +252,12 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     extractFunctionSource(source, "sampleRestV2LearningResourceIds"),
     extractFunctionSource(source, "enrichRestV2LearningResourcesFromConsoleContext"),
     "function resolveRestV2DebugFlowIdForHarvest() { return ''; }",
-    "async function getRestV2DebugFlowSnapshot() { return null; }",
-    "function extractRestV2SamlResponseFromDebugFlow() { return {}; }",
+    "async function getRestV2DebugFlowSnapshot() { return typeof globalThis.__seed.getFlowSnapshot === 'function' ? globalThis.__seed.getFlowSnapshot() : null; }",
+    "function extractRestV2SamlResponseFromDebugFlow(flow = null) { return typeof globalThis.__seed.extractSaml === 'function' ? globalThis.__seed.extractSaml(flow) : {}; }",
+    "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || context?.sessionPartner || '').trim(); }",
+    "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); }",
+    "function isRestV2PartnerFrameworkStatusUsable(value = '') { return typeof globalThis.__seed.isFrameworkStatusUsable === 'function' ? globalThis.__seed.isFrameworkStatusUsable(value) : Boolean(String(value || '').trim()); }",
+    "function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydratePartnerContext === 'function') { return globalThis.__seed.hydratePartnerContext(context, flow); } return context; }",
     extractFunctionSource(source, "prepareRestV2InteractiveDocsContextForEntry"),
     "module.exports = { enrichRestV2LearningResourcesFromConsoleContext, prepareRestV2InteractiveDocsContextForEntry };",
   ].join("\n\n");
@@ -519,6 +527,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /service-box-container hr-rest-v2-doc-section-shell/);
   assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /getRestV2InteractiveDocsSectionCollapsed/);
   assert.doesNotMatch(buildRestV2InteractiveDocsSectionHtmlSource, /hr-rest-v2-doc-section-link/);
+  assert.doesNotMatch(buildRestV2InteractiveDocsSectionHtmlSource, /\$\{isReady \? "" : "disabled"\}/);
   assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /wireCollapsibleSection/);
   assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /setRestV2InteractiveDocsSectionCollapsed/);
   assert.match(collectRestV2LearningResourceIdsSource, /getRestV2ProfilePreauthzChecks\(harvest\)/);
@@ -854,6 +863,48 @@ test("REST V2 learning force-refreshes the selected MVPD snapshot when cached re
       forceRefresh: true,
     },
   ]);
+});
+
+test("REST V2 learning hydrates partner-path and framework status from the debug flow even when SAML is already present", async () => {
+  let snapshotCalls = 0;
+  const flowSnapshot = {
+    partnerFrameworkStatus: "framework-status-token",
+    partner: "Apple",
+  };
+  const { prepareRestV2InteractiveDocsContextForEntry } = loadRestV2LearningContextPreparer({
+    getFlowSnapshot() {
+      snapshotCalls += 1;
+      return flowSnapshot;
+    },
+    hydratePartnerContext(context, flow) {
+      context.partnerFrameworkStatus = String(flow?.partnerFrameworkStatus || "").trim();
+      context.partner = String(flow?.partner || "").trim();
+      return context;
+    },
+    isFrameworkStatusUsable(value = "") {
+      return String(value || "").trim() === "framework-status-token";
+    },
+  });
+
+  const prepared = await prepareRestV2InteractiveDocsContextForEntry(
+    {
+      key: "partner-sso-verification-token",
+      usesPartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      usesBodySamlResponse: false,
+    },
+    {
+      ok: true,
+      partner: "",
+      partnerFrameworkStatus: "",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      flowId: "flow-123",
+    }
+  );
+
+  assert.equal(snapshotCalls, 1);
+  assert.equal(prepared.partner, "Apple");
+  assert.equal(prepared.partnerFrameworkStatus, "framework-status-token");
 });
 
 test("REST V2 learning resource helpers merge the requestor x MVPD pool and sample ten unique ids", () => {
@@ -1207,6 +1258,15 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     }),
     "utf8"
   ).toString("base64");
+  const rawPartnerFrameworkStatus = JSON.stringify({
+    frameworkPermissionInfo: {
+      accessStatus: "granted",
+    },
+    frameworkProviderInfo: {
+      id: "comcast-provider-map",
+      expirationDate: String(Date.now() + 60 * 60 * 1000),
+    },
+  });
   const baseContext = {
     serviceProviderId: "turner",
     requestorId: "turner",
@@ -1454,6 +1514,26 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(partnerProfilePlan.fieldValues["header.AP-Device-Identifier"], "device-123");
   assert.equal(partnerProfilePlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
   assert.match(String(partnerProfilePlan.notes[0] || ""), /SAMLResponse captured from/);
+
+  const rawPartnerProfilePlan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    { ...baseContext, partnerFrameworkStatus: rawPartnerFrameworkStatus },
+    accessToken
+  );
+  assert.equal(rawPartnerProfilePlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
 
   const partnerSsoPlan = buildRestV2InteractiveDocsHydrationPlan(
     {

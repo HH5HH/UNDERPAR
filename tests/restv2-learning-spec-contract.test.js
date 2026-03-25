@@ -93,6 +93,7 @@ function loadPlanBuilder() {
     extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
+    extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsHydrationPlan"),
     "module.exports = { buildRestV2InteractiveDocsHydrationPlan };",
@@ -102,6 +103,9 @@ function loadPlanBuilder() {
     exports: {},
     navigator: { userAgent: "UnderPAR spec contract test" },
     atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
   };
   vm.runInNewContext(script, context, { filename: POPUP_PATH });
   return context.module.exports.buildRestV2InteractiveDocsHydrationPlan;

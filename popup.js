@@ -17232,7 +17232,9 @@ async function fetchRestV2ProfilesForHarvest(harvest, options = {}) {
   const actionLabel = getBobtoolsRestV2ActionLabel(actionMode);
   const flowId = resolveRestV2DebugFlowIdForHarvest(harvest);
   const likelySsoContext = isRestV2LikelyPartnerSsoContext(harvest);
-  const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(harvest);
+  const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2PartnerFrameworkStatusFromContext(harvest)
+  );
   const requestHeaders = buildRestV2Headers(serviceProviderId, {
     Accept: "application/json",
   });
@@ -27069,7 +27071,9 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
     }
   }
 
-  const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(context);
+  const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2PartnerFrameworkStatusFromContext(context)
+  );
   result.frameworkStatusPresent = isRestV2PartnerFrameworkStatusUsable(partnerFrameworkStatus);
   if (!result.frameworkStatusPresent) {
     result.error = "Missing AP-Partner-Framework-Status from REST session response.";
@@ -27399,7 +27403,9 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
 
   const endpointScope = `${String(scope || "profiles-check")}:${String(endpoint.endpointKey || "profiles").trim()}`;
   const likelySsoContext = isRestV2LikelyPartnerSsoContext(context);
-  const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(context);
+  const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2PartnerFrameworkStatusFromContext(context)
+  );
   const requestHeaders = buildRestV2Headers(context.serviceProviderId, {
     Accept: "application/json",
   });
@@ -29924,6 +29930,19 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
     await waitForDelay(900);
     const stopResult = await stopRestV2DebugFlowAndSnapshot(activeFlowId, "user-stop");
     const entitlementPhaseSummary = stopResult?.flow ? summarizeRestV2EntitlementPhaseSignals(stopResult.flow) : null;
+    if (hasRecordingContext && stopResult?.flow) {
+      hydrateRestV2PartnerSsoContextFromDebugFlow(recordingContext, stopResult.flow);
+      const explicitNoActiveProfile = isRestV2NoActiveProfileSignal(profileCheckResult);
+      const checkedNoProfiles =
+        profileCheckResult?.checked === true &&
+        profileCheckResult?.ok === true &&
+        Number(profileCheckResult?.profileCount || 0) === 0;
+      if (explicitNoActiveProfile || checkedNoProfiles) {
+        clearRestV2ProfileHarvestForContext(recordingContext);
+      } else if (profileCheckResult?.checked === true) {
+        storeRestV2ProfileHarvest(recordingContext, profileCheckResult, activeFlowId);
+      }
+    }
     if (entitlementPhaseSummary) {
       emitRestV2DebugEvent(activeFlowId, {
         source: "extension",
@@ -29940,6 +29959,9 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
     state.restV2RecordingActive = false;
     state.restV2RecordingStartedAt = 0;
     state.restV2RecordingContext = null;
+    if (hasRecordingContext) {
+      maybeRefreshRestV2InteractiveDocsForContext(recordingContext, "rest-v2-recording-stop-final");
+    }
 
     const profileVerdict = buildRestV2ProfileVerdict(profileCheckResult, recordingContext);
     let panelMessage = "";
@@ -61048,14 +61070,21 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
   const preparedContext = {
     ...resolvedContext,
   };
-  if (resolvedEntry.usesBodySamlResponse !== true || String(preparedContext.samlResponse || "").trim()) {
-    if (resolvedEntry.usesBodyResources === true) {
-      return enrichRestV2LearningResourcesFromConsoleContext(preparedContext);
-    }
-    return preparedContext;
-  }
   if (resolvedEntry.usesBodyResources === true) {
     Object.assign(preparedContext, await enrichRestV2LearningResourcesFromConsoleContext(preparedContext));
+  }
+  const needsPartnerFlowHydration =
+    resolvedEntry.usesPartnerPath === true ||
+    resolvedEntry.usesPartnerFrameworkStatus === true ||
+    resolvedEntry.usesBodySamlResponse === true;
+  const missingPartner =
+    resolvedEntry.usesPartnerPath === true && !String(resolveRestV2PartnerNameFromContext(preparedContext) || "").trim();
+  const missingPartnerFrameworkStatus =
+    resolvedEntry.usesPartnerFrameworkStatus === true &&
+    !isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(preparedContext));
+  const missingSamlResponse = resolvedEntry.usesBodySamlResponse === true && !String(preparedContext.samlResponse || "").trim();
+  if (!needsPartnerFlowHydration || (!missingPartner && !missingPartnerFrameworkStatus && !missingSamlResponse)) {
+    return preparedContext;
   }
   const flowId = firstNonEmptyString([
     String(preparedContext.flowId || "").trim(),
@@ -61068,13 +61097,15 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
   try {
     const flowSnapshot = await getRestV2DebugFlowSnapshot(flowId);
     hydrateRestV2PartnerSsoContextFromDebugFlow(preparedContext, flowSnapshot);
-    const samlDetails = extractRestV2SamlResponseFromDebugFlow(flowSnapshot);
-    if (String(samlDetails?.samlResponse || "").trim()) {
-      preparedContext.samlResponse = String(samlDetails.samlResponse || "").trim();
-      preparedContext.samlSource = String(samlDetails.source || "").trim();
+    if (!String(preparedContext.samlResponse || "").trim()) {
+      const samlDetails = extractRestV2SamlResponseFromDebugFlow(flowSnapshot);
+      if (String(samlDetails?.samlResponse || "").trim()) {
+        preparedContext.samlResponse = String(samlDetails.samlResponse || "").trim();
+        preparedContext.samlSource = String(samlDetails.source || "").trim();
+      }
     }
   } catch {
-    // Leave samlResponse empty and allow the docs form to remain partially hydrated.
+    // Leave the remaining fields empty and allow the docs form to remain partially hydrated.
   }
   return preparedContext;
 }
@@ -61114,10 +61145,10 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (resolvedEntry.contentType) {
     fieldValues["header.Content-Type"] = String(resolvedEntry.contentType || "").trim();
   }
-  const partnerFrameworkStatus = String(resolvedContext.partnerFrameworkStatus || "").trim();
-  const usablePartnerFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(partnerFrameworkStatus)
-    ? partnerFrameworkStatus
-    : "";
+  const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    String(resolvedContext.partnerFrameworkStatus || "").trim()
+  );
+  const usablePartnerFrameworkStatus = partnerFrameworkStatus;
   if (resolvedEntry.usesPartnerFrameworkStatus === true && usablePartnerFrameworkStatus) {
     fieldValues["header.AP-Partner-Framework-Status"] = usablePartnerFrameworkStatus;
   }
@@ -61489,7 +61520,6 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
                   data-restv2-doc-state="${isReady ? "ready" : "locked"}"
                   title="${escapeHtml(entryActionLabel)}"
                   aria-label="${escapeHtml(entryActionLabel)}"
-                  ${isReady ? "" : "disabled"}
                 >
                   <span class="hr-rest-v2-doc-entry-topline">
                     <span class="hr-rest-v2-doc-entry-label">${escapeHtml(entry.label)}</span>
@@ -83569,6 +83599,33 @@ function resolveRestV2PartnerFrameworkStatusSummary(value = "") {
 
 function isRestV2PartnerFrameworkStatusUsable(value = "") {
   return resolveRestV2PartnerFrameworkStatusSummary(value).usable === true;
+}
+
+function normalizeRestV2PartnerFrameworkStatusForRequest(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const summary = resolveRestV2PartnerFrameworkStatusSummary(raw);
+  if (summary.usable !== true || !summary.payload || typeof summary.payload !== "object") {
+    return "";
+  }
+
+  const decodedUri = decodeURIComponentSafe(raw);
+  const decodedBase64Raw = decodeBase64TextSafe(raw);
+  const decodedBase64Uri = decodeBase64TextSafe(decodedUri);
+  if (parseJsonText(decodedBase64Raw, null)) {
+    return raw.replace(/\s+/g, "");
+  }
+  if (parseJsonText(decodedBase64Uri, null)) {
+    return decodedUri.replace(/\s+/g, "");
+  }
+
+  try {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(summary.payload))));
+  } catch {
+    return "";
+  }
 }
 
 function resolveRestV2PartnerFromFrameworkStatus(value = "") {
