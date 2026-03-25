@@ -79,6 +79,15 @@ function loadRestV2LearningPlanBuilder() {
     'const REST_V2_BASE = "https://api.example.test";',
     'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
     'function buildRestV2Headers() { return { "AP-Device-Identifier": "device-123", "X-Device-Info": "device-info-123" }; }',
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
+    extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
+    extractFunctionSource(source, "decodeBase64TextSafe"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(source, "decodeURIComponentSafe"),
+    extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
+    extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsHydrationPlan"),
     "module.exports = { buildRestV2InteractiveDocsHydrationPlan };",
@@ -87,6 +96,7 @@ function loadRestV2LearningPlanBuilder() {
     module: { exports: {} },
     exports: {},
     navigator: { userAgent: "UnderPAR test" },
+    atob,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -1092,7 +1102,7 @@ test("REST V2 learning activation clears stale plan-missing partner SSO fields w
   assert.deepEqual(Array.from(createPartnerProfileState.pendingFields || []), []);
 });
 
-test("REST V2 learning context falls back to the active SSO MVPD when partner metadata was not explicitly captured", () => {
+test("REST V2 learning context does not treat the selected SSO MVPD as the partner when partner metadata was not explicitly captured", () => {
   const seededApp = {
     guid: "rest-guid",
     appData: {
@@ -1133,9 +1143,6 @@ test("REST V2 learning context falls back to the active SSO MVPD when partner me
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       partner: "",
     },
-    isLikelyPartnerSso(context = null) {
-      return String(context?.mvpd || "").trim() === "Comcast_SSO";
-    },
   });
 
   const context = buildRestV2InteractiveDocsContext(
@@ -1151,7 +1158,7 @@ test("REST V2 learning context falls back to the active SSO MVPD when partner me
   );
 
   assert.equal(context.ok, true);
-  assert.equal(context.partner, "Comcast_SSO");
+  assert.equal(context.partner, "");
   assert.equal(context.mvpd, "Comcast_SSO");
   assert.equal(context.samlResponse, "PHNhbWxwOlJlc3BvbnNlPg==");
 });
@@ -1188,6 +1195,18 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const accessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
   const toArray = (value) => Array.from(value || []);
+  const validPartnerFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "comcast-provider-map",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+    }),
+    "utf8"
+  ).toString("base64");
   const baseContext = {
     serviceProviderId: "turner",
     requestorId: "turner",
@@ -1197,8 +1216,8 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     resourceIds: ["urn:resource:turner"],
     redirectUrl: "https://experience.example.test/callback",
     domainName: "experience.example.test",
-    partner: "Roku",
-    partnerFrameworkStatus: "none",
+    partner: "Apple",
+    partnerFrameworkStatus: validPartnerFrameworkStatus,
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "tab-network:body",
   };
@@ -1329,7 +1348,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   );
   assert.equal(profilesPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
   assert.equal(profilesPlan.fieldValues["header.X-Device-Info"], "device-info-123");
-  assert.equal(profilesPlan.fieldValues["header.AP-Partner-Framework-Status"], "none");
+  assert.equal(profilesPlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
   assert.deepEqual(toArray(profilesPlan.requiredFields), ["path.serviceProvider", "header.Authorization"]);
 
   const profilesByMvpdPlan = buildRestV2InteractiveDocsHydrationPlan(
@@ -1422,6 +1441,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       usesPartnerPath: true,
       requirePartnerPath: true,
       usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
       usesBodySamlResponse: true,
       requireBodySamlResponse: true,
       contentType: "application/x-www-form-urlencoded",
@@ -1429,9 +1449,10 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     baseContext,
     accessToken
   );
-  assert.equal(partnerProfilePlan.fieldValues["path.partner"], "Roku");
+  assert.equal(partnerProfilePlan.fieldValues["path.partner"], "Apple");
   assert.equal(partnerProfilePlan.fieldValues["body.SAMLResponse"], "PHNhbWxwOlJlc3BvbnNlPg==");
   assert.equal(partnerProfilePlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+  assert.equal(partnerProfilePlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
   assert.match(String(partnerProfilePlan.notes[0] || ""), /SAMLResponse captured from/);
 
   const partnerSsoPlan = buildRestV2InteractiveDocsHydrationPlan(
@@ -1444,6 +1465,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       usesPartnerPath: true,
       requirePartnerPath: true,
       usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
       usesBodyDomainName: true,
       requireBodyDomainName: true,
       usesBodyRedirectUrl: true,
@@ -1453,8 +1475,9 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     baseContext,
     accessToken
   );
-  assert.equal(partnerSsoPlan.fieldValues["path.partner"], "Roku");
+  assert.equal(partnerSsoPlan.fieldValues["path.partner"], "Apple");
   assert.equal(partnerSsoPlan.fieldValues["body.domainName"], "experience.example.test");
+  assert.equal(partnerSsoPlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
   assert.equal(
     partnerSsoPlan.fieldValues["body.redirectUrl"],
     "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/retrieveVerificationTokenUsingPOST"
@@ -1463,6 +1486,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     "body.domainName",
     "body.redirectUrl",
     "header.Authorization",
+    "header.AP-Partner-Framework-Status",
     "path.serviceProvider",
     "path.partner",
   ].sort());
@@ -1477,15 +1501,57 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       usesDeviceHeaders: true,
       usesPartnerPath: true,
       requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
       usesBodySamlResponse: true,
       requireBodySamlResponse: true,
       contentType: "application/x-www-form-urlencoded",
     },
-    { ...baseContext, partner: "", samlResponse: "" },
+    { ...baseContext, partner: "", samlResponse: "", partnerFrameworkStatus: "" },
     accessToken
   );
-  assert.deepEqual(toArray(missingDynamicContextPlan.missingRequiredFields).sort(), ["body.SAMLResponse", "path.partner"].sort());
+  assert.deepEqual(
+    toArray(missingDynamicContextPlan.missingRequiredFields).sort(),
+    ["body.SAMLResponse", "header.AP-Partner-Framework-Status", "path.partner"].sort()
+  );
   assert.match(missingDynamicContextPlan.notes.join(" "), /Partner SSO/);
+});
+
+test("REST V2 learning keeps partner APIs locked when the partner framework payload is not usable", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const plan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    {
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      requestorAutoResolved: false,
+      partner: "Apple",
+      partnerFrameworkStatus: "framework-status-token",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      samlSource: "tab-network:body",
+    },
+    "test-token"
+  );
+
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(toArray(plan.missingRequiredFields), ["header.AP-Partner-Framework-Status"]);
+
+  function toArray(value) {
+    return Array.from(value || []);
+  }
 });
 
 test("premium service sections and HR service pills keep their theme class wiring", () => {

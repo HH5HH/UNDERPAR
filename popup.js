@@ -450,6 +450,7 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     usesPartnerPath: true,
     requirePartnerPath: true,
     usesPartnerFrameworkStatus: true,
+    requirePartnerFrameworkStatus: true,
     usesBodySamlResponse: true,
     requireBodySamlResponse: true,
     contentType: "application/x-www-form-urlencoded",
@@ -469,6 +470,7 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     usesPartnerPath: true,
     requirePartnerPath: true,
     usesPartnerFrameworkStatus: true,
+    requirePartnerFrameworkStatus: true,
     usesBodyDomainName: true,
     requireBodyDomainName: true,
     usesBodyRedirectUrl: true,
@@ -26621,16 +26623,14 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
   }
 
   const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(context);
-  result.frameworkStatusPresent = Boolean(partnerFrameworkStatus);
-  if (!partnerFrameworkStatus) {
+  result.frameworkStatusPresent = isRestV2PartnerFrameworkStatusUsable(partnerFrameworkStatus);
+  if (!result.frameworkStatusPresent) {
     result.error = "Missing AP-Partner-Framework-Status from REST session response.";
     setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
     return result;
   }
   const resolvedPartner = String(resolveRestV2PartnerNameFromContext(context) || "").trim();
-  const fallbackPartner = isRestV2LikelyPartnerSsoContext(context) ? "Apple" : "";
-  const partner = firstNonEmptyString([resolvedPartner, fallbackPartner]);
-  result.partner = /^(?:ios|tvos)$/i.test(String(partner || "").trim()) ? "Apple" : String(partner || "").trim();
+  result.partner = /^(?:ios|tvos)$/i.test(String(resolvedPartner || "").trim()) ? "Apple" : String(resolvedPartner || "").trim();
   if (!result.partner) {
     result.error = "Missing partner for SSO profile creation.";
     setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
@@ -60101,14 +60101,6 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     String(harvestContext?.partner || "").trim(),
     String(harvest?.partner || "").trim(),
     String(harvest?.sessionPartner || "").trim(),
-    isRestV2LikelyPartnerSsoContext({
-      mvpd: fallbackMvpd,
-      sessionAction: activeRecordingContext?.sessionAction || harvestContext?.sessionAction || harvest?.sessionAction,
-      sessionPartner: activeRecordingContext?.sessionPartner || harvestContext?.sessionPartner || harvest?.sessionPartner,
-      partnerFrameworkStatus,
-    })
-      ? String(fallbackMvpd || "").trim()
-      : "",
   ]);
   const samlResponse = firstNonEmptyString([
     String(activeRecordingContext?.samlResponse || "").trim(),
@@ -60228,8 +60220,15 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (resolvedEntry.contentType) {
     fieldValues["header.Content-Type"] = String(resolvedEntry.contentType || "").trim();
   }
-  if (resolvedEntry.usesPartnerFrameworkStatus === true && String(resolvedContext.partnerFrameworkStatus || "").trim()) {
-    fieldValues["header.AP-Partner-Framework-Status"] = String(resolvedContext.partnerFrameworkStatus || "").trim();
+  const partnerFrameworkStatus = String(resolvedContext.partnerFrameworkStatus || "").trim();
+  const usablePartnerFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(partnerFrameworkStatus)
+    ? partnerFrameworkStatus
+    : "";
+  if (resolvedEntry.usesPartnerFrameworkStatus === true && usablePartnerFrameworkStatus) {
+    fieldValues["header.AP-Partner-Framework-Status"] = usablePartnerFrameworkStatus;
+  }
+  if (resolvedEntry.requirePartnerFrameworkStatus === true) {
+    requiredFields.push("header.AP-Partner-Framework-Status");
   }
   if (resolvedEntry.usesSessionCode === true) {
     if (String(resolvedContext.sessionCode || "").trim()) {
@@ -60338,6 +60337,11 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (missingRequiredFields.includes("path.partner")) {
     notes.push("Run a real Partner SSO flow first, or choose the correct partner before Send.");
   }
+  if (missingRequiredFields.includes("header.AP-Partner-Framework-Status")) {
+    notes.push(
+      "Complete a real partner-framework SSO flow first so UnderPAR can capture a valid AP-Partner-Framework-Status payload."
+    );
+  }
   if (missingRequiredFields.includes("body.domainName")) {
     notes.push("UnderPAR could not resolve the first configured Channel domain for this RequestorId.");
   }
@@ -60385,6 +60389,9 @@ function summarizeRestV2InteractiveDocsActivationLockReason(pendingFields = [], 
   }
   if (hasPendingField("path.partner")) {
     messages.push("Run a Partner SSO flow first to capture partner context.");
+  }
+  if (hasPendingField("header.AP-Partner-Framework-Status")) {
+    messages.push("Run a real partner-framework SSO flow first to capture a valid AP-Partner-Framework-Status payload.");
   }
   if (hasPendingField("body.SAMLResponse")) {
     messages.push("Complete Partner SSO login first to capture SAMLResponse.");
@@ -60495,6 +60502,10 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
   syncPendingField(
     "path.partner",
     resolvedEntry.usesPartnerPath !== true || hasPlannedValue("path.partner") || hasContextValue(context.partner)
+  );
+  syncPendingField(
+    "header.AP-Partner-Framework-Status",
+    resolvedEntry.requirePartnerFrameworkStatus !== true || hasPlannedValue("header.AP-Partner-Framework-Status")
   );
   syncPendingField(
     "body.resources",
@@ -82543,6 +82554,62 @@ function parseRestV2PartnerFrameworkStatusPayload(value = "") {
   return null;
 }
 
+function resolveRestV2PartnerFrameworkStatusSummary(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return {
+      raw: "",
+      payload: null,
+      providerId: "",
+      accessStatus: "",
+      expirationDate: "",
+      usable: false,
+    };
+  }
+
+  const payload = parseRestV2PartnerFrameworkStatusPayload(raw);
+  const frameworkPermissionInfo =
+    payload?.frameworkPermissionInfo && typeof payload.frameworkPermissionInfo === "object"
+      ? payload.frameworkPermissionInfo
+      : null;
+  const frameworkProviderInfo =
+    payload?.frameworkProviderInfo && typeof payload.frameworkProviderInfo === "object"
+      ? payload.frameworkProviderInfo
+      : null;
+  const providerId = String(
+    getRestV2CaseInsensitiveObjectValue(frameworkProviderInfo, [
+      "id",
+      "mappingId",
+      "providerId",
+      "provider",
+      "mvpd",
+      "mvpdId",
+    ]) || ""
+  ).trim();
+  const accessStatus = String(
+    getRestV2CaseInsensitiveObjectValue(frameworkPermissionInfo, ["accessStatus", "status"]) || ""
+  ).trim();
+  const expirationDate = String(
+    getRestV2CaseInsensitiveObjectValue(frameworkProviderInfo, ["expirationDate", "expiresAt", "expiration"]) || ""
+  ).trim();
+  const permissionGranted = String(accessStatus || "").trim().toLowerCase() === "granted";
+  const expirationMs = Number(expirationDate || 0);
+  const expirationValid = !expirationDate || !Number.isFinite(expirationMs) || expirationMs > Date.now();
+
+  return {
+    raw,
+    payload,
+    providerId,
+    accessStatus,
+    expirationDate,
+    usable: Boolean(payload && providerId && permissionGranted && expirationValid),
+  };
+}
+
+function isRestV2PartnerFrameworkStatusUsable(value = "") {
+  return resolveRestV2PartnerFrameworkStatusSummary(value).usable === true;
+}
+
 function resolveRestV2PartnerFromFrameworkStatus(value = "") {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -82855,15 +82922,11 @@ function isRestV2LikelyPartnerSsoContext(context = null) {
   if (!context || typeof context !== "object") {
     return false;
   }
-  const mvpd = String(context.mvpd || "").trim().toLowerCase();
-  const sessionAction = String(context.sessionAction || "").trim().toLowerCase();
-  const sessionPartner = String(context.sessionPartner || "").trim().toLowerCase();
   const partnerFrameworkStatus = String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim();
+  const partnerName = String(resolveRestV2PartnerNameFromContext(context) || "").trim().toLowerCase();
   return (
-    mvpd.includes("sso") ||
-    sessionAction.includes("sso") ||
-    sessionPartner.includes("sso") ||
-    Boolean(partnerFrameworkStatus)
+    isRestV2PartnerFrameworkStatusUsable(partnerFrameworkStatus) ||
+    /^(?:apple|roku|google|amazon|samsung)$/i.test(partnerName)
   );
 }
 

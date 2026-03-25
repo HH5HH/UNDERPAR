@@ -84,6 +84,15 @@ function loadPlanBuilder() {
     'const REST_V2_BASE = "https://sp.auth.adobe.com/api/v2";',
     'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
     'function buildRestV2Headers() { return { "AP-Device-Identifier": "device-123", "X-Device-Info": "device-info-123" }; }',
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
+    extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
+    extractFunctionSource(source, "decodeBase64TextSafe"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(source, "decodeURIComponentSafe"),
+    extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
+    extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsHydrationPlan"),
     "module.exports = { buildRestV2InteractiveDocsHydrationPlan };",
@@ -92,6 +101,7 @@ function loadPlanBuilder() {
     module: { exports: {} },
     exports: {},
     navigator: { userAgent: "UnderPAR spec contract test" },
+    atob,
   };
   vm.runInNewContext(script, context, { filename: POPUP_PATH });
   return context.module.exports.buildRestV2InteractiveDocsHydrationPlan;
@@ -207,6 +217,18 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
 
   const entries = loadRestV2Entries();
   const buildPlan = loadPlanBuilder();
+  const validPartnerFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "comcast-provider-map",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+    }),
+    "utf8"
+  ).toString("base64");
   const sampleContext = {
     serviceProviderId: "turner",
     requestorId: "turner",
@@ -216,8 +238,8 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     resourceIds: ["urn:adobe:test-resource"],
     redirectUrl: "https://experience.example.test/callback",
     domainName: "experience.example.test",
-    partner: "Roku",
-    partnerFrameworkStatus: "none",
+    partner: "Apple",
+    partnerFrameworkStatus: validPartnerFrameworkStatus,
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "spec-contract",
   };
@@ -243,6 +265,9 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     const partnerParam = getParameter(specMeta.parameters, "partner", "path");
     assert.equal(entry.usesPartnerPath === true, Boolean(partnerParam), `${entry.operationId} partner-path usage drifted`);
     assert.equal(entry.requirePartnerPath === true, Boolean(partnerParam?.required), `${entry.operationId} partner-path requirement drifted`);
+    if (String(entry.sectionKey || "") === "partnerSso") {
+      assert.equal(entry.requirePartnerFrameworkStatus === true, true, `${entry.operationId} must require a usable partner framework payload`);
+    }
 
     const bodyProperties = getBodyPropertyNames(specMeta.requestBody, components);
     const requiredBodyProperties = getRequiredBodyPropertyNames(specMeta.requestBody, components);
