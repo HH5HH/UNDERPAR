@@ -145,6 +145,49 @@ function loadWorkspaceDecodeFunctions(functionNames) {
   return context.module.exports;
 }
 
+function loadWorkspaceControllerFunctions(initialState = {}) {
+  const filePath = path.join(ROOT, "registered-application-health-workspace.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const calls = [];
+  const script = [
+    `
+      const state = Object.assign(
+        {
+          controllerOnline: false,
+          registeredApplicationHealthReady: false,
+          programmerId: "",
+          programmerName: "",
+          requestorId: "",
+          environmentKey: "",
+          environmentLabel: "",
+          selectionKey: "",
+          loading: false,
+          report: null,
+          jwtDecodeCache: new Map()
+        },
+        initialState
+      );
+    `,
+    extractFunctionSource(source, "firstNonEmptyString"),
+    extractFunctionSource(source, "canRunCurrentContextReport"),
+    extractFunctionSource(source, "getReportSelectionKey"),
+    extractFunctionSource(source, "applyControllerState"),
+    "module.exports = { state, applyControllerState };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Map,
+    initialState,
+    closeJwtInspector: () => calls.push("close"),
+    updateControllerBanner: () => calls.push("update"),
+    renderReport: () => calls.push("render"),
+    runCurrentContextReport: (options = {}) => calls.push({ type: "run", options }),
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return { ...context.module.exports, calls };
+}
+
 function encodeJwtSegment(value) {
   return Buffer.from(JSON.stringify(value), "utf8")
     .toString("base64")
@@ -314,6 +357,78 @@ test("registered application workspace decodes JWT payloads locally and extracts
   assert.deepEqual(decoded.summary.scopes, ["restv2", "esm"]);
 });
 
+test("registered application workspace treats ENV x MediaCompany changes as a hard redraw boundary", () => {
+  const { state, applyControllerState, calls } = loadWorkspaceControllerFunctions({
+    registeredApplicationHealthReady: true,
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "MML",
+    environmentKey: "release-production",
+    environmentLabel: "Production",
+    selectionKey: "release-production|Turner",
+    report: {
+      selectionKey: "release-production|Turner",
+      applications: [{ guid: "old-app" }],
+    },
+  });
+
+  applyControllerState({
+    controllerOnline: true,
+    registeredApplicationHealthReady: true,
+    programmerId: "FOX",
+    programmerName: "FOX",
+    requestorId: "FOXNOW",
+    environmentKey: "release-staging",
+    environmentLabel: "Staging",
+    selectionKey: "release-staging|FOX",
+  });
+
+  assert.equal(state.selectionKey, "release-staging|FOX");
+  assert.equal(state.report, null);
+  assert.deepEqual(
+    calls.map((entry) => (typeof entry === "string" ? entry : entry.type)),
+    ["close", "update", "render", "run"]
+  );
+  assert.deepEqual(normalizeRealmObject(calls.find((entry) => entry?.type === "run")?.options), {
+    statusMessage: "Refreshing Registered Application Inspector for the selected UnderPAR context...",
+    preferRefresh: false,
+  });
+});
+
+test("registered application workspace redraws requestor matches without refetching the catalog", () => {
+  const { state, applyControllerState, calls } = loadWorkspaceControllerFunctions({
+    registeredApplicationHealthReady: true,
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "MML",
+    environmentKey: "release-production",
+    environmentLabel: "Production",
+    selectionKey: "release-production|Turner",
+    report: {
+      selectionKey: "release-production|Turner",
+      applications: [{ guid: "app-guid" }],
+    },
+  });
+
+  applyControllerState({
+    controllerOnline: true,
+    registeredApplicationHealthReady: true,
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "NBADE",
+    environmentKey: "release-production",
+    environmentLabel: "Production",
+    selectionKey: "release-production|Turner",
+  });
+
+  assert.equal(state.requestorId, "NBADE");
+  assert.equal(state.report.selectionKey, "release-production|Turner");
+  assert.deepEqual(
+    calls.map((entry) => (typeof entry === "string" ? entry : entry.type)),
+    ["update", "render"]
+  );
+});
+
 test("registered application health sources wire the HEALTH action and workspace assets", () => {
   const popupSource = read("popup.js");
   const backgroundSource = read("background.js");
@@ -331,4 +446,7 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(workspaceHtml, /JWT Inspector/);
   assert.match(workspaceHtml, /Paste any JWT, bearer value, or JSON body containing a JWT/);
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
+  assert.match(workspaceJs, /const disableRerun = state\.loading \|\| !canRunCurrentContextReport\(\);/);
+  assert.match(workspaceJs, /if \(controllerChanged \|\| requestorChanged \|\| shouldClearStaleReport\) \{\s*renderReport\(\);/);
+  assert.match(workspaceJs, /const action = hasRenderableReport\(\) && preferRefresh \? "refresh-latest" : "run-dashboard";/);
 });

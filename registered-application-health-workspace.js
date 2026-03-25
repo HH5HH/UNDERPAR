@@ -149,8 +149,12 @@ function hasRenderableReport() {
   return Boolean(state.report);
 }
 
+function canRunCurrentContextReport() {
+  return Boolean(state.programmerId && state.registeredApplicationHealthReady);
+}
+
 function syncActionButtonsDisabled() {
-  const disableRerun = state.loading || !hasRenderableReport();
+  const disableRerun = state.loading || !canRunCurrentContextReport();
   const disableClear = state.loading || !hasRenderableReport();
   document.body.classList.toggle("net-busy", state.loading);
   document.body.setAttribute("aria-busy", state.loading ? "true" : "false");
@@ -195,16 +199,62 @@ function updateControllerBanner() {
   syncActionButtonsDisabled();
 }
 
+function getReportSelectionKey(report = null) {
+  return firstNonEmptyString([report?.selectionKey, report?.queryContext?.selectionKey]);
+}
+
 function applyControllerState(payload = {}) {
+  const nextSelectionKey = String(payload?.selectionKey || "").trim();
+  const nextProgrammerId = String(payload?.programmerId || "").trim();
+  const nextRequestorId = String(payload?.requestorId || "").trim();
+  const nextEnvironmentKey = String(payload?.environmentKey || "").trim();
+  const previousSelectionKey = String(state.selectionKey || "").trim();
+  const previousProgrammerId = String(state.programmerId || "").trim();
+  const previousRequestorId = String(state.requestorId || "").trim();
+  const previousEnvironmentKey = String(state.environmentKey || "").trim();
+  const previousReady = state.registeredApplicationHealthReady === true;
+  const controllerChanged =
+    nextSelectionKey !== previousSelectionKey ||
+    nextProgrammerId !== previousProgrammerId ||
+    nextEnvironmentKey !== previousEnvironmentKey;
+  const requestorChanged = nextRequestorId !== previousRequestorId;
+  const readinessActivated = !previousReady && payload?.registeredApplicationHealthReady === true;
+  const hadLiveControllerContext = Boolean(previousSelectionKey || previousProgrammerId || previousEnvironmentKey);
+  const currentReportSelectionKey = getReportSelectionKey(state.report);
+  const shouldClearStaleReport = controllerChanged && currentReportSelectionKey !== nextSelectionKey;
+  const shouldAutoRefreshForControllerUpdate =
+    (controllerChanged || readinessActivated) &&
+    hadLiveControllerContext &&
+    nextProgrammerId &&
+    payload?.registeredApplicationHealthReady === true &&
+    !state.loading;
+
   state.controllerOnline = payload?.controllerOnline === true;
   state.registeredApplicationHealthReady = payload?.registeredApplicationHealthReady === true;
-  state.programmerId = String(payload?.programmerId || "");
+  state.programmerId = nextProgrammerId;
   state.programmerName = String(payload?.programmerName || "");
-  state.requestorId = String(payload?.requestorId || "");
-  state.environmentKey = String(payload?.environmentKey || "");
+  state.requestorId = nextRequestorId;
+  state.environmentKey = nextEnvironmentKey;
   state.environmentLabel = String(payload?.environmentLabel || "");
-  state.selectionKey = String(payload?.selectionKey || "");
+  state.selectionKey = nextSelectionKey;
+  if (controllerChanged) {
+    closeJwtInspector();
+    state.loading = false;
+  }
+  if (shouldClearStaleReport) {
+    state.report = null;
+    state.jwtDecodeCache.clear();
+  }
   updateControllerBanner();
+  if (controllerChanged || requestorChanged || shouldClearStaleReport) {
+    renderReport();
+  }
+  if (shouldAutoRefreshForControllerUpdate) {
+    void runCurrentContextReport({
+      statusMessage: "Refreshing Registered Application Inspector for the selected UnderPAR context...",
+      preferRefresh: false,
+    });
+  }
 }
 
 function normalizeJwtTimestamp(value) {
@@ -834,8 +884,17 @@ function renderReport() {
     return;
   }
   if (!state.report) {
-    els.cardsHost.innerHTML =
-      '<article class="rest-report-card"><p class="regapp-empty-state">No Registered Application Inspector report loaded yet.</p></article>';
+    let emptyMessage = "No Registered Application Inspector report loaded yet.";
+    if (state.loading && state.programmerId) {
+      emptyMessage = "Loading registered applications for the selected ENV x Media Company...";
+    } else if (!state.programmerId) {
+      emptyMessage = "Select an ENV x Media Company in HEALTH > Status and click REG APPS.";
+    } else if (!state.registeredApplicationHealthReady) {
+      emptyMessage = "UnderPAR is still hydrating the Adobe Pass registered application context for the selected ENV x Media Company.";
+    }
+    els.cardsHost.innerHTML = `<article class="rest-report-card"><p class="regapp-empty-state">${escapeHtml(
+      emptyMessage
+    )}</p></article>`;
     return;
   }
 
@@ -1003,7 +1062,6 @@ function handleWorkspaceEvent(eventName, payload = {}) {
   }
   if (event === "controller-state") {
     applyControllerState(payload);
-    renderReport();
     return;
   }
   if (event === "report-start") {
@@ -1015,10 +1073,13 @@ function handleWorkspaceEvent(eventName, payload = {}) {
     return;
   }
   if (event === "environment-switch-rerun") {
-    if (state.loading || !hasRenderableReport()) {
+    if (state.loading || !canRunCurrentContextReport()) {
       return;
     }
-    void rerunLatestReport();
+    void runCurrentContextReport({
+      statusMessage: "Refreshing Registered Application Inspector for the selected UnderPAR context...",
+      preferRefresh: false,
+    });
     return;
   }
   if (event === "workspace-clear") {
@@ -1043,24 +1104,53 @@ async function sendWorkspaceAction(action, payload = {}) {
   }
 }
 
-async function rerunLatestReport() {
+async function runCurrentContextReport(options = {}) {
   if (state.loading) {
     return;
   }
-  if (!hasRenderableReport()) {
-    setStatus("No previous Registered Application Inspector report is available to refresh.", "error");
+  if (!state.programmerId) {
+    setStatus("Select a Media Company before opening Registered Application Inspector.", "error");
     return;
   }
+  if (!state.registeredApplicationHealthReady) {
+    setStatus("UnderPAR is still hydrating the Adobe Pass registered application context for the selected ENV x Media Company.", "error");
+    return;
+  }
+  const preferRefresh = options.preferRefresh !== false;
+  const action = hasRenderableReport() && preferRefresh ? "refresh-latest" : "run-dashboard";
   state.loading = true;
   syncActionButtonsDisabled();
-  setStatus("Refreshing Registered Application Inspector...");
-  const result = await sendWorkspaceAction("refresh-latest", {
+  setStatus(
+    String(
+      options.statusMessage ||
+        (action === "refresh-latest"
+          ? "Refreshing Registered Application Inspector..."
+          : "Loading Registered Application Inspector...")
+    ).trim()
+  );
+  const result = await sendWorkspaceAction(action, {
     selectionKey: String(state.selectionKey || "").trim(),
+    queryContext: {
+      programmerId: String(state.programmerId || "").trim(),
+      programmerName: String(state.programmerName || "").trim(),
+      requestorId: String(state.requestorId || "").trim(),
+      environmentKey: String(state.environmentKey || "").trim(),
+      environmentLabel: String(state.environmentLabel || "").trim(),
+      selectionKey: String(state.selectionKey || "").trim(),
+    },
   });
   if (!result?.ok) {
     state.loading = false;
     syncActionButtonsDisabled();
-    setStatus(String(result?.error || "Unable to refresh Registered Application Inspector."), "error");
+    setStatus(
+      String(
+        result?.error ||
+          (action === "refresh-latest"
+            ? "Unable to refresh Registered Application Inspector."
+            : "Unable to load Registered Application Inspector.")
+      ),
+      "error"
+    );
   }
 }
 
@@ -1076,7 +1166,7 @@ function clearWorkspace() {
 function registerEventHandlers() {
   if (els.rerunAllButton) {
     els.rerunAllButton.addEventListener("click", () => {
-      void rerunLatestReport();
+      void runCurrentContextReport();
     });
   }
   if (els.clearButton) {
