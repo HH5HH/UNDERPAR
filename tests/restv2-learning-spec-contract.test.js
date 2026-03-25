@@ -89,11 +89,17 @@ function loadPlanBuilder() {
     extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
     extractFunctionSource(source, "decodeBase64TextSafe"),
     extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveHeaderValue"),
+    extractFunctionSource(source, "collectRestV2CaseInsensitiveObjectValues"),
+    extractFunctionSource(source, "getRestV2InteractiveDocsHeaderAliasCandidates"),
     extractFunctionSource(source, "decodeURIComponentSafe"),
     extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
+    extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
+    extractFunctionSource(source, "resolveRestV2InteractiveDocsHeaderValueFromContext"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsHydrationPlan"),
     "module.exports = { buildRestV2InteractiveDocsHydrationPlan };",
@@ -106,6 +112,7 @@ function loadPlanBuilder() {
     btoa,
     unescape,
     encodeURIComponent,
+    Headers,
   };
   vm.runInNewContext(script, context, { filename: POPUP_PATH });
   return context.module.exports.buildRestV2InteractiveDocsHydrationPlan;
@@ -233,6 +240,9 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     }),
     "utf8"
   ).toString("base64");
+  const rawTempPassIdentity = JSON.stringify({
+    subscriberId: "promo-user-1",
+  });
   const sampleContext = {
     serviceProviderId: "turner",
     requestorId: "turner",
@@ -244,6 +254,9 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     domainName: "experience.example.test",
     partner: "Apple",
     partnerFrameworkStatus: validPartnerFrameworkStatus,
+    adobeSubjectToken: "subject-token-payload",
+    adServiceToken: "service-token-payload",
+    tempPassIdentity: rawTempPassIdentity,
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "spec-contract",
   };
@@ -269,6 +282,26 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     const partnerParam = getParameter(specMeta.parameters, "partner", "path");
     assert.equal(entry.usesPartnerPath === true, Boolean(partnerParam), `${entry.operationId} partner-path usage drifted`);
     assert.equal(entry.requirePartnerPath === true, Boolean(partnerParam?.required), `${entry.operationId} partner-path requirement drifted`);
+    const adobeSubjectTokenHeader = getParameter(specMeta.parameters, "Adobe-Subject-Token", "header");
+    assert.equal(
+      entry.usesAdobeSubjectToken === true,
+      Boolean(adobeSubjectTokenHeader),
+      `${entry.operationId} Adobe-Subject-Token usage drifted`
+    );
+    const adServiceTokenHeader = getParameter(specMeta.parameters, "AD-Service-Token", "header");
+    assert.equal(
+      entry.usesAdServiceToken === true,
+      Boolean(adServiceTokenHeader),
+      `${entry.operationId} AD-Service-Token usage drifted`
+    );
+    const tempPassIdentityHeader =
+      getParameter(specMeta.parameters, "AP-Temppass-Identity", "header") ||
+      getParameter(specMeta.parameters, "AP-TempPass-Identity", "header");
+    assert.equal(
+      entry.usesTempPassIdentity === true,
+      Boolean(tempPassIdentityHeader),
+      `${entry.operationId} AP-Temppass-Identity usage drifted`
+    );
     if (String(entry.sectionKey || "") === "partnerSso") {
       assert.equal(entry.requirePartnerFrameworkStatus === true, true, `${entry.operationId} must require a usable partner framework payload`);
     }
@@ -320,6 +353,27 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
         plan.fieldValues["query.redirectUrl"],
         plan.docsUrl,
         `${entry.operationId} query.redirectUrl must use the clicked docs operation url`
+      );
+    }
+    if (entry.usesAdobeSubjectToken === true) {
+      assert.equal(
+        plan.fieldValues["header.Adobe-Subject-Token"],
+        sampleContext.adobeSubjectToken,
+        `${entry.operationId} must hydrate Adobe-Subject-Token when UnderPAR has it`
+      );
+    }
+    if (entry.usesAdServiceToken === true) {
+      assert.equal(
+        plan.fieldValues["header.AD-Service-Token"],
+        sampleContext.adServiceToken,
+        `${entry.operationId} must hydrate AD-Service-Token when UnderPAR has it`
+      );
+    }
+    if (entry.usesTempPassIdentity === true) {
+      assert.equal(
+        plan.fieldValues["header.AP-Temppass-Identity"],
+        Buffer.from(rawTempPassIdentity, "utf8").toString("base64"),
+        `${entry.operationId} must normalize AP-Temppass-Identity when UnderPAR has it`
       );
     }
   }

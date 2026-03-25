@@ -342,6 +342,52 @@ test("partner framework status extraction falls back to debug-flow preview text"
       ADOBE_SP_BASE: "https://sp.auth.adobe.com",
       firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
       dedupeRestV2CandidateStrings: (values = []) => [...new Set((Array.isArray(values) ? values : [values]).map((value) => String(value || "").trim()).filter(Boolean))],
+      normalizeRestV2ProfileAttributeValue: (value = "") => String(value == null ? "" : value).trim(),
+      collectRestV2CaseInsensitiveObjectValues: (source = null, keyCandidates = []) => {
+        if (!source || typeof source !== "object") {
+          return [];
+        }
+        const candidates = (Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates])
+          .map((key) => String(key || "").trim().toLowerCase())
+          .filter(Boolean);
+        const values = [];
+        const visit = (node) => {
+          if (!node || typeof node !== "object") {
+            return;
+          }
+          if (Array.isArray(node)) {
+            node.forEach((entry) => visit(entry));
+            return;
+          }
+          Object.entries(node).forEach(([key, value]) => {
+            if (candidates.includes(String(key || "").trim().toLowerCase())) {
+              const normalized = String(value == null ? "" : value).trim();
+              if (normalized) {
+                values.push(normalized);
+              }
+            }
+            if (value && typeof value === "object") {
+              visit(value);
+            }
+          });
+        };
+        visit(source);
+        return values;
+      },
+      getRestV2InteractiveDocsHeaderAliasCandidates: (headerName = "") => {
+        const normalized = String(headerName || "").trim().toLowerCase();
+        if (normalized === "ap-partner-framework-status") {
+          return [
+            "AP-Partner-Framework-Status",
+            "ap-partner-framework-status",
+            "partnerFrameworkStatus",
+            "partner_framework_status",
+            "frameworkStatus",
+            "framework_status",
+          ];
+        }
+        return [headerName];
+      },
       decodeURIComponentSafe: (value = "") => {
         try {
           return decodeURIComponent(String(value || "").trim());

@@ -300,6 +300,8 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     operationId: "createSessionUsingPOST",
     requiresAccessToken: true,
     usesDeviceHeaders: true,
+    usesAdobeSubjectToken: true,
+    usesAdServiceToken: true,
     contentType: "application/x-www-form-urlencoded",
     usesBodyMvpd: true,
     usesBodyDomainName: true,
@@ -363,6 +365,8 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     operationId: "getProfilesUsingGET_1",
     requiresAccessToken: true,
     usesDeviceHeaders: true,
+    usesAdobeSubjectToken: true,
+    usesAdServiceToken: true,
     usesPartnerFrameworkStatus: true,
   },
   {
@@ -379,7 +383,10 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     usesDeviceHeaders: true,
     usesMvpdPath: true,
     requireMvpdPath: true,
+    usesAdobeSubjectToken: true,
+    usesAdServiceToken: true,
     usesPartnerFrameworkStatus: true,
+    usesTempPassIdentity: true,
   },
   {
     key: "decisions-authorize",
@@ -397,7 +404,10 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     requireMvpdPath: true,
     usesBodyResources: true,
     requireBodyResources: true,
+    usesAdobeSubjectToken: true,
+    usesAdServiceToken: true,
     usesPartnerFrameworkStatus: true,
+    usesTempPassIdentity: true,
     contentType: "application/json",
   },
   {
@@ -416,7 +426,10 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     requireMvpdPath: true,
     usesBodyResources: true,
     requireBodyResources: true,
+    usesAdobeSubjectToken: true,
+    usesAdServiceToken: true,
     usesPartnerFrameworkStatus: true,
+    usesTempPassIdentity: true,
     contentType: "application/json",
   },
   {
@@ -433,6 +446,8 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     usesDeviceHeaders: true,
     usesMvpdPath: true,
     requireMvpdPath: true,
+    usesAdobeSubjectToken: true,
+    usesAdServiceToken: true,
     usesQueryRedirectUrl: true,
   },
   {
@@ -16216,9 +16231,12 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
       ...(Array.isArray(source?.sessionCodeCandidates) ? source.sessionCodeCandidates : []),
     ])
   );
+  const latestSourceList = sourceList.slice().reverse();
   const mergedSessionResponseHeaders =
-    sourceList.find((source) => source?.sessionResponseHeaders && typeof source.sessionResponseHeaders === "object")
+    latestSourceList.find((source) => source?.sessionResponseHeaders && typeof source.sessionResponseHeaders === "object")
       ?.sessionResponseHeaders || null;
+  const mergedSessionData =
+    latestSourceList.find((source) => source?.sessionData && typeof source.sessionData === "object")?.sessionData || null;
   return {
     ...harvest,
     flowId: firstNonEmptyString(sourceList.map((source) => String(source?.flowId || "").trim())),
@@ -16234,6 +16252,15 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     partnerFrameworkStatus: firstNonEmptyString(
       sourceList.map((source) => String(source?.partnerFrameworkStatus || "").trim())
     ),
+    adobeSubjectToken: firstNonEmptyString(
+      sourceList.map((source) => String(source?.adobeSubjectToken || "").trim())
+    ),
+    adServiceToken: firstNonEmptyString(
+      sourceList.map((source) => String(source?.adServiceToken || "").trim())
+    ),
+    tempPassIdentity: firstNonEmptyString(
+      sourceList.map((source) => String(source?.tempPassIdentity || "").trim())
+    ),
     samlResponse: firstNonEmptyString(sourceList.map((source) => String(source?.samlResponse || "").trim())),
     samlSource: firstNonEmptyString(sourceList.map((source) => String(source?.samlSource || "").trim())),
     sessionUrl: normalizeAdobeNavigationUrl(firstNonEmptyString(sourceList.map((source) => String(source?.sessionUrl || "").trim()))),
@@ -16244,7 +16271,11 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     domainName: firstNonEmptyString(sourceList.map((source) => String(source?.domainName || "").trim())),
     sessionResponseHeaders:
       mergedSessionResponseHeaders && typeof mergedSessionResponseHeaders === "object"
-        ? { ...mergedSessionResponseHeaders }
+        ? cloneJsonLikeValue(mergedSessionResponseHeaders, null)
+        : null,
+    sessionData:
+      mergedSessionData && typeof mergedSessionData === "object"
+        ? cloneJsonLikeValue(mergedSessionData, null)
         : null,
     preauthzChecks: mergedChecks,
   };
@@ -16851,6 +16882,9 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     sessionPartner: String(harvest.sessionPartner || "").trim(),
     partner: String(firstNonEmptyString([harvest.partner, harvest.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(harvest.partnerFrameworkStatus || "").trim(),
+    adobeSubjectToken: String(harvest.adobeSubjectToken || "").trim(),
+    adServiceToken: String(harvest.adServiceToken || "").trim(),
+    tempPassIdentity: String(harvest.tempPassIdentity || "").trim(),
     samlResponse: String(harvest.samlResponse || "").trim(),
     samlSource: String(harvest.samlSource || "").trim(),
     sessionUrl,
@@ -16858,9 +16892,11 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     redirectUrl: normalizeAdobeNavigationUrl(String(harvest.redirectUrl || "").trim()),
     domainName: String(harvest.domainName || "").trim(),
     flowId: String(harvest.flowId || "").trim(),
+    sessionData:
+      harvest?.sessionData && typeof harvest.sessionData === "object" ? cloneJsonLikeValue(harvest.sessionData, null) : null,
     sessionResponseHeaders:
       harvest?.sessionResponseHeaders && typeof harvest.sessionResponseHeaders === "object"
-        ? { ...harvest.sessionResponseHeaders }
+        ? cloneJsonLikeValue(harvest.sessionResponseHeaders, null)
         : null,
     appInfo,
     restV2AppCandidates: [appInfo],
@@ -24333,11 +24369,17 @@ function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntr
     String(resolvedEntry?.sessionPartner || "").trim(),
     String(sessionData?.partner || "").trim(),
   ]);
+  const adobeSubjectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "Adobe-Subject-Token");
+  const adServiceToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "AD-Service-Token");
+  const tempPassIdentity = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "AP-Temppass-Identity");
   if (sessionCode) {
     context.sessionCode = sessionCode;
   }
   if (sessionCodeCandidates.length > 0) {
     context.sessionCodeCandidates = sessionCodeCandidates;
+  }
+  if (!context?.sessionData && sessionData) {
+    context.sessionData = cloneJsonLikeValue(sessionData, null);
   }
   if (!String(context?.sessionAction || "").trim()) {
     context.sessionAction = String(sessionData?.actionName || "").trim();
@@ -24365,6 +24407,15 @@ function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntr
   ) {
     context.sessionResponseHeaders = { ...resolvedEntry.sessionResponseHeaders };
   }
+  if (!String(context?.adobeSubjectToken || "").trim() && adobeSubjectToken) {
+    context.adobeSubjectToken = adobeSubjectToken;
+  }
+  if (!String(context?.adServiceToken || "").trim() && adServiceToken) {
+    context.adServiceToken = adServiceToken;
+  }
+  if (!String(context?.tempPassIdentity || "").trim() && tempPassIdentity) {
+    context.tempPassIdentity = tempPassIdentity;
+  }
   if (sessionUrl) {
     context.sessionUrl = sessionUrl;
   }
@@ -24391,11 +24442,16 @@ function setRestV2PreparedLoginEntry(context, payload) {
     preparedAt: Date.now(),
     loginUrl: String(payload?.loginUrl || "").trim(),
     appInfo: payload?.appInfo || context?.appInfo || null,
-    sessionData: payload?.sessionData && typeof payload.sessionData === "object" ? payload.sessionData : null,
+    sessionData: payload?.sessionData && typeof payload.sessionData === "object" ? cloneJsonLikeValue(payload.sessionData, null) : null,
     sessionResponseHeaders:
-      payload?.sessionResponseHeaders && typeof payload.sessionResponseHeaders === "object" ? payload.sessionResponseHeaders : null,
+      payload?.sessionResponseHeaders && typeof payload.sessionResponseHeaders === "object"
+        ? cloneJsonLikeValue(payload.sessionResponseHeaders, null)
+        : null,
     partnerFrameworkStatus: String(payload?.partnerFrameworkStatus || payload?.sessionData?.partnerFrameworkStatus || "").trim(),
     sessionPartner: String(payload?.sessionPartner || payload?.sessionData?.partner || "").trim(),
+    adobeSubjectToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "Adobe-Subject-Token") || "").trim(),
+    adServiceToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "AD-Service-Token") || "").trim(),
+    tempPassIdentity: String(resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "AP-Temppass-Identity") || "").trim(),
     domainName: String(firstNonEmptyString([payload?.payload?.domainName, payload?.sessionData?.existingParameters?.domainName]) || "").trim(),
     redirectUrl: normalizeAdobeNavigationUrl(
       firstNonEmptyString([payload?.payload?.redirectUrl, payload?.sessionData?.existingParameters?.redirectUrl])
@@ -25246,11 +25302,40 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     sessionPartner: String(firstNonEmptyString([options?.sessionPartner, context?.sessionPartner]) || "").trim(),
     partner: String(firstNonEmptyString([options?.partner, context?.partner, context?.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(options?.partnerFrameworkStatus || context?.partnerFrameworkStatus || "").trim(),
+    adobeSubjectToken: String(
+      firstNonEmptyString([
+        options?.adobeSubjectToken,
+        context?.adobeSubjectToken,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(context, "Adobe-Subject-Token"),
+      ]) || ""
+    ).trim(),
+    adServiceToken: String(
+      firstNonEmptyString([
+        options?.adServiceToken,
+        context?.adServiceToken,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AD-Service-Token"),
+      ]) || ""
+    ).trim(),
+    tempPassIdentity: String(
+      firstNonEmptyString([
+        options?.tempPassIdentity,
+        context?.tempPassIdentity,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Temppass-Identity"),
+      ]) || ""
+    ).trim(),
     samlResponse: String(firstNonEmptyString([options?.samlResponse, context?.samlResponse]) || "").trim(),
     samlSource: String(firstNonEmptyString([options?.samlSource, context?.samlSource]) || "").trim(),
+    sessionData:
+      options?.sessionData && typeof options.sessionData === "object"
+        ? cloneJsonLikeValue(options.sessionData, null)
+        : context?.sessionData && typeof context.sessionData === "object"
+          ? cloneJsonLikeValue(context.sessionData, null)
+          : null,
     sessionResponseHeaders:
       options?.sessionResponseHeaders && typeof options.sessionResponseHeaders === "object"
-        ? { ...options.sessionResponseHeaders }
+        ? cloneJsonLikeValue(options.sessionResponseHeaders, null)
+        : context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
+          ? cloneJsonLikeValue(context.sessionResponseHeaders, null)
         : null,
     sessionUrl,
     loginUrl,
@@ -25424,9 +25509,16 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
       partnerFrameworkStatus: String(
         firstNonEmptyString([preparedEntry?.partnerFrameworkStatus, preparedEntry?.sessionData?.partnerFrameworkStatus]) || ""
       ).trim(),
+      adobeSubjectToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(preparedEntry, "Adobe-Subject-Token") || "").trim(),
+      adServiceToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(preparedEntry, "AD-Service-Token") || "").trim(),
+      tempPassIdentity: String(resolveRestV2InteractiveDocsHeaderValueFromContext(preparedEntry, "AP-Temppass-Identity") || "").trim(),
+      sessionData:
+        preparedEntry?.sessionData && typeof preparedEntry.sessionData === "object"
+          ? cloneJsonLikeValue(preparedEntry.sessionData, null)
+          : null,
       sessionResponseHeaders:
         preparedEntry?.sessionResponseHeaders && typeof preparedEntry.sessionResponseHeaders === "object"
-          ? { ...preparedEntry.sessionResponseHeaders }
+          ? cloneJsonLikeValue(preparedEntry.sessionResponseHeaders, null)
           : null,
       sessionUrl: normalizeAdobeNavigationUrl(firstNonEmptyString([preparedEntry?.sessionData?.url])),
       loginUrl: preparedEntry?.loginUrl,
@@ -26654,15 +26746,20 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     sessionPartner: String(context?.sessionPartner || "").trim(),
     partner: String(partner || "").trim(),
     partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
+    adobeSubjectToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "Adobe-Subject-Token") || "").trim(),
+    adServiceToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AD-Service-Token") || "").trim(),
+    tempPassIdentity: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Temppass-Identity") || "").trim(),
     samlResponse: String(context?.samlResponse || "").trim(),
     samlSource: String(context?.samlSource || "").trim(),
     sessionUrl,
     loginUrl,
     redirectUrl,
     domainName,
+    sessionData:
+      context?.sessionData && typeof context.sessionData === "object" ? cloneJsonLikeValue(context.sessionData, null) : null,
     sessionResponseHeaders:
       context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
-        ? { ...context.sessionResponseHeaders }
+        ? cloneJsonLikeValue(context.sessionResponseHeaders, null)
         : null,
     profileUrl: String(profileCheckResult.url || "").trim(),
     profileCheckOutcome,
@@ -27408,6 +27505,11 @@ function extractRestV2PartnerFrameworkStatusFromText(value = "") {
       return "";
     }
     return firstNonEmptyString([
+      ...collectRestV2CaseInsensitiveObjectValues(
+        candidate,
+        getRestV2InteractiveDocsHeaderAliasCandidates("AP-Partner-Framework-Status"),
+        { maxDepth: 5 }
+      ),
       getRestV2CaseInsensitiveObjectValue(candidate, [
         "ap-partner-framework-status",
         "AP-Partner-Framework-Status",
@@ -54022,11 +54124,18 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
     sessionPartner: String(recordingContext.sessionPartner || "").trim(),
     partner: String(firstNonEmptyString([recordingContext.partner, recordingContext.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(recordingContext.partnerFrameworkStatus || "").trim(),
+    adobeSubjectToken: String(recordingContext.adobeSubjectToken || "").trim(),
+    adServiceToken: String(recordingContext.adServiceToken || "").trim(),
+    tempPassIdentity: String(recordingContext.tempPassIdentity || "").trim(),
     samlResponse: String(recordingContext.samlResponse || "").trim(),
     samlSource: String(recordingContext.samlSource || "").trim(),
+    sessionData:
+      recordingContext?.sessionData && typeof recordingContext.sessionData === "object"
+        ? cloneJsonLikeValue(recordingContext.sessionData, null)
+        : null,
     sessionResponseHeaders:
       recordingContext?.sessionResponseHeaders && typeof recordingContext.sessionResponseHeaders === "object"
-        ? { ...recordingContext.sessionResponseHeaders }
+        ? cloneJsonLikeValue(recordingContext.sessionResponseHeaders, null)
         : null,
     sessionUrl: normalizeAdobeNavigationUrl(String(recordingContext.sessionUrl || "").trim()),
     loginUrl: normalizeAdobeNavigationUrl(String(recordingContext.loginUrl || "").trim()),
@@ -54083,6 +54192,9 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     sessionPartner: String(context.sessionPartner || "").trim(),
     partner: String(firstNonEmptyString([context.partner, context.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
+    adobeSubjectToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "Adobe-Subject-Token") || "").trim(),
+    adServiceToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AD-Service-Token") || "").trim(),
+    tempPassIdentity: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Temppass-Identity") || "").trim(),
     samlResponse: String(context.samlResponse || "").trim(),
     samlSource: String(context.samlSource || "").trim(),
     sessionUrl,
@@ -54090,9 +54202,11 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     redirectUrl: normalizeAdobeNavigationUrl(String(context.redirectUrl || "").trim()),
     domainName: String(context.domainName || "").trim(),
     flowId: String(resolveRestV2DebugFlowIdForHarvest(null, context.flowId || "") || "").trim(),
+    sessionData:
+      context?.sessionData && typeof context.sessionData === "object" ? cloneJsonLikeValue(context.sessionData, null) : null,
     sessionResponseHeaders:
       context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
-        ? { ...context.sessionResponseHeaders }
+        ? cloneJsonLikeValue(context.sessionResponseHeaders, null)
         : null,
     harvestedAt: Date.now(),
     profileCount: 0,
@@ -61909,7 +62023,12 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
         sessionCodeCandidates: [],
         redirectUrl: "",
         domainName: "",
+        sessionData: null,
+        sessionResponseHeaders: null,
         partnerFrameworkStatus: "",
+        adobeSubjectToken: "",
+        adServiceToken: "",
+        tempPassIdentity: "",
         partner: "",
         samlResponse: "",
         samlSource: "",
@@ -62005,6 +62124,24 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     String(harvest?.sessionCode || "").trim(),
     sessionCodeCandidates[0],
   ]);
+  const sessionData =
+    (activeRecordingContext?.sessionData && typeof activeRecordingContext.sessionData === "object"
+      ? cloneJsonLikeValue(activeRecordingContext.sessionData, null)
+      : null) ||
+    (harvestContext?.sessionData && typeof harvestContext.sessionData === "object"
+      ? cloneJsonLikeValue(harvestContext.sessionData, null)
+      : null) ||
+    (harvest?.sessionData && typeof harvest.sessionData === "object" ? cloneJsonLikeValue(harvest.sessionData, null) : null);
+  const sessionResponseHeaders =
+    (activeRecordingContext?.sessionResponseHeaders && typeof activeRecordingContext.sessionResponseHeaders === "object"
+      ? cloneJsonLikeValue(activeRecordingContext.sessionResponseHeaders, null)
+      : null) ||
+    (harvestContext?.sessionResponseHeaders && typeof harvestContext.sessionResponseHeaders === "object"
+      ? cloneJsonLikeValue(harvestContext.sessionResponseHeaders, null)
+      : null) ||
+    (harvest?.sessionResponseHeaders && typeof harvest.sessionResponseHeaders === "object"
+      ? cloneJsonLikeValue(harvest.sessionResponseHeaders, null)
+      : null);
   const operationRedirectUrl =
     resolvedEntry?.usesBodyRedirectUrl === true || resolvedEntry?.usesQueryRedirectUrl === true
       ? buildRestV2InteractiveDocsUrl(resolvedEntry.operationAnchor || resolvedEntry.tagAnchor || "")
@@ -62025,6 +62162,21 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
   const partnerFrameworkStatus = firstNonEmptyString([
     String(activeRecordingContext?.partnerFrameworkStatus || "").trim(),
     String(resolveRestV2PartnerFrameworkStatusFromContext(harvestContext || harvest) || "").trim(),
+  ]);
+  const adobeSubjectToken = firstNonEmptyString([
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(activeRecordingContext, "Adobe-Subject-Token") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "Adobe-Subject-Token") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvest, "Adobe-Subject-Token") || "").trim(),
+  ]);
+  const adServiceToken = firstNonEmptyString([
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(activeRecordingContext, "AD-Service-Token") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AD-Service-Token") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvest, "AD-Service-Token") || "").trim(),
+  ]);
+  const tempPassIdentity = firstNonEmptyString([
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(activeRecordingContext, "AP-Temppass-Identity") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Temppass-Identity") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvest, "AP-Temppass-Identity") || "").trim(),
   ]);
   const partner = firstNonEmptyString([
     String(resolveRestV2PartnerNameFromContext(activeRecordingContext) || "").trim(),
@@ -62070,7 +62222,12 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     sessionCodeCandidates,
     redirectUrl: String(redirectUrl || "").trim(),
     domainName: String(domainName || "").trim(),
+    sessionData,
+    sessionResponseHeaders,
     partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
+    adobeSubjectToken: String(adobeSubjectToken || "").trim(),
+    adServiceToken: String(adServiceToken || "").trim(),
+    tempPassIdentity: String(tempPassIdentity || "").trim(),
     partner: String(partner || "").trim(),
     samlResponse: String(samlResponse || "").trim(),
     samlSource: String(samlSource || "").trim(),
@@ -62087,6 +62244,7 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
   const preparedContext = {
     ...resolvedContext,
   };
+  hydrateRestV2ContextFromPreparedLoginEntry(preparedContext);
   if (resolvedEntry.usesBodyResources === true) {
     Object.assign(preparedContext, await enrichRestV2LearningResourcesFromConsoleContext(preparedContext));
   }
@@ -62094,13 +62252,21 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
     resolvedEntry.usesPartnerPath === true ||
     resolvedEntry.usesPartnerFrameworkStatus === true ||
     resolvedEntry.usesBodySamlResponse === true;
+  const optionalHeaderNames = [
+    resolvedEntry.usesAdobeSubjectToken === true ? "Adobe-Subject-Token" : "",
+    resolvedEntry.usesAdServiceToken === true ? "AD-Service-Token" : "",
+    resolvedEntry.usesTempPassIdentity === true ? "AP-Temppass-Identity" : "",
+  ].filter(Boolean);
+  const missingOptionalHeaders = optionalHeaderNames.filter(
+    (headerName) => !String(resolveRestV2InteractiveDocsHeaderValueFromContext(preparedContext, headerName) || "").trim()
+  );
   const missingPartner =
     resolvedEntry.usesPartnerPath === true && !String(resolveRestV2PartnerNameFromContext(preparedContext) || "").trim();
   const missingPartnerFrameworkStatus =
     resolvedEntry.usesPartnerFrameworkStatus === true &&
     !isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(preparedContext));
   const missingSamlResponse = resolvedEntry.usesBodySamlResponse === true && !String(preparedContext.samlResponse || "").trim();
-  if (!needsPartnerFlowHydration || (!missingPartner && !missingPartnerFrameworkStatus && !missingSamlResponse)) {
+  if ((!needsPartnerFlowHydration || (!missingPartner && !missingPartnerFrameworkStatus && !missingSamlResponse)) && missingOptionalHeaders.length === 0) {
     return preparedContext;
   }
   const flowId = firstNonEmptyString([
@@ -62113,7 +62279,12 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
   preparedContext.flowId = flowId;
   try {
     const flowSnapshot = await getRestV2DebugFlowSnapshot(flowId);
-    hydrateRestV2PartnerSsoContextFromDebugFlow(preparedContext, flowSnapshot);
+    if (needsPartnerFlowHydration) {
+      hydrateRestV2PartnerSsoContextFromDebugFlow(preparedContext, flowSnapshot);
+    }
+    if (missingOptionalHeaders.length > 0) {
+      hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(preparedContext, flowSnapshot, missingOptionalHeaders);
+    }
     if (!String(preparedContext.samlResponse || "").trim()) {
       const samlDetails = extractRestV2SamlResponseFromDebugFlow(flowSnapshot);
       if (String(samlDetails?.samlResponse || "").trim()) {
@@ -62159,11 +62330,30 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     fieldValues["header.AP-Device-Identifier"] = String(deviceHeaders["AP-Device-Identifier"] || "").trim();
     fieldValues["header.X-Device-Info"] = String(deviceHeaders["X-Device-Info"] || "").trim();
   }
+  if (resolvedEntry.usesAdobeSubjectToken === true) {
+    const adobeSubjectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "Adobe-Subject-Token");
+    if (adobeSubjectToken) {
+      fieldValues["header.Adobe-Subject-Token"] = adobeSubjectToken;
+    }
+  }
+  if (resolvedEntry.usesAdServiceToken === true) {
+    const adServiceToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "AD-Service-Token");
+    if (adServiceToken) {
+      fieldValues["header.AD-Service-Token"] = adServiceToken;
+    }
+  }
+  if (resolvedEntry.usesTempPassIdentity === true) {
+    const tempPassIdentity = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "AP-Temppass-Identity");
+    if (tempPassIdentity) {
+      fieldValues["header.AP-Temppass-Identity"] = tempPassIdentity;
+    }
+  }
   if (resolvedEntry.contentType) {
     fieldValues["header.Content-Type"] = String(resolvedEntry.contentType || "").trim();
   }
-  const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
-    String(resolvedContext.partnerFrameworkStatus || "").trim()
+  const partnerFrameworkStatus = resolveRestV2InteractiveDocsHeaderValueFromContext(
+    resolvedContext,
+    "AP-Partner-Framework-Status"
   );
   const usablePartnerFrameworkStatus = partnerFrameworkStatus;
   if (resolvedEntry.usesPartnerFrameworkStatus === true && usablePartnerFrameworkStatus) {
@@ -63002,6 +63192,16 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       name: normalize(normalizedFieldName.slice(dotIndex + 1)),
     };
   };
+  const getFieldNameCandidates = (fieldName = "") => {
+    const normalizedFieldName = normalize(fieldName);
+    if (!normalizedFieldName) {
+      return [];
+    }
+    if (normalizedFieldName === "header.AP-Temppass-Identity") {
+      return [normalizedFieldName, "header.AP-TempPass-Identity"];
+    }
+    return [normalizedFieldName];
+  };
   const collectDescendants = (root) => {
     if (!root || typeof root.querySelectorAll !== "function") {
       return [];
@@ -63180,22 +63380,29 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     return true;
   };
   const findLabeledControl = (operation, fieldName) => {
-    const { scope, name } = parseFieldReference(fieldName);
-    const normalizedName = String(name || "").trim().toLowerCase();
-    if (!operation || !normalizedName) {
+    const fieldNameCandidates = getFieldNameCandidates(fieldName)
+      .map((candidate) => parseFieldReference(candidate))
+      .filter((candidate) => String(candidate?.name || "").trim());
+    if (!operation || fieldNameCandidates.length === 0) {
       return null;
     }
     const descendants = collectDescendants(operation);
     const candidates = descendants.filter((element) => {
       const haystack = getElementTextHaystack(element);
-      if (!haystack || !haystack.includes(normalizedName)) {
+      if (!haystack) {
         return false;
       }
-      if (!scope) {
-        return true;
-      }
-      const dataScope = normalize(element.getAttribute?.("data-param-in")).toLowerCase();
-      return !dataScope || dataScope === scope || haystack.includes(scope);
+      return fieldNameCandidates.some(({ scope, name }) => {
+        const normalizedName = String(name || "").trim().toLowerCase();
+        if (!normalizedName || !haystack.includes(normalizedName)) {
+          return false;
+        }
+        if (!scope) {
+          return true;
+        }
+        const dataScope = normalize(element.getAttribute?.("data-param-in")).toLowerCase();
+        return !dataScope || dataScope === scope || haystack.includes(scope);
+      });
     });
     for (const candidate of candidates) {
       const control = findEmbeddedControlWithin(candidate);
@@ -63269,21 +63476,24 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     return JSON.stringify(mergedObject, null, 2);
   };
   const findControl = (operation, fieldName) => {
-    const normalizedFieldName = normalize(fieldName);
-    if (!operation || !normalizedFieldName) {
+    const fieldNameCandidates = getFieldNameCandidates(fieldName);
+    const normalizedFieldName = normalize(fieldNameCandidates[0] || fieldName);
+    if (!operation || !normalizedFieldName || fieldNameCandidates.length === 0) {
       return null;
     }
     if (normalizedFieldName === "server") {
       return operation.querySelector("select");
     }
-    const byId = document.getElementById(normalizedFieldName);
-    if (byId && operation.contains(byId)) {
-      return byId;
-    }
-    const escapedName = normalizedFieldName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    const byName = operation.querySelector(`[name="${escapedName}"]`);
-    if (byName) {
-      return byName;
+    for (const candidateFieldName of fieldNameCandidates) {
+      const byId = document.getElementById(candidateFieldName);
+      if (byId && operation.contains(byId)) {
+        return byId;
+      }
+      const escapedName = candidateFieldName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const byName = operation.querySelector(`[name="${escapedName}"]`);
+      if (byName) {
+        return byName;
+      }
     }
     if (normalizedFieldName === "body.resources") {
       return findRequestBodyEditor(operation);
@@ -84536,6 +84746,309 @@ function getRestV2CaseInsensitiveHeaderValue(headersLike = null, keyCandidates =
   return getRestV2CaseInsensitiveObjectValue(headersLike, normalizedCandidates);
 }
 
+function collectRestV2CaseInsensitiveObjectValues(source = null, keyCandidates = [], options = {}) {
+  if (!source || typeof source !== "object") {
+    return [];
+  }
+  const candidates = Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates];
+  const normalizedCandidates = candidates.map((key) => String(key || "").trim().toLowerCase()).filter(Boolean);
+  if (normalizedCandidates.length === 0) {
+    return [];
+  }
+  const maxDepthRaw = Number(options?.maxDepth || 5);
+  const maxDepth = Number.isFinite(maxDepthRaw) && maxDepthRaw >= 0 ? maxDepthRaw : 5;
+  const seenObjects = new Set();
+  const values = [];
+  const seenValues = new Set();
+  const pushValue = (candidate) => {
+    const normalized = normalizeRestV2ProfileAttributeValue(candidate);
+    if (!normalized) {
+      return;
+    }
+    const dedupeKey = normalized.toLowerCase();
+    if (seenValues.has(dedupeKey)) {
+      return;
+    }
+    seenValues.add(dedupeKey);
+    values.push(normalized);
+  };
+  const visit = (node, depth) => {
+    if (!node || typeof node !== "object" || depth > maxDepth || seenObjects.has(node)) {
+      return;
+    }
+    seenObjects.add(node);
+    if (Array.isArray(node)) {
+      node.forEach((entry) => {
+        if (entry && typeof entry === "object") {
+          visit(entry, depth + 1);
+        }
+      });
+      return;
+    }
+    Object.entries(node).forEach(([rawKey, rawValue]) => {
+      const normalizedKey = String(rawKey || "").trim().toLowerCase();
+      if (normalizedKey && normalizedCandidates.includes(normalizedKey)) {
+        pushValue(rawValue);
+      }
+      if (rawValue && typeof rawValue === "object") {
+        visit(rawValue, depth + 1);
+      }
+    });
+  };
+  visit(source, 0);
+  return values;
+}
+
+function getRestV2InteractiveDocsHeaderAliasCandidates(headerName = "") {
+  const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
+  if (!normalizedHeaderName) {
+    return [];
+  }
+  if (normalizedHeaderName === "adobe-subject-token") {
+    return [
+      "Adobe-Subject-Token",
+      "adobe-subject-token",
+      "adobeSubjectToken",
+      "subjectToken",
+      "subject_token",
+    ];
+  }
+  if (normalizedHeaderName === "ad-service-token") {
+    return [
+      "AD-Service-Token",
+      "ad-service-token",
+      "adServiceToken",
+      "serviceToken",
+      "service_token",
+    ];
+  }
+  if (normalizedHeaderName === "ap-temppass-identity" || normalizedHeaderName === "ap-temp-pass-identity") {
+    return [
+      "AP-Temppass-Identity",
+      "AP-TempPass-Identity",
+      "ap-temppass-identity",
+      "ap-temp-pass-identity",
+      "tempPassIdentity",
+      "tempPassIdentityHeader",
+      "apTempPassIdentity",
+      "identityJson",
+    ];
+  }
+  if (normalizedHeaderName === "ap-partner-framework-status") {
+    return [
+      "AP-Partner-Framework-Status",
+      "ap-partner-framework-status",
+      "partnerFrameworkStatus",
+      "partner_framework_status",
+      "frameworkStatus",
+      "framework_status",
+    ];
+  }
+  return [headerName];
+}
+
+function normalizeRestV2TempPassIdentityForRequest(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  let parsed = parseJsonText(raw, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    parsed = parseJsonText(decodeBase64TextSafe(raw), null);
+  }
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    try {
+      return btoa(unescape(encodeURIComponent(JSON.stringify(parsed))));
+    } catch {
+      return "";
+    }
+  }
+  return raw;
+}
+
+function normalizeRestV2InteractiveDocsHeaderCandidate(headerName = "", value = "") {
+  const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+  if (normalizedHeaderName === "ap-partner-framework-status") {
+    return normalizeRestV2PartnerFrameworkStatusForRequest(rawValue);
+  }
+  if (normalizedHeaderName === "ap-temppass-identity" || normalizedHeaderName === "ap-temp-pass-identity") {
+    return normalizeRestV2TempPassIdentityForRequest(rawValue);
+  }
+  return rawValue;
+}
+
+function getRestV2InteractiveDocsContextPropertyForHeader(headerName = "") {
+  const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
+  if (normalizedHeaderName === "adobe-subject-token") {
+    return "adobeSubjectToken";
+  }
+  if (normalizedHeaderName === "ad-service-token") {
+    return "adServiceToken";
+  }
+  if (normalizedHeaderName === "ap-temppass-identity" || normalizedHeaderName === "ap-temp-pass-identity") {
+    return "tempPassIdentity";
+  }
+  if (normalizedHeaderName === "ap-partner-framework-status") {
+    return "partnerFrameworkStatus";
+  }
+  return "";
+}
+
+function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = "") {
+  if (!context || typeof context !== "object") {
+    return "";
+  }
+  const normalizedHeaderName = String(headerName || "").trim();
+  if (!normalizedHeaderName) {
+    return "";
+  }
+  const aliases = getRestV2InteractiveDocsHeaderAliasCandidates(normalizedHeaderName);
+  const sourceList = [
+    context,
+    context?.sessionData || null,
+    context?.activeRecordingContext || null,
+    context?.activeRecordingContext?.sessionData || null,
+    context?.harvestContext || null,
+    context?.harvestContext?.sessionData || null,
+    context?.harvest || null,
+    context?.harvest?.sessionData || null,
+  ];
+  const headerBagList = [
+    context?.sessionResponseHeaders || null,
+    context?.responseHeaders || null,
+    context?.requestHeaders || null,
+    context?.activeRecordingContext?.sessionResponseHeaders || null,
+    context?.harvestContext?.sessionResponseHeaders || null,
+    context?.harvest?.sessionResponseHeaders || null,
+  ];
+  const candidates = [];
+  sourceList.forEach((source) => {
+    if (!source || typeof source !== "object") {
+      return;
+    }
+    candidates.push(...collectRestV2CaseInsensitiveObjectValues(source, aliases, { maxDepth: 4 }));
+  });
+  headerBagList.forEach((headersLike) => {
+    const headerValue = getRestV2CaseInsensitiveHeaderValue(headersLike, aliases);
+    if (headerValue) {
+      candidates.push(headerValue);
+    }
+  });
+  const normalizedCandidates = dedupeRestV2CandidateStrings(candidates);
+  for (const candidate of normalizedCandidates) {
+    const normalized = normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
+function extractRestV2InteractiveDocsHeaderValueFromText(value = "", headerName = "") {
+  const normalizedHeaderName = String(headerName || "").trim();
+  const raw = String(value || "").trim();
+  if (!normalizedHeaderName || !raw) {
+    return "";
+  }
+  const aliases = getRestV2InteractiveDocsHeaderAliasCandidates(normalizedHeaderName);
+  const textCandidates = dedupeRestV2CandidateStrings([
+    raw,
+    decodeURIComponentSafe(raw),
+    decodeBase64TextSafe(raw),
+    decodeBase64TextSafe(decodeURIComponentSafe(raw)),
+  ]);
+  for (const candidateText of textCandidates) {
+    const looksLikeStandaloneHeaderValue =
+      !/[{}\n\r]/.test(candidateText) && !candidateText.includes("://") && !candidateText.includes("&");
+    const normalizedDirect = looksLikeStandaloneHeaderValue
+      ? normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, candidateText)
+      : "";
+    if (normalizedDirect) {
+      return normalizedDirect;
+    }
+    const parsed = parseJsonText(candidateText, null);
+    const objectCandidates = collectRestV2CaseInsensitiveObjectValues(parsed, aliases, { maxDepth: 5 });
+    for (const objectCandidate of objectCandidates) {
+      const normalizedObjectCandidate = normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, objectCandidate);
+      if (normalizedObjectCandidate) {
+        return normalizedObjectCandidate;
+      }
+    }
+    try {
+      const parsedUrl = new URL(candidateText, ADOBE_SP_BASE);
+      for (const alias of aliases) {
+        const queryCandidate = String(parsedUrl.searchParams.get(alias) || "").trim();
+        const normalizedQueryCandidate = normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, queryCandidate);
+        if (normalizedQueryCandidate) {
+          return normalizedQueryCandidate;
+        }
+      }
+    } catch {
+      // Ignore malformed preview URLs.
+    }
+  }
+  const escapedAliases = aliases
+    .map((alias) => String(alias || "").trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+    .map((alias) => alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (escapedAliases.length === 0) {
+    return "";
+  }
+  const inlineMatch = raw.match(new RegExp(`(?:${escapedAliases.join("|")})["'=:\\s]+([^"\\s&,}]{8,})`, "i"));
+  return normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, String(inlineMatch?.[1] || "").trim());
+}
+
+function extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow = null, headerName = "") {
+  const normalizedHeaderName = String(headerName || "").trim();
+  if (!normalizedHeaderName) {
+    return "";
+  }
+  const direct = resolveRestV2InteractiveDocsHeaderValueFromContext(flow, normalizedHeaderName);
+  if (direct) {
+    return direct;
+  }
+  const events = Array.isArray(flow?.events) ? flow.events : [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    const eventValue =
+      resolveRestV2InteractiveDocsHeaderValueFromContext(event, normalizedHeaderName) ||
+      extractRestV2InteractiveDocsHeaderValueFromText(String(event?.responsePreview || "").trim(), normalizedHeaderName) ||
+      extractRestV2InteractiveDocsHeaderValueFromText(String(event?.bodyPreview || "").trim(), normalizedHeaderName) ||
+      extractRestV2InteractiveDocsHeaderValueFromText(String(event?.url || "").trim(), normalizedHeaderName) ||
+      extractRestV2InteractiveDocsHeaderValueFromText(String(event?.requestUrl || "").trim(), normalizedHeaderName);
+    if (eventValue) {
+      return eventValue;
+    }
+  }
+  return "";
+}
+
+function hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context = null, flow = null, headerNames = []) {
+  if (!context || typeof context !== "object") {
+    return context;
+  }
+  const normalizedHeaderNames = Array.isArray(headerNames) ? headerNames.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  normalizedHeaderNames.forEach((headerName) => {
+    const propertyName = getRestV2InteractiveDocsContextPropertyForHeader(headerName);
+    if (!propertyName || String(context?.[propertyName] || "").trim()) {
+      return;
+    }
+    const extracted = extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, headerName);
+    if (extracted) {
+      context[propertyName] = extracted;
+    }
+  });
+  return context;
+}
+
 function decodeURIComponentSafe(value = "") {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -84714,6 +85227,16 @@ function resolveRestV2PartnerFrameworkStatusFromSessionData(sessionData = null, 
   const existingParameters =
     sessionData?.existingParameters && typeof sessionData.existingParameters === "object" ? sessionData.existingParameters : null;
   const candidates = dedupeRestV2CandidateStrings([
+    ...collectRestV2CaseInsensitiveObjectValues(
+      sessionData,
+      getRestV2InteractiveDocsHeaderAliasCandidates("AP-Partner-Framework-Status"),
+      { maxDepth: 5 }
+    ),
+    ...collectRestV2CaseInsensitiveObjectValues(
+      existingParameters,
+      getRestV2InteractiveDocsHeaderAliasCandidates("AP-Partner-Framework-Status"),
+      { maxDepth: 4 }
+    ),
     getRestV2CaseInsensitiveObjectValue(sessionData, [
       "ap-partner-framework-status",
       "AP-Partner-Framework-Status",
@@ -84742,6 +85265,8 @@ function resolveRestV2SessionPartnerFromSessionData(sessionData = null, partnerF
   const existingParameters =
     sessionData?.existingParameters && typeof sessionData.existingParameters === "object" ? sessionData.existingParameters : null;
   const partner = firstNonEmptyString([
+    ...collectRestV2CaseInsensitiveObjectValues(sessionData, ["partner", "partnerName"], { maxDepth: 4 }),
+    ...collectRestV2CaseInsensitiveObjectValues(existingParameters, ["partner", "partnerName"], { maxDepth: 3 }),
     getRestV2CaseInsensitiveObjectValue(sessionData, [
       "partner",
       "partnerName",

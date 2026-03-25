@@ -773,3 +773,53 @@ test("REST V2 docs hydrator serializes form-encoded body fields into a textarea 
   assert.equal(result.filledFields.includes("body.redirectUrl"), true);
   assert.deepEqual(Array.from(result.unresolvedRequiredFields), []);
 });
+
+test("REST V2 docs hydrator maps the TempPASS identity header across casing variants", async () => {
+  const harness = createDomHarness("getProfileForMvpdUsingGET");
+  const { createElement, operationElement } = harness;
+  operationElement.appendChild(
+    createElement("button", {
+      textContent: "Send",
+      attributes: { "data-cy": "send-button" },
+    })
+  );
+  operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "path.serviceProvider" },
+    })
+  );
+  operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "header.AP-TempPass-Identity" },
+    })
+  );
+
+  const runRestV2InteractiveDocsHydrator = loadHydrator({
+    document: harness.document,
+    location: harness.location,
+    window: harness.window,
+    Event: harness.Event,
+    HTMLElement: harness.HTMLElement,
+    HTMLInputElement: harness.HTMLInputElement,
+    HTMLSelectElement: harness.HTMLSelectElement,
+    HTMLTextAreaElement: harness.HTMLTextAreaElement,
+  });
+
+  const result = await runRestV2InteractiveDocsHydrator({
+    operationId: "getProfileForMvpdUsingGET",
+    fieldValues: {
+      "path.serviceProvider": "Turner",
+      "header.AP-Temppass-Identity": "encoded-temp-pass-identity",
+    },
+    requiredFields: ["path.serviceProvider"],
+    missingRequiredFields: [],
+    timeoutMs: 1200,
+  });
+
+  const tempPassInput = operationElement.querySelector('[name="header.AP-TempPass-Identity"]');
+  assert.equal(tempPassInput.value, "encoded-temp-pass-identity");
+  assert.equal(result.ok, true);
+  assert.equal(result.filledFields.includes("header.AP-Temppass-Identity"), true);
+});

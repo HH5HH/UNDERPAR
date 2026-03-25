@@ -84,11 +84,17 @@ function loadRestV2LearningPlanBuilder() {
     extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
     extractFunctionSource(source, "decodeBase64TextSafe"),
     extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveHeaderValue"),
+    extractFunctionSource(source, "collectRestV2CaseInsensitiveObjectValues"),
+    extractFunctionSource(source, "getRestV2InteractiveDocsHeaderAliasCandidates"),
     extractFunctionSource(source, "decodeURIComponentSafe"),
     extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
+    extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
+    extractFunctionSource(source, "resolveRestV2InteractiveDocsHeaderValueFromContext"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsHydrationPlan"),
     "module.exports = { buildRestV2InteractiveDocsHydrationPlan };",
@@ -101,6 +107,7 @@ function loadRestV2LearningPlanBuilder() {
     btoa,
     unescape,
     encodeURIComponent,
+    Headers,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -157,10 +164,12 @@ function loadRestV2InteractiveDocsContextBuilder(seed = {}) {
     "function sampleRestV2LearningResourceIds(values = [], count = 10) { return typeof globalThis.__seed.sampleResourceIds === 'function' ? globalThis.__seed.sampleResourceIds(values, count) : (Array.isArray(values) ? values.slice(0, count) : []); }",
     "function normalizeAdobeNavigationUrl(value = '') { return String(value || '').trim(); }",
     "function collectRestV2SessionCodeCandidates(values = []) { return (Array.isArray(values) ? values : [values]).map((value) => String(value || '').trim()).filter(Boolean); }",
+    "function cloneJsonLikeValue(value, fallback = null) { if (value == null) { return fallback; } try { return JSON.parse(JSON.stringify(value)); } catch { return fallback; } }",
     "function buildRestV2InteractiveDocsUrl(anchor = '') { return typeof globalThis.__seed.buildDocsUrl === 'function' ? globalThis.__seed.buildDocsUrl(anchor) : String(anchor || '').trim(); }",
     "function resolveRestV2LearningRequestorDomainName() { return String(globalThis.__seed.domainName || '').trim(); }",
     "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || '').trim(); }",
     "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || context?.sessionPartner || '').trim(); }",
+    "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || '').trim(); } return ''; }",
     "function isRestV2LikelyPartnerSsoContext(context = null) { return typeof globalThis.__seed.isLikelyPartnerSso === 'function' ? globalThis.__seed.isLikelyPartnerSso(context) : false; }",
     "function resolveRestV2DebugFlowIdForHarvest(harvest = null) { return typeof globalThis.__seed.resolveFlowId === 'function' ? globalThis.__seed.resolveFlowId(harvest) : ''; }",
     extractFunctionSource(source, "resolveRestV2InteractiveDocsAppRequestorContext"),
@@ -202,6 +211,7 @@ function loadRestV2HarvestContextBuilder(seed = {}) {
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
     "function normalizeAdobeNavigationUrl(value = '') { return String(value || '').trim(); }",
     "function collectRestV2SessionCodeCandidates(values = []) { return (Array.isArray(values) ? values : [values]).map((value) => String(value || '').trim()).filter(Boolean); }",
+    "function cloneJsonLikeValue(value, fallback = null) { if (value == null) { return fallback; } try { return JSON.parse(JSON.stringify(value)); } catch { return fallback; } }",
     "function getRequestorScopedMvpdCache(requestorId = '') { return typeof globalThis.__seed.getRequestorScopedMvpdCache === 'function' ? globalThis.__seed.getRequestorScopedMvpdCache(requestorId) : null; }",
     "function resolveRestV2AppInfoForHarvest(harvest = null) { return typeof globalThis.__seed.resolveAppInfo === 'function' ? globalThis.__seed.resolveAppInfo(harvest) : { guid: String(harvest?.appGuid || ''), appName: String(harvest?.appName || harvest?.appGuid || '') }; }",
     extractFunctionSource(source, "buildRestV2ContextFromHarvest"),
@@ -256,8 +266,11 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     "function extractRestV2SamlResponseFromDebugFlow(flow = null) { return typeof globalThis.__seed.extractSaml === 'function' ? globalThis.__seed.extractSaml(flow) : {}; }",
     "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || context?.sessionPartner || '').trim(); }",
     "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); }",
+    "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); } return ''; }",
     "function isRestV2PartnerFrameworkStatusUsable(value = '') { return typeof globalThis.__seed.isFrameworkStatusUsable === 'function' ? globalThis.__seed.isFrameworkStatusUsable(value) : Boolean(String(value || '').trim()); }",
+    "function hydrateRestV2ContextFromPreparedLoginEntry(context = null) { if (typeof globalThis.__seed.hydratePreparedContext === 'function') { return globalThis.__seed.hydratePreparedContext(context); } return context; }",
     "function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydratePartnerContext === 'function') { return globalThis.__seed.hydratePartnerContext(context, flow); } return context; }",
+    "function hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context = null, flow = null, headerNames = []) { if (typeof globalThis.__seed.hydrateOptionalHeaders === 'function') { return globalThis.__seed.hydrateOptionalHeaders(context, flow, headerNames); } return context; }",
     extractFunctionSource(source, "prepareRestV2InteractiveDocsContextForEntry"),
     "module.exports = { enrichRestV2LearningResourcesFromConsoleContext, prepareRestV2InteractiveDocsContextForEntry };",
   ].join("\n\n");
@@ -907,6 +920,45 @@ test("REST V2 learning hydrates partner-path and framework status from the debug
   assert.equal(prepared.partnerFrameworkStatus, "framework-status-token");
 });
 
+test("REST V2 learning hydrates optional SSO headers from the debug flow when the current context has not retained them yet", async () => {
+  let snapshotCalls = 0;
+  const { prepareRestV2InteractiveDocsContextForEntry } = loadRestV2LearningContextPreparer({
+    getFlowSnapshot() {
+      snapshotCalls += 1;
+      return {
+        flowId: "flow-123",
+      };
+    },
+    hydrateOptionalHeaders(context) {
+      context.adobeSubjectToken = "subject-token-payload";
+      context.adServiceToken = "service-token-payload";
+      context.tempPassIdentity = "encoded-temp-pass-identity";
+      return context;
+    },
+  });
+
+  const prepared = await prepareRestV2InteractiveDocsContextForEntry(
+    {
+      key: "profiles-by-mvpd",
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
+      usesTempPassIdentity: true,
+    },
+    {
+      ok: true,
+      flowId: "flow-123",
+      adobeSubjectToken: "",
+      adServiceToken: "",
+      tempPassIdentity: "",
+    }
+  );
+
+  assert.equal(snapshotCalls, 1);
+  assert.equal(prepared.adobeSubjectToken, "subject-token-payload");
+  assert.equal(prepared.adServiceToken, "service-token-payload");
+  assert.equal(prepared.tempPassIdentity, "encoded-temp-pass-identity");
+});
+
 test("REST V2 learning resource helpers merge the requestor x MVPD pool and sample ten unique ids", () => {
   const randomValues = [0.91, 0.18, 0.77, 0.06, 0.64, 0.41, 0.23, 0.88, 0.35, 0.52, 0.11, 0.69];
   let randomIndex = 0;
@@ -1229,6 +1281,9 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
     sessionPartner: "Apple",
     partner: "Apple",
     partnerFrameworkStatus: "framework-status-token",
+    adobeSubjectToken: "subject-token-payload",
+    adServiceToken: "service-token-payload",
+    tempPassIdentity: "temp-pass-identity-payload",
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "tab-network:body",
     redirectUrl: "https://experience.example.test/callback",
@@ -1239,17 +1294,26 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
     sessionResponseHeaders: {
       "AP-Partner-Framework-Status": "framework-status-token",
     },
+    sessionData: {
+      existingParameters: {
+        redirectUrl: "https://experience.example.test/callback",
+      },
+    },
   });
 
   assert.equal(context.ok, true);
   assert.equal(context.partner, "Apple");
   assert.equal(context.partnerFrameworkStatus, "framework-status-token");
+  assert.equal(context.adobeSubjectToken, "subject-token-payload");
+  assert.equal(context.adServiceToken, "service-token-payload");
+  assert.equal(context.tempPassIdentity, "temp-pass-identity-payload");
   assert.equal(context.samlResponse, "PHNhbWxwOlJlc3BvbnNlPg==");
   assert.equal(context.samlSource, "tab-network:body");
   assert.equal(context.redirectUrl, "https://experience.example.test/callback");
   assert.equal(context.domainName, "experience.example.test");
   assert.equal(context.flowId, "flow-123");
   assert.equal(context.sessionResponseHeaders["AP-Partner-Framework-Status"], "framework-status-token");
+  assert.equal(context.sessionData.existingParameters.redirectUrl, "https://experience.example.test/callback");
 });
 
 test("REST V2 learning context reuses selection-scoped partner SSO seed when auth completed without an active profile harvest", () => {
@@ -1355,6 +1419,12 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       expirationDate: String(Date.now() + 60 * 60 * 1000),
     },
   });
+  const adobeSubjectToken = "subject-token-payload";
+  const adServiceToken = "service-token-payload";
+  const rawTempPassIdentity = JSON.stringify({
+    subscriberId: "promo-user-1",
+  });
+  const normalizedTempPassIdentity = Buffer.from(rawTempPassIdentity, "utf8").toString("base64");
   const baseContext = {
     serviceProviderId: "turner",
     requestorId: "turner",
@@ -1366,6 +1436,9 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     domainName: "experience.example.test",
     partner: "Apple",
     partnerFrameworkStatus: validPartnerFrameworkStatus,
+    adobeSubjectToken,
+    adServiceToken,
+    tempPassIdentity: rawTempPassIdentity,
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "tab-network:body",
   };
@@ -1409,6 +1482,8 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/createSessionUsingPOST",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
       contentType: "application/x-www-form-urlencoded",
       usesBodyMvpd: true,
       usesBodyDomainName: true,
@@ -1421,6 +1496,8 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(createSessionPlan.fieldValues["header.Content-Type"], "application/x-www-form-urlencoded");
   assert.equal(createSessionPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
   assert.equal(createSessionPlan.fieldValues["header.X-Device-Info"], "device-info-123");
+  assert.equal(createSessionPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
+  assert.equal(createSessionPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
   assert.equal(createSessionPlan.fieldValues["body.domainName"], "experience.example.test");
   assert.equal(
     createSessionPlan.fieldValues["body.redirectUrl"],
@@ -1489,6 +1566,8 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/getProfilesUsingGET_1",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
       usesPartnerFrameworkStatus: true,
     },
     baseContext,
@@ -1496,6 +1575,8 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   );
   assert.equal(profilesPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
   assert.equal(profilesPlan.fieldValues["header.X-Device-Info"], "device-info-123");
+  assert.equal(profilesPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
+  assert.equal(profilesPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
   assert.equal(profilesPlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
   assert.deepEqual(toArray(profilesPlan.requiredFields), ["path.serviceProvider", "header.Authorization"]);
 
@@ -1508,13 +1589,19 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       usesDeviceHeaders: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
       usesPartnerFrameworkStatus: true,
+      usesTempPassIdentity: true,
     },
     baseContext,
     accessToken
   );
   assert.equal(profilesByMvpdPlan.fieldValues["path.mvpd"], "Comcast_SSO");
   assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+  assert.equal(profilesByMvpdPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
+  assert.equal(profilesByMvpdPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
+  assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Temppass-Identity"], normalizedTempPassIdentity);
 
   const authorizePlan = buildRestV2InteractiveDocsHydrationPlan(
     {
@@ -1527,7 +1614,10 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       requireMvpdPath: true,
       usesBodyResources: true,
       requireBodyResources: true,
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
       usesPartnerFrameworkStatus: true,
+      usesTempPassIdentity: true,
       contentType: "application/json",
     },
     baseContext,
@@ -1535,6 +1625,9 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   );
   assert.equal(authorizePlan.fieldValues["path.mvpd"], "Comcast_SSO");
   assert.equal(authorizePlan.fieldValues["header.Content-Type"], "application/json");
+  assert.equal(authorizePlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
+  assert.equal(authorizePlan.fieldValues["header.AD-Service-Token"], adServiceToken);
+  assert.equal(authorizePlan.fieldValues["header.AP-Temppass-Identity"], normalizedTempPassIdentity);
   assert.deepEqual(toArray(authorizePlan.fieldValues["body.resources"]), ["urn:resource:turner"]);
 
   const decisionsPlan = buildRestV2InteractiveDocsHydrationPlan(
@@ -1548,7 +1641,10 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       requireMvpdPath: true,
       usesBodyResources: true,
       requireBodyResources: true,
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
       usesPartnerFrameworkStatus: true,
+      usesTempPassIdentity: true,
       contentType: "application/json",
     },
     baseContext,
@@ -1556,6 +1652,9 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   );
   assert.equal(decisionsPlan.fieldValues["path.mvpd"], "Comcast_SSO");
   assert.equal(decisionsPlan.fieldValues["header.Content-Type"], "application/json");
+  assert.equal(decisionsPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
+  assert.equal(decisionsPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
+  assert.equal(decisionsPlan.fieldValues["header.AP-Temppass-Identity"], normalizedTempPassIdentity);
   assert.deepEqual(toArray(decisionsPlan.fieldValues["body.resources"]), ["urn:resource:turner"]);
   assert.deepEqual(toArray(decisionsPlan.missingRequiredFields), []);
 
@@ -1568,12 +1667,16 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       usesDeviceHeaders: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
       usesQueryRedirectUrl: true,
     },
     baseContext,
     accessToken
   );
   assert.equal(logoutPlan.fieldValues["path.mvpd"], "Comcast_SSO");
+  assert.equal(logoutPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
+  assert.equal(logoutPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
   assert.equal(
     logoutPlan.fieldValues["query.redirectUrl"],
     "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/getLogoutForMvpdUsingGET"
