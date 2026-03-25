@@ -1357,8 +1357,8 @@ test("esm health treats an unavailable uniques dataset as optional instead of fa
 
   assert.equal(report.ok, true);
   assert.equal(report.partial, false);
-  assert.equal(report.loadedSections, 7);
-  assert.equal(report.totalSections, 7);
+  assert.equal(report.loadedSections, 8);
+  assert.equal(report.totalSections, 8);
   assert.equal(report.error, "");
 });
 
@@ -1385,6 +1385,10 @@ test("esm health now builds supported ordered report paths and drops broken metr
   assert.match(
     runSource,
     /const sdkBreakdownPath = buildEsmHealthReportPath\(breakdownGranularity, \[\s*"requestor-id",\s*"proxy",\s*"mvpd",\s*"platform",\s*"nsdk",\s*"nsdk-version",\s*\]\);/
+  );
+  assert.match(
+    runSource,
+    /const reasonBreakdownPath = buildEsmHealthReportPath\(breakdownGranularity, \["event", "requestor-id", "proxy", "mvpd", "reason"\]\);/
   );
   assert.doesNotMatch(runSource, /metrics:\s*ESM_HEALTH_METRICS\./);
   assert.doesNotMatch(runSource, /`mvpd\/\$\{dayPath\}`/);
@@ -1440,6 +1444,7 @@ test("esm health now builds supported ordered report paths and drops broken metr
   assert.ok(catalogPaths.has("year/month/day/requestor-id/proxy/mvpd/platform/application-name/application-version"));
   assert.ok(catalogPaths.has("year/month/day/requestor-id/platform/application-name/application-version/api"));
   assert.ok(catalogPaths.has("year/month/day/requestor-id/proxy/mvpd/platform/nsdk/nsdk-version"));
+  assert.ok(catalogPaths.has("year/month/day/event/requestor-id/proxy/mvpd/reason"));
 
   const range = getEsmHealthDefaultDateRange(Date.UTC(2026, 2, 24, 20, 0, 0));
   assert.equal(range.start, "2026-03-23");
@@ -1460,6 +1465,7 @@ test("health workspaces render full-width collapsible report sections and expose
   assert.match(esmHealthWorkspaceSource, /"Application Versions"/);
   assert.match(esmHealthWorkspaceSource, /"API Entry Points"/);
   assert.match(esmHealthWorkspaceSource, /"SDK Versions"/);
+  assert.match(esmHealthWorkspaceSource, /"Failure Reasons"/);
   assert.match(esmHealthWorkspaceSource, /renderInsightCards\(report\)/);
   assert.match(esmHealthWorkspaceHtml, /<body class="spectrum spectrum--medium spectrum--dark">/);
   assert.match(esmHealthWorkspaceHtml, /class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"/);

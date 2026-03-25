@@ -143,6 +143,21 @@ const ESM_HEALTH_BREAKDOWN_TABLES = Object.freeze([
     ],
   },
   {
+    key: "failure-reasons",
+    title: "Failure Reasons",
+    copy: "Failure-reason rollup from the ESM event tree. This ties issue load back to the lead event, MVPD, and RequestorId context in the active slice.",
+    rowsKey: "reasonRows",
+    errorKey: "reasons",
+    columns: [
+      { key: "reason", label: "Reason" },
+      { key: "issueShare", label: "Issue Share", type: "percent" },
+      { key: "issueEvents", label: "Issue Events", type: "number" },
+      { key: "eventSummary", label: "Event" },
+      { key: "mvpdSummary", label: "Lead MVPD" },
+      { key: "requestorSummary", label: "Lead RequestorId" },
+    ],
+  },
+  {
     key: "requestor-ids",
     title: "RequestorIds",
     copy: "Cross-requestor comparison for the active media company. Click a RequestorId to re-run the dashboard with that RequestorId applied.",
@@ -861,6 +876,17 @@ function renderInsightCards(report = null) {
       )
     );
   }
+  if (String(summary?.topReasonLabel || "").trim()) {
+    cards.push(
+      renderInsightCard(
+        "Reason Focus",
+        summary.topReasonLabel,
+        `${formatCompactNumber(report?.reasonRows?.[0]?.issueEvents || 0)} issue events | ${
+          String(summary?.topReasonEventLabel || "Reason telemetry").trim() || "Reason telemetry"
+        }`
+      )
+    );
+  }
   if (cards.length === 0) {
     return "";
   }
@@ -1087,6 +1113,17 @@ function renderReport() {
           <p class="esm-health-kpi-value">${escapeHtml(formatCompactNumber(summary.activeApplications || 0))}</p>
           <p class="esm-health-overview-copy">${escapeHtml(
             `${formatCompactNumber(summary.activeApis || 0)} API slices | ${formatCompactNumber(summary.activeSdkVersions || 0)} SDK slices`
+          )}</p>
+        </header>
+      </article>
+      <article class="rest-report-card esm-health-kpi-card">
+        <header class="rest-report-head">
+          <p class="esm-health-kpi-label">Failure Reasons</p>
+          <p class="esm-health-kpi-value">${escapeHtml(formatCompactNumber(summary.activeReasons || 0))}</p>
+          <p class="esm-health-overview-copy">${escapeHtml(
+            `${summary.topReasonLabel || "No reason hotspots detected"}${
+              summary.topReasonEventLabel ? ` | ${summary.topReasonEventLabel}` : ""
+            }`
           )}</p>
         </header>
       </article>
