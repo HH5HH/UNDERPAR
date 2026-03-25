@@ -1077,6 +1077,9 @@ test("environment switch only reactivates the retained explicit session and neve
     /const shouldRestoreSelection =[\s\S]*options\?\.restoreSelection !== false[\s\S]*state\.sessionReady === true[\s\S]*Boolean\(state\.loginData\)[\s\S]*state\.restricted !== true;/
   );
   assert.match(environmentSwitchSource, /if \(shouldRestoreSelection && hasProgrammerSelectionSnapshot\(selectionSnapshot\)\)/);
+  assert.match(environmentSwitchSource, /setPendingEnvironmentSwitchSelectionRestore\(selectionSnapshot,\s*\{/);
+  assert.match(environmentSwitchSource, /await consumePendingEnvironmentSwitchSelectionRestore\(\{/);
+  assert.doesNotMatch(environmentSwitchSource, /await applyGlobalSelectionSnapshot\(selectionSnapshot,/);
 });
 
 test("environment-switch selection restore preserves current globals by default and explicit context-driving flows can bypass it", () => {
@@ -1138,6 +1141,8 @@ test("media-company selection and vault rehydrate share the same programmer hydr
   assert.match(hydrateSelectionSource, /ensureSelectedProgrammerApplicationsLoaded\(selectedProgrammer,\s*\{/);
   assert.match(hydrateSelectionSource, /await refreshProgrammerPanels\(\{/);
   assert.match(hydrateSelectionSource, /programmerApplicationsPromise,/);
+  assert.match(applySnapshotSource, /const restoredProgrammer = await hydrateProgrammerSelection\(programmer,\s*\{/);
+  assert.match(applySnapshotSource, /await populateMvpdSelectForRequestor\(explicitRequestorId\);/);
   assert.doesNotMatch(refreshPanelsSource, /const selectedRequestorId = String\(state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
   assert.doesNotMatch(refreshPanelsSource, /requestorId:\s*selectedRequestorId/);
   assert.doesNotMatch(premiumDetectionSource, /selectPreferredEsmAppForRequestor\(/);
@@ -1151,6 +1156,19 @@ test("media-company selection and vault rehydrate share the same programmer hydr
   assert.doesNotMatch(devtoolsRehydrateSource, /clearSelectedProgrammerUiForVaultRehydrate\(/);
   assert.doesNotMatch(devtoolsRehydrateSource, /renderPremiumServicesLoading\(/);
   assert.ok(mediaCompanyChangeBlock);
+});
+
+test("post-login hydration consumes queued environment-switch selection restores after programmer catalogs load", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const hydrateAuthenticatedSource = extractFunctionSource(popupSource, "hydrateAuthenticatedAdobePassSession");
+  const consumePendingSource = extractFunctionSource(popupSource, "consumePendingEnvironmentSwitchSelectionRestore");
+
+  assert.match(hydrateAuthenticatedSource, /await consumePendingEnvironmentSwitchSelectionRestore\(\{\s*awaitProgrammerHydration:\s*false,/);
+  assert.match(consumePendingSource, /await waitForEnvironmentSwitchSelectionRestoreCatalog\(\{/);
+  assert.match(consumePendingSource, /clearPendingEnvironmentSwitchSelectionRestore\(\);[\s\S]*await applyGlobalSelectionSnapshot\(latestPending\.snapshot,\s*\{/);
+  assert.match(consumePendingSource, /controllerReason:\s*"environment-switch"/);
+  assert.match(consumePendingSource, /requestorControllerReason:\s*"environment-switch-requestor-restore"/);
+  assert.match(consumePendingSource, /mvpdControllerReason:\s*"environment-switch-mvpd-restore"/);
 });
 
 test("requestor change waits for programmer refresh before loading MVPDs", () => {

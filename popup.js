@@ -10309,6 +10309,20 @@ function captureAdobePassEnvironmentSwitchSelectionSnapshot() {
   };
 }
 
+function normalizeAdobePassEnvironmentSwitchSelectionSnapshot(snapshot = null) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return null;
+  }
+  const normalizedSnapshot = {
+    programmerId: String(snapshot.programmerId || "").trim(),
+    programmerName: String(snapshot.programmerName || "").trim(),
+    mediaCompanyName: String(snapshot.mediaCompanyName || "").trim(),
+    requestorId: String(snapshot.requestorId || "").trim(),
+    mvpdId: String(snapshot.mvpdId || "").trim(),
+  };
+  return hasProgrammerSelectionSnapshot(normalizedSnapshot) ? normalizedSnapshot : null;
+}
+
 function hasProgrammerSelectionSnapshot(snapshot = null) {
   if (!snapshot || typeof snapshot !== "object") {
     return false;
@@ -10350,6 +10364,138 @@ function findProgrammerForEnvironmentSwitchSnapshot(snapshot = null) {
       return candidateNames.some((candidateName) => nameCandidates.includes(candidateName));
     }) || null
   );
+}
+
+function setPendingEnvironmentSwitchSelectionRestore(snapshot = null, options = {}) {
+  const normalizedSnapshot = normalizeAdobePassEnvironmentSwitchSelectionSnapshot(snapshot);
+  if (!normalizedSnapshot) {
+    state.pendingEnvironmentSwitchSelectionRestore = null;
+    return null;
+  }
+  const environment = resolveAdobePassEnvironment(
+    options?.environmentKey || getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key
+  );
+  const pendingRestore = {
+    snapshot: normalizedSnapshot,
+    environmentKey: String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key,
+    environmentLabel: String(options?.environmentLabel || environment?.label || "").trim(),
+    autoSelectFirstMvpd: options?.autoSelectFirstMvpd === true,
+    preferredTabId: Number(options?.preferredTabId || 0),
+    requestedAt: Date.now(),
+  };
+  state.pendingEnvironmentSwitchSelectionRestore = pendingRestore;
+  return pendingRestore;
+}
+
+function clearPendingEnvironmentSwitchSelectionRestore() {
+  state.pendingEnvironmentSwitchSelectionRestore = null;
+}
+
+async function waitForEnvironmentSwitchSelectionRestoreCatalog(options = {}) {
+  const timeoutMs = Math.max(0, Number(options?.timeoutMs || ENVIRONMENT_SWITCH_SELECTION_RESTORE_TIMEOUT_MS));
+  const pollMs = Math.max(25, Number(options?.pollMs || ENVIRONMENT_SWITCH_SELECTION_RESTORE_POLL_MS));
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const programmersReady = Array.isArray(state.programmers) && state.programmers.length > 0;
+    if (programmersReady) {
+      return {
+        ready: true,
+        timedOut: false,
+      };
+    }
+    if (state.programmersLoadInFlight !== true) {
+      return {
+        ready: false,
+        timedOut: false,
+      };
+    }
+    if (timeoutMs <= 0 || Date.now() >= deadline) {
+      return {
+        ready: programmersReady,
+        timedOut: true,
+      };
+    }
+    await sleepMs(Math.min(pollMs, Math.max(25, deadline - Date.now())));
+  }
+}
+
+async function consumePendingEnvironmentSwitchSelectionRestore(options = {}) {
+  const pendingRestore =
+    state.pendingEnvironmentSwitchSelectionRestore && typeof state.pendingEnvironmentSwitchSelectionRestore === "object"
+      ? state.pendingEnvironmentSwitchSelectionRestore
+      : null;
+  if (!pendingRestore?.snapshot) {
+    return null;
+  }
+  const currentEnvironmentKey =
+    String(getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  if (String(pendingRestore.environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() !== currentEnvironmentKey) {
+    return null;
+  }
+  if (state.pendingEnvironmentSwitchSelectionRestorePromise) {
+    return state.pendingEnvironmentSwitchSelectionRestorePromise;
+  }
+
+  const restorePromise = (async () => {
+    const awaitProgrammerHydration = options?.awaitProgrammerHydration !== false;
+    if (awaitProgrammerHydration) {
+      const catalogState = await waitForEnvironmentSwitchSelectionRestoreCatalog({
+        timeoutMs: Number(options?.timeoutMs || 0),
+      });
+      if (!catalogState.ready) {
+        if (!catalogState.timedOut && state.programmersLoadInFlight !== true) {
+          clearPendingEnvironmentSwitchSelectionRestore();
+        }
+        return {
+          ok: false,
+          skipped: true,
+          reason: catalogState.timedOut ? "programmer-catalog-timeout" : "programmer-catalog-unavailable",
+        };
+      }
+    }
+
+    const latestPending =
+      state.pendingEnvironmentSwitchSelectionRestore && typeof state.pendingEnvironmentSwitchSelectionRestore === "object"
+        ? state.pendingEnvironmentSwitchSelectionRestore
+        : null;
+    if (!latestPending?.snapshot || latestPending !== pendingRestore) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "superseded",
+      };
+    }
+
+    clearPendingEnvironmentSwitchSelectionRestore();
+    const restoreResult = await applyGlobalSelectionSnapshot(latestPending.snapshot, {
+      controllerReason: "environment-switch",
+      requestorControllerReason: "environment-switch-requestor-restore",
+      mvpdControllerReason: "environment-switch-mvpd-restore",
+      autoSelectFirstMvpd: latestPending.autoSelectFirstMvpd === true,
+      preferredTabId: Number(latestPending.preferredTabId || 0),
+    });
+    const missingSelectionLabel = String(restoreResult?.missingSelection || "").trim();
+    if (missingSelectionLabel) {
+      const environmentLabel = String(latestPending.environmentLabel || currentEnvironmentKey).trim() || currentEnvironmentKey;
+      setStatus(
+        `${missingSelectionLabel} is not available in ${environmentLabel}. Re-select the Media Company in this environment.`,
+        "error"
+      );
+    }
+    return {
+      ok: true,
+      restoreResult,
+    };
+  })();
+
+  state.pendingEnvironmentSwitchSelectionRestorePromise = restorePromise;
+  try {
+    return await restorePromise;
+  } finally {
+    if (state.pendingEnvironmentSwitchSelectionRestorePromise === restorePromise) {
+      state.pendingEnvironmentSwitchSelectionRestorePromise = null;
+    }
+  }
 }
 
 function prepareAdobePassEnvironmentSwitchUi(targetEnvironment = null) {
@@ -10943,16 +11089,22 @@ async function applyGlobalSelectionSnapshot(snapshot = null, options = {}) {
     return result;
   }
 
-  state.selectedProgrammerKey = String(programmer.key || "").trim();
-  if (els.mediaCompanySelect) {
-    els.mediaCompanySelect.value = state.selectedProgrammerKey;
+  const preferredTabId = Number(options?.preferredTabId || 0);
+  const restoredProgrammer = await hydrateProgrammerSelection(programmer, {
+    controllerReason: String(options?.controllerReason || "environment-switch"),
+    forcePremiumRefresh: options?.forcePremiumRefresh === true,
+    skipCmBootstrap: options?.skipCmBootstrap === true,
+    preferredTabId,
+  });
+  if (!restoredProgrammer?.programmerId) {
+    result.missingSelection = String(
+      snapshot?.programmerName || snapshot?.mediaCompanyName || snapshot?.programmerId || ""
+    ).trim();
+    return result;
   }
-  state.selectedRequestorId = "";
-  state.selectedMvpdId = "";
-  populateRequestorSelect();
   result.programmerRestored = true;
 
-  const availableRequestorIds = Array.isArray(programmer.requestorIds) ? programmer.requestorIds : [];
+  const availableRequestorIds = Array.isArray(restoredProgrammer.requestorIds) ? restoredProgrammer.requestorIds : [];
   const explicitRequestorId = String(snapshot?.requestorId || "").trim();
   if (explicitRequestorId && availableRequestorIds.includes(explicitRequestorId)) {
     state.selectedRequestorId = explicitRequestorId;
@@ -10962,13 +11114,13 @@ async function applyGlobalSelectionSnapshot(snapshot = null, options = {}) {
     result.requestorRestored = true;
   }
 
-  // Let refreshProgrammerPanels own VAULT/runtime restore so ENV switching
-  // does not restore the same Media Company twice on the critical path.
-  await refreshProgrammerPanels({
-    controllerReason: String(options?.controllerReason || "environment-switch"),
-  });
-
   if (result.requestorRestored) {
+    await refreshProgrammerPanels({
+      controllerReason:
+        String(options?.requestorControllerReason || options?.controllerReason || "environment-switch-requestor-restore").trim() ||
+        "environment-switch-requestor-restore",
+      preferredTabId,
+    });
     await populateMvpdSelectForRequestor(explicitRequestorId);
   }
 
@@ -10984,6 +11136,7 @@ async function applyGlobalSelectionSnapshot(snapshot = null, options = {}) {
       await refreshProgrammerPanels({
         controllerReason: String(options?.mvpdControllerReason || "environment-switch-mvpd-restore"),
         forcePremiumRefresh: false,
+        preferredTabId,
       });
     }
   }
@@ -11003,17 +11156,17 @@ async function applyGlobalSelectionSnapshot(snapshot = null, options = {}) {
   if (cmState) {
     cmBroadcastControllerState(cmState);
   }
-  const selectedServices = getCurrentPremiumAppsSnapshot(programmer.programmerId);
-  mvpdWorkspaceBroadcastSelectedControllerState(programmer, selectedServices);
+  const selectedServices = getCurrentPremiumAppsSnapshot(restoredProgrammer.programmerId);
+  mvpdWorkspaceBroadcastSelectedControllerState(restoredProgrammer, selectedServices);
   refreshMvpdWorkspaceTools();
   void mvpdWorkspaceRefreshSelectedSnapshot({
-    programmer,
+    programmer: restoredProgrammer,
     services: selectedServices,
     forceRefresh: result.requestorRestored,
     onlyIfWorkspaceOpen: !result.requestorRestored,
     surfaceMissingSelectionError: false,
   });
-  await refreshOpenWorkspacesForEnvironmentSwitch(programmer, selectedServices);
+  await refreshOpenWorkspacesForEnvironmentSwitch(restoredProgrammer, selectedServices);
 
   return result;
 }
@@ -11021,6 +11174,7 @@ async function applyGlobalSelectionSnapshot(snapshot = null, options = {}) {
 async function restoreAdobePassEnvironmentSwitchSelection(snapshot = null) {
   return applyGlobalSelectionSnapshot(snapshot, {
     controllerReason: "environment-switch",
+    requestorControllerReason: "environment-switch-requestor-restore",
     mvpdControllerReason: "environment-switch-mvpd-restore",
   });
 }
@@ -11051,11 +11205,13 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
       Boolean(state.loginData) &&
       state.restricted !== true;
     const selectionSnapshot = shouldRestoreSelection
-      ? options?.selectionSnapshot && typeof options.selectionSnapshot === "object"
-        ? {
-            ...options.selectionSnapshot,
-          }
-        : captureAdobePassEnvironmentSwitchSelectionSnapshot()
+      ? normalizeAdobePassEnvironmentSwitchSelectionSnapshot(
+          options?.selectionSnapshot && typeof options.selectionSnapshot === "object"
+            ? {
+                ...options.selectionSnapshot,
+              }
+            : captureAdobePassEnvironmentSwitchSelectionSnapshot()
+        )
       : null;
     const retainedLoginData =
       state.loginData && typeof state.loginData === "object"
@@ -11093,6 +11249,16 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
       renderBuildInfo();
       prepareAdobePassEnvironmentSwitchUi(targetEnvironment);
       render();
+      if (selectionSnapshot) {
+        setPendingEnvironmentSwitchSelectionRestore(selectionSnapshot, {
+          environmentKey: targetEnvironmentKey,
+          environmentLabel,
+          autoSelectFirstMvpd: options?.autoSelectFirstMvpd === true,
+          preferredTabId: Number(options?.preferredTabId || 0),
+        });
+      } else {
+        clearPendingEnvironmentSwitchSelectionRestore();
+      }
 
       let activated = false;
       let activationSource = "none";
@@ -11139,11 +11305,13 @@ async function switchAdobePassEnvironmentInPlace(environment = null, options = {
         missingSelection: "",
       };
       if (shouldRestoreSelection && hasProgrammerSelectionSnapshot(selectionSnapshot)) {
-        restoreResult = await applyGlobalSelectionSnapshot(selectionSnapshot, {
-          controllerReason: "environment-switch",
-          mvpdControllerReason: "environment-switch-mvpd-restore",
-          autoSelectFirstMvpd: options?.autoSelectFirstMvpd === true,
+        const restoreConsumption = await consumePendingEnvironmentSwitchSelectionRestore({
+          awaitProgrammerHydration: true,
+          timeoutMs: ENVIRONMENT_SWITCH_SELECTION_RESTORE_TIMEOUT_MS,
         });
+        if (restoreConsumption?.ok === true && restoreConsumption?.restoreResult) {
+          restoreResult = restoreConsumption.restoreResult;
+        }
       }
       const missingSelectionLabel = String(restoreResult.missingSelection || "").trim();
       if (missingSelectionLabel) {
@@ -12356,6 +12524,8 @@ const DEGRADATION_CHEAT_SHEET_CALL_SPECS = Object.freeze([
 ]);
 const DEGRADATION_API_VERSION = "3.0";
 const MEDIA_COMPANY_SELECTION_DEBOUNCE_MS = 180;
+const ENVIRONMENT_SWITCH_SELECTION_RESTORE_TIMEOUT_MS = 15000;
+const ENVIRONMENT_SWITCH_SELECTION_RESTORE_POLL_MS = 80;
 
 const state = {
   adobePassEnvironment: resolveAdobePassEnvironment(DEFAULT_ADOBEPASS_ENVIRONMENT.key),
@@ -12405,6 +12575,8 @@ const state = {
   mediaCompanyOptionHydrationDeferred: false,
   mediaCompanySelectionHydrationTimerId: 0,
   pendingMediaCompanySelectionControllerReason: "",
+  pendingEnvironmentSwitchSelectionRestore: null,
+  pendingEnvironmentSwitchSelectionRestorePromise: null,
   programmersApiEndpoint: null,
   refreshTimeoutId: null,
   silentRefreshPromise: null,
@@ -61392,6 +61564,8 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.selectedRequestorId = "";
   state.selectedMvpdId = "";
   state.selectedProgrammerKey = "";
+  state.pendingEnvironmentSwitchSelectionRestore = null;
+  state.pendingEnvironmentSwitchSelectionRestorePromise = null;
   state.applicationsByProgrammerId.clear();
   state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByProgrammerId.clear();
@@ -70088,6 +70262,7 @@ async function hydrateAuthenticatedAdobePassSession(source = "session", options 
 
   let programmersLoadError = null;
   let cmPrecheckError = null;
+  let pendingEnvironmentSelectionRestore = null;
 
   if (!hydrationResult.ok) {
     programmersLoadError =
@@ -70139,6 +70314,21 @@ async function hydrateAuthenticatedAdobePassSession(source = "session", options 
     }
   }
 
+  if (!programmersLoadError) {
+    pendingEnvironmentSelectionRestore = await consumePendingEnvironmentSwitchSelectionRestore({
+      awaitProgrammerHydration: false,
+    }).catch((error) => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+
+  const missingSelectionLabel = String(
+    pendingEnvironmentSelectionRestore?.ok === true
+      ? pendingEnvironmentSelectionRestore?.restoreResult?.missingSelection || ""
+      : ""
+  ).trim();
+
   if (programmersLoadError) {
     if (!(preserveExistingOnFailure || normalizedSource === "stored")) {
       setStatus(
@@ -70151,6 +70341,8 @@ async function hydrateAuthenticatedAdobePassSession(source = "session", options 
     } else {
       clearStatusUnlessCmTenantsPrecheckBlocked();
     }
+  } else if (missingSelectionLabel) {
+    // keep helper-emitted missing-selection status intact
   } else if (cmPrecheckError) {
     setStatus(
       firstNonEmptyString([
