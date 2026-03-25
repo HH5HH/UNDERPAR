@@ -64,6 +64,14 @@
   --cm-json-border: rgba(var(--zip-accent-1000), 0.22);
   --cm-json-ink: rgb(238, 238, 238);
   --cm-json-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --cm-json-subtle-surface: rgba(255, 255, 255, 0.04);
+  --cm-json-key-ink: color-mix(in srgb, var(--legacy-muted) 64%, var(--legacy-text) 36%);
+  --cm-json-divider: rgba(255, 255, 255, 0.08);
+  --cm-json-chip-surface: rgba(var(--zip-accent-1000), 0.12);
+  --cm-json-chip-border: rgba(var(--zip-accent-1000), 0.18);
+  --cm-json-boolean-bg: rgba(39, 167, 110, 0.18);
+  --cm-json-boolean-ink: rgb(168, 239, 204);
+  --cm-json-empty-ink: rgba(242, 242, 242, 0.64);
   font-family: "Avenir Next", "Segoe UI Variable", "Gill Sans MT", "Trebuchet MS", sans-serif;
 }
 
@@ -1059,24 +1067,134 @@ body.workspace-locked .workspace-cards {
 
 .esm-table td.cm-cell--json {
   white-space: normal;
-  max-width: min(72ch, 52vw);
+  max-width: min(58ch, 40vw);
 }
 
+.cm-json-view,
 .cm-cell-json {
   margin: 0;
-  padding: 10px 12px;
+  padding: 12px;
   border: 1px solid var(--cm-json-border);
   border-radius: var(--s2-radius-strong);
   background: linear-gradient(180deg, var(--cm-json-surface-top), var(--cm-json-surface-bottom));
   box-shadow: var(--cm-json-shadow);
   color: var(--cm-json-ink);
+  overflow: auto;
+}
+
+.cm-json-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(320px, 44vh);
+  font-family: var(--spectrum-sans-serif-font-family, "Avenir Next", "Segoe UI Variable", sans-serif);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cm-cell-json {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-  overflow-x: auto;
+}
+
+.cm-json-structure,
+.cm-json-collection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cm-json-row,
+.cm-json-section {
+  border: 1px solid var(--cm-json-divider);
+  border-radius: var(--s2-radius-default);
+  background: var(--cm-json-subtle-surface);
+}
+
+.cm-json-row {
+  display: grid;
+  gap: 8px;
+  padding: 9px 10px;
+}
+
+.cm-json-row--inline {
+  grid-template-columns: minmax(108px, 38%) minmax(0, 1fr);
+  align-items: start;
+}
+
+.cm-json-row--stacked {
+  grid-template-columns: 1fr;
+}
+
+.cm-json-key,
+.cm-json-section-title {
+  margin: 0;
+  color: var(--cm-json-key-ink);
+  font-size: 11px;
+  line-height: 1.35;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cm-json-value {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cm-json-scalar,
+.cm-json-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--cm-json-chip-border);
+  border-radius: 999px;
+  background: var(--cm-json-chip-surface);
+  color: var(--cm-json-ink);
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.cm-json-scalar--code,
+.cm-json-chip.cm-json-scalar--code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.cm-json-scalar--boolean,
+.cm-json-chip.cm-json-scalar--boolean {
+  background: var(--cm-json-boolean-bg);
+  border-color: rgba(94, 196, 146, 0.22);
+  color: var(--cm-json-boolean-ink);
+}
+
+.cm-json-scalar--null,
+.cm-json-chip.cm-json-scalar--null {
+  color: var(--cm-json-empty-ink);
+}
+
+.cm-json-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cm-json-section {
+  padding: 10px;
+}
+
+.cm-json-empty {
+  color: var(--cm-json-empty-ink);
+  font-style: italic;
 }
 
 .esm-table thead th {

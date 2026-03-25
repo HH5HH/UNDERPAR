@@ -240,7 +240,7 @@ test("ESM health correlation record carries scoped requestor and mvpd context", 
   assert.equal(records[0].payload.items[0].MvpdLabel, "Comcast");
 });
 
-test("CM workspace multiline cells preserve formatted JSON blocks", () => {
+test("CM workspace JSON cells render structured metadata instead of raw JSON dumps", () => {
   const documentStub = {
     createElement(tagName) {
       return {
@@ -261,23 +261,45 @@ test("CM workspace multiline cells preserve formatted JSON blocks", () => {
       };
     },
   };
+  const flattenNodeText = (node) => {
+    if (!node) {
+      return "";
+    }
+    return [node.textContent || "", ...(node.children || []).map(flattenNodeText)].join(" ").trim();
+  };
   const { createCell } = loadFunctions(
     "cm-workspace.js",
     ["safeJsonParse", "normalizeCmColumnName", "shouldTreatCmCellAsStructuredJson", "formatCmCellDisplayValue", "createCell"],
     {
-    document: documentStub,
-  });
+      document: documentStub,
+    }
+  );
 
   const multilineCell = createCell('{\n  "ok": true\n}', "ResponsePayloadJson");
   assert.equal(multilineCell.title, "");
   assert.deepEqual(multilineCell.classList.values, ["cm-cell--multiline", "cm-cell--json"]);
-  assert.equal(multilineCell.children[0].tagName, "pre");
-  assert.equal(multilineCell.children[0].textContent, '{\n  "ok": true\n}');
+  assert.equal(multilineCell.children[0].tagName, "div");
+  assert.equal(multilineCell.children[0].className, "cm-json-view");
+  assert.match(flattenNodeText(multilineCell.children[0]), /\bOK\b/);
+  assert.match(flattenNodeText(multilineCell.children[0]), /\bTrue\b/);
+  assert.doesNotMatch(flattenNodeText(multilineCell.children[0]), /"ok"/);
+  assert.doesNotMatch(flattenNodeText(multilineCell.children[0]), /\{/);
 
   const singleLineJsonPreviewCell = createCell('{"profiles":{"comcast":{"subject":"viewer-1"}}}', "ProfileCheckResponsePreview");
   assert.equal(singleLineJsonPreviewCell.title, "");
   assert.deepEqual(singleLineJsonPreviewCell.classList.values, ["cm-cell--multiline", "cm-cell--json"]);
-  assert.match(singleLineJsonPreviewCell.children[0].textContent, /\n  "profiles": \{/);
+  assert.equal(singleLineJsonPreviewCell.children[0].className, "cm-json-view");
+  assert.match(flattenNodeText(singleLineJsonPreviewCell.children[0]), /\bProfiles\b/);
+  assert.match(flattenNodeText(singleLineJsonPreviewCell.children[0]), /\bComcast\b/);
+  assert.match(flattenNodeText(singleLineJsonPreviewCell.children[0]), /\bSubject\b/);
+  assert.match(flattenNodeText(singleLineJsonPreviewCell.children[0]), /\bviewer-1\b/);
+
+  const rawFallbackCell = createCell("{not-json}", "ResponsePayloadJson");
+  assert.equal(rawFallbackCell.title, "");
+  assert.deepEqual(rawFallbackCell.classList.values, ["cm-cell--multiline", "cm-cell--json"]);
+  assert.equal(rawFallbackCell.children[0].tagName, "pre");
+  assert.equal(rawFallbackCell.children[0].className, "cm-cell-json cm-cell-json--raw");
+  assert.equal(rawFallbackCell.children[0].textContent, "{not-json}");
 
   const singleLineCell = createCell("plain");
   assert.equal(singleLineCell.title, "plain");

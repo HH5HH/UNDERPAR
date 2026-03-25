@@ -3050,6 +3050,7 @@ function formatCmCellDisplayValue(value, columnName = "") {
       text: "",
       multiline: false,
       json: false,
+      jsonValue: null,
     };
   }
 
@@ -3060,6 +3061,7 @@ function formatCmCellDisplayValue(value, columnName = "") {
         text: formatted,
         multiline: true,
         json: true,
+        jsonValue: value,
       };
     } catch {
       const fallback = String(value);
@@ -3067,6 +3069,7 @@ function formatCmCellDisplayValue(value, columnName = "") {
         text: fallback,
         multiline: fallback.includes("\n"),
         json: false,
+        jsonValue: null,
       };
     }
   }
@@ -3085,6 +3088,7 @@ function formatCmCellDisplayValue(value, columnName = "") {
         text: JSON.stringify(parsedJson, null, 2),
         multiline: true,
         json: true,
+        jsonValue: parsedJson,
       };
     } catch {
       // Fall through to raw text rendering.
@@ -3096,6 +3100,7 @@ function formatCmCellDisplayValue(value, columnName = "") {
     text,
     multiline: looksStructuredJson || text.includes("\n"),
     json: looksStructuredJson,
+    jsonValue: null,
   };
 }
 
@@ -3104,11 +3109,178 @@ function createCell(value, columnName = "") {
   const display = formatCmCellDisplayValue(value, columnName);
   const text = String(display?.text || "");
 
+  const createStructuredJsonContent = (jsonValue) => {
+    const acronymMap = new Map(
+      Object.entries({
+        api: "API",
+        cm: "CM",
+        cmu: "CMU",
+        esm: "ESM",
+        hba: "HBA",
+        id: "ID",
+        ids: "IDs",
+        ims: "IMS",
+        json: "JSON",
+        jwt: "JWT",
+        mvpd: "MVPD",
+        raw: "Raw",
+        rest: "REST",
+        sdk: "SDK",
+        sso: "SSO",
+        tv: "TV",
+        ui: "UI",
+        url: "URL",
+        uuid: "UUID",
+      })
+    );
+    const isScalarValue = (candidate) =>
+      candidate == null || typeof candidate === "string" || typeof candidate === "number" || typeof candidate === "boolean";
+    const humanizeKey = (candidate) => {
+      const normalized = String(candidate || "").trim();
+      if (!normalized) {
+        return "Value";
+      }
+      return normalized
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/[_-]+/g, " ")
+        .split(/\s+/g)
+        .filter(Boolean)
+        .map((segment) => {
+          const lower = String(segment || "").toLowerCase();
+          if (acronymMap.has(lower)) {
+            return acronymMap.get(lower);
+          }
+          if (lower.length <= 2) {
+            return lower.toUpperCase();
+          }
+          return lower.charAt(0).toUpperCase() + lower.slice(1);
+        })
+        .join(" ");
+    };
+    const shouldRenderScalarAsCode = (candidate) => {
+      const textValue = String(candidate ?? "").trim();
+      if (!textValue) {
+        return false;
+      }
+      return (
+        textValue.length >= 18 ||
+        /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(textValue) ||
+        /^[A-Za-z0-9+/=_:-]{18,}$/.test(textValue)
+      );
+    };
+    const createScalarNode = (candidate) => {
+      const scalar = document.createElement("span");
+      scalar.className = "cm-json-scalar";
+      if (candidate == null) {
+        scalar.classList.add("cm-json-scalar--null");
+        scalar.textContent = "None";
+        return scalar;
+      }
+      if (typeof candidate === "boolean") {
+        scalar.classList.add("cm-json-scalar--boolean");
+        scalar.textContent = candidate ? "True" : "False";
+        return scalar;
+      }
+      if (typeof candidate === "number") {
+        scalar.classList.add("cm-json-scalar--number");
+        scalar.textContent = String(candidate);
+        return scalar;
+      }
+      if (shouldRenderScalarAsCode(candidate)) {
+        scalar.classList.add("cm-json-scalar--code");
+      }
+      scalar.textContent = String(candidate);
+      return scalar;
+    };
+    const createScalarCollection = (values = []) => {
+      const list = document.createElement("div");
+      list.className = "cm-json-chip-list";
+      values.forEach((entry) => {
+        const chip = document.createElement("span");
+        chip.className = "cm-json-chip";
+        const scalarNode = createScalarNode(entry);
+        chip.textContent = String(scalarNode.textContent || "");
+        if (scalarNode.className) {
+          chip.className += ` ${scalarNode.className}`;
+        }
+        list.appendChild(chip);
+      });
+      return list;
+    };
+    const renderStructuredValue = (candidate, depth = 0) => {
+      if (isScalarValue(candidate)) {
+        return createScalarNode(candidate);
+      }
+
+      if (Array.isArray(candidate)) {
+        if (candidate.length === 0) {
+          const empty = document.createElement("span");
+          empty.className = "cm-json-empty";
+          empty.textContent = "No values";
+          return empty;
+        }
+        if (candidate.every((entry) => isScalarValue(entry))) {
+          return createScalarCollection(candidate);
+        }
+        const collection = document.createElement("div");
+        collection.className = "cm-json-collection";
+        candidate.forEach((entry, index) => {
+          const section = document.createElement("section");
+          section.className = "cm-json-section";
+          const heading = document.createElement("p");
+          heading.className = "cm-json-section-title";
+          heading.textContent = `Item ${index + 1}`;
+          section.appendChild(heading);
+          section.appendChild(renderStructuredValue(entry, depth + 1));
+          collection.appendChild(section);
+        });
+        return collection;
+      }
+
+      const entries = Object.entries(candidate || {});
+      if (entries.length === 0) {
+        const empty = document.createElement("span");
+        empty.className = "cm-json-empty";
+        empty.textContent = "No fields";
+        return empty;
+      }
+
+      const container = document.createElement("div");
+      container.className = depth === 0 ? "cm-json-structure cm-json-structure--root" : "cm-json-structure";
+      entries.forEach(([key, entryValue]) => {
+        const row = document.createElement("div");
+        row.className = "cm-json-row";
+        const label = document.createElement("p");
+        label.className = "cm-json-key";
+        label.textContent = humanizeKey(key);
+        const valueWrap = document.createElement("div");
+        valueWrap.className = "cm-json-value";
+        if (isScalarValue(entryValue) || (Array.isArray(entryValue) && entryValue.every((item) => isScalarValue(item)))) {
+          row.classList.add("cm-json-row--inline");
+        } else {
+          row.classList.add("cm-json-row--stacked");
+        }
+        valueWrap.appendChild(renderStructuredValue(entryValue, depth + 1));
+        row.appendChild(label);
+        row.appendChild(valueWrap);
+        container.appendChild(row);
+      });
+      return container;
+    };
+
+    const root = document.createElement("div");
+    root.className = "cm-json-view";
+    root.appendChild(renderStructuredValue(jsonValue, 0));
+    return root;
+  };
+
   if (display?.json === true) {
     cell.classList.add("cm-cell--multiline", "cm-cell--json");
-    const content = document.createElement("pre");
-    content.className = "cm-cell-json";
-    content.textContent = text;
+    const content = display?.jsonValue ? createStructuredJsonContent(display.jsonValue) : document.createElement("pre");
+    if (!display?.jsonValue) {
+      content.className = "cm-cell-json cm-cell-json--raw";
+      content.textContent = text;
+    }
     cell.appendChild(content);
     cell.title = "";
     return cell;
