@@ -26972,6 +26972,119 @@ function extractRestV2SamlResponseFromDebugFlow(flow = null) {
   };
 }
 
+function extractRestV2PartnerFrameworkStatusFromDebugFlow(flow = null) {
+  const directCandidates = dedupeRestV2CandidateStrings([
+    String(flow?.partnerFrameworkStatus || "").trim(),
+    String(flow?.context?.partnerFrameworkStatus || "").trim(),
+  ]);
+  for (const candidate of directCandidates) {
+    if (isRestV2PartnerFrameworkStatusUsable(candidate)) {
+      return candidate;
+    }
+  }
+
+  const events = Array.isArray(flow?.events) ? flow.events : [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    const candidate = firstNonEmptyString([
+      String(event.partnerFrameworkStatus || "").trim(),
+      String(event?.sessionData?.partnerFrameworkStatus || "").trim(),
+      resolveRestV2PartnerFrameworkStatusFromSessionData(event?.sessionData || null, event?.responseHeaders || null),
+      resolveRestV2PartnerFrameworkStatusFromSessionData(event?.sessionData || null, event?.sessionResponseHeaders || null),
+      getRestV2CaseInsensitiveHeaderValue(event?.responseHeaders || null, [
+        "AP-Partner-Framework-Status",
+        "ap-partner-framework-status",
+      ]),
+      getRestV2CaseInsensitiveHeaderValue(event?.requestHeaders || null, [
+        "AP-Partner-Framework-Status",
+        "ap-partner-framework-status",
+      ]),
+      getRestV2CaseInsensitiveHeaderValue(event?.headers || null, [
+        "AP-Partner-Framework-Status",
+        "ap-partner-framework-status",
+      ]),
+    ]);
+    if (isRestV2PartnerFrameworkStatusUsable(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
+function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null) {
+  if (!context || typeof context !== "object") {
+    return context;
+  }
+
+  const extractedPartnerFrameworkStatus = extractRestV2PartnerFrameworkStatusFromDebugFlow(flow);
+  if (
+    extractedPartnerFrameworkStatus &&
+    !isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context))
+  ) {
+    context.partnerFrameworkStatus = extractedPartnerFrameworkStatus;
+    if (context.sessionData && typeof context.sessionData === "object" && !String(context.sessionData.partnerFrameworkStatus || "").trim()) {
+      context.sessionData.partnerFrameworkStatus = extractedPartnerFrameworkStatus;
+    }
+  }
+
+  const resolvedPartnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(context);
+  const resolvedPartner = firstNonEmptyString([
+    String(context.partner || "").trim(),
+    String(context.sessionPartner || "").trim(),
+    resolveRestV2PartnerFromFrameworkStatus(resolvedPartnerFrameworkStatus),
+  ]);
+  if (resolvedPartner) {
+    if (!String(context.partner || "").trim()) {
+      context.partner = resolvedPartner;
+    }
+    if (!String(context.sessionPartner || "").trim()) {
+      context.sessionPartner = resolvedPartner;
+    }
+    if (context.sessionData && typeof context.sessionData === "object" && !String(context.sessionData.partner || "").trim()) {
+      context.sessionData.partner = resolvedPartner;
+    }
+  }
+
+  if (!String(context.samlResponse || "").trim()) {
+    const samlDetails = extractRestV2SamlResponseFromDebugFlow(flow);
+    const samlResponse = String(samlDetails?.samlResponse || "").trim();
+    if (samlResponse) {
+      context.samlResponse = samlResponse;
+      context.samlSource = String(samlDetails?.source || "").trim();
+    }
+  }
+
+  return context;
+}
+
+async function hydrateRestV2PartnerSsoContextFromFlowId(context = null, flowId = "", options = {}) {
+  const normalizedFlowId = String(flowId || "").trim();
+  if (!context || typeof context !== "object" || !normalizedFlowId) {
+    return context;
+  }
+
+  const hasFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context));
+  const hasPartner = Boolean(String(firstNonEmptyString([context.partner, context.sessionPartner]) || "").trim());
+  const hasSamlResponse = Boolean(String(context.samlResponse || "").trim());
+  if (hasFrameworkStatus && hasPartner && hasSamlResponse) {
+    return context;
+  }
+
+  try {
+    const flowSnapshot =
+      options?.flowSnapshot && typeof options.flowSnapshot === "object"
+        ? options.flowSnapshot
+        : await getRestV2DebugFlowSnapshot(normalizedFlowId);
+    hydrateRestV2PartnerSsoContextFromDebugFlow(context, flowSnapshot);
+  } catch {
+    // Leave the runtime context untouched when no debug-flow snapshot is available.
+  }
+  return context;
+}
+
 async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "", options = {}) {
   const normalizedFlowId = String(flowId || "").trim();
   const cached = getRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId);
@@ -27002,6 +27115,16 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
     return result;
   }
 
+  let flowSnapshot = options?.flowSnapshot && typeof options.flowSnapshot === "object" ? options.flowSnapshot : null;
+  if (normalizedFlowId) {
+    try {
+      flowSnapshot = flowSnapshot || (await getRestV2DebugFlowSnapshot(normalizedFlowId));
+      hydrateRestV2PartnerSsoContextFromDebugFlow(context, flowSnapshot);
+    } catch {
+      flowSnapshot = flowSnapshot || null;
+    }
+  }
+
   const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromContext(context);
   result.frameworkStatusPresent = isRestV2PartnerFrameworkStatusUsable(partnerFrameworkStatus);
   if (!result.frameworkStatusPresent) {
@@ -27024,11 +27147,11 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
     source: "",
   };
   for (let attempt = 1; attempt <= maxSamlCaptureAttempts; attempt += 1) {
-    const flowSnapshot =
-      attempt === 1 && options?.flowSnapshot && typeof options.flowSnapshot === "object"
-        ? options.flowSnapshot
+    const currentFlowSnapshot =
+      attempt === 1 && flowSnapshot && typeof flowSnapshot === "object"
+        ? flowSnapshot
         : await getRestV2DebugFlowSnapshot(normalizedFlowId);
-    samlDetails = extractRestV2SamlResponseFromDebugFlow(flowSnapshot);
+    samlDetails = extractRestV2SamlResponseFromDebugFlow(currentFlowSnapshot);
     if (String(samlDetails?.samlResponse || "").trim()) {
       break;
     }
@@ -27372,6 +27495,21 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
     );
 
     const responseText = await response.text().catch(() => "");
+    const responseHeaders = toDebugHeadersObject(response.headers || new Headers());
+    const responsePartnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromSessionData(null, responseHeaders);
+    if (
+      isRestV2PartnerFrameworkStatusUsable(responsePartnerFrameworkStatus) &&
+      !isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context))
+    ) {
+      context.partnerFrameworkStatus = responsePartnerFrameworkStatus;
+      const responsePartner = resolveRestV2PartnerFromFrameworkStatus(responsePartnerFrameworkStatus);
+      if (responsePartner && !String(context.partner || "").trim()) {
+        context.partner = responsePartner;
+      }
+      if (responsePartner && !String(context.sessionPartner || "").trim()) {
+        context.sessionPartner = responsePartner;
+      }
+    }
     const parsed = parseJsonText(responseText, {});
     const selectedMvpd = String(context?.mvpd || "").trim();
     const rawProfiles = parsed?.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {};
@@ -29768,6 +29906,7 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
 
     try {
       if (hasRecordingContext) {
+        await hydrateRestV2PartnerSsoContextFromFlowId(recordingContext, activeFlowId);
         const postAuthProbe = await probeRestV2PostAuthProfiles(recordingContext, activeFlowId, {
           scopePrefix: "profiles-stop",
           maxAttempts: REST_V2_POST_AUTH_PROFILE_CHECK_RETRIES,
@@ -39646,15 +39785,24 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
     esmWorkspaceSyncMegSelectionUi(esmWorkspaceState);
   });
 
-  esmWorkspaceState.megSavedQuerySelectElement?.addEventListener("change", (event) => {
+  esmWorkspaceState.megSavedQuerySelectElement?.addEventListener("change", async (event) => {
     const selectElement = event.target;
     const savedQueryUrl = String(selectElement?.value || "").trim();
     if (!savedQueryUrl) {
       return;
     }
     const savedQueryName = String(selectElement?.selectedOptions?.[0]?.textContent || "").trim();
-    resetEsmWorkspaceMegSavedQuerySelect(selectElement);
-    void esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, getLiveRequestToken(), savedQueryName);
+    if (selectElement) {
+      selectElement.disabled = true;
+    }
+    try {
+      await esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, getLiveRequestToken(), savedQueryName);
+    } finally {
+      if (selectElement) {
+        selectElement.disabled = false;
+      }
+      resetEsmWorkspaceMegSavedQuerySelect(selectElement);
+    }
   });
 
   esmWorkspaceState.megToggleButton?.addEventListener("click", (event) => {
@@ -54564,6 +54712,7 @@ async function handleRestV2LoginPopupClosed(tabId = 0) {
   state.restV2PopupCloseProbeInFlightBySelectionKey.add(selectionKey);
 
   try {
+    await hydrateRestV2PartnerSsoContextFromFlowId(recordingContext, flowId);
     const postAuthProbe = await probeRestV2PostAuthProfiles(recordingContext, flowId, {
       scopePrefix: "profiles-popup-close",
       maxAttempts: REST_V2_POST_AUTH_PROFILE_CHECK_RETRIES,
@@ -60974,6 +61123,7 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
   preparedContext.flowId = flowId;
   try {
     const flowSnapshot = await getRestV2DebugFlowSnapshot(flowId);
+    hydrateRestV2PartnerSsoContextFromDebugFlow(preparedContext, flowSnapshot);
     const samlDetails = extractRestV2SamlResponseFromDebugFlow(flowSnapshot);
     if (String(samlDetails?.samlResponse || "").trim()) {
       preparedContext.samlResponse = String(samlDetails.samlResponse || "").trim();

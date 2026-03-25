@@ -2958,8 +2958,8 @@ async function saveCurrentQuery() {
   }
 }
 
-async function loadSelectedSavedQuery() {
-  const selectedOption = getSelectedSavedQueryOption();
+async function loadSelectedSavedQuery(selectedOptionOverride = null) {
+  const selectedOption = selectedOptionOverride || getSelectedSavedQueryOption();
   if (!selectedOption) {
     reportSavedQueryStatus("Select a Saved ESM Query to load.", "error");
     return;
@@ -3147,14 +3147,24 @@ function registerEventHandlers() {
     void saveCurrentQuery();
   });
 
-  savedQueryPicker?.addEventListener("change", () => {
+  savedQueryPicker?.addEventListener("change", async () => {
     syncSavedQueryPickerTitle();
     syncSavedQueryButtonsDisabled();
-    if (!getSelectedSavedQueryOption()) {
+    const selectedOption = getSelectedSavedQueryOption();
+    if (!selectedOption) {
       return;
     }
-    resetSavedQueryPickerSelection();
-    void loadSelectedSavedQuery();
+    if (savedQueryPicker) {
+      savedQueryPicker.disabled = true;
+    }
+    try {
+      await loadSelectedSavedQuery(selectedOption);
+    } finally {
+      if (savedQueryPicker) {
+        savedQueryPicker.disabled = false;
+      }
+      resetSavedQueryPickerSelection();
+    }
   });
 
   btnSaveQuery?.addEventListener("click", () => {

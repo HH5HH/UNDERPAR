@@ -24,13 +24,15 @@ test("workspace and popup surfaces import the shared console env badge styleshee
   });
 });
 
-test("shared env badge stylesheet defines the neutral console contract", () => {
+test("shared env badge stylesheet defines the quiet console badge contract", () => {
   const source = read("underpar-env-badge.css");
 
-  assert.match(source, /--underpar-env-badge-bg-top:\s*rgb\(248,\s*248,\s*248\);/i);
-  assert.match(source, /--underpar-env-badge-bg-bottom:\s*rgb\(233,\s*233,\s*233\);/i);
-  assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\)\s*\{[\s\S]*?border:\s*1px solid var\(--underpar-env-badge-border\);/i);
+  assert.match(source, /--underpar-env-badge-bg:\s*rgba\(255,\s*255,\s*255,\s*0\.98\);/i);
+  assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\)\s*\{[\s\S]*?background:\s*transparent;/i);
+  assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\)\s*\{[\s\S]*?box-shadow:\s*none;/i);
   assert.match(source, /:is\(\.page-env-badge-prefix,\s*\.env-badge-prefix\)\s*\{[\s\S]*?display:\s*none;/i);
+  assert.match(source, /:is\(\.page-env-badge-value,\s*\.env-badge-value\)\s*\{[\s\S]*?border-radius:\s*999px;/i);
+  assert.match(source, /:is\(\.page-env-badge-value,\s*\.env-badge-value\)\s*\{[\s\S]*?background:\s*var\(--underpar-env-badge-bg\);/i);
   assert.match(source, /:is\(\.page-env-badge-value,\s*\.env-badge-value\)\s*\{[\s\S]*?font-weight:\s*600;/i);
   assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\):has\(:is\(\.page-env-badge-value,\s*\.env-badge-value\):empty\)\s*\{[\s\S]*?display:\s*none;/i);
 });
@@ -73,11 +75,9 @@ test("standalone click views use the same neutral env badge treatment", () => {
   ["clickESM-template.html", "clickDGR-template.html", "scripts/clickESM.html"].forEach((relativePath) => {
     const source = read(relativePath);
 
-    assert.match(
-      source,
-      /\.env-badge\s*\{[\s\S]*?background:\s*linear-gradient\(180deg,\s*rgb\(248,\s*248,\s*248\)\s*0%,\s*rgb\(233,\s*233,\s*233\)\s*100%\);/i
-    );
+    assert.match(source, /\.env-badge\s*\{[\s\S]*?background:\s*transparent;/i);
     assert.match(source, /\.env-badge-prefix\s*\{[\s\S]*?display:\s*none;/i);
+    assert.match(source, /\.env-badge-value\s*\{[\s\S]*?border-radius:\s*999px;/i);
     assert.match(source, /\.env-badge-value\s*\{[\s\S]*?font-weight:\s*600;/i);
   });
 });

@@ -216,6 +216,44 @@ test("MEG workspace saved-query reset clears the picker after the native menu cl
   assert.equal(disabledSyncCount, 1);
 });
 
+test("saved-query change handlers load the selected query before resetting the picker", () => {
+  const popupSource = read("popup.js");
+  const megSource = read("meg-workspace.js");
+
+  assert.match(
+    popupSource,
+    /megSavedQuerySelectElement\?\.addEventListener\("change", async \(event\) => \{[\s\S]*?await esmWorkspaceOpenSavedQueryFromUi\([\s\S]*?resetEsmWorkspaceMegSavedQuerySelect\(selectElement\);/m
+  );
+  assert.match(
+    megSource,
+    /savedQueryPicker\?\.addEventListener\("change", async \(\) => \{[\s\S]*?await loadSelectedSavedQuery\(selectedOption\);[\s\S]*?resetSavedQueryPickerSelection\(\);/m
+  );
+});
+
+test("debug-flow hydration helpers are wired into the partner SSO runtime paths", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(popupSource, /function extractRestV2PartnerFrameworkStatusFromDebugFlow\(flow = null\)/);
+  assert.match(popupSource, /function hydrateRestV2PartnerSsoContextFromDebugFlow\(context = null, flow = null\)/);
+  assert.match(popupSource, /function hydrateRestV2PartnerSsoContextFromFlowId\(context = null, flowId = "", options = \{\}\)/);
+  assert.match(
+    popupSource,
+    /const extractedPartnerFrameworkStatus = extractRestV2PartnerFrameworkStatusFromDebugFlow\(flow\);[\s\S]*?context\.partnerFrameworkStatus = extractedPartnerFrameworkStatus;/m
+  );
+  assert.match(
+    popupSource,
+    /const samlDetails = extractRestV2SamlResponseFromDebugFlow\(flow\);[\s\S]*?context\.samlResponse = samlResponse;/m
+  );
+  assert.match(
+    popupSource,
+    /await hydrateRestV2PartnerSsoContextFromFlowId\(recordingContext, activeFlowId\);[\s\S]*?probeRestV2PostAuthProfiles\(recordingContext, activeFlowId/m
+  );
+  assert.match(
+    popupSource,
+    /await hydrateRestV2PartnerSsoContextFromFlowId\(recordingContext, flowId\);[\s\S]*?probeRestV2PostAuthProfiles\(recordingContext, flowId/m
+  );
+});
+
 test("popup env badge stays hidden until an AdobePASS session is active", () => {
   const els = {
     pageEnvBadgeRow: {

@@ -1097,7 +1097,8 @@ body.workspace-locked .workspace-cards {
   display: inline-flex;
   align-items: center;
   min-height: 22px;
-  width: fit-content;
+  align-self: flex-start;
+  width: auto;
   max-width: 100%;
   padding: 4px 10px;
   border: 1px solid var(--cm-json-chip-border);
@@ -1106,8 +1107,9 @@ body.workspace-locked .workspace-cards {
   color: var(--cm-json-ink);
   font-size: 12px;
   line-height: 1.35;
+  white-space: normal;
   word-break: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .cm-json-scalar--code,
@@ -1117,7 +1119,7 @@ body.workspace-locked .workspace-cards {
 }
 
 .cm-json-scalar--block {
-  display: flex;
+  display: block;
   align-items: flex-start;
   justify-content: flex-start;
   width: 100%;
@@ -1143,6 +1145,7 @@ body.workspace-locked .workspace-cards {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: flex-start;
 }
 
 .cm-json-meta {

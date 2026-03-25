@@ -403,22 +403,20 @@
         align-items: center;
         gap: 0;
         flex: 0 1 auto;
-        width: fit-content;
+        width: auto;
         max-width: min(44vw, 320px);
-        min-height: 24px;
-        padding: 3px 8px;
-        border: 1px solid rgba(143, 143, 143, 0.34);
-        border-radius: 6px;
-        background: linear-gradient(180deg, rgb(248, 248, 248) 0%, rgb(233, 233, 233) 100%);
+        min-height: 20px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
         color: var(--spectrum-neutral-content-color-default, #2c2c2c);
         font-family: adobe-clean, "Adobe Clean", "Source Sans Pro", "Segoe UI", system-ui, sans-serif;
         font-size: 11px;
         line-height: 1.2;
         letter-spacing: 0.01em;
         user-select: text;
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.52),
-          inset 0 -1px 0 rgba(80, 80, 80, 0.12);
+        box-shadow: none;
       }
 
       .env-badge-prefix {
@@ -430,8 +428,15 @@
       }
 
       .env-badge-value {
+        display: inline-flex;
+        align-items: center;
         flex: 0 1 auto;
         min-width: 0;
+        min-height: 20px;
+        padding: 0 8px;
+        border: 1px solid rgba(29, 29, 29, 0.12);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.98);
         color: var(--spectrum-neutral-content-color-default, #2c2c2c);
         font-family: adobe-clean, "Adobe Clean", "Source Sans Pro", "Segoe UI", system-ui, sans-serif;
         font-size: 11px;

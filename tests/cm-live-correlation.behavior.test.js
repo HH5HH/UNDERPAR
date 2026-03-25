@@ -383,6 +383,16 @@ test("CM workspace JSON cells render structured metadata instead of raw JSON dum
   assert.deepEqual(singleLineCell.classList.values, []);
 });
 
+test("CM workspace scalar styles keep JSON values readable instead of collapsing to one-character columns", () => {
+  const source = read("cm-workspace.css");
+
+  assert.match(source, /\.cm-json-scalar,\s*\.cm-json-chip\s*\{[\s\S]*?align-self:\s*flex-start;/i);
+  assert.match(source, /\.cm-json-scalar,\s*\.cm-json-chip\s*\{[\s\S]*?width:\s*auto;/i);
+  assert.match(source, /\.cm-json-scalar,\s*\.cm-json-chip\s*\{[\s\S]*?overflow-wrap:\s*break-word;/i);
+  assert.doesNotMatch(source, /\.cm-json-scalar,\s*\.cm-json-chip\s*\{[^}]*width:\s*fit-content;/i);
+  assert.doesNotMatch(source, /\.cm-json-scalar,\s*\.cm-json-chip\s*\{[^}]*overflow-wrap:\s*anywhere;/i);
+});
+
 test("workspace dataset exposes the CM V2 live API group", () => {
   const popupSource = read("popup.js");
 

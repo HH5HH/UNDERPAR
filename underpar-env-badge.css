@@ -1,9 +1,6 @@
 :root {
-  --underpar-env-badge-border: rgba(143, 143, 143, 0.34);
-  --underpar-env-badge-bg-top: rgb(248, 248, 248);
-  --underpar-env-badge-bg-bottom: rgb(233, 233, 233);
-  --underpar-env-badge-shadow-top: rgba(255, 255, 255, 0.52);
-  --underpar-env-badge-shadow-bottom: rgba(80, 80, 80, 0.12);
+  --underpar-env-badge-border: rgba(29, 29, 29, 0.12);
+  --underpar-env-badge-bg: rgba(255, 255, 255, 0.98);
   --underpar-env-badge-value-ink: var(--spectrum-neutral-content-color-default, #2c2c2c);
 }
 
@@ -12,14 +9,14 @@
   align-items: center;
   gap: 0;
   flex: 0 1 auto;
-  width: fit-content;
+  width: auto;
   max-width: min(44vw, 320px);
-  min-height: 24px;
-  padding: 3px 8px;
-  border: 1px solid var(--underpar-env-badge-border);
-  border-radius: 6px;
-  background: linear-gradient(180deg, var(--underpar-env-badge-bg-top) 0%, var(--underpar-env-badge-bg-bottom) 100%);
-  box-shadow: inset 0 1px 0 var(--underpar-env-badge-shadow-top), inset 0 -1px 0 var(--underpar-env-badge-shadow-bottom);
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--underpar-env-badge-value-ink);
   cursor: default;
   user-select: text;
@@ -38,8 +35,16 @@
 }
 
 :is(.page-env-badge-value, .env-badge-value) {
+  display: inline-flex;
+  align-items: center;
   flex: 0 1 auto;
   min-width: 0;
+  min-height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--underpar-env-badge-border);
+  border-radius: 999px;
+  background: var(--underpar-env-badge-bg);
+  box-shadow: none;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.01em;
