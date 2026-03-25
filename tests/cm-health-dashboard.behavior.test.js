@@ -165,15 +165,13 @@ test("CM health query context clears incompatible MVPD filters when channel focu
 });
 
 test("CM health request URL injects tenant scope and MVPD only for MVPD-aware paths", () => {
-  const popupHelpers = loadPopupFunctions(["buildCmHealthUsageRequestUrl"], {
+  const popupHelpers = loadPopupFunctions(["normalizeCmHealthUsagePath", "extractCmHealthUsagePathParts", "buildCmHealthUsageRequestUrl"], {
     CM_REPORTS_BASE_URL: "https://cm.example.test",
     CM_USAGE_TENANT_QUERY_KEYS: ["tenant"],
-    canonicalizeCmuUsagePath: (value = "") => String(value || "").trim(),
     buildApiRequestUrl: (baseUrl, pathname) => new URL(pathname, baseUrl),
     resolveCmUsageTenantScopeValue: (...values) => values.find((value) => String(value || "").trim()) || "",
     cmUsagePathRequiresTenantScope: (pathname = "") => String(pathname || "").includes("/tenant"),
     applyCmUsageTenantScopeToSearchParams: (searchParams, tenantScope) => searchParams.set("tenant", tenantScope),
-    cmuUsageExtractPathParts: (pathname = "") => String(pathname || "").split("/").filter(Boolean),
     normalizeEsmHealthFilterList: makeNormalizeStringList,
   });
 
@@ -195,15 +193,27 @@ test("CM health request URL injects tenant scope and MVPD only for MVPD-aware pa
 
   assert.equal(scopedUrl.searchParams.get("tenant"), "fox-tenant");
   assert.equal(scopedUrl.searchParams.get("mvpd"), "Comcast");
+  assert.equal(scopedUrl.pathname, "/v2/tenant/year/month/day/mvpd/platform/application-id");
   assert.equal(tenantOnlyUrl.searchParams.get("tenant"), "fox-tenant");
   assert.equal(tenantOnlyUrl.searchParams.get("mvpd"), null);
+
+  const concurrencyUrl = new URL(
+    popupHelpers.buildCmHealthUsageRequestUrl("/v2/year/month/day/concurrency-level/tenant", {
+      tenantScope: "fox-tenant",
+    })
+  );
+  assert.equal(concurrencyUrl.pathname, "/v2/year/month/day/concurrency-level/tenant");
+  assert.equal(concurrencyUrl.searchParams.get("metrics"), "users");
 });
 
 test("health status source places CM between ESM and SPLUNK launch buttons", () => {
   const popupSource = read("popup.js");
+  const popupCssSource = read("popup.css");
 
   assert.match(popupSource, /data-health-action="esm"[\s\S]*data-health-action="cm"[\s\S]*data-health-action="splunk"/);
   assert.match(popupSource, /if \(normalizedAction === "cm"\)[\s\S]*runCmHealthDashboardForSelection/);
+  assert.match(popupSource, /platformBreakdown: fetchCmHealthJson\(queryContext, CM_HEALTH_PLATFORM_APPLICATION_DAILY_PATH/);
+  assert.match(popupCssSource, /\.hr-health-action-btn:not\(:disabled\)[\s\S]*underpar-success/);
 });
 
 test("CM health workspace renders sortable headers and honors numeric sort order", () => {

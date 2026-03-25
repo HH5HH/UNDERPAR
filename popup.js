@@ -11435,6 +11435,7 @@ const CM_HEALTH_BACKBONE_DAILY_PATH = "/v2/tenant/year/month/day";
 const CM_HEALTH_BACKBONE_HOURLY_PATH = "/v2/tenant/year/month/day/hour";
 const CM_HEALTH_BACKBONE_PLATFORM_DAILY_PATH = "/v2/year/month/day/tenant/platform/application-id";
 const CM_HEALTH_BACKBONE_PLATFORM_HOURLY_PATH = "/v2/year/month/day/hour/tenant/platform/application-id";
+const CM_HEALTH_PLATFORM_APPLICATION_DAILY_PATH = "/v2/year/month/day/tenant/platform/application-id/application";
 const CM_HEALTH_BACKBONE_MVPD_DAILY_PATH = "/v2/tenant/year/month/day/mvpd/platform/application-id";
 const CM_HEALTH_BACKBONE_MVPD_HOURLY_PATH = "/v2/tenant/year/month/day/hour/mvpd/platform/application-id";
 const CM_HEALTH_BACKBONE_CHANNEL_DAILY_PATH = "/v2/tenant/year/month/day/channel/platform/application-id";
@@ -22012,8 +22013,33 @@ function cmHealthFilterUsageRows(rows = [], queryContext = null, options = {}) {
   });
 }
 
+function normalizeCmHealthUsagePath(pathname = "") {
+  const raw = String(pathname || "").trim();
+  if (!raw) {
+    return "";
+  }
+  let normalizedPath = raw;
+  try {
+    normalizedPath = String(new URL(raw, CM_REPORTS_BASE_URL).pathname || "");
+  } catch {
+    normalizedPath = raw.split("?")[0];
+  }
+  normalizedPath = `/${String(normalizedPath || "").replace(/^\/+/, "").replace(/\/{2,}/g, "/")}`;
+  if (!normalizedPath.startsWith("/v2/")) {
+    normalizedPath = `/v2/${normalizedPath.replace(/^\/+/, "")}`;
+  }
+  return normalizedPath;
+}
+
+function extractCmHealthUsagePathParts(pathname = "") {
+  return normalizeCmHealthUsagePath(pathname)
+    .split("/")
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function buildCmHealthUsageRequestUrl(pathname = "", queryContext = null, options = {}) {
-  const normalizedPath = canonicalizeCmuUsagePath(pathname) || String(pathname || "").trim();
+  const normalizedPath = normalizeCmHealthUsagePath(pathname);
   const parsed = buildApiRequestUrl(CM_REPORTS_BASE_URL, normalizedPath, {});
   parsed.searchParams.set("format", "json");
   const tenantScope = resolveCmUsageTenantScopeValue(options?.tenantScope, queryContext?.tenantScope);
@@ -22021,7 +22047,7 @@ function buildCmHealthUsageRequestUrl(pathname = "", queryContext = null, option
   if (tenantScope && cmUsagePathRequiresTenantScope(parsed.pathname)) {
     applyCmUsageTenantScopeToSearchParams(parsed.searchParams, tenantScope);
   }
-  const pathParts = cmuUsageExtractPathParts(parsed.pathname);
+  const pathParts = extractCmHealthUsagePathParts(parsed.pathname);
   const mvpdIds = normalizeEsmHealthFilterList(
     Object.prototype.hasOwnProperty.call(options, "mvpdIds") ? options.mvpdIds : queryContext?.mvpdIds
   );
@@ -22030,6 +22056,9 @@ function buildCmHealthUsageRequestUrl(pathname = "", queryContext = null, option
   parsed.searchParams.delete("mvpd-id");
   if (Array.isArray(pathParts) && pathParts.includes("mvpd") && mvpdIds.length > 0) {
     parsed.searchParams.set("mvpd", mvpdIds[0]);
+  }
+  if (Array.isArray(pathParts) && (pathParts.includes("activity-level") || pathParts.includes("concurrency-level"))) {
+    parsed.searchParams.set("metrics", "users");
   }
   return parsed.toString();
 }
@@ -49444,6 +49473,11 @@ async function runCmHealthDashboardForSelection(rawQueryContext = null, options 
       datasetKey: "backbone",
       contextLabel: "overview",
     }),
+    platformBreakdown: fetchCmHealthJson(queryContext, CM_HEALTH_PLATFORM_APPLICATION_DAILY_PATH, {
+      tenantScope: cmHealthContext.tenantScope,
+      datasetKey: "platform-breakdown",
+      contextLabel: "platform/application daily",
+    }),
     mvpdBreakdown: fetchCmHealthJson(queryContext, CM_HEALTH_MVPD_APPLICATION_DAILY_PATH, {
       tenantScope: cmHealthContext.tenantScope,
       mvpdIds: filterMode === "mvpd" ? queryContext.mvpdIds : [],
@@ -49477,8 +49511,9 @@ async function runCmHealthDashboardForSelection(rawQueryContext = null, options 
     ),
   };
 
-  const [backboneResult, mvpdBreakdownResult, channelBreakdownResult, concurrencyResult, activityResult] = await Promise.all([
+  const [backboneResult, platformBreakdownResult, mvpdBreakdownResult, channelBreakdownResult, concurrencyResult, activityResult] = await Promise.all([
     requestPromises.backbone,
+    requestPromises.platformBreakdown,
     requestPromises.mvpdBreakdown,
     requestPromises.channelBreakdown,
     requestPromises.concurrency,
@@ -49503,6 +49538,12 @@ async function runCmHealthDashboardForSelection(rawQueryContext = null, options 
   let concurrencyRows = [];
   let activityRows = [];
 
+  const platformBreakdownRows = platformBreakdownResult.ok
+    ? cmHealthFilterUsageRows(platformBreakdownResult.rows, queryContext, {
+        mvpdIds: [],
+        channels: [],
+      })
+    : [];
   const mvpdBreakdownRows = mvpdBreakdownResult.ok
     ? cmHealthFilterUsageRows(mvpdBreakdownResult.rows, queryContext, {
         channels: filterMode === "channel" ? [] : queryContext.channels,
@@ -49513,23 +49554,6 @@ async function runCmHealthDashboardForSelection(rawQueryContext = null, options 
         mvpdIds: filterMode === "mvpd" ? [] : queryContext.mvpdIds,
       })
     : [];
-
-  if (!mvpdBreakdownResult.ok) {
-    const breakdownError = String(mvpdBreakdownResult.error || "Unable to load CM HEALTH MVPD/platform/application data.").trim();
-    sectionErrors.mvpd = breakdownError;
-    if (filterMode !== "channel") {
-      sectionErrors.platform = breakdownError;
-      sectionErrors.applications = breakdownError;
-    }
-  }
-  if (!channelBreakdownResult.ok) {
-    const breakdownError = String(channelBreakdownResult.error || "Unable to load CM HEALTH channel/platform/application data.").trim();
-    sectionErrors.channel = breakdownError;
-    if (filterMode === "channel") {
-      sectionErrors.platform = breakdownError;
-      sectionErrors.applications = breakdownError;
-    }
-  }
 
   const mapApplicationRow = (entry) => ({
     ...entry,
@@ -49542,7 +49566,12 @@ async function runCmHealthDashboardForSelection(rawQueryContext = null, options 
     ignoredSections.push("mvpd");
     sectionMessages.mvpd =
       "MVPD breakdown is unavailable while Channel focus is active because CMU does not expose a channel x MVPD usage slice.";
-    if (channelBreakdownResult.ok) {
+    if (!channelBreakdownResult.ok) {
+      const breakdownError = String(channelBreakdownResult.error || "Unable to load CM HEALTH channel/platform/application data.").trim();
+      sectionErrors.channel = breakdownError;
+      sectionErrors.platform = breakdownError;
+      sectionErrors.applications = breakdownError;
+    } else {
       channelRows = aggregateCmHealthBreakdownRows(channelBreakdownRows, ["channel"], CM_HEALTH_TOP_ROW_LIMIT, {
         mapRow: (entry) => ({
           ...entry,
@@ -49569,37 +49598,81 @@ async function runCmHealthDashboardForSelection(rawQueryContext = null, options 
       );
     }
   } else {
-    if (mvpdBreakdownResult.ok) {
-      mvpdRows = aggregateCmHealthBreakdownRows(mvpdBreakdownRows, ["mvpd"], CM_HEALTH_TOP_ROW_LIMIT, {
-        mapRow: (entry) => ({
-          ...entry,
-          mvpd: entry.label,
-        }),
-      });
-      platformRows = aggregateCmHealthBreakdownRows(mvpdBreakdownRows, ["platform"], CM_HEALTH_TOP_ROW_LIMIT, {
-        mapRow: (entry) => ({
-          ...entry,
-          platform: entry.label,
-        }),
-      });
-      applicationRows = aggregateCmHealthBreakdownRows(
-        mvpdBreakdownRows,
-        ["application-id", "application"],
-        CM_HEALTH_TOP_ROW_LIMIT,
-        {
-          buildLabel: (values) =>
-            [String(values?.application || "").trim(), String(values?.["application-id"] || "").trim()]
-              .filter(Boolean)
-              .join(" · "),
-          mapRow: mapApplicationRow,
-        }
-      );
+    if (filterMode === "mvpd") {
+      if (!mvpdBreakdownResult.ok) {
+        const breakdownError = String(mvpdBreakdownResult.error || "Unable to load CM HEALTH MVPD/platform/application data.").trim();
+        sectionErrors.mvpd = breakdownError;
+        sectionErrors.platform = breakdownError;
+        sectionErrors.applications = breakdownError;
+      } else {
+        mvpdRows = aggregateCmHealthBreakdownRows(mvpdBreakdownRows, ["mvpd"], CM_HEALTH_TOP_ROW_LIMIT, {
+          mapRow: (entry) => ({
+            ...entry,
+            mvpd: entry.label,
+          }),
+        });
+        platformRows = aggregateCmHealthBreakdownRows(mvpdBreakdownRows, ["platform"], CM_HEALTH_TOP_ROW_LIMIT, {
+          mapRow: (entry) => ({
+            ...entry,
+            platform: entry.label,
+          }),
+        });
+        applicationRows = aggregateCmHealthBreakdownRows(
+          mvpdBreakdownRows,
+          ["application-id", "application"],
+          CM_HEALTH_TOP_ROW_LIMIT,
+          {
+            buildLabel: (values) =>
+              [String(values?.application || "").trim(), String(values?.["application-id"] || "").trim()]
+                .filter(Boolean)
+                .join(" · "),
+            mapRow: mapApplicationRow,
+          }
+        );
+      }
+    } else {
+      if (!platformBreakdownResult.ok) {
+        const breakdownError = String(platformBreakdownResult.error || "Unable to load CM HEALTH platform/application data.").trim();
+        sectionErrors.platform = breakdownError;
+        sectionErrors.applications = breakdownError;
+      } else {
+        platformRows = aggregateCmHealthBreakdownRows(platformBreakdownRows, ["platform"], CM_HEALTH_TOP_ROW_LIMIT, {
+          mapRow: (entry) => ({
+            ...entry,
+            platform: entry.label,
+          }),
+        });
+        applicationRows = aggregateCmHealthBreakdownRows(
+          platformBreakdownRows,
+          ["application-id", "application"],
+          CM_HEALTH_TOP_ROW_LIMIT,
+          {
+            buildLabel: (values) =>
+              [String(values?.application || "").trim(), String(values?.["application-id"] || "").trim()]
+                .filter(Boolean)
+                .join(" · "),
+            mapRow: mapApplicationRow,
+          }
+        );
+      }
+      if (!mvpdBreakdownResult.ok) {
+        sectionErrors.mvpd = String(mvpdBreakdownResult.error || "Unable to load CM HEALTH MVPD/platform/application data.").trim();
+      } else {
+        mvpdRows = aggregateCmHealthBreakdownRows(mvpdBreakdownRows, ["mvpd"], CM_HEALTH_TOP_ROW_LIMIT, {
+          mapRow: (entry) => ({
+            ...entry,
+            mvpd: entry.label,
+          }),
+        });
+      }
     }
     if (filterMode === "mvpd") {
       ignoredSections.push("channel");
       sectionMessages.channel =
         "Channel breakdown is unavailable while MVPD focus is active because CMU does not expose an MVPD x channel usage slice.";
-    } else if (channelBreakdownResult.ok) {
+    } else if (!channelBreakdownResult.ok) {
+      sectionErrors.channel = String(channelBreakdownResult.error || "Unable to load CM HEALTH channel/platform/application data.").trim();
+    } else {
       channelRows = aggregateCmHealthBreakdownRows(channelBreakdownRows, ["channel"], CM_HEALTH_TOP_ROW_LIMIT, {
         mapRow: (entry) => ({
           ...entry,

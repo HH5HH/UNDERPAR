@@ -2657,20 +2657,34 @@ select:disabled {
   color: var(--s2-action-text-accent);
 }
 
+.hr-health-action-btn:not(:disabled) {
+  border-color: rgba(var(--underpar-success-1100), 0.84);
+  background: linear-gradient(160deg, rgb(var(--underpar-success-700)), rgb(var(--underpar-success-900)));
+  color: rgb(255, 255, 255);
+  box-shadow:
+    0 10px 18px rgba(var(--underpar-success-900), 0.18),
+    0 0 0 1px rgba(var(--underpar-success-1100), 0.12);
+}
+
 .hr-health-action-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  background: var(--s2-action-bg-hover);
-  box-shadow: 0 10px 18px rgba(var(--service-health-zip-900), 0.14);
+  border-color: rgba(var(--underpar-success-1100), 0.92);
+  background: linear-gradient(160deg, rgb(var(--underpar-success-800)), rgb(var(--underpar-success-1000)));
+  box-shadow:
+    0 12px 20px rgba(var(--underpar-success-900), 0.22),
+    0 0 0 1px rgba(var(--underpar-success-1100), 0.16);
 }
 
 .hr-health-action-btn--accent:hover:not(:disabled) {
-  background: var(--s2-action-bg-accent-hover);
-  border-color: var(--s2-action-bg-accent-hover);
+  background: linear-gradient(160deg, rgb(var(--underpar-success-800)), rgb(var(--underpar-success-1000)));
+  border-color: rgba(var(--underpar-success-1100), 0.92);
 }
 
 .hr-health-action-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--s2-action-focus-ring);
+  box-shadow:
+    0 0 0 2px rgba(var(--underpar-success-1100), 0.24),
+    0 12px 20px rgba(var(--underpar-success-900), 0.22);
 }
 
 .hr-health-action-btn:disabled {
