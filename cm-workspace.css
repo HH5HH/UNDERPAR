@@ -1067,7 +1067,7 @@ body.workspace-locked .workspace-cards {
 
 .esm-table td.cm-cell--json {
   white-space: normal;
-  max-width: min(58ch, 40vw);
+  max-width: min(76ch, 56vw);
 }
 
 .cm-json-view,
@@ -1122,7 +1122,7 @@ body.workspace-locked .workspace-cards {
 }
 
 .cm-json-row--inline {
-  grid-template-columns: minmax(108px, 38%) minmax(0, 1fr);
+  grid-template-columns: minmax(132px, 176px) minmax(0, 1fr);
   align-items: start;
 }
 
@@ -1147,6 +1147,12 @@ body.workspace-locked .workspace-cards {
   gap: 8px;
 }
 
+.cm-json-value-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .cm-json-scalar,
 .cm-json-chip {
   display: inline-flex;
@@ -1154,20 +1160,32 @@ body.workspace-locked .workspace-cards {
   min-height: 22px;
   width: fit-content;
   max-width: 100%;
-  padding: 2px 8px;
+  padding: 4px 10px;
   border: 1px solid var(--cm-json-chip-border);
   border-radius: 999px;
   background: var(--cm-json-chip-surface);
   color: var(--cm-json-ink);
   font-size: 12px;
   line-height: 1.35;
-  word-break: break-word;
+  word-break: normal;
   overflow-wrap: anywhere;
 }
 
 .cm-json-scalar--code,
-.cm-json-chip.cm-json-scalar--code {
+.cm-json-chip.cm-json-scalar--code,
+.cm-json-scalar--timestamp {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.cm-json-scalar--block {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  border-radius: 12px;
+  white-space: normal;
 }
 
 .cm-json-scalar--boolean,
@@ -1186,6 +1204,14 @@ body.workspace-locked .workspace-cards {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.cm-json-meta {
+  color: var(--cm-json-key-ink);
+  font-size: 11px;
+  line-height: 1.35;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .cm-json-section {

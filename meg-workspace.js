@@ -2681,6 +2681,27 @@ function syncSavedQueryButtonsDisabled() {
   }
 }
 
+function resetSavedQueryPickerSelection() {
+  if (!savedQueryPicker) {
+    return;
+  }
+  const restoreDefault = () => {
+    savedQueryPicker.value = "";
+    syncSavedQueryPickerTitle();
+    syncSavedQueryButtonsDisabled();
+  };
+  try {
+    savedQueryPicker.blur?.();
+  } catch {
+    // Ignore focus release failures.
+  }
+  if (typeof setTimeout === "function") {
+    setTimeout(restoreDefault, 0);
+    return;
+  }
+  restoreDefault();
+}
+
 function syncSavedQueryPickerTitle() {
   if (!savedQueryPicker) {
     return;
@@ -2690,7 +2711,7 @@ function syncSavedQueryPickerTitle() {
     .map((option) => String(option?.textContent || "").trim())
     .filter(Boolean)
     .sort((left, right) => right.length - left.length)[0] || "Saved Queries";
-  const nextWidthCh = Math.min(Math.max(widthLabel.length + 4, 18), 52);
+  const nextWidthCh = Math.min(Math.max(widthLabel.length + 4, 18), 36);
   const title = selectedOption ? String(selectedOption.value || "").trim() : "Saved Queries";
   savedQueryPicker.style.width = `${nextWidthCh}ch`;
   savedQueryPicker.title = title;
@@ -2711,6 +2732,7 @@ function populateSavedQuerySelect(preferredStorageKey = "", records = state.save
   const defaultOption = document.createElement("option");
   defaultOption.textContent = "Saved Queries";
   defaultOption.value = "";
+  defaultOption.disabled = true;
   savedQueryPicker.appendChild(defaultOption);
 
   records.forEach((record) => {
@@ -3097,6 +3119,7 @@ function registerEventHandlers() {
     if (!getSelectedSavedQueryOption()) {
       return;
     }
+    resetSavedQueryPickerSelection();
     void loadSelectedSavedQuery();
   });
 

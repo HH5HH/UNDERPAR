@@ -24273,6 +24273,34 @@ function refreshRestV2LoginPanels() {
   refreshBobtoolsWorkspaceTools();
 }
 
+function maybeRefreshRestV2InteractiveDocsForContext(context = null, controllerReason = "rest-v2-learning-context") {
+  const programmerId = String(context?.programmerId || "").trim();
+  const requestorId = String(context?.requestorId || context?.serviceProviderId || "").trim();
+  const mvpd = String(context?.mvpd || "").trim();
+  const selectedProgrammerId = String(resolveSelectedProgrammer()?.programmerId || "").trim();
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  const selectedMvpdId = String(state.selectedMvpdId || "").trim();
+  if (!programmerId || !selectedProgrammerId || programmerId !== selectedProgrammerId) {
+    return false;
+  }
+  if (requestorId && selectedRequestorId && requestorId.toLowerCase() !== selectedRequestorId.toLowerCase()) {
+    return false;
+  }
+  if (
+    mvpd &&
+    selectedMvpdId &&
+    !isRestV2MvpdMatch(mvpd, selectedMvpdId, {
+      allowSsoAlias: true,
+    })
+  ) {
+    return false;
+  }
+  void refreshProgrammerPanels({
+    controllerReason: String(controllerReason || "rest-v2-learning-context").trim() || "rest-v2-learning-context",
+  });
+  return true;
+}
+
 async function maybeAutoStopRestV2RecordingForSelectionChange(nextSelection = {}, options = {}) {
   if (state.restV2Stopping || state.restV2RecordingActive !== true || !String(state.restV2DebugFlowId || "").trim()) {
     return false;
@@ -29418,6 +29446,7 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
           }
         }
         refreshBobtoolsWorkspaceTools();
+        maybeRefreshRestV2InteractiveDocsForContext(recordingContext, "rest-v2-recording-stop");
       }
 
       closeResult = await closeRestV2LoginAndReturn(section, {
@@ -38492,6 +38521,7 @@ function esmWorkspaceSyncMegSavedQueryUi(esmWorkspaceState) {
   defaultOption.value = "";
   defaultOption.textContent = "Saved Queries";
   defaultOption.title = "Saved Queries";
+  defaultOption.disabled = true;
   selectElement.appendChild(defaultOption);
 
   if (records.length === 0) {
@@ -38515,6 +38545,27 @@ function esmWorkspaceSyncMegSavedQueryUi(esmWorkspaceState) {
   selectElement.disabled = false;
   selectElement.title = "Saved Queries";
   selectElement.setAttribute("aria-label", "Saved Queries");
+}
+
+function resetEsmWorkspaceMegSavedQuerySelect(selectElement = null) {
+  if (!selectElement) {
+    return;
+  }
+  const restoreDefault = () => {
+    selectElement.value = "";
+    selectElement.title = "Saved Queries";
+    selectElement.setAttribute("aria-label", "Saved Queries");
+  };
+  try {
+    selectElement.blur?.();
+  } catch {
+    // Ignore focus release failures.
+  }
+  if (typeof setTimeout === "function") {
+    setTimeout(restoreDefault, 0);
+    return;
+  }
+  restoreDefault();
 }
 
 function refreshAllEsmWorkspaceMegSavedQuerySelectors() {
@@ -39121,9 +39172,7 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
       return;
     }
     const savedQueryName = String(selectElement?.selectedOptions?.[0]?.textContent || "").trim();
-    selectElement.value = "";
-    selectElement.title = "Saved Queries";
-    selectElement.setAttribute("aria-label", "Saved Queries");
+    resetEsmWorkspaceMegSavedQuerySelect(selectElement);
     void esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, getLiveRequestToken(), savedQueryName);
   });
 
@@ -43011,16 +43060,7 @@ function cmBuildEsmHealthXrefSavedQueryName(record = null, cmState = null) {
     firstNonEmptyString([payload?.mvpdLabel, getRestV2MvpdPickerLabel(requestorId, mvpdId), mvpdId]) || ""
   ).trim();
   const recordTitle = String(record?.title || "ESM Health Scope").trim() || "ESM Health Scope";
-  const scopeLabel = cmBuildCrossReferenceLabel(
-    requestorId,
-    mvpdId,
-    mvpdId && mvpdLabel
-      ? {
-          id: mvpdId,
-          name: mvpdLabel,
-        }
-      : null
-  );
+  const scopeLabel = requestorId && mvpdLabel ? `${requestorId} x ${mvpdLabel}` : firstNonEmptyString([requestorId, mvpdLabel, mvpdId]);
   return popupNormalizeSavedEsmQueryName([recordTitle, scopeLabel].filter(Boolean).join(" "));
 }
 
@@ -53668,6 +53708,7 @@ async function handleRestV2LoginPopupClosed(tabId = 0) {
           source: "popup-close",
         });
       }
+      maybeRefreshRestV2InteractiveDocsForContext(recordingContext, "rest-v2-popup-close");
 
       const requestorMvpdLabel = formatRestV2RequestorMvpdDisplay(
         String(recordingContext.requestorId || ""),
@@ -53821,6 +53862,7 @@ function ensureRestV2BobtoolsRedirectWatcher() {
           source: "redirect-intercept",
         });
         refreshRestV2LoginPanels();
+        maybeRefreshRestV2InteractiveDocsForContext(recordingContext, "rest-v2-redirect-intercept");
       }
 
       const workspaceUrl = bobtoolsWorkspaceGetWorkspaceUrl();
@@ -59958,6 +60000,14 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     String(harvestContext?.partner || "").trim(),
     String(harvest?.partner || "").trim(),
     String(harvest?.sessionPartner || "").trim(),
+    isRestV2LikelyPartnerSsoContext({
+      mvpd: fallbackMvpd,
+      sessionAction: activeRecordingContext?.sessionAction || harvestContext?.sessionAction || harvest?.sessionAction,
+      sessionPartner: activeRecordingContext?.sessionPartner || harvestContext?.sessionPartner || harvest?.sessionPartner,
+      partnerFrameworkStatus,
+    })
+      ? String(fallbackMvpd || "").trim()
+      : "",
   ]);
   const samlResponse = firstNonEmptyString([
     String(activeRecordingContext?.samlResponse || "").trim(),

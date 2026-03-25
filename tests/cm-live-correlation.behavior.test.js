@@ -318,6 +318,16 @@ test("CM workspace JSON cells render structured metadata instead of raw JSON dum
     }
     return [node.textContent || "", ...(node.children || []).map(flattenNodeText)].join(" ").trim();
   };
+  const collectClassNames = (node) => {
+    if (!node) {
+      return [];
+    }
+    return [
+      String(node.className || "").trim(),
+      ...((node.classList?.values || []).map((value) => String(value || "").trim())),
+      ...((node.children || []).flatMap((child) => collectClassNames(child))),
+    ].filter(Boolean);
+  };
   const { createCell } = loadFunctions(
     "cm-workspace.js",
     ["safeJsonParse", "normalizeCmColumnName", "shouldTreatCmCellAsStructuredJson", "formatCmCellDisplayValue", "createCell"],
@@ -344,6 +354,22 @@ test("CM workspace JSON cells render structured metadata instead of raw JSON dum
   assert.match(flattenNodeText(singleLineJsonPreviewCell.children[0]), /\bComcast\b/);
   assert.match(flattenNodeText(singleLineJsonPreviewCell.children[0]), /\bSubject\b/);
   assert.match(flattenNodeText(singleLineJsonPreviewCell.children[0]), /\bviewer-1\b/);
+
+  const nestedProfileCell = createCell(
+    '{"profiles":{"Comcast_SSO":{"notBefore":1774463394000,"upstreamUserID":{"value":"8cd6f500de33772d726f54ad18fad8f1a36968be","state":"plain"}}}}',
+    "ProfileCheckResponsePreview"
+  );
+  const nestedClassNames = collectClassNames(nestedProfileCell.children[0]);
+  assert.match(flattenNodeText(nestedProfileCell.children[0]), /2026-/);
+  assert.match(flattenNodeText(nestedProfileCell.children[0]), /State: plain/);
+  assert.ok(
+    nestedClassNames.some((className) => className.includes("cm-json-scalar--timestamp")),
+    "expected timestamp fields to render with timestamp styling"
+  );
+  assert.ok(
+    nestedClassNames.some((className) => className.includes("cm-json-scalar--block")),
+    "expected long scalar values to render as block rows instead of chips"
+  );
 
   const rawFallbackCell = createCell("{not-json}", "ResponsePayloadJson");
   assert.equal(rawFallbackCell.title, "");

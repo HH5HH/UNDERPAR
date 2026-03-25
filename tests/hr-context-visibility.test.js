@@ -127,10 +127,28 @@ function loadRestV2InteractiveDocsContextBuilder(seed = {}) {
     "function resolveRestV2LearningRequestorContext() { return globalThis.__seed.requestorContext || { requestorId: '', autoResolved: false, candidateCount: 0 }; }",
     "function collectRestV2AppCandidatesFromPremiumApps() { return globalThis.__seed.restV2Candidates || []; }",
     "function resolveRestV2AppForServiceProvider(restV2Apps, serviceProviderId) { return typeof globalThis.__seed.resolveApp === 'function' ? globalThis.__seed.resolveApp(restV2Apps, serviceProviderId) : (Array.isArray(restV2Apps) ? restV2Apps[0] || null : null); }",
+    "function selectPreferredRestV2AppForRequestor(restV2Apps, serviceProviderId) { return typeof globalThis.__seed.selectPreferredApp === 'function' ? globalThis.__seed.selectPreferredApp(restV2Apps, serviceProviderId) : (Array.isArray(restV2Apps) ? restV2Apps[0] || null : null); }",
     "function normalizeEntityToken(value = '') { return String(value || '').trim().toLowerCase(); }",
     "function sanitizePassVaultHintValue(...values) { for (const value of values) { if (value == null) { continue; } if (Array.isArray(value)) { const nested = sanitizePassVaultHintValue(...value); if (nested) { return nested; } continue; } if (typeof value === 'object') { const nested = sanitizePassVaultHintValue(value.value, value.id, value.key, value.guid); if (nested) { return nested; } continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
     "function extractPassVaultPrimaryRequestorHintFromAppData(appData = null) { return String(appData?.primaryRequestor || '').trim(); }",
     "function collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId) { return typeof globalThis.__seed.collectCandidates === 'function' ? globalThis.__seed.collectCandidates(appInfo, programmerId) : []; }",
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function resolveRestV2LearningRecordingContext() { return globalThis.__seed.activeRecordingContext || null; }",
+    "function getRestV2ProfileHarvestForContext() { return globalThis.__seed.harvest || null; }",
+    "function buildRestV2ContextFromHarvest(harvest = null) { return typeof globalThis.__seed.buildHarvestContext === 'function' ? globalThis.__seed.buildHarvestContext(harvest) : (globalThis.__seed.harvestContext || null); }",
+    "function getRestV2MvpdMeta(requestorId = '', mvpdId = '') { return typeof globalThis.__seed.resolveMvpdMeta === 'function' ? globalThis.__seed.resolveMvpdMeta(requestorId, mvpdId) : null; }",
+    "function findRestV2PreauthorizeHistoryEntriesForLearning() { return globalThis.__seed.preauthorizeHistoryEntries || []; }",
+    "function bobtoolsWorkspaceResolveQuickResourceOptions() { return globalThis.__seed.quickResourceOptions || { resourceIds: [] }; }",
+    "function collectRestV2LearningResourceIds(harvest = null, extras = []) { return typeof globalThis.__seed.collectResourceIds === 'function' ? globalThis.__seed.collectResourceIds(harvest, extras) : []; }",
+    "function sampleRestV2LearningResourceIds(values = [], count = 10) { return typeof globalThis.__seed.sampleResourceIds === 'function' ? globalThis.__seed.sampleResourceIds(values, count) : (Array.isArray(values) ? values.slice(0, count) : []); }",
+    "function normalizeAdobeNavigationUrl(value = '') { return String(value || '').trim(); }",
+    "function collectRestV2SessionCodeCandidates(values = []) { return (Array.isArray(values) ? values : [values]).map((value) => String(value || '').trim()).filter(Boolean); }",
+    "function buildRestV2InteractiveDocsUrl(anchor = '') { return typeof globalThis.__seed.buildDocsUrl === 'function' ? globalThis.__seed.buildDocsUrl(anchor) : String(anchor || '').trim(); }",
+    "function resolveRestV2LearningRequestorDomainName() { return String(globalThis.__seed.domainName || '').trim(); }",
+    "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || '').trim(); }",
+    "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || context?.sessionPartner || '').trim(); }",
+    "function isRestV2LikelyPartnerSsoContext(context = null) { return typeof globalThis.__seed.isLikelyPartnerSso === 'function' ? globalThis.__seed.isLikelyPartnerSso(context) : false; }",
+    "function resolveRestV2DebugFlowIdForHarvest(harvest = null) { return typeof globalThis.__seed.resolveFlowId === 'function' ? globalThis.__seed.resolveFlowId(harvest) : ''; }",
     extractFunctionSource(source, "resolveRestV2InteractiveDocsAppRequestorContext"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsContext"),
     "module.exports = { buildRestV2InteractiveDocsContext };",
@@ -1072,6 +1090,70 @@ test("REST V2 learning activation clears stale plan-missing partner SSO fields w
 
   assert.equal(createPartnerProfileState.ready, true);
   assert.deepEqual(Array.from(createPartnerProfileState.pendingFields || []), []);
+});
+
+test("REST V2 learning context falls back to the active SSO MVPD when partner metadata was not explicitly captured", () => {
+  const seededApp = {
+    guid: "rest-guid",
+    appData: {
+      requestor: "MML",
+    },
+  };
+  const { buildRestV2InteractiveDocsContext } = loadRestV2InteractiveDocsContextBuilder({
+    state: {
+      selectedRequestorId: "MML",
+      selectedMvpdId: "Comcast_SSO",
+      restV2RecordingActive: false,
+      restV2DebugFlowId: "",
+    },
+    programmer: {
+      programmerId: "Turner",
+      programmerName: "Turner",
+    },
+    services: {
+      restV2: seededApp,
+    },
+    restV2Candidates: [seededApp],
+    requestorContext: {
+      requestorId: "MML",
+      autoResolved: false,
+      candidateCount: 1,
+    },
+    harvest: {
+      mvpd: "Comcast_SSO",
+      sessionAction: "authenticate",
+      partnerFrameworkStatus: "framework-status-token",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+    },
+    harvestContext: {
+      ok: true,
+      mvpd: "Comcast_SSO",
+      sessionAction: "authenticate",
+      partnerFrameworkStatus: "framework-status-token",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      partner: "",
+    },
+    isLikelyPartnerSso(context = null) {
+      return String(context?.mvpd || "").trim() === "Comcast_SSO";
+    },
+  });
+
+  const context = buildRestV2InteractiveDocsContext(
+    {
+      programmerId: "Turner",
+      programmerName: "Turner",
+    },
+    {
+      key: "partner-sso-create-profile",
+      usesPartnerPath: true,
+      usesBodySamlResponse: true,
+    }
+  );
+
+  assert.equal(context.ok, true);
+  assert.equal(context.partner, "Comcast_SSO");
+  assert.equal(context.mvpd, "Comcast_SSO");
+  assert.equal(context.samlResponse, "PHNhbWxwOlJlc3BvbnNlPg==");
 });
 
 test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING deeplink hydration", () => {
