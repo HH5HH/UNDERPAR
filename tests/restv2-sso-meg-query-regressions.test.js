@@ -216,7 +216,7 @@ test("MEG workspace saved-query reset clears the picker after the native menu cl
   assert.equal(disabledSyncCount, 1);
 });
 
-test("popup env badge stays hidden before auth and shows after auth", () => {
+test("popup env badge stays hidden until an AdobePASS session is active", () => {
   const els = {
     pageEnvBadgeRow: {
       hidden: false,
@@ -229,13 +229,19 @@ test("popup env badge stays hidden before auth and shows after auth", () => {
   const { syncPageEnvironmentBadgeVisibility } = loadFunctions("popup.js", ["syncPageEnvironmentBadgeVisibility"], {
     els,
     state,
+    shouldShowAdobePassEnvironmentBadge: () =>
+      Boolean(state.sessionReady === true && state.loginData && state.loginData.adobePassReady === true),
   });
 
   syncPageEnvironmentBadgeVisibility();
   assert.equal(els.pageEnvBadgeRow.hidden, true);
 
   state.sessionReady = true;
-  state.loginData = { accessToken: "token" };
+  state.loginData = { accessToken: "token", adobePassReady: false };
+  syncPageEnvironmentBadgeVisibility();
+  assert.equal(els.pageEnvBadgeRow.hidden, true);
+
+  state.loginData = { accessToken: "token", adobePassReady: true };
   syncPageEnvironmentBadgeVisibility();
   assert.equal(els.pageEnvBadgeRow.hidden, false);
 });
@@ -258,6 +264,8 @@ test("popup env badge renders the console release label", () => {
   const { renderPageEnvironmentBadge } = loadFunctions("popup.js", ["renderPageEnvironmentBadge"], {
     els,
     DEFAULT_ADOBEPASS_ENVIRONMENT: { key: "release-production" },
+    shouldShowAdobePassEnvironmentBadge: () => true,
+    clearPageEnvironmentBadge: () => {},
     getActiveAdobePassEnvironment: () => ({
       key: "release-staging",
       label: "Staging",
@@ -275,4 +283,49 @@ test("popup env badge renders the console release label", () => {
   assert.equal(els.pageEnvBadgeValue["aria-hidden"], "false");
   assert.equal(els.pageEnvBadge.dataset.environmentKey, "release-staging");
   assert.equal(els.pageEnvBadge.dataset.environmentLabel, "Release Staging");
+});
+
+test("popup env badge clears instead of leaking AdobePASS context for non-AdobePASS sessions", () => {
+  const els = {
+    pageEnvBadge: {
+      dataset: {
+        environmentKey: "release-production",
+        environmentLabel: "Release Production",
+      },
+      title: "Environment : Release Production",
+      setAttribute(name, value) {
+        this[name] = value;
+      },
+    },
+    pageEnvBadgeValue: {
+      textContent: "Release Production",
+      setAttribute(name, value) {
+        this[name] = value;
+      },
+    },
+  };
+  const { clearPageEnvironmentBadge, renderPageEnvironmentBadge } = loadFunctions(
+    "popup.js",
+    ["clearPageEnvironmentBadge", "renderPageEnvironmentBadge"],
+    {
+      els,
+      shouldShowAdobePassEnvironmentBadge: () => false,
+      getActiveAdobePassEnvironment: () => ({
+        key: "release-production",
+        label: "Production",
+      }),
+      getUnderParEnvironmentRegistry: () => null,
+      DEFAULT_ADOBEPASS_ENVIRONMENT: { key: "release-production" },
+    }
+  );
+
+  clearPageEnvironmentBadge();
+  assert.equal(els.pageEnvBadgeValue.textContent, "");
+  assert.equal(els.pageEnvBadgeValue["aria-hidden"], "true");
+  assert.equal(els.pageEnvBadge.dataset.environmentLabel, "");
+
+  els.pageEnvBadgeValue.textContent = "Release Production";
+  renderPageEnvironmentBadge();
+  assert.equal(els.pageEnvBadgeValue.textContent, "");
+  assert.equal(els.pageEnvBadge.title, "Environment");
 });

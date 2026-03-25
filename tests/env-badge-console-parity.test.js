@@ -54,6 +54,7 @@ test("environment registry exposes a console-style release badge label helper", 
   assert.match(source, /function buildEnvironmentBadgeLabel\(environment\)/);
   assert.match(source, /return `Release \$\{label\}`;/);
   assert.match(source, /buildEnvironmentBadgeLabel,/);
+  assert.match(source, /normalizedContext === "underpar" \|\| normalizedContext === "popup" \|\| normalizedContext === "sidepanel"/);
 });
 
 test("legacy env badge recolors are removed from popup, Blondie, and MEG overrides", () => {

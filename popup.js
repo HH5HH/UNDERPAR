@@ -83774,8 +83774,34 @@ function renderBuildInfo() {
   renderPageEnvironmentBadge();
 }
 
+function clearPageEnvironmentBadge() {
+  if (!els.pageEnvBadge || !els.pageEnvBadgeValue) {
+    return;
+  }
+  els.pageEnvBadgeValue.textContent = "";
+  els.pageEnvBadgeValue.setAttribute("aria-hidden", "true");
+  els.pageEnvBadge.dataset.environmentKey = "";
+  els.pageEnvBadge.dataset.environmentLabel = "";
+  els.pageEnvBadge.title = "Environment";
+  els.pageEnvBadge.setAttribute("aria-label", "Environment");
+}
+
+function shouldShowAdobePassEnvironmentBadge(sessionData = state.loginData) {
+  const currentSession = sessionData && typeof sessionData === "object" ? sessionData : null;
+  return Boolean(
+    currentSession &&
+      state.sessionReady === true &&
+      state.restricted !== true &&
+      shouldHydrateAdobePassWorkflowForSession(currentSession)
+  );
+}
+
 function renderPageEnvironmentBadge() {
   if (!els.pageEnvBadge || !els.pageEnvBadgeValue) {
+    return;
+  }
+  if (!shouldShowAdobePassEnvironmentBadge()) {
+    clearPageEnvironmentBadge();
     return;
   }
   const environment = getActiveAdobePassEnvironment();
@@ -83802,7 +83828,7 @@ function syncPageEnvironmentBadgeVisibility() {
   if (!els.pageEnvBadgeRow) {
     return;
   }
-  els.pageEnvBadgeRow.hidden = !(state.sessionReady === true && Boolean(state.loginData));
+  els.pageEnvBadgeRow.hidden = !shouldShowAdobePassEnvironmentBadge();
 }
 
 function renderRestrictedView() {

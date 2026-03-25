@@ -106,6 +106,10 @@
 
   function buildEnvironmentBadgeTooltip(environment, context = "console") {
     const resolved = buildEnvironmentDetails(environment);
+    const normalizedContext = String(context || "console").trim().toLowerCase();
+    if (normalizedContext === "underpar" || normalizedContext === "popup" || normalizedContext === "sidepanel") {
+      return `Environment : ${buildEnvironmentBadgeLabel(resolved)}`;
+    }
     const badgeContext = resolveEnvironmentBadgeContext(resolved, context);
     const lines = [`Environment : ${resolved.label}`];
     if (String(badgeContext?.label || "").trim() && String(badgeContext?.url || "").trim()) {
