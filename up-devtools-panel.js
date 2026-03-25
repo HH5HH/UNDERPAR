@@ -1777,6 +1777,70 @@ function extractNamespaceRoot(storageKey = "") {
   return match ? String(match[1] || "").trim() || "unscoped" : normalizedKey;
 }
 
+const VAULT_JWT_VALUE_REDACTION_PATTERN = /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
+const VAULT_BEARER_TOKEN_REDACTION_PATTERN = /\bBearer\s+[A-Za-z0-9._~-]{20,}\b/gi;
+const VAULT_NAMED_TOKEN_VALUE_REDACTION_PATTERN =
+  /\b(access[_\s-]?token|id[_\s-]?token|refresh[_\s-]?token|authorization|csrf[_\s-]?token)\b\s*([:=])\s*([A-Za-z0-9._~\/=-]{8,})/gi;
+
+function isVaultSensitiveStorageKey(storageKey = "") {
+  const normalizedKey = String(storageKey || "").trim().toLowerCase();
+  if (!normalizedKey) {
+    return false;
+  }
+  return (
+    normalizedKey.includes("token") ||
+    normalizedKey.includes("authorization") ||
+    normalizedKey.includes("cookie") ||
+    normalizedKey.includes("secret") ||
+    normalizedKey.includes("password") ||
+    normalizedKey.includes("csrf")
+  );
+}
+
+function maskVaultSensitiveValue(value = "") {
+  const normalizedValue = String(value || "").trim();
+  return normalizedValue ? `<redacted:${normalizedValue.length}>` : "<redacted>";
+}
+
+function redactVaultSensitiveText(value = "") {
+  const raw = String(value || "");
+  if (!raw) {
+    return "";
+  }
+  return raw
+    .replace(VAULT_BEARER_TOKEN_REDACTION_PATTERN, "Bearer <redacted>")
+    .replace(VAULT_NAMED_TOKEN_VALUE_REDACTION_PATTERN, (_match, tokenName, operator) => `${tokenName}${operator}<redacted>`)
+    .replace(VAULT_JWT_VALUE_REDACTION_PATTERN, "<redacted-jwt>");
+}
+
+function redactVaultSensitivePayload(value, keyName = "", seen = new WeakSet()) {
+  if (typeof value === "string") {
+    if (isVaultSensitiveStorageKey(keyName)) {
+      return maskVaultSensitiveValue(value);
+    }
+    return redactVaultSensitiveText(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactVaultSensitivePayload(entry, keyName, seen));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if (seen.has(value)) {
+    return "[Circular]";
+  }
+  seen.add(value);
+
+  const output = {};
+  Object.entries(value).forEach(([entryKey, entryValue]) => {
+    output[entryKey] = redactVaultSensitivePayload(entryValue, entryKey, seen);
+  });
+  return output;
+}
+
 function truncateVaultPreview(text, maxLength = 220) {
   const normalizedText = String(text || "").replace(/\s+/g, " ").trim();
   if (normalizedText.length <= maxLength) {
@@ -1804,10 +1868,11 @@ function getVaultEntryAnchorId(areaId = "", entryIndex = 0) {
 
 function buildVaultAreaSnapshot(areaId, label, payload, errorMessage = "") {
   const normalizedPayload = payload && typeof payload === "object" ? payload : {};
-  const entries = Object.keys(normalizedPayload)
+  const redactedPayload = redactVaultSensitivePayload(normalizedPayload);
+  const entries = Object.keys(redactedPayload)
     .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))
     .map((key, entryIndex) => {
-      const value = normalizedPayload[key];
+      const value = redactedPayload[key];
       const serialized = safeJsonStringify(value, 2);
       return {
         key,
@@ -1822,12 +1887,12 @@ function buildVaultAreaSnapshot(areaId, label, payload, errorMessage = "") {
   return {
     areaId,
     label,
-    errorMessage: String(errorMessage || "").trim(),
+    errorMessage: redactVaultSensitiveText(String(errorMessage || "").trim()),
     keyCount: entries.length,
-    byteCount: estimateSerializedBytes(normalizedPayload),
-    payload: cloneJsonLikeValue(normalizedPayload, {}),
+    byteCount: estimateSerializedBytes(redactedPayload),
+    payload: cloneJsonLikeValue(redactedPayload, {}),
     entries,
-    rawJson: safeJsonStringify(normalizedPayload, 2),
+    rawJson: safeJsonStringify(redactedPayload, 2),
   };
 }
 

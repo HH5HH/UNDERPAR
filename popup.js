@@ -497,6 +497,7 @@ const DEBUG_FLOW_STORAGE_INDEX_KEY = "underpardebug_flow_index_v1";
 const LEGACY_DEBUG_FLOW_STORAGE_INDEX_KEY = "minclouddebug_flow_index_v1";
 const DEBUG_FLOW_STORAGE_PREFIX = "underpardebug_flow_v1:";
 const LEGACY_DEBUG_FLOW_STORAGE_PREFIX = "minclouddebug_flow_v1:";
+const UNDERPAR_SESSION_STORAGE_ACCESS_LEVEL = "TRUSTED_CONTEXTS";
 const IMS_RELAY_MESSAGE_TIMEOUT_MS = 15000;
 const PROGRAMMERS_FETCH_TIMEOUT_MS = 15000;
 const NON_INTERACTIVE_AUTH_TIMEOUT_MS = 12000;
@@ -558,6 +559,9 @@ const PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS = 2500;
 const DEGRADATION_CHEAT_SHEET_FAST_AUTH_TIMEOUT_MS = 1200;
 const DEGRADATION_CHEAT_SHEET_FAST_HARVEST_TIMEOUT_MS = 1200;
 const PREMIUM_SERVICE_SCOPE_HYDRATION_CONCURRENCY = 6;
+
+let underparLoginStorageReadyPromise = null;
+let underparEphemeralLoginStorageSnapshot = null;
 const PREMIUM_CM_RENDER_GRACE_MS = 250;
 const PREMIUM_PROGRAMMER_HYDRATION_GRACE_MS = 750;
 const PREMIUM_REQUIRED_SERVICE_KEYS = ["restV2", "esm", "degradation"];
@@ -5984,8 +5988,7 @@ function ensureUnderparVaultGlobalContainers(vault = null) {
 }
 
 function getPreferredCmTokenFingerprint(accessToken = "") {
-  const normalized = normalizeBearerTokenValue(accessToken);
-  return normalized ? String(normalized).slice(-24) : "";
+  return buildUnderparTokenFingerprint(accessToken);
 }
 
 function getUnderparVaultSavedQueriesInput(vault = null) {
@@ -13538,7 +13541,7 @@ function summarizeUnderparConsoleSensitiveString(value, keyName = "") {
     normalizedKey === "cookie" ||
     normalizedKey === "set-cookie";
   if (DEBUG_REDACT_SENSITIVE && normalizedBearerValue && isProbablyJwt(normalizedBearerValue)) {
-    return `<redacted-jwt:${normalizedBearerValue.slice(-12)}>`;
+    return `<redacted-jwt:${buildUnderparTokenFingerprint(normalizedBearerValue)}>`;
   }
   if (DEBUG_REDACT_SENSITIVE && looksSensitiveKey) {
     const redacted = redactSensitiveTokenValues(raw);
@@ -15192,6 +15195,20 @@ function redactSensitiveTokenValues(value) {
     .replace(BEARER_TOKEN_REDACTION_PATTERN, "Bearer <redacted>")
     .replace(NAMED_TOKEN_VALUE_REDACTION_PATTERN, (_match, tokenName, operator) => `${tokenName}${operator}<redacted>`)
     .replace(JWT_VALUE_REDACTION_PATTERN, "<redacted-jwt>");
+}
+
+function buildUnderparTokenFingerprint(tokenValue = "") {
+  const normalized = normalizeBearerTokenValue(tokenValue);
+  if (!normalized) {
+    return "";
+  }
+  let hash = 2166136261;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash ^= normalized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const unsignedHash = hash >>> 0;
+  return `tok:${unsignedHash.toString(16).padStart(8, "0")}:${normalized.length}`;
 }
 
 function normalizeHttpErrorMessage(value) {
@@ -62236,6 +62253,142 @@ async function exchangeUnderparImsAuthorizationCode({
   return parsed;
 }
 
+async function refreshUnderparImsAccessToken({
+  tokenEndpoint = IMS_DEFAULT_TOKEN_ENDPOINT,
+  clientId = "",
+  refreshToken = "",
+} = {}) {
+  const normalizedRefreshToken = String(refreshToken || "").trim();
+  const normalizedClientId = String(clientId || "").trim();
+  if (!normalizedRefreshToken || !normalizedClientId) {
+    throw new Error("Adobe IMS refresh token exchange requires both client_id and refresh_token.");
+  }
+
+  const endpoint = new URL(String(tokenEndpoint || IMS_DEFAULT_TOKEN_ENDPOINT));
+  endpoint.searchParams.set("client_id", normalizedClientId);
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: normalizedRefreshToken,
+  });
+  const response = await relayImsFetch(endpoint.toString(), {
+    method: "POST",
+    credentials: "omit",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+  });
+  const text = await response.text().catch(() => "");
+  const parsed = parseJsonOrFormText(text, null);
+  if (!response.ok) {
+    throw buildUnderparImsAuthError(parsed, text, "Adobe IMS refresh token exchange failed.");
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Adobe IMS refresh token exchange returned an invalid response.");
+  }
+  return parsed;
+}
+
+async function refreshUnderparLoginSessionWithRefreshToken(loginData = null) {
+  const sessionData = loginData && typeof loginData === "object" ? loginData : state.loginData || {};
+  const refreshToken = firstNonEmptyString([sessionData?.refreshToken]);
+  if (!refreshToken) {
+    return null;
+  }
+
+  const clientId = firstNonEmptyString([
+    sessionData?.imsSession?.clientId,
+    sessionData?.imsSession?.client_id,
+    ...getUnderparImsClientIdCandidates(firstNonEmptyString([sessionData?.accessToken])),
+  ]);
+  if (!clientId) {
+    return null;
+  }
+
+  const authConfiguration = await fetchUnderparImsOpenIdConfiguration().catch(
+    () => getDefaultUnderparImsAuthConfiguration()
+  );
+  const tokenPayload = await refreshUnderparImsAccessToken({
+    tokenEndpoint: firstNonEmptyString([authConfiguration?.token_endpoint, IMS_DEFAULT_TOKEN_ENDPOINT]),
+    clientId,
+    refreshToken,
+  });
+  const accessToken = normalizeBearerTokenValue(firstNonEmptyString([tokenPayload?.access_token]));
+  if (!accessToken) {
+    throw new Error("Adobe IMS refresh token exchange returned no access token.");
+  }
+
+  const tokenExpiry = resolveAuthResponseExpiry(accessToken, tokenPayload?.expires_in);
+  const accessTokenClaims = parseJwtPayload(accessToken) || {};
+  const idToken = compactStorageString(
+    firstNonEmptyString([String(tokenPayload?.id_token || "").trim(), sessionData?.idToken]),
+    4096
+  );
+  const idTokenClaims = parseJwtPayload(idToken) || {};
+  const requestedScope = firstNonEmptyString([
+    String(tokenPayload?.scope || "").trim(),
+    sessionData?.scope,
+    IMS_SCOPE,
+  ]);
+  const returnedScope = compactStorageString(
+    resolveGrantedUnderparImsScope(accessToken, requestedScope, requestedScope),
+    2048
+  );
+  const expiresAt = coercePositiveNumber(tokenExpiry?.expiresAt);
+  const tokenType =
+    compactStorageString(
+      firstNonEmptyString([String(tokenPayload?.token_type || "").trim(), sessionData?.tokenType]),
+      60
+    ) || "bearer";
+  const mergedImsSession = mergeImsSessionSnapshots(
+    mergeImsSessionSnapshots(
+      tokenExpiry?.tokenSnapshot || null,
+      sessionData?.imsSession && typeof sessionData.imsSession === "object" ? sessionData.imsSession : null
+    ),
+    {
+      userId: firstNonEmptyString([
+        idTokenClaims?.sub,
+        sessionData?.imsSession?.userId,
+        sessionData?.imsSession?.user_id,
+      ]),
+      sessionId: firstNonEmptyString([
+        idTokenClaims?.sid,
+        sessionData?.imsSession?.sessionId,
+        sessionData?.imsSession?.sid,
+      ]),
+      authId: firstNonEmptyString([
+        idTokenClaims?.aa_id,
+        idTokenClaims?.authId,
+        sessionData?.imsSession?.authId,
+        sessionData?.imsSession?.aa_id,
+      ]),
+      clientId: firstNonEmptyString([accessTokenClaims?.client_id, accessTokenClaims?.clientId, clientId]),
+      tokenType,
+      scope: returnedScope,
+      expiresAt,
+    }
+  );
+
+  return {
+    accessToken,
+    expiresAt,
+    tokenType,
+    scope: returnedScope,
+    idToken,
+    refreshToken: compactStorageString(
+      firstNonEmptyString([String(tokenPayload?.refresh_token || "").trim(), refreshToken]),
+      4096
+    ),
+    imsSession: mergedImsSession,
+    organizations:
+      sessionData?.organizations && typeof sessionData.organizations === "object"
+        ? sessionData.organizations
+        : null,
+    imageUrl: firstNonEmptyString([sessionData?.imageUrl]),
+  };
+}
+
 async function fetchUnderparImsUserInfo({
   userInfoEndpoint = IMS_DEFAULT_USERINFO_ENDPOINT,
   accessToken = "",
@@ -66401,7 +66554,7 @@ function buildLoginAuthContext(loginData = {}) {
     ].find((value) => coercePositiveNumber(value) > 0)),
     accessTokenFingerprint: firstNonEmptyString([
       loginData?.sessionKeys?.accessTokenFingerprint,
-      loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "",
+      buildUnderparTokenFingerprint(loginData?.accessToken),
     ]),
   };
 }
@@ -66775,7 +66928,7 @@ function getAvatarCacheIdentity(loginData) {
 
 function getAvatarPersistIdentityCandidates(loginData, options = {}) {
   const includeTokenFingerprint = options.includeTokenFingerprint !== false;
-  const tokenFingerprint = loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "";
+  const tokenFingerprint = buildUnderparTokenFingerprint(loginData?.accessToken);
   const candidates = [
     getLoginPrincipalId(loginData),
     getLoginAuthId(loginData),
@@ -67007,7 +67160,7 @@ function buildSessionKeySnapshot(loginData = {}) {
     accessTokenFingerprint: compactStorageString(
       firstNonEmptyString([
         authContext?.accessTokenFingerprint,
-        loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "",
+        buildUnderparTokenFingerprint(loginData?.accessToken),
       ]),
       64
     ),
@@ -67479,7 +67632,7 @@ function makeAvatarResolveKey(loginData) {
     return normalized;
   };
 
-  const tokenFingerprint = loginData?.accessToken ? String(loginData.accessToken).slice(-16) : "";
+  const tokenFingerprint = buildUnderparTokenFingerprint(loginData?.accessToken);
   const persistedAvatar = compactAvatarValue(readPersistedAvatarCandidate(loginData));
   const explicitLoginImageUrl = compactAvatarValue(resolveLoginImageUrl(loginData));
   const loginProfile = resolveLoginProfile(loginData) || {};
@@ -67497,7 +67650,7 @@ function makeAvatarResolveKey(loginData) {
 }
 
 function getAvatarRefreshSessionKey(loginData) {
-  const tokenFingerprint = loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "";
+  const tokenFingerprint = buildUnderparTokenFingerprint(loginData?.accessToken);
   const profile = resolveLoginProfile(loginData) || {};
   const identity = firstNonEmptyString([
     profile?.userId,
@@ -67922,7 +68075,7 @@ function buildAvatarDataUrlPrefetchKey(loginData, url) {
   if (!sourceUrl) {
     return "";
   }
-  const tokenFingerprint = loginData?.accessToken ? String(loginData.accessToken).slice(-24) : "no-token";
+  const tokenFingerprint = buildUnderparTokenFingerprint(loginData?.accessToken) || "no-token";
   const userFingerprint = getAvatarCacheIdentity(loginData);
   return `${userFingerprint}:${tokenFingerprint}:${sourceUrl}`;
 }
@@ -68865,12 +69018,91 @@ function resolveStoredSessionExpiresAt(loginData, tokenSession) {
   return Math.min(storedExpiresAt, tokenExpiresAt);
 }
 
+function getUnderparLoginStorageArea() {
+  return chrome?.storage?.session || null;
+}
+
+async function primeUnderparLoginStorageArea() {
+  const storageArea = getUnderparLoginStorageArea();
+  if (!storageArea) {
+    return null;
+  }
+  if (!underparLoginStorageReadyPromise) {
+    underparLoginStorageReadyPromise = (async () => {
+      if (typeof storageArea.setAccessLevel === "function") {
+        try {
+          await storageArea.setAccessLevel({
+            accessLevel: UNDERPAR_SESSION_STORAGE_ACCESS_LEVEL,
+          });
+        } catch {
+          // Keep default trusted-context access when access-level changes are unavailable.
+        }
+      }
+      return storageArea;
+    })();
+  }
+  return underparLoginStorageReadyPromise;
+}
+
+async function clearLegacyPersistedLoginData() {
+  if (!chrome?.storage?.local?.remove) {
+    return false;
+  }
+  try {
+    await chrome.storage.local.remove(STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeStoredLoginDataSession(payload = null) {
+  const normalizedPayload = payload && typeof payload === "object" ? payload : null;
+  underparEphemeralLoginStorageSnapshot = normalizedPayload;
+  const storageArea = await primeUnderparLoginStorageArea();
+  if (storageArea?.set && normalizedPayload) {
+    await storageArea.set({ [STORAGE_KEY]: normalizedPayload });
+  } else if (storageArea?.remove && !normalizedPayload) {
+    await storageArea.remove(STORAGE_KEY);
+  }
+  await clearLegacyPersistedLoginData();
+  return true;
+}
+
+async function readStoredLoginDataSession() {
+  await clearLegacyPersistedLoginData();
+  const storageArea = await primeUnderparLoginStorageArea();
+  if (storageArea?.get) {
+    try {
+      const payload = await storageArea.get(STORAGE_KEY);
+      const stored = payload?.[STORAGE_KEY];
+      if (stored && typeof stored === "object") {
+        underparEphemeralLoginStorageSnapshot = stored;
+        return stored;
+      }
+    } catch {
+      // Fall back to popup-memory storage below.
+    }
+  }
+  return underparEphemeralLoginStorageSnapshot && typeof underparEphemeralLoginStorageSnapshot === "object"
+    ? underparEphemeralLoginStorageSnapshot
+    : null;
+}
+
+async function clearStoredLoginDataSession() {
+  underparEphemeralLoginStorageSnapshot = null;
+  const storageArea = await primeUnderparLoginStorageArea();
+  if (storageArea?.remove) {
+    await storageArea.remove(STORAGE_KEY);
+  }
+  await clearLegacyPersistedLoginData();
+}
+
 async function loadStoredLoginData() {
   if (state.manualSignOutHold === true) {
     return null;
   }
-  const stored = await chrome.storage.local.get(STORAGE_KEY);
-  const loginData = stored?.[STORAGE_KEY] || null;
+  const loginData = await readStoredLoginDataSession();
 
   if (!loginData) {
     return null;
@@ -68878,11 +69110,11 @@ async function loadStoredLoginData() {
 
   const accessToken = firstNonEmptyString([loginData?.accessToken]);
   if (!accessToken) {
-    await chrome.storage.local.remove(STORAGE_KEY);
+    await clearStoredLoginDataSession();
     return null;
   }
   if (tokenSupportsCmTenantCatalog(accessToken)) {
-    await chrome.storage.local.remove(STORAGE_KEY);
+    await clearStoredLoginDataSession();
     return null;
   }
 
@@ -68898,12 +69130,12 @@ async function loadStoredLoginData() {
     loginData?.imsSession?.client_id,
   ]);
   if (configuredClientId && storedClientId && storedClientId !== configuredClientId) {
-    await chrome.storage.local.remove(STORAGE_KEY);
+    await clearStoredLoginDataSession();
     return null;
   }
   const expiresAt = resolveStoredSessionExpiresAt(loginData, tokenSnapshot);
   if (!expiresAt || expiresAt <= Date.now()) {
-    await chrome.storage.local.remove(STORAGE_KEY);
+    await clearStoredLoginDataSession();
     return null;
   }
 
@@ -69359,58 +69591,24 @@ async function saveLoginData(loginData) {
   }
 
   try {
-    await chrome.storage.local.set({ [STORAGE_KEY]: normalized });
+    await writeStoredLoginDataSession(normalized);
     emitCmConsoleTokenForTesting(
       firstNonEmptyString([normalized.cmConsoleAccessToken, normalized.accessToken]),
       "save-login-data"
     );
     return true;
   } catch (error) {
-    if (!isStorageQuotaError(error)) {
-      log("Unable to persist login data; keeping in-memory session only.", error?.message || String(error));
-      return false;
-    }
-
-    const removedDebugKeys = await clearDebugFlowStorageFromChromeStorage();
-    if (removedDebugKeys > 0) {
-      try {
-        await chrome.storage.local.set({ [STORAGE_KEY]: normalized });
-        emitCmConsoleTokenForTesting(
-          firstNonEmptyString([normalized.cmConsoleAccessToken, normalized.accessToken]),
-          "save-login-data-retry"
-        );
-        log("Recovered storage quota by clearing persisted UP debug flow keys.", { removedDebugKeys });
-        return true;
-      } catch {
-        // Fallback to minimal payload below.
-      }
-    }
-
     const minimal = buildStoredLoginData(loginData, true);
-    if (!minimal.accessToken || !minimal.expiresAt || minimal.expiresAt <= 0) {
-      return false;
+    if (minimal.accessToken && minimal.expiresAt && minimal.expiresAt > 0) {
+      underparEphemeralLoginStorageSnapshot = minimal;
     }
-
-    try {
-      await chrome.storage.local.set({ [STORAGE_KEY]: minimal });
-      emitCmConsoleTokenForTesting(
-        firstNonEmptyString([minimal.cmConsoleAccessToken, minimal.accessToken]),
-        "save-login-data-minimal"
-      );
-      log("Stored minimal session payload after quota pressure.", { removedDebugKeys });
-      return true;
-    } catch (retryError) {
-      log("Storage quota prevented persisted session write; continuing with in-memory session.", {
-        removedDebugKeys,
-        error: retryError instanceof Error ? retryError.message : String(retryError),
-      });
-      return false;
-    }
+    log("Unable to write session-scoped login data; keeping popup-memory session only.", error?.message || String(error));
+    return false;
   }
 }
 
 async function clearLoginData() {
-  await chrome.storage.local.remove(STORAGE_KEY);
+  await clearStoredLoginDataSession();
 }
 
 function clearRefreshTimer() {
@@ -70057,20 +70255,30 @@ async function refreshSessionNoTouch() {
     setUnderparDiagnosticMarker("auth", {
       status: "pending",
       mode: "silent-refresh",
-      phase: "launch-web-auth-flow",
+      phase: "refresh-token-or-silent-login",
     });
     try {
-      const authData = await startLogin({ interactive: false, allowFallback: false });
+      let authMode = "refresh-token";
+      let authData = await refreshUnderparLoginSessionWithRefreshToken(state.loginData).catch((error) => {
+        log("Refresh-token renewal skipped", error instanceof Error ? error.message : String(error));
+        return null;
+      });
+      if (!authData) {
+        authMode = "silent-web-auth-flow";
+        authData = await startLogin({ interactive: false, allowFallback: false });
+      }
       setUnderparDiagnosticMarker("auth", {
         status: "token-acquired",
         mode: "silent-refresh",
         phase: "token-acquired",
+        authMode,
       });
       const profile = await resolveProfileAfterLogin(authData);
       setUnderparDiagnosticMarker("auth", {
         status: "profile-resolved",
         mode: "silent-refresh",
         phase: "profile-resolved",
+        authMode,
       });
       const activated = await activateSession(
         attachTargetOrganizationToLoginData(
@@ -70085,6 +70293,7 @@ async function refreshSessionNoTouch() {
         status: activated === true ? "success" : "incomplete",
         mode: "silent-refresh",
         phase: activated === true ? "activation-complete" : "activation-incomplete",
+        authMode,
       });
       return activated === true;
     } catch (error) {
@@ -78703,7 +78912,7 @@ async function autoHydrateCmConsoleTokenAfterImsLogin(source = "unknown") {
 
 function getCmAuthFingerprint() {
   const token = getPreferredCmRequestAccessTokenCandidate();
-  return token ? token.slice(-24) : "no-token";
+  return buildUnderparTokenFingerprint(token) || "no-token";
 }
 
 function queueCmConsoleAutoHydration(source = "unknown") {
@@ -83267,28 +83476,38 @@ async function refreshSessionManual() {
   setUnderparDiagnosticMarker("auth", {
     status: "pending",
     mode: "manual-refresh",
-    phase: "launch-web-auth-flow",
+    phase: "refresh-token-or-login",
   });
 
   const refreshStartedAt = Date.now();
   try {
     let authData;
     let usedInteractiveLogin = false;
-    try {
-      authData = await startLogin({ interactive: false, allowFallback: false });
-    } catch {
-      authData = await startLogin({
-        interactive: true,
-        allowFallback: true,
-        prompt: "login",
-      });
-      usedInteractiveLogin = true;
+    let authMode = "refresh-token";
+    authData = await refreshUnderparLoginSessionWithRefreshToken(state.loginData).catch((error) => {
+      log("Manual refresh-token renewal skipped", error instanceof Error ? error.message : String(error));
+      return null;
+    });
+    if (!authData) {
+      authMode = "silent-web-auth-flow";
+      try {
+        authData = await startLogin({ interactive: false, allowFallback: false });
+      } catch {
+        authMode = "interactive-web-auth-flow";
+        authData = await startLogin({
+          interactive: true,
+          allowFallback: true,
+          prompt: "login",
+        });
+        usedInteractiveLogin = true;
+      }
     }
     setUnderparDiagnosticMarker("auth", {
       status: "token-acquired",
       mode: "manual-refresh",
       phase: "token-acquired",
       interactiveFallback: usedInteractiveLogin,
+      authMode,
     });
 
     const authCompletedAt = Date.now();
@@ -83303,6 +83522,7 @@ async function refreshSessionManual() {
       mode: "manual-refresh",
       phase: "profile-resolved",
       interactiveFallback: usedInteractiveLogin,
+      authMode,
     });
     const profileResolvedAt = Date.now();
     const imageUrl = resolveAuthAvatarSeed(authData, profile);
@@ -83348,6 +83568,7 @@ async function refreshSessionManual() {
         mode: "manual-refresh",
         phase: "activation-complete",
         interactiveFallback: usedInteractiveLogin,
+        authMode,
       });
       log("Manual refresh critical path complete", {
         interactive: usedInteractiveLogin,
@@ -83365,6 +83586,7 @@ async function refreshSessionManual() {
         mode: "manual-refresh",
         phase: "activation-incomplete",
         interactiveFallback: usedInteractiveLogin,
+        authMode,
       });
       clearStatusUnlessCmTenantsPrecheckBlocked();
       return;
@@ -84034,6 +84256,7 @@ async function init() {
     },
   });
   await settleUnderparInitStep("Pass VAULT load", () => ensurePassVaultLoaded({ forceReload: false }));
+  await settleUnderparInitStep("Legacy Adobe IMS local token purge", () => clearLegacyPersistedLoginData());
   void renderBuildInfo();
   await settleUnderparInitStep("Session bootstrap", () => bootstrapSession("startup"));
   render();
