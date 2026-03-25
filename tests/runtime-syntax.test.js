@@ -23,3 +23,7 @@ test("vault store helper source parses as valid JavaScript", () => {
 test("background runtime source parses as valid JavaScript", () => {
   assertParses("background.js");
 });
+
+test("CM health workspace source parses as valid JavaScript", () => {
+  assertParses("cm-health-workspace.js");
+});

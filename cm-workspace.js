@@ -3036,7 +3036,12 @@ function createCell(value) {
   const cell = document.createElement("td");
   const text = value == null ? "" : String(value);
   cell.textContent = text;
-  cell.title = text;
+  if (text.includes("\n")) {
+    cell.classList.add("cm-cell--multiline");
+    cell.title = "";
+  } else {
+    cell.title = text;
+  }
   return cell;
 }
 

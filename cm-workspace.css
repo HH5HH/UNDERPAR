@@ -1040,6 +1040,18 @@ body.workspace-locked .workspace-cards {
   text-align: left;
 }
 
+.esm-table td.cm-cell--multiline {
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: clip;
+  vertical-align: top;
+  max-width: min(56ch, 42vw);
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .esm-table thead th {
   position: sticky;
   top: 0;

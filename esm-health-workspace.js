@@ -24,6 +24,7 @@ const state = {
   platformOptions: [],
   loading: false,
   report: null,
+  tableSorts: {},
   query: {
     initialized: false,
     controllerSelectionKey: "",
@@ -58,6 +59,108 @@ const els = {
   pageEnvBadge: document.getElementById("page-env-badge"),
   pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
 };
+
+const ESM_HEALTH_BREAKDOWN_TABLES = Object.freeze([
+  {
+    key: "platform-hotspots",
+    title: "Platform Hotspots",
+    copy: "Sorted by issue load first, then traffic. Click a platform to narrow the dashboard further.",
+    rowsKey: "platformRows",
+    errorKey: "platform",
+    columns: [
+      { key: "platform", label: "Platform", drillType: "platform" },
+      { key: "trafficShare", label: "Traffic Share", type: "percent" },
+      { key: "mediaTokens", label: "Play Requests", type: "number" },
+      { key: "issueEvents", label: "Issue Events", type: "number" },
+      { key: "authnConversion", label: "AuthN Conv", type: "percent" },
+      { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+      { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+      { key: "clientlessFailureRate", label: "Clientless Failure", type: "percent" },
+    ],
+  },
+  {
+    key: "application-versions",
+    title: "Application Versions",
+    copy: "Highest-impact DCR app versions in the active health slice.",
+    rowsKey: "applicationRows",
+    errorKey: "applications",
+    columns: [
+      { key: "applicationLabel", label: "Application Version" },
+      { key: "trafficShare", label: "Traffic Share", type: "percent" },
+      { key: "mediaTokens", label: "Play Requests", type: "number" },
+      { key: "issueEvents", label: "Issue Events", type: "number" },
+      { key: "authnConversion", label: "AuthN Conv", type: "percent" },
+      { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+      { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+    ],
+  },
+  {
+    key: "api-entry-points",
+    title: "API Entry Points",
+    copy: "Migration visibility for the active app/device slice. Watch which API entry points carry the load and the failures.",
+    rowsKey: "apiRows",
+    errorKey: "apis",
+    columns: [
+      { key: "api", label: "API" },
+      { key: "trafficShare", label: "Traffic Share", type: "percent" },
+      { key: "mediaTokens", label: "Play Requests", type: "number" },
+      { key: "issueEvents", label: "Issue Events", type: "number" },
+      { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+      { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+    ],
+  },
+  {
+    key: "sdk-versions",
+    title: "SDK Versions",
+    copy: "Adobe Pass SDK distribution for the current slice. Use this to spot older client populations before API v2 migration work.",
+    rowsKey: "sdkRows",
+    errorKey: "sdkVersions",
+    columns: [
+      { key: "sdkVersionLabel", label: "SDK Version" },
+      { key: "trafficShare", label: "Traffic Share", type: "percent" },
+      { key: "mediaTokens", label: "Play Requests", type: "number" },
+      { key: "issueEvents", label: "Issue Events", type: "number" },
+      { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+      { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+    ],
+  },
+  {
+    key: "mvpd-hotspots",
+    title: "MVPD Hotspots",
+    copy: "Sorted by issue load first, then traffic. Click an MVPD to re-run the dashboard with that MVPD applied.",
+    rowsKey: "mvpdRows",
+    errorKey: "mvpd",
+    columns: [
+      { key: "mvpd", label: "MVPD", drillType: "mvpd" },
+      { key: "trafficShare", label: "Traffic Share", type: "percent" },
+      { key: "mediaTokens", label: "Play Requests", type: "number" },
+      { key: "issueEvents", label: "Issue Events", type: "number" },
+      { key: "authzSuccessful", label: "AuthZ Success", type: "number" },
+      { key: "authzRejected", label: "Rejected", type: "number" },
+      { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+      { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+      { key: "avgAuthzLatency", label: "Avg Latency", type: "latency" },
+    ],
+  },
+  {
+    key: "requestor-ids",
+    title: "RequestorIds",
+    copy: "Cross-requestor comparison for the active media company. Click a RequestorId to re-run the dashboard with that RequestorId applied.",
+    rowsKey: "requestorRows",
+    errorKey: "requestor",
+    columns: [
+      { key: "requestorId", label: "RequestorId", drillType: "requestor" },
+      { key: "trafficShare", label: "Traffic Share", type: "percent" },
+      { key: "mediaTokens", label: "Play Requests", type: "number" },
+      { key: "issueEvents", label: "Issue Events", type: "number" },
+      { key: "authnSuccessful", label: "AuthN Success", type: "number" },
+      { key: "authzSuccessful", label: "AuthZ Success", type: "number" },
+      { key: "authnConversion", label: "AuthN Conv", type: "percent" },
+      { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
+      { key: "authzErrorRate", label: "Error Rate", type: "percent" },
+    ],
+  },
+]);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -155,6 +258,166 @@ function formatLatency(value) {
     return "—";
   }
   return `${numeric.toFixed(0)} ms`;
+}
+
+function normalizeBreakdownSortDirection(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "asc" || normalized === "desc" ? normalized : "";
+}
+
+function normalizeBreakdownSortRule(sortRule = null) {
+  if (!sortRule || typeof sortRule !== "object") {
+    return null;
+  }
+  const columnKey = String(sortRule.columnKey || sortRule.key || "").trim();
+  const direction = normalizeBreakdownSortDirection(sortRule.direction);
+  if (!columnKey || !direction) {
+    return null;
+  }
+  return {
+    columnKey,
+    direction,
+  };
+}
+
+function getBreakdownTableDefinition(tableKey = "") {
+  const normalizedKey = String(tableKey || "").trim();
+  if (!normalizedKey) {
+    return null;
+  }
+  return ESM_HEALTH_BREAKDOWN_TABLES.find((entry) => String(entry?.key || "").trim() === normalizedKey) || null;
+}
+
+function resolveBreakdownColumn(columns = [], columnKey = "") {
+  const normalizedKey = String(columnKey || "").trim();
+  if (!normalizedKey) {
+    return null;
+  }
+  return (Array.isArray(columns) ? columns : []).find((column) => String(column?.key || "").trim() === normalizedKey) || null;
+}
+
+function getBreakdownDefaultSortDirection(column = null) {
+  const type = String(column?.type || "").trim().toLowerCase();
+  return type === "number" || type === "percent" || type === "latency" ? "desc" : "asc";
+}
+
+function getBreakdownSortableValue(row = null, column = null) {
+  const key = String(column?.key || "").trim();
+  if (!key) {
+    return null;
+  }
+  const rawValue = row?.[key];
+  const type = String(column?.type || "").trim().toLowerCase();
+  if (type === "number" || type === "percent" || type === "latency") {
+    const numeric = Number(rawValue);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  const text = String(rawValue ?? "").trim();
+  return text || null;
+}
+
+function compareBreakdownSortValues(leftValue, rightValue, column = null) {
+  const leftMissing = leftValue === null || leftValue === undefined || leftValue === "";
+  const rightMissing = rightValue === null || rightValue === undefined || rightValue === "";
+  if (leftMissing && rightMissing) {
+    return 0;
+  }
+  if (leftMissing) {
+    return 1;
+  }
+  if (rightMissing) {
+    return -1;
+  }
+  const type = String(column?.type || "").trim().toLowerCase();
+  if (type === "number" || type === "percent" || type === "latency") {
+    return Number(leftValue) - Number(rightValue);
+  }
+  return String(leftValue).localeCompare(String(rightValue), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function sortBreakdownRows(rows = [], columns = [], sortRule = null) {
+  const normalizedRows = Array.isArray(rows) ? rows.slice() : [];
+  const normalizedSort = normalizeBreakdownSortRule(sortRule);
+  if (!normalizedSort) {
+    return normalizedRows;
+  }
+  const sortColumn = resolveBreakdownColumn(columns, normalizedSort.columnKey);
+  if (!sortColumn) {
+    return normalizedRows;
+  }
+  const directionFactor = normalizedSort.direction === "asc" ? 1 : -1;
+  return normalizedRows
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => {
+      const comparison = compareBreakdownSortValues(
+        getBreakdownSortableValue(left.row, sortColumn),
+        getBreakdownSortableValue(right.row, sortColumn),
+        sortColumn
+      );
+      if (comparison !== 0) {
+        return comparison * directionFactor;
+      }
+      return left.index - right.index;
+    })
+    .map((entry) => entry.row);
+}
+
+function getBreakdownSortAriaValue(sortRule = null, column = null) {
+  const normalizedSort = normalizeBreakdownSortRule(sortRule);
+  const columnKey = String(column?.key || "").trim();
+  if (!normalizedSort || !columnKey || normalizedSort.columnKey !== columnKey) {
+    return "none";
+  }
+  return normalizedSort.direction === "asc" ? "ascending" : "descending";
+}
+
+function getBreakdownSortIndicatorHtml(sortRule = null, column = null) {
+  const ariaValue = getBreakdownSortAriaValue(sortRule, column);
+  if (ariaValue === "ascending") {
+    return "&uarr;";
+  }
+  if (ariaValue === "descending") {
+    return "&darr;";
+  }
+  return "&harr;";
+}
+
+function buildBreakdownSortButtonLabel(column = null, sortRule = null) {
+  const label = String(column?.label || column?.key || "column").trim() || "column";
+  const ariaValue = getBreakdownSortAriaValue(sortRule, column);
+  if (ariaValue === "ascending") {
+    return `Sort by ${label}. Currently ascending.`;
+  }
+  if (ariaValue === "descending") {
+    return `Sort by ${label}. Currently descending.`;
+  }
+  return `Sort by ${label}. Currently not sorted.`;
+}
+
+function getNextBreakdownSortRule(columns = [], currentSort = null, columnKey = "") {
+  const nextColumn = resolveBreakdownColumn(columns, columnKey);
+  if (!nextColumn) {
+    return null;
+  }
+  const normalizedCurrent = normalizeBreakdownSortRule(currentSort);
+  const resolvedColumnKey = String(nextColumn.key || "").trim();
+  const defaultDirection = getBreakdownDefaultSortDirection(nextColumn);
+  if (!normalizedCurrent || normalizedCurrent.columnKey !== resolvedColumnKey) {
+    return {
+      columnKey: resolvedColumnKey,
+      direction: defaultDirection,
+    };
+  }
+  if (normalizedCurrent.direction === defaultDirection) {
+    return {
+      columnKey: resolvedColumnKey,
+      direction: defaultDirection === "asc" ? "desc" : "asc",
+    };
+  }
+  return null;
 }
 
 function getProgrammerLabel() {
@@ -633,15 +896,38 @@ function renderReachCard(report = null) {
   `;
 }
 
-function renderBreakdownTable(title, copy, rows = [], columns = [], errorText = "") {
+function renderBreakdownTable(tableKey, title, copy, rows = [], columns = [], errorText = "") {
   const normalizedRows = Array.isArray(rows) ? rows : [];
+  const normalizedColumns = Array.isArray(columns) ? columns : [];
+  const sortRule = normalizeBreakdownSortRule(state.tableSorts?.[String(tableKey || "").trim()] || null);
+  const sortedRows = sortBreakdownRows(normalizedRows, normalizedColumns, sortRule);
   const hasRows = normalizedRows.length > 0;
   const defaultOpen = hasRows || Boolean(String(errorText || "").trim());
   const stateLabel = hasRows ? `${normalizedRows.length} row${normalizedRows.length === 1 ? "" : "s"}` : errorText ? "Issue" : "No rows";
-  const headerHtml = columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("");
-  const bodyHtml = normalizedRows
+  const headerHtml = normalizedColumns
+    .map((column) => {
+      const ariaSort = getBreakdownSortAriaValue(sortRule, column);
+      const buttonLabel = buildBreakdownSortButtonLabel(column, sortRule);
+      return `
+        <th scope="col" aria-sort="${ariaSort}">
+          <button
+            type="button"
+            class="esm-health-table-sort-btn${ariaSort === "none" ? "" : " is-active"}"
+            data-sort-table="${escapeHtml(String(tableKey || ""))}"
+            data-sort-column="${escapeHtml(String(column?.key || ""))}"
+            aria-label="${escapeHtml(buttonLabel)}"
+            title="${escapeHtml(buttonLabel)}"
+          >
+            <span class="esm-health-table-sort-label">${escapeHtml(column?.label || "")}</span>
+            <span class="esm-health-table-sort-icon" aria-hidden="true">${getBreakdownSortIndicatorHtml(sortRule, column)}</span>
+          </button>
+        </th>
+      `;
+    })
+    .join("");
+  const bodyHtml = sortedRows
     .map((row) => {
-      const cells = columns
+      const cells = normalizedColumns
         .map((column) => {
           const rawValue = row?.[column.key];
           let display = "";
@@ -867,99 +1153,16 @@ function renderReport() {
     </section>
 
     <section class="esm-health-table-grid">
-      ${renderBreakdownTable(
-        "Platform Hotspots",
-        "Sorted by issue load first, then traffic. Click a platform to narrow the dashboard further.",
-        Array.isArray(report?.platformRows) ? report.platformRows : [],
-        [
-          { key: "platform", label: "Platform", drillType: "platform" },
-          { key: "trafficShare", label: "Traffic Share", type: "percent" },
-          { key: "mediaTokens", label: "Play Requests", type: "number" },
-          { key: "issueEvents", label: "Issue Events", type: "number" },
-          { key: "authnConversion", label: "AuthN Conv", type: "percent" },
-          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
-          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
-          { key: "clientlessFailureRate", label: "Clientless Failure", type: "percent" },
-        ],
-        String(report?.sectionErrors?.platform || "").trim()
-      )}
-      ${renderBreakdownTable(
-        "Application Versions",
-        "Highest-impact DCR app versions in the active health slice.",
-        Array.isArray(report?.applicationRows) ? report.applicationRows : [],
-        [
-          { key: "applicationLabel", label: "Application Version" },
-          { key: "trafficShare", label: "Traffic Share", type: "percent" },
-          { key: "mediaTokens", label: "Play Requests", type: "number" },
-          { key: "issueEvents", label: "Issue Events", type: "number" },
-          { key: "authnConversion", label: "AuthN Conv", type: "percent" },
-          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
-          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
-        ],
-        String(report?.sectionErrors?.applications || "").trim()
-      )}
-      ${renderBreakdownTable(
-        "API Entry Points",
-        "Migration visibility for the active app/device slice. Watch which API entry points carry the load and the failures.",
-        Array.isArray(report?.apiRows) ? report.apiRows : [],
-        [
-          { key: "api", label: "API" },
-          { key: "trafficShare", label: "Traffic Share", type: "percent" },
-          { key: "mediaTokens", label: "Play Requests", type: "number" },
-          { key: "issueEvents", label: "Issue Events", type: "number" },
-          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
-          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
-        ],
-        String(report?.sectionErrors?.apis || "").trim()
-      )}
-      ${renderBreakdownTable(
-        "SDK Versions",
-        "Adobe Pass SDK distribution for the current slice. Use this to spot older client populations before API v2 migration work.",
-        Array.isArray(report?.sdkRows) ? report.sdkRows : [],
-        [
-          { key: "sdkVersionLabel", label: "SDK Version" },
-          { key: "trafficShare", label: "Traffic Share", type: "percent" },
-          { key: "mediaTokens", label: "Play Requests", type: "number" },
-          { key: "issueEvents", label: "Issue Events", type: "number" },
-          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
-          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
-        ],
-        String(report?.sectionErrors?.sdkVersions || "").trim()
-      )}
-      ${renderBreakdownTable(
-        "MVPD Hotspots",
-        "Sorted by issue load first, then traffic. Click an MVPD to re-run the dashboard with that MVPD applied.",
-        Array.isArray(report?.mvpdRows) ? report.mvpdRows : [],
-        [
-          { key: "mvpd", label: "MVPD", drillType: "mvpd" },
-          { key: "trafficShare", label: "Traffic Share", type: "percent" },
-          { key: "mediaTokens", label: "Play Requests", type: "number" },
-          { key: "issueEvents", label: "Issue Events", type: "number" },
-          { key: "authzSuccessful", label: "AuthZ Success", type: "number" },
-          { key: "authzRejected", label: "Rejected", type: "number" },
-          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
-          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
-          { key: "avgAuthzLatency", label: "Avg Latency", type: "latency" },
-        ],
-        String(report?.sectionErrors?.mvpd || "").trim()
-      )}
-      ${renderBreakdownTable(
-        "RequestorIds",
-        "Cross-requestor comparison for the active media company. Click a RequestorId to re-run the dashboard with that RequestorId applied.",
-        Array.isArray(report?.requestorRows) ? report.requestorRows : [],
-        [
-          { key: "requestorId", label: "RequestorId", drillType: "requestor" },
-          { key: "trafficShare", label: "Traffic Share", type: "percent" },
-          { key: "mediaTokens", label: "Play Requests", type: "number" },
-          { key: "issueEvents", label: "Issue Events", type: "number" },
-          { key: "authnSuccessful", label: "AuthN Success", type: "number" },
-          { key: "authzSuccessful", label: "AuthZ Success", type: "number" },
-          { key: "authnConversion", label: "AuthN Conv", type: "percent" },
-          { key: "authzConversion", label: "AuthZ Conv", type: "percent" },
-          { key: "authzErrorRate", label: "Error Rate", type: "percent" },
-        ],
-        String(report?.sectionErrors?.requestor || "").trim()
-      )}
+      ${ESM_HEALTH_BREAKDOWN_TABLES.map((table) =>
+        renderBreakdownTable(
+          table.key,
+          table.title,
+          table.copy,
+          Array.isArray(report?.[table.rowsKey]) ? report[table.rowsKey] : [],
+          table.columns,
+          String(report?.sectionErrors?.[table.errorKey] || "").trim()
+        )
+      ).join("")}
     </section>
   `;
 }
@@ -1122,6 +1325,32 @@ async function applyDrilldown(drillType = "", drillValue = "") {
   await runDashboard(`Applying ${normalizedType} drilldown for ${normalizedValue}...`);
 }
 
+function toggleBreakdownTableSort(tableKey = "", columnKey = "") {
+  const normalizedTableKey = String(tableKey || "").trim();
+  const normalizedColumnKey = String(columnKey || "").trim();
+  if (!normalizedTableKey || !normalizedColumnKey || state.loading || !state.report) {
+    return;
+  }
+  const tableDefinition = getBreakdownTableDefinition(normalizedTableKey);
+  if (!tableDefinition) {
+    return;
+  }
+  const nextSortRule = getNextBreakdownSortRule(
+    tableDefinition.columns,
+    state.tableSorts?.[normalizedTableKey] || null,
+    normalizedColumnKey
+  );
+  if (!state.tableSorts || typeof state.tableSorts !== "object") {
+    state.tableSorts = {};
+  }
+  if (nextSortRule) {
+    state.tableSorts[normalizedTableKey] = nextSortRule;
+  } else {
+    delete state.tableSorts[normalizedTableKey];
+  }
+  renderReport();
+}
+
 async function resetFilters() {
   resetQueryToControllerDefaults();
   syncFilterControlsFromState();
@@ -1179,6 +1408,15 @@ function registerEventHandlers() {
   }
   if (els.cardsHost) {
     els.cardsHost.addEventListener("click", (event) => {
+      const sortTarget = event.target instanceof Element ? event.target.closest("[data-sort-table][data-sort-column]") : null;
+      if (sortTarget) {
+        event.preventDefault();
+        toggleBreakdownTableSort(
+          String(sortTarget.getAttribute("data-sort-table") || ""),
+          String(sortTarget.getAttribute("data-sort-column") || "")
+        );
+        return;
+      }
       const target = event.target instanceof Element ? event.target.closest("[data-drill-type][data-drill-value]") : null;
       if (!target) {
         return;

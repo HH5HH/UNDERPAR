@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UP CM Health Dashboard</title>
+    <link id="workspace-style-link" rel="stylesheet" href="cm-health-workspace.css" />
+  </head>
+  <body class="spectrum spectrum--medium spectrum--dark">
+    <main id="workspace-app-root" class="workspace-app esm-health-app cm-health-app">
+      <header class="workspace-header esm-health-hero cm-health-hero">
+        <div class="workspace-title-wrap esm-health-hero-copy">
+          <div class="esm-health-kicker-row">
+            <p class="esm-health-kicker cm-health-kicker">CM Health</p>
+            <span id="page-env-badge" class="page-env-badge" aria-label="Data Environment" title="Data Environment">
+              <span class="page-env-badge-prefix">ENV</span>
+              <span class="page-env-badge-sep">|</span>
+              <span id="page-env-badge-value" class="page-env-badge-value"></span>
+            </span>
+          </div>
+          <p id="workspace-controller-state" class="workspace-controller-state">
+            Waiting for UnderPAR side panel controller...
+          </p>
+          <p id="workspace-filter-state" class="workspace-filter-state"></p>
+          <p id="workspace-context-caption" class="esm-health-context-caption">
+            CM HEALTH stays bound to the live UnderPAR CM tenant context. RequestorId is carried only as a correlation hint because CMU reports are tenant-native, not RequestorId-native.
+          </p>
+        </div>
+        <div class="workspace-actions esm-health-hero-actions">
+          <button
+            id="workspace-rerun-all"
+            class="workspace-icon-btn workspace-icon-btn--rerun"
+            type="button"
+            title="Re-run latest CM HEALTH dashboard query"
+            aria-label="Re-run latest CM HEALTH dashboard query"
+          >
+            <span class="workspace-icon workspace-icon--rerun-glyph" aria-hidden="true">f5</span>
+            <span id="workspace-rerun-indicator" class="workspace-net-indicator" aria-hidden="true" hidden></span>
+          </button>
+          <button
+            id="workspace-clear-all"
+            class="workspace-icon-btn"
+            type="button"
+            title="Clear"
+            aria-label="Clear"
+          >
+            <span class="workspace-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M7 7 17 17" />
+                <path d="M17 7 7 17" />
+              </svg>
+            </span>
+          </button>
+        </div>
+      </header>
+
+      <p id="workspace-status" class="workspace-status" aria-live="polite" hidden></p>
+
+      <section class="rest-report-card esm-health-filter-card">
+        <header class="rest-report-head">
+          <p class="rest-report-title">CM HEALTH Filters</p>
+          <p class="rest-report-meta">Controller context comes from UnderPAR global pickers. Date range is native here. CM source buckets are PST effective.</p>
+        </header>
+        <form id="workspace-filter-form" class="esm-health-filter-form">
+          <label class="spectrum-Field esm-health-field">
+            <span class="spectrum-FieldLabel esm-health-field-label">Start</span>
+            <input id="workspace-start-date" class="spectrum-Textfield esm-health-date-input" type="date" />
+          </label>
+          <label class="spectrum-Field esm-health-field">
+            <span class="spectrum-FieldLabel esm-health-field-label">End</span>
+            <input id="workspace-end-date" class="spectrum-Textfield esm-health-date-input" type="date" />
+          </label>
+          <div class="spectrum-Field esm-health-field esm-health-field--granularity">
+            <span class="spectrum-FieldLabel esm-health-field-label">Granularity</span>
+            <div id="workspace-granularity-group" class="esm-health-granularity-group" role="group" aria-label="Granularity">
+              <button type="button" class="spectrum-Button esm-health-granularity-btn" data-granularity="day">
+                <span class="spectrum-Button-label">Day</span>
+              </button>
+              <button type="button" class="spectrum-Button esm-health-granularity-btn" data-granularity="hour">
+                <span class="spectrum-Button-label">Hour</span>
+              </button>
+              <button type="button" class="spectrum-Button esm-health-granularity-btn" data-granularity="month">
+                <span class="spectrum-Button-label">Month</span>
+              </button>
+            </div>
+            <p class="esm-health-help-copy">Monthly view rolls daily CMU buckets up in the workspace. Concurrency and activity sections stay daily-sourced.</p>
+          </div>
+          <div class="esm-health-filter-actions">
+            <button
+              id="workspace-run-dashboard"
+              class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"
+              type="submit"
+            >
+              <span class="spectrum-Button-label">Run Dashboard</span>
+            </button>
+            <button id="workspace-reset-filters" class="spectrum-Button workspace-text-btn" type="button">
+              <span class="spectrum-Button-label">Reset to Context</span>
+            </button>
+          </div>
+        </form>
+        <div id="workspace-active-pills" class="esm-health-pill-row"></div>
+      </section>
+
+      <section id="workspace-cards" class="workspace-cards"></section>
+    </main>
+
+    <script src="underpar-environment.js"></script>
+    <script src="cm-health-workspace.js"></script>
+  </body>
+</html>

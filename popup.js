@@ -10580,6 +10580,16 @@ async function refreshOpenWorkspacesForEnvironmentSwitch(programmer = null, serv
     void esmHealthWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
   }
 
+  const cmHealthSelectionContext = cmHealthWorkspaceGetSelectionContext(programmer);
+  const cmHealthWindowIds = collectBoundWorkspaceWindowIds(
+    state.cmHealthWorkspaceWindowId,
+    state.cmHealthWorkspaceTabIdByWindowId
+  );
+  for (const targetWindowId of cmHealthWindowIds) {
+    cmHealthWorkspaceBroadcastControllerState(programmer, cmHealthSelectionContext, targetWindowId);
+    void cmHealthWorkspaceSendWorkspaceMessage("environment-switch-rerun", environmentPayload, { targetWindowId });
+  }
+
   const healthSelectionContext = healthWorkspaceGetSelectionContext(programmer);
   const healthWindowIds = collectBoundWorkspaceWindowIds(state.healthWorkspaceWindowId, state.healthWorkspaceTabIdByWindowId);
   for (const targetWindowId of healthWindowIds) {
@@ -11357,6 +11367,9 @@ const LEGACY_REST_WORKSPACE_MESSAGE_TYPE = "mincloud:rest-workspace";
 const ESM_HEALTH_WORKSPACE_PATH = "esm-health-workspace.html";
 const ESM_HEALTH_WORKSPACE_MESSAGE_TYPE = "underpar:esm-health-workspace";
 const LEGACY_ESM_HEALTH_WORKSPACE_MESSAGE_TYPE = "mincloud:esm-health-workspace";
+const CM_HEALTH_WORKSPACE_PATH = "cm-health-workspace.html";
+const CM_HEALTH_WORKSPACE_MESSAGE_TYPE = "underpar:cm-health-workspace";
+const LEGACY_CM_HEALTH_WORKSPACE_MESSAGE_TYPE = "mincloud:cm-health-workspace";
 const HEALTH_WORKSPACE_PATH = "health-workspace.html";
 const HEALTH_WORKSPACE_MESSAGE_TYPE = "underpar:health-workspace";
 const LEGACY_HEALTH_WORKSPACE_MESSAGE_TYPE = "mincloud:health-workspace";
@@ -11377,6 +11390,7 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   MVPD_WORKSPACE_PATH,
   REST_WORKSPACE_PATH,
   ESM_HEALTH_WORKSPACE_PATH,
+  CM_HEALTH_WORKSPACE_PATH,
   HEALTH_WORKSPACE_PATH,
   TEMP_PASS_WORKSPACE_PATH,
   DEGRADATION_WORKSPACE_PATH,
@@ -11403,6 +11417,8 @@ const HEALTH_SPLUNK_DASHBOARD_VIEW_NAME = "live_rest_api_sev2_dashboard";
 const HEALTH_SPLUNK_JOB_CREATE_URL = `${SPLUNK_SPLUNKD_BASE}/servicesNS/-/app_adobepass/search/jobs`;
 const HEALTH_SPLUNK_RESULTS_PREVIEW_BASE_URL = `${SPLUNK_SPLUNKD_BASE}/services/search/v2/jobs`;
 const HEALTH_SPLUNK_TABLE_FETCH_LIMIT = 10;
+const HEALTH_SPLUNK_JOB_POLL_TIMEOUT_MS = 45000;
+const HEALTH_SPLUNK_JOB_POLL_INTERVAL_MS = 1000;
 const ESM_HEALTH_API_REQUEST_TIMEOUT_MS = 30000;
 const ESM_HEALTH_BREAKDOWN_LIMIT = 500;
 const ESM_HEALTH_TOP_ROW_LIMIT = 10;
@@ -11412,6 +11428,23 @@ const ESM_HEALTH_GRANULARITY_PATH_BY_KEY = Object.freeze({
   day: "year/month/day.json",
   hour: "year/month/day/hour.json",
 });
+const CM_SOURCE_UTC_OFFSET_MINUTES = -8 * 60;
+const CM_HEALTH_TOP_ROW_LIMIT = 10;
+const CM_HEALTH_DEFAULT_GRANULARITY = "hour";
+const CM_HEALTH_BACKBONE_DAILY_PATH = "/v2/tenant/year/month/day";
+const CM_HEALTH_BACKBONE_HOURLY_PATH = "/v2/tenant/year/month/day/hour";
+const CM_HEALTH_BACKBONE_PLATFORM_DAILY_PATH = "/v2/year/month/day/tenant/platform/application-id";
+const CM_HEALTH_BACKBONE_PLATFORM_HOURLY_PATH = "/v2/year/month/day/hour/tenant/platform/application-id";
+const CM_HEALTH_BACKBONE_MVPD_DAILY_PATH = "/v2/tenant/year/month/day/mvpd/platform/application-id";
+const CM_HEALTH_BACKBONE_MVPD_HOURLY_PATH = "/v2/tenant/year/month/day/hour/mvpd/platform/application-id";
+const CM_HEALTH_BACKBONE_CHANNEL_DAILY_PATH = "/v2/tenant/year/month/day/channel/platform/application-id";
+const CM_HEALTH_BACKBONE_CHANNEL_HOURLY_PATH = "/v2/tenant/year/month/day/hour/channel/platform/application-id";
+const CM_HEALTH_MVPD_APPLICATION_DAILY_PATH = "/v2/tenant/year/month/day/mvpd/platform/application-id/application";
+const CM_HEALTH_CHANNEL_APPLICATION_DAILY_PATH = "/v2/tenant/year/month/day/channel/platform/application-id/application";
+const CM_HEALTH_CONCURRENCY_DAILY_PATH = "/v2/year/month/day/concurrency-level/tenant";
+const CM_HEALTH_CONCURRENCY_MVPD_DAILY_PATH = "/v2/year/month/day/concurrency-level/tenant/mvpd";
+const CM_HEALTH_ACTIVITY_DAILY_PATH = "/v2/year/month/day/activity-level/tenant";
+const CM_HEALTH_ACTIVITY_MVPD_DAILY_PATH = "/v2/year/month/day/activity-level/tenant/mvpd";
 const ESM_HEALTH_PLATFORM_OPTIONS = Object.freeze([
   "android",
   "androidTV",
@@ -12186,6 +12219,10 @@ const ESM_HEALTH_WORKSPACE_MESSAGE_TYPES = new Set([
   ESM_HEALTH_WORKSPACE_MESSAGE_TYPE,
   LEGACY_ESM_HEALTH_WORKSPACE_MESSAGE_TYPE,
 ]);
+const CM_HEALTH_WORKSPACE_MESSAGE_TYPES = new Set([
+  CM_HEALTH_WORKSPACE_MESSAGE_TYPE,
+  LEGACY_CM_HEALTH_WORKSPACE_MESSAGE_TYPE,
+]);
 const HEALTH_WORKSPACE_MESSAGE_TYPES = new Set([HEALTH_WORKSPACE_MESSAGE_TYPE, LEGACY_HEALTH_WORKSPACE_MESSAGE_TYPE]);
 const TEMP_PASS_WORKSPACE_MESSAGE_TYPES = new Set([TEMP_PASS_WORKSPACE_MESSAGE_TYPE, LEGACY_TEMP_PASS_WORKSPACE_MESSAGE_TYPE]);
 const DEGRADATION_WORKSPACE_MESSAGE_TYPES = new Set([
@@ -12536,6 +12573,14 @@ const state = {
   esmHealthWorkspaceLastSelectionKey: "",
   esmHealthWorkspaceLastReportBySelectionKey: new Map(),
   esmHealthWorkspaceLastQueryContextBySelectionKey: new Map(),
+  cmHealthWorkspaceTabId: 0,
+  cmHealthWorkspaceWindowId: 0,
+  cmHealthWorkspaceTabIdByWindowId: new Map(),
+  cmHealthWorkspaceRuntimeListenerBound: false,
+  cmHealthWorkspaceTabWatcherBound: false,
+  cmHealthWorkspaceLastSelectionKey: "",
+  cmHealthWorkspaceLastReportBySelectionKey: new Map(),
+  cmHealthWorkspaceLastQueryContextBySelectionKey: new Map(),
   healthWorkspaceTabId: 0,
   healthWorkspaceWindowId: 0,
   healthWorkspaceTabIdByWindowId: new Map(),
@@ -20138,6 +20183,12 @@ function buildHealthSplunkQueryContext(rawContext = null) {
     programmerId,
     requestorId,
   });
+  const dashboardUrl = buildHealthSplunkDashboardUrl({
+    requestorId,
+    earliest,
+    latest,
+    environmentIndex,
+  });
   return {
     programmerId,
     programmerName,
@@ -20147,6 +20198,7 @@ function buildHealthSplunkQueryContext(rawContext = null) {
     environmentKey,
     environmentLabel,
     environmentIndex,
+    dashboardUrl,
     selectionKey,
     requestSource: String(context.requestSource || "health-splunk-dashboard").trim() || "health-splunk-dashboard",
     search: buildHealthSplunkLoginSearch({
@@ -20175,6 +20227,23 @@ function buildHealthSplunkLoginSearch(queryContext = null) {
     return `search index=${environmentIndex}`;
   }
   return `search index=${environmentIndex} "${requestorId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function buildHealthSplunkDashboardUrl(queryContext = null) {
+  const requestorId = String(queryContext?.requestorId || "").trim();
+  const environmentIndex = String(queryContext?.environmentIndex || getSplunkSearchIndexForEnvironment()).trim();
+  const earliest = String(queryContext?.earliest || SPLUNK_SEARCH_EARLIEST).trim() || SPLUNK_SEARCH_EARLIEST;
+  const latest = String(queryContext?.latest || SPLUNK_SEARCH_LATEST).trim() || SPLUNK_SEARCH_LATEST;
+  const dashboardUrl = new URL(`${SPLUNK_BASE_URL}/en-US/app/app_adobepass/${HEALTH_SPLUNK_DASHBOARD_VIEW_NAME}`);
+  dashboardUrl.searchParams.set("form.tr_NmSjmaI0.earliest", earliest);
+  dashboardUrl.searchParams.set("form.tr_NmSjmaI0.latest", latest);
+  if (requestorId) {
+    dashboardUrl.searchParams.set("form.serviceProvider", requestorId);
+  }
+  if (environmentIndex) {
+    dashboardUrl.searchParams.set("form.environment", environmentIndex);
+  }
+  return dashboardUrl.toString();
 }
 
 function getHealthSplunkTableDefinitions(queryContext = null) {
@@ -20394,8 +20463,8 @@ async function fetchHealthSplunkPreviewReportBySid(queryContext = null, tableDef
       };
     }
 
-    await waitForDelay(SPLUNK_JOB_POLL_INTERVAL_MS);
-  } while ((timedOut = Date.now() - previewStartedAt >= SPLUNK_JOB_POLL_TIMEOUT_MS) === false);
+    await waitForDelay(HEALTH_SPLUNK_JOB_POLL_INTERVAL_MS);
+  } while ((timedOut = Date.now() - previewStartedAt >= HEALTH_SPLUNK_JOB_POLL_TIMEOUT_MS) === false);
 
   return {
     ok: false,
@@ -21413,6 +21482,678 @@ function addEsmHealthTrafficShare(rows = [], totalPlayRequests = 0) {
     ...entry,
     trafficShare: total > 0 ? Number(entry?.mediaTokens || 0) / total : null,
   }));
+}
+
+function buildCmHealthWorkspaceBaseSelectionKey(context = null) {
+  const environmentKey =
+    String(context?.environmentKey || getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() ||
+    DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const programmerId = String(context?.programmerId || "").trim();
+  const tenantScope = resolveCmUsageTenantScopeValue(context?.tenantScope);
+  if (!programmerId) {
+    return "";
+  }
+  return [environmentKey, programmerId, tenantScope || "*"].join("|");
+}
+
+function buildCmHealthWorkspaceSelectionKey(context = null) {
+  const baseKey = buildCmHealthWorkspaceBaseSelectionKey(context);
+  if (!baseKey) {
+    return "";
+  }
+  const dateRange = resolveEsmHealthDateRange(context?.start, context?.end);
+  const granularity = normalizeEsmHealthGranularity(context?.granularity || CM_HEALTH_DEFAULT_GRANULARITY);
+  const drilldownMvpdIds = normalizeEsmHealthFilterList(context?.drilldownMvpdIds);
+  const platforms = normalizeEsmHealthFilterList(context?.platforms);
+  const channels = normalizeEsmHealthFilterList(context?.channels);
+  return [
+    baseKey,
+    dateRange.start,
+    dateRange.end,
+    granularity,
+    drilldownMvpdIds.join(",") || "*",
+    platforms.join(",") || "*",
+    channels.join(",") || "*",
+  ].join("|");
+}
+
+function buildCmHealthWorkspaceControllerContextKey(context = null, premiumPanelRequestToken = state.premiumPanelRequestToken) {
+  const controllerSelectionKey = String(
+    context?.controllerSelectionKey || buildCmHealthWorkspaceBaseSelectionKey(context)
+  ).trim();
+  if (!controllerSelectionKey) {
+    return "";
+  }
+  return `${controllerSelectionKey}::${Math.max(0, Number(premiumPanelRequestToken || 0))}`;
+}
+
+function resolveCmHealthFilterMode(context = null) {
+  const channels = normalizeEsmHealthFilterList(context?.channels);
+  if (channels.length > 0) {
+    return "channel";
+  }
+  const mvpdIds = normalizeEsmHealthFilterList(context?.drilldownMvpdIds || context?.mvpdIds);
+  if (mvpdIds.length > 0) {
+    return "mvpd";
+  }
+  const platforms = normalizeEsmHealthFilterList(context?.platforms);
+  if (platforms.length > 0) {
+    return "platform";
+  }
+  return "";
+}
+
+function buildCmHealthDashboardQueryContext(rawContext = null) {
+  const context = rawContext && typeof rawContext === "object" ? rawContext : {};
+  const resolvedProgrammer = resolveSelectedProgrammer();
+  const environment = getActiveAdobePassEnvironment();
+  const programmerId = String(context.programmerId || resolvedProgrammer?.programmerId || "").trim();
+  const programmerName = firstNonEmptyString([
+    context.programmerName,
+    resolvedProgrammer?.programmerName,
+    resolvedProgrammer?.mediaCompanyName,
+  ]);
+  const drilldownMvpdIds = normalizeEsmHealthFilterList(context.drilldownMvpdIds);
+  const platforms = normalizeEsmHealthFilterList(context.platforms);
+  const channels = normalizeEsmHealthFilterList(context.channels);
+  const dateRange = resolveEsmHealthDateRange(context.start, context.end);
+  const granularity = normalizeEsmHealthGranularity(context.granularity || CM_HEALTH_DEFAULT_GRANULARITY);
+  const environmentKey = String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
+  const environmentLabel = firstNonEmptyString([environment?.label, environment?.shortCode, environmentKey]);
+  const tenantScope = resolveCmUsageTenantScopeValue(
+    context?.tenantScope,
+    getCmTenantScopeForProgrammer(programmerId ? { programmerId } : resolvedProgrammer)
+  );
+  const queryContext = {
+    programmerId,
+    programmerName,
+    mediaCompany: programmerId,
+    environmentKey,
+    environmentLabel,
+    tenantScope,
+    drilldownMvpdIds,
+    mvpdIds: drilldownMvpdIds.slice(),
+    platforms,
+    channels,
+    start: dateRange.start,
+    end: dateRange.end,
+    granularity,
+    timezoneLabel: "PST effective",
+    requestorHint: String(context.requestorHint || state.selectedRequestorId || "").trim(),
+    requestSource: String(context.requestSource || "cm-health-dashboard").trim() || "cm-health-dashboard",
+  };
+  queryContext.filterMode = resolveCmHealthFilterMode(queryContext);
+  if (queryContext.filterMode === "channel") {
+    queryContext.drilldownMvpdIds = [];
+    queryContext.mvpdIds = [];
+  } else if (queryContext.filterMode === "mvpd") {
+    queryContext.channels = [];
+  }
+  queryContext.controllerSelectionKey = buildCmHealthWorkspaceBaseSelectionKey(queryContext);
+  queryContext.selectionKey = buildCmHealthWorkspaceSelectionKey(queryContext);
+  return queryContext;
+}
+
+function rebaseCmHealthDashboardQueryContextForCurrentSelection(rawContext = null, options = {}) {
+  const sourceContext = rawContext && typeof rawContext === "object" ? rawContext : {};
+  const currentSelectionContext = cmHealthWorkspaceGetSelectionContext(resolveSelectedProgrammer());
+  const sameControllerSelection =
+    String(sourceContext?.controllerSelectionKey || "").trim() ===
+    String(currentSelectionContext?.controllerSelectionKey || "").trim();
+  const rebasedContext = {
+    ...currentSelectionContext,
+    start: String(sourceContext?.start || currentSelectionContext?.start || "").trim(),
+    end: String(sourceContext?.end || currentSelectionContext?.end || "").trim(),
+    requestSource:
+      String(options?.requestSource || sourceContext?.requestSource || "cm-health-dashboard").trim() ||
+      "cm-health-dashboard",
+  };
+  if (sameControllerSelection) {
+    rebasedContext.granularity = normalizeEsmHealthGranularity(sourceContext?.granularity || CM_HEALTH_DEFAULT_GRANULARITY);
+    rebasedContext.drilldownMvpdIds = normalizeEsmHealthFilterList(sourceContext?.drilldownMvpdIds);
+    rebasedContext.platforms = normalizeEsmHealthFilterList(sourceContext?.platforms);
+    rebasedContext.channels = normalizeEsmHealthFilterList(sourceContext?.channels);
+  }
+  return buildCmHealthDashboardQueryContext(rebasedContext);
+}
+
+function buildCmHealthStatusMessage(queryContext = null) {
+  const programmerId = String(queryContext?.programmerId || "").trim();
+  const tenantScope = resolveCmUsageTenantScopeValue(queryContext?.tenantScope);
+  const filterMode = String(queryContext?.filterMode || resolveCmHealthFilterMode(queryContext)).trim();
+  const filterValue =
+    filterMode === "mvpd"
+      ? normalizeEsmHealthFilterList(queryContext?.mvpdIds).join(", ")
+      : filterMode === "platform"
+        ? normalizeEsmHealthFilterList(queryContext?.platforms).join(", ")
+        : filterMode === "channel"
+          ? normalizeEsmHealthFilterList(queryContext?.channels).join(", ")
+          : "";
+  const environmentLabel = String(queryContext?.environmentLabel || "").trim();
+  return [programmerId, tenantScope ? `Tenant ${tenantScope}` : "", filterValue ? `${filterMode} ${filterValue}` : "", environmentLabel]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function getCmHealthMetricNumber(row = null, key = "") {
+  const parsed = Number(row?.[key] ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function computeCmHealthDerivedMetrics(source = null) {
+  const activeUsers = Math.max(0, Number(source?.activeUsers ?? source?.["active-users"] ?? 0));
+  const activeSessions = Math.max(0, Number(source?.activeSessions ?? source?.["active-sessions"] ?? 0));
+  const startedSessions = Math.max(0, Number(source?.startedSessions ?? source?.["started-sessions"] ?? 0));
+  const completedSessions = Math.max(0, Number(source?.completedSessions ?? source?.["completed-sessions"] ?? 0));
+  const failedAttempts = Math.max(0, Number(source?.failedAttempts ?? source?.["failed-attempts"] ?? 0));
+  const dismissedSessions = Math.max(0, Number(source?.dismissedSessions ?? source?.["dismissed-sessions"] ?? 0));
+  const killedSessions = Math.max(0, Number(source?.killedSessions ?? source?.["killed-sessions"] ?? 0));
+  const issueEvents = failedAttempts + dismissedSessions + killedSessions;
+  return {
+    activeUsers,
+    activeSessions,
+    startedSessions,
+    completedSessions,
+    failedAttempts,
+    dismissedSessions,
+    killedSessions,
+    issueEvents,
+    completionRate: startedSessions > 0 ? completedSessions / startedSessions : null,
+    failureRate: startedSessions > 0 ? failedAttempts / startedSessions : null,
+    interruptionRate: startedSessions > 0 ? (dismissedSessions + killedSessions) / startedSessions : null,
+    dismissalRate: startedSessions > 0 ? dismissedSessions / startedSessions : null,
+    killRate: startedSessions > 0 ? killedSessions / startedSessions : null,
+    avgSessionsPerUser: activeUsers > 0 ? activeSessions / activeUsers : null,
+  };
+}
+
+function cmHealthPartsToUtcMs(row = null) {
+  const year = Number(row?.year ?? 1970);
+  const month = Number(row?.month ?? 1);
+  const day = Number(row?.day ?? 1);
+  const hour = Number(row?.hour ?? 0);
+  return (
+    Date.UTC(
+      Number.isFinite(year) ? year : 1970,
+      Number.isFinite(month) ? month - 1 : 0,
+      Number.isFinite(day) ? day : 1,
+      Number.isFinite(hour) ? hour : 0,
+      0,
+      0
+    ) -
+    CM_SOURCE_UTC_OFFSET_MINUTES * 60 * 1000
+  );
+}
+
+function buildCmHealthBucketMeta(row = null, granularity = CM_HEALTH_DEFAULT_GRANULARITY) {
+  const year = Number(row?.year ?? 1970);
+  const month = Number(row?.month ?? 1);
+  const day = Number(row?.day ?? 1);
+  const hour = Number(row?.hour ?? 0);
+  const paddedMonth = String(Math.max(1, month)).padStart(2, "0");
+  const paddedDay = String(Math.max(1, day)).padStart(2, "0");
+  const paddedHour = String(Math.max(0, hour)).padStart(2, "0");
+  const normalizedGranularity = normalizeEsmHealthGranularity(granularity || CM_HEALTH_DEFAULT_GRANULARITY);
+  if (normalizedGranularity === "month") {
+    return {
+      key: `${year}-${paddedMonth}`,
+      label: `${paddedMonth}/${year}`,
+      timestamp: cmHealthPartsToUtcMs({ year, month, day: 1, hour: 0 }),
+    };
+  }
+  if (normalizedGranularity === "hour") {
+    return {
+      key: `${year}-${paddedMonth}-${paddedDay}T${paddedHour}`,
+      label: `${paddedMonth}/${paddedDay} ${paddedHour}:00`,
+      timestamp: cmHealthPartsToUtcMs({ year, month, day, hour }),
+    };
+  }
+  return {
+    key: `${year}-${paddedMonth}-${paddedDay}`,
+    label: `${paddedMonth}/${paddedDay}/${year}`,
+    timestamp: cmHealthPartsToUtcMs({ year, month, day, hour: 0 }),
+  };
+}
+
+function aggregateCmHealthBackboneRows(rows = [], granularity = CM_HEALTH_DEFAULT_GRANULARITY) {
+  const buckets = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const meta = buildCmHealthBucketMeta(row, granularity);
+    if (!meta.key) {
+      return;
+    }
+    if (!buckets.has(meta.key)) {
+      buckets.set(meta.key, {
+        bucketKey: meta.key,
+        label: meta.label,
+        timestamp: meta.timestamp,
+        activeUsers: 0,
+        activeSessions: 0,
+        startedSessions: 0,
+        completedSessions: 0,
+        failedAttempts: 0,
+        dismissedSessions: 0,
+        killedSessions: 0,
+      });
+    }
+    const bucket = buckets.get(meta.key);
+    bucket.activeUsers += getCmHealthMetricNumber(row, "active-users");
+    bucket.activeSessions += getCmHealthMetricNumber(row, "active-sessions");
+    bucket.startedSessions += getCmHealthMetricNumber(row, "started-sessions");
+    bucket.completedSessions += getCmHealthMetricNumber(row, "completed-sessions");
+    bucket.failedAttempts += getCmHealthMetricNumber(row, "failed-attempts");
+    bucket.dismissedSessions += getCmHealthMetricNumber(row, "dismissed-sessions");
+    bucket.killedSessions += getCmHealthMetricNumber(row, "killed-sessions");
+  });
+
+  return Array.from(buckets.values())
+    .sort((left, right) => Number(left?.timestamp || 0) - Number(right?.timestamp || 0))
+    .map((bucket) => ({
+      ...bucket,
+      ...computeCmHealthDerivedMetrics(bucket),
+    }));
+}
+
+function aggregateCmHealthBreakdownRows(rows = [], dimensionKeys = [], limit = CM_HEALTH_TOP_ROW_LIMIT, options = {}) {
+  const normalizedDimensionKeys = uniquePreserveOrder(
+    (Array.isArray(dimensionKeys) ? dimensionKeys : [dimensionKeys])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  const buildLabel =
+    typeof options?.buildLabel === "function"
+      ? options.buildLabel
+      : (values) =>
+          normalizedDimensionKeys
+            .map((key) => String(values?.[key] || "").trim())
+            .filter(Boolean)
+            .join(" / ");
+  const buckets = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const dimensionValues = {};
+    normalizedDimensionKeys.forEach((key) => {
+      dimensionValues[key] = String(row?.[key] || "").trim() || "(unknown)";
+    });
+    const bucketKey =
+      normalizedDimensionKeys.length > 0
+        ? normalizedDimensionKeys.map((key) => String(dimensionValues[key] || "").trim() || "(unknown)").join("\u001f")
+        : "(aggregate)";
+    const bucketLabel = String(buildLabel(dimensionValues, row) || "").trim() || "(unknown)";
+    if (!buckets.has(bucketKey)) {
+      buckets.set(bucketKey, {
+        label: bucketLabel,
+        ...dimensionValues,
+        activeUsers: 0,
+        activeSessions: 0,
+        startedSessions: 0,
+        completedSessions: 0,
+        failedAttempts: 0,
+        dismissedSessions: 0,
+        killedSessions: 0,
+      });
+    }
+    const bucket = buckets.get(bucketKey);
+    bucket.activeUsers += getCmHealthMetricNumber(row, "active-users");
+    bucket.activeSessions += getCmHealthMetricNumber(row, "active-sessions");
+    bucket.startedSessions += getCmHealthMetricNumber(row, "started-sessions");
+    bucket.completedSessions += getCmHealthMetricNumber(row, "completed-sessions");
+    bucket.failedAttempts += getCmHealthMetricNumber(row, "failed-attempts");
+    bucket.dismissedSessions += getCmHealthMetricNumber(row, "dismissed-sessions");
+    bucket.killedSessions += getCmHealthMetricNumber(row, "killed-sessions");
+  });
+
+  return Array.from(buckets.values())
+    .map((entry) => ({
+      ...entry,
+      ...computeCmHealthDerivedMetrics(entry),
+    }))
+    .sort((left, right) => {
+      const issueDelta = Number(right?.issueEvents || 0) - Number(left?.issueEvents || 0);
+      if (issueDelta !== 0) {
+        return issueDelta;
+      }
+      const startDelta = Number(right?.startedSessions || 0) - Number(left?.startedSessions || 0);
+      if (startDelta !== 0) {
+        return startDelta;
+      }
+      const activeUsersDelta = Number(right?.activeUsers || 0) - Number(left?.activeUsers || 0);
+      if (activeUsersDelta !== 0) {
+        return activeUsersDelta;
+      }
+      return String(left?.label || "").localeCompare(String(right?.label || ""), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    })
+    .slice(0, Math.max(1, Number(limit || CM_HEALTH_TOP_ROW_LIMIT)))
+    .map((entry, index) => {
+      if (typeof options?.mapRow === "function") {
+        return options.mapRow(entry, index);
+      }
+      return entry;
+    });
+}
+
+function aggregateCmHealthUserDistributionRows(rows = [], dimensionKey = "", limit = CM_HEALTH_TOP_ROW_LIMIT, options = {}) {
+  const normalizedKey = String(dimensionKey || "").trim();
+  if (!normalizedKey) {
+    return [];
+  }
+  const buckets = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const rawValue = String(row?.[normalizedKey] || "").trim() || "(unknown)";
+    if (!buckets.has(rawValue)) {
+      buckets.set(rawValue, {
+        label: rawValue,
+        [normalizedKey]: rawValue,
+        users: 0,
+      });
+    }
+    const bucket = buckets.get(rawValue);
+    bucket.users += getCmHealthMetricNumber(row, "users");
+  });
+
+  return Array.from(buckets.values())
+    .sort((left, right) => {
+      const userDelta = Number(right?.users || 0) - Number(left?.users || 0);
+      if (userDelta !== 0) {
+        return userDelta;
+      }
+      return String(left?.label || "").localeCompare(String(right?.label || ""), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    })
+    .slice(0, Math.max(1, Number(limit || CM_HEALTH_TOP_ROW_LIMIT)))
+    .map((entry, index) => (typeof options?.mapRow === "function" ? options.mapRow(entry, index) : entry));
+}
+
+function buildCmHealthSummary(backboneSeries = [], breakdowns = {}) {
+  const totals = {
+    activeUsers: 0,
+    activeSessions: 0,
+    startedSessions: 0,
+    completedSessions: 0,
+    failedAttempts: 0,
+    dismissedSessions: 0,
+    killedSessions: 0,
+  };
+  (Array.isArray(backboneSeries) ? backboneSeries : []).forEach((entry) => {
+    totals.activeUsers += Number(entry?.activeUsers || 0);
+    totals.activeSessions += Number(entry?.activeSessions || 0);
+    totals.startedSessions += Number(entry?.startedSessions || 0);
+    totals.completedSessions += Number(entry?.completedSessions || 0);
+    totals.failedAttempts += Number(entry?.failedAttempts || 0);
+    totals.dismissedSessions += Number(entry?.dismissedSessions || 0);
+    totals.killedSessions += Number(entry?.killedSessions || 0);
+  });
+  const latestBucket = Array.isArray(backboneSeries) && backboneSeries.length > 0 ? backboneSeries[backboneSeries.length - 1] : null;
+  const platformRows = Array.isArray(breakdowns?.platformRows) ? breakdowns.platformRows : [];
+  const applicationRows = Array.isArray(breakdowns?.applicationRows) ? breakdowns.applicationRows : [];
+  const channelRows = Array.isArray(breakdowns?.channelRows) ? breakdowns.channelRows : [];
+  const mvpdRows = Array.isArray(breakdowns?.mvpdRows) ? breakdowns.mvpdRows : [];
+  const concurrencyRows = Array.isArray(breakdowns?.concurrencyRows) ? breakdowns.concurrencyRows : [];
+  const activityRows = Array.isArray(breakdowns?.activityRows) ? breakdowns.activityRows : [];
+  return {
+    ...totals,
+    ...computeCmHealthDerivedMetrics(totals),
+    latestActiveUsers: Number(latestBucket?.activeUsers || 0),
+    latestActiveSessions: Number(latestBucket?.activeSessions || 0),
+    latestBucketLabel: String(latestBucket?.label || "").trim(),
+    seriesPoints: Array.isArray(backboneSeries) ? backboneSeries.length : 0,
+    activePlatforms: platformRows.length,
+    activeApplications: applicationRows.length,
+    activeChannels: channelRows.length,
+    activeMvpds: mvpdRows.length,
+    activeConcurrencyLevels: concurrencyRows.length,
+    activeActivityLevels: activityRows.length,
+    topPlatformLabel: String(platformRows[0]?.platform || platformRows[0]?.label || "").trim(),
+    topApplicationLabel: String(applicationRows[0]?.applicationLabel || applicationRows[0]?.label || "").trim(),
+    topChannelLabel: String(channelRows[0]?.channel || channelRows[0]?.label || "").trim(),
+    topMvpdLabel: String(mvpdRows[0]?.mvpd || mvpdRows[0]?.label || "").trim(),
+    topConcurrencyLabel: String(concurrencyRows[0]?.concurrencyLevel || concurrencyRows[0]?.label || "").trim(),
+    topActivityLabel: String(activityRows[0]?.activityLevel || activityRows[0]?.label || "").trim(),
+  };
+}
+
+function addCmHealthTrafficShare(rows = [], totalStartedSessions = 0) {
+  const total = Math.max(0, Number(totalStartedSessions || 0));
+  return (Array.isArray(rows) ? rows : []).map((entry) => ({
+    ...entry,
+    trafficShare: total > 0 ? Number(entry?.startedSessions || 0) / total : null,
+  }));
+}
+
+function addCmHealthUserShare(rows = [], totalUsers = 0) {
+  const total = Math.max(0, Number(totalUsers || 0));
+  return (Array.isArray(rows) ? rows : []).map((entry) => ({
+    ...entry,
+    userShare: total > 0 ? Number(entry?.users || 0) / total : null,
+  }));
+}
+
+function cmHealthExtractRows(payload = null, preferredKeys = []) {
+  const collections = collectCmCollections(payload, {
+    preferredKeys:
+      Array.isArray(preferredKeys) && preferredKeys.length > 0
+        ? preferredKeys
+        : ["usage", "data", "rows", "results", "records", "report", "items"],
+    maxDepth: 5,
+  });
+  const bestCollection = collections.find((entry) =>
+    Array.isArray(entry?.values) &&
+    entry.values.some((item) => item && typeof item === "object" && !Array.isArray(item))
+  );
+  if (bestCollection) {
+    return bestCollection.values.filter((item) => item && typeof item === "object" && !Array.isArray(item));
+  }
+  if (Array.isArray(payload)) {
+    return payload.filter((item) => item && typeof item === "object" && !Array.isArray(item));
+  }
+  return payload && typeof payload === "object" ? [payload] : [];
+}
+
+function buildCmHealthRowDateKey(row = null) {
+  const year = Number(row?.year);
+  const month = Number(row?.month);
+  const day = Number(row?.day);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return "";
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function cmHealthBuildMatchSet(values = []) {
+  return new Set(
+    normalizeEsmHealthFilterList(values).map((value) => String(value || "").trim().toLowerCase()).filter(Boolean)
+  );
+}
+
+function cmHealthMatchesDimension(row = null, key = "", matchSet = null) {
+  if (!(matchSet instanceof Set) || matchSet.size === 0) {
+    return true;
+  }
+  const candidate = String(row?.[key] || "").trim().toLowerCase();
+  return candidate ? matchSet.has(candidate) : false;
+}
+
+function cmHealthFilterUsageRows(rows = [], queryContext = null, options = {}) {
+  const start = String(options?.start || queryContext?.start || "").trim();
+  const end = String(options?.end || queryContext?.end || "").trim();
+  const mvpdSet = cmHealthBuildMatchSet(
+    Object.prototype.hasOwnProperty.call(options, "mvpdIds") ? options.mvpdIds : queryContext?.mvpdIds
+  );
+  const platformSet = cmHealthBuildMatchSet(
+    Object.prototype.hasOwnProperty.call(options, "platforms") ? options.platforms : queryContext?.platforms
+  );
+  const channelSet = cmHealthBuildMatchSet(
+    Object.prototype.hasOwnProperty.call(options, "channels") ? options.channels : queryContext?.channels
+  );
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    const dateKey = buildCmHealthRowDateKey(row);
+    if (dateKey) {
+      if (start && dateKey < start) {
+        return false;
+      }
+      if (end && dateKey > end) {
+        return false;
+      }
+    }
+    if (!cmHealthMatchesDimension(row, "mvpd", mvpdSet)) {
+      return false;
+    }
+    if (!cmHealthMatchesDimension(row, "platform", platformSet)) {
+      return false;
+    }
+    if (!cmHealthMatchesDimension(row, "channel", channelSet)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function buildCmHealthUsageRequestUrl(pathname = "", queryContext = null, options = {}) {
+  const normalizedPath = canonicalizeCmuUsagePath(pathname) || String(pathname || "").trim();
+  const parsed = buildApiRequestUrl(CM_REPORTS_BASE_URL, normalizedPath, {});
+  parsed.searchParams.set("format", "json");
+  const tenantScope = resolveCmUsageTenantScopeValue(options?.tenantScope, queryContext?.tenantScope);
+  CM_USAGE_TENANT_QUERY_KEYS.forEach((key) => parsed.searchParams.delete(key));
+  if (tenantScope && cmUsagePathRequiresTenantScope(parsed.pathname)) {
+    applyCmUsageTenantScopeToSearchParams(parsed.searchParams, tenantScope);
+  }
+  const pathParts = cmuUsageExtractPathParts(parsed.pathname);
+  const mvpdIds = normalizeEsmHealthFilterList(
+    Object.prototype.hasOwnProperty.call(options, "mvpdIds") ? options.mvpdIds : queryContext?.mvpdIds
+  );
+  parsed.searchParams.delete("mvpd");
+  parsed.searchParams.delete("mvpd_id");
+  parsed.searchParams.delete("mvpd-id");
+  if (Array.isArray(pathParts) && pathParts.includes("mvpd") && mvpdIds.length > 0) {
+    parsed.searchParams.set("mvpd", mvpdIds[0]);
+  }
+  return parsed.toString();
+}
+
+async function fetchCmHealthJson(queryContext = null, pathname = "", options = {}) {
+  const requestUrl = buildCmHealthUsageRequestUrl(pathname, queryContext, options);
+  try {
+    await ensureCmApiAccessToken({
+      forceRefresh: options?.forceRefresh === true,
+      freshLeewayMs: 60 * 1000,
+      allowTemporaryPageContextTab: false,
+    });
+    const response = await fetchCmJsonWithAuthVariants(
+      [requestUrl],
+      `CM HEALTH ${String(options?.contextLabel || options?.datasetKey || pathname || "dataset").trim() || "dataset"}`,
+      {
+        allowTemporaryPageContextTab: false,
+        debugMeta: {
+          scope: "cm-health",
+          datasetKey: String(options?.datasetKey || pathname || "").trim(),
+          endpointUrl: requestUrl,
+          programmerId: String(queryContext?.programmerId || "").trim(),
+          tenantScope: resolveCmUsageTenantScopeValue(options?.tenantScope, queryContext?.tenantScope),
+          mvpd: normalizeEsmHealthFilterList(options?.mvpdIds || queryContext?.mvpdIds)[0] || "",
+        },
+      }
+    );
+    return {
+      ok: true,
+      requestUrl,
+      status: Number(response.status || 0),
+      rows: cmHealthExtractRows(response.parsed, options?.preferredKeys),
+      parsed: response.parsed,
+      text: String(response.text || ""),
+      lastModified: String(response.lastModified || ""),
+      error: "",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      requestUrl,
+      status: 0,
+      rows: [],
+      parsed: null,
+      text: "",
+      lastModified: "",
+      error:
+        normalizeHttpErrorMessage(error instanceof Error ? error.message : String(error)) || "CM HEALTH request failed.",
+    };
+  }
+}
+
+function buildCmHealthBackbonePath(queryContext = null) {
+  const filterMode = resolveCmHealthFilterMode(queryContext);
+  const useHourly = normalizeEsmHealthGranularity(queryContext?.granularity || CM_HEALTH_DEFAULT_GRANULARITY) === "hour";
+  if (filterMode === "channel") {
+    return useHourly ? CM_HEALTH_BACKBONE_CHANNEL_HOURLY_PATH : CM_HEALTH_BACKBONE_CHANNEL_DAILY_PATH;
+  }
+  if (filterMode === "mvpd") {
+    return useHourly ? CM_HEALTH_BACKBONE_MVPD_HOURLY_PATH : CM_HEALTH_BACKBONE_MVPD_DAILY_PATH;
+  }
+  if (filterMode === "platform") {
+    return useHourly ? CM_HEALTH_BACKBONE_PLATFORM_HOURLY_PATH : CM_HEALTH_BACKBONE_PLATFORM_DAILY_PATH;
+  }
+  return useHourly ? CM_HEALTH_BACKBONE_HOURLY_PATH : CM_HEALTH_BACKBONE_DAILY_PATH;
+}
+
+function buildCmHealthDashboardReportPayload(queryContext = null, data = null, options = {}) {
+  const sectionErrors = data?.sectionErrors && typeof data.sectionErrors === "object" ? { ...data.sectionErrors } : {};
+  const sectionMessages = data?.sectionMessages && typeof data.sectionMessages === "object" ? { ...data.sectionMessages } : {};
+  const ignoredSections = new Set(
+    (Array.isArray(data?.ignoredSections) ? data.ignoredSections : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  const requestedSections = ["backbone", "platform", "applications", "channel", "mvpd", "concurrency", "activity"];
+  const effectiveSections = requestedSections.filter((key) => !ignoredSections.has(key));
+  const failedSections = effectiveSections.filter((key) => Boolean(String(sectionErrors?.[key] || "").trim()));
+  const loadedSections = effectiveSections.length - failedSections.length;
+  const backboneSeries = Array.isArray(data?.backboneSeries) ? data.backboneSeries : [];
+  const platformRows = Array.isArray(data?.platformRows) ? data.platformRows : [];
+  const applicationRows = Array.isArray(data?.applicationRows) ? data.applicationRows : [];
+  const channelRows = Array.isArray(data?.channelRows) ? data.channelRows : [];
+  const mvpdRows = Array.isArray(data?.mvpdRows) ? data.mvpdRows : [];
+  const concurrencyRows = Array.isArray(data?.concurrencyRows) ? data.concurrencyRows : [];
+  const activityRows = Array.isArray(data?.activityRows) ? data.activityRows : [];
+  const summary = buildCmHealthSummary(backboneSeries, {
+    platformRows,
+    applicationRows,
+    channelRows,
+    mvpdRows,
+    concurrencyRows,
+    activityRows,
+  });
+  return {
+    ok: failedSections.length === 0 && loadedSections > 0,
+    partial: failedSections.length > 0 && loadedSections > 0,
+    checkedAt: Date.now(),
+    selectionKey: String(queryContext?.selectionKey || "").trim(),
+    controllerSelectionKey: String(queryContext?.controllerSelectionKey || "").trim(),
+    programmerId: String(queryContext?.programmerId || "").trim(),
+    environmentKey: String(queryContext?.environmentKey || "").trim(),
+    premiumPanelRequestToken: Math.max(0, Number(options?.premiumPanelRequestToken || 0)),
+    workspaceContextKey: String(options?.workspaceContextKey || "").trim(),
+    queryContext,
+    summary,
+    backboneSeries,
+    platformRows,
+    applicationRows,
+    channelRows,
+    mvpdRows,
+    concurrencyRows,
+    activityRows,
+    sectionErrors,
+    sectionMessages,
+    ignoredSections: [...ignoredSections],
+    loadedSections,
+    totalSections: effectiveSections.length,
+    error:
+      failedSections.length > 0
+        ? String(options?.error || "One or more CM HEALTH datasets failed to load.").trim() ||
+          "One or more CM HEALTH datasets failed to load."
+        : "",
+  };
 }
 
 function getHealthWorkspacePremiumContextSnapshot(programmerId = "") {
@@ -40034,25 +40775,126 @@ function cmBuildCmV2OperationRecords(programmer = null, credentialHints = []) {
   });
 }
 
-function cmBuildRestV2CorrelationRecords(programmer = null) {
+function cmBuildCrossReferenceLabel(requestorId = "", mvpd = "", mvpdMeta = null) {
+  return (
+    formatRestV2RequestorMvpdDisplay(String(requestorId || "").trim(), String(mvpd || "").trim(), mvpdMeta, {
+      separator: " x ",
+    }) ||
+    firstNonEmptyString([String(requestorId || "").trim(), String(mvpd || "").trim(), "Cross Reference"])
+  );
+}
+
+function cmBuildCrossReferenceRowMeta(context = null, options = {}) {
+  const source = context && typeof context === "object" ? context : {};
+  const override = options && typeof options === "object" ? options : {};
+  return {
+    MediaCompany: String(firstNonEmptyString([override.programmerName, source.programmerName, source.programmerId]) || "").trim(),
+    Environment: String(firstNonEmptyString([override.environmentKey, source.environmentKey]) || "").trim(),
+    CmTenantScope: String(firstNonEmptyString([override.tenantScope, source.tenantScope]) || "").trim(),
+    CmMatchedTenantCount: Math.max(
+      0,
+      Number(
+        Object.prototype.hasOwnProperty.call(override, "matchedTenantCount")
+          ? override.matchedTenantCount
+          : Array.isArray(source.matchedTenants)
+            ? source.matchedTenants.length
+            : 0
+      ) || 0
+    ),
+    CmMatchedTenants: Array.isArray(source.matchedTenants)
+      ? source.matchedTenants
+          .map((tenant) => String(tenant?.tenantName || tenant?.tenantId || "").trim())
+          .filter(Boolean)
+          .join(", ")
+      : "",
+    RestV2App: String(firstNonEmptyString([override.restV2AppName, source.restV2App?.appName, source.restV2App?.guid]) || "").trim(),
+    RestV2AppGuid: String(firstNonEmptyString([override.restV2AppGuid, source.restV2App?.guid]) || "").trim(),
+    EsmApp: String(firstNonEmptyString([override.esmAppName, source.esmApp?.appName, source.esmApp?.guid]) || "").trim(),
+    EsmAppGuid: String(firstNonEmptyString([override.esmAppGuid, source.esmApp?.guid]) || "").trim(),
+  };
+}
+
+function cmResolveCrossReferenceContext(programmer = null, options = {}) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  const services =
+    options?.services ||
+    getCurrentPremiumAppsSnapshot(programmerId) ||
+    getRuntimePremiumServicesSeed(programmerId) ||
+    null;
+  const cmService =
+    options?.cmService ||
+    services?.cmMvpd ||
+    services?.cm ||
+    state.cmServiceByProgrammerId.get(programmerId) ||
+    null;
+  const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants.filter(Boolean) : [];
   const profileHarvestList = getCmProfileHarvestListForProgrammer(programmer);
+  const profileHarvest = getCmProfileHarvestForProgrammer(programmer) || profileHarvestList[0] || null;
+  const requestorId = String(
+    firstNonEmptyString([
+      options?.requestorId,
+      state.selectedRequestorId,
+      profileHarvest?.requestorId,
+      profileHarvest?.serviceProviderId,
+      cmService?.requestorId,
+    ]) || ""
+  ).trim();
+  const mvpd = String(
+    firstNonEmptyString([
+      options?.mvpdId,
+      state.selectedMvpdId,
+      profileHarvest?.mvpd,
+      cmService?.mvpdId,
+      cmService?.mvpd,
+    ]) || ""
+  ).trim();
+  const mvpdMeta = requestorId && mvpd ? getRestV2MvpdMeta(requestorId, mvpd) : null;
+  const mvpdLabel = mvpd
+    ? firstNonEmptyString([getRestV2MvpdPickerLabel(requestorId, mvpd, mvpdMeta), mvpd])
+    : "";
+  const tenantScope = resolveCmUsageTenantScopeValue(
+    options?.tenantScope,
+    cmService?.matchedTenants?.[0]?.tenantId,
+    cmService?.matchedTenants?.[0]?.tenantName,
+    getCmTenantScopeForProgrammer(programmer)
+  );
+  const restV2AppCandidates = collectRestV2AppCandidatesFromPremiumApps(services);
+  const restV2App =
+    selectPreferredRestV2AppForRequestor(restV2AppCandidates, requestorId, programmerId) || services?.restV2 || null;
+  const esmCandidates = collectEsmAppCandidatesFromPremiumApps(services, services?.esm || null);
+  const esmApp = selectPreferredEsmAppForRequestor(esmCandidates, requestorId, programmerId) || services?.esm || null;
+  const environment = getActiveAdobePassEnvironment();
+  return {
+    programmerId,
+    programmerName: String(
+      firstNonEmptyString([programmer?.programmerName, programmer?.mediaCompanyName, programmerId]) || ""
+    ).trim(),
+    services,
+    cmService,
+    matchedTenants,
+    tenantScope,
+    profileHarvest,
+    profileHarvestList,
+    preauthorizeHistory: getRestV2PreauthorizeHistoryForProgrammer(programmerId),
+    requestorId,
+    mvpd,
+    mvpdMeta,
+    mvpdLabel,
+    restV2App,
+    esmApp,
+    environmentKey: String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key,
+    environmentLabel: String(
+      firstNonEmptyString([environment?.label, environment?.shortCode, environment?.key, DEFAULT_ADOBEPASS_ENVIRONMENT.key]) || ""
+    ).trim(),
+  };
+}
+
+function cmBuildRestV2ProfileCorrelationRecords(context = null) {
+  const source = context && typeof context === "object" ? context : {};
+  const profileHarvestList = Array.isArray(source.profileHarvestList) ? source.profileHarvestList : [];
   if (profileHarvestList.length === 0) {
     return [];
   }
-
-  const toJsonString = (value) => {
-    if (value == null || value === "") {
-      return "";
-    }
-    if (typeof value === "string") {
-      return value;
-    }
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  };
 
   return profileHarvestList.map((profileHarvest, recordIndex) => {
     const capturedAtLabel = profileHarvest.harvestedAt
@@ -40069,10 +40911,11 @@ function cmBuildRestV2CorrelationRecords(programmer = null) {
             : "NO ACTIVE PROFILE (empty profiles)"
           : `ERROR (HTTP ${Number(profileCheck.status || 0)} ${String(profileCheck.statusText || "").trim()})`
       : "Unknown";
-    const profileSummaries = Array.isArray(profileHarvest.profileSummaries) ? profileHarvest.profileSummaries : [];
+    const summaryRowsSource = Array.isArray(profileHarvest.profileSummaries) ? profileHarvest.profileSummaries : [];
+    const rowMeta = cmBuildCrossReferenceRowMeta(source);
     const summaryRows =
-      profileSummaries.length > 0
-        ? profileSummaries.map((summary, index) => ({
+      summaryRowsSource.length > 0
+        ? summaryRowsSource.map((summary, index) => ({
             Row: index + 1,
             RequestorId: String(profileHarvest.requestorId || "").trim(),
             ServiceProviderId: String(profileHarvest.serviceProviderId || "").trim(),
@@ -40097,10 +40940,11 @@ function cmBuildRestV2CorrelationRecords(programmer = null) {
             SessionCandidates: Array.isArray(summary?.sessionCandidates) ? summary.sessionCandidates.join(", ") : "",
             NotBeforeMs: Number(summary?.notBeforeMs || 0),
             NotAfterMs: Number(summary?.notAfterMs || 0),
-            ProfileAttributesJson: toJsonString(summary?.attributes),
-            ProfileScalarFieldsJson: toJsonString(summary?.scalarFields),
-            ProfileRawJson: toJsonString(summary?.rawProfile),
-            ProfileResponsePayloadJson: toJsonString(profileHarvest.profileResponsePayload),
+            ProfileAttributesJson: stringifyJsonForDisplay(summary?.attributes),
+            ProfileScalarFieldsJson: stringifyJsonForDisplay(summary?.scalarFields),
+            ProfileRawJson: stringifyJsonForDisplay(summary?.rawProfile),
+            ProfileResponsePayloadJson: stringifyJsonForDisplay(profileHarvest.profileResponsePayload),
+            ...rowMeta,
           }))
         : [
             {
@@ -40128,17 +40972,28 @@ function cmBuildRestV2CorrelationRecords(programmer = null) {
               SessionCandidates: Array.isArray(profileHarvest.sessionCandidates) ? profileHarvest.sessionCandidates.join(", ") : "",
               NotBeforeMs: Number(profileHarvest.notBeforeMs || 0),
               NotAfterMs: Number(profileHarvest.notAfterMs || 0),
-              ProfileAttributesJson: toJsonString(profileHarvest.profileAttributes),
-              ProfileScalarFieldsJson: toJsonString(profileHarvest.profileScalarFields),
-              ProfileRawJson: toJsonString(profileHarvest.profile),
-              ProfileResponsePayloadJson: toJsonString(profileHarvest.profileResponsePayload),
+              ProfileAttributesJson: stringifyJsonForDisplay(profileHarvest.profileAttributes),
+              ProfileScalarFieldsJson: stringifyJsonForDisplay(profileHarvest.profileScalarFields),
+              ProfileRawJson: stringifyJsonForDisplay(profileHarvest.profile),
+              ProfileResponsePayloadJson: stringifyJsonForDisplay(profileHarvest.profileResponsePayload),
+              ...rowMeta,
             },
           ];
     const payload = {
-      mediaCompany: String(programmer?.programmerName || programmer?.mediaCompanyName || programmer?.programmerId || "").trim(),
+      mediaCompany: source.programmerName,
       requestorId: String(profileHarvest.requestorId || "").trim(),
       serviceProviderId: String(profileHarvest.serviceProviderId || "").trim(),
       mvpd: String(profileHarvest.mvpd || "").trim(),
+      mvpdLabel: String(
+        firstNonEmptyString([
+          source.requestorId &&
+          String(profileHarvest.requestorId || "").trim().toLowerCase() === String(source.requestorId || "").trim().toLowerCase()
+            ? source.mvpdLabel
+            : "",
+          profileHarvest?.mvpdName,
+          profileHarvest?.mvpd,
+        ]) || ""
+      ).trim(),
       profileCheckOutcome: String(profileHarvest.profileCheckOutcome || "").trim(),
       profileCheckStatus,
       profileCount: Number(profileHarvest.profileCount || profileCheck?.profileCount || 0),
@@ -40147,40 +41002,287 @@ function cmBuildRestV2CorrelationRecords(programmer = null) {
       profileUrl: String(profileHarvest.profileUrl || "").trim(),
       items: summaryRows,
       harvestedAt: capturedAtLabel,
+      ...rowMeta,
     };
 
     const correlationKey =
       buildRestV2ProfileHarvestBucketKey(profileHarvest) ||
       `${String(profileHarvest.requestorId || "requestor")}_${String(profileHarvest.mvpd || "mvpd")}_${recordIndex + 1}`;
+    const rowMvpdMeta = String(profileHarvest?.mvpdName || "").trim()
+      ? {
+          id: String(profileHarvest.mvpd || "").trim(),
+          name: String(profileHarvest.mvpdName || "").trim(),
+        }
+      : String(source.mvpd || "").trim() &&
+          String(payload.requestorId || "").trim().toLowerCase() === String(source.requestorId || "").trim().toLowerCase()
+        ? source.mvpdMeta
+        : null;
     return {
       cardId: cmBuildRecordId(
-        "correlation",
-        String(profileHarvest.programmerId || programmer?.programmerId || "cm"),
+        "restv2-profile-xref",
+        String(profileHarvest.programmerId || source.programmerId || "cm"),
         correlationKey,
         recordIndex
       ),
-      kind: "correlation",
-      title: "MVPD Login Profile",
-      subtitle: `${formatRestV2RequestorMvpdDisplay(
-        String(payload.requestorId || "").trim(),
-        String(payload.mvpd || "").trim(),
-        String(profileHarvest?.mvpdName || "").trim()
-          ? {
-              id: String(payload.mvpd || "").trim(),
-              name: String(profileHarvest.mvpdName || "").trim(),
-            }
-          : null,
-        { separator: " x " }
-      )} | ${profileCheckStatus} | ${capturedAtLabel}`,
+      kind: "restv2-profile-xref",
+      title: "MVPD Authenticated Profile",
+      subtitle: `${cmBuildCrossReferenceLabel(String(payload.requestorId || "").trim(), String(payload.mvpd || "").trim(), rowMvpdMeta)} | ${profileCheckStatus} | ${capturedAtLabel}`,
       endpointUrl: "",
       requestUrl: "",
       payload,
       columns: cmColumnsFromPayload(payload),
-      tenantId: String(profileHarvest.programmerId || programmer?.programmerId || ""),
-      tenantName: String(programmer?.programmerName || programmer?.mediaCompanyName || profileHarvest.programmerId || "CM"),
+      tenantId: String(profileHarvest.programmerId || source.programmerId || ""),
+      tenantName: String(source.programmerName || profileHarvest.programmerId || "CM"),
       lastModified: "",
     };
   });
+}
+
+function cmBuildRestV2PreauthzCorrelationRecords(context = null) {
+  const source = context && typeof context === "object" ? context : {};
+  const entries = Array.isArray(source.preauthorizeHistory) ? source.preauthorizeHistory.slice(0, 8) : [];
+  if (entries.length === 0) {
+    return [];
+  }
+
+  return entries.map((entry, recordIndex) => {
+    const requestorId = String(entry?.requestorId || entry?.serviceProviderId || source.requestorId || "").trim();
+    const mvpd = String(entry?.mvpd || source.mvpd || "").trim();
+    const mvpdMeta = requestorId && mvpd ? getRestV2MvpdMeta(requestorId, mvpd) || source.mvpdMeta : source.mvpdMeta;
+    const checkedAtLabel = String(firstNonEmptyString([entry?.checkedAtLabel, formatTimestampLabel(entry?.checkedAt)]) || "Unknown").trim();
+    const verdict =
+      entry?.allRequestedPermitted === true ? "YES" : entry?.allRequestedPermitted === false ? "NO" : "UNKNOWN";
+    const decisionRows = Array.isArray(entry?.decisionRows) ? entry.decisionRows : [];
+    const rowMeta = cmBuildCrossReferenceRowMeta(source);
+    const items =
+      decisionRows.length > 0
+        ? decisionRows.map((decision, index) => ({
+            Row: index + 1,
+            CheckedAt: checkedAtLabel,
+            Verdict: verdict,
+            RequestorId: requestorId,
+            ServiceProviderId: String(entry?.serviceProviderId || requestorId || "").trim(),
+            Mvpd: mvpd,
+            MvpdLabel: String(firstNonEmptyString([getRestV2MvpdPickerLabel(requestorId, mvpd, mvpdMeta), mvpd]) || "").trim(),
+            Subject: String(entry?.subject || "").trim(),
+            UpstreamUserId: String(entry?.upstreamUserId || "").trim(),
+            UserId: String(entry?.userId || "").trim(),
+            SessionId: String(entry?.sessionId || "").trim(),
+            ProfileKey: String(entry?.profileKey || "").trim(),
+            ResourceId: String(decision?.resourceId || "").trim(),
+            Decision: String(decision?.decision || "").trim(),
+            Authorized: typeof decision?.authorized === "boolean" ? (decision.authorized ? "Yes" : "No") : "",
+            ErrorCode: String(decision?.errorCode || "").trim(),
+            ErrorDetails: String(decision?.errorDetails || "").trim(),
+            Source: String(decision?.source || "").trim(),
+            MediaTokenPresent: decision?.mediaTokenPresent === true ? "Yes" : decision?.mediaTokenPresent === false ? "No" : "",
+            MediaTokenPreview: String(decision?.mediaTokenPreview || "").trim(),
+            MediaTokenNotBeforeMs: Number(decision?.mediaTokenNotBeforeMs || 0),
+            MediaTokenNotAfterMs: Number(decision?.mediaTokenNotAfterMs || 0),
+            DecisionNotBeforeMs: Number(decision?.notBeforeMs || 0),
+            DecisionNotAfterMs: Number(decision?.notAfterMs || 0),
+            HttpStatus: Number(entry?.status || 0),
+            HttpStatusText: String(entry?.statusText || "").trim(),
+            Error: String(entry?.error || "").trim(),
+            ResourceIds: (Array.isArray(entry?.resourceIds) ? entry.resourceIds : []).join(", "),
+            RequestBodyJson: stringifyJsonForDisplay(entry?.requestBody),
+            ResponsePayloadJson: stringifyJsonForDisplay(entry?.responsePayload),
+            DecisionRawJson: stringifyJsonForDisplay(decision?.raw),
+            ...rowMeta,
+          }))
+        : [
+            {
+              Row: 1,
+              CheckedAt: checkedAtLabel,
+              Verdict: verdict,
+              RequestorId: requestorId,
+              ServiceProviderId: String(entry?.serviceProviderId || requestorId || "").trim(),
+              Mvpd: mvpd,
+              MvpdLabel: String(firstNonEmptyString([getRestV2MvpdPickerLabel(requestorId, mvpd, mvpdMeta), mvpd]) || "").trim(),
+              Subject: String(entry?.subject || "").trim(),
+              UpstreamUserId: String(entry?.upstreamUserId || "").trim(),
+              UserId: String(entry?.userId || "").trim(),
+              SessionId: String(entry?.sessionId || "").trim(),
+              ProfileKey: String(entry?.profileKey || "").trim(),
+              ResourceId: "",
+              Decision: "",
+              Authorized: "",
+              ErrorCode: "",
+              ErrorDetails: "",
+              Source: "",
+              MediaTokenPresent: "",
+              MediaTokenPreview: "",
+              MediaTokenNotBeforeMs: 0,
+              MediaTokenNotAfterMs: 0,
+              DecisionNotBeforeMs: 0,
+              DecisionNotAfterMs: 0,
+              HttpStatus: Number(entry?.status || 0),
+              HttpStatusText: String(entry?.statusText || "").trim(),
+              Error: String(entry?.error || "").trim(),
+              ResourceIds: (Array.isArray(entry?.resourceIds) ? entry.resourceIds : []).join(", "),
+              RequestBodyJson: stringifyJsonForDisplay(entry?.requestBody),
+              ResponsePayloadJson: stringifyJsonForDisplay(entry?.responsePayload),
+              DecisionRawJson: "",
+              ...rowMeta,
+            },
+          ];
+    const payload = {
+      mediaCompany: source.programmerName,
+      requestorId,
+      serviceProviderId: String(entry?.serviceProviderId || requestorId || "").trim(),
+      mvpd,
+      mvpdLabel: String(firstNonEmptyString([getRestV2MvpdPickerLabel(requestorId, mvpd, mvpdMeta), mvpd]) || "").trim(),
+      checkedAt: checkedAtLabel,
+      verdict,
+      permitCount: Number(entry?.permitCount || 0),
+      denyCount: Number(entry?.denyCount || 0),
+      unknownCount: Number(entry?.unknownCount || 0),
+      resourceIds: (Array.isArray(entry?.resourceIds) ? entry.resourceIds : []).join(", "),
+      responsePreview: String(entry?.responsePreview || "").trim(),
+      items,
+      ...rowMeta,
+    };
+    const correlationKey = buildRestV2PreauthzCheckKey(entry) || `${requestorId}_${mvpd}_${recordIndex + 1}`;
+    return {
+      cardId: cmBuildRecordId("restv2-preauthz-xref", String(source.programmerId || "cm"), correlationKey, recordIndex),
+      kind: "restv2-preauthz-xref",
+      title: "REST V2 Preauthorize",
+      subtitle: `${cmBuildCrossReferenceLabel(requestorId, mvpd, mvpdMeta)} | Can I watch? ${verdict} | ${checkedAtLabel}`,
+      endpointUrl: String(entry?.endpointUrl || "").trim(),
+      requestUrl: "",
+      payload,
+      columns: cmColumnsFromPayload(payload),
+      tenantId: String(source.programmerId || ""),
+      tenantName: String(source.programmerName || source.programmerId || "CM"),
+      lastModified: "",
+    };
+  });
+}
+
+function cmBuildEsmHealthCorrelationRecords(context = null) {
+  const source = context && typeof context === "object" ? context : {};
+  if (!source.programmerId || !source.requestorId || !source.esmApp?.guid) {
+    return [];
+  }
+  const reportPath = buildEsmHealthReportPath("day", ["requestor-id", "proxy", "mvpd", "platform"]);
+  const queryContext = buildEsmHealthDashboardQueryContext({
+    programmerId: source.programmerId,
+    programmerName: source.programmerName,
+    baseRequestorIds: [source.requestorId],
+    baseMvpdIds: source.mvpd ? [source.mvpd] : [],
+    requestSource: "cm-esm-health-xref",
+  });
+  const limit = Math.max(25, Math.min(ESM_HEALTH_BREAKDOWN_LIMIT, 250));
+  const requestUrl = buildEsmHealthRequestUrl(reportPath, queryContext, {
+    limit,
+  });
+  const rowMeta = cmBuildCrossReferenceRowMeta(source);
+  const summaryRow = {
+    RequestorId: source.requestorId,
+    Mvpd: source.mvpd,
+    MvpdLabel: source.mvpdLabel,
+    DateStart: String(queryContext.start || "").trim(),
+    DateEnd: String(queryContext.end || "").trim(),
+    ReportPath: reportPath,
+    RequestUrl: requestUrl,
+    ...rowMeta,
+  };
+  const payload = {
+    mediaCompany: source.programmerName,
+    requestorId: source.requestorId,
+    mvpd: source.mvpd,
+    mvpdLabel: source.mvpdLabel,
+    reportPath,
+    limit,
+    requestUrl,
+    queryContext: cloneJsonLikeValue(queryContext, queryContext),
+    items: [summaryRow],
+    ...rowMeta,
+  };
+  return [
+    {
+      cardId: cmBuildRecordId("esm-health-xref", String(source.programmerId || "cm"), source.requestorId, 0),
+      kind: "esm-health-xref",
+      title: "ESM Health Scope",
+      subtitle: `${cmBuildCrossReferenceLabel(source.requestorId, source.mvpd, source.mvpdMeta)} | ${String(queryContext.start || "").trim()} to ${String(queryContext.end || "").trim()}`,
+      endpointUrl: requestUrl,
+      requestUrl,
+      payload,
+      columns: cmColumnsFromPayload(payload),
+      tenantId: String(source.programmerId || ""),
+      tenantName: String(source.programmerName || source.programmerId || "ESM"),
+      lastModified: "",
+    },
+  ];
+}
+
+function cmBuildRestV2CorrelationRecords(programmer = null, options = {}) {
+  const context = cmResolveCrossReferenceContext(programmer, options);
+  return [
+    ...cmBuildRestV2ProfileCorrelationRecords(context),
+    ...cmBuildRestV2PreauthzCorrelationRecords(context),
+    ...cmBuildEsmHealthCorrelationRecords(context),
+  ];
+}
+
+function cmBuildWorkspaceDataset(programmer = null, cmService = null, bundles = [], options = {}) {
+  const normalizedBundles = (Array.isArray(bundles) ? bundles : []).filter(Boolean);
+  const bundleRecords = cmBuildWorkspaceRecordsFromBundles(normalizedBundles);
+  const credentialHints = cmExtractCredentialHintsFromBundles(normalizedBundles);
+  const credentialRecords = cmBuildCredentialHintRecords(credentialHints, programmer);
+  const cmV2OperationRecords = cmBuildCmV2OperationRecords(programmer, credentialHints);
+  const correlationRecords = cmBuildRestV2CorrelationRecords(programmer, {
+    cmService,
+    tenantScope: options?.tenantScope,
+    services: options?.services,
+  });
+  const records = [...correlationRecords, ...bundleRecords, ...cmV2OperationRecords, ...credentialRecords];
+  const groupDefinitions = [
+    {
+      key: "correlation",
+      label: "Live Cross References",
+      records: correlationRecords,
+    },
+    {
+      key: "cmv2",
+      label: "CM V2 Live APIs",
+      records: cmV2OperationRecords,
+    },
+    {
+      key: "tenants",
+      label: "CM Tenants",
+      records: records.filter((record) => record.kind === "tenant"),
+    },
+    {
+      key: "applications",
+      label: "CM Applications",
+      records: records.filter((record) => record.kind === "applications"),
+    },
+    {
+      key: "credentials",
+      label: "CM Credential Hints",
+      records: records.filter((record) => record.kind === "credential"),
+    },
+    {
+      key: "policies",
+      label: "CM Policies",
+      records: records.filter((record) => record.kind === "policies"),
+    },
+    {
+      key: "usage",
+      label: "CMU Usage",
+      records: records.filter((record) => record.kind === "usage"),
+    },
+  ];
+  return {
+    bundleRecords,
+    credentialHints,
+    credentialRecords,
+    cmV2OperationRecords,
+    correlationRecords,
+    records,
+    groupDefinitions,
+  };
 }
 
 function cmBuildWorkspaceRecordsFromBundles(bundles) {
@@ -40355,7 +41457,10 @@ function cmFormatRecordKindLabel(kind) {
     applications: "Application",
     policies: "Policy",
     usage: "Usage",
-    correlation: "MVPD Login",
+    "restv2-profile-xref": "REST V2 Profile",
+    "restv2-preauthz-xref": "REST V2 Preauthz",
+    "esm-health-xref": "ESM Health",
+    correlation: "Cross Reference",
     credential: "Credential",
     "cmv2-op": "CM V2 API",
     "group-list": "List",
@@ -41136,43 +42241,11 @@ function buildDetachedCmWorkspaceState(programmer, cmService = null, requestToke
   const workspaceKey = String(options?.workspaceKey || (isMvpdService ? "mvpd-workspace" : "cmu-workspace")).trim();
   const workspaceOrigin = String(options?.workspaceOrigin || (isMvpdService ? "MVPD Workspace" : "CMU Workspace")).trim();
   const bundles = cachedRenderContext.bundles.filter(Boolean);
-  const bundleRecords = cmBuildWorkspaceRecordsFromBundles(bundles);
-  const correlationRecords = cmBuildRestV2CorrelationRecords(programmer);
-  const credentialHints = cmExtractCredentialHintsFromBundles(bundles);
-  const credentialRecords = cmBuildCredentialHintRecords(credentialHints, programmer);
-  const records = [...correlationRecords, ...bundleRecords, ...credentialRecords];
-  const correlationCardRecords = records.filter((record) => record.kind === "correlation");
-  const tenantRecords = records.filter((record) => record.kind === "tenant");
-  const applicationRecords = records.filter((record) => record.kind === "applications");
-  const credentialHintRecords = records.filter((record) => record.kind === "credential");
-  const policyRecords = records.filter((record) => record.kind === "policies");
-  const groupDefinitions = [
-    {
-      key: "correlation",
-      label: "MVPD Login History",
-      records: correlationCardRecords,
-    },
-    {
-      key: "tenants",
-      label: "CM Tenants",
-      records: tenantRecords,
-    },
-    {
-      key: "applications",
-      label: "CM Applications",
-      records: applicationRecords,
-    },
-    {
-      key: "credentials",
-      label: "CM Credential Hints",
-      records: credentialHintRecords,
-    },
-    {
-      key: "policies",
-      label: "CM Policies",
-      records: policyRecords,
-    },
-  ];
+  const workspaceDataset = cmBuildWorkspaceDataset(programmer, cmService, bundles, {
+    tenantScope: cachedRenderContext.tenantScope,
+  });
+  const records = workspaceDataset.records.slice();
+  const groupDefinitions = workspaceDataset.groupDefinitions.slice();
   const groupChildRecordIdsByGroupRecordId = new Map();
   groupDefinitions.forEach((group, index) => {
     const groupRecord = cmBuildGroupWorkspaceRecord(group.key, group.label, group.records, programmer, index);
@@ -41530,6 +42603,71 @@ function cmBuildWorkspaceReportContextPayload(cmState = null, requestToken = 0) 
   };
 }
 
+function cmResolveEsmHealthXrefRecordConfig(record = null, cmState = null) {
+  const payload = record?.payload && typeof record.payload === "object" ? record.payload : {};
+  const seededQueryContext =
+    payload?.queryContext && typeof payload.queryContext === "object" ? cloneJsonLikeValue(payload.queryContext, {}) : {};
+  const programmerId = String(
+    firstNonEmptyString([seededQueryContext.programmerId, cmState?.programmer?.programmerId, record?.tenantId]) || ""
+  ).trim();
+  const programmerName = String(
+    firstNonEmptyString([seededQueryContext.programmerName, cmState?.programmer?.programmerName, record?.tenantName, programmerId]) || ""
+  ).trim();
+  const requestorId = String(
+    firstNonEmptyString([payload?.requestorId, state.selectedRequestorId, cmState?.cmService?.requestorId]) || ""
+  ).trim();
+  const mvpdId = String(firstNonEmptyString([payload?.mvpd, state.selectedMvpdId, cmState?.cmService?.mvpdId]) || "").trim();
+  const queryContext = buildEsmHealthDashboardQueryContext({
+    ...seededQueryContext,
+    programmerId,
+    programmerName,
+    baseRequestorIds: requestorId ? [requestorId] : normalizeEsmHealthFilterList(seededQueryContext.baseRequestorIds),
+    baseMvpdIds: mvpdId ? [mvpdId] : normalizeEsmHealthFilterList(seededQueryContext.baseMvpdIds),
+    requestSource: "cm-esm-health-xref",
+  });
+  const reportPath = String(payload?.reportPath || buildEsmHealthReportPath("day", ["requestor-id", "proxy", "mvpd", "platform"])).trim();
+  const limit = Math.max(1, Number(payload?.limit || ESM_HEALTH_BREAKDOWN_LIMIT || 0) || ESM_HEALTH_BREAKDOWN_LIMIT);
+  const requestUrl = buildEsmHealthRequestUrl(reportPath, queryContext, {
+    limit,
+  });
+  return {
+    queryContext,
+    reportPath,
+    limit,
+    requestUrl,
+  };
+}
+
+async function cmFetchEsmHealthXrefReport(record = null, cmState = null) {
+  const config = cmResolveEsmHealthXrefRecordConfig(record, cmState);
+  const result = await fetchEsmHealthJson(config.queryContext, config.reportPath, {
+    limit: config.limit,
+  });
+  if (!result?.ok) {
+    throw new Error(String(result?.error || "Unable to load the scoped ESM HEALTH cross reference.").trim());
+  }
+  const rows = Array.isArray(result.rows) ? result.rows : [];
+  const fallbackRows =
+    rows.length > 0
+      ? rows
+      : [
+          {
+            RequestorId: String(config.queryContext?.requestorIds?.[0] || "").trim(),
+            Mvpd: String(config.queryContext?.mvpdIds?.[0] || "").trim(),
+            DateStart: String(config.queryContext?.start || "").trim(),
+            DateEnd: String(config.queryContext?.end || "").trim(),
+            Message: "No ESM HEALTH rows matched the current scoped window.",
+            RequestUrl: String(result?.requestUrl || config.requestUrl || "").trim(),
+          },
+        ];
+  return {
+    requestUrl: String(result?.requestUrl || config.requestUrl || "").trim(),
+    rows: fallbackRows,
+    columns: cmColumnsFromRows(fallbackRows),
+    lastModified: "",
+  };
+}
+
 async function cmRunOperationRecordToWorkspace(cmState, record, requestToken, options = {}) {
   if (!cmState || !record) {
     return;
@@ -41861,6 +42999,30 @@ function cmNormalizeRecordKind(kindValue = "") {
   const normalized = String(kindValue || "").trim().toLowerCase();
   if (!normalized) {
     return "";
+  }
+  if (
+    normalized === "restv2-profile-xref" ||
+    normalized === "restv2-profile" ||
+    normalized === "rest-v2-profile" ||
+    normalized === "rest_v2_profile"
+  ) {
+    return "restv2-profile-xref";
+  }
+  if (
+    normalized === "restv2-preauthz-xref" ||
+    normalized === "restv2-preauthz" ||
+    normalized === "rest-v2-preauthz" ||
+    normalized === "rest_v2_preauthz"
+  ) {
+    return "restv2-preauthz-xref";
+  }
+  if (
+    normalized === "esm-health-xref" ||
+    normalized === "esmhealthxref" ||
+    normalized === "esm-health" ||
+    normalized === "esm_health"
+  ) {
+    return "esm-health-xref";
   }
   if (normalized === "application" || normalized === "applications") {
     return "applications";
@@ -42265,12 +43427,16 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
   const preserveExactRequestContext =
     requestSource === "workspace-path-link" || requestSource === "workspace-path-node";
   const endpointUrl = String(record.endpointUrl || record.requestUrl || "").trim();
+  const recordKind = String(record?.kind || "").trim().toLowerCase();
   const baseRequestUrlRaw = String(options.baseRequestUrl || record.requestUrl || endpointUrl).trim();
   const baseRequestUrl = preserveExactRequestContext
     ? baseRequestUrlRaw
     : cmScopeUsageRequestUrl(baseRequestUrlRaw, cmState, scopedRecord) || baseRequestUrlRaw;
   const requestUrlOverride = String(options.requestUrlOverride || "").trim();
   let requestUrl = requestUrlOverride || baseRequestUrl;
+  if (recordKind === "esm-health-xref") {
+    requestUrl = cmResolveEsmHealthXrefRecordConfig(record, cmState).requestUrl;
+  }
   if (!preserveExactRequestContext) {
     requestUrl = cmResolveApplicationDetailUrl(scopedRecord, requestUrl);
     requestUrl = cmScopeUsageRequestUrl(requestUrl, cmState, scopedRecord) || requestUrl;
@@ -42323,7 +43489,6 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
     : cmScopeUsageRequestUrl(String(record.requestUrl || endpointUrl || "").trim(), cmState, scopedRecord);
   const hasUrlOverrideDiffersFromRecord =
     Boolean(requestUrlOverride) && requestUrl !== recordRequestUrl;
-  const recordKind = String(record?.kind || "").trim().toLowerCase();
   const applicationsListRequest = recordKind === "applications" && cmIsApplicationsListRequestUrl(requestUrl);
   const shouldRefetchForRecordKind =
     recordKind === "usage" ||
@@ -42370,6 +43535,68 @@ async function cmRunRecordToWorkspace(cmState, record, requestToken, options = {
       },
     }
   );
+  if (recordKind === "esm-health-xref") {
+    try {
+      const response = await cmFetchEsmHealthXrefReport(record, cmState);
+      requestUrl = String(response.requestUrl || requestUrl || "").trim();
+      const rows = Array.isArray(response.rows) ? response.rows : [];
+      const columns = Array.isArray(response.columns) ? response.columns : cmColumnsFromRows(rows);
+      lastModified = String(response.lastModified || lastModified || "").trim();
+      record.columns = columns;
+      if (!hasUrlOverrideDiffersFromRecord) {
+        record.requestUrl = requestUrl;
+        record.endpointUrl = requestUrl;
+      }
+      cmSendReportWorkspaceMessage(
+        targetWorkspace,
+        "report-result",
+        {
+          ...workspaceReportContext,
+          ok: true,
+          cardId,
+          endpointUrl: requestUrl || endpointUrl,
+          requestUrl,
+          baseRequestUrl,
+          zoomKey: String(record.kind || "").toUpperCase(),
+          columns,
+          rows,
+          lastModified,
+          localColumnFilters: normalizedLocalColumnFilters,
+          tenantId: reportTenantId,
+          tenantName: reportTenantName,
+          programmerId: String(cmState?.programmer?.programmerId || ""),
+          requestorId: targetRequestorId,
+          mvpdId: targetMvpdId,
+          mvpdLabel: targetMvpdLabel,
+        },
+        { targetWindowId }
+      );
+      return;
+    } catch (error) {
+      cmSendReportWorkspaceMessage(
+        targetWorkspace,
+        "report-result",
+        {
+          ...workspaceReportContext,
+          ok: false,
+          cardId,
+          endpointUrl: requestUrl || endpointUrl,
+          requestUrl,
+          baseRequestUrl,
+          localColumnFilters: normalizedLocalColumnFilters,
+          tenantId: reportTenantId,
+          tenantName: reportTenantName,
+          error: error instanceof Error ? error.message : String(error),
+          programmerId: String(cmState?.programmer?.programmerId || ""),
+          requestorId: targetRequestorId,
+          mvpdId: targetMvpdId,
+          mvpdLabel: targetMvpdLabel,
+        },
+        { targetWindowId }
+      );
+      return;
+    }
+  }
   if (requestUrl && shouldRefetch) {
     try {
       const response = await fetchCmJsonWithAuthVariants([requestUrl], `CM ${record.kind || "item"} report`, {
@@ -48065,6 +49292,395 @@ function ensureRestWorkspaceTabWatcher() {
   state.restWorkspaceTabWatcherBound = true;
 }
 
+async function runCmHealthDashboardForSelection(rawQueryContext = null, options = {}) {
+  const queryContext = buildCmHealthDashboardQueryContext(rawQueryContext);
+  if (!queryContext.programmerId) {
+    return buildCmHealthDashboardReportPayload(
+      queryContext,
+      {
+        sectionErrors: {
+          backbone: "Select a Media Company first.",
+        },
+      },
+      {
+        error: "Select a Media Company before running CM HEALTH.",
+      }
+    );
+  }
+
+  const openWorkspace = options.openWorkspace !== false;
+  const activateWorkspace = options.activateWorkspace !== false;
+  const premiumPanelRequestToken = Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0));
+  const workspaceContextKey = buildCmHealthWorkspaceControllerContextKey(queryContext, premiumPanelRequestToken);
+  let targetWindowId = Number(options.targetWindowId || 0);
+
+  if (openWorkspace) {
+    const workspaceTab = await cmHealthWorkspaceEnsureWorkspaceTab({
+      activate: activateWorkspace,
+      windowId: targetWindowId || undefined,
+    });
+    targetWindowId = Number(workspaceTab?.windowId || targetWindowId || state.cmHealthWorkspaceWindowId || 0);
+  }
+
+  cmHealthWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), cmHealthWorkspaceGetSelectionContext(resolveSelectedProgrammer()), targetWindowId);
+  void cmHealthWorkspaceSendWorkspaceMessage(
+    "report-start",
+    {
+      selectionKey: queryContext.selectionKey,
+      controllerSelectionKey: queryContext.controllerSelectionKey,
+      programmerId: queryContext.programmerId,
+      environmentKey: queryContext.environmentKey,
+      premiumPanelRequestToken,
+      workspaceContextKey,
+      queryContext,
+      startedAt: Date.now(),
+    },
+    {
+      targetWindowId,
+    }
+  );
+
+  const finalizeReport = (payload) => {
+    if (payload && typeof payload === "object") {
+      payload.premiumPanelRequestToken = premiumPanelRequestToken;
+      payload.workspaceContextKey = workspaceContextKey;
+      payload.controllerSelectionKey = String(payload.controllerSelectionKey || queryContext.controllerSelectionKey || "").trim();
+      payload.programmerId = String(payload.programmerId || queryContext.programmerId || "").trim();
+      payload.environmentKey = String(payload.environmentKey || queryContext.environmentKey || "").trim();
+    }
+    cmHealthWorkspaceStoreLatestReport(payload);
+    void cmHealthWorkspaceSendWorkspaceMessage("report-result", payload, { targetWindowId });
+    return payload;
+  };
+
+  let cmHealthContext = null;
+  try {
+    const premiumContext = await ensureHealthWorkspacePremiumContext(queryContext.programmerId, {
+      controllerReason: "cm-health-dashboard",
+      requestToken: premiumPanelRequestToken,
+      forceRefresh: options?.forceRefresh === true,
+    });
+    const programmer =
+      premiumContext?.programmer ||
+      findProgrammerByProgrammerId(queryContext.programmerId) ||
+      (resolveSelectedProgrammer()?.programmerId === queryContext.programmerId ? resolveSelectedProgrammer() : null);
+    if (!programmer?.programmerId) {
+      throw new Error("Select a Media Company before running CM HEALTH.");
+    }
+
+    const hydration = await ensureCmHydratedForProgrammer(programmer, premiumContext?.services || null, {
+      forceRefresh: options?.forceRefresh === true,
+      freshLeewayMs: 60 * 1000,
+      reason: "cm-health-dashboard",
+    });
+    const services =
+      hydration?.services ||
+      premiumContext?.services ||
+      getCurrentPremiumAppsSnapshot(queryContext.programmerId) ||
+      getRuntimePremiumServicesSeed(queryContext.programmerId) ||
+      null;
+    const cmService = hydration?.cmService || services?.cm || state.cmServiceByProgrammerId.get(queryContext.programmerId) || null;
+    if (!shouldShowCmService(cmService)) {
+      throw new Error("Selected Media Company does not have a Concurrency Monitoring tenant match.");
+    }
+    const tenantScope = resolveCmUsageTenantScopeValue(
+      queryContext.tenantScope,
+      cmService?.matchedTenants?.[0]?.tenantId,
+      cmService?.matchedTenants?.[0]?.tenantName,
+      getCmTenantScopeForProgrammer(programmer)
+    );
+    if (!tenantScope) {
+      throw new Error("Unable to resolve CM tenant scope for the selected Media Company.");
+    }
+    queryContext.tenantScope = tenantScope;
+    queryContext.filterMode = resolveCmHealthFilterMode(queryContext);
+    queryContext.controllerSelectionKey = buildCmHealthWorkspaceBaseSelectionKey(queryContext);
+    queryContext.selectionKey = buildCmHealthWorkspaceSelectionKey(queryContext);
+
+    await ensureCmUsageWarmStateForProgrammer(programmer, cmService, {
+      tenantScope,
+      forceRefresh: options?.forceRefresh === true,
+      freshLeewayMs: 45 * 1000,
+    }).catch(() => null);
+
+    cmHealthContext = {
+      programmer,
+      services,
+      cmService,
+      tenantScope,
+    };
+  } catch (error) {
+    const contextError = error instanceof Error ? error.message : String(error);
+    const sectionErrors = {
+      backbone: contextError,
+      platform: contextError,
+      applications: contextError,
+      channel: contextError,
+      mvpd: contextError,
+      concurrency: contextError,
+      activity: contextError,
+    };
+    return finalizeReport(
+      buildCmHealthDashboardReportPayload(
+        queryContext,
+        {
+          sectionErrors,
+        },
+        {
+          premiumPanelRequestToken,
+          workspaceContextKey,
+          error: contextError,
+        }
+      )
+    );
+  }
+
+  const filterMode = String(queryContext.filterMode || resolveCmHealthFilterMode(queryContext)).trim();
+  const useMvpdScopedPressure = filterMode === "mvpd" && normalizeEsmHealthFilterList(queryContext.mvpdIds).length > 0;
+  const requestPromises = {
+    backbone: fetchCmHealthJson(queryContext, buildCmHealthBackbonePath(queryContext), {
+      tenantScope: cmHealthContext.tenantScope,
+      mvpdIds: filterMode === "mvpd" ? queryContext.mvpdIds : [],
+      datasetKey: "backbone",
+      contextLabel: "overview",
+    }),
+    mvpdBreakdown: fetchCmHealthJson(queryContext, CM_HEALTH_MVPD_APPLICATION_DAILY_PATH, {
+      tenantScope: cmHealthContext.tenantScope,
+      mvpdIds: filterMode === "mvpd" ? queryContext.mvpdIds : [],
+      datasetKey: "mvpd-breakdown",
+      contextLabel: "mvpd/platform/application daily",
+    }),
+    channelBreakdown: fetchCmHealthJson(queryContext, CM_HEALTH_CHANNEL_APPLICATION_DAILY_PATH, {
+      tenantScope: cmHealthContext.tenantScope,
+      datasetKey: "channel-breakdown",
+      contextLabel: "channel/platform/application daily",
+    }),
+    concurrency: fetchCmHealthJson(
+      queryContext,
+      useMvpdScopedPressure ? CM_HEALTH_CONCURRENCY_MVPD_DAILY_PATH : CM_HEALTH_CONCURRENCY_DAILY_PATH,
+      {
+        tenantScope: cmHealthContext.tenantScope,
+        mvpdIds: useMvpdScopedPressure ? queryContext.mvpdIds : [],
+        datasetKey: "concurrency",
+        contextLabel: "concurrency daily",
+      }
+    ),
+    activity: fetchCmHealthJson(
+      queryContext,
+      useMvpdScopedPressure ? CM_HEALTH_ACTIVITY_MVPD_DAILY_PATH : CM_HEALTH_ACTIVITY_DAILY_PATH,
+      {
+        tenantScope: cmHealthContext.tenantScope,
+        mvpdIds: useMvpdScopedPressure ? queryContext.mvpdIds : [],
+        datasetKey: "activity",
+        contextLabel: "activity daily",
+      }
+    ),
+  };
+
+  const [backboneResult, mvpdBreakdownResult, channelBreakdownResult, concurrencyResult, activityResult] = await Promise.all([
+    requestPromises.backbone,
+    requestPromises.mvpdBreakdown,
+    requestPromises.channelBreakdown,
+    requestPromises.concurrency,
+    requestPromises.activity,
+  ]);
+
+  const sectionErrors = {};
+  const sectionMessages = {};
+  const ignoredSections = [];
+
+  const backboneRows = backboneResult.ok ? cmHealthFilterUsageRows(backboneResult.rows, queryContext) : [];
+  const backboneSeries = backboneResult.ok ? aggregateCmHealthBackboneRows(backboneRows, queryContext.granularity) : [];
+  if (!backboneResult.ok) {
+    sectionErrors.backbone = String(backboneResult.error || "Unable to load CM HEALTH overview data.").trim();
+  }
+  const totalStartedSessions = backboneSeries.reduce((sum, entry) => sum + Number(entry?.startedSessions || 0), 0);
+
+  let platformRows = [];
+  let applicationRows = [];
+  let channelRows = [];
+  let mvpdRows = [];
+  let concurrencyRows = [];
+  let activityRows = [];
+
+  const mvpdBreakdownRows = mvpdBreakdownResult.ok
+    ? cmHealthFilterUsageRows(mvpdBreakdownResult.rows, queryContext, {
+        channels: filterMode === "channel" ? [] : queryContext.channels,
+      })
+    : [];
+  const channelBreakdownRows = channelBreakdownResult.ok
+    ? cmHealthFilterUsageRows(channelBreakdownResult.rows, queryContext, {
+        mvpdIds: filterMode === "mvpd" ? [] : queryContext.mvpdIds,
+      })
+    : [];
+
+  if (!mvpdBreakdownResult.ok) {
+    const breakdownError = String(mvpdBreakdownResult.error || "Unable to load CM HEALTH MVPD/platform/application data.").trim();
+    sectionErrors.mvpd = breakdownError;
+    if (filterMode !== "channel") {
+      sectionErrors.platform = breakdownError;
+      sectionErrors.applications = breakdownError;
+    }
+  }
+  if (!channelBreakdownResult.ok) {
+    const breakdownError = String(channelBreakdownResult.error || "Unable to load CM HEALTH channel/platform/application data.").trim();
+    sectionErrors.channel = breakdownError;
+    if (filterMode === "channel") {
+      sectionErrors.platform = breakdownError;
+      sectionErrors.applications = breakdownError;
+    }
+  }
+
+  const mapApplicationRow = (entry) => ({
+    ...entry,
+    applicationId: String(entry?.["application-id"] || "").trim(),
+    applicationName: String(entry?.application || entry?.["application-name"] || "").trim(),
+    applicationLabel: entry.label,
+  });
+
+  if (filterMode === "channel") {
+    ignoredSections.push("mvpd");
+    sectionMessages.mvpd =
+      "MVPD breakdown is unavailable while Channel focus is active because CMU does not expose a channel x MVPD usage slice.";
+    if (channelBreakdownResult.ok) {
+      channelRows = aggregateCmHealthBreakdownRows(channelBreakdownRows, ["channel"], CM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          channel: entry.label,
+        }),
+      });
+      platformRows = aggregateCmHealthBreakdownRows(channelBreakdownRows, ["platform"], CM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          platform: entry.label,
+        }),
+      });
+      applicationRows = aggregateCmHealthBreakdownRows(
+        channelBreakdownRows,
+        ["application-id", "application"],
+        CM_HEALTH_TOP_ROW_LIMIT,
+        {
+          buildLabel: (values) =>
+            [String(values?.application || "").trim(), String(values?.["application-id"] || "").trim()]
+              .filter(Boolean)
+              .join(" · "),
+          mapRow: mapApplicationRow,
+        }
+      );
+    }
+  } else {
+    if (mvpdBreakdownResult.ok) {
+      mvpdRows = aggregateCmHealthBreakdownRows(mvpdBreakdownRows, ["mvpd"], CM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          mvpd: entry.label,
+        }),
+      });
+      platformRows = aggregateCmHealthBreakdownRows(mvpdBreakdownRows, ["platform"], CM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          platform: entry.label,
+        }),
+      });
+      applicationRows = aggregateCmHealthBreakdownRows(
+        mvpdBreakdownRows,
+        ["application-id", "application"],
+        CM_HEALTH_TOP_ROW_LIMIT,
+        {
+          buildLabel: (values) =>
+            [String(values?.application || "").trim(), String(values?.["application-id"] || "").trim()]
+              .filter(Boolean)
+              .join(" · "),
+          mapRow: mapApplicationRow,
+        }
+      );
+    }
+    if (filterMode === "mvpd") {
+      ignoredSections.push("channel");
+      sectionMessages.channel =
+        "Channel breakdown is unavailable while MVPD focus is active because CMU does not expose an MVPD x channel usage slice.";
+    } else if (channelBreakdownResult.ok) {
+      channelRows = aggregateCmHealthBreakdownRows(channelBreakdownRows, ["channel"], CM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          channel: entry.label,
+        }),
+      });
+    }
+  }
+
+  if (!concurrencyResult.ok) {
+    sectionErrors.concurrency = String(concurrencyResult.error || "Unable to load CM HEALTH concurrency levels.").trim();
+  } else {
+    if (!useMvpdScopedPressure && (filterMode === "platform" || filterMode === "channel")) {
+      sectionMessages.concurrency =
+        "Showing tenant-wide concurrency pressure because CMU exposes concurrency level by tenant or MVPD, not by platform or channel.";
+    }
+    const filteredConcurrencyRows = cmHealthFilterUsageRows(concurrencyResult.rows, queryContext, {
+      mvpdIds: useMvpdScopedPressure ? queryContext.mvpdIds : [],
+      platforms: [],
+      channels: [],
+    });
+    const totalUsers = filteredConcurrencyRows.reduce((sum, row) => sum + getCmHealthMetricNumber(row, "users"), 0);
+    concurrencyRows = addCmHealthUserShare(
+      aggregateCmHealthUserDistributionRows(filteredConcurrencyRows, "concurrency-level", CM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          concurrencyLevel: entry.label,
+        }),
+      }),
+      totalUsers
+    );
+  }
+
+  if (!activityResult.ok) {
+    sectionErrors.activity = String(activityResult.error || "Unable to load CM HEALTH activity levels.").trim();
+  } else {
+    if (!useMvpdScopedPressure && (filterMode === "platform" || filterMode === "channel")) {
+      sectionMessages.activity =
+        "Showing tenant-wide activity pressure because CMU exposes activity level by tenant or MVPD, not by platform or channel.";
+    }
+    const filteredActivityRows = cmHealthFilterUsageRows(activityResult.rows, queryContext, {
+      mvpdIds: useMvpdScopedPressure ? queryContext.mvpdIds : [],
+      platforms: [],
+      channels: [],
+    });
+    const totalUsers = filteredActivityRows.reduce((sum, row) => sum + getCmHealthMetricNumber(row, "users"), 0);
+    activityRows = addCmHealthUserShare(
+      aggregateCmHealthUserDistributionRows(filteredActivityRows, "activity-level", CM_HEALTH_TOP_ROW_LIMIT, {
+        mapRow: (entry) => ({
+          ...entry,
+          activityLevel: entry.label,
+        }),
+      }),
+      totalUsers
+    );
+  }
+
+  return finalizeReport(
+    buildCmHealthDashboardReportPayload(
+      queryContext,
+      {
+        backboneSeries,
+        platformRows: addCmHealthTrafficShare(platformRows, totalStartedSessions),
+        applicationRows: addCmHealthTrafficShare(applicationRows, totalStartedSessions),
+        channelRows: addCmHealthTrafficShare(channelRows, totalStartedSessions),
+        mvpdRows: addCmHealthTrafficShare(mvpdRows, totalStartedSessions),
+        concurrencyRows,
+        activityRows,
+        sectionErrors,
+        sectionMessages,
+        ignoredSections,
+      },
+      {
+        premiumPanelRequestToken,
+        workspaceContextKey,
+        error: "One or more CM HEALTH datasets failed to load.",
+      }
+    )
+  );
+}
+
 function esmHealthWorkspaceGetSelectionContext(programmer = null) {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
   return buildEsmHealthDashboardQueryContext({
@@ -48476,6 +50092,427 @@ function ensureEsmHealthWorkspaceTabWatcher() {
     }
   });
   state.esmHealthWorkspaceTabWatcherBound = true;
+}
+
+function cmHealthWorkspaceGetSelectionContext(programmer = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  return buildCmHealthDashboardQueryContext({
+    programmerId: String(resolvedProgrammer?.programmerId || "").trim(),
+    programmerName: firstNonEmptyString([resolvedProgrammer?.programmerName, resolvedProgrammer?.mediaCompanyName]),
+  });
+}
+
+function cmHealthWorkspaceGetSelectedControllerStatePayload(programmer = null, selectionContext = null) {
+  const context =
+    selectionContext && typeof selectionContext === "object"
+      ? selectionContext
+      : cmHealthWorkspaceGetSelectionContext(programmer);
+  const premiumContext = getHealthWorkspacePremiumContextSnapshot(String(context?.programmerId || "").trim());
+  const premiumPanelRequestToken = Math.max(0, Number(state.premiumPanelRequestToken || 0));
+  const services =
+    premiumContext?.services ||
+    getCurrentPremiumAppsSnapshot(String(context?.programmerId || "").trim()) ||
+    getRuntimePremiumServicesSeed(String(context?.programmerId || "").trim()) ||
+    null;
+  const matchedTenants = Array.isArray(services?.cm?.matchedTenants) ? services.cm.matchedTenants : [];
+  return {
+    controllerOnline: true,
+    cmHealthReady: Boolean(context?.programmerId && premiumContext?.hydrationReady && shouldShowCmService(services?.cm)),
+    programmerId: String(context?.programmerId || "").trim(),
+    programmerName: String(context?.programmerName || "").trim(),
+    mediaCompany: String(context?.mediaCompany || context?.programmerId || "").trim(),
+    tenantScope: resolveCmUsageTenantScopeValue(context?.tenantScope),
+    matchedTenants: cloneJsonLikeValue(matchedTenants, []),
+    mvpdIds: normalizeEsmHealthFilterList(context?.mvpdIds),
+    platforms: normalizeEsmHealthFilterList(context?.platforms),
+    channels: normalizeEsmHealthFilterList(context?.channels),
+    requestorHint: String(context?.requestorHint || "").trim(),
+    environmentKey: String(context?.environmentKey || "").trim(),
+    environmentLabel: String(context?.environmentLabel || "").trim(),
+    selectionKey: String(context?.controllerSelectionKey || context?.selectionKey || "").trim(),
+    defaultStart: String(context?.start || "").trim(),
+    defaultEnd: String(context?.end || "").trim(),
+    defaultGranularity: normalizeEsmHealthGranularity(context?.granularity || CM_HEALTH_DEFAULT_GRANULARITY),
+    timezoneLabel: String(context?.timezoneLabel || "PST effective").trim(),
+    premiumPanelRequestToken,
+    workspaceContextKey: buildCmHealthWorkspaceControllerContextKey(context, premiumPanelRequestToken),
+    controllerStateVersion: nextEsmWorkspaceControllerStateVersion(),
+    updatedAt: Date.now(),
+  };
+}
+
+function cmHealthWorkspaceGetWorkspaceUrl() {
+  return chrome.runtime.getURL(CM_HEALTH_WORKSPACE_PATH);
+}
+
+function cmHealthWorkspaceIsWorkspaceTab(tabLike) {
+  return String(tabLike?.url || "").startsWith(cmHealthWorkspaceGetWorkspaceUrl());
+}
+
+function cmHealthWorkspaceBindWorkspaceTab(windowId, tabId) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId > 0 && normalizedTabId > 0) {
+    state.cmHealthWorkspaceTabIdByWindowId.set(normalizedWindowId, normalizedTabId);
+  }
+  if (normalizedWindowId > 0) {
+    state.cmHealthWorkspaceWindowId = normalizedWindowId;
+  }
+  if (normalizedTabId > 0) {
+    state.cmHealthWorkspaceTabId = normalizedTabId;
+  }
+}
+
+function cmHealthWorkspaceUnbindWorkspaceTab(tabId) {
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedTabId > 0) {
+    for (const [windowId, mappedTabId] of state.cmHealthWorkspaceTabIdByWindowId.entries()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        state.cmHealthWorkspaceTabIdByWindowId.delete(windowId);
+      }
+    }
+  }
+  if (!normalizedTabId || Number(state.cmHealthWorkspaceTabId || 0) === normalizedTabId) {
+    state.cmHealthWorkspaceTabId = 0;
+    state.cmHealthWorkspaceWindowId = 0;
+  }
+}
+
+function cmHealthWorkspaceGetBoundWorkspaceTabId(windowId) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId > 0) {
+    const mapped = Number(state.cmHealthWorkspaceTabIdByWindowId.get(normalizedWindowId) || 0);
+    if (mapped > 0) {
+      return mapped;
+    }
+  }
+  return Number(state.cmHealthWorkspaceTabId || 0);
+}
+
+async function cmHealthWorkspaceSendWorkspaceMessage(event, payload = {}, options = {}) {
+  const targetWindowId = Number(options.targetWindowId || 0);
+  try {
+    const message = {
+      type: CM_HEALTH_WORKSPACE_MESSAGE_TYPE,
+      channel: "workspace-event",
+      event: String(event || ""),
+      payload,
+    };
+    if (targetWindowId > 0) {
+      message.targetWindowId = targetWindowId;
+    }
+    await chrome.runtime.sendMessage(message);
+  } catch {
+    // Ignore when workspace listener is inactive.
+  }
+}
+
+function cmHealthWorkspaceBroadcastControllerState(programmer = null, selectionContext = null, targetWindowId = 0) {
+  const resolvedWindowId = Number(targetWindowId || 0) || Number(state.cmHealthWorkspaceWindowId || 0);
+  void cmHealthWorkspaceSendWorkspaceMessage(
+    "controller-state",
+    cmHealthWorkspaceGetSelectedControllerStatePayload(programmer, selectionContext),
+    {
+      targetWindowId: resolvedWindowId,
+    }
+  );
+}
+
+async function cmHealthWorkspaceEnsureWorkspaceTab(options = {}) {
+  ensureCmHealthWorkspaceRuntimeListener();
+  ensureCmHealthWorkspaceTabWatcher();
+  const shouldActivate = options.activate !== false;
+  const requestedWindowId = Number(options.windowId || 0);
+  const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
+  const useWindowFilter = targetWindowId > 0;
+  let workspaceTab = null;
+
+  const boundTabId = cmHealthWorkspaceGetBoundWorkspaceTabId(targetWindowId);
+  if (boundTabId > 0) {
+    try {
+      const existing = await chrome.tabs.get(boundTabId);
+      if (cmHealthWorkspaceIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
+        workspaceTab = existing;
+      }
+    } catch {
+      cmHealthWorkspaceUnbindWorkspaceTab(boundTabId);
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    try {
+      const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
+      workspaceTab = allTabs.find((tab) => cmHealthWorkspaceIsWorkspaceTab(tab)) || null;
+    } catch {
+      workspaceTab = null;
+    }
+  }
+
+  if (!workspaceTab) {
+    workspaceTab = await chrome.tabs.create({
+      url: cmHealthWorkspaceGetWorkspaceUrl(),
+      active: shouldActivate,
+      ...(useWindowFilter ? { windowId: targetWindowId } : {}),
+    });
+  } else if (shouldActivate && workspaceTab.id) {
+    try {
+      workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
+      if (Number(workspaceTab?.windowId || 0) > 0) {
+        await chrome.windows.update(Number(workspaceTab.windowId), { focused: true });
+      }
+    } catch {
+      // Ignore activation failures.
+    }
+  }
+
+  cmHealthWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  return workspaceTab;
+}
+
+function cmHealthWorkspaceTrimCacheMaps(limit = 40) {
+  const maxSize = Math.max(10, Number(limit || 40));
+  while (state.cmHealthWorkspaceLastReportBySelectionKey.size > maxSize) {
+    const firstKey = state.cmHealthWorkspaceLastReportBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.cmHealthWorkspaceLastReportBySelectionKey.delete(firstKey);
+  }
+  while (state.cmHealthWorkspaceLastQueryContextBySelectionKey.size > maxSize) {
+    const firstKey = state.cmHealthWorkspaceLastQueryContextBySelectionKey.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    state.cmHealthWorkspaceLastQueryContextBySelectionKey.delete(firstKey);
+  }
+}
+
+function cmHealthWorkspaceStoreLatestReport(reportPayload = null) {
+  if (!reportPayload || typeof reportPayload !== "object") {
+    return "";
+  }
+  const selectionKey = firstNonEmptyString([
+    reportPayload.selectionKey,
+    buildCmHealthWorkspaceSelectionKey(reportPayload.queryContext || null),
+  ]);
+  if (!selectionKey) {
+    return "";
+  }
+  const clonedReport = cloneJsonLikeValue(reportPayload, null);
+  if (clonedReport && typeof clonedReport === "object") {
+    state.cmHealthWorkspaceLastReportBySelectionKey.set(selectionKey, clonedReport);
+  }
+  const queryContext = cloneJsonLikeValue(reportPayload?.queryContext, null);
+  if (queryContext && typeof queryContext === "object") {
+    state.cmHealthWorkspaceLastQueryContextBySelectionKey.set(selectionKey, queryContext);
+  }
+  state.cmHealthWorkspaceLastSelectionKey = selectionKey;
+  cmHealthWorkspaceTrimCacheMaps(40);
+  return selectionKey;
+}
+
+function cmHealthWorkspaceGetLatestReport(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (normalizedSelectionKey && state.cmHealthWorkspaceLastReportBySelectionKey.has(normalizedSelectionKey)) {
+    return cloneJsonLikeValue(state.cmHealthWorkspaceLastReportBySelectionKey.get(normalizedSelectionKey), null);
+  }
+  if (normalizedSelectionKey) {
+    for (const report of state.cmHealthWorkspaceLastReportBySelectionKey.values()) {
+      const reportBaseSelectionKey = firstNonEmptyString([
+        report?.queryContext?.controllerSelectionKey,
+        buildCmHealthWorkspaceBaseSelectionKey(report?.queryContext || null),
+      ]);
+      if (reportBaseSelectionKey && reportBaseSelectionKey === normalizedSelectionKey) {
+        return cloneJsonLikeValue(report, null);
+      }
+    }
+  }
+  const fallbackSelectionKey = String(state.cmHealthWorkspaceLastSelectionKey || "").trim();
+  if (fallbackSelectionKey && state.cmHealthWorkspaceLastReportBySelectionKey.has(fallbackSelectionKey)) {
+    return cloneJsonLikeValue(state.cmHealthWorkspaceLastReportBySelectionKey.get(fallbackSelectionKey), null);
+  }
+  for (const report of state.cmHealthWorkspaceLastReportBySelectionKey.values()) {
+    return cloneJsonLikeValue(report, null);
+  }
+  return null;
+}
+
+function cmHealthWorkspaceGetLatestQueryContext(selectionKey = "") {
+  const normalizedSelectionKey = String(selectionKey || "").trim();
+  if (normalizedSelectionKey && state.cmHealthWorkspaceLastQueryContextBySelectionKey.has(normalizedSelectionKey)) {
+    return cloneJsonLikeValue(state.cmHealthWorkspaceLastQueryContextBySelectionKey.get(normalizedSelectionKey), null);
+  }
+  if (normalizedSelectionKey) {
+    for (const queryContext of state.cmHealthWorkspaceLastQueryContextBySelectionKey.values()) {
+      const queryBaseSelectionKey = firstNonEmptyString([
+        queryContext?.controllerSelectionKey,
+        buildCmHealthWorkspaceBaseSelectionKey(queryContext || null),
+      ]);
+      if (queryBaseSelectionKey && queryBaseSelectionKey === normalizedSelectionKey) {
+        return cloneJsonLikeValue(queryContext, null);
+      }
+    }
+  }
+  const fallbackSelectionKey = String(state.cmHealthWorkspaceLastSelectionKey || "").trim();
+  if (fallbackSelectionKey && state.cmHealthWorkspaceLastQueryContextBySelectionKey.has(fallbackSelectionKey)) {
+    return cloneJsonLikeValue(state.cmHealthWorkspaceLastQueryContextBySelectionKey.get(fallbackSelectionKey), null);
+  }
+  for (const queryContext of state.cmHealthWorkspaceLastQueryContextBySelectionKey.values()) {
+    return cloneJsonLikeValue(queryContext, null);
+  }
+  return null;
+}
+
+async function handleCmHealthWorkspaceAction(message, sender = null) {
+  const action = String(message?.action || "").trim().toLowerCase();
+  const senderWindowId = Number(sender?.tab?.windowId || 0);
+  const senderTabId = Number(sender?.tab?.id || 0);
+  const mappedSenderTabId =
+    senderWindowId > 0 ? Number(state.cmHealthWorkspaceTabIdByWindowId.get(senderWindowId) || 0) : 0;
+  if (senderWindowId > 0 && senderTabId > 0 && mappedSenderTabId > 0 && senderTabId !== mappedSenderTabId) {
+    return { ok: false, error: "This is not the bound CM HEALTH workspace tab for the window." };
+  }
+  if (senderWindowId > 0 && senderTabId > 0 && (!mappedSenderTabId || mappedSenderTabId <= 0)) {
+    cmHealthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+  }
+
+  if (action === "workspace-ready") {
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = cmHealthWorkspaceGetSelectionContext(selectedProgrammer);
+    if (senderWindowId > 0) {
+      cmHealthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
+    }
+    cmHealthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
+    const latestReport = cmHealthWorkspaceGetLatestReport(selectionContext.controllerSelectionKey);
+    if (latestReport) {
+      void cmHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId: senderWindowId });
+    }
+    return { ok: true };
+  }
+
+  if (action === "open-workspace") {
+    const workspaceTab = await cmHealthWorkspaceEnsureWorkspaceTab({
+      activate: true,
+      windowId: senderWindowId || undefined,
+    });
+    const targetWindowId = Number(workspaceTab?.windowId || senderWindowId || state.cmHealthWorkspaceWindowId || 0);
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = cmHealthWorkspaceGetSelectionContext(selectedProgrammer);
+    cmHealthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, targetWindowId);
+    const latestReport = cmHealthWorkspaceGetLatestReport(selectionContext.controllerSelectionKey);
+    if (latestReport) {
+      void cmHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId });
+    }
+    return { ok: true };
+  }
+
+  if (action === "run-dashboard") {
+    const queryContext = buildCmHealthDashboardQueryContext({
+      ...(message?.queryContext && typeof message.queryContext === "object" ? message.queryContext : {}),
+      requestSource: "cm-health-workspace-run",
+    });
+    const result = await runCmHealthDashboardForSelection(queryContext, {
+      openWorkspace: true,
+      activateWorkspace: false,
+      targetWindowId: senderWindowId,
+    });
+    return result?.ok || result?.partial
+      ? { ok: true }
+      : { ok: false, error: String(result?.error || "Unable to load CM HEALTH dashboard.").trim() };
+  }
+
+  if (action === "refresh-latest") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const queryContext = cmHealthWorkspaceGetLatestQueryContext(selectionKey);
+    if (!queryContext || typeof queryContext !== "object") {
+      return { ok: false, error: "No previous CM HEALTH query context is available to refresh." };
+    }
+    const refreshed = await runCmHealthDashboardForSelection(
+      rebaseCmHealthDashboardQueryContextForCurrentSelection(queryContext, {
+        requestSource: "cm-health-workspace-refresh",
+      }),
+      {
+        openWorkspace: true,
+        activateWorkspace: false,
+        targetWindowId: senderWindowId,
+      }
+    );
+    return refreshed?.ok || refreshed?.partial
+      ? { ok: true }
+      : { ok: false, error: String(refreshed?.error || "Unable to refresh CM HEALTH dashboard.").trim() };
+  }
+
+  if (action === "clear-all") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    if (selectionKey) {
+      state.cmHealthWorkspaceLastReportBySelectionKey.delete(selectionKey);
+      state.cmHealthWorkspaceLastQueryContextBySelectionKey.delete(selectionKey);
+      if (state.cmHealthWorkspaceLastSelectionKey === selectionKey) {
+        state.cmHealthWorkspaceLastSelectionKey = "";
+      }
+    } else {
+      state.cmHealthWorkspaceLastReportBySelectionKey.clear();
+      state.cmHealthWorkspaceLastQueryContextBySelectionKey.clear();
+      state.cmHealthWorkspaceLastSelectionKey = "";
+    }
+    const targetWindowId = Number(senderWindowId || state.cmHealthWorkspaceWindowId || 0);
+    void cmHealthWorkspaceSendWorkspaceMessage("workspace-clear", {}, { targetWindowId });
+    return { ok: true };
+  }
+
+  return { ok: false, error: `Unsupported CM HEALTH workspace action: ${action}` };
+}
+
+function ensureCmHealthWorkspaceRuntimeListener() {
+  if (state.cmHealthWorkspaceRuntimeListenerBound) {
+    return;
+  }
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!CM_HEALTH_WORKSPACE_MESSAGE_TYPES.has(String(message?.type || "")) || message?.channel !== "workspace-action") {
+      return false;
+    }
+    void handleCmHealthWorkspaceAction(message, sender)
+      .then((result) => {
+        sendResponse(result && typeof result === "object" ? result : { ok: true });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      });
+    return true;
+  });
+  state.cmHealthWorkspaceRuntimeListenerBound = true;
+}
+
+function ensureCmHealthWorkspaceTabWatcher() {
+  if (state.cmHealthWorkspaceTabWatcherBound) {
+    return;
+  }
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    cmHealthWorkspaceUnbindWorkspaceTab(tabId);
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    const normalizedTabId = Number(tabId || 0);
+    if (!normalizedTabId || !changeInfo?.url) {
+      return;
+    }
+    if (cmHealthWorkspaceIsWorkspaceTab(tab)) {
+      cmHealthWorkspaceBindWorkspaceTab(tab?.windowId, normalizedTabId);
+      return;
+    }
+    const boundTabId = Number(state.cmHealthWorkspaceTabId || 0);
+    let isMappedTab = false;
+    for (const mappedTabId of state.cmHealthWorkspaceTabIdByWindowId.values()) {
+      if (Number(mappedTabId || 0) === normalizedTabId) {
+        isMappedTab = true;
+        break;
+      }
+    }
+    if (isMappedTab || normalizedTabId === boundTabId) {
+      cmHealthWorkspaceUnbindWorkspaceTab(normalizedTabId);
+    }
+  });
+  state.cmHealthWorkspaceTabWatcherBound = true;
 }
 
 function buildHealthWorkspaceSelectionKey(context = null) {
@@ -51593,44 +53630,17 @@ function renderCmServiceContent(programmer, resolvedCmService, section, contentE
     getCmTenantScopeForProgrammer(programmer)
   );
   const controllerWindowId = Number(options?.controllerWindowId || section?.__underparCmState?.controllerWindowId || 0);
-  const bundleRecords = cmBuildWorkspaceRecordsFromBundles(bundles);
-  const correlationRecords = cmBuildRestV2CorrelationRecords(programmer);
-  const credentialHints = cmExtractCredentialHintsFromBundles(bundles);
-  const credentialRecords = cmBuildCredentialHintRecords(credentialHints, programmer);
-  const records = [...correlationRecords, ...bundleRecords, ...credentialRecords];
-  const correlationCardRecords = records.filter((record) => record.kind === "correlation");
-  const tenantRecords = records.filter((record) => record.kind === "tenant");
-  const applicationRecords = records.filter((record) => record.kind === "applications");
-  const credentialHintRecords = records.filter((record) => record.kind === "credential");
-  const policyRecords = records.filter((record) => record.kind === "policies");
-  const usageRecords = records.filter((record) => record.kind === "usage");
-  const groupDefinitions = [
-    {
-      key: "correlation",
-      label: "MVPD Login History",
-      records: correlationCardRecords,
-    },
-    {
-      key: "tenants",
-      label: "CM Tenants",
-      records: tenantRecords,
-    },
-    {
-      key: "applications",
-      label: "CM Applications",
-      records: applicationRecords,
-    },
-    {
-      key: "credentials",
-      label: "CM Credential Hints",
-      records: credentialHintRecords,
-    },
-    {
-      key: "policies",
-      label: "CM Policies",
-      records: policyRecords,
-    },
-  ];
+  const workspaceDataset = cmBuildWorkspaceDataset(programmer, resolvedCmService, bundles, {
+    tenantScope,
+  });
+  const records = workspaceDataset.records.slice();
+  const usageRecords = workspaceDataset.groupDefinitions.find((group) => group.key === "usage")?.records || [];
+  const groupDefinitions = workspaceDataset.groupDefinitions
+    .filter((group) => group.key !== "usage")
+    .map((group) => ({
+      ...group,
+      records: Array.isArray(group.records) ? group.records.slice() : [],
+    }));
   const hiddenCmGroupKeys = new Set(["tenants"]);
   const groupRecordsByKey = new Map();
   const groupChildRecordIdsByGroupRecordId = new Map();
@@ -51650,7 +53660,7 @@ function renderCmServiceContent(programmer, resolvedCmService, section, contentE
   const correlationGroup =
     groupDefinitions.find((group) => group.key === "correlation") || {
       key: "correlation",
-      label: "MVPD Login History",
+      label: "Live Cross References",
       records: [],
     };
   const correlationGroupRecord = groupRecordsByKey.get(correlationGroup.key);
@@ -58026,22 +60036,30 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
   const context = getHrContextSummary(programmer);
   const selectionContext = healthWorkspaceGetSelectionContext(programmer);
   const premiumContext = getHealthWorkspacePremiumContextSnapshot(String(selectionContext?.programmerId || "").trim());
+  const services =
+    premiumContext?.services ||
+    getCurrentPremiumAppsSnapshot(String(selectionContext?.programmerId || "").trim()) ||
+    getRuntimePremiumServicesSeed(String(selectionContext?.programmerId || "").trim()) ||
+    null;
   const adobePassWorkflowActive =
     state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);
   const esmReady = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && premiumContext?.esmAvailable);
+  const cmReady = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && shouldShowCmService(services?.cm));
   const healthReady = Boolean(selectionContext?.programmerId && selectionContext?.requestorId && premiumContext?.hydrationReady);
   const adobePassOrgRequiredLabel = "Adobe Pass org required";
   const healthActionGroupLabel = !selectionContext?.programmerId
-    ? "HEALTH actions. Select a Media Company and RequestorId to unlock ESM HEALTH and HEALTH SPLUNK."
+    ? "HEALTH actions. Select a Media Company and RequestorId to unlock ESM HEALTH, CM HEALTH, and HEALTH SPLUNK."
     : !adobePassWorkflowActive
-      ? `HEALTH actions. ${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile to unlock ESM HEALTH and HEALTH SPLUNK.`
+      ? `HEALTH actions. ${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile to unlock ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.`
       : !premiumContext?.hydrationReady
         ? `HEALTH actions. Preparing HEALTH workspaces for ${selectionContext.programmerName || selectionContext.programmerId}.`
         : healthReady
           ? `HEALTH actions for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
+          : esmReady || cmReady
+            ? `HEALTH actions for ${selectionContext.programmerName || selectionContext.programmerId} in ${selectionContext.environmentLabel}. Select a RequestorId to unlock HEALTH SPLUNK.`
           : context.hasProgrammerContext
             ? "HEALTH actions. Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH."
-            : "HEALTH actions. Select a Media Company and RequestorId to unlock ESM HEALTH and HEALTH SPLUNK.";
+            : "HEALTH actions. Select a Media Company and RequestorId to unlock ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.";
 
   return `
     <article class="metadata-item hr-health-status-value">
@@ -58060,6 +60078,26 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
             )}"
             ${esmReady ? "" : "disabled"}
           >ESM</button>
+          <button
+            type="button"
+            class="hr-health-action-btn hr-health-action-btn--secondary"
+            data-health-action="cm"
+            title="${escapeHtml(
+              !premiumContext?.hydrationReady
+                ? "UnderPAR is still hydrating the CM HEALTH context"
+                : cmReady
+                  ? `Open CM HEALTH dashboard for ${selectionContext.programmerName || selectionContext.programmerId}`
+                  : "Selected Media Company does not have a Concurrency Monitoring tenant match"
+            )}"
+            aria-label="${escapeHtml(
+              !premiumContext?.hydrationReady
+                ? "UnderPAR is still hydrating the CM HEALTH context"
+                : cmReady
+                  ? `Open CM HEALTH dashboard for ${selectionContext.programmerName || selectionContext.programmerId}`
+                  : "Selected Media Company does not have a Concurrency Monitoring tenant match"
+            )}"
+            ${cmReady ? "" : "disabled"}
+          >CM</button>
           <button
             type="button"
             class="hr-health-action-btn hr-health-action-btn--accent"
@@ -58131,6 +60169,48 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
       return;
     }
     setStatus(String(report?.error || "Unable to load ESM HEALTH dashboard."), "error");
+    return;
+  }
+
+  if (normalizedAction === "cm") {
+    const programmerId = String(programmer?.programmerId || "").trim();
+    const premiumContext = await ensureHealthWorkspacePremiumContext(programmerId, {
+      controllerReason: "hr-health-cm",
+      requestToken: Math.max(0, Number(state.premiumPanelRequestToken || 0)),
+    });
+    const services =
+      premiumContext?.services ||
+      getCurrentPremiumAppsSnapshot(programmerId) ||
+      getRuntimePremiumServicesSeed(programmerId) ||
+      null;
+    const queryContext = buildCmHealthDashboardQueryContext({
+      programmerId,
+      programmerName: String(programmer?.programmerName || programmer?.mediaCompanyName || "").trim(),
+      requestSource: "hr-health-cm",
+    });
+    if (!queryContext.programmerId) {
+      setStatus("Select a Media Company before running CM HEALTH.", "error");
+      return;
+    }
+    if (!shouldShowCmService(services?.cm)) {
+      setStatus("Selected Media Company does not have a Concurrency Monitoring tenant match.", "error");
+      return;
+    }
+    setStatus(`Loading CM HEALTH for ${buildCmHealthStatusMessage(queryContext)}...`);
+    const report = await runCmHealthDashboardForSelection(queryContext, {
+      openWorkspace: true,
+      activateWorkspace: true,
+      requestSource: "hr-health-cm",
+    });
+    if (report?.ok === true) {
+      setStatus(`Loaded CM HEALTH dashboard (${Number(report?.loadedSections || 0)}/${Number(report?.totalSections || 0)} sections).`, "success");
+      return;
+    }
+    if (report?.partial === true) {
+      setStatus(`Loaded CM HEALTH dashboard with partial data (${Number(report?.loadedSections || 0)}/${Number(report?.totalSections || 0)} sections).`, "success");
+      return;
+    }
+    setStatus(String(report?.error || "Unable to load CM HEALTH dashboard."), "error");
     return;
   }
 
@@ -59109,6 +61189,12 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.esmHealthWorkspaceLastSelectionKey = "";
   state.esmHealthWorkspaceLastReportBySelectionKey.clear();
   state.esmHealthWorkspaceLastQueryContextBySelectionKey.clear();
+  state.cmHealthWorkspaceTabId = 0;
+  state.cmHealthWorkspaceWindowId = 0;
+  state.cmHealthWorkspaceTabIdByWindowId.clear();
+  state.cmHealthWorkspaceLastSelectionKey = "";
+  state.cmHealthWorkspaceLastReportBySelectionKey.clear();
+  state.cmHealthWorkspaceLastQueryContextBySelectionKey.clear();
   state.healthWorkspaceTabId = 0;
   state.healthWorkspaceWindowId = 0;
   state.healthWorkspaceTabIdByWindowId.clear();
@@ -79299,6 +81385,7 @@ async function cmDownloadCsvForCard(cmState, record, card, sortRule, requestToke
   );
   const hasUrlOverrideDiffersFromRecord =
     Boolean(requestUrlOverride) && requestUrlOverride !== recordRequestUrl;
+  const recordKind = String(record?.kind || "").trim().toLowerCase();
   let rows = hasUrlOverrideDiffersFromRecord ? [] : Array.isArray(normalizedCard.rows) ? normalizedCard.rows : [];
   let columns = Array.isArray(normalizedCard.columns) ? normalizedCard.columns : [];
 
@@ -79310,11 +81397,25 @@ async function cmDownloadCsvForCard(cmState, record, card, sortRule, requestToke
         : cmColumnsFromPayloadForRecord(record.payload, record, recordRequestUrl);
   }
 
-  if (rows.length === 0 && record && String(record?.kind || "").toLowerCase() !== "cmv2-op") {
+  if (rows.length === 0 && recordKind === "esm-health-xref") {
+    const response = await cmFetchEsmHealthXrefReport(record, cmState);
+    if (!isCmServiceRequestActive(cmState.section, requestToken, cmState.programmer?.programmerId)) {
+      return { ok: false, skipped: true, error: "CM controller is no longer active for the selected media company." };
+    }
+    rows = Array.isArray(response.rows) ? response.rows : [];
+    columns = Array.isArray(response.columns) ? response.columns : cmColumnsFromRows(rows);
+    if (!hasUrlOverrideDiffersFromRecord) {
+      record.requestUrl = String(response.requestUrl || record.requestUrl || "").trim();
+      record.endpointUrl = String(response.requestUrl || record.endpointUrl || "").trim();
+      record.columns = columns;
+    }
+  }
+
+  if (rows.length === 0 && record && recordKind !== "cmv2-op" && recordKind !== "esm-health-xref") {
     const requestUrl = requestUrlOverride || recordRequestUrl;
     if (requestUrl) {
       const response = await fetchCmJsonWithAuthVariants([requestUrl], `CM ${record.kind || "report"} CSV`, {
-        allowTemporaryPageContextTab: String(record?.kind || "").trim().toLowerCase() === "usage",
+        allowTemporaryPageContextTab: recordKind === "usage",
         debugMeta: {
           scope: `cm-csv-${String(record.kind || "report")}`,
           endpointUrl: requestUrl,

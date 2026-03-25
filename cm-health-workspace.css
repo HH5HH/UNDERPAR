@@ -1,0 +1,36 @@
+@import url("esm-health-workspace.css");
+
+:root {
+  --esm-health-accent: var(--spectrum-seafoam-background-color-default, #19a588);
+  --esm-health-accent-soft: rgba(25, 165, 136, 0.18);
+  --esm-health-accent-strong: var(--spectrum-seafoam-visual-color, #2cc7a5);
+  --esm-health-panel: rgba(13, 21, 21, 0.92);
+  --esm-health-panel-strong: rgba(18, 30, 30, 0.96);
+  --esm-health-panel-muted: rgba(24, 39, 39, 0.9);
+  --esm-health-border: rgba(96, 128, 122, 0.34);
+  --esm-health-border-strong: rgba(122, 164, 154, 0.46);
+}
+
+body {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(25, 165, 136, 0.22), rgba(25, 165, 136, 0) 34%),
+    radial-gradient(circle at 88% 0%, rgba(213, 111, 33, 0.14), rgba(213, 111, 33, 0) 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 18%),
+    linear-gradient(180deg, #081110 0%, #0b1515 52%, #070b0b 100%);
+}
+
+.cm-health-hero {
+  background:
+    linear-gradient(100deg, rgba(25, 165, 136, 0.18), rgba(25, 165, 136, 0) 24%),
+    linear-gradient(180deg, rgba(18, 30, 30, 0.98), rgba(10, 18, 18, 0.98));
+}
+
+.cm-health-kicker {
+  background: rgba(25, 165, 136, 0.16);
+  color: var(--esm-health-accent-strong);
+}
+
+.cm-health-app .esm-health-overview-copy code,
+.cm-health-app .cm-health-table-copy code {
+  font-size: inherit;
+}

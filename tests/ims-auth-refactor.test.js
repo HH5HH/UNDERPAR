@@ -1592,6 +1592,7 @@ test("premium service refresh and CMU actions keep ESM and CM JellyBeans on the 
 test("health splunk stays on the scoped job-create and results-preview calls instead of recreating the dashboard transport", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const normalizeJobSource = extractFunctionSource(popupSource, "normalizeSplunkJobSearchQuery");
+  const healthDashboardUrlSource = extractFunctionSource(popupSource, "buildHealthSplunkDashboardUrl");
   const healthQueryContextSource = extractFunctionSource(popupSource, "buildHealthSplunkQueryContext");
   const tableDefinitionsSource = extractFunctionSource(popupSource, "getHealthSplunkTableDefinitions");
   const previewSource = extractFunctionSource(popupSource, "fetchHealthSplunkPreviewReportBySid");
@@ -1600,11 +1601,17 @@ test("health splunk stays on the scoped job-create and results-preview calls ins
   const restSearchSource = extractFunctionSource(popupSource, "runSplunkSearchForQueryContext");
 
   assert.match(healthQueryContextSource, /search:\s*buildHealthSplunkLoginSearch\(\{/);
-  assert.doesNotMatch(healthQueryContextSource, /dashboardUrl/);
+  assert.match(healthQueryContextSource, /const dashboardUrl = buildHealthSplunkDashboardUrl\(\{/);
+  assert.match(healthQueryContextSource, /dashboardUrl,/);
+  assert.match(healthDashboardUrlSource, /HEALTH_SPLUNK_DASHBOARD_VIEW_NAME/);
+  assert.match(healthDashboardUrlSource, /form\.serviceProvider/);
+  assert.match(healthDashboardUrlSource, /form\.environment/);
   assert.match(tableDefinitionsSource, /jobLabel:\s*String\(entry\.jobLabel \|\| ""\)\.trim\(\),/);
   assert.match(normalizeJobSource, /return `search \$\{normalizedSearch\}`;/);
   assert.match(previewSource, /const previewUrl = `\$\{HEALTH_SPLUNK_RESULTS_PREVIEW_BASE_URL\}\/\$\{encodedSid\}\/results_preview\?/);
   assert.match(previewSource, /if \(report\.rows\.length > 0 \|\| isHealthSplunkPreviewComplete\(previewResponse\.parsed\)\) {/);
+  assert.match(previewSource, /waitForDelay\(HEALTH_SPLUNK_JOB_POLL_INTERVAL_MS\)/);
+  assert.match(previewSource, /HEALTH_SPLUNK_JOB_POLL_TIMEOUT_MS/);
   assert.doesNotMatch(previewSource, /resultsUrl/);
   assert.doesNotMatch(previewSource, /jobMetaUrl/);
   assert.match(tableSearchSource, /search: normalizeSplunkJobSearchQuery\(compiledTable\.query\),/);
