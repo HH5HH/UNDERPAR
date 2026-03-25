@@ -216,18 +216,64 @@ test("MEG workspace saved-query reset clears the picker after the native menu cl
   assert.equal(disabledSyncCount, 1);
 });
 
-test("saved-query change handlers load the selected query before resetting the picker", () => {
+test("sidepanel saved-query menu uses an owned trigger while standalone MEG keeps the deferred native picker flow", () => {
   const popupSource = read("popup.js");
   const megSource = read("meg-workspace.js");
 
   assert.match(
     popupSource,
-    /megSavedQuerySelectElement\?\.addEventListener\("change", async \(event\) => \{[\s\S]*?const executeSavedQuerySelection = async \(\) => \{[\s\S]*?await esmWorkspaceOpenSavedQueryFromUi\([\s\S]*?resetEsmWorkspaceMegSavedQuerySelect\(selectElement\);[\s\S]*?setTimeout\(\(\) => \{\s*void executeSavedQuerySelection\(\);/m
+    /class="esm-workspace-meg-saved-trigger"[\s\S]*?class="esm-workspace-meg-saved-menu"/m
+  );
+  assert.match(
+    popupSource,
+    /megSavedQueryTriggerButton\?\.addEventListener\("click", \(event\) => \{[\s\S]*?esmWorkspaceToggleMegSavedQueryMenu\(esmWorkspaceState/m
+  );
+  assert.match(
+    popupSource,
+    /optionButton\.addEventListener\("click", \(event\) => \{[\s\S]*?void esmWorkspaceRunMegSavedQueryRecord\(esmWorkspaceState, record\);/m
   );
   assert.match(
     megSource,
     /savedQueryPicker\?\.addEventListener\("change", async \(\) => \{[\s\S]*?const executeSavedQuerySelection = async \(\) => \{[\s\S]*?await loadSelectedSavedQuery\(selectedOption\);[\s\S]*?resetSavedQueryPickerSelection\(\);[\s\S]*?setTimeout\(\(\) => \{\s*void executeSavedQuerySelection\(\);/m
   );
+  assert.doesNotMatch(popupSource, /megSavedQuerySelectElement\?\.addEventListener\("change"/);
+});
+
+test("sidepanel saved-query menu close helper hides the menu and resets the trigger state", () => {
+  let restoredFocusCount = 0;
+  const pickerElement = {
+    classList: {
+      remove(name) {
+        this.removed = name;
+      },
+    },
+  };
+  const triggerButton = {
+    setAttribute(name, value) {
+      this[name] = value;
+    },
+    focus() {
+      restoredFocusCount += 1;
+    },
+  };
+  const menuElement = {
+    hidden: false,
+  };
+  const { esmWorkspaceCloseMegSavedQueryMenu } = loadFunctions("popup.js", ["esmWorkspaceCloseMegSavedQueryMenu"]);
+
+  esmWorkspaceCloseMegSavedQueryMenu(
+    {
+      megSavedQueryPickerElement: pickerElement,
+      megSavedQueryTriggerButton: triggerButton,
+      megSavedQueryMenuElement: menuElement,
+    },
+    { restoreFocus: true }
+  );
+
+  assert.equal(pickerElement.classList.removed, "is-open");
+  assert.equal(menuElement.hidden, true);
+  assert.equal(triggerButton["aria-expanded"], "false");
+  assert.equal(restoredFocusCount, 1);
 });
 
 test("debug-flow hydration helpers are wired into the partner SSO runtime paths", () => {
@@ -256,6 +302,18 @@ test("debug-flow hydration helpers are wired into the partner SSO runtime paths"
   assert.match(
     popupSource,
     /await hydrateRestV2PartnerSsoContextFromFlowId\(recordingContext, flowId\);[\s\S]*?probeRestV2PostAuthProfiles\(recordingContext, flowId/m
+  );
+  assert.match(
+    popupSource,
+    /hydrateRestV2ContextFromPreparedLoginEntry\(context\);[\s\S]*?await hydrateRestV2PartnerSsoContextFromFlowId\(context, flowId\);[\s\S]*?storeRestV2LearningContextSeed\(context, flowId\);/m
+  );
+  assert.match(
+    popupSource,
+    /clearRestV2ProfileHarvestForContext\(recordingContext\);[\s\S]*?storeRestV2LearningContextSeed\(recordingContext, flowId\);/m
+  );
+  assert.match(
+    popupSource,
+    /clearRestV2ProfileHarvestForContext\(recordingContext\);[\s\S]*?storeRestV2LearningContextSeed\(recordingContext, activeFlowId\);/m
   );
 });
 

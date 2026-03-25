@@ -16191,8 +16191,61 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
   const mergedChecks = normalizeRestV2ProfilePreauthzChecks(
     sourceList.flatMap((source) => getRestV2ProfilePreauthzChecks(source))
   );
+  const mergeUniqueStrings = (...collections) => {
+    const output = [];
+    const seen = new Set();
+    collections.forEach((collection) => {
+      (Array.isArray(collection) ? collection : [collection]).forEach((value) => {
+        const normalized = String(value || "").trim();
+        if (!normalized) {
+          return;
+        }
+        const key = normalized.toLowerCase();
+        if (seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+        output.push(normalized);
+      });
+    });
+    return output;
+  };
+  const mergedSessionCodeCandidates = mergeUniqueStrings(
+    sourceList.flatMap((source) => [
+      String(source?.sessionCode || "").trim(),
+      ...(Array.isArray(source?.sessionCodeCandidates) ? source.sessionCodeCandidates : []),
+    ])
+  );
+  const mergedSessionResponseHeaders =
+    sourceList.find((source) => source?.sessionResponseHeaders && typeof source.sessionResponseHeaders === "object")
+      ?.sessionResponseHeaders || null;
   return {
     ...harvest,
+    flowId: firstNonEmptyString(sourceList.map((source) => String(source?.flowId || "").trim())),
+    sessionCode: firstNonEmptyString([String(harvest?.sessionCode || "").trim(), mergedSessionCodeCandidates[0]]),
+    sessionCodeCandidates: mergedSessionCodeCandidates,
+    sessionAction: firstNonEmptyString(sourceList.map((source) => String(source?.sessionAction || "").trim())),
+    sessionPartner: firstNonEmptyString(
+      sourceList.flatMap((source) => [String(source?.sessionPartner || "").trim(), String(source?.partner || "").trim()])
+    ),
+    partner: firstNonEmptyString(
+      sourceList.flatMap((source) => [String(source?.partner || "").trim(), String(source?.sessionPartner || "").trim()])
+    ),
+    partnerFrameworkStatus: firstNonEmptyString(
+      sourceList.map((source) => String(source?.partnerFrameworkStatus || "").trim())
+    ),
+    samlResponse: firstNonEmptyString(sourceList.map((source) => String(source?.samlResponse || "").trim())),
+    samlSource: firstNonEmptyString(sourceList.map((source) => String(source?.samlSource || "").trim())),
+    sessionUrl: normalizeAdobeNavigationUrl(firstNonEmptyString(sourceList.map((source) => String(source?.sessionUrl || "").trim()))),
+    loginUrl: normalizeAdobeNavigationUrl(firstNonEmptyString(sourceList.map((source) => String(source?.loginUrl || "").trim()))),
+    redirectUrl: normalizeAdobeNavigationUrl(
+      firstNonEmptyString(sourceList.map((source) => String(source?.redirectUrl || "").trim()))
+    ),
+    domainName: firstNonEmptyString(sourceList.map((source) => String(source?.domainName || "").trim())),
+    sessionResponseHeaders:
+      mergedSessionResponseHeaders && typeof mergedSessionResponseHeaders === "object"
+        ? { ...mergedSessionResponseHeaders }
+        : null,
     preauthzChecks: mergedChecks,
   };
 }
@@ -16802,6 +16855,13 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     samlSource: String(harvest.samlSource || "").trim(),
     sessionUrl,
     loginUrl,
+    redirectUrl: normalizeAdobeNavigationUrl(String(harvest.redirectUrl || "").trim()),
+    domainName: String(harvest.domainName || "").trim(),
+    flowId: String(harvest.flowId || "").trim(),
+    sessionResponseHeaders:
+      harvest?.sessionResponseHeaders && typeof harvest.sessionResponseHeaders === "object"
+        ? { ...harvest.sessionResponseHeaders }
+        : null,
     appInfo,
     restV2AppCandidates: [appInfo],
   };
@@ -24194,6 +24254,132 @@ function getRestV2PreparedLoginEntry(context) {
   return entry;
 }
 
+function getRestV2PreparedLoginEntryForContextLike(context = null) {
+  if (!context || typeof context !== "object") {
+    return null;
+  }
+  const programmerId = String(context?.programmerId || "").trim();
+  const requestorId = String(context?.requestorId || context?.serviceProviderId || "").trim();
+  const mvpd = String(context?.mvpd || "").trim();
+  if (!programmerId || !requestorId || !mvpd) {
+    return null;
+  }
+  const selectionKey = [getActiveAdobePassEnvironmentKey(), programmerId, requestorId, mvpd]
+    .map((value) => String(value || "").trim())
+    .join("|");
+  if (!selectionKey) {
+    return null;
+  }
+  const entry = state.restV2PreparedLoginBySelectionKey.get(selectionKey) || null;
+  if (!entry) {
+    return null;
+  }
+  if (!isRestV2PreparedLoginEntryFresh(entry)) {
+    state.restV2PreparedLoginBySelectionKey.delete(selectionKey);
+    return null;
+  }
+  return entry;
+}
+
+function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntry = null) {
+  if (!context || typeof context !== "object") {
+    return context;
+  }
+  const resolvedEntry =
+    preparedEntry && typeof preparedEntry === "object" ? preparedEntry : getRestV2PreparedLoginEntryForContextLike(context);
+  if (!resolvedEntry) {
+    return context;
+  }
+  const sessionData = resolvedEntry.sessionData && typeof resolvedEntry.sessionData === "object" ? resolvedEntry.sessionData : null;
+  const serviceProviderId = String(context?.serviceProviderId || context?.requestorId || "").trim();
+  const sessionUrl = normalizeAdobeNavigationUrl(
+    firstNonEmptyString([String(context?.sessionUrl || "").trim(), String(sessionData?.url || "").trim()])
+  );
+  const loginUrl = normalizeAdobeNavigationUrl(
+    firstNonEmptyString([
+      String(context?.loginUrl || "").trim(),
+      String(resolvedEntry?.loginUrl || "").trim(),
+      resolveMvpdLoginNavigationUrl(sessionData, serviceProviderId),
+    ])
+  );
+  const sessionCodeCandidates = collectRestV2SessionCodeCandidates(
+    [
+      String(context?.sessionCode || "").trim(),
+      ...(Array.isArray(context?.sessionCodeCandidates) ? context.sessionCodeCandidates : []),
+      String(sessionData?.code || "").trim(),
+      String(sessionData?.sessionCode || "").trim(),
+      sessionUrl,
+      loginUrl,
+    ],
+    serviceProviderId
+  );
+  const sessionCode = firstNonEmptyString([String(context?.sessionCode || "").trim(), sessionCodeCandidates[0]]);
+  const redirectUrl = normalizeAdobeNavigationUrl(
+    firstNonEmptyString([
+      String(context?.redirectUrl || "").trim(),
+      String(resolvedEntry?.redirectUrl || "").trim(),
+      String(resolvedEntry?.payload?.redirectUrl || "").trim(),
+      String(sessionData?.existingParameters?.redirectUrl || "").trim(),
+    ])
+  );
+  const domainName = firstNonEmptyString([
+    String(context?.domainName || "").trim(),
+    String(resolvedEntry?.domainName || "").trim(),
+    String(resolvedEntry?.payload?.domainName || "").trim(),
+    String(sessionData?.existingParameters?.domainName || "").trim(),
+  ]);
+  const sessionPartner = firstNonEmptyString([
+    String(context?.sessionPartner || "").trim(),
+    String(resolvedEntry?.sessionPartner || "").trim(),
+    String(sessionData?.partner || "").trim(),
+  ]);
+  if (sessionCode) {
+    context.sessionCode = sessionCode;
+  }
+  if (sessionCodeCandidates.length > 0) {
+    context.sessionCodeCandidates = sessionCodeCandidates;
+  }
+  if (!String(context?.sessionAction || "").trim()) {
+    context.sessionAction = String(sessionData?.actionName || "").trim();
+  }
+  if (sessionPartner) {
+    if (!String(context?.sessionPartner || "").trim()) {
+      context.sessionPartner = sessionPartner;
+    }
+    if (!String(context?.partner || "").trim()) {
+      context.partner = sessionPartner;
+    }
+  }
+  if (!String(context?.partnerFrameworkStatus || "").trim()) {
+    context.partnerFrameworkStatus = String(
+      firstNonEmptyString([
+        String(resolvedEntry?.partnerFrameworkStatus || "").trim(),
+        String(sessionData?.partnerFrameworkStatus || "").trim(),
+      ]) || ""
+    ).trim();
+  }
+  if (
+    !context?.sessionResponseHeaders &&
+    resolvedEntry?.sessionResponseHeaders &&
+    typeof resolvedEntry.sessionResponseHeaders === "object"
+  ) {
+    context.sessionResponseHeaders = { ...resolvedEntry.sessionResponseHeaders };
+  }
+  if (sessionUrl) {
+    context.sessionUrl = sessionUrl;
+  }
+  if (loginUrl) {
+    context.loginUrl = loginUrl;
+  }
+  if (redirectUrl) {
+    context.redirectUrl = redirectUrl;
+  }
+  if (domainName) {
+    context.domainName = domainName;
+  }
+  return context;
+}
+
 function setRestV2PreparedLoginEntry(context, payload) {
   const selectionKey = getRestV2SelectionKey(context);
   if (!selectionKey) {
@@ -24210,6 +24396,10 @@ function setRestV2PreparedLoginEntry(context, payload) {
       payload?.sessionResponseHeaders && typeof payload.sessionResponseHeaders === "object" ? payload.sessionResponseHeaders : null,
     partnerFrameworkStatus: String(payload?.partnerFrameworkStatus || payload?.sessionData?.partnerFrameworkStatus || "").trim(),
     sessionPartner: String(payload?.sessionPartner || payload?.sessionData?.partner || "").trim(),
+    domainName: String(firstNonEmptyString([payload?.payload?.domainName, payload?.sessionData?.existingParameters?.domainName]) || "").trim(),
+    redirectUrl: normalizeAdobeNavigationUrl(
+      firstNonEmptyString([payload?.payload?.redirectUrl, payload?.sessionData?.existingParameters?.redirectUrl])
+    ),
     payload: payload?.payload && typeof payload.payload === "object" ? payload.payload : null,
   };
   if (!entry.loginUrl) {
@@ -25019,6 +25209,7 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
   }
   const serviceProviderId = String(context.serviceProviderId || context.requestorId || "").trim();
   const redirectUrl = normalizeAdobeNavigationUrl(firstNonEmptyString([options?.redirectUrl, context?.redirectUrl]));
+  const domainName = String(firstNonEmptyString([options?.domainName, context?.domainName]) || "").trim();
   const sessionUrl = normalizeAdobeNavigationUrl(firstNonEmptyString([options?.sessionUrl]));
   const loginUrl = normalizeAdobeNavigationUrl(firstNonEmptyString([options?.loginUrl]));
   const sessionCodeCandidates = collectRestV2SessionCodeCandidates(
@@ -25048,6 +25239,7 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     mvpdName: String(context?.mvpdMeta?.name || "").trim(),
     appInfo: compactAppInfo,
     redirectUrl,
+    domainName,
     sessionCode,
     sessionCodeCandidates,
     sessionAction: String(firstNonEmptyString([options?.sessionAction, context?.sessionAction]) || "").trim(),
@@ -25218,6 +25410,13 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
     storeRestV2AuthContextForRequestor(context, selectedAppInfo);
     state.restV2RecordingContext = toRestV2RecordingContext(context, selectedAppInfo, {
       redirectUrl: configuredRedirectUrl,
+      domainName: String(
+        firstNonEmptyString([
+          preparedEntry?.domainName,
+          preparedEntry?.payload?.domainName,
+          preparedEntry?.sessionData?.existingParameters?.domainName,
+        ]) || ""
+      ).trim(),
       sessionCode: firstNonEmptyString([preparedEntry?.sessionData?.code, sessionCodeCandidates[0]]),
       sessionCodeCandidates,
       sessionAction: String(preparedEntry?.sessionData?.actionName || "").trim(),
@@ -26423,6 +26622,8 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
   const contextServiceProviderId = String(context?.serviceProviderId || context?.requestorId || "").trim();
   const sessionUrl = normalizeAdobeNavigationUrl(String(context?.sessionUrl || "").trim());
   const loginUrl = normalizeAdobeNavigationUrl(String(context?.loginUrl || "").trim());
+  const redirectUrl = normalizeAdobeNavigationUrl(String(context?.redirectUrl || "").trim());
+  const domainName = String(context?.domainName || "").trim();
   const sessionCodeCandidates = collectRestV2SessionCodeCandidates(
     [
       context?.sessionCode,
@@ -26457,6 +26658,12 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     samlSource: String(context?.samlSource || "").trim(),
     sessionUrl,
     loginUrl,
+    redirectUrl,
+    domainName,
+    sessionResponseHeaders:
+      context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
+        ? { ...context.sessionResponseHeaders }
+        : null,
     profileUrl: String(profileCheckResult.url || "").trim(),
     profileCheckOutcome,
     profileCheck: {
@@ -28270,6 +28477,9 @@ async function probeRestV2PostAuthProfiles(context, flowId, options = {}) {
   const delayMs = Math.max(0, Number(options?.delayMs || REST_V2_POST_AUTH_PROFILE_CHECK_DELAY_MS || 0));
   const scopePrefix = String(options?.scopePrefix || "profiles-post-auth").trim() || "profiles-post-auth";
   let lastCheck = buildRestV2ProfileCheckFallbackResult("Profile check not attempted.");
+  hydrateRestV2ContextFromPreparedLoginEntry(context);
+  await hydrateRestV2PartnerSsoContextFromFlowId(context, flowId);
+  storeRestV2LearningContextSeed(context, flowId);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     emitRestV2DebugEvent(flowId, {
@@ -30253,6 +30463,7 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
           });
         } else {
           clearRestV2ProfileHarvestForContext(recordingContext);
+          storeRestV2LearningContextSeed(recordingContext, activeFlowId);
         }
         const explicitNoActiveProfile = isRestV2NoActiveProfileSignal(profileCheckResult);
         const checkedNoProfiles =
@@ -30261,6 +30472,7 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
           Number(profileCheckResult?.profileCount || 0) === 0;
         if (explicitNoActiveProfile || checkedNoProfiles) {
           clearRestV2ProfileHarvestForContext(recordingContext);
+          storeRestV2LearningContextSeed(recordingContext, activeFlowId);
         }
 
         const selectedProgrammer = resolveSelectedProgrammer();
@@ -30296,6 +30508,7 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
         Number(profileCheckResult?.profileCount || 0) === 0;
       if (explicitNoActiveProfile || checkedNoProfiles) {
         clearRestV2ProfileHarvestForContext(recordingContext);
+        storeRestV2LearningContextSeed(recordingContext, activeFlowId);
       } else if (profileCheckResult?.checked === true) {
         storeRestV2ProfileHarvest(recordingContext, profileCheckResult, activeFlowId);
       }
@@ -38942,12 +39155,20 @@ function esmWorkspaceBuildShellHtml() {
             aria-label="Launch the currently selected JellyBean node into MEGSPACE"
           ></select>
           <button type="button" class="esm-workspace-meg-open-btn">GO</button>
-          <select
-            class="esm-workspace-meg-saved-select"
-            title="Saved Queries"
-            aria-label="Saved Queries"
-            hidden
-          ></select>
+          <div class="esm-workspace-meg-saved-picker" hidden>
+            <button
+              type="button"
+              class="esm-workspace-meg-saved-trigger"
+              title="Saved Queries"
+              aria-label="Saved Queries"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <span class="esm-workspace-meg-saved-trigger-label">Saved Queries</span>
+              <span class="esm-workspace-meg-saved-trigger-icon" aria-hidden="true">▾</span>
+            </button>
+            <div class="esm-workspace-meg-saved-menu" role="menu" aria-label="Saved Queries" hidden></div>
+          </div>
         </div>
       </section>
       <div class="esm-workspace-footer">
@@ -39457,6 +39678,143 @@ async function esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl
   }
 }
 
+function resolveEsmWorkspaceStateFromMegSavedQueryNode(node = null) {
+  const pickerElement = node instanceof Element ? node.closest(".esm-workspace-meg-saved-picker") : null;
+  const section = pickerElement instanceof Element ? pickerElement.closest(".premium-service-section.service-esm") : null;
+  return section?.__underparEsmWorkspaceState || null;
+}
+
+function esmWorkspaceGetMegSavedQueryOptionButtons(esmWorkspaceState) {
+  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
+  if (!menuElement || typeof menuElement.querySelectorAll !== "function") {
+    return [];
+  }
+  return [...menuElement.querySelectorAll(".esm-workspace-meg-saved-option")];
+}
+
+function esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, targetIndex = 0) {
+  const optionButtons = esmWorkspaceGetMegSavedQueryOptionButtons(esmWorkspaceState);
+  if (!optionButtons.length) {
+    return;
+  }
+  const boundedIndex = Math.max(0, Math.min(optionButtons.length - 1, Number(targetIndex) || 0));
+  const targetButton = optionButtons[boundedIndex] || null;
+  if (!targetButton) {
+    return;
+  }
+  try {
+    targetButton.focus({ preventScroll: true });
+  } catch {
+    targetButton.focus?.();
+  }
+}
+
+function esmWorkspaceMoveMegSavedQueryMenuFocus(esmWorkspaceState, currentButton = null, delta = 1) {
+  const optionButtons = esmWorkspaceGetMegSavedQueryOptionButtons(esmWorkspaceState);
+  if (!optionButtons.length) {
+    return;
+  }
+  const currentIndex = optionButtons.indexOf(currentButton);
+  const fallbackIndex = delta < 0 ? optionButtons.length - 1 : 0;
+  const nextIndex = currentIndex >= 0 ? (currentIndex + delta + optionButtons.length) % optionButtons.length : fallbackIndex;
+  esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, nextIndex);
+}
+
+function esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, options = null) {
+  const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
+  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
+  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
+  if (!pickerElement || !triggerButton || !menuElement) {
+    return;
+  }
+  pickerElement.classList.remove("is-open");
+  menuElement.hidden = true;
+  triggerButton.setAttribute("aria-expanded", "false");
+  if (options?.restoreFocus === true) {
+    try {
+      triggerButton.focus({ preventScroll: true });
+    } catch {
+      triggerButton.focus?.();
+    }
+  }
+}
+
+function closeAllEsmWorkspaceMegSavedQueryMenus(exceptState = null) {
+  const sections = document.querySelectorAll(".premium-service-section.service-esm");
+  sections.forEach((section) => {
+    const esmWorkspaceState = section?.__underparEsmWorkspaceState || null;
+    if (!esmWorkspaceState || esmWorkspaceState === exceptState) {
+      return;
+    }
+    esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
+  });
+}
+
+function esmWorkspaceOpenMegSavedQueryMenu(esmWorkspaceState, options = null) {
+  const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
+  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
+  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
+  if (!pickerElement || !triggerButton || !menuElement || pickerElement.hidden || triggerButton.disabled) {
+    return;
+  }
+  closeAllEsmWorkspaceMegSavedQueryMenus(esmWorkspaceState);
+  pickerElement.classList.add("is-open");
+  menuElement.hidden = false;
+  triggerButton.setAttribute("aria-expanded", "true");
+  if (options?.focusLast === true) {
+    esmWorkspaceFocusMegSavedQueryMenuOption(
+      esmWorkspaceState,
+      Math.max(esmWorkspaceGetMegSavedQueryOptionButtons(esmWorkspaceState).length - 1, 0)
+    );
+    return;
+  }
+  if (options?.focusFirst === true) {
+    esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, 0);
+  }
+}
+
+function esmWorkspaceToggleMegSavedQueryMenu(esmWorkspaceState, options = null) {
+  const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
+  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
+  const isOpen = Boolean(pickerElement?.classList.contains("is-open") && menuElement?.hidden === false);
+  if (isOpen) {
+    esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, { restoreFocus: options?.restoreFocus === true });
+    return;
+  }
+  esmWorkspaceOpenMegSavedQueryMenu(esmWorkspaceState, options);
+}
+
+async function esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record = null) {
+  const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
+  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
+  const savedQueryUrl = String(record?.url || "").trim();
+  const savedQueryName = String(record?.name || "").trim();
+  if (!pickerElement || !triggerButton || !savedQueryUrl || esmWorkspaceState?.megSavedQueryBusy === true) {
+    return;
+  }
+
+  esmWorkspaceState.megSavedQueryBusy = true;
+  esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
+  pickerElement.classList.add("is-busy");
+  triggerButton.disabled = true;
+  triggerButton.setAttribute("aria-busy", "true");
+
+  try {
+    const requestToken = resolveCurrentPremiumPanelRequestToken(
+      esmWorkspaceState?.programmer?.programmerId,
+      esmWorkspaceState?.requestToken || state.premiumPanelRequestToken || 0
+    );
+    await esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName);
+  } finally {
+    const hasRecords =
+      Array.isArray(esmWorkspaceState?.megSavedQueryRecords) && esmWorkspaceState.megSavedQueryRecords.length > 0;
+    esmWorkspaceState.megSavedQueryBusy = false;
+    pickerElement.classList.remove("is-busy");
+    triggerButton.disabled = !hasRecords;
+    triggerButton.removeAttribute("aria-busy");
+  }
+}
+
 async function consumePendingUnderparEsmDeeplink() {
   if (state.pendingUnderparEsmDeeplinkPromise) {
     return state.pendingUnderparEsmDeeplinkPromise;
@@ -39558,41 +39916,85 @@ async function consumePendingUnderparEsmDeeplink() {
 }
 
 function esmWorkspaceSyncMegSavedQueryUi(esmWorkspaceState) {
-  const selectElement = esmWorkspaceState?.megSavedQuerySelectElement || null;
-  if (!selectElement) {
+  const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
+  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
+  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
+  if (!pickerElement || !triggerButton || !menuElement) {
     return;
   }
 
   const records = popupGetSavedEsmQueryRecords();
-  selectElement.innerHTML = "";
-
-  const defaultOption = document.createElement("option");
-  defaultOption.value = "";
-  defaultOption.textContent = "Saved Queries";
-  defaultOption.title = "Saved Queries";
-  selectElement.appendChild(defaultOption);
+  esmWorkspaceState.megSavedQueryRecords = records;
+  esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
+  menuElement.innerHTML = "";
 
   if (records.length === 0) {
-    selectElement.hidden = true;
-    selectElement.disabled = true;
-    selectElement.title = "Saved Queries";
-    selectElement.setAttribute("aria-label", "Saved Queries");
+    pickerElement.hidden = true;
+    pickerElement.classList.remove("is-busy");
+    triggerButton.disabled = true;
+    triggerButton.title = "Saved Queries";
+    triggerButton.setAttribute("aria-label", "Saved Queries");
     return;
   }
 
   records.forEach((record) => {
-    const option = document.createElement("option");
-    option.value = record.url;
-    option.textContent = record.name;
-    option.title = record.url;
-    selectElement.appendChild(option);
+    const optionButton = document.createElement("button");
+    optionButton.type = "button";
+    optionButton.className = "esm-workspace-meg-saved-option";
+    optionButton.setAttribute("role", "menuitem");
+    optionButton.dataset.savedQueryUrl = record.url;
+    optionButton.dataset.savedQueryName = record.name;
+    optionButton.title = record.url;
+    optionButton.setAttribute("aria-label", `Open Saved Query ${record.name}`);
+    optionButton.textContent = record.name;
+    optionButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record);
+    });
+    optionButton.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        esmWorkspaceMoveMegSavedQueryMenuFocus(esmWorkspaceState, event.currentTarget, 1);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        esmWorkspaceMoveMegSavedQueryMenuFocus(esmWorkspaceState, event.currentTarget, -1);
+        return;
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, 0);
+        return;
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, records.length - 1);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, { restoreFocus: true });
+        return;
+      }
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record);
+    });
+    menuElement.appendChild(optionButton);
   });
 
-  selectElement.value = "";
-  selectElement.hidden = false;
-  selectElement.disabled = false;
-  selectElement.title = "Saved Queries";
-  selectElement.setAttribute("aria-label", "Saved Queries");
+  pickerElement.hidden = false;
+  pickerElement.classList.toggle("is-busy", esmWorkspaceState?.megSavedQueryBusy === true);
+  triggerButton.disabled = esmWorkspaceState?.megSavedQueryBusy === true;
+  triggerButton.title = "Saved Queries";
+  triggerButton.setAttribute("aria-label", "Saved Queries");
+  triggerButton.setAttribute("aria-expanded", "false");
 }
 
 function resetEsmWorkspaceMegSavedQuerySelect(selectElement = null) {
@@ -39714,6 +40116,9 @@ function esmWorkspaceSetMegPanelCollapsed(esmWorkspaceState, collapsed = true) {
   const isCollapsed = Boolean(collapsed);
   panelElement.classList.toggle("is-collapsed", isCollapsed);
   bodyElement.hidden = isCollapsed;
+  if (isCollapsed) {
+    esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
+  }
   toggleButton.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
   toggleButton.setAttribute("aria-label", isCollapsed ? "Expand MEGSPACE" : "Collapse MEGSPACE");
   toggleButton.title = ESM_MEGTOOL_FILTER_TOOLTIP;
@@ -40234,33 +40639,35 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
     esmWorkspaceSyncMegLaunchUi(esmWorkspaceState);
   });
 
-  esmWorkspaceState.megSavedQuerySelectElement?.addEventListener("change", async (event) => {
-    const selectElement = event.target;
-    const savedQueryUrl = String(selectElement?.value || "").trim();
-    if (!savedQueryUrl) {
+  esmWorkspaceState.megSavedQueryTriggerButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    esmWorkspaceToggleMegSavedQueryMenu(esmWorkspaceState, {
+      focusFirst: esmWorkspaceState?.megSavedQueryMenuElement?.hidden === false,
+    });
+  });
+
+  esmWorkspaceState.megSavedQueryTriggerButton?.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      esmWorkspaceOpenMegSavedQueryMenu(esmWorkspaceState, { focusFirst: true });
       return;
     }
-    const savedQueryName = String(selectElement?.selectedOptions?.[0]?.textContent || "").trim();
-    const executeSavedQuerySelection = async () => {
-      if (selectElement) {
-        selectElement.disabled = true;
-      }
-      try {
-        await esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, getLiveRequestToken(), savedQueryName);
-      } finally {
-        if (selectElement) {
-          selectElement.disabled = false;
-        }
-        resetEsmWorkspaceMegSavedQuerySelect(selectElement);
-      }
-    };
-    if (typeof setTimeout === "function") {
-      setTimeout(() => {
-        void executeSavedQuerySelection();
-      }, 0);
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      esmWorkspaceOpenMegSavedQueryMenu(esmWorkspaceState, { focusLast: true });
       return;
     }
-    await executeSavedQuerySelection();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    esmWorkspaceToggleMegSavedQueryMenu(esmWorkspaceState, { focusFirst: true });
   });
 
   esmWorkspaceState.megToggleButton?.addEventListener("click", (event) => {
@@ -41318,7 +41725,11 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
       megToggleButton: contentElement.querySelector(".esm-workspace-meg-toggle"),
       megBodyElement: contentElement.querySelector(".esm-workspace-meg-body"),
       megSelectElement: contentElement.querySelector(".esm-workspace-meg-select"),
-      megSavedQuerySelectElement: contentElement.querySelector(".esm-workspace-meg-saved-select"),
+      megSavedQueryPickerElement: contentElement.querySelector(".esm-workspace-meg-saved-picker"),
+      megSavedQueryTriggerButton: contentElement.querySelector(".esm-workspace-meg-saved-trigger"),
+      megSavedQueryMenuElement: contentElement.querySelector(".esm-workspace-meg-saved-menu"),
+      megSavedQueryRecords: [],
+      megSavedQueryBusy: false,
       megLaunchButton: contentElement.querySelector(".esm-workspace-meg-open-btn"),
       megSelectedEndpointUrl: "",
       visibleEndpointIndexes: [],
@@ -53619,6 +54030,8 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
         : null,
     sessionUrl: normalizeAdobeNavigationUrl(String(recordingContext.sessionUrl || "").trim()),
     loginUrl: normalizeAdobeNavigationUrl(String(recordingContext.loginUrl || "").trim()),
+    redirectUrl: normalizeAdobeNavigationUrl(String(recordingContext.redirectUrl || "").trim()),
+    domainName: String(recordingContext.domainName || "").trim(),
     appInfo: {
       guid: appGuid,
       appName: String(recordingContext?.appInfo?.appName || appGuid).trim(),
@@ -53626,15 +54039,24 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
   };
 }
 
-function buildRestV2ProfilesHydrationSeedHarvest(context = null) {
-  if (!context?.ok) {
+function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
+  if (!context || typeof context !== "object") {
     return null;
   }
-  const existingHarvest = getRestV2ProfileHarvestForContext(context);
-  if (existingHarvest && typeof existingHarvest === "object") {
-    return existingHarvest;
-  }
+  const programmerId = String(context.programmerId || "").trim();
+  const requestorId = String(context.requestorId || context.serviceProviderId || "").trim();
   const serviceProviderId = String(context.serviceProviderId || context.requestorId || "").trim();
+  const mvpd = String(context.mvpd || "").trim();
+  const appGuid = String(context?.appInfo?.guid || context?.appGuid || "").trim();
+  if (!programmerId || !requestorId || !serviceProviderId || !mvpd || !appGuid) {
+    return null;
+  }
+  if (options?.preferExisting !== false) {
+    const existingHarvest = getRestV2ProfileHarvestForContext(context);
+    if (existingHarvest && typeof existingHarvest === "object") {
+      return existingHarvest;
+    }
+  }
   const sessionUrl = normalizeAdobeNavigationUrl(String(context.sessionUrl || "").trim());
   const loginUrl = normalizeAdobeNavigationUrl(String(context.loginUrl || "").trim());
   const sessionCodeCandidates = collectRestV2SessionCodeCandidates(
@@ -53647,14 +54069,14 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null) {
     serviceProviderId
   );
   return {
-    programmerId: String(context.programmerId || "").trim(),
+    programmerId,
     programmerName: String(context.programmerName || "").trim(),
-    requestorId: String(context.requestorId || "").trim(),
+    requestorId,
     serviceProviderId,
-    mvpd: String(context.mvpd || "").trim(),
+    mvpd,
     mvpdName: String(context?.mvpdMeta?.name || "").trim(),
-    appGuid: String(context?.appInfo?.guid || "").trim(),
-    appName: String(context?.appInfo?.appName || context?.appInfo?.guid || "").trim(),
+    appGuid,
+    appName: String(context?.appInfo?.appName || context?.appName || appGuid).trim(),
     sessionCode: firstNonEmptyString([String(context.sessionCode || "").trim(), sessionCodeCandidates[0]]),
     sessionCodeCandidates,
     sessionAction: String(context.sessionAction || "").trim(),
@@ -53665,11 +54087,54 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null) {
     samlSource: String(context.samlSource || "").trim(),
     sessionUrl,
     loginUrl,
+    redirectUrl: normalizeAdobeNavigationUrl(String(context.redirectUrl || "").trim()),
+    domainName: String(context.domainName || "").trim(),
+    flowId: String(resolveRestV2DebugFlowIdForHarvest(null, context.flowId || "") || "").trim(),
+    sessionResponseHeaders:
+      context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
+        ? { ...context.sessionResponseHeaders }
+        : null,
     harvestedAt: Date.now(),
     profileCount: 0,
     profileCheckOutcome: "seed",
     preauthzChecks: [],
   };
+}
+
+function storeRestV2LearningContextSeed(context = null, flowId = "") {
+  if (!context || typeof context !== "object") {
+    return null;
+  }
+  const selectionKey = buildRestV2ProfileHarvestSelectionKey(context);
+  if (!selectionKey || selectionKey === "||") {
+    return null;
+  }
+  const seedContext = {
+    ...context,
+    flowId: String(flowId || context?.flowId || "").trim(),
+  };
+  const seedHarvest = buildRestV2ProfilesHydrationSeedHarvest(seedContext, {
+    preferExisting: false,
+  });
+  if (!seedHarvest) {
+    return null;
+  }
+  const existingSelectionHarvest =
+    state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
+      ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null
+      : null;
+  const mergedHarvest = mergeRestV2HarvestWithPreauthzChecks(
+    existingSelectionHarvest && isUsableRestV2ProfileHarvest(existingSelectionHarvest) ? existingSelectionHarvest : seedHarvest,
+    seedHarvest,
+    existingSelectionHarvest
+  );
+  mergedHarvest.harvestedAt = Math.max(
+    Number(seedHarvest?.harvestedAt || 0),
+    Number(existingSelectionHarvest?.harvestedAt || 0),
+    Number(mergedHarvest?.harvestedAt || 0)
+  );
+  state.restV2ProfileHarvestBySelectionKey.set(selectionKey, mergedHarvest);
+  return mergedHarvest;
 }
 
 function buildRestV2ProfilesHydrationProfilePayload(row = null) {
@@ -55301,6 +55766,7 @@ async function handleRestV2LoginPopupClosed(tabId = 0) {
         Number(profileCheckResult?.profileCount || 0) === 0;
       if (explicitNoActiveProfile || checkedNoProfiles) {
         clearRestV2ProfileHarvestForContext(recordingContext);
+        storeRestV2LearningContextSeed(recordingContext, flowId);
       }
       const requestorMvpdLabel = formatRestV2RequestorMvpdDisplay(
         String(recordingContext.requestorId || ""),
@@ -55402,7 +55868,9 @@ function ensureRestV2BobtoolsRedirectWatcher() {
         recordingContext?.mvpd
       ) {
         try {
-          const postAuthProbe = await probeRestV2PostAuthProfiles(recordingContext, String(state.restV2DebugFlowId || "").trim(), {
+          const activeFlowId = String(state.restV2DebugFlowId || "").trim();
+          await hydrateRestV2PartnerSsoContextFromFlowId(recordingContext, activeFlowId);
+          const postAuthProbe = await probeRestV2PostAuthProfiles(recordingContext, activeFlowId, {
             scopePrefix: "profiles-redirect-bobtools",
             maxAttempts: 1,
             delayMs: 0,
@@ -55410,7 +55878,7 @@ function ensureRestV2BobtoolsRedirectWatcher() {
           const profileCheckResult =
             postAuthProbe?.result || buildRestV2ProfileCheckFallbackResult("Profile check unavailable after redirect intercept.");
           if (profileCheckResult?.harvestedProfile && isUsableRestV2ProfileHarvest(profileCheckResult.harvestedProfile)) {
-            const storedHarvest = storeRestV2ProfileHarvest(recordingContext, profileCheckResult, String(state.restV2DebugFlowId || "").trim());
+            const storedHarvest = storeRestV2ProfileHarvest(recordingContext, profileCheckResult, activeFlowId);
             hydrationContext = buildRestV2ContextFromHarvest(storedHarvest);
           }
         } catch {
@@ -86371,9 +86839,33 @@ function registerEventHandlers() {
     closeAvatarMenu();
   });
 
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    const pickerElement = target instanceof Element ? target.closest(".esm-workspace-meg-saved-picker") : null;
+    if (pickerElement) {
+      return;
+    }
+    closeAllEsmWorkspaceMegSavedQueryMenus();
+  });
+
+  document.addEventListener("focusin", (event) => {
+    const target = event.target;
+    const pickerElement = target instanceof Element ? target.closest(".esm-workspace-meg-saved-picker") : null;
+    if (pickerElement) {
+      return;
+    }
+    closeAllEsmWorkspaceMegSavedQueryMenus();
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeAvatarMenu();
+      const esmWorkspaceState = resolveEsmWorkspaceStateFromMegSavedQueryNode(document.activeElement);
+      if (esmWorkspaceState) {
+        esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, { restoreFocus: true });
+        return;
+      }
+      closeAllEsmWorkspaceMegSavedQueryMenus();
     }
   });
 

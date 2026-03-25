@@ -1231,8 +1231,14 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
     partnerFrameworkStatus: "framework-status-token",
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "tab-network:body",
+    redirectUrl: "https://experience.example.test/callback",
+    domainName: "experience.example.test",
+    flowId: "flow-123",
     sessionUrl: "https://example.test/sessions/session-code-123",
     loginUrl: "https://example.test/authenticate/turner/session-code-123",
+    sessionResponseHeaders: {
+      "AP-Partner-Framework-Status": "framework-status-token",
+    },
   });
 
   assert.equal(context.ok, true);
@@ -1240,6 +1246,88 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
   assert.equal(context.partnerFrameworkStatus, "framework-status-token");
   assert.equal(context.samlResponse, "PHNhbWxwOlJlc3BvbnNlPg==");
   assert.equal(context.samlSource, "tab-network:body");
+  assert.equal(context.redirectUrl, "https://experience.example.test/callback");
+  assert.equal(context.domainName, "experience.example.test");
+  assert.equal(context.flowId, "flow-123");
+  assert.equal(context.sessionResponseHeaders["AP-Partner-Framework-Status"], "framework-status-token");
+});
+
+test("REST V2 learning context reuses selection-scoped partner SSO seed when auth completed without an active profile harvest", () => {
+  const { buildRestV2InteractiveDocsContext } = loadRestV2InteractiveDocsContextBuilder({
+    state: {
+      selectedRequestorId: "MML",
+      selectedMvpdId: "Comcast_SSO",
+      restV2RecordingActive: false,
+      restV2DebugFlowId: "",
+    },
+    services: {
+      restV2: {
+        guid: "rest-guid",
+        appName: "REST V2",
+      },
+    },
+    restV2Candidates: [
+      {
+        guid: "rest-guid",
+        appName: "REST V2",
+      },
+    ],
+    requestorContext: {
+      requestorId: "MML",
+      autoResolved: false,
+      candidateCount: 1,
+    },
+    harvest: {
+      programmerId: "Turner",
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      profileCheckOutcome: "seed",
+      flowId: "flow-123",
+      redirectUrl: "https://experience.example.test/callback",
+      domainName: "experience.example.test",
+    },
+    harvestContext: {
+      ok: true,
+      programmerId: "Turner",
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      sessionCode: "session-code-123",
+      partner: "Apple",
+      partnerFrameworkStatus: "framework-status-token",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      samlSource: "tab-network:body",
+      redirectUrl: "https://experience.example.test/callback",
+      domainName: "experience.example.test",
+      flowId: "flow-123",
+    },
+    resolveFlowId: (harvest = null) => String(harvest?.flowId || "").trim(),
+  });
+
+  const context = buildRestV2InteractiveDocsContext(
+    {
+      programmerId: "Turner",
+      programmerName: "Turner",
+    },
+    {
+      key: "partner-sso-create-profile",
+      usesPartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+    }
+  );
+
+  assert.equal(context.ok, true);
+  assert.equal(context.mvpd, "Comcast_SSO");
+  assert.equal(context.sessionCode, "session-code-123");
+  assert.equal(context.partner, "Apple");
+  assert.equal(context.partnerFrameworkStatus, "framework-status-token");
+  assert.equal(context.samlResponse, "PHNhbWxwOlJlc3BvbnNlPg==");
+  assert.equal(context.samlSource, "tab-network:body");
+  assert.equal(context.redirectUrl, "https://experience.example.test/callback");
+  assert.equal(context.domainName, "experience.example.test");
+  assert.equal(context.flowId, "flow-123");
 });
 
 test("REST V2 learning hydration plans honor the selected customer-doc operation contracts", () => {

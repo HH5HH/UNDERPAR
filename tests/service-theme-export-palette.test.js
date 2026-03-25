@@ -236,7 +236,7 @@ test("Popup and sidepanel share the gold-and-onyx shell while service palettes s
   );
   assert.match(
     popupCss,
-    /\.service-esm :is\(\.esm-workspace-search, \.esm-workspace-zoom-filter, \.esm-workspace-meg-select, \.esm-workspace-meg-saved-select\) \{[\s\S]*?background:\s*var\(--service-input-bg\);/
+    /\.service-esm :is\(\.esm-workspace-search, \.esm-workspace-zoom-filter, \.esm-workspace-meg-select, \.esm-workspace-meg-saved-trigger\) \{[\s\S]*?background:\s*var\(--service-input-bg\);/
   );
   assert.match(
     popupCss,
@@ -248,7 +248,7 @@ test("Popup and sidepanel share the gold-and-onyx shell while service palettes s
   );
   assert.match(
     popupCss,
-    /\.service-esm \.esm-workspace-meg-select,\s*\.service-esm \.esm-workspace-meg-saved-select \{[\s\S]*?border:\s*1px solid #000000;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*#ffffff;[\s\S]*?color:\s*#000000;/
+    /\.service-esm \.esm-workspace-meg-select,\s*\.service-esm \.esm-workspace-meg-saved-trigger,\s*\.service-esm \.esm-workspace-meg-saved-menu \{[\s\S]*?border:\s*1px solid #000000;[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*#ffffff;[\s\S]*?color:\s*#000000;/
   );
   assert.match(
     popupCss,
@@ -256,7 +256,7 @@ test("Popup and sidepanel share the gold-and-onyx shell while service palettes s
   );
   assert.match(
     popupCss,
-    /\.service-esm \.esm-workspace-meg-toggle:focus-visible,\s*\.service-esm \.esm-workspace-meg-select:focus-visible,\s*\.service-esm \.esm-workspace-meg-saved-select:focus-visible,\s*\.service-esm \.esm-workspace-meg-open-btn:focus-visible \{[\s\S]*?outline:\s*2px solid #000000;[\s\S]*?outline-offset:\s*2px;/
+    /\.service-esm \.esm-workspace-meg-toggle:focus-visible,\s*\.service-esm \.esm-workspace-meg-select:focus-visible,\s*\.service-esm \.esm-workspace-meg-saved-trigger:focus-visible,\s*\.service-esm \.esm-workspace-meg-saved-option:focus-visible,\s*\.service-esm \.esm-workspace-meg-open-btn:focus-visible \{[\s\S]*?outline:\s*2px solid #000000;[\s\S]*?outline-offset:\s*2px;/
   );
 });
 
