@@ -52,6 +52,9 @@
   --up-danger-gradient: linear-gradient(180deg, rgba(var(--up-error-rgb), 0.92), rgba(var(--up-error-deep-rgb), 0.94));
   --up-surface-muted: rgba(34, 34, 34, 0.7);
   --up-surface-strong: rgba(17, 17, 17, 0.7);
+  --up-native-select-popup-bg: var(--spectrum-white, #ffffff);
+  --up-native-select-popup-ink: var(--spectrum-gray-900, #1d1d1d);
+  --up-native-select-popup-muted: var(--spectrum-gray-500, #767676);
 }
 
 * {
@@ -881,6 +884,16 @@ body::before {
   color: var(--up-text);
   font: inherit;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color-scheme: light;
+}
+
+.env-select :is(option, optgroup) {
+  background: var(--up-native-select-popup-bg);
+  color: var(--up-native-select-popup-ink);
+}
+
+.env-select option:disabled {
+  color: var(--up-native-select-popup-muted);
 }
 
 .env-select:focus-visible {

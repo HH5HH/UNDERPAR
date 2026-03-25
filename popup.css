@@ -155,6 +155,9 @@
   --underpar-sidepanel-shell-min-width: 452px;
   --underpar-shell-column-gap: 6px;
   --underpar-shell-gutter-width: 36px;
+  --underpar-native-select-popup-bg: var(--spectrum-white, #ffffff);
+  --underpar-native-select-popup-ink: var(--spectrum-gray-900, #1d1d1d);
+  --underpar-native-select-popup-muted: var(--spectrum-gray-500, #767676);
   background: var(--legacy-bg);
   color: var(--legacy-text);
 }
@@ -619,18 +622,26 @@ body.underpar-up-tab select:disabled {
 }
 
 /*
- * Native select popups are rendered by the host OS and do not honor dark form
- * control styling consistently across Chrome/Windows combinations. Force the
- * global controller menus to use a readable popup color scheme everywhere while
- * keeping the closed field chrome dark inside UnderPAR.
+ * Native single-select popups are rendered by the host OS and can ignore the
+ * page's dark surface colors on Chrome/Windows. Force a readable light popup
+ * palette for every single-select while keeping the closed field chrome dark.
+ * Multiple-select listboxes stay excluded because they render in-page and keep
+ * their service-specific option styling.
  */
-body.underpar-up-tab :is(#restricted-org-select, #media-company-select, #requestor-select, #mvpd-select) {
+body.underpar-up-tab select:not([multiple]):not([size]),
+body.underpar-up-tab select:not([multiple])[size="1"] {
   color-scheme: light;
 }
 
-body.underpar-up-tab :is(#restricted-org-select, #media-company-select, #requestor-select, #mvpd-select) :is(option, optgroup) {
-  background: #ffffff;
-  color: #142033;
+body.underpar-up-tab select:not([multiple]):not([size]) :is(option, optgroup),
+body.underpar-up-tab select:not([multiple])[size="1"] :is(option, optgroup) {
+  background: var(--underpar-native-select-popup-bg);
+  color: var(--underpar-native-select-popup-ink);
+}
+
+body.underpar-up-tab select:not([multiple]):not([size]) option:disabled,
+body.underpar-up-tab select:not([multiple])[size="1"] option:disabled {
+  color: var(--underpar-native-select-popup-muted);
 }
 
 body.underpar-up-tab .metadata-section,

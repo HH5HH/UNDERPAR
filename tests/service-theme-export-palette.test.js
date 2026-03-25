@@ -229,7 +229,7 @@ test("Popup and sidepanel share the gold-and-onyx shell while service palettes s
     popupCss,
     /body\.underpar-up-tab \.premium-service-section \.metadata-header\.service-box-header::before,\s*body\.underpar-up-tab \.hr-context-section \.metadata-header\.service-box-header::before\s*\{[\s\S]*?width:\s*6px;[\s\S]*?box-shadow:\s*10px 0 0 rgba\(var\(--service-zip-1100\),\s*0\.14\);/
   );
-  assert.doesNotMatch(popupCss, /body\.underpar-up-tab\s*\{[\s\S]*?color-scheme:\s*light;/);
+  assert.doesNotMatch(popupCss, /body\.underpar-up-tab\s*\{[^{}]*color-scheme:\s*light;/);
   assert.doesNotMatch(
     popupCss,
     /body\.underpar-up-tab \.header\s*\{[\s\S]*?linear-gradient\(180deg,\s*rgba\(255,\s*255,\s*255,\s*0\.98\)\s*0%,\s*rgba\(243,\s*243,\s*243,\s*0\.98\)\s*100%\);/

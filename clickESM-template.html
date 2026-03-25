@@ -154,6 +154,9 @@
   --spectrum-accent-content-color-down:rgb(var(--click-url-down-rgb));
   --spectrum-text-color-link:var(--spectrum-accent-content-color-default);
   --fg-primary:var(--spectrum-text-color-link);
+  --native-select-popup-bg:var(--spectrum-white, #ffffff);
+  --native-select-popup-ink:var(--spectrum-gray-900, #1d1d1d);
+  --native-select-popup-muted:var(--spectrum-gray-500, #767676);
   --mvpd-colorA:rgba(255, 255, 255, 0.96);
   --mvpd-colorB:rgba(255, 248, 241, 0.98);
   --mvpd-colorC:rgba(255, 244, 232, 0.97);
@@ -551,6 +554,19 @@ input,select{
   color:var(--text-primary);
   box-shadow:none;
   white-space:nowrap;
+}
+select:not([multiple]):not([size]),
+select:not([multiple])[size="1"]{
+  color-scheme:light;
+}
+select:not([multiple]):not([size]) :is(option,optgroup),
+select:not([multiple])[size="1"] :is(option,optgroup){
+  background:var(--native-select-popup-bg);
+  color:var(--native-select-popup-ink);
+}
+select:not([multiple]):not([size]) option:disabled,
+select:not([multiple])[size="1"] option:disabled{
+  color:var(--native-select-popup-muted);
 }
 #searchText{
   width:calc(12ch + 24px);
