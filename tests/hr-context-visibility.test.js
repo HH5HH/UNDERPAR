@@ -1516,6 +1516,39 @@ test("REST V2 learning framework status builder prefers cached partner platform 
   assert.equal(payload.frameworkPartnerInfo.name, "Apple");
 });
 
+test("REST V2 learning framework status builder prefers the selected SSO MVPD id over a generic Comcast fallback", () => {
+  const { buildRestV2LearningPartnerFrameworkStatus } = loadRestV2LearningPartnerFrameworkStatusBuilder({
+    resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
+      return mvpdMeta || null;
+    },
+  });
+
+  const encoded = buildRestV2LearningPartnerFrameworkStatus(
+    {
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      mvpdPlatformMappingId: "Comcast",
+      mvpdMeta: {
+        id: "Comcast",
+        name: "Comcast",
+        platformMappingId: "Comcast",
+      },
+    },
+    {
+      updatedAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    },
+    {
+      signalSource: "recorded partner auth flow",
+    },
+    "Apple"
+  );
+
+  const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+  assert.equal(payload.frameworkProviderInfo.id, "Comcast_SSO");
+  assert.equal(payload.frameworkPartnerInfo.name, "Apple");
+});
+
 test("REST V2 partner platform hydrator promotes cached Apple partner mappings even when the live snapshot is unavailable", async () => {
   const { hydrateRestV2PartnerPlatformMappingFromConsoleContext } = loadRestV2PartnerPlatformMappingHydrator({
     resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
@@ -3212,7 +3245,7 @@ test("REST V2 learning keeps Create Partner Profile blocked when partner mapping
   assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
 });
 
-test("REST V2 learning keeps partner SSO docs locked when only a generic MVPD provider id is available for a partner flow", () => {
+test("REST V2 learning uses the selected SSO MVPD id when the recorded partner payload has no stronger provider mapping", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -3269,8 +3302,13 @@ test("REST V2 learning keeps partner SSO docs locked when only a generic MVPD pr
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), true);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+  assert.equal(
+    JSON.parse(Buffer.from(plan.fieldValues["header.AP-Partner-Framework-Status"], "base64").toString("utf8"))
+      ?.frameworkProviderInfo?.id,
+    "Comcast_SSO"
+  );
 });
 
 test("REST V2 learning keeps Create Partner Profile blocked when the inferred provider id does not match the selected MVPD mapping", () => {

@@ -150,6 +150,7 @@ function loadLearningRuntime() {
     extractFunctionSource(popupSource, "normalizeRestV2MvpdMatchToken"),
     extractFunctionSource(popupSource, "buildRestV2MvpdMatchTokens"),
     extractFunctionSource(popupSource, "isRestV2MvpdMatch"),
+    extractFunctionSource(popupSource, "normalizeRestV2PartnerSsoPlatformName"),
     extractFunctionSource(popupSource, "resolveRestV2PartnerFromFrameworkStatus"),
     extractFunctionSource(popupSource, "resolveRestV2PartnerFrameworkStatusProviderId"),
     extractFunctionSource(popupSource, "resolveRestV2MvpdMetaForPartnerFrameworkProviderId"),
