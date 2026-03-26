@@ -28015,42 +28015,28 @@ function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flo
       : context?.mvpdMeta || flow?.context?.mvpdMeta || null;
   const expectedProviderId = String(
     firstNonEmptyString([
-      context?.mvpdPlatformMappingId,
-      context?.mvpdMeta?.platformMappingId,
-      context?.mvpdMeta?.platformMappingID,
+      resolveRestV2ExpectedPartnerFrameworkProviderId(context),
       flow?.context?.mvpdPlatformMappingId,
       flow?.context?.mvpdMeta?.platformMappingId,
       flow?.context?.mvpdMeta?.platformMappingID,
       cachedMvpdMeta?.platformMappingId,
       cachedMvpdMeta?.platformMappingID,
     ]) || ""
-  )
-    .trim()
-    .toLowerCase();
-  const extractProviderId = (value = "") => {
-    const parsedPayload = parseRestV2PartnerFrameworkStatusPayload(String(value || "").trim());
-    return String(
-      firstNonEmptyString([
-        parsedPayload?.frameworkProviderInfo?.id,
-        parsedPayload?.frameworkProvider?.id,
-        parsedPayload?.frameworkProviderId,
-        parsedPayload?.providerId,
-        parsedPayload?.provider,
-        parsedPayload?.id,
-      ]) || ""
-    )
-      .trim()
-      .toLowerCase();
-  };
+  ).trim();
   const existingLearningFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
     String(context.learningPartnerFrameworkStatus || "").trim()
   );
   const existingLearningFrameworkStatusCompatible =
     isRestV2PartnerFrameworkStatusUsable(existingLearningFrameworkStatus) &&
-    (!expectedProviderId || extractProviderId(existingLearningFrameworkStatus) === expectedProviderId);
+    (!expectedProviderId || isRestV2PartnerFrameworkStatusCompatibleWithContext(existingLearningFrameworkStatus, context));
   const hasRealPartner = Boolean(String(resolveRestV2PartnerNameFromContext(context) || "").trim());
-  const hasRealFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context));
-  if (hasRealPartner && hasRealFrameworkStatus) {
+  const directFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2PartnerFrameworkStatusFromContext(context)
+  );
+  const hasRealFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(directFrameworkStatus);
+  const hasCompatibleRealFrameworkStatus =
+    hasRealFrameworkStatus && (!expectedProviderId || isRestV2PartnerFrameworkStatusCompatibleWithContext(directFrameworkStatus, context));
+  if (hasRealPartner && hasCompatibleRealFrameworkStatus) {
     return context;
   }
 
@@ -28073,20 +28059,19 @@ function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flo
     context.learningPartner = inferredPartner;
   }
 
-  if (!hasRealFrameworkStatus && !existingLearningFrameworkStatusCompatible && String(context.learningPartnerFrameworkStatus || "").trim()) {
+  if (!hasCompatibleRealFrameworkStatus && !existingLearningFrameworkStatusCompatible && String(context.learningPartnerFrameworkStatus || "").trim()) {
     context.learningPartnerFrameworkStatus = "";
   }
-  if (!hasRealFrameworkStatus && !existingLearningFrameworkStatusCompatible) {
+  if (!hasCompatibleRealFrameworkStatus && !existingLearningFrameworkStatusCompatible) {
     const inferredFrameworkStatus = buildRestV2LearningPartnerFrameworkStatus(
       context,
       flow,
       artifacts,
       String(inferredPartner || "").trim()
     );
-    const inferredProviderId = extractProviderId(inferredFrameworkStatus);
     if (
       isRestV2PartnerFrameworkStatusUsable(inferredFrameworkStatus) &&
-      (!expectedProviderId || inferredProviderId === expectedProviderId)
+      (!expectedProviderId || isRestV2PartnerFrameworkStatusCompatibleWithContext(inferredFrameworkStatus, context))
     ) {
       context.learningPartnerFrameworkStatus = inferredFrameworkStatus;
     }
@@ -28139,11 +28124,22 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
     const mvpd = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
     const currentMvpdMeta =
       requestorId && mvpd ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || null) || context?.mvpdMeta || { id: mvpd } : context?.mvpdMeta || null;
-    context.mvpdPlatformMappingId = resolvedProviderId;
+    const currentMappingId = String(
+      firstNonEmptyString([
+        context?.mvpdPlatformMappingId,
+        currentMvpdMeta?.platformMappingId,
+        currentMvpdMeta?.platformMappingID,
+      ]) || ""
+    ).trim();
+    if (!currentMappingId) {
+      context.mvpdPlatformMappingId = resolvedProviderId;
+    }
     if (currentMvpdMeta && typeof currentMvpdMeta === "object") {
       context.mvpdMeta = {
         ...currentMvpdMeta,
-        platformMappingId: resolvedProviderId,
+        ...(String(currentMvpdMeta?.platformMappingId || currentMvpdMeta?.platformMappingID || "").trim()
+          ? {}
+          : { platformMappingId: resolvedProviderId }),
       };
     }
   }
@@ -28163,22 +28159,6 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
 async function hydrateRestV2PartnerSsoContextFromFlowId(context = null, flowId = "", options = {}) {
   const normalizedFlowId = String(flowId || "").trim();
   if (!context || typeof context !== "object" || !normalizedFlowId) {
-    return context;
-  }
-
-  const hasFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context));
-  const hasPartner = Boolean(String(firstNonEmptyString([context.partner, context.sessionPartner]) || "").trim());
-  const hasSamlResponse = Boolean(String(context.samlResponse || "").trim());
-  const hasPlatformMappingId = Boolean(
-    String(
-      firstNonEmptyString([
-        context?.mvpdPlatformMappingId,
-        context?.mvpdMeta?.platformMappingId,
-        context?.mvpdMeta?.platformMappingID,
-      ]) || ""
-    ).trim()
-  );
-  if (hasFrameworkStatus && hasPartner && hasSamlResponse && hasPlatformMappingId) {
     return context;
   }
 
@@ -28235,22 +28215,23 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
   if (normalizedFlowId) {
     try {
       flowSnapshot = flowSnapshot || (await getRestV2DebugFlowSnapshot(normalizedFlowId));
-      hydrateRestV2PartnerSsoContextFromDebugFlow(context, flowSnapshot);
+      await hydrateRestV2PartnerSsoContextFromFlowId(context, normalizedFlowId, {
+        flowSnapshot,
+        forceRefresh: false,
+      });
     } catch {
       flowSnapshot = flowSnapshot || null;
     }
   }
 
-  const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
-    resolveRestV2PartnerFrameworkStatusFromContext(context)
-  );
+  const partnerFrameworkStatus = resolveRestV2PreferredPartnerFrameworkStatusForContext(context);
   result.frameworkStatusPresent = isRestV2PartnerFrameworkStatusUsable(partnerFrameworkStatus);
   if (!result.frameworkStatusPresent) {
     result.error = "Missing AP-Partner-Framework-Status from REST session response.";
     setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
     return result;
   }
-  const resolvedPartner = String(resolveRestV2PartnerNameFromContext(context) || "").trim();
+  const resolvedPartner = String(resolveRestV2LearningPartnerNameFromContext(context) || "").trim();
   result.partner = /^(?:ios|tvos)$/i.test(String(resolvedPartner || "").trim()) ? "Apple" : String(resolvedPartner || "").trim();
   if (!result.partner) {
     result.error = "Missing partner for SSO profile creation.";
@@ -62950,9 +62931,29 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
   );
   const missingPartner =
     resolvedEntry.usesPartnerPath === true && !String(resolveRestV2PartnerNameFromContext(preparedContext) || "").trim();
+  const preferredPartnerFrameworkStatus = String(resolveRestV2PreferredPartnerFrameworkStatusForContext(preparedContext) || "").trim();
+  const preferredPartnerName = String(
+    firstNonEmptyString([
+      resolveRestV2LearningPartnerNameFromContext(preparedContext),
+      resolveRestV2PartnerNameFromContext(preparedContext),
+    ]) || ""
+  ).trim();
+  const partnerPlatformMappings =
+    preparedContext?.mvpdMeta?.partnerPlatformMappings && typeof preparedContext.mvpdMeta.partnerPlatformMappings === "object"
+      ? preparedContext.mvpdMeta.partnerPlatformMappings
+      : null;
+  const hasMappedPartnerProviderId =
+    Boolean(preferredPartnerName) &&
+    Boolean(
+      Object.entries(partnerPlatformMappings || {}).find(
+        ([rawPartnerName, rawProviderId]) =>
+          String(rawPartnerName || "").trim().toLowerCase() === preferredPartnerName.toLowerCase() &&
+          String(rawProviderId || "").trim()
+      )
+    );
   const missingPartnerFrameworkStatus =
     resolvedEntry.usesPartnerFrameworkStatus === true &&
-    !isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(preparedContext));
+    (!preferredPartnerFrameworkStatus || (preferredPartnerName && !hasMappedPartnerProviderId));
   const missingSamlResponse = resolvedEntry.usesBodySamlResponse === true && !String(preparedContext.samlResponse || "").trim();
   if ((!needsPartnerFlowHydration || (!missingPartner && !missingPartnerFrameworkStatus && !missingSamlResponse)) && missingOptionalHeaders.length === 0) {
     return preparedContext;
@@ -63018,6 +63019,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   const directPartnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
     resolveRestV2PartnerFrameworkStatusFromContext(resolvedContext)
   );
+  const preferredPartnerFrameworkStatus = resolveRestV2PreferredPartnerFrameworkStatusForContext(resolvedContext);
   const learningPartnerFrameworkStatus = resolveRestV2LearningPartnerFrameworkStatusFromContext(resolvedContext);
   if (resolvedContext.requestorAutoResolved === true && String(resolvedContext.requestorId || "").trim()) {
     notes.push(`Using the only REST V2 RequestorId mapped in UnderPAR: ${String(resolvedContext.requestorId || "").trim()}.`);
@@ -63052,10 +63054,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (resolvedEntry.contentType) {
     fieldValues["header.Content-Type"] = String(resolvedEntry.contentType || "").trim();
   }
-  const usablePartnerFrameworkStatus = firstNonEmptyString([
-    isRestV2PartnerFrameworkStatusUsable(directPartnerFrameworkStatus) ? directPartnerFrameworkStatus : "",
-    learningPartnerFrameworkStatus,
-  ]);
+  const usablePartnerFrameworkStatus = String(preferredPartnerFrameworkStatus || "").trim();
   if (resolvedEntry.usesPartnerFrameworkStatus === true && usablePartnerFrameworkStatus) {
     fieldValues["header.AP-Partner-Framework-Status"] = usablePartnerFrameworkStatus;
   }
@@ -63144,7 +63143,8 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (
     resolvedEntry.usesPartnerFrameworkStatus === true &&
     learningPartnerFrameworkStatus &&
-    !isRestV2PartnerFrameworkStatusUsable(directPartnerFrameworkStatus)
+    usablePartnerFrameworkStatus === learningPartnerFrameworkStatus &&
+    learningPartnerFrameworkStatus !== directPartnerFrameworkStatus
   ) {
     notes.push(
       `Using inferred AP-Partner-Framework-Status from ${String(resolvedContext.learningPartnerSource || "the recorded partner auth flow").trim()}.`
@@ -85811,6 +85811,44 @@ function resolveRestV2PartnerFrameworkStatusProviderId(value = "") {
   ).trim();
 }
 
+function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
+  if (!context || typeof context !== "object") {
+    return "";
+  }
+  const requestorId = String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim();
+  const mvpd = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
+  const cachedMvpdMeta =
+    requestorId && mvpd && typeof getRestV2MvpdMeta === "function"
+      ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || null)
+      : context?.mvpdMeta || null;
+  return String(
+    firstNonEmptyString([
+      context?.mvpdPlatformMappingId,
+      context?.mvpdMeta?.platformMappingId,
+      context?.mvpdMeta?.platformMappingID,
+      cachedMvpdMeta?.platformMappingId,
+      cachedMvpdMeta?.platformMappingID,
+    ]) || ""
+  ).trim();
+}
+
+function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context = null) {
+  const normalizedValue = normalizeRestV2PartnerFrameworkStatusForRequest(String(value || "").trim());
+  if (!isRestV2PartnerFrameworkStatusUsable(normalizedValue)) {
+    return false;
+  }
+  const expectedProviderId = String(resolveRestV2ExpectedPartnerFrameworkProviderId(context) || "")
+    .trim()
+    .toLowerCase();
+  if (!expectedProviderId) {
+    return true;
+  }
+  const actualProviderId = String(resolveRestV2PartnerFrameworkStatusProviderId(normalizedValue) || "")
+    .trim()
+    .toLowerCase();
+  return Boolean(actualProviderId) && actualProviderId === expectedProviderId;
+}
+
 function resolveRestV2PartnerPlatformMappingDetailsFromSnapshot(snapshot = null, partnerCandidates = []) {
   const entries = Array.isArray(snapshot?.partnerSsoPlatforms) ? snapshot.partnerSsoPlatforms : [];
   const normalizedPartnerCandidates = uniquePreserveOrder(
@@ -85910,17 +85948,15 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     currentMvpdMeta?.partnerPlatformMappings && typeof currentMvpdMeta.partnerPlatformMappings === "object"
       ? { ...currentMvpdMeta.partnerPlatformMappings }
       : {};
-  if (realFrameworkProviderId) {
-    context.mvpdPlatformMappingId = realFrameworkProviderId;
-    context.mvpdMeta = {
-      ...currentMvpdMeta,
-      ...(Object.keys(existingPartnerPlatformMappings).length > 0 ? { partnerPlatformMappings: existingPartnerPlatformMappings } : {}),
-      platformMappingId: realFrameworkProviderId,
-    };
-    return context;
-  }
-
   if (partnerCandidates.length === 0) {
+    if (realFrameworkProviderId) {
+      context.mvpdPlatformMappingId = realFrameworkProviderId;
+      context.mvpdMeta = {
+        ...currentMvpdMeta,
+        ...(Object.keys(existingPartnerPlatformMappings).length > 0 ? { partnerPlatformMappings: existingPartnerPlatformMappings } : {}),
+        platformMappingId: realFrameworkProviderId,
+      };
+    }
     if (!context?.mvpdMeta && currentMvpdMeta) {
       context.mvpdMeta = currentMvpdMeta;
     }
@@ -85963,6 +85999,7 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   const resolvedMappingId = String(
     firstNonEmptyString([
       resolvedDetails?.resolvedMappingId,
+      realFrameworkProviderId,
       currentMappingId,
     ]) || ""
   ).trim();
@@ -86211,7 +86248,7 @@ function resolveRestV2LearningPartnerFrameworkStatusFromContext(context = null) 
   const directValue = normalizeRestV2PartnerFrameworkStatusForRequest(
     resolveRestV2PartnerFrameworkStatusFromContext(context)
   );
-  if (isRestV2PartnerFrameworkStatusUsable(directValue)) {
+  if (isRestV2PartnerFrameworkStatusCompatibleWithContext(directValue, context)) {
     return directValue;
   }
   const inferredValue = normalizeRestV2PartnerFrameworkStatusForRequest(
@@ -86220,40 +86257,30 @@ function resolveRestV2LearningPartnerFrameworkStatusFromContext(context = null) 
   if (!isRestV2PartnerFrameworkStatusUsable(inferredValue)) {
     return "";
   }
-  const requestorId = String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim();
-  const mvpd = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
-  const cachedMvpdMeta =
-    requestorId && mvpd && typeof getRestV2MvpdMeta === "function"
-      ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || null)
-      : context?.mvpdMeta || null;
-  const expectedProviderId = String(
-    firstNonEmptyString([
-      context?.mvpdPlatformMappingId,
-      context?.mvpdMeta?.platformMappingId,
-      context?.mvpdMeta?.platformMappingID,
-      cachedMvpdMeta?.platformMappingId,
-      cachedMvpdMeta?.platformMappingID,
-    ]) || ""
-  )
-    .trim()
-    .toLowerCase();
-  if (!expectedProviderId) {
+  if (isRestV2PartnerFrameworkStatusCompatibleWithContext(inferredValue, context)) {
     return inferredValue;
   }
-  const parsedPayload = parseRestV2PartnerFrameworkStatusPayload(inferredValue);
-  const actualProviderId = String(
-    firstNonEmptyString([
-      parsedPayload?.frameworkProviderInfo?.id,
-      parsedPayload?.frameworkProvider?.id,
-      parsedPayload?.frameworkProviderId,
-      parsedPayload?.providerId,
-      parsedPayload?.provider,
-      parsedPayload?.id,
-    ]) || ""
-  )
-    .trim()
-    .toLowerCase();
-  return actualProviderId && actualProviderId === expectedProviderId ? inferredValue : "";
+  return !String(resolveRestV2ExpectedPartnerFrameworkProviderId(context) || "").trim() ? inferredValue : "";
+}
+
+function resolveRestV2PreferredPartnerFrameworkStatusForContext(context = null) {
+  if (!context || typeof context !== "object") {
+    return "";
+  }
+  const directValue = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2PartnerFrameworkStatusFromContext(context)
+  );
+  if (isRestV2PartnerFrameworkStatusCompatibleWithContext(directValue, context)) {
+    return directValue;
+  }
+  const learningValue = resolveRestV2LearningPartnerFrameworkStatusFromContext(context);
+  if (isRestV2PartnerFrameworkStatusCompatibleWithContext(learningValue, context)) {
+    return learningValue;
+  }
+  if (!String(resolveRestV2ExpectedPartnerFrameworkProviderId(context) || "").trim()) {
+    return firstNonEmptyString([directValue, learningValue]);
+  }
+  return "";
 }
 
 function resolveRestV2LearningPartnerNameFromContext(context = null) {

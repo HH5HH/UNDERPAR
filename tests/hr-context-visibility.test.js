@@ -67,6 +67,10 @@ function loadHrVisibilityHelpers(seed = {}) {
     module: { exports: {} },
     exports: {},
     __seed: seed,
+    atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -80,6 +84,7 @@ function loadRestV2LearningPlanBuilder() {
     'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
     'function buildRestV2Headers() { return { "AP-Device-Identifier": "device-123", "X-Device-Info": "device-info-123" }; }',
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function getRestV2MvpdMeta(requestorId = '', mvpdId = '', mvpdMeta = null) { return mvpdMeta || null; }",
     extractFunctionSource(source, "parseJsonText"),
     extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
     extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
@@ -96,11 +101,15 @@ function loadRestV2LearningPlanBuilder() {
     extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
     extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
+    extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusFromSessionData"),
     extractFunctionSource(source, "resolveRestV2SessionPartnerFromSessionData"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusFromContext"),
     extractFunctionSource(source, "resolveRestV2PartnerNameFromContext"),
     extractFunctionSource(source, "resolveRestV2LearningPartnerFrameworkStatusFromContext"),
+    extractFunctionSource(source, "resolveRestV2PreferredPartnerFrameworkStatusForContext"),
     extractFunctionSource(source, "resolveRestV2LearningPartnerNameFromContext"),
     extractFunctionSource(source, "resolveRestV2InteractiveDocsHeaderValueFromContext"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
@@ -152,6 +161,39 @@ function loadRestV2PartnerPlatformMappingSnapshotResolver() {
   const context = {
     module: { exports: {} },
     exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+function loadRestV2PartnerPlatformMappingHydrator(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    "function getRestV2MvpdMeta(requestorId = '', mvpdId = '', mvpdMeta = null) { return typeof globalThis.__seed.resolveMvpdMeta === 'function' ? globalThis.__seed.resolveMvpdMeta(requestorId, mvpdId, mvpdMeta) : mvpdMeta; }",
+    "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || '').trim(); }",
+    "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || '').trim(); }",
+    "function resolveRestV2LearningPartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolveLearningPartnerName === 'function' ? globalThis.__seed.resolveLearningPartnerName(context) : String(context?.learningPartner || '').trim(); }",
+    "async function mvpdWorkspaceEnsureSnapshot(selectionContext, options = {}) { return typeof globalThis.__seed.loadSnapshot === 'function' ? globalThis.__seed.loadSnapshot(selectionContext, options) : null; }",
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
+    extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
+    extractFunctionSource(source, "decodeBase64TextSafe"),
+    extractFunctionSource(source, "decodeURIComponentSafe"),
+    extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "inferRestV2LearningPartnerNameFromText"),
+    extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
+    extractFunctionSource(source, "resolveRestV2PartnerPlatformMappingDetailsFromSnapshot"),
+    extractFunctionSource(source, "hydrateRestV2PartnerPlatformMappingFromConsoleContext"),
+    "module.exports = { hydrateRestV2PartnerPlatformMappingFromConsoleContext };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -300,15 +342,32 @@ function loadRestV2LearningContextPreparer(seed = {}) {
   const script = [
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
     "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    "function getRestV2MvpdMeta(requestorId = '', mvpdId = '', mvpdMeta = null) { return mvpdMeta || null; }",
     "function bobtoolsWorkspaceResolveQuickResourceOptions(programmerId, requestorId, mvpdId) { return typeof globalThis.__seed.resolveQuickResourceOptions === 'function' ? globalThis.__seed.resolveQuickResourceOptions(programmerId, requestorId, mvpdId) : { resourceIds: [] }; }",
     "function bobtoolsWorkspaceNormalizeQuickResourceIds(values = [], maxItems = 320) { const normalizedMax = Number(maxItems || 0); const limit = Number.isFinite(normalizedMax) && normalizedMax > 0 ? normalizedMax : 320; const unique = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const text = String(value || '').trim(); if (!text) { return; } const key = text.toLowerCase(); if (seen.has(key)) { return; } seen.add(key); unique.push(text); }); return unique.slice(0, limit); }",
     "async function mvpdWorkspaceEnsureSnapshot(selectionContext, options = {}) { return typeof globalThis.__seed.loadSnapshot === 'function' ? globalThis.__seed.loadSnapshot(selectionContext, options) : null; }",
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
+    extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
+    extractFunctionSource(source, "decodeBase64TextSafe"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveHeaderValue"),
+    extractFunctionSource(source, "collectRestV2CaseInsensitiveObjectValues"),
+    extractFunctionSource(source, "getRestV2InteractiveDocsHeaderAliasCandidates"),
+    extractFunctionSource(source, "decodeURIComponentSafe"),
+    extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
+    extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
+    extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
     extractFunctionSource(source, "sampleRestV2LearningResourceIds"),
     extractFunctionSource(source, "enrichRestV2LearningResourcesFromConsoleContext"),
     "function resolveRestV2DebugFlowIdForHarvest() { return ''; }",
     "async function getRestV2DebugFlowSnapshot() { return typeof globalThis.__seed.getFlowSnapshot === 'function' ? globalThis.__seed.getFlowSnapshot() : null; }",
     "function extractRestV2SamlResponseFromDebugFlow(flow = null) { return typeof globalThis.__seed.extractSaml === 'function' ? globalThis.__seed.extractSaml(flow) : {}; }",
     "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || context?.sessionPartner || '').trim(); }",
+    "function resolveRestV2LearningPartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolveLearningPartnerName === 'function' ? globalThis.__seed.resolveLearningPartnerName(context) : String(context?.partner || context?.sessionPartner || context?.learningPartner || '').trim(); }",
     "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); }",
     "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); } return ''; }",
     "function isRestV2PartnerFrameworkStatusUsable(value = '') { return typeof globalThis.__seed.isFrameworkStatusUsable === 'function' ? globalThis.__seed.isFrameworkStatusUsable(value) : Boolean(String(value || '').trim()); }",
@@ -317,6 +376,8 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     "function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydrateLearningPartnerContext === 'function') { return globalThis.__seed.hydrateLearningPartnerContext(context, flow); } return context; }",
     "async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = null, options = {}) { if (typeof globalThis.__seed.hydratePartnerPlatformMapping === 'function') { return globalThis.__seed.hydratePartnerPlatformMapping(context, options); } return context; }",
     "function hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context = null, flow = null, headerNames = []) { if (typeof globalThis.__seed.hydrateOptionalHeaders === 'function') { return globalThis.__seed.hydrateOptionalHeaders(context, flow, headerNames); } return context; }",
+    extractFunctionSource(source, "resolveRestV2LearningPartnerFrameworkStatusFromContext"),
+    extractFunctionSource(source, "resolveRestV2PreferredPartnerFrameworkStatusForContext"),
     extractFunctionSource(source, "prepareRestV2InteractiveDocsContextForEntry"),
     "module.exports = { enrichRestV2LearningResourcesFromConsoleContext, prepareRestV2InteractiveDocsContextForEntry };",
   ].join("\n\n");
@@ -330,6 +391,10 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     exports: {},
     __seed: seed,
     Math: mathObject,
+    atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -1096,6 +1161,66 @@ test("REST V2 partner snapshot resolver preserves the Apple-specific provider ma
   assert.equal(resolved.partnerPlatformMappings.Amazon, "Comcast_SSO");
 });
 
+test("REST V2 partner platform hydrator upgrades a generic captured Comcast framework provider to the Apple partner mapping from the snapshot", async () => {
+  const genericFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const { hydrateRestV2PartnerPlatformMappingFromConsoleContext } = loadRestV2PartnerPlatformMappingHydrator({
+    resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
+      return mvpdMeta || {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+      };
+    },
+    loadSnapshot() {
+      return {
+        partnerSsoPlatforms: [
+          {
+            partner: "Apple",
+            mappingId: "Comcast_SSO_Apple",
+            integrationEnabled: true,
+            boardingStatus: "PICKER",
+          },
+        ],
+      };
+    },
+  });
+
+  const context = {
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "MML",
+    serviceProviderId: "MML",
+    mvpd: "Comcast_SSO",
+    partnerFrameworkStatus: genericFrameworkStatus,
+    learningPartner: "Apple",
+    mvpdMeta: {
+      id: "Comcast_SSO",
+      name: "Xfinity",
+    },
+  };
+
+  await hydrateRestV2PartnerPlatformMappingFromConsoleContext(context, {
+    forceRefresh: false,
+  });
+
+  assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO_Apple");
+  assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
+  assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
+});
+
 test("REST V2 learning reruns inferred partner hydration after console snapshot mapping resolves the Comcast Apple provider id", async () => {
   let learningHydrationCalls = 0;
   const validLearningFrameworkStatus = Buffer.from(
@@ -1187,6 +1312,209 @@ test("REST V2 learning reruns inferred partner hydration after console snapshot 
   assert.equal(learningHydrationCalls, 2);
   assert.equal(prepared.mvpdPlatformMappingId, "Comcast_SSO_Apple");
   assert.equal(prepared.learningPartner, "Apple");
+  assert.equal(prepared.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
+});
+
+test("REST V2 learning reruns inferred partner hydration when the recorded framework status stays generic but the snapshot resolves Comcast Apple", async () => {
+  let learningHydrationCalls = 0;
+  const genericFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const validLearningFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const { prepareRestV2InteractiveDocsContextForEntry } = loadRestV2LearningContextPreparer({
+    getFlowSnapshot() {
+      return {
+        flowId: "flow-123",
+        events: [
+          {
+            source: "web-request",
+            phase: "cookies-snapshot",
+            cookies: [
+              {
+                name: "r-apt",
+                value: "jwt-placeholder",
+              },
+            ],
+          },
+        ],
+      };
+    },
+    hydrateLearningPartnerContext(context) {
+      learningHydrationCalls += 1;
+      context.learningPartner = "Apple";
+      context.learningPartnerSource = "recorded r-apt cookie";
+      if (String(context?.mvpdPlatformMappingId || "").trim() === "Comcast_SSO_Apple") {
+        context.learningPartnerFrameworkStatus = validLearningFrameworkStatus;
+      }
+      return context;
+    },
+    hydratePartnerPlatformMapping(context) {
+      context.mvpdPlatformMappingId = "Comcast_SSO_Apple";
+      context.mvpdMeta = {
+        ...(context.mvpdMeta || {}),
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "Comcast_SSO_Apple",
+        partnerPlatformMappings: {
+          Apple: "Comcast_SSO_Apple",
+        },
+      };
+      return context;
+    },
+    isFrameworkStatusUsable(value = "") {
+      const normalized = String(value || "").trim();
+      return normalized === genericFrameworkStatus || normalized === validLearningFrameworkStatus;
+    },
+  });
+
+  const prepared = await prepareRestV2InteractiveDocsContextForEntry(
+    {
+      key: "partner-sso-create-profile",
+      usesPartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      usesBodySamlResponse: false,
+    },
+    {
+      ok: true,
+      programmerId: "Turner",
+      programmerName: "Turner",
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+      },
+      partner: "",
+      partnerFrameworkStatus: genericFrameworkStatus,
+      learningPartner: "",
+      learningPartnerFrameworkStatus: "",
+      flowId: "flow-123",
+    }
+  );
+
+  assert.equal(learningHydrationCalls, 2);
+  assert.equal(prepared.mvpdPlatformMappingId, "Comcast_SSO_Apple");
+  assert.equal(prepared.learningPartner, "Apple");
+  assert.equal(prepared.partnerFrameworkStatus, genericFrameworkStatus);
+  assert.equal(prepared.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
+});
+
+test("REST V2 learning still refreshes the partner flow when a generic captured framework status already names Apple", async () => {
+  let learningHydrationCalls = 0;
+  const genericFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const validLearningFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const { prepareRestV2InteractiveDocsContextForEntry } = loadRestV2LearningContextPreparer({
+    getFlowSnapshot() {
+      return {
+        flowId: "flow-123",
+      };
+    },
+    hydrateLearningPartnerContext(context) {
+      learningHydrationCalls += 1;
+      if (String(context?.mvpdPlatformMappingId || "").trim() === "Comcast_SSO_Apple") {
+        context.learningPartnerFrameworkStatus = validLearningFrameworkStatus;
+      }
+      return context;
+    },
+    hydratePartnerPlatformMapping(context) {
+      context.mvpdPlatformMappingId = "Comcast_SSO_Apple";
+      context.mvpdMeta = {
+        ...(context.mvpdMeta || {}),
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "Comcast_SSO_Apple",
+      };
+      return context;
+    },
+    isFrameworkStatusUsable(value = "") {
+      const normalized = String(value || "").trim();
+      return normalized === genericFrameworkStatus || normalized === validLearningFrameworkStatus;
+    },
+  });
+
+  const prepared = await prepareRestV2InteractiveDocsContextForEntry(
+    {
+      key: "partner-sso-create-profile",
+      usesPartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      usesBodySamlResponse: false,
+    },
+    {
+      ok: true,
+      programmerId: "Turner",
+      programmerName: "Turner",
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+      },
+      partner: "Apple",
+      partnerFrameworkStatus: genericFrameworkStatus,
+      learningPartner: "",
+      learningPartnerFrameworkStatus: "",
+      flowId: "flow-123",
+    }
+  );
+
+  assert.equal(learningHydrationCalls, 2);
+  assert.equal(prepared.mvpdPlatformMappingId, "Comcast_SSO_Apple");
   assert.equal(prepared.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
 });
 
@@ -2153,6 +2481,81 @@ test("REST V2 learning activates partner APIs from the inferred partner SSO seed
   assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
   assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
   assert.match(plan.notes.join(" "), /inferred partner Apple/i);
+});
+
+test("REST V2 learning prefers the Apple-specific inferred framework status over a generic captured Comcast framework status", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const genericFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const validLearningFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+
+  const plan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    {
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      requestorAutoResolved: false,
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "Comcast_SSO_Apple",
+      },
+      partner: "",
+      partnerFrameworkStatus: genericFrameworkStatus,
+      learningPartner: "Apple",
+      learningPartnerFrameworkStatus: validLearningFrameworkStatus,
+      learningPartnerSource: "recorded r-apt cookie",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      samlSource: "tab-network:body",
+    },
+    "test-token"
+  );
+
+  assert.equal(plan.fieldValues["path.partner"], "Apple");
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+  assert.match(plan.notes.join(" "), /inferred AP-Partner-Framework-Status/i);
 });
 
 test("REST V2 learning keeps Create Partner Profile blocked when the inferred provider id does not match the selected MVPD mapping", () => {
