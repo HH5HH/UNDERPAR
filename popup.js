@@ -24432,6 +24432,7 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
     apis: fetchEsmHealthJson(queryContext, apiBreakdownPath, {
       authState,
       limit: ESM_HEALTH_BREAKDOWN_LIMIT,
+      mvpdIds: [],
     }),
     sdk: fetchEsmHealthJson(queryContext, sdkBreakdownPath, {
       authState,

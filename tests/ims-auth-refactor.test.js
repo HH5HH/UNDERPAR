@@ -1402,6 +1402,10 @@ test("esm health now builds supported ordered report paths and drops broken metr
   );
   assert.match(
     runSource,
+    /apis:\s*fetchEsmHealthJson\(queryContext,\s*apiBreakdownPath,\s*\{[\s\S]*?mvpdIds:\s*\[\],/
+  );
+  assert.match(
+    runSource,
     /const sdkBreakdownPath = buildEsmHealthReportPath\(breakdownGranularity, \[\s*"requestor-id",\s*"proxy",\s*"mvpd",\s*"platform",\s*"nsdk",\s*"nsdk-version",\s*\]\);/
   );
   assert.match(
@@ -1467,6 +1471,56 @@ test("esm health now builds supported ordered report paths and drops broken metr
   const range = getEsmHealthDefaultDateRange(Date.UTC(2026, 2, 24, 20, 0, 0));
   assert.equal(range.start, "2026-03-23");
   assert.equal(range.end, "2026-03-24");
+});
+
+test("ESM health request URL can explicitly drop MVPD filters for MVPD-incompatible report paths", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const script = [
+    "const ADOBE_MGMT_BASE = 'https://mgmt.auth.adobe.com';",
+    "function uniquePreserveOrder(values = []) { const seen = new Set(); const output = []; for (const value of Array.isArray(values) ? values : []) { const text = String(value || '').trim(); if (!text || seen.has(text)) { continue; } seen.add(text); output.push(text); } return output; }",
+    extractFunctionSource(popupSource, "normalizeEsmHealthFilterList"),
+    extractFunctionSource(popupSource, "buildEsmHealthRequestUrl"),
+    "module.exports = { buildEsmHealthRequestUrl };",
+  ].join("\n\n");
+
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    URL,
+    getActiveAdobePassEnvironment: () => ({ esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/" }),
+  };
+  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
+  const { buildEsmHealthRequestUrl } = context.module.exports;
+
+  const baseQueryContext = {
+    mediaCompany: "Turner",
+    start: "2026-03-25",
+    end: "2026-03-26",
+    requestorIds: ["MML"],
+    mvpdIds: ["Comcast_SSO"],
+    platforms: ["Apple"],
+  };
+
+  const inheritedUrl = new URL(
+    buildEsmHealthRequestUrl(
+      "year/month/day/requestor-id/platform/application-name/application-version/api.json",
+      baseQueryContext
+    )
+  );
+  assert.deepEqual(inheritedUrl.searchParams.getAll("mvpd"), ["Comcast_SSO"]);
+  assert.deepEqual(inheritedUrl.searchParams.getAll("requestor-id"), ["MML"]);
+  assert.deepEqual(inheritedUrl.searchParams.getAll("platform"), ["Apple"]);
+
+  const overrideUrl = new URL(
+    buildEsmHealthRequestUrl(
+      "year/month/day/requestor-id/platform/application-name/application-version/api.json",
+      baseQueryContext,
+      { mvpdIds: [] }
+    )
+  );
+  assert.deepEqual(overrideUrl.searchParams.getAll("mvpd"), []);
+  assert.deepEqual(overrideUrl.searchParams.getAll("requestor-id"), ["MML"]);
+  assert.deepEqual(overrideUrl.searchParams.getAll("platform"), ["Apple"]);
 });
 
 test("health workspaces render full-width collapsible report sections and expose the richer ESM health breakdowns", () => {
