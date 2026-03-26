@@ -79,6 +79,32 @@ function loadMvpdWorkspaceConsoleHelpers() {
   return context.module.exports;
 }
 
+function loadMvpdWorkspaceLogoHelpers(fetchImpl = async () => "") {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    'const MVPD_LOGO_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;',
+    "const state = { mvpdLogoCacheByUrl: new Map(), mvpdLogoResolvePromiseByUrl: new Map() };",
+    "async function fetchImageDataUrlViaBackground(url) { return globalThis.__fetchImageDataUrlViaBackground(url); }",
+    extractFunctionSource(source, "normalizeRestV2MvpdLogoUrl"),
+    extractFunctionSource(source, "getMvpdWorkspaceLogoCacheEntry"),
+    extractFunctionSource(source, "setMvpdWorkspaceLogoCacheEntry"),
+    extractFunctionSource(source, "ensureMvpdWorkspaceLogoResolved"),
+    "module.exports = { state, getMvpdWorkspaceLogoCacheEntry, setMvpdWorkspaceLogoCacheEntry, ensureMvpdWorkspaceLogoResolved, normalizeRestV2MvpdLogoUrl };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Map,
+    Date,
+    URL,
+    __fetchImageDataUrlViaBackground: fetchImpl,
+  };
+  context.globalThis = context;
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function normalizeVmValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -230,4 +256,41 @@ test("mvpd workspace resource chips fall back to discovered resource IDs when no
     },
   ]);
   assert.deepEqual(normalizeVmValue(result.finalResourceIdsRaw), ["resource.beta", "resource.gamma"]);
+});
+
+test("mvpd workspace logo resolver caches a successful background image resolution", async () => {
+  let fetchCount = 0;
+  const helpers = loadMvpdWorkspaceLogoHelpers(async () => {
+    fetchCount += 1;
+    return "data:image/png;base64,ZmFrZS1sb2dv";
+  });
+  const logoUrl = "https://logos.example.test/comcast.png";
+
+  const first = await helpers.ensureMvpdWorkspaceLogoResolved(logoUrl);
+  const second = await helpers.ensureMvpdWorkspaceLogoResolved(logoUrl);
+  const cachedEntry = helpers.getMvpdWorkspaceLogoCacheEntry(logoUrl);
+
+  assert.equal(first, "data:image/png;base64,ZmFrZS1sb2dv");
+  assert.equal(second, "data:image/png;base64,ZmFrZS1sb2dv");
+  assert.equal(fetchCount, 1);
+  assert.equal(cachedEntry?.status, "loaded");
+  assert.equal(cachedEntry?.resolvedUrl, "data:image/png;base64,ZmFrZS1sb2dv");
+});
+
+test("mvpd workspace logo resolver cools down failed image fetches instead of retrying every redraw", async () => {
+  let fetchCount = 0;
+  const helpers = loadMvpdWorkspaceLogoHelpers(async () => {
+    fetchCount += 1;
+    return "";
+  });
+  const logoUrl = "https://logos.example.test/fails.png";
+
+  const first = await helpers.ensureMvpdWorkspaceLogoResolved(logoUrl);
+  const second = await helpers.ensureMvpdWorkspaceLogoResolved(logoUrl);
+  const cachedEntry = helpers.getMvpdWorkspaceLogoCacheEntry(logoUrl);
+
+  assert.equal(first, "");
+  assert.equal(second, "");
+  assert.equal(fetchCount, 1);
+  assert.equal(cachedEntry?.status, "failed");
 });

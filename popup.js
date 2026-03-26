@@ -12560,6 +12560,7 @@ const LEGACY_AVATAR_PERSIST_STORAGE_PREFIX = "mincloudlogin_avatar_persist_v1:";
 const AVATAR_PERSIST_GLOBAL_KEY = `${AVATAR_PERSIST_STORAGE_PREFIX}last`;
 const LEGACY_AVATAR_PERSIST_GLOBAL_KEY = `${LEGACY_AVATAR_PERSIST_STORAGE_PREFIX}last`;
 const AVATAR_PERSIST_TTL_SECONDS = 30 * 24 * 60 * 60;
+const MVPD_LOGO_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const ESM_WORKSPACE_MESSAGE_TYPES = new Set([ESM_WORKSPACE_MESSAGE_TYPE, LEGACY_ESM_WORKSPACE_MESSAGE_TYPE]);
 const BLONDIE_TIME_WORKSPACE_MESSAGE_TYPES = new Set([BLONDIE_TIME_WORKSPACE_MESSAGE_TYPE]);
 const MEG_WORKSPACE_MESSAGE_TYPES = new Set([MEG_WORKSPACE_MESSAGE_TYPE, LEGACY_MEG_WORKSPACE_MESSAGE_TYPE]);
@@ -12748,6 +12749,8 @@ const state = {
   avatarFailureLogged: false,
   avatarDataUrlPrefetchKeys: new Set(),
   avatarMemoryCache: new Map(),
+  mvpdLogoCacheByUrl: new Map(),
+  mvpdLogoResolvePromiseByUrl: new Map(),
   loginData: null,
   programmers: [],
   selectedMediaCompany: "",
@@ -52819,6 +52822,9 @@ function syncMvpdWorkspaceToolForSection(section, programmer = null, services = 
       activeLabelElement.hidden = true;
       activeLabelElement.textContent = "";
       activeLabelElement.classList.remove("has-logo", "is-active");
+      activeLabelElement.dataset.mvpdLogoSourceUrl = "";
+      activeLabelElement.dataset.mvpdLogoResolvedUrl = "";
+      activeLabelElement.dataset.mvpdActiveTitle = "";
       activeLabelElement.removeAttribute("title");
       activeLabelElement.removeAttribute("aria-label");
     }
@@ -52831,27 +52837,102 @@ function syncMvpdWorkspaceToolForSection(section, programmer = null, services = 
   const mvpdLabel = mvpdWorkspaceGetSelectionMvpdLabel(context);
   const mvpdMeta = getRestV2MvpdMeta(context.requestorId, context.mvpdId);
   const mvpdLogoUrl = String(mvpdMeta?.logoUrl || "").trim();
+  const cachedLogoEntry = getMvpdWorkspaceLogoCacheEntry(mvpdLogoUrl);
+  const resolvedMvpdLogoUrl =
+    cachedLogoEntry?.status === "loaded" ? String(cachedLogoEntry?.resolvedUrl || "").trim() : "";
   const isMvpdActive = Boolean(context.isReady && mvpdLabel);
   const activeTitleText = isMvpdActive ? `MVPD ${mvpdLabel} Active` : "MVPD Not Active";
   if (activeLabelElement) {
     activeLabelElement.title = activeTitleText;
     activeLabelElement.setAttribute("aria-label", activeTitleText);
-    activeLabelElement.classList.toggle("has-logo", isMvpdActive && Boolean(mvpdLogoUrl));
-    if (isMvpdActive && mvpdLogoUrl) {
-      activeLabelElement.textContent = "";
+    activeLabelElement.dataset.mvpdLogoSourceUrl = String(mvpdLogoUrl || "").trim();
+    activeLabelElement.dataset.mvpdLogoResolvedUrl = String(resolvedMvpdLogoUrl || "").trim();
+    activeLabelElement.dataset.mvpdActiveTitle = activeTitleText;
+    activeLabelElement.classList.toggle("has-logo", isMvpdActive && Boolean(resolvedMvpdLogoUrl));
+    if (isMvpdActive && resolvedMvpdLogoUrl) {
+      const existingImage = activeLabelElement.querySelector(".mvpd-workspace-active-logo");
+      if (
+        activeLabelElement.classList.contains("has-logo") &&
+        existingImage instanceof HTMLImageElement &&
+        String(existingImage.src || "").trim() === resolvedMvpdLogoUrl &&
+        String(existingImage.alt || "").trim() === mvpdLabel
+      ) {
+        activeLabelElement.classList.toggle("is-active", isMvpdActive);
+        return;
+      }
+      activeLabelElement.replaceChildren();
       const logoImage = document.createElement("img");
       logoImage.className = "mvpd-workspace-active-logo";
-      logoImage.src = mvpdLogoUrl;
+      logoImage.src = resolvedMvpdLogoUrl;
       logoImage.alt = mvpdLabel;
       logoImage.loading = "lazy";
       logoImage.decoding = "async";
       logoImage.referrerPolicy = "no-referrer";
       logoImage.title = activeTitleText;
+      logoImage.addEventListener(
+        "error",
+        () => {
+          setMvpdWorkspaceLogoCacheEntry(mvpdLogoUrl, {
+            status: "failed",
+          });
+          if (
+            String(activeLabelElement.dataset.mvpdLogoSourceUrl || "").trim() === String(mvpdLogoUrl || "").trim() &&
+            String(activeLabelElement.dataset.mvpdActiveTitle || "").trim() === activeTitleText
+          ) {
+            activeLabelElement.classList.remove("has-logo");
+            activeLabelElement.replaceChildren(document.createTextNode(activeTitleText));
+          }
+        },
+        { once: true }
+      );
       activeLabelElement.appendChild(logoImage);
     } else {
       activeLabelElement.textContent = activeTitleText;
     }
     activeLabelElement.classList.toggle("is-active", isMvpdActive);
+    if (isMvpdActive && mvpdLogoUrl && !resolvedMvpdLogoUrl && cachedLogoEntry?.status !== "failed") {
+      const expectedLogoSourceUrl = String(mvpdLogoUrl || "").trim();
+      const expectedActiveTitleText = activeTitleText;
+      const expectedMvpdLabel = mvpdLabel;
+      void ensureMvpdWorkspaceLogoResolved(expectedLogoSourceUrl).then((nextResolvedLogoUrl) => {
+        if (
+          !nextResolvedLogoUrl ||
+          !activeLabelElement.isConnected ||
+          String(activeLabelElement.dataset.mvpdLogoSourceUrl || "").trim() !== expectedLogoSourceUrl ||
+          String(activeLabelElement.dataset.mvpdActiveTitle || "").trim() !== expectedActiveTitleText
+        ) {
+          return;
+        }
+        activeLabelElement.classList.add("has-logo");
+        activeLabelElement.dataset.mvpdLogoResolvedUrl = String(nextResolvedLogoUrl || "").trim();
+        activeLabelElement.replaceChildren();
+        const resolvedImage = document.createElement("img");
+        resolvedImage.className = "mvpd-workspace-active-logo";
+        resolvedImage.src = String(nextResolvedLogoUrl || "").trim();
+        resolvedImage.alt = expectedMvpdLabel;
+        resolvedImage.loading = "lazy";
+        resolvedImage.decoding = "async";
+        resolvedImage.referrerPolicy = "no-referrer";
+        resolvedImage.title = expectedActiveTitleText;
+        resolvedImage.addEventListener(
+          "error",
+          () => {
+            setMvpdWorkspaceLogoCacheEntry(expectedLogoSourceUrl, {
+              status: "failed",
+            });
+            if (
+              String(activeLabelElement.dataset.mvpdLogoSourceUrl || "").trim() === expectedLogoSourceUrl &&
+              String(activeLabelElement.dataset.mvpdActiveTitle || "").trim() === expectedActiveTitleText
+            ) {
+              activeLabelElement.classList.remove("has-logo");
+              activeLabelElement.replaceChildren(document.createTextNode(expectedActiveTitleText));
+            }
+          },
+          { once: true }
+        );
+        activeLabelElement.appendChild(resolvedImage);
+      });
+    }
   }
 }
 
@@ -74723,15 +74804,12 @@ async function fetchAvatarBlobUrl(url) {
   return null;
 }
 
-async function fetchAvatarDataUrlViaBackground(url, accessToken = "") {
-  if (ENABLE_IMS_AVATAR_RENDERING !== true) {
-    return "";
-  }
+async function fetchImageDataUrlViaBackground(url, accessToken = "") {
   if (!url || url.startsWith("data:image/") || url.startsWith("blob:")) {
     return "";
   }
 
-  const token = firstNonEmptyString([accessToken, state.loginData?.accessToken]);
+  const token = String(accessToken || "").trim();
   const response = await sendRuntimeMessageSafe({
     type: "underpar:fetchAvatarDataUrl",
     url,
@@ -74743,6 +74821,13 @@ async function fetchAvatarDataUrlViaBackground(url, accessToken = "") {
   }
 
   return "";
+}
+
+async function fetchAvatarDataUrlViaBackground(url, accessToken = "") {
+  if (ENABLE_IMS_AVATAR_RENDERING !== true) {
+    return "";
+  }
+  return fetchImageDataUrlViaBackground(url, firstNonEmptyString([accessToken, state.loginData?.accessToken]));
 }
 
 function buildAvatarDataUrlPrefetchKey(loginData, url) {
@@ -88595,6 +88680,91 @@ function normalizeRestV2MvpdLogoUrl(value) {
     }
     return "";
   }
+}
+
+function getMvpdWorkspaceLogoCacheEntry(url = "") {
+  const normalizedUrl = normalizeRestV2MvpdLogoUrl(url);
+  if (!normalizedUrl || !(state.mvpdLogoCacheByUrl instanceof Map)) {
+    return null;
+  }
+  const entry = state.mvpdLogoCacheByUrl.get(normalizedUrl);
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  if (
+    entry.status === "failed" &&
+    Number(entry.updatedAt || 0) > 0 &&
+    Date.now() - Number(entry.updatedAt || 0) >= MVPD_LOGO_FAILURE_COOLDOWN_MS
+  ) {
+    state.mvpdLogoCacheByUrl.delete(normalizedUrl);
+    return null;
+  }
+  return entry;
+}
+
+function setMvpdWorkspaceLogoCacheEntry(url = "", payload = {}) {
+  const normalizedUrl = normalizeRestV2MvpdLogoUrl(url);
+  if (!normalizedUrl || !(state.mvpdLogoCacheByUrl instanceof Map)) {
+    return null;
+  }
+  const nextEntry = {
+    status: String(payload?.status || "").trim() || "failed",
+    resolvedUrl: String(payload?.resolvedUrl || "").trim(),
+    updatedAt: Date.now(),
+  };
+  state.mvpdLogoCacheByUrl.set(normalizedUrl, nextEntry);
+  return nextEntry;
+}
+
+async function ensureMvpdWorkspaceLogoResolved(url = "") {
+  const normalizedUrl = normalizeRestV2MvpdLogoUrl(url);
+  if (!normalizedUrl) {
+    return "";
+  }
+  const cachedEntry = getMvpdWorkspaceLogoCacheEntry(normalizedUrl);
+  if (cachedEntry?.status === "loaded" && String(cachedEntry?.resolvedUrl || "").trim()) {
+    return String(cachedEntry.resolvedUrl || "").trim();
+  }
+  if (cachedEntry?.status === "failed") {
+    return "";
+  }
+  if (state.mvpdLogoResolvePromiseByUrl instanceof Map && state.mvpdLogoResolvePromiseByUrl.has(normalizedUrl)) {
+    return state.mvpdLogoResolvePromiseByUrl.get(normalizedUrl);
+  }
+
+  const workPromise = (async () => {
+    try {
+      const dataUrl = await fetchImageDataUrlViaBackground(normalizedUrl);
+      if (String(dataUrl || "").trim()) {
+        setMvpdWorkspaceLogoCacheEntry(normalizedUrl, {
+          status: "loaded",
+          resolvedUrl: dataUrl,
+        });
+        return String(dataUrl || "").trim();
+      }
+      setMvpdWorkspaceLogoCacheEntry(normalizedUrl, {
+        status: "failed",
+      });
+      return "";
+    } catch {
+      setMvpdWorkspaceLogoCacheEntry(normalizedUrl, {
+        status: "failed",
+      });
+      return "";
+    } finally {
+      if (
+        state.mvpdLogoResolvePromiseByUrl instanceof Map &&
+        state.mvpdLogoResolvePromiseByUrl.get(normalizedUrl) === workPromise
+      ) {
+        state.mvpdLogoResolvePromiseByUrl.delete(normalizedUrl);
+      }
+    }
+  })();
+
+  if (state.mvpdLogoResolvePromiseByUrl instanceof Map) {
+    state.mvpdLogoResolvePromiseByUrl.set(normalizedUrl, workPromise);
+  }
+  return workPromise;
 }
 
 function isRestV2MvpdLogoNodeVisible(node) {
