@@ -2692,7 +2692,7 @@ test("REST V2 learning keeps partner APIs locked when the partner framework payl
   }
 });
 
-test("REST V2 learning keeps partner APIs locked when only inferred partner framework context is available", () => {
+test("REST V2 learning uses a compatible inferred partner framework payload when the recorded flow already captured trusted partner SSO context", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const validLearningFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -2748,12 +2748,12 @@ test("REST V2 learning keeps partner APIs locked when only inferred partner fram
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
-  assert.match(plan.notes.join(" "), /requires the exact AP-Partner-Framework-Status payload/i);
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
+  assert.equal(plan.fieldValues["body.SAMLResponse"], "PHNhbWxwOlJlc3BvbnNlPg==");
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
 });
 
-test("REST V2 learning does not replace a generic captured Comcast framework status with inferred Apple partner payloads", () => {
+test("REST V2 learning replaces a generic captured Comcast framework status with a compatible inferred Apple partner payload", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -2824,12 +2824,11 @@ test("REST V2 learning does not replace a generic captured Comcast framework sta
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
-  assert.match(plan.notes.join(" "), /requires the exact AP-Partner-Framework-Status payload/i);
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
 });
 
-test("REST V2 learning keeps partner APIs locked when partner mappings resolve beyond a stale generic Comcast framework status", () => {
+test("REST V2 learning prefers the partner-mapped Apple framework payload when snapshot mappings outrank a stale generic Comcast header", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -2903,9 +2902,8 @@ test("REST V2 learning keeps partner APIs locked when partner mappings resolve b
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
-  assert.match(plan.notes.join(" "), /requires the exact AP-Partner-Framework-Status payload/i);
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
 });
 
 test("REST V2 learning keeps Create Partner Profile blocked when partner mappings expose a more specific Comcast Apple provider than the captured header", () => {

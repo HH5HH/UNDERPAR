@@ -18584,7 +18584,7 @@ async function fetchRestV2ProfilesForHarvest(harvest, options = {}) {
   const flowId = resolveRestV2DebugFlowIdForHarvest(harvest);
   const likelySsoContext = isRestV2LikelyPartnerSsoContext(harvest);
   const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
-    resolveRestV2PartnerFrameworkStatusFromContext(harvest)
+    resolveRestV2PreferredPartnerFrameworkStatusForContext(harvest)
   );
   const requestHeaders = buildRestV2Headers(serviceProviderId, {
     Accept: "application/json",
@@ -30358,12 +30358,33 @@ function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flo
     context.learningPartner = inferredPartner;
   }
 
-  if (!hasRealFrameworkStatus && String(context.learningPartnerFrameworkStatus || "").trim()) {
-    context.learningPartnerFrameworkStatus = "";
-  }
-
   if (!String(context.learningPartnerSource || "").trim()) {
     context.learningPartnerSource = String(firstNonEmptyString([artifacts.signalSource, "recorded partner auth flow"]) || "").trim();
+  }
+
+  if (!hasRealFrameworkStatus) {
+    const compatibilityContext = {
+      ...context,
+      ...(inferredPartner
+        ? {
+            learningPartner: inferredPartner,
+          }
+        : {}),
+    };
+    const existingLearningFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+      String(context.learningPartnerFrameworkStatus || "").trim()
+    );
+    const promotedLearningFrameworkStatus =
+      existingLearningFrameworkStatus ||
+      buildRestV2LearningPartnerFrameworkStatus(compatibilityContext, flow, artifacts, inferredPartner);
+    if (
+      promotedLearningFrameworkStatus &&
+      isRestV2PartnerFrameworkStatusCompatibleWithContext(promotedLearningFrameworkStatus, compatibilityContext)
+    ) {
+      context.learningPartnerFrameworkStatus = promotedLearningFrameworkStatus;
+    } else if (String(context.learningPartnerFrameworkStatus || "").trim()) {
+      context.learningPartnerFrameworkStatus = "";
+    }
   }
   return context;
 }
@@ -30435,6 +30456,18 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
     const samlDetails = extractRestV2SamlResponseFromDebugFlow(flow);
     const samlResponse = String(samlDetails?.samlResponse || "").trim();
     const samlPartner = String(samlDetails?.partner || "").trim();
+    const learningArtifacts = extractRestV2PartnerSsoLearningArtifactsFromDebugFlow(flow);
+    const hasRecordedPartnerAuthSignals = Boolean(
+      String(learningArtifacts?.rApt || "").trim() ||
+        String(learningArtifacts?.cimaTicket || "").trim() ||
+        String(learningArtifacts?.oauthClients || "").trim()
+    );
+    const inferredLearningPartner = String(resolveRestV2LearningPartnerNameFromContext(context) || "").trim();
+    const inferredLearningFrameworkStatus = String(resolveRestV2LearningPartnerFrameworkStatusFromContext(context) || "").trim();
+    const canTrustInferredPartnerSso =
+      hasRecordedPartnerAuthSignals &&
+      Boolean(inferredLearningPartner) &&
+      isRestV2PartnerFrameworkStatusUsable(inferredLearningFrameworkStatus);
     if (samlPartner) {
       if (!String(context.partner || "").trim()) {
         context.partner = samlPartner;
@@ -30446,7 +30479,7 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
         context.sessionData.partner = samlPartner;
       }
     }
-    if (samlResponse && samlDetails?.trustedForPartnerSso === true) {
+    if (samlResponse && (samlDetails?.trustedForPartnerSso === true || canTrustInferredPartnerSso)) {
       context.samlResponse = samlResponse;
       context.samlSource = String(samlDetails?.source || "").trim();
       context.samlTrustedForPartnerSso = true;
@@ -30467,8 +30500,8 @@ async function hydrateRestV2PartnerSsoContextFromFlowId(context = null, flowId =
       options?.flowSnapshot && typeof options.flowSnapshot === "object"
         ? options.flowSnapshot
         : await getRestV2DebugFlowSnapshot(normalizedFlowId);
-    hydrateRestV2PartnerSsoContextFromDebugFlow(context, flowSnapshot);
     hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context, flowSnapshot);
+    hydrateRestV2PartnerSsoContextFromDebugFlow(context, flowSnapshot);
     hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context, flowSnapshot, [
       "Adobe-Subject-Token",
       "AD-Service-Token",
@@ -30481,6 +30514,7 @@ async function hydrateRestV2PartnerSsoContextFromFlowId(context = null, flowId =
       forceRefresh: options?.forceRefresh === true,
     });
     hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context, flowSnapshot);
+    hydrateRestV2PartnerSsoContextFromDebugFlow(context, flowSnapshot);
     hydrateRestV2ContextFromPartnerSsoOverride(context);
   } catch {
     // Leave the runtime context untouched when no debug-flow snapshot is available.
@@ -30912,7 +30946,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
   const endpointScope = `${String(scope || "profiles-check")}:${String(endpoint.endpointKey || "profiles").trim()}`;
   const likelySsoContext = isRestV2LikelyPartnerSsoContext(context);
   const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
-    resolveRestV2PartnerFrameworkStatusFromContext(context)
+    resolveRestV2PreferredPartnerFrameworkStatusForContext(context)
   );
   const requestHeaders = buildRestV2Headers(context.serviceProviderId, {
     Accept: "application/json",
@@ -89663,6 +89697,12 @@ function resolveRestV2PreferredPartnerFrameworkStatusForContext(context = null) 
   if (isRestV2PartnerFrameworkStatusCompatibleWithContext(directValue, context)) {
     return directValue;
   }
+  const learningValue = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2LearningPartnerFrameworkStatusFromContext(context)
+  );
+  if (isRestV2PartnerFrameworkStatusCompatibleWithContext(learningValue, context)) {
+    return learningValue;
+  }
   return "";
 }
 
@@ -89859,8 +89899,8 @@ function isRestV2LikelyPartnerSsoContext(context = null) {
   if (!context || typeof context !== "object") {
     return false;
   }
-  const partnerFrameworkStatus = String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim();
-  const partnerName = String(resolveRestV2PartnerNameFromContext(context) || "").trim().toLowerCase();
+  const partnerFrameworkStatus = String(resolveRestV2PreferredPartnerFrameworkStatusForContext(context) || "").trim();
+  const partnerName = String(resolveRestV2LearningPartnerNameFromContext(context) || "").trim().toLowerCase();
   return (
     isRestV2PartnerFrameworkStatusUsable(partnerFrameworkStatus) ||
     /^(?:apple|roku|google|amazon|samsung)$/i.test(partnerName)
