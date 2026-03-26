@@ -16252,6 +16252,15 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     partnerFrameworkStatus: firstNonEmptyString(
       sourceList.map((source) => String(source?.partnerFrameworkStatus || "").trim())
     ),
+    learningPartner: firstNonEmptyString(
+      sourceList.map((source) => String(source?.learningPartner || "").trim())
+    ),
+    learningPartnerFrameworkStatus: firstNonEmptyString(
+      sourceList.map((source) => String(source?.learningPartnerFrameworkStatus || "").trim())
+    ),
+    learningPartnerSource: firstNonEmptyString(
+      sourceList.map((source) => String(source?.learningPartnerSource || "").trim())
+    ),
     adobeSubjectToken: firstNonEmptyString(
       sourceList.map((source) => String(source?.adobeSubjectToken || "").trim())
     ),
@@ -16882,6 +16891,9 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     sessionPartner: String(harvest.sessionPartner || "").trim(),
     partner: String(firstNonEmptyString([harvest.partner, harvest.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(harvest.partnerFrameworkStatus || "").trim(),
+    learningPartner: String(harvest.learningPartner || "").trim(),
+    learningPartnerFrameworkStatus: String(harvest.learningPartnerFrameworkStatus || "").trim(),
+    learningPartnerSource: String(harvest.learningPartnerSource || "").trim(),
     adobeSubjectToken: String(harvest.adobeSubjectToken || "").trim(),
     adServiceToken: String(harvest.adServiceToken || "").trim(),
     tempPassIdentity: String(harvest.tempPassIdentity || "").trim(),
@@ -24369,6 +24381,10 @@ function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntr
     String(resolvedEntry?.sessionPartner || "").trim(),
     String(sessionData?.partner || "").trim(),
   ]);
+  const learningPartner = firstNonEmptyString([
+    String(context?.learningPartner || "").trim(),
+    String(resolvedEntry?.learningPartner || "").trim(),
+  ]);
   const adobeSubjectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "Adobe-Subject-Token");
   const adServiceToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "AD-Service-Token");
   const tempPassIdentity = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "AP-Temppass-Identity");
@@ -24406,6 +24422,15 @@ function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntr
     typeof resolvedEntry.sessionResponseHeaders === "object"
   ) {
     context.sessionResponseHeaders = { ...resolvedEntry.sessionResponseHeaders };
+  }
+  if (!String(context?.learningPartner || "").trim() && learningPartner) {
+    context.learningPartner = learningPartner;
+  }
+  if (!String(context?.learningPartnerFrameworkStatus || "").trim()) {
+    context.learningPartnerFrameworkStatus = String(resolvedEntry?.learningPartnerFrameworkStatus || "").trim();
+  }
+  if (!String(context?.learningPartnerSource || "").trim()) {
+    context.learningPartnerSource = String(resolvedEntry?.learningPartnerSource || "").trim();
   }
   if (!String(context?.adobeSubjectToken || "").trim() && adobeSubjectToken) {
     context.adobeSubjectToken = adobeSubjectToken;
@@ -25302,6 +25327,11 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     sessionPartner: String(firstNonEmptyString([options?.sessionPartner, context?.sessionPartner]) || "").trim(),
     partner: String(firstNonEmptyString([options?.partner, context?.partner, context?.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(options?.partnerFrameworkStatus || context?.partnerFrameworkStatus || "").trim(),
+    learningPartner: String(firstNonEmptyString([options?.learningPartner, context?.learningPartner]) || "").trim(),
+    learningPartnerFrameworkStatus: String(
+      firstNonEmptyString([options?.learningPartnerFrameworkStatus, context?.learningPartnerFrameworkStatus]) || ""
+    ).trim(),
+    learningPartnerSource: String(firstNonEmptyString([options?.learningPartnerSource, context?.learningPartnerSource]) || "").trim(),
     adobeSubjectToken: String(
       firstNonEmptyString([
         options?.adobeSubjectToken,
@@ -26731,6 +26761,10 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     String(context?.sessionPartner || "").trim(),
     resolveRestV2PartnerNameFromContext(context),
   ]);
+  const learningPartner = firstNonEmptyString([
+    String(context?.learningPartner || "").trim(),
+    resolveRestV2LearningPartnerNameFromContext(context),
+  ]);
 
   return {
     harvestedAt,
@@ -26746,6 +26780,9 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     sessionPartner: String(context?.sessionPartner || "").trim(),
     partner: String(partner || "").trim(),
     partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
+    learningPartner: String(learningPartner || "").trim(),
+    learningPartnerFrameworkStatus: String(resolveRestV2LearningPartnerFrameworkStatusFromContext(context) || "").trim(),
+    learningPartnerSource: String(context?.learningPartnerSource || "").trim(),
     adobeSubjectToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "Adobe-Subject-Token") || "").trim(),
     adServiceToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AD-Service-Token") || "").trim(),
     tempPassIdentity: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Temppass-Identity") || "").trim(),
@@ -27626,6 +27663,283 @@ function extractRestV2PartnerFrameworkStatusFromDebugFlow(flow = null) {
   return "";
 }
 
+function extractRestV2CookieValueFromCookieText(value = "", cookieName = "") {
+  const raw = String(value || "").trim();
+  const normalizedCookieName = String(cookieName || "").trim().toLowerCase();
+  if (!raw || !normalizedCookieName) {
+    return "";
+  }
+  const cookieParts = raw.split(/;\s*/);
+  for (const cookiePart of cookieParts) {
+    const dividerIndex = cookiePart.indexOf("=");
+    if (dividerIndex <= 0) {
+      continue;
+    }
+    const candidateName = String(cookiePart.slice(0, dividerIndex) || "").trim().toLowerCase();
+    if (candidateName !== normalizedCookieName) {
+      continue;
+    }
+    return String(cookiePart.slice(dividerIndex + 1) || "").trim();
+  }
+  return "";
+}
+
+function extractRestV2QueryParameterFromText(value = "", parameterName = "") {
+  const raw = String(value || "").trim();
+  const normalizedParameterName = String(parameterName || "").trim();
+  if (!raw || !normalizedParameterName) {
+    return "";
+  }
+  try {
+    const parsedUrl = new URL(raw, ADOBE_SP_BASE);
+    const directValue = String(parsedUrl.searchParams.get(normalizedParameterName) || "").trim();
+    if (directValue) {
+      return directValue;
+    }
+  } catch {
+    // Fall through to regex extraction for non-URL text.
+  }
+  const escapedParameterName = normalizedParameterName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const directMatch = raw.match(new RegExp(`(?:^|[?&])${escapedParameterName}=([^&#]+)`, "i"));
+  return String(directMatch?.[1] || "").trim();
+}
+
+function parseRestV2JwtPayload(value = "") {
+  const raw = String(value || "").trim().replace(/^Bearer\s+/i, "");
+  const segments = raw.split(".");
+  if (segments.length < 2) {
+    return null;
+  }
+  const payloadText = decodeBase64TextSafe(segments[1]);
+  const payload = parseJsonText(payloadText, null);
+  return payload && typeof payload === "object" ? payload : null;
+}
+
+function inferRestV2LearningPartnerNameFromText(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/\broku\b/i.test(raw)) {
+    return "Roku";
+  }
+  if (/\b(?:fire\s?tv|firetv|aft[a-z0-9]*|kindle|silk|amazon)\b/i.test(raw)) {
+    return "Amazon";
+  }
+  if (/\b(?:tizen|samsung)\b/i.test(raw)) {
+    return "Samsung";
+  }
+  if (/\b(?:android|chrome\s?os|chromebook|google\s?tv|googlecast)\b/i.test(raw)) {
+    return "Google";
+  }
+  if (/\b(?:appletv|apple\s?tv|tvos|ios|iphone|ipad|macintosh|macintel|mac os)\b/i.test(raw)) {
+    return "Apple";
+  }
+  return "";
+}
+
+function extractRestV2PartnerSsoLearningArtifactsFromDebugFlow(flow = null) {
+  const result = {
+    rApt: "",
+    cimaTicket: "",
+    oauthClients: "",
+    authUrl: "",
+    signalSource: "",
+  };
+  const events = Array.isArray(flow?.events) ? flow.events : [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+
+    if (!result.rApt && Array.isArray(event.cookies)) {
+      const cookieEntry = event.cookies.find(
+        (cookie) => String(cookie?.name || "").trim().toLowerCase() === "r-apt"
+      );
+      if (cookieEntry?.value) {
+        result.rApt = String(cookieEntry.value || "").trim();
+      }
+    }
+    if (!result.oauthClients && Array.isArray(event.cookies)) {
+      const cookieEntry = event.cookies.find(
+        (cookie) => String(cookie?.name || "").trim().toLowerCase() === "oauthclients"
+      );
+      if (cookieEntry?.value) {
+        result.oauthClients = String(cookieEntry.value || "").trim();
+      }
+    }
+
+    const cookieHeaderValues = [
+      ...(Array.isArray(event.cookieHeaders) ? event.cookieHeaders : []),
+      ...(Array.isArray(event.setCookieHeaders) ? event.setCookieHeaders : []),
+    ];
+    for (const headerValue of cookieHeaderValues) {
+      if (!result.rApt) {
+        result.rApt = extractRestV2CookieValueFromCookieText(headerValue, "r-apt");
+      }
+      if (!result.oauthClients) {
+        result.oauthClients = extractRestV2CookieValueFromCookieText(headerValue, "OAUTHCLIENTS");
+      }
+      if (result.rApt && result.oauthClients) {
+        break;
+      }
+    }
+
+    if (!result.cimaTicket) {
+      result.cimaTicket = firstNonEmptyString([
+        extractRestV2QueryParameterFromText(String(event?.url || "").trim(), "cima.ticket"),
+        extractRestV2QueryParameterFromText(String(event?.requestUrl || "").trim(), "cima.ticket"),
+        extractRestV2QueryParameterFromText(String(event?.redirectUrl || "").trim(), "cima.ticket"),
+        extractRestV2QueryParameterFromText(String(event?.responsePreview || "").trim(), "cima.ticket"),
+        extractRestV2QueryParameterFromText(String(event?.bodyPreview || "").trim(), "cima.ticket"),
+      ]);
+    }
+
+    if (!result.authUrl) {
+      const authUrlCandidate = firstNonEmptyString([
+        String(event?.url || "").trim(),
+        String(event?.requestUrl || "").trim(),
+        String(event?.redirectUrl || "").trim(),
+      ]);
+      if (/oauth\.|login\./i.test(authUrlCandidate) && /authorize|authenticate|sso|login/i.test(authUrlCandidate)) {
+        result.authUrl = authUrlCandidate;
+      }
+    }
+
+    if (result.rApt || result.cimaTicket || result.oauthClients) {
+      result.signalSource = firstNonEmptyString([
+        result.rApt ? "recorded r-apt cookie" : "",
+        result.cimaTicket ? "recorded cima.ticket redirect" : "",
+        result.oauthClients ? "recorded OAUTHCLIENTS cookie" : "",
+      ]);
+    }
+  }
+  return result;
+}
+
+function inferRestV2LearningPartnerName(context = null, flow = null, artifacts = null) {
+  let serializedSessionData = "";
+  let serializedFlowContext = "";
+  try {
+    serializedSessionData = context?.sessionData ? JSON.stringify(context.sessionData) : "";
+  } catch {
+    serializedSessionData = "";
+  }
+  try {
+    serializedFlowContext = flow?.context ? JSON.stringify(flow.context) : "";
+  } catch {
+    serializedFlowContext = "";
+  }
+
+  const signalText = [
+    String(artifacts?.authUrl || "").trim(),
+    String(context?.loginUrl || "").trim(),
+    String(context?.sessionUrl || "").trim(),
+    String(context?.redirectUrl || "").trim(),
+    typeof navigator !== "undefined" ? String(navigator.userAgent || "").trim() : "",
+    typeof navigator !== "undefined" ? String(navigator.platform || "").trim() : "",
+    typeof navigator !== "undefined" ? String(navigator.vendor || "").trim() : "",
+    serializedSessionData,
+    serializedFlowContext,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return inferRestV2LearningPartnerNameFromText(signalText);
+}
+
+function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, artifacts = null, partnerName = "") {
+  const resolvedPartnerName = String(partnerName || "").trim();
+  const providerId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd, context?.requestorId]) || "").trim();
+  if (!resolvedPartnerName || !providerId) {
+    return "";
+  }
+
+  const rAptPayload = parseRestV2JwtPayload(String(artifacts?.rApt || "").trim());
+  let expirationMs = Number(rAptPayload?.exp || 0);
+  if (Number.isFinite(expirationMs) && expirationMs > 0 && expirationMs < 1000000000000) {
+    expirationMs *= 1000;
+  }
+  if (!(Number.isFinite(expirationMs) && expirationMs > Date.now())) {
+    const flowUpdatedAt = Date.parse(String(flow?.updatedAt || "").trim());
+    expirationMs =
+      Number.isFinite(flowUpdatedAt) && flowUpdatedAt > 0
+        ? flowUpdatedAt + 6 * 60 * 60 * 1000
+        : Date.now() + 6 * 60 * 60 * 1000;
+  }
+
+  const payload = {
+    frameworkPermissionInfo: {
+      accessStatus: "granted",
+      inferenceMode: "underpar-learning",
+      signalSource: String(firstNonEmptyString([artifacts?.signalSource, "recorded partner auth flow"]) || "").trim(),
+    },
+    frameworkProviderInfo: {
+      id: providerId,
+      expirationDate: String(Math.max(Date.now() + 60 * 1000, expirationMs)),
+    },
+    frameworkPartnerInfo: {
+      name: resolvedPartnerName,
+      partner: resolvedPartnerName,
+      inferenceMode: "underpar-learning",
+    },
+  };
+
+  try {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  } catch {
+    return "";
+  }
+}
+
+function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flow = null) {
+  if (!context || typeof context !== "object" || !flow || typeof flow !== "object") {
+    return context;
+  }
+
+  const hasRealPartner = Boolean(String(resolveRestV2PartnerNameFromContext(context) || "").trim());
+  const hasRealFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context));
+  if (hasRealPartner && hasRealFrameworkStatus) {
+    return context;
+  }
+
+  const artifacts = extractRestV2PartnerSsoLearningArtifactsFromDebugFlow(flow);
+  const hasPartnerAuthSignals = Boolean(
+    String(artifacts?.rApt || "").trim() ||
+      String(artifacts?.cimaTicket || "").trim() ||
+      String(artifacts?.oauthClients || "").trim()
+  );
+  if (!hasPartnerAuthSignals) {
+    return context;
+  }
+
+  const inferredPartner = firstNonEmptyString([
+    String(context.learningPartner || "").trim(),
+    hasRealPartner ? String(resolveRestV2PartnerNameFromContext(context) || "").trim() : "",
+    inferRestV2LearningPartnerName(context, flow, artifacts),
+  ]);
+  if (inferredPartner && !String(context.learningPartner || "").trim()) {
+    context.learningPartner = inferredPartner;
+  }
+
+  if (!hasRealFrameworkStatus && !String(context.learningPartnerFrameworkStatus || "").trim()) {
+    const inferredFrameworkStatus = buildRestV2LearningPartnerFrameworkStatus(
+      context,
+      flow,
+      artifacts,
+      String(inferredPartner || "").trim()
+    );
+    if (isRestV2PartnerFrameworkStatusUsable(inferredFrameworkStatus)) {
+      context.learningPartnerFrameworkStatus = inferredFrameworkStatus;
+    }
+  }
+
+  if (!String(context.learningPartnerSource || "").trim()) {
+    context.learningPartnerSource = String(firstNonEmptyString([artifacts.signalSource, "recorded partner auth flow"]) || "").trim();
+  }
+  return context;
+}
+
 function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null) {
   if (!context || typeof context !== "object") {
     return context;
@@ -27691,6 +28005,7 @@ async function hydrateRestV2PartnerSsoContextFromFlowId(context = null, flowId =
         ? options.flowSnapshot
         : await getRestV2DebugFlowSnapshot(normalizedFlowId);
     hydrateRestV2PartnerSsoContextFromDebugFlow(context, flowSnapshot);
+    hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context, flowSnapshot);
   } catch {
     // Leave the runtime context untouched when no debug-flow snapshot is available.
   }
@@ -30603,6 +30918,7 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
     const entitlementPhaseSummary = stopResult?.flow ? summarizeRestV2EntitlementPhaseSignals(stopResult.flow) : null;
     if (hasRecordingContext && stopResult?.flow) {
       hydrateRestV2PartnerSsoContextFromDebugFlow(recordingContext, stopResult.flow);
+      hydrateRestV2LearningPartnerSsoContextFromDebugFlow(recordingContext, stopResult.flow);
       const explicitNoActiveProfile = isRestV2NoActiveProfileSignal(profileCheckResult);
       const checkedNoProfiles =
         profileCheckResult?.checked === true &&
@@ -54124,6 +54440,9 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
     sessionPartner: String(recordingContext.sessionPartner || "").trim(),
     partner: String(firstNonEmptyString([recordingContext.partner, recordingContext.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(recordingContext.partnerFrameworkStatus || "").trim(),
+    learningPartner: String(recordingContext.learningPartner || "").trim(),
+    learningPartnerFrameworkStatus: String(recordingContext.learningPartnerFrameworkStatus || "").trim(),
+    learningPartnerSource: String(recordingContext.learningPartnerSource || "").trim(),
     adobeSubjectToken: String(recordingContext.adobeSubjectToken || "").trim(),
     adServiceToken: String(recordingContext.adServiceToken || "").trim(),
     tempPassIdentity: String(recordingContext.tempPassIdentity || "").trim(),
@@ -54192,6 +54511,9 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     sessionPartner: String(context.sessionPartner || "").trim(),
     partner: String(firstNonEmptyString([context.partner, context.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
+    learningPartner: String(firstNonEmptyString([context.learningPartner, resolveRestV2LearningPartnerNameFromContext(context)]) || "").trim(),
+    learningPartnerFrameworkStatus: String(resolveRestV2LearningPartnerFrameworkStatusFromContext(context) || "").trim(),
+    learningPartnerSource: String(context.learningPartnerSource || "").trim(),
     adobeSubjectToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "Adobe-Subject-Token") || "").trim(),
     adServiceToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AD-Service-Token") || "").trim(),
     tempPassIdentity: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Temppass-Identity") || "").trim(),
@@ -62186,6 +62508,21 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     String(harvest?.partner || "").trim(),
     String(harvest?.sessionPartner || "").trim(),
   ]);
+  const learningPartner = firstNonEmptyString([
+    String(activeRecordingContext?.learningPartner || "").trim(),
+    String(harvestContext?.learningPartner || "").trim(),
+    String(harvest?.learningPartner || "").trim(),
+  ]);
+  const learningPartnerFrameworkStatus = firstNonEmptyString([
+    String(activeRecordingContext?.learningPartnerFrameworkStatus || "").trim(),
+    String(harvestContext?.learningPartnerFrameworkStatus || "").trim(),
+    String(harvest?.learningPartnerFrameworkStatus || "").trim(),
+  ]);
+  const learningPartnerSource = firstNonEmptyString([
+    String(activeRecordingContext?.learningPartnerSource || "").trim(),
+    String(harvestContext?.learningPartnerSource || "").trim(),
+    String(harvest?.learningPartnerSource || "").trim(),
+  ]);
   const samlResponse = firstNonEmptyString([
     String(activeRecordingContext?.samlResponse || "").trim(),
     String(harvestContext?.samlResponse || "").trim(),
@@ -62225,10 +62562,13 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     sessionData,
     sessionResponseHeaders,
     partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
+    learningPartnerFrameworkStatus: String(learningPartnerFrameworkStatus || "").trim(),
     adobeSubjectToken: String(adobeSubjectToken || "").trim(),
     adServiceToken: String(adServiceToken || "").trim(),
     tempPassIdentity: String(tempPassIdentity || "").trim(),
     partner: String(partner || "").trim(),
+    learningPartner: String(learningPartner || "").trim(),
+    learningPartnerSource: String(learningPartnerSource || "").trim(),
     samlResponse: String(samlResponse || "").trim(),
     samlSource: String(samlSource || "").trim(),
     flowId: String(flowId || "").trim(),
@@ -62281,6 +62621,7 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
     const flowSnapshot = await getRestV2DebugFlowSnapshot(flowId);
     if (needsPartnerFlowHydration) {
       hydrateRestV2PartnerSsoContextFromDebugFlow(preparedContext, flowSnapshot);
+      hydrateRestV2LearningPartnerSsoContextFromDebugFlow(preparedContext, flowSnapshot);
     }
     if (missingOptionalHeaders.length > 0) {
       hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(preparedContext, flowSnapshot, missingOptionalHeaders);
@@ -62318,6 +62659,12 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   };
   const requiredFields = ["path.serviceProvider"];
   const notes = [];
+  const directPartner = String(resolveRestV2PartnerNameFromContext(resolvedContext) || "").trim();
+  const learningPartner = String(resolveRestV2LearningPartnerNameFromContext(resolvedContext) || "").trim();
+  const directPartnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2PartnerFrameworkStatusFromContext(resolvedContext)
+  );
+  const learningPartnerFrameworkStatus = resolveRestV2LearningPartnerFrameworkStatusFromContext(resolvedContext);
   if (resolvedContext.requestorAutoResolved === true && String(resolvedContext.requestorId || "").trim()) {
     notes.push(`Using the only REST V2 RequestorId mapped in UnderPAR: ${String(resolvedContext.requestorId || "").trim()}.`);
   }
@@ -62351,11 +62698,10 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (resolvedEntry.contentType) {
     fieldValues["header.Content-Type"] = String(resolvedEntry.contentType || "").trim();
   }
-  const partnerFrameworkStatus = resolveRestV2InteractiveDocsHeaderValueFromContext(
-    resolvedContext,
-    "AP-Partner-Framework-Status"
-  );
-  const usablePartnerFrameworkStatus = partnerFrameworkStatus;
+  const usablePartnerFrameworkStatus = firstNonEmptyString([
+    isRestV2PartnerFrameworkStatusUsable(directPartnerFrameworkStatus) ? directPartnerFrameworkStatus : "",
+    learningPartnerFrameworkStatus,
+  ]);
   if (resolvedEntry.usesPartnerFrameworkStatus === true && usablePartnerFrameworkStatus) {
     fieldValues["header.AP-Partner-Framework-Status"] = usablePartnerFrameworkStatus;
   }
@@ -62401,8 +62747,8 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     fieldValues["query.redirectUrl"] = redirectUrlValue;
   }
   if (resolvedEntry.usesPartnerPath === true) {
-    if (String(resolvedContext.partner || "").trim()) {
-      fieldValues["path.partner"] = String(resolvedContext.partner || "").trim();
+    if (learningPartner) {
+      fieldValues["path.partner"] = learningPartner;
     }
     if (resolvedEntry.requirePartnerPath === true) {
       requiredFields.push("path.partner");
@@ -62435,6 +62781,20 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     if (String(resolvedContext.samlSource || "").trim()) {
       notes.push(`Using SAMLResponse captured from ${String(resolvedContext.samlSource || "").trim()}.`);
     }
+  }
+  if (resolvedEntry.usesPartnerPath === true && learningPartner && !directPartner) {
+    notes.push(
+      `Using inferred partner ${learningPartner} from ${String(resolvedContext.learningPartnerSource || "the recorded partner auth flow").trim()}.`
+    );
+  }
+  if (
+    resolvedEntry.usesPartnerFrameworkStatus === true &&
+    learningPartnerFrameworkStatus &&
+    !isRestV2PartnerFrameworkStatusUsable(directPartnerFrameworkStatus)
+  ) {
+    notes.push(
+      `Using inferred AP-Partner-Framework-Status from ${String(resolvedContext.learningPartnerSource || "the recorded partner auth flow").trim()}.`
+    );
   }
 
   const normalizedFieldValues = Object.entries(fieldValues).reduce((result, [key, value]) => {
@@ -85301,6 +85661,33 @@ function resolveRestV2PartnerNameFromContext(context = null) {
     String(context.partner || "").trim(),
     resolveRestV2SessionPartnerFromSessionData(context?.sessionData || null, frameworkStatus),
     resolveRestV2PartnerFromFrameworkStatus(frameworkStatus),
+  ]);
+}
+
+function resolveRestV2LearningPartnerFrameworkStatusFromContext(context = null) {
+  if (!context || typeof context !== "object") {
+    return "";
+  }
+  const directValue = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2PartnerFrameworkStatusFromContext(context)
+  );
+  if (isRestV2PartnerFrameworkStatusUsable(directValue)) {
+    return directValue;
+  }
+  const inferredValue = normalizeRestV2PartnerFrameworkStatusForRequest(
+    String(context.learningPartnerFrameworkStatus || "").trim()
+  );
+  return isRestV2PartnerFrameworkStatusUsable(inferredValue) ? inferredValue : "";
+}
+
+function resolveRestV2LearningPartnerNameFromContext(context = null) {
+  if (!context || typeof context !== "object") {
+    return "";
+  }
+  return firstNonEmptyString([
+    resolveRestV2PartnerNameFromContext(context),
+    String(context.learningPartner || "").trim(),
+    resolveRestV2PartnerFromFrameworkStatus(String(context.learningPartnerFrameworkStatus || "").trim()),
   ]);
 }
 

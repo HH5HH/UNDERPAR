@@ -79,6 +79,7 @@ function loadRestV2LearningPlanBuilder() {
     'const REST_V2_BASE = "https://api.example.test";',
     'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
     'function buildRestV2Headers() { return { "AP-Device-Identifier": "device-123", "X-Device-Info": "device-info-123" }; }',
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
     extractFunctionSource(source, "parseJsonText"),
     extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
     extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
@@ -94,6 +95,13 @@ function loadRestV2LearningPlanBuilder() {
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
     extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
     extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
+    extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusFromSessionData"),
+    extractFunctionSource(source, "resolveRestV2SessionPartnerFromSessionData"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusFromContext"),
+    extractFunctionSource(source, "resolveRestV2PartnerNameFromContext"),
+    extractFunctionSource(source, "resolveRestV2LearningPartnerFrameworkStatusFromContext"),
+    extractFunctionSource(source, "resolveRestV2LearningPartnerNameFromContext"),
     extractFunctionSource(source, "resolveRestV2InteractiveDocsHeaderValueFromContext"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsHydrationPlan"),
@@ -270,6 +278,7 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     "function isRestV2PartnerFrameworkStatusUsable(value = '') { return typeof globalThis.__seed.isFrameworkStatusUsable === 'function' ? globalThis.__seed.isFrameworkStatusUsable(value) : Boolean(String(value || '').trim()); }",
     "function hydrateRestV2ContextFromPreparedLoginEntry(context = null) { if (typeof globalThis.__seed.hydratePreparedContext === 'function') { return globalThis.__seed.hydratePreparedContext(context); } return context; }",
     "function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydratePartnerContext === 'function') { return globalThis.__seed.hydratePartnerContext(context, flow); } return context; }",
+    "function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydrateLearningPartnerContext === 'function') { return globalThis.__seed.hydrateLearningPartnerContext(context, flow); } return context; }",
     "function hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context = null, flow = null, headerNames = []) { if (typeof globalThis.__seed.hydrateOptionalHeaders === 'function') { return globalThis.__seed.hydrateOptionalHeaders(context, flow, headerNames); } return context; }",
     extractFunctionSource(source, "prepareRestV2InteractiveDocsContextForEntry"),
     "module.exports = { enrichRestV2LearningResourcesFromConsoleContext, prepareRestV2InteractiveDocsContextForEntry };",
@@ -918,6 +927,74 @@ test("REST V2 learning hydrates partner-path and framework status from the debug
   assert.equal(snapshotCalls, 1);
   assert.equal(prepared.partner, "Apple");
   assert.equal(prepared.partnerFrameworkStatus, "framework-status-token");
+});
+
+test("REST V2 learning falls back to inferred partner SSO context when the recorded flow only retained partner auth artifacts", async () => {
+  let snapshotCalls = 0;
+  const validLearningFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const { prepareRestV2InteractiveDocsContextForEntry } = loadRestV2LearningContextPreparer({
+    getFlowSnapshot() {
+      snapshotCalls += 1;
+      return {
+        flowId: "flow-123",
+        events: [
+          {
+            source: "web-request",
+            phase: "cookies-snapshot",
+            cookies: [
+              {
+                name: "r-apt",
+                value: "jwt-placeholder",
+              },
+            ],
+          },
+        ],
+      };
+    },
+    hydrateLearningPartnerContext(context) {
+      context.learningPartner = "Apple";
+      context.learningPartnerFrameworkStatus = validLearningFrameworkStatus;
+      context.learningPartnerSource = "recorded r-apt cookie";
+      return context;
+    },
+    isFrameworkStatusUsable(value = "") {
+      return String(value || "").trim() === validLearningFrameworkStatus;
+    },
+  });
+
+  const prepared = await prepareRestV2InteractiveDocsContextForEntry(
+    {
+      key: "partner-sso-verification-token",
+      usesPartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      usesBodySamlResponse: false,
+    },
+    {
+      ok: true,
+      partner: "",
+      partnerFrameworkStatus: "",
+      flowId: "flow-123",
+    }
+  );
+
+  assert.equal(snapshotCalls, 1);
+  assert.equal(prepared.learningPartner, "Apple");
+  assert.equal(prepared.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
+  assert.equal(prepared.learningPartnerSource, "recorded r-apt cookie");
 });
 
 test("REST V2 learning hydrates optional SSO headers from the debug flow when the current context has not retained them yet", async () => {
@@ -1823,6 +1900,60 @@ test("REST V2 learning keeps partner APIs locked when the partner framework payl
   function toArray(value) {
     return Array.from(value || []);
   }
+});
+
+test("REST V2 learning activates partner APIs from the inferred partner SSO seed when strict capture is absent", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const validLearningFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+
+  const plan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    {
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      requestorAutoResolved: false,
+      partner: "",
+      partnerFrameworkStatus: "",
+      learningPartner: "Apple",
+      learningPartnerFrameworkStatus: validLearningFrameworkStatus,
+      learningPartnerSource: "recorded r-apt cookie",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      samlSource: "tab-network:body",
+    },
+    "test-token"
+  );
+
+  assert.equal(plan.fieldValues["path.partner"], "Apple");
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+  assert.match(plan.notes.join(" "), /inferred partner Apple/i);
 });
 
 test("premium service sections and HR service pills keep their theme class wiring", () => {
