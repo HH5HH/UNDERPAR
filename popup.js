@@ -14173,13 +14173,15 @@ function buildUnderparRestV2DebugSnapshot(programmer = null) {
     selected_mvpd_label: selectedMvpdLabel || "n/a",
     selected_partner: selectedPartner || "n/a",
     learning_partner_source: String(baseContext?.learningPartnerSource || "").trim() || "n/a",
-    selected_mvpd_platform_mapping_id: String(
-      firstNonEmptyString([
-        baseContext?.mvpdPlatformMappingId,
-        resolvedMvpdMeta?.platformMappingId,
-        resolvedMvpdMeta?.platformMappingID,
-      ]) || ""
-    ).trim() || "n/a",
+    selected_mvpd_platform_mapping_id:
+      String(
+        firstNonEmptyString([
+          expectedProviderId,
+          baseContext?.mvpdPlatformMappingId,
+          resolvedMvpdMeta?.platformMappingId,
+          resolvedMvpdMeta?.platformMappingID,
+        ]) || ""
+      ).trim() || "n/a",
     selected_mvpd_partner_platform_mappings: partnerPlatformMappings || null,
     adobe_subject_token_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "Adobe-Subject-Token") ? "yes" : "no",
     ad_service_token_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AD-Service-Token") ? "yes" : "no",
@@ -30608,6 +30610,10 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
     /sso/i.test(String(cachedMvpdMeta?.name || "").trim()) ? "" : cachedMvpdMeta?.name,
     /sso/i.test(String(cachedMvpdMeta?.displayName || "").trim()) ? "" : cachedMvpdMeta?.displayName,
   ]).map((value) => String(value || "").trim().toLowerCase());
+  const usableMappedPartnerProviderId = (() => {
+    const normalizedCandidate = String(mappedPartnerProviderId || "").trim().toLowerCase();
+    return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate) ? String(mappedPartnerProviderId || "").trim() : "";
+  })();
   const explicitPartnerProviderId = dedupeRestV2CandidateStrings([
     context?.mvpdPlatformMappingId,
     context?.mvpdMeta?.platformMappingId,
@@ -30624,7 +30630,7 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
   });
   const providerId = String(
     firstNonEmptyString([
-      mappedPartnerProviderId,
+      usableMappedPartnerProviderId,
       explicitPartnerProviderId,
     ]) || ""
   ).trim();
@@ -89572,6 +89578,10 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
     /sso/i.test(String(cachedMvpdMeta?.name || "").trim()) ? "" : cachedMvpdMeta?.name,
     /sso/i.test(String(cachedMvpdMeta?.displayName || "").trim()) ? "" : cachedMvpdMeta?.displayName,
   ]).map((value) => String(value || "").trim().toLowerCase());
+  const usableMappedPartnerProviderId = (() => {
+    const normalizedCandidate = String(mappedPartnerProviderId || "").trim().toLowerCase();
+    return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate) ? String(mappedPartnerProviderId || "").trim() : "";
+  })();
   const explicitPartnerProviderId = dedupeRestV2CandidateStrings([
     context?.mvpdPlatformMappingId,
     context?.mvpdMeta?.platformMappingId,
@@ -89584,7 +89594,7 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
     return Boolean(normalizedCandidate) && !genericProviderTokens.includes(normalizedCandidate);
   });
   if (resolvedPartnerName) {
-    return String(firstNonEmptyString([mappedPartnerProviderId, explicitPartnerProviderId]) || "").trim();
+    return String(firstNonEmptyString([usableMappedPartnerProviderId, explicitPartnerProviderId]) || "").trim();
   }
   return String(
     firstNonEmptyString([
@@ -89797,6 +89807,10 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     /sso/i.test(String(currentMvpdMeta?.name || "").trim()) ? "" : currentMvpdMeta?.name,
     /sso/i.test(String(currentMvpdMeta?.displayName || "").trim()) ? "" : currentMvpdMeta?.displayName,
   ]).map((value) => String(value || "").trim().toLowerCase());
+  const usableMappedPartnerProviderId = (() => {
+    const normalizedCandidate = String(mappedPartnerProviderId || "").trim().toLowerCase();
+    return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate) ? String(mappedPartnerProviderId || "").trim() : "";
+  })();
   const preferredPartnerFallbackId = dedupeRestV2CandidateStrings([
     context?.mvpdPlatformMappingId,
     currentMvpdMeta?.platformMappingId,
@@ -89843,7 +89857,7 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   if (!snapshot || typeof snapshot !== "object") {
     const fallbackMappingId = String(
       firstNonEmptyString([
-        mappedPartnerProviderId,
+        usableMappedPartnerProviderId,
         preferredPartnerFallbackId,
         realFrameworkProviderId,
       ]) || ""
@@ -89870,10 +89884,16 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
       ? resolvedDetails.partnerPlatformMappings
       : {}),
   };
+  const usableResolvedSnapshotMappingId = (() => {
+    const normalizedCandidate = String(resolvedDetails?.resolvedMappingId || "").trim().toLowerCase();
+    return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate)
+      ? String(resolvedDetails?.resolvedMappingId || "").trim()
+      : "";
+  })();
   const resolvedMappingId = String(
     firstNonEmptyString([
-      resolvedDetails?.resolvedMappingId,
-      mappedPartnerProviderId,
+      usableResolvedSnapshotMappingId,
+      usableMappedPartnerProviderId,
       preferredPartnerFallbackId,
       realFrameworkProviderId,
     ]) || ""
@@ -89883,8 +89903,8 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     ...(Object.keys(mergedPartnerPlatformMappings).length > 0 ? { partnerPlatformMappings: mergedPartnerPlatformMappings } : {}),
     ...(resolvedMappingId ? { platformMappingId: resolvedMappingId } : {}),
   });
-  if (resolvedDetails?.resolvedMappingId) {
-    context.mvpdPlatformMappingId = String(resolvedDetails.resolvedMappingId || "").trim();
+  if (resolvedMappingId) {
+    context.mvpdPlatformMappingId = resolvedMappingId;
   } else if (!String(context?.mvpdPlatformMappingId || "").trim() && currentMappingId) {
     context.mvpdPlatformMappingId = currentMappingId;
   }

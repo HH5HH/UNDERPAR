@@ -1549,6 +1549,42 @@ test("REST V2 learning framework status builder prefers the selected SSO MVPD id
   assert.equal(payload.frameworkPartnerInfo.name, "Apple");
 });
 
+test("REST V2 learning framework status builder ignores a generic cached Apple partner mapping and keeps the selected SSO MVPD id", () => {
+  const { buildRestV2LearningPartnerFrameworkStatus } = loadRestV2LearningPartnerFrameworkStatusBuilder({
+    resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
+      return mvpdMeta || null;
+    },
+  });
+
+  const encoded = buildRestV2LearningPartnerFrameworkStatus(
+    {
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      mvpdPlatformMappingId: "Comcast",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity (Comcast_SSO)",
+        platformMappingId: "Comcast",
+        partnerPlatformMappings: {
+          Apple: "Comcast",
+        },
+      },
+    },
+    {
+      updatedAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    },
+    {
+      signalSource: "recorded partner auth flow",
+    },
+    "Apple"
+  );
+
+  const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+  assert.equal(payload.frameworkProviderInfo.id, "Comcast_SSO");
+  assert.equal(payload.frameworkPartnerInfo.name, "Apple");
+});
+
 test("REST V2 partner platform hydrator promotes cached Apple partner mappings even when the live snapshot is unavailable", async () => {
   const { hydrateRestV2PartnerPlatformMappingFromConsoleContext } = loadRestV2PartnerPlatformMappingHydrator({
     resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
@@ -1584,6 +1620,43 @@ test("REST V2 partner platform hydrator promotes cached Apple partner mappings e
   assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
+});
+
+test("REST V2 partner platform hydrator ignores a generic cached Apple mapping when the live snapshot is unavailable", async () => {
+  const { hydrateRestV2PartnerPlatformMappingFromConsoleContext } = loadRestV2PartnerPlatformMappingHydrator({
+    resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
+      return mvpdMeta || null;
+    },
+    loadSnapshot() {
+      return null;
+    },
+  });
+
+  const context = {
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "MML",
+    serviceProviderId: "MML",
+    mvpd: "Comcast_SSO",
+    learningPartner: "Apple",
+    mvpdPlatformMappingId: "Comcast",
+    mvpdMeta: {
+      id: "Comcast_SSO",
+      name: "Xfinity (Comcast_SSO)",
+      platformMappingId: "Comcast",
+      partnerPlatformMappings: {
+        Apple: "Comcast",
+      },
+    },
+  };
+
+  await hydrateRestV2PartnerPlatformMappingFromConsoleContext(context, {
+    forceRefresh: false,
+  });
+
+  assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO");
+  assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO");
+  assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast");
 });
 
 test("REST V2 learning reruns inferred partner hydration after console snapshot mapping resolves the Comcast Apple provider id", async () => {
