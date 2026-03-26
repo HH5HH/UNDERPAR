@@ -6,7 +6,6 @@ const state = {
   esmHealthReady: false,
   programmerId: "",
   programmerName: "",
-  mediaCompany: "",
   requestorIds: [],
   mvpdIds: [],
   platforms: [],
@@ -51,10 +50,9 @@ const els = {
   filterForm: document.getElementById("workspace-filter-form"),
   startDateInput: document.getElementById("workspace-start-date"),
   endDateInput: document.getElementById("workspace-end-date"),
-  granularityGroup: document.getElementById("workspace-granularity-group"),
+  granularitySelect: document.getElementById("workspace-granularity-select"),
   runButton: document.getElementById("workspace-run-dashboard"),
   resetButton: document.getElementById("workspace-reset-filters"),
-  activePills: document.getElementById("workspace-active-pills"),
   cardsHost: document.getElementById("workspace-cards"),
   pageEnvBadge: document.getElementById("page-env-badge"),
   pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
@@ -435,15 +433,6 @@ function getNextBreakdownSortRule(columns = [], currentSort = null, columnKey = 
   return null;
 }
 
-function getProgrammerLabel() {
-  const name = String(state.programmerName || "").trim();
-  const id = String(state.programmerId || "").trim();
-  if (name && id && name !== id) {
-    return `${name} (${id})`;
-  }
-  return name || id || "Selected Media Company";
-}
-
 function getEffectiveRequestorIds() {
   return state.query.drilldownRequestorIds.length > 0 ? state.query.drilldownRequestorIds.slice() : state.query.baseRequestorIds.slice();
 }
@@ -473,39 +462,12 @@ function hasRenderableReport() {
   return Boolean(state.report);
 }
 
-function updateGranularityButtons() {
-  const buttons = els.granularityGroup?.querySelectorAll("[data-granularity]") || [];
-  buttons.forEach((button) => {
-    const value = String(button.getAttribute("data-granularity") || "").trim().toLowerCase();
-    const isActive = value === normalizeGranularity(state.query.granularity);
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", isActive ? "true" : "false");
-    button.disabled = state.loading;
-  });
-}
-
-function renderActivePills() {
-  if (!els.activePills) {
+function syncGranularitySelect() {
+  if (!els.granularitySelect) {
     return;
   }
-  const pills = [
-    { label: "Media Company", value: state.mediaCompany || state.programmerId || "N/A", accent: true },
-    { label: "Global Requestor", value: state.query.baseRequestorIds.join(", ") || "All" },
-    { label: "Global MVPD", value: state.query.baseMvpdIds.join(", ") || "All" },
-    { label: "Active Requestor", value: state.query.drilldownRequestorIds.join(", ") || "Global scope" },
-    { label: "Active MVPD", value: state.query.drilldownMvpdIds.join(", ") || "Global scope" },
-    { label: "Platforms", value: state.query.platforms.join(", ") || "All" },
-    { label: "Range", value: `${state.query.start || "?"} -> ${state.query.end || "?"}` },
-    { label: "Granularity", value: normalizeGranularity(state.query.granularity) },
-  ];
-  els.activePills.innerHTML = pills
-    .map(
-      (pill) =>
-        `<span class="esm-health-pill${pill.accent ? " esm-health-pill--accent" : ""}"><strong>${escapeHtml(
-          pill.label
-        )}:</strong> ${escapeHtml(String(pill.value || "").trim() || "N/A")}</span>`
-    )
-    .join("");
+  els.granularitySelect.value = normalizeGranularity(state.query.granularity);
+  els.granularitySelect.disabled = state.loading || !state.esmHealthReady;
 }
 
 function syncActionButtonsDisabled() {
@@ -532,9 +494,12 @@ function syncActionButtonsDisabled() {
   if (els.endDateInput) {
     els.endDateInput.disabled = state.loading || !state.esmHealthReady;
   }
+  if (els.granularitySelect) {
+    els.granularitySelect.disabled = state.loading || !state.esmHealthReady;
+  }
   document.body.classList.toggle("net-busy", state.loading);
   document.body.setAttribute("aria-busy", state.loading ? "true" : "false");
-  updateGranularityButtons();
+  syncGranularitySelect();
 }
 
 function renderWorkspaceEnvironmentBadge() {
@@ -560,17 +525,17 @@ function getContextCaption() {
     return "Waiting for the UnderPAR side panel to bind the live ESM controller context.";
   }
   if (!state.programmerId) {
-    return "Select an ENV x Media Company with ESM access in UnderPAR to hydrate this dashboard.";
+    return "Select an ESM-scoped UnderPAR context to hydrate this dashboard.";
   }
   if (!state.esmHealthReady) {
-    return "UnderPAR is still hydrating the ESM premium service for the selected ENV x Media Company.";
+    return "UnderPAR is still hydrating the selected ESM context.";
   }
-  return "Bound to the live UnderPAR ESM context. Date range persists across ENV x Media Company switches; scoped drilldowns reset to the selected controller context.";
+  return "Bound to the live UnderPAR ESM context. Date range persists across environment switches; scoped drilldowns reset to the selected controller context.";
 }
 
 function updateControllerBanner() {
   if (els.controllerState) {
-    els.controllerState.textContent = `ESM HEALTH Dashboard | ${getProgrammerLabel()}`;
+    els.controllerState.textContent = "ESM HEALTH Dashboard";
   }
   if (els.filterState) {
     els.filterState.textContent = getFilterLabel();
@@ -604,7 +569,7 @@ function syncFilterControlsFromState() {
   if (els.endDateInput) {
     els.endDateInput.value = String(state.query.end || "").trim();
   }
-  renderActivePills();
+  syncGranularitySelect();
   syncActionButtonsDisabled();
 }
 
@@ -646,7 +611,6 @@ function applyControllerState(payload = {}) {
   state.esmHealthReady = payload?.esmHealthReady === true;
   state.programmerId = String(payload?.programmerId || "");
   state.programmerName = String(payload?.programmerName || "");
-  state.mediaCompany = String(payload?.mediaCompany || "");
   state.requestorIds = normalizeStringList(payload?.requestorIds);
   state.mvpdIds = normalizeStringList(payload?.mvpdIds);
   state.platforms = normalizeStringList(payload?.platforms);
@@ -1311,7 +1275,7 @@ async function runDashboard(statusMessage = "Running ESM HEALTH dashboard...") {
     return;
   }
   if (!state.esmHealthReady || !state.programmerId) {
-    setStatus("No Media Company is selected in UnderPAR.", "error");
+    setStatus("No ESM context is selected in UnderPAR.", "error");
     return;
   }
   state.loading = true;
@@ -1424,6 +1388,7 @@ function registerEventHandlers() {
       event.preventDefault();
       state.query.start = String(els.startDateInput?.value || "").trim();
       state.query.end = String(els.endDateInput?.value || "").trim();
+      state.query.granularity = normalizeGranularity(String(els.granularitySelect?.value || state.query.granularity || ""));
       void runDashboard();
     });
   }
@@ -1444,14 +1409,9 @@ function registerEventHandlers() {
       void resetFilters();
     });
   }
-  if (els.granularityGroup) {
-    els.granularityGroup.addEventListener("click", (event) => {
-      const target = event.target instanceof Element ? event.target.closest("[data-granularity]") : null;
-      if (!target) {
-        return;
-      }
-      const nextGranularity = normalizeGranularity(String(target.getAttribute("data-granularity") || ""));
-      state.query.granularity = nextGranularity;
+  if (els.granularitySelect) {
+    els.granularitySelect.addEventListener("change", () => {
+      state.query.granularity = normalizeGranularity(String(els.granularitySelect?.value || ""));
       syncFilterControlsFromState();
     });
   }

@@ -23,7 +23,7 @@
           </p>
           <p id="workspace-filter-state" class="workspace-filter-state"></p>
           <p id="workspace-context-caption" class="esm-health-context-caption">
-            ESM HEALTH stays bound to the live UnderPAR ESM context. Date range is the only sticky customization across ENV x Media Company switches.
+            ESM HEALTH stays bound to the live UnderPAR ESM context. Date range is the only sticky customization across environment switches.
           </p>
         </div>
         <div class="workspace-actions esm-health-hero-actions">
@@ -70,22 +70,22 @@
             <span class="spectrum-FieldLabel esm-health-field-label">End</span>
             <input id="workspace-end-date" class="spectrum-Textfield esm-health-date-input" type="date" />
           </label>
-          <div class="spectrum-Field esm-health-field esm-health-field--granularity">
-            <span class="spectrum-FieldLabel esm-health-field-label">Granularity</span>
-            <div id="workspace-granularity-group" class="esm-health-granularity-group" role="group" aria-label="Granularity">
-              <button type="button" class="spectrum-Button esm-health-granularity-btn" data-granularity="day">
-                <span class="spectrum-Button-label">Day</span>
-              </button>
-              <button type="button" class="spectrum-Button esm-health-granularity-btn" data-granularity="hour">
-                <span class="spectrum-Button-label">Hour</span>
-              </button>
-              <button type="button" class="spectrum-Button esm-health-granularity-btn" data-granularity="month">
-                <span class="spectrum-Button-label">Month</span>
-              </button>
-            </div>
-            <p class="esm-health-help-copy">Unique reach stays daily-only, even when the overview zoom changes.</p>
-          </div>
           <div class="esm-health-filter-actions">
+            <button id="workspace-reset-filters" class="spectrum-Button workspace-text-btn" type="button">
+              <span class="spectrum-Button-label">Reset to Context</span>
+            </button>
+            <label class="spectrum-Field esm-health-inline-field esm-health-inline-field--granularity">
+              <span class="spectrum-FieldLabel esm-health-field-label">Granularity</span>
+              <select
+                id="workspace-granularity-select"
+                class="spectrum-Textfield esm-health-filter-select"
+                aria-label="Granularity"
+              >
+                <option value="day">Day</option>
+                <option value="hour">Hour</option>
+                <option value="month">Month</option>
+              </select>
+            </label>
             <button
               id="workspace-run-dashboard"
               class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"
@@ -93,12 +93,8 @@
             >
               <span class="spectrum-Button-label">Run Dashboard</span>
             </button>
-            <button id="workspace-reset-filters" class="spectrum-Button workspace-text-btn" type="button">
-              <span class="spectrum-Button-label">Reset to Context</span>
-            </button>
           </div>
         </form>
-        <div id="workspace-active-pills" class="esm-health-pill-row"></div>
       </section>
 
       <section id="workspace-cards" class="workspace-cards"></section>
