@@ -233,6 +233,7 @@ test("MEG workspace saved-query reset clears the picker after the native menu cl
 test("sidepanel saved-query menu uses an owned trigger while standalone MEG keeps the deferred native picker flow", () => {
   const popupSource = read("popup.js");
   const megSource = read("meg-workspace.js");
+  const popupCss = read("popup.css");
 
   assert.match(
     popupSource,
@@ -251,6 +252,10 @@ test("sidepanel saved-query menu uses an owned trigger while standalone MEG keep
     /savedQueryPicker\?\.addEventListener\("change", async \(\) => \{[\s\S]*?const executeSavedQuerySelection = async \(\) => \{[\s\S]*?await loadSelectedSavedQuery\(selectedOption\);[\s\S]*?setTimeout\(\(\) => \{\s*void executeSavedQuerySelection\(\);/m
   );
   assert.doesNotMatch(popupSource, /megSavedQuerySelectElement\?\.addEventListener\("change"/);
+  assert.match(
+    popupCss,
+    /\.service-esm \.esm-workspace-meg-panel \{[\s\S]*?overflow:\s*visible;/m
+  );
 });
 
 test("sidepanel saved-query menu close helper hides the menu and resets the trigger state", () => {

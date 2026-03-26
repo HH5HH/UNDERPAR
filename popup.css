@@ -3420,7 +3420,7 @@ select:disabled {
 }
 
 .service-esm .esm-workspace-meg-panel {
-  overflow: hidden;
+  overflow: visible;
   padding: 0;
   border: 1px solid var(--service-accent-soft-strong);
   border-radius: 12px;
