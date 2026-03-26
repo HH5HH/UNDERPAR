@@ -1246,6 +1246,47 @@ body.workspace-locked .workspace-status {
   flex: 0 0 auto;
 }
 
+.esm-query-health-link,
+.esm-csv-link {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--s2-radius-pill);
+  border: 1px solid rgba(var(--zip-accent-1000), 0.3);
+  background: linear-gradient(180deg, rgba(44, 44, 44, 0.98), rgba(27, 27, 27, 0.98));
+  color: rgb(var(--workspace-link-hover-rgb));
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 5px 11px rgba(0, 0, 0, 0.26);
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease,
+    color 140ms ease;
+}
+
+.esm-query-health-link:hover,
+.esm-query-health-link:focus-visible,
+.esm-csv-link:hover,
+.esm-csv-link:focus-visible {
+  outline: none;
+  background: var(--s2-action-bg-hover);
+  border-color: rgba(var(--zip-accent-1100), 0.58);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.32);
+}
+
+.esm-query-health-link:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
 .esm-footer-controls {
   margin-left: auto;
   display: flex;

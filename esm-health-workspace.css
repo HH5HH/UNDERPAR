@@ -166,7 +166,7 @@ body::before {
 
 .esm-health-filter-form {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
   padding: 16px;
 }
@@ -290,7 +290,7 @@ body::before {
 .esm-health-filter-actions {
   grid-column: span 2;
   display: grid;
-  grid-template-columns: auto minmax(164px, 212px) auto;
+  grid-template-columns: auto minmax(176px, 228px) minmax(164px, 212px) auto;
   align-items: end;
   justify-content: flex-end;
   gap: 12px;
@@ -298,6 +298,10 @@ body::before {
 
 .esm-health-inline-field {
   min-width: 0;
+}
+
+.esm-health-inline-field--compare {
+  min-width: 176px;
 }
 
 .esm-health-inline-field--granularity {
@@ -371,6 +375,13 @@ body::before {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--esm-health-ink-soft);
+}
+
+.esm-health-kpi-compare {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(164, 223, 255, 0.92);
 }
 
 .esm-health-chart-grid,

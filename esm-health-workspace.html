@@ -74,6 +74,18 @@
             <button id="workspace-reset-filters" class="spectrum-Button workspace-text-btn" type="button">
               <span class="spectrum-Button-label">Reset to Context</span>
             </button>
+            <label class="spectrum-Field esm-health-inline-field esm-health-inline-field--compare">
+              <span class="spectrum-FieldLabel esm-health-field-label">Compare</span>
+              <select
+                id="workspace-compare-select"
+                class="spectrum-Textfield esm-health-filter-select"
+                aria-label="Comparison Window"
+              >
+                <option value="off">Current Window</option>
+                <option value="mom">Month over Month</option>
+                <option value="yoy">Year over Year</option>
+              </select>
+            </label>
             <label class="spectrum-Field esm-health-inline-field esm-health-inline-field--granularity">
               <span class="spectrum-FieldLabel esm-health-field-label">Granularity</span>
               <select

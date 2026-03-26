@@ -30,11 +30,14 @@ const state = {
     start: "",
     end: "",
     granularity: "hour",
+    compareMode: "off",
     baseRequestorIds: [],
     baseMvpdIds: [],
     drilldownRequestorIds: [],
     drilldownMvpdIds: [],
     platforms: [],
+    sourceRequestPath: "",
+    sourceRequestLabel: "",
   },
 };
 
@@ -50,6 +53,7 @@ const els = {
   filterForm: document.getElementById("workspace-filter-form"),
   startDateInput: document.getElementById("workspace-start-date"),
   endDateInput: document.getElementById("workspace-end-date"),
+  compareSelect: document.getElementById("workspace-compare-select"),
   granularitySelect: document.getElementById("workspace-granularity-select"),
   runButton: document.getElementById("workspace-run-dashboard"),
   resetButton: document.getElementById("workspace-reset-filters"),
@@ -209,6 +213,11 @@ function normalizeStringList(values = []) {
 function normalizeGranularity(value = "") {
   const normalized = String(value || "").trim().toLowerCase();
   return normalized === "hour" || normalized === "month" ? normalized : "day";
+}
+
+function normalizeCompareMode(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "mom" || normalized === "yoy" ? normalized : "off";
 }
 
 function normalizeIsoDateInput(value = "") {
@@ -445,7 +454,19 @@ function getFilterLabel() {
   const requestorLabel = getEffectiveRequestorIds().join(", ") || "All RequestorIds";
   const mvpdLabel = getEffectiveMvpdIds().join(", ") || "All MVPDs";
   const environmentLabel = String(state.environmentLabel || state.environmentKey || "N/A").trim();
-  return `Env: ${environmentLabel} | RequestorId: ${requestorLabel} | MVPD: ${mvpdLabel} | ${state.timezoneLabel || "PST effective"}`;
+  const compareMode = normalizeCompareMode(state.query.compareMode);
+  const compareLabel = compareMode === "mom" ? "MoM" : compareMode === "yoy" ? "YoY" : "Current";
+  const sourceLabel = String(state.query.sourceRequestLabel || "").trim();
+  return [
+    `Env: ${environmentLabel}`,
+    `RequestorId: ${requestorLabel}`,
+    `MVPD: ${mvpdLabel}`,
+    `Compare: ${compareLabel}`,
+    sourceLabel ? `Seed: ${sourceLabel}` : "",
+    state.timezoneLabel || "PST effective",
+  ]
+    .filter(Boolean)
+    .join(" | ");
 }
 
 function setStatus(message = "", type = "info") {
@@ -468,6 +489,14 @@ function syncGranularitySelect() {
   }
   els.granularitySelect.value = normalizeGranularity(state.query.granularity);
   els.granularitySelect.disabled = state.loading || !state.esmHealthReady;
+}
+
+function syncCompareSelect() {
+  if (!els.compareSelect) {
+    return;
+  }
+  els.compareSelect.value = normalizeCompareMode(state.query.compareMode);
+  els.compareSelect.disabled = state.loading || !state.esmHealthReady;
 }
 
 function syncActionButtonsDisabled() {
@@ -497,8 +526,12 @@ function syncActionButtonsDisabled() {
   if (els.granularitySelect) {
     els.granularitySelect.disabled = state.loading || !state.esmHealthReady;
   }
+  if (els.compareSelect) {
+    els.compareSelect.disabled = state.loading || !state.esmHealthReady;
+  }
   document.body.classList.toggle("net-busy", state.loading);
   document.body.setAttribute("aria-busy", state.loading ? "true" : "false");
+  syncCompareSelect();
   syncGranularitySelect();
 }
 
@@ -529,6 +562,9 @@ function getContextCaption() {
   }
   if (!state.esmHealthReady) {
     return "UnderPAR is still hydrating the selected ESM context.";
+  }
+  if (String(state.query.sourceRequestPath || "").trim()) {
+    return `Seeded from ${String(state.query.sourceRequestLabel || state.query.sourceRequestPath).trim()}. Compare presets reuse that same ESM request scope; Reset to Context returns to the live UnderPAR controller scope.`;
   }
   return "Bound to the live UnderPAR ESM context. Date range persists across environment switches; scoped drilldowns reset to the selected controller context.";
 }
@@ -566,11 +602,14 @@ function resetQueryToControllerDefaults() {
     start: String(state.defaultStart || "").trim(),
     end: String(state.defaultEnd || "").trim(),
     granularity: normalizeGranularity(state.defaultGranularity),
+    compareMode: "off",
     baseRequestorIds: normalizeStringList(state.requestorIds),
     baseMvpdIds: normalizeStringList(state.mvpdIds),
     drilldownRequestorIds: [],
     drilldownMvpdIds: [],
     platforms: normalizeStringList(state.platforms),
+    sourceRequestPath: "",
+    sourceRequestLabel: "",
   };
 }
 
@@ -581,6 +620,7 @@ function syncFilterControlsFromState() {
   if (els.endDateInput) {
     els.endDateInput.value = String(state.query.end || "").trim();
   }
+  syncCompareSelect();
   syncGranularitySelect();
   syncActionButtonsDisabled();
 }
@@ -674,6 +714,9 @@ function buildQueryContextPayload() {
     start: String(state.query.start || "").trim(),
     end: String(state.query.end || "").trim(),
     granularity: normalizeGranularity(state.query.granularity),
+    compareMode: normalizeCompareMode(state.query.compareMode),
+    sourceRequestPath: String(state.query.sourceRequestPath || "").trim(),
+    sourceRequestLabel: String(state.query.sourceRequestLabel || "").trim(),
   };
 }
 
@@ -731,11 +774,14 @@ function syncQueryFromReport(payload = {}) {
     start: String(queryContext?.start || state.defaultStart || "").trim(),
     end: String(queryContext?.end || state.defaultEnd || "").trim(),
     granularity: normalizeGranularity(queryContext?.granularity || state.defaultGranularity),
+    compareMode: normalizeCompareMode(queryContext?.compareMode),
     baseRequestorIds: normalizeStringList(queryContext?.baseRequestorIds || state.requestorIds),
     baseMvpdIds: normalizeStringList(queryContext?.baseMvpdIds || state.mvpdIds),
     drilldownRequestorIds: normalizeStringList(queryContext?.drilldownRequestorIds),
     drilldownMvpdIds: normalizeStringList(queryContext?.drilldownMvpdIds),
     platforms: normalizeStringList(queryContext?.platforms),
+    sourceRequestPath: String(queryContext?.sourceRequestPath || "").trim(),
+    sourceRequestLabel: String(queryContext?.sourceRequestLabel || "").trim(),
   };
   syncFilterControlsFromState();
 }
@@ -781,6 +827,86 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0) {
       <polyline class="line-stroke" points="${polylinePoints}" />
       <circle class="point-dot" cx="${lastPoint.x.toFixed(2)}" cy="${lastPoint.y.toFixed(2)}" r="3.6" />
     </svg>
+  `;
+}
+
+function getCompareModeLabel(mode = "") {
+  const normalized = normalizeCompareMode(mode);
+  if (normalized === "mom") {
+    return "Month over Month";
+  }
+  if (normalized === "yoy") {
+    return "Year over Year";
+  }
+  return "Current Window";
+}
+
+function formatSignedNumber(value, formatter = formatCompactNumber) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) {
+    return "0";
+  }
+  if (numeric === 0) {
+    return formatter(0);
+  }
+  const prefix = numeric > 0 ? "+" : "-";
+  return `${prefix}${formatter(Math.abs(numeric))}`;
+}
+
+function formatSignedPercent(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) {
+    return "0%";
+  }
+  const absolute = Math.abs(numeric) * 100;
+  return `${numeric > 0 ? "+" : numeric < 0 ? "-" : ""}${absolute.toFixed(1)}%`;
+}
+
+function formatSignedPercentagePoints(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) {
+    return "0.0 pts";
+  }
+  const absolute = Math.abs(numeric) * 100;
+  return `${numeric > 0 ? "+" : numeric < 0 ? "-" : ""}${absolute.toFixed(1)} pts`;
+}
+
+function buildComparisonDeltaText(currentValue, previousValue, comparison = null, kind = "number") {
+  if (!comparison?.enabled || !comparison?.summary) {
+    return "";
+  }
+  const current = Number(currentValue);
+  const previous = Number(previousValue);
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) {
+    return "";
+  }
+  const delta = current - previous;
+  const comparisonLabel = String(comparison?.badgeLabel || comparison?.label || "comparison window").trim();
+  if (kind === "ratio") {
+    return `${formatSignedPercentagePoints(delta)} vs ${comparisonLabel}`;
+  }
+  if (kind === "latency") {
+    const relativeDelta = previous !== 0 ? ` | ${formatSignedPercent(delta / Math.abs(previous))}` : "";
+    return `${formatSignedNumber(delta, (value) => `${Math.round(value)} ms`)}${relativeDelta} vs ${comparisonLabel}`;
+  }
+  const relativeDelta = previous !== 0 ? ` | ${formatSignedPercent(delta / Math.abs(previous))}` : "";
+  return `${formatSignedNumber(delta)}${relativeDelta} vs ${comparisonLabel}`;
+}
+
+function renderKpiCard(label = "", value = "", copy = "", comparisonText = "") {
+  return `
+    <article class="rest-report-card esm-health-kpi-card">
+      <header class="rest-report-head">
+        <p class="esm-health-kpi-label">${escapeHtml(label)}</p>
+        <p class="esm-health-kpi-value">${escapeHtml(String(value || "").trim() || "0")}</p>
+        <p class="esm-health-overview-copy">${escapeHtml(String(copy || "").trim() || "No additional context available.")}</p>
+        ${
+          comparisonText
+            ? `<p class="esm-health-kpi-compare">${escapeHtml(comparisonText)}</p>`
+            : ""
+        }
+      </header>
+    </article>
   `;
 }
 
@@ -1005,6 +1131,8 @@ function renderReport() {
   }
 
   const summary = report?.summary && typeof report.summary === "object" ? report.summary : {};
+  const comparison = report?.comparison && typeof report.comparison === "object" ? report.comparison : { enabled: false };
+  const comparisonSummary = comparison?.summary && typeof comparison.summary === "object" ? comparison.summary : null;
   const backboneSeries = Array.isArray(report?.backboneSeries) ? report.backboneSeries : [];
   const latestBackbone = backboneSeries.length > 0 ? backboneSeries[backboneSeries.length - 1] : null;
   const checkedAtLabel = formatDateTime(report?.checkedAt);
@@ -1012,6 +1140,13 @@ function renderReport() {
   const introCopy = `${String(report?.queryContext?.start || "").trim() || "?"} -> ${String(
     report?.queryContext?.end || ""
   ).trim() || "?"} | ${String(report?.queryContext?.timezoneLabel || state.timezoneLabel || "PST effective").trim()}`;
+  const comparisonCopy =
+    comparison?.enabled === true
+      ? `${getCompareModeLabel(comparison?.mode)} | ${String(comparison?.start || "?").trim()} -> ${String(
+          comparison?.end || "?"
+        ).trim()}`
+      : "";
+  const seedCopy = String(report?.queryContext?.sourceRequestLabel || report?.queryContext?.sourceRequestPath || "").trim();
 
   els.cardsHost.innerHTML = `
     <article class="rest-report-card">
@@ -1019,96 +1154,92 @@ function renderReport() {
         <p class="rest-report-title">ESM HEALTH Overview</p>
         <p class="rest-report-meta"><strong>Checked:</strong> ${escapeHtml(checkedAtLabel)} | <strong>Range:</strong> ${escapeHtml(
           introCopy
-        )} | <strong>Status:</strong> ${escapeHtml(sectionSummary)}</p>
+        )} | ${comparisonCopy ? `<strong>Compare:</strong> ${escapeHtml(comparisonCopy)} | ` : ""}<strong>Status:</strong> ${escapeHtml(
+          sectionSummary
+        )}</p>
         <p class="esm-health-overview-copy">${escapeHtml(
           report?.partial === true
             ? "Dashboard loaded with partial data. Sections with failures are flagged below."
             : "Dashboard loaded from ESM v3 using the current UnderPAR context."
         )}</p>
+        ${
+          seedCopy
+            ? `<p class="esm-health-overview-copy">Seeded from: ${escapeHtml(seedCopy)}</p>`
+            : ""
+        }
+        ${
+          comparison?.enabled === true && !comparison?.error
+            ? `<p class="esm-health-overview-copy">Comparison reuses the same ESM request scope against the ${escapeHtml(
+                getCompareModeLabel(comparison?.mode).toLowerCase()
+              )} window.</p>`
+            : ""
+        }
+        ${
+          comparison?.enabled === true && comparison?.error
+            ? `<p class="esm-health-overview-copy esm-health-section-error">${escapeHtml(
+                `Comparison unavailable: ${comparison.error}`
+              )}</p>`
+            : ""
+        }
         ${report?.error ? `<p class="esm-health-overview-copy esm-health-section-error">${escapeHtml(report.error)}</p>` : ""}
       </header>
     </article>
 
     <section class="esm-health-kpi-grid">
-      <article class="rest-report-card esm-health-kpi-card">
-        <header class="rest-report-head">
-          <p class="esm-health-kpi-label">Play Requests</p>
-          <p class="esm-health-kpi-value">${escapeHtml(formatCompactNumber(summary.playRequests || 0))}</p>
-          <p class="esm-health-overview-copy">Total media token volume for the selected window.</p>
-        </header>
-      </article>
-      <article class="rest-report-card esm-health-kpi-card">
-        <header class="rest-report-head">
-          <p class="esm-health-kpi-label">AuthN Conversion</p>
-          <p class="esm-health-kpi-value">${escapeHtml(formatPercent(summary.authnConversion))}</p>
-          <p class="esm-health-overview-copy">${escapeHtml(
-            `${formatCompactNumber(summary.authnSuccessful || 0)} successful of ${formatCompactNumber(summary.authnAttempts || 0)} attempts`
-          )}</p>
-        </header>
-      </article>
-      <article class="rest-report-card esm-health-kpi-card">
-        <header class="rest-report-head">
-          <p class="esm-health-kpi-label">AuthZ Conversion</p>
-          <p class="esm-health-kpi-value">${escapeHtml(formatPercent(summary.authzConversion))}</p>
-          <p class="esm-health-overview-copy">${escapeHtml(
-            `${formatCompactNumber(summary.authzSuccessful || 0)} successful of ${formatCompactNumber(summary.authzAttempts || 0)} attempts`
-          )}</p>
-        </header>
-      </article>
-      <article class="rest-report-card esm-health-kpi-card">
-        <header class="rest-report-head">
-          <p class="esm-health-kpi-label">AuthZ Error Rate</p>
-          <p class="esm-health-kpi-value">${escapeHtml(formatPercent(summary.authzErrorRate))}</p>
-          <p class="esm-health-overview-copy">${escapeHtml(
-            `${formatCompactNumber((summary.authzFailed || 0) + (summary.authzRejected || 0))} failed or rejected authorizations`
-          )}</p>
-        </header>
-      </article>
-      <article class="rest-report-card esm-health-kpi-card">
-        <header class="rest-report-head">
-          <p class="esm-health-kpi-label">Avg AuthZ Latency</p>
-          <p class="esm-health-kpi-value">${escapeHtml(formatLatency(summary.avgAuthzLatency))}</p>
-          <p class="esm-health-overview-copy">Calculated from successful and failed authorization responses.</p>
-        </header>
-      </article>
-      <article class="rest-report-card esm-health-kpi-card">
-        <header class="rest-report-head">
-          <p class="esm-health-kpi-label">Clientless Failure</p>
-          <p class="esm-health-kpi-value">${escapeHtml(formatPercent(summary.clientlessFailureRate))}</p>
-          <p class="esm-health-overview-copy">${escapeHtml(
-            `${formatCompactNumber(summary.clientlessFailures || 0)} failures across clientless token traffic`
-          )}</p>
-        </header>
-      </article>
-      <article class="rest-report-card esm-health-kpi-card">
-        <header class="rest-report-head">
-          <p class="esm-health-kpi-label">Unique Sessions</p>
-          <p class="esm-health-kpi-value">${escapeHtml(formatCompactNumber(summary.latestUniqueSessions || 0))}</p>
-          <p class="esm-health-overview-copy">${escapeHtml(
-            `${formatCompactNumber(summary.latestUniqueAccounts || 0)} accounts | ${summary.latestUniqueLabel || "Daily uniques"}`
-          )}</p>
-        </header>
-      </article>
-      <article class="rest-report-card esm-health-kpi-card">
-        <header class="rest-report-head">
-          <p class="esm-health-kpi-label">App Versions</p>
-          <p class="esm-health-kpi-value">${escapeHtml(formatCompactNumber(summary.activeApplications || 0))}</p>
-          <p class="esm-health-overview-copy">${escapeHtml(
-            `${formatCompactNumber(summary.activeApis || 0)} API slices | ${formatCompactNumber(summary.activeSdkVersions || 0)} SDK slices`
-          )}</p>
-        </header>
-      </article>
-      <article class="rest-report-card esm-health-kpi-card">
-        <header class="rest-report-head">
-          <p class="esm-health-kpi-label">Failure Reasons</p>
-          <p class="esm-health-kpi-value">${escapeHtml(formatCompactNumber(summary.activeReasons || 0))}</p>
-          <p class="esm-health-overview-copy">${escapeHtml(
-            `${summary.topReasonLabel || "No reason hotspots detected"}${
-              summary.topReasonEventLabel ? ` | ${summary.topReasonEventLabel}` : ""
-            }`
-          )}</p>
-        </header>
-      </article>
+      ${renderKpiCard(
+        "Play Requests",
+        formatCompactNumber(summary.playRequests || 0),
+        "Total media token volume for the selected window.",
+        buildComparisonDeltaText(summary.playRequests, comparisonSummary?.playRequests, comparison, "number")
+      )}
+      ${renderKpiCard(
+        "AuthN Conversion",
+        formatPercent(summary.authnConversion),
+        `${formatCompactNumber(summary.authnSuccessful || 0)} successful of ${formatCompactNumber(summary.authnAttempts || 0)} attempts`,
+        buildComparisonDeltaText(summary.authnConversion, comparisonSummary?.authnConversion, comparison, "ratio")
+      )}
+      ${renderKpiCard(
+        "AuthZ Conversion",
+        formatPercent(summary.authzConversion),
+        `${formatCompactNumber(summary.authzSuccessful || 0)} successful of ${formatCompactNumber(summary.authzAttempts || 0)} attempts`,
+        buildComparisonDeltaText(summary.authzConversion, comparisonSummary?.authzConversion, comparison, "ratio")
+      )}
+      ${renderKpiCard(
+        "AuthZ Error Rate",
+        formatPercent(summary.authzErrorRate),
+        `${formatCompactNumber((summary.authzFailed || 0) + (summary.authzRejected || 0))} failed or rejected authorizations`,
+        buildComparisonDeltaText(summary.authzErrorRate, comparisonSummary?.authzErrorRate, comparison, "ratio")
+      )}
+      ${renderKpiCard(
+        "Avg AuthZ Latency",
+        formatLatency(summary.avgAuthzLatency),
+        "Calculated from successful and failed authorization responses.",
+        buildComparisonDeltaText(summary.avgAuthzLatency, comparisonSummary?.avgAuthzLatency, comparison, "latency")
+      )}
+      ${renderKpiCard(
+        "Clientless Failure",
+        formatPercent(summary.clientlessFailureRate),
+        `${formatCompactNumber(summary.clientlessFailures || 0)} failures across clientless token traffic`,
+        buildComparisonDeltaText(summary.clientlessFailureRate, comparisonSummary?.clientlessFailureRate, comparison, "ratio")
+      )}
+      ${renderKpiCard(
+        "Unique Sessions",
+        formatCompactNumber(summary.latestUniqueSessions || 0),
+        `${formatCompactNumber(summary.latestUniqueAccounts || 0)} accounts | ${summary.latestUniqueLabel || "Daily uniques"}`,
+        buildComparisonDeltaText(summary.latestUniqueSessions, comparisonSummary?.latestUniqueSessions, comparison, "number")
+      )}
+      ${renderKpiCard(
+        "App Versions",
+        formatCompactNumber(summary.activeApplications || 0),
+        `${formatCompactNumber(summary.activeApis || 0)} API slices | ${formatCompactNumber(summary.activeSdkVersions || 0)} SDK slices`,
+        buildComparisonDeltaText(summary.activeApplications, comparisonSummary?.activeApplications, comparison, "number")
+      )}
+      ${renderKpiCard(
+        "Failure Reasons",
+        formatCompactNumber(summary.activeReasons || 0),
+        `${summary.topReasonLabel || "No reason hotspots detected"}${summary.topReasonEventLabel ? ` | ${summary.topReasonEventLabel}` : ""}`,
+        buildComparisonDeltaText(summary.activeReasons, comparisonSummary?.activeReasons, comparison, "number")
+      )}
     </section>
 
     ${renderInsightCards(report)}
@@ -1400,6 +1531,7 @@ function registerEventHandlers() {
       event.preventDefault();
       state.query.start = String(els.startDateInput?.value || "").trim();
       state.query.end = String(els.endDateInput?.value || "").trim();
+      state.query.compareMode = normalizeCompareMode(String(els.compareSelect?.value || state.query.compareMode || ""));
       state.query.granularity = normalizeGranularity(String(els.granularitySelect?.value || state.query.granularity || ""));
       void runDashboard();
     });
@@ -1419,6 +1551,12 @@ function registerEventHandlers() {
   if (els.resetButton) {
     els.resetButton.addEventListener("click", () => {
       void resetFilters();
+    });
+  }
+  if (els.compareSelect) {
+    els.compareSelect.addEventListener("change", () => {
+      state.query.compareMode = normalizeCompareMode(String(els.compareSelect?.value || ""));
+      syncFilterControlsFromState();
     });
   }
   if (els.granularitySelect) {

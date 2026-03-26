@@ -1342,12 +1342,14 @@ test("health workspace readiness now keys off hydrated premium-service context",
 test("esm health treats an unavailable uniques dataset as optional instead of failing the whole dashboard", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const reportPayloadSource = extractFunctionSource(popupSource, "buildEsmHealthDashboardReportPayload");
+  const loadReportSource = extractFunctionSource(popupSource, "loadEsmHealthDashboardReportPayload");
   const runSource = extractFunctionSource(popupSource, "runEsmHealthDashboardForSelection");
 
   assert.match(reportPayloadSource, /const ignoredSections = new Set\(/);
   assert.match(reportPayloadSource, /const effectiveSections = requestedSections\.filter\(\(key\) => !ignoredSections\.has\(key\)\);/);
-  assert.match(runSource, /const uniquesUnsupported = Number\(uniquesResult\?\.status \|\| 0\) === 404;/);
-  assert.match(runSource, /ignoredSections\.push\("uniques"\);/);
+  assert.match(loadReportSource, /const uniquesUnsupported = Number\(uniquesResult\?\.status \|\| 0\) === 404;/);
+  assert.match(loadReportSource, /ignoredSections\.push\("uniques"\);/);
+  assert.match(runSource, /const comparison = await loadEsmHealthDashboardComparison\(queryContext/);
 
   const script = [
     'function normalizeEsmHealthGranularity(value = "") { const normalized = String(value || "").trim().toLowerCase(); return normalized === "hour" || normalized === "day" || normalized === "month" ? normalized : "hour"; }',
@@ -1382,7 +1384,7 @@ test("esm health treats an unavailable uniques dataset as optional instead of fa
 
 test("esm health now builds supported ordered report paths and drops broken metric-bundle breakdown calls", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const runSource = extractFunctionSource(popupSource, "runEsmHealthDashboardForSelection");
+  const runSource = extractFunctionSource(popupSource, "loadEsmHealthDashboardReportPayload");
 
   assert.match(
     runSource,
@@ -1541,10 +1543,11 @@ test("health workspaces render full-width collapsible report sections and expose
   assert.match(esmHealthWorkspaceSource, /renderInsightCards\(report\)/);
   assert.match(esmHealthWorkspaceHtml, /<body class="spectrum spectrum--medium spectrum--dark">/);
   assert.match(esmHealthWorkspaceHtml, /class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"/);
+  assert.match(esmHealthWorkspaceHtml, /id="workspace-compare-select"/);
   assert.match(esmHealthWorkspaceHtml, /id="workspace-granularity-select"/);
   assert.doesNotMatch(esmHealthWorkspaceHtml, /workspace-active-pills/);
   assert.match(esmHealthWorkspaceCss, /@import url\("underpar-env-badge\.css"\);/);
-  assert.match(esmHealthWorkspaceCss, /\.esm-health-filter-actions\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(164px,\s*212px\) auto;/);
+  assert.match(esmHealthWorkspaceCss, /\.esm-health-filter-actions\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(176px,\s*228px\) minmax\(164px,\s*212px\) auto;/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-table-grid\s*\{\s*display:\s*flex;/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-section-summary\s*\{/);
   assert.doesNotMatch(esmHealthWorkspaceSource, /Media Company/);
