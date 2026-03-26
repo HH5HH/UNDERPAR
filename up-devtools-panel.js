@@ -33,6 +33,11 @@ const vaultSlacktivatePanel = document.getElementById("vault-slacktivate-panel")
 const vaultSlacktivateBadge = document.getElementById("vault-slacktivate-badge");
 const vaultSlacktivateContent = document.getElementById("vault-slacktivate-content");
 const vaultSlacktivateInput = document.getElementById("vault-slacktivate-input");
+const registeredApplicationsCard = document.getElementById("registered-applications-card");
+const registeredApplicationsBadge = document.getElementById("registered-applications-badge");
+const registeredApplicationsContext = document.getElementById("registered-applications-context");
+const registeredApplicationsSummary = document.getElementById("registered-applications-summary");
+const registeredApplicationsStatus = document.getElementById("registered-applications-status");
 const UP_DEVTOOLS_STATUS_PORT_NAME = "underpar-up-devtools-status";
 const FALLBACK_STORAGE_KEY = "underpar_adobepass_environment_v1";
 const UNDERPAR_VAULT_CSV_SCHEMA = "underpar-pass-vault-csv-v6";
@@ -54,6 +59,13 @@ const VAULT_REQUIRED_SCOPE_BY_SERVICE_KEY = Object.freeze({
   esm: "analytics:client",
   degradation: "decisions:owner",
 });
+const DEVTOOLS_PREMIUM_SERVICE_LABEL_BY_KEY = Object.freeze({
+  restV2: "REST V2",
+  esm: "ESM",
+  degradation: "DEGRADATION",
+  resetTempPass: "Reset TempPASS",
+});
+const DEVTOOLS_PREMIUM_SERVICE_DISPLAY_ORDER = Object.freeze(["restV2", "esm", "degradation", "resetTempPass"]);
 const underparVaultStore = globalThis.UnderparVaultStore || null;
 const FALLBACK_DEFAULT_KEY = "release-production";
 const FALLBACK_ENVIRONMENTS = Object.freeze([
@@ -83,6 +95,7 @@ const panelState = {
   switchBusy: false,
   statusPort: null,
   statusReconnectTimerId: 0,
+  controllerStatusSnapshot: null,
   vaultLoadPromise: null,
   vaultSnapshot: null,
   vaultDirty: true,
@@ -93,6 +106,8 @@ const panelState = {
   vaultActionBusy: false,
   vaultActionContext: null,
   vaultSlacktivateDragDepth: 0,
+  registeredApplicationPendingSwitch: null,
+  registeredApplicationSwitchBusy: false,
 };
 
 function normalizeEnvironmentKey(value) {
@@ -230,6 +245,7 @@ function syncInteractiveControlState() {
 
 function renderControllerStatus(snapshot = null) {
   const status = snapshot && typeof snapshot === "object" ? snapshot : {};
+  panelState.controllerStatusSnapshot = status;
   const normalizedStatus = String(status.status || "bootstrapping").trim().toLowerCase();
   const ready = status.ready === true;
   let badgeText = "Checking";
@@ -269,6 +285,7 @@ function renderControllerStatus(snapshot = null) {
   }
 
   syncInteractiveControlState();
+  renderRegisteredApplicationsControlPanel(status);
 }
 
 function scheduleStatusPortReconnect() {
@@ -402,6 +419,279 @@ function canUseUnderparVaultIndexedDb() {
 function uniqueSorted(values = []) {
   return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))].sort((left, right) =>
     left.localeCompare(right, undefined, { sensitivity: "base" })
+  );
+}
+
+function normalizeControlPanelPremiumServiceBindings(bindings = []) {
+  return (Array.isArray(bindings) ? bindings : [])
+    .map((binding) => {
+      const serviceKey = String(binding?.serviceKey || "").trim();
+      const label = firstNonEmptyString([binding?.label, DEVTOOLS_PREMIUM_SERVICE_LABEL_BY_KEY[serviceKey], serviceKey]);
+      const appGuid = String(binding?.appGuid || binding?.guid || "").trim();
+      const appName = firstNonEmptyString([binding?.appName, binding?.applicationName, appGuid]);
+      if (!serviceKey || !label || !appGuid || !appName) {
+        return null;
+      }
+      return {
+        serviceKey,
+        label,
+        appGuid,
+        appName,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftIndex = DEVTOOLS_PREMIUM_SERVICE_DISPLAY_ORDER.indexOf(String(left?.serviceKey || "").trim());
+      const rightIndex = DEVTOOLS_PREMIUM_SERVICE_DISPLAY_ORDER.indexOf(String(right?.serviceKey || "").trim());
+      if (leftIndex !== rightIndex) {
+        return (leftIndex >= 0 ? leftIndex : Number.MAX_SAFE_INTEGER) - (rightIndex >= 0 ? rightIndex : Number.MAX_SAFE_INTEGER);
+      }
+      return String(left?.label || "").localeCompare(String(right?.label || ""), undefined, { sensitivity: "base" });
+    });
+}
+
+function normalizeControlPanelPremiumServiceOptions(options = null) {
+  const normalized = {};
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    return normalized;
+  }
+  Object.entries(options).forEach(([serviceKey, entries]) => {
+    const normalizedServiceKey = String(serviceKey || "").trim();
+    if (!normalizedServiceKey) {
+      return;
+    }
+    normalized[normalizedServiceKey] = (Array.isArray(entries) ? entries : [])
+      .map((entry) => {
+        const guid = String(entry?.guid || entry?.appGuid || "").trim();
+        const appName = firstNonEmptyString([entry?.appName, entry?.name, guid]);
+        if (!guid || !appName) {
+          return null;
+        }
+        return { guid, appName };
+      })
+      .filter(Boolean);
+  });
+  return normalized;
+}
+
+function normalizeControlPanelPendingSwitch(value = null) {
+  const serviceKey = String(value?.serviceKey || "").trim();
+  const appGuid = String(value?.appGuid || value?.guid || "").trim();
+  if (!serviceKey || !appGuid) {
+    return null;
+  }
+  return {
+    serviceKey,
+    appGuid,
+  };
+}
+
+function normalizeControlPanelServicePillToneKey(value = "", options = {}) {
+  const serviceKeyCompact = String(options?.serviceKey || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  if (serviceKeyCompact === "restv2") {
+    return "service-rest-v2";
+  }
+  if (serviceKeyCompact === "esm") {
+    return "service-esm";
+  }
+  if (serviceKeyCompact === "degradation") {
+    return "service-degradation";
+  }
+  if (serviceKeyCompact === "resettemppass") {
+    return "service-temp-pass";
+  }
+  const normalizedCompact = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  if (normalizedCompact === "default") {
+    return "service-default";
+  }
+  return "service-neutral";
+}
+
+function buildControlPanelServicePillMarkup(label = "", options = {}) {
+  const normalizedLabel = String(label || "").trim();
+  if (!normalizedLabel) {
+    return "";
+  }
+  return `<span class="regapp-service-pill regapp-service-pill--${escapeHtml(
+    normalizeControlPanelServicePillToneKey(normalizedLabel, options)
+  )}">${escapeHtml(normalizedLabel)}</span>`;
+}
+
+function buildControllerProgrammerLabel(snapshot = null) {
+  const programmerName = String(snapshot?.programmerName || "").trim();
+  const programmerId = String(snapshot?.programmerId || "").trim();
+  if (programmerName && programmerId && programmerName.toLowerCase() !== programmerId.toLowerCase()) {
+    return `${programmerName} (${programmerId})`;
+  }
+  return programmerName || programmerId || "";
+}
+
+function getCurrentRegisteredApplicationBindings(snapshot = null) {
+  return normalizeControlPanelPremiumServiceBindings(snapshot?.premiumServiceBindings || []);
+}
+
+function getRegisteredApplicationOptionsForService(serviceKey = "", snapshot = null) {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  if (!normalizedServiceKey) {
+    return [];
+  }
+  const optionsMap = normalizeControlPanelPremiumServiceOptions(snapshot?.premiumServiceOptions || null);
+  return Array.isArray(optionsMap[normalizedServiceKey]) ? optionsMap[normalizedServiceKey] : [];
+}
+
+function getPendingRegisteredApplicationSwitch(snapshot = null) {
+  const pending = normalizeControlPanelPendingSwitch(panelState.registeredApplicationPendingSwitch);
+  if (!pending) {
+    return null;
+  }
+  const currentBinding = getCurrentRegisteredApplicationBindings(snapshot).find((binding) => binding.serviceKey === pending.serviceKey) || null;
+  if (!currentBinding || String(currentBinding.appGuid || "").trim() === pending.appGuid) {
+    return null;
+  }
+  const optionGuids = getRegisteredApplicationOptionsForService(pending.serviceKey, snapshot)
+    .map((entry) => String(entry?.guid || "").trim())
+    .filter(Boolean);
+  if (optionGuids.length > 0 && !optionGuids.includes(pending.appGuid)) {
+    return null;
+  }
+  return pending;
+}
+
+function setPendingRegisteredApplicationSwitch(serviceKey = "", appGuid = "") {
+  const snapshot = panelState.controllerStatusSnapshot || {};
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const normalizedGuid = String(appGuid || "").trim();
+  const currentBinding =
+    getCurrentRegisteredApplicationBindings(snapshot).find((binding) => binding.serviceKey === normalizedServiceKey) || null;
+  panelState.registeredApplicationPendingSwitch =
+    normalizedServiceKey &&
+    normalizedGuid &&
+    currentBinding &&
+    String(currentBinding.appGuid || "").trim() !== normalizedGuid
+      ? { serviceKey: normalizedServiceKey, appGuid: normalizedGuid }
+      : null;
+  renderRegisteredApplicationsControlPanel(snapshot);
+}
+
+function setRegisteredApplicationsStatusMessage(message = "") {
+  if (registeredApplicationsStatus) {
+    registeredApplicationsStatus.textContent = String(message || "").trim() || "UnderPAR reuses the selected registered application on the next Premium Service call.";
+  }
+}
+
+function renderRegisteredApplicationsControlPanel(snapshot = null) {
+  const normalizedSnapshot = snapshot && typeof snapshot === "object" ? snapshot : panelState.controllerStatusSnapshot || {};
+  const programmerId = String(normalizedSnapshot?.programmerId || "").trim();
+  const requestorId = String(normalizedSnapshot?.requestorId || "").trim();
+  const environmentLabel = String(normalizedSnapshot?.environmentLabel || "").trim();
+  const programmerLabel = buildControllerProgrammerLabel(normalizedSnapshot);
+  const bindings = getCurrentRegisteredApplicationBindings(normalizedSnapshot);
+  const pendingSwitch = getPendingRegisteredApplicationSwitch(normalizedSnapshot);
+  const switchBusy = panelState.registeredApplicationSwitchBusy === true;
+  const controlsDisabled = panelState.controllerReady !== true || switchBusy;
+
+  if (registeredApplicationsBadge) {
+    registeredApplicationsBadge.textContent = switchBusy
+      ? "Working"
+      : !programmerId
+        ? "Pending"
+        : bindings.length > 0
+          ? `${bindings.length} Services`
+          : "None";
+  }
+  if (registeredApplicationsCard) {
+    registeredApplicationsCard.classList.toggle("is-disabled", panelState.controllerReady !== true);
+  }
+  if (registeredApplicationsContext) {
+    if (!programmerId) {
+      registeredApplicationsContext.textContent =
+        panelState.controllerReady === true
+          ? "Select an ENV x Media Company in UnderPAR to inspect and switch the registered applications currently in use."
+          : panelState.controllerStatusMessage || "Open the UnderPAR side panel to manage registered applications.";
+    } else {
+      registeredApplicationsContext.textContent = [
+        [environmentLabel, programmerLabel].filter(Boolean).join(" x "),
+        requestorId ? `RequestorId ${requestorId}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | ");
+    }
+  }
+
+  if (!registeredApplicationsSummary) {
+    return;
+  }
+  if (!programmerId) {
+    registeredApplicationsSummary.innerHTML =
+      '<p class="regapp-control-empty">UnderPAR will surface the active Premium Service registered applications here after a live ENV x Media Company selection is in place.</p>';
+    setRegisteredApplicationsStatusMessage("");
+    return;
+  }
+  if (bindings.length === 0) {
+    registeredApplicationsSummary.innerHTML =
+      '<p class="regapp-control-empty">No DCR-gated Premium Services are currently detected for this ENV x Media Company.</p>';
+    setRegisteredApplicationsStatusMessage("");
+    return;
+  }
+
+  registeredApplicationsSummary.innerHTML = `
+    <div class="regapp-control-summary-line">
+      ${bindings
+        .map((binding) => {
+          const options = getRegisteredApplicationOptionsForService(binding.serviceKey, normalizedSnapshot);
+          const hasAlternatives = options.length > 1;
+          const selectedGuid =
+            pendingSwitch?.serviceKey === binding.serviceKey ? String(pendingSwitch.appGuid || "").trim() : String(binding.appGuid || "").trim();
+          return `
+            <span class="regapp-control-item" data-premium-service-block="${escapeHtml(binding.serviceKey)}">
+              ${buildControlPanelServicePillMarkup(binding.label, { serviceKey: binding.serviceKey })}
+              <span class="regapp-control-using">using:</span>
+              ${
+                hasAlternatives
+                  ? `<select
+                      class="regapp-control-picker"
+                      aria-label="${escapeHtml(`Registered application for ${binding.label}`)}"
+                      title="${escapeHtml(`Choose which registered application UnderPAR should use for ${binding.label}`)}"
+                      data-premium-service-switcher="${escapeHtml(binding.serviceKey)}"${controlsDisabled ? " disabled" : ""}
+                    >
+                      ${options
+                        .map((option) => {
+                          const guid = String(option?.guid || "").trim();
+                          const selected = guid === selectedGuid ? " selected" : "";
+                          return `<option value="${escapeHtml(guid)}"${selected}>${escapeHtml(
+                            firstNonEmptyString([option?.appName, guid])
+                          )}</option>`;
+                        })
+                        .join("")}
+                    </select>`
+                  : `<span class="regapp-control-app regapp-control-app--static">${escapeHtml(binding.appName)}</span>`
+              }
+            </span>
+          `;
+        })
+        .join("")}
+      ${
+        pendingSwitch
+          ? `<button
+              type="button"
+              class="switch-btn"
+              data-registered-application-switch-apply="true"${controlsDisabled ? " disabled" : ""}
+              title="${escapeHtml("Switch the selected Premium Service to the newly chosen Registered Application.")}"
+            >${switchBusy ? "SWITCHING..." : "SWITCH"}</button>`
+          : ""
+      }
+    </div>
+  `;
+  setRegisteredApplicationsStatusMessage(
+    pendingSwitch
+      ? "Switch will re-hydrate only the selected Premium Service and UnderPAR will use that Registered Application on the next call."
+      : "UnderPAR reuses the selected registered application on the next Premium Service call."
   );
 }
 
@@ -4347,6 +4637,73 @@ async function handleSwitch() {
   }
 }
 
+async function handleRegisteredApplicationSwitch() {
+  const snapshot = panelState.controllerStatusSnapshot || null;
+  const pendingSwitch = getPendingRegisteredApplicationSwitch(snapshot);
+  const programmerId = String(snapshot?.programmerId || "").trim();
+  let finalStatusMessage = "";
+  if (!pendingSwitch || !programmerId || panelState.registeredApplicationSwitchBusy === true) {
+    return;
+  }
+  if (!panelState.controllerReady) {
+    setRegisteredApplicationsStatusMessage(panelState.controllerStatusMessage || "Open the UnderPAR side panel before switching registered applications.");
+    return;
+  }
+
+  panelState.registeredApplicationSwitchBusy = true;
+  renderRegisteredApplicationsControlPanel(snapshot);
+  setRegisteredApplicationsStatusMessage("Switching the selected Premium Service to the chosen Registered Application...");
+
+  try {
+    const response = await sendVaultActionRequest("switch-premium-service-application", {
+      serviceKey: pendingSwitch.serviceKey,
+      guid: pendingSwitch.appGuid,
+      queryContext: {
+        programmerId,
+        programmerName: String(snapshot?.programmerName || "").trim(),
+        requestorId: String(snapshot?.requestorId || "").trim(),
+        environmentKey: String(snapshot?.environmentKey || "").trim(),
+        environmentLabel: String(snapshot?.environmentLabel || "").trim(),
+        selectionKey: String(snapshot?.selectionKey || "").trim(),
+      },
+    });
+    if (!response || response.ok !== true) {
+      throw new Error(String(response?.error || "UnderPAR could not switch the selected Registered Application."));
+    }
+    const nextSnapshot =
+      panelState.controllerStatusSnapshot && typeof panelState.controllerStatusSnapshot === "object"
+        ? cloneJsonLikeValue(panelState.controllerStatusSnapshot, {})
+        : {};
+    nextSnapshot.premiumServiceBindings = normalizeControlPanelPremiumServiceBindings(
+      getCurrentRegisteredApplicationBindings(nextSnapshot).map((binding) =>
+        binding?.serviceKey === pendingSwitch.serviceKey
+          ? {
+              ...binding,
+              appGuid: String(response?.appGuid || pendingSwitch.appGuid || "").trim(),
+              appName: firstNonEmptyString([response?.appName, pendingSwitch.appGuid]),
+            }
+          : binding
+      )
+    );
+    panelState.controllerStatusSnapshot = nextSnapshot;
+    panelState.registeredApplicationPendingSwitch = null;
+    renderRegisteredApplicationsControlPanel(nextSnapshot);
+    finalStatusMessage = `Switched ${firstNonEmptyString([
+      response?.serviceLabel,
+      DEVTOOLS_PREMIUM_SERVICE_LABEL_BY_KEY[pendingSwitch.serviceKey],
+      pendingSwitch.serviceKey,
+    ])} to ${firstNonEmptyString([response?.appName, response?.appGuid, pendingSwitch.appGuid])}.`;
+  } catch (error) {
+    finalStatusMessage = error instanceof Error ? error.message : String(error || "Unable to switch the selected Registered Application.");
+  } finally {
+    panelState.registeredApplicationSwitchBusy = false;
+    renderRegisteredApplicationsControlPanel(panelState.controllerStatusSnapshot || snapshot || null);
+    if (finalStatusMessage) {
+      setRegisteredApplicationsStatusMessage(finalStatusMessage);
+    }
+  }
+}
+
 function setVaultSlacktivateDropActive(active) {
   if (vaultSlacktivateContent) {
     vaultSlacktivateContent.dataset.dropActive = active ? "true" : "false";
@@ -4497,12 +4854,35 @@ function init() {
       }
     });
   }
+  if (registeredApplicationsSummary) {
+    registeredApplicationsSummary.addEventListener("change", (event) => {
+      const select =
+        event.target instanceof Element ? event.target.closest("[data-premium-service-switcher]") : null;
+      if (!(select instanceof HTMLSelectElement)) {
+        return;
+      }
+      setPendingRegisteredApplicationSwitch(
+        String(select.dataset.premiumServiceSwitcher || "").trim(),
+        String(select.value || "").trim()
+      );
+    });
+    registeredApplicationsSummary.addEventListener("click", (event) => {
+      const switchAction =
+        event.target instanceof Element ? event.target.closest("[data-registered-application-switch-apply]") : null;
+      if (!(switchAction instanceof HTMLElement)) {
+        return;
+      }
+      event.preventDefault();
+      void handleRegisteredApplicationSwitch();
+    });
+  }
   environmentSelect.addEventListener("change", () => {
     void handleEnvironmentSelectionChange();
   });
   switchButton.addEventListener("click", () => {
     void handleSwitch();
   });
+  renderRegisteredApplicationsControlPanel(panelState.controllerStatusSnapshot || null);
   void loadSelectedEnvironment().catch(() => {
     panelState.environmentsLoaded = false;
     syncInteractiveControlState();

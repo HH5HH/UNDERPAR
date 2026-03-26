@@ -435,78 +435,23 @@ function renderPremiumServiceSummary() {
       '<p class="regapp-health-service-summary-note">No DCR-gated Premium Services are currently detected for this ENV x Media Company.</p>';
     return;
   }
-  const pendingSwitch = getPendingPremiumServiceSwitch();
-  const anySwitchBusy = state.switchingServiceKeys.size > 0;
-  const pendingBinding = pendingSwitch ? getCurrentBindingForService(pendingSwitch.serviceKey) : null;
-  const pendingServiceLabel = firstNonEmptyString([
-    pendingBinding?.label,
-    REGAPP_PREMIUM_SERVICE_LABEL_BY_KEY[pendingSwitch?.serviceKey],
-    pendingSwitch?.serviceKey,
-  ]);
-  const pendingSwitchTitle =
-    pendingSwitch && pendingBinding
-      ? `Switch ${pendingServiceLabel} to ${firstNonEmptyString([
-          getPremiumServiceSwitchOptions(pendingSwitch.serviceKey).find(
-            (app) => String(app?.guid || "").trim() === pendingSwitch.appGuid
-          )?.name,
-          pendingSwitch.appGuid,
-        ])}`
-      : "Switch premium service registered application";
-  const switchBusy = pendingSwitch ? state.switchingServiceKeys.has(pendingSwitch.serviceKey) : anySwitchBusy;
   els.premiumServiceSummary.innerHTML = `
     <div class="regapp-health-service-summary">
       <p class="regapp-health-service-summary-note">Detected Premium Services</p>
       <div class="regapp-health-service-line">
         ${bindings
           .map((binding) => {
-            const currentGuid = String(binding?.appGuid || "").trim();
-            const options = getPremiumServiceSwitchOptions(binding.serviceKey);
-            const selectedGuid =
-              pendingSwitch?.serviceKey === binding.serviceKey ? String(pendingSwitch.appGuid || "").trim() : currentGuid;
-            const hasAlternatives = options.length > 1;
-            const currentAppLabel = firstNonEmptyString([binding.appName, currentGuid]);
             return `
               <span class="regapp-health-service-item" data-premium-service-block="${escapeHtml(binding.serviceKey)}">
                 ${buildServicePillMarkup(binding.label, { serviceKey: binding.serviceKey })}
                 <span class="regapp-health-service-using">using:</span>
-                ${
-                  hasAlternatives
-                    ? `<span class="regapp-health-service-picker-wrap">
-                        <select
-                          class="regapp-health-service-picker"
-                          aria-label="${escapeHtml(`Registered application for ${binding.label}`)}"
-                          title="${escapeHtml(`Choose which registered application UnderPAR should use for ${binding.label}`)}"
-                          data-premium-service-switcher="${escapeHtml(binding.serviceKey)}"${anySwitchBusy ? " disabled" : ""}
-                        >
-                          ${options
-                            .map((app) => {
-                              const guid = String(app?.guid || "").trim();
-                              const selected = guid === selectedGuid ? " selected" : "";
-                              const optionLabel = firstNonEmptyString([app?.name, guid]);
-                              return `<option value="${escapeHtml(guid)}"${selected}>${escapeHtml(optionLabel)}</option>`;
-                            })
-                            .join("")}
-                        </select>
-                      </span>`
-                    : `<span class="regapp-health-service-app">${escapeHtml(currentAppLabel)}</span>`
-                }
+                <span class="regapp-health-service-app">${escapeHtml(firstNonEmptyString([binding.appName, binding.appGuid]))}</span>
               </span>
             `;
           })
           .join("")}
-        ${
-          pendingSwitch
-            ? `<button
-                type="button"
-                class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent regapp-health-summary-switch-btn"
-                data-pending-premium-service-switch-apply="true"
-                title="${escapeHtml(pendingSwitchTitle)}"${switchBusy ? " disabled" : ""}
-              >
-                <span class="spectrum-Button-label">${switchBusy ? "SWITCHING..." : "SWITCH"}</span>
-              </button>`
-            : ""
-        }
       </div>
+      <p class="regapp-health-service-summary-note">Switch active Registered Applications from the UnderPAR DevTools tab.</p>
     </div>
   `;
 }
@@ -1635,35 +1580,6 @@ function registerEventHandlers() {
         els.decodeInput.value = "";
       }
       setDecodeSummary("");
-    });
-  }
-  if (els.premiumServiceSummary) {
-    els.premiumServiceSummary.addEventListener("change", (event) => {
-      const select =
-        event.target instanceof Element ? event.target.closest("[data-premium-service-switcher]") : null;
-      if (!(select instanceof HTMLSelectElement)) {
-        return;
-      }
-      const serviceKey = String(select.dataset.premiumServiceSwitcher || "").trim();
-      const guid = String(select.value || "").trim();
-      if (!serviceKey) {
-        return;
-      }
-      setPendingPremiumServiceSwitch(serviceKey, guid);
-    });
-    els.premiumServiceSummary.addEventListener("click", (event) => {
-      const switchButton =
-        event.target instanceof Element ? event.target.closest("[data-pending-premium-service-switch-apply]") : null;
-      if (!(switchButton instanceof HTMLElement)) {
-        return;
-      }
-      const pendingSwitch = getPendingPremiumServiceSwitch();
-      const serviceKey = String(pendingSwitch?.serviceKey || "").trim();
-      const guid = String(pendingSwitch?.appGuid || "").trim();
-      if (!serviceKey || !guid) {
-        return;
-      }
-      void switchPremiumServiceApplication(serviceKey, guid);
     });
   }
   if (els.cardsHost) {

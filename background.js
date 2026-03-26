@@ -804,6 +804,16 @@ function buildUnderparControllerStatusSnapshot() {
   const sidepanelStates = Array.from(controllerBridgeState.sidepanelStateByPort.values()).filter(
     (entry) => entry && typeof entry === "object"
   );
+  const prioritizedSidepanelStates = sidepanelStates
+    .slice()
+    .sort((left, right) => {
+      const readyDelta = Number(right?.sessionReady === true) - Number(left?.sessionReady === true);
+      if (readyDelta !== 0) {
+        return readyDelta;
+      }
+      return Number(right?.reportedAt || 0) - Number(left?.reportedAt || 0);
+    });
+  const preferredState = prioritizedSidepanelStates[0] || null;
   const activeWindowIds = new Set();
   let hasReadySidepanel = false;
   let hasRestrictedSidepanel = false;
@@ -856,6 +866,21 @@ function buildUnderparControllerStatusSnapshot() {
     activeWindowIds: Array.from(activeWindowIds),
     status,
     message,
+    programmerId: String(preferredState?.programmerId || "").trim(),
+    programmerName: String(preferredState?.programmerName || "").trim(),
+    requestorId: String(preferredState?.requestorId || "").trim(),
+    environmentKey: String(preferredState?.environmentKey || "").trim(),
+    environmentLabel: String(preferredState?.environmentLabel || "").trim(),
+    selectionKey: String(preferredState?.selectionKey || "").trim(),
+    premiumServiceBindings: Array.isArray(preferredState?.premiumServiceBindings)
+      ? preferredState.premiumServiceBindings
+      : [],
+    premiumServiceOptions:
+      preferredState?.premiumServiceOptions &&
+      typeof preferredState.premiumServiceOptions === "object" &&
+      !Array.isArray(preferredState.premiumServiceOptions)
+        ? preferredState.premiumServiceOptions
+        : {},
     updatedAt: Date.now(),
   };
 }
@@ -4530,6 +4555,14 @@ chrome.runtime.onConnect.addListener((port) => {
     sessionReady: false,
     restricted: false,
     bootstrapping: true,
+    programmerId: "",
+    programmerName: "",
+    requestorId: "",
+    environmentKey: "",
+    environmentLabel: "",
+    selectionKey: "",
+    premiumServiceBindings: [],
+    premiumServiceOptions: {},
     reportedAt: 0,
   });
   broadcastUnderparControllerStatus();
@@ -4548,6 +4581,19 @@ chrome.runtime.onConnect.addListener((port) => {
       sessionReady: message.sessionReady === true,
       restricted: message.restricted === true,
       bootstrapping: message.bootstrapping === true,
+      programmerId: String(message?.programmerId || "").trim(),
+      programmerName: String(message?.programmerName || "").trim(),
+      requestorId: String(message?.requestorId || "").trim(),
+      environmentKey: String(message?.environmentKey || "").trim(),
+      environmentLabel: String(message?.environmentLabel || "").trim(),
+      selectionKey: String(message?.selectionKey || "").trim(),
+      premiumServiceBindings: Array.isArray(message?.premiumServiceBindings) ? message.premiumServiceBindings : [],
+      premiumServiceOptions:
+        message?.premiumServiceOptions &&
+        typeof message.premiumServiceOptions === "object" &&
+        !Array.isArray(message.premiumServiceOptions)
+          ? message.premiumServiceOptions
+          : {},
       reportedAt: Date.now(),
     });
     broadcastUnderparControllerStatus();

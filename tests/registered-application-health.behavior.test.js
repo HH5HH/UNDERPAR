@@ -856,11 +856,8 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(workspaceHtml, /id="workspace-cards"[\s\S]*regapp-jwt-utility-card/);
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
   assert.match(workspaceJs, /data-software-statement-download-guid/);
-  assert.match(workspaceJs, /data-pending-premium-service-switch-apply/);
-  assert.match(workspaceJs, /sendWorkspaceAction\("switch-premium-service-application"/);
   assert.match(workspaceJs, /renderPremiumServiceSummary\(\);/);
   assert.match(workspaceJs, /regapp-up-indicator/);
-  assert.match(workspaceJs, /setPendingPremiumServiceSwitch/);
   assert.match(workspaceJs, /service-default/);
   assert.match(workspaceJs, /sendWorkspaceAction\("hydrate-application"/);
   assert.match(workspaceJs, /sendWorkspaceAction\("download-application"/);
@@ -871,6 +868,8 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.doesNotMatch(workspaceJs, /Selected RequestorId/);
   assert.doesNotMatch(workspaceJs, /Scope Coverage/);
   assert.doesNotMatch(workspaceJs, /UnderPAR will reuse the live DCR hydration path/);
+  assert.doesNotMatch(workspaceJs, /data-pending-premium-service-switch-apply/);
+  assert.doesNotMatch(workspaceJs, /data-premium-service-switcher/);
   assert.doesNotMatch(workspaceJs, /sendWorkspaceAction\("prefetch-applications"/);
   assert.doesNotMatch(workspaceJs, /background-hydration/);
   assert.doesNotMatch(workspaceJs, /defaultOpen/);
@@ -879,6 +878,7 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.doesNotMatch(workspaceJs, /Application Matrix/);
   assert.doesNotMatch(workspaceJs, /buildMetricCardsMarkup/);
   assert.doesNotMatch(workspaceJs, /renderMatrixTable/);
+  assert.match(workspaceJs, /Switch active Registered Applications from the UnderPAR DevTools tab\./);
   assert.match(workspaceJs, /const disableRerun = state\.loading \|\| serviceSwitchBusy \|\| !canRunCurrentContextReport\(\);/);
   assert.match(workspaceJs, /if \(controllerChanged \|\| requestorChanged \|\| shouldClearStaleReport \|\| premiumServiceChanged\) \{\s*renderReport\(\);/);
   assert.match(workspaceJs, /const action = hasRenderableReport\(\) && preferRefresh \? "refresh-latest" : "run-dashboard";/);
@@ -887,7 +887,6 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(popupSource, /if \(action === "switch-premium-service-application"\)/);
   assert.match(popupSource, /switchRegisteredApplicationHealthPremiumService\(/);
   assert.match(workspaceCss, /\.regapp-service-pill--service-default/);
-  assert.match(workspaceCss, /\.regapp-health-summary-switch-btn/);
   assert.match(workspaceCss, /\.regapp-health-service-line/);
   assert.doesNotMatch(extractFunctionSource(popupSource, "fetchRegisteredApplicationHealthDashboardReport"), /enrichRegisteredApplicationForHydration/);
   assert.doesNotMatch(

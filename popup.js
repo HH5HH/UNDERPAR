@@ -10997,21 +10997,85 @@ async function resolveSidepanelControllerWindowId(forceRefresh = false) {
 }
 
 function buildSidepanelControllerSnapshot(windowId = 0) {
+  const activeEnvironment = getActiveAdobePassEnvironment();
+  const selectedProgrammer = resolveSelectedProgrammer();
+  const programmerId = String(selectedProgrammer?.programmerId || "").trim();
+  const programmerName = firstNonEmptyString([
+    selectedProgrammer?.programmerName,
+    selectedProgrammer?.mediaCompanyName,
+    programmerId,
+  ]);
+  const queryContext = buildRegisteredApplicationHealthQueryContext({
+    programmerId,
+    programmerName,
+    requestorId: String(state.selectedRequestorId || "").trim(),
+    requestSource: "up-devtools-control-panel",
+  });
+  const runtimeServices =
+    (programmerId && (getCurrentPremiumAppsSnapshot(programmerId) || getRuntimePremiumServicesSeed(programmerId))) || {};
+  const existingRecord = programmerId ? getPassVaultMediaCompanyRecord(programmerId, queryContext.environmentKey) : null;
+  const applicationsData =
+    (programmerId &&
+      (getCurrentProgrammerApplicationsSnapshot(programmerId) ||
+        buildPassVaultApplicationsSnapshotFromRegisteredApplications(getPassVaultRegisteredApplicationsByGuid(existingRecord)))) ||
+    {};
+  const registeredApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
+  const premiumServiceSwitchState = buildRegisteredApplicationHealthPremiumServiceSwitchState(
+    selectedProgrammer,
+    queryContext,
+    runtimeServices,
+    registeredApplications
+  );
   return {
     windowId: normalizeUnderparWindowId(windowId || state.sidepanelControllerWindowId),
     sessionReady: state.sessionReady === true && Boolean(state.loginData) && state.restricted !== true,
     restricted: state.restricted === true,
     bootstrapping: state.isBootstrapping === true,
+    programmerId,
+    programmerName,
+    requestorId: String(queryContext?.requestorId || "").trim(),
+    environmentKey: String(queryContext?.environmentKey || activeEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim(),
+    environmentLabel: String(queryContext?.environmentLabel || activeEnvironment?.label || "").trim(),
+    selectionKey: String(queryContext?.selectionKey || "").trim(),
+    premiumServiceBindings: premiumServiceSwitchState.premiumServiceBindings,
+    premiumServiceOptions: premiumServiceSwitchState.premiumServiceOptions,
   };
 }
 
 function getSidepanelControllerSnapshotKey(snapshot = null) {
   const normalizedSnapshot = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const premiumServiceBindingSignature = (Array.isArray(normalizedSnapshot?.premiumServiceBindings)
+    ? normalizedSnapshot.premiumServiceBindings
+    : []
+  )
+    .map((binding) => `${String(binding?.serviceKey || "").trim()}:${String(binding?.appGuid || binding?.guid || "").trim()}`)
+    .filter(Boolean)
+    .join("|");
+  const premiumServiceOptionsSignature =
+    normalizedSnapshot?.premiumServiceOptions &&
+    typeof normalizedSnapshot.premiumServiceOptions === "object" &&
+    !Array.isArray(normalizedSnapshot.premiumServiceOptions)
+      ? Object.entries(normalizedSnapshot.premiumServiceOptions)
+          .sort((left, right) => String(left[0] || "").localeCompare(String(right[0] || ""), undefined, { sensitivity: "base" }))
+          .map(([serviceKey, options]) =>
+            `${String(serviceKey || "").trim()}:${(Array.isArray(options) ? options : [])
+              .map((option) => String(option?.guid || option?.appGuid || "").trim())
+              .filter(Boolean)
+              .join(",")}`
+          )
+          .join("|")
+      : "";
   return [
     normalizeUnderparWindowId(normalizedSnapshot.windowId),
     normalizedSnapshot.sessionReady === true ? 1 : 0,
     normalizedSnapshot.restricted === true ? 1 : 0,
     normalizedSnapshot.bootstrapping === true ? 1 : 0,
+    String(normalizedSnapshot.environmentKey || "").trim(),
+    String(normalizedSnapshot.programmerId || "").trim(),
+    String(normalizedSnapshot.requestorId || "").trim(),
+    String(normalizedSnapshot.selectionKey || "").trim(),
+    premiumServiceBindingSignature,
+    premiumServiceOptionsSignature,
   ].join(":");
 }
 
@@ -22556,6 +22620,71 @@ function buildRegisteredApplicationHealthPremiumServiceBindings(programmer = nul
       };
     })
     .filter(Boolean);
+}
+
+function buildRegisteredApplicationHealthPremiumServiceSwitchState(programmer = null, queryContext = null, services = null, applications = null) {
+  const programmerId = String(queryContext?.programmerId || programmer?.programmerId || "").trim();
+  if (!programmerId) {
+    return {
+      premiumServiceBindings: [],
+      premiumServiceOptions: {},
+    };
+  }
+
+  const normalizedQueryContext =
+    queryContext && typeof queryContext === "object" ? queryContext : buildRegisteredApplicationHealthQueryContext({ programmerId });
+  const runtimeServices =
+    services && typeof services === "object"
+      ? services
+      : getRuntimePremiumServicesSeed(programmerId) || getCurrentPremiumAppsSnapshot(programmerId) || {};
+  const existingRecord = getPassVaultMediaCompanyRecord(programmerId, normalizedQueryContext.environmentKey);
+  const registeredApplications = Array.isArray(applications)
+    ? applications.filter((app) => app?.guid)
+    : buildPassVaultHydrationRegisteredApplications(
+        getCurrentProgrammerApplicationsSnapshot(programmerId) ||
+          buildPassVaultApplicationsSnapshotFromRegisteredApplications(getPassVaultRegisteredApplicationsByGuid(existingRecord)) ||
+          {}
+      );
+  const premiumServiceBindings = buildRegisteredApplicationHealthPremiumServiceBindings(
+    programmer,
+    normalizedQueryContext,
+    runtimeServices,
+    registeredApplications
+  );
+  const premiumServiceOptions = {};
+
+  premiumServiceBindings.forEach((binding) => {
+    const serviceKey = String(binding?.serviceKey || "").trim();
+    if (!serviceKey) {
+      return;
+    }
+    premiumServiceOptions[serviceKey] = buildRegisteredApplicationHealthServiceCandidates(
+      serviceKey,
+      programmerId,
+      runtimeServices,
+      registeredApplications,
+      {
+        requestorId: String(normalizedQueryContext?.requestorId || "").trim(),
+        preferredGuid: String(binding?.appGuid || "").trim(),
+      }
+    )
+      .map((appInfo) => {
+        const guid = String(appInfo?.guid || "").trim();
+        if (!guid) {
+          return null;
+        }
+        return {
+          guid,
+          appName: firstNonEmptyString([appInfo?.appName, appInfo?.name, guid]),
+        };
+      })
+      .filter(Boolean);
+  });
+
+  return {
+    premiumServiceBindings,
+    premiumServiceOptions,
+  };
 }
 
 function normalizeRegisteredApplicationRequestorHintToken(value = "") {
@@ -44558,6 +44687,37 @@ function ensureUpDevtoolsVaultActionListener() {
         return await refreshUnderparSlacktivationFromDevtools({
           interactive: message?.interactive === true,
         });
+      }
+      if (action === "switch-premium-service-application") {
+        const explicitQueryContext =
+          message?.queryContext && typeof message.queryContext === "object"
+            ? cloneJsonLikeValue(message.queryContext, null)
+            : null;
+        const selectedProgrammer = resolveSelectedProgrammer();
+        const queryContext = buildRegisteredApplicationHealthQueryContext({
+          programmerId: String(explicitQueryContext?.programmerId || selectedProgrammer?.programmerId || "").trim(),
+          programmerName: firstNonEmptyString([
+            explicitQueryContext?.programmerName,
+            selectedProgrammer?.programmerName,
+            selectedProgrammer?.mediaCompanyName,
+          ]),
+          requestorId: String(
+            Object.prototype.hasOwnProperty.call(explicitQueryContext || {}, "requestorId")
+              ? explicitQueryContext?.requestorId
+              : state.selectedRequestorId
+          ).trim(),
+          requestSource: "up-devtools-switch",
+        });
+        return await switchRegisteredApplicationHealthPremiumService(
+          rebaseRegisteredApplicationHealthQueryContextForCurrentSelection(queryContext, {
+            requestSource: "up-devtools-switch",
+          }),
+          String(message?.serviceKey || "").trim(),
+          String(message?.guid || message?.appGuid || "").trim(),
+          {
+            preferredTabId: Number(message?.preferredTabId || 0),
+          }
+        );
       }
       throw new Error(`Unsupported UP VAULT action: ${action || "unknown"}`);
     })()
