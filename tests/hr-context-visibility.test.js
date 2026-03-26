@@ -313,6 +313,7 @@ function loadRestV2LearningActivationEvaluator(seed = {}) {
   const script = [
     "function buildRestV2InteractiveDocsContext(programmer, entry) { return (globalThis.__seed.contextByEntryKey && globalThis.__seed.contextByEntryKey[String(entry?.key || '')]) || globalThis.__seed.context || { ok: false, error: 'missing-context' }; }",
     "function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = '') { return typeof globalThis.__seed.planBuilder === 'function' ? globalThis.__seed.planBuilder(entry, context, accessToken) : { missingRequiredFields: [], notes: [] }; }",
+    "function hydrateRestV2ContextFromPreparedLoginEntry(context = null) { if (typeof globalThis.__seed.hydratePrepared === 'function') { return globalThis.__seed.hydratePrepared(context); } return context; }",
     "function hydrateRestV2ContextFromPartnerSsoOverride(context = null) { if (typeof globalThis.__seed.hydratePartnerOverride === 'function') { return globalThis.__seed.hydratePartnerOverride(context); } return context; }",
     extractFunctionSource(source, "summarizeRestV2InteractiveDocsActivationLockReason"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsEntryActivationState"),
@@ -1993,6 +1994,50 @@ test("REST V2 learning activation clears stale plan-missing partner SSO fields w
   assert.deepEqual(Array.from(createPartnerProfileState.pendingFields || []), []);
 });
 
+test("REST V2 learning activation reuses prepared login state before evaluating deep-link readiness", () => {
+  const { buildRestV2InteractiveDocsEntryActivationState } = loadRestV2LearningActivationEvaluator({
+    context: {
+      ok: true,
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      mvpd: "",
+      domainName: "",
+      redirectUrl: "",
+      sessionCode: "",
+      appInfo: { guid: "rest-guid" },
+    },
+    hydratePrepared(context) {
+      context.sessionCode = "prepared-session-code";
+      context.mvpd = "Comcast_SSO";
+      context.domainName = "experience.example.test";
+      context.redirectUrl = "https://experience.example.test/callback";
+      return context;
+    },
+    planBuilder() {
+      return {
+        missingRequiredFields: [],
+        notes: [],
+      };
+    },
+  });
+
+  const startAuthenticationState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "sessions-start-authentication",
+    usesSessionCode: true,
+    requireSessionCode: true,
+  });
+  assert.equal(startAuthenticationState.ready, true);
+
+  const createSessionState = buildRestV2InteractiveDocsEntryActivationState({
+    key: "sessions-create-session",
+    requiresAccessToken: true,
+    usesBodyMvpd: true,
+    usesBodyDomainName: true,
+    usesBodyRedirectUrl: true,
+  });
+  assert.equal(createSessionState.ready, true);
+});
+
 test("REST V2 learning context does not treat the selected SSO MVPD as the partner when partner metadata was not explicitly captured", () => {
   const seededApp = {
     guid: "rest-guid",
@@ -3124,13 +3169,13 @@ test("premium service sections and HR service pills keep their theme class wirin
   assert.match(popupSource, /hr-context-service-pill--\$\{themeClass\}/);
 });
 
-test("REST V2 login tool includes Partner SSO raw JSON and SAML controls", () => {
+test("REST V2 login tool hides the old Partner SSO raw JSON and SAML controls", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const createPremiumServiceSectionSource = extractFunctionSource(popupSource, "createPremiumServiceSection");
 
-  assert.match(createPremiumServiceSectionSource, /Partner Framework Status \(JSON\)/);
-  assert.match(createPremiumServiceSectionSource, /rest-v2-partner-status-json-input/);
-  assert.match(createPremiumServiceSectionSource, /rest-v2-partner-saml-input/);
-  assert.match(createPremiumServiceSectionSource, /rest-v2-partner-status-copy-current-btn/);
-  assert.match(createPremiumServiceSectionSource, /rest-v2-partner-sso-clear-btn/);
+  assert.doesNotMatch(createPremiumServiceSectionSource, /Partner Framework Status \(JSON\)/);
+  assert.doesNotMatch(createPremiumServiceSectionSource, /rest-v2-partner-status-json-input/);
+  assert.doesNotMatch(createPremiumServiceSectionSource, /rest-v2-partner-saml-input/);
+  assert.doesNotMatch(createPremiumServiceSectionSource, /rest-v2-partner-status-copy-current-btn/);
+  assert.doesNotMatch(createPremiumServiceSectionSource, /rest-v2-partner-sso-clear-btn/);
 });

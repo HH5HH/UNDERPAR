@@ -15385,12 +15385,20 @@ function toDebugHeadersObject(headersLike) {
   }
 
   if (Array.isArray(headersLike)) {
-    for (const pair of headersLike) {
-      if (!Array.isArray(pair) || pair.length < 2) {
+    for (const entry of headersLike) {
+      if (Array.isArray(entry) && entry.length >= 2) {
+        const [key, value] = entry;
+        output[String(key)] = redactDebugHeaderValue(key, value);
         continue;
       }
-      const [key, value] = pair;
-      output[String(key)] = redactDebugHeaderValue(key, value);
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const key = String(entry.name || "").trim();
+      if (!key) {
+        continue;
+      }
+      output[key] = redactDebugHeaderValue(key, entry.value);
     }
     return output;
   }
@@ -27906,15 +27914,26 @@ function normalizeRestV2ProfileAttributeValue(value) {
   if (value == null) {
     return "";
   }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const normalizedEntry = normalizeRestV2ProfileAttributeValue(entry);
+      if (normalizedEntry) {
+        return normalizedEntry;
+      }
+    }
+    return "";
+  }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return String(value).trim();
   }
   if (typeof value === "object") {
-    if (typeof value.value === "string" || typeof value.value === "number" || typeof value.value === "boolean") {
-      return String(value.value).trim();
+    const normalizedValue = normalizeRestV2ProfileAttributeValue(value.value);
+    if (normalizedValue) {
+      return normalizedValue;
     }
-    if (typeof value.raw === "string" || typeof value.raw === "number" || typeof value.raw === "boolean") {
-      return String(value.raw).trim();
+    const normalizedRaw = normalizeRestV2ProfileAttributeValue(value.raw);
+    if (normalizedRaw) {
+      return normalizedRaw;
     }
   }
   return "";
@@ -30035,7 +30054,12 @@ async function hydrateRestV2PartnerSsoContextFromFlowId(context = null, flowId =
         : await getRestV2DebugFlowSnapshot(normalizedFlowId);
     hydrateRestV2PartnerSsoContextFromDebugFlow(context, flowSnapshot);
     hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context, flowSnapshot);
-    hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context, flowSnapshot, ["AP-Visitor-Identifier"]);
+    hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context, flowSnapshot, [
+      "Adobe-Subject-Token",
+      "AD-Service-Token",
+      "AP-Temppass-Identity",
+      "AP-Visitor-Identifier",
+    ]);
     await hydrateRestV2PartnerPlatformMappingFromConsoleContext(context, {
       snapshot: options?.snapshot && typeof options.snapshot === "object" ? options.snapshot : null,
       flowSnapshot,
@@ -63620,43 +63644,6 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
               <button type="button" class="rest-v2-close-login-btn" disabled hidden>STOP</button>
             </div>
           </div>
-          <section class="rest-v2-partner-sso-tool" hidden>
-            <div class="rest-v2-partner-sso-head">
-              <p class="rest-v2-partner-sso-title">Partner SSO Test Form</p>
-              <p class="rest-v2-partner-sso-provider"></p>
-            </div>
-            <label class="rest-v2-partner-sso-field">
-              <span class="rest-v2-partner-sso-label">Partner Framework Status (JSON)</span>
-              <div class="rest-v2-partner-sso-field-actions">
-                <button type="button" class="rest-v2-partner-status-use-current-btn">USE CURRENT</button>
-                <button type="button" class="rest-v2-partner-status-copy-current-btn">COPY JSON</button>
-              </div>
-              <textarea
-                class="rest-v2-partner-status-json-input"
-                rows="8"
-                spellcheck="false"
-                autocomplete="off"
-                autocapitalize="off"
-                placeholder="Paste raw Partner Framework Status JSON from the partner framework."
-              ></textarea>
-            </label>
-            <label class="rest-v2-partner-sso-field">
-              <span class="rest-v2-partner-sso-label">SAMLResponse</span>
-              <div class="rest-v2-partner-sso-field-actions">
-                <button type="button" class="rest-v2-partner-saml-use-current-btn">USE CURRENT</button>
-                <button type="button" class="rest-v2-partner-sso-clear-btn">CLEAR</button>
-              </div>
-              <textarea
-                class="rest-v2-partner-saml-input"
-                rows="6"
-                spellcheck="false"
-                autocomplete="off"
-                autocapitalize="off"
-                placeholder="Paste the Partner SSO SAMLResponse captured from network."
-              ></textarea>
-            </label>
-            <p class="rest-v2-partner-sso-status" hidden></p>
-          </section>
           <p class="rest-v2-login-status" hidden></p>
         </section>
         <section class="rest-v2-bobtools-tool" hidden>
@@ -63804,12 +63791,6 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
     const testLoginButton = section.querySelector(".rest-v2-test-login-btn");
     const closeLoginButton = section.querySelector(".rest-v2-close-login-btn");
     const openBobtoolsButton = section.querySelector(".rest-v2-bobtools-open-btn");
-    const partnerFrameworkStatusInput = section.querySelector(".rest-v2-partner-status-json-input");
-    const partnerSamlInput = section.querySelector(".rest-v2-partner-saml-input");
-    const useCurrentPartnerStatusButton = section.querySelector(".rest-v2-partner-status-use-current-btn");
-    const copyCurrentPartnerStatusButton = section.querySelector(".rest-v2-partner-status-copy-current-btn");
-    const useCurrentPartnerSamlButton = section.querySelector(".rest-v2-partner-saml-use-current-btn");
-    const clearPartnerOverrideButton = section.querySelector(".rest-v2-partner-sso-clear-btn");
     if (testLoginButton) {
       testLoginButton.addEventListener("click", async (event) => {
         event.stopPropagation();
@@ -63833,46 +63814,6 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
         } catch (error) {
           setStatus(error instanceof Error ? error.message : String(error), "error");
         }
-      });
-    }
-    if (partnerFrameworkStatusInput) {
-      partnerFrameworkStatusInput.addEventListener("input", () => {
-        persistRestV2PartnerSsoPanelInput(section, programmer, appInfo);
-      });
-      partnerFrameworkStatusInput.addEventListener("blur", () => {
-        persistRestV2PartnerSsoPanelInput(section, programmer, appInfo);
-      });
-    }
-    if (partnerSamlInput) {
-      partnerSamlInput.addEventListener("input", () => {
-        persistRestV2PartnerSsoPanelInput(section, programmer, appInfo);
-      });
-      partnerSamlInput.addEventListener("blur", () => {
-        persistRestV2PartnerSsoPanelInput(section, programmer, appInfo);
-      });
-    }
-    if (useCurrentPartnerStatusButton) {
-      useCurrentPartnerStatusButton.addEventListener("click", (event) => {
-        event.stopPropagation();
-        applyRestV2PartnerSsoPanelCurrentJson(section, programmer, appInfo);
-      });
-    }
-    if (copyCurrentPartnerStatusButton) {
-      copyCurrentPartnerStatusButton.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        await copyRestV2PartnerSsoPanelCurrentJson(section, programmer, appInfo);
-      });
-    }
-    if (useCurrentPartnerSamlButton) {
-      useCurrentPartnerSamlButton.addEventListener("click", (event) => {
-        event.stopPropagation();
-        applyRestV2PartnerSsoPanelCurrentSaml(section, programmer, appInfo);
-      });
-    }
-    if (clearPartnerOverrideButton) {
-      clearPartnerOverrideButton.addEventListener("click", (event) => {
-        event.stopPropagation();
-        clearRestV2PartnerSsoPanelOverrides(section, programmer, appInfo);
       });
     }
 
@@ -65111,7 +65052,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     notes.push(`Using the only REST V2 RequestorId mapped in UnderPAR: ${String(resolvedContext.requestorId || "").trim()}.`);
   }
   if (partnerFrameworkStatusValidation?.rawInputPresent === true && partnerFrameworkStatusValidation.ok === true) {
-    notes.push("Using AP-Partner-Framework-Status from the REST V2 test form.");
+    notes.push("Using AP-Partner-Framework-Status already stored in UnderPAR.");
   }
   if (resolvedEntry.requiresAccessToken !== false) {
     fieldValues["header.Authorization"] = accessToken ? `Bearer ${String(accessToken || "").trim()}` : "";
@@ -65273,7 +65214,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
       notes.push(String(partnerFrameworkStatusValidation.error || "").trim() || "Partner framework status validation failed.");
     } else if (hasInferredPartnerHints) {
       notes.push(
-        `UnderPAR inferred partner SSO context from ${String(resolvedContext.learningPartnerSource || "the recorded auth flow").trim()}, but this API requires the exact AP-Partner-Framework-Status payload from a real partner flow or the REST V2 test form.`
+        `UnderPAR inferred partner SSO context from ${String(resolvedContext.learningPartnerSource || "the recorded auth flow").trim()}, but this API requires the exact AP-Partner-Framework-Status payload captured from a real partner flow.`
       );
     } else {
       notes.push(
@@ -65292,7 +65233,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (missingRequiredFields.includes("body.SAMLResponse")) {
     notes.push(
       standardAuthenticateCapture && resolvedEntry.usesPartnerPath === true
-        ? "Standard LOGIN captures the regular /authenticate flow, not the partner SSO SAMLResponse required here. Paste the matching Partner SSO SAMLResponse into the REST V2 test form."
+        ? "Standard LOGIN captures the regular /authenticate flow, not the partner SSO SAMLResponse required here. Complete a real Partner SSO flow for this selection."
         : "Complete a Partner SSO login first so UnderPAR can capture SAMLResponse for this selection."
     );
   }
@@ -65384,6 +65325,9 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
       context,
       plan: null,
     };
+  }
+  if (typeof hydrateRestV2ContextFromPreparedLoginEntry === "function") {
+    hydrateRestV2ContextFromPreparedLoginEntry(context);
   }
   hydrateRestV2ContextFromPartnerSsoOverride(context);
 
@@ -66808,8 +66752,13 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
     ? hydrationResult.unresolvedRequiredFields.filter(Boolean)
     : [];
   if (unresolvedRequiredFields.length > 0) {
+    const guidance = Array.isArray(plan?.notes)
+      ? String(plan.notes.find((note) => String(note || "").trim()) || "").trim()
+      : "";
     setStatus(
-      `Opened ${entry.label} docs with partial UnderPAR context. Fill ${unresolvedRequiredFields.join(", ")} before Send.`,
+      guidance
+        ? `Opened ${entry.label} docs with partial UnderPAR context. ${guidance}`
+        : `Opened ${entry.label} docs with partial UnderPAR context. Fill ${unresolvedRequiredFields.join(", ")} before Send.`,
       "info"
     );
   } else if (Array.isArray(plan.notes) && plan.notes.length > 0) {
@@ -87748,7 +87697,7 @@ function getRestV2CaseInsensitiveObjectValue(source = null, keyCandidates = []) 
     if (!normalizedKey || !normalizedCandidates.includes(normalizedKey)) {
       continue;
     }
-    return String(value || "").trim();
+    return normalizeRestV2ProfileAttributeValue(value);
   }
   return "";
 }
@@ -87763,7 +87712,26 @@ function getRestV2CaseInsensitiveHeaderValue(headersLike = null, keyCandidates =
     for (const [key, value] of headersLike.entries()) {
       const normalizedKey = String(key || "").trim().toLowerCase();
       if (normalizedCandidates.includes(normalizedKey)) {
-        return String(value || "").trim();
+        return normalizeRestV2ProfileAttributeValue(value);
+      }
+    }
+    return "";
+  }
+  if (Array.isArray(headersLike)) {
+    for (const entry of headersLike) {
+      if (Array.isArray(entry) && entry.length >= 2) {
+        const normalizedKey = String(entry[0] || "").trim().toLowerCase();
+        if (normalizedKey && normalizedCandidates.includes(normalizedKey)) {
+          return normalizeRestV2ProfileAttributeValue(entry[1]);
+        }
+        continue;
+      }
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const normalizedKey = String(entry.name || "").trim().toLowerCase();
+      if (normalizedKey && normalizedCandidates.includes(normalizedKey)) {
+        return normalizeRestV2ProfileAttributeValue(entry.value);
       }
     }
     return "";

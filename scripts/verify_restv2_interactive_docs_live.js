@@ -12,19 +12,48 @@ const CDP_PORT = Number(process.env.UNDERPAR_CDP_PORT || 9222);
 const HYDRATE_TIMEOUT_MS = Number(process.env.UNDERPAR_REST_V2_HYDRATE_TIMEOUT_MS || 12000);
 const REQUEST_CAPTURE_TIMEOUT_MS = Number(process.env.UNDERPAR_REST_V2_REQUEST_TIMEOUT_MS || 8000);
 const SAMPLE_ACCESS_TOKEN = "test-token";
+const SAMPLE_PARTNER_FRAMEWORK_STATUS = Buffer.from(
+  JSON.stringify({
+    frameworkPermissionInfo: {
+      accessStatus: "granted",
+    },
+    frameworkProviderInfo: {
+      id: "Comcast_SSO_Apple",
+      expirationDate: "1775748018000",
+    },
+    frameworkPartnerInfo: {
+      partner: "Apple",
+      name: "Apple",
+    },
+  }),
+  "utf8"
+).toString("base64");
 const SAMPLE_CONTEXT = Object.freeze({
   serviceProviderId: "turner",
   requestorId: "turner",
   requestorAutoResolved: false,
   sessionCode: "sample-session-code",
   mvpd: "Comcast_SSO",
+  mvpdMeta: {
+    id: "Comcast_SSO",
+    name: "Xfinity (Comcast_SSO)",
+    platformMappingId: "Comcast_SSO",
+    partnerPlatformMappings: {
+      Apple: "Comcast_SSO_Apple",
+    },
+  },
   resourceIds: ["urn:adobe:test-resource"],
   redirectUrl: "https://experience.example.test/callback",
   domainName: "experience.example.test",
-  partner: "Roku",
-  partnerFrameworkStatus: "none",
+  partner: "Apple",
+  partnerFrameworkStatus: SAMPLE_PARTNER_FRAMEWORK_STATUS,
   samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
   samlSource: "live-probe",
+  samlTrustedForPartnerSso: true,
+  adobeSubjectToken: "subject-token-live-probe",
+  adServiceToken: "service-token-live-probe",
+  tempPassIdentity: "temp-pass-identity-live-probe",
+  visitorIdentifier: "12345678901234567890",
 });
 
 function extractFunctionSource(source, functionName) {
@@ -99,6 +128,43 @@ function loadLearningRuntime() {
     'const REST_V2_BASE = "https://sp.auth.adobe.com/api/v2";',
     'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
     'function buildRestV2Headers() { return { "AP-Device-Identifier": "device-123", "X-Device-Info": "device-info-123" }; }',
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function getRestV2MvpdMeta(requestorId = '', mvpdId = '', mvpdMeta = null) { return mvpdMeta || null; }",
+    extractFunctionSource(popupSource, "parseJsonText"),
+    extractFunctionSource(popupSource, "normalizeRestV2ProfileAttributeValue"),
+    extractFunctionSource(popupSource, "dedupeRestV2CandidateStrings"),
+    extractFunctionSource(popupSource, "decodeBase64TextSafe"),
+    extractFunctionSource(popupSource, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(popupSource, "getRestV2CaseInsensitiveHeaderValue"),
+    extractFunctionSource(popupSource, "collectRestV2CaseInsensitiveObjectValues"),
+    extractFunctionSource(popupSource, "getRestV2InteractiveDocsHeaderAliasCandidates"),
+    extractFunctionSource(popupSource, "decodeURIComponentSafe"),
+    extractFunctionSource(popupSource, "parseRestV2PartnerFrameworkStatusPayload"),
+    extractFunctionSource(popupSource, "resolveRestV2PartnerFrameworkStatusSummary"),
+    extractFunctionSource(popupSource, "isRestV2PartnerFrameworkStatusUsable"),
+    extractFunctionSource(popupSource, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(popupSource, "extractRestV2VisitorIdentifierFromCarrierValue"),
+    extractFunctionSource(popupSource, "normalizeRestV2VisitorIdentifierForRequest"),
+    extractFunctionSource(popupSource, "normalizeRestV2TempPassIdentityForRequest"),
+    extractFunctionSource(popupSource, "normalizeRestV2InteractiveDocsHeaderCandidate"),
+    extractFunctionSource(popupSource, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(popupSource, "buildRestV2MvpdMatchTokens"),
+    extractFunctionSource(popupSource, "isRestV2MvpdMatch"),
+    extractFunctionSource(popupSource, "resolveRestV2PartnerFromFrameworkStatus"),
+    extractFunctionSource(popupSource, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(popupSource, "resolveRestV2MvpdMetaForPartnerFrameworkProviderId"),
+    extractFunctionSource(popupSource, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
+    extractFunctionSource(popupSource, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
+    extractFunctionSource(popupSource, "resolveRestV2PartnerFrameworkStatusFromSessionData"),
+    extractFunctionSource(popupSource, "resolveRestV2SessionPartnerFromSessionData"),
+    extractFunctionSource(popupSource, "resolveRestV2PartnerFrameworkStatusFromContext"),
+    extractFunctionSource(popupSource, "resolveRestV2PartnerNameFromContext"),
+    extractFunctionSource(popupSource, "resolveRestV2LearningPartnerFrameworkStatusFromContext"),
+    extractFunctionSource(popupSource, "resolveRestV2PreferredPartnerFrameworkStatusForContext"),
+    extractFunctionSource(popupSource, "resolveRestV2LearningPartnerNameFromContext"),
+    extractFunctionSource(popupSource, "resolveRestV2InteractiveDocsHeaderValueFromContext"),
+    extractFunctionSource(popupSource, "isRestV2TrustedPartnerSsoSamlContext"),
+    extractFunctionSource(popupSource, "isRestV2StandardAuthenticateCaptureContext"),
     extractFunctionSource(popupSource, "buildRestV2InteractiveDocsUrl"),
     extractFunctionSource(popupSource, "buildRestV2InteractiveDocsHydrationPlan"),
     extractFunctionSource(popupSource, "runRestV2InteractiveDocsHydrator"),
@@ -108,6 +174,11 @@ function loadLearningRuntime() {
     module: { exports: {} },
     exports: {},
     navigator: { userAgent: "UnderPAR live probe" },
+    Headers,
+    atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
   };
   vm.runInNewContext(script, context, { filename: POPUP_PATH });
   return context.module.exports;
@@ -232,6 +303,15 @@ function parseCapturedBody(request) {
     return Object.fromEntries(new URLSearchParams(raw).entries());
   }
   return { raw };
+}
+
+function getCapturedHeaderValue(headers = {}, headerName = "") {
+  const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
+  if (!normalizedHeaderName || !headers || typeof headers !== "object") {
+    return "";
+  }
+  const match = Object.entries(headers).find(([key]) => String(key || "").trim().toLowerCase() === normalizedHeaderName);
+  return String(match?.[1] || "").trim();
 }
 
 async function waitForCapturedRequest(client, expectedMethod, timeoutMs = REQUEST_CAPTURE_TIMEOUT_MS) {
@@ -365,13 +445,25 @@ async function hydrateAndSendOperation(entry, plan, specMeta, popupSource) {
       checks.push(Object.keys(captured.headers || {}).some((key) => key.toLowerCase() === "ap-device-identifier"));
       checks.push(Object.keys(captured.headers || {}).some((key) => key.toLowerCase() === "x-device-info"));
     }
+    if (entry.usesVisitorIdentifier === true) {
+      checks.push(getCapturedHeaderValue(captured.headers, "AP-Visitor-Identifier") === SAMPLE_CONTEXT.visitorIdentifier);
+    }
+    if (entry.usesAdobeSubjectToken === true) {
+      checks.push(getCapturedHeaderValue(captured.headers, "Adobe-Subject-Token") === SAMPLE_CONTEXT.adobeSubjectToken);
+    }
+    if (entry.usesAdServiceToken === true) {
+      checks.push(getCapturedHeaderValue(captured.headers, "AD-Service-Token") === SAMPLE_CONTEXT.adServiceToken);
+    }
+    if (entry.usesTempPassIdentity === true) {
+      checks.push(getCapturedHeaderValue(captured.headers, "AP-Temppass-Identity") === SAMPLE_CONTEXT.tempPassIdentity);
+    }
     if (entry.usesPartnerFrameworkStatus === true) {
-      checks.push(
-        Object.keys(captured.headers || {}).some((key) => key.toLowerCase() === "ap-partner-framework-status")
-      );
+      checks.push(getCapturedHeaderValue(captured.headers, "AP-Partner-Framework-Status") === SAMPLE_CONTEXT.partnerFrameworkStatus);
     }
     if (entry.usesQueryRedirectUrl === true) {
-      checks.push(parsedUrl.searchParams.get("redirectUrl") === SAMPLE_CONTEXT.redirectUrl);
+      checks.push(
+        String(parsedUrl.searchParams.get("redirectUrl") || "").trim() === String(plan.fieldValues["query.redirectUrl"] || "").trim()
+      );
     }
     if (entry.usesBodyMvpd === true) {
       checks.push(body.mvpd === SAMPLE_CONTEXT.mvpd);
@@ -380,7 +472,7 @@ async function hydrateAndSendOperation(entry, plan, specMeta, popupSource) {
       checks.push(body.domainName === SAMPLE_CONTEXT.domainName);
     }
     if (entry.usesBodyRedirectUrl === true) {
-      checks.push(body.redirectUrl === SAMPLE_CONTEXT.redirectUrl);
+      checks.push(body.redirectUrl === String(plan.fieldValues["body.redirectUrl"] || "").trim());
     }
     if (entry.usesBodyResources === true) {
       const resources =

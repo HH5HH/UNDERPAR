@@ -72,7 +72,7 @@ function loadVisitorIdentifierHelpers() {
     extractFunctionSource(source, "extractRestV2VisitorIdentifierFromDebugFlow"),
     extractFunctionSource(source, "extractRestV2InteractiveDocsHeaderValueFromDebugFlow"),
     extractFunctionSource(source, "hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow"),
-    "module.exports = { normalizeRestV2VisitorIdentifierForRequest, extractRestV2VisitorIdentifierFromDebugFlow, extractRestV2InteractiveDocsHeaderValueFromDebugFlow, hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow };",
+    "module.exports = { normalizeRestV2VisitorIdentifierForRequest, getRestV2CaseInsensitiveHeaderValue, extractRestV2VisitorIdentifierFromDebugFlow, extractRestV2InteractiveDocsHeaderValueFromDebugFlow, hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
@@ -137,4 +137,69 @@ test("REST V2 visitor identifier hydrates from debug-flow cookies when no litera
   assert.equal(extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "AP-Visitor-Identifier"), ecid);
   hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context, flow, ["AP-Visitor-Identifier"]);
   assert.equal(context.visitorIdentifier, ecid);
+});
+
+test("REST V2 optional headers hydrate from array-backed formData captures", () => {
+  const { extractRestV2InteractiveDocsHeaderValueFromDebugFlow, hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow } =
+    loadVisitorIdentifierHelpers();
+  const flow = {
+    flowId: "flow-header-formdata-123",
+    events: [
+      {
+        source: "web-request",
+        phase: "onBeforeRequest",
+        requestBody: {
+          formData: {
+            adobeSubjectToken: ["subject-token-123"],
+            adServiceToken: ["service-token-456"],
+            tempPassIdentity: ["temp-pass-identity-789"],
+          },
+        },
+      },
+    ],
+  };
+  const context = {
+    adobeSubjectToken: "",
+    adServiceToken: "",
+    tempPassIdentity: "",
+  };
+
+  assert.equal(
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "Adobe-Subject-Token"),
+    "subject-token-123"
+  );
+  assert.equal(
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "AD-Service-Token"),
+    "service-token-456"
+  );
+  assert.equal(
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "AP-Temppass-Identity"),
+    "temp-pass-identity-789"
+  );
+
+  hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context, flow, [
+    "Adobe-Subject-Token",
+    "AD-Service-Token",
+    "AP-Temppass-Identity",
+  ]);
+  assert.equal(context.adobeSubjectToken, "subject-token-123");
+  assert.equal(context.adServiceToken, "service-token-456");
+  assert.equal(context.tempPassIdentity, "temp-pass-identity-789");
+});
+
+test("REST V2 case-insensitive header lookup accepts header entry arrays", () => {
+  const { getRestV2CaseInsensitiveHeaderValue } = loadVisitorIdentifierHelpers();
+
+  assert.equal(
+    getRestV2CaseInsensitiveHeaderValue(
+      [
+        {
+          name: "AD-Service-Token",
+          value: ["service-token-456"],
+        },
+      ],
+      ["ad-service-token"]
+    ),
+    "service-token-456"
+  );
 });
