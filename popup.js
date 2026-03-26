@@ -85821,8 +85821,25 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
     requestorId && mvpd && typeof getRestV2MvpdMeta === "function"
       ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || null)
       : context?.mvpdMeta || null;
+  const resolvedPartnerName = String(resolveRestV2LearningPartnerNameFromContext(context) || "").trim();
+  const partnerPlatformMappings =
+    cachedMvpdMeta?.partnerPlatformMappings && typeof cachedMvpdMeta.partnerPlatformMappings === "object"
+      ? cachedMvpdMeta.partnerPlatformMappings
+      : context?.mvpdMeta?.partnerPlatformMappings && typeof context.mvpdMeta.partnerPlatformMappings === "object"
+        ? context.mvpdMeta.partnerPlatformMappings
+        : null;
+  const mappedPartnerProviderId = resolvedPartnerName
+    ? String(
+        Object.entries(partnerPlatformMappings || {}).find(
+          ([rawPartnerName, rawProviderId]) =>
+            String(rawPartnerName || "").trim().toLowerCase() === resolvedPartnerName.toLowerCase() &&
+            String(rawProviderId || "").trim()
+        )?.[1] || ""
+      ).trim()
+    : "";
   return String(
     firstNonEmptyString([
+      mappedPartnerProviderId,
       context?.mvpdPlatformMappingId,
       context?.mvpdMeta?.platformMappingId,
       context?.mvpdMeta?.platformMappingID,

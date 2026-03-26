@@ -2558,6 +2558,145 @@ test("REST V2 learning prefers the Apple-specific inferred framework status over
   assert.match(plan.notes.join(" "), /inferred AP-Partner-Framework-Status/i);
 });
 
+test("REST V2 learning prefers partner platform mappings over a stale generic Comcast mapping on the current MVPD context", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const genericFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const validLearningFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+
+  const plan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    {
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      requestorAutoResolved: false,
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "Comcast_SSO",
+        partnerPlatformMappings: {
+          Apple: "Comcast_SSO_Apple",
+        },
+      },
+      partner: "",
+      partnerFrameworkStatus: genericFrameworkStatus,
+      learningPartner: "Apple",
+      learningPartnerFrameworkStatus: validLearningFrameworkStatus,
+      learningPartnerSource: "recorded r-apt cookie",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      samlSource: "tab-network:body",
+    },
+    "test-token"
+  );
+
+  assert.equal(plan.fieldValues["path.partner"], "Apple");
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+});
+
+test("REST V2 learning keeps Create Partner Profile blocked when partner mappings expose a more specific Comcast Apple provider than the captured header", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const genericFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+
+  const plan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    {
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      requestorAutoResolved: false,
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "Comcast_SSO",
+        partnerPlatformMappings: {
+          Apple: "Comcast_SSO_Apple",
+        },
+      },
+      partner: "",
+      partnerFrameworkStatus: genericFrameworkStatus,
+      learningPartner: "Apple",
+      learningPartnerFrameworkStatus: "",
+      learningPartnerSource: "recorded r-apt cookie",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      samlSource: "tab-network:body",
+    },
+    "test-token"
+  );
+
+  assert.equal(plan.fieldValues["path.partner"], "Apple");
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+});
+
 test("REST V2 learning keeps Create Partner Profile blocked when the inferred provider id does not match the selected MVPD mapping", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const mismatchedLearningFrameworkStatus = Buffer.from(
