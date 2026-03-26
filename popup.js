@@ -10582,6 +10582,10 @@ function prepareAdobePassEnvironmentSwitchUi(targetEnvironment = null) {
   const environmentLabel = String(targetEnvironment?.label || "selected environment").trim() || "selected environment";
   clearPremiumServiceAutoRefreshTimers();
   state.programmersApiEndpoint = null;
+  state.selectedMediaCompany = "";
+  state.selectedProgrammerKey = "";
+  state.selectedRequestorId = "";
+  state.selectedMvpdId = "";
   applyProgrammerEntities([]);
   els.mediaCompanySelect.disabled = true;
   els.mediaCompanySelect.innerHTML = `<option value="">-- Switching to ${escapeHtml(environmentLabel)}... --</option>`;
@@ -10596,6 +10600,7 @@ function prepareAdobePassEnvironmentSwitchUi(targetEnvironment = null) {
       environmentLabel
     )}...</p>`;
   }
+  void syncSidepanelControllerBridge(true);
 }
 
 function findProgrammerByProgrammerId(programmerId = "") {
@@ -10650,6 +10655,7 @@ function selectProgrammerForController(programmer = null, controllerReason = "me
     onlyIfWorkspaceOpen: true,
     surfaceMissingSelectionError: false,
   });
+  void syncSidepanelControllerBridge(true);
   return resolvedProgrammer;
 }
 

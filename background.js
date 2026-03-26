@@ -4549,12 +4549,24 @@ chrome.runtime.onConnect.addListener((port) => {
     });
     requestUnderparControllerStatusRefresh();
 
+    const onMessage = (message) => {
+      if (!message || typeof message !== "object") {
+        return;
+      }
+      if (message.type !== "request-status-refresh") {
+        return;
+      }
+      requestUnderparControllerStatusRefresh();
+    };
+
     const onDisconnect = () => {
       consumeRuntimeLastError();
       controllerBridgeState.devtoolsStatusPorts.delete(port);
+      port.onMessage.removeListener(onMessage);
       port.onDisconnect.removeListener(onDisconnect);
     };
 
+    port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(onDisconnect);
     return;
   }

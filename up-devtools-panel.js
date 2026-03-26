@@ -91,11 +91,13 @@ const FALLBACK_ENVIRONMENTS = Object.freeze([
 const panelState = {
   controllerReady: false,
   controllerStatusMessage: "Waiting for UnderPAR side panel status...",
+  controllerSelectionSignature: "",
   environmentsLoaded: false,
   switchBusy: false,
   statusPort: null,
   statusReconnectTimerId: 0,
   controllerStatusSnapshot: null,
+  controllerRealtimeListenersBound: false,
   vaultLoadPromise: null,
   vaultSnapshot: null,
   vaultDirty: true,
@@ -243,8 +245,50 @@ function syncInteractiveControlState() {
   }
 }
 
+function buildControllerSelectionSignature(snapshot = null) {
+  const normalizedSnapshot = snapshot && typeof snapshot === "object" ? snapshot : {};
+  return [
+    String(normalizedSnapshot.environmentKey || "").trim(),
+    String(normalizedSnapshot.programmerId || "").trim(),
+    String(normalizedSnapshot.requestorId || "").trim(),
+    String(normalizedSnapshot.selectionKey || "").trim(),
+  ].join("|");
+}
+
+function clearRegisteredApplicationsSelection(snapshot = null, environment = null) {
+  const baseSnapshot =
+    snapshot && typeof snapshot === "object"
+      ? cloneJsonLikeValue(snapshot, {})
+      : cloneJsonLikeValue(panelState.controllerStatusSnapshot, {}) || {};
+  const resolvedEnvironment =
+    environment && typeof environment === "object" ? cloneEnvironment(environment) : null;
+  const nextSnapshot = {
+    ...baseSnapshot,
+    programmerId: "",
+    programmerName: "",
+    requestorId: "",
+    selectionKey: "",
+    premiumServiceBindings: [],
+    premiumServiceOptions: {},
+  };
+  if (resolvedEnvironment) {
+    nextSnapshot.environmentKey = String(resolvedEnvironment.key || "").trim();
+    nextSnapshot.environmentLabel = String(resolvedEnvironment.label || "").trim();
+  }
+  panelState.registeredApplicationPendingSwitch = null;
+  panelState.controllerSelectionSignature = buildControllerSelectionSignature(nextSnapshot);
+  panelState.controllerStatusSnapshot = nextSnapshot;
+  renderRegisteredApplicationsControlPanel(nextSnapshot);
+  return nextSnapshot;
+}
+
 function renderControllerStatus(snapshot = null) {
   const status = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const nextSelectionSignature = buildControllerSelectionSignature(status);
+  if (nextSelectionSignature !== panelState.controllerSelectionSignature) {
+    panelState.registeredApplicationPendingSwitch = null;
+  }
+  panelState.controllerSelectionSignature = nextSelectionSignature;
   panelState.controllerStatusSnapshot = status;
   const normalizedStatus = String(status.status || "bootstrapping").trim().toLowerCase();
   const ready = status.ready === true;
@@ -286,6 +330,25 @@ function renderControllerStatus(snapshot = null) {
 
   syncInteractiveControlState();
   renderRegisteredApplicationsControlPanel(status);
+}
+
+function requestControllerStatusRefresh() {
+  const port = panelState.statusPort || connectControllerStatusPort();
+  if (!port) {
+    return false;
+  }
+  try {
+    port.postMessage({
+      type: "request-status-refresh",
+    });
+    return true;
+  } catch {
+    if (panelState.statusPort === port) {
+      panelState.statusPort = null;
+    }
+    scheduleStatusPortReconnect();
+    return false;
+  }
 }
 
 function scheduleStatusPortReconnect() {
@@ -594,22 +657,25 @@ function renderRegisteredApplicationsControlPanel(snapshot = null) {
   const bindings = getCurrentRegisteredApplicationBindings(normalizedSnapshot);
   const pendingSwitch = getPendingRegisteredApplicationSwitch(normalizedSnapshot);
   const switchBusy = panelState.registeredApplicationSwitchBusy === true;
+  const selectionReady = Boolean(programmerId);
   const controlsDisabled = panelState.controllerReady !== true || switchBusy;
 
   if (registeredApplicationsBadge) {
     registeredApplicationsBadge.textContent = switchBusy
       ? "Working"
-      : !programmerId
+      : !panelState.controllerReady
         ? "Pending"
+        : !selectionReady
+          ? "Disabled"
         : bindings.length > 0
           ? `${bindings.length} Services`
           : "None";
   }
   if (registeredApplicationsCard) {
-    registeredApplicationsCard.classList.toggle("is-disabled", panelState.controllerReady !== true);
+    registeredApplicationsCard.classList.toggle("is-disabled", panelState.controllerReady !== true || !selectionReady);
   }
   if (registeredApplicationsContext) {
-    if (!programmerId) {
+    if (!selectionReady) {
       registeredApplicationsContext.textContent =
         panelState.controllerReady === true
           ? "Select an ENV x Media Company in UnderPAR to inspect and switch the registered applications currently in use."
@@ -627,10 +693,14 @@ function renderRegisteredApplicationsControlPanel(snapshot = null) {
   if (!registeredApplicationsSummary) {
     return;
   }
-  if (!programmerId) {
+  if (!selectionReady) {
     registeredApplicationsSummary.innerHTML =
-      '<p class="regapp-control-empty">UnderPAR will surface the active Premium Service registered applications here after a live ENV x Media Company selection is in place.</p>';
-    setRegisteredApplicationsStatusMessage("");
+      '<p class="regapp-control-empty">Registered Applications unlock after a live ENV x Media Company selection is active in UnderPAR.</p>';
+    setRegisteredApplicationsStatusMessage(
+      panelState.controllerReady === true
+        ? "Registered Application switching is disabled until an ENV x Media Company is selected."
+        : ""
+    );
     return;
   }
   if (bindings.length === 0) {
@@ -4626,15 +4696,49 @@ async function handleSwitch() {
       : await fallbackRegistry.getStoredEnvironment();
     if (normalizeEnvironmentKey(currentEnvironment?.key) === normalizeEnvironmentKey(environmentSelect.value)) {
       renderEnvironmentDetails(currentEnvironment);
+      requestControllerStatusRefresh();
       return;
     }
-    await registry.setStoredEnvironment(environmentSelect.value);
+    const nextEnvironment = await registry.setStoredEnvironment(environmentSelect.value);
     await loadSelectedEnvironment();
+    clearRegisteredApplicationsSelection(null, nextEnvironment);
+    requestControllerStatusRefresh();
   } catch (_error) {
   } finally {
     panelState.switchBusy = false;
     syncInteractiveControlState();
   }
+}
+
+function bindControllerRealtimeListeners() {
+  if (panelState.controllerRealtimeListenersBound) {
+    return;
+  }
+  const registry = getEnvironmentRegistry();
+  const storageKey = String(registry?.STORAGE_KEY || FALLBACK_STORAGE_KEY).trim() || FALLBACK_STORAGE_KEY;
+  if (chrome?.storage?.onChanged?.addListener) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local" || !changes || !Object.prototype.hasOwnProperty.call(changes, storageKey)) {
+        return;
+      }
+      const nextEnvironment = resolveEnvironmentRecord(changes?.[storageKey]?.newValue || FALLBACK_DEFAULT_KEY);
+      void loadSelectedEnvironment().catch(() => {
+        panelState.environmentsLoaded = false;
+        syncInteractiveControlState();
+      });
+      clearRegisteredApplicationsSelection(null, nextEnvironment);
+      requestControllerStatusRefresh();
+    });
+  }
+  window.addEventListener("focus", () => {
+    requestControllerStatusRefresh();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      requestControllerStatusRefresh();
+    }
+  });
+  panelState.controllerRealtimeListenersBound = true;
 }
 
 async function handleRegisteredApplicationSwitch() {
@@ -4730,6 +4834,7 @@ function init() {
   });
   syncInteractiveControlState();
   connectControllerStatusPort();
+  bindControllerRealtimeListeners();
   wireCollapsibleSection(environmentUrlsToggle, environmentUrlsPanel, false);
   wireCollapsibleSection(vaultToggle, vaultPanel, false);
   wireCollapsibleSection(vaultSlacktivateToggle, vaultSlacktivatePanel, false);
