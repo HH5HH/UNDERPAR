@@ -533,9 +533,21 @@ function getContextCaption() {
   return "Bound to the live UnderPAR ESM context. Date range persists across environment switches; scoped drilldowns reset to the selected controller context.";
 }
 
+function getControllerBannerTitle() {
+  const programmerLabel = firstNonEmptyString([state.programmerName, state.programmerId]);
+  const environmentLabel = String(state.environmentLabel || "").trim();
+  if (programmerLabel && environmentLabel) {
+    return `ESM HEALTH Dashboard | ${environmentLabel} x ${programmerLabel}`;
+  }
+  if (programmerLabel) {
+    return `ESM HEALTH Dashboard | ${programmerLabel}`;
+  }
+  return "ESM HEALTH Dashboard";
+}
+
 function updateControllerBanner() {
   if (els.controllerState) {
-    els.controllerState.textContent = "ESM HEALTH Dashboard";
+    els.controllerState.textContent = getControllerBannerTitle();
   }
   if (els.filterState) {
     els.filterState.textContent = getFilterLabel();

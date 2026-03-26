@@ -43358,6 +43358,45 @@ async function handleMegWorkspaceWorkspaceAction(message, sender = null) {
     return { ok: true, controllerOnline: Boolean(esmWorkspaceState) };
   }
 
+  if (action === "saved-query-get-records") {
+    await ensureSavedEsmQueryVaultMirror({ forceReload: false });
+    return {
+      ok: true,
+      records: popupGetSavedEsmQueryRecords(),
+    };
+  }
+
+  if (action === "saved-query-put-record") {
+    const result = await popupPersistSavedEsmQueryRecord(
+      String(message?.payload?.name || ""),
+      String(message?.payload?.url || "")
+    );
+    return {
+      ok: true,
+      storageKey: String(result?.storageKey || ""),
+      existed: result?.existed === true,
+      records: popupGetSavedEsmQueryRecords(),
+    };
+  }
+
+  if (action === "saved-query-delete-record") {
+    const result = await popupDeleteSavedEsmQueryRecord(String(message?.payload?.storageKey || ""));
+    return {
+      ok: true,
+      storageKey: String(result?.storageKey || ""),
+      records: popupGetSavedEsmQueryRecords(),
+    };
+  }
+
+  if (action === "saved-query-sync-sidepanel") {
+    await ensureSavedEsmQueryVaultMirror({ forceReload: false });
+    refreshAllEsmWorkspaceMegSavedQuerySelectors();
+    return {
+      ok: true,
+      records: popupGetSavedEsmQueryRecords(),
+    };
+  }
+
   if (action === "open-workspace") {
     const targetWindowId = senderWindowId || controllerWindowId || Number(state.megWorkspaceWindowId || 0);
     const workspaceTab = await megWorkspaceEnsureWorkspaceTab({
@@ -43458,45 +43497,6 @@ async function handleMegWorkspaceWorkspaceAction(message, sender = null) {
       ok: true,
       fileName: result.fileName || "",
       format: result.format || format,
-    };
-  }
-
-  if (action === "saved-query-get-records") {
-    await ensureSavedEsmQueryVaultMirror({ forceReload: false });
-    return {
-      ok: true,
-      records: popupGetSavedEsmQueryRecords(),
-    };
-  }
-
-  if (action === "saved-query-put-record") {
-    const result = await popupPersistSavedEsmQueryRecord(
-      String(message?.payload?.name || ""),
-      String(message?.payload?.url || "")
-    );
-    return {
-      ok: true,
-      storageKey: String(result?.storageKey || ""),
-      existed: result?.existed === true,
-      records: popupGetSavedEsmQueryRecords(),
-    };
-  }
-
-  if (action === "saved-query-delete-record") {
-    const result = await popupDeleteSavedEsmQueryRecord(String(message?.payload?.storageKey || ""));
-    return {
-      ok: true,
-      storageKey: String(result?.storageKey || ""),
-      records: popupGetSavedEsmQueryRecords(),
-    };
-  }
-
-  if (action === "saved-query-sync-sidepanel") {
-    await ensureSavedEsmQueryVaultMirror({ forceReload: false });
-    refreshAllEsmWorkspaceMegSavedQuerySelectors();
-    return {
-      ok: true,
-      records: popupGetSavedEsmQueryRecords(),
     };
   }
 
