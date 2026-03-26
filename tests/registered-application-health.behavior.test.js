@@ -174,6 +174,15 @@ function loadWorkspaceControllerFunctions(initialState = {}) {
   const calls = [];
   const script = [
     `
+      const REGAPP_PREMIUM_SERVICE_LABEL_BY_KEY = Object.freeze({
+        restV2: "REST V2",
+        esm: "ESM",
+        degradation: "DEGRADATION",
+        resetTempPass: "Reset TempPASS",
+      });
+      const REGAPP_PREMIUM_SERVICE_DISPLAY_ORDER = Object.freeze(["restV2", "esm", "degradation", "resetTempPass"]);
+    `,
+    `
       const state = Object.assign(
         {
           controllerOnline: false,
@@ -186,8 +195,10 @@ function loadWorkspaceControllerFunctions(initialState = {}) {
           selectionKey: "",
           loading: false,
           report: null,
+          premiumServiceBindings: [],
           jwtDecodeCache: new Map(),
           hydratingGuids: new Set(),
+          switchingServiceKeys: new Set(),
           backgroundHydrationActive: false,
           backgroundHydrationSelectionKey: ""
         },
@@ -195,6 +206,8 @@ function loadWorkspaceControllerFunctions(initialState = {}) {
       );
     `,
     extractFunctionSource(source, "firstNonEmptyString"),
+    extractFunctionSource(source, "normalizePremiumServiceBindings"),
+    extractFunctionSource(source, "buildPremiumServiceBindingSignature"),
     extractFunctionSource(source, "canRunCurrentContextReport"),
     extractFunctionSource(source, "getReportSelectionKey"),
     extractFunctionSource(source, "getExpandedGuidStore"),
@@ -431,6 +444,120 @@ test("registered application health report payload prioritizes selected requesto
   assert.equal(report.applications[0].guid, "primary-app");
   assert.equal(report.applications[0].selectedRequestorMatch, true);
   assert.deepEqual(report.warnings, ["secondary-app: details endpoint timed out"]);
+});
+
+test("registered application health premium service bindings stay requestor-aware and exclude CM", () => {
+  const services = {
+    restV2Apps: [
+      { guid: "rest-shared", appName: "REST Shared", scopes: ["api:client:v2"], requestors: ["NBADE"] },
+      { guid: "rest-mml", appName: "REST MML", scopes: ["api:client:v2"], requestors: ["MML"] },
+    ],
+    esmApps: [
+      { guid: "esm-mml", appName: "ESM MML", scopes: ["analytics:client"], requestors: ["MML"] },
+      { guid: "esm-shared", appName: "ESM Shared", scopes: ["analytics:client"], requestors: [] },
+    ],
+    degradationApps: [
+      { guid: "deg-mml", appName: "DGR MML", scopes: ["decisions:owner"], requestors: ["MML"] },
+    ],
+    resetTempPassApps: [
+      { guid: "temp-mml", appName: "TempPASS MML", scopes: ["temporary:passes:owner"], requestors: ["MML"] },
+    ],
+    cm: { matchedTenants: [{ tenantId: "tenant-1" }] },
+  };
+  const applications = [
+    ...services.restV2Apps,
+    ...services.esmApps,
+    ...services.degradationApps,
+    ...services.resetTempPassApps,
+  ];
+  const helpers = loadPopupFunctions(
+    [
+      "getRegisteredApplicationHealthPremiumServiceLabel",
+      "orderRegisteredApplicationHealthServiceCandidates",
+      "buildRegisteredApplicationHealthServiceCandidates",
+      "buildRegisteredApplicationHealthPremiumServiceBindings",
+    ],
+    {
+      UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS: [
+        { serviceKey: "restV2", label: "REST V2", requiredScope: "api:client:v2" },
+        { serviceKey: "esm", label: "ESM", requiredScope: "analytics:client" },
+        { serviceKey: "degradation", label: "DEGRADATION", requiredScope: "decisions:owner" },
+        { serviceKey: "resetTempPass", label: "TempPASS", requiredScope: "temporary:passes:owner" },
+      ],
+      firstNonEmptyString,
+      mergeUniquePremiumServiceAppInfos: (...collections) => {
+        const merged = [];
+        const seen = new Set();
+        collections.flat().forEach((entry) => {
+          if (!entry || typeof entry !== "object") {
+            return;
+          }
+          const guid = String(entry.guid || "").trim();
+          if (!guid || seen.has(guid)) {
+            return;
+          }
+          seen.add(guid);
+          merged.push(entry);
+        });
+        return merged;
+      },
+      getPassVaultRequiredScopeForService: (serviceKey = "") =>
+        ({
+          restV2: "api:client:v2",
+          esm: "analytics:client",
+          degradation: "decisions:owner",
+          resetTempPass: "temporary:passes:owner",
+        })[String(serviceKey || "").trim()] || "",
+      registeredApplicationMatchesNativeRequiredScope: (app = null, requiredScope = "") =>
+        (Array.isArray(app?.scopes) ? app.scopes : []).includes(String(requiredScope || "").trim()),
+      collectRestV2AppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.restV2Apps || [],
+      collectEsmAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.esmApps || [],
+      collectResetTempPassAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.resetTempPassApps || [],
+      resolveDegradationAppCandidates: (programmerId = "", seedAppInfo = null, options = {}) => {
+        const requestorId = String(options?.requestorId || "").trim();
+        const candidates = services.degradationApps.slice();
+        if (seedAppInfo?.guid && !candidates.some((entry) => entry.guid === seedAppInfo.guid)) {
+          candidates.unshift(seedAppInfo);
+        }
+        return candidates.sort((left, right) => {
+          const leftMatch = Number((left.requestors || []).includes(requestorId));
+          const rightMatch = Number((right.requestors || []).includes(requestorId));
+          return rightMatch - leftMatch;
+        });
+      },
+      selectPreferredRestV2AppForRequestor: (apps = [], requestorId = "") =>
+        apps.find((entry) => (entry.requestors || []).includes(String(requestorId || "").trim())) || apps[0] || null,
+      selectPreferredEsmAppForRequestor: (apps = [], requestorId = "") =>
+        apps.find((entry) => (entry.requestors || []).includes(String(requestorId || "").trim())) || apps[0] || null,
+      selectPreferredResetTempPassAppForRequestor: (apps = [], requestorId = "") =>
+        apps.find((entry) => (entry.requestors || []).includes(String(requestorId || "").trim())) || apps[0] || null,
+      getRuntimePremiumServicesSeed: () => services,
+      getCurrentPremiumAppsSnapshot: () => services,
+      buildPassVaultHydrationRegisteredApplications: () => applications,
+      getCurrentProgrammerApplicationsSnapshot: () => ({ unused: true }),
+      appSupportsServiceProvider: (appInfo = null, requestorId = "") =>
+        (Array.isArray(appInfo?.requestors) ? appInfo.requestors : []).includes(String(requestorId || "").trim()),
+    }
+  );
+
+  const bindings = normalizeRealmObject(
+    helpers.buildRegisteredApplicationHealthPremiumServiceBindings(
+      { programmerId: "Turner" },
+      { programmerId: "Turner", requestorId: "MML" },
+      services,
+      applications
+    )
+  );
+
+  assert.deepEqual(
+    bindings.map((binding) => ({ serviceKey: binding.serviceKey, appGuid: binding.appGuid, label: binding.label })),
+    [
+      { serviceKey: "restV2", appGuid: "rest-mml", label: "REST V2" },
+      { serviceKey: "esm", appGuid: "esm-mml", label: "ESM" },
+      { serviceKey: "degradation", appGuid: "deg-mml", label: "DEGRADATION" },
+      { serviceKey: "resetTempPass", appGuid: "temp-mml", label: "Reset TempPASS" },
+    ]
+  );
 });
 
 test("registered application health dashboard returns the catalog immediately without per-app detail hydration", async () => {
@@ -675,10 +802,15 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(workspaceHtml, /JWT Inspector/);
   assert.match(workspaceHtml, /Paste any JWT, bearer value, or JSON body containing a JWT/);
   assert.match(workspaceHtml, /Registered Application Health Inspector/);
+  assert.match(workspaceHtml, /workspace-premium-service-summary/);
   assert.match(workspaceHtml, /underpar-jwt-inspector\.js/);
   assert.match(workspaceHtml, /id="workspace-cards"[\s\S]*regapp-jwt-utility-card/);
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
   assert.match(workspaceJs, /data-software-statement-download-guid/);
+  assert.match(workspaceJs, /data-premium-service-switch-apply/);
+  assert.match(workspaceJs, /sendWorkspaceAction\("switch-premium-service-application"/);
+  assert.match(workspaceJs, /renderPremiumServiceSummary\(\);/);
+  assert.match(workspaceJs, /regapp-up-indicator/);
   assert.match(workspaceJs, /sendWorkspaceAction\("hydrate-application"/);
   assert.match(workspaceJs, /sendWorkspaceAction\("download-application"/);
   assert.match(workspaceJs, /filterApplicationsForSelectedRequestor/);
@@ -693,10 +825,13 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.doesNotMatch(workspaceJs, /Application Matrix/);
   assert.doesNotMatch(workspaceJs, /buildMetricCardsMarkup/);
   assert.doesNotMatch(workspaceJs, /renderMatrixTable/);
-  assert.match(workspaceJs, /const disableRerun = state\.loading \|\| !canRunCurrentContextReport\(\);/);
-  assert.match(workspaceJs, /if \(controllerChanged \|\| requestorChanged \|\| shouldClearStaleReport\) \{\s*renderReport\(\);/);
+  assert.match(workspaceJs, /const disableRerun = state\.loading \|\| serviceSwitchBusy \|\| !canRunCurrentContextReport\(\);/);
+  assert.match(workspaceJs, /if \(controllerChanged \|\| requestorChanged \|\| shouldClearStaleReport \|\| premiumServiceChanged\) \{\s*renderReport\(\);/);
   assert.match(workspaceJs, /const action = hasRenderableReport\(\) && preferRefresh \? "refresh-latest" : "run-dashboard";/);
   assert.match(popupSource, /const forceRefresh = options\.forceRefresh === true;/);
+  assert.match(popupSource, /premiumServiceBindings:\s*buildRegisteredApplicationHealthPremiumServiceBindings/);
+  assert.match(popupSource, /if \(action === "switch-premium-service-application"\)/);
+  assert.match(popupSource, /switchRegisteredApplicationHealthPremiumService\(/);
   assert.doesNotMatch(extractFunctionSource(popupSource, "fetchRegisteredApplicationHealthDashboardReport"), /enrichRegisteredApplicationForHydration/);
   assert.doesNotMatch(
     extractFunctionSource(popupSource, "runRegisteredApplicationHealthDashboardForSelection"),

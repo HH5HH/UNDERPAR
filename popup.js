@@ -22386,6 +22386,178 @@ function buildRegisteredApplicationHealthStatusMessage(queryContext = null) {
   return [programmerId, requestorId ? `Requestor ${requestorId}` : "", environmentLabel].filter(Boolean).join(" | ");
 }
 
+function getRegisteredApplicationHealthPremiumServiceLabel(serviceKey = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  if (normalizedServiceKey === "resetTempPass") {
+    return "Reset TempPASS";
+  }
+  if (normalizedServiceKey === "restV2") {
+    return "REST V2";
+  }
+  if (normalizedServiceKey === "esm") {
+    return "ESM";
+  }
+  if (normalizedServiceKey === "degradation") {
+    return "DEGRADATION";
+  }
+  const definition =
+    UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.find((entry) => String(entry?.serviceKey || "").trim() === normalizedServiceKey) || null;
+  return firstNonEmptyString([definition?.label, normalizedServiceKey]);
+}
+
+function getRegisteredApplicationHealthPremiumServiceDefinition(serviceKey = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  if (!normalizedServiceKey) {
+    return null;
+  }
+  return (
+    UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.find((definition) => String(definition?.serviceKey || "").trim() === normalizedServiceKey) ||
+    null
+  );
+}
+
+function orderRegisteredApplicationHealthServiceCandidates(
+  programmerId = "",
+  requestorId = "",
+  candidates = [],
+  options = {}
+) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const preferredGuid = String(options?.preferredGuid || options?.preferredApp?.guid || "").trim();
+  const currentGuid = String(options?.currentApp?.guid || "").trim();
+  const orderedCandidates = mergeUniquePremiumServiceAppInfos(candidates).filter((appInfo) => appInfo?.guid);
+
+  return orderedCandidates.sort((leftApp, rightApp) => {
+    const leftGuid = String(leftApp?.guid || "").trim();
+    const rightGuid = String(rightApp?.guid || "").trim();
+    const leftPreferred = Number(Boolean(preferredGuid && leftGuid === preferredGuid));
+    const rightPreferred = Number(Boolean(preferredGuid && rightGuid === preferredGuid));
+    if (leftPreferred !== rightPreferred) {
+      return rightPreferred - leftPreferred;
+    }
+
+    const leftCurrent = Number(Boolean(currentGuid && leftGuid === currentGuid));
+    const rightCurrent = Number(Boolean(currentGuid && rightGuid === currentGuid));
+    if (leftCurrent !== rightCurrent) {
+      return rightCurrent - leftCurrent;
+    }
+
+    const leftMatch = Number(
+      Boolean(normalizedRequestorId) && appSupportsServiceProvider(leftApp, normalizedRequestorId, normalizedProgrammerId)
+    );
+    const rightMatch = Number(
+      Boolean(normalizedRequestorId) && appSupportsServiceProvider(rightApp, normalizedRequestorId, normalizedProgrammerId)
+    );
+    if (leftMatch !== rightMatch) {
+      return rightMatch - leftMatch;
+    }
+
+    return firstNonEmptyString([leftApp?.appName, leftApp?.name, leftGuid]).localeCompare(
+      firstNonEmptyString([rightApp?.appName, rightApp?.name, rightGuid]),
+      undefined,
+      { sensitivity: "base" }
+    );
+  });
+}
+
+function buildRegisteredApplicationHealthServiceCandidates(
+  serviceKey = "",
+  programmerId = "",
+  services = null,
+  registeredApplications = [],
+  options = {}
+) {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedRequestorId = String(options?.requestorId || "").trim();
+  const normalizedServices = services && typeof services === "object" ? services : {};
+  const normalizedRegisteredApplications = Array.isArray(registeredApplications) ? registeredApplications.filter((app) => app?.guid) : [];
+  const preferredApp = options?.preferredApp && typeof options.preferredApp === "object" ? options.preferredApp : null;
+
+  if (normalizedServiceKey === "degradation") {
+    return resolveDegradationAppCandidates(normalizedProgrammerId, preferredApp || normalizedServices?.degradation || null, {
+      requestorId: normalizedRequestorId,
+      preferredGuid: String(options?.preferredGuid || preferredApp?.guid || normalizedServices?.degradation?.guid || "").trim(),
+    });
+  }
+
+  const requiredScope = getPassVaultRequiredScopeForService(normalizedServiceKey, preferredApp);
+  const scopeCandidates = normalizedRegisteredApplications.filter((application) =>
+    registeredApplicationMatchesNativeRequiredScope(application, requiredScope)
+  );
+  const currentCandidates =
+    normalizedServiceKey === "restV2"
+      ? collectRestV2AppCandidatesFromPremiumApps(normalizedServices)
+      : normalizedServiceKey === "esm"
+        ? collectEsmAppCandidatesFromPremiumApps(normalizedServices)
+        : normalizedServiceKey === "resetTempPass"
+          ? collectResetTempPassAppCandidatesFromPremiumApps(normalizedServices, preferredApp)
+          : [];
+  const currentApp =
+    normalizedServiceKey === "restV2"
+      ? normalizedServices?.restV2 || null
+      : normalizedServiceKey === "esm"
+        ? normalizedServices?.esm || null
+        : normalizedServiceKey === "resetTempPass"
+          ? normalizedServices?.resetTempPass || null
+          : null;
+
+  return orderRegisteredApplicationHealthServiceCandidates(
+    normalizedProgrammerId,
+    normalizedRequestorId,
+    [preferredApp, currentApp, ...currentCandidates, ...scopeCandidates],
+    {
+      preferredApp,
+      preferredGuid: String(options?.preferredGuid || preferredApp?.guid || "").trim(),
+      currentApp,
+    }
+  );
+}
+
+function buildRegisteredApplicationHealthPremiumServiceBindings(programmer = null, queryContext = null, services = null, applications = null) {
+  const programmerId = String(queryContext?.programmerId || programmer?.programmerId || "").trim();
+  if (!programmerId) {
+    return [];
+  }
+  const requestorId = String(queryContext?.requestorId || "").trim();
+  const runtimeServices =
+    services && typeof services === "object"
+      ? services
+      : getRuntimePremiumServicesSeed(programmerId) || getCurrentPremiumAppsSnapshot(programmerId) || {};
+  const registeredApplications = Array.isArray(applications)
+    ? applications.filter((app) => app?.guid)
+    : buildPassVaultHydrationRegisteredApplications(getCurrentProgrammerApplicationsSnapshot(programmerId) || {});
+
+  return ["restV2", "esm", "degradation", "resetTempPass"]
+    .map((serviceKey) => {
+      const candidates = buildRegisteredApplicationHealthServiceCandidates(serviceKey, programmerId, runtimeServices, registeredApplications, {
+        requestorId,
+      });
+      let currentApp = null;
+      if (serviceKey === "restV2") {
+        currentApp = selectPreferredRestV2AppForRequestor(candidates, requestorId, programmerId);
+      } else if (serviceKey === "esm") {
+        currentApp = selectPreferredEsmAppForRequestor(candidates, requestorId, programmerId);
+      } else if (serviceKey === "resetTempPass") {
+        currentApp = selectPreferredResetTempPassAppForRequestor(candidates, requestorId, programmerId);
+      } else if (serviceKey === "degradation") {
+        currentApp = candidates[0] || null;
+      }
+      const guid = String(currentApp?.guid || "").trim();
+      if (!guid) {
+        return null;
+      }
+      return {
+        serviceKey,
+        label: getRegisteredApplicationHealthPremiumServiceLabel(serviceKey),
+        appGuid: guid,
+        appName: firstNonEmptyString([currentApp?.appName, currentApp?.name, guid]),
+      };
+    })
+    .filter(Boolean);
+}
+
 function normalizeRegisteredApplicationRequestorHintToken(value = "") {
   const normalized = String(value || "").trim();
   if (!normalized) {
@@ -22812,6 +22984,239 @@ function registeredApplicationHealthWorkspaceQueueBackgroundHydration(queryConte
     return;
   }
   void prefetchRegisteredApplicationHealthApplications(normalizedQueryContext, options).catch(() => {});
+}
+
+async function switchRegisteredApplicationHealthPremiumService(queryContext = null, serviceKey = "", guid = "", options = {}) {
+  const normalizedQueryContext = buildRegisteredApplicationHealthQueryContext(queryContext);
+  const programmerId = String(normalizedQueryContext?.programmerId || "").trim();
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const normalizedGuid = String(guid || "").trim();
+  const requestorId = String(normalizedQueryContext?.requestorId || "").trim();
+  if (!programmerId || !normalizedServiceKey || !normalizedGuid) {
+    return {
+      ok: false,
+      error: "Registered Application switching requires a Media Company, premium service, and application guid.",
+    };
+  }
+
+  const definition = getRegisteredApplicationHealthPremiumServiceDefinition(normalizedServiceKey);
+  if (!definition) {
+    return {
+      ok: false,
+      error: `Registered Application switching is not supported for ${normalizedServiceKey || "this premium service"}.`,
+    };
+  }
+
+  const programmer =
+    state.programmers.find((item) => String(item?.programmerId || "").trim() === programmerId) || resolveSelectedProgrammer() || null;
+  if (!programmer?.programmerId) {
+    return {
+      ok: false,
+      error: "UnderPAR could not resolve the selected ENV x Media Company for this switch.",
+    };
+  }
+
+  const existingRecord = getPassVaultMediaCompanyRecord(programmerId);
+  const currentServices =
+    getCurrentPremiumAppsSnapshot(programmerId) ||
+    getRuntimePremiumServicesSeed(programmerId) ||
+    buildPassVaultRuntimeServicesSnapshot(existingRecord) ||
+    {};
+  const existingApplicationsData =
+    getCurrentProgrammerApplicationsSnapshot(programmerId) ||
+    buildPassVaultApplicationsSnapshotFromRegisteredApplications(getPassVaultRegisteredApplicationsByGuid(existingRecord)) ||
+    {};
+  let applicationsData =
+    existingApplicationsData && typeof existingApplicationsData === "object" && !Array.isArray(existingApplicationsData)
+      ? cloneJsonLikeValue(existingApplicationsData, {})
+      : {};
+  if (!applicationsData?.[normalizedGuid]) {
+    const refreshedApplications = await fetchApplicationsForProgrammer(programmerId, {
+      session: state.loginData,
+      forceRefresh: false,
+      preferredTabId: Number(options?.preferredTabId || 0),
+      requestTimeoutMs: Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS)),
+    });
+    applicationsData =
+      refreshedApplications && typeof refreshedApplications === "object" && !Array.isArray(refreshedApplications)
+        ? cloneJsonLikeValue(refreshedApplications, {})
+        : applicationsData;
+  }
+
+  const registeredApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
+  const selectedApplication =
+    registeredApplications.find((application) => String(application?.guid || "").trim() === normalizedGuid) || null;
+  if (!selectedApplication) {
+    return {
+      ok: false,
+      error: "The selected Registered Application is no longer available for this ENV x Media Company.",
+    };
+  }
+
+  const requiredScope = getPassVaultRequiredScopeForService(normalizedServiceKey, selectedApplication);
+  if (!registeredApplicationMatchesNativeRequiredScope(selectedApplication, requiredScope)) {
+    return {
+      ok: false,
+      error: `${firstNonEmptyString([selectedApplication?.name, normalizedGuid])} does not expose the ${getRegisteredApplicationHealthPremiumServiceLabel(
+        normalizedServiceKey
+      )} scope.`,
+    };
+  }
+  if (requestorId && !appSupportsServiceProvider(selectedApplication, requestorId, programmerId)) {
+    return {
+      ok: false,
+      error: `${firstNonEmptyString([selectedApplication?.name, normalizedGuid])} is not associated with RequestorId ${requestorId}.`,
+    };
+  }
+
+  const hydratedServiceRecord = await hydratePassVaultServiceRecordWithContext(
+    {
+      key: normalizedServiceKey,
+      label: getRegisteredApplicationHealthPremiumServiceLabel(normalizedServiceKey),
+      available: true,
+      requiredScope,
+      registeredApplication: buildPassVaultCompactRegisteredApplication(selectedApplication),
+      client: normalizeUnderparVaultCredentialEntry(loadDcrCache(programmerId, normalizedGuid) || null),
+      status: "pending",
+    },
+    definition,
+    {
+      programmerId,
+      forceRefresh: options?.forceRefresh === true,
+      preferredTabId: Number(options?.preferredTabId || 0),
+      allowTemporaryPageContextTab: true,
+    }
+  );
+  const hydratedClient = normalizeUnderparVaultCredentialEntry(hydratedServiceRecord?.client || null);
+  if (!hydratedClient?.clientId || !hydratedClient?.clientSecret) {
+    return {
+      ok: false,
+      error: firstNonEmptyString([
+        hydratedClient?.error,
+        `UnderPAR could not hydrate ${getRegisteredApplicationHealthPremiumServiceLabel(normalizedServiceKey)} credentials for ${firstNonEmptyString([
+          selectedApplication?.name,
+          normalizedGuid,
+        ])}.`,
+      ]),
+    };
+  }
+
+  const nextApplicationsData = mergeHydratedServiceEntriesIntoApplicationsData(applicationsData, {
+    [normalizedServiceKey]: hydratedServiceRecord,
+  });
+  const nextRegisteredApplications = buildPassVaultHydrationRegisteredApplications(nextApplicationsData);
+  const seedServices =
+    currentServices && typeof currentServices === "object" && !Array.isArray(currentServices)
+      ? cloneJsonLikeValue(currentServices, {})
+      : buildPassVaultDirectPremiumServicesSnapshot(programmer, nextRegisteredApplications, {}, {
+          cmServiceSnapshot: state.cmServiceByProgrammerId.get(programmerId) || null,
+          cmMvpdServiceSnapshot: null,
+          cmMvpdSelectionKey: "",
+        });
+  const nextCandidates = buildRegisteredApplicationHealthServiceCandidates(
+    normalizedServiceKey,
+    programmerId,
+    seedServices,
+    nextRegisteredApplications,
+    {
+      requestorId,
+      preferredApp:
+        nextRegisteredApplications.find((application) => String(application?.guid || "").trim() === normalizedGuid) ||
+        selectedApplication,
+      preferredGuid: normalizedGuid,
+    }
+  );
+  const nextServices = {
+    ...seedServices,
+  };
+  if (normalizedServiceKey === "restV2") {
+    nextServices.restV2Apps = nextCandidates;
+    nextServices.restV2 = selectPreferredRestV2AppForRequestor(nextCandidates, requestorId, programmerId) || nextCandidates[0] || null;
+    if (requestorId && nextServices.restV2?.guid) {
+      const existingContext = getRequestorScopedRestV2AuthContext(requestorId) || {};
+      setRequestorScopedRestV2AuthContext(requestorId, {
+        ...existingContext,
+        programmerId,
+        preferredAppGuid: String(nextServices.restV2.guid || "").trim(),
+        candidateGuids: uniquePreserveOrder(
+          [String(nextServices.restV2.guid || "").trim()].concat(
+            Array.isArray(existingContext?.candidateGuids) ? existingContext.candidateGuids : []
+          )
+        ),
+      });
+    }
+  } else if (normalizedServiceKey === "esm") {
+    nextServices.esmApps = nextCandidates;
+    nextServices.esm = selectPreferredEsmAppForRequestor(nextCandidates, requestorId, programmerId) || nextCandidates[0] || null;
+  } else if (normalizedServiceKey === "degradation") {
+    nextServices.degradationApps = nextCandidates;
+    nextServices.degradation = nextCandidates[0] || null;
+  } else if (normalizedServiceKey === "resetTempPass") {
+    nextServices.resetTempPassApps = nextCandidates;
+    nextServices.resetTempPass =
+      selectPreferredResetTempPassAppForRequestor(nextCandidates, requestorId, programmerId) || nextCandidates[0] || null;
+  }
+
+  const summarizedServices = applyPremiumServiceRuntimeSummary(programmer, nextServices, {
+    cmCatalog: state.cmTenantsCatalog,
+  });
+  setCurrentProgrammerApplicationsSnapshot(programmerId, nextApplicationsData);
+  setCurrentPremiumAppsSnapshot(programmerId, summarizedServices);
+
+  await persistPassVaultProgrammerRecord(programmer, summarizedServices, {
+    source: "live",
+    serviceCredentialResults: [
+      {
+        serviceKey: normalizedServiceKey,
+        appGuid: normalizedGuid,
+        cache: hydratedClient,
+        error: String(hydratedClient?.error || "").trim(),
+      },
+    ],
+  }).catch(() => null);
+
+  const nextReport = buildRegisteredApplicationHealthReportPayload(
+    normalizedQueryContext,
+    nextRegisteredApplications,
+    {
+      hydrationErrorsByGuid:
+        cloneJsonLikeValue(
+          registeredApplicationHealthWorkspaceGetLatestReport(normalizedQueryContext.selectionKey)?.hydrationErrorsByGuid,
+          {}
+        ) || {},
+    }
+  );
+  registeredApplicationHealthWorkspaceStoreLatestReport(nextReport);
+
+  const targetWindowId = Number(options?.targetWindowId || 0);
+  void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", nextReport, {
+    targetWindowId,
+  });
+  registeredApplicationHealthWorkspaceBroadcastControllerState(programmer, normalizedQueryContext, targetWindowId);
+
+  if (String(resolveSelectedProgrammer()?.programmerId || "").trim() === programmerId) {
+    renderPremiumServices(summarizedServices, programmer, {
+      controllerReason: `registered-application-health-switch-${normalizedServiceKey}`,
+    });
+    emitPremiumServiceDecisionLogs(programmer, summarizedServices);
+  }
+
+  const selectedBinding =
+    buildRegisteredApplicationHealthPremiumServiceBindings(programmer, normalizedQueryContext, summarizedServices, nextRegisteredApplications).find(
+      (binding) => String(binding?.serviceKey || "").trim() === normalizedServiceKey
+    ) || null;
+  return {
+    ok: true,
+    serviceKey: normalizedServiceKey,
+    serviceLabel: getRegisteredApplicationHealthPremiumServiceLabel(normalizedServiceKey),
+    appGuid: String(selectedBinding?.appGuid || normalizedGuid).trim(),
+    appName: firstNonEmptyString([
+      selectedBinding?.appName,
+      nextServices?.[normalizedServiceKey]?.appName,
+      selectedApplication?.name,
+      normalizedGuid,
+    ]),
+  };
 }
 
 async function runRegisteredApplicationHealthDashboardForSelection(rawQueryContext = null, options = {}) {
@@ -55691,6 +56096,7 @@ function registeredApplicationHealthWorkspaceGetSelectedControllerStatePayload(p
     selectionContext && typeof selectionContext === "object"
       ? selectionContext
       : registeredApplicationHealthWorkspaceGetSelectionContext(programmer);
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
   return {
     controllerOnline: true,
     registeredApplicationHealthReady: Boolean(
@@ -55702,6 +56108,11 @@ function registeredApplicationHealthWorkspaceGetSelectedControllerStatePayload(p
     environmentKey: String(context?.environmentKey || "").trim(),
     environmentLabel: String(context?.environmentLabel || "").trim(),
     selectionKey: String(context?.selectionKey || "").trim(),
+    premiumServiceBindings: buildRegisteredApplicationHealthPremiumServiceBindings(
+      resolvedProgrammer,
+      context,
+      getRuntimePremiumServicesSeed(String(context?.programmerId || "").trim()) || null
+    ),
     updatedAt: Date.now(),
   };
 }
@@ -56081,6 +56492,27 @@ async function handleRegisteredApplicationHealthWorkspaceAction(message, sender 
           ok: false,
           error: String(downloadResult?.error || "Unable to download this registered application.").trim(),
         };
+  }
+
+  if (action === "switch-premium-service-application") {
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const latestQueryContext =
+      registeredApplicationHealthWorkspaceGetLatestQueryContext(selectionKey) ||
+      (message?.queryContext && typeof message.queryContext === "object" ? cloneJsonLikeValue(message.queryContext, null) : null);
+    if (!latestQueryContext || typeof latestQueryContext !== "object") {
+      return { ok: false, error: "No Registered Application Health query context is available for service switching." };
+    }
+    return switchRegisteredApplicationHealthPremiumService(
+      rebaseRegisteredApplicationHealthQueryContextForCurrentSelection(latestQueryContext, {
+        requestSource: "registered-application-health-workspace-switch",
+      }),
+      String(message?.serviceKey || "").trim(),
+      String(message?.guid || "").trim(),
+      {
+        targetWindowId: senderWindowId,
+        preferredTabId: Number(message?.preferredTabId || 0),
+      }
+    );
   }
 
   if (action === "prefetch-applications") {
@@ -87885,6 +88317,37 @@ function getRestV2CaseInsensitiveObjectValue(source = null, keyCandidates = []) 
   if (!source || typeof source !== "object") {
     return "";
   }
+  const normalizeValue =
+    typeof normalizeRestV2ProfileAttributeValue === "function"
+      ? normalizeRestV2ProfileAttributeValue
+      : (value) => {
+          if (value == null) {
+            return "";
+          }
+          if (Array.isArray(value)) {
+            for (const entry of value) {
+              const normalizedEntry = normalizeValue(entry);
+              if (normalizedEntry) {
+                return normalizedEntry;
+              }
+            }
+            return "";
+          }
+          if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            return String(value).trim();
+          }
+          if (typeof value === "object") {
+            const normalizedValue = normalizeValue(value.value);
+            if (normalizedValue) {
+              return normalizedValue;
+            }
+            const normalizedRaw = normalizeValue(value.raw);
+            if (normalizedRaw) {
+              return normalizedRaw;
+            }
+          }
+          return "";
+        };
   const candidates = Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates];
   const normalizedCandidates = candidates.map((key) => String(key || "").trim().toLowerCase()).filter(Boolean);
   if (normalizedCandidates.length === 0) {
@@ -87895,12 +88358,43 @@ function getRestV2CaseInsensitiveObjectValue(source = null, keyCandidates = []) 
     if (!normalizedKey || !normalizedCandidates.includes(normalizedKey)) {
       continue;
     }
-    return normalizeRestV2ProfileAttributeValue(value);
+    return normalizeValue(value);
   }
   return "";
 }
 
 function getRestV2CaseInsensitiveHeaderValue(headersLike = null, keyCandidates = []) {
+  const normalizeValue =
+    typeof normalizeRestV2ProfileAttributeValue === "function"
+      ? normalizeRestV2ProfileAttributeValue
+      : (value) => {
+          if (value == null) {
+            return "";
+          }
+          if (Array.isArray(value)) {
+            for (const entry of value) {
+              const normalizedEntry = normalizeValue(entry);
+              if (normalizedEntry) {
+                return normalizedEntry;
+              }
+            }
+            return "";
+          }
+          if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            return String(value).trim();
+          }
+          if (typeof value === "object") {
+            const normalizedValue = normalizeValue(value.value);
+            if (normalizedValue) {
+              return normalizedValue;
+            }
+            const normalizedRaw = normalizeValue(value.raw);
+            if (normalizedRaw) {
+              return normalizedRaw;
+            }
+          }
+          return "";
+        };
   const candidates = Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates];
   const normalizedCandidates = candidates.map((key) => String(key || "").trim().toLowerCase()).filter(Boolean);
   if (normalizedCandidates.length === 0) {
@@ -87910,7 +88404,7 @@ function getRestV2CaseInsensitiveHeaderValue(headersLike = null, keyCandidates =
     for (const [key, value] of headersLike.entries()) {
       const normalizedKey = String(key || "").trim().toLowerCase();
       if (normalizedCandidates.includes(normalizedKey)) {
-        return normalizeRestV2ProfileAttributeValue(value);
+        return normalizeValue(value);
       }
     }
     return "";
@@ -87920,7 +88414,7 @@ function getRestV2CaseInsensitiveHeaderValue(headersLike = null, keyCandidates =
       if (Array.isArray(entry) && entry.length >= 2) {
         const normalizedKey = String(entry[0] || "").trim().toLowerCase();
         if (normalizedKey && normalizedCandidates.includes(normalizedKey)) {
-          return normalizeRestV2ProfileAttributeValue(entry[1]);
+          return normalizeValue(entry[1]);
         }
         continue;
       }
@@ -87929,7 +88423,7 @@ function getRestV2CaseInsensitiveHeaderValue(headersLike = null, keyCandidates =
       }
       const normalizedKey = String(entry.name || "").trim().toLowerCase();
       if (normalizedKey && normalizedCandidates.includes(normalizedKey)) {
-        return normalizeRestV2ProfileAttributeValue(entry.value);
+        return normalizeValue(entry.value);
       }
     }
     return "";

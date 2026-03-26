@@ -28,6 +28,118 @@
   color: rgba(229, 236, 244, 0.8);
 }
 
+.regapp-health-service-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0 0;
+}
+
+.regapp-health-service-summary-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(229, 236, 244, 0.8);
+}
+
+.regapp-health-service-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 224, 154, 0.16);
+  background:
+    linear-gradient(180deg, rgba(26, 31, 39, 0.96), rgba(18, 22, 29, 0.94)),
+    radial-gradient(circle at top right, rgba(255, 191, 111, 0.12), rgba(255, 191, 111, 0) 42%);
+}
+
+.regapp-health-service-label,
+.regapp-health-service-value,
+.regapp-health-service-switch-note {
+  margin: 0;
+}
+
+.regapp-health-service-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 224, 154, 0.82);
+}
+
+.regapp-health-service-value {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(245, 248, 250, 0.96);
+}
+
+.regapp-health-service-switch-note {
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(219, 227, 235, 0.72);
+}
+
+.regapp-health-service-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.regapp-health-service-select {
+  min-width: 210px;
+  max-width: 320px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(143, 154, 171, 0.3);
+  background: rgba(11, 16, 22, 0.92);
+  color: rgba(245, 248, 250, 0.96);
+  font-size: 12px;
+}
+
+.regapp-health-service-select:focus-visible {
+  outline: none;
+  border-color: rgba(255, 190, 107, 0.58);
+  box-shadow: 0 0 0 2px rgba(255, 190, 107, 0.14);
+}
+
+.regapp-health-service-btn {
+  appearance: none;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 190, 107, 0.34);
+  background:
+    linear-gradient(180deg, rgba(71, 46, 14, 0.98), rgba(47, 31, 9, 0.98)),
+    linear-gradient(90deg, rgba(255, 190, 107, 0.16), rgba(255, 190, 107, 0.08));
+  color: rgba(255, 233, 197, 0.96);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.regapp-health-service-btn:hover:not(:disabled) {
+  border-color: rgba(255, 190, 107, 0.58);
+  box-shadow: 0 10px 18px rgba(55, 32, 7, 0.28);
+}
+
+.regapp-health-service-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 190, 107, 0.18);
+}
+
+.regapp-health-service-btn:disabled,
+.regapp-health-service-select:disabled {
+  opacity: 0.58;
+  cursor: default;
+  box-shadow: none;
+}
+
 .regapp-jwt-utility-card {
   margin-top: 18px;
 }
@@ -196,6 +308,13 @@
   color: rgba(248, 249, 250, 0.98);
 }
 
+.regapp-app-summary-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .regapp-app-summary-meta {
   font-size: 12px;
   color: rgba(221, 230, 238, 0.78);
@@ -281,6 +400,23 @@
   box-shadow: none;
 }
 
+.regapp-up-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(123, 197, 255, 0.34);
+  background: rgba(16, 41, 69, 0.82);
+  color: rgba(214, 233, 255, 0.98);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .regapp-app-card[open] .regapp-app-summary {
   border-bottom-color: rgba(255, 191, 111, 0.24);
 }
@@ -296,6 +432,28 @@
   flex-direction: column;
   gap: 16px;
   padding: 16px;
+}
+
+@media (max-width: 960px) {
+  .regapp-health-service-select {
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+  }
+
+  .regapp-health-service-controls {
+    align-items: stretch;
+  }
+
+  .regapp-app-summary-main {
+    flex-direction: column;
+  }
+
+  .regapp-app-summary-actions {
+    min-width: 0;
+    width: 100%;
+    align-items: flex-start;
+  }
 }
 
 .regapp-app-body-alert {
