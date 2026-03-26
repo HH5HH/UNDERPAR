@@ -100,18 +100,18 @@ function getProgrammerLabel() {
   if (name && id && name !== id) {
     return `${name} (${id})`;
   }
-  return name || id || "Selected Media Company";
+  return name || id || "Selected ENV x Media Company";
 }
 
 function getFilterLabel() {
   const requestorId = String(state.requestorId || "").trim();
   const environmentLabel = String(state.environmentLabel || state.environmentKey || "").trim();
   if (!state.programmerId) {
-    return "Select a Media Company in HEALTH > Status and click REG APPS.";
+    return "Select an ENV x Media Company in HEALTH > Status and click REG APPS.";
   }
   return [
-    `Media Company: ${getProgrammerLabel()}`,
-    requestorId ? `Selected RequestorId: ${requestorId}` : "Selected RequestorId: none",
+    `ENV x Media Company: ${getProgrammerLabel()}`,
+    requestorId ? `RequestorId: ${requestorId}` : "RequestorId: all",
     `Env: ${environmentLabel || "N/A"}`,
   ].join(" | ");
 }
@@ -187,7 +187,7 @@ function renderWorkspaceEnvironmentBadge() {
 
 function updateControllerBanner() {
   if (els.controllerState) {
-    els.controllerState.textContent = `Registered Application Health | ${getProgrammerLabel()}`;
+    els.controllerState.textContent = `Registered Application Health Inspector | ${getProgrammerLabel()}`;
   }
   if (els.filterState) {
     els.filterState.textContent = getFilterLabel();
@@ -250,7 +250,7 @@ function applyControllerState(payload = {}) {
   }
   if (shouldAutoRefreshForControllerUpdate) {
     void runCurrentContextReport({
-      statusMessage: "Refreshing Registered Application Health for the selected UnderPAR context...",
+      statusMessage: "Refreshing Registered Application Health Inspector for the selected UnderPAR context...",
       preferRefresh: false,
     });
   }
@@ -522,31 +522,6 @@ function appNeedsHydration(app = null) {
   return !String(app.softwareStatement || "").trim();
 }
 
-function buildSoftwareStatementDownloadFileName(app = null) {
-  const label = firstNonEmptyString([app?.name, app?.guid, "registered-application"]);
-  const sanitized = label.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "registered-application";
-  return `${sanitized}.jwt`;
-}
-
-function downloadSoftwareStatementToken(token = "", app = null) {
-  const normalizedToken = String(token || "").trim();
-  if (!normalizedToken) {
-    setStatus("No software statement JWT is available to download.", "error");
-    return;
-  }
-  const blob = new Blob([normalizedToken], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = buildSoftwareStatementDownloadFileName(app);
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => {
-    URL.revokeObjectURL(url);
-  }, 0);
-}
-
 function setApplicationHydrationState(guid = "", active = false) {
   const normalizedGuid = String(guid || "").trim();
   if (!normalizedGuid) {
@@ -585,6 +560,25 @@ function decorateApplication(app = null, index = 0) {
 
 function getDecoratedApplications() {
   return getReportApplications().map((app, index) => decorateApplication(app, index));
+}
+
+function filterApplicationsForSelectedRequestor(applications = []) {
+  const selectedRequestorId = String(state.requestorId || "").trim().toLowerCase();
+  const entries = Array.isArray(applications) ? applications.slice() : [];
+  if (!selectedRequestorId) {
+    return entries;
+  }
+  return entries.filter((entry) => {
+    if (entry?.selectedRequestorMatch === true) {
+      return true;
+    }
+    const app = entry?.app && typeof entry.app === "object" ? entry.app : {};
+    const hints = uniqueStringArray([
+      app.requestorHint,
+      ...(Array.isArray(app.serviceProviderHints) ? app.serviceProviderHints : []),
+    ]);
+    return hints.some((value) => String(value || "").trim().toLowerCase() === selectedRequestorId);
+  });
 }
 
 function buildRequestorSummary(app = {}) {
@@ -810,7 +804,11 @@ function buildJwtInspectorMarkup(inspection = null, options = {}) {
 
 function renderApplicationCards(applications = []) {
   if (applications.length === 0) {
-    return '<article class="rest-report-card"><p class="regapp-empty-state">No registered applications were returned for this Media Company.</p></article>';
+    return `<article class="rest-report-card"><p class="regapp-empty-state">${escapeHtml(
+      state.requestorId
+        ? `No registered applications are associated with RequestorId ${state.requestorId}.`
+        : "No registered applications were returned for this ENV x Media Company."
+    )}</p></article>`;
   }
   return `
     <section class="regapp-card-grid">
@@ -846,7 +844,7 @@ function renderApplicationCards(applications = []) {
                       type="button"
                       class="regapp-app-summary-btn"
                       data-software-statement-download-guid="${escapeHtml(guid)}"
-                    >${entry.hydrating ? "Loading JWT..." : "Download JWT"}</button>
+                    >DOWNLOAD</button>
                   </div>
                 </div>
               </summary>
@@ -871,7 +869,7 @@ function renderReport() {
     return;
   }
   if (!state.report) {
-    let emptyMessage = "No Registered Application Health report loaded yet.";
+    let emptyMessage = "No Registered Application Health Inspector report loaded yet.";
     if (state.loading && state.programmerId) {
       emptyMessage = "Loading registered applications for the selected ENV x Media Company...";
     } else if (!state.programmerId) {
@@ -885,7 +883,7 @@ function renderReport() {
     return;
   }
 
-  const applications = getDecoratedApplications();
+  const applications = filterApplicationsForSelectedRequestor(getDecoratedApplications());
   els.cardsHost.innerHTML = renderApplicationCards(applications);
 }
 
@@ -971,17 +969,30 @@ async function downloadSoftwareStatementByGuid(guid = "") {
   if (!normalizedGuid) {
     return;
   }
-  let app = getApplicationByGuid(normalizedGuid);
-  if (appNeedsHydration(app)) {
-    app = await ensureApplicationHydrated(normalizedGuid, { reason: "download" });
-  }
-  const token = String(app?.softwareStatement || "").trim();
-  if (!token) {
-    setStatus("This registered application does not expose a downloadable software statement JWT.", "error");
+  const app = getApplicationByGuid(normalizedGuid);
+  const result = await sendWorkspaceAction("download-application", {
+    selectionKey: String(state.selectionKey || "").trim(),
+    guid: normalizedGuid,
+    queryContext: {
+      programmerId: String(state.programmerId || "").trim(),
+      programmerName: String(state.programmerName || "").trim(),
+      requestorId: String(state.requestorId || "").trim(),
+      environmentKey: String(state.environmentKey || "").trim(),
+      environmentLabel: String(state.environmentLabel || "").trim(),
+      selectionKey: String(state.selectionKey || "").trim(),
+    },
+  });
+  if (!result?.ok) {
+    setStatus(String(result?.error || "Unable to download this registered application."), "error");
     return;
   }
-  downloadSoftwareStatementToken(token, app);
-  setStatus(`Downloaded software statement for ${firstNonEmptyString([app?.name, app?.guid, "registered application"])}.`);
+  const appLabel = firstNonEmptyString([app?.name, app?.guid, "registered application"]);
+  const fileName = String(result?.fileName || "").trim();
+  const warning = String(result?.warning || "").trim();
+  setStatus(
+    [fileName ? `Downloaded ${appLabel} as ${fileName}.` : `Downloaded ${appLabel}.`, warning].filter(Boolean).join(" "),
+    warning ? "info" : "success"
+  );
 }
 
 function handleReportStart(payload = {}) {
@@ -1009,7 +1020,7 @@ function handleReportResult(payload = {}) {
   syncActionButtonsDisabled();
   renderReport();
   if (!state.report) {
-    setStatus("No Registered Application Health data returned.", "error");
+    setStatus("No Registered Application Health Inspector data returned.", "error");
     return;
   }
   if (state.report.ok === true) {
@@ -1028,7 +1039,7 @@ function handleReportResult(payload = {}) {
     );
     return;
   }
-  setStatus(String(state.report?.error || "Registered Application Health failed."), "error");
+  setStatus(String(state.report?.error || "Registered Application Health Inspector failed."), "error");
 }
 
 function clearWorkspaceCards() {
@@ -1085,7 +1096,7 @@ function handleWorkspaceEvent(eventName, payload = {}) {
       return;
     }
     void runCurrentContextReport({
-      statusMessage: "Refreshing Registered Application Health for the selected UnderPAR context...",
+      statusMessage: "Refreshing Registered Application Health Inspector for the selected UnderPAR context...",
       preferRefresh: false,
     });
     return;
@@ -1117,7 +1128,7 @@ async function runCurrentContextReport(options = {}) {
     return;
   }
   if (!state.programmerId) {
-    setStatus("Select a Media Company before opening Registered Application Health.", "error");
+    setStatus("Select an ENV x Media Company before opening Registered Application Health Inspector.", "error");
     return;
   }
   if (!state.registeredApplicationHealthReady) {
@@ -1132,8 +1143,8 @@ async function runCurrentContextReport(options = {}) {
     String(
       options.statusMessage ||
         (action === "refresh-latest"
-          ? "Refreshing Registered Application Health..."
-          : "Loading Registered Application Health...")
+          ? "Refreshing Registered Application Health Inspector..."
+          : "Loading Registered Application Health Inspector...")
     ).trim()
   );
   const result = await sendWorkspaceAction(action, {
@@ -1154,8 +1165,8 @@ async function runCurrentContextReport(options = {}) {
       String(
         result?.error ||
           (action === "refresh-latest"
-            ? "Unable to refresh Registered Application Health."
-            : "Unable to load Registered Application Health.")
+            ? "Unable to refresh Registered Application Health Inspector."
+            : "Unable to load Registered Application Health Inspector.")
       ),
       "error"
     );
@@ -1264,7 +1275,7 @@ async function init() {
   renderReport();
   const result = await sendWorkspaceAction("workspace-ready");
   if (!result?.ok) {
-    setStatus(result?.error || "Unable to contact UnderPAR Registered Application Health controller.", "error");
+    setStatus(result?.error || "Unable to contact UnderPAR Registered Application Health Inspector controller.", "error");
   }
 }
 

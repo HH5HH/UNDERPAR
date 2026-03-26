@@ -147,6 +147,27 @@ function loadWorkspaceDecodeFunctions(functionNames) {
   return context.module.exports;
 }
 
+function loadWorkspaceRequestorFilterFunctions(initialState = {}) {
+  const filePath = path.join(ROOT, "registered-application-health-workspace.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    `const state = Object.assign({ requestorId: "" }, initialState);`,
+    extractFunctionSource(source, "uniqueStringArray"),
+    extractFunctionSource(source, "filterApplicationsForSelectedRequestor"),
+    "module.exports = { state, filterApplicationsForSelectedRequestor };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    initialState,
+    Set,
+    String,
+    Array,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadWorkspaceControllerFunctions(initialState = {}) {
   const filePath = path.join(ROOT, "registered-application-health-workspace.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -229,6 +250,21 @@ test("registered application health query context tracks env, media company, and
     selectionKey: "release-staging|Turner",
     controllerSelectionKey: "release-staging|Turner",
   });
+});
+
+test("registered application download filenames honor the Adobe console content-disposition contract", () => {
+  const helpers = loadPopupFunctions(["extractDownloadFilenameFromContentDisposition"], {});
+
+  assert.equal(
+    helpers.extractDownloadFilenameFromContentDisposition('attachment; filename="MML_RESTv2_software_statement.jwt"'),
+    "MML_RESTv2_software_statement.jwt"
+  );
+  assert.equal(
+    helpers.extractDownloadFilenameFromContentDisposition(
+      "attachment; filename*=UTF-8''Turner%20REST%20V2%20Software%20Statement.jwt"
+    ),
+    "Turner REST V2 Software Statement.jwt"
+  );
 });
 
 test("registered application health records surface decoded software statements and requestor matches", () => {
@@ -447,7 +483,7 @@ test("registered application workspace treats ENV x MediaCompany changes as a ha
     ["close", "update", "render", "run"]
   );
   assert.deepEqual(normalizeRealmObject(calls.find((entry) => entry?.type === "run")?.options), {
-    statusMessage: "Refreshing Registered Application Health for the selected UnderPAR context...",
+    statusMessage: "Refreshing Registered Application Health Inspector for the selected UnderPAR context...",
     preferRefresh: false,
   });
 });
@@ -486,6 +522,46 @@ test("registered application workspace redraws requestor matches without refetch
   );
 });
 
+test("registered application workspace filters visible cards to the selected requestor without mutating the catalog", () => {
+  const { filterApplicationsForSelectedRequestor } = loadWorkspaceRequestorFilterFunctions({
+    requestorId: "MML",
+  });
+
+  const visibleEntries = normalizeRealmObject(
+    filterApplicationsForSelectedRequestor([
+      {
+        selectedRequestorMatch: true,
+        app: {
+          guid: "mml-app",
+          requestorHint: "MML",
+          serviceProviderHints: ["MML", "NBADE"],
+        },
+      },
+      {
+        selectedRequestorMatch: false,
+        app: {
+          guid: "nbade-app",
+          requestorHint: "NBADE",
+          serviceProviderHints: ["NBADE"],
+        },
+      },
+      {
+        selectedRequestorMatch: false,
+        app: {
+          guid: "service-provider-only",
+          requestorHint: "",
+          serviceProviderHints: ["MML"],
+        },
+      },
+    ])
+  );
+
+  assert.deepEqual(
+    visibleEntries.map((entry) => entry.app.guid),
+    ["mml-app", "service-provider-only"]
+  );
+});
+
 test("registered application health sources wire the HEALTH action and workspace assets", () => {
   const popupSource = read("popup.js");
   const backgroundSource = read("background.js");
@@ -503,14 +579,17 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(manifestSource, /registered-application-health-workspace\.js/);
   assert.match(workspaceHtml, /JWT Inspector/);
   assert.match(workspaceHtml, /Paste any JWT, bearer value, or JSON body containing a JWT/);
+  assert.match(workspaceHtml, /Registered Application Health Inspector/);
   assert.match(workspaceHtml, /underpar-jwt-inspector\.js/);
   assert.match(workspaceHtml, /id="workspace-cards"[\s\S]*regapp-jwt-utility-card/);
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
   assert.match(workspaceJs, /data-software-statement-download-guid/);
   assert.match(workspaceJs, /sendWorkspaceAction\("hydrate-application"/);
+  assert.match(workspaceJs, /sendWorkspaceAction\("download-application"/);
+  assert.match(workspaceJs, /filterApplicationsForSelectedRequestor/);
   assert.match(workspaceJs, /expandedGuids:\s*new Set\(\)/);
   assert.match(workspaceJs, /setApplicationExpandedState\(guid,\s*details\.open\);/);
-  assert.match(workspaceJs, /Download JWT/);
+  assert.match(workspaceJs, />DOWNLOAD</);
   assert.doesNotMatch(workspaceJs, /sendWorkspaceAction\("prefetch-applications"/);
   assert.doesNotMatch(workspaceJs, /background-hydration/);
   assert.doesNotMatch(workspaceJs, /defaultOpen/);

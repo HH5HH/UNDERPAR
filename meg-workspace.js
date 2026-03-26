@@ -3164,7 +3164,8 @@ function registerEventHandlers() {
         if (savedQueryPicker) {
           savedQueryPicker.disabled = false;
         }
-        resetSavedQueryPickerSelection();
+        syncSavedQueryPickerTitle();
+        syncSavedQueryButtonsDisabled();
       }
     };
     if (typeof setTimeout === "function") {

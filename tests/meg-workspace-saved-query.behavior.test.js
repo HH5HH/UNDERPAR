@@ -173,3 +173,46 @@ test("MEG workspace saved-query reads bypass live ESM controller gating during p
   assert.equal(result.ok, true);
   assert.equal(result.records?.[0]?.name, "Daily Auth");
 });
+
+test("MEG workspace saved-query actions bypass controller window mismatch guards", async () => {
+  let deletedStorageKey = "";
+  const handleMegWorkspaceWorkspaceAction = loadMegWorkspaceActionHandler({
+    getActiveEsmWorkspaceState: () => ({
+      controllerWindowId: 42,
+    }),
+    megWorkspaceBindWorkspaceTab: () => {},
+    megMarkWorkspaceReady: () => {},
+    megWorkspaceBroadcastControllerState: () => {},
+    resolveSelectedProgrammer: () => null,
+    getCurrentPremiumAppsSnapshot: () => null,
+    megWorkspaceBroadcastSelectedControllerState: () => {},
+    megWorkspaceGetRememberedSelection: () => null,
+    megWorkspaceSendWorkspaceMessage: () => {},
+    ensureSavedEsmQueryVaultMirror: async () => ({}),
+    popupPersistSavedEsmQueryRecord: async () => ({ storageKey: "", existed: false }),
+    popupGetSavedEsmQueryRecords: () => [],
+    popupDeleteSavedEsmQueryRecord: async (storageKey) => {
+      deletedStorageKey = storageKey;
+      return { storageKey };
+    },
+    refreshAllEsmWorkspaceMegSavedQuerySelectors: () => {},
+  });
+
+  const result = await handleMegWorkspaceWorkspaceAction(
+    {
+      action: "saved-query-delete-record",
+      payload: {
+        storageKey: "underpar:saved-esm-query:Daily%20Auth",
+      },
+    },
+    {
+      tab: {
+        windowId: 7,
+        id: 88,
+      },
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(deletedStorageKey, "underpar:saved-esm-query:Daily%20Auth");
+});

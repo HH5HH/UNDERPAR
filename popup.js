@@ -32296,6 +32296,40 @@ async function downloadBinaryFile(bytes, fileName = "underpar-download.bin", mim
   await downloadBlobFile(new Blob([normalizedBytes], { type: mimeType }), fileName);
 }
 
+function extractDownloadFilenameFromContentDisposition(contentDisposition = "") {
+  const rawHeader = String(contentDisposition || "").trim();
+  if (!rawHeader) {
+    return "";
+  }
+
+  const normalizeHeaderFilename = (value = "") =>
+    String(value || "")
+      .trim()
+      .replace(/^UTF-8''/i, "")
+      .replace(/^"(.*)"$/, "$1")
+      .replace(/[\\\/]+/g, "-")
+      .trim();
+
+  const filenameStarMatch = rawHeader.match(/filename\*\s*=\s*([^;]+)/i);
+  if (filenameStarMatch?.[1]) {
+    const encodedValue = normalizeHeaderFilename(filenameStarMatch[1]);
+    if (encodedValue) {
+      try {
+        return decodeURIComponent(encodedValue);
+      } catch {
+        return encodedValue;
+      }
+    }
+  }
+
+  const filenameMatch = rawHeader.match(/filename\s*=\s*([^;]+)/i);
+  if (filenameMatch?.[1]) {
+    return normalizeHeaderFilename(filenameMatch[1]);
+  }
+
+  return "";
+}
+
 function downloadJsonFile(payload, fileName = "underpar-export.json") {
   const json = JSON.stringify(payload, null, 2);
   const blob = new Blob([json], { type: "application/json;charset=utf-8" });
@@ -43783,6 +43817,50 @@ async function handleBlondieTimeWorkspaceAction(message, sender = null) {
 
 async function handleMegWorkspaceWorkspaceAction(message, sender = null) {
   const action = String(message?.action || "").trim().toLowerCase();
+  const isSavedQueryAction = action.startsWith("saved-query-");
+  if (isSavedQueryAction) {
+    if (action === "saved-query-get-records") {
+      await ensureSavedEsmQueryVaultMirror({ forceReload: false });
+      return {
+        ok: true,
+        records: popupGetSavedEsmQueryRecords(),
+      };
+    }
+
+    if (action === "saved-query-put-record") {
+      const result = await popupPersistSavedEsmQueryRecord(
+        String(message?.payload?.name || message?.name || ""),
+        String(message?.payload?.url || message?.url || "")
+      );
+      return {
+        ok: true,
+        storageKey: String(result?.storageKey || ""),
+        existed: result?.existed === true,
+        records: popupGetSavedEsmQueryRecords(),
+      };
+    }
+
+    if (action === "saved-query-delete-record") {
+      const result = await popupDeleteSavedEsmQueryRecord(
+        String(message?.payload?.storageKey || message?.storageKey || "")
+      );
+      return {
+        ok: true,
+        storageKey: String(result?.storageKey || ""),
+        records: popupGetSavedEsmQueryRecords(),
+      };
+    }
+
+    if (action === "saved-query-sync-sidepanel") {
+      await ensureSavedEsmQueryVaultMirror({ forceReload: false });
+      refreshAllEsmWorkspaceMegSavedQuerySelectors();
+      return {
+        ok: true,
+        records: popupGetSavedEsmQueryRecords(),
+      };
+    }
+  }
+
   const esmWorkspaceState = getActiveEsmWorkspaceState();
   const senderWindowId = Number(sender?.tab?.windowId || 0);
   const senderTabId = Number(sender?.tab?.id || 0);
@@ -43830,45 +43908,6 @@ async function handleMegWorkspaceWorkspaceAction(message, sender = null) {
       );
     }
     return { ok: true, controllerOnline: Boolean(esmWorkspaceState) };
-  }
-
-  if (action === "saved-query-get-records") {
-    await ensureSavedEsmQueryVaultMirror({ forceReload: false });
-    return {
-      ok: true,
-      records: popupGetSavedEsmQueryRecords(),
-    };
-  }
-
-  if (action === "saved-query-put-record") {
-    const result = await popupPersistSavedEsmQueryRecord(
-      String(message?.payload?.name || ""),
-      String(message?.payload?.url || "")
-    );
-    return {
-      ok: true,
-      storageKey: String(result?.storageKey || ""),
-      existed: result?.existed === true,
-      records: popupGetSavedEsmQueryRecords(),
-    };
-  }
-
-  if (action === "saved-query-delete-record") {
-    const result = await popupDeleteSavedEsmQueryRecord(String(message?.payload?.storageKey || ""));
-    return {
-      ok: true,
-      storageKey: String(result?.storageKey || ""),
-      records: popupGetSavedEsmQueryRecords(),
-    };
-  }
-
-  if (action === "saved-query-sync-sidepanel") {
-    await ensureSavedEsmQueryVaultMirror({ forceReload: false });
-    refreshAllEsmWorkspaceMegSavedQuerySelectors();
-    return {
-      ok: true,
-      records: popupGetSavedEsmQueryRecords(),
-    };
   }
 
   if (action === "open-workspace") {
@@ -56003,6 +56042,34 @@ async function handleRegisteredApplicationHealthWorkspaceAction(message, sender 
           error: String(hydrated?.error || "Unable to hydrate this registered application.").trim(),
           application: cloneJsonLikeValue(hydrated?.application, null),
           report: cloneJsonLikeValue(hydrated?.report, null),
+        };
+  }
+
+  if (action === "download-application") {
+    const guid = String(message?.guid || "").trim();
+    if (!guid) {
+      return { ok: false, error: "Registered Application download requires an application guid." };
+    }
+    const selectionKey = firstNonEmptyString([message?.selectionKey, message?.selection?.selectionKey]);
+    const latestQueryContext =
+      registeredApplicationHealthWorkspaceGetLatestQueryContext(selectionKey) ||
+      (message?.queryContext && typeof message.queryContext === "object" ? cloneJsonLikeValue(message.queryContext, null) : null);
+    const downloadResult = await downloadRegisteredApplicationSoftwareStatementByGuid(guid, {
+      ...(latestQueryContext && typeof latestQueryContext === "object" ? latestQueryContext : {}),
+      requestSource: "registered-application-health-workspace-download",
+      preferredTabId: Number(message?.preferredTabId || 0),
+      requestTimeoutMs: Math.max(1000, Number(message?.requestTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS)),
+    });
+    return downloadResult?.ok
+      ? {
+          ok: true,
+          fileName: String(downloadResult?.fileName || "").trim(),
+          warning: String(downloadResult?.warning || "").trim(),
+          fallbackUsed: downloadResult?.fallbackUsed === true,
+        }
+      : {
+          ok: false,
+          error: String(downloadResult?.error || "Unable to download this registered application.").trim(),
         };
   }
 
@@ -79292,6 +79359,127 @@ async function fetchSoftwareStatementForAppGuid(guid, options = {}) {
   }
 
   return "";
+}
+
+async function fetchRegisteredApplicationDownloadByGuid(guid, options = {}) {
+  const normalizedGuid = String(guid || "").trim();
+  if (!normalizedGuid) {
+    throw new Error("Registered Application download requires an application guid.");
+  }
+
+  const requestOptions = options && typeof options === "object" ? options : {};
+  const requestTimeoutMs = Math.max(
+    1000,
+    Number(requestOptions.timeoutMs || requestOptions.requestTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS)
+  );
+  const accessToken = normalizeBearerTokenValue(
+    firstNonEmptyString([
+      requestOptions.accessToken,
+      getPreferredAdobeConsoleAccessTokenCandidate(),
+      state.loginData?.accessToken,
+    ])
+  );
+  if (!accessToken || !isProbablyJwt(accessToken)) {
+    throw new Error("Registered Application download requires a valid Adobe Pass console IMS bearer.");
+  }
+
+  const encodedGuid = encodeURIComponent(normalizedGuid);
+  const urlCandidates = uniquePreserveOrder([
+    `${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`,
+    appendAdobeConsoleConfigurationVersion(`${ADOBE_CONSOLE_BASE}/rest/api/applications/${encodedGuid}`),
+  ]);
+
+  let lastError = null;
+  for (const candidateUrl of urlCandidates) {
+    try {
+      const response = await fetchWithAbortTimeout(
+        candidateUrl,
+        {
+          method: "GET",
+          credentials: "include",
+          mode: "cors",
+          headers: {
+            ...getAdobeConsoleRequestHeaders(accessToken),
+            Accept: "application/octet-stream, application/jwt, text/plain, */*",
+          },
+        },
+        requestTimeoutMs
+      );
+      captureAdobeConsoleResponseState(response);
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        const parsedError = parseJsonText(errorText, null);
+        const message = getAdobeConsoleErrorMessage(parsedError, errorText, response.statusText);
+        lastError = new Error(`Registered Application download failed (${response.status}): ${message}`);
+        continue;
+      }
+
+      const blob = await response.blob();
+      if (!(blob instanceof Blob) || blob.size <= 0) {
+        lastError = new Error("Registered Application download returned an empty response.");
+        continue;
+      }
+
+      const contentDisposition = firstNonEmptyString([
+        response.headers?.get?.("content-disposition"),
+        response.headers?.get?.("Content-Disposition"),
+      ]);
+      const fileName = extractDownloadFilenameFromContentDisposition(contentDisposition);
+      if (!fileName) {
+        lastError = new Error("Registered Application download response did not expose a Content-Disposition filename.");
+        continue;
+      }
+      return {
+        ok: true,
+        blob,
+        fileName,
+        contentDisposition,
+        mimeType: firstNonEmptyString([blob.type, response.headers?.get?.("content-type"), "application/octet-stream"]),
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  throw lastError || new Error("Registered Application download failed.");
+}
+
+async function downloadRegisteredApplicationSoftwareStatementByGuid(guid, options = {}) {
+  const normalizedGuid = String(guid || "").trim();
+  if (!normalizedGuid) {
+    return { ok: false, error: "Registered Application download requires an application guid." };
+  }
+
+  const requestOptions = options && typeof options === "object" ? options : {};
+  try {
+    const download = await fetchRegisteredApplicationDownloadByGuid(normalizedGuid, requestOptions);
+    const resolvedFileName =
+      firstNonEmptyString([download?.fileName, `registered-application-${normalizedGuid}.jwt`]) ||
+      `registered-application-${normalizedGuid}.jwt`;
+    await downloadBlobFile(download?.blob, resolvedFileName);
+    return {
+      ok: true,
+      fileName: resolvedFileName,
+      fallbackUsed: false,
+    };
+  } catch (downloadError) {
+    const softwareStatement = await fetchSoftwareStatementForAppGuid(normalizedGuid, requestOptions).catch(() => "");
+    if (!softwareStatement) {
+      return {
+        ok: false,
+        error: downloadError instanceof Error ? downloadError.message : String(downloadError),
+      };
+    }
+    const fallbackFileName = `registered-application-${normalizedGuid}.jwt`;
+    await downloadBlobFile(new Blob([softwareStatement], { type: "text/plain;charset=utf-8" }), fallbackFileName);
+    return {
+      ok: true,
+      fileName: fallbackFileName,
+      fallbackUsed: true,
+      warning: "Adobe Pass console did not expose a downloadable filename, so UnderPAR used a fallback JWT filename.",
+    };
+  }
 }
 
 async function fetchApplicationsForProgrammer(programmerId, options = {}) {
