@@ -841,8 +841,6 @@ function buildRequestorSummary(app = {}) {
 
 function renderApplicationSummaryFacts(app = {}) {
   const summaryFacts = [
-    ["Client ID", firstNonEmptyString([app.clientId, "Not returned"])],
-    ["Type", firstNonEmptyString([app.type, "Not returned"])],
     ["Requestor Hints", buildRequestorSummary(app)],
   ];
   return `

@@ -828,6 +828,8 @@ test("registered application workspace renders scope coverage as colored service
   assert.match(markup, /regapp-service-pill--service-default/);
   assert.match(markup, /regapp-service-pill--service-rest-v2/);
   assert.match(markup, /regapp-service-pill--service-esm/);
+  assert.doesNotMatch(markup, /Client ID/);
+  assert.doesNotMatch(markup, /Type/);
   assert.doesNotMatch(markup, /Scope Coverage/);
   assert.doesNotMatch(markup, /DEFAULT,\s*REST API V2/);
 });
