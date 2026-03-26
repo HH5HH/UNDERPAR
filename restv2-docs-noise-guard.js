@@ -62,7 +62,10 @@ function installRestV2DocsNoiseGuard(globalRef = null) {
   };
   const shouldStubRequest = (url) => shouldStubRestV2DocsImsProfileRequest(normalizeUrl(url), baseUrl);
 
-  ["log", "info", "warn", "error", "debug"].forEach((methodName) => {
+  // Keep the noise guard out of real error paths. Redoc uses console.error for
+  // component failures, and wrapping that method makes UnderPAR appear in the
+  // stack for genuine docs/runtime exceptions.
+  ["log", "info", "debug"].forEach((methodName) => {
     const original = root.console?.[methodName];
     if (typeof original !== "function") {
       return;

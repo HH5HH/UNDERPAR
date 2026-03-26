@@ -80,7 +80,11 @@ test("REST V2 docs noise guard installs directly on the page world without inlin
 
   fakeWindow.console.log("Going to iterate over instancesSettings");
   fakeWindow.console.warn("keep this visible");
-  assert.deepEqual(consoleCalls, [["warn", "keep this visible"]]);
+  fakeWindow.console.error("real error stays visible");
+  assert.deepEqual(consoleCalls, [
+    ["warn", "keep this visible"],
+    ["error", "real error stays visible"],
+  ]);
 
   const stubbedResponse = await fakeWindow.fetch(
     "https://ims-na1.adobelogin.com/ims/profile/v1?client_id=adobe_io"
@@ -92,6 +96,32 @@ test("REST V2 docs noise guard installs directly on the page world without inlin
   const delegatedResponse = await fakeWindow.fetch("https://developer.adobe.com/favicon.ico");
   assert.equal(delegatedResponse, "delegated");
   assert.equal(delegatedFetchCalls.length, 1);
+});
+
+test("REST V2 docs noise guard leaves warn and error methods unwrapped", () => {
+  const originalWarn = function warn(...args) {
+    return ["warn", this, ...args];
+  };
+  const originalError = function error(...args) {
+    return ["error", this, ...args];
+  };
+  const fakeWindow = {
+    location: {
+      href: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/",
+    },
+    console: {
+      log() {},
+      info() {},
+      debug() {},
+      warn: originalWarn,
+      error: originalError,
+    },
+    setTimeout,
+  };
+
+  assert.equal(installRestV2DocsNoiseGuard(fakeWindow), true);
+  assert.equal(fakeWindow.console.warn, originalWarn);
+  assert.equal(fakeWindow.console.error, originalError);
 });
 
 test("REST V2 docs noise guard inject helper reuses the document window instead of creating inline script tags", () => {
