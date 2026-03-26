@@ -337,9 +337,19 @@ test("partner framework status extraction falls back to debug-flow preview text"
     getCaseInsensitiveObjectValue(headersLike, keyCandidates);
   const { extractRestV2PartnerFrameworkStatusFromText, extractRestV2PartnerFrameworkStatusFromDebugFlow } = loadFunctions(
     "popup.js",
-    ["extractRestV2PartnerFrameworkStatusFromText", "extractRestV2PartnerFrameworkStatusFromDebugFlow"],
+    [
+      "isRestV2PartnerSsoApiUrl",
+      "extractRestV2PartnerNameFromSsoApiUrl",
+      "isRestV2InteractiveDocsUrl",
+      "isRestV2ExtensionInitiatedDebugEvent",
+      "isRestV2InteractiveDocsDebugEvent",
+      "shouldTrustRestV2PartnerSsoLearningEvent",
+      "extractRestV2PartnerFrameworkStatusFromText",
+      "extractRestV2PartnerFrameworkStatusFromDebugFlow",
+    ],
     {
       ADOBE_SP_BASE: "https://sp.auth.adobe.com",
+      URL,
       firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
       dedupeRestV2CandidateStrings: (values = []) => [...new Set((Array.isArray(values) ? values : [values]).map((value) => String(value || "").trim()).filter(Boolean))],
       normalizeRestV2ProfileAttributeValue: (value = "") => String(value == null ? "" : value).trim(),
@@ -434,6 +444,208 @@ test("partner framework status extraction falls back to debug-flow preview text"
     }),
     validPartnerFrameworkStatus
   );
+});
+
+test("partner framework status extraction ignores extension and interactive-docs self traffic but accepts real app partner SSO requests", () => {
+  const validPartnerFrameworkStatus = "valid-partner-framework-status";
+  const getCaseInsensitiveObjectValue = (source = null, keyCandidates = []) => {
+    if (!source || typeof source !== "object") {
+      return "";
+    }
+    const candidates = (Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates])
+      .map((key) => String(key || "").trim().toLowerCase())
+      .filter(Boolean);
+    for (const [key, value] of Object.entries(source)) {
+      if (candidates.includes(String(key || "").trim().toLowerCase())) {
+        return String(value || "").trim();
+      }
+    }
+    return "";
+  };
+  const getCaseInsensitiveHeaderValue = (headersLike = null, keyCandidates = []) =>
+    getCaseInsensitiveObjectValue(headersLike, keyCandidates);
+  const { extractRestV2PartnerFrameworkStatusFromDebugFlow } = loadFunctions(
+    "popup.js",
+    [
+      "isRestV2PartnerSsoApiUrl",
+      "extractRestV2PartnerNameFromSsoApiUrl",
+      "isRestV2InteractiveDocsUrl",
+      "isRestV2ExtensionInitiatedDebugEvent",
+      "isRestV2InteractiveDocsDebugEvent",
+      "shouldTrustRestV2PartnerSsoLearningEvent",
+      "extractRestV2PartnerFrameworkStatusFromText",
+      "extractRestV2PartnerFrameworkStatusFromDebugFlow",
+    ],
+    {
+      ADOBE_SP_BASE: "https://sp.auth.adobe.com",
+      URL,
+      firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+      dedupeRestV2CandidateStrings: (values = []) => [...new Set((Array.isArray(values) ? values : [values]).map((value) => String(value || "").trim()).filter(Boolean))],
+      normalizeRestV2ProfileAttributeValue: (value = "") => String(value == null ? "" : value).trim(),
+      collectRestV2CaseInsensitiveObjectValues: () => [],
+      getRestV2InteractiveDocsHeaderAliasCandidates: () => [
+        "AP-Partner-Framework-Status",
+        "ap-partner-framework-status",
+        "partnerFrameworkStatus",
+      ],
+      decodeURIComponentSafe: (value = "") => String(value || "").trim(),
+      decodeBase64TextSafe: () => "",
+      parseJsonText: () => null,
+      getRestV2CaseInsensitiveObjectValue: getCaseInsensitiveObjectValue,
+      getRestV2CaseInsensitiveHeaderValue: getCaseInsensitiveHeaderValue,
+      resolveRestV2PartnerFrameworkStatusFromSessionData: (sessionData = null, responseHeaders = null) =>
+        getCaseInsensitiveObjectValue(sessionData, ["partnerFrameworkStatus"]) ||
+        getCaseInsensitiveHeaderValue(responseHeaders, ["AP-Partner-Framework-Status", "ap-partner-framework-status"]),
+      isRestV2PartnerFrameworkStatusUsable: (value = "") => String(value || "").trim() === validPartnerFrameworkStatus,
+      normalizeRestV2PartnerFrameworkStatusForRequest: (value = "") => String(value || "").trim(),
+    }
+  );
+
+  assert.equal(
+    extractRestV2PartnerFrameworkStatusFromDebugFlow({
+      events: [
+        {
+          source: "extension",
+          phase: "profiles-sso-create-request",
+          requestHeaders: {
+            "AP-Partner-Framework-Status": validPartnerFrameworkStatus,
+          },
+        },
+        {
+          source: "web-request",
+          phase: "onBeforeSendHeaders",
+          initiator: "chrome-extension://ggiocjgfmddgkjnaamchnflcohgagoma",
+          url: "https://sp.auth.adobe.com/api/v2/MML/profiles/sso/Apple",
+          requestHeaders: {
+            "AP-Partner-Framework-Status": validPartnerFrameworkStatus,
+          },
+        },
+        {
+          source: "web-request",
+          phase: "onBeforeSendHeaders",
+          initiator: "https://developer.adobe.com",
+          url: "https://sp.auth.adobe.com/api/v2/MML/profiles/sso/Apple",
+          requestHeaders: {
+            "AP-Partner-Framework-Status": validPartnerFrameworkStatus,
+          },
+        },
+      ],
+    }),
+    ""
+  );
+
+  assert.equal(
+    extractRestV2PartnerFrameworkStatusFromDebugFlow({
+      events: [
+        {
+          source: "web-request",
+          phase: "onBeforeSendHeaders",
+          initiator: "https://video.example.test",
+          url: "https://sp.auth.adobe.com/api/v2/MML/profiles/sso/Apple",
+          requestHeaders: {
+            "AP-Partner-Framework-Status": validPartnerFrameworkStatus,
+          },
+        },
+      ],
+    }),
+    validPartnerFrameworkStatus
+  );
+});
+
+test("SAML extraction ignores extension and interactive-docs partner profile posts but keeps the real app request", () => {
+  const encodedSaml = Buffer.from("<samlp:Response>ok</samlp:Response>", "utf8").toString("base64");
+  const { extractRestV2SamlResponseFromDebugFlow } = loadFunctions(
+    "popup.js",
+    [
+      "isRestV2PartnerSsoApiUrl",
+      "extractRestV2PartnerNameFromSsoApiUrl",
+      "isRestV2InteractiveDocsUrl",
+      "isRestV2ExtensionInitiatedDebugEvent",
+      "isRestV2InteractiveDocsDebugEvent",
+      "shouldTrustRestV2PartnerSsoLearningEvent",
+      "decodeSimpleHtmlEntities",
+      "normalizeRestV2SamlResponseForPartnerProfile",
+      "extractRestV2SamlResponseFromText",
+      "extractRestV2SamlResponseFromWebRequestEvent",
+      "extractRestV2SamlResponseFromDebugFlow",
+    ],
+    {
+      ADOBE_SP_BASE: "https://sp.auth.adobe.com",
+      URL,
+      base64EncodeUtf8: (value = "") => Buffer.from(String(value || ""), "utf8").toString("base64"),
+      dedupeRestV2CandidateStrings: (values = []) => [...new Set((Array.isArray(values) ? values : [values]).map((value) => String(value || "").trim()).filter(Boolean))],
+      decodeURIComponentSafe: (value = "") => {
+        try {
+          return decodeURIComponent(String(value || "").trim());
+        } catch {
+          return "";
+        }
+      },
+      decodeBase64TextSafe: (value = "") => {
+        try {
+          return Buffer.from(String(value || "").trim(), "base64").toString("utf8");
+        } catch {
+          return "";
+        }
+      },
+      getRestV2CaseInsensitiveObjectValue: (source = null, keyCandidates = []) => {
+        if (!source || typeof source !== "object") {
+          return "";
+        }
+        const candidates = (Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates])
+          .map((key) => String(key || "").trim().toLowerCase())
+          .filter(Boolean);
+        for (const [key, value] of Object.entries(source)) {
+          if (candidates.includes(String(key || "").trim().toLowerCase())) {
+            return value;
+          }
+        }
+        return "";
+      },
+    }
+  );
+
+  const result = extractRestV2SamlResponseFromDebugFlow({
+    events: [
+      {
+        source: "web-request",
+        phase: "onBeforeRequest",
+        initiator: "https://video.example.test",
+        url: "https://sp.auth.adobe.com/api/v2/MML/profiles/sso/Apple",
+        requestBody: {
+          formData: {
+            SAMLResponse: [encodedSaml],
+          },
+        },
+      },
+      {
+        source: "web-request",
+        phase: "onBeforeRequest",
+        initiator: "https://developer.adobe.com",
+        url: "https://sp.auth.adobe.com/api/v2/MML/profiles/sso/Apple",
+        requestBody: {
+          formData: {
+            SAMLResponse: [encodedSaml.replace(/=/g, "%3D")],
+          },
+        },
+      },
+      {
+        source: "web-request",
+        phase: "onBeforeRequest",
+        initiator: "chrome-extension://ggiocjgfmddgkjnaamchnflcohgagoma",
+        url: "https://sp.auth.adobe.com/api/v2/MML/profiles/sso/Apple",
+        requestBody: {
+          formData: {
+            SAMLResponse: [encodedSaml.replace(/=/g, "%3D")],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.samlResponse, encodedSaml);
+  assert.equal(result.source, "web-request:onBeforeRequest");
+  assert.equal(result.partner, "Apple");
 });
 
 test("sidepanel MEG endpoint picker updates launch state without rebuilding the full option list in change", () => {

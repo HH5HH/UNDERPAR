@@ -27520,6 +27520,82 @@ function normalizeRestV2SamlResponseForPartnerProfile(value = "") {
   return "";
 }
 
+function isRestV2PartnerSsoApiUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return false;
+  }
+  try {
+    const parsed = new URL(raw, ADOBE_SP_BASE);
+    return /\/api\/v2\/[^/]+\/(?:sessions|profiles)\/sso\/[^/?#]+$/i.test(String(parsed.pathname || "").trim());
+  } catch {
+    return /\/api\/v2\/[^/]+\/(?:sessions|profiles)\/sso\/[^/?#]+/i.test(raw);
+  }
+}
+
+function extractRestV2PartnerNameFromSsoApiUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, ADOBE_SP_BASE);
+    const match = String(parsed.pathname || "").match(/\/api\/v2\/[^/]+\/(?:sessions|profiles)\/sso\/([^/?#]+)$/i);
+    return String(match?.[1] || "").trim();
+  } catch {
+    const match = raw.match(/\/api\/v2\/[^/]+\/(?:sessions|profiles)\/sso\/([^/?#]+)/i);
+    return String(match?.[1] || "").trim();
+  }
+}
+
+function isRestV2InteractiveDocsUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return false;
+  }
+  try {
+    const parsed = new URL(raw, ADOBE_SP_BASE);
+    return /(^|\.)developer\.adobe\.com$/i.test(String(parsed.hostname || "").trim());
+  } catch {
+    return /developer\.adobe\.com/i.test(raw);
+  }
+}
+
+function isRestV2ExtensionInitiatedDebugEvent(event = null) {
+  if (!event || typeof event !== "object") {
+    return false;
+  }
+  if (String(event.source || "").trim() === "extension") {
+    return true;
+  }
+  return /^chrome-extension:\/\//i.test(String(event.initiator || "").trim());
+}
+
+function isRestV2InteractiveDocsDebugEvent(event = null) {
+  if (!event || typeof event !== "object") {
+    return false;
+  }
+  return [
+    String(event.initiator || "").trim(),
+    String(event.url || "").trim(),
+    String(event.requestUrl || "").trim(),
+    String(event.redirectUrl || "").trim(),
+  ].some((candidate) => isRestV2InteractiveDocsUrl(candidate));
+}
+
+function shouldTrustRestV2PartnerSsoLearningEvent(event = null) {
+  if (!event || typeof event !== "object") {
+    return false;
+  }
+  if (isRestV2ExtensionInitiatedDebugEvent(event)) {
+    return false;
+  }
+  if (isRestV2InteractiveDocsDebugEvent(event)) {
+    return false;
+  }
+  return true;
+}
+
 function extractRestV2SamlResponseFromText(value = "") {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -27567,12 +27643,16 @@ function extractRestV2SamlResponseFromDebugFlow(flow = null) {
       continue;
     }
     if (event.source === "tab-network" && String(event.phase || "").trim() === "body") {
+      if (isRestV2InteractiveDocsUrl(String(event.url || "").trim())) {
+        continue;
+      }
       const extracted = extractRestV2SamlResponseFromText(String(event.bodyPreview || "").trim());
       const normalizedSaml = normalizeRestV2SamlResponseForPartnerProfile(extracted);
       if (normalizedSaml) {
         return {
           samlResponse: normalizedSaml,
           source: "tab-network:body",
+          partner: extractRestV2PartnerNameFromSsoApiUrl(String(event.url || "").trim()),
         };
       }
     }
@@ -27583,12 +27663,16 @@ function extractRestV2SamlResponseFromDebugFlow(flow = null) {
       continue;
     }
     if (event.source === "web-request" && String(event.phase || "").trim() === "onBeforeRequest") {
+      if (!shouldTrustRestV2PartnerSsoLearningEvent(event)) {
+        continue;
+      }
       const rawSaml = extractRestV2SamlResponseFromWebRequestEvent(event);
       const normalizedSaml = normalizeRestV2SamlResponseForPartnerProfile(rawSaml);
       if (normalizedSaml) {
         return {
           samlResponse: normalizedSaml,
           source: "web-request:onBeforeRequest",
+          partner: extractRestV2PartnerNameFromSsoApiUrl(String(event.url || "").trim()),
         };
       }
     }
@@ -27596,6 +27680,7 @@ function extractRestV2SamlResponseFromDebugFlow(flow = null) {
   return {
     samlResponse: "",
     source: "",
+    partner: "",
   };
 }
 
@@ -27702,27 +27787,36 @@ function extractRestV2PartnerFrameworkStatusFromDebugFlow(flow = null) {
     if (!event || typeof event !== "object") {
       continue;
     }
+    const trustedEvent = shouldTrustRestV2PartnerSsoLearningEvent(event);
     const candidate = firstNonEmptyString([
-      String(event.partnerFrameworkStatus || "").trim(),
-      String(event?.sessionData?.partnerFrameworkStatus || "").trim(),
-      resolveRestV2PartnerFrameworkStatusFromSessionData(event?.sessionData || null, event?.responseHeaders || null),
-      resolveRestV2PartnerFrameworkStatusFromSessionData(event?.sessionData || null, event?.sessionResponseHeaders || null),
-      getRestV2CaseInsensitiveHeaderValue(event?.responseHeaders || null, [
-        "AP-Partner-Framework-Status",
-        "ap-partner-framework-status",
-      ]),
-      getRestV2CaseInsensitiveHeaderValue(event?.requestHeaders || null, [
-        "AP-Partner-Framework-Status",
-        "ap-partner-framework-status",
-      ]),
-      getRestV2CaseInsensitiveHeaderValue(event?.headers || null, [
-        "AP-Partner-Framework-Status",
-        "ap-partner-framework-status",
-      ]),
-      extractRestV2PartnerFrameworkStatusFromText(String(event?.responsePreview || "").trim()),
-      extractRestV2PartnerFrameworkStatusFromText(String(event?.bodyPreview || "").trim()),
-      extractRestV2PartnerFrameworkStatusFromText(String(event?.url || "").trim()),
-      extractRestV2PartnerFrameworkStatusFromText(String(event?.requestUrl || "").trim()),
+      trustedEvent ? String(event.partnerFrameworkStatus || "").trim() : "",
+      trustedEvent ? String(event?.sessionData?.partnerFrameworkStatus || "").trim() : "",
+      trustedEvent ? resolveRestV2PartnerFrameworkStatusFromSessionData(event?.sessionData || null, event?.responseHeaders || null) : "",
+      trustedEvent
+        ? resolveRestV2PartnerFrameworkStatusFromSessionData(event?.sessionData || null, event?.sessionResponseHeaders || null)
+        : "",
+      trustedEvent
+        ? getRestV2CaseInsensitiveHeaderValue(event?.responseHeaders || null, [
+            "AP-Partner-Framework-Status",
+            "ap-partner-framework-status",
+          ])
+        : "",
+      trustedEvent
+        ? getRestV2CaseInsensitiveHeaderValue(event?.requestHeaders || null, [
+            "AP-Partner-Framework-Status",
+            "ap-partner-framework-status",
+          ])
+        : "",
+      trustedEvent
+        ? getRestV2CaseInsensitiveHeaderValue(event?.headers || null, [
+            "AP-Partner-Framework-Status",
+            "ap-partner-framework-status",
+          ])
+        : "",
+      trustedEvent ? extractRestV2PartnerFrameworkStatusFromText(String(event?.responsePreview || "").trim()) : "",
+      trustedEvent ? extractRestV2PartnerFrameworkStatusFromText(String(event?.bodyPreview || "").trim()) : "",
+      trustedEvent ? extractRestV2PartnerFrameworkStatusFromText(String(event?.url || "").trim()) : "",
+      trustedEvent ? extractRestV2PartnerFrameworkStatusFromText(String(event?.requestUrl || "").trim()) : "",
     ]);
     if (isRestV2PartnerFrameworkStatusUsable(candidate)) {
       return candidate;
@@ -28156,6 +28250,18 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
   if (!String(context.samlResponse || "").trim()) {
     const samlDetails = extractRestV2SamlResponseFromDebugFlow(flow);
     const samlResponse = String(samlDetails?.samlResponse || "").trim();
+    const samlPartner = String(samlDetails?.partner || "").trim();
+    if (samlPartner) {
+      if (!String(context.partner || "").trim()) {
+        context.partner = samlPartner;
+      }
+      if (!String(context.sessionPartner || "").trim()) {
+        context.sessionPartner = samlPartner;
+      }
+      if (context.sessionData && typeof context.sessionData === "object" && !String(context.sessionData.partner || "").trim()) {
+        context.sessionData.partner = samlPartner;
+      }
+    }
     if (samlResponse) {
       context.samlResponse = samlResponse;
       context.samlSource = String(samlDetails?.source || "").trim();
@@ -54834,8 +54940,13 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     sessionCodeCandidates,
     sessionAction: String(context.sessionAction || "").trim(),
     sessionPartner: String(context.sessionPartner || "").trim(),
-    partner: String(firstNonEmptyString([context.partner, context.sessionPartner]) || "").trim(),
-    partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
+    partner: String(firstNonEmptyString([context.partner, context.sessionPartner, resolveRestV2LearningPartnerNameFromContext(context)]) || "").trim(),
+    partnerFrameworkStatus: String(
+      firstNonEmptyString([
+        resolveRestV2PreferredPartnerFrameworkStatusForContext(context),
+        resolveRestV2PartnerFrameworkStatusFromContext(context),
+      ]) || ""
+    ).trim(),
     learningPartner: String(firstNonEmptyString([context.learningPartner, resolveRestV2LearningPartnerNameFromContext(context)]) || "").trim(),
     learningPartnerFrameworkStatus: String(resolveRestV2LearningPartnerFrameworkStatusFromContext(context) || "").trim(),
     learningPartnerSource: String(context.learningPartnerSource || "").trim(),
