@@ -999,15 +999,6 @@ async function closeUnderparWorkspaceTabs(options = {}) {
     }
   }
 
-  if (closedTabIds.length > 0) {
-    console.log("[UnderPAR][Controller] Closed workspace tabs after sidepanel disconnect.", {
-      reason,
-      targetWindowId,
-      requestedCloseCount: tabIds.length,
-      closedCount: closedTabIds.length,
-    });
-  }
-
   return {
     closedCount: closedTabIds.length,
     requestedCloseCount: tabIds.length,
@@ -4431,15 +4422,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === CONSOLE_LOG_RELAY_REQUEST_TYPE) {
-    const text = String(message?.message || "").trim();
-    const details = message?.details && typeof message.details === "object" ? message.details : null;
-    if (text) {
-      if (details) {
-        console.log(`[UnderPAR][Sidepanel] ${text}`, details);
-      } else {
-        console.log(`[UnderPAR][Sidepanel] ${text}`);
-      }
-    }
     sendResponse({ ok: true });
     return false;
   }

@@ -774,6 +774,56 @@ test("REST V2 docs hydrator serializes form-encoded body fields into a textarea 
   assert.deepEqual(Array.from(result.unresolvedRequiredFields), []);
 });
 
+test("REST V2 docs hydrator does not treat an unrelated textarea as a request-body editor", async () => {
+  const harness = createDomHarness("createPartnerProfileUsingPOST");
+  const { createElement, operationElement } = harness;
+  operationElement.appendChild(
+    createElement("button", {
+      textContent: "Send",
+      attributes: { "data-cy": "send-button" },
+    })
+  );
+  operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "path.serviceProvider" },
+    })
+  );
+  const notesArea = operationElement.appendChild(
+    createElement("textarea", {
+      attributes: { "aria-label": "Notes" },
+    })
+  );
+
+  const runRestV2InteractiveDocsHydrator = loadHydrator({
+    document: harness.document,
+    location: harness.location,
+    window: harness.window,
+    Event: harness.Event,
+    HTMLElement: harness.HTMLElement,
+    HTMLInputElement: harness.HTMLInputElement,
+    HTMLSelectElement: harness.HTMLSelectElement,
+    HTMLTextAreaElement: harness.HTMLTextAreaElement,
+  });
+
+  const result = await runRestV2InteractiveDocsHydrator({
+    operationId: "createPartnerProfileUsingPOST",
+    fieldValues: {
+      "path.serviceProvider": "Turner",
+      "header.Content-Type": "application/x-www-form-urlencoded",
+      "body.SAMLResponse": "encoded-saml-response",
+    },
+    requiredFields: ["path.serviceProvider", "body.SAMLResponse"],
+    missingRequiredFields: [],
+    timeoutMs: 1200,
+  });
+
+  assert.equal(notesArea.value, "");
+  assert.equal(result.ok, false);
+  assert.equal(result.missingControls.includes("body.SAMLResponse"), true);
+  assert.deepEqual(Array.from(result.unresolvedRequiredFields), ["body.SAMLResponse"]);
+});
+
 test("REST V2 docs hydrator maps the TempPASS identity header across casing variants", async () => {
   const harness = createDomHarness("getProfileForMvpdUsingGET");
   const { createElement, operationElement } = harness;

@@ -13108,6 +13108,9 @@ registerCoreInteractionHandlers();
 function log(message, details = null) {
   const normalizedMessage = String(message || "").trim() || "(no message)";
   appendDebugLogEntry("app", normalizedMessage, details);
+  if (!shouldEmitUnderparBrowserConsole()) {
+    return;
+  }
   if (details === null) {
     console.log(`[UnderPAR] ${normalizedMessage}`);
     return;
@@ -13116,6 +13119,9 @@ function log(message, details = null) {
 }
 
 function relayDecisionLogToBackground(message, details = null) {
+  if (!shouldEmitUnderparBrowserConsole()) {
+    return;
+  }
   const payload = {
     type: CONSOLE_LOG_RELAY_REQUEST_TYPE,
     message: String(message || ""),
@@ -14491,11 +14497,25 @@ async function exportFullDiagnosticsBundle() {
   }
 }
 
-const UNDERPAR_BROWSER_CONSOLE_TRACE_ENABLED = true;
+const UNDERPAR_BROWSER_CONSOLE_TRACE_ENABLED = false;
+const UNDERPAR_BROWSER_CONSOLE_OUTPUT_STORAGE_KEY = "underpar_browser_console_output_v1";
 const UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_DEPTH = 4;
 const UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_ITEMS = 24;
 const UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_KEYS = 48;
 const UNDERPAR_BROWSER_CONSOLE_TRACE_MAX_STRING = 1200;
+
+function shouldEmitUnderparBrowserConsole() {
+  if (UNDERPAR_BROWSER_CONSOLE_TRACE_ENABLED === true) {
+    return true;
+  }
+  try {
+    const rawFlag = globalThis?.localStorage?.getItem(UNDERPAR_BROWSER_CONSOLE_OUTPUT_STORAGE_KEY);
+    const normalizedFlag = String(rawFlag || "").trim().toLowerCase();
+    return normalizedFlag === "1" || normalizedFlag === "true" || normalizedFlag === "yes" || normalizedFlag === "on";
+  } catch {
+    return false;
+  }
+}
 
 function summarizeUnderparConsoleSensitiveString(value, keyName = "") {
   const raw = String(value ?? "");
@@ -14599,12 +14619,15 @@ function sanitizeUnderparConsoleTraceValue(value, options = {}) {
 }
 
 function emitUnderparBrowserConsoleTrace(channel = "event", message = "", details = null, options = {}) {
-  if (UNDERPAR_BROWSER_CONSOLE_TRACE_ENABLED !== true) {
-    return;
-  }
   const normalizedChannel = String(channel || "event").trim() || "event";
   const normalizedMessage = String(message || "").trim() || "(no message)";
   const requestedConsoleLevel = String(options.level || "").trim().toLowerCase();
+  appendDebugLogEntry(normalizedChannel, normalizedMessage, details, {
+    level: requestedConsoleLevel || "info",
+  });
+  if (!shouldEmitUnderparBrowserConsole()) {
+    return;
+  }
   const consoleMethodName =
     requestedConsoleLevel === "debug"
       ? "debug"
@@ -14615,9 +14638,6 @@ function emitUnderparBrowserConsoleTrace(channel = "event", message = "", detail
   // Errors pane only reflects real uncaught failures instead of expected diagnostic noise.
   const consoleMethod = typeof console?.[consoleMethodName] === "function" ? console[consoleMethodName].bind(console) : console.log.bind(console);
   const label = `[UnderPAR Trace][${normalizedChannel}] ${normalizedMessage}`;
-  appendDebugLogEntry(normalizedChannel, normalizedMessage, details, {
-    level: requestedConsoleLevel || "info",
-  });
   if (details == null) {
     consoleMethod(label);
     return;
@@ -65604,6 +65624,20 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     }
     return collectDescendants(element).find((candidate) => isFormControlElement(candidate)) || null;
   };
+  const isLikelyRequestBodyElement = (element) => {
+    if (!element || !isFormControlElement(element)) {
+      return false;
+    }
+    if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) {
+      return false;
+    }
+    const haystack = getElementTextHaystack(element, { includeParentText: true });
+    const parentHaystack = getElementTextHaystack(element.parentElement, { includeParentText: true });
+    const combinedHaystack = [haystack, parentHaystack].filter(Boolean).join(" ");
+    const explicitBodyScope = normalize(element.getAttribute?.("data-param-in")).toLowerCase() === "body";
+    const explicitBodyWrapper = Boolean(element.closest?.('[data-cy="console-request-body"]'));
+    return explicitBodyScope || explicitBodyWrapper || /request body|request-body|body-param/.test(combinedHaystack);
+  };
   const formatEditorBodyValue = (fieldName, rawValue) => {
     const normalizedFieldName = normalize(fieldName);
     if (normalizedFieldName === "body.resources") {
@@ -65783,20 +65817,7 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       return findEmbeddedControlWithin(explicitBodyEditor) || explicitBodyEditor;
     }
     const descendants = collectDescendants(operation);
-    const bodyCandidates = descendants.filter((element) => {
-      if (!isFormControlElement(element)) {
-        return false;
-      }
-      if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) {
-        return false;
-      }
-      return true;
-    });
-    const prioritized = bodyCandidates.find((element) => {
-      const haystack = getElementTextHaystack(element, { includeParentText: true });
-      return haystack.includes("request body") || haystack.includes("body-param") || haystack.includes("body");
-    });
-    return prioritized || bodyCandidates[0] || null;
+    return descendants.find((element) => isLikelyRequestBodyElement(element)) || null;
   };
   const buildRequestBodyEditorValue = (bodyEntries, editorElement, normalizedFieldValues) => {
     const contentType = String(
@@ -65856,7 +65877,11 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       return findRequestBodyEditor(operation);
     }
     if (normalizedFieldName === "body.SAMLResponse") {
-      return findRequestBodyEditor(operation) || operation.querySelector('input[type="text"], input:not([type])');
+      const labeledSamlControl = findLabeledControl(operation, normalizedFieldName);
+      if (labeledSamlControl && !(labeledSamlControl instanceof HTMLSelectElement)) {
+        return labeledSamlControl;
+      }
+      return findRequestBodyEditor(operation);
     }
     const byLabel = findLabeledControl(operation, normalizedFieldName);
     if (byLabel) {
@@ -65947,7 +65972,7 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       continue;
     }
     if (!control) {
-      if (normalizedFieldName.startsWith("body.")) {
+      if (normalizedFieldName.startsWith("body.") && sharedBodyEditor) {
         bodyEditorEntries.push([fieldName, rawValue]);
         continue;
       }
@@ -81808,8 +81833,9 @@ function emitCmConsoleTokenForTesting(accessToken = "", source = "") {
   }
   state.cmConsoleTokenConsoleEmitKey = emitKey || token.slice(-36);
 
-  // Explicit plain log requested for shell copy/paste testing.
-  console.log(`cm-console-ui token = ${token}`);
+  if (shouldEmitUnderparBrowserConsole()) {
+    console.log(`cm-console-ui token = ${token}`);
+  }
   log("CM token emitted for testing", {
     source: String(source || "unknown"),
     clientId: CM_IMS_PRIMARY_CLIENT_ID,
