@@ -2564,7 +2564,11 @@ async function openUnderparGetLatestFlow() {
       downloadUrl,
       error
     ).message;
-    if (!preferLocalPackage && localDownloadVersion) {
+    const canFallbackToBundledRuntime =
+      !preferLocalPackage &&
+      localDownloadVersion &&
+      (!hasKnownRemoteUpdate || compareVersions(localDownloadVersion, latestVersion) >= 0);
+    if (canFallbackToBundledRuntime) {
       const bundledDownloadUrl = buildLocalUnderparPackageUrl();
       if (bundledDownloadUrl) {
         try {

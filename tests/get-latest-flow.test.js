@@ -110,6 +110,29 @@ function loadGetLatestHelpers(seed = {}) {
   return context.module.exports;
 }
 
+function loadGetLatestPopupTrigger(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "const state = globalThis.__seed.state || { updateCheckPending: false, latestCommitSha: '', latestVersion: '', updateCheckError: '', updateAvailable: false };",
+    "function closeAvatarMenu() { if (typeof globalThis.__seed.closeAvatarMenu === 'function') { globalThis.__seed.closeAvatarMenu(); } }",
+    "function setStatus(message, type) { if (typeof globalThis.__seed.setStatus === 'function') { globalThis.__seed.setStatus(message, type); } }",
+    "async function sendRuntimeMessageSafe(message = null) { return typeof globalThis.__seed.sendRuntimeMessageSafe === 'function' ? globalThis.__seed.sendRuntimeMessageSafe(message) : null; }",
+    "function syncAvatarMenuUpdateAction() {}",
+    "function syncSignInUpdateIndicator() {}",
+    "const UNDERPAR_GET_LATEST_REQUEST_TYPE = 'underpar:getLatest';",
+    extractFunctionSource(source, "triggerGetLatestWorkflow"),
+    "module.exports = { triggerGetLatestWorkflow, state };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function createSeed(options = {}) {
   const calls = {
     fetch: [],
@@ -530,11 +553,11 @@ test("openUnderparGetLatestFlow falls back to the bundled runtime package when G
   assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.17.4.zip");
 });
 
-test("openUnderparGetLatestFlow retries with the bundled runtime package when remote package download fails", async () => {
+test("openUnderparGetLatestFlow keeps the remote package target when remote download fails and the bundled runtime is older", async () => {
   const latestSha = "fedcba9876543210fedcba9876543210fedcba98";
   const seed = createSeed({
     currentVersion: "1.17.4",
-    downloadFailureSequence: [true, false],
+    downloadShouldFail: true,
     responseByUrl: {
       "https://raw.githubusercontent.com/HH5HH/UNDERPAR/main/underpar_distro.version.json": {
         ok: true,
@@ -557,14 +580,61 @@ test("openUnderparGetLatestFlow retries with the bundled runtime package when re
   const response = await helpers.openUnderparGetLatestFlow();
 
   assert.equal(response.ok, true);
-  assert.equal(response.downloadStarted, true);
-  assert.equal(String(response.downloadSource || ""), "local-runtime");
+  assert.equal(response.downloadStarted, false);
+  assert.equal(response.downloadTabOpened, true);
+  assert.equal(String(response.downloadSource || ""), "github-remote");
   assert.match(String(response.downloadError || ""), /Remote UnderPAR package download/);
-  assert.match(String(response.infoMessage || ""), /Downloaded bundled UnderPAR package v1\.17\.4 from the current runtime instead\./);
-  assert.equal(seed.calls.downloadsDownload.length, 2);
+  assert.equal(String(response.infoMessage || ""), "");
+  assert.equal(seed.calls.downloadsDownload.length, 1);
+  assert.equal(seed.calls.tabsCreate.length, 2);
   assert.match(String(seed.calls.downloadsDownload[0]?.url || ""), new RegExp(`/${latestSha}/underpar_distro\\.zip\\?cacheBust=\\d+$`));
-  assert.equal(String(seed.calls.downloadsDownload[1]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
-  assert.equal(String(seed.calls.downloadsDownload[1]?.filename || ""), "UnderPAR-v1.17.4.zip");
+  assert.match(String(seed.calls.tabsCreate[0]?.url || ""), new RegExp(`/${latestSha}/underpar_distro\\.zip\\?cacheBust=\\d+$`));
+  assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
+});
+
+test("openUnderparGetLatestFlow does not fall back to an older bundled runtime package when a newer remote build exists", async () => {
+  const latestSha = "00112233445566778899aabbccddeeff00112233";
+  const seed = createSeed({
+    currentVersion: "1.18.83",
+    downloadShouldFail: true,
+    responseByUrl: {
+      "chrome-extension://underpar/underpar_distro.version.json": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.18.83" };
+        },
+      },
+      [`https://raw.githubusercontent.com/HH5HH/UNDERPAR/${latestSha}/underpar_distro.version.json`]: {
+        ok: true,
+        status: 200,
+        async json() {
+          return { version: "1.18.86" };
+        },
+      },
+      "https://api.github.com/repos/HH5HH/UNDERPAR/git/ref/heads/main": {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: latestSha } };
+        },
+      },
+    },
+  });
+
+  const helpers = loadGetLatestHelpers(seed);
+  const response = await helpers.openUnderparGetLatestFlow();
+
+  assert.equal(response.ok, true);
+  assert.equal(response.downloadStarted, false);
+  assert.equal(response.downloadTabOpened, true);
+  assert.equal(String(response.downloadSource || ""), "github-remote");
+  assert.match(String(response.downloadError || ""), /Remote UnderPAR package download/);
+  assert.equal(seed.calls.downloadsDownload.length, 1);
+  assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.18.86-0011223.zip");
+  assert.equal(seed.calls.tabsCreate.length, 2);
+  assert.match(String(seed.calls.tabsCreate[0]?.url || ""), new RegExp(`/${latestSha}/underpar_distro\\.zip\\?cacheBust=\\d+$`));
+  assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
 });
 
 test("openUnderparGetLatestFlow falls back to opening the package tab when downloads API fails", async () => {
@@ -596,7 +666,7 @@ test("openUnderparGetLatestFlow falls back to opening the package tab when downl
   assert.equal(response.ok, true);
   assert.equal(response.downloadStarted, false);
   assert.equal(response.downloadTabOpened, true);
-  assert.equal(seed.calls.downloadsDownload.length, 2);
+  assert.equal(seed.calls.downloadsDownload.length, 1);
   assert.equal(seed.calls.tabsCreate.length, 2);
   assert.match(String(seed.calls.tabsCreate[0]?.url || ""), new RegExp(`/${latestSha}/underpar_distro\\.zip\\?cacheBust=\\d+$`));
   assert.equal(String(seed.calls.tabsCreate[1]?.url || ""), "chrome://extensions");
@@ -752,4 +822,35 @@ test("UnderPAR avatar menu exposes a Get Latest action wired to the background f
   assert.match(sidepanelHtml, /id="get-latest-btn"/);
   assert.match(popupSource, /UNDERPAR_GET_LATEST_REQUEST_TYPE/);
   assert.match(popupSource, /Starting latest UnderPAR download and opening chrome:\/\/extensions\.\.\./);
+});
+
+test("triggerGetLatestWorkflow surfaces the background infoMessage instead of masking it with a generic success status", async () => {
+  const statuses = [];
+  const runtimeMessages = [];
+  const { triggerGetLatestWorkflow } = loadGetLatestPopupTrigger({
+    setStatus(message, type) {
+      statuses.push({ message: String(message || ""), type: String(type || "") });
+    },
+    async sendRuntimeMessageSafe(message = null) {
+      runtimeMessages.push(message);
+      return {
+        downloadStarted: true,
+        extensionsOpened: true,
+        infoMessage: "GitHub package download failed. Downloaded bundled UnderPAR package v1.18.83 from the current runtime instead.",
+        latestVersion: "1.18.86",
+        latestCommitSha: "82e2c72b037c85d2082154f9965e2de836442db4",
+        updateAvailable: true,
+      };
+    },
+  });
+
+  await triggerGetLatestWorkflow();
+
+  assert.equal(String(runtimeMessages[0]?.type || ""), "underpar:getLatest");
+  assert.equal(statuses.length >= 2, true);
+  assert.equal(
+    statuses[statuses.length - 1]?.message,
+    "GitHub package download failed. Downloaded bundled UnderPAR package v1.18.83 from the current runtime instead."
+  );
+  assert.equal(statuses[statuses.length - 1]?.type, "info");
 });

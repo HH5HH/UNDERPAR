@@ -72016,18 +72016,34 @@ async function triggerGetLatestWorkflow() {
     }
     const downloadLabel = String(response?.downloadFileName || "").trim() || "latest UnderPAR package";
     if (response?.downloadStarted === true && response?.extensionsOpened === true) {
+      if (response?.infoMessage) {
+        setStatus(String(response.infoMessage || "").trim(), "info");
+        return;
+      }
       setStatus(`Started ${downloadLabel} download and opened chrome://extensions.`, "success");
       return;
     }
     if (response?.downloadStarted === true) {
+      if (response?.infoMessage) {
+        setStatus(String(response.infoMessage || "").trim(), "info");
+        return;
+      }
       setStatus(`Started ${downloadLabel} download. Open chrome://extensions to finish the update.`, "info");
       return;
     }
     if (response?.downloadTabOpened === true && response?.extensionsOpened === true) {
+      if (response?.infoMessage) {
+        setStatus(String(response.infoMessage || "").trim(), "info");
+        return;
+      }
       setStatus("Opened latest UnderPAR package tab and chrome://extensions.", "success");
       return;
     }
     if (response?.downloadTabOpened === true) {
+      if (response?.infoMessage) {
+        setStatus(String(response.infoMessage || "").trim(), "info");
+        return;
+      }
       setStatus("Opened latest UnderPAR package tab. Open chrome://extensions to finish the update.", "info");
       return;
     }
