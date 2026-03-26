@@ -998,7 +998,8 @@ body.workspace-locked .workspace-cards {
   text-overflow: clip;
   vertical-align: top;
   max-width: min(56ch, 42vw);
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.45;
@@ -1036,8 +1037,8 @@ body.workspace-locked .workspace-cards {
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .cm-json-structure,
@@ -1058,10 +1059,11 @@ body.workspace-locked .workspace-cards {
   display: grid;
   gap: 8px;
   padding: 9px 10px;
+  container-type: inline-size;
 }
 
 .cm-json-row--inline {
-  grid-template-columns: minmax(132px, 176px) minmax(0, 1fr);
+  grid-template-columns: minmax(120px, 168px) minmax(14rem, 1fr);
   align-items: start;
 }
 
@@ -1127,6 +1129,14 @@ body.workspace-locked .workspace-cards {
   min-width: 0;
   border-radius: 12px;
   white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+@container (max-width: 380px) {
+  .cm-json-row--inline {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .cm-json-scalar--boolean,

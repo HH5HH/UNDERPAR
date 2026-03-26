@@ -391,7 +391,8 @@
   display: block;
   margin-top: 8px;
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: normal;
   font: 11px/1.55 ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
   color: rgba(241, 246, 250, 0.9);
 }
@@ -425,10 +426,13 @@
 
 .regapp-jwt-summary-value {
   margin-top: 8px;
+  min-width: 0;
+  white-space: normal;
   font-size: 12px;
   line-height: 1.5;
   color: rgba(241, 246, 250, 0.92);
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .regapp-jwt-object-stack {
@@ -442,6 +446,7 @@
   border-radius: 14px;
   padding: 12px;
   background: rgba(13, 17, 22, 0.72);
+  container-type: inline-size;
 }
 
 .regapp-jwt-object-title {
@@ -455,7 +460,7 @@
 
 .regapp-jwt-object-list {
   display: grid;
-  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(120px, 176px) minmax(14rem, 1fr);
   gap: 8px 12px;
   margin: 0;
 }
@@ -470,10 +475,13 @@
 
 .regapp-jwt-object-list dd {
   margin: 0;
+  min-width: 0;
+  white-space: normal;
   font-size: 12px;
   line-height: 1.55;
   color: rgba(240, 245, 249, 0.92);
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .regapp-jwt-object-list + .regapp-jwt-object-stack {
@@ -617,5 +625,11 @@
     width: 100%;
     justify-content: flex-start;
     align-items: flex-start;
+  }
+}
+
+@container (max-width: 380px) {
+  .regapp-jwt-object-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

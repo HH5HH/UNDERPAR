@@ -452,7 +452,8 @@ body:has([aria-busy="true"]) * {
   font-size: 11px;
   line-height: 1.45;
   color: var(--legacy-muted);
-  word-break: break-all;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .degradation-cheat-call-url {
@@ -801,8 +802,8 @@ body:has([aria-busy="true"]) * {
 .degradation-report-table td {
   color: var(--legacy-text);
   max-width: 480px;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
   white-space: normal;
 }
 
