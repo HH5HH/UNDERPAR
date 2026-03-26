@@ -1893,6 +1893,9 @@ test("REST V2 learning activation unlocks login-derived operations after UnderPA
     sessionCode: "session-code-123",
     resourceIds: ["urn:adobe:test-resource"],
     partner: "Roku",
+    samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+    samlSource: "REST V2 test form",
+    samlTrustedForPartnerSso: true,
     flowId: "flow-123",
     appInfo: { guid: "rest-guid" },
   };
@@ -1955,6 +1958,9 @@ test("REST V2 learning activation clears stale plan-missing partner SSO fields w
       serviceProviderId: "turner",
       requestorId: "turner",
       partner: "Apple",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      samlSource: "REST V2 test form",
+      samlTrustedForPartnerSso: true,
       flowId: "flow-123",
       appInfo: { guid: "rest-guid" },
     },
@@ -2061,6 +2067,7 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
     visitorIdentifier: "20265673158980419722735089753036633573",
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "tab-network:body",
+    samlTrustedForPartnerSso: true,
     redirectUrl: "https://experience.example.test/callback",
     domainName: "experience.example.test",
     flowId: "flow-123",
@@ -2139,6 +2146,7 @@ test("REST V2 learning context reuses selection-scoped partner SSO seed when aut
       visitorIdentifier: "20265673158980419722735089753036633573",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
+      samlTrustedForPartnerSso: true,
       redirectUrl: "https://experience.example.test/callback",
       domainName: "experience.example.test",
       flowId: "flow-123",
@@ -2221,6 +2229,8 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     visitorIdentifier,
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "tab-network:body",
+    samlTrustedForPartnerSso: true,
+    samlTrustedForPartnerSso: true,
   };
 
   const configurationPlan = buildRestV2InteractiveDocsHydrationPlan(
@@ -2608,6 +2618,7 @@ test("REST V2 learning keeps partner APIs locked when the partner framework payl
       partnerFrameworkStatus: "framework-status-token",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
+      samlTrustedForPartnerSso: true,
     },
     "test-token"
   );
@@ -2620,7 +2631,7 @@ test("REST V2 learning keeps partner APIs locked when the partner framework payl
   }
 });
 
-test("REST V2 learning activates partner APIs from the inferred partner SSO seed when strict capture is absent", () => {
+test("REST V2 learning keeps partner APIs locked when only inferred partner framework context is available", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const validLearningFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -2670,17 +2681,18 @@ test("REST V2 learning activates partner APIs from the inferred partner SSO seed
       learningPartnerSource: "recorded r-apt cookie",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
+      samlTrustedForPartnerSso: true,
     },
     "test-token"
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
-  assert.match(plan.notes.join(" "), /inferred partner Apple/i);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.match(plan.notes.join(" "), /requires the exact AP-Partner-Framework-Status payload/i);
 });
 
-test("REST V2 learning prefers the Apple-specific inferred framework status over a generic captured Comcast framework status", () => {
+test("REST V2 learning does not replace a generic captured Comcast framework status with inferred Apple partner payloads", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -2745,17 +2757,18 @@ test("REST V2 learning prefers the Apple-specific inferred framework status over
       learningPartnerSource: "recorded r-apt cookie",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
+      samlTrustedForPartnerSso: true,
     },
     "test-token"
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
-  assert.match(plan.notes.join(" "), /inferred AP-Partner-Framework-Status/i);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.match(plan.notes.join(" "), /requires the exact AP-Partner-Framework-Status payload/i);
 });
 
-test("REST V2 learning prefers partner platform mappings over a stale generic Comcast mapping on the current MVPD context", () => {
+test("REST V2 learning keeps partner APIs locked when partner mappings resolve beyond a stale generic Comcast framework status", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -2823,13 +2836,15 @@ test("REST V2 learning prefers partner platform mappings over a stale generic Co
       learningPartnerSource: "recorded r-apt cookie",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
+      samlTrustedForPartnerSso: true,
     },
     "test-token"
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.match(plan.notes.join(" "), /requires the exact AP-Partner-Framework-Status payload/i);
 });
 
 test("REST V2 learning keeps Create Partner Profile blocked when partner mappings expose a more specific Comcast Apple provider than the captured header", () => {
@@ -2885,6 +2900,7 @@ test("REST V2 learning keeps Create Partner Profile blocked when partner mapping
       learningPartnerSource: "recorded r-apt cookie",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
+      samlTrustedForPartnerSso: true,
     },
     "test-token"
   );
@@ -3005,6 +3021,7 @@ test("REST V2 learning keeps Create Partner Profile blocked when the inferred pr
       learningPartnerSource: "recorded r-apt cookie",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
+      samlTrustedForPartnerSso: true,
     },
     "test-token"
   );

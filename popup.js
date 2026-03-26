@@ -16847,7 +16847,9 @@ function applyRestV2PartnerSsoPanelCurrentSaml(section, programmer = null, appIn
     setRestV2PartnerSsoPanelStatus(section, String(panelContext?.reason || "Partner SSO context is not ready."), "error");
     return;
   }
-  const currentSamlResponse = String(panelContext.baseContext?.samlResponse || "").trim();
+  const currentSamlResponse = isRestV2TrustedPartnerSsoSamlContext(panelContext.baseContext)
+    ? String(panelContext.baseContext?.samlResponse || "").trim()
+    : "";
   if (!currentSamlResponse) {
     setRestV2PartnerSsoPanelStatus(section, "Complete a partner SSO flow first so UnderPAR can reuse the current SAMLResponse.", "error");
     return;
@@ -16919,7 +16921,9 @@ function syncRestV2PartnerSsoPanel(section, programmer = null, appInfo = null) {
     requiredPartner: panelContext.requiredPartner,
   });
   const displayedPartnerJson = manualValidation.rawInputPresent === true ? String(override?.partnerFrameworkStatusJson || "").trim() : currentPartnerFrameworkJson;
-  const displayedSamlResponse = String(override?.samlResponse || "").trim() || String(panelContext.baseContext?.samlResponse || "").trim();
+  const displayedSamlResponse =
+    String(override?.samlResponse || "").trim() ||
+    (isRestV2TrustedPartnerSsoSamlContext(panelContext.baseContext) ? String(panelContext.baseContext?.samlResponse || "").trim() : "");
   if (document.activeElement !== partnerJsonInput) {
     partnerJsonInput.value = displayedPartnerJson;
   }
@@ -16967,7 +16971,7 @@ function syncRestV2PartnerSsoPanel(section, programmer = null, appInfo = null) {
     copyCurrentJsonButton.disabled = !currentPartnerFrameworkJson;
   }
   if (useCurrentSamlButton) {
-    useCurrentSamlButton.disabled = !String(panelContext.baseContext?.samlResponse || "").trim();
+    useCurrentSamlButton.disabled = !isRestV2TrustedPartnerSsoSamlContext(panelContext.baseContext);
   }
   if (clearOverrideButton) {
     clearOverrideButton.disabled = !(manualValidation.rawInputPresent === true || String(override?.samlResponse || "").trim());
@@ -16989,13 +16993,7 @@ function syncRestV2PartnerSsoPanel(section, programmer = null, appInfo = null) {
     return;
   }
   if (currentPartnerFrameworkJson) {
-    const sourceLabel =
-      currentPartnerFrameworkStatus &&
-      currentPartnerFrameworkStatus === String(resolveRestV2LearningPartnerFrameworkStatusFromContext(panelContext.baseContext) || "").trim() &&
-      currentPartnerFrameworkStatus !== String(resolveRestV2PartnerFrameworkStatusFromContext(panelContext.baseContext) || "").trim()
-        ? String(panelContext.baseContext?.learningPartnerSource || "recorded partner auth flow").trim()
-        : "captured partner flow";
-    const messageBits = [`Current Partner Framework Status is ready from ${sourceLabel}.`];
+    const messageBits = [`Current Partner Framework Status is ready from captured partner flow.`];
     if (currentPartnerSummary.providerId) {
       messageBits.push(`Provider ${currentPartnerSummary.providerId}`);
     }
@@ -17003,6 +17001,13 @@ function syncRestV2PartnerSsoPanel(section, programmer = null, appInfo = null) {
       messageBits.push(`MVPD ${currentMvpdLabel}`);
     }
     setRestV2PartnerSsoPanelStatus(section, messageBits.join(" "), "success");
+    return;
+  }
+  if (panelContext.requiredPartner) {
+    setRestV2PartnerSsoPanelStatus(
+      section,
+      `UnderPAR inferred partner ${panelContext.requiredPartner} from ${String(panelContext.baseContext?.learningPartnerSource || "the recorded auth flow").trim()}, but Partner SSO APIs still need exact Partner Framework Status JSON and matching SAMLResponse from a real partner flow or the REST V2 test form.`
+    );
     return;
   }
   setRestV2PartnerSsoPanelStatus(
@@ -17317,6 +17322,7 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     ),
     samlResponse: firstNonEmptyString(sourceList.map((source) => String(source?.samlResponse || "").trim())),
     samlSource: firstNonEmptyString(sourceList.map((source) => String(source?.samlSource || "").trim())),
+    samlTrustedForPartnerSso: sourceList.some((source) => source?.samlTrustedForPartnerSso === true),
     sessionUrl: normalizeAdobeNavigationUrl(firstNonEmptyString(sourceList.map((source) => String(source?.sessionUrl || "").trim()))),
     loginUrl: normalizeAdobeNavigationUrl(firstNonEmptyString(sourceList.map((source) => String(source?.loginUrl || "").trim()))),
     redirectUrl: normalizeAdobeNavigationUrl(
@@ -17955,6 +17961,7 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     visitorIdentifier: String(harvest.visitorIdentifier || "").trim(),
     samlResponse: String(harvest.samlResponse || "").trim(),
     samlSource: String(harvest.samlSource || "").trim(),
+    samlTrustedForPartnerSso: harvest.samlTrustedForPartnerSso === true,
     sessionUrl,
     loginUrl,
     redirectUrl: normalizeAdobeNavigationUrl(String(harvest.redirectUrl || "").trim()),
@@ -25608,6 +25615,7 @@ function hydrateRestV2ContextFromPartnerSsoOverride(context = null, options = {}
   if (normalizedSamlResponse) {
     context.samlResponse = normalizedSamlResponse;
     context.samlSource = "REST V2 test form";
+    context.samlTrustedForPartnerSso = true;
   }
   return context;
 }
@@ -26604,6 +26612,8 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     ).trim(),
     samlResponse: String(firstNonEmptyString([options?.samlResponse, context?.samlResponse]) || "").trim(),
     samlSource: String(firstNonEmptyString([options?.samlSource, context?.samlSource]) || "").trim(),
+    samlTrustedForPartnerSso:
+      options?.samlTrustedForPartnerSso === true || (options?.samlTrustedForPartnerSso == null && context?.samlTrustedForPartnerSso === true),
     sessionData:
       options?.sessionData && typeof options.sessionData === "object"
         ? cloneJsonLikeValue(options.sessionData, null)
@@ -28044,6 +28054,7 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     visitorIdentifier: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Visitor-Identifier") || "").trim(),
     samlResponse: String(context?.samlResponse || "").trim(),
     samlSource: String(context?.samlSource || "").trim(),
+    samlTrustedForPartnerSso: context?.samlTrustedForPartnerSso === true,
     sessionUrl,
     loginUrl,
     redirectUrl,
@@ -28824,25 +28835,66 @@ function extractRestV2SamlResponseFromWebRequestEvent(event = null) {
   return String(samlValues || "").trim();
 }
 
+function extractRestV2SamlResponseFromTabNetworkEvent(event = null) {
+  if (!event || typeof event !== "object") {
+    return "";
+  }
+  const previewText =
+    typeof firstNonEmptyString === "function"
+      ? firstNonEmptyString([
+          String(event?.postDataPreview || "").trim(),
+          String(event?.bodyPreview || "").trim(),
+        ])
+      : [String(event?.postDataPreview || "").trim(), String(event?.bodyPreview || "").trim()].find(Boolean) || "";
+  return extractRestV2SamlResponseFromText(
+    previewText
+  );
+}
+
 function extractRestV2SamlResponseFromDebugFlow(flow = null) {
+  const directPartnerFrameworkStatus =
+    typeof extractRestV2PartnerFrameworkStatusFromDebugFlow === "function"
+      ? extractRestV2PartnerFrameworkStatusFromDebugFlow(flow)
+      : "";
+  let fallback = null;
   const events = Array.isArray(flow?.events) ? flow.events : [];
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (!event || typeof event !== "object") {
       continue;
     }
-    if (event.source === "tab-network" && String(event.phase || "").trim() === "body") {
+    const normalizedSource = String(event.source || "").trim();
+    const normalizedPhase = String(event.phase || "").trim();
+    const requestUrl = String(
+      (typeof firstNonEmptyString === "function"
+        ? firstNonEmptyString([event?.url, event?.requestUrl])
+        : [event?.url, event?.requestUrl].find((candidate) => String(candidate || "").trim())) || ""
+    ).trim();
+    if (normalizedSource === "tab-network" && (normalizedPhase === "body" || normalizedPhase === "request")) {
       if (isRestV2InteractiveDocsUrl(String(event.url || "").trim())) {
         continue;
       }
-      const extracted = extractRestV2SamlResponseFromText(String(event.bodyPreview || "").trim());
+      const extracted =
+        typeof extractRestV2SamlResponseFromTabNetworkEvent === "function"
+          ? extractRestV2SamlResponseFromTabNetworkEvent(event)
+          : extractRestV2SamlResponseFromText(String(event?.postDataPreview || event?.bodyPreview || "").trim());
       const normalizedSaml = normalizeRestV2SamlResponseForPartnerProfile(extracted);
       if (normalizedSaml) {
-        return {
+        const result = {
           samlResponse: normalizedSaml,
-          source: "tab-network:body",
-          partner: extractRestV2PartnerNameFromSsoApiUrl(String(event.url || "").trim()),
+          source: `tab-network:${normalizedPhase || "request"}`,
+          partner: extractRestV2PartnerNameFromSsoApiUrl(requestUrl),
+          trustedForPartnerSso: Boolean(
+            extractRestV2PartnerNameFromSsoApiUrl(requestUrl) ||
+              isRestV2PartnerFrameworkStatusUsable(directPartnerFrameworkStatus)
+          ),
         };
+        if (result.trustedForPartnerSso === true) {
+          return result;
+        }
+        if (!fallback) {
+          fallback = result;
+        }
       }
     }
   }
@@ -28858,19 +28910,58 @@ function extractRestV2SamlResponseFromDebugFlow(flow = null) {
       const rawSaml = extractRestV2SamlResponseFromWebRequestEvent(event);
       const normalizedSaml = normalizeRestV2SamlResponseForPartnerProfile(rawSaml);
       if (normalizedSaml) {
-        return {
+        const result = {
           samlResponse: normalizedSaml,
           source: "web-request:onBeforeRequest",
           partner: extractRestV2PartnerNameFromSsoApiUrl(String(event.url || "").trim()),
+          trustedForPartnerSso: Boolean(
+            extractRestV2PartnerNameFromSsoApiUrl(String(event.url || "").trim()) ||
+              isRestV2PartnerFrameworkStatusUsable(directPartnerFrameworkStatus)
+          ),
         };
+        if (result.trustedForPartnerSso === true) {
+          return result;
+        }
+        if (!fallback) {
+          fallback = result;
+        }
       }
     }
   }
-  return {
-    samlResponse: "",
-    source: "",
-    partner: "",
-  };
+  return (
+    fallback || {
+      samlResponse: "",
+      source: "",
+      partner: "",
+      trustedForPartnerSso: false,
+    }
+  );
+}
+
+function isRestV2TrustedPartnerSsoSamlContext(context = null) {
+  if (!context || typeof context !== "object") {
+    return false;
+  }
+  if (!String(context?.samlResponse || "").trim()) {
+    return false;
+  }
+  if (context.samlTrustedForPartnerSso === true) {
+    return true;
+  }
+  return String(context?.samlSource || "").trim() === "REST V2 test form";
+}
+
+function isRestV2StandardAuthenticateCaptureContext(context = null) {
+  if (!context || typeof context !== "object") {
+    return false;
+  }
+  const action = String(context?.sessionAction || context?.sessionData?.actionName || "").trim().toLowerCase();
+  if (action === "authenticate") {
+    return true;
+  }
+  return [context?.loginUrl, context?.sessionUrl, context?.sessionData?.url].some((candidate) =>
+    /\/authenticate\//i.test(String(candidate || "").trim())
+  );
 }
 
 function extractRestV2PartnerFrameworkStatusFromText(value = "") {
@@ -29372,30 +29463,12 @@ function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flo
     requestorId && mvpd && typeof getRestV2MvpdMeta === "function"
       ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || flow?.context?.mvpdMeta || null)
       : context?.mvpdMeta || flow?.context?.mvpdMeta || null;
-  const expectedProviderId = String(
-    firstNonEmptyString([
-      resolveRestV2ExpectedPartnerFrameworkProviderId(context),
-      flow?.context?.mvpdPlatformMappingId,
-      flow?.context?.mvpdMeta?.platformMappingId,
-      flow?.context?.mvpdMeta?.platformMappingID,
-      cachedMvpdMeta?.platformMappingId,
-      cachedMvpdMeta?.platformMappingID,
-    ]) || ""
-  ).trim();
-  const existingLearningFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
-    String(context.learningPartnerFrameworkStatus || "").trim()
-  );
-  const existingLearningFrameworkStatusCompatible =
-    isRestV2PartnerFrameworkStatusUsable(existingLearningFrameworkStatus) &&
-    (!expectedProviderId || isRestV2PartnerFrameworkStatusCompatibleWithContext(existingLearningFrameworkStatus, context));
   const hasRealPartner = Boolean(String(resolveRestV2PartnerNameFromContext(context) || "").trim());
   const directFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
     resolveRestV2PartnerFrameworkStatusFromContext(context)
   );
   const hasRealFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(directFrameworkStatus);
-  const hasCompatibleRealFrameworkStatus =
-    hasRealFrameworkStatus && (!expectedProviderId || isRestV2PartnerFrameworkStatusCompatibleWithContext(directFrameworkStatus, context));
-  if (hasRealPartner && hasCompatibleRealFrameworkStatus) {
+  if (hasRealPartner && hasRealFrameworkStatus) {
     return context;
   }
 
@@ -29418,22 +29491,8 @@ function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flo
     context.learningPartner = inferredPartner;
   }
 
-  if (!hasCompatibleRealFrameworkStatus && !existingLearningFrameworkStatusCompatible && String(context.learningPartnerFrameworkStatus || "").trim()) {
+  if (!hasRealFrameworkStatus && String(context.learningPartnerFrameworkStatus || "").trim()) {
     context.learningPartnerFrameworkStatus = "";
-  }
-  if (!hasCompatibleRealFrameworkStatus && !existingLearningFrameworkStatusCompatible) {
-    const inferredFrameworkStatus = buildRestV2LearningPartnerFrameworkStatus(
-      context,
-      flow,
-      artifacts,
-      String(inferredPartner || "").trim()
-    );
-    if (
-      isRestV2PartnerFrameworkStatusUsable(inferredFrameworkStatus) &&
-      (!expectedProviderId || isRestV2PartnerFrameworkStatusCompatibleWithContext(inferredFrameworkStatus, context))
-    ) {
-      context.learningPartnerFrameworkStatus = inferredFrameworkStatus;
-    }
   }
 
   if (!String(context.learningPartnerSource || "").trim()) {
@@ -29520,9 +29579,10 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
         context.sessionData.partner = samlPartner;
       }
     }
-    if (samlResponse) {
+    if (samlResponse && samlDetails?.trustedForPartnerSso === true) {
       context.samlResponse = samlResponse;
       context.samlSource = String(samlDetails?.source || "").trim();
+      context.samlTrustedForPartnerSso = true;
     }
   }
 
@@ -29663,12 +29723,16 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
   }
   const samlResponse = String(samlDetails?.samlResponse || "").trim();
   result.samlSource = String(samlDetails?.source || "").trim();
-  if (samlResponse) {
+  if (samlResponse && samlDetails?.trustedForPartnerSso === true) {
     context.samlResponse = samlResponse;
     context.samlSource = result.samlSource;
+    context.samlTrustedForPartnerSso = true;
   }
-  if (!samlResponse) {
-    result.error = "SAMLResponse was not captured from response body/request body.";
+  if (!samlResponse || samlDetails?.trustedForPartnerSso !== true) {
+    result.error =
+      !samlResponse
+        ? "SAMLResponse was not captured from a trusted partner flow."
+        : "SAMLResponse was captured, but not from a trusted partner flow.";
     setRestV2PartnerSsoCreateResultForFlow(context, normalizedFlowId, result);
     return result;
   }
@@ -56176,6 +56240,7 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
     visitorIdentifier: String(recordingContext.visitorIdentifier || "").trim(),
     samlResponse: String(recordingContext.samlResponse || "").trim(),
     samlSource: String(recordingContext.samlSource || "").trim(),
+    samlTrustedForPartnerSso: recordingContext.samlTrustedForPartnerSso === true,
     sessionData:
       recordingContext?.sessionData && typeof recordingContext.sessionData === "object"
         ? cloneJsonLikeValue(recordingContext.sessionData, null)
@@ -56261,6 +56326,7 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     visitorIdentifier: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Visitor-Identifier") || "").trim(),
     samlResponse: String(context.samlResponse || "").trim(),
     samlSource: String(context.samlSource || "").trim(),
+    samlTrustedForPartnerSso: context?.samlTrustedForPartnerSso === true,
     sessionUrl,
     loginUrl,
     redirectUrl: normalizeAdobeNavigationUrl(String(context.redirectUrl || "").trim()),
@@ -64415,6 +64481,11 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     learningPartnerSource: String(learningPartnerSource || "").trim(),
     samlResponse: String(samlResponse || "").trim(),
     samlSource: String(samlSource || "").trim(),
+    samlTrustedForPartnerSso: Boolean(
+      activeRecordingContext?.samlTrustedForPartnerSso === true ||
+        harvestContext?.samlTrustedForPartnerSso === true ||
+        harvest?.samlTrustedForPartnerSso === true
+    ),
     flowId: String(flowId || "").trim(),
   };
 }
@@ -64500,9 +64571,10 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
     }
     if (!String(preparedContext.samlResponse || "").trim()) {
       const samlDetails = extractRestV2SamlResponseFromDebugFlow(flowSnapshot);
-      if (String(samlDetails?.samlResponse || "").trim()) {
+      if (String(samlDetails?.samlResponse || "").trim() && samlDetails?.trustedForPartnerSso === true) {
         preparedContext.samlResponse = String(samlDetails.samlResponse || "").trim();
         preparedContext.samlSource = String(samlDetails.source || "").trim();
+        preparedContext.samlTrustedForPartnerSso = true;
       }
     }
     hydrateRestV2ContextFromPartnerSsoOverride(preparedContext);
@@ -64542,7 +64614,29 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     resolveRestV2PartnerFrameworkStatusFromContext(resolvedContext)
   );
   const preferredPartnerFrameworkStatus = resolveRestV2PreferredPartnerFrameworkStatusForContext(resolvedContext);
-  const learningPartnerFrameworkStatus = resolveRestV2LearningPartnerFrameworkStatusFromContext(resolvedContext);
+  const hasTrustedPartnerSsoSaml =
+    typeof isRestV2TrustedPartnerSsoSamlContext === "function"
+      ? isRestV2TrustedPartnerSsoSamlContext(resolvedContext)
+      : Boolean(
+          String(resolvedContext?.samlResponse || "").trim() &&
+            (resolvedContext?.samlTrustedForPartnerSso === true ||
+              String(resolvedContext?.samlSource || "").trim() === "REST V2 test form")
+        );
+  const hasInferredPartnerHints = Boolean(
+    learningPartner ||
+      String(resolvedContext?.learningPartnerFrameworkStatus || "").trim() ||
+      String(resolvedContext?.learningPartnerSource || "").trim()
+  );
+  const standardAuthenticateCapture =
+    typeof isRestV2StandardAuthenticateCaptureContext === "function"
+      ? isRestV2StandardAuthenticateCaptureContext(resolvedContext)
+      : Boolean(
+          String(resolvedContext?.sessionAction || resolvedContext?.sessionData?.actionName || "").trim().toLowerCase() ===
+            "authenticate" ||
+            [resolvedContext?.loginUrl, resolvedContext?.sessionUrl, resolvedContext?.sessionData?.url].some((candidate) =>
+              /\/authenticate\//i.test(String(candidate || "").trim())
+            )
+        );
   if (resolvedContext.requestorAutoResolved === true && String(resolvedContext.requestorId || "").trim()) {
     notes.push(`Using the only REST V2 RequestorId mapped in UnderPAR: ${String(resolvedContext.requestorId || "").trim()}.`);
   }
@@ -64656,29 +64750,19 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     }
   }
   if (resolvedEntry.usesBodySamlResponse === true) {
-    if (String(resolvedContext.samlResponse || "").trim()) {
+    if (hasTrustedPartnerSsoSaml) {
       fieldValues["body.SAMLResponse"] = String(resolvedContext.samlResponse || "").trim();
     }
     if (resolvedEntry.requireBodySamlResponse === true) {
       requiredFields.push("body.SAMLResponse");
     }
-    if (String(resolvedContext.samlSource || "").trim()) {
+    if (hasTrustedPartnerSsoSaml && String(resolvedContext.samlSource || "").trim()) {
       notes.push(`Using SAMLResponse captured from ${String(resolvedContext.samlSource || "").trim()}.`);
     }
   }
   if (resolvedEntry.usesPartnerPath === true && learningPartner && !directPartner) {
     notes.push(
       `Using inferred partner ${learningPartner} from ${String(resolvedContext.learningPartnerSource || "the recorded partner auth flow").trim()}.`
-    );
-  }
-  if (
-    resolvedEntry.usesPartnerFrameworkStatus === true &&
-    learningPartnerFrameworkStatus &&
-    usablePartnerFrameworkStatus === learningPartnerFrameworkStatus &&
-    learningPartnerFrameworkStatus !== directPartnerFrameworkStatus
-  ) {
-    notes.push(
-      `Using inferred AP-Partner-Framework-Status from ${String(resolvedContext.learningPartnerSource || "the recorded partner auth flow").trim()}.`
     );
   }
 
@@ -64717,6 +64801,10 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (missingRequiredFields.includes("header.AP-Partner-Framework-Status")) {
     if (partnerFrameworkStatusValidation?.rawInputPresent === true && partnerFrameworkStatusValidation.ok !== true) {
       notes.push(String(partnerFrameworkStatusValidation.error || "").trim() || "Partner framework status validation failed.");
+    } else if (hasInferredPartnerHints) {
+      notes.push(
+        `UnderPAR inferred partner SSO context from ${String(resolvedContext.learningPartnerSource || "the recorded auth flow").trim()}, but this API requires the exact AP-Partner-Framework-Status payload from a real partner flow or the REST V2 test form.`
+      );
     } else {
       notes.push(
         resolvedContext?.flowId
@@ -64732,7 +64820,11 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     notes.push("UnderPAR could not resolve this operation's docs redirectUrl.");
   }
   if (missingRequiredFields.includes("body.SAMLResponse")) {
-    notes.push("Complete a Partner SSO login first so UnderPAR can capture SAMLResponse for this selection.");
+    notes.push(
+      standardAuthenticateCapture && resolvedEntry.usesPartnerPath === true
+        ? "Standard LOGIN captures the regular /authenticate flow, not the partner SSO SAMLResponse required here. Paste the matching Partner SSO SAMLResponse into the REST V2 test form."
+        : "Complete a Partner SSO login first so UnderPAR can capture SAMLResponse for this selection."
+    );
   }
 
   return {
@@ -64781,7 +64873,13 @@ function summarizeRestV2InteractiveDocsActivationLockReason(pendingFields = [], 
     messages.push(partnerStatusNote || "UnderPAR has not captured a valid AP-Partner-Framework-Status payload for this selection yet.");
   }
   if (hasPendingField("body.SAMLResponse")) {
-    messages.push("Complete Partner SSO login first to capture SAMLResponse.");
+    const samlNote =
+      Array.isArray(plan?.notes) && plan.notes.length > 0
+        ? String(
+            plan.notes.find((note) => /samlresponse|partner sso|\/authenticate\//i.test(String(note || ""))) || ""
+          ).trim()
+        : "";
+    messages.push(samlNote || "Complete Partner SSO login first to capture SAMLResponse.");
   }
   if (messages.length === 0 && Array.isArray(plan?.notes)) {
     const fallbackNote = String(plan.notes.find((note) => String(note || "").trim()) || "").trim();
@@ -64905,8 +65003,13 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
     "body.SAMLResponse",
     resolvedEntry.usesBodySamlResponse !== true ||
       hasPlannedValue("body.SAMLResponse") ||
-      hasContextValue(context.samlResponse) ||
-      hasContextValue(context.flowId)
+      (typeof isRestV2TrustedPartnerSsoSamlContext === "function"
+        ? isRestV2TrustedPartnerSsoSamlContext(context)
+        : Boolean(
+            String(context?.samlResponse || "").trim() &&
+              (context?.samlTrustedForPartnerSso === true ||
+                String(context?.samlSource || "").trim() === "REST V2 test form")
+          ))
   );
   const pendingFields = [...pendingFieldSet];
 
@@ -88239,10 +88342,6 @@ function resolveRestV2PreferredPartnerFrameworkStatusForContext(context = null) 
   );
   if (isRestV2PartnerFrameworkStatusCompatibleWithContext(directValue, context)) {
     return directValue;
-  }
-  const learningValue = resolveRestV2LearningPartnerFrameworkStatusFromContext(context);
-  if (isRestV2PartnerFrameworkStatusCompatibleWithContext(learningValue, context)) {
-    return learningValue;
   }
   return "";
 }
