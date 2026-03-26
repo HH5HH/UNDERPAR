@@ -66386,11 +66386,11 @@ async function handleHrContextHealthAction(action = "", programmer = null) {
 
 function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services = null, options = {}) {
   const context = getHrContextSummary(programmer);
-  const contextItemHtml = buildMetadataItemHtml("Context", context.compositeLabel);
   if (sectionKey === "health") {
-    return `${contextItemHtml}${buildHrContextHealthStatusItemHtml(programmer)}`;
+    return buildHrContextHealthStatusItemHtml(programmer);
   }
 
+  const contextItemHtml = buildMetadataItemHtml("Context", context.compositeLabel);
   const detectedServiceEntries = getDetectedPremiumServiceEntries(services);
   const detectedServiceLabels = detectedServiceEntries.map((entry) => String(entry?.label || "").trim()).filter(Boolean);
   const detectedServiceSummary = detectedServiceLabels.join(", ");
