@@ -25750,6 +25750,26 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
   return mergedMeta;
 }
 
+function upsertRequestorScopedMvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const normalizedMvpdId = String(mvpdId || "").trim();
+  const providedMeta = mvpdMeta && typeof mvpdMeta === "object" ? mvpdMeta : null;
+  if (!normalizedRequestorId || !normalizedMvpdId || !providedMeta) {
+    return providedMeta ? getRestV2MvpdMeta(normalizedRequestorId, normalizedMvpdId, providedMeta) : null;
+  }
+
+  const mergedMeta = getRestV2MvpdMeta(normalizedRequestorId, normalizedMvpdId, providedMeta);
+  if (!mergedMeta) {
+    return null;
+  }
+
+  const existingCache = getRequestorScopedMvpdCache(normalizedRequestorId);
+  const nextCache = existingCache instanceof Map ? new Map(existingCache) : new Map();
+  nextCache.set(normalizedMvpdId, mergedMeta);
+  setRequestorScopedMvpdCache(normalizedRequestorId, nextCache);
+  return mergedMeta;
+}
+
 function getRestV2MvpdPickerLabel(requestorId = "", mvpdId = "", mvpdMeta = null) {
   const normalizedMvpdId = String(mvpdId || "").trim();
   if (!normalizedMvpdId) {
@@ -29066,12 +29086,14 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
       context.mvpdPlatformMappingId = resolvedProviderId;
     }
     if (currentMvpdMeta && typeof currentMvpdMeta === "object") {
-      context.mvpdMeta = {
+      const nextMvpdMeta = {
         ...currentMvpdMeta,
         ...(String(currentMvpdMeta?.platformMappingId || currentMvpdMeta?.platformMappingID || "").trim()
           ? {}
           : { platformMappingId: resolvedProviderId }),
       };
+      context.mvpdMeta =
+        requestorId && mvpd ? upsertRequestorScopedMvpdMeta(requestorId, mvpd, nextMvpdMeta) || nextMvpdMeta : nextMvpdMeta;
     }
   }
 
@@ -86919,14 +86941,31 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
         )?.[1] || ""
       ).trim()
     : "";
+  const genericMvpdId = String(
+    firstNonEmptyString([context?.mvpd, context?.selectedMvpd, context?.mvpdMeta?.id, cachedMvpdMeta?.id]) || ""
+  )
+    .trim()
+    .toLowerCase();
+  const fallbackProviderCandidates = [
+    context?.mvpdPlatformMappingId,
+    context?.mvpdMeta?.platformMappingId,
+    context?.mvpdMeta?.platformMappingID,
+    cachedMvpdMeta?.platformMappingId,
+    cachedMvpdMeta?.platformMappingID,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  if (resolvedPartnerName) {
+    const explicitPartnerProviderId = String(
+      fallbackProviderCandidates.find(
+        (candidate) => !genericMvpdId || String(candidate || "").trim().toLowerCase() !== genericMvpdId
+      ) || ""
+    ).trim();
+    return String(firstNonEmptyString([mappedPartnerProviderId, explicitPartnerProviderId]) || "").trim();
+  }
   return String(
     firstNonEmptyString([
-      mappedPartnerProviderId,
-      context?.mvpdPlatformMappingId,
-      context?.mvpdMeta?.platformMappingId,
-      context?.mvpdMeta?.platformMappingID,
-      cachedMvpdMeta?.platformMappingId,
-      cachedMvpdMeta?.platformMappingID,
+      ...fallbackProviderCandidates,
     ]) || ""
   ).trim();
 }
@@ -86939,13 +86978,27 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
   const expectedProviderId = String(resolveRestV2ExpectedPartnerFrameworkProviderId(context) || "")
     .trim()
     .toLowerCase();
-  if (!expectedProviderId) {
-    return true;
-  }
   const actualProviderId = String(resolveRestV2PartnerFrameworkStatusProviderId(normalizedValue) || "")
     .trim()
     .toLowerCase();
-  return Boolean(actualProviderId) && actualProviderId === expectedProviderId;
+  if (!actualProviderId) {
+    return false;
+  }
+  if (expectedProviderId) {
+    return actualProviderId === expectedProviderId;
+  }
+  const resolvedPartnerName = String(resolveRestV2LearningPartnerNameFromContext(context) || "")
+    .trim()
+    .toLowerCase();
+  if (resolvedPartnerName) {
+    const genericMvpdId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd, context?.mvpdMeta?.id]) || "")
+      .trim()
+      .toLowerCase();
+    if (genericMvpdId && actualProviderId === genericMvpdId) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function resolveRestV2PartnerPlatformMappingDetailsFromSnapshot(snapshot = null, partnerCandidates = []) {
@@ -87047,6 +87100,15 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     currentMvpdMeta?.partnerPlatformMappings && typeof currentMvpdMeta.partnerPlatformMappings === "object"
       ? { ...currentMvpdMeta.partnerPlatformMappings }
       : {};
+  const persistMvpdMeta = (nextMvpdMeta = null) => {
+    if (!nextMvpdMeta || typeof nextMvpdMeta !== "object") {
+      return nextMvpdMeta;
+    }
+    if (!requestorId || !mvpd) {
+      return nextMvpdMeta;
+    }
+    return upsertRequestorScopedMvpdMeta(requestorId, mvpd, nextMvpdMeta) || nextMvpdMeta;
+  };
   const mappedPartnerProviderId = String(
     partnerCandidates
       .map((partnerName) =>
@@ -87063,14 +87125,14 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   if (partnerCandidates.length === 0) {
     if (realFrameworkProviderId) {
       context.mvpdPlatformMappingId = realFrameworkProviderId;
-      context.mvpdMeta = {
+      context.mvpdMeta = persistMvpdMeta({
         ...currentMvpdMeta,
         ...(Object.keys(existingPartnerPlatformMappings).length > 0 ? { partnerPlatformMappings: existingPartnerPlatformMappings } : {}),
         platformMappingId: realFrameworkProviderId,
-      };
+      });
     }
     if (!context?.mvpdMeta && currentMvpdMeta) {
-      context.mvpdMeta = currentMvpdMeta;
+      context.mvpdMeta = persistMvpdMeta(currentMvpdMeta);
     }
     return context;
   }
@@ -87104,15 +87166,15 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     ).trim();
     if (fallbackMappingId) {
       context.mvpdPlatformMappingId = fallbackMappingId;
-      context.mvpdMeta = {
+      context.mvpdMeta = persistMvpdMeta({
         ...currentMvpdMeta,
         ...(Object.keys(existingPartnerPlatformMappings).length > 0 ? { partnerPlatformMappings: existingPartnerPlatformMappings } : {}),
         platformMappingId: fallbackMappingId,
-      };
+      });
       return context;
     }
     if (!context?.mvpdMeta && currentMvpdMeta) {
-      context.mvpdMeta = currentMvpdMeta;
+      context.mvpdMeta = persistMvpdMeta(currentMvpdMeta);
     }
     return context;
   }
@@ -87132,11 +87194,11 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
       currentMappingId,
     ]) || ""
   ).trim();
-  context.mvpdMeta = {
+  context.mvpdMeta = persistMvpdMeta({
     ...currentMvpdMeta,
     ...(Object.keys(mergedPartnerPlatformMappings).length > 0 ? { partnerPlatformMappings: mergedPartnerPlatformMappings } : {}),
     ...(resolvedMappingId ? { platformMappingId: resolvedMappingId } : {}),
-  };
+  });
   if (resolvedDetails?.resolvedMappingId) {
     context.mvpdPlatformMappingId = String(resolvedDetails.resolvedMappingId || "").trim();
   } else if (!String(context?.mvpdPlatformMappingId || "").trim() && currentMappingId) {
@@ -87389,7 +87451,7 @@ function resolveRestV2LearningPartnerFrameworkStatusFromContext(context = null) 
   if (isRestV2PartnerFrameworkStatusCompatibleWithContext(inferredValue, context)) {
     return inferredValue;
   }
-  return !String(resolveRestV2ExpectedPartnerFrameworkProviderId(context) || "").trim() ? inferredValue : "";
+  return "";
 }
 
 function resolveRestV2PreferredPartnerFrameworkStatusForContext(context = null) {
@@ -87405,9 +87467,6 @@ function resolveRestV2PreferredPartnerFrameworkStatusForContext(context = null) 
   const learningValue = resolveRestV2LearningPartnerFrameworkStatusFromContext(context);
   if (isRestV2PartnerFrameworkStatusCompatibleWithContext(learningValue, context)) {
     return learningValue;
-  }
-  if (!String(resolveRestV2ExpectedPartnerFrameworkProviderId(context) || "").trim()) {
-    return firstNonEmptyString([directValue, learningValue]);
   }
   return "";
 }

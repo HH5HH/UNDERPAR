@@ -174,6 +174,8 @@ function loadRestV2PartnerPlatformMappingHydrator(seed = {}) {
   const script = [
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
     "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    "function getRequestorScopedMvpdCache(requestorId = '') { return typeof globalThis.__seed.getRequestorScopedMvpdCache === 'function' ? globalThis.__seed.getRequestorScopedMvpdCache(requestorId) : null; }",
+    "function setRequestorScopedMvpdCache(requestorId = '', value = null) { return typeof globalThis.__seed.setRequestorScopedMvpdCache === 'function' ? globalThis.__seed.setRequestorScopedMvpdCache(requestorId, value) : value; }",
     "function getRestV2MvpdMeta(requestorId = '', mvpdId = '', mvpdMeta = null) { return typeof globalThis.__seed.resolveMvpdMeta === 'function' ? globalThis.__seed.resolveMvpdMeta(requestorId, mvpdId, mvpdMeta) : mvpdMeta; }",
     "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || '').trim(); }",
     "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || '').trim(); }",
@@ -189,6 +191,7 @@ function loadRestV2PartnerPlatformMappingHydrator(seed = {}) {
     extractFunctionSource(source, "inferRestV2LearningPartnerNameFromText"),
     extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
     extractFunctionSource(source, "resolveRestV2PartnerPlatformMappingDetailsFromSnapshot"),
+    extractFunctionSource(source, "upsertRequestorScopedMvpdMeta"),
     extractFunctionSource(source, "hydrateRestV2PartnerPlatformMappingFromConsoleContext"),
     "module.exports = { hydrateRestV2PartnerPlatformMappingFromConsoleContext };",
   ].join("\n\n");
@@ -1250,6 +1253,70 @@ test("REST V2 partner platform hydrator upgrades a generic captured Comcast fram
   assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
+});
+
+test("REST V2 partner platform hydrator persists resolved Apple partner mappings into the requestor-scoped MVPD cache", async () => {
+  const requestorCache = new Map([
+    [
+      "Comcast_SSO",
+      {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "Comcast_SSO",
+      },
+    ],
+  ]);
+  const { hydrateRestV2PartnerPlatformMappingFromConsoleContext } = loadRestV2PartnerPlatformMappingHydrator({
+    getRequestorScopedMvpdCache(requestorId) {
+      return requestorId === "MML" ? requestorCache : null;
+    },
+    setRequestorScopedMvpdCache(requestorId, value) {
+      if (requestorId === "MML" && value && typeof value.get === "function" && typeof value.forEach === "function") {
+        requestorCache.clear();
+        value.forEach((entryValue, entryKey) => {
+          requestorCache.set(entryKey, entryValue);
+        });
+      }
+      return value;
+    },
+    resolveMvpdMeta(_requestorId, mvpdId, mvpdMeta) {
+      return mvpdMeta || requestorCache.get(mvpdId) || null;
+    },
+    loadSnapshot() {
+      return {
+        partnerSsoPlatforms: [
+          {
+            partner: "Apple",
+            mappingId: "Comcast_SSO_Apple",
+            integrationEnabled: true,
+            boardingStatus: "PICKER",
+          },
+        ],
+      };
+    },
+  });
+
+  const context = {
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "MML",
+    serviceProviderId: "MML",
+    mvpd: "Comcast_SSO",
+    learningPartner: "Apple",
+    mvpdMeta: {
+      id: "Comcast_SSO",
+      name: "Xfinity",
+      platformMappingId: "Comcast_SSO",
+    },
+  };
+
+  await hydrateRestV2PartnerPlatformMappingFromConsoleContext(context, {
+    forceRefresh: false,
+  });
+
+  const cached = requestorCache.get("Comcast_SSO");
+  assert.equal(cached.platformMappingId, "Comcast_SSO_Apple");
+  assert.equal(cached.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
 });
 
 test("REST V2 learning framework status builder prefers cached partner platform mappings over a generic Comcast provider id", () => {
@@ -2816,6 +2883,67 @@ test("REST V2 learning keeps Create Partner Profile blocked when partner mapping
       learningPartnerSource: "recorded r-apt cookie",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
+    },
+    "test-token"
+  );
+
+  assert.equal(plan.fieldValues["path.partner"], "Apple");
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+});
+
+test("REST V2 learning keeps partner SSO docs locked when only a generic MVPD provider id is available for a partner flow", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const genericFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+
+  const plan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-verification-token",
+      operationId: "retrieveVerificationTokenUsingPOST",
+      operationAnchor: "operation/retrieveVerificationTokenUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
+      usesBodyDomainName: true,
+      requireBodyDomainName: true,
+      usesBodyRedirectUrl: true,
+      requireBodyRedirectUrl: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    {
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      requestorAutoResolved: false,
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "Comcast_SSO",
+      },
+      partner: "",
+      partnerFrameworkStatus: genericFrameworkStatus,
+      learningPartner: "Apple",
+      learningPartnerFrameworkStatus: "",
+      learningPartnerSource: "recorded r-apt cookie",
+      domainName: "experience.example.test",
+      redirectUrl: "https://experience.example.test/callback",
     },
     "test-token"
   );
