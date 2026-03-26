@@ -196,6 +196,7 @@ function loadWorkspaceControllerFunctions(initialState = {}) {
           loading: false,
           report: null,
           premiumServiceBindings: [],
+          pendingPremiumServiceSwitch: null,
           jwtDecodeCache: new Map(),
           hydratingGuids: new Set(),
           switchingServiceKeys: new Set(),
@@ -211,6 +212,7 @@ function loadWorkspaceControllerFunctions(initialState = {}) {
     extractFunctionSource(source, "canRunCurrentContextReport"),
     extractFunctionSource(source, "getReportSelectionKey"),
     extractFunctionSource(source, "getExpandedGuidStore"),
+    "function getPendingPremiumServiceSwitch() { return null; }",
     extractFunctionSource(source, "applyControllerState"),
     "module.exports = { state, applyControllerState };",
   ].join("\n\n");
@@ -228,6 +230,31 @@ function loadWorkspaceControllerFunctions(initialState = {}) {
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return { ...context.module.exports, calls };
+}
+
+function loadWorkspaceSummaryRenderFunctions() {
+  const filePath = path.join(ROOT, "registered-application-health-workspace.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    extractFunctionSource(source, "escapeHtml"),
+    extractFunctionSource(source, "firstNonEmptyString"),
+    extractFunctionSource(source, "uniqueStringArray"),
+    extractFunctionSource(source, "normalizeServicePillToneKey"),
+    extractFunctionSource(source, "buildServicePillMarkup"),
+    extractFunctionSource(source, "renderServicePillList"),
+    extractFunctionSource(source, "buildRequestorSummary"),
+    extractFunctionSource(source, "renderApplicationSummaryFacts"),
+    "module.exports = { normalizeServicePillToneKey, renderApplicationSummaryFacts };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Set,
+    String,
+    Array,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
 }
 
 function encodeJwtSegment(value) {
@@ -784,12 +811,34 @@ test("registered application workspace filter honors raw @ServiceProvider reques
   );
 });
 
+test("registered application workspace renders scope coverage as colored service pills", () => {
+  const { normalizeServicePillToneKey, renderApplicationSummaryFacts } = loadWorkspaceSummaryRenderFunctions();
+
+  assert.equal(normalizeServicePillToneKey("DEFAULT"), "service-default");
+  assert.equal(normalizeServicePillToneKey("REST API V2"), "service-rest-v2");
+  assert.equal(normalizeServicePillToneKey("ESM"), "service-esm");
+
+  const markup = renderApplicationSummaryFacts({
+    clientId: "client-123",
+    type: "browser",
+    requestorHint: "@ServiceProvider:truTV",
+    scopeLabels: ["DEFAULT", "REST API V2", "ESM"],
+  });
+
+  assert.match(markup, /regapp-service-pill--service-default/);
+  assert.match(markup, /regapp-service-pill--service-rest-v2/);
+  assert.match(markup, /regapp-service-pill--service-esm/);
+  assert.doesNotMatch(markup, /Scope Coverage/);
+  assert.doesNotMatch(markup, /DEFAULT,\s*REST API V2/);
+});
+
 test("registered application health sources wire the HEALTH action and workspace assets", () => {
   const popupSource = read("popup.js");
   const backgroundSource = read("background.js");
   const manifestSource = read("manifest.json");
   const workspaceHtml = read("registered-application-health-workspace.html");
   const workspaceJs = read("registered-application-health-workspace.js");
+  const workspaceCss = read("registered-application-health-workspace.css");
   const sharedJwtSource = read("underpar-jwt-inspector.js");
 
   assert.match(
@@ -807,16 +856,21 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(workspaceHtml, /id="workspace-cards"[\s\S]*regapp-jwt-utility-card/);
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
   assert.match(workspaceJs, /data-software-statement-download-guid/);
-  assert.match(workspaceJs, /data-premium-service-switch-apply/);
+  assert.match(workspaceJs, /data-pending-premium-service-switch-apply/);
   assert.match(workspaceJs, /sendWorkspaceAction\("switch-premium-service-application"/);
   assert.match(workspaceJs, /renderPremiumServiceSummary\(\);/);
   assert.match(workspaceJs, /regapp-up-indicator/);
+  assert.match(workspaceJs, /setPendingPremiumServiceSwitch/);
+  assert.match(workspaceJs, /service-default/);
   assert.match(workspaceJs, /sendWorkspaceAction\("hydrate-application"/);
   assert.match(workspaceJs, /sendWorkspaceAction\("download-application"/);
   assert.match(workspaceJs, /filterApplicationsForSelectedRequestor/);
   assert.match(workspaceJs, /expandedGuids:\s*new Set\(\)/);
   assert.match(workspaceJs, /setApplicationExpandedState\(guid,\s*details\.open\);/);
   assert.match(workspaceJs, />DOWNLOAD</);
+  assert.doesNotMatch(workspaceJs, /Selected RequestorId/);
+  assert.doesNotMatch(workspaceJs, /Scope Coverage/);
+  assert.doesNotMatch(workspaceJs, /UnderPAR will reuse the live DCR hydration path/);
   assert.doesNotMatch(workspaceJs, /sendWorkspaceAction\("prefetch-applications"/);
   assert.doesNotMatch(workspaceJs, /background-hydration/);
   assert.doesNotMatch(workspaceJs, /defaultOpen/);
@@ -832,6 +886,9 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(popupSource, /premiumServiceBindings:\s*buildRegisteredApplicationHealthPremiumServiceBindings/);
   assert.match(popupSource, /if \(action === "switch-premium-service-application"\)/);
   assert.match(popupSource, /switchRegisteredApplicationHealthPremiumService\(/);
+  assert.match(workspaceCss, /\.regapp-service-pill--service-default/);
+  assert.match(workspaceCss, /\.regapp-health-summary-switch-btn/);
+  assert.match(workspaceCss, /\.regapp-health-service-line/);
   assert.doesNotMatch(extractFunctionSource(popupSource, "fetchRegisteredApplicationHealthDashboardReport"), /enrichRegisteredApplicationForHydration/);
   assert.doesNotMatch(
     extractFunctionSource(popupSource, "runRegisteredApplicationHealthDashboardForSelection"),

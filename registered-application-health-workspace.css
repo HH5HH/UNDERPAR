@@ -30,38 +30,13 @@
 
 .regapp-health-service-summary {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   margin: 8px 0 0;
 }
 
 .regapp-health-service-summary-note {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: rgba(229, 236, 244, 0.8);
-}
-
-.regapp-health-service-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 220px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 224, 154, 0.16);
-  background:
-    linear-gradient(180deg, rgba(26, 31, 39, 0.96), rgba(18, 22, 29, 0.94)),
-    radial-gradient(circle at top right, rgba(255, 191, 111, 0.12), rgba(255, 191, 111, 0) 42%);
-}
-
-.regapp-health-service-label,
-.regapp-health-service-value,
-.regapp-health-service-switch-note {
-  margin: 0;
-}
-
-.regapp-health-service-label {
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -69,75 +44,171 @@
   color: rgba(255, 224, 154, 0.82);
 }
 
-.regapp-health-service-value {
-  font-size: 12px;
-  line-height: 1.5;
-  color: rgba(245, 248, 250, 0.96);
-}
-
-.regapp-health-service-switch-note {
-  font-size: 11px;
-  line-height: 1.45;
-  color: rgba(219, 227, 235, 0.72);
-}
-
-.regapp-health-service-controls {
+.regapp-health-service-line {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.regapp-health-service-item {
+  display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.regapp-health-service-select {
-  min-width: 210px;
-  max-width: 320px;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(143, 154, 171, 0.3);
-  background: rgba(11, 16, 22, 0.92);
+.regapp-health-service-using {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: rgba(229, 236, 244, 0.76);
+}
+
+.regapp-health-service-picker-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: min(100%, 260px);
+}
+
+.regapp-health-service-picker-wrap::after {
+  content: "▾";
+  position: absolute;
+  right: 10px;
+  pointer-events: none;
+  color: rgba(255, 228, 184, 0.88);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.regapp-health-service-picker,
+.regapp-health-service-app {
+  min-width: 0;
+  min-height: 28px;
+  max-width: 260px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 190, 107, 0.24);
+  background:
+    linear-gradient(180deg, rgba(22, 27, 34, 0.98), rgba(14, 18, 24, 0.96)),
+    radial-gradient(circle at top right, rgba(255, 190, 107, 0.08), rgba(255, 190, 107, 0) 42%);
   color: rgba(245, 248, 250, 0.96);
   font-size: 12px;
+  line-height: 1.5;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-.regapp-health-service-select:focus-visible {
+.regapp-health-service-picker {
+  width: 100%;
+  padding: 0 30px 0 12px;
+  appearance: none;
+  cursor: pointer;
+}
+
+.regapp-health-service-picker:focus-visible {
   outline: none;
   border-color: rgba(255, 190, 107, 0.58);
   box-shadow: 0 0 0 2px rgba(255, 190, 107, 0.14);
 }
 
-.regapp-health-service-btn {
-  appearance: none;
-  min-height: 30px;
+.regapp-health-service-app {
+  display: inline-flex;
+  align-items: center;
   padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 190, 107, 0.34);
-  background:
-    linear-gradient(180deg, rgba(71, 46, 14, 0.98), rgba(47, 31, 9, 0.98)),
-    linear-gradient(90deg, rgba(255, 190, 107, 0.16), rgba(255, 190, 107, 0.08));
-  color: rgba(255, 233, 197, 0.96);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.regapp-health-service-btn:hover:not(:disabled) {
-  border-color: rgba(255, 190, 107, 0.58);
-  box-shadow: 0 10px 18px rgba(55, 32, 7, 0.28);
-}
-
-.regapp-health-service-btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(255, 190, 107, 0.18);
-}
-
-.regapp-health-service-btn:disabled,
-.regapp-health-service-select:disabled {
+.regapp-health-service-picker:disabled,
+.regapp-health-summary-switch-btn:disabled {
   opacity: 0.58;
   cursor: default;
   box-shadow: none;
+}
+
+.regapp-health-summary-switch-btn {
+  min-height: 28px;
+  padding: 0 14px;
+  border-radius: 999px;
+}
+
+.regapp-service-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.regapp-service-pill {
+  --regapp-service-pill-500: 92, 103, 125;
+  --regapp-service-pill-800: 131, 139, 156;
+  --regapp-service-pill-900: 151, 158, 172;
+  --regapp-service-pill-1100: 214, 220, 231;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--regapp-service-pill-900), 0.48);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, white 76%, rgb(var(--regapp-service-pill-500)) 24%),
+    color-mix(in srgb, white 86%, rgb(var(--regapp-service-pill-900)) 14%)
+  );
+  color: rgb(var(--regapp-service-pill-1100));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+.regapp-service-pill--service-default {
+  --regapp-service-pill-500: 2, 87, 58;
+  --regapp-service-pill-800: 6, 136, 80;
+  --regapp-service-pill-900: 14, 175, 98;
+  --regapp-service-pill-1100: 204, 245, 197;
+}
+
+.regapp-service-pill--service-rest-v2 {
+  --regapp-service-pill-500: 61, 68, 82;
+  --regapp-service-pill-800: 92, 103, 125;
+  --regapp-service-pill-900: 131, 139, 156;
+  --regapp-service-pill-1100: 214, 220, 231;
+}
+
+.regapp-service-pill--service-esm {
+  --regapp-service-pill-500: 135, 47, 0;
+  --regapp-service-pill-800: 199, 82, 0;
+  --regapp-service-pill-900: 243, 117, 0;
+  --regapp-service-pill-1100: 255, 210, 160;
+}
+
+.regapp-service-pill--service-cm {
+  --regapp-service-pill-500: 107, 6, 195;
+  --regapp-service-pill-800: 157, 78, 228;
+  --regapp-service-pill-900: 186, 127, 237;
+  --regapp-service-pill-1100: 229, 211, 255;
+}
+
+.regapp-service-pill--service-degradation {
+  --regapp-service-pill-500: 147, 31, 17;
+  --regapp-service-pill-800: 223, 52, 34;
+  --regapp-service-pill-900: 255, 103, 86;
+  --regapp-service-pill-1100: 255, 214, 208;
+}
+
+.regapp-service-pill--service-temp-pass {
+  --regapp-service-pill-500: 108, 61, 10;
+  --regapp-service-pill-800: 188, 117, 22;
+  --regapp-service-pill-900: 238, 170, 58;
+  --regapp-service-pill-1100: 255, 230, 182;
 }
 
 .regapp-jwt-utility-card {
@@ -327,6 +398,12 @@
   gap: 8px;
 }
 
+.regapp-app-summary-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .regapp-app-summary-fact {
   display: inline-flex;
   align-items: baseline;
@@ -435,14 +512,15 @@
 }
 
 @media (max-width: 960px) {
-  .regapp-health-service-select {
-    min-width: 0;
-    width: 100%;
-    max-width: none;
+  .regapp-health-service-picker-wrap,
+  .regapp-health-service-picker,
+  .regapp-health-service-app {
+    max-width: 100%;
   }
 
-  .regapp-health-service-controls {
-    align-items: stretch;
+  .regapp-health-service-item,
+  .regapp-health-service-line {
+    align-items: flex-start;
   }
 
   .regapp-app-summary-main {

@@ -30,6 +30,7 @@ const state = {
   hydratingGuids: new Set(),
   premiumServiceBindings: [],
   switchingServiceKeys: new Set(),
+  pendingPremiumServiceSwitch: null,
 };
 
 const els = {
@@ -81,6 +82,85 @@ function uniqueStringArray(values = []) {
         .filter(Boolean)
     )
   );
+}
+
+function normalizePremiumServiceSwitchRequest(value = null) {
+  const serviceKey = String(value?.serviceKey || "").trim();
+  const appGuid = String(value?.appGuid || value?.guid || "").trim();
+  if (!serviceKey || !appGuid) {
+    return null;
+  }
+  return {
+    serviceKey,
+    appGuid,
+  };
+}
+
+function normalizeServicePillToneKey(value = "", options = {}) {
+  const serviceKeyCompact = String(options?.serviceKey || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  if (serviceKeyCompact === "restv2") {
+    return "service-rest-v2";
+  }
+  if (serviceKeyCompact === "esm") {
+    return "service-esm";
+  }
+  if (serviceKeyCompact === "degradation") {
+    return "service-degradation";
+  }
+  if (serviceKeyCompact === "resettemppass") {
+    return "service-temp-pass";
+  }
+  if (serviceKeyCompact === "cm" || serviceKeyCompact === "cmmvpd") {
+    return "service-cm";
+  }
+  const normalizedCompact = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  if (!normalizedCompact) {
+    return "service-neutral";
+  }
+  if (normalizedCompact === "default") {
+    return "service-default";
+  }
+  if (normalizedCompact === "restapiv2" || normalizedCompact === "restv2") {
+    return "service-rest-v2";
+  }
+  if (normalizedCompact === "esm") {
+    return "service-esm";
+  }
+  if (normalizedCompact === "degradation") {
+    return "service-degradation";
+  }
+  if (normalizedCompact === "resettemppass" || normalizedCompact === "resettemppassdcr" || normalizedCompact === "resettemppassowner") {
+    return "service-temp-pass";
+  }
+  if (normalizedCompact === "mvpdstatusservice" || normalizedCompact === "cmu") {
+    return "service-cm";
+  }
+  return "service-neutral";
+}
+
+function buildServicePillMarkup(label = "", options = {}) {
+  const normalizedLabel = String(label || "").trim();
+  if (!normalizedLabel) {
+    return "";
+  }
+  const toneKey = normalizeServicePillToneKey(normalizedLabel, options);
+  return `<span class="regapp-service-pill regapp-service-pill--${escapeHtml(toneKey)}">${escapeHtml(normalizedLabel)}</span>`;
+}
+
+function renderServicePillList(labels = [], options = {}) {
+  const pills = uniqueStringArray(labels)
+    .map((label) => buildServicePillMarkup(label, options))
+    .filter(Boolean);
+  if (pills.length === 0) {
+    return "";
+  }
+  return `<div class="regapp-service-pill-list">${pills.join("")}</div>`;
 }
 
 function normalizePremiumServiceBindings(bindings = []) {
@@ -308,6 +388,38 @@ function getPremiumServiceSwitchOptions(serviceKey = "") {
   });
 }
 
+function getPendingPremiumServiceSwitch() {
+  const pending = normalizePremiumServiceSwitchRequest(state.pendingPremiumServiceSwitch);
+  if (!pending) {
+    return null;
+  }
+  const currentBinding = getCurrentBindingForService(pending.serviceKey);
+  if (!currentBinding || String(currentBinding.appGuid || "").trim() === pending.appGuid) {
+    return null;
+  }
+  const optionGuids = getPremiumServiceSwitchOptions(pending.serviceKey)
+    .map((app) => String(app?.guid || "").trim())
+    .filter(Boolean);
+  if (optionGuids.length > 0 && !optionGuids.includes(pending.appGuid)) {
+    return null;
+  }
+  return pending;
+}
+
+function setPendingPremiumServiceSwitch(serviceKey = "", guid = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const normalizedGuid = String(guid || "").trim();
+  const currentBinding = getCurrentBindingForService(normalizedServiceKey);
+  state.pendingPremiumServiceSwitch =
+    normalizedServiceKey &&
+    normalizedGuid &&
+    currentBinding &&
+    String(currentBinding.appGuid || "").trim() !== normalizedGuid
+      ? { serviceKey: normalizedServiceKey, appGuid: normalizedGuid }
+      : null;
+  renderPremiumServiceSummary();
+}
+
 function renderPremiumServiceSummary() {
   if (!els.premiumServiceSummary) {
     return;
@@ -323,48 +435,78 @@ function renderPremiumServiceSummary() {
       '<p class="regapp-health-service-summary-note">No DCR-gated Premium Services are currently detected for this ENV x Media Company.</p>';
     return;
   }
-
+  const pendingSwitch = getPendingPremiumServiceSwitch();
+  const anySwitchBusy = state.switchingServiceKeys.size > 0;
+  const pendingBinding = pendingSwitch ? getCurrentBindingForService(pendingSwitch.serviceKey) : null;
+  const pendingServiceLabel = firstNonEmptyString([
+    pendingBinding?.label,
+    REGAPP_PREMIUM_SERVICE_LABEL_BY_KEY[pendingSwitch?.serviceKey],
+    pendingSwitch?.serviceKey,
+  ]);
+  const pendingSwitchTitle =
+    pendingSwitch && pendingBinding
+      ? `Switch ${pendingServiceLabel} to ${firstNonEmptyString([
+          getPremiumServiceSwitchOptions(pendingSwitch.serviceKey).find(
+            (app) => String(app?.guid || "").trim() === pendingSwitch.appGuid
+          )?.name,
+          pendingSwitch.appGuid,
+        ])}`
+      : "Switch premium service registered application";
+  const switchBusy = pendingSwitch ? state.switchingServiceKeys.has(pendingSwitch.serviceKey) : anySwitchBusy;
   els.premiumServiceSummary.innerHTML = `
     <div class="regapp-health-service-summary">
-      ${bindings
-        .map((binding) => {
-          const currentGuid = String(binding?.appGuid || "").trim();
-          const options = getPremiumServiceSwitchOptions(binding.serviceKey);
-          const busy = state.switchingServiceKeys.has(binding.serviceKey);
-          const switchDisabled = busy || options.length === 0;
-          const selectId = `regapp-service-switch-${binding.serviceKey}`;
-          return `
-            <section class="regapp-health-service-block" data-premium-service-block="${escapeHtml(binding.serviceKey)}">
-              <p class="regapp-health-service-label">${escapeHtml(binding.label)} detected</p>
-              <p class="regapp-health-service-value">${escapeHtml(`${binding.label}: ${binding.appName}`)}</p>
-              <div class="regapp-health-service-controls">
-                <select
-                  id="${escapeHtml(selectId)}"
-                  class="regapp-health-service-select"
-                  data-premium-service-switcher="${escapeHtml(binding.serviceKey)}"${switchDisabled ? " disabled" : ""}
-                >
-                  ${options
-                    .map((app) => {
-                      const guid = String(app?.guid || "").trim();
-                      const selected = guid === currentGuid ? " selected" : "";
-                      const optionLabel = firstNonEmptyString([app?.name, guid]);
-                      return `<option value="${escapeHtml(guid)}"${selected}>${escapeHtml(optionLabel)}</option>`;
-                    })
-                    .join("")}
-                </select>
-                <button
-                  type="button"
-                  class="regapp-health-service-btn"
-                  data-premium-service-switch-apply="${escapeHtml(binding.serviceKey)}"${switchDisabled ? " disabled" : ""}
-                >${busy ? "Switching..." : "Switch"}</button>
-              </div>
-              <p class="regapp-health-service-switch-note">UnderPAR will reuse the live DCR hydration path for the next ${escapeHtml(
-                binding.label
-              )} call.</p>
-            </section>
-          `;
-        })
-        .join("")}
+      <p class="regapp-health-service-summary-note">Detected Premium Services</p>
+      <div class="regapp-health-service-line">
+        ${bindings
+          .map((binding) => {
+            const currentGuid = String(binding?.appGuid || "").trim();
+            const options = getPremiumServiceSwitchOptions(binding.serviceKey);
+            const selectedGuid =
+              pendingSwitch?.serviceKey === binding.serviceKey ? String(pendingSwitch.appGuid || "").trim() : currentGuid;
+            const hasAlternatives = options.length > 1;
+            const currentAppLabel = firstNonEmptyString([binding.appName, currentGuid]);
+            return `
+              <span class="regapp-health-service-item" data-premium-service-block="${escapeHtml(binding.serviceKey)}">
+                ${buildServicePillMarkup(binding.label, { serviceKey: binding.serviceKey })}
+                <span class="regapp-health-service-using">using:</span>
+                ${
+                  hasAlternatives
+                    ? `<span class="regapp-health-service-picker-wrap">
+                        <select
+                          class="regapp-health-service-picker"
+                          aria-label="${escapeHtml(`Registered application for ${binding.label}`)}"
+                          title="${escapeHtml(`Choose which registered application UnderPAR should use for ${binding.label}`)}"
+                          data-premium-service-switcher="${escapeHtml(binding.serviceKey)}"${anySwitchBusy ? " disabled" : ""}
+                        >
+                          ${options
+                            .map((app) => {
+                              const guid = String(app?.guid || "").trim();
+                              const selected = guid === selectedGuid ? " selected" : "";
+                              const optionLabel = firstNonEmptyString([app?.name, guid]);
+                              return `<option value="${escapeHtml(guid)}"${selected}>${escapeHtml(optionLabel)}</option>`;
+                            })
+                            .join("")}
+                        </select>
+                      </span>`
+                    : `<span class="regapp-health-service-app">${escapeHtml(currentAppLabel)}</span>`
+                }
+              </span>
+            `;
+          })
+          .join("")}
+        ${
+          pendingSwitch
+            ? `<button
+                type="button"
+                class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent regapp-health-summary-switch-btn"
+                data-pending-premium-service-switch-apply="true"
+                title="${escapeHtml(pendingSwitchTitle)}"${switchBusy ? " disabled" : ""}
+              >
+                <span class="spectrum-Button-label">${switchBusy ? "SWITCHING..." : "SWITCH"}</span>
+              </button>`
+            : ""
+        }
+      </div>
     </div>
   `;
 }
@@ -430,6 +572,9 @@ function applyControllerState(payload = {}) {
     getExpandedGuidStore().clear();
     state.hydratingGuids.clear();
     state.switchingServiceKeys.clear();
+    state.pendingPremiumServiceSwitch = null;
+  } else {
+    state.pendingPremiumServiceSwitch = getPendingPremiumServiceSwitch();
   }
   if (shouldClearStaleReport) {
     state.report = null;
@@ -801,16 +946,11 @@ function buildRequestorSummary(app = {}) {
   ]);
 }
 
-function buildScopeSummary(app = {}) {
-  return Array.isArray(app.scopeLabels) && app.scopeLabels.length > 0 ? app.scopeLabels.join(", ") : "No scopes";
-}
-
 function renderApplicationSummaryFacts(app = {}) {
   const summaryFacts = [
     ["Client ID", firstNonEmptyString([app.clientId, "Not returned"])],
     ["Type", firstNonEmptyString([app.type, "Not returned"])],
     ["Requestor Hints", buildRequestorSummary(app)],
-    ["Scope Coverage", buildScopeSummary(app)],
   ];
   return `
     <div class="regapp-app-summary-facts">
@@ -825,6 +965,11 @@ function renderApplicationSummaryFacts(app = {}) {
         )
         .join("")}
     </div>
+    ${
+      Array.isArray(app.scopeLabels) && app.scopeLabels.length > 0
+        ? `<div class="regapp-app-summary-scopes">${renderServicePillList(app.scopeLabels)}</div>`
+        : ""
+    }
   `;
 }
 
@@ -1028,7 +1173,6 @@ function renderApplicationCards(applications = []) {
         .map((entry) => {
           const app = entry.app || {};
           const summaryBadges = [
-            entry.selectedRequestorMatch ? '<span class="regapp-chip regapp-chip--success">Selected RequestorId</span>' : "",
             String(app.hydrationError || "").trim() ? '<span class="regapp-chip regapp-chip--danger">Hydration Warning</span>' : "",
           ]
             .filter(Boolean)
@@ -1259,12 +1403,25 @@ async function switchPremiumServiceApplication(serviceKey = "", guid = "") {
     setStatus(String(result?.error || "Unable to switch this premium service registered application."), "error");
     return;
   }
+  state.pendingPremiumServiceSwitch = null;
+  state.premiumServiceBindings = normalizePremiumServiceBindings(
+    state.premiumServiceBindings.map((binding) =>
+      binding?.serviceKey === normalizedServiceKey
+        ? {
+            ...binding,
+            appGuid: normalizedGuid,
+            appName: firstNonEmptyString([result?.appName, normalizedGuid]),
+          }
+        : binding
+    )
+  );
   const serviceLabel = firstNonEmptyString([
     result?.serviceLabel,
     REGAPP_PREMIUM_SERVICE_LABEL_BY_KEY[normalizedServiceKey],
     normalizedServiceKey,
   ]);
   const appLabel = firstNonEmptyString([result?.appName, normalizedGuid, "registered application"]);
+  renderReport();
   setStatus(`Switched ${serviceLabel} to ${appLabel}.`, "success");
 }
 
@@ -1481,17 +1638,28 @@ function registerEventHandlers() {
     });
   }
   if (els.premiumServiceSummary) {
+    els.premiumServiceSummary.addEventListener("change", (event) => {
+      const select =
+        event.target instanceof Element ? event.target.closest("[data-premium-service-switcher]") : null;
+      if (!(select instanceof HTMLSelectElement)) {
+        return;
+      }
+      const serviceKey = String(select.dataset.premiumServiceSwitcher || "").trim();
+      const guid = String(select.value || "").trim();
+      if (!serviceKey) {
+        return;
+      }
+      setPendingPremiumServiceSwitch(serviceKey, guid);
+    });
     els.premiumServiceSummary.addEventListener("click", (event) => {
       const switchButton =
-        event.target instanceof Element ? event.target.closest("[data-premium-service-switch-apply]") : null;
+        event.target instanceof Element ? event.target.closest("[data-pending-premium-service-switch-apply]") : null;
       if (!(switchButton instanceof HTMLElement)) {
         return;
       }
-      const serviceKey = String(switchButton.dataset.premiumServiceSwitchApply || "").trim();
-      const select = els.premiumServiceSummary.querySelector(
-        `[data-premium-service-switcher="${CSS.escape(serviceKey)}"]`
-      );
-      const guid = select instanceof HTMLSelectElement ? String(select.value || "").trim() : "";
+      const pendingSwitch = getPendingPremiumServiceSwitch();
+      const serviceKey = String(pendingSwitch?.serviceKey || "").trim();
+      const guid = String(pendingSwitch?.appGuid || "").trim();
       if (!serviceKey || !guid) {
         return;
       }
