@@ -20,7 +20,21 @@ function extractFunctionSource(source, functionName) {
     }
   }
   assert.notEqual(start, -1, `Unable to locate ${functionName}`);
-  const bodyStart = source.indexOf("{", start);
+  const paramsStart = source.indexOf("(", start);
+  assert.notEqual(paramsStart, -1, `Unable to locate params for ${functionName}`);
+  let paramsDepth = 0;
+  let bodyStart = -1;
+  for (let index = paramsStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "(") paramsDepth += 1;
+    if (char === ")") {
+      paramsDepth -= 1;
+      if (paramsDepth === 0) {
+        bodyStart = source.indexOf("{", index);
+        break;
+      }
+    }
+  }
   assert.notEqual(bodyStart, -1, `Unable to locate body for ${functionName}`);
   let depth = 0;
   for (let index = bodyStart; index < source.length; index += 1) {
@@ -602,6 +616,7 @@ test("SAML extraction ignores extension and interactive-docs partner profile pos
         }
         return "";
       },
+      isRestV2PartnerFrameworkStatusUsable: () => false,
     }
   );
 
@@ -646,6 +661,87 @@ test("SAML extraction ignores extension and interactive-docs partner profile pos
   assert.equal(result.samlResponse, encodedSaml);
   assert.equal(result.source, "web-request:onBeforeRequest");
   assert.equal(result.partner, "Apple");
+});
+
+test("SAML extraction does not trust standard authenticate captures solely because a partner framework header exists elsewhere in the flow", () => {
+  const encodedSaml = Buffer.from("<samlp:Response>ok</samlp:Response>", "utf8").toString("base64");
+  const validPartnerFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const { extractRestV2SamlResponseFromDebugFlow } = loadFunctions(
+    "popup.js",
+    [
+      "normalizeRestV2ProfileAttributeValue",
+      "dedupeRestV2CandidateStrings",
+      "decodeBase64TextSafe",
+      "getRestV2CaseInsensitiveObjectValue",
+      "getRestV2CaseInsensitiveHeaderValue",
+      "collectRestV2CaseInsensitiveObjectValues",
+      "getRestV2InteractiveDocsHeaderAliasCandidates",
+      "decodeURIComponentSafe",
+      "parseJsonText",
+      "parseRestV2PartnerFrameworkStatusPayload",
+      "resolveRestV2PartnerFrameworkStatusSummary",
+      "isRestV2PartnerFrameworkStatusUsable",
+      "normalizeRestV2PartnerFrameworkStatusForRequest",
+      "resolveRestV2PartnerFrameworkStatusFromSessionData",
+      "isRestV2PartnerSsoApiUrl",
+      "extractRestV2PartnerNameFromSsoApiUrl",
+      "isRestV2InteractiveDocsUrl",
+      "isRestV2ExtensionInitiatedDebugEvent",
+      "isRestV2InteractiveDocsDebugEvent",
+      "shouldTrustRestV2PartnerSsoLearningEvent",
+      "decodeSimpleHtmlEntities",
+      "normalizeRestV2SamlResponseForPartnerProfile",
+      "extractRestV2PartnerFrameworkStatusFromText",
+      "extractRestV2PartnerFrameworkStatusFromDebugFlow",
+      "extractRestV2SamlResponseFromText",
+      "extractRestV2SamlResponseFromWebRequestEvent",
+      "extractRestV2SamlResponseFromTabNetworkEvent",
+      "extractRestV2SamlResponseFromDebugFlow",
+    ],
+    {
+      ADOBE_SP_BASE: "https://sp.auth.adobe.com",
+      URL,
+      atob,
+      btoa,
+      unescape,
+      encodeURIComponent,
+      firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+    }
+  );
+
+  const result = extractRestV2SamlResponseFromDebugFlow({
+    context: {
+      loginUrl: "https://sp.auth.adobe.com/api/v2/authenticate/MML/J859AQV",
+      sessionAction: "authenticate",
+    },
+    partnerFrameworkStatus: validPartnerFrameworkStatus,
+    events: [
+      {
+        source: "tab-network",
+        phase: "body",
+        url: "https://oauth.xfinity.com/oauth/authorize",
+        postDataPreview: `SAMLResponse=${encodeURIComponent(encodedSaml)}`,
+      },
+    ],
+  });
+
+  assert.equal(result.samlResponse, encodedSaml);
+  assert.equal(result.source, "tab-network:body");
+  assert.equal(result.partner, "");
+  assert.equal(result.trustedForPartnerSso, false);
 });
 
 test("sidepanel MEG endpoint picker updates launch state without rebuilding the full option list in change", () => {

@@ -72,6 +72,9 @@ function loadPartnerSsoOverrideHelpers(seed = {}) {
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
+    extractFunctionSource(source, "isRestV2MvpdMatch"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
     extractFunctionSource(source, "stringifyRestV2PartnerFrameworkStatusPayload"),
@@ -190,6 +193,40 @@ test("generic provider ids are rejected for Apple partner SSO when the MVPD mapp
 
   assert.equal(validation.ok, false);
   assert.match(validation.error, /does not match the configured Apple mapping/i);
+});
+
+test("unknown provider ids are rejected for Apple partner SSO when no MVPD mapping is known", () => {
+  const { validateRestV2PartnerFrameworkStatusInput } = loadPartnerSsoOverrideHelpers({
+    getRequestorScopedMvpdCache(requestorId = "") {
+      return String(requestorId || "").trim() === "MML" ? buildMvpdCache() : null;
+    },
+  });
+  const rawPartnerFrameworkStatus = JSON.stringify({
+    frameworkPermissionInfo: {
+      accessStatus: "granted",
+    },
+    frameworkProviderInfo: {
+      id: "Comcast_SSO_Apple_Unmapped",
+      expirationDate: "1775748018000",
+    },
+    frameworkPartnerInfo: {
+      partner: "Apple",
+      name: "Apple",
+    },
+  });
+
+  const validation = validateRestV2PartnerFrameworkStatusInput(rawPartnerFrameworkStatus, {
+    context: {
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      learningPartner: "Apple",
+    },
+    requiredPartner: "Apple",
+  });
+
+  assert.equal(validation.ok, false);
+  assert.match(validation.error, /not associated with a known MVPD/i);
 });
 
 test("encoded partner framework headers are rejected in the raw JSON form", () => {

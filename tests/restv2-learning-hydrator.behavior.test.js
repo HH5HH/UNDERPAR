@@ -439,6 +439,66 @@ test("REST V2 docs hydrator still clicks Try it when a send button shell exists 
   assert.equal(result.ok, true);
 });
 
+test("REST V2 docs hydrator matches bare Redoc path and header parameter names", async () => {
+  const harness = createDomHarness("startAuthenticationUsingGET");
+  const { createElement, operationElement } = harness;
+  operationElement.appendChild(
+    createElement("button", {
+      textContent: "Send",
+      attributes: { "data-cy": "send-button" },
+    })
+  );
+  const serviceProviderInput = operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "serviceProvider", "data-param-in": "path" },
+    })
+  );
+  const codeInput = operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "code", "data-param-in": "path" },
+    })
+  );
+  const userAgentInput = operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "User-Agent", "data-param-in": "header" },
+    })
+  );
+
+  const runRestV2InteractiveDocsHydrator = loadHydrator({
+    document: harness.document,
+    location: harness.location,
+    window: harness.window,
+    Event: harness.Event,
+    HTMLElement: harness.HTMLElement,
+    HTMLInputElement: harness.HTMLInputElement,
+    HTMLSelectElement: harness.HTMLSelectElement,
+    HTMLTextAreaElement: harness.HTMLTextAreaElement,
+  });
+
+  const result = await runRestV2InteractiveDocsHydrator({
+    operationId: "startAuthenticationUsingGET",
+    fieldValues: {
+      "path.serviceProvider": "MML",
+      "path.code": "A1B2C3D",
+      "header.User-Agent": "UnderPAR test agent",
+    },
+    requiredFields: ["path.serviceProvider", "path.code"],
+    missingRequiredFields: [],
+    timeoutMs: 1200,
+  });
+
+  assert.equal(serviceProviderInput.value, "MML");
+  assert.equal(codeInput.value, "A1B2C3D");
+  assert.equal(userAgentInput.value, "UnderPAR test agent");
+  assert.equal(result.ok, true);
+  assert.equal(result.filledFields.includes("path.serviceProvider"), true);
+  assert.equal(result.filledFields.includes("path.code"), true);
+  assert.equal(result.filledFields.includes("header.User-Agent"), true);
+});
+
 test("REST V2 docs hydrator merges body fields into a JSON request-body editor when standalone controls are absent", async () => {
   const harness = createDomHarness("retrieveAuthorizeDecisionsForMvpdUsingPOST");
   const { createElement, operationElement } = harness;
@@ -774,6 +834,65 @@ test("REST V2 docs hydrator serializes form-encoded body fields into a textarea 
   assert.deepEqual(Array.from(result.unresolvedRequiredFields), []);
 });
 
+test("REST V2 docs hydrator fills bare Redoc token header names for session creation", async () => {
+  const harness = createDomHarness("createSessionUsingPOST");
+  const { createElement, operationElement } = harness;
+  operationElement.appendChild(
+    createElement("button", {
+      textContent: "Send",
+      attributes: { "data-cy": "send-button" },
+    })
+  );
+  const serviceProviderInput = operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "serviceProvider", "data-param-in": "path" },
+    })
+  );
+  const adobeSubjectTokenInput = operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "Adobe-Subject-Token", "data-param-in": "header" },
+    })
+  );
+  const adServiceTokenInput = operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "AD-Service-Token", "data-param-in": "header" },
+    })
+  );
+
+  const runRestV2InteractiveDocsHydrator = loadHydrator({
+    document: harness.document,
+    location: harness.location,
+    window: harness.window,
+    Event: harness.Event,
+    HTMLElement: harness.HTMLElement,
+    HTMLInputElement: harness.HTMLInputElement,
+    HTMLSelectElement: harness.HTMLSelectElement,
+    HTMLTextAreaElement: harness.HTMLTextAreaElement,
+  });
+
+  const result = await runRestV2InteractiveDocsHydrator({
+    operationId: "createSessionUsingPOST",
+    fieldValues: {
+      "path.serviceProvider": "Turner",
+      "header.Adobe-Subject-Token": "subject-token-payload",
+      "header.AD-Service-Token": "service-token-payload",
+    },
+    requiredFields: ["path.serviceProvider"],
+    missingRequiredFields: [],
+    timeoutMs: 1200,
+  });
+
+  assert.equal(serviceProviderInput.value, "Turner");
+  assert.equal(adobeSubjectTokenInput.value, "subject-token-payload");
+  assert.equal(adServiceTokenInput.value, "service-token-payload");
+  assert.equal(result.ok, true);
+  assert.equal(result.filledFields.includes("header.Adobe-Subject-Token"), true);
+  assert.equal(result.filledFields.includes("header.AD-Service-Token"), true);
+});
+
 test("REST V2 docs hydrator does not treat an unrelated textarea as a request-body editor", async () => {
   const harness = createDomHarness("createPartnerProfileUsingPOST");
   const { createElement, operationElement } = harness;
@@ -836,7 +955,25 @@ test("REST V2 docs hydrator maps the TempPASS identity header across casing vari
   operationElement.appendChild(
     createElement("input", {
       type: "text",
-      attributes: { name: "path.serviceProvider" },
+      attributes: { name: "serviceProvider", "data-param-in": "path" },
+    })
+  );
+  operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "mvpd", "data-param-in": "path" },
+    })
+  );
+  operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "Adobe-Subject-Token", "data-param-in": "header" },
+    })
+  );
+  operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "AD-Service-Token", "data-param-in": "header" },
     })
   );
   operationElement.appendChild(
@@ -861,15 +998,29 @@ test("REST V2 docs hydrator maps the TempPASS identity header across casing vari
     operationId: "getProfileForMvpdUsingGET",
     fieldValues: {
       "path.serviceProvider": "Turner",
+      "path.mvpd": "Comcast_SSO",
+      "header.Adobe-Subject-Token": "subject-token-payload",
+      "header.AD-Service-Token": "service-token-payload",
       "header.AP-Temppass-Identity": "encoded-temp-pass-identity",
     },
-    requiredFields: ["path.serviceProvider"],
+    requiredFields: ["path.serviceProvider", "path.mvpd"],
     missingRequiredFields: [],
     timeoutMs: 1200,
   });
 
+  const serviceProviderInput = operationElement.querySelector('[name="serviceProvider"]');
+  const mvpdInput = operationElement.querySelector('[name="mvpd"]');
+  const adobeSubjectTokenInput = operationElement.querySelector('[name="Adobe-Subject-Token"]');
+  const adServiceTokenInput = operationElement.querySelector('[name="AD-Service-Token"]');
   const tempPassInput = operationElement.querySelector('[name="header.AP-TempPass-Identity"]');
+  assert.equal(serviceProviderInput.value, "Turner");
+  assert.equal(mvpdInput.value, "Comcast_SSO");
+  assert.equal(adobeSubjectTokenInput.value, "subject-token-payload");
+  assert.equal(adServiceTokenInput.value, "service-token-payload");
   assert.equal(tempPassInput.value, "encoded-temp-pass-identity");
   assert.equal(result.ok, true);
+  assert.equal(result.filledFields.includes("path.mvpd"), true);
+  assert.equal(result.filledFields.includes("header.Adobe-Subject-Token"), true);
+  assert.equal(result.filledFields.includes("header.AD-Service-Token"), true);
   assert.equal(result.filledFields.includes("header.AP-Temppass-Identity"), true);
 });

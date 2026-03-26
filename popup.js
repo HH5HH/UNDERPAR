@@ -16223,6 +16223,163 @@ function normalizeHttpErrorMessage(value) {
   return redacted.length > 220 ? `${redacted.slice(0, 217)}...` : redacted;
 }
 
+const REST_V2_ENHANCED_ERROR_ACTION_HINTS = Object.freeze({
+  none: "Fix the request context.",
+  configuration: "Fix the integration configuration context before retrying.",
+  "application-registration": "Re-register the client application context before retrying.",
+  authentication: "Re-authenticate the user before retrying.",
+  authorization: "Obtain a fresh authorization for the requested resource before retrying.",
+  retry: "Retry with bounded backoff and only for the affected request or items.",
+});
+
+const REST_V2_ENHANCED_ERROR_HINTS_BY_CODE = Object.freeze({
+  invalid_header_pfs_permission_access_not_present:
+    "Partner SSO requires raw partner framework JSON that includes frameworkPermissionInfo.accessStatus.",
+  invalid_header_pfs_permission_access_not_determined:
+    "Partner SSO requires a determinate partner permission state from the partner framework.",
+  invalid_header_pfs_permission_access_not_granted:
+    "Partner SSO can proceed only when the partner framework reports accessStatus=granted.",
+  invalid_header_pfs_provider_id_not_determined:
+    "Use the exact partner framework provider mapping id for the selected MVPD. Generic MVPD ids and inferred provider ids are not valid here.",
+  invalid_header_pfs_provider_id_mismatch:
+    "The partner framework provider id must resolve to the same MVPD selected in UnderPAR.",
+  invalid_header_pfs_provider_info_expired:
+    "Refresh the partner framework status and retry before the provider metadata expires.",
+  invalid_parameter_partner:
+    "The partner path parameter must match the partner identified by the partner framework status payload.",
+  invalid_parameter_saml_response:
+    "Use the SAMLResponse captured from the same partner SSO flow that produced the partner framework status.",
+  invalid_parameter_mvpd:
+    "If this appears on a partner SSO flow, Adobe likely fell back to the basic authentication flow because the partner payload was not valid.",
+  invalid_authentication_session:
+    "The partner or authentication session is no longer valid. Start a fresh flow and capture new artifacts.",
+  authenticated_profile_missing:
+    "No authenticated profile is currently active. Re-authenticate the user and retry.",
+  authenticated_profile_expired:
+    "The authenticated profile expired. Re-authenticate the user and retry.",
+  authenticated_profile_invalidated:
+    "The authenticated profile was invalidated upstream. Re-authenticate the user and retry.",
+});
+
+function getRestV2EnhancedErrorMessageText(value) {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return String(value || "").trim();
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function normalizeRestV2EnhancedError(value = null, options = {}) {
+  let payload = value;
+  if (typeof payload === "string") {
+    payload = parseJsonText(payload, null);
+  }
+  const root = payload && typeof payload === "object" ? payload : null;
+  const errorValue =
+    root?.error && typeof root.error === "object" && !Array.isArray(root.error) ? root.error : root;
+  const errorPayload = errorValue && typeof errorValue === "object" ? errorValue : null;
+  const httpStatus = Number(options?.httpStatus || root?.httpStatus || 0);
+  const enhancedStatus = Number(errorPayload?.status || root?.status || 0);
+  const code = String(
+    firstNonEmptyString([
+      errorPayload?.code,
+      errorPayload?.errorCode,
+      errorPayload?.error_code,
+      typeof errorPayload?.error === "string" ? errorPayload.error : "",
+      root?.code,
+      root?.errorCode,
+      root?.error_code,
+      typeof root?.error === "string" ? root.error : "",
+    ]) || ""
+  )
+    .trim()
+    .toLowerCase();
+  const action = String(
+    firstNonEmptyString([
+      errorPayload?.action,
+      root?.action,
+    ]) || ""
+  )
+    .trim()
+    .toLowerCase();
+  const message = getRestV2EnhancedErrorMessageText(
+    firstNonEmptyString([
+      errorPayload?.message,
+      root?.message,
+    ])
+  );
+  const details = getRestV2EnhancedErrorMessageText(
+    firstNonEmptyString([
+      errorPayload?.details,
+      root?.details,
+    ])
+  );
+  const helpUrl = String(
+    firstNonEmptyString([
+      errorPayload?.helpUrl,
+      errorPayload?.helpURL,
+      root?.helpUrl,
+      root?.helpURL,
+    ]) || ""
+  ).trim();
+  const trace = String(
+    firstNonEmptyString([
+      errorPayload?.trace,
+      root?.trace,
+    ]) || ""
+  ).trim();
+  const hint = String(
+    firstNonEmptyString([
+      code ? REST_V2_ENHANCED_ERROR_HINTS_BY_CODE[code] : "",
+      action ? REST_V2_ENHANCED_ERROR_ACTION_HINTS[action] : "",
+    ]) || ""
+  ).trim();
+  const displayParts = [];
+  if (code && message) {
+    displayParts.push(`${code}: ${message}`);
+  } else if (message) {
+    displayParts.push(message);
+  } else if (code) {
+    displayParts.push(code);
+  }
+  if (details && !displayParts.some((part) => part.includes(details))) {
+    displayParts.push(details);
+  }
+  if (hint && !displayParts.some((part) => part.includes(hint))) {
+    displayParts.push(hint);
+  }
+  const displayMessage = String(
+    firstNonEmptyString([
+      displayParts.join(" "),
+      normalizeHttpErrorMessage(typeof value === "string" ? value : ""),
+    ]) || ""
+  ).trim();
+
+  return {
+    ok: Boolean(code || message || details || helpUrl || trace),
+    httpStatus,
+    enhancedStatus,
+    effectiveStatus: enhancedStatus || httpStatus || 0,
+    code,
+    action,
+    message,
+    details,
+    helpUrl,
+    trace,
+    hint,
+    displayMessage,
+  };
+}
+
 function extractApiErrorCode(value) {
   if (!value) {
     return "";
@@ -18338,28 +18495,19 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
   });
 
   if (!response.ok) {
-    const errorCode = String(
-      firstNonEmptyString([
-        parsedPayload?.code,
-        parsedPayload?.error?.code,
-        parsedPayload?.error,
-      ]) || ""
-    ).trim();
-    const errorMessage =
-      firstNonEmptyString([
-        errorCode,
-        parsedPayload?.error?.code,
-        parsedPayload?.error,
-        parsedPayload?.details,
-        parsedPayload?.message,
-        normalizeHttpErrorMessage(responseText),
-        result.statusText,
-      ]) || `HTTP ${result.status}`;
+    const enhancedError = normalizeRestV2EnhancedError(parsedPayload || responseText, {
+      httpStatus: result.status,
+    });
+    const errorCode = String(enhancedError.code || "").trim();
+    const errorMessage = enhancedError.displayMessage || `HTTP ${result.status}`;
     const errorHint =
       Number(result.status || 0) === 401
         ? "REST V2 rejected the client bearer token. UnderPAR uses DCR auth for this API, and token refresh is automatic."
         : "";
     result.error = errorHint ? `${errorMessage}. ${errorHint}` : errorMessage;
+    if (enhancedError.ok) {
+      result.enhancedError = enhancedError;
+    }
     throw Object.assign(new Error(`${actionLabel} failed (${result.status}): ${errorMessage}`), { underparResult: result });
   }
 
@@ -18538,17 +18686,14 @@ async function fetchRestV2ProfilesForHarvest(harvest, options = {}) {
   });
 
   if (!response.ok) {
-    const errorMessage =
-      firstNonEmptyString([
-        parsedPayload?.code,
-        parsedPayload?.error?.code,
-        parsedPayload?.error,
-        parsedPayload?.details,
-        parsedPayload?.message,
-        normalizeHttpErrorMessage(responseText),
-        result.statusText,
-      ]) || `HTTP ${result.status}`;
+    const enhancedError = normalizeRestV2EnhancedError(parsedPayload || responseText, {
+      httpStatus: result.status,
+    });
+    const errorMessage = enhancedError.displayMessage || `HTTP ${result.status}`;
     result.error = errorMessage;
+    if (enhancedError.ok) {
+      result.enhancedError = enhancedError;
+    }
     throw Object.assign(new Error(`${actionLabel} failed (${result.status}): ${errorMessage}`), { underparResult: result });
   }
 
@@ -18718,15 +18863,14 @@ async function fetchTempPassProfilesForSelection(payload = {}, services = null) 
   };
 
   if (!response.ok) {
-    const errorMessage =
-      firstNonEmptyString([
-        parsedPayload?.code,
-        parsedPayload?.details,
-        parsedPayload?.message,
-        normalizeHttpErrorMessage(responseText),
-        result.statusText,
-      ]) || `HTTP ${result.status}`;
+    const enhancedError = normalizeRestV2EnhancedError(parsedPayload || responseText, {
+      httpStatus: result.status,
+    });
+    const errorMessage = enhancedError.displayMessage || `HTTP ${result.status}`;
     result.error = errorMessage;
+    if (enhancedError.ok) {
+      result.enhancedError = enhancedError;
+    }
     throw Object.assign(new Error(`TempPASS Profiles failed (${result.status}): ${errorMessage}`), {
       underparResult: result,
     });
@@ -18823,15 +18967,14 @@ async function fetchTempPassAuthorizeForSelection(payload = {}, services = null)
   };
 
   if (!response.ok) {
-    const errorMessage =
-      firstNonEmptyString([
-        parsedPayload?.code,
-        parsedPayload?.details,
-        parsedPayload?.message,
-        normalizeHttpErrorMessage(responseText),
-        result.statusText,
-      ]) || `HTTP ${result.status}`;
+    const enhancedError = normalizeRestV2EnhancedError(parsedPayload || responseText, {
+      httpStatus: result.status,
+    });
+    const errorMessage = enhancedError.displayMessage || `HTTP ${result.status}`;
     result.error = errorMessage;
+    if (enhancedError.ok) {
+      result.enhancedError = enhancedError;
+    }
     throw Object.assign(new Error(`TempPASS Authorize failed (${result.status}): ${errorMessage}`), {
       underparResult: result,
     });
@@ -18928,15 +19071,14 @@ async function resetTempPassForSelection(payload = {}, services = null) {
   };
 
   if (!response.ok) {
-    const errorMessage =
-      firstNonEmptyString([
-        parsedPayload?.code,
-        parsedPayload?.details,
-        parsedPayload?.message,
-        normalizeHttpErrorMessage(responseText),
-        result.statusText,
-      ]) || `HTTP ${result.status}`;
+    const enhancedError = normalizeRestV2EnhancedError(parsedPayload || responseText, {
+      httpStatus: result.status,
+    });
+    const errorMessage = enhancedError.displayMessage || `HTTP ${result.status}`;
     result.error = errorMessage;
+    if (enhancedError.ok) {
+      result.enhancedError = enhancedError;
+    }
     throw Object.assign(new Error(`${result.actionLabel} failed (${result.status}): ${errorMessage}`), {
       underparResult: result,
     });
@@ -19062,17 +19204,14 @@ async function fetchRestV2ConfigurationForHarvest(harvest) {
   });
 
   if (!response.ok) {
-    const errorMessage =
-      firstNonEmptyString([
-        parsedPayload?.code,
-        parsedPayload?.error?.code,
-        parsedPayload?.error,
-        parsedPayload?.details,
-        parsedPayload?.message,
-        normalizeHttpErrorMessage(responseText),
-        result.statusText,
-      ]) || `HTTP ${result.status}`;
+    const enhancedError = normalizeRestV2EnhancedError(parsedPayload || responseText, {
+      httpStatus: result.status,
+    });
+    const errorMessage = enhancedError.displayMessage || `HTTP ${result.status}`;
     result.error = errorMessage;
+    if (enhancedError.ok) {
+      result.enhancedError = enhancedError;
+    }
     throw Object.assign(new Error(`${actionLabel} failed (${result.status}): ${errorMessage}`), { underparResult: result });
   }
 
@@ -27742,15 +27881,10 @@ function isRestV2LogoutApiAccepted(response = null) {
 }
 
 function buildRestV2LogoutFailureReason(responseText = "", parsed = {}, response = null) {
-  return (
-    firstNonEmptyString([
-      parsed?.code,
-      parsed?.error,
-      parsed?.message,
-      normalizeHttpErrorMessage(responseText),
-      response?.statusText,
-    ]) || `Logout failed (${Number(response?.status || 0)}).`
-  );
+  const enhancedError = normalizeRestV2EnhancedError(parsed || responseText, {
+    httpStatus: Number(response?.status || 0),
+  });
+  return enhancedError.displayMessage || `Logout failed (${Number(response?.status || 0)}).`;
 }
 
 function buildRestV2LogoutAcceptedFallbackAction(parsed = {}, result = null) {
@@ -29139,6 +29273,24 @@ function extractRestV2SamlResponseFromDebugFlow(flow = null) {
     typeof extractRestV2PartnerFrameworkStatusFromDebugFlow === "function"
       ? extractRestV2PartnerFrameworkStatusFromDebugFlow(flow)
       : "";
+  const trustedPartnerFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(directPartnerFrameworkStatus);
+  const standardAuthenticateFlow = Boolean(
+    String(
+      (flow?.context && typeof flow.context === "object" ? flow.context?.sessionAction : "") ||
+        flow?.sessionAction ||
+        flow?.sessionData?.actionName ||
+        ""
+    )
+      .trim()
+      .toLowerCase() === "authenticate" ||
+      [
+        flow?.context?.loginUrl,
+        flow?.context?.sessionUrl,
+        flow?.loginUrl,
+        flow?.sessionUrl,
+        flow?.sessionData?.url,
+      ].some((candidate) => /\/authenticate\//i.test(String(candidate || "").trim()))
+  );
   let fallback = null;
   const events = Array.isArray(flow?.events) ? flow.events : [];
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -29163,14 +29315,13 @@ function extractRestV2SamlResponseFromDebugFlow(flow = null) {
           : extractRestV2SamlResponseFromText(String(event?.postDataPreview || event?.bodyPreview || "").trim());
       const normalizedSaml = normalizeRestV2SamlResponseForPartnerProfile(extracted);
       if (normalizedSaml) {
+        const partnerName = extractRestV2PartnerNameFromSsoApiUrl(requestUrl);
+        const trustedForPartnerSso = Boolean(partnerName || (!standardAuthenticateFlow && trustedPartnerFrameworkStatus));
         const result = {
           samlResponse: normalizedSaml,
           source: `tab-network:${normalizedPhase || "request"}`,
-          partner: extractRestV2PartnerNameFromSsoApiUrl(requestUrl),
-          trustedForPartnerSso: Boolean(
-            extractRestV2PartnerNameFromSsoApiUrl(requestUrl) ||
-              isRestV2PartnerFrameworkStatusUsable(directPartnerFrameworkStatus)
-          ),
+          partner: partnerName,
+          trustedForPartnerSso,
         };
         if (result.trustedForPartnerSso === true) {
           return result;
@@ -29193,14 +29344,13 @@ function extractRestV2SamlResponseFromDebugFlow(flow = null) {
       const rawSaml = extractRestV2SamlResponseFromWebRequestEvent(event);
       const normalizedSaml = normalizeRestV2SamlResponseForPartnerProfile(rawSaml);
       if (normalizedSaml) {
+        const partnerName = extractRestV2PartnerNameFromSsoApiUrl(String(event.url || "").trim());
+        const trustedForPartnerSso = Boolean(partnerName || (!standardAuthenticateFlow && trustedPartnerFrameworkStatus));
         const result = {
           samlResponse: normalizedSaml,
           source: "web-request:onBeforeRequest",
-          partner: extractRestV2PartnerNameFromSsoApiUrl(String(event.url || "").trim()),
-          trustedForPartnerSso: Boolean(
-            extractRestV2PartnerNameFromSsoApiUrl(String(event.url || "").trim()) ||
-              isRestV2PartnerFrameworkStatusUsable(directPartnerFrameworkStatus)
-          ),
+          partner: partnerName,
+          trustedForPartnerSso,
         };
         if (result.trustedForPartnerSso === true) {
           return result;
@@ -30078,15 +30228,13 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
     result.ok = response.ok === true;
     result.created = response.ok === true;
     if (!result.ok) {
-      result.error =
-        firstNonEmptyString([
-          String(parsed?.code || "").trim(),
-          String(parsed?.error?.code || "").trim(),
-          String(parsed?.error || "").trim(),
-          String(parsed?.message || "").trim(),
-          normalizeHttpErrorMessage(responseText),
-          `HTTP ${result.status || 0} ${result.statusText || ""}`.trim(),
-        ]) || "Partner SSO profile creation failed.";
+      const enhancedError = normalizeRestV2EnhancedError(parsed || responseText, {
+        httpStatus: result.status,
+      });
+      result.error = enhancedError.displayMessage || "Partner SSO profile creation failed.";
+      if (enhancedError.ok) {
+        result.enhancedError = enhancedError;
+      }
     }
     if (result.ok) {
       context.partner = result.partner;
@@ -30106,6 +30254,10 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
       created: result.created,
       profileCount,
       error: String(result.error || "").trim(),
+      enhancedErrorCode: String(result?.enhancedError?.code || "").trim(),
+      enhancedErrorAction: String(result?.enhancedError?.action || "").trim(),
+      enhancedErrorHelpUrl: String(result?.enhancedError?.helpUrl || "").trim(),
+      enhancedErrorTrace: String(result?.enhancedError?.trace || "").trim(),
       expectedProviderId,
       frameworkProviderId,
       frameworkPartner: frameworkPartnerName,
@@ -30582,18 +30734,13 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
     const status = Number(response.status || 0);
     const statusText = String(response.statusText || "");
     const responsePreview = truncateDebugText(responseText, 1200);
+    const enhancedError = normalizeRestV2EnhancedError(parsed || responseText, {
+      httpStatus: status,
+    });
     const errorMessage =
       response.ok === true
         ? ""
-        : firstNonEmptyString([
-            parsed?.code,
-            parsed?.error?.code,
-            parsed?.error,
-            parsed?.message,
-            parsed?.description,
-            normalizeHttpErrorMessage(responseText),
-            statusText,
-          ]) || `HTTP ${status}`;
+        : enhancedError.displayMessage || `HTTP ${status}`;
     const harvestedProfile = buildRestV2ProfileHarvest(
       context,
       {
@@ -30606,6 +30753,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
         responsePayload: effectivePayload,
         url: endpoint.url,
         error: errorMessage,
+        enhancedError: enhancedError.ok ? enhancedError : null,
       },
       flowId
     );
@@ -65857,6 +66005,24 @@ async function openPremiumServiceDocumentation(serviceKey = "", requestedUrl = "
 
 async function runRestV2InteractiveDocsHydrator(config = {}) {
   const normalize = (value) => String(value || "").trim();
+  const uniqueStrings = (values = []) => {
+    const seen = new Set();
+    const output = [];
+    (Array.isArray(values) ? values : [values]).forEach((value) => {
+      const normalizedValue = normalize(value);
+      if (!normalizedValue) {
+        return;
+      }
+      const dedupeKey = normalizedValue.toLowerCase();
+      if (seen.has(dedupeKey)) {
+        return;
+      }
+      seen.add(dedupeKey);
+      output.push(normalizedValue);
+    });
+    return output;
+  };
+  const normalizeFieldMatchToken = (value) => normalize(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
   const parseFieldReference = (fieldName = "") => {
     const normalizedFieldName = normalize(fieldName);
     const dotIndex = normalizedFieldName.indexOf(".");
@@ -65871,15 +66037,113 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       name: normalize(normalizedFieldName.slice(dotIndex + 1)),
     };
   };
+  const getHeaderAliasCandidates = (headerName = "") => {
+    const normalizedHeaderName = normalize(headerName);
+    const lowerHeaderName = normalizedHeaderName.toLowerCase();
+    if (!lowerHeaderName) {
+      return [];
+    }
+    if (lowerHeaderName === "adobe-subject-token") {
+      return [
+        "Adobe-Subject-Token",
+        "adobe-subject-token",
+        "adobeSubjectToken",
+        "subjectToken",
+        "subject_token",
+      ];
+    }
+    if (lowerHeaderName === "ad-service-token") {
+      return [
+        "AD-Service-Token",
+        "ad-service-token",
+        "adServiceToken",
+        "serviceToken",
+        "service_token",
+      ];
+    }
+    if (lowerHeaderName === "ap-temppass-identity" || lowerHeaderName === "ap-temp-pass-identity") {
+      return [
+        "AP-Temppass-Identity",
+        "AP-TempPass-Identity",
+        "ap-temppass-identity",
+        "ap-temp-pass-identity",
+        "tempPassIdentity",
+        "temp_pass_identity",
+        "apTempPassIdentity",
+      ];
+    }
+    if (lowerHeaderName === "ap-partner-framework-status") {
+      return [
+        "AP-Partner-Framework-Status",
+        "ap-partner-framework-status",
+        "partnerFrameworkStatus",
+        "partner_framework_status",
+        "frameworkStatus",
+      ];
+    }
+    if (lowerHeaderName === "ap-visitor-identifier") {
+      return [
+        "AP-Visitor-Identifier",
+        "ap-visitor-identifier",
+        "visitorIdentifier",
+        "visitorId",
+        "visitor_id",
+        "ecid",
+      ];
+    }
+    return [normalizedHeaderName];
+  };
   const getFieldNameCandidates = (fieldName = "") => {
     const normalizedFieldName = normalize(fieldName);
     if (!normalizedFieldName) {
       return [];
     }
-    if (normalizedFieldName === "header.AP-Temppass-Identity") {
-      return [normalizedFieldName, "header.AP-TempPass-Identity"];
+    const { scope, name } = parseFieldReference(normalizedFieldName);
+    const candidates = [normalizedFieldName];
+    if (name) {
+      candidates.push(name);
+      if (scope) {
+        candidates.push(`${scope}.${name}`);
+      }
     }
-    return [normalizedFieldName];
+    if (scope === "header" && name) {
+      getHeaderAliasCandidates(name).forEach((alias) => {
+        candidates.push(alias);
+        candidates.push(`header.${alias}`);
+      });
+    }
+    return uniqueStrings(candidates);
+  };
+  const buildFieldReferenceCandidates = (fieldName = "") =>
+    getFieldNameCandidates(fieldName)
+      .map((candidate) => {
+        const parsed = parseFieldReference(candidate);
+        const name = normalize(parsed?.name || candidate);
+        const scope = normalize(parsed?.scope || "");
+        const rawCandidates = uniqueStrings([candidate, name]);
+        const matchTokens = uniqueStrings(rawCandidates.map((value) => normalizeFieldMatchToken(value))).filter(Boolean);
+        if (!name || matchTokens.length === 0) {
+          return null;
+        }
+        return {
+          scope,
+          name,
+          rawCandidates,
+          matchTokens,
+        };
+      })
+      .filter(Boolean);
+  const isElementScopeCompatible = (element, scope = "") => {
+    const normalizedScope = normalize(scope).toLowerCase();
+    if (!element || !normalizedScope) {
+      return true;
+    }
+    const dataScope = normalize(element.getAttribute?.("data-param-in")).toLowerCase();
+    if (dataScope) {
+      return dataScope === normalizedScope;
+    }
+    const elementHaystackToken = normalizeFieldMatchToken(getElementTextHaystack(element, { includeParentText: true }));
+    return !elementHaystackToken || elementHaystackToken.includes(normalizeFieldMatchToken(normalizedScope));
   };
   const collectDescendants = (root) => {
     if (!root || typeof root.querySelectorAll !== "function") {
@@ -65925,6 +66189,48 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       return element;
     }
     return collectDescendants(element).find((candidate) => isFormControlElement(candidate)) || null;
+  };
+  const doesControlMatchField = (element, fieldCandidates = []) => {
+    if (!element || !Array.isArray(fieldCandidates) || fieldCandidates.length === 0) {
+      return false;
+    }
+    const rawControlCandidates = uniqueStrings([
+      element.getAttribute?.("data-param-name"),
+      element.getAttribute?.("data-name"),
+      element.getAttribute?.("name"),
+      element.getAttribute?.("aria-label"),
+      element.getAttribute?.("placeholder"),
+      element.id,
+      element.textContent,
+    ]);
+    const controlMatchTokens = uniqueStrings(rawControlCandidates.map((value) => normalizeFieldMatchToken(value))).filter(Boolean);
+    if (controlMatchTokens.length === 0) {
+      return false;
+    }
+    return fieldCandidates.some(({ scope, rawCandidates, matchTokens }) => {
+      if (!isElementScopeCompatible(element, scope)) {
+        return false;
+      }
+      const exactMatch = rawCandidates.some((candidate) =>
+        rawControlCandidates.some((controlCandidate) => String(controlCandidate || "").toLowerCase() === String(candidate || "").toLowerCase())
+      );
+      if (exactMatch) {
+        return true;
+      }
+      return matchTokens.some((candidateToken) =>
+        controlMatchTokens.some((controlToken) => controlToken === candidateToken || controlToken.includes(candidateToken))
+      );
+    });
+  };
+  const findMatchingControlWithin = (element, fieldCandidates = []) => {
+    if (!element) {
+      return null;
+    }
+    if (isFormControlElement(element) && doesControlMatchField(element, fieldCandidates)) {
+      return element;
+    }
+    const descendants = collectDescendants(element).filter((candidate) => isFormControlElement(candidate));
+    return descendants.find((candidate) => doesControlMatchField(candidate, fieldCandidates)) || findEmbeddedControlWithin(element);
   };
   const isLikelyRequestBodyElement = (element) => {
     if (!element || !isFormControlElement(element)) {
@@ -66073,32 +66379,26 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     return true;
   };
   const findLabeledControl = (operation, fieldName) => {
-    const fieldNameCandidates = getFieldNameCandidates(fieldName)
-      .map((candidate) => parseFieldReference(candidate))
-      .filter((candidate) => String(candidate?.name || "").trim());
-    if (!operation || fieldNameCandidates.length === 0) {
+    const fieldCandidates = buildFieldReferenceCandidates(fieldName);
+    if (!operation || fieldCandidates.length === 0) {
       return null;
     }
     const descendants = collectDescendants(operation);
     const candidates = descendants.filter((element) => {
-      const haystack = getElementTextHaystack(element);
-      if (!haystack) {
+      const haystackToken = normalizeFieldMatchToken(getElementTextHaystack(element));
+      if (!haystackToken) {
         return false;
       }
-      return fieldNameCandidates.some(({ scope, name }) => {
-        const normalizedName = String(name || "").trim().toLowerCase();
-        if (!normalizedName || !haystack.includes(normalizedName)) {
+      return fieldCandidates.some(({ scope, matchTokens }) => {
+        const hasNameMatch = matchTokens.some((candidateToken) => haystackToken.includes(candidateToken));
+        if (!hasNameMatch) {
           return false;
         }
-        if (!scope) {
-          return true;
-        }
-        const dataScope = normalize(element.getAttribute?.("data-param-in")).toLowerCase();
-        return !dataScope || dataScope === scope || haystack.includes(scope);
+        return isElementScopeCompatible(element, scope);
       });
     });
     for (const candidate of candidates) {
-      const control = findEmbeddedControlWithin(candidate);
+      const control = findMatchingControlWithin(candidate, fieldCandidates);
       if (control) {
         return control;
       }
@@ -66157,6 +66457,7 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
   };
   const findControl = (operation, fieldName) => {
     const fieldNameCandidates = getFieldNameCandidates(fieldName);
+    const fieldCandidates = buildFieldReferenceCandidates(fieldName);
     const normalizedFieldName = normalize(fieldNameCandidates[0] || fieldName);
     if (!operation || !normalizedFieldName || fieldNameCandidates.length === 0) {
       return null;
@@ -66174,6 +66475,12 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
       if (byName) {
         return byName;
       }
+    }
+    const directMatch = collectDescendants(operation)
+      .filter((element) => isFormControlElement(element))
+      .find((element) => doesControlMatchField(element, fieldCandidates));
+    if (directMatch) {
+      return directMatch;
     }
     if (normalizedFieldName === "body.resources") {
       return findRequestBodyEditor(operation);
@@ -66221,11 +66528,13 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
 
   const normalizedFieldValues = config?.fieldValues && typeof config.fieldValues === "object" ? config.fieldValues : {};
   const fieldNames = Object.keys(normalizedFieldValues);
+  const requiredFields = Array.isArray(config?.requiredFields) ? config.requiredFields.map((item) => normalize(item)).filter(Boolean) : [];
+  const initialMountFieldNames = requiredFields.length > 0 ? uniqueStrings(requiredFields) : fieldNames;
   const hasInteractiveControlsMounted = () => {
-    if (fieldNames.length === 0) {
+    if (initialMountFieldNames.length === 0) {
       return collectDescendants(operationElement).some((element) => isFormControlElement(element));
     }
-    return fieldNames.every((fieldName) => {
+    return initialMountFieldNames.every((fieldName) => {
       if (fieldName.startsWith("body.")) {
         return Boolean(findControl(operationElement, fieldName) || findRequestBodyEditor(operationElement));
       }
@@ -66265,10 +66574,13 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
   const missingControls = [];
   const bodyEditorEntries = [];
   const sharedBodyEditor = findRequestBodyEditor(operationElement);
+  const perFieldWaitMs = Math.min(900, Math.max(260, Number(config?.perFieldWaitMs || 360)));
 
   for (const [fieldName, rawValue] of Object.entries(normalizedFieldValues)) {
     const normalizedFieldName = normalize(fieldName);
-    const control = findControl(operationElement, fieldName);
+    const control =
+      findControl(operationElement, fieldName) ||
+      ((await waitFor(() => findControl(operationElement, fieldName), perFieldWaitMs, 90)) || null);
     if (normalizedFieldName.startsWith("body.") && control && sharedBodyEditor && control === sharedBodyEditor) {
       bodyEditorEntries.push([fieldName, rawValue]);
       continue;
@@ -66308,7 +66620,6 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     }
   }
 
-  const requiredFields = Array.isArray(config?.requiredFields) ? config.requiredFields.map((item) => normalize(item)).filter(Boolean) : [];
   const missingRequiredFields = Array.isArray(config?.missingRequiredFields)
     ? config.missingRequiredFields.map((item) => normalize(item)).filter(Boolean)
     : [];
@@ -87974,6 +88285,8 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
   if (!isRestV2PartnerFrameworkStatusUsable(normalizedValue)) {
     return false;
   }
+  const requestorId = String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim();
+  const selectedMvpd = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
   const expectedProviderId = String(resolveRestV2ExpectedPartnerFrameworkProviderId(context) || "")
     .trim()
     .toLowerCase();
@@ -87983,12 +88296,23 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
   if (!actualProviderId) {
     return false;
   }
+  const resolvedMvpd = resolveRestV2MvpdMetaForPartnerFrameworkProviderId(actualProviderId, requestorId, context);
+  const resolvedMvpdId = String(resolvedMvpd?.mvpdId || "").trim();
   if (expectedProviderId) {
-    return actualProviderId === expectedProviderId;
+    if (actualProviderId !== expectedProviderId) {
+      return false;
+    }
+    if (selectedMvpd && resolvedMvpdId && !isRestV2MvpdMatch(resolvedMvpdId, selectedMvpd, { allowSsoAlias: true })) {
+      return false;
+    }
+    return Boolean(resolvedMvpdId || selectedMvpd);
   }
   const resolvedPartnerName = String(resolveRestV2LearningPartnerNameFromContext(context) || "")
     .trim()
     .toLowerCase();
+  if (resolvedPartnerName && !resolvedMvpdId) {
+    return false;
+  }
   if (resolvedPartnerName) {
     const genericMvpdId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd, context?.mvpdMeta?.id]) || "")
       .trim()
@@ -87996,6 +88320,9 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
     if (genericMvpdId && actualProviderId === genericMvpdId) {
       return false;
     }
+  }
+  if (selectedMvpd && resolvedMvpdId && !isRestV2MvpdMatch(resolvedMvpdId, selectedMvpd, { allowSsoAlias: true })) {
+    return false;
   }
   return true;
 }
@@ -88436,6 +88763,11 @@ function validateRestV2PartnerFrameworkStatusInput(value = "", options = {}) {
   );
   result.mvpdId = String(resolvedMvpd?.mvpdId || "").trim();
   result.mvpdLabel = getRestV2MvpdPickerLabel(requestorId, result.mvpdId, resolvedMvpd?.mvpdMeta || null);
+  if (compatibilityContext && result.providerId && !result.mvpdId) {
+    result.errors.push(
+      `Partner framework provider id ${result.providerId} is not associated with a known MVPD for ${requestorId || "the selected requestor"}.`
+    );
+  }
   if (
     compatibilityContext &&
     result.providerId &&
@@ -89031,19 +89363,18 @@ async function createRestV2SessionForContext(context, options = {}) {
       }
 
       lastStatus = response.status;
-      const message =
-        firstNonEmptyString([
-          parsed?.code,
-          parsed?.error,
-          parsed?.message,
-          parsed?.description,
-          normalizeHttpErrorMessage(text),
-          response.statusText,
-        ]) || response.statusText;
+      const enhancedError = normalizeRestV2EnhancedError(parsed || text, {
+        httpStatus: response.status,
+      });
+      const message = enhancedError.displayMessage || response.statusText;
       lastErrorText = `Create session payload failed (${response.status}): ${message}`;
       log("REST V2 create-session failed", {
         status: response.status,
         message,
+        enhancedErrorCode: String(enhancedError.code || "").trim(),
+        enhancedErrorAction: String(enhancedError.action || "").trim(),
+        enhancedErrorHelpUrl: String(enhancedError.helpUrl || "").trim(),
+        enhancedErrorTrace: String(enhancedError.trace || "").trim(),
         serviceProvider: context.serviceProviderId,
         appGuid: appCandidate.guid,
       });

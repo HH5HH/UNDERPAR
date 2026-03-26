@@ -102,8 +102,12 @@ function loadRestV2LearningPlanBuilder() {
     extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
     extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
     extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
+    extractFunctionSource(source, "isRestV2MvpdMatch"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "resolveRestV2MvpdMetaForPartnerFrameworkProviderId"),
     extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusFromSessionData"),
@@ -393,7 +397,11 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
     extractFunctionSource(source, "extractRestV2VisitorIdentifierFromCarrierValue"),
     extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
+    extractFunctionSource(source, "isRestV2MvpdMatch"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "resolveRestV2MvpdMetaForPartnerFrameworkProviderId"),
     extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
     extractFunctionSource(source, "sampleRestV2LearningResourceIds"),
@@ -2222,6 +2230,14 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     redirectUrl: "https://experience.example.test/callback",
     domainName: "experience.example.test",
     partner: "Apple",
+    learningPartner: "Apple",
+    mvpdMeta: {
+      id: "Comcast_SSO",
+      name: "Xfinity",
+      partnerPlatformMappings: {
+        Apple: "comcast-provider-map",
+      },
+    },
     partnerFrameworkStatus: validPartnerFrameworkStatus,
     adobeSubjectToken,
     adServiceToken,
@@ -2583,7 +2599,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       requireBodySamlResponse: true,
       contentType: "application/x-www-form-urlencoded",
     },
-    { ...baseContext, partner: "", samlResponse: "", partnerFrameworkStatus: "" },
+    { ...baseContext, partner: "", learningPartner: "", samlResponse: "", partnerFrameworkStatus: "" },
     accessToken
   );
   assert.deepEqual(
@@ -3029,6 +3045,69 @@ test("REST V2 learning keeps Create Partner Profile blocked when the inferred pr
   assert.equal(plan.fieldValues["path.partner"], "Apple");
   assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
   assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+});
+
+test("REST V2 learning keeps Create Partner Profile blocked when the provider id is not associated with any known MVPD", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const unknownProviderFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple_Unmapped",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+
+  const plan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    {
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      requestorAutoResolved: false,
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        partnerPlatformMappings: {
+          Apple: "Comcast_SSO_Apple",
+        },
+      },
+      partner: "",
+      partnerFrameworkStatus: unknownProviderFrameworkStatus,
+      learningPartner: "Apple",
+      learningPartnerFrameworkStatus: "",
+      learningPartnerSource: "captured partner flow",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      samlSource: "web-request:onBeforeRequest",
+      samlTrustedForPartnerSso: true,
+    },
+    "test-token"
+  );
+
+  assert.equal(plan.fieldValues["path.partner"], "Apple");
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.match(plan.notes.join(" "), /exact AP-Partner-Framework-Status payload/i);
 });
 
 test("premium service sections and HR service pills keep their theme class wiring", () => {

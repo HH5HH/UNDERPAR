@@ -103,8 +103,12 @@ function loadPlanBuilder() {
     extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
     extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
     extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
+    extractFunctionSource(source, "isRestV2MvpdMatch"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "resolveRestV2MvpdMetaForPartnerFrameworkProviderId"),
     extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusFromSessionData"),
@@ -268,6 +272,14 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     redirectUrl: "https://experience.example.test/callback",
     domainName: "experience.example.test",
     partner: "Apple",
+    learningPartner: "Apple",
+    mvpdMeta: {
+      id: "Comcast_SSO",
+      name: "Xfinity",
+      partnerPlatformMappings: {
+        Apple: "comcast-provider-map",
+      },
+    },
     partnerFrameworkStatus: validPartnerFrameworkStatus,
     adobeSubjectToken: "subject-token-payload",
     adServiceToken: "service-token-payload",
@@ -286,6 +298,17 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
 
     const serviceProviderParam = getParameter(specMeta.parameters, "serviceProvider", "path");
     assert.ok(serviceProviderParam?.required, `${entry.operationId} must keep path.serviceProvider required`);
+    const deviceIdentifierHeader = getParameter(specMeta.parameters, "AP-Device-Identifier", "header");
+    const deviceInfoHeader = getParameter(specMeta.parameters, "X-Device-Info", "header");
+    assert.equal(
+      entry.usesDeviceHeaders === true,
+      Boolean(deviceIdentifierHeader && deviceInfoHeader),
+      `${entry.operationId} device-header usage drifted`
+    );
+    if (entry.usesDeviceHeaders === true) {
+      assert.equal(deviceIdentifierHeader?.required, true, `${entry.operationId} must keep AP-Device-Identifier required`);
+      assert.equal(deviceInfoHeader?.required, true, `${entry.operationId} must keep X-Device-Info required`);
+    }
 
     const codeParam = getParameter(specMeta.parameters, "code", "path");
     assert.equal(entry.usesSessionCode === true, Boolean(codeParam), `${entry.operationId} code-path usage drifted`);
@@ -323,6 +346,12 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
       entry.usesVisitorIdentifier === true,
       Boolean(visitorIdentifierHeader),
       `${entry.operationId} AP-Visitor-Identifier usage drifted`
+    );
+    const partnerFrameworkStatusHeader = getParameter(specMeta.parameters, "AP-Partner-Framework-Status", "header");
+    assert.equal(
+      entry.usesPartnerFrameworkStatus === true,
+      Boolean(partnerFrameworkStatusHeader),
+      `${entry.operationId} AP-Partner-Framework-Status usage drifted`
     );
     if (String(entry.sectionKey || "") === "partnerSso") {
       assert.equal(entry.requirePartnerFrameworkStatus === true, true, `${entry.operationId} must require a usable partner framework payload`);
