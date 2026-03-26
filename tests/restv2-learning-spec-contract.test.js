@@ -99,10 +99,65 @@ function loadPlanBuilder() {
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
     extractFunctionSource(source, "extractRestV2VisitorIdentifierFromCarrierValue"),
     extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
     extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
     extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
+    `function extractRestV2InteractiveDocsHeaderValueFromText(value = "", headerName = "") {
+      const normalizedHeaderName = String(headerName || "").trim();
+      const raw = String(value || "").trim();
+      if (!normalizedHeaderName || !raw) {
+        return "";
+      }
+      const aliases = getRestV2InteractiveDocsHeaderAliasCandidates(normalizedHeaderName);
+      const textCandidates = dedupeRestV2CandidateStrings([
+        raw,
+        decodeURIComponentSafe(raw),
+        decodeBase64TextSafe(raw),
+        decodeBase64TextSafe(decodeURIComponentSafe(raw)),
+      ]);
+      for (const candidateText of textCandidates) {
+        const looksLikeStandaloneHeaderValue =
+          !/[{}\\n\\r]/.test(candidateText) && !candidateText.includes("://") && !candidateText.includes("&");
+        const normalizedDirect = looksLikeStandaloneHeaderValue
+          ? normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, candidateText)
+          : "";
+        if (normalizedDirect) {
+          return normalizedDirect;
+        }
+        const parsed = parseJsonText(candidateText, null);
+        const objectCandidates = collectRestV2CaseInsensitiveObjectValues(parsed, aliases, { maxDepth: 5 });
+        for (const objectCandidate of objectCandidates) {
+          const normalizedObjectCandidate = normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, objectCandidate);
+          if (normalizedObjectCandidate) {
+            return normalizedObjectCandidate;
+          }
+        }
+        try {
+          const parsedUrl = new URL(candidateText, ADOBE_SP_BASE);
+          for (const alias of aliases) {
+            const queryCandidate = String(parsedUrl.searchParams.get(alias) || "").trim();
+            const normalizedQueryCandidate = normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, queryCandidate);
+            if (normalizedQueryCandidate) {
+              return normalizedQueryCandidate;
+            }
+          }
+        } catch {}
+      }
+      const escapedAliases = aliases
+        .map((alias) => String(alias || "").trim())
+        .filter(Boolean)
+        .sort((left, right) => right.length - left.length)
+        .map((alias) => alias.replace(/[.*+?^$()|[\\]\\\\]/g, "\\\\$&"));
+      if (escapedAliases.length === 0) {
+        return "";
+      }
+      const inlineMatch = raw.match(new RegExp("(?:"
+        + escapedAliases.join("|")
+        + ")[\\\"'=:\\\\s]+([^\\\"\\\\s&,}]{8,})", "i"));
+      return normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, String(inlineMatch?.[1] || "").trim());
+    }`,
     extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
     extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
     extractFunctionSource(source, "isRestV2MvpdMatch"),

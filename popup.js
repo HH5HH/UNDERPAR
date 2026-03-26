@@ -14090,6 +14090,127 @@ function buildUnderparDebugSupportPacketSummary(snapshot = null) {
   };
 }
 
+function buildUnderparRestV2DebugSnapshot(programmer = null) {
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer();
+  const baseContext =
+    buildRestV2InteractiveDocsContext(resolvedProgrammer, null) ||
+    buildRestV2SelectionContextFromRecordingContext(state.restV2RecordingContext) ||
+    null;
+  if (!baseContext || baseContext?.ok !== true) {
+    return {
+      selection_ready: "no",
+      selection_error: String(baseContext?.error || baseContext?.reason || "REST V2 context is not ready.").trim(),
+    };
+  }
+
+  const requestorId = String(firstNonEmptyString([baseContext?.requestorId, baseContext?.serviceProviderId]) || "").trim();
+  const selectedMvpd = String(firstNonEmptyString([baseContext?.mvpd, baseContext?.selectedMvpd]) || "").trim();
+  const resolvedMvpdMeta = getRestV2MvpdMeta(requestorId, selectedMvpd, baseContext?.mvpdMeta || null) || baseContext?.mvpdMeta || null;
+  const directFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2PartnerFrameworkStatusFromContext(baseContext)
+  );
+  const learningFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2LearningPartnerFrameworkStatusFromContext(baseContext)
+  );
+  const preferredFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2PreferredPartnerFrameworkStatusForContext(baseContext)
+  );
+  const preferredSummary = resolveRestV2PartnerFrameworkStatusSummary(preferredFrameworkStatus);
+  const expectedProviderId = String(resolveRestV2ExpectedPartnerFrameworkProviderId(baseContext) || "").trim();
+  const resolvedProviderMvpd = resolveRestV2MvpdMetaForPartnerFrameworkProviderId(
+    String(preferredSummary.providerId || "").trim(),
+    requestorId,
+    baseContext
+  );
+  const selectedPartner = String(
+    firstNonEmptyString([
+      resolveRestV2LearningPartnerNameFromContext(baseContext),
+      resolveRestV2PartnerNameFromContext(baseContext),
+    ]) || ""
+  ).trim();
+  const selectedMvpdLabel = getRestV2MvpdPickerLabel(requestorId, selectedMvpd, resolvedMvpdMeta);
+  const resolvedProviderMvpdId = String(resolvedProviderMvpd?.mvpdId || "").trim();
+  const resolvedProviderMvpdLabel = resolvedProviderMvpdId
+    ? getRestV2MvpdPickerLabel(requestorId, resolvedProviderMvpdId, resolvedProviderMvpd?.mvpdMeta || null)
+    : "";
+  const partnerPlatformMappings =
+    resolvedMvpdMeta?.partnerPlatformMappings && typeof resolvedMvpdMeta.partnerPlatformMappings === "object"
+      ? { ...resolvedMvpdMeta.partnerPlatformMappings }
+      : null;
+  const preferredFrameworkSource =
+    preferredFrameworkStatus && preferredFrameworkStatus === learningFrameworkStatus
+      ? "learning_partner_framework_status"
+      : preferredFrameworkStatus && preferredFrameworkStatus === directFrameworkStatus
+        ? "partner_framework_status"
+        : preferredFrameworkStatus
+          ? "normalized_partner_framework_status"
+          : learningFrameworkStatus
+            ? "learning_partner_framework_status"
+            : directFrameworkStatus
+              ? "partner_framework_status"
+              : "missing";
+  const debugChecklist = [
+    "Decode AP-Partner-Framework-Status once and inspect frameworkPermissionInfo.accessStatus, frameworkProviderInfo.id, and frameworkProviderInfo.expiration_date.",
+    "Confirm frameworkPermissionInfo.accessStatus is granted and frameworkProviderInfo.id is a non-empty mapping id, not a display name.",
+    "Fetch GET /api/v2/{serviceProvider}/configuration and compare frameworkProviderInfo.id to the selected MVPD mapping id for this serviceProvider.",
+    "Confirm the selected serviceProvider, Apple picker MVPD, and Adobe Pass environment all match the same integration stack.",
+    "If frameworkProviderInfo.id matches configuration but Adobe still returns provider_id_not_determined, treat it as an Adobe Pass config mismatch instead of a client hydration bug.",
+  ];
+  return {
+    selection_ready: "yes",
+    service_provider: requestorId || "n/a",
+    configuration_endpoint: requestorId ? `${REST_V2_BASE}/${encodeURIComponent(requestorId)}/configuration` : "n/a",
+    selected_mvpd: selectedMvpd || "n/a",
+    selected_mvpd_label: selectedMvpdLabel || "n/a",
+    selected_partner: selectedPartner || "n/a",
+    learning_partner_source: String(baseContext?.learningPartnerSource || "").trim() || "n/a",
+    selected_mvpd_platform_mapping_id: String(
+      firstNonEmptyString([
+        baseContext?.mvpdPlatformMappingId,
+        resolvedMvpdMeta?.platformMappingId,
+        resolvedMvpdMeta?.platformMappingID,
+      ]) || ""
+    ).trim() || "n/a",
+    selected_mvpd_partner_platform_mappings: partnerPlatformMappings || null,
+    adobe_subject_token_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "Adobe-Subject-Token") ? "yes" : "no",
+    ad_service_token_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AD-Service-Token") ? "yes" : "no",
+    temp_pass_identity_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AP-Temppass-Identity") ? "yes" : "no",
+    visitor_identifier_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AP-Visitor-Identifier") ? "yes" : "no",
+    preferred_partner_framework_status_source: preferredFrameworkSource,
+    preferred_partner_framework_status_present: preferredFrameworkStatus ? "yes" : "no",
+    preferred_partner_framework_status_usable: preferredSummary.usable === true ? "yes" : "no",
+    framework_permission_access_status: String(preferredSummary.accessStatus || "").trim() || "n/a",
+    framework_partner: String(preferredSummary.partnerName || "").trim() || "n/a",
+    framework_provider_id: String(preferredSummary.providerId || "").trim() || "n/a",
+    framework_expected_provider_id: expectedProviderId || "n/a",
+    framework_expiration_date: String(preferredSummary.expirationDate || "").trim() || "n/a",
+    framework_resolved_mvpd_id: resolvedProviderMvpdId || "n/a",
+    framework_resolved_mvpd_label: resolvedProviderMvpdLabel || "n/a",
+    framework_matches_selected_mvpd:
+      preferredFrameworkStatus && isRestV2PartnerFrameworkStatusCompatibleWithContext(preferredFrameworkStatus, baseContext)
+        ? "yes"
+        : "no",
+    decoded_ap_partner_framework_status:
+      parseRestV2PartnerFrameworkStatusPayload(preferredFrameworkStatus) ||
+      parseRestV2PartnerFrameworkStatusPayload(directFrameworkStatus) ||
+      parseRestV2PartnerFrameworkStatusPayload(learningFrameworkStatus) ||
+      null,
+    direct_partner_framework_status_decoded:
+      directFrameworkStatus && directFrameworkStatus !== preferredFrameworkStatus
+        ? parseRestV2PartnerFrameworkStatusPayload(directFrameworkStatus) || null
+        : null,
+    learning_partner_framework_status_decoded:
+      learningFrameworkStatus && learningFrameworkStatus !== preferredFrameworkStatus
+        ? parseRestV2PartnerFrameworkStatusPayload(learningFrameworkStatus) || null
+        : null,
+    saml_source: String(baseContext?.samlSource || "").trim() || "n/a",
+    saml_trusted_for_partner_sso: baseContext?.samlTrustedForPartnerSso === true ? "yes" : "no",
+    partner_sso_debug_steps: debugChecklist,
+    support_prompt:
+      "If you paste a redacted decoded AP-Partner-Framework-Status payload here plus your serviceProvider value and the MVPD you're choosing in the Apple picker, I can pinpoint exactly what needs to change.",
+  };
+}
+
 function buildUnderparDebugSupportPacketData(options = {}) {
   const fullExport = options?.fullExport === true;
   const loginData = state.loginData && typeof state.loginData === "object" ? state.loginData : null;
@@ -14099,6 +14220,7 @@ function buildUnderparDebugSupportPacketData(options = {}) {
   const selectedProgrammer = resolveSelectedProgrammer();
   const selectedProgrammerId = String(selectedProgrammer?.programmerId || "").trim();
   const selectedServices = selectedProgrammerId ? getCurrentPremiumAppsSnapshot(selectedProgrammerId) : null;
+  const restV2Snapshot = buildUnderparRestV2DebugSnapshot(selectedProgrammer);
   const globalStatus = String(els.status?.textContent || "").trim();
   const selectedMvpdLabel = state.selectedMvpdId
     ? String(getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), state.selectedMvpdId) || state.selectedMvpdId).trim()
@@ -14239,6 +14361,10 @@ function buildUnderparDebugSupportPacketData(options = {}) {
       session_monitor_suppressed: state.sessionMonitorSuppressed ? "yes" : "no",
     },
     selection: selectionSnapshot,
+    rest_v2: sanitizeUnderparSupportPacketValue(restV2Snapshot, {
+      keyName: "rest_v2",
+      seen: new WeakSet(),
+    }),
     feature_flags: {
       restricted: state.restricted === true,
       session_ready: state.sessionReady === true,
@@ -30453,7 +30579,8 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
     ? String(
         Object.entries(partnerPlatformMappings || {}).find(
           ([rawPartnerName, rawProviderId]) =>
-            String(rawPartnerName || "").trim().toLowerCase() === resolvedPartnerName.toLowerCase() &&
+            normalizeRestV2PartnerSsoPlatformName(rawPartnerName) ===
+              normalizeRestV2PartnerSsoPlatformName(resolvedPartnerName) &&
             String(rawProviderId || "").trim()
         )?.[1] || ""
       ).trim()
@@ -65728,7 +65855,8 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
     Boolean(
       Object.entries(partnerPlatformMappings || {}).find(
         ([rawPartnerName, rawProviderId]) =>
-          String(rawPartnerName || "").trim().toLowerCase() === preferredPartnerName.toLowerCase() &&
+          normalizeRestV2PartnerSsoPlatformName(rawPartnerName) ===
+            normalizeRestV2PartnerSsoPlatformName(preferredPartnerName) &&
           String(rawProviderId || "").trim()
       )
     );
@@ -88962,21 +89090,36 @@ function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, head
   const aliases = getRestV2InteractiveDocsHeaderAliasCandidates(normalizedHeaderName);
   const sourceList = [
     context,
+    context?.context || null,
     context?.sessionData || null,
+    context?.context?.sessionData || null,
     context?.activeRecordingContext || null,
     context?.activeRecordingContext?.sessionData || null,
     context?.harvestContext || null,
     context?.harvestContext?.sessionData || null,
     context?.harvest || null,
     context?.harvest?.sessionData || null,
+    context?.requestBody || null,
+    context?.requestBody?.formData || null,
+    context?.request || null,
+    context?.request?.postData || null,
+    context?.response || null,
+    context?.response?.content || null,
   ];
   const headerBagList = [
+    context?.headers || null,
     context?.sessionResponseHeaders || null,
     context?.responseHeaders || null,
     context?.requestHeaders || null,
+    context?.context?.headers || null,
+    context?.context?.sessionResponseHeaders || null,
+    context?.context?.responseHeaders || null,
+    context?.context?.requestHeaders || null,
     context?.activeRecordingContext?.sessionResponseHeaders || null,
     context?.harvestContext?.sessionResponseHeaders || null,
     context?.harvest?.sessionResponseHeaders || null,
+    context?.request?.headers || null,
+    context?.response?.headers || null,
   ];
   const candidates = [];
   sourceList.forEach((source) => {
@@ -88989,6 +89132,21 @@ function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, head
     const headerValue = getRestV2CaseInsensitiveHeaderValue(headersLike, aliases);
     if (headerValue) {
       candidates.push(headerValue);
+    }
+  });
+  [
+    context?.requestBodyPreview,
+    context?.postDataPreview,
+    context?.bodyPreview,
+    context?.responsePreview,
+    context?.requestBody?.raw,
+    context?.requestBody?.text,
+    context?.request?.postData?.text,
+    context?.response?.content?.text,
+  ].forEach((carrierValue) => {
+    const extracted = extractRestV2InteractiveDocsHeaderValueFromText(String(carrierValue || "").trim(), normalizedHeaderName);
+    if (extracted) {
+      candidates.push(extracted);
     }
   });
   const normalizedCandidates = dedupeRestV2CandidateStrings(candidates);
@@ -89077,12 +89235,24 @@ function extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow = null, heade
     if (!event || typeof event !== "object") {
       continue;
     }
+    const textCarriers = [
+      String(event?.responsePreview || "").trim(),
+      String(event?.requestBodyPreview || "").trim(),
+      String(event?.postDataPreview || "").trim(),
+      String(event?.bodyPreview || "").trim(),
+      String(event?.requestBody?.raw || "").trim(),
+      String(event?.requestBody?.text || "").trim(),
+      String(event?.request?.postData?.text || "").trim(),
+      String(event?.response?.content?.text || "").trim(),
+      String(event?.url || "").trim(),
+      String(event?.requestUrl || "").trim(),
+    ];
     const eventValue =
       resolveRestV2InteractiveDocsHeaderValueFromContext(event, normalizedHeaderName) ||
-      extractRestV2InteractiveDocsHeaderValueFromText(String(event?.responsePreview || "").trim(), normalizedHeaderName) ||
-      extractRestV2InteractiveDocsHeaderValueFromText(String(event?.bodyPreview || "").trim(), normalizedHeaderName) ||
-      extractRestV2InteractiveDocsHeaderValueFromText(String(event?.url || "").trim(), normalizedHeaderName) ||
-      extractRestV2InteractiveDocsHeaderValueFromText(String(event?.requestUrl || "").trim(), normalizedHeaderName);
+      textCarriers
+        .map((value) => extractRestV2InteractiveDocsHeaderValueFromText(value, normalizedHeaderName))
+        .find(Boolean) ||
+      resolveRestV2InteractiveDocsHeaderValueFromContext(flow?.context || null, normalizedHeaderName);
     if (eventValue) {
       return eventValue;
     }
@@ -89167,7 +89337,14 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
     requestorId && mvpd && typeof getRestV2MvpdMeta === "function"
       ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || null)
       : context?.mvpdMeta || null;
-  const resolvedPartnerName = String(resolveRestV2LearningPartnerNameFromContext(context) || "").trim();
+  const resolvedPartnerName = normalizeRestV2PartnerSsoPlatformName(
+    firstNonEmptyString([
+      resolveRestV2LearningPartnerNameFromContext(context),
+      resolveRestV2PartnerNameFromContext(context),
+      resolveRestV2PartnerFromFrameworkStatus(String(context?.partnerFrameworkStatus || "").trim()),
+      resolveRestV2PartnerFromFrameworkStatus(String(context?.learningPartnerFrameworkStatus || "").trim()),
+    ])
+  );
   const partnerPlatformMappings =
     cachedMvpdMeta?.partnerPlatformMappings && typeof cachedMvpdMeta.partnerPlatformMappings === "object"
       ? cachedMvpdMeta.partnerPlatformMappings
@@ -89178,7 +89355,8 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
     ? String(
         Object.entries(partnerPlatformMappings || {}).find(
           ([rawPartnerName, rawProviderId]) =>
-            String(rawPartnerName || "").trim().toLowerCase() === resolvedPartnerName.toLowerCase() &&
+            normalizeRestV2PartnerSsoPlatformName(rawPartnerName) ===
+              normalizeRestV2PartnerSsoPlatformName(resolvedPartnerName) &&
             String(rawProviderId || "").trim()
         )?.[1] || ""
       ).trim()
@@ -89217,9 +89395,28 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
   if (!isRestV2PartnerFrameworkStatusUsable(normalizedValue)) {
     return false;
   }
-  const requestorId = String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim();
-  const selectedMvpd = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
-  const expectedProviderId = String(resolveRestV2ExpectedPartnerFrameworkProviderId(context) || "")
+  const derivedPartnerName = String(
+    firstNonEmptyString([
+      resolveRestV2LearningPartnerNameFromContext(context),
+      resolveRestV2PartnerNameFromContext(context),
+      resolveRestV2PartnerFromFrameworkStatus(normalizedValue),
+      resolveRestV2PartnerFromFrameworkStatus(String(context?.learningPartnerFrameworkStatus || "").trim()),
+      resolveRestV2PartnerFromFrameworkStatus(String(context?.partnerFrameworkStatus || "").trim()),
+    ]) || ""
+  ).trim();
+  const compatibilityContext =
+    derivedPartnerName &&
+    !String(firstNonEmptyString([context?.learningPartner, context?.partner, context?.sessionPartner]) || "").trim()
+      ? {
+          ...(context && typeof context === "object" ? context : {}),
+          learningPartner: derivedPartnerName,
+          partner: derivedPartnerName,
+          sessionPartner: String(context?.sessionPartner || "").trim() || derivedPartnerName,
+        }
+      : context;
+  const requestorId = String(firstNonEmptyString([compatibilityContext?.requestorId, compatibilityContext?.serviceProviderId]) || "").trim();
+  const selectedMvpd = String(firstNonEmptyString([compatibilityContext?.mvpd, compatibilityContext?.selectedMvpd]) || "").trim();
+  const expectedProviderId = String(resolveRestV2ExpectedPartnerFrameworkProviderId(compatibilityContext) || "")
     .trim()
     .toLowerCase();
   const actualProviderId = String(resolveRestV2PartnerFrameworkStatusProviderId(normalizedValue) || "")
@@ -89228,7 +89425,7 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
   if (!actualProviderId) {
     return false;
   }
-  const resolvedMvpd = resolveRestV2MvpdMetaForPartnerFrameworkProviderId(actualProviderId, requestorId, context);
+  const resolvedMvpd = resolveRestV2MvpdMetaForPartnerFrameworkProviderId(actualProviderId, requestorId, compatibilityContext);
   const resolvedMvpdId = String(resolvedMvpd?.mvpdId || "").trim();
   if (expectedProviderId) {
     if (actualProviderId !== expectedProviderId) {
@@ -89239,14 +89436,14 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
     }
     return Boolean(resolvedMvpdId || selectedMvpd);
   }
-  const resolvedPartnerName = String(resolveRestV2LearningPartnerNameFromContext(context) || "")
-    .trim()
-    .toLowerCase();
+  const resolvedPartnerName = normalizeRestV2PartnerSsoPlatformName(derivedPartnerName);
   if (resolvedPartnerName && !resolvedMvpdId) {
     return false;
   }
   if (resolvedPartnerName) {
-    const genericMvpdId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd, context?.mvpdMeta?.id]) || "")
+    const genericMvpdId = String(
+      firstNonEmptyString([compatibilityContext?.mvpd, compatibilityContext?.selectedMvpd, compatibilityContext?.mvpdMeta?.id]) || ""
+    )
       .trim()
       .toLowerCase();
     if (genericMvpdId && actualProviderId === genericMvpdId) {
@@ -89373,7 +89570,8 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
         String(
           Object.entries(existingPartnerPlatformMappings).find(
             ([rawPartnerName, rawProviderId]) =>
-              String(rawPartnerName || "").trim().toLowerCase() === String(partnerName || "").trim().toLowerCase() &&
+              normalizeRestV2PartnerSsoPlatformName(rawPartnerName) ===
+                normalizeRestV2PartnerSsoPlatformName(partnerName) &&
               String(rawProviderId || "").trim()
           )?.[1] || ""
         ).trim()
@@ -89472,6 +89670,7 @@ function resolveRestV2PartnerFrameworkStatusSummary(value = "") {
       raw: "",
       payload: null,
       providerId: "",
+      partnerName: "",
       accessStatus: "",
       expirationDate: "",
       usable: false,
@@ -89487,6 +89686,10 @@ function resolveRestV2PartnerFrameworkStatusSummary(value = "") {
     payload?.frameworkProviderInfo && typeof payload.frameworkProviderInfo === "object"
       ? payload.frameworkProviderInfo
       : null;
+  const frameworkPartnerInfo =
+    payload?.frameworkPartnerInfo && typeof payload.frameworkPartnerInfo === "object"
+      ? payload.frameworkPartnerInfo
+      : null;
   const providerId = String(
     getRestV2CaseInsensitiveObjectValue(frameworkProviderInfo, [
       "id",
@@ -89496,6 +89699,9 @@ function resolveRestV2PartnerFrameworkStatusSummary(value = "") {
       "mvpd",
       "mvpdId",
     ]) || ""
+  ).trim();
+  const partnerName = String(
+    getRestV2CaseInsensitiveObjectValue(frameworkPartnerInfo, ["partner", "name"]) || ""
   ).trim();
   const accessStatus = String(
     getRestV2CaseInsensitiveObjectValue(frameworkPermissionInfo, ["accessStatus", "status"]) || ""
@@ -89516,6 +89722,7 @@ function resolveRestV2PartnerFrameworkStatusSummary(value = "") {
     raw,
     payload,
     providerId,
+    partnerName,
     accessStatus,
     expirationDate,
     usable: Boolean(payload && providerId && permissionGranted && expirationValid),
@@ -89560,6 +89767,29 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
   }
   const cache = typeof getRequestorScopedMvpdCache === "function" ? getRequestorScopedMvpdCache(normalizedRequestorId) : null;
   const matchesProviderId = (candidate = "") => String(candidate || "").trim().toLowerCase() === normalizedProviderId;
+  const requiredPartnerName = normalizeRestV2PartnerSsoPlatformName(
+    firstNonEmptyString([
+      resolveRestV2LearningPartnerNameFromContext(fallbackContext),
+      resolveRestV2PartnerNameFromContext(fallbackContext),
+      resolveRestV2PartnerFromFrameworkStatus(String(fallbackContext?.partnerFrameworkStatus || "").trim()),
+      resolveRestV2PartnerFromFrameworkStatus(String(fallbackContext?.learningPartnerFrameworkStatus || "").trim()),
+      fallbackContext?.learningPartner,
+      fallbackContext?.partner,
+      fallbackContext?.sessionPartner,
+    ])
+  );
+  const requiresPartnerSpecificProvider = Boolean(requiredPartnerName);
+  const hasPartnerSpecificMatch = (partnerMappings = null) => {
+    const mappingEntries =
+      partnerMappings && typeof partnerMappings === "object" ? Object.entries(partnerMappings) : [];
+    if (requiresPartnerSpecificProvider) {
+      return mappingEntries.some(
+        ([rawPartnerName, rawProviderId]) =>
+          normalizeRestV2PartnerSsoPlatformName(rawPartnerName) === requiredPartnerName && matchesProviderId(rawProviderId)
+      );
+    }
+    return mappingEntries.some(([, rawProviderId]) => matchesProviderId(rawProviderId));
+  };
   if (cache instanceof Map) {
     for (const [mvpdId, rawMeta] of cache.entries()) {
       const resolvedMeta = getRestV2MvpdMeta(normalizedRequestorId, String(mvpdId || "").trim(), rawMeta) || rawMeta;
@@ -89567,12 +89797,13 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
         resolvedMeta?.partnerPlatformMappings && typeof resolvedMeta.partnerPlatformMappings === "object"
           ? resolvedMeta.partnerPlatformMappings
           : null;
-      const mappingMatch = Object.values(partnerMappings || {}).find((candidate) => matchesProviderId(candidate));
+      const mappingMatch = hasPartnerSpecificMatch(partnerMappings);
       if (
         mappingMatch ||
-        matchesProviderId(resolvedMeta?.platformMappingId) ||
-        matchesProviderId(resolvedMeta?.platformMappingID) ||
-        matchesProviderId(resolvedMeta?.id)
+        (!requiresPartnerSpecificProvider &&
+          (matchesProviderId(resolvedMeta?.platformMappingId) ||
+            matchesProviderId(resolvedMeta?.platformMappingID) ||
+            matchesProviderId(resolvedMeta?.id)))
       ) {
         return {
           mvpdId: String(mvpdId || "").trim(),
@@ -89586,11 +89817,17 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
     fallbackMvpdId && normalizedRequestorId
       ? getRestV2MvpdMeta(normalizedRequestorId, fallbackMvpdId, fallbackContext?.mvpdMeta || null) || fallbackContext?.mvpdMeta || null
       : fallbackContext?.mvpdMeta || null;
+  const fallbackPartnerMappings =
+    fallbackMvpdMeta?.partnerPlatformMappings && typeof fallbackMvpdMeta.partnerPlatformMappings === "object"
+      ? fallbackMvpdMeta.partnerPlatformMappings
+      : null;
   if (
     fallbackMvpdId &&
-    (matchesProviderId(fallbackMvpdMeta?.platformMappingId) ||
-      matchesProviderId(fallbackMvpdMeta?.platformMappingID) ||
-      matchesProviderId(fallbackMvpdMeta?.id))
+    (hasPartnerSpecificMatch(fallbackPartnerMappings) ||
+      (!requiresPartnerSpecificProvider &&
+        (matchesProviderId(fallbackMvpdMeta?.platformMappingId) ||
+          matchesProviderId(fallbackMvpdMeta?.platformMappingID) ||
+          matchesProviderId(fallbackMvpdMeta?.id))))
   ) {
     return {
       mvpdId: fallbackMvpdId,

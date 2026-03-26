@@ -72,6 +72,7 @@ function loadPartnerSsoOverrideHelpers(seed = {}) {
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
     extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
     extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
     extractFunctionSource(source, "isRestV2MvpdMatch"),
@@ -85,7 +86,7 @@ function loadPartnerSsoOverrideHelpers(seed = {}) {
     extractFunctionSource(source, "normalizeRestV2SamlResponseForPartnerProfile"),
     extractFunctionSource(source, "validateRestV2PartnerFrameworkStatusInput"),
     extractFunctionSource(source, "hydrateRestV2ContextFromPartnerSsoOverride"),
-    "module.exports = { validateRestV2PartnerFrameworkStatusInput, hydrateRestV2ContextFromPartnerSsoOverride };",
+    "module.exports = { validateRestV2PartnerFrameworkStatusInput, hydrateRestV2ContextFromPartnerSsoOverride, isRestV2PartnerFrameworkStatusCompatibleWithContext };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
@@ -192,7 +193,63 @@ test("generic provider ids are rejected for Apple partner SSO when the MVPD mapp
   });
 
   assert.equal(validation.ok, false);
-  assert.match(validation.error, /does not match the configured Apple mapping/i);
+  assert.match(validation.error, /not associated with a known MVPD|does not match the configured Apple mapping/i);
+});
+
+test("partner framework compatibility derives Apple from the payload when context has not promoted learningPartner yet", () => {
+  const { isRestV2PartnerFrameworkStatusCompatibleWithContext } = loadPartnerSsoOverrideHelpers({
+    getRequestorScopedMvpdCache(requestorId = "") {
+      return String(requestorId || "").trim() === "MML" ? buildMvpdCache() : null;
+    },
+  });
+  const genericFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: "1775748018000",
+      },
+      frameworkPartnerInfo: {
+        partner: "Apple",
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const mappedFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+        expirationDate: "1775748018000",
+      },
+      frameworkPartnerInfo: {
+        partner: "Apple",
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const baseContext = {
+    requestorId: "MML",
+    serviceProviderId: "MML",
+    mvpd: "Comcast_SSO",
+    mvpdMeta: {
+      id: "Comcast_SSO",
+      name: "Xfinity (Comcast_SSO)",
+      platformMappingId: "Comcast_SSO",
+      partnerPlatformMappings: {
+        Apple: "Comcast_SSO_Apple",
+      },
+    },
+  };
+
+  assert.equal(isRestV2PartnerFrameworkStatusCompatibleWithContext(genericFrameworkStatus, baseContext), false);
+  assert.equal(isRestV2PartnerFrameworkStatusCompatibleWithContext(mappedFrameworkStatus, baseContext), true);
 });
 
 test("unknown provider ids are rejected for Apple partner SSO when no MVPD mapping is known", () => {

@@ -243,8 +243,9 @@ function loadWorkspaceSummaryRenderFunctions() {
     extractFunctionSource(source, "buildServicePillMarkup"),
     extractFunctionSource(source, "renderServicePillList"),
     extractFunctionSource(source, "buildRequestorSummary"),
+    extractFunctionSource(source, "buildApplicationSummaryMeta"),
     extractFunctionSource(source, "renderApplicationSummaryFacts"),
-    "module.exports = { normalizeServicePillToneKey, renderApplicationSummaryFacts };",
+    "module.exports = { normalizeServicePillToneKey, buildApplicationSummaryMeta, renderApplicationSummaryFacts };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
@@ -832,6 +833,25 @@ test("registered application workspace renders scope coverage as colored service
   assert.doesNotMatch(markup, /Type/);
   assert.doesNotMatch(markup, /Scope Coverage/);
   assert.doesNotMatch(markup, /DEFAULT,\s*REST API V2/);
+});
+
+test("registered application workspace suppresses duplicate requestor summary meta when it matches Requestor Hints", () => {
+  const { buildApplicationSummaryMeta } = loadWorkspaceSummaryRenderFunctions();
+
+  assert.equal(
+    buildApplicationSummaryMeta({
+      requestorHint: "@ServiceProvider:AdultSwim",
+      serviceProviderSummary: "@ServiceProvider:AdultSwim",
+    }),
+    ""
+  );
+  assert.equal(
+    buildApplicationSummaryMeta({
+      requestorHint: "@ServiceProvider:AdultSwim",
+      serviceProviderSummary: "AdultSwim scoped app",
+    }),
+    "AdultSwim scoped app"
+  );
 });
 
 test("registered application health sources wire the HEALTH action and workspace assets", () => {

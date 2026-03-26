@@ -68,7 +68,60 @@ function loadVisitorIdentifierHelpers() {
     extractFunctionSource(source, "getRestV2InteractiveDocsContextPropertyForHeader"),
     extractFunctionSource(source, "resolveRestV2InteractiveDocsHeaderValueFromContext"),
     extractFunctionSource(source, "extractRestV2CookieValueFromCookieText"),
-    "function extractRestV2InteractiveDocsHeaderValueFromText() { return ''; }",
+    `function extractRestV2InteractiveDocsHeaderValueFromText(value = "", headerName = "") {
+      const normalizedHeaderName = String(headerName || "").trim();
+      const raw = String(value || "").trim();
+      if (!normalizedHeaderName || !raw) {
+        return "";
+      }
+      const aliases = getRestV2InteractiveDocsHeaderAliasCandidates(normalizedHeaderName);
+      const textCandidates = dedupeRestV2CandidateStrings([
+        raw,
+        decodeURIComponentSafe(raw),
+        decodeBase64TextSafe(raw),
+        decodeBase64TextSafe(decodeURIComponentSafe(raw)),
+      ]);
+      for (const candidateText of textCandidates) {
+        const looksLikeStandaloneHeaderValue =
+          !/[{}\\n\\r]/.test(candidateText) && !candidateText.includes("://") && !candidateText.includes("&");
+        const normalizedDirect = looksLikeStandaloneHeaderValue
+          ? normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, candidateText)
+          : "";
+        if (normalizedDirect) {
+          return normalizedDirect;
+        }
+        const parsed = parseJsonText(candidateText, null);
+        const objectCandidates = collectRestV2CaseInsensitiveObjectValues(parsed, aliases, { maxDepth: 5 });
+        for (const objectCandidate of objectCandidates) {
+          const normalizedObjectCandidate = normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, objectCandidate);
+          if (normalizedObjectCandidate) {
+            return normalizedObjectCandidate;
+          }
+        }
+        try {
+          const parsedUrl = new URL(candidateText, ADOBE_SP_BASE);
+          for (const alias of aliases) {
+            const queryCandidate = String(parsedUrl.searchParams.get(alias) || "").trim();
+            const normalizedQueryCandidate = normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, queryCandidate);
+            if (normalizedQueryCandidate) {
+              return normalizedQueryCandidate;
+            }
+          }
+        } catch {}
+      }
+      const escapedAliases = aliases
+        .map((alias) => String(alias || "").trim())
+        .filter(Boolean)
+        .sort((left, right) => right.length - left.length)
+        .map((alias) => alias.replace(/[.*+?^$()|[\\]\\\\]/g, "\\\\$&"));
+      if (escapedAliases.length === 0) {
+        return "";
+      }
+      const inlineMatch = raw.match(new RegExp("(?:"
+        + escapedAliases.join("|")
+        + ")[\\\"'=:\\\\s]+([^\\\"\\\\s&,}]{8,})", "i"));
+      return normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, String(inlineMatch?.[1] || "").trim());
+    }`,
     extractFunctionSource(source, "extractRestV2VisitorIdentifierFromDebugFlow"),
     extractFunctionSource(source, "extractRestV2InteractiveDocsHeaderValueFromDebugFlow"),
     extractFunctionSource(source, "hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow"),
@@ -185,6 +238,49 @@ test("REST V2 optional headers hydrate from array-backed formData captures", () 
   assert.equal(context.adobeSubjectToken, "subject-token-123");
   assert.equal(context.adServiceToken, "service-token-456");
   assert.equal(context.tempPassIdentity, "temp-pass-identity-789");
+});
+
+test("REST V2 optional headers hydrate from request preview text carriers", () => {
+  const { extractRestV2InteractiveDocsHeaderValueFromDebugFlow, hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow } =
+    loadVisitorIdentifierHelpers();
+  const flow = {
+    flowId: "flow-header-preview-456",
+    events: [
+      {
+        source: "tab-network",
+        phase: "request",
+        postDataPreview:
+          "Adobe-Subject-Token=subject-token-abc&AD-Service-Token=service-token-def&AP-Temppass-Identity=temp-pass-ghi",
+      },
+    ],
+  };
+  const context = {
+    adobeSubjectToken: "",
+    adServiceToken: "",
+    tempPassIdentity: "",
+  };
+
+  assert.equal(
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "Adobe-Subject-Token"),
+    "subject-token-abc"
+  );
+  assert.equal(
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "AD-Service-Token"),
+    "service-token-def"
+  );
+  assert.equal(
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "AP-Temppass-Identity"),
+    "temp-pass-ghi"
+  );
+
+  hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context, flow, [
+    "Adobe-Subject-Token",
+    "AD-Service-Token",
+    "AP-Temppass-Identity",
+  ]);
+  assert.equal(context.adobeSubjectToken, "subject-token-abc");
+  assert.equal(context.adServiceToken, "service-token-def");
+  assert.equal(context.tempPassIdentity, "temp-pass-ghi");
 });
 
 test("REST V2 case-insensitive header lookup accepts header entry arrays", () => {

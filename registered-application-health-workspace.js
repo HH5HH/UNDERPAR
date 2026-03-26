@@ -839,6 +839,15 @@ function buildRequestorSummary(app = {}) {
   ]);
 }
 
+function buildApplicationSummaryMeta(app = {}) {
+  const summary = String(buildRequestorSummary(app) || "").trim().toLowerCase();
+  const candidate = String(firstNonEmptyString([app.serviceProviderSummary]) || "").trim();
+  if (!candidate) {
+    return "";
+  }
+  return String(candidate || "").trim().toLowerCase() === summary ? "" : candidate;
+}
+
 function renderApplicationSummaryFacts(app = {}) {
   const summaryFacts = [
     ["Requestor Hints", buildRequestorSummary(app)],
@@ -1088,9 +1097,11 @@ function renderApplicationCards(applications = []) {
                       <p class="regapp-app-summary-title">${escapeHtml(firstNonEmptyString([app.name, app.guid, "Registered Application"]))}</p>
                       ${upIndicator}
                     </div>
-                    <p class="regapp-app-summary-meta">${escapeHtml(
-                      firstNonEmptyString([app.requestorHint, app.serviceProviderSummary, "No requestor hints"])
-                    )}</p>
+                    ${
+                      buildApplicationSummaryMeta(app)
+                        ? `<p class="regapp-app-summary-meta">${escapeHtml(buildApplicationSummaryMeta(app))}</p>`
+                        : ""
+                    }
                     ${renderApplicationSummaryFacts(app)}
                   </div>
                   <div class="regapp-app-summary-actions">
