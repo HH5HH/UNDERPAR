@@ -1006,11 +1006,13 @@ test("selected media company refresh starts direct premium hydration immediately
   assert.doesNotMatch(refreshPanelsSource, /withAdobeConsolePageContextTarget\(/);
   assert.match(refreshPanelsSource, /const cmServicePromise = skipCmBootstrap/);
   assert.match(refreshPanelsSource, /const cmMvpdServicePromise =/);
-  assert.match(refreshPanelsSource, /const cmHydrationPromise = Promise\.allSettled\(\[cmServicePromise,\s*cmMvpdServicePromise\]\)/);
+  assert.match(refreshPanelsSource, /const initialCmResults = await Promise\.allSettled\(\[cmServicePromise,\s*cmMvpdServicePromise\]\);/);
+  assert.match(refreshPanelsSource, /const cmHydrationPromise = Promise\.resolve\(\)\.then\(\(\) => \{/);
   assert.match(refreshPanelsSource, /const registeredApplications = buildPassVaultHydrationRegisteredApplications\(applicationsData\);/);
   assert.match(refreshPanelsSource, /buildPassVaultServiceHydrationEntries\(\{/);
   assert.match(refreshPanelsSource, /const provisionalRuntimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*provisionalServices\);/);
-  assert.match(refreshPanelsSource, /setProgrammerWorkspaceHydrationReady\(programmerId,\s*provisionalRuntimeReady\);/);
+  assert.match(refreshPanelsSource, /const provisionalHrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*provisionalServices\);/);
+  assert.match(refreshPanelsSource, /setProgrammerWorkspaceHydrationReady\(programmerId,\s*provisionalHrContextReady\);/);
   assert.match(refreshPanelsSource, /renderPremiumServices\(provisionalServices,\s*programmer,\s*\{\s*controllerReason\s*\}\);/);
   assert.match(refreshPanelsSource, /let resolvedServices = await premiumHydrationPromise;/);
   assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*provisionalServices,\s*\{/);
@@ -1328,13 +1330,24 @@ test("health workspace readiness now keys off hydrated premium-service context",
   const esmControllerSource = extractFunctionSource(popupSource, "esmHealthWorkspaceGetSelectedControllerStatePayload");
   const healthControllerSource = extractFunctionSource(popupSource, "healthWorkspaceGetSelectedControllerStatePayload");
   const statusItemSource = extractFunctionSource(popupSource, "buildHrContextHealthStatusItemHtml");
+  const healthSnapshotSource = extractFunctionSource(popupSource, "getHealthWorkspacePremiumContextSnapshot");
+  const hrRevealSource = extractFunctionSource(popupSource, "shouldRevealHrContextSections");
 
+  assert.match(popupSource, /function hasResolvedCmAvailabilityForProgrammer\(/);
+  assert.match(popupSource, /function isProgrammerHrContextHydrationReady\(/);
   assert.match(esmControllerSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(context\?\.programmerId \|\| ""\)\.trim\(\)\);/);
   assert.match(esmControllerSource, /esmHealthReady: Boolean\(context\?\.programmerId && premiumContext\?\.hydrationReady && premiumContext\?\.esmAvailable\)/);
   assert.match(healthControllerSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(context\?\.programmerId \|\| ""\)\.trim\(\)\);/);
   assert.match(healthControllerSource, /healthReady: Boolean\(context\?\.programmerId && context\?\.requestorId && premiumContext\?\.hydrationReady\)/);
+  assert.match(healthSnapshotSource, /isProgrammerHrContextHydrationReady\(normalizedProgrammerId,\s*services\)/);
+  assert.match(hrRevealSource, /isProgrammerHrContextHydrationReady\(programmerId,\s*services\)/);
   assert.match(statusItemSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(selectionContext\?\.programmerId \|\| ""\)\.trim\(\)\);/);
-  assert.match(statusItemSource, /const esmReady = Boolean\(selectionContext\?\.programmerId && premiumContext\?\.hydrationReady && premiumContext\?\.esmAvailable\)/);
+  assert.match(statusItemSource, /const esmVisible = Boolean\(selectionContext\?\.programmerId && premiumContext\?\.hydrationReady && premiumContext\?\.esmAvailable\)/);
+  assert.match(statusItemSource, /const esmReady = esmVisible;/);
+  assert.match(statusItemSource, /const cmVisible = Boolean\(selectionContext\?\.programmerId && premiumContext\?\.hydrationReady && shouldShowCmService\(services\?\.cm\)\)/);
+  assert.match(statusItemSource, /const cmReady = cmVisible;/);
+  assert.match(statusItemSource, /const esmButtonHtml = esmVisible/);
+  assert.match(statusItemSource, /const cmButtonHtml = cmVisible/);
   assert.match(statusItemSource, /const adobePassWorkflowActive =/);
   assert.match(statusItemSource, /"Adobe Pass org required"/);
 });
@@ -2825,14 +2838,17 @@ test("premium runtime readiness still depends on DCR-ready premium apps while UI
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const runtimeReadySource = extractFunctionSource(popupSource, "isProgrammerRuntimeServicesReady");
   const renderReadySource = extractFunctionSource(popupSource, "shouldRenderPremiumServicesUi");
+  const hrContextReadySource = extractFunctionSource(popupSource, "isProgrammerHrContextHydrationReady");
   const progressSource = extractFunctionSource(popupSource, "setProgrammerPremiumHydrationProgress");
   const primeSource = extractFunctionSource(popupSource, "primeProgrammerServiceHydration");
   const loadingSource = extractFunctionSource(popupSource, "renderPremiumServicesLoading");
 
   assert.match(runtimeReadySource, /hasPassVaultCredentialCoverageForServices\(normalizedProgrammerId,\s*resolvedServices\)/);
+  assert.match(hrContextReadySource, /hasResolvedCmAvailabilityForProgrammer\(normalizedProgrammerId,\s*resolvedServices\)/);
   assert.match(renderReadySource, /return isProgrammerPremiumUiReady\(programmerId,\s*services\);/);
   assert.match(progressSource, /!shouldRenderPremiumServicesUi\(String\(programmerId \|\| ""\)\.trim\(\), getCurrentPremiumAppsSnapshot\(programmerId\)\)/);
-  assert.match(primeSource, /if \(runtimeReady\) \{\s*setProgrammerWorkspaceHydrationReady\(programmerId,\s*true\);/);
+  assert.match(primeSource, /const hrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*runtimeServices\);/);
+  assert.match(primeSource, /if \(hrContextReady\) \{\s*setProgrammerWorkspaceHydrationReady\(programmerId,\s*true\);/);
   assert.doesNotMatch(runtimeReadySource, /isCmRuntimeRenderReady/);
   assert.doesNotMatch(loadingSource, /Detected:/);
   assert.doesNotMatch(loadingSource, /detailLines/);
@@ -2846,15 +2862,18 @@ test("premium panel rendering unlocks on detected services and keeps workspace h
 
   assert.match(primeSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*runtimeServices\)/);
   assert.match(primeSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*runtimeServices\)/);
+  assert.match(primeSource, /const hrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*runtimeServices\)/);
   assert.match(primeSource, /renderOnReady &&[\s\S]*uiReady &&/);
-  assert.match(primeSource, /if \(runtimeReady\) \{\s*setProgrammerWorkspaceHydrationReady\(programmerId,\s*true\);/);
+  assert.match(primeSource, /if \(hrContextReady\) \{\s*setProgrammerWorkspaceHydrationReady\(programmerId,\s*true\);/);
   assert.doesNotMatch(primeSource, /finalizePassVaultProgrammerHydration\(/);
   assert.doesNotMatch(primeSource, /hydrateProgrammerFromPassVault\(/);
   assert.match(refreshSource, /const provisionalRuntimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*provisionalServices\);/);
+  assert.match(refreshSource, /const provisionalHrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*provisionalServices\);/);
   assert.match(refreshSource, /renderPremiumServices\(provisionalServices,\s*programmer,\s*\{\s*controllerReason\s*\}\);/);
   assert.match(refreshSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*finalServices\);/);
+  assert.match(refreshSource, /const hrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*finalServices\);/);
   assert.match(refreshSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*finalServices\);/);
-  assert.match(refreshSource, /setProgrammerWorkspaceHydrationReady\(programmerId,\s*runtimeReady\);/);
+  assert.match(refreshSource, /setProgrammerWorkspaceHydrationReady\(programmerId,\s*hrContextReady\);/);
   assert.doesNotMatch(refreshSource, /options\.markHydrated !== false && runtimeReady/);
   assert.match(compileSource, /const hydratedServiceEntries = await hydratePassVaultServiceEntries/);
   assert.match(compileSource, /const credentialResults = buildPassVaultDirectCredentialResults\(hydratedServiceEntries\);/);
@@ -2886,7 +2905,7 @@ test("optional TempPASS credential misses stay non-blocking and successful panel
   assert.match(refreshSource, /if \(reusableServices\) \{[\s\S]*clearStatusUnlessCmTenantsPrecheckBlocked\(\);[\s\S]*renderPremiumServices\(reusableServices,/);
   assert.match(
     refreshSource,
-    /clearProgrammerPremiumHydrationProgress\(programmerId\);[\s\S]*setProgrammerWorkspaceHydrationReady\(programmerId,\s*runtimeReady\);[\s\S]*clearStatusUnlessCmTenantsPrecheckBlocked\(\);[\s\S]*renderPremiumServices\(finalServices,/
+    /clearProgrammerPremiumHydrationProgress\(programmerId\);[\s\S]*setProgrammerWorkspaceHydrationReady\(programmerId,\s*hrContextReady\);[\s\S]*clearStatusUnlessCmTenantsPrecheckBlocked\(\);[\s\S]*renderPremiumServices\(finalServices,/
   );
 });
 

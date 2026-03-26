@@ -951,6 +951,49 @@ function isProgrammerRuntimeServicesReady(programmerId = "", services = null) {
   return hasPassVaultCredentialCoverageForServices(normalizedProgrammerId, resolvedServices);
 }
 
+function hasResolvedCmAvailabilityForProgrammer(programmerId = "", services = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return false;
+  }
+
+  const resolvedServices = services && typeof services === "object" ? services : null;
+  const vaultRecord = getPassVaultMediaCompanyRecord(normalizedProgrammerId);
+  const candidateServices = [
+    resolvedServices?.cm,
+    state.cmServiceByProgrammerId.get(normalizedProgrammerId) || null,
+    buildPassVaultRuntimeCmServiceSnapshot(vaultRecord),
+  ];
+
+  return candidateServices.some((cmService) => {
+    if (!cmService || typeof cmService !== "object") {
+      return false;
+    }
+    if (Array.isArray(cmService.matchedTenants)) {
+      return true;
+    }
+    if (String(cmService.loadError || "").trim()) {
+      return true;
+    }
+    if (Number(cmService.tenantCount || 0) > 0) {
+      return true;
+    }
+    return cmService.synthetic === true;
+  });
+}
+
+function isProgrammerHrContextHydrationReady(programmerId = "", services = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const resolvedServices = services && typeof services === "object" ? services : null;
+  if (!normalizedProgrammerId || !resolvedServices) {
+    return false;
+  }
+  if (!isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices)) {
+    return false;
+  }
+  return hasResolvedCmAvailabilityForProgrammer(normalizedProgrammerId, resolvedServices);
+}
+
 function shouldRenderPremiumServicesUi(programmerId = "", services = null) {
   return isProgrammerPremiumUiReady(programmerId, services);
 }
@@ -1032,6 +1075,7 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
     }
 
     const runtimeReady = isProgrammerRuntimeServicesReady(programmerId, runtimeServices);
+    const hrContextReady = isProgrammerHrContextHydrationReady(programmerId, runtimeServices);
     const uiReady = shouldRenderPremiumServicesUi(programmerId, runtimeServices);
     const selectedProgrammerId = String(resolveSelectedProgrammer()?.programmerId || "").trim();
     if (
@@ -1040,7 +1084,7 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
       selectedProgrammerId === programmerId &&
       requestToken === Number(state.premiumPanelRequestToken || 0)
     ) {
-      if (runtimeReady) {
+      if (hrContextReady) {
         setProgrammerWorkspaceHydrationReady(programmerId, true);
       }
       emitPremiumServiceDecisionLogs(programmer, runtimeServices);
@@ -25156,7 +25200,7 @@ function getHealthWorkspacePremiumContextSnapshot(programmerId = "") {
     null;
   const hydrationReady =
     isProgrammerWorkspaceHydrationReady(normalizedProgrammerId) ||
-    isProgrammerRuntimeServicesReady(normalizedProgrammerId, services);
+    isProgrammerHrContextHydrationReady(normalizedProgrammerId, services);
 
   return {
     programmerId: normalizedProgrammerId,
@@ -25199,7 +25243,7 @@ async function ensureHealthWorkspacePremiumContext(programmerId = "", options = 
     if (!snapshot.services && hydratedServices && typeof hydratedServices === "object") {
       snapshot.services = hydratedServices;
       snapshot.esmAvailable = hasEsmScopedApp(hydratedServices);
-      snapshot.hydrationReady = isProgrammerRuntimeServicesReady(normalizedProgrammerId, hydratedServices);
+      snapshot.hydrationReady = isProgrammerHrContextHydrationReady(normalizedProgrammerId, hydratedServices);
     }
   } else if (!snapshot.services || !snapshot.hydrationReady || (options?.forceRefresh === true && programmer)) {
     const hydratedServices = await primeProgrammerServiceHydration(
@@ -25216,8 +25260,30 @@ async function ensureHealthWorkspacePremiumContext(programmerId = "", options = 
     if (!snapshot.services && hydratedServices && typeof hydratedServices === "object") {
       snapshot.services = hydratedServices;
       snapshot.esmAvailable = hasEsmScopedApp(hydratedServices);
-      snapshot.hydrationReady = isProgrammerRuntimeServicesReady(normalizedProgrammerId, hydratedServices);
+      snapshot.hydrationReady = isProgrammerHrContextHydrationReady(normalizedProgrammerId, hydratedServices);
     }
+  }
+
+  if (programmer?.programmerId && snapshot.services && !snapshot.hydrationReady) {
+    const resolvedCmService = await ensureCmServiceForProgrammer(programmer, {
+      forceRefresh: options?.forceRefresh === true,
+    }).catch(() => snapshot.services?.cm || state.cmServiceByProgrammerId.get(normalizedProgrammerId) || null);
+    const mergedServices = applyPremiumServiceRuntimeSummary(
+      programmer,
+      {
+        ...(snapshot.services && typeof snapshot.services === "object" ? snapshot.services : {}),
+        cm: selectPreferredCmRuntimeService(snapshot.services?.cm, resolvedCmService),
+        cmMvpd: snapshot.services?.cmMvpd || null,
+        cmMvpdSelectionKey: String(snapshot.services?.cmMvpdSelectionKey || "").trim(),
+      },
+      {
+        cmCatalog: state.cmTenantsCatalog,
+      }
+    );
+    setCurrentPremiumAppsSnapshot(normalizedProgrammerId, mergedServices);
+    snapshot.services = mergedServices;
+    snapshot.esmAvailable = hasEsmScopedApp(mergedServices);
+    snapshot.hydrationReady = isProgrammerHrContextHydrationReady(normalizedProgrammerId, mergedServices);
   }
 
   return {
@@ -64878,7 +64944,11 @@ function getHrContextSummary(programmer = null) {
 
 function shouldRevealHrContextSections(programmer = null, services = null) {
   const programmerId = String(programmer?.programmerId || "").trim();
-  return Boolean(programmerId) && getDetectedPremiumServiceKeys(services).length > 0;
+  return (
+    Boolean(programmerId) &&
+    getDetectedPremiumServiceKeys(services).length > 0 &&
+    isProgrammerHrContextHydrationReady(programmerId, services)
+  );
 }
 
 function setHrContextSectionsVisibility(visible = false) {
@@ -66315,8 +66385,10 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
   const adobePassWorkflowActive =
     state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);
   const registeredApplicationReady = Boolean(selectionContext?.programmerId && adobePassWorkflowActive);
-  const esmReady = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && premiumContext?.esmAvailable);
-  const cmReady = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && shouldShowCmService(services?.cm));
+  const esmVisible = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && premiumContext?.esmAvailable);
+  const esmReady = esmVisible;
+  const cmVisible = Boolean(selectionContext?.programmerId && premiumContext?.hydrationReady && shouldShowCmService(services?.cm));
+  const cmReady = cmVisible;
   const healthReady = Boolean(selectionContext?.programmerId && selectionContext?.requestorId && premiumContext?.hydrationReady);
   const adobePassOrgRequiredLabel = "Adobe Pass org required";
   const healthActionGroupLabel = !selectionContext?.programmerId
@@ -66327,49 +66399,39 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
         ? `HEALTH actions. Preparing HEALTH workspaces for ${selectionContext.programmerName || selectionContext.programmerId}.`
         : healthReady
           ? `HEALTH actions for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
-          : esmReady || cmReady
+          : esmVisible || cmVisible
             ? `HEALTH actions for ${selectionContext.programmerName || selectionContext.programmerId} in ${selectionContext.environmentLabel}. Select a RequestorId to unlock HEALTH SPLUNK. Registered Application Health stays available.`
           : context.hasProgrammerContext
-            ? "HEALTH actions. Select a RequestorId to unlock HEALTH SPLUNK and scope ESM HEALTH. Registered Application Health stays available."
+            ? "HEALTH actions. Select a RequestorId to unlock HEALTH SPLUNK. Registered Application Health stays available."
             : "HEALTH actions. Select a Media Company and RequestorId to unlock Registered Application Health, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.";
+  const esmButtonHtml = esmVisible
+    ? `
+          <button
+            type="button"
+            class="hr-health-action-btn hr-health-action-btn--secondary"
+            data-health-action="esm"
+            title="${escapeHtml("Open ESM HEALTH dashboard")}"
+            aria-label="${escapeHtml("Open ESM HEALTH dashboard")}"
+          >ESM</button>`
+    : "";
+  const cmButtonHtml = cmVisible
+    ? `
+          <button
+            type="button"
+            class="hr-health-action-btn hr-health-action-btn--secondary"
+            data-health-action="cm"
+            title="${escapeHtml(`Open CM HEALTH dashboard for ${selectionContext.programmerName || selectionContext.programmerId}`)}"
+            aria-label="${escapeHtml(`Open CM HEALTH dashboard for ${selectionContext.programmerName || selectionContext.programmerId}`)}"
+          >CM</button>`
+    : "";
 
   return `
     <article class="metadata-item hr-health-status-value">
       <p class="metadata-key">Status</p>
       <div class="metadata-value hr-health-status-body">
         <div class="hr-health-action-row" role="group" aria-label="${escapeHtml(healthActionGroupLabel)}">
-          <button
-            type="button"
-            class="hr-health-action-btn hr-health-action-btn--secondary"
-            data-health-action="esm"
-            title="${escapeHtml(
-              esmReady ? "Open ESM HEALTH dashboard" : "UnderPAR is still hydrating the ESM HEALTH context"
-            )}"
-            aria-label="${escapeHtml(
-              esmReady ? "Open ESM HEALTH dashboard" : "UnderPAR is still hydrating the ESM HEALTH context"
-            )}"
-            ${esmReady ? "" : "disabled"}
-          >ESM</button>
-          <button
-            type="button"
-            class="hr-health-action-btn hr-health-action-btn--secondary"
-            data-health-action="cm"
-            title="${escapeHtml(
-              !premiumContext?.hydrationReady
-                ? "UnderPAR is still hydrating the CM HEALTH context"
-                : cmReady
-                  ? `Open CM HEALTH dashboard for ${selectionContext.programmerName || selectionContext.programmerId}`
-                  : "Selected Media Company does not have a Concurrency Monitoring tenant match"
-            )}"
-            aria-label="${escapeHtml(
-              !premiumContext?.hydrationReady
-                ? "UnderPAR is still hydrating the CM HEALTH context"
-                : cmReady
-                  ? `Open CM HEALTH dashboard for ${selectionContext.programmerName || selectionContext.programmerId}`
-                  : "Selected Media Company does not have a Concurrency Monitoring tenant match"
-            )}"
-            ${cmReady ? "" : "disabled"}
-          >CM</button>
+          ${esmButtonHtml}
+          ${cmButtonHtml}
           <button
             type="button"
             class="hr-health-action-btn hr-health-action-btn--secondary"
@@ -77893,7 +77955,10 @@ async function refreshProgrammerPanels(options = {}) {
       : null;
   if (reusableServices) {
     clearProgrammerPremiumHydrationProgress(programmerId);
-    setProgrammerWorkspaceHydrationReady(programmerId, true);
+    setProgrammerWorkspaceHydrationReady(
+      programmerId,
+      isProgrammerHrContextHydrationReady(programmerId, reusableServices)
+    );
     clearStatusUnlessCmTenantsPrecheckBlocked();
     renderPremiumServices(reusableServices, programmer, { controllerReason });
     return;
@@ -77901,7 +77966,9 @@ async function refreshProgrammerPanels(options = {}) {
 
   if (provisionalUiServices) {
     const provisionalRuntimeReady = isProgrammerRuntimeServicesReady(programmerId, provisionalUiServices);
-    setProgrammerWorkspaceHydrationReady(programmerId, provisionalRuntimeReady);
+    const provisionalHrContextReady = isProgrammerHrContextHydrationReady(programmerId, provisionalUiServices);
+    void provisionalRuntimeReady;
+    setProgrammerWorkspaceHydrationReady(programmerId, provisionalHrContextReady);
     renderPremiumServices(provisionalUiServices, programmer, { controllerReason });
   }
 
@@ -77951,7 +78018,9 @@ async function refreshProgrammerPanels(options = {}) {
     }
 
     const provisionalRuntimeReady = isProgrammerRuntimeServicesReady(programmerId, provisionalServices);
-    setProgrammerWorkspaceHydrationReady(programmerId, provisionalRuntimeReady);
+    const provisionalHrContextReady = isProgrammerHrContextHydrationReady(programmerId, provisionalServices);
+    void provisionalRuntimeReady;
+    setProgrammerWorkspaceHydrationReady(programmerId, provisionalHrContextReady);
     renderPremiumServices(provisionalServices, programmer, { controllerReason });
 
     const premiumHydrationPromise = primeProgrammerServiceHydration(programmer, provisionalServices, {
@@ -77967,22 +78036,6 @@ async function refreshProgrammerPanels(options = {}) {
     if (!selectionStillCurrent()) {
       return;
     }
-
-    const finalServices = updateSelectionServicesSnapshot(resolvedServices, cachedCmService, cachedCmMvpdService);
-    const runtimeReady = isProgrammerRuntimeServicesReady(programmerId, finalServices);
-    const uiReady = shouldRenderPremiumServicesUi(programmerId, finalServices);
-    if (!uiReady) {
-      throw new Error("UnderPAR could not finish premium service hydration.");
-    }
-
-    clearProgrammerPremiumHydrationProgress(programmerId);
-    setProgrammerWorkspaceHydrationReady(programmerId, runtimeReady);
-    clearStatusUnlessCmTenantsPrecheckBlocked();
-    renderPremiumServices(finalServices, programmer, { controllerReason });
-    void persistPassVaultProgrammerRecord(programmer, finalServices, {
-      source: "live",
-      hydrationStatus: computePersistedHydrationStatus(finalServices),
-    }).catch(() => {});
 
     const cmSelectionReadyPromise = skipCmBootstrap
       ? Promise.resolve(null)
@@ -78002,21 +78055,43 @@ async function refreshProgrammerPanels(options = {}) {
               forceRefresh: forcePremiumRefresh,
             }).catch(() => state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || cachedCmMvpdService)
           );
-    const cmHydrationPromise = Promise.allSettled([cmServicePromise, cmMvpdServicePromise]).then((cmResults) => {
-      const nextCmService = selectPreferredCmRuntimeService(
-        finalServices?.cm,
-        cmResults[0]?.status === "fulfilled" ? cmResults[0].value : cachedCmService
-      );
-      const nextCmMvpdService = selectPreferredCmRuntimeService(
-        finalServices?.cmMvpd,
-        cmResults[1]?.status === "fulfilled" ? cmResults[1].value : cachedCmMvpdService
-      );
-      if (skipCmBootstrap || !shouldShowCmService(nextCmService)) {
+    const initialCmResults = await Promise.allSettled([cmServicePromise, cmMvpdServicePromise]);
+    if (!selectionStillCurrent()) {
+      return;
+    }
+
+    const resolvedCmService = selectPreferredCmRuntimeService(
+      resolvedServices?.cm,
+      initialCmResults[0]?.status === "fulfilled" ? initialCmResults[0].value : cachedCmService
+    );
+    const resolvedCmMvpdService = selectPreferredCmRuntimeService(
+      resolvedServices?.cmMvpd,
+      initialCmResults[1]?.status === "fulfilled" ? initialCmResults[1].value : cachedCmMvpdService
+    );
+    const finalServices = updateSelectionServicesSnapshot(resolvedServices, resolvedCmService, resolvedCmMvpdService);
+    const runtimeReady = isProgrammerRuntimeServicesReady(programmerId, finalServices);
+    const hrContextReady = isProgrammerHrContextHydrationReady(programmerId, finalServices);
+    const uiReady = shouldRenderPremiumServicesUi(programmerId, finalServices);
+    if (!uiReady) {
+      throw new Error("UnderPAR could not finish premium service hydration.");
+    }
+
+    clearProgrammerPremiumHydrationProgress(programmerId);
+    setProgrammerWorkspaceHydrationReady(programmerId, hrContextReady);
+    clearStatusUnlessCmTenantsPrecheckBlocked();
+    renderPremiumServices(finalServices, programmer, { controllerReason });
+    void persistPassVaultProgrammerRecord(programmer, finalServices, {
+      source: "live",
+      hydrationStatus: computePersistedHydrationStatus(finalServices),
+    }).catch(() => {});
+
+    const cmHydrationPromise = Promise.resolve().then(() => {
+      if (skipCmBootstrap || !shouldShowCmService(resolvedCmService)) {
         return null;
       }
       return ensureCmHydratedForProgrammer(
         programmer,
-        mergeSelectionServices(finalServices, nextCmService, nextCmMvpdService),
+        mergeSelectionServices(finalServices, resolvedCmService, resolvedCmMvpdService),
         {
           forceRefresh: forcePremiumRefresh,
           reason: "panel-selection",
@@ -78024,22 +78099,16 @@ async function refreshProgrammerPanels(options = {}) {
       ).catch(() => null);
     });
 
-    void Promise.allSettled([cmServicePromise, cmMvpdServicePromise, cmHydrationPromise]).then((results) => {
+    void Promise.allSettled([cmHydrationPromise]).then((results) => {
       if (!selectionStillCurrent()) {
         return;
       }
       const currentServices = getCurrentPremiumAppsSnapshot(programmerId) || finalServices;
-      const refreshedCmService = selectPreferredCmRuntimeService(
-        currentServices?.cm,
-        results[0]?.status === "fulfilled" ? results[0].value : null
-      );
-      const refreshedCmMvpdService = selectPreferredCmRuntimeService(
-        currentServices?.cmMvpd,
-        results[1]?.status === "fulfilled" ? results[1].value : null
-      );
+      const refreshedCmService = selectPreferredCmRuntimeService(currentServices?.cm, resolvedCmService);
+      const refreshedCmMvpdService = selectPreferredCmRuntimeService(currentServices?.cmMvpd, resolvedCmMvpdService);
       const hydratedCmServices =
-        results[2]?.status === "fulfilled" && results[2].value?.services && typeof results[2].value.services === "object"
-          ? results[2].value.services
+        results[0]?.status === "fulfilled" && results[0].value?.services && typeof results[0].value.services === "object"
+          ? results[0].value.services
           : null;
       const nextServices = updateSelectionServicesSnapshot(
         hydratedCmServices || currentServices,

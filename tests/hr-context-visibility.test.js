@@ -52,11 +52,17 @@ function loadHrVisibilityHelpers(seed = {}) {
   const script = [
     'const DEFAULT_ADOBEPASS_ENVIRONMENT = { key: "production" };',
     'const PREMIUM_SERVICE_DISPLAY_ORDER = ["restV2", "esmWorkspace", "degradation", "resetTempPass", "cm", "cmMvpd"];',
-    "const state = globalThis.__seed.state || { programmerWorkspaceHydrationReadyByKey: new Map() };",
+    "const state = globalThis.__seed.state || { programmerWorkspaceHydrationReadyByKey: new Map(), cmServiceByProgrammerId: new Map() };",
     "function getActiveAdobePassEnvironmentKey() { return globalThis.__seed.environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key; }",
+    "function hasPassVaultCredentialCoverageForServices() { return globalThis.__seed.hasCredentialCoverage !== false; }",
+    "function getPassVaultMediaCompanyRecord() { return globalThis.__seed.passVaultRecord || null; }",
+    "function buildPassVaultRuntimeCmServiceSnapshot() { return globalThis.__seed.passVaultCmService || null; }",
     extractFunctionSource(source, "getEnvironmentScopedProgrammerKey"),
     extractFunctionSource(source, "getProgrammerWorkspaceHydrationReadyKey"),
     extractFunctionSource(source, "isProgrammerWorkspaceHydrationReady"),
+    extractFunctionSource(source, "isProgrammerRuntimeServicesReady"),
+    extractFunctionSource(source, "hasResolvedCmAvailabilityForProgrammer"),
+    extractFunctionSource(source, "isProgrammerHrContextHydrationReady"),
     extractFunctionSource(source, "hasEsmScopedApp"),
     extractFunctionSource(source, "shouldShowCmService"),
     extractFunctionSource(source, "getDetectedPremiumServiceKeys"),
@@ -534,14 +540,21 @@ test("HR context stays hidden without a selected media company or detected premi
 test("HR context reveals only when the selected media company has detected premium services", () => {
   const state = {
     programmerWorkspaceHydrationReadyByKey: new Map(),
+    cmServiceByProgrammerId: new Map(),
   };
   const { shouldRevealHrContextSections } = loadHrVisibilityHelpers({
     state,
     environmentKey: "production",
   });
 
-  assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, { restV2: { appName: "REST V2" } }), true);
-  assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, { esm: { guid: "esm-guid" } }), true);
+  assert.equal(
+    shouldRevealHrContextSections({ programmerId: "fox" }, { restV2: { appName: "REST V2" }, cm: { matchedTenants: [] } }),
+    true
+  );
+  assert.equal(
+    shouldRevealHrContextSections({ programmerId: "fox" }, { esm: { guid: "esm-guid" }, cm: { matchedTenants: [] } }),
+    true
+  );
   assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, { cm: { matchedTenants: [{ id: "cm-tenant" }] } }), true);
   assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, {}), false);
   assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, { cm: { matchedTenants: [] } }), false);
