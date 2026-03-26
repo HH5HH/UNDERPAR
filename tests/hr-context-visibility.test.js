@@ -139,6 +139,24 @@ function loadRestV2MvpdMetaResolver(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2PartnerPlatformMappingSnapshotResolver() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    extractFunctionSource(source, "inferRestV2LearningPartnerNameFromText"),
+    extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
+    extractFunctionSource(source, "resolveRestV2PartnerPlatformMappingDetailsFromSnapshot"),
+    "module.exports = { resolveRestV2PartnerPlatformMappingDetailsFromSnapshot };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadRestV2LearningEntryOpener(seed = {}) {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -297,6 +315,7 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     "function hydrateRestV2ContextFromPreparedLoginEntry(context = null) { if (typeof globalThis.__seed.hydratePreparedContext === 'function') { return globalThis.__seed.hydratePreparedContext(context); } return context; }",
     "function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydratePartnerContext === 'function') { return globalThis.__seed.hydratePartnerContext(context, flow); } return context; }",
     "function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydrateLearningPartnerContext === 'function') { return globalThis.__seed.hydrateLearningPartnerContext(context, flow); } return context; }",
+    "async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = null, options = {}) { if (typeof globalThis.__seed.hydratePartnerPlatformMapping === 'function') { return globalThis.__seed.hydratePartnerPlatformMapping(context, options); } return context; }",
     "function hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context = null, flow = null, headerNames = []) { if (typeof globalThis.__seed.hydrateOptionalHeaders === 'function') { return globalThis.__seed.hydrateOptionalHeaders(context, flow, headerNames); } return context; }",
     extractFunctionSource(source, "prepareRestV2InteractiveDocsContextForEntry"),
     "module.exports = { enrichRestV2LearningResourcesFromConsoleContext, prepareRestV2InteractiveDocsContextForEntry };",
@@ -1045,6 +1064,130 @@ test("REST V2 MVPD meta keeps cached platform mapping when callers only provide 
   assert.equal(resolved.id, "Comcast_SSO");
   assert.equal(resolved.name, "Xfinity");
   assert.equal(resolved.platformMappingId, "comcast-provider-map");
+});
+
+test("REST V2 partner snapshot resolver preserves the Apple-specific provider mapping for Comcast partner SSO", () => {
+  const { resolveRestV2PartnerPlatformMappingDetailsFromSnapshot } =
+    loadRestV2PartnerPlatformMappingSnapshotResolver();
+
+  const resolved = resolveRestV2PartnerPlatformMappingDetailsFromSnapshot(
+    {
+      partnerSsoPlatforms: [
+        {
+          partner: "Amazon",
+          mappingId: "Comcast_SSO",
+          integrationEnabled: true,
+          boardingStatus: "NOT_SUPPORTED",
+        },
+        {
+          partner: "Apple",
+          mappingId: "Comcast_SSO_Apple",
+          integrationEnabled: true,
+          boardingStatus: "PICKER",
+        },
+      ],
+    },
+    ["Apple"]
+  );
+
+  assert.equal(resolved.resolvedPartner, "Apple");
+  assert.equal(resolved.resolvedMappingId, "Comcast_SSO_Apple");
+  assert.equal(resolved.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
+  assert.equal(resolved.partnerPlatformMappings.Amazon, "Comcast_SSO");
+});
+
+test("REST V2 learning reruns inferred partner hydration after console snapshot mapping resolves the Comcast Apple provider id", async () => {
+  let learningHydrationCalls = 0;
+  const validLearningFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const { prepareRestV2InteractiveDocsContextForEntry } = loadRestV2LearningContextPreparer({
+    getFlowSnapshot() {
+      return {
+        flowId: "flow-123",
+        events: [
+          {
+            source: "web-request",
+            phase: "cookies-snapshot",
+            cookies: [
+              {
+                name: "r-apt",
+                value: "jwt-placeholder",
+              },
+            ],
+          },
+        ],
+      };
+    },
+    hydrateLearningPartnerContext(context) {
+      learningHydrationCalls += 1;
+      context.learningPartner = "Apple";
+      context.learningPartnerSource = "recorded r-apt cookie";
+      if (String(context?.mvpdPlatformMappingId || "").trim() === "Comcast_SSO_Apple") {
+        context.learningPartnerFrameworkStatus = validLearningFrameworkStatus;
+      }
+      return context;
+    },
+    hydratePartnerPlatformMapping(context) {
+      context.mvpdPlatformMappingId = "Comcast_SSO_Apple";
+      context.mvpdMeta = {
+        ...(context.mvpdMeta || {}),
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "Comcast_SSO_Apple",
+        partnerPlatformMappings: {
+          Apple: "Comcast_SSO_Apple",
+        },
+      };
+      return context;
+    },
+    isFrameworkStatusUsable(value = "") {
+      return String(value || "").trim() === validLearningFrameworkStatus;
+    },
+  });
+
+  const prepared = await prepareRestV2InteractiveDocsContextForEntry(
+    {
+      key: "partner-sso-create-profile",
+      usesPartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      usesBodySamlResponse: false,
+    },
+    {
+      ok: true,
+      programmerId: "Turner",
+      programmerName: "Turner",
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+      },
+      partner: "",
+      partnerFrameworkStatus: "",
+      learningPartner: "",
+      learningPartnerFrameworkStatus: "",
+      flowId: "flow-123",
+    }
+  );
+
+  assert.equal(learningHydrationCalls, 2);
+  assert.equal(prepared.mvpdPlatformMappingId, "Comcast_SSO_Apple");
+  assert.equal(prepared.learningPartner, "Apple");
+  assert.equal(prepared.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
 });
 
 test("REST V2 learning hydrates optional SSO headers from the debug flow when the current context has not retained them yet", async () => {
