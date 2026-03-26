@@ -1,0 +1,140 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+
+const ROOT = path.resolve(__dirname, "..");
+const POPUP_PATH = path.join(ROOT, "popup.js");
+
+function extractFunctionSource(source, functionName) {
+  const markers = [`async function ${functionName}(`, `function ${functionName}(`];
+  let start = -1;
+  for (const marker of markers) {
+    start = source.indexOf(marker);
+    if (start !== -1) {
+      break;
+    }
+  }
+  assert.notEqual(start, -1, `Unable to locate ${functionName}`);
+  const paramsStart = source.indexOf("(", start);
+  let paramsDepth = 0;
+  let bodyStart = -1;
+  for (let index = paramsStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "(") paramsDepth += 1;
+    if (char === ")") {
+      paramsDepth -= 1;
+      if (paramsDepth === 0) {
+        bodyStart = source.indexOf("{", index);
+        break;
+      }
+    }
+  }
+  assert.notEqual(bodyStart, -1, `Unable to locate body for ${functionName}`);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+  throw new Error(`Unterminated function ${functionName}`);
+}
+
+function loadVisitorIdentifierHelpers() {
+  const source = fs.readFileSync(POPUP_PATH, "utf8");
+  const script = [
+    'const ADOBE_SP_BASE = "https://sp.auth.adobe.com";',
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function normalizeRestV2PartnerFrameworkStatusForRequest(value = '') { return String(value || '').trim(); }",
+    "function normalizeRestV2TempPassIdentityForRequest(value = '') { return String(value || '').trim(); }",
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
+    extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
+    extractFunctionSource(source, "decodeBase64TextSafe"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveHeaderValue"),
+    extractFunctionSource(source, "collectRestV2CaseInsensitiveObjectValues"),
+    extractFunctionSource(source, "getRestV2InteractiveDocsHeaderAliasCandidates"),
+    extractFunctionSource(source, "decodeURIComponentSafe"),
+    extractFunctionSource(source, "extractRestV2VisitorIdentifierFromCarrierValue"),
+    extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
+    extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
+    extractFunctionSource(source, "getRestV2InteractiveDocsContextPropertyForHeader"),
+    extractFunctionSource(source, "resolveRestV2InteractiveDocsHeaderValueFromContext"),
+    extractFunctionSource(source, "extractRestV2CookieValueFromCookieText"),
+    "function extractRestV2InteractiveDocsHeaderValueFromText() { return ''; }",
+    extractFunctionSource(source, "extractRestV2VisitorIdentifierFromDebugFlow"),
+    extractFunctionSource(source, "extractRestV2InteractiveDocsHeaderValueFromDebugFlow"),
+    extractFunctionSource(source, "hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow"),
+    "module.exports = { normalizeRestV2VisitorIdentifierForRequest, extractRestV2VisitorIdentifierFromDebugFlow, extractRestV2InteractiveDocsHeaderValueFromDebugFlow, hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
+    Headers,
+  };
+  vm.runInNewContext(script, context, { filename: POPUP_PATH });
+  return context.module.exports;
+}
+
+test("REST V2 visitor identifier normalization extracts ECID from Experience Cloud carriers", () => {
+  const { normalizeRestV2VisitorIdentifierForRequest } = loadVisitorIdentifierHelpers();
+  const ecid = "20265673158980419722735089753036633573";
+
+  assert.equal(normalizeRestV2VisitorIdentifierForRequest(`MCMID|${ecid}`), ecid);
+  assert.equal(
+    normalizeRestV2VisitorIdentifierForRequest(`-12345%7CMCIDTS%7C20443%7CMCMID%7C${ecid}%7CMCAAMLH-12345%7C6`),
+    ecid
+  );
+  assert.equal(
+    normalizeRestV2VisitorIdentifierForRequest(JSON.stringify({ visitorIdentifier: ecid })),
+    ecid
+  );
+});
+
+test("REST V2 visitor identifier hydrates from debug-flow cookies when no literal header was retained", () => {
+  const {
+    extractRestV2VisitorIdentifierFromDebugFlow,
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow,
+    hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow,
+  } = loadVisitorIdentifierHelpers();
+  const ecid = "20265673158980419722735089753036633573";
+  const flow = {
+    flowId: "flow-visitor-123",
+    events: [
+      {
+        source: "web-request",
+        phase: "cookies-snapshot",
+        cookies: [
+          {
+            name: "AMCV_1FD6776A524453CC0A490D44%40AdobeOrg",
+            value: `-12345%7CMCIDTS%7C20443%7CMCMID%7C${ecid}%7CMCAAMLH-12345%7C6`,
+          },
+        ],
+      },
+      {
+        source: "extension",
+        phase: "profile-check",
+        cookieHeaders: [`foo=bar; s_ecid=MCMID|${ecid}; path=/; Secure`],
+      },
+    ],
+  };
+  const context = {
+    visitorIdentifier: "",
+  };
+
+  assert.equal(extractRestV2VisitorIdentifierFromDebugFlow(flow), ecid);
+  assert.equal(extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "AP-Visitor-Identifier"), ecid);
+  hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context, flow, ["AP-Visitor-Identifier"]);
+  assert.equal(context.visitorIdentifier, ecid);
+});

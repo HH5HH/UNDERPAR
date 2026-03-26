@@ -99,6 +99,8 @@ function loadPlanBuilder() {
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "extractRestV2VisitorIdentifierFromCarrierValue"),
+    extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
     extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
     extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
@@ -270,6 +272,7 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     adobeSubjectToken: "subject-token-payload",
     adServiceToken: "service-token-payload",
     tempPassIdentity: rawTempPassIdentity,
+    visitorIdentifier: "20265673158980419722735089753036633573",
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "spec-contract",
   };
@@ -314,6 +317,12 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
       entry.usesTempPassIdentity === true,
       Boolean(tempPassIdentityHeader),
       `${entry.operationId} AP-Temppass-Identity usage drifted`
+    );
+    const visitorIdentifierHeader = getParameter(specMeta.parameters, "AP-Visitor-Identifier", "header");
+    assert.equal(
+      entry.usesVisitorIdentifier === true,
+      Boolean(visitorIdentifierHeader),
+      `${entry.operationId} AP-Visitor-Identifier usage drifted`
     );
     if (String(entry.sectionKey || "") === "partnerSso") {
       assert.equal(entry.requirePartnerFrameworkStatus === true, true, `${entry.operationId} must require a usable partner framework payload`);
@@ -387,6 +396,13 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
         plan.fieldValues["header.AP-Temppass-Identity"],
         Buffer.from(rawTempPassIdentity, "utf8").toString("base64"),
         `${entry.operationId} must normalize AP-Temppass-Identity when UnderPAR has it`
+      );
+    }
+    if (entry.usesVisitorIdentifier === true) {
+      assert.equal(
+        plan.fieldValues["header.AP-Visitor-Identifier"],
+        sampleContext.visitorIdentifier,
+        `${entry.operationId} must hydrate AP-Visitor-Identifier when UnderPAR has it`
       );
     }
   }

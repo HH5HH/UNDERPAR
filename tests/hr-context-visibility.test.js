@@ -98,6 +98,8 @@ function loadRestV2LearningPlanBuilder() {
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "extractRestV2VisitorIdentifierFromCarrierValue"),
+    extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
     extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
     extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
@@ -282,7 +284,7 @@ function loadRestV2InteractiveDocsContextBuilder(seed = {}) {
     "function resolveRestV2LearningRequestorDomainName() { return String(globalThis.__seed.domainName || '').trim(); }",
     "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || '').trim(); }",
     "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || context?.sessionPartner || '').trim(); }",
-    "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || '').trim(); } return ''; }",
+    "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-visitor-identifier') { return String(context?.visitorIdentifier || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || '').trim(); } return ''; }",
     "function isRestV2LikelyPartnerSsoContext(context = null) { return typeof globalThis.__seed.isLikelyPartnerSso === 'function' ? globalThis.__seed.isLikelyPartnerSso(context) : false; }",
     "function resolveRestV2DebugFlowIdForHarvest(harvest = null) { return typeof globalThis.__seed.resolveFlowId === 'function' ? globalThis.__seed.resolveFlowId(harvest) : ''; }",
     extractFunctionSource(source, "resolveRestV2InteractiveDocsAppRequestorContext"),
@@ -385,6 +387,8 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "extractRestV2VisitorIdentifierFromCarrierValue"),
+    extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
     extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
@@ -396,7 +400,7 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || context?.sessionPartner || '').trim(); }",
     "function resolveRestV2LearningPartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolveLearningPartnerName === 'function' ? globalThis.__seed.resolveLearningPartnerName(context) : String(context?.partner || context?.sessionPartner || context?.learningPartner || '').trim(); }",
     "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); }",
-    "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); } return ''; }",
+    "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-visitor-identifier') { return String(context?.visitorIdentifier || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); } return ''; }",
     "function isRestV2PartnerFrameworkStatusUsable(value = '') { return typeof globalThis.__seed.isFrameworkStatusUsable === 'function' ? globalThis.__seed.isFrameworkStatusUsable(value) : Boolean(String(value || '').trim()); }",
     "function hydrateRestV2ContextFromPreparedLoginEntry(context = null) { if (typeof globalThis.__seed.hydratePreparedContext === 'function') { return globalThis.__seed.hydratePreparedContext(context); } return context; }",
     "function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydratePartnerContext === 'function') { return globalThis.__seed.hydratePartnerContext(context, flow); } return context; }",
@@ -1630,6 +1634,7 @@ test("REST V2 learning hydrates optional SSO headers from the debug flow when th
       context.adobeSubjectToken = "subject-token-payload";
       context.adServiceToken = "service-token-payload";
       context.tempPassIdentity = "encoded-temp-pass-identity";
+      context.visitorIdentifier = "20265673158980419722735089753036633573";
       return context;
     },
   });
@@ -1640,6 +1645,7 @@ test("REST V2 learning hydrates optional SSO headers from the debug flow when th
       usesAdobeSubjectToken: true,
       usesAdServiceToken: true,
       usesTempPassIdentity: true,
+      usesVisitorIdentifier: true,
     },
     {
       ok: true,
@@ -1647,6 +1653,7 @@ test("REST V2 learning hydrates optional SSO headers from the debug flow when th
       adobeSubjectToken: "",
       adServiceToken: "",
       tempPassIdentity: "",
+      visitorIdentifier: "",
     }
   );
 
@@ -1654,6 +1661,7 @@ test("REST V2 learning hydrates optional SSO headers from the debug flow when th
   assert.equal(prepared.adobeSubjectToken, "subject-token-payload");
   assert.equal(prepared.adServiceToken, "service-token-payload");
   assert.equal(prepared.tempPassIdentity, "encoded-temp-pass-identity");
+  assert.equal(prepared.visitorIdentifier, "20265673158980419722735089753036633573");
 });
 
 test("REST V2 learning resource helpers merge the requestor x MVPD pool and sample ten unique ids", () => {
@@ -1981,6 +1989,7 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
     adobeSubjectToken: "subject-token-payload",
     adServiceToken: "service-token-payload",
     tempPassIdentity: "temp-pass-identity-payload",
+    visitorIdentifier: "20265673158980419722735089753036633573",
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "tab-network:body",
     redirectUrl: "https://experience.example.test/callback",
@@ -2004,6 +2013,7 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
   assert.equal(context.adobeSubjectToken, "subject-token-payload");
   assert.equal(context.adServiceToken, "service-token-payload");
   assert.equal(context.tempPassIdentity, "temp-pass-identity-payload");
+  assert.equal(context.visitorIdentifier, "20265673158980419722735089753036633573");
   assert.equal(context.samlResponse, "PHNhbWxwOlJlc3BvbnNlPg==");
   assert.equal(context.samlSource, "tab-network:body");
   assert.equal(context.redirectUrl, "https://experience.example.test/callback");
@@ -2057,6 +2067,7 @@ test("REST V2 learning context reuses selection-scoped partner SSO seed when aut
       sessionCode: "session-code-123",
       partner: "Apple",
       partnerFrameworkStatus: "framework-status-token",
+      visitorIdentifier: "20265673158980419722735089753036633573",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
       redirectUrl: "https://experience.example.test/callback",
@@ -2084,6 +2095,7 @@ test("REST V2 learning context reuses selection-scoped partner SSO seed when aut
   assert.equal(context.sessionCode, "session-code-123");
   assert.equal(context.partner, "Apple");
   assert.equal(context.partnerFrameworkStatus, "framework-status-token");
+  assert.equal(context.visitorIdentifier, "20265673158980419722735089753036633573");
   assert.equal(context.samlResponse, "PHNhbWxwOlJlc3BvbnNlPg==");
   assert.equal(context.samlSource, "tab-network:body");
   assert.equal(context.redirectUrl, "https://experience.example.test/callback");
@@ -2122,6 +2134,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     subscriberId: "promo-user-1",
   });
   const normalizedTempPassIdentity = Buffer.from(rawTempPassIdentity, "utf8").toString("base64");
+  const visitorIdentifier = "20265673158980419722735089753036633573";
   const baseContext = {
     serviceProviderId: "turner",
     requestorId: "turner",
@@ -2136,6 +2149,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     adobeSubjectToken,
     adServiceToken,
     tempPassIdentity: rawTempPassIdentity,
+    visitorIdentifier,
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "tab-network:body",
   };
@@ -2179,6 +2193,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/createSessionUsingPOST",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesAdobeSubjectToken: true,
       usesAdServiceToken: true,
       contentType: "application/x-www-form-urlencoded",
@@ -2193,6 +2208,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(createSessionPlan.fieldValues["header.Content-Type"], "application/x-www-form-urlencoded");
   assert.equal(createSessionPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
   assert.equal(createSessionPlan.fieldValues["header.X-Device-Info"], "device-info-123");
+  assert.equal(createSessionPlan.fieldValues["header.AP-Visitor-Identifier"], visitorIdentifier);
   assert.equal(createSessionPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
   assert.equal(createSessionPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
   assert.equal(createSessionPlan.fieldValues["body.domainName"], "experience.example.test");
@@ -2210,6 +2226,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/resumeSessionUsingPOST",
       requiresAccessToken: true,
       contentType: "application/x-www-form-urlencoded",
+      usesVisitorIdentifier: true,
       usesSessionCode: true,
       requireSessionCode: true,
       usesBodyMvpd: true,
@@ -2234,6 +2251,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationId: "getSessionStatusUsingGET_1",
       operationAnchor: "operation/getSessionStatusUsingGET_1",
       requiresAccessToken: true,
+      usesVisitorIdentifier: true,
       usesSessionCode: true,
       requireSessionCode: true,
     },
@@ -2248,6 +2266,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationId: "getProfileForCodeUsingGET_1",
       operationAnchor: "operation/getProfileForCodeUsingGET_1",
       requiresAccessToken: true,
+      usesVisitorIdentifier: true,
       usesSessionCode: true,
       requireSessionCode: true,
     },
@@ -2263,6 +2282,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/getProfilesUsingGET_1",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesAdobeSubjectToken: true,
       usesAdServiceToken: true,
       usesPartnerFrameworkStatus: true,
@@ -2284,6 +2304,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/getProfileForMvpdUsingGET",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
       usesAdobeSubjectToken: true,
@@ -2307,6 +2328,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/retrieveAuthorizeDecisionsForMvpdUsingPOST",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
       usesBodyResources: true,
@@ -2334,6 +2356,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
       usesBodyResources: true,
@@ -2362,6 +2385,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/getLogoutForMvpdUsingGET",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
       usesAdobeSubjectToken: true,
@@ -2386,6 +2410,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/createPartnerProfileUsingPOST",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesPartnerPath: true,
       requirePartnerPath: true,
       usesPartnerFrameworkStatus: true,
@@ -2400,6 +2425,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(partnerProfilePlan.fieldValues["path.partner"], "Apple");
   assert.equal(partnerProfilePlan.fieldValues["body.SAMLResponse"], "PHNhbWxwOlJlc3BvbnNlPg==");
   assert.equal(partnerProfilePlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+  assert.equal(partnerProfilePlan.fieldValues["header.AP-Visitor-Identifier"], visitorIdentifier);
   assert.equal(partnerProfilePlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
   assert.match(String(partnerProfilePlan.notes[0] || ""), /SAMLResponse captured from/);
 
@@ -2410,6 +2436,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/createPartnerProfileUsingPOST",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesPartnerPath: true,
       requirePartnerPath: true,
       usesPartnerFrameworkStatus: true,
@@ -2430,6 +2457,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/retrieveVerificationTokenUsingPOST",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesPartnerPath: true,
       requirePartnerPath: true,
       usesPartnerFrameworkStatus: true,
@@ -2445,6 +2473,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   );
   assert.equal(partnerSsoPlan.fieldValues["path.partner"], "Apple");
   assert.equal(partnerSsoPlan.fieldValues["body.domainName"], "experience.example.test");
+  assert.equal(partnerSsoPlan.fieldValues["header.AP-Visitor-Identifier"], visitorIdentifier);
   assert.equal(partnerSsoPlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
   assert.equal(
     partnerSsoPlan.fieldValues["body.redirectUrl"],
