@@ -30471,7 +30471,9 @@ function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flo
     resolveRestV2PartnerFrameworkStatusFromContext(context)
   );
   const hasRealFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(directFrameworkStatus);
-  if (hasRealPartner && hasRealFrameworkStatus) {
+  const hasCompatibleDirectFrameworkStatus =
+    hasRealFrameworkStatus && isRestV2PartnerFrameworkStatusCompatibleWithContext(directFrameworkStatus, context);
+  if (hasRealPartner && hasCompatibleDirectFrameworkStatus) {
     return context;
   }
 
@@ -30498,7 +30500,7 @@ function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flo
     context.learningPartnerSource = String(firstNonEmptyString([artifacts.signalSource, "recorded partner auth flow"]) || "").trim();
   }
 
-  if (!hasRealFrameworkStatus) {
+  if (!hasCompatibleDirectFrameworkStatus) {
     const compatibilityContext = {
       ...context,
       ...(inferredPartner

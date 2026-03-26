@@ -235,6 +235,32 @@ function loadRestV2LearningPartnerFrameworkStatusBuilder(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2LearningPartnerContextHydrator(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function getRestV2MvpdMeta(requestorId = '', mvpdId = '', mvpdMeta = null) { return typeof globalThis.__seed.resolveMvpdMeta === 'function' ? globalThis.__seed.resolveMvpdMeta(requestorId, mvpdId, mvpdMeta) : mvpdMeta; }",
+    "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || '').trim(); }",
+    "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || '').trim(); }",
+    "function normalizeRestV2PartnerFrameworkStatusForRequest(value = '') { return typeof globalThis.__seed.normalizeFrameworkStatus === 'function' ? globalThis.__seed.normalizeFrameworkStatus(value) : String(value || '').trim(); }",
+    "function isRestV2PartnerFrameworkStatusUsable(value = '') { return typeof globalThis.__seed.isFrameworkStatusUsable === 'function' ? globalThis.__seed.isFrameworkStatusUsable(value) : Boolean(String(value || '').trim()); }",
+    "function extractRestV2PartnerSsoLearningArtifactsFromDebugFlow(flow = null) { return typeof globalThis.__seed.extractArtifacts === 'function' ? globalThis.__seed.extractArtifacts(flow) : {}; }",
+    "function inferRestV2LearningPartnerName(context = null, flow = null, artifacts = null) { return typeof globalThis.__seed.inferPartnerName === 'function' ? globalThis.__seed.inferPartnerName(context, flow, artifacts) : ''; }",
+    "function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, artifacts = null, partnerName = '') { return typeof globalThis.__seed.buildLearningFrameworkStatus === 'function' ? globalThis.__seed.buildLearningFrameworkStatus(context, flow, artifacts, partnerName) : ''; }",
+    "function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = '', context = null) { return typeof globalThis.__seed.isFrameworkStatusCompatible === 'function' ? globalThis.__seed.isFrameworkStatusCompatible(value, context) : Boolean(String(value || '').trim()); }",
+    extractFunctionSource(source, "hydrateRestV2LearningPartnerSsoContextFromDebugFlow"),
+    "module.exports = { hydrateRestV2LearningPartnerSsoContextFromDebugFlow };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadRestV2LearningEntryOpener(seed = {}) {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -1697,6 +1723,98 @@ test("REST V2 learning still refreshes the partner flow when a generic captured 
   assert.equal(learningHydrationCalls, 2);
   assert.equal(prepared.mvpdPlatformMappingId, "Comcast_SSO_Apple");
   assert.equal(prepared.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
+});
+
+test("REST V2 learning promotes an inferred partner framework payload when the captured header is usable but incompatible with the resolved partner mapping", () => {
+  const genericFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const validLearningFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+  const { hydrateRestV2LearningPartnerSsoContextFromDebugFlow } = loadRestV2LearningPartnerContextHydrator({
+    resolvePartnerName() {
+      return "Apple";
+    },
+    resolveFrameworkStatus(context) {
+      return String(context?.partnerFrameworkStatus || "").trim();
+    },
+    normalizeFrameworkStatus(value = "") {
+      return String(value || "").trim();
+    },
+    isFrameworkStatusUsable(value = "") {
+      const normalized = String(value || "").trim();
+      return normalized === genericFrameworkStatus || normalized === validLearningFrameworkStatus;
+    },
+    isFrameworkStatusCompatible(value = "") {
+      return String(value || "").trim() === validLearningFrameworkStatus;
+    },
+    extractArtifacts() {
+      return {
+        rApt: "jwt-placeholder",
+        signalSource: "recorded r-apt cookie",
+      };
+    },
+    inferPartnerName() {
+      return "Apple";
+    },
+    buildLearningFrameworkStatus() {
+      return validLearningFrameworkStatus;
+    },
+  });
+
+  const context = {
+    requestorId: "MML",
+    serviceProviderId: "MML",
+    mvpd: "Comcast_SSO",
+    mvpdPlatformMappingId: "Comcast_SSO_Apple",
+    mvpdMeta: {
+      id: "Comcast_SSO",
+      name: "Xfinity",
+      platformMappingId: "Comcast_SSO_Apple",
+      partnerPlatformMappings: {
+        Apple: "Comcast_SSO_Apple",
+      },
+    },
+    partner: "Apple",
+    partnerFrameworkStatus: genericFrameworkStatus,
+    learningPartner: "",
+    learningPartnerFrameworkStatus: "",
+    learningPartnerSource: "",
+  };
+
+  hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context, {
+    flowId: "flow-123",
+    events: [],
+  });
+
+  assert.equal(context.learningPartner, "Apple");
+  assert.equal(context.learningPartnerSource, "recorded r-apt cookie");
+  assert.equal(context.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
 });
 
 test("REST V2 learning hydrates optional SSO headers from the debug flow when the current context has not retained them yet", async () => {
