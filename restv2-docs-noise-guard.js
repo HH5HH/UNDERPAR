@@ -26,201 +26,187 @@ function shouldSuppressRestV2DocsConsoleArgs(args = []) {
   return REST_V2_DOCS_CONSOLE_NOISE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
-function shouldStubRestV2DocsImsProfileRequest(url = "") {
+function shouldStubRestV2DocsImsProfileRequest(url = "", baseUrl = "https://developer.adobe.com") {
   const normalizedUrl = normalizeRestV2DocsNoiseText(url);
   if (!normalizedUrl) {
     return false;
   }
   try {
-    return REST_V2_DOCS_IMS_PROFILE_URL_PATTERN.test(String(new URL(normalizedUrl, "https://developer.adobe.com").href));
+    return REST_V2_DOCS_IMS_PROFILE_URL_PATTERN.test(String(new URL(normalizedUrl, baseUrl).href));
   } catch {
     return REST_V2_DOCS_IMS_PROFILE_URL_PATTERN.test(normalizedUrl);
   }
 }
 
-function createRestV2DocsNoiseGuardPageScriptSource() {
-  return `(() => {
-    if (window.__UNDERPAR_RESTV2_DOCS_NOISE_GUARD__ === true) {
+function installRestV2DocsNoiseGuard(globalRef = null) {
+  const root = globalRef || (typeof window !== "undefined" ? window : null);
+  if (!root) {
+    return false;
+  }
+  if (root.__UNDERPAR_RESTV2_DOCS_NOISE_GUARD__ === true) {
+    return true;
+  }
+  root.__UNDERPAR_RESTV2_DOCS_NOISE_GUARD__ = true;
+
+  const baseUrl = normalizeRestV2DocsNoiseText(root?.location?.href) || "https://developer.adobe.com";
+  const normalizeUrl = (value) => {
+    const raw = normalizeRestV2DocsNoiseText(value);
+    if (!raw) {
+      return "";
+    }
+    try {
+      return String(new URL(raw, baseUrl).href);
+    } catch {
+      return raw;
+    }
+  };
+  const shouldStubRequest = (url) => shouldStubRestV2DocsImsProfileRequest(normalizeUrl(url), baseUrl);
+
+  ["log", "info", "warn", "error", "debug"].forEach((methodName) => {
+    const original = root.console?.[methodName];
+    if (typeof original !== "function") {
       return;
     }
-    window.__UNDERPAR_RESTV2_DOCS_NOISE_GUARD__ = true;
-    const noisePatternSources = ${JSON.stringify(REST_V2_DOCS_CONSOLE_NOISE_PATTERNS.map((pattern) => pattern.source))};
-    const noisePatterns = noisePatternSources.map((source) => new RegExp(source, "i"));
-    const imsProfilePattern = new RegExp(${JSON.stringify(REST_V2_DOCS_IMS_PROFILE_URL_PATTERN.source)}, "i");
-    const normalizeText = (value) => {
-      if (value == null) {
-        return "";
+    root.console[methodName] = function underparDocsConsoleNoiseGuard(...args) {
+      if (shouldSuppressRestV2DocsConsoleArgs(args)) {
+        return undefined;
       }
-      if (typeof value === "string") {
-        return value.trim();
-      }
-      try {
-        return JSON.stringify(value).trim();
-      } catch {
-        return String(value || "").trim();
-      }
+      return original.apply(this, args);
     };
-    const normalizeUrl = (value) => {
-      const raw = normalizeText(value);
-      if (!raw) {
-        return "";
+  });
+
+  if (typeof root.fetch === "function") {
+    const originalFetch = root.fetch.bind(root);
+    const ResponseCtor = root.Response || (typeof Response === "function" ? Response : null);
+    root.fetch = function underparDocsNoiseGuardFetch(input, init) {
+      const requestUrl =
+        typeof input === "string"
+          ? input
+          : input && typeof input === "object" && "url" in input
+            ? input.url
+            : "";
+      if (shouldStubRequest(requestUrl) && ResponseCtor) {
+        return Promise.resolve(
+          new ResponseCtor("{}", {
+            status: 200,
+            statusText: "OK",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          })
+        );
       }
-      try {
-        return String(new URL(raw, window.location.href).href);
-      } catch {
-        return raw;
-      }
+      return originalFetch(input, init);
     };
-    const shouldSuppressConsoleArgs = (args) => {
-      const text = Array.from(args || []).map((item) => normalizeText(item)).join(" ").trim();
-      return Boolean(text) && noisePatterns.some((pattern) => pattern.test(text));
-    };
-    const shouldStubImsProfileRequest = (url) => imsProfilePattern.test(normalizeUrl(url));
-    ["log", "info", "warn", "error", "debug"].forEach((methodName) => {
-      const original = console?.[methodName];
-      if (typeof original !== "function") {
-        return;
+  }
+
+  if (typeof root.XMLHttpRequest === "function" && root.XMLHttpRequest?.prototype) {
+    const xhrPrototype = root.XMLHttpRequest.prototype;
+    const originalOpen = xhrPrototype.open;
+    const originalSend = xhrPrototype.send;
+    const originalSetRequestHeader =
+      typeof xhrPrototype.setRequestHeader === "function" ? xhrPrototype.setRequestHeader : null;
+    const EventCtor = root.Event || (typeof Event === "function" ? Event : null);
+    const setTimer = typeof root.setTimeout === "function" ? root.setTimeout.bind(root) : setTimeout;
+    xhrPrototype.open = function underparDocsNoiseGuardOpen(method, url) {
+      const requestUrl = normalizeUrl(url);
+      this.__underparStubImsProfile = shouldStubRequest(requestUrl);
+      this.__underparStubImsProfileUrl = requestUrl;
+      if (this.__underparStubImsProfile) {
+        return undefined;
       }
-      console[methodName] = function underparDocsConsoleNoiseGuard(...args) {
-        if (shouldSuppressConsoleArgs(args)) {
-          return;
-        }
-        return original.apply(this, args);
-      };
-    });
-    if (typeof window.fetch === "function") {
-      const originalFetch = window.fetch.bind(window);
-      window.fetch = function underparDocsNoiseGuardFetch(input, init) {
-        const requestUrl =
-          typeof input === "string"
-            ? input
-            : input && typeof input === "object" && "url" in input
-              ? input.url
-              : "";
-        if (shouldStubImsProfileRequest(requestUrl)) {
-          return Promise.resolve(
-            new Response("{}", {
-              status: 200,
-              statusText: "OK",
-              headers: {
-                "Content-Type": "application/json",
-              },
-            })
-          );
-        }
-        return originalFetch(input, init);
-      };
-    }
-    if (typeof XMLHttpRequest === "function" && XMLHttpRequest?.prototype) {
-      const originalOpen = XMLHttpRequest.prototype.open;
-      const originalSend = XMLHttpRequest.prototype.send;
-      const originalSetRequestHeader =
-        typeof XMLHttpRequest.prototype.setRequestHeader === "function" ? XMLHttpRequest.prototype.setRequestHeader : null;
-      XMLHttpRequest.prototype.open = function underparDocsNoiseGuardOpen(method, url) {
-        const requestUrl = normalizeUrl(url);
-        this.__underparStubImsProfile = shouldStubImsProfileRequest(requestUrl);
-        this.__underparStubImsProfileUrl = requestUrl;
+      return originalOpen.apply(this, arguments);
+    };
+    if (originalSetRequestHeader) {
+      xhrPrototype.setRequestHeader = function underparDocsNoiseGuardSetRequestHeader(name, value) {
         if (this.__underparStubImsProfile) {
           return undefined;
         }
-        return originalOpen.apply(this, arguments);
+        return originalSetRequestHeader.call(this, name, value);
       };
-      if (originalSetRequestHeader) {
-        XMLHttpRequest.prototype.setRequestHeader = function underparDocsNoiseGuardSetRequestHeader(name, value) {
-          if (this.__underparStubImsProfile) {
-            return undefined;
-          }
-          return originalSetRequestHeader.call(this, name, value);
-        };
+    }
+    xhrPrototype.send = function underparDocsNoiseGuardSend() {
+      if (!this.__underparStubImsProfile) {
+        return originalSend.apply(this, arguments);
       }
-      XMLHttpRequest.prototype.send = function underparDocsNoiseGuardSend() {
-        if (!this.__underparStubImsProfile) {
-          return originalSend.apply(this, arguments);
+      const xhr = this;
+      const responseText = "{}";
+      const defineConstant = (propertyName, value) => {
+        try {
+          Object.defineProperty(xhr, propertyName, {
+            configurable: true,
+            get: () => value,
+          });
+        } catch {
+          // Ignore read-only browser implementations.
         }
-        const xhr = this;
-        const responseText = "{}";
-        const defineConstant = (propertyName, value) => {
+      };
+      defineConstant("readyState", 4);
+      defineConstant("status", 200);
+      defineConstant("statusText", "OK");
+      defineConstant("responseURL", xhr.__underparStubImsProfileUrl || "");
+      defineConstant("responseText", responseText);
+      defineConstant("response", responseText);
+      defineConstant("responseXML", null);
+      xhr.getAllResponseHeaders = () => "content-type: application/json\r\n";
+      xhr.getResponseHeader = (headerName) =>
+        String(headerName || "").trim().toLowerCase() === "content-type" ? "application/json" : null;
+      const dispatch = (type) => {
+        let eventObject = null;
+        try {
+          eventObject = EventCtor ? new EventCtor(type) : { type };
+        } catch {
+          eventObject = { type };
+        }
+        const handler = xhr["on" + type];
+        if (typeof handler === "function") {
           try {
-            Object.defineProperty(xhr, propertyName, {
-              configurable: true,
-              get: () => value,
-            });
+            handler.call(xhr, eventObject);
           } catch {
-            // Ignore read-only browser implementations.
+            // Ignore consumer handler failures.
           }
-        };
-        defineConstant("readyState", 4);
-        defineConstant("status", 200);
-        defineConstant("statusText", "OK");
-        defineConstant("responseURL", xhr.__underparStubImsProfileUrl || "");
-        defineConstant("responseText", responseText);
-        defineConstant("response", responseText);
-        defineConstant("responseXML", null);
-        xhr.getAllResponseHeaders = () => "content-type: application/json\\r\\n";
-        xhr.getResponseHeader = (headerName) =>
-          String(headerName || "").trim().toLowerCase() === "content-type" ? "application/json" : null;
-        const dispatch = (type) => {
-          let eventObject = null;
-          try {
-            eventObject = new Event(type);
-          } catch {
-            eventObject = { type };
-          }
-          const handler = xhr["on" + type];
-          if (typeof handler === "function") {
-            try {
-              handler.call(xhr, eventObject);
-            } catch {
-              // Ignore consumer handler failures.
-            }
-          }
+        }
+        if (typeof xhr.dispatchEvent === "function") {
           try {
             xhr.dispatchEvent(eventObject);
           } catch {
             // Ignore event dispatch failures on partial XHR state.
           }
-        };
-        window.setTimeout(() => {
-          dispatch("readystatechange");
-          dispatch("load");
-          dispatch("loadend");
-        }, 0);
-        return undefined;
+        }
       };
-    }
-  })();`;
+      setTimer(() => {
+        dispatch("readystatechange");
+        dispatch("load");
+        dispatch("loadend");
+      }, 0);
+      return undefined;
+    };
+  }
+
+  return true;
 }
 
 function injectRestV2DocsNoiseGuard(documentRef = null) {
   const doc = documentRef || (typeof document !== "undefined" ? document : null);
-  if (!doc) {
-    return false;
-  }
-  const parent = doc.documentElement || doc.head || doc.body;
-  if (!parent || typeof doc.createElement !== "function") {
-    return false;
-  }
-  const script = doc.createElement("script");
-  script.setAttribute("data-underpar-restv2-noise-guard", "true");
-  script.textContent = createRestV2DocsNoiseGuardPageScriptSource();
-  parent.appendChild(script);
-  script.remove();
-  return true;
+  const root =
+    (doc && doc.defaultView) ||
+    (typeof window !== "undefined" ? window : null);
+  return installRestV2DocsNoiseGuard(root);
 }
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    createRestV2DocsNoiseGuardPageScriptSource,
     injectRestV2DocsNoiseGuard,
+    installRestV2DocsNoiseGuard,
     normalizeRestV2DocsNoiseText,
     shouldStubRestV2DocsImsProfileRequest,
     shouldSuppressRestV2DocsConsoleArgs,
   };
 }
 
-if (typeof window !== "undefined" && typeof document !== "undefined") {
+if (typeof window !== "undefined") {
   try {
-    injectRestV2DocsNoiseGuard(document);
+    installRestV2DocsNoiseGuard(window);
   } catch {
     // Best-effort page guard only.
   }
