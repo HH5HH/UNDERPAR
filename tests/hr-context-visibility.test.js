@@ -121,6 +121,24 @@ function loadRestV2LearningPlanBuilder() {
   return context.module.exports;
 }
 
+function loadRestV2MvpdMetaResolver(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function getRequestorScopedMvpdCache(requestorId = '') { return typeof globalThis.__seed.getRequestorScopedMvpdCache === 'function' ? globalThis.__seed.getRequestorScopedMvpdCache(requestorId) : null; }",
+    extractFunctionSource(source, "getRestV2MvpdMeta"),
+    "module.exports = { getRestV2MvpdMeta };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadRestV2LearningEntryOpener(seed = {}) {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -937,7 +955,7 @@ test("REST V2 learning falls back to inferred partner SSO context when the recor
         accessStatus: "granted",
       },
       frameworkProviderInfo: {
-        id: "Comcast_SSO",
+        id: "comcast-provider-map",
         expirationDate: String(Date.now() + 60 * 60 * 1000),
       },
       frameworkPartnerInfo: {
@@ -987,6 +1005,11 @@ test("REST V2 learning falls back to inferred partner SSO context when the recor
       ok: true,
       partner: "",
       partnerFrameworkStatus: "",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "comcast-provider-map",
+      },
       flowId: "flow-123",
     }
   );
@@ -995,6 +1018,33 @@ test("REST V2 learning falls back to inferred partner SSO context when the recor
   assert.equal(prepared.learningPartner, "Apple");
   assert.equal(prepared.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
   assert.equal(prepared.learningPartnerSource, "recorded r-apt cookie");
+});
+
+test("REST V2 MVPD meta keeps cached platform mapping when callers only provide a name snapshot", () => {
+  const cachedMetaById = new Map([
+    [
+      "Comcast_SSO",
+      {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "comcast-provider-map",
+      },
+    ],
+  ]);
+  const { getRestV2MvpdMeta } = loadRestV2MvpdMetaResolver({
+    getRequestorScopedMvpdCache() {
+      return cachedMetaById;
+    },
+  });
+
+  const resolved = getRestV2MvpdMeta("turner", "Comcast_SSO", {
+    id: "Comcast_SSO",
+    name: "Xfinity",
+  });
+
+  assert.equal(resolved.id, "Comcast_SSO");
+  assert.equal(resolved.name, "Xfinity");
+  assert.equal(resolved.platformMappingId, "comcast-provider-map");
 });
 
 test("REST V2 learning hydrates optional SSO headers from the debug flow when the current context has not retained them yet", async () => {
@@ -1910,6 +1960,66 @@ test("REST V2 learning activates partner APIs from the inferred partner SSO seed
         accessStatus: "granted",
       },
       frameworkProviderInfo: {
+        id: "comcast-provider-map",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+      frameworkPartnerInfo: {
+        name: "Apple",
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+
+  const plan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "partner-sso-create-profile",
+      operationId: "createPartnerProfileUsingPOST",
+      operationAnchor: "operation/createPartnerProfileUsingPOST",
+      requiresAccessToken: true,
+      usesDeviceHeaders: true,
+      usesPartnerPath: true,
+      requirePartnerPath: true,
+      usesPartnerFrameworkStatus: true,
+      requirePartnerFrameworkStatus: true,
+      usesBodySamlResponse: true,
+      requireBodySamlResponse: true,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    {
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      requestorAutoResolved: false,
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "comcast-provider-map",
+      },
+      partner: "",
+      partnerFrameworkStatus: "",
+      learningPartner: "Apple",
+      learningPartnerFrameworkStatus: validLearningFrameworkStatus,
+      learningPartnerSource: "recorded r-apt cookie",
+      samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
+      samlSource: "tab-network:body",
+    },
+    "test-token"
+  );
+
+  assert.equal(plan.fieldValues["path.partner"], "Apple");
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+  assert.match(plan.notes.join(" "), /inferred partner Apple/i);
+});
+
+test("REST V2 learning keeps Create Partner Profile blocked when the inferred provider id does not match the selected MVPD mapping", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const mismatchedLearningFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
         id: "Comcast_SSO",
         expirationDate: String(Date.now() + 60 * 60 * 1000),
       },
@@ -1939,10 +2049,16 @@ test("REST V2 learning activates partner APIs from the inferred partner SSO seed
       serviceProviderId: "turner",
       requestorId: "turner",
       requestorAutoResolved: false,
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "comcast-provider-map",
+      },
       partner: "",
       partnerFrameworkStatus: "",
       learningPartner: "Apple",
-      learningPartnerFrameworkStatus: validLearningFrameworkStatus,
+      learningPartnerFrameworkStatus: mismatchedLearningFrameworkStatus,
       learningPartnerSource: "recorded r-apt cookie",
       samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
       samlSource: "tab-network:body",
@@ -1951,9 +2067,8 @@ test("REST V2 learning activates partner APIs from the inferred partner SSO seed
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
-  assert.match(plan.notes.join(" "), /inferred partner Apple/i);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
 });
 
 test("premium service sections and HR service pills keep their theme class wiring", () => {

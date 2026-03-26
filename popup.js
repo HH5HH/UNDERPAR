@@ -16870,9 +16870,18 @@ function buildRestV2ContextFromHarvest(harvest = null) {
   );
   const sessionCode = firstNonEmptyString([String(harvest.sessionCode || "").trim(), sessionCodeCandidates[0]]);
   const harvestMvpdName = String(harvest.mvpdName || "").trim();
+  const harvestMvpdPlatformMappingId = String(harvest.mvpdPlatformMappingId || "").trim();
   const cachedMvpdMeta =
     requestorId ? getRequestorScopedMvpdCache(requestorId)?.get(mvpd) || null : null;
-  const mvpdMeta = cachedMvpdMeta || (harvestMvpdName ? { id: mvpd, name: harvestMvpdName } : null);
+  const mvpdMeta =
+    cachedMvpdMeta ||
+    (harvestMvpdName || harvestMvpdPlatformMappingId
+      ? {
+          id: mvpd,
+          ...(harvestMvpdName ? { name: harvestMvpdName } : {}),
+          ...(harvestMvpdPlatformMappingId ? { platformMappingId: harvestMvpdPlatformMappingId } : {}),
+        }
+      : null);
   const appInfo = resolveRestV2AppInfoForHarvest(harvest);
   if (!programmerId || !requestorId || !serviceProviderId || !mvpd || !appInfo?.guid) {
     return null;
@@ -16885,6 +16894,7 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     serviceProviderId,
     mvpd,
     mvpdMeta,
+    mvpdPlatformMappingId: String(firstNonEmptyString([harvestMvpdPlatformMappingId, mvpdMeta?.platformMappingId]) || "").trim(),
     sessionCode,
     sessionCodeCandidates,
     sessionAction: String(harvest.sessionAction || "").trim(),
@@ -24941,8 +24951,39 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
     normalizedRequestorId
       ? getRequestorScopedMvpdCache(normalizedRequestorId)?.get(normalizedMvpdId) || null
       : null;
-  const resolvedMeta = mvpdMeta && typeof mvpdMeta === "object" ? mvpdMeta : cacheMeta;
-  return resolvedMeta && typeof resolvedMeta === "object" ? resolvedMeta : null;
+  const providedMeta = mvpdMeta && typeof mvpdMeta === "object" ? mvpdMeta : null;
+  if (!cacheMeta && !providedMeta) {
+    return null;
+  }
+  const mergedMeta = {
+    ...(cacheMeta && typeof cacheMeta === "object" ? cacheMeta : {}),
+    ...(providedMeta && typeof providedMeta === "object" ? providedMeta : {}),
+    id:
+      firstNonEmptyString([providedMeta?.id, providedMeta?.mvpd, cacheMeta?.id, cacheMeta?.mvpd, normalizedMvpdId]) ||
+      normalizedMvpdId,
+    name:
+      firstNonEmptyString([
+        providedMeta?.name,
+        providedMeta?.displayName,
+        cacheMeta?.name,
+        cacheMeta?.displayName,
+        normalizedMvpdId,
+      ]) || normalizedMvpdId,
+    platformMappingId: firstNonEmptyString([
+      providedMeta?.platformMappingId,
+      providedMeta?.platformMappingID,
+      cacheMeta?.platformMappingId,
+      cacheMeta?.platformMappingID,
+    ]),
+    logoUrl: firstNonEmptyString([providedMeta?.logoUrl, cacheMeta?.logoUrl]),
+    boardingStatus: firstNonEmptyString([providedMeta?.boardingStatus, cacheMeta?.boardingStatus]),
+  };
+  if (typeof providedMeta?.isProxy === "boolean") {
+    mergedMeta.isProxy = providedMeta.isProxy;
+  } else if (typeof cacheMeta?.isProxy === "boolean") {
+    mergedMeta.isProxy = cacheMeta.isProxy;
+  }
+  return mergedMeta;
 }
 
 function getRestV2MvpdPickerLabel(requestorId = "", mvpdId = "", mvpdMeta = null) {
@@ -25303,6 +25344,14 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     serviceProviderId
   );
   const sessionCode = firstNonEmptyString(sessionCodeCandidates);
+  const mvpdPlatformMappingId = String(
+    firstNonEmptyString([
+      options?.mvpdPlatformMappingId,
+      context?.mvpdPlatformMappingId,
+      context?.mvpdMeta?.platformMappingId,
+      context?.mvpdMeta?.platformMappingID,
+    ]) || ""
+  ).trim();
   const selectedAppInfo = appInfoOverride || context.appInfo || null;
   const compactAppInfo = selectedAppInfo
     ? {
@@ -25318,6 +25367,7 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     serviceProviderId,
     mvpd: context.mvpd,
     mvpdName: String(context?.mvpdMeta?.name || "").trim(),
+    mvpdPlatformMappingId,
     appInfo: compactAppInfo,
     redirectUrl,
     domainName,
@@ -25475,6 +25525,7 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
         programmerName: context.programmerName || "",
         requestorId: context.requestorId,
         mvpd: context.mvpd,
+        mvpdPlatformMappingId: String(firstNonEmptyString([context?.mvpdPlatformMappingId, context?.mvpdMeta?.platformMappingId]) || "").trim(),
       },
       "start-recording-click"
     );
@@ -26714,12 +26765,16 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     profileMvpd,
     String(context?.mvpd || "").trim(),
   ]);
-  const cachedMvpdName =
+  const resolvedMvpdMeta =
     String(context?.requestorId || "").trim() && String(mvpd || "").trim()
-      ? String(
-          getRequestorScopedMvpdCache(String(context.requestorId || "").trim())?.get(String(mvpd || "").trim())?.name || ""
-        ).trim()
-      : "";
+      ? getRequestorScopedMvpdCache(String(context.requestorId || "").trim())?.get(String(mvpd || "").trim()) || null
+      : null;
+  const cachedMvpdName = String(resolvedMvpdMeta?.name || "").trim();
+  const mvpdPlatformMappingId = firstNonEmptyString([
+    String(context?.mvpdPlatformMappingId || "").trim(),
+    String(context?.mvpdMeta?.platformMappingId || context?.mvpdMeta?.platformMappingID || "").trim(),
+    String(resolvedMvpdMeta?.platformMappingId || resolvedMvpdMeta?.platformMappingID || "").trim(),
+  ]);
   const mvpdName = firstNonEmptyString([
     String(context?.mvpdMeta?.name || "").trim(),
     cachedMvpdName,
@@ -26819,6 +26874,7 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     profileMvpd: String(profileMvpd || "").trim(),
     decisionMvpd: String(decisionMvpd || "").trim(),
     mvpdName: String(mvpdName || "").trim(),
+    mvpdPlatformMappingId: String(mvpdPlatformMappingId || "").trim(),
     subject: String(subject || "").trim(),
     upstreamUserId: String(upstreamUserId || "").trim(),
     userId: String(userId || "").trim(),
@@ -27850,7 +27906,33 @@ function inferRestV2LearningPartnerName(context = null, flow = null, artifacts =
 
 function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, artifacts = null, partnerName = "") {
   const resolvedPartnerName = String(partnerName || "").trim();
-  const providerId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd, context?.requestorId]) || "").trim();
+  const requestorId = String(
+    firstNonEmptyString([
+      context?.requestorId,
+      context?.serviceProviderId,
+      flow?.context?.requestorId,
+      flow?.context?.serviceProviderId,
+    ]) || ""
+  ).trim();
+  const mvpd = String(
+    firstNonEmptyString([context?.mvpd, context?.selectedMvpd, flow?.context?.mvpd, flow?.context?.selectedMvpd]) || ""
+  ).trim();
+  const cachedMvpdMeta =
+    requestorId && mvpd && typeof getRestV2MvpdMeta === "function"
+      ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || flow?.context?.mvpdMeta || null)
+      : context?.mvpdMeta || flow?.context?.mvpdMeta || null;
+  const providerId = String(
+    firstNonEmptyString([
+      context?.mvpdPlatformMappingId,
+      context?.mvpdMeta?.platformMappingId,
+      context?.mvpdMeta?.platformMappingID,
+      flow?.context?.mvpdPlatformMappingId,
+      flow?.context?.mvpdMeta?.platformMappingId,
+      flow?.context?.mvpdMeta?.platformMappingID,
+      cachedMvpdMeta?.platformMappingId,
+      cachedMvpdMeta?.platformMappingID,
+    ]) || ""
+  ).trim();
   if (!resolvedPartnerName || !providerId) {
     return "";
   }
@@ -27897,6 +27979,56 @@ function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flo
     return context;
   }
 
+  const requestorId = String(
+    firstNonEmptyString([
+      context?.requestorId,
+      context?.serviceProviderId,
+      flow?.context?.requestorId,
+      flow?.context?.serviceProviderId,
+    ]) || ""
+  ).trim();
+  const mvpd = String(
+    firstNonEmptyString([context?.mvpd, context?.selectedMvpd, flow?.context?.mvpd, flow?.context?.selectedMvpd]) || ""
+  ).trim();
+  const cachedMvpdMeta =
+    requestorId && mvpd && typeof getRestV2MvpdMeta === "function"
+      ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || flow?.context?.mvpdMeta || null)
+      : context?.mvpdMeta || flow?.context?.mvpdMeta || null;
+  const expectedProviderId = String(
+    firstNonEmptyString([
+      context?.mvpdPlatformMappingId,
+      context?.mvpdMeta?.platformMappingId,
+      context?.mvpdMeta?.platformMappingID,
+      flow?.context?.mvpdPlatformMappingId,
+      flow?.context?.mvpdMeta?.platformMappingId,
+      flow?.context?.mvpdMeta?.platformMappingID,
+      cachedMvpdMeta?.platformMappingId,
+      cachedMvpdMeta?.platformMappingID,
+    ]) || ""
+  )
+    .trim()
+    .toLowerCase();
+  const extractProviderId = (value = "") => {
+    const parsedPayload = parseRestV2PartnerFrameworkStatusPayload(String(value || "").trim());
+    return String(
+      firstNonEmptyString([
+        parsedPayload?.frameworkProviderInfo?.id,
+        parsedPayload?.frameworkProvider?.id,
+        parsedPayload?.frameworkProviderId,
+        parsedPayload?.providerId,
+        parsedPayload?.provider,
+        parsedPayload?.id,
+      ]) || ""
+    )
+      .trim()
+      .toLowerCase();
+  };
+  const existingLearningFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    String(context.learningPartnerFrameworkStatus || "").trim()
+  );
+  const existingLearningFrameworkStatusCompatible =
+    isRestV2PartnerFrameworkStatusUsable(existingLearningFrameworkStatus) &&
+    (!expectedProviderId || extractProviderId(existingLearningFrameworkStatus) === expectedProviderId);
   const hasRealPartner = Boolean(String(resolveRestV2PartnerNameFromContext(context) || "").trim());
   const hasRealFrameworkStatus = isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context));
   if (hasRealPartner && hasRealFrameworkStatus) {
@@ -27922,14 +28054,21 @@ function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flo
     context.learningPartner = inferredPartner;
   }
 
-  if (!hasRealFrameworkStatus && !String(context.learningPartnerFrameworkStatus || "").trim()) {
+  if (!hasRealFrameworkStatus && !existingLearningFrameworkStatusCompatible && String(context.learningPartnerFrameworkStatus || "").trim()) {
+    context.learningPartnerFrameworkStatus = "";
+  }
+  if (!hasRealFrameworkStatus && !existingLearningFrameworkStatusCompatible) {
     const inferredFrameworkStatus = buildRestV2LearningPartnerFrameworkStatus(
       context,
       flow,
       artifacts,
       String(inferredPartner || "").trim()
     );
-    if (isRestV2PartnerFrameworkStatusUsable(inferredFrameworkStatus)) {
+    const inferredProviderId = extractProviderId(inferredFrameworkStatus);
+    if (
+      isRestV2PartnerFrameworkStatusUsable(inferredFrameworkStatus) &&
+      (!expectedProviderId || inferredProviderId === expectedProviderId)
+    ) {
       context.learningPartnerFrameworkStatus = inferredFrameworkStatus;
     }
   }
@@ -54423,7 +54562,22 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
     return null;
   }
   const mvpdName = String(recordingContext?.mvpdName || "").trim();
-  const mvpdMeta = mvpdName ? { id: mvpd, name: mvpdName } : getRestV2MvpdMeta(requestorId, mvpd);
+  const mvpdPlatformMappingId = String(
+    firstNonEmptyString([
+      recordingContext?.mvpdPlatformMappingId,
+      recordingContext?.mvpdMeta?.platformMappingId,
+      recordingContext?.mvpdMeta?.platformMappingID,
+    ]) || ""
+  ).trim();
+  const mvpdMeta =
+    getRestV2MvpdMeta(requestorId, mvpd) ||
+    (mvpdName || mvpdPlatformMappingId
+      ? {
+          id: mvpd,
+          ...(mvpdName ? { name: mvpdName } : {}),
+          ...(mvpdPlatformMappingId ? { platformMappingId: mvpdPlatformMappingId } : {}),
+        }
+      : null);
   return {
     ok: true,
     programmerId,
@@ -54432,6 +54586,7 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
     serviceProviderId,
     mvpd,
     mvpdMeta: mvpdMeta || null,
+    mvpdPlatformMappingId: String(firstNonEmptyString([mvpdPlatformMappingId, mvpdMeta?.platformMappingId]) || "").trim(),
     sessionCode: String(recordingContext.sessionCode || "").trim(),
     sessionCodeCandidates: Array.isArray(recordingContext.sessionCodeCandidates)
       ? recordingContext.sessionCodeCandidates.map((value) => String(value || "").trim()).filter(Boolean)
@@ -54496,6 +54651,13 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     ],
     serviceProviderId
   );
+  const mvpdPlatformMappingId = String(
+    firstNonEmptyString([
+      context?.mvpdPlatformMappingId,
+      context?.mvpdMeta?.platformMappingId,
+      context?.mvpdMeta?.platformMappingID,
+    ]) || ""
+  ).trim();
   return {
     programmerId,
     programmerName: String(context.programmerName || "").trim(),
@@ -54503,6 +54665,7 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     serviceProviderId,
     mvpd,
     mvpdName: String(context?.mvpdMeta?.name || "").trim(),
+    mvpdPlatformMappingId,
     appGuid,
     appName: String(context?.appInfo?.appName || context?.appName || appGuid).trim(),
     sessionCode: firstNonEmptyString([String(context.sessionCode || "").trim(), sessionCodeCandidates[0]]),
@@ -62395,13 +62558,15 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     String(harvestContext?.mvpd || "").trim(),
     String(harvest?.mvpd || "").trim(),
   ]);
+  const harvestMvpdPlatformMappingId = String(harvest?.mvpdPlatformMappingId || "").trim();
   const mvpdMeta =
     getRestV2MvpdMeta(requestorId, fallbackMvpd) ||
     activeRecordingContext?.mvpdMeta ||
-    (String(harvest?.mvpdName || "").trim() && fallbackMvpd
+    ((String(harvest?.mvpdName || "").trim() || harvestMvpdPlatformMappingId) && fallbackMvpd
       ? {
           id: fallbackMvpd,
-          name: String(harvest.mvpdName || "").trim(),
+          ...(String(harvest?.mvpdName || "").trim() ? { name: String(harvest.mvpdName || "").trim() } : {}),
+          ...(harvestMvpdPlatformMappingId ? { platformMappingId: harvestMvpdPlatformMappingId } : {}),
         }
       : null);
   const preauthorizeHistoryEntries = findRestV2PreauthorizeHistoryEntriesForLearning(programmerId, requestorId, fallbackMvpd);
@@ -62546,6 +62711,16 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     serviceProviderId: requestorId,
     mvpd: String(fallbackMvpd || "").trim(),
     mvpdMeta,
+    mvpdPlatformMappingId: String(
+      firstNonEmptyString([
+        activeRecordingContext?.mvpdPlatformMappingId,
+        activeRecordingContext?.mvpdMeta?.platformMappingId,
+        harvestContext?.mvpdPlatformMappingId,
+        harvestContext?.mvpdMeta?.platformMappingId,
+        harvest?.mvpdPlatformMappingId,
+        mvpdMeta?.platformMappingId,
+      ]) || ""
+    ).trim(),
     appInfo: preferredApp,
     services,
     activeRecordingContext: activeRecordingContext || null,
@@ -85027,10 +85202,12 @@ function normalizeRestV2MvpdCollection(payload) {
       if (!id) {
         return null;
       }
+      const platformMappingId = firstNonEmptyString([item.platformMappingId, item.platformMappingID, item.providerId]);
 
       return {
         id,
         name: firstNonEmptyString([item.displayName, item.name, id]) || id,
+        platformMappingId: String(platformMappingId || "").trim(),
         logoUrl: extractRestV2MvpdLogoUrl(item),
         isProxy: item.isProxy === false ? false : true,
         boardingStatus: firstNonEmptyString([item.boardingStatus]),
@@ -85677,7 +85854,43 @@ function resolveRestV2LearningPartnerFrameworkStatusFromContext(context = null) 
   const inferredValue = normalizeRestV2PartnerFrameworkStatusForRequest(
     String(context.learningPartnerFrameworkStatus || "").trim()
   );
-  return isRestV2PartnerFrameworkStatusUsable(inferredValue) ? inferredValue : "";
+  if (!isRestV2PartnerFrameworkStatusUsable(inferredValue)) {
+    return "";
+  }
+  const requestorId = String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim();
+  const mvpd = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
+  const cachedMvpdMeta =
+    requestorId && mvpd && typeof getRestV2MvpdMeta === "function"
+      ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || null)
+      : context?.mvpdMeta || null;
+  const expectedProviderId = String(
+    firstNonEmptyString([
+      context?.mvpdPlatformMappingId,
+      context?.mvpdMeta?.platformMappingId,
+      context?.mvpdMeta?.platformMappingID,
+      cachedMvpdMeta?.platformMappingId,
+      cachedMvpdMeta?.platformMappingID,
+    ]) || ""
+  )
+    .trim()
+    .toLowerCase();
+  if (!expectedProviderId) {
+    return inferredValue;
+  }
+  const parsedPayload = parseRestV2PartnerFrameworkStatusPayload(inferredValue);
+  const actualProviderId = String(
+    firstNonEmptyString([
+      parsedPayload?.frameworkProviderInfo?.id,
+      parsedPayload?.frameworkProvider?.id,
+      parsedPayload?.frameworkProviderId,
+      parsedPayload?.providerId,
+      parsedPayload?.provider,
+      parsedPayload?.id,
+    ]) || ""
+  )
+    .trim()
+    .toLowerCase();
+  return actualProviderId && actualProviderId === expectedProviderId ? inferredValue : "";
 }
 
 function resolveRestV2LearningPartnerNameFromContext(context = null) {
