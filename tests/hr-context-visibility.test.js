@@ -199,6 +199,33 @@ function loadRestV2PartnerPlatformMappingHydrator(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2LearningPartnerFrameworkStatusBuilder(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function getRestV2MvpdMeta(requestorId = '', mvpdId = '', mvpdMeta = null) { return typeof globalThis.__seed.resolveMvpdMeta === 'function' ? globalThis.__seed.resolveMvpdMeta(requestorId, mvpdId, mvpdMeta) : mvpdMeta; }",
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
+    extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
+    extractFunctionSource(source, "decodeBase64TextSafe"),
+    extractFunctionSource(source, "parseRestV2JwtPayload"),
+    extractFunctionSource(source, "buildRestV2LearningPartnerFrameworkStatus"),
+    "module.exports = { buildRestV2LearningPartnerFrameworkStatus };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+    atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadRestV2LearningEntryOpener(seed = {}) {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -1209,6 +1236,78 @@ test("REST V2 partner platform hydrator upgrades a generic captured Comcast fram
     mvpdMeta: {
       id: "Comcast_SSO",
       name: "Xfinity",
+    },
+  };
+
+  await hydrateRestV2PartnerPlatformMappingFromConsoleContext(context, {
+    forceRefresh: false,
+  });
+
+  assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO_Apple");
+  assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
+  assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
+});
+
+test("REST V2 learning framework status builder prefers cached partner platform mappings over a generic Comcast provider id", () => {
+  const { buildRestV2LearningPartnerFrameworkStatus } = loadRestV2LearningPartnerFrameworkStatusBuilder({
+    resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
+      return mvpdMeta || null;
+    },
+  });
+
+  const encoded = buildRestV2LearningPartnerFrameworkStatus(
+    {
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      mvpdMeta: {
+        id: "Comcast_SSO",
+        name: "Xfinity",
+        platformMappingId: "Comcast_SSO",
+        partnerPlatformMappings: {
+          Apple: "Comcast_SSO_Apple",
+        },
+      },
+    },
+    {
+      updatedAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    },
+    {
+      signalSource: "recorded partner auth flow",
+    },
+    "Apple"
+  );
+
+  const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+  assert.equal(payload.frameworkProviderInfo.id, "Comcast_SSO_Apple");
+  assert.equal(payload.frameworkPartnerInfo.name, "Apple");
+});
+
+test("REST V2 partner platform hydrator promotes cached Apple partner mappings even when the live snapshot is unavailable", async () => {
+  const { hydrateRestV2PartnerPlatformMappingFromConsoleContext } = loadRestV2PartnerPlatformMappingHydrator({
+    resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
+      return mvpdMeta || null;
+    },
+    loadSnapshot() {
+      return null;
+    },
+  });
+
+  const context = {
+    programmerId: "Turner",
+    programmerName: "Turner",
+    requestorId: "MML",
+    serviceProviderId: "MML",
+    mvpd: "Comcast_SSO",
+    learningPartner: "Apple",
+    mvpdPlatformMappingId: "",
+    mvpdMeta: {
+      id: "Comcast_SSO",
+      name: "Xfinity",
+      platformMappingId: "Comcast_SSO",
+      partnerPlatformMappings: {
+        Apple: "Comcast_SSO_Apple",
+      },
     },
   };
 

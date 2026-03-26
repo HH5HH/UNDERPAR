@@ -27933,8 +27933,24 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
     requestorId && mvpd && typeof getRestV2MvpdMeta === "function"
       ? getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || flow?.context?.mvpdMeta || null)
       : context?.mvpdMeta || flow?.context?.mvpdMeta || null;
+  const partnerPlatformMappings =
+    cachedMvpdMeta?.partnerPlatformMappings && typeof cachedMvpdMeta.partnerPlatformMappings === "object"
+      ? cachedMvpdMeta.partnerPlatformMappings
+      : context?.mvpdMeta?.partnerPlatformMappings && typeof context.mvpdMeta.partnerPlatformMappings === "object"
+        ? context.mvpdMeta.partnerPlatformMappings
+        : null;
+  const mappedPartnerProviderId = resolvedPartnerName
+    ? String(
+        Object.entries(partnerPlatformMappings || {}).find(
+          ([rawPartnerName, rawProviderId]) =>
+            String(rawPartnerName || "").trim().toLowerCase() === resolvedPartnerName.toLowerCase() &&
+            String(rawProviderId || "").trim()
+        )?.[1] || ""
+      ).trim()
+    : "";
   const providerId = String(
     firstNonEmptyString([
+      mappedPartnerProviderId,
       context?.mvpdPlatformMappingId,
       context?.mvpdMeta?.platformMappingId,
       context?.mvpdMeta?.platformMappingID,
@@ -85973,6 +85989,19 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     currentMvpdMeta?.partnerPlatformMappings && typeof currentMvpdMeta.partnerPlatformMappings === "object"
       ? { ...currentMvpdMeta.partnerPlatformMappings }
       : {};
+  const mappedPartnerProviderId = String(
+    partnerCandidates
+      .map((partnerName) =>
+        String(
+          Object.entries(existingPartnerPlatformMappings).find(
+            ([rawPartnerName, rawProviderId]) =>
+              String(rawPartnerName || "").trim().toLowerCase() === String(partnerName || "").trim().toLowerCase() &&
+              String(rawProviderId || "").trim()
+          )?.[1] || ""
+        ).trim()
+      )
+      .find(Boolean) || ""
+  ).trim();
   if (partnerCandidates.length === 0) {
     if (realFrameworkProviderId) {
       context.mvpdPlatformMappingId = realFrameworkProviderId;
@@ -86008,6 +86037,22 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     }
   }
   if (!snapshot || typeof snapshot !== "object") {
+    const fallbackMappingId = String(
+      firstNonEmptyString([
+        mappedPartnerProviderId,
+        realFrameworkProviderId,
+        currentMappingId,
+      ]) || ""
+    ).trim();
+    if (fallbackMappingId) {
+      context.mvpdPlatformMappingId = fallbackMappingId;
+      context.mvpdMeta = {
+        ...currentMvpdMeta,
+        ...(Object.keys(existingPartnerPlatformMappings).length > 0 ? { partnerPlatformMappings: existingPartnerPlatformMappings } : {}),
+        platformMappingId: fallbackMappingId,
+      };
+      return context;
+    }
     if (!context?.mvpdMeta && currentMvpdMeta) {
       context.mvpdMeta = currentMvpdMeta;
     }
@@ -86024,6 +86069,7 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   const resolvedMappingId = String(
     firstNonEmptyString([
       resolvedDetails?.resolvedMappingId,
+      mappedPartnerProviderId,
       realFrameworkProviderId,
       currentMappingId,
     ]) || ""
