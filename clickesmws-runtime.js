@@ -252,6 +252,7 @@
       return;
     }
     const environment = resolveWorkspaceAdobePassEnvironment(payload?.adobePassEnvironment);
+    const environmentKey = String(environment?.key || "release-production").trim() || "release-production";
     const label = String(environment?.label || "").trim() || "Production";
     const badgeLabel =
       String(globalThis.UnderParEnvironment?.buildEnvironmentBadgeLabel?.(environment) || `Release ${label}`).trim() ||
@@ -261,6 +262,7 @@
     els.pageEnvBadgeValue.setAttribute("aria-hidden", "false");
     els.pageEnvBadge.title = title;
     els.pageEnvBadge.setAttribute("aria-label", title);
+    els.pageEnvBadge.dataset.environmentKey = environmentKey;
     els.pageEnvBadge.dataset.environmentLabel = badgeLabel;
   }
 

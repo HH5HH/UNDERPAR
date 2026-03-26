@@ -55,7 +55,7 @@ test("popup env badge render stores the active environment metadata used for red
 
   assert.match(renderSource, /const environmentKey = String\(environment\?\.key \|\| DEFAULT_ADOBEPASS_ENVIRONMENT\.key\)/);
   assert.match(renderSource, /els\.pageEnvBadge\.dataset\.environmentKey = environmentKey;/);
-  assert.match(renderSource, /els\.pageEnvBadge\.dataset\.environmentLabel = label;/);
+  assert.match(renderSource, /els\.pageEnvBadge\.dataset\.environmentLabel = badgeLabel;/);
 });
 
 test("environment switch redraw happens immediately after applying the new environment", () => {

@@ -9,8 +9,7 @@
 .regapp-health-kicker-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .regapp-health-kicker {
@@ -35,6 +34,15 @@
 
 .regapp-jwt-utility-card .rest-report-head {
   gap: 8px;
+}
+
+.regapp-health-hero-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.regapp-health-hero-actions .page-env-badge {
+  align-self: center;
 }
 
 .regapp-jwt-decode-form {
@@ -153,11 +161,6 @@
 .regapp-app-summary {
   list-style: none;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
   border-bottom: 1px solid rgba(156, 167, 181, 0.14);
   background:
     linear-gradient(166deg, rgba(34, 39, 49, 0.98), rgba(24, 29, 37, 0.96)),
@@ -166,6 +169,14 @@
 
 .regapp-app-summary::-webkit-details-marker {
   display: none;
+}
+
+.regapp-app-summary-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
 }
 
 .regapp-app-summary-copy {
@@ -191,12 +202,47 @@
   line-height: 1.5;
 }
 
+.regapp-app-summary-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.regapp-app-summary-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 28px;
+  min-width: 0;
+  padding: 4px 10px;
+  border: 1px solid rgba(156, 167, 181, 0.16);
+  border-radius: 999px;
+  background: rgba(14, 18, 24, 0.66);
+}
+
+.regapp-app-summary-fact-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 224, 154, 0.72);
+}
+
+.regapp-app-summary-fact-value {
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(242, 246, 249, 0.94);
+  word-break: break-word;
+}
+
 .regapp-app-summary-actions {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-start;
   gap: 8px;
-  flex-wrap: wrap;
+  min-width: 164px;
 }
 
 .regapp-app-summary-btn {
@@ -252,38 +298,15 @@
   padding: 16px;
 }
 
-.regapp-app-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.regapp-app-meta-card {
-  min-width: 0;
-  border: 1px solid rgba(156, 167, 181, 0.16);
-  border-radius: 16px;
-  padding: 12px 14px;
-  background: rgba(14, 18, 24, 0.72);
-}
-
-.regapp-app-meta-card p {
+.regapp-app-body-alert {
   margin: 0;
-}
-
-.regapp-app-meta-label {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(255, 224, 154, 0.74);
-}
-
-.regapp-app-meta-value {
-  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(236, 109, 100, 0.24);
+  border-radius: 14px;
+  background: rgba(68, 22, 22, 0.54);
+  color: rgba(255, 213, 209, 0.92);
   font-size: 12px;
-  line-height: 1.5;
-  color: rgba(242, 246, 249, 0.94);
-  word-break: break-word;
+  line-height: 1.55;
 }
 
 .regapp-app-panels,
@@ -569,12 +592,6 @@
   padding: 18px;
 }
 
-@media (max-width: 1180px) {
-  .regapp-app-meta-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 920px) {
   .regapp-app-panels,
   .regapp-jwt-inspector-layout,
@@ -584,12 +601,11 @@
 }
 
 @media (max-width: 780px) {
-  .regapp-app-meta-grid,
   .regapp-jwt-object-list {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .regapp-app-summary,
+  .regapp-app-summary-main,
   .regapp-jwt-dialog-head {
     flex-direction: column;
     align-items: flex-start;
@@ -600,5 +616,6 @@
   .regapp-app-footer {
     width: 100%;
     justify-content: flex-start;
+    align-items: flex-start;
   }
 }

@@ -24,16 +24,19 @@ test("workspace and popup surfaces import the shared console env badge styleshee
   });
 });
 
-test("shared env badge stylesheet defines the quiet console badge contract", () => {
+test("shared env badge stylesheet defines the colored release badge contract", () => {
   const source = read("underpar-env-badge.css");
 
-  assert.match(source, /--underpar-env-badge-bg:\s*rgba\(255,\s*255,\s*255,\s*0\.98\);/i);
+  assert.doesNotMatch(source, /--underpar-env-badge-bg:\s*rgba\(255,\s*255,\s*255,\s*0\.98\);/i);
   assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\)\s*\{[\s\S]*?background:\s*transparent;/i);
   assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\)\s*\{[\s\S]*?box-shadow:\s*none;/i);
+  assert.match(source, /\[data-environment-key="release-production"\]/);
+  assert.match(source, /\[data-environment-key="release-staging"\]/);
   assert.match(source, /:is\(\.page-env-badge-prefix,\s*\.env-badge-prefix\)\s*\{[\s\S]*?display:\s*none;/i);
   assert.match(source, /:is\(\.page-env-badge-value,\s*\.env-badge-value\)\s*\{[\s\S]*?border-radius:\s*999px;/i);
   assert.match(source, /:is\(\.page-env-badge-value,\s*\.env-badge-value\)\s*\{[\s\S]*?background:\s*var\(--underpar-env-badge-bg\);/i);
-  assert.match(source, /:is\(\.page-env-badge-value,\s*\.env-badge-value\)\s*\{[\s\S]*?font-weight:\s*600;/i);
+  assert.match(source, /:is\(\.page-env-badge-value,\s*\.env-badge-value\)\s*\{[\s\S]*?box-shadow:\s*var\(--underpar-env-badge-shadow\);/i);
+  assert.match(source, /:is\(\.page-env-badge-value,\s*\.env-badge-value\)\s*\{[\s\S]*?font-weight:\s*700;/i);
   assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\):has\(:is\(\.page-env-badge-value,\s*\.env-badge-value\):empty\)\s*\{[\s\S]*?display:\s*none;/i);
 });
 
@@ -71,13 +74,16 @@ test("legacy env badge recolors are removed from popup, Blondie, and MEG overrid
   assert.doesNotMatch(megCss, /body\.meg-standalone-mode\[data-theme="modern"\] \.page-env-badge\b/);
 });
 
-test("standalone click views use the same neutral env badge treatment", () => {
+test("standalone click views use the same colored release badge treatment", () => {
   ["clickESM-template.html", "clickDGR-template.html", "scripts/clickESM.html"].forEach((relativePath) => {
     const source = read(relativePath);
 
     assert.match(source, /\.env-badge\s*\{[\s\S]*?background:\s*transparent;/i);
+    assert.match(source, /\.env-badge\[data-environment-key="release-production"\]/);
+    assert.match(source, /\.env-badge\[data-environment-key="release-staging"\]/);
     assert.match(source, /\.env-badge-prefix\s*\{[\s\S]*?display:\s*none;/i);
     assert.match(source, /\.env-badge-value\s*\{[\s\S]*?border-radius:\s*999px;/i);
-    assert.match(source, /\.env-badge-value\s*\{[\s\S]*?font-weight:\s*600;/i);
+    assert.match(source, /\.env-badge-value\s*\{[\s\S]*?box-shadow:\s*var\(--env-badge-shadow\);/i);
+    assert.match(source, /\.env-badge-value\s*\{[\s\S]*?font-weight:\s*700;/i);
   });
 });

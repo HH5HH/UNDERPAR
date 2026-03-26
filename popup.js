@@ -21642,14 +21642,7 @@ async function runRegisteredApplicationHealthDashboardForSelection(rawQueryConte
       forceRefresh,
       preferredTabId: Number(options?.preferredTabId || 0),
     });
-    const finalizedReport = finalizeReport(report);
-    if (finalizedReport?.ok || finalizedReport?.partial) {
-      registeredApplicationHealthWorkspaceQueueBackgroundHydration(queryContext, {
-        targetWindowId,
-        preferredTabId: Number(options?.preferredTabId || 0),
-      });
-    }
-    return finalizedReport;
+    return finalizeReport(report);
   } catch (error) {
     return finalizeReport(
       buildRegisteredApplicationHealthReportPayload(queryContext, [], {
@@ -34754,6 +34747,10 @@ body[data-theme="dark"]{
       \`\${String(
         ACTIVE_ADOBEPASS_ENVIRONMENT.cmReportsBase || DEFAULT_ADOBEPASS_ENVIRONMENT.cmReportsBase
       ).trim().replace(/\\/+$/, "")}/v2/\`;
+    const envKey =
+      /staging|stage/i.test(envBase)
+        ? "release-staging"
+        : String(ACTIVE_ADOBEPASS_ENVIRONMENT?.key || "release-production").trim() || "release-production";
     if (envDisplay) {
       envDisplay.textContent = envLabel;
       envDisplay.title = envMessage;
@@ -34763,6 +34760,7 @@ body[data-theme="dark"]{
     if (envBadge) {
       envBadge.title = envMessage;
       envBadge.setAttribute("aria-label", envMessage);
+      envBadge.dataset.environmentKey = envKey;
       envBadge.dataset.environmentLabel = envLabel;
       envBadge.dataset.baseUrl = envBase;
     }
@@ -53929,9 +53927,6 @@ async function handleRegisteredApplicationHealthWorkspaceAction(message, sender 
       void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, {
         targetWindowId: senderWindowId,
       });
-      registeredApplicationHealthWorkspaceQueueBackgroundHydration(latestReport?.queryContext || selectionContext, {
-        targetWindowId: senderWindowId,
-      });
     }
     return { ok: true };
   }
@@ -53949,9 +53944,6 @@ async function handleRegisteredApplicationHealthWorkspaceAction(message, sender 
     const latestReport = registeredApplicationHealthWorkspaceGetLatestReport(selectionContext.selectionKey);
     if (latestReport) {
       void registeredApplicationHealthWorkspaceSendWorkspaceMessage("report-result", latestReport, { targetWindowId });
-      registeredApplicationHealthWorkspaceQueueBackgroundHydration(latestReport?.queryContext || selectionContext, {
-        targetWindowId,
-      });
     }
     return { ok: true };
   }

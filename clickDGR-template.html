@@ -399,6 +399,10 @@
       }
 
       .env-badge {
+        --env-badge-border: rgba(81, 196, 104, 0.34);
+        --env-badge-bg: linear-gradient(180deg, rgba(23, 84, 46, 0.96), rgba(15, 61, 32, 0.96));
+        --env-badge-ink: rgba(235, 255, 236, 0.96);
+        --env-badge-shadow: 0 8px 18px rgba(17, 70, 36, 0.22);
         display: inline-flex;
         align-items: center;
         gap: 0;
@@ -419,6 +423,20 @@
         box-shadow: none;
       }
 
+      .env-badge[data-environment-key="release-production"] {
+        --env-badge-border: rgba(81, 196, 104, 0.34);
+        --env-badge-bg: linear-gradient(180deg, rgba(23, 84, 46, 0.96), rgba(15, 61, 32, 0.96));
+        --env-badge-ink: rgba(235, 255, 236, 0.96);
+        --env-badge-shadow: 0 8px 18px rgba(17, 70, 36, 0.22);
+      }
+
+      .env-badge[data-environment-key="release-staging"] {
+        --env-badge-border: rgba(255, 190, 107, 0.38);
+        --env-badge-bg: linear-gradient(180deg, rgba(92, 54, 12, 0.96), rgba(66, 38, 8, 0.96));
+        --env-badge-ink: rgba(255, 235, 201, 0.96);
+        --env-badge-shadow: 0 8px 18px rgba(82, 45, 7, 0.22);
+      }
+
       .env-badge-prefix {
         display: none;
       }
@@ -432,16 +450,17 @@
         align-items: center;
         flex: 0 1 auto;
         min-width: 0;
-        min-height: 20px;
-        padding: 0 8px;
-        border: 1px solid rgba(29, 29, 29, 0.12);
+        min-height: 22px;
+        padding: 0 10px;
+        border: 1px solid var(--env-badge-border);
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.98);
-        color: var(--spectrum-neutral-content-color-default, #2c2c2c);
+        background: var(--env-badge-bg);
+        color: var(--env-badge-ink);
         font-family: adobe-clean, "Adobe Clean", "Source Sans Pro", "Segoe UI", system-ui, sans-serif;
         font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.01em;
+        font-weight: 700;
+        letter-spacing: 0.015em;
+        box-shadow: var(--env-badge-shadow);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -1268,6 +1287,7 @@
         if (envBadge) {
           envBadge.title = envMessage;
           envBadge.setAttribute("aria-label", envMessage);
+          envBadge.dataset.environmentKey = String(environment.key || "release-production").trim() || "release-production";
           envBadge.dataset.environmentLabel = envLabel;
           envBadge.dataset.baseUrl = envBase;
         }

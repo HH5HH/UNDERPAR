@@ -176,6 +176,7 @@ function loadWorkspaceControllerFunctions(initialState = {}) {
     extractFunctionSource(source, "firstNonEmptyString"),
     extractFunctionSource(source, "canRunCurrentContextReport"),
     extractFunctionSource(source, "getReportSelectionKey"),
+    extractFunctionSource(source, "getExpandedGuidStore"),
     extractFunctionSource(source, "applyControllerState"),
     "module.exports = { state, applyControllerState };",
   ].join("\n\n");
@@ -443,7 +444,7 @@ test("registered application workspace treats ENV x MediaCompany changes as a ha
   assert.equal(state.report, null);
   assert.deepEqual(
     calls.map((entry) => (typeof entry === "string" ? entry : entry.type)),
-    ["close", "background", "update", "render", "run"]
+    ["close", "update", "render", "run"]
   );
   assert.deepEqual(normalizeRealmObject(calls.find((entry) => entry?.type === "run")?.options), {
     statusMessage: "Refreshing Registered Application Health for the selected UnderPAR context...",
@@ -507,7 +508,13 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
   assert.match(workspaceJs, /data-software-statement-download-guid/);
   assert.match(workspaceJs, /sendWorkspaceAction\("hydrate-application"/);
-  assert.match(workspaceJs, /sendWorkspaceAction\("prefetch-applications"/);
+  assert.match(workspaceJs, /expandedGuids:\s*new Set\(\)/);
+  assert.match(workspaceJs, /setApplicationExpandedState\(guid,\s*details\.open\);/);
+  assert.match(workspaceJs, /Download JWT/);
+  assert.doesNotMatch(workspaceJs, /sendWorkspaceAction\("prefetch-applications"/);
+  assert.doesNotMatch(workspaceJs, /background-hydration/);
+  assert.doesNotMatch(workspaceJs, /defaultOpen/);
+  assert.doesNotMatch(workspaceJs, /buildJwtStateChip/);
   assert.doesNotMatch(workspaceJs, /Open JWT Inspector/);
   assert.doesNotMatch(workspaceJs, /Application Matrix/);
   assert.doesNotMatch(workspaceJs, /buildMetricCardsMarkup/);
@@ -517,8 +524,15 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(workspaceJs, /const action = hasRenderableReport\(\) && preferRefresh \? "refresh-latest" : "run-dashboard";/);
   assert.match(popupSource, /const forceRefresh = options\.forceRefresh === true;/);
   assert.doesNotMatch(extractFunctionSource(popupSource, "fetchRegisteredApplicationHealthDashboardReport"), /enrichRegisteredApplicationForHydration/);
+  assert.doesNotMatch(
+    extractFunctionSource(popupSource, "runRegisteredApplicationHealthDashboardForSelection"),
+    /registeredApplicationHealthWorkspaceQueueBackgroundHydration/
+  );
+  assert.doesNotMatch(
+    extractFunctionSource(popupSource, "handleRegisteredApplicationHealthWorkspaceAction"),
+    /registeredApplicationHealthWorkspaceQueueBackgroundHydration/
+  );
   assert.match(popupSource, /if \(action === "hydrate-application"\)/);
-  assert.match(popupSource, /if \(action === "prefetch-applications"\)/);
   assert.match(sharedJwtSource, /UnderParJwtInspector/);
   assert.match(sharedJwtSource, /buildInspectorMarkup/);
 });
