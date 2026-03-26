@@ -6,7 +6,6 @@ const state = {
   cmHealthReady: false,
   programmerId: "",
   programmerName: "",
-  mediaCompany: "",
   tenantScope: "",
   matchedTenants: [],
   requestorHint: "",
@@ -52,10 +51,9 @@ const els = {
   filterForm: document.getElementById("workspace-filter-form"),
   startDateInput: document.getElementById("workspace-start-date"),
   endDateInput: document.getElementById("workspace-end-date"),
-  granularityGroup: document.getElementById("workspace-granularity-group"),
+  granularitySelect: document.getElementById("workspace-granularity-select"),
   runButton: document.getElementById("workspace-run-dashboard"),
   resetButton: document.getElementById("workspace-reset-filters"),
-  activePills: document.getElementById("workspace-active-pills"),
   cardsHost: document.getElementById("workspace-cards"),
   pageEnvBadge: document.getElementById("page-env-badge"),
   pageEnvBadgeValue: document.getElementById("page-env-badge-value"),
@@ -405,15 +403,6 @@ function getNextBreakdownSortRule(columns = [], currentSort = null, columnKey = 
   return null;
 }
 
-function getProgrammerLabel() {
-  const name = String(state.programmerName || "").trim();
-  const id = String(state.programmerId || "").trim();
-  if (name && id && name !== id) {
-    return `${name} (${id})`;
-  }
-  return name || id || "Selected Media Company";
-}
-
 function getEffectiveMvpdIds() {
   if (state.query.channels.length > 0) {
     return [];
@@ -443,40 +432,12 @@ function hasRenderableReport() {
   return Boolean(state.report);
 }
 
-function updateGranularityButtons() {
-  const buttons = els.granularityGroup?.querySelectorAll("[data-granularity]") || [];
-  buttons.forEach((button) => {
-    const value = String(button.getAttribute("data-granularity") || "").trim().toLowerCase();
-    const isActive = value === normalizeGranularity(state.query.granularity);
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", isActive ? "true" : "false");
-    button.disabled = state.loading;
-  });
-}
-
-function renderActivePills() {
-  if (!els.activePills) {
+function syncGranularitySelect() {
+  if (!els.granularitySelect) {
     return;
   }
-  const pills = [
-    { label: "Media Company", value: state.mediaCompany || state.programmerId || "N/A", accent: true },
-    { label: "Tenant", value: state.tenantScope || "Pending" },
-    { label: "Requestor Hint", value: state.requestorHint || "None" },
-    { label: "Controller MVPD", value: state.query.baseMvpdIds.join(", ") || "All" },
-    { label: "Active MVPD", value: getEffectiveMvpdIds().join(", ") || "Global scope" },
-    { label: "Platforms", value: state.query.platforms.join(", ") || "All" },
-    { label: "Channels", value: state.query.channels.join(", ") || "All" },
-    { label: "Range", value: `${state.query.start || "?"} -> ${state.query.end || "?"}` },
-    { label: "Granularity", value: normalizeGranularity(state.query.granularity) },
-  ];
-  els.activePills.innerHTML = pills
-    .map(
-      (pill) =>
-        `<span class="esm-health-pill${pill.accent ? " esm-health-pill--accent" : ""}"><strong>${escapeHtml(
-          pill.label
-        )}:</strong> ${escapeHtml(String(pill.value || "").trim() || "N/A")}</span>`
-    )
-    .join("");
+  els.granularitySelect.value = normalizeGranularity(state.query.granularity);
+  els.granularitySelect.disabled = state.loading || !state.cmHealthReady;
 }
 
 function syncActionButtonsDisabled() {
@@ -503,9 +464,12 @@ function syncActionButtonsDisabled() {
   if (els.endDateInput) {
     els.endDateInput.disabled = state.loading || !state.cmHealthReady;
   }
+  if (els.granularitySelect) {
+    els.granularitySelect.disabled = state.loading || !state.cmHealthReady;
+  }
   document.body.classList.toggle("net-busy", state.loading);
   document.body.setAttribute("aria-busy", state.loading ? "true" : "false");
-  updateGranularityButtons();
+  syncGranularitySelect();
 }
 
 function renderWorkspaceEnvironmentBadge() {
@@ -531,10 +495,10 @@ function getContextCaption() {
     return "Waiting for the UnderPAR side panel to bind the live CM controller context.";
   }
   if (!state.programmerId) {
-    return "Select an ENV x Media Company with a Concurrency Monitoring tenant match in UnderPAR to hydrate this dashboard.";
+    return "Select a CM-enabled UnderPAR context to hydrate this dashboard.";
   }
   if (!state.cmHealthReady) {
-    return "UnderPAR is still hydrating the Concurrency Monitoring tenant scope for the selected ENV x Media Company.";
+    return "UnderPAR is still hydrating the selected CM tenant scope.";
   }
   const tenantNames = state.matchedTenants
     .map((entry) => firstNonEmptyString([entry?.tenantName, entry?.tenantId]))
@@ -546,7 +510,7 @@ function getContextCaption() {
 
 function updateControllerBanner() {
   if (els.controllerState) {
-    els.controllerState.textContent = `CM HEALTH Dashboard | ${getProgrammerLabel()}`;
+    els.controllerState.textContent = "CM HEALTH Dashboard";
   }
   if (els.filterState) {
     els.filterState.textContent = getFilterLabel();
@@ -579,7 +543,7 @@ function syncFilterControlsFromState() {
   if (els.endDateInput) {
     els.endDateInput.value = String(state.query.end || "").trim();
   }
-  renderActivePills();
+  syncGranularitySelect();
   syncActionButtonsDisabled();
 }
 
@@ -621,7 +585,6 @@ function applyControllerState(payload = {}) {
   state.cmHealthReady = payload?.cmHealthReady === true;
   state.programmerId = String(payload?.programmerId || "");
   state.programmerName = String(payload?.programmerName || "");
-  state.mediaCompany = String(payload?.mediaCompany || "");
   state.tenantScope = String(payload?.tenantScope || "");
   state.matchedTenants = Array.isArray(payload?.matchedTenants) ? payload.matchedTenants : [];
   state.requestorHint = String(payload?.requestorHint || "");
@@ -1272,7 +1235,7 @@ async function runDashboard(statusMessage = "Running CM HEALTH dashboard...") {
     return;
   }
   if (!state.cmHealthReady || !state.programmerId) {
-    setStatus("No CM-enabled Media Company is selected in UnderPAR.", "error");
+    setStatus("No CM-enabled context is selected in UnderPAR.", "error");
     return;
   }
   state.loading = true;
@@ -1387,6 +1350,7 @@ function registerEventHandlers() {
       event.preventDefault();
       state.query.start = String(els.startDateInput?.value || "").trim();
       state.query.end = String(els.endDateInput?.value || "").trim();
+      state.query.granularity = normalizeGranularity(String(els.granularitySelect?.value || state.query.granularity || ""));
       void runDashboard();
     });
   }
@@ -1407,14 +1371,9 @@ function registerEventHandlers() {
       void resetFilters();
     });
   }
-  if (els.granularityGroup) {
-    els.granularityGroup.addEventListener("click", (event) => {
-      const target = event.target instanceof Element ? event.target.closest("[data-granularity]") : null;
-      if (!target) {
-        return;
-      }
-      const nextGranularity = normalizeGranularity(String(target.getAttribute("data-granularity") || ""));
-      state.query.granularity = nextGranularity;
+  if (els.granularitySelect) {
+    els.granularitySelect.addEventListener("change", () => {
+      state.query.granularity = normalizeGranularity(String(els.granularitySelect?.value || ""));
       syncFilterControlsFromState();
     });
   }
