@@ -556,14 +556,21 @@ const READY_ZIP_KEY_IMPORT_STATUS_MESSAGE = "Key loaded.";
 const PENDING_ZIP_KEY_IMPORT_STATUS_MESSAGE = "Loading key...";
 const PREAUTH_TARGET_ORG_PLACEHOLDER_VALUE = "__underpar_choose_target_org__";
 const DEFAULT_DEBUG_TOGGLE_LABEL = "DEBUG INFO";
-const DEFAULT_DEBUG_TOGGLE_META = "Click copies. Shift+click toggles details.";
-const DEFAULT_DEBUG_COPY_STATUS = "Copied to clipboard";
+const DEFAULT_DEBUG_TOGGLE_META = "Click copies AI packet. Shift+click toggles details.";
+const DEFAULT_DEBUG_COPY_STATUS = "Copied AI packet";
+const DEFAULT_DEBUG_JSON_COPY_STATUS = "Copied JSON snapshot";
+const DEFAULT_DEBUG_EXPORT_STATUS = "Exported full diagnostics";
 const COPY_DEBUG_RESET_DELAY_MS = 1600;
-const UNDERPAR_DEBUG_LOG_LIMIT = 200;
-const UNDERPAR_DEBUG_STATUS_HISTORY_LIMIT = 80;
+const UNDERPAR_DEBUG_LOG_LIMIT = 160;
+const UNDERPAR_DEBUG_STATUS_HISTORY_LIMIT = 64;
 const UNDERPAR_DEBUG_STATUS_OUTPUT_LIMIT = 8;
 const UNDERPAR_DEBUG_FAILURE_OUTPUT_LIMIT = 6;
 const UNDERPAR_DEBUG_NON_FETCH_OUTPUT_LIMIT = 6;
+const UNDERPAR_DEBUG_PACKET_TIMELINE_LIMIT = 6;
+const UNDERPAR_DEBUG_PACKET_ACTIVITY_LIMIT = 12;
+const UNDERPAR_DEBUG_PACKET_FAILURE_LIMIT = 8;
+const UNDERPAR_DEBUG_PACKET_JSON_LIMIT = 16000;
+const UNDERPAR_DEBUG_FULL_EXPORT_ACTIVITY_LIMIT = 120;
 const REST_V2_POST_LOGOUT_PROFILE_CHECK_RETRIES = 3;
 const REST_V2_POST_LOGOUT_PROFILE_CHECK_DELAY_MS = 900;
 const REST_V2_POST_AUTH_PROFILE_CHECK_RETRIES = 7;
@@ -12902,6 +12909,9 @@ const els = {
   debugToggleButtonLabel: document.getElementById("debugToggleButtonLabel"),
   debugToggleButtonMeta: document.getElementById("debugToggleButtonMeta"),
   debugToggleStatus: document.getElementById("debugToggleStatus"),
+  debugCopyPacketButton: document.getElementById("debugCopyPacketButton"),
+  debugCopyJsonButton: document.getElementById("debugCopyJsonButton"),
+  debugExportDiagnosticsButton: document.getElementById("debugExportDiagnosticsButton"),
   logOutput: document.getElementById("logOutput"),
   workflow: document.getElementById("workflow"),
   avatarMenu: document.getElementById("avatar-menu"),
@@ -12971,6 +12981,24 @@ function registerCoreInteractionHandlers() {
         return;
       }
       void copyDebugConsoleToClipboard();
+    });
+  }
+
+  if (els.debugCopyPacketButton) {
+    els.debugCopyPacketButton.addEventListener("click", () => {
+      void copyDebugConsoleToClipboard();
+    });
+  }
+
+  if (els.debugCopyJsonButton) {
+    els.debugCopyJsonButton.addEventListener("click", () => {
+      void copyDebugJsonToClipboard();
+    });
+  }
+
+  if (els.debugExportDiagnosticsButton) {
+    els.debugExportDiagnosticsButton.addEventListener("click", () => {
+      void exportFullDiagnosticsBundle();
     });
   }
 
@@ -13221,10 +13249,368 @@ function stringifyUnderparDebugInfoValue(value) {
   }
 }
 
+function buildUnderparTextFingerprint(value = "", prefix = "fp") {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  let hash = 2166136261;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash ^= normalized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const normalizedPrefix = String(prefix || "fp").trim() || "fp";
+  return `${normalizedPrefix}:${(hash >>> 0).toString(16).padStart(8, "0")}:${normalized.length}`;
+}
+
+function redactUnderparSupportPacketText(value = "") {
+  const redacted = redactSensitiveTokenValues(String(value || "").trim());
+  if (!redacted) {
+    return "";
+  }
+  return redacted.replace(
+    /\b[A-Z0-9._%+-]+@(?:[A-Z0-9-]+\.)+[A-Z]{2,}\b/gi,
+    (match) => `<redacted-email:${buildUnderparTextFingerprint(match, "usr")}>`
+  );
+}
+
+function sanitizeUnderparSupportPacketValue(value, options = {}) {
+  const depth = Number(options.depth || 0);
+  const keyName = String(options.keyName || "").trim();
+  const seen = options.seen instanceof WeakSet ? options.seen : new WeakSet();
+
+  if (value == null) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return truncateDebugText(redactUnderparSupportPacketText(value), 1200);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+  if (value instanceof Error) {
+    return {
+      name: String(value.name || "Error"),
+      message: truncateDebugText(redactUnderparSupportPacketText(value.message || ""), 600),
+      stack: truncateDebugText(redactUnderparSupportPacketText(String(value.stack || "")), 1200),
+    };
+  }
+  if (value instanceof Headers) {
+    return sanitizeUnderparSupportPacketValue(toDebugHeadersObject(value), {
+      depth: depth + 1,
+      keyName,
+      seen,
+    });
+  }
+  if (typeof value !== "object") {
+    return truncateDebugText(redactUnderparSupportPacketText(String(value)), 600);
+  }
+  if (depth >= 4) {
+    if (Array.isArray(value)) {
+      return `[array:${value.length}]`;
+    }
+    return `[${String(value?.constructor?.name || "object")}]`;
+  }
+  if (seen.has(value)) {
+    return "[circular]";
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    const output = value.slice(0, 20).map((entry) =>
+      sanitizeUnderparSupportPacketValue(entry, {
+        depth: depth + 1,
+        keyName,
+        seen,
+      })
+    );
+    if (value.length > 20) {
+      output.push(`[+${value.length - 20} more]`);
+    }
+    return output;
+  }
+
+  const output = {};
+  const entries = Object.entries(value);
+  entries.slice(0, 32).forEach(([entryKey, entryValue]) => {
+    output[entryKey] = sanitizeUnderparSupportPacketValue(entryValue, {
+      depth: depth + 1,
+      keyName: entryKey,
+      seen,
+    });
+  });
+  if (entries.length > 32) {
+    output.__truncatedKeys = entries.length - 32;
+  }
+  return output;
+}
+
+function stringifyUnderparSupportPacketValue(value) {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return truncateDebugText(redactUnderparSupportPacketText(value), 1200);
+  }
+  try {
+    return truncateDebugText(JSON.stringify(sanitizeUnderparSupportPacketValue(value), null, 0), 1600);
+  } catch {
+    return truncateDebugText(redactUnderparSupportPacketText(String(value)), 1200);
+  }
+}
+
+function buildUnderparDebugEntryDetailsSignature(details = null) {
+  if (details == null) {
+    return "";
+  }
+  try {
+    return truncateDebugText(JSON.stringify(details), 480);
+  } catch {
+    return truncateDebugText(String(details), 480);
+  }
+}
+
+function buildUnderparDebugEntrySignature(parts = []) {
+  return (Array.isArray(parts) ? parts : [parts])
+    .map((part) => truncateDebugText(String(part ?? "").trim(), 320))
+    .join("|");
+}
+
+function summarizeUnderparDebugIdentityValue(value = "", prefix = "id") {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "n/a";
+  }
+  return buildUnderparTextFingerprint(normalized, prefix) || "n/a";
+}
+
+function summarizeUnderparDebugEmail(value = "") {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return {
+      domain: "n/a",
+      fingerprint: "n/a",
+    };
+  }
+  const domain = normalized.includes("@") ? normalized.split("@").pop() : "";
+  return {
+    domain: String(domain || "n/a").trim() || "n/a",
+    fingerprint: buildUnderparTextFingerprint(normalized, "usr") || "n/a",
+  };
+}
+
+function buildUnderparStructuredStatusWindow(entries = [], limit = UNDERPAR_DEBUG_STATUS_OUTPUT_LIMIT) {
+  const history = Array.isArray(entries) ? entries : [];
+  const output = [];
+  const maxItems = Math.max(1, Number(limit || UNDERPAR_DEBUG_STATUS_OUTPUT_LIMIT));
+  for (let index = 0; index < history.length; index += 1) {
+    if (output.length >= maxItems) {
+      break;
+    }
+    const entry = history[index];
+    if (!entry || typeof entry !== "object") {
+      const message = redactUnderparSupportPacketText(String(entry || "").trim());
+      if (!message) {
+        continue;
+      }
+      output.push({
+        at: 0,
+        first_at: 0,
+        source: "status",
+        level: "info",
+        message,
+        repeat_count: 1,
+      });
+      continue;
+    }
+    const record = {
+      at: Number(entry?.at || 0),
+      first_at: Number(entry?.firstAt || entry?.at || 0),
+      source: String(entry?.source || "status").trim() || "status",
+      level: String(entry?.type || "info").trim() || "info",
+      message: redactUnderparSupportPacketText(String(entry?.message || "").trim()),
+      repeat_count: Math.max(1, Number(entry?.repeatCount || 1)),
+    };
+    if (!record.message) {
+      continue;
+    }
+    const signature = buildUnderparDebugEntrySignature([record.source, record.level, record.message]);
+    const previous = output[output.length - 1];
+    if (previous && previous.__signature === signature) {
+      previous.repeat_count += record.repeat_count;
+      previous.at = Math.max(Number(previous.at || 0), record.at);
+      continue;
+    }
+    output.push({
+      ...record,
+      __signature: signature,
+    });
+  }
+  return output.map(({ __signature, ...entry }) => entry);
+}
+
+function buildUnderparStructuredActivityWindow(entries = [], limit = UNDERPAR_DEBUG_PACKET_ACTIVITY_LIMIT) {
+  const history = Array.isArray(entries) ? entries : [];
+  const output = [];
+  const maxItems = Math.max(1, Number(limit || UNDERPAR_DEBUG_PACKET_ACTIVITY_LIMIT));
+  for (let index = 0; index < history.length; index += 1) {
+    if (output.length >= maxItems) {
+      break;
+    }
+    const entry = history[index];
+    if (!entry || typeof entry !== "object") {
+      const message = redactUnderparSupportPacketText(String(entry || "").trim());
+      if (!message) {
+        continue;
+      }
+      output.push({
+        at: 0,
+        first_at: 0,
+        channel: "app",
+        level: "info",
+        message,
+        details: null,
+        repeat_count: 1,
+      });
+      continue;
+    }
+    const details = sanitizeUnderparSupportPacketValue(entry?.details, {
+      keyName: String(entry?.channel || "app").trim() || "app",
+      seen: new WeakSet(),
+    });
+    const record = {
+      at: Number(entry?.at || 0),
+      first_at: Number(entry?.firstAt || entry?.at || 0),
+      channel: String(entry?.channel || "app").trim() || "app",
+      level: String(entry?.level || "info").trim() || "info",
+      message: redactUnderparSupportPacketText(String(entry?.message || "").trim()),
+      details: details == null ? null : details,
+      repeat_count: Math.max(1, Number(entry?.repeatCount || 1)),
+    };
+    if (!record.message) {
+      continue;
+    }
+    const signature = buildUnderparDebugEntrySignature([
+      record.channel,
+      record.level,
+      record.message,
+      stringifyUnderparSupportPacketValue(record.details),
+    ]);
+    const previous = output[output.length - 1];
+    if (previous && previous.__signature === signature) {
+      previous.repeat_count += record.repeat_count;
+      previous.at = Math.max(Number(previous.at || 0), record.at);
+      continue;
+    }
+    output.push({
+      ...record,
+      __signature: signature,
+    });
+  }
+  return output.map(({ __signature, ...entry }) => entry);
+}
+
+function formatUnderparStructuredStatusRecord(entry = null) {
+  if (!entry || typeof entry !== "object") {
+    return "";
+  }
+  const parts = [
+    Number(entry?.at || 0) > 0 ? new Date(Number(entry.at || 0)).toLocaleTimeString() : "n/a",
+    String(entry?.source || "status").trim() || "status",
+    String(entry?.level || "info").trim() || "info",
+    String(entry?.message || "").trim(),
+  ].filter(Boolean);
+  const repeatCount = Math.max(1, Number(entry?.repeat_count || 1));
+  if (repeatCount > 1) {
+    parts.push(`repeated=${repeatCount}`);
+  }
+  return truncateDebugText(parts.join(" | "), 420);
+}
+
+function formatUnderparStructuredActivityRecord(entry = null) {
+  if (!entry || typeof entry !== "object") {
+    return "";
+  }
+  const parts = [
+    Number(entry?.at || 0) > 0 ? new Date(Number(entry.at || 0)).toLocaleTimeString() : "n/a",
+    String(entry?.channel || "app").trim() || "app",
+    String(entry?.level || "info").trim() || "info",
+    String(entry?.message || "").trim(),
+  ].filter(Boolean);
+  const repeatCount = Math.max(1, Number(entry?.repeat_count || 1));
+  if (repeatCount > 1) {
+    parts.push(`repeated=${repeatCount}`);
+  }
+  const details = stringifyUnderparSupportPacketValue(entry?.details);
+  if (details) {
+    parts.push(details);
+  }
+  return truncateDebugText(parts.join(" | "), 420);
+}
+
+function collectUnderparDebugCorrelationIds(sourceList = [], limit = 12) {
+  const sources = Array.isArray(sourceList) ? sourceList : [sourceList];
+  const keys = new Set([
+    "requestid",
+    "request_id",
+    "flowid",
+    "attemptid",
+    "traceid",
+    "sessionid",
+    "tokenid",
+    "appguid",
+    "tenantid",
+  ]);
+  const output = [];
+  const seen = new Set();
+  const push = (key, value) => {
+    const normalizedKey = String(key || "").trim();
+    const normalizedValue = truncateDebugText(redactUnderparSupportPacketText(String(value || "").trim()), 180);
+    if (!normalizedKey || !normalizedValue) {
+      return;
+    }
+    const signature = `${normalizedKey}:${normalizedValue}`.toLowerCase();
+    if (seen.has(signature)) {
+      return;
+    }
+    seen.add(signature);
+    output.push(`${normalizedKey}:${normalizedValue}`);
+  };
+  const visit = (node, depth = 0) => {
+    if (output.length >= limit || !node || depth > 4) {
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.slice(0, 24).forEach((entry) => visit(entry, depth + 1));
+      return;
+    }
+    if (typeof node !== "object") {
+      return;
+    }
+    Object.entries(node)
+      .slice(0, 40)
+      .forEach(([entryKey, entryValue]) => {
+        const normalizedKey = String(entryKey || "").trim().toLowerCase();
+        if (keys.has(normalizedKey)) {
+          push(entryKey, entryValue);
+        }
+        if (entryValue && typeof entryValue === "object") {
+          visit(entryValue, depth + 1);
+        }
+      });
+  };
+  sources.forEach((source) => visit(source, 0));
+  return output.slice(0, limit);
+}
+
 function appendDebugLogEntry(channel = "app", message = "", details = null, options = {}) {
   const normalizedMessage = redactSensitiveTokenValues(String(message || "").trim() || "(no message)");
   const normalizedChannel = String(channel || "app").trim() || "app";
   const normalizedLevel = String(options.level || "info").trim().toLowerCase() || "info";
+  const entryAt = Date.now();
   const sanitizedDetails =
     details == null
       ? null
@@ -13232,13 +13618,38 @@ function appendDebugLogEntry(channel = "app", message = "", details = null, opti
           keyName: normalizedChannel,
           seen: new WeakSet(),
         });
+  const signature = buildUnderparDebugEntrySignature([
+    normalizedChannel,
+    normalizedLevel,
+    normalizedMessage,
+    buildUnderparDebugEntryDetailsSignature(sanitizedDetails),
+  ]);
+
+  const latestEntry =
+    Array.isArray(state.logs) && state.logs.length > 0 && state.logs[0] && typeof state.logs[0] === "object"
+      ? state.logs[0]
+      : null;
+  if (latestEntry && String(latestEntry.signature || "").trim() === signature) {
+    latestEntry.at = entryAt;
+    latestEntry.lastAt = entryAt;
+    latestEntry.repeatCount = Math.max(1, Number(latestEntry.repeatCount || 1)) + 1;
+    if (sanitizedDetails != null) {
+      latestEntry.details = sanitizedDetails;
+    }
+    renderDebugConsole();
+    return;
+  }
 
   state.logs.unshift({
-    at: Date.now(),
+    at: entryAt,
+    firstAt: entryAt,
+    lastAt: entryAt,
     channel: normalizedChannel,
     level: normalizedLevel,
     message: normalizedMessage,
     details: sanitizedDetails,
+    repeatCount: 1,
+    signature,
   });
   state.logs = state.logs.slice(0, UNDERPAR_DEBUG_LOG_LIMIT);
   renderDebugConsole();
@@ -13252,11 +13663,30 @@ function appendDebugStatusHistoryEntry(message = "", type = "info", source = "st
 
   const normalizedType = String(type || "info").trim().toLowerCase() || "info";
   const normalizedSource = String(source || "status").trim() || "status";
+  const entryAt = Date.now();
+  const signature = buildUnderparDebugEntrySignature([normalizedSource, normalizedType, normalizedMessage]);
+  const latestEntry =
+    Array.isArray(state.debugStatusHistory) &&
+    state.debugStatusHistory.length > 0 &&
+    state.debugStatusHistory[0] &&
+    typeof state.debugStatusHistory[0] === "object"
+      ? state.debugStatusHistory[0]
+      : null;
+  if (latestEntry && String(latestEntry.signature || "").trim() === signature) {
+    latestEntry.at = entryAt;
+    latestEntry.lastAt = entryAt;
+    latestEntry.repeatCount = Math.max(1, Number(latestEntry.repeatCount || 1)) + 1;
+    return;
+  }
   state.debugStatusHistory.unshift({
-    at: Date.now(),
+    at: entryAt,
+    firstAt: entryAt,
+    lastAt: entryAt,
     type: normalizedType,
     source: normalizedSource,
     message: normalizedMessage,
+    repeatCount: 1,
+    signature,
   });
   state.debugStatusHistory = state.debugStatusHistory.slice(0, UNDERPAR_DEBUG_STATUS_HISTORY_LIMIT);
 }
@@ -13279,9 +13709,14 @@ function compactRecentActivityEntries(entries, limit = 12) {
     const parts = [
       timestamp,
       String(entry?.channel || "app").trim() || "app",
+      String(entry?.level || "info").trim() || "info",
       String(entry?.message || "").trim(),
       stringifyUnderparDebugInfoValue(entry?.details),
     ].filter(Boolean);
+    const repeatCount = Math.max(1, Number(entry?.repeatCount || 1));
+    if (repeatCount > 1) {
+      parts.push(`repeated=${repeatCount}`);
+    }
     const compact = parts.join(" | ");
     return compact.length > 420 ? `${compact.slice(0, 417)}...` : compact;
   });
@@ -13300,6 +13735,10 @@ function compactRecentStatusEntries(entries, limit = UNDERPAR_DEBUG_STATUS_OUTPU
       String(entry?.type || "info").trim() || "info",
       String(entry?.message || "").trim(),
     ].filter(Boolean);
+    const repeatCount = Math.max(1, Number(entry?.repeatCount || 1));
+    if (repeatCount > 1) {
+      parts.push(`repeated=${repeatCount}`);
+    }
     const compact = parts.join(" | ");
     return compact.length > 420 ? `${compact.slice(0, 417)}...` : compact;
   });
@@ -13452,8 +13891,73 @@ function pushDebugSection(lines, label, entries) {
   lines.push("");
 }
 
-function composeUnderparDebugConsoleOutput() {
-  const lines = [];
+function buildUnderparDebugSelectionSummary(snapshot = null) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return "No active selection";
+  }
+  return (
+    [
+      String(snapshot?.selection?.environment_label || "").trim(),
+      String(snapshot?.selection?.programmer_id || "").trim(),
+      String(snapshot?.selection?.requestor_id || "").trim(),
+      String(snapshot?.selection?.mvpd_id || "").trim(),
+    ].filter((value) => value && value !== "n/a").join(" | ") || "No active selection"
+  );
+}
+
+function buildUnderparDebugSupportPacketSummary(snapshot = null) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return {
+      severity: "info",
+      headline: "INFO | UnderPAR debug snapshot",
+      what_user_was_doing: "Using UnderPAR",
+      expected: "The selected UnderPAR action should complete without errors.",
+      actual: "No recent activity was captured.",
+      selection: "No active selection",
+      focus: "Inspect the structured snapshot for the latest diagnostic context.",
+      one_sentence: "UnderPAR generated a bounded debug snapshot.",
+    };
+  }
+  const lastError = snapshot?.diagnostics?.last_error_status || snapshot?.diagnostics?.recent_error || null;
+  const lastFailure = snapshot?.diagnostics?.last_failure_activity || null;
+  const lastStatus = snapshot?.diagnostics?.last_status || null;
+  const userAction = firstNonEmptyString([
+    snapshot?.diagnostics?.last_non_fetch_activity?.message,
+    lastStatus?.message,
+    "Using UnderPAR",
+  ]);
+  const actual = firstNonEmptyString([
+    lastError?.message,
+    lastFailure?.message,
+    lastStatus?.message,
+    "No recent error captured.",
+  ]);
+  const severity = lastError ? "error" : lastFailure ? "warning" : "info";
+  const selection = buildUnderparDebugSelectionSummary(snapshot);
+  const headline = truncateDebugText(
+    `${severity.toUpperCase()} | ${selection}${actual ? ` | ${actual}` : ""}`,
+    220
+  );
+  return {
+    severity,
+    headline,
+    what_user_was_doing: truncateDebugText(String(userAction || "Using UnderPAR"), 180),
+    expected: "The selected UnderPAR action should complete without a captured error.",
+    actual: truncateDebugText(String(actual || "No recent error captured."), 220),
+    selection,
+    focus:
+      Array.isArray(snapshot?.correlation?.ids) && snapshot.correlation.ids.length > 0
+        ? "Use the correlation ids and the recent timeline in the structured snapshot to trace the failing request path."
+        : "Use the recent timeline and diagnostic markers in the structured snapshot to trace the failing step.",
+    one_sentence: truncateDebugText(
+      `${severity.toUpperCase()}: ${String(userAction || "Using UnderPAR")} -> ${String(actual || "No recent error captured.")}`,
+      260
+    ),
+  };
+}
+
+function buildUnderparDebugSupportPacketData(options = {}) {
+  const fullExport = options?.fullExport === true;
   const loginData = state.loginData && typeof state.loginData === "object" ? state.loginData : null;
   const authContext = loginData ? buildLoginAuthContext(loginData) : {};
   const runtimeConfig = getActiveUnderparImsRuntimeConfig();
@@ -13465,6 +13969,7 @@ function composeUnderparDebugConsoleOutput() {
   const selectedMvpdLabel = state.selectedMvpdId
     ? String(getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), state.selectedMvpdId) || state.selectedMvpdId).trim()
     : "";
+  const emailSummary = summarizeUnderparDebugEmail(getLoginEmail(loginData));
   const workspaceState = {
     esmWindowId: Number(state.esmWorkspaceWorkspaceWindowId || 0),
     cmWindowId: Number(state.cmWorkspaceWindowId || 0),
@@ -13478,17 +13983,23 @@ function composeUnderparDebugConsoleOutput() {
   const latestErrorStatusEntry = getLatestDebugStatusEntry(
     (entry) => String(entry?.type || "").trim().toLowerCase() === "error"
   );
-  const recentStatusEntries = compactRecentStatusEntries(state.debugStatusHistory, UNDERPAR_DEBUG_STATUS_OUTPUT_LIMIT);
-  const recentFailureEntries = compactRecentActivityEntries(
-    getRecentDebugLogEntries((entry) => isUnderparDebugErrorEntry(entry), UNDERPAR_DEBUG_FAILURE_OUTPUT_LIMIT),
-    UNDERPAR_DEBUG_FAILURE_OUTPUT_LIMIT
+  const recentStatusWindow = buildUnderparStructuredStatusWindow(
+    state.debugStatusHistory,
+    fullExport ? Math.min(UNDERPAR_DEBUG_STATUS_HISTORY_LIMIT, 16) : UNDERPAR_DEBUG_PACKET_TIMELINE_LIMIT
   );
-  const recentNonFetchEntries = compactRecentActivityEntries(
+  const recentFailureWindow = buildUnderparStructuredActivityWindow(
+    getRecentDebugLogEntries(
+      (entry) => isUnderparDebugErrorEntry(entry),
+      fullExport ? UNDERPAR_DEBUG_PACKET_FAILURE_LIMIT * 2 : UNDERPAR_DEBUG_PACKET_FAILURE_LIMIT
+    ),
+    fullExport ? UNDERPAR_DEBUG_PACKET_FAILURE_LIMIT * 2 : UNDERPAR_DEBUG_PACKET_FAILURE_LIMIT
+  );
+  const recentNonFetchWindow = buildUnderparStructuredActivityWindow(
     getRecentDebugLogEntries(
       (entry) => String(entry?.channel || "").trim().toLowerCase() !== "fetch",
-      UNDERPAR_DEBUG_NON_FETCH_OUTPUT_LIMIT
+      Math.max(UNDERPAR_DEBUG_NON_FETCH_OUTPUT_LIMIT, UNDERPAR_DEBUG_PACKET_TIMELINE_LIMIT)
     ),
-    UNDERPAR_DEBUG_NON_FETCH_OUTPUT_LIMIT
+    Math.max(UNDERPAR_DEBUG_NON_FETCH_OUTPUT_LIMIT, UNDERPAR_DEBUG_PACKET_TIMELINE_LIMIT)
   );
   const bootstrapMarker = getUnderparDiagnosticMarker("bootstrap");
   const authMarker = getUnderparDiagnosticMarker("auth");
@@ -13496,172 +14007,312 @@ function composeUnderparDebugConsoleOutput() {
   const consoleBootstrapMarker = getUnderparDiagnosticMarker("console_bootstrap");
   const programmersMarker = getUnderparDiagnosticMarker("programmers");
   const cmPrecheckMarker = getUnderparDiagnosticMarker("cm_precheck");
-  const recentActivityEntries = compactRecentActivityEntries(state.logs, 12);
-
-  lines.push("UnderPAR DEBUG INFO");
-  lines.push(`captured_at=${new Date().toISOString()}`);
-  lines.push(`summary=${buildUnderparDebugSummaryLine({ currentView: getUnderparCurrentView() })}`);
-  lines.push("");
-
-  pushDebugSection(lines, "app", [
-    `build=${BUILD_VERSION || "unknown"}`,
-    `view=${getUnderparCurrentView()}`,
-    `url=${String(window.location.href || "").trim() || "n/a"}`,
-    `busy=${state.busy ? "yes" : "no"}`,
-    `busy_context=${String(state.busyContext || "").trim() || "n/a"}`,
-    `session_ready=${state.sessionReady ? "yes" : "no"}`,
-    `restricted=${state.restricted ? "yes" : "no"}`,
-    `zip_key_gate=${shouldShowZipKeyImportGate() ? "visible" : "hidden"}`,
-    `zip_key_status=${String(state.zipKeyImportMessage || DEFAULT_ZIP_KEY_IMPORT_STATUS_MESSAGE).trim() || DEFAULT_ZIP_KEY_IMPORT_STATUS_MESSAGE}`,
-    `global_status=${globalStatus || "n/a"}`,
-    `update_available=${state.updateAvailable ? "yes" : "no"}`,
-    `latest_version=${String(state.latestVersion || "").trim() || "n/a"}`,
-    `latest_commit=${String(state.latestCommitSha || "").trim() || "n/a"}`,
-    `debug_panel=${state.debugConsoleCollapsed ? "collapsed" : "expanded"}`,
-  ]);
-
-  pushDebugSection(lines, "identity", [
-    `display_name=${String(getLoginDisplayName(loginData) || "n/a").trim() || "n/a"}`,
-    `login_email=${String(getLoginEmail(loginData) || "n/a").trim() || "n/a"}`,
-    `principal_id=${String(authContext?.principalId || "n/a").trim() || "n/a"}`,
-    `auth_id=${String(authContext?.authId || "n/a").trim() || "n/a"}`,
-    `user_id=${String(authContext?.userId || "n/a").trim() || "n/a"}`,
-    `org_name=${String(authContext?.orgName || "n/a").trim() || "n/a"}`,
-    `org_id=${String(authContext?.orgId || "n/a").trim() || "n/a"}`,
-  ]);
-
-  pushDebugSection(lines, "session", [
-    `client_id=${String(authContext?.clientId || runtimeConfig?.clientId || "n/a").trim() || "n/a"}`,
-    `scope=${String(authContext?.scope || runtimeConfig?.scope || "n/a").trim() || "n/a"}`,
-    `session_id=${String(authContext?.sessionId || "n/a").trim() || "n/a"}`,
-    `token_id=${String(authContext?.tokenId || "n/a").trim() || "n/a"}`,
-    `access_token_fingerprint=${String(authContext?.accessTokenFingerprint || "n/a").trim() || "n/a"}`,
-    `expires_at=${Number(authContext?.expiresAt || 0) > 0 ? new Date(Number(authContext.expiresAt)).toISOString() : "n/a"}`,
-    `session_monitor_source=${String(state.sessionMonitorLastProbeSource || "n/a").trim() || "n/a"}`,
-    `session_monitor_busy=${state.sessionMonitorBusy ? "yes" : "no"}`,
-    `session_monitor_suppressed=${state.sessionMonitorSuppressed ? "yes" : "no"}`,
-  ]);
-
-  pushDebugSection(lines, "diagnostics", [
-    `last_status=${latestStatusEntry ? compactRecentStatusEntries([latestStatusEntry], 1)[0] : "n/a"}`,
-    `last_error_status=${latestErrorStatusEntry ? compactRecentStatusEntries([latestErrorStatusEntry], 1)[0] : "n/a"}`,
-    `last_non_fetch_activity=${recentNonFetchEntries[0] || "n/a"}`,
-    `last_failure_activity=${recentFailureEntries[0] || "n/a"}`,
-    `bootstrap=${summarizeUnderparDiagnosticMarker(bootstrapMarker, ["reason", "phase", "path"])}`,
-    `auth=${summarizeUnderparDiagnosticMarker(authMarker, ["mode", "phase", "interactiveFallback"])}`,
-    `activation=${summarizeUnderparDiagnosticMarker(activationMarker, ["source", "phase", "programmersCount"])}`,
-    `console_bootstrap=${summarizeUnderparDiagnosticMarker(consoleBootstrapMarker, ["phase", "configurationVersion", "authoritiesCount"])}`,
-    `programmers=${summarizeUnderparDiagnosticMarker(programmersMarker, ["phase", "count", "code", "endpoint"])}`,
-    `cm_precheck=${summarizeUnderparDiagnosticMarker(cmPrecheckMarker, ["reason", "phase", "tenantCount"])}`,
-  ]);
-
-  pushDebugSection(lines, "selection", [
-    `environment_key=${String(state.adobePassEnvironmentKey || environment?.key || "n/a").trim() || "n/a"}`,
-    `environment_label=${String(environment?.label || "n/a").trim() || "n/a"}`,
-    `console_base=${String(environment?.consoleBase || "n/a").trim() || "n/a"}`,
-    `mgmt_base=${String(environment?.mgmtBase || "n/a").trim() || "n/a"}`,
-    `sp_base=${String(environment?.spBase || "n/a").trim() || "n/a"}`,
-    `media_company=${String(selectedProgrammer?.programmerName || selectedProgrammer?.mediaCompanyName || "n/a").trim() || "n/a"}`,
-    `programmer_id=${selectedProgrammerId || "n/a"}`,
-    `requestor_id=${String(state.selectedRequestorId || "n/a").trim() || "n/a"}`,
-    `mvpd_id=${String(state.selectedMvpdId || "n/a").trim() || "n/a"}`,
-    `mvpd_label=${selectedMvpdLabel || "n/a"}`,
-    `premium_services=${stringifyUnderparDebugInfoValue({
+  const recentActivityWindow = buildUnderparStructuredActivityWindow(
+    state.logs,
+    fullExport ? UNDERPAR_DEBUG_FULL_EXPORT_ACTIVITY_LIMIT : UNDERPAR_DEBUG_PACKET_ACTIVITY_LIMIT
+  );
+  const appSnapshot = {
+    build: BUILD_VERSION || "unknown",
+    view: getUnderparCurrentView(),
+    route: String(window.location.pathname || "n/a").trim() || "n/a",
+    busy: state.busy ? "yes" : "no",
+    busy_context: String(state.busyContext || "").trim() || "n/a",
+    session_ready: state.sessionReady ? "yes" : "no",
+    restricted: state.restricted ? "yes" : "no",
+    zip_key_gate: shouldShowZipKeyImportGate() ? "visible" : "hidden",
+    zip_key_status:
+      String(state.zipKeyImportMessage || DEFAULT_ZIP_KEY_IMPORT_STATUS_MESSAGE).trim() || DEFAULT_ZIP_KEY_IMPORT_STATUS_MESSAGE,
+    global_status: globalStatus || "n/a",
+    update_available: state.updateAvailable ? "yes" : "no",
+    latest_version: String(state.latestVersion || "").trim() || "n/a",
+    latest_commit: String(state.latestCommitSha || "").trim() || "n/a",
+    debug_panel: state.debugConsoleCollapsed ? "collapsed" : "expanded",
+  };
+  const selectionSnapshot = {
+    environment_key: String(state.adobePassEnvironmentKey || environment?.key || "n/a").trim() || "n/a",
+    environment_label: String(environment?.label || "n/a").trim() || "n/a",
+    console_base: String(environment?.consoleBase || "n/a").trim() || "n/a",
+    mgmt_base: String(environment?.mgmtBase || "n/a").trim() || "n/a",
+    sp_base: String(environment?.spBase || "n/a").trim() || "n/a",
+    media_company:
+      String(selectedProgrammer?.programmerName || selectedProgrammer?.mediaCompanyName || "n/a").trim() || "n/a",
+    programmer_id: selectedProgrammerId || "n/a",
+    requestor_id: String(state.selectedRequestorId || "n/a").trim() || "n/a",
+    mvpd_id: String(state.selectedMvpdId || "n/a").trim() || "n/a",
+    mvpd_label: selectedMvpdLabel || "n/a",
+    premium_services: {
       restV2: Boolean(selectedServices?.restV2),
       esm: Boolean(selectedServices?.esmWorkspace || selectedServices?.esm),
       degradation: Boolean(selectedServices?.degradation),
       cm: Boolean(selectedServices?.cm),
       cmMvpd: Boolean(selectedServices?.cmMvpd),
       resetTempPass: Boolean(hasResetTempPassAvailable(selectedServices)),
-    }) || "n/a"}`,
-    `premium_services_summary=${String(firstNonEmptyString([selectedServices?.premiumServicesSummary]) || "n/a").trim() || "n/a"}`,
-  ]);
+    },
+    premium_services_summary:
+      String(firstNonEmptyString([selectedServices?.premiumServicesSummary]) || "n/a").trim() || "n/a",
+  };
+  const diagnosticsSnapshot = {
+    last_status: latestStatusEntry ? buildUnderparStructuredStatusWindow([latestStatusEntry], 1)[0] || null : null,
+    last_error_status:
+      latestErrorStatusEntry ? buildUnderparStructuredStatusWindow([latestErrorStatusEntry], 1)[0] || null : null,
+    last_non_fetch_activity: recentNonFetchWindow[0] || null,
+    last_failure_activity: recentFailureWindow[0] || null,
+    recent_error: recentFailureWindow[0] || (latestErrorStatusEntry ? buildUnderparStructuredStatusWindow([latestErrorStatusEntry], 1)[0] || null : null),
+    bootstrap: sanitizeUnderparSupportPacketValue(bootstrapMarker, { keyName: "bootstrap", seen: new WeakSet() }),
+    auth: sanitizeUnderparSupportPacketValue(authMarker, { keyName: "auth", seen: new WeakSet() }),
+    activation: sanitizeUnderparSupportPacketValue(activationMarker, { keyName: "activation", seen: new WeakSet() }),
+    console_bootstrap: sanitizeUnderparSupportPacketValue(consoleBootstrapMarker, {
+      keyName: "console_bootstrap",
+      seen: new WeakSet(),
+    }),
+    programmers: sanitizeUnderparSupportPacketValue(programmersMarker, { keyName: "programmers", seen: new WeakSet() }),
+    cm_precheck: sanitizeUnderparSupportPacketValue(cmPrecheckMarker, { keyName: "cm_precheck", seen: new WeakSet() }),
+    windows: {
+      status_count: recentStatusWindow.length,
+      failure_count: recentFailureWindow.length,
+      activity_count: recentActivityWindow.length,
+      stored_log_count: Array.isArray(state.logs) ? state.logs.length : 0,
+      stored_status_count: Array.isArray(state.debugStatusHistory) ? state.debugStatusHistory.length : 0,
+    },
+  };
+  const packet = {
+    schema_version: 2,
+    packet_kind: fullExport ? "full_diagnostics" : "support_packet",
+    captured_at: new Date().toISOString(),
+    summary_line: buildUnderparDebugSummaryLine({ currentView: getUnderparCurrentView() }),
+    summary: null,
+    app: appSnapshot,
+    identity: {
+      display_name_present: String(getLoginDisplayName(loginData || null) || "").trim() ? "yes" : "no",
+      login_email_domain: emailSummary.domain,
+      login_email_fingerprint: emailSummary.fingerprint,
+      principal_id_fingerprint: summarizeUnderparDebugIdentityValue(authContext?.principalId, "pid"),
+      auth_id_fingerprint: summarizeUnderparDebugIdentityValue(authContext?.authId, "aid"),
+      user_id_fingerprint: summarizeUnderparDebugIdentityValue(authContext?.userId, "uid"),
+      org_name: String(authContext?.orgName || "n/a").trim() || "n/a",
+      org_id: String(authContext?.orgId || "n/a").trim() || "n/a",
+    },
+    session: {
+      client_id: String(authContext?.clientId || runtimeConfig?.clientId || "n/a").trim() || "n/a",
+      scope: String(authContext?.scope || runtimeConfig?.scope || "n/a").trim() || "n/a",
+      session_id: String(authContext?.sessionId || "n/a").trim() || "n/a",
+      token_id: String(authContext?.tokenId || "n/a").trim() || "n/a",
+      access_token_fingerprint: String(authContext?.accessTokenFingerprint || "n/a").trim() || "n/a",
+      expires_at:
+        Number(authContext?.expiresAt || 0) > 0 ? new Date(Number(authContext.expiresAt)).toISOString() : "n/a",
+      session_monitor_source: String(state.sessionMonitorLastProbeSource || "n/a").trim() || "n/a",
+      session_monitor_busy: state.sessionMonitorBusy ? "yes" : "no",
+      session_monitor_suppressed: state.sessionMonitorSuppressed ? "yes" : "no",
+    },
+    selection: selectionSnapshot,
+    feature_flags: {
+      restricted: state.restricted === true,
+      session_ready: state.sessionReady === true,
+      zip_key_loaded: Boolean(runtimeConfig?.clientId),
+      update_available: state.updateAvailable === true,
+      cm_bootstrap_qualified: state.cmConsoleBootstrapQualified === true,
+      debug_panel_collapsed: state.debugConsoleCollapsed === true,
+    },
+    diagnostics: diagnosticsSnapshot,
+    cm: {
+      catalog_hydrated: state.cmTenantsCatalogHydrated ? "yes" : "no",
+      catalog_runtime_fresh: state.cmTenantsCatalogRuntimeFresh ? "yes" : "no",
+      precheck_pending: state.cmTenantsPrecheckPending ? "yes" : "no",
+      precheck_complete: state.cmTenantsPrecheckComplete ? "yes" : "no",
+      precheck_error: String(state.cmTenantsPrecheckLastError || "").trim() || "n/a",
+      bootstrap_qualified: state.cmConsoleBootstrapQualified ? "yes" : "no",
+      bootstrap_summary: sanitizeUnderparSupportPacketValue(state.cmConsoleBootstrapSummary, {
+        keyName: "cm_bootstrap_summary",
+        seen: new WeakSet(),
+      }),
+    },
+    network: {
+      local_activity_count: getLocalGlobalNetworkActivityCount(),
+      remote_activity_count: getRemoteGlobalNetworkActivityCount(),
+      local_activity_context: String(state.globalNetworkActivityContext || "").trim() || "n/a",
+      remote_activity_context: String(state.remoteNetworkActivityContext || "").trim() || "n/a",
+      sidepanel_bridge_window_id: Number(state.sidepanelControllerWindowId || 0) || "n/a",
+      sidepanel_bridge_connected: state.sidepanelControllerPort ? "yes" : "no",
+    },
+    credential: {
+      zip_key_loaded: runtimeConfig?.clientId ? "yes" : "no",
+      zip_key_client_id: String(runtimeConfig?.clientId || "n/a").trim() || "n/a",
+      zip_key_scope: String(runtimeConfig?.scope || "n/a").trim() || "n/a",
+      zip_key_raw_scope: String(runtimeConfig?.rawScope || "n/a").trim() || "n/a",
+      zip_key_source: String(runtimeConfig?.source || "n/a").trim() || "n/a",
+      zip_key_imported_at: String(runtimeConfig?.importedAt || "n/a").trim() || "n/a",
+      manual_gate: state.manualZipKeyImportGate ? "yes" : "no",
+    },
+    runtime: {
+      extension_id: String(chrome?.runtime?.id || "n/a").trim() || "n/a",
+      browser_language: String(navigator?.language || "n/a").trim() || "n/a",
+      browser_timezone: String(Intl.DateTimeFormat().resolvedOptions().timeZone || "n/a").trim() || "n/a",
+      workspace_windows: workspaceState,
+    },
+    correlation: {
+      ids: collectUnderparDebugCorrelationIds([
+        {
+          sessionId: authContext?.sessionId,
+          tokenId: authContext?.tokenId,
+          flowId: state.restV2DebugFlowId || state.esmWorkspaceDebugFlowId || state.cmWorkspaceActivityDebugFlowId || state.degradationWorkspaceDebugFlowId,
+        },
+        diagnosticsSnapshot,
+        recentFailureWindow,
+        recentActivityWindow,
+        recentStatusWindow,
+      ]),
+    },
+    timeline: recentStatusWindow,
+    recent_status: recentStatusWindow,
+    recent_failures: recentFailureWindow,
+    recent_activity: recentActivityWindow,
+  };
+  packet.summary = buildUnderparDebugSupportPacketSummary(packet);
+  if (fullExport) {
+    packet.raw_tail = {
+      logs: buildUnderparStructuredActivityWindow(state.logs, UNDERPAR_DEBUG_FULL_EXPORT_ACTIVITY_LIMIT),
+      status_history: buildUnderparStructuredStatusWindow(state.debugStatusHistory, UNDERPAR_DEBUG_STATUS_HISTORY_LIMIT),
+      markers: sanitizeUnderparSupportPacketValue(state.debugMarkers || {}, {
+        keyName: "debug_markers",
+        seen: new WeakSet(),
+      }),
+    };
+  }
+  return packet;
+}
 
-  pushDebugSection(lines, "cm", [
-    `catalog_hydrated=${state.cmTenantsCatalogHydrated ? "yes" : "no"}`,
-    `catalog_runtime_fresh=${state.cmTenantsCatalogRuntimeFresh ? "yes" : "no"}`,
-    `precheck_pending=${state.cmTenantsPrecheckPending ? "yes" : "no"}`,
-    `precheck_complete=${state.cmTenantsPrecheckComplete ? "yes" : "no"}`,
-    `precheck_error=${String(state.cmTenantsPrecheckLastError || "").trim() || "n/a"}`,
-    `bootstrap_qualified=${state.cmConsoleBootstrapQualified ? "yes" : "no"}`,
-    `bootstrap_summary=${stringifyUnderparDebugInfoValue(state.cmConsoleBootstrapSummary) || "n/a"}`,
-  ]);
+function buildUnderparDebugFallbackPacket(error = null, options = {}) {
+  const fullExport = options?.fullExport === true;
+  const errorLabel = error instanceof Error ? `${error.name}: ${error.message}` : String(error || "").trim();
+  const recentActivityWindow = buildUnderparStructuredActivityWindow(
+    state.logs || [],
+    fullExport ? UNDERPAR_DEBUG_FULL_EXPORT_ACTIVITY_LIMIT : UNDERPAR_DEBUG_PACKET_ACTIVITY_LIMIT
+  );
+  const packet = {
+    schema_version: 2,
+    packet_kind: fullExport ? "full_diagnostics" : "support_packet",
+    captured_at: new Date().toISOString(),
+    summary_line: "fallback snapshot",
+    summary: null,
+    app: {
+      build: String(chrome?.runtime?.getManifest?.()?.version || "n/a").trim() || "n/a",
+      view: String(state.sessionReady && state.loginData ? "authenticated" : state.restricted ? "restricted" : "unauthenticated").trim(),
+      route: String(window.location.pathname || "n/a").trim() || "n/a",
+      busy: state.busy ? String(state.busyContext || "yes").trim() || "yes" : "no",
+      debug_panel: state.debugConsoleCollapsed ? "collapsed" : "expanded",
+    },
+    identity: {
+      display_name_present: String(getLoginDisplayName(state.loginData || null) || "").trim() ? "yes" : "no",
+    },
+    session: {},
+    selection: {},
+    feature_flags: {
+      zip_key_loaded: hasConfiguredUnderparImsClientId(),
+      debug_panel_collapsed: state.debugConsoleCollapsed === true,
+    },
+    diagnostics: {
+      render_error: errorLabel ? redactUnderparSupportPacketText(errorLabel) : "none",
+      last_failure_activity: recentActivityWindow[0] || null,
+      windows: {
+        activity_count: recentActivityWindow.length,
+      },
+    },
+    cm: {},
+    network: {},
+    credential: {},
+    runtime: {},
+    correlation: {
+      ids: [],
+    },
+    timeline: [],
+    recent_status: [],
+    recent_failures: [],
+    recent_activity: recentActivityWindow,
+  };
+  packet.summary = buildUnderparDebugSupportPacketSummary(packet);
+  if (fullExport) {
+    packet.raw_tail = {
+      logs: recentActivityWindow,
+      status_history: buildUnderparStructuredStatusWindow(state.debugStatusHistory || [], UNDERPAR_DEBUG_STATUS_HISTORY_LIMIT),
+      markers: sanitizeUnderparSupportPacketValue(state.debugMarkers || {}, {
+        keyName: "debug_markers",
+        seen: new WeakSet(),
+      }),
+    };
+  }
+  return packet;
+}
 
-  pushDebugSection(lines, "network", [
-    `local_activity_count=${getLocalGlobalNetworkActivityCount()}`,
-    `remote_activity_count=${getRemoteGlobalNetworkActivityCount()}`,
-    `local_activity_context=${String(state.globalNetworkActivityContext || "").trim() || "n/a"}`,
-    `remote_activity_context=${String(state.remoteNetworkActivityContext || "").trim() || "n/a"}`,
-    `sidepanel_bridge_window_id=${Number(state.sidepanelControllerWindowId || 0) || "n/a"}`,
-    `sidepanel_bridge_connected=${state.sidepanelControllerPort ? "yes" : "no"}`,
-  ]);
+function getUnderparDebugStructuredSnapshot(options = {}) {
+  try {
+    return buildUnderparDebugSupportPacketData(options);
+  } catch (error) {
+    console.error("[UnderPAR] Unable to compose DEBUG INFO snapshot", error);
+    return buildUnderparDebugFallbackPacket(error, options);
+  }
+}
 
-  pushDebugSection(lines, "credential", [
-    `zip_key_loaded=${runtimeConfig?.clientId ? "yes" : "no"}`,
-    `zip_key_client_id=${String(runtimeConfig?.clientId || "n/a").trim() || "n/a"}`,
-    `zip_key_scope=${String(runtimeConfig?.scope || "n/a").trim() || "n/a"}`,
-    `zip_key_raw_scope=${String(runtimeConfig?.rawScope || "n/a").trim() || "n/a"}`,
-    `zip_key_source=${String(runtimeConfig?.source || "n/a").trim() || "n/a"}`,
-    `zip_key_imported_at=${String(runtimeConfig?.importedAt || "n/a").trim() || "n/a"}`,
-    `manual_gate=${state.manualZipKeyImportGate ? "yes" : "no"}`,
-  ]);
+function composeUnderparDebugConsoleOutput() {
+  const packet = getUnderparDebugStructuredSnapshot({
+    fullExport: false,
+  });
+  const lines = [];
+  const summary = packet?.summary && typeof packet.summary === "object" ? packet.summary : {};
+  const correlationIds = Array.isArray(packet?.correlation?.ids) ? packet.correlation.ids : [];
 
-  pushDebugSection(lines, "runtime", [
-    `extension_id=${String(chrome?.runtime?.id || "n/a").trim() || "n/a"}`,
-    `browser_language=${String(navigator?.language || "n/a").trim() || "n/a"}`,
-    `browser_timezone=${String(Intl.DateTimeFormat().resolvedOptions().timeZone || "n/a").trim() || "n/a"}`,
-    `workspace_windows=${stringifyUnderparDebugInfoValue(workspaceState) || "n/a"}`,
+  lines.push("UnderPAR DEBUG INFO");
+  lines.push(`captured_at=${String(packet?.captured_at || new Date().toISOString()).trim()}`);
+  lines.push(`summary=${String(packet?.summary_line || buildUnderparDebugSummaryLine({ currentView: getUnderparCurrentView() })).trim()}`);
+  lines.push("");
+
+  pushDebugSection(lines, "summary", [
+    `packet_kind=${String(packet?.packet_kind || "support_packet").trim() || "support_packet"}`,
+    `severity=${String(summary?.severity || "info").trim() || "info"}`,
+    `headline=${String(summary?.headline || "n/a").trim() || "n/a"}`,
+    `what_user_was_doing=${String(summary?.what_user_was_doing || "n/a").trim() || "n/a"}`,
+    `expected=${String(summary?.expected || "n/a").trim() || "n/a"}`,
+    `actual=${String(summary?.actual || "n/a").trim() || "n/a"}`,
+    `selection=${String(summary?.selection || "n/a").trim() || "n/a"}`,
+    `focus=${String(summary?.focus || "n/a").trim() || "n/a"}`,
+    `correlation_ids=${correlationIds.length > 0 ? correlationIds.join(", ") : "n/a"}`,
   ]);
 
   pushDebugSection(
     lines,
-    "recent_status",
-    recentStatusEntries.length > 0
-      ? recentStatusEntries.map((entry, index) => `event_${String(index + 1).padStart(2, "0")}=${entry}`)
-      : ["event_01=Waiting for status."]
+    "timeline",
+    Array.isArray(packet?.timeline) && packet.timeline.length > 0
+      ? packet.timeline.map((entry, index) => `event_${String(index + 1).padStart(2, "0")}=${formatUnderparStructuredStatusRecord(entry)}`)
+      : ["event_01=Waiting for timeline."]
   );
 
-  pushDebugSection(
-    lines,
-    "recent_failures",
-    recentFailureEntries.length > 0
-      ? recentFailureEntries.map((entry, index) => `event_${String(index + 1).padStart(2, "0")}=${entry}`)
-      : ["event_01=Waiting for failures."]
-  );
-
-  pushDebugSection(
-    lines,
-    "recent_activity",
-    recentActivityEntries.length > 0
-      ? recentActivityEntries.map((entry, index) => `event_${String(index + 1).padStart(2, "0")}=${entry}`)
-      : ["event_01=Waiting for activity."]
-  );
-
+  lines.push("[structured_json]");
+  lines.push(truncateDebugText(JSON.stringify(packet, null, 2), UNDERPAR_DEBUG_PACKET_JSON_LIMIT));
+  lines.push("");
   return lines.join("\n");
 }
 
 function composeUnderparDebugConsoleFallback(error = null) {
-  const fallbackLines = ["UnderPAR DEBUG INFO", ""];
-  const errorLabel = error instanceof Error ? `${error.name}: ${error.message}` : String(error || "").trim();
-  const recentActivityEntries = compactRecentActivityEntries(state.logs || []);
-
+  const packet = buildUnderparDebugFallbackPacket(error, {
+    fullExport: false,
+  });
+  const fallbackLines = ["UnderPAR DEBUG INFO", `captured_at=${String(packet?.captured_at || new Date().toISOString()).trim()}`, ""];
   pushDebugSection(fallbackLines, "summary", [
-    `build=${String(chrome?.runtime?.getManifest?.()?.version || "n/a").trim() || "n/a"}`,
-    `view=${String(state.sessionReady && state.loginData ? "authenticated" : state.restricted ? "restricted" : "unauthenticated").trim()}`,
-    `busy=${state.busy ? String(state.busyContext || "yes").trim() || "yes" : "no"}`,
-    `zip_key_configured=${hasConfiguredUnderparImsClientId() ? "yes" : "no"}`,
-    `debug_panel=${state.debugConsoleCollapsed ? "collapsed" : "expanded"}`,
-    errorLabel ? `render_error=${redactSensitiveTokenValues(errorLabel)}` : "render_error=none",
+    `packet_kind=${String(packet?.packet_kind || "support_packet").trim() || "support_packet"}`,
+    `severity=${String(packet?.summary?.severity || "info").trim() || "info"}`,
+    `headline=${String(packet?.summary?.headline || "n/a").trim() || "n/a"}`,
+    `actual=${String(packet?.summary?.actual || "n/a").trim() || "n/a"}`,
+    `focus=${String(packet?.summary?.focus || "n/a").trim() || "n/a"}`,
   ]);
-
   pushDebugSection(
     fallbackLines,
     "recent_activity",
-    recentActivityEntries.length > 0
-      ? recentActivityEntries.map((entry, index) => `event_${String(index + 1).padStart(2, "0")}=${entry}`)
+    Array.isArray(packet?.recent_activity) && packet.recent_activity.length > 0
+      ? packet.recent_activity.map((entry, index) => `event_${String(index + 1).padStart(2, "0")}=${formatUnderparStructuredActivityRecord(entry)}`)
       : ["event_01=Waiting for activity."]
   );
-
+  fallbackLines.push("[structured_json]");
+  fallbackLines.push(truncateDebugText(JSON.stringify(packet, null, 2), UNDERPAR_DEBUG_PACKET_JSON_LIMIT));
+  fallbackLines.push("");
   return fallbackLines.join("\n");
 }
 
@@ -13672,6 +14323,43 @@ function getUnderparDebugConsoleSnapshot() {
     console.error("[UnderPAR] Unable to compose DEBUG INFO snapshot", error);
     return composeUnderparDebugConsoleFallback(error);
   }
+}
+
+function getUnderparDebugJsonSnapshot(options = {}) {
+  const packet = getUnderparDebugStructuredSnapshot(options);
+  return JSON.stringify(packet, null, 2);
+}
+
+function buildUnderparDebugExportFileName(packet = null) {
+  const selection = packet?.selection && typeof packet.selection === "object" ? packet.selection : {};
+  const capturedAt = String(packet?.captured_at || new Date().toISOString()).trim() || new Date().toISOString();
+  const fileSegments = [
+    "underpar_debug",
+    selection.environment_key || "env",
+    selection.programmer_id || "programmer",
+    selection.requestor_id || "requestor",
+    selection.mvpd_id || "mvpd",
+    capturedAt,
+  ].map((value, index) => sanitizeDownloadFileSegment(value, index === 0 ? "underpar_debug" : "part"));
+  return `${fileSegments.filter(Boolean).join("_")}.json`;
+}
+
+function buildUnderparDebugExportBundle() {
+  const supportPacket = getUnderparDebugStructuredSnapshot({
+    fullExport: false,
+  });
+  const fullDiagnostics = getUnderparDebugStructuredSnapshot({
+    fullExport: true,
+  });
+  return {
+    schema_version: 1,
+    export_kind: "underpar_debug_bundle",
+    exported_at: String(fullDiagnostics?.captured_at || new Date().toISOString()).trim() || new Date().toISOString(),
+    summary: fullDiagnostics?.summary || supportPacket?.summary || null,
+    ai_bug_report: getUnderparDebugConsoleSnapshot(),
+    support_packet: supportPacket,
+    full_diagnostics: fullDiagnostics,
+  };
 }
 
 function renderDebugConsole() {
@@ -13687,12 +14375,12 @@ function renderDebugConsole() {
   els.debugToggleButton.setAttribute(
     "aria-label",
     state.debugConsoleCollapsed
-      ? "DEBUG INFO. Click to copy debug info. Shift-click to expand."
-      : "DEBUG INFO. Click to copy debug info. Shift-click to collapse."
+      ? "DEBUG INFO. Click to copy the AI bug report. Shift-click to expand."
+      : "DEBUG INFO. Click to copy the AI bug report. Shift-click to collapse."
   );
   els.debugToggleButton.title = state.debugConsoleCollapsed
-    ? "Click to copy debug info. Shift+click to expand."
-    : "Click to copy debug info. Shift+click to collapse.";
+    ? "Click to copy AI bug report. Shift+click to expand."
+    : "Click to copy AI bug report. Shift+click to collapse.";
   if (els.debugToggleButtonLabel) {
     els.debugToggleButtonLabel.textContent = DEFAULT_DEBUG_TOGGLE_LABEL;
   }
@@ -13703,7 +14391,18 @@ function renderDebugConsole() {
     els.debugToggleStatus.hidden = !state.debugCopyStatus;
     els.debugToggleStatus.textContent = state.debugCopyStatus || DEFAULT_DEBUG_COPY_STATUS;
   }
-  setTextOutput(els.logOutput, getUnderparDebugConsoleSnapshot());
+  if (els.debugCopyPacketButton) {
+    els.debugCopyPacketButton.title = "Copy the prompt-ready AI bug report.";
+  }
+  if (els.debugCopyJsonButton) {
+    els.debugCopyJsonButton.title = "Copy the structured JSON support packet.";
+  }
+  if (els.debugExportDiagnosticsButton) {
+    els.debugExportDiagnosticsButton.title = "Download the full diagnostics bundle with the raw tail.";
+  }
+  if (state.debugConsoleCollapsed !== true) {
+    setTextOutput(els.logOutput, getUnderparDebugConsoleSnapshot());
+  }
 }
 
 function setDebugConsoleCollapsed(collapsed) {
@@ -13731,7 +14430,7 @@ function setDebugCopyStatus(message = "") {
 }
 
 async function copyDebugConsoleToClipboard() {
-  const snapshot = String(els.logOutput?.value || getUnderparDebugConsoleSnapshot()).trim();
+  const snapshot = String(getUnderparDebugConsoleSnapshot()).trim();
   if (!snapshot) {
     return;
   }
@@ -13742,9 +14441,41 @@ async function copyDebugConsoleToClipboard() {
     return;
   }
 
-  log("Unable to copy UnderPAR debug console", copyResult?.error || "Unknown clipboard failure.");
-  window.alert("UnderPAR could not copy the debug console to the clipboard.");
+  log("Unable to copy UnderPAR AI debug packet", copyResult?.error || "Unknown clipboard failure.");
+  window.alert("UnderPAR could not copy the AI bug report to the clipboard.");
   setDebugCopyStatus("");
+}
+
+async function copyDebugJsonToClipboard() {
+  const snapshot = String(getUnderparDebugJsonSnapshot({
+    fullExport: false,
+  })).trim();
+  if (!snapshot) {
+    return;
+  }
+
+  const copyResult = await copyTextToClipboard(snapshot);
+  if (copyResult?.ok) {
+    setDebugCopyStatus(DEFAULT_DEBUG_JSON_COPY_STATUS);
+    return;
+  }
+
+  log("Unable to copy UnderPAR structured debug JSON", copyResult?.error || "Unknown clipboard failure.");
+  window.alert("UnderPAR could not copy the structured JSON snapshot to the clipboard.");
+  setDebugCopyStatus("");
+}
+
+async function exportFullDiagnosticsBundle() {
+  try {
+    const bundle = buildUnderparDebugExportBundle();
+    const fileName = buildUnderparDebugExportFileName(bundle?.full_diagnostics || bundle?.support_packet || null);
+    downloadJsonFile(bundle, fileName);
+    setDebugCopyStatus(DEFAULT_DEBUG_EXPORT_STATUS);
+  } catch (error) {
+    log("Unable to export UnderPAR diagnostics bundle", error instanceof Error ? error.message : String(error || ""));
+    window.alert("UnderPAR could not export the full diagnostics bundle.");
+    setDebugCopyStatus("");
+  }
 }
 
 const UNDERPAR_BROWSER_CONSOLE_TRACE_ENABLED = true;

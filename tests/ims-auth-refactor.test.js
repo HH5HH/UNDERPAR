@@ -2067,8 +2067,9 @@ test("DEBUG INFO and logged-out controls bind before async init and keep a safe 
   assert.match(popupSource, /debugMarkers:\s*\{\}/);
   assert.match(popupSource, /function appendDebugStatusHistoryEntry\(/);
   assert.match(popupSource, /function setUnderparDiagnosticMarker\(/);
+  assert.match(renderDebugSource, /if \(state\.debugConsoleCollapsed !== true\) \{/);
   assert.match(renderDebugSource, /setTextOutput\(els\.logOutput,\s*getUnderparDebugConsoleSnapshot\(\)\);/);
-  assert.match(copyDebugSource, /els\.logOutput\?\.value \|\| getUnderparDebugConsoleSnapshot\(\)/);
+  assert.match(copyDebugSource, /String\(getUnderparDebugConsoleSnapshot\(\)\)\.trim\(\)/);
   assert.match(statusSource, /appendDebugStatusHistoryEntry\(normalizedMessage,\s*normalizedType,\s*"status"\)/);
   assert.match(popupSource, /passVaultLoaded:\s*false,/);
   assert.match(ensurePassVaultLoadedSource, /if \(!forceReload && state\.passVault && state\.passVaultLoaded === true\) \{/);
@@ -4040,7 +4041,10 @@ test("sidepanel exposes LoginButton-style DEBUG INFO controls backed by popup ru
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const renderDebugConsoleSource = extractFunctionSource(popupSource, "renderDebugConsole");
   const copyDebugConsoleSource = extractFunctionSource(popupSource, "copyDebugConsoleToClipboard");
+  const copyDebugJsonSource = extractFunctionSource(popupSource, "copyDebugJsonToClipboard");
+  const exportDiagnosticsSource = extractFunctionSource(popupSource, "exportFullDiagnosticsBundle");
   const composeDebugSource = extractFunctionSource(popupSource, "composeUnderparDebugConsoleOutput");
+  const buildPacketSource = extractFunctionSource(popupSource, "buildUnderparDebugSupportPacketData");
 
   assert.match(sidepanelHtml, /id="debugConsole"/);
   assert.match(sidepanelHtml, /id="debugToggleButton"/);
@@ -4051,29 +4055,38 @@ test("sidepanel exposes LoginButton-style DEBUG INFO controls backed by popup ru
   );
   assert.match(
     sidepanelHtml,
-    /id="debugToggleStatus" class="spectrum-Detail spectrum-Detail--sizeS debug-toggleStatus" hidden>Copied to clipboard</
+    /id="debugToggleStatus" class="spectrum-Detail spectrum-Detail--sizeS debug-toggleStatus" hidden>Copied AI packet</
   );
   assert.match(sidepanelHtml, /id="debugConsoleBody" class="debug-body" hidden/);
+  assert.match(sidepanelHtml, /id="debugCopyPacketButton"/);
+  assert.match(sidepanelHtml, /id="debugCopyJsonButton"/);
+  assert.match(sidepanelHtml, /id="debugExportDiagnosticsButton"/);
+  assert.match(sidepanelHtml, /Copy AI Bug Report/);
+  assert.match(sidepanelHtml, /Collapsed mode stays lightweight\./);
   assert.match(sidepanelHtml, /class="spectrum-Textfield spectrum-Textfield--sizeM spectrum-Textfield--multiline is-readOnly debug-field"/);
   assert.match(sidepanelHtml, /class="spectrum-Textfield-input debug-field-input"/);
-  assert.match(sidepanelHtml, /Click copies\. Shift\+click toggles details\./);
+  assert.match(sidepanelHtml, /Click copies AI packet\. Shift\+click toggles details\./);
   assert.match(sidepanelHtml, /id="logOutput"/);
   assert.match(popupSource, /const DEFAULT_DEBUG_TOGGLE_LABEL = "DEBUG INFO"/);
-  assert.match(popupSource, /const DEFAULT_DEBUG_TOGGLE_META = "Click copies\. Shift\+click toggles details\.";/);
-  assert.match(popupSource, /const DEFAULT_DEBUG_COPY_STATUS = "Copied to clipboard"/);
-  assert.match(renderDebugConsoleSource, /Shift-click to expand/);
-  assert.match(renderDebugConsoleSource, /Shift-click to collapse/);
-  assert.match(copyDebugConsoleSource, /UnderPAR could not copy the debug console to the clipboard\./);
+  assert.match(popupSource, /const DEFAULT_DEBUG_TOGGLE_META = "Click copies AI packet\. Shift\+click toggles details\.";/);
+  assert.match(popupSource, /const DEFAULT_DEBUG_COPY_STATUS = "Copied AI packet"/);
+  assert.match(popupSource, /const DEFAULT_DEBUG_JSON_COPY_STATUS = "Copied JSON snapshot"/);
+  assert.match(popupSource, /const DEFAULT_DEBUG_EXPORT_STATUS = "Exported full diagnostics"/);
+  assert.match(renderDebugConsoleSource, /copy the AI bug report/);
+  assert.match(renderDebugConsoleSource, /state\.debugConsoleCollapsed !== true/);
+  assert.match(renderDebugConsoleSource, /els\.debugCopyPacketButton\.title = "Copy the prompt-ready AI bug report\."/);
+  assert.match(copyDebugConsoleSource, /UnderPAR could not copy the AI bug report to the clipboard\./);
+  assert.match(copyDebugJsonSource, /UnderPAR could not copy the structured JSON snapshot to the clipboard\./);
+  assert.match(exportDiagnosticsSource, /downloadJsonFile\(bundle, fileName\)/);
   assert.match(composeDebugSource, /UnderPAR DEBUG INFO/);
-  assert.match(composeDebugSource, /"diagnostics"/);
-  assert.match(composeDebugSource, /"recent_status"/);
-  assert.match(composeDebugSource, /"recent_failures"/);
-  assert.match(composeDebugSource, /last_error_status=/);
-  assert.match(composeDebugSource, /console_bootstrap=/);
-  assert.match(composeDebugSource, /programmers=/);
-  assert.match(composeDebugSource, /cm_precheck=/);
-  assert.match(composeDebugSource, /"recent_activity"/);
-  assert.match(composeDebugSource, /precheck_pending/);
+  assert.match(composeDebugSource, /pushDebugSection\(lines,\s*"summary",\s*\[/);
+  assert.match(composeDebugSource, /pushDebugSection\(\s*lines,\s*"timeline",/);
+  assert.match(composeDebugSource, /\[structured_json\]/);
+  assert.match(composeDebugSource, /correlation_ids=/);
+  assert.match(buildPacketSource, /packet_kind: fullExport \? "full_diagnostics" : "support_packet"/);
+  assert.match(buildPacketSource, /summary_line:/);
+  assert.match(buildPacketSource, /recent_failures:/);
+  assert.match(buildPacketSource, /raw_tail = \{/);
 });
 
 test("stored and silent session activation stay tabless unless explicitly allowed", () => {

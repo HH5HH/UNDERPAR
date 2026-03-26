@@ -167,14 +167,20 @@
           >
             <span class="debug-toggleHeading">
               <span id="debugToggleButtonLabel" class="spectrum-Detail spectrum-Detail--sizeL debug-toggleTitle">DEBUG INFO</span>
-              <span id="debugToggleButtonMeta" class="spectrum-Body spectrum-Body--sizeS debug-toggleSubtitle">Click copies. Shift+click toggles details.</span>
+              <span id="debugToggleButtonMeta" class="spectrum-Body spectrum-Body--sizeS debug-toggleSubtitle">Click copies AI packet. Shift+click toggles details.</span>
             </span>
-            <span id="debugToggleStatus" class="spectrum-Detail spectrum-Detail--sizeS debug-toggleStatus" hidden>Copied to clipboard</span>
+            <span id="debugToggleStatus" class="spectrum-Detail spectrum-Detail--sizeS debug-toggleStatus" hidden>Copied AI packet</span>
             <span id="debugToggleIcon" class="debug-toggleIcon" aria-hidden="true">▼</span>
           </button>
         </div>
 
         <div id="debugConsoleBody" class="debug-body" hidden>
+          <div class="debug-actions" role="group" aria-label="Debug diagnostics actions">
+            <button id="debugCopyPacketButton" class="debug-action-btn" type="button">Copy AI Bug Report</button>
+            <button id="debugCopyJsonButton" class="debug-action-btn" type="button">Copy JSON Snapshot</button>
+            <button id="debugExportDiagnosticsButton" class="debug-action-btn debug-action-btn--secondary" type="button">Export Full Diagnostics</button>
+          </div>
+          <p class="debug-body-note">Collapsed mode stays lightweight. The default copy is the AI packet, while JSON and full diagnostics are on-demand.</p>
           <div class="spectrum-Textfield spectrum-Textfield--sizeM spectrum-Textfield--multiline is-readOnly debug-field">
             <textarea id="logOutput" class="spectrum-Textfield-input debug-field-input" readonly spellcheck="false"></textarea>
           </div>

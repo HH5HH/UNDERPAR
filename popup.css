@@ -1301,8 +1301,70 @@ body[aria-busy="true"] .auth-btn::before {
 }
 
 .debug-body {
+  display: grid;
+  gap: 12px;
   min-height: 0;
   overflow: hidden;
+}
+
+.debug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.debug-action-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 241, 204, 0.22);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 245, 214, 0.16), rgba(255, 245, 214, 0.06)),
+    rgba(12, 15, 20, 0.88);
+  color: rgba(255, 245, 214, 0.96);
+  font: 700 11px/1.2 "Adobe Clean", "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.debug-action-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 241, 204, 0.38);
+  background:
+    linear-gradient(180deg, rgba(255, 245, 214, 0.22), rgba(255, 245, 214, 0.08)),
+    rgba(16, 20, 27, 0.94);
+}
+
+.debug-action-btn:focus-visible {
+  outline: 2px solid rgba(255, 236, 184, 0.92);
+  outline-offset: 3px;
+}
+
+.debug-action-btn--secondary {
+  color: rgba(224, 232, 244, 0.92);
+  border-color: rgba(176, 196, 222, 0.2);
+  background:
+    linear-gradient(180deg, rgba(176, 196, 222, 0.12), rgba(176, 196, 222, 0.05)),
+    rgba(12, 15, 20, 0.88);
+}
+
+.debug-action-btn--secondary:hover {
+  border-color: rgba(176, 196, 222, 0.34);
+  background:
+    linear-gradient(180deg, rgba(176, 196, 222, 0.18), rgba(176, 196, 222, 0.06)),
+    rgba(16, 20, 27, 0.94);
+}
+
+.debug-body-note {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.72);
+  font: 12px/1.45 "Adobe Clean", "Segoe UI", sans-serif;
 }
 
 .debug-field {
