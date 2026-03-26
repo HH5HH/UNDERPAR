@@ -309,6 +309,7 @@ function loadRestV2LearningActivationEvaluator(seed = {}) {
   const script = [
     "function buildRestV2InteractiveDocsContext(programmer, entry) { return (globalThis.__seed.contextByEntryKey && globalThis.__seed.contextByEntryKey[String(entry?.key || '')]) || globalThis.__seed.context || { ok: false, error: 'missing-context' }; }",
     "function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = '') { return typeof globalThis.__seed.planBuilder === 'function' ? globalThis.__seed.planBuilder(entry, context, accessToken) : { missingRequiredFields: [], notes: [] }; }",
+    "function hydrateRestV2ContextFromPartnerSsoOverride(context = null) { if (typeof globalThis.__seed.hydratePartnerOverride === 'function') { return globalThis.__seed.hydratePartnerOverride(context); } return context; }",
     extractFunctionSource(source, "summarizeRestV2InteractiveDocsActivationLockReason"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsEntryActivationState"),
     "module.exports = { buildRestV2InteractiveDocsEntryActivationState };",
@@ -406,6 +407,7 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-visitor-identifier') { return String(context?.visitorIdentifier || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); } return ''; }",
     "function isRestV2PartnerFrameworkStatusUsable(value = '') { return typeof globalThis.__seed.isFrameworkStatusUsable === 'function' ? globalThis.__seed.isFrameworkStatusUsable(value) : Boolean(String(value || '').trim()); }",
     "function hydrateRestV2ContextFromPreparedLoginEntry(context = null) { if (typeof globalThis.__seed.hydratePreparedContext === 'function') { return globalThis.__seed.hydratePreparedContext(context); } return context; }",
+    "function hydrateRestV2ContextFromPartnerSsoOverride(context = null) { if (typeof globalThis.__seed.hydratePartnerOverride === 'function') { return globalThis.__seed.hydratePartnerOverride(context); } return context; }",
     "function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydratePartnerContext === 'function') { return globalThis.__seed.hydratePartnerContext(context, flow); } return context; }",
     "function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flow = null) { if (typeof globalThis.__seed.hydrateLearningPartnerContext === 'function') { return globalThis.__seed.hydrateLearningPartnerContext(context, flow); } return context; }",
     "async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = null, options = {}) { if (typeof globalThis.__seed.hydratePartnerPlatformMapping === 'function') { return globalThis.__seed.hydratePartnerPlatformMapping(context, options); } return context; }",
@@ -3024,4 +3026,15 @@ test("premium service sections and HR service pills keep their theme class wirin
   assert.match(popupSource, /restV2:\s*"service-rest-v2"/);
   assert.match(popupSource, /premium-service-section \$\{PREMIUM_SERVICE_THEME_CLASS_BY_KEY\[serviceKey\] \|\| ""\}/);
   assert.match(popupSource, /hr-context-service-pill--\$\{themeClass\}/);
+});
+
+test("REST V2 login tool includes Partner SSO raw JSON and SAML controls", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const createPremiumServiceSectionSource = extractFunctionSource(popupSource, "createPremiumServiceSection");
+
+  assert.match(createPremiumServiceSectionSource, /Partner Framework Status \(JSON\)/);
+  assert.match(createPremiumServiceSectionSource, /rest-v2-partner-status-json-input/);
+  assert.match(createPremiumServiceSectionSource, /rest-v2-partner-saml-input/);
+  assert.match(createPremiumServiceSectionSource, /rest-v2-partner-status-copy-current-btn/);
+  assert.match(createPremiumServiceSectionSource, /rest-v2-partner-sso-clear-btn/);
 });
