@@ -268,8 +268,13 @@ test("registered application download filenames honor the Adobe console content-
 });
 
 test("registered application health records surface decoded software statements and requestor matches", () => {
-  const helpers = loadPopupFunctions(["buildRegisteredApplicationHealthAppRecord"], {
+  const helpers = loadPopupFunctions(["normalizeRegisteredApplicationRequestorHintToken", "buildRegisteredApplicationHealthAppRecord"], {
     normalizeRegisteredApplicationRuntimeRecord: (value) => value,
+    extractEntityIdFromToken: (value = "") => {
+      const normalized = String(value || "").trim();
+      const match = normalized.match(/^@[^:]+:(.+)$/i);
+      return match ? String(match[1] || "").trim() : normalized;
+    },
     firstNonEmptyString,
     extractSoftwareStatementFromAppData: (appData = {}) => String(appData.softwareStatement || "").trim(),
     sanitizePassVaultHintList: (...values) =>
@@ -313,11 +318,69 @@ test("registered application health records surface decoded software statements 
   assert.equal(record.selectedRequestorMatch, true);
 });
 
-test("registered application health report payload prioritizes selected requestor matches and warnings", () => {
+test("registered application health matches selected requestor ids against raw @ServiceProvider requestor hints", () => {
   const helpers = loadPopupFunctions(
-    ["buildRegisteredApplicationHealthAppRecord", "buildRegisteredApplicationHealthReportPayload"],
+    ["normalizeRegisteredApplicationRequestorHintToken", "buildRegisteredApplicationHealthAppRecord"],
     {
       normalizeRegisteredApplicationRuntimeRecord: (value) => value,
+      extractEntityIdFromToken: (value = "") => {
+        const normalized = String(value || "").trim();
+        const match = normalized.match(/^@[^:]+:(.+)$/i);
+        return match ? String(match[1] || "").trim() : normalized;
+      },
+      firstNonEmptyString,
+      extractSoftwareStatementFromAppData: (appData = {}) => String(appData.softwareStatement || "").trim(),
+      sanitizePassVaultHintList: (...values) =>
+        uniquePreserveOrder(values.flatMap((value) => (Array.isArray(value) ? value : [value]))),
+      sanitizePassVaultHintValue: (...values) => firstNonEmptyString(values),
+      collectPassVaultServiceProviderHintsFromAppData: () => [],
+      extractPassVaultPrimaryRequestorHintFromAppData: () => "",
+      uniqueSorted,
+      getScopesFromApplication: (value = {}) => (Array.isArray(value.scopes) ? value.scopes : []),
+      buildRegisteredApplicationScopeLabels: (scopes = []) =>
+        uniqueSorted(scopes).map((scope) => String(scope || "").trim().toUpperCase()),
+      parseJwtPayload: (token = "") => (String(token).startsWith("header.") ? { iss: "adobe-pass" } : null),
+    }
+  );
+
+  assert.equal(
+    helpers.normalizeRegisteredApplicationRequestorHintToken("@ServiceProvider:AdultSwim"),
+    "adultswim"
+  );
+
+  const record = normalizeRealmObject(
+    helpers.buildRegisteredApplicationHealthAppRecord(
+      {
+        guid: "adultswim-app",
+        name: "Adult Swim REST V2",
+        requestor: "@ServiceProvider:AdultSwim",
+        serviceProviders: ["@ServiceProvider:AdultSwim"],
+        appData: {
+          softwareStatement: "header.payload.signature",
+        },
+      },
+      { requestorId: "AdultSwim" }
+    )
+  );
+
+  assert.equal(record.requestorHint, "@ServiceProvider:AdultSwim");
+  assert.equal(record.selectedRequestorMatch, true);
+});
+
+test("registered application health report payload prioritizes selected requestor matches and warnings", () => {
+  const helpers = loadPopupFunctions(
+    [
+      "normalizeRegisteredApplicationRequestorHintToken",
+      "buildRegisteredApplicationHealthAppRecord",
+      "buildRegisteredApplicationHealthReportPayload",
+    ],
+    {
+      normalizeRegisteredApplicationRuntimeRecord: (value) => value,
+      extractEntityIdFromToken: (value = "") => {
+        const normalized = String(value || "").trim();
+        const match = normalized.match(/^@[^:]+:(.+)$/i);
+        return match ? String(match[1] || "").trim() : normalized;
+      },
       firstNonEmptyString,
       extractSoftwareStatementFromAppData: (appData = {}) => String(appData.softwareStatement || "").trim(),
       sanitizePassVaultHintList: (...values) =>
@@ -559,6 +622,38 @@ test("registered application workspace filters visible cards to the selected req
   assert.deepEqual(
     visibleEntries.map((entry) => entry.app.guid),
     ["mml-app", "service-provider-only"]
+  );
+});
+
+test("registered application workspace filter honors raw @ServiceProvider requestor hints", () => {
+  const { filterApplicationsForSelectedRequestor } = loadWorkspaceRequestorFilterFunctions({
+    requestorId: "AdultSwim",
+  });
+
+  const visibleEntries = normalizeRealmObject(
+    filterApplicationsForSelectedRequestor([
+      {
+        selectedRequestorMatch: false,
+        app: {
+          guid: "adultswim-app",
+          requestorHint: "@ServiceProvider:AdultSwim",
+          serviceProviderHints: [],
+        },
+      },
+      {
+        selectedRequestorMatch: false,
+        app: {
+          guid: "other-app",
+          requestorHint: "@ServiceProvider:Turner",
+          serviceProviderHints: [],
+        },
+      },
+    ])
+  );
+
+  assert.deepEqual(
+    visibleEntries.map((entry) => entry.app.guid),
+    ["adultswim-app"]
   );
 });
 

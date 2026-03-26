@@ -22386,6 +22386,16 @@ function buildRegisteredApplicationHealthStatusMessage(queryContext = null) {
   return [programmerId, requestorId ? `Requestor ${requestorId}` : "", environmentLabel].filter(Boolean).join(" | ");
 }
 
+function normalizeRegisteredApplicationRequestorHintToken(value = "") {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return String(extractEntityIdFromToken(normalized) || normalized)
+    .trim()
+    .toLowerCase();
+}
+
 function buildRegisteredApplicationHealthAppRecord(appInfo = null, queryContext = null, options = {}) {
   const normalizedApp =
     normalizeRegisteredApplicationRuntimeRecord(appInfo) ||
@@ -22448,7 +22458,7 @@ function buildRegisteredApplicationHealthAppRecord(appInfo = null, queryContext 
   const selectedRequestorMatch =
     Boolean(selectedRequestorId) &&
     [requestorHint, ...serviceProviderHints].some(
-      (value) => String(value || "").trim().toLowerCase() === selectedRequestorId.toLowerCase()
+      (value) => normalizeRegisteredApplicationRequestorHintToken(value) === selectedRequestorId.toLowerCase()
     );
   const hydrationError = firstNonEmptyString([
     options?.hydrationErrorsByGuid?.[guid],

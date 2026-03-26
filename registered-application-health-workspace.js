@@ -542,7 +542,15 @@ function appMatchesSelectedRequestor(app = null) {
     return false;
   }
   const hints = uniqueStringArray([app?.requestorHint, ...(Array.isArray(app?.serviceProviderHints) ? app.serviceProviderHints : [])]);
-  return hints.some((value) => String(value || "").trim().toLowerCase() === selectedRequestorId);
+  return hints.some((value) => {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return false;
+    }
+    const tokenMatch = normalizedValue.match(/^@[^:]+:(.+)$/i);
+    const comparableValue = String(tokenMatch ? tokenMatch[1] : normalizedValue).trim().toLowerCase();
+    return comparableValue === selectedRequestorId;
+  });
 }
 
 function decorateApplication(app = null, index = 0) {
@@ -577,7 +585,15 @@ function filterApplicationsForSelectedRequestor(applications = []) {
       app.requestorHint,
       ...(Array.isArray(app.serviceProviderHints) ? app.serviceProviderHints : []),
     ]);
-    return hints.some((value) => String(value || "").trim().toLowerCase() === selectedRequestorId);
+    return hints.some((value) => {
+      const normalizedValue = String(value || "").trim();
+      if (!normalizedValue) {
+        return false;
+      }
+      const tokenMatch = normalizedValue.match(/^@[^:]+:(.+)$/i);
+      const comparableValue = String(tokenMatch ? tokenMatch[1] : normalizedValue).trim().toLowerCase();
+      return comparableValue === selectedRequestorId;
+    });
   });
 }
 
