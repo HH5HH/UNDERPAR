@@ -36,7 +36,6 @@ const state = {
 const els = {
   controllerState: document.getElementById("workspace-controller-state"),
   filterState: document.getElementById("workspace-filter-state"),
-  premiumServiceSummary: document.getElementById("workspace-premium-service-summary"),
   status: document.getElementById("workspace-status"),
   rerunIndicator: document.getElementById("workspace-rerun-indicator"),
   rerunAllButton: document.getElementById("workspace-rerun-all"),
@@ -406,56 +405,6 @@ function getPendingPremiumServiceSwitch() {
   return pending;
 }
 
-function setPendingPremiumServiceSwitch(serviceKey = "", guid = "") {
-  const normalizedServiceKey = String(serviceKey || "").trim();
-  const normalizedGuid = String(guid || "").trim();
-  const currentBinding = getCurrentBindingForService(normalizedServiceKey);
-  state.pendingPremiumServiceSwitch =
-    normalizedServiceKey &&
-    normalizedGuid &&
-    currentBinding &&
-    String(currentBinding.appGuid || "").trim() !== normalizedGuid
-      ? { serviceKey: normalizedServiceKey, appGuid: normalizedGuid }
-      : null;
-  renderPremiumServiceSummary();
-}
-
-function renderPremiumServiceSummary() {
-  if (!els.premiumServiceSummary) {
-    return;
-  }
-  const bindings = getCurrentPremiumServiceBindings();
-  if (!state.programmerId) {
-    els.premiumServiceSummary.innerHTML =
-      '<p class="regapp-health-service-summary-note">Select an ENV x Media Company in HEALTH > Status and click REG APPS.</p>';
-    return;
-  }
-  if (bindings.length === 0) {
-    els.premiumServiceSummary.innerHTML =
-      '<p class="regapp-health-service-summary-note">No DCR-gated Premium Services are currently detected for this ENV x Media Company.</p>';
-    return;
-  }
-  els.premiumServiceSummary.innerHTML = `
-    <div class="regapp-health-service-summary">
-      <p class="regapp-health-service-summary-note">Detected Premium Services</p>
-      <div class="regapp-health-service-line">
-        ${bindings
-          .map((binding) => {
-            return `
-              <span class="regapp-health-service-item" data-premium-service-block="${escapeHtml(binding.serviceKey)}">
-                ${buildServicePillMarkup(binding.label, { serviceKey: binding.serviceKey })}
-                <span class="regapp-health-service-using">using:</span>
-                <span class="regapp-health-service-app">${escapeHtml(firstNonEmptyString([binding.appName, binding.appGuid]))}</span>
-              </span>
-            `;
-          })
-          .join("")}
-      </div>
-      <p class="regapp-health-service-summary-note">Switch active Registered Applications from the UnderPAR DevTools tab.</p>
-    </div>
-  `;
-}
-
 function updateControllerBanner() {
   if (els.controllerState) {
     els.controllerState.textContent = `Registered Application Health Inspector | ${getProgrammerLabel()}`;
@@ -464,7 +413,6 @@ function updateControllerBanner() {
     els.filterState.textContent = getFilterLabel();
   }
   renderWorkspaceEnvironmentBadge();
-  renderPremiumServiceSummary();
   syncActionButtonsDisabled();
 }
 
@@ -1177,7 +1125,6 @@ function renderReport() {
   if (!els.cardsHost) {
     return;
   }
-  renderPremiumServiceSummary();
   if (!state.report) {
     let emptyMessage = "No Registered Application Health Inspector report loaded yet.";
     if (state.loading && state.programmerId) {

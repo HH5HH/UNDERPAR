@@ -851,12 +851,11 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(workspaceHtml, /JWT Inspector/);
   assert.match(workspaceHtml, /Paste any JWT, bearer value, or JSON body containing a JWT/);
   assert.match(workspaceHtml, /Registered Application Health Inspector/);
-  assert.match(workspaceHtml, /workspace-premium-service-summary/);
+  assert.doesNotMatch(workspaceHtml, /workspace-premium-service-summary/);
   assert.match(workspaceHtml, /underpar-jwt-inspector\.js/);
   assert.match(workspaceHtml, /id="workspace-cards"[\s\S]*regapp-jwt-utility-card/);
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
   assert.match(workspaceJs, /data-software-statement-download-guid/);
-  assert.match(workspaceJs, /renderPremiumServiceSummary\(\);/);
   assert.match(workspaceJs, /regapp-up-indicator/);
   assert.match(workspaceJs, /service-default/);
   assert.match(workspaceJs, /sendWorkspaceAction\("hydrate-application"/);
@@ -878,7 +877,8 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.doesNotMatch(workspaceJs, /Application Matrix/);
   assert.doesNotMatch(workspaceJs, /buildMetricCardsMarkup/);
   assert.doesNotMatch(workspaceJs, /renderMatrixTable/);
-  assert.match(workspaceJs, /Switch active Registered Applications from the UnderPAR DevTools tab\./);
+  assert.doesNotMatch(workspaceJs, /Detected Premium Services/);
+  assert.doesNotMatch(workspaceJs, /Switch active Registered Applications from the UnderPAR DevTools tab\./);
   assert.match(workspaceJs, /const disableRerun = state\.loading \|\| serviceSwitchBusy \|\| !canRunCurrentContextReport\(\);/);
   assert.match(workspaceJs, /if \(controllerChanged \|\| requestorChanged \|\| shouldClearStaleReport \|\| premiumServiceChanged\) \{\s*renderReport\(\);/);
   assert.match(workspaceJs, /const action = hasRenderableReport\(\) && preferRefresh \? "refresh-latest" : "run-dashboard";/);
@@ -887,7 +887,7 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(popupSource, /if \(action === "switch-premium-service-application"\)/);
   assert.match(popupSource, /switchRegisteredApplicationHealthPremiumService\(/);
   assert.match(workspaceCss, /\.regapp-service-pill--service-default/);
-  assert.match(workspaceCss, /\.regapp-health-service-line/);
+  assert.doesNotMatch(workspaceCss, /\.regapp-health-service-line/);
   assert.doesNotMatch(extractFunctionSource(popupSource, "fetchRegisteredApplicationHealthDashboardReport"), /enrichRegisteredApplicationForHydration/);
   assert.doesNotMatch(
     extractFunctionSource(popupSource, "runRegisteredApplicationHealthDashboardForSelection"),

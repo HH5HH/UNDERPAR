@@ -895,6 +895,14 @@ function broadcastUnderparControllerStatus() {
   }
 }
 
+function requestUnderparControllerStatusRefresh() {
+  for (const port of controllerBridgeState.sidepanelStateByPort.keys()) {
+    postToPortSafe(port, {
+      type: "request-session-state",
+    });
+  }
+}
+
 function buildUnderparNetworkActivitySnapshot() {
   const count = Math.max(0, Number(controllerBridgeState.networkActivityCount || 0));
   return {
@@ -4539,6 +4547,7 @@ chrome.runtime.onConnect.addListener((port) => {
       type: "controller-status",
       status: buildUnderparControllerStatusSnapshot(),
     });
+    requestUnderparControllerStatusRefresh();
 
     const onDisconnect = () => {
       consumeRuntimeLastError();

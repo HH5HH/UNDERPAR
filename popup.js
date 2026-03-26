@@ -11114,7 +11114,14 @@ function ensureSidepanelControllerPort() {
   try {
     const port = chrome.runtime.connect({ name: UNDERPAR_SIDEPANEL_SESSION_PORT_NAME });
     port.onMessage.addListener((message) => {
-      if (!message || typeof message !== "object" || message.type !== "network-activity") {
+      if (!message || typeof message !== "object") {
+        return;
+      }
+      if (message.type === "request-session-state") {
+        void syncSidepanelControllerBridge(true);
+        return;
+      }
+      if (message.type !== "network-activity") {
         return;
       }
       state.remoteNetworkActivityCount = Math.max(0, Number(message?.activity?.count || 0));

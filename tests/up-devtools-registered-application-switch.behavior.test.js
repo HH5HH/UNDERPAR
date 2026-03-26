@@ -29,6 +29,8 @@ test("UP DevTools owns the registered application switch UI and reuses the exist
   assert.match(devtoolsJs, /normalizeControlPanelPremiumServiceBindings/);
   assert.match(devtoolsJs, /normalizeControlPanelPremiumServiceOptions/);
   assert.match(devtoolsJs, /DEVTOOLS_PREMIUM_SERVICE_LABEL_BY_KEY/);
+  assert.match(devtoolsJs, /connectControllerStatusPort\(\);/);
+  assert.match(devtoolsJs, /renderRegisteredApplicationsControlPanel\(panelState\.controllerStatusSnapshot \|\| null\)/);
 
   assert.match(devtoolsCss, /\.settings-grid/);
   assert.match(devtoolsCss, /\.settings-card--registered-apps/);
@@ -40,7 +42,11 @@ test("UP DevTools owns the registered application switch UI and reuses the exist
   assert.match(popupSource, /premiumServiceOptions:\s*premiumServiceSwitchState\.premiumServiceOptions/);
   assert.match(popupSource, /requestSource:\s*"up-devtools-switch"/);
   assert.match(popupSource, /if \(action === "switch-premium-service-application"\)/);
+  assert.match(popupSource, /message\.type === "request-session-state"/);
+  assert.match(popupSource, /void syncSidepanelControllerBridge\(true\)/);
 
   assert.match(backgroundSource, /premiumServiceBindings:\s*Array\.isArray\(preferredState\?\.premiumServiceBindings\)/);
   assert.match(backgroundSource, /premiumServiceOptions:/);
+  assert.match(backgroundSource, /function requestUnderparControllerStatusRefresh\(\)/);
+  assert.match(backgroundSource, /type: "request-session-state"/);
 });
