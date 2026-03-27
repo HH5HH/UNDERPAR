@@ -328,12 +328,17 @@ function loadRestV2LearningEntryOpener(seed = {}) {
   const source = fs.readFileSync(filePath, "utf8");
   const script = [
     'const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = { restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/" };',
+    "const state = globalThis.__seed.state || { selectedRequestorId: '', selectedMvpdId: '' };",
     "const __calls = globalThis.__seed.calls;",
     "const __statuses = globalThis.__seed.statuses;",
+    "const __learningStates = globalThis.__seed.learningStates || [];",
     "function setStatus(message, type) { __statuses.push({ message: String(message || ''), type: String(type || '') }); }",
+    "function setRestV2LearningUiState(value = null, options = {}) { __learningStates.push({ value, options }); return value; }",
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
     "function getRestV2InteractiveDocsEntry() { return globalThis.__seed.entry; }",
     "function resolveSelectedProgrammer() { return globalThis.__seed.programmer || null; }",
     "function buildRestV2InteractiveDocsContext() { return globalThis.__seed.context; }",
+    "function getRestV2MvpdMeta(requestorId = '', mvpdId = '') { return typeof globalThis.__seed.resolveMvpdMeta === 'function' ? globalThis.__seed.resolveMvpdMeta(requestorId, mvpdId) : null; }",
     "async function openPremiumServiceDocumentation(serviceKey, url) { __calls.push({ serviceKey, url }); return { ok: true, tabId: 7, windowId: 9, url }; }",
     extractFunctionSource(source, "buildRestV2InteractiveDocsUrl"),
     extractFunctionSource(source, "openRestV2InteractiveDocsEntry"),
@@ -619,11 +624,15 @@ function loadRestV2LearningCollapseHelpers(seed = {}) {
     "function getActiveAdobePassEnvironmentKey() { return globalThis.__seed.environmentKey || DEFAULT_ADOBEPASS_ENVIRONMENT.key; }",
     "function getEnvironmentScopedProgrammerKey(programmerId, environmentKey) { return `${String(environmentKey || '').trim()}|${String(programmerId || '').trim()}`; }",
     extractFunctionSource(source, "getPremiumCollapseKey"),
+    extractFunctionSource(source, "getPremiumSectionCollapsed"),
     extractFunctionSource(source, "setPremiumSectionCollapsed"),
+    extractFunctionSource(source, "getRestV2LearningServiceCollapseKey"),
+    extractFunctionSource(source, "getRestV2LearningServiceCollapsed"),
+    extractFunctionSource(source, "setRestV2LearningServiceCollapsed"),
     extractFunctionSource(source, "getRestV2InteractiveDocsSectionCollapseKey"),
     extractFunctionSource(source, "getRestV2InteractiveDocsSectionCollapsed"),
     extractFunctionSource(source, "setRestV2InteractiveDocsSectionCollapsed"),
-    "module.exports = { getRestV2InteractiveDocsSectionCollapsed, setRestV2InteractiveDocsSectionCollapsed };",
+    "module.exports = { getRestV2LearningServiceCollapsed, setRestV2LearningServiceCollapsed, getRestV2InteractiveDocsSectionCollapsed, setRestV2InteractiveDocsSectionCollapsed };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
@@ -777,6 +786,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
   const buildRestV2InteractiveDocsContextSource = extractFunctionSource(popupSource, "buildRestV2InteractiveDocsContext");
+  const buildHrContextSectionBodyHtmlSource = extractFunctionSource(popupSource, "buildHrContextSectionBodyHtml");
   const buildRestV2InteractiveDocsEntryActivationStateSource = extractFunctionSource(
     popupSource,
     "buildRestV2InteractiveDocsEntryActivationState"
@@ -784,6 +794,18 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   const buildRestV2InteractiveDocsSectionHtmlSource = extractFunctionSource(
     popupSource,
     "buildRestV2InteractiveDocsSectionHtml"
+  );
+  const buildRestV2InteractiveDocsPanelHtmlSource = extractFunctionSource(
+    popupSource,
+    "buildRestV2InteractiveDocsPanelHtml"
+  );
+  const buildRestV2LearningContextItemHtmlSource = extractFunctionSource(
+    popupSource,
+    "buildRestV2LearningContextItemHtml"
+  );
+  const wireRestV2LearningContainerCollapsiblesSource = extractFunctionSource(
+    popupSource,
+    "wireRestV2LearningContainerCollapsibles"
   );
   const wireRestV2InteractiveDocsSectionCollapsiblesSource = extractFunctionSource(
     popupSource,
@@ -833,6 +855,10 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2AppForServiceProvider/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2LearningRequestorDomainName/);
   assert.match(buildRestV2InteractiveDocsContextSource, /buildRestV2InteractiveDocsUrl\(resolvedEntry\.operationAnchor/);
+  assert.match(
+    buildHrContextSectionBodyHtmlSource,
+    /\$\{buildHrServiceListHtml\(detectedServiceEntries, fallbackSummary\)\}\s*\$\{contextItemHtml\}\s*\$\{restV2DocsPanelHtml\}/
+  );
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /mvpdWorkspaceEnsureSnapshot/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /bobtoolsWorkspaceResolveQuickResourceOptions/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /resourceIdPoolSource:\s*"console-tms-map"/);
@@ -846,8 +872,20 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /hr-rest-v2-doc-section-status/);
   assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /service-box-container hr-rest-v2-doc-section-shell/);
   assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /getRestV2InteractiveDocsSectionCollapsed/);
+  assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /data-restv2-doc-active/);
+  assert.match(buildRestV2InteractiveDocsSectionHtmlSource, /hr-rest-v2-doc-entry-state-badge--active/);
   assert.doesNotMatch(buildRestV2InteractiveDocsSectionHtmlSource, /hr-rest-v2-doc-section-link/);
   assert.doesNotMatch(buildRestV2InteractiveDocsSectionHtmlSource, /\$\{isReady \? "" : "disabled"\}/);
+  assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /data-restv2-learning-service-key="restV2"/);
+  assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /metadata-header service-box-header hr-rest-v2-docs-toggle/);
+  assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /service-box-container hr-rest-v2-docs-shell-body/);
+  assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /hr-context-service-pill hr-context-service-pill--service-rest-v2 hr-rest-v2-docs-pill/);
+  assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /getRestV2LearningServiceCollapsed/);
+  assert.match(buildRestV2LearningContextItemHtmlSource, /fieldValues/);
+  assert.match(buildRestV2LearningContextItemHtmlSource, /hr-learning-context-field-grid/);
+  assert.match(buildRestV2LearningContextItemHtmlSource, /hr-learning-context-status-badge/);
+  assert.match(wireRestV2LearningContainerCollapsiblesSource, /wireCollapsibleSection/);
+  assert.match(wireRestV2LearningContainerCollapsiblesSource, /setRestV2LearningServiceCollapsed/);
   assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /wireCollapsibleSection/);
   assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /setRestV2InteractiveDocsSectionCollapsed/);
   assert.match(collectRestV2LearningResourceIdsSource, /getRestV2ProfilePreauthzChecks\(harvest\)/);
@@ -871,7 +909,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(resolveRestV2LearningRequestorContextSource, /candidates\.length === 1/);
   assert.doesNotMatch(resolveRestV2LearningRequestorContextSource, /requestorId:\s*programmerId/);
   assert.match(popupSource, /data-restv2-doc-entry-key/);
-  assert.match(popupSource, /REST API V2 Interactive Docs/);
+  assert.match(popupSource, /REST V2 learning methods/);
+  assert.match(popupSource, /Click any REST V2 LEARNING deeplink to preview the exact interactive docs payload here/);
   assert.match(popupSource, /getRestV2InteractiveDocsSections/);
   assert.match(
     popupSource,
@@ -882,7 +921,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(openRestV2InteractiveDocsEntrySource, /prepareRestV2InteractiveDocsContextForEntry/);
   assert.match(openRestV2InteractiveDocsEntrySource, /buildRestV2InteractiveDocsContext\(resolveSelectedProgrammer\(\), entry\)/);
   assert.match(openRestV2InteractiveDocsEntrySource, /entry\.requiresAccessToken !== false/);
-  assert.match(openRestV2InteractiveDocsEntrySource, /const openPartialDocs = async \(message, type = "info"\) => \{/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /const openPartialDocs = async \(message, type = "info", payload = \{\}\) => \{/);
+  assert.match(openRestV2InteractiveDocsEntrySource, /setRestV2LearningUiState/);
   assert.match(openRestV2InteractiveDocsEntrySource, /Opened \$\{entry\.label\} docs without full UnderPAR context\./);
   assert.match(openRestV2InteractiveDocsEntrySource, /openPremiumServiceDocumentation\("restV2"/);
   assert.match(openRestV2InteractiveDocsEntrySource, /waitForTabCompletion/);
@@ -898,8 +938,17 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(runRestV2InteractiveDocsHydratorSource, /normalizedFieldName === "body\.resources"/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /console-request-body/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /textarea/);
+  assert.match(popupCss, /\.hr-learning-context-card/);
+  assert.match(popupCss, /\.hr-learning-context-field-grid/);
+  assert.match(popupCss, /\.hr-learning-context-status-badge--active/);
+  assert.match(popupCss, /\.hr-rest-v2-docs-shell/);
+  assert.match(popupCss, /\.hr-rest-v2-docs-toggle/);
+  assert.match(popupCss, /\.hr-rest-v2-docs-shell-body/);
+  assert.match(popupCss, /\.hr-rest-v2-docs-pill/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-entry\.is-active/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry-readiness/);
+  assert.match(popupCss, /\.hr-rest-v2-doc-entry-state-badge--active/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry-state-badge--locked/);
   assert.match(popupCss, /\.hr-rest-v2-docs-grid/);
   assert.match(popupCss, /\.hr-rest-v2-doc-section/);
@@ -917,23 +966,34 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /Using \$\{selectedCount\} random resourceIds from the selected MVPD pool/);
 });
 
-test("REST V2 learning subsection collapse state defaults open and persists per section", () => {
-  const { getRestV2InteractiveDocsSectionCollapsed, setRestV2InteractiveDocsSectionCollapsed } =
+test("REST V2 learning containers default collapsed and persist per section", () => {
+  const {
+    getRestV2LearningServiceCollapsed,
+    setRestV2LearningServiceCollapsed,
+    getRestV2InteractiveDocsSectionCollapsed,
+    setRestV2InteractiveDocsSectionCollapsed,
+  } =
     loadRestV2LearningCollapseHelpers();
 
-  assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "configuration"), false);
+  assert.equal(getRestV2LearningServiceCollapsed("Turner", "restV2"), true);
+  setRestV2LearningServiceCollapsed("Turner", "restV2", false);
+  assert.equal(getRestV2LearningServiceCollapsed("Turner", "restV2"), false);
+  assert.equal(getRestV2LearningServiceCollapsed("Fox", "restV2"), false);
+  assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "configuration"), true);
   setRestV2InteractiveDocsSectionCollapsed("Turner", "configuration", true);
   assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "configuration"), true);
   assert.equal(getRestV2InteractiveDocsSectionCollapsed("Fox", "configuration"), true);
-  assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "sessions"), false);
+  assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "sessions"), true);
 });
 
 test("REST V2 learning entries still open the customer docs when requestor context is missing", async () => {
   const calls = [];
   const statuses = [];
+  const learningStates = [];
   const { openRestV2InteractiveDocsEntry } = loadRestV2LearningEntryOpener({
     calls,
     statuses,
+    learningStates,
     entry: {
       key: "configuration-service-provider",
       label: "Service Provider Configuration",
@@ -957,6 +1017,8 @@ test("REST V2 learning entries still open the customer docs when requestor conte
     "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/handleRequestUsingGET"
   );
   assert.equal(result.partial, true);
+  assert.equal(learningStates.length > 0, true);
+  assert.equal(String(learningStates[0]?.value?.entryKey || ""), "configuration-service-provider");
   assert.match(String(statuses[0]?.message || ""), /Opened Service Provider Configuration docs without full UnderPAR context\./);
   assert.match(String(statuses[0]?.message || ""), /Select a Content Provider first\./);
 });

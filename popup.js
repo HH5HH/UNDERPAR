@@ -12825,6 +12825,8 @@ const state = {
   cmTenantBundlePromiseByTenantKey: new Map(),
   cmUsageWarmStateByProgrammerId: new Map(),
   premiumSectionCollapsedByKey: new Map(),
+  restV2LearningUiState: null,
+  restV2LearningUiVersion: 0,
   premiumAutoRefreshMetaByKey: new Map(),
   premiumServiceReminderLogKeys: new Set(),
   premiumServiceDecisionSignatureByProgrammerKey: new Map(),
@@ -17021,6 +17023,18 @@ function setHrContextSectionCollapsed(programmerId, sectionKey, isCollapsed) {
   setPremiumSectionCollapsed(programmerId, getHrContextSectionCollapseKey(sectionKey), isCollapsed);
 }
 
+function getRestV2LearningServiceCollapseKey(serviceKey = "") {
+  return `rest-v2-learning-service:${String(serviceKey || "").trim()}`;
+}
+
+function getRestV2LearningServiceCollapsed(programmerId, serviceKey) {
+  return getPremiumSectionCollapsed(programmerId, getRestV2LearningServiceCollapseKey(serviceKey));
+}
+
+function setRestV2LearningServiceCollapsed(programmerId, serviceKey, isCollapsed) {
+  setPremiumSectionCollapsed(programmerId, getRestV2LearningServiceCollapseKey(serviceKey), isCollapsed);
+}
+
 function getRestV2InteractiveDocsSectionCollapseKey(sectionKey = "") {
   return `rest-v2-learning:${String(sectionKey || "").trim()}`;
 }
@@ -17035,11 +17049,74 @@ function getRestV2InteractiveDocsSectionCollapsed(programmerId, sectionKey) {
   if (state.premiumSectionCollapsedByKey.has(globalScopedKey)) {
     return Boolean(state.premiumSectionCollapsedByKey.get(globalScopedKey));
   }
-  return false;
+  return true;
 }
 
 function setRestV2InteractiveDocsSectionCollapsed(programmerId, sectionKey, isCollapsed) {
   setPremiumSectionCollapsed(programmerId, getRestV2InteractiveDocsSectionCollapseKey(sectionKey), isCollapsed);
+}
+
+function getRestV2LearningUiSelection(programmer = null) {
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer();
+  return {
+    programmerId: String(resolvedProgrammer?.programmerId || "").trim(),
+    requestorId: String(state.selectedRequestorId || "").trim(),
+    mvpd: String(state.selectedMvpdId || "").trim(),
+  };
+}
+
+function getActiveRestV2LearningUiState(programmer = null) {
+  const activeState = state.restV2LearningUiState && typeof state.restV2LearningUiState === "object" ? state.restV2LearningUiState : null;
+  if (!activeState) {
+    return null;
+  }
+  const activeProgrammerId = String(activeState?.programmerId || "").trim();
+  const activeRequestorId = String(firstNonEmptyString([activeState?.requestorId, activeState?.serviceProviderId]) || "").trim();
+  const activeMvpd = String(activeState?.mvpd || "").trim();
+  const currentSelection = getRestV2LearningUiSelection(programmer);
+  if (!activeProgrammerId || !currentSelection.programmerId || activeProgrammerId !== currentSelection.programmerId) {
+    return null;
+  }
+  if (currentSelection.requestorId && activeRequestorId && currentSelection.requestorId !== activeRequestorId) {
+    return null;
+  }
+  if (currentSelection.requestorId && !activeRequestorId) {
+    return null;
+  }
+  if (currentSelection.mvpd && activeMvpd && currentSelection.mvpd !== activeMvpd) {
+    return null;
+  }
+  if (currentSelection.mvpd && !activeMvpd) {
+    return null;
+  }
+  return activeState;
+}
+
+function refreshRestV2LearningUi(programmer = null, options = {}) {
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer();
+  const services = resolvedProgrammer?.programmerId ? getCurrentPremiumAppsSnapshot(resolvedProgrammer.programmerId) || null : null;
+  renderHrSections(services, resolvedProgrammer, options);
+}
+
+function setRestV2LearningUiState(nextState = null, options = {}) {
+  state.restV2LearningUiVersion = Number(state.restV2LearningUiVersion || 0) + 1;
+  if (!nextState || typeof nextState !== "object") {
+    state.restV2LearningUiState = null;
+  } else {
+    const snapshot = cloneJsonLikeValue(nextState, {}) || {};
+    snapshot.updatedAt = Date.now();
+    state.restV2LearningUiState = snapshot;
+  }
+  if (options?.render !== false) {
+    refreshRestV2LearningUi(resolveSelectedProgrammer(), {
+      controllerReason: String(options?.controllerReason || "rest-v2-learning-ui-state").trim() || "rest-v2-learning-ui-state",
+    });
+  }
+  return state.restV2LearningUiState;
+}
+
+function clearRestV2LearningUiState(options = {}) {
+  return setRestV2LearningUiState(null, options);
 }
 
 function applyCollapsibleState(toggleButton, containerElement, isCollapsed) {
@@ -65025,15 +65102,17 @@ function buildRestV2InteractiveDocsPanelSignature(programmer = null, services = 
   if (!programmerId || !services?.restV2) {
     return "";
   }
-  return getRestV2InteractiveDocsSections()
+  return [
+    ...getRestV2InteractiveDocsSections()
     .flatMap((section) =>
       section.entries.map((entry) => {
         const activationState = buildRestV2InteractiveDocsEntryActivationState(entry, programmer, services);
         const pendingFields = Array.isArray(activationState?.pendingFields) ? activationState.pendingFields.join(",") : "";
         return `${String(entry?.key || "").trim()}:${activationState?.ready === true ? "1" : "0"}:${pendingFields}`;
       })
-    )
-    .join("|");
+    ),
+    `learning-ui:${Number(state.restV2LearningUiVersion || 0)}`,
+  ].join("|");
 }
 
 function buildHrSectionsRenderSignature(programmer = null, services = null, options = {}) {
@@ -66624,6 +66703,225 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
   };
 }
 
+function formatRestV2LearningContextValue(value = "") {
+  if (Array.isArray(value)) {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return value.map((item) => String(item || "").trim()).filter(Boolean).join("\n");
+    }
+  }
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value || "").trim();
+    }
+  }
+  return String(value || "").trim();
+}
+
+function buildRestV2LearningUiStatusMeta(activeState = null) {
+  const phase = String(activeState?.phase || "").trim().toLowerCase();
+  if (phase === "error") {
+    return {
+      label: "ERROR",
+      theme: "error",
+    };
+  }
+  if (phase === "blocked") {
+    return {
+      label: "BLOCKED",
+      theme: "blocked",
+    };
+  }
+  if (phase === "partial" || phase === "setup-needed") {
+    return {
+      label: "SETUP NEEDED",
+      theme: "partial",
+    };
+  }
+  if (phase === "hydrated") {
+    return {
+      label: "HYDRATED",
+      theme: "active",
+    };
+  }
+  if (phase === "active" || phase === "preparing") {
+    return {
+      label: "ACTIVE",
+      theme: "active",
+    };
+  }
+  return {
+    label: "IDLE",
+    theme: "idle",
+  };
+}
+
+function buildRestV2LearningContextItemHtml(programmer = null) {
+  const activeState = getActiveRestV2LearningUiState(programmer);
+  const selectionRequestorId = String(state.selectedRequestorId || "").trim();
+  const selectionMvpdId = String(state.selectedMvpdId || "").trim();
+  const requestorId = String(firstNonEmptyString([activeState?.requestorId, activeState?.serviceProviderId, selectionRequestorId]) || "").trim();
+  const mvpdId = String(firstNonEmptyString([activeState?.mvpd, selectionMvpdId]) || "").trim();
+  const mvpdMeta = activeState?.mvpdMeta && typeof activeState.mvpdMeta === "object" ? activeState.mvpdMeta : null;
+  const selectionLabel =
+    requestorId && mvpdId
+      ? formatRestV2RequestorMvpdDisplay(requestorId, mvpdId, mvpdMeta, {
+          separator: " x ",
+        })
+      : requestorId
+        ? requestorId
+        : "No REST V2 learning action selected yet.";
+  if (!activeState) {
+    return `
+      <article class="metadata-item hr-learning-context-card">
+        <p class="metadata-key">Context</p>
+        <div class="metadata-value hr-learning-context-body">
+          <div class="hr-learning-context-summary">
+            <span class="hr-learning-context-summary-label">Selection</span>
+            <span class="hr-learning-context-summary-value">${escapeHtml(selectionLabel)}</span>
+          </div>
+          <p class="hr-learning-context-empty">Click any REST V2 LEARNING deeplink to preview the exact interactive docs payload here before UnderPAR hydrates the online Run form.</p>
+        </div>
+      </article>
+    `;
+  }
+
+  const plan = activeState?.plan && typeof activeState.plan === "object" ? activeState.plan : null;
+  const context = activeState?.context && typeof activeState.context === "object" ? activeState.context : null;
+  const fieldValues = plan?.fieldValues && typeof plan.fieldValues === "object" ? plan.fieldValues : {};
+  const requiredFields = Array.isArray(plan?.requiredFields) ? plan.requiredFields : [];
+  const missingRequiredFields = Array.isArray(plan?.missingRequiredFields) ? plan.missingRequiredFields : [];
+  const fieldNames = uniquePreserveOrder([
+    ...Object.keys(fieldValues),
+    ...requiredFields,
+    ...missingRequiredFields,
+  ]);
+  const statusMeta = buildRestV2LearningUiStatusMeta(activeState);
+  const stateMessage = String(
+    firstNonEmptyString([
+      activeState?.statusMessage,
+      activeState?.reason,
+      Array.isArray(plan?.notes) ? plan.notes.find((note) => String(note || "").trim()) : "",
+    ]) || ""
+  ).trim();
+  const entryLabel = String(firstNonEmptyString([activeState?.entryLabel, activeState?.entryKey]) || "").trim() || "REST V2 action";
+  const operationId = String(firstNonEmptyString([plan?.operationId, activeState?.operationId]) || "").trim();
+  const operationSummary = String(firstNonEmptyString([plan?.operationSummary, activeState?.operationSummary]) || "").trim();
+  const docsUrl = String(firstNonEmptyString([plan?.docsUrl, activeState?.docsUrl]) || "").trim();
+  const fieldRowsHtml =
+    fieldNames.length > 0
+      ? fieldNames
+          .map((fieldName) => {
+            const normalizedFieldName = String(fieldName || "").trim();
+            const hasValue = Object.prototype.hasOwnProperty.call(fieldValues, normalizedFieldName);
+            const isRequired = requiredFields.includes(normalizedFieldName);
+            const isMissing = missingRequiredFields.includes(normalizedFieldName) || !hasValue;
+            const rawValue = hasValue ? fieldValues[normalizedFieldName] : "Pending";
+            const valueText = formatRestV2LearningContextValue(rawValue) || "Pending";
+            return `
+              <article class="hr-learning-context-field${isMissing ? " is-missing" : ""}">
+                <div class="hr-learning-context-field-head">
+                  <span class="hr-learning-context-field-name">${escapeHtml(normalizedFieldName)}</span>
+                  <span class="hr-learning-context-field-badges">
+                    ${isRequired ? '<span class="hr-learning-context-field-badge hr-learning-context-field-badge--required">Required</span>' : ""}
+                    ${isMissing ? '<span class="hr-learning-context-field-badge hr-learning-context-field-badge--pending">Pending</span>' : '<span class="hr-learning-context-field-badge hr-learning-context-field-badge--ready">Hydrated</span>'}
+                  </span>
+                </div>
+                <pre class="hr-learning-context-field-value">${escapeHtml(valueText)}</pre>
+              </article>
+            `;
+          })
+          .join("")
+      : `
+          <article class="hr-learning-context-field is-missing">
+            <div class="hr-learning-context-field-head">
+              <span class="hr-learning-context-field-name">UnderPAR</span>
+              <span class="hr-learning-context-field-badges">
+                <span class="hr-learning-context-field-badge hr-learning-context-field-badge--pending">Pending</span>
+              </span>
+            </div>
+            <pre class="hr-learning-context-field-value">${escapeHtml(stateMessage || "No REST V2 hydration plan is available for this action yet.")}</pre>
+          </article>
+        `;
+  const notesHtml =
+    Array.isArray(plan?.notes) && plan.notes.length > 0
+      ? `
+        <div class="hr-learning-context-notes">
+          ${plan.notes
+            .map((note) => String(note || "").trim())
+            .filter(Boolean)
+            .map((note) => `<p class="hr-learning-context-note">${escapeHtml(note)}</p>`)
+            .join("")}
+        </div>
+      `
+      : "";
+
+  return `
+    <article class="metadata-item hr-learning-context-card">
+      <p class="metadata-key">Context</p>
+      <div class="metadata-value hr-learning-context-body">
+        <div class="hr-learning-context-summary-grid">
+          <div class="hr-learning-context-summary">
+            <span class="hr-learning-context-summary-label">Action</span>
+            <span class="hr-learning-context-summary-value">${escapeHtml(entryLabel)}</span>
+          </div>
+          <div class="hr-learning-context-summary">
+            <span class="hr-learning-context-summary-label">Selection</span>
+            <span class="hr-learning-context-summary-value">${escapeHtml(selectionLabel)}</span>
+          </div>
+          <div class="hr-learning-context-summary">
+            <span class="hr-learning-context-summary-label">Status</span>
+            <span class="hr-learning-context-summary-value">
+              <span class="hr-learning-context-status-badge hr-learning-context-status-badge--${escapeHtml(statusMeta.theme)}">${escapeHtml(statusMeta.label)}</span>
+            </span>
+          </div>
+          <div class="hr-learning-context-summary">
+            <span class="hr-learning-context-summary-label">Operation</span>
+            <span class="hr-learning-context-summary-value">${escapeHtml(operationSummary || operationId || "Not resolved")}</span>
+          </div>
+          ${
+            operationId
+              ? `
+                <div class="hr-learning-context-summary">
+                  <span class="hr-learning-context-summary-label">Operation ID</span>
+                  <span class="hr-learning-context-summary-value hr-learning-context-summary-value--mono">${escapeHtml(operationId)}</span>
+                </div>
+              `
+              : ""
+          }
+          ${
+            docsUrl
+              ? `
+                <div class="hr-learning-context-summary">
+                  <span class="hr-learning-context-summary-label">Docs URL</span>
+                  <span class="hr-learning-context-summary-value hr-learning-context-summary-value--mono">${escapeHtml(docsUrl)}</span>
+                </div>
+              `
+              : ""
+          }
+        </div>
+        ${
+          stateMessage
+            ? `<p class="hr-learning-context-status-copy">${escapeHtml(stateMessage)}</p>`
+            : ""
+        }
+        <div class="hr-learning-context-field-grid">
+          ${fieldRowsHtml}
+        </div>
+        ${notesHtml}
+        ${
+          context?.learningPartnerSource
+            ? `<p class="hr-learning-context-source">Learning partner source: ${escapeHtml(String(context.learningPartnerSource || "").trim())}</p>`
+            : ""
+        }
+      </div>
+    </article>
+  `;
+}
+
 function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null) {
   const resolvedSection = section && typeof section === "object" ? section : null;
   if (!resolvedSection?.sectionKey) {
@@ -66642,6 +66940,8 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
     .trim()
     .toLowerCase()
     .replace(/[^\w-]+/g, "-")}-${sectionKey.toLowerCase().replace(/[^\w-]+/g, "-")}`;
+  const activeLearningState = getActiveRestV2LearningUiState(programmer);
+  const activeEntryKey = String(activeLearningState?.entryKey || "").trim();
 
   return `
     <section
@@ -66672,6 +66972,7 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
               const entryUrl = buildRestV2InteractiveDocsUrl(entry.operationAnchor || entry.tagAnchor || "");
               const activationState = entry.activationState || {};
               const isReady = activationState.ready === true;
+              const isActive = String(entry?.key || "").trim() === activeEntryKey;
               const entryActionLabel = isReady
                 ? `Open and hydrate ${entry.label} in Adobe PASS REST API V2 interactive docs`
                 : `${entry.label} is locked. ${String(activationState.reason || "").trim()}`;
@@ -66679,20 +66980,27 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
               return `
                 <button
                   type="button"
-                  class="hr-rest-v2-doc-entry ${isReady ? "is-ready" : "is-locked"}"
+                  class="hr-rest-v2-doc-entry ${isReady ? "is-ready" : "is-locked"}${isActive ? " is-active" : ""}"
                   data-restv2-doc-entry-key="${escapeHtml(entry.key)}"
                   data-restv2-doc-url="${escapeHtml(entryUrl)}"
                   data-restv2-doc-state="${isReady ? "ready" : "locked"}"
+                  data-restv2-doc-active="${isActive ? "true" : "false"}"
+                  aria-pressed="${isActive ? "true" : "false"}"
                   title="${escapeHtml(entryActionLabel)}"
                   aria-label="${escapeHtml(entryActionLabel)}"
                 >
                   <span class="hr-rest-v2-doc-entry-topline">
                     <span class="hr-rest-v2-doc-entry-label">${escapeHtml(entry.label)}</span>
-                    <span class="hr-rest-v2-doc-entry-method">${escapeHtml(entry.methodLabel || "")}</span>
+                    <span class="hr-rest-v2-doc-entry-flags">
+                      <span class="hr-rest-v2-doc-entry-method">${escapeHtml(entry.methodLabel || "")}</span>
+                      ${isActive ? '<span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--active">ACTIVE</span>' : ""}
+                    </span>
                   </span>
                   <span class="hr-rest-v2-doc-entry-summary">${escapeHtml(entry.operationSummary || "")}</span>
                   <span class="hr-rest-v2-doc-entry-readiness">
-                    <span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--${isReady ? "ready" : "locked"}">${escapeHtml(readinessLabel)}</span>
+                    <span class="hr-rest-v2-doc-entry-badges">
+                      <span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--${isReady ? "ready" : "locked"}">${escapeHtml(readinessLabel)}</span>
+                    </span>
                     <span class="hr-rest-v2-doc-entry-state-text">${escapeHtml(String(activationState.reason || "").trim())}</span>
                   </span>
                 </button>
@@ -66723,26 +67031,83 @@ function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null)
   });
   const context = getHrContextSummary(programmer);
   const actionLabel = `Open REST API V2 interactive docs in main content for ${context.compositeLabel}`;
+  const totalEntries = sections.reduce((count, section) => count + Number(Array.isArray(section?.entries) ? section.entries.length : 0), 0);
+  const readyCount = sections.reduce((count, section) => count + Number(section?.readyCount || 0), 0);
+  const initialCollapsed = getRestV2LearningServiceCollapsed(programmer?.programmerId, "restV2");
+  const shellDomId = `rest-v2-learning-shell-${String(programmer?.programmerId || "global")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w-]+/g, "-")}`;
   return `
-    <article class="metadata-item hr-rest-v2-docs-card">
-      <div class="hr-rest-v2-docs-head">
-        <a
-          href="${escapeHtml(docsUrl)}"
-          class="hr-rest-v2-docs-title"
-          data-service-doc-key="restV2"
-          data-service-doc-url="${escapeHtml(docsUrl)}"
-          title="${escapeHtml(actionLabel)}"
-          aria-label="${escapeHtml(actionLabel)}"
-        >
-          REST API V2 Interactive Docs
-        </a>
-        <p class="hr-rest-v2-docs-subtitle">Every customer-facing REST V2 operation, hydrated from UnderPAR context when available.</p>
+    <section
+      class="hr-rest-v2-docs-shell"
+      data-restv2-learning-service-key="restV2"
+      data-restv2-learning-service-initial-collapsed="${initialCollapsed ? "true" : "false"}"
+    >
+      <button
+        type="button"
+        class="metadata-header service-box-header hr-rest-v2-docs-toggle"
+        aria-controls="${escapeHtml(shellDomId)}"
+        title="${escapeHtml("Toggle REST V2 learning methods")}"
+        aria-label="${escapeHtml("Toggle REST V2 learning methods")}"
+      >
+        <span class="hr-rest-v2-docs-toggle-copy">
+          <span class="hr-rest-v2-docs-toggle-label">REST V2</span>
+          <span class="hr-rest-v2-docs-toggle-meta">
+            <span class="hr-rest-v2-docs-toggle-count">${escapeHtml(`${readyCount}/${totalEntries} ready`)}</span>
+            <span class="hr-rest-v2-docs-toggle-status">${escapeHtml(`${sections.length} sections`)}</span>
+          </span>
+        </span>
+        <span class="collapse-icon" aria-hidden="true">▼</span>
+      </button>
+      <div class="metadata-container service-box-container hr-rest-v2-docs-shell-body" id="${escapeHtml(shellDomId)}">
+        <article class="metadata-item hr-rest-v2-docs-card">
+          <div class="hr-rest-v2-docs-head">
+            <button
+              type="button"
+              class="hr-context-service-pill hr-context-service-pill--service-rest-v2 hr-rest-v2-docs-pill"
+              data-service-doc-key="restV2"
+              data-service-doc-url="${escapeHtml(docsUrl)}"
+              title="${escapeHtml(actionLabel)}"
+              aria-label="${escapeHtml(actionLabel)}"
+            >REST V2</button>
+            <p class="hr-rest-v2-docs-subtitle">Every customer-facing REST V2 operation, hydrated from UnderPAR context before the online Run form is focused.</p>
+          </div>
+          <div class="hr-rest-v2-docs-grid">
+            ${sections.map((section) => buildRestV2InteractiveDocsSectionHtml(section, programmer)).join("")}
+          </div>
+        </article>
       </div>
-      <div class="hr-rest-v2-docs-grid">
-        ${sections.map((section) => buildRestV2InteractiveDocsSectionHtml(section, programmer)).join("")}
-      </div>
-    </article>
+    </section>
   `;
+}
+
+function wireRestV2LearningContainerCollapsibles(section, programmer = null) {
+  if (!section) {
+    return;
+  }
+
+  const learningContainers = section.querySelectorAll("[data-restv2-learning-service-key]");
+  learningContainers.forEach((containerElement) => {
+    if (!(containerElement instanceof HTMLElement)) {
+      return;
+    }
+    const serviceKey = String(containerElement.dataset.restv2LearningServiceKey || "").trim();
+    if (!serviceKey) {
+      return;
+    }
+    const toggleButton = containerElement.querySelector(".hr-rest-v2-docs-toggle");
+    const shellElement = containerElement.querySelector(".hr-rest-v2-docs-shell-body");
+    if (!(toggleButton instanceof HTMLElement) || !(shellElement instanceof HTMLElement)) {
+      return;
+    }
+    const initialCollapsedAttr = String(containerElement.dataset.restv2LearningServiceInitialCollapsed || "").trim().toLowerCase();
+    const initialCollapsed =
+      initialCollapsedAttr === "true" || getRestV2LearningServiceCollapsed(programmer?.programmerId, serviceKey);
+    wireCollapsibleSection(toggleButton, shellElement, initialCollapsed, (collapsed) => {
+      setRestV2LearningServiceCollapsed(programmer?.programmerId, serviceKey, collapsed);
+    });
+  });
 }
 
 function wireRestV2InteractiveDocsSectionCollapsibles(section, programmer = null) {
@@ -67058,7 +67423,7 @@ function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services =
     return buildHrContextHealthStatusItemHtml(programmer);
   }
 
-  const contextItemHtml = buildMetadataItemHtml("Context", context.compositeLabel);
+  const contextItemHtml = buildRestV2LearningContextItemHtml(programmer);
   const detectedServiceEntries = getDetectedPremiumServiceEntries(services);
   const detectedServiceLabels = detectedServiceEntries.map((entry) => String(entry?.label || "").trim()).filter(Boolean);
   const detectedServiceSummary = detectedServiceLabels.join(", ");
@@ -67077,8 +67442,8 @@ function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services =
   const restV2DocsPanelHtml = buildRestV2InteractiveDocsPanelHtml(programmer, services);
   const docsItemHtml = restV2DocsPanelHtml ? "" : buildMetadataItemHtml("Docs", `HOWTO: ${howtoSubject} quick docs coming soon...`);
   return `
-    ${contextItemHtml}
     ${buildHrServiceListHtml(detectedServiceEntries, fallbackSummary)}
+    ${contextItemHtml}
     ${restV2DocsPanelHtml}
     ${docsItemHtml}
   `;
@@ -67807,7 +68172,34 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
     };
   }
   const targetUrl = String(requestedUrl || buildRestV2InteractiveDocsUrl(entry.operationAnchor || entry.tagAnchor || "")).trim();
-  const openPartialDocs = async (message, type = "info") => {
+  const publishLearningState = (phase = "active", payload = {}) =>
+    setRestV2LearningUiState(
+      {
+        entryKey: String(entry?.key || "").trim(),
+        entryLabel: String(entry?.label || "").trim(),
+        operationId: String(entry?.operationId || "").trim(),
+        operationSummary: String(entry?.operationSummary || entry?.label || "").trim(),
+        docsUrl: targetUrl,
+        phase,
+        ...payload,
+      },
+      {
+        controllerReason: `rest-v2-learning-${String(entry?.key || "").trim()}`,
+      }
+    );
+  const openPartialDocs = async (message, type = "info", payload = {}) => {
+    const partialStatePayload = payload && typeof payload === "object" ? payload : {};
+    publishLearningState(type === "error" ? "error" : "setup-needed", {
+      programmerId: String(partialStatePayload?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([partialStatePayload?.requestorId, partialStatePayload?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([partialStatePayload?.serviceProviderId, partialStatePayload?.requestorId]) || "").trim(),
+      mvpd: String(partialStatePayload?.mvpd || "").trim(),
+      mvpdMeta: partialStatePayload?.mvpdMeta && typeof partialStatePayload.mvpdMeta === "object" ? partialStatePayload.mvpdMeta : null,
+      context: partialStatePayload?.context && typeof partialStatePayload.context === "object" ? partialStatePayload.context : null,
+      plan: partialStatePayload?.plan && typeof partialStatePayload.plan === "object" ? partialStatePayload.plan : null,
+      statusMessage: String(message || "").trim(),
+      reason: String(message || "").trim(),
+    });
     const opened = await openPremiumServiceDocumentation("restV2", targetUrl);
     if (opened?.ok !== true) {
       return opened;
@@ -67831,8 +68223,27 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
 
   const context = buildRestV2InteractiveDocsContext(resolveSelectedProgrammer(), entry);
   if (!context?.ok) {
-    return openPartialDocs(String(context?.error || "REST V2 learning needs a Media Company selection."));
+    return openPartialDocs(String(context?.error || "REST V2 learning needs a Media Company selection."), "info", {
+      programmerId: String(resolveSelectedProgrammer()?.programmerId || "").trim(),
+      requestorId: String(state.selectedRequestorId || "").trim(),
+      serviceProviderId: String(state.selectedRequestorId || "").trim(),
+      mvpd: String(state.selectedMvpdId || "").trim(),
+      mvpdMeta: String(state.selectedRequestorId || "").trim() && String(state.selectedMvpdId || "").trim()
+        ? getRestV2MvpdMeta(String(state.selectedRequestorId || "").trim(), String(state.selectedMvpdId || "").trim())
+        : null,
+      context,
+    });
   }
+
+  publishLearningState("preparing", {
+    programmerId: String(context?.programmerId || "").trim(),
+    requestorId: String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim(),
+    serviceProviderId: String(firstNonEmptyString([context?.serviceProviderId, context?.requestorId]) || "").trim(),
+    mvpd: String(context?.mvpd || "").trim(),
+    mvpdMeta: context?.mvpdMeta && typeof context.mvpdMeta === "object" ? context.mvpdMeta : null,
+    context,
+    statusMessage: "Preparing exact REST V2 learning payload for the interactive docs form.",
+  });
 
   setStatus(`Opening ${entry.label} interactive docs with UnderPAR context...`, "info");
 
@@ -67852,7 +68263,14 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      return openPartialDocs(reason, "error");
+      return openPartialDocs(reason, "error", {
+        programmerId: String(context?.programmerId || "").trim(),
+        requestorId: String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim(),
+        serviceProviderId: String(firstNonEmptyString([context?.serviceProviderId, context?.requestorId]) || "").trim(),
+        mvpd: String(context?.mvpd || "").trim(),
+        mvpdMeta: context?.mvpdMeta && typeof context.mvpdMeta === "object" ? context.mvpdMeta : null,
+        context,
+      });
     }
   }
 
@@ -67864,9 +68282,27 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
       appInfo: tokenResult?.appInfo || context.appInfo,
     });
     plan = buildRestV2InteractiveDocsHydrationPlan(entry, resolvedContext, String(tokenResult?.accessToken || "").trim());
+    publishLearningState("active", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      mvpd: String(resolvedContext?.mvpd || "").trim(),
+      mvpdMeta: resolvedContext?.mvpdMeta && typeof resolvedContext.mvpdMeta === "object" ? resolvedContext.mvpdMeta : null,
+      context: resolvedContext,
+      plan,
+      statusMessage: "Context hydrated. UnderPAR is sending this exact payload into the online REST V2 Run form.",
+    });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    return openPartialDocs(reason, "error");
+    return openPartialDocs(reason, "error", {
+      programmerId: String(context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([context?.serviceProviderId, context?.requestorId]) || "").trim(),
+      mvpd: String(context?.mvpd || "").trim(),
+      mvpdMeta: context?.mvpdMeta && typeof context.mvpdMeta === "object" ? context.mvpdMeta : null,
+      context,
+      plan,
+    });
   }
   const partnerFrameworkStatusValidation =
     resolvedContext?.partnerFrameworkStatusValidation && typeof resolvedContext.partnerFrameworkStatusValidation === "object"
@@ -67874,6 +68310,17 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
       : null;
   if (partnerFrameworkStatusValidation?.rawInputPresent === true && partnerFrameworkStatusValidation.ok !== true) {
     const reason = String(partnerFrameworkStatusValidation.error || "Partner framework status validation failed.").trim();
+    publishLearningState("blocked", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      mvpd: String(resolvedContext?.mvpd || "").trim(),
+      mvpdMeta: resolvedContext?.mvpdMeta && typeof resolvedContext.mvpdMeta === "object" ? resolvedContext.mvpdMeta : null,
+      context: resolvedContext,
+      plan,
+      statusMessage: reason,
+      reason,
+    });
     setStatus(reason, "error");
     return {
       ok: false,
@@ -67885,11 +68332,33 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
 
   const opened = await openPremiumServiceDocumentation("restV2", targetUrl);
   if (opened?.ok !== true) {
+    publishLearningState("error", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      mvpd: String(resolvedContext?.mvpd || "").trim(),
+      mvpdMeta: resolvedContext?.mvpdMeta && typeof resolvedContext.mvpdMeta === "object" ? resolvedContext.mvpdMeta : null,
+      context: resolvedContext,
+      plan,
+      statusMessage: String(opened?.error || "Unable to open REST V2 interactive docs.").trim(),
+      reason: String(opened?.error || "Unable to open REST V2 interactive docs.").trim(),
+    });
     return opened;
   }
 
   const tabId = Number(opened?.tabId || 0);
   if (tabId <= 0) {
+    publishLearningState("error", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      mvpd: String(resolvedContext?.mvpd || "").trim(),
+      mvpdMeta: resolvedContext?.mvpdMeta && typeof resolvedContext.mvpdMeta === "object" ? resolvedContext.mvpdMeta : null,
+      context: resolvedContext,
+      plan,
+      statusMessage: "Opened the docs tab, but UnderPAR could not target it for hydration.",
+      reason: "missing-restv2-doc-tab",
+    });
     setStatus(`Opened ${entry.label} docs, but UnderPAR could not target the tab for hydration.`, "error");
     return {
       ok: false,
@@ -67915,6 +68384,17 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
 
   if (!hydrationResult) {
     const reason = String(lastHydrationError?.message || "REST V2 docs hydration failed.").trim();
+    publishLearningState("error", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      mvpd: String(resolvedContext?.mvpd || "").trim(),
+      mvpdMeta: resolvedContext?.mvpdMeta && typeof resolvedContext.mvpdMeta === "object" ? resolvedContext.mvpdMeta : null,
+      context: resolvedContext,
+      plan,
+      statusMessage: reason,
+      reason,
+    });
     setStatus(`Opened ${entry.label} docs, but UnderPAR could not hydrate the interactive form: ${reason}`, "error");
     return {
       ok: false,
@@ -67932,6 +68412,17 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
     const guidance = Array.isArray(plan?.notes)
       ? String(plan.notes.find((note) => String(note || "").trim()) || "").trim()
       : "";
+    publishLearningState("partial", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      mvpd: String(resolvedContext?.mvpd || "").trim(),
+      mvpdMeta: resolvedContext?.mvpdMeta && typeof resolvedContext.mvpdMeta === "object" ? resolvedContext.mvpdMeta : null,
+      context: resolvedContext,
+      plan,
+      hydrationResult,
+      statusMessage: guidance || `Fill ${unresolvedRequiredFields.join(", ")} before Send.`,
+    });
     setStatus(
       guidance
         ? `Opened ${entry.label} docs with partial UnderPAR context. ${guidance}`
@@ -67939,8 +68430,30 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
       "info"
     );
   } else if (Array.isArray(plan.notes) && plan.notes.length > 0) {
+    publishLearningState("hydrated", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      mvpd: String(resolvedContext?.mvpd || "").trim(),
+      mvpdMeta: resolvedContext?.mvpdMeta && typeof resolvedContext.mvpdMeta === "object" ? resolvedContext.mvpdMeta : null,
+      context: resolvedContext,
+      plan,
+      hydrationResult,
+      statusMessage: String(plan.notes[0] || "").trim(),
+    });
     setStatus(`Opened ${entry.label} docs with UnderPAR context. ${plan.notes[0]}`, "info");
   } else {
+    publishLearningState("hydrated", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      mvpd: String(resolvedContext?.mvpd || "").trim(),
+      mvpdMeta: resolvedContext?.mvpdMeta && typeof resolvedContext.mvpdMeta === "object" ? resolvedContext.mvpdMeta : null,
+      context: resolvedContext,
+      plan,
+      hydrationResult,
+      statusMessage: "UnderPAR hydrated the online Run form and focused Send.",
+    });
     setStatus(`Opened ${entry.label} docs with UnderPAR context and focused Send.`, "success");
   }
 
@@ -67974,6 +68487,7 @@ function createHrContextSection(programmer, sectionKey, services = null, options
     },
   });
   if (sectionKey === "learning") {
+    wireRestV2LearningContainerCollapsibles(section, programmer);
     wireRestV2InteractiveDocsSectionCollapsibles(section, programmer);
   }
   wireHrContextSectionActions(section);
@@ -91552,6 +92066,8 @@ function resetProgrammerRuntimeState() {
   state.cmTenantBundleByTenantKey.clear();
   state.cmTenantBundlePromiseByTenantKey.clear();
   state.premiumSectionCollapsedByKey.clear();
+  state.restV2LearningUiState = null;
+  state.restV2LearningUiVersion = 0;
   state.premiumAutoRefreshMetaByKey.clear();
   state.premiumServiceReminderLogKeys.clear();
   state.premiumServiceDecisionSignatureByProgrammerKey.clear();
@@ -92528,6 +93044,9 @@ function registerEventHandlers() {
 
   els.mediaCompanySelect.addEventListener("change", (event) => {
     state.selectedProgrammerKey = String(event.target.value || "");
+    clearRestV2LearningUiState({
+      render: false,
+    });
     const controllerReason = "media-company-change";
     const selectedProgrammer = resolveSelectedProgrammer();
     emitGlobalSelectorChangeLog(
@@ -92558,6 +93077,9 @@ function registerEventHandlers() {
 
     state.selectedRequestorId = nextRequestorId;
     state.selectedMvpdId = "";
+    clearRestV2LearningUiState({
+      render: false,
+    });
     emitGlobalSelectorChangeLog("Requestor ID", state.selectedRequestorId, state.selectedRequestorId);
     await refreshProgrammerPanels({
       controllerReason: "requestor-change",
@@ -92610,6 +93132,9 @@ function registerEventHandlers() {
     }
 
     state.selectedMvpdId = nextMvpdId;
+    clearRestV2LearningUiState({
+      render: false,
+    });
     const mvpdSelectionLabel = state.selectedMvpdId
       ? String(getRestV2MvpdPickerLabel(String(state.selectedRequestorId || "").trim(), state.selectedMvpdId) || "")
       : "";
