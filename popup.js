@@ -17947,6 +17947,7 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     samlResponse: firstNonEmptyString(sourceList.map((source) => String(source?.samlResponse || "").trim())),
     samlSource: firstNonEmptyString(sourceList.map((source) => String(source?.samlSource || "").trim())),
     samlTrustedForPartnerSso: sourceList.some((source) => source?.samlTrustedForPartnerSso === true),
+    partnerSsoCompletedFlowVerified: sourceList.some((source) => source?.partnerSsoCompletedFlowVerified === true),
     sessionUrl: normalizeAdobeNavigationUrl(firstNonEmptyString(sourceList.map((source) => String(source?.sessionUrl || "").trim()))),
     loginUrl: normalizeAdobeNavigationUrl(firstNonEmptyString(sourceList.map((source) => String(source?.loginUrl || "").trim()))),
     redirectUrl: normalizeAdobeNavigationUrl(
@@ -18590,6 +18591,7 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     samlResponse: String(harvest.samlResponse || "").trim(),
     samlSource: String(harvest.samlSource || "").trim(),
     samlTrustedForPartnerSso: harvest.samlTrustedForPartnerSso === true,
+    partnerSsoCompletedFlowVerified: harvest.partnerSsoCompletedFlowVerified === true,
     sessionUrl,
     loginUrl,
     redirectUrl: normalizeAdobeNavigationUrl(String(harvest.redirectUrl || "").trim()),
@@ -28137,6 +28139,9 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     samlSource: String(firstNonEmptyString([options?.samlSource, context?.samlSource]) || "").trim(),
     samlTrustedForPartnerSso:
       options?.samlTrustedForPartnerSso === true || (options?.samlTrustedForPartnerSso == null && context?.samlTrustedForPartnerSso === true),
+    partnerSsoCompletedFlowVerified:
+      options?.partnerSsoCompletedFlowVerified === true ||
+      (options?.partnerSsoCompletedFlowVerified == null && context?.partnerSsoCompletedFlowVerified === true),
     sessionData:
       options?.sessionData && typeof options.sessionData === "object"
         ? cloneJsonLikeValue(options.sessionData, null)
@@ -29587,6 +29592,7 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     samlResponse: String(context?.samlResponse || "").trim(),
     samlSource: String(context?.samlSource || "").trim(),
     samlTrustedForPartnerSso: context?.samlTrustedForPartnerSso === true,
+    partnerSsoCompletedFlowVerified: context?.partnerSsoCompletedFlowVerified === true,
     sessionUrl,
     loginUrl,
     redirectUrl,
@@ -58558,6 +58564,7 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
     samlResponse: String(recordingContext.samlResponse || "").trim(),
     samlSource: String(recordingContext.samlSource || "").trim(),
     samlTrustedForPartnerSso: recordingContext.samlTrustedForPartnerSso === true,
+    partnerSsoCompletedFlowVerified: recordingContext?.partnerSsoCompletedFlowVerified === true,
     sessionData:
       recordingContext?.sessionData && typeof recordingContext.sessionData === "object"
         ? cloneJsonLikeValue(recordingContext.sessionData, null)
@@ -58648,6 +58655,7 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     samlResponse: String(context.samlResponse || "").trim(),
     samlSource: String(context.samlSource || "").trim(),
     samlTrustedForPartnerSso: context?.samlTrustedForPartnerSso === true,
+    partnerSsoCompletedFlowVerified: context?.partnerSsoCompletedFlowVerified === true,
     sessionUrl,
     loginUrl,
     redirectUrl: normalizeAdobeNavigationUrl(String(context.redirectUrl || "").trim()),
@@ -66748,6 +66756,11 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
       activeRecordingContext?.samlTrustedForPartnerSso === true ||
         harvestContext?.samlTrustedForPartnerSso === true ||
         harvest?.samlTrustedForPartnerSso === true
+    ),
+    partnerSsoCompletedFlowVerified: Boolean(
+      activeRecordingContext?.partnerSsoCompletedFlowVerified === true ||
+        harvestContext?.partnerSsoCompletedFlowVerified === true ||
+        harvest?.partnerSsoCompletedFlowVerified === true
     ),
     flowId: String(flowId || "").trim(),
   };
@@ -77786,6 +77799,7 @@ async function hydrateAuthenticatedAdobePassSession(source = "session", options 
 
   let programmersLoadError = null;
   let cmPrecheckError = null;
+  let cmPrecheckWarning = null;
   let pendingEnvironmentSelectionRestore = null;
 
   if (!hydrationResult.ok) {
@@ -77827,13 +77841,21 @@ async function hydrateAuthenticatedAdobePassSession(source = "session", options 
     const cmTokenReady =
       Boolean(normalizeBearerTokenValue(firstNonEmptyString([hydratedLoginData?.cmConsoleAccessToken, cmContext?.cmuToken]))) &&
       state.cmConsoleBootstrapQualified === true;
-    if (!(cmCatalogReady && cmTokenReady)) {
+    if (!cmCatalogReady) {
       const cmErrorMessage = firstNonEmptyString([
         cmContext?.errors?.tenants,
         cmContext?.errors?.cmuToken,
       ]);
       if (cmErrorMessage) {
         cmPrecheckError = new Error(cmErrorMessage);
+      }
+    } else if (!cmTokenReady) {
+      const cmWarningMessage = firstNonEmptyString([
+        cmContext?.errors?.cmuToken,
+        cmContext?.errors?.reports,
+      ]);
+      if (cmWarningMessage) {
+        cmPrecheckWarning = new Error(cmWarningMessage);
       }
     }
   }
@@ -77875,20 +77897,23 @@ async function hydrateAuthenticatedAdobePassSession(source = "session", options 
       ]),
       "error"
     );
+  } else if (cmPrecheckWarning) {
+    setStatus(String(cmPrecheckWarning?.message || "").trim(), "info");
   } else {
     clearStatusUnlessCmTenantsPrecheckBlocked();
   }
 
   render();
   setUnderparDiagnosticMarker("activation", {
-    status: programmersLoadError || cmPrecheckError ? "warning" : "success",
+    status: programmersLoadError || cmPrecheckError || cmPrecheckWarning ? "warning" : "success",
     source: normalizedSource,
-    phase: programmersLoadError ? "programmers-load-warning" : cmPrecheckError ? "cm-precheck-warning" : "complete",
+    phase: programmersLoadError ? "programmers-load-warning" : cmPrecheckError || cmPrecheckWarning ? "cm-precheck-warning" : "complete",
     programmersCount: Number(state.programmers.length || 0),
     criticalPathMs: Math.max(0, Date.now() - Number(options.activationStartedAt || Date.now())),
     error: firstNonEmptyString([
       String(programmersLoadError?.message || "").trim(),
       String(cmPrecheckError?.message || "").trim(),
+      String(cmPrecheckWarning?.message || "").trim(),
     ]),
   });
   log(`Session hydration completed (${normalizedSource})`, {
@@ -77897,6 +77922,7 @@ async function hydrateAuthenticatedAdobePassSession(source = "session", options 
     criticalPathMs: Math.max(0, Date.now() - Number(options.activationStartedAt || Date.now())),
     programmersError: String(programmersLoadError?.message || "").trim(),
     cmPrecheckError: String(cmPrecheckError?.message || "").trim(),
+    cmPrecheckWarning: String(cmPrecheckWarning?.message || "").trim(),
   });
   return !(programmersLoadError || cmPrecheckError);
 }

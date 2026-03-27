@@ -2838,6 +2838,7 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
     samlResponse: "PHNhbWxwOlJlc3BvbnNlPg==",
     samlSource: "tab-network:body",
     samlTrustedForPartnerSso: true,
+    partnerSsoCompletedFlowVerified: true,
     redirectUrl: "https://experience.example.test/callback",
     domainName: "experience.example.test",
     flowId: "flow-123",
@@ -2864,11 +2865,23 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
   assert.equal(context.visitorIdentifier, "20265673158980419722735089753036633573");
   assert.equal(context.samlResponse, "PHNhbWxwOlJlc3BvbnNlPg==");
   assert.equal(context.samlSource, "tab-network:body");
+  assert.equal(context.partnerSsoCompletedFlowVerified, true);
   assert.equal(context.redirectUrl, "https://experience.example.test/callback");
   assert.equal(context.domainName, "experience.example.test");
   assert.equal(context.flowId, "flow-123");
   assert.equal(context.sessionResponseHeaders["AP-Partner-Framework-Status"], "framework-status-token");
   assert.equal(context.sessionData.existingParameters.redirectUrl, "https://experience.example.test/callback");
+});
+
+test("REST V2 verified partner-flow trust survives seed and interactive context rebuilds", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+
+  assert.match(popupSource, /partnerSsoCompletedFlowVerified:\s*context\?\.partnerSsoCompletedFlowVerified === true/);
+  assert.match(popupSource, /partnerSsoCompletedFlowVerified:\s*harvest\.partnerSsoCompletedFlowVerified === true/);
+  assert.match(
+    popupSource,
+    /partnerSsoCompletedFlowVerified:\s*Boolean\([\s\S]*activeRecordingContext\?\.partnerSsoCompletedFlowVerified === true[\s\S]*harvestContext\?\.partnerSsoCompletedFlowVerified === true[\s\S]*harvest\?\.partnerSsoCompletedFlowVerified === true[\s\S]*\)/
+  );
 });
 
 test("REST V2 learning context reuses selection-scoped partner SSO seed when auth completed without an active profile harvest", () => {

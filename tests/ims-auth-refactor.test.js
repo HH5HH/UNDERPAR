@@ -4303,3 +4303,14 @@ test("applying the active session preserves a hydrated cm-console-ui bearer inst
   assert.match(applySource, /state\.cmConsoleBootstrapQualified =[\s\S]*tokenSupportsCmConsoleRequests/);
   assert.doesNotMatch(applySource, /state\.cmConsoleBootstrapQualified = false;/);
 });
+
+test("authenticated Adobe Pass hydration treats cm-console-ui bootstrap misses as CM warnings instead of core sign-in errors", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const hydrateSource = extractFunctionSource(popupSource, "hydrateAuthenticatedAdobePassSession");
+
+  assert.match(hydrateSource, /let cmPrecheckWarning = null;/);
+  assert.match(hydrateSource, /if \(!cmCatalogReady\) \{/);
+  assert.match(hydrateSource, /else if \(!cmTokenReady\) \{/);
+  assert.match(hydrateSource, /cmPrecheckWarning = new Error\(cmWarningMessage\);/);
+  assert.match(hydrateSource, /else if \(cmPrecheckWarning\) \{\s*setStatus\(String\(cmPrecheckWarning\?\.message \|\| ""\)\.trim\(\), "info"\);/m);
+});
