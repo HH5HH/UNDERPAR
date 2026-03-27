@@ -82,6 +82,35 @@ function loadHrVisibilityHelpers(seed = {}) {
   return context.module.exports;
 }
 
+function loadPopupLearningJwtInspectorUtility(sharedUtility = null) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "let learningJwtInspectorFallbackUtility = null;",
+    extractFunctionSource(source, "escapeHtml"),
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "decodeBase64UrlText"),
+    extractFunctionSource(source, "chunkLearningInspectorText"),
+    extractFunctionSource(source, "firstNonEmptyString"),
+    extractFunctionSource(source, "buildLearningJwtInspectorFallbackUtility"),
+    extractFunctionSource(source, "getLearningJwtInspectorUtility"),
+    "globalThis.UnderParJwtInspector = globalThis.__sharedUtility;",
+    "module.exports = { buildLearningJwtInspectorFallbackUtility, getLearningJwtInspectorUtility };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __sharedUtility: sharedUtility,
+    atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
+    TextDecoder,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadRestV2LearningPlanBuilder() {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -1052,10 +1081,12 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /Base64 Inspector/);
   assert.doesNotMatch(popupSource, /Paste any JWT, bearer value, or JSON body containing a JWT\./);
   assert.doesNotMatch(popupSource, /Paste any Base64 or Base64URL value\./);
+  assert.doesNotMatch(popupSource, /The shared JWT inspector utility is unavailable\. Reload UnderPAR and retry\./);
   assert.match(popupSource, /showLearningInspectorResult\("jwt"/);
   assert.match(popupSource, /showLearningInspectorResult\("base64"/);
   assert.doesNotMatch(popupSource, /Review the inspector dialog for details/);
   assert.doesNotMatch(popupSource, /openLearningInspectorDialog/);
+  assert.match(popupSource, /buildLearningJwtInspectorFallbackUtility/);
   assert.doesNotMatch(popupSource, /buildRestV2LearningContextItemHtml/);
   assert.doesNotMatch(popupSource, /buildRestV2LearningUiStatusMeta/);
   assert.doesNotMatch(popupSource, /Click any REST V2 LEARNING deeplink to preview the exact interactive docs payload here/);
@@ -1146,6 +1177,35 @@ test("REST V2 learning containers default collapsed and persist per section", ()
   assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "configuration"), true);
   assert.equal(getRestV2InteractiveDocsSectionCollapsed("Fox", "configuration"), true);
   assert.equal(getRestV2InteractiveDocsSectionCollapsed("Turner", "sessions"), true);
+});
+
+test("LEARNING JWT inspector falls back to a local decoder when the shared utility is unavailable", () => {
+  const { getLearningJwtInspectorUtility } = loadPopupLearningJwtInspectorUtility(null);
+  const utility = getLearningJwtInspectorUtility();
+  const token = [
+    Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url"),
+    Buffer.from(
+      JSON.stringify({
+        sub: "d23d67ff-0342-4bc4-b610-2c5ae8e94ee5",
+        nbf: 1774634644,
+        iss: "auth.adobe.com",
+        scopes: "api:client:v2",
+        exp: 1774656244,
+        iat: 1774634644,
+      })
+    ).toString("base64url"),
+    "signature",
+  ].join(".");
+  const extracted = utility.extractJwtCandidateFromText(JSON.stringify({ Authorization: `Bearer ${token}` }));
+  const decoded = utility.decodeJwtToken(extracted);
+
+  assert.equal(extracted, token);
+  assert.equal(decoded.valid, true);
+  assert.equal(decoded.header.alg, "RS256");
+  assert.equal(decoded.payload.iss, "auth.adobe.com");
+  assert.equal(decoded.summary.subject, "d23d67ff-0342-4bc4-b610-2c5ae8e94ee5");
+  assert.deepEqual(Array.from(decoded.summary.scopes), ["api:client:v2"]);
+  assert.match(String(utility.buildInspectorMarkup(decoded)), /Decoded JWT/);
 });
 
 test("REST V2 learning entries still open the customer docs when requestor context is missing", async () => {

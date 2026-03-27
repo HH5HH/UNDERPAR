@@ -68456,10 +68456,384 @@ function getLearningInspectorConfig(type = "jwt") {
   return LEARNING_INSPECTOR_CONFIG_BY_TYPE[normalizedType] || LEARNING_INSPECTOR_CONFIG_BY_TYPE.jwt;
 }
 
+let learningJwtInspectorFallbackUtility = null;
+
+function buildLearningJwtInspectorFallbackUtility() {
+  function uniqueLearningJwtStrings(values = []) {
+    return Array.from(
+      new Set(
+        (Array.isArray(values) ? values : [values])
+          .map((value) => String(value ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+  }
+
+  function isLearningJwtPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function normalizeLearningJwtTimestamp(value) {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return "";
+    }
+    const milliseconds = numeric > 1000000000000 ? numeric : numeric * 1000;
+    try {
+      return new Date(milliseconds).toLocaleString();
+    } catch {
+      return "";
+    }
+  }
+
+  function isLearningJwtCandidate(value = "") {
+    const normalized = String(value || "").trim();
+    return normalized.length >= 30 && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(normalized);
+  }
+
+  function extractLearningJwtCandidateFromValue(value, seen = new Set()) {
+    if (typeof value === "string") {
+      const normalized = String(value || "").trim();
+      if (!normalized) {
+        return "";
+      }
+      const compact = normalized.replace(/\s+/g, "");
+      const directCandidates = uniqueLearningJwtStrings([normalized, compact]);
+      for (const candidate of directCandidates) {
+        if (isLearningJwtCandidate(candidate)) {
+          return candidate;
+        }
+        const bearerMatch = candidate.match(/bearer([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/i);
+        if (bearerMatch?.[1] && isLearningJwtCandidate(bearerMatch[1])) {
+          return bearerMatch[1];
+        }
+      }
+      const bearerMatch = normalized.match(/bearer\s+([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/i);
+      if (bearerMatch?.[1] && isLearningJwtCandidate(bearerMatch[1])) {
+        return bearerMatch[1];
+      }
+      const rawMatch = compact.match(/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/);
+      return rawMatch?.[1] && isLearningJwtCandidate(rawMatch[1]) ? rawMatch[1] : "";
+    }
+    if (!value || typeof value !== "object") {
+      return "";
+    }
+    if (seen.has(value)) {
+      return "";
+    }
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const candidate = extractLearningJwtCandidateFromValue(entry, seen);
+        if (candidate) {
+          return candidate;
+        }
+      }
+      return "";
+    }
+    for (const entry of Object.values(value)) {
+      const candidate = extractLearningJwtCandidateFromValue(entry, seen);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return "";
+  }
+
+  function extractLearningJwtCandidateFromText(rawText = "") {
+    const normalized = String(rawText || "").trim();
+    if (!normalized) {
+      return "";
+    }
+    const direct = extractLearningJwtCandidateFromValue(normalized);
+    if (direct) {
+      return direct;
+    }
+    const parsed = parseJsonText(normalized, null);
+    return extractLearningJwtCandidateFromValue(parsed);
+  }
+
+  function decodeLearningJwtSection(token = "", index = 0) {
+    const parts = String(token || "").trim().split(".");
+    const rawValue = String(parts[index] || "").trim();
+    const text = decodeBase64UrlText(rawValue);
+    const parsed = parseJsonText(text, null);
+    return {
+      rawValue,
+      text,
+      parsed: isLearningJwtPlainObject(parsed) ? parsed : null,
+    };
+  }
+
+  function collectLearningJwtScopeValues(payload = null) {
+    if (!payload || typeof payload !== "object") {
+      return [];
+    }
+    const scopeCandidates = [];
+    const append = (value) => {
+      if (value == null) {
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((entry) => append(entry));
+        return;
+      }
+      if (typeof value === "object") {
+        append(value.scope);
+        append(value.scopes);
+        append(value.permissions);
+        append(value.value);
+        return;
+      }
+      String(value || "")
+        .split(/[\s,]+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .forEach((entry) => scopeCandidates.push(entry));
+    };
+    append(payload.scope);
+    append(payload.scopes);
+    append(payload.permissions);
+    append(payload.client?.scope);
+    append(payload.client?.scopes);
+    append(payload.clientApplication?.scope);
+    append(payload.clientApplication?.scopes);
+    return uniqueLearningJwtStrings(scopeCandidates);
+  }
+
+  function buildLearningJwtInspectionSummary(result = null) {
+    const header = isLearningJwtPlainObject(result?.header) ? result.header : {};
+    const payload = isLearningJwtPlainObject(result?.payload) ? result.payload : {};
+    const audience = uniqueLearningJwtStrings(Array.isArray(payload.aud) ? payload.aud : [payload.aud]).join(", ");
+    return {
+      algorithm: firstNonEmptyString([header.alg]),
+      type: firstNonEmptyString([header.typ]),
+      keyId: firstNonEmptyString([header.kid]),
+      issuer: firstNonEmptyString([payload.iss, payload.issuer]),
+      subject: firstNonEmptyString([payload.sub, payload.subject]),
+      audience,
+      clientId: firstNonEmptyString([payload.client_id, payload.clientId, payload.azp]),
+      issuedAt: normalizeLearningJwtTimestamp(payload.iat),
+      notBefore: normalizeLearningJwtTimestamp(payload.nbf),
+      expiresAt: normalizeLearningJwtTimestamp(payload.exp),
+      scopes: collectLearningJwtScopeValues(payload),
+    };
+  }
+
+  function decodeLearningJwtToken(token = "") {
+    const normalized = String(token || "").trim().replace(/\s+/g, "");
+    const parts = normalized.split(".");
+    const headerSection = decodeLearningJwtSection(normalized, 0);
+    const payloadSection = decodeLearningJwtSection(normalized, 1);
+    const valid = parts.length === 3 && Boolean(headerSection.parsed) && Boolean(payloadSection.parsed);
+    const result = {
+      token: normalized,
+      valid,
+      header: headerSection.parsed,
+      payload: payloadSection.parsed,
+      headerSegment: headerSection.rawValue,
+      payloadSegment: payloadSection.rawValue,
+      signatureSegment: String(parts[2] || "").trim(),
+      headerText: headerSection.text,
+      payloadText: payloadSection.text,
+      error: valid ? "" : "UnderPAR could not parse this JWT into a valid header and payload object.",
+    };
+    result.summary = buildLearningJwtInspectionSummary(result);
+    return result;
+  }
+
+  function renderLearningJwtScalarValue(value) {
+    if (value == null) {
+      return "null";
+    }
+    if (typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? String(value) : "NaN";
+    }
+    return String(value);
+  }
+
+  function renderLearningJwtObjectInspector(value, title = "") {
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return '<p class="up-jwt-empty-state">No decoded fields.</p>';
+      }
+      if (value.every((entry) => entry == null || typeof entry !== "object")) {
+        return `<div class="up-jwt-array">${value
+          .map((entry) => `<span class="up-jwt-array-item">${escapeHtml(renderLearningJwtScalarValue(entry))}</span>`)
+          .join("")}</div>`;
+      }
+      return `
+        <div class="up-jwt-object-stack">
+          ${value
+            .map(
+              (entry, index) => `
+                <section class="up-jwt-object-section">
+                  <p class="up-jwt-object-title">${escapeHtml(`${title || "Item"} ${index + 1}`)}</p>
+                  ${renderLearningJwtObjectInspector(entry)}
+                </section>
+              `
+            )
+            .join("")}
+        </div>
+      `;
+    }
+
+    if (!isLearningJwtPlainObject(value)) {
+      return `<p class="up-jwt-empty-state">${escapeHtml(renderLearningJwtScalarValue(value))}</p>`;
+    }
+
+    const entries = Object.entries(value);
+    const scalarEntries = entries.filter(([, entryValue]) => !entryValue || typeof entryValue !== "object");
+    const nestedEntries = entries.filter(([, entryValue]) => entryValue && typeof entryValue === "object");
+    if (scalarEntries.length === 0 && nestedEntries.length === 0) {
+      return '<p class="up-jwt-empty-state">No decoded fields.</p>';
+    }
+
+    return `
+      ${scalarEntries.length > 0
+        ? `<dl class="up-jwt-object-list">
+            ${scalarEntries
+              .map(
+                ([key, entryValue]) => `
+                  <dt>${escapeHtml(key)}</dt>
+                  <dd>${escapeHtml(renderLearningJwtScalarValue(entryValue))}</dd>
+                `
+              )
+              .join("")}
+          </dl>`
+        : ""}
+      ${nestedEntries.length > 0
+        ? `<div class="up-jwt-object-stack">
+            ${nestedEntries
+              .map(
+                ([key, entryValue]) => `
+                  <section class="up-jwt-object-section">
+                    <p class="up-jwt-object-title">${escapeHtml(key)}</p>
+                    ${renderLearningJwtObjectInspector(entryValue, key)}
+                  </section>
+                `
+              )
+              .join("")}
+          </div>`
+        : ""}
+    `;
+  }
+
+  function renderLearningJwtSummaryCards(inspection = null) {
+    if (!inspection?.token) {
+      return '<p class="up-jwt-empty-state">No JWT is available to inspect.</p>';
+    }
+    const summary = inspection.summary || {};
+    const cards = [
+      ["Algorithm", firstNonEmptyString([summary.algorithm, "Not returned"])],
+      ["Type", firstNonEmptyString([summary.type, "Not returned"])],
+      ["Key ID", firstNonEmptyString([summary.keyId, "Not returned"])],
+      ["Issuer", firstNonEmptyString([summary.issuer, "Not returned"])],
+      ["Client ID", firstNonEmptyString([summary.clientId, "Not returned"])],
+      ["Subject", firstNonEmptyString([summary.subject, "Not returned"])],
+      ["Audience", firstNonEmptyString([summary.audience, "Not returned"])],
+      ["Issued", firstNonEmptyString([summary.issuedAt, "Not returned"])],
+      ["Not Before", firstNonEmptyString([summary.notBefore, "Not returned"])],
+      ["Expires", firstNonEmptyString([summary.expiresAt, "Not returned"])],
+      ["Scopes", summary.scopes && summary.scopes.length > 0 ? summary.scopes.join(", ") : "Not returned"],
+      ["Decode State", inspection.valid === true ? "Decoded locally" : "Needs review"],
+    ];
+    return `
+      <div class="up-jwt-summary-grid">
+        ${cards
+          .map(
+            ([label, value]) => `
+              <article class="up-jwt-summary-card">
+                <p class="up-jwt-summary-label">${escapeHtml(label)}</p>
+                <p class="up-jwt-summary-value">${escapeHtml(value)}</p>
+              </article>
+            `
+          )
+          .join("")}
+      </div>
+    `;
+  }
+
+  function buildLearningJwtInspectorMarkup(inspection = null) {
+    const normalizedInspection = inspection && typeof inspection === "object" ? inspection : null;
+    if (!normalizedInspection?.token) {
+      return '<p class="up-jwt-empty-state">No JWT is available to inspect.</p>';
+    }
+    return `
+      <div class="up-jwt-layout">
+        <section class="up-jwt-panel">
+          <header class="up-jwt-panel-head">
+            <p class="up-jwt-panel-title">Encoded JWT</p>
+            <p class="up-jwt-panel-subtitle">Raw JWT segments shown without sending the token to any third-party service.</p>
+          </header>
+          <div class="up-jwt-panel-body">
+            <div class="up-jwt-token-segments">
+              <article class="up-jwt-token-segment">
+                <p class="up-jwt-token-segment-label">Header Segment</p>
+                <code>${escapeHtml(chunkLearningInspectorText(normalizedInspection.headerSegment))}</code>
+              </article>
+              <article class="up-jwt-token-segment">
+                <p class="up-jwt-token-segment-label">Payload Segment</p>
+                <code>${escapeHtml(chunkLearningInspectorText(normalizedInspection.payloadSegment))}</code>
+              </article>
+              <article class="up-jwt-token-segment">
+                <p class="up-jwt-token-segment-label">Signature Segment</p>
+                <code>${escapeHtml(chunkLearningInspectorText(normalizedInspection.signatureSegment))}</code>
+              </article>
+            </div>
+          </div>
+        </section>
+        <section class="up-jwt-panel">
+          <header class="up-jwt-panel-head">
+            <p class="up-jwt-panel-title">Decoded JWT</p>
+            <p class="up-jwt-panel-subtitle">${
+              normalizedInspection.valid === true
+                ? "Header and payload were decoded locally."
+                : "UnderPAR could not fully decode this token. Review the raw segments."
+            }</p>
+          </header>
+          <div class="up-jwt-panel-body">
+            ${renderLearningJwtSummaryCards(normalizedInspection)}
+            <div class="up-jwt-sections">
+              <section class="up-jwt-object-section">
+                <p class="up-jwt-object-title">Header</p>
+                ${renderLearningJwtObjectInspector(normalizedInspection.header)}
+              </section>
+              <section class="up-jwt-object-section">
+                <p class="up-jwt-object-title">Payload</p>
+                ${renderLearningJwtObjectInspector(normalizedInspection.payload)}
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  return Object.freeze({
+    extractJwtCandidateFromText: extractLearningJwtCandidateFromText,
+    decodeJwtToken: decodeLearningJwtToken,
+    buildInspectorMarkup: buildLearningJwtInspectorMarkup,
+  });
+}
+
 function getLearningJwtInspectorUtility() {
-  return globalThis.UnderParJwtInspector && typeof globalThis.UnderParJwtInspector.buildInspectorMarkup === "function"
-    ? globalThis.UnderParJwtInspector
-    : null;
+  const sharedInspector = globalThis.UnderParJwtInspector;
+  if (
+    sharedInspector &&
+    typeof sharedInspector.extractJwtCandidateFromText === "function" &&
+    typeof sharedInspector.decodeJwtToken === "function" &&
+    typeof sharedInspector.buildInspectorMarkup === "function"
+  ) {
+    return sharedInspector;
+  }
+  if (!learningJwtInspectorFallbackUtility) {
+    learningJwtInspectorFallbackUtility = buildLearningJwtInspectorFallbackUtility();
+  }
+  return learningJwtInspectorFallbackUtility;
 }
 
 function buildLearningInspectorCardHtml(type = "jwt") {
@@ -68789,10 +69163,6 @@ function inspectLearningJwtInput() {
     return;
   }
   const utility = getLearningJwtInspectorUtility();
-  if (!utility) {
-    showLearningInspectorError("jwt", "The shared JWT inspector utility is unavailable. Reload UnderPAR and retry.");
-    return;
-  }
   const token = utility.extractJwtCandidateFromText(rawInput);
   if (!token) {
     showLearningInspectorError("jwt", "UnderPAR could not locate a JWT in that input.");
