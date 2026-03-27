@@ -1365,6 +1365,27 @@ test("REST V2 MVPD meta preserves selected Comcast_SSO mappings when stale conte
   assert.equal(resolved.partnerPlatformMappings.Amazon, "Comcast_SSO");
 });
 
+test("REST V2 MVPD meta normalizes a generic Comcast Apple mapping back to the selected Comcast_SSO id", () => {
+  const { getRestV2MvpdMeta } = loadRestV2MvpdMetaResolver({
+    getRequestorScopedMvpdCache() {
+      return null;
+    },
+  });
+
+  const resolved = getRestV2MvpdMeta("MML", "Comcast_SSO", {
+    id: "Comcast_SSO",
+    name: "Xfinity (Comcast_SSO)",
+    platformMappingId: "Comcast",
+    partnerPlatformMappings: {
+      Apple: "Comcast",
+    },
+  });
+
+  assert.equal(resolved.id, "Comcast_SSO");
+  assert.equal(resolved.platformMappingId, "Comcast_SSO");
+  assert.equal(resolved.partnerPlatformMappings.Apple, "Comcast_SSO");
+});
+
 test("REST V2 partner snapshot resolver preserves the Apple-specific provider mapping for Comcast partner SSO", () => {
   const { resolveRestV2PartnerPlatformMappingDetailsFromSnapshot } =
     loadRestV2PartnerPlatformMappingSnapshotResolver();
@@ -1660,7 +1681,7 @@ test("REST V2 partner platform hydrator promotes cached Apple partner mappings e
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
 });
 
-test("REST V2 partner platform hydrator ignores a generic cached Apple mapping when the live snapshot is unavailable", async () => {
+test("REST V2 partner platform hydrator normalizes a generic cached Apple mapping back to Comcast_SSO when the live snapshot is unavailable", async () => {
   const { hydrateRestV2PartnerPlatformMappingFromConsoleContext } = loadRestV2PartnerPlatformMappingHydrator({
     resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
       return mvpdMeta || null;
@@ -1694,7 +1715,7 @@ test("REST V2 partner platform hydrator ignores a generic cached Apple mapping w
 
   assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO");
   assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO");
-  assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast");
+  assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO");
 });
 
 test("REST V2 learning reruns inferred partner hydration after console snapshot mapping resolves the Comcast Apple provider id", async () => {

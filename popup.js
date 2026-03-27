@@ -27299,6 +27299,18 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9]/g, "");
+  const normalizeSelectedSsoProviderId = (value = "") => {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue || !/sso/i.test(normalizedMvpdId)) {
+      return normalizedValue;
+    }
+    const normalizedValueToken = normalizePlatformMappingToken(normalizedValue);
+    const normalizedMvpdToken = normalizePlatformMappingToken(normalizedMvpdId);
+    if (!normalizedValueToken || !normalizedMvpdToken || normalizedValueToken === normalizedMvpdToken) {
+      return normalizedValue;
+    }
+    return normalizedMvpdToken.startsWith(normalizedValueToken) ? normalizedMvpdId : normalizedValue;
+  };
   const scorePlatformMappingStrength = (value = "") => {
     const normalizedValue = String(value || "").trim();
     if (!normalizedValue) {
@@ -27364,7 +27376,7 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
     }
     Object.entries(source).forEach(([rawPartnerName, rawMappingId]) => {
       const partnerName = String(rawPartnerName || "").trim();
-      const mappingId = String(rawMappingId || "").trim();
+      const mappingId = normalizeSelectedSsoProviderId(rawMappingId);
       if (!partnerName || !mappingId) {
         return;
       }
@@ -27388,8 +27400,8 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
         normalizedMvpdId,
       ]) || normalizedMvpdId,
     platformMappingId: preferPlatformMappingId(
-      firstNonEmptyString([cacheMeta?.platformMappingId, cacheMeta?.platformMappingID]),
-      firstNonEmptyString([providedMeta?.platformMappingId, providedMeta?.platformMappingID])
+      normalizeSelectedSsoProviderId(firstNonEmptyString([cacheMeta?.platformMappingId, cacheMeta?.platformMappingID])),
+      normalizeSelectedSsoProviderId(firstNonEmptyString([providedMeta?.platformMappingId, providedMeta?.platformMappingID]))
     ),
     logoUrl: firstNonEmptyString([providedMeta?.logoUrl, cacheMeta?.logoUrl]),
     boardingStatus: firstNonEmptyString([providedMeta?.boardingStatus, cacheMeta?.boardingStatus]),
@@ -89922,6 +89934,29 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     currentMvpdMeta?.partnerPlatformMappings && typeof currentMvpdMeta.partnerPlatformMappings === "object"
       ? { ...currentMvpdMeta.partnerPlatformMappings }
       : {};
+  const selectedMvpdProviderId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
+  const normalizePartnerProviderToken = (value = "") =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+  const normalizePartnerProviderId = (value = "") => {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue || !selectedMvpdProviderId || !/sso/i.test(selectedMvpdProviderId)) {
+      return normalizedValue;
+    }
+    const normalizedValueToken = normalizePartnerProviderToken(normalizedValue);
+    const normalizedSelectedToken = normalizePartnerProviderToken(selectedMvpdProviderId);
+    if (!normalizedValueToken || !normalizedSelectedToken || normalizedValueToken === normalizedSelectedToken) {
+      return normalizedValue;
+    }
+    return normalizedSelectedToken.startsWith(normalizedValueToken) ? selectedMvpdProviderId : normalizedValue;
+  };
+  const normalizedExistingPartnerPlatformMappings = Object.fromEntries(
+    Object.entries(existingPartnerPlatformMappings)
+      .map(([partnerName, providerId]) => [String(partnerName || "").trim(), normalizePartnerProviderId(providerId)])
+      .filter(([partnerName, providerId]) => partnerName && providerId)
+  );
   const persistMvpdMeta = (nextMvpdMeta = null) => {
     if (!nextMvpdMeta || typeof nextMvpdMeta !== "object") {
       return nextMvpdMeta;
@@ -89935,7 +89970,7 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     partnerCandidates
       .map((partnerName) =>
         String(
-          Object.entries(existingPartnerPlatformMappings).find(
+          Object.entries(normalizedExistingPartnerPlatformMappings).find(
             ([rawPartnerName, rawProviderId]) =>
               normalizeRestV2PartnerSsoPlatformName(rawPartnerName) ===
                 normalizeRestV2PartnerSsoPlatformName(partnerName) &&
@@ -89945,7 +89980,6 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
       )
       .find(Boolean) || ""
   ).trim();
-  const selectedMvpdProviderId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
   const genericSelectedMvpdBaseToken =
     selectedMvpdProviderId && /sso/i.test(selectedMvpdProviderId)
       ? String(selectedMvpdProviderId.replace(/(?:[_-]?sso(?:[_-].+)?)$/i, "") || "").trim()
@@ -89961,9 +89995,9 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate) ? String(mappedPartnerProviderId || "").trim() : "";
   })();
   const preferredPartnerFallbackId = dedupeRestV2CandidateStrings([
-    context?.mvpdPlatformMappingId,
-    currentMvpdMeta?.platformMappingId,
-    currentMvpdMeta?.platformMappingID,
+    normalizePartnerProviderId(context?.mvpdPlatformMappingId),
+    normalizePartnerProviderId(currentMvpdMeta?.platformMappingId),
+    normalizePartnerProviderId(currentMvpdMeta?.platformMappingID),
     selectedMvpdProviderId,
   ]).find((candidate) => {
     const normalizedCandidate = String(candidate || "").trim().toLowerCase();
@@ -89971,11 +90005,14 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   });
   if (partnerCandidates.length === 0) {
     if (realFrameworkProviderId) {
-      context.mvpdPlatformMappingId = realFrameworkProviderId;
+      const normalizedFrameworkProviderId = normalizePartnerProviderId(realFrameworkProviderId);
+      context.mvpdPlatformMappingId = normalizedFrameworkProviderId;
       context.mvpdMeta = persistMvpdMeta({
         ...currentMvpdMeta,
-        ...(Object.keys(existingPartnerPlatformMappings).length > 0 ? { partnerPlatformMappings: existingPartnerPlatformMappings } : {}),
-        platformMappingId: realFrameworkProviderId,
+        ...(Object.keys(normalizedExistingPartnerPlatformMappings).length > 0
+          ? { partnerPlatformMappings: normalizedExistingPartnerPlatformMappings }
+          : {}),
+        platformMappingId: normalizedFrameworkProviderId,
       });
     }
     if (!context?.mvpdMeta && currentMvpdMeta) {
@@ -90015,7 +90052,9 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
       context.mvpdPlatformMappingId = fallbackMappingId;
       context.mvpdMeta = persistMvpdMeta({
         ...currentMvpdMeta,
-        ...(Object.keys(existingPartnerPlatformMappings).length > 0 ? { partnerPlatformMappings: existingPartnerPlatformMappings } : {}),
+        ...(Object.keys(normalizedExistingPartnerPlatformMappings).length > 0
+          ? { partnerPlatformMappings: normalizedExistingPartnerPlatformMappings }
+          : {}),
         platformMappingId: fallbackMappingId,
       });
       return context;
@@ -90027,16 +90066,24 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   }
 
   const resolvedDetails = resolveRestV2PartnerPlatformMappingDetailsFromSnapshot(snapshot, partnerCandidates);
+  const normalizedSnapshotPartnerPlatformMappings = Object.fromEntries(
+    Object.entries(
+      resolvedDetails?.partnerPlatformMappings && typeof resolvedDetails.partnerPlatformMappings === "object"
+        ? resolvedDetails.partnerPlatformMappings
+        : {}
+    )
+      .map(([partnerName, providerId]) => [String(partnerName || "").trim(), normalizePartnerProviderId(providerId)])
+      .filter(([partnerName, providerId]) => partnerName && providerId)
+  );
   const mergedPartnerPlatformMappings = {
-    ...existingPartnerPlatformMappings,
-    ...(resolvedDetails?.partnerPlatformMappings && typeof resolvedDetails.partnerPlatformMappings === "object"
-      ? resolvedDetails.partnerPlatformMappings
-      : {}),
+    ...normalizedExistingPartnerPlatformMappings,
+    ...normalizedSnapshotPartnerPlatformMappings,
   };
+  const normalizedResolvedSnapshotMappingId = normalizePartnerProviderId(resolvedDetails?.resolvedMappingId);
   const usableResolvedSnapshotMappingId = (() => {
-    const normalizedCandidate = String(resolvedDetails?.resolvedMappingId || "").trim().toLowerCase();
+    const normalizedCandidate = String(normalizedResolvedSnapshotMappingId || "").trim().toLowerCase();
     return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate)
-      ? String(resolvedDetails?.resolvedMappingId || "").trim()
+      ? String(normalizedResolvedSnapshotMappingId || "").trim()
       : "";
   })();
   const resolvedMappingId = String(
