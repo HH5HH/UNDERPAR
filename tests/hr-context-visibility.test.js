@@ -3723,15 +3723,10 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/retrieveAuthorizeDecisionsForMvpdUsingPOST",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
-      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
       usesBodyResources: true,
       requireBodyResources: true,
-      usesAdobeSubjectToken: true,
-      usesAdServiceToken: true,
-      usesPartnerFrameworkStatus: true,
-      usesTempPassIdentity: true,
       contentType: "application/json",
     },
     baseContext,
@@ -3739,9 +3734,13 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   );
   assert.equal(authorizePlan.fieldValues["path.mvpd"], "Comcast_SSO");
   assert.equal(authorizePlan.fieldValues["header.Content-Type"], "application/json");
-  assert.equal(authorizePlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
-  assert.equal(authorizePlan.fieldValues["header.AD-Service-Token"], adServiceToken);
-  assert.equal(authorizePlan.fieldValues["header.AP-Temppass-Identity"], normalizedTempPassIdentity);
+  assert.equal(authorizePlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+  assert.equal(authorizePlan.fieldValues["header.X-Device-Info"], "device-info-123");
+  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.AP-Visitor-Identifier"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.Adobe-Subject-Token"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.AD-Service-Token"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.AP-Temppass-Identity"), false);
   assert.deepEqual(toArray(authorizePlan.fieldValues["body.resources"]), ["urn:resource:turner"]);
 
   const decisionsPlan = buildRestV2InteractiveDocsHydrationPlan(
@@ -3751,15 +3750,10 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
-      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
       usesBodyResources: true,
       requireBodyResources: true,
-      usesAdobeSubjectToken: true,
-      usesAdServiceToken: true,
-      usesPartnerFrameworkStatus: true,
-      usesTempPassIdentity: true,
       contentType: "application/json",
     },
     baseContext,
@@ -3767,9 +3761,13 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   );
   assert.equal(decisionsPlan.fieldValues["path.mvpd"], "Comcast_SSO");
   assert.equal(decisionsPlan.fieldValues["header.Content-Type"], "application/json");
-  assert.equal(decisionsPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
-  assert.equal(decisionsPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
-  assert.equal(decisionsPlan.fieldValues["header.AP-Temppass-Identity"], normalizedTempPassIdentity);
+  assert.equal(decisionsPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
+  assert.equal(decisionsPlan.fieldValues["header.X-Device-Info"], "device-info-123");
+  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.AP-Visitor-Identifier"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.Adobe-Subject-Token"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.AD-Service-Token"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.AP-Temppass-Identity"), false);
   assert.deepEqual(toArray(decisionsPlan.fieldValues["body.resources"]), ["urn:resource:turner"]);
   assert.deepEqual(toArray(decisionsPlan.missingRequiredFields), []);
 
