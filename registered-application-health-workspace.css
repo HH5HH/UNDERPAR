@@ -337,12 +337,15 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
 }
 
 .regapp-app-summary-scopes {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+  min-width: 0;
 }
 
 .regapp-app-summary-fact {

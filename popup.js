@@ -13069,11 +13069,6 @@ const els = {
   mvpdWorkspaceLaunchBtn: document.getElementById("mvpd-workspace-launch-btn"),
   hrServicesContainer: document.getElementById("hr-services-container"),
   premiumServicesContainer: document.getElementById("premium-services-container"),
-  learningInspectorDialog: document.getElementById("learning-inspector-dialog"),
-  learningInspectorDialogTitle: document.getElementById("learning-inspector-dialog-title"),
-  learningInspectorDialogSubtitle: document.getElementById("learning-inspector-dialog-subtitle"),
-  learningInspectorDialogBody: document.getElementById("learning-inspector-dialog-body"),
-  learningInspectorDialogCloseButton: document.getElementById("learning-inspector-dialog-close"),
 };
 
 let clickEsmEndpoints = [];
@@ -67891,6 +67886,7 @@ function buildLearningInspectorCardHtml(type = "jwt") {
       <p class="hr-learning-inspector-summary" data-learning-inspector-summary="${escapeHtml(normalizedType)}" aria-live="polite">
         ${escapeHtml(config.defaultSummary)}
       </p>
+      <section class="hr-learning-inspector-result" data-learning-inspector-result="${escapeHtml(normalizedType)}" hidden></section>
     </article>
   `;
 }
@@ -67916,40 +67912,19 @@ function getLearningInspectorField(type = "jwt", field = "input") {
   return els.hrServicesContainer.querySelector(`[data-learning-inspector-${normalizedField}="${normalizedType}"]`);
 }
 
-function setLearningInspectorSummary(type = "jwt", message = "", severity = "info") {
+function setLearningInspectorSummary(type = "jwt", message = "", severity = "info", options = {}) {
   const summaryElement = getLearningInspectorField(type, "summary");
   if (!(summaryElement instanceof HTMLElement)) {
     return;
   }
   const config = getLearningInspectorConfig(type);
   const text = String(message || "").trim();
-  summaryElement.textContent = text || config.defaultSummary;
+  const showDefault = options?.showDefault !== false;
+  const nextText = text || (showDefault ? config.defaultSummary : "");
+  summaryElement.textContent = nextText;
   summaryElement.classList.toggle("is-error", severity === "error" && Boolean(text));
   summaryElement.classList.toggle("is-success", severity === "success" && Boolean(text));
-}
-
-function openLearningInspectorDialog(options = {}) {
-  if (
-    !(els.learningInspectorDialog instanceof HTMLDialogElement) ||
-    !(els.learningInspectorDialogTitle instanceof HTMLElement) ||
-    !(els.learningInspectorDialogSubtitle instanceof HTMLElement) ||
-    !(els.learningInspectorDialogBody instanceof HTMLElement)
-  ) {
-    return false;
-  }
-  els.learningInspectorDialogTitle.textContent = String(options?.title || "Inspector").trim() || "Inspector";
-  els.learningInspectorDialogSubtitle.textContent = String(options?.subtitle || "").trim();
-  els.learningInspectorDialogBody.innerHTML = String(options?.bodyHtml || "").trim();
-  if (!els.learningInspectorDialog.open) {
-    els.learningInspectorDialog.showModal();
-  }
-  return true;
-}
-
-function closeLearningInspectorDialog() {
-  if (els.learningInspectorDialog instanceof HTMLDialogElement && els.learningInspectorDialog.open) {
-    els.learningInspectorDialog.close();
-  }
+  summaryElement.hidden = !nextText;
 }
 
 function chunkLearningInspectorText(value = "", chunkSize = 64) {
@@ -68153,50 +68128,65 @@ function buildLearningBase64InspectorMarkup(inspection = null) {
   `;
 }
 
+function setLearningInspectorResult(type = "jwt", bodyHtml = "") {
+  const resultElement = getLearningInspectorField(type, "result");
+  if (!(resultElement instanceof HTMLElement)) {
+    return;
+  }
+  const html = String(bodyHtml || "").trim();
+  resultElement.innerHTML = html;
+  resultElement.hidden = !html;
+}
+
+function resetLearningInspector(type = "jwt") {
+  setLearningInspectorSummary(type, "", "info", { showDefault: true });
+  setLearningInspectorResult(type, "");
+}
+
+function showLearningInspectorError(type = "jwt", message = "") {
+  setLearningInspectorResult(type, "");
+  setLearningInspectorSummary(type, message, "error", { showDefault: false });
+}
+
+function showLearningInspectorResult(type = "jwt", bodyHtml = "") {
+  setLearningInspectorSummary(type, "", "success", { showDefault: false });
+  setLearningInspectorResult(type, bodyHtml);
+}
+
 function inspectLearningJwtInput() {
   const inputElement = getLearningInspectorField("jwt", "input");
   const rawInput = inputElement instanceof HTMLTextAreaElement ? String(inputElement.value || "").trim() : "";
   if (!rawInput) {
-    setLearningInspectorSummary("jwt", "Paste a JWT or token-bearing payload first.", "error");
+    showLearningInspectorError("jwt", "Paste a JWT or token-bearing payload first.");
     return;
   }
   const utility = getLearningJwtInspectorUtility();
   if (!utility) {
-    setLearningInspectorSummary("jwt", "The shared JWT inspector utility is unavailable. Reload UnderPAR and retry.", "error");
+    showLearningInspectorError("jwt", "The shared JWT inspector utility is unavailable. Reload UnderPAR and retry.");
     return;
   }
   const token = utility.extractJwtCandidateFromText(rawInput);
   if (!token) {
-    setLearningInspectorSummary("jwt", "UnderPAR could not locate a JWT in that input.", "error");
+    showLearningInspectorError("jwt", "UnderPAR could not locate a JWT in that input.");
     return;
   }
   const inspection = utility.decodeJwtToken(token);
-  setLearningInspectorSummary("jwt", "Decoded JWT locally. Review the inspector dialog for details.", "success");
-  openLearningInspectorDialog({
-    title: "JWT Inspector",
-    subtitle: "Decoded from LEARNING ad hoc input.",
-    bodyHtml: utility.buildInspectorMarkup(inspection),
-  });
+  showLearningInspectorResult("jwt", utility.buildInspectorMarkup(inspection));
 }
 
 function inspectLearningBase64Input() {
   const inputElement = getLearningInspectorField("base64", "input");
   const rawInput = inputElement instanceof HTMLTextAreaElement ? String(inputElement.value || "").trim() : "";
   if (!rawInput) {
-    setLearningInspectorSummary("base64", "Paste a Base64 value or payload first.", "error");
+    showLearningInspectorError("base64", "Paste a Base64 value or payload first.");
     return;
   }
   const inspection = resolveLearningBase64Inspection(rawInput);
   if (!inspection) {
-    setLearningInspectorSummary("base64", "UnderPAR could not locate a decodable Base64 value in that input.", "error");
+    showLearningInspectorError("base64", "UnderPAR could not locate a decodable Base64 value in that input.");
     return;
   }
-  setLearningInspectorSummary("base64", "Decoded Base64 locally. Review the inspector dialog for details.", "success");
-  openLearningInspectorDialog({
-    title: "Base64 Inspector",
-    subtitle: "Decoded from LEARNING ad hoc input.",
-    bodyHtml: buildLearningBase64InspectorMarkup(inspection),
-  });
+  showLearningInspectorResult("base64", buildLearningBase64InspectorMarkup(inspection));
 }
 
 function wireLearningInspectors(section) {
@@ -68235,7 +68225,7 @@ function wireLearningInspectors(section) {
       if (inputElement instanceof HTMLTextAreaElement) {
         inputElement.value = "";
       }
-      setLearningInspectorSummary(type, "");
+      resetLearningInspector(type);
     });
   });
 }
@@ -94439,20 +94429,6 @@ function registerEventHandlers() {
   if (els.getLatestBtn) {
     els.getLatestBtn.addEventListener("click", () => {
       void triggerGetLatestWorkflow();
-    });
-  }
-
-  if (els.learningInspectorDialogCloseButton) {
-    els.learningInspectorDialogCloseButton.addEventListener("click", () => {
-      closeLearningInspectorDialog();
-    });
-  }
-
-  if (els.learningInspectorDialog) {
-    els.learningInspectorDialog.addEventListener("click", (event) => {
-      if (event.target === els.learningInspectorDialog) {
-        closeLearningInspectorDialog();
-      }
     });
   }
 

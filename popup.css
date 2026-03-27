@@ -2993,83 +2993,43 @@ select:disabled {
   color: rgb(var(--underpar-success-1000));
 }
 
-.hr-learning-inspector-dialog {
-  width: min(920px, calc(100vw - 28px));
-  max-width: calc(100vw - 28px);
-  max-height: calc(100vh - 32px);
-  padding: 0;
-  border: 1px solid rgba(var(--service-learning-zip-1100), 0.26);
-  border-radius: 18px;
+.hr-learning-inspector-result {
+  margin: 0 16px 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(var(--service-learning-zip-1100), 0.14);
+}
+
+.hr-learning-inspector-result .up-jwt-layout {
+  gap: 12px;
+}
+
+.hr-learning-inspector-result .up-jwt-panel {
   background:
-    linear-gradient(180deg, rgba(20, 24, 31, 0.98), rgba(11, 15, 21, 0.98)),
-    radial-gradient(circle at top right, rgba(var(--service-learning-zip-1000), 0.12), rgba(var(--service-learning-zip-1000), 0) 44%);
+    linear-gradient(180deg, rgba(12, 17, 24, 0.96), rgba(9, 13, 19, 0.96)),
+    radial-gradient(circle at top right, rgba(var(--service-learning-zip-1000), 0.08), rgba(var(--service-learning-zip-1000), 0) 42%);
+  border-color: rgba(var(--service-learning-zip-1100), 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+.hr-learning-inspector-result .up-jwt-panel-title,
+.hr-learning-inspector-result .up-jwt-object-title,
+.hr-learning-inspector-result .up-jwt-token-segment-label,
+.hr-learning-inspector-result .up-jwt-summary-label {
+  color: rgba(var(--underpar-gray-800-rgb), 0.94);
+}
+
+.hr-learning-inspector-result .up-jwt-panel-subtitle,
+.hr-learning-inspector-result .up-jwt-summary-value,
+.hr-learning-inspector-result .up-jwt-object-list dd {
+  color: rgba(var(--underpar-gray-700-rgb), 0.92);
+}
+
+.hr-learning-inspector-result .up-jwt-token-segment code {
+  background: rgba(5, 8, 13, 0.78);
   color: rgba(var(--underpar-gray-900-rgb), 0.96);
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.42);
-}
-
-.hr-learning-inspector-dialog::backdrop {
-  background: rgba(4, 8, 14, 0.72);
-  backdrop-filter: blur(4px);
-}
-
-.hr-learning-inspector-dialog-shell {
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100vh - 32px);
-}
-
-.hr-learning-inspector-dialog-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 18px 14px;
-  border-bottom: 1px solid rgba(var(--service-learning-zip-1100), 0.16);
-}
-
-.hr-learning-inspector-dialog-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.hr-learning-inspector-dialog-title {
-  margin: 0;
-  color: rgba(var(--underpar-gray-900-rgb), 0.98);
-  font-size: 18px;
-  font-weight: 800;
-}
-
-.hr-learning-inspector-dialog-subtitle {
-  margin: 0;
-  color: rgba(var(--underpar-gray-700-rgb), 0.84);
-  font-size: 12px;
-}
-
-.hr-learning-inspector-dialog-close {
-  width: 34px;
-  height: 34px;
-  border: 1px solid rgba(var(--service-learning-zip-1100), 0.22);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(var(--underpar-gray-900-rgb), 0.96);
-  font-size: 24px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.hr-learning-inspector-dialog-close:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.hr-learning-inspector-dialog-close:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(var(--service-learning-zip-1000), 0.24);
-}
-
-.hr-learning-inspector-dialog-body {
-  overflow: auto;
-  padding: 0 18px 18px;
+  border-color: rgba(var(--service-learning-zip-1100), 0.12);
 }
 
 .hr-learning-inspector-code {

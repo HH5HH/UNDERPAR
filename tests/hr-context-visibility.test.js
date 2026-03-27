@@ -957,6 +957,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildLearningInspectorCardHtmlSource, /getLearningInspectorConfig/);
   assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-form="\$\{escapeHtml\(normalizedType\)\}"/);
   assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-input="\$\{escapeHtml\(normalizedType\)\}"/);
+  assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-result="\$\{escapeHtml\(normalizedType\)\}"/);
   assert.match(wireLearningInspectorsSource, /inspectLearningJwtInput\(\)/);
   assert.match(wireLearningInspectorsSource, /inspectLearningBase64Input\(\)/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /mvpdWorkspaceEnsureSnapshot/);
@@ -981,7 +982,6 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /service-box-container hr-rest-v2-docs-shell-body/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /hr-context-service-pill hr-context-service-pill--service-rest-v2 hr-rest-v2-docs-pill/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /getRestV2LearningServiceCollapsed/);
-  assert.match(popupHtml, /learning-inspector-dialog/);
   assert.match(popupHtml, /underpar-jwt-inspector\.js/);
   assert.match(wireRestV2LearningContainerCollapsiblesSource, /wireCollapsibleSection/);
   assert.match(wireRestV2LearningContainerCollapsiblesSource, /setRestV2LearningServiceCollapsed/);
@@ -1011,6 +1011,10 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /REST V2 learning methods/);
   assert.match(popupSource, /JWT Inspector/);
   assert.match(popupSource, /Base64 Inspector/);
+  assert.match(popupSource, /showLearningInspectorResult\("jwt"/);
+  assert.match(popupSource, /showLearningInspectorResult\("base64"/);
+  assert.doesNotMatch(popupSource, /Review the inspector dialog for details/);
+  assert.doesNotMatch(popupSource, /openLearningInspectorDialog/);
   assert.doesNotMatch(popupSource, /buildRestV2LearningContextItemHtml/);
   assert.doesNotMatch(popupSource, /buildRestV2LearningUiStatusMeta/);
   assert.doesNotMatch(popupSource, /Click any REST V2 LEARNING deeplink to preview the exact interactive docs payload here/);
@@ -1051,7 +1055,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupCss, /\.hr-rest-v2-docs-pill/);
   assert.match(popupCss, /\.hr-learning-inspector-stack/);
   assert.match(popupCss, /\.hr-learning-inspector-card/);
-  assert.match(popupCss, /\.hr-learning-inspector-dialog/);
+  assert.match(popupCss, /\.hr-learning-inspector-result/);
   assert.match(popupCss, /\.hr-learning-inspector-code/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry\.is-active/);

@@ -832,6 +832,7 @@ test("registered application workspace renders scope coverage as colored service
   assert.match(markup, /hr-context-service-pill--service-default/);
   assert.match(markup, /hr-context-service-pill--service-rest-v2/);
   assert.match(markup, /hr-context-service-pill--service-esm/);
+  assert.match(markup, /regapp-app-summary-facts[\s\S]*Requestor Hints[\s\S]*regapp-app-summary-scopes/);
   assert.doesNotMatch(markup, /Client ID/);
   assert.doesNotMatch(markup, /Type/);
   assert.doesNotMatch(markup, /Scope Coverage/);
@@ -878,7 +879,8 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(popupSource, /Base64 Inspector/);
   assert.match(popupSource, /buildLearningInspectorToolsHtml/);
   assert.match(popupSource, /wireLearningInspectors\(section\)/);
-  assert.match(popupHtml, /learning-inspector-dialog/);
+  assert.match(popupSource, /data-learning-inspector-result=/);
+  assert.doesNotMatch(popupHtml, /learning-inspector-dialog/);
   assert.match(popupHtml, /underpar-jwt-inspector\.js/);
   assert.match(workspaceHtml, /Registered Application Health Inspector/);
   assert.doesNotMatch(workspaceHtml, /workspace-premium-service-summary/);

@@ -854,6 +854,10 @@ function renderApplicationSummaryFacts(app = {}) {
   const summaryFacts = [
     ["Requestor Hints", buildRequestorSummary(app)],
   ];
+  const scopeMarkup =
+    Array.isArray(app.scopeLabels) && app.scopeLabels.length > 0
+      ? `<div class="regapp-app-summary-scopes">${renderServicePillList(app.scopeLabels)}</div>`
+      : "";
   return `
     <div class="regapp-app-summary-facts">
       ${summaryFacts
@@ -866,12 +870,8 @@ function renderApplicationSummaryFacts(app = {}) {
           `
         )
         .join("")}
+      ${scopeMarkup}
     </div>
-    ${
-      Array.isArray(app.scopeLabels) && app.scopeLabels.length > 0
-        ? `<div class="regapp-app-summary-scopes">${renderServicePillList(app.scopeLabels)}</div>`
-        : ""
-    }
   `;
 }
 
