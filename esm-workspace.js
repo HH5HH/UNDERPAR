@@ -1212,6 +1212,105 @@ function detectWorkspaceZoomKeyFromUrl(urlValue = "") {
   return detected;
 }
 
+function shiftInstantToEsmSourceCalendar(dateValue) {
+  return new Date(new Date(dateValue).getTime() + (ESM_SOURCE_UTC_OFFSET_MINUTES * 60 * 1000));
+}
+
+function getEsmSourceCalendarParts(dateValue = Date.now()) {
+  const shiftedValue = shiftInstantToEsmSourceCalendar(dateValue);
+  return {
+    year: shiftedValue.getUTCFullYear(),
+    month: shiftedValue.getUTCMonth() + 1,
+    day: shiftedValue.getUTCDate(),
+    hour: shiftedValue.getUTCHours(),
+  };
+}
+
+function parseEsmQueryDatePartValue(value = "", min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const numeric = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isInteger(numeric) || numeric < min || numeric > max) {
+    return null;
+  }
+  return numeric;
+}
+
+function resolveEsmQueryDatePart(searchParams, keys = [], fallbackValue = 0, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  if (!(searchParams instanceof URLSearchParams)) {
+    return fallbackValue;
+  }
+  const candidates = Array.isArray(keys) ? keys : [keys];
+  for (const key of candidates) {
+    const values = searchParams.getAll(String(key || "").trim()).filter((value) => String(value || "").trim());
+    for (const value of values) {
+      const parsedValue = parseEsmQueryDatePartValue(value, min, max);
+      if (parsedValue != null) {
+        return parsedValue;
+      }
+    }
+  }
+  return fallbackValue;
+}
+
+function buildEsmContextualStartQueryValue(urlValue = "", nowValue = Date.now()) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, ESM_NODE_BASE_URL);
+    const zoomKey = detectWorkspaceZoomKeyFromUrl(parsed.toString());
+    if (!zoomKey) {
+      return "";
+    }
+    const calendarParts = getEsmSourceCalendarParts(nowValue);
+    const year = resolveEsmQueryDatePart(parsed.searchParams, ["year", "yr"], calendarParts.year, 1970, 9999);
+    const month = resolveEsmQueryDatePart(parsed.searchParams, ["month", "mo"], calendarParts.month, 1, 12);
+    const day = resolveEsmQueryDatePart(parsed.searchParams, ["day"], calendarParts.day, 1, 31);
+    const hour = resolveEsmQueryDatePart(parsed.searchParams, ["hour", "hr"], calendarParts.hour, 0, 23);
+    const yyyy = String(year).padStart(4, "0");
+    const mm = String(month).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    const hh = String(hour).padStart(2, "0");
+
+    if (zoomKey === "YR") {
+      return `${yyyy}-01-01T00:00:00`;
+    }
+    if (zoomKey === "MO") {
+      return `${yyyy}-${mm}-01T00:00:00`;
+    }
+    if (zoomKey === "DAY" || zoomKey === "HR") {
+      return `${yyyy}-${mm}-${dd}T00:00:00`;
+    }
+    if (zoomKey === "MIN") {
+      return `${yyyy}-${mm}-${dd}T${hh}:00:00`;
+    }
+    return "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function ensureEsmContextualStartQuery(urlValue = "", nowValue = Date.now()) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, ESM_NODE_BASE_URL);
+    const currentStart = String(parsed.searchParams.get("start") || "").trim();
+    if (!currentStart) {
+      const contextualStart = buildEsmContextualStartQueryValue(parsed.toString(), nowValue);
+      if (contextualStart) {
+        parsed.searchParams.delete("start");
+        parsed.searchParams.set("start", contextualStart);
+      }
+    }
+    return parsed.toString();
+  } catch (_error) {
+    return raw;
+  }
+}
+
 function resolveWorkspaceCardZoomKey(cardLike = null) {
   const explicit = normalizeWorkspaceZoomKey(cardLike?.zoomKey);
   if (explicit) {
@@ -3621,14 +3720,14 @@ function buildInheritedRequestUrl(endpointUrl, sourceRequestUrl) {
 
     const sourceRaw = String(sourceRequestUrl || "").trim();
     if (!sourceRaw) {
-      return endpointParsed.toString();
+      return ensureEsmContextualStartQuery(endpointParsed.toString());
     }
 
     const rawQueryText = extractRawQueryText(sourceRaw);
     if (!rawQueryText) {
-      return endpointParsed.toString();
+      return ensureEsmContextualStartQuery(endpointParsed.toString());
     }
-    return `${endpointParsed.toString()}?${rawQueryText}`;
+    return ensureEsmContextualStartQuery(`${endpointParsed.toString()}?${rawQueryText}`);
   } catch (_error) {
     return endpointRaw;
   }
@@ -5824,7 +5923,7 @@ async function maybeConsumePendingWorkspaceDeeplink() {
     return;
   }
 
-  const requestUrl = buildWorkspaceDeeplinkAbsoluteRequestUrl(pending.requestPath);
+  const requestUrl = ensureEsmContextualStartQuery(buildWorkspaceDeeplinkAbsoluteRequestUrl(pending.requestPath));
   if (!requestUrl) {
     state.pendingWorkspaceDeeplink = null;
     clearWorkspaceDeeplinkFromLocation();

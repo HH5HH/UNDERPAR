@@ -581,9 +581,10 @@ function buildControlPanelServicePillMarkup(label = "", options = {}) {
   if (!normalizedLabel) {
     return "";
   }
-  return `<span class="regapp-service-pill regapp-service-pill--${escapeHtml(
-    normalizeControlPanelServicePillToneKey(normalizedLabel, options)
-  )}">${escapeHtml(normalizedLabel)}</span>`;
+  const toneKey = normalizeControlPanelServicePillToneKey(normalizedLabel, options);
+  return `<span class="regapp-service-pill hr-context-service-pill regapp-service-pill--${escapeHtml(
+    toneKey
+  )} hr-context-service-pill--${escapeHtml(toneKey)}">${escapeHtml(normalizedLabel)}</span>`;
 }
 
 function buildControllerProgrammerLabel(snapshot = null) {

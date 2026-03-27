@@ -149,7 +149,9 @@ function buildServicePillMarkup(label = "", options = {}) {
     return "";
   }
   const toneKey = normalizeServicePillToneKey(normalizedLabel, options);
-  return `<span class="regapp-service-pill regapp-service-pill--${escapeHtml(toneKey)}">${escapeHtml(normalizedLabel)}</span>`;
+  return `<span class="regapp-service-pill hr-context-service-pill regapp-service-pill--${escapeHtml(
+    toneKey
+  )} hr-context-service-pill--${escapeHtml(toneKey)}">${escapeHtml(normalizedLabel)}</span>`;
 }
 
 function renderServicePillList(labels = [], options = {}) {

@@ -829,6 +829,9 @@ test("registered application workspace renders scope coverage as colored service
   assert.match(markup, /regapp-service-pill--service-default/);
   assert.match(markup, /regapp-service-pill--service-rest-v2/);
   assert.match(markup, /regapp-service-pill--service-esm/);
+  assert.match(markup, /hr-context-service-pill--service-default/);
+  assert.match(markup, /hr-context-service-pill--service-rest-v2/);
+  assert.match(markup, /hr-context-service-pill--service-esm/);
   assert.doesNotMatch(markup, /Client ID/);
   assert.doesNotMatch(markup, /Type/);
   assert.doesNotMatch(markup, /Scope Coverage/);
@@ -909,6 +912,7 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(popupSource, /if \(action === "switch-premium-service-application"\)/);
   assert.match(popupSource, /switchRegisteredApplicationHealthPremiumService\(/);
   assert.match(workspaceCss, /\.regapp-service-pill--service-default/);
+  assert.match(workspaceCss, /\.hr-context-service-pill--service-default/);
   assert.doesNotMatch(workspaceCss, /\.regapp-health-service-line/);
   assert.doesNotMatch(extractFunctionSource(popupSource, "fetchRegisteredApplicationHealthDashboardReport"), /enrichRegisteredApplicationForHydration/);
   assert.doesNotMatch(

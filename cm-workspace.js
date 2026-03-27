@@ -266,6 +266,7 @@ const state = {
   cmAvailabilityResolved: false,
   cmContainerVisible: null,
   tenantScope: "",
+  tenantName: "",
   programmerId: "",
   programmerName: "",
   programmerHydrationReady: false,
@@ -907,6 +908,42 @@ function shiftInstantToPstCalendar(dateValue) {
   return new Date(new Date(dateValue).getTime() + (CM_SOURCE_UTC_OFFSET_MINUTES * 60 * 1000));
 }
 
+function getCmuSourceCalendarParts(dateValue = Date.now()) {
+  const shiftedValue = shiftInstantToPstCalendar(dateValue);
+  return {
+    year: shiftedValue.getUTCFullYear(),
+    month: shiftedValue.getUTCMonth() + 1,
+    day: shiftedValue.getUTCDate(),
+    hour: shiftedValue.getUTCHours(),
+    minute: shiftedValue.getUTCMinutes(),
+  };
+}
+
+function parseCmuQueryDatePartValue(value = "", min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const numeric = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isInteger(numeric) || numeric < min || numeric > max) {
+    return null;
+  }
+  return numeric;
+}
+
+function resolveCmuQueryDatePart(searchParams, keys = [], fallbackValue = 0, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  if (!(searchParams instanceof URLSearchParams)) {
+    return fallbackValue;
+  }
+  const candidates = Array.isArray(keys) ? keys : [keys];
+  for (const key of candidates) {
+    const values = searchParams.getAll(String(key || "").trim()).filter((value) => String(value || "").trim());
+    for (const value of values) {
+      const parsedValue = parseCmuQueryDatePartValue(value, min, max);
+      if (parsedValue != null) {
+        return parsedValue;
+      }
+    }
+  }
+  return fallbackValue;
+}
+
 function normalizeCmuZoomFromValue(value = "") {
   const normalized = String(value || "")
     .trim()
@@ -993,50 +1030,39 @@ function getCmuZoomKeyFromUrl(urlValue = "") {
   return "";
 }
 
-function buildCmuTimeWindowForZoom(zoomKey = "") {
-  const normalizedZoom = String(zoomKey || "").trim().toUpperCase();
-  const now = new Date();
-  const nowPst = shiftInstantToPstCalendar(now);
-  const nowIso = formatCmuIsoQueryValue(now);
+function buildCmuContextualStartQueryValue(urlValue = "", nowValue = Date.now()) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, CM_WORKSPACE_REPORTS_BASE_URL);
+    const zoomKey = getCmuZoomKeyFromUrl(parsed.toString());
+    if (!zoomKey) {
+      return "";
+    }
+    const calendarParts = getCmuSourceCalendarParts(nowValue);
+    const year = resolveCmuQueryDatePart(parsed.searchParams, ["year", "yr"], calendarParts.year, 1970, 9999);
+    const month = resolveCmuQueryDatePart(parsed.searchParams, ["month", "mo"], calendarParts.month, 1, 12);
+    const day = resolveCmuQueryDatePart(parsed.searchParams, ["day"], calendarParts.day, 1, 31);
+    const hour = resolveCmuQueryDatePart(parsed.searchParams, ["hour", "hr"], calendarParts.hour, 0, 23);
 
-  if (normalizedZoom === "YR") {
-    return {
-      start: String(nowPst.getUTCFullYear() - 1),
-      end: nowIso,
-    };
+    if (zoomKey === "YR") {
+      return formatCmuDateQueryValue(new Date(Date.UTC(year, 0, 1, 0, 0, 0)));
+    }
+    if (zoomKey === "MO") {
+      return formatCmuDateQueryValue(new Date(Date.UTC(year, month - 1, 1, 0, 0, 0)));
+    }
+    if (zoomKey === "DAY" || zoomKey === "HR") {
+      return formatCmuDateQueryValue(new Date(Date.UTC(year, month - 1, day, 0, 0, 0)));
+    }
+    if (zoomKey === "MIN") {
+      return formatCmuDateQueryValue(new Date(Date.UTC(year, month - 1, day, hour, 0, 0)));
+    }
+    return "";
+  } catch {
+    return "";
   }
-  if (normalizedZoom === "MO") {
-    const previousMonth = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth() - 1, 1));
-    return {
-      start: `${previousMonth.getUTCFullYear()}-${String(previousMonth.getUTCMonth() + 1).padStart(2, "0")}`,
-      end: nowIso,
-    };
-  }
-  if (normalizedZoom === "DAY") {
-    const previousDay = new Date(Date.UTC(nowPst.getUTCFullYear(), nowPst.getUTCMonth(), nowPst.getUTCDate() - 1));
-    return {
-      start: `${previousDay.getUTCFullYear()}-${String(previousDay.getUTCMonth() + 1).padStart(2, "0")}-${String(
-        previousDay.getUTCDate()
-      ).padStart(2, "0")}`,
-      end: nowIso,
-    };
-  }
-  if (normalizedZoom === "HR") {
-    return {
-      start: formatCmuIsoQueryValue(new Date(now.getTime() - 12 * 60 * 60 * 1000)),
-      end: nowIso,
-    };
-  }
-  if (normalizedZoom === "MIN") {
-    return {
-      start: formatCmuIsoQueryValue(new Date(now.getTime() - 60 * 60 * 1000)),
-      end: nowIso,
-    };
-  }
-  return {
-    start: nowIso,
-    end: nowIso,
-  };
 }
 
 function normalizeWorkspaceTenantScopeValue(value) {
@@ -1136,6 +1162,7 @@ function resolveWorkspaceTenantLabel(cardState = null, cardPayload = null) {
     firstNonEmptyString([
       cardPayload?.tenantName,
       cardState?.tenantName,
+      state.tenantName,
       cardPayload?.tenantId,
       cardState?.tenantId,
       state.tenantScope,
@@ -1143,6 +1170,10 @@ function resolveWorkspaceTenantLabel(cardState = null, cardPayload = null) {
       state.programmerId,
     ]) || ""
   ).trim();
+}
+
+function getWorkspaceTenantDisplayLabel(cardState = null, cardPayload = null) {
+  return String(resolveWorkspaceTenantLabel(cardState, cardPayload) || getProgrammerLabel()).trim();
 }
 
 function ensureCmuQueryDefaults(urlValue, tenantScope = "") {
@@ -1156,9 +1187,14 @@ function ensureCmuQueryDefaults(urlValue, tenantScope = "") {
       parsed.searchParams.set("format", "json");
     }
     if (isCmuUsageRequestUrl(parsed.toString())) {
-      const timeWindow = buildCmuTimeWindowForZoom(getCmuZoomKeyFromUrl(parsed.toString()));
-      parsed.searchParams.set("start", String(timeWindow.start || formatCmuIsoQueryValue(new Date())));
-      parsed.searchParams.set("end", String(timeWindow.end || formatCmuIsoQueryValue(new Date())));
+      const currentStart = String(parsed.searchParams.get("start") || "").trim();
+      if (!currentStart) {
+        const contextualStart = buildCmuContextualStartQueryValue(parsed.toString());
+        if (contextualStart) {
+          parsed.searchParams.delete("start");
+          parsed.searchParams.set("start", contextualStart);
+        }
+      }
     }
     const lowerPath = String(parsed.pathname || "").toLowerCase();
     if (!parsed.searchParams.has("metrics") && (lowerPath.includes("/tenant") || lowerPath.includes("/hour"))) {
@@ -1915,6 +1951,16 @@ function hasProgrammerContext() {
   return Boolean(String(state.programmerId || "").trim() || String(state.programmerName || "").trim());
 }
 
+function hasRunnableWorkspaceControllerContext() {
+  return (
+    state.controllerOnline === true ||
+    (state.programmerHydrationReady === true &&
+      state.cmAvailabilityResolved === true &&
+      state.cmAvailable === true &&
+      hasProgrammerContext())
+  );
+}
+
 function shouldShowNonCmMode() {
   return (
     state.cmAvailabilityResolved === true &&
@@ -2062,15 +2108,16 @@ function updateControllerBanner() {
   }
 
   const hasProgrammerContext = Boolean(String(state.programmerId || "").trim() || String(state.programmerName || "").trim());
+  const tenantLabel = getWorkspaceTenantDisplayLabel();
   if (state.workspaceLocked) {
-    els.controllerState.textContent = `Selected Media Company: ${getProgrammerLabel()}`;
+    els.controllerState.textContent = `CM Tenant: ${tenantLabel}`;
     els.filterState.textContent = "CM workspace is locked for this media company. No Premium, No CM, No Dice.";
     return;
   }
-  if (!state.controllerOnline) {
+  if (!hasRunnableWorkspaceControllerContext()) {
     if (hasProgrammerContext) {
-      els.controllerState.textContent = `Selected Media Company: ${getProgrammerLabel()}`;
-      els.filterState.textContent = "Waiting for CM controller sync from UnderPAR side panel...";
+      els.controllerState.textContent = `CM Tenant: ${tenantLabel}`;
+      els.filterState.textContent = "";
     } else {
       els.controllerState.textContent = "Waiting for UnderPAR side panel controller...";
       els.filterState.textContent = "";
@@ -2078,7 +2125,7 @@ function updateControllerBanner() {
     return;
   }
 
-  els.controllerState.textContent = `Selected Media Company: ${getProgrammerLabel()}`;
+  els.controllerState.textContent = `CM Tenant: ${tenantLabel}`;
   const requestorLabel = state.requestorIds.length > 0 ? state.requestorIds.join(", ") : "All requestors";
   const mvpdLabel = state.mvpdIds.length > 0 ? state.mvpdIds.join(", ") : "All MVPDs";
   const harvestList = Array.isArray(state.profileHarvestList) ? state.profileHarvestList : [];
@@ -2242,7 +2289,7 @@ function maybeConsumePendingAutoRerun() {
     }
     return;
   }
-  const hasRunnableControllerContext = state.controllerOnline === true;
+  const hasRunnableControllerContext = hasRunnableWorkspaceControllerContext();
   if (!hasRunnableControllerContext) {
     return;
   }
@@ -4065,28 +4112,28 @@ function buildInheritedRequestUrl(endpointUrl, sourceRequestUrl, tenantScope = "
 
     const sourceRaw = String(sourceRequestUrl || "").trim();
     if (!sourceRaw) {
-      return applyWorkspaceTenantScopeToUsageUrl(endpointParsed.toString(), tenantScope);
+      return ensureCmuQueryDefaults(endpointParsed.toString(), tenantScope);
     }
 
     const sourceParsed = new URL(sourceRaw);
     sourceParsed.searchParams.forEach((value, key) => {
       endpointParsed.searchParams.append(key, value);
     });
-    return applyWorkspaceTenantScopeToUsageUrl(endpointParsed.toString(), tenantScope);
+    return ensureCmuQueryDefaults(endpointParsed.toString(), tenantScope);
   } catch (_error) {
     const endpointWithoutHash = endpointRaw.split("#", 1)[0];
     const endpointBase = endpointWithoutHash.split("?", 1)[0];
     const sourceRaw = String(sourceRequestUrl || "").trim();
     const sourceQueryIndex = sourceRaw.indexOf("?");
     if (sourceQueryIndex < 0) {
-      return endpointBase;
+      return ensureCmuQueryDefaults(endpointBase, tenantScope);
     }
     const sourceHashIndex = sourceRaw.indexOf("#", sourceQueryIndex + 1);
     const sourceQuery = sourceRaw.slice(sourceQueryIndex + 1, sourceHashIndex >= 0 ? sourceHashIndex : undefined).trim();
     if (!sourceQuery) {
-      return applyWorkspaceTenantScopeToUsageUrl(endpointBase, tenantScope);
+      return ensureCmuQueryDefaults(endpointBase, tenantScope);
     }
-    return applyWorkspaceTenantScopeToUsageUrl(`${endpointBase}?${sourceQuery}`, tenantScope);
+    return ensureCmuQueryDefaults(`${endpointBase}?${sourceQuery}`, tenantScope);
   }
 }
 
@@ -5751,6 +5798,7 @@ function applyControllerState(payload) {
       incomingEnvironmentKey || previousEnvironmentKey
     );
   state.tenantScope = String(payload?.tenantScope || "").trim();
+  state.tenantName = String(payload?.tenantName || "").trim();
   state.requestorIds = Array.isArray(payload?.requestorIds)
     ? payload.requestorIds.map((value) => String(value || "").trim()).filter(Boolean)
     : [];
@@ -6835,7 +6883,7 @@ async function maybeConsumePendingWorkspaceDeeplink() {
   if (!pending || state.pendingWorkspaceDeeplinkConsuming) {
     return;
   }
-  if (!state.controllerOnline || !String(state.programmerId || "").trim()) {
+  if (!hasRunnableWorkspaceControllerContext() || !String(state.programmerId || "").trim()) {
     return;
   }
 

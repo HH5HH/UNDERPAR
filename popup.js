@@ -34787,6 +34787,89 @@ function stripServerManagedTimeParams(urlValue, baseUrl = window.location.href) 
   }
 }
 
+function popupShiftInstantToPstCalendar(dateValue) {
+  return new Date(new Date(dateValue).getTime() + (-8 * 60 * 60 * 1000));
+}
+
+function popupGetCmuSourceCalendarParts(dateValue = Date.now()) {
+  const shiftedValue = popupShiftInstantToPstCalendar(dateValue);
+  return {
+    year: shiftedValue.getUTCFullYear(),
+    month: shiftedValue.getUTCMonth() + 1,
+    day: shiftedValue.getUTCDate(),
+    hour: shiftedValue.getUTCHours(),
+  };
+}
+
+function popupParseDatePartValue(value = "", min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const numeric = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isInteger(numeric) || numeric < min || numeric > max) {
+    return null;
+  }
+  return numeric;
+}
+
+function popupResolveDatePart(searchParams, keys = [], fallbackValue = 0, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  if (!(searchParams instanceof URLSearchParams)) {
+    return fallbackValue;
+  }
+  const candidates = Array.isArray(keys) ? keys : [keys];
+  for (const key of candidates) {
+    const values = searchParams.getAll(String(key || "").trim()).filter((value) => String(value || "").trim());
+    for (const value of values) {
+      const parsedValue = popupParseDatePartValue(value, min, max);
+      if (parsedValue != null) {
+        return parsedValue;
+      }
+    }
+  }
+  return fallbackValue;
+}
+
+function popupFormatCmuStartDateValue(dateValue) {
+  const value = dateValue instanceof Date ? dateValue : new Date(dateValue);
+  const yyyy = value.getUTCFullYear();
+  const mm = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(value.getUTCDate()).padStart(2, "0");
+  const hh = String(value.getUTCHours()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:00:00`;
+}
+
+function popupBuildCmuContextualStartQueryValue(urlValue = "", nowValue = Date.now()) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+    const zoomKey = cmuUsageGetZoomKey(cmuUsageExtractPathParts(parsed.pathname), parsed.toString());
+    if (!zoomKey) {
+      return "";
+    }
+    const calendarParts = popupGetCmuSourceCalendarParts(nowValue);
+    const year = popupResolveDatePart(parsed.searchParams, ["year", "yr"], calendarParts.year, 1970, 9999);
+    const month = popupResolveDatePart(parsed.searchParams, ["month", "mo"], calendarParts.month, 1, 12);
+    const day = popupResolveDatePart(parsed.searchParams, ["day"], calendarParts.day, 1, 31);
+    const hour = popupResolveDatePart(parsed.searchParams, ["hour", "hr"], calendarParts.hour, 0, 23);
+
+    if (zoomKey === "YR") {
+      return popupFormatCmuStartDateValue(new Date(Date.UTC(year, 0, 1, 0, 0, 0)));
+    }
+    if (zoomKey === "MO") {
+      return popupFormatCmuStartDateValue(new Date(Date.UTC(year, month - 1, 1, 0, 0, 0)));
+    }
+    if (zoomKey === "DAY" || zoomKey === "HR") {
+      return popupFormatCmuStartDateValue(new Date(Date.UTC(year, month - 1, day, 0, 0, 0)));
+    }
+    if (zoomKey === "MIN") {
+      return popupFormatCmuStartDateValue(new Date(Date.UTC(year, month - 1, day, hour, 0, 0)));
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 function popupSafeDecodeUrlSegment(segment = "") {
   const raw = String(segment || "");
   try {
@@ -34832,6 +34915,112 @@ function popupParseEsmRawQueryPairs(urlValue = "") {
         hasAssignment: true,
       };
     });
+}
+
+function popupDetectEsmZoomKey(urlValue = "") {
+  const href = String(urlValue || "").trim();
+  if (!href) {
+    return "";
+  }
+  const zoomTokens = {
+    YR: "/year",
+    MO: "/month",
+    DAY: "/day",
+    HR: "/hour",
+    MIN: "/minute",
+  };
+  let detected = "";
+  let bestIndex = -1;
+  Object.entries(zoomTokens).forEach(([key, token]) => {
+    const index = href.lastIndexOf(token);
+    if (index > bestIndex) {
+      detected = key;
+      bestIndex = index;
+    }
+  });
+  return detected;
+}
+
+function popupShiftInstantToEsmSourceCalendar(dateValue) {
+  return new Date(new Date(dateValue).getTime() + (ESM_SOURCE_UTC_OFFSET_MINUTES * 60 * 1000));
+}
+
+function popupGetEsmSourceCalendarParts(dateValue = Date.now()) {
+  const shiftedValue = popupShiftInstantToEsmSourceCalendar(dateValue);
+  return {
+    year: shiftedValue.getUTCFullYear(),
+    month: shiftedValue.getUTCMonth() + 1,
+    day: shiftedValue.getUTCDate(),
+    hour: shiftedValue.getUTCHours(),
+  };
+}
+
+function popupBuildEsmContextualStartQueryValue(urlValue = "", nowValue = Date.now()) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const esmBaseUrl = firstNonEmptyString([
+      ADOBE_MGMT_BASE ? `${String(ADOBE_MGMT_BASE).replace(/\/+$/, "")}/esm/v3/media-company/` : "",
+      "https://mgmt.auth.adobe.com/esm/v3/media-company/",
+    ]);
+    const parsed = new URL(raw, esmBaseUrl);
+    const zoomKey = popupDetectEsmZoomKey(parsed.toString());
+    if (!zoomKey) {
+      return "";
+    }
+    const calendarParts = popupGetEsmSourceCalendarParts(nowValue);
+    const year = popupResolveDatePart(parsed.searchParams, ["year", "yr"], calendarParts.year, 1970, 9999);
+    const month = popupResolveDatePart(parsed.searchParams, ["month", "mo"], calendarParts.month, 1, 12);
+    const day = popupResolveDatePart(parsed.searchParams, ["day"], calendarParts.day, 1, 31);
+    const hour = popupResolveDatePart(parsed.searchParams, ["hour", "hr"], calendarParts.hour, 0, 23);
+    const yyyy = String(year).padStart(4, "0");
+    const mm = String(month).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    const hh = String(hour).padStart(2, "0");
+
+    if (zoomKey === "YR") {
+      return `${yyyy}-01-01T00:00:00`;
+    }
+    if (zoomKey === "MO") {
+      return `${yyyy}-${mm}-01T00:00:00`;
+    }
+    if (zoomKey === "DAY" || zoomKey === "HR") {
+      return `${yyyy}-${mm}-${dd}T00:00:00`;
+    }
+    if (zoomKey === "MIN") {
+      return `${yyyy}-${mm}-${dd}T${hh}:00:00`;
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+function popupEnsureEsmContextualStartQuery(urlValue = "", nowValue = Date.now()) {
+  const raw = String(urlValue || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const esmBaseUrl = firstNonEmptyString([
+      ADOBE_MGMT_BASE ? `${String(ADOBE_MGMT_BASE).replace(/\/+$/, "")}/esm/v3/media-company/` : "",
+      "https://mgmt.auth.adobe.com/esm/v3/media-company/",
+    ]);
+    const parsed = new URL(raw, esmBaseUrl);
+    const currentStart = String(parsed.searchParams.get("start") || "").trim();
+    if (!currentStart) {
+      const contextualStart = popupBuildEsmContextualStartQueryValue(parsed.toString(), nowValue);
+      if (contextualStart) {
+        parsed.searchParams.delete("start");
+        parsed.searchParams.set("start", contextualStart);
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
 }
 
 function normalizeEsmDisplayDimensionKey(value = "") {
@@ -35537,9 +35726,7 @@ function cmBuildUsageReportExampleRequestUrl(example = null, options = {}) {
     return "";
   }
   try {
-    const parsed = new URL(stripServerManagedTimeParams(baseUrl, CM_REPORTS_BASE_URL), CM_REPORTS_BASE_URL);
-    parsed.searchParams.delete("start");
-    parsed.searchParams.delete("end");
+    const parsed = new URL(baseUrl, CM_REPORTS_BASE_URL);
     parsed.searchParams.set("format", "json");
     CM_USAGE_TENANT_QUERY_KEYS.forEach((key) => parsed.searchParams.delete(key));
     if (tenantScope && cmUsagePathRequiresTenantScope(parsed.pathname)) {
@@ -35554,7 +35741,11 @@ function cmBuildUsageReportExampleRequestUrl(example = null, options = {}) {
         parsed.searchParams.set("mvpd", mvpdId);
       }
     }
-    return parsed.toString();
+    return ensureCmUsageEndpointFormat(parsed.toString(), {
+      tenantScope,
+      tenantId: options?.tenantId,
+      programmerId: options?.programmerId,
+    });
   } catch {
     return baseUrl;
   }
@@ -37149,17 +37340,23 @@ function ensureCmUsageEndpointFormat(url, options = {}) {
     getCmTenantScopeForProgrammer({ programmerId: String(options?.programmerId || "").trim() })
   );
   try {
-    const parsed = new URL(stripServerManagedTimeParams(raw, CM_REPORTS_BASE_URL), CM_REPORTS_BASE_URL);
+    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
     const canonicalPath = canonicalizeCmuUsagePath(parsed.pathname);
     if (canonicalPath) {
       parsed.pathname = canonicalPath;
     }
-    parsed.searchParams.delete("start");
-    parsed.searchParams.delete("end");
     if (!parsed.searchParams.has("format")) {
       parsed.searchParams.set("format", "json");
     }
     if (isCanonicalCmuUsagePath(parsed.pathname)) {
+      const currentStart = String(parsed.searchParams.get("start") || "").trim();
+      if (!currentStart) {
+        const contextualStart = popupBuildCmuContextualStartQueryValue(parsed.toString());
+        if (contextualStart) {
+          parsed.searchParams.delete("start");
+          parsed.searchParams.set("start", contextualStart);
+        }
+      }
       if (!parsed.searchParams.has("metrics")) {
         const lowerPath = String(parsed.pathname || "").toLowerCase();
         if (lowerPath.includes("/tenant") || lowerPath.includes("/hour")) {
@@ -38380,6 +38577,80 @@ body[data-theme="dark"]{
     return yyyy + "-" + mm + "-" + dd + "T" + hh + ":" + mi + ":" + ss;
   }
 
+  function shiftInstantToPstCalendar(dateValue) {
+    return new Date(new Date(dateValue).getTime() + (-8 * 60 * 60 * 1000));
+  }
+
+  function getCmuSourceCalendarParts(dateValue = Date.now()) {
+    const shiftedValue = shiftInstantToPstCalendar(dateValue);
+    return {
+      year: shiftedValue.getUTCFullYear(),
+      month: shiftedValue.getUTCMonth() + 1,
+      day: shiftedValue.getUTCDate(),
+      hour: shiftedValue.getUTCHours(),
+    };
+  }
+
+  function parseDatePartValue(value = "", min = 0, max = Number.MAX_SAFE_INTEGER) {
+    const numeric = Number.parseInt(String(value || "").trim(), 10);
+    if (!Number.isInteger(numeric) || numeric < min || numeric > max) {
+      return null;
+    }
+    return numeric;
+  }
+
+  function resolveDatePart(searchParams, keys = [], fallbackValue = 0, min = 0, max = Number.MAX_SAFE_INTEGER) {
+    if (!(searchParams instanceof URLSearchParams)) {
+      return fallbackValue;
+    }
+    const candidates = Array.isArray(keys) ? keys : [keys];
+    for (const key of candidates) {
+      const values = searchParams.getAll(String(key || "").trim()).filter((value) => String(value || "").trim());
+      for (const value of values) {
+        const parsedValue = parseDatePartValue(value, min, max);
+        if (parsedValue != null) {
+          return parsedValue;
+        }
+      }
+    }
+    return fallbackValue;
+  }
+
+  function buildContextualCmuStartValue(urlValue = "", nowValue = Date.now()) {
+    const raw = String(urlValue || "").trim();
+    if (!raw) {
+      return "";
+    }
+    try {
+      const parsed = new URL(raw, CM_REPORTS_BASE_URL);
+      const zoomKey = getCmuZoomKeyFromPath(parsed.pathname, parsed.toString());
+      if (!zoomKey) {
+        return "";
+      }
+      const calendarParts = getCmuSourceCalendarParts(nowValue);
+      const year = resolveDatePart(parsed.searchParams, ["year", "yr"], calendarParts.year, 1970, 9999);
+      const month = resolveDatePart(parsed.searchParams, ["month", "mo"], calendarParts.month, 1, 12);
+      const day = resolveDatePart(parsed.searchParams, ["day"], calendarParts.day, 1, 31);
+      const hour = resolveDatePart(parsed.searchParams, ["hour", "hr"], calendarParts.hour, 0, 23);
+
+      if (zoomKey === "YR") {
+        return formatCmuDateValue(new Date(Date.UTC(year, 0, 1, 0, 0, 0)));
+      }
+      if (zoomKey === "MO") {
+        return formatCmuDateValue(new Date(Date.UTC(year, month - 1, 1, 0, 0, 0)));
+      }
+      if (zoomKey === "DAY" || zoomKey === "HR") {
+        return formatCmuDateValue(new Date(Date.UTC(year, month - 1, day, 0, 0, 0)));
+      }
+      if (zoomKey === "MIN") {
+        return formatCmuDateValue(new Date(Date.UTC(year, month - 1, day, hour, 0, 0)));
+      }
+      return "";
+    } catch {
+      return "";
+    }
+  }
+
   function normalizeCmuZoomToken(value = "") {
     const normalized = String(value || "")
       .trim()
@@ -38541,10 +38812,18 @@ body[data-theme="dark"]{
       if (canonicalPath) {
         parsed.pathname = canonicalPath;
       }
-      parsed.searchParams.delete("start");
-      parsed.searchParams.delete("end");
       if (!parsed.searchParams.has("format")) {
         parsed.searchParams.set("format", "json");
+      }
+      if (isCmuUsagePath(parsed.pathname)) {
+        const currentStart = String(parsed.searchParams.get("start") || "").trim();
+        if (!currentStart) {
+          const contextualStart = buildContextualCmuStartValue(parsed.toString());
+          if (contextualStart) {
+            parsed.searchParams.delete("start");
+            parsed.searchParams.set("start", contextualStart);
+          }
+        }
       }
       const lowerPath = parsed.pathname.toLowerCase();
       if (
@@ -42254,12 +42533,11 @@ function esmWorkspaceBuildEndpointUrl(esmWorkspaceState, endpoint) {
   parsed.hash = "";
   parsed.searchParams.delete("media-company");
   if (preserveQueryContext) {
-    return parsed.toString();
+    return popupEnsureEsmContextualStartQuery(parsed.toString());
   }
-  parsed.searchParams.delete("start");
   parsed.searchParams.delete("end");
   parsed.searchParams.set("format", "json");
-  return parsed.toString();
+  return popupEnsureEsmContextualStartQuery(parsed.toString());
 }
 
 function esmWorkspaceNormalizeRunRequestUrlOverride(endpointUrl, requestUrlOverride) {
@@ -45996,6 +46274,12 @@ function cmGetControllerStatePayload(cmState) {
     cmState?.cmService?.matchedTenants?.[0]?.tenantName,
     getCmTenantScopeForProgrammer(cmState?.programmer)
   );
+  const tenantName = firstNonEmptyString([
+    cmState?.cmService?.matchedTenants?.[0]?.tenantName,
+    cmState?.cmService?.matchedTenants?.[0]?.tenantId,
+    cmState?.programmer?.tenantName,
+    cmState?.programmer?.tenantId,
+  ]);
   const workspaceContextKey = buildCmWorkspaceControllerContextKey(
     programmerId,
     premiumPanelRequestToken,
@@ -46013,6 +46297,7 @@ function cmGetControllerStatePayload(cmState) {
     adobePassEnvironment,
     adobePassEnvironmentKey: String(adobePassEnvironment?.key || "").trim(),
     tenantScope,
+    tenantName,
     requestorIds,
     mvpdIds,
     cmAuth: getCmControllerAuthPayload(),
@@ -46088,6 +46373,12 @@ function cmGetSelectedControllerStatePayload(programmer = null, services = null,
     options?.programmerHydrationReady === true || options?.programmerHydrationReady === false
       ? options.programmerHydrationReady === true
       : isProgrammerWorkspaceHydrationReady(programmerId);
+  const tenantName = firstNonEmptyString([
+    resolvedServices?.cm?.matchedTenants?.[0]?.tenantName,
+    resolvedServices?.cm?.matchedTenants?.[0]?.tenantId,
+    resolvedProgrammer?.tenantName,
+    resolvedProgrammer?.tenantId,
+  ]);
   const workspaceContextKey = buildCmWorkspaceControllerContextKey(
     programmerId,
     premiumPanelRequestToken,
@@ -46105,6 +46396,7 @@ function cmGetSelectedControllerStatePayload(programmer = null, services = null,
     adobePassEnvironment,
     adobePassEnvironmentKey: String(adobePassEnvironment?.key || "").trim(),
     tenantScope: getCmTenantScopeForProgrammer(resolvedProgrammer),
+    tenantName,
     requestorIds,
     mvpdIds,
     cmAuth: getCmControllerAuthPayload(),
@@ -49217,10 +49509,8 @@ function cmApplyUsageExampleRequestContext(urlValue, record = null, cmState = nu
   const hasMvpdDimension = payload?.hasMvpdDimension === true;
   const selectedMvpdId = String(state.selectedMvpdId || "").trim();
   try {
-    const parsed = new URL(stripServerManagedTimeParams(raw, CM_REPORTS_BASE_URL), CM_REPORTS_BASE_URL);
+    const parsed = new URL(raw, CM_REPORTS_BASE_URL);
     parsed.searchParams.set("format", "json");
-    parsed.searchParams.delete("start");
-    parsed.searchParams.delete("end");
     const tenantScope = cmResolveUsageTenantScope(cmState, record);
     CM_USAGE_TENANT_QUERY_KEYS.forEach((key) => parsed.searchParams.delete(key));
     if (tenantScope && cmUsagePathRequiresTenantScope(parsed.pathname)) {
@@ -49234,7 +49524,7 @@ function cmApplyUsageExampleRequestContext(urlValue, record = null, cmState = nu
         parsed.searchParams.set("mvpd", selectedMvpdId);
       }
     }
-    return parsed.toString();
+    return ensureCmUsageEndpointFormat(parsed.toString(), { tenantScope });
   } catch {
     return raw;
   }

@@ -2576,6 +2576,13 @@ select:disabled {
   --service-pill-zip-1100: var(--service-rest-v2-zip-1100);
 }
 
+.hr-context-service-pill--service-default {
+  --service-pill-zip-500: 15, 88, 61;
+  --service-pill-zip-800: 26, 122, 84;
+  --service-pill-zip-900: 39, 148, 102;
+  --service-pill-zip-1100: 18, 97, 66;
+}
+
 .hr-context-service-pill--service-esm {
   --service-pill-zip-500: var(--service-esm-zip-500);
   --service-pill-zip-800: var(--service-esm-zip-800);
@@ -2603,6 +2610,13 @@ select:disabled {
   --service-pill-zip-800: var(--service-temp-pass-zip-800);
   --service-pill-zip-900: var(--service-temp-pass-zip-900);
   --service-pill-zip-1100: var(--service-temp-pass-zip-1100);
+}
+
+.hr-context-service-pill--service-neutral {
+  --service-pill-zip-500: var(--service-rest-v2-zip-500);
+  --service-pill-zip-800: var(--service-rest-v2-zip-800);
+  --service-pill-zip-900: var(--service-rest-v2-zip-900);
+  --service-pill-zip-1100: var(--service-rest-v2-zip-1100);
 }
 
 .hr-base64-hover-target {

@@ -2,6 +2,39 @@
 @import url("underpar-jwt-inspector.css");
 @import url("rest-workspace.css");
 
+:root {
+  --service-rest-v2-zip-500: 61, 68, 82;
+  --service-rest-v2-zip-800: 92, 103, 125;
+  --service-rest-v2-zip-900: 112, 121, 141;
+  --service-rest-v2-zip-1100: 151, 158, 172;
+  --service-esm-zip-500: 135, 47, 0;
+  --service-esm-zip-800: 199, 82, 0;
+  --service-esm-zip-900: 224, 100, 0;
+  --service-esm-zip-1100: 255, 137, 0;
+  --service-cm-zip-500: 107, 6, 195;
+  --service-cm-zip-800: 157, 78, 228;
+  --service-cm-zip-900: 173, 105, 233;
+  --service-cm-zip-1100: 197, 149, 240;
+  --service-degradation-zip-500: 147, 31, 17;
+  --service-degradation-zip-800: 223, 52, 34;
+  --service-degradation-zip-900: 252, 67, 46;
+  --service-degradation-zip-1100: 255, 134, 120;
+  --service-temp-pass-zip-500: 108, 61, 10;
+  --service-temp-pass-zip-800: 188, 117, 22;
+  --service-temp-pass-zip-900: 214, 142, 37;
+  --service-temp-pass-zip-1100: 255, 202, 112;
+  --service-default-zip-500: 15, 88, 61;
+  --service-default-zip-800: 26, 122, 84;
+  --service-default-zip-900: 39, 148, 102;
+  --service-default-zip-1100: 18, 97, 66;
+  --service-neutral-zip-500: var(--service-rest-v2-zip-500);
+  --service-neutral-zip-800: var(--service-rest-v2-zip-800);
+  --service-neutral-zip-900: var(--service-rest-v2-zip-900);
+  --service-neutral-zip-1100: var(--service-rest-v2-zip-1100);
+  --underpar-service-dark-panel-rgb: 27, 27, 27;
+  --underpar-service-dark-shell-rgb: 34, 34, 34;
+}
+
 .regapp-health-hero {
   align-items: stretch;
 }
@@ -24,90 +57,99 @@
 .regapp-service-pill-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
-.regapp-service-pill {
-  --service-zip-500: var(--service-rest-v2-zip-500);
-  --service-zip-800: var(--service-rest-v2-zip-800);
-  --service-zip-900: var(--service-rest-v2-zip-900);
-  --service-zip-1000: var(--service-rest-v2-zip-1000);
-  --service-zip-1100: var(--service-rest-v2-zip-1100);
-  --service-accent-soft: rgba(var(--service-zip-1000), 0.21);
+.regapp-service-pill,
+.hr-context-service-pill {
+  --service-pill-zip-500: var(--service-rest-v2-zip-500);
+  --service-pill-800: var(--service-rest-v2-zip-800);
+  --service-pill-900: var(--service-rest-v2-zip-900);
+  --service-pill-1100: var(--service-rest-v2-zip-1100);
+  --service-pill-top: color-mix(in srgb, rgb(var(--underpar-service-dark-panel-rgb)) 86%, rgb(var(--service-pill-900)) 14%);
+  --service-pill-bottom: color-mix(in srgb, rgb(var(--underpar-service-dark-shell-rgb)) 82%, rgb(var(--service-pill-800)) 18%);
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
   padding: 4px 8px;
   border-radius: 999px;
-  border: 1px solid var(--service-accent-soft);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, white 76%, rgb(var(--service-zip-500)) 24%),
-    color-mix(in srgb, white 86%, rgb(var(--service-zip-900)) 14%)
-  );
-  color: rgb(var(--service-zip-1100));
+  border: 1px solid rgba(var(--service-pill-900), 0.48);
+  background: linear-gradient(180deg, var(--service-pill-top), var(--service-pill-bottom));
+  color: rgb(var(--service-pill-1100));
   font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  text-decoration: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 8px 18px rgba(0, 0, 0, 0.22);
 }
 
-.regapp-service-pill--service-default {
-  --service-zip-500: 15, 88, 61;
-  --service-zip-800: 26, 122, 84;
-  --service-zip-900: 39, 148, 102;
-  --service-zip-1000: 57, 172, 120;
-  --service-zip-1100: 18, 97, 66;
+.regapp-service-pill:hover,
+.hr-context-service-pill:hover {
+  border-color: rgba(var(--service-pill-1100), 0.72);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--service-pill-top) 78%, rgb(var(--service-pill-1100)) 22%), var(--service-pill-bottom));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 12px 22px rgba(0, 0, 0, 0.28);
 }
 
-.regapp-service-pill--service-rest-v2 {
-  --service-zip-500: 61, 68, 82;
-  --service-zip-800: 92, 103, 125;
-  --service-zip-900: 112, 121, 141;
-  --service-zip-1000: 131, 139, 156;
-  --service-zip-1100: 151, 158, 172;
+.regapp-service-pill--service-default,
+.hr-context-service-pill--service-default {
+  --service-pill-zip-500: var(--service-default-zip-500);
+  --service-pill-800: var(--service-default-zip-800);
+  --service-pill-900: var(--service-default-zip-900);
+  --service-pill-1100: var(--service-default-zip-1100);
 }
 
-.regapp-service-pill--service-esm {
-  --service-zip-500: 135, 47, 0;
-  --service-zip-800: 199, 82, 0;
-  --service-zip-900: 224, 100, 0;
-  --service-zip-1000: 243, 117, 0;
-  --service-zip-1100: 255, 137, 0;
+.regapp-service-pill--service-rest-v2,
+.hr-context-service-pill--service-rest-v2 {
+  --service-pill-zip-500: var(--service-rest-v2-zip-500);
+  --service-pill-800: var(--service-rest-v2-zip-800);
+  --service-pill-900: var(--service-rest-v2-zip-900);
+  --service-pill-1100: var(--service-rest-v2-zip-1100);
 }
 
-.regapp-service-pill--service-cm {
-  --service-zip-500: 107, 6, 195;
-  --service-zip-800: 157, 78, 228;
-  --service-zip-900: 173, 105, 233;
-  --service-zip-1000: 186, 127, 237;
-  --service-zip-1100: 197, 149, 240;
+.regapp-service-pill--service-esm,
+.hr-context-service-pill--service-esm {
+  --service-pill-zip-500: var(--service-esm-zip-500);
+  --service-pill-800: var(--service-esm-zip-800);
+  --service-pill-900: var(--service-esm-zip-900);
+  --service-pill-1100: var(--service-esm-zip-1100);
 }
 
-.regapp-service-pill--service-degradation {
-  --service-zip-500: 147, 31, 17;
-  --service-zip-800: 223, 52, 34;
-  --service-zip-900: 252, 67, 46;
-  --service-zip-1000: 255, 103, 86;
-  --service-zip-1100: 255, 134, 120;
+.regapp-service-pill--service-cm,
+.hr-context-service-pill--service-cm,
+.hr-context-service-pill--service-cm-mvpd {
+  --service-pill-zip-500: var(--service-cm-zip-500);
+  --service-pill-800: var(--service-cm-zip-800);
+  --service-pill-900: var(--service-cm-zip-900);
+  --service-pill-1100: var(--service-cm-zip-1100);
 }
 
-.regapp-service-pill--service-temp-pass {
-  --service-zip-500: 108, 61, 10;
-  --service-zip-800: 188, 117, 22;
-  --service-zip-900: 214, 142, 37;
-  --service-zip-1000: 238, 170, 58;
-  --service-zip-1100: 255, 202, 112;
+.regapp-service-pill--service-degradation,
+.hr-context-service-pill--service-degradation {
+  --service-pill-zip-500: var(--service-degradation-zip-500);
+  --service-pill-800: var(--service-degradation-zip-800);
+  --service-pill-900: var(--service-degradation-zip-900);
+  --service-pill-1100: var(--service-degradation-zip-1100);
 }
 
-.regapp-service-pill--service-neutral {
-  --service-zip-500: 61, 68, 82;
-  --service-zip-800: 92, 103, 125;
-  --service-zip-900: 112, 121, 141;
-  --service-zip-1000: 131, 139, 156;
-  --service-zip-1100: 151, 158, 172;
+.regapp-service-pill--service-temp-pass,
+.hr-context-service-pill--service-temp-pass {
+  --service-pill-zip-500: var(--service-temp-pass-zip-500);
+  --service-pill-800: var(--service-temp-pass-zip-800);
+  --service-pill-900: var(--service-temp-pass-zip-900);
+  --service-pill-1100: var(--service-temp-pass-zip-1100);
+}
+
+.regapp-service-pill--service-neutral,
+.hr-context-service-pill--service-neutral {
+  --service-pill-zip-500: var(--service-neutral-zip-500);
+  --service-pill-800: var(--service-neutral-zip-800);
+  --service-pill-900: var(--service-neutral-zip-900);
+  --service-pill-1100: var(--service-neutral-zip-1100);
 }
 
 .regapp-jwt-utility-card {
