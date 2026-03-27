@@ -965,8 +965,10 @@ test("REST V2 learning card exposes every interactive doc operation across all s
 
   assert.match(popupSource, /const DCR_INTERACTIVE_DOC_ENTRIES = Object\.freeze\(\[/);
   assert.match(popupSource, /DCR API \(V2\)/);
+  assert.match(popupSource, /launchOnly:\s*true/);
   assert.match(popupSource, /operationId: "processSoftwareStatementUsingPOST"/);
   assert.match(popupSource, /operationId: "generateAccessTokenUsingPOST"/);
+  assert.match(popupSource, /buildDcrRegisterLaunchReason/);
   assert.match(buildDcrInteractiveDocsContextSource, /collectRestV2AppCandidatesFromPremiumApps/);
   assert.match(buildDcrInteractiveDocsContextSource, /extractRegisteredApplicationRedirectUri/);
   assert.match(prepareDcrInteractiveDocsContextForEntrySource, /enrichRegisteredApplicationForHydration/);
@@ -979,9 +981,13 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildDcrInteractiveDocsHydrationPlanSource, /query\.grant_type/);
   assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /autoProvisionClientCredentials === true/);
   assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /canProvisionClientCredentials === true/);
+  assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /resolvedEntry\.launchOnly === true/);
+  assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /buildDcrRegisterLaunchReason\(context\)/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /data-restv2-learning-service-key="dcrV2"/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /data-dcr-doc-entry-key/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /hr-context-service-pill--service-default/);
+  assert.match(buildDcrInteractiveDocsPanelHtmlSource, /\/register opens as reference-only, while \/token hydrates the live Run form\./);
+  assert.match(buildDcrInteractiveDocsPanelHtmlSource, /without form hydration/);
   assert.match(popupSource, /const REST_V2_INTERACTIVE_DOC_ENTRIES = Object\.freeze\(\[/);
   assert.match(popupSource, /sectionLabel: "1\. Configuration"/);
   assert.match(popupSource, /sectionLabel: "2\. Sessions"/);
@@ -1111,6 +1117,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(openDcrInteractiveDocsEntrySource, /setDcrLearningUiState/);
   assert.match(openDcrInteractiveDocsEntrySource, /openPremiumServiceDocumentation\("dcrV2"/);
   assert.match(openDcrInteractiveDocsEntrySource, /hydrateRestV2InteractiveDocsTab/);
+  assert.match(openDcrInteractiveDocsEntrySource, /entry\.launchOnly === true/);
+  assert.match(openDcrInteractiveDocsEntrySource, /Opened \$\{entry\.label\} docs\. \$\{launchReason\}/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /document\.getElementById\(`operation\/\$\{operationId\}`\)/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /\[data-cy="try-it"\]/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /\[data-cy="send-button"\]/);

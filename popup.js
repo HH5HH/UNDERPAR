@@ -270,6 +270,7 @@ const DCR_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     operationSummary: "Register client application",
     operationAnchor: "operation/processSoftwareStatementUsingPOST",
     operationId: "processSoftwareStatementUsingPOST",
+    launchOnly: true,
     contentType: "application/json",
     usesDeviceInfoHeader: true,
     requireDeviceInfoHeader: true,
@@ -67140,6 +67141,33 @@ function buildDcrInteractiveDocsHydrationPlan(entry = null, context = null) {
   };
 }
 
+function buildDcrRegisterLaunchReason(context = null) {
+  const resolvedContext = context && typeof context === "object" ? context : null;
+  const appLabel = String(
+    firstNonEmptyString([
+      resolvedContext?.appInfo?.appName,
+      resolvedContext?.appInfo?.name,
+      resolvedContext?.appInfo?.guid,
+      "the selected REST V2 registered application",
+    ]) || "the selected REST V2 registered application"
+  ).trim();
+  const programmerLabel = String(
+    firstNonEmptyString([
+      resolvedContext?.programmerName,
+      resolveSelectedProgrammer()?.programmerName,
+      "this Media Company",
+    ]) || "this Media Company"
+  ).trim();
+  const environmentLabel = String(
+    firstNonEmptyString([
+      getActiveAdobePassEnvironment()?.label,
+      state?.selectedEnvironmentLabel,
+      "the selected environment",
+    ]) || "the selected environment"
+  ).trim();
+  return `UnderPAR selected "${appLabel}" for /register before REST V2, just like ${programmerLabel} does in ${environmentLabel}.`;
+}
+
 function summarizeDcrInteractiveDocsActivationLockReason(pendingFields = [], plan = null) {
   const normalizedPendingFields = Array.isArray(pendingFields)
     ? pendingFields.map((fieldName) => String(fieldName || "").trim()).filter(Boolean)
@@ -67186,6 +67214,16 @@ function buildDcrInteractiveDocsEntryActivationState(entry = null, programmer = 
       ready: false,
       pendingFields: [],
       reason: String(context?.error || "DCR learning needs more UnderPAR context.").trim(),
+      context,
+      plan: null,
+    };
+  }
+
+  if (resolvedEntry.launchOnly === true) {
+    return {
+      ready: true,
+      pendingFields: [],
+      reason: buildDcrRegisterLaunchReason(context),
       context,
       plan: null,
     };
@@ -68315,7 +68353,7 @@ function buildDcrInteractiveDocsPanelHtml(programmer = null, services = null) {
               title="${escapeHtml(actionLabel)}"
               aria-label="${escapeHtml(actionLabel)}"
             >DCR API (V2)</button>
-            <p class="hr-rest-v2-docs-subtitle">Dynamic Client Registration methods, hydrated from the selected registered application before the online Run form is focused.</p>
+            <p class="hr-rest-v2-docs-subtitle">Dynamic Client Registration methods for the selected REST V2 registered application. /register opens as reference-only, while /token hydrates the live Run form.</p>
           </div>
           <div class="hr-rest-v2-docs-grid">
             ${entries
@@ -68325,7 +68363,9 @@ function buildDcrInteractiveDocsPanelHtml(programmer = null, services = null) {
                 const isReady = activationState.ready === true;
                 const isActive = String(entry?.key || "").trim() === activeEntryKey;
                 const entryActionLabel = isReady
-                  ? `Open and hydrate ${entry.label} in Adobe PASS DCR API interactive docs`
+                  ? entry.launchOnly === true
+                    ? `Open ${entry.label} in Adobe PASS DCR API interactive docs without form hydration`
+                    : `Open and hydrate ${entry.label} in Adobe PASS DCR API interactive docs`
                   : `${entry.label} is locked. ${String(activationState.reason || "").trim()}`;
                 const readinessLabel = isReady ? "READY NOW" : "SETUP NEEDED";
                 return `
@@ -70439,6 +70479,45 @@ async function openDcrInteractiveDocsEntry(entryKey = "", requestedUrl = "") {
     statusMessage: "Preparing exact DCR learning payload for the interactive docs form.",
   });
   setStatus(`Opening ${entry.label} interactive docs with UnderPAR context...`, "info");
+
+  if (entry.launchOnly === true) {
+    const launchReason = buildDcrRegisterLaunchReason(context);
+    publishLearningState("launch-only", {
+      programmerId: String(context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([context?.serviceProviderId, context?.requestorId]) || "").trim(),
+      appGuid: String(context?.appInfo?.guid || "").trim(),
+      appInfo: context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null,
+      context,
+      plan: null,
+      statusMessage: launchReason,
+      reason: launchReason,
+    });
+    const opened = await openPremiumServiceDocumentation("dcrV2", targetUrl);
+    if (opened?.ok !== true) {
+      publishLearningState("error", {
+        programmerId: String(context?.programmerId || "").trim(),
+        requestorId: String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim(),
+        serviceProviderId: String(firstNonEmptyString([context?.serviceProviderId, context?.requestorId]) || "").trim(),
+        appGuid: String(context?.appInfo?.guid || "").trim(),
+        appInfo: context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null,
+        context,
+        plan: null,
+        statusMessage: String(opened?.error || "Unable to open DCR interactive docs.").trim(),
+        reason: String(opened?.error || "Unable to open DCR interactive docs.").trim(),
+      });
+      return opened;
+    }
+    setStatus(`Opened ${entry.label} docs. ${launchReason}`, "info");
+    return {
+      ok: true,
+      launchOnly: true,
+      tabId: Number(opened?.tabId || 0),
+      windowId: Number(opened?.windowId || 0),
+      url: String(opened?.url || targetUrl).trim(),
+      context,
+    };
+  }
 
   let resolvedContext = null;
   let plan = null;
