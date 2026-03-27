@@ -2165,7 +2165,7 @@ test("REST V2 partner platform hydrator upgrades a generic captured Comcast fram
   assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
   assert.deepEqual(Array.from(context.mvpdMeta.partnerPlatformSettingIds.Apple || []), ["Comcast_SSO_Apple"]);
-  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple", "MML_Comcast_SSO"]);
+  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple"]);
 });
 
 test("REST V2 partner platform hydrator persists resolved Apple partner mappings into the requestor-scoped MVPD cache", async () => {
@@ -2235,7 +2235,7 @@ test("REST V2 partner platform hydrator persists resolved Apple partner mappings
   assert.equal(cached.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(cached.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
   assert.deepEqual(Array.from(cached.partnerPlatformSettingIds.Apple || []), ["Comcast_SSO_Apple"]);
-  assert.deepEqual(Array.from(cached.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple", "MML_Comcast_SSO"]);
+  assert.deepEqual(Array.from(cached.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple"]);
 });
 
 test("REST V2 learning framework status builder prefers cached partner platform mappings over a generic Comcast provider id", () => {
@@ -2342,7 +2342,7 @@ test("REST V2 learning framework status builder prefers a requestor-scoped provi
   assert.equal(payload.frameworkPartnerInfo.name, "Apple");
 });
 
-test("REST V2 learning blocks a generic top-level Comcast provider mapping for Apple when Comcast_SSO is selected", () => {
+test("REST V2 learning preserves an exact generic Comcast provider mapping when it was captured from the real partner flow", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -2399,9 +2399,9 @@ test("REST V2 learning blocks a generic top-level Comcast provider mapping for A
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
-  assert.deepEqual(Array.from(plan.clearFieldNames || []), ["header.AP-Partner-Framework-Status"]);
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], genericFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+  assert.deepEqual(Array.from(plan.clearFieldNames || []), []);
 });
 
 test("REST V2 partner platform hydrator promotes cached Apple partner mappings even when the live snapshot is unavailable", async () => {
@@ -2447,7 +2447,7 @@ test("REST V2 partner platform hydrator promotes cached Apple partner mappings e
   assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
   assert.deepEqual(Array.from(context.mvpdMeta.partnerPlatformSettingIds.Apple || []), ["Comcast_SSO_Apple"]);
-  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple", "MML_Comcast_SSO"]);
+  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple"]);
 });
 
 test("REST V2 partner platform hydrator drops a generic cached Apple mapping when the live snapshot is unavailable", async () => {
@@ -2692,7 +2692,7 @@ test("REST V2 learning reruns inferred partner hydration when the recorded frame
   assert.equal(prepared.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
 });
 
-test("REST V2 learning still refreshes the partner flow when a generic captured framework status already names Apple", async () => {
+test("REST V2 learning does not rerun inferred partner framework hydration when an exact captured framework status is already present", async () => {
   let learningHydrationCalls = 0;
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -2779,12 +2779,13 @@ test("REST V2 learning still refreshes the partner flow when a generic captured 
     }
   );
 
-  assert.equal(learningHydrationCalls, 2);
-  assert.equal(prepared.mvpdPlatformMappingId, "Comcast_SSO_Apple");
-  assert.equal(prepared.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
+  assert.equal(learningHydrationCalls, 0);
+  assert.equal(prepared.partnerFrameworkStatus, genericFrameworkStatus);
+  assert.equal(prepared.mvpdPlatformMappingId, undefined);
+  assert.equal(prepared.learningPartnerFrameworkStatus, "");
 });
 
-test("REST V2 learning promotes an inferred partner framework payload when the captured header is usable but incompatible with the resolved partner mapping", () => {
+test("REST V2 learning keeps inferred partner framework payloads empty when the captured header is already usable", () => {
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
       frameworkPermissionInfo: {
@@ -2873,7 +2874,7 @@ test("REST V2 learning promotes an inferred partner framework payload when the c
 
   assert.equal(context.learningPartner, "Apple");
   assert.equal(context.learningPartnerSource, "recorded r-apt cookie");
-  assert.equal(context.learningPartnerFrameworkStatus, validLearningFrameworkStatus);
+  assert.equal(context.learningPartnerFrameworkStatus, "");
 });
 
 test("REST V2 learning hydrates optional SSO headers from the debug flow when the current context has not retained them yet", async () => {
@@ -2919,7 +2920,7 @@ test("REST V2 learning hydrates optional SSO headers from the debug flow when th
   assert.equal(prepared.visitorIdentifier, "20265673158980419722735089753036633573");
 });
 
-test("REST V2 partner hydrator promotes exact Comcast_SSO Section 6 context after a verified completed partner flow", () => {
+test("REST V2 partner hydrator keeps exact Section 6 PFS empty after a verified completed partner flow when no exact header was captured", () => {
   const encodedSaml = Buffer.from("<samlp:Response>ok</samlp:Response>", "utf8").toString("base64");
   const { hydrateRestV2PartnerSsoContextFromDebugFlow } = loadRestV2PartnerContextHydrator({
     extractArtifacts() {
@@ -2970,11 +2971,7 @@ test("REST V2 partner hydrator promotes exact Comcast_SSO Section 6 context afte
     events: [],
   });
 
-  const decodedFrameworkStatus = JSON.parse(Buffer.from(String(context.partnerFrameworkStatus || "").trim(), "base64").toString("utf8"));
-  assert.equal(decodedFrameworkStatus.frameworkProviderInfo.id, "Comcast_SSO");
-  assert.equal(decodedFrameworkStatus.frameworkPartnerInfo.partner, "Apple");
-  assert.equal(context.allowPartnerFrameworkSelectedMvpdFallback, true);
-  assert.equal(context.partnerFrameworkStatusSource, "verified completed partner auth flow");
+  assert.equal(context.partnerFrameworkStatus, "");
   assert.equal(context.samlResponse, encodedSaml);
   assert.equal(context.samlSource, "tab-network:body");
   assert.equal(context.samlTrustedForPartnerSso, true);
@@ -4007,7 +4004,7 @@ test("REST V2 learning uses a compatible inferred partner framework payload when
   assert.match(plan.notes.join(" "), /requires the exact AP-Partner-Framework-Status payload captured from a real partner flow/i);
 });
 
-test("REST V2 learning replaces a generic captured Comcast framework status with a compatible inferred Apple partner payload", () => {
+test("REST V2 learning preserves an exact captured Comcast framework status instead of replacing it with inferred Apple payloads", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -4078,12 +4075,11 @@ test("REST V2 learning replaces a generic captured Comcast framework status with
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
-  assert.match(plan.notes.join(" "), /requires the exact AP-Partner-Framework-Status payload captured from a real partner flow/i);
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], genericFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
 });
 
-test("REST V2 learning prefers the partner-mapped Apple framework payload when snapshot mappings outrank a stale generic Comcast header", () => {
+test("REST V2 learning preserves an exact captured framework header even when console mappings expose a more specific Apple provider id", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -4157,12 +4153,11 @@ test("REST V2 learning prefers the partner-mapped Apple framework payload when s
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
-  assert.match(plan.notes.join(" "), /requires the exact AP-Partner-Framework-Status payload captured from a real partner flow/i);
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], genericFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
 });
 
-test("REST V2 learning keeps Create Partner Profile blocked when partner mappings expose a more specific Comcast Apple provider than the captured header", () => {
+test("REST V2 learning allows Create Partner Profile when the captured framework header is exact, even if console mappings expose a more specific provider id", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -4221,11 +4216,11 @@ test("REST V2 learning keeps Create Partner Profile blocked when partner mapping
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], genericFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
 });
 
-test("REST V2 learning keeps Retrieve Verification Token blocked when only a selected MVPD id is available and no real provider mapping exists", () => {
+test("REST V2 learning allows Retrieve Verification Token when the captured framework header is exact, even if no real provider mapping was cached", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -4282,9 +4277,8 @@ test("REST V2 learning keeps Retrieve Verification Token blocked when only a sel
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
-  assert.match(plan.notes.join(" "), /exact AP-Partner-Framework-Status payload/i);
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], genericFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
 });
 
 test("REST V2 learning keeps Create Partner Profile blocked when the inferred provider id does not match the selected MVPD mapping", () => {
@@ -4347,7 +4341,7 @@ test("REST V2 learning keeps Create Partner Profile blocked when the inferred pr
   assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
 });
 
-test("REST V2 learning keeps Create Partner Profile blocked when the provider id is not associated with any known MVPD", () => {
+test("REST V2 learning preserves an exact captured framework header even when the provider id is not associated with a known MVPD cache entry", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const unknownProviderFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -4405,9 +4399,8 @@ test("REST V2 learning keeps Create Partner Profile blocked when the provider id
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
-  assert.match(plan.notes.join(" "), /exact AP-Partner-Framework-Status payload/i);
+  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], unknownProviderFrameworkStatus);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
 });
 
 test("shared Base64 hover decode renders decoded tooltips in metadata items", () => {
