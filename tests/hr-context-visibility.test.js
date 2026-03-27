@@ -854,10 +854,6 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     popupSource,
     "buildRestV2InteractiveDocsPanelHtml"
   );
-  const buildRestV2LearningContextItemHtmlSource = extractFunctionSource(
-    popupSource,
-    "buildRestV2LearningContextItemHtml"
-  );
   const wireRestV2LearningContainerCollapsiblesSource = extractFunctionSource(
     popupSource,
     "wireRestV2LearningContainerCollapsibles"
@@ -912,8 +908,9 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsContextSource, /buildRestV2InteractiveDocsUrl\(resolvedEntry\.operationAnchor/);
   assert.match(
     buildHrContextSectionBodyHtmlSource,
-    /\$\{buildHrServiceListHtml\(detectedServiceEntries, fallbackSummary\)\}\s*\$\{contextItemHtml\}\s*\$\{restV2DocsPanelHtml\}/
+    /\$\{buildHrServiceListHtml\(detectedServiceEntries, fallbackSummary\)\}\s*\$\{restV2DocsPanelHtml\}/
   );
+  assert.doesNotMatch(buildHrContextSectionBodyHtmlSource, /contextItemHtml/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /mvpdWorkspaceEnsureSnapshot/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /bobtoolsWorkspaceResolveQuickResourceOptions/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /resourceIdPoolSource:\s*"console-tms-map"/);
@@ -936,10 +933,6 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /service-box-container hr-rest-v2-docs-shell-body/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /hr-context-service-pill hr-context-service-pill--service-rest-v2 hr-rest-v2-docs-pill/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /getRestV2LearningServiceCollapsed/);
-  assert.match(buildRestV2LearningContextItemHtmlSource, /fieldValues/);
-  assert.match(buildRestV2LearningContextItemHtmlSource, /hr-learning-context-field-grid/);
-  assert.match(buildRestV2LearningContextItemHtmlSource, /hr-learning-context-status-badge/);
-  assert.match(buildRestV2LearningContextItemHtmlSource, /resolveBase64DecodedHoverMeta/);
   assert.match(wireRestV2LearningContainerCollapsiblesSource, /wireCollapsibleSection/);
   assert.match(wireRestV2LearningContainerCollapsiblesSource, /setRestV2LearningServiceCollapsed/);
   assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /wireCollapsibleSection/);
@@ -966,7 +959,9 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(resolveRestV2LearningRequestorContextSource, /requestorId:\s*programmerId/);
   assert.match(popupSource, /data-restv2-doc-entry-key/);
   assert.match(popupSource, /REST V2 learning methods/);
-  assert.match(popupSource, /Click any REST V2 LEARNING deeplink to preview the exact interactive docs payload here/);
+  assert.doesNotMatch(popupSource, /buildRestV2LearningContextItemHtml/);
+  assert.doesNotMatch(popupSource, /buildRestV2LearningUiStatusMeta/);
+  assert.doesNotMatch(popupSource, /Click any REST V2 LEARNING deeplink to preview the exact interactive docs payload here/);
   assert.match(popupSource, /getRestV2InteractiveDocsSections/);
   assert.match(
     popupSource,
@@ -994,9 +989,9 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(runRestV2InteractiveDocsHydratorSource, /normalizedFieldName === "body\.resources"/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /console-request-body/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /textarea/);
-  assert.match(popupCss, /\.hr-learning-context-card/);
-  assert.match(popupCss, /\.hr-learning-context-field-grid/);
-  assert.match(popupCss, /\.hr-learning-context-status-badge--active/);
+  assert.doesNotMatch(popupCss, /\.hr-learning-context-card/);
+  assert.doesNotMatch(popupCss, /\.hr-learning-context-field-grid/);
+  assert.doesNotMatch(popupCss, /\.hr-learning-context-status-badge--active/);
   assert.match(popupCss, /\.hr-base64-hover-target/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell/);
   assert.match(popupCss, /\.hr-rest-v2-docs-toggle/);
@@ -3807,71 +3802,25 @@ test("REST V2 learning keeps Create Partner Profile blocked when the provider id
   assert.match(plan.notes.join(" "), /exact AP-Partner-Framework-Status payload/i);
 });
 
-test("shared Base64 hover decode renders decoded tooltips in metadata items and REST V2 learning context fields", () => {
+test("shared Base64 hover decode renders decoded tooltips in metadata items", () => {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
   const script = [
-    "const state = globalThis.__seed.state || { selectedRequestorId: 'MML', selectedMvpdId: 'Comcast_SSO' };",
-    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
-    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
-    "function formatRestV2RequestorMvpdDisplay(requestorId = '', mvpdId = '') { return `${requestorId} x ${mvpdId}`; }",
-    "function getActiveRestV2LearningUiState() { return globalThis.__seed.activeState || null; }",
     extractFunctionSource(source, "escapeHtml"),
     extractFunctionSource(source, "parseJsonText"),
     extractFunctionSource(source, "resolveBase64DecodedHoverMeta"),
     extractFunctionSource(source, "buildMetadataItemHtml"),
-    extractFunctionSource(source, "formatRestV2LearningContextValue"),
-    extractFunctionSource(source, "buildRestV2LearningUiStatusMeta"),
-    extractFunctionSource(source, "buildRestV2LearningContextItemHtml"),
-    "module.exports = { buildMetadataItemHtml, buildRestV2LearningContextItemHtml };",
+    "module.exports = { buildMetadataItemHtml };",
   ].join("\n\n");
   const context = {
     module: { exports: {} },
     exports: {},
-    __seed: {
-      state: {
-        selectedRequestorId: "MML",
-        selectedMvpdId: "Comcast_SSO",
-      },
-      activeState: {
-        entryKey: "partner-sso-create-profile",
-        entryLabel: "Create Partner Profile",
-        phase: "active",
-        requestorId: "MML",
-        serviceProviderId: "MML",
-        mvpd: "Comcast_SSO",
-        context: {
-          learningPartnerSource: "recorded r-apt cookie",
-        },
-        plan: {
-          operationId: "createPartnerProfileUsingPOST",
-          operationSummary: "Retrieve profile using partner authentication response",
-          docsUrl: "https://developer.adobe.com/example",
-          fieldValues: {
-            "header.AP-Partner-Framework-Status": Buffer.from(
-              JSON.stringify({
-                frameworkProviderInfo: {
-                  id: "Comcast",
-                },
-                frameworkPartnerInfo: {
-                  name: "Apple",
-                },
-              }),
-              "utf8"
-            ).toString("base64"),
-          },
-          requiredFields: ["header.AP-Partner-Framework-Status"],
-          missingRequiredFields: [],
-          notes: [],
-        },
-      },
-    },
     atob,
     btoa,
     TextDecoder,
   };
   vm.runInNewContext(script, context, { filename: filePath });
-  const { buildMetadataItemHtml, buildRestV2LearningContextItemHtml } = context.module.exports;
+  const { buildMetadataItemHtml } = context.module.exports;
 
   const metadataHtml = buildMetadataItemHtml(
     "TempPASS Identity",
@@ -3880,14 +3829,6 @@ test("shared Base64 hover decode renders decoded tooltips in metadata items and 
   assert.match(metadataHtml, /hr-base64-hover-target/);
   assert.match(metadataHtml, /Base64 decoded value/);
   assert.match(metadataHtml, /abc123/);
-
-  const learningHtml = buildRestV2LearningContextItemHtml({
-    programmerId: "Turner",
-  });
-  assert.match(learningHtml, /hr-base64-hover-target/);
-  assert.match(learningHtml, /header\.AP-Partner-Framework-Status/);
-  assert.match(learningHtml, /frameworkProviderInfo/);
-  assert.match(learningHtml, /Apple/);
 });
 
 test("premium service sections and HR service pills keep their theme class wiring", () => {
