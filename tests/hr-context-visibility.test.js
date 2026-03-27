@@ -95,6 +95,7 @@ function loadRestV2LearningPlanBuilder() {
     extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
     extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
     extractFunctionSource(source, "decodeBase64TextSafe"),
+    extractFunctionSource(source, "decodeURIComponentSafe"),
     extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
     extractFunctionSource(source, "getRestV2CaseInsensitiveHeaderValue"),
     extractFunctionSource(source, "collectRestV2CaseInsensitiveObjectValues"),
@@ -321,6 +322,56 @@ function loadRestV2LearningPartnerContextHydrator(seed = {}) {
     module: { exports: {} },
     exports: {},
     __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+function loadRestV2PartnerContextHydrator(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function getRestV2MvpdMeta(requestorId = '', mvpdId = '', mvpdMeta = null) { return typeof globalThis.__seed.resolveMvpdMeta === 'function' ? globalThis.__seed.resolveMvpdMeta(requestorId, mvpdId, mvpdMeta) : mvpdMeta; }",
+    "function upsertRequestorScopedMvpdMeta(requestorId = '', mvpdId = '', mvpdMeta = null) { return typeof globalThis.__seed.upsertMvpdMeta === 'function' ? globalThis.__seed.upsertMvpdMeta(requestorId, mvpdId, mvpdMeta) : mvpdMeta; }",
+    "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || context?.sessionData?.partnerFrameworkStatus || '').trim(); }",
+    "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || context?.sessionPartner || '').trim(); }",
+    "function resolveRestV2LearningPartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolveLearningPartnerName === 'function' ? globalThis.__seed.resolveLearningPartnerName(context) : String(context?.learningPartner || context?.partner || context?.sessionPartner || '').trim(); }",
+    "function extractRestV2PartnerSsoLearningArtifactsFromDebugFlow(flow = null) { return typeof globalThis.__seed.extractArtifacts === 'function' ? globalThis.__seed.extractArtifacts(flow) : {}; }",
+    "function extractRestV2PartnerFrameworkStatusFromDebugFlow(flow = null) { return typeof globalThis.__seed.extractFrameworkStatus === 'function' ? globalThis.__seed.extractFrameworkStatus(flow) : ''; }",
+    "function extractRestV2SamlResponseFromDebugFlow(flow = null) { return typeof globalThis.__seed.extractSaml === 'function' ? globalThis.__seed.extractSaml(flow) : {}; }",
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
+    extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
+    extractFunctionSource(source, "decodeBase64TextSafe"),
+    extractFunctionSource(source, "decodeURIComponentSafe"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
+    extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
+    extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
+    extractFunctionSource(source, "isRestV2MvpdMatch"),
+    extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
+    extractFunctionSource(source, "resolveRestV2MvpdMetaForPartnerFrameworkProviderId"),
+    extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
+    extractFunctionSource(source, "resolveRestV2LearningPartnerFrameworkStatusFromContext"),
+    extractFunctionSource(source, "buildRestV2TrustedPartnerFrameworkStatusFromCapturedFlow"),
+    extractFunctionSource(source, "hydrateRestV2PartnerSsoContextFromDebugFlow"),
+    "module.exports = { hydrateRestV2PartnerSsoContextFromDebugFlow };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+    atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -2276,6 +2327,67 @@ test("REST V2 learning hydrates optional SSO headers from the debug flow when th
   assert.equal(prepared.visitorIdentifier, "20265673158980419722735089753036633573");
 });
 
+test("REST V2 partner hydrator promotes exact Comcast_SSO Section 6 context after a verified completed partner flow", () => {
+  const encodedSaml = Buffer.from("<samlp:Response>ok</samlp:Response>", "utf8").toString("base64");
+  const { hydrateRestV2PartnerSsoContextFromDebugFlow } = loadRestV2PartnerContextHydrator({
+    extractArtifacts() {
+      return {
+        rApt: "jwt-placeholder",
+        signalSource: "recorded r-apt cookie",
+      };
+    },
+    extractFrameworkStatus() {
+      return "";
+    },
+    extractSaml() {
+      return {
+        samlResponse: encodedSaml,
+        source: "tab-network:body",
+        partner: "",
+        trustedForPartnerSso: false,
+      };
+    },
+  });
+
+  const context = {
+    requestorId: "MML",
+    serviceProviderId: "MML",
+    mvpd: "Comcast_SSO",
+    mvpdPlatformMappingId: "Comcast_SSO",
+    mvpdMeta: {
+      id: "Comcast_SSO",
+      name: "Xfinity (Comcast_SSO)",
+      platformMappingId: "Comcast_SSO",
+      partnerPlatformMappings: {
+        Apple: "Comcast",
+      },
+    },
+    learningPartner: "Apple",
+    learningPartnerSource: "recorded r-apt cookie",
+    partnerFrameworkStatus: "",
+    samlResponse: "",
+    samlSource: "",
+    samlTrustedForPartnerSso: false,
+    partnerSsoCompletedFlowVerified: true,
+    sessionData: {},
+  };
+
+  hydrateRestV2PartnerSsoContextFromDebugFlow(context, {
+    flowId: "flow-verified",
+    updatedAt: new Date().toISOString(),
+    events: [],
+  });
+
+  const decodedFrameworkStatus = JSON.parse(Buffer.from(String(context.partnerFrameworkStatus || "").trim(), "base64").toString("utf8"));
+  assert.equal(decodedFrameworkStatus.frameworkProviderInfo.id, "Comcast_SSO");
+  assert.equal(decodedFrameworkStatus.frameworkPartnerInfo.partner, "Apple");
+  assert.equal(context.allowPartnerFrameworkSelectedMvpdFallback, true);
+  assert.equal(context.partnerFrameworkStatusSource, "verified completed partner auth flow");
+  assert.equal(context.samlResponse, encodedSaml);
+  assert.equal(context.samlSource, "tab-network:body");
+  assert.equal(context.samlTrustedForPartnerSso, true);
+});
+
 test("REST V2 learning resource helpers merge the requestor x MVPD pool and sample ten unique ids", () => {
   const randomValues = [0.91, 0.18, 0.77, 0.06, 0.64, 0.41, 0.23, 0.88, 0.35, 0.52, 0.11, 0.69];
   let randomIndex = 0;
@@ -2648,6 +2760,8 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
     sessionPartner: "Apple",
     partner: "Apple",
     partnerFrameworkStatus: "framework-status-token",
+    partnerFrameworkStatusSource: "verified completed partner auth flow",
+    allowPartnerFrameworkSelectedMvpdFallback: true,
     adobeSubjectToken: "subject-token-payload",
     adServiceToken: "service-token-payload",
     tempPassIdentity: "temp-pass-identity-payload",
@@ -2673,6 +2787,8 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
   assert.equal(context.ok, true);
   assert.equal(context.partner, "Apple");
   assert.equal(context.partnerFrameworkStatus, "framework-status-token");
+  assert.equal(context.partnerFrameworkStatusSource, "verified completed partner auth flow");
+  assert.equal(context.allowPartnerFrameworkSelectedMvpdFallback, true);
   assert.equal(context.adobeSubjectToken, "subject-token-payload");
   assert.equal(context.adServiceToken, "service-token-payload");
   assert.equal(context.tempPassIdentity, "temp-pass-identity-payload");

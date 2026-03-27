@@ -17904,6 +17904,12 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     partnerFrameworkStatus: firstNonEmptyString(
       sourceList.map((source) => String(source?.partnerFrameworkStatus || "").trim())
     ),
+    partnerFrameworkStatusSource: firstNonEmptyString(
+      sourceList.map((source) => String(source?.partnerFrameworkStatusSource || "").trim())
+    ),
+    allowPartnerFrameworkSelectedMvpdFallback: sourceList.some(
+      (source) => source?.allowPartnerFrameworkSelectedMvpdFallback === true
+    ),
     learningPartner: firstNonEmptyString(
       sourceList.map((source) => String(source?.learningPartner || "").trim())
     ),
@@ -18557,6 +18563,8 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     sessionPartner: String(harvest.sessionPartner || "").trim(),
     partner: String(firstNonEmptyString([harvest.partner, harvest.sessionPartner]) || "").trim(),
     partnerFrameworkStatus: String(harvest.partnerFrameworkStatus || "").trim(),
+    partnerFrameworkStatusSource: String(harvest.partnerFrameworkStatusSource || "").trim(),
+    allowPartnerFrameworkSelectedMvpdFallback: harvest.allowPartnerFrameworkSelectedMvpdFallback === true,
     learningPartner: String(harvest.learningPartner || "").trim(),
     learningPartnerFrameworkStatus: String(harvest.learningPartnerFrameworkStatus || "").trim(),
     learningPartnerSource: String(harvest.learningPartnerSource || "").trim(),
@@ -29468,6 +29476,8 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     sessionPartner: String(context?.sessionPartner || "").trim(),
     partner: String(partner || "").trim(),
     partnerFrameworkStatus: String(resolveRestV2PartnerFrameworkStatusFromContext(context) || "").trim(),
+    partnerFrameworkStatusSource: String(context?.partnerFrameworkStatusSource || "").trim(),
+    allowPartnerFrameworkSelectedMvpdFallback: context?.allowPartnerFrameworkSelectedMvpdFallback === true,
     learningPartner: String(learningPartner || "").trim(),
     learningPartnerFrameworkStatus: String(resolveRestV2LearningPartnerFrameworkStatusFromContext(context) || "").trim(),
     learningPartnerSource: String(context?.learningPartnerSource || "").trim(),
@@ -30224,11 +30234,36 @@ function extractRestV2SamlResponseFromText(value = "") {
   if (!raw) {
     return "";
   }
+  const parsed = parseJsonText(raw, null);
+  if (parsed && typeof parsed === "object") {
+    const nestedCandidate = firstNonEmptyString([
+      ...collectRestV2CaseInsensitiveObjectValues(
+        parsed,
+        ["SAMLResponse", "samlResponse", "samlresponse", "samlAttributeQueryResponse", "saml_attribute_query_response"],
+        { maxDepth: 5 }
+      ),
+      getRestV2CaseInsensitiveObjectValue(parsed, [
+        "SAMLResponse",
+        "samlResponse",
+        "samlresponse",
+        "samlAttributeQueryResponse",
+        "saml_attribute_query_response",
+      ]),
+    ]);
+    if (nestedCandidate && nestedCandidate !== raw) {
+      const extractedNestedValue = extractRestV2SamlResponseFromText(nestedCandidate);
+      if (extractedNestedValue) {
+        return extractedNestedValue;
+      }
+      return decodeSimpleHtmlEntities(String(nestedCandidate || "").trim());
+    }
+  }
   if (/<\s*(?:\?xml|saml|soap|[A-Za-z0-9_.:-]+:Envelope)/i.test(raw)) {
     return raw;
   }
   const patterns = [
     /(?:^|[?&])SAMLResponse=([^&#]+)/i,
+    /["'](?:samlAttributeQueryResponse|saml_attribute_query_response)["']\s*[:=]\s*["']([^"']+)["']/i,
     /name=["']SAMLResponse["'][^>]*value=["']([^"']+)["']/i,
     /value=["']([^"']+)["'][^>]*name=["']SAMLResponse["']/i,
     /["']SAMLResponse["']\s*[:=]\s*["']([^"']+)["']/i,
@@ -30250,8 +30285,9 @@ function extractRestV2SamlResponseFromWebRequestEvent(event = null) {
   const samlValues =
     formData.SAMLResponse ||
     formData.samlResponse ||
+    formData.samlAttributeQueryResponse ||
     formData.samlresponse ||
-    getRestV2CaseInsensitiveObjectValue(formData, ["SAMLResponse"]);
+    getRestV2CaseInsensitiveObjectValue(formData, ["SAMLResponse", "samlAttributeQueryResponse"]);
   if (Array.isArray(samlValues)) {
     return String(samlValues[0] || "").trim();
   }
@@ -30904,6 +30940,114 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
   }
 }
 
+function buildRestV2TrustedPartnerFrameworkStatusFromCapturedFlow(
+  context = null,
+  flow = null,
+  artifacts = null,
+  partnerName = "",
+  options = {}
+) {
+  const resolvedPartnerName = normalizeRestV2PartnerSsoPlatformName(
+    firstNonEmptyString([
+      partnerName,
+      resolveRestV2LearningPartnerNameFromContext(context),
+      resolveRestV2PartnerNameFromContext(context),
+    ])
+  );
+  if (!resolvedPartnerName) {
+    return "";
+  }
+
+  const requestorId = String(
+    firstNonEmptyString([
+      context?.requestorId,
+      context?.serviceProviderId,
+      flow?.context?.requestorId,
+      flow?.context?.serviceProviderId,
+    ]) || ""
+  ).trim();
+  const selectedMvpdId = String(
+    firstNonEmptyString([context?.mvpd, context?.selectedMvpd, flow?.context?.mvpd, flow?.context?.selectedMvpd]) || ""
+  ).trim();
+  const cachedMvpdMeta =
+    requestorId && selectedMvpdId && typeof getRestV2MvpdMeta === "function"
+      ? getRestV2MvpdMeta(requestorId, selectedMvpdId, context?.mvpdMeta || flow?.context?.mvpdMeta || null)
+      : context?.mvpdMeta || flow?.context?.mvpdMeta || null;
+  const partnerPlatformMappings =
+    cachedMvpdMeta?.partnerPlatformMappings && typeof cachedMvpdMeta.partnerPlatformMappings === "object"
+      ? cachedMvpdMeta.partnerPlatformMappings
+      : context?.mvpdMeta?.partnerPlatformMappings && typeof context.mvpdMeta.partnerPlatformMappings === "object"
+        ? context.mvpdMeta.partnerPlatformMappings
+        : null;
+  const isGenericSsoAliasDowngrade = (candidateValue = "", selectedValue = "") => {
+    const candidateToken = normalizeRestV2MvpdMatchToken(candidateValue);
+    const selectedToken = normalizeRestV2MvpdMatchToken(selectedValue);
+    if (!candidateToken || !selectedToken || !/sso$/i.test(selectedToken)) {
+      return false;
+    }
+    const selectedWithoutSso = selectedToken.replace(/sso$/i, "");
+    return Boolean(selectedWithoutSso) && candidateToken === selectedWithoutSso && candidateToken !== selectedToken;
+  };
+  const mappedPartnerProviderId = String(
+    Object.entries(partnerPlatformMappings || {}).find(
+      ([rawPartnerName, rawProviderId]) =>
+        normalizeRestV2PartnerSsoPlatformName(rawPartnerName) === resolvedPartnerName &&
+        String(rawProviderId || "").trim()
+    )?.[1] || ""
+  ).trim();
+  const explicitPartnerProviderId = String(
+    firstNonEmptyString([
+      context?.mvpdPlatformMappingId,
+      context?.mvpdMeta?.platformMappingId,
+      context?.mvpdMeta?.platformMappingID,
+      flow?.context?.mvpdPlatformMappingId,
+      flow?.context?.mvpdMeta?.platformMappingId,
+      flow?.context?.mvpdMeta?.platformMappingID,
+      cachedMvpdMeta?.platformMappingId,
+      cachedMvpdMeta?.platformMappingID,
+    ]) || ""
+  ).trim();
+  const allowSelectedMvpdFallback = options?.allowSelectedMvpdFallback === true;
+  const providerId = String(
+    firstNonEmptyString([
+      isGenericSsoAliasDowngrade(mappedPartnerProviderId, selectedMvpdId) ? "" : mappedPartnerProviderId,
+      isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdId) ? "" : explicitPartnerProviderId,
+      allowSelectedMvpdFallback ? selectedMvpdId : "",
+    ]) || ""
+  ).trim();
+  if (!providerId) {
+    return "";
+  }
+
+  const flowUpdatedAt = Date.parse(String(flow?.updatedAt || "").trim());
+  const expirationMs =
+    Number.isFinite(flowUpdatedAt) && flowUpdatedAt > 0
+      ? flowUpdatedAt + 6 * 60 * 60 * 1000
+      : Date.now() + 6 * 60 * 60 * 1000;
+  const payload = {
+    frameworkPermissionInfo: {
+      accessStatus: "granted",
+      inferenceMode: "underpar-partner-flow",
+      signalSource: String(firstNonEmptyString([artifacts?.signalSource, "captured partner auth flow"]) || "").trim(),
+    },
+    frameworkProviderInfo: {
+      id: providerId,
+      expirationDate: String(Math.max(Date.now() + 60 * 1000, expirationMs)),
+    },
+    frameworkPartnerInfo: {
+      name: resolvedPartnerName,
+      partner: resolvedPartnerName,
+      inferenceMode: "underpar-partner-flow",
+    },
+  };
+
+  try {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  } catch {
+    return "";
+  }
+}
+
 function hydrateRestV2LearningPartnerSsoContextFromDebugFlow(context = null, flow = null) {
   if (!context || typeof context !== "object" || !flow || typeof flow !== "object") {
     return context;
@@ -30990,12 +31134,19 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
     return context;
   }
 
+  const learningArtifacts = extractRestV2PartnerSsoLearningArtifactsFromDebugFlow(flow);
+  const hasRecordedPartnerAuthSignals = Boolean(
+    String(learningArtifacts?.rApt || "").trim() ||
+      String(learningArtifacts?.cimaTicket || "").trim() ||
+      String(learningArtifacts?.oauthClients || "").trim()
+  );
   const extractedPartnerFrameworkStatus = extractRestV2PartnerFrameworkStatusFromDebugFlow(flow);
   if (
     extractedPartnerFrameworkStatus &&
     !isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context))
   ) {
     context.partnerFrameworkStatus = extractedPartnerFrameworkStatus;
+    context.allowPartnerFrameworkSelectedMvpdFallback = false;
     if (context.sessionData && typeof context.sessionData === "object" && !String(context.sessionData.partnerFrameworkStatus || "").trim()) {
       context.sessionData.partnerFrameworkStatus = extractedPartnerFrameworkStatus;
     }
@@ -31048,22 +31199,61 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
     }
   }
 
+  const inferredLearningPartner = String(resolveRestV2LearningPartnerNameFromContext(context) || "").trim();
+  const trustedFallbackFrameworkStatus = buildRestV2TrustedPartnerFrameworkStatusFromCapturedFlow(
+    context,
+    flow,
+    learningArtifacts,
+    inferredLearningPartner,
+    {
+      allowSelectedMvpdFallback: true,
+    }
+  );
+  const canTrustCompletedPartnerFlow =
+    context?.partnerSsoCompletedFlowVerified === true &&
+    hasRecordedPartnerAuthSignals &&
+    Boolean(inferredLearningPartner);
+  const promoteTrustedPartnerFrameworkStatus = (frameworkStatusValue = "", sourceLabel = "captured partner auth flow") => {
+    const exactPartnerFrameworkStatus = String(frameworkStatusValue || "").trim();
+    if (!isRestV2PartnerFrameworkStatusUsable(exactPartnerFrameworkStatus)) {
+      return false;
+    }
+    context.partnerFrameworkStatus = exactPartnerFrameworkStatus;
+    context.partnerFrameworkStatusSource = String(sourceLabel || "captured partner auth flow").trim();
+    context.allowPartnerFrameworkSelectedMvpdFallback =
+      normalizeRestV2MvpdMatchToken(resolveRestV2PartnerFrameworkStatusProviderId(exactPartnerFrameworkStatus)) ===
+      normalizeRestV2MvpdMatchToken(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]));
+    if (context.sessionData && typeof context.sessionData === "object" && !String(context.sessionData.partnerFrameworkStatus || "").trim()) {
+      context.sessionData.partnerFrameworkStatus = exactPartnerFrameworkStatus;
+    }
+    return true;
+  };
+  if (
+    canTrustCompletedPartnerFlow &&
+    !isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context))
+  ) {
+    promoteTrustedPartnerFrameworkStatus(trustedFallbackFrameworkStatus, "verified completed partner auth flow");
+  }
+
   if (!String(context.samlResponse || "").trim()) {
     const samlDetails = extractRestV2SamlResponseFromDebugFlow(flow);
     const samlResponse = String(samlDetails?.samlResponse || "").trim();
     const samlPartner = String(samlDetails?.partner || "").trim();
-    const learningArtifacts = extractRestV2PartnerSsoLearningArtifactsFromDebugFlow(flow);
-    const hasRecordedPartnerAuthSignals = Boolean(
-      String(learningArtifacts?.rApt || "").trim() ||
-        String(learningArtifacts?.cimaTicket || "").trim() ||
-        String(learningArtifacts?.oauthClients || "").trim()
-    );
-    const inferredLearningPartner = String(resolveRestV2LearningPartnerNameFromContext(context) || "").trim();
     const inferredLearningFrameworkStatus = String(resolveRestV2LearningPartnerFrameworkStatusFromContext(context) || "").trim();
     const canTrustInferredPartnerSso =
       hasRecordedPartnerAuthSignals &&
-      Boolean(inferredLearningPartner) &&
-      isRestV2PartnerFrameworkStatusUsable(inferredLearningFrameworkStatus);
+      Boolean(firstNonEmptyString([samlPartner, inferredLearningPartner])) &&
+      (
+        isRestV2PartnerFrameworkStatusUsable(inferredLearningFrameworkStatus) ||
+        isRestV2PartnerFrameworkStatusUsable(
+          samlPartner && samlPartner !== inferredLearningPartner
+            ? buildRestV2TrustedPartnerFrameworkStatusFromCapturedFlow(context, flow, learningArtifacts, samlPartner, {
+                allowSelectedMvpdFallback: true,
+              })
+            : trustedFallbackFrameworkStatus
+        ) ||
+        canTrustCompletedPartnerFlow
+      );
     if (samlPartner) {
       if (!String(context.partner || "").trim()) {
         context.partner = samlPartner;
@@ -31075,10 +31265,24 @@ function hydrateRestV2PartnerSsoContextFromDebugFlow(context = null, flow = null
         context.sessionData.partner = samlPartner;
       }
     }
-    if (samlResponse && (samlDetails?.trustedForPartnerSso === true || canTrustInferredPartnerSso)) {
+    if (samlResponse && (samlDetails?.trustedForPartnerSso === true || canTrustInferredPartnerSso || canTrustCompletedPartnerFlow)) {
       context.samlResponse = samlResponse;
       context.samlSource = String(samlDetails?.source || "").trim();
       context.samlTrustedForPartnerSso = true;
+      if (!isRestV2PartnerFrameworkStatusUsable(resolveRestV2PartnerFrameworkStatusFromContext(context))) {
+        promoteTrustedPartnerFrameworkStatus(
+          buildRestV2TrustedPartnerFrameworkStatusFromCapturedFlow(
+            context,
+            flow,
+            learningArtifacts,
+            firstNonEmptyString([samlPartner, inferredLearningPartner]),
+            {
+              allowSelectedMvpdFallback: true,
+            }
+          ),
+          canTrustCompletedPartnerFlow ? "verified completed partner auth flow" : "captured partner auth flow"
+        );
+      }
     }
   }
 
@@ -31210,27 +31414,36 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
     samlResponse: "",
     source: "",
   };
-  for (let attempt = 1; attempt <= maxSamlCaptureAttempts; attempt += 1) {
-    const currentFlowSnapshot =
-      attempt === 1 && flowSnapshot && typeof flowSnapshot === "object"
-        ? flowSnapshot
-        : await getRestV2DebugFlowSnapshot(normalizedFlowId);
-    samlDetails = extractRestV2SamlResponseFromDebugFlow(currentFlowSnapshot);
-    if (String(samlDetails?.samlResponse || "").trim()) {
-      break;
-    }
-    if (attempt < maxSamlCaptureAttempts && samlCaptureDelayMs > 0) {
-      await waitForDelay(samlCaptureDelayMs);
+  let samlResponse = String(context?.samlResponse || "").trim();
+  let trustedPartnerSsoSaml =
+    samlResponse &&
+    (context?.samlTrustedForPartnerSso === true || context?.partnerSsoCompletedFlowVerified === true);
+  if (!samlResponse) {
+    for (let attempt = 1; attempt <= maxSamlCaptureAttempts; attempt += 1) {
+      const currentFlowSnapshot =
+        attempt === 1 && flowSnapshot && typeof flowSnapshot === "object"
+          ? flowSnapshot
+          : await getRestV2DebugFlowSnapshot(normalizedFlowId);
+      samlDetails = extractRestV2SamlResponseFromDebugFlow(currentFlowSnapshot);
+      samlResponse = String(samlDetails?.samlResponse || "").trim();
+      trustedPartnerSsoSaml =
+        Boolean(samlResponse) &&
+        (samlDetails?.trustedForPartnerSso === true || context?.partnerSsoCompletedFlowVerified === true);
+      if (samlResponse) {
+        break;
+      }
+      if (attempt < maxSamlCaptureAttempts && samlCaptureDelayMs > 0) {
+        await waitForDelay(samlCaptureDelayMs);
+      }
     }
   }
-  const samlResponse = String(samlDetails?.samlResponse || "").trim();
-  result.samlSource = String(samlDetails?.source || "").trim();
-  if (samlResponse && samlDetails?.trustedForPartnerSso === true) {
+  result.samlSource = String(firstNonEmptyString([samlDetails?.source, context?.samlSource]) || "").trim();
+  if (samlResponse && trustedPartnerSsoSaml) {
     context.samlResponse = samlResponse;
     context.samlSource = result.samlSource;
     context.samlTrustedForPartnerSso = true;
   }
-  if (!samlResponse || samlDetails?.trustedForPartnerSso !== true) {
+  if (!samlResponse || trustedPartnerSsoSaml !== true) {
     result.error =
       !samlResponse
         ? "SAMLResponse was not captured from a trusted partner flow."
@@ -32105,6 +32318,13 @@ async function probeRestV2PostAuthProfiles(context, flowId, options = {}) {
     });
 
     if (hasActiveProfile) {
+      if (isRestV2LikelyPartnerSsoContext(context)) {
+        context.partnerSsoCompletedFlowVerified = true;
+        await hydrateRestV2PartnerSsoContextFromFlowId(context, flowId, {
+          forceRefresh: false,
+        });
+        storeRestV2LearningContextSeed(context, flowId);
+      }
       return {
         ok: true,
         attempt,
@@ -58147,6 +58367,8 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
         resolveRestV2PartnerFrameworkStatusFromContext(context),
       ]) || ""
     ).trim(),
+    partnerFrameworkStatusSource: String(context?.partnerFrameworkStatusSource || "").trim(),
+    allowPartnerFrameworkSelectedMvpdFallback: context?.allowPartnerFrameworkSelectedMvpdFallback === true,
     learningPartner: String(firstNonEmptyString([context.learningPartner, resolveRestV2LearningPartnerNameFromContext(context)]) || "").trim(),
     learningPartnerFrameworkStatus: String(resolveRestV2LearningPartnerFrameworkStatusFromContext(context) || "").trim(),
     learningPartnerSource: String(context.learningPartnerSource || "").trim(),
@@ -66132,6 +66354,11 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     String(activeRecordingContext?.partnerFrameworkStatus || "").trim(),
     String(resolveRestV2PartnerFrameworkStatusFromContext(harvestContext || harvest) || "").trim(),
   ]);
+  const partnerFrameworkStatusSource = firstNonEmptyString([
+    String(activeRecordingContext?.partnerFrameworkStatusSource || "").trim(),
+    String(harvestContext?.partnerFrameworkStatusSource || "").trim(),
+    String(harvest?.partnerFrameworkStatusSource || "").trim(),
+  ]);
   const adobeSubjectToken = firstNonEmptyString([
     String(resolveRestV2InteractiveDocsHeaderValueFromContext(activeRecordingContext, "Adobe-Subject-Token") || "").trim(),
     String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "Adobe-Subject-Token") || "").trim(),
@@ -66224,6 +66451,12 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     sessionData,
     sessionResponseHeaders,
     partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
+    partnerFrameworkStatusSource: String(partnerFrameworkStatusSource || "").trim(),
+    allowPartnerFrameworkSelectedMvpdFallback: Boolean(
+      activeRecordingContext?.allowPartnerFrameworkSelectedMvpdFallback === true ||
+        harvestContext?.allowPartnerFrameworkSelectedMvpdFallback === true ||
+        harvest?.allowPartnerFrameworkSelectedMvpdFallback === true
+    ),
     learningPartnerFrameworkStatus: String(learningPartnerFrameworkStatus || "").trim(),
     adobeSubjectToken: String(adobeSubjectToken || "").trim(),
     adServiceToken: String(adServiceToken || "").trim(),
@@ -90395,14 +90628,16 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
     cachedMvpdMeta?.platformMappingId,
     cachedMvpdMeta?.platformMappingID,
   ]);
+  const allowSelectedMvpdFallback = context?.allowPartnerFrameworkSelectedMvpdFallback === true;
   if (resolvedPartnerName) {
     return String(
       firstNonEmptyString([
         isGenericSsoAliasDowngrade(mappedPartnerProviderId, selectedMvpdProviderId) ? "" : mappedPartnerProviderId,
         isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ||
-        isBareSelectedMvpdProviderId(explicitPartnerProviderId, selectedMvpdProviderId)
+        (isBareSelectedMvpdProviderId(explicitPartnerProviderId, selectedMvpdProviderId) && !allowSelectedMvpdFallback)
           ? ""
           : explicitPartnerProviderId,
+        allowSelectedMvpdFallback ? selectedMvpdProviderId : "",
       ]) || ""
     ).trim();
   }
@@ -90443,6 +90678,7 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
       : context;
   const requestorId = String(firstNonEmptyString([compatibilityContext?.requestorId, compatibilityContext?.serviceProviderId]) || "").trim();
   const selectedMvpd = String(firstNonEmptyString([compatibilityContext?.mvpd, compatibilityContext?.selectedMvpd]) || "").trim();
+  const allowSelectedMvpdFallback = compatibilityContext?.allowPartnerFrameworkSelectedMvpdFallback === true;
   const isGenericSsoAliasDowngrade = (candidateValue = "", selectedValue = "") => {
     const candidateToken = normalizeRestV2MvpdMatchToken(candidateValue);
     const selectedToken = normalizeRestV2MvpdMatchToken(selectedValue);
@@ -90485,7 +90721,7 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
     )
       .trim()
       .toLowerCase();
-    if (genericMvpdId && actualProviderId === genericMvpdId) {
+    if (genericMvpdId && actualProviderId === genericMvpdId && allowSelectedMvpdFallback !== true) {
       return false;
     }
   }
@@ -90859,6 +91095,7 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
   );
   const providerMatchesSelectedMvpd =
     Boolean(normalizedSelectedMvpdToken) && normalizeRestV2MvpdMatchToken(normalizedProviderId) === normalizedSelectedMvpdToken;
+  const allowSelectedMvpdFallback = fallbackContext?.allowPartnerFrameworkSelectedMvpdFallback === true;
   const requiredPartnerName = normalizeRestV2PartnerSsoPlatformName(
     firstNonEmptyString([
       resolveRestV2LearningPartnerNameFromContext(fallbackContext),
@@ -90911,7 +91148,7 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
           topLevelMatch &&
           (
             !requiresPartnerSpecificProvider ||
-            (!hasRequiredPartnerMapping(partnerMappings) && providerMatchesSelectedMvpd !== true)
+            (!hasRequiredPartnerMapping(partnerMappings) && (providerMatchesSelectedMvpd !== true || allowSelectedMvpdFallback === true))
           )
         )
       ) {
@@ -90941,7 +91178,7 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
         fallbackTopLevelMatch &&
         (
           !requiresPartnerSpecificProvider ||
-          (!hasRequiredPartnerMapping(fallbackPartnerMappings) && providerMatchesSelectedMvpd !== true)
+          (!hasRequiredPartnerMapping(fallbackPartnerMappings) && (providerMatchesSelectedMvpd !== true || allowSelectedMvpdFallback === true))
         )
       ))
   ) {

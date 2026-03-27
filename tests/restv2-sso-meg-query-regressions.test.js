@@ -668,6 +668,64 @@ test("SAML extraction ignores extension and interactive-docs partner profile pos
   assert.equal(result.partner, "Apple");
 });
 
+test("SAML extraction decodes Apple-style samlAttributeQueryResponse JSON previews from tab-network events", () => {
+  const encodedSaml = Buffer.from("<samlp:Response>ok</samlp:Response>", "utf8").toString("base64");
+  const { extractRestV2SamlResponseFromDebugFlow } = loadFunctions(
+    "popup.js",
+    [
+      "normalizeRestV2ProfileAttributeValue",
+      "dedupeRestV2CandidateStrings",
+      "decodeBase64TextSafe",
+      "getRestV2CaseInsensitiveObjectValue",
+      "collectRestV2CaseInsensitiveObjectValues",
+      "decodeURIComponentSafe",
+      "parseJsonText",
+      "isRestV2PartnerSsoApiUrl",
+      "extractRestV2PartnerNameFromSsoApiUrl",
+      "isRestV2InteractiveDocsUrl",
+      "isRestV2ExtensionInitiatedDebugEvent",
+      "isRestV2InteractiveDocsDebugEvent",
+      "shouldTrustRestV2PartnerSsoLearningEvent",
+      "decodeSimpleHtmlEntities",
+      "base64EncodeUtf8",
+      "normalizeRestV2SamlResponseForPartnerProfile",
+      "extractRestV2SamlResponseFromText",
+      "extractRestV2SamlResponseFromTabNetworkEvent",
+      "extractRestV2SamlResponseFromDebugFlow",
+    ],
+    {
+      ADOBE_SP_BASE: "https://sp.auth.adobe.com",
+      URL,
+      atob,
+      btoa,
+      unescape,
+      encodeURIComponent,
+      firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+      isRestV2PartnerFrameworkStatusUsable: () => false,
+    }
+  );
+
+  const result = extractRestV2SamlResponseFromDebugFlow({
+    context: {
+      sessionAction: "partner_profile",
+    },
+    events: [
+      {
+        source: "tab-network",
+        phase: "body",
+        url: "https://video.example.test/vsa/callback",
+        bodyPreview: JSON.stringify({
+          samlAttributeQueryResponse: "<samlp:Response>ok</samlp:Response>",
+        }),
+      },
+    ],
+  });
+
+  assert.equal(result.samlResponse, encodedSaml);
+  assert.equal(result.source, "tab-network:body");
+  assert.equal(result.trustedForPartnerSso, false);
+});
+
 test("SAML extraction does not trust standard authenticate captures solely because a partner framework header exists elsewhere in the flow", () => {
   const encodedSaml = Buffer.from("<samlp:Response>ok</samlp:Response>", "utf8").toString("base64");
   const validPartnerFrameworkStatus = Buffer.from(
