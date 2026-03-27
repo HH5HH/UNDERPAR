@@ -67114,10 +67114,15 @@ function buildDcrInteractiveDocsContext(programmer = null, entry = null, service
   const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(resolvedServices);
   const requestorContext = resolveRestV2LearningRequestorContext(resolvedProgrammer, resolvedServices);
   const requestorId = String(requestorContext.requestorId || "").trim();
+  const isRegisterEntry = String(resolvedEntry?.key || "").trim() === "dcr-client-register";
   const selectedRegisterApp =
-    String(resolvedEntry?.key || "").trim() === "dcr-client-register"
-      ? getSelectedDcrRegisterApp(resolvedProgrammer, resolvedServices)
-      : null;
+    isRegisterEntry ? getSelectedDcrRegisterApp(resolvedProgrammer, resolvedServices) : null;
+  if (isRegisterEntry && !selectedRegisterApp?.appInfo?.guid) {
+    return {
+      ok: false,
+      error: "Choose a DCR-scoped registered application from the list first.",
+    };
+  }
   const preferredApp = selectedRegisterApp?.appInfo
     ? selectedRegisterApp.appInfo
     : (requestorId
@@ -67131,7 +67136,7 @@ function buildDcrInteractiveDocsContext(programmer = null, entry = null, service
     return {
       ok: false,
       error:
-        String(resolvedEntry?.key || "").trim() === "dcr-client-register"
+        isRegisterEntry
           ? "Choose a DCR-scoped registered application from the list first."
           : "No REST V2/DCR scoped registered application is mapped to this selection.",
     };

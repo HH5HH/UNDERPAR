@@ -1494,6 +1494,47 @@ test("DCR register context prefers the registered application's HTTPS redirect U
   assert.equal(result.redirectUri, "https://wrong.example.test/callback");
 });
 
+test("DCR register context requires an explicit registered application selection before it can go ready", () => {
+  const fallbackApp = {
+    guid: "rest-guid",
+    softwareStatement: "header.payload.signature",
+    appData: {
+      requestor: "turner",
+    },
+  };
+  const { buildDcrInteractiveDocsContext } = loadDcrInteractiveDocsContextBuilder({
+    programmer: {
+      programmerId: "Turner",
+      programmerName: "Turner",
+    },
+    services: {
+      restV2: fallbackApp,
+    },
+    restV2Candidates: [fallbackApp],
+    requestorContext: {
+      requestorId: "turner",
+      autoResolved: true,
+      candidateCount: 1,
+    },
+  });
+
+  const result = buildDcrInteractiveDocsContext(
+    {
+      programmerId: "Turner",
+      programmerName: "Turner",
+    },
+    {
+      key: "dcr-client-register",
+    },
+    {
+      restV2: fallbackApp,
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Choose a DCR-scoped registered application from the list first.");
+});
+
 test("DCR register hydration falls back to the clicked docs URL when the registered application has no HTTPS redirect URI", () => {
   const { buildDcrInteractiveDocsHydrationPlan } = loadDcrInteractiveDocsHydrationPlanBuilder();
   const plan = buildDcrInteractiveDocsHydrationPlan(
