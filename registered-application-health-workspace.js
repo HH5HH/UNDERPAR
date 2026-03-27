@@ -983,19 +983,19 @@ function renderJwtSummaryCards(inspection = null) {
   }
   const summary = inspection.summary || {};
   const cards = [
-    ["Algorithm", firstNonEmptyString([summary.algorithm, "Not returned"])],
-    ["Type", firstNonEmptyString([summary.type, "Not returned"])],
-    ["Key ID", firstNonEmptyString([summary.keyId, "Not returned"])],
-    ["Issuer", firstNonEmptyString([summary.issuer, "Not returned"])],
-    ["Client ID", firstNonEmptyString([summary.clientId, "Not returned"])],
-    ["Subject", firstNonEmptyString([summary.subject, "Not returned"])],
-    ["Audience", firstNonEmptyString([summary.audience, "Not returned"])],
-    ["Issued", firstNonEmptyString([summary.issuedAt, "Not returned"])],
-    ["Not Before", firstNonEmptyString([summary.notBefore, "Not returned"])],
-    ["Expires", firstNonEmptyString([summary.expiresAt, "Not returned"])],
-    ["Scopes", summary.scopes && summary.scopes.length > 0 ? summary.scopes.join(", ") : "Not returned"],
+    ["Algorithm", firstNonEmptyString([summary.algorithm])],
+    ["Type", firstNonEmptyString([summary.type])],
+    ["Key ID", firstNonEmptyString([summary.keyId])],
+    ["Issuer", firstNonEmptyString([summary.issuer])],
+    ["Client ID", firstNonEmptyString([summary.clientId])],
+    ["Subject", firstNonEmptyString([summary.subject])],
+    ["Audience", firstNonEmptyString([summary.audience])],
+    ["Issued", firstNonEmptyString([summary.issuedAt])],
+    ["Not Before", firstNonEmptyString([summary.notBefore])],
+    ["Expires", firstNonEmptyString([summary.expiresAt])],
+    ["Scopes", summary.scopes && summary.scopes.length > 0 ? summary.scopes.join(", ") : ""],
     ["Decode State", inspection.valid === true ? "Decoded locally" : "Needs review"],
-  ];
+  ].filter(([, value]) => String(value ?? "").trim());
   return `
     <div class="regapp-jwt-summary-grid">
       ${cards
@@ -1015,7 +1015,13 @@ function renderJwtSummaryCards(inspection = null) {
 function buildJwtInspectorMarkup(inspection = null, options = {}) {
   const sharedInspector = getJwtInspectorUtility();
   if (sharedInspector?.buildInspectorMarkup) {
-    return sharedInspector.buildInspectorMarkup(inspection, options);
+    return sharedInspector.buildInspectorMarkup(inspection, {
+      ...options,
+      rawTitle: "Software Statement",
+      rawSubtitle: "Raw JWT segments shown without sending the token to any third-party service.",
+      loadingTitle: "Software Statement",
+      loadingSubtitle: "UnderPAR is hydrating the registered application software statement now.",
+    });
   }
   if (options?.loading === true) {
     return '<p class="regapp-empty-state">Hydrating software statement and decoding JWT claims for this registered application...</p>';

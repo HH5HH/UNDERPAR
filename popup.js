@@ -262,6 +262,7 @@ const HR_CONTEXT_SECTION_TITLE_BY_KEY = {
   health: "HEALTH",
   learning: "LEARNING",
 };
+const DCR_REGISTER_SERVICE_KEYS = Object.freeze(["restV2", "esm", "degradation", "resetTempPass"]);
 const DCR_INTERACTIVE_DOC_ENTRIES = Object.freeze([
   {
     key: "dcr-client-register",
@@ -270,7 +271,6 @@ const DCR_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     operationSummary: "Register client application",
     operationAnchor: "operation/processSoftwareStatementUsingPOST",
     operationId: "processSoftwareStatementUsingPOST",
-    launchOnly: true,
     contentType: "application/json",
     usesDeviceInfoHeader: true,
     requireDeviceInfoHeader: true,
@@ -12860,6 +12860,7 @@ const state = {
   cmTenantBundlePromiseByTenantKey: new Map(),
   cmUsageWarmStateByProgrammerId: new Map(),
   premiumSectionCollapsedByKey: new Map(),
+  dcrRegisterSelectedAppGuidBySelectionKey: new Map(),
   dcrLearningUiState: null,
   dcrLearningUiVersion: 0,
   restV2LearningUiState: null,
@@ -23114,6 +23115,117 @@ function buildRegisteredApplicationHealthPremiumServiceBindings(programmer = nul
       };
     })
     .filter(Boolean);
+}
+
+function getDcrRegisterAppSelectionKey(programmer = null, services = null) {
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer();
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  if (!programmerId) {
+    return "";
+  }
+  const resolvedServices =
+    services && typeof services === "object" ? services : getCurrentPremiumAppsSnapshot(programmerId) || null;
+  const requestorContext = resolveRestV2LearningRequestorContext(resolvedProgrammer, resolvedServices);
+  const requestorId = String(requestorContext?.requestorId || state.selectedRequestorId || "").trim();
+  return [getEnvironmentScopedProgrammerKey(programmerId), requestorId].filter(Boolean).join("|");
+}
+
+function collectDcrRegisterAppOptions(programmer = null, services = null) {
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer();
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  if (!programmerId) {
+    return [];
+  }
+
+  const resolvedServices =
+    services && typeof services === "object" ? services : getCurrentPremiumAppsSnapshot(programmerId) || {};
+  const requestorContext = resolveRestV2LearningRequestorContext(resolvedProgrammer, resolvedServices);
+  const requestorId = String(requestorContext?.requestorId || state.selectedRequestorId || "").trim();
+  const existingRecord = getPassVaultMediaCompanyRecord(programmerId);
+  const registeredApplications = buildPassVaultHydrationRegisteredApplications(
+    getCurrentProgrammerApplicationsSnapshot(programmerId) ||
+      buildPassVaultApplicationsSnapshotFromRegisteredApplications(getPassVaultRegisteredApplicationsByGuid(existingRecord)) ||
+      {}
+  );
+  const optionsByGuid = new Map();
+  const optionOrder = [];
+
+  DCR_REGISTER_SERVICE_KEYS.forEach((serviceKey) => {
+    const candidates = buildRegisteredApplicationHealthServiceCandidates(
+      serviceKey,
+      programmerId,
+      resolvedServices,
+      registeredApplications,
+      {
+        requestorId,
+      }
+    );
+    candidates.forEach((appInfo) => {
+      const appGuid = String(appInfo?.guid || "").trim();
+      if (!appGuid) {
+        return;
+      }
+      if (!optionsByGuid.has(appGuid)) {
+        optionsByGuid.set(appGuid, {
+          appGuid,
+          appInfo,
+          appName: firstNonEmptyString([appInfo?.appName, appInfo?.name, appGuid]),
+          serviceKeys: [],
+          serviceLabels: [],
+        });
+        optionOrder.push(appGuid);
+      }
+      const option = optionsByGuid.get(appGuid);
+      option.appInfo = option.appInfo || appInfo;
+      option.appName = firstNonEmptyString([option.appName, appInfo?.appName, appInfo?.name, appGuid]);
+      option.serviceKeys = uniquePreserveOrder([...(option.serviceKeys || []), serviceKey]);
+      option.serviceLabels = uniquePreserveOrder([
+        ...(option.serviceLabels || []),
+        getRegisteredApplicationHealthPremiumServiceLabel(serviceKey),
+      ]);
+    });
+  });
+
+  return optionOrder.map((appGuid) => optionsByGuid.get(appGuid)).filter(Boolean);
+}
+
+function getSelectedDcrRegisterApp(programmer = null, services = null) {
+  const selectionKey = getDcrRegisterAppSelectionKey(programmer, services);
+  if (!selectionKey) {
+    return null;
+  }
+  const selectedGuid = String(state.dcrRegisterSelectedAppGuidBySelectionKey.get(selectionKey) || "").trim();
+  if (!selectedGuid) {
+    return null;
+  }
+  const options = collectDcrRegisterAppOptions(programmer, services);
+  return options.find((option) => String(option?.appGuid || "").trim() === selectedGuid) || null;
+}
+
+function setSelectedDcrRegisterAppGuid(programmer = null, appGuid = "", services = null, options = {}) {
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer();
+  const selectionKey = getDcrRegisterAppSelectionKey(resolvedProgrammer, services);
+  if (!selectionKey) {
+    return "";
+  }
+
+  const normalizedGuid = String(appGuid || "").trim();
+  const optionMatch = collectDcrRegisterAppOptions(resolvedProgrammer, services).find(
+    (option) => String(option?.appGuid || "").trim() === normalizedGuid
+  );
+  if (optionMatch?.appGuid) {
+    state.dcrRegisterSelectedAppGuidBySelectionKey.set(selectionKey, String(optionMatch.appGuid || "").trim());
+  } else {
+    state.dcrRegisterSelectedAppGuidBySelectionKey.delete(selectionKey);
+  }
+  state.dcrLearningUiState = null;
+  state.dcrLearningUiVersion = Number(state.dcrLearningUiVersion || 0) + 1;
+  if (options?.render !== false) {
+    refreshRestV2LearningUi(resolvedProgrammer, {
+      controllerReason: String(options?.controllerReason || "dcr-register-app-selection").trim() || "dcr-register-app-selection",
+    });
+  }
+  return optionMatch?.appGuid ? String(optionMatch.appGuid || "").trim() : "";
 }
 
 function buildRegisteredApplicationHealthPremiumServiceSwitchState(programmer = null, queryContext = null, services = null, applications = null) {
@@ -65823,12 +65935,41 @@ function wireHrContextSectionActions(section) {
     return;
   }
 
+  section.addEventListener("change", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) {
+      return;
+    }
+    const dcrRegisterAppSelect = target.closest("[data-dcr-register-app-select]");
+    if (!dcrRegisterAppSelect) {
+      return;
+    }
+    event.stopPropagation();
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const programmerId = String(selectedProgrammer?.programmerId || "").trim();
+    if (!programmerId) {
+      return;
+    }
+    const currentServices = getCurrentPremiumAppsSnapshot(programmerId) || null;
+    setSelectedDcrRegisterAppGuid(
+      selectedProgrammer,
+      String(dcrRegisterAppSelect.value || "").trim(),
+      currentServices,
+      {
+        controllerReason: "dcr-register-app-select-change",
+      }
+    );
+  });
+
   section.addEventListener("click", (event) => {
     if (event.defaultPrevented) {
       return;
     }
     const target = event.target instanceof Element ? event.target : null;
     if (!target) {
+      return;
+    }
+    if (target.closest("[data-dcr-register-app-picker]")) {
       return;
     }
     const dcrDocsButton = target.closest("[data-dcr-doc-entry-key]");
@@ -65872,6 +66013,29 @@ function wireHrContextSectionActions(section) {
     void openPremiumServiceDocumentation(
       String(serviceDocButton.getAttribute("data-service-doc-key") || ""),
       String(serviceDocButton.getAttribute("data-service-doc-url") || "")
+    );
+  });
+
+  section.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) {
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target.closest("[data-dcr-register-app-picker]")) {
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    const dcrDocsButton = target.closest("[data-dcr-doc-entry-key]");
+    if (!dcrDocsButton) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    void openDcrInteractiveDocsEntry(
+      String(dcrDocsButton.getAttribute("data-dcr-doc-entry-key") || ""),
+      String(dcrDocsButton.getAttribute("data-dcr-doc-url") || "")
     );
   });
 
@@ -66142,12 +66306,14 @@ function buildDcrInteractiveDocsPanelSignature(programmer = null, services = nul
   if (!programmerId || !services?.restV2) {
     return "";
   }
+  const selectedRegisterAppGuid = String(getSelectedDcrRegisterApp(programmer, services)?.appGuid || "").trim();
   return [
     ...DCR_INTERACTIVE_DOC_ENTRIES.map((entry) => {
       const activationState = buildDcrInteractiveDocsEntryActivationState(entry, programmer, services);
       const pendingFields = Array.isArray(activationState?.pendingFields) ? activationState.pendingFields.join(",") : "";
       return `${String(entry?.key || "").trim()}:${activationState?.ready === true ? "1" : "0"}:${pendingFields}`;
     }),
+    `dcr-register-app:${selectedRegisterAppGuid}`,
     `dcr-learning-ui:${Number(state.dcrLearningUiVersion || 0)}`,
   ].join("|");
 }
@@ -66910,7 +67076,7 @@ function resolveRestV2InteractiveDocsAppRequestorContext(appInfo = null, program
   };
 }
 
-function buildDcrInteractiveDocsContext(programmer = null, entry = null) {
+function buildDcrInteractiveDocsContext(programmer = null, entry = null, services = null) {
   const resolvedProgrammer = programmer || resolveSelectedProgrammer();
   const resolvedEntry = entry && typeof entry === "object" ? entry : null;
   if (!resolvedProgrammer?.programmerId) {
@@ -66921,22 +67087,30 @@ function buildDcrInteractiveDocsContext(programmer = null, entry = null) {
   }
 
   const programmerId = String(resolvedProgrammer.programmerId || "").trim();
-  const services = getCurrentPremiumAppsSnapshot(programmerId) || null;
-  const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(services);
-  const requestorContext = resolveRestV2LearningRequestorContext(resolvedProgrammer, services);
+  const resolvedServices = services && typeof services === "object" ? services : getCurrentPremiumAppsSnapshot(programmerId) || null;
+  const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(resolvedServices);
+  const requestorContext = resolveRestV2LearningRequestorContext(resolvedProgrammer, resolvedServices);
   const requestorId = String(requestorContext.requestorId || "").trim();
-  const preferredApp =
-    (requestorId
-      ? selectPreferredRestV2AppForRequestor(restV2Candidates, requestorId, programmerId)
-      : null) ||
-    services?.restV2 ||
-    restV2Candidates[0] ||
-    null;
+  const selectedRegisterApp =
+    String(resolvedEntry?.key || "").trim() === "dcr-client-register"
+      ? getSelectedDcrRegisterApp(resolvedProgrammer, resolvedServices)
+      : null;
+  const preferredApp = selectedRegisterApp?.appInfo
+    ? selectedRegisterApp.appInfo
+    : (requestorId
+        ? selectPreferredRestV2AppForRequestor(restV2Candidates, requestorId, programmerId)
+        : null) ||
+      resolvedServices?.restV2 ||
+      restV2Candidates[0] ||
+      null;
 
   if (!preferredApp?.guid) {
     return {
       ok: false,
-      error: "No REST V2/DCR scoped registered application is mapped to this selection.",
+      error:
+        String(resolvedEntry?.key || "").trim() === "dcr-client-register"
+          ? "Choose a DCR-scoped registered application from the list first."
+          : "No REST V2/DCR scoped registered application is mapped to this selection.",
     };
   }
 
@@ -66959,7 +67133,8 @@ function buildDcrInteractiveDocsContext(programmer = null, entry = null) {
     requestorAutoResolved: requestorContext.autoResolved === true,
     serviceProviderId: requestorId,
     appInfo: preferredApp,
-    services,
+    services: resolvedServices,
+    selectedRegisterApp,
     softwareStatement: String(softwareStatement || "").trim(),
     redirectUri: String(redirectUri || "").trim(),
     clientId: String(dcrCache?.clientId || "").trim(),
@@ -67121,12 +67296,6 @@ function buildDcrInteractiveDocsHydrationPlan(entry = null, context = null) {
   if (missingRequiredFields.includes("header.X-Device-Info")) {
     notes.push("UnderPAR could not build X-Device-Info for this browser session.");
   }
-  notes.push(
-    `Using ${String(resolvedContext?.appInfo?.appName || resolvedContext?.appInfo?.guid || "the selected registered application").trim()}.`
-  );
-  if (String(resolvedContext.requestorId || "").trim()) {
-    notes.push(`RequestorId context is ${String(resolvedContext.requestorId || "").trim()}.`);
-  }
 
   return {
     entryKey: String(resolvedEntry.key || "").trim(),
@@ -67139,33 +67308,6 @@ function buildDcrInteractiveDocsHydrationPlan(entry = null, context = null) {
     clearFieldNames: [],
     notes,
   };
-}
-
-function buildDcrRegisterLaunchReason(context = null) {
-  const resolvedContext = context && typeof context === "object" ? context : null;
-  const appLabel = String(
-    firstNonEmptyString([
-      resolvedContext?.appInfo?.appName,
-      resolvedContext?.appInfo?.name,
-      resolvedContext?.appInfo?.guid,
-      "the selected REST V2 registered application",
-    ]) || "the selected REST V2 registered application"
-  ).trim();
-  const programmerLabel = String(
-    firstNonEmptyString([
-      resolvedContext?.programmerName,
-      resolveSelectedProgrammer()?.programmerName,
-      "this Media Company",
-    ]) || "this Media Company"
-  ).trim();
-  const environmentLabel = String(
-    firstNonEmptyString([
-      getActiveAdobePassEnvironment()?.label,
-      state?.selectedEnvironmentLabel,
-      "the selected environment",
-    ]) || "the selected environment"
-  ).trim();
-  return `UnderPAR selected "${appLabel}" for /register before REST V2, just like ${programmerLabel} does in ${environmentLabel}.`;
 }
 
 function summarizeDcrInteractiveDocsActivationLockReason(pendingFields = [], plan = null) {
@@ -67219,16 +67361,6 @@ function buildDcrInteractiveDocsEntryActivationState(entry = null, programmer = 
     };
   }
 
-  if (resolvedEntry.launchOnly === true) {
-    return {
-      ready: true,
-      pendingFields: [],
-      reason: buildDcrRegisterLaunchReason(context),
-      context,
-      plan: null,
-    };
-  }
-
   let plan = null;
   try {
     plan = buildDcrInteractiveDocsHydrationPlan(resolvedEntry, context);
@@ -67239,6 +67371,16 @@ function buildDcrInteractiveDocsEntryActivationState(entry = null, programmer = 
       reason: error instanceof Error ? error.message : String(error || "DCR learning plan failed."),
       context,
       plan: null,
+    };
+  }
+
+  if (String(resolvedEntry.key || "").trim() === "dcr-client-register" && String(context?.appInfo?.guid || "").trim()) {
+    return {
+      ready: true,
+      pendingFields: [],
+      reason: "",
+      context,
+      plan,
     };
   }
 
@@ -67306,10 +67448,7 @@ function buildDcrInteractiveDocsEntryActivationState(entry = null, programmer = 
   return {
     ready: pendingFields.length === 0,
     pendingFields,
-    reason:
-      pendingFields.length === 0
-        ? "Ready to hydrate UnderPAR context and focus Send."
-        : summarizeDcrInteractiveDocsActivationLockReason(pendingFields, plan),
+    reason: pendingFields.length === 0 ? "" : summarizeDcrInteractiveDocsActivationLockReason(pendingFields, plan),
     context,
     plan,
   };
@@ -68202,10 +68341,7 @@ function buildRestV2InteractiveDocsEntryActivationState(entry, programmer = null
   return {
     ready: pendingFields.length === 0,
     pendingFields,
-    reason:
-      pendingFields.length === 0
-        ? "Ready to hydrate UnderPAR context and focus Send."
-        : summarizeRestV2InteractiveDocsActivationLockReason(pendingFields, plan),
+    reason: pendingFields.length === 0 ? "" : summarizeRestV2InteractiveDocsActivationLockReason(pendingFields, plan),
     context,
     plan,
   };
@@ -68258,9 +68394,10 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
               const activationState = entry.activationState || {};
               const isReady = activationState.ready === true;
               const isActive = String(entry?.key || "").trim() === activeEntryKey;
+              const entryReason = String(activationState.reason || "").trim();
               const entryActionLabel = isReady
                 ? `Open and hydrate ${entry.label} in Adobe PASS REST API V2 interactive docs`
-                : `${entry.label} is locked. ${String(activationState.reason || "").trim()}`;
+                : `${entry.label} is locked. ${entryReason}`;
               const readinessLabel = isReady ? "READY NOW" : "SETUP NEEDED";
               return `
                 <button
@@ -68286,7 +68423,7 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
                     <span class="hr-rest-v2-doc-entry-badges">
                       <span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--${isReady ? "ready" : "locked"}">${escapeHtml(readinessLabel)}</span>
                     </span>
-                    <span class="hr-rest-v2-doc-entry-state-text">${escapeHtml(String(activationState.reason || "").trim())}</span>
+                    ${entryReason ? `<span class="hr-rest-v2-doc-entry-state-text">${escapeHtml(entryReason)}</span>` : ""}
                   </span>
                 </button>
               `;
@@ -68303,6 +68440,8 @@ function buildDcrInteractiveDocsPanelHtml(programmer = null, services = null) {
     return "";
   }
 
+  const registerOptions = collectDcrRegisterAppOptions(programmer, services);
+  const selectedRegisterApp = getSelectedDcrRegisterApp(programmer, services);
   const docsUrl = buildDcrInteractiveDocsUrl();
   const entries = DCR_INTERACTIVE_DOC_ENTRIES.map((entry) => ({
     ...entry,
@@ -68353,7 +68492,7 @@ function buildDcrInteractiveDocsPanelHtml(programmer = null, services = null) {
               title="${escapeHtml(actionLabel)}"
               aria-label="${escapeHtml(actionLabel)}"
             >DCR API (V2)</button>
-            <p class="hr-rest-v2-docs-subtitle">Dynamic Client Registration methods for the selected REST V2 registered application. /register opens as reference-only, while /token hydrates the live Run form.</p>
+            <p class="hr-rest-v2-docs-subtitle">Dynamic Client Registration methods for Adobe Pass premium services. Choose a registered application for /register, then UnderPAR hydrates the online Run form.</p>
           </div>
           <div class="hr-rest-v2-docs-grid">
             ${entries
@@ -68362,20 +68501,55 @@ function buildDcrInteractiveDocsPanelHtml(programmer = null, services = null) {
                 const activationState = entry.activationState || {};
                 const isReady = activationState.ready === true;
                 const isActive = String(entry?.key || "").trim() === activeEntryKey;
+                const entryReason = String(activationState.reason || "").trim();
+                const isRegisterEntry = String(entry?.key || "").trim() === "dcr-client-register";
+                const registerSelectId = `dcr-register-app-select-${String(programmer?.programmerId || "global")
+                  .trim()
+                  .toLowerCase()
+                  .replace(/[^\w-]+/g, "-")}`;
                 const entryActionLabel = isReady
-                  ? entry.launchOnly === true
-                    ? `Open ${entry.label} in Adobe PASS DCR API interactive docs without form hydration`
-                    : `Open and hydrate ${entry.label} in Adobe PASS DCR API interactive docs`
-                  : `${entry.label} is locked. ${String(activationState.reason || "").trim()}`;
+                    ? `Open and hydrate ${entry.label} in Adobe PASS DCR API interactive docs`
+                  : `${entry.label} is locked. ${entryReason}`;
                 const readinessLabel = isReady ? "READY NOW" : "SETUP NEEDED";
+                const registerPickerHtml = isRegisterEntry
+                  ? `
+                    <div class="hr-dcr-doc-entry-picker" data-dcr-register-app-picker="true">
+                      <label class="hr-dcr-doc-entry-picker-label" for="${escapeHtml(registerSelectId)}">Registered Application</label>
+                      <select
+                        id="${escapeHtml(registerSelectId)}"
+                        class="hr-dcr-doc-entry-picker-select"
+                        data-dcr-register-app-select="true"
+                        data-dcr-register-app-selected-guid="${escapeHtml(String(selectedRegisterApp?.appGuid || "").trim())}"
+                        aria-label="${escapeHtml("Select the DCR-scoped registered application to hydrate /register")}"
+                      >
+                        <option value="">Select a registered application...</option>
+                        ${registerOptions
+                          .map((option) => {
+                            const appGuid = String(option?.appGuid || "").trim();
+                            const optionLabel = firstNonEmptyString([option?.appName, appGuid]);
+                            const scopeLabel = Array.isArray(option?.serviceLabels)
+                              ? option.serviceLabels.filter(Boolean).join(" | ")
+                              : "";
+                            const isSelected = appGuid && appGuid === String(selectedRegisterApp?.appGuid || "").trim();
+                            return `<option value="${escapeHtml(appGuid)}"${isSelected ? ' selected="selected"' : ""}>${escapeHtml(
+                              scopeLabel ? `${optionLabel} · ${scopeLabel}` : optionLabel
+                            )}</option>`;
+                          })
+                          .join("")}
+                      </select>
+                    </div>
+                  `
+                  : "";
                 return `
-                  <button
-                    type="button"
+                  <article
                     class="hr-rest-v2-doc-entry ${isReady ? "is-ready" : "is-locked"}${isActive ? " is-active" : ""}"
                     data-dcr-doc-entry-key="${escapeHtml(entry.key)}"
                     data-dcr-doc-url="${escapeHtml(entryUrl)}"
                     data-dcr-doc-state="${isReady ? "ready" : "locked"}"
                     data-dcr-doc-active="${isActive ? "true" : "false"}"
+                    tabindex="0"
+                    role="button"
+                    aria-disabled="${isReady ? "false" : "true"}"
                     aria-pressed="${isActive ? "true" : "false"}"
                     title="${escapeHtml(entryActionLabel)}"
                     aria-label="${escapeHtml(entryActionLabel)}"
@@ -68388,13 +68562,14 @@ function buildDcrInteractiveDocsPanelHtml(programmer = null, services = null) {
                       </span>
                     </span>
                     <span class="hr-rest-v2-doc-entry-summary">${escapeHtml(entry.operationSummary || "")}</span>
+                    ${registerPickerHtml}
                     <span class="hr-rest-v2-doc-entry-readiness">
                       <span class="hr-rest-v2-doc-entry-badges">
                         <span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--${isReady ? "ready" : "locked"}">${escapeHtml(readinessLabel)}</span>
                       </span>
-                      <span class="hr-rest-v2-doc-entry-state-text">${escapeHtml(String(activationState.reason || "").trim())}</span>
+                      ${entryReason ? `<span class="hr-rest-v2-doc-entry-state-text">${escapeHtml(entryReason)}</span>` : ""}
                     </span>
-                  </button>
+                  </article>
                 `;
               })
               .join("")}
@@ -68768,19 +68943,19 @@ function buildLearningJwtInspectorFallbackUtility() {
     }
     const summary = inspection.summary || {};
     const cards = [
-      ["Algorithm", firstNonEmptyString([summary.algorithm, "Not returned"])],
-      ["Type", firstNonEmptyString([summary.type, "Not returned"])],
-      ["Key ID", firstNonEmptyString([summary.keyId, "Not returned"])],
-      ["Issuer", firstNonEmptyString([summary.issuer, "Not returned"])],
-      ["Client ID", firstNonEmptyString([summary.clientId, "Not returned"])],
-      ["Subject", firstNonEmptyString([summary.subject, "Not returned"])],
-      ["Audience", firstNonEmptyString([summary.audience, "Not returned"])],
-      ["Issued", firstNonEmptyString([summary.issuedAt, "Not returned"])],
-      ["Not Before", firstNonEmptyString([summary.notBefore, "Not returned"])],
-      ["Expires", firstNonEmptyString([summary.expiresAt, "Not returned"])],
-      ["Scopes", summary.scopes && summary.scopes.length > 0 ? summary.scopes.join(", ") : "Not returned"],
+      ["Algorithm", firstNonEmptyString([summary.algorithm])],
+      ["Type", firstNonEmptyString([summary.type])],
+      ["Key ID", firstNonEmptyString([summary.keyId])],
+      ["Issuer", firstNonEmptyString([summary.issuer])],
+      ["Client ID", firstNonEmptyString([summary.clientId])],
+      ["Subject", firstNonEmptyString([summary.subject])],
+      ["Audience", firstNonEmptyString([summary.audience])],
+      ["Issued", firstNonEmptyString([summary.issuedAt])],
+      ["Not Before", firstNonEmptyString([summary.notBefore])],
+      ["Expires", firstNonEmptyString([summary.expiresAt])],
+      ["Scopes", summary.scopes && summary.scopes.length > 0 ? summary.scopes.join(", ") : ""],
       ["Decode State", inspection.valid === true ? "Decoded locally" : "Needs review"],
-    ];
+    ].filter(([, value]) => String(value ?? "").trim());
     return `
       <div class="up-jwt-summary-grid">
         ${cards
@@ -68806,7 +68981,7 @@ function buildLearningJwtInspectorFallbackUtility() {
       <div class="up-jwt-layout">
         <section class="up-jwt-panel">
           <header class="up-jwt-panel-head">
-            <p class="up-jwt-panel-title">Encoded JWT</p>
+            <p class="up-jwt-panel-title">JWT Segments</p>
             <p class="up-jwt-panel-subtitle">Raw JWT segments shown without sending the token to any third-party service.</p>
           </header>
           <div class="up-jwt-panel-body">
@@ -70458,10 +70633,12 @@ async function openDcrInteractiveDocsEntry(entryKey = "", requestedUrl = "") {
     };
   };
 
-  const context = buildDcrInteractiveDocsContext(resolveSelectedProgrammer(), entry);
+  const selectedProgrammer = resolveSelectedProgrammer();
+  const currentServices = selectedProgrammer?.programmerId ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId) || null : null;
+  const context = buildDcrInteractiveDocsContext(selectedProgrammer, entry, currentServices);
   if (!context?.ok) {
     return openPartialDocs(String(context?.error || "DCR learning needs a Media Company selection."), "info", {
-      programmerId: String(resolveSelectedProgrammer()?.programmerId || "").trim(),
+      programmerId: String(selectedProgrammer?.programmerId || "").trim(),
       requestorId: String(state.selectedRequestorId || "").trim(),
       serviceProviderId: String(state.selectedRequestorId || "").trim(),
       appInfo: context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null,
@@ -70479,45 +70656,6 @@ async function openDcrInteractiveDocsEntry(entryKey = "", requestedUrl = "") {
     statusMessage: "Preparing exact DCR learning payload for the interactive docs form.",
   });
   setStatus(`Opening ${entry.label} interactive docs with UnderPAR context...`, "info");
-
-  if (entry.launchOnly === true) {
-    const launchReason = buildDcrRegisterLaunchReason(context);
-    publishLearningState("launch-only", {
-      programmerId: String(context?.programmerId || "").trim(),
-      requestorId: String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim(),
-      serviceProviderId: String(firstNonEmptyString([context?.serviceProviderId, context?.requestorId]) || "").trim(),
-      appGuid: String(context?.appInfo?.guid || "").trim(),
-      appInfo: context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null,
-      context,
-      plan: null,
-      statusMessage: launchReason,
-      reason: launchReason,
-    });
-    const opened = await openPremiumServiceDocumentation("dcrV2", targetUrl);
-    if (opened?.ok !== true) {
-      publishLearningState("error", {
-        programmerId: String(context?.programmerId || "").trim(),
-        requestorId: String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim(),
-        serviceProviderId: String(firstNonEmptyString([context?.serviceProviderId, context?.requestorId]) || "").trim(),
-        appGuid: String(context?.appInfo?.guid || "").trim(),
-        appInfo: context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null,
-        context,
-        plan: null,
-        statusMessage: String(opened?.error || "Unable to open DCR interactive docs.").trim(),
-        reason: String(opened?.error || "Unable to open DCR interactive docs.").trim(),
-      });
-      return opened;
-    }
-    setStatus(`Opened ${entry.label} docs. ${launchReason}`, "info");
-    return {
-      ok: true,
-      launchOnly: true,
-      tabId: Number(opened?.tabId || 0),
-      windowId: Number(opened?.windowId || 0),
-      url: String(opened?.url || targetUrl).trim(),
-      context,
-    };
-  }
 
   let resolvedContext = null;
   let plan = null;

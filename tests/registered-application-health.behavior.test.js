@@ -934,4 +934,9 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(popupSource, /if \(action === "hydrate-application"\)/);
   assert.match(sharedJwtSource, /UnderParJwtInspector/);
   assert.match(sharedJwtSource, /buildInspectorMarkup/);
+  assert.match(sharedJwtSource, /JWT Segments/);
+  assert.doesNotMatch(sharedJwtSource, /Not returned/);
+  assert.doesNotMatch(sharedJwtSource, /jwt\.io/);
+  assert.doesNotMatch(sharedJwtSource, /\bfetch\(/);
+  assert.match(workspaceJs, /rawTitle:\s*"Software Statement"/);
 });

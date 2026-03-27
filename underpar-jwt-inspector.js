@@ -344,19 +344,19 @@
     }
     const summary = inspection.summary || {};
     const cards = [
-      ["Algorithm", firstNonEmptyString([summary.algorithm, "Not returned"])],
-      ["Type", firstNonEmptyString([summary.type, "Not returned"])],
-      ["Key ID", firstNonEmptyString([summary.keyId, "Not returned"])],
-      ["Issuer", firstNonEmptyString([summary.issuer, "Not returned"])],
-      ["Client ID", firstNonEmptyString([summary.clientId, "Not returned"])],
-      ["Subject", firstNonEmptyString([summary.subject, "Not returned"])],
-      ["Audience", firstNonEmptyString([summary.audience, "Not returned"])],
-      ["Issued", firstNonEmptyString([summary.issuedAt, "Not returned"])],
-      ["Not Before", firstNonEmptyString([summary.notBefore, "Not returned"])],
-      ["Expires", firstNonEmptyString([summary.expiresAt, "Not returned"])],
-      ["Scopes", summary.scopes && summary.scopes.length > 0 ? summary.scopes.join(", ") : "Not returned"],
+      ["Algorithm", firstNonEmptyString([summary.algorithm])],
+      ["Type", firstNonEmptyString([summary.type])],
+      ["Key ID", firstNonEmptyString([summary.keyId])],
+      ["Issuer", firstNonEmptyString([summary.issuer])],
+      ["Client ID", firstNonEmptyString([summary.clientId])],
+      ["Subject", firstNonEmptyString([summary.subject])],
+      ["Audience", firstNonEmptyString([summary.audience])],
+      ["Issued", firstNonEmptyString([summary.issuedAt])],
+      ["Not Before", firstNonEmptyString([summary.notBefore])],
+      ["Expires", firstNonEmptyString([summary.expiresAt])],
+      ["Scopes", summary.scopes && summary.scopes.length > 0 ? summary.scopes.join(", ") : ""],
       ["Decode State", inspection.valid === true ? "Decoded locally" : "Needs review"],
-    ];
+    ].filter(([, value]) => String(value ?? "").trim());
     return `
       <div class="up-jwt-summary-grid">
         ${cards
@@ -376,6 +376,16 @@
   function buildInspectorMarkup(inspection = null, options = {}) {
     const normalizedInspection = inspection && typeof inspection === "object" ? inspection : null;
     const loading = options?.loading === true;
+    const rawPanelTitle = firstNonEmptyString([options?.rawTitle, "JWT Segments"]);
+    const rawPanelSubtitle = firstNonEmptyString([
+      options?.rawSubtitle,
+      "Raw JWT segments shown without sending the token to any third-party service.",
+    ]);
+    const loadingTitle = firstNonEmptyString([options?.loadingTitle, options?.rawTitle, "JWT Segments"]);
+    const loadingSubtitle = firstNonEmptyString([
+      options?.loadingSubtitle,
+      "UnderPAR is decoding JWT claims locally now.",
+    ]);
     if (!normalizedInspection?.token && !loading) {
       return '<p class="up-jwt-empty-state">No JWT is available to inspect.</p>';
     }
@@ -383,11 +393,11 @@
       return `
         <article class="up-jwt-panel">
           <header class="up-jwt-panel-head">
-            <p class="up-jwt-panel-title">Software Statement</p>
-            <p class="up-jwt-panel-subtitle">UnderPAR is hydrating the registered application software statement now.</p>
+            <p class="up-jwt-panel-title">${escapeHtml(loadingTitle)}</p>
+            <p class="up-jwt-panel-subtitle">${escapeHtml(loadingSubtitle)}</p>
           </header>
           <div class="up-jwt-panel-body">
-            <p class="up-jwt-empty-state">Hydrating software statement and decoding JWT claims for this registered application...</p>
+            <p class="up-jwt-empty-state">UnderPAR is decoding JWT claims locally now...</p>
           </div>
         </article>
       `;
@@ -396,8 +406,8 @@
       <div class="up-jwt-layout">
         <section class="up-jwt-panel">
           <header class="up-jwt-panel-head">
-            <p class="up-jwt-panel-title">Software Statement</p>
-            <p class="up-jwt-panel-subtitle">Raw JWT segments shown without sending the token to any third-party service.</p>
+            <p class="up-jwt-panel-title">${escapeHtml(rawPanelTitle)}</p>
+            <p class="up-jwt-panel-subtitle">${escapeHtml(rawPanelSubtitle)}</p>
           </header>
           <div class="up-jwt-panel-body">
             ${renderTokenPane(normalizedInspection)}
