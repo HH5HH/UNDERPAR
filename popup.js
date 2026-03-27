@@ -6969,6 +6969,11 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
     })
       ? UNDERPAR_VAULT_STATUS_COMPLETE
       : normalizedHydrationStatus;
+  const customSchemes = uniquePreserveOrder(
+    (Array.isArray(record?.customSchemes) ? record.customSchemes : []).concat(
+      collectProgrammerCustomSchemeRedirectUris(record)
+    )
+  );
   const services = {
     restV2: {
       available: legacyServiceSummary?.restV2?.available === true || derivedServices.restV2.available === true,
@@ -7066,6 +7071,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
     updatedAt: Number(record?.updatedAt || 0),
     hydratedAt: Number(record?.hydratedAt || 0),
     lastSelectedAt: Number(record?.lastSelectedAt || 0),
+    customSchemes,
     registeredApplicationCount,
     registeredApplicationsByGuid: compactedRegisteredApplicationsByGuid,
     services,
@@ -7356,6 +7362,7 @@ function buildProgrammerEntitiesFromPassVault(vault = null, environmentKey = get
         id: normalizedRecord.programmerId,
         displayName: normalizedRecord.programmerName,
         mediaCompanyName: normalizedRecord.mediaCompanyName,
+        customSchemes: Array.isArray(normalizedRecord.customSchemes) ? normalizedRecord.customSchemes.slice() : [],
         contentProviders: requestorIds,
         applications,
       },
@@ -7912,6 +7919,11 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
     registeredApplicationsByGuid,
     servicesSummary
   );
+  const customSchemes = uniquePreserveOrder(
+    collectProgrammerCustomSchemeRedirectUris(programmer).concat(
+      Array.isArray(existingRecord?.customSchemes) ? existingRecord.customSchemes : []
+    )
+  );
 
   return {
     programmerId,
@@ -7928,6 +7940,7 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
     hydratedAt:
       hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE ? now : Number(existingRecord?.hydratedAt || 0),
     lastSelectedAt: 0,
+    customSchemes,
     registeredApplicationCount,
     registeredApplicationsByGuid: compactedRegisteredApplicationsByGuid,
     services: servicesSummary,
@@ -67120,6 +67133,7 @@ function buildDcrInteractiveDocsContext(programmer = null, entry = null, service
     extractSoftwareStatementFromAppData(preferredApp),
   ]);
   const redirectUri = firstNonEmptyString([
+    resolveProgrammerCustomSchemeRedirectUri(resolvedProgrammer, programmerId),
     extractRegisteredApplicationRedirectUri(preferredApp),
     extractRegisteredApplicationRedirectUri(preferredApp?.appData || null),
   ]);
@@ -67184,6 +67198,7 @@ async function prepareDcrInteractiveDocsContextForEntry(entry = null, context = 
       ]);
       preparedContext.redirectUri = firstNonEmptyString([
         String(preparedContext.redirectUri || "").trim(),
+        resolveProgrammerCustomSchemeRedirectUri(null, preparedContext.programmerId),
         extractRegisteredApplicationRedirectUri(nextAppInfo),
       ]);
     }
@@ -67288,7 +67303,7 @@ function buildDcrInteractiveDocsHydrationPlan(entry = null, context = null) {
     notes.push("UnderPAR could not resolve the selected registered application's software statement yet.");
   }
   if (missingRequiredFields.includes("body.redirect_uri")) {
-    notes.push("UnderPAR could not resolve the selected registered application's redirect URI yet.");
+    notes.push("UnderPAR could not resolve the selected Media Company's custom scheme redirect URI yet.");
   }
   if (missingRequiredFields.includes("query.client_id") || missingRequiredFields.includes("query.client_secret")) {
     notes.push("UnderPAR could not auto-provision DCR client credentials for the selected registered application yet.");
@@ -67322,7 +67337,7 @@ function summarizeDcrInteractiveDocsActivationLockReason(pendingFields = [], pla
     messages.push("UnderPAR could not resolve the selected registered application's software statement yet.");
   }
   if (hasPendingField("body.redirect_uri")) {
-    messages.push("UnderPAR could not resolve the selected registered application's redirect URI yet.");
+    messages.push("UnderPAR could not resolve the selected Media Company's custom scheme redirect URI yet.");
   }
   if (hasPendingField("query.client_id", "query.client_secret")) {
     const clientNote =
@@ -67371,16 +67386,6 @@ function buildDcrInteractiveDocsEntryActivationState(entry = null, programmer = 
       reason: error instanceof Error ? error.message : String(error || "DCR learning plan failed."),
       context,
       plan: null,
-    };
-  }
-
-  if (String(resolvedEntry.key || "").trim() === "dcr-client-register" && String(context?.appInfo?.guid || "").trim()) {
-    return {
-      ready: true,
-      pendingFields: [],
-      reason: "",
-      context,
-      plan,
     };
   }
 
@@ -67634,15 +67639,12 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     (harvest?.sessionResponseHeaders && typeof harvest.sessionResponseHeaders === "object"
       ? cloneJsonLikeValue(harvest.sessionResponseHeaders, null)
       : null);
-  const operationRedirectUrl =
-    resolvedEntry?.usesBodyRedirectUrl === true || resolvedEntry?.usesQueryRedirectUrl === true
-      ? buildRestV2InteractiveDocsUrl(resolvedEntry.operationAnchor || resolvedEntry.tagAnchor || "")
-      : "";
   const redirectUrl = normalizeAdobeNavigationUrl(
     firstNonEmptyString([
-      String(operationRedirectUrl || "").trim(),
       String(activeRecordingContext?.redirectUrl || "").trim(),
+      String(harvestContext?.redirectUrl || "").trim(),
       String(harvest?.redirectUrl || "").trim(),
+      resolveProgrammerCustomSchemeRedirectUri(resolvedProgrammer, programmerId),
     ])
   );
   const requestorDomainName = resolveRestV2LearningRequestorDomainName(resolvedProgrammer, requestorId);
@@ -67894,7 +67896,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   const operationDocsUrl = buildRestV2InteractiveDocsUrl(resolvedEntry.operationAnchor || resolvedEntry.tagAnchor || "");
   const redirectUrlValue =
     resolvedEntry.usesBodyRedirectUrl === true || resolvedEntry.usesQueryRedirectUrl === true
-      ? String(operationDocsUrl || resolvedContext.redirectUrl || "").trim()
+      ? String(resolvedContext.redirectUrl || "").trim()
       : String(resolvedContext.redirectUrl || "").trim();
 
   const fieldValues = {
@@ -68133,7 +68135,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     notes.push("UnderPAR could not resolve the first configured Channel domain for this RequestorId.");
   }
   if (missingRequiredFields.includes("body.redirectUrl") || missingRequiredFields.includes("query.redirectUrl")) {
-    notes.push("UnderPAR could not resolve this operation's docs redirectUrl.");
+    notes.push("UnderPAR could not resolve a valid redirectUrl for this selection yet.");
   }
   if (missingRequiredFields.includes("body.SAMLResponse")) {
     notes.push(
@@ -68179,7 +68181,7 @@ function summarizeRestV2InteractiveDocsActivationLockReason(pendingFields = [], 
     messages.push("UnderPAR could not resolve the first configured Channel domain for this RequestorId.");
   }
   if (hasPendingField("body.redirectUrl", "query.redirectUrl")) {
-    messages.push("UnderPAR could not resolve this operation's docs redirectUrl.");
+    messages.push("UnderPAR could not resolve a valid redirectUrl for this selection yet.");
   }
   if (hasPendingField("body.resources")) {
     messages.push("Run PREAUTHORIZE or AUTHORIZE first to capture resourceIds.");
@@ -82414,6 +82416,109 @@ function extractRegisteredApplicationRedirectUri(appInfo = null) {
   ].forEach((candidate) => pushCandidate(candidate));
 
   return firstNonEmptyString(candidates);
+}
+
+function normalizeProgrammerCustomSchemeRedirectUri(value = "") {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue) {
+    return "";
+  }
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\/.+/.test(normalizedValue)) {
+    return normalizedValue;
+  }
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\/$/.test(normalizedValue)) {
+    return normalizedValue;
+  }
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:$/.test(normalizedValue)) {
+    return `${normalizedValue}//`;
+  }
+  if (/^[A-Za-z][A-Za-z0-9+.-]*$/.test(normalizedValue)) {
+    return `${normalizedValue}://`;
+  }
+  return normalizedValue;
+}
+
+function collectProgrammerCustomSchemeRedirectUris(programmer = null) {
+  if (!programmer || typeof programmer !== "object") {
+    return [];
+  }
+
+  const redirectUris = [];
+  const seen = new Set();
+  const pushCandidate = (value) => {
+    if (value == null) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry) => pushCandidate(entry));
+      return;
+    }
+    if (typeof value === "object") {
+      pushCandidate(value.customScheme);
+      pushCandidate(value.custom_scheme);
+      pushCandidate(value.scheme);
+      pushCandidate(value.schemeName);
+      pushCandidate(value.value);
+      pushCandidate(value.uri);
+      pushCandidate(value.url);
+      pushCandidate(value.redirectUri);
+      pushCandidate(value.redirect_uri);
+      return;
+    }
+    const normalizedCandidate = normalizeProgrammerCustomSchemeRedirectUri(value);
+    if (!normalizedCandidate || seen.has(normalizedCandidate)) {
+      return;
+    }
+    seen.add(normalizedCandidate);
+    redirectUris.push(normalizedCandidate);
+  };
+
+  [
+    programmer?.customSchemes,
+    programmer?.raw?.customSchemes,
+    programmer?.source?.customSchemes,
+    programmer?.source?.entityData?.customSchemes,
+    programmer?.source?.raw?.customSchemes,
+    programmer?.entityData?.customSchemes,
+  ].forEach((value) => pushCandidate(value));
+
+  return redirectUris;
+}
+
+function resolveProgrammerCustomSchemeRedirectUri(programmer = null, programmerId = "") {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : null;
+  const normalizedProgrammerId = firstNonEmptyString([
+    programmerId,
+    resolvedProgrammer?.programmerId,
+    resolvedProgrammer?.id,
+    resolvedProgrammer?.raw?.id,
+  ]);
+  const records = [];
+  const seen = new Set();
+  const pushRecord = (value) => {
+    if (!value || typeof value !== "object" || seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+    records.push(value);
+  };
+
+  pushRecord(resolvedProgrammer);
+  if (normalizedProgrammerId) {
+    pushRecord(findProgrammerByProgrammerId(normalizedProgrammerId));
+    if (typeof getPassVaultMediaCompanyRecord === "function") {
+      pushRecord(getPassVaultMediaCompanyRecord(normalizedProgrammerId));
+    }
+  }
+
+  for (const record of records) {
+    const redirectUri = firstNonEmptyString(collectProgrammerCustomSchemeRedirectUris(record));
+    if (redirectUri) {
+      return redirectUri;
+    }
+  }
+
+  return "";
 }
 
 function extractSoftwareStatementFromText(text = "") {

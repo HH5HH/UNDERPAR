@@ -497,11 +497,16 @@ function loadRestV2InteractiveDocsContextBuilder(seed = {}) {
     "function cloneJsonLikeValue(value, fallback = null) { if (value == null) { return fallback; } try { return JSON.parse(JSON.stringify(value)); } catch { return fallback; } }",
     "function buildRestV2InteractiveDocsUrl(anchor = '') { return typeof globalThis.__seed.buildDocsUrl === 'function' ? globalThis.__seed.buildDocsUrl(anchor) : String(anchor || '').trim(); }",
     "function resolveRestV2LearningRequestorDomainName() { return String(globalThis.__seed.domainName || '').trim(); }",
+    "function findProgrammerByProgrammerId(programmerId = '') { return typeof globalThis.__seed.findProgrammerByProgrammerId === 'function' ? globalThis.__seed.findProgrammerByProgrammerId(programmerId) : null; }",
+    "function getPassVaultMediaCompanyRecord(programmerId = '') { return typeof globalThis.__seed.getPassVaultMediaCompanyRecord === 'function' ? globalThis.__seed.getPassVaultMediaCompanyRecord(programmerId) : null; }",
     "function resolveRestV2PartnerFrameworkStatusFromContext(context = null) { return typeof globalThis.__seed.resolveFrameworkStatus === 'function' ? globalThis.__seed.resolveFrameworkStatus(context) : String(context?.partnerFrameworkStatus || '').trim(); }",
     "function resolveRestV2PartnerNameFromContext(context = null) { return typeof globalThis.__seed.resolvePartnerName === 'function' ? globalThis.__seed.resolvePartnerName(context) : String(context?.partner || context?.sessionPartner || '').trim(); }",
     "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-visitor-identifier') { return String(context?.visitorIdentifier || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || '').trim(); } return ''; }",
     "function isRestV2LikelyPartnerSsoContext(context = null) { return typeof globalThis.__seed.isLikelyPartnerSso === 'function' ? globalThis.__seed.isLikelyPartnerSso(context) : false; }",
     "function resolveRestV2DebugFlowIdForHarvest(harvest = null) { return typeof globalThis.__seed.resolveFlowId === 'function' ? globalThis.__seed.resolveFlowId(harvest) : ''; }",
+    extractFunctionSource(source, "normalizeProgrammerCustomSchemeRedirectUri"),
+    extractFunctionSource(source, "collectProgrammerCustomSchemeRedirectUris"),
+    extractFunctionSource(source, "resolveProgrammerCustomSchemeRedirectUri"),
     extractFunctionSource(source, "resolveRestV2InteractiveDocsAppRequestorContext"),
     extractFunctionSource(source, "buildRestV2InteractiveDocsContext"),
     "module.exports = { buildRestV2InteractiveDocsContext };",
@@ -510,6 +515,42 @@ function loadRestV2InteractiveDocsContextBuilder(seed = {}) {
     module: { exports: {} },
     exports: {},
     __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+function loadDcrInteractiveDocsContextBuilder(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function resolveSelectedProgrammer() { return globalThis.__seed.programmer || null; }",
+    "function getCurrentPremiumAppsSnapshot() { return globalThis.__seed.services || null; }",
+    "function resolveRestV2LearningRequestorContext() { return globalThis.__seed.requestorContext || { requestorId: '', autoResolved: false, candidateCount: 0 }; }",
+    "function collectRestV2AppCandidatesFromPremiumApps() { return globalThis.__seed.restV2Candidates || []; }",
+    "function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId, programmerId) { return typeof globalThis.__seed.selectPreferredApp === 'function' ? globalThis.__seed.selectPreferredApp(restV2Apps, requestorId, programmerId) : (Array.isArray(restV2Apps) ? restV2Apps[0] || null : null); }",
+    "function getSelectedDcrRegisterApp() { return globalThis.__seed.selectedRegisterApp || null; }",
+    "function loadDcrCache() { return globalThis.__seed.dcrCache || null; }",
+    "function buildDcrDeviceInfo() { return String(globalThis.__seed.deviceInfo || 'device-info-123').trim(); }",
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function findProgrammerByProgrammerId(programmerId = '') { return typeof globalThis.__seed.findProgrammerByProgrammerId === 'function' ? globalThis.__seed.findProgrammerByProgrammerId(programmerId) : null; }",
+    "function getPassVaultMediaCompanyRecord(programmerId = '') { return typeof globalThis.__seed.getPassVaultMediaCompanyRecord === 'function' ? globalThis.__seed.getPassVaultMediaCompanyRecord(programmerId) : null; }",
+    "function parseJwtPayload() { return globalThis.__seed.jwtClaims || null; }",
+    extractFunctionSource(source, "extractJwtAndUrls"),
+    extractFunctionSource(source, "normalizeProgrammerCustomSchemeRedirectUri"),
+    extractFunctionSource(source, "collectProgrammerCustomSchemeRedirectUris"),
+    extractFunctionSource(source, "resolveProgrammerCustomSchemeRedirectUri"),
+    extractFunctionSource(source, "isProbablyJwt"),
+    extractFunctionSource(source, "extractSoftwareStatementFromAppData"),
+    extractFunctionSource(source, "extractRegisteredApplicationRedirectUri"),
+    extractFunctionSource(source, "buildDcrInteractiveDocsContext"),
+    "module.exports = { buildDcrInteractiveDocsContext };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+    navigator: { userAgent: "UnderPAR test" },
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -972,6 +1013,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /function setSelectedDcrRegisterAppGuid/);
   assert.match(buildDcrInteractiveDocsContextSource, /collectRestV2AppCandidatesFromPremiumApps/);
   assert.match(buildDcrInteractiveDocsContextSource, /getSelectedDcrRegisterApp/);
+  assert.match(buildDcrInteractiveDocsContextSource, /resolveProgrammerCustomSchemeRedirectUri/);
   assert.match(buildDcrInteractiveDocsContextSource, /extractRegisteredApplicationRedirectUri/);
   assert.match(prepareDcrInteractiveDocsContextForEntrySource, /enrichRegisteredApplicationForHydration/);
   assert.match(prepareDcrInteractiveDocsContextForEntrySource, /registerClientWithSoftwareStatement/);
@@ -983,7 +1025,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildDcrInteractiveDocsHydrationPlanSource, /query\.grant_type/);
   assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /autoProvisionClientCredentials === true/);
   assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /canProvisionClientCredentials === true/);
-  assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /resolvedEntry\.key \|\| ""\)\.trim\(\) === "dcr-client-register"/);
+  assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /body\.redirect_uri/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /data-restv2-learning-service-key="dcrV2"/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /data-dcr-doc-entry-key/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /hr-context-service-pill--service-default/);
@@ -1015,7 +1057,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2InteractiveDocsAppRequestorContext/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2AppForServiceProvider/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2LearningRequestorDomainName/);
-  assert.match(buildRestV2InteractiveDocsContextSource, /buildRestV2InteractiveDocsUrl\(resolvedEntry\.operationAnchor/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /resolveProgrammerCustomSchemeRedirectUri/);
   assert.match(
     buildHrContextSectionBodyHtmlSource,
     /\$\{buildHrServiceListHtml\(detectedServiceEntries, fallbackSummary\)\}\s*\$\{dcrDocsPanelHtml\}\s*\$\{restV2DocsPanelHtml\}/
@@ -1073,7 +1115,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   );
   assert.match(
     summarizeRestV2InteractiveDocsActivationLockReasonSource,
-    /UnderPAR could not resolve this operation's docs redirectUrl\./
+    /UnderPAR could not resolve a valid redirectUrl for this selection yet\./
   );
   assert.match(buildRestV2InteractiveDocsContextSource, /Select a Content Provider first\./);
   assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_REDIRECT_CANDIDATES/);
@@ -1310,6 +1352,98 @@ test("REST V2 configuration context resolves the app requestor when only the med
   assert.equal(result.serviceProviderId, "turner");
   assert.equal(result.requestorAutoResolved, true);
   assert.equal(result.appInfo?.guid, "rest-guid");
+});
+
+test("DCR register context prefers the programmer custom scheme over app-level redirect URIs", () => {
+  const selectedRegisterApp = {
+    appInfo: {
+      guid: "rest-guid",
+      redirectUri: "https://wrong.example.test/callback",
+      appData: {
+        redirectUri: "https://wrong.example.test/callback",
+        softwareStatement: "header.payload.signature",
+      },
+      softwareStatement: "header.payload.signature",
+    },
+  };
+  const { buildDcrInteractiveDocsContext } = loadDcrInteractiveDocsContextBuilder({
+    programmer: {
+      programmerId: "Turner",
+      programmerName: "Turner",
+      raw: {
+        customSchemes: [{ customScheme: "adbe.turner://"}],
+      },
+    },
+    services: {
+      restV2: selectedRegisterApp.appInfo,
+    },
+    selectedRegisterApp,
+  });
+
+  const result = buildDcrInteractiveDocsContext(
+    {
+      programmerId: "Turner",
+      programmerName: "Turner",
+      raw: {
+        customSchemes: [{ customScheme: "adbe.turner://"}],
+      },
+    },
+    {
+      key: "dcr-client-register",
+    },
+    {
+      restV2: selectedRegisterApp.appInfo,
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.appInfo?.guid, "rest-guid");
+  assert.equal(result.redirectUri, "adbe.turner://");
+});
+
+test("REST V2 learning context falls back to the programmer custom scheme when no runtime redirect was captured", () => {
+  const seededApp = {
+    guid: "rest-guid",
+    appData: {
+      requestor: "turner",
+      serviceProviders: ["turner"],
+    },
+  };
+  const { buildRestV2InteractiveDocsContext } = loadRestV2InteractiveDocsContextBuilder({
+    programmer: {
+      programmerId: "Turner",
+      programmerName: "Turner",
+      raw: {
+        customSchemes: [{ customScheme: "adbe.turner://"}],
+      },
+    },
+    services: {
+      restV2: seededApp,
+    },
+    restV2Candidates: [seededApp],
+    requestorContext: {
+      requestorId: "turner",
+      autoResolved: false,
+      candidateCount: 1,
+    },
+  });
+
+  const result = buildRestV2InteractiveDocsContext(
+    {
+      programmerId: "Turner",
+      programmerName: "Turner",
+      raw: {
+        customSchemes: [{ customScheme: "adbe.turner://"}],
+      },
+    },
+    {
+      key: "sessions-create-session",
+      usesBodyRedirectUrl: true,
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.redirectUrl, "adbe.turner://");
 });
 
 test("REST V2 learning resolves the first configured channel domain for the selected requestor", () => {
@@ -3252,7 +3386,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(createSessionPlan.fieldValues["body.domainName"], "experience.example.test");
   assert.equal(
     createSessionPlan.fieldValues["body.redirectUrl"],
-    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/createSessionUsingPOST"
+    "https://experience.example.test/callback"
   );
   assert.equal(Object.prototype.hasOwnProperty.call(createSessionPlan.fieldValues, "body.mvpd"), false);
   assert.deepEqual(toArray(createSessionPlan.missingRequiredFields), []);
@@ -3280,7 +3414,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(resumeSessionPlan.fieldValues["body.domainName"], "experience.example.test");
   assert.equal(
     resumeSessionPlan.fieldValues["body.redirectUrl"],
-    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/resumeSessionUsingPOST"
+    "https://experience.example.test/callback"
   );
 
   const sessionStatusPlan = buildRestV2InteractiveDocsHydrationPlan(
@@ -3438,7 +3572,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(logoutPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
   assert.equal(
     logoutPlan.fieldValues["query.redirectUrl"],
-    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/getLogoutForMvpdUsingGET"
+    "https://experience.example.test/callback"
   );
 
   const partnerProfilePlan = buildRestV2InteractiveDocsHydrationPlan(
@@ -3515,7 +3649,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(partnerSsoPlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
   assert.equal(
     partnerSsoPlan.fieldValues["body.redirectUrl"],
-    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/retrieveVerificationTokenUsingPOST"
+    "https://experience.example.test/callback"
   );
   assert.deepEqual(toArray(partnerSsoPlan.requiredFields).sort(), [
     "body.domainName",
