@@ -56,6 +56,11 @@ function loadPartnerSsoOverrideHelpers(seed = {}) {
   const script = [
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
     "function getRequestorScopedMvpdCache(requestorId = '') { if (typeof globalThis.__seed.getRequestorScopedMvpdCache !== 'function') { return null; } const cache = globalThis.__seed.getRequestorScopedMvpdCache(requestorId); if (cache instanceof Map) { return cache; } if (cache && typeof cache.entries === 'function') { return new Map(Array.from(cache.entries())); } if (Array.isArray(cache)) { return new Map(cache); } return null; }",
+    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
+    extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
     extractFunctionSource(source, "getRestV2MvpdMeta"),
     "function getRestV2MvpdPickerLabel(requestorId = '', mvpdId = '', mvpdMeta = null) { const resolvedMeta = getRestV2MvpdMeta(requestorId, mvpdId, mvpdMeta); return String(resolvedMeta?.name || mvpdId || '').trim() || 'MVPD'; }",
     "function resolveRestV2LearningPartnerNameFromContext(context = null) { return String(context?.learningPartner || context?.partner || '').trim(); }",
@@ -68,12 +73,12 @@ function loadPartnerSsoOverrideHelpers(seed = {}) {
     extractFunctionSource(source, "decodeURIComponentSafe"),
     extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "collectRestV2PartnerProviderIdCandidatesFromMvpdMeta"),
+    extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderIds"),
     extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusUsable"),
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
-    extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
-    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
     extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
     extractFunctionSource(source, "isRestV2MvpdMatch"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
@@ -111,6 +116,12 @@ function buildMvpdCache() {
         platformMappingId: "Comcast_SSO",
         partnerPlatformMappings: {
           Apple: "Comcast_SSO_Apple",
+        },
+        partnerPlatformSettingIds: {
+          Apple: ["Comcast_SSO_Apple"],
+        },
+        partnerProviderIdCandidates: {
+          Apple: ["Comcast_SSO_Apple"],
         },
       },
     ],
@@ -194,6 +205,111 @@ test("generic provider ids are rejected for Apple partner SSO when the MVPD mapp
 
   assert.equal(validation.ok, false);
   assert.match(validation.error, /not associated with a known MVPD|does not match the configured Apple mapping/i);
+});
+
+test("platform setting ids validate for Apple partner SSO even when the stored mapping id stays generic", () => {
+  const { validateRestV2PartnerFrameworkStatusInput } = loadPartnerSsoOverrideHelpers({
+    getRequestorScopedMvpdCache(requestorId = "") {
+      if (String(requestorId || "").trim() !== "MML") {
+        return null;
+      }
+      return new Map([
+        [
+          "Comcast_SSO",
+          {
+            id: "Comcast_SSO",
+            name: "Xfinity (Comcast_SSO)",
+            platformMappingId: "Comcast_SSO_Apple",
+            partnerPlatformMappings: {
+              Apple: "Comcast",
+            },
+            partnerPlatformSettingIds: {
+              Apple: ["Comcast_SSO_Apple"],
+            },
+            partnerProviderIdCandidates: {
+              Apple: ["Comcast_SSO_Apple", "Comcast"],
+            },
+          },
+        ],
+      ]);
+    },
+  });
+  const rawPartnerFrameworkStatus = JSON.stringify({
+    frameworkPermissionInfo: {
+      accessStatus: "granted",
+    },
+    frameworkProviderInfo: {
+      id: "Comcast_SSO_Apple",
+      expirationDate: "1775748018000",
+    },
+    frameworkPartnerInfo: {
+      partner: "Apple",
+      name: "Apple",
+    },
+  });
+
+  const validation = validateRestV2PartnerFrameworkStatusInput(rawPartnerFrameworkStatus, {
+    context: {
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      learningPartner: "Apple",
+    },
+    requiredPartner: "Apple",
+  });
+
+  assert.equal(validation.ok, true);
+  assert.equal(validation.providerId, "Comcast_SSO_Apple");
+  assert.equal(validation.mvpdId, "Comcast_SSO");
+});
+
+test("runtime-resolved partner provider ids override a generic mapping id for Apple partner SSO validation", () => {
+  const { validateRestV2PartnerFrameworkStatusInput } = loadPartnerSsoOverrideHelpers({
+    getRequestorScopedMvpdCache(requestorId = "") {
+      if (String(requestorId || "").trim() !== "MML") {
+        return null;
+      }
+      return new Map([
+        [
+          "Verizon",
+          {
+            id: "Verizon",
+            name: "Verizon",
+            platformMappingId: "Verizon",
+          },
+        ],
+      ]);
+    },
+  });
+  const rawPartnerFrameworkStatus = JSON.stringify({
+    frameworkPermissionInfo: {
+      accessStatus: "granted",
+    },
+    frameworkProviderInfo: {
+      id: "Verizon_Apple",
+      expirationDate: "1775748018000",
+    },
+    frameworkPartnerInfo: {
+      partner: "Apple",
+      name: "Apple",
+    },
+  });
+
+  const validation = validateRestV2PartnerFrameworkStatusInput(rawPartnerFrameworkStatus, {
+    context: {
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Verizon",
+      learningPartner: "Apple",
+      mvpdPlatformMappingId: "Verizon",
+      mvpdPartnerProviderId: "Verizon_Apple",
+    },
+    requiredPartner: "Apple",
+  });
+
+  assert.equal(validation.ok, true);
+  assert.equal(validation.providerId, "Verizon_Apple");
+  assert.equal(validation.mvpdId, "Verizon");
 });
 
 test("partner framework compatibility derives Apple from the payload when context has not promoted learningPartner yet", () => {

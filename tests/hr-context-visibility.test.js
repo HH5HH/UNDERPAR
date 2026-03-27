@@ -165,11 +165,15 @@ function loadRestV2LearningPlanBuilder() {
       return normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, String(inlineMatch?.[1] || "").trim());
     }`,
     extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
+    extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
     extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
     extractFunctionSource(source, "isRestV2MvpdMatch"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "collectRestV2PartnerProviderIdCandidatesFromMvpdMeta"),
     extractFunctionSource(source, "resolveRestV2MvpdMetaForPartnerFrameworkProviderId"),
+    extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderIds"),
     extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusFromSessionData"),
@@ -205,6 +209,11 @@ function loadRestV2MvpdMetaResolver(seed = {}) {
   const script = [
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
     "function getRequestorScopedMvpdCache(requestorId = '') { return typeof globalThis.__seed.getRequestorScopedMvpdCache === 'function' ? globalThis.__seed.getRequestorScopedMvpdCache(requestorId) : null; }",
+    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
+    extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
     extractFunctionSource(source, "getRestV2MvpdMeta"),
     "module.exports = { getRestV2MvpdMeta };",
   ].join("\n\n");
@@ -224,6 +233,9 @@ function loadRestV2PartnerPlatformMappingSnapshotResolver() {
     "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
     extractFunctionSource(source, "inferRestV2LearningPartnerNameFromText"),
     extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
+    extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
     extractFunctionSource(source, "resolveRestV2PartnerPlatformMappingDetailsFromSnapshot"),
     "module.exports = { resolveRestV2PartnerPlatformMappingDetailsFromSnapshot };",
   ].join("\n\n");
@@ -255,6 +267,9 @@ function loadRestV2PartnerPlatformMappingHydrator(seed = {}) {
     extractFunctionSource(source, "decodeURIComponentSafe"),
     extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
     extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
+    extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
+    extractFunctionSource(source, "collectRestV2PartnerProviderIdCandidatesFromMvpdMeta"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
     extractFunctionSource(source, "inferRestV2LearningPartnerNameFromText"),
     extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
@@ -285,6 +300,9 @@ function loadRestV2LearningPartnerFrameworkStatusBuilder(seed = {}) {
     extractFunctionSource(source, "parseRestV2JwtPayload"),
     extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
     extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
+    extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
+    extractFunctionSource(source, "collectRestV2PartnerProviderIdCandidatesFromMvpdMeta"),
     extractFunctionSource(source, "buildRestV2LearningPartnerFrameworkStatus"),
     "module.exports = { buildRestV2LearningPartnerFrameworkStatus };",
   ].join("\n\n");
@@ -352,10 +370,14 @@ function loadRestV2PartnerContextHydrator(seed = {}) {
     extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
     extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
     extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
+    extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
     extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
     extractFunctionSource(source, "isRestV2MvpdMatch"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "collectRestV2PartnerProviderIdCandidatesFromMvpdMeta"),
+    extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderIds"),
     extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
     extractFunctionSource(source, "resolveRestV2MvpdMetaForPartnerFrameworkProviderId"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
@@ -547,11 +569,15 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     extractFunctionSource(source, "extractRestV2VisitorIdentifierFromCarrierValue"),
     extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
     extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
+    extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
     extractFunctionSource(source, "buildRestV2MvpdMatchTokens"),
     extractFunctionSource(source, "isRestV2MvpdMatch"),
     extractFunctionSource(source, "resolveRestV2PartnerFromFrameworkStatus"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
+    extractFunctionSource(source, "collectRestV2PartnerProviderIdCandidatesFromMvpdMeta"),
     extractFunctionSource(source, "resolveRestV2MvpdMetaForPartnerFrameworkProviderId"),
+    extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderIds"),
     extractFunctionSource(source, "resolveRestV2ExpectedPartnerFrameworkProviderId"),
     extractFunctionSource(source, "isRestV2PartnerFrameworkStatusCompatibleWithContext"),
     `function extractRestV2InteractiveDocsHeaderValueFromText(value = "", headerName = "") {
@@ -1526,8 +1552,38 @@ test("REST V2 partner snapshot resolver preserves the Apple-specific provider ma
 
   assert.equal(resolved.resolvedPartner, "Apple");
   assert.equal(resolved.resolvedMappingId, "Comcast_SSO_Apple");
+  assert.equal(resolved.resolvedPreferredProviderId, "Comcast_SSO_Apple");
   assert.equal(resolved.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
   assert.equal(resolved.partnerPlatformMappings.Amazon, "Comcast_SSO");
+  assert.deepEqual(Array.from(resolved.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple"]);
+});
+
+test("REST V2 partner snapshot resolver keeps Apple platform setting ids when they outrank a generic mapping id", () => {
+  const { resolveRestV2PartnerPlatformMappingDetailsFromSnapshot } =
+    loadRestV2PartnerPlatformMappingSnapshotResolver();
+
+  const resolved = resolveRestV2PartnerPlatformMappingDetailsFromSnapshot(
+    {
+      partnerSsoPlatforms: [
+        {
+          partner: "Apple",
+          mappingId: "Comcast",
+          platformSettingIds: ["Comcast_SSO_Apple"],
+          providerIdCandidates: ["Comcast_SSO_Apple", "Comcast"],
+          preferredProviderId: "Comcast_SSO_Apple",
+          integrationEnabled: true,
+          boardingStatus: "PICKER",
+        },
+      ],
+    },
+    ["Apple"]
+  );
+
+  assert.equal(resolved.resolvedPartner, "Apple");
+  assert.equal(resolved.resolvedMappingId, "Comcast");
+  assert.equal(resolved.resolvedPreferredProviderId, "Comcast_SSO_Apple");
+  assert.deepEqual(Array.from(resolved.resolvedPlatformSettingIds || []), ["Comcast_SSO_Apple"]);
+  assert.deepEqual(Array.from(resolved.resolvedProviderIdCandidates || []), ["Comcast_SSO_Apple", "Comcast"]);
 });
 
 test("REST V2 partner platform hydrator upgrades a generic captured Comcast framework provider to the Apple partner mapping from the snapshot", async () => {
@@ -1559,6 +1615,9 @@ test("REST V2 partner platform hydrator upgrades a generic captured Comcast fram
           {
             partner: "Apple",
             mappingId: "Comcast_SSO_Apple",
+            platformSettingIds: ["Comcast_SSO_Apple"],
+            providerIdCandidates: ["Comcast_SSO_Apple"],
+            preferredProviderId: "Comcast_SSO_Apple",
             integrationEnabled: true,
             boardingStatus: "PICKER",
           },
@@ -1588,6 +1647,8 @@ test("REST V2 partner platform hydrator upgrades a generic captured Comcast fram
   assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
+  assert.deepEqual(Array.from(context.mvpdMeta.partnerPlatformSettingIds.Apple || []), ["Comcast_SSO_Apple"]);
+  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple"]);
 });
 
 test("REST V2 partner platform hydrator persists resolved Apple partner mappings into the requestor-scoped MVPD cache", async () => {
@@ -1623,6 +1684,9 @@ test("REST V2 partner platform hydrator persists resolved Apple partner mappings
           {
             partner: "Apple",
             mappingId: "Comcast_SSO_Apple",
+            platformSettingIds: ["Comcast_SSO_Apple"],
+            providerIdCandidates: ["Comcast_SSO_Apple"],
+            preferredProviderId: "Comcast_SSO_Apple",
             integrationEnabled: true,
             boardingStatus: "PICKER",
           },
@@ -1652,6 +1716,8 @@ test("REST V2 partner platform hydrator persists resolved Apple partner mappings
   const cached = requestorCache.get("Comcast_SSO");
   assert.equal(cached.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(cached.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
+  assert.deepEqual(Array.from(cached.partnerPlatformSettingIds.Apple || []), ["Comcast_SSO_Apple"]);
+  assert.deepEqual(Array.from(cached.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple"]);
 });
 
 test("REST V2 learning framework status builder prefers cached partner platform mappings over a generic Comcast provider id", () => {
@@ -1841,6 +1907,12 @@ test("REST V2 partner platform hydrator promotes cached Apple partner mappings e
       partnerPlatformMappings: {
         Apple: "Comcast_SSO_Apple",
       },
+      partnerPlatformSettingIds: {
+        Apple: ["Comcast_SSO_Apple"],
+      },
+      partnerProviderIdCandidates: {
+        Apple: ["Comcast_SSO_Apple"],
+      },
     },
   };
 
@@ -1851,6 +1923,8 @@ test("REST V2 partner platform hydrator promotes cached Apple partner mappings e
   assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
+  assert.deepEqual(Array.from(context.mvpdMeta.partnerPlatformSettingIds.Apple || []), ["Comcast_SSO_Apple"]);
+  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple"]);
 });
 
 test("REST V2 partner platform hydrator drops a generic cached Apple mapping when the live snapshot is unavailable", async () => {

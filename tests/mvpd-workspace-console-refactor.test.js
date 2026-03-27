@@ -110,13 +110,15 @@ function loadMvpdWorkspacePartnerSsoHelpers() {
   const source = fs.readFileSync(filePath, "utf8");
   const script = [
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { const text = String(value || '').trim(); if (text) { return text; } } return ''; }",
+    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
     extractFunctionSource(source, "inferRestV2LearningPartnerNameFromText"),
     extractFunctionSource(source, "mvpdWorkspaceGetEntityData"),
     extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
     extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
     extractFunctionSource(source, "scoreRestV2PartnerPlatformMappingId"),
     extractFunctionSource(source, "chooseRestV2PreferredPartnerPlatformMappingId"),
-    extractFunctionSource(source, "shouldPromoteRestV2PartnerPlatformMappingToSelectedMvpd"),
+    extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
+    extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
     extractFunctionSource(source, "buildRestV2MvpdWorkspacePartnerSsoPlatforms"),
     "module.exports = { buildRestV2MvpdWorkspacePartnerSsoPlatforms };",
   ].join("\n\n");
@@ -320,10 +322,47 @@ test("mvpd workspace partner SSO summary prefers the strongest Apple mapping ove
   const apple = summaries.find((entry) => entry.partner === "Apple");
   assert.ok(apple);
   assert.equal(apple.mappingId, "Comcast_SSO_Apple");
+  assert.equal(apple.preferredProviderId, "Comcast_SSO_Apple");
+  assert.deepEqual(normalizeVmValue(apple.providerIdCandidates), ["Comcast_SSO_Apple", "platform-setting-apple-specific", "Comcast"]);
   assert.equal(apple.integrationEnabled, true);
 });
 
-test("mvpd workspace partner SSO summary promotes a generic Apple Comcast mapping to the selected Comcast_SSO fallback", () => {
+test("mvpd workspace partner SSO summary keeps Apple platform setting ids as stronger provider candidates than a generic mapping id", () => {
+  const { buildRestV2MvpdWorkspacePartnerSsoPlatforms } = loadMvpdWorkspacePartnerSsoHelpers();
+  const summaries = buildRestV2MvpdWorkspacePartnerSsoPlatforms(
+    [
+      {
+        entityData: {
+          id: "Comcast_SSO_Apple",
+          tokenExchangeConfiguration: {
+            source: "Apple",
+          },
+          mappingId: "Comcast",
+          boardingStatus: "PICKER",
+        },
+      },
+    ],
+    [
+      {
+        entityData: {
+          platform: "ios",
+          enabledPlatformServices: true,
+        },
+      },
+    ],
+    "Comcast_SSO"
+  );
+
+  const apple = summaries.find((entry) => entry.partner === "Apple");
+  assert.ok(apple);
+  assert.equal(apple.mappingId, "Comcast");
+  assert.equal(apple.preferredProviderId, "Comcast_SSO_Apple");
+  assert.deepEqual(normalizeVmValue(apple.platformSettingIds), ["Comcast_SSO_Apple"]);
+  assert.deepEqual(normalizeVmValue(apple.providerIdCandidates), ["Comcast_SSO_Apple", "Comcast"]);
+  assert.equal(apple.integrationEnabled, true);
+});
+
+test("mvpd workspace partner SSO summary does not invent a selected MVPD fallback when only a generic Apple mapping exists", () => {
   const { buildRestV2MvpdWorkspacePartnerSsoPlatforms } = loadMvpdWorkspacePartnerSsoHelpers();
   const summaries = buildRestV2MvpdWorkspacePartnerSsoPlatforms(
     [
@@ -351,7 +390,9 @@ test("mvpd workspace partner SSO summary promotes a generic Apple Comcast mappin
 
   const apple = summaries.find((entry) => entry.partner === "Apple");
   assert.ok(apple);
-  assert.equal(apple.mappingId, "Comcast_SSO");
+  assert.equal(apple.mappingId, "Comcast");
+  assert.equal(apple.preferredProviderId, "Comcast");
+  assert.deepEqual(normalizeVmValue(apple.providerIdCandidates), ["Comcast", "platform-setting-apple-generic"]);
   assert.equal(apple.integrationEnabled, true);
 });
 
