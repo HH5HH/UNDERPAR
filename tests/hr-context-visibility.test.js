@@ -1327,6 +1327,44 @@ test("REST V2 MVPD meta keeps cached platform mapping when callers only provide 
   assert.equal(resolved.platformMappingId, "comcast-provider-map");
 });
 
+test("REST V2 MVPD meta preserves selected Comcast_SSO mappings when stale context metadata drifts to generic Comcast", () => {
+  const cachedMetaById = new Map([
+    [
+      "Comcast_SSO",
+      {
+        id: "Comcast_SSO",
+        name: "Xfinity (Comcast_SSO)",
+        platformMappingId: "Comcast_SSO_Apple",
+        partnerPlatformMappings: {
+          Apple: "Comcast_SSO_Apple",
+          Amazon: "Comcast_SSO",
+        },
+      },
+    ],
+  ]);
+  const { getRestV2MvpdMeta } = loadRestV2MvpdMetaResolver({
+    getRequestorScopedMvpdCache() {
+      return cachedMetaById;
+    },
+  });
+
+  const resolved = getRestV2MvpdMeta("MML", "Comcast_SSO", {
+    id: "Comcast",
+    name: "Comcast",
+    platformMappingId: "Comcast",
+    partnerPlatformMappings: {
+      Apple: "Comcast",
+      Amazon: "Comcast",
+    },
+  });
+
+  assert.equal(resolved.id, "Comcast_SSO");
+  assert.equal(resolved.name, "Xfinity (Comcast_SSO)");
+  assert.equal(resolved.platformMappingId, "Comcast_SSO_Apple");
+  assert.equal(resolved.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
+  assert.equal(resolved.partnerPlatformMappings.Amazon, "Comcast_SSO");
+});
+
 test("REST V2 partner snapshot resolver preserves the Apple-specific provider mapping for Comcast partner SSO", () => {
   const { resolveRestV2PartnerPlatformMappingDetailsFromSnapshot } =
     loadRestV2PartnerPlatformMappingSnapshotResolver();

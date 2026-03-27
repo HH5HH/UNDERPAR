@@ -27294,6 +27294,69 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
   if (!cacheMeta && !providedMeta) {
     return null;
   }
+  const normalizePlatformMappingToken = (value = "") =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+  const scorePlatformMappingStrength = (value = "") => {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) {
+      return -1;
+    }
+    const normalizedValueToken = normalizePlatformMappingToken(normalizedValue);
+    const normalizedMvpdToken = normalizePlatformMappingToken(normalizedMvpdId);
+    const normalizedValueLower = normalizedValue.toLowerCase();
+    const normalizedMvpdLower = normalizedMvpdId.toLowerCase();
+    const valueHasSso = /sso/i.test(normalizedValue);
+    const mvpdHasSso = /sso/i.test(normalizedMvpdId);
+    let score = 0;
+    if (normalizedMvpdToken) {
+      if (normalizedValueToken === normalizedMvpdToken) {
+        score = Math.max(score, 60);
+      }
+      if (normalizedValueToken.startsWith(normalizedMvpdToken) && normalizedValueToken.length > normalizedMvpdToken.length) {
+        score = Math.max(score, 80);
+      } else if (
+        normalizedMvpdToken.startsWith(normalizedValueToken) &&
+        normalizedValueToken.length > 0 &&
+        normalizedValueToken.length < normalizedMvpdToken.length
+      ) {
+        score = Math.max(score, 20);
+      }
+    } else if (valueHasSso) {
+      score = Math.max(score, 20);
+    }
+    if (mvpdHasSso) {
+      score += valueHasSso ? 15 : -15;
+    }
+    if (normalizedValueLower === normalizedMvpdLower) {
+      score += 5;
+    }
+    return score;
+  };
+  const preferPlatformMappingId = (currentValue = "", nextValue = "") => {
+    const current = String(currentValue || "").trim();
+    const next = String(nextValue || "").trim();
+    if (!current) {
+      return next;
+    }
+    if (!next) {
+      return current;
+    }
+    const currentScore = scorePlatformMappingStrength(current);
+    const nextScore = scorePlatformMappingStrength(next);
+    if (nextScore > currentScore) {
+      return next;
+    }
+    if (nextScore < currentScore) {
+      return current;
+    }
+    return next;
+  };
+  const providedMetaId = String(firstNonEmptyString([providedMeta?.id, providedMeta?.mvpd]) || "").trim();
+  const providedMetaMatchesSelectedMvpd =
+    !providedMetaId || providedMetaId.toLowerCase() === normalizedMvpdId.toLowerCase();
   const mergedPartnerPlatformMappings = {};
   const appendPartnerPlatformMappings = (source = null) => {
     if (!source || typeof source !== "object") {
@@ -27305,7 +27368,7 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
       if (!partnerName || !mappingId) {
         return;
       }
-      mergedPartnerPlatformMappings[partnerName] = mappingId;
+      mergedPartnerPlatformMappings[partnerName] = preferPlatformMappingId(mergedPartnerPlatformMappings[partnerName], mappingId);
     });
   };
   appendPartnerPlatformMappings(cacheMeta?.partnerPlatformMappings);
@@ -27313,23 +27376,21 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
   const mergedMeta = {
     ...(cacheMeta && typeof cacheMeta === "object" ? cacheMeta : {}),
     ...(providedMeta && typeof providedMeta === "object" ? providedMeta : {}),
-    id:
-      firstNonEmptyString([providedMeta?.id, providedMeta?.mvpd, cacheMeta?.id, cacheMeta?.mvpd, normalizedMvpdId]) ||
-      normalizedMvpdId,
+    id: normalizedMvpdId,
     name:
       firstNonEmptyString([
-        providedMeta?.name,
-        providedMeta?.displayName,
+        providedMetaMatchesSelectedMvpd ? providedMeta?.name : "",
+        providedMetaMatchesSelectedMvpd ? providedMeta?.displayName : "",
         cacheMeta?.name,
         cacheMeta?.displayName,
+        providedMeta?.name,
+        providedMeta?.displayName,
         normalizedMvpdId,
       ]) || normalizedMvpdId,
-    platformMappingId: firstNonEmptyString([
-      providedMeta?.platformMappingId,
-      providedMeta?.platformMappingID,
-      cacheMeta?.platformMappingId,
-      cacheMeta?.platformMappingID,
-    ]),
+    platformMappingId: preferPlatformMappingId(
+      firstNonEmptyString([cacheMeta?.platformMappingId, cacheMeta?.platformMappingID]),
+      firstNonEmptyString([providedMeta?.platformMappingId, providedMeta?.platformMappingID])
+    ),
     logoUrl: firstNonEmptyString([providedMeta?.logoUrl, cacheMeta?.logoUrl]),
     boardingStatus: firstNonEmptyString([providedMeta?.boardingStatus, cacheMeta?.boardingStatus]),
   };
