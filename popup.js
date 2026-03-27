@@ -66906,6 +66906,20 @@ function resolveRestV2LearningRequestorDomainName(programmer = null, requestorId
   return String(collectRestV2LearningRequestorDomainNames(programmer, requestorId)[0] || "").trim();
 }
 
+function buildProgrammerControlledHttpsRedirectUrl(domainName = "") {
+  const normalizedDomainName = String(domainName || "").trim();
+  if (!normalizedDomainName) {
+    return "";
+  }
+  if (isHttpsRedirectUri(normalizedDomainName)) {
+    return normalizedDomainName;
+  }
+  if (/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}(\/.*)?$/.test(normalizedDomainName)) {
+    return `https://${normalizedDomainName.replace(/^\/+/, "")}`;
+  }
+  return "";
+}
+
 async function enrichRestV2LearningResourcesFromConsoleContext(context = null, options = {}) {
   const resolvedContext = context && typeof context === "object" ? context : null;
   if (!resolvedContext?.programmerId) {
@@ -67133,9 +67147,8 @@ function buildDcrInteractiveDocsContext(programmer = null, entry = null, service
     extractSoftwareStatementFromAppData(preferredApp),
   ]);
   const redirectUri = firstNonEmptyString([
-    resolveProgrammerCustomSchemeRedirectUri(resolvedProgrammer, programmerId),
-    extractRegisteredApplicationRedirectUri(preferredApp),
-    extractRegisteredApplicationRedirectUri(preferredApp?.appData || null),
+    extractRegisteredApplicationHttpsRedirectUri(preferredApp),
+    extractRegisteredApplicationHttpsRedirectUri(preferredApp?.appData || null),
   ]);
   const dcrCache = loadDcrCache(programmerId, String(preferredApp?.guid || "").trim()) || null;
 
@@ -67198,8 +67211,8 @@ async function prepareDcrInteractiveDocsContextForEntry(entry = null, context = 
       ]);
       preparedContext.redirectUri = firstNonEmptyString([
         String(preparedContext.redirectUri || "").trim(),
-        resolveProgrammerCustomSchemeRedirectUri(null, preparedContext.programmerId),
-        extractRegisteredApplicationRedirectUri(nextAppInfo),
+        extractRegisteredApplicationHttpsRedirectUri(nextAppInfo),
+        extractRegisteredApplicationHttpsRedirectUri(nextAppInfo?.appData || null),
       ]);
     }
   };
@@ -67303,7 +67316,7 @@ function buildDcrInteractiveDocsHydrationPlan(entry = null, context = null) {
     notes.push("UnderPAR could not resolve the selected registered application's software statement yet.");
   }
   if (missingRequiredFields.includes("body.redirect_uri")) {
-    notes.push("UnderPAR could not resolve the selected Media Company's custom scheme redirect URI yet.");
+    notes.push("UnderPAR could not resolve the selected registered application's HTTPS redirect URI yet.");
   }
   if (missingRequiredFields.includes("query.client_id") || missingRequiredFields.includes("query.client_secret")) {
     notes.push("UnderPAR could not auto-provision DCR client credentials for the selected registered application yet.");
@@ -67337,7 +67350,7 @@ function summarizeDcrInteractiveDocsActivationLockReason(pendingFields = [], pla
     messages.push("UnderPAR could not resolve the selected registered application's software statement yet.");
   }
   if (hasPendingField("body.redirect_uri")) {
-    messages.push("UnderPAR could not resolve the selected Media Company's custom scheme redirect URI yet.");
+    messages.push("UnderPAR could not resolve the selected registered application's HTTPS redirect URI yet.");
   }
   if (hasPendingField("query.client_id", "query.client_secret")) {
     const clientNote =
@@ -67639,12 +67652,20 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     (harvest?.sessionResponseHeaders && typeof harvest.sessionResponseHeaders === "object"
       ? cloneJsonLikeValue(harvest.sessionResponseHeaders, null)
       : null);
+  const applicationRedirectUrl = firstNonEmptyString([
+    extractRegisteredApplicationHttpsRedirectUri(preferredApp),
+    extractRegisteredApplicationHttpsRedirectUri(preferredApp?.appData || null),
+  ]);
+  const requestorDomainRedirectUrl = buildProgrammerControlledHttpsRedirectUrl(
+    resolveRestV2LearningRequestorDomainName(resolvedProgrammer, requestorId)
+  );
   const redirectUrl = normalizeAdobeNavigationUrl(
     firstNonEmptyString([
-      String(activeRecordingContext?.redirectUrl || "").trim(),
-      String(harvestContext?.redirectUrl || "").trim(),
-      String(harvest?.redirectUrl || "").trim(),
-      resolveProgrammerCustomSchemeRedirectUri(resolvedProgrammer, programmerId),
+      normalizeHttpsRedirectUri(String(activeRecordingContext?.redirectUrl || "").trim()),
+      normalizeHttpsRedirectUri(String(harvestContext?.redirectUrl || "").trim()),
+      normalizeHttpsRedirectUri(String(harvest?.redirectUrl || "").trim()),
+      String(applicationRedirectUrl || "").trim(),
+      String(requestorDomainRedirectUrl || "").trim(),
     ])
   );
   const requestorDomainName = resolveRestV2LearningRequestorDomainName(resolvedProgrammer, requestorId);
@@ -68135,7 +68156,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     notes.push("UnderPAR could not resolve the first configured Channel domain for this RequestorId.");
   }
   if (missingRequiredFields.includes("body.redirectUrl") || missingRequiredFields.includes("query.redirectUrl")) {
-    notes.push("UnderPAR could not resolve a valid redirectUrl for this selection yet.");
+    notes.push("UnderPAR could not resolve a valid HTTPS redirectUrl for this selection yet.");
   }
   if (missingRequiredFields.includes("body.SAMLResponse")) {
     notes.push(
@@ -68181,7 +68202,7 @@ function summarizeRestV2InteractiveDocsActivationLockReason(pendingFields = [], 
     messages.push("UnderPAR could not resolve the first configured Channel domain for this RequestorId.");
   }
   if (hasPendingField("body.redirectUrl", "query.redirectUrl")) {
-    messages.push("UnderPAR could not resolve a valid redirectUrl for this selection yet.");
+    messages.push("UnderPAR could not resolve a valid HTTPS redirectUrl for this selection yet.");
   }
   if (hasPendingField("body.resources")) {
     messages.push("Run PREAUTHORIZE or AUTHORIZE first to capture resourceIds.");
@@ -82341,12 +82362,13 @@ function extractSoftwareStatementFromAppData(appData) {
   return "";
 }
 
-function extractRegisteredApplicationRedirectUri(appInfo = null) {
+function collectRegisteredApplicationRedirectUriCandidates(appInfo = null) {
   if (!appInfo || typeof appInfo !== "object") {
-    return "";
+    return [];
   }
 
   const candidates = [];
+  const seen = new Set();
   const pushCandidate = (value) => {
     if (value == null) {
       return;
@@ -82363,7 +82385,8 @@ function extractRegisteredApplicationRedirectUri(appInfo = null) {
       return;
     }
     const normalized = String(value || "").trim();
-    if (normalized) {
+    if (normalized && !seen.has(normalized)) {
+      seen.add(normalized);
       candidates.push(normalized);
     }
   };
@@ -82375,6 +82398,20 @@ function extractRegisteredApplicationRedirectUri(appInfo = null) {
     extractSoftwareStatementFromAppData(appInfo),
   ]);
   const claims = softwareStatement ? parseJwtPayload(softwareStatement) : null;
+  const softwareStatementClaims =
+    (appInfo?.softwareStatementClaims && typeof appInfo.softwareStatementClaims === "object"
+      ? appInfo.softwareStatementClaims
+      : null) ||
+    (appInfo?.software_statement_claims && typeof appInfo.software_statement_claims === "object"
+      ? appInfo.software_statement_claims
+      : null) ||
+    (appData?.softwareStatementClaims && typeof appData.softwareStatementClaims === "object"
+      ? appData.softwareStatementClaims
+      : null) ||
+    (appData?.software_statement_claims && typeof appData.software_statement_claims === "object"
+      ? appData.software_statement_claims
+      : null) ||
+    null;
 
   [
     appInfo?.redirectUri,
@@ -82413,9 +82450,53 @@ function extractRegisteredApplicationRedirectUri(appInfo = null) {
     claims?.redirectUri,
     claims?.redirect_uris,
     claims?.redirectUris,
+    softwareStatementClaims?.redirect_uri,
+    softwareStatementClaims?.redirectUri,
+    softwareStatementClaims?.redirect_uris,
+    softwareStatementClaims?.redirectUris,
   ].forEach((candidate) => pushCandidate(candidate));
 
+  return candidates;
+}
+
+function isHttpsRedirectUri(value = "") {
+  const normalizedValue = String(value || "").trim();
+  return /^https:\/\//i.test(normalizedValue);
+}
+
+function normalizeHttpsRedirectUri(value = "") {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue) {
+    return "";
+  }
+  if (isHttpsRedirectUri(normalizedValue)) {
+    return normalizedValue;
+  }
+  if (/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}(\/.*)?$/.test(normalizedValue)) {
+    return `https://${normalizedValue.replace(/^\/+/, "")}`;
+  }
+  return "";
+}
+
+function extractRegisteredApplicationRedirectUri(appInfo = null) {
+  const candidates = collectRegisteredApplicationRedirectUriCandidates(appInfo);
+  const httpsCandidate = firstNonEmptyString(
+    candidates
+      .map((candidate) => normalizeHttpsRedirectUri(candidate))
+      .filter(Boolean)
+  );
+  if (httpsCandidate) {
+    return httpsCandidate;
+  }
   return firstNonEmptyString(candidates);
+}
+
+function extractRegisteredApplicationHttpsRedirectUri(appInfo = null) {
+  return firstNonEmptyString(
+    collectRegisteredApplicationRedirectUriCandidates(appInfo)
+      .map((candidate) => normalizeHttpsRedirectUri(candidate))
+      .filter(Boolean)
+  );
 }
 
 function normalizeProgrammerCustomSchemeRedirectUri(value = "") {
@@ -82760,7 +82841,14 @@ async function enrichRegisteredApplicationForHydration(appInfo = null, options =
     resolveApplicationGuidFromEntityData(currentAppInfo?.appData || null),
   ]);
   const forceDetails = options?.forceDetails === true;
-  if (!guid || (!forceDetails && firstNonEmptyString([currentAppInfo?.softwareStatement]))) {
+  const hasSoftwareStatement = Boolean(firstNonEmptyString([currentAppInfo?.softwareStatement]));
+  const hasHttpsRedirectUri = Boolean(
+    firstNonEmptyString([
+      extractRegisteredApplicationHttpsRedirectUri(currentAppInfo),
+      extractRegisteredApplicationHttpsRedirectUri(currentAppInfo?.appData || null),
+    ])
+  );
+  if (!guid || (!forceDetails && hasSoftwareStatement && hasHttpsRedirectUri)) {
     return currentAppInfo;
   }
 

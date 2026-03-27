@@ -504,6 +504,15 @@ function loadRestV2InteractiveDocsContextBuilder(seed = {}) {
     "function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = '') { if (typeof globalThis.__seed.resolveHeaderValue === 'function') { return globalThis.__seed.resolveHeaderValue(context, headerName); } const normalized = String(headerName || '').trim().toLowerCase(); if (normalized === 'adobe-subject-token') { return String(context?.adobeSubjectToken || '').trim(); } if (normalized === 'ad-service-token') { return String(context?.adServiceToken || '').trim(); } if (normalized === 'ap-temppass-identity') { return String(context?.tempPassIdentity || '').trim(); } if (normalized === 'ap-visitor-identifier') { return String(context?.visitorIdentifier || '').trim(); } if (normalized === 'ap-partner-framework-status') { return String(context?.partnerFrameworkStatus || '').trim(); } return ''; }",
     "function isRestV2LikelyPartnerSsoContext(context = null) { return typeof globalThis.__seed.isLikelyPartnerSso === 'function' ? globalThis.__seed.isLikelyPartnerSso(context) : false; }",
     "function resolveRestV2DebugFlowIdForHarvest(harvest = null) { return typeof globalThis.__seed.resolveFlowId === 'function' ? globalThis.__seed.resolveFlowId(harvest) : ''; }",
+    "function parseJwtPayload() { return globalThis.__seed.jwtClaims || null; }",
+    extractFunctionSource(source, "isProbablyJwt"),
+    extractFunctionSource(source, "extractSoftwareStatementFromAppData"),
+    extractFunctionSource(source, "collectRegisteredApplicationRedirectUriCandidates"),
+    extractFunctionSource(source, "isHttpsRedirectUri"),
+    extractFunctionSource(source, "normalizeHttpsRedirectUri"),
+    extractFunctionSource(source, "extractRegisteredApplicationRedirectUri"),
+    extractFunctionSource(source, "extractRegisteredApplicationHttpsRedirectUri"),
+    extractFunctionSource(source, "buildProgrammerControlledHttpsRedirectUrl"),
     extractFunctionSource(source, "normalizeProgrammerCustomSchemeRedirectUri"),
     extractFunctionSource(source, "collectProgrammerCustomSchemeRedirectUris"),
     extractFunctionSource(source, "resolveProgrammerCustomSchemeRedirectUri"),
@@ -537,6 +546,10 @@ function loadDcrInteractiveDocsContextBuilder(seed = {}) {
     "function getPassVaultMediaCompanyRecord(programmerId = '') { return typeof globalThis.__seed.getPassVaultMediaCompanyRecord === 'function' ? globalThis.__seed.getPassVaultMediaCompanyRecord(programmerId) : null; }",
     "function parseJwtPayload() { return globalThis.__seed.jwtClaims || null; }",
     extractFunctionSource(source, "extractJwtAndUrls"),
+    extractFunctionSource(source, "collectRegisteredApplicationRedirectUriCandidates"),
+    extractFunctionSource(source, "isHttpsRedirectUri"),
+    extractFunctionSource(source, "normalizeHttpsRedirectUri"),
+    extractFunctionSource(source, "extractRegisteredApplicationHttpsRedirectUri"),
     extractFunctionSource(source, "normalizeProgrammerCustomSchemeRedirectUri"),
     extractFunctionSource(source, "collectProgrammerCustomSchemeRedirectUris"),
     extractFunctionSource(source, "resolveProgrammerCustomSchemeRedirectUri"),
@@ -551,6 +564,60 @@ function loadDcrInteractiveDocsContextBuilder(seed = {}) {
     exports: {},
     __seed: seed,
     navigator: { userAgent: "UnderPAR test" },
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+function loadRegisteredApplicationHydrationHelper(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    `function mergeHydratedRegisteredApplication(appInfo = null, detailData = null, softwareStatement = "") {
+      const baseAppInfo = appInfo && typeof appInfo === "object" && !Array.isArray(appInfo) ? appInfo : {};
+      const detail = detailData && typeof detailData === "object" && !Array.isArray(detailData) ? detailData : null;
+      return {
+        ...baseAppInfo,
+        ...(detail || {}),
+        appData: {
+          ...(baseAppInfo?.appData && typeof baseAppInfo.appData === "object" && !Array.isArray(baseAppInfo.appData) ? baseAppInfo.appData : {}),
+          ...(detail && typeof detail === "object" ? detail : {}),
+        },
+        softwareStatement: firstNonEmptyString([
+          softwareStatement,
+          baseAppInfo?.softwareStatement,
+          baseAppInfo?.appData?.softwareStatement,
+        ]),
+      };
+    }`,
+    "function resolveApplicationGuidFromEntityData(applicationData = null) { return String(applicationData?.guid || applicationData?.id || applicationData?.applicationId || applicationData?.__underparEntityKey || '').trim(); }",
+    "function isHttpsRedirectUri(value = '') { return /^https:\\/\\//i.test(String(value || '').trim()); }",
+    "function normalizeHttpsRedirectUri(value = '') { const normalizedValue = String(value || '').trim(); if (!normalizedValue) { return ''; } if (isHttpsRedirectUri(normalizedValue)) { return normalizedValue; } if (/^[A-Za-z0-9.-]+\\.[A-Za-z]{2,}(\\/.*)?$/.test(normalizedValue)) { return `https://${normalizedValue.replace(/^\\/+/, '')}`; } return ''; }",
+    `function extractRegisteredApplicationHttpsRedirectUri(appInfo = null) {
+      const candidates = [
+        appInfo?.redirectUri,
+        appInfo?.redirect_uri,
+        appInfo?.appData?.redirectUri,
+        appInfo?.appData?.redirect_uri,
+      ];
+      for (const candidate of candidates) {
+        const normalized = normalizeHttpsRedirectUri(candidate);
+        if (normalized) {
+          return normalized;
+        }
+      }
+      return "";
+    }`,
+    "async function fetchApplicationDetailsByGuid(guid, options = {}) { return typeof globalThis.__seed.fetchApplicationDetailsByGuid === 'function' ? globalThis.__seed.fetchApplicationDetailsByGuid(guid, options) : null; }",
+    "async function fetchSoftwareStatementForAppGuid(guid, options = {}) { return typeof globalThis.__seed.fetchSoftwareStatementForAppGuid === 'function' ? globalThis.__seed.fetchSoftwareStatementForAppGuid(guid, options) : ''; }",
+    extractFunctionSource(source, "enrichRegisteredApplicationForHydration"),
+    "module.exports = { enrichRegisteredApplicationForHydration };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -1013,9 +1080,11 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /function setSelectedDcrRegisterAppGuid/);
   assert.match(buildDcrInteractiveDocsContextSource, /collectRestV2AppCandidatesFromPremiumApps/);
   assert.match(buildDcrInteractiveDocsContextSource, /getSelectedDcrRegisterApp/);
-  assert.match(buildDcrInteractiveDocsContextSource, /resolveProgrammerCustomSchemeRedirectUri/);
-  assert.match(buildDcrInteractiveDocsContextSource, /extractRegisteredApplicationRedirectUri/);
+  assert.match(buildDcrInteractiveDocsContextSource, /extractRegisteredApplicationHttpsRedirectUri/);
+  assert.doesNotMatch(buildDcrInteractiveDocsContextSource, /resolveProgrammerCustomSchemeRedirectUri/);
   assert.match(prepareDcrInteractiveDocsContextForEntrySource, /enrichRegisteredApplicationForHydration/);
+  assert.match(extractFunctionSource(popupSource, "enrichRegisteredApplicationForHydration"), /hasHttpsRedirectUri/);
+  assert.match(extractFunctionSource(popupSource, "enrichRegisteredApplicationForHydration"), /extractRegisteredApplicationHttpsRedirectUri/);
   assert.match(prepareDcrInteractiveDocsContextForEntrySource, /registerClientWithSoftwareStatement/);
   assert.match(prepareDcrInteractiveDocsContextForEntrySource, /saveDcrCache/);
   assert.match(buildDcrInteractiveDocsHydrationPlanSource, /body\.software_statement/);
@@ -1057,7 +1126,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2InteractiveDocsAppRequestorContext/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2AppForServiceProvider/);
   assert.match(buildRestV2InteractiveDocsContextSource, /resolveRestV2LearningRequestorDomainName/);
-  assert.match(buildRestV2InteractiveDocsContextSource, /resolveProgrammerCustomSchemeRedirectUri/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /extractRegisteredApplicationHttpsRedirectUri/);
+  assert.match(buildRestV2InteractiveDocsContextSource, /buildProgrammerControlledHttpsRedirectUrl/);
   assert.match(
     buildHrContextSectionBodyHtmlSource,
     /\$\{buildHrServiceListHtml\(detectedServiceEntries, fallbackSummary\)\}\s*\$\{dcrDocsPanelHtml\}\s*\$\{restV2DocsPanelHtml\}/
@@ -1115,7 +1185,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   );
   assert.match(
     summarizeRestV2InteractiveDocsActivationLockReasonSource,
-    /UnderPAR could not resolve a valid redirectUrl for this selection yet\./
+    /UnderPAR could not resolve a valid HTTPS redirectUrl for this selection yet\./
   );
   assert.match(buildRestV2InteractiveDocsContextSource, /Select a Content Provider first\./);
   assert.doesNotMatch(buildRestV2InteractiveDocsContextSource, /REST_V2_REDIRECT_CANDIDATES/);
@@ -1354,7 +1424,7 @@ test("REST V2 configuration context resolves the app requestor when only the med
   assert.equal(result.appInfo?.guid, "rest-guid");
 });
 
-test("DCR register context prefers the programmer custom scheme over app-level redirect URIs", () => {
+test("DCR register context prefers the registered application's HTTPS redirect URI over programmer custom schemes", () => {
   const selectedRegisterApp = {
     appInfo: {
       guid: "rest-guid",
@@ -1398,10 +1468,39 @@ test("DCR register context prefers the programmer custom scheme over app-level r
 
   assert.equal(result.ok, true);
   assert.equal(result.appInfo?.guid, "rest-guid");
-  assert.equal(result.redirectUri, "adbe.turner://");
+  assert.equal(result.redirectUri, "https://wrong.example.test/callback");
 });
 
-test("REST V2 learning context falls back to the programmer custom scheme when no runtime redirect was captured", () => {
+test("registered application hydration still fetches app details when a software statement exists but the HTTPS redirect URI is missing", async () => {
+  const calls = [];
+  const { enrichRegisteredApplicationForHydration } = loadRegisteredApplicationHydrationHelper({
+    async fetchApplicationDetailsByGuid(guid) {
+      calls.push({ type: "details", guid });
+      return {
+        guid,
+        redirectUri: "https://turner.example.test/callback",
+      };
+    },
+    async fetchSoftwareStatementForAppGuid(guid) {
+      calls.push({ type: "software", guid });
+      return "";
+    },
+  });
+
+  const result = await enrichRegisteredApplicationForHydration({
+    guid: "rest-guid",
+    softwareStatement: "header.payload.signature",
+    appData: {
+      softwareStatement: "header.payload.signature",
+    },
+  });
+
+  assert.equal(result?.redirectUri, "https://turner.example.test/callback");
+  assert.equal(result?.appData?.redirectUri, "https://turner.example.test/callback");
+  assert.deepEqual(calls, [{ type: "details", guid: "rest-guid" }]);
+});
+
+test("REST V2 learning context falls back to a programmer-controlled HTTPS domain when no runtime redirect was captured", () => {
   const seededApp = {
     guid: "rest-guid",
     appData: {
@@ -1426,6 +1525,7 @@ test("REST V2 learning context falls back to the programmer custom scheme when n
       autoResolved: false,
       candidateCount: 1,
     },
+    domainName: "turner.example.test",
   });
 
   const result = buildRestV2InteractiveDocsContext(
@@ -1443,7 +1543,7 @@ test("REST V2 learning context falls back to the programmer custom scheme when n
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.redirectUrl, "adbe.turner://");
+  assert.equal(result.redirectUrl, "https://turner.example.test");
 });
 
 test("REST V2 learning resolves the first configured channel domain for the selected requestor", () => {
