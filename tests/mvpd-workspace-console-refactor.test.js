@@ -105,6 +105,29 @@ function loadMvpdWorkspaceLogoHelpers(fetchImpl = async () => "") {
   return context.module.exports;
 }
 
+function loadMvpdWorkspacePartnerSsoHelpers() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { const text = String(value || '').trim(); if (text) { return text; } } return ''; }",
+    extractFunctionSource(source, "inferRestV2LearningPartnerNameFromText"),
+    extractFunctionSource(source, "mvpdWorkspaceGetEntityData"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
+    extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
+    extractFunctionSource(source, "scoreRestV2PartnerPlatformMappingId"),
+    extractFunctionSource(source, "chooseRestV2PreferredPartnerPlatformMappingId"),
+    extractFunctionSource(source, "shouldPromoteRestV2PartnerPlatformMappingToSelectedMvpd"),
+    extractFunctionSource(source, "buildRestV2MvpdWorkspacePartnerSsoPlatforms"),
+    "module.exports = { buildRestV2MvpdWorkspacePartnerSsoPlatforms };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function normalizeVmValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -256,6 +279,80 @@ test("mvpd workspace resource chips fall back to discovered resource IDs when no
     },
   ]);
   assert.deepEqual(normalizeVmValue(result.finalResourceIdsRaw), ["resource.beta", "resource.gamma"]);
+});
+
+test("mvpd workspace partner SSO summary prefers the strongest Apple mapping over a stale generic Comcast entry", () => {
+  const { buildRestV2MvpdWorkspacePartnerSsoPlatforms } = loadMvpdWorkspacePartnerSsoHelpers();
+  const summaries = buildRestV2MvpdWorkspacePartnerSsoPlatforms(
+    [
+      {
+        entityData: {
+          id: "platform-setting-apple-generic",
+          tokenExchangeConfiguration: {
+            source: "tvOS",
+          },
+          mappingId: "Comcast",
+          boardingStatus: "PICKER",
+        },
+      },
+      {
+        entityData: {
+          id: "platform-setting-apple-specific",
+          tokenExchangeConfiguration: {
+            source: "Apple",
+          },
+          mappingId: "Comcast_SSO_Apple",
+          boardingStatus: "PICKER",
+        },
+      },
+    ],
+    [
+      {
+        entityData: {
+          platform: "ios",
+          enabledPlatformServices: true,
+        },
+      },
+    ],
+    "Comcast_SSO"
+  );
+
+  const apple = summaries.find((entry) => entry.partner === "Apple");
+  assert.ok(apple);
+  assert.equal(apple.mappingId, "Comcast_SSO_Apple");
+  assert.equal(apple.integrationEnabled, true);
+});
+
+test("mvpd workspace partner SSO summary promotes a generic Apple Comcast mapping to the selected Comcast_SSO fallback", () => {
+  const { buildRestV2MvpdWorkspacePartnerSsoPlatforms } = loadMvpdWorkspacePartnerSsoHelpers();
+  const summaries = buildRestV2MvpdWorkspacePartnerSsoPlatforms(
+    [
+      {
+        entityData: {
+          id: "platform-setting-apple-generic",
+          tokenExchangeConfiguration: {
+            source: "Apple",
+          },
+          mappingId: "Comcast",
+          boardingStatus: "PICKER",
+        },
+      },
+    ],
+    [
+      {
+        entityData: {
+          platform: "ios",
+          enabledPlatformServices: true,
+        },
+      },
+    ],
+    "Comcast_SSO"
+  );
+
+  const apple = summaries.find((entry) => entry.partner === "Apple");
+  assert.ok(apple);
+  assert.equal(apple.mappingId, "Comcast_SSO");
+  assert.equal(apple.integrationEnabled, true);
 });
 
 test("mvpd workspace logo resolver caches a successful background image resolution", async () => {

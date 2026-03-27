@@ -50490,7 +50490,82 @@ function normalizeRestV2PartnerSsoPlatformName(value = "") {
   return inferRestV2LearningPartnerNameFromText(raw);
 }
 
-function buildRestV2MvpdWorkspacePartnerSsoPlatforms(platformSettingEntities = [], integrationPlatformConfigurationEntities = []) {
+function scoreRestV2PartnerPlatformMappingId(value = "", selectedMvpdId = "") {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue) {
+    return -1;
+  }
+  const normalizedValueToken = normalizeRestV2MvpdMatchToken(normalizedValue);
+  const normalizedSelectedToken = normalizeRestV2MvpdMatchToken(selectedMvpdId);
+  const valueHasSso = /sso/i.test(normalizedValue);
+  const selectedHasSso = /sso/i.test(selectedMvpdId);
+  let score = 0;
+
+  if (normalizedSelectedToken) {
+    if (normalizedValueToken === normalizedSelectedToken) {
+      score = Math.max(score, 90);
+    }
+    if (normalizedValueToken.startsWith(normalizedSelectedToken) && normalizedValueToken.length > normalizedSelectedToken.length) {
+      score = Math.max(score, 120);
+    } else if (
+      normalizedSelectedToken.startsWith(normalizedValueToken) &&
+      normalizedValueToken.length > 0 &&
+      normalizedValueToken.length < normalizedSelectedToken.length
+    ) {
+      score = Math.max(score, 35);
+    }
+  }
+
+  if (valueHasSso) {
+    score += 15;
+  } else if (selectedHasSso) {
+    score -= 10;
+  }
+
+  score += Math.min(12, Math.max(0, normalizedValue.length - 6));
+  return score;
+}
+
+function chooseRestV2PreferredPartnerPlatformMappingId(currentValue = "", nextValue = "", selectedMvpdId = "") {
+  const current = String(currentValue || "").trim();
+  const next = String(nextValue || "").trim();
+  if (!current) {
+    return next;
+  }
+  if (!next) {
+    return current;
+  }
+
+  const currentScore = scoreRestV2PartnerPlatformMappingId(current, selectedMvpdId);
+  const nextScore = scoreRestV2PartnerPlatformMappingId(next, selectedMvpdId);
+  if (nextScore > currentScore) {
+    return next;
+  }
+  if (nextScore < currentScore) {
+    return current;
+  }
+  return next.length > current.length ? next : current;
+}
+
+function shouldPromoteRestV2PartnerPlatformMappingToSelectedMvpd(mappingId = "", selectedMvpdId = "") {
+  const normalizedMappingId = String(mappingId || "").trim();
+  const normalizedSelectedMvpdId = String(selectedMvpdId || "").trim();
+  if (!normalizedMappingId || !normalizedSelectedMvpdId || !/sso/i.test(normalizedSelectedMvpdId)) {
+    return false;
+  }
+  const normalizedMappingToken = normalizeRestV2MvpdMatchToken(normalizedMappingId);
+  const normalizedSelectedToken = normalizeRestV2MvpdMatchToken(normalizedSelectedMvpdId);
+  if (!normalizedMappingToken || !normalizedSelectedToken || normalizedMappingToken === normalizedSelectedToken) {
+    return false;
+  }
+  return normalizedSelectedToken.startsWith(normalizedMappingToken);
+}
+
+function buildRestV2MvpdWorkspacePartnerSsoPlatforms(
+  platformSettingEntities = [],
+  integrationPlatformConfigurationEntities = [],
+  selectedMvpdId = ""
+) {
   const byPartner = new Map();
   const ensureSummary = (partnerName = "") => {
     const normalizedPartner = normalizeRestV2PartnerSsoPlatformName(partnerName);
@@ -50540,8 +50615,20 @@ function buildRestV2MvpdWorkspacePartnerSsoPlatforms(platformSettingEntities = [
       entityData?.platformMappingID,
       entityData?.providerId,
     ]);
-    if (mappingId && !summary.mappingId) {
-      summary.mappingId = String(mappingId || "").trim();
+    if (mappingId) {
+      const promotedSelectedMvpdId = shouldPromoteRestV2PartnerPlatformMappingToSelectedMvpd(mappingId, selectedMvpdId)
+        ? String(selectedMvpdId || "").trim()
+        : "";
+      const preferredMappingId = chooseRestV2PreferredPartnerPlatformMappingId(
+        String(mappingId || "").trim(),
+        promotedSelectedMvpdId,
+        selectedMvpdId
+      );
+      summary.mappingId = chooseRestV2PreferredPartnerPlatformMappingId(
+        summary.mappingId,
+        preferredMappingId,
+        selectedMvpdId
+      );
     }
     const boardingStatus = String(entityData?.boardingStatus || "").trim();
     if (boardingStatus && !summary.boardingStatus) {
@@ -51851,7 +51938,8 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
   const integrationPlatformTraitEntities = resolveEntityArray(integrationPlatformTraitRefs);
   const partnerSsoPlatforms = buildRestV2MvpdWorkspacePartnerSsoPlatforms(
     platformSettingEntities,
-    integrationPlatformConfigurationEntities
+    integrationPlatformConfigurationEntities,
+    context.mvpdId
   );
 
   const allCalls = [versionCall, ...phaseOneCalls, ...phaseTwoCalls, ...phaseThreeCalls, ...phaseFourCalls];
