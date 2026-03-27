@@ -235,6 +235,27 @@ function loadRestV2LearningPlanBuilder() {
   return context.module.exports;
 }
 
+function loadDcrInteractiveDocsHydrationPlanBuilder(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    'const ADOBE_SP_BASE = "https://sp.auth.adobe.com";',
+    'const DCR_API_DOCUMENTATION_URL = "https://developer.adobe.com/adobe-pass/api/dcr_api/interactive/";',
+    "function getActiveAdobePassEnvironment() { return globalThis.__seed.environment || { spBase: ADOBE_SP_BASE }; }",
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    extractFunctionSource(source, "buildDcrInteractiveDocsUrl"),
+    extractFunctionSource(source, "buildDcrInteractiveDocsHydrationPlan"),
+    "module.exports = { buildDcrInteractiveDocsHydrationPlan };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadRestV2MvpdMetaResolver(seed = {}) {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -1089,6 +1110,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(prepareDcrInteractiveDocsContextForEntrySource, /saveDcrCache/);
   assert.match(buildDcrInteractiveDocsHydrationPlanSource, /body\.software_statement/);
   assert.match(buildDcrInteractiveDocsHydrationPlanSource, /body\.redirect_uri/);
+  assert.match(buildDcrInteractiveDocsHydrationPlanSource, /redirectUriValue/);
+  assert.match(buildDcrInteractiveDocsHydrationPlanSource, /operationDocsUrl/);
   assert.match(buildDcrInteractiveDocsHydrationPlanSource, /query\.client_id/);
   assert.match(buildDcrInteractiveDocsHydrationPlanSource, /query\.client_secret/);
   assert.match(buildDcrInteractiveDocsHydrationPlanSource, /query\.grant_type/);
@@ -1471,6 +1494,37 @@ test("DCR register context prefers the registered application's HTTPS redirect U
   assert.equal(result.redirectUri, "https://wrong.example.test/callback");
 });
 
+test("DCR register hydration falls back to the clicked docs URL when the registered application has no HTTPS redirect URI", () => {
+  const { buildDcrInteractiveDocsHydrationPlan } = loadDcrInteractiveDocsHydrationPlanBuilder();
+  const plan = buildDcrInteractiveDocsHydrationPlan(
+    {
+      key: "dcr-client-register",
+      operationId: "processSoftwareStatementUsingPOST",
+      operationAnchor: "operation/processSoftwareStatementUsingPOST",
+      contentType: "application/json",
+      usesBodySoftwareStatement: true,
+      requireBodySoftwareStatement: true,
+      usesBodyRedirectUri: true,
+      requireBodyRedirectUri: true,
+      usesDeviceInfoHeader: true,
+      requireDeviceInfoHeader: true,
+    },
+    {
+      appInfo: { guid: "rest-guid" },
+      softwareStatement: "header.payload.signature",
+      redirectUri: "",
+      deviceInfo: "device-info-123",
+      userAgent: "UnderPAR test",
+    }
+  );
+
+  assert.equal(
+    plan.fieldValues["body.redirect_uri"],
+    "https://developer.adobe.com/adobe-pass/api/dcr_api/interactive/#operation/processSoftwareStatementUsingPOST"
+  );
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+});
+
 test("registered application hydration still fetches app details when a software statement exists but the HTTPS redirect URI is missing", async () => {
   const calls = [];
   const { enrichRegisteredApplicationForHydration } = loadRegisteredApplicationHydrationHelper({
@@ -1544,6 +1598,35 @@ test("REST V2 learning context falls back to a programmer-controlled HTTPS domai
 
   assert.equal(result.ok, true);
   assert.equal(result.redirectUrl, "https://turner.example.test");
+});
+
+test("REST V2 hydration falls back to the clicked docs URL when no runtime HTTPS redirectUrl is available", () => {
+  const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
+  const plan = buildRestV2InteractiveDocsHydrationPlan(
+    {
+      key: "sessions-create-session",
+      operationId: "createSessionUsingPOST",
+      operationAnchor: "operation/createSessionUsingPOST",
+      requiresAccessToken: true,
+      usesBodyRedirectUrl: true,
+      requireBodyRedirectUrl: true,
+      usesBodyDomainName: false,
+      contentType: "application/x-www-form-urlencoded",
+    },
+    {
+      serviceProviderId: "turner",
+      requestorId: "turner",
+      requestorAutoResolved: false,
+      redirectUrl: "",
+    },
+    "test-token"
+  );
+
+  assert.equal(
+    plan.fieldValues["body.redirectUrl"],
+    "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/#operation/createSessionUsingPOST"
+  );
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
 });
 
 test("REST V2 learning resolves the first configured channel domain for the selected requestor", () => {

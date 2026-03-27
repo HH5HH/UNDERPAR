@@ -67252,6 +67252,10 @@ function buildDcrInteractiveDocsHydrationPlan(entry = null, context = null) {
   }
 
   const operationDocsUrl = buildDcrInteractiveDocsUrl(resolvedEntry.operationAnchor || "");
+  const redirectUriValue = firstNonEmptyString([
+    String(resolvedContext.redirectUri || "").trim(),
+    String(operationDocsUrl || "").trim(),
+  ]);
   const fieldValues = {
     server: `${String(getActiveAdobePassEnvironment()?.spBase || ADOBE_SP_BASE || "").trim()}/o`,
     "header.Accept": "application/json",
@@ -67277,8 +67281,8 @@ function buildDcrInteractiveDocsHydrationPlan(entry = null, context = null) {
   if (resolvedEntry.requireBodySoftwareStatement === true) {
     requiredFields.push("body.software_statement");
   }
-  if (resolvedEntry.usesBodyRedirectUri === true && String(resolvedContext.redirectUri || "").trim()) {
-    fieldValues["body.redirect_uri"] = String(resolvedContext.redirectUri || "").trim();
+  if (resolvedEntry.usesBodyRedirectUri === true && redirectUriValue) {
+    fieldValues["body.redirect_uri"] = redirectUriValue;
   }
   if (resolvedEntry.requireBodyRedirectUri === true) {
     requiredFields.push("body.redirect_uri");
@@ -67917,8 +67921,14 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   const operationDocsUrl = buildRestV2InteractiveDocsUrl(resolvedEntry.operationAnchor || resolvedEntry.tagAnchor || "");
   const redirectUrlValue =
     resolvedEntry.usesBodyRedirectUrl === true || resolvedEntry.usesQueryRedirectUrl === true
-      ? String(resolvedContext.redirectUrl || "").trim()
-      : String(resolvedContext.redirectUrl || "").trim();
+      ? firstNonEmptyString([
+          String(resolvedContext.redirectUrl || "").trim(),
+          String(operationDocsUrl || "").trim(),
+        ])
+      : firstNonEmptyString([
+          String(resolvedContext.redirectUrl || "").trim(),
+          String(operationDocsUrl || "").trim(),
+        ]);
 
   const fieldValues = {
     server: String(REST_V2_BASE || "").trim(),
