@@ -61,6 +61,8 @@ function loadPartnerSsoOverrideHelpers(seed = {}) {
     extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
     extractFunctionSource(source, "scoreRestV2PartnerProviderIdCandidate"),
     extractFunctionSource(source, "rankRestV2PartnerProviderIdCandidates"),
+    extractFunctionSource(source, "buildRestV2RequestorScopedPartnerProviderId"),
+    extractFunctionSource(source, "collectRestV2RequestorScopedPartnerProviderIdCandidates"),
     extractFunctionSource(source, "getRestV2MvpdMeta"),
     "function getRestV2MvpdPickerLabel(requestorId = '', mvpdId = '', mvpdMeta = null) { const resolvedMeta = getRestV2MvpdMeta(requestorId, mvpdId, mvpdMeta); return String(resolvedMeta?.name || mvpdId || '').trim() || 'MVPD'; }",
     "function resolveRestV2LearningPartnerNameFromContext(context = null) { return String(context?.learningPartner || context?.partner || '').trim(); }",
@@ -171,6 +173,41 @@ test("raw Partner Framework Status JSON validates and encodes to the exact compa
     Buffer.from(validation.encodedValue, "base64").toString("utf8"),
     validation.compactJson
   );
+});
+
+test("requestor-scoped provider ids validate for Apple partner SSO and resolve back to the selected MVPD", () => {
+  const { validateRestV2PartnerFrameworkStatusInput } = loadPartnerSsoOverrideHelpers({
+    getRequestorScopedMvpdCache(requestorId = "") {
+      return String(requestorId || "").trim() === "MML" ? buildMvpdCache() : null;
+    },
+  });
+  const rawPartnerFrameworkStatus = JSON.stringify({
+    frameworkPermissionInfo: {
+      accessStatus: "granted",
+    },
+    frameworkProviderInfo: {
+      id: "MML_Comcast_SSO",
+      expirationDate: "1775748018000",
+    },
+    frameworkPartnerInfo: {
+      partner: "Apple",
+      name: "Apple",
+    },
+  });
+
+  const validation = validateRestV2PartnerFrameworkStatusInput(rawPartnerFrameworkStatus, {
+    context: {
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      learningPartner: "Apple",
+    },
+    requiredPartner: "Apple",
+  });
+
+  assert.equal(validation.ok, true);
+  assert.equal(validation.providerId, "MML_Comcast_SSO");
+  assert.equal(validation.mvpdId, "Comcast_SSO");
 });
 
 test("generic provider ids are rejected for Apple partner SSO when the MVPD mapping expects a partner-specific id", () => {
