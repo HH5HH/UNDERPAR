@@ -138,10 +138,32 @@
       </span>
     </div>
 
+    <dialog id="learning-inspector-dialog" class="hr-learning-inspector-dialog">
+      <div class="hr-learning-inspector-dialog-shell">
+        <header class="hr-learning-inspector-dialog-head">
+          <div class="hr-learning-inspector-dialog-copy">
+            <p id="learning-inspector-dialog-title" class="hr-learning-inspector-dialog-title">Inspector</p>
+            <p id="learning-inspector-dialog-subtitle" class="hr-learning-inspector-dialog-subtitle"></p>
+          </div>
+          <button
+            id="learning-inspector-dialog-close"
+            class="hr-learning-inspector-dialog-close"
+            type="button"
+            title="Close inspector"
+            aria-label="Close inspector"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <section id="learning-inspector-dialog-body" class="hr-learning-inspector-dialog-body"></section>
+      </div>
+    </dialog>
+
     <script src="underpar-environment.js"></script>
     <script src="underpar-vault-store.js"></script>
     <script src="blondie-time-logic.js"></script>
     <script src="build-info-bootstrap.js"></script>
+    <script src="underpar-jwt-inspector.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

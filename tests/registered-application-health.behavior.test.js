@@ -858,6 +858,7 @@ test("registered application workspace suppresses duplicate requestor summary me
 });
 
 test("registered application health sources wire the HEALTH action and workspace assets", () => {
+  const popupHtml = read("popup.html");
   const popupSource = read("popup.js");
   const backgroundSource = read("background.js");
   const manifestSource = read("manifest.json");
@@ -873,12 +874,17 @@ test("registered application health sources wire the HEALTH action and workspace
   assert.match(popupSource, /if \(normalizedAction === "registered-apps"\)[\s\S]*runRegisteredApplicationHealthDashboardForSelection/);
   assert.match(backgroundSource, /registered-application-health-workspace\.html/);
   assert.match(manifestSource, /registered-application-health-workspace\.js/);
-  assert.match(workspaceHtml, /JWT Inspector/);
-  assert.match(workspaceHtml, /Paste any JWT, bearer value, or JSON body containing a JWT/);
+  assert.match(popupSource, /JWT Inspector/);
+  assert.match(popupSource, /Base64 Inspector/);
+  assert.match(popupSource, /buildLearningInspectorToolsHtml/);
+  assert.match(popupSource, /wireLearningInspectors\(section\)/);
+  assert.match(popupHtml, /learning-inspector-dialog/);
+  assert.match(popupHtml, /underpar-jwt-inspector\.js/);
   assert.match(workspaceHtml, /Registered Application Health Inspector/);
   assert.doesNotMatch(workspaceHtml, /workspace-premium-service-summary/);
-  assert.match(workspaceHtml, /underpar-jwt-inspector\.js/);
-  assert.match(workspaceHtml, /id="workspace-cards"[\s\S]*regapp-jwt-utility-card/);
+  assert.doesNotMatch(workspaceHtml, /JWT Inspector/);
+  assert.doesNotMatch(workspaceHtml, /regapp-jwt-utility-card/);
+  assert.doesNotMatch(workspaceHtml, /workspace-jwt-inspector-dialog/);
   assert.match(workspaceJs, /Decoded locally inside UnderPAR\./);
   assert.match(workspaceJs, /data-software-statement-download-guid/);
   assert.match(workspaceJs, /regapp-up-indicator/);

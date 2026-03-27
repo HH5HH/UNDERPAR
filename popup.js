@@ -13069,6 +13069,11 @@ const els = {
   mvpdWorkspaceLaunchBtn: document.getElementById("mvpd-workspace-launch-btn"),
   hrServicesContainer: document.getElementById("hr-services-container"),
   premiumServicesContainer: document.getElementById("premium-services-container"),
+  learningInspectorDialog: document.getElementById("learning-inspector-dialog"),
+  learningInspectorDialogTitle: document.getElementById("learning-inspector-dialog-title"),
+  learningInspectorDialogSubtitle: document.getElementById("learning-inspector-dialog-subtitle"),
+  learningInspectorDialogBody: document.getElementById("learning-inspector-dialog-body"),
+  learningInspectorDialogCloseButton: document.getElementById("learning-inspector-dialog-close"),
 };
 
 let clickEsmEndpoints = [];
@@ -67821,6 +67826,420 @@ function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null)
   `;
 }
 
+const LEARNING_INSPECTOR_CONFIG_BY_TYPE = Object.freeze({
+  jwt: Object.freeze({
+    title: "JWT Inspector",
+    inputLabel: "JWT Input",
+    actionLabel: "Inspect JWT",
+    placeholder: "Paste a JWT, Authorization header, or JSON response body here...",
+    description: "Paste any JWT, bearer value, or JSON body containing a JWT. UnderPAR decodes it locally without bouncing to jwt.io.",
+    defaultSummary: "Paste any JWT-looking value and UnderPAR will decode it locally.",
+  }),
+  base64: Object.freeze({
+    title: "Base64 Inspector",
+    inputLabel: "Base64 Input",
+    actionLabel: "Inspect Base64",
+    placeholder: "Paste a Base64, Base64URL, header value, or JSON payload here...",
+    description: "Paste any Base64 or Base64URL value. UnderPAR decodes it locally without bouncing to third-party tools.",
+    defaultSummary: "Paste any Base64-looking value and UnderPAR will decode it locally.",
+  }),
+});
+
+function getLearningInspectorConfig(type = "jwt") {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  return LEARNING_INSPECTOR_CONFIG_BY_TYPE[normalizedType] || LEARNING_INSPECTOR_CONFIG_BY_TYPE.jwt;
+}
+
+function getLearningJwtInspectorUtility() {
+  return globalThis.UnderParJwtInspector && typeof globalThis.UnderParJwtInspector.buildInspectorMarkup === "function"
+    ? globalThis.UnderParJwtInspector
+    : null;
+}
+
+function buildLearningInspectorCardHtml(type = "jwt") {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  const config = getLearningInspectorConfig(normalizedType);
+  return `
+    <article class="metadata-item hr-learning-inspector-card hr-learning-inspector-card--${escapeHtml(normalizedType)}">
+      <header class="hr-learning-inspector-card-head">
+        <p class="hr-learning-inspector-card-title">${escapeHtml(config.title)}</p>
+        <p class="hr-learning-inspector-card-description">${escapeHtml(config.description)}</p>
+      </header>
+      <form class="hr-learning-inspector-form" data-learning-inspector-form="${escapeHtml(normalizedType)}">
+        <label class="hr-learning-inspector-field">
+          <span class="hr-learning-inspector-field-label">${escapeHtml(config.inputLabel)}</span>
+          <textarea
+            class="hr-learning-inspector-input"
+            data-learning-inspector-input="${escapeHtml(normalizedType)}"
+            rows="5"
+            placeholder="${escapeHtml(config.placeholder)}"
+          ></textarea>
+        </label>
+        <div class="hr-learning-inspector-actions">
+          <button
+            type="submit"
+            class="hr-learning-inspector-btn hr-learning-inspector-btn--accent"
+            data-learning-inspector-submit="${escapeHtml(normalizedType)}"
+          >${escapeHtml(config.actionLabel)}</button>
+          <button
+            type="button"
+            class="hr-learning-inspector-btn"
+            data-learning-inspector-clear="${escapeHtml(normalizedType)}"
+          >Clear</button>
+        </div>
+      </form>
+      <p class="hr-learning-inspector-summary" data-learning-inspector-summary="${escapeHtml(normalizedType)}" aria-live="polite">
+        ${escapeHtml(config.defaultSummary)}
+      </p>
+    </article>
+  `;
+}
+
+function buildLearningInspectorToolsHtml() {
+  return `
+    <section class="hr-learning-inspector-stack" aria-label="Learning inspectors">
+      ${buildLearningInspectorCardHtml("jwt")}
+      ${buildLearningInspectorCardHtml("base64")}
+    </section>
+  `;
+}
+
+function getLearningInspectorField(type = "jwt", field = "input") {
+  if (!els.hrServicesContainer) {
+    return null;
+  }
+  const normalizedType = String(type || "").trim().toLowerCase();
+  const normalizedField = String(field || "").trim().toLowerCase();
+  if (!normalizedType || !normalizedField) {
+    return null;
+  }
+  return els.hrServicesContainer.querySelector(`[data-learning-inspector-${normalizedField}="${normalizedType}"]`);
+}
+
+function setLearningInspectorSummary(type = "jwt", message = "", severity = "info") {
+  const summaryElement = getLearningInspectorField(type, "summary");
+  if (!(summaryElement instanceof HTMLElement)) {
+    return;
+  }
+  const config = getLearningInspectorConfig(type);
+  const text = String(message || "").trim();
+  summaryElement.textContent = text || config.defaultSummary;
+  summaryElement.classList.toggle("is-error", severity === "error" && Boolean(text));
+  summaryElement.classList.toggle("is-success", severity === "success" && Boolean(text));
+}
+
+function openLearningInspectorDialog(options = {}) {
+  if (
+    !(els.learningInspectorDialog instanceof HTMLDialogElement) ||
+    !(els.learningInspectorDialogTitle instanceof HTMLElement) ||
+    !(els.learningInspectorDialogSubtitle instanceof HTMLElement) ||
+    !(els.learningInspectorDialogBody instanceof HTMLElement)
+  ) {
+    return false;
+  }
+  els.learningInspectorDialogTitle.textContent = String(options?.title || "Inspector").trim() || "Inspector";
+  els.learningInspectorDialogSubtitle.textContent = String(options?.subtitle || "").trim();
+  els.learningInspectorDialogBody.innerHTML = String(options?.bodyHtml || "").trim();
+  if (!els.learningInspectorDialog.open) {
+    els.learningInspectorDialog.showModal();
+  }
+  return true;
+}
+
+function closeLearningInspectorDialog() {
+  if (els.learningInspectorDialog instanceof HTMLDialogElement && els.learningInspectorDialog.open) {
+    els.learningInspectorDialog.close();
+  }
+}
+
+function chunkLearningInspectorText(value = "", chunkSize = 64) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const chunks = [];
+  for (let index = 0; index < normalized.length; index += chunkSize) {
+    chunks.push(normalized.slice(index, index + chunkSize));
+  }
+  return chunks.join("\n");
+}
+
+function decodeLearningBase64Utf8Text(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const normalized = raw
+    .replace(/[\r\n]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  if (!normalized || /[^A-Za-z0-9+/=]/.test(normalized)) {
+    return "";
+  }
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+  try {
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (entry) => entry.charCodeAt(0));
+    const decodedText =
+      typeof TextDecoder === "function"
+        ? new TextDecoder("utf-8", { fatal: false }).decode(bytes)
+        : binary;
+    return String(decodedText || "").replace(/\0/g, "");
+  } catch {
+    return "";
+  }
+}
+
+function isLearningBase64DecodedTextUsable(value = "", sourceValue = "") {
+  const normalized = String(value || "").trim();
+  if (!normalized || normalized === String(sourceValue || "").trim()) {
+    return false;
+  }
+  const printableCharacterCount = [...normalized].filter((character) => {
+    const code = character.charCodeAt(0);
+    return character === "\n" || character === "\r" || character === "\t" || (code >= 32 && code !== 127);
+  }).length;
+  return printableCharacterCount / Math.max(1, normalized.length) >= 0.8;
+}
+
+function extractBase64CandidateFromValue(value, seen = new Set()) {
+  if (typeof value === "string") {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return "";
+    }
+    const directCandidates = [normalized, decodeURIComponentSafe(normalized)].filter(Boolean);
+    for (const candidate of directCandidates) {
+      const decoded = decodeLearningBase64Utf8Text(candidate);
+      if (isLearningBase64DecodedTextUsable(decoded, candidate)) {
+        return candidate;
+      }
+    }
+    const embeddedMatches = normalized.match(/[A-Za-z0-9+/_=-]{8,}/g) || [];
+    for (const match of embeddedMatches) {
+      const decoded = decodeLearningBase64Utf8Text(match);
+      if (isLearningBase64DecodedTextUsable(decoded, match)) {
+        return match;
+      }
+    }
+    return "";
+  }
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  if (seen.has(value)) {
+    return "";
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const candidate = extractBase64CandidateFromValue(entry, seen);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return "";
+  }
+  for (const entry of Object.values(value)) {
+    const candidate = extractBase64CandidateFromValue(entry, seen);
+    if (candidate) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
+function extractBase64CandidateFromText(rawText = "") {
+  const normalized = String(rawText || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const directCandidate = extractBase64CandidateFromValue(normalized);
+  if (directCandidate) {
+    return directCandidate;
+  }
+  const parsed = parseJsonText(normalized, null);
+  return parsed && typeof parsed === "object" ? extractBase64CandidateFromValue(parsed) : "";
+}
+
+function resolveLearningBase64Inspection(rawInput = "") {
+  const normalizedInput = String(rawInput || "").trim();
+  if (!normalizedInput) {
+    return null;
+  }
+  const candidate = extractBase64CandidateFromText(normalizedInput) || normalizedInput;
+  const candidateOptions = Array.from(new Set([candidate, decodeURIComponentSafe(candidate)].filter(Boolean)));
+  for (const option of candidateOptions) {
+    const decodedText = decodeLearningBase64Utf8Text(option);
+    if (!isLearningBase64DecodedTextUsable(decodedText, option)) {
+      continue;
+    }
+    const parsedJson = parseJsonText(decodedText, null);
+    let displayValue = decodedText.trim();
+    let decodedFormat = "text";
+    if (parsedJson && typeof parsedJson === "object") {
+      decodedFormat = "json";
+      try {
+        displayValue = JSON.stringify(parsedJson, null, 2);
+      } catch {
+        displayValue = decodedText.trim();
+      }
+    } else if (/^\s*</.test(decodedText)) {
+      decodedFormat = "xml";
+    }
+    return {
+      encodedValue: option,
+      decodedValue: decodedText.trim(),
+      displayValue,
+      decodedFormat,
+      characterCount: displayValue.length,
+    };
+  }
+  return null;
+}
+
+function buildLearningBase64InspectorMarkup(inspection = null) {
+  if (!inspection || typeof inspection !== "object") {
+    return '<p class="up-jwt-empty-state">No Base64 value is available to inspect.</p>';
+  }
+  const formatLabel =
+    inspection.decodedFormat === "json"
+      ? "JSON"
+      : inspection.decodedFormat === "xml"
+        ? "XML / HTML"
+        : "Text";
+  return `
+    <div class="up-jwt-layout">
+      <section class="up-jwt-panel">
+        <header class="up-jwt-panel-head">
+          <p class="up-jwt-panel-title">Encoded Value</p>
+          <p class="up-jwt-panel-subtitle">Raw Base64 input shown without sending the payload to any third-party service.</p>
+        </header>
+        <div class="up-jwt-panel-body">
+          <article class="up-jwt-token-segment">
+            <p class="up-jwt-token-segment-label">Base64 Segment</p>
+            <code>${escapeHtml(chunkLearningInspectorText(inspection.encodedValue || ""))}</code>
+          </article>
+        </div>
+      </section>
+      <section class="up-jwt-panel">
+        <header class="up-jwt-panel-head">
+          <p class="up-jwt-panel-title">Decoded Base64</p>
+          <p class="up-jwt-panel-subtitle">Decoded locally inside UnderPAR.</p>
+        </header>
+        <div class="up-jwt-panel-body">
+          <div class="up-jwt-summary-grid">
+            <article class="up-jwt-summary-card">
+              <p class="up-jwt-summary-label">Format</p>
+              <p class="up-jwt-summary-value">${escapeHtml(formatLabel)}</p>
+            </article>
+            <article class="up-jwt-summary-card">
+              <p class="up-jwt-summary-label">Characters</p>
+              <p class="up-jwt-summary-value">${escapeHtml(String(inspection.characterCount || 0))}</p>
+            </article>
+            <article class="up-jwt-summary-card">
+              <p class="up-jwt-summary-label">Decode State</p>
+              <p class="up-jwt-summary-value">Decoded locally</p>
+            </article>
+          </div>
+          <section class="up-jwt-object-section">
+            <p class="up-jwt-object-title">Decoded Value</p>
+            <pre class="hr-learning-inspector-code">${escapeHtml(String(inspection.displayValue || "").trim())}</pre>
+          </section>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function inspectLearningJwtInput() {
+  const inputElement = getLearningInspectorField("jwt", "input");
+  const rawInput = inputElement instanceof HTMLTextAreaElement ? String(inputElement.value || "").trim() : "";
+  if (!rawInput) {
+    setLearningInspectorSummary("jwt", "Paste a JWT or token-bearing payload first.", "error");
+    return;
+  }
+  const utility = getLearningJwtInspectorUtility();
+  if (!utility) {
+    setLearningInspectorSummary("jwt", "The shared JWT inspector utility is unavailable. Reload UnderPAR and retry.", "error");
+    return;
+  }
+  const token = utility.extractJwtCandidateFromText(rawInput);
+  if (!token) {
+    setLearningInspectorSummary("jwt", "UnderPAR could not locate a JWT in that input.", "error");
+    return;
+  }
+  const inspection = utility.decodeJwtToken(token);
+  setLearningInspectorSummary("jwt", "Decoded JWT locally. Review the inspector dialog for details.", "success");
+  openLearningInspectorDialog({
+    title: "JWT Inspector",
+    subtitle: "Decoded from LEARNING ad hoc input.",
+    bodyHtml: utility.buildInspectorMarkup(inspection),
+  });
+}
+
+function inspectLearningBase64Input() {
+  const inputElement = getLearningInspectorField("base64", "input");
+  const rawInput = inputElement instanceof HTMLTextAreaElement ? String(inputElement.value || "").trim() : "";
+  if (!rawInput) {
+    setLearningInspectorSummary("base64", "Paste a Base64 value or payload first.", "error");
+    return;
+  }
+  const inspection = resolveLearningBase64Inspection(rawInput);
+  if (!inspection) {
+    setLearningInspectorSummary("base64", "UnderPAR could not locate a decodable Base64 value in that input.", "error");
+    return;
+  }
+  setLearningInspectorSummary("base64", "Decoded Base64 locally. Review the inspector dialog for details.", "success");
+  openLearningInspectorDialog({
+    title: "Base64 Inspector",
+    subtitle: "Decoded from LEARNING ad hoc input.",
+    bodyHtml: buildLearningBase64InspectorMarkup(inspection),
+  });
+}
+
+function wireLearningInspectors(section) {
+  if (!(section instanceof HTMLElement)) {
+    return;
+  }
+  const inspectorForms = Array.from(section.querySelectorAll("[data-learning-inspector-form]"));
+  inspectorForms.forEach((formElement) => {
+    if (!(formElement instanceof HTMLFormElement)) {
+      return;
+    }
+    const type = String(formElement.dataset.learningInspectorForm || "").trim().toLowerCase();
+    if (!type) {
+      return;
+    }
+    formElement.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (type === "base64") {
+        inspectLearningBase64Input();
+        return;
+      }
+      inspectLearningJwtInput();
+    });
+  });
+  const clearButtons = Array.from(section.querySelectorAll("[data-learning-inspector-clear]"));
+  clearButtons.forEach((buttonElement) => {
+    if (!(buttonElement instanceof HTMLButtonElement)) {
+      return;
+    }
+    const type = String(buttonElement.dataset.learningInspectorClear || "").trim().toLowerCase();
+    if (!type) {
+      return;
+    }
+    buttonElement.addEventListener("click", () => {
+      const inputElement = getLearningInspectorField(type, "input");
+      if (inputElement instanceof HTMLTextAreaElement) {
+        inputElement.value = "";
+      }
+      setLearningInspectorSummary(type, "");
+    });
+  });
+}
+
 function wireRestV2LearningContainerCollapsibles(section, programmer = null) {
   if (!section) {
     return;
@@ -68183,6 +68602,7 @@ function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services =
     ${buildHrServiceListHtml(detectedServiceEntries, fallbackSummary)}
     ${restV2DocsPanelHtml}
     ${docsItemHtml}
+    ${buildLearningInspectorToolsHtml()}
   `;
 }
 
@@ -69251,6 +69671,7 @@ function createHrContextSection(programmer, sectionKey, services = null, options
   if (sectionKey === "learning") {
     wireRestV2LearningContainerCollapsibles(section, programmer);
     wireRestV2InteractiveDocsSectionCollapsibles(section, programmer);
+    wireLearningInspectors(section);
   }
   wireHrContextSectionActions(section);
 
@@ -94018,6 +94439,20 @@ function registerEventHandlers() {
   if (els.getLatestBtn) {
     els.getLatestBtn.addEventListener("click", () => {
       void triggerGetLatestWorkflow();
+    });
+  }
+
+  if (els.learningInspectorDialogCloseButton) {
+    els.learningInspectorDialogCloseButton.addEventListener("click", () => {
+      closeLearningInspectorDialog();
+    });
+  }
+
+  if (els.learningInspectorDialog) {
+    els.learningInspectorDialog.addEventListener("click", (event) => {
+      if (event.target === els.learningInspectorDialog) {
+        closeLearningInspectorDialog();
+      }
     });
   }
 

@@ -54,68 +54,7 @@
       <p id="workspace-status" class="workspace-status" aria-live="polite" hidden></p>
 
       <section id="workspace-cards" class="workspace-cards"></section>
-
-      <section class="rest-report-card regapp-jwt-utility-card">
-        <header class="rest-report-head">
-          <p class="rest-report-title">JWT Inspector</p>
-          <p class="rest-report-meta">
-            Paste any JWT, bearer value, or JSON body containing a JWT. UnderPAR decodes it locally without bouncing to jwt.io.
-          </p>
-        </header>
-        <form id="workspace-jwt-decode-form" class="regapp-jwt-decode-form">
-          <label class="spectrum-Field regapp-jwt-field">
-            <span class="spectrum-FieldLabel regapp-jwt-field-label">JWT Input</span>
-            <textarea
-              id="workspace-jwt-decode-input"
-              class="regapp-jwt-decode-input"
-              rows="5"
-              placeholder="Paste a JWT, Authorization header, or JSON response body here..."
-            ></textarea>
-          </label>
-          <div class="regapp-jwt-decode-actions">
-            <button
-              id="workspace-jwt-decode-run"
-              class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"
-              type="submit"
-            >
-              <span class="spectrum-Button-label">Inspect JWT</span>
-            </button>
-            <button id="workspace-jwt-decode-clear" class="spectrum-Button workspace-text-btn" type="button">
-              <span class="spectrum-Button-label">Clear</span>
-            </button>
-          </div>
-        </form>
-        <p id="workspace-jwt-decode-summary" class="regapp-jwt-decode-summary" aria-live="polite">
-          Paste any JWT-looking value and UnderPAR will decode it locally.
-        </p>
-      </section>
     </main>
-
-    <dialog id="workspace-jwt-inspector-dialog" class="regapp-jwt-dialog">
-      <div class="regapp-jwt-dialog-shell">
-        <header class="regapp-jwt-dialog-head">
-          <div class="regapp-jwt-dialog-copy">
-            <p id="workspace-jwt-inspector-title" class="regapp-jwt-dialog-title">JWT Inspector</p>
-            <p id="workspace-jwt-inspector-subtitle" class="regapp-jwt-dialog-subtitle"></p>
-          </div>
-          <button
-            id="workspace-jwt-inspector-close"
-            class="workspace-icon-btn"
-            type="button"
-            title="Close JWT inspector"
-            aria-label="Close JWT inspector"
-          >
-            <span class="workspace-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <path d="M7 7 17 17" />
-                <path d="M17 7 7 17" />
-              </svg>
-            </span>
-          </button>
-        </header>
-        <section id="workspace-jwt-inspector-body" class="regapp-jwt-dialog-body"></section>
-      </div>
-    </dialog>
 
     <script src="underpar-environment.js"></script>
     <script src="underpar-jwt-inspector.js"></script>

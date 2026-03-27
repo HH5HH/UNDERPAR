@@ -876,6 +876,7 @@ test("service shells align the collapse arrow and racing stripes on a shared hea
 });
 
 test("REST V2 learning card exposes every interactive doc operation across all six sections", () => {
+  const popupHtml = fs.readFileSync(path.join(ROOT, "popup.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
   const buildRestV2InteractiveDocsContextSource = extractFunctionSource(popupSource, "buildRestV2InteractiveDocsContext");
@@ -892,6 +893,9 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     popupSource,
     "buildRestV2InteractiveDocsPanelHtml"
   );
+  const buildLearningInspectorCardHtmlSource = extractFunctionSource(popupSource, "buildLearningInspectorCardHtml");
+  const buildLearningInspectorToolsHtmlSource = extractFunctionSource(popupSource, "buildLearningInspectorToolsHtml");
+  const wireLearningInspectorsSource = extractFunctionSource(popupSource, "wireLearningInspectors");
   const wireRestV2LearningContainerCollapsiblesSource = extractFunctionSource(
     popupSource,
     "wireRestV2LearningContainerCollapsibles"
@@ -948,7 +952,13 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     buildHrContextSectionBodyHtmlSource,
     /\$\{buildHrServiceListHtml\(detectedServiceEntries, fallbackSummary\)\}\s*\$\{restV2DocsPanelHtml\}/
   );
+  assert.match(buildHrContextSectionBodyHtmlSource, /buildLearningInspectorToolsHtml\(\)/);
   assert.doesNotMatch(buildHrContextSectionBodyHtmlSource, /contextItemHtml/);
+  assert.match(buildLearningInspectorCardHtmlSource, /getLearningInspectorConfig/);
+  assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-form="\$\{escapeHtml\(normalizedType\)\}"/);
+  assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-input="\$\{escapeHtml\(normalizedType\)\}"/);
+  assert.match(wireLearningInspectorsSource, /inspectLearningJwtInput\(\)/);
+  assert.match(wireLearningInspectorsSource, /inspectLearningBase64Input\(\)/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /mvpdWorkspaceEnsureSnapshot/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /bobtoolsWorkspaceResolveQuickResourceOptions/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /resourceIdPoolSource:\s*"console-tms-map"/);
@@ -971,6 +981,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /service-box-container hr-rest-v2-docs-shell-body/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /hr-context-service-pill hr-context-service-pill--service-rest-v2 hr-rest-v2-docs-pill/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /getRestV2LearningServiceCollapsed/);
+  assert.match(popupHtml, /learning-inspector-dialog/);
+  assert.match(popupHtml, /underpar-jwt-inspector\.js/);
   assert.match(wireRestV2LearningContainerCollapsiblesSource, /wireCollapsibleSection/);
   assert.match(wireRestV2LearningContainerCollapsiblesSource, /setRestV2LearningServiceCollapsed/);
   assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /wireCollapsibleSection/);
@@ -997,6 +1009,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(resolveRestV2LearningRequestorContextSource, /requestorId:\s*programmerId/);
   assert.match(popupSource, /data-restv2-doc-entry-key/);
   assert.match(popupSource, /REST V2 learning methods/);
+  assert.match(popupSource, /JWT Inspector/);
+  assert.match(popupSource, /Base64 Inspector/);
   assert.doesNotMatch(popupSource, /buildRestV2LearningContextItemHtml/);
   assert.doesNotMatch(popupSource, /buildRestV2LearningUiStatusMeta/);
   assert.doesNotMatch(popupSource, /Click any REST V2 LEARNING deeplink to preview the exact interactive docs payload here/);
@@ -1035,6 +1049,10 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupCss, /\.hr-rest-v2-docs-toggle/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell-body/);
   assert.match(popupCss, /\.hr-rest-v2-docs-pill/);
+  assert.match(popupCss, /\.hr-learning-inspector-stack/);
+  assert.match(popupCss, /\.hr-learning-inspector-card/);
+  assert.match(popupCss, /\.hr-learning-inspector-dialog/);
+  assert.match(popupCss, /\.hr-learning-inspector-code/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry\.is-active/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry-readiness/);
@@ -2988,6 +3006,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const accessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
   const toArray = (value) => Array.from(value || []);
+  const frameworkExpirationDate = String(Date.now() + 60 * 60 * 1000);
   const validPartnerFrameworkStatus = Buffer.from(
     JSON.stringify({
       frameworkPermissionInfo: {
@@ -2995,7 +3014,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       },
       frameworkProviderInfo: {
         id: "comcast-provider-map",
-        expirationDate: String(Date.now() + 60 * 60 * 1000),
+        expirationDate: frameworkExpirationDate,
       },
     }),
     "utf8"
@@ -3006,7 +3025,7 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
     },
     frameworkProviderInfo: {
       id: "comcast-provider-map",
-      expirationDate: String(Date.now() + 60 * 60 * 1000),
+      expirationDate: frameworkExpirationDate,
     },
   });
   const adobeSubjectToken = "subject-token-payload";
