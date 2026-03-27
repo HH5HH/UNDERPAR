@@ -253,6 +253,7 @@ function loadRestV2PartnerPlatformMappingHydrator(seed = {}) {
     extractFunctionSource(source, "decodeBase64TextSafe"),
     extractFunctionSource(source, "decodeURIComponentSafe"),
     extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusProviderId"),
     extractFunctionSource(source, "inferRestV2LearningPartnerNameFromText"),
     extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
@@ -282,6 +283,7 @@ function loadRestV2LearningPartnerFrameworkStatusBuilder(seed = {}) {
     extractFunctionSource(source, "decodeBase64TextSafe"),
     extractFunctionSource(source, "parseRestV2JwtPayload"),
     extractFunctionSource(source, "normalizeRestV2PartnerSsoPlatformName"),
+    extractFunctionSource(source, "normalizeRestV2MvpdMatchToken"),
     extractFunctionSource(source, "buildRestV2LearningPartnerFrameworkStatus"),
     "module.exports = { buildRestV2LearningPartnerFrameworkStatus };",
   ].join("\n\n");
@@ -1641,7 +1643,7 @@ test("REST V2 learning framework status builder prefers cached partner platform 
   assert.equal(payload.frameworkPartnerInfo.name, "Apple");
 });
 
-test("REST V2 learning framework status builder preserves a generic Comcast provider id when no stronger mapping exists", () => {
+test("REST V2 learning framework status builder falls back to the selected Comcast_SSO provider id when only a generic Comcast mapping exists", () => {
   const { buildRestV2LearningPartnerFrameworkStatus } = loadRestV2LearningPartnerFrameworkStatusBuilder({
     resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
       return mvpdMeta || null;
@@ -1670,11 +1672,11 @@ test("REST V2 learning framework status builder preserves a generic Comcast prov
   );
 
   const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
-  assert.equal(payload.frameworkProviderInfo.id, "Comcast");
+  assert.equal(payload.frameworkProviderInfo.id, "Comcast_SSO");
   assert.equal(payload.frameworkPartnerInfo.name, "Apple");
 });
 
-test("REST V2 learning framework status builder preserves a generic cached Apple partner mapping when no stronger mapping exists", () => {
+test("REST V2 learning framework status builder ignores a generic cached Apple mapping when Comcast_SSO is selected", () => {
   const { buildRestV2LearningPartnerFrameworkStatus } = loadRestV2LearningPartnerFrameworkStatusBuilder({
     resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
       return mvpdMeta || null;
@@ -1706,11 +1708,11 @@ test("REST V2 learning framework status builder preserves a generic cached Apple
   );
 
   const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
-  assert.equal(payload.frameworkProviderInfo.id, "Comcast");
+  assert.equal(payload.frameworkProviderInfo.id, "Comcast_SSO");
   assert.equal(payload.frameworkPartnerInfo.name, "Apple");
 });
 
-test("REST V2 learning accepts a generic top-level Comcast provider mapping for Apple when no partner-specific mapping exists", () => {
+test("REST V2 learning blocks a generic top-level Comcast provider mapping for Apple when Comcast_SSO is selected", () => {
   const { buildRestV2InteractiveDocsHydrationPlan } = loadRestV2LearningPlanBuilder();
   const genericFrameworkStatus = Buffer.from(
     JSON.stringify({
@@ -1767,13 +1769,9 @@ test("REST V2 learning accepts a generic top-level Comcast provider mapping for 
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), true);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
-  assert.equal(
-    JSON.parse(Buffer.from(plan.fieldValues["header.AP-Partner-Framework-Status"], "base64").toString("utf8"))
-      ?.frameworkProviderInfo?.id,
-    "Comcast"
-  );
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.deepEqual(Array.from(plan.clearFieldNames || []), ["header.AP-Partner-Framework-Status"]);
 });
 
 test("REST V2 partner platform hydrator promotes cached Apple partner mappings even when the live snapshot is unavailable", async () => {
@@ -1813,7 +1811,7 @@ test("REST V2 partner platform hydrator promotes cached Apple partner mappings e
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
 });
 
-test("REST V2 partner platform hydrator preserves a generic cached Apple mapping when the live snapshot is unavailable", async () => {
+test("REST V2 partner platform hydrator drops a generic cached Apple mapping when the live snapshot is unavailable", async () => {
   const { hydrateRestV2PartnerPlatformMappingFromConsoleContext } = loadRestV2PartnerPlatformMappingHydrator({
     resolveMvpdMeta(_requestorId, _mvpdId, mvpdMeta) {
       return mvpdMeta || null;
@@ -1845,8 +1843,8 @@ test("REST V2 partner platform hydrator preserves a generic cached Apple mapping
     forceRefresh: false,
   });
 
-  assert.equal(context.mvpdPlatformMappingId, "Comcast");
-  assert.equal(context.mvpdMeta.platformMappingId, "Comcast");
+  assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO");
+  assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO");
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast");
 });
 

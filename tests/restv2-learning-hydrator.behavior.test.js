@@ -1024,3 +1024,57 @@ test("REST V2 docs hydrator maps the TempPASS identity header across casing vari
   assert.equal(result.filledFields.includes("header.AD-Service-Token"), true);
   assert.equal(result.filledFields.includes("header.AP-Temppass-Identity"), true);
 });
+
+test("REST V2 docs hydrator clears a stale partner framework status header when the current plan leaves it pending", async () => {
+  const harness = createDomHarness("retrieveVerificationTokenUsingPOST");
+  const { createElement, operationElement } = harness;
+  const sendButton = operationElement.appendChild(
+    createElement("button", {
+      textContent: "Send",
+      attributes: { "data-cy": "send-button" },
+    })
+  );
+  const serviceProviderInput = operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      attributes: { name: "serviceProvider", "data-param-in": "path" },
+    })
+  );
+  const partnerFrameworkStatusInput = operationElement.appendChild(
+    createElement("input", {
+      type: "text",
+      value: "stale-comcast-framework-status",
+      attributes: { name: "AP-Partner-Framework-Status", "data-param-in": "header" },
+    })
+  );
+
+  const runRestV2InteractiveDocsHydrator = loadHydrator({
+    document: harness.document,
+    location: harness.location,
+    window: harness.window,
+    Event: harness.Event,
+    HTMLElement: harness.HTMLElement,
+    HTMLInputElement: harness.HTMLInputElement,
+    HTMLSelectElement: harness.HTMLSelectElement,
+    HTMLTextAreaElement: harness.HTMLTextAreaElement,
+  });
+
+  const result = await runRestV2InteractiveDocsHydrator({
+    operationId: "retrieveVerificationTokenUsingPOST",
+    fieldValues: {
+      "path.serviceProvider": "MML",
+    },
+    requiredFields: ["path.serviceProvider", "header.AP-Partner-Framework-Status"],
+    missingRequiredFields: ["header.AP-Partner-Framework-Status"],
+    clearFieldNames: ["header.AP-Partner-Framework-Status"],
+    timeoutMs: 1200,
+  });
+
+  assert.equal(serviceProviderInput.value, "MML");
+  assert.equal(partnerFrameworkStatusInput.value, "");
+  assert.equal(sendButton.focused, false);
+  assert.equal(partnerFrameworkStatusInput.focused, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.clearedFields.includes("header.AP-Partner-Framework-Status"), true);
+  assert.deepEqual(Array.from(result.unresolvedRequiredFields), ["header.AP-Partner-Framework-Status"]);
+});

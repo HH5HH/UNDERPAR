@@ -30834,6 +30834,15 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
       ).trim()
     : "";
   const selectedMvpdProviderId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
+  const isGenericSsoAliasDowngrade = (candidateValue = "", selectedValue = "") => {
+    const candidateToken = normalizeRestV2MvpdMatchToken(candidateValue);
+    const selectedToken = normalizeRestV2MvpdMatchToken(selectedValue);
+    if (!candidateToken || !selectedToken || !/sso$/i.test(selectedToken)) {
+      return false;
+    }
+    const selectedWithoutSso = selectedToken.replace(/sso$/i, "");
+    return Boolean(selectedWithoutSso) && candidateToken === selectedWithoutSso && candidateToken !== selectedToken;
+  };
   const explicitPartnerProviderId = firstNonEmptyString([
     context?.mvpdPlatformMappingId,
     context?.mvpdMeta?.platformMappingId,
@@ -30846,8 +30855,8 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
   ]);
   const providerId = String(
     firstNonEmptyString([
-      mappedPartnerProviderId,
-      explicitPartnerProviderId,
+      isGenericSsoAliasDowngrade(mappedPartnerProviderId, selectedMvpdProviderId) ? "" : mappedPartnerProviderId,
+      isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ? "" : explicitPartnerProviderId,
       selectedMvpdProviderId,
     ]) || ""
   ).trim();
@@ -66583,6 +66592,11 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
         : "Complete a Partner SSO login first so UnderPAR can capture SAMLResponse for this selection."
     );
   }
+  const clearFieldNames = [...new Set(
+    missingRequiredFields.filter(
+      (fieldName) => fieldName && !Object.prototype.hasOwnProperty.call(normalizedFieldValues, fieldName)
+    )
+  )];
 
   return {
     entryKey: String(resolvedEntry.key || "").trim(),
@@ -66592,6 +66606,7 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     fieldValues: normalizedFieldValues,
     requiredFields,
     missingRequiredFields,
+    clearFieldNames,
     notes,
   };
 }
@@ -68106,6 +68121,9 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
   const normalizedFieldValues = config?.fieldValues && typeof config.fieldValues === "object" ? config.fieldValues : {};
   const fieldNames = Object.keys(normalizedFieldValues);
   const requiredFields = Array.isArray(config?.requiredFields) ? config.requiredFields.map((item) => normalize(item)).filter(Boolean) : [];
+  const clearFieldNames = Array.isArray(config?.clearFieldNames)
+    ? config.clearFieldNames.map((item) => normalize(item)).filter(Boolean)
+    : [];
   const initialMountFieldNames = requiredFields.length > 0 ? uniqueStrings(requiredFields) : fieldNames;
   const hasInteractiveControlsMounted = () => {
     if (initialMountFieldNames.length === 0) {
@@ -68148,10 +68166,30 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     }, config?.timeoutMs || 18000, 140)) || null;
   const sendButton = interactiveState?.sendButton || sendButtonSelector() || null;
   const filledFields = [];
+  const clearedFields = [];
   const missingControls = [];
   const bodyEditorEntries = [];
   const sharedBodyEditor = findRequestBodyEditor(operationElement);
   const perFieldWaitMs = Math.min(900, Math.max(260, Number(config?.perFieldWaitMs || 360)));
+
+  for (const fieldName of clearFieldNames) {
+    const normalizedFieldName = normalize(fieldName);
+    if (!normalizedFieldName || Object.prototype.hasOwnProperty.call(normalizedFieldValues, normalizedFieldName)) {
+      continue;
+    }
+    const control =
+      findControl(operationElement, normalizedFieldName) ||
+      ((await waitFor(() => findControl(operationElement, normalizedFieldName), perFieldWaitMs, 90)) || null);
+    if (!control) {
+      continue;
+    }
+    if (normalizedFieldName.startsWith("body.") && sharedBodyEditor && control === sharedBodyEditor) {
+      continue;
+    }
+    if (setElementValue(control, "", normalizedFieldName)) {
+      clearedFields.push(normalizedFieldName);
+    }
+  }
 
   for (const [fieldName, rawValue] of Object.entries(normalizedFieldValues)) {
     const normalizedFieldName = normalize(fieldName);
@@ -68214,6 +68252,7 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
     operationId,
     operationTitle: normalize(operationElement.querySelector("h2")?.textContent),
     filledFields,
+    clearedFields,
     missingControls,
     unresolvedRequiredFields,
     sendButtonFound: Boolean(sendButton),
@@ -68237,6 +68276,7 @@ async function hydrateRestV2InteractiveDocsTab(tabId, plan = null) {
         operationId: String(plan?.operationId || "").trim(),
         requiredFields: Array.isArray(plan?.requiredFields) ? plan.requiredFields.slice() : [],
         missingRequiredFields: Array.isArray(plan?.missingRequiredFields) ? plan.missingRequiredFields.slice() : [],
+        clearFieldNames: Array.isArray(plan?.clearFieldNames) ? plan.clearFieldNames.slice() : [],
         fieldValues: plan?.fieldValues && typeof plan.fieldValues === "object" ? { ...plan.fieldValues } : {},
         timeoutMs: 18000,
       },
@@ -90320,6 +90360,15 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
       : context?.mvpdMeta?.partnerPlatformMappings && typeof context.mvpdMeta.partnerPlatformMappings === "object"
         ? context.mvpdMeta.partnerPlatformMappings
         : null;
+  const isGenericSsoAliasDowngrade = (candidateValue = "", selectedValue = "") => {
+    const candidateToken = normalizeRestV2MvpdMatchToken(candidateValue);
+    const selectedToken = normalizeRestV2MvpdMatchToken(selectedValue);
+    if (!candidateToken || !selectedToken || !/sso$/i.test(selectedToken)) {
+      return false;
+    }
+    const selectedWithoutSso = selectedToken.replace(/sso$/i, "");
+    return Boolean(selectedWithoutSso) && candidateToken === selectedWithoutSso && candidateToken !== selectedToken;
+  };
   const mappedPartnerProviderId = resolvedPartnerName
     ? String(
         Object.entries(partnerPlatformMappings || {}).find(
@@ -90339,11 +90388,17 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
     cachedMvpdMeta?.platformMappingID,
   ]);
   if (resolvedPartnerName) {
-    return String(firstNonEmptyString([mappedPartnerProviderId, explicitPartnerProviderId, selectedMvpdProviderId]) || "").trim();
+    return String(
+      firstNonEmptyString([
+        isGenericSsoAliasDowngrade(mappedPartnerProviderId, selectedMvpdProviderId) ? "" : mappedPartnerProviderId,
+        isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ? "" : explicitPartnerProviderId,
+        selectedMvpdProviderId,
+      ]) || ""
+    ).trim();
   }
   return String(
     firstNonEmptyString([
-      explicitPartnerProviderId,
+      isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ? "" : explicitPartnerProviderId,
       selectedMvpdProviderId,
       context?.mvpdMeta?.platformMappingId,
       context?.mvpdMeta?.platformMappingID,
@@ -90379,6 +90434,15 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
       : context;
   const requestorId = String(firstNonEmptyString([compatibilityContext?.requestorId, compatibilityContext?.serviceProviderId]) || "").trim();
   const selectedMvpd = String(firstNonEmptyString([compatibilityContext?.mvpd, compatibilityContext?.selectedMvpd]) || "").trim();
+  const isGenericSsoAliasDowngrade = (candidateValue = "", selectedValue = "") => {
+    const candidateToken = normalizeRestV2MvpdMatchToken(candidateValue);
+    const selectedToken = normalizeRestV2MvpdMatchToken(selectedValue);
+    if (!candidateToken || !selectedToken || !/sso$/i.test(selectedToken)) {
+      return false;
+    }
+    const selectedWithoutSso = selectedToken.replace(/sso$/i, "");
+    return Boolean(selectedWithoutSso) && candidateToken === selectedWithoutSso && candidateToken !== selectedToken;
+  };
   const expectedProviderId = String(resolveRestV2ExpectedPartnerFrameworkProviderId(compatibilityContext) || "")
     .trim()
     .toLowerCase();
@@ -90386,6 +90450,10 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
     .trim()
     .toLowerCase();
   if (!actualProviderId) {
+    return false;
+  }
+  const resolvedPartnerName = normalizeRestV2PartnerSsoPlatformName(derivedPartnerName);
+  if (resolvedPartnerName && isGenericSsoAliasDowngrade(actualProviderId, selectedMvpd)) {
     return false;
   }
   const resolvedMvpd = resolveRestV2MvpdMetaForPartnerFrameworkProviderId(actualProviderId, requestorId, compatibilityContext);
@@ -90399,7 +90467,6 @@ function isRestV2PartnerFrameworkStatusCompatibleWithContext(value = "", context
     }
     return Boolean(resolvedMvpdId || selectedMvpd);
   }
-  const resolvedPartnerName = normalizeRestV2PartnerSsoPlatformName(derivedPartnerName);
   if (resolvedPartnerName && !resolvedMvpdId) {
     return false;
   }
@@ -90494,6 +90561,15 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   const currentMvpdMeta = getRestV2MvpdMeta(requestorId, mvpd, context?.mvpdMeta || null) || context?.mvpdMeta || {
     id: mvpd,
   };
+  const isGenericSsoAliasDowngrade = (candidateValue = "", selectedValue = "") => {
+    const candidateToken = normalizeRestV2MvpdMatchToken(candidateValue);
+    const selectedToken = normalizeRestV2MvpdMatchToken(selectedValue);
+    if (!candidateToken || !selectedToken || !/sso$/i.test(selectedToken)) {
+      return false;
+    }
+    const selectedWithoutSso = selectedToken.replace(/sso$/i, "");
+    return Boolean(selectedWithoutSso) && candidateToken === selectedWithoutSso && candidateToken !== selectedToken;
+  };
   const currentMappingId = String(
     firstNonEmptyString([
       context?.mvpdPlatformMappingId,
@@ -90519,6 +90595,9 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
       ? { ...currentMvpdMeta.partnerPlatformMappings }
       : {};
   const selectedMvpdProviderId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
+  const sanitizedRealFrameworkProviderId = isGenericSsoAliasDowngrade(realFrameworkProviderId, selectedMvpdProviderId)
+    ? ""
+    : realFrameworkProviderId;
   const normalizePartnerProviderId = (value = "") => String(value || "").trim();
   const normalizedExistingPartnerPlatformMappings = Object.fromEntries(
     Object.entries(existingPartnerPlatformMappings)
@@ -90548,16 +90627,25 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
       )
       .find(Boolean) || ""
   ).trim();
+  const sanitizedMappedPartnerProviderId = isGenericSsoAliasDowngrade(mappedPartnerProviderId, selectedMvpdProviderId)
+    ? ""
+    : mappedPartnerProviderId;
   const preferredPartnerFallbackId = firstNonEmptyString([
-    normalizePartnerProviderId(context?.mvpdPlatformMappingId),
-    normalizePartnerProviderId(currentMvpdMeta?.platformMappingId),
-    normalizePartnerProviderId(currentMvpdMeta?.platformMappingID),
-    normalizePartnerProviderId(realFrameworkProviderId),
+    isGenericSsoAliasDowngrade(normalizePartnerProviderId(context?.mvpdPlatformMappingId), selectedMvpdProviderId)
+      ? ""
+      : normalizePartnerProviderId(context?.mvpdPlatformMappingId),
+    isGenericSsoAliasDowngrade(normalizePartnerProviderId(currentMvpdMeta?.platformMappingId), selectedMvpdProviderId)
+      ? ""
+      : normalizePartnerProviderId(currentMvpdMeta?.platformMappingId),
+    isGenericSsoAliasDowngrade(normalizePartnerProviderId(currentMvpdMeta?.platformMappingID), selectedMvpdProviderId)
+      ? ""
+      : normalizePartnerProviderId(currentMvpdMeta?.platformMappingID),
+    normalizePartnerProviderId(sanitizedRealFrameworkProviderId),
     selectedMvpdProviderId,
   ]);
   if (partnerCandidates.length === 0) {
-    if (realFrameworkProviderId) {
-      const normalizedFrameworkProviderId = normalizePartnerProviderId(realFrameworkProviderId);
+    if (sanitizedRealFrameworkProviderId) {
+      const normalizedFrameworkProviderId = normalizePartnerProviderId(sanitizedRealFrameworkProviderId);
       context.mvpdPlatformMappingId = normalizedFrameworkProviderId;
       context.mvpdMeta = persistMvpdMeta({
         ...currentMvpdMeta,
@@ -90595,7 +90683,7 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   if (!snapshot || typeof snapshot !== "object") {
     const fallbackMappingId = String(
       firstNonEmptyString([
-        mappedPartnerProviderId,
+        sanitizedMappedPartnerProviderId,
         preferredPartnerFallbackId,
       ]) || ""
     ).trim();
@@ -90633,8 +90721,10 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   const normalizedResolvedSnapshotMappingId = normalizePartnerProviderId(resolvedDetails?.resolvedMappingId);
   const resolvedMappingId = String(
     firstNonEmptyString([
-      normalizedResolvedSnapshotMappingId,
-      mappedPartnerProviderId,
+      isGenericSsoAliasDowngrade(normalizedResolvedSnapshotMappingId, selectedMvpdProviderId)
+        ? ""
+        : normalizedResolvedSnapshotMappingId,
+      sanitizedMappedPartnerProviderId,
       preferredPartnerFallbackId,
     ]) || ""
   ).trim();
