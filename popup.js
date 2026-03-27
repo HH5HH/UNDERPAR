@@ -256,11 +256,45 @@ const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = {
     "https://experienceleague.adobe.com/en/docs/pass/authentication/integration-guide-programmers/features-premium/temporary-access/temp-pass-feature",
   restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/",
 };
+const DCR_API_DOCUMENTATION_URL = "https://developer.adobe.com/adobe-pass/api/dcr_api/interactive/";
 const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["health", "learning"];
 const HR_CONTEXT_SECTION_TITLE_BY_KEY = {
   health: "HEALTH",
   learning: "LEARNING",
 };
+const DCR_INTERACTIVE_DOC_ENTRIES = Object.freeze([
+  {
+    key: "dcr-client-register",
+    label: "Register Client",
+    methodLabel: "POST",
+    operationSummary: "Register client application",
+    operationAnchor: "operation/processSoftwareStatementUsingPOST",
+    operationId: "processSoftwareStatementUsingPOST",
+    contentType: "application/json",
+    usesDeviceInfoHeader: true,
+    requireDeviceInfoHeader: true,
+    usesUserAgentHeader: true,
+    usesBodySoftwareStatement: true,
+    requireBodySoftwareStatement: true,
+    usesBodyRedirectUri: true,
+    requireBodyRedirectUri: true,
+  },
+  {
+    key: "dcr-client-token",
+    label: "Retrieve Client Token",
+    methodLabel: "POST",
+    operationSummary: "Retrieve client token",
+    operationAnchor: "operation/generateAccessTokenUsingPOST",
+    operationId: "generateAccessTokenUsingPOST",
+    usesQueryClientId: true,
+    requireQueryClientId: true,
+    usesQueryClientSecret: true,
+    requireQueryClientSecret: true,
+    usesQueryGrantType: true,
+    requireQueryGrantType: true,
+    autoProvisionClientCredentials: true,
+  },
+]);
 const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
   {
     key: "configuration-service-provider",
@@ -12825,6 +12859,8 @@ const state = {
   cmTenantBundlePromiseByTenantKey: new Map(),
   cmUsageWarmStateByProgrammerId: new Map(),
   premiumSectionCollapsedByKey: new Map(),
+  dcrLearningUiState: null,
+  dcrLearningUiVersion: 0,
   restV2LearningUiState: null,
   restV2LearningUiVersion: 0,
   premiumAutoRefreshMetaByKey: new Map(),
@@ -17125,6 +17161,27 @@ function setRestV2LearningServiceCollapsed(programmerId, serviceKey, isCollapsed
   setPremiumSectionCollapsed(programmerId, getRestV2LearningServiceCollapseKey(serviceKey), isCollapsed);
 }
 
+function getLearningInspectorCollapseKey(type = "") {
+  return `learning-inspector:${String(type || "").trim()}`;
+}
+
+function getLearningInspectorCollapsed(programmerId, type = "") {
+  const scopedKey = getLearningInspectorCollapseKey(type);
+  const programmerScopedKey = getPremiumCollapseKey(programmerId, scopedKey);
+  if (state.premiumSectionCollapsedByKey.has(programmerScopedKey)) {
+    return Boolean(state.premiumSectionCollapsedByKey.get(programmerScopedKey));
+  }
+  const globalScopedKey = getPremiumCollapseKey("__global__", scopedKey);
+  if (state.premiumSectionCollapsedByKey.has(globalScopedKey)) {
+    return Boolean(state.premiumSectionCollapsedByKey.get(globalScopedKey));
+  }
+  return true;
+}
+
+function setLearningInspectorCollapsed(programmerId, type = "", isCollapsed) {
+  setPremiumSectionCollapsed(programmerId, getLearningInspectorCollapseKey(type), isCollapsed);
+}
+
 function getRestV2InteractiveDocsSectionCollapseKey(sectionKey = "") {
   return `rest-v2-learning:${String(sectionKey || "").trim()}`;
 }
@@ -17153,6 +17210,26 @@ function getRestV2LearningUiSelection(programmer = null) {
     requestorId: String(state.selectedRequestorId || "").trim(),
     mvpd: String(state.selectedMvpdId || "").trim(),
   };
+}
+
+function getActiveDcrLearningUiState(programmer = null) {
+  const activeState = state.dcrLearningUiState && typeof state.dcrLearningUiState === "object" ? state.dcrLearningUiState : null;
+  if (!activeState) {
+    return null;
+  }
+  const activeProgrammerId = String(activeState?.programmerId || "").trim();
+  const activeRequestorId = String(firstNonEmptyString([activeState?.requestorId, activeState?.serviceProviderId]) || "").trim();
+  const currentSelection = getRestV2LearningUiSelection(programmer);
+  if (!activeProgrammerId || !currentSelection.programmerId || activeProgrammerId !== currentSelection.programmerId) {
+    return null;
+  }
+  if (currentSelection.requestorId && activeRequestorId && currentSelection.requestorId !== activeRequestorId) {
+    return null;
+  }
+  if (currentSelection.requestorId && !activeRequestorId) {
+    return null;
+  }
+  return activeState;
 }
 
 function getActiveRestV2LearningUiState(programmer = null) {
@@ -17207,6 +17284,27 @@ function setRestV2LearningUiState(nextState = null, options = {}) {
 
 function clearRestV2LearningUiState(options = {}) {
   return setRestV2LearningUiState(null, options);
+}
+
+function setDcrLearningUiState(nextState = null, options = {}) {
+  state.dcrLearningUiVersion = Number(state.dcrLearningUiVersion || 0) + 1;
+  if (!nextState || typeof nextState !== "object") {
+    state.dcrLearningUiState = null;
+  } else {
+    const snapshot = cloneJsonLikeValue(nextState, {}) || {};
+    snapshot.updatedAt = Date.now();
+    state.dcrLearningUiState = snapshot;
+  }
+  if (options?.render !== false) {
+    refreshRestV2LearningUi(resolveSelectedProgrammer(), {
+      controllerReason: String(options?.controllerReason || "dcr-learning-ui-state").trim() || "dcr-learning-ui-state",
+    });
+  }
+  return state.dcrLearningUiState;
+}
+
+function clearDcrLearningUiState(options = {}) {
+  return setDcrLearningUiState(null, options);
 }
 
 function applyCollapsibleState(toggleButton, containerElement, isCollapsed) {
@@ -65732,6 +65830,16 @@ function wireHrContextSectionActions(section) {
     if (!target) {
       return;
     }
+    const dcrDocsButton = target.closest("[data-dcr-doc-entry-key]");
+    if (dcrDocsButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      void openDcrInteractiveDocsEntry(
+        String(dcrDocsButton.getAttribute("data-dcr-doc-entry-key") || ""),
+        String(dcrDocsButton.getAttribute("data-dcr-doc-url") || "")
+      );
+      return;
+    }
     const restV2DocsButton = target.closest("[data-restv2-doc-entry-key]");
     if (restV2DocsButton) {
       event.preventDefault();
@@ -66028,6 +66136,21 @@ function buildRestV2InteractiveDocsPanelSignature(programmer = null, services = 
   ].join("|");
 }
 
+function buildDcrInteractiveDocsPanelSignature(programmer = null, services = null) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  if (!programmerId || !services?.restV2) {
+    return "";
+  }
+  return [
+    ...DCR_INTERACTIVE_DOC_ENTRIES.map((entry) => {
+      const activationState = buildDcrInteractiveDocsEntryActivationState(entry, programmer, services);
+      const pendingFields = Array.isArray(activationState?.pendingFields) ? activationState.pendingFields.join(",") : "";
+      return `${String(entry?.key || "").trim()}:${activationState?.ready === true ? "1" : "0"}:${pendingFields}`;
+    }),
+    `dcr-learning-ui:${Number(state.dcrLearningUiVersion || 0)}`,
+  ].join("|");
+}
+
 function buildHrSectionsRenderSignature(programmer = null, services = null, options = {}) {
   const programmerId = String(programmer?.programmerId || "").trim();
   if (!programmerId || !services || typeof services !== "object") {
@@ -66038,6 +66161,9 @@ function buildHrSectionsRenderSignature(programmer = null, services = null, opti
   const availableKeys = getDetectedPremiumServiceKeys(services);
   const errorText = String(options?.error || "").trim();
   const loadingFlag = options?.loading === true ? "loading" : "ready";
+  const dcrLearningSignature = availableKeys.includes("restV2")
+    ? buildDcrInteractiveDocsPanelSignature(programmer, services)
+    : "";
   const restV2LearningSignature = availableKeys.includes("restV2")
     ? buildRestV2InteractiveDocsPanelSignature(programmer, services)
     : "";
@@ -66048,6 +66174,7 @@ function buildHrSectionsRenderSignature(programmer = null, services = null, opti
     loadingFlag,
     errorText,
     ...availableKeys,
+    dcrLearningSignature,
     restV2LearningSignature,
   ].join("|");
 }
@@ -66398,6 +66525,23 @@ function buildRestV2InteractiveDocsUrl(anchor = "") {
     return baseUrl;
   }
   return `${baseUrl}#${normalizedAnchor}`;
+}
+
+function buildDcrInteractiveDocsUrl(anchor = "") {
+  const baseUrl = String(DCR_API_DOCUMENTATION_URL || "").trim();
+  const normalizedAnchor = String(anchor || "").trim().replace(/^#/, "");
+  if (!baseUrl || !normalizedAnchor) {
+    return baseUrl;
+  }
+  return `${baseUrl}#${normalizedAnchor}`;
+}
+
+function getDcrInteractiveDocsEntry(entryKey = "") {
+  const normalizedEntryKey = String(entryKey || "").trim().toLowerCase();
+  if (!normalizedEntryKey) {
+    return null;
+  }
+  return DCR_INTERACTIVE_DOC_ENTRIES.find((entry) => String(entry?.key || "").trim().toLowerCase() === normalizedEntryKey) || null;
 }
 
 function getRestV2InteractiveDocsEntry(entryKey = "") {
@@ -66762,6 +66906,374 @@ function resolveRestV2InteractiveDocsAppRequestorContext(appInfo = null, program
     requestorId: "",
     autoResolved: false,
     candidateCount: candidates.length,
+  };
+}
+
+function buildDcrInteractiveDocsContext(programmer = null, entry = null) {
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer();
+  const resolvedEntry = entry && typeof entry === "object" ? entry : null;
+  if (!resolvedProgrammer?.programmerId) {
+    return {
+      ok: false,
+      error: "Select a Media Company first.",
+    };
+  }
+
+  const programmerId = String(resolvedProgrammer.programmerId || "").trim();
+  const services = getCurrentPremiumAppsSnapshot(programmerId) || null;
+  const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(services);
+  const requestorContext = resolveRestV2LearningRequestorContext(resolvedProgrammer, services);
+  const requestorId = String(requestorContext.requestorId || "").trim();
+  const preferredApp =
+    (requestorId
+      ? selectPreferredRestV2AppForRequestor(restV2Candidates, requestorId, programmerId)
+      : null) ||
+    services?.restV2 ||
+    restV2Candidates[0] ||
+    null;
+
+  if (!preferredApp?.guid) {
+    return {
+      ok: false,
+      error: "No REST V2/DCR scoped registered application is mapped to this selection.",
+    };
+  }
+
+  const softwareStatement = firstNonEmptyString([
+    String(preferredApp?.softwareStatement || "").trim(),
+    extractSoftwareStatementFromAppData(preferredApp?.appData || null),
+    extractSoftwareStatementFromAppData(preferredApp),
+  ]);
+  const redirectUri = firstNonEmptyString([
+    extractRegisteredApplicationRedirectUri(preferredApp),
+    extractRegisteredApplicationRedirectUri(preferredApp?.appData || null),
+  ]);
+  const dcrCache = loadDcrCache(programmerId, String(preferredApp?.guid || "").trim()) || null;
+
+  return {
+    ok: true,
+    programmerId,
+    programmerName: String(resolvedProgrammer.programmerName || "").trim(),
+    requestorId,
+    requestorAutoResolved: requestorContext.autoResolved === true,
+    serviceProviderId: requestorId,
+    appInfo: preferredApp,
+    services,
+    softwareStatement: String(softwareStatement || "").trim(),
+    redirectUri: String(redirectUri || "").trim(),
+    clientId: String(dcrCache?.clientId || "").trim(),
+    clientSecret: String(dcrCache?.clientSecret || "").trim(),
+    grantType: "client_credentials",
+    deviceInfo: buildDcrDeviceInfo(),
+    userAgent: typeof navigator !== "undefined" ? String(navigator.userAgent || "").trim() : "UnderPAR",
+    canProvisionClientCredentials: Boolean(softwareStatement),
+    entryKey: String(resolvedEntry?.key || "").trim(),
+  };
+}
+
+async function prepareDcrInteractiveDocsContextForEntry(entry = null, context = null) {
+  const resolvedEntry = entry && typeof entry === "object" ? entry : null;
+  const resolvedContext = context && typeof context === "object" ? context : null;
+  if (!resolvedEntry?.key || !resolvedContext?.ok) {
+    return resolvedContext;
+  }
+
+  const preparedContext = {
+    ...resolvedContext,
+  };
+  const ensureHydratedAppInfo = async () => {
+    let nextAppInfo = preparedContext?.appInfo && typeof preparedContext.appInfo === "object" ? preparedContext.appInfo : null;
+    if (nextAppInfo?.guid) {
+      try {
+        const hydratedAppInfo = await enrichRegisteredApplicationForHydration(nextAppInfo, {
+          timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+          preferAuthenticatedHeaders: true,
+          preferredTabId: 0,
+          allowTemporaryPageContextTab: true,
+        });
+        if (hydratedAppInfo && typeof hydratedAppInfo === "object") {
+          nextAppInfo = hydratedAppInfo;
+        }
+      } catch {
+        // Leave the current app info in place when hydration is unavailable.
+      }
+    }
+    if (nextAppInfo && typeof nextAppInfo === "object") {
+      preparedContext.appInfo = nextAppInfo;
+      preparedContext.softwareStatement = firstNonEmptyString([
+        String(preparedContext.softwareStatement || "").trim(),
+        String(nextAppInfo?.softwareStatement || "").trim(),
+        extractSoftwareStatementFromAppData(nextAppInfo?.appData || null),
+        extractSoftwareStatementFromAppData(nextAppInfo),
+      ]);
+      preparedContext.redirectUri = firstNonEmptyString([
+        String(preparedContext.redirectUri || "").trim(),
+        extractRegisteredApplicationRedirectUri(nextAppInfo),
+      ]);
+    }
+  };
+
+  if (!String(preparedContext.softwareStatement || "").trim() || !String(preparedContext.redirectUri || "").trim()) {
+    await ensureHydratedAppInfo();
+  }
+
+  if (resolvedEntry.autoProvisionClientCredentials === true) {
+    const programmerId = String(preparedContext.programmerId || "").trim();
+    const appGuid = String(preparedContext?.appInfo?.guid || "").trim();
+    let dcrCache = programmerId && appGuid ? loadDcrCache(programmerId, appGuid) || {} : {};
+    if (!String(dcrCache?.clientId || "").trim() || !String(dcrCache?.clientSecret || "").trim()) {
+      const softwareStatement = String(preparedContext.softwareStatement || "").trim();
+      if (programmerId && appGuid && softwareStatement) {
+        const registered = await registerClientWithSoftwareStatement(softwareStatement);
+        dcrCache = {
+          ...dcrCache,
+          clientId: String(registered?.clientId || "").trim(),
+          clientSecret: String(registered?.clientSecret || "").trim(),
+        };
+        saveDcrCache(programmerId, appGuid, dcrCache);
+      }
+    }
+    preparedContext.clientId = String(dcrCache?.clientId || preparedContext.clientId || "").trim();
+    preparedContext.clientSecret = String(dcrCache?.clientSecret || preparedContext.clientSecret || "").trim();
+  }
+
+  return preparedContext;
+}
+
+function buildDcrInteractiveDocsHydrationPlan(entry = null, context = null) {
+  const resolvedEntry = entry && typeof entry === "object" ? entry : null;
+  const resolvedContext = context && typeof context === "object" ? context : null;
+  if (!resolvedEntry?.key || !resolvedContext?.appInfo?.guid) {
+    throw new Error("DCR learning hydration is missing entry or registered application context.");
+  }
+
+  const operationDocsUrl = buildDcrInteractiveDocsUrl(resolvedEntry.operationAnchor || "");
+  const fieldValues = {
+    server: `${String(getActiveAdobePassEnvironment()?.spBase || ADOBE_SP_BASE || "").trim()}/o`,
+    "header.Accept": "application/json",
+  };
+  const requiredFields = [];
+  const notes = [];
+
+  if (String(resolvedEntry.contentType || "").trim()) {
+    fieldValues["header.Content-Type"] = String(resolvedEntry.contentType || "").trim();
+  }
+  if (resolvedEntry.usesDeviceInfoHeader === true && String(resolvedContext.deviceInfo || "").trim()) {
+    fieldValues["header.X-Device-Info"] = String(resolvedContext.deviceInfo || "").trim();
+  }
+  if (resolvedEntry.requireDeviceInfoHeader === true) {
+    requiredFields.push("header.X-Device-Info");
+  }
+  if (resolvedEntry.usesUserAgentHeader === true && String(resolvedContext.userAgent || "").trim()) {
+    fieldValues["header.User-Agent"] = String(resolvedContext.userAgent || "").trim();
+  }
+  if (resolvedEntry.usesBodySoftwareStatement === true && String(resolvedContext.softwareStatement || "").trim()) {
+    fieldValues["body.software_statement"] = String(resolvedContext.softwareStatement || "").trim();
+  }
+  if (resolvedEntry.requireBodySoftwareStatement === true) {
+    requiredFields.push("body.software_statement");
+  }
+  if (resolvedEntry.usesBodyRedirectUri === true && String(resolvedContext.redirectUri || "").trim()) {
+    fieldValues["body.redirect_uri"] = String(resolvedContext.redirectUri || "").trim();
+  }
+  if (resolvedEntry.requireBodyRedirectUri === true) {
+    requiredFields.push("body.redirect_uri");
+  }
+  if (resolvedEntry.usesQueryClientId === true && String(resolvedContext.clientId || "").trim()) {
+    fieldValues["query.client_id"] = String(resolvedContext.clientId || "").trim();
+  }
+  if (resolvedEntry.requireQueryClientId === true) {
+    requiredFields.push("query.client_id");
+  }
+  if (resolvedEntry.usesQueryClientSecret === true && String(resolvedContext.clientSecret || "").trim()) {
+    fieldValues["query.client_secret"] = String(resolvedContext.clientSecret || "").trim();
+  }
+  if (resolvedEntry.requireQueryClientSecret === true) {
+    requiredFields.push("query.client_secret");
+  }
+  if (resolvedEntry.usesQueryGrantType === true) {
+    fieldValues["query.grant_type"] = String(resolvedContext.grantType || "client_credentials").trim();
+  }
+  if (resolvedEntry.requireQueryGrantType === true) {
+    requiredFields.push("query.grant_type");
+  }
+
+  const normalizedFieldValues = Object.entries(fieldValues).reduce((result, [key, value]) => {
+    const normalizedValue = String(value || "").trim();
+    if (normalizedValue) {
+      result[key] = normalizedValue;
+    }
+    return result;
+  }, {});
+  const missingRequiredFields = requiredFields.filter(
+    (fieldName) => fieldName && !Object.prototype.hasOwnProperty.call(normalizedFieldValues, fieldName)
+  );
+  if (missingRequiredFields.includes("body.software_statement")) {
+    notes.push("UnderPAR could not resolve the selected registered application's software statement yet.");
+  }
+  if (missingRequiredFields.includes("body.redirect_uri")) {
+    notes.push("UnderPAR could not resolve the selected registered application's redirect URI yet.");
+  }
+  if (missingRequiredFields.includes("query.client_id") || missingRequiredFields.includes("query.client_secret")) {
+    notes.push("UnderPAR could not auto-provision DCR client credentials for the selected registered application yet.");
+  }
+  if (missingRequiredFields.includes("header.X-Device-Info")) {
+    notes.push("UnderPAR could not build X-Device-Info for this browser session.");
+  }
+  notes.push(
+    `Using ${String(resolvedContext?.appInfo?.appName || resolvedContext?.appInfo?.guid || "the selected registered application").trim()}.`
+  );
+  if (String(resolvedContext.requestorId || "").trim()) {
+    notes.push(`RequestorId context is ${String(resolvedContext.requestorId || "").trim()}.`);
+  }
+
+  return {
+    entryKey: String(resolvedEntry.key || "").trim(),
+    docsUrl: operationDocsUrl,
+    operationId: String(resolvedEntry.operationId || "").trim(),
+    operationSummary: String(resolvedEntry.operationSummary || resolvedEntry.label || "").trim(),
+    fieldValues: normalizedFieldValues,
+    requiredFields,
+    missingRequiredFields,
+    clearFieldNames: [],
+    notes,
+  };
+}
+
+function summarizeDcrInteractiveDocsActivationLockReason(pendingFields = [], plan = null) {
+  const normalizedPendingFields = Array.isArray(pendingFields)
+    ? pendingFields.map((fieldName) => String(fieldName || "").trim()).filter(Boolean)
+    : [];
+  const hasPendingField = (...candidates) =>
+    candidates.some((candidate) => normalizedPendingFields.includes(String(candidate || "").trim()));
+  const messages = [];
+
+  if (hasPendingField("body.software_statement")) {
+    messages.push("UnderPAR could not resolve the selected registered application's software statement yet.");
+  }
+  if (hasPendingField("body.redirect_uri")) {
+    messages.push("UnderPAR could not resolve the selected registered application's redirect URI yet.");
+  }
+  if (hasPendingField("query.client_id", "query.client_secret")) {
+    const clientNote =
+      Array.isArray(plan?.notes) && plan.notes.length > 0
+        ? String(plan.notes.find((note) => /client credentials|client_id|client_secret/i.test(String(note || ""))) || "").trim()
+        : "";
+    messages.push(clientNote || "UnderPAR could not auto-provision DCR client credentials for this registered application yet.");
+  }
+  if (hasPendingField("header.X-Device-Info")) {
+    messages.push("UnderPAR could not build X-Device-Info for this browser session.");
+  }
+
+  return messages.length > 0 ? messages.slice(0, 2).join(" ") : "UnderPAR needs more runtime context before this DCR call can fire.";
+}
+
+function buildDcrInteractiveDocsEntryActivationState(entry = null, programmer = null, services = null) {
+  const resolvedEntry = entry && typeof entry === "object" ? entry : null;
+  if (!resolvedEntry?.key) {
+    return {
+      ready: false,
+      pendingFields: [],
+      reason: "This DCR learning entry is not configured.",
+      context: null,
+      plan: null,
+    };
+  }
+
+  const context = buildDcrInteractiveDocsContext(programmer, resolvedEntry, services);
+  if (!context?.ok) {
+    return {
+      ready: false,
+      pendingFields: [],
+      reason: String(context?.error || "DCR learning needs more UnderPAR context.").trim(),
+      context,
+      plan: null,
+    };
+  }
+
+  let plan = null;
+  try {
+    plan = buildDcrInteractiveDocsHydrationPlan(resolvedEntry, context);
+  } catch (error) {
+    return {
+      ready: false,
+      pendingFields: [],
+      reason: error instanceof Error ? error.message : String(error || "DCR learning plan failed."),
+      context,
+      plan: null,
+    };
+  }
+
+  const pendingFieldSet = new Set(
+    (Array.isArray(plan?.missingRequiredFields) ? plan.missingRequiredFields : [])
+      .map((fieldName) => String(fieldName || "").trim())
+      .filter(Boolean)
+  );
+  const planFieldValues = plan?.fieldValues && typeof plan.fieldValues === "object" ? plan.fieldValues : {};
+  const hasPlannedValue = (fieldName = "") =>
+    Boolean(fieldName) && Object.prototype.hasOwnProperty.call(planFieldValues, String(fieldName || "").trim());
+  const hasContextValue = (value) => String(value || "").trim().length > 0;
+  const syncPendingField = (fieldName, satisfied) => {
+    const normalizedFieldName = String(fieldName || "").trim();
+    if (!normalizedFieldName) {
+      return;
+    }
+    if (satisfied) {
+      pendingFieldSet.delete(normalizedFieldName);
+    } else {
+      pendingFieldSet.add(normalizedFieldName);
+    }
+  };
+
+  syncPendingField(
+    "header.X-Device-Info",
+    resolvedEntry.usesDeviceInfoHeader !== true ||
+      hasPlannedValue("header.X-Device-Info") ||
+      hasContextValue(context.deviceInfo)
+  );
+  syncPendingField(
+    "body.software_statement",
+    resolvedEntry.usesBodySoftwareStatement !== true ||
+      hasPlannedValue("body.software_statement") ||
+      hasContextValue(context.softwareStatement)
+  );
+  syncPendingField(
+    "body.redirect_uri",
+    resolvedEntry.usesBodyRedirectUri !== true ||
+      hasPlannedValue("body.redirect_uri") ||
+      hasContextValue(context.redirectUri)
+  );
+  syncPendingField(
+    "query.client_id",
+    resolvedEntry.usesQueryClientId !== true ||
+      hasPlannedValue("query.client_id") ||
+      hasContextValue(context.clientId) ||
+      (resolvedEntry.autoProvisionClientCredentials === true && context.canProvisionClientCredentials === true)
+  );
+  syncPendingField(
+    "query.client_secret",
+    resolvedEntry.usesQueryClientSecret !== true ||
+      hasPlannedValue("query.client_secret") ||
+      hasContextValue(context.clientSecret) ||
+      (resolvedEntry.autoProvisionClientCredentials === true && context.canProvisionClientCredentials === true)
+  );
+  syncPendingField(
+    "query.grant_type",
+    resolvedEntry.usesQueryGrantType !== true ||
+      hasPlannedValue("query.grant_type") ||
+      hasContextValue(context.grantType)
+  );
+
+  const pendingFields = [...pendingFieldSet];
+  return {
+    ready: pendingFields.length === 0,
+    pendingFields,
+    reason:
+      pendingFields.length === 0
+        ? "Ready to hydrate UnderPAR context and focus Send."
+        : summarizeDcrInteractiveDocsActivationLockReason(pendingFields, plan),
+    context,
+    plan,
   };
 }
 
@@ -67748,6 +68260,111 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
   `;
 }
 
+function buildDcrInteractiveDocsPanelHtml(programmer = null, services = null) {
+  if (!services?.restV2) {
+    return "";
+  }
+
+  const docsUrl = buildDcrInteractiveDocsUrl();
+  const entries = DCR_INTERACTIVE_DOC_ENTRIES.map((entry) => ({
+    ...entry,
+    activationState: buildDcrInteractiveDocsEntryActivationState(entry, programmer, services),
+  }));
+  const readyCount = entries.filter((entry) => entry.activationState?.ready === true).length;
+  const totalEntries = entries.length;
+  const initialCollapsed = getRestV2LearningServiceCollapsed(programmer?.programmerId, "dcrV2");
+  const shellDomId = `dcr-learning-shell-${String(programmer?.programmerId || "global")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w-]+/g, "-")}`;
+  const activeLearningState = getActiveDcrLearningUiState(programmer);
+  const activeEntryKey = String(activeLearningState?.entryKey || "").trim();
+  const context = getHrContextSummary(programmer);
+  const actionLabel = `Open DCR API interactive docs in main content for ${context.compositeLabel}`;
+
+  return `
+    <section
+      class="hr-rest-v2-docs-shell hr-dcr-docs-shell"
+      data-restv2-learning-service-key="dcrV2"
+      data-restv2-learning-service-initial-collapsed="${initialCollapsed ? "true" : "false"}"
+    >
+      <button
+        type="button"
+        class="metadata-header service-box-header hr-rest-v2-docs-toggle hr-dcr-docs-toggle"
+        aria-controls="${escapeHtml(shellDomId)}"
+        title="${escapeHtml("Toggle DCR learning methods")}"
+        aria-label="${escapeHtml("Toggle DCR learning methods")}"
+      >
+        <span class="hr-rest-v2-docs-toggle-copy">
+          <span class="hr-rest-v2-docs-toggle-label">DCR API (V2)</span>
+          <span class="hr-rest-v2-docs-toggle-meta">
+            <span class="hr-rest-v2-docs-toggle-count">${escapeHtml(`${readyCount}/${totalEntries} ready`)}</span>
+            <span class="hr-rest-v2-docs-toggle-status">${escapeHtml(`${totalEntries} methods`)}</span>
+          </span>
+        </span>
+        <span class="collapse-icon" aria-hidden="true">▼</span>
+      </button>
+      <div class="metadata-container service-box-container hr-rest-v2-docs-shell-body" id="${escapeHtml(shellDomId)}">
+        <article class="metadata-item hr-rest-v2-docs-card">
+          <div class="hr-rest-v2-docs-head">
+            <button
+              type="button"
+              class="hr-context-service-pill hr-context-service-pill--service-default hr-rest-v2-docs-pill"
+              data-service-doc-key="dcrV2"
+              data-service-doc-url="${escapeHtml(docsUrl)}"
+              title="${escapeHtml(actionLabel)}"
+              aria-label="${escapeHtml(actionLabel)}"
+            >DCR API (V2)</button>
+            <p class="hr-rest-v2-docs-subtitle">Dynamic Client Registration methods, hydrated from the selected registered application before the online Run form is focused.</p>
+          </div>
+          <div class="hr-rest-v2-docs-grid">
+            ${entries
+              .map((entry) => {
+                const entryUrl = buildDcrInteractiveDocsUrl(entry.operationAnchor || "");
+                const activationState = entry.activationState || {};
+                const isReady = activationState.ready === true;
+                const isActive = String(entry?.key || "").trim() === activeEntryKey;
+                const entryActionLabel = isReady
+                  ? `Open and hydrate ${entry.label} in Adobe PASS DCR API interactive docs`
+                  : `${entry.label} is locked. ${String(activationState.reason || "").trim()}`;
+                const readinessLabel = isReady ? "READY NOW" : "SETUP NEEDED";
+                return `
+                  <button
+                    type="button"
+                    class="hr-rest-v2-doc-entry ${isReady ? "is-ready" : "is-locked"}${isActive ? " is-active" : ""}"
+                    data-dcr-doc-entry-key="${escapeHtml(entry.key)}"
+                    data-dcr-doc-url="${escapeHtml(entryUrl)}"
+                    data-dcr-doc-state="${isReady ? "ready" : "locked"}"
+                    data-dcr-doc-active="${isActive ? "true" : "false"}"
+                    aria-pressed="${isActive ? "true" : "false"}"
+                    title="${escapeHtml(entryActionLabel)}"
+                    aria-label="${escapeHtml(entryActionLabel)}"
+                  >
+                    <span class="hr-rest-v2-doc-entry-topline">
+                      <span class="hr-rest-v2-doc-entry-label">${escapeHtml(entry.label)}</span>
+                      <span class="hr-rest-v2-doc-entry-flags">
+                        <span class="hr-rest-v2-doc-entry-method">${escapeHtml(entry.methodLabel || "")}</span>
+                        ${isActive ? '<span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--active">ACTIVE</span>' : ""}
+                      </span>
+                    </span>
+                    <span class="hr-rest-v2-doc-entry-summary">${escapeHtml(entry.operationSummary || "")}</span>
+                    <span class="hr-rest-v2-doc-entry-readiness">
+                      <span class="hr-rest-v2-doc-entry-badges">
+                        <span class="hr-rest-v2-doc-entry-state-badge hr-rest-v2-doc-entry-state-badge--${isReady ? "ready" : "locked"}">${escapeHtml(readinessLabel)}</span>
+                      </span>
+                      <span class="hr-rest-v2-doc-entry-state-text">${escapeHtml(String(activationState.reason || "").trim())}</span>
+                    </span>
+                  </button>
+                `;
+              })
+              .join("")}
+          </div>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
 function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null) {
   if (!services?.restV2) {
     return "";
@@ -67823,7 +68440,6 @@ const LEARNING_INSPECTOR_CONFIG_BY_TYPE = Object.freeze({
     inputLabel: "JWT Input",
     actionLabel: "Inspect JWT",
     placeholder: "Paste a JWT, Authorization header, or JSON response body here...",
-    description: "Paste any JWT, bearer value, or JSON body containing a JWT. UnderPAR decodes it locally without bouncing to jwt.io.",
     defaultSummary: "Paste any JWT-looking value and UnderPAR will decode it locally.",
   }),
   base64: Object.freeze({
@@ -67831,7 +68447,6 @@ const LEARNING_INSPECTOR_CONFIG_BY_TYPE = Object.freeze({
     inputLabel: "Base64 Input",
     actionLabel: "Inspect Base64",
     placeholder: "Paste a Base64, Base64URL, header value, or JSON payload here...",
-    description: "Paste any Base64 or Base64URL value. UnderPAR decodes it locally without bouncing to third-party tools.",
     defaultSummary: "Paste any Base64-looking value and UnderPAR will decode it locally.",
   }),
 });
@@ -67850,40 +68465,57 @@ function getLearningJwtInspectorUtility() {
 function buildLearningInspectorCardHtml(type = "jwt") {
   const normalizedType = String(type || "").trim().toLowerCase();
   const config = getLearningInspectorConfig(normalizedType);
+  const initialCollapsed = getLearningInspectorCollapsed(resolveSelectedProgrammer()?.programmerId, normalizedType);
+  const shellDomId = `learning-inspector-${normalizedType}-${String(resolveSelectedProgrammer()?.programmerId || "global")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w-]+/g, "-")}`;
   return `
-    <article class="metadata-item hr-learning-inspector-card hr-learning-inspector-card--${escapeHtml(normalizedType)}">
-      <header class="hr-learning-inspector-card-head">
-        <p class="hr-learning-inspector-card-title">${escapeHtml(config.title)}</p>
-        <p class="hr-learning-inspector-card-description">${escapeHtml(config.description)}</p>
-      </header>
-      <form class="hr-learning-inspector-form" data-learning-inspector-form="${escapeHtml(normalizedType)}">
-        <label class="hr-learning-inspector-field">
-          <span class="hr-learning-inspector-field-label">${escapeHtml(config.inputLabel)}</span>
-          <textarea
-            class="hr-learning-inspector-input"
-            data-learning-inspector-input="${escapeHtml(normalizedType)}"
-            rows="5"
-            placeholder="${escapeHtml(config.placeholder)}"
-          ></textarea>
-        </label>
-        <div class="hr-learning-inspector-actions">
-          <button
-            type="submit"
-            class="hr-learning-inspector-btn hr-learning-inspector-btn--accent"
-            data-learning-inspector-submit="${escapeHtml(normalizedType)}"
-          >${escapeHtml(config.actionLabel)}</button>
-          <button
-            type="button"
-            class="hr-learning-inspector-btn"
-            data-learning-inspector-clear="${escapeHtml(normalizedType)}"
-          >Clear</button>
-        </div>
-      </form>
-      <p class="hr-learning-inspector-summary" data-learning-inspector-summary="${escapeHtml(normalizedType)}" aria-live="polite">
-        ${escapeHtml(config.defaultSummary)}
-      </p>
-      <section class="hr-learning-inspector-result" data-learning-inspector-result="${escapeHtml(normalizedType)}" hidden></section>
-    </article>
+    <section
+      class="metadata-item hr-learning-inspector-card hr-learning-inspector-card--${escapeHtml(normalizedType)}"
+      data-learning-inspector-key="${escapeHtml(normalizedType)}"
+      data-learning-inspector-initial-collapsed="${initialCollapsed ? "true" : "false"}"
+    >
+      <button
+        type="button"
+        class="metadata-header service-box-header hr-learning-inspector-toggle"
+        aria-controls="${escapeHtml(shellDomId)}"
+        title="${escapeHtml(`Toggle ${config.title}`)}"
+        aria-label="${escapeHtml(`Toggle ${config.title}`)}"
+      >
+        <span class="hr-learning-inspector-toggle-title">${escapeHtml(config.title)}</span>
+        <span class="collapse-icon" aria-hidden="true">▼</span>
+      </button>
+      <div class="metadata-container service-box-container hr-learning-inspector-card-body" id="${escapeHtml(shellDomId)}">
+        <form class="hr-learning-inspector-form" data-learning-inspector-form="${escapeHtml(normalizedType)}">
+          <label class="hr-learning-inspector-field">
+            <span class="hr-learning-inspector-field-label">${escapeHtml(config.inputLabel)}</span>
+            <textarea
+              class="hr-learning-inspector-input"
+              data-learning-inspector-input="${escapeHtml(normalizedType)}"
+              rows="5"
+              placeholder="${escapeHtml(config.placeholder)}"
+            ></textarea>
+          </label>
+          <div class="hr-learning-inspector-actions">
+            <button
+              type="submit"
+              class="hr-learning-inspector-btn hr-learning-inspector-btn--accent"
+              data-learning-inspector-submit="${escapeHtml(normalizedType)}"
+            >${escapeHtml(config.actionLabel)}</button>
+            <button
+              type="button"
+              class="hr-learning-inspector-btn"
+              data-learning-inspector-clear="${escapeHtml(normalizedType)}"
+            >Clear</button>
+          </div>
+        </form>
+        <p class="hr-learning-inspector-summary" data-learning-inspector-summary="${escapeHtml(normalizedType)}" aria-live="polite">
+          ${escapeHtml(config.defaultSummary)}
+        </p>
+        <section class="hr-learning-inspector-result" data-learning-inspector-result="${escapeHtml(normalizedType)}" hidden></section>
+      </div>
+    </section>
   `;
 }
 
@@ -68189,6 +68821,27 @@ function wireLearningInspectors(section) {
   if (!(section instanceof HTMLElement)) {
     return;
   }
+  const inspectorCards = Array.from(section.querySelectorAll("[data-learning-inspector-key]"));
+  inspectorCards.forEach((cardElement) => {
+    if (!(cardElement instanceof HTMLElement)) {
+      return;
+    }
+    const type = String(cardElement.dataset.learningInspectorKey || "").trim().toLowerCase();
+    if (!type) {
+      return;
+    }
+    const toggleButton = cardElement.querySelector(".hr-learning-inspector-toggle");
+    const bodyElement = cardElement.querySelector(".hr-learning-inspector-card-body");
+    if (!(toggleButton instanceof HTMLElement) || !(bodyElement instanceof HTMLElement)) {
+      return;
+    }
+    const initialCollapsedAttr = String(cardElement.dataset.learningInspectorInitialCollapsed || "").trim().toLowerCase();
+    const initialCollapsed =
+      initialCollapsedAttr === "true" || getLearningInspectorCollapsed(resolveSelectedProgrammer()?.programmerId, type);
+    wireCollapsibleSection(toggleButton, bodyElement, initialCollapsed, (collapsed) => {
+      setLearningInspectorCollapsed(resolveSelectedProgrammer()?.programmerId, type, collapsed);
+    });
+  });
   const inspectorForms = Array.from(section.querySelectorAll("[data-learning-inspector-form]"));
   inspectorForms.forEach((formElement) => {
     if (!(formElement instanceof HTMLFormElement)) {
@@ -68582,10 +69235,15 @@ function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services =
     fallbackSummary = "Select a media company to view detected services.";
   }
   const howtoSubject = detectedServiceSummary || fallbackSummary;
+  const dcrDocsPanelHtml = buildDcrInteractiveDocsPanelHtml(programmer, services);
   const restV2DocsPanelHtml = buildRestV2InteractiveDocsPanelHtml(programmer, services);
-  const docsItemHtml = restV2DocsPanelHtml ? "" : buildMetadataItemHtml("Docs", `HOWTO: ${howtoSubject} quick docs coming soon...`);
+  const docsItemHtml =
+    dcrDocsPanelHtml || restV2DocsPanelHtml
+      ? ""
+      : buildMetadataItemHtml("Docs", `HOWTO: ${howtoSubject} quick docs coming soon...`);
   return `
     ${buildHrServiceListHtml(detectedServiceEntries, fallbackSummary)}
+    ${dcrDocsPanelHtml}
     ${restV2DocsPanelHtml}
     ${docsItemHtml}
     ${buildLearningInspectorToolsHtml()}
@@ -69328,6 +69986,253 @@ async function hydrateRestV2InteractiveDocsTab(tabId, plan = null) {
     throw new Error(String(result.error || "REST V2 docs hydration failed."));
   }
   return result;
+}
+
+async function openDcrInteractiveDocsEntry(entryKey = "", requestedUrl = "") {
+  const entry = getDcrInteractiveDocsEntry(entryKey);
+  if (!entry) {
+    setStatus("UnderPAR could not resolve the requested DCR learning entry.", "error");
+    return {
+      ok: false,
+      error: "missing-dcr-learning-entry",
+    };
+  }
+
+  const targetUrl = String(requestedUrl || buildDcrInteractiveDocsUrl(entry.operationAnchor || "")).trim();
+  const publishLearningState = (phase = "active", payload = {}) =>
+    setDcrLearningUiState(
+      {
+        entryKey: String(entry?.key || "").trim(),
+        entryLabel: String(entry?.label || "").trim(),
+        operationId: String(entry?.operationId || "").trim(),
+        operationSummary: String(entry?.operationSummary || entry?.label || "").trim(),
+        docsUrl: targetUrl,
+        phase,
+        ...payload,
+      },
+      {
+        controllerReason: `dcr-learning-${String(entry?.key || "").trim()}`,
+      }
+    );
+  const openPartialDocs = async (message, type = "info", payload = {}) => {
+    const partialStatePayload = payload && typeof payload === "object" ? payload : {};
+    publishLearningState(type === "error" ? "error" : "setup-needed", {
+      programmerId: String(partialStatePayload?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([partialStatePayload?.requestorId, partialStatePayload?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([partialStatePayload?.serviceProviderId, partialStatePayload?.requestorId]) || "").trim(),
+      appGuid: String(partialStatePayload?.appInfo?.guid || "").trim(),
+      appInfo: partialStatePayload?.appInfo && typeof partialStatePayload.appInfo === "object" ? partialStatePayload.appInfo : null,
+      context: partialStatePayload?.context && typeof partialStatePayload.context === "object" ? partialStatePayload.context : null,
+      plan: partialStatePayload?.plan && typeof partialStatePayload.plan === "object" ? partialStatePayload.plan : null,
+      statusMessage: String(message || "").trim(),
+      reason: String(message || "").trim(),
+    });
+    const opened = await openPremiumServiceDocumentation("dcrV2", targetUrl);
+    if (opened?.ok !== true) {
+      return opened;
+    }
+    const guidance = String(message || "").trim();
+    setStatus(
+      guidance
+        ? `Opened ${entry.label} docs without full UnderPAR context. ${guidance}`
+        : `Opened ${entry.label} docs without full UnderPAR context.`,
+      type
+    );
+    return {
+      ok: false,
+      partial: true,
+      error: guidance || "partial-dcr-learning-context",
+      tabId: Number(opened?.tabId || 0),
+      windowId: Number(opened?.windowId || 0),
+      url: String(opened?.url || targetUrl).trim(),
+    };
+  };
+
+  const context = buildDcrInteractiveDocsContext(resolveSelectedProgrammer(), entry);
+  if (!context?.ok) {
+    return openPartialDocs(String(context?.error || "DCR learning needs a Media Company selection."), "info", {
+      programmerId: String(resolveSelectedProgrammer()?.programmerId || "").trim(),
+      requestorId: String(state.selectedRequestorId || "").trim(),
+      serviceProviderId: String(state.selectedRequestorId || "").trim(),
+      appInfo: context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null,
+      context,
+    });
+  }
+
+  publishLearningState("preparing", {
+    programmerId: String(context?.programmerId || "").trim(),
+    requestorId: String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim(),
+    serviceProviderId: String(firstNonEmptyString([context?.serviceProviderId, context?.requestorId]) || "").trim(),
+    appGuid: String(context?.appInfo?.guid || "").trim(),
+    appInfo: context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null,
+    context,
+    statusMessage: "Preparing exact DCR learning payload for the interactive docs form.",
+  });
+  setStatus(`Opening ${entry.label} interactive docs with UnderPAR context...`, "info");
+
+  let resolvedContext = null;
+  let plan = null;
+  try {
+    resolvedContext = await prepareDcrInteractiveDocsContextForEntry(entry, context);
+    plan = buildDcrInteractiveDocsHydrationPlan(entry, resolvedContext);
+    publishLearningState("active", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      appGuid: String(resolvedContext?.appInfo?.guid || "").trim(),
+      appInfo: resolvedContext?.appInfo && typeof resolvedContext.appInfo === "object" ? resolvedContext.appInfo : null,
+      context: resolvedContext,
+      plan,
+      statusMessage: "Context hydrated. UnderPAR is sending this exact payload into the online DCR Run form.",
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return openPartialDocs(reason, "error", {
+      programmerId: String(context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([context?.requestorId, context?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([context?.serviceProviderId, context?.requestorId]) || "").trim(),
+      appInfo: context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null,
+      context,
+      plan,
+    });
+  }
+
+  const opened = await openPremiumServiceDocumentation("dcrV2", targetUrl);
+  if (opened?.ok !== true) {
+    publishLearningState("error", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      appGuid: String(resolvedContext?.appInfo?.guid || "").trim(),
+      appInfo: resolvedContext?.appInfo && typeof resolvedContext.appInfo === "object" ? resolvedContext.appInfo : null,
+      context: resolvedContext,
+      plan,
+      statusMessage: String(opened?.error || "Unable to open DCR interactive docs.").trim(),
+      reason: String(opened?.error || "Unable to open DCR interactive docs.").trim(),
+    });
+    return opened;
+  }
+
+  const tabId = Number(opened?.tabId || 0);
+  if (tabId <= 0) {
+    publishLearningState("error", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      appGuid: String(resolvedContext?.appInfo?.guid || "").trim(),
+      appInfo: resolvedContext?.appInfo && typeof resolvedContext.appInfo === "object" ? resolvedContext.appInfo : null,
+      context: resolvedContext,
+      plan,
+      statusMessage: "Opened the docs tab, but UnderPAR could not target it for hydration.",
+      reason: "missing-dcr-doc-tab",
+    });
+    setStatus(`Opened ${entry.label} docs, but UnderPAR could not target the tab for hydration.`, "error");
+    return {
+      ok: false,
+      error: "missing-dcr-doc-tab",
+    };
+  }
+
+  await waitForTabCompletion(tabId, 20000, {
+    expectedUrl: DCR_API_DOCUMENTATION_URL,
+  }).catch(() => null);
+
+  let hydrationResult = null;
+  let lastHydrationError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      hydrationResult = await hydrateRestV2InteractiveDocsTab(tabId, plan);
+      break;
+    } catch (error) {
+      lastHydrationError = error instanceof Error ? error : new Error(String(error));
+      await sleep(220 * attempt);
+    }
+  }
+
+  if (!hydrationResult) {
+    const reason = String(lastHydrationError?.message || "DCR docs hydration failed.").trim();
+    publishLearningState("error", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      appGuid: String(resolvedContext?.appInfo?.guid || "").trim(),
+      appInfo: resolvedContext?.appInfo && typeof resolvedContext.appInfo === "object" ? resolvedContext.appInfo : null,
+      context: resolvedContext,
+      plan,
+      statusMessage: reason,
+      reason,
+    });
+    setStatus(`Opened ${entry.label} docs, but UnderPAR could not hydrate the interactive form: ${reason}`, "error");
+    return {
+      ok: false,
+      error: reason,
+      tabId,
+      windowId: Number(opened?.windowId || 0),
+      url: targetUrl,
+    };
+  }
+
+  const unresolvedRequiredFields = Array.isArray(hydrationResult.unresolvedRequiredFields)
+    ? hydrationResult.unresolvedRequiredFields.filter(Boolean)
+    : [];
+  if (unresolvedRequiredFields.length > 0) {
+    const guidance = Array.isArray(plan?.notes)
+      ? String(plan.notes.find((note) => String(note || "").trim()) || "").trim()
+      : "";
+    publishLearningState("partial", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      appGuid: String(resolvedContext?.appInfo?.guid || "").trim(),
+      appInfo: resolvedContext?.appInfo && typeof resolvedContext.appInfo === "object" ? resolvedContext.appInfo : null,
+      context: resolvedContext,
+      plan,
+      hydrationResult,
+      statusMessage: guidance || `Fill ${unresolvedRequiredFields.join(", ")} before Send.`,
+    });
+    setStatus(
+      guidance
+        ? `Opened ${entry.label} docs with partial UnderPAR context. ${guidance}`
+        : `Opened ${entry.label} docs with partial UnderPAR context. Fill ${unresolvedRequiredFields.join(", ")} before Send.`,
+      "info"
+    );
+  } else if (Array.isArray(plan?.notes) && plan.notes.length > 0) {
+    publishLearningState("hydrated", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      appGuid: String(resolvedContext?.appInfo?.guid || "").trim(),
+      appInfo: resolvedContext?.appInfo && typeof resolvedContext.appInfo === "object" ? resolvedContext.appInfo : null,
+      context: resolvedContext,
+      plan,
+      hydrationResult,
+      statusMessage: String(plan.notes[0] || "").trim(),
+    });
+    setStatus(`Opened ${entry.label} docs with UnderPAR context. ${plan.notes[0]}`, "info");
+  } else {
+    publishLearningState("hydrated", {
+      programmerId: String(resolvedContext?.programmerId || context?.programmerId || "").trim(),
+      requestorId: String(firstNonEmptyString([resolvedContext?.requestorId, resolvedContext?.serviceProviderId]) || "").trim(),
+      serviceProviderId: String(firstNonEmptyString([resolvedContext?.serviceProviderId, resolvedContext?.requestorId]) || "").trim(),
+      appGuid: String(resolvedContext?.appInfo?.guid || "").trim(),
+      appInfo: resolvedContext?.appInfo && typeof resolvedContext.appInfo === "object" ? resolvedContext.appInfo : null,
+      context: resolvedContext,
+      plan,
+      hydrationResult,
+      statusMessage: "UnderPAR hydrated the online Run form and focused Send.",
+    });
+    setStatus(`Opened ${entry.label} docs with UnderPAR context and focused Send.`, "success");
+  }
+
+  return {
+    ok: unresolvedRequiredFields.length === 0,
+    partial: unresolvedRequiredFields.length > 0,
+    tabId,
+    windowId: Number(opened?.windowId || 0),
+    url: targetUrl,
+    hydrationResult,
+    plan,
+  };
 }
 
 async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") {
@@ -80845,6 +81750,83 @@ function extractSoftwareStatementFromAppData(appData) {
   }
 
   return "";
+}
+
+function extractRegisteredApplicationRedirectUri(appInfo = null) {
+  if (!appInfo || typeof appInfo !== "object") {
+    return "";
+  }
+
+  const candidates = [];
+  const pushCandidate = (value) => {
+    if (value == null) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry) => pushCandidate(entry));
+      return;
+    }
+    if (typeof value === "object") {
+      pushCandidate(value.redirectUri);
+      pushCandidate(value.redirect_uri);
+      pushCandidate(value.uri);
+      pushCandidate(value.url);
+      return;
+    }
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      candidates.push(normalized);
+    }
+  };
+
+  const appData = appInfo?.appData && typeof appInfo.appData === "object" ? appInfo.appData : null;
+  const softwareStatement = firstNonEmptyString([
+    String(appInfo?.softwareStatement || "").trim(),
+    extractSoftwareStatementFromAppData(appData),
+    extractSoftwareStatementFromAppData(appInfo),
+  ]);
+  const claims = softwareStatement ? parseJwtPayload(softwareStatement) : null;
+
+  [
+    appInfo?.redirectUri,
+    appInfo?.redirect_uri,
+    appInfo?.redirectUris,
+    appInfo?.redirect_uris,
+    appInfo?.client?.redirectUri,
+    appInfo?.client?.redirect_uri,
+    appInfo?.client?.redirectUris,
+    appInfo?.client?.redirect_uris,
+    appInfo?.clientApplication?.redirectUri,
+    appInfo?.clientApplication?.redirect_uri,
+    appInfo?.clientApplication?.redirectUris,
+    appInfo?.clientApplication?.redirect_uris,
+    appInfo?.registeredClient?.redirectUri,
+    appInfo?.registeredClient?.redirect_uri,
+    appInfo?.registeredClient?.redirectUris,
+    appInfo?.registeredClient?.redirect_uris,
+    appData?.redirectUri,
+    appData?.redirect_uri,
+    appData?.redirectUris,
+    appData?.redirect_uris,
+    appData?.client?.redirectUri,
+    appData?.client?.redirect_uri,
+    appData?.client?.redirectUris,
+    appData?.client?.redirect_uris,
+    appData?.clientApplication?.redirectUri,
+    appData?.clientApplication?.redirect_uri,
+    appData?.clientApplication?.redirectUris,
+    appData?.clientApplication?.redirect_uris,
+    appData?.registeredClient?.redirectUri,
+    appData?.registeredClient?.redirect_uri,
+    appData?.registeredClient?.redirectUris,
+    appData?.registeredClient?.redirect_uris,
+    claims?.redirect_uri,
+    claims?.redirectUri,
+    claims?.redirect_uris,
+    claims?.redirectUris,
+  ].forEach((candidate) => pushCandidate(candidate));
+
+  return firstNonEmptyString(candidates);
 }
 
 function extractSoftwareStatementFromText(text = "") {
@@ -93498,6 +94480,8 @@ function resetProgrammerRuntimeState() {
   state.cmTenantBundleByTenantKey.clear();
   state.cmTenantBundlePromiseByTenantKey.clear();
   state.premiumSectionCollapsedByKey.clear();
+  state.dcrLearningUiState = null;
+  state.dcrLearningUiVersion = 0;
   state.restV2LearningUiState = null;
   state.restV2LearningUiVersion = 0;
   state.premiumAutoRefreshMetaByKey.clear();

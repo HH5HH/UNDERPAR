@@ -2733,6 +2733,16 @@ select:disabled {
     0 12px 24px rgba(0, 0, 0, 0.18);
 }
 
+.hr-dcr-docs-shell {
+  border-color: rgba(var(--service-learning-zip-1000), 0.24);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, rgb(var(--underpar-service-dark-panel-rgb)) 88%, rgb(var(--service-learning-zip-1000)) 12%) 0%,
+      color-mix(in srgb, rgb(var(--underpar-service-dark-shell-rgb)) 84%, rgb(var(--service-learning-zip-900)) 16%) 100%
+    );
+}
+
 .hr-rest-v2-docs-toggle {
   width: 100%;
   min-width: 0;
@@ -2749,8 +2759,22 @@ select:disabled {
   box-shadow: none;
 }
 
+.hr-dcr-docs-toggle {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, rgb(var(--underpar-service-dark-panel-rgb)) 88%, rgb(var(--service-learning-zip-900)) 12%) 0%,
+      color-mix(in srgb, rgb(var(--underpar-service-dark-shell-rgb)) 84%, rgb(var(--service-learning-zip-800)) 16%) 100%
+    );
+  color: rgba(var(--service-learning-zip-1100), 0.98);
+}
+
 .hr-rest-v2-docs-toggle:not(.collapsed) {
   border-bottom: 1px solid rgba(var(--service-rest-v2-zip-1100), 0.16);
+}
+
+.hr-dcr-docs-toggle:not(.collapsed) {
+  border-bottom-color: rgba(var(--service-learning-zip-1100), 0.18);
 }
 
 .hr-rest-v2-docs-toggle-copy {
@@ -2828,6 +2852,17 @@ select:disabled {
   text-transform: uppercase;
 }
 
+.hr-dcr-docs-shell .hr-rest-v2-docs-toggle-label,
+.hr-dcr-docs-shell .hr-rest-v2-docs-toggle-count,
+.hr-dcr-docs-shell .hr-rest-v2-docs-toggle-status {
+  color: rgba(var(--service-learning-zip-1100), 0.96);
+}
+
+.hr-dcr-docs-shell .hr-rest-v2-docs-toggle-count {
+  border-color: rgba(var(--service-learning-zip-1100), 0.24);
+  background: rgba(var(--service-learning-zip-900), 0.18);
+}
+
 .hr-rest-v2-docs-grid {
   display: flex;
   flex-direction: column;
@@ -2859,18 +2894,40 @@ select:disabled {
     0 12px 24px rgba(0, 0, 0, 0.18);
 }
 
-.hr-learning-inspector-card-head {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px 12px;
-  border-bottom: 1px solid rgba(var(--service-learning-zip-1100), 0.14);
+.hr-learning-inspector-toggle {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 48px 11px 14px;
+  border: none;
+  border-radius: 14px 14px 0 0;
   background:
     linear-gradient(
       180deg,
       color-mix(in srgb, rgb(var(--underpar-service-dark-panel-rgb)) 84%, rgb(var(--service-learning-zip-1100)) 16%) 0%,
       color-mix(in srgb, rgb(var(--underpar-service-dark-shell-rgb)) 86%, rgb(var(--service-learning-zip-900)) 14%) 100%
     );
+  color: rgba(var(--service-learning-zip-1100), 0.98);
+  box-shadow: none;
+}
+
+.hr-learning-inspector-toggle:not(.collapsed) {
+  border-bottom: 1px solid rgba(var(--service-learning-zip-1100), 0.16);
+}
+
+.hr-learning-inspector-toggle.collapsed {
+  border-radius: 14px;
+}
+
+.hr-learning-inspector-toggle-title {
+  color: rgba(var(--underpar-gray-900-rgb), 0.98);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.hr-learning-inspector-card-body {
+  padding: 0;
+  border-radius: 0 0 14px 14px;
 }
 
 .hr-learning-inspector-card-title {

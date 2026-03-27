@@ -879,6 +879,18 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   const popupHtml = fs.readFileSync(path.join(ROOT, "popup.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
+  const buildDcrInteractiveDocsContextSource = extractFunctionSource(popupSource, "buildDcrInteractiveDocsContext");
+  const prepareDcrInteractiveDocsContextForEntrySource = extractFunctionSource(
+    popupSource,
+    "prepareDcrInteractiveDocsContextForEntry"
+  );
+  const buildDcrInteractiveDocsHydrationPlanSource = extractFunctionSource(popupSource, "buildDcrInteractiveDocsHydrationPlan");
+  const buildDcrInteractiveDocsEntryActivationStateSource = extractFunctionSource(
+    popupSource,
+    "buildDcrInteractiveDocsEntryActivationState"
+  );
+  const buildDcrInteractiveDocsPanelHtmlSource = extractFunctionSource(popupSource, "buildDcrInteractiveDocsPanelHtml");
+  const openDcrInteractiveDocsEntrySource = extractFunctionSource(popupSource, "openDcrInteractiveDocsEntry");
   const buildRestV2InteractiveDocsContextSource = extractFunctionSource(popupSource, "buildRestV2InteractiveDocsContext");
   const buildHrContextSectionBodyHtmlSource = extractFunctionSource(popupSource, "buildHrContextSectionBodyHtml");
   const buildRestV2InteractiveDocsEntryActivationStateSource = extractFunctionSource(
@@ -922,6 +934,25 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   const openRestV2InteractiveDocsEntrySource = extractFunctionSource(popupSource, "openRestV2InteractiveDocsEntry");
   const runRestV2InteractiveDocsHydratorSource = extractFunctionSource(popupSource, "runRestV2InteractiveDocsHydrator");
 
+  assert.match(popupSource, /const DCR_INTERACTIVE_DOC_ENTRIES = Object\.freeze\(\[/);
+  assert.match(popupSource, /DCR API \(V2\)/);
+  assert.match(popupSource, /operationId: "processSoftwareStatementUsingPOST"/);
+  assert.match(popupSource, /operationId: "generateAccessTokenUsingPOST"/);
+  assert.match(buildDcrInteractiveDocsContextSource, /collectRestV2AppCandidatesFromPremiumApps/);
+  assert.match(buildDcrInteractiveDocsContextSource, /extractRegisteredApplicationRedirectUri/);
+  assert.match(prepareDcrInteractiveDocsContextForEntrySource, /enrichRegisteredApplicationForHydration/);
+  assert.match(prepareDcrInteractiveDocsContextForEntrySource, /registerClientWithSoftwareStatement/);
+  assert.match(prepareDcrInteractiveDocsContextForEntrySource, /saveDcrCache/);
+  assert.match(buildDcrInteractiveDocsHydrationPlanSource, /body\.software_statement/);
+  assert.match(buildDcrInteractiveDocsHydrationPlanSource, /body\.redirect_uri/);
+  assert.match(buildDcrInteractiveDocsHydrationPlanSource, /query\.client_id/);
+  assert.match(buildDcrInteractiveDocsHydrationPlanSource, /query\.client_secret/);
+  assert.match(buildDcrInteractiveDocsHydrationPlanSource, /query\.grant_type/);
+  assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /autoProvisionClientCredentials === true/);
+  assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /canProvisionClientCredentials === true/);
+  assert.match(buildDcrInteractiveDocsPanelHtmlSource, /data-restv2-learning-service-key="dcrV2"/);
+  assert.match(buildDcrInteractiveDocsPanelHtmlSource, /data-dcr-doc-entry-key/);
+  assert.match(buildDcrInteractiveDocsPanelHtmlSource, /hr-context-service-pill--service-default/);
   assert.match(popupSource, /const REST_V2_INTERACTIVE_DOC_ENTRIES = Object\.freeze\(\[/);
   assert.match(popupSource, /sectionLabel: "1\. Configuration"/);
   assert.match(popupSource, /sectionLabel: "2\. Sessions"/);
@@ -950,14 +981,21 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2InteractiveDocsContextSource, /buildRestV2InteractiveDocsUrl\(resolvedEntry\.operationAnchor/);
   assert.match(
     buildHrContextSectionBodyHtmlSource,
-    /\$\{buildHrServiceListHtml\(detectedServiceEntries, fallbackSummary\)\}\s*\$\{restV2DocsPanelHtml\}/
+    /\$\{buildHrServiceListHtml\(detectedServiceEntries, fallbackSummary\)\}\s*\$\{dcrDocsPanelHtml\}\s*\$\{restV2DocsPanelHtml\}/
   );
   assert.match(buildHrContextSectionBodyHtmlSource, /buildLearningInspectorToolsHtml\(\)/);
   assert.doesNotMatch(buildHrContextSectionBodyHtmlSource, /contextItemHtml/);
   assert.match(buildLearningInspectorCardHtmlSource, /getLearningInspectorConfig/);
+  assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-key="\$\{escapeHtml\(normalizedType\)\}"/);
+  assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-initial-collapsed/);
+  assert.match(buildLearningInspectorCardHtmlSource, /hr-learning-inspector-toggle/);
   assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-form="\$\{escapeHtml\(normalizedType\)\}"/);
   assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-input="\$\{escapeHtml\(normalizedType\)\}"/);
   assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-result="\$\{escapeHtml\(normalizedType\)\}"/);
+  assert.doesNotMatch(buildLearningInspectorCardHtmlSource, /hr-learning-inspector-card-description/);
+  assert.match(wireLearningInspectorsSource, /data-learning-inspector-key/);
+  assert.match(wireLearningInspectorsSource, /wireCollapsibleSection/);
+  assert.match(wireLearningInspectorsSource, /setLearningInspectorCollapsed/);
   assert.match(wireLearningInspectorsSource, /inspectLearningJwtInput\(\)/);
   assert.match(wireLearningInspectorsSource, /inspectLearningBase64Input\(\)/);
   assert.match(enrichRestV2LearningResourcesFromConsoleContextSource, /mvpdWorkspaceEnsureSnapshot/);
@@ -1007,9 +1045,13 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(resolveRestV2LearningRequestorContextSource, /candidates\.length === 1/);
   assert.doesNotMatch(resolveRestV2LearningRequestorContextSource, /requestorId:\s*programmerId/);
   assert.match(popupSource, /data-restv2-doc-entry-key/);
+  assert.match(popupSource, /data-dcr-doc-entry-key/);
+  assert.match(popupSource, /Toggle DCR learning methods/);
   assert.match(popupSource, /REST V2 learning methods/);
   assert.match(popupSource, /JWT Inspector/);
   assert.match(popupSource, /Base64 Inspector/);
+  assert.doesNotMatch(popupSource, /Paste any JWT, bearer value, or JSON body containing a JWT\./);
+  assert.doesNotMatch(popupSource, /Paste any Base64 or Base64URL value\./);
   assert.match(popupSource, /showLearningInspectorResult\("jwt"/);
   assert.match(popupSource, /showLearningInspectorResult\("base64"/);
   assert.doesNotMatch(popupSource, /Review the inspector dialog for details/);
@@ -1033,6 +1075,11 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(openRestV2InteractiveDocsEntrySource, /openPremiumServiceDocumentation\("restV2"/);
   assert.match(openRestV2InteractiveDocsEntrySource, /waitForTabCompletion/);
   assert.match(openRestV2InteractiveDocsEntrySource, /hydrateRestV2InteractiveDocsTab/);
+  assert.match(openDcrInteractiveDocsEntrySource, /prepareDcrInteractiveDocsContextForEntry/);
+  assert.match(openDcrInteractiveDocsEntrySource, /buildDcrInteractiveDocsContext\(resolveSelectedProgrammer\(\), entry\)/);
+  assert.match(openDcrInteractiveDocsEntrySource, /setDcrLearningUiState/);
+  assert.match(openDcrInteractiveDocsEntrySource, /openPremiumServiceDocumentation\("dcrV2"/);
+  assert.match(openDcrInteractiveDocsEntrySource, /hydrateRestV2InteractiveDocsTab/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /document\.getElementById\(`operation\/\$\{operationId\}`\)/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /\[data-cy="try-it"\]/);
   assert.match(runRestV2InteractiveDocsHydratorSource, /\[data-cy="send-button"\]/);
@@ -1052,8 +1099,12 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupCss, /\.hr-rest-v2-docs-toggle/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell-body/);
   assert.match(popupCss, /\.hr-rest-v2-docs-pill/);
+  assert.match(popupCss, /\.hr-dcr-docs-shell/);
+  assert.match(popupCss, /\.hr-dcr-docs-toggle/);
   assert.match(popupCss, /\.hr-learning-inspector-stack/);
   assert.match(popupCss, /\.hr-learning-inspector-card/);
+  assert.match(popupCss, /\.hr-learning-inspector-toggle/);
+  assert.match(popupCss, /\.hr-learning-inspector-card-body/);
   assert.match(popupCss, /\.hr-learning-inspector-result/);
   assert.match(popupCss, /\.hr-learning-inspector-code/);
   assert.match(popupCss, /\.hr-rest-v2-doc-entry/);
@@ -1070,7 +1121,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupCss, /\.hr-rest-v2-doc-section-grid/);
   assert.match(
     popupSource,
-    /const docsItemHtml = restV2DocsPanelHtml \? "" : buildMetadataItemHtml\("Docs", `HOWTO: \$\{howtoSubject\} quick docs coming soon\.\.\.`\);/
+    /const docsItemHtml =\s*dcrDocsPanelHtml \|\| restV2DocsPanelHtml\s*\?\s*""\s*:\s*buildMetadataItemHtml\("Docs", `HOWTO: \$\{howtoSubject\} quick docs coming soon\.\.\.`\);/
   );
   assert.match(popupSource, /data-restv2-doc-state/);
   assert.match(popupSource, /SETUP NEEDED/);
