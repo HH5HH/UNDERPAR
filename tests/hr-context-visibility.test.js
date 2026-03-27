@@ -2855,7 +2855,7 @@ test("REST V2 learning hydrates optional SSO headers from the debug flow when th
 
   const prepared = await prepareRestV2InteractiveDocsContextForEntry(
     {
-      key: "profiles-by-mvpd",
+      key: "decisions-authorize",
       usesAdobeSubjectToken: true,
       usesAdServiceToken: true,
       usesTempPassIdentity: true,
@@ -3659,22 +3659,21 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/getProfileForMvpdUsingGET",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
-      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
-      usesAdobeSubjectToken: true,
-      usesAdServiceToken: true,
       usesPartnerFrameworkStatus: true,
-      usesTempPassIdentity: true,
     },
     baseContext,
     accessToken
   );
   assert.equal(profilesByMvpdPlan.fieldValues["path.mvpd"], "Comcast_SSO");
   assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
-  assert.equal(profilesByMvpdPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
-  assert.equal(profilesByMvpdPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
-  assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Temppass-Identity"], normalizedTempPassIdentity);
+  assert.equal(profilesByMvpdPlan.fieldValues["header.X-Device-Info"], "device-info-123");
+  assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
+  assert.equal(Object.prototype.hasOwnProperty.call(profilesByMvpdPlan.fieldValues, "header.AP-Visitor-Identifier"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(profilesByMvpdPlan.fieldValues, "header.Adobe-Subject-Token"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(profilesByMvpdPlan.fieldValues, "header.AD-Service-Token"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(profilesByMvpdPlan.fieldValues, "header.AP-Temppass-Identity"), false);
 
   const authorizePlan = buildRestV2InteractiveDocsHydrationPlan(
     {

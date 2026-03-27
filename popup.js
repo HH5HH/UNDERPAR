@@ -421,13 +421,9 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     operationId: "getProfileForMvpdUsingGET",
     requiresAccessToken: true,
     usesDeviceHeaders: true,
-    usesVisitorIdentifier: true,
     usesMvpdPath: true,
     requireMvpdPath: true,
-    usesAdobeSubjectToken: true,
-    usesAdServiceToken: true,
     usesPartnerFrameworkStatus: true,
-    usesTempPassIdentity: true,
   },
   {
     key: "decisions-authorize",
