@@ -31170,6 +31170,11 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
     mvpd,
     [cachedMvpdMeta?.id]
   );
+  const isRequestorScopedProviderId = (candidateValue = "") =>
+    requestorScopedProviderIdCandidates.some(
+      (candidateProviderId) =>
+        normalizeRestV2MvpdMatchToken(candidateProviderId) === normalizeRestV2MvpdMatchToken(candidateValue)
+    );
   const selectedMvpdProviderId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
   const explicitRuntimePartnerProviderId = String(
     firstNonEmptyString([context?.mvpdPartnerProviderId, flow?.context?.mvpdPartnerProviderId]) || ""
@@ -31204,15 +31209,16 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
   const providerId = String(
     firstNonEmptyString([
       isGenericSsoAliasDowngrade(explicitRuntimePartnerProviderId, selectedMvpdProviderId) ||
-      isBareSelectedMvpdProviderId(explicitRuntimePartnerProviderId, selectedMvpdProviderId)
+      isBareSelectedMvpdProviderId(explicitRuntimePartnerProviderId, selectedMvpdProviderId) ||
+      isRequestorScopedProviderId(explicitRuntimePartnerProviderId)
         ? ""
         : explicitRuntimePartnerProviderId,
-      ...requestorScopedProviderIdCandidates,
       isGenericSsoAliasDowngrade(preferredPartnerProviderId, selectedMvpdProviderId) ? "" : preferredPartnerProviderId,
       isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ||
       isBareSelectedMvpdProviderId(explicitPartnerProviderId, selectedMvpdProviderId)
         ? ""
         : explicitPartnerProviderId,
+      ...requestorScopedProviderIdCandidates,
     ]) || ""
   ).trim();
   if (!resolvedPartnerName || !providerId) {
@@ -31294,6 +31300,11 @@ function buildRestV2TrustedPartnerFrameworkStatusFromCapturedFlow(
     selectedMvpdId,
     [cachedMvpdMeta?.id]
   );
+  const isRequestorScopedProviderId = (candidateValue = "") =>
+    requestorScopedProviderIdCandidates.some(
+      (candidateProviderId) =>
+        normalizeRestV2MvpdMatchToken(candidateProviderId) === normalizeRestV2MvpdMatchToken(candidateValue)
+    );
   const explicitRuntimePartnerProviderId = String(
     firstNonEmptyString([context?.mvpdPartnerProviderId, flow?.context?.mvpdPartnerProviderId]) || ""
   ).trim();
@@ -31324,10 +31335,13 @@ function buildRestV2TrustedPartnerFrameworkStatusFromCapturedFlow(
   const allowSelectedMvpdFallback = options?.allowSelectedMvpdFallback === true;
   const providerId = String(
     firstNonEmptyString([
-      isGenericSsoAliasDowngrade(explicitRuntimePartnerProviderId, selectedMvpdId) ? "" : explicitRuntimePartnerProviderId,
-      ...requestorScopedProviderIdCandidates,
+      isGenericSsoAliasDowngrade(explicitRuntimePartnerProviderId, selectedMvpdId) ||
+      isRequestorScopedProviderId(explicitRuntimePartnerProviderId)
+        ? ""
+        : explicitRuntimePartnerProviderId,
       isGenericSsoAliasDowngrade(preferredPartnerProviderId, selectedMvpdId) ? "" : preferredPartnerProviderId,
       isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdId) ? "" : explicitPartnerProviderId,
+      ...requestorScopedProviderIdCandidates,
       allowSelectedMvpdFallback ? selectedMvpdId : "",
     ]) || ""
   ).trim();
@@ -93199,21 +93213,18 @@ function resolveRestV2ExpectedPartnerFrameworkProviderIds(context = null) {
   };
 
   if (resolvedPartnerName) {
-    const partnerCandidates = uniquePreserveOrder([
-      ...requestorScopedProviderIdCandidates,
-      ...rankRestV2PartnerProviderIdCandidates(
-        [
-          explicitRuntimePartnerProviderId,
-          ...collectRestV2PartnerProviderIdCandidatesFromMvpdMeta(
-            cachedMvpdMeta || context?.mvpdMeta || null,
-            resolvedPartnerName,
-            selectedMvpdProviderId
-          ),
-        ],
-        selectedMvpdProviderId,
-        resolvedPartnerName
-      ),
-    ]).filter((candidateValue) => {
+    const partnerCandidates = rankRestV2PartnerProviderIdCandidates(
+      [
+        explicitRuntimePartnerProviderId,
+        ...collectRestV2PartnerProviderIdCandidatesFromMvpdMeta(
+          cachedMvpdMeta || context?.mvpdMeta || null,
+          resolvedPartnerName,
+          selectedMvpdProviderId
+        ),
+      ],
+      selectedMvpdProviderId,
+      resolvedPartnerName
+    ).filter((candidateValue) => {
       if (isGenericSsoAliasDowngrade(candidateValue, selectedMvpdProviderId)) {
         return false;
       }
@@ -93231,10 +93242,10 @@ function resolveRestV2ExpectedPartnerFrameworkProviderIds(context = null) {
       !isGenericSsoAliasDowngrade(explicitCandidate, selectedMvpdProviderId) &&
       (!isBareSelectedMvpdProviderId(explicitCandidate, selectedMvpdProviderId) || allowSelectedMvpdFallback)
     ) {
-      return uniquePreserveOrder([...requestorScopedProviderIdCandidates, explicitCandidate]);
+      return [explicitCandidate];
     }
     return allowSelectedMvpdFallback && selectedMvpdProviderId
-      ? uniquePreserveOrder([...requestorScopedProviderIdCandidates, selectedMvpdProviderId])
+      ? [selectedMvpdProviderId]
       : requestorScopedProviderIdCandidates;
   }
 
@@ -93565,10 +93576,10 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     selectedMvpdProviderId,
   ]);
   const preferredRuntimeProviderId = firstNonEmptyString([
-    ...requestorScopedProviderIdCandidates,
     sanitizedRealFrameworkProviderId,
     currentPartnerProviderId,
     sanitizedMappedPartnerProviderId,
+    ...requestorScopedProviderIdCandidates,
   ]);
   if (partnerCandidates.length === 0) {
     if (sanitizedRealFrameworkProviderId) {
@@ -93616,12 +93627,11 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
       ]) || ""
     ).trim();
     const fallbackRuntimeProviderId = String(
-      firstNonEmptyString([...requestorScopedProviderIdCandidates, preferredRuntimeProviderId, fallbackMappingId]) || ""
+      firstNonEmptyString([preferredRuntimeProviderId, fallbackMappingId, ...requestorScopedProviderIdCandidates]) || ""
     ).trim();
     const fallbackPartnerProviderIdCandidates = { ...existingPartnerProviderIdCandidates };
     partnerCandidates.forEach((partnerName) => {
       fallbackPartnerProviderIdCandidates[partnerName] = uniquePreserveOrder([
-        ...requestorScopedProviderIdCandidates,
         ...rankRestV2PartnerProviderIdCandidates(
           [
             ...(Array.isArray(existingPartnerProviderIdCandidates[partnerName]) ? existingPartnerProviderIdCandidates[partnerName] : []),
@@ -93631,6 +93641,7 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
           selectedMvpdProviderId,
           partnerName
         ),
+        ...requestorScopedProviderIdCandidates,
       ]);
     });
     if (fallbackMappingId) {
@@ -93709,7 +93720,6 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     ...mergedPartnerProviderIdCandidates,
   }).forEach((partnerName) => {
     mergedPartnerProviderIdCandidates[partnerName] = uniquePreserveOrder([
-      ...requestorScopedProviderIdCandidates,
       ...rankRestV2PartnerProviderIdCandidates(
         [
           ...(Array.isArray(mergedPartnerProviderIdCandidates[partnerName]) ? mergedPartnerProviderIdCandidates[partnerName] : []),
@@ -93719,17 +93729,18 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
         selectedMvpdProviderId,
         partnerName
       ),
+      ...requestorScopedProviderIdCandidates,
     ]);
   });
   const normalizedResolvedSnapshotMappingId = normalizePartnerProviderId(resolvedDetails?.resolvedMappingId);
   const normalizedResolvedPreferredProviderId = normalizePartnerProviderId(resolvedDetails?.resolvedPreferredProviderId);
   const resolvedRuntimeProviderId = String(
     firstNonEmptyString([
-      ...requestorScopedProviderIdCandidates,
       isGenericSsoAliasDowngrade(normalizedResolvedPreferredProviderId, selectedMvpdProviderId)
         ? ""
         : normalizedResolvedPreferredProviderId,
       preferredRuntimeProviderId,
+      ...requestorScopedProviderIdCandidates,
     ]) || ""
   ).trim();
   const resolvedMappingId = String(

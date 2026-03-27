@@ -2160,12 +2160,12 @@ test("REST V2 partner platform hydrator upgrades a generic captured Comcast fram
     forceRefresh: false,
   });
 
-  assert.equal(context.mvpdPartnerProviderId, "MML_Comcast_SSO");
+  assert.equal(context.mvpdPartnerProviderId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
   assert.deepEqual(Array.from(context.mvpdMeta.partnerPlatformSettingIds.Apple || []), ["Comcast_SSO_Apple"]);
-  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["MML_Comcast_SSO", "Comcast_SSO_Apple"]);
+  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple", "MML_Comcast_SSO"]);
 });
 
 test("REST V2 partner platform hydrator persists resolved Apple partner mappings into the requestor-scoped MVPD cache", async () => {
@@ -2231,11 +2231,11 @@ test("REST V2 partner platform hydrator persists resolved Apple partner mappings
   });
 
   const cached = requestorCache.get("Comcast_SSO");
-  assert.equal(context.mvpdPartnerProviderId, "MML_Comcast_SSO");
+  assert.equal(context.mvpdPartnerProviderId, "Comcast_SSO_Apple");
   assert.equal(cached.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(cached.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
   assert.deepEqual(Array.from(cached.partnerPlatformSettingIds.Apple || []), ["Comcast_SSO_Apple"]);
-  assert.deepEqual(Array.from(cached.partnerProviderIdCandidates.Apple || []), ["MML_Comcast_SSO", "Comcast_SSO_Apple"]);
+  assert.deepEqual(Array.from(cached.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple", "MML_Comcast_SSO"]);
 });
 
 test("REST V2 learning framework status builder prefers cached partner platform mappings over a generic Comcast provider id", () => {
@@ -2269,7 +2269,7 @@ test("REST V2 learning framework status builder prefers cached partner platform 
   );
 
   const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
-  assert.equal(payload.frameworkProviderInfo.id, "MML_Comcast_SSO");
+  assert.equal(payload.frameworkProviderInfo.id, "Comcast_SSO_Apple");
   assert.equal(payload.frameworkPartnerInfo.name, "Apple");
 });
 
@@ -2442,12 +2442,12 @@ test("REST V2 partner platform hydrator promotes cached Apple partner mappings e
     forceRefresh: false,
   });
 
-  assert.equal(context.mvpdPartnerProviderId, "MML_Comcast_SSO");
+  assert.equal(context.mvpdPartnerProviderId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdPlatformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.platformMappingId, "Comcast_SSO_Apple");
   assert.equal(context.mvpdMeta.partnerPlatformMappings.Apple, "Comcast_SSO_Apple");
   assert.deepEqual(Array.from(context.mvpdMeta.partnerPlatformSettingIds.Apple || []), ["Comcast_SSO_Apple"]);
-  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["MML_Comcast_SSO", "Comcast_SSO_Apple"]);
+  assert.deepEqual(Array.from(context.mvpdMeta.partnerProviderIdCandidates.Apple || []), ["Comcast_SSO_Apple", "MML_Comcast_SSO"]);
 });
 
 test("REST V2 partner platform hydrator drops a generic cached Apple mapping when the live snapshot is unavailable", async () => {
@@ -2971,9 +2971,9 @@ test("REST V2 partner hydrator promotes exact Comcast_SSO Section 6 context afte
   });
 
   const decodedFrameworkStatus = JSON.parse(Buffer.from(String(context.partnerFrameworkStatus || "").trim(), "base64").toString("utf8"));
-  assert.equal(decodedFrameworkStatus.frameworkProviderInfo.id, "MML_Comcast_SSO");
+  assert.equal(decodedFrameworkStatus.frameworkProviderInfo.id, "Comcast_SSO");
   assert.equal(decodedFrameworkStatus.frameworkPartnerInfo.partner, "Apple");
-  assert.equal(context.allowPartnerFrameworkSelectedMvpdFallback, false);
+  assert.equal(context.allowPartnerFrameworkSelectedMvpdFallback, true);
   assert.equal(context.partnerFrameworkStatusSource, "verified completed partner auth flow");
   assert.equal(context.samlResponse, encodedSaml);
   assert.equal(context.samlSource, "tab-network:body");
