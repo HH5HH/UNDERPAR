@@ -257,10 +257,11 @@ const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = {
   restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/",
 };
 const DCR_API_DOCUMENTATION_URL = "https://developer.adobe.com/adobe-pass/api/dcr_api/interactive/";
-const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["health", "learning"];
+const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["health", "learning", "harpo"];
 const HR_CONTEXT_SECTION_TITLE_BY_KEY = {
   health: "HEALTH",
   learning: "LEARNING",
+  harpo: "HARPO",
 };
 const DCR_REGISTER_SERVICE_KEYS = Object.freeze(["restV2", "esm", "degradation", "resetTempPass"]);
 const DCR_INTERACTIVE_DOC_ENTRIES = Object.freeze([
@@ -66470,6 +66471,10 @@ function buildHrSectionsRenderSignature(programmer = null, services = null, opti
   const restV2LearningSignature = availableKeys.includes("restV2")
     ? buildRestV2InteractiveDocsPanelSignature(programmer, services)
     : "";
+  const visibleSectionKeys = getHrContextSectionDisplayKeys(programmer, services);
+  const harpoPanelSignature = visibleSectionKeys.includes("harpo")
+    ? buildHarpoPanelSignature(programmer, services)
+    : "";
   return [
     programmerId,
     selectedRequestorId,
@@ -66477,8 +66482,10 @@ function buildHrSectionsRenderSignature(programmer = null, services = null, opti
     loadingFlag,
     errorText,
     ...availableKeys,
+    `hr-sections:${visibleSectionKeys.join(",")}`,
     dcrLearningSignature,
     restV2LearningSignature,
+    harpoPanelSignature,
   ].join("|");
 }
 
@@ -66498,16 +66505,17 @@ function hasRenderablePremiumServiceSections(services = null) {
   return expectedKeys.every((serviceKey, index) => actualKeys[index] === serviceKey);
 }
 
-function hasRenderableHrContextSections() {
+function hasRenderableHrContextSections(programmer = null, services = null) {
   if (!els.hrServicesContainer) {
     return false;
   }
+  const expectedSectionKeys = getHrContextSectionDisplayKeys(programmer, services);
   const sections = Array.from(els.hrServicesContainer.querySelectorAll(".hr-context-section"));
-  if (sections.length !== HR_CONTEXT_SECTION_DISPLAY_ORDER.length) {
+  if (sections.length !== expectedSectionKeys.length) {
     return false;
   }
   const actualKeys = sections.map((section) => String(section?.dataset?.hrSectionKey || "").trim());
-  return HR_CONTEXT_SECTION_DISPLAY_ORDER.every((sectionKey, index) => actualKeys[index] === sectionKey);
+  return expectedSectionKeys.every((sectionKey, index) => actualKeys[index] === sectionKey);
 }
 
 function shouldHydrateExistingPremiumServiceSection(section, serviceKey = "") {
@@ -66773,6 +66781,47 @@ function shouldRevealHrContextSections(programmer = null, services = null) {
     getDetectedPremiumServiceKeys(services).length > 0 &&
     isProgrammerHrContextHydrationReady(programmerId, services)
   );
+}
+
+function collectHarpoProgrammerDomainNames(programmer = null, services = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : null;
+  const resolvedServices = services && typeof services === "object" ? services : null;
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  const candidateRequestorIds = uniquePreserveOrder([
+    selectedRequestorId,
+    ...(Array.isArray(resolvedProgrammer?.requestorIds) ? resolvedProgrammer.requestorIds : []),
+    ...collectRestV2LearningRequestorCandidates(resolvedProgrammer, resolvedServices),
+    ...(Array.isArray(resolvedProgrammer?.requestorOptions)
+      ? resolvedProgrammer.requestorOptions
+          .map((option) =>
+            extractEntityIdFromToken(
+              firstNonEmptyString([option?.id, option?.key, option?.raw?.id, option?.entityData?.id])
+            )
+          )
+          .filter(Boolean)
+      : []),
+  ]);
+
+  const domainNames = uniquePreserveOrder(
+    candidateRequestorIds.flatMap((requestorId) => collectRestV2LearningRequestorDomainNames(resolvedProgrammer, requestorId))
+  );
+  return domainNames;
+}
+
+function shouldShowHarpoHrSection(programmer = null, services = null) {
+  if (!services?.restV2) {
+    return false;
+  }
+  return collectHarpoProgrammerDomainNames(programmer, services).length > 0;
+}
+
+function getHrContextSectionDisplayKeys(programmer = null, services = null) {
+  return HR_CONTEXT_SECTION_DISPLAY_ORDER.filter((sectionKey) => {
+    if (sectionKey === "harpo") {
+      return shouldShowHarpoHrSection(programmer, services);
+    }
+    return true;
+  });
 }
 
 function setHrContextSectionsVisibility(visible = false) {
@@ -69794,6 +69843,60 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
   `;
 }
 
+function buildHarpoPanelSignature(programmer = null, services = null) {
+  if (!shouldShowHarpoHrSection(programmer, services)) {
+    return "";
+  }
+  const programmerId = String(programmer?.programmerId || "").trim();
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  const domainNames = collectHarpoProgrammerDomainNames(programmer, services);
+  return [
+    programmerId,
+    selectedRequestorId,
+    `domains:${domainNames.join(",")}`,
+    `restv2:${services?.restV2 ? "1" : "0"}`,
+  ].join("|");
+}
+
+function buildHarpoStatusItemHtml(programmer = null, services = null) {
+  const context = getHrContextSummary(programmer);
+  const domainNames = collectHarpoProgrammerDomainNames(programmer, services);
+  const visibleDomains = domainNames.slice(0, 4);
+  const hiddenDomainCount = Math.max(0, domainNames.length - visibleDomains.length);
+  const scopeLabel =
+    domainNames.length === 1 ? "1 configured domain" : `${Number(domainNames.length || 0)} configured domains`;
+
+  return `
+    <article class="metadata-item hr-harpo-status-card">
+      <p class="metadata-key">Status</p>
+      <div class="metadata-value hr-harpo-status-body">
+        <p class="hr-harpo-status-title">HAR &amp; Pass Observatory</p>
+        <p class="hr-harpo-status-copy">Analyze Adobe Pass traffic from a pre-recorded HAR file or a live recorder scoped to ${escapeHtml(
+          context.compositeLabel
+        )} domains.</p>
+        <div class="hr-harpo-mode-row" aria-label="${escapeHtml("HARPO input modes")}">
+          <span class="hr-harpo-mode-pill">PRE-RECORDED HAR</span>
+          <span class="hr-harpo-mode-pill">LIVE DOMAIN RECORDER</span>
+        </div>
+        <div class="hr-harpo-domain-block">
+          <p class="hr-harpo-domain-label">${escapeHtml(scopeLabel)}</p>
+          <div class="hr-harpo-domain-list">
+            ${visibleDomains.map((domainName) => `<span class="hr-harpo-domain-pill">${escapeHtml(domainName)}</span>`).join("")}
+            ${
+              hiddenDomainCount > 0
+                ? `<span class="hr-harpo-domain-pill hr-harpo-domain-pill--count">+${escapeHtml(
+                    String(hiddenDomainCount)
+                  )} more</span>`
+                : ""
+            }
+          </div>
+        </div>
+        <p class="hr-harpo-status-note">HARPO is reserved for modern Adobe Pass Media Companies with REST V2 and configured Channel domains. Legacy AccessEnabler flows stay out of scope.</p>
+      </div>
+    </article>
+  `;
+}
+
 async function handleHrContextHealthAction(action = "", programmer = null) {
   const normalizedAction = String(action || "").trim().toLowerCase();
   if (!normalizedAction) {
@@ -69973,6 +70076,9 @@ function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services =
   const context = getHrContextSummary(programmer);
   if (sectionKey === "health") {
     return buildHrContextHealthStatusItemHtml(programmer);
+  }
+  if (sectionKey === "harpo") {
+    return buildHarpoStatusItemHtml(programmer, services);
   }
 
   const detectedServiceEntries = getDetectedPremiumServiceEntries(services);
@@ -71341,7 +71447,7 @@ function renderHrSections(services, programmer = null, options = {}) {
   if (
     renderSignature &&
     String(els.hrServicesContainer.dataset.renderSignature || "") === renderSignature &&
-    hasRenderableHrContextSections()
+    hasRenderableHrContextSections(programmer, services)
   ) {
     setHrContextSectionsVisibility(true);
     return;
@@ -71353,7 +71459,8 @@ function renderHrSections(services, programmer = null, options = {}) {
   topDivider.className = "hr-context-divider";
   topDivider.setAttribute("aria-hidden", "true");
   els.hrServicesContainer.appendChild(topDivider);
-  for (const sectionKey of HR_CONTEXT_SECTION_DISPLAY_ORDER) {
+  const visibleSectionKeys = getHrContextSectionDisplayKeys(programmer, services);
+  for (const sectionKey of visibleSectionKeys) {
     els.hrServicesContainer.appendChild(createHrContextSection(programmer, sectionKey, services, options));
   }
   const bottomDivider = document.createElement("div");

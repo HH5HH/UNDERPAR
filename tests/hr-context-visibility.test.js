@@ -82,6 +82,36 @@ function loadHrVisibilityHelpers(seed = {}) {
   return context.module.exports;
 }
 
+function loadHrContextSectionDisplayHelpers(seed = {}) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    'const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["health", "learning", "harpo"];',
+    "const state = globalThis.__seed.state || {};",
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function uniquePreserveOrder(values = []) { const seen = new Set(); const output = []; (Array.isArray(values) ? values : [values]).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    "function normalizeEntityToken(value = '') { return String(value || '').trim().toLowerCase().replace(/^@serviceprovider:/, ''); }",
+    "function extractEntityIdFromToken(value = '') { const normalized = String(value || '').trim(); return normalized.replace(/^@ServiceProvider:/i, ''); }",
+    "function collectRestV2LearningRequestorCandidates() { return Array.isArray(globalThis.__seed.requestorCandidates) ? globalThis.__seed.requestorCandidates : []; }",
+    "function collectRestV2LearningRequestorDomainNames(programmer = null, requestorId = '') { if (typeof globalThis.__seed.collectDomains === 'function') { return globalThis.__seed.collectDomains(programmer, requestorId); } return []; }",
+    extractFunctionSource(source, "collectHarpoProgrammerDomainNames"),
+    extractFunctionSource(source, "shouldShowHarpoHrSection"),
+    extractFunctionSource(source, "getHrContextSectionDisplayKeys"),
+    "module.exports = { collectHarpoProgrammerDomainNames, shouldShowHarpoHrSection, getHrContextSectionDisplayKeys };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: seed,
+    atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadPopupLearningJwtInspectorUtility(sharedUtility = null) {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -975,6 +1005,46 @@ test("HR context reveals only when the selected media company has detected premi
   assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, []), false);
 });
 
+test("HR context adds HARPO only for REST V2 media companies with configured domains", () => {
+  const { collectHarpoProgrammerDomainNames, shouldShowHarpoHrSection, getHrContextSectionDisplayKeys } =
+    loadHrContextSectionDisplayHelpers({
+      state: {
+        selectedRequestorId: "",
+      },
+      requestorCandidates: ["turner", "cnn"],
+      collectDomains(programmer, requestorId) {
+        const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
+        if (normalizedRequestorId === "turner") {
+          return ["turner.example.test", "turner-alt.example.test"];
+        }
+        if (normalizedRequestorId === "cnn") {
+          return ["cnn.example.test"];
+        }
+        return [];
+      },
+    });
+
+  const programmer = {
+    programmerId: "Turner",
+    requestorIds: ["turner"],
+    requestorOptions: [{ id: "turner" }],
+  };
+  const services = {
+    restV2: {
+      guid: "rest-guid",
+    },
+  };
+
+  assert.deepEqual(
+    Array.from(collectHarpoProgrammerDomainNames(programmer, services)),
+    ["turner.example.test", "turner-alt.example.test", "cnn.example.test"]
+  );
+  assert.equal(shouldShowHarpoHrSection(programmer, services), true);
+  assert.deepEqual(Array.from(getHrContextSectionDisplayKeys(programmer, services)), ["health", "learning", "harpo"]);
+  assert.equal(shouldShowHarpoHrSection(programmer, {}), false);
+  assert.deepEqual(Array.from(getHrContextSectionDisplayKeys(programmer, {})), ["health", "learning"]);
+});
+
 test("sidepanel seeds the HR context container hidden and popup runtime uses unlabeled top and bottom separators", () => {
   const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
@@ -1126,6 +1196,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     popupSource,
     "collectRestV2LearningRequestorDomainNames"
   );
+  const renderHrSectionsSource = extractFunctionSource(popupSource, "renderHrSections");
   const summarizeRestV2InteractiveDocsActivationLockReasonSource = extractFunctionSource(
     popupSource,
     "summarizeRestV2InteractiveDocsActivationLockReason"
@@ -1198,6 +1269,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     /\$\{buildHrServiceListHtml\(detectedServiceEntries, fallbackSummary\)\}\s*\$\{dcrDocsPanelHtml\}\s*\$\{restV2DocsPanelHtml\}/
   );
   assert.match(buildHrContextSectionBodyHtmlSource, /buildLearningInspectorToolsHtml\(\)/);
+  assert.match(buildHrContextSectionBodyHtmlSource, /buildHarpoStatusItemHtml\(programmer, services\)/);
   assert.doesNotMatch(buildHrContextSectionBodyHtmlSource, /contextItemHtml/);
   assert.match(buildLearningInspectorCardHtmlSource, /getLearningInspectorConfig/);
   assert.match(buildLearningInspectorCardHtmlSource, /data-learning-inspector-key="\$\{escapeHtml\(normalizedType\)\}"/);
@@ -1260,6 +1332,12 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(resolveRestV2LearningRequestorContextSource, /requestorId:\s*programmerId/);
   assert.match(popupSource, /data-restv2-doc-entry-key/);
   assert.match(popupSource, /data-dcr-doc-entry-key/);
+  assert.match(popupSource, /const HR_CONTEXT_SECTION_DISPLAY_ORDER = \["health", "learning", "harpo"\]/);
+  assert.match(popupSource, /function getHrContextSectionDisplayKeys\(programmer = null, services = null\)/);
+  assert.match(popupSource, /function collectHarpoProgrammerDomainNames\(programmer = null, services = null\)/);
+  assert.match(popupSource, /function shouldShowHarpoHrSection\(programmer = null, services = null\)/);
+  assert.match(popupSource, /HAR &amp; Pass Observatory/);
+  assert.match(popupSource, /LIVE DOMAIN RECORDER/);
   assert.match(popupSource, /Toggle DCR learning methods/);
   assert.match(popupSource, /REST V2 learning methods/);
   assert.match(popupSource, /JWT Inspector/);
@@ -1315,6 +1393,10 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(popupCss, /\.hr-learning-context-field-grid/);
   assert.doesNotMatch(popupCss, /\.hr-learning-context-status-badge--active/);
   assert.match(popupCss, /\.hr-base64-hover-target/);
+  assert.match(popupCss, /\.hr-context-section\.hr-context-section--harpo/);
+  assert.match(popupCss, /\.hr-harpo-status-card/);
+  assert.match(popupCss, /\.hr-harpo-mode-pill/);
+  assert.match(popupCss, /\.hr-harpo-domain-pill/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell/);
   assert.match(popupCss, /\.hr-rest-v2-docs-toggle/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell-body/);
@@ -1345,6 +1427,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
     popupSource,
     /const docsItemHtml =\s*dcrDocsPanelHtml \|\| restV2DocsPanelHtml\s*\?\s*""\s*:\s*buildMetadataItemHtml\("Docs", `HOWTO: \$\{howtoSubject\} quick docs coming soon\.\.\.`\);/
   );
+  assert.match(renderHrSectionsSource, /const visibleSectionKeys = getHrContextSectionDisplayKeys\(programmer, services\)/);
   assert.match(popupSource, /data-restv2-doc-state/);
   assert.match(popupSource, /SETUP NEEDED/);
   assert.match(popupSource, /Using \$\{selectedCount\} random resourceIds from the selected MVPD pool/);

@@ -59,6 +59,13 @@
   --service-learning-zip-900: 86, 129, 255;
   --service-learning-zip-1000: 105, 149, 254;
   --service-learning-zip-1100: 124, 169, 252;
+  --service-harpo-zip-500: 0, 77, 84;
+  --service-harpo-zip-600: 0, 95, 104;
+  --service-harpo-zip-700: 0, 115, 126;
+  --service-harpo-zip-800: 0, 131, 144;
+  --service-harpo-zip-900: 0, 150, 166;
+  --service-harpo-zip-1000: 18, 172, 188;
+  --service-harpo-zip-1100: 80, 208, 223;
   --service-rest-v2-zip-500: 61, 68, 82;
   --service-rest-v2-zip-600: 72, 80, 98;
   --service-rest-v2-zip-700: 82, 92, 111;
@@ -2219,6 +2226,43 @@ select:disabled {
   --service-vibe-feedback-border-alpha: 0.457;
 }
 
+.hr-context-section.hr-context-section--harpo {
+  --service-zip-500: var(--service-harpo-zip-500);
+  --service-zip-600: var(--service-harpo-zip-600);
+  --service-zip-700: var(--service-harpo-zip-700);
+  --service-zip-800: var(--service-harpo-zip-800);
+  --service-zip-900: var(--service-harpo-zip-900);
+  --service-zip-1000: var(--service-harpo-zip-1000);
+  --service-zip-1100: var(--service-harpo-zip-1100);
+  --service-on-primary-rgb: 255, 255, 255;
+  --service-vibe-shell-mix: 46.12%;
+  --service-vibe-body-start-mix: 52.96%;
+  --service-vibe-body-end-mix: 42.34%;
+  --service-vibe-border-mix: 48.87%;
+  --service-vibe-topbar-a-alpha: 0.286;
+  --service-vibe-topbar-b-alpha: 0.169;
+  --service-vibe-footer-a-alpha: 0.238;
+  --service-vibe-topbar-c-mix: 31.28%;
+  --service-vibe-footer-b-mix: 28.11%;
+  --service-vibe-menu-a-mix: 22.96%;
+  --service-vibe-menu-b-mix: 19.72%;
+  --service-vibe-login-a-alpha: 0.231;
+  --service-vibe-login-c-alpha: 0.164;
+  --service-vibe-section-a-mix: 34.06%;
+  --service-vibe-section-b-mix: 38.42%;
+  --service-vibe-header-a-alpha: 0.264;
+  --service-vibe-selection-a-alpha: 0.319;
+  --service-vibe-selection-b-alpha: 0.191;
+  --service-vibe-focus-alpha: 0.291;
+  --service-vibe-surface-soft-alpha: 0.204;
+  --service-vibe-surface-mid-alpha: 0.287;
+  --service-vibe-surface-strong-alpha: 0.418;
+  --service-vibe-menu-surface-mix: 21.41%;
+  --service-vibe-glow-alpha: 0.279;
+  --service-vibe-feedback-bg-alpha: 0.211;
+  --service-vibe-feedback-border-alpha: 0.448;
+}
+
 .premium-service-section.service-rest-v2 {
   --service-zip-500: var(--service-rest-v2-zip-500);
   --service-zip-600: var(--service-rest-v2-zip-600);
@@ -2874,6 +2918,94 @@ select:disabled {
   flex-direction: column;
   gap: 12px;
   margin-top: 12px;
+}
+
+.hr-harpo-status-card {
+  border: 1px solid rgba(var(--service-harpo-zip-1000), 0.22);
+  background:
+    linear-gradient(180deg, rgba(var(--service-harpo-zip-700), 0.08), rgba(255, 255, 255, 0.95) 32%),
+    linear-gradient(135deg, rgba(var(--service-harpo-zip-1000), 0.06), rgba(255, 255, 255, 0));
+}
+
+.hr-harpo-status-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hr-harpo-status-title {
+  margin: 0;
+  color: rgba(var(--service-harpo-zip-1100), 0.98);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.hr-harpo-status-copy {
+  margin: 0;
+  color: rgba(var(--underpar-service-ink-rgb), 0.92);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.hr-harpo-mode-row,
+.hr-harpo-domain-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hr-harpo-mode-pill,
+.hr-harpo-domain-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--service-harpo-zip-1100), 0.24);
+  background: rgba(var(--service-harpo-zip-900), 0.18);
+  color: rgba(var(--service-harpo-zip-1100), 0.96);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hr-harpo-domain-pill {
+  min-height: 26px;
+  color: rgba(var(--underpar-service-ink-rgb), 0.94);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.hr-harpo-domain-pill--count {
+  color: rgba(var(--service-harpo-zip-1100), 0.96);
+}
+
+.hr-harpo-domain-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hr-harpo-domain-label,
+.hr-harpo-status-note {
+  margin: 0;
+  color: rgba(var(--service-harpo-zip-1100), 0.8);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hr-harpo-status-note {
+  color: rgba(var(--underpar-service-muted-rgb), 0.92);
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: 0.01em;
 }
 
 .hr-learning-inspector-card {

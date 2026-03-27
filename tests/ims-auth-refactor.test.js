@@ -2590,11 +2590,12 @@ test("premium and HR render reuse requires intact mounted section shells after e
   assert.match(prepareSwitchSource, /delete els\.premiumServicesContainer\.dataset\.renderSignature/);
   assert.match(hrVisibilitySource, /delete els\.hrServicesContainer\.dataset\.renderSignature/);
   assert.match(renderPremiumSource, /hasRenderablePremiumServiceSections\(services\)/);
-  assert.match(renderHrSource, /hasRenderableHrContextSections\(\)/);
+  assert.match(renderHrSource, /hasRenderableHrContextSections\(programmer,\s*services\)/);
   assert.match(createHrSource, /section\.dataset\.hrSectionKey = String\(sectionKey \|\| ""\)\.trim\(\);/);
 
   const script = [
-    'const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["learning", "health"];',
+    'const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["learning", "health", "harpo"];',
+    "function getHrContextSectionDisplayKeys() { return ['learning', 'health']; }",
     extractFunctionSource(popupSource, "hasRenderablePremiumServiceSections"),
     extractFunctionSource(popupSource, "hasRenderableHrContextSections"),
     "module.exports = { hasRenderablePremiumServiceSections, hasRenderableHrContextSections };",
