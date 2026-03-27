@@ -458,15 +458,15 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     if (entry.usesBodyRedirectUrl === true) {
       assert.equal(
         plan.fieldValues["body.redirectUrl"],
-        plan.docsUrl,
-        `${entry.operationId} body.redirectUrl must use the clicked docs operation url`
+        sampleContext.redirectUrl,
+        `${entry.operationId} body.redirectUrl must prefer the resolved HTTPS runtime redirect when UnderPAR has it`
       );
     }
     if (entry.usesQueryRedirectUrl === true) {
       assert.equal(
         plan.fieldValues["query.redirectUrl"],
-        plan.docsUrl,
-        `${entry.operationId} query.redirectUrl must use the clicked docs operation url`
+        sampleContext.redirectUrl,
+        `${entry.operationId} query.redirectUrl must prefer the resolved HTTPS runtime redirect when UnderPAR has it`
       );
     }
     if (entry.usesAdobeSubjectToken === true) {

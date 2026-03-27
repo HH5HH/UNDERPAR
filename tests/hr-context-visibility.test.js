@@ -687,6 +687,48 @@ function loadRestV2HarvestContextBuilder(seed = {}) {
   return context.module.exports;
 }
 
+function loadRestV2HeaderResolutionHelpers() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "normalizeRestV2ProfileAttributeValue"),
+    extractFunctionSource(source, "dedupeRestV2CandidateStrings"),
+    extractFunctionSource(source, "decodeBase64TextSafe"),
+    extractFunctionSource(source, "decodeURIComponentSafe"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveObjectValue"),
+    extractFunctionSource(source, "getRestV2CaseInsensitiveHeaderValue"),
+    extractFunctionSource(source, "collectRestV2CaseInsensitiveObjectValues"),
+    extractFunctionSource(source, "getRestV2InteractiveDocsHeaderAliasCandidates"),
+    extractFunctionSource(source, "parseRestV2PartnerFrameworkStatusPayload"),
+    extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusSummary"),
+    extractFunctionSource(source, "normalizeRestV2PartnerFrameworkStatusForRequest"),
+    extractFunctionSource(source, "extractRestV2VisitorIdentifierFromCarrierValue"),
+    extractFunctionSource(source, "normalizeRestV2VisitorIdentifierForRequest"),
+    extractFunctionSource(source, "normalizeRestV2TempPassIdentityForRequest"),
+    extractFunctionSource(source, "normalizeRestV2InteractiveDocsHeaderCandidate"),
+    extractFunctionSource(source, "getRestV2InteractiveDocsContextPropertyForHeader"),
+    extractFunctionSource(source, "isRestV2ExactCapturedHeaderName"),
+    extractFunctionSource(source, "resolveRestV2StructuredHeaderValueFromContext"),
+    extractFunctionSource(source, "buildRestV2CapturedAuthHeadersFromContext"),
+    extractFunctionSource(source, "mergeRestV2CapturedAuthHeaders"),
+    extractFunctionSource(source, "resolveRestV2InteractiveDocsHeaderValueFromContext"),
+    "module.exports = { resolveRestV2InteractiveDocsHeaderValueFromContext, mergeRestV2CapturedAuthHeaders };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    atob,
+    btoa,
+    unescape,
+    encodeURIComponent,
+    Headers,
+    TextDecoder,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function loadRestV2LearningResourceHelpers(seed = {}) {
   const filePath = path.join(ROOT, "popup.js");
   const source = fs.readFileSync(filePath, "utf8");
@@ -3393,6 +3435,85 @@ test("REST V2 harvest context preserves partner SSO artifacts for later LEARNING
   assert.equal(context.sessionData.existingParameters.redirectUrl, "https://experience.example.test/callback");
 });
 
+test("REST V2 exact auth headers do not infer from preview text when no structured capture exists", () => {
+  const { resolveRestV2InteractiveDocsHeaderValueFromContext } = loadRestV2HeaderResolutionHelpers();
+  const exactFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+
+  const context = {
+    responsePreview: JSON.stringify({
+      "AP-Partner-Framework-Status": exactFrameworkStatus,
+      "Adobe-Subject-Token": "subject-token-payload",
+      "AD-Service-Token": "service-token-payload",
+    }),
+    requestBodyPreview: `AP-Visitor-Identifier=20265673158980419722735089753036633573&AP-Partner-Framework-Status=${exactFrameworkStatus}`,
+  };
+
+  assert.equal(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Partner-Framework-Status"), "");
+  assert.equal(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "Adobe-Subject-Token"), "");
+  assert.equal(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AD-Service-Token"), "");
+  assert.equal(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Visitor-Identifier"), "");
+});
+
+test("REST V2 exact auth headers persist from structured request and response header bags", () => {
+  const { resolveRestV2InteractiveDocsHeaderValueFromContext, mergeRestV2CapturedAuthHeaders } =
+    loadRestV2HeaderResolutionHelpers();
+  const exactFrameworkStatus = Buffer.from(
+    JSON.stringify({
+      frameworkPermissionInfo: {
+        accessStatus: "granted",
+      },
+      frameworkProviderInfo: {
+        id: "Comcast_SSO_Apple",
+        expirationDate: String(Date.now() + 60 * 60 * 1000),
+      },
+    }),
+    "utf8"
+  ).toString("base64");
+
+  const capturedAuthHeaders = mergeRestV2CapturedAuthHeaders(
+    {
+      sessionRequestHeaders: {
+        "Adobe-Subject-Token": "subject-token-payload",
+        "AP-Visitor-Identifier": "20265673158980419722735089753036633573",
+      },
+    },
+    {
+      sessionResponseHeaders: {
+        "AP-Partner-Framework-Status": exactFrameworkStatus,
+      },
+      responseHeaders: {
+        "AD-Service-Token": "service-token-payload",
+      },
+    }
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(capturedAuthHeaders)), {
+    "Adobe-Subject-Token": "subject-token-payload",
+    "AP-Visitor-Identifier": "20265673158980419722735089753036633573",
+    "AP-Partner-Framework-Status": exactFrameworkStatus,
+    "AD-Service-Token": "service-token-payload",
+  });
+  assert.equal(
+    resolveRestV2InteractiveDocsHeaderValueFromContext({ capturedAuthHeaders }, "AP-Partner-Framework-Status"),
+    exactFrameworkStatus
+  );
+  assert.equal(
+    resolveRestV2InteractiveDocsHeaderValueFromContext({ capturedAuthHeaders }, "Adobe-Subject-Token"),
+    "subject-token-payload"
+  );
+});
+
 test("REST V2 verified partner-flow trust survives seed and interactive context rebuilds", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
 
@@ -3697,8 +3818,12 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/getProfileForMvpdUsingGET",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
+      usesTempPassIdentity: true,
       usesPartnerFrameworkStatus: true,
     },
     baseContext,
@@ -3707,11 +3832,11 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(profilesByMvpdPlan.fieldValues["path.mvpd"], "Comcast_SSO");
   assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
   assert.equal(profilesByMvpdPlan.fieldValues["header.X-Device-Info"], "device-info-123");
+  assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Visitor-Identifier"], visitorIdentifier);
+  assert.equal(profilesByMvpdPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
+  assert.equal(profilesByMvpdPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
+  assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Temppass-Identity"], normalizedTempPassIdentity);
   assert.equal(profilesByMvpdPlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
-  assert.equal(Object.prototype.hasOwnProperty.call(profilesByMvpdPlan.fieldValues, "header.AP-Visitor-Identifier"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(profilesByMvpdPlan.fieldValues, "header.Adobe-Subject-Token"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(profilesByMvpdPlan.fieldValues, "header.AD-Service-Token"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(profilesByMvpdPlan.fieldValues, "header.AP-Temppass-Identity"), false);
 
   const authorizePlan = buildRestV2InteractiveDocsHydrationPlan(
     {
@@ -3720,8 +3845,13 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/retrieveAuthorizeDecisionsForMvpdUsingPOST",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
+      usesTempPassIdentity: true,
+      usesPartnerFrameworkStatus: true,
       usesBodyResources: true,
       requireBodyResources: true,
       contentType: "application/json",
@@ -3733,11 +3863,11 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(authorizePlan.fieldValues["header.Content-Type"], "application/json");
   assert.equal(authorizePlan.fieldValues["header.AP-Device-Identifier"], "device-123");
   assert.equal(authorizePlan.fieldValues["header.X-Device-Info"], "device-info-123");
-  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.AP-Visitor-Identifier"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.Adobe-Subject-Token"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.AD-Service-Token"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(authorizePlan.fieldValues, "header.AP-Temppass-Identity"), false);
+  assert.equal(authorizePlan.fieldValues["header.AP-Visitor-Identifier"], visitorIdentifier);
+  assert.equal(authorizePlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
+  assert.equal(authorizePlan.fieldValues["header.AD-Service-Token"], adServiceToken);
+  assert.equal(authorizePlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
+  assert.equal(authorizePlan.fieldValues["header.AP-Temppass-Identity"], normalizedTempPassIdentity);
   assert.deepEqual(toArray(authorizePlan.fieldValues["body.resources"]), ["urn:resource:turner"]);
 
   const decisionsPlan = buildRestV2InteractiveDocsHydrationPlan(
@@ -3747,8 +3877,13 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
       operationAnchor: "operation/retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
       requiresAccessToken: true,
       usesDeviceHeaders: true,
+      usesVisitorIdentifier: true,
       usesMvpdPath: true,
       requireMvpdPath: true,
+      usesAdobeSubjectToken: true,
+      usesAdServiceToken: true,
+      usesTempPassIdentity: true,
+      usesPartnerFrameworkStatus: true,
       usesBodyResources: true,
       requireBodyResources: true,
       contentType: "application/json",
@@ -3760,11 +3895,11 @@ test("REST V2 learning hydration plans honor the selected customer-doc operation
   assert.equal(decisionsPlan.fieldValues["header.Content-Type"], "application/json");
   assert.equal(decisionsPlan.fieldValues["header.AP-Device-Identifier"], "device-123");
   assert.equal(decisionsPlan.fieldValues["header.X-Device-Info"], "device-info-123");
-  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.AP-Visitor-Identifier"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.Adobe-Subject-Token"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.AD-Service-Token"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.AP-Partner-Framework-Status"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(decisionsPlan.fieldValues, "header.AP-Temppass-Identity"), false);
+  assert.equal(decisionsPlan.fieldValues["header.AP-Visitor-Identifier"], visitorIdentifier);
+  assert.equal(decisionsPlan.fieldValues["header.Adobe-Subject-Token"], adobeSubjectToken);
+  assert.equal(decisionsPlan.fieldValues["header.AD-Service-Token"], adServiceToken);
+  assert.equal(decisionsPlan.fieldValues["header.AP-Partner-Framework-Status"], validPartnerFrameworkStatus);
+  assert.equal(decisionsPlan.fieldValues["header.AP-Temppass-Identity"], normalizedTempPassIdentity);
   assert.deepEqual(toArray(decisionsPlan.fieldValues["body.resources"]), ["urn:resource:turner"]);
   assert.deepEqual(toArray(decisionsPlan.missingRequiredFields), []);
 

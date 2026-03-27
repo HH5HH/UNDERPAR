@@ -423,6 +423,10 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     usesDeviceHeaders: true,
     usesMvpdPath: true,
     requireMvpdPath: true,
+    usesAdobeSubjectToken: true,
+    usesAdServiceToken: true,
+    usesTempPassIdentity: true,
+    usesVisitorIdentifier: true,
     usesPartnerFrameworkStatus: true,
   },
   {
@@ -437,8 +441,13 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     operationId: "retrieveAuthorizeDecisionsForMvpdUsingPOST",
     requiresAccessToken: true,
     usesDeviceHeaders: true,
+    usesVisitorIdentifier: true,
     usesMvpdPath: true,
     requireMvpdPath: true,
+    usesAdobeSubjectToken: true,
+    usesAdServiceToken: true,
+    usesTempPassIdentity: true,
+    usesPartnerFrameworkStatus: true,
     usesBodyResources: true,
     requireBodyResources: true,
     contentType: "application/json",
@@ -455,8 +464,13 @@ const REST_V2_INTERACTIVE_DOC_ENTRIES = Object.freeze([
     operationId: "retrievePreAuthorizeDecisionsForMvpdUsingPOST_1",
     requiresAccessToken: true,
     usesDeviceHeaders: true,
+    usesVisitorIdentifier: true,
     usesMvpdPath: true,
     requireMvpdPath: true,
+    usesAdobeSubjectToken: true,
+    usesAdServiceToken: true,
+    usesTempPassIdentity: true,
+    usesPartnerFrameworkStatus: true,
     usesBodyResources: true,
     requireBodyResources: true,
     contentType: "application/json",
@@ -14195,6 +14209,20 @@ function buildUnderparRestV2DebugSnapshot(programmer = null) {
     resolvedMvpdMeta?.partnerProviderIdCandidates && typeof resolvedMvpdMeta.partnerProviderIdCandidates === "object"
       ? cloneJsonLikeValue(resolvedMvpdMeta.partnerProviderIdCandidates, null)
       : null;
+  const capturedAuthHeaders =
+    baseContext?.capturedAuthHeaders && typeof baseContext.capturedAuthHeaders === "object"
+      ? cloneJsonLikeValue(baseContext.capturedAuthHeaders, null)
+      : null;
+  const capturedAuthHeaderNames = capturedAuthHeaders ? Object.keys(capturedAuthHeaders).filter(Boolean).sort() : [];
+  const sessionRequestHeaders =
+    baseContext?.sessionRequestHeaders && typeof baseContext.sessionRequestHeaders === "object"
+      ? cloneJsonLikeValue(baseContext.sessionRequestHeaders, null)
+      : null;
+  const sessionRequestHeaderNames = sessionRequestHeaders ? Object.keys(sessionRequestHeaders).filter(Boolean).sort() : [];
+  const sessionResponseHeaderNames =
+    baseContext?.sessionResponseHeaders && typeof baseContext.sessionResponseHeaders === "object"
+      ? Object.keys(baseContext.sessionResponseHeaders).filter(Boolean).sort()
+      : [];
   const preferredFrameworkSource =
     preferredFrameworkStatus && preferredFrameworkStatus === learningFrameworkStatus
       ? "learning_partner_framework_status"
@@ -14230,6 +14258,12 @@ function buildUnderparRestV2DebugSnapshot(programmer = null) {
     selected_mvpd_partner_platform_mappings: partnerPlatformMappings || null,
     selected_mvpd_partner_platform_setting_ids: partnerPlatformSettingIds || null,
     selected_mvpd_partner_provider_id_candidates: partnerProviderIdCandidates || null,
+    session_request_header_count: sessionRequestHeaderNames.length,
+    session_request_header_names: sessionRequestHeaderNames.length > 0 ? sessionRequestHeaderNames : null,
+    session_response_header_count: sessionResponseHeaderNames.length,
+    session_response_header_names: sessionResponseHeaderNames.length > 0 ? sessionResponseHeaderNames : null,
+    captured_auth_header_count: capturedAuthHeaderNames.length,
+    captured_auth_header_names: capturedAuthHeaderNames.length > 0 ? capturedAuthHeaderNames : null,
     adobe_subject_token_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "Adobe-Subject-Token") ? "yes" : "no",
     ad_service_token_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AD-Service-Token") ? "yes" : "no",
     temp_pass_identity_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AP-Temppass-Identity") ? "yes" : "no",
@@ -18001,6 +18035,7 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
       ?.sessionResponseHeaders || null;
   const mergedSessionData =
     latestSourceList.find((source) => source?.sessionData && typeof source.sessionData === "object")?.sessionData || null;
+  const mergedCapturedAuthHeaders = mergeRestV2CapturedAuthHeaders(...sourceList);
   return {
     ...harvest,
     flowId: firstNonEmptyString(sourceList.map((source) => String(source?.flowId || "").trim())),
@@ -18060,6 +18095,10 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     sessionData:
       mergedSessionData && typeof mergedSessionData === "object"
         ? cloneJsonLikeValue(mergedSessionData, null)
+        : null,
+    capturedAuthHeaders:
+      mergedCapturedAuthHeaders && typeof mergedCapturedAuthHeaders === "object"
+        ? cloneJsonLikeValue(mergedCapturedAuthHeaders, null)
         : null,
     preauthzChecks: mergedChecks,
   };
@@ -18659,6 +18698,8 @@ function buildRestV2ContextFromHarvest(harvest = null) {
         }
       : null);
   const appInfo = resolveRestV2AppInfoForHarvest(harvest);
+  const capturedAuthHeaders =
+    typeof mergeRestV2CapturedAuthHeaders === "function" ? mergeRestV2CapturedAuthHeaders(harvest) : null;
   if (!programmerId || !requestorId || !serviceProviderId || !mvpd || !appInfo?.guid) {
     return null;
   }
@@ -18698,10 +18739,16 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     flowId: String(harvest.flowId || "").trim(),
     sessionData:
       harvest?.sessionData && typeof harvest.sessionData === "object" ? cloneJsonLikeValue(harvest.sessionData, null) : null,
+    sessionRequestHeaders:
+      harvest?.sessionRequestHeaders && typeof harvest.sessionRequestHeaders === "object"
+        ? cloneJsonLikeValue(harvest.sessionRequestHeaders, null)
+        : null,
     sessionResponseHeaders:
       harvest?.sessionResponseHeaders && typeof harvest.sessionResponseHeaders === "object"
         ? cloneJsonLikeValue(harvest.sessionResponseHeaders, null)
         : null,
+    capturedAuthHeaders:
+      capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? cloneJsonLikeValue(capturedAuthHeaders, null) : null,
     appInfo,
     restV2AppCandidates: [appInfo],
   };
@@ -27078,6 +27125,13 @@ function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntr
     ).trim();
   }
   if (
+    !context?.sessionRequestHeaders &&
+    resolvedEntry?.sessionRequestHeaders &&
+    typeof resolvedEntry.sessionRequestHeaders === "object"
+  ) {
+    context.sessionRequestHeaders = { ...resolvedEntry.sessionRequestHeaders };
+  }
+  if (
     !context?.sessionResponseHeaders &&
     resolvedEntry?.sessionResponseHeaders &&
     typeof resolvedEntry.sessionResponseHeaders === "object"
@@ -27104,6 +27158,9 @@ function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntr
   }
   if (!String(context?.visitorIdentifier || "").trim() && visitorIdentifier) {
     context.visitorIdentifier = visitorIdentifier;
+  }
+  if (typeof mergeRestV2CapturedAuthHeaders === "function") {
+    context.capturedAuthHeaders = mergeRestV2CapturedAuthHeaders(context, resolvedEntry);
   }
   if (sessionUrl) {
     context.sessionUrl = sessionUrl;
@@ -27233,6 +27290,10 @@ function setRestV2PreparedLoginEntry(context, payload) {
     loginUrl: String(payload?.loginUrl || "").trim(),
     appInfo: payload?.appInfo || context?.appInfo || null,
     sessionData: payload?.sessionData && typeof payload.sessionData === "object" ? cloneJsonLikeValue(payload.sessionData, null) : null,
+    sessionRequestHeaders:
+      payload?.sessionRequestHeaders && typeof payload.sessionRequestHeaders === "object"
+        ? cloneJsonLikeValue(payload.sessionRequestHeaders, null)
+        : null,
     sessionResponseHeaders:
       payload?.sessionResponseHeaders && typeof payload.sessionResponseHeaders === "object"
         ? cloneJsonLikeValue(payload.sessionResponseHeaders, null)
@@ -27249,6 +27310,16 @@ function setRestV2PreparedLoginEntry(context, payload) {
     ),
     payload: payload?.payload && typeof payload.payload === "object" ? payload.payload : null,
   };
+  const capturedAuthHeaders =
+    typeof mergeRestV2CapturedAuthHeaders === "function"
+      ? mergeRestV2CapturedAuthHeaders(
+          payload?.capturedAuthHeaders && typeof payload.capturedAuthHeaders === "object" ? payload.capturedAuthHeaders : null,
+          entry
+        )
+      : null;
+  if (capturedAuthHeaders && typeof capturedAuthHeaders === "object") {
+    entry.capturedAuthHeaders = cloneJsonLikeValue(capturedAuthHeaders, null);
+  }
   if (!entry.loginUrl) {
     return null;
   }
@@ -28287,6 +28358,22 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
     ]) || ""
   ).trim();
   const selectedAppInfo = appInfoOverride || context.appInfo || null;
+  const capturedAuthHeaders =
+    typeof mergeRestV2CapturedAuthHeaders === "function"
+      ? mergeRestV2CapturedAuthHeaders(
+        context,
+        options?.capturedAuthHeaders && typeof options.capturedAuthHeaders === "object" ? options.capturedAuthHeaders : null,
+        options?.sessionData && typeof options.sessionData === "object" ? { sessionData: options.sessionData } : null,
+        options?.sessionRequestHeaders && typeof options.sessionRequestHeaders === "object"
+          ? { sessionRequestHeaders: options.sessionRequestHeaders }
+          : null,
+        options?.sessionResponseHeaders && typeof options.sessionResponseHeaders === "object"
+          ? { sessionResponseHeaders: options.sessionResponseHeaders }
+          : null,
+        options?.requestHeaders && typeof options.requestHeaders === "object" ? { requestHeaders: options.requestHeaders } : null,
+        options?.responseHeaders && typeof options.responseHeaders === "object" ? { responseHeaders: options.responseHeaders } : null
+      )
+      : null;
   const compactAppInfo = selectedAppInfo
     ? {
         guid: String(selectedAppInfo.guid || ""),
@@ -28358,12 +28445,20 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
         : context?.sessionData && typeof context.sessionData === "object"
           ? cloneJsonLikeValue(context.sessionData, null)
           : null,
+    sessionRequestHeaders:
+      options?.sessionRequestHeaders && typeof options.sessionRequestHeaders === "object"
+        ? cloneJsonLikeValue(options.sessionRequestHeaders, null)
+        : context?.sessionRequestHeaders && typeof context.sessionRequestHeaders === "object"
+          ? cloneJsonLikeValue(context.sessionRequestHeaders, null)
+          : null,
     sessionResponseHeaders:
       options?.sessionResponseHeaders && typeof options.sessionResponseHeaders === "object"
         ? cloneJsonLikeValue(options.sessionResponseHeaders, null)
         : context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
           ? cloneJsonLikeValue(context.sessionResponseHeaders, null)
         : null,
+    capturedAuthHeaders:
+      capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? cloneJsonLikeValue(capturedAuthHeaders, null) : null,
     sessionUrl,
     loginUrl,
     startedAt: Date.now(),
@@ -28545,9 +28640,17 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
         preparedEntry?.sessionData && typeof preparedEntry.sessionData === "object"
           ? cloneJsonLikeValue(preparedEntry.sessionData, null)
           : null,
+      sessionRequestHeaders:
+        preparedEntry?.sessionRequestHeaders && typeof preparedEntry.sessionRequestHeaders === "object"
+          ? cloneJsonLikeValue(preparedEntry.sessionRequestHeaders, null)
+          : null,
       sessionResponseHeaders:
         preparedEntry?.sessionResponseHeaders && typeof preparedEntry.sessionResponseHeaders === "object"
           ? cloneJsonLikeValue(preparedEntry.sessionResponseHeaders, null)
+          : null,
+      capturedAuthHeaders:
+        preparedEntry?.capturedAuthHeaders && typeof preparedEntry.capturedAuthHeaders === "object"
+          ? cloneJsonLikeValue(preparedEntry.capturedAuthHeaders, null)
           : null,
       sessionUrl: normalizeAdobeNavigationUrl(firstNonEmptyString([preparedEntry?.sessionData?.url])),
       loginUrl: preparedEntry?.loginUrl,
@@ -29775,6 +29878,7 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     String(context?.learningPartner || "").trim(),
     resolveRestV2LearningPartnerNameFromContext(context),
   ]);
+  const capturedAuthHeaders = mergeRestV2CapturedAuthHeaders(context);
 
   return {
     harvestedAt,
@@ -29813,6 +29917,8 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
       context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
         ? cloneJsonLikeValue(context.sessionResponseHeaders, null)
         : null,
+    capturedAuthHeaders:
+      capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? cloneJsonLikeValue(capturedAuthHeaders, null) : null,
     profileUrl: String(profileCheckResult.url || "").trim(),
     profileCheckOutcome,
     profileCheck: {
@@ -31810,6 +31916,10 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
         endpointUrl,
       }
     );
+    context.capturedAuthHeaders = mergeRestV2CapturedAuthHeaders(
+      context?.capturedAuthHeaders,
+      { requestHeaders, responseHeaders: toDebugHeadersObject(response.headers || new Headers()) }
+    );
     const responseText = await response.text().catch(() => "");
     const parsed = parseJsonText(responseText, {});
     const profileCount = Number(Object.keys(parsed?.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {}).length || 0);
@@ -32106,6 +32216,10 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
 
     const responseText = await response.text().catch(() => "");
     const responseHeaders = toDebugHeadersObject(response.headers || new Headers());
+    context.capturedAuthHeaders = mergeRestV2CapturedAuthHeaders(
+      context?.capturedAuthHeaders,
+      { requestHeaders, responseHeaders }
+    );
     const responsePartnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromSessionData(null, responseHeaders);
     if (
       isRestV2PartnerFrameworkStatusUsable(responsePartnerFrameworkStatus) &&
@@ -59088,6 +59202,8 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
           ...(mvpdPlatformMappingId ? { platformMappingId: mvpdPlatformMappingId } : {}),
         }
       : null);
+  const capturedAuthHeaders =
+    typeof mergeRestV2CapturedAuthHeaders === "function" ? mergeRestV2CapturedAuthHeaders(recordingContext) : null;
   return {
     ok: true,
     programmerId,
@@ -59121,10 +59237,16 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
       recordingContext?.sessionData && typeof recordingContext.sessionData === "object"
         ? cloneJsonLikeValue(recordingContext.sessionData, null)
         : null,
+    sessionRequestHeaders:
+      recordingContext?.sessionRequestHeaders && typeof recordingContext.sessionRequestHeaders === "object"
+        ? cloneJsonLikeValue(recordingContext.sessionRequestHeaders, null)
+        : null,
     sessionResponseHeaders:
       recordingContext?.sessionResponseHeaders && typeof recordingContext.sessionResponseHeaders === "object"
         ? cloneJsonLikeValue(recordingContext.sessionResponseHeaders, null)
         : null,
+    capturedAuthHeaders:
+      capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? cloneJsonLikeValue(capturedAuthHeaders, null) : null,
     sessionUrl: normalizeAdobeNavigationUrl(String(recordingContext.sessionUrl || "").trim()),
     loginUrl: normalizeAdobeNavigationUrl(String(recordingContext.loginUrl || "").trim()),
     redirectUrl: normalizeAdobeNavigationUrl(String(recordingContext.redirectUrl || "").trim()),
@@ -59173,6 +59295,8 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     ]) || ""
   ).trim();
   const mvpdPartnerProviderId = String(firstNonEmptyString([context?.mvpdPartnerProviderId]) || "").trim();
+  const capturedAuthHeaders =
+    typeof mergeRestV2CapturedAuthHeaders === "function" ? mergeRestV2CapturedAuthHeaders(context) : null;
   return {
     programmerId,
     programmerName: String(context.programmerName || "").trim(),
@@ -59215,10 +59339,16 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     flowId: String(resolveRestV2DebugFlowIdForHarvest(null, context.flowId || "") || "").trim(),
     sessionData:
       context?.sessionData && typeof context.sessionData === "object" ? cloneJsonLikeValue(context.sessionData, null) : null,
+    sessionRequestHeaders:
+      context?.sessionRequestHeaders && typeof context.sessionRequestHeaders === "object"
+        ? cloneJsonLikeValue(context.sessionRequestHeaders, null)
+        : null,
     sessionResponseHeaders:
       context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
         ? cloneJsonLikeValue(context.sessionResponseHeaders, null)
         : null,
+    capturedAuthHeaders:
+      capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? cloneJsonLikeValue(capturedAuthHeaders, null) : null,
     harvestedAt: Date.now(),
     profileCount: 0,
     profileCheckOutcome: "seed",
@@ -67644,6 +67774,16 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
       ? cloneJsonLikeValue(harvestContext.sessionData, null)
       : null) ||
     (harvest?.sessionData && typeof harvest.sessionData === "object" ? cloneJsonLikeValue(harvest.sessionData, null) : null);
+  const sessionRequestHeaders =
+    (activeRecordingContext?.sessionRequestHeaders && typeof activeRecordingContext.sessionRequestHeaders === "object"
+      ? cloneJsonLikeValue(activeRecordingContext.sessionRequestHeaders, null)
+      : null) ||
+    (harvestContext?.sessionRequestHeaders && typeof harvestContext.sessionRequestHeaders === "object"
+      ? cloneJsonLikeValue(harvestContext.sessionRequestHeaders, null)
+      : null) ||
+    (harvest?.sessionRequestHeaders && typeof harvest.sessionRequestHeaders === "object"
+      ? cloneJsonLikeValue(harvest.sessionRequestHeaders, null)
+      : null);
   const sessionResponseHeaders =
     (activeRecordingContext?.sessionResponseHeaders && typeof activeRecordingContext.sessionResponseHeaders === "object"
       ? cloneJsonLikeValue(activeRecordingContext.sessionResponseHeaders, null)
@@ -67654,6 +67794,10 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     (harvest?.sessionResponseHeaders && typeof harvest.sessionResponseHeaders === "object"
       ? cloneJsonLikeValue(harvest.sessionResponseHeaders, null)
       : null);
+  const capturedAuthHeaders =
+    typeof mergeRestV2CapturedAuthHeaders === "function"
+      ? mergeRestV2CapturedAuthHeaders(activeRecordingContext, harvestContext, harvest)
+      : null;
   const applicationRedirectUrl = firstNonEmptyString([
     extractRegisteredApplicationHttpsRedirectUri(preferredApp),
     extractRegisteredApplicationHttpsRedirectUri(preferredApp?.appData || null),
@@ -67783,7 +67927,9 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     redirectUrl: String(redirectUrl || "").trim(),
     domainName: String(domainName || "").trim(),
     sessionData,
+    sessionRequestHeaders,
     sessionResponseHeaders,
+    capturedAuthHeaders: capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? cloneJsonLikeValue(capturedAuthHeaders, null) : null,
     partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
     partnerFrameworkStatusSource: String(partnerFrameworkStatusSource || "").trim(),
     allowPartnerFrameworkSelectedMvpdFallback: Boolean(
@@ -67859,6 +68005,8 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
     resolvedEntry.usesPartnerFrameworkStatus === true && !preferredPartnerFrameworkStatus;
   const missingSamlResponse = resolvedEntry.usesBodySamlResponse === true && !String(preparedContext.samlResponse || "").trim();
   if ((!needsPartnerFlowHydration || (!missingPartner && !missingPartnerFrameworkStatus && !missingSamlResponse)) && missingOptionalHeaders.length === 0) {
+    preparedContext.capturedAuthHeaders =
+      typeof mergeRestV2CapturedAuthHeaders === "function" ? mergeRestV2CapturedAuthHeaders(preparedContext) : null;
     return preparedContext;
   }
   const flowId = firstNonEmptyString([
@@ -67896,6 +68044,8 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
   } catch {
     // Leave the remaining fields empty and allow the docs form to remain partially hydrated.
   }
+  preparedContext.capturedAuthHeaders =
+    typeof mergeRestV2CapturedAuthHeaders === "function" ? mergeRestV2CapturedAuthHeaders(preparedContext) : null;
   return preparedContext;
 }
 
@@ -92898,7 +93048,19 @@ function getRestV2InteractiveDocsContextPropertyForHeader(headerName = "") {
   return "";
 }
 
-function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = "") {
+function isRestV2ExactCapturedHeaderName(headerName = "") {
+  const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
+  return (
+    normalizedHeaderName === "adobe-subject-token" ||
+    normalizedHeaderName === "ad-service-token" ||
+    normalizedHeaderName === "ap-temppass-identity" ||
+    normalizedHeaderName === "ap-temp-pass-identity" ||
+    normalizedHeaderName === "ap-visitor-identifier" ||
+    normalizedHeaderName === "ap-partner-framework-status"
+  );
+}
+
+function resolveRestV2StructuredHeaderValueFromContext(context = null, headerName = "") {
   if (!context || typeof context !== "object") {
     return "";
   }
@@ -92906,7 +93068,30 @@ function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, head
   if (!normalizedHeaderName) {
     return "";
   }
+  const resolvePropertyName = (targetHeaderName = "") => {
+    if (typeof getRestV2InteractiveDocsContextPropertyForHeader === "function") {
+      return getRestV2InteractiveDocsContextPropertyForHeader(targetHeaderName);
+    }
+    const normalizedTargetHeaderName = String(targetHeaderName || "").trim().toLowerCase();
+    if (normalizedTargetHeaderName === "adobe-subject-token") {
+      return "adobeSubjectToken";
+    }
+    if (normalizedTargetHeaderName === "ad-service-token") {
+      return "adServiceToken";
+    }
+    if (normalizedTargetHeaderName === "ap-temppass-identity" || normalizedTargetHeaderName === "ap-temp-pass-identity") {
+      return "tempPassIdentity";
+    }
+    if (normalizedTargetHeaderName === "ap-partner-framework-status") {
+      return "partnerFrameworkStatus";
+    }
+    if (normalizedTargetHeaderName === "ap-visitor-identifier") {
+      return "visitorIdentifier";
+    }
+    return "";
+  };
   const aliases = getRestV2InteractiveDocsHeaderAliasCandidates(normalizedHeaderName);
+  const propertyName = resolvePropertyName(normalizedHeaderName);
   const sourceList = [
     context,
     context?.context || null,
@@ -92926,16 +93111,26 @@ function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, head
     context?.response?.content || null,
   ];
   const headerBagList = [
+    context?.capturedAuthHeaders || null,
     context?.headers || null,
+    context?.sessionRequestHeaders || null,
     context?.sessionResponseHeaders || null,
     context?.responseHeaders || null,
     context?.requestHeaders || null,
+    context?.context?.capturedAuthHeaders || null,
     context?.context?.headers || null,
+    context?.context?.sessionRequestHeaders || null,
     context?.context?.sessionResponseHeaders || null,
     context?.context?.responseHeaders || null,
     context?.context?.requestHeaders || null,
+    context?.activeRecordingContext?.capturedAuthHeaders || null,
+    context?.activeRecordingContext?.sessionRequestHeaders || null,
     context?.activeRecordingContext?.sessionResponseHeaders || null,
+    context?.harvestContext?.capturedAuthHeaders || null,
+    context?.harvestContext?.sessionRequestHeaders || null,
     context?.harvestContext?.sessionResponseHeaders || null,
+    context?.harvest?.capturedAuthHeaders || null,
+    context?.harvest?.sessionRequestHeaders || null,
     context?.harvest?.sessionResponseHeaders || null,
     context?.request?.headers || null,
     context?.response?.headers || null,
@@ -92945,6 +93140,9 @@ function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, head
     if (!source || typeof source !== "object") {
       return;
     }
+    if (propertyName && String(source?.[propertyName] || "").trim()) {
+      candidates.push(String(source[propertyName] || "").trim());
+    }
     candidates.push(...collectRestV2CaseInsensitiveObjectValues(source, aliases, { maxDepth: 4 }));
   });
   headerBagList.forEach((headersLike) => {
@@ -92953,6 +93151,180 @@ function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, head
       candidates.push(headerValue);
     }
   });
+  const normalizedCandidates = dedupeRestV2CandidateStrings(candidates);
+  for (const candidate of normalizedCandidates) {
+    const normalized = normalizeRestV2InteractiveDocsHeaderCandidate(normalizedHeaderName, candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
+function buildRestV2CapturedAuthHeadersFromContext(context = null) {
+  const headerNames = [
+    "Adobe-Subject-Token",
+    "AD-Service-Token",
+    "AP-Temppass-Identity",
+    "AP-Visitor-Identifier",
+    "AP-Partner-Framework-Status",
+  ];
+  const captured = {};
+  headerNames.forEach((headerName) => {
+    const value = resolveRestV2StructuredHeaderValueFromContext(context, headerName);
+    if (value) {
+      captured[headerName] = value;
+    }
+  });
+  return Object.keys(captured).length > 0 ? captured : null;
+}
+
+function mergeRestV2CapturedAuthHeaders(...sources) {
+  const merged = {};
+  sources.forEach((source) => {
+    if (!source || typeof source !== "object") {
+      return;
+    }
+    const captured =
+      source?.capturedAuthHeaders && typeof source.capturedAuthHeaders === "object" ? source.capturedAuthHeaders : source;
+    const nextCaptured = buildRestV2CapturedAuthHeadersFromContext(captured);
+    if (!nextCaptured || typeof nextCaptured !== "object") {
+      return;
+    }
+    Object.entries(nextCaptured).forEach(([headerName, value]) => {
+      const normalizedValue = String(value || "").trim();
+      if (normalizedValue) {
+        merged[headerName] = normalizedValue;
+      }
+    });
+  });
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
+function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, headerName = "") {
+  if (!context || typeof context !== "object") {
+    return "";
+  }
+  const normalizedHeaderName = String(headerName || "").trim();
+  if (!normalizedHeaderName) {
+    return "";
+  }
+  const isExactCapturedHeader =
+    typeof isRestV2ExactCapturedHeaderName === "function"
+      ? isRestV2ExactCapturedHeaderName(normalizedHeaderName)
+      : /^(?:adobe-subject-token|ad-service-token|ap-temppass-identity|ap-temp-pass-identity|ap-visitor-identifier|ap-partner-framework-status)$/i.test(
+          normalizedHeaderName
+        );
+  const structuredResolver = (sourceContext = null, targetHeaderName = "") => {
+    if (typeof resolveRestV2StructuredHeaderValueFromContext === "function") {
+      return resolveRestV2StructuredHeaderValueFromContext(sourceContext, targetHeaderName);
+    }
+    if (!sourceContext || typeof sourceContext !== "object") {
+      return "";
+    }
+    const resolvePropertyName = (resolvedHeaderName = "") => {
+      if (typeof getRestV2InteractiveDocsContextPropertyForHeader === "function") {
+        return getRestV2InteractiveDocsContextPropertyForHeader(resolvedHeaderName);
+      }
+      const normalizedResolvedHeaderName = String(resolvedHeaderName || "").trim().toLowerCase();
+      if (normalizedResolvedHeaderName === "adobe-subject-token") {
+        return "adobeSubjectToken";
+      }
+      if (normalizedResolvedHeaderName === "ad-service-token") {
+        return "adServiceToken";
+      }
+      if (
+        normalizedResolvedHeaderName === "ap-temppass-identity" ||
+        normalizedResolvedHeaderName === "ap-temp-pass-identity"
+      ) {
+        return "tempPassIdentity";
+      }
+      if (normalizedResolvedHeaderName === "ap-partner-framework-status") {
+        return "partnerFrameworkStatus";
+      }
+      if (normalizedResolvedHeaderName === "ap-visitor-identifier") {
+        return "visitorIdentifier";
+      }
+      return "";
+    };
+    const aliases = getRestV2InteractiveDocsHeaderAliasCandidates(targetHeaderName);
+    const propertyName = resolvePropertyName(targetHeaderName);
+    const sourceList = [
+      sourceContext,
+      sourceContext?.context || null,
+      sourceContext?.sessionData || null,
+      sourceContext?.context?.sessionData || null,
+      sourceContext?.activeRecordingContext || null,
+      sourceContext?.activeRecordingContext?.sessionData || null,
+      sourceContext?.harvestContext || null,
+      sourceContext?.harvestContext?.sessionData || null,
+      sourceContext?.harvest || null,
+      sourceContext?.harvest?.sessionData || null,
+      sourceContext?.requestBody || null,
+      sourceContext?.requestBody?.formData || null,
+      sourceContext?.request || null,
+      sourceContext?.request?.postData || null,
+      sourceContext?.response || null,
+      sourceContext?.response?.content || null,
+    ];
+    const headerBagList = [
+      sourceContext?.capturedAuthHeaders || null,
+      sourceContext?.headers || null,
+      sourceContext?.sessionRequestHeaders || null,
+      sourceContext?.sessionResponseHeaders || null,
+      sourceContext?.responseHeaders || null,
+      sourceContext?.requestHeaders || null,
+      sourceContext?.context?.capturedAuthHeaders || null,
+      sourceContext?.context?.headers || null,
+      sourceContext?.context?.sessionRequestHeaders || null,
+      sourceContext?.context?.sessionResponseHeaders || null,
+      sourceContext?.context?.responseHeaders || null,
+      sourceContext?.context?.requestHeaders || null,
+      sourceContext?.activeRecordingContext?.capturedAuthHeaders || null,
+      sourceContext?.activeRecordingContext?.sessionRequestHeaders || null,
+      sourceContext?.activeRecordingContext?.sessionResponseHeaders || null,
+      sourceContext?.harvestContext?.capturedAuthHeaders || null,
+      sourceContext?.harvestContext?.sessionRequestHeaders || null,
+      sourceContext?.harvestContext?.sessionResponseHeaders || null,
+      sourceContext?.harvest?.capturedAuthHeaders || null,
+      sourceContext?.harvest?.sessionRequestHeaders || null,
+      sourceContext?.harvest?.sessionResponseHeaders || null,
+      sourceContext?.request?.headers || null,
+      sourceContext?.response?.headers || null,
+    ];
+    const candidates = [];
+    sourceList.forEach((source) => {
+      if (!source || typeof source !== "object") {
+        return;
+      }
+      if (propertyName && String(source?.[propertyName] || "").trim()) {
+        candidates.push(String(source[propertyName] || "").trim());
+      }
+      candidates.push(...collectRestV2CaseInsensitiveObjectValues(source, aliases, { maxDepth: 4 }));
+    });
+    headerBagList.forEach((headersLike) => {
+      const headerValue = getRestV2CaseInsensitiveHeaderValue(headersLike, aliases);
+      if (headerValue) {
+        candidates.push(headerValue);
+      }
+    });
+    const normalizedCandidates = dedupeRestV2CandidateStrings(candidates);
+    for (const candidate of normalizedCandidates) {
+      const normalizedCandidate = normalizeRestV2InteractiveDocsHeaderCandidate(targetHeaderName, candidate);
+      if (normalizedCandidate) {
+        return normalizedCandidate;
+      }
+    }
+    return "";
+  };
+  const structuredValue = structuredResolver(context, normalizedHeaderName);
+  if (structuredValue) {
+    return structuredValue;
+  }
+  if (isExactCapturedHeader) {
+    return "";
+  }
+  const candidates = [];
   [
     context?.requestBodyPreview,
     context?.postDataPreview,
@@ -93048,6 +93420,12 @@ function extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow = null, heade
   if (direct) {
     return direct;
   }
+  const isExactCapturedHeader =
+    typeof isRestV2ExactCapturedHeaderName === "function"
+      ? isRestV2ExactCapturedHeaderName(normalizedHeaderName)
+      : /^(?:adobe-subject-token|ad-service-token|ap-temppass-identity|ap-temp-pass-identity|ap-visitor-identifier|ap-partner-framework-status)$/i.test(
+          normalizedHeaderName
+        );
   const events = Array.isArray(flow?.events) ? flow.events : [];
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -93066,8 +93444,14 @@ function extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow = null, heade
       String(event?.url || "").trim(),
       String(event?.requestUrl || "").trim(),
     ];
+    const exactEventValue = resolveRestV2InteractiveDocsHeaderValueFromContext(event, normalizedHeaderName);
+    if (exactEventValue) {
+      return exactEventValue;
+    }
+    if (isExactCapturedHeader) {
+      continue;
+    }
     const eventValue =
-      resolveRestV2InteractiveDocsHeaderValueFromContext(event, normalizedHeaderName) ||
       textCarriers
         .map((value) => extractRestV2InteractiveDocsHeaderValueFromText(value, normalizedHeaderName))
         .find(Boolean) ||
@@ -94681,6 +95065,10 @@ async function createRestV2SessionForContext(context, options = {}) {
         redirectUrl: payloadCandidate.redirectUrl || "",
       });
 
+      const requestHeaders = buildRestV2Headers(context.serviceProviderId, {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      });
       const response = await fetchWithPremiumAuth(
         context.programmerId,
         appCandidate,
@@ -94688,10 +95076,7 @@ async function createRestV2SessionForContext(context, options = {}) {
         {
           method: "POST",
           mode: "cors",
-          headers: buildRestV2Headers(context.serviceProviderId, {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-          }),
+          headers: requestHeaders,
           body: payloadCandidate.body,
         },
         "refresh",
@@ -94710,6 +95095,10 @@ async function createRestV2SessionForContext(context, options = {}) {
       const responseHeaders = toDebugHeadersObject(response.headers || new Headers());
       if (response.ok) {
         const sessionData = parsed && typeof parsed === "object" ? parsed : {};
+        const capturedAuthHeaders = mergeRestV2CapturedAuthHeaders(
+          context?.capturedAuthHeaders,
+          { requestHeaders, responseHeaders, sessionData }
+        );
         const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromSessionData(sessionData, responseHeaders);
         const sessionPartner = resolveRestV2SessionPartnerFromSessionData(sessionData, partnerFrameworkStatus);
         if (partnerFrameworkStatus && !String(sessionData?.partnerFrameworkStatus || "").trim()) {
@@ -94743,7 +95132,9 @@ async function createRestV2SessionForContext(context, options = {}) {
             sessionData,
             payload: payloadCandidate,
             appInfo: appCandidate,
+            sessionRequestHeaders: requestHeaders,
             sessionResponseHeaders: responseHeaders,
+            capturedAuthHeaders: capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? capturedAuthHeaders : null,
             partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
             sessionPartner: String(sessionPartner || "").trim(),
           };
