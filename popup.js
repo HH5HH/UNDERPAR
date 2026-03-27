@@ -67674,7 +67674,6 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
   const totalEntries = Array.isArray(resolvedSection.entries) ? resolvedSection.entries.length : 0;
   const readyCount = Number(resolvedSection.readyCount || 0);
   const readinessLabel = `${readyCount}/${totalEntries} ready`;
-  const methodCountLabel = `${totalEntries} interactive method${totalEntries === 1 ? "" : "s"}`;
   const sectionDomId = `rest-v2-doc-section-${String(programmer?.programmerId || "global")
     .trim()
     .toLowerCase()
@@ -67695,14 +67694,11 @@ function buildRestV2InteractiveDocsSectionHtml(section = null, programmer = null
         title="${escapeHtml(toggleActionLabel)}"
         aria-label="${escapeHtml(toggleActionLabel)}"
       >
-        <span class="hr-rest-v2-doc-section-toggle-copy">
-          <span class="hr-rest-v2-doc-section-toggle-label">${escapeHtml(sectionLabel)}</span>
-          <span class="hr-rest-v2-doc-section-toggle-meta">
-            <span class="hr-rest-v2-doc-section-count">${escapeHtml(readinessLabel)}</span>
-            <span class="hr-rest-v2-doc-section-status">${escapeHtml(methodCountLabel)}</span>
-          </span>
+        <span class="hr-rest-v2-doc-section-toggle-label">${escapeHtml(sectionLabel)}</span>
+        <span class="hr-rest-v2-doc-section-toggle-meta">
+          <span class="hr-rest-v2-doc-section-count">${escapeHtml(readinessLabel)}</span>
+          <span class="collapse-icon" aria-hidden="true">▼</span>
         </span>
-        <span class="collapse-icon" aria-hidden="true">▼</span>
       </button>
       <div class="metadata-container service-box-container hr-rest-v2-doc-section-shell" id="${escapeHtml(sectionDomId)}">
         <div class="hr-rest-v2-doc-section-grid">
