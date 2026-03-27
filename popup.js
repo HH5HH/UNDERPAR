@@ -27376,55 +27376,7 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9]/g, "");
-  const normalizeSelectedSsoProviderId = (value = "") => {
-    const normalizedValue = String(value || "").trim();
-    if (!normalizedValue || !/sso/i.test(normalizedMvpdId)) {
-      return normalizedValue;
-    }
-    const normalizedValueToken = normalizePlatformMappingToken(normalizedValue);
-    const normalizedMvpdToken = normalizePlatformMappingToken(normalizedMvpdId);
-    if (!normalizedValueToken || !normalizedMvpdToken || normalizedValueToken === normalizedMvpdToken) {
-      return normalizedValue;
-    }
-    return normalizedMvpdToken.startsWith(normalizedValueToken) ? normalizedMvpdId : normalizedValue;
-  };
-  const scorePlatformMappingStrength = (value = "") => {
-    const normalizedValue = String(value || "").trim();
-    if (!normalizedValue) {
-      return -1;
-    }
-    const normalizedValueToken = normalizePlatformMappingToken(normalizedValue);
-    const normalizedMvpdToken = normalizePlatformMappingToken(normalizedMvpdId);
-    const normalizedValueLower = normalizedValue.toLowerCase();
-    const normalizedMvpdLower = normalizedMvpdId.toLowerCase();
-    const valueHasSso = /sso/i.test(normalizedValue);
-    const mvpdHasSso = /sso/i.test(normalizedMvpdId);
-    let score = 0;
-    if (normalizedMvpdToken) {
-      if (normalizedValueToken === normalizedMvpdToken) {
-        score = Math.max(score, 60);
-      }
-      if (normalizedValueToken.startsWith(normalizedMvpdToken) && normalizedValueToken.length > normalizedMvpdToken.length) {
-        score = Math.max(score, 80);
-      } else if (
-        normalizedMvpdToken.startsWith(normalizedValueToken) &&
-        normalizedValueToken.length > 0 &&
-        normalizedValueToken.length < normalizedMvpdToken.length
-      ) {
-        score = Math.max(score, 20);
-      }
-    } else if (valueHasSso) {
-      score = Math.max(score, 20);
-    }
-    if (mvpdHasSso) {
-      score += valueHasSso ? 15 : -15;
-    }
-    if (normalizedValueLower === normalizedMvpdLower) {
-      score += 5;
-    }
-    return score;
-  };
-  const preferPlatformMappingId = (currentValue = "", nextValue = "") => {
+  const choosePreferredPlatformMappingId = (currentValue = "", nextValue = "") => {
     const current = String(currentValue || "").trim();
     const next = String(nextValue || "").trim();
     if (!current) {
@@ -27433,15 +27385,41 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
     if (!next) {
       return current;
     }
-    const currentScore = scorePlatformMappingStrength(current);
-    const nextScore = scorePlatformMappingStrength(next);
-    if (nextScore > currentScore) {
-      return next;
-    }
-    if (nextScore < currentScore) {
+    const normalizedCurrentToken = normalizePlatformMappingToken(current);
+    const normalizedNextToken = normalizePlatformMappingToken(next);
+    const normalizedSelectedToken = normalizePlatformMappingToken(normalizedMvpdId);
+    if (normalizedCurrentToken && normalizedNextToken && normalizedCurrentToken === normalizedNextToken) {
       return current;
     }
-    return next;
+    const currentMatchesSelected =
+      normalizedCurrentToken && normalizedSelectedToken && normalizedCurrentToken === normalizedSelectedToken;
+    const nextMatchesSelected =
+      normalizedNextToken && normalizedSelectedToken && normalizedNextToken === normalizedSelectedToken;
+    if (
+      normalizedCurrentToken &&
+      normalizedNextToken &&
+      normalizedNextToken.startsWith(normalizedCurrentToken) &&
+      normalizedNextToken.length > normalizedCurrentToken.length &&
+      !(nextMatchesSelected && !currentMatchesSelected)
+    ) {
+      return next;
+    }
+    if (
+      normalizedCurrentToken &&
+      normalizedNextToken &&
+      normalizedCurrentToken.startsWith(normalizedNextToken) &&
+      normalizedCurrentToken.length > normalizedNextToken.length &&
+      !(currentMatchesSelected && !nextMatchesSelected)
+    ) {
+      return current;
+    }
+    if (currentMatchesSelected !== nextMatchesSelected) {
+      return current;
+    }
+    return current;
+  };
+  const preferPlatformMappingId = (currentValue = "", nextValue = "") => {
+    return choosePreferredPlatformMappingId(currentValue, nextValue);
   };
   const providedMetaId = String(firstNonEmptyString([providedMeta?.id, providedMeta?.mvpd]) || "").trim();
   const providedMetaMatchesSelectedMvpd =
@@ -27453,7 +27431,7 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
     }
     Object.entries(source).forEach(([rawPartnerName, rawMappingId]) => {
       const partnerName = String(rawPartnerName || "").trim();
-      const mappingId = normalizeSelectedSsoProviderId(rawMappingId);
+      const mappingId = String(rawMappingId || "").trim();
       if (!partnerName || !mappingId) {
         return;
       }
@@ -27477,8 +27455,8 @@ function getRestV2MvpdMeta(requestorId = "", mvpdId = "", mvpdMeta = null) {
         normalizedMvpdId,
       ]) || normalizedMvpdId,
     platformMappingId: preferPlatformMappingId(
-      normalizeSelectedSsoProviderId(firstNonEmptyString([cacheMeta?.platformMappingId, cacheMeta?.platformMappingID])),
-      normalizeSelectedSsoProviderId(firstNonEmptyString([providedMeta?.platformMappingId, providedMeta?.platformMappingID]))
+      firstNonEmptyString([cacheMeta?.platformMappingId, cacheMeta?.platformMappingID]),
+      firstNonEmptyString([providedMeta?.platformMappingId, providedMeta?.platformMappingID])
     ),
     logoUrl: firstNonEmptyString([providedMeta?.logoUrl, cacheMeta?.logoUrl]),
     boardingStatus: firstNonEmptyString([providedMeta?.boardingStatus, cacheMeta?.boardingStatus]),
@@ -30747,24 +30725,7 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
       ).trim()
     : "";
   const selectedMvpdProviderId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
-  const genericSelectedMvpdBaseToken =
-    selectedMvpdProviderId && /sso/i.test(selectedMvpdProviderId)
-      ? String(selectedMvpdProviderId.replace(/(?:[_-]?sso(?:[_-].+)?)$/i, "") || "").trim()
-      : "";
-  const genericProviderTokens = dedupeRestV2CandidateStrings([
-    genericSelectedMvpdBaseToken,
-    /sso/i.test(String(context?.mvpdMeta?.id || "").trim()) ? "" : context?.mvpdMeta?.id,
-    /sso/i.test(String(context?.mvpdMeta?.name || "").trim()) ? "" : context?.mvpdMeta?.name,
-    /sso/i.test(String(context?.mvpdMeta?.displayName || "").trim()) ? "" : context?.mvpdMeta?.displayName,
-    /sso/i.test(String(cachedMvpdMeta?.id || "").trim()) ? "" : cachedMvpdMeta?.id,
-    /sso/i.test(String(cachedMvpdMeta?.name || "").trim()) ? "" : cachedMvpdMeta?.name,
-    /sso/i.test(String(cachedMvpdMeta?.displayName || "").trim()) ? "" : cachedMvpdMeta?.displayName,
-  ]).map((value) => String(value || "").trim().toLowerCase());
-  const usableMappedPartnerProviderId = (() => {
-    const normalizedCandidate = String(mappedPartnerProviderId || "").trim().toLowerCase();
-    return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate) ? String(mappedPartnerProviderId || "").trim() : "";
-  })();
-  const explicitPartnerProviderId = dedupeRestV2CandidateStrings([
+  const explicitPartnerProviderId = firstNonEmptyString([
     context?.mvpdPlatformMappingId,
     context?.mvpdMeta?.platformMappingId,
     context?.mvpdMeta?.platformMappingID,
@@ -30773,15 +30734,12 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
     flow?.context?.mvpdMeta?.platformMappingID,
     cachedMvpdMeta?.platformMappingId,
     cachedMvpdMeta?.platformMappingID,
-    selectedMvpdProviderId,
-  ]).find((candidate) => {
-    const normalizedCandidate = String(candidate || "").trim().toLowerCase();
-    return Boolean(normalizedCandidate) && !genericProviderTokens.includes(normalizedCandidate);
-  });
+  ]);
   const providerId = String(
     firstNonEmptyString([
-      usableMappedPartnerProviderId,
+      mappedPartnerProviderId,
       explicitPartnerProviderId,
+      selectedMvpdProviderId,
     ]) || ""
   ).trim();
   if (!resolvedPartnerName || !providerId) {
@@ -50624,30 +50582,38 @@ function chooseRestV2PreferredPartnerPlatformMappingId(currentValue = "", nextVa
   if (!next) {
     return current;
   }
-
-  const currentScore = scoreRestV2PartnerPlatformMappingId(current, selectedMvpdId);
-  const nextScore = scoreRestV2PartnerPlatformMappingId(next, selectedMvpdId);
-  if (nextScore > currentScore) {
-    return next;
-  }
-  if (nextScore < currentScore) {
+  const normalizedCurrentToken = normalizeRestV2MvpdMatchToken(current);
+  const normalizedNextToken = normalizeRestV2MvpdMatchToken(next);
+  const normalizedSelectedToken = normalizeRestV2MvpdMatchToken(selectedMvpdId);
+  if (normalizedCurrentToken && normalizedNextToken && normalizedCurrentToken === normalizedNextToken) {
     return current;
   }
-  return next.length > current.length ? next : current;
-}
-
-function shouldPromoteRestV2PartnerPlatformMappingToSelectedMvpd(mappingId = "", selectedMvpdId = "") {
-  const normalizedMappingId = String(mappingId || "").trim();
-  const normalizedSelectedMvpdId = String(selectedMvpdId || "").trim();
-  if (!normalizedMappingId || !normalizedSelectedMvpdId || !/sso/i.test(normalizedSelectedMvpdId)) {
-    return false;
+  const currentMatchesSelected =
+    normalizedCurrentToken && normalizedSelectedToken && normalizedCurrentToken === normalizedSelectedToken;
+  const nextMatchesSelected =
+    normalizedNextToken && normalizedSelectedToken && normalizedNextToken === normalizedSelectedToken;
+  if (
+    normalizedCurrentToken &&
+    normalizedNextToken &&
+    normalizedNextToken.startsWith(normalizedCurrentToken) &&
+    normalizedNextToken.length > normalizedCurrentToken.length &&
+    !(nextMatchesSelected && !currentMatchesSelected)
+  ) {
+    return next;
   }
-  const normalizedMappingToken = normalizeRestV2MvpdMatchToken(normalizedMappingId);
-  const normalizedSelectedToken = normalizeRestV2MvpdMatchToken(normalizedSelectedMvpdId);
-  if (!normalizedMappingToken || !normalizedSelectedToken || normalizedMappingToken === normalizedSelectedToken) {
-    return false;
+  if (
+    normalizedCurrentToken &&
+    normalizedNextToken &&
+    normalizedCurrentToken.startsWith(normalizedNextToken) &&
+    normalizedCurrentToken.length > normalizedNextToken.length &&
+    !(currentMatchesSelected && !nextMatchesSelected)
+  ) {
+    return current;
   }
-  return normalizedSelectedToken.startsWith(normalizedMappingToken);
+  if (currentMatchesSelected !== nextMatchesSelected) {
+    return current;
+  }
+  return current;
 }
 
 function buildRestV2MvpdWorkspacePartnerSsoPlatforms(
@@ -50705,17 +50671,9 @@ function buildRestV2MvpdWorkspacePartnerSsoPlatforms(
       entityData?.providerId,
     ]);
     if (mappingId) {
-      const promotedSelectedMvpdId = shouldPromoteRestV2PartnerPlatformMappingToSelectedMvpd(mappingId, selectedMvpdId)
-        ? String(selectedMvpdId || "").trim()
-        : "";
-      const preferredMappingId = chooseRestV2PreferredPartnerPlatformMappingId(
-        String(mappingId || "").trim(),
-        promotedSelectedMvpdId,
-        selectedMvpdId
-      );
       summary.mappingId = chooseRestV2PreferredPartnerPlatformMappingId(
         summary.mappingId,
-        preferredMappingId,
+        String(mappingId || "").trim(),
         selectedMvpdId
       );
     }
@@ -90240,40 +90198,19 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
       ).trim()
     : "";
   const selectedMvpdProviderId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
-  const genericSelectedMvpdBaseToken =
-    selectedMvpdProviderId && /sso/i.test(selectedMvpdProviderId)
-      ? String(selectedMvpdProviderId.replace(/(?:[_-]?sso(?:[_-].+)?)$/i, "") || "").trim()
-      : "";
-  const genericProviderTokens = dedupeRestV2CandidateStrings([
-    genericSelectedMvpdBaseToken,
-    /sso/i.test(String(context?.mvpdMeta?.id || "").trim()) ? "" : context?.mvpdMeta?.id,
-    /sso/i.test(String(context?.mvpdMeta?.name || "").trim()) ? "" : context?.mvpdMeta?.name,
-    /sso/i.test(String(context?.mvpdMeta?.displayName || "").trim()) ? "" : context?.mvpdMeta?.displayName,
-    /sso/i.test(String(cachedMvpdMeta?.id || "").trim()) ? "" : cachedMvpdMeta?.id,
-    /sso/i.test(String(cachedMvpdMeta?.name || "").trim()) ? "" : cachedMvpdMeta?.name,
-    /sso/i.test(String(cachedMvpdMeta?.displayName || "").trim()) ? "" : cachedMvpdMeta?.displayName,
-  ]).map((value) => String(value || "").trim().toLowerCase());
-  const usableMappedPartnerProviderId = (() => {
-    const normalizedCandidate = String(mappedPartnerProviderId || "").trim().toLowerCase();
-    return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate) ? String(mappedPartnerProviderId || "").trim() : "";
-  })();
-  const explicitPartnerProviderId = dedupeRestV2CandidateStrings([
+  const explicitPartnerProviderId = firstNonEmptyString([
     context?.mvpdPlatformMappingId,
     context?.mvpdMeta?.platformMappingId,
     context?.mvpdMeta?.platformMappingID,
     cachedMvpdMeta?.platformMappingId,
     cachedMvpdMeta?.platformMappingID,
-    selectedMvpdProviderId,
-  ]).find((candidate) => {
-    const normalizedCandidate = String(candidate || "").trim().toLowerCase();
-    return Boolean(normalizedCandidate) && !genericProviderTokens.includes(normalizedCandidate);
-  });
+  ]);
   if (resolvedPartnerName) {
-    return String(firstNonEmptyString([usableMappedPartnerProviderId, explicitPartnerProviderId]) || "").trim();
+    return String(firstNonEmptyString([mappedPartnerProviderId, explicitPartnerProviderId, selectedMvpdProviderId]) || "").trim();
   }
   return String(
     firstNonEmptyString([
-      context?.mvpdPlatformMappingId,
+      explicitPartnerProviderId,
       selectedMvpdProviderId,
       context?.mvpdMeta?.platformMappingId,
       context?.mvpdMeta?.platformMappingID,
@@ -90449,23 +90386,7 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
       ? { ...currentMvpdMeta.partnerPlatformMappings }
       : {};
   const selectedMvpdProviderId = String(firstNonEmptyString([context?.mvpd, context?.selectedMvpd]) || "").trim();
-  const normalizePartnerProviderToken = (value = "") =>
-    String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-  const normalizePartnerProviderId = (value = "") => {
-    const normalizedValue = String(value || "").trim();
-    if (!normalizedValue || !selectedMvpdProviderId || !/sso/i.test(selectedMvpdProviderId)) {
-      return normalizedValue;
-    }
-    const normalizedValueToken = normalizePartnerProviderToken(normalizedValue);
-    const normalizedSelectedToken = normalizePartnerProviderToken(selectedMvpdProviderId);
-    if (!normalizedValueToken || !normalizedSelectedToken || normalizedValueToken === normalizedSelectedToken) {
-      return normalizedValue;
-    }
-    return normalizedSelectedToken.startsWith(normalizedValueToken) ? selectedMvpdProviderId : normalizedValue;
-  };
+  const normalizePartnerProviderId = (value = "") => String(value || "").trim();
   const normalizedExistingPartnerPlatformMappings = Object.fromEntries(
     Object.entries(existingPartnerPlatformMappings)
       .map(([partnerName, providerId]) => [String(partnerName || "").trim(), normalizePartnerProviderId(providerId)])
@@ -90494,29 +90415,13 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
       )
       .find(Boolean) || ""
   ).trim();
-  const genericSelectedMvpdBaseToken =
-    selectedMvpdProviderId && /sso/i.test(selectedMvpdProviderId)
-      ? String(selectedMvpdProviderId.replace(/(?:[_-]?sso(?:[_-].+)?)$/i, "") || "").trim()
-      : "";
-  const genericProviderTokens = dedupeRestV2CandidateStrings([
-    genericSelectedMvpdBaseToken,
-    /sso/i.test(String(currentMvpdMeta?.id || "").trim()) ? "" : currentMvpdMeta?.id,
-    /sso/i.test(String(currentMvpdMeta?.name || "").trim()) ? "" : currentMvpdMeta?.name,
-    /sso/i.test(String(currentMvpdMeta?.displayName || "").trim()) ? "" : currentMvpdMeta?.displayName,
-  ]).map((value) => String(value || "").trim().toLowerCase());
-  const usableMappedPartnerProviderId = (() => {
-    const normalizedCandidate = String(mappedPartnerProviderId || "").trim().toLowerCase();
-    return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate) ? String(mappedPartnerProviderId || "").trim() : "";
-  })();
-  const preferredPartnerFallbackId = dedupeRestV2CandidateStrings([
+  const preferredPartnerFallbackId = firstNonEmptyString([
     normalizePartnerProviderId(context?.mvpdPlatformMappingId),
     normalizePartnerProviderId(currentMvpdMeta?.platformMappingId),
     normalizePartnerProviderId(currentMvpdMeta?.platformMappingID),
+    normalizePartnerProviderId(realFrameworkProviderId),
     selectedMvpdProviderId,
-  ]).find((candidate) => {
-    const normalizedCandidate = String(candidate || "").trim().toLowerCase();
-    return Boolean(normalizedCandidate) && !genericProviderTokens.includes(normalizedCandidate);
-  });
+  ]);
   if (partnerCandidates.length === 0) {
     if (realFrameworkProviderId) {
       const normalizedFrameworkProviderId = normalizePartnerProviderId(realFrameworkProviderId);
@@ -90557,9 +90462,8 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
   if (!snapshot || typeof snapshot !== "object") {
     const fallbackMappingId = String(
       firstNonEmptyString([
-        usableMappedPartnerProviderId,
+        mappedPartnerProviderId,
         preferredPartnerFallbackId,
-        realFrameworkProviderId,
       ]) || ""
     ).trim();
     if (fallbackMappingId) {
@@ -90594,18 +90498,11 @@ async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = n
     ...normalizedSnapshotPartnerPlatformMappings,
   };
   const normalizedResolvedSnapshotMappingId = normalizePartnerProviderId(resolvedDetails?.resolvedMappingId);
-  const usableResolvedSnapshotMappingId = (() => {
-    const normalizedCandidate = String(normalizedResolvedSnapshotMappingId || "").trim().toLowerCase();
-    return normalizedCandidate && !genericProviderTokens.includes(normalizedCandidate)
-      ? String(normalizedResolvedSnapshotMappingId || "").trim()
-      : "";
-  })();
   const resolvedMappingId = String(
     firstNonEmptyString([
-      usableResolvedSnapshotMappingId,
-      usableMappedPartnerProviderId,
+      normalizedResolvedSnapshotMappingId,
+      mappedPartnerProviderId,
       preferredPartnerFallbackId,
-      realFrameworkProviderId,
     ]) || ""
   ).trim();
   context.mvpdMeta = persistMvpdMeta({
@@ -90748,6 +90645,18 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
     }
     return mappingEntries.some(([, rawProviderId]) => matchesProviderId(rawProviderId));
   };
+  const hasRequiredPartnerMapping = (partnerMappings = null) => {
+    if (!requiresPartnerSpecificProvider) {
+      return false;
+    }
+    const mappingEntries =
+      partnerMappings && typeof partnerMappings === "object" ? Object.entries(partnerMappings) : [];
+    return mappingEntries.some(
+      ([rawPartnerName, rawProviderId]) =>
+        normalizeRestV2PartnerSsoPlatformName(rawPartnerName) === requiredPartnerName &&
+        String(rawProviderId || "").trim()
+    );
+  };
   if (cache instanceof Map) {
     for (const [mvpdId, rawMeta] of cache.entries()) {
       const resolvedMeta = getRestV2MvpdMeta(normalizedRequestorId, String(mvpdId || "").trim(), rawMeta) || rawMeta;
@@ -90756,12 +90665,13 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
           ? resolvedMeta.partnerPlatformMappings
           : null;
       const mappingMatch = hasPartnerSpecificMatch(partnerMappings);
+      const topLevelMatch =
+        matchesProviderId(resolvedMeta?.platformMappingId) ||
+        matchesProviderId(resolvedMeta?.platformMappingID) ||
+        matchesProviderId(resolvedMeta?.id);
       if (
         mappingMatch ||
-        (!requiresPartnerSpecificProvider &&
-          (matchesProviderId(resolvedMeta?.platformMappingId) ||
-            matchesProviderId(resolvedMeta?.platformMappingID) ||
-            matchesProviderId(resolvedMeta?.id)))
+        (topLevelMatch && (!requiresPartnerSpecificProvider || !hasRequiredPartnerMapping(partnerMappings)))
       ) {
         return {
           mvpdId: String(mvpdId || "").trim(),
@@ -90779,13 +90689,14 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
     fallbackMvpdMeta?.partnerPlatformMappings && typeof fallbackMvpdMeta.partnerPlatformMappings === "object"
       ? fallbackMvpdMeta.partnerPlatformMappings
       : null;
+  const fallbackTopLevelMatch =
+    matchesProviderId(fallbackMvpdMeta?.platformMappingId) ||
+    matchesProviderId(fallbackMvpdMeta?.platformMappingID) ||
+    matchesProviderId(fallbackMvpdMeta?.id);
   if (
     fallbackMvpdId &&
     (hasPartnerSpecificMatch(fallbackPartnerMappings) ||
-      (!requiresPartnerSpecificProvider &&
-        (matchesProviderId(fallbackMvpdMeta?.platformMappingId) ||
-          matchesProviderId(fallbackMvpdMeta?.platformMappingID) ||
-          matchesProviderId(fallbackMvpdMeta?.id))))
+      (fallbackTopLevelMatch && (!requiresPartnerSpecificProvider || !hasRequiredPartnerMapping(fallbackPartnerMappings))))
   ) {
     return {
       mvpdId: fallbackMvpdId,
