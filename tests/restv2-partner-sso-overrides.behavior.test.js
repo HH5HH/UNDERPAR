@@ -286,6 +286,51 @@ test("unknown provider ids are rejected for Apple partner SSO when no MVPD mappi
   assert.match(validation.error, /not associated with a known MVPD/i);
 });
 
+test("partner framework provider ids are not resolved from the bare MVPD id when no platform mapping is configured", () => {
+  const { validateRestV2PartnerFrameworkStatusInput } = loadPartnerSsoOverrideHelpers({
+    getRequestorScopedMvpdCache(requestorId = "") {
+      if (String(requestorId || "").trim() !== "MML") {
+        return null;
+      }
+      return new Map([
+        [
+          "Comcast_SSO",
+          {
+            id: "Comcast_SSO",
+            name: "Xfinity (Comcast_SSO)",
+          },
+        ],
+      ]);
+    },
+  });
+  const rawPartnerFrameworkStatus = JSON.stringify({
+    frameworkPermissionInfo: {
+      accessStatus: "granted",
+    },
+    frameworkProviderInfo: {
+      id: "Comcast_SSO",
+      expirationDate: "1775748018000",
+    },
+    frameworkPartnerInfo: {
+      partner: "Apple",
+      name: "Apple",
+    },
+  });
+
+  const validation = validateRestV2PartnerFrameworkStatusInput(rawPartnerFrameworkStatus, {
+    context: {
+      requestorId: "MML",
+      serviceProviderId: "MML",
+      mvpd: "Comcast_SSO",
+      learningPartner: "Apple",
+    },
+    requiredPartner: "Apple",
+  });
+
+  assert.equal(validation.ok, false);
+  assert.match(validation.error, /not associated with a known MVPD/i);
+});
+
 test("encoded partner framework headers are rejected in the raw JSON form", () => {
   const { validateRestV2PartnerFrameworkStatusInput } = loadPartnerSsoOverrideHelpers();
   const encodedValue = Buffer.from(

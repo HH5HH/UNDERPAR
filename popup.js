@@ -14155,11 +14155,7 @@ function buildUnderparRestV2DebugSnapshot(programmer = null) {
         ? "partner_framework_status"
         : preferredFrameworkStatus
           ? "normalized_partner_framework_status"
-          : learningFrameworkStatus
-            ? "learning_partner_framework_status"
-            : directFrameworkStatus
-              ? "partner_framework_status"
-              : "missing";
+          : "missing";
   const debugChecklist = [
     "Decode AP-Partner-Framework-Status once and inspect frameworkPermissionInfo.accessStatus, frameworkProviderInfo.id, and frameworkProviderInfo.expiration_date.",
     "Confirm frameworkPermissionInfo.accessStatus is granted and frameworkProviderInfo.id is a non-empty mapping id, not a display name.",
@@ -19008,7 +19004,7 @@ async function fetchRestV2ProfilesForHarvest(harvest, options = {}) {
   const flowId = resolveRestV2DebugFlowIdForHarvest(harvest);
   const likelySsoContext = isRestV2LikelyPartnerSsoContext(harvest);
   const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
-    resolveRestV2PreferredPartnerFrameworkStatusForContext(harvest)
+    resolveRestV2ExactPartnerFrameworkStatusForContext(harvest)
   );
   const requestHeaders = buildRestV2Headers(serviceProviderId, {
     Accept: "application/json",
@@ -30843,6 +30839,11 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
     const selectedWithoutSso = selectedToken.replace(/sso$/i, "");
     return Boolean(selectedWithoutSso) && candidateToken === selectedWithoutSso && candidateToken !== selectedToken;
   };
+  const isBareSelectedMvpdProviderId = (candidateValue = "", selectedValue = "") => {
+    const candidateToken = normalizeRestV2MvpdMatchToken(candidateValue);
+    const selectedToken = normalizeRestV2MvpdMatchToken(selectedValue);
+    return Boolean(candidateToken) && Boolean(selectedToken) && candidateToken === selectedToken;
+  };
   const explicitPartnerProviderId = firstNonEmptyString([
     context?.mvpdPlatformMappingId,
     context?.mvpdMeta?.platformMappingId,
@@ -30856,8 +30857,10 @@ function buildRestV2LearningPartnerFrameworkStatus(context = null, flow = null, 
   const providerId = String(
     firstNonEmptyString([
       isGenericSsoAliasDowngrade(mappedPartnerProviderId, selectedMvpdProviderId) ? "" : mappedPartnerProviderId,
-      isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ? "" : explicitPartnerProviderId,
-      selectedMvpdProviderId,
+      isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ||
+      isBareSelectedMvpdProviderId(explicitPartnerProviderId, selectedMvpdProviderId)
+        ? ""
+        : explicitPartnerProviderId,
     ]) || ""
   ).trim();
   if (!resolvedPartnerName || !providerId) {
@@ -31539,7 +31542,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
   const endpointScope = `${String(scope || "profiles-check")}:${String(endpoint.endpointKey || "profiles").trim()}`;
   const likelySsoContext = isRestV2LikelyPartnerSsoContext(context);
   const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
-    resolveRestV2PreferredPartnerFrameworkStatusForContext(context)
+    resolveRestV2ExactPartnerFrameworkStatusForContext(context)
   );
   const requestHeaders = buildRestV2Headers(context.serviceProviderId, {
     Accept: "application/json",
@@ -58140,7 +58143,7 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     partner: String(firstNonEmptyString([context.partner, context.sessionPartner, resolveRestV2LearningPartnerNameFromContext(context)]) || "").trim(),
     partnerFrameworkStatus: String(
       firstNonEmptyString([
-        resolveRestV2PreferredPartnerFrameworkStatusForContext(context),
+        resolveRestV2ExactPartnerFrameworkStatusForContext(context),
         resolveRestV2PartnerFrameworkStatusFromContext(context),
       ]) || ""
     ).trim(),
@@ -90369,6 +90372,11 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
     const selectedWithoutSso = selectedToken.replace(/sso$/i, "");
     return Boolean(selectedWithoutSso) && candidateToken === selectedWithoutSso && candidateToken !== selectedToken;
   };
+  const isBareSelectedMvpdProviderId = (candidateValue = "", selectedValue = "") => {
+    const candidateToken = normalizeRestV2MvpdMatchToken(candidateValue);
+    const selectedToken = normalizeRestV2MvpdMatchToken(selectedValue);
+    return Boolean(candidateToken) && Boolean(selectedToken) && candidateToken === selectedToken;
+  };
   const mappedPartnerProviderId = resolvedPartnerName
     ? String(
         Object.entries(partnerPlatformMappings || {}).find(
@@ -90391,15 +90399,16 @@ function resolveRestV2ExpectedPartnerFrameworkProviderId(context = null) {
     return String(
       firstNonEmptyString([
         isGenericSsoAliasDowngrade(mappedPartnerProviderId, selectedMvpdProviderId) ? "" : mappedPartnerProviderId,
-        isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ? "" : explicitPartnerProviderId,
-        selectedMvpdProviderId,
+        isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ||
+        isBareSelectedMvpdProviderId(explicitPartnerProviderId, selectedMvpdProviderId)
+          ? ""
+          : explicitPartnerProviderId,
       ]) || ""
     ).trim();
   }
   return String(
     firstNonEmptyString([
       isGenericSsoAliasDowngrade(explicitPartnerProviderId, selectedMvpdProviderId) ? "" : explicitPartnerProviderId,
-      selectedMvpdProviderId,
       context?.mvpdMeta?.platformMappingId,
       context?.mvpdMeta?.platformMappingID,
       cachedMvpdMeta?.platformMappingId,
@@ -90845,6 +90854,11 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
   }
   const cache = typeof getRequestorScopedMvpdCache === "function" ? getRequestorScopedMvpdCache(normalizedRequestorId) : null;
   const matchesProviderId = (candidate = "") => String(candidate || "").trim().toLowerCase() === normalizedProviderId;
+  const normalizedSelectedMvpdToken = normalizeRestV2MvpdMatchToken(
+    firstNonEmptyString([fallbackContext?.mvpd, fallbackContext?.selectedMvpd])
+  );
+  const providerMatchesSelectedMvpd =
+    Boolean(normalizedSelectedMvpdToken) && normalizeRestV2MvpdMatchToken(normalizedProviderId) === normalizedSelectedMvpdToken;
   const requiredPartnerName = normalizeRestV2PartnerSsoPlatformName(
     firstNonEmptyString([
       resolveRestV2LearningPartnerNameFromContext(fallbackContext),
@@ -90890,11 +90904,16 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
       const mappingMatch = hasPartnerSpecificMatch(partnerMappings);
       const topLevelMatch =
         matchesProviderId(resolvedMeta?.platformMappingId) ||
-        matchesProviderId(resolvedMeta?.platformMappingID) ||
-        matchesProviderId(resolvedMeta?.id);
+        matchesProviderId(resolvedMeta?.platformMappingID);
       if (
         mappingMatch ||
-        (topLevelMatch && (!requiresPartnerSpecificProvider || !hasRequiredPartnerMapping(partnerMappings)))
+        (
+          topLevelMatch &&
+          (
+            !requiresPartnerSpecificProvider ||
+            (!hasRequiredPartnerMapping(partnerMappings) && providerMatchesSelectedMvpd !== true)
+          )
+        )
       ) {
         return {
           mvpdId: String(mvpdId || "").trim(),
@@ -90914,12 +90933,17 @@ function resolveRestV2MvpdMetaForPartnerFrameworkProviderId(providerId = "", req
       : null;
   const fallbackTopLevelMatch =
     matchesProviderId(fallbackMvpdMeta?.platformMappingId) ||
-    matchesProviderId(fallbackMvpdMeta?.platformMappingID) ||
-    matchesProviderId(fallbackMvpdMeta?.id);
+    matchesProviderId(fallbackMvpdMeta?.platformMappingID);
   if (
     fallbackMvpdId &&
     (hasPartnerSpecificMatch(fallbackPartnerMappings) ||
-      (fallbackTopLevelMatch && (!requiresPartnerSpecificProvider || !hasRequiredPartnerMapping(fallbackPartnerMappings))))
+      (
+        fallbackTopLevelMatch &&
+        (
+          !requiresPartnerSpecificProvider ||
+          (!hasRequiredPartnerMapping(fallbackPartnerMappings) && providerMatchesSelectedMvpd !== true)
+        )
+      ))
   ) {
     return {
       mvpdId: fallbackMvpdId,
@@ -91274,17 +91298,7 @@ function resolveRestV2PreferredPartnerFrameworkStatusForContext(context = null) 
   if (context.partnerFrameworkStatusOverrideBlocked === true) {
     return "";
   }
-  const directValue = resolveRestV2ExactPartnerFrameworkStatusForContext(context);
-  if (directValue) {
-    return directValue;
-  }
-  const learningValue = normalizeRestV2PartnerFrameworkStatusForRequest(
-    resolveRestV2LearningPartnerFrameworkStatusFromContext(context)
-  );
-  if (isRestV2PartnerFrameworkStatusCompatibleWithContext(learningValue, context)) {
-    return learningValue;
-  }
-  return "";
+  return resolveRestV2ExactPartnerFrameworkStatusForContext(context);
 }
 
 function resolveRestV2LearningPartnerNameFromContext(context = null) {
