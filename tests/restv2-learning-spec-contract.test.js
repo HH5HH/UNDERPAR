@@ -171,6 +171,7 @@ function loadPlanBuilder() {
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusFromContext"),
     extractFunctionSource(source, "resolveRestV2PartnerNameFromContext"),
     extractFunctionSource(source, "resolveRestV2LearningPartnerFrameworkStatusFromContext"),
+    extractFunctionSource(source, "resolveRestV2ExactPartnerFrameworkStatusForContext"),
     extractFunctionSource(source, "resolveRestV2PreferredPartnerFrameworkStatusForContext"),
     extractFunctionSource(source, "resolveRestV2LearningPartnerNameFromContext"),
     extractFunctionSource(source, "resolveRestV2InteractiveDocsHeaderValueFromContext"),

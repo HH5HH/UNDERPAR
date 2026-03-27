@@ -176,6 +176,7 @@ function loadRestV2LearningPlanBuilder() {
     extractFunctionSource(source, "resolveRestV2PartnerFrameworkStatusFromContext"),
     extractFunctionSource(source, "resolveRestV2PartnerNameFromContext"),
     extractFunctionSource(source, "resolveRestV2LearningPartnerFrameworkStatusFromContext"),
+    extractFunctionSource(source, "resolveRestV2ExactPartnerFrameworkStatusForContext"),
     extractFunctionSource(source, "resolveRestV2PreferredPartnerFrameworkStatusForContext"),
     extractFunctionSource(source, "resolveRestV2LearningPartnerNameFromContext"),
     extractFunctionSource(source, "resolveRestV2InteractiveDocsHeaderValueFromContext"),
@@ -571,6 +572,7 @@ function loadRestV2LearningContextPreparer(seed = {}) {
     "async function hydrateRestV2PartnerPlatformMappingFromConsoleContext(context = null, options = {}) { if (typeof globalThis.__seed.hydratePartnerPlatformMapping === 'function') { return globalThis.__seed.hydratePartnerPlatformMapping(context, options); } return context; }",
     "function hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context = null, flow = null, headerNames = []) { if (typeof globalThis.__seed.hydrateOptionalHeaders === 'function') { return globalThis.__seed.hydrateOptionalHeaders(context, flow, headerNames); } return context; }",
     extractFunctionSource(source, "resolveRestV2LearningPartnerFrameworkStatusFromContext"),
+    extractFunctionSource(source, "resolveRestV2ExactPartnerFrameworkStatusForContext"),
     extractFunctionSource(source, "resolveRestV2PreferredPartnerFrameworkStatusForContext"),
     extractFunctionSource(source, "prepareRestV2InteractiveDocsContextForEntry"),
     "module.exports = { enrichRestV2LearningResourcesFromConsoleContext, prepareRestV2InteractiveDocsContextForEntry };",
@@ -884,6 +886,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildRestV2LearningContextItemHtmlSource, /fieldValues/);
   assert.match(buildRestV2LearningContextItemHtmlSource, /hr-learning-context-field-grid/);
   assert.match(buildRestV2LearningContextItemHtmlSource, /hr-learning-context-status-badge/);
+  assert.match(buildRestV2LearningContextItemHtmlSource, /resolveBase64DecodedHoverMeta/);
   assert.match(wireRestV2LearningContainerCollapsiblesSource, /wireCollapsibleSection/);
   assert.match(wireRestV2LearningContainerCollapsiblesSource, /setRestV2LearningServiceCollapsed/);
   assert.match(wireRestV2InteractiveDocsSectionCollapsiblesSource, /wireCollapsibleSection/);
@@ -941,6 +944,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupCss, /\.hr-learning-context-card/);
   assert.match(popupCss, /\.hr-learning-context-field-grid/);
   assert.match(popupCss, /\.hr-learning-context-status-badge--active/);
+  assert.match(popupCss, /\.hr-base64-hover-target/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell/);
   assert.match(popupCss, /\.hr-rest-v2-docs-toggle/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell-body/);
@@ -3284,9 +3288,10 @@ test("REST V2 learning uses a compatible inferred partner framework payload when
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
   assert.equal(plan.fieldValues["body.SAMLResponse"], "PHNhbWxwOlJlc3BvbnNlPg==");
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.match(plan.notes.join(" "), /exact AP-Partner-Framework-Status captured from a real partner flow/i);
 });
 
 test("REST V2 learning replaces a generic captured Comcast framework status with a compatible inferred Apple partner payload", () => {
@@ -3360,8 +3365,9 @@ test("REST V2 learning replaces a generic captured Comcast framework status with
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.match(plan.notes.join(" "), /will not hydrate that inferred header/i);
 });
 
 test("REST V2 learning prefers the partner-mapped Apple framework payload when snapshot mappings outrank a stale generic Comcast header", () => {
@@ -3438,8 +3444,9 @@ test("REST V2 learning prefers the partner-mapped Apple framework payload when s
   );
 
   assert.equal(plan.fieldValues["path.partner"], "Apple");
-  assert.equal(plan.fieldValues["header.AP-Partner-Framework-Status"], validLearningFrameworkStatus);
-  assert.deepEqual(Array.from(plan.missingRequiredFields || []), []);
+  assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
+  assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
+  assert.match(plan.notes.join(" "), /exact AP-Partner-Framework-Status captured from a real partner flow/i);
 });
 
 test("REST V2 learning keeps Create Partner Profile blocked when partner mappings expose a more specific Comcast Apple provider than the captured header", () => {
@@ -3692,6 +3699,89 @@ test("REST V2 learning keeps Create Partner Profile blocked when the provider id
   assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Partner-Framework-Status"), false);
   assert.deepEqual(Array.from(plan.missingRequiredFields || []), ["header.AP-Partner-Framework-Status"]);
   assert.match(plan.notes.join(" "), /exact AP-Partner-Framework-Status payload/i);
+});
+
+test("shared Base64 hover decode renders decoded tooltips in metadata items and REST V2 learning context fields", () => {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "const state = globalThis.__seed.state || { selectedRequestorId: 'MML', selectedMvpdId: 'Comcast_SSO' };",
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    "function formatRestV2RequestorMvpdDisplay(requestorId = '', mvpdId = '') { return `${requestorId} x ${mvpdId}`; }",
+    "function getActiveRestV2LearningUiState() { return globalThis.__seed.activeState || null; }",
+    extractFunctionSource(source, "escapeHtml"),
+    extractFunctionSource(source, "parseJsonText"),
+    extractFunctionSource(source, "resolveBase64DecodedHoverMeta"),
+    extractFunctionSource(source, "buildMetadataItemHtml"),
+    extractFunctionSource(source, "formatRestV2LearningContextValue"),
+    extractFunctionSource(source, "buildRestV2LearningUiStatusMeta"),
+    extractFunctionSource(source, "buildRestV2LearningContextItemHtml"),
+    "module.exports = { buildMetadataItemHtml, buildRestV2LearningContextItemHtml };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    __seed: {
+      state: {
+        selectedRequestorId: "MML",
+        selectedMvpdId: "Comcast_SSO",
+      },
+      activeState: {
+        entryKey: "partner-sso-create-profile",
+        entryLabel: "Create Partner Profile",
+        phase: "active",
+        requestorId: "MML",
+        serviceProviderId: "MML",
+        mvpd: "Comcast_SSO",
+        context: {
+          learningPartnerSource: "recorded r-apt cookie",
+        },
+        plan: {
+          operationId: "createPartnerProfileUsingPOST",
+          operationSummary: "Retrieve profile using partner authentication response",
+          docsUrl: "https://developer.adobe.com/example",
+          fieldValues: {
+            "header.AP-Partner-Framework-Status": Buffer.from(
+              JSON.stringify({
+                frameworkProviderInfo: {
+                  id: "Comcast",
+                },
+                frameworkPartnerInfo: {
+                  name: "Apple",
+                },
+              }),
+              "utf8"
+            ).toString("base64"),
+          },
+          requiredFields: ["header.AP-Partner-Framework-Status"],
+          missingRequiredFields: [],
+          notes: [],
+        },
+      },
+    },
+    atob,
+    btoa,
+    TextDecoder,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  const { buildMetadataItemHtml, buildRestV2LearningContextItemHtml } = context.module.exports;
+
+  const metadataHtml = buildMetadataItemHtml(
+    "TempPASS Identity",
+    Buffer.from('{"hash":"abc123"}', "utf8").toString("base64")
+  );
+  assert.match(metadataHtml, /hr-base64-hover-target/);
+  assert.match(metadataHtml, /Base64 decoded value/);
+  assert.match(metadataHtml, /abc123/);
+
+  const learningHtml = buildRestV2LearningContextItemHtml({
+    programmerId: "Turner",
+  });
+  assert.match(learningHtml, /hr-base64-hover-target/);
+  assert.match(learningHtml, /header\.AP-Partner-Framework-Status/);
+  assert.match(learningHtml, /frameworkProviderInfo/);
+  assert.match(learningHtml, /Apple/);
 });
 
 test("premium service sections and HR service pills keep their theme class wiring", () => {

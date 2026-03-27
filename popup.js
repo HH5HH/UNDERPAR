@@ -16406,6 +16406,81 @@ function parseJsonText(text, fallback = {}) {
   }
 }
 
+function resolveBase64DecodedHoverMeta(value = "", options = {}) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue || rawValue.length < 12) {
+    return {
+      title: "",
+      decodedValue: "",
+    };
+  }
+
+  const normalizedBase64 = rawValue
+    .replace(/[\r\n]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  if (!normalizedBase64 || /[^A-Za-z0-9+/=]/.test(normalizedBase64)) {
+    return {
+      title: "",
+      decodedValue: "",
+    };
+  }
+
+  const paddedBase64 = normalizedBase64 + "=".repeat((4 - (normalizedBase64.length % 4 || 4)) % 4);
+  let decodedText = "";
+  try {
+    const binary = atob(paddedBase64);
+    const bytes = Uint8Array.from(binary, (entry) => entry.charCodeAt(0));
+    decodedText =
+      typeof TextDecoder === "function"
+        ? new TextDecoder("utf-8", { fatal: false }).decode(bytes)
+        : binary;
+  } catch {
+    decodedText = "";
+  }
+
+  const normalizedDecoded = String(decodedText || "").replace(/\0/g, "").trim();
+  if (!normalizedDecoded || normalizedDecoded === rawValue) {
+    return {
+      title: "",
+      decodedValue: "",
+    };
+  }
+
+  const printableCharacterCount = [...normalizedDecoded].filter((character) => {
+    const code = character.charCodeAt(0);
+    return character === "\n" || character === "\r" || character === "\t" || (code >= 32 && code !== 127);
+  }).length;
+  if (printableCharacterCount / Math.max(1, normalizedDecoded.length) < 0.85) {
+    return {
+      title: "",
+      decodedValue: "",
+    };
+  }
+
+  let displayValue = normalizedDecoded;
+  const parsedJson = parseJsonText(normalizedDecoded, null);
+  if (parsedJson && typeof parsedJson === "object") {
+    try {
+      displayValue = JSON.stringify(parsedJson, null, 2);
+    } catch {
+      displayValue = normalizedDecoded;
+    }
+  }
+
+  const maxLength = Math.max(240, Number(options?.maxLength || 2400));
+  if (displayValue.length > maxLength) {
+    displayValue = `${displayValue.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+  }
+
+  const label = String(options?.label || "Base64 decoded value").trim() || "Base64 decoded value";
+  return {
+    title: `${label}\n\n${displayValue}`,
+    decodedValue: displayValue,
+  };
+}
+
 function serializeError(error) {
   if (error instanceof Error) {
     return error.message;
@@ -16974,10 +17049,16 @@ function resolveSelectedProgrammer() {
 }
 
 function buildMetadataItemHtml(key, value) {
+  const normalizedValue = String(value || "").trim();
+  const hoverMeta = resolveBase64DecodedHoverMeta(normalizedValue);
+  const hoverAttributes = hoverMeta.title
+    ? ` title="${escapeHtml(hoverMeta.title)}" aria-label="${escapeHtml(hoverMeta.title)}"`
+    : "";
+  const hoverClassName = hoverMeta.title ? " hr-base64-hover-target" : "";
   return `
     <article class="metadata-item">
       <p class="metadata-key">${escapeHtml(key)}</p>
-      <p class="metadata-value">${escapeHtml(value)}</p>
+      <p class="metadata-value${hoverClassName}"${hoverAttributes}>${escapeHtml(normalizedValue)}</p>
     </article>
   `;
 }
@@ -17318,12 +17399,18 @@ async function copyRestV2PartnerSsoPanelCurrentJson(section, programmer = null, 
     setRestV2PartnerSsoPanelStatus(section, String(panelContext?.reason || "Partner SSO context is not ready."), "error");
     return;
   }
-  const currentPartnerFrameworkStatus = String(resolveRestV2PreferredPartnerFrameworkStatusForContext(panelContext.baseContext) || "").trim();
+  const currentPartnerFrameworkStatus = String(
+    resolveRestV2ExactPartnerFrameworkStatusForContext(panelContext.baseContext) || ""
+  ).trim();
   const currentPartnerFrameworkJson = stringifyRestV2PartnerFrameworkStatusPayload(currentPartnerFrameworkStatus, {
     pretty: true,
   });
   if (!currentPartnerFrameworkJson) {
-    setRestV2PartnerSsoPanelStatus(section, "Complete a partner SSO flow first so UnderPAR can copy the current framework JSON.", "error");
+    setRestV2PartnerSsoPanelStatus(
+      section,
+      "Complete a real partner SSO flow first so UnderPAR can copy the exact Partner Framework Status JSON.",
+      "error"
+    );
     return;
   }
   const copyResult = await copyTextToClipboard(currentPartnerFrameworkJson);
@@ -17340,12 +17427,18 @@ function applyRestV2PartnerSsoPanelCurrentJson(section, programmer = null, appIn
     setRestV2PartnerSsoPanelStatus(section, String(panelContext?.reason || "Partner SSO context is not ready."), "error");
     return;
   }
-  const currentPartnerFrameworkStatus = String(resolveRestV2PreferredPartnerFrameworkStatusForContext(panelContext.baseContext) || "").trim();
+  const currentPartnerFrameworkStatus = String(
+    resolveRestV2ExactPartnerFrameworkStatusForContext(panelContext.baseContext) || ""
+  ).trim();
   const currentPartnerFrameworkJson = stringifyRestV2PartnerFrameworkStatusPayload(currentPartnerFrameworkStatus, {
     pretty: true,
   });
   if (!currentPartnerFrameworkJson) {
-    setRestV2PartnerSsoPanelStatus(section, "Complete a partner SSO flow first so UnderPAR can reuse the current framework JSON.", "error");
+    setRestV2PartnerSsoPanelStatus(
+      section,
+      "Complete a real partner SSO flow first so UnderPAR can reuse the exact Partner Framework Status JSON.",
+      "error"
+    );
     return;
   }
   const partnerJsonInput = section?.querySelector(".rest-v2-partner-status-json-input");
@@ -17411,7 +17504,9 @@ function syncRestV2PartnerSsoPanel(section, programmer = null, appInfo = null) {
   }
 
   panelElement.hidden = false;
-  const currentPartnerFrameworkStatus = String(resolveRestV2PreferredPartnerFrameworkStatusForContext(panelContext.baseContext) || "").trim();
+  const currentPartnerFrameworkStatus = String(
+    resolveRestV2ExactPartnerFrameworkStatusForContext(panelContext.baseContext) || ""
+  ).trim();
   const currentPartnerFrameworkJson = stringifyRestV2PartnerFrameworkStatusPayload(currentPartnerFrameworkStatus, {
     pretty: true,
   });
@@ -19885,14 +19980,22 @@ function renderRestV2ProfileHistoryTool(section, harvestList = []) {
           ["Next Action", "Can I watch? is shown only when an active MVPD profile session is detected."],
         ];
         const factCards = factRows
-          .map(
-            ([label, value]) => `
+          .map(([label, value]) => {
+            const rawValue = String(value || "").trim();
+            const displayValue = formatRestV2CompactValue(rawValue, 120) || "N/A";
+            const hoverMeta = resolveBase64DecodedHoverMeta(rawValue, {
+              maxLength: 2000,
+            });
+            const hoverAttributes = hoverMeta.title
+              ? ` title="${escapeHtml(hoverMeta.title)}" aria-label="${escapeHtml(hoverMeta.title)}"`
+              : "";
+            return `
           <div class="rest-v2-profile-fact">
             <span class="rest-v2-profile-fact-label">${escapeHtml(label)}</span>
-            <span class="rest-v2-profile-fact-value">${escapeHtml(formatRestV2CompactValue(String(value || ""), 120) || "N/A")}</span>
+            <span class="rest-v2-profile-fact-value${hoverMeta.title ? " hr-base64-hover-target" : ""}"${hoverAttributes}>${escapeHtml(displayValue)}</span>
           </div>
-        `
-          )
+        `;
+          })
           .join("");
         const attributeMarkup =
           attributes.length > 0
@@ -19901,16 +20004,22 @@ function renderRestV2ProfileHistoryTool(section, harvestList = []) {
               <p class="rest-v2-profile-attributes-title">Profile Attributes</p>
               <ul class="rest-v2-profile-attributes-list">
                 ${attributes
-                  .map(
-                    ([key, value]) => `
+                  .map(([key, value]) => {
+                    const rawValue = String(value || "").trim();
+                    const displayValue = formatRestV2CompactValue(rawValue, 120) || "N/A";
+                    const hoverMeta = resolveBase64DecodedHoverMeta(rawValue, {
+                      maxLength: 2000,
+                    });
+                    const hoverAttributes = hoverMeta.title
+                      ? ` title="${escapeHtml(hoverMeta.title)}" aria-label="${escapeHtml(hoverMeta.title)}"`
+                      : "";
+                    return `
                   <li class="rest-v2-profile-attributes-item">
                     <span class="rest-v2-profile-attributes-key">${escapeHtml(String(key || "").trim())}</span>
-                    <span class="rest-v2-profile-attributes-value">${escapeHtml(
-                      formatRestV2CompactValue(String(value || "").trim(), 120) || "N/A"
-                    )}</span>
+                    <span class="rest-v2-profile-attributes-value${hoverMeta.title ? " hr-base64-hover-target" : ""}"${hoverAttributes}>${escapeHtml(displayValue)}</span>
                   </li>
-                `
-                  )
+                `;
+                  })
                   .join("")}
               </ul>
             </div>
@@ -31041,7 +31150,7 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
   }
   hydrateRestV2ContextFromPartnerSsoOverride(context);
 
-  const partnerFrameworkStatus = resolveRestV2PreferredPartnerFrameworkStatusForContext(context);
+  const partnerFrameworkStatus = resolveRestV2ExactPartnerFrameworkStatusForContext(context);
   const visitorIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Visitor-Identifier");
   const decodedPartnerFrameworkStatus = stringifyRestV2PartnerFrameworkStatusPayload(partnerFrameworkStatus, {
     pretty: false,
@@ -31058,7 +31167,7 @@ async function createRestV2PartnerSsoProfileForFlow(context = null, flowId = "",
   const expectedProviderId = String(resolveRestV2ExpectedPartnerFrameworkProviderId(context) || "").trim();
   result.frameworkStatusPresent = isRestV2PartnerFrameworkStatusUsable(partnerFrameworkStatus);
   if (!result.frameworkStatusPresent) {
-    result.error = "Missing AP-Partner-Framework-Status from REST session response.";
+    result.error = "Missing exact AP-Partner-Framework-Status captured from a trusted partner flow.";
     emitRestV2DebugEvent(normalizedFlowId, {
       source: "extension",
       phase: "profiles-sso-create-error",
@@ -66243,10 +66352,13 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
       : null;
   const directPartner = String(resolveRestV2PartnerNameFromContext(resolvedContext) || "").trim();
   const learningPartner = String(resolveRestV2LearningPartnerNameFromContext(resolvedContext) || "").trim();
-  const directPartnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
-    resolveRestV2PartnerFrameworkStatusFromContext(resolvedContext)
-  );
+  const exactPartnerFrameworkStatus = resolveRestV2ExactPartnerFrameworkStatusForContext(resolvedContext);
   const preferredPartnerFrameworkStatus = resolveRestV2PreferredPartnerFrameworkStatusForContext(resolvedContext);
+  const exactPartnerFrameworkStatusRequired =
+    String(resolvedEntry?.sectionKey || "").trim() === "partnerSso" ||
+    (resolvedEntry?.usesPartnerFrameworkStatus === true &&
+      resolvedEntry?.usesPartnerPath === true &&
+      (resolvedEntry?.usesBodySamlResponse === true || resolvedEntry?.usesBodyDomainName === true));
   const hasTrustedPartnerSsoSaml =
     typeof isRestV2TrustedPartnerSsoSamlContext === "function"
       ? isRestV2TrustedPartnerSsoSamlContext(resolvedContext)
@@ -66312,7 +66424,9 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (resolvedEntry.contentType) {
     fieldValues["header.Content-Type"] = String(resolvedEntry.contentType || "").trim();
   }
-  const usablePartnerFrameworkStatus = String(preferredPartnerFrameworkStatus || "").trim();
+  const usablePartnerFrameworkStatus = String(
+    exactPartnerFrameworkStatusRequired ? exactPartnerFrameworkStatus : preferredPartnerFrameworkStatus
+  ).trim();
   if (resolvedEntry.usesPartnerFrameworkStatus === true && usablePartnerFrameworkStatus) {
     fieldValues["header.AP-Partner-Framework-Status"] = usablePartnerFrameworkStatus;
   }
@@ -66434,6 +66548,16 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
   if (missingRequiredFields.includes("header.AP-Partner-Framework-Status")) {
     if (partnerFrameworkStatusValidation?.rawInputPresent === true && partnerFrameworkStatusValidation.ok !== true) {
       notes.push(String(partnerFrameworkStatusValidation.error || "").trim() || "Partner framework status validation failed.");
+    } else if (
+      exactPartnerFrameworkStatusRequired &&
+      !exactPartnerFrameworkStatus &&
+      String(preferredPartnerFrameworkStatus || "").trim()
+    ) {
+      notes.push(
+        `Section 6 Partner SSO requires the exact AP-Partner-Framework-Status captured from a real partner flow. UnderPAR learned a likely value from ${String(
+          resolvedContext.learningPartnerSource || "the recorded auth flow"
+        ).trim()}, but it will not hydrate that inferred header into this request.`
+      );
     } else if (hasInferredPartnerHints) {
       notes.push(
         `UnderPAR inferred partner SSO context from ${String(resolvedContext.learningPartnerSource || "the recorded auth flow").trim()}, but this API requires the exact AP-Partner-Framework-Status payload captured from a real partner flow.`
@@ -66779,6 +66903,15 @@ function buildRestV2LearningContextItemHtml(programmer = null) {
             const isMissing = missingRequiredFields.includes(normalizedFieldName) || !hasValue;
             const rawValue = hasValue ? fieldValues[normalizedFieldName] : "Pending";
             const valueText = formatRestV2LearningContextValue(rawValue) || "Pending";
+            const hoverMeta = resolveBase64DecodedHoverMeta(
+              Array.isArray(rawValue) || (rawValue && typeof rawValue === "object") ? valueText : rawValue,
+              {
+                maxLength: 3200,
+              }
+            );
+            const hoverAttributes = hoverMeta.title
+              ? ` title="${escapeHtml(hoverMeta.title)}" aria-label="${escapeHtml(hoverMeta.title)}"`
+              : "";
             return `
               <article class="hr-learning-context-field${isMissing ? " is-missing" : ""}">
                 <div class="hr-learning-context-field-head">
@@ -66788,7 +66921,7 @@ function buildRestV2LearningContextItemHtml(programmer = null) {
                     ${isMissing ? '<span class="hr-learning-context-field-badge hr-learning-context-field-badge--pending">Pending</span>' : '<span class="hr-learning-context-field-badge hr-learning-context-field-badge--ready">Hydrated</span>'}
                   </span>
                 </div>
-                <pre class="hr-learning-context-field-value">${escapeHtml(valueText)}</pre>
+                <pre class="hr-learning-context-field-value${hoverMeta.title ? " hr-base64-hover-target" : ""}"${hoverAttributes}>${escapeHtml(valueText)}</pre>
               </article>
             `;
           })
@@ -91028,7 +91161,7 @@ function resolveRestV2LearningPartnerFrameworkStatusFromContext(context = null) 
   return "";
 }
 
-function resolveRestV2PreferredPartnerFrameworkStatusForContext(context = null) {
+function resolveRestV2ExactPartnerFrameworkStatusForContext(context = null) {
   if (!context || typeof context !== "object") {
     return "";
   }
@@ -91039,6 +91172,20 @@ function resolveRestV2PreferredPartnerFrameworkStatusForContext(context = null) 
     resolveRestV2PartnerFrameworkStatusFromContext(context)
   );
   if (isRestV2PartnerFrameworkStatusCompatibleWithContext(directValue, context)) {
+    return directValue;
+  }
+  return "";
+}
+
+function resolveRestV2PreferredPartnerFrameworkStatusForContext(context = null) {
+  if (!context || typeof context !== "object") {
+    return "";
+  }
+  if (context.partnerFrameworkStatusOverrideBlocked === true) {
+    return "";
+  }
+  const directValue = resolveRestV2ExactPartnerFrameworkStatusForContext(context);
+  if (directValue) {
     return directValue;
   }
   const learningValue = normalizeRestV2PartnerFrameworkStatusForRequest(
