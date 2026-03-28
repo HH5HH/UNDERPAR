@@ -1336,8 +1336,6 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /function getHrContextSectionDisplayKeys\(programmer = null, services = null\)/);
   assert.match(popupSource, /function collectHarpoProgrammerDomainNames\(programmer = null, services = null\)/);
   assert.match(popupSource, /function shouldShowHarpoHrSection\(programmer = null, services = null\)/);
-  assert.match(popupSource, /HAR &amp; Pass Observatory/);
-  assert.match(popupSource, /LIVE DOMAIN RECORDER/);
   assert.match(popupSource, /Toggle DCR learning methods/);
   assert.match(popupSource, /REST V2 learning methods/);
   assert.match(popupSource, /JWT Inspector/);
@@ -1394,9 +1392,14 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(popupCss, /\.hr-learning-context-status-badge--active/);
   assert.match(popupCss, /\.hr-base64-hover-target/);
   assert.match(popupCss, /\.hr-context-section\.hr-context-section--harpo/);
-  assert.match(popupCss, /\.hr-harpo-status-card/);
-  assert.match(popupCss, /\.hr-harpo-mode-pill/);
-  assert.match(popupCss, /\.hr-harpo-domain-pill/);
+  assert.doesNotMatch(popupSource, /HAR &amp; Pass Observatory/);
+  assert.doesNotMatch(popupSource, /PRE-RECORDED HAR/);
+  assert.doesNotMatch(popupSource, /LIVE DOMAIN RECORDER/);
+  assert.doesNotMatch(popupSource, /configured domains/);
+  assert.doesNotMatch(popupSource, /Legacy AccessEnabler flows stay out of scope/);
+  assert.doesNotMatch(popupCss, /\.hr-harpo-status-card/);
+  assert.doesNotMatch(popupCss, /\.hr-harpo-mode-pill/);
+  assert.doesNotMatch(popupCss, /\.hr-harpo-domain-pill/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell/);
   assert.match(popupCss, /\.hr-rest-v2-docs-toggle/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell-body/);

@@ -69859,42 +69859,10 @@ function buildHarpoPanelSignature(programmer = null, services = null) {
 }
 
 function buildHarpoStatusItemHtml(programmer = null, services = null) {
-  const context = getHrContextSummary(programmer);
-  const domainNames = collectHarpoProgrammerDomainNames(programmer, services);
-  const visibleDomains = domainNames.slice(0, 4);
-  const hiddenDomainCount = Math.max(0, domainNames.length - visibleDomains.length);
-  const scopeLabel =
-    domainNames.length === 1 ? "1 configured domain" : `${Number(domainNames.length || 0)} configured domains`;
-
-  return `
-    <article class="metadata-item hr-harpo-status-card">
-      <p class="metadata-key">Status</p>
-      <div class="metadata-value hr-harpo-status-body">
-        <p class="hr-harpo-status-title">HAR &amp; Pass Observatory</p>
-        <p class="hr-harpo-status-copy">Analyze Adobe Pass traffic from a pre-recorded HAR file or a live recorder scoped to ${escapeHtml(
-          context.compositeLabel
-        )} domains.</p>
-        <div class="hr-harpo-mode-row" aria-label="${escapeHtml("HARPO input modes")}">
-          <span class="hr-harpo-mode-pill">PRE-RECORDED HAR</span>
-          <span class="hr-harpo-mode-pill">LIVE DOMAIN RECORDER</span>
-        </div>
-        <div class="hr-harpo-domain-block">
-          <p class="hr-harpo-domain-label">${escapeHtml(scopeLabel)}</p>
-          <div class="hr-harpo-domain-list">
-            ${visibleDomains.map((domainName) => `<span class="hr-harpo-domain-pill">${escapeHtml(domainName)}</span>`).join("")}
-            ${
-              hiddenDomainCount > 0
-                ? `<span class="hr-harpo-domain-pill hr-harpo-domain-pill--count">+${escapeHtml(
-                    String(hiddenDomainCount)
-                  )} more</span>`
-                : ""
-            }
-          </div>
-        </div>
-        <p class="hr-harpo-status-note">HARPO is reserved for modern Adobe Pass Media Companies with REST V2 and configured Channel domains. Legacy AccessEnabler flows stay out of scope.</p>
-      </div>
-    </article>
-  `;
+  if (!shouldShowHarpoHrSection(programmer, services)) {
+    return "";
+  }
+  return "";
 }
 
 async function handleHrContextHealthAction(action = "", programmer = null) {
