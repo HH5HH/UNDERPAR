@@ -1,5 +1,6 @@
 (function attachUnderParJwtInspector(globalObject) {
   const root = globalObject || globalThis;
+  const sharedDecodeHelpers = root.AdobePassDecodeHelpers || null;
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -59,6 +60,9 @@
   }
 
   function decodeBase64UrlText(value) {
+    if (sharedDecodeHelpers && typeof sharedDecodeHelpers.decodeBase64UrlText === "function") {
+      return sharedDecodeHelpers.decodeBase64UrlText(value);
+    }
     const normalized = String(value || "").trim();
     if (!normalized) {
       return "";
@@ -80,11 +84,17 @@
   }
 
   function isProbablyJwt(value) {
+    if (sharedDecodeHelpers && typeof sharedDecodeHelpers.isProbablyJwt === "function") {
+      return sharedDecodeHelpers.isProbablyJwt(value);
+    }
     const normalized = String(value || "").trim();
     return normalized.length >= 30 && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(normalized);
   }
 
   function extractJwtCandidateFromValue(value, seen = new Set()) {
+    if (sharedDecodeHelpers && typeof sharedDecodeHelpers.extractJwtCandidateFromValue === "function") {
+      return sharedDecodeHelpers.extractJwtCandidateFromValue(value, seen);
+    }
     if (typeof value === "string") {
       const normalized = value.trim();
       if (isProbablyJwt(normalized)) {
@@ -123,6 +133,9 @@
   }
 
   function extractJwtCandidateFromText(rawText = "") {
+    if (sharedDecodeHelpers && typeof sharedDecodeHelpers.extractJwtCandidateFromText === "function") {
+      return sharedDecodeHelpers.extractJwtCandidateFromText(rawText);
+    }
     const normalized = String(rawText || "").trim();
     if (!normalized) {
       return "";
@@ -203,6 +216,9 @@
   }
 
   function decodeJwtToken(token = "") {
+    if (sharedDecodeHelpers && typeof sharedDecodeHelpers.decodeJwtToken === "function") {
+      return sharedDecodeHelpers.decodeJwtToken(token);
+    }
     const normalized = String(token || "").trim();
     const parts = normalized.split(".");
     const headerSection = decodeJwtSection(normalized, 0);

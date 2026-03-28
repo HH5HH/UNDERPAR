@@ -68883,6 +68883,13 @@ const LEARNING_INSPECTOR_CONFIG_BY_TYPE = Object.freeze({
     placeholder: "Paste a Base64, Base64URL, header value, or JSON payload here...",
     defaultSummary: "Paste any Base64-looking value and UnderPAR will decode it locally.",
   }),
+  saml: Object.freeze({
+    title: "SAML Inspector",
+    inputLabel: "SAML Input",
+    actionLabel: "Inspect SAML",
+    placeholder: "Paste a SAMLRequest, SAMLResponse, wresult, redirect URL, form post, or HTML response here...",
+    defaultSummary: "Paste any SAML-looking value and UnderPAR will decode it locally.",
+  }),
 });
 
 function getLearningInspectorConfig(type = "jwt") {
@@ -68891,6 +68898,10 @@ function getLearningInspectorConfig(type = "jwt") {
 }
 
 let learningJwtInspectorFallbackUtility = null;
+
+function getLearningSharedDecodeHelpers() {
+  return globalThis.AdobePassDecodeHelpers || null;
+}
 
 function buildLearningJwtInspectorFallbackUtility() {
   function uniqueLearningJwtStrings(values = []) {
@@ -69332,6 +69343,7 @@ function buildLearningInspectorToolsHtml() {
     <section class="hr-learning-inspector-stack" aria-label="Learning inspectors">
       ${buildLearningInspectorCardHtml("jwt")}
       ${buildLearningInspectorCardHtml("base64")}
+      ${buildLearningInspectorCardHtml("saml")}
     </section>
   `;
 }
@@ -69479,6 +69491,10 @@ function resolveLearningBase64Inspection(rawInput = "") {
   if (!normalizedInput) {
     return null;
   }
+  const sharedHelpers = getLearningSharedDecodeHelpers();
+  if (sharedHelpers && typeof sharedHelpers.inspectBase64Value === "function") {
+    return sharedHelpers.inspectBase64Value(normalizedInput);
+  }
   const candidate = extractBase64CandidateFromText(normalizedInput) || normalizedInput;
   const candidateOptions = Array.from(new Set([candidate, decodeURIComponentSafe(candidate)].filter(Boolean)));
   for (const option of candidateOptions) {
@@ -69564,6 +69580,88 @@ function buildLearningBase64InspectorMarkup(inspection = null) {
   `;
 }
 
+function buildLearningInspectorNameValueTable(rows = []) {
+  const safeRows = Array.isArray(rows)
+    ? rows.filter((row) => String(row?.name || "").trim() && String(row?.value || "").trim())
+    : [];
+  if (!safeRows.length) {
+    return '<p class="up-jwt-empty-state">No decoded fields.</p>';
+  }
+  return `<dl class="up-jwt-object-list">${safeRows
+    .map((row) => `<dt>${escapeHtml(String(row.name || ""))}</dt><dd>${escapeHtml(String(row.value || ""))}</dd>`)
+    .join("")}</dl>`;
+}
+
+function buildLearningSamlInspectorMarkup(inspection = null) {
+  const matches = Array.isArray(inspection?.matches) ? inspection.matches : [];
+  if (!matches.length) {
+    return '<p class="up-jwt-empty-state">No SAML value is available to inspect.</p>';
+  }
+  const uniqueFieldNames = Array.from(new Set(matches.map((match) => String(match?.originName || "").trim()).filter(Boolean)));
+  return `
+    <div class="up-jwt-layout">
+      <section class="up-jwt-panel">
+        <header class="up-jwt-panel-head">
+          <p class="up-jwt-panel-title">SAML Input</p>
+          <p class="up-jwt-panel-subtitle">Raw SAML-bearing input shown without sending the payload to any third-party service.</p>
+        </header>
+        <div class="up-jwt-panel-body">
+          <div class="up-jwt-summary-grid">
+            <article class="up-jwt-summary-card">
+              <p class="up-jwt-summary-label">Messages</p>
+              <p class="up-jwt-summary-value">${escapeHtml(String(matches.length))}</p>
+            </article>
+            <article class="up-jwt-summary-card">
+              <p class="up-jwt-summary-label">Source Fields</p>
+              <p class="up-jwt-summary-value">${escapeHtml(String(uniqueFieldNames.length))}</p>
+            </article>
+            <article class="up-jwt-summary-card">
+              <p class="up-jwt-summary-label">Decode State</p>
+              <p class="up-jwt-summary-value">Decoded locally</p>
+            </article>
+          </div>
+          <section class="up-jwt-object-section">
+            <p class="up-jwt-object-title">Input</p>
+            <pre class="hr-learning-inspector-code">${escapeHtml(chunkLearningInspectorText(String(inspection?.rawText || ""), 96))}</pre>
+          </section>
+        </div>
+      </section>
+      <section class="up-jwt-panel">
+        <header class="up-jwt-panel-head">
+          <p class="up-jwt-panel-title">Decoded SAML</p>
+          <p class="up-jwt-panel-subtitle">HTTP-Redirect, POST, and WS-Fed payloads decoded locally using the shared helper.</p>
+        </header>
+        <div class="up-jwt-panel-body">
+          <div class="up-jwt-sections">
+            ${matches.map((match, index) => `
+              <section class="up-jwt-object-section">
+                <p class="up-jwt-object-title">Message ${index + 1}: ${escapeHtml(String(match?.originName || "input"))}</p>
+                ${buildLearningInspectorNameValueTable([
+                  { name: "Decode Path", value: String(match?.decodeMethod || "raw XML") },
+                  { name: "Supporting Fields", value: String(Array.isArray(match?.supportingFields) ? match.supportingFields.length : 0) },
+                ])}
+                <p class="up-jwt-object-title">Original Value</p>
+                <pre class="hr-learning-inspector-code">${escapeHtml(String(match?.originValue || "").trim())}</pre>
+                ${Array.isArray(match?.supportingFields) && match.supportingFields.length
+                  ? `
+                    <p class="up-jwt-object-title">Supporting Fields</p>
+                    ${buildLearningInspectorNameValueTable(match.supportingFields.map((field) => ({
+                      name: String(field?.name || ""),
+                      value: String(field?.value || ""),
+                    })))}
+                  `
+                  : ""}
+                <p class="up-jwt-object-title">Decoded XML</p>
+                <pre class="hr-learning-inspector-code">${escapeHtml(String(match?.decodedXml || "").trim())}</pre>
+              </section>
+            `).join("")}
+          </div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 function setLearningInspectorResult(type = "jwt", bodyHtml = "") {
   const resultElement = getLearningInspectorField(type, "result");
   if (!(resultElement instanceof HTMLElement)) {
@@ -69621,6 +69719,26 @@ function inspectLearningBase64Input() {
   showLearningInspectorResult("base64", buildLearningBase64InspectorMarkup(inspection));
 }
 
+async function inspectLearningSamlInput() {
+  const inputElement = getLearningInspectorField("saml", "input");
+  const rawInput = inputElement instanceof HTMLTextAreaElement ? String(inputElement.value || "").trim() : "";
+  if (!rawInput) {
+    showLearningInspectorError("saml", "Paste a SAMLRequest, SAMLResponse, wresult, redirect URL, form post, or HTML payload first.");
+    return;
+  }
+  const sharedHelpers = getLearningSharedDecodeHelpers();
+  if (!sharedHelpers || typeof sharedHelpers.inspectSamlInput !== "function") {
+    showLearningInspectorError("saml", "UnderPAR could not load the shared SAML decoder helper.");
+    return;
+  }
+  const inspection = await sharedHelpers.inspectSamlInput(rawInput, { rawFieldName: "input" });
+  if (!inspection || !Array.isArray(inspection.matches) || inspection.matches.length === 0) {
+    showLearningInspectorError("saml", "UnderPAR could not locate a decodable SAML value in that input.");
+    return;
+  }
+  showLearningInspectorResult("saml", buildLearningSamlInspectorMarkup(inspection));
+}
+
 function wireLearningInspectors(section) {
   if (!(section instanceof HTMLElement)) {
     return;
@@ -69659,6 +69777,10 @@ function wireLearningInspectors(section) {
       event.preventDefault();
       if (type === "base64") {
         inspectLearningBase64Input();
+        return;
+      }
+      if (type === "saml") {
+        void inspectLearningSamlInput();
         return;
       }
       inspectLearningJwtInput();
