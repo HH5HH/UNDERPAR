@@ -8405,6 +8405,8 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.selectedProgrammerKey = "";
   state.mvpdCacheByRequestor.clear();
   state.mvpdLoadPromiseByRequestor.clear();
+  state.domainCacheByRequestor.clear();
+  state.harpoSelectedDomainByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
   state.restV2PrewarmedAppsByProgrammerId.clear();
   state.restV2PreparedLoginBySelectionKey.clear();
@@ -9644,17 +9646,16 @@ function selectPreferredResetTempPassAppForRequestor(resetTempPassApps = [], req
   if (candidates.length === 0) {
     return null;
   }
-  const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedProgrammerId = String(programmerId || "").trim();
-  if (normalizedRequestorId) {
-    const mapped =
-      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) ||
+  if (normalizedProgrammerId) {
+    const sharedProgrammerApp =
+      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedProgrammerId, normalizedProgrammerId)) ||
       null;
-    if (mapped) {
-      return mapped;
+    if (sharedProgrammerApp) {
+      return sharedProgrammerApp;
     }
   }
-  return candidates[0] || null;
+  return pickHighestRankedPassVaultServiceCandidate(candidates, normalizedProgrammerId) || candidates[0] || null;
 }
 
 function selectPreferredEsmAppForRequestor(esmApps = [], requestorId = "", programmerId = "") {
@@ -9662,17 +9663,16 @@ function selectPreferredEsmAppForRequestor(esmApps = [], requestorId = "", progr
   if (candidates.length === 0) {
     return null;
   }
-  const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedProgrammerId = String(programmerId || "").trim();
-  if (normalizedRequestorId) {
-    const mapped =
-      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) ||
+  if (normalizedProgrammerId) {
+    const sharedProgrammerApp =
+      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedProgrammerId, normalizedProgrammerId)) ||
       null;
-    if (mapped) {
-      return mapped;
+    if (sharedProgrammerApp) {
+      return sharedProgrammerApp;
     }
   }
-  return candidates[0] || null;
+  return pickHighestRankedPassVaultServiceCandidate(candidates, normalizedProgrammerId) || candidates[0] || null;
 }
 
 function resolveLatestPremiumServiceAppInfo(programmerId = "", fallbackAppInfo = null, debugMeta = null) {
@@ -10279,6 +10279,69 @@ function setRequestorScopedMvpdLoadPromise(requestorId = "", promise = null) {
   return promise;
 }
 
+function getRequestorScopedDomainCache(requestorId = "") {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return null;
+  }
+  return state.domainCacheByRequestor.get(key) || null;
+}
+
+function setRequestorScopedDomainCache(requestorId = "", value = null) {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    state.domainCacheByRequestor.delete(key);
+    return null;
+  }
+  const snapshot = value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const domainName = String(entry.domainName || "").trim();
+      if (!domainName) {
+        return null;
+      }
+      return {
+        id: String(entry.id || domainName).trim() || domainName,
+        domainName,
+        name: String(entry.name || domainName).trim() || domainName,
+      };
+    })
+    .filter(Boolean);
+  if (snapshot.length === 0) {
+    state.domainCacheByRequestor.delete(key);
+    return null;
+  }
+  state.domainCacheByRequestor.set(key, snapshot);
+  return snapshot;
+}
+
+function getRequestorScopedHarpoSelectedDomain(requestorId = "") {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return "";
+  }
+  return String(state.harpoSelectedDomainByRequestor.get(key) || "").trim();
+}
+
+function setRequestorScopedHarpoSelectedDomain(requestorId = "", domainName = "") {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return "";
+  }
+  const normalizedDomainName = String(domainName || "").trim();
+  if (!normalizedDomainName) {
+    state.harpoSelectedDomainByRequestor.delete(key);
+    return "";
+  }
+  state.harpoSelectedDomainByRequestor.set(key, normalizedDomainName);
+  return normalizedDomainName;
+}
+
 function getRequestorScopedRestV2AuthContext(requestorId = "") {
   const key = getEnvironmentScopedRequestorKey(requestorId);
   if (!key) {
@@ -10307,6 +10370,8 @@ function setRequestorScopedRestV2AuthContext(requestorId = "", value = null) {
 function clearEnvironmentAwareRegisteredAppState(reason = "environment-change") {
   state.mvpdCacheByRequestor.clear();
   state.mvpdLoadPromiseByRequestor.clear();
+  state.domainCacheByRequestor.clear();
+  state.harpoSelectedDomainByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
   state.restV2PrewarmedAppsByProgrammerId.clear();
   state.applicationsByProgrammerId.clear();
@@ -12817,6 +12882,8 @@ const state = {
   lastSilentBootstrapAttemptAt: 0,
   mvpdCacheByRequestor: new Map(),
   mvpdLoadPromiseByRequestor: new Map(),
+  domainCacheByRequestor: new Map(),
+  harpoSelectedDomainByRequestor: new Map(),
   restV2AuthContextByRequestor: new Map(),
   restV2PrewarmedAppsByProgrammerId: new Map(),
   restV2PreparedLoginBySelectionKey: new Map(),
@@ -19747,6 +19814,7 @@ async function fetchRestV2ConfigurationForHarvest(harvest) {
   const responseText = await response.text().catch(() => "");
   const parsedPayload = parseJsonText(responseText, null);
   const mvpds = normalizeRestV2MvpdCollection(parsedPayload || {});
+  const domains = normalizeRestV2DomainCollection(parsedPayload || {});
   const checkedAt = Date.now();
   const result = {
     checkedAt,
@@ -19780,6 +19848,12 @@ async function fetchRestV2ConfigurationForHarvest(harvest) {
       boardingStatus: String(item?.boardingStatus || "").trim(),
     })),
     mvpdCount: mvpds.length,
+    domainRows: domains.map((item) => ({
+      id: String(item?.id || item?.domainName || "").trim(),
+      domainName: String(item?.domainName || "").trim(),
+      name: String(item?.name || item?.domainName || "").trim(),
+    })),
+    domainCount: domains.length,
     responsePreview: truncateDebugText(responseText, 3000),
     responsePayload: parsedPayload ?? responseText,
     error: "",
@@ -19800,6 +19874,7 @@ async function fetchRestV2ConfigurationForHarvest(harvest) {
     appName: result.appName,
     authMode: result.authMode,
     mvpdCount: result.mvpdCount,
+    domainCount: result.domainCount,
     responsePreview: result.responsePreview,
   });
 
@@ -23844,13 +23919,6 @@ async function switchRegisteredApplicationHealthPremiumService(queryContext = nu
       )} scope.`,
     };
   }
-  if (requestorId && !appSupportsServiceProvider(selectedApplication, requestorId, programmerId)) {
-    return {
-      ok: false,
-      error: `${firstNonEmptyString([selectedApplication?.name, normalizedGuid])} is not associated with RequestorId ${requestorId}.`,
-    };
-  }
-
   const hydratedServiceRecord = await hydratePassVaultServiceRecordWithContext(
     {
       key: normalizedServiceKey,
@@ -27719,6 +27787,14 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
     orderedCandidates.push(item);
   };
 
+  const mappingPreferred = selectPreferredRestV2AppForRequestor(
+    baseCandidates,
+    requestorId,
+    resolvedProgrammer.programmerId
+  );
+  pushCandidate(mappingPreferred);
+  pushCandidate(allowAppOverride ? appInfoOverride : null);
+
   if (
     cachedAuthContext &&
     cachedAuthContext.programmerId === resolvedProgrammer.programmerId &&
@@ -27728,23 +27804,16 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
       pushCandidate(byGuid.get(guid));
     });
   }
-
-  const mappingPreferred = selectPreferredRestV2AppForRequestor(
-    baseCandidates,
-    requestorId,
-    resolvedProgrammer.programmerId
-  );
-  pushCandidate(mappingPreferred);
-  pushCandidate(allowAppOverride ? appInfoOverride : null);
   baseCandidates.forEach((item) => pushCandidate(item));
 
   const resolvedApp =
+    mappingPreferred ||
+    (allowAppOverride ? appInfoOverride : null) ||
     (cachedAuthContext &&
     cachedAuthContext.programmerId === resolvedProgrammer.programmerId &&
     cachedAuthContext.preferredAppGuid
       ? orderedCandidates.find((item) => item.guid === cachedAuthContext.preferredAppGuid)
       : null) ||
-    mappingPreferred ||
     (orderedCandidates.length === 1 ? orderedCandidates[0] : null) ||
     null;
 
@@ -60278,6 +60347,8 @@ function buildRestV2BobtoolsActionErrorResult(harvest = null, apiAction = "", me
     profileKeys: [],
     mvpdRows: [],
     mvpdCount: 0,
+    domainRows: [],
+    domainCount: 0,
     responsePreview: String(options?.responsePreview || "").trim(),
     responsePayload: cloneJsonLikeValue(options?.responsePayload, {}),
     error: String(message || "").trim() || "Unable to run REST V2 action.",
@@ -66077,6 +66148,21 @@ function wireHrContextSectionActions(section) {
     if (!target) {
       return;
     }
+    const harpoDomainSelect = target.closest("[data-harpo-domain-select]");
+    if (harpoDomainSelect) {
+      event.stopPropagation();
+      const requestorId = String(
+        harpoDomainSelect.getAttribute("data-requestor-id") || state.selectedRequestorId || ""
+      ).trim();
+      if (!requestorId) {
+        return;
+      }
+      setRequestorScopedHarpoSelectedDomain(requestorId, String(harpoDomainSelect.value || "").trim());
+      clearRestV2LearningUiState({
+        controllerReason: "harpo-domain-select-change",
+      });
+      return;
+    }
     const dcrRegisterAppSelect = target.closest("[data-dcr-register-app-select]");
     if (!dcrRegisterAppSelect) {
       return;
@@ -67015,10 +67101,32 @@ function getFirstCachedMvpdIdForRequestor(requestorId = "") {
   return String(firstEntry?.value || "").trim();
 }
 
+function isExcludedHarpoDomainName(domainName = "") {
+  return String(domainName || "").trim().toLowerCase() === "adobe.com";
+}
+
+function collectRequestorScopedConfiguredDomainNames(requestorId = "") {
+  const cache = getRequestorScopedDomainCache(requestorId);
+  if (!Array.isArray(cache) || cache.length === 0) {
+    return [];
+  }
+  return uniquePreserveOrder(
+    cache
+      .map((entry) => String(entry?.domainName || entry?.name || entry?.id || "").trim())
+      .filter((domainName) => domainName && !isExcludedHarpoDomainName(domainName))
+  );
+}
+
 function collectRestV2LearningRequestorDomainNames(programmer = null, requestorId = "") {
-  const normalizedRequestorId = normalizeEntityToken(extractEntityIdFromToken(requestorId));
+  const resolvedRequestorId = String(extractEntityIdFromToken(requestorId) || "").trim();
+  const normalizedRequestorId = normalizeEntityToken(resolvedRequestorId);
   if (!normalizedRequestorId) {
     return [];
+  }
+
+  const configuredDomainNames = collectRequestorScopedConfiguredDomainNames(resolvedRequestorId);
+  if (configuredDomainNames.length > 0) {
+    return configuredDomainNames;
   }
 
   const domainNames = [];
@@ -67038,6 +67146,9 @@ function collectRestV2LearningRequestorDomainNames(programmer = null, requestorI
     }
     const normalizedValue = String(value || "").trim();
     if (!normalizedValue) {
+      return;
+    }
+    if (isExcludedHarpoDomainName(normalizedValue)) {
       return;
     }
     if (normalizeEntityToken(normalizedValue) === "all-domains") {
@@ -67075,6 +67186,11 @@ function collectRestV2LearningRequestorDomainNames(programmer = null, requestorI
 }
 
 function resolveRestV2LearningRequestorDomainName(programmer = null, requestorId = "") {
+  const resolvedRequestorId = String(extractEntityIdFromToken(requestorId) || "").trim();
+  const selectedHarpoDomain = getRequestorScopedHarpoSelectedDomain(resolvedRequestorId);
+  if (selectedHarpoDomain) {
+    return selectedHarpoDomain;
+  }
   return String(collectRestV2LearningRequestorDomainNames(programmer, requestorId)[0] || "").trim();
 }
 
@@ -69972,10 +70088,16 @@ function buildHarpoPanelSignature(programmer = null, services = null) {
   const programmerId = String(programmer?.programmerId || "").trim();
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const domainNames = collectHarpoProgrammerDomainNames(programmer, services);
+  const configuredDomainNames = selectedRequestorId ? collectRequestorScopedConfiguredDomainNames(selectedRequestorId) : [];
+  const selectedDomainName = selectedRequestorId ? getRequestorScopedHarpoSelectedDomain(selectedRequestorId) : "";
+  const configurationPending = selectedRequestorId && getRequestorScopedMvpdLoadPromise(selectedRequestorId) ? "1" : "0";
   return [
     programmerId,
     selectedRequestorId,
     `domains:${domainNames.join(",")}`,
+    `configured:${configuredDomainNames.join(",")}`,
+    `selected:${selectedDomainName}`,
+    `loading:${configurationPending}`,
     `restv2:${services?.restV2 ? "1" : "0"}`,
   ].join("|");
 }
@@ -69984,7 +70106,56 @@ function buildHarpoStatusItemHtml(programmer = null, services = null) {
   if (!shouldShowHarpoHrSection(programmer, services)) {
     return "";
   }
-  return "";
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  if (!selectedRequestorId) {
+    return '<p class="metadata-empty">Select a RequestorId to preview REST V2 /configuration DOMAIN entries for HARPO.</p>';
+  }
+
+  const configuredDomainRows = (Array.isArray(getRequestorScopedDomainCache(selectedRequestorId))
+    ? getRequestorScopedDomainCache(selectedRequestorId)
+    : []
+  ).filter((row) => !isExcludedHarpoDomainName(String(row?.domainName || "").trim()));
+  const configurationPending = Boolean(getRequestorScopedMvpdLoadPromise(selectedRequestorId));
+  if (configuredDomainRows.length === 0) {
+    return `<p class="metadata-empty">${
+      configurationPending
+        ? `Loading REST V2 /configuration DOMAIN entries for ${escapeHtml(selectedRequestorId)}...`
+        : `No DOMAIN entries were parsed from REST V2 /configuration for ${escapeHtml(selectedRequestorId)}.`
+    }</p>`;
+  }
+
+  const selectedDomainValue = String(getRequestorScopedHarpoSelectedDomain(selectedRequestorId) || "").trim();
+  const selectId = `hr-harpo-domain-select-${
+    selectedRequestorId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "requestor"
+  }`;
+  const optionMarkup = configuredDomainRows
+    .map((row) => {
+      const domainName = String(row?.domainName || "").trim();
+      if (!domainName) {
+        return "";
+      }
+      const optionLabel = String(row?.name || domainName).trim() || domainName;
+      return `<option value="${escapeHtml(domainName)}"${selectedDomainValue === domainName ? " selected" : ""}>${escapeHtml(
+        optionLabel
+      )}</option>`;
+    })
+    .join("");
+
+  return `
+    <div class="hr-harpo-domain-picker">
+      <label for="${escapeHtml(selectId)}">Domains</label>
+      <select
+        id="${escapeHtml(selectId)}"
+        class="hr-harpo-domain-select"
+        data-harpo-domain-select
+        data-requestor-id="${escapeHtml(selectedRequestorId)}"
+        aria-label="${escapeHtml(`HARPO configured domains for ${selectedRequestorId}`)}"
+      >
+        <option value=""></option>
+        ${optionMarkup}
+      </select>
+    </div>
+  `;
 }
 
 async function handleHrContextHealthAction(action = "", programmer = null) {
@@ -71788,6 +71959,8 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.premiumServiceRecoveryPromiseByProgrammerKey.clear();
   state.mvpdCacheByRequestor.clear();
   state.mvpdLoadPromiseByRequestor.clear();
+  state.domainCacheByRequestor.clear();
+  state.harpoSelectedDomainByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
   state.restV2PrewarmedAppsByProgrammerId.clear();
   state.zipKeyImportPending = false;
@@ -80171,6 +80344,8 @@ async function resetToSignedOutState(options = {}) {
   state.consoleCsrfToken = "";
   state.consoleBootstrapState = null;
   state.mvpdCacheByRequestor.clear();
+  state.domainCacheByRequestor.clear();
+  state.harpoSelectedDomainByRequestor.clear();
   state.sessionMonitorConsecutiveInactiveDetections = 0;
   state.sessionMonitorLastProbeSource = "unknown";
   state.sessionMonitorInactivityGuardUntil = 0;
@@ -82239,30 +82414,17 @@ function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", prog
     return null;
   }
 
-  const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedProgrammerId = String(programmerId || "").trim();
-  const cachedAuthContext = normalizedRequestorId ? getRequestorScopedRestV2AuthContext(normalizedRequestorId) : null;
-  if (
-    cachedAuthContext &&
-    cachedAuthContext.preferredAppGuid &&
-    (!normalizedProgrammerId || String(cachedAuthContext.programmerId || "").trim() === normalizedProgrammerId)
-  ) {
-    const cachedMatch = candidates.find((item) => item.guid === cachedAuthContext.preferredAppGuid) || null;
-    if (cachedMatch) {
-      return cachedMatch;
-    }
-  }
-
-  if (normalizedRequestorId) {
-    const mapped =
-      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) ||
+  if (normalizedProgrammerId) {
+    const sharedProgrammerApp =
+      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedProgrammerId, normalizedProgrammerId)) ||
       null;
-    if (mapped) {
-      return mapped;
+    if (sharedProgrammerApp) {
+      return sharedProgrammerApp;
     }
   }
 
-  return candidates[0] || null;
+  return pickHighestRankedPassVaultServiceCandidate(candidates, normalizedProgrammerId) || candidates[0] || null;
 }
 
 function normalizeScope(scope) {
@@ -84801,10 +84963,10 @@ function collectRestV2AppCandidatesFromPremiumApps(premiumApps) {
     candidates.push(appInfo);
   };
 
+  pushCandidate(premiumApps?.restV2);
   if (Array.isArray(premiumApps?.restV2Apps)) {
     premiumApps.restV2Apps.forEach((appInfo) => pushCandidate(appInfo));
   }
-  pushCandidate(premiumApps?.restV2);
 
   return candidates;
 }
@@ -92823,8 +92985,36 @@ function extractRestV2MvpdLogoUrl(item = null) {
   return "";
 }
 
+function getRestV2ConfigurationCollection(payload = null, keyCandidates = []) {
+  const normalizedCandidates = (Array.isArray(keyCandidates) ? keyCandidates : [keyCandidates])
+    .map((candidate) => String(candidate || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (!payload || typeof payload !== "object" || normalizedCandidates.length === 0) {
+    return [];
+  }
+
+  const findCollection = (container = null) => {
+    if (!container || typeof container !== "object") {
+      return null;
+    }
+    for (const [key, value] of Object.entries(container)) {
+      const normalizedKey = String(key || "").trim().toLowerCase();
+      if (!normalizedKey || !normalizedCandidates.includes(normalizedKey) || !Array.isArray(value)) {
+        continue;
+      }
+      return value;
+    }
+    return null;
+  };
+
+  const requestorPayload = Object.entries(payload).find(
+    ([key, value]) => String(key || "").trim().toLowerCase() === "requestor" && value && typeof value === "object"
+  )?.[1] || null;
+  return findCollection(requestorPayload) || findCollection(payload) || [];
+}
+
 function normalizeRestV2MvpdCollection(payload) {
-  const collection = payload?.requestor?.mvpds || payload?.mvpds || payload?.requestor?.mvpd || [];
+  const collection = getRestV2ConfigurationCollection(payload, ["mvpds", "mvpd"]);
   if (!Array.isArray(collection)) {
     return [];
   }
@@ -92850,6 +93040,45 @@ function normalizeRestV2MvpdCollection(payload) {
       };
     })
     .filter(Boolean);
+}
+
+function normalizeRestV2DomainCollection(payload) {
+  const collection = getRestV2ConfigurationCollection(payload, ["domains", "domain"]);
+  if (!Array.isArray(collection)) {
+    return [];
+  }
+
+  const rows = [];
+  const seen = new Set();
+  collection.forEach((item) => {
+    let domainName = "";
+    let name = "";
+    if (typeof item === "string") {
+      domainName = String(item || "").trim();
+      name = domainName;
+    } else if (item && typeof item === "object") {
+      domainName = firstNonEmptyString([item.domainName, item.domain, item.name, item.displayName, item.id]);
+      name = firstNonEmptyString([item.displayName, item.name, domainName]);
+    }
+    const normalizedDomainName = String(domainName || "").trim();
+    if (!normalizedDomainName) {
+      return;
+    }
+    const normalizedKey = normalizedDomainName.toLowerCase();
+    if (isExcludedHarpoDomainName(normalizedKey)) {
+      return;
+    }
+    if (seen.has(normalizedKey)) {
+      return;
+    }
+    seen.add(normalizedKey);
+    rows.push({
+      id: normalizedDomainName,
+      domainName: normalizedDomainName,
+      name: String(name || normalizedDomainName).trim() || normalizedDomainName,
+    });
+  });
+  return rows;
 }
 
 function formatMvpdPickerLabel(mvpdId = "", metadata = null) {
@@ -95425,13 +95654,17 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
   }
 
   const mvpds = normalizeRestV2MvpdCollection(payload || {});
+  const domainRows = normalizeRestV2DomainCollection(payload || {});
   const map = new Map();
   for (const item of mvpds) {
     if (!map.has(item.id)) {
       map.set(item.id, item);
     }
   }
-  return map;
+  return {
+    map,
+    domainRows,
+  };
 }
 
 function orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestorId) {
@@ -95449,6 +95682,8 @@ function orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestor
     ordered.push(candidate);
   };
 
+  pushCandidate(resolvedApp);
+
   if (context.preferredAppGuid) {
     pushCandidate(byGuid.get(context.preferredAppGuid));
   }
@@ -95459,7 +95694,6 @@ function orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestor
     });
   }
 
-  pushCandidate(resolvedApp);
   candidates.forEach((candidate) => pushCandidate(candidate));
   return ordered;
 }
@@ -95477,7 +95711,11 @@ async function fetchRestV2ConfigurationUsingCandidateApps(programmer, requestorI
     const batch = candidates.slice(index, index + concurrency);
     const attempts = batch.map((appInfo) =>
       fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId)
-        .then((map) => ({ map, appInfo }))
+        .then((result) => ({
+          map: result?.map instanceof Map ? result.map : new Map(),
+          domainRows: Array.isArray(result?.domainRows) ? result.domainRows : [],
+          appInfo,
+        }))
         .catch((error) => {
           const normalized = error instanceof Error ? error : new Error(String(error));
           lastError = normalized;
@@ -95568,13 +95806,21 @@ async function loadMvpdsFromRestV2(requestorId) {
         hasRestV2Candidate = true;
         const resolvedApp = selectPreferredRestV2AppForRequestor(restV2Apps, requestorId, programmer.programmerId);
         const orderedCandidates = orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestorId);
-        const { map, appInfo } = await fetchRestV2ConfigurationUsingCandidateApps(
+        const { map, domainRows, appInfo } = await fetchRestV2ConfigurationUsingCandidateApps(
           programmer,
           requestorId,
           orderedCandidates
         );
 
         setRequestorScopedMvpdCache(requestorId, map);
+        setRequestorScopedDomainCache(requestorId, domainRows);
+        const configuredDomainNames = Array.isArray(domainRows)
+          ? domainRows.map((item) => String(item?.domainName || "").trim()).filter(Boolean)
+          : [];
+        const selectedHarpoDomain = getRequestorScopedHarpoSelectedDomain(requestorId);
+        if (selectedHarpoDomain && !configuredDomainNames.includes(selectedHarpoDomain)) {
+          setRequestorScopedHarpoSelectedDomain(requestorId, "");
+        }
         setRequestorScopedRestV2AuthContext(requestorId, {
           programmerId: programmer.programmerId,
           preferredAppGuid: appInfo.guid,
@@ -95585,6 +95831,7 @@ async function loadMvpdsFromRestV2(requestorId) {
           programmerId: programmer.programmerId,
           app: appInfo.appName,
           count: map.size,
+          domainCount: configuredDomainNames.length,
         });
         return map;
       } catch (error) {
@@ -95655,6 +95902,9 @@ async function populateMvpdSelectForRequestor(requestorId) {
       state.selectedMvpdId = "";
       syncGlobalQuickLaunchButtons();
       refreshRestV2LoginPanels();
+      refreshRestV2LearningUi(resolveSelectedProgrammer(), {
+        controllerReason: "requestor-configuration-empty",
+      });
       return;
     }
 
@@ -95695,6 +95945,9 @@ async function populateMvpdSelectForRequestor(requestorId) {
       onlyIfWorkspaceOpen: true,
       surfaceMissingSelectionError: false,
     });
+    refreshRestV2LearningUi(selectedProgrammer, {
+      controllerReason: "requestor-configuration-loaded",
+    });
     setStatus("", "info");
   } catch (error) {
     if (String(state.selectedRequestorId || "") !== expectedRequestorId) {
@@ -95717,6 +95970,9 @@ async function populateMvpdSelectForRequestor(requestorId) {
       forceRefresh: false,
       onlyIfWorkspaceOpen: true,
       surfaceMissingSelectionError: false,
+    });
+    refreshRestV2LearningUi(selectedProgrammer, {
+      controllerReason: "requestor-configuration-failed",
     });
     if (isRestV2ScopedAppMappingMissingError(error)) {
       setStatus("", "info");
@@ -95889,6 +96145,8 @@ function resetProgrammerRuntimeState() {
   state.selectedProgrammerKey = "";
   state.mvpdCacheByRequestor.clear();
   state.mvpdLoadPromiseByRequestor.clear();
+  state.domainCacheByRequestor.clear();
+  state.harpoSelectedDomainByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
   state.applicationsByProgrammerId.clear();
   state.programmerApplicationsLoadPromiseByProgrammerId.clear();

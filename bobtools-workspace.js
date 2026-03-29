@@ -1265,12 +1265,14 @@ function renderConfigurationResult(result = null) {
   const actionLabel = firstNonEmptyString([result?.apiActionLabel, getApiActionLabel(state.apiAction)]);
   const checkedAtLabel = formatDateTime(result?.checkedAt);
   const rows = Array.isArray(result?.mvpdRows) ? result.mvpdRows : [];
+  const domainRows = Array.isArray(result?.domainRows) ? result.domainRows : [];
   const previewRows = rows.slice(0, 120);
+  const previewDomains = domainRows.slice(0, 24);
 
   els.resultStatus.classList.remove("error", "success");
   if (result?.ok === true) {
     els.resultStatus.classList.add("success");
-    els.resultStatus.textContent = `${actionLabel}: ${rows.length} MVPD config entries`;
+    els.resultStatus.textContent = `${actionLabel}: ${rows.length} MVPD config entries | ${domainRows.length} DOMAIN entries`;
   } else {
     els.resultStatus.classList.add("error");
     els.resultStatus.textContent = `${actionLabel}: ERROR (${String(result?.error || "request_failed")})`;
@@ -1294,6 +1296,7 @@ function renderConfigurationResult(result = null) {
   const statusText = String(result?.statusText || "").trim();
   const endpoint = String(result?.endpointUrl || "").trim();
   const method = String(result?.method || "GET").trim().toUpperCase();
+  const domainSummary = previewDomains.map((row) => String(row?.domainName || row?.name || "").trim()).filter(Boolean).join(", ");
 
   els.resultSummary.hidden = false;
   els.resultSummary.innerHTML = `
@@ -1301,6 +1304,13 @@ function renderConfigurationResult(result = null) {
       String(rows.length)
     )}</p>
     ${rowMarkup ? `<ul class="bobtools-config-list">${rowMarkup}</ul>` : '<p class="bobtools-profile-row-empty">No MVPD entries were returned.</p>'}
+    ${
+      domainSummary
+        ? `<p class="bobtools-result-meta"><strong>DOMAINs:</strong> ${escapeHtml(domainSummary)}${
+            domainRows.length > previewDomains.length ? ` ... (+${domainRows.length - previewDomains.length} more)` : ""
+          }</p>`
+        : ""
+    }
     ${rows.length > previewRows.length ? `<p class="bobtools-result-meta">Showing ${previewRows.length} of ${rows.length} rows.</p>` : ""}
     <p class="bobtools-result-meta">${escapeHtml(method)} ${escapeHtml(endpoint)} | HTTP ${escapeHtml(String(status))} ${escapeHtml(statusText)}</p>
   `;

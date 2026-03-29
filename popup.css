@@ -3466,6 +3466,12 @@ select:disabled {
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
+.hr-harpo-domain-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .cm-shell {
   display: flex;
   flex-direction: column;

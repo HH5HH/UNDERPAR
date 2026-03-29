@@ -2679,21 +2679,29 @@ test("same-signature premium refresh preserves mounted stateful sections and onl
   assert.equal(shouldHydrateExistingPremiumServiceSection(pendingEsmSection, "esmWorkspace"), false);
 });
 
-test("REST V2 app selection preserves detected order while still reusing requestor-scoped app context", () => {
+test("REST V2 app selection stays media-company scoped and no longer blocks shared registered apps on requestor hints", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const selectRestV2Source = extractFunctionSource(popupSource, "selectPreferredRestV2AppForRequestor");
+  const switchServiceSource = extractFunctionSource(popupSource, "switchRegisteredApplicationHealthPremiumService");
   const loadMvpdsSource = extractFunctionSource(popupSource, "loadMvpdsFromRestV2");
   const fetchWithPremiumAuthSource = extractFunctionSource(popupSource, "fetchWithPremiumAuth");
 
-  assert.match(selectRestV2Source, /const cachedAuthContext = normalizedRequestorId \? getRequestorScopedRestV2AuthContext\(normalizedRequestorId\) : null;/);
-  assert.match(selectRestV2Source, /const cachedMatch = candidates\.find\(\(item\) => item\.guid === cachedAuthContext\.preferredAppGuid\) \|\| null;/);
-  assert.match(selectRestV2Source, /const mapped =\s*candidates\.find\(\(appInfo\) => appSupportsServiceProvider\(appInfo,\s*normalizedRequestorId,\s*normalizedProgrammerId\)\)/);
-  assert.doesNotMatch(selectRestV2Source, /getProvisioningRank/);
-  assert.match(selectRestV2Source, /return candidates\[0\] \|\| null;/);
+  assert.match(selectRestV2Source, /const normalizedProgrammerId = String\(programmerId \|\| ""\)\.trim\(\);/);
+  assert.match(selectRestV2Source, /const sharedProgrammerApp =/);
+  assert.match(selectRestV2Source, /appSupportsServiceProvider\(appInfo,\s*normalizedProgrammerId,\s*normalizedProgrammerId\)/);
+  assert.match(
+    selectRestV2Source,
+    /return pickHighestRankedPassVaultServiceCandidate\(candidates,\s*normalizedProgrammerId\) \|\| candidates\[0\] \|\| null;/
+  );
+  assert.doesNotMatch(selectRestV2Source, /getRequestorScopedRestV2AuthContext\(/);
+  assert.doesNotMatch(selectRestV2Source, /normalizedRequestorId/);
+  assert.doesNotMatch(switchServiceSource, /is not associated with RequestorId/);
   assert.match(loadMvpdsSource, /const requestorPreferredApp = selectPreferredRestV2AppForRequestor\(/);
   assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
   assert.match(loadMvpdsSource, /await primeProgrammerServiceHydration\(programmer,\s*premiumApps,\s*\{/);
   assert.match(loadMvpdsSource, /requestorId,/);
+  assert.match(loadMvpdsSource, /const \{ map, domainRows, appInfo \} = await fetchRestV2ConfigurationUsingCandidateApps\(/);
+  assert.match(loadMvpdsSource, /setRequestorScopedDomainCache\(requestorId,\s*domainRows\)/);
   assert.match(fetchWithPremiumAuthSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
 });
 

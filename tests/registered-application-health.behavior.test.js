@@ -588,6 +588,78 @@ test("registered application health premium service bindings stay requestor-awar
   );
 });
 
+test("REST V2 requestor selection prefers the media-company-scoped app over requestor-specific hints", () => {
+  const helpers = loadPopupFunctions(["selectPreferredRestV2AppForRequestor"], {
+    pickHighestRankedPassVaultServiceCandidate: (apps = [], programmerId = "") =>
+      apps.find((entry) => String(entry?.guid || "").trim() === "shared-app" && String(programmerId || "").trim() === "Discovery") ||
+      apps[0] ||
+      null,
+    appSupportsServiceProvider: (appInfo = null, requestorId = "", programmerId = "") =>
+      String(programmerId || "").trim() === "Discovery" &&
+      String(requestorId || "").trim() === "Discovery" &&
+      String(appInfo?.guid || "").trim() === "shared-app",
+  });
+
+  const selected = normalizeRealmObject(
+    helpers.selectPreferredRestV2AppForRequestor(
+      [
+        { guid: "animalplanet-app", appName: "Animal Planet Scoped" },
+        { guid: "shared-app", appName: "Discovery Shared" },
+      ],
+      "animalplanet",
+      "Discovery"
+    )
+  );
+
+  assert.equal(selected?.guid, "shared-app");
+});
+
+test("registered application health ordering keeps the selected app ahead of requestor-specific hints", () => {
+  const helpers = loadPopupFunctions(["orderRegisteredApplicationHealthServiceCandidates"], {
+    firstNonEmptyString,
+    mergeUniquePremiumServiceAppInfos: (...collections) => {
+      const merged = [];
+      const seen = new Set();
+      collections.flat().forEach((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return;
+        }
+        const guid = String(entry.guid || "").trim();
+        if (!guid || seen.has(guid)) {
+          return;
+        }
+        seen.add(guid);
+        merged.push(entry);
+      });
+      return merged;
+    },
+    appSupportsServiceProvider: (appInfo = null, requestorId = "", programmerId = "") =>
+      String(programmerId || "").trim() === "Discovery" &&
+      String(requestorId || "").trim() === "animalplanet" &&
+      String(appInfo?.guid || "").trim() === "animalplanet-app",
+  });
+
+  const ordered = normalizeRealmObject(
+    helpers.orderRegisteredApplicationHealthServiceCandidates(
+      "Discovery",
+      "animalplanet",
+      [
+        { guid: "shared-app", appName: "Discovery Shared" },
+        { guid: "animalplanet-app", appName: "Animal Planet Scoped" },
+      ],
+      {
+        preferredGuid: "shared-app",
+        currentApp: { guid: "shared-app" },
+      }
+    )
+  );
+
+  assert.deepEqual(
+    ordered.map((entry) => entry.guid),
+    ["shared-app", "animalplanet-app"]
+  );
+});
+
 test("registered application health dashboard returns the catalog immediately without per-app detail hydration", async () => {
   let fetchOptions = null;
   const helpers = loadPopupFunctions(["fetchRegisteredApplicationHealthDashboardReport"], {

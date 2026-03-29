@@ -925,6 +925,10 @@ function loadRestV2LearningDomainResolver(seed = {}) {
     "function normalizeEntityToken(value = '') { return String(value || '').trim().toLowerCase(); }",
     "function extractEntityIdFromToken(value = '') { const text = String(value || '').trim(); const prefixed = text.match(/^@[^:]+:(.+)$/); return prefixed ? String(prefixed[1] || '').trim() : text; }",
     "function uniquePreserveOrder(values = []) { const output = []; const seen = new Set(); (Array.isArray(values) ? values : []).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
+    "function getRequestorScopedDomainCache(requestorId = '') { return typeof globalThis.__seed.getRequestorScopedDomainCache === 'function' ? globalThis.__seed.getRequestorScopedDomainCache(requestorId) : null; }",
+    "function getRequestorScopedHarpoSelectedDomain(requestorId = '') { return typeof globalThis.__seed.getRequestorScopedHarpoSelectedDomain === 'function' ? globalThis.__seed.getRequestorScopedHarpoSelectedDomain(requestorId) : ''; }",
+    extractFunctionSource(source, "isExcludedHarpoDomainName"),
+    extractFunctionSource(source, "collectRequestorScopedConfiguredDomainNames"),
     extractFunctionSource(source, "collectRestV2LearningRequestorDomainNames"),
     extractFunctionSource(source, "resolveRestV2LearningRequestorDomainName"),
     "module.exports = { collectRestV2LearningRequestorDomainNames, resolveRestV2LearningRequestorDomainName };",
@@ -933,6 +937,26 @@ function loadRestV2LearningDomainResolver(seed = {}) {
     module: { exports: {} },
     exports: {},
     __seed: seed,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
+function loadRestV2ConfigurationNormalizers() {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { if (value == null) { continue; } const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
+    "function extractRestV2MvpdLogoUrl() { return ''; }",
+    extractFunctionSource(source, "isExcludedHarpoDomainName"),
+    extractFunctionSource(source, "getRestV2ConfigurationCollection"),
+    extractFunctionSource(source, "normalizeRestV2MvpdCollection"),
+    extractFunctionSource(source, "normalizeRestV2DomainCollection"),
+    "module.exports = { getRestV2ConfigurationCollection, normalizeRestV2MvpdCollection, normalizeRestV2DomainCollection };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
   };
   vm.runInNewContext(script, context, { filename: filePath });
   return context.module.exports;
@@ -1045,6 +1069,39 @@ test("HR context adds HARPO only for REST V2 media companies with configured dom
   assert.deepEqual(Array.from(getHrContextSectionDisplayKeys(programmer, {})), ["health", "learning"]);
 });
 
+test("REST V2 configuration normalizers parse DOMAINs alongside MVPDs", () => {
+  const { normalizeRestV2MvpdCollection, normalizeRestV2DomainCollection } = loadRestV2ConfigurationNormalizers();
+
+  const payload = {
+    Requestor: {
+      MVPDs: [
+        {
+          id: "directv",
+          displayName: "DIRECTV",
+          isProxy: false,
+        },
+      ],
+      DOMAINs: [
+        { domainName: "experience.example.test", displayName: "Primary Experience" },
+        { domain: "experience-alt.example.test" },
+        { domainName: "adobe.com" },
+        "experience.example.test",
+      ],
+    },
+  };
+
+  const mvpds = Array.from(normalizeRestV2MvpdCollection(payload));
+  const domains = Array.from(normalizeRestV2DomainCollection(payload));
+
+  assert.equal(mvpds.length, 1);
+  assert.equal(mvpds[0].id, "directv");
+  assert.equal(domains.length, 2);
+  assert.deepEqual(
+    domains.map((entry) => entry.domainName),
+    ["experience.example.test", "experience-alt.example.test"]
+  );
+});
+
 test("sidepanel seeds the HR context container hidden and popup runtime uses unlabeled top and bottom separators", () => {
   const sidepanelHtml = fs.readFileSync(path.join(ROOT, "sidepanel.html"), "utf8");
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
@@ -1072,6 +1129,7 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
   assert.doesNotMatch(applyServiceBoxSectionShellSource, /toggleButton\.addEventListener\("keydown", \(event\) => \{/);
   assert.doesNotMatch(applyServiceBoxSectionShellSource, /detailsElement\.addEventListener\("toggle", syncOpenState\)/);
   assert.match(wireHrContextSectionActionsSource, /section\.addEventListener\("click", \(event\) => \{/);
+  assert.match(wireHrContextSectionActionsSource, /target\.closest\("\[data-harpo-domain-select\]"\)/);
   assert.match(wireHrContextSectionActionsSource, /openRestV2InteractiveDocsEntry/);
   assert.match(wireHrContextSectionActionsSource, /openPremiumServiceDocumentation/);
   assert.match(createPremiumServiceSectionSource, /applyServiceBoxSectionShell\(section,\s*\{/);
@@ -1354,6 +1412,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(popupSource, /buildRestV2LearningContextItemHtml/);
   assert.doesNotMatch(popupSource, /buildRestV2LearningUiStatusMeta/);
   assert.doesNotMatch(popupSource, /Click any REST V2 LEARNING deeplink to preview the exact interactive docs payload here/);
+  assert.match(popupSource, /<label[^>]+>Domains<\/label>/);
+  assert.doesNotMatch(popupSource, /AUTO \(/);
   assert.match(popupSource, /getRestV2InteractiveDocsSections/);
   assert.match(
     popupSource,
@@ -1395,11 +1455,16 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(popupSource, /HAR &amp; Pass Observatory/);
   assert.doesNotMatch(popupSource, /PRE-RECORDED HAR/);
   assert.doesNotMatch(popupSource, /LIVE DOMAIN RECORDER/);
-  assert.doesNotMatch(popupSource, /configured domains/);
   assert.doesNotMatch(popupSource, /Legacy AccessEnabler flows stay out of scope/);
-  assert.doesNotMatch(popupCss, /\.hr-harpo-status-card/);
-  assert.doesNotMatch(popupCss, /\.hr-harpo-mode-pill/);
-  assert.doesNotMatch(popupCss, /\.hr-harpo-domain-pill/);
+  assert.match(popupSource, /data-harpo-domain-select/);
+  assert.doesNotMatch(popupSource, /Parsed from REST V2 \/configuration/);
+  assert.doesNotMatch(popupSource, /Configured Domain/);
+  assert.doesNotMatch(popupSource, /Effective domain:/);
+  assert.match(popupCss, /\.hr-harpo-domain-picker/);
+  assert.doesNotMatch(popupCss, /\.hr-harpo-domain-select\s*\{/);
+  assert.doesNotMatch(popupCss, /\.hr-harpo-domain-copy/);
+  assert.doesNotMatch(popupCss, /\.hr-harpo-domain-label/);
+  assert.doesNotMatch(popupCss, /\.hr-harpo-domain-meta/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell/);
   assert.match(popupCss, /\.hr-rest-v2-docs-toggle/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell-body/);
@@ -1853,6 +1918,58 @@ test("REST V2 learning resolves the first configured channel domain for the sele
     ),
     "turner.example.test"
   );
+});
+
+test("REST V2 learning prefers parsed configuration domains and honors HARPO domain override", () => {
+  const { collectRestV2LearningRequestorDomainNames, resolveRestV2LearningRequestorDomainName } =
+    loadRestV2LearningDomainResolver({
+      state: {
+        consoleBootstrapState: {
+          channels: [
+            {
+              id: "turner",
+              raw: {
+                domains: [{ domainName: "console.example.test" }],
+              },
+            },
+          ],
+        },
+      },
+      getRequestorScopedDomainCache(requestorId) {
+        return String(requestorId || "").trim().toLowerCase() === "turner"
+          ? [
+              { domainName: "config-primary.example.test" },
+              { domainName: "adobe.com" },
+              { domainName: "config-alt.example.test" },
+            ]
+          : null;
+      },
+      getRequestorScopedHarpoSelectedDomain(requestorId) {
+        return String(requestorId || "").trim().toLowerCase() === "turner"
+          ? "config-alt.example.test"
+          : "";
+      },
+    });
+
+  assert.deepEqual(
+    Array.from(
+      collectRestV2LearningRequestorDomainNames(
+        {
+          requestorOptions: [
+            {
+              id: "turner",
+              raw: {
+                domains: [{ domainName: "requestor-option.example.test" }],
+              },
+            },
+          ],
+        },
+        "turner"
+      )
+    ),
+    ["config-primary.example.test", "config-alt.example.test"]
+  );
+  assert.equal(resolveRestV2LearningRequestorDomainName(null, "@ServiceProvider:turner"), "config-alt.example.test");
 });
 
 test("REST V2 learning enriches resource-bearing docs context from the console-backed MVPD resource pool", async () => {
