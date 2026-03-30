@@ -2840,7 +2840,12 @@ function scheduleFlowPersist(flow) {
 
 function buildFlowStorageIndex() {
   const flowByTab = {};
-  for (const [tabId, flowId] of debugState.flowIdByTabId.entries()) {
+  for (const flow of debugState.flowsById.values()) {
+    const tabId = normalizeTabId(flow?.tabId || 0);
+    const flowId = String(flow?.flowId || "").trim();
+    if (!tabId || !flowId) {
+      continue;
+    }
     flowByTab[String(tabId)] = flowId;
   }
 
@@ -3654,6 +3659,74 @@ async function bindFlowToTab(flowId, tabId, metadata = {}) {
   scheduleFlowPersist(flow);
   scheduleFlowIndexPersist();
   sendFlowSnapshotToTabPorts(normalizedTabId);
+}
+
+function getTrackedTabIdsForFlow(flowId = "") {
+  const normalizedFlowId = String(flowId || "").trim();
+  if (!normalizedFlowId) {
+    return [];
+  }
+  const tabIds = [];
+  for (const [tabIdRaw, mappedFlowId] of debugState.flowIdByTabId.entries()) {
+    if (String(mappedFlowId || "").trim() !== normalizedFlowId) {
+      continue;
+    }
+    const tabId = normalizeTabId(tabIdRaw);
+    if (tabId) {
+      tabIds.push(tabId);
+    }
+  }
+  return tabIds;
+}
+
+function trackAdditionalFlowTab(sourceTabId, targetTabId, trigger = "") {
+  const normalizedSourceTabId = normalizeTabId(sourceTabId);
+  const normalizedTargetTabId = normalizeTabId(targetTabId);
+  if (!normalizedSourceTabId || !normalizedTargetTabId || normalizedSourceTabId === normalizedTargetTabId) {
+    return;
+  }
+
+  const flow = getFlowByTabId(normalizedSourceTabId);
+  if (!flow || !shouldAllowNetworkCaptureForFlow(flow, normalizedSourceTabId)) {
+    return;
+  }
+
+  const existingFlowId = String(debugState.flowIdByTabId.get(normalizedTargetTabId) || "").trim();
+  if (existingFlowId && existingFlowId === String(flow.flowId || "").trim()) {
+    return;
+  }
+  if (existingFlowId && existingFlowId !== String(flow.flowId || "").trim()) {
+    return;
+  }
+
+  debugState.flowIdByTabId.set(normalizedTargetTabId, flow.flowId);
+  appendFlowEvent(flow, {
+    source: "extension",
+    phase: "child-tab-tracked",
+    tabId: normalizedTargetTabId,
+    sourceTabId: normalizedSourceTabId,
+    trigger: String(trigger || "").trim() || "tracked-tab-created",
+  });
+  scheduleFlowIndexPersist();
+  void syncDebuggerAttachmentForTab(normalizedTargetTabId, String(trigger || "").trim() || "child-tab-tracked");
+}
+
+function handleTrackedFlowTabCreated(tab) {
+  const createdTabId = normalizeTabId(tab?.id);
+  const openerTabId = normalizeTabId(tab?.openerTabId);
+  if (!createdTabId || !openerTabId) {
+    return;
+  }
+  trackAdditionalFlowTab(openerTabId, createdTabId, "tabs.onCreated");
+}
+
+function handleTrackedFlowCreatedNavigationTarget(details) {
+  const sourceTabId = normalizeTabId(details?.sourceTabId);
+  const createdTabId = normalizeTabId(details?.tabId);
+  if (!createdTabId || !sourceTabId) {
+    return;
+  }
+  trackAdditionalFlowTab(sourceTabId, createdTabId, "webNavigation.onCreatedNavigationTarget");
 }
 
 function isPassCriticalPath(pathname = "") {
@@ -4520,13 +4593,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     });
 
     const snapshot = serializeFlow(flow);
-
-    if (flow.tabId) {
-      const activeTabId = flow.tabId;
-      debugState.flowIdByTabId.delete(activeTabId);
-      void syncDebuggerAttachmentForTab(activeTabId, "flow-stop");
-      flow.tabId = 0;
-    }
+    const trackedTabIds = getTrackedTabIdsForFlow(flow.flowId);
+    trackedTabIds.forEach((trackedTabId) => {
+      debugState.flowIdByTabId.delete(trackedTabId);
+      void syncDebuggerAttachmentForTab(trackedTabId, "flow-stop");
+    });
+    flow.tabId = 0;
     scheduleFlowPersist(flow);
     scheduleFlowIndexPersist();
     sendResponse({ ok: true, flow: snapshot });
@@ -4761,7 +4833,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
       phase: "tab-closed",
       tabId: normalizedTabId,
     });
-    flow.tabId = 0;
+    if (flow.tabId === normalizedTabId) {
+      flow.tabId = 0;
+    }
   }
 
   debugState.flowIdByTabId.delete(normalizedTabId);
@@ -4769,6 +4843,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void syncDebuggerAttachmentForTab(normalizedTabId, "tab-removed");
   void stopBlondieTimeForClosedWorkspaceTab(normalizedTabId);
 });
+
+chrome.tabs.onCreated.addListener(handleTrackedFlowTabCreated);
+
+if (chrome.webNavigation?.onCreatedNavigationTarget?.addListener) {
+  chrome.webNavigation.onCreatedNavigationTarget.addListener(handleTrackedFlowCreatedNavigationTarget);
+}
 
 chrome.debugger.onEvent.addListener(handleDebuggerEvent);
 chrome.debugger.onDetach.addListener(handleDebuggerDetach);

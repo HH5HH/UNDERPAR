@@ -78,6 +78,27 @@ function loadEsmHealthSortHelpers() {
   return context.module.exports;
 }
 
+function loadEsmSparklineHelpers() {
+  const filePath = path.join(ROOT, "esm-health-workspace.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    extractFunctionSource(source, "escapeHtml"),
+    extractFunctionSource(source, "formatCompactNumber"),
+    extractFunctionSource(source, "encodeSparklinePayload"),
+    extractFunctionSource(source, "buildSparklineSvg"),
+    "module.exports = { buildSparklineSvg };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Intl,
+    encodeURIComponent,
+    JSON,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function getSampleColumns() {
   return [
     { key: "platform", label: "Platform", drillType: "platform" },
@@ -160,4 +181,34 @@ test("workspace source wires delegated header sort clicks into the shared table 
 
   assert.match(source, /closest\("\[data-sort-table\]\[data-sort-column\]"\)/);
   assert.match(source, /toggleBreakdownTableSort\(/);
+});
+
+test("sparkline charts expose hover tooltip markup with bucket-aware payloads", () => {
+  const { buildSparklineSvg } = loadEsmSparklineHelpers();
+  const html = buildSparklineSvg(
+    [
+      { label: "2026-03-29 08:00", playRequests: 1200, accounts: 800 },
+      { label: "2026-03-29 09:00", playRequests: 1450, accounts: 910 },
+    ],
+    (entry) => Number(entry?.playRequests || 0),
+    {
+      title: "Play Requests",
+      summary: "Daily or hourly media token volume across the selected health window.",
+      formatter: (value) => `${Math.round(value)} req`,
+      valueLabel: "Play Requests",
+      detailAccessor: (entry) => [`Accounts: ${Math.round(Number(entry?.accounts || 0))}`],
+    }
+  );
+
+  assert.match(html, /data-sparkline-chart/);
+  assert.match(html, /data-sparkline-payload=/);
+  assert.match(html, /esm-health-chart-tooltip-title/);
+  assert.match(html, /esm-health-chart-tooltip-details/);
+  assert.match(html, /esm-health-sparkline-hover-guide/);
+  assert.match(html, /esm-health-sparkline-hover-dot/);
+  assert.match(html, /tabindex="0"/);
+  assert.match(
+    html,
+    /aria-label="Play Requests Daily or hourly media token volume across the selected health window\. Play Requests: 1450 req at 2026-03-29 09:00\."/
+  );
 });

@@ -344,6 +344,10 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
       },
     },
     partnerFrameworkStatus: validPartnerFrameworkStatus,
+    sessionRequestHeaders: {
+      "AP-Device-Identifier": "fingerprint recorded-device-123",
+      "X-Device-Info": "recorded-device-info-456",
+    },
     adobeSubjectToken: "subject-token-payload",
     adServiceToken: "service-token-payload",
     tempPassIdentity: rawTempPassIdentity,
@@ -495,6 +499,18 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
         plan.fieldValues["header.AP-Visitor-Identifier"],
         sampleContext.visitorIdentifier,
         `${entry.operationId} must hydrate AP-Visitor-Identifier when UnderPAR has it`
+      );
+    }
+    if (entry.usesDeviceHeaders === true) {
+      assert.equal(
+        plan.fieldValues["header.AP-Device-Identifier"],
+        sampleContext.sessionRequestHeaders["AP-Device-Identifier"],
+        `${entry.operationId} must prefer the recorded AP-Device-Identifier when UnderPAR already captured it`
+      );
+      assert.equal(
+        plan.fieldValues["header.X-Device-Info"],
+        sampleContext.sessionRequestHeaders["X-Device-Info"],
+        `${entry.operationId} must prefer the recorded X-Device-Info when UnderPAR already captured it`
       );
     }
   }

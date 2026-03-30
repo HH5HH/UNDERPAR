@@ -420,7 +420,73 @@ body::before {
 }
 
 .esm-health-chart-wrap {
+  position: relative;
   padding: 12px 14px 14px;
+}
+
+.esm-health-sparkline-shell {
+  position: relative;
+}
+
+.esm-health-chart-tooltip {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 2;
+  transform: translateX(-50%);
+  min-width: 168px;
+  max-width: min(252px, calc(100% - 24px));
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(92, 194, 255, 0.28);
+  background: rgba(7, 13, 20, 0.96);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+  pointer-events: none;
+  display: grid;
+  gap: 4px;
+}
+
+.esm-health-chart-tooltip[hidden],
+.esm-health-chart-tooltip-details[hidden] {
+  display: none;
+}
+
+.esm-health-chart-tooltip-title,
+.esm-health-chart-tooltip-copy,
+.esm-health-chart-tooltip-label,
+.esm-health-chart-tooltip-value,
+.esm-health-chart-tooltip-detail {
+  margin: 0;
+}
+
+.esm-health-chart-tooltip-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(232, 247, 255, 0.98);
+}
+
+.esm-health-chart-tooltip-copy,
+.esm-health-chart-tooltip-detail {
+  font-size: 10px;
+  line-height: 1.4;
+  color: rgba(185, 204, 214, 0.94);
+}
+
+.esm-health-chart-tooltip-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(167, 220, 255, 0.95);
+}
+
+.esm-health-chart-tooltip-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(244, 250, 255, 0.99);
+}
+
+.esm-health-chart-tooltip-details {
+  display: grid;
+  gap: 2px;
 }
 
 .esm-health-sparkline {
@@ -432,11 +498,25 @@ body::before {
     linear-gradient(180deg, rgba(24, 142, 220, 0.08), rgba(24, 142, 220, 0)),
     rgba(6, 10, 15, 0.72);
   border: 1px solid rgba(94, 115, 126, 0.18);
+  cursor: crosshair;
+}
+
+.esm-health-sparkline:focus-visible {
+  outline: 2px solid rgba(92, 194, 255, 0.5);
+  outline-offset: 2px;
 }
 
 .esm-health-sparkline .grid-line {
   stroke: rgba(94, 115, 126, 0.2);
   stroke-width: 1;
+}
+
+.esm-health-sparkline .esm-health-sparkline-hover-guide {
+  stroke: rgba(185, 229, 255, 0.78);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 4;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
 
 .esm-health-sparkline .area-fill {
@@ -453,6 +533,24 @@ body::before {
 
 .esm-health-sparkline .point-dot {
   fill: rgba(232, 247, 255, 0.98);
+  transition: opacity 120ms ease;
+}
+
+.esm-health-sparkline .esm-health-sparkline-hover-dot {
+  fill: rgba(232, 247, 255, 0.98);
+  stroke: rgba(24, 142, 220, 0.96);
+  stroke-width: 1.8;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.esm-health-sparkline-shell.is-active .esm-health-sparkline-hover-guide,
+.esm-health-sparkline-shell.is-active .esm-health-sparkline-hover-dot {
+  opacity: 1;
+}
+
+.esm-health-sparkline-shell.is-active .point-dot {
+  opacity: 0.32;
 }
 
 .esm-health-reach-grid {

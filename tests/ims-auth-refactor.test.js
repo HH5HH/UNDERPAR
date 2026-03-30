@@ -1427,6 +1427,10 @@ test("esm health now builds supported ordered report paths and drops broken metr
     runSource,
     /const reasonBreakdownPath = buildEsmHealthReportPath\(breakdownGranularity, \["event", "requestor-id", "proxy", "mvpd", "reason"\]\);/
   );
+  assert.match(
+    runSource,
+    /events:\s*ESM_HEALTH_REASON_FAILURE_EVENTS,/
+  );
   assert.doesNotMatch(runSource, /metrics:\s*ESM_HEALTH_METRICS\./);
   assert.doesNotMatch(runSource, /`mvpd\/\$\{dayPath\}`/);
   assert.doesNotMatch(runSource, /`requestor-id\/\$\{dayPath\}`/);
@@ -1544,6 +1548,7 @@ test("health workspaces render full-width collapsible report sections and expose
   const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
   const esmHealthWorkspaceCss = fs.readFileSync(path.join(ROOT, "esm-health-workspace.css"), "utf8");
   const esmHealthWorkspaceHtml = fs.readFileSync(path.join(ROOT, "esm-health-workspace.html"), "utf8");
+  const cmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "cm-health-workspace.js"), "utf8");
 
   assert.match(healthWorkspaceSource, /<details class="rest-report-card health-report-card health-report-collapsible/);
   assert.match(healthWorkspaceCss, /\.health-report-grid\s*\{\s*display:\s*flex;/);
@@ -1563,7 +1568,144 @@ test("health workspaces render full-width collapsible report sections and expose
   assert.match(esmHealthWorkspaceCss, /\.esm-health-filter-actions\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(176px,\s*228px\) minmax\(164px,\s*212px\) auto;/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-table-grid\s*\{\s*display:\s*flex;/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-section-summary\s*\{/);
+  assert.match(esmHealthWorkspaceSource, /data-sparkline-chart/);
+  assert.match(esmHealthWorkspaceSource, /bindSparklineTooltips\(\);/);
+  assert.match(esmHealthWorkspaceSource, /addEventListener\("mousemove"/);
+  assert.match(esmHealthWorkspaceSource, /tabindex="0"/);
+  assert.match(esmHealthWorkspaceCss, /\.esm-health-chart-tooltip\s*\{/);
+  assert.match(cmHealthWorkspaceSource, /data-sparkline-chart/);
+  assert.match(cmHealthWorkspaceSource, /bindSparklineTooltips\(\);/);
   assert.doesNotMatch(esmHealthWorkspaceSource, /Media Company/);
+  assert.doesNotMatch(esmHealthWorkspaceSource, /Clientless Failure/);
+  assert.doesNotMatch(esmHealthWorkspaceSource, /clientlessFailureRate/);
+});
+
+test("esm health ignores deprecated clientless metrics in aggregation and workspace UI", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
+  const script = [
+    'const ESM_DEPRECATED_COLUMN_KEYS = new Set(["clientless-failures", "clientless-tokens"]);',
+    'const ESM_HEALTH_DEFAULT_GRANULARITY = "hour";',
+    'const ESM_SOURCE_UTC_OFFSET_MINUTES = -8 * 60;',
+    'function normalizeEsmHealthGranularity(value = "") { const normalized = String(value || "").trim().toLowerCase(); return normalized === "hour" || normalized === "day" || normalized === "month" ? normalized : "hour"; }',
+    extractFunctionSource(popupSource, "getEsmHealthMetricNumber"),
+    extractFunctionSource(popupSource, "computeEsmHealthDerivedMetrics"),
+    extractFunctionSource(popupSource, "esmHealthPartsToUtcMs"),
+    extractFunctionSource(popupSource, "buildEsmHealthBucketMeta"),
+    extractFunctionSource(popupSource, "aggregateEsmHealthBackboneRows"),
+    extractFunctionSource(popupSource, "buildEsmHealthSummary"),
+    "module.exports = { getEsmHealthMetricNumber, computeEsmHealthDerivedMetrics, aggregateEsmHealthBackboneRows, buildEsmHealthSummary };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Date,
+  };
+  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
+  const {
+    getEsmHealthMetricNumber,
+    computeEsmHealthDerivedMetrics,
+    aggregateEsmHealthBackboneRows,
+    buildEsmHealthSummary,
+  } = context.module.exports;
+
+  assert.match(popupSource, /const ESM_DEPRECATED_COLUMN_KEYS = new Set\(\["clientless-failures", "clientless-tokens"\]\);/);
+  assert.doesNotMatch(esmHealthWorkspaceSource, /Clientless Failure/);
+  assert.doesNotMatch(esmHealthWorkspaceSource, /clientlessFailureRate/);
+  assert.equal(getEsmHealthMetricNumber({ "clientless-failures": 9 }, "clientless-failures"), 0);
+
+  const derived = computeEsmHealthDerivedMetrics({
+    authnAttempts: 10,
+    authnSuccessful: 8,
+    authnFailed: 2,
+    authzAttempts: 7,
+    authzSuccessful: 6,
+    authzFailed: 1,
+    authzRejected: 0,
+    authzLatency: 70,
+    mediaTokens: 11,
+    clientlessTokens: 101,
+    clientlessFailures: 99,
+  });
+  assert.equal(derived.issueEvents, 3);
+  assert.equal(Object.hasOwn(derived, "clientlessFailureRate"), false);
+
+  const backboneSeries = aggregateEsmHealthBackboneRows(
+    [
+      {
+        year: 2026,
+        month: 3,
+        day: 25,
+        hour: 1,
+        "authn-attempts": 10,
+        "authn-successful": 8,
+        "authn-failed": 2,
+        "authz-attempts": 7,
+        "authz-successful": 6,
+        "authz-failed": 1,
+        "authz-rejected": 0,
+        "authz-latency": 70,
+        "media-tokens": 11,
+        "clientless-tokens": 101,
+        "clientless-failures": 99,
+      },
+    ],
+    "hour"
+  );
+  assert.equal(backboneSeries.length, 1);
+  assert.equal(backboneSeries[0].issueEvents, 3);
+  assert.equal(Object.hasOwn(backboneSeries[0], "clientlessFailures"), false);
+
+  const summary = buildEsmHealthSummary(backboneSeries, [], {
+    mvpdRows: [],
+    requestorRows: [],
+    platformRows: [],
+    applicationRows: [],
+    apiRows: [],
+    sdkRows: [],
+    reasonRows: [],
+  });
+  assert.equal(summary.issueEvents, 3);
+  assert.equal(Object.hasOwn(summary, "clientlessFailures"), false);
+});
+
+test("esm health failure reasons keep only failed event rows", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const runSource = extractFunctionSource(popupSource, "loadEsmHealthDashboardReportPayload");
+  const script = [
+    'const ESM_HEALTH_REASON_FAILURE_EVENTS = Object.freeze(["authnf", "authzf", "shauthzf"]);',
+    'const ESM_HEALTH_REASON_FAILURE_EVENT_SET = new Set(ESM_HEALTH_REASON_FAILURE_EVENTS);',
+    extractFunctionSource(popupSource, "normalizeEsmHealthEventKey"),
+    extractFunctionSource(popupSource, "isEsmHealthFailureEvent"),
+    extractFunctionSource(popupSource, "filterEsmHealthFailureReasonRows"),
+    "module.exports = { filterEsmHealthFailureReasonRows };",
+  ].join("\n\n");
+
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Set,
+  };
+  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
+  const { filterEsmHealthFailureReasonRows } = context.module.exports;
+
+  assert.match(runSource, /const reasonScopeRows = reasonsResult\.ok \? filterEsmHealthFailureReasonRows\(reasonsResult\.rows\) : \[\];/);
+
+  const rows = filterEsmHealthFailureReasonRows([
+    { event: "authzg", count: 100 },
+    { event: "shauthzg", count: 99 },
+    { event: "authnr", count: 98 },
+    { event: "authnp", count: 50 },
+    { event: "authnf", count: 2 },
+    { event: "authzf", count: 3 },
+    { event: "authzr", count: 4 },
+    { event: "shauthzf", count: 5 },
+  ]);
+
+  assert.deepEqual(
+    rows.map((row) => row.event),
+    ["authnf", "authzf", "shauthzf"]
+  );
 });
 
 test("health status UI stays pill-only and premium recording controls stay icon-only with hover labels", () => {

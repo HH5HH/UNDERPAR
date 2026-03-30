@@ -283,6 +283,54 @@ test("REST V2 optional headers hydrate from request preview text carriers", () =
   assert.equal(context.tempPassIdentity, "temp-pass-ghi");
 });
 
+test("REST V2 exact device and Roku headers hydrate from structured request header bags", () => {
+  const { extractRestV2InteractiveDocsHeaderValueFromDebugFlow, hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow } =
+    loadVisitorIdentifierHelpers();
+  const flow = {
+    flowId: "flow-header-device-789",
+    events: [
+      {
+        source: "web-request",
+        phase: "onBeforeSendHeaders",
+        request: {
+          headers: {
+            "AP-Device-Identifier": "fingerprint recorded-device-123",
+            "X-Device-Info": "recorded-device-info-456",
+            "X-Roku-Reserved-Roku-Connect-Token": "roku-connect-token-789",
+          },
+        },
+      },
+    ],
+  };
+  const context = {
+    deviceIdentifier: "",
+    deviceInfo: "",
+    rokuConnectToken: "",
+  };
+
+  assert.equal(
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "AP-Device-Identifier"),
+    "fingerprint recorded-device-123"
+  );
+  assert.equal(
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "X-Device-Info"),
+    "recorded-device-info-456"
+  );
+  assert.equal(
+    extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow, "X-Roku-Reserved-Roku-Connect-Token"),
+    "roku-connect-token-789"
+  );
+
+  hydrateRestV2InteractiveDocsOptionalHeadersFromDebugFlow(context, flow, [
+    "AP-Device-Identifier",
+    "X-Device-Info",
+    "X-Roku-Reserved-Roku-Connect-Token",
+  ]);
+  assert.equal(context.deviceIdentifier, "fingerprint recorded-device-123");
+  assert.equal(context.deviceInfo, "recorded-device-info-456");
+  assert.equal(context.rokuConnectToken, "roku-connect-token-789");
+});
+
 test("REST V2 case-insensitive header lookup accepts header entry arrays", () => {
   const { getRestV2CaseInsensitiveHeaderValue } = loadVisitorIdentifierHelpers();
 

@@ -253,3 +253,17 @@ test("CM health workspace source wires delegated header sort clicks into the sha
   assert.match(source, /closest\("\[data-sort-table\]\[data-sort-column\]"\)/);
   assert.match(source, /toggleBreakdownTableSort\(/);
 });
+
+test("CM health workspace charts bind hover-aware sparkline tooltips after rerenders", () => {
+  const source = read("cm-health-workspace.js");
+  const css = read("esm-health-workspace.css");
+
+  assert.match(source, /data-sparkline-chart/);
+  assert.match(source, /data-sparkline-payload/);
+  assert.match(source, /bindSparklineTooltips\(\);/);
+  assert.match(source, /addEventListener\("mousemove"/);
+  assert.match(source, /addEventListener\("keydown"/);
+  assert.match(source, /role="img"/);
+  assert.match(css, /\.esm-health-chart-tooltip\s*\{/);
+  assert.match(css, /\.esm-health-sparkline-hover-guide/);
+});

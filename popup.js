@@ -11926,6 +11926,8 @@ const ESM_HEALTH_PLATFORM_OPTIONS = Object.freeze([
   "web",
   "XBoxOne",
 ]);
+const ESM_HEALTH_REASON_FAILURE_EVENTS = Object.freeze(["authnf", "authzf", "shauthzf"]);
+const ESM_HEALTH_REASON_FAILURE_EVENT_SET = new Set(ESM_HEALTH_REASON_FAILURE_EVENTS);
 const ESM_HEALTH_METRICS = Object.freeze({
   backbone: [
     "authn-attempts",
@@ -11937,8 +11939,6 @@ const ESM_HEALTH_METRICS = Object.freeze({
     "authz-rejected",
     "authz-latency",
     "media-tokens",
-    "clientless-tokens",
-    "clientless-failures",
   ],
   uniques: ["unique-accounts", "unique-sessions"],
   mvpd: [
@@ -14332,10 +14332,14 @@ function buildUnderparRestV2DebugSnapshot(programmer = null) {
     session_response_header_names: sessionResponseHeaderNames.length > 0 ? sessionResponseHeaderNames : null,
     captured_auth_header_count: capturedAuthHeaderNames.length,
     captured_auth_header_names: capturedAuthHeaderNames.length > 0 ? capturedAuthHeaderNames : null,
+    device_identifier_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AP-Device-Identifier") ? "yes" : "no",
+    device_info_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "X-Device-Info") ? "yes" : "no",
     adobe_subject_token_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "Adobe-Subject-Token") ? "yes" : "no",
     ad_service_token_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AD-Service-Token") ? "yes" : "no",
     temp_pass_identity_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AP-Temppass-Identity") ? "yes" : "no",
     visitor_identifier_present: resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "AP-Visitor-Identifier") ? "yes" : "no",
+    roku_connect_token_present:
+      resolveRestV2InteractiveDocsHeaderValueFromContext(baseContext, "X-Roku-Reserved-Roku-Connect-Token") ? "yes" : "no",
     preferred_partner_framework_status_source: preferredFrameworkSource,
     preferred_partner_framework_status_present: preferredFrameworkStatus ? "yes" : "no",
     preferred_partner_framework_status_usable: preferredSummary.usable === true ? "yes" : "no",
@@ -18098,6 +18102,9 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     ])
   );
   const latestSourceList = sourceList.slice().reverse();
+  const mergedSessionRequestHeaders =
+    latestSourceList.find((source) => source?.sessionRequestHeaders && typeof source.sessionRequestHeaders === "object")
+      ?.sessionRequestHeaders || null;
   const mergedSessionResponseHeaders =
     latestSourceList.find((source) => source?.sessionResponseHeaders && typeof source.sessionResponseHeaders === "object")
       ?.sessionResponseHeaders || null;
@@ -18134,6 +18141,12 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     learningPartnerSource: firstNonEmptyString(
       sourceList.map((source) => String(source?.learningPartnerSource || "").trim())
     ),
+    deviceIdentifier: firstNonEmptyString(
+      sourceList.map((source) => String(source?.deviceIdentifier || "").trim())
+    ),
+    deviceInfo: firstNonEmptyString(
+      sourceList.map((source) => String(source?.deviceInfo || "").trim())
+    ),
     adobeSubjectToken: firstNonEmptyString(
       sourceList.map((source) => String(source?.adobeSubjectToken || "").trim())
     ),
@@ -18146,6 +18159,9 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
     visitorIdentifier: firstNonEmptyString(
       sourceList.map((source) => String(source?.visitorIdentifier || "").trim())
     ),
+    rokuConnectToken: firstNonEmptyString(
+      sourceList.map((source) => String(source?.rokuConnectToken || "").trim())
+    ),
     samlResponse: firstNonEmptyString(sourceList.map((source) => String(source?.samlResponse || "").trim())),
     samlSource: firstNonEmptyString(sourceList.map((source) => String(source?.samlSource || "").trim())),
     samlTrustedForPartnerSso: sourceList.some((source) => source?.samlTrustedForPartnerSso === true),
@@ -18156,6 +18172,10 @@ function mergeRestV2HarvestWithPreauthzChecks(harvest = null, ...sources) {
       firstNonEmptyString(sourceList.map((source) => String(source?.redirectUrl || "").trim()))
     ),
     domainName: firstNonEmptyString(sourceList.map((source) => String(source?.domainName || "").trim())),
+    sessionRequestHeaders:
+      mergedSessionRequestHeaders && typeof mergedSessionRequestHeaders === "object"
+        ? cloneJsonLikeValue(mergedSessionRequestHeaders, null)
+        : null,
     sessionResponseHeaders:
       mergedSessionResponseHeaders && typeof mergedSessionResponseHeaders === "object"
         ? cloneJsonLikeValue(mergedSessionResponseHeaders, null)
@@ -18792,10 +18812,13 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     learningPartner: String(harvest.learningPartner || "").trim(),
     learningPartnerFrameworkStatus: String(harvest.learningPartnerFrameworkStatus || "").trim(),
     learningPartnerSource: String(harvest.learningPartnerSource || "").trim(),
+    deviceIdentifier: String(firstNonEmptyString([harvest.deviceIdentifier]) || "").trim(),
+    deviceInfo: String(firstNonEmptyString([harvest.deviceInfo]) || "").trim(),
     adobeSubjectToken: String(harvest.adobeSubjectToken || "").trim(),
     adServiceToken: String(harvest.adServiceToken || "").trim(),
     tempPassIdentity: String(harvest.tempPassIdentity || "").trim(),
     visitorIdentifier: String(harvest.visitorIdentifier || "").trim(),
+    rokuConnectToken: String(firstNonEmptyString([harvest.rokuConnectToken]) || "").trim(),
     samlResponse: String(harvest.samlResponse || "").trim(),
     samlSource: String(harvest.samlSource || "").trim(),
     samlTrustedForPartnerSso: harvest.samlTrustedForPartnerSso === true,
@@ -24746,7 +24769,11 @@ function buildEsmHealthStatusMessage(queryContext = null) {
 }
 
 function getEsmHealthMetricNumber(row = null, key = "") {
-  const parsed = Number(row?.[key] ?? 0);
+  const normalizedKey = String(key || "").trim().toLowerCase();
+  if (ESM_DEPRECATED_COLUMN_KEYS.has(normalizedKey)) {
+    return 0;
+  }
+  const parsed = Number(row?.[key] ?? row?.[normalizedKey] ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -24760,11 +24787,8 @@ function computeEsmHealthDerivedMetrics(source = null) {
   const authzRejected = Math.max(0, Number(source?.authzRejected || 0));
   const authzLatency = Math.max(0, Number(source?.authzLatency || 0));
   const mediaTokens = Math.max(0, Number(source?.mediaTokens || 0));
-  const clientlessTokens = Math.max(0, Number(source?.clientlessTokens || 0));
-  const clientlessFailures = Math.max(0, Number(source?.clientlessFailures || 0));
   const authzLatencyDenominator = authzSuccessful + authzFailed;
-  const clientlessFailureDenominator = clientlessFailures + clientlessTokens;
-  const issueEvents = authnFailed + authzFailed + authzRejected + clientlessFailures;
+  const issueEvents = authnFailed + authzFailed + authzRejected;
   return {
     authnConversion: authnAttempts > 0 ? authnSuccessful / authnAttempts : null,
     authnFailureRate: authnAttempts > 0 ? authnFailed / authnAttempts : null,
@@ -24772,7 +24796,6 @@ function computeEsmHealthDerivedMetrics(source = null) {
     authzErrorRate: authzAttempts > 0 ? (authzFailed + authzRejected) / authzAttempts : null,
     avgAuthzLatency: authzLatencyDenominator > 0 ? authzLatency / authzLatencyDenominator : null,
     playRequests: mediaTokens,
-    clientlessFailureRate: clientlessFailureDenominator > 0 ? clientlessFailures / clientlessFailureDenominator : null,
     issueEvents,
   };
 }
@@ -24846,8 +24869,6 @@ function aggregateEsmHealthBackboneRows(rows = [], granularity = ESM_HEALTH_DEFA
         authzRejected: 0,
         authzLatency: 0,
         mediaTokens: 0,
-        clientlessTokens: 0,
-        clientlessFailures: 0,
       });
     }
     const bucket = buckets.get(meta.key);
@@ -24860,8 +24881,6 @@ function aggregateEsmHealthBackboneRows(rows = [], granularity = ESM_HEALTH_DEFA
     bucket.authzRejected += getEsmHealthMetricNumber(row, "authz-rejected");
     bucket.authzLatency += getEsmHealthMetricNumber(row, "authz-latency");
     bucket.mediaTokens += getEsmHealthMetricNumber(row, "media-tokens");
-    bucket.clientlessTokens += getEsmHealthMetricNumber(row, "clientless-tokens");
-    bucket.clientlessFailures += getEsmHealthMetricNumber(row, "clientless-failures");
   });
 
   return Array.from(buckets.values())
@@ -24934,8 +24953,6 @@ function aggregateEsmHealthBreakdownRows(rows = [], dimensionKeys = [], limit = 
         authzRejected: 0,
         authzLatency: 0,
         mediaTokens: 0,
-        clientlessTokens: 0,
-        clientlessFailures: 0,
       });
     }
     const bucket = buckets.get(bucketKey);
@@ -24948,8 +24965,6 @@ function aggregateEsmHealthBreakdownRows(rows = [], dimensionKeys = [], limit = 
     bucket.authzRejected += getEsmHealthMetricNumber(row, "authz-rejected");
     bucket.authzLatency += getEsmHealthMetricNumber(row, "authz-latency");
     bucket.mediaTokens += getEsmHealthMetricNumber(row, "media-tokens");
-    bucket.clientlessTokens += getEsmHealthMetricNumber(row, "clientless-tokens");
-    bucket.clientlessFailures += getEsmHealthMetricNumber(row, "clientless-failures");
   });
 
   return Array.from(buckets.values())
@@ -25016,9 +25031,21 @@ function buildEsmHealthReasonFacetSummary(counts = null, fallbackLabel = "(unkno
   return `${leadLabel} (+${normalizedEntries.length - 1} more)`;
 }
 
+function normalizeEsmHealthEventKey(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isEsmHealthFailureEvent(value = "") {
+  return ESM_HEALTH_REASON_FAILURE_EVENT_SET.has(normalizeEsmHealthEventKey(value));
+}
+
+function filterEsmHealthFailureReasonRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => isEsmHealthFailureEvent(row?.event));
+}
+
 function aggregateEsmHealthReasonRows(rows = [], limit = ESM_HEALTH_TOP_ROW_LIMIT) {
   const buckets = new Map();
-  (Array.isArray(rows) ? rows : []).forEach((row) => {
+  filterEsmHealthFailureReasonRows(rows).forEach((row) => {
     const reason = String(row?.reason || "").trim() || "(unknown)";
     const count = Math.max(0, Number(row?.count || 0));
     if (count <= 0) {
@@ -25085,8 +25112,6 @@ function buildEsmHealthSummary(backboneSeries = [], uniqueSeries = [], breakdown
     authzRejected: 0,
     authzLatency: 0,
     mediaTokens: 0,
-    clientlessTokens: 0,
-    clientlessFailures: 0,
   };
   (Array.isArray(backboneSeries) ? backboneSeries : []).forEach((entry) => {
     totals.authnAttempts += Number(entry?.authnAttempts || 0);
@@ -25098,8 +25123,6 @@ function buildEsmHealthSummary(backboneSeries = [], uniqueSeries = [], breakdown
     totals.authzRejected += Number(entry?.authzRejected || 0);
     totals.authzLatency += Number(entry?.authzLatency || 0);
     totals.mediaTokens += Number(entry?.mediaTokens || 0);
-    totals.clientlessTokens += Number(entry?.clientlessTokens || 0);
-    totals.clientlessFailures += Number(entry?.clientlessFailures || 0);
   });
   const latestUniqueBucket = Array.isArray(uniqueSeries) && uniqueSeries.length > 0 ? uniqueSeries[uniqueSeries.length - 1] : null;
   const mvpdRows = Array.isArray(breakdowns?.mvpdRows) ? breakdowns.mvpdRows : [];
@@ -26342,6 +26365,7 @@ async function loadEsmHealthDashboardReportPayload(rawQueryContext = null, optio
     reasons: fetchEsmHealthJson(queryContext, reasonBreakdownPath, {
       authState,
       limit: ESM_HEALTH_BREAKDOWN_LIMIT,
+      events: ESM_HEALTH_REASON_FAILURE_EVENTS,
     }),
   };
 
@@ -26463,7 +26487,7 @@ async function loadEsmHealthDashboardReportPayload(rawQueryContext = null, optio
         }
       )
     : [];
-  const reasonScopeRows = reasonsResult.ok ? (Array.isArray(reasonsResult.rows) ? reasonsResult.rows : []) : [];
+  const reasonScopeRows = reasonsResult.ok ? filterEsmHealthFailureReasonRows(reasonsResult.rows) : [];
   if (!reasonsResult.ok) {
     sectionErrors.reasons = String(reasonsResult.error || "Unable to load ESM HEALTH reason breakdowns.").trim();
   }
@@ -27165,6 +27189,12 @@ function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntr
   const adServiceToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "AD-Service-Token");
   const tempPassIdentity = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "AP-Temppass-Identity");
   const visitorIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "AP-Visitor-Identifier");
+  const deviceIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "AP-Device-Identifier");
+  const deviceInfo = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedEntry, "X-Device-Info");
+  const rokuConnectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(
+    resolvedEntry,
+    "X-Roku-Reserved-Roku-Connect-Token"
+  );
   if (sessionCode) {
     context.sessionCode = sessionCode;
   }
@@ -27216,6 +27246,12 @@ function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntr
   if (!String(context?.learningPartnerSource || "").trim()) {
     context.learningPartnerSource = String(resolvedEntry?.learningPartnerSource || "").trim();
   }
+  if (!String(context?.deviceIdentifier || "").trim() && deviceIdentifier) {
+    context.deviceIdentifier = deviceIdentifier;
+  }
+  if (!String(context?.deviceInfo || "").trim() && deviceInfo) {
+    context.deviceInfo = deviceInfo;
+  }
   if (!String(context?.adobeSubjectToken || "").trim() && adobeSubjectToken) {
     context.adobeSubjectToken = adobeSubjectToken;
   }
@@ -27227,6 +27263,9 @@ function hydrateRestV2ContextFromPreparedLoginEntry(context = null, preparedEntr
   }
   if (!String(context?.visitorIdentifier || "").trim() && visitorIdentifier) {
     context.visitorIdentifier = visitorIdentifier;
+  }
+  if (!String(context?.rokuConnectToken || "").trim() && rokuConnectToken) {
+    context.rokuConnectToken = rokuConnectToken;
   }
   if (typeof mergeRestV2CapturedAuthHeaders === "function") {
     context.capturedAuthHeaders = mergeRestV2CapturedAuthHeaders(context, resolvedEntry);
@@ -27369,10 +27408,15 @@ function setRestV2PreparedLoginEntry(context, payload) {
         : null,
     partnerFrameworkStatus: String(payload?.partnerFrameworkStatus || payload?.sessionData?.partnerFrameworkStatus || "").trim(),
     sessionPartner: String(payload?.sessionPartner || payload?.sessionData?.partner || "").trim(),
+    deviceIdentifier: String(resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "AP-Device-Identifier") || "").trim(),
+    deviceInfo: String(resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "X-Device-Info") || "").trim(),
     adobeSubjectToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "Adobe-Subject-Token") || "").trim(),
     adServiceToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "AD-Service-Token") || "").trim(),
     tempPassIdentity: String(resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "AP-Temppass-Identity") || "").trim(),
     visitorIdentifier: String(resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "AP-Visitor-Identifier") || "").trim(),
+    rokuConnectToken: String(
+      resolveRestV2InteractiveDocsHeaderValueFromContext(payload, "X-Roku-Reserved-Roku-Connect-Token") || ""
+    ).trim(),
     domainName: String(firstNonEmptyString([payload?.payload?.domainName, payload?.sessionData?.existingParameters?.domainName]) || "").trim(),
     redirectUrl: normalizeAdobeNavigationUrl(
       firstNonEmptyString([payload?.payload?.redirectUrl, payload?.sessionData?.existingParameters?.redirectUrl])
@@ -28427,6 +28471,15 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
       context?.mvpdPartnerProviderId,
     ]) || ""
   ).trim();
+  const optionsHeaderContext = {
+    sessionRequestHeaders:
+      options?.sessionRequestHeaders && typeof options.sessionRequestHeaders === "object" ? options.sessionRequestHeaders : null,
+    sessionResponseHeaders:
+      options?.sessionResponseHeaders && typeof options.sessionResponseHeaders === "object" ? options.sessionResponseHeaders : null,
+    requestHeaders: options?.requestHeaders && typeof options.requestHeaders === "object" ? options.requestHeaders : null,
+    responseHeaders: options?.responseHeaders && typeof options.responseHeaders === "object" ? options.responseHeaders : null,
+    headers: options?.headers && typeof options.headers === "object" ? options.headers : null,
+  };
   const selectedAppInfo = appInfoOverride || context.appInfo || null;
   const capturedAuthHeaders =
     typeof mergeRestV2CapturedAuthHeaders === "function"
@@ -28474,6 +28527,22 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
       firstNonEmptyString([options?.learningPartnerFrameworkStatus, context?.learningPartnerFrameworkStatus]) || ""
     ).trim(),
     learningPartnerSource: String(firstNonEmptyString([options?.learningPartnerSource, context?.learningPartnerSource]) || "").trim(),
+    deviceIdentifier: String(
+      firstNonEmptyString([
+        options?.deviceIdentifier,
+        context?.deviceIdentifier,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(optionsHeaderContext, "AP-Device-Identifier"),
+        resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Device-Identifier"),
+      ]) || ""
+    ).trim(),
+    deviceInfo: String(
+      firstNonEmptyString([
+        options?.deviceInfo,
+        context?.deviceInfo,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(optionsHeaderContext, "X-Device-Info"),
+        resolveRestV2InteractiveDocsHeaderValueFromContext(context, "X-Device-Info"),
+      ]) || ""
+    ).trim(),
     adobeSubjectToken: String(
       firstNonEmptyString([
         options?.adobeSubjectToken,
@@ -28502,6 +28571,14 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
         resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Visitor-Identifier"),
       ]) || ""
     ).trim(),
+    rokuConnectToken: String(
+      firstNonEmptyString([
+        options?.rokuConnectToken,
+        context?.rokuConnectToken,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(optionsHeaderContext, "X-Roku-Reserved-Roku-Connect-Token"),
+        resolveRestV2InteractiveDocsHeaderValueFromContext(context, "X-Roku-Reserved-Roku-Connect-Token"),
+      ]) || ""
+    ).trim(),
     samlResponse: String(firstNonEmptyString([options?.samlResponse, context?.samlResponse]) || "").trim(),
     samlSource: String(firstNonEmptyString([options?.samlSource, context?.samlSource]) || "").trim(),
     samlTrustedForPartnerSso:
@@ -28526,7 +28603,7 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
         ? cloneJsonLikeValue(options.sessionResponseHeaders, null)
         : context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
           ? cloneJsonLikeValue(context.sessionResponseHeaders, null)
-        : null,
+          : null,
     capturedAuthHeaders:
       capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? cloneJsonLikeValue(capturedAuthHeaders, null) : null,
     sessionUrl,
@@ -29969,10 +30046,15 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     learningPartner: String(learningPartner || "").trim(),
     learningPartnerFrameworkStatus: String(resolveRestV2LearningPartnerFrameworkStatusFromContext(context) || "").trim(),
     learningPartnerSource: String(context?.learningPartnerSource || "").trim(),
+    deviceIdentifier: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Device-Identifier") || "").trim(),
+    deviceInfo: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "X-Device-Info") || "").trim(),
     adobeSubjectToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "Adobe-Subject-Token") || "").trim(),
     adServiceToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AD-Service-Token") || "").trim(),
     tempPassIdentity: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Temppass-Identity") || "").trim(),
     visitorIdentifier: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Visitor-Identifier") || "").trim(),
+    rokuConnectToken: String(
+      resolveRestV2InteractiveDocsHeaderValueFromContext(context, "X-Roku-Reserved-Roku-Connect-Token") || ""
+    ).trim(),
     samlResponse: String(context?.samlResponse || "").trim(),
     samlSource: String(context?.samlSource || "").trim(),
     samlTrustedForPartnerSso: context?.samlTrustedForPartnerSso === true,
@@ -29983,6 +30065,10 @@ function buildRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
     domainName,
     sessionData:
       context?.sessionData && typeof context.sessionData === "object" ? cloneJsonLikeValue(context.sessionData, null) : null,
+    sessionRequestHeaders:
+      context?.sessionRequestHeaders && typeof context.sessionRequestHeaders === "object"
+        ? cloneJsonLikeValue(context.sessionRequestHeaders, null)
+        : null,
     sessionResponseHeaders:
       context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
         ? cloneJsonLikeValue(context.sessionResponseHeaders, null)
@@ -33209,7 +33295,155 @@ function shouldIgnoreRedirectSiteUrl(url, context = null) {
   return mode === "origin_except_pass";
 }
 
-function buildWebRequestHarEntries(flowEvents = [], context = null) {
+const UNDERPAR_HAR_PHYSICAL_ASSET_RESOURCE_TYPES = new Set(["font", "image", "manifest", "media", "stylesheet"]);
+const UNDERPAR_HAR_PHYSICAL_ASSET_EXTENSIONS = new Set([
+  "apng",
+  "avif",
+  "bmp",
+  "css",
+  "cur",
+  "eot",
+  "gif",
+  "heic",
+  "heif",
+  "ico",
+  "jpeg",
+  "jpg",
+  "m4a",
+  "m4s",
+  "mp3",
+  "mp4",
+  "ogg",
+  "otf",
+  "png",
+  "svg",
+  "tif",
+  "tiff",
+  "ts",
+  "ttf",
+  "wav",
+  "webm",
+  "webp",
+  "woff",
+  "woff2",
+]);
+const UNDERPAR_HAR_PHYSICAL_ASSET_MIME_PREFIXES = ["audio/", "font/", "image/", "video/"];
+const UNDERPAR_HAR_PHYSICAL_ASSET_MIME_TYPES = new Set([
+  "application/font-sfnt",
+  "application/font-woff",
+  "application/font-woff2",
+  "text/css",
+  "application/vnd.ms-fontobject",
+  "application/x-font-opentype",
+  "application/x-font-ttf",
+  "application/x-font-woff",
+  "application/x-font-woff2",
+]);
+
+function getUnderparHarEventUrl(event = null) {
+  return firstNonEmptyString([String(event?.url || "").trim(), String(event?.requestUrl || "").trim()]);
+}
+
+function mergeUnderparHarHeaders(...headerObjects) {
+  const merged = {};
+  const resolvedKeys = new Map();
+  headerObjects.forEach((headerObject) => {
+    if (!headerObject || typeof headerObject !== "object") {
+      return;
+    }
+    Object.entries(headerObject).forEach(([key, value]) => {
+      const normalizedKey = String(key || "").trim();
+      if (!normalizedKey) {
+        return;
+      }
+      const canonicalKey = resolvedKeys.get(normalizedKey.toLowerCase()) || normalizedKey;
+      resolvedKeys.set(normalizedKey.toLowerCase(), canonicalKey);
+      merged[canonicalKey] = value;
+    });
+  });
+  return merged;
+}
+
+function getUnderparHarHeaderValueFromObject(headersLike = null, headerName = "") {
+  const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
+  if (!normalizedHeaderName || !headersLike || typeof headersLike !== "object") {
+    return "";
+  }
+  for (const [key, value] of Object.entries(headersLike)) {
+    if (String(key || "").trim().toLowerCase() === normalizedHeaderName) {
+      return String(value || "").trim();
+    }
+  }
+  return "";
+}
+
+function getUnderparHarPathExtension(url = "") {
+  try {
+    const parsed = new URL(String(url || ""));
+    const segments = String(parsed.pathname || "")
+      .split("/")
+      .filter(Boolean);
+    const lastSegment = String(segments[segments.length - 1] || "").trim();
+    const dotIndex = lastSegment.lastIndexOf(".");
+    return dotIndex >= 0 ? lastSegment.slice(dotIndex + 1).toLowerCase() : "";
+  } catch {
+    const sanitizedUrl = String(url || "").split("#")[0].split("?")[0];
+    const lastSegment = sanitizedUrl.slice(sanitizedUrl.lastIndexOf("/") + 1);
+    const dotIndex = lastSegment.lastIndexOf(".");
+    return dotIndex >= 0 ? lastSegment.slice(dotIndex + 1).toLowerCase() : "";
+  }
+}
+
+function isUnderparHarPhysicalAssetTraffic({ url = "", resourceType = "", mimeType = "", headers = null } = {}) {
+  const normalizedResourceType = String(resourceType || "").trim().toLowerCase();
+  if (UNDERPAR_HAR_PHYSICAL_ASSET_RESOURCE_TYPES.has(normalizedResourceType)) {
+    return true;
+  }
+
+  const normalizedMimeType = String(
+    mimeType || getUnderparHarHeaderValueFromObject(headers, "content-type").split(";")[0]
+  )
+    .trim()
+    .toLowerCase();
+  if (
+    normalizedMimeType &&
+    (UNDERPAR_HAR_PHYSICAL_ASSET_MIME_TYPES.has(normalizedMimeType) ||
+      UNDERPAR_HAR_PHYSICAL_ASSET_MIME_PREFIXES.some((prefix) => normalizedMimeType.startsWith(prefix)))
+  ) {
+    return true;
+  }
+
+  const extension = getUnderparHarPathExtension(url);
+  return extension ? UNDERPAR_HAR_PHYSICAL_ASSET_EXTENSIONS.has(extension) : false;
+}
+
+function serializeUnderparHarRequestBody(requestBody = null, requestBodyPreview = "") {
+  const directPreview = String(requestBodyPreview || "").trim();
+  if (directPreview) {
+    return directPreview;
+  }
+  if (requestBody == null) {
+    return "";
+  }
+  if (typeof requestBody === "string") {
+    return requestBody;
+  }
+  if (requestBody && typeof requestBody === "object" && requestBody.formData && typeof requestBody.formData === "object") {
+    const params = new URLSearchParams();
+    Object.entries(requestBody.formData).forEach(([key, values]) => {
+      (Array.isArray(values) ? values : [values]).forEach((value) => {
+        params.append(String(key || ""), String(value ?? ""));
+      });
+    });
+    const serialized = params.toString();
+    if (serialized) {
+      return serialized;
+    }
+  }
+  return JSON.stringify(requestBody);
+}
+
+function buildUnderparWebRequestHarRecords(flowEvents = [], context = null) {
   const records = new Map();
 
   const getRecord = (event) => {
@@ -33225,7 +33459,8 @@ function buildWebRequestHarEntries(flowEvents = [], context = null) {
     const record = {
       key,
       tabId,
-      requestId,
+      webRequestId: requestId,
+      tabNetworkRequestId: "",
       startedMs: 0,
       endedMs: 0,
       method: "",
@@ -33233,10 +33468,19 @@ function buildWebRequestHarEntries(flowEvents = [], context = null) {
       requestHeaders: {},
       responseHeaders: {},
       requestBody: null,
+      requestBodyPreview: "",
       status: 0,
       statusText: "",
       redirectUrl: "",
       errorText: "",
+      resourceType: "",
+      mimeType: "",
+      responseBodyPreview: "",
+      responseBodyBase64Encoded: false,
+      responseBodySource: "",
+      encodedDataLength: 0,
+      webRequestSeen: true,
+      tabNetworkSeen: false,
     };
     records.set(key, record);
     return record;
@@ -33246,7 +33490,8 @@ function buildWebRequestHarEntries(flowEvents = [], context = null) {
     if (!event || event.source !== "web-request") {
       continue;
     }
-    if (shouldIgnoreRedirectSiteUrl(event.url || "", context)) {
+    const eventUrl = getUnderparHarEventUrl(event);
+    if (!eventUrl || shouldIgnoreRedirectSiteUrl(eventUrl, context)) {
       continue;
     }
 
@@ -33263,15 +33508,16 @@ function buildWebRequestHarEntries(flowEvents = [], context = null) {
       record.method = String(event.method || "GET").toUpperCase();
     }
     if (!record.url) {
-      record.url = String(event.url || "");
+      record.url = eventUrl;
     }
-    if (!record.requestHeaders || Object.keys(record.requestHeaders).length === 0) {
-      if (event.requestHeaders && typeof event.requestHeaders === "object") {
-        record.requestHeaders = event.requestHeaders;
-      }
+    if (!record.resourceType) {
+      record.resourceType = String(event.type || "").trim();
+    }
+    if (event.requestHeaders && typeof event.requestHeaders === "object") {
+      record.requestHeaders = mergeUnderparHarHeaders(record.requestHeaders, event.requestHeaders);
     }
     if (event.responseHeaders && typeof event.responseHeaders === "object") {
-      record.responseHeaders = event.responseHeaders;
+      record.responseHeaders = mergeUnderparHarHeaders(record.responseHeaders, event.responseHeaders);
     }
     if (event.requestBody && record.requestBody === null) {
       record.requestBody = event.requestBody;
@@ -33291,33 +33537,261 @@ function buildWebRequestHarEntries(flowEvents = [], context = null) {
     }
   }
 
-  const entries = [];
-  for (const record of records.values()) {
-    if (!record.url) {
+  return [...records.values()];
+}
+
+function buildUnderparTabNetworkHarRecords(flowEvents = [], context = null) {
+  const records = new Map();
+
+  const getRecord = (event) => {
+    const tabId = Number(event?.tabId || 0);
+    const requestId = String(event?.requestId || "").trim();
+    const fallbackKey = `${tabId}:seq:${String(event?.seq || 0)}`;
+    const key = requestId ? `${tabId}:${requestId}` : fallbackKey;
+    const existing = records.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const record = {
+      key,
+      tabId,
+      webRequestId: "",
+      tabNetworkRequestId: requestId,
+      startedMs: 0,
+      endedMs: 0,
+      method: "",
+      url: "",
+      requestHeaders: {},
+      responseHeaders: {},
+      requestBody: null,
+      requestBodyPreview: "",
+      status: 0,
+      statusText: "",
+      redirectUrl: "",
+      errorText: "",
+      resourceType: "",
+      mimeType: "",
+      responseBodyPreview: "",
+      responseBodyBase64Encoded: false,
+      responseBodySource: "",
+      encodedDataLength: 0,
+      webRequestSeen: false,
+      tabNetworkSeen: true,
+    };
+    records.set(key, record);
+    return record;
+  };
+
+  for (const event of flowEvents) {
+    if (!event || event.source !== "tab-network") {
+      continue;
+    }
+    const eventUrl = getUnderparHarEventUrl(event);
+    if (!eventUrl || shouldIgnoreRedirectSiteUrl(eventUrl, context)) {
       continue;
     }
 
-    const startedMs = record.startedMs || Date.now();
-    const endedMs = record.endedMs || startedMs;
-    const durationMs = Math.max(0, endedMs - startedMs);
-    const requestHeaders = toHarHeadersArray(record.requestHeaders);
-    const responseHeaders = toHarHeadersArray(record.responseHeaders);
-    const requestBodyText =
-      record.requestBody === null
-        ? ""
-        : typeof record.requestBody === "string"
-          ? record.requestBody
-          : JSON.stringify(record.requestBody);
+    const record = getRecord(event);
+    const timestampMs = pickFlowEventTimestampMs(event, Date.now());
+    if (!record.startedMs || timestampMs < record.startedMs) {
+      record.startedMs = timestampMs;
+    }
+    if (!record.endedMs || timestampMs > record.endedMs) {
+      record.endedMs = timestampMs;
+    }
+
+    if (!record.url) {
+      record.url = eventUrl;
+    }
+    if (event.method && !record.method) {
+      record.method = String(event.method || "GET").toUpperCase();
+    }
+    if (event.resourceType && !record.resourceType) {
+      record.resourceType = String(event.resourceType || "").trim();
+    }
+    if (event.requestHeaders && typeof event.requestHeaders === "object") {
+      record.requestHeaders = mergeUnderparHarHeaders(record.requestHeaders, event.requestHeaders);
+    }
+    if (event.responseHeaders && typeof event.responseHeaders === "object") {
+      record.responseHeaders = mergeUnderparHarHeaders(record.responseHeaders, event.responseHeaders);
+    }
+    if (event.postDataPreview && !record.requestBodyPreview) {
+      record.requestBodyPreview = String(event.postDataPreview || "");
+    }
+    if (event.mimeType && !record.mimeType) {
+      record.mimeType = String(event.mimeType || "").trim();
+    }
+    if (Number(event.status || 0) > 0) {
+      record.status = Number(event.status || 0);
+    }
+    if (event.statusText) {
+      record.statusText = String(event.statusText || "");
+    }
+    if (Number(event.encodedDataLength || 0) > 0) {
+      record.encodedDataLength = Math.max(record.encodedDataLength, Number(event.encodedDataLength || 0));
+    }
+    if (event.phase === "body" && String(event.bodyPreview || "").trim()) {
+      record.responseBodyPreview = String(event.bodyPreview || "");
+      record.responseBodyBase64Encoded = event.base64Encoded === true;
+      record.responseBodySource = "tab-network:body";
+    }
+    if (event.phase === "loading-failed" || event.phase === "body-error") {
+      record.errorText = firstNonEmptyString([String(event.errorText || "").trim(), String(event.error || "").trim()]);
+    }
+  }
+
+  return [...records.values()];
+}
+
+function mergeUnderparRecordedHarRecord(webRecord = null, tabRecord = null) {
+  const left = webRecord && typeof webRecord === "object" ? webRecord : {};
+  const right = tabRecord && typeof tabRecord === "object" ? tabRecord : {};
+  const startedCandidates = [left.startedMs, right.startedMs]
+    .map((value) => Number(value || 0))
+    .filter((value) => value > 0);
+  return {
+    key: String(right.key || left.key || "").trim(),
+    tabId: Number(right.tabId || left.tabId || 0),
+    webRequestId: String(left.webRequestId || "").trim(),
+    tabNetworkRequestId: String(right.tabNetworkRequestId || "").trim(),
+    startedMs: startedCandidates.length > 0 ? Math.min(...startedCandidates) : 0,
+    endedMs: Math.max(Number(left.endedMs || 0), Number(right.endedMs || 0)),
+    method: firstNonEmptyString([String(right.method || "").trim(), String(left.method || "").trim(), "GET"]).toUpperCase(),
+    url: firstNonEmptyString([String(right.url || "").trim(), String(left.url || "").trim()]),
+    requestHeaders: mergeUnderparHarHeaders(left.requestHeaders, right.requestHeaders),
+    responseHeaders: mergeUnderparHarHeaders(left.responseHeaders, right.responseHeaders),
+    requestBody: left.requestBody != null ? left.requestBody : right.requestBody,
+    requestBodyPreview: firstNonEmptyString([String(right.requestBodyPreview || "").trim(), String(left.requestBodyPreview || "").trim()]),
+    status: Number(right.status || left.status || 0),
+    statusText: firstNonEmptyString([String(right.statusText || "").trim(), String(left.statusText || "").trim()]),
+    redirectUrl: firstNonEmptyString([
+      String(left.redirectUrl || "").trim(),
+      String(right.redirectUrl || "").trim(),
+      getUnderparHarHeaderValueFromObject(left.responseHeaders, "location"),
+      getUnderparHarHeaderValueFromObject(right.responseHeaders, "location"),
+    ]),
+    errorText: firstNonEmptyString([String(right.errorText || "").trim(), String(left.errorText || "").trim()]),
+    resourceType: firstNonEmptyString([String(right.resourceType || "").trim(), String(left.resourceType || "").trim()]),
+    mimeType: firstNonEmptyString([String(right.mimeType || "").trim(), String(left.mimeType || "").trim()]),
+    responseBodyPreview: firstNonEmptyString([String(right.responseBodyPreview || "").trim(), String(left.responseBodyPreview || "").trim()]),
+    responseBodyBase64Encoded: right.responseBodyBase64Encoded === true || left.responseBodyBase64Encoded === true,
+    responseBodySource: firstNonEmptyString([String(right.responseBodySource || "").trim(), String(left.responseBodySource || "").trim()]),
+    encodedDataLength: Math.max(Number(left.encodedDataLength || 0), Number(right.encodedDataLength || 0)),
+    webRequestSeen: left.webRequestSeen === true || right.webRequestSeen === true,
+    tabNetworkSeen: left.tabNetworkSeen === true || right.tabNetworkSeen === true,
+  };
+}
+
+function mergeUnderparRecordedHarRecords(webRecords = [], tabRecords = []) {
+  const normalizedWebRecords = (Array.isArray(webRecords) ? webRecords : [])
+    .filter((record) => record && typeof record === "object" && String(record.url || "").trim())
+    .sort((left, right) => (Number(left.startedMs || 0) || 0) - (Number(right.startedMs || 0) || 0));
+  const normalizedTabRecords = (Array.isArray(tabRecords) ? tabRecords : [])
+    .filter((record) => record && typeof record === "object" && String(record.url || "").trim())
+    .sort((left, right) => (Number(left.startedMs || 0) || 0) - (Number(right.startedMs || 0) || 0));
+
+  const usedWebIndexes = new Set();
+  const mergedRecords = [];
+
+  normalizedTabRecords.forEach((tabRecord) => {
+    const normalizedTabMethod = String(tabRecord.method || "GET").trim().toUpperCase();
+    const normalizedTabUrl = String(tabRecord.url || "").trim();
+    let matchedWebIndex = -1;
+    let matchedWebDistance = Number.POSITIVE_INFINITY;
+
+    normalizedWebRecords.forEach((webRecord, index) => {
+      if (usedWebIndexes.has(index)) {
+        return;
+      }
+      if (Number(webRecord.tabId || 0) !== Number(tabRecord.tabId || 0)) {
+        return;
+      }
+      const normalizedWebUrl = String(webRecord.url || "").trim();
+      if (!normalizedWebUrl || normalizedWebUrl !== normalizedTabUrl) {
+        return;
+      }
+      const normalizedWebMethod = String(webRecord.method || "GET").trim().toUpperCase();
+      if (normalizedWebMethod && normalizedTabMethod && normalizedWebMethod !== normalizedTabMethod) {
+        return;
+      }
+      const distance = Math.abs(Number(webRecord.startedMs || 0) - Number(tabRecord.startedMs || 0));
+      if (distance > 1500 || distance >= matchedWebDistance) {
+        return;
+      }
+      matchedWebDistance = distance;
+      matchedWebIndex = index;
+    });
+
+    if (matchedWebIndex >= 0) {
+      usedWebIndexes.add(matchedWebIndex);
+      mergedRecords.push(mergeUnderparRecordedHarRecord(normalizedWebRecords[matchedWebIndex], tabRecord));
+      return;
+    }
+
+    mergedRecords.push(tabRecord);
+  });
+
+  normalizedWebRecords.forEach((webRecord, index) => {
+    if (!usedWebIndexes.has(index)) {
+      mergedRecords.push(webRecord);
+    }
+  });
+
+  return mergedRecords.sort((left, right) => (Number(left.startedMs || 0) || 0) - (Number(right.startedMs || 0) || 0));
+}
+
+function buildWebRequestHarEntries(flowEvents = [], context = null) {
+  const mergedRecords = mergeUnderparRecordedHarRecords(
+    buildUnderparWebRequestHarRecords(flowEvents, context),
+    buildUnderparTabNetworkHarRecords(flowEvents, context)
+  );
+
+  const entries = [];
+  for (const record of mergedRecords) {
+    if (!record || typeof record !== "object" || !record.url) {
+      continue;
+    }
+
+    const requestHeadersObject = record.requestHeaders && typeof record.requestHeaders === "object" ? record.requestHeaders : {};
+    const responseHeadersObject = record.responseHeaders && typeof record.responseHeaders === "object" ? record.responseHeaders : {};
     const mimeType = firstNonEmptyString([
-      getHarHeaderValue(responseHeaders, "content-type").split(";")[0],
-      getHarHeaderValue(requestHeaders, "content-type").split(";")[0],
+      String(record.mimeType || "").trim(),
+      getUnderparHarHeaderValueFromObject(responseHeadersObject, "content-type").split(";")[0],
+      getUnderparHarHeaderValueFromObject(requestHeadersObject, "content-type").split(";")[0],
       "application/octet-stream",
     ]);
+    if (
+      isUnderparHarPhysicalAssetTraffic({
+        url: record.url,
+        resourceType: record.resourceType,
+        mimeType,
+        headers: responseHeadersObject,
+      })
+    ) {
+      continue;
+    }
+
+    const startedMs = Number(record.startedMs || 0) || Date.now();
+    const endedMs = Number(record.endedMs || 0) || startedMs;
+    const durationMs = Math.max(0, endedMs - startedMs);
+    const requestHeaders = toHarHeadersArray(requestHeadersObject);
+    const responseHeaders = toHarHeadersArray(responseHeadersObject);
+    const requestBodyText = serializeUnderparHarRequestBody(record.requestBody, record.requestBodyPreview);
+    const responseBodyText = String(record.responseBodyPreview || "");
+    const responseBodySize = Math.max(0, Number(record.encodedDataLength || 0), responseBodyText.length);
+    const hasResponseBodyMetadata =
+      responseBodySize > 0 || Boolean(responseBodyText) || String(record.responseBodySource || "").trim().length > 0;
     const status = Number(record.status || 0);
+    const redirectUrl = firstNonEmptyString([
+      String(record.redirectUrl || "").trim(),
+      getHarHeaderValue(responseHeaders, "location"),
+    ]);
 
     entries.push({
       startedDateTime: new Date(startedMs).toISOString(),
       time: durationMs,
+      _resourceType: String(record.resourceType || "").trim() || "Other",
       request: {
         method: record.method || "GET",
         url: record.url,
@@ -33340,12 +33814,15 @@ function buildWebRequestHarEntries(flowEvents = [], context = null) {
         httpVersion: "HTTP/1.1",
         headers: responseHeaders,
         cookies: [],
-        redirectURL: record.redirectUrl || "",
+        redirectURL: redirectUrl,
         headersSize: -1,
-        bodySize: -1,
+        bodySize: hasResponseBodyMetadata ? responseBodySize : -1,
         content: {
-          size: 0,
+          size: responseBodySize,
           mimeType,
+          ...(responseBodyText ? { text: truncateDebugText(responseBodyText, 10000) } : {}),
+          ...(record.responseBodyBase64Encoded === true ? { encoding: "base64" } : {}),
+          ...(record.responseBodySource ? { comment: "Captured from UnderPAR tab-network response body preview." } : {}),
         },
       },
       cache: {},
@@ -33355,9 +33832,12 @@ function buildWebRequestHarEntries(flowEvents = [], context = null) {
         receive: 0,
       },
       _underpar: {
-        source: "web-request",
-        tabId: record.tabId,
-        requestId: record.requestId,
+        source: "recorded-network",
+        tabId: Number(record.tabId || 0),
+        webRequestId: String(record.webRequestId || "").trim(),
+        tabNetworkRequestId: String(record.tabNetworkRequestId || "").trim(),
+        webRequestSeen: record.webRequestSeen === true,
+        tabNetworkSeen: record.tabNetworkSeen === true,
       },
     });
   }
@@ -57763,6 +58243,7 @@ function healthWorkspaceGetSelectedControllerStatePayload(programmer = null, sel
   return {
     controllerOnline: true,
     healthReady: Boolean(context?.programmerId && context?.requestorId && premiumContext?.hydrationReady),
+    esmAvailable: premiumContext?.esmAvailable === true,
     programmerId: String(context?.programmerId || "").trim(),
     programmerName: String(context?.programmerName || "").trim(),
     requestorId: String(context?.requestorId || "").trim(),
@@ -59295,10 +59776,28 @@ function buildRestV2SelectionContextFromRecordingContext(recordingContext = null
     learningPartner: String(recordingContext.learningPartner || "").trim(),
     learningPartnerFrameworkStatus: String(recordingContext.learningPartnerFrameworkStatus || "").trim(),
     learningPartnerSource: String(recordingContext.learningPartnerSource || "").trim(),
+    deviceIdentifier: String(
+      firstNonEmptyString([
+        recordingContext.deviceIdentifier,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(recordingContext, "AP-Device-Identifier"),
+      ]) || ""
+    ).trim(),
+    deviceInfo: String(
+      firstNonEmptyString([
+        recordingContext.deviceInfo,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(recordingContext, "X-Device-Info"),
+      ]) || ""
+    ).trim(),
     adobeSubjectToken: String(recordingContext.adobeSubjectToken || "").trim(),
     adServiceToken: String(recordingContext.adServiceToken || "").trim(),
     tempPassIdentity: String(recordingContext.tempPassIdentity || "").trim(),
     visitorIdentifier: String(recordingContext.visitorIdentifier || "").trim(),
+    rokuConnectToken: String(
+      firstNonEmptyString([
+        recordingContext.rokuConnectToken,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(recordingContext, "X-Roku-Reserved-Roku-Connect-Token"),
+      ]) || ""
+    ).trim(),
     samlResponse: String(recordingContext.samlResponse || "").trim(),
     samlSource: String(recordingContext.samlSource || "").trim(),
     samlTrustedForPartnerSso: recordingContext.samlTrustedForPartnerSso === true,
@@ -59394,10 +59893,15 @@ function buildRestV2ProfilesHydrationSeedHarvest(context = null, options = {}) {
     learningPartner: String(firstNonEmptyString([context.learningPartner, resolveRestV2LearningPartnerNameFromContext(context)]) || "").trim(),
     learningPartnerFrameworkStatus: String(resolveRestV2LearningPartnerFrameworkStatusFromContext(context) || "").trim(),
     learningPartnerSource: String(context.learningPartnerSource || "").trim(),
+    deviceIdentifier: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Device-Identifier") || "").trim(),
+    deviceInfo: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "X-Device-Info") || "").trim(),
     adobeSubjectToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "Adobe-Subject-Token") || "").trim(),
     adServiceToken: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AD-Service-Token") || "").trim(),
     tempPassIdentity: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Temppass-Identity") || "").trim(),
     visitorIdentifier: String(resolveRestV2InteractiveDocsHeaderValueFromContext(context, "AP-Visitor-Identifier") || "").trim(),
+    rokuConnectToken: String(
+      resolveRestV2InteractiveDocsHeaderValueFromContext(context, "X-Roku-Reserved-Roku-Connect-Token") || ""
+    ).trim(),
     samlResponse: String(context.samlResponse || "").trim(),
     samlSource: String(context.samlSource || "").trim(),
     samlTrustedForPartnerSso: context?.samlTrustedForPartnerSso === true,
@@ -67828,12 +68332,16 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
         redirectUrl: "",
         domainName: "",
         sessionData: null,
+        sessionRequestHeaders: null,
         sessionResponseHeaders: null,
         partnerFrameworkStatus: "",
+        deviceIdentifier: "",
+        deviceInfo: "",
         adobeSubjectToken: "",
         adServiceToken: "",
         tempPassIdentity: "",
         visitorIdentifier: "",
+        rokuConnectToken: "",
         partner: "",
         samlResponse: "",
         samlSource: "",
@@ -67999,6 +68507,16 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "Adobe-Subject-Token") || "").trim(),
     String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvest, "Adobe-Subject-Token") || "").trim(),
   ]);
+  const deviceIdentifier = firstNonEmptyString([
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(activeRecordingContext, "AP-Device-Identifier") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Device-Identifier") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvest, "AP-Device-Identifier") || "").trim(),
+  ]);
+  const deviceInfo = firstNonEmptyString([
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(activeRecordingContext, "X-Device-Info") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "X-Device-Info") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvest, "X-Device-Info") || "").trim(),
+  ]);
   const adServiceToken = firstNonEmptyString([
     String(resolveRestV2InteractiveDocsHeaderValueFromContext(activeRecordingContext, "AD-Service-Token") || "").trim(),
     String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AD-Service-Token") || "").trim(),
@@ -68013,6 +68531,11 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
     String(resolveRestV2InteractiveDocsHeaderValueFromContext(activeRecordingContext, "AP-Visitor-Identifier") || "").trim(),
     String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Visitor-Identifier") || "").trim(),
     String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvest, "AP-Visitor-Identifier") || "").trim(),
+  ]);
+  const rokuConnectToken = firstNonEmptyString([
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(activeRecordingContext, "X-Roku-Reserved-Roku-Connect-Token") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "X-Roku-Reserved-Roku-Connect-Token") || "").trim(),
+    String(resolveRestV2InteractiveDocsHeaderValueFromContext(harvest, "X-Roku-Reserved-Roku-Connect-Token") || "").trim(),
   ]);
   const partner = firstNonEmptyString([
     String(resolveRestV2PartnerNameFromContext(activeRecordingContext) || "").trim(),
@@ -68103,10 +68626,13 @@ function buildRestV2InteractiveDocsContext(programmer = null, entry = null) {
         harvest?.allowPartnerFrameworkSelectedMvpdFallback === true
     ),
     learningPartnerFrameworkStatus: String(learningPartnerFrameworkStatus || "").trim(),
+    deviceIdentifier: String(deviceIdentifier || "").trim(),
+    deviceInfo: String(deviceInfo || "").trim(),
     adobeSubjectToken: String(adobeSubjectToken || "").trim(),
     adServiceToken: String(adServiceToken || "").trim(),
     tempPassIdentity: String(tempPassIdentity || "").trim(),
     visitorIdentifier: String(visitorIdentifier || "").trim(),
+    rokuConnectToken: String(rokuConnectToken || "").trim(),
     partner: String(partner || "").trim(),
     learningPartner: String(learningPartner || "").trim(),
     learningPartnerSource: String(learningPartnerSource || "").trim(),
@@ -68145,6 +68671,8 @@ async function prepareRestV2InteractiveDocsContextForEntry(entry = null, context
     resolvedEntry.usesPartnerFrameworkStatus === true ||
     resolvedEntry.usesBodySamlResponse === true;
   const optionalHeaderNames = [
+    resolvedEntry.usesDeviceHeaders === true ? "AP-Device-Identifier" : "",
+    resolvedEntry.usesDeviceHeaders === true ? "X-Device-Info" : "",
     resolvedEntry.usesAdobeSubjectToken === true ? "Adobe-Subject-Token" : "",
     resolvedEntry.usesAdServiceToken === true ? "AD-Service-Token" : "",
     resolvedEntry.usesTempPassIdentity === true ? "AP-Temppass-Identity" : "",
@@ -68287,9 +68815,21 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
     requiredFields.push("header.Authorization");
   }
   if (resolvedEntry.usesDeviceHeaders === true) {
-    const deviceHeaders = buildRestV2Headers(resolvedContext.serviceProviderId, {});
-    fieldValues["header.AP-Device-Identifier"] = String(deviceHeaders["AP-Device-Identifier"] || "").trim();
-    fieldValues["header.X-Device-Info"] = String(deviceHeaders["X-Device-Info"] || "").trim();
+    const fallbackDeviceHeaders = buildRestV2Headers(resolvedContext.serviceProviderId, {});
+    fieldValues["header.AP-Device-Identifier"] = String(
+      firstNonEmptyString([
+        resolvedContext.deviceIdentifier,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "AP-Device-Identifier"),
+        fallbackDeviceHeaders["AP-Device-Identifier"],
+      ]) || ""
+    ).trim();
+    fieldValues["header.X-Device-Info"] = String(
+      firstNonEmptyString([
+        resolvedContext.deviceInfo,
+        resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "X-Device-Info"),
+        fallbackDeviceHeaders["X-Device-Info"],
+      ]) || ""
+    ).trim();
   }
   if (resolvedEntry.usesAdobeSubjectToken === true) {
     const adobeSubjectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "Adobe-Subject-Token");
@@ -70470,6 +71010,25 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
         "service_token",
       ];
     }
+    if (lowerHeaderName === "ap-device-identifier") {
+      return [
+        "AP-Device-Identifier",
+        "ap-device-identifier",
+        "deviceIdentifier",
+        "device_identifier",
+        "deviceId",
+        "device_id",
+      ];
+    }
+    if (lowerHeaderName === "x-device-info") {
+      return [
+        "X-Device-Info",
+        "x-device-info",
+        "deviceInfo",
+        "device_info",
+        "xDeviceInfo",
+      ];
+    }
     if (lowerHeaderName === "ap-temppass-identity" || lowerHeaderName === "ap-temp-pass-identity") {
       return [
         "AP-Temppass-Identity",
@@ -70498,6 +71057,16 @@ async function runRestV2InteractiveDocsHydrator(config = {}) {
         "visitorId",
         "visitor_id",
         "ecid",
+      ];
+    }
+    if (lowerHeaderName === "x-roku-reserved-roku-connect-token") {
+      return [
+        "X-Roku-Reserved-Roku-Connect-Token",
+        "x-roku-reserved-roku-connect-token",
+        "rokuConnectToken",
+        "roku_connect_token",
+        "rokuReservedRokuConnectToken",
+        "xRokuReservedRokuConnectToken",
       ];
     }
     return [normalizedHeaderName];
@@ -93305,6 +93874,25 @@ function getRestV2InteractiveDocsHeaderAliasCandidates(headerName = "") {
       "service_token",
     ];
   }
+  if (normalizedHeaderName === "ap-device-identifier") {
+    return [
+      "AP-Device-Identifier",
+      "ap-device-identifier",
+      "deviceIdentifier",
+      "device_identifier",
+      "deviceId",
+      "device_id",
+    ];
+  }
+  if (normalizedHeaderName === "x-device-info") {
+    return [
+      "X-Device-Info",
+      "x-device-info",
+      "deviceInfo",
+      "device_info",
+      "xDeviceInfo",
+    ];
+  }
   if (normalizedHeaderName === "ap-temppass-identity" || normalizedHeaderName === "ap-temp-pass-identity") {
     return [
       "AP-Temppass-Identity",
@@ -93341,6 +93929,16 @@ function getRestV2InteractiveDocsHeaderAliasCandidates(headerName = "") {
       "marketingCloudVisitorId",
       "mcmid",
       "MCMID",
+    ];
+  }
+  if (normalizedHeaderName === "x-roku-reserved-roku-connect-token") {
+    return [
+      "X-Roku-Reserved-Roku-Connect-Token",
+      "x-roku-reserved-roku-connect-token",
+      "rokuConnectToken",
+      "roku_connect_token",
+      "rokuReservedRokuConnectToken",
+      "xRokuReservedRokuConnectToken",
     ];
   }
   return [headerName];
@@ -93462,6 +94060,12 @@ function getRestV2InteractiveDocsContextPropertyForHeader(headerName = "") {
   if (normalizedHeaderName === "ad-service-token") {
     return "adServiceToken";
   }
+  if (normalizedHeaderName === "ap-device-identifier") {
+    return "deviceIdentifier";
+  }
+  if (normalizedHeaderName === "x-device-info") {
+    return "deviceInfo";
+  }
   if (normalizedHeaderName === "ap-temppass-identity" || normalizedHeaderName === "ap-temp-pass-identity") {
     return "tempPassIdentity";
   }
@@ -93471,6 +94075,9 @@ function getRestV2InteractiveDocsContextPropertyForHeader(headerName = "") {
   if (normalizedHeaderName === "ap-visitor-identifier") {
     return "visitorIdentifier";
   }
+  if (normalizedHeaderName === "x-roku-reserved-roku-connect-token") {
+    return "rokuConnectToken";
+  }
   return "";
 }
 
@@ -93479,10 +94086,13 @@ function isRestV2ExactCapturedHeaderName(headerName = "") {
   return (
     normalizedHeaderName === "adobe-subject-token" ||
     normalizedHeaderName === "ad-service-token" ||
+    normalizedHeaderName === "ap-device-identifier" ||
+    normalizedHeaderName === "x-device-info" ||
     normalizedHeaderName === "ap-temppass-identity" ||
     normalizedHeaderName === "ap-temp-pass-identity" ||
     normalizedHeaderName === "ap-visitor-identifier" ||
-    normalizedHeaderName === "ap-partner-framework-status"
+    normalizedHeaderName === "ap-partner-framework-status" ||
+    normalizedHeaderName === "x-roku-reserved-roku-connect-token"
   );
 }
 
@@ -93656,23 +94266,32 @@ function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, head
       if (normalizedResolvedHeaderName === "adobe-subject-token") {
         return "adobeSubjectToken";
       }
-      if (normalizedResolvedHeaderName === "ad-service-token") {
-        return "adServiceToken";
-      }
-      if (
-        normalizedResolvedHeaderName === "ap-temppass-identity" ||
-        normalizedResolvedHeaderName === "ap-temp-pass-identity"
-      ) {
-        return "tempPassIdentity";
+    if (normalizedResolvedHeaderName === "ad-service-token") {
+      return "adServiceToken";
+    }
+    if (normalizedResolvedHeaderName === "ap-device-identifier") {
+      return "deviceIdentifier";
+    }
+    if (normalizedResolvedHeaderName === "x-device-info") {
+      return "deviceInfo";
+    }
+    if (
+      normalizedResolvedHeaderName === "ap-temppass-identity" ||
+      normalizedResolvedHeaderName === "ap-temp-pass-identity"
+    ) {
+      return "tempPassIdentity";
       }
       if (normalizedResolvedHeaderName === "ap-partner-framework-status") {
         return "partnerFrameworkStatus";
       }
-      if (normalizedResolvedHeaderName === "ap-visitor-identifier") {
-        return "visitorIdentifier";
-      }
-      return "";
-    };
+    if (normalizedResolvedHeaderName === "ap-visitor-identifier") {
+      return "visitorIdentifier";
+    }
+    if (normalizedResolvedHeaderName === "x-roku-reserved-roku-connect-token") {
+      return "rokuConnectToken";
+    }
+    return "";
+  };
     const aliases = getRestV2InteractiveDocsHeaderAliasCandidates(targetHeaderName);
     const propertyName = resolvePropertyName(targetHeaderName);
     const sourceList = [
@@ -93875,6 +94494,12 @@ function extractRestV2InteractiveDocsHeaderValueFromDebugFlow(flow = null, heade
       return exactEventValue;
     }
     if (isExactCapturedHeader) {
+      const previewExactValue = textCarriers
+        .map((value) => extractRestV2InteractiveDocsHeaderValueFromText(value, normalizedHeaderName))
+        .find(Boolean);
+      if (previewExactValue) {
+        return previewExactValue;
+      }
       continue;
     }
     const eventValue =

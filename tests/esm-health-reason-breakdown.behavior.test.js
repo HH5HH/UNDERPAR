@@ -50,10 +50,15 @@ test("ESM health aggregates failure reasons into sortable hotspot rows with corr
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const script = [
     'const ESM_HEALTH_TOP_ROW_LIMIT = 10;',
+    'const ESM_HEALTH_REASON_FAILURE_EVENTS = Object.freeze(["authnf", "authzf", "shauthzf"]);',
+    'const ESM_HEALTH_REASON_FAILURE_EVENT_SET = new Set(ESM_HEALTH_REASON_FAILURE_EVENTS);',
+    extractFunctionSource(popupSource, "normalizeEsmHealthEventKey"),
+    extractFunctionSource(popupSource, "isEsmHealthFailureEvent"),
+    extractFunctionSource(popupSource, "filterEsmHealthFailureReasonRows"),
     extractFunctionSource(popupSource, "buildEsmHealthReasonFacetSummary"),
     extractFunctionSource(popupSource, "aggregateEsmHealthReasonRows"),
     extractFunctionSource(popupSource, "addEsmHealthIssueShare"),
-    "module.exports = { aggregateEsmHealthReasonRows, addEsmHealthIssueShare };",
+    "module.exports = { filterEsmHealthFailureReasonRows, aggregateEsmHealthReasonRows, addEsmHealthIssueShare };",
   ].join("\n\n");
 
   const context = {
@@ -64,26 +69,39 @@ test("ESM health aggregates failure reasons into sortable hotspot rows with corr
     String,
   };
   vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
-  const { aggregateEsmHealthReasonRows, addEsmHealthIssueShare } = context.module.exports;
+  const { filterEsmHealthFailureReasonRows, aggregateEsmHealthReasonRows, addEsmHealthIssueShare } = context.module.exports;
 
   const sourceRows = [
-    { reason: "Unknown resource", event: "authz-failed", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "adobe", count: 4 },
-    { reason: "Unknown resource", event: "authz-failed", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "adobe", count: 2 },
-    { reason: "Unknown resource", event: "authz-rejected", mvpd: "Dish", "requestor-id": "NBADE", proxy: "adobe", count: 3 },
-    { reason: "Authn expired", event: "authn-failed", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "adobe", count: 2 },
-    { reason: "", event: "authz-failed", mvpd: "DirecTV", "requestor-id": "MML", proxy: "proxy", count: 1 },
+    { reason: "Unknown resource", event: "authzf", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "adobe", count: 4 },
+    { reason: "Unknown resource", event: "authzf", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "adobe", count: 2 },
+    { reason: "Unknown resource", event: "authzr", mvpd: "Dish", "requestor-id": "NBADE", proxy: "adobe", count: 3 },
+    { reason: "Authn expired", event: "authnf", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "adobe", count: 2 },
+    { reason: "Shared auth issue", event: "shauthzf", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "proxy", count: 1 },
+    { reason: "Happy path", event: "authzg", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "adobe", count: 99 },
+    { reason: "Shared happy path", event: "shauthzg", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "proxy", count: 98 },
+    { reason: "Successful play", event: "authnr", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "adobe", count: 97 },
+    { reason: "Waiting", event: "authnp", mvpd: "Comcast", "requestor-id": "NBADE", proxy: "adobe", count: 50 },
+    { reason: "", event: "authzf", mvpd: "DirecTV", "requestor-id": "MML", proxy: "proxy", count: 1 },
   ];
 
-  const totalIssueEvents = sourceRows.reduce((sum, row) => sum + Number(row.count || 0), 0);
+  const filteredRows = filterEsmHealthFailureReasonRows(sourceRows);
+  const totalIssueEvents = filteredRows.reduce((sum, row) => sum + Number(row.count || 0), 0);
   const aggregatedRows = addEsmHealthIssueShare(aggregateEsmHealthReasonRows(sourceRows, 10), totalIssueEvents);
 
-  assert.equal(aggregatedRows.length, 3);
+  assert.equal(filteredRows.length, 5);
+  assert.equal(aggregatedRows.length, 4);
   assert.equal(aggregatedRows[0].reason, "Unknown resource");
-  assert.equal(aggregatedRows[0].issueEvents, 9);
-  assert.equal(aggregatedRows[0].eventSummary, "authz-failed (+1 more)");
-  assert.equal(aggregatedRows[0].mvpdSummary, "Comcast (+1 more)");
+  assert.equal(aggregatedRows[0].issueEvents, 6);
+  assert.equal(aggregatedRows[0].eventSummary, "authzf");
+  assert.equal(aggregatedRows[0].mvpdSummary, "Comcast");
   assert.equal(aggregatedRows[0].requestorSummary, "NBADE");
-  assert.equal(aggregatedRows[0].issueShare, 9 / 12);
+  assert.equal(aggregatedRows[0].issueShare, 6 / 10);
   assert.equal(aggregatedRows[1].reason, "Authn expired");
-  assert.equal(aggregatedRows[2].reason, "(unknown)");
+  assert.ok(aggregatedRows.some((row) => row.reason === "Shared auth issue" && row.issueEvents === 1));
+  assert.ok(aggregatedRows.some((row) => row.reason === "(unknown)" && row.issueEvents === 1));
+  assert.ok(aggregatedRows.every((row) => !String(row?.eventSummary || "").includes("authzg")));
+  assert.ok(aggregatedRows.every((row) => !String(row?.eventSummary || "").includes("shauthzg")));
+  assert.ok(aggregatedRows.every((row) => !String(row?.eventSummary || "").includes("authnr")));
+  assert.ok(aggregatedRows.every((row) => !String(row?.eventSummary || "").includes("authnp")));
+  assert.ok(aggregatedRows.every((row) => !String(row?.eventSummary || "").includes("authzr")));
 });
