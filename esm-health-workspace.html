@@ -23,7 +23,7 @@
           </p>
           <p id="workspace-filter-state" class="workspace-filter-state"></p>
           <p id="workspace-context-caption" class="esm-health-context-caption">
-            ESM HEALTH stays bound to the live UnderPAR ESM context. Date range is the only sticky customization across environment switches.
+            ESM HEALTH stays bound to the live UnderPAR ESM context. The default view is the last 24 hours, and Advanced Dates stay hidden unless you need a manual slice.
           </p>
         </div>
         <div class="workspace-actions esm-health-hero-actions">
@@ -59,52 +59,50 @@
       <section class="rest-report-card esm-health-filter-card">
         <header class="rest-report-head">
           <p class="rest-report-title">ESM HEALTH Filters</p>
-          <p class="rest-report-meta">Controller context comes from UnderPAR global pickers. Date range is native here. ESM is PST effective.</p>
+          <p class="rest-report-meta">Management-first health windows stay pinned to now. Advanced dates are optional and hidden by default. ESM is PST effective.</p>
         </header>
         <form id="workspace-filter-form" class="esm-health-filter-form">
-          <label class="spectrum-Field esm-health-field">
-            <span class="spectrum-FieldLabel esm-health-field-label">Start</span>
-            <input id="workspace-start-date" class="spectrum-Textfield esm-health-date-input" type="date" />
-          </label>
-          <label class="spectrum-Field esm-health-field">
-            <span class="spectrum-FieldLabel esm-health-field-label">End</span>
-            <input id="workspace-end-date" class="spectrum-Textfield esm-health-date-input" type="date" />
-          </label>
           <div class="esm-health-filter-actions">
-            <button id="workspace-reset-filters" class="spectrum-Button workspace-text-btn" type="button">
-              <span class="spectrum-Button-label">Reset to Context</span>
-            </button>
-            <label class="spectrum-Field esm-health-inline-field esm-health-inline-field--compare">
-              <span class="spectrum-FieldLabel esm-health-field-label">Compare</span>
+            <label class="spectrum-Field esm-health-inline-field esm-health-inline-field--window">
+              <span class="spectrum-FieldLabel esm-health-field-label">Health Window</span>
               <select
-                id="workspace-compare-select"
+                id="workspace-window-select"
                 class="spectrum-Textfield esm-health-filter-select"
-                aria-label="Comparison Window"
+                aria-label="Health Window"
               >
-                <option value="off">Current Window</option>
-                <option value="mom">Month over Month</option>
-                <option value="yoy">Year over Year</option>
+                <option value="hr-24">HR over HR | Last 24 Hours</option>
+                <option value="day-7">DAY over DAY | Last 7 Days</option>
+                <option value="month-4">MO over MO | Last 4 Months</option>
+                <option value="year-ytd">YR over YR | Year to Date</option>
               </select>
             </label>
-            <label class="spectrum-Field esm-health-inline-field esm-health-inline-field--granularity">
-              <span class="spectrum-FieldLabel esm-health-field-label">Granularity</span>
-              <select
-                id="workspace-granularity-select"
-                class="spectrum-Textfield esm-health-filter-select"
-                aria-label="Granularity"
-              >
-                <option value="day">Day</option>
-                <option value="hour">Hour</option>
-                <option value="month">Month</option>
-              </select>
-            </label>
-            <button
-              id="workspace-run-dashboard"
-              class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"
-              type="submit"
-            >
-              <span class="spectrum-Button-label">Run Dashboard</span>
-            </button>
+            <details id="workspace-advanced-filters" class="esm-health-advanced-panel">
+              <summary class="esm-health-advanced-toggle">Advanced Dates</summary>
+              <div class="esm-health-advanced-body">
+                <div class="esm-health-advanced-grid">
+                  <label class="spectrum-Field esm-health-field">
+                    <span class="spectrum-FieldLabel esm-health-field-label">Start</span>
+                    <input id="workspace-start-date" class="spectrum-Textfield esm-health-date-input" type="date" />
+                  </label>
+                  <label class="spectrum-Field esm-health-field">
+                    <span class="spectrum-FieldLabel esm-health-field-label">End</span>
+                    <input id="workspace-end-date" class="spectrum-Textfield esm-health-date-input" type="date" />
+                  </label>
+                  <div class="esm-health-advanced-actions">
+                    <button
+                      id="workspace-apply-advanced-dates"
+                      class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"
+                      type="submit"
+                    >
+                      <span class="spectrum-Button-label">Apply Dates</span>
+                    </button>
+                    <button id="workspace-reset-filters" class="spectrum-Button workspace-text-btn" type="button" hidden>
+                      <span class="spectrum-Button-label">Reset</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         </form>
       </section>

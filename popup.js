@@ -8407,7 +8407,10 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.mvpdLoadPromiseByRequestor.clear();
   state.domainCacheByRequestor.clear();
   state.harpoSelectedDomainByRequestor.clear();
+  state.harpoReproOpenByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
+  clearHarpoPanelStatus();
+  clearHarpoRecordingState(controllerReason, { stopFlow: true });
   state.restV2PrewarmedAppsByProgrammerId.clear();
   state.restV2PreparedLoginBySelectionKey.clear();
   state.restV2PreparePromiseBySelectionKey.clear();
@@ -10342,6 +10345,27 @@ function setRequestorScopedHarpoSelectedDomain(requestorId = "", domainName = ""
   return normalizedDomainName;
 }
 
+function getRequestorScopedHarpoReproOpen(requestorId = "") {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return false;
+  }
+  return state.harpoReproOpenByRequestor.get(key) === true;
+}
+
+function setRequestorScopedHarpoReproOpen(requestorId = "", isOpen = false) {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return false;
+  }
+  if (isOpen !== true) {
+    state.harpoReproOpenByRequestor.delete(key);
+    return false;
+  }
+  state.harpoReproOpenByRequestor.set(key, true);
+  return true;
+}
+
 function getRequestorScopedRestV2AuthContext(requestorId = "") {
   const key = getEnvironmentScopedRequestorKey(requestorId);
   if (!key) {
@@ -10372,7 +10396,10 @@ function clearEnvironmentAwareRegisteredAppState(reason = "environment-change") 
   state.mvpdLoadPromiseByRequestor.clear();
   state.domainCacheByRequestor.clear();
   state.harpoSelectedDomainByRequestor.clear();
+  state.harpoReproOpenByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
+  clearHarpoPanelStatus();
+  clearHarpoRecordingState(reason, { stopFlow: true });
   state.restV2PrewarmedAppsByProgrammerId.clear();
   state.applicationsByProgrammerId.clear();
   state.programmerApplicationsLoadPromiseByProgrammerId.clear();
@@ -11844,6 +11871,13 @@ const LEGACY_DEGRADATION_WORKSPACE_MESSAGE_TYPE = "mincloud:degradation-workspac
 const BOBTOOLS_WORKSPACE_PATH = "bobtools-workspace.html";
 const BOBTOOLS_WORKSPACE_MESSAGE_TYPE = "underpar:bobtools-workspace";
 const LEGACY_BOBTOOLS_WORKSPACE_MESSAGE_TYPE = "mincloud:bobtools-workspace";
+const HARPO_WORKSPACE_PATH = "harpo.html";
+const HARPO_STORAGE_PREFIX = "harpo:";
+const HARPO_IDB_NAME = "harpo-v1";
+const HARPO_IDB_VERSION = 1;
+const HARPO_IDB_STORE = "sessions";
+const HARPO_DOMAIN_PICKER_PLACEHOLDER = "__harpo_choose_domain__";
+const HARPO_RECORDING_COUNT_POLL_INTERVAL_MS = 1500;
 const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   ESM_WORKSPACE_WORKSPACE_PATH,
   BLONDIE_TIME_WORKSPACE_PATH,
@@ -11858,6 +11892,7 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   TEMP_PASS_WORKSPACE_PATH,
   DEGRADATION_WORKSPACE_PATH,
   BOBTOOLS_WORKSPACE_PATH,
+  HARPO_WORKSPACE_PATH,
 ]);
 const BOBTOOLS_INLINE_ICON_PATH = "icons/appIcon.png";
 const BOBTOOLS_WORKSPACE_ICON_PATH = "icons/medium.png";
@@ -12884,6 +12919,17 @@ const state = {
   mvpdLoadPromiseByRequestor: new Map(),
   domainCacheByRequestor: new Map(),
   harpoSelectedDomainByRequestor: new Map(),
+  harpoReproOpenByRequestor: new Map(),
+  harpoDebugFlowId: "",
+  harpoRecordingActive: false,
+  harpoRecordingStarting: false,
+  harpoRecordingStopping: false,
+  harpoRecordingCount: 0,
+  harpoRecordingContext: null,
+  harpoRecordingPollTimerId: 0,
+  harpoStatusMessage: "",
+  harpoStatusTone: "info",
+  harpoStatusRequestorId: "",
   restV2AuthContextByRequestor: new Map(),
   restV2PrewarmedAppsByProgrammerId: new Map(),
   restV2PreparedLoginBySelectionKey: new Map(),
@@ -66652,6 +66698,21 @@ function wireHrContextSectionActions(section) {
     if (!target) {
       return;
     }
+    const harpoFileInput = target.closest("[data-harpo-file-input]");
+    if (harpoFileInput instanceof HTMLInputElement) {
+      event.stopPropagation();
+      const selectedFile = harpoFileInput.files && harpoFileInput.files.length > 0 ? harpoFileInput.files[0] : null;
+      harpoFileInput.value = "";
+      if (!selectedFile) {
+        return;
+      }
+      const selectedProgrammer = resolveSelectedProgrammer();
+      const programmerId = String(selectedProgrammer?.programmerId || "").trim();
+      const currentServices =
+        (programmerId ? getCurrentPremiumAppsSnapshot(programmerId) || getRuntimePremiumServicesSeed(programmerId) : null) || null;
+      void handleHarpoWorkspaceFile(selectedFile, selectedProgrammer, currentServices);
+      return;
+    }
     const harpoDomainSelect = target.closest("[data-harpo-domain-select]");
     if (harpoDomainSelect) {
       event.stopPropagation();
@@ -66661,10 +66722,15 @@ function wireHrContextSectionActions(section) {
       if (!requestorId) {
         return;
       }
-      setRequestorScopedHarpoSelectedDomain(requestorId, String(harpoDomainSelect.value || "").trim());
+      const nextDomainValue = String(harpoDomainSelect.value || "").trim();
+      setRequestorScopedHarpoSelectedDomain(
+        requestorId,
+        nextDomainValue === HARPO_DOMAIN_PICKER_PLACEHOLDER ? "" : nextDomainValue
+      );
       clearRestV2LearningUiState({
         controllerReason: "harpo-domain-select-change",
       });
+      refreshHarpoHrContextSection();
       return;
     }
     const dcrRegisterAppSelect = target.closest("[data-dcr-register-app-select]");
@@ -66697,6 +66763,46 @@ function wireHrContextSectionActions(section) {
       return;
     }
     if (target.closest("[data-dcr-register-app-picker]")) {
+      return;
+    }
+    const harpoUploadTrigger = target.closest("[data-harpo-upload-dropzone], [data-harpo-upload-btn]");
+    if (harpoUploadTrigger) {
+      event.preventDefault();
+      event.stopPropagation();
+      const harpoShell = harpoUploadTrigger.closest(".hr-harpo-shell");
+      const fileInput = harpoShell?.querySelector("[data-harpo-file-input]");
+      const uploadButton = harpoShell?.querySelector("[data-harpo-upload-btn]");
+      if (fileInput instanceof HTMLInputElement && !(uploadButton instanceof HTMLButtonElement && uploadButton.disabled)) {
+        openHarpoFilePicker(fileInput);
+      }
+      return;
+    }
+    const harpoReproToggle = target.closest("[data-harpo-repro-toggle]");
+    if (harpoReproToggle) {
+      event.preventDefault();
+      event.stopPropagation();
+      const requestorId = String(state.selectedRequestorId || "").trim();
+      if (!requestorId) {
+        setStatus("Select a RequestorId before opening HARPO REPRO.", "error");
+        return;
+      }
+      setRequestorScopedHarpoReproOpen(requestorId, !getRequestorScopedHarpoReproOpen(requestorId));
+      refreshHarpoHrContextSection();
+      return;
+    }
+    const harpoRecordToggle = target.closest("[data-harpo-record-toggle]");
+    if (harpoRecordToggle) {
+      event.preventDefault();
+      event.stopPropagation();
+      const selectedProgrammer = resolveSelectedProgrammer();
+      const programmerId = String(selectedProgrammer?.programmerId || "").trim();
+      const currentServices =
+        (programmerId ? getCurrentPremiumAppsSnapshot(programmerId) || getRuntimePremiumServicesSeed(programmerId) : null) || null;
+      if (state.harpoRecordingActive || state.harpoRecordingStopping) {
+        void stopHarpoRecording();
+      } else {
+        void startHarpoRecording(selectedProgrammer, currentServices);
+      }
       return;
     }
     const dcrDocsButton = target.closest("[data-dcr-doc-entry-key]");
@@ -66751,6 +66857,18 @@ function wireHrContextSectionActions(section) {
     if (!target || target.closest("[data-dcr-register-app-picker]")) {
       return;
     }
+    const harpoUploadDropzone = target.closest("[data-harpo-upload-dropzone]");
+    if (harpoUploadDropzone && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      event.stopPropagation();
+      const harpoShell = harpoUploadDropzone.closest(".hr-harpo-shell");
+      const fileInput = harpoShell?.querySelector("[data-harpo-file-input]");
+      const uploadButton = harpoShell?.querySelector("[data-harpo-upload-btn]");
+      if (fileInput instanceof HTMLInputElement && !(uploadButton instanceof HTMLButtonElement && uploadButton.disabled)) {
+        openHarpoFilePicker(fileInput);
+      }
+      return;
+    }
     if (event.key !== "Enter" && event.key !== " ") {
       return;
     }
@@ -66764,6 +66882,57 @@ function wireHrContextSectionActions(section) {
       String(dcrDocsButton.getAttribute("data-dcr-doc-entry-key") || ""),
       String(dcrDocsButton.getAttribute("data-dcr-doc-url") || "")
     );
+  });
+
+  section.addEventListener("dragover", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const dropzone = target?.closest("[data-harpo-upload-dropzone]");
+    if (!dropzone) {
+      return;
+    }
+    const hasFiles = Array.from(event.dataTransfer?.types || []).includes("Files");
+    if (!hasFiles) {
+      return;
+    }
+    event.preventDefault();
+    dropzone.classList.add("is-drag-active");
+  });
+
+  section.addEventListener("dragleave", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const dropzone = target?.closest("[data-harpo-upload-dropzone]");
+    if (!dropzone) {
+      return;
+    }
+    const nextTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+    if (nextTarget && dropzone.contains(nextTarget)) {
+      return;
+    }
+    dropzone.classList.remove("is-drag-active");
+  });
+
+  section.addEventListener("drop", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const dropzone = target?.closest("[data-harpo-upload-dropzone]");
+    if (!dropzone) {
+      return;
+    }
+    const hasFiles = Array.from(event.dataTransfer?.types || []).includes("Files");
+    if (!hasFiles) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    dropzone.classList.remove("is-drag-active");
+    const selectedFile = event.dataTransfer?.files && event.dataTransfer.files.length > 0 ? event.dataTransfer.files[0] : null;
+    if (!selectedFile) {
+      return;
+    }
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const programmerId = String(selectedProgrammer?.programmerId || "").trim();
+    const currentServices =
+      (programmerId ? getCurrentPremiumAppsSnapshot(programmerId) || getRuntimePremiumServicesSeed(programmerId) : null) || null;
+    void handleHarpoWorkspaceFile(selectedFile, selectedProgrammer, currentServices);
   });
 
   section.__underparHrActionsBound = true;
@@ -67403,6 +67572,614 @@ function shouldShowHarpoHrSection(programmer = null, services = null) {
     return false;
   }
   return collectHarpoProgrammerDomainNames(programmer, services).length > 0;
+}
+
+function getHarpoWorkspaceEnvironmentLabel() {
+  const activeEnvironment = getActiveAdobePassEnvironment();
+  const registry = globalThis.UnderParEnvironment || UNDERPAR_ENVIRONMENT_REGISTRY || null;
+  const explicitLabel = String(
+    registry?.buildEnvironmentBadgeLabel?.(activeEnvironment) || activeEnvironment?.label || activeEnvironment?.name || activeEnvironment?.key || ""
+  ).trim();
+  return explicitLabel || "Unknown ENV";
+}
+
+function buildHarpoWorkspaceSessionKey() {
+  if (globalThis.crypto?.randomUUID) {
+    return `${HARPO_STORAGE_PREFIX}${globalThis.crypto.randomUUID()}`;
+  }
+  return `${HARPO_STORAGE_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function openHarpoSessionDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(HARPO_IDB_NAME, HARPO_IDB_VERSION);
+
+    request.onupgradeneeded = ({ target }) => {
+      const db = target?.result;
+      if (db && !db.objectStoreNames.contains(HARPO_IDB_STORE)) {
+        db.createObjectStore(HARPO_IDB_STORE);
+      }
+    };
+    request.onsuccess = ({ target }) => resolve(target?.result || null);
+    request.onerror = ({ target }) => reject(target?.error || new Error("HARPO workspace storage could not be opened."));
+    request.onblocked = () => reject(new Error("HARPO workspace storage is blocked by another open tab."));
+  });
+}
+
+async function storeHarpoWorkspaceSession(sessionKey = "", payload = null) {
+  const normalizedSessionKey = String(sessionKey || "").trim();
+  if (!normalizedSessionKey) {
+    throw new Error("HARPO workspace session key is missing.");
+  }
+  const db = await openHarpoSessionDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(HARPO_IDB_STORE, "readwrite");
+    const store = tx.objectStore(HARPO_IDB_STORE);
+    store.put(payload, normalizedSessionKey);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = ({ target }) => {
+      db.close();
+      reject(target?.error || new Error("HARPO workspace session could not be stored."));
+    };
+    tx.onabort = ({ target }) => {
+      db.close();
+      reject(target?.error || new Error("HARPO workspace session was aborted."));
+    };
+  });
+}
+
+function normalizeHarpoWorkspaceDomainList(values = []) {
+  return uniquePreserveOrder((Array.isArray(values) ? values : [values]).map((value) => String(value || "").trim()).filter(Boolean));
+}
+
+function buildHarpoWorkspaceSessionRecord(har = null, options = {}) {
+  const safeDomains = uniquePreserveOrder([
+    "adobe.com",
+    ...normalizeHarpoWorkspaceDomainList(
+      Array.isArray(options.safeDomains) && options.safeDomains.length > 0 ? options.safeDomains : options.programmerDomains
+    ),
+  ]).filter(Boolean);
+  const reproDomains = normalizeHarpoWorkspaceDomainList(options.reproDomains);
+  return {
+    har,
+    source: String(options.source || "file").trim() || "file",
+    fileName: String(options.fileName || "").trim(),
+    programmerName: String(options.programmerName || "").trim(),
+    requestorId: String(options.requestorId || "").trim(),
+    requestorName: String(options.requestorName || "").trim(),
+    environmentKey: String(options.environmentKey || getActiveAdobePassEnvironmentKey() || "").trim(),
+    environmentLabel: String(options.environmentLabel || getHarpoWorkspaceEnvironmentLabel()).trim(),
+    safeDomains,
+    programmerDomains: safeDomains.slice(),
+    reproDomains,
+    expectedMvpds: Array.isArray(options.expectedMvpds) ? options.expectedMvpds.slice(0, 400) : [],
+    mvpdDomains: normalizeHarpoWorkspaceDomainList(options.mvpdDomains),
+    theme: "underpar-dark",
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function buildHarpoWorkspaceFileName(context = null) {
+  const requestor = sanitizeHarFileSegment(context?.requestorId || "requestor", "requestor");
+  const domain = sanitizeHarFileSegment(context?.selectedDomain || "repro", "repro");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `underpar-harpo-${requestor}-${domain}-${stamp}.har`;
+}
+
+async function openHarpoWorkspace(har = null, options = {}) {
+  if (!har?.log) {
+    throw new Error("HARPO workspace needs a valid HAR payload.");
+  }
+
+  const sessionKey = buildHarpoWorkspaceSessionKey();
+  const record = buildHarpoWorkspaceSessionRecord(har, options);
+  await storeHarpoWorkspaceSession(sessionKey, record);
+
+  const workspaceUrl = chrome.runtime.getURL(`${HARPO_WORKSPACE_PATH}#${sessionKey}`);
+  const targetWindowId = await resolveSidepanelControllerWindowId(false).catch(() => 0);
+  const openedTab = await chrome.tabs.create({
+    url: workspaceUrl,
+    active: true,
+    ...(targetWindowId > 0 ? { windowId: targetWindowId } : {}),
+  });
+  const windowId = Number(openedTab?.windowId || targetWindowId || 0);
+  if (windowId > 0) {
+    await chrome.windows.update(windowId, { focused: true }).catch(() => null);
+  }
+  return {
+    ok: true,
+    tabId: Number(openedTab?.id || 0),
+    windowId,
+    url: workspaceUrl,
+    sessionKey,
+  };
+}
+
+function resolveHarpoRequestorLabel(programmer = null, requestorId = "") {
+  const normalizedRequestorId = String(extractEntityIdFromToken(requestorId) || "").trim();
+  if (!normalizedRequestorId) {
+    return "";
+  }
+  const requestorOptions = Array.isArray(programmer?.requestorOptions) ? programmer.requestorOptions : [];
+  const normalizedRequestorToken = normalizeEntityToken(normalizedRequestorId);
+  const match = requestorOptions.find((option) => {
+    const optionId = extractEntityIdFromToken(firstNonEmptyString([option?.id, option?.key]));
+    return normalizeEntityToken(optionId) === normalizedRequestorToken;
+  });
+  return String(firstNonEmptyString([match?.label, match?.name, match?.id, match?.key, normalizedRequestorId]) || "").trim();
+}
+
+function collectHarpoExpectedMvpds(requestorId = "") {
+  const cache = getRequestorScopedMvpdCache(requestorId);
+  if (!cache || typeof cache?.values !== "function") {
+    return [];
+  }
+  return uniquePreserveOrder(
+    [...cache.values()]
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return "";
+        }
+        const id = String(entry.id || entry.value || "").trim();
+        const name = String(entry.name || entry.displayName || id).trim();
+        return name && name !== id ? `${name} (${id})` : id || name;
+      })
+      .filter(Boolean)
+  );
+}
+
+function buildHarpoPanelContext(programmer = null, services = null) {
+  const requestorId = String(state.selectedRequestorId || "").trim();
+  const requestorName = resolveHarpoRequestorLabel(programmer, requestorId);
+  const activeRecordingContext =
+    state.harpoRecordingContext && typeof state.harpoRecordingContext === "object" ? state.harpoRecordingContext : null;
+  const configuredDomainRows = requestorId
+    ? (Array.isArray(getRequestorScopedDomainCache(requestorId)) ? getRequestorScopedDomainCache(requestorId) : []).filter(
+        (row) => !isExcludedHarpoDomainName(String(row?.domainName || "").trim())
+      )
+    : [];
+  const reproDomains = requestorId ? collectRestV2LearningRequestorDomainNames(programmer, requestorId) : [];
+  const selectedDomain = requestorId ? String(getRequestorScopedHarpoSelectedDomain(requestorId) || "").trim() : "";
+  const currentStatusRequestorId = String(state.harpoStatusRequestorId || "").trim();
+  const explicitStatusMatchesRequestor =
+    !currentStatusRequestorId || (requestorId && currentStatusRequestorId === requestorId);
+
+  return {
+    programmerId: String(programmer?.programmerId || "").trim(),
+    programmerName: String(programmer?.programmerName || programmer?.mediaCompanyName || programmer?.programmerId || "").trim(),
+    requestorId,
+    requestorName,
+    environmentKey: getActiveAdobePassEnvironmentKey(),
+    environmentLabel: getHarpoWorkspaceEnvironmentLabel(),
+    availableDomainCount: collectHarpoProgrammerDomainNames(programmer, services).length,
+    configuredDomainRows,
+    reproDomains,
+    safeDomains: uniquePreserveOrder(["adobe.com", ...reproDomains]).filter(Boolean),
+    selectedDomain: reproDomains.includes(selectedDomain) ? selectedDomain : "",
+    configurationPending: Boolean(requestorId && getRequestorScopedMvpdLoadPromise(requestorId)),
+    expectedMvpds: requestorId ? collectHarpoExpectedMvpds(requestorId) : [],
+    reproOpen: requestorId ? getRequestorScopedHarpoReproOpen(requestorId) : false,
+    recordingActive: state.harpoRecordingActive === true,
+    recordingStarting: state.harpoRecordingStarting === true,
+    recordingStopping: state.harpoRecordingStopping === true,
+    recordingCount: Math.max(0, Number(state.harpoRecordingCount || 0)),
+    activeRecordingRequestorId: String(activeRecordingContext?.requestorId || "").trim(),
+    activeRecordingRequestorName: String(activeRecordingContext?.requestorName || activeRecordingContext?.requestorId || "").trim(),
+    activeRecordingDomain: String(activeRecordingContext?.selectedDomain || "").trim(),
+    explicitStatusMessage: explicitStatusMatchesRequestor ? String(state.harpoStatusMessage || "").trim() : "",
+    explicitStatusTone: explicitStatusMatchesRequestor ? String(state.harpoStatusTone || "info").trim() : "info",
+  };
+}
+
+function buildHarpoInlineStatus(context = null) {
+  const resolvedContext = context && typeof context === "object" ? context : {};
+  if (resolvedContext.explicitStatusMessage) {
+    return {
+      message: resolvedContext.explicitStatusMessage,
+      tone: resolvedContext.explicitStatusTone || "info",
+    };
+  }
+  if (!resolvedContext.requestorId) {
+    return {
+      message: "Upload any HAR immediately. Select a RequestorId to unlock HARPO REPRO against hydrated requestor domains.",
+      tone: "info",
+    };
+  }
+  if (resolvedContext.recordingStarting) {
+    return {
+      message: `Opening a dark-mode HARPO repro tab for ${
+        resolvedContext.activeRecordingRequestorName || resolvedContext.requestorName || resolvedContext.requestorId
+      }...`,
+      tone: "info",
+    };
+  }
+  if (resolvedContext.recordingStopping) {
+    return {
+      message: `Finalizing HARPO capture for ${
+        resolvedContext.activeRecordingRequestorName || resolvedContext.requestorName || resolvedContext.requestorId
+      }...`,
+      tone: "info",
+    };
+  }
+  if (resolvedContext.recordingActive) {
+    return {
+      message: `Recording ${
+        resolvedContext.activeRecordingRequestorName || resolvedContext.requestorName || resolvedContext.requestorId
+      } on ${resolvedContext.activeRecordingDomain || resolvedContext.selectedDomain || "the selected domain"}. Click STOP when the repro is complete.`,
+      tone: "success",
+    };
+  }
+  if (resolvedContext.configurationPending && resolvedContext.reproDomains.length === 0) {
+    return {
+      message: `Hydrating requestor domains for ${resolvedContext.requestorName || resolvedContext.requestorId}...`,
+      tone: "info",
+    };
+  }
+  if (resolvedContext.reproDomains.length === 0) {
+    return {
+      message: `No non-adobe.com requestor domains are ready for ${resolvedContext.requestorName || resolvedContext.requestorId}.`,
+      tone: "error",
+    };
+  }
+  if (resolvedContext.reproOpen && !resolvedContext.selectedDomain) {
+    return {
+      message: "Choose a requestor domain, then click RECORD to capture the HARPO repro.",
+      tone: "info",
+    };
+  }
+  return {
+    message: `Upload a HAR or launch REPRO for ${resolvedContext.requestorName || resolvedContext.requestorId}.`,
+    tone: "info",
+  };
+}
+
+function getHarpoPanelStatusToneClass(tone = "") {
+  const normalizedTone = String(tone || "").trim().toLowerCase();
+  if (normalizedTone === "success") {
+    return "success";
+  }
+  if (normalizedTone === "error") {
+    return "error";
+  }
+  return "info";
+}
+
+function refreshHarpoHrContextSection(programmer = null, services = null) {
+  if (!els.hrServicesContainer) {
+    return;
+  }
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer() || null;
+  const resolvedProgrammerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const resolvedServices =
+    services ||
+    (resolvedProgrammerId ? getCurrentPremiumAppsSnapshot(resolvedProgrammerId) || getRuntimePremiumServicesSeed(resolvedProgrammerId) : null) ||
+    null;
+  renderHrSections(resolvedServices, resolvedProgrammer);
+}
+
+function setHarpoPanelStatus(message = "", tone = "info", requestorId = "") {
+  state.harpoStatusMessage = String(message || "").trim();
+  state.harpoStatusTone = getHarpoPanelStatusToneClass(tone);
+  state.harpoStatusRequestorId = String(requestorId || "").trim();
+  refreshHarpoHrContextSection();
+}
+
+function clearHarpoPanelStatus(requestorId = "") {
+  const normalizedRequestorId = String(requestorId || "").trim();
+  if (normalizedRequestorId && String(state.harpoStatusRequestorId || "").trim() && state.harpoStatusRequestorId !== normalizedRequestorId) {
+    return;
+  }
+  state.harpoStatusMessage = "";
+  state.harpoStatusTone = "info";
+  state.harpoStatusRequestorId = "";
+}
+
+function openHarpoFilePicker(fileInput = null) {
+  if (!(fileInput instanceof HTMLInputElement) || fileInput.type !== "file") {
+    return false;
+  }
+  try {
+    if (typeof fileInput.showPicker === "function") {
+      fileInput.showPicker();
+      return true;
+    }
+  } catch {
+    // Fall through to synthetic click for browsers that reject showPicker.
+  }
+  try {
+    fileInput.click();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function countHarpoCapturedCalls(flowSnapshot = null, context = null) {
+  const flowEvents = Array.isArray(flowSnapshot?.events) ? flowSnapshot.events : [];
+  return buildWebRequestHarEntries(flowEvents, context)
+    .filter((entry) => !shouldExcludeInternalExtensionHarEntry(entry))
+    .length;
+}
+
+function stopHarpoRecordingCountPoll() {
+  if (state.harpoRecordingPollTimerId) {
+    window.clearInterval(state.harpoRecordingPollTimerId);
+    state.harpoRecordingPollTimerId = 0;
+  }
+}
+
+function startHarpoRecordingCountPoll() {
+  stopHarpoRecordingCountPoll();
+  state.harpoRecordingPollTimerId = window.setInterval(async () => {
+    const activeFlowId = String(state.harpoDebugFlowId || "").trim();
+    if (!activeFlowId || state.harpoRecordingActive !== true) {
+      stopHarpoRecordingCountPoll();
+      return;
+    }
+    try {
+      const snapshot = await getRestV2DebugFlowSnapshot(activeFlowId);
+      if (!snapshot) {
+        return;
+      }
+      const nextCount = countHarpoCapturedCalls(snapshot, state.harpoRecordingContext);
+      if (nextCount !== Number(state.harpoRecordingCount || 0)) {
+        state.harpoRecordingCount = nextCount;
+        refreshHarpoHrContextSection();
+      }
+    } catch {
+      // Keep polling until stop or reset.
+    }
+  }, HARPO_RECORDING_COUNT_POLL_INTERVAL_MS);
+}
+
+function clearHarpoRecordingState(reason = "state-reset", options = {}) {
+  const shouldStopFlow = options?.stopFlow === true;
+  const preserveCount = options?.preserveCount === true;
+  const activeFlowId = String(state.harpoDebugFlowId || "").trim();
+  stopHarpoRecordingCountPoll();
+  if (activeFlowId && shouldStopFlow) {
+    void stopRestV2DebugFlowAndSnapshot(activeFlowId, String(reason || "state-reset"));
+  }
+  state.harpoDebugFlowId = "";
+  state.harpoRecordingActive = false;
+  state.harpoRecordingStarting = false;
+  state.harpoRecordingStopping = false;
+  state.harpoRecordingContext = null;
+  if (!preserveCount) {
+    state.harpoRecordingCount = 0;
+  }
+}
+
+function getHarpoRecordingContext(programmer = null, services = null) {
+  const panelContext = buildHarpoPanelContext(programmer, services);
+  const reproUrl = buildProgrammerControlledHttpsRedirectUrl(panelContext.selectedDomain);
+  if (!panelContext.requestorId) {
+    throw new Error("Select a RequestorId before starting HARPO REPRO.");
+  }
+  if (!panelContext.selectedDomain) {
+    throw new Error("Choose a requestor domain before starting HARPO REPRO.");
+  }
+  if (!reproUrl) {
+    throw new Error("Selected requestor domain could not be converted into a valid HTTPS repro URL.");
+  }
+  return {
+    serviceType: "harpo",
+    programmerId: panelContext.programmerId,
+    programmerName: panelContext.programmerName,
+    requestorId: panelContext.requestorId,
+    serviceProviderId: panelContext.requestorId,
+    requestorName: panelContext.requestorName,
+    selectedDomain: panelContext.selectedDomain,
+    reproUrl,
+    safeDomains: panelContext.safeDomains.slice(),
+    reproDomains: panelContext.reproDomains.slice(),
+    expectedMvpds: panelContext.expectedMvpds.slice(),
+    environmentKey: panelContext.environmentKey,
+    environmentLabel: panelContext.environmentLabel,
+  };
+}
+
+async function handleHarpoWorkspaceFile(file = null, programmer = null, services = null) {
+  if (!file) {
+    return;
+  }
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer() || null;
+  const panelContext = buildHarpoPanelContext(resolvedProgrammer, services);
+  const scopedRequestorId = String(panelContext.requestorId || "").trim();
+  setHarpoPanelStatus(`Reading ${String(file.name || "HAR file").trim()}...`, "info", scopedRequestorId);
+  try {
+    const text = await file.text();
+    const har = parseJsonText(text, null);
+    if (!har?.log) {
+      throw new Error("Selected file is not a valid HAR payload.");
+    }
+    await openHarpoWorkspace(har, {
+      source: "file",
+      fileName: String(file.name || "").trim(),
+      programmerName: panelContext.programmerName,
+      requestorId: panelContext.requestorId,
+      requestorName: panelContext.requestorName,
+      safeDomains: panelContext.safeDomains,
+      reproDomains: panelContext.reproDomains,
+      expectedMvpds: panelContext.expectedMvpds,
+      environmentKey: panelContext.environmentKey,
+      environmentLabel: panelContext.environmentLabel,
+    });
+    setHarpoPanelStatus(`Opened ${String(file.name || "HAR file").trim()} in the HARPO workspace.`, "success", scopedRequestorId);
+    setStatus(`HARPO workspace opened for ${String(file.name || "the uploaded HAR").trim()}.`, "success");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "Unable to open the HAR.");
+    setHarpoPanelStatus(message, "error", scopedRequestorId);
+    setStatus(message, "error");
+  }
+}
+
+async function startHarpoRecording(programmer = null, services = null) {
+  if (state.harpoRecordingActive || state.harpoRecordingStarting || state.harpoRecordingStopping) {
+    return;
+  }
+  const resolvedProgrammer = programmer || resolveSelectedProgrammer() || null;
+  let flowId = "";
+  let reproTabId = 0;
+  let recordingContext = null;
+  try {
+    recordingContext = getHarpoRecordingContext(resolvedProgrammer, services);
+    state.harpoRecordingStarting = true;
+    state.harpoRecordingCount = 0;
+    setHarpoPanelStatus(
+      `Opening a dark-mode HARPO repro tab for ${recordingContext.requestorName || recordingContext.requestorId}...`,
+      "info",
+      recordingContext.requestorId
+    );
+
+    flowId = await startRestV2DebugFlow(
+      {
+        serviceType: "harpo",
+        programmerId: recordingContext.programmerId,
+        programmerName: recordingContext.programmerName,
+        requestorId: recordingContext.requestorId,
+        serviceProviderId: recordingContext.requestorId,
+        requestorName: recordingContext.requestorName,
+        redirectUrl: recordingContext.reproUrl,
+        domainName: recordingContext.selectedDomain,
+        environmentKey: recordingContext.environmentKey,
+      },
+      "harpo-repro"
+    );
+    if (!flowId) {
+      throw new Error("UnderPAR could not start the HARPO debug flow.");
+    }
+
+    const targetWindowId = await resolveSidepanelControllerWindowId(false).catch(() => 0);
+    const createdTab = await chrome.tabs.create({
+      url: "about:blank",
+      active: true,
+      ...(targetWindowId > 0 ? { windowId: targetWindowId } : {}),
+    });
+    reproTabId = Number(createdTab?.id || 0);
+    if (!reproTabId) {
+      throw new Error("UnderPAR could not open a HARPO repro tab.");
+    }
+
+    const bound = await bindRestV2DebugFlowToTab(flowId, reproTabId, {
+      requestorId: recordingContext.requestorId,
+      redirectUrl: recordingContext.reproUrl,
+      serviceType: "harpo",
+      captureNetwork: true,
+      keepNetworkWhenHidden: true,
+    });
+    if (!bound) {
+      throw new Error("UnderPAR could not bind HARPO recording to the repro tab.");
+    }
+
+    await chrome.tabs.update(reproTabId, {
+      url: recordingContext.reproUrl,
+      active: true,
+    });
+    if (Number(createdTab?.windowId || 0) > 0) {
+      await chrome.windows.update(Number(createdTab.windowId), { focused: true }).catch(() => null);
+    }
+
+    state.harpoDebugFlowId = flowId;
+    state.harpoRecordingActive = true;
+    state.harpoRecordingStarting = false;
+    state.harpoRecordingStopping = false;
+    state.harpoRecordingContext = {
+      ...recordingContext,
+      flowId,
+      tabId: reproTabId,
+    };
+    startHarpoRecordingCountPoll();
+    setHarpoPanelStatus(
+      `Recording ${recordingContext.requestorName || recordingContext.requestorId} on ${recordingContext.selectedDomain}. Click STOP when the repro is complete.`,
+      "success",
+      recordingContext.requestorId
+    );
+    setStatus(`HARPO recording started for ${recordingContext.requestorName || recordingContext.requestorId}.`, "success");
+  } catch (error) {
+    if (flowId) {
+      await stopRestV2DebugFlowAndSnapshot(flowId, "harpo-start-failed").catch(() => null);
+    }
+    clearHarpoRecordingState("harpo-start-failed");
+    const requestorId = String(recordingContext?.requestorId || state.selectedRequestorId || "").trim();
+    const message = error instanceof Error ? error.message : String(error || "HARPO recording could not start.");
+    setHarpoPanelStatus(message, "error", requestorId);
+    setStatus(message, "error");
+  } finally {
+    if (state.harpoRecordingActive !== true) {
+      state.harpoRecordingStarting = false;
+      refreshHarpoHrContextSection(resolvedProgrammer, services);
+    }
+  }
+}
+
+async function stopHarpoRecording() {
+  if (state.harpoRecordingStarting || state.harpoRecordingStopping || !state.harpoRecordingActive) {
+    return;
+  }
+  const activeFlowId = String(state.harpoDebugFlowId || "").trim();
+  const recordingContext =
+    state.harpoRecordingContext && typeof state.harpoRecordingContext === "object" ? state.harpoRecordingContext : null;
+  if (!activeFlowId || !recordingContext) {
+    clearHarpoRecordingState("harpo-stop-empty");
+    refreshHarpoHrContextSection();
+    return;
+  }
+
+  stopHarpoRecordingCountPoll();
+  state.harpoRecordingStopping = true;
+  refreshHarpoHrContextSection();
+  setHarpoPanelStatus(
+    `Finalizing HARPO capture for ${recordingContext.requestorName || recordingContext.requestorId}...`,
+    "info",
+    recordingContext.requestorId
+  );
+
+  try {
+    const stopResult = await stopRestV2DebugFlowAndSnapshot(activeFlowId, "harpo-user-stop");
+    if (!stopResult?.flow) {
+      throw new Error(stopResult?.error || "HARPO snapshot was unavailable.");
+    }
+    const entryCount = countHarpoCapturedCalls(stopResult.flow, recordingContext);
+    const harPayload = buildHarLogFromFlowSnapshot(stopResult.flow, recordingContext, null);
+    const fileName = buildHarpoWorkspaceFileName(recordingContext);
+    await openHarpoWorkspace(harPayload, {
+      source: "recording",
+      fileName,
+      programmerName: recordingContext.programmerName,
+      requestorId: recordingContext.requestorId,
+      requestorName: recordingContext.requestorName,
+      safeDomains: recordingContext.safeDomains,
+      reproDomains: recordingContext.reproDomains,
+      expectedMvpds: recordingContext.expectedMvpds,
+      environmentKey: recordingContext.environmentKey,
+      environmentLabel: recordingContext.environmentLabel,
+    });
+    clearHarpoRecordingState("harpo-stop-complete", { preserveCount: true });
+    state.harpoRecordingCount = entryCount;
+    setHarpoPanelStatus(
+      `Captured ${entryCount} HARPO call${entryCount === 1 ? "" : "s"} and opened the workspace.`,
+      "success",
+      recordingContext.requestorId
+    );
+    setStatus(
+      `HARPO captured ${entryCount} call${entryCount === 1 ? "" : "s"} for ${
+        recordingContext.requestorName || recordingContext.requestorId
+      }.`,
+      "success"
+    );
+  } catch (error) {
+    clearHarpoRecordingState("harpo-stop-failed");
+    const message = error instanceof Error ? error.message : String(error || "HARPO recording could not be finalized.");
+    setHarpoPanelStatus(message, "error", recordingContext.requestorId);
+    setStatus(message, "error");
+  } finally {
+    state.harpoRecordingStopping = false;
+    refreshHarpoHrContextSection();
+  }
 }
 
 function getHrContextSectionDisplayKeys(programmer = null, services = null) {
@@ -70625,19 +71402,17 @@ function buildHarpoPanelSignature(programmer = null, services = null) {
   if (!shouldShowHarpoHrSection(programmer, services)) {
     return "";
   }
-  const programmerId = String(programmer?.programmerId || "").trim();
-  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
-  const domainNames = collectHarpoProgrammerDomainNames(programmer, services);
-  const configuredDomainNames = selectedRequestorId ? collectRequestorScopedConfiguredDomainNames(selectedRequestorId) : [];
-  const selectedDomainName = selectedRequestorId ? getRequestorScopedHarpoSelectedDomain(selectedRequestorId) : "";
-  const configurationPending = selectedRequestorId && getRequestorScopedMvpdLoadPromise(selectedRequestorId) ? "1" : "0";
+  const panelContext = buildHarpoPanelContext(programmer, services);
   return [
-    programmerId,
-    selectedRequestorId,
-    `domains:${domainNames.join(",")}`,
-    `configured:${configuredDomainNames.join(",")}`,
-    `selected:${selectedDomainName}`,
-    `loading:${configurationPending}`,
+    panelContext.programmerId,
+    panelContext.requestorId,
+    `available:${panelContext.availableDomainCount}`,
+    `domains:${panelContext.reproDomains.join(",")}`,
+    `selected:${panelContext.selectedDomain}`,
+    `repro:${panelContext.reproOpen ? "1" : "0"}`,
+    `recording:${panelContext.recordingActive ? "1" : panelContext.recordingStarting ? "start" : panelContext.recordingStopping ? "stop" : "0"}`,
+    `count:${panelContext.recordingCount}`,
+    `status:${panelContext.explicitStatusTone}:${panelContext.explicitStatusMessage}`,
     `restv2:${services?.restV2 ? "1" : "0"}`,
   ].join("|");
 }
@@ -70646,54 +71421,174 @@ function buildHarpoStatusItemHtml(programmer = null, services = null) {
   if (!shouldShowHarpoHrSection(programmer, services)) {
     return "";
   }
-  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
-  if (!selectedRequestorId) {
-    return '<p class="metadata-empty">Select a RequestorId to preview REST V2 /configuration DOMAIN entries for HARPO.</p>';
-  }
-
-  const configuredDomainRows = (Array.isArray(getRequestorScopedDomainCache(selectedRequestorId))
-    ? getRequestorScopedDomainCache(selectedRequestorId)
-    : []
-  ).filter((row) => !isExcludedHarpoDomainName(String(row?.domainName || "").trim()));
-  const configurationPending = Boolean(getRequestorScopedMvpdLoadPromise(selectedRequestorId));
-  if (configuredDomainRows.length === 0) {
-    return `<p class="metadata-empty">${
-      configurationPending
-        ? `Loading REST V2 /configuration DOMAIN entries for ${escapeHtml(selectedRequestorId)}...`
-        : `No DOMAIN entries were parsed from REST V2 /configuration for ${escapeHtml(selectedRequestorId)}.`
-    }</p>`;
-  }
-
-  const selectedDomainValue = String(getRequestorScopedHarpoSelectedDomain(selectedRequestorId) || "").trim();
+  const panelContext = buildHarpoPanelContext(programmer, services);
+  const inlineStatus = buildHarpoInlineStatus(panelContext);
   const selectId = `hr-harpo-domain-select-${
-    selectedRequestorId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "requestor"
+    panelContext.requestorId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "requestor"
   }`;
-  const optionMarkup = configuredDomainRows
-    .map((row) => {
-      const domainName = String(row?.domainName || "").trim();
-      if (!domainName) {
-        return "";
-      }
-      const optionLabel = String(row?.name || domainName).trim() || domainName;
-      return `<option value="${escapeHtml(domainName)}"${selectedDomainValue === domainName ? " selected" : ""}>${escapeHtml(
-        optionLabel
-      )}</option>`;
-    })
-    .join("");
-
+  const uploadDisabled = panelContext.recordingActive || panelContext.recordingStarting || panelContext.recordingStopping;
+  const reproDisabled =
+    uploadDisabled ||
+    !panelContext.requestorId ||
+    (panelContext.reproDomains.length === 0 && !panelContext.configurationPending);
+  const showStopState = panelContext.recordingActive || panelContext.recordingStopping;
+  const recordToggleLabel = panelContext.recordingStarting ? "RECORDING" : showStopState ? "STOP" : "RECORD";
+  const recordDisabled =
+    panelContext.recordingStarting ||
+    panelContext.recordingStopping ||
+    (!showStopState && (!panelContext.reproOpen || !panelContext.requestorId || !panelContext.selectedDomain));
+  const optionMarkup = panelContext.configuredDomainRows.length > 0
+    ? panelContext.configuredDomainRows
+        .map((row) => {
+          const domainName = String(row?.domainName || "").trim();
+          if (!domainName) {
+            return "";
+          }
+          const optionLabel = String(row?.name || domainName).trim() || domainName;
+          return `<option value="${escapeHtml(domainName)}"${panelContext.selectedDomain === domainName ? " selected" : ""}>${escapeHtml(
+            optionLabel
+          )}</option>`;
+        })
+        .join("")
+    : panelContext.reproDomains
+        .map((domainName) => {
+          return `<option value="${escapeHtml(domainName)}"${panelContext.selectedDomain === domainName ? " selected" : ""}>${escapeHtml(
+            domainName
+          )}</option>`;
+        })
+        .join("");
+  const summaryLabel = panelContext.requestorId
+    ? `${panelContext.requestorName || panelContext.requestorId} · ${panelContext.reproDomains.length} hydrated domain${
+        panelContext.reproDomains.length === 1 ? "" : "s"
+      }`
+    : `Upload-first HARPO is ready · ${panelContext.availableDomainCount} known programmer domain${
+        panelContext.availableDomainCount === 1 ? "" : "s"
+      }`;
   return `
-    <div class="hr-harpo-domain-picker">
-      <label for="${escapeHtml(selectId)}">Domains</label>
-      <select
-        id="${escapeHtml(selectId)}"
-        class="hr-harpo-domain-select"
-        data-harpo-domain-select
-        data-requestor-id="${escapeHtml(selectedRequestorId)}"
-        aria-label="${escapeHtml(`HARPO configured domains for ${selectedRequestorId}`)}"
-      >
-        <option value=""></option>
-        ${optionMarkup}
-      </select>
+    <div class="hr-harpo-shell" aria-live="polite">
+      <div class="hr-harpo-summary">
+        <p class="hr-harpo-eyebrow">HAR &amp; Pass Observatory</p>
+        <p class="hr-harpo-copy">${escapeHtml(summaryLabel)}</p>
+      </div>
+      <div class="hr-harpo-mode-row">
+        <div
+          class="hr-harpo-dropzone"
+          data-harpo-upload-dropzone
+          role="button"
+          tabindex="0"
+          aria-label="Upload a HAR file into the HARPO workspace"
+          title="Click to browse or drop a .har file"
+        >
+          <input
+            type="file"
+            accept=".har,application/json"
+            data-harpo-file-input
+            class="hr-harpo-file-input"
+            tabindex="-1"
+            aria-hidden="true"
+          />
+          <button
+            type="button"
+            class="hr-harpo-action-btn hr-harpo-action-btn--upload"
+            data-harpo-upload-btn
+            ${uploadDisabled ? "disabled" : ""}
+            title="${escapeHtml(
+              uploadDisabled ? "HAR upload is disabled while HARPO recording is active." : "Upload a HAR into the HARPO workspace."
+            )}"
+            aria-label="${escapeHtml(
+              uploadDisabled ? "HAR upload is disabled while HARPO recording is active." : "Upload a HAR into the HARPO workspace."
+            )}"
+          >
+            <span class="hr-harpo-action-icon" aria-hidden="true">⬆</span>
+            <span class="hr-harpo-action-label">HAR</span>
+          </button>
+          <span class="hr-harpo-dropzone-copy">Drop a HAR or click to browse.</span>
+        </div>
+        <button
+          type="button"
+          class="hr-harpo-action-btn hr-harpo-action-btn--repro"
+          data-harpo-repro-toggle
+          ${reproDisabled ? "disabled" : ""}
+          aria-pressed="${panelContext.reproOpen ? "true" : "false"}"
+          title="${escapeHtml(
+            !panelContext.requestorId
+              ? "Select a RequestorId to unlock HARPO REPRO."
+              : panelContext.reproDomains.length === 0
+                ? "No hydrated requestor domains are available for HARPO REPRO yet."
+                : panelContext.reproOpen
+                  ? "Hide HARPO REPRO controls."
+                  : "Show HARPO REPRO controls."
+          )}"
+          aria-label="${escapeHtml(
+            !panelContext.requestorId
+              ? "Select a RequestorId to unlock HARPO REPRO."
+              : panelContext.reproDomains.length === 0
+                ? "No hydrated requestor domains are available for HARPO REPRO yet."
+                : panelContext.reproOpen
+                  ? "Hide HARPO REPRO controls."
+                  : "Show HARPO REPRO controls."
+          )}"
+        >
+          <span class="hr-harpo-action-icon" aria-hidden="true">▶</span>
+          <span class="hr-harpo-action-label">REPRO</span>
+        </button>
+      </div>
+      <div class="hr-harpo-repro-panel"${panelContext.reproOpen ? "" : " hidden"}>
+        <label class="hr-harpo-select-label" for="${escapeHtml(selectId)}">Requestor Domain</label>
+        <div class="hr-harpo-repro-toolbar">
+          <div class="hr-harpo-select-shell">
+            <select
+              id="${escapeHtml(selectId)}"
+              class="hr-harpo-domain-select"
+              data-harpo-domain-select
+              data-requestor-id="${escapeHtml(panelContext.requestorId)}"
+              aria-label="${escapeHtml(
+                panelContext.requestorId
+                  ? `HARPO configured domains for ${panelContext.requestorName || panelContext.requestorId}`
+                  : "HARPO requestor domains"
+              )}"
+              ${panelContext.requestorId && panelContext.reproDomains.length > 0 ? "" : "disabled"}
+            >
+              <option value="${escapeHtml(HARPO_DOMAIN_PICKER_PLACEHOLDER)}">${escapeHtml(
+                panelContext.configurationPending && panelContext.reproDomains.length === 0
+                  ? "Hydrating requestor domains..."
+                  : panelContext.reproDomains.length > 0
+                    ? "Choose a requestor domain..."
+                    : "No requestor domains available"
+              )}</option>
+              ${optionMarkup}
+            </select>
+            <span class="hr-harpo-select-chevron" aria-hidden="true">▼</span>
+          </div>
+          <button
+            type="button"
+            class="hr-harpo-record-toggle${showStopState ? " is-recording" : ""}${panelContext.recordingStarting ? " is-starting" : ""}${
+              panelContext.recordingStopping ? " is-stopping" : ""
+            }"
+            data-harpo-record-toggle
+            ${recordDisabled ? "disabled" : ""}
+            aria-pressed="${showStopState ? "true" : "false"}"
+            title="${escapeHtml(recordToggleLabel)}"
+            aria-label="${escapeHtml(recordToggleLabel)}"
+          >
+            <span class="hr-harpo-record-toggle-icon hr-harpo-record-toggle-icon--${showStopState ? "stop" : "record"}" aria-hidden="true"></span>
+            <span class="hr-harpo-record-toggle-label">${escapeHtml(recordToggleLabel)}</span>
+          </button>
+        </div>
+      </div>
+      <div class="hr-harpo-recording-section"${panelContext.recordingActive || panelContext.recordingStarting || panelContext.recordingStopping ? "" : " hidden"}>
+        <div class="hr-harpo-recording-indicator">
+          <span class="hr-harpo-recording-dot" aria-hidden="true"></span>
+          <span class="hr-harpo-recording-copy">
+            Recording <strong>${escapeHtml(String(panelContext.recordingCount || 0))}</strong> call${
+              Number(panelContext.recordingCount || 0) === 1 ? "" : "s"
+            }
+          </span>
+        </div>
+      </div>
+      <p class="hr-harpo-status hr-harpo-status--${escapeHtml(getHarpoPanelStatusToneClass(inlineStatus.tone))}">${escapeHtml(
+        inlineStatus.message
+      )}</p>
     </div>
   `;
 }
@@ -72530,7 +73425,10 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.mvpdLoadPromiseByRequestor.clear();
   state.domainCacheByRequestor.clear();
   state.harpoSelectedDomainByRequestor.clear();
+  state.harpoReproOpenByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
+  clearHarpoPanelStatus();
+  clearHarpoRecordingState("vault-reset", { stopFlow: true });
   state.restV2PrewarmedAppsByProgrammerId.clear();
   state.zipKeyImportPending = false;
   state.zipKeyImportDragActive = false;
@@ -80915,6 +81813,9 @@ async function resetToSignedOutState(options = {}) {
   state.mvpdCacheByRequestor.clear();
   state.domainCacheByRequestor.clear();
   state.harpoSelectedDomainByRequestor.clear();
+  state.harpoReproOpenByRequestor.clear();
+  clearHarpoPanelStatus();
+  clearHarpoRecordingState("logged-out", { stopFlow: true });
   state.sessionMonitorConsecutiveInactiveDetections = 0;
   state.sessionMonitorLastProbeSource = "unknown";
   state.sessionMonitorInactivityGuardUntil = 0;
@@ -96772,7 +97673,10 @@ function resetProgrammerRuntimeState() {
   state.mvpdLoadPromiseByRequestor.clear();
   state.domainCacheByRequestor.clear();
   state.harpoSelectedDomainByRequestor.clear();
+  state.harpoReproOpenByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
+  clearHarpoPanelStatus();
+  clearHarpoRecordingState("programmer-reset", { stopFlow: true });
   state.applicationsByProgrammerId.clear();
   state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByProgrammerId.clear();

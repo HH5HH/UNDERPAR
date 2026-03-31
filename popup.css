@@ -3466,10 +3466,369 @@ select:disabled {
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
-.hr-harpo-domain-picker {
+.hr-harpo-shell {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
+}
+
+.hr-harpo-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hr-harpo-eyebrow {
+  margin: 0;
+  color: rgb(var(--service-harpo-zip-1100));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hr-harpo-copy {
+  margin: 0;
+  color: rgba(var(--underpar-gray-900-rgb), 0.92);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.hr-harpo-mode-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(120px, 0.75fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.hr-harpo-dropzone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px dashed rgba(var(--service-harpo-zip-1000), 0.34);
+  background:
+    linear-gradient(180deg, rgba(var(--service-harpo-zip-1000), 0.1), rgba(var(--service-harpo-zip-700), 0.08)),
+    rgba(12, 24, 28, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 12px 24px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.hr-harpo-dropzone:hover,
+.hr-harpo-dropzone.is-drag-active {
+  transform: translateY(-1px);
+  border-color: rgba(var(--service-harpo-zip-1100), 0.58);
+  background:
+    linear-gradient(180deg, rgba(var(--service-harpo-zip-1000), 0.16), rgba(var(--service-harpo-zip-700), 0.12)),
+    rgba(10, 22, 27, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 16px 28px rgba(0, 0, 0, 0.24);
+}
+
+.hr-harpo-dropzone:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(var(--service-harpo-zip-1100), 0.24),
+    0 16px 28px rgba(0, 0, 0, 0.24);
+}
+
+.hr-harpo-dropzone-copy {
+  min-width: 0;
+  color: rgba(var(--underpar-gray-800-rgb), 0.82);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.hr-harpo-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  pointer-events: none;
+}
+
+.hr-harpo-action-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  width: 100%;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--service-harpo-zip-1000), 0.28);
+  background:
+    linear-gradient(180deg, rgba(var(--service-harpo-zip-900), 0.22), rgba(var(--service-harpo-zip-700), 0.18)),
+    rgba(10, 22, 27, 0.92);
+  color: rgb(var(--underpar-gray-900-rgb));
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.hr-harpo-action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(var(--service-harpo-zip-1100), 0.54);
+  box-shadow:
+    0 14px 24px rgba(0, 0, 0, 0.22),
+    0 0 0 1px rgba(var(--service-harpo-zip-1100), 0.14);
+}
+
+.hr-harpo-action-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(var(--service-harpo-zip-1100), 0.22),
+    0 14px 24px rgba(0, 0, 0, 0.22);
+}
+
+.hr-harpo-action-btn:disabled {
+  opacity: 0.48;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+
+.hr-harpo-action-btn--upload {
+  width: auto;
+  min-width: 106px;
+  justify-content: center;
+  padding-inline: 14px;
+  border-color: rgba(var(--service-harpo-zip-1100), 0.52);
+  background:
+    linear-gradient(180deg, rgba(var(--service-harpo-zip-1100), 0.18), rgba(var(--service-harpo-zip-900), 0.18)),
+    rgba(6, 18, 22, 0.9);
+}
+
+.hr-harpo-action-btn--repro {
+  align-self: stretch;
+}
+
+.hr-harpo-action-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.hr-harpo-action-label {
+  white-space: nowrap;
+}
+
+.hr-harpo-repro-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(var(--service-harpo-zip-900), 0.18);
+  background:
+    linear-gradient(180deg, rgba(var(--service-harpo-zip-1000), 0.1), rgba(var(--service-harpo-zip-700), 0.04)),
+    rgba(8, 16, 20, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.hr-harpo-select-label {
+  color: rgba(var(--underpar-gray-800-rgb), 0.84);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hr-harpo-repro-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.hr-harpo-select-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.hr-harpo-domain-select {
+  appearance: none;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 34px 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(var(--service-harpo-zip-1000), 0.26);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(6, 14, 18, 0.92);
+  color: rgb(var(--underpar-gray-900-rgb));
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.hr-harpo-domain-select:hover:not(:disabled) {
+  border-color: rgba(var(--service-harpo-zip-1100), 0.38);
+}
+
+.hr-harpo-domain-select:focus,
+.hr-harpo-domain-select:focus-visible {
+  outline: none;
+  border-color: rgba(var(--service-harpo-zip-1100), 0.54);
+  box-shadow:
+    0 0 0 2px rgba(var(--service-harpo-zip-1100), 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.hr-harpo-domain-select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.hr-harpo-select-chevron {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  color: rgba(var(--service-harpo-zip-1100), 0.74);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.hr-harpo-record-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 124px;
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--service-harpo-zip-1100), 0.42);
+  background:
+    linear-gradient(180deg, rgba(var(--service-harpo-zip-1100), 0.16), rgba(var(--service-harpo-zip-900), 0.16)),
+    rgba(10, 20, 26, 0.94);
+  color: rgb(var(--underpar-gray-900-rgb));
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.hr-harpo-record-toggle:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 14px 24px rgba(0, 0, 0, 0.24),
+    0 0 0 1px rgba(var(--service-harpo-zip-1100), 0.16);
+}
+
+.hr-harpo-record-toggle:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(var(--service-harpo-zip-1100), 0.24),
+    0 14px 24px rgba(0, 0, 0, 0.24);
+}
+
+.hr-harpo-record-toggle:disabled {
+  opacity: 0.48;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+
+.hr-harpo-record-toggle.is-recording,
+.hr-harpo-record-toggle.is-stopping {
+  border-color: rgba(var(--underpar-danger-1100), 0.46);
+  background:
+    linear-gradient(180deg, rgba(var(--underpar-danger-1000), 0.2), rgba(var(--underpar-danger-800), 0.2)),
+    rgba(42, 10, 10, 0.9);
+}
+
+.hr-harpo-record-toggle-icon {
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.hr-harpo-record-toggle-icon--record {
+  border-radius: 999px;
+  background: rgb(var(--underpar-danger-900));
+  box-shadow: 0 0 0 3px rgba(var(--underpar-danger-900), 0.16);
+}
+
+.hr-harpo-record-toggle-icon--stop {
+  border-radius: 3px;
+  background: rgb(var(--underpar-gray-1000-rgb));
+  box-shadow: 0 0 0 3px rgba(var(--underpar-danger-1100), 0.12);
+}
+
+.hr-harpo-recording-section {
+  display: flex;
+}
+
+.hr-harpo-recording-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(var(--service-harpo-zip-1000), 0.12);
+  color: rgba(var(--underpar-gray-900-rgb), 0.92);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.hr-harpo-recording-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgb(var(--underpar-danger-900));
+  box-shadow:
+    0 0 0 4px rgba(var(--underpar-danger-900), 0.14),
+    0 0 14px rgba(var(--underpar-danger-1000), 0.42);
+}
+
+.hr-harpo-status {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(var(--underpar-gray-800-rgb), 0.82);
+}
+
+.hr-harpo-status--success {
+  color: rgb(var(--underpar-success-1100));
+}
+
+.hr-harpo-status--error {
+  color: rgb(var(--underpar-danger-1100));
+}
+
+@media (max-width: 520px) {
+  .hr-harpo-mode-row,
+  .hr-harpo-repro-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hr-harpo-action-btn--upload,
+  .hr-harpo-record-toggle {
+    width: 100%;
+  }
 }
 
 .cm-shell {

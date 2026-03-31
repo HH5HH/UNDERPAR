@@ -27,6 +27,7 @@ const state = {
   query: {
     initialized: false,
     controllerSelectionKey: "",
+    windowPreset: "hr-24",
     start: "",
     end: "",
     granularity: "hour",
@@ -51,11 +52,11 @@ const els = {
   rerunAllButton: document.getElementById("workspace-rerun-all"),
   clearButton: document.getElementById("workspace-clear-all"),
   filterForm: document.getElementById("workspace-filter-form"),
+  windowSelect: document.getElementById("workspace-window-select"),
+  advancedFilters: document.getElementById("workspace-advanced-filters"),
   startDateInput: document.getElementById("workspace-start-date"),
   endDateInput: document.getElementById("workspace-end-date"),
-  compareSelect: document.getElementById("workspace-compare-select"),
-  granularitySelect: document.getElementById("workspace-granularity-select"),
-  runButton: document.getElementById("workspace-run-dashboard"),
+  applyAdvancedButton: document.getElementById("workspace-apply-advanced-dates"),
   resetButton: document.getElementById("workspace-reset-filters"),
   cardsHost: document.getElementById("workspace-cards"),
   pageEnvBadge: document.getElementById("page-env-badge"),
@@ -178,6 +179,37 @@ const ESM_HEALTH_BREAKDOWN_TABLES = Object.freeze([
   },
 ]);
 
+const ESM_HEALTH_SMART_WINDOW_PRESETS = Object.freeze({
+  "hr-24": Object.freeze({
+    key: "hr-24",
+    label: "HR over HR",
+    description: "Last 24 Hours",
+    granularity: "hour",
+    compareMode: "off",
+  }),
+  "day-7": Object.freeze({
+    key: "day-7",
+    label: "DAY over DAY",
+    description: "Last 7 Days",
+    granularity: "day",
+    compareMode: "off",
+  }),
+  "month-4": Object.freeze({
+    key: "month-4",
+    label: "MO over MO",
+    description: "Last 4 Months",
+    granularity: "month",
+    compareMode: "off",
+  }),
+  "year-ytd": Object.freeze({
+    key: "year-ytd",
+    label: "YR over YR",
+    description: "Year to Date",
+    granularity: "month",
+    compareMode: "yoy",
+  }),
+});
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -219,9 +251,56 @@ function normalizeCompareMode(value = "") {
   return normalized === "mom" || normalized === "yoy" ? normalized : "off";
 }
 
+function normalizeSmartWindowPreset(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(ESM_HEALTH_SMART_WINDOW_PRESETS, normalized) ? normalized : "hr-24";
+}
+
+function getSmartWindowPresetDefinition(value = "") {
+  return ESM_HEALTH_SMART_WINDOW_PRESETS[normalizeSmartWindowPreset(value)] || ESM_HEALTH_SMART_WINDOW_PRESETS["hr-24"];
+}
+
 function normalizeIsoDateInput(value = "") {
   const normalized = String(value || "").trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
+}
+
+function getPacificDateParts(timestamp = Date.now()) {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = formatter.formatToParts(new Date(Number(timestamp || Date.now())));
+    const record = {};
+    parts.forEach((part) => {
+      if (part?.type && part.type !== "literal") {
+        record[part.type] = String(part.value || "").trim();
+      }
+    });
+    if (record.year && record.month && record.day) {
+      return {
+        year: record.year,
+        month: record.month,
+        day: record.day,
+        iso: `${record.year}-${record.month}-${record.day}`,
+      };
+    }
+  } catch {
+    // Fall through to UTC fallback.
+  }
+  const fallback = new Date(Number(timestamp || Date.now()));
+  const year = String(fallback.getUTCFullYear());
+  const month = String(fallback.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(fallback.getUTCDate()).padStart(2, "0");
+  return {
+    year,
+    month,
+    day,
+    iso: `${year}-${month}-${day}`,
+  };
 }
 
 function resolveDateInputRange(startValue = "", endValue = "") {
@@ -236,6 +315,103 @@ function resolveDateInputRange(startValue = "", endValue = "") {
     start,
     end,
   };
+}
+
+function shiftIsoDateInputByDays(value = "", dayDelta = 0) {
+  const normalized = normalizeIsoDateInput(value);
+  const delta = Number(dayDelta || 0);
+  if (!normalized || !Number.isFinite(delta) || delta === 0) {
+    return normalized;
+  }
+  const parsed = new Date(`${normalized}T12:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) {
+    return normalized;
+  }
+  parsed.setUTCDate(parsed.getUTCDate() + delta);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function shiftIsoDateInputByMonths(value = "", monthDelta = 0) {
+  const normalized = normalizeIsoDateInput(value);
+  const delta = Number(monthDelta || 0);
+  if (!normalized || !Number.isFinite(delta) || delta === 0) {
+    return normalized;
+  }
+  const [yearText = "", monthText = "", dayText = ""] = normalized.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  const day = Number(dayText);
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || !Number.isFinite(day)) {
+    return normalized;
+  }
+  const targetMonthDate = new Date(Date.UTC(year, monthIndex + delta, 1));
+  if (!Number.isFinite(targetMonthDate.getTime())) {
+    return normalized;
+  }
+  const targetYear = targetMonthDate.getUTCFullYear();
+  const targetMonthIndex = targetMonthDate.getUTCMonth();
+  const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, targetMonthIndex + 1, 0)).getUTCDate();
+  const safeDay = Math.max(1, Math.min(day, lastDayOfTargetMonth));
+  return new Date(Date.UTC(targetYear, targetMonthIndex, safeDay)).toISOString().slice(0, 10);
+}
+
+function buildSmartWindowDateRange(preset = "", nowMs = Date.now()) {
+  const definition = getSmartWindowPresetDefinition(preset);
+  const pacific = getPacificDateParts(nowMs);
+  const monthStart = `${pacific.year}-${pacific.month}-01`;
+  let start = pacific.iso;
+  if (definition.key === "day-7") {
+    start = shiftIsoDateInputByDays(pacific.iso, -6) || pacific.iso;
+  } else if (definition.key === "month-4") {
+    start = shiftIsoDateInputByMonths(monthStart, -3) || monthStart;
+  } else if (definition.key === "year-ytd") {
+    start = `${pacific.year}-01-01`;
+  } else {
+    start = shiftIsoDateInputByDays(pacific.iso, -1) || pacific.iso;
+  }
+  return {
+    start,
+    end: pacific.iso,
+    granularity: normalizeGranularity(definition.granularity),
+    compareMode: normalizeCompareMode(definition.compareMode),
+  };
+}
+
+function applySmartWindowPresetToQuery(preset = "", options = {}) {
+  const normalizedPreset = normalizeSmartWindowPreset(preset);
+  const nextRange = buildSmartWindowDateRange(normalizedPreset, options?.nowMs);
+  state.query.windowPreset = normalizedPreset;
+  state.query.granularity = nextRange.granularity;
+  state.query.compareMode = nextRange.compareMode;
+  if (options?.preserveDates === true) {
+    return nextRange;
+  }
+  state.query.start = nextRange.start;
+  state.query.end = nextRange.end;
+  return nextRange;
+}
+
+function hasActiveWorkspaceFilters() {
+  if (!state.query.initialized) {
+    return false;
+  }
+  const currentDefaultRange = buildSmartWindowDateRange(state.query.windowPreset);
+  const hasExplicitDates = Boolean(String(state.query.start || "").trim() && String(state.query.end || "").trim());
+  const hasDateOverride =
+    hasExplicitDates &&
+    (String(state.query.start || "").trim() !== currentDefaultRange.start || String(state.query.end || "").trim() !== currentDefaultRange.end);
+  const hasScopedDrilldown =
+    state.query.drilldownRequestorIds.length > 0 ||
+    state.query.drilldownMvpdIds.length > 0 ||
+    state.query.sourceRequestPath.length > 0;
+  const defaultPlatforms = normalizeStringList(state.platforms);
+  const hasPlatformOverride = normalizeStringList(state.query.platforms).join("|") !== defaultPlatforms.join("|");
+  return hasDateOverride || hasScopedDrilldown || hasPlatformOverride;
+}
+
+function getSelectedWindowSummary() {
+  const definition = getSmartWindowPresetDefinition(state.query.windowPreset);
+  return `${definition.label} | ${definition.description}`;
 }
 
 function formatDateTime(value) {
@@ -453,14 +629,13 @@ function getFilterLabel() {
   const requestorLabel = getEffectiveRequestorIds().join(", ") || "All RequestorIds";
   const mvpdLabel = getEffectiveMvpdIds().join(", ") || "All MVPDs";
   const environmentLabel = String(state.environmentLabel || state.environmentKey || "N/A").trim();
-  const compareMode = normalizeCompareMode(state.query.compareMode);
-  const compareLabel = compareMode === "mom" ? "MoM" : compareMode === "yoy" ? "YoY" : "Current";
   const sourceLabel = String(state.query.sourceRequestLabel || "").trim();
   return [
     `Env: ${environmentLabel}`,
+    `Window: ${getSelectedWindowSummary()}`,
+    `Range: ${String(state.query.start || "").trim() || "?"} -> ${String(state.query.end || "").trim() || "?"}`,
     `RequestorId: ${requestorLabel}`,
     `MVPD: ${mvpdLabel}`,
-    `Compare: ${compareLabel}`,
     sourceLabel ? `Seed: ${sourceLabel}` : "",
     state.timezoneLabel || "PST effective",
   ]
@@ -482,20 +657,12 @@ function hasRenderableReport() {
   return Boolean(state.report);
 }
 
-function syncGranularitySelect() {
-  if (!els.granularitySelect) {
+function syncWindowSelect() {
+  if (!els.windowSelect) {
     return;
   }
-  els.granularitySelect.value = normalizeGranularity(state.query.granularity);
-  els.granularitySelect.disabled = state.loading || !state.esmHealthReady;
-}
-
-function syncCompareSelect() {
-  if (!els.compareSelect) {
-    return;
-  }
-  els.compareSelect.value = normalizeCompareMode(state.query.compareMode);
-  els.compareSelect.disabled = state.loading || !state.esmHealthReady;
+  els.windowSelect.value = normalizeSmartWindowPreset(state.query.windowPreset);
+  els.windowSelect.disabled = state.loading || !state.esmHealthReady;
 }
 
 function syncActionButtonsDisabled() {
@@ -510,11 +677,13 @@ function syncActionButtonsDisabled() {
   if (els.clearButton) {
     els.clearButton.disabled = state.loading || !hasRenderableReport();
   }
-  if (els.runButton) {
-    els.runButton.disabled = state.loading || !state.esmHealthReady || !hasValidDates;
+  if (els.applyAdvancedButton) {
+    els.applyAdvancedButton.disabled = state.loading || !state.esmHealthReady || !hasValidDates;
   }
   if (els.resetButton) {
-    els.resetButton.disabled = state.loading || !state.query.initialized;
+    const shouldShowReset = hasActiveWorkspaceFilters();
+    els.resetButton.hidden = !shouldShowReset;
+    els.resetButton.disabled = state.loading || !state.query.initialized || !shouldShowReset;
   }
   if (els.startDateInput) {
     els.startDateInput.disabled = state.loading || !state.esmHealthReady;
@@ -522,16 +691,9 @@ function syncActionButtonsDisabled() {
   if (els.endDateInput) {
     els.endDateInput.disabled = state.loading || !state.esmHealthReady;
   }
-  if (els.granularitySelect) {
-    els.granularitySelect.disabled = state.loading || !state.esmHealthReady;
-  }
-  if (els.compareSelect) {
-    els.compareSelect.disabled = state.loading || !state.esmHealthReady;
-  }
   document.body.classList.toggle("net-busy", state.loading);
   document.body.setAttribute("aria-busy", state.loading ? "true" : "false");
-  syncCompareSelect();
-  syncGranularitySelect();
+  syncWindowSelect();
 }
 
 function renderWorkspaceEnvironmentBadge() {
@@ -563,9 +725,9 @@ function getContextCaption() {
     return "UnderPAR is still hydrating the selected ESM context.";
   }
   if (String(state.query.sourceRequestPath || "").trim()) {
-    return `Seeded from ${String(state.query.sourceRequestLabel || state.query.sourceRequestPath).trim()}. Compare presets reuse that same ESM request scope; Reset to Context returns to the live UnderPAR controller scope.`;
+    return `Seeded from ${String(state.query.sourceRequestLabel || state.query.sourceRequestPath).trim()}. Smart windows stay pinned to now; Advanced Dates can override the range when leadership needs a manual slice.`;
   }
-  return "Bound to the live UnderPAR ESM context. Date range persists across environment switches; scoped drilldowns reset to the selected controller context.";
+  return "Bound to the live UnderPAR ESM context. The default view is the last 24 hours, smart windows stay current to now, and Advanced Dates remain optional.";
 }
 
 function getControllerBannerTitle() {
@@ -598,9 +760,10 @@ function resetQueryToControllerDefaults() {
   state.query = {
     initialized: true,
     controllerSelectionKey: String(state.selectionKey || "").trim(),
-    start: String(state.defaultStart || "").trim(),
-    end: String(state.defaultEnd || "").trim(),
-    granularity: normalizeGranularity(state.defaultGranularity),
+    windowPreset: "hr-24",
+    start: "",
+    end: "",
+    granularity: "hour",
     compareMode: "off",
     baseRequestorIds: normalizeStringList(state.requestorIds),
     baseMvpdIds: normalizeStringList(state.mvpdIds),
@@ -610,17 +773,17 @@ function resetQueryToControllerDefaults() {
     sourceRequestPath: "",
     sourceRequestLabel: "",
   };
+  applySmartWindowPresetToQuery(state.query.windowPreset);
 }
 
 function syncFilterControlsFromState() {
+  syncWindowSelect();
   if (els.startDateInput) {
     els.startDateInput.value = String(state.query.start || "").trim();
   }
   if (els.endDateInput) {
     els.endDateInput.value = String(state.query.end || "").trim();
   }
-  syncCompareSelect();
-  syncGranularitySelect();
   syncActionButtonsDisabled();
 }
 
@@ -648,7 +811,6 @@ function applyControllerState(payload = {}) {
   const hadLiveControllerContext =
     Boolean(previousControllerSelectionKey || previousProgrammerId || previousEnvironmentKey || previousWorkspaceContextKey) ||
     previousRequestToken > 0;
-  const preservedDates = controllerChanged ? resolveDateInputRange(state.query.start, state.query.end) : { start: "", end: "" };
   const currentReportSelectionKey = getReportControllerSelectionKey(state.report);
   const shouldClearStaleReport = controllerChanged && currentReportSelectionKey && currentReportSelectionKey !== nextSelectionKey;
   const shouldAutoRefreshForControllerUpdate =
@@ -680,12 +842,6 @@ function applyControllerState(payload = {}) {
 
   if (controllerChanged) {
     resetQueryToControllerDefaults();
-    if (preservedDates.start) {
-      state.query.start = preservedDates.start;
-    }
-    if (preservedDates.end) {
-      state.query.end = preservedDates.end;
-    }
     state.loading = false;
   } else if (runtimeContextChanged) {
     state.loading = false;
@@ -705,6 +861,7 @@ function buildQueryContextPayload() {
   return {
     programmerId: String(state.programmerId || "").trim(),
     programmerName: String(state.programmerName || "").trim(),
+    windowPreset: normalizeSmartWindowPreset(state.query.windowPreset),
     baseRequestorIds: state.query.baseRequestorIds.slice(),
     baseMvpdIds: state.query.baseMvpdIds.slice(),
     drilldownRequestorIds: state.query.drilldownRequestorIds.slice(),
@@ -770,6 +927,7 @@ function syncQueryFromReport(payload = {}) {
   state.query = {
     initialized: true,
     controllerSelectionKey: String(state.selectionKey || "").trim(),
+    windowPreset: normalizeSmartWindowPreset(queryContext?.windowPreset || state.query.windowPreset),
     start: String(queryContext?.start || state.defaultStart || "").trim(),
     end: String(queryContext?.end || state.defaultEnd || "").trim(),
     granularity: normalizeGranularity(queryContext?.granularity || state.defaultGranularity),
@@ -806,6 +964,82 @@ function decodeSparklinePayload(value = "") {
   }
 }
 
+function normalizeSparklineBoundaryUnit(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "day" || normalized === "month" || normalized === "year" ? normalized : "";
+}
+
+function getSparklineBoundaryGroupKey(bucketKey = "", boundaryUnit = "") {
+  const normalizedBucketKey = String(bucketKey || "").trim();
+  const normalizedUnit = normalizeSparklineBoundaryUnit(boundaryUnit);
+  if (!normalizedBucketKey || !normalizedUnit) {
+    return "";
+  }
+  if (normalizedUnit === "day") {
+    return normalizedBucketKey.slice(0, 10);
+  }
+  if (normalizedUnit === "month") {
+    return normalizedBucketKey.slice(0, 7);
+  }
+  return normalizedBucketKey.slice(0, 4);
+}
+
+function formatSparklineBoundaryLabel(bucketKey = "", boundaryUnit = "") {
+  const normalizedBucketKey = String(bucketKey || "").trim();
+  const normalizedUnit = normalizeSparklineBoundaryUnit(boundaryUnit);
+  if (!normalizedBucketKey || !normalizedUnit) {
+    return "";
+  }
+  if (normalizedUnit === "day") {
+    const month = normalizedBucketKey.slice(5, 7);
+    const day = normalizedBucketKey.slice(8, 10);
+    return month && day ? `${month}/${day}` : normalizedBucketKey;
+  }
+  if (normalizedUnit === "month") {
+    const year = normalizedBucketKey.slice(0, 4);
+    const month = normalizedBucketKey.slice(5, 7);
+    return month && year ? `${month}/${year}` : normalizedBucketKey;
+  }
+  return normalizedBucketKey.slice(0, 4) || normalizedBucketKey;
+}
+
+function buildSparklineBoundaryMarkers(points = [], coordinateList = [], boundaryUnit = "") {
+  const normalizedUnit = normalizeSparklineBoundaryUnit(boundaryUnit);
+  if (!normalizedUnit || points.length < 2 || coordinateList.length !== points.length) {
+    return [];
+  }
+  const markers = [];
+  let previousGroupKey = getSparklineBoundaryGroupKey(points[0]?.bucketKey, normalizedUnit);
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index];
+    const currentGroupKey = getSparklineBoundaryGroupKey(point?.bucketKey, normalizedUnit);
+    if (!currentGroupKey || currentGroupKey === previousGroupKey) {
+      previousGroupKey = currentGroupKey || previousGroupKey;
+      continue;
+    }
+    const previousPoint = coordinateList[index - 1];
+    const currentPoint = coordinateList[index];
+    const markerX = Number((((Number(previousPoint?.x || 0) + Number(currentPoint?.x || 0)) / 2) || 0).toFixed(2));
+    markers.push({
+      x: markerX,
+      label: formatSparklineBoundaryLabel(point?.bucketKey, normalizedUnit) || String(point?.label || "").trim(),
+    });
+    previousGroupKey = currentGroupKey;
+  }
+  return markers;
+}
+
+function getSparklineBoundaryUnitForGranularity(granularity = "") {
+  const normalizedGranularity = normalizeGranularity(granularity);
+  if (normalizedGranularity === "hour") {
+    return "day";
+  }
+  if (normalizedGranularity === "month") {
+    return "year";
+  }
+  return "month";
+}
+
 function findNearestSparklinePointIndex(points = [], viewBoxX = 0) {
   let closestIndex = 0;
   let closestDistance = Number.POSITIVE_INFINITY;
@@ -819,18 +1053,33 @@ function findNearestSparklinePointIndex(points = [], viewBoxX = 0) {
   return closestIndex;
 }
 
+function getSparklineTooltipHost(chartShell) {
+  if (!(chartShell instanceof HTMLElement)) {
+    return null;
+  }
+  return chartShell.closest(".esm-health-chart-card") || chartShell;
+}
+
 function hideSparklineTooltip(chartShell) {
   if (!(chartShell instanceof HTMLElement)) {
     return;
   }
+  const payload = decodeSparklinePayload(chartShell.getAttribute("data-sparkline-payload"));
+  const points = Array.isArray(payload?.points) ? payload.points : [];
+  const tooltipHost = getSparklineTooltipHost(chartShell);
+  const tooltip = tooltipHost?.querySelector(".esm-health-chart-tooltip");
+  const shouldPersistDockedDetails = tooltip instanceof HTMLElement && tooltip.classList.contains("esm-health-chart-tooltip--docked");
+  if (shouldPersistDockedDetails && points.length > 0) {
+    showSparklineTooltip(chartShell, points.length - 1, { activateChart: false });
+    return;
+  }
   chartShell.classList.remove("is-active");
-  const tooltip = chartShell.querySelector(".esm-health-chart-tooltip");
   if (tooltip instanceof HTMLElement) {
     tooltip.hidden = true;
   }
 }
 
-function showSparklineTooltip(chartShell, pointIndex = 0) {
+function showSparklineTooltip(chartShell, pointIndex = 0, options = {}) {
   if (!(chartShell instanceof HTMLElement)) {
     return;
   }
@@ -846,20 +1095,29 @@ function showSparklineTooltip(chartShell, pointIndex = 0) {
     hideSparklineTooltip(chartShell);
     return;
   }
-  const tooltip = chartShell.querySelector(".esm-health-chart-tooltip");
-  const tooltipTitle = chartShell.querySelector(".esm-health-chart-tooltip-title");
-  const tooltipCopy = chartShell.querySelector(".esm-health-chart-tooltip-copy");
-  const tooltipLabel = chartShell.querySelector(".esm-health-chart-tooltip-label");
-  const tooltipValue = chartShell.querySelector(".esm-health-chart-tooltip-value");
-  const tooltipDetails = chartShell.querySelector(".esm-health-chart-tooltip-details");
+  const tooltipHost = getSparklineTooltipHost(chartShell);
+  const tooltip = tooltipHost?.querySelector(".esm-health-chart-tooltip");
+  const tooltipTitle = tooltipHost?.querySelector(".esm-health-chart-tooltip-title");
+  const tooltipCopy = tooltipHost?.querySelector(".esm-health-chart-tooltip-copy");
+  const tooltipLabel = tooltipHost?.querySelector(".esm-health-chart-tooltip-label");
+  const tooltipValue = tooltipHost?.querySelector(".esm-health-chart-tooltip-value");
+  const tooltipDetails = tooltipHost?.querySelector(".esm-health-chart-tooltip-details");
   const hoverGuide = chartShell.querySelector(".esm-health-sparkline-hover-guide");
   const hoverDot = chartShell.querySelector(".esm-health-sparkline-hover-dot");
   if (!(tooltip instanceof HTMLElement) || !(tooltipTitle instanceof HTMLElement) || !(tooltipCopy instanceof HTMLElement)) {
     return;
   }
+  const activateChart = options?.activateChart !== false;
+  const isDockedTarget = tooltip.classList.contains("esm-health-chart-tooltip--docked");
+  const currentIndex = Number(chartShell.dataset.sparklineActiveIndex || -1);
+  const isCurrentStateActive = chartShell.classList.contains("is-active");
+  if (currentIndex === boundedIndex && isCurrentStateActive === activateChart && tooltip.hidden === false) {
+    return;
+  }
   tooltipTitle.textContent = String(payload?.title || "Chart").trim() || "Chart";
+  tooltipTitle.hidden = isDockedTarget || tooltipTitle.textContent.length === 0;
   tooltipCopy.textContent = String(payload?.summary || "").trim();
-  tooltipCopy.hidden = tooltipCopy.textContent.length === 0;
+  tooltipCopy.hidden = isDockedTarget || tooltipCopy.textContent.length === 0;
   if (tooltipLabel instanceof HTMLElement) {
     tooltipLabel.textContent = String(point?.label || "Selected bucket").trim() || "Selected bucket";
   }
@@ -889,12 +1147,16 @@ function showSparklineTooltip(chartShell, pointIndex = 0) {
     hoverDot.setAttribute("cx", String(point.x));
     hoverDot.setAttribute("cy", String(point.y));
   }
-  const chartWidth = Math.max(1, Number(payload?.width || 0));
-  const leftPercent = Math.max(14, Math.min(86, (Number(point.x || 0) / chartWidth) * 100));
-  tooltip.style.left = `${leftPercent}%`;
+  if (isDockedTarget) {
+    tooltip.style.left = "";
+  } else {
+    const chartWidth = Math.max(1, Number(payload?.width || 0));
+    const leftPercent = Math.max(14, Math.min(86, (Number(point.x || 0) / chartWidth) * 100));
+    tooltip.style.left = `${leftPercent}%`;
+  }
   tooltip.hidden = false;
   chartShell.dataset.sparklineActiveIndex = String(boundedIndex);
-  chartShell.classList.add("is-active");
+  chartShell.classList.toggle("is-active", activateChart);
 }
 
 function bindSparklineTooltips() {
@@ -953,6 +1215,7 @@ function bindSparklineTooltips() {
       const nextIndex = Math.max(0, Math.min(points.length - 1, currentIndex + offset));
       showSparklineTooltip(chartShell, nextIndex);
     });
+    hideSparklineTooltip(chartShell);
     chartShell.dataset.sparklineTooltipBound = "true";
   });
 }
@@ -963,8 +1226,10 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
   const summary = String(options?.summary || "").trim();
   const valueLabel = String(options?.valueLabel || title).trim() || title;
   const detailAccessor = typeof options?.detailAccessor === "function" ? options.detailAccessor : null;
+  const boundaryUnit = normalizeSparklineBoundaryUnit(options?.boundaryUnit);
   const points = (Array.isArray(series) ? series : [])
     .map((entry) => ({
+      bucketKey: String(entry?.bucketKey || "").trim(),
       label: String(entry?.label || "").trim(),
       value: Number(valueAccessor(entry)),
       formattedValue: formatter(Number(valueAccessor(entry))),
@@ -994,6 +1259,7 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
   });
   const polylinePoints = coordinateList.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
   const areaPoints = [`${insetX},${height - insetY}`, polylinePoints, `${width - insetX},${height - insetY}`].join(" ");
+  const boundaryMarkers = buildSparklineBoundaryMarkers(points, coordinateList, boundaryUnit);
   const lastPoint = coordinateList[coordinateList.length - 1];
   const sparklinePayload = encodeSparklinePayload({
     title,
@@ -1022,13 +1288,6 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
 
   return `
     <div class="esm-health-sparkline-shell" data-sparkline-chart data-sparkline-payload="${escapeHtml(sparklinePayload)}">
-      <div class="esm-health-chart-tooltip" role="status" aria-live="polite" hidden>
-        <p class="esm-health-chart-tooltip-title"></p>
-        <p class="esm-health-chart-tooltip-copy"></p>
-        <p class="esm-health-chart-tooltip-label"></p>
-        <p class="esm-health-chart-tooltip-value"></p>
-        <div class="esm-health-chart-tooltip-details" hidden></div>
-      </div>
       <svg
         class="esm-health-sparkline"
         viewBox="0 0 ${width} ${height}"
@@ -1040,6 +1299,22 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
         <line class="grid-line" x1="${insetX}" y1="${insetY}" x2="${width - insetX}" y2="${insetY}" />
         <line class="grid-line" x1="${insetX}" y1="${height / 2}" x2="${width - insetX}" y2="${height / 2}" />
         <line class="grid-line" x1="${insetX}" y1="${height - insetY}" x2="${width - insetX}" y2="${height - insetY}" />
+        ${boundaryMarkers
+          .map((marker) => {
+            const textX = Math.min(width - insetX - 4, Math.max(insetX + 4, marker.x + 4));
+            const anchor = textX >= width - insetX - 4 ? "end" : "start";
+            return `
+              <g class="esm-health-sparkline-boundary">
+                <line class="esm-health-sparkline-boundary-line" x1="${marker.x}" y1="${insetY}" x2="${marker.x}" y2="${
+                  height - insetY
+                }" />
+                <text class="esm-health-sparkline-boundary-label" x="${textX}" y="${insetY + 9}" text-anchor="${anchor}">${escapeHtml(
+                  marker.label
+                )}</text>
+              </g>
+            `;
+          })
+          .join("")}
         <line class="esm-health-sparkline-hover-guide" x1="${lastPoint.x.toFixed(2)}" y1="${insetY}" x2="${lastPoint.x.toFixed(
           2
         )}" y2="${height - insetY}" />
@@ -1048,6 +1323,18 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
         <circle class="point-dot" cx="${lastPoint.x.toFixed(2)}" cy="${lastPoint.y.toFixed(2)}" r="3.6" />
         <circle class="esm-health-sparkline-hover-dot" cx="${lastPoint.x.toFixed(2)}" cy="${lastPoint.y.toFixed(2)}" r="4.5" />
       </svg>
+    </div>
+  `;
+}
+
+function buildChartHoverTarget(title = "", summary = "") {
+  return `
+    <div class="esm-health-chart-tooltip esm-health-chart-tooltip--docked" role="status" aria-live="polite" aria-atomic="true">
+      <p class="esm-health-chart-tooltip-title" hidden>${escapeHtml(String(title || "").trim() || "Chart")}</p>
+      <p class="esm-health-chart-tooltip-copy" hidden>${escapeHtml(String(summary || "").trim())}</p>
+      <p class="esm-health-chart-tooltip-label">Selected bucket</p>
+      <p class="esm-health-chart-tooltip-value">Loading...</p>
+      <div class="esm-health-chart-tooltip-details" hidden></div>
     </div>
   `;
 }
@@ -1136,11 +1423,15 @@ function renderChartCard(title, latestValue, summary, series, valueAccessor, for
   const latestDisplay = formatter(latestValue);
   return `
     <article class="rest-report-card esm-health-chart-card">
-      <header class="rest-report-head">
-        <p class="rest-report-title">${escapeHtml(title)}</p>
-        <p class="esm-health-chart-summary">${escapeHtml(latestDisplay)}</p>
-        <p class="esm-health-chart-meta">${escapeHtml(summary)}</p>
-        ${errorText ? `<p class="esm-health-chart-meta esm-health-section-error">${escapeHtml(errorText)}</p>` : ""}
+      <header class="rest-report-head esm-health-chart-head">
+        <div class="esm-health-chart-title-row">
+          <div class="esm-health-chart-title-block">
+            <p class="rest-report-title">${escapeHtml(title)}</p>
+            <p class="esm-health-chart-summary">${escapeHtml(latestDisplay)}</p>
+            <p class="esm-health-chart-meta">${escapeHtml(summary)}</p>
+          </div>
+        </div>
+        ${errorText ? `<p class="esm-health-chart-meta esm-health-section-error esm-health-chart-error">${escapeHtml(errorText)}</p>` : ""}
       </header>
       <div class="esm-health-chart-wrap">
         ${buildSparklineSvg(series, valueAccessor, {
@@ -1148,7 +1439,11 @@ function renderChartCard(title, latestValue, summary, series, valueAccessor, for
           summary,
           formatter,
           valueLabel: title,
+          boundaryUnit: getSparklineBoundaryUnitForGranularity(state.query.granularity),
         })}
+      </div>
+      <div class="esm-health-chart-detail-wrap">
+        ${buildChartHoverTarget(title, summary)}
       </div>
     </article>
   `;
@@ -1232,13 +1527,18 @@ function renderReachCard(report = null) {
   const uniqueSeries = Array.isArray(report?.uniqueSeries) ? report.uniqueSeries : [];
   const latest = uniqueSeries.length > 0 ? uniqueSeries[uniqueSeries.length - 1] : null;
   const errorText = String(report?.sectionErrors?.uniques || "").trim();
+  const summary = "Reach is shown only at daily granularity and summed across dc.";
   return `
     <article class="rest-report-card esm-health-chart-card">
-      <header class="rest-report-head">
-        <p class="rest-report-title">Unique Accounts &amp; Sessions</p>
-        <p class="esm-health-chart-summary">${escapeHtml(String(latest?.label || "Daily uniques").trim() || "Daily uniques")}</p>
-        <p class="esm-health-chart-meta">Reach is shown only at daily granularity and summed across dc.</p>
-        ${errorText ? `<p class="esm-health-chart-meta esm-health-section-error">${escapeHtml(errorText)}</p>` : ""}
+      <header class="rest-report-head esm-health-chart-head">
+        <div class="esm-health-chart-title-row">
+          <div class="esm-health-chart-title-block">
+            <p class="rest-report-title">Unique Accounts &amp; Sessions</p>
+            <p class="esm-health-chart-summary">${escapeHtml(String(latest?.label || "Daily uniques").trim() || "Daily uniques")}</p>
+            <p class="esm-health-chart-meta">${escapeHtml(summary)}</p>
+          </div>
+        </div>
+        ${errorText ? `<p class="esm-health-chart-meta esm-health-section-error esm-health-chart-error">${escapeHtml(errorText)}</p>` : ""}
       </header>
       <div class="esm-health-reach-grid">
         <article class="esm-health-reach-stat">
@@ -1253,11 +1553,15 @@ function renderReachCard(report = null) {
       <div class="esm-health-chart-wrap">
         ${buildSparklineSvg(uniqueSeries, (entry) => Number(entry?.uniqueSessions || 0), {
           title: "Unique Accounts & Sessions",
-          summary: "Reach is shown only at daily granularity and summed across dc.",
+          summary,
           formatter: formatCompactNumber,
           valueLabel: "Sessions",
+          boundaryUnit: getSparklineBoundaryUnitForGranularity("day"),
           detailAccessor: (entry) => [`Accounts: ${formatCompactNumber(entry?.uniqueAccounts || 0)}`],
         })}
+      </div>
+      <div class="esm-health-chart-detail-wrap">
+        ${buildChartHoverTarget("Unique Accounts & Sessions", summary)}
       </div>
     </article>
   `;
@@ -1371,6 +1675,7 @@ function renderReport() {
   const latestBackbone = backboneSeries.length > 0 ? backboneSeries[backboneSeries.length - 1] : null;
   const checkedAtLabel = formatDateTime(report?.checkedAt);
   const sectionSummary = `${Number(report?.loadedSections || 0)}/${Number(report?.totalSections || 0)} sections loaded`;
+  const windowSummary = getSmartWindowPresetDefinition(report?.queryContext?.windowPreset || state.query.windowPreset);
   const introCopy = `${String(report?.queryContext?.start || "").trim() || "?"} -> ${String(
     report?.queryContext?.end || ""
   ).trim() || "?"} | ${String(report?.queryContext?.timezoneLabel || state.timezoneLabel || "PST effective").trim()}`;
@@ -1386,9 +1691,11 @@ function renderReport() {
     <article class="rest-report-card">
       <header class="rest-report-head">
         <p class="rest-report-title">ESM HEALTH Overview</p>
-        <p class="rest-report-meta"><strong>Checked:</strong> ${escapeHtml(checkedAtLabel)} | <strong>Range:</strong> ${escapeHtml(
-          introCopy
-        )} | ${comparisonCopy ? `<strong>Compare:</strong> ${escapeHtml(comparisonCopy)} | ` : ""}<strong>Status:</strong> ${escapeHtml(
+        <p class="rest-report-meta"><strong>Checked:</strong> ${escapeHtml(checkedAtLabel)} | <strong>Window:</strong> ${escapeHtml(
+          `${windowSummary.label} | ${windowSummary.description}`
+        )} | <strong>Range:</strong> ${escapeHtml(introCopy)} | ${
+          comparisonCopy ? `<strong>Compare:</strong> ${escapeHtml(comparisonCopy)} | ` : ""
+        }<strong>Status:</strong> ${escapeHtml(
           sectionSummary
         )}</p>
         <p class="esm-health-overview-copy">${escapeHtml(
@@ -1650,6 +1957,9 @@ async function runDashboard(statusMessage = "Running ESM HEALTH dashboard...") {
     setStatus("No ESM context is selected in UnderPAR.", "error");
     return;
   }
+  if (!String(state.query.start || "").trim() || !String(state.query.end || "").trim()) {
+    applySmartWindowPresetToQuery(state.query.windowPreset);
+  }
   state.loading = true;
   syncActionButtonsDisabled();
   setStatus(statusMessage);
@@ -1758,40 +2068,47 @@ function registerEventHandlers() {
   if (els.filterForm) {
     els.filterForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      state.query.start = String(els.startDateInput?.value || "").trim();
-      state.query.end = String(els.endDateInput?.value || "").trim();
-      state.query.compareMode = normalizeCompareMode(String(els.compareSelect?.value || state.query.compareMode || ""));
-      state.query.granularity = normalizeGranularity(String(els.granularitySelect?.value || state.query.granularity || ""));
-      void runDashboard();
+      const dateRange = resolveDateInputRange(els.startDateInput?.value, els.endDateInput?.value);
+      if (!dateRange.start || !dateRange.end) {
+        applySmartWindowPresetToQuery(state.query.windowPreset);
+      } else {
+        state.query.start = dateRange.start;
+        state.query.end = dateRange.end;
+      }
+      syncFilterControlsFromState();
+      void runDashboard("Applying advanced ESM HEALTH dates...");
+    });
+  }
+  if (els.windowSelect) {
+    els.windowSelect.addEventListener("change", () => {
+      applySmartWindowPresetToQuery(String(els.windowSelect?.value || ""));
+      syncFilterControlsFromState();
+      void runDashboard(`Refreshing ESM HEALTH dashboard for ${getSelectedWindowSummary()}...`);
     });
   }
   if (els.startDateInput) {
     els.startDateInput.addEventListener("change", () => {
-      state.query.start = String(els.startDateInput?.value || "").trim();
+      const dateRange = resolveDateInputRange(els.startDateInput?.value, state.query.end);
+      state.query.start = String(dateRange.start || els.startDateInput?.value || "").trim();
+      if (dateRange.end) {
+        state.query.end = dateRange.end;
+      }
       syncFilterControlsFromState();
     });
   }
   if (els.endDateInput) {
     els.endDateInput.addEventListener("change", () => {
-      state.query.end = String(els.endDateInput?.value || "").trim();
+      const dateRange = resolveDateInputRange(state.query.start, els.endDateInput?.value);
+      if (dateRange.start) {
+        state.query.start = dateRange.start;
+      }
+      state.query.end = String(dateRange.end || els.endDateInput?.value || "").trim();
       syncFilterControlsFromState();
     });
   }
   if (els.resetButton) {
     els.resetButton.addEventListener("click", () => {
       void resetFilters();
-    });
-  }
-  if (els.compareSelect) {
-    els.compareSelect.addEventListener("change", () => {
-      state.query.compareMode = normalizeCompareMode(String(els.compareSelect?.value || ""));
-      syncFilterControlsFromState();
-    });
-  }
-  if (els.granularitySelect) {
-    els.granularitySelect.addEventListener("change", () => {
-      state.query.granularity = normalizeGranularity(String(els.granularitySelect?.value || ""));
-      syncFilterControlsFromState();
     });
   }
   if (els.cardsHost) {
