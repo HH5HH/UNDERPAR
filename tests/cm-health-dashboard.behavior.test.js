@@ -115,6 +115,36 @@ function loadCmHealthSortHelpers() {
   return context.module.exports;
 }
 
+function loadCmSparklineHelpers() {
+  const filePath = path.join(ROOT, "cm-health-workspace.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    'const state = { query: { granularity: "hour" } };',
+    extractFunctionSource(source, "escapeHtml"),
+    extractFunctionSource(source, "formatCompactNumber"),
+    extractFunctionSource(source, "encodeSparklinePayload"),
+    extractFunctionSource(source, "normalizeGranularity"),
+    extractFunctionSource(source, "normalizeSparklineBoundaryUnit"),
+    extractFunctionSource(source, "getSparklineBoundaryGroupKey"),
+    extractFunctionSource(source, "formatSparklineBoundaryLabel"),
+    extractFunctionSource(source, "buildSparklineBoundaryMarkers"),
+    extractFunctionSource(source, "getSparklineBoundaryUnitForGranularity"),
+    extractFunctionSource(source, "buildSparklineSvg"),
+    extractFunctionSource(source, "buildChartHoverTarget"),
+    extractFunctionSource(source, "renderChartCard"),
+    "module.exports = { state, buildSparklineSvg, renderChartCard, getSparklineBoundaryUnitForGranularity };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Intl,
+    encodeURIComponent,
+    JSON,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 test("CM health query context clears incompatible MVPD filters when channel focus is active", () => {
   const popupHelpers = loadPopupFunctions(
     [
@@ -268,4 +298,61 @@ test("CM health workspace charts bind hover-aware sparkline tooltips after reren
   assert.match(source, /role="img"/);
   assert.match(css, /\.esm-health-chart-tooltip\s*\{/);
   assert.match(css, /\.esm-health-sparkline-hover-guide/);
+});
+
+test("CM sparkline charts render docked hover details with boundary markers", () => {
+  const { buildSparklineSvg } = loadCmSparklineHelpers();
+  const html = buildSparklineSvg(
+    [
+      { bucketKey: "2026-03-29T23", label: "2026-03-29 23:00", startedSessions: 1200 },
+      { bucketKey: "2026-03-30T00", label: "2026-03-30 00:00", startedSessions: 1450 },
+    ],
+    (entry) => Number(entry?.startedSessions || 0),
+    {
+      title: "Started Sessions",
+      summary: "Daily or hourly rollup of CM session starts.",
+      formatter: (value) => `${Math.round(value)} sess`,
+      valueLabel: "Started Sessions",
+      boundaryUnit: "day",
+    }
+  );
+
+  assert.match(html, /data-sparkline-chart/);
+  assert.match(html, /data-sparkline-payload=/);
+  assert.doesNotMatch(html, /esm-health-chart-tooltip-title/);
+  assert.doesNotMatch(html, /esm-health-chart-tooltip-details/);
+  assert.match(html, /esm-health-sparkline-boundary-line/);
+  assert.match(html, />03\/30</);
+  assert.match(html, /esm-health-sparkline-hover-guide/);
+  assert.match(html, /esm-health-sparkline-hover-dot/);
+  assert.match(html, /tabindex="0"/);
+});
+
+test("CM chart cards place hover details in a docked panel below the sparkline", () => {
+  const helpers = loadCmSparklineHelpers();
+  helpers.state.query.granularity = "hour";
+  const html = helpers.renderChartCard(
+    "Started Sessions",
+    3800,
+    "Daily or hourly rollup of CM session starts.",
+    [
+      { bucketKey: "2026-03-29T08", label: "2026-03-29 08:00", startedSessions: 1200 },
+      { bucketKey: "2026-03-29T09", label: "2026-03-29 09:00", startedSessions: 1450 },
+    ],
+    (entry) => Number(entry?.startedSessions || 0),
+    (value) => `${Math.round(Number(value || 0))} sess`
+  );
+
+  const chartTitleIndex = html.indexOf("esm-health-chart-title-row");
+  const chartWrapIndex = html.indexOf("esm-health-chart-wrap");
+  const dockedTooltipIndex = html.indexOf("esm-health-chart-tooltip--docked");
+
+  assert.match(html, /esm-health-chart-title-row/);
+  assert.match(html, /Selected bucket/);
+  assert.match(html, /esm-health-chart-detail-wrap/);
+  assert.notEqual(chartTitleIndex, -1);
+  assert.notEqual(chartWrapIndex, -1);
+  assert.notEqual(dockedTooltipIndex, -1);
+  assert.ok(chartTitleIndex < chartWrapIndex);
+  assert.ok(chartWrapIndex < dockedTooltipIndex);
 });

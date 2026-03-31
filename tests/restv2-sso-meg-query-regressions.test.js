@@ -271,6 +271,32 @@ test("sidepanel saved-query menu opens above the footer trigger so it stays visi
   );
 });
 
+test("sidepanel saved-query menu lifts into a floating body layer when opened", () => {
+  const popupSource = read("popup.js");
+  const popupCss = read("popup.css");
+
+  assert.match(
+    popupSource,
+    /if \(menuElement\.parentElement !== document\.body\) \{\s*document\.body\.appendChild\(menuElement\);\s*\}/m
+  );
+  assert.match(popupSource, /menuElement\.classList\.add\("is-floating"\);/);
+  assert.match(popupSource, /function esmWorkspacePositionMegSavedQueryMenu\(esmWorkspaceState\)/);
+  assert.match(popupCss, /\.esm-workspace-meg-saved-menu\.is-floating\s*\{/);
+});
+
+test("global MEG saved-query dismiss logic treats the floating menu as inside the picker", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(
+    popupSource,
+    /const menuElement = target instanceof Element \? target\.closest\("\.esm-workspace-meg-saved-menu"\) : null;\s*if \(menuElement\) \{\s*return;\s*\}/m
+  );
+  assert.match(
+    popupSource,
+    /function resolveEsmWorkspaceStateFromMegSavedQueryNode\(node = null\) \{[\s\S]*?closest\("\.esm-workspace-meg-saved-menu"\)[\s\S]*?__underparEsmWorkspaceState/m
+  );
+});
+
 test("sidepanel saved-query menu close helper hides the menu and resets the trigger state", () => {
   let restoredFocusCount = 0;
   const pickerElement = {
@@ -278,6 +304,10 @@ test("sidepanel saved-query menu close helper hides the menu and resets the trig
       remove(name) {
         this.removed = name;
       },
+    },
+    appendChild(node) {
+      this.appendedNode = node;
+      node.parentElement = this;
     },
   };
   const triggerButton = {
@@ -290,6 +320,15 @@ test("sidepanel saved-query menu close helper hides the menu and resets the trig
   };
   const menuElement = {
     hidden: false,
+    classList: {
+      remove(name) {
+        this.removed = name;
+      },
+    },
+    style: {},
+    parentElement: {
+      nodeName: "BODY",
+    },
   };
   const { esmWorkspaceCloseMegSavedQueryMenu } = loadFunctions("popup.js", ["esmWorkspaceCloseMegSavedQueryMenu"]);
 
@@ -304,6 +343,8 @@ test("sidepanel saved-query menu close helper hides the menu and resets the trig
 
   assert.equal(pickerElement.classList.removed, "is-open");
   assert.equal(menuElement.hidden, true);
+  assert.equal(menuElement.classList.removed, "is-floating");
+  assert.equal(pickerElement.appendedNode, menuElement);
   assert.equal(triggerButton["aria-expanded"], "false");
   assert.equal(restoredFocusCount, 1);
 });
@@ -340,6 +381,25 @@ test("REST V2 Bobtools redirect watcher falls back to the launch page when redir
   assert.match(
     popupSource,
     /const redirectUrl = firstNonEmptyString\(\[\s*recordingContext\?\.redirectUrl,\s*state\.restV2PreviousTabUrl\s*\]\);/m
+  );
+});
+
+test("REST V2 Bobtools redirect watcher swaps the tab before profile hydration begins", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(
+    popupSource,
+    /const workspaceUrl = bobtoolsWorkspaceGetWorkspaceUrl\(\);[\s\S]*?await chrome\.tabs\.update\(normalizedTabId, \{ url: workspaceUrl \}\);[\s\S]*?await ensureRestV2ProfilesHydratedForBobtools\(hydrationContext/m
+  );
+  assert.match(popupSource, /function bobtoolsWorkspaceRefreshSelection\(programmer = null, targetWindowId = 0\)/);
+});
+
+test("popup-close success path auto-opens BOBTOOLS in background-hydration mode", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(
+    popupSource,
+    /await bobtoolsWorkspaceOpenFromRestV2\(null, \{[\s\S]*?skipHydration: true,[\s\S]*?allowWithoutProfiles: true,[\s\S]*?\}\);/m
   );
 });
 

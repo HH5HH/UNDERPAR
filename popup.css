@@ -4414,6 +4414,23 @@ select:disabled {
   box-shadow: 0 16px 30px rgba(0, 0, 0, 0.22);
 }
 
+.esm-workspace-meg-saved-menu.is-floating {
+  position: fixed;
+  inset: auto auto auto auto;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid #000000;
+  border-radius: 0;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+}
+
 .service-esm .esm-workspace-meg-saved-option {
   width: 100%;
   min-height: 32px;
@@ -4430,10 +4447,22 @@ select:disabled {
   cursor: pointer;
 }
 
+.esm-workspace-meg-saved-menu.is-floating .esm-workspace-meg-saved-option {
+  border-radius: 0;
+  color: #000000;
+}
+
 .service-esm .esm-workspace-meg-saved-option:hover:not(:disabled),
 .service-esm .esm-workspace-meg-saved-option:focus-visible {
   border-color: var(--service-input-border-hover);
   background: var(--service-input-bg-hover);
+}
+
+.esm-workspace-meg-saved-menu.is-floating .esm-workspace-meg-saved-option:hover:not(:disabled),
+.esm-workspace-meg-saved-menu.is-floating .esm-workspace-meg-saved-option:focus-visible {
+  border-color: #000000;
+  background: #000000;
+  color: #ffffff;
 }
 
 .service-esm .esm-workspace-meg-saved-picker.is-busy .esm-workspace-meg-saved-trigger {

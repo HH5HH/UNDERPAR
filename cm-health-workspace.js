@@ -902,6 +902,82 @@ function decodeSparklinePayload(value = "") {
   }
 }
 
+function normalizeSparklineBoundaryUnit(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "day" || normalized === "month" || normalized === "year" ? normalized : "";
+}
+
+function getSparklineBoundaryGroupKey(bucketKey = "", boundaryUnit = "") {
+  const normalizedBucketKey = String(bucketKey || "").trim();
+  const normalizedUnit = normalizeSparklineBoundaryUnit(boundaryUnit);
+  if (!normalizedBucketKey || !normalizedUnit) {
+    return "";
+  }
+  if (normalizedUnit === "day") {
+    return normalizedBucketKey.slice(0, 10);
+  }
+  if (normalizedUnit === "month") {
+    return normalizedBucketKey.slice(0, 7);
+  }
+  return normalizedBucketKey.slice(0, 4);
+}
+
+function formatSparklineBoundaryLabel(bucketKey = "", boundaryUnit = "") {
+  const normalizedBucketKey = String(bucketKey || "").trim();
+  const normalizedUnit = normalizeSparklineBoundaryUnit(boundaryUnit);
+  if (!normalizedBucketKey || !normalizedUnit) {
+    return "";
+  }
+  if (normalizedUnit === "day") {
+    const month = normalizedBucketKey.slice(5, 7);
+    const day = normalizedBucketKey.slice(8, 10);
+    return month && day ? `${month}/${day}` : normalizedBucketKey;
+  }
+  if (normalizedUnit === "month") {
+    const year = normalizedBucketKey.slice(0, 4);
+    const month = normalizedBucketKey.slice(5, 7);
+    return month && year ? `${month}/${year}` : normalizedBucketKey;
+  }
+  return normalizedBucketKey.slice(0, 4) || normalizedBucketKey;
+}
+
+function buildSparklineBoundaryMarkers(points = [], coordinateList = [], boundaryUnit = "") {
+  const normalizedUnit = normalizeSparklineBoundaryUnit(boundaryUnit);
+  if (!normalizedUnit || points.length < 2 || coordinateList.length !== points.length) {
+    return [];
+  }
+  const markers = [];
+  let previousGroupKey = getSparklineBoundaryGroupKey(points[0]?.bucketKey, normalizedUnit);
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index];
+    const currentGroupKey = getSparklineBoundaryGroupKey(point?.bucketKey, normalizedUnit);
+    if (!currentGroupKey || currentGroupKey === previousGroupKey) {
+      previousGroupKey = currentGroupKey || previousGroupKey;
+      continue;
+    }
+    const previousPoint = coordinateList[index - 1];
+    const currentPoint = coordinateList[index];
+    const markerX = Number((((Number(previousPoint?.x || 0) + Number(currentPoint?.x || 0)) / 2) || 0).toFixed(2));
+    markers.push({
+      x: markerX,
+      label: formatSparklineBoundaryLabel(point?.bucketKey, normalizedUnit) || String(point?.label || "").trim(),
+    });
+    previousGroupKey = currentGroupKey;
+  }
+  return markers;
+}
+
+function getSparklineBoundaryUnitForGranularity(granularity = "") {
+  const normalizedGranularity = normalizeGranularity(granularity);
+  if (normalizedGranularity === "hour") {
+    return "day";
+  }
+  if (normalizedGranularity === "month") {
+    return "year";
+  }
+  return "month";
+}
+
 function findNearestSparklinePointIndex(points = [], viewBoxX = 0) {
   let closestIndex = 0;
   let closestDistance = Number.POSITIVE_INFINITY;
@@ -915,18 +991,33 @@ function findNearestSparklinePointIndex(points = [], viewBoxX = 0) {
   return closestIndex;
 }
 
+function getSparklineTooltipHost(chartShell) {
+  if (!(chartShell instanceof HTMLElement)) {
+    return null;
+  }
+  return chartShell.closest(".esm-health-chart-card") || chartShell;
+}
+
 function hideSparklineTooltip(chartShell) {
   if (!(chartShell instanceof HTMLElement)) {
     return;
   }
+  const payload = decodeSparklinePayload(chartShell.getAttribute("data-sparkline-payload"));
+  const points = Array.isArray(payload?.points) ? payload.points : [];
+  const tooltipHost = getSparklineTooltipHost(chartShell);
+  const tooltip = tooltipHost?.querySelector(".esm-health-chart-tooltip");
+  const shouldPersistDockedDetails = tooltip instanceof HTMLElement && tooltip.classList.contains("esm-health-chart-tooltip--docked");
+  if (shouldPersistDockedDetails && points.length > 0) {
+    showSparklineTooltip(chartShell, points.length - 1, { activateChart: false });
+    return;
+  }
   chartShell.classList.remove("is-active");
-  const tooltip = chartShell.querySelector(".esm-health-chart-tooltip");
   if (tooltip instanceof HTMLElement) {
     tooltip.hidden = true;
   }
 }
 
-function showSparklineTooltip(chartShell, pointIndex = 0) {
+function showSparklineTooltip(chartShell, pointIndex = 0, options = {}) {
   if (!(chartShell instanceof HTMLElement)) {
     return;
   }
@@ -942,20 +1033,29 @@ function showSparklineTooltip(chartShell, pointIndex = 0) {
     hideSparklineTooltip(chartShell);
     return;
   }
-  const tooltip = chartShell.querySelector(".esm-health-chart-tooltip");
-  const tooltipTitle = chartShell.querySelector(".esm-health-chart-tooltip-title");
-  const tooltipCopy = chartShell.querySelector(".esm-health-chart-tooltip-copy");
-  const tooltipLabel = chartShell.querySelector(".esm-health-chart-tooltip-label");
-  const tooltipValue = chartShell.querySelector(".esm-health-chart-tooltip-value");
-  const tooltipDetails = chartShell.querySelector(".esm-health-chart-tooltip-details");
+  const tooltipHost = getSparklineTooltipHost(chartShell);
+  const tooltip = tooltipHost?.querySelector(".esm-health-chart-tooltip");
+  const tooltipTitle = tooltipHost?.querySelector(".esm-health-chart-tooltip-title");
+  const tooltipCopy = tooltipHost?.querySelector(".esm-health-chart-tooltip-copy");
+  const tooltipLabel = tooltipHost?.querySelector(".esm-health-chart-tooltip-label");
+  const tooltipValue = tooltipHost?.querySelector(".esm-health-chart-tooltip-value");
+  const tooltipDetails = tooltipHost?.querySelector(".esm-health-chart-tooltip-details");
   const hoverGuide = chartShell.querySelector(".esm-health-sparkline-hover-guide");
   const hoverDot = chartShell.querySelector(".esm-health-sparkline-hover-dot");
   if (!(tooltip instanceof HTMLElement) || !(tooltipTitle instanceof HTMLElement) || !(tooltipCopy instanceof HTMLElement)) {
     return;
   }
+  const activateChart = options?.activateChart !== false;
+  const isDockedTarget = tooltip.classList.contains("esm-health-chart-tooltip--docked");
+  const currentIndex = Number(chartShell.dataset.sparklineActiveIndex || -1);
+  const isCurrentStateActive = chartShell.classList.contains("is-active");
+  if (currentIndex === boundedIndex && isCurrentStateActive === activateChart && tooltip.hidden === false) {
+    return;
+  }
   tooltipTitle.textContent = String(payload?.title || "Chart").trim() || "Chart";
+  tooltipTitle.hidden = isDockedTarget || tooltipTitle.textContent.length === 0;
   tooltipCopy.textContent = String(payload?.summary || "").trim();
-  tooltipCopy.hidden = tooltipCopy.textContent.length === 0;
+  tooltipCopy.hidden = isDockedTarget || tooltipCopy.textContent.length === 0;
   if (tooltipLabel instanceof HTMLElement) {
     tooltipLabel.textContent = String(point?.label || "Selected bucket").trim() || "Selected bucket";
   }
@@ -985,12 +1085,16 @@ function showSparklineTooltip(chartShell, pointIndex = 0) {
     hoverDot.setAttribute("cx", String(point.x));
     hoverDot.setAttribute("cy", String(point.y));
   }
-  const chartWidth = Math.max(1, Number(payload?.width || 0));
-  const leftPercent = Math.max(14, Math.min(86, (Number(point.x || 0) / chartWidth) * 100));
-  tooltip.style.left = `${leftPercent}%`;
+  if (isDockedTarget) {
+    tooltip.style.left = "";
+  } else {
+    const chartWidth = Math.max(1, Number(payload?.width || 0));
+    const leftPercent = Math.max(14, Math.min(86, (Number(point.x || 0) / chartWidth) * 100));
+    tooltip.style.left = `${leftPercent}%`;
+  }
   tooltip.hidden = false;
   chartShell.dataset.sparklineActiveIndex = String(boundedIndex);
-  chartShell.classList.add("is-active");
+  chartShell.classList.toggle("is-active", activateChart);
 }
 
 function bindSparklineTooltips() {
@@ -1049,6 +1153,7 @@ function bindSparklineTooltips() {
       const nextIndex = Math.max(0, Math.min(points.length - 1, currentIndex + offset));
       showSparklineTooltip(chartShell, nextIndex);
     });
+    hideSparklineTooltip(chartShell);
     chartShell.dataset.sparklineTooltipBound = "true";
   });
 }
@@ -1059,8 +1164,10 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
   const summary = String(options?.summary || "").trim();
   const valueLabel = String(options?.valueLabel || title).trim() || title;
   const detailAccessor = typeof options?.detailAccessor === "function" ? options.detailAccessor : null;
+  const boundaryUnit = normalizeSparklineBoundaryUnit(options?.boundaryUnit);
   const points = (Array.isArray(series) ? series : [])
     .map((entry) => ({
+      bucketKey: String(entry?.bucketKey || "").trim(),
       label: String(entry?.label || "").trim(),
       value: Number(valueAccessor(entry)),
       formattedValue: formatter(Number(valueAccessor(entry))),
@@ -1090,6 +1197,7 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
   });
   const polylinePoints = coordinateList.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
   const areaPoints = [`${insetX},${height - insetY}`, polylinePoints, `${width - insetX},${height - insetY}`].join(" ");
+  const boundaryMarkers = buildSparklineBoundaryMarkers(points, coordinateList, boundaryUnit);
   const lastPoint = coordinateList[coordinateList.length - 1];
   const sparklinePayload = encodeSparklinePayload({
     title,
@@ -1118,13 +1226,6 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
 
   return `
     <div class="esm-health-sparkline-shell" data-sparkline-chart data-sparkline-payload="${escapeHtml(sparklinePayload)}">
-      <div class="esm-health-chart-tooltip" role="status" aria-live="polite" hidden>
-        <p class="esm-health-chart-tooltip-title"></p>
-        <p class="esm-health-chart-tooltip-copy"></p>
-        <p class="esm-health-chart-tooltip-label"></p>
-        <p class="esm-health-chart-tooltip-value"></p>
-        <div class="esm-health-chart-tooltip-details" hidden></div>
-      </div>
       <svg
         class="esm-health-sparkline"
         viewBox="0 0 ${width} ${height}"
@@ -1136,6 +1237,22 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
         <line class="grid-line" x1="${insetX}" y1="${insetY}" x2="${width - insetX}" y2="${insetY}" />
         <line class="grid-line" x1="${insetX}" y1="${height / 2}" x2="${width - insetX}" y2="${height / 2}" />
         <line class="grid-line" x1="${insetX}" y1="${height - insetY}" x2="${width - insetX}" y2="${height - insetY}" />
+        ${boundaryMarkers
+          .map((marker) => {
+            const textX = Math.min(width - insetX - 4, Math.max(insetX + 4, marker.x + 4));
+            const anchor = textX >= width - insetX - 4 ? "end" : "start";
+            return `
+              <g class="esm-health-sparkline-boundary">
+                <line class="esm-health-sparkline-boundary-line" x1="${marker.x}" y1="${insetY}" x2="${marker.x}" y2="${
+                  height - insetY
+                }" />
+                <text class="esm-health-sparkline-boundary-label" x="${textX}" y="${insetY + 9}" text-anchor="${anchor}">${escapeHtml(
+                  marker.label
+                )}</text>
+              </g>
+            `;
+          })
+          .join("")}
         <line class="esm-health-sparkline-hover-guide" x1="${lastPoint.x.toFixed(2)}" y1="${insetY}" x2="${lastPoint.x.toFixed(
           2
         )}" y2="${height - insetY}" />
@@ -1148,15 +1265,31 @@ function buildSparklineSvg(series = [], valueAccessor = () => 0, options = {}) {
   `;
 }
 
+function buildChartHoverTarget(title = "", summary = "") {
+  return `
+    <div class="esm-health-chart-tooltip esm-health-chart-tooltip--docked" role="status" aria-live="polite" aria-atomic="true">
+      <p class="esm-health-chart-tooltip-title" hidden>${escapeHtml(String(title || "").trim() || "Chart")}</p>
+      <p class="esm-health-chart-tooltip-copy" hidden>${escapeHtml(String(summary || "").trim())}</p>
+      <p class="esm-health-chart-tooltip-label">Selected bucket</p>
+      <p class="esm-health-chart-tooltip-value">Loading...</p>
+      <div class="esm-health-chart-tooltip-details" hidden></div>
+    </div>
+  `;
+}
+
 function renderChartCard(title, latestValue, summary, series, valueAccessor, formatter, errorText = "") {
   const latestDisplay = formatter(latestValue);
   return `
     <article class="rest-report-card esm-health-chart-card">
-      <header class="rest-report-head">
-        <p class="rest-report-title">${escapeHtml(title)}</p>
-        <p class="esm-health-chart-summary">${escapeHtml(latestDisplay)}</p>
-        <p class="esm-health-chart-meta">${escapeHtml(summary)}</p>
-        ${errorText ? `<p class="esm-health-chart-meta esm-health-section-error">${escapeHtml(errorText)}</p>` : ""}
+      <header class="rest-report-head esm-health-chart-head">
+        <div class="esm-health-chart-title-row">
+          <div class="esm-health-chart-title-block">
+            <p class="rest-report-title">${escapeHtml(title)}</p>
+            <p class="esm-health-chart-summary">${escapeHtml(latestDisplay)}</p>
+            <p class="esm-health-chart-meta">${escapeHtml(summary)}</p>
+          </div>
+        </div>
+        ${errorText ? `<p class="esm-health-chart-meta esm-health-section-error esm-health-chart-error">${escapeHtml(errorText)}</p>` : ""}
       </header>
       <div class="esm-health-chart-wrap">
         ${buildSparklineSvg(series, valueAccessor, {
@@ -1164,7 +1297,11 @@ function renderChartCard(title, latestValue, summary, series, valueAccessor, for
           summary,
           formatter,
           valueLabel: title,
+          boundaryUnit: getSparklineBoundaryUnitForGranularity(state.query.granularity),
         })}
+      </div>
+      <div class="esm-health-chart-detail-wrap">
+        ${buildChartHoverTarget(title, summary)}
       </div>
     </article>
   `;

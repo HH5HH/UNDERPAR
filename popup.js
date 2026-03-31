@@ -45046,8 +45046,15 @@ async function esmWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl
 
 function resolveEsmWorkspaceStateFromMegSavedQueryNode(node = null) {
   const pickerElement = node instanceof Element ? node.closest(".esm-workspace-meg-saved-picker") : null;
-  const section = pickerElement instanceof Element ? pickerElement.closest(".premium-service-section.service-esm") : null;
-  return section?.__underparEsmWorkspaceState || null;
+  if (pickerElement instanceof Element) {
+    const section = pickerElement.closest(".premium-service-section.service-esm");
+    return section?.__underparEsmWorkspaceState || null;
+  }
+  const menuElement = node instanceof Element ? node.closest(".esm-workspace-meg-saved-menu") : null;
+  if (menuElement && menuElement.__underparEsmWorkspaceState) {
+    return menuElement.__underparEsmWorkspaceState || null;
+  }
+  return null;
 }
 
 function esmWorkspaceGetMegSavedQueryOptionButtons(esmWorkspaceState) {
@@ -45086,6 +45093,44 @@ function esmWorkspaceMoveMegSavedQueryMenuFocus(esmWorkspaceState, currentButton
   esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, nextIndex);
 }
 
+function esmWorkspacePositionMegSavedQueryMenu(esmWorkspaceState) {
+  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
+  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
+  if (!(triggerButton instanceof HTMLElement) || !(menuElement instanceof HTMLElement)) {
+    return;
+  }
+  const rect = triggerButton.getBoundingClientRect();
+  const viewportWidth = Math.max(0, Number(window.innerWidth || document.documentElement?.clientWidth || 0));
+  const viewportHeight = Math.max(0, Number(window.innerHeight || document.documentElement?.clientHeight || 0));
+  const maxWidth = Math.max(220, Math.min(Math.round(rect.width || 0) || 0, Math.max(220, viewportWidth - 16)));
+  const fallbackMaxHeight = Math.max(120, Math.min(320, viewportHeight - 16));
+
+  menuElement.style.position = "fixed";
+  menuElement.style.left = "8px";
+  menuElement.style.top = "8px";
+  menuElement.style.width = `${maxWidth}px`;
+  menuElement.style.maxHeight = `${fallbackMaxHeight}px`;
+  menuElement.style.visibility = "hidden";
+
+  const measuredHeight = Math.max(0, Math.min(menuElement.scrollHeight || 0, fallbackMaxHeight));
+  const spaceAbove = Math.max(0, rect.top - 8);
+  const spaceBelow = Math.max(0, viewportHeight - rect.bottom - 8);
+  const placeAbove = spaceAbove >= Math.min(measuredHeight || fallbackMaxHeight, 240) || spaceAbove > spaceBelow;
+  const maxHeight = Math.max(120, Math.min(320, placeAbove ? spaceAbove - 4 : spaceBelow - 4, viewportHeight - 16));
+  const width = Math.max(220, Math.min(maxWidth, viewportWidth - 16));
+  const left = Math.min(Math.max(8, rect.left), Math.max(8, viewportWidth - width - 8));
+  const resolvedHeight = Math.max(0, Math.min(menuElement.scrollHeight || 0, maxHeight));
+  const top = placeAbove
+    ? Math.max(8, rect.top - resolvedHeight - 4)
+    : Math.min(Math.max(8, rect.bottom + 4), Math.max(8, viewportHeight - resolvedHeight - 8));
+
+  menuElement.style.width = `${width}px`;
+  menuElement.style.maxHeight = `${maxHeight}px`;
+  menuElement.style.left = `${left}px`;
+  menuElement.style.top = `${top}px`;
+  menuElement.style.visibility = "";
+}
+
 function esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, options = null) {
   const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
   const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
@@ -45095,6 +45140,17 @@ function esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, options = null) {
   }
   pickerElement.classList.remove("is-open");
   menuElement.hidden = true;
+  menuElement.classList.remove("is-floating");
+  menuElement.style.position = "";
+  menuElement.style.left = "";
+  menuElement.style.top = "";
+  menuElement.style.width = "";
+  menuElement.style.maxHeight = "";
+  menuElement.style.visibility = "";
+  menuElement.style.zIndex = "";
+  if (menuElement.parentElement !== pickerElement) {
+    pickerElement.appendChild(menuElement);
+  }
   triggerButton.setAttribute("aria-expanded", "false");
   if (options?.restoreFocus === true) {
     try {
@@ -45125,7 +45181,13 @@ function esmWorkspaceOpenMegSavedQueryMenu(esmWorkspaceState, options = null) {
   }
   closeAllEsmWorkspaceMegSavedQueryMenus(esmWorkspaceState);
   pickerElement.classList.add("is-open");
+  if (menuElement.parentElement !== document.body) {
+    document.body.appendChild(menuElement);
+  }
+  menuElement.classList.add("is-floating");
   menuElement.hidden = false;
+  menuElement.style.zIndex = "2147483000";
+  esmWorkspacePositionMegSavedQueryMenu(esmWorkspaceState);
   triggerButton.setAttribute("aria-expanded", "true");
   if (options?.focusLast === true) {
     esmWorkspaceFocusMegSavedQueryMenuOption(
@@ -47187,6 +47249,9 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
     }
 
     section.__underparEsmWorkspaceState = esmWorkspaceState;
+    if (esmWorkspaceState.megSavedQueryMenuElement) {
+      esmWorkspaceState.megSavedQueryMenuElement.__underparEsmWorkspaceState = esmWorkspaceState;
+    }
     wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken);
     esmWorkspaceSetTreeCollapsed(esmWorkspaceState, true);
     esmWorkspaceSetMegPanelCollapsed(esmWorkspaceState, true);
@@ -60967,6 +61032,17 @@ function bobtoolsWorkspaceBroadcastProfiles(programmer = null, options = {}) {
   void bobtoolsWorkspaceSendWorkspaceMessage("profiles-update", payload, { targetWindowId });
 }
 
+function bobtoolsWorkspaceRefreshSelection(programmer = null, targetWindowId = 0) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const selectionContext = buildBobtoolsWorkspaceSelectionContext(resolvedProgrammer);
+  bobtoolsWorkspaceBroadcastControllerState(resolvedProgrammer, selectionContext, targetWindowId);
+  bobtoolsWorkspaceBroadcastProfiles(resolvedProgrammer, {
+    targetWindowId,
+    selectedHarvestKey: selectionContext.selectedHarvestKey,
+  });
+  return selectionContext;
+}
+
 async function bobtoolsWorkspaceEnsureWorkspaceTab(options = {}) {
   ensureBobtoolsWorkspaceRuntimeListener();
   ensureBobtoolsWorkspaceTabWatcher();
@@ -61438,7 +61514,8 @@ function resolveBobtoolsProfilesHydrationContext(programmer = null) {
 async function bobtoolsWorkspaceOpenFromRestV2(programmer = null, options = {}) {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
   const hydrationContext = resolveBobtoolsProfilesHydrationContext(resolvedProgrammer);
-  if (hydrationContext?.ok) {
+  const skipHydration = options.skipHydration === true;
+  if (!skipHydration && hydrationContext?.ok) {
     await ensureRestV2ProfilesHydratedForBobtools(hydrationContext, {
       force: options.forceRefresh === true,
       source: "bobtools-open",
@@ -61449,7 +61526,7 @@ async function bobtoolsWorkspaceOpenFromRestV2(programmer = null, options = {}) 
   if (!selectionContext.programmerId) {
     throw new Error("Select a Media Company first.");
   }
-  if (!selectionContext.hasProfiles) {
+  if (!selectionContext.hasProfiles && options.allowWithoutProfiles !== true) {
     throw new Error("BOBTOOLS unlocks after at least one successful MVPD login profile is captured.");
   }
   const workspaceTab = await bobtoolsWorkspaceEnsureWorkspaceTab({
@@ -61457,11 +61534,20 @@ async function bobtoolsWorkspaceOpenFromRestV2(programmer = null, options = {}) 
     windowId: options.windowId || undefined,
   });
   const targetWindowId = Number(workspaceTab?.windowId || state.bobtoolsWorkspaceWindowId || 0);
-  bobtoolsWorkspaceBroadcastControllerState(resolvedProgrammer, selectionContext, targetWindowId);
-  bobtoolsWorkspaceBroadcastProfiles(resolvedProgrammer, {
-    targetWindowId,
-    selectedHarvestKey: selectionContext.selectedHarvestKey,
-  });
+  bobtoolsWorkspaceRefreshSelection(resolvedProgrammer, targetWindowId);
+  if (skipHydration && hydrationContext?.ok) {
+    void ensureRestV2ProfilesHydratedForBobtools(hydrationContext, {
+      force: options.forceRefresh === true,
+      source: "bobtools-open-background",
+    })
+      .then(() => {
+        refreshRestV2LoginPanels();
+        bobtoolsWorkspaceRefreshSelection(resolveSelectedProgrammer(), targetWindowId);
+      })
+      .catch(() => {
+        // Leave the live workspace open even if the background profile hydration misses.
+      });
+  }
   return workspaceTab;
 }
 
@@ -61479,23 +61565,23 @@ async function handleBobtoolsWorkspaceAction(message, sender = null) {
 
   if (action === "workspace-ready") {
     const selectedProgrammer = resolveSelectedProgrammer();
-    const hydrationContext = resolveBobtoolsProfilesHydrationContext(selectedProgrammer);
-    if (hydrationContext?.ok) {
-      await ensureRestV2ProfilesHydratedForBobtools(hydrationContext, {
-        force: message?.forceRefresh === true,
-        source: message?.forceRefresh === true ? "environment-switch-workspace-ready" : "workspace-ready",
-      });
-      refreshRestV2LoginPanels();
-    }
-    const selectionContext = buildBobtoolsWorkspaceSelectionContext(selectedProgrammer);
     if (senderWindowId > 0) {
       bobtoolsWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
     }
-    bobtoolsWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
-    bobtoolsWorkspaceBroadcastProfiles(selectedProgrammer, {
-      targetWindowId: senderWindowId,
-      selectedHarvestKey: selectionContext.selectedHarvestKey,
-    });
+    bobtoolsWorkspaceRefreshSelection(selectedProgrammer, senderWindowId);
+    const hydrationContext = resolveBobtoolsProfilesHydrationContext(selectedProgrammer);
+    if (hydrationContext?.ok) {
+      try {
+        await ensureRestV2ProfilesHydratedForBobtools(hydrationContext, {
+          force: message?.forceRefresh === true,
+          source: message?.forceRefresh === true ? "environment-switch-workspace-ready" : "workspace-ready",
+        });
+        refreshRestV2LoginPanels();
+      } catch {
+        // Keep the workspace usable even when the latest hydration pass fails.
+      }
+      bobtoolsWorkspaceRefreshSelection(resolveSelectedProgrammer(), senderWindowId);
+    }
     return { ok: true };
   }
 
@@ -61787,6 +61873,7 @@ async function handleRestV2LoginPopupClosed(tabId = 0) {
   const recordingContext =
     state.restV2RecordingContext && typeof state.restV2RecordingContext === "object" ? state.restV2RecordingContext : null;
   const wasRecording = state.restV2RecordingActive === true;
+  const previousLaunchWindowId = Number(state.restV2LastLaunchWindowId || 0);
 
   state.restV2LastLaunchTabId = 0;
   state.restV2LastLaunchWindowId = 0;
@@ -61854,6 +61941,18 @@ async function handleRestV2LoginPopupClosed(tabId = 0) {
               ? { ...harvestedProfile.profileCheck }
               : null,
         });
+      }
+
+      try {
+        await bobtoolsWorkspaceOpenFromRestV2(null, {
+          activate: true,
+          windowId: previousLaunchWindowId || undefined,
+          forceRefresh: false,
+          skipHydration: true,
+          allowWithoutProfiles: true,
+        });
+      } catch {
+        // Keep the success path alive even if the workspace could not be focused.
       }
 
       const hydrationContext = buildRestV2ContextFromHarvest(harvestedProfile) || selectionContext;
@@ -61984,6 +62083,12 @@ function ensureRestV2BobtoolsRedirectWatcher() {
     }
     state.restV2BobtoolsRedirectInFlightByTabId.add(normalizedTabId);
     void (async () => {
+      const workspaceUrl = bobtoolsWorkspaceGetWorkspaceUrl();
+      const updatedTab = await chrome.tabs.update(normalizedTabId, { url: workspaceUrl });
+      const targetWindowId = Number(updatedTab?.windowId || 0);
+      bobtoolsWorkspaceBindWorkspaceTab(updatedTab?.windowId, normalizedTabId);
+      bobtoolsWorkspaceRefreshSelection(resolveSelectedProgrammer(), targetWindowId);
+
       let hydrationContext = null;
       if (
         recordingContext?.programmerId &&
@@ -62021,17 +62126,7 @@ function ensureRestV2BobtoolsRedirectWatcher() {
         refreshRestV2LoginPanels();
         maybeRefreshRestV2InteractiveDocsForContext(recordingContext, "rest-v2-redirect-intercept");
       }
-
-      const workspaceUrl = bobtoolsWorkspaceGetWorkspaceUrl();
-      const updatedTab = await chrome.tabs.update(normalizedTabId, { url: workspaceUrl });
-      bobtoolsWorkspaceBindWorkspaceTab(updatedTab?.windowId, normalizedTabId);
-      const selectedProgrammer = resolveSelectedProgrammer();
-      const selectionContext = buildBobtoolsWorkspaceSelectionContext(selectedProgrammer);
-      bobtoolsWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, Number(updatedTab?.windowId || 0));
-      bobtoolsWorkspaceBroadcastProfiles(selectedProgrammer, {
-        targetWindowId: Number(updatedTab?.windowId || 0),
-        selectedHarvestKey: selectionContext.selectedHarvestKey,
-      });
+      bobtoolsWorkspaceRefreshSelection(resolveSelectedProgrammer(), targetWindowId);
     })()
       .catch(() => {
         // Ignore tab update race failures.
@@ -99133,6 +99228,10 @@ function registerEventHandlers() {
     if (pickerElement) {
       return;
     }
+    const menuElement = target instanceof Element ? target.closest(".esm-workspace-meg-saved-menu") : null;
+    if (menuElement) {
+      return;
+    }
     closeAllEsmWorkspaceMegSavedQueryMenus();
   });
 
@@ -99142,6 +99241,14 @@ function registerEventHandlers() {
     if (pickerElement) {
       return;
     }
+    const menuElement = target instanceof Element ? target.closest(".esm-workspace-meg-saved-menu") : null;
+    if (menuElement) {
+      return;
+    }
+    closeAllEsmWorkspaceMegSavedQueryMenus();
+  });
+
+  window.addEventListener("resize", () => {
     closeAllEsmWorkspaceMegSavedQueryMenus();
   });
 
