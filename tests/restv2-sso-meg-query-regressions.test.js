@@ -258,6 +258,19 @@ test("sidepanel saved-query menu uses an owned trigger while standalone MEG keep
   );
 });
 
+test("sidepanel saved-query menu opens above the footer trigger so it stays visible inside the ESM service shell", () => {
+  const popupCss = read("popup.css");
+
+  assert.match(
+    popupCss,
+    /\.service-esm \.esm-workspace-meg-saved-picker\.is-open \{[\s\S]*?z-index:\s*45;/m
+  );
+  assert.match(
+    popupCss,
+    /\.service-esm \.esm-workspace-meg-saved-menu \{[\s\S]*?top:\s*auto;[\s\S]*?bottom:\s*calc\(100%\s*\+\s*4px\);/m
+  );
+});
+
 test("sidepanel saved-query menu close helper hides the menu and resets the trigger state", () => {
   let restoredFocusCount = 0;
   const pickerElement = {
@@ -293,6 +306,41 @@ test("sidepanel saved-query menu close helper hides the menu and resets the trig
   assert.equal(menuElement.hidden, true);
   assert.equal(triggerButton["aria-expanded"], "false");
   assert.equal(restoredFocusCount, 1);
+});
+
+test("REST V2 post-login redirect matcher ignores trailing-slash drift on the landing page", () => {
+  const { normalizeAdobeNavigationUrl, isRestV2RedirectAtPostLoginTarget } = loadFunctions(
+    "popup.js",
+    ["normalizeAdobeNavigationUrl", "isRestV2RedirectAtPostLoginTarget"],
+    {
+      ADOBE_SP_BASE: "https://sp.auth.adobe.com",
+      URL,
+    }
+  );
+
+  assert.equal(
+    isRestV2RedirectAtPostLoginTarget(
+      "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/",
+      "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive"
+    ),
+    true
+  );
+  assert.equal(
+    isRestV2RedirectAtPostLoginTarget(
+      "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive?underpar=1",
+      normalizeAdobeNavigationUrl("https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/")
+    ),
+    true
+  );
+});
+
+test("REST V2 Bobtools redirect watcher falls back to the launch page when redirectUrl is unavailable", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(
+    popupSource,
+    /const redirectUrl = firstNonEmptyString\(\[\s*recordingContext\?\.redirectUrl,\s*state\.restV2PreviousTabUrl\s*\]\);/m
+  );
 });
 
 test("debug-flow hydration helpers are wired into the partner SSO runtime paths", () => {

@@ -149,6 +149,7 @@ test("CM health query context clears incompatible MVPD filters when channel focu
     popupHelpers.buildCmHealthDashboardQueryContext({
       programmerId: "foxsports",
       programmerName: "FOX Sports",
+      windowPreset: "day-7",
       tenantScope: "fox-tenant",
       drilldownMvpdIds: ["Comcast"],
       channels: ["FoxSportsGo"],
@@ -158,6 +159,7 @@ test("CM health query context clears incompatible MVPD filters when channel focu
   );
 
   assert.equal(queryContext.filterMode, "channel");
+  assert.equal(queryContext.windowPreset, "day-7");
   assert.deepEqual(queryContext.drilldownMvpdIds, []);
   assert.deepEqual(queryContext.mvpdIds, []);
   assert.equal(queryContext.tenantScope, "fox-tenant");

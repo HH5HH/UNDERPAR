@@ -1561,11 +1561,16 @@ test("health workspaces render full-width collapsible report sections and expose
   assert.match(esmHealthWorkspaceSource, /renderInsightCards\(report\)/);
   assert.match(esmHealthWorkspaceHtml, /<body class="spectrum spectrum--medium spectrum--dark">/);
   assert.match(esmHealthWorkspaceHtml, /class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"/);
-  assert.match(esmHealthWorkspaceHtml, /id="workspace-compare-select"/);
-  assert.match(esmHealthWorkspaceHtml, /id="workspace-granularity-select"/);
+  assert.match(esmHealthWorkspaceHtml, /id="workspace-window-select"/);
+  assert.match(esmHealthWorkspaceHtml, /id="workspace-advanced-filters"/);
+  assert.match(esmHealthWorkspaceHtml, /id="workspace-apply-advanced-dates"/);
+  assert.doesNotMatch(esmHealthWorkspaceHtml, /workspace-compare-select/);
+  assert.doesNotMatch(esmHealthWorkspaceHtml, /workspace-granularity-select/);
   assert.doesNotMatch(esmHealthWorkspaceHtml, /workspace-active-pills/);
   assert.match(esmHealthWorkspaceCss, /@import url\("underpar-env-badge\.css"\);/);
-  assert.match(esmHealthWorkspaceCss, /\.esm-health-filter-actions\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(176px,\s*228px\) minmax\(164px,\s*212px\) auto;/);
+  assert.match(esmHealthWorkspaceCss, /\.esm-health-filter-actions\s*\{[\s\S]*grid-template-columns:\s*minmax\(220px,\s*320px\) minmax\(0,\s*1fr\);/);
+  assert.match(esmHealthWorkspaceCss, /\.esm-health-advanced-panel\s*\{/);
+  assert.match(esmHealthWorkspaceCss, /\.esm-health-advanced-grid\s*\{/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-table-grid\s*\{\s*display:\s*flex;/);
   assert.match(esmHealthWorkspaceCss, /\.esm-health-section-summary\s*\{/);
   assert.match(esmHealthWorkspaceSource, /data-sparkline-chart/);
@@ -1728,7 +1733,7 @@ test("health status UI stays pill-only and premium recording controls stay icon-
   assert.match(popupCss, /\.degradation-record-toggle-btn\s*\{[\s\S]*width:\s*36px;/);
 });
 
-test("esm health rebinds to the live controller context and only persists the date window across ENV x Media Company switches", () => {
+test("esm health rebinds to the live controller context and resets to controller defaults across ENV x Media Company switches", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
   const healthWorkspaceSource = fs.readFileSync(path.join(ROOT, "health-workspace.js"), "utf8");
@@ -1754,13 +1759,12 @@ test("esm health rebinds to the live controller context and only persists the da
   assert.match(runSource, /workspaceContextKey,/);
 
   assert.match(esmHealthWorkspaceSource, /function doesWorkspaceEventMatchCurrentContext\(payload = \{\}\)/);
-  assert.match(applyControllerSource, /const preservedDates = controllerChanged \? resolveDateInputRange\(state\.query\.start,\s*state\.query\.end\) : \{ start: "", end: "" \};/);
   assert.match(applyControllerSource, /const runtimeContextChanged =/);
   assert.match(applyControllerSource, /const readinessActivated = !previousEsmHealthReady && payload\?\.esmHealthReady === true;/);
   assert.match(applyControllerSource, /const shouldAutoRefreshForControllerUpdate =/);
   assert.match(applyControllerSource, /if \(controllerChanged\) \{/);
-  assert.match(applyControllerSource, /state\.query\.start = preservedDates\.start;/);
-  assert.match(applyControllerSource, /state\.query\.end = preservedDates\.end;/);
+  assert.match(applyControllerSource, /resetQueryToControllerDefaults\(\);/);
+  assert.doesNotMatch(applyControllerSource, /preservedDates/);
   assert.match(applyControllerSource, /state\.loading = false;/);
   assert.match(applyControllerSource, /if \(shouldAutoRefreshForControllerUpdate\) \{\s*void runDashboard\("Refreshing ESM HEALTH dashboard for the selected UnderPAR context\.\.\."\);/);
   assert.match(handleWorkspaceEventSource, /if \(\(event === "report-start" \|\| event === "report-result"\) && !doesWorkspaceEventMatchCurrentContext\(payload\)\) \{/);

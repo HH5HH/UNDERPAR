@@ -80,6 +80,44 @@ function loadHarpoWorkspaceRecordBuilder() {
   return context.module.exports.buildHarpoWorkspaceSessionRecord;
 }
 
+function loadHarpoSelectionAutoStopHelper() {
+  const source = fs.readFileSync(POPUP_PATH, "utf8");
+  const statusCalls = [];
+  let stopCalls = 0;
+  const script = [
+    extractFunctionSource(source, "maybeAutoStopHarpoRecordingForSelectionChange"),
+    "module.exports = { maybeAutoStopHarpoRecordingForSelectionChange };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    state: {
+      harpoRecordingStarting: false,
+      harpoRecordingStopping: false,
+      harpoRecordingActive: false,
+      harpoDebugFlowId: "",
+      harpoRecordingContext: null,
+    },
+    setStatus(message, tone) {
+      statusCalls.push({ message, tone });
+    },
+    async stopHarpoRecording() {
+      stopCalls += 1;
+    },
+  };
+  vm.runInNewContext(script, context, { filename: POPUP_PATH });
+  return {
+    maybeAutoStopHarpoRecordingForSelectionChange: context.module.exports.maybeAutoStopHarpoRecordingForSelectionChange,
+    context,
+    getStatusCalls() {
+      return statusCalls.slice();
+    },
+    getStopCalls() {
+      return stopCalls;
+    },
+  };
+}
+
 function loadHarpoCountHelper() {
   const source = fs.readFileSync(POPUP_PATH, "utf8");
   const script = [
@@ -124,17 +162,45 @@ function loadHarpoCountHelper() {
       const text = typeof value === "string" ? value : String(value ?? "");
       return text.length <= limit ? text : text.slice(0, limit);
     }`,
+    `function uniquePreserveOrder(values = []) {
+      const items = Array.isArray(values) ? values : [values];
+      const seen = new Set();
+      const output = [];
+      for (const value of items) {
+        const normalized = String(value || "").trim();
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        output.push(normalized);
+      }
+      return output;
+    }`,
+    `const UNDERPAR_HARPO_SECOND_LEVEL_TLDS = new Set(["ac.uk","co.uk","gov.uk","ltd.uk","me.uk","net.uk","org.uk","plc.uk","sch.uk","co.jp","com.au","net.au","org.au","com.br","com.mx","com.tr","co.nz","com.sg"]);`,
+    `const UNDERPAR_HARPO_PASS_HOST_RE = /(^|\\.)auth(?:-staging)?\\.adobe\\.com$/i;`,
+    `const UNDERPAR_HARPO_ADOBE_SUPPORT_HOSTS = [/(^|\\.)adobedtm\\.com$/i];`,
     extractFunctionSource(source, "getUnderparHarEventUrl"),
     extractFunctionSource(source, "mergeUnderparHarHeaders"),
     extractFunctionSource(source, "getUnderparHarHeaderValueFromObject"),
     extractFunctionSource(source, "getUnderparHarPathExtension"),
     extractFunctionSource(source, "isUnderparHarPhysicalAssetTraffic"),
     extractFunctionSource(source, "serializeUnderparHarRequestBody"),
+    extractFunctionSource(source, "getUnderparHarpoScopeHostname"),
+    extractFunctionSource(source, "getUnderparHarpoScopeDomainBucket"),
+    extractFunctionSource(source, "isUnderparHarpoAdobeHost"),
+    extractFunctionSource(source, "isUnderparHarpoAdobeSupportHost"),
+    extractFunctionSource(source, "isUnderparHarpoAdobeTraffic"),
+    extractFunctionSource(source, "isUnderparHarpoPassSamlAssertionConsumerUrl"),
+    extractFunctionSource(source, "matchesUnderparHarpoScopeDomains"),
+    extractFunctionSource(source, "collectUnderparHarpoScopeDomains"),
+    extractFunctionSource(source, "collectUnderparHarpoSamlMvpdDomains"),
+    extractFunctionSource(source, "resolveUnderparHarpoMvpdDomains"),
+    extractFunctionSource(source, "shouldRetainHarpoRecordedEntry"),
+    extractFunctionSource(source, "filterHarpoScopedHarEntries"),
     extractFunctionSource(source, "buildUnderparWebRequestHarRecords"),
     extractFunctionSource(source, "buildUnderparTabNetworkHarRecords"),
     extractFunctionSource(source, "mergeUnderparRecordedHarRecord"),
     extractFunctionSource(source, "mergeUnderparRecordedHarRecords"),
     extractFunctionSource(source, "buildWebRequestHarEntries"),
+    extractFunctionSource(source, "buildHarpoScopedCaptureResult"),
     extractFunctionSource(source, "shouldExcludeInternalExtensionHarEntry"),
     extractFunctionSource(source, "countHarpoCapturedCalls"),
     "module.exports = { countHarpoCapturedCalls };",
@@ -165,6 +231,7 @@ test("HARPO workspace session record keeps UnderPAR dark defaults and safe domai
       requestorName: "Turner East",
       safeDomains: ["turner.com", "adobe.com", "turner.com"],
       reproDomains: ["turner.com", "api.turner.com", "turner.com"],
+      mvpdDomains: ["dish.com", "auth.dish.com", "dish.com"],
       expectedMvpds: ["Dish", "Dish"],
     }
   );
@@ -172,12 +239,62 @@ test("HARPO workspace session record keeps UnderPAR dark defaults and safe domai
   assert.deepEqual(Array.from(record.safeDomains), ["adobe.com", "turner.com"]);
   assert.deepEqual(Array.from(record.programmerDomains), ["adobe.com", "turner.com"]);
   assert.deepEqual(Array.from(record.reproDomains), ["turner.com", "api.turner.com"]);
+  assert.deepEqual(Array.from(record.mvpdDomains), ["dish.com", "auth.dish.com"]);
   assert.equal(record.theme, "underpar-dark");
   assert.equal(record.environmentKey, "stage");
   assert.equal(record.environmentLabel, "Stage");
   assert.equal(record.source, "recording");
   assert.equal(record.fileName, "capture.har");
   assert.ok(typeof record.createdAt === "string" && record.createdAt.includes("T"));
+});
+
+test("HARPO auto-stop helper stops active recording when RequestorId changes", async () => {
+  const { maybeAutoStopHarpoRecordingForSelectionChange, context, getStatusCalls, getStopCalls } = loadHarpoSelectionAutoStopHelper();
+  context.state.harpoRecordingActive = true;
+  context.state.harpoDebugFlowId = "flow-harpo";
+  context.state.harpoRecordingContext = {
+    requestorId: "old-requestor",
+  };
+
+  const result = await maybeAutoStopHarpoRecordingForSelectionChange(
+    {
+      requestorId: "new-requestor",
+    },
+    {
+      reason: "Requestor change",
+    }
+  );
+
+  assert.equal(result, true);
+  assert.equal(getStopCalls(), 1);
+  assert.deepEqual(getStatusCalls(), [
+    {
+      message: "Detected Requestor change while HARPO recording was active. Auto-stopping previous capture...",
+      tone: "info",
+    },
+  ]);
+});
+
+test("HARPO auto-stop helper ignores unchanged RequestorId", async () => {
+  const { maybeAutoStopHarpoRecordingForSelectionChange, context, getStatusCalls, getStopCalls } = loadHarpoSelectionAutoStopHelper();
+  context.state.harpoRecordingActive = true;
+  context.state.harpoDebugFlowId = "flow-harpo";
+  context.state.harpoRecordingContext = {
+    requestorId: "same-requestor",
+  };
+
+  const result = await maybeAutoStopHarpoRecordingForSelectionChange(
+    {
+      requestorId: "same-requestor",
+    },
+    {
+      reason: "Requestor change",
+    }
+  );
+
+  assert.equal(result, false);
+  assert.equal(getStopCalls(), 0);
+  assert.deepEqual(getStatusCalls(), []);
 });
 
 test("HARPO captured call counter ignores extension URLs and counts merged requests", () => {
@@ -236,4 +353,162 @@ test("HARPO captured call counter ignores extension URLs and counts merged reque
   });
 
   assert.equal(count, 1);
+});
+
+test("HARPO captured call counter drops unrelated off-scope domains", () => {
+  const countHarpoCapturedCalls = loadHarpoCountHelper();
+  const count = countHarpoCapturedCalls(
+    {
+      events: [
+        {
+          source: "web-request",
+          phase: "onBeforeRequest",
+          tabId: 55,
+          requestId: "wr-pass",
+          method: "GET",
+          url: "https://api.auth.adobe.com/api/v2/thetennischannel/configuration",
+          type: "xmlhttprequest",
+          timestampMs: 1000,
+        },
+        {
+          source: "web-request",
+          phase: "onCompleted",
+          tabId: 55,
+          requestId: "wr-pass",
+          method: "GET",
+          url: "https://api.auth.adobe.com/api/v2/thetennischannel/configuration",
+          statusCode: 200,
+          statusLine: "HTTP/1.1 200 OK",
+          timestampMs: 1010,
+          responseHeaders: {
+            "content-type": "application/json",
+          },
+        },
+        {
+          source: "web-request",
+          phase: "onBeforeRequest",
+          tabId: 55,
+          requestId: "wr-offscope",
+          method: "GET",
+          url: "https://facebook.com/tracker",
+          type: "xmlhttprequest",
+          timestampMs: 1020,
+        },
+        {
+          source: "web-request",
+          phase: "onCompleted",
+          tabId: 55,
+          requestId: "wr-offscope",
+          method: "GET",
+          url: "https://facebook.com/tracker",
+          statusCode: 200,
+          statusLine: "HTTP/1.1 200 OK",
+          timestampMs: 1030,
+          responseHeaders: {
+            "content-type": "application/json",
+          },
+        },
+      ],
+    },
+    {
+      serviceType: "harpo",
+      safeDomains: ["adobe.com", "thetennischannel.com"],
+      reproDomains: ["thetennischannel.com"],
+    }
+  );
+
+  assert.equal(count, 1);
+});
+
+test("HARPO captured call counter keeps SAML-inferred MVPD traffic", () => {
+  const countHarpoCapturedCalls = loadHarpoCountHelper();
+  const count = countHarpoCapturedCalls(
+    {
+      events: [
+        {
+          source: "web-request",
+          phase: "onBeforeRequest",
+          tabId: 77,
+          requestId: "wr-mvpd",
+          method: "GET",
+          url: "https://auth.spectrum.net/login",
+          type: "main_frame",
+          timestampMs: 1000,
+        },
+        {
+          source: "web-request",
+          phase: "onCompleted",
+          tabId: 77,
+          requestId: "wr-mvpd",
+          method: "GET",
+          url: "https://auth.spectrum.net/login",
+          statusCode: 200,
+          statusLine: "HTTP/1.1 200 OK",
+          timestampMs: 1010,
+          responseHeaders: {
+            "content-type": "text/html",
+          },
+        },
+        {
+          source: "web-request",
+          phase: "onBeforeSendHeaders",
+          tabId: 77,
+          requestId: "wr-saml",
+          method: "POST",
+          url: "https://sp.auth.adobe.com/sp/saml/SAMLAssertionConsumer",
+          type: "xmlhttprequest",
+          timestampMs: 1020,
+          requestHeaders: {
+            referer: "https://auth.spectrum.net/login",
+          },
+        },
+        {
+          source: "web-request",
+          phase: "onHeadersReceived",
+          tabId: 77,
+          requestId: "wr-saml",
+          method: "POST",
+          url: "https://sp.auth.adobe.com/sp/saml/SAMLAssertionConsumer",
+          statusCode: 302,
+          statusLine: "HTTP/1.1 302 Found",
+          timestampMs: 1030,
+          responseHeaders: {
+            "content-type": "text/html",
+            "access-control-allow-origin": "https://auth.spectrum.net",
+          },
+        },
+        {
+          source: "web-request",
+          phase: "onBeforeRequest",
+          tabId: 77,
+          requestId: "wr-offscope",
+          method: "GET",
+          url: "https://facebook.com/tracker",
+          type: "xmlhttprequest",
+          timestampMs: 1040,
+        },
+        {
+          source: "web-request",
+          phase: "onCompleted",
+          tabId: 77,
+          requestId: "wr-offscope",
+          method: "GET",
+          url: "https://facebook.com/tracker",
+          statusCode: 200,
+          statusLine: "HTTP/1.1 200 OK",
+          timestampMs: 1050,
+          responseHeaders: {
+            "content-type": "application/json",
+          },
+        },
+      ],
+    },
+    {
+      serviceType: "harpo",
+      safeDomains: ["adobe.com", "thetennischannel.com"],
+      reproDomains: ["thetennischannel.com"],
+    }
+  );
+
+  assert.equal(count, 2);
 });

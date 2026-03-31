@@ -1685,6 +1685,8 @@ function isPassConsoleHost(hostname) {
 function isAdobeHost(hostname) {
   return hostname === "adobe.com" ||
     hostname.endsWith(".adobe.com") ||
+    hostname === "adobe.net" ||
+    hostname.endsWith(".adobe.net") ||
     hostname.endsWith(".services.adobe.com") ||
     hostname.endsWith(".adobe.io") ||
     hostname.endsWith(".adobelogin.com");

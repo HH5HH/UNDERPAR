@@ -4344,6 +4344,11 @@ select:disabled {
   position: relative;
   width: 100%;
   min-width: 0;
+  z-index: 0;
+}
+
+.service-esm .esm-workspace-meg-saved-picker.is-open {
+  z-index: 45;
 }
 
 .service-esm .esm-workspace-meg-saved-trigger {
@@ -4388,7 +4393,8 @@ select:disabled {
 
 .service-esm .esm-workspace-meg-saved-menu {
   position: absolute;
-  top: calc(100% + 4px);
+  top: auto;
+  bottom: calc(100% + 4px);
   left: 0;
   right: 0;
   z-index: 40;

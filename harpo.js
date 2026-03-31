@@ -2445,6 +2445,11 @@ function isSafeDomainHost(hostname) {
   });
 }
 
+function shouldRetainHarpoClassification(classification = null) {
+  const domain = String(classification?.domain || "").trim().toLowerCase();
+  return domain === "pass" || domain === "ims" || domain === "programmer" || domain === "adobe" || domain === "mvpd";
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let harData            = null;
@@ -2604,7 +2609,7 @@ function processHar(har) {
       if (mvpdGateOpen && classification?.domain === "programmer" && String(entry?._resourceType || "").toLowerCase() === "document") {
         mvpdGateOpen = false;
       }
-      if (!classification) return null;
+      if (!classification || !shouldRetainHarpoClassification(classification)) return null;
       return { idx, entry, classification, hostname, domainBucket, originalIndex, startedMs, sequence: idx + 1 };
     })
     .filter(Boolean);

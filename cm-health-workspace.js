@@ -29,6 +29,7 @@ const state = {
   query: {
     initialized: false,
     controllerSelectionKey: "",
+    windowPreset: "hr-24",
     start: "",
     end: "",
     granularity: "hour",
@@ -49,10 +50,11 @@ const els = {
   rerunAllButton: document.getElementById("workspace-rerun-all"),
   clearButton: document.getElementById("workspace-clear-all"),
   filterForm: document.getElementById("workspace-filter-form"),
+  windowSelect: document.getElementById("workspace-window-select"),
+  advancedFilters: document.getElementById("workspace-advanced-filters"),
   startDateInput: document.getElementById("workspace-start-date"),
   endDateInput: document.getElementById("workspace-end-date"),
-  granularitySelect: document.getElementById("workspace-granularity-select"),
-  runButton: document.getElementById("workspace-run-dashboard"),
+  applyAdvancedButton: document.getElementById("workspace-apply-advanced-dates"),
   resetButton: document.getElementById("workspace-reset-filters"),
   cardsHost: document.getElementById("workspace-cards"),
   pageEnvBadge: document.getElementById("page-env-badge"),
@@ -153,6 +155,33 @@ const CM_HEALTH_BREAKDOWN_TABLES = Object.freeze([
   },
 ]);
 
+const CM_HEALTH_SMART_WINDOW_PRESETS = Object.freeze({
+  "hr-24": Object.freeze({
+    key: "hr-24",
+    label: "HR over HR",
+    description: "Last 24 Hours",
+    granularity: "hour",
+  }),
+  "day-7": Object.freeze({
+    key: "day-7",
+    label: "DAY over DAY",
+    description: "Last 7 Days",
+    granularity: "day",
+  }),
+  "month-4": Object.freeze({
+    key: "month-4",
+    label: "MO over MO",
+    description: "Last 4 Months",
+    granularity: "month",
+  }),
+  "year-ytd": Object.freeze({
+    key: "year-ytd",
+    label: "YR over YR",
+    description: "Year to Date",
+    granularity: "month",
+  }),
+});
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -189,9 +218,56 @@ function normalizeGranularity(value = "") {
   return normalized === "hour" || normalized === "month" ? normalized : "day";
 }
 
+function normalizeSmartWindowPreset(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(CM_HEALTH_SMART_WINDOW_PRESETS, normalized) ? normalized : "hr-24";
+}
+
+function getSmartWindowPresetDefinition(value = "") {
+  return CM_HEALTH_SMART_WINDOW_PRESETS[normalizeSmartWindowPreset(value)] || CM_HEALTH_SMART_WINDOW_PRESETS["hr-24"];
+}
+
 function normalizeIsoDateInput(value = "") {
   const normalized = String(value || "").trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
+}
+
+function getPacificDateParts(timestamp = Date.now()) {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = formatter.formatToParts(new Date(Number(timestamp || Date.now())));
+    const record = {};
+    parts.forEach((part) => {
+      if (part?.type && part.type !== "literal") {
+        record[part.type] = String(part.value || "").trim();
+      }
+    });
+    if (record.year && record.month && record.day) {
+      return {
+        year: record.year,
+        month: record.month,
+        day: record.day,
+        iso: `${record.year}-${record.month}-${record.day}`,
+      };
+    }
+  } catch {
+    // Fall through to UTC fallback.
+  }
+  const fallback = new Date(Number(timestamp || Date.now()));
+  const year = String(fallback.getUTCFullYear());
+  const month = String(fallback.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(fallback.getUTCDate()).padStart(2, "0");
+  return {
+    year,
+    month,
+    day,
+    iso: `${year}-${month}-${day}`,
+  };
 }
 
 function resolveDateInputRange(startValue = "", endValue = "") {
@@ -206,6 +282,100 @@ function resolveDateInputRange(startValue = "", endValue = "") {
     start,
     end,
   };
+}
+
+function shiftIsoDateInputByDays(value = "", dayDelta = 0) {
+  const normalized = normalizeIsoDateInput(value);
+  const delta = Number(dayDelta || 0);
+  if (!normalized || !Number.isFinite(delta) || delta === 0) {
+    return normalized;
+  }
+  const parsed = new Date(`${normalized}T12:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) {
+    return normalized;
+  }
+  parsed.setUTCDate(parsed.getUTCDate() + delta);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function shiftIsoDateInputByMonths(value = "", monthDelta = 0) {
+  const normalized = normalizeIsoDateInput(value);
+  const delta = Number(monthDelta || 0);
+  if (!normalized || !Number.isFinite(delta) || delta === 0) {
+    return normalized;
+  }
+  const [yearText = "", monthText = "", dayText = ""] = normalized.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  const day = Number(dayText);
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || !Number.isFinite(day)) {
+    return normalized;
+  }
+  const targetMonthDate = new Date(Date.UTC(year, monthIndex + delta, 1));
+  if (!Number.isFinite(targetMonthDate.getTime())) {
+    return normalized;
+  }
+  const targetYear = targetMonthDate.getUTCFullYear();
+  const targetMonthIndex = targetMonthDate.getUTCMonth();
+  const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, targetMonthIndex + 1, 0)).getUTCDate();
+  const safeDay = Math.max(1, Math.min(day, lastDayOfTargetMonth));
+  return new Date(Date.UTC(targetYear, targetMonthIndex, safeDay)).toISOString().slice(0, 10);
+}
+
+function buildSmartWindowDateRange(preset = "", nowMs = Date.now()) {
+  const definition = getSmartWindowPresetDefinition(preset);
+  const pacific = getPacificDateParts(nowMs);
+  const monthStart = `${pacific.year}-${pacific.month}-01`;
+  let start = pacific.iso;
+  if (definition.key === "day-7") {
+    start = shiftIsoDateInputByDays(pacific.iso, -6) || pacific.iso;
+  } else if (definition.key === "month-4") {
+    start = shiftIsoDateInputByMonths(monthStart, -3) || monthStart;
+  } else if (definition.key === "year-ytd") {
+    start = `${pacific.year}-01-01`;
+  } else {
+    start = shiftIsoDateInputByDays(pacific.iso, -1) || pacific.iso;
+  }
+  return {
+    start,
+    end: pacific.iso,
+    granularity: normalizeGranularity(definition.granularity),
+  };
+}
+
+function applySmartWindowPresetToQuery(preset = "", options = {}) {
+  const normalizedPreset = normalizeSmartWindowPreset(preset);
+  const nextRange = buildSmartWindowDateRange(normalizedPreset, options?.nowMs);
+  state.query.windowPreset = normalizedPreset;
+  state.query.granularity = nextRange.granularity;
+  if (options?.preserveDates === true) {
+    return nextRange;
+  }
+  state.query.start = nextRange.start;
+  state.query.end = nextRange.end;
+  return nextRange;
+}
+
+function hasActiveWorkspaceFilters() {
+  if (!state.query.initialized) {
+    return false;
+  }
+  const currentDefaultRange = buildSmartWindowDateRange(state.query.windowPreset);
+  const hasExplicitDates = Boolean(String(state.query.start || "").trim() && String(state.query.end || "").trim());
+  const hasDateOverride =
+    hasExplicitDates &&
+    (String(state.query.start || "").trim() !== currentDefaultRange.start || String(state.query.end || "").trim() !== currentDefaultRange.end);
+  const hasMvpdDrilldown = state.query.drilldownMvpdIds.length > 0;
+  const defaultPlatforms = normalizeStringList(state.platforms);
+  const defaultChannels = normalizeStringList(state.channels);
+  const hasPlatformOverride = normalizeStringList(state.query.platforms).join("|") !== defaultPlatforms.join("|");
+  const hasChannelOverride = normalizeStringList(state.query.channels).join("|") !== defaultChannels.join("|");
+  return hasDateOverride || hasMvpdDrilldown || hasPlatformOverride || hasChannelOverride;
+}
+
+function getSelectedWindowSummary() {
+  const definition = getSmartWindowPresetDefinition(state.query.windowPreset);
+  return `${definition.label} | ${definition.description}`;
 }
 
 function formatDateTime(value) {
@@ -414,8 +584,20 @@ function getFilterLabel() {
   const environmentLabel = String(state.environmentLabel || state.environmentKey || "N/A").trim();
   const tenantLabel = String(state.tenantScope || "").trim() || "Pending";
   const requestorLabel = String(state.requestorHint || "").trim() || "None";
-  const mvpdLabel = getEffectiveMvpdIds().join(", ") || "All MVPDs";
-  return `Env: ${environmentLabel} | Tenant: ${tenantLabel} | Requestor Hint: ${requestorLabel} | MVPD: ${mvpdLabel} | ${state.timezoneLabel || "PST effective"}`;
+  const scopeLabel = state.query.channels.join(", ")
+    ? `Channel: ${state.query.channels.join(", ")}`
+    : state.query.platforms.join(", ")
+      ? `Platform: ${state.query.platforms.join(", ")}`
+      : `MVPD: ${getEffectiveMvpdIds().join(", ") || "All MVPDs"}`;
+  return [
+    `Env: ${environmentLabel}`,
+    `Window: ${getSelectedWindowSummary()}`,
+    `Range: ${String(state.query.start || "").trim() || "?"} -> ${String(state.query.end || "").trim() || "?"}`,
+    `Tenant: ${tenantLabel}`,
+    `Requestor Hint: ${requestorLabel}`,
+    scopeLabel,
+    state.timezoneLabel || "PST effective",
+  ].join(" | ");
 }
 
 function setStatus(message = "", type = "info") {
@@ -432,12 +614,12 @@ function hasRenderableReport() {
   return Boolean(state.report);
 }
 
-function syncGranularitySelect() {
-  if (!els.granularitySelect) {
+function syncWindowSelect() {
+  if (!els.windowSelect) {
     return;
   }
-  els.granularitySelect.value = normalizeGranularity(state.query.granularity);
-  els.granularitySelect.disabled = state.loading || !state.cmHealthReady;
+  els.windowSelect.value = normalizeSmartWindowPreset(state.query.windowPreset);
+  els.windowSelect.disabled = state.loading || !state.cmHealthReady;
 }
 
 function syncActionButtonsDisabled() {
@@ -452,11 +634,13 @@ function syncActionButtonsDisabled() {
   if (els.clearButton) {
     els.clearButton.disabled = state.loading || !hasRenderableReport();
   }
-  if (els.runButton) {
-    els.runButton.disabled = state.loading || !state.cmHealthReady || !hasValidDates;
+  if (els.applyAdvancedButton) {
+    els.applyAdvancedButton.disabled = state.loading || !state.cmHealthReady || !hasValidDates;
   }
   if (els.resetButton) {
-    els.resetButton.disabled = state.loading || !state.query.initialized;
+    const shouldShowReset = hasActiveWorkspaceFilters();
+    els.resetButton.hidden = !shouldShowReset;
+    els.resetButton.disabled = state.loading || !state.query.initialized || !shouldShowReset;
   }
   if (els.startDateInput) {
     els.startDateInput.disabled = state.loading || !state.cmHealthReady;
@@ -464,12 +648,9 @@ function syncActionButtonsDisabled() {
   if (els.endDateInput) {
     els.endDateInput.disabled = state.loading || !state.cmHealthReady;
   }
-  if (els.granularitySelect) {
-    els.granularitySelect.disabled = state.loading || !state.cmHealthReady;
-  }
   document.body.classList.toggle("net-busy", state.loading);
   document.body.setAttribute("aria-busy", state.loading ? "true" : "false");
-  syncGranularitySelect();
+  syncWindowSelect();
 }
 
 function renderWorkspaceEnvironmentBadge() {
@@ -505,7 +686,7 @@ function getContextCaption() {
     .filter(Boolean)
     .slice(0, 2)
     .join(", ");
-  return `Bound to tenant ${state.tenantScope || "unknown"}. RequestorId stays a correlation hint only because CMU usage reports are tenant-native.${tenantNames ? ` Matched tenants: ${tenantNames}.` : ""}`;
+  return `Bound to tenant ${state.tenantScope || "unknown"}. The default view is the last 24 hours, smart windows stay pinned to now, and RequestorId remains a correlation hint because CMU usage reports are tenant-native.${tenantNames ? ` Matched tenants: ${tenantNames}.` : ""}`;
 }
 
 function updateControllerBanner() {
@@ -526,24 +707,26 @@ function resetQueryToControllerDefaults() {
   state.query = {
     initialized: true,
     controllerSelectionKey: String(state.selectionKey || "").trim(),
-    start: String(state.defaultStart || "").trim(),
-    end: String(state.defaultEnd || "").trim(),
-    granularity: normalizeGranularity(state.defaultGranularity),
+    windowPreset: "hr-24",
+    start: "",
+    end: "",
+    granularity: "hour",
     baseMvpdIds: normalizeStringList(state.mvpdIds),
     drilldownMvpdIds: [],
     platforms: normalizeStringList(state.platforms),
     channels: normalizeStringList(state.channels),
   };
+  applySmartWindowPresetToQuery(state.query.windowPreset);
 }
 
 function syncFilterControlsFromState() {
+  syncWindowSelect();
   if (els.startDateInput) {
     els.startDateInput.value = String(state.query.start || "").trim();
   }
   if (els.endDateInput) {
     els.endDateInput.value = String(state.query.end || "").trim();
   }
-  syncGranularitySelect();
   syncActionButtonsDisabled();
 }
 
@@ -571,7 +754,6 @@ function applyControllerState(payload = {}) {
   const hadLiveControllerContext =
     Boolean(previousControllerSelectionKey || previousProgrammerId || previousEnvironmentKey || previousWorkspaceContextKey) ||
     previousRequestToken > 0;
-  const preservedDates = controllerChanged ? resolveDateInputRange(state.query.start, state.query.end) : { start: "", end: "" };
   const currentReportSelectionKey = getReportControllerSelectionKey(state.report);
   const shouldClearStaleReport = controllerChanged && currentReportSelectionKey && currentReportSelectionKey !== nextSelectionKey;
   const shouldAutoRefreshForControllerUpdate =
@@ -605,12 +787,6 @@ function applyControllerState(payload = {}) {
 
   if (controllerChanged) {
     resetQueryToControllerDefaults();
-    if (preservedDates.start) {
-      state.query.start = preservedDates.start;
-    }
-    if (preservedDates.end) {
-      state.query.end = preservedDates.end;
-    }
     state.loading = false;
   } else if (runtimeContextChanged) {
     state.loading = false;
@@ -632,6 +808,7 @@ function buildQueryContextPayload() {
     programmerName: String(state.programmerName || "").trim(),
     tenantScope: String(state.tenantScope || "").trim(),
     requestorHint: String(state.requestorHint || "").trim(),
+    windowPreset: normalizeSmartWindowPreset(state.query.windowPreset),
     drilldownMvpdIds: getEffectiveMvpdIds(),
     platforms: state.query.platforms.slice(),
     channels: state.query.channels.slice(),
@@ -692,6 +869,7 @@ function syncQueryFromReport(payload = {}) {
   state.query = {
     initialized: true,
     controllerSelectionKey: String(state.selectionKey || "").trim(),
+    windowPreset: normalizeSmartWindowPreset(queryContext?.windowPreset || state.query.windowPreset),
     start: String(queryContext?.start || state.defaultStart || "").trim(),
     end: String(queryContext?.end || state.defaultEnd || "").trim(),
     granularity: normalizeGranularity(queryContext?.granularity || state.defaultGranularity),
@@ -1196,20 +1374,21 @@ function renderReport() {
   const latestBackbone = backboneSeries.length > 0 ? backboneSeries[backboneSeries.length - 1] : null;
   const checkedAtLabel = formatDateTime(report?.checkedAt);
   const sectionSummary = `${Number(report?.loadedSections || 0)}/${Number(report?.totalSections || 0)} sections loaded`;
-  const introBits = [
+  const windowSummary = getSmartWindowPresetDefinition(report?.queryContext?.windowPreset || state.query.windowPreset);
+  const introCopy = [
     `Tenant ${String(report?.queryContext?.tenantScope || state.tenantScope || "?").trim()}`,
     `${String(report?.queryContext?.start || "").trim() || "?"} -> ${String(report?.queryContext?.end || "").trim() || "?"}`,
     `Requestor Hint ${String(report?.queryContext?.requestorHint || state.requestorHint || "None").trim() || "None"}`,
     String(report?.queryContext?.timezoneLabel || state.timezoneLabel || "PST effective").trim(),
-  ];
+  ].join(" | ");
 
   els.cardsHost.innerHTML = `
     <article class="rest-report-card">
       <header class="rest-report-head">
         <p class="rest-report-title">CM HEALTH Overview</p>
-        <p class="rest-report-meta"><strong>Checked:</strong> ${escapeHtml(checkedAtLabel)} | <strong>Range:</strong> ${escapeHtml(
-          introBits.join(" | ")
-        )} | <strong>Status:</strong> ${escapeHtml(sectionSummary)}</p>
+        <p class="rest-report-meta"><strong>Checked:</strong> ${escapeHtml(checkedAtLabel)} | <strong>Window:</strong> ${escapeHtml(
+          `${windowSummary.label} | ${windowSummary.description}`
+        )} | <strong>Range:</strong> ${escapeHtml(introCopy)} | <strong>Status:</strong> ${escapeHtml(sectionSummary)}</p>
         <p class="esm-health-overview-copy">${escapeHtml(
           report?.partial === true
             ? "Dashboard loaded with partial data. Sections with failures or CMU dimensional limits are flagged below."
@@ -1468,6 +1647,9 @@ async function runDashboard(statusMessage = "Running CM HEALTH dashboard...") {
     setStatus("No CM-enabled context is selected in UnderPAR.", "error");
     return;
   }
+  if (!String(state.query.start || "").trim() || !String(state.query.end || "").trim()) {
+    applySmartWindowPresetToQuery(state.query.windowPreset);
+  }
   state.loading = true;
   syncActionButtonsDisabled();
   setStatus(statusMessage);
@@ -1578,33 +1760,47 @@ function registerEventHandlers() {
   if (els.filterForm) {
     els.filterForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      state.query.start = String(els.startDateInput?.value || "").trim();
-      state.query.end = String(els.endDateInput?.value || "").trim();
-      state.query.granularity = normalizeGranularity(String(els.granularitySelect?.value || state.query.granularity || ""));
-      void runDashboard();
+      const dateRange = resolveDateInputRange(els.startDateInput?.value, els.endDateInput?.value);
+      if (!dateRange.start || !dateRange.end) {
+        applySmartWindowPresetToQuery(state.query.windowPreset);
+      } else {
+        state.query.start = dateRange.start;
+        state.query.end = dateRange.end;
+      }
+      syncFilterControlsFromState();
+      void runDashboard("Applying advanced CM HEALTH dates...");
+    });
+  }
+  if (els.windowSelect) {
+    els.windowSelect.addEventListener("change", () => {
+      applySmartWindowPresetToQuery(String(els.windowSelect?.value || ""));
+      syncFilterControlsFromState();
+      void runDashboard(`Refreshing CM HEALTH dashboard for ${getSelectedWindowSummary()}...`);
     });
   }
   if (els.startDateInput) {
     els.startDateInput.addEventListener("change", () => {
-      state.query.start = String(els.startDateInput?.value || "").trim();
+      const dateRange = resolveDateInputRange(els.startDateInput?.value, state.query.end);
+      state.query.start = String(dateRange.start || els.startDateInput?.value || "").trim();
+      if (dateRange.end) {
+        state.query.end = dateRange.end;
+      }
       syncFilterControlsFromState();
     });
   }
   if (els.endDateInput) {
     els.endDateInput.addEventListener("change", () => {
-      state.query.end = String(els.endDateInput?.value || "").trim();
+      const dateRange = resolveDateInputRange(state.query.start, els.endDateInput?.value);
+      if (dateRange.start) {
+        state.query.start = dateRange.start;
+      }
+      state.query.end = String(dateRange.end || els.endDateInput?.value || "").trim();
       syncFilterControlsFromState();
     });
   }
   if (els.resetButton) {
     els.resetButton.addEventListener("click", () => {
       void resetFilters();
-    });
-  }
-  if (els.granularitySelect) {
-    els.granularitySelect.addEventListener("change", () => {
-      state.query.granularity = normalizeGranularity(String(els.granularitySelect?.value || ""));
-      syncFilterControlsFromState();
     });
   }
   if (els.cardsHost) {

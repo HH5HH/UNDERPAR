@@ -25306,6 +25306,7 @@ function buildCmHealthDashboardQueryContext(rawContext = null) {
     mediaCompany: programmerId,
     environmentKey,
     environmentLabel,
+    windowPreset: String(context.windowPreset || "hr-24").trim() || "hr-24",
     tenantScope,
     drilldownMvpdIds,
     mvpdIds: drilldownMvpdIds.slice(),
@@ -25338,6 +25339,7 @@ function rebaseCmHealthDashboardQueryContextForCurrentSelection(rawContext = nul
     String(currentSelectionContext?.controllerSelectionKey || "").trim();
   const rebasedContext = {
     ...currentSelectionContext,
+    windowPreset: String(sourceContext?.windowPreset || currentSelectionContext?.windowPreset || "hr-24").trim() || "hr-24",
     start: String(sourceContext?.start || currentSelectionContext?.start || "").trim(),
     end: String(sourceContext?.end || currentSelectionContext?.end || "").trim(),
     requestSource:
@@ -28396,6 +28398,33 @@ async function maybeAutoStopRestV2RecordingForSelectionChange(nextSelection = {}
   setStatus(`Detected ${selectionReason} while REST V2 recording was active. Auto-stopping previous capture...`, "info");
   const restSection = document.querySelector(".premium-service-section.service-rest-v2");
   await stopRestV2MvpdRecording(restSection || null, resolveSelectedProgrammer(), null);
+  return true;
+}
+
+async function maybeAutoStopHarpoRecordingForSelectionChange(nextSelection = {}, options = {}) {
+  if (
+    state.harpoRecordingStarting === true ||
+    state.harpoRecordingStopping === true ||
+    state.harpoRecordingActive !== true ||
+    !String(state.harpoDebugFlowId || "").trim()
+  ) {
+    return false;
+  }
+  const recordingContext =
+    state.harpoRecordingContext && typeof state.harpoRecordingContext === "object" ? state.harpoRecordingContext : null;
+  if (!recordingContext) {
+    return false;
+  }
+
+  const currentRequestorId = String(recordingContext.requestorId || recordingContext.serviceProviderId || "").trim().toLowerCase();
+  const nextRequestorId = String(nextSelection.requestorId || "").trim().toLowerCase();
+  if (currentRequestorId === nextRequestorId) {
+    return false;
+  }
+
+  const selectionReason = String(options.reason || "selection change").trim() || "selection change";
+  setStatus(`Detected ${selectionReason} while HARPO recording was active. Auto-stopping previous capture...`, "info");
+  await stopHarpoRecording();
   return true;
 }
 
@@ -33385,6 +33414,208 @@ const UNDERPAR_HAR_PHYSICAL_ASSET_MIME_TYPES = new Set([
   "application/x-font-woff",
   "application/x-font-woff2",
 ]);
+const UNDERPAR_HARPO_SECOND_LEVEL_TLDS = new Set([
+  "ac.uk",
+  "co.uk",
+  "gov.uk",
+  "ltd.uk",
+  "me.uk",
+  "net.uk",
+  "org.uk",
+  "plc.uk",
+  "sch.uk",
+  "co.jp",
+  "com.au",
+  "net.au",
+  "org.au",
+  "com.br",
+  "com.mx",
+  "com.tr",
+  "co.nz",
+  "com.sg",
+]);
+const UNDERPAR_HARPO_PASS_HOST_RE = /(^|\.)auth(?:-staging)?\.adobe\.com$/i;
+const UNDERPAR_HARPO_ADOBE_SUPPORT_HOSTS = [/(^|\.)adobedtm\.com$/i];
+
+function getUnderparHarpoScopeHostname(input = "") {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    if (!/^https?:$/i.test(String(parsed.protocol || ""))) {
+      return "";
+    }
+    return String(parsed.hostname || "").trim().toLowerCase().replace(/\.$/, "");
+  } catch {
+    const normalized = raw.toLowerCase().replace(/\.$/, "");
+    if (!normalized) {
+      return "";
+    }
+    if (normalized === "localhost" || /^[\d:.]+$/.test(normalized)) {
+      return normalized;
+    }
+    if (!/^[a-z0-9.-]+$/.test(normalized) || !normalized.includes(".")) {
+      return "";
+    }
+    return normalized;
+  }
+}
+
+function getUnderparHarpoScopeDomainBucket(input = "") {
+  const hostname = getUnderparHarpoScopeHostname(input);
+  if (!hostname) {
+    return "";
+  }
+  if (hostname === "localhost" || /^[\d:.]+$/.test(hostname)) {
+    return hostname;
+  }
+  const parts = hostname.split(".").filter(Boolean);
+  if (parts.length <= 2) {
+    return hostname;
+  }
+  const tail = parts.slice(-2).join(".");
+  if (UNDERPAR_HARPO_SECOND_LEVEL_TLDS.has(tail) && parts.length >= 3) {
+    return parts.slice(-3).join(".");
+  }
+  return parts.slice(-2).join(".");
+}
+
+function isUnderparHarpoAdobeHost(hostname = "") {
+  const normalizedHost = getUnderparHarpoScopeHostname(hostname);
+  if (!normalizedHost) {
+    return false;
+  }
+  return (
+    normalizedHost === "adobe.com" ||
+    normalizedHost.endsWith(".adobe.com") ||
+    normalizedHost === "adobe.net" ||
+    normalizedHost.endsWith(".adobe.net") ||
+    normalizedHost.endsWith(".services.adobe.com") ||
+    normalizedHost.endsWith(".adobe.io") ||
+    normalizedHost.endsWith(".adobelogin.com")
+  );
+}
+
+function isUnderparHarpoAdobeSupportHost(hostname = "") {
+  const normalizedHost = getUnderparHarpoScopeHostname(hostname);
+  if (!normalizedHost) {
+    return false;
+  }
+  return UNDERPAR_HARPO_ADOBE_SUPPORT_HOSTS.some((pattern) => pattern.test(normalizedHost));
+}
+
+function isUnderparHarpoAdobeTraffic(input = "") {
+  const hostname = getUnderparHarpoScopeHostname(input);
+  return isUnderparHarpoAdobeHost(hostname) || isUnderparHarpoAdobeSupportHost(hostname);
+}
+
+function isUnderparHarpoPassSamlAssertionConsumerUrl(input = "") {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return false;
+  }
+  try {
+    const parsed = new URL(raw);
+    const hostname = getUnderparHarpoScopeHostname(parsed.hostname);
+    const pathname = String(parsed.pathname || "").trim();
+    return UNDERPAR_HARPO_PASS_HOST_RE.test(hostname) && pathname === "/sp/saml/SAMLAssertionConsumer";
+  } catch {
+    return false;
+  }
+}
+
+function matchesUnderparHarpoScopeDomains(hostname = "", domains = []) {
+  const normalizedHost = getUnderparHarpoScopeHostname(hostname);
+  if (!normalizedHost) {
+    return false;
+  }
+  return (Array.isArray(domains) ? domains : []).some((domain) => {
+    const normalizedDomain = getUnderparHarpoScopeHostname(domain) || getUnderparHarpoScopeDomainBucket(domain);
+    if (!normalizedDomain) {
+      return false;
+    }
+    return normalizedHost === normalizedDomain || normalizedHost.endsWith(`.${normalizedDomain}`);
+  });
+}
+
+function collectUnderparHarpoScopeDomains(context = null) {
+  return uniquePreserveOrder(
+    [
+      ...(Array.isArray(context?.safeDomains) ? context.safeDomains : []),
+      ...(Array.isArray(context?.programmerDomains) ? context.programmerDomains : []),
+      ...(Array.isArray(context?.reproDomains) ? context.reproDomains : []),
+      context?.selectedDomain,
+    ]
+      .map((value) => getUnderparHarpoScopeHostname(value))
+      .filter(Boolean)
+  );
+}
+
+function collectUnderparHarpoSamlMvpdDomains(entries = [], context = null) {
+  const safeDomains = collectUnderparHarpoScopeDomains(context);
+  return uniquePreserveOrder(
+    (Array.isArray(entries) ? entries : []).flatMap((entry) => {
+      if (!isUnderparHarpoPassSamlAssertionConsumerUrl(entry?.request?.url || "")) {
+        return [];
+      }
+      return [
+        getHarHeaderValue(entry?.request?.headers || [], "origin"),
+        getHarHeaderValue(entry?.request?.headers || [], "referer"),
+        getHarHeaderValue(entry?.response?.headers || [], "access-control-allow-origin"),
+      ]
+        .flatMap((value) => String(value || "").split(","))
+        .map((value) => getUnderparHarpoScopeDomainBucket(value))
+        .filter(Boolean)
+        .filter((domain) => !isUnderparHarpoAdobeTraffic(domain))
+        .filter((domain) => !matchesUnderparHarpoScopeDomains(domain, safeDomains));
+    })
+  );
+}
+
+function resolveUnderparHarpoMvpdDomains(entries = [], context = null) {
+  return uniquePreserveOrder(
+    [
+      ...(Array.isArray(context?.mvpdDomains) ? context.mvpdDomains : []).map((value) =>
+        getUnderparHarpoScopeDomainBucket(value)
+      ),
+      ...collectUnderparHarpoSamlMvpdDomains(entries, context),
+    ].filter(Boolean)
+  );
+}
+
+function shouldRetainHarpoRecordedEntry(entry = null, context = null, mvpdDomains = []) {
+  const url = String(entry?.request?.url || "").trim();
+  const hostname = getUnderparHarpoScopeHostname(url);
+  if (!hostname) {
+    return false;
+  }
+  if (isUnderparHarpoAdobeTraffic(hostname)) {
+    return true;
+  }
+  if (matchesUnderparHarpoScopeDomains(hostname, collectUnderparHarpoScopeDomains(context))) {
+    return true;
+  }
+  if (matchesUnderparHarpoScopeDomains(hostname, mvpdDomains)) {
+    return true;
+  }
+  return false;
+}
+
+function filterHarpoScopedHarEntries(entries = [], context = null) {
+  const mvpdDomains = resolveUnderparHarpoMvpdDomains(entries, context);
+  return {
+    entries: (Array.isArray(entries) ? entries : []).filter((entry) =>
+      shouldRetainHarpoRecordedEntry(entry, context, mvpdDomains)
+    ),
+    mvpdDomains,
+  };
+}
+
+function buildHarpoScopedCaptureResult(flowEvents = [], context = null) {
+  return filterHarpoScopedHarEntries(buildWebRequestHarEntries(flowEvents, context), context);
+}
 
 function getUnderparHarEventUrl(event = null) {
   return firstNonEmptyString([String(event?.url || "").trim(), String(event?.requestUrl || "").trim()]);
@@ -34424,7 +34655,14 @@ function shouldExcludeInternalExtensionHarEntry(entry = null) {
 
 function buildHarLogFromFlowSnapshot(flowSnapshot, context = null, logoutResult = null) {
   const flowEvents = Array.isArray(flowSnapshot?.events) ? flowSnapshot.events : [];
-  const rawEntries = [...buildWebRequestHarEntries(flowEvents, context), ...buildExtensionHarEntries(flowEvents)];
+  const harpoScopedCapture =
+    String(context?.serviceType || "").trim().toLowerCase() === "harpo"
+      ? buildHarpoScopedCaptureResult(flowEvents, context)
+      : null;
+  const rawEntries = [
+    ...(harpoScopedCapture ? harpoScopedCapture.entries : buildWebRequestHarEntries(flowEvents, context)),
+    ...buildExtensionHarEntries(flowEvents),
+  ];
   const entries = rawEntries
     .filter((entry) => !shouldExcludeInternalExtensionHarEntry(entry))
     .sort((a, b) => {
@@ -34460,6 +34698,7 @@ function buildHarLogFromFlowSnapshot(flowSnapshot, context = null, logoutResult 
         mvpd: String(context.mvpd || ""),
         requestorIds: Array.isArray(context.requestorIds) ? context.requestorIds.slice(0, 24) : [],
         mvpdIds: Array.isArray(context.mvpdIds) ? context.mvpdIds.slice(0, 24) : [],
+        mvpdDomains: Array.isArray(harpoScopedCapture?.mvpdDomains) ? harpoScopedCapture.mvpdDomains.slice(0, 24) : [],
         serviceProviderId: String(context.serviceProviderId || ""),
         appGuid: String(context?.appInfo?.guid || ""),
         appName: String(context?.appInfo?.appName || ""),
@@ -61503,10 +61742,20 @@ function isRestV2RedirectAtPostLoginTarget(url = "", redirectUrl = "") {
   if (!candidate || !configuredRedirect) {
     return false;
   }
+  const normalizePathname = (pathname = "") => {
+    const normalizedPath = String(pathname || "").trim();
+    if (!normalizedPath || normalizedPath === "/") {
+      return "/";
+    }
+    return normalizedPath.replace(/\/+$/, "") || "/";
+  };
   try {
     const candidateParsed = new URL(candidate);
     const redirectParsed = new URL(configuredRedirect);
-    return candidateParsed.origin === redirectParsed.origin && candidateParsed.pathname === redirectParsed.pathname;
+    return (
+      candidateParsed.origin === redirectParsed.origin &&
+      normalizePathname(candidateParsed.pathname) === normalizePathname(redirectParsed.pathname)
+    );
   } catch {
     return candidate === configuredRedirect || candidate.startsWith(`${configuredRedirect}?`) || candidate.startsWith(`${configuredRedirect}#`);
   }
@@ -61717,14 +61966,16 @@ function ensureRestV2BobtoolsRedirectWatcher() {
     if (!activeTabId || normalizedTabId !== activeTabId) {
       return;
     }
-    if (!state.restV2RecordingActive || !state.restV2RecordingContext) {
+    const recordingContext =
+      state.restV2RecordingContext && typeof state.restV2RecordingContext === "object" ? state.restV2RecordingContext : null;
+    if (!state.restV2RecordingActive || !recordingContext) {
       return;
     }
     const candidateUrl = String(changeInfo?.url || tab?.url || "").trim();
     if (!candidateUrl || bobtoolsWorkspaceIsWorkspaceTab({ url: candidateUrl })) {
       return;
     }
-    const redirectUrl = String(state.restV2RecordingContext?.redirectUrl || "").trim();
+    const redirectUrl = firstNonEmptyString([recordingContext?.redirectUrl, state.restV2PreviousTabUrl]);
     if (!isRestV2RedirectAtPostLoginTarget(candidateUrl, redirectUrl)) {
       return;
     }
@@ -61733,10 +61984,6 @@ function ensureRestV2BobtoolsRedirectWatcher() {
     }
     state.restV2BobtoolsRedirectInFlightByTabId.add(normalizedTabId);
     void (async () => {
-      const recordingContext =
-        state.restV2RecordingContext && typeof state.restV2RecordingContext === "object"
-          ? state.restV2RecordingContext
-          : null;
       let hydrationContext = null;
       if (
         recordingContext?.programmerId &&
@@ -67899,7 +68146,7 @@ function openHarpoFilePicker(fileInput = null) {
 
 function countHarpoCapturedCalls(flowSnapshot = null, context = null) {
   const flowEvents = Array.isArray(flowSnapshot?.events) ? flowSnapshot.events : [];
-  return buildWebRequestHarEntries(flowEvents, context)
+  return buildHarpoScopedCaptureResult(flowEvents, context).entries
     .filter((entry) => !shouldExcludeInternalExtensionHarEntry(entry))
     .length;
 }
@@ -67976,6 +68223,7 @@ function getHarpoRecordingContext(programmer = null, services = null) {
     reproUrl,
     safeDomains: panelContext.safeDomains.slice(),
     reproDomains: panelContext.reproDomains.slice(),
+    mvpdDomains: [],
     expectedMvpds: panelContext.expectedMvpds.slice(),
     environmentKey: panelContext.environmentKey,
     environmentLabel: panelContext.environmentLabel,
@@ -68004,6 +68252,7 @@ async function handleHarpoWorkspaceFile(file = null, programmer = null, services
       requestorName: panelContext.requestorName,
       safeDomains: panelContext.safeDomains,
       reproDomains: panelContext.reproDomains,
+      mvpdDomains: Array.isArray(har?.log?._underpar?.context?.mvpdDomains) ? har.log._underpar.context.mvpdDomains : [],
       expectedMvpds: panelContext.expectedMvpds,
       environmentKey: panelContext.environmentKey,
       environmentLabel: panelContext.environmentLabel,
@@ -68045,6 +68294,10 @@ async function startHarpoRecording(programmer = null, services = null) {
         requestorName: recordingContext.requestorName,
         redirectUrl: recordingContext.reproUrl,
         domainName: recordingContext.selectedDomain,
+        selectedDomain: recordingContext.selectedDomain,
+        safeDomains: recordingContext.safeDomains.slice(),
+        reproDomains: recordingContext.reproDomains.slice(),
+        mvpdDomains: Array.isArray(recordingContext.mvpdDomains) ? recordingContext.mvpdDomains.slice() : [],
         environmentKey: recordingContext.environmentKey,
       },
       "harpo-repro"
@@ -68143,8 +68396,13 @@ async function stopHarpoRecording() {
     if (!stopResult?.flow) {
       throw new Error(stopResult?.error || "HARPO snapshot was unavailable.");
     }
-    const entryCount = countHarpoCapturedCalls(stopResult.flow, recordingContext);
-    const harPayload = buildHarLogFromFlowSnapshot(stopResult.flow, recordingContext, null);
+    const harpoCapture = buildHarpoScopedCaptureResult(stopResult.flow.events, recordingContext);
+    const scopedRecordingContext = {
+      ...recordingContext,
+      mvpdDomains: harpoCapture.mvpdDomains.slice(),
+    };
+    const entryCount = harpoCapture.entries.length;
+    const harPayload = buildHarLogFromFlowSnapshot(stopResult.flow, scopedRecordingContext, null);
     const fileName = buildHarpoWorkspaceFileName(recordingContext);
     await openHarpoWorkspace(harPayload, {
       source: "recording",
@@ -68154,6 +68412,7 @@ async function stopHarpoRecording() {
       requestorName: recordingContext.requestorName,
       safeDomains: recordingContext.safeDomains,
       reproDomains: recordingContext.reproDomains,
+      mvpdDomains: scopedRecordingContext.mvpdDomains,
       expectedMvpds: recordingContext.expectedMvpds,
       environmentKey: recordingContext.environmentKey,
       environmentLabel: recordingContext.environmentLabel,
@@ -98696,6 +98955,19 @@ function registerEventHandlers() {
 
   els.requestorSelect.addEventListener("change", async (event) => {
     const nextRequestorId = String(event.target.value || "").trim();
+    try {
+      await maybeAutoStopHarpoRecordingForSelectionChange(
+        {
+          requestorId: nextRequestorId,
+        },
+        {
+          reason: "Requestor change",
+        }
+      );
+    } catch (error) {
+      setStatus(`HARPO auto-stop before Requestor switch failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+
     try {
       await maybeAutoStopRestV2RecordingForSelectionChange(
         {
