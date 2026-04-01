@@ -2763,21 +2763,22 @@ select:disabled {
 .hr-rest-v2-docs-shell {
   display: flex;
   flex-direction: column;
-  border: 1px solid rgba(var(--service-rest-v2-zip-1000), 0.2);
+  border: 1px solid rgba(132, 146, 176, 0.22);
   border-radius: 14px;
   overflow: hidden;
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, rgb(var(--underpar-service-dark-panel-rgb)) 88%, rgb(var(--service-rest-v2-zip-1000)) 12%) 0%,
-      color-mix(in srgb, rgb(var(--underpar-service-dark-shell-rgb)) 84%, rgb(var(--service-rest-v2-zip-900)) 16%) 100%
+      color-mix(in srgb, rgb(var(--underpar-service-dark-panel-rgb)) 94%, rgb(132, 146, 176) 6%) 0%,
+      color-mix(in srgb, rgb(var(--underpar-service-dark-shell-rgb)) 90%, rgb(107, 122, 152) 10%) 100%
     );
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     0 12px 24px rgba(0, 0, 0, 0.18);
 }
 
-.hr-dcr-docs-shell {
+.hr-learning-docs-shell[data-learning-service-state="ready"],
+.hr-dcr-docs-shell[data-learning-service-state="ready"] {
   border-color: rgba(var(--service-learning-zip-1000), 0.24);
   background:
     linear-gradient(
@@ -2796,14 +2797,15 @@ select:disabled {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, rgb(var(--underpar-service-dark-panel-rgb)) 88%, rgb(var(--service-rest-v2-zip-900)) 12%) 0%,
-      color-mix(in srgb, rgb(var(--underpar-service-dark-shell-rgb)) 84%, rgb(var(--service-rest-v2-zip-800)) 16%) 100%
+      color-mix(in srgb, rgb(var(--underpar-service-dark-panel-rgb)) 94%, rgb(132, 146, 176) 6%) 0%,
+      color-mix(in srgb, rgb(var(--underpar-service-dark-shell-rgb)) 90%, rgb(107, 122, 152) 10%) 100%
     );
-  color: rgba(var(--service-rest-v2-zip-1100), 0.98);
+  color: rgba(var(--underpar-gray-900-rgb), 0.94);
   box-shadow: none;
 }
 
-.hr-dcr-docs-toggle {
+.hr-learning-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle,
+.hr-dcr-docs-shell[data-learning-service-state="ready"] .hr-dcr-docs-toggle {
   background:
     linear-gradient(
       180deg,
@@ -2814,10 +2816,11 @@ select:disabled {
 }
 
 .hr-rest-v2-docs-toggle:not(.collapsed) {
-  border-bottom: 1px solid rgba(var(--service-rest-v2-zip-1100), 0.16);
+  border-bottom: 1px solid rgba(132, 146, 176, 0.18);
 }
 
-.hr-dcr-docs-toggle:not(.collapsed) {
+.hr-learning-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle:not(.collapsed),
+.hr-dcr-docs-shell[data-learning-service-state="ready"] .hr-dcr-docs-toggle:not(.collapsed) {
   border-bottom-color: rgba(var(--service-learning-zip-1100), 0.18);
 }
 
@@ -2831,7 +2834,7 @@ select:disabled {
 }
 
 .hr-rest-v2-docs-toggle-label {
-  color: rgba(var(--service-rest-v2-zip-1100), 0.98);
+  color: rgba(var(--underpar-gray-900-rgb), 0.94);
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.01em;
@@ -2849,9 +2852,9 @@ select:disabled {
   align-items: center;
   padding: 2px 8px;
   border-radius: 999px;
-  border: 1px solid rgba(var(--service-rest-v2-zip-1100), 0.24);
-  background: rgba(var(--service-rest-v2-zip-900), 0.18);
-  color: rgba(var(--service-rest-v2-zip-1100), 0.96);
+  border: 1px solid rgba(132, 146, 176, 0.28);
+  background: rgba(132, 146, 176, 0.12);
+  color: rgba(var(--underpar-gray-900-rgb), 0.92);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -2859,7 +2862,7 @@ select:disabled {
 }
 
 .hr-rest-v2-docs-toggle-status {
-  color: rgba(var(--service-rest-v2-zip-1100), 0.76);
+  color: rgba(var(--underpar-gray-700-rgb), 0.82);
   font-size: 10px;
   font-weight: 600;
 }
@@ -2896,13 +2899,17 @@ select:disabled {
   text-transform: uppercase;
 }
 
-.hr-dcr-docs-shell .hr-rest-v2-docs-toggle-label,
-.hr-dcr-docs-shell .hr-rest-v2-docs-toggle-count,
-.hr-dcr-docs-shell .hr-rest-v2-docs-toggle-status {
+.hr-learning-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle-label,
+.hr-learning-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle-count,
+.hr-learning-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle-status,
+.hr-dcr-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle-label,
+.hr-dcr-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle-count,
+.hr-dcr-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle-status {
   color: rgba(var(--service-learning-zip-1100), 0.96);
 }
 
-.hr-dcr-docs-shell .hr-rest-v2-docs-toggle-count {
+.hr-learning-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle-count,
+.hr-dcr-docs-shell[data-learning-service-state="ready"] .hr-rest-v2-docs-toggle-count {
   border-color: rgba(var(--service-learning-zip-1100), 0.24);
   background: rgba(var(--service-learning-zip-900), 0.18);
 }

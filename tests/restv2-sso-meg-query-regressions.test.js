@@ -1217,3 +1217,95 @@ test("popup env badge clears instead of leaking AdobePASS context for non-AdobeP
   assert.equal(els.pageEnvBadgeValue.textContent, "");
   assert.equal(els.pageEnvBadge.title, "Environment");
 });
+
+test("DCR learning card mirrors the shared ready vs locked top-level state", () => {
+  const readyEntryKeys = new Set(["dcr-register"]);
+  const { buildDcrInteractiveDocsPanelHtml } = loadFunctions("popup.js", ["buildDcrInteractiveDocsPanelHtml"], {
+    DCR_INTERACTIVE_DOC_ENTRIES: [
+      {
+        key: "dcr-register",
+        label: "Register Client",
+        methodLabel: "POST",
+        operationSummary: "Create a DCR client.",
+        operationAnchor: "register",
+      },
+      {
+        key: "dcr-list",
+        label: "List Clients",
+        methodLabel: "GET",
+        operationSummary: "List DCR clients.",
+        operationAnchor: "clients",
+      },
+    ],
+    collectDcrRegisterAppOptions: () => [],
+    getSelectedDcrRegisterApp: () => null,
+    buildDcrInteractiveDocsUrl: (anchor = "") => `https://example.test/dcr/${anchor}`,
+    buildDcrInteractiveDocsEntryActivationState: (entry = null) => {
+      const key = String(entry?.key || "").trim();
+      return {
+        ready: readyEntryKeys.has(key),
+        reason: readyEntryKeys.has(key) ? "" : "Setup needed",
+      };
+    },
+    getRestV2LearningServiceCollapsed: () => false,
+    getActiveDcrLearningUiState: () => ({ entryKey: "" }),
+    getHrContextSummary: () => ({ compositeLabel: "Turner x MML x Xfinity" }),
+    escapeHtml: (value = "") => String(value),
+    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+  });
+
+  const readyHtml = buildDcrInteractiveDocsPanelHtml({ programmerId: "Turner" }, { restV2: true });
+  assert.match(readyHtml, /class="hr-rest-v2-docs-shell hr-learning-docs-shell hr-dcr-docs-shell"/);
+  assert.match(readyHtml, /data-learning-service-state="ready"/);
+
+  readyEntryKeys.clear();
+  const lockedHtml = buildDcrInteractiveDocsPanelHtml({ programmerId: "Turner" }, { restV2: true });
+  assert.match(lockedHtml, /data-learning-service-state="locked"/);
+});
+
+test("REST V2 learning card mirrors the shared ready vs locked top-level state", () => {
+  const readyEntryKeys = new Set(["config"]);
+  const { buildRestV2InteractiveDocsPanelHtml } = loadFunctions("popup.js", ["buildRestV2InteractiveDocsPanelHtml"], {
+    buildRestV2InteractiveDocsUrl: () => "https://example.test/restv2",
+    getRestV2InteractiveDocsSections: () => [
+      {
+        sectionKey: "configuration",
+        sectionLabel: "1. Configuration",
+        entries: [
+          {
+            key: "config",
+            label: "Retrieve configuration",
+            methodLabel: "GET",
+            operationSummary: "Fetch configuration.",
+          },
+          {
+            key: "profiles",
+            label: "Get profile",
+            methodLabel: "GET",
+            operationSummary: "Fetch a profile.",
+          },
+        ],
+      },
+    ],
+    buildRestV2InteractiveDocsEntryActivationState: (entry = null) => {
+      const key = String(entry?.key || "").trim();
+      return {
+        ready: readyEntryKeys.has(key),
+        reason: readyEntryKeys.has(key) ? "" : "Setup needed",
+      };
+    },
+    getHrContextSummary: () => ({ compositeLabel: "Turner x MML x Xfinity" }),
+    getRestV2LearningServiceCollapsed: () => false,
+    buildRestV2InteractiveDocsSectionHtml: (section = null) =>
+      `<section data-section-ready-count="${Number(section?.readyCount || 0)}"></section>`,
+    escapeHtml: (value = "") => String(value),
+  });
+
+  const readyHtml = buildRestV2InteractiveDocsPanelHtml({ programmerId: "Turner" }, { restV2: true });
+  assert.match(readyHtml, /class="hr-rest-v2-docs-shell hr-learning-docs-shell"/);
+  assert.match(readyHtml, /data-learning-service-state="ready"/);
+
+  readyEntryKeys.clear();
+  const lockedHtml = buildRestV2InteractiveDocsPanelHtml({ programmerId: "Turner" }, { restV2: true });
+  assert.match(lockedHtml, /data-learning-service-state="locked"/);
+});

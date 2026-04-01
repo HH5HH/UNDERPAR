@@ -70533,6 +70533,7 @@ function buildDcrInteractiveDocsPanelHtml(programmer = null, services = null) {
   }));
   const readyCount = entries.filter((entry) => entry.activationState?.ready === true).length;
   const totalEntries = entries.length;
+  const learningServiceState = readyCount > 0 ? "ready" : "locked";
   const initialCollapsed = getRestV2LearningServiceCollapsed(programmer?.programmerId, "dcrV2");
   const shellDomId = `dcr-learning-shell-${String(programmer?.programmerId || "global")
     .trim()
@@ -70545,8 +70546,9 @@ function buildDcrInteractiveDocsPanelHtml(programmer = null, services = null) {
 
   return `
     <section
-      class="hr-rest-v2-docs-shell hr-dcr-docs-shell"
+      class="hr-rest-v2-docs-shell hr-learning-docs-shell hr-dcr-docs-shell"
       data-restv2-learning-service-key="dcrV2"
+      data-learning-service-state="${learningServiceState}"
       data-restv2-learning-service-initial-collapsed="${initialCollapsed ? "true" : "false"}"
     >
       <button
@@ -70684,6 +70686,7 @@ function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null)
   const actionLabel = `Open REST API V2 interactive docs in main content for ${context.compositeLabel}`;
   const totalEntries = sections.reduce((count, section) => count + Number(Array.isArray(section?.entries) ? section.entries.length : 0), 0);
   const readyCount = sections.reduce((count, section) => count + Number(section?.readyCount || 0), 0);
+  const learningServiceState = readyCount > 0 ? "ready" : "locked";
   const initialCollapsed = getRestV2LearningServiceCollapsed(programmer?.programmerId, "restV2");
   const shellDomId = `rest-v2-learning-shell-${String(programmer?.programmerId || "global")
     .trim()
@@ -70691,8 +70694,9 @@ function buildRestV2InteractiveDocsPanelHtml(programmer = null, services = null)
     .replace(/[^\w-]+/g, "-")}`;
   return `
     <section
-      class="hr-rest-v2-docs-shell"
+      class="hr-rest-v2-docs-shell hr-learning-docs-shell"
       data-restv2-learning-service-key="restV2"
+      data-learning-service-state="${learningServiceState}"
       data-restv2-learning-service-initial-collapsed="${initialCollapsed ? "true" : "false"}"
     >
       <button

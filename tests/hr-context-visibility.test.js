@@ -1290,6 +1290,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /canProvisionClientCredentials === true/);
   assert.match(buildDcrInteractiveDocsEntryActivationStateSource, /body\.redirect_uri/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /data-restv2-learning-service-key="dcrV2"/);
+  assert.match(buildDcrInteractiveDocsPanelHtmlSource, /data-learning-service-state="\$\{learningServiceState\}"/);
+  assert.match(buildDcrInteractiveDocsPanelHtmlSource, /hr-learning-docs-shell hr-dcr-docs-shell/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /data-dcr-doc-entry-key/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /hr-context-service-pill--service-default/);
   assert.match(buildDcrInteractiveDocsPanelHtmlSource, /Choose a registered application for \/register, then UnderPAR hydrates the online Run form\./);
@@ -1359,6 +1361,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(buildRestV2InteractiveDocsSectionHtmlSource, /hr-rest-v2-doc-section-link/);
   assert.doesNotMatch(buildRestV2InteractiveDocsSectionHtmlSource, /\$\{isReady \? "" : "disabled"\}/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /data-restv2-learning-service-key="restV2"/);
+  assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /data-learning-service-state="\$\{learningServiceState\}"/);
+  assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /class="hr-rest-v2-docs-shell hr-learning-docs-shell"/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /metadata-header service-box-header hr-rest-v2-docs-toggle/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /service-box-container hr-rest-v2-docs-shell-body/);
   assert.match(buildRestV2InteractiveDocsPanelHtmlSource, /hr-context-service-pill hr-context-service-pill--service-rest-v2 hr-rest-v2-docs-pill/);
@@ -1466,6 +1470,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(popupCss, /\.hr-harpo-domain-label/);
   assert.doesNotMatch(popupCss, /\.hr-harpo-domain-meta/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell/);
+  assert.match(popupCss, /\.hr-learning-docs-shell\[data-learning-service-state="ready"\]/);
+  assert.match(popupCss, /\.hr-learning-docs-shell\[data-learning-service-state="ready"\] \.hr-rest-v2-docs-toggle/);
   assert.match(popupCss, /\.hr-rest-v2-docs-toggle/);
   assert.match(popupCss, /\.hr-rest-v2-docs-shell-body/);
   assert.match(popupCss, /\.hr-rest-v2-docs-pill/);
