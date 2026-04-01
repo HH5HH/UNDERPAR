@@ -230,58 +230,114 @@ test("MEG workspace saved-query reset clears the picker after the native menu cl
   assert.equal(disabledSyncCount, 1);
 });
 
-test("sidepanel saved-query menu uses an owned trigger while standalone MEG keeps the deferred native picker flow", () => {
+test("sidepanel MEGSPACE saved-query picker now uses a native select while standalone MEG keeps the deferred native picker flow", () => {
   const popupSource = read("popup.js");
   const megSource = read("meg-workspace.js");
-  const popupCss = read("popup.css");
 
   assert.match(
     popupSource,
-    /class="esm-workspace-meg-saved-trigger"[\s\S]*?class="esm-workspace-meg-saved-menu"/m
+    /class="esm-workspace-meg-saved-picker" hidden>[\s\S]*?class="esm-workspace-meg-saved-select"/m
   );
   assert.match(
     popupSource,
-    /megSavedQueryTriggerButton\?\.addEventListener\("click", \(event\) => \{[\s\S]*?esmWorkspaceToggleMegSavedQueryMenu\(esmWorkspaceState/m
+    /megSavedQuerySelectElement:\s*contentElement\.querySelector\("\.esm-workspace-meg-saved-select"\)/m
   );
   assert.match(
     popupSource,
-    /optionButton\.addEventListener\("click", \(event\) => \{[\s\S]*?void esmWorkspaceRunMegSavedQueryRecord\(esmWorkspaceState, record\);/m
+    /megSavedQuerySelectElement\?\.addEventListener\("change", async \(\) => \{[\s\S]*?const selectedRecord = esmWorkspaceGetSelectedMegSavedQueryRecord\(esmWorkspaceState\);[\s\S]*?await esmWorkspaceRunMegSavedQueryRecord\(esmWorkspaceState, selectedRecord\);/m
   );
   assert.match(
     megSource,
     /savedQueryPicker\?\.addEventListener\("change", async \(\) => \{[\s\S]*?const executeSavedQuerySelection = async \(\) => \{[\s\S]*?await loadSelectedSavedQuery\(selectedOption\);[\s\S]*?setTimeout\(\(\) => \{\s*void executeSavedQuerySelection\(\);/m
   );
-  assert.doesNotMatch(popupSource, /megSavedQuerySelectElement\?\.addEventListener\("change"/);
-  assert.match(
-    popupCss,
-    /\.service-esm \.esm-workspace-meg-panel \{[\s\S]*?overflow:\s*visible;/m
-  );
+  assert.doesNotMatch(popupSource, /esm-workspace-meg-saved-trigger/);
+  assert.doesNotMatch(popupSource, /esm-workspace-meg-saved-menu/);
+  assert.doesNotMatch(popupSource, /esmWorkspaceToggleMegSavedQueryMenu|closeAllEsmWorkspaceMegSavedQueryMenus|resolveEsmWorkspaceStateFromMegSavedQueryNode/);
 });
 
-test("sidepanel saved-query menu opens above the footer trigger so it stays visible inside the ESM service shell", () => {
+test("sidepanel MEGSPACE native saved-query select keeps the embedded monochrome picker styling", () => {
   const popupCss = read("popup.css");
 
   assert.match(
     popupCss,
-    /\.service-esm \.esm-workspace-meg-saved-picker\.is-open \{[\s\S]*?z-index:\s*45;/m
+    /\.service-esm \.esm-workspace-meg-saved-picker::after \{[\s\S]*?content:\s*"▾";/m
   );
   assert.match(
     popupCss,
-    /\.service-esm \.esm-workspace-meg-saved-menu \{[\s\S]*?top:\s*auto;[\s\S]*?bottom:\s*calc\(100%\s*\+\s*4px\);/m
+    /\.service-esm \.esm-workspace-meg-saved-select \{[\s\S]*?padding:\s*0 30px 0 8px;[\s\S]*?appearance:\s*none;[\s\S]*?-webkit-appearance:\s*none;/m
+  );
+  assert.match(
+    popupCss,
+    /\.service-esm :is\(\.esm-workspace-search, \.esm-workspace-zoom-filter, \.esm-workspace-meg-select, \.esm-workspace-meg-saved-select\)/m
   );
 });
 
-test("sidepanel saved-query menu lifts into a floating body layer when opened", () => {
-  const popupSource = read("popup.js");
-  const popupCss = read("popup.css");
+test("sidepanel MEGSPACE saved-query runner disables the native select while launching and resets it afterward", async () => {
+  const interactions = {
+    opened: null,
+    resetTarget: null,
+  };
+  const pickerElement = {
+    classList: {
+      added: [],
+      removed: [],
+      add(name) {
+        this.added.push(name);
+      },
+      remove(name) {
+        this.removed.push(name);
+      },
+    },
+  };
+  const selectElement = {
+    disabled: false,
+    setAttribute(name, value) {
+      this[name] = value;
+    },
+    removeAttribute(name) {
+      delete this[name];
+    },
+  };
+  const esmWorkspaceState = {
+    megSavedQueryPickerElement: pickerElement,
+    megSavedQuerySelectElement: selectElement,
+    megSavedQueryRecords: [{ name: "Daily Auth", url: "/esm/v3/media-company/year/day?requestor-id=MML" }],
+    megSavedQueryBusy: false,
+    programmer: {
+      programmerId: "Turner",
+    },
+    requestToken: 19,
+  };
+  const { esmWorkspaceRunMegSavedQueryRecord } = loadFunctions("popup.js", ["esmWorkspaceRunMegSavedQueryRecord"], {
+    state: {
+      premiumPanelRequestToken: 31,
+    },
+    resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
+    megWorkspaceOpenSavedQueryFromUi: async (...args) => {
+      interactions.opened = args;
+    },
+    resetEsmWorkspaceMegSavedQuerySelect: (target) => {
+      interactions.resetTarget = target;
+    },
+  });
 
-  assert.match(
-    popupSource,
-    /if \(menuElement\.parentElement !== document\.body\) \{\s*document\.body\.appendChild\(menuElement\);\s*\}/m
-  );
-  assert.match(popupSource, /menuElement\.classList\.add\("is-floating"\);/);
-  assert.match(popupSource, /function esmWorkspacePositionMegSavedQueryMenu\(esmWorkspaceState\)/);
-  assert.match(popupCss, /\.esm-workspace-meg-saved-menu\.is-floating\s*\{/);
+  await esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, {
+    name: "Daily Auth",
+    url: "/esm/v3/media-company/year/day?requestor-id=MML",
+  });
+
+  assert.equal(esmWorkspaceState.megSavedQueryBusy, false);
+  assert.equal(selectElement.disabled, false);
+  assert.equal(selectElement["aria-busy"], undefined);
+  assert.deepEqual(interactions.opened, [
+    esmWorkspaceState,
+    "/esm/v3/media-company/year/day?requestor-id=MML",
+    19,
+    "Daily Auth",
+  ]);
+  assert.equal(interactions.resetTarget, selectElement);
+  assert.deepEqual(pickerElement.classList.added, ["is-busy"]);
+  assert.deepEqual(pickerElement.classList.removed, ["is-busy"]);
 });
 
 test("sidepanel MEGSPACE saved-query launcher hands the saved URL to the MEG workspace selection-change flow", async () => {
@@ -390,71 +446,6 @@ test("sidepanel MEGSPACE saved-query runner no longer routes saved queries throu
     popupSource,
     /await esmWorkspaceOpenRequestPathInWorkspace\(esmWorkspaceState, normalizedSavedQueryUrl, liveRequestToken, \{[\s\S]*?requestSource:\s*"saved-query"/m
   );
-});
-
-test("global MEG saved-query dismiss logic treats the floating menu as inside the picker", () => {
-  const popupSource = read("popup.js");
-
-  assert.match(
-    popupSource,
-    /const menuElement = target instanceof Element \? target\.closest\("\.esm-workspace-meg-saved-menu"\) : null;\s*if \(menuElement\) \{\s*return;\s*\}/m
-  );
-  assert.match(
-    popupSource,
-    /function resolveEsmWorkspaceStateFromMegSavedQueryNode\(node = null\) \{[\s\S]*?closest\("\.esm-workspace-meg-saved-menu"\)[\s\S]*?__underparEsmWorkspaceState/m
-  );
-});
-
-test("sidepanel saved-query menu close helper hides the menu and resets the trigger state", () => {
-  let restoredFocusCount = 0;
-  const pickerElement = {
-    classList: {
-      remove(name) {
-        this.removed = name;
-      },
-    },
-    appendChild(node) {
-      this.appendedNode = node;
-      node.parentElement = this;
-    },
-  };
-  const triggerButton = {
-    setAttribute(name, value) {
-      this[name] = value;
-    },
-    focus() {
-      restoredFocusCount += 1;
-    },
-  };
-  const menuElement = {
-    hidden: false,
-    classList: {
-      remove(name) {
-        this.removed = name;
-      },
-    },
-    style: {},
-    parentElement: {
-      nodeName: "BODY",
-    },
-  };
-  const { esmWorkspaceCloseMegSavedQueryMenu } = loadFunctions("popup.js", ["esmWorkspaceCloseMegSavedQueryMenu"]);
-
-  esmWorkspaceCloseMegSavedQueryMenu(
-    {
-      megSavedQueryPickerElement: pickerElement,
-      megSavedQueryTriggerButton: triggerButton,
-      megSavedQueryMenuElement: menuElement,
-    },
-    { restoreFocus: true }
-  );
-
-  assert.equal(pickerElement.classList.removed, "is-open");
-  assert.equal(menuElement.hidden, true);
-  assert.equal(menuElement.classList.removed, "is-floating");
-  assert.equal(pickerElement.appendedNode, menuElement);
-  assert.equal(triggerButton["aria-expanded"], "false");
-  assert.equal(restoredFocusCount, 1);
 });
 
 test("REST V2 post-login redirect matcher ignores trailing-slash drift on the landing page", () => {

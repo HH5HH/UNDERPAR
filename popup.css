@@ -4299,8 +4299,7 @@ select:disabled {
 
 .service-esm .esm-workspace-meg-toggle:focus-visible,
 .service-esm .esm-workspace-meg-select:focus-visible,
-.service-esm .esm-workspace-meg-saved-trigger:focus-visible,
-.service-esm .esm-workspace-meg-saved-option:focus-visible,
+.service-esm .esm-workspace-meg-saved-select:focus-visible,
 .service-esm .esm-workspace-meg-open-btn:focus-visible {
   outline: none;
   box-shadow: var(--service-action-focus-shadow);
@@ -4349,16 +4348,24 @@ select:disabled {
 .service-esm .esm-workspace-meg-saved-picker {
   grid-column: 1 / -1;
   position: relative;
+  display: block;
   width: 100%;
   min-width: 0;
-  z-index: 0;
 }
 
-.service-esm .esm-workspace-meg-saved-picker.is-open {
-  z-index: 45;
+.service-esm .esm-workspace-meg-saved-picker::after {
+  content: "▾";
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--legacy-text);
+  pointer-events: none;
 }
 
-.service-esm .esm-workspace-meg-saved-trigger {
+.service-esm .esm-workspace-meg-saved-select {
   width: 100%;
   min-height: 32px;
   border: 1px solid var(--service-accent-soft-strong);
@@ -4369,110 +4376,20 @@ select:disabled {
     color-mix(in srgb, white 95%, rgb(var(--service-zip-900)) 5%)
   );
   color: var(--legacy-text);
-  padding: 0 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  padding: 0 30px 0 8px;
   font-size: 12px;
-  text-align: left;
+  line-height: 1.2;
+  appearance: none;
+  -webkit-appearance: none;
   cursor: pointer;
 }
 
-.service-esm .esm-workspace-meg-saved-trigger-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.service-esm .esm-workspace-meg-saved-trigger-icon {
-  flex: 0 0 auto;
-  font-size: 12px;
-  line-height: 1;
-  transition: transform 140ms ease;
-}
-
-.service-esm .esm-workspace-meg-saved-picker.is-open .esm-workspace-meg-saved-trigger-icon {
-  transform: rotate(180deg);
-}
-
-.service-esm .esm-workspace-meg-saved-menu {
-  position: absolute;
-  top: auto;
-  bottom: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 240px;
-  padding: 4px;
-  overflow: auto;
-  border: 1px solid var(--service-accent-soft-strong);
-  border-radius: 10px;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.995),
-    color-mix(in srgb, white 95%, rgb(var(--service-zip-900)) 5%)
-  );
-  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.22);
-}
-
-.esm-workspace-meg-saved-menu.is-floating {
-  position: fixed;
-  inset: auto auto auto auto;
-  z-index: 2147483000;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px;
-  overflow: auto;
-  border: 1px solid #000000;
-  border-radius: 0;
+.service-esm .esm-workspace-meg-saved-select option {
+  color: #000000;
   background: #ffffff;
-  color: #000000;
-  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.3);
-  pointer-events: auto;
 }
 
-.service-esm .esm-workspace-meg-saved-option {
-  width: 100%;
-  min-height: 32px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--legacy-text);
-  padding: 7px 10px;
-  font-size: 12px;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.esm-workspace-meg-saved-menu.is-floating .esm-workspace-meg-saved-option {
-  border-radius: 0;
-  color: #000000;
-}
-
-.service-esm .esm-workspace-meg-saved-option:hover:not(:disabled),
-.service-esm .esm-workspace-meg-saved-option:focus-visible {
-  border-color: var(--service-input-border-hover);
-  background: var(--service-input-bg-hover);
-}
-
-.esm-workspace-meg-saved-menu.is-floating .esm-workspace-meg-saved-option:hover:not(:disabled),
-.esm-workspace-meg-saved-menu.is-floating .esm-workspace-meg-saved-option:focus-visible {
-  border-color: #000000;
-  background: #000000;
-  color: #ffffff;
-}
-
-.service-esm .esm-workspace-meg-saved-picker.is-busy .esm-workspace-meg-saved-trigger {
+.service-esm .esm-workspace-meg-saved-picker.is-busy .esm-workspace-meg-saved-select {
   cursor: progress;
 }
 
@@ -4505,7 +4422,7 @@ select:disabled {
 
 .service-esm .esm-workspace-meg-open-btn:disabled,
 .service-esm .esm-workspace-meg-select:disabled,
-.service-esm .esm-workspace-meg-saved-trigger:disabled {
+.service-esm .esm-workspace-meg-saved-select:disabled {
   opacity: 0.58;
 }
 
@@ -7212,20 +7129,20 @@ select:disabled {
   --esm-workspace-chip-service-rgb: var(--service-zip-1000);
 }
 
-.service-esm :is(.esm-workspace-search, .esm-workspace-zoom-filter, .esm-workspace-meg-select, .esm-workspace-meg-saved-trigger) {
+.service-esm :is(.esm-workspace-search, .esm-workspace-zoom-filter, .esm-workspace-meg-select, .esm-workspace-meg-saved-select) {
   border-color: var(--service-input-border);
   background: var(--service-input-bg);
   color: rgb(var(--underpar-service-ink-rgb));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
-.service-esm :is(.esm-workspace-search, .esm-workspace-zoom-filter, .esm-workspace-meg-select, .esm-workspace-meg-saved-trigger):hover {
+.service-esm :is(.esm-workspace-search, .esm-workspace-zoom-filter, .esm-workspace-meg-select, .esm-workspace-meg-saved-select):hover {
   border-color: var(--service-input-border-hover);
   background: var(--service-input-bg-hover);
 }
 
-.service-esm :is(.esm-workspace-search, .esm-workspace-zoom-filter, .esm-workspace-meg-select, .esm-workspace-meg-saved-trigger):focus,
-.service-esm :is(.esm-workspace-search, .esm-workspace-zoom-filter, .esm-workspace-meg-select, .esm-workspace-meg-saved-trigger):focus-visible {
+.service-esm :is(.esm-workspace-search, .esm-workspace-zoom-filter, .esm-workspace-meg-select, .esm-workspace-meg-saved-select):focus,
+.service-esm :is(.esm-workspace-search, .esm-workspace-zoom-filter, .esm-workspace-meg-select, .esm-workspace-meg-saved-select):focus-visible {
   outline: none;
   border-color: var(--service-input-border-hover);
   box-shadow:
@@ -7624,8 +7541,7 @@ body.underpar-up-tab .hr-context-service-pill:hover {
 
 .service-esm .esm-workspace-meg-toggle:focus-visible,
 .service-esm .esm-workspace-meg-select:focus-visible,
-.service-esm .esm-workspace-meg-saved-trigger:focus-visible,
-.service-esm .esm-workspace-meg-saved-option:focus-visible,
+.service-esm .esm-workspace-meg-saved-select:focus-visible,
 .service-esm .esm-workspace-meg-open-btn:focus-visible {
   outline: 2px solid #000000;
   outline-offset: 2px;
@@ -7633,8 +7549,7 @@ body.underpar-up-tab .hr-context-service-pill:hover {
 }
 
 .service-esm .esm-workspace-meg-select,
-.service-esm .esm-workspace-meg-saved-trigger,
-.service-esm .esm-workspace-meg-saved-menu {
+.service-esm .esm-workspace-meg-saved-select {
   border: 1px solid #000000;
   border-radius: 0;
   background: #ffffff;
@@ -7642,16 +7557,8 @@ body.underpar-up-tab .hr-context-service-pill:hover {
   box-shadow: none;
 }
 
-.service-esm .esm-workspace-meg-saved-option {
-  border-radius: 0;
+.service-esm .esm-workspace-meg-saved-picker::after {
   color: #000000;
-}
-
-.service-esm .esm-workspace-meg-saved-option:hover:not(:disabled),
-.service-esm .esm-workspace-meg-saved-option:focus-visible {
-  border-color: #000000;
-  background: #000000;
-  color: #ffffff;
 }
 
 .service-esm .esm-workspace-meg-open-btn {

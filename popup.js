@@ -44550,18 +44550,11 @@ function esmWorkspaceBuildShellHtml() {
           ></select>
           <button type="button" class="esm-workspace-meg-open-btn">GO</button>
           <div class="esm-workspace-meg-saved-picker" hidden>
-            <button
-              type="button"
-              class="esm-workspace-meg-saved-trigger"
+            <select
+              class="esm-workspace-meg-saved-select"
               title="Saved Queries"
               aria-label="Saved Queries"
-              aria-haspopup="menu"
-              aria-expanded="false"
-            >
-              <span class="esm-workspace-meg-saved-trigger-label">Saved Queries</span>
-              <span class="esm-workspace-meg-saved-trigger-icon" aria-hidden="true">▾</span>
-            </button>
-            <div class="esm-workspace-meg-saved-menu" role="menu" aria-label="Saved Queries" hidden></div>
+            ></select>
           </div>
         </div>
       </section>
@@ -45105,188 +45098,49 @@ async function megWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl
   }
 }
 
-function resolveEsmWorkspaceStateFromMegSavedQueryNode(node = null) {
-  const pickerElement = node instanceof Element ? node.closest(".esm-workspace-meg-saved-picker") : null;
-  if (pickerElement instanceof Element) {
-    const section = pickerElement.closest(".premium-service-section.service-esm");
-    return section?.__underparEsmWorkspaceState || null;
-  }
-  const menuElement = node instanceof Element ? node.closest(".esm-workspace-meg-saved-menu") : null;
-  if (menuElement && menuElement.__underparEsmWorkspaceState) {
-    return menuElement.__underparEsmWorkspaceState || null;
-  }
-  return null;
-}
-
-function esmWorkspaceGetMegSavedQueryOptionButtons(esmWorkspaceState) {
-  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
-  if (!menuElement || typeof menuElement.querySelectorAll !== "function") {
-    return [];
-  }
-  return [...menuElement.querySelectorAll(".esm-workspace-meg-saved-option")];
-}
-
-function esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, targetIndex = 0) {
-  const optionButtons = esmWorkspaceGetMegSavedQueryOptionButtons(esmWorkspaceState);
-  if (!optionButtons.length) {
+function esmWorkspaceSyncMegSavedQuerySelectMetadata(selectElement = null) {
+  if (!selectElement) {
     return;
   }
-  const boundedIndex = Math.max(0, Math.min(optionButtons.length - 1, Number(targetIndex) || 0));
-  const targetButton = optionButtons[boundedIndex] || null;
-  if (!targetButton) {
+  const selectedOption = selectElement?.selectedOptions?.[0] || null;
+  const selectedQueryName = String(selectedOption?.dataset?.savedQueryName || selectedOption?.textContent || "").trim();
+  if (selectedQueryName && String(selectElement.value || "").trim()) {
+    const label = `Saved Query: ${selectedQueryName}`;
+    selectElement.title = label;
+    selectElement.setAttribute("aria-label", label);
     return;
   }
-  try {
-    targetButton.focus({ preventScroll: true });
-  } catch {
-    targetButton.focus?.();
-  }
+  selectElement.title = "Saved Queries";
+  selectElement.setAttribute("aria-label", "Saved Queries");
 }
 
-function esmWorkspaceMoveMegSavedQueryMenuFocus(esmWorkspaceState, currentButton = null, delta = 1) {
-  const optionButtons = esmWorkspaceGetMegSavedQueryOptionButtons(esmWorkspaceState);
-  if (!optionButtons.length) {
-    return;
+function esmWorkspaceGetSelectedMegSavedQueryRecord(esmWorkspaceState) {
+  const selectElement = esmWorkspaceState?.megSavedQuerySelectElement || null;
+  const selectedOption = selectElement?.selectedOptions?.[0] || null;
+  const savedQueryUrl = String(selectedOption?.value || "").trim();
+  if (!savedQueryUrl) {
+    return null;
   }
-  const currentIndex = optionButtons.indexOf(currentButton);
-  const fallbackIndex = delta < 0 ? optionButtons.length - 1 : 0;
-  const nextIndex = currentIndex >= 0 ? (currentIndex + delta + optionButtons.length) % optionButtons.length : fallbackIndex;
-  esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, nextIndex);
-}
-
-function esmWorkspacePositionMegSavedQueryMenu(esmWorkspaceState) {
-  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
-  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
-  if (!(triggerButton instanceof HTMLElement) || !(menuElement instanceof HTMLElement)) {
-    return;
-  }
-  const rect = triggerButton.getBoundingClientRect();
-  const viewportWidth = Math.max(0, Number(window.innerWidth || document.documentElement?.clientWidth || 0));
-  const viewportHeight = Math.max(0, Number(window.innerHeight || document.documentElement?.clientHeight || 0));
-  const maxWidth = Math.max(220, Math.min(Math.round(rect.width || 0) || 0, Math.max(220, viewportWidth - 16)));
-  const fallbackMaxHeight = Math.max(120, Math.min(320, viewportHeight - 16));
-
-  menuElement.style.position = "fixed";
-  menuElement.style.left = "8px";
-  menuElement.style.top = "8px";
-  menuElement.style.width = `${maxWidth}px`;
-  menuElement.style.maxHeight = `${fallbackMaxHeight}px`;
-  menuElement.style.visibility = "hidden";
-
-  const measuredHeight = Math.max(0, Math.min(menuElement.scrollHeight || 0, fallbackMaxHeight));
-  const spaceAbove = Math.max(0, rect.top - 8);
-  const spaceBelow = Math.max(0, viewportHeight - rect.bottom - 8);
-  const placeAbove = spaceAbove >= Math.min(measuredHeight || fallbackMaxHeight, 240) || spaceAbove > spaceBelow;
-  const maxHeight = Math.max(120, Math.min(320, placeAbove ? spaceAbove - 4 : spaceBelow - 4, viewportHeight - 16));
-  const width = Math.max(220, Math.min(maxWidth, viewportWidth - 16));
-  const left = Math.min(Math.max(8, rect.left), Math.max(8, viewportWidth - width - 8));
-  const resolvedHeight = Math.max(0, Math.min(menuElement.scrollHeight || 0, maxHeight));
-  const top = placeAbove
-    ? Math.max(8, rect.top - resolvedHeight - 4)
-    : Math.min(Math.max(8, rect.bottom + 4), Math.max(8, viewportHeight - resolvedHeight - 8));
-
-  menuElement.style.width = `${width}px`;
-  menuElement.style.maxHeight = `${maxHeight}px`;
-  menuElement.style.left = `${left}px`;
-  menuElement.style.top = `${top}px`;
-  menuElement.style.visibility = "";
-}
-
-function esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, options = null) {
-  const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
-  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
-  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
-  if (!pickerElement || !triggerButton || !menuElement) {
-    return;
-  }
-  pickerElement.classList.remove("is-open");
-  menuElement.hidden = true;
-  menuElement.classList.remove("is-floating");
-  menuElement.style.position = "";
-  menuElement.style.left = "";
-  menuElement.style.top = "";
-  menuElement.style.width = "";
-  menuElement.style.maxHeight = "";
-  menuElement.style.visibility = "";
-  menuElement.style.zIndex = "";
-  if (menuElement.parentElement !== pickerElement) {
-    pickerElement.appendChild(menuElement);
-  }
-  triggerButton.setAttribute("aria-expanded", "false");
-  if (options?.restoreFocus === true) {
-    try {
-      triggerButton.focus({ preventScroll: true });
-    } catch {
-      triggerButton.focus?.();
-    }
-  }
-}
-
-function closeAllEsmWorkspaceMegSavedQueryMenus(exceptState = null) {
-  const sections = document.querySelectorAll(".premium-service-section.service-esm");
-  sections.forEach((section) => {
-    const esmWorkspaceState = section?.__underparEsmWorkspaceState || null;
-    if (!esmWorkspaceState || esmWorkspaceState === exceptState) {
-      return;
-    }
-    esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
-  });
-}
-
-function esmWorkspaceOpenMegSavedQueryMenu(esmWorkspaceState, options = null) {
-  const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
-  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
-  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
-  if (!pickerElement || !triggerButton || !menuElement || pickerElement.hidden || triggerButton.disabled) {
-    return;
-  }
-  closeAllEsmWorkspaceMegSavedQueryMenus(esmWorkspaceState);
-  pickerElement.classList.add("is-open");
-  if (menuElement.parentElement !== document.body) {
-    document.body.appendChild(menuElement);
-  }
-  menuElement.classList.add("is-floating");
-  menuElement.hidden = false;
-  menuElement.style.zIndex = "2147483000";
-  esmWorkspacePositionMegSavedQueryMenu(esmWorkspaceState);
-  triggerButton.setAttribute("aria-expanded", "true");
-  if (options?.focusLast === true) {
-    esmWorkspaceFocusMegSavedQueryMenuOption(
-      esmWorkspaceState,
-      Math.max(esmWorkspaceGetMegSavedQueryOptionButtons(esmWorkspaceState).length - 1, 0)
-    );
-    return;
-  }
-  if (options?.focusFirst === true) {
-    esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, 0);
-  }
-}
-
-function esmWorkspaceToggleMegSavedQueryMenu(esmWorkspaceState, options = null) {
-  const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
-  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
-  const isOpen = Boolean(pickerElement?.classList.contains("is-open") && menuElement?.hidden === false);
-  if (isOpen) {
-    esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, { restoreFocus: options?.restoreFocus === true });
-    return;
-  }
-  esmWorkspaceOpenMegSavedQueryMenu(esmWorkspaceState, options);
+  return {
+    storageKey: String(selectedOption?.dataset?.storageKey || "").trim(),
+    name: String(selectedOption?.dataset?.savedQueryName || selectedOption?.textContent || "").trim(),
+    url: savedQueryUrl,
+  };
 }
 
 async function esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record = null) {
   const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
-  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
+  const selectElement = esmWorkspaceState?.megSavedQuerySelectElement || null;
   const savedQueryUrl = String(record?.url || "").trim();
   const savedQueryName = String(record?.name || "").trim();
-  if (!pickerElement || !triggerButton || !savedQueryUrl || esmWorkspaceState?.megSavedQueryBusy === true) {
+  if (!pickerElement || !selectElement || !savedQueryUrl || esmWorkspaceState?.megSavedQueryBusy === true) {
     return;
   }
 
   esmWorkspaceState.megSavedQueryBusy = true;
-  esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
   pickerElement.classList.add("is-busy");
-  triggerButton.disabled = true;
-  triggerButton.setAttribute("aria-busy", "true");
+  selectElement.disabled = true;
+  selectElement.setAttribute("aria-busy", "true");
 
   try {
     const requestToken = resolveCurrentPremiumPanelRequestToken(
@@ -45299,8 +45153,9 @@ async function esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record = nu
       Array.isArray(esmWorkspaceState?.megSavedQueryRecords) && esmWorkspaceState.megSavedQueryRecords.length > 0;
     esmWorkspaceState.megSavedQueryBusy = false;
     pickerElement.classList.remove("is-busy");
-    triggerButton.disabled = !hasRecords;
-    triggerButton.removeAttribute("aria-busy");
+    selectElement.disabled = !hasRecords;
+    selectElement.removeAttribute("aria-busy");
+    resetEsmWorkspaceMegSavedQuerySelect(selectElement);
   }
 }
 
@@ -45406,84 +45261,46 @@ async function consumePendingUnderparEsmDeeplink() {
 
 function esmWorkspaceSyncMegSavedQueryUi(esmWorkspaceState) {
   const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
-  const triggerButton = esmWorkspaceState?.megSavedQueryTriggerButton || null;
-  const menuElement = esmWorkspaceState?.megSavedQueryMenuElement || null;
-  if (!pickerElement || !triggerButton || !menuElement) {
+  const selectElement = esmWorkspaceState?.megSavedQuerySelectElement || null;
+  if (!pickerElement || !selectElement) {
     return;
   }
 
   const records = popupGetSavedEsmQueryRecords();
   esmWorkspaceState.megSavedQueryRecords = records;
-  esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
-  menuElement.innerHTML = "";
+  const selectedStorageKey = String(selectElement.selectedOptions?.[0]?.dataset?.storageKey || "").trim();
+  selectElement.innerHTML = "";
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Saved Queries";
+  selectElement.appendChild(defaultOption);
 
   if (records.length === 0) {
     pickerElement.hidden = true;
     pickerElement.classList.remove("is-busy");
-    triggerButton.disabled = true;
-    triggerButton.title = "Saved Queries";
-    triggerButton.setAttribute("aria-label", "Saved Queries");
+    selectElement.disabled = true;
+    esmWorkspaceSyncMegSavedQuerySelectMetadata(selectElement);
     return;
   }
 
   records.forEach((record) => {
-    const optionButton = document.createElement("button");
-    optionButton.type = "button";
-    optionButton.className = "esm-workspace-meg-saved-option";
-    optionButton.setAttribute("role", "menuitem");
-    optionButton.dataset.savedQueryUrl = record.url;
-    optionButton.dataset.savedQueryName = record.name;
-    optionButton.title = record.url;
-    optionButton.setAttribute("aria-label", `Open Saved Query ${record.name}`);
-    optionButton.textContent = record.name;
-    optionButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record);
-    });
-    optionButton.addEventListener("keydown", (event) => {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        esmWorkspaceMoveMegSavedQueryMenuFocus(esmWorkspaceState, event.currentTarget, 1);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        esmWorkspaceMoveMegSavedQueryMenuFocus(esmWorkspaceState, event.currentTarget, -1);
-        return;
-      }
-      if (event.key === "Home") {
-        event.preventDefault();
-        esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, 0);
-        return;
-      }
-      if (event.key === "End") {
-        event.preventDefault();
-        esmWorkspaceFocusMegSavedQueryMenuOption(esmWorkspaceState, records.length - 1);
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, { restoreFocus: true });
-        return;
-      }
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      void esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record);
-    });
-    menuElement.appendChild(optionButton);
+    const option = document.createElement("option");
+    option.value = record.url;
+    option.dataset.storageKey = record.storageKey;
+    option.dataset.savedQueryName = record.name;
+    option.title = record.url;
+    option.textContent = record.name;
+    if (selectedStorageKey && record.storageKey === selectedStorageKey) {
+      option.selected = true;
+    }
+    selectElement.appendChild(option);
   });
 
   pickerElement.hidden = false;
   pickerElement.classList.toggle("is-busy", esmWorkspaceState?.megSavedQueryBusy === true);
-  triggerButton.disabled = esmWorkspaceState?.megSavedQueryBusy === true;
-  triggerButton.title = "Saved Queries";
-  triggerButton.setAttribute("aria-label", "Saved Queries");
-  triggerButton.setAttribute("aria-expanded", "false");
+  selectElement.disabled = esmWorkspaceState?.megSavedQueryBusy === true;
+  esmWorkspaceSyncMegSavedQuerySelectMetadata(selectElement);
 }
 
 function resetEsmWorkspaceMegSavedQuerySelect(selectElement = null) {
@@ -45606,7 +45423,7 @@ function esmWorkspaceSetMegPanelCollapsed(esmWorkspaceState, collapsed = true) {
   panelElement.classList.toggle("is-collapsed", isCollapsed);
   bodyElement.hidden = isCollapsed;
   if (isCollapsed) {
-    esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
+    resetEsmWorkspaceMegSavedQuerySelect(esmWorkspaceState?.megSavedQuerySelectElement || null);
   }
   toggleButton.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
   toggleButton.setAttribute("aria-label", isCollapsed ? "Expand MEGSPACE" : "Collapse MEGSPACE");
@@ -46128,35 +45945,23 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
     esmWorkspaceSyncMegLaunchUi(esmWorkspaceState);
   });
 
-  esmWorkspaceState.megSavedQueryTriggerButton?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    esmWorkspaceToggleMegSavedQueryMenu(esmWorkspaceState, {
-      focusFirst: esmWorkspaceState?.megSavedQueryMenuElement?.hidden === false,
-    });
-  });
-
-  esmWorkspaceState.megSavedQueryTriggerButton?.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      esmWorkspaceOpenMegSavedQueryMenu(esmWorkspaceState, { focusFirst: true });
+  esmWorkspaceState.megSavedQuerySelectElement?.addEventListener("change", async () => {
+    const selectElement = esmWorkspaceState?.megSavedQuerySelectElement || null;
+    esmWorkspaceSyncMegSavedQuerySelectMetadata(selectElement);
+    const selectedRecord = esmWorkspaceGetSelectedMegSavedQueryRecord(esmWorkspaceState);
+    if (!selectedRecord) {
       return;
     }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      esmWorkspaceOpenMegSavedQueryMenu(esmWorkspaceState, { focusLast: true });
+    const executeSavedQuerySelection = async () => {
+      await esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, selectedRecord);
+    };
+    if (typeof setTimeout === "function") {
+      setTimeout(() => {
+        void executeSavedQuerySelection();
+      }, 0);
       return;
     }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState);
-      return;
-    }
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-    event.preventDefault();
-    esmWorkspaceToggleMegSavedQueryMenu(esmWorkspaceState, { focusFirst: true });
+    await executeSavedQuerySelection();
   });
 
   esmWorkspaceState.megToggleButton?.addEventListener("click", (event) => {
@@ -47290,8 +47095,7 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
       megBodyElement: contentElement.querySelector(".esm-workspace-meg-body"),
       megSelectElement: contentElement.querySelector(".esm-workspace-meg-select"),
       megSavedQueryPickerElement: contentElement.querySelector(".esm-workspace-meg-saved-picker"),
-      megSavedQueryTriggerButton: contentElement.querySelector(".esm-workspace-meg-saved-trigger"),
-      megSavedQueryMenuElement: contentElement.querySelector(".esm-workspace-meg-saved-menu"),
+      megSavedQuerySelectElement: contentElement.querySelector(".esm-workspace-meg-saved-select"),
       megSavedQueryRecords: [],
       megSavedQueryBusy: false,
       megLaunchButton: contentElement.querySelector(".esm-workspace-meg-open-btn"),
@@ -47310,9 +47114,6 @@ async function loadEsmWorkspaceService(programmer, appInfo, section, contentElem
     }
 
     section.__underparEsmWorkspaceState = esmWorkspaceState;
-    if (esmWorkspaceState.megSavedQueryMenuElement) {
-      esmWorkspaceState.megSavedQueryMenuElement.__underparEsmWorkspaceState = esmWorkspaceState;
-    }
     wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken);
     esmWorkspaceSetTreeCollapsed(esmWorkspaceState, true);
     esmWorkspaceSetMegPanelCollapsed(esmWorkspaceState, true);
@@ -98960,45 +98761,9 @@ function registerEventHandlers() {
     closeAvatarMenu();
   });
 
-  document.addEventListener("click", (event) => {
-    const target = event.target;
-    const pickerElement = target instanceof Element ? target.closest(".esm-workspace-meg-saved-picker") : null;
-    if (pickerElement) {
-      return;
-    }
-    const menuElement = target instanceof Element ? target.closest(".esm-workspace-meg-saved-menu") : null;
-    if (menuElement) {
-      return;
-    }
-    closeAllEsmWorkspaceMegSavedQueryMenus();
-  });
-
-  document.addEventListener("focusin", (event) => {
-    const target = event.target;
-    const pickerElement = target instanceof Element ? target.closest(".esm-workspace-meg-saved-picker") : null;
-    if (pickerElement) {
-      return;
-    }
-    const menuElement = target instanceof Element ? target.closest(".esm-workspace-meg-saved-menu") : null;
-    if (menuElement) {
-      return;
-    }
-    closeAllEsmWorkspaceMegSavedQueryMenus();
-  });
-
-  window.addEventListener("resize", () => {
-    closeAllEsmWorkspaceMegSavedQueryMenus();
-  });
-
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeAvatarMenu();
-      const esmWorkspaceState = resolveEsmWorkspaceStateFromMegSavedQueryNode(document.activeElement);
-      if (esmWorkspaceState) {
-        esmWorkspaceCloseMegSavedQueryMenu(esmWorkspaceState, { restoreFocus: true });
-        return;
-      }
-      closeAllEsmWorkspaceMegSavedQueryMenus();
     }
   });
 
