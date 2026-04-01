@@ -446,16 +446,16 @@ async function hydrateAndSendOperation(entry, plan, specMeta, popupSource) {
       checks.push(Object.keys(captured.headers || {}).some((key) => key.toLowerCase() === "ap-device-identifier"));
       checks.push(Object.keys(captured.headers || {}).some((key) => key.toLowerCase() === "x-device-info"));
     }
-    if (entry.usesVisitorIdentifier === true) {
+    if (Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Visitor-Identifier")) {
       checks.push(getCapturedHeaderValue(captured.headers, "AP-Visitor-Identifier") === SAMPLE_CONTEXT.visitorIdentifier);
     }
-    if (entry.usesAdobeSubjectToken === true) {
+    if (Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.Adobe-Subject-Token")) {
       checks.push(getCapturedHeaderValue(captured.headers, "Adobe-Subject-Token") === SAMPLE_CONTEXT.adobeSubjectToken);
     }
-    if (entry.usesAdServiceToken === true) {
+    if (Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AD-Service-Token")) {
       checks.push(getCapturedHeaderValue(captured.headers, "AD-Service-Token") === SAMPLE_CONTEXT.adServiceToken);
     }
-    if (entry.usesTempPassIdentity === true) {
+    if (Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Temppass-Identity")) {
       checks.push(getCapturedHeaderValue(captured.headers, "AP-Temppass-Identity") === SAMPLE_CONTEXT.tempPassIdentity);
     }
     if (entry.usesPartnerFrameworkStatus === true) {

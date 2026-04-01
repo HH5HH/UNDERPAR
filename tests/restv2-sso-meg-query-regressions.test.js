@@ -403,6 +403,48 @@ test("popup-close success path auto-opens BOBTOOLS in background-hydration mode"
   );
 });
 
+test("REST V2 popup-close BOBTOOLS launch reuses the prior browsing window before the stale popup window id", async () => {
+  const { resolveRestV2BobtoolsLaunchWindowId } = loadFunctions("popup.js", ["resolveRestV2BobtoolsLaunchWindowId"], {
+    state: {
+      restV2PreviousTabId: 71,
+    },
+    getTabByIdSafe: async (tabId) => ({ id: tabId, windowId: 314 }),
+    chrome: {
+      windows: {
+        get: async () => ({ id: 999 }),
+      },
+    },
+    resolveSidepanelControllerWindowId: async () => 123,
+  });
+
+  await assert.doesNotReject(async () => {
+    const windowId = await resolveRestV2BobtoolsLaunchWindowId(999);
+    assert.equal(windowId, 314);
+  });
+});
+
+test("REST V2 popup-close BOBTOOLS launch falls back from a closed popup window to the controller window", async () => {
+  const { resolveRestV2BobtoolsLaunchWindowId } = loadFunctions("popup.js", ["resolveRestV2BobtoolsLaunchWindowId"], {
+    state: {
+      restV2PreviousTabId: 71,
+    },
+    getTabByIdSafe: async () => null,
+    chrome: {
+      windows: {
+        get: async () => {
+          throw new Error("No window with id: 999");
+        },
+      },
+    },
+    resolveSidepanelControllerWindowId: async () => 123,
+  });
+
+  await assert.doesNotReject(async () => {
+    const windowId = await resolveRestV2BobtoolsLaunchWindowId(999);
+    assert.equal(windowId, 123);
+  });
+});
+
 test("debug-flow hydration helpers are wired into the partner SSO runtime paths", () => {
   const popupSource = read("popup.js");
 

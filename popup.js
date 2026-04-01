@@ -61856,6 +61856,33 @@ function buildRestV2SelectionContextFromRecordingContextSafe(recordingContext = 
   return fallback?.ok ? fallback : null;
 }
 
+async function resolveRestV2BobtoolsLaunchWindowId(preferredWindowId = 0) {
+  const previousTab = await getTabByIdSafe(state.restV2PreviousTabId);
+  const previousTabWindowId = Number(previousTab?.windowId || 0);
+  if (previousTabWindowId > 0) {
+    return previousTabWindowId;
+  }
+
+  const normalizedPreferredWindowId = Number(preferredWindowId || 0);
+  if (normalizedPreferredWindowId > 0 && chrome.windows?.get) {
+    try {
+      const preferredWindow = await chrome.windows.get(normalizedPreferredWindowId);
+      const resolvedPreferredWindowId = Number(preferredWindow?.id || 0);
+      if (resolvedPreferredWindowId > 0) {
+        return resolvedPreferredWindowId;
+      }
+    } catch {
+      // Ignore stale popup-window ids and fall through to the controller window.
+    }
+  }
+
+  try {
+    return await resolveSidepanelControllerWindowId(false);
+  } catch {
+    return 0;
+  }
+}
+
 function setRestV2LoginPanelStatusAcrossSections(message = "", type = "") {
   const sections = document.querySelectorAll(".premium-service-section.service-rest-v2");
   sections.forEach((section) => {
@@ -61943,10 +61970,11 @@ async function handleRestV2LoginPopupClosed(tabId = 0) {
         });
       }
 
+      const bobtoolsLaunchWindowId = await resolveRestV2BobtoolsLaunchWindowId(previousLaunchWindowId);
       try {
         await bobtoolsWorkspaceOpenFromRestV2(null, {
           activate: true,
-          windowId: previousLaunchWindowId || undefined,
+          windowId: bobtoolsLaunchWindowId || undefined,
           forceRefresh: false,
           skipHydration: true,
           allowWithoutProfiles: true,
@@ -69905,6 +69933,9 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
       : null;
   const directPartner = String(resolveRestV2PartnerNameFromContext(resolvedContext) || "").trim();
   const learningPartner = String(resolveRestV2LearningPartnerNameFromContext(resolvedContext) || "").trim();
+  // Adobe's browser-run docs contract for Profile by MVPD regresses when the
+  // optional SSO/temp-pass/visitor headers are hydrated into the Run form.
+  const suppressOptionalDocsAuthHeaders = String(resolvedEntry?.key || "").trim() === "profiles-by-mvpd";
   const exactPartnerFrameworkStatus = resolveRestV2ExactPartnerFrameworkStatusForContext(resolvedContext);
   const preferredPartnerFrameworkStatus = resolveRestV2PreferredPartnerFrameworkStatusForContext(resolvedContext);
   const exactPartnerFrameworkStatusRequired =
@@ -69962,25 +69993,25 @@ function buildRestV2InteractiveDocsHydrationPlan(entry, context, accessToken = "
       ]) || ""
     ).trim();
   }
-  if (resolvedEntry.usesAdobeSubjectToken === true) {
+  if (!suppressOptionalDocsAuthHeaders && resolvedEntry.usesAdobeSubjectToken === true) {
     const adobeSubjectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "Adobe-Subject-Token");
     if (adobeSubjectToken) {
       fieldValues["header.Adobe-Subject-Token"] = adobeSubjectToken;
     }
   }
-  if (resolvedEntry.usesAdServiceToken === true) {
+  if (!suppressOptionalDocsAuthHeaders && resolvedEntry.usesAdServiceToken === true) {
     const adServiceToken = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "AD-Service-Token");
     if (adServiceToken) {
       fieldValues["header.AD-Service-Token"] = adServiceToken;
     }
   }
-  if (resolvedEntry.usesTempPassIdentity === true) {
+  if (!suppressOptionalDocsAuthHeaders && resolvedEntry.usesTempPassIdentity === true) {
     const tempPassIdentity = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "AP-Temppass-Identity");
     if (tempPassIdentity) {
       fieldValues["header.AP-Temppass-Identity"] = tempPassIdentity;
     }
   }
-  if (resolvedEntry.usesVisitorIdentifier === true) {
+  if (!suppressOptionalDocsAuthHeaders && resolvedEntry.usesVisitorIdentifier === true) {
     const visitorIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(resolvedContext, "AP-Visitor-Identifier");
     if (visitorIdentifier) {
       fieldValues["header.AP-Visitor-Identifier"] = visitorIdentifier;

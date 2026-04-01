@@ -362,6 +362,7 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
     const specMeta = operationById.get(String(entry.operationId || "").trim());
     assert.ok(specMeta, `Missing spec entry for ${entry.operationId}`);
     assert.equal(String(entry.methodLabel || "").trim(), specMeta.method, `${entry.operationId} method drifted from spec`);
+    const suppressProfileByMvpdOptionalAuthHeaders = entry.key === "profiles-by-mvpd";
 
     const serviceProviderParam = getParameter(specMeta.parameters, "serviceProvider", "path");
     assert.ok(serviceProviderParam?.required, `${entry.operationId} must keep path.serviceProvider required`);
@@ -473,33 +474,39 @@ test("REST V2 learning entries stay aligned with the local OpenAPI spec", () => 
         `${entry.operationId} query.redirectUrl must prefer the resolved HTTPS runtime redirect when UnderPAR has it`
       );
     }
-    if (entry.usesAdobeSubjectToken === true) {
+    if (entry.usesAdobeSubjectToken === true && !suppressProfileByMvpdOptionalAuthHeaders) {
       assert.equal(
         plan.fieldValues["header.Adobe-Subject-Token"],
         sampleContext.adobeSubjectToken,
         `${entry.operationId} must hydrate Adobe-Subject-Token when UnderPAR has it`
       );
     }
-    if (entry.usesAdServiceToken === true) {
+    if (entry.usesAdServiceToken === true && !suppressProfileByMvpdOptionalAuthHeaders) {
       assert.equal(
         plan.fieldValues["header.AD-Service-Token"],
         sampleContext.adServiceToken,
         `${entry.operationId} must hydrate AD-Service-Token when UnderPAR has it`
       );
     }
-    if (entry.usesTempPassIdentity === true) {
+    if (entry.usesTempPassIdentity === true && !suppressProfileByMvpdOptionalAuthHeaders) {
       assert.equal(
         plan.fieldValues["header.AP-Temppass-Identity"],
         Buffer.from(rawTempPassIdentity, "utf8").toString("base64"),
         `${entry.operationId} must normalize AP-Temppass-Identity when UnderPAR has it`
       );
     }
-    if (entry.usesVisitorIdentifier === true) {
+    if (entry.usesVisitorIdentifier === true && !suppressProfileByMvpdOptionalAuthHeaders) {
       assert.equal(
         plan.fieldValues["header.AP-Visitor-Identifier"],
         sampleContext.visitorIdentifier,
         `${entry.operationId} must hydrate AP-Visitor-Identifier when UnderPAR has it`
       );
+    }
+    if (suppressProfileByMvpdOptionalAuthHeaders) {
+      assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.Adobe-Subject-Token"), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AD-Service-Token"), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Temppass-Identity"), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(plan.fieldValues, "header.AP-Visitor-Identifier"), false);
     }
     if (entry.usesDeviceHeaders === true) {
       assert.equal(
