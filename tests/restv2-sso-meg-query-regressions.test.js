@@ -284,6 +284,114 @@ test("sidepanel saved-query menu lifts into a floating body layer when opened", 
   assert.match(popupCss, /\.esm-workspace-meg-saved-menu\.is-floating\s*\{/);
 });
 
+test("sidepanel MEGSPACE saved-query launcher hands the saved URL to the MEG workspace selection-change flow", async () => {
+  const interactions = {
+    rememberedSelection: null,
+    broadcastWindowId: 0,
+    workspaceMessage: null,
+    normalizedEndpointArg: null,
+    normalizedOptionsArg: null,
+  };
+  const esmWorkspaceState = {
+    controllerWindowId: 31,
+    programmer: {
+      programmerId: "Turner",
+    },
+    requestToken: 15,
+  };
+  const { megWorkspaceOpenSavedQueryFromUi } = loadFunctions("popup.js", ["megWorkspaceOpenSavedQueryFromUi"], {
+    state: {
+      megWorkspaceWindowId: 0,
+      premiumPanelRequestToken: 23,
+    },
+    stripMegWorkspaceMediaCompanyQueryParam: (value = "") =>
+      String(value || "").replace(/[?&]media-company=[^&]+/g, "").replace(/\?$/, ""),
+    resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
+    megWorkspaceEnsureWorkspaceTab: async () => ({
+      id: 77,
+      windowId: 45,
+    }),
+    getActiveAdobePassEnvironment: () => ({
+      esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/",
+      mgmtBase: "https://mgmt.auth.adobe.com",
+    }),
+    ADOBE_MGMT_BASE: "https://mgmt.auth.adobe.com",
+    megWorkspaceBuildAbsoluteServiceUrl: (baseOrigin, value) => new URL(String(value || ""), String(baseOrigin || "")).toString(),
+    megWorkspaceNormalizeSelection: (endpoint = null, options = {}) => {
+      interactions.normalizedEndpointArg = endpoint;
+      interactions.normalizedOptionsArg = options;
+      return {
+        endpointUrl: String(endpoint?.url || ""),
+        endpointPath: "/esm/v3/media-company/year/day?requestor-id=MML",
+        endpointLabel: String(options.endpointLabel || ""),
+        launchToken: String(options.launchToken || ""),
+      };
+    },
+    generateRequestId: () => "launch-42",
+    megWorkspaceRememberSelection: (windowId, selection) => {
+      interactions.rememberedSelection = {
+        windowId,
+        selection,
+      };
+    },
+    megWaitForWorkspaceReady: async () => true,
+    megWorkspaceBroadcastControllerState: (_state, windowId) => {
+      interactions.broadcastWindowId = Number(windowId || 0);
+    },
+    megWorkspaceSendWorkspaceMessage: async (event, payload = {}, options = {}) => {
+      interactions.workspaceMessage = {
+        event,
+        payload,
+        options,
+      };
+    },
+    setStatus: () => {
+      throw new Error("setStatus should not be called on the success path");
+    },
+    URL,
+    Date,
+  });
+
+  await megWorkspaceOpenSavedQueryFromUi(
+    esmWorkspaceState,
+    "/esm/v3/media-company/year/day?requestor-id=MML&media-company=Turner",
+    19,
+    "Daily Auth"
+  );
+
+  assert.equal(
+    interactions.normalizedEndpointArg?.url,
+    "https://mgmt.auth.adobe.com/esm/v3/media-company/year/day?requestor-id=MML"
+  );
+  assert.equal(interactions.normalizedOptionsArg?.endpointLabel, "Daily Auth");
+  assert.equal(interactions.normalizedOptionsArg?.launchToken, "launch-42");
+  assert.equal(interactions.rememberedSelection?.windowId, 45);
+  assert.equal(interactions.broadcastWindowId, 45);
+  assert.equal(interactions.workspaceMessage?.event, "selection-change");
+  assert.equal(interactions.workspaceMessage?.payload?.endpointPath, "/esm/v3/media-company/year/day?requestor-id=MML");
+  assert.equal(interactions.workspaceMessage?.payload?.endpointLabel, "Daily Auth");
+  assert.equal(interactions.workspaceMessage?.payload?.autoRun, true);
+  assert.equal(interactions.workspaceMessage?.payload?.requestToken, 19);
+  assert.equal(interactions.workspaceMessage?.options?.targetWindowId, 45);
+});
+
+test("sidepanel MEGSPACE saved-query runner no longer routes saved queries through the ESM workspace opener", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(
+    popupSource,
+    /await megWorkspaceOpenSavedQueryFromUi\(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName\);/
+  );
+  assert.match(
+    popupSource,
+    /await megWorkspaceSendWorkspaceMessage\(\s*"selection-change",[\s\S]*?autoRun:\s*true,/m
+  );
+  assert.doesNotMatch(
+    popupSource,
+    /await esmWorkspaceOpenRequestPathInWorkspace\(esmWorkspaceState, normalizedSavedQueryUrl, liveRequestToken, \{[\s\S]*?requestSource:\s*"saved-query"/m
+  );
+});
+
 test("global MEG saved-query dismiss logic treats the floating menu as inside the picker", () => {
   const popupSource = read("popup.js");
 
