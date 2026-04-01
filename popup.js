@@ -189,6 +189,8 @@ const PREMIUM_SERVICE_SCOPE_RULES = Object.freeze([
   { key: "resetTempPass", label: "Reset TempPASS", scope: PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE },
 ]);
 const PREMIUM_SERVICE_CONCURRENCY_LABEL = "Concurrency Monitoring";
+const CM_USAGE_BILLING_SCOPE = "cmu:billing:client";
+const CM_USAGE_ANALYTICS_SCOPE = "cmu:analytics:client";
 const underparVaultStore = globalThis.UnderparVaultStore || null;
 const REGISTERED_APPLICATION_SCOPE_LABELS = Object.freeze({
   "api:client:v2": "REST API V2",
@@ -197,7 +199,8 @@ const REGISTERED_APPLICATION_SCOPE_LABELS = Object.freeze({
   "temporary:passes:owner": "reset TempPass",
   "mvpd_status:client": "MVPD Status Service",
   "idp:owner": "Proxy MVPD push",
-  "cmu:analytics:client": "CMU",
+  [CM_USAGE_BILLING_SCOPE]: "CM Usage Billing",
+  [CM_USAGE_ANALYTICS_SCOPE]: "CM Usage Analytics",
 });
 const DEGRADATION_SCOPE_CANDIDATES = [PREMIUM_SERVICE_SCOPE_BY_KEY.degradation];
 const KNOWN_PREMIUM_SERVICE_SCOPES = Array.from(
@@ -12138,6 +12141,7 @@ const CM_POLICIES_PATH_TEMPLATES = [
   "/maitai/policy?orgId={tenantId}",
 ];
 const CM_USAGE_PATH_TEMPLATES = [
+  "/v2/billing/daily",
   "/v2/year",
   "/v2/year/duration",
   "/v2/year/duration/occurrences",
@@ -39902,11 +39906,28 @@ body[data-theme="dark"]{
   }
 
   const CMU_TENANT_QUERY_KEYS = ["tenant", "tenant_id", "tenant-id"];
-  const CMU_USAGE_ROOT_SEGMENTS = ["year", "tenant"];
-  const CMU_USAGE_ROOT_SEGMENT_SET = new Set(CMU_USAGE_ROOT_SEGMENTS);
+  const CMU_USAGE_ROOT_SEGMENTS = ["year"];
+  const CMU_USAGE_BILLING_ROOT_SEGMENTS = ["billing"];
+  const CMU_USAGE_ROOT_SEGMENT_SET = new Set([...CMU_USAGE_ROOT_SEGMENTS, ...CMU_USAGE_BILLING_ROOT_SEGMENTS]);
 
   function normalizeTenantScopeValue(value) {
     return String(value || "").trim();
+  }
+
+  function resolveCmuUsageRootSegments(pathParts = []) {
+    const normalizedParts = (Array.isArray(pathParts) ? pathParts : [])
+      .map((part) => String(part || "").trim().toLowerCase())
+      .filter(Boolean)
+      .filter((part) => part !== "cmu" && part !== "v2");
+    for (const part of normalizedParts) {
+      if (part === "billing") {
+        return CMU_USAGE_BILLING_ROOT_SEGMENTS.slice();
+      }
+      if (part === "year") {
+        return CMU_USAGE_ROOT_SEGMENTS.slice();
+      }
+    }
+    return [];
   }
 
   function canonicalizeCmuUsagePath(pathValue) {
@@ -39925,23 +39946,25 @@ body[data-theme="dark"]{
       .map((part) => String(part || "").trim().toLowerCase())
       .filter(Boolean)
       .filter((part) => part !== "cmu" && part !== "v2");
-    if (normalizedParts.length === 0 || !normalizedParts.includes("year")) {
+    const rootSegments = resolveCmuUsageRootSegments(normalizedParts);
+    if (normalizedParts.length === 0 || rootSegments.length === 0) {
       return "";
     }
     const extras = [];
     const seenExtras = new Set();
     normalizedParts.forEach((part) => {
-      if (CMU_USAGE_ROOT_SEGMENT_SET.has(part) || seenExtras.has(part)) {
+      if (rootSegments.includes(part) || seenExtras.has(part)) {
         return;
       }
       seenExtras.add(part);
       extras.push(part);
     });
-    return "/" + ["v2", ...CMU_USAGE_ROOT_SEGMENTS, ...extras].join("/");
+    return "/" + ["v2", ...rootSegments, ...extras].join("/");
   }
 
   function isCmuUsagePath(pathValue) {
-    return canonicalizeCmuUsagePath(pathValue).startsWith("/v2/" + CMU_USAGE_ROOT_SEGMENTS.join("/"));
+    const canonicalPath = canonicalizeCmuUsagePath(pathValue);
+    return canonicalPath.startsWith("/v2/year") || canonicalPath.startsWith("/v2/billing");
   }
 
   function cmuPathRequiresTenantScope(pathValue) {
@@ -40226,6 +40249,8 @@ body[data-theme="dark"]{
     "v2",
     "summary",
     "concurrency",
+    "billing",
+    "daily",
     "report",
     "reports",
     "usage",
@@ -49167,6 +49192,7 @@ function cmuUsageBuildPathLookupCandidates(pathParts) {
   if (canonical.length > 0) {
     return [canonical];
   }
+  const rootSegments = resolveCmuUsageRootSegments(normalizedInput);
   const extras = [];
   const seenExtras = new Set();
   normalizedInput.forEach((part) => {
@@ -49176,7 +49202,7 @@ function cmuUsageBuildPathLookupCandidates(pathParts) {
     seenExtras.add(part);
     extras.push(part);
   });
-  return [[...CM_USAGE_ROOT_SEGMENTS, ...extras]];
+  return rootSegments.length > 0 ? [[...rootSegments, ...extras]] : [];
 }
 
 function cmuUsageBuildCatalog(usageRecords) {
@@ -92487,8 +92513,9 @@ function formatCmUsageDateValue(date) {
 const CM_USAGE_TENANT_QUERY_KEYS = ["tenant", "tenant_id", "tenant-id"];
 const CM_USAGE_REQUIRED_SEGMENT = "year";
 const CM_USAGE_ROOT_SEGMENTS = ["year"];
-const CM_USAGE_ROOT_SEGMENT_SET = new Set(CM_USAGE_ROOT_SEGMENTS);
-const CM_USAGE_CANONICAL_PREFIX = "/v2/year";
+const CM_USAGE_BILLING_ROOT_SEGMENTS = ["billing"];
+const CM_USAGE_ROOT_SEGMENT_SET = new Set([...CM_USAGE_ROOT_SEGMENTS, ...CM_USAGE_BILLING_ROOT_SEGMENTS]);
+const CM_USAGE_CANONICAL_PREFIXES = ["/v2/year", "/v2/billing"];
 let cmUsageCanonicalTemplatePathsCache = null;
 
 function resolveCmUsageTenantScopeValue(...candidates) {
@@ -92524,6 +92551,22 @@ function normalizeCmuUsagePathSegment(value = "") {
   return String(value || "").trim().toLowerCase();
 }
 
+function resolveCmuUsageRootSegments(pathParts = []) {
+  const normalizedParts = (Array.isArray(pathParts) ? pathParts : [])
+    .map((value) => normalizeCmuUsagePathSegment(value))
+    .filter(Boolean)
+    .filter((value) => value !== "cmu" && value !== "v2");
+  for (const part of normalizedParts) {
+    if (part === "billing") {
+      return CM_USAGE_BILLING_ROOT_SEGMENTS.slice();
+    }
+    if (part === CM_USAGE_REQUIRED_SEGMENT) {
+      return CM_USAGE_ROOT_SEGMENTS.slice();
+    }
+  }
+  return [];
+}
+
 function canonicalizeCmuUsagePathParts(pathParts = []) {
   const normalizedParts = (Array.isArray(pathParts) ? pathParts : [])
     .map((value) => normalizeCmuUsagePathSegment(value))
@@ -92535,19 +92578,20 @@ function canonicalizeCmuUsagePathParts(pathParts = []) {
   if (withoutPrefixes.length === 0) {
     return [];
   }
-  if (!withoutPrefixes.includes("year")) {
+  const rootSegments = resolveCmuUsageRootSegments(withoutPrefixes);
+  if (rootSegments.length === 0) {
     return [];
   }
   const extras = [];
   const seenExtras = new Set();
   withoutPrefixes.forEach((part) => {
-    if (CM_USAGE_ROOT_SEGMENT_SET.has(part) || seenExtras.has(part)) {
+    if (rootSegments.includes(part) || seenExtras.has(part)) {
       return;
     }
     seenExtras.add(part);
     extras.push(part);
   });
-  return [...CM_USAGE_ROOT_SEGMENTS, ...extras];
+  return [...rootSegments, ...extras];
 }
 
 function canonicalizeCmuUsagePath(pathValue = "") {
@@ -92574,7 +92618,7 @@ function canonicalizeCmuUsagePath(pathValue = "") {
 
 function isCanonicalCmuUsagePath(pathValue = "") {
   const canonicalPath = canonicalizeCmuUsagePath(pathValue);
-  return canonicalPath.startsWith(CM_USAGE_CANONICAL_PREFIX);
+  return CM_USAGE_CANONICAL_PREFIXES.some((prefix) => canonicalPath.startsWith(prefix));
 }
 
 function cmUsagePathRequiresTenantScope(pathValue = "") {

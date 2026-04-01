@@ -125,6 +125,8 @@ const CM_CMU_NON_DIMENSION_PATH_SEGMENTS = new Set([
   "v2",
   "summary",
   "concurrency",
+  "billing",
+  "daily",
   "report",
   "reports",
   "usage",
@@ -1657,14 +1659,10 @@ function isCmuUsageRequestUrl(urlValue = "") {
     .map((value) => String(value || "").trim().toLowerCase())
     .filter(Boolean)
     .filter((value) => value !== "cmu" && value !== "v2");
-  if (
-    parts.length === 0 ||
-    !parts.includes("year") ||
-    !parts.includes("tenant")
-  ) {
+  if (parts.length === 0) {
     return false;
   }
-  return true;
+  return parts.includes("year") || parts.includes("billing");
 }
 
 function isCmuUsageCard(cardState) {

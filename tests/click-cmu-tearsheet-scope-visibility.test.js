@@ -112,6 +112,16 @@ test("scripts/clickESM.html hides CM tenant scope parameters from visible clickC
     ),
     "v2/year/tenant/month/day?requestor-id=MML&mvpd=Comcast_SSO"
   );
+
+  assert.equal(
+    api.getVisibleSystemRequestUrl("https://cm.adobe.test/v2/billing/daily?tenant=Turner&format=json"),
+    "https://cm.adobe.test/v2/billing/daily"
+  );
+
+  assert.equal(
+    api.getCompactCmuLabel("https://cm.adobe.test/v2/billing/daily?tenant=Turner&format=json"),
+    "v2/billing/daily"
+  );
 });
 
 test("clickCMU static markup hides tenant scope from visible href/text while preserving the full scoped URL in data attributes", () => {

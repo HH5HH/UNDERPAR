@@ -1,7 +1,7 @@
 {
   "sourceUrl": "https://experienceleague.adobe.com/en/docs/pass/cm/integration-guide/cm-usage-reports-examples",
   "sourceLastUpdate": "2025-11-20",
-  "reportCount": 65,
+  "reportCount": 66,
   "reports": [
     {
       "id": "monthly-01-cross-mvpd-monthly-stats",
@@ -1904,6 +1904,16 @@
         "duration_over-1m"
       ],
       "hasMvpdDimension": true
+    },
+    {
+      "id": "daily-22-billing-daily-usage-report",
+      "section": "daily",
+      "sectionLabel": "Daily",
+      "name": "Billing daily usage report",
+      "path": "/v2/billing/daily",
+      "dimensions": [],
+      "metrics": [],
+      "hasMvpdDimension": false
     }
   ]
 }

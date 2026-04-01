@@ -6410,6 +6410,12 @@
         "users",
         "year"
       ]
+    },
+    {
+      "url": "https://cm-reports.adobeprimetime.com/v2/billing/daily",
+      "zoomClass": "zmDAY",
+      "zoomKey": "DAY",
+      "columns": []
     }
   ]
 }
