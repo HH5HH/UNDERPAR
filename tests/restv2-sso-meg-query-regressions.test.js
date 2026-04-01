@@ -403,6 +403,15 @@ test("popup-close success path auto-opens BOBTOOLS in background-hydration mode"
   );
 });
 
+test("REST V2 stop success path auto-opens BOBTOOLS after closing the login window", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(
+    popupSource,
+    /closeResult = await closeRestV2LoginAndReturn\(section, \{[\s\S]*?phasePrefix: "recording-close",[\s\S]*?\}\);[\s\S]*?if \(hasRecordingContext && isRestV2ProfileSessionActiveResult\(profileCheckResult\)\) \{[\s\S]*?await maybeOpenBobtoolsWorkspaceForRestV2ProfileSuccess\(activeFlowId, \{[\s\S]*?source: "recording-stop",[\s\S]*?\}\);[\s\S]*?\}/m
+  );
+});
+
 test("REST V2 popup-close BOBTOOLS launch reuses the prior browsing window before the stale popup window id", async () => {
   const { resolveRestV2BobtoolsLaunchWindowId } = loadFunctions("popup.js", ["resolveRestV2BobtoolsLaunchWindowId"], {
     state: {
@@ -443,6 +452,47 @@ test("REST V2 popup-close BOBTOOLS launch falls back from a closed popup window 
     const windowId = await resolveRestV2BobtoolsLaunchWindowId(999);
     assert.equal(windowId, 123);
   });
+});
+
+test("shared REST V2 success opener uses the resolved browsing window and background-hydration workspace options", async () => {
+  const debugEvents = [];
+  let openOptions = null;
+  const { maybeOpenBobtoolsWorkspaceForRestV2ProfileSuccess } = loadFunctions(
+    "popup.js",
+    ["maybeOpenBobtoolsWorkspaceForRestV2ProfileSuccess"],
+    {
+      resolveRestV2BobtoolsLaunchWindowId: async (windowId) => {
+        assert.equal(windowId, 999);
+        return 314;
+      },
+      bobtoolsWorkspaceOpenFromRestV2: async (_programmer, options) => {
+        openOptions = options;
+        return { id: 11, windowId: Number(options?.windowId || 0) };
+      },
+      emitRestV2DebugEvent: (...args) => {
+        debugEvents.push(args);
+      },
+    }
+  );
+
+  const result = await maybeOpenBobtoolsWorkspaceForRestV2ProfileSuccess("flow-1", {
+    preferredWindowId: 999,
+    source: "recording-stop",
+  });
+
+  assert.equal(result?.ok, true);
+  assert.equal(result?.windowId, 314);
+  assert.equal(openOptions?.activate, true);
+  assert.equal(openOptions?.windowId, 314);
+  assert.equal(openOptions?.forceRefresh, false);
+  assert.equal(openOptions?.skipHydration, true);
+  assert.equal(openOptions?.allowWithoutProfiles, true);
+  assert.equal(debugEvents[0]?.[0], "flow-1");
+  assert.equal(debugEvents[0]?.[1]?.source, "extension");
+  assert.equal(debugEvents[0]?.[1]?.phase, "bobtools-opened");
+  assert.equal(debugEvents[0]?.[1]?.reason, "recording-stop");
+  assert.equal(debugEvents[0]?.[1]?.activate, true);
+  assert.equal(debugEvents[0]?.[1]?.windowId, 314);
 });
 
 test("debug-flow hydration helpers are wired into the partner SSO runtime paths", () => {

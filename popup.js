@@ -35574,6 +35574,12 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
         suppressStatus: true,
         phasePrefix: "recording-close",
       });
+      if (hasRecordingContext && isRestV2ProfileSessionActiveResult(profileCheckResult)) {
+        await maybeOpenBobtoolsWorkspaceForRestV2ProfileSuccess(activeFlowId, {
+          preferredWindowId: Number(closeResult?.closedWindowId || 0),
+          source: "recording-stop",
+        });
+      }
     } catch (error) {
       operationError = error instanceof Error ? error.message : String(error);
     }
@@ -61883,6 +61889,46 @@ async function resolveRestV2BobtoolsLaunchWindowId(preferredWindowId = 0) {
   }
 }
 
+async function maybeOpenBobtoolsWorkspaceForRestV2ProfileSuccess(flowId = "", options = {}) {
+  const preferredWindowId = Number(options?.preferredWindowId || 0);
+  const activate = options?.activate !== false;
+  const source = String(options?.source || "rest-v2-profile-success").trim() || "rest-v2-profile-success";
+  try {
+    const bobtoolsLaunchWindowId = await resolveRestV2BobtoolsLaunchWindowId(preferredWindowId);
+    await bobtoolsWorkspaceOpenFromRestV2(null, {
+      activate,
+      windowId: bobtoolsLaunchWindowId || undefined,
+      forceRefresh: false,
+      skipHydration: true,
+      allowWithoutProfiles: true,
+    });
+    emitRestV2DebugEvent(flowId, {
+      source: "extension",
+      phase: "bobtools-opened",
+      reason: source,
+      activate,
+      windowId: bobtoolsLaunchWindowId,
+    });
+    return {
+      ok: true,
+      windowId: bobtoolsLaunchWindowId,
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    emitRestV2DebugEvent(flowId, {
+      source: "extension",
+      phase: "bobtools-open-error",
+      reason: source,
+      error: reason,
+    });
+    return {
+      ok: false,
+      error: reason,
+      windowId: 0,
+    };
+  }
+}
+
 function setRestV2LoginPanelStatusAcrossSections(message = "", type = "") {
   const sections = document.querySelectorAll(".premium-service-section.service-rest-v2");
   sections.forEach((section) => {
@@ -61970,18 +62016,10 @@ async function handleRestV2LoginPopupClosed(tabId = 0) {
         });
       }
 
-      const bobtoolsLaunchWindowId = await resolveRestV2BobtoolsLaunchWindowId(previousLaunchWindowId);
-      try {
-        await bobtoolsWorkspaceOpenFromRestV2(null, {
-          activate: true,
-          windowId: bobtoolsLaunchWindowId || undefined,
-          forceRefresh: false,
-          skipHydration: true,
-          allowWithoutProfiles: true,
-        });
-      } catch {
-        // Keep the success path alive even if the workspace could not be focused.
-      }
+      await maybeOpenBobtoolsWorkspaceForRestV2ProfileSuccess(flowId, {
+        preferredWindowId: previousLaunchWindowId,
+        source: "popup-close",
+      });
 
       const hydrationContext = buildRestV2ContextFromHarvest(harvestedProfile) || selectionContext;
       if (hydrationContext?.ok) {
