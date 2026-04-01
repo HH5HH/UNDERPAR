@@ -474,28 +474,42 @@ test("registered application health report payload prioritizes selected requesto
   assert.deepEqual(report.warnings, ["secondary-app: details endpoint timed out"]);
 });
 
-test("registered application health premium service bindings stay requestor-aware and exclude CM", () => {
+test("registered application health premium service bindings follow the hydrated runtime primary app and exclude CM", () => {
   const services = {
+    restV2: { guid: "rest-shared", appName: "REST Shared", scopes: ["api:client:v2"], requestors: ["NBADE"] },
     restV2Apps: [
       { guid: "rest-shared", appName: "REST Shared", scopes: ["api:client:v2"], requestors: ["NBADE"] },
       { guid: "rest-mml", appName: "REST MML", scopes: ["api:client:v2"], requestors: ["MML"] },
     ],
+    esm: { guid: "esm-shared", appName: "ESM Shared", scopes: ["analytics:client"], requestors: [] },
     esmApps: [
       { guid: "esm-mml", appName: "ESM MML", scopes: ["analytics:client"], requestors: ["MML"] },
       { guid: "esm-shared", appName: "ESM Shared", scopes: ["analytics:client"], requestors: [] },
     ],
+    degradation: { guid: "deg-mml", appName: "DGR MML", scopes: ["decisions:owner"], requestors: ["MML"] },
     degradationApps: [
       { guid: "deg-mml", appName: "DGR MML", scopes: ["decisions:owner"], requestors: ["MML"] },
     ],
+    resetTempPass: {
+      guid: "temp-shared",
+      appName: "TempPASS Shared",
+      scopes: ["temporary:passes:owner"],
+      requestors: [],
+    },
     resetTempPassApps: [
       { guid: "temp-mml", appName: "TempPASS MML", scopes: ["temporary:passes:owner"], requestors: ["MML"] },
+      { guid: "temp-shared", appName: "TempPASS Shared", scopes: ["temporary:passes:owner"], requestors: [] },
     ],
     cm: { matchedTenants: [{ tenantId: "tenant-1" }] },
   };
   const applications = [
+    services.restV2,
     ...services.restV2Apps,
+    services.esm,
     ...services.esmApps,
+    services.degradation,
     ...services.degradationApps,
+    services.resetTempPass,
     ...services.resetTempPassApps,
   ];
   const helpers = loadPopupFunctions(
@@ -563,6 +577,12 @@ test("registered application health premium service bindings stay requestor-awar
       getCurrentPremiumAppsSnapshot: () => services,
       buildPassVaultHydrationRegisteredApplications: () => applications,
       getCurrentProgrammerApplicationsSnapshot: () => ({ unused: true }),
+      resolveProgrammerPremiumServiceRuntimeApp: (serviceKey = "") =>
+        ({
+          restV2: services.restV2,
+          esm: services.esm,
+          resetTempPass: services.resetTempPass,
+        })[String(serviceKey || "").trim()] || null,
       appSupportsServiceProvider: (appInfo = null, requestorId = "") =>
         (Array.isArray(appInfo?.requestors) ? appInfo.requestors : []).includes(String(requestorId || "").trim()),
     }
@@ -580,10 +600,10 @@ test("registered application health premium service bindings stay requestor-awar
   assert.deepEqual(
     bindings.map((binding) => ({ serviceKey: binding.serviceKey, appGuid: binding.appGuid, label: binding.label })),
     [
-      { serviceKey: "restV2", appGuid: "rest-mml", label: "REST V2" },
-      { serviceKey: "esm", appGuid: "esm-mml", label: "ESM" },
+      { serviceKey: "restV2", appGuid: "rest-shared", label: "REST V2" },
+      { serviceKey: "esm", appGuid: "esm-shared", label: "ESM" },
       { serviceKey: "degradation", appGuid: "deg-mml", label: "DEGRADATION" },
-      { serviceKey: "resetTempPass", appGuid: "temp-mml", label: "Reset TempPASS" },
+      { serviceKey: "resetTempPass", appGuid: "temp-shared", label: "Reset TempPASS" },
     ]
   );
 });
@@ -610,6 +630,80 @@ test("REST V2 requestor selection prefers the media-company-scoped app over requ
       "Discovery"
     )
   );
+
+  assert.equal(selected?.guid, "shared-app");
+});
+
+test("runtime premium service app resolution stays pinned to the hydrated primary app", () => {
+  const services = {
+    restV2: { guid: "rest-shared", appName: "REST Shared" },
+    restV2Apps: [
+      { guid: "rest-shared", appName: "REST Shared" },
+      { guid: "rest-mml", appName: "REST MML" },
+    ],
+    esm: { guid: "esm-shared", appName: "ESM Shared" },
+    esmApps: [
+      { guid: "esm-shared", appName: "ESM Shared" },
+      { guid: "esm-mml", appName: "ESM MML" },
+    ],
+    resetTempPass: { guid: "temp-shared", appName: "TempPASS Shared" },
+    resetTempPassApps: [
+      { guid: "temp-shared", appName: "TempPASS Shared" },
+      { guid: "temp-mml", appName: "TempPASS MML" },
+    ],
+  };
+  const helpers = loadPopupFunctions(["resolveProgrammerPremiumServiceRuntimeApp"], {
+    getCurrentPremiumAppsSnapshot: () => services,
+    getRuntimePremiumServicesSeed: () => services,
+    collectRestV2AppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.restV2Apps || [],
+    collectEsmAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.esmApps || [],
+    collectResetTempPassAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.resetTempPassApps || [],
+    selectPreferredRestV2AppForRequestor: () => services.restV2Apps[1],
+    selectPreferredEsmAppForRequestor: () => services.esmApps[1],
+    selectPreferredResetTempPassAppForRequestor: () => services.resetTempPassApps[1],
+  });
+
+  assert.equal(
+    normalizeRealmObject(helpers.resolveProgrammerPremiumServiceRuntimeApp("restV2", "Turner", services))?.guid,
+    "rest-shared"
+  );
+  assert.equal(
+    normalizeRealmObject(helpers.resolveProgrammerPremiumServiceRuntimeApp("esm", "Turner", services))?.guid,
+    "esm-shared"
+  );
+  assert.equal(
+    normalizeRealmObject(helpers.resolveProgrammerPremiumServiceRuntimeApp("resetTempPass", "Turner", services))?.guid,
+    "temp-shared"
+  );
+});
+
+test("pass vault service hydration reuses the existing primary app before other scoped matches", () => {
+  const helpers = loadPopupFunctions(["resolvePassVaultHydrationServiceApplication"], {
+    registeredApplicationMatchesNativeRequiredScope: (app = null, requiredScope = "") =>
+      (Array.isArray(app?.scopes) ? app.scopes : []).includes(String(requiredScope || "").trim()),
+    buildPassVaultExistingHydrationServiceRecord: () => ({
+      registeredApplication: {
+        guid: "shared-app",
+        appName: "Shared App",
+        scopes: ["api:client:v2"],
+      },
+    }),
+    pickHighestRankedPassVaultServiceCandidate: (apps = []) => apps[0] || null,
+    buildPassVaultCompactRegisteredApplication: (app = null) => normalizeRealmObject(app),
+  });
+
+  const selected = helpers.resolvePassVaultHydrationServiceApplication({
+    definition: {
+      serviceKey: "restV2",
+      requiredScope: "api:client:v2",
+    },
+    programmerId: "Discovery",
+    registeredApplications: [
+      { guid: "animalplanet-app", appName: "Animal Planet", scopes: ["api:client:v2"] },
+      { guid: "shared-app", appName: "Shared App", scopes: ["api:client:v2"] },
+    ],
+    existingRecord: { services: { restV2: { primaryGuid: "shared-app" } } },
+  });
 
   assert.equal(selected?.guid, "shared-app");
 });

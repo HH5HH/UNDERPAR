@@ -528,6 +528,7 @@ function loadRestV2InteractiveDocsContextBuilder(seed = {}) {
     "function getCurrentPremiumAppsSnapshot() { return globalThis.__seed.services || null; }",
     "function resolveRestV2LearningRequestorContext() { return globalThis.__seed.requestorContext || { requestorId: '', autoResolved: false, candidateCount: 0 }; }",
     "function collectRestV2AppCandidatesFromPremiumApps() { return globalThis.__seed.restV2Candidates || []; }",
+    "function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = '', programmerId = '', services = null) { if (typeof globalThis.__seed.resolveRuntimeApp === 'function') { return globalThis.__seed.resolveRuntimeApp(serviceKey, programmerId, services); } const resolvedServices = services && typeof services === 'object' ? services : (globalThis.__seed.services || null); if (String(serviceKey || '').trim() === 'restV2') { return resolvedServices?.restV2 || (globalThis.__seed.restV2Candidates || [])[0] || null; } return null; }",
     "function resolveRestV2AppForServiceProvider(restV2Apps, serviceProviderId) { return typeof globalThis.__seed.resolveApp === 'function' ? globalThis.__seed.resolveApp(restV2Apps, serviceProviderId) : (Array.isArray(restV2Apps) ? restV2Apps[0] || null : null); }",
     "function selectPreferredRestV2AppForRequestor(restV2Apps, serviceProviderId) { return typeof globalThis.__seed.selectPreferredApp === 'function' ? globalThis.__seed.selectPreferredApp(restV2Apps, serviceProviderId) : (Array.isArray(restV2Apps) ? restV2Apps[0] || null : null); }",
     "function normalizeEntityToken(value = '') { return String(value || '').trim().toLowerCase(); }",
@@ -588,6 +589,7 @@ function loadDcrInteractiveDocsContextBuilder(seed = {}) {
     "function getCurrentPremiumAppsSnapshot() { return globalThis.__seed.services || null; }",
     "function resolveRestV2LearningRequestorContext() { return globalThis.__seed.requestorContext || { requestorId: '', autoResolved: false, candidateCount: 0 }; }",
     "function collectRestV2AppCandidatesFromPremiumApps() { return globalThis.__seed.restV2Candidates || []; }",
+    "function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = '', programmerId = '', services = null) { if (typeof globalThis.__seed.resolveRuntimeApp === 'function') { return globalThis.__seed.resolveRuntimeApp(serviceKey, programmerId, services); } const resolvedServices = services && typeof services === 'object' ? services : (globalThis.__seed.services || null); if (String(serviceKey || '').trim() === 'restV2') { return resolvedServices?.restV2 || (globalThis.__seed.restV2Candidates || [])[0] || null; } return null; }",
     "function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId, programmerId) { return typeof globalThis.__seed.selectPreferredApp === 'function' ? globalThis.__seed.selectPreferredApp(restV2Apps, requestorId, programmerId) : (Array.isArray(restV2Apps) ? restV2Apps[0] || null : null); }",
     "function getSelectedDcrRegisterApp() { return globalThis.__seed.selectedRegisterApp || null; }",
     "function loadDcrCache() { return globalThis.__seed.dcrCache || null; }",
@@ -1272,6 +1274,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.match(popupSource, /function setSelectedDcrRegisterAppGuid/);
   assert.match(buildDcrInteractiveDocsContextSource, /collectRestV2AppCandidatesFromPremiumApps/);
   assert.match(buildDcrInteractiveDocsContextSource, /getSelectedDcrRegisterApp/);
+  assert.match(buildDcrInteractiveDocsContextSource, /resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmerId,\s*resolvedServices\)/);
   assert.match(buildDcrInteractiveDocsContextSource, /extractRegisteredApplicationHttpsRedirectUri/);
   assert.doesNotMatch(buildDcrInteractiveDocsContextSource, /resolveProgrammerCustomSchemeRedirectUri/);
   assert.match(prepareDcrInteractiveDocsContextForEntrySource, /enrichRegisteredApplicationForHydration/);
