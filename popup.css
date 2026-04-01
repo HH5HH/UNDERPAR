@@ -2539,6 +2539,32 @@ select:disabled {
     inset 0 0 0 1px var(--service-accent-soft);
 }
 
+.premium-service-section.is-disabled {
+  opacity: 0.84;
+}
+
+.premium-service-section.is-disabled .metadata-header.service-box-header {
+  cursor: not-allowed;
+  filter: saturate(0.62) grayscale(0.18);
+}
+
+.premium-service-section.is-disabled .metadata-header.service-box-header::before {
+  opacity: 0.58;
+}
+
+.premium-service-section.is-disabled .metadata-header .collapse-icon {
+  display: none;
+}
+
+.premium-service-section.is-disabled .service-box-container,
+.premium-service-section.is-disabled .service-box-container:not(.collapsed) {
+  border-left: 4px solid rgba(126, 140, 153, 0.34);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(239, 243, 247, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    inset 0 0 0 1px rgba(126, 140, 153, 0.18);
+}
+
 .premium-service-section .metadata-item,
 .hr-context-section .metadata-item {
   border-color: var(--service-accent-soft);
@@ -2560,6 +2586,27 @@ select:disabled {
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
+}
+
+.service-disabled-note {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px 16px;
+  color: var(--fg-primary);
+}
+
+.service-disabled-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.service-disabled-copy {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-secondary);
 }
 
 .hr-context-service-list {
@@ -7500,6 +7547,32 @@ body.underpar-up-tab .premium-service-section .metadata-header.service-box-heade
 body.underpar-up-tab .hr-context-section .metadata-header.service-box-header::before {
   width: 6px;
   box-shadow: 10px 0 0 rgba(var(--service-zip-1100), 0.14);
+}
+
+body.underpar-up-tab .premium-service-section.is-disabled .metadata-header.service-box-header {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    inset 0 -1px 0 rgba(var(--service-zip-1100), 0.04);
+}
+
+body.underpar-up-tab .premium-service-section.is-disabled::after {
+  opacity: 0.24;
+}
+
+body.underpar-up-tab .premium-service-section.is-disabled .service-box-container,
+body.underpar-up-tab .premium-service-section.is-disabled .service-box-container:not(.collapsed) {
+  background: linear-gradient(180deg, rgba(33, 39, 47, 0.9), rgba(26, 31, 37, 0.94));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.02),
+    inset 0 0 0 1px rgba(126, 140, 153, 0.12);
+}
+
+body.underpar-up-tab .premium-service-section.is-disabled .service-disabled-title {
+  color: rgba(228, 235, 243, 0.94);
+}
+
+body.underpar-up-tab .premium-service-section.is-disabled .service-disabled-copy {
+  color: rgba(177, 188, 201, 0.88);
 }
 
 body.underpar-up-tab .hr-context-service-pill {

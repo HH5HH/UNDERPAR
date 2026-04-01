@@ -30,6 +30,8 @@ test("shared env badge stylesheet defines the colored release badge contract", (
   assert.doesNotMatch(source, /--underpar-env-badge-bg:\s*rgba\(255,\s*255,\s*255,\s*0\.98\);/i);
   assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\)\s*\{[\s\S]*?background:\s*transparent;/i);
   assert.match(source, /:is\(\.page-env-badge,\s*\.env-badge\)\s*\{[\s\S]*?box-shadow:\s*none;/i);
+  assert.match(source, /\[data-environment-key="prequal-staging"\]/);
+  assert.match(source, /\[data-environment-key="prequal-production"\]/);
   assert.match(source, /\[data-environment-key="release-production"\]/);
   assert.match(source, /\[data-environment-key="release-staging"\]/);
   assert.match(source, /:is\(\.page-env-badge-prefix,\s*\.env-badge-prefix\)\s*\{[\s\S]*?display:\s*none;/i);
@@ -57,7 +59,7 @@ test("environment registry exposes a console-style release badge label helper", 
   const source = read("underpar-environment.js");
 
   assert.match(source, /function buildEnvironmentBadgeLabel\(environment\)/);
-  assert.match(source, /return `Release \$\{label\}`;/);
+  assert.match(source, /return String\(resolved\?\.(?:badgeLabel|label)/);
   assert.match(source, /buildEnvironmentBadgeLabel,/);
   assert.match(source, /normalizedContext === "underpar" \|\| normalizedContext === "popup" \|\| normalizedContext === "sidepanel"/);
 });
@@ -79,6 +81,8 @@ test("standalone click views use the same colored release badge treatment", () =
     const source = read(relativePath);
 
     assert.match(source, /\.env-badge\s*\{[\s\S]*?background:\s*transparent;/i);
+    assert.match(source, /\.env-badge\[data-environment-key="prequal-staging"\]/);
+    assert.match(source, /\.env-badge\[data-environment-key="prequal-production"\]/);
     assert.match(source, /\.env-badge\[data-environment-key="release-production"\]/);
     assert.match(source, /\.env-badge\[data-environment-key="release-staging"\]/);
     assert.match(source, /\.env-badge-prefix\s*\{[\s\S]*?display:\s*none;/i);

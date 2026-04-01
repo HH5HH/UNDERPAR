@@ -6,7 +6,7 @@
 }
 
 :is(.page-env-badge, .env-badge)[data-environment-key="release-production"],
-:is(.page-env-badge, .env-badge)[data-environment-label*="Production"] {
+:is(.page-env-badge, .env-badge)[data-environment-label="Release Production"] {
   --underpar-env-badge-border: rgba(81, 196, 104, 0.34);
   --underpar-env-badge-bg: linear-gradient(180deg, rgba(23, 84, 46, 0.96), rgba(15, 61, 32, 0.96));
   --underpar-env-badge-value-ink: rgba(235, 255, 236, 0.96);
@@ -14,11 +14,27 @@
 }
 
 :is(.page-env-badge, .env-badge)[data-environment-key="release-staging"],
-:is(.page-env-badge, .env-badge)[data-environment-label*="Staging"] {
+:is(.page-env-badge, .env-badge)[data-environment-label="Release Staging"] {
   --underpar-env-badge-border: rgba(255, 190, 107, 0.38);
   --underpar-env-badge-bg: linear-gradient(180deg, rgba(92, 54, 12, 0.96), rgba(66, 38, 8, 0.96));
   --underpar-env-badge-value-ink: rgba(255, 235, 201, 0.96);
   --underpar-env-badge-shadow: 0 8px 18px rgba(82, 45, 7, 0.22);
+}
+
+:is(.page-env-badge, .env-badge)[data-environment-key="prequal-production"],
+:is(.page-env-badge, .env-badge)[data-environment-label="Prequal Production"] {
+  --underpar-env-badge-border: rgba(103, 182, 255, 0.38);
+  --underpar-env-badge-bg: linear-gradient(180deg, rgba(18, 63, 106, 0.96), rgba(13, 47, 82, 0.96));
+  --underpar-env-badge-value-ink: rgba(233, 246, 255, 0.97);
+  --underpar-env-badge-shadow: 0 8px 18px rgba(13, 47, 82, 0.24);
+}
+
+:is(.page-env-badge, .env-badge)[data-environment-key="prequal-staging"],
+:is(.page-env-badge, .env-badge)[data-environment-label="Prequal Staging"] {
+  --underpar-env-badge-border: rgba(206, 151, 255, 0.38);
+  --underpar-env-badge-bg: linear-gradient(180deg, rgba(77, 40, 110, 0.96), rgba(57, 28, 86, 0.96));
+  --underpar-env-badge-value-ink: rgba(247, 236, 255, 0.97);
+  --underpar-env-badge-shadow: 0 8px 18px rgba(57, 28, 86, 0.24);
 }
 
 :is(.page-env-badge, .env-badge) {

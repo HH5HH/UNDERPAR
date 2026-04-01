@@ -941,10 +941,43 @@ function beginSavedQueryFlow() {
 function buildFallbackEnvironmentFromInputs() {
   const mgmtBase = getEmbeddedInputValue("mgmt_base") || DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase;
   const spBase = getEmbeddedInputValue("sp_base") || mgmtBase.replace("://mgmt.", "://sp.");
-  const route = /staging/i.test(`${mgmtBase} ${spBase}`) ? "release-staging" : "release-production";
-  const label = /staging/i.test(`${mgmtBase} ${spBase}`) ? "Staging" : "Production";
+  const registry = globalThis.UnderParEnvironment || null;
+  if (registry?.getEnvironment) {
+    const resolved = registry.getEnvironment({ mgmtBase, spBase });
+    return {
+      ...DEFAULT_ADOBEPASS_ENVIRONMENT,
+      ...resolved,
+      mgmtBase,
+      spBase,
+      consoleProgrammersUrl: String(
+        resolved?.consoleProgrammersUrl ||
+          `${String(resolved?.consoleShellOrigin || "https://experience.adobe.com").replace(/\/+$/, "")}/#/@adobepass/pass/authentication/${
+            resolved?.route || resolved?.key || "release-production"
+          }/programmers`
+      ).trim(),
+      esmBase: `${mgmtBase.replace(/\/+$/, "")}/esm/v3/media-company/`,
+    };
+  }
+  const raw = `${mgmtBase} ${spBase}`.toLowerCase();
+  const isPrequal = raw.includes("prequal");
+  const isStaging = raw.includes("staging");
+  const route = isPrequal
+    ? isStaging
+      ? "prequal-staging"
+      : "prequal-production"
+    : isStaging
+      ? "release-staging"
+      : "release-production";
+  const label = isPrequal
+    ? isStaging
+      ? "Prequal Staging"
+      : "Prequal Production"
+    : isStaging
+      ? "Release Staging"
+      : "Release Production";
   return {
     ...DEFAULT_ADOBEPASS_ENVIRONMENT,
+    key: route,
     route,
     label,
     mgmtBase,

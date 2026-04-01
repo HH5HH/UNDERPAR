@@ -70,22 +70,44 @@ const underparVaultStore = globalThis.UnderparVaultStore || null;
 const FALLBACK_DEFAULT_KEY = "release-production";
 const FALLBACK_ENVIRONMENTS = Object.freeze([
   {
-    key: "release-production",
-    label: "Production",
-    route: "release-production",
-    consoleBase: "https://console.auth.adobe.com",
+    key: "prequal-staging",
+    label: "Prequal Staging",
+    route: "prequal-staging",
+    consoleBase: "https://console-prequal.auth-staging.adobe.com",
+    consoleShellOrigin: "https://experience-stage.adobe.com",
+    cmConsoleOrigin: "https://experience-stage.adobe.com",
+    mgmtBase: "https://mgmt-prequal.auth-staging.adobe.com",
+    spBase: "https://sp-prequal.auth-staging.adobe.com",
+  },
+  {
+    key: "prequal-production",
+    label: "Prequal Production",
+    route: "prequal-production",
+    consoleBase: "https://console-prequal.auth.adobe.com",
+    consoleShellOrigin: "https://experience.adobe.com",
     cmConsoleOrigin: "https://experience.adobe.com",
-    mgmtBase: "https://mgmt.auth.adobe.com",
-    spBase: "https://sp.auth.adobe.com",
+    mgmtBase: "https://mgmt-prequal.auth.adobe.com",
+    spBase: "https://sp-prequal.auth.adobe.com",
   },
   {
     key: "release-staging",
-    label: "Staging",
+    label: "Release Staging",
     route: "release-staging",
     consoleBase: "https://console.auth-staging.adobe.com",
+    consoleShellOrigin: "https://experience-stage.adobe.com",
     cmConsoleOrigin: "https://experience-stage.adobe.com",
     mgmtBase: "https://mgmt.auth-staging.adobe.com",
     spBase: "https://sp.auth-staging.adobe.com",
+  },
+  {
+    key: "release-production",
+    label: "Release Production",
+    route: "release-production",
+    consoleBase: "https://console.auth.adobe.com",
+    consoleShellOrigin: "https://experience.adobe.com",
+    cmConsoleOrigin: "https://experience.adobe.com",
+    mgmtBase: "https://mgmt.auth.adobe.com",
+    spBase: "https://sp.auth.adobe.com",
   },
 ]);
 const panelState = {
@@ -128,7 +150,8 @@ function resolveEnvironmentRecord(value) {
 
 function cloneEnvironment(environment) {
   const source = resolveEnvironmentRecord(environment);
-  const consoleShellUrl = `https://experience.adobe.com/#/@adobepass/pass/authentication/${source.route}`;
+  const consoleShellOrigin = String(source.consoleShellOrigin || "https://experience.adobe.com").replace(/\/+$/, "");
+  const consoleShellUrl = `${consoleShellOrigin}/#/@adobepass/pass/authentication/${source.route}`;
   const cmConsoleShellUrl = `${String(source.cmConsoleOrigin || "https://experience.adobe.com").replace(/\/+$/, "")}/#/@adobepass/cm-console/cmu/year`;
   const dcrRegisterUrl = `${source.spBase}/o/client/register`;
   const dcrTokenUrl = `${source.spBase}/o/client/token`;
@@ -155,7 +178,8 @@ function cloneEnvironment(environment) {
 
 function buildEnvironmentTooltip(environment) {
   const env = resolveEnvironmentRecord(environment);
-  const consoleShellUrl = `https://experience.adobe.com/#/@adobepass/pass/authentication/${env.route}`;
+  const consoleShellOrigin = String(env.consoleShellOrigin || "https://experience.adobe.com").replace(/\/+$/, "");
+  const consoleShellUrl = `${consoleShellOrigin}/#/@adobepass/pass/authentication/${env.route}`;
   const cmConsoleShellUrl = `${String(env.cmConsoleOrigin || "https://experience.adobe.com").replace(/\/+$/, "")}/#/@adobepass/cm-console/cmu/year`;
   const dcrRegisterUrl = `${env.spBase}/o/client/register`;
   const dcrTokenUrl = `${env.spBase}/o/client/token`;

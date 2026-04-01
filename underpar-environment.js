@@ -2,50 +2,190 @@
   const STORAGE_KEY = "underpar_adobepass_environment_v1";
   const DEFAULT_KEY = "release-production";
   const EXPERIENCE_ORIGIN = "https://experience.adobe.com";
+  const EXPERIENCE_STAGE_ORIGIN = "https://experience-stage.adobe.com";
+  const PREMIUM_SERVICE_KEY_ALIASES = Object.freeze({
+    cm: "cm",
+    cmmvpd: "cmMvpd",
+    degradation: "degradation",
+    esm: "esmWorkspace",
+    esmworkspace: "esmWorkspace",
+    resettemppass: "resetTempPass",
+    restv2: "restV2",
+  });
   const ENVIRONMENTS = Object.freeze([
     {
-      key: "release-production",
-      label: "Production",
-      route: "release-production",
-      consoleBase: "https://console.auth.adobe.com",
-      cmConsoleOrigin: "https://experience.adobe.com",
-      mgmtBase: "https://mgmt.auth.adobe.com",
-      spBase: "https://sp.auth.adobe.com",
+      key: "prequal-staging",
+      label: "Prequal Staging",
+      shortCode: "PQ_STAGE",
+      route: "prequal-staging",
+      consoleBase: "https://console-prequal.auth-staging.adobe.com",
+      consoleShellOrigin: EXPERIENCE_STAGE_ORIGIN,
+      cmConsoleOrigin: EXPERIENCE_STAGE_ORIGIN,
+      mgmtBase: "https://mgmt-prequal.auth-staging.adobe.com",
+      spBase: "https://sp-prequal.auth-staging.adobe.com",
+      supportedPremiumServices: Object.freeze({
+        restV2: true,
+        esmWorkspace: false,
+        degradation: true,
+        resetTempPass: true,
+        cm: true,
+        cmMvpd: true,
+      }),
+      premiumServiceNotes: Object.freeze({
+        esmWorkspace:
+          "ESM is not provisioned in Prequal Staging. Adobe Pass Console maps ESM only for Release Production, Release Staging, and Prequal Production.",
+      }),
+    },
+    {
+      key: "prequal-production",
+      label: "Prequal Production",
+      shortCode: "PQ_PROD",
+      route: "prequal-production",
+      consoleBase: "https://console-prequal.auth.adobe.com",
+      consoleShellOrigin: EXPERIENCE_ORIGIN,
+      cmConsoleOrigin: EXPERIENCE_ORIGIN,
+      mgmtBase: "https://mgmt-prequal.auth.adobe.com",
+      spBase: "https://sp-prequal.auth.adobe.com",
+      supportedPremiumServices: Object.freeze({
+        restV2: true,
+        esmWorkspace: true,
+        degradation: true,
+        resetTempPass: true,
+        cm: true,
+        cmMvpd: true,
+      }),
     },
     {
       key: "release-staging",
-      label: "Staging",
+      label: "Release Staging",
+      shortCode: "REL_STAGE",
       route: "release-staging",
       consoleBase: "https://console.auth-staging.adobe.com",
-      cmConsoleOrigin: "https://experience-stage.adobe.com",
+      consoleShellOrigin: EXPERIENCE_STAGE_ORIGIN,
+      cmConsoleOrigin: EXPERIENCE_STAGE_ORIGIN,
       mgmtBase: "https://mgmt.auth-staging.adobe.com",
       spBase: "https://sp.auth-staging.adobe.com",
+      supportedPremiumServices: Object.freeze({
+        restV2: true,
+        esmWorkspace: true,
+        degradation: true,
+        resetTempPass: true,
+        cm: true,
+        cmMvpd: true,
+      }),
+    },
+    {
+      key: "release-production",
+      label: "Release Production",
+      shortCode: "REL_PROD",
+      route: "release-production",
+      consoleBase: "https://console.auth.adobe.com",
+      consoleShellOrigin: EXPERIENCE_ORIGIN,
+      cmConsoleOrigin: EXPERIENCE_ORIGIN,
+      mgmtBase: "https://mgmt.auth.adobe.com",
+      spBase: "https://sp.auth.adobe.com",
+      supportedPremiumServices: Object.freeze({
+        restV2: true,
+        esmWorkspace: true,
+        degradation: true,
+        resetTempPass: true,
+        cm: true,
+        cmMvpd: true,
+      }),
     },
   ]);
   const ENVIRONMENT_BY_KEY = new Map(
     ENVIRONMENTS.map((environment) => [String(environment.key || "").trim().toLowerCase(), environment])
   );
+  const ENVIRONMENT_KEY_BY_HOST = new Map(
+    ENVIRONMENTS.flatMap((environment) => {
+      const hosts = [environment.consoleBase, environment.mgmtBase, environment.spBase]
+        .map((value) => {
+          try {
+            return new URL(String(value || "").trim()).host.toLowerCase();
+          } catch {
+            return "";
+          }
+        })
+        .filter(Boolean);
+      return hosts.map((host) => [host, String(environment.key || "").trim().toLowerCase()]);
+    })
+  );
   const HOST_MATCHERS = Object.freeze({
-    console: /^console\.auth(?:-staging)?\.adobe\.com$/i,
-    mgmt: /^mgmt\.auth(?:-staging)?\.adobe\.com$/i,
-    sp: /^(?:sp|api)\.auth(?:-staging)?\.adobe\.com$/i,
+    console: /^console(?:-prequal)?\.auth(?:-staging)?\.adobe\.com$/i,
+    mgmt: /^mgmt(?:-prequal)?\.auth(?:-staging)?\.adobe\.com$/i,
+    sp: /^(?:sp|api)(?:-prequal)?\.auth(?:-staging)?\.adobe\.com$/i,
   });
 
   function normalizeEnvironmentKey(value) {
     return String(value || "").trim().toLowerCase();
   }
 
+  function normalizePremiumServiceKey(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return PREMIUM_SERVICE_KEY_ALIASES[normalized] || normalized;
+  }
+
+  function tryResolveEnvironmentFromUrlValue(value) {
+    const raw = String(value || "").trim();
+    if (!raw) {
+      return null;
+    }
+    try {
+      const parsed = new URL(raw);
+      const mappedKey = ENVIRONMENT_KEY_BY_HOST.get(String(parsed.host || "").trim().toLowerCase());
+      return mappedKey ? ENVIRONMENT_BY_KEY.get(mappedKey) || null : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function resolveEnvironmentFromHints(values = []) {
+    const hints = Array.isArray(values) ? values : [values];
+    for (const value of hints) {
+      const keyed = ENVIRONMENT_BY_KEY.get(normalizeEnvironmentKey(value));
+      if (keyed) {
+        return keyed;
+      }
+      const urlMatched = tryResolveEnvironmentFromUrlValue(value);
+      if (urlMatched) {
+        return urlMatched;
+      }
+    }
+    return null;
+  }
+
   function resolveEnvironmentRecord(value) {
     if (value && typeof value === "object" && !Array.isArray(value)) {
       const keyed = ENVIRONMENT_BY_KEY.get(normalizeEnvironmentKey(value.key));
-      return keyed || ENVIRONMENT_BY_KEY.get(DEFAULT_KEY);
+      if (keyed) {
+        return keyed;
+      }
+      return (
+        resolveEnvironmentFromHints([
+          value.route,
+          value.consoleBase,
+          value.mgmtBase,
+          value.spBase,
+          value.consoleShellUrl,
+          value.cmConsoleOrigin,
+          value.cmConsoleShellUrl,
+          value.dcrRegisterUrl,
+          value.dcrTokenUrl,
+          value.clickEsmTokenUrl,
+          value.restV2Base,
+          value.esmBase,
+          value.degradationBase,
+        ]) || ENVIRONMENT_BY_KEY.get(DEFAULT_KEY)
+      );
     }
-    return ENVIRONMENT_BY_KEY.get(normalizeEnvironmentKey(value)) || ENVIRONMENT_BY_KEY.get(DEFAULT_KEY);
+    return resolveEnvironmentFromHints(value) || ENVIRONMENT_BY_KEY.get(DEFAULT_KEY);
   }
 
   function buildEnvironmentDetails(environment) {
     const resolved = resolveEnvironmentRecord(environment);
-    const consoleShellUrl = `${EXPERIENCE_ORIGIN}/#/@adobepass/pass/authentication/${resolved.route}`;
+    const consoleShellOrigin = String(resolved.consoleShellOrigin || EXPERIENCE_ORIGIN).replace(/\/+$/, "");
+    const consoleShellUrl = `${consoleShellOrigin}/#/@adobepass/pass/authentication/${resolved.route}`;
     const cmConsoleShellUrl = `${String(resolved.cmConsoleOrigin || EXPERIENCE_ORIGIN).replace(/\/+$/, "")}/#/@adobepass/cm-console/cmu/year`;
     const dcrRegisterUrl = `${resolved.spBase}/o/client/register`;
     const dcrTokenUrl = `${resolved.spBase}/o/client/token`;
@@ -55,6 +195,7 @@
     const cmReportsBase = String(resolved.cmReportsBase || "https://cm-reports.adobeprimetime.com").trim();
     return {
       ...resolved,
+      consoleShellOrigin,
       consoleShellUrl,
       cmConsoleShellUrl,
       cmReportsBase,
@@ -64,6 +205,15 @@
       clickEsmTokenUrl: dcrTokenUrl,
       restV2Base,
       esmBase,
+      supportedPremiumServices:
+        resolved.supportedPremiumServices && typeof resolved.supportedPremiumServices === "object"
+          ? { ...resolved.supportedPremiumServices }
+          : {},
+      premiumServiceNotes:
+        resolved.premiumServiceNotes && typeof resolved.premiumServiceNotes === "object"
+          ? { ...resolved.premiumServiceNotes }
+          : {},
+      fileTag: String(resolved.fileTag || resolved.shortCode || resolved.key || "").trim(),
     };
   }
 
@@ -120,8 +270,12 @@
 
   function buildEnvironmentBadgeLabel(environment) {
     const resolved = buildEnvironmentDetails(environment);
-    const label = String(resolved?.label || "Production").trim() || "Production";
-    return `Release ${label}`;
+    return String(resolved?.label || "Release Production").trim() || "Release Production";
+  }
+
+  function buildEnvironmentFileTag(environment) {
+    const resolved = buildEnvironmentDetails(environment);
+    return String(resolved?.fileTag || resolved?.shortCode || resolved?.key || "REL_PROD").trim() || "REL_PROD";
   }
 
   function cloneEnvironment(environment) {
@@ -196,6 +350,43 @@
     return resolved.consoleBase;
   }
 
+  function isPremiumServiceSupported(serviceKey = "", environment = null) {
+    const normalizedServiceKey = normalizePremiumServiceKey(serviceKey);
+    if (!normalizedServiceKey) {
+      return true;
+    }
+    const resolved = buildEnvironmentDetails(environment);
+    const supportedPremiumServices =
+      resolved?.supportedPremiumServices && typeof resolved.supportedPremiumServices === "object"
+        ? resolved.supportedPremiumServices
+        : {};
+    if (Object.prototype.hasOwnProperty.call(supportedPremiumServices, normalizedServiceKey)) {
+      return supportedPremiumServices[normalizedServiceKey] !== false;
+    }
+    return true;
+  }
+
+  function getPremiumServiceSupportNote(serviceKey = "", environment = null) {
+    const normalizedServiceKey = normalizePremiumServiceKey(serviceKey);
+    if (!normalizedServiceKey) {
+      return "";
+    }
+    const resolved = buildEnvironmentDetails(environment);
+    const premiumServiceNotes =
+      resolved?.premiumServiceNotes && typeof resolved.premiumServiceNotes === "object"
+        ? resolved.premiumServiceNotes
+        : {};
+    const explicit = String(premiumServiceNotes[normalizedServiceKey] || "").trim();
+    if (explicit) {
+      return explicit;
+    }
+    if (isPremiumServiceSupported(normalizedServiceKey, resolved)) {
+      return "";
+    }
+    const label = buildEnvironmentBadgeLabel(resolved);
+    return `${normalizedServiceKey} is not provisioned in ${label}.`;
+  }
+
   function rewriteServiceUrl(urlValue, serviceKey = "console", environment = null) {
     const raw = String(urlValue || "").trim();
     if (!raw) {
@@ -245,6 +436,9 @@
     buildEnvironmentTooltip,
     buildEnvironmentBadgeTooltip,
     buildEnvironmentBadgeLabel,
+    buildEnvironmentFileTag,
+    isPremiumServiceSupported,
+    getPremiumServiceSupportNote,
     rewriteServiceUrl,
   });
 })(typeof globalThis !== "undefined" ? globalThis : window);

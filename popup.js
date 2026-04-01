@@ -738,7 +738,12 @@ function getActiveAdobePassEnvironmentKey() {
 }
 
 function getAdobePassEnvironmentFileTag(environment = null) {
+  const registry = getUnderParEnvironmentRegistry();
   const resolved = environment && typeof environment === "object" ? environment : getActiveAdobePassEnvironment();
+  const registryTag = String(registry?.buildEnvironmentFileTag?.(resolved) || "").trim();
+  if (registryTag) {
+    return registryTag;
+  }
   const raw = [
     resolved?.shortCode,
     resolved?.label,
@@ -758,6 +763,22 @@ function getAdobePassEnvironmentFileTag(environment = null) {
     return "STAGE";
   }
   return "PROD";
+}
+
+function isPremiumServiceSupportedInEnvironment(serviceKey = "", environment = getActiveAdobePassEnvironment()) {
+  const registry = getUnderParEnvironmentRegistry();
+  if (registry?.isPremiumServiceSupported) {
+    return registry.isPremiumServiceSupported(serviceKey, environment);
+  }
+  return true;
+}
+
+function getPremiumServiceUnsupportedReason(serviceKey = "", environment = getActiveAdobePassEnvironment()) {
+  const registry = getUnderParEnvironmentRegistry();
+  if (registry?.getPremiumServiceSupportNote) {
+    return String(registry.getPremiumServiceSupportNote(serviceKey, environment) || "").trim();
+  }
+  return "";
 }
 
 function getEnvironmentScopedProgrammerKey(programmerId = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
@@ -39266,7 +39287,7 @@ body[data-theme="dark"]{
   const runtime = ${runtimeJson} || {};
   const DEFAULT_ADOBEPASS_ENVIRONMENT = {
     key: "release-production",
-    label: "Production",
+    label: "Release Production",
     route: "release-production",
     consoleBase: "https://console.auth.adobe.com",
     cmConsoleOrigin: "https://experience.adobe.com",
@@ -39282,32 +39303,80 @@ body[data-theme="dark"]{
     consoleShellUrl: "https://experience.adobe.com/#/@adobepass/pass/authentication/release-production",
     cmConsoleShellUrl: "https://experience.adobe.com/#/@adobepass/cm-console/cmu/year",
   };
+  const ADOBEPASS_ENVIRONMENT_FALLBACKS = {
+    "prequal-staging": {
+      key: "prequal-staging",
+      label: "Prequal Staging",
+      route: "prequal-staging",
+      consoleBase: "https://console-prequal.auth-staging.adobe.com",
+      cmConsoleOrigin: "https://experience-stage.adobe.com",
+      mgmtBase: "https://mgmt-prequal.auth-staging.adobe.com",
+      spBase: "https://sp-prequal.auth-staging.adobe.com",
+    },
+    "prequal-production": {
+      key: "prequal-production",
+      label: "Prequal Production",
+      route: "prequal-production",
+      consoleBase: "https://console-prequal.auth.adobe.com",
+      cmConsoleOrigin: "https://experience.adobe.com",
+      mgmtBase: "https://mgmt-prequal.auth.adobe.com",
+      spBase: "https://sp-prequal.auth.adobe.com",
+    },
+    "release-staging": {
+      key: "release-staging",
+      label: "Release Staging",
+      route: "release-staging",
+      consoleBase: "https://console.auth-staging.adobe.com",
+      cmConsoleOrigin: "https://experience-stage.adobe.com",
+      mgmtBase: "https://mgmt.auth-staging.adobe.com",
+      spBase: "https://sp.auth-staging.adobe.com",
+    },
+    "release-production": DEFAULT_ADOBEPASS_ENVIRONMENT,
+  };
   function resolveRuntimeAdobePassEnvironment(value = null) {
     const payload = value && typeof value === "object" ? value : {};
-    const route = String(payload.route || DEFAULT_ADOBEPASS_ENVIRONMENT.route || "release-production").trim() || "release-production";
-    const isStaging = /staging/i.test(route) || /staging/i.test(String(payload.key || ""));
+    const raw = [
+      payload.route,
+      payload.key,
+      payload.consoleBase,
+      payload.mgmtBase,
+      payload.spBase,
+      payload.restV2Base,
+      payload.esmBase,
+    ]
+      .map((entry) => String(entry || "").trim().toLowerCase())
+      .join(" ");
+    const route = String(
+      payload.route ||
+        (raw.includes("prequal")
+          ? raw.includes("staging")
+            ? "prequal-staging"
+            : "prequal-production"
+          : raw.includes("staging")
+            ? "release-staging"
+            : DEFAULT_ADOBEPASS_ENVIRONMENT.route) ||
+        "release-production"
+    ).trim() || "release-production";
+    const fallback = ADOBEPASS_ENVIRONMENT_FALLBACKS[route] || DEFAULT_ADOBEPASS_ENVIRONMENT;
     const consoleBase = String(
-      payload.consoleBase ||
-        (isStaging ? "https://console.auth-staging.adobe.com" : DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase)
+      payload.consoleBase || fallback.consoleBase || DEFAULT_ADOBEPASS_ENVIRONMENT.consoleBase
     ).trim();
     const cmConsoleOrigin = String(
-      payload.cmConsoleOrigin ||
-        (isStaging ? "https://experience-stage.adobe.com" : DEFAULT_ADOBEPASS_ENVIRONMENT.cmConsoleOrigin)
+      payload.cmConsoleOrigin || fallback.cmConsoleOrigin || DEFAULT_ADOBEPASS_ENVIRONMENT.cmConsoleOrigin
     ).trim();
     const mgmtBase = String(
-      payload.mgmtBase ||
-        (isStaging ? "https://mgmt.auth-staging.adobe.com" : DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase)
+      payload.mgmtBase || fallback.mgmtBase || DEFAULT_ADOBEPASS_ENVIRONMENT.mgmtBase
     ).trim();
     const spBase = String(
-      payload.spBase ||
-        (isStaging ? "https://sp.auth-staging.adobe.com" : DEFAULT_ADOBEPASS_ENVIRONMENT.spBase)
+      payload.spBase || fallback.spBase || DEFAULT_ADOBEPASS_ENVIRONMENT.spBase
     ).trim();
     const cmReportsBase = String(payload.cmReportsBase || DEFAULT_ADOBEPASS_ENVIRONMENT.cmReportsBase).trim();
     return {
       ...DEFAULT_ADOBEPASS_ENVIRONMENT,
+      ...fallback,
       ...payload,
-      key: String(payload.key || (isStaging ? "release-staging" : DEFAULT_ADOBEPASS_ENVIRONMENT.key)).trim(),
-      label: String(payload.label || (isStaging ? "Staging" : DEFAULT_ADOBEPASS_ENVIRONMENT.label)).trim(),
+      key: String(payload.key || fallback.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim(),
+      label: String(payload.label || fallback.label || DEFAULT_ADOBEPASS_ENVIRONMENT.label).trim(),
       route,
       consoleBase,
       cmConsoleOrigin,
@@ -42634,7 +42703,10 @@ function esmWorkspaceGetSelectedControllerStatePayload(programmer = null, servic
 }
 
 function hasEsmScopedApp(services) {
-  return Boolean(String(services?.esm?.guid || "").trim());
+  return (
+    isPremiumServiceSupportedInEnvironment("esmWorkspace", getActiveAdobePassEnvironment()) &&
+    Boolean(String(services?.esm?.guid || "").trim())
+  );
 }
 
 function esmWorkspaceBroadcastSelectedControllerState(programmer = null, services = null, targetWindowId = 0, options = {}) {
@@ -47097,6 +47169,13 @@ function ensureMegWorkspaceWorkspaceTabWatcher() {
 
 async function loadEsmWorkspaceService(programmer, appInfo, section, contentElement, requestToken) {
   if (!contentElement) {
+    return;
+  }
+  if (!isPremiumServiceSupportedInEnvironment("esmWorkspace", getActiveAdobePassEnvironment())) {
+    contentElement.innerHTML = `<div class="service-disabled-note"><p class="service-disabled-copy">${escapeHtml(
+      getPremiumServiceUnsupportedReason("esmWorkspace", getActiveAdobePassEnvironment()) ||
+        "ESM is unavailable in the selected Adobe Pass environment."
+    )}</p></div>`;
     return;
   }
   let currentServices = programmer?.programmerId ? getCurrentPremiumAppsSnapshot(programmer.programmerId) : null;
@@ -67309,8 +67388,11 @@ function wireHrContextSectionActions(section) {
   section.__underparHrActionsBound = true;
 }
 
-function createPremiumServiceSection(programmer, serviceKey, appInfo) {
+function createPremiumServiceSection(programmer, serviceKey, appInfo, options = {}) {
   const title = PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey;
+  const environment = options?.environment && typeof options.environment === "object" ? options.environment : getActiveAdobePassEnvironment();
+  const disabled = options?.disabled === true;
+  const disabledReason = String(options?.disabledReason || "").trim();
   const servicesForProgrammer =
     programmer?.programmerId && state.premiumAppsByProgrammerId.has(programmer.programmerId)
       ? getCurrentPremiumAppsSnapshot(programmer.programmerId)
@@ -67339,9 +67421,13 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
       : "Concurrency Monitoring is powered by CM tenant APIs (not a registered application scope).";
 
   const section = document.createElement("article");
-  section.className = `metadata-section premium-service-section ${PREMIUM_SERVICE_THEME_CLASS_BY_KEY[serviceKey] || ""}`;
+  section.className = `metadata-section premium-service-section ${PREMIUM_SERVICE_THEME_CLASS_BY_KEY[serviceKey] || ""}${
+    disabled ? " is-disabled" : ""
+  }`;
   section.dataset.programmerId = String(programmer?.programmerId || "").trim();
   section.dataset.serviceKey = String(serviceKey || "").trim();
+  section.dataset.serviceDisabled = disabled ? "true" : "false";
+  section.dataset.environmentKey = String(environment?.key || getActiveAdobePassEnvironmentKey() || "").trim();
   section.dataset.appGuid = String(resolvedServiceApp?.guid || "").trim();
   const restV2LoginToolHtml =
     serviceKey === "restV2"
@@ -67377,20 +67463,34 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
         </section>
         `
       : "";
+  const disabledStateBodyHtml = disabled
+    ? `
+      <div class="service-disabled-note" role="note">
+        <p class="service-disabled-title">${escapeHtml(title)} is disabled in ${escapeHtml(
+          String(environment?.label || environment?.key || "this environment").trim()
+        )}.</p>
+        <p class="service-disabled-copy">${escapeHtml(
+          disabledReason || `${title} does not apply to the selected Adobe Pass environment.`
+        )}</p>
+      </div>
+    `
+    : "";
   const serviceBodyHtml =
-    serviceKey === "esmWorkspace" ||
-    serviceKey === "degradation" ||
-    serviceKey === "resetTempPass" ||
-    serviceKey === "cm" ||
-    serviceKey === "cmMvpd"
-      ? ""
-      : buildPremiumServiceSummaryHtml(programmer, serviceKey, appInfo);
+    disabled
+      ? disabledStateBodyHtml
+      : serviceKey === "esmWorkspace" ||
+          serviceKey === "degradation" ||
+          serviceKey === "resetTempPass" ||
+          serviceKey === "cm" ||
+          serviceKey === "cmMvpd"
+        ? ""
+        : buildPremiumServiceSummaryHtml(programmer, serviceKey, appInfo);
   const sectionLabel =
     serviceKey === "cm" || serviceKey === "cmMvpd" ? String(title || serviceKey).toUpperCase() : title;
-  const initialCollapsed = getPremiumSectionCollapsed(programmer?.programmerId, serviceKey);
-  const { detailsElement, contentElement } = applyServiceBoxSectionShell(section, {
+  const initialCollapsed = disabled ? false : getPremiumSectionCollapsed(programmer?.programmerId, serviceKey);
+  const { detailsElement, toggleButton, contentElement } = applyServiceBoxSectionShell(section, {
     title: sectionLabel,
-    hoverMessage: serviceHoverMessage,
+    hoverMessage: disabled ? disabledReason || serviceHoverMessage : serviceHoverMessage,
     initialCollapsed,
     useNativeDetailsToggle: serviceKey === "cm" || serviceKey === "cmMvpd",
     contentClassName: "service-content",
@@ -67399,9 +67499,24 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo) {
       ${serviceBodyHtml}
     `,
     onCollapsedChange: (collapsed) => {
-      setPremiumSectionCollapsed(programmer?.programmerId, serviceKey, collapsed);
+      if (!disabled) {
+        setPremiumSectionCollapsed(programmer?.programmerId, serviceKey, collapsed);
+      }
     },
   });
+
+  if (disabled) {
+    if (toggleButton) {
+      toggleButton.classList.add("is-disabled");
+      toggleButton.setAttribute("aria-disabled", "true");
+      toggleButton.title = disabledReason || serviceHoverMessage;
+      toggleButton.setAttribute("aria-label", disabledReason || serviceHoverMessage);
+      if (toggleButton instanceof HTMLButtonElement) {
+        toggleButton.disabled = true;
+      }
+    }
+    return section;
+  }
 
   if (serviceKey === "esmWorkspace") {
     section.__underparRefreshEsmWorkspace = () => {
@@ -67541,11 +67656,12 @@ function buildPremiumServicesRenderSignature(programmer = null, services = null)
   }
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const selectedMvpdId = String(state.selectedMvpdId || "").trim();
-  const availableKeys = getDetectedPremiumServiceKeys(services);
-  const serviceSegments = availableKeys.map((serviceKey) => {
+  const renderEntries = getRenderablePremiumServiceEntries(services);
+  const serviceSegments = renderEntries.map((entry) => {
+    const serviceKey = String(entry?.serviceKey || "").trim();
     const appInfo = serviceKey === "esmWorkspace" ? services?.esm : services?.[serviceKey];
     const appGuid = String(appInfo?.guid || "").trim();
-    return `${serviceKey}:${appGuid}`;
+    return `${serviceKey}:${appGuid}:${entry?.disabled === true ? "disabled" : "active"}`;
   });
   return [programmerId, selectedRequestorId, selectedMvpdId, ...serviceSegments].join("|");
 }
@@ -67623,16 +67739,20 @@ function hasRenderablePremiumServiceSections(services = null) {
   if (!els.premiumServicesContainer) {
     return false;
   }
-  const expectedKeys = getDetectedPremiumServiceKeys(services);
-  if (expectedKeys.length === 0) {
+  const expectedEntries = getRenderablePremiumServiceEntries(services);
+  if (expectedEntries.length === 0) {
     return false;
   }
   const sections = Array.from(els.premiumServicesContainer.querySelectorAll(".premium-service-section"));
-  if (sections.length !== expectedKeys.length) {
+  if (sections.length !== expectedEntries.length) {
     return false;
   }
-  const actualKeys = sections.map((section) => String(section?.dataset?.serviceKey || "").trim());
-  return expectedKeys.every((serviceKey, index) => actualKeys[index] === serviceKey);
+  return expectedEntries.every((entry, index) => {
+    const section = sections[index];
+    const actualKey = String(section?.dataset?.serviceKey || "").trim();
+    const actualDisabled = String(section?.dataset?.serviceDisabled || "").trim() === "true";
+    return actualKey === String(entry?.serviceKey || "").trim() && actualDisabled === (entry?.disabled === true);
+  });
 }
 
 function hasRenderableHrContextSections(programmer = null, services = null) {
@@ -67744,6 +67864,9 @@ function refreshExistingPremiumServiceSections(programmer, services = null) {
     }
     const serviceKey = String(section.dataset.serviceKey || "").trim();
     if (!serviceKey) {
+      return;
+    }
+    if (String(section.dataset.serviceDisabled || "").trim() === "true") {
       return;
     }
     const serviceApp = serviceKey === "esmWorkspace" ? services?.esm || null : services?.[serviceKey] || null;
@@ -67858,18 +67981,61 @@ function shouldShowCmService(cmService) {
   return matchedTenants.length > 0;
 }
 
-function getDetectedPremiumServiceKeys(services) {
+function getRawDetectedPremiumServiceKeys(services) {
   if (!services || typeof services !== "object") {
     return [];
   }
   return PREMIUM_SERVICE_DISPLAY_ORDER.filter((serviceKey) => {
     if (serviceKey === "esmWorkspace") {
-      return hasEsmScopedApp(services);
+      return Boolean(String(services?.esm?.guid || "").trim());
     }
     if (serviceKey === "cm" || serviceKey === "cmMvpd") {
       return shouldShowCmService(services?.[serviceKey]);
     }
     return Boolean(services?.[serviceKey]);
+  });
+}
+
+function getDetectedPremiumServiceKeys(services, environment = getActiveAdobePassEnvironment()) {
+  return getRawDetectedPremiumServiceKeys(services).filter((serviceKey) =>
+    isPremiumServiceSupportedInEnvironment(serviceKey, environment)
+  );
+}
+
+function getDisabledDetectedPremiumServiceEntries(services, environment = getActiveAdobePassEnvironment()) {
+  return getRawDetectedPremiumServiceKeys(services)
+    .filter((serviceKey) => !isPremiumServiceSupportedInEnvironment(serviceKey, environment))
+    .map((serviceKey) => ({
+      serviceKey,
+      label: PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey,
+      documentationUrl: String(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY[serviceKey] || "").trim(),
+      disabled: true,
+      reason:
+        getPremiumServiceUnsupportedReason(serviceKey, environment) ||
+        `${PREMIUM_SERVICE_TITLE_BY_KEY[serviceKey] || serviceKey} is unavailable in this Adobe Pass environment.`,
+    }));
+}
+
+function getRenderablePremiumServiceEntries(services, environment = getActiveAdobePassEnvironment()) {
+  const enabledKeys = new Set(getDetectedPremiumServiceKeys(services, environment));
+  const disabledEntryByKey = new Map(
+    getDisabledDetectedPremiumServiceEntries(services, environment).map((entry) => [String(entry.serviceKey || "").trim(), entry])
+  );
+  return PREMIUM_SERVICE_DISPLAY_ORDER.flatMap((serviceKey) => {
+    const normalizedServiceKey = String(serviceKey || "").trim();
+    if (enabledKeys.has(normalizedServiceKey)) {
+      return [
+        {
+          serviceKey: normalizedServiceKey,
+          label: PREMIUM_SERVICE_TITLE_BY_KEY[normalizedServiceKey] || normalizedServiceKey,
+          documentationUrl: String(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY[normalizedServiceKey] || "").trim(),
+          disabled: false,
+          reason: "",
+        },
+      ];
+    }
+    const disabledEntry = disabledEntryByKey.get(normalizedServiceKey);
+    return disabledEntry ? [disabledEntry] : [];
   });
 }
 
@@ -73635,7 +73801,8 @@ function renderPremiumServices(services, programmer = null, options = {}) {
       : '<p class="metadata-empty">Select a Media Company to load premium scoped applications.</p>';
     return;
   }
-  const availableKeys = getDetectedPremiumServiceKeys(services);
+  const renderEntries = getRenderablePremiumServiceEntries(services);
+  const availableKeys = renderEntries.filter((entry) => entry?.disabled !== true).map((entry) => String(entry?.serviceKey || "").trim());
   const hasCmContainer = availableKeys.includes("cm") || availableKeys.includes("cmMvpd");
   cmBroadcastSelectedControllerState(programmer, services, 0, {
     controllerReason,
@@ -73652,7 +73819,7 @@ function renderPremiumServices(services, programmer = null, options = {}) {
     esmAvailabilityResolved: true,
     esmContainerVisible: hasEsmContainer,
   });
-  if (availableKeys.length === 0) {
+  if (renderEntries.length === 0) {
     delete els.premiumServicesContainer.dataset.renderSignature;
     els.premiumServicesContainer.innerHTML =
       '<p class="metadata-empty">No premium scoped applications found for this media company.</p>';
@@ -73672,9 +73839,14 @@ function renderPremiumServices(services, programmer = null, options = {}) {
   }
 
   els.premiumServicesContainer.innerHTML = "";
-  for (const serviceKey of availableKeys) {
+  for (const entry of renderEntries) {
+    const serviceKey = String(entry?.serviceKey || "").trim();
     const appInfo = serviceKey === "esmWorkspace" ? services.esm : services[serviceKey];
-    const section = createPremiumServiceSection(programmer, serviceKey, appInfo);
+    const section = createPremiumServiceSection(programmer, serviceKey, appInfo, {
+      environment: getActiveAdobePassEnvironment(),
+      disabled: entry?.disabled === true,
+      disabledReason: String(entry?.reason || "").trim(),
+    });
     els.premiumServicesContainer.appendChild(section);
   }
   els.premiumServicesContainer.dataset.renderSignature = renderSignature;
