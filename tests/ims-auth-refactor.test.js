@@ -838,6 +838,10 @@ test("session activation delegates background hydration to the shared LoginButto
   assert.match(postLoginHydrateSource, /buildUnifiedShellContext\(/);
   assert.ok(
     buildConsoleContextSource.indexOf("Console extended profile") <
+      buildConsoleContextSource.indexOf("Console maintenance status")
+  );
+  assert.ok(
+    buildConsoleContextSource.indexOf("Console maintenance status") <
       buildConsoleContextSource.indexOf("Console configuration version")
   );
   assert.doesNotMatch(hydrateSource, /prefetchCmConsoleBootstrapSummaryInBackground/);
@@ -1265,6 +1269,7 @@ test("console configuration version is sourced dynamically from the direct conso
   assert.match(buildConsoleContextSource, /const pageContextTargetRef = \{ target: null \};/);
   assert.match(buildConsoleContextSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
   assert.match(buildConsoleContextSource, /rest\/api\/user\/extendedProfile/);
+  assert.match(buildConsoleContextSource, /rest\/api\/admin\/maintenance\/status/);
   assert.match(buildConsoleContextSource, /rest\/api\/config\/latestActivatedConsoleConfigurationVersion/);
   assert.match(buildConsoleContextSource, /const configurationVersionMissingError = configurationVersion > 0/);
   assert.match(buildConsoleContextSource, /configurationVersion > 0\s*\?\s*await Promise\.all/);
@@ -2159,14 +2164,13 @@ test("console page-context target resolution matches LoginButton behavior", () =
   assert.match(resolveExperienceTargetSource, /getCmConsoleBootstrapUrl\(\)/);
 });
 
-test("CM reports page helpers no longer open temporary Adobe tabs for direct fetches", () => {
+test("legacy CM reports-page bootstrap helpers are removed from source", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const reportsBootstrapSource = extractFunctionSource(popupSource, "requestCmConsoleBootstrapCatalogFromReportsPage");
-  const reportsFetchSource = extractFunctionSource(popupSource, "fetchCmJsonViaReportsPageContext");
 
-  assert.doesNotMatch(reportsBootstrapSource, /openTemporaryAdobePageContextTarget/);
-  assert.doesNotMatch(reportsFetchSource, /openTemporaryAdobePageContextTarget/);
-  assert.match(reportsFetchSource, /allowTemporaryPageContextTab:\s*false/);
+  assert.doesNotMatch(popupSource, /function requestCmConsoleBootstrapCatalogFromReportsPage\(/);
+  assert.doesNotMatch(popupSource, /function fetchCmJsonViaReportsPageContext\(/);
+  assert.doesNotMatch(popupSource, /function findExistingCmReportsAdobeTab\(/);
+  assert.doesNotMatch(popupSource, /function bootstrapCmConsoleTenantSession\(/);
 });
 
 test("media company selection uses cached live AdobePass apps or direct applications queries without selection-time vault hydration", () => {
@@ -2416,20 +2420,17 @@ test("vault purge path forces a durable start-shell reset and clears in-memory v
 
 test("active CM bootstrap uses UnderPAR bearer-derived qualification instead of exc_app seeding", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const requestQualifiedSource = extractFunctionSource(popupSource, "requestQualifiedCmConsoleToken");
   const hydrateCmSource = extractFunctionSource(popupSource, "hydrateGlobalCmConsoleBootstrapForActiveSession");
   const ensureCmSource = extractFunctionSource(popupSource, "ensureCmApiAccessToken");
 
-  assert.equal(/requestExperienceCloudConsoleToken/.test(requestQualifiedSource), false);
-  assert.equal(/persistExperienceCloudConsoleTokenResult/.test(requestQualifiedSource), false);
-  assert.equal(/getPreferredExperienceCloudConsoleAccessTokenCandidate/.test(requestQualifiedSource), false);
+  assert.doesNotMatch(popupSource, /function requestQualifiedCmConsoleToken\(/);
   assert.equal(/requestExperienceCloudConsoleToken/.test(hydrateCmSource), false);
   assert.equal(/persistExperienceCloudConsoleTokenResult/.test(hydrateCmSource), false);
   assert.equal(/tryRefreshCmTokenFromIms\(\"\"/.test(hydrateCmSource), false);
   assert.equal(/requestExperienceCloudConsoleToken/.test(ensureCmSource), false);
   assert.equal(/persistExperienceCloudConsoleTokenResult/.test(ensureCmSource), false);
   assert.equal(/ensure-cookie-session/.test(ensureCmSource), false);
-  assert.doesNotMatch(requestQualifiedSource, /attemptSilentBootstrapLogin/);
+  assert.doesNotMatch(hydrateCmSource, /attemptSilentBootstrapLogin/);
   assert.doesNotMatch(ensureCmSource, /tryRefreshCmTokenFromIms/);
 });
 

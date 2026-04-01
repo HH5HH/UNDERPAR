@@ -82003,10 +82003,24 @@ function compactStoredConsoleHydrationSnapshot(snapshot = null) {
     .map((programmer) => compactStoredConsoleProgrammerForStorage(programmer))
     .filter(Boolean)
     .slice(0, 500);
+  const maintenanceStatus =
+    raw.maintenanceStatus && typeof raw.maintenanceStatus === "object"
+      ? pruneEmptyObject({
+          maintenanceMode: compactStorageString(
+            firstNonEmptyString([raw.maintenanceStatus?.maintenanceMode, raw.maintenanceMode]),
+            32
+          ),
+          message: compactStorageString(
+            firstNonEmptyString([raw.maintenanceStatus?.message, raw.maintenanceMessage]),
+            512
+          ),
+        })
+      : null;
   const compact = pruneEmptyObject({
     configurationVersion,
     hydratedAt,
     grantedAuthorities,
+    maintenanceStatus,
     channels,
     programmers,
     programmersApiEndpoint: compactStorageString(firstNonEmptyString([raw.programmersApiEndpoint]), 2048),
@@ -82025,6 +82039,10 @@ function normalizeStoredConsoleHydrationSnapshot(snapshot = null) {
     configurationVersion: Number(compact.configurationVersion || 0),
     hydratedAt: Number(compact.hydratedAt || 0),
     grantedAuthorities: Array.isArray(compact.grantedAuthorities) ? compact.grantedAuthorities.slice() : [],
+    maintenanceStatus:
+      compact.maintenanceStatus && typeof compact.maintenanceStatus === "object"
+        ? cloneJsonLikeValue(compact.maintenanceStatus, null)
+        : null,
     channels: Array.isArray(compact.channels) ? compact.channels.slice() : [],
     programmers: Array.isArray(compact.programmers) ? compact.programmers.slice() : [],
     programmersApiEndpoint: firstNonEmptyString([compact.programmersApiEndpoint]),
@@ -82038,6 +82056,10 @@ function buildStoredConsoleHydrationSnapshotFromState() {
     grantedAuthorities: Array.isArray(state.consoleBootstrapState?.grantedAuthorities)
       ? state.consoleBootstrapState.grantedAuthorities
       : [],
+    maintenanceStatus:
+      state.consoleBootstrapState?.maintenanceStatus && typeof state.consoleBootstrapState.maintenanceStatus === "object"
+        ? state.consoleBootstrapState.maintenanceStatus
+        : null,
     channels: Array.isArray(state.consoleBootstrapState?.channels) ? state.consoleBootstrapState.channels : [],
     programmers: Array.isArray(state.programmers) ? state.programmers : [],
     programmersApiEndpoint: firstNonEmptyString([state.programmersApiEndpoint]),
@@ -85472,6 +85494,7 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
       pageContextUrl: "",
       configurationVersion: 0,
       extendedProfile: null,
+      maintenanceStatus: null,
       roles: [],
       channels: [],
       programmers: [],
@@ -85480,6 +85503,7 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
       status: "unavailable",
       errors: {
         extendedProfile: "Adobe IMS access token is unavailable.",
+        maintenanceStatus: "Adobe IMS access token is unavailable.",
         configurationVersion: "Adobe IMS access token is unavailable.",
         channels: "Adobe IMS access token is unavailable.",
         programmers: "Adobe IMS access token is unavailable.",
@@ -85507,6 +85531,7 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
       pageContextUrl: "",
       configurationVersion: 0,
       extendedProfile: null,
+      maintenanceStatus: null,
       roles: [],
       channels: [],
       programmers: [],
@@ -85515,6 +85540,7 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
       status: explicitAdobePassRecoveryRequested ? "org-selection-required" : "skipped",
       errors: {
         extendedProfile: "",
+        maintenanceStatus: "",
         configurationVersion: "",
         channels: "",
         programmers: "",
@@ -85552,6 +85578,17 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
       syncConsoleFetchMeta(extendedProfileResult.value);
     }
 
+    const maintenanceStatusResult = await settle(() =>
+      fetchAdobeConsoleJsonWithLoginButtonFallback(
+        [`${ADOBE_CONSOLE_BASE}/rest/api/admin/maintenance/status`],
+        "Console maintenance status",
+        buildCommonRequestOptions()
+      )
+    );
+    if (maintenanceStatusResult.ok) {
+      syncConsoleFetchMeta(maintenanceStatusResult.value);
+    }
+
     const configurationVersionResult = await settle(() =>
       fetchAdobeConsoleJsonWithLoginButtonFallback(
         [`${ADOBE_CONSOLE_BASE}/rest/api/config/latestActivatedConsoleConfigurationVersion`],
@@ -85566,6 +85603,12 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
     const extendedProfile =
       extendedProfileResult.ok && extendedProfileResult.value?.parsed && typeof extendedProfileResult.value.parsed === "object"
         ? extendedProfileResult.value.parsed
+        : null;
+    const maintenanceStatus =
+      maintenanceStatusResult.ok &&
+      maintenanceStatusResult.value?.parsed &&
+      typeof maintenanceStatusResult.value.parsed === "object"
+        ? maintenanceStatusResult.value.parsed
         : null;
     const configurationVersion = mvpdWorkspaceExtractConfigurationVersion(configurationVersionResult.ok ? configurationVersionResult.value?.parsed : null, 0);
     const configurationVersionMissingError = configurationVersion > 0
@@ -85608,6 +85651,7 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
     const roles = extractAdobeConsoleGrantedAuthorities(extendedProfile);
     const errors = {
       extendedProfile: extendedProfileResult.ok ? "" : serializeError(extendedProfileResult.error),
+      maintenanceStatus: maintenanceStatusResult.ok ? "" : serializeError(maintenanceStatusResult.error),
       configurationVersion:
         configurationVersionResult.ok && configurationVersion > 0
           ? ""
@@ -85619,10 +85663,13 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
     };
     const successfulSegments = [
       extendedProfile ? 1 : 0,
+      maintenanceStatus ? 1 : 0,
       configurationVersion > 0 ? 1 : 0,
       channelsResult.ok ? 1 : 0,
       programmersResult.ok ? 1 : 0,
     ].reduce((total, value) => total + value, 0);
+    const bootstrapReady = successfulSegments === 5;
+    const bootstrapAvailable = successfulSegments > 0;
     const nextConsoleContext = {
       ...previousConsole,
       environmentId: String(environment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.key).trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key,
@@ -85634,24 +85681,35 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
       pageContextUrl,
       configurationVersion,
       extendedProfile,
+      maintenanceStatus,
       roles,
       channels,
       programmers,
       programmersApiEndpoint: firstNonEmptyString([state.programmersApiEndpoint, previousConsole?.programmersApiEndpoint]),
       hydratedAt,
       programmerAccess,
-      status: successfulSegments === 4 ? "ready" : successfulSegments > 0 ? "limited" : "unavailable",
+      status: bootstrapReady ? "ready" : bootstrapAvailable ? "limited" : "unavailable",
       errors,
     };
 
     setUnderparDiagnosticMarker("console_bootstrap", {
-      status: extendedProfile ? "success" : "error",
-      phase: extendedProfile ? "complete" : "failed",
+      status: bootstrapReady ? "success" : bootstrapAvailable ? "limited" : "error",
+      phase: bootstrapReady ? "complete" : bootstrapAvailable ? "partial" : "failed",
       forceRefresh: options?.forceRefresh === true,
       configurationVersion: Number(configurationVersion || 0),
       authoritiesCount: Array.isArray(roles) ? roles.length : 0,
       hasExtendedProfile: Boolean(extendedProfile),
-      error: !extendedProfile ? errors.extendedProfile : "",
+      hasMaintenanceStatus: Boolean(maintenanceStatus),
+      maintenanceMode: String(firstNonEmptyString([maintenanceStatus?.maintenanceMode]) || "").trim().toUpperCase(),
+      error: bootstrapReady
+        ? ""
+        : firstNonEmptyString([
+            errors.extendedProfile,
+            errors.maintenanceStatus,
+            errors.configurationVersion,
+            errors.channels,
+            errors.programmers,
+          ]),
     });
     return nextConsoleContext;
   } catch (error) {
@@ -85713,12 +85771,17 @@ function buildConsoleBootstrapStateFromContext(consoleContext = null, loginData 
       consoleContext?.extendedProfile && typeof consoleContext.extendedProfile === "object"
         ? consoleContext.extendedProfile
         : null,
+    maintenanceStatus:
+      consoleContext?.maintenanceStatus && typeof consoleContext.maintenanceStatus === "object"
+        ? cloneJsonLikeValue(consoleContext.maintenanceStatus, null)
+        : null,
     grantedAuthorities: Array.isArray(consoleContext?.roles) ? consoleContext.roles.slice() : [],
     configurationVersion: Number(consoleContext?.configurationVersion || 0),
     channels: Array.isArray(consoleContext?.channels) ? consoleContext.channels.slice() : [],
     programmersApiEndpoint: firstNonEmptyString([consoleContext?.programmersApiEndpoint]),
     errors: {
       extendedProfile: firstNonEmptyString([consoleContext?.errors?.extendedProfile]),
+      maintenanceStatus: firstNonEmptyString([consoleContext?.errors?.maintenanceStatus]),
       configurationVersion: firstNonEmptyString([consoleContext?.errors?.configurationVersion]),
       channels: firstNonEmptyString([consoleContext?.errors?.channels]),
       programmers: firstNonEmptyString([consoleContext?.errors?.programmers]),
@@ -90571,24 +90634,6 @@ function cmuTokenFromContext(cmContext = null) {
   return normalizeBearerTokenValue(firstNonEmptyString([cmContext?.cmuToken]));
 }
 
-async function requestQualifiedCmConsoleToken(options = {}) {
-  const currentSession = state.loginData || createCmBootstrapSeedLoginData();
-  try {
-    const resolved = await resolveQualifiedCmConsoleAccessToken(
-      currentSession,
-      firstNonEmptyString([options?.seedToken, currentSession?.cmConsoleAccessToken]),
-      {
-        preferredTabId: Number(options?.preferredTabId || 0),
-        allowTemporaryTab: options?.allowTemporaryPageContextTab !== false,
-      }
-    );
-    const normalizedResult = buildCmConsoleBootstrapResult(resolved?.token, resolved?.source);
-    return normalizedResult ? { ...normalizedResult, qualified: true } : null;
-  } catch {
-    return null;
-  }
-}
-
 async function requestCmTokenViaValidateToken(seedToken = "", options = {}) {
   const token = normalizeBearerTokenValue(seedToken);
   if (!token || !isProbablyJwt(token)) {
@@ -90688,46 +90733,6 @@ async function requestCmTokenViaImsCheck(seedToken = "", options = {}) {
   return null;
 }
 
-async function bootstrapCmConsoleTenantSession(options = {}) {
-  const forceRefresh = options?.forceRefresh === true;
-  try {
-    const qualifiedResult = await requestQualifiedCmConsoleToken({
-      requireFresh: forceRefresh,
-    });
-    const qualifiedToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(qualifiedResult || {}, {}));
-    if (qualifiedToken && tokenSupportsCmTenantCatalog(qualifiedToken)) {
-      emitCmDebugEvent({
-        phase: "cm-tenant-session-bootstrap",
-        source: String(qualifiedResult?.source || "qualified"),
-        tokenClientId: String(parseJwtPayload(qualifiedToken)?.client_id || ""),
-      });
-      return qualifiedToken;
-    }
-
-    const primarySeedToken = normalizeBearerTokenValue(getPreferredPrimaryImsAccessTokenCandidate());
-    if (primarySeedToken) {
-      const result = await requestCmTokenViaImsCheck(primarySeedToken, {
-        requireFresh: forceRefresh,
-      });
-      const directToken = normalizeBearerTokenValue(await persistCmTokenBootstrapResult(result || {}, {}));
-      if (directToken && tokenSupportsCmTenantCatalog(directToken)) {
-        emitCmDebugEvent({
-          phase: "cm-tenant-session-bootstrap",
-          source: String(result?.source || "ims-check"),
-          tokenClientId: String(parseJwtPayload(directToken)?.client_id || ""),
-        });
-        return directToken;
-      }
-    }
-  } catch (error) {
-    log("CM tenant session bootstrap failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  return "";
-}
-
 async function persistCmTokenBootstrapResult(result = {}, options = {}) {
   const accessToken = normalizeBearerTokenValue(result?.accessToken);
   if (!accessToken || !isProbablyJwt(accessToken)) {
@@ -90800,32 +90805,6 @@ async function persistCmTokenBootstrapResult(result = {}, options = {}) {
   ).catch(() => {});
   scheduleNoTouchRefresh();
   return accessToken;
-}
-
-async function findExistingCmReportsAdobeTab() {
-  try {
-    const tabs = await chrome.tabs.query({
-      url: [`${CM_REPORTS_APP_ORIGIN}/*`],
-    });
-    const normalizedTabs = Array.isArray(tabs) ? tabs : [];
-    const scored = normalizedTabs
-      .filter((tab) => Number(tab?.id || 0) > 0)
-      .map((tab) => {
-        const url = String(tab?.url || tab?.pendingUrl || "").trim().toLowerCase();
-        let score = Number(tab?.lastAccessed || 0);
-        if (tab?.active === true) {
-          score += 5000;
-        }
-        if (url.startsWith(`${String(CM_REPORTS_APP_ORIGIN || "").trim().toLowerCase()}/`)) {
-          score += 2400;
-        }
-        return { tab, score };
-      })
-      .sort((left, right) => right.score - left.score);
-    return scored[0]?.tab || null;
-  } catch {
-    return null;
-  }
 }
 
 async function findExistingExperienceCloudAdobeTab() {
@@ -91371,411 +91350,6 @@ async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options
     if (!pageContextTargetRef) {
       await closeTemporaryAdobePageContextTarget(temporaryTarget);
     }
-  }
-}
-
-async function requestCmConsoleBootstrapCatalogFromReportsPage(options = {}) {
-  if (!chrome.scripting?.executeScript) {
-    return null;
-  }
-
-  const requireFresh = options.requireFresh === true;
-  const preferredTabId = Number(options.preferredTabId || 0);
-  let accessToken = normalizeBearerTokenValue(firstNonEmptyString([options?.accessToken, getPreferredCmRequestAccessTokenCandidate()]));
-  if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken) || (requireFresh && !isAccessTokenFreshEnough(accessToken, CM_IMS_FORCE_REFRESH_SKEW_MS))) {
-    accessToken = normalizeBearerTokenValue(
-      await ensureCmApiAccessToken({
-        forceRefresh: requireFresh,
-        allowTemporaryPageContextTab: false,
-        preferredCmBootstrapTabId: preferredTabId,
-        freshLeewayMs: CM_IMS_FORCE_REFRESH_SKEW_MS,
-      })
-    );
-  }
-  if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
-    return null;
-  }
-
-  let tab = await resolveReusableAdobePageContextTab(preferredTabId);
-  if (!tab?.id) {
-    tab = await findExistingCmReportsAdobeTab();
-  }
-
-  const tabId = Number(tab?.id || 0);
-  if (tabId <= 0) {
-    return null;
-  }
-
-  try {
-    const executionResults = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      args: [
-        {
-          accessToken,
-          underparClientId: String(getConfiguredUnderparImsClientId() || "").trim(),
-          requireFresh,
-          freshSkewMs: CM_IMS_FORCE_REFRESH_SKEW_MS,
-          tenantUrl: `${CM_CONFIG_BASE_URL}/core/tenants?orgId=${encodeURIComponent(CM_DEFAULT_TENANT_ORG_HINT)}`,
-          applicationsBaseUrl: `${CM_CONFIG_BASE_URL}/maitai/applications?orgId=`,
-          policiesBaseUrl: `${CM_CONFIG_BASE_URL}/maitai/policy?orgId=`,
-          parallelism: Math.max(1, Number(CM_BOOTSTRAP_PARALLELISM) || 1),
-        },
-      ],
-      func: async (config) => {
-        const normalize = (value) => String(value || "").trim();
-        const isJwt = (value) => normalize(value).split(".").length === 3;
-        const parseJson = (text) => {
-          try {
-            return JSON.parse(String(text || ""));
-          } catch {
-            return null;
-          }
-        };
-        const parseJwt = (value) => {
-          const token = normalize(value);
-          if (!isJwt(token)) {
-            return null;
-          }
-          try {
-            const payloadBase64 = token.split(".")[1] || "";
-            const normalizedPayload = payloadBase64.replace(/-/g, "+").replace(/_/g, "/");
-            const padded = normalizedPayload + "=".repeat((4 - (normalizedPayload.length % 4 || 4)) % 4);
-            return JSON.parse(atob(padded));
-          } catch {
-            return null;
-          }
-        };
-        const tokenSupportsCmCatalog = (value) => {
-          const claims = parseJwt(value) || {};
-          const clientId = normalize(claims?.client_id || claims?.clientId).toLowerCase();
-          const underparClientId = normalize(config?.underparClientId || "").toLowerCase();
-          return clientId === "cm-console-ui" || (underparClientId && clientId === underparClientId);
-        };
-        const isFreshEnough = (value, skewMs = 0) => {
-          const claims = parseJwt(value) || {};
-          const exp = Number(claims?.exp || 0);
-          if (!Number.isFinite(exp) || exp <= 0) {
-            return Boolean(normalize(value));
-          }
-          return exp * 1000 > Date.now() + Math.max(0, Number(skewMs || 0));
-        };
-        const extractTokenFromPayload = (payload) => {
-          if (!payload || typeof payload !== "object") {
-            return "";
-          }
-          const nestedToken =
-            payload.token && typeof payload.token === "object"
-              ? payload.token.access_token || payload.token.accessToken || payload.token.token || payload.token.value || ""
-              : payload.token || "";
-          return normalize(
-            payload.access_token ||
-              payload.accessToken ||
-              nestedToken ||
-              payload.imsToken ||
-              payload.bearer ||
-              payload.authToken ||
-              payload.authorization ||
-              payload.Authorization ||
-              payload.value ||
-              ""
-          );
-        };
-        const extractCollection = (payload) => {
-          if (Array.isArray(payload)) {
-            return payload;
-          }
-          if (!payload || typeof payload !== "object") {
-            return [];
-          }
-          const collectionKeys = ["items", "data", "results", "tenants", "applications", "policies"];
-          for (const key of collectionKeys) {
-            if (Array.isArray(payload[key])) {
-              return payload[key];
-            }
-          }
-          return [];
-        };
-        const countRows = (payload) => extractCollection(payload).length;
-        const tenantCollectionFromPayload = (payload) =>
-          extractCollection(payload).filter((entry) => entry && typeof entry === "object");
-        const fetchJson = async (url, init = {}) => {
-          const response = await fetch(String(url || ""), {
-            credentials: "include",
-            ...(init && typeof init === "object" ? init : {}),
-          });
-          const text = await response.text().catch(() => "");
-          const headers = {};
-          response.headers.forEach((value, key) => {
-            headers[key] = value;
-          });
-          return {
-            ok: Boolean(response.ok),
-            status: Number(response.status || 0),
-            statusText: String(response.statusText || ""),
-            url: String(response.url || url || ""),
-            headers,
-            text,
-            parsed: parseJson(text),
-          };
-        };
-        const resolvedAccessToken = normalize(config?.accessToken || "");
-        if (!resolvedAccessToken) {
-          return {
-            ok: false,
-            stage: "token",
-            status: 0,
-            statusText: "",
-            error: "CM token bootstrap failed in reports page context.",
-          };
-        }
-        if (!isJwt(resolvedAccessToken) || !tokenSupportsCmCatalog(resolvedAccessToken)) {
-          return {
-            ok: false,
-            stage: "token",
-            status: 0,
-            statusText: "",
-            error: "CM token bootstrap produced an unsupported Adobe IMS bearer.",
-          };
-        }
-        if (config?.requireFresh && !isFreshEnough(resolvedAccessToken, config?.freshSkewMs)) {
-          return {
-            ok: false,
-            stage: "token",
-            status: 0,
-            statusText: "",
-            error: "CM token bootstrap produced a stale cm-console-ui bearer.",
-          };
-        }
-
-        const tenantResponse = await fetchJson(config?.tenantUrl || "", {
-          method: "GET",
-          headers: {
-            Accept: "*/*",
-            Authorization: `Bearer ${resolvedAccessToken}`,
-          },
-        });
-        if (!tenantResponse.ok) {
-          return {
-            ok: false,
-            stage: "tenants",
-            status: Number(tenantResponse.status || 0),
-            statusText: String(tenantResponse.statusText || ""),
-            error: normalize(tenantResponse.text || tenantResponse.statusText || "CM tenants request failed."),
-          };
-        }
-
-        const tenantRows = tenantCollectionFromPayload(tenantResponse.parsed);
-        const tenantIds = tenantRows
-          .map((entry) =>
-            normalize(
-              entry?.consoleId ||
-                entry?.tenantId ||
-                entry?.tenant_id ||
-                entry?.id ||
-                entry?.payload?.ownerId ||
-                entry?.payload?.tenantId ||
-                entry?.payload?.tenant_id ||
-                entry?.payload?.name
-            )
-          )
-          .filter(Boolean);
-
-        let applicationCount = 0;
-        let policyCount = 0;
-        const errors = [];
-        const parallelism = Math.max(1, Number(config?.parallelism || 1));
-
-        for (let index = 0; index < tenantIds.length; index += parallelism) {
-          const batch = tenantIds.slice(index, index + parallelism);
-          const batchResults = await Promise.all(
-            batch.map(async (tenantId) => {
-              const [applicationsResponse, policiesResponse] = await Promise.all([
-                fetchJson(`${String(config?.applicationsBaseUrl || "")}${encodeURIComponent(tenantId)}`, {
-                  method: "GET",
-                  headers: {
-                    Accept: "*/*",
-                    Authorization: `Bearer ${resolvedAccessToken}`,
-                  },
-                }),
-                fetchJson(`${String(config?.policiesBaseUrl || "")}${encodeURIComponent(tenantId)}`, {
-                  method: "GET",
-                  headers: {
-                    Accept: "*/*",
-                    Authorization: `Bearer ${resolvedAccessToken}`,
-                  },
-                }),
-              ]);
-              return {
-                tenantId,
-                applicationsResponse,
-                policiesResponse,
-              };
-            })
-          );
-
-          batchResults.forEach((result) => {
-            applicationCount += countRows(result?.applicationsResponse?.parsed);
-            policyCount += countRows(result?.policiesResponse?.parsed);
-            if (!result?.applicationsResponse?.ok) {
-              errors.push(
-                `${String(result?.tenantId || "tenant")}:applications:${Number(result?.applicationsResponse?.status || 0)}`
-              );
-            }
-            if (!result?.policiesResponse?.ok) {
-              errors.push(`${String(result?.tenantId || "tenant")}:policies:${Number(result?.policiesResponse?.status || 0)}`);
-            }
-          });
-        }
-
-        return {
-          ok: true,
-          accessToken: resolvedAccessToken,
-          tenantPayload: tenantResponse.parsed,
-          tenantUrl: String(tenantResponse.url || config?.tenantUrl || ""),
-          tenantCount: tenantRows.length,
-          applicationCount,
-          policyCount,
-          summaryReady: errors.length === 0,
-          errors: errors.slice(0, 8),
-        };
-      },
-    });
-
-    const result = executionResults?.[0]?.result;
-    if (!result || result.ok !== true) {
-      return result && typeof result === "object" ? result : null;
-    }
-    return {
-      ...result,
-      accessToken,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function fetchCmJsonViaReportsPageContext(requestUrl = "", options = {}) {
-  if (!chrome.scripting?.executeScript) {
-    return null;
-  }
-
-  const normalizedUrl = normalizeCmUrl(requestUrl);
-  if (!normalizedUrl || (!isCmReportsRequestUrl(normalizedUrl) && !isCmConfigRequestUrl(normalizedUrl))) {
-    return null;
-  }
-
-  const method = String(options.method || "GET").trim().toUpperCase();
-  if (method !== "GET") {
-    return null;
-  }
-
-  let accessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([options?.accessToken, getPreferredCmRequestAccessTokenCandidate()])
-  );
-  if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
-    accessToken = normalizeBearerTokenValue(
-      await ensureCmApiAccessToken({
-        forceRefresh: options.forceRefresh === true,
-        allowTemporaryPageContextTab: false,
-        freshLeewayMs:
-          Number.isFinite(options?.freshLeewayMs) && Number(options.freshLeewayMs) >= 0
-            ? Number(options.freshLeewayMs)
-            : 45 * 1000,
-      })
-    );
-  }
-  if (!accessToken || !tokenSupportsCmConsoleRequests(accessToken)) {
-    return null;
-  }
-
-  let tab = await findExistingCmReportsAdobeTab();
-
-  const tabId = Number(tab?.id || 0);
-  if (tabId <= 0) {
-    return null;
-  }
-
-  try {
-    const executionResults = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      args: [
-        {
-          requestUrl: normalizedUrl,
-          accessToken,
-          headers: options?.headers && typeof options.headers === "object" ? options.headers : {},
-        },
-      ],
-      func: async (config) => {
-        const normalize = (value) => String(value || "").trim();
-        const parseJson = (text) => {
-          try {
-            return JSON.parse(String(text || ""));
-          } catch {
-            return null;
-          }
-        };
-        const requestHeaders = {
-          Accept: "*/*",
-          ...(config?.headers && typeof config.headers === "object" ? config.headers : {}),
-        };
-        requestHeaders.Authorization = `Bearer ${normalize(config?.accessToken || "")}`;
-        delete requestHeaders.Origin;
-        delete requestHeaders.origin;
-        delete requestHeaders.Referer;
-        delete requestHeaders.referer;
-
-        try {
-          const response = await fetch(String(config?.requestUrl || ""), {
-            method: "GET",
-            credentials: "include",
-            headers: requestHeaders,
-          });
-          const text = await response.text().catch(() => "");
-          const headers = {};
-          response.headers.forEach((value, key) => {
-            headers[key] = value;
-          });
-          return {
-            ok: Boolean(response.ok),
-            status: Number(response.status || 0),
-            statusText: String(response.statusText || ""),
-            url: String(response.url || config?.requestUrl || ""),
-            text,
-            parsed: parseJson(text),
-            headers,
-          };
-        } catch (error) {
-          return {
-            ok: false,
-            status: 0,
-            statusText: error instanceof Error ? error.message : String(error),
-            url: String(config?.requestUrl || ""),
-            text: "",
-            parsed: null,
-            headers: {},
-          };
-        }
-      },
-    });
-
-    const result = executionResults?.[0]?.result;
-    if (!result || typeof result !== "object") {
-      return null;
-    }
-    return {
-      ok: result.ok === true,
-      status: Number(result.status || 0),
-      statusText: String(result.statusText || ""),
-      url: String(result.url || normalizedUrl),
-      text: String(result.text || ""),
-      parsed: result.parsed,
-      headers: result.headers && typeof result.headers === "object" ? result.headers : {},
-      lastModified: String(result?.headers?.["last-modified"] || result?.headers?.["Last-Modified"] || ""),
-    };
-  } catch {
-    return null;
   }
 }
 
@@ -98326,11 +97900,16 @@ function restoreStoredAuthenticatedConsoleHydration(loginData = null) {
     accessToken: normalizeBearerTokenValue(firstNonEmptyString([loginData?.accessToken])),
     fetchedAt: Number(snapshot.hydratedAt || Date.now()),
     extendedProfile: null,
+    maintenanceStatus:
+      snapshot.maintenanceStatus && typeof snapshot.maintenanceStatus === "object"
+        ? cloneJsonLikeValue(snapshot.maintenanceStatus, null)
+        : null,
     grantedAuthorities,
     configurationVersion,
     channels,
     errors: {
       extendedProfile: "",
+      maintenanceStatus: "",
       configurationVersion: "",
     },
   };
