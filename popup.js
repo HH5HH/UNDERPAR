@@ -28171,13 +28171,10 @@ function syncRestV2BobtoolsLauncher(section, programmer, appInfo) {
     return;
   }
 
-  const context = buildCurrentRestV2SelectionContext(programmer, appInfo);
-  const programmerId = context?.ok
-    ? String(context.programmerId || "").trim()
-    : String(programmer?.programmerId || resolveSelectedProgrammer()?.programmerId || "").trim();
-  const harvestList = programmerId ? getRestV2ProfileHarvestBucketForProgrammer(programmerId) : [];
+  const selectionContext = buildBobtoolsWorkspaceSelectionContext(programmer, appInfo);
+  const harvestList = Array.isArray(selectionContext?.harvestList) ? selectionContext.harvestList : [];
   const hasProfiles = harvestList.length > 0;
-  const selectedHarvest = harvestList[0] || null;
+  const selectedHarvest = selectionContext?.selectedHarvest || harvestList[0] || null;
   const selectedRequestorId = String(selectedHarvest?.requestorId || selectedHarvest?.serviceProviderId || "").trim();
   const selectedMvpd = String(selectedHarvest?.mvpd || "").trim();
   const mvpdMeta =
@@ -28194,8 +28191,8 @@ function syncRestV2BobtoolsLauncher(section, programmer, appInfo) {
   tool.hidden = !hasProfiles;
   button.disabled = !hasProfiles;
   if (!hasProfiles) {
-    button.title = "BOBTOOLS unlocks after at least one successful MVPD login profile is captured.";
-    button.setAttribute("aria-label", "BOBTOOLS unavailable until MVPD login profile is captured");
+    button.title = "BOBTOOLS unlocks after at least one recorded MVPD login flow is captured.";
+    button.setAttribute("aria-label", "BOBTOOLS unavailable until an MVPD login flow is captured");
     return;
   }
   const actionLabel = requestorMvpdLabel ? `Open BOBTOOLS Workspace for ${requestorMvpdLabel}.` : "Open BOBTOOLS Workspace";
@@ -60659,11 +60656,23 @@ async function ensureRestV2ProfilesHydratedForBobtools(context = null, options =
   return workPromise;
 }
 
-function buildBobtoolsWorkspaceSelectionContext(programmer = null) {
+function buildBobtoolsWorkspaceHarvestList(programmer = null, appInfoOverride = null) {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const bucketHarvestList = programmerId ? getRestV2ProfileHarvestBucketForProgrammer(programmerId) : [];
+  const currentSelectionContext = buildCurrentRestV2SelectionContext(resolvedProgrammer, appInfoOverride);
+  const currentSelectionHarvest = currentSelectionContext?.ok ? getRestV2ProfileHarvestForContext(currentSelectionContext) : null;
+  return mergeRestV2ProfileHarvestLists(
+    currentSelectionHarvest && typeof currentSelectionHarvest === "object" ? [currentSelectionHarvest] : [],
+    bucketHarvestList
+  );
+}
+
+function buildBobtoolsWorkspaceSelectionContext(programmer = null, appInfoOverride = null) {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
   const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
   const programmerName = String(resolvedProgrammer?.programmerName || "").trim();
-  const harvestList = programmerId ? getRestV2ProfileHarvestBucketForProgrammer(programmerId) : [];
+  const harvestList = buildBobtoolsWorkspaceHarvestList(resolvedProgrammer, appInfoOverride);
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const selectedMvpd = String(state.selectedMvpdId || "").trim();
   let selectedHarvest = null;
@@ -61533,7 +61542,7 @@ async function bobtoolsWorkspaceOpenFromRestV2(programmer = null, options = {}) 
     throw new Error("Select a Media Company first.");
   }
   if (!selectionContext.hasProfiles && options.allowWithoutProfiles !== true) {
-    throw new Error("BOBTOOLS unlocks after at least one successful MVPD login profile is captured.");
+    throw new Error("BOBTOOLS unlocks after at least one recorded MVPD login flow is captured.");
   }
   const workspaceTab = await bobtoolsWorkspaceEnsureWorkspaceTab({
     activate: options.activate !== false,

@@ -837,7 +837,12 @@ function renderHeader() {
     els.greeting.textContent = `Hey ${userLabel},`;
   }
   if (els.subtitle) {
-    els.subtitle.textContent = `We have a successful authenticated MVPD Profile from ${selectedLabel}. You can now use BOBTOOLS!`;
+    const hasConfirmedProfile =
+      String(selectedProfile?.profileCheckOutcome || "").trim().toLowerCase() === "success" &&
+      Number(selectedProfile?.profileCount || 0) > 0;
+    els.subtitle.textContent = hasConfirmedProfile
+      ? `We have a successful authenticated MVPD Profile from ${selectedLabel}. You can now use BOBTOOLS!`
+      : `We captured an MVPD login context from ${selectedLabel}. BOBTOOLS is available, but active-profile actions may need a fresh profile validation.`;
   }
 }
 
@@ -850,7 +855,7 @@ function renderProfileList() {
     els.profileCount.textContent = String(profiles.length);
   }
   if (profiles.length === 0) {
-    els.profileList.innerHTML = '<li><p class="bobtools-profile-empty">No successful MVPD login profiles yet. Complete one MVPD login to unlock BOBTOOLS.</p></li>';
+    els.profileList.innerHTML = '<li><p class="bobtools-profile-empty">No captured MVPD login flows yet. Complete one MVPD login to unlock BOBTOOLS.</p></li>';
     return;
   }
 
@@ -2128,7 +2133,7 @@ function renderResult() {
       showCopyResultButtonFeedback(els.copyResultButton, false);
     }
     renderQuickResourcePicker(null);
-    els.resultStatus.textContent = "REST V2 actions unlock after at least one successful MVPD login profile is captured.";
+    els.resultStatus.textContent = "REST V2 actions unlock after at least one recorded MVPD login flow is captured.";
     els.resultStatus.classList.remove("error", "success");
     els.resultSummary.hidden = true;
     els.resultSummary.innerHTML = "";

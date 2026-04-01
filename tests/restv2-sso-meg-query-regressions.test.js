@@ -495,6 +495,93 @@ test("shared REST V2 success opener uses the resolved browsing window and backgr
   assert.equal(debugEvents[0]?.[1]?.windowId, 314);
 });
 
+test("BOBTOOLS selection context includes the current selection harvest when only a selection-scoped error harvest exists", () => {
+  const currentSelectionHarvest = {
+    programmerId: "Turner",
+    requestorId: "MML",
+    serviceProviderId: "MML",
+    mvpd: "Comcast_SSO",
+    mvpdName: "Xfinity",
+    profileCheckOutcome: "http_error",
+    harvestedAt: 100,
+  };
+  const { buildBobtoolsWorkspaceSelectionContext } = loadFunctions(
+    "popup.js",
+    ["buildBobtoolsWorkspaceHarvestList", "buildBobtoolsWorkspaceSelectionContext"],
+    {
+      state: {
+        selectedRequestorId: "MML",
+        selectedMvpdId: "Comcast_SSO",
+      },
+      resolveSelectedProgrammer: () => ({ programmerId: "Turner", programmerName: "Turner" }),
+      getRestV2ProfileHarvestBucketForProgrammer: () => [],
+      buildCurrentRestV2SelectionContext: () => ({
+        ok: true,
+        programmerId: "Turner",
+        requestorId: "MML",
+        mvpd: "Comcast_SSO",
+      }),
+      getRestV2ProfileHarvestForContext: () => currentSelectionHarvest,
+      mergeRestV2ProfileHarvestLists: (...lists) => lists.flat().filter(Boolean),
+      findRestV2HarvestByRequestorAndMvpd: (list, requestorId, mvpd) =>
+        list.find((item) => item.requestorId === requestorId && item.mvpd === mvpd) || null,
+      getRestV2MvpdPickerLabel: () => "Xfinity (Comcast_SSO)",
+      getRestV2HarvestRecordKey: () => "harvest-1",
+      getUnderparActiveUserLabel: () => "UnderPAR user",
+    }
+  );
+
+  const selectionContext = buildBobtoolsWorkspaceSelectionContext();
+  assert.equal(selectionContext.hasProfiles, true);
+  assert.equal(selectionContext.harvestList.length, 1);
+  assert.equal(selectionContext.selectedHarvest?.profileCheckOutcome, "http_error");
+  assert.equal(selectionContext.requestorId, "MML");
+  assert.equal(selectionContext.mvpd, "Comcast_SSO");
+  assert.equal(selectionContext.selectedHarvestKey, "harvest-1");
+});
+
+test("REST V2 BOBTOOLS launcher unlocks from the current selection harvest even when the programmer bucket is empty", () => {
+  const tool = { hidden: true };
+  const button = {
+    disabled: true,
+    title: "",
+    attrs: {},
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    },
+  };
+  const section = {
+    querySelector(selector) {
+      if (selector === ".rest-v2-bobtools-tool") {
+        return tool;
+      }
+      if (selector === ".rest-v2-bobtools-open-btn") {
+        return button;
+      }
+      return null;
+    },
+  };
+  const selectedHarvest = {
+    requestorId: "MML",
+    serviceProviderId: "MML",
+    mvpd: "Comcast_SSO",
+    mvpdName: "Xfinity",
+  };
+  const { syncRestV2BobtoolsLauncher } = loadFunctions("popup.js", ["syncRestV2BobtoolsLauncher"], {
+    buildBobtoolsWorkspaceSelectionContext: () => ({
+      harvestList: [selectedHarvest],
+      selectedHarvest,
+    }),
+    formatRestV2RequestorMvpdDisplay: () => "MML x Xfinity (Comcast_SSO)",
+  });
+
+  syncRestV2BobtoolsLauncher(section, null, null);
+  assert.equal(tool.hidden, false);
+  assert.equal(button.disabled, false);
+  assert.equal(button.title, "Open BOBTOOLS Workspace for MML x Xfinity (Comcast_SSO).");
+  assert.equal(button.attrs["aria-label"], "Open BOBTOOLS Workspace for MML x Xfinity (Comcast_SSO).");
+});
+
 test("debug-flow hydration helpers are wired into the partner SSO runtime paths", () => {
   const popupSource = read("popup.js");
 
