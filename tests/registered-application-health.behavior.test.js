@@ -1097,6 +1097,93 @@ test("REST V2 bound-cache checks require a software statement fingerprint when b
   );
 });
 
+test("REST V2 credential selection prefers the cache already bound to the selected app", () => {
+  const helpers = loadPopupFunctions(["choosePreferredPassVaultCredentialEntry"], {
+    normalizeUnderparVaultCredentialEntry: (value = null) => value,
+    getPassVaultRequiredScopeForService: () => "api:client:v2",
+    resolveRegisteredApplicationSoftwareStatement: (app = null) => String(app?.softwareStatement || "").trim(),
+    shouldRequireSoftwareStatementBoundDcrCache: () => true,
+    buildUnderparSoftwareStatementFingerprint: (value = "") => String(value || "").trim(),
+    hasSoftwareStatementBoundDcrCache: (cache = null) =>
+      Boolean(cache?.clientId && cache?.clientSecret && cache?.softwareStatementFingerprint && Number(cache?.cacheBindingVersion || 0) >= 1),
+    hasMatchingSoftwareStatementBoundDcrCache: (cache = null, softwareStatement = "") =>
+      Boolean(
+        cache?.clientId &&
+          cache?.clientSecret &&
+          Number(cache?.cacheBindingVersion || 0) >= 1 &&
+          String(cache?.softwareStatementFingerprint || "").trim() === String(softwareStatement || "").trim()
+      ),
+    normalizeScope: (value = "") => String(value || "").trim().toLowerCase(),
+  });
+
+  const selected = normalizeRealmObject(
+    helpers.choosePreferredPassVaultCredentialEntry(
+      [
+        {
+          clientId: "shared-cid",
+          clientSecret: "shared-sec",
+          softwareStatementFingerprint: "shared-fingerprint",
+          cacheBindingVersion: 1,
+          updatedAt: 20,
+        },
+        {
+          clientId: "adult-cid",
+          clientSecret: "adult-sec",
+          softwareStatementFingerprint: "adult-fingerprint",
+          cacheBindingVersion: 1,
+          updatedAt: 10,
+        },
+      ],
+      "restV2",
+      {
+        guid: "adultswim-app",
+        softwareStatement: "adult-fingerprint",
+      }
+    )
+  );
+
+  assert.equal(selected?.clientId, "adult-cid");
+});
+
+test("REST V2 bound-cache recovery ignores programmer-level credentials bound to a different app", () => {
+  const helpers = loadPopupFunctions(["resolvePassVaultBoundServiceCredentialCache"], {
+    resolvePassVaultRuntimeBoundAppInfo: (_programmerId = "", appInfo = null) => appInfo,
+    getPassVaultMediaCompanyRecord: () => ({
+      serviceCredentialsByServiceKey: {
+        restV2: {
+          clientId: "shared-cid",
+          clientSecret: "shared-sec",
+          softwareStatementFingerprint: "shared-fingerprint",
+          cacheBindingVersion: 1,
+          updatedAt: 20,
+        },
+      },
+    }),
+    getPassVaultRegisteredApplicationRecord: () => null,
+    choosePreferredPassVaultCredentialEntry: (candidates = []) => candidates.find(Boolean) || null,
+    getPassVaultRequiredScopeForService: () => "api:client:v2",
+    resolveRegisteredApplicationSoftwareStatement: (app = null) => String(app?.softwareStatement || "").trim(),
+    shouldRequireSoftwareStatementBoundDcrCache: () => true,
+    hasMatchingSoftwareStatementBoundDcrCache: (cache = null, softwareStatement = "") =>
+      String(cache?.softwareStatementFingerprint || "").trim() === String(softwareStatement || "").trim(),
+    normalizeUnderparVaultDcrCache: (value = null) => value,
+  });
+
+  const restored = normalizeRealmObject(
+    helpers.resolvePassVaultBoundServiceCredentialCache(
+      "Turner",
+      {
+        guid: "adultswim-app",
+        softwareStatement: "adult-fingerprint",
+      },
+      "restV2"
+    )
+  );
+
+  assert.equal(restored?.appInfo?.guid, "adultswim-app");
+  assert.equal(restored?.cache, null);
+});
+
 test("pass vault REST V2 guid reconstruction preserves stored fetch order instead of stale primary order", () => {
   const helpers = loadPopupFunctions(
     ["getPassVaultStoredApplicationFetchOrder", "getPassVaultRegisteredApplicationsByGuid", "getPassVaultServiceAppGuidsFromRecord"],

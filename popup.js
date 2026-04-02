@@ -1284,26 +1284,36 @@ function normalizeUnderparVaultCredentialEntry(value = null) {
 function choosePreferredPassVaultCredentialEntry(candidates = [], serviceKey = "", application = null) {
   const normalizedServiceKey = String(serviceKey || "").trim();
   const requiredScope = getPassVaultRequiredScopeForService(normalizedServiceKey, application);
+  const softwareStatement = resolveRegisteredApplicationSoftwareStatement(application);
+  const shouldBindCache = shouldRequireSoftwareStatementBoundDcrCache(normalizedServiceKey, requiredScope);
+  const expectedFingerprint = shouldBindCache ? buildUnderparSoftwareStatementFingerprint(softwareStatement) : "";
   const rankedCandidates = (Array.isArray(candidates) ? candidates : [])
     .map((value, index) => {
       const normalizedCredential = normalizeUnderparVaultCredentialEntry(value);
       if (!normalizedCredential) {
         return null;
       }
-      const boundCredential =
-        bindUnderparVaultCredentialEntryToApplication(normalizedCredential, application, normalizedServiceKey) ||
-        normalizedCredential;
+      const credentialFingerprint = String(normalizedCredential.softwareStatementFingerprint || "").trim();
+      const hasBoundCache = hasSoftwareStatementBoundDcrCache(normalizedCredential, normalizedServiceKey, requiredScope);
+      const hasMatchingBoundCache = hasMatchingSoftwareStatementBoundDcrCache(
+        normalizedCredential,
+        softwareStatement,
+        normalizedServiceKey,
+        requiredScope
+      );
       return {
         index,
-        credential: boundCredential,
-        hasClientCredentials: Boolean(boundCredential.clientId && boundCredential.clientSecret),
-        hasBoundCache: hasSoftwareStatementBoundDcrCache(boundCredential, normalizedServiceKey, requiredScope),
+        credential: normalizedCredential,
+        hasClientCredentials: Boolean(normalizedCredential.clientId && normalizedCredential.clientSecret),
+        hasMatchingBoundCache,
+        hasMismatchedBoundCache:
+          shouldBindCache && hasBoundCache && Boolean(expectedFingerprint) && credentialFingerprint !== expectedFingerprint,
         scopeMatch:
           !normalizedServiceKey ||
           !requiredScope ||
-          normalizeScope(boundCredential.serviceScope || boundCredential.tokenRequestedScope || "") === normalizeScope(requiredScope),
-        updatedAt: Math.max(0, Number(boundCredential.updatedAt || 0)),
-        hasAccessToken: Boolean(boundCredential.accessToken),
+          normalizeScope(normalizedCredential.serviceScope || normalizedCredential.tokenRequestedScope || "") === normalizeScope(requiredScope),
+        updatedAt: Math.max(0, Number(normalizedCredential.updatedAt || 0)),
+        hasAccessToken: Boolean(normalizedCredential.accessToken),
       };
     })
     .filter(Boolean);
@@ -1312,7 +1322,8 @@ function choosePreferredPassVaultCredentialEntry(candidates = [], serviceKey = "
   }
   rankedCandidates.sort((left, right) => {
     return (
-      Number(right.hasBoundCache) - Number(left.hasBoundCache) ||
+      Number(right.hasMatchingBoundCache) - Number(left.hasMatchingBoundCache) ||
+      Number(left.hasMismatchedBoundCache) - Number(right.hasMismatchedBoundCache) ||
       Number(right.hasClientCredentials) - Number(left.hasClientCredentials) ||
       Number(right.scopeMatch) - Number(left.scopeMatch) ||
       right.updatedAt - left.updatedAt ||
@@ -9754,6 +9765,17 @@ function resolvePassVaultBoundServiceCredentialCache(programmerId = "", appInfo 
     resolvedAppInfo
   );
   if (!credential) {
+    return {
+      appInfo: resolvedAppInfo,
+      cache: null,
+    };
+  }
+  const requiredScope = getPassVaultRequiredScopeForService(normalizedServiceKey, resolvedAppInfo);
+  const softwareStatement = resolveRegisteredApplicationSoftwareStatement(resolvedAppInfo);
+  if (
+    shouldRequireSoftwareStatementBoundDcrCache(normalizedServiceKey, requiredScope) &&
+    !hasMatchingSoftwareStatementBoundDcrCache(credential, softwareStatement, normalizedServiceKey, requiredScope)
+  ) {
     return {
       appInfo: resolvedAppInfo,
       cache: null,

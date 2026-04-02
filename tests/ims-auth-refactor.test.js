@@ -2514,6 +2514,7 @@ test("missing DCR credentials no longer trigger full pass vault compilation from
   const chooseRuntimeCacheSource = extractFunctionSource(popupSource, "choosePassVaultRuntimeDcrCache");
   const choosePreferredCredentialSource = extractFunctionSource(popupSource, "choosePreferredPassVaultCredentialEntry");
   const programmerRecordSource = extractFunctionSource(popupSource, "buildPassVaultProgrammerRecord");
+  const resolveBoundCacheSource = extractFunctionSource(popupSource, "resolvePassVaultBoundServiceCredentialCache");
   const restoreBoundCacheSource = extractFunctionSource(popupSource, "restorePassVaultBoundServiceCredentialCache");
   const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
 
@@ -2521,11 +2522,16 @@ test("missing DCR credentials no longer trigger full pass vault compilation from
   assert.match(chooseRuntimeCacheSource, /const orderedServiceKeys = uniquePreserveOrder\(/);
   assert.match(chooseRuntimeCacheSource, /const credential = choosePreferredPassVaultCredentialEntry\(/);
   assert.match(chooseRuntimeCacheSource, /serviceCredentials\?\.\[serviceKey\] \|\| null,\s*applicationRecord\?\.dcrCache \|\| null/);
-  assert.match(choosePreferredCredentialSource, /bindUnderparVaultCredentialEntryToApplication\(normalizedCredential,\s*application,\s*normalizedServiceKey\)/);
-  assert.doesNotMatch(choosePreferredCredentialSource, /bindUnderparVaultCredentialEntry\(normalizedCredential,\s*application,\s*normalizedServiceKey\)/);
+  assert.match(choosePreferredCredentialSource, /const softwareStatement = resolveRegisteredApplicationSoftwareStatement\(application\);/);
+  assert.match(choosePreferredCredentialSource, /const hasMatchingBoundCache = hasMatchingSoftwareStatementBoundDcrCache\(/);
+  assert.match(choosePreferredCredentialSource, /const expectedFingerprint = shouldBindCache \? buildUnderparSoftwareStatementFingerprint\(softwareStatement\) : "";/);
+  assert.doesNotMatch(choosePreferredCredentialSource, /bindUnderparVaultCredentialEntryToApplication\(normalizedCredential,\s*application,\s*normalizedServiceKey\)/);
   assert.match(chooseRuntimeCacheSource, /if \(credential && \(credential\.clientId \|\| credential\.clientSecret \|\| credential\.accessToken\)\) \{\s*return credential;\s*\}/);
   assert.match(chooseRuntimeCacheSource, /const directCache = normalizeUnderparVaultDcrCache\(applicationRecord\?\.dcrCache \|\| null\);/);
   assert.match(programmerRecordSource, /registeredApplicationsByGuid\[guid\]\.dcrCache = normalizeUnderparVaultDcrCache\(result\.cache\);/);
+  assert.match(resolveBoundCacheSource, /const requiredScope = getPassVaultRequiredScopeForService\(normalizedServiceKey,\s*resolvedAppInfo\);/);
+  assert.match(resolveBoundCacheSource, /const softwareStatement = resolveRegisteredApplicationSoftwareStatement\(resolvedAppInfo\);/);
+  assert.match(resolveBoundCacheSource, /!hasMatchingSoftwareStatementBoundDcrCache\(credential,\s*softwareStatement,\s*normalizedServiceKey,\s*requiredScope\)/);
   assert.match(restoreBoundCacheSource, /const restored = resolvePassVaultBoundServiceCredentialCache\(normalizedProgrammerId,\s*appInfo,\s*serviceKey\);/);
   assert.match(restoreBoundCacheSource, /const normalizedServiceKey = String\(serviceKey \|\| ""\)\.trim\(\);/);
   assert.match(restoreBoundCacheSource, /saveDcrCache\(normalizedProgrammerId,\s*normalizedGuid,\s*cache,\s*normalizedServiceKey\);/);
