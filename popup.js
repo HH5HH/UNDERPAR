@@ -85217,6 +85217,16 @@ function extractEntityIdFromToken(value) {
 function collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId) {
   const candidates = [];
   const seen = new Set();
+  const appData =
+    appInfo?.appData && typeof appInfo.appData === "object" && !Array.isArray(appInfo.appData) ? appInfo.appData : null;
+  const rawAppData =
+    appInfo?.raw && typeof appInfo.raw === "object" && !Array.isArray(appInfo.raw) ? appInfo.raw : null;
+  const appDataEntityData =
+    appData?.__rawEnvelope?.entityData && typeof appData.__rawEnvelope.entityData === "object" ? appData.__rawEnvelope.entityData : null;
+  const rawEntityData =
+    rawAppData?.__rawEnvelope?.entityData && typeof rawAppData.__rawEnvelope.entityData === "object"
+      ? rawAppData.__rawEnvelope.entityData
+      : null;
 
   const pushValue = (value) => {
     if (value == null) {
@@ -85244,13 +85254,41 @@ function collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId) {
     candidates.push(id);
   };
 
-  pushValue(appInfo?.appData?.serviceProviders);
-  pushValue(appInfo?.appData?.contentProviders);
-  pushValue(appInfo?.appData?.requestors);
-  pushValue(appInfo?.appData?.requestorIds);
-  pushValue(appInfo?.appData?.requestor);
-  pushValue(appInfo?.appData?.serviceProvider);
-  pushValue(collectPassVaultServiceProviderHintsFromAppData(appInfo?.appData, appInfo?.softwareStatement));
+  pushValue(appInfo?.serviceProviders);
+  pushValue(appInfo?.contentProviders);
+  pushValue(appInfo?.requestors);
+  pushValue(appInfo?.requestorIds);
+  pushValue(appInfo?.requestor);
+  pushValue(appInfo?.serviceProvider);
+  pushValue(appInfo?.requestorHint);
+  pushValue(appInfo?.serviceProviderHints);
+  pushValue(appData?.serviceProviders);
+  pushValue(appData?.contentProviders);
+  pushValue(appData?.requestors);
+  pushValue(appData?.requestorIds);
+  pushValue(appData?.requestor);
+  pushValue(appData?.serviceProvider);
+  pushValue(appDataEntityData?.serviceProviders);
+  pushValue(appDataEntityData?.contentProviders);
+  pushValue(appDataEntityData?.requestors);
+  pushValue(appDataEntityData?.requestorIds);
+  pushValue(appDataEntityData?.requestor);
+  pushValue(appDataEntityData?.serviceProvider);
+  pushValue(rawAppData?.serviceProviders);
+  pushValue(rawAppData?.contentProviders);
+  pushValue(rawAppData?.requestors);
+  pushValue(rawAppData?.requestorIds);
+  pushValue(rawAppData?.requestor);
+  pushValue(rawAppData?.serviceProvider);
+  pushValue(rawEntityData?.serviceProviders);
+  pushValue(rawEntityData?.contentProviders);
+  pushValue(rawEntityData?.requestors);
+  pushValue(rawEntityData?.requestorIds);
+  pushValue(rawEntityData?.requestor);
+  pushValue(rawEntityData?.serviceProvider);
+  pushValue(collectPassVaultServiceProviderHintsFromAppData(appInfo, appInfo?.softwareStatement));
+  pushValue(collectPassVaultServiceProviderHintsFromAppData(appData, appInfo?.softwareStatement));
+  pushValue(collectPassVaultServiceProviderHintsFromAppData(rawAppData, appInfo?.softwareStatement));
 
   if (programmerId) {
     pushValue(programmerId);

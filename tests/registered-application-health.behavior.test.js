@@ -707,6 +707,77 @@ test("REST V2 requestor selection prefers the requestor-compatible programmer ca
   assert.equal(selected?.guid, "nhltv-app");
 });
 
+test("REST V2 service-provider matching honors persisted top-level requestor hints", () => {
+  const helpers = loadPopupFunctions(["collectRestV2ServiceProviderCandidatesFromApp", "appSupportsServiceProvider"], {
+    extractEntityIdFromToken: (value = "") => {
+      const normalized = String(value || "").trim();
+      const match = normalized.match(/^@[^:]+:(.+)$/i);
+      return match ? String(match[1] || "").trim() : normalized;
+    },
+    normalizeEntityToken: (value = "") => String(value || "").trim().toLowerCase(),
+    collectPassVaultServiceProviderHintsFromAppData: () => [],
+  });
+
+  const appInfo = {
+    guid: "turner-child-app",
+    serviceProviders: ["@ServiceProvider:CartoonNetwork"],
+    requestor: "@ServiceProvider:AdultSwim",
+    requestorIds: ["Bleacher"],
+    serviceProviderHints: ["@ServiceProvider:truTV"],
+    raw: {
+      __rawEnvelope: {
+        entityData: {
+          serviceProviders: ["@ServiceProvider:CNN"],
+        },
+      },
+    },
+  };
+
+  assert.deepEqual(
+    normalizeRealmObject(helpers.collectRestV2ServiceProviderCandidatesFromApp(appInfo, "Turner")),
+    ["CartoonNetwork", "Bleacher", "AdultSwim", "truTV", "CNN", "Turner"]
+  );
+  assert.equal(helpers.appSupportsServiceProvider(appInfo, "CartoonNetwork", "Turner"), true);
+  assert.equal(helpers.appSupportsServiceProvider(appInfo, "AdultSwim", "Turner"), true);
+  assert.equal(helpers.appSupportsServiceProvider(appInfo, "Bleacher", "Turner"), true);
+  assert.equal(helpers.appSupportsServiceProvider(appInfo, "truTV", "Turner"), true);
+  assert.equal(helpers.appSupportsServiceProvider(appInfo, "CNN", "Turner"), true);
+});
+
+test("REST V2 requestor selection matches persisted top-level requestor hints before shared fallback", () => {
+  const helpers = loadPopupFunctions(
+    [
+      "collectRestV2ServiceProviderCandidatesFromApp",
+      "appSupportsServiceProvider",
+      "resolveRestV2AppForServiceProvider",
+      "selectPreferredRestV2AppForRequestor",
+    ],
+    {
+      extractEntityIdFromToken: (value = "") => {
+        const normalized = String(value || "").trim();
+        const match = normalized.match(/^@[^:]+:(.+)$/i);
+        return match ? String(match[1] || "").trim() : normalized;
+      },
+      normalizeEntityToken: (value = "") => String(value || "").trim().toLowerCase(),
+      collectPassVaultServiceProviderHintsFromAppData: () => [],
+      selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) => apps[0] || null,
+    }
+  );
+
+  const selected = normalizeRealmObject(
+    helpers.selectPreferredRestV2AppForRequestor(
+      [
+        { guid: "turner-shared", appName: "Turner Shared", serviceProviders: ["Turner"] },
+        { guid: "cartoon-app", appName: "Cartoon Network", serviceProviders: ["@ServiceProvider:CartoonNetwork"] },
+      ],
+      "CartoonNetwork",
+      "Turner"
+    )
+  );
+
+  assert.equal(selected?.guid, "cartoon-app");
+});
+
 test("runtime REST V2 app resolution follows the first programmer-scoped REST V2 candidate", () => {
   const services = {
     restV2: { guid: "rest-shared", appName: "REST Shared" },
@@ -993,6 +1064,89 @@ test("child-requestor MVPD loading uses the requestor-compatible programmer REST
   const result = await helpers.loadMvpdsFromRestV2("NHLTV");
 
   assert.equal(capturedFetchAppGuid, "nhltv-app");
+  assert.equal(result instanceof Map, true);
+  assert.equal(result.get("DISH")?.id, "DISH");
+});
+
+test("child-requestor MVPD loading uses persisted top-level requestor hints when selecting the programmer REST V2 app", async () => {
+  let pendingPromise = null;
+  let capturedFetchAppGuid = "";
+  const programmer = {
+    programmerId: "Turner",
+    requestorIds: ["AdultSwim", "Bleacher", "CartoonNetwork"],
+  };
+  const services = {
+    restV2: { guid: "turner-shared", appName: "Turner Shared", serviceProviders: ["Turner"] },
+    restV2Apps: [
+      { guid: "turner-shared", appName: "Turner Shared", serviceProviders: ["Turner"] },
+      { guid: "cartoon-app", appName: "Cartoon Network", serviceProviders: ["@ServiceProvider:CartoonNetwork"] },
+    ],
+  };
+  const helpers = loadPopupFunctions(
+    [
+      "collectRestV2ServiceProviderCandidatesFromApp",
+      "appSupportsServiceProvider",
+      "resolveRestV2AppForServiceProvider",
+      "selectPreferredRestV2AppForRequestor",
+      "loadMvpdsFromRestV2",
+    ],
+    {
+      Map,
+      state: {
+        programmers: [programmer],
+      },
+      extractEntityIdFromToken: (value = "") => {
+        const normalized = String(value || "").trim();
+        const match = normalized.match(/^@[^:]+:(.+)$/i);
+        return match ? String(match[1] || "").trim() : normalized;
+      },
+      normalizeEntityToken: (value = "") => String(value || "").trim().toLowerCase(),
+      collectPassVaultServiceProviderHintsFromAppData: () => [],
+      getRequestorScopedMvpdCache: () => null,
+      getRequestorScopedMvpdLoadPromise: () => pendingPromise,
+      setRequestorScopedMvpdLoadPromise: (_requestorId = "", promise = null) => {
+        pendingPromise = promise;
+        return promise;
+      },
+      getProgrammerCandidatesForRequestor: () => [programmer],
+      getProgrammerServiceHydrationPromise: () => null,
+      hydrateProgrammerFromPassVault: async () => null,
+      getPassVaultProgrammerReuseReadiness: () => ({
+        reusable: true,
+        runtimeServices: services,
+      }),
+      getCurrentPremiumAppsSnapshot: () => services,
+      collectProgrammerScopedRestV2AppCandidates: (_programmerId = "", premiumApps = null) =>
+        Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [],
+      selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) => apps[0] || null,
+      resolvePassVaultRuntimeBoundAppInfo: (_programmerId = "", appInfo = null) => appInfo,
+      resolveProgrammerPremiumServiceRuntimeApp: () => services.restV2,
+      hasPassVaultServiceClientCredentials: () => true,
+      fetchRestV2ConfigurationMvpds: async (_programmer = null, appInfo = null) => {
+        capturedFetchAppGuid = String(appInfo?.guid || "").trim();
+        return {
+          map: new Map([["DISH", { id: "DISH", displayName: "Dish" }]]),
+          domainRows: [],
+        };
+      },
+      promoteResolvedRestV2ConfigurationApp: () => services,
+      setRequestorScopedMvpdCache: () => null,
+      setRequestorScopedDomainCache: () => null,
+      getRequestorScopedHarpoSelectedDomain: () => "",
+      setRequestorScopedHarpoSelectedDomain: () => "",
+      log: () => {},
+      createProgrammersError: (message, code) => {
+        const error = new Error(message);
+        error.code = code;
+        return error;
+      },
+      resolveSelectedProgrammer: () => programmer,
+    }
+  );
+
+  const result = await helpers.loadMvpdsFromRestV2("CartoonNetwork");
+
+  assert.equal(capturedFetchAppGuid, "cartoon-app");
   assert.equal(result instanceof Map, true);
   assert.equal(result.get("DISH")?.id, "DISH");
 });
