@@ -9786,13 +9786,15 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
 
   if (normalizedServiceKey === "restV2") {
     const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, resolvedServices);
-    const preferredMatch = selectPreferredRestV2AppForRequestor(candidates, "", normalizedProgrammerId);
-    if (preferredMatch?.guid) {
-      return preferredMatch;
-    }
     const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
     if (primaryMatch?.guid) {
       return primaryMatch;
+    }
+    const preferredMatch =
+      selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
+      selectPreferredRestV2AppForRequestor(candidates, "", normalizedProgrammerId);
+    if (preferredMatch?.guid) {
+      return preferredMatch;
     }
     const fallbackMatch = resolveFallbackMatch(candidates);
     if (fallbackMatch?.guid) {
@@ -96558,49 +96560,6 @@ function promoteResolvedRestV2ConfigurationApp(programmer = null, services = nul
   return summarizedServices;
 }
 
-function orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestorId) {
-  void requestorId;
-  return mergeUniquePremiumServiceAppInfos(resolvedApp, restV2Apps);
-}
-
-async function fetchRestV2ConfigurationUsingCandidateApps(programmer, requestorId, orderedCandidates) {
-  const candidates = Array.isArray(orderedCandidates) ? orderedCandidates.filter((item) => item?.guid) : [];
-  if (candidates.length === 0) {
-    throw new Error("No REST V2 app candidates available.");
-  }
-
-  let lastError = null;
-  for (let index = 0; index < candidates.length; index += 1) {
-    const appInfo = candidates[index];
-    try {
-      const result = await fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId);
-      return {
-        map: result?.map instanceof Map ? result.map : new Map(),
-        domainRows: Array.isArray(result?.domainRows) ? result.domainRows : [],
-        appInfo,
-      };
-    } catch (error) {
-      const normalized = error instanceof Error ? error : new Error(String(error));
-      lastError = normalized;
-      const shouldTryNextProgrammerApp =
-        isServiceProviderTokenMismatchError(normalized.message) && index < candidates.length - 1;
-      log("REST V2 configuration attempt failed", {
-        requestorId,
-        programmerId: programmer?.programmerId || "",
-        app: appInfo?.appName || appInfo?.guid || "unknown",
-        error: normalized.message,
-        tryingNextProgrammerApp: shouldTryNextProgrammerApp,
-      });
-      if (shouldTryNextProgrammerApp) {
-        continue;
-      }
-      throw normalized;
-    }
-  }
-
-  throw lastError || new Error("No REST V2 app candidates available.");
-}
-
 async function loadMvpdsFromRestV2(requestorId) {
   if (!requestorId) {
     return new Map();
@@ -96671,20 +96630,9 @@ async function loadMvpdsFromRestV2(requestorId) {
         }
 
         hasRestV2Candidate = true;
-        const orderedCandidates = orderRestV2AppCandidatesForRequestor(
-          mergeUniquePremiumServiceAppInfos(
-            runtimePrimaryApp,
-            collectProgrammerScopedRestV2AppCandidates(programmer.programmerId, premiumApps)
-          ),
-          runtimePrimaryApp,
-          requestorId
-        );
-        const { map, domainRows, appInfo } = await fetchRestV2ConfigurationUsingCandidateApps(
-          programmer,
-          requestorId,
-          orderedCandidates
-        );
-        premiumApps = promoteResolvedRestV2ConfigurationApp(programmer, premiumApps, appInfo, requestorId) || premiumApps;
+        const { map, domainRows } = await fetchRestV2ConfigurationMvpds(programmer, runtimePrimaryApp, requestorId);
+        premiumApps =
+          promoteResolvedRestV2ConfigurationApp(programmer, premiumApps, runtimePrimaryApp, requestorId) || premiumApps;
 
         setRequestorScopedMvpdCache(requestorId, map);
         setRequestorScopedDomainCache(requestorId, domainRows);
@@ -96698,7 +96646,7 @@ async function loadMvpdsFromRestV2(requestorId) {
         log("MVPD menu loaded from REST V2 configuration.", {
           requestorId,
           programmerId: programmer.programmerId,
-          app: appInfo.appName,
+          app: runtimePrimaryApp.appName,
           count: map.size,
           domainCount: configuredDomainNames.length,
         });

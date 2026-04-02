@@ -744,79 +744,31 @@ test("pass vault hydration applications preserve console fetch order for primary
   );
 });
 
-test("REST V2 runtime keeps the programmer primary app first while retaining fallback candidates", () => {
-  const helpers = loadPopupFunctions(["orderRestV2AppCandidatesForRequestor"], {
-    mergeUniquePremiumServiceAppInfos: (...collections) => {
-      const merged = [];
-      const seen = new Set();
-      collections.flat().forEach((entry) => {
-        if (!entry || typeof entry !== "object") {
-          return;
-        }
-        const guid = String(entry.guid || "").trim();
-        if (!guid || seen.has(guid)) {
-          return;
-        }
-        seen.add(guid);
-        merged.push(normalizeRealmObject(entry));
-      });
-      return merged;
-    },
-  });
-
-  const ordered = normalizeRealmObject(
-    helpers.orderRestV2AppCandidatesForRequestor(
-      [
-        { guid: "shared-app", appName: "Shared App" },
-        { guid: "citytv-app", appName: "Citytvplus V2" },
-      ],
-      { guid: "shared-app", appName: "Shared App" },
-      "animalplanettv"
-    )
-  );
-
-  assert.deepEqual(ordered.map((entry) => entry.guid), ["shared-app", "citytv-app"]);
-});
-
-test("REST V2 configuration retries the next programmer app after a service-provider mismatch", async () => {
-  const attempts = [];
-  const helpers = loadPopupFunctions(["fetchRestV2ConfigurationUsingCandidateApps"], {
-    fetchRestV2ConfigurationMvpds: async (_programmer = null, appInfo = null, requestorId = "") => {
-      attempts.push({
-        guid: String(appInfo?.guid || "").trim(),
-        requestorId: String(requestorId || "").trim(),
-      });
-      if (String(appInfo?.guid || "").trim() === "shared-app") {
-        throw new Error(
-          "REST V2 configuration failed (401): invalid_access_token_service_provider: The access token is invalid due to invalid service provider."
-        );
-      }
-      return {
-        map: new Map([["Comcast_SSO", { id: "Comcast_SSO" }]]),
-        domainRows: [{ domainName: "watch.example.com" }],
-      };
-    },
-    isServiceProviderTokenMismatchError: (value = "") =>
-      String(value || "").toLowerCase().includes("invalid_access_token_service_provider"),
-    log: () => {},
-  });
-
-  const result = await helpers.fetchRestV2ConfigurationUsingCandidateApps(
-    { programmerId: "Rogers Media" },
-    "animalplanettv",
-    [
-      { guid: "shared-app", appName: "Shared App" },
+test("runtime REST V2 app resolution prefers the programmer primary over catalog order", () => {
+  const services = {
+    restV2: { guid: "shared-app", appName: "Shared App" },
+    restV2Apps: [
       { guid: "citytv-app", appName: "Citytvplus V2" },
-    ]
+      { guid: "shared-app", appName: "Shared App" },
+    ],
+  };
+  const helpers = loadPopupFunctions(["resolveProgrammerPremiumServiceRuntimeApp"], {
+    getCurrentPremiumAppsSnapshot: () => services,
+    getRuntimePremiumServicesSeed: () => services,
+    collectProgrammerScopedRestV2AppCandidates: (_programmerId = "", premiumApps = null) =>
+      Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [],
+    selectPreferredRestV2AppForRequestor: (apps = []) => apps[0] || null,
+    selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) => apps[0] || null,
+    collectEsmAppCandidatesFromPremiumApps: () => [],
+    collectResetTempPassAppCandidatesFromPremiumApps: () => [],
+    collectDegradationAppCandidatesFromPremiumApps: () => [],
+  });
+
+  const resolved = normalizeRealmObject(
+    helpers.resolveProgrammerPremiumServiceRuntimeApp("restV2", "Rogers Media", services)
   );
 
-  assert.deepEqual(attempts, [
-    { guid: "shared-app", requestorId: "animalplanettv" },
-    { guid: "citytv-app", requestorId: "animalplanettv" },
-  ]);
-  assert.equal(String(result?.appInfo?.guid || ""), "citytv-app");
-  assert.deepEqual(Array.from(result?.map?.keys?.() || []), ["Comcast_SSO"]);
-  assert.deepEqual(normalizeRealmObject(result?.domainRows || []), [{ domainName: "watch.example.com" }]);
+  assert.equal(resolved?.guid, "shared-app");
 });
 
 test("pass vault service hydration resets service selection from the first live scoped application", () => {
