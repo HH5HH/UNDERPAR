@@ -119,6 +119,83 @@ function loadMvpdSearchCatalogBuilder(fetchStub) {
   return context.module.exports;
 }
 
+function loadMvpdSearchSubmitHarness(options = {}) {
+  const filePath = path.join(ROOT, "up-devtools-panel.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const panelState = {
+    mvpdSearchBusy: false,
+    mvpdSearchViewBusyKey: "",
+    mvpdSearchQuery: "",
+    mvpdSearchResultRows: [],
+    mvpdSearchLastEnvironmentKey: "",
+    environmentsLoaded: true,
+    ...(options.panelState && typeof options.panelState === "object" ? options.panelState : {}),
+  };
+  const renderCalls = [];
+  const syncCalls = [];
+  const badgeCalls = [];
+  const statusCalls = [];
+  const rebuildCalls = [];
+  const script = [
+    extractFunctionSource(source, "handleMvpdSearchSubmit"),
+    "module.exports = { handleMvpdSearchSubmit };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    panelState,
+    mvpdSearchInput: {
+      value: String(options.query || ""),
+    },
+    getActivePanelEnvironment:
+      typeof options.getActivePanelEnvironment === "function"
+        ? options.getActivePanelEnvironment
+        : () => ({ key: "release-production", label: "Release Production" }),
+    syncInteractiveControlState: () => {
+      syncCalls.push({ busy: panelState.mvpdSearchBusy, viewBusyKey: panelState.mvpdSearchViewBusyKey });
+    },
+    setMvpdSearchBadgeState: (...args) => {
+      badgeCalls.push(args);
+    },
+    renderMvpdSearchResults: (rows, renderOptions) => {
+      renderCalls.push({
+        busy: panelState.mvpdSearchBusy,
+        rows: normalizeVmValue(rows),
+        options: normalizeVmValue(renderOptions || {}),
+      });
+    },
+    sendVaultActionRequest:
+      typeof options.sendVaultActionRequest === "function"
+        ? options.sendVaultActionRequest
+        : async () => ({
+            results: [],
+            environmentKey: "release-production",
+          }),
+    rebuildMvpdSearchResultIndex: (rows) => {
+      rebuildCalls.push(normalizeVmValue(rows));
+    },
+    setMvpdSearchStatusMessage: (...args) => {
+      statusCalls.push(args);
+    },
+    String,
+    Array,
+    Object,
+    Number,
+    Math,
+    JSON,
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return {
+    panelState,
+    renderCalls,
+    syncCalls,
+    badgeCalls,
+    statusCalls,
+    rebuildCalls,
+    handleMvpdSearchSubmit: context.module.exports.handleMvpdSearchSubmit,
+  };
+}
+
 function normalizeVmValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -508,4 +585,33 @@ test("UP DevTools MVPD search catalog bulk-loads proxied MVPD refs declared by p
   assert.equal(claroRow.displayName, "Claro Puerto Rico");
   assert.match(claroRow.searchText, /claro puerto rico/);
   assert.match(claroRow.searchText, /nrtccpr010/);
+});
+
+test("UP DevTools MVPD search re-renders results after busy clears so MVPD workspace links remain clickable", async () => {
+  const harness = loadMvpdSearchSubmitHarness({
+    query: "blue",
+    sendVaultActionRequest: async () => ({
+      results: [
+        {
+          entityType: "mvpdproxy",
+          id: "blue001",
+          displayName: "Blue Proxy",
+        },
+      ],
+      environmentKey: "release-production",
+    }),
+  });
+
+  await harness.handleMvpdSearchSubmit();
+
+  assert.equal(harness.renderCalls.length >= 3, true);
+  assert.equal(harness.renderCalls[0].busy, true);
+  assert.equal(harness.renderCalls.at(-1).busy, false);
+  assert.deepEqual(harness.renderCalls.at(-1).rows, [
+    {
+      entityType: "mvpdproxy",
+      id: "blue001",
+      displayName: "Blue Proxy",
+    },
+  ]);
 });

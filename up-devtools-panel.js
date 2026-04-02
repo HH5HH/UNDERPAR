@@ -4990,6 +4990,9 @@ async function handleMvpdSearchSubmit() {
   } finally {
     panelState.mvpdSearchBusy = false;
     syncInteractiveControlState();
+    if (panelState.mvpdSearchResultRows.length > 0) {
+      renderMvpdSearchResults(panelState.mvpdSearchResultRows, {});
+    }
   }
 }
 
