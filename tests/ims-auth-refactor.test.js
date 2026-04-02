@@ -2551,6 +2551,13 @@ test("premium app details still retain software statements while pass-vault mapp
     resolveServiceApplicationSource,
     /registeredApplicationMatchesNativeRequiredScope\(application,\s*normalizedDefinition\.requiredScope\)/
   );
+  assert.match(resolveServiceApplicationSource, /const existingGuid = String\(existingService\?\.registeredApplication\?\.guid \|\| ""\)\.trim\(\);/);
+  assert.match(resolveServiceApplicationSource, /const existingClient =/);
+  assert.match(resolveServiceApplicationSource, /const existingBoundMatch =/);
+  assert.match(
+    resolveServiceApplicationSource,
+    /Boolean\(String\(existingClient\?\.clientId \|\| ""\)\.trim\(\) && String\(existingClient\?\.clientSecret \|\| ""\)\.trim\(\)\)/
+  );
   assert.match(
     resolveServiceApplicationSource,
     /selectPreferredPassVaultHydrationServiceApplication\(\s*normalizedDefinition\.serviceKey,\s*matchingApplications,\s*programmerId\s*\)/
@@ -3007,9 +3014,10 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(resolveRuntimeSource, /if \(preferredMatch\?\.guid\) \{\s*return preferredMatch;\s*\}/);
   assert.match(resolveRuntimeSource, /const candidates = collectProgrammerScopedRestV2AppCandidates\(normalizedProgrammerId,\s*resolvedServices\);/);
   assert.match(resolveRuntimeSource, /return primaryMatch \|\| fallbackMatch \|\| preferredMatch \|\| null;/);
+  assert.match(runtimeSnapshotSource, /const credentialBackedMatch =/);
   assert.match(
     runtimeSnapshotSource,
-    /if \(normalizedServiceKey === "restV2"\) \{\s*return \(\s*primaryMatch\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\([\s\S]*\|\|\s*credentialBackedMatch/
+    /if \(normalizedServiceKey === "restV2"\) \{\s*return \(\s*credentialBackedMatch\s*\|\|\s*\(primaryMatch && hasCredentialEntryForService\(normalizedServiceKey,\s*primaryGuid\) \? primaryMatch : null\)\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\(/
   );
   assert.match(
     promoteResolvedSource,
@@ -3050,13 +3058,12 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   );
   assert.match(
     fetchWithPremiumAuthSource,
-    /if \(response\.status === 401 && retryStage === "restv2-token-refresh"\) \{[\s\S]*if \(isServiceProviderTokenMismatchError\(bodyText\)\) \{[\s\S]*clearDcrCache\(programmerId,\s*retryAppInfo\.guid,\s*"restV2"\);[\s\S]*allowProvisioning:\s*true,[\s\S]*forceFreshClientRegistration:\s*true,[\s\S]*lockAppSelection:\s*true,[\s\S]*return fetchWithPremiumAuth\([\s\S]*"restv2-reprovision"[\s\S]*allowProvisioning:\s*true,[\s\S]*lockAppSelection:\s*true[\s\S]*\}\s*return response;\s*\}/
+    /if \(response\.status === 401 && retryStage === "restv2-token-refresh"\) \{[\s\S]*if \(isServiceProviderTokenMismatchError\(bodyText\)\) \{[\s\S]*reason:\s*"401-restv2-programmer-hydration-repair"[\s\S]*const programmer =[\s\S]*state\.programmers\.find\([\s\S]*const seedServices = getRuntimePremiumServicesSeed\(programmerId\);[\s\S]*await primeProgrammerServiceHydration\(programmer,\s*seedServices,\s*\{[\s\S]*forceRefresh:\s*true,[\s\S]*renderOnReady:\s*false,[\s\S]*controllerReason:\s*"restv2-programmer-hydration-repair"[\s\S]*\}\)\.catch\(\(\) => null\);[\s\S]*return fetchWithPremiumAuth\([\s\S]*"restv2-hydration-repair"[\s\S]*allowProvisioning:\s*false,[\s\S]*lockAppSelection:\s*true[\s\S]*\}\s*return response;\s*\}/
   );
-  assert.match(
-    fetchWithPremiumAuthSource,
-    /if \(response\.status === 401 && retryStage === "restv2-reprovision"\) \{[\s\S]*if \(isServiceProviderTokenMismatchError\(bodyText\)\) \{[\s\S]*recoverPremiumServiceSelection\(programmerId,\s*resolvedAppInfo,\s*\{[\s\S]*requiredServiceScope:\s*REST_V2_SCOPE,[\s\S]*\}\)\.catch\(\(\) => null\);[\s\S]*reason:\s*"401-restv2-alternate-parent"[\s\S]*clearDcrCache\(programmerId,\s*recoveredAppInfo\.guid,\s*"restV2"\);[\s\S]*allowProvisioning:\s*true,[\s\S]*forceFreshClientRegistration:\s*true,[\s\S]*lockAppSelection:\s*true,[\s\S]*return fetchWithPremiumAuth\([\s\S]*"restv2-alt-reprovision"[\s\S]*allowProvisioning:\s*true,[\s\S]*lockAppSelection:\s*true[\s\S]*\}\s*return response;\s*\}/
-  );
-  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "restv2-alt-reprovision"\) \{\s*return response;\s*\}/);
+  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "restv2-hydration-repair"\) \{\s*return response;\s*\}/);
+  assert.doesNotMatch(fetchWithPremiumAuthSource, /401-restv2-alternate-parent/);
+  assert.doesNotMatch(fetchWithPremiumAuthSource, /restv2-alt-reprovision/);
+  assert.doesNotMatch(fetchWithPremiumAuthSource, /forceFreshClientRegistration:\s*true,[\s\S]*"restv2-reprovision"/);
   assert.match(
     loadMvpdsSource,
     /premiumApps =[\s\S]*promoteResolvedRestV2ConfigurationApp\(programmer,\s*premiumApps,\s*runtimePrimaryApp,\s*requestorId\) \|\| premiumApps;/
