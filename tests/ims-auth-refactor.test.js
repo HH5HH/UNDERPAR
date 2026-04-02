@@ -2677,7 +2677,7 @@ test("legacy premium provisioning helpers are removed and live loading stays on 
   assert.match(refreshPanelsSource, /const finalServices = updateSelectionServicesSnapshot\(/);
 });
 
-test("premium UI waits for reusable programmer vault state while runtime readiness stays DCR-backed and pass-vault compilation persists before CM background hydration", () => {
+test("premium UI renders from detected live services while runtime readiness stays DCR-backed and pass-vault compilation persists before CM background hydration", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const renderReadinessSource = extractFunctionSource(popupSource, "shouldRenderPremiumServicesUi");
   const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
@@ -2687,8 +2687,9 @@ test("premium UI waits for reusable programmer vault state while runtime readine
 
   assert.match(
     renderReadinessSource,
-    /return isPassVaultProgrammerReadyForReuse\(normalizedProgrammerId\) && isProgrammerPremiumUiReady\(normalizedProgrammerId,\s*services\);/
+    /return isProgrammerPremiumUiReady\(normalizedProgrammerId,\s*services\);/
   );
+  assert.doesNotMatch(renderReadinessSource, /isPassVaultProgrammerReadyForReuse/);
   assert.match(refreshPanelsSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*renderServices\);/);
   assert.match(refreshPanelsSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*renderServices\);/);
   assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*provisionalServices,\s*\{/);
@@ -3229,7 +3230,7 @@ test("DCR register and token flows now mirror LoginButton's compact form/query c
   assert.match(tokenSource, /body\.set\("scope", normalizedAttemptScope\)/);
 });
 
-test("premium runtime readiness still depends on DCR-ready premium apps while UI rendering waits for reusable programmer vault state", () => {
+test("premium runtime readiness still depends on DCR-ready premium apps while UI rendering follows detected live premium services", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const runtimeReadySource = extractFunctionSource(popupSource, "isProgrammerRuntimeServicesReady");
   const renderReadySource = extractFunctionSource(popupSource, "shouldRenderPremiumServicesUi");
@@ -3242,8 +3243,9 @@ test("premium runtime readiness still depends on DCR-ready premium apps while UI
   assert.match(hrContextReadySource, /hasResolvedCmAvailabilityForProgrammer\(normalizedProgrammerId,\s*resolvedServices\)/);
   assert.match(
     renderReadySource,
-    /return isPassVaultProgrammerReadyForReuse\(normalizedProgrammerId\) && isProgrammerPremiumUiReady\(normalizedProgrammerId,\s*services\);/
+    /return isProgrammerPremiumUiReady\(normalizedProgrammerId,\s*services\);/
   );
+  assert.doesNotMatch(renderReadySource, /isPassVaultProgrammerReadyForReuse/);
   assert.match(progressSource, /!shouldRenderPremiumServicesUi\(String\(programmerId \|\| ""\)\.trim\(\), getCurrentPremiumAppsSnapshot\(programmerId\)\)/);
   assert.match(primeSource, /const hrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*runtimeServices\);/);
   assert.match(primeSource, /if \(hrContextReady\) \{\s*setProgrammerWorkspaceHydrationReady\(programmerId,\s*true\);/);
@@ -3285,6 +3287,7 @@ test("available TempPASS credentials participate in programmer reuse readiness a
   const credentialReadySource = extractFunctionSource(popupSource, "passVaultCredentialResultHasClientCredentials");
   const readinessSource = extractFunctionSource(popupSource, "getPassVaultProgrammerReuseReadiness");
   const forceHydrationSource = extractFunctionSource(popupSource, "shouldForceLivePassVaultProgrammerHydration");
+  const premiumUiSource = extractFunctionSource(popupSource, "shouldRenderPremiumServicesUi");
 
   assert.match(
     compileSource,
@@ -3306,6 +3309,8 @@ test("available TempPASS credentials participate in programmer reuse readiness a
   assert.doesNotMatch(readinessSource, /hydrationStatus !== UNDERPAR_VAULT_STATUS_PENDING/);
   assert.match(forceHydrationSource, /if \(readiness\.hydrationStatus !== UNDERPAR_VAULT_STATUS_COMPLETE\) \{\s*return true;\s*\}/);
   assert.match(forceHydrationSource, /readiness\.runtimeCoverage &&[\s\S]*readiness\.credentialCoverage &&[\s\S]*readiness\.cmCoverage/);
+  assert.match(premiumUiSource, /return isProgrammerPremiumUiReady\(normalizedProgrammerId,\s*services\);/);
+  assert.doesNotMatch(premiumUiSource, /isPassVaultProgrammerReadyForReuse/);
   assert.match(refreshSource, /if \(reusableServices\) \{[\s\S]*clearStatusUnlessCmTenantsPrecheckBlocked\(\);[\s\S]*renderPremiumServices\(reusableServices,/);
   assert.match(
     refreshSource,

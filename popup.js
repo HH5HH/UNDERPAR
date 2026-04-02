@@ -1061,7 +1061,7 @@ function shouldRenderPremiumServicesUi(programmerId = "", services = null) {
   if (!normalizedProgrammerId) {
     return false;
   }
-  return isPassVaultProgrammerReadyForReuse(normalizedProgrammerId) && isProgrammerPremiumUiReady(normalizedProgrammerId, services);
+  return isProgrammerPremiumUiReady(normalizedProgrammerId, services);
 }
 
 function getProgrammerServiceHydrationPromise(
