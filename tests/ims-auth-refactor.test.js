@@ -3019,6 +3019,11 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(fetchRestV2ConfigurationSource, /allowProvisioning:\s*false/);
   assert.match(createSessionSource, /allowProvisioning:\s*false/);
   assert.match(
+    fetchWithPremiumAuthSource,
+    /if \(isServiceProviderMismatch\) \{[\s\S]*if \(isRestV2ServiceRequest\) \{[\s\S]*clearDcrCache\(programmerId,\s*retryAppInfo\.guid\);[\s\S]*allowProvisioning:\s*true,[\s\S]*forceFreshClientRegistration:\s*true,[\s\S]*lockAppSelection:\s*true,[\s\S]*return fetchWithPremiumAuth\([\s\S]*"restv2-reprovision"[\s\S]*allowProvisioning:\s*false,[\s\S]*lockAppSelection:\s*true/
+  );
+  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "restv2-reprovision"\) \{\s*return response;\s*\}/);
+  assert.match(
     loadMvpdsSource,
     /premiumApps =[\s\S]*promoteResolvedRestV2ConfigurationApp\(programmer,\s*premiumApps,\s*runtimePrimaryApp,\s*requestorId\) \|\| premiumApps;/
   );
@@ -3043,15 +3048,11 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(fetchWithPremiumAuthSource, /reason:\s*isServiceProviderMismatch \? "401-refresh-service-provider-mismatch" : "401-refresh"/);
   assert.match(
     fetchWithPremiumAuthSource,
-    /if \(isServiceProviderMismatch\) \{\s*if \(isRestV2ServiceRequest\) \{\s*return response;\s*\}\s*clearDcrCache\(programmerId,\s*retryAppInfo\.guid\);/
-  );
-  assert.match(
-    fetchWithPremiumAuthSource,
     /if \(isRestV2ServiceRequest\) \{\s*await ensureDcrAccessToken\(programmerId,\s*retryAppInfo,\s*true,\s*\{[\s\S]*allowProvisioning:\s*false[\s\S]*\}\);\s*return fetchWithPremiumAuth\([\s\S]*"none"[\s\S]*allowProvisioning:\s*false/
   );
-  assert.match(
+  assert.doesNotMatch(
     fetchWithPremiumAuthSource,
-    /if \(response\.status === 401 && retryStage === "reprovision"\) \{[\s\S]*if \(isRestV2ServiceRequest\) \{\s*return response;\s*\}/
+    /if \(isServiceProviderMismatch\) \{\s*if \(isRestV2ServiceRequest\) \{\s*return response;\s*\}/
   );
 });
 

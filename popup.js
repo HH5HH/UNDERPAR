@@ -88611,7 +88611,25 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
     const retryAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
     if (isServiceProviderMismatch) {
       if (isRestV2ServiceRequest) {
-        return response;
+        clearDcrCache(programmerId, retryAppInfo.guid);
+        await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
+          ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+          allowProvisioning: true,
+          forceFreshClientRegistration: true,
+          lockAppSelection: true,
+        });
+        return fetchWithPremiumAuth(
+          programmerId,
+          retryAppInfo,
+          url,
+          options,
+          "restv2-reprovision",
+          {
+            ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+            allowProvisioning: false,
+            lockAppSelection: true,
+          }
+        );
       }
       clearDcrCache(programmerId, retryAppInfo.guid);
       await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
@@ -88639,6 +88657,10 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
     }
     await ensureDcrAccessToken(programmerId, retryAppInfo, true, debugMeta);
     return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "reprovision", debugMeta);
+  }
+
+  if (response.status === 401 && retryStage === "restv2-reprovision") {
+    return response;
   }
 
   if (response.status === 401 && retryStage === "reprovision") {
