@@ -608,16 +608,11 @@ test("registered application health premium service bindings follow the hydrated
   );
 });
 
-test("REST V2 requestor selection prefers the media-company-scoped app over requestor-specific hints", () => {
+test("REST V2 requestor selection now follows the first programmer-scoped REST V2 candidate", () => {
   const helpers = loadPopupFunctions(["selectPreferredRestV2AppForRequestor"], {
-    pickHighestRankedPassVaultServiceCandidate: (apps = [], programmerId = "") =>
-      apps.find((entry) => String(entry?.guid || "").trim() === "shared-app" && String(programmerId || "").trim() === "Discovery") ||
-      apps[0] ||
-      null,
-    appSupportsServiceProvider: (appInfo = null, requestorId = "", programmerId = "") =>
-      String(programmerId || "").trim() === "Discovery" &&
-      String(requestorId || "").trim() === "Discovery" &&
-      String(appInfo?.guid || "").trim() === "shared-app",
+    pickHighestRankedPassVaultServiceCandidate: () => {
+      throw new Error("should not rank REST V2 candidates");
+    },
   });
 
   const selected = normalizeRealmObject(
@@ -631,10 +626,10 @@ test("REST V2 requestor selection prefers the media-company-scoped app over requ
     )
   );
 
-  assert.equal(selected?.guid, "shared-app");
+  assert.equal(selected?.guid, "animalplanet-app");
 });
 
-test("runtime REST V2 app resolution prefers the ranked programmer catalog over a stale cached primary", () => {
+test("runtime REST V2 app resolution follows the first programmer-scoped REST V2 candidate", () => {
   const services = {
     restV2: { guid: "rest-shared", appName: "REST Shared" },
     restV2Apps: [
@@ -658,14 +653,14 @@ test("runtime REST V2 app resolution prefers the ranked programmer catalog over 
     collectProgrammerScopedRestV2AppCandidates: (_programmerId = "", premiumApps = null) => premiumApps?.restV2Apps || [],
     collectEsmAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.esmApps || [],
     collectResetTempPassAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.resetTempPassApps || [],
-    selectPreferredRestV2AppForRequestor: () => services.restV2Apps[1],
+    selectPreferredRestV2AppForRequestor: () => services.restV2Apps[0],
     selectPreferredEsmAppForRequestor: () => services.esmApps[1],
     selectPreferredResetTempPassAppForRequestor: () => services.resetTempPassApps[1],
   });
 
   assert.equal(
     normalizeRealmObject(helpers.resolveProgrammerPremiumServiceRuntimeApp("restV2", "Turner", services))?.guid,
-    "rest-mml"
+    "rest-shared"
   );
   assert.equal(
     normalizeRealmObject(helpers.resolveProgrammerPremiumServiceRuntimeApp("esm", "Turner", services))?.guid,
@@ -704,7 +699,69 @@ test("programmer-scoped REST V2 candidates are rebuilt from the full registered-
   );
 });
 
-test("pass vault service hydration reuses the existing primary app before other scoped matches", () => {
+test("pass vault hydration applications preserve console fetch order for primary-service selection", () => {
+  const helpers = loadPopupFunctions(["buildPassVaultHydrationRegisteredApplications"], {
+    normalizeRegisteredApplicationRuntimeRecord: (value = null) => normalizeRealmObject(value),
+    buildRegisteredApplicationScopeLabels: () => [],
+    buildRegisteredApplicationLabel: (appName = "") => String(appName || "").trim(),
+    firstNonEmptyString,
+    extractSoftwareStatementFromAppData: () => "",
+    normalizeScope: (value = "") => String(value || "").trim().toLowerCase(),
+  });
+
+  const applications = normalizeRealmObject(
+    helpers.buildPassVaultHydrationRegisteredApplications({
+      "citytv-app": {
+        guid: "citytv-app",
+        name: "Citytvplus V2",
+        appData: {
+          scopes: ["api:client:v2"],
+          __underparFetchOrder: 4,
+        },
+      },
+      "shared-app": {
+        guid: "shared-app",
+        name: "Discovery Shared",
+        appData: {
+          scopes: ["api:client:v2"],
+          __underparFetchOrder: 1,
+        },
+      },
+      "animalplanet-app": {
+        guid: "animalplanet-app",
+        name: "Animal Planet",
+        appData: {
+          scopes: ["api:client:v2"],
+          __underparFetchOrder: 2,
+        },
+      },
+    })
+  );
+
+  assert.deepEqual(
+    applications.map((entry) => entry.guid),
+    ["shared-app", "animalplanet-app", "citytv-app"]
+  );
+});
+
+test("REST V2 runtime only keeps the programmer primary app in the MVPD load candidate list", () => {
+  const helpers = loadPopupFunctions(["orderRestV2AppCandidatesForRequestor"], {});
+
+  const ordered = normalizeRealmObject(
+    helpers.orderRestV2AppCandidatesForRequestor(
+      [
+        { guid: "shared-app", appName: "Shared App" },
+        { guid: "citytv-app", appName: "Citytvplus V2" },
+      ],
+      { guid: "shared-app", appName: "Shared App" },
+      "animalplanettv"
+    )
+  );
+
+  assert.deepEqual(ordered.map((entry) => entry.guid), ["shared-app"]);
+});
+
+test("pass vault service hydration resets service selection from the first live scoped application", () => {
   const helpers = loadPopupFunctions(["resolvePassVaultHydrationServiceApplication"], {
     registeredApplicationMatchesNativeRequiredScope: (app = null, requiredScope = "") =>
       (Array.isArray(app?.scopes) ? app.scopes : []).includes(String(requiredScope || "").trim()),
@@ -716,7 +773,7 @@ test("pass vault service hydration reuses the existing primary app before other 
       },
     }),
     selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) =>
-      apps.find((app) => String(app?.guid || "").trim() === "shared-app") || apps[0] || null,
+      apps[0] || null,
     buildPassVaultCompactRegisteredApplication: (app = null) => normalizeRealmObject(app),
   });
 
@@ -733,10 +790,10 @@ test("pass vault service hydration reuses the existing primary app before other 
     existingRecord: { services: { restV2: { primaryGuid: "shared-app" } } },
   });
 
-  assert.equal(selected?.guid, "shared-app");
+  assert.equal(selected?.guid, "animalplanet-app");
 });
 
-test("successful REST V2 requestor resolution preserves the media-company primary app while caching the requestor winner", async () => {
+test("successful REST V2 requestor resolution preserves the media-company primary app without storing requestor app state", async () => {
   const programmer = { programmerId: "Rogers Media" };
   const services = {
     restV2: { guid: "shared-app", appName: "Shared App" },
@@ -746,7 +803,6 @@ test("successful REST V2 requestor resolution preserves the media-company primar
     ],
   };
   const setPremiumSnapshots = [];
-  const setRequestorContexts = [];
   const helpers = loadPopupFunctions(["promoteResolvedRestV2ConfigurationApp"], {
     mergeUniquePremiumServiceAppInfos: (...collections) => {
       const merged = [];
@@ -764,6 +820,8 @@ test("successful REST V2 requestor resolution preserves the media-company primar
       });
       return merged;
     },
+    collectProgrammerScopedRestV2AppCandidates: (_programmerId = "", premiumApps = null) =>
+      Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [],
     selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) =>
       apps.find((app) => String(app?.guid || "").trim() === "shared-app") || apps[0] || null,
     applyPremiumServiceRuntimeSummary: (_programmer = null, nextServices = null) => normalizeRealmObject(nextServices),
@@ -771,15 +829,6 @@ test("successful REST V2 requestor resolution preserves the media-company primar
       setPremiumSnapshots.push({
         programmerId,
         services: normalizeRealmObject(nextServices),
-      });
-    },
-    getRequestorScopedRestV2AuthContext: () => ({
-      candidateGuids: ["legacy-app"],
-    }),
-    setRequestorScopedRestV2AuthContext: (requestorId, nextValue) => {
-      setRequestorContexts.push({
-        requestorId,
-        value: normalizeRealmObject(nextValue),
       });
     },
     uniquePreserveOrder,
@@ -802,14 +851,10 @@ test("successful REST V2 requestor resolution preserves the media-company primar
   assert.equal(nextServices?.restV2?.guid, "shared-app");
   assert.deepEqual(
     (Array.isArray(nextServices?.restV2Apps) ? nextServices.restV2Apps : []).map((app) => app.guid),
-    ["citytv-app", "shared-app"]
+    ["shared-app", "citytv-app"]
   );
   assert.equal(setPremiumSnapshots.length, 1);
   assert.equal(setPremiumSnapshots[0]?.services?.restV2?.guid, "shared-app");
-  assert.equal(setRequestorContexts.length, 1);
-  assert.equal(setRequestorContexts[0]?.requestorId, "animalplanettv");
-  assert.equal(setRequestorContexts[0]?.value?.preferredAppGuid, "citytv-app");
-  assert.deepEqual(setRequestorContexts[0]?.value?.candidateGuids, ["citytv-app", "legacy-app", "shared-app"]);
 });
 
 test("registered application health ordering keeps the selected app ahead of requestor-specific hints", () => {
