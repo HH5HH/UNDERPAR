@@ -7634,14 +7634,9 @@ async function ensurePassVaultLoaded(options = {}) {
   return loadPromise;
 }
 
-function choosePassVaultRuntimeDcrCache(applicationRecord = null) {
+function choosePassVaultRuntimeDcrCache(applicationRecord = null, serviceKey = "") {
   if (!applicationRecord || typeof applicationRecord !== "object") {
     return null;
-  }
-
-  const directCache = normalizeUnderparVaultDcrCache(applicationRecord?.dcrCache || null);
-  if (directCache) {
-    return directCache;
   }
 
   const serviceCredentials =
@@ -7649,12 +7644,23 @@ function choosePassVaultRuntimeDcrCache(applicationRecord = null) {
     typeof applicationRecord.serviceCredentialsByServiceKey === "object"
       ? applicationRecord.serviceCredentialsByServiceKey
       : {};
-  const orderedServiceKeys = ["restV2", "esm", "degradation", "resetTempPass"];
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const orderedServiceKeys = uniquePreserveOrder(
+    [normalizedServiceKey]
+      .concat(["restV2", "esm", "degradation", "resetTempPass"])
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean)
+  );
   for (const serviceKey of orderedServiceKeys) {
     const credential = normalizeUnderparVaultCredentialEntry(serviceCredentials?.[serviceKey] || null);
     if (credential && (credential.clientId || credential.clientSecret || credential.accessToken)) {
       return credential;
     }
+  }
+
+  const directCache = normalizeUnderparVaultDcrCache(applicationRecord?.dcrCache || null);
+  if (directCache) {
+    return directCache;
   }
   return null;
 }
@@ -8080,7 +8086,7 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
       return;
     }
     registeredApplicationsByGuid[guid].serviceCredentialsByServiceKey[serviceKey] = credentialEntry;
-    if (!registeredApplicationsByGuid[guid].dcrCache && result?.cache) {
+    if (result?.cache) {
       registeredApplicationsByGuid[guid].dcrCache = normalizeUnderparVaultDcrCache(result.cache);
     }
     registeredApplicationsByGuid[guid].serviceKeys = uniqueSorted(
@@ -8953,7 +8959,9 @@ function buildPassVaultExistingHydrationServiceRecord(programmerId = "", existin
 
   const applicationRecord = getPassVaultRegisteredApplicationsByGuid(existingRecord)?.[guid] || null;
   const client =
-    normalizeUnderparVaultCredentialEntry((guid ? loadDcrCache(normalizedProgrammerId, guid) : null) || null) ||
+    normalizeUnderparVaultCredentialEntry(
+      (guid ? loadDcrCache(normalizedProgrammerId, guid, normalizedServiceKey) : null) || null
+    ) ||
     normalizeUnderparVaultCredentialEntry(applicationRecord?.serviceCredentialsByServiceKey?.[normalizedServiceKey] || null) ||
     stagedClient ||
     normalizeUnderparVaultCredentialEntry(applicationRecord?.dcrCache || null) ||
@@ -9030,7 +9038,9 @@ function buildPassVaultServiceHydrationEntries({
     });
     const appGuid = String(registeredApplication?.guid || "").trim();
     const cachedClient =
-      normalizeUnderparVaultCredentialEntry((programmerId && appGuid ? loadDcrCache(programmerId, appGuid) : null) || null) ||
+      normalizeUnderparVaultCredentialEntry(
+        (programmerId && appGuid ? loadDcrCache(programmerId, appGuid, definition.serviceKey) : null) || null
+      ) ||
       null;
     const existingClient = normalizeUnderparVaultCredentialEntry(existingService?.client || null);
     const sameApplicationClient =
@@ -9144,7 +9154,9 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
   const now = Date.now();
   const requiredScope = getPassVaultRequiredScopeForService(normalizedDefinition.serviceKey, registeredApplication);
   const cachedClient =
-    normalizeUnderparVaultDcrCache((programmerId && guid ? loadDcrCache(programmerId, guid) : null) || null) || null;
+    normalizeUnderparVaultDcrCache(
+      (programmerId && guid ? loadDcrCache(programmerId, guid, normalizedDefinition.serviceKey) : null) || null
+    ) || null;
   const sharedClient = normalizeUnderparVaultDcrCache((guid ? sharedClientByGuid?.get(guid) : null) || null) || null;
   const nextClient =
     normalizeUnderparVaultDcrCache(currentRecord?.client || null) ||
@@ -9667,7 +9679,9 @@ function hasPassVaultServiceClientCredentials(programmerId = "", appInfo = null,
     ? getPassVaultRequiredScopeForService(normalizedServiceKey, resolvedAppInfo)
     : resolveRequiredPremiumServiceScope(resolvedAppInfo);
   const softwareStatement = resolveRegisteredApplicationSoftwareStatement(resolvedAppInfo);
-  const cache = normalizeUnderparVaultDcrCache(loadDcrCache(normalizedProgrammerId, guid) || null);
+  const cache = normalizeUnderparVaultDcrCache(
+    loadDcrCache(normalizedProgrammerId, guid, normalizedServiceKey) || null
+  );
   if (
     hasMatchingSoftwareStatementBoundDcrCache(
       cache,
@@ -24606,7 +24620,9 @@ async function switchRegisteredApplicationHealthPremiumService(queryContext = nu
       available: true,
       requiredScope,
       registeredApplication: buildPassVaultCompactRegisteredApplication(selectedApplication),
-      client: normalizeUnderparVaultCredentialEntry(loadDcrCache(programmerId, normalizedGuid) || null),
+      client: normalizeUnderparVaultCredentialEntry(
+        loadDcrCache(programmerId, normalizedGuid, normalizedServiceKey) || null
+      ),
       status: "pending",
     },
     definition,
@@ -38598,7 +38614,7 @@ async function resolveClickEsmAuthContext(context, requestToken, options = {}) {
     console.warn("UnderPAR MEG context falling back to vault credentials without a primed ESM token.", error);
   }
 
-  const dcrCache = loadDcrCache(programmer.programmerId, appInfo.guid) || {};
+  const dcrCache = loadDcrCache(programmer.programmerId, appInfo.guid, "esm") || {};
   const clientId = String(dcrCache.clientId || "");
   const clientSecret = String(dcrCache.clientSecret || "");
   const resolvedAccessToken = String(accessToken || dcrCache.accessToken || "");
@@ -38621,7 +38637,7 @@ async function makeClickEsmDownload(context, requestToken, options = {}) {
   const resolvedAppInfo = authContext?.appInfo || context?.appInfo || null;
   const credential =
     normalizeUnderparVaultDcrCache(
-      loadDcrCache(String(programmer?.programmerId || ""), String(resolvedAppInfo?.guid || "")) || null
+      loadDcrCache(String(programmer?.programmerId || ""), String(resolvedAppInfo?.guid || ""), "esm") || null
     ) || {
       clientId: String(authContext?.clientId || "").trim(),
       clientSecret: String(authContext?.clientSecret || "").trim(),
@@ -38913,7 +38929,11 @@ function resolveClickDgrCachedAuthContext(context, requestToken) {
   const selectedContext = resolveClickDgrSelectedAppContext(context, requestToken);
   const dcrCache =
     normalizeUnderparVaultDcrCache(
-      loadDcrCache(String(selectedContext?.programmer?.programmerId || ""), String(selectedContext?.appInfo?.guid || "")) || null
+      loadDcrCache(
+        String(selectedContext?.programmer?.programmerId || ""),
+        String(selectedContext?.appInfo?.guid || ""),
+        "degradation"
+      ) || null
     ) || {};
   const tokenExpiresAt = Number(dcrCache?.tokenExpiresAt || 0);
   const hasFreshToken = Boolean(String(dcrCache?.accessToken || "").trim()) && tokenExpiresAt > Date.now() + 60 * 1000;
@@ -38956,7 +38976,7 @@ async function resolveClickDgrAuthContext(context, requestToken, options = {}) {
   appInfo = tokenResult?.appInfo || appInfo;
   const accessToken = String(tokenResult?.accessToken || "");
 
-  const dcrCache = loadDcrCache(programmer.programmerId, appInfo.guid) || {};
+  const dcrCache = loadDcrCache(programmer.programmerId, appInfo.guid, "degradation") || {};
   const clientId = String(dcrCache.clientId || "");
   const clientSecret = String(dcrCache.clientSecret || "");
   const resolvedAccessToken = String(accessToken || dcrCache.accessToken || "");
@@ -39020,7 +39040,7 @@ async function makeClickDgrDownload(context, requestToken, options = {}) {
   const authContext = await resolveClickDgrAuthContext(context, requestToken, options);
   const credential =
     normalizeUnderparVaultDcrCache(
-      loadDcrCache(String(programmer?.programmerId || ""), String(context?.appInfo?.guid || "")) || null
+      loadDcrCache(String(programmer?.programmerId || ""), String(context?.appInfo?.guid || ""), "degradation") || null
     ) || {
       clientId: String(authContext?.clientId || "").trim(),
       clientSecret: String(authContext?.clientSecret || "").trim(),
@@ -63538,7 +63558,7 @@ function shouldAutoRefreshPremiumService(programmer, serviceKey, appInfo = null)
     return { refresh: false, reason: "" };
   }
 
-  const dcrCache = loadDcrCache(programmerId, guid) || null;
+  const dcrCache = loadDcrCache(programmerId, guid, normalizedServiceKey) || null;
   if (!dcrCache) {
     return { refresh: false, reason: "" };
   }
@@ -69784,7 +69804,7 @@ function buildDcrInteractiveDocsContext(programmer = null, entry = null, service
     extractRegisteredApplicationHttpsRedirectUri(preferredApp),
     extractRegisteredApplicationHttpsRedirectUri(preferredApp?.appData || null),
   ]);
-  const dcrCache = loadDcrCache(programmerId, String(preferredApp?.guid || "").trim()) || null;
+  const dcrCache = loadDcrCache(programmerId, String(preferredApp?.guid || "").trim(), "restV2") || null;
 
   return {
     ok: true,
@@ -69858,7 +69878,7 @@ async function prepareDcrInteractiveDocsContextForEntry(entry = null, context = 
   if (resolvedEntry.autoProvisionClientCredentials === true) {
     const programmerId = String(preparedContext.programmerId || "").trim();
     const appGuid = String(preparedContext?.appInfo?.guid || "").trim();
-    let dcrCache = programmerId && appGuid ? loadDcrCache(programmerId, appGuid) || {} : {};
+    let dcrCache = programmerId && appGuid ? loadDcrCache(programmerId, appGuid, "restV2") || {} : {};
     if (!String(dcrCache?.clientId || "").trim() || !String(dcrCache?.clientSecret || "").trim()) {
       const softwareStatement = String(preparedContext.softwareStatement || "").trim();
       if (programmerId && appGuid && softwareStatement) {
@@ -87601,11 +87621,12 @@ function getLegacyDcrCacheKey(programmerId, appGuid) {
   return `${LEGACY_DCR_CACHE_PREFIX}:${programmerId}:${appGuid}`;
 }
 
-function loadDcrCache(programmerId, appGuid) {
+function loadDcrCache(programmerId, appGuid, serviceKey = "") {
   try {
     const environmentKey = getActiveAdobePassEnvironmentKey();
     const vaultCache = choosePassVaultRuntimeDcrCache(
-      getPassVaultRegisteredApplicationRecord(programmerId, appGuid, environmentKey)
+      getPassVaultRegisteredApplicationRecord(programmerId, appGuid, environmentKey),
+      serviceKey
     );
     if (vaultCache) {
       localStorage.setItem(getDcrCacheKey(programmerId, appGuid, environmentKey), JSON.stringify(vaultCache));
@@ -88257,7 +88278,10 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
   }
 
   const workPromise = (async () => {
-    let cache = normalizeUnderparVaultDcrCache(loadDcrCache(programmerId, resolvedAppInfo.guid) || null) || {};
+    let cache =
+      normalizeUnderparVaultDcrCache(
+        loadDcrCache(programmerId, resolvedAppInfo.guid, resolveCurrentServiceKey()) || null
+      ) || {};
     if (forceFreshClientRegistration) {
       cache = {};
       emitDcrDebugEvent("dcr-registration-forced");
@@ -88338,7 +88362,10 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
           });
           await activeHydrationPromise.catch(() => null);
           refreshResolvedAppInfo();
-          cache = normalizeUnderparVaultDcrCache(loadDcrCache(programmerId, resolvedAppInfo.guid) || null) || {};
+          cache =
+            normalizeUnderparVaultDcrCache(
+              loadDcrCache(programmerId, resolvedAppInfo.guid, resolveCurrentServiceKey()) || null
+            ) || {};
           cacheBindingRepairRequired = await recomputeCacheBindingRepairRequired(cache);
         }
       }
@@ -88871,19 +88898,24 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
     const retryAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
     if (isServiceProviderMismatch) {
       if (isRestV2ServiceRequest) {
-        clearDcrCache(programmerId, retryAppInfo.guid);
-        await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
+        const serviceCredentialRecovery = restorePassVaultBoundServiceCredentialCache(
+          programmerId,
+          retryAppInfo,
+          "restV2"
+        );
+        const restoredAppInfo = serviceCredentialRecovery?.appInfo?.guid ? serviceCredentialRecovery.appInfo : retryAppInfo;
+        clearDcrTokenCache(programmerId, restoredAppInfo.guid);
+        await ensureDcrAccessToken(programmerId, restoredAppInfo, true, {
           ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
-          allowProvisioning: true,
-          forceFreshClientRegistration: true,
+          allowProvisioning: false,
           lockAppSelection: true,
         });
         return fetchWithPremiumAuth(
           programmerId,
-          retryAppInfo,
+          restoredAppInfo,
           url,
           options,
-          "restv2-reprovision",
+          "restv2-token-refresh",
           {
             ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
             allowProvisioning: false,
@@ -88919,7 +88951,7 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
     return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "reprovision", debugMeta);
   }
 
-  if (response.status === 401 && retryStage === "restv2-reprovision") {
+  if (response.status === 401 && retryStage === "restv2-token-refresh") {
     return response;
   }
 
