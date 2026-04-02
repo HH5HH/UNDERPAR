@@ -47742,9 +47742,23 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = 
       return;
     }
     const normalizedId = normalizeUpDevtoolsMvpdSearchCatalogKey(record.id);
-    if (!proxyById.has(normalizedId)) {
-      proxyById.set(normalizedId, record);
-    }
+    const existingRecord = proxyById.get(normalizedId) || null;
+    proxyById.set(
+      normalizedId,
+      existingRecord
+        ? {
+            ...existingRecord,
+            ...record,
+            data: {
+              ...(existingRecord.data && typeof existingRecord.data === "object" ? existingRecord.data : {}),
+              ...(record.data && typeof record.data === "object" ? record.data : {}),
+            },
+            entity: record.entity || existingRecord.entity,
+            entityRef: record.entityRef || existingRecord.entityRef,
+            displayName: record.displayName || existingRecord.displayName,
+          }
+        : record
+    );
     if (!proxyOwnerById.has(normalizedId)) {
       const ownerRef = firstNonEmptyString([
         record.data?.owner,
@@ -47883,16 +47897,28 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
     const baseUrl = buildAdobeConsoleRestApiUrl(entityPath, environment.consoleBase);
     return configurationVersion > 0 ? appendAdobeConsoleConfigurationVersion(baseUrl, configurationVersion) : baseUrl;
   };
-  const mvpdCall = await mvpdWorkspaceFetchCall(
-    "upDevtoolsMvpdCatalog",
-    "MVPD Catalog",
-    [buildEntityUrl("entity/Mvpd")],
-    null,
-    debugContext
-  );
+  const [mvpdCall, mvpdProxyCall] = await Promise.all([
+    mvpdWorkspaceFetchCall(
+      "upDevtoolsMvpdCatalog",
+      "MVPD Catalog",
+      [buildEntityUrl("entity/Mvpd")],
+      null,
+      debugContext
+    ),
+    mvpdWorkspaceFetchCall(
+      "upDevtoolsMvpdProxyCatalog",
+      "MVPD Proxy Catalog",
+      [buildEntityUrl("entity/MvpdProxy")],
+      null,
+      debugContext
+    ),
+  ]);
 
   if (!mvpdCall?.ok) {
     throw new Error(String(mvpdCall?.error || "MVPD Catalog failed."));
+  }
+  if (!mvpdProxyCall?.ok) {
+    throw new Error(String(mvpdProxyCall?.error || "MVPD Proxy Catalog failed."));
   }
 
   const directEntities = normalizeApplicationsResponse(mvpdCall?.parsed || null);
@@ -47937,7 +47963,11 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
     }
   }
 
-  const builtCatalog = buildUpDevtoolsMvpdSearchRows(mvpdCall?.parsed || null, proxiedMvpdsCall?.parsed || null, null);
+  const builtCatalog = buildUpDevtoolsMvpdSearchRows(
+    mvpdCall?.parsed || null,
+    proxiedMvpdsCall?.parsed || null,
+    mvpdProxyCall?.parsed || null
+  );
   const rowByKey = new Map();
   builtCatalog.rows.forEach((row) => {
     const resultKey = String(row?.resultKey || "").trim();
@@ -47951,7 +47981,7 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
     environmentKey: String(environment?.key || "").trim(),
     environmentLabel: String(environment?.label || "").trim(),
     configurationVersion,
-    calls: [versionCall, mvpdCall, ...(proxiedMvpdsCall ? [proxiedMvpdsCall] : [])],
+    calls: [versionCall, mvpdCall, mvpdProxyCall, ...(proxiedMvpdsCall ? [proxiedMvpdsCall] : [])],
     directById: builtCatalog.directById,
     proxyById: builtCatalog.proxyById,
     proxyOwnerById: builtCatalog.proxyOwnerById,

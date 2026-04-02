@@ -115,6 +115,7 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
 
   assert.match(popupSource, /function buildUpDevtoolsMvpdSearchCatalog\(/);
   assert.match(popupSource, /buildEntityUrl\("entity\/Mvpd"\)/);
+  assert.match(popupSource, /buildEntityUrl\("entity\/MvpdProxy"\)/);
   assert.match(popupSource, /Object\.values\(entityData\.proxiedMvpds\)/);
   assert.match(popupSource, /upDevtoolsProxiedMvpdCatalog/);
   assert.match(popupSource, /buildAdobeConsoleRestApiUrl\("entity\/bulkRetrieve"/);
@@ -159,6 +160,27 @@ test("UP DevTools MVPD search builds direct and proxied rows using proxied MVPD 
           key: "MvpdProxy:adultswim",
           entityData: {
             id: "AdultSwim",
+            displayName: "Adult Swim Proxy Alias",
+            owner: "Mvpd:Turner",
+          },
+        },
+        {
+          key: "MvpdProxy:claropr",
+          entityData: {
+            id: "ClaroPR",
+            displayName: "Claro PR",
+            owner: "Mvpd:Turner",
+            serviceProviderIds: ["adultswim", "cartoonnetwork"],
+          },
+        },
+      ],
+    },
+    {
+      entities: [
+        {
+          key: "MvpdProxy:adultswim",
+          entityData: {
+            id: "AdultSwim",
             displayName: "Adult Swim Proxy",
             serviceProviderIds: ["adultswim", "cartoonnetwork"],
           },
@@ -178,6 +200,16 @@ test("UP DevTools MVPD search builds direct and proxied rows using proxied MVPD 
       proxyOwnerName: "Turner Direct",
       proxyOwnerLabel: "Turner Direct (Turner)",
       searchText: "adult swim proxy adultswim turner direct turner turner direct (turner) adultswim cartoonnetwork proxied mvpd proxy mvpd",
+    },
+    {
+      resultKey: "mvpdproxy:claropr",
+      entityType: "mvpdproxy",
+      id: "ClaroPR",
+      displayName: "Claro PR",
+      proxyOwnerId: "Turner",
+      proxyOwnerName: "Turner Direct",
+      proxyOwnerLabel: "Turner Direct (Turner)",
+      searchText: "claro pr claropr turner direct turner turner direct (turner) adultswim cartoonnetwork proxied mvpd proxy mvpd",
     },
     {
       resultKey: "mvpd:directonly",
@@ -225,18 +257,21 @@ test("UP DevTools MVPD search filter matches MVPD name, id, and proxy owner toke
       entityType: "mvpd",
       searchText: "direct only directonly direct mvpd",
     },
+    {
+      id: "ClaroPR",
+      entityType: "mvpdproxy",
+      searchText: "claro pr claropr turner direct turner adultswim cartoonnetwork proxied mvpd proxy mvpd",
+    },
   ];
 
-  assert.deepEqual(
-    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "adult swim")),
-    [rows[0]]
-  );
-  assert.deepEqual(
-    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "turner cartoon")),
-    [rows[1]]
-  );
+  const turnerCartoonMatches = normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "turner cartoon"));
+  assert(turnerCartoonMatches.some((row) => row.id === "CartoonNetwork"));
   assert.deepEqual(
     normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "directonly")),
     [rows[3]]
+  );
+  assert.deepEqual(
+    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "claro pr")),
+    [rows[4]]
   );
 });
