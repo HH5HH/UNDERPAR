@@ -413,7 +413,7 @@ test("sidepanel MEGSPACE saved-query runner disables the native select while lau
       premiumPanelRequestToken: 31,
     },
     resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
-    megWorkspaceOpenSavedQueryFromUi: async (...args) => {
+    esmWorkspaceOpenRequestPathInWorkspace: async (...args) => {
       interactions.opened = args;
     },
     setStatus: () => {},
@@ -434,13 +434,14 @@ test("sidepanel MEGSPACE saved-query runner disables the native select while lau
   assert.equal(interactions.opened?.[0], esmWorkspaceState);
   assert.equal(interactions.opened?.[1], "/esm/v3/media-company/year/day?requestor-id=MML");
   assert.equal(interactions.opened?.[2], 19);
-  assert.equal(interactions.opened?.[3], "Daily Auth");
+  assert.equal(interactions.opened?.[3]?.requestSource, "saved-query");
+  assert.equal(interactions.opened?.[3]?.displayNodeLabel, "Daily Auth");
   assert.equal(interactions.resetTarget, selectElement);
   assert.deepEqual(pickerElement.classList.added, ["is-busy"]);
   assert.deepEqual(pickerElement.classList.removed, ["is-busy"]);
 });
 
-test("sidepanel MEGSPACE saved-query runner sends the saved URL back through the MEGSPACE opener", async () => {
+test("sidepanel MEGSPACE saved-query runner sends the saved URL back through the ESM Workspace opener", async () => {
   const interactions = {
     opened: null,
     resetTarget: null,
@@ -481,7 +482,7 @@ test("sidepanel MEGSPACE saved-query runner sends the saved URL back through the
       premiumPanelRequestToken: 23,
     },
     resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
-    megWorkspaceOpenSavedQueryFromUi: async (...args) => {
+    esmWorkspaceOpenRequestPathInWorkspace: async (...args) => {
       interactions.opened = args;
     },
     setStatus: () => {},
@@ -502,14 +503,15 @@ test("sidepanel MEGSPACE saved-query runner sends the saved URL back through the
   assert.equal(interactions.opened?.[0], esmWorkspaceState);
   assert.equal(interactions.opened?.[1], "/esm/v3/media-company/year/day?requestor-id=MML");
   assert.equal(interactions.opened?.[2], 15);
-  assert.equal(interactions.opened?.[3], "Daily Auth");
+  assert.equal(interactions.opened?.[3]?.requestSource, "saved-query");
+  assert.equal(interactions.opened?.[3]?.displayNodeLabel, "Daily Auth");
   assert.equal(interactions.resetTarget, selectElement);
   assert.deepEqual(pickerElement.classList.added, ["is-busy"]);
   assert.deepEqual(pickerElement.classList.removed, ["is-busy"]);
   assert.equal(selectElement.disabled, false);
 });
 
-test("sidepanel MEGSPACE saved-query runner reports MEGSPACE launch failures without leaving the picker busy", async () => {
+test("sidepanel MEGSPACE saved-query runner reports ESM Workspace launch failures without leaving the picker busy", async () => {
   const interactions = {
     statuses: [],
     resetTarget: null,
@@ -550,7 +552,7 @@ test("sidepanel MEGSPACE saved-query runner reports MEGSPACE launch failures wit
       premiumPanelRequestToken: 37,
     },
     resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
-    megWorkspaceOpenSavedQueryFromUi: async () => {
+    esmWorkspaceOpenRequestPathInWorkspace: async () => {
       throw new Error("selection bridge failed");
     },
     setStatus: (message, level) => {
@@ -572,23 +574,20 @@ test("sidepanel MEGSPACE saved-query runner reports MEGSPACE launch failures wit
   assert.equal(interactions.resetTarget, selectElement);
   assert.deepEqual(interactions.statuses, [
     {
-      message: 'Unable to open Saved Query "Daily Auth" in MEGSPACE: selection bridge failed',
+      message: 'Unable to open Saved Query "Daily Auth" in ESM Workspace: selection bridge failed',
       level: "error",
     },
   ]);
 });
 
-test("sidepanel MEGSPACE saved-query runner routes saved queries through the MEGSPACE opener", () => {
+test("sidepanel MEGSPACE saved-query runner routes saved queries through the ESM Workspace opener", () => {
   const popupSource = read("popup.js");
 
   assert.match(
     popupSource,
-    /await megWorkspaceOpenSavedQueryFromUi\(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName\);/m
-  );
-  assert.doesNotMatch(
-    popupSource,
     /await esmWorkspaceOpenRequestPathInWorkspace\(esmWorkspaceState, savedQueryUrl, requestToken, \{[\s\S]*?requestSource:\s*"saved-query",[\s\S]*?displayNodeLabel:\s*savedQueryName,[\s\S]*?\}\);/m
   );
+  assert.doesNotMatch(popupSource, /await megWorkspaceOpenSavedQueryFromUi\(/m);
 });
 
 test("REST V2 post-login redirect matcher ignores trailing-slash drift on the landing page", () => {

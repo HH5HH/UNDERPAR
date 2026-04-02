@@ -45378,63 +45378,6 @@ async function esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, request
   };
 }
 
-async function megWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName = "") {
-  const normalizedSavedQueryUrl = stripMegWorkspaceMediaCompanyQueryParam(String(savedQueryUrl || "").trim());
-  if (!esmWorkspaceState || !normalizedSavedQueryUrl) {
-    return;
-  }
-  const liveRequestToken = resolveCurrentPremiumPanelRequestToken(
-    esmWorkspaceState?.programmer?.programmerId,
-    requestToken || esmWorkspaceState?.requestToken || 0
-  );
-  esmWorkspaceState.requestToken = liveRequestToken;
-
-  try {
-    const targetWindowId = Number(esmWorkspaceState.controllerWindowId || state.megWorkspaceWindowId || 0);
-    const workspaceTab = await megWorkspaceEnsureWorkspaceTab({
-      activate: true,
-      windowId: targetWindowId,
-    });
-    const absoluteRequestUrl = megWorkspaceBuildAbsoluteServiceUrl(
-      String(getActiveAdobePassEnvironment()?.esmBase || getActiveAdobePassEnvironment()?.mgmtBase || ADOBE_MGMT_BASE).trim(),
-      normalizedSavedQueryUrl
-    );
-    const selection = megWorkspaceNormalizeSelection(
-      {
-        url: absoluteRequestUrl || normalizedSavedQueryUrl,
-      },
-      {
-        launchToken: generateRequestId(),
-        endpointLabel: String(savedQueryName || "").trim() || normalizedSavedQueryUrl,
-      }
-    );
-    if (!selection) {
-      throw new Error("Saved Query selection is invalid.");
-    }
-    const resolvedWindowId = Number(workspaceTab?.windowId || targetWindowId || 0);
-    megWorkspaceRememberSelection(resolvedWindowId, selection);
-    await megWaitForWorkspaceReady(resolvedWindowId, Number(workspaceTab?.id || 0), 6000).catch(() => false);
-    megWorkspaceBroadcastControllerState(esmWorkspaceState, resolvedWindowId);
-    await megWorkspaceSendWorkspaceMessage(
-      "selection-change",
-      {
-        ...selection,
-        autoRun: true,
-        requestToken: liveRequestToken,
-        requestedAt: Date.now(),
-      },
-      {
-        targetWindowId: resolvedWindowId,
-      }
-    );
-  } catch (error) {
-    const suffix = savedQueryName ? ` "${savedQueryName}"` : "";
-    const errorMessage =
-      error && typeof error === "object" && typeof error.message === "string" ? error.message : String(error);
-    setStatus(`Unable to open Saved Query${suffix} in MEGSPACE: ${errorMessage}`, "error");
-  }
-}
-
 function esmWorkspaceSyncMegSavedQuerySelectMetadata(selectElement = null) {
   if (!selectElement) {
     return;
@@ -45584,12 +45527,15 @@ async function esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record = nu
       esmWorkspaceState?.programmer?.programmerId,
       esmWorkspaceState?.requestToken || state.premiumPanelRequestToken || 0
     );
-    await megWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName);
+    await esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, savedQueryUrl, requestToken, {
+      requestSource: "saved-query",
+      displayNodeLabel: savedQueryName,
+    });
   } catch (error) {
     const suffix = savedQueryName ? ` "${savedQueryName}"` : "";
     const errorMessage =
       error && typeof error === "object" && typeof error.message === "string" ? error.message : String(error);
-    setStatus(`Unable to open Saved Query${suffix} in MEGSPACE: ${errorMessage}`, "error");
+    setStatus(`Unable to open Saved Query${suffix} in ESM Workspace: ${errorMessage}`, "error");
   } finally {
     const hasRecords =
       Array.isArray(esmWorkspaceState?.megSavedQueryRecords) && esmWorkspaceState.megSavedQueryRecords.length > 0;
