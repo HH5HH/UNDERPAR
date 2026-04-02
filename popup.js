@@ -171,6 +171,7 @@ const UNDERPAR_IBETA_HANDLER_STORE_URL = `${UNDERPAR_IBETA_HANDLER_BASE_URL}inde
 const UNDERPAR_IBETA_REQUEST_TIMEOUT_MS = 8000;
 const UNDERPAR_UPSPACE_SLACK_LINK_LABEL = "[ ^ ]";
 const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 5;
+const UNDERPAR_DCR_CACHE_BINDING_VERSION = 1;
 const UNDERPAR_VAULT_STATUS_PENDING = "pending";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
 const UNDERPAR_VAULT_STATUS_PARTIAL = "partial";
@@ -1196,6 +1197,8 @@ function createEmptyUnderparVaultCredential() {
     tokenScope: "",
     serviceScope: "",
     tokenRequestedScope: "",
+    softwareStatementFingerprint: "",
+    cacheBindingVersion: 0,
   };
 }
 
@@ -1213,6 +1216,14 @@ function normalizeUnderparVaultDcrCache(value = null) {
     tokenScope: String(value?.tokenScope || value?.scope || "").trim(),
     serviceScope: String(value?.serviceScope || "").trim(),
     tokenRequestedScope: String(value?.tokenRequestedScope || "").trim(),
+    softwareStatementFingerprint: firstNonEmptyString([
+      String(value?.softwareStatementFingerprint || "").trim(),
+      String(value?.software_statement_fingerprint || "").trim(),
+    ]),
+    cacheBindingVersion: Math.max(
+      0,
+      Number(value?.cacheBindingVersion || value?.cache_binding_version || 0)
+    ),
   };
 
   if (
@@ -1222,7 +1233,9 @@ function normalizeUnderparVaultDcrCache(value = null) {
     !normalized.tokenExpiresAt &&
     !normalized.tokenScope &&
     !normalized.serviceScope &&
-    !normalized.tokenRequestedScope
+    !normalized.tokenRequestedScope &&
+    !normalized.softwareStatementFingerprint &&
+    !normalized.cacheBindingVersion
   ) {
     return null;
   }
@@ -1246,6 +1259,34 @@ function normalizeUnderparVaultCredentialEntry(value = null) {
     ...(error ? { error } : {}),
     updatedAt: Number(value?.updatedAt || 0),
   };
+}
+
+function buildUnderparSoftwareStatementFingerprint(value = "") {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return buildUnderparTextFingerprint(normalized, "sst");
+}
+
+function shouldRequireSoftwareStatementBoundDcrCache(serviceKey = "", requiredScope = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const normalizedRequiredScope = normalizeScope(requiredScope);
+  return normalizedServiceKey === "restV2" || normalizedRequiredScope === normalizeScope(REST_V2_SCOPE);
+}
+
+function hasSoftwareStatementBoundDcrCache(cache = null, serviceKey = "", requiredScope = "") {
+  const normalizedCache = normalizeUnderparVaultDcrCache(cache);
+  if (!normalizedCache?.clientId || !normalizedCache?.clientSecret) {
+    return false;
+  }
+  if (!shouldRequireSoftwareStatementBoundDcrCache(serviceKey, requiredScope)) {
+    return true;
+  }
+  return (
+    Number(normalizedCache.cacheBindingVersion || 0) >= UNDERPAR_DCR_CACHE_BINDING_VERSION &&
+    Boolean(String(normalizedCache.softwareStatementFingerprint || "").trim())
+  );
 }
 
 function markPassVaultBackedValue(value, record = null) {
@@ -8545,7 +8586,14 @@ function getPassVaultServiceProvisioningRank(programmerId = "", appInfo = null) 
   if (!guid) {
     return 0;
   }
-  if (normalizedProgrammerId && hasPassVaultServiceClientCredentials(normalizedProgrammerId, appInfo)) {
+  if (
+    normalizedProgrammerId &&
+    hasPassVaultServiceClientCredentials(
+      normalizedProgrammerId,
+      appInfo,
+      resolvePremiumServiceKeyForAuth(appInfo)
+    )
+  ) {
     return 3;
   }
   const softwareStatement = firstNonEmptyString([
@@ -8944,22 +8992,27 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
     cachedClient ||
     sharedClient ||
     createEmptyUnderparVaultCredential();
+  const cacheBindingRepairRequired =
+    shouldRequireSoftwareStatementBoundDcrCache(normalizedDefinition.serviceKey, requiredScope) &&
+    Boolean(nextClient.clientId && nextClient.clientSecret) &&
+    !hasSoftwareStatementBoundDcrCache(nextClient, normalizedDefinition.serviceKey, requiredScope);
 
   nextClient.serviceScope = String(requiredScope || nextClient.serviceScope || "").trim();
   if (guid && sharedHydratedApplicationsByGuid && !sharedHydratedApplicationsByGuid.has(guid)) {
     sharedHydratedApplicationsByGuid.set(guid, cloneJsonLikeValue(registeredApplication, null));
   }
-  if (guid && sharedClientByGuid && (nextClient.clientId || nextClient.clientSecret || nextClient.accessToken)) {
+  if (guid && sharedClientByGuid && hasSoftwareStatementBoundDcrCache(nextClient, normalizedDefinition.serviceKey, requiredScope)) {
     sharedClientByGuid.set(guid, {
       ...nextClient,
     });
   }
 
-  if (!nextClient.clientId || !nextClient.clientSecret) {
+  if (!nextClient.clientId || !nextClient.clientSecret || cacheBindingRepairRequired) {
     registeredApplication =
       (await enrichRegisteredApplicationForHydration(registeredApplication, {
         timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
         preferAuthenticatedHeaders: true,
+        forceDetails: cacheBindingRepairRequired,
       }).catch(() => registeredApplication)) || registeredApplication;
     if (guid && sharedHydratedApplicationsByGuid) {
       sharedHydratedApplicationsByGuid.set(guid, cloneJsonLikeValue(registeredApplication, null));
@@ -8970,6 +9023,7 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
       extractSoftwareStatementFromAppData(registeredApplication?.appData || null),
       extractSoftwareStatementFromAppData(registeredApplication),
     ]);
+    const softwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint(softwareStatement);
     if (!softwareStatement) {
       return {
         ...currentRecord,
@@ -8989,6 +9043,22 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
       const registeredClient = await registerClientWithSoftwareStatement(softwareStatement);
       nextClient.clientId = registeredClient.clientId;
       nextClient.clientSecret = registeredClient.clientSecret;
+      nextClient.accessToken = "";
+      nextClient.tokenExpiresAt = 0;
+      nextClient.tokenScope = "";
+      nextClient.tokenRequestedScope = "";
+      nextClient.softwareStatementFingerprint = shouldRequireSoftwareStatementBoundDcrCache(
+        normalizedDefinition.serviceKey,
+        requiredScope
+      )
+        ? softwareStatementFingerprint
+        : "";
+      nextClient.cacheBindingVersion = shouldRequireSoftwareStatementBoundDcrCache(
+        normalizedDefinition.serviceKey,
+        requiredScope
+      )
+        ? UNDERPAR_DCR_CACHE_BINDING_VERSION
+        : 0;
       nextClient.updatedAt = now;
       nextClient.error = "";
       if (programmerId && guid) {
@@ -9249,7 +9319,9 @@ function getPassVaultCredentialResultsForServiceKeys(
 
 function passVaultCredentialResultHasClientCredentials(result = null) {
   const cache = normalizeUnderparVaultDcrCache(result?.cache || null);
-  return Boolean(cache?.clientId && cache?.clientSecret);
+  const serviceKey = String(result?.serviceKey || "").trim();
+  const requiredScope = String(result?.cache?.serviceScope || result?.requiredScope || "").trim();
+  return hasSoftwareStatementBoundDcrCache(cache, serviceKey, requiredScope);
 }
 
 function getPassVaultCredentialTasks(programmerId = "", services = null) {
@@ -9280,7 +9352,7 @@ function getPassVaultCredentialTasks(programmerId = "", services = null) {
   return tasks;
 }
 
-function hasPassVaultServiceClientCredentials(programmerId = "", appInfo = null) {
+function hasPassVaultServiceClientCredentials(programmerId = "", appInfo = null, serviceKey = "") {
   const normalizedProgrammerId = String(programmerId || "").trim();
   const guid = String(appInfo?.guid || "").trim();
   if (!normalizedProgrammerId || !guid) {
@@ -9288,7 +9360,10 @@ function hasPassVaultServiceClientCredentials(programmerId = "", appInfo = null)
   }
 
   const cache = normalizeUnderparVaultDcrCache(loadDcrCache(normalizedProgrammerId, guid) || null);
-  return Boolean(cache?.clientId && cache?.clientSecret);
+  const requiredScope = serviceKey
+    ? getPassVaultRequiredScopeForService(serviceKey, appInfo)
+    : resolveRequiredPremiumServiceScope(appInfo);
+  return hasSoftwareStatementBoundDcrCache(cache, serviceKey, requiredScope);
 }
 
 function hasPassVaultCredentialCoverageForServices(programmerId = "", services = null) {
@@ -9302,7 +9377,9 @@ function hasPassVaultCredentialCoverageForServices(programmerId = "", services =
     return true;
   }
 
-  return tasks.every((task) => hasPassVaultServiceClientCredentials(normalizedProgrammerId, task?.appInfo || null));
+  return tasks.every((task) =>
+    hasPassVaultServiceClientCredentials(normalizedProgrammerId, task?.appInfo || null, task?.serviceKey || "")
+  );
 }
 
 function buildPassVaultRuntimeServicesSnapshot(record = null) {
@@ -87174,17 +87251,10 @@ function loadDcrCache(programmerId, appGuid) {
       return null;
     }
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") {
+    const normalized = normalizeUnderparVaultDcrCache(parsed);
+    if (!normalized) {
       return null;
     }
-    const normalized = {
-      ...parsed,
-      clientId: parsed.clientId || parsed.client_id || "",
-      clientSecret: parsed.clientSecret || parsed.client_secret || "",
-      accessToken: parsed.accessToken || parsed.access_token || "",
-      tokenExpiresAt: Number(parsed.tokenExpiresAt || parsed.expires_at || 0),
-      tokenScope: String(parsed.tokenScope || parsed.scope || "").trim(),
-    };
     if (!scopedRaw && isProductionAdobePassEnvironmentKey(environmentKey)) {
       localStorage.setItem(scopedCacheKey, JSON.stringify(normalized));
     }
@@ -87196,14 +87266,7 @@ function loadDcrCache(programmerId, appGuid) {
 
 function saveDcrCache(programmerId, appGuid, value) {
   try {
-    const normalized = {
-      ...value,
-      clientId: value?.clientId || value?.client_id || "",
-      clientSecret: value?.clientSecret || value?.client_secret || "",
-      accessToken: value?.accessToken || value?.access_token || "",
-      tokenExpiresAt: Number(value?.tokenExpiresAt || value?.expires_at || 0),
-      tokenScope: String(value?.tokenScope || value?.scope || "").trim(),
-    };
+    const normalized = normalizeUnderparVaultDcrCache(value) || createEmptyUnderparVaultCredential();
     localStorage.setItem(getDcrCacheKey(programmerId, appGuid), JSON.stringify(normalized));
     void persistPassVaultApplicationDcrCache(programmerId, appGuid, normalized).catch(() => {});
   } catch {
@@ -87736,6 +87799,11 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
     debugMeta?.tokenAttemptMode === "scoped-only" || isEsmRequiredScope ? "scoped-only" : "default";
   const allowProvisioning = debugMeta?.allowProvisioning === true;
   const forceFreshClientRegistration = debugMeta?.forceFreshClientRegistration === true;
+  const resolveCurrentServiceKey = () => resolvePremiumServiceKeyForAuth(resolvedAppInfo, debugMeta);
+  const shouldBindCache = () =>
+    shouldRequireSoftwareStatementBoundDcrCache(resolveCurrentServiceKey(), requiredServiceScope);
+  const hasBoundCache = (cache = null) =>
+    hasSoftwareStatementBoundDcrCache(cache, resolveCurrentServiceKey(), requiredServiceScope);
   const refreshResolvedAppInfo = () => {
     const latestAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
     if (latestAppInfo?.guid) {
@@ -87767,11 +87835,15 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
   }
 
   const workPromise = (async () => {
-    let cache = loadDcrCache(programmerId, resolvedAppInfo.guid) || {};
+    let cache = normalizeUnderparVaultDcrCache(loadDcrCache(programmerId, resolvedAppInfo.guid) || null) || {};
     if (forceFreshClientRegistration) {
       cache = {};
       emitDcrDebugEvent("dcr-registration-forced");
     }
+    let cacheBindingRepairRequired =
+      !forceFreshClientRegistration &&
+      Boolean(cache.clientId && cache.clientSecret) &&
+      !hasBoundCache(cache);
 
     const ensureSoftwareStatement = async () => {
       const currentStatement = firstNonEmptyString([
@@ -87779,7 +87851,7 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
         extractSoftwareStatementFromAppData(resolvedAppInfo?.appData || null),
         extractSoftwareStatementFromAppData(resolvedAppInfo),
       ]);
-      if (forceFreshClientRegistration && resolvedAppInfo?.guid) {
+      if ((forceFreshClientRegistration || cacheBindingRepairRequired) && resolvedAppInfo?.guid) {
         try {
           const authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(resolvedAppInfo.guid, {
             timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
@@ -87806,6 +87878,7 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
           preferAuthenticatedHeaders: true,
           preferredTabId: 0,
           allowTemporaryPageContextTab: true,
+          forceDetails: cacheBindingRepairRequired,
         });
         if (hydratedAppInfo && typeof hydratedAppInfo === "object") {
           resolvedAppInfo = hydratedAppInfo;
@@ -87829,9 +87902,10 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
       return String(resolvedAppInfo?.softwareStatement || "").trim();
     };
 
-    if (!cache.clientId || !cache.clientSecret) {
+    if (!cache.clientId || !cache.clientSecret || cacheBindingRepairRequired) {
       emitDcrDebugEvent("dcr-registration-required", {
         allowProvisioning,
+        cacheBindingRepairRequired,
       });
       if (!allowProvisioning) {
         throw new Error(
@@ -87842,12 +87916,20 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
       if (!softwareStatement) {
         throw new Error(`No software statement found on app ${resolvedAppInfo.appName || resolvedAppInfo.guid}`);
       }
+      const softwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint(softwareStatement);
 
       const registered = await registerClientWithSoftwareStatement(softwareStatement);
       cache.clientId = registered.clientId;
       cache.clientSecret = registered.clientSecret;
+      cache.accessToken = "";
+      cache.tokenExpiresAt = 0;
+      cache.tokenScope = "";
+      cache.tokenRequestedScope = "";
+      cache.softwareStatementFingerprint = shouldBindCache() ? softwareStatementFingerprint : "";
+      cache.cacheBindingVersion = shouldBindCache() ? UNDERPAR_DCR_CACHE_BINDING_VERSION : 0;
       saveDcrCache(programmerId, resolvedAppInfo.guid, cache);
       emitDcrDebugEvent("dcr-registration-succeeded");
+      cacheBindingRepairRequired = false;
     }
 
     const tokenMissing = !cache.accessToken || !cache.tokenExpiresAt;
@@ -96598,7 +96680,8 @@ async function loadMvpdsFromRestV2(requestorId) {
           forceOverwrite: false,
           forceDcrRestore: true,
         }).catch(() => null);
-        let premiumApps = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+        const programmerReuseReadiness = getPassVaultProgrammerReuseReadiness(programmer.programmerId);
+        let premiumApps = programmerReuseReadiness.runtimeServices || getCurrentPremiumAppsSnapshot(programmer.programmerId);
         if (!premiumApps) {
           const selectedProgrammer = resolveSelectedProgrammer();
           if (String(selectedProgrammer?.programmerId || "").trim() === String(programmer?.programmerId || "").trim()) {
@@ -96608,30 +96691,19 @@ async function loadMvpdsFromRestV2(requestorId) {
           }
           continue;
         }
-        const liveApplicationsData =
-          (await ensureSelectedProgrammerApplicationsLoaded(programmer, {
-            forceRefresh: false,
-            preferredTabId: 0,
-            requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
-          }).catch(() => null)) || getCurrentProgrammerApplicationsSnapshot(programmer.programmerId) || {};
         let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
-        const runtimeSeedIsVaultBacked =
-          isPassVaultBackedValue(premiumApps) || isPassVaultBackedValue(premiumApps?.restV2);
         const requiresRuntimeHydration =
-          runtimeSeedIsVaultBacked ||
-          !isProgrammerRuntimeServicesReady(programmer.programmerId, premiumApps) ||
+          !programmerReuseReadiness.reusable ||
           !runtimePrimaryApp?.guid ||
-          !hasPassVaultServiceClientCredentials(programmer.programmerId, runtimePrimaryApp);
+          !hasPassVaultServiceClientCredentials(programmer.programmerId, runtimePrimaryApp, "restV2");
         if (requiresRuntimeHydration) {
-          premiumApps =
-            (await primeProgrammerServiceHydration(programmer, premiumApps, {
-              forceRefresh: runtimeSeedIsVaultBacked,
-              controllerReason: "requestor-restv2-load",
-              applicationsData: liveApplicationsData,
-            }).catch(() => null)) ||
-            getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
-            premiumApps;
-          runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
+          const selectedProgrammer = resolveSelectedProgrammer();
+          if (String(selectedProgrammer?.programmerId || "").trim() === String(programmer?.programmerId || "").trim()) {
+            throw new Error(
+              `Premium services for ${programmer.programmerId} are not hydrated in the UnderPAR vault yet. Re-select the media company first.`
+            );
+          }
+          continue;
         }
         if (!runtimePrimaryApp?.guid) {
           continue;

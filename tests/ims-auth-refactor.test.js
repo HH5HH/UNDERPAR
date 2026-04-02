@@ -2507,6 +2507,31 @@ test("premium app details still retain software statements while pass-vault mapp
   assert.match(ensureDcrSource, /extractSoftwareStatementFromAppData\(resolvedAppInfo\?\.appData \|\| null\)/);
 });
 
+test("REST V2 DCR caches are bound to the parent software statement and legacy caches are repaired once", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const emptyCredentialSource = extractFunctionSource(popupSource, "createEmptyUnderparVaultCredential");
+  const normalizeCacheSource = extractFunctionSource(popupSource, "normalizeUnderparVaultDcrCache");
+  const bindingRequirementSource = extractFunctionSource(popupSource, "shouldRequireSoftwareStatementBoundDcrCache");
+  const boundCacheSource = extractFunctionSource(popupSource, "hasSoftwareStatementBoundDcrCache");
+  const hydrateServiceSource = extractFunctionSource(popupSource, "hydratePassVaultServiceRecordWithContext");
+  const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
+
+  assert.match(emptyCredentialSource, /softwareStatementFingerprint:\s*""/);
+  assert.match(emptyCredentialSource, /cacheBindingVersion:\s*0/);
+  assert.match(normalizeCacheSource, /softwareStatementFingerprint:\s*firstNonEmptyString\(\[/);
+  assert.match(normalizeCacheSource, /cacheBindingVersion:\s*Math\.max\(/);
+  assert.match(bindingRequirementSource, /normalizedServiceKey === "restV2" \|\| normalizedRequiredScope === normalizeScope\(REST_V2_SCOPE\)/);
+  assert.match(boundCacheSource, /Number\(normalizedCache\.cacheBindingVersion \|\| 0\) >= UNDERPAR_DCR_CACHE_BINDING_VERSION/);
+  assert.match(hydrateServiceSource, /const cacheBindingRepairRequired =/);
+  assert.match(hydrateServiceSource, /forceDetails:\s*cacheBindingRepairRequired/);
+  assert.match(hydrateServiceSource, /const softwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint\(softwareStatement\);/);
+  assert.match(hydrateServiceSource, /nextClient\.cacheBindingVersion =[\s\S]*UNDERPAR_DCR_CACHE_BINDING_VERSION/);
+  assert.match(ensureDcrSource, /let cacheBindingRepairRequired =/);
+  assert.match(ensureDcrSource, /\(forceFreshClientRegistration \|\| cacheBindingRepairRequired\) && resolvedAppInfo\?\.guid/);
+  assert.match(ensureDcrSource, /cache\.softwareStatementFingerprint = shouldBindCache\(\) \? softwareStatementFingerprint : "";/);
+  assert.match(ensureDcrSource, /cache\.cacheBindingVersion = shouldBindCache\(\) \? UNDERPAR_DCR_CACHE_BINDING_VERSION : 0;/);
+});
+
 test("selected premium app hydration mirrors LoginButton detail and software-statement enrichment before DCR register", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const orderedCandidatesSource = extractFunctionSource(popupSource, "buildOrderedPremiumServiceCandidates");
@@ -2528,7 +2553,7 @@ test("selected premium app hydration mirrors LoginButton detail and software-sta
   assert.match(enrichSource, /fetchApplicationDetailsByGuid\(guid,\s*requestOptions\)/);
   assert.match(enrichSource, /fetchSoftwareStatementForAppGuid\(guid,\s*requestOptions\)/);
   assert.match(ensureDcrSource, /enrichRegisteredApplicationForHydration\(resolvedAppInfo,\s*\{/);
-  assert.match(ensureDcrSource, /if \(forceFreshClientRegistration && resolvedAppInfo\?\.guid\) \{/);
+  assert.match(ensureDcrSource, /if \(\(forceFreshClientRegistration \|\| cacheBindingRepairRequired\) && resolvedAppInfo\?\.guid\) \{/);
   assert.match(ensureDcrSource, /const authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid\(resolvedAppInfo\.guid,\s*\{/);
 });
 
@@ -2638,7 +2663,10 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(collectCandidatesSource, /services\.restV2Apps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
   assert.match(collectCandidatesSource, /services\.esmApps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
   assert.match(collectCandidatesSource, /services\.degradationApps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
-  assert.match(credentialCoverageSource, /hasPassVaultServiceClientCredentials\(normalizedProgrammerId,\s*task\?\.appInfo \|\| null\)/);
+  assert.match(
+    credentialCoverageSource,
+    /hasPassVaultServiceClientCredentials\(normalizedProgrammerId,\s*task\?\.appInfo \|\| null,\s*task\?\.serviceKey \|\| ""\)/
+  );
   assert.match(serviceEntriesSource, /const cachedClient =/);
   assert.match(serviceEntriesSource, /loadDcrCache\(programmerId,\s*appGuid\)/);
   assert.match(serviceEntriesSource, /registeredApplication:\s*registeredApplication \? cloneJsonLikeValue\(registeredApplication,\s*null\) : null,/);
@@ -2889,21 +2917,23 @@ test("REST V2 app selection stays media-company scoped and keeps the programmer 
   assert.doesNotMatch(switchServiceSource, /setRequestorScopedRestV2AuthContext\(/);
   assert.match(primeHydrationSource, /await ensureSelectedProgrammerApplicationsLoaded\(programmer,\s*\{/);
   assert.match(primeHydrationSource, /applicationsData:\s*resolvedApplicationsData,/);
-  assert.match(loadMvpdsSource, /await ensureSelectedProgrammerApplicationsLoaded\(programmer,\s*\{/);
-  assert.match(loadMvpdsSource, /const liveApplicationsData =/);
+  assert.match(loadMvpdsSource, /const programmerReuseReadiness = getPassVaultProgrammerReuseReadiness\(programmer\.programmerId\);/);
+  assert.match(loadMvpdsSource, /let premiumApps = programmerReuseReadiness\.runtimeServices \|\| getCurrentPremiumAppsSnapshot\(programmer\.programmerId\);/);
   assert.match(loadMvpdsSource, /let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\);/);
-  assert.match(loadMvpdsSource, /const runtimeSeedIsVaultBacked =/);
   assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
-  assert.match(loadMvpdsSource, /runtimeSeedIsVaultBacked \|\|/);
-  assert.match(loadMvpdsSource, /await primeProgrammerServiceHydration\(programmer,\s*premiumApps,\s*\{/);
-  assert.match(loadMvpdsSource, /forceRefresh:\s*runtimeSeedIsVaultBacked,/);
-  assert.match(loadMvpdsSource, /applicationsData:\s*liveApplicationsData,/);
+  assert.match(loadMvpdsSource, /!programmerReuseReadiness\.reusable \|\|/);
+  assert.match(loadMvpdsSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*runtimePrimaryApp,\s*"restV2"\);/);
+  assert.match(loadMvpdsSource, /Premium services for \$\{programmer\.programmerId\} are not hydrated in the UnderPAR vault yet\./);
   assert.match(loadMvpdsSource, /const \{ map, domainRows \} = await fetchRestV2ConfigurationMvpds\(programmer,\s*runtimePrimaryApp,\s*requestorId\);/);
   assert.match(
     loadMvpdsSource,
     /premiumApps =[\s\S]*promoteResolvedRestV2ConfigurationApp\(programmer,\s*premiumApps,\s*runtimePrimaryApp,\s*requestorId\) \|\| premiumApps;/
   );
   assert.match(loadMvpdsSource, /setRequestorScopedDomainCache\(requestorId,\s*domainRows\)/);
+  assert.doesNotMatch(loadMvpdsSource, /ensureSelectedProgrammerApplicationsLoaded\(programmer,\s*\{/);
+  assert.doesNotMatch(loadMvpdsSource, /const liveApplicationsData =/);
+  assert.doesNotMatch(loadMvpdsSource, /const runtimeSeedIsVaultBacked =/);
+  assert.doesNotMatch(loadMvpdsSource, /await primeProgrammerServiceHydration\(programmer,\s*premiumApps,\s*\{/);
   assert.doesNotMatch(loadMvpdsSource, /fetchRestV2ConfigurationUsingCandidateApps\(/);
   assert.doesNotMatch(loadMvpdsSource, /orderRestV2AppCandidatesForRequestor\(/);
   assert.doesNotMatch(loadMvpdsSource, /tryingNextProgrammerApp/);
@@ -3132,6 +3162,7 @@ test("available TempPASS credentials participate in programmer reuse readiness a
     /const requestedServiceKeys = new Set\(\s*\(Array\.isArray\(serviceKeys\) && serviceKeys\.length > 0 \? serviceKeys : PREMIUM_REQUIRED_SERVICE_KEYS\)/
   );
   assert.match(credentialReadySource, /const cache = normalizeUnderparVaultDcrCache\(result\?\.cache \|\| null\);/);
+  assert.match(credentialReadySource, /return hasSoftwareStatementBoundDcrCache\(cache,\s*serviceKey,\s*requiredScope\);/);
   assert.match(readinessSource, /hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE &&[\s\S]*runtimeCoverage &&[\s\S]*credentialCoverage &&[\s\S]*cmCoverage/);
   assert.doesNotMatch(readinessSource, /hydrationStatus !== UNDERPAR_VAULT_STATUS_PENDING/);
   assert.match(forceHydrationSource, /if \(readiness\.hydrationStatus !== UNDERPAR_VAULT_STATUS_COMPLETE\) \{\s*return true;\s*\}/);
