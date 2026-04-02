@@ -84992,33 +84992,9 @@ function extractSoftwareStatementFromAppData(appData) {
     }
   }
 
-  const seenObjects = new Set();
-  const stack = [appData];
-  while (stack.length > 0) {
-    const currentNode = stack.pop();
-    if (typeof currentNode === "string") {
-      const normalizedValue = currentNode.trim();
-      if (isProbablyJwt(normalizedValue)) {
-        return normalizedValue;
-      }
-      continue;
-    }
-
-    if (!currentNode || typeof currentNode !== "object" || seenObjects.has(currentNode)) {
-      continue;
-    }
-    seenObjects.add(currentNode);
-
-    if (Array.isArray(currentNode)) {
-      currentNode.forEach((value) => {
-        stack.push(value);
-      });
-      continue;
-    }
-
-    Object.values(currentNode).forEach((value) => {
-      stack.push(value);
-    });
+  const dereference = extractJwtAndUrls(appData);
+  if (dereference.jwt && dereference.jwtScore > 0) {
+    return dereference.jwt;
   }
 
   return "";
@@ -86500,6 +86476,20 @@ async function fetchSoftwareStatementForAppGuid(guid, options = {}) {
   const requestOptions = options && typeof options === "object" ? options : {};
 
   try {
+    const download = await fetchRegisteredApplicationDownloadByGuid(guid, {
+      ...requestOptions,
+      allowMissingFilename: true,
+    });
+    const downloadedText = await download?.blob?.text?.().catch(() => "");
+    const downloadedStatement = extractSoftwareStatementFromText(downloadedText);
+    if (downloadedStatement) {
+      return downloadedStatement;
+    }
+  } catch {
+    // Continue to detail/raw fallback.
+  }
+
+  try {
     const details = await fetchApplicationDetailsByGuid(guid, requestOptions);
     const direct = extractSoftwareStatementFromAppData(details);
     if (direct) {
@@ -86574,6 +86564,7 @@ async function fetchRegisteredApplicationDownloadByGuid(guid, options = {}) {
     1000,
     Number(requestOptions.timeoutMs || requestOptions.requestTimeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS)
   );
+  const allowMissingFilename = requestOptions.allowMissingFilename === true;
   const accessToken = normalizeBearerTokenValue(
     firstNonEmptyString([
       requestOptions.accessToken,
@@ -86628,14 +86619,14 @@ async function fetchRegisteredApplicationDownloadByGuid(guid, options = {}) {
         response.headers?.get?.("Content-Disposition"),
       ]);
       const fileName = extractDownloadFilenameFromContentDisposition(contentDisposition);
-      if (!fileName) {
+      if (!fileName && !allowMissingFilename) {
         lastError = new Error("Registered Application download response did not expose a Content-Disposition filename.");
         continue;
       }
       return {
         ok: true,
         blob,
-        fileName,
+        fileName: fileName || "",
         contentDisposition,
         mimeType: firstNonEmptyString([blob.type, response.headers?.get?.("content-type"), "application/octet-stream"]),
       };

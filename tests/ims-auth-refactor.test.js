@@ -2527,8 +2527,9 @@ test("selected premium app hydration mirrors LoginButton detail and software-sta
   assert.doesNotMatch(orderedCandidatesSource, /getDetectionScopesFromApplication\(appData\)/);
   assert.doesNotMatch(orderedCandidatesSource, /getScopesFromApplication\(appData\)/);
   assert.match(statementSource, /appData\?\.raw\?\.softwareStatement/);
-  assert.match(statementSource, /const stack = \[appData\];/);
-  assert.match(statementSource, /if \(isProbablyJwt\(normalizedValue\)\) \{\s*return normalizedValue;\s*\}/);
+  assert.match(statementSource, /const dereference = extractJwtAndUrls\(appData\);/);
+  assert.match(statementSource, /if \(dereference\.jwt && dereference\.jwtScore > 0\) \{\s*return dereference\.jwt;\s*\}/);
+  assert.doesNotMatch(statementSource, /const stack = \[appData\];/);
   assert.match(detailPayloadSource, /payload\.entityData/);
   assert.match(detailUrlsSource, /appendAdobeConsoleConfigurationVersion\(`\$\{ADOBE_CONSOLE_BASE\}\/rest\/api\/applications\/\$\{encodedGuid\}`\)/);
   assert.match(detailUrlsSource, /appendAdobeConsoleConfigurationVersion\(`\$\{ADOBE_CONSOLE_BASE\}\/rest\/api\/entity\/RegisteredApplication\/\$\{encodedGuid\}`\)/);
@@ -2681,6 +2682,9 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(rawFetchSource, /const bulkStatement = firstNonEmptyString\(\[/);
   assert.match(rawFetchSource, /const urlCandidates = buildRegisteredApplicationDetailUrlCandidates\(guid\);/);
   assert.match(rawFetchSource, /return bulkFallback \|\| \{ text: "", parsed: null \};/);
+  assert.match(fetchStatementSource, /const download = await fetchRegisteredApplicationDownloadByGuid\(guid,\s*\{/);
+  assert.match(fetchStatementSource, /allowMissingFilename:\s*true/);
+  assert.match(fetchStatementSource, /const downloadedStatement = extractSoftwareStatementFromText\(downloadedText\);/);
   assert.match(fetchStatementSource, /const candidateStatement = extractSoftwareStatementFromText\(content\);/);
   assert.match(fetchStatementSource, /const rawTextStatement = extractSoftwareStatementFromText\(rawPayload\?\.text \|\| ""\);/);
 });
