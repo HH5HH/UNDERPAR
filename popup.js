@@ -83768,6 +83768,14 @@ function scheduleMediaCompanySelectionHydration(controllerReason = "media-compan
   }, delayMs);
 }
 
+function stageMediaCompanySelectionTransition(programmer = null, controllerReason = "media-company-change") {
+  state.premiumPanelRequestToken = Number(state.premiumPanelRequestToken || 0) + 1;
+  setStatus("", "info");
+  const selectedProgrammer = selectProgrammerForController(programmer, controllerReason);
+  syncMediaCompanySelectAvailability();
+  return selectedProgrammer;
+}
+
 function applyMediaCompanyOptionHydrationState(options = {}) {
   if (!els.mediaCompanySelect) {
     return;
@@ -98237,6 +98245,7 @@ function registerEventHandlers() {
         ? `${String(selectedProgrammer.programmerName || "").trim()} - ${String(selectedProgrammer.programmerId || "").trim()}`
         : ""
     );
+    stageMediaCompanySelectionTransition(selectedProgrammer, controllerReason);
     scheduleMediaCompanySelectionHydration(controllerReason);
   });
 

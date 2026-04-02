@@ -1184,6 +1184,23 @@ test("requestor change waits for programmer refresh before loading MVPDs", () =>
   assert.ok(requestorChangeBlock, "requestor change handler should await programmer refresh before MVPD load");
 });
 
+test("media company change immediately invalidates stale requestor-scoped panel work before deferred hydration", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const stageTransitionSource = extractFunctionSource(popupSource, "stageMediaCompanySelectionTransition");
+  const mediaCompanyChangeBlock = popupSource.match(
+    /els\.mediaCompanySelect\.addEventListener\("change",[\s\S]*?stageMediaCompanySelectionTransition\(selectedProgrammer,\s*controllerReason\);[\s\S]*?scheduleMediaCompanySelectionHydration\(controllerReason\);[\s\S]*?\}\);/
+  );
+
+  assert.match(stageTransitionSource, /state\.premiumPanelRequestToken = Number\(state\.premiumPanelRequestToken \|\| 0\) \+ 1;/);
+  assert.match(stageTransitionSource, /setStatus\("",\s*"info"\);/);
+  assert.match(stageTransitionSource, /selectProgrammerForController\(programmer,\s*controllerReason\);/);
+  assert.match(stageTransitionSource, /syncMediaCompanySelectAvailability\(\);/);
+  assert.ok(
+    mediaCompanyChangeBlock,
+    "media company change should stage the new controller state before deferred hydration runs"
+  );
+});
+
 test("requestor selector stays disabled until the selected programmer is reusable", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const selectProgrammerSource = extractFunctionSource(popupSource, "selectProgrammerForController");
