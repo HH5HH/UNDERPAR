@@ -634,7 +634,7 @@ test("REST V2 requestor selection prefers the media-company-scoped app over requ
   assert.equal(selected?.guid, "shared-app");
 });
 
-test("runtime premium service app resolution stays pinned to the hydrated primary app", () => {
+test("runtime REST V2 app resolution prefers the ranked programmer catalog over a stale cached primary", () => {
   const services = {
     restV2: { guid: "rest-shared", appName: "REST Shared" },
     restV2Apps: [
@@ -655,7 +655,7 @@ test("runtime premium service app resolution stays pinned to the hydrated primar
   const helpers = loadPopupFunctions(["resolveProgrammerPremiumServiceRuntimeApp"], {
     getCurrentPremiumAppsSnapshot: () => services,
     getRuntimePremiumServicesSeed: () => services,
-    collectRestV2AppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.restV2Apps || [],
+    collectProgrammerScopedRestV2AppCandidates: (_programmerId = "", premiumApps = null) => premiumApps?.restV2Apps || [],
     collectEsmAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.esmApps || [],
     collectResetTempPassAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.resetTempPassApps || [],
     selectPreferredRestV2AppForRequestor: () => services.restV2Apps[1],
@@ -665,7 +665,7 @@ test("runtime premium service app resolution stays pinned to the hydrated primar
 
   assert.equal(
     normalizeRealmObject(helpers.resolveProgrammerPremiumServiceRuntimeApp("restV2", "Turner", services))?.guid,
-    "rest-shared"
+    "rest-mml"
   );
   assert.equal(
     normalizeRealmObject(helpers.resolveProgrammerPremiumServiceRuntimeApp("esm", "Turner", services))?.guid,
@@ -674,6 +674,33 @@ test("runtime premium service app resolution stays pinned to the hydrated primar
   assert.equal(
     normalizeRealmObject(helpers.resolveProgrammerPremiumServiceRuntimeApp("resetTempPass", "Turner", services))?.guid,
     "temp-shared"
+  );
+});
+
+test("programmer-scoped REST V2 candidates are rebuilt from the full registered-application catalog", () => {
+  const helpers = loadPopupFunctions(["collectProgrammerScopedRestV2AppCandidates"], {
+    collectRestV2AppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.restV2Apps || [],
+    getCurrentProgrammerApplicationsSnapshot: () => ({
+      "shared-app": { guid: "shared-app", appName: "Shared App", scopes: ["api:client:v2"] },
+      "animalplanet-app": { guid: "animalplanet-app", appName: "Animal Planet", scopes: ["api:client:v2"] },
+      "esm-app": { guid: "esm-app", appName: "ESM App", scopes: ["analytics:client"] },
+    }),
+    buildPassVaultApplicationsSnapshotFromRegisteredApplications: (value = null) => value || {},
+    getPassVaultMediaCompanyRecord: () => null,
+    getPassVaultRegisteredApplicationsByGuid: () => ({}),
+    buildPassVaultHydrationRegisteredApplications: (applicationsData = {}) => Object.values(applicationsData),
+    registeredApplicationMatchesNativeRequiredScope: (app = null, requiredScope = "") =>
+      (Array.isArray(app?.scopes) ? app.scopes : []).includes(String(requiredScope || "").trim()),
+    REST_V2_SCOPE: "api:client:v2",
+  });
+
+  const candidates = helpers.collectProgrammerScopedRestV2AppCandidates("Discovery", {
+    restV2Apps: [{ guid: "shared-app", appName: "Shared App", scopes: ["api:client:v2"] }],
+  });
+
+  assert.deepEqual(
+    normalizeRealmObject(candidates).map((app) => app.guid),
+    ["shared-app", "animalplanet-app"]
   );
 });
 

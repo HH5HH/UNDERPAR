@@ -9773,11 +9773,7 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
   };
 
   if (normalizedServiceKey === "restV2") {
-    const candidates = collectRestV2AppCandidatesFromPremiumApps(resolvedServices);
-    const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
-    if (primaryMatch?.guid) {
-      return primaryMatch;
-    }
+    const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, resolvedServices);
     const fallbackMatch = resolveFallbackMatch(candidates);
     if (fallbackMatch?.guid) {
       return fallbackMatch;
@@ -18905,20 +18901,12 @@ function resolveRestV2AppInfoForHarvest(harvest = null) {
   }
 
   const services = getCurrentPremiumAppsSnapshot(programmerId);
-  const restV2Candidates = collectRestV2AppCandidatesFromPremiumApps(services);
+  const restV2Candidates = collectProgrammerScopedRestV2AppCandidates(programmerId, services);
   const appGuid = String(harvest.appGuid || "").trim();
   if (appGuid) {
     const guidMatch = restV2Candidates.find((item) => String(item?.guid || "").trim() === appGuid);
     if (guidMatch?.guid) {
       return guidMatch;
-    }
-  }
-
-  const requestorId = String(harvest.requestorId || "").trim();
-  if (requestorId) {
-    const mapped = resolveRestV2AppForServiceProvider(restV2Candidates, requestorId, programmerId);
-    if (mapped?.guid) {
-      return mapped;
     }
   }
 
@@ -28001,7 +27989,7 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
   }
 
   const premiumApps = getCurrentPremiumAppsSnapshot(resolvedProgrammer.programmerId);
-  const baseCandidates = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+  const baseCandidates = collectProgrammerScopedRestV2AppCandidates(resolvedProgrammer.programmerId, premiumApps);
   const byGuid = new Map();
   baseCandidates.forEach((item) => {
     if (item?.guid && !byGuid.has(item.guid)) {
@@ -28029,13 +28017,6 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
     allowAppOverride ? appInfoOverride : null
   );
   pushCandidate(allowAppOverride ? appInfoOverride : null);
-  if (
-    cachedAuthContext &&
-    cachedAuthContext.programmerId === resolvedProgrammer.programmerId &&
-    cachedAuthContext.preferredAppGuid
-  ) {
-    pushCandidate(byGuid.get(cachedAuthContext.preferredAppGuid));
-  }
   pushCandidate(runtimePrimaryApp);
 
   if (
@@ -28052,11 +28033,6 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
   const resolvedApp =
     (allowAppOverride ? appInfoOverride : null) ||
     runtimePrimaryApp ||
-    (cachedAuthContext &&
-    cachedAuthContext.programmerId === resolvedProgrammer.programmerId &&
-    cachedAuthContext.preferredAppGuid
-      ? orderedCandidates.find((item) => item.guid === cachedAuthContext.preferredAppGuid)
-      : null) ||
     (orderedCandidates.length === 1 ? orderedCandidates[0] : null) ||
     null;
 
@@ -84492,18 +84468,7 @@ function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", prog
   if (candidates.length === 0) {
     return null;
   }
-
-  const normalizedProgrammerId = String(programmerId || "").trim();
-  if (normalizedProgrammerId) {
-    const sharedProgrammerApp =
-      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedProgrammerId, normalizedProgrammerId)) ||
-      null;
-    if (sharedProgrammerApp) {
-      return sharedProgrammerApp;
-    }
-  }
-
-  return pickHighestRankedPassVaultServiceCandidate(candidates, normalizedProgrammerId) || candidates[0] || null;
+  return pickHighestRankedPassVaultServiceCandidate(candidates, String(programmerId || "").trim()) || candidates[0] || null;
 }
 
 function selectPreferredPassVaultHydrationServiceApplication(serviceKey = "", appCandidates = [], programmerId = "") {
@@ -87033,6 +86998,33 @@ function collectRestV2AppCandidatesFromPremiumApps(premiumApps) {
   return candidates;
 }
 
+function collectProgrammerScopedRestV2AppCandidates(programmerId = "", premiumApps = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const candidates = [];
+  const seen = new Set();
+  const pushCandidate = (appInfo) => {
+    const guid = String(appInfo?.guid || "").trim();
+    if (!guid || seen.has(guid)) {
+      return;
+    }
+    seen.add(guid);
+    candidates.push(appInfo);
+  };
+
+  const runtimeApplications =
+    getCurrentProgrammerApplicationsSnapshot(normalizedProgrammerId) ||
+    buildPassVaultApplicationsSnapshotFromRegisteredApplications(
+      getPassVaultRegisteredApplicationsByGuid(getPassVaultMediaCompanyRecord(normalizedProgrammerId)) || {}
+    ) ||
+    null;
+  buildPassVaultHydrationRegisteredApplications(runtimeApplications || {})
+    .filter((application) => registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE))
+    .forEach((application) => pushCandidate(application));
+  collectRestV2AppCandidatesFromPremiumApps(premiumApps).forEach((appInfo) => pushCandidate(appInfo));
+
+  return candidates;
+}
+
 function hasRestV2AppBeenPrewarmed(programmerId, appGuid) {
   const appSet = state.restV2PrewarmedAppsByProgrammerId.get(getEnvironmentScopedProgrammerKey(programmerId));
   return Boolean(appSet && appSet.has(String(appGuid || "")));
@@ -87055,7 +87047,7 @@ async function prewarmRestV2ForProgrammer(programmer, premiumApps) {
     return;
   }
 
-  const candidates = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+  const candidates = collectProgrammerScopedRestV2AppCandidates(programmer.programmerId, premiumApps);
   if (candidates.length === 0) {
     return;
   }
@@ -88004,7 +87996,7 @@ function selectRecoveredPremiumServiceApp(programmerId = "", serviceKey = "", se
   }
 
   if (normalizedServiceKey === "restV2") {
-    const candidates = collectRestV2AppCandidatesFromPremiumApps(services).filter(
+    const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, services).filter(
       (entry) => String(entry?.guid || "").trim() !== excludedGuid
     );
     return (
@@ -88250,9 +88242,6 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
 
   if (response.status === 401 && retryStage === "refresh") {
     const bodyText = await response.clone().text().catch(() => "");
-    if (isServiceProviderTokenMismatchError(bodyText)) {
-      return response;
-    }
     emitRestV2DebugEvent(debugFlowId, {
       source: "extension",
       phase: "restv2-retry",
@@ -88272,9 +88261,6 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
 
   if (response.status === 401 && retryStage === "reprovision") {
     const bodyText = await response.clone().text().catch(() => "");
-    if (isServiceProviderTokenMismatchError(bodyText)) {
-      return response;
-    }
     emitRestV2DebugEvent(debugFlowId, {
       source: "extension",
       phase: "restv2-retry",
@@ -88295,9 +88281,6 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
 
   if (response.status === 401 && retryStage === "none" && isEsmServiceDebugMeta(debugMeta)) {
     const bodyText = await response.clone().text().catch(() => "");
-    if (isServiceProviderTokenMismatchError(bodyText)) {
-      return response;
-    }
     const recovered = await recoverEsmServiceSelection(programmerId, {
       requestorId: String(debugMeta?.requestorId || "").trim(),
     }).catch(() => null);
@@ -96535,11 +96518,11 @@ function orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestor
     ordered.push(candidate);
   };
 
+  pushCandidate(resolvedApp);
+
   if (context.preferredAppGuid) {
     pushCandidate(byGuid.get(context.preferredAppGuid));
   }
-
-  pushCandidate(resolvedApp);
 
   if (Array.isArray(context.candidateGuids)) {
     context.candidateGuids.forEach((guid) => {
@@ -96632,7 +96615,7 @@ async function loadMvpdsFromRestV2(requestorId) {
           }
           continue;
         }
-        let restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+        let restV2Apps = collectProgrammerScopedRestV2AppCandidates(programmer.programmerId, premiumApps);
         let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
         const requiresRuntimeHydration =
           !isProgrammerRuntimeServicesReady(programmer.programmerId, premiumApps) ||
@@ -96646,7 +96629,7 @@ async function loadMvpdsFromRestV2(requestorId) {
             }).catch(() => null)) ||
             getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
             premiumApps;
-          restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+          restV2Apps = collectProgrammerScopedRestV2AppCandidates(programmer.programmerId, premiumApps);
           runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
         }
         if (restV2Apps.length === 0) {
