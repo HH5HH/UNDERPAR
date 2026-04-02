@@ -2504,6 +2504,7 @@ test("CM tenant bundle loader no longer returns stale bundle data after a live f
 test("missing DCR credentials no longer trigger full pass vault compilation from inside token acquisition", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const chooseRuntimeCacheSource = extractFunctionSource(popupSource, "choosePassVaultRuntimeDcrCache");
+  const choosePreferredCredentialSource = extractFunctionSource(popupSource, "choosePreferredPassVaultCredentialEntry");
   const programmerRecordSource = extractFunctionSource(popupSource, "buildPassVaultProgrammerRecord");
   const restoreBoundCacheSource = extractFunctionSource(popupSource, "restorePassVaultBoundServiceCredentialCache");
   const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
@@ -2512,6 +2513,8 @@ test("missing DCR credentials no longer trigger full pass vault compilation from
   assert.match(chooseRuntimeCacheSource, /const orderedServiceKeys = uniquePreserveOrder\(/);
   assert.match(chooseRuntimeCacheSource, /const credential = choosePreferredPassVaultCredentialEntry\(/);
   assert.match(chooseRuntimeCacheSource, /serviceCredentials\?\.\[serviceKey\] \|\| null,\s*applicationRecord\?\.dcrCache \|\| null/);
+  assert.match(choosePreferredCredentialSource, /bindUnderparVaultCredentialEntryToApplication\(normalizedCredential,\s*application,\s*normalizedServiceKey\)/);
+  assert.doesNotMatch(choosePreferredCredentialSource, /bindUnderparVaultCredentialEntry\(normalizedCredential,\s*application,\s*normalizedServiceKey\)/);
   assert.match(chooseRuntimeCacheSource, /if \(credential && \(credential\.clientId \|\| credential\.clientSecret \|\| credential\.accessToken\)\) \{\s*return credential;\s*\}/);
   assert.match(chooseRuntimeCacheSource, /const directCache = normalizeUnderparVaultDcrCache\(applicationRecord\?\.dcrCache \|\| null\);/);
   assert.match(programmerRecordSource, /registeredApplicationsByGuid\[guid\]\.dcrCache = normalizeUnderparVaultDcrCache\(result\.cache\);/);

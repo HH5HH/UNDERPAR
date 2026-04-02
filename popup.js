@@ -1274,7 +1274,8 @@ function choosePreferredPassVaultCredentialEntry(candidates = [], serviceKey = "
         return null;
       }
       const boundCredential =
-        bindUnderparVaultCredentialEntry(normalizedCredential, application, normalizedServiceKey) || normalizedCredential;
+        bindUnderparVaultCredentialEntryToApplication(normalizedCredential, application, normalizedServiceKey) ||
+        normalizedCredential;
       return {
         index,
         credential: boundCredential,
