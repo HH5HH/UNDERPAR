@@ -614,14 +614,21 @@ test("REST V2 post-login redirect matcher ignores trailing-slash drift on the la
     ),
     true
   );
+  assert.equal(
+    isRestV2RedirectAtPostLoginTarget(
+      "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/1-configuration",
+      normalizeAdobeNavigationUrl("https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/")
+    ),
+    true
+  );
 });
 
-test("REST V2 Bobtools redirect watcher falls back to the launch page when redirectUrl is unavailable", () => {
+test("REST V2 Bobtools redirect watcher checks the configured redirect, the canonical docs target, and the launch page", () => {
   const popupSource = read("popup.js");
 
   assert.match(
     popupSource,
-    /const redirectUrl = firstNonEmptyString\(\[\s*recordingContext\?\.redirectUrl,\s*state\.restV2PreviousTabUrl\s*\]\);/m
+    /const redirectCandidates = \[\s*String\(recordingContext\?\.redirectUrl \|\| ""\)\.trim\(\),\s*String\(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY\.restV2 \|\| ""\)\.trim\(\),\s*String\(state\.restV2PreviousTabUrl \|\| ""\)\.trim\(\),\s*\]\.filter\(Boolean\);/m
   );
 });
 
@@ -653,7 +660,7 @@ test("REST V2 stop success path auto-opens BOBTOOLS after closing the login wind
   );
 });
 
-test("REST V2 popup-close BOBTOOLS launch reuses the prior browsing window before the stale popup window id", async () => {
+test("REST V2 popup-close BOBTOOLS launch prefers the live popup window before the prior browsing window", async () => {
   const { resolveRestV2BobtoolsLaunchWindowId } = loadFunctions("popup.js", ["resolveRestV2BobtoolsLaunchWindowId"], {
     state: {
       restV2PreviousTabId: 71,
@@ -669,11 +676,33 @@ test("REST V2 popup-close BOBTOOLS launch reuses the prior browsing window befor
 
   await assert.doesNotReject(async () => {
     const windowId = await resolveRestV2BobtoolsLaunchWindowId(999);
+    assert.equal(windowId, 999);
+  });
+});
+
+test("REST V2 popup-close BOBTOOLS launch falls back from a closed popup window to the prior browsing window", async () => {
+  const { resolveRestV2BobtoolsLaunchWindowId } = loadFunctions("popup.js", ["resolveRestV2BobtoolsLaunchWindowId"], {
+    state: {
+      restV2PreviousTabId: 71,
+    },
+    getTabByIdSafe: async () => ({ id: 71, windowId: 314 }),
+    chrome: {
+      windows: {
+        get: async () => {
+          throw new Error("No window with id: 999");
+        },
+      },
+    },
+    resolveSidepanelControllerWindowId: async () => 123,
+  });
+
+  await assert.doesNotReject(async () => {
+    const windowId = await resolveRestV2BobtoolsLaunchWindowId(999);
     assert.equal(windowId, 314);
   });
 });
 
-test("REST V2 popup-close BOBTOOLS launch falls back from a closed popup window to the controller window", async () => {
+test("REST V2 popup-close BOBTOOLS launch falls back from missing popup and browsing windows to the controller window", async () => {
   const { resolveRestV2BobtoolsLaunchWindowId } = loadFunctions("popup.js", ["resolveRestV2BobtoolsLaunchWindowId"], {
     state: {
       restV2PreviousTabId: 71,

@@ -62424,12 +62424,20 @@ function isRestV2RedirectAtPostLoginTarget(url = "", redirectUrl = "") {
   try {
     const candidateParsed = new URL(candidate);
     const redirectParsed = new URL(configuredRedirect);
+    const candidatePath = normalizePathname(candidateParsed.pathname);
+    const redirectPath = normalizePathname(redirectParsed.pathname);
     return (
       candidateParsed.origin === redirectParsed.origin &&
-      normalizePathname(candidateParsed.pathname) === normalizePathname(redirectParsed.pathname)
+      (candidatePath === redirectPath ||
+        (redirectPath !== "/" && candidatePath.startsWith(`${redirectPath}/`)))
     );
   } catch {
-    return candidate === configuredRedirect || candidate.startsWith(`${configuredRedirect}?`) || candidate.startsWith(`${configuredRedirect}#`);
+    return (
+      candidate === configuredRedirect ||
+      candidate.startsWith(`${configuredRedirect}/`) ||
+      candidate.startsWith(`${configuredRedirect}?`) ||
+      candidate.startsWith(`${configuredRedirect}#`)
+    );
   }
 }
 
@@ -62443,12 +62451,6 @@ function buildRestV2SelectionContextFromRecordingContextSafe(recordingContext = 
 }
 
 async function resolveRestV2BobtoolsLaunchWindowId(preferredWindowId = 0) {
-  const previousTab = await getTabByIdSafe(state.restV2PreviousTabId);
-  const previousTabWindowId = Number(previousTab?.windowId || 0);
-  if (previousTabWindowId > 0) {
-    return previousTabWindowId;
-  }
-
   const normalizedPreferredWindowId = Number(preferredWindowId || 0);
   if (normalizedPreferredWindowId > 0 && chrome.windows?.get) {
     try {
@@ -62458,8 +62460,14 @@ async function resolveRestV2BobtoolsLaunchWindowId(preferredWindowId = 0) {
         return resolvedPreferredWindowId;
       }
     } catch {
-      // Ignore stale popup-window ids and fall through to the controller window.
+      // Ignore stale popup-window ids and fall through to the previous browsing window.
     }
+  }
+
+  const previousTab = await getTabByIdSafe(state.restV2PreviousTabId);
+  const previousTabWindowId = Number(previousTab?.windowId || 0);
+  if (previousTabWindowId > 0) {
+    return previousTabWindowId;
   }
 
   try {
@@ -62720,8 +62728,15 @@ function ensureRestV2BobtoolsRedirectWatcher() {
     if (!candidateUrl || bobtoolsWorkspaceIsWorkspaceTab({ url: candidateUrl })) {
       return;
     }
-    const redirectUrl = firstNonEmptyString([recordingContext?.redirectUrl, state.restV2PreviousTabUrl]);
-    if (!isRestV2RedirectAtPostLoginTarget(candidateUrl, redirectUrl)) {
+    const redirectCandidates = [
+      String(recordingContext?.redirectUrl || "").trim(),
+      String(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY.restV2 || "").trim(),
+      String(state.restV2PreviousTabUrl || "").trim(),
+    ].filter(Boolean);
+    if (
+      redirectCandidates.length === 0 ||
+      !redirectCandidates.some((redirectUrl) => isRestV2RedirectAtPostLoginTarget(candidateUrl, redirectUrl))
+    ) {
       return;
     }
     if (state.restV2BobtoolsRedirectInFlightByTabId.has(normalizedTabId)) {
