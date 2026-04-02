@@ -1335,6 +1335,22 @@ function normalizeVaultCredential(value = null) {
   return normalized;
 }
 
+function normalizeVaultServiceCredentialEntries(value = null) {
+  const normalizedEntries = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return normalizedEntries;
+  }
+  Object.entries(value).forEach(([serviceKey, credentialValue]) => {
+    const normalizedServiceKey = String(serviceKey || "").trim();
+    const normalizedCredential = normalizeVaultCredential(credentialValue);
+    if (!normalizedServiceKey || !normalizedCredential) {
+      return;
+    }
+    normalizedEntries[normalizedServiceKey] = normalizedCredential;
+  });
+  return normalizedEntries;
+}
+
 function normalizeVaultSavedQueryName(value = "") {
   return String(value || "").replace(/\|+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -1819,7 +1835,7 @@ function getVaultRegisteredApplicationCount(record = null) {
 }
 
 function collectVaultServiceTags(record = null) {
-  const serviceKeys = ["restV2", "esm", "degradation", "cm"];
+  const serviceKeys = ["restV2", "esm", "degradation", "resetTempPass", "cm"];
   return serviceKeys
     .filter((serviceKey) => getVaultServiceSummary(record, serviceKey)?.available === true)
     .map((serviceKey) => {
@@ -1831,6 +1847,9 @@ function collectVaultServiceTags(record = null) {
       }
       if (serviceKey === "degradation") {
         return "DEGRADATION";
+      }
+      if (serviceKey === "resetTempPass") {
+        return "Reset TempPASS";
       }
       return "CM";
     });
@@ -1929,6 +1948,7 @@ function buildEmptyVaultPassServicesSummary() {
     restV2: createImportedPassServiceSummary("restV2"),
     esm: createImportedPassServiceSummary("esm"),
     degradation: createImportedPassServiceSummary("degradation"),
+    resetTempPass: createImportedPassServiceSummary("resetTempPass"),
     cm: createImportedPassServiceSummary("cm", {
       available: false,
       checked: false,
@@ -2094,7 +2114,7 @@ function hasVaultProgrammerHydrationResults(record = null) {
   }
 
   const serviceSummaries = record?.services && typeof record.services === "object" ? record.services : {};
-  return ["restV2", "esm", "degradation", "cm"].some((serviceKey) => {
+  return ["restV2", "esm", "degradation", "resetTempPass", "cm"].some((serviceKey) => {
     const summary = serviceSummaries?.[serviceKey];
     if (!summary || typeof summary !== "object") {
       return false;
@@ -2814,6 +2834,30 @@ function getVaultAppCredential(applicationRecord = null, serviceKey = "") {
   return normalizeVaultCredential(applicationRecord?.dcrCache || null);
 }
 
+function getVaultProgrammerServiceCredential(record = null, serviceKey = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  if (!record || typeof record !== "object" || !normalizedServiceKey) {
+    return null;
+  }
+
+  const serviceSummary = getVaultServiceSummary(record, normalizedServiceKey);
+  const registeredApplications = getVaultRegisteredApplications(record);
+  const candidateGuids = uniquePreserveOrder(
+    (Array.isArray(serviceSummary?.appGuids) ? serviceSummary.appGuids : []).concat(
+      String(serviceSummary?.primaryGuid || "").trim() ? [String(serviceSummary.primaryGuid).trim()] : []
+    )
+  );
+  for (const guid of candidateGuids) {
+    const credential = getVaultAppCredential(registeredApplications?.[guid] || null, normalizedServiceKey);
+    if (credential?.clientId && credential?.clientSecret) {
+      return credential;
+    }
+  }
+
+  const stagedCredentials = normalizeVaultServiceCredentialEntries(record?.serviceCredentialsByServiceKey || null);
+  return stagedCredentials[normalizedServiceKey] || null;
+}
+
 function getVaultServiceLabel(serviceKey = "") {
   if (serviceKey === "restV2") {
     return "REST V2";
@@ -2823,6 +2867,9 @@ function getVaultServiceLabel(serviceKey = "") {
   }
   if (serviceKey === "degradation") {
     return "DEGRADATION";
+  }
+  if (serviceKey === "resetTempPass") {
+    return "Reset TempPASS";
   }
   if (serviceKey === "cm") {
     return "CM";
@@ -2840,6 +2887,9 @@ function getVaultServiceKeyFromLabel(value = "") {
   }
   if (normalized === "degradation" || normalized === "degredation") {
     return "degradation";
+  }
+  if (normalized === "resettemppass" || normalized === "resettempass" || normalized === "resettemppas") {
+    return "resetTempPass";
   }
   if (normalized === "cm" || normalized === "concurrencymonitoring" || normalized === "concurrencymonitorring") {
     return "cm";
@@ -2884,7 +2934,6 @@ function parseVaultMatchedTenants(value = "") {
 
 function createVaultExportRowSkeleton() {
   return {
-    "UnderPAR Vault CSV": UNDERPAR_VAULT_CSV_SCHEMA,
     "Row Type": "",
     "Environment Key": "",
     "Adobe IMS Client ID": "",
@@ -2896,7 +2945,6 @@ function createVaultExportRowSkeleton() {
     "Adobe IMS Updated At": "",
     "Media Company ID": "",
     Service: "",
-    "Registered Application GUID": "",
     "Client ID": "",
     "Client Secret": "",
     "Access Token": "",
@@ -3056,32 +3104,25 @@ function buildVaultExportRows(vaultPayload = null) {
         : {};
 
     Object.values(mediaCompanies).forEach((record) => {
-      const serviceKeys = ["restV2", "esm", "degradation"];
-      const registeredApplications = getVaultRegisteredApplications(record);
+      const serviceKeys = ["restV2", "esm", "degradation", "resetTempPass"];
       const cmSummary = getVaultServiceSummary(record, "cm");
       const matchedTenants = Array.isArray(cmSummary?.matchedTenants) ? cmSummary.matchedTenants : [];
 
       serviceKeys.forEach((serviceKey) => {
-        const serviceSummary = getVaultServiceSummary(record, serviceKey);
-        const appGuids = uniqueSorted(Array.isArray(serviceSummary?.appGuids) ? serviceSummary.appGuids : []);
-        appGuids.forEach((guid) => {
-          const applicationRecord = registeredApplications?.[guid] || {};
-          const credential = getVaultAppCredential(applicationRecord, serviceKey) || {};
-          if (!credential?.clientId || !credential?.clientSecret) {
-            return;
-          }
-          rows.push({
-            ...createVaultExportRowSkeleton(),
-            "Row Type": "pass-service",
-            "Environment Key": environmentKey,
-            "Media Company ID": String(record?.programmerId || "").trim(),
-            Service: getVaultServiceLabel(serviceKey),
-            "Registered Application GUID": guid,
-            "Client ID": String(credential?.clientId || "").trim(),
-            "Client Secret": String(credential?.clientSecret || "").trim(),
-            "Access Token": String(credential?.accessToken || "").trim(),
-            "Token Expires At": Number(credential?.tokenExpiresAt || 0) || "",
-          });
+        const credential = getVaultProgrammerServiceCredential(record, serviceKey) || {};
+        if (!credential?.clientId || !credential?.clientSecret) {
+          return;
+        }
+        rows.push({
+          ...createVaultExportRowSkeleton(),
+          "Row Type": "pass-service",
+          "Environment Key": environmentKey,
+          "Media Company ID": String(record?.programmerId || "").trim(),
+          Service: getVaultServiceLabel(serviceKey),
+          "Client ID": String(credential?.clientId || "").trim(),
+          "Client Secret": String(credential?.clientSecret || "").trim(),
+          "Access Token": String(credential?.accessToken || "").trim(),
+          "Token Expires At": Number(credential?.tokenExpiresAt || 0) || "",
         });
       });
 
@@ -3275,10 +3316,12 @@ function createImportedPassVaultRecord(meta = {}) {
     lastSelectedAt: 0,
     registeredApplicationCount: 0,
     registeredApplicationsByGuid: {},
+    serviceCredentialsByServiceKey: {},
     services: {
       restV2: createImportedPassServiceSummary("restV2"),
       esm: createImportedPassServiceSummary("esm"),
       degradation: createImportedPassServiceSummary("degradation"),
+      resetTempPass: createImportedPassServiceSummary("resetTempPass"),
       cm: createImportedPassServiceSummary("cm", {
         available: false,
         checked: false,
@@ -3556,8 +3599,9 @@ async function handleVaultImportFile(file) {
     let importableRowCount = 0;
 
     rows.forEach((row) => {
+      const hasSchemaColumn = Object.prototype.hasOwnProperty.call(row || {}, "UnderPAR Vault CSV");
       const schema = String(row?.["UnderPAR Vault CSV"] || "").trim();
-      if (!UNDERPAR_VAULT_SUPPORTED_CSV_SCHEMAS.has(schema)) {
+      if (hasSchemaColumn && !UNDERPAR_VAULT_SUPPORTED_CSV_SCHEMAS.has(schema)) {
         return;
       }
 
@@ -3720,14 +3764,7 @@ async function handleVaultImportFile(file) {
         return;
       }
 
-      const guid = firstNonEmptyString([row?.["Registered Application GUID"]]);
-      if (!guid) {
-        return;
-      }
-
       const requiredScope = VAULT_REQUIRED_SCOPE_BY_SERVICE_KEY[serviceKey];
-      const appName = guid;
-      const scopes = requiredScope ? [requiredScope] : [];
       const credential = normalizeVaultCredential({
         clientId: row?.["Client ID"],
         clientSecret: row?.["Client Secret"],
@@ -3739,6 +3776,22 @@ async function handleVaultImportFile(file) {
       if (!credential?.clientId || !credential?.clientSecret) {
         return;
       }
+      const guid = firstNonEmptyString([row?.["Registered Application GUID"]]);
+      if (!guid) {
+        record.serviceCredentialsByServiceKey = {
+          ...normalizeVaultServiceCredentialEntries(record?.serviceCredentialsByServiceKey || null),
+          [serviceKey]: credential,
+        };
+        mergeImportedPassServiceSummary(record, serviceKey, {
+          available: true,
+          requiredScope,
+        });
+        importableRowCount += 1;
+        return;
+      }
+
+      const appName = guid;
+      const scopes = requiredScope ? [requiredScope] : [];
       const applicationRecord = getImportedPassApplicationRecord(record, guid, appName);
       if (!applicationRecord) {
         return;

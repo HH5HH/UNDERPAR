@@ -1261,6 +1261,22 @@ function normalizeUnderparVaultCredentialEntry(value = null) {
   };
 }
 
+function normalizeUnderparVaultServiceCredentialEntries(value = null) {
+  const normalizedEntries = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return normalizedEntries;
+  }
+  Object.entries(value).forEach(([serviceKey, credentialValue]) => {
+    const normalizedServiceKey = String(serviceKey || "").trim();
+    const normalizedCredential = normalizeUnderparVaultCredentialEntry(credentialValue);
+    if (!normalizedServiceKey || !normalizedCredential) {
+      return;
+    }
+    normalizedEntries[normalizedServiceKey] = normalizedCredential;
+  });
+  return normalizedEntries;
+}
+
 function buildUnderparSoftwareStatementFingerprint(value = "") {
   const normalized = String(value || "").trim();
   if (!normalized) {
@@ -6811,6 +6827,31 @@ function compactPassVaultRegisteredApplications(registeredApplicationsByGuid = {
   return compacted;
 }
 
+function bindUnderparVaultCredentialEntryToApplication(credential = null, application = null, serviceKey = "") {
+  const normalizedCredential = normalizeUnderparVaultCredentialEntry(credential);
+  if (!normalizedCredential) {
+    return null;
+  }
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const requiredScope = getPassVaultRequiredScopeForService(normalizedServiceKey, application);
+  const shouldBindCache = shouldRequireSoftwareStatementBoundDcrCache(normalizedServiceKey, requiredScope);
+  const softwareStatementFingerprint = shouldBindCache
+    ? buildUnderparSoftwareStatementFingerprint(resolveRegisteredApplicationSoftwareStatement(application))
+    : "";
+  return normalizeUnderparVaultCredentialEntry({
+    ...normalizedCredential,
+    serviceScope: String(requiredScope || normalizedCredential.serviceScope || "").trim(),
+    tokenRequestedScope: String(normalizedCredential.tokenRequestedScope || requiredScope || "").trim(),
+    softwareStatementFingerprint: shouldBindCache ? softwareStatementFingerprint : "",
+    cacheBindingVersion:
+      shouldBindCache && softwareStatementFingerprint
+        ? UNDERPAR_DCR_CACHE_BINDING_VERSION
+        : shouldBindCache
+          ? Math.max(0, Number(normalizedCredential.cacheBindingVersion || 0))
+          : 0,
+  });
+}
+
 function buildPassVaultRuntimeAppInfoFromRecord(record = null, guid = "", applicationsSnapshot = null) {
   const normalizedGuid = String(guid || "").trim();
   if (!record || typeof record !== "object" || !normalizedGuid) {
@@ -6978,6 +7019,9 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
     record?.cmServiceSnapshot && typeof record.cmServiceSnapshot === "object" && !Array.isArray(record.cmServiceSnapshot)
       ? cloneJsonLikeValue(record.cmServiceSnapshot, null)
       : null;
+  const stagedServiceCredentialsByServiceKey = normalizeUnderparVaultServiceCredentialEntries(
+    record?.serviceCredentialsByServiceKey || null
+  );
 
   const registeredApplicationsByGuid = {};
   const registeredApplicationsInput =
@@ -7210,6 +7254,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
     customSchemes,
     registeredApplicationCount,
     registeredApplicationsByGuid,
+    serviceCredentialsByServiceKey: stagedServiceCredentialsByServiceKey,
     services,
     cmTenantBundlesByTenantKey,
   };
@@ -7975,6 +8020,12 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
       services || getCurrentPremiumAppsSnapshot(programmerId) || buildPassVaultRuntimeServicesSnapshot(existingRecord) || {},
       {}
     ) || {};
+  const stagedServiceCredentialsByServiceKey = normalizeUnderparVaultServiceCredentialEntries(
+    existingRecord?.serviceCredentialsByServiceKey || null
+  );
+  const remainingStagedServiceCredentialsByServiceKey = {
+    ...stagedServiceCredentialsByServiceKey,
+  };
 
   premiumServicesSnapshot.cm = cmServiceSnapshot;
   premiumServicesSnapshot.cmMvpd = null;
@@ -8038,6 +8089,7 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
       )
     );
     registeredApplicationsByGuid[guid].updatedAt = now;
+    delete remainingStagedServiceCredentialsByServiceKey[serviceKey];
   });
 
   const hydrationStatus =
@@ -8045,6 +8097,38 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
       ? normalizeUnderparVaultStatus(options.hydrationStatus)
       : normalizeUnderparVaultStatus(existingRecord?.hydrationStatus);
   const servicesSummary = buildPassVaultServicesSummary(premiumServicesSnapshot, cmServiceSnapshot);
+  ["restV2", "esm", "degradation", "resetTempPass"].forEach((serviceKey) => {
+    const stagedCredential = normalizeUnderparVaultCredentialEntry(remainingStagedServiceCredentialsByServiceKey[serviceKey] || null);
+    const targetGuid = String(servicesSummary?.[serviceKey]?.primaryGuid || "").trim();
+    const targetApplication = targetGuid ? registeredApplicationsByGuid[targetGuid] : null;
+    if (!stagedCredential || !targetApplication) {
+      return;
+    }
+    const targetAppInfo = buildPassVaultRuntimeAppInfoFromRecord(
+      {
+        registeredApplicationsByGuid,
+      },
+      targetGuid,
+      applicationsSnapshot
+    );
+    const boundCredential = bindUnderparVaultCredentialEntryToApplication(
+      stagedCredential,
+      targetAppInfo || targetApplication?.applicationData || targetApplication,
+      serviceKey
+    );
+    if (!boundCredential) {
+      return;
+    }
+    targetApplication.serviceCredentialsByServiceKey[serviceKey] = boundCredential;
+    if (!targetApplication.dcrCache) {
+      targetApplication.dcrCache = normalizeUnderparVaultDcrCache(boundCredential);
+    }
+    targetApplication.serviceKeys = uniqueSorted(
+      (Array.isArray(targetApplication.serviceKeys) ? targetApplication.serviceKeys : []).concat(serviceKey)
+    );
+    targetApplication.updatedAt = now;
+    delete remainingStagedServiceCredentialsByServiceKey[serviceKey];
+  });
   const registeredApplicationCount = Math.max(
     getPassVaultRegisteredApplicationCount(existingRecord),
     Object.keys(applicationsSnapshot).length,
@@ -8075,6 +8159,7 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
     customSchemes,
     registeredApplicationCount,
     registeredApplicationsByGuid,
+    serviceCredentialsByServiceKey: remainingStagedServiceCredentialsByServiceKey,
     services: servicesSummary,
   };
 }
@@ -8858,15 +8943,19 @@ function buildPassVaultExistingHydrationServiceRecord(programmerId = "", existin
     runtimeServices?.[normalizedServiceKey] && typeof runtimeServices[normalizedServiceKey] === "object"
       ? cloneJsonLikeValue(runtimeServices[normalizedServiceKey], null)
       : null;
+  const stagedClient = normalizeUnderparVaultCredentialEntry(
+    existingRecord?.serviceCredentialsByServiceKey?.[normalizedServiceKey] || null
+  );
   const guid = String(registeredApplication?.guid || "").trim();
-  if (!guid) {
+  if (!guid && !stagedClient) {
     return null;
   }
 
   const applicationRecord = getPassVaultRegisteredApplicationsByGuid(existingRecord)?.[guid] || null;
   const client =
-    normalizeUnderparVaultCredentialEntry(loadDcrCache(normalizedProgrammerId, guid) || null) ||
+    normalizeUnderparVaultCredentialEntry((guid ? loadDcrCache(normalizedProgrammerId, guid) : null) || null) ||
     normalizeUnderparVaultCredentialEntry(applicationRecord?.serviceCredentialsByServiceKey?.[normalizedServiceKey] || null) ||
+    stagedClient ||
     normalizeUnderparVaultCredentialEntry(applicationRecord?.dcrCache || null) ||
     null;
 
@@ -8943,15 +9032,20 @@ function buildPassVaultServiceHydrationEntries({
     const cachedClient =
       normalizeUnderparVaultCredentialEntry((programmerId && appGuid ? loadDcrCache(programmerId, appGuid) : null) || null) ||
       null;
-    const client =
-      cachedClient ||
-      (compactPassVaultRegisteredApplicationsMatch(registeredApplication, existingService?.registeredApplication) &&
-      existingService?.client &&
-      typeof existingService.client === "object")
+    const existingClient = normalizeUnderparVaultCredentialEntry(existingService?.client || null);
+    const sameApplicationClient =
+      compactPassVaultRegisteredApplicationsMatch(registeredApplication, existingService?.registeredApplication) && existingClient
         ? {
-            ...(cachedClient || existingService.client),
+            ...existingClient,
           }
         : null;
+    const stagedClient =
+      registeredApplication && !existingService?.registeredApplication && existingClient
+        ? {
+            ...existingClient,
+          }
+        : null;
+    const client = cachedClient || sameApplicationClient || stagedClient || null;
 
     entries[definition.serviceKey] = {
       key: definition.serviceKey,
