@@ -1111,10 +1111,18 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
       : getCurrentPremiumAppsSnapshot(programmerId) || getRuntimePremiumServicesSeed(programmerId) || null;
 
   const workPromise = (async () => {
+    const resolvedApplicationsData =
+      applicationsData ||
+      (await ensureSelectedProgrammerApplicationsLoaded(programmer, {
+        forceRefresh,
+        preferredTabId: Number(options?.preferredTabId || 0),
+        requestTimeoutMs: Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS)),
+      }).catch(() => getCurrentProgrammerApplicationsSnapshot(programmerId) || {}));
     const compileResult = await queuePassVaultProgrammerCompilation(programmer, seedServices, {
       forceRefresh,
       preferredTabId: Number(options?.preferredTabId || 0),
-      applicationsData,
+      requestTimeoutMs: Math.max(1000, Number(options?.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS)),
+      applicationsData: resolvedApplicationsData,
     });
     let runtimeServices =
       (compileResult?.services && typeof compileResult.services === "object" ? compileResult.services : null) ||
@@ -7066,7 +7074,6 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
       loadError: firstNonEmptyString([legacyServiceSummary?.cm?.loadError, legacyCmServiceSnapshot?.loadError]),
     },
   };
-  const compactedRegisteredApplicationsByGuid = compactPassVaultRegisteredApplications(registeredApplicationsByGuid, services);
   const cmTenantBundlesByTenantKey = normalizePassVaultCmTenantBundlesByTenantKey(record?.cmTenantBundlesByTenantKey || {});
 
   return {
@@ -7098,7 +7105,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
     lastSelectedAt: Number(record?.lastSelectedAt || 0),
     customSchemes,
     registeredApplicationCount,
-    registeredApplicationsByGuid: compactedRegisteredApplicationsByGuid,
+    registeredApplicationsByGuid,
     services,
     cmTenantBundlesByTenantKey,
   };
@@ -7940,10 +7947,6 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
     Array.isArray(programmer?.applications) ? programmer.applications.length : 0,
     Object.keys(registeredApplicationsByGuid).length
   );
-  const compactedRegisteredApplicationsByGuid = compactPassVaultRegisteredApplications(
-    registeredApplicationsByGuid,
-    servicesSummary
-  );
   const customSchemes = uniquePreserveOrder(
     collectProgrammerCustomSchemeRedirectUris(programmer).concat(
       Array.isArray(existingRecord?.customSchemes) ? existingRecord.customSchemes : []
@@ -7967,7 +7970,7 @@ function buildPassVaultProgrammerRecord(programmer, services = null, options = {
     lastSelectedAt: 0,
     customSchemes,
     registeredApplicationCount,
-    registeredApplicationsByGuid: compactedRegisteredApplicationsByGuid,
+    registeredApplicationsByGuid,
     services: servicesSummary,
   };
 }
@@ -96615,6 +96618,11 @@ async function loadMvpdsFromRestV2(requestorId) {
           }
           continue;
         }
+        await ensureSelectedProgrammerApplicationsLoaded(programmer, {
+          forceRefresh: false,
+          preferredTabId: 0,
+          requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
+        }).catch(() => null);
         let restV2Apps = collectProgrammerScopedRestV2AppCandidates(programmer.programmerId, premiumApps);
         let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
         const requiresRuntimeHydration =

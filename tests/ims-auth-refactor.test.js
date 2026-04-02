@@ -2850,6 +2850,7 @@ test("REST V2 app selection stays media-company scoped and no longer blocks shar
   const resolveHarvestSource = extractFunctionSource(popupSource, "resolveRestV2AppInfoForHarvest");
   const selectRestV2Source = extractFunctionSource(popupSource, "selectPreferredRestV2AppForRequestor");
   const resolveRuntimeSource = extractFunctionSource(popupSource, "resolveProgrammerPremiumServiceRuntimeApp");
+  const primeHydrationSource = extractFunctionSource(popupSource, "primeProgrammerServiceHydration");
   const orderCandidatesSource = extractFunctionSource(popupSource, "orderRestV2AppCandidatesForRequestor");
   const promoteResolvedSource = extractFunctionSource(popupSource, "promoteResolvedRestV2ConfigurationApp");
   const switchServiceSource = extractFunctionSource(popupSource, "switchRegisteredApplicationHealthPremiumService");
@@ -2883,7 +2884,10 @@ test("REST V2 app selection stays media-company scoped and no longer blocks shar
   assert.match(promoteResolvedSource, /restV2:\s*authoritativeRestV2App,/);
   assert.match(promoteResolvedSource, /preferredAppGuid:\s*String\(resolvedAppInfo\.guid \|\| ""\)\.trim\(\),/);
   assert.doesNotMatch(switchServiceSource, /is not associated with RequestorId/);
+  assert.match(primeHydrationSource, /await ensureSelectedProgrammerApplicationsLoaded\(programmer,\s*\{/);
+  assert.match(primeHydrationSource, /applicationsData:\s*resolvedApplicationsData,/);
   assert.match(loadMvpdsSource, /let restV2Apps = collectProgrammerScopedRestV2AppCandidates\(programmer\.programmerId,\s*premiumApps\);/);
+  assert.match(loadMvpdsSource, /await ensureSelectedProgrammerApplicationsLoaded\(programmer,\s*\{/);
   assert.match(loadMvpdsSource, /let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\);/);
   assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
   assert.match(loadMvpdsSource, /await primeProgrammerServiceHydration\(programmer,\s*premiumApps,\s*\{/);
@@ -2954,6 +2958,7 @@ test("activation leaves the global selectors user-owned and premium hydration st
   const refreshSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
   const activateSessionSource = extractFunctionSource(popupSource, "activateSession");
   const passVaultRecordSource = extractFunctionSource(popupSource, "buildPassVaultProgrammerRecord");
+  const normalizedPassVaultRecordSource = extractFunctionSource(popupSource, "normalizeUnderparPassVaultProgrammerRecord");
 
   assert.doesNotMatch(refreshSource, /hydrateProgrammerFromPassVault\(/);
   assert.match(
@@ -2972,6 +2977,10 @@ test("activation leaves the global selectors user-owned and premium hydration st
   assert.doesNotMatch(activateSessionSource, /selectProgrammerForController\(/);
   assert.doesNotMatch(activateSessionSource, /refreshProgrammerPanels\(\{/);
   assert.match(passVaultRecordSource, /lastSelectedAt:\s*0/);
+  assert.doesNotMatch(passVaultRecordSource, /compactPassVaultRegisteredApplications\(/);
+  assert.match(passVaultRecordSource, /registeredApplicationsByGuid\s*,/);
+  assert.doesNotMatch(normalizedPassVaultRecordSource, /compactPassVaultRegisteredApplications\(/);
+  assert.match(normalizedPassVaultRecordSource, /registeredApplicationsByGuid\s*,/);
   assert.match(activateSessionSource, /void hydrateAuthenticatedAdobePassSession\(normalizedSource,/);
 });
 
