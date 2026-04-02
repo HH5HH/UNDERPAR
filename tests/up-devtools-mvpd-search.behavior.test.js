@@ -61,6 +61,7 @@ function loadMvpdSearchHelpers() {
     extractFunctionSource(source, "extractEntityIdFromToken"),
     extractFunctionSource(source, "normalizeApplicationsResponse"),
     extractFunctionSource(source, "normalizeUpDevtoolsMvpdSearchCatalogKey"),
+    extractFunctionSource(source, "buildUpDevtoolsMvpdSearchResultKey"),
     extractFunctionSource(source, "buildUpDevtoolsMvpdSearchRows"),
     extractFunctionSource(source, "filterUpDevtoolsMvpdSearchRows"),
     "module.exports = { buildUpDevtoolsMvpdSearchRows, filterUpDevtoolsMvpdSearchRows };",
@@ -95,6 +96,7 @@ function loadMvpdSearchCatalogBuilder(fetchStub) {
     extractFunctionSource(source, "extractEntityIdFromToken"),
     extractFunctionSource(source, "normalizeApplicationsResponse"),
     extractFunctionSource(source, "normalizeUpDevtoolsMvpdSearchCatalogKey"),
+    extractFunctionSource(source, "buildUpDevtoolsMvpdSearchResultKey"),
     extractFunctionSource(source, "buildUpDevtoolsMvpdSearchRows"),
     extractFunctionSource(source, "buildUpDevtoolsMvpdSearchCatalog"),
     "module.exports = { buildUpDevtoolsMvpdSearchCatalog };",
@@ -143,6 +145,7 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(devtoolsCss, /\.mvpd-search-table/);
   assert.match(devtoolsCss, /\.mvpd-search-view-btn/);
   assert.match(devtoolsCss, /\.mvpd-search-name-btn/);
+  assert.match(devtoolsCss, /\.mvpd-search-owner-btn/);
   assert.match(devtoolsCss, /\.mvpd-search-associated/);
   assert.match(devtoolsCss, /\.mvpd-search-owner-meta/);
   assert.match(devtoolsCss, /\.mvpd-search-table-empty-row td/);
@@ -152,7 +155,8 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(devtoolsJs, /sendVaultActionRequest\("open-mvpd-search-result"/);
   assert.match(devtoolsJs, /No MVPDs found\./);
   assert.match(devtoolsJs, /class="mvpd-search-name-btn"/);
-  assert.match(devtoolsJs, /Requestors \(\$\{associatedServiceProviderCount\}\):/);
+  assert.match(devtoolsJs, /class="mvpd-search-owner-btn"/);
+  assert.match(devtoolsJs, /Channels \/ Requestors \(\$\{associatedServiceProviderCount\}\):/);
   assert.match(devtoolsJs, /Load the active UnderPAR environment before searching MVPDs\./);
   assert.doesNotMatch(devtoolsJs, /mvpd-search-results-summary/);
 
@@ -166,6 +170,9 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(popupSource, /workspaceKey:\s*"up-devtools-mvpd-search"/);
   assert.match(popupSource, /if \(action === "search-env-mvpds"\)/);
   assert.match(popupSource, /if \(action === "open-mvpd-search-result"\)/);
+  assert.match(popupSource, /upDevtoolsPendingMvpdWorkspaceOpenByWindowId: new Map\(\)/);
+  assert.match(popupSource, /consumePendingUpDevtoolsMvpdWorkspaceOpen\(senderWindowId\)/);
+  assert.match(popupSource, /launchUpDevtoolsMvpdSearchResultInWorkspace\(/);
   assert.match(popupSource, /requestorId:\s*""/);
   assert.match(popupSource, /programmerId:\s*""/);
 
@@ -347,6 +354,78 @@ test("UP DevTools MVPD search filter matches normalized MVPD names, ids, owners,
     normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "turner adultswim cartoonnetwork")),
     [rows[0], rows[4]]
   );
+});
+
+test("UP DevTools MVPD search resolves proxy-parent owners and exposes an owner workspace target", () => {
+  const { buildUpDevtoolsMvpdSearchRows } = loadMvpdSearchHelpers();
+  const built = buildUpDevtoolsMvpdSearchRows(
+    {
+      entities: [
+        {
+          key: "Mvpd:turner",
+          entityData: {
+            id: "Turner",
+            displayName: "Turner Direct",
+          },
+        },
+      ],
+    },
+    {
+      entities: [
+        {
+          key: "MvpdProxy:nrtccpr010",
+          entityData: {
+            id: "nrtccpr010",
+            displayName: "Claro Puerto Rico",
+            owner: "MvpdProxy:claroParent",
+            serviceProviderIds: ["nbade"],
+          },
+        },
+      ],
+    },
+    {
+      entities: [
+        {
+          key: "MvpdProxy:claroParent",
+          entityData: {
+            id: "claroParent",
+            displayName: "Claro Parent Proxy",
+            owner: "Mvpd:Turner",
+            proxiedMvpds: {
+              claroPuertoRico: "MvpdProxy:nrtccpr010",
+            },
+          },
+        },
+        {
+          key: "MvpdProxy:nrtccpr010",
+          entityData: {
+            id: "nrtccpr010",
+            owner: "MvpdProxy:claroParent",
+          },
+        },
+      ],
+    },
+    {
+      entities: [
+        {
+          key: "IntegrationConfiguration:turner_nbade",
+          entityData: {
+            id: "turner_nbade",
+            owner: "Mvpd:Turner",
+            serviceProvider: "ServiceProvider:NBADE",
+            enabled: true,
+          },
+        },
+      ],
+    }
+  );
+
+  const rows = normalizeVmValue(built.rows);
+  const rowByKey = Object.fromEntries(rows.map((row) => [row.resultKey, row]));
+
+  assert.equal(rowByKey["mvpdproxy:nrtccpr010"].proxyOwnerLabel, "Claro Parent Proxy (claroParent)");
+  assert.equal(rowByKey["mvpdproxy:nrtccpr010"].proxyOwnerEntityType, "mvpdproxy");
+  assert.equal(rowByKey["mvpdproxy:nrtccpr010"].proxyOwnerResultKey, "mvpdproxy:claroparent");
 });
 
 test("UP DevTools MVPD search catalog bulk-loads proxied MVPD refs declared by proxy parents", async () => {

@@ -631,6 +631,7 @@ const PREMIUM_AUTO_REFRESH_COOLDOWN_MS = 90 * 1000;
 const PREMIUM_AUTO_REFRESH_TOKEN_LEEWAY_MS = 2 * 60 * 1000;
 const PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS = 2500;
 const PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS = 2500;
+const UP_DEVTOOLS_MVPD_WORKSPACE_PENDING_TTL_MS = 10 * 1000;
 const DEGRADATION_CHEAT_SHEET_FAST_AUTH_TIMEOUT_MS = 1200;
 const DEGRADATION_CHEAT_SHEET_FAST_HARVEST_TIMEOUT_MS = 1200;
 const PREMIUM_SERVICE_SCOPE_HYDRATION_CONCURRENCY = 6;
@@ -13694,6 +13695,7 @@ const state = {
   domainCacheByRequestor: new Map(),
   upDevtoolsMvpdSearchCatalogByEnvironmentKey: new Map(),
   upDevtoolsMvpdSearchCatalogPromiseByEnvironmentKey: new Map(),
+  upDevtoolsPendingMvpdWorkspaceOpenByWindowId: new Map(),
   harpoSelectedDomainByRequestor: new Map(),
   harpoReproOpenByRequestor: new Map(),
   harpoDebugFlowId: "",
@@ -47679,6 +47681,76 @@ function normalizeUpDevtoolsMvpdSearchCatalogKey(value = "") {
   return String(value || "").trim().toLowerCase();
 }
 
+function buildUpDevtoolsMvpdSearchResultKey(entityType = "", mvpdId = "") {
+  const normalizedId = normalizeUpDevtoolsMvpdSearchCatalogKey(mvpdId);
+  if (!normalizedId) {
+    return "";
+  }
+  return `${String(entityType || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd"}:${normalizedId}`;
+}
+
+function getUpDevtoolsMvpdSearchRowFromCatalog(catalog = null, entityType = "", mvpdId = "") {
+  if (!catalog || typeof catalog !== "object") {
+    return null;
+  }
+  const normalizedId = normalizeUpDevtoolsMvpdSearchCatalogKey(mvpdId);
+  if (!normalizedId) {
+    return null;
+  }
+  return (
+    catalog.rowByKey?.get(buildUpDevtoolsMvpdSearchResultKey(entityType, normalizedId)) ||
+    catalog.rowByKey?.get(buildUpDevtoolsMvpdSearchResultKey("mvpd", normalizedId)) ||
+    catalog.rowByKey?.get(buildUpDevtoolsMvpdSearchResultKey("mvpdproxy", normalizedId)) ||
+    null
+  );
+}
+
+function normalizeUpDevtoolsPendingMvpdWorkspaceOpenPayload(payload = null) {
+  const environmentKey = String(payload?.environmentKey || "").trim();
+  const entityType = String(payload?.entityType || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd";
+  const mvpdId = String(payload?.mvpdId || "").trim();
+  if (!environmentKey || !mvpdId) {
+    return null;
+  }
+  return {
+    environmentKey,
+    entityType,
+    mvpdId,
+    queuedAt: Number(payload?.queuedAt || Date.now()),
+  };
+}
+
+function setPendingUpDevtoolsMvpdWorkspaceOpen(windowId = 0, payload = null) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId <= 0) {
+    return null;
+  }
+  const normalizedPayload = normalizeUpDevtoolsPendingMvpdWorkspaceOpenPayload(payload);
+  if (!normalizedPayload) {
+    state.upDevtoolsPendingMvpdWorkspaceOpenByWindowId.delete(normalizedWindowId);
+    return null;
+  }
+  state.upDevtoolsPendingMvpdWorkspaceOpenByWindowId.set(normalizedWindowId, normalizedPayload);
+  return normalizedPayload;
+}
+
+function consumePendingUpDevtoolsMvpdWorkspaceOpen(windowId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  if (normalizedWindowId <= 0) {
+    return null;
+  }
+  const pending = state.upDevtoolsPendingMvpdWorkspaceOpenByWindowId.get(normalizedWindowId) || null;
+  if (!pending) {
+    return null;
+  }
+  state.upDevtoolsPendingMvpdWorkspaceOpenByWindowId.delete(normalizedWindowId);
+  const queuedAt = Number(pending?.queuedAt || 0);
+  if (!Number.isFinite(queuedAt) || queuedAt <= 0 || Date.now() - queuedAt > UP_DEVTOOLS_MVPD_WORKSPACE_PENDING_TTL_MS) {
+    return null;
+  }
+  return pending;
+}
+
 function buildUpDevtoolsMvpdSearchRows(
   mvpdPayload = null,
   proxiedMvpdPayload = null,
@@ -47757,15 +47829,33 @@ function buildUpDevtoolsMvpdSearchRows(
     if (!id) {
       return null;
     }
+    const entityType = String(entityRefParts.type || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd";
     const explicitDisplayName = firstNonEmptyString([entityData?.displayName, entityData?.name]);
     return {
       entity,
       data: entityData,
       entityRef: mvpdWorkspaceNormalizeEntityRef(entityRef),
       id: String(id || "").trim(),
+      entityType,
       displayName: firstNonEmptyString([explicitDisplayName, humanizeIdentifier(id), id]),
       displayNameIsFallback: !explicitDisplayName,
     };
+  };
+  const resolveOwnerRecord = (entityRef = "") => {
+    const ownerParts = mvpdWorkspaceSplitEntityRef(entityRef);
+    const ownerId = firstNonEmptyString([ownerParts.id, extractEntityIdFromToken(entityRef)]);
+    const normalizedOwnerId = normalizeUpDevtoolsMvpdSearchCatalogKey(ownerId);
+    const ownerType = String(ownerParts.type || "").trim().toLowerCase();
+    if (!normalizedOwnerId) {
+      return null;
+    }
+    if (ownerType === "mvpdproxy") {
+      return proxyById.get(normalizedOwnerId) || directById.get(normalizedOwnerId) || null;
+    }
+    if (ownerType === "mvpd") {
+      return directById.get(normalizedOwnerId) || proxyById.get(normalizedOwnerId) || null;
+    }
+    return directById.get(normalizedOwnerId) || proxyById.get(normalizedOwnerId) || null;
   };
   const appendIntegrationRecord = (ownerId = "", integrationRecord = null) => {
     const normalizedOwnerId = normalizeUpDevtoolsMvpdSearchCatalogKey(ownerId);
@@ -47827,18 +47917,6 @@ function buildUpDevtoolsMvpdSearchRows(
     if (!directById.has(normalizedId)) {
       directById.set(normalizedId, record);
     }
-    const proxiedRefs =
-      record.data?.proxiedMvpds && typeof record.data.proxiedMvpds === "object"
-        ? Object.values(record.data.proxiedMvpds)
-        : [];
-    proxiedRefs.forEach((entityRef) => {
-      const split = mvpdWorkspaceSplitEntityRef(entityRef);
-      const proxyId = firstNonEmptyString([split.id, extractEntityIdFromToken(entityRef)]);
-      const normalizedProxyId = normalizeUpDevtoolsMvpdSearchCatalogKey(proxyId);
-      if (normalizedProxyId && !proxyOwnerById.has(normalizedProxyId)) {
-        proxyOwnerById.set(normalizedProxyId, record);
-      }
-    });
   });
 
   proxyEntities.forEach((entity) => {
@@ -47860,6 +47938,7 @@ function buildUpDevtoolsMvpdSearchRows(
             },
             entity: record.entity || existingRecord.entity,
             entityRef: record.entityRef || existingRecord.entityRef,
+            entityType: record.entityType || existingRecord.entityType,
             displayName:
               !record.displayNameIsFallback || !existingRecord.displayName
                 ? record.displayName
@@ -47873,28 +47952,53 @@ function buildUpDevtoolsMvpdSearchRows(
           }
         : record
     );
-    if (!proxyOwnerById.has(normalizedId)) {
-      const ownerRef = firstNonEmptyString([
-        record.data?.owner,
-        record.data?.ownerId,
-        record.data?.mvpd,
-      ]);
-      const ownerParts = mvpdWorkspaceSplitEntityRef(ownerRef);
-      const ownerId = firstNonEmptyString([ownerParts.id, extractEntityIdFromToken(ownerRef)]);
-      const normalizedOwnerId = normalizeUpDevtoolsMvpdSearchCatalogKey(ownerId);
-      if (normalizedOwnerId) {
-        proxyOwnerById.set(
-          normalizedId,
-          directById.get(normalizedOwnerId) || {
-            entity: null,
-            data: null,
-            entityRef: ownerRef,
-            id: ownerId,
-            displayName: ownerId,
-          }
-        );
+  });
+  [...directById.values(), ...proxyById.values()].forEach((record) => {
+    const proxiedRefs =
+      record?.data?.proxiedMvpds && typeof record.data.proxiedMvpds === "object"
+        ? Object.values(record.data.proxiedMvpds)
+        : [];
+    proxiedRefs.forEach((entityRef) => {
+      const split = mvpdWorkspaceSplitEntityRef(entityRef);
+      const proxyId = firstNonEmptyString([split.id, extractEntityIdFromToken(entityRef)]);
+      const normalizedProxyId = normalizeUpDevtoolsMvpdSearchCatalogKey(proxyId);
+      const existingOwner = proxyOwnerById.get(normalizedProxyId) || null;
+      if (!normalizedProxyId || (existingOwner?.entity && existingOwner !== record)) {
+        return;
       }
+      proxyOwnerById.set(normalizedProxyId, record);
+    });
+  });
+  proxyById.forEach((record) => {
+    const normalizedId = normalizeUpDevtoolsMvpdSearchCatalogKey(record.id);
+    const existingOwner = proxyOwnerById.get(normalizedId) || null;
+    if (existingOwner?.entity) {
+      return;
     }
+    const ownerRef = firstNonEmptyString([
+      record.data?.owner,
+      record.data?.ownerId,
+      record.data?.mvpd,
+    ]);
+    const ownerRecord = resolveOwnerRecord(ownerRef);
+    if (ownerRecord) {
+      proxyOwnerById.set(normalizedId, ownerRecord);
+      return;
+    }
+    const ownerParts = mvpdWorkspaceSplitEntityRef(ownerRef);
+    const ownerId = firstNonEmptyString([ownerParts.id, extractEntityIdFromToken(ownerRef)]);
+    if (!ownerId) {
+      return;
+    }
+    proxyOwnerById.set(normalizedId, {
+      entity: null,
+      data: null,
+      entityRef: mvpdWorkspaceNormalizeEntityRef(ownerRef),
+      id: ownerId,
+      entityType: String(ownerParts.type || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd",
+      displayName: humanizeIdentifier(ownerId) || ownerId,
+      displayNameIsFallback: true,
+    });
   });
   integrationEntities.forEach((entity) => {
     const integrationData = mvpdWorkspaceGetEntityData(entity);
@@ -47946,6 +48050,11 @@ function buildUpDevtoolsMvpdSearchRows(
     const ownerRecord = proxyOwnerById.get(normalizeUpDevtoolsMvpdSearchCatalogKey(record.id)) || null;
     const proxyOwnerId = String(ownerRecord?.id || "").trim();
     const proxyOwnerName = String(ownerRecord?.displayName || "").trim();
+    const proxyOwnerEntityType = String(ownerRecord?.entityType || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd";
+    const proxyOwnerResultKey =
+      ownerRecord?.entity || directById.has(normalizeUpDevtoolsMvpdSearchCatalogKey(proxyOwnerId)) || proxyById.has(normalizeUpDevtoolsMvpdSearchCatalogKey(proxyOwnerId))
+        ? buildUpDevtoolsMvpdSearchResultKey(proxyOwnerEntityType, proxyOwnerId)
+        : "";
     const explicitServiceProviderIds = Array.isArray(record?.data?.serviceProviderIds)
       ? record.data.serviceProviderIds.map((value) => String(value || "").trim()).filter(Boolean)
       : [];
@@ -47965,6 +48074,8 @@ function buildUpDevtoolsMvpdSearchRows(
       displayName: record.displayName,
       proxyOwnerId,
       proxyOwnerName,
+      proxyOwnerEntityType,
+      proxyOwnerResultKey,
       proxyOwnerLabel,
       associatedServiceProviderIds,
       associatedServiceProviderCount: associatedServiceProviderIds.length,
@@ -48252,21 +48363,46 @@ function buildUpDevtoolsMvpdSearchSelectionEntries(row = null, environment = nul
   return entries;
 }
 
+function resolveUpDevtoolsMvpdSearchOwnerChain(catalog = null, row = null) {
+  const normalizedId = normalizeUpDevtoolsMvpdSearchCatalogKey(row?.id);
+  if (!catalog || typeof catalog !== "object" || !row || row.entityType !== "mvpdproxy" || !normalizedId) {
+    return {
+      proxyOwnerRecord: null,
+      effectiveOwnerRecord: null,
+    };
+  }
+  const proxyOwnerRecord = catalog.proxyOwnerById?.get(normalizedId) || null;
+  const visited = new Set([normalizedId]);
+  let effectiveOwnerRecord = proxyOwnerRecord;
+  while (effectiveOwnerRecord && String(effectiveOwnerRecord?.entityType || "").trim().toLowerCase() === "mvpdproxy") {
+    const nextOwnerId = normalizeUpDevtoolsMvpdSearchCatalogKey(effectiveOwnerRecord?.id);
+    if (!nextOwnerId || visited.has(nextOwnerId)) {
+      break;
+    }
+    visited.add(nextOwnerId);
+    const nextOwnerRecord = catalog.proxyOwnerById?.get(nextOwnerId) || null;
+    if (!nextOwnerRecord || nextOwnerRecord === effectiveOwnerRecord) {
+      break;
+    }
+    effectiveOwnerRecord = nextOwnerRecord;
+  }
+  return {
+    proxyOwnerRecord,
+    effectiveOwnerRecord: effectiveOwnerRecord || proxyOwnerRecord || null,
+  };
+}
+
 async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", entityType = "", mvpdId = "") {
   const catalog = await ensureUpDevtoolsMvpdSearchCatalog(environmentKey, {
     forceRefresh: false,
   });
-  const normalizedId = normalizeUpDevtoolsMvpdSearchCatalogKey(mvpdId);
-  const normalizedType = String(entityType || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd";
-  const row =
-    catalog.rowByKey.get(`${normalizedType}:${normalizedId}`) ||
-    catalog.rowByKey.get(`mvpd:${normalizedId}`) ||
-    catalog.rowByKey.get(`mvpdproxy:${normalizedId}`) ||
-    null;
+  const row = getUpDevtoolsMvpdSearchRowFromCatalog(catalog, entityType, mvpdId);
   if (!row) {
     throw new Error(`MVPD ${mvpdId || "selection"} is not available in ${catalog.environmentLabel || catalog.environmentKey}.`);
   }
 
+  const normalizedId = normalizeUpDevtoolsMvpdSearchCatalogKey(row.id);
+  const normalizedType = String(row.entityType || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd";
   const selectedDirectRecord = catalog.directById.get(normalizedId) || null;
   const selectedProxyRecord = catalog.proxyById.get(normalizedId) || null;
   const selectedRecord = normalizedType === "mvpdproxy" ? selectedProxyRecord || selectedDirectRecord : selectedDirectRecord || selectedProxyRecord;
@@ -48274,13 +48410,19 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
     throw new Error(`MVPD ${row.displayName || row.id} could not be resolved from the Adobe Pass console catalog.`);
   }
 
-  const proxyOwnerRecord = row.entityType === "mvpdproxy" ? catalog.proxyOwnerById.get(normalizedId) || null : null;
+  const { proxyOwnerRecord, effectiveOwnerRecord } = resolveUpDevtoolsMvpdSearchOwnerChain(catalog, row);
   const selectedEntity = selectedRecord.entity;
   const selectedEntityData = mvpdWorkspaceGetEntityData(selectedEntity);
   const proxyOwnerEntity = proxyOwnerRecord?.entity || null;
   const proxyOwnerData = mvpdWorkspaceGetEntityData(proxyOwnerEntity);
+  const effectiveOwnerEntity = effectiveOwnerRecord?.entity || proxyOwnerEntity || null;
+  const effectiveOwnerData = mvpdWorkspaceGetEntityData(effectiveOwnerEntity);
   const effectiveMvpdData =
-    row.entityType === "mvpdproxy" && proxyOwnerData && typeof proxyOwnerData === "object" ? proxyOwnerData : selectedEntityData;
+    row.entityType === "mvpdproxy" && effectiveOwnerData && typeof effectiveOwnerData === "object"
+      ? effectiveOwnerData
+      : row.entityType === "mvpdproxy" && proxyOwnerData && typeof proxyOwnerData === "object"
+        ? proxyOwnerData
+        : selectedEntityData;
   const configurationVersion = Number(catalog.configurationVersion || 0);
   const environment = catalog.environment || resolveAdobePassEnvironment(environmentKey);
   const debugContext = {
@@ -48596,7 +48738,7 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
   if (proxyOwnerData && proxyOwnerData !== selectedEntityData) {
     pushSection(
       "mvpd-search-proxy-owner",
-      "Proxy Owner | Direct MVPD Data",
+      "Proxy Owner | Parent MVPD Data",
       mvpdWorkspaceCollectFlatEntries("Proxy Owner Direct MVPD", proxyOwnerData, {
         maxEntries: 320,
         maxDepth: 7,
@@ -48604,7 +48746,7 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
     );
   }
 
-  if (endpointSourceData && endpointSourceData !== selectedEntityData) {
+  if (endpointSourceData && endpointSourceData !== selectedEntityData && endpointSourceData !== proxyOwnerData) {
     pushSection(
       "mvpd-search-effective-owner",
       "Effective Direct MVPD | Endpoint Source",
@@ -48826,26 +48968,26 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
   };
 }
 
-async function openUpDevtoolsMvpdSearchResultInWorkspace(environmentKey = "", entityType = "", mvpdId = "") {
+async function launchUpDevtoolsMvpdSearchResultInWorkspace(environmentKey = "", entityType = "", mvpdId = "", targetWindowId = 0) {
   const catalog = await ensureUpDevtoolsMvpdSearchCatalog(environmentKey, {
     forceRefresh: false,
   });
-  const normalizedType = String(entityType || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd";
-  const normalizedId = normalizeUpDevtoolsMvpdSearchCatalogKey(mvpdId);
-  const row =
-    catalog.rowByKey.get(`${normalizedType}:${normalizedId}`) ||
-    catalog.rowByKey.get(`mvpd:${normalizedId}`) ||
-    catalog.rowByKey.get(`mvpdproxy:${normalizedId}`) ||
-    null;
+  const row = getUpDevtoolsMvpdSearchRowFromCatalog(catalog, entityType, mvpdId);
   if (!row) {
     throw new Error(`MVPD ${mvpdId || "selection"} is not available in ${catalog.environmentLabel || catalog.environmentKey}.`);
   }
-
-  const workspaceTab = await mvpdWorkspaceEnsureWorkspaceTab({
-    activate: true,
-  });
-  const targetWindowId = Number(workspaceTab?.windowId || state.mvpdWorkspaceWindowId || 0);
-  void mvpdWorkspaceSendWorkspaceMessage(
+  const normalizedTargetWindowId = Number(targetWindowId || 0);
+  await mvpdWorkspaceSendWorkspaceMessage(
+    "workspace-clear",
+    {
+      programmerId: "",
+      requestorId: "",
+      mvpdId: row.id,
+      mvpdLabel: row.displayName,
+    },
+    { targetWindowId: normalizedTargetWindowId }
+  );
+  await mvpdWorkspaceSendWorkspaceMessage(
     "controller-state",
     {
       controllerOnline: true,
@@ -48872,9 +49014,9 @@ async function openUpDevtoolsMvpdSearchResultInWorkspace(environmentKey = "", en
       integrationRecordUrl: "",
       updatedAt: Date.now(),
     },
-    { targetWindowId }
+    { targetWindowId: normalizedTargetWindowId }
   );
-  void mvpdWorkspaceSendWorkspaceMessage(
+  await mvpdWorkspaceSendWorkspaceMessage(
     "snapshot-start",
     {
       requestorId: "",
@@ -48883,12 +49025,12 @@ async function openUpDevtoolsMvpdSearchResultInWorkspace(environmentKey = "", en
       programmerId: "",
       startedAt: Date.now(),
     },
-    { targetWindowId }
+    { targetWindowId: normalizedTargetWindowId }
   );
 
   try {
     const snapshot = await buildUpDevtoolsMvpdWorkspaceSearchSnapshot(catalog.environmentKey, row.entityType, row.id);
-    void mvpdWorkspaceSendWorkspaceMessage(
+    await mvpdWorkspaceSendWorkspaceMessage(
       "snapshot-result",
       {
         ok: true,
@@ -48897,7 +49039,7 @@ async function openUpDevtoolsMvpdSearchResultInWorkspace(environmentKey = "", en
         mvpdLabel: row.displayName,
         snapshot,
       },
-      { targetWindowId }
+      { targetWindowId: normalizedTargetWindowId }
     );
     return {
       environmentKey: catalog.environmentKey,
@@ -48905,11 +49047,11 @@ async function openUpDevtoolsMvpdSearchResultInWorkspace(environmentKey = "", en
       mvpdId: row.id,
       mvpdLabel: row.displayName,
       entityType: row.entityType,
-      targetWindowId,
+      targetWindowId: normalizedTargetWindowId,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    void mvpdWorkspaceSendWorkspaceMessage(
+    await mvpdWorkspaceSendWorkspaceMessage(
       "snapshot-result",
       {
         ok: false,
@@ -48918,10 +49060,52 @@ async function openUpDevtoolsMvpdSearchResultInWorkspace(environmentKey = "", en
         mvpdLabel: row.displayName,
         error: message,
       },
-      { targetWindowId }
+      { targetWindowId: normalizedTargetWindowId }
     );
     throw error;
   }
+}
+
+async function openUpDevtoolsMvpdSearchResultInWorkspace(environmentKey = "", entityType = "", mvpdId = "") {
+  const catalog = await ensureUpDevtoolsMvpdSearchCatalog(environmentKey, {
+    forceRefresh: false,
+  });
+  const row = getUpDevtoolsMvpdSearchRowFromCatalog(catalog, entityType, mvpdId);
+  if (!row) {
+    throw new Error(`MVPD ${mvpdId || "selection"} is not available in ${catalog.environmentLabel || catalog.environmentKey}.`);
+  }
+
+  const requestedWindowId = await esmWorkspaceGetCurrentWindowId();
+  let existingWorkspaceTab = null;
+  try {
+    const candidateTabs = await chrome.tabs.query(
+      Number(requestedWindowId || 0) > 0 ? { windowId: Number(requestedWindowId) } : { currentWindow: true }
+    );
+    existingWorkspaceTab = candidateTabs.find((tab) => mvpdWorkspaceIsWorkspaceTab(tab)) || null;
+  } catch {
+    existingWorkspaceTab = null;
+  }
+  const workspaceTab = await mvpdWorkspaceEnsureWorkspaceTab({
+    activate: true,
+    windowId: Number(requestedWindowId || 0) > 0 ? Number(requestedWindowId) : undefined,
+  });
+  const targetWindowId = Number(workspaceTab?.windowId || state.mvpdWorkspaceWindowId || 0);
+  setPendingUpDevtoolsMvpdWorkspaceOpen(targetWindowId, {
+    environmentKey: catalog.environmentKey,
+    entityType: row.entityType,
+    mvpdId: row.id,
+  });
+  if (existingWorkspaceTab) {
+    return await launchUpDevtoolsMvpdSearchResultInWorkspace(catalog.environmentKey, row.entityType, row.id, targetWindowId);
+  }
+  return {
+    environmentKey: catalog.environmentKey,
+    environmentLabel: catalog.environmentLabel,
+    mvpdId: row.id,
+    mvpdLabel: row.displayName,
+    entityType: row.entityType,
+    targetWindowId,
+  };
 }
 
 function ensureUpDevtoolsVaultActionListener() {
@@ -56719,6 +56903,15 @@ async function handleMvpdWorkspaceAction(message, sender = null) {
   }
 
   if (action === "workspace-ready") {
+    const pendingUpDevtoolsWorkspaceOpen = consumePendingUpDevtoolsMvpdWorkspaceOpen(senderWindowId);
+    if (pendingUpDevtoolsWorkspaceOpen) {
+      return await launchUpDevtoolsMvpdSearchResultInWorkspace(
+        String(pendingUpDevtoolsWorkspaceOpen.environmentKey || "").trim(),
+        String(pendingUpDevtoolsWorkspaceOpen.entityType || "").trim(),
+        String(pendingUpDevtoolsWorkspaceOpen.mvpdId || "").trim(),
+        senderWindowId
+      );
+    }
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectedServices = selectedProgrammer?.programmerId
       ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)

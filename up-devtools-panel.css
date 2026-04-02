@@ -1158,6 +1158,30 @@ body::before {
   text-transform: uppercase;
 }
 
+.mvpd-search-owner-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mvpd-search-owner-btn:hover:not(:disabled) .mvpd-search-owner,
+.mvpd-search-owner-btn:focus-visible .mvpd-search-owner {
+  color: #ffffff;
+}
+
+.mvpd-search-owner-btn:focus-visible {
+  outline: none;
+}
+
+.mvpd-search-owner-btn:disabled {
+  cursor: default;
+}
+
 .mvpd-search-kind {
   color: var(--up-link);
 }

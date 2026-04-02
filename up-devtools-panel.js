@@ -4819,6 +4819,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
       const displayName = String(row?.displayName || row?.name || row?.id || "").trim() || "MVPD";
       const displayId = String(row?.id || "").trim();
       const ownerLabel = String(row?.proxyOwnerLabel || "").trim() || "DIRECT MVPD";
+      const ownerResultKey = String(row?.proxyOwnerResultKey || "").trim();
       const kindLabel = row?.entityType === "mvpdproxy" ? "Proxy" : "Direct";
       const associatedServiceProviderIds = Array.isArray(row?.associatedServiceProviderIds)
         ? row.associatedServiceProviderIds.map((value) => String(value || "").trim()).filter(Boolean)
@@ -4830,7 +4831,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
       const associatedServiceProviderPreview = associatedServiceProviderIds.slice(0, 4);
       const requestorLabel =
         associatedServiceProviderCount > 0
-          ? `Requestors (${associatedServiceProviderCount}): ${associatedServiceProviderPreview.join(", ")}${
+          ? `Channels / Requestors (${associatedServiceProviderCount}): ${associatedServiceProviderPreview.join(", ")}${
               associatedServiceProviderCount > associatedServiceProviderPreview.length
                 ? ` +${associatedServiceProviderCount - associatedServiceProviderPreview.length}`
                 : ""
@@ -4843,6 +4844,20 @@ function renderMvpdSearchResults(rows = [], options = {}) {
           ? `${enabledIntegrationCount}/${integrationCount} integration${integrationCount === 1 ? "" : "s"} enabled`
           : "";
       const isViewBusy = panelState.mvpdSearchViewBusyKey === resultKey;
+      const ownerMarkup = ownerResultKey
+        ? `
+            <button
+              type="button"
+              class="mvpd-search-owner-btn"
+              data-mvpd-search-view="${escapeHtml(ownerResultKey)}"
+              ${isViewBusy || panelState.mvpdSearchBusy === true || panelState.environmentsLoaded !== true ? "disabled" : ""}
+            >
+              <span class="mvpd-search-owner">${escapeHtml(ownerLabel)}</span>
+            </button>
+          `
+        : `<span class="mvpd-search-owner${row?.entityType === "mvpdproxy" ? "" : " mvpd-search-owner--direct"}">${escapeHtml(
+            ownerLabel
+          )}</span>`;
       return `
         <tr>
           <td>
@@ -4861,9 +4876,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
             ${requestorLabel ? `<p class="mvpd-search-associated">${escapeHtml(requestorLabel)}</p>` : ""}
           </td>
           <td>
-            <span class="mvpd-search-owner${row?.entityType === "mvpdproxy" ? "" : " mvpd-search-owner--direct"}">${escapeHtml(
-              ownerLabel
-            )}</span>
+            ${ownerMarkup}
             ${ownerMetaLabel ? `<p class="mvpd-search-owner-meta">${escapeHtml(ownerMetaLabel)}</p>` : ""}
           </td>
           <td class="mvpd-search-actions-cell">
