@@ -88245,10 +88245,11 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
 
   if (response.status === 401 && retryStage === "refresh") {
     const bodyText = await response.clone().text().catch(() => "");
+    const isServiceProviderMismatch = isServiceProviderTokenMismatchError(bodyText);
     emitRestV2DebugEvent(debugFlowId, {
       source: "extension",
       phase: "restv2-retry",
-      reason: "401-refresh",
+      reason: isServiceProviderMismatch ? "401-refresh-service-provider-mismatch" : "401-refresh",
       url: String(url || ""),
       status: 401,
       responsePreview: truncateDebugText(bodyText, 1200),
@@ -88258,6 +88259,11 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
       workspaceOrigin,
     });
     const retryAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
+    if (isServiceProviderMismatch) {
+      clearDcrCache(programmerId, retryAppInfo.guid);
+      await ensureDcrAccessToken(programmerId, retryAppInfo, true, debugMeta);
+      return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "none", debugMeta);
+    }
     await ensureDcrAccessToken(programmerId, retryAppInfo, true, debugMeta);
     return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "reprovision", debugMeta);
   }
@@ -88277,7 +88283,7 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
       workspaceOrigin,
     });
     const retryAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
-    clearDcrTokenCache(programmerId, retryAppInfo.guid);
+    clearDcrCache(programmerId, retryAppInfo.guid);
     await ensureDcrAccessToken(programmerId, retryAppInfo, true, debugMeta);
     return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "none", debugMeta);
   }

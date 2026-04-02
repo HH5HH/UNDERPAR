@@ -2900,6 +2900,12 @@ test("REST V2 app selection stays media-company scoped and no longer blocks shar
   assert.doesNotMatch(restSelectionContextSource, /cachedAuthContext\.preferredAppGuid/);
   assert.doesNotMatch(fetchWithPremiumAuthSource, /if \(isServiceProviderTokenMismatchError\(bodyText\)\) \{\s*return response;\s*\}/);
   assert.match(fetchWithPremiumAuthSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
+  assert.match(fetchWithPremiumAuthSource, /const isServiceProviderMismatch = isServiceProviderTokenMismatchError\(bodyText\);/);
+  assert.match(fetchWithPremiumAuthSource, /reason:\s*isServiceProviderMismatch \? "401-refresh-service-provider-mismatch" : "401-refresh"/);
+  assert.match(fetchWithPremiumAuthSource, /if \(isServiceProviderMismatch\) \{\s*clearDcrCache\(programmerId,\s*retryAppInfo\.guid\);/);
+  assert.match(fetchWithPremiumAuthSource, /return fetchWithPremiumAuth\(programmerId,\s*retryAppInfo,\s*url,\s*options,\s*"none",\s*debugMeta\);/);
+  assert.doesNotMatch(fetchWithPremiumAuthSource, /clearDcrTokenCache\(programmerId,\s*retryAppInfo\.guid\)/);
+  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "reprovision"\)[\s\S]*clearDcrCache\(programmerId,\s*retryAppInfo\.guid\);/);
 });
 
 test("premium API usage provisions service clients on demand and ESM direct auth helpers no longer stay cache-only", () => {
