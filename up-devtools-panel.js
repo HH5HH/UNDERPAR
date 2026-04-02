@@ -16,6 +16,11 @@ const dcrTokenUrlEl = document.getElementById("dcr-token-url");
 const restV2BaseEl = document.getElementById("rest-v2-base");
 const esmBaseEl = document.getElementById("esm-base");
 const degradationBaseEl = document.getElementById("degradation-base");
+const mvpdSearchBadge = document.getElementById("mvpd-search-badge");
+const mvpdSearchInput = document.getElementById("mvpd-search-input");
+const mvpdSearchButton = document.getElementById("mvpd-search-btn");
+const mvpdSearchStatus = document.getElementById("mvpd-search-status");
+const mvpdSearchResults = document.getElementById("mvpd-search-results");
 const vaultToggle = document.getElementById("vault-toggle");
 const vaultPanel = document.getElementById("vault-panel");
 const vaultBadge = document.getElementById("vault-badge");
@@ -132,6 +137,13 @@ const panelState = {
   vaultSlacktivateDragDepth: 0,
   registeredApplicationPendingSwitch: null,
   registeredApplicationSwitchBusy: false,
+  activeEnvironment: null,
+  mvpdSearchBusy: false,
+  mvpdSearchQuery: "",
+  mvpdSearchResultRows: [],
+  mvpdSearchResultRowByKey: new Map(),
+  mvpdSearchLastEnvironmentKey: "",
+  mvpdSearchViewBusyKey: "",
 };
 
 function normalizeEnvironmentKey(value) {
@@ -258,6 +270,7 @@ function clearStatusPortReconnectTimer() {
 
 function syncInteractiveControlState() {
   const canInteract = panelState.controllerReady && panelState.environmentsLoaded && !panelState.switchBusy;
+  const canSearch = panelState.environmentsLoaded && !panelState.switchBusy;
   document.body.classList.toggle("up-controller-disabled", !panelState.controllerReady);
   if (environmentSelect) {
     environmentSelect.disabled = !canInteract;
@@ -266,6 +279,18 @@ function syncInteractiveControlState() {
   if (switchButton) {
     switchButton.disabled = !canInteract;
     switchButton.title = panelState.controllerReady ? "Switch environment" : panelState.controllerStatusMessage;
+  }
+  if (mvpdSearchInput) {
+    mvpdSearchInput.disabled = !canSearch || panelState.mvpdSearchBusy === true;
+    mvpdSearchInput.title = canSearch
+      ? "Search MVPDs in the active UnderPAR environment"
+      : "Load the active UnderPAR environment before searching MVPDs.";
+  }
+  if (mvpdSearchButton) {
+    mvpdSearchButton.disabled = !canSearch || panelState.mvpdSearchBusy === true;
+    mvpdSearchButton.title = canSearch
+      ? "Search MVPDs in the active UnderPAR environment"
+      : "Load the active UnderPAR environment before searching MVPDs.";
   }
 }
 
@@ -4734,6 +4759,292 @@ function renderEnvironmentDetails(environment) {
   }
 }
 
+function normalizeMvpdSearchResultKey(entityType = "", mvpdId = "") {
+  const normalizedType = String(entityType || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd";
+  const normalizedId = String(mvpdId || "").trim().toLowerCase();
+  return normalizedId ? `${normalizedType}:${normalizedId}` : "";
+}
+
+function setMvpdSearchBadgeState(text = "", tone = "idle") {
+  if (!mvpdSearchBadge) {
+    return;
+  }
+  mvpdSearchBadge.textContent = String(text || "").trim() || "Idle";
+  mvpdSearchBadge.dataset.tone = String(tone || "idle").trim().toLowerCase() || "idle";
+}
+
+function setMvpdSearchStatusMessage(message = "", tone = "info") {
+  if (!mvpdSearchStatus) {
+    return;
+  }
+  mvpdSearchStatus.textContent =
+    String(message || "").trim() ||
+    "Search honors only the active UnderPAR ENV. Click SWITCH before searching if you changed the environment picker.";
+  mvpdSearchStatus.dataset.tone = String(tone || "info").trim().toLowerCase() || "info";
+}
+
+function rebuildMvpdSearchResultIndex(rows = []) {
+  const nextMap = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const resultKey = normalizeMvpdSearchResultKey(row?.entityType, row?.id);
+    if (!resultKey || nextMap.has(resultKey)) {
+      return;
+    }
+    nextMap.set(resultKey, row);
+  });
+  panelState.mvpdSearchResultRowByKey = nextMap;
+}
+
+function getActivePanelEnvironment() {
+  return panelState.activeEnvironment && typeof panelState.activeEnvironment === "object"
+    ? cloneEnvironment(panelState.activeEnvironment)
+    : null;
+}
+
+function hasPendingEnvironmentPreviewChange() {
+  const activeEnvironmentKey = normalizeEnvironmentKey(panelState.activeEnvironment?.key);
+  const previewEnvironmentKey = normalizeEnvironmentKey(environmentSelect?.value);
+  return Boolean(activeEnvironmentKey && previewEnvironmentKey && activeEnvironmentKey !== previewEnvironmentKey);
+}
+
+function renderMvpdSearchResults(rows = [], options = {}) {
+  if (!mvpdSearchResults) {
+    return;
+  }
+
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  const query = String(options?.query ?? panelState.mvpdSearchQuery ?? "").trim();
+  const totalCount = Math.max(0, Number(options?.totalCount || normalizedRows.length || 0));
+  const environmentLabel = String(
+    options?.environmentLabel || panelState.activeEnvironment?.label || "the active UnderPAR environment"
+  ).trim();
+
+  if (normalizedRows.length === 0) {
+    const emptyMessage = String(options?.emptyMessage || "").trim();
+    mvpdSearchResults.innerHTML = `<p class="mvpd-search-empty">${escapeHtml(
+      emptyMessage ||
+        (query
+          ? `No MVPDs matched "${query}" in ${environmentLabel}.`
+          : `Run an MVPD search against ${environmentLabel} to list direct and proxied MVPDs.`)
+    )}</p>`;
+    return;
+  }
+
+  const summaryLabel =
+    totalCount > normalizedRows.length
+      ? `${normalizedRows.length} of ${totalCount} MVPDs`
+      : `${normalizedRows.length} MVPD${normalizedRows.length === 1 ? "" : "s"}`;
+  const rowsMarkup = normalizedRows
+    .map((row) => {
+      const resultKey = normalizeMvpdSearchResultKey(row?.entityType, row?.id);
+      const displayName = String(row?.displayName || row?.name || row?.id || "").trim() || "MVPD";
+      const displayId = String(row?.id || "").trim();
+      const ownerLabel = String(row?.proxyOwnerLabel || "").trim() || "DIRECT MVPD";
+      const kindLabel = row?.entityType === "mvpdproxy" ? "Proxy" : "Direct";
+      const isViewBusy = panelState.mvpdSearchViewBusyKey === resultKey;
+      return `
+        <tr>
+          <td>
+            <div class="mvpd-search-name">${escapeHtml(displayName)}</div>
+            <div class="mvpd-search-meta-row">
+              <span class="mvpd-search-kind">${escapeHtml(kindLabel)}</span>
+              <span class="mvpd-search-id">${escapeHtml(displayId)}</span>
+            </div>
+          </td>
+          <td>
+            <span class="mvpd-search-owner${row?.entityType === "mvpdproxy" ? "" : " mvpd-search-owner--direct"}">${escapeHtml(
+              ownerLabel
+            )}</span>
+          </td>
+          <td class="mvpd-search-actions-cell">
+            <button
+              type="button"
+              class="mvpd-search-view-btn"
+              data-mvpd-search-view="${escapeHtml(resultKey)}"
+              ${isViewBusy || panelState.mvpdSearchBusy === true || panelState.environmentsLoaded !== true ? "disabled" : ""}
+            >${isViewBusy ? "OPENING" : "VIEW"}</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  mvpdSearchResults.innerHTML = `
+    <div class="mvpd-search-results-summary">${escapeHtml(summaryLabel)} in ${escapeHtml(environmentLabel)}</div>
+    <div class="mvpd-search-results-scroll">
+      <table class="mvpd-search-table">
+        <thead>
+          <tr>
+            <th>MVPD NAME</th>
+            <th>Proxy Owner</th>
+            <th>View</th>
+          </tr>
+        </thead>
+        <tbody>${rowsMarkup}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function resetMvpdSearchPanel(options = {}) {
+  const environment =
+    options?.environment && typeof options.environment === "object"
+      ? cloneEnvironment(options.environment)
+      : getActivePanelEnvironment();
+  panelState.mvpdSearchBusy = false;
+  panelState.mvpdSearchViewBusyKey = "";
+  panelState.mvpdSearchResultRows = [];
+  panelState.mvpdSearchLastEnvironmentKey = String(environment?.key || "").trim();
+  rebuildMvpdSearchResultIndex([]);
+  if (options?.clearQuery === true) {
+    panelState.mvpdSearchQuery = "";
+    if (mvpdSearchInput) {
+      mvpdSearchInput.value = "";
+    }
+  }
+  setMvpdSearchBadgeState("Idle", "idle");
+  setMvpdSearchStatusMessage(
+    String(options?.statusMessage || "").trim() ||
+      "Search honors only the active UnderPAR ENV. Click SWITCH before searching if you changed the environment picker.",
+    String(options?.statusTone || "info").trim() || "info"
+  );
+  renderMvpdSearchResults([], {
+    environmentLabel: environment?.label || "",
+    emptyMessage: String(options?.emptyMessage || "").trim(),
+    query: panelState.mvpdSearchQuery,
+  });
+  syncInteractiveControlState();
+}
+
+async function handleMvpdSearchSubmit() {
+  if (panelState.environmentsLoaded !== true) {
+    setMvpdSearchStatusMessage("UnderPAR is still loading environments for MVPD search.", "error");
+    return;
+  }
+  if (panelState.mvpdSearchBusy === true) {
+    return;
+  }
+
+  const activeEnvironment = getActivePanelEnvironment();
+  if (!activeEnvironment?.key) {
+    setMvpdSearchStatusMessage("UnderPAR could not resolve the active environment for MVPD search.", "error");
+    return;
+  }
+  if (hasPendingEnvironmentPreviewChange()) {
+    const previewEnvironment = resolveEnvironmentRecord(environmentSelect?.value || "");
+    setMvpdSearchBadgeState("Switch", "warning");
+    setMvpdSearchStatusMessage(
+      `MVPD search only honors the active ENV (${activeEnvironment.label}). Click SWITCH before searching ${previewEnvironment?.label || environmentSelect?.value || "the previewed environment"}.`,
+      "warning"
+    );
+    return;
+  }
+
+  const query = String(mvpdSearchInput?.value || "").trim();
+  panelState.mvpdSearchBusy = true;
+  panelState.mvpdSearchViewBusyKey = "";
+  syncInteractiveControlState();
+  setMvpdSearchBadgeState("Searching", "working");
+  setMvpdSearchStatusMessage(`Searching all MVPDs in ${activeEnvironment.label}...`, "info");
+
+  try {
+    const response = await sendVaultActionRequest("search-env-mvpds", {
+      environmentKey: activeEnvironment.key,
+      query,
+    });
+    const rows = Array.isArray(response?.results) ? response.results : [];
+    const totalCount = Math.max(0, Number(response?.totalCount || rows.length || 0));
+    panelState.mvpdSearchQuery = query;
+    panelState.mvpdSearchResultRows = rows;
+    panelState.mvpdSearchLastEnvironmentKey = String(response?.environmentKey || activeEnvironment.key || "").trim();
+    rebuildMvpdSearchResultIndex(rows);
+    renderMvpdSearchResults(rows, {
+      query,
+      totalCount,
+      environmentLabel: String(response?.environmentLabel || activeEnvironment.label || "").trim(),
+    });
+    setMvpdSearchBadgeState(
+      rows.length > 0 ? `${rows.length} Row${rows.length === 1 ? "" : "s"}` : "No Match",
+      rows.length > 0 ? "ready" : "muted"
+    );
+    setMvpdSearchStatusMessage(
+      rows.length > 0
+        ? `Found ${rows.length} MVPD result${rows.length === 1 ? "" : "s"} in ${activeEnvironment.label}.`
+        : query
+          ? `No MVPDs matched "${query}" in ${activeEnvironment.label}.`
+          : `No MVPDs were returned for ${activeEnvironment.label}.`,
+      rows.length > 0 ? "success" : "info"
+    );
+  } catch (error) {
+    panelState.mvpdSearchResultRows = [];
+    rebuildMvpdSearchResultIndex([]);
+    setMvpdSearchBadgeState("Error", "error");
+    setMvpdSearchStatusMessage(
+      error instanceof Error ? error.message : String(error || "Unable to search MVPDs in the active UnderPAR environment."),
+      "error"
+    );
+    renderMvpdSearchResults([], {
+      query,
+      environmentLabel: activeEnvironment.label,
+      emptyMessage: "MVPD search failed for the active UnderPAR environment.",
+    });
+  } finally {
+    panelState.mvpdSearchBusy = false;
+    syncInteractiveControlState();
+  }
+}
+
+async function handleMvpdSearchView(resultKey = "") {
+  const normalizedResultKey = String(resultKey || "").trim();
+  const row = panelState.mvpdSearchResultRowByKey.get(normalizedResultKey) || null;
+  const activeEnvironment = getActivePanelEnvironment();
+  if (!row || !activeEnvironment?.key) {
+    return;
+  }
+  if (panelState.environmentsLoaded !== true) {
+    setMvpdSearchStatusMessage("UnderPAR is still loading environments for MVPD search.", "error");
+    return;
+  }
+  if (panelState.mvpdSearchBusy === true || panelState.mvpdSearchViewBusyKey) {
+    return;
+  }
+  if (hasPendingEnvironmentPreviewChange()) {
+    const previewEnvironment = resolveEnvironmentRecord(environmentSelect?.value || "");
+    setMvpdSearchStatusMessage(
+      `MVPD VIEW only honors the active ENV (${activeEnvironment.label}). Click SWITCH before opening results for ${previewEnvironment?.label || environmentSelect?.value || "the previewed environment"}.`,
+      "warning"
+    );
+    return;
+  }
+
+  panelState.mvpdSearchViewBusyKey = normalizedResultKey;
+  renderMvpdSearchResults(panelState.mvpdSearchResultRows, {
+    query: panelState.mvpdSearchQuery,
+    environmentLabel: activeEnvironment.label,
+  });
+  setMvpdSearchStatusMessage(`Opening ${row.displayName || row.id} in MVPD Workspace...`, "info");
+
+  try {
+    await sendVaultActionRequest("open-mvpd-search-result", {
+      environmentKey: activeEnvironment.key,
+      entityType: String(row?.entityType || "").trim(),
+      mvpdId: String(row?.id || "").trim(),
+    });
+    setMvpdSearchStatusMessage(`Loaded ${row.displayName || row.id} in MVPD Workspace.`, "success");
+  } catch (error) {
+    setMvpdSearchStatusMessage(
+      error instanceof Error ? error.message : String(error || "Unable to open the selected MVPD in MVPD Workspace."),
+      "error"
+    );
+  } finally {
+    panelState.mvpdSearchViewBusyKey = "";
+    renderMvpdSearchResults(panelState.mvpdSearchResultRows, {
+      query: panelState.mvpdSearchQuery,
+      environmentLabel: activeEnvironment.label,
+    });
+  }
+}
+
 async function loadSelectedEnvironment() {
   const registry = getEnvironmentRegistry();
   const environments = Array.isArray(registry?.listEnvironments?.()) ? registry.listEnvironments() : fallbackRegistry.listEnvironments();
@@ -4746,7 +5057,21 @@ async function loadSelectedEnvironment() {
       return `<option value="${environment.key}"${selected}>${environment.label}</option>`;
     })
     .join("");
+  const previousEnvironmentKey = normalizeEnvironmentKey(panelState.activeEnvironment?.key);
+  panelState.activeEnvironment = cloneEnvironment(currentEnvironment);
   renderEnvironmentDetails(currentEnvironment);
+  if (previousEnvironmentKey !== normalizeEnvironmentKey(currentEnvironment?.key)) {
+    resetMvpdSearchPanel({
+      environment: currentEnvironment,
+      clearQuery: true,
+      emptyMessage: "Run an MVPD search against the active UnderPAR ENV to list direct and proxied MVPDs.",
+    });
+  } else if (!panelState.mvpdSearchResultRows.length) {
+    renderMvpdSearchResults([], {
+      environmentLabel: currentEnvironment?.label || "",
+      query: panelState.mvpdSearchQuery,
+    });
+  }
   panelState.environmentsLoaded = true;
   syncInteractiveControlState();
 }
@@ -5057,6 +5382,31 @@ function init() {
       }
       event.preventDefault();
       void handleRegisteredApplicationSwitch();
+    });
+  }
+  if (mvpdSearchInput) {
+    mvpdSearchInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      void handleMvpdSearchSubmit();
+    });
+  }
+  if (mvpdSearchButton) {
+    mvpdSearchButton.addEventListener("click", () => {
+      void handleMvpdSearchSubmit();
+    });
+  }
+  if (mvpdSearchResults) {
+    mvpdSearchResults.addEventListener("click", (event) => {
+      const viewButton =
+        event.target instanceof Element ? event.target.closest("[data-mvpd-search-view]") : null;
+      if (!(viewButton instanceof HTMLElement)) {
+        return;
+      }
+      event.preventDefault();
+      void handleMvpdSearchView(String(viewButton.getAttribute("data-mvpd-search-view") || "").trim());
     });
   }
   environmentSelect.addEventListener("change", () => {

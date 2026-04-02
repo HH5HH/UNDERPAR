@@ -385,10 +385,11 @@ function formatDateTime(value) {
 function getProgrammerLabel() {
   const name = String(state.programmerName || "").trim();
   const id = String(state.programmerId || "").trim();
+  const environmentLabel = String(state.adobePassEnvironment?.label || state.adobePassEnvironment?.key || "").trim();
   if (name && id && name !== id) {
     return `${name} (${id})`;
   }
-  return name || id || "Selected Media Company";
+  return name || id || environmentLabel || "Selected Media Company";
 }
 
 function getSelectedRequestorId() {
@@ -500,8 +501,36 @@ function buildSelectionQueueMarkup() {
   const requestor = getSelectedRequestorId();
   const mvpd = getSelectedMvpdId();
   const mvpdLabel = getSelectedMvpdLabel() || mvpd;
-  if (!requestor || !mvpd) {
+  const environmentLabel = String(state.adobePassEnvironment?.label || state.adobePassEnvironment?.key || "").trim();
+  if (!mvpd) {
     return '<span class="workspace-filter-empty">Select Requestor + MVPD in UnderPAR to load details.</span>';
+  }
+
+  if (!requestor) {
+    const queue = [
+      `<span class="workspace-filter-pill workspace-filter-pill--mvpd"><span class="workspace-filter-pill-key">MVPD</span><span class="workspace-filter-pill-value">${escapeHtml(
+        mvpdLabel
+      )}</span></span>`,
+    ];
+    if (environmentLabel) {
+      queue.push(
+        `<span class="workspace-filter-pill"><span class="workspace-filter-pill-key">ENV</span><span class="workspace-filter-pill-value">${escapeHtml(
+          environmentLabel
+        )}</span></span>`
+      );
+    }
+    queue.push(
+      `<span class="workspace-filter-pill workspace-filter-pill--relation"><span class="workspace-filter-pill-key">Scope</span><span class="workspace-filter-pill-value">ENV Search</span></span>`
+    );
+    const proxyOwnerLabel = firstNonEmptyString([state.snapshot?.proxyOwnerLabel]);
+    if (proxyOwnerLabel && proxyOwnerLabel.toUpperCase() !== "DIRECT MVPD") {
+      queue.push(
+        `<span class="workspace-filter-pill workspace-filter-pill--integration"><span class="workspace-filter-pill-key">Proxy Owner</span><span class="workspace-filter-pill-value">${escapeHtml(
+          proxyOwnerLabel
+        )}</span></span>`
+      );
+    }
+    return `<span class="workspace-filter-queue">${queue.join("")}</span>`;
   }
 
   const queue = [
@@ -3921,7 +3950,7 @@ function handleSnapshotStart(payload) {
   const requestorId = String(payload?.requestorId || getSelectedRequestorId() || "").trim();
   const mvpdId = String(payload?.mvpdId || getSelectedMvpdId() || "").trim();
   const mvpdDisplayLabel = firstNonEmptyString([mvpdLabel, getSelectedMvpdLabel(), mvpdId]);
-  const label = requestorId && mvpdDisplayLabel ? `${requestorId} x ${mvpdDisplayLabel}` : "selected MVPD";
+  const label = requestorId && mvpdDisplayLabel ? `${requestorId} x ${mvpdDisplayLabel}` : mvpdDisplayLabel || "selected MVPD";
   setStatus(`Loading ${label} details...`);
 }
 
