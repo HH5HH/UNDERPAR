@@ -1307,7 +1307,7 @@ function hasMatchingSoftwareStatementBoundDcrCache(cache = null, softwareStateme
   }
   const expectedFingerprint = buildUnderparSoftwareStatementFingerprint(softwareStatement);
   if (!expectedFingerprint) {
-    return true;
+    return false;
   }
   return String(normalizedCache.softwareStatementFingerprint || "").trim() === expectedFingerprint;
 }
@@ -9542,12 +9542,12 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
 
     if (normalizedServiceKey === "restV2") {
       return (
+        primaryMatch ||
         selectPreferredPassVaultHydrationServiceApplication(
           normalizedServiceKey,
           candidates,
           String(record?.programmerId || "").trim()
         ) ||
-        primaryMatch ||
         credentialBackedMatch ||
         serviceKeyBackedMatch ||
         candidates[0] ||
@@ -10016,12 +10016,6 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
 
   if (normalizedServiceKey === "restV2") {
     const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, resolvedServices);
-    const preferredMatch =
-      selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
-      selectPreferredRestV2AppForRequestor(candidates, "", normalizedProgrammerId);
-    if (preferredMatch?.guid) {
-      return preferredMatch;
-    }
     const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
     if (primaryMatch?.guid) {
       return primaryMatch;
@@ -10030,7 +10024,13 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
     if (fallbackMatch?.guid) {
       return fallbackMatch;
     }
-    return primaryMatch || preferredMatch || null;
+    const preferredMatch =
+      selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
+      selectPreferredRestV2AppForRequestor(candidates, "", normalizedProgrammerId);
+    if (preferredMatch?.guid) {
+      return preferredMatch;
+    }
+    return primaryMatch || fallbackMatch || preferredMatch || null;
   }
 
   if (normalizedServiceKey === "esm") {
@@ -87321,10 +87321,10 @@ function collectProgrammerScopedRestV2AppCandidates(programmerId = "", premiumAp
       getPassVaultRegisteredApplicationsByGuid(getPassVaultMediaCompanyRecord(normalizedProgrammerId)) || {}
     ) ||
     null;
+  collectRestV2AppCandidatesFromPremiumApps(premiumApps).forEach((appInfo) => pushCandidate(appInfo));
   buildPassVaultHydrationRegisteredApplications(runtimeApplications || {})
     .filter((application) => registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE))
     .forEach((application) => pushCandidate(application));
-  collectRestV2AppCandidatesFromPremiumApps(premiumApps).forEach((appInfo) => pushCandidate(appInfo));
 
   return candidates;
 }
@@ -96838,9 +96838,9 @@ function promoteResolvedRestV2ConfigurationApp(programmer = null, services = nul
     resolvedAppInfo
   );
   const authoritativeRestV2App =
-    selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
     currentServices?.restV2 ||
     resolvedAppInfo ||
+    selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
     mergedRestV2Apps[0] ||
     null;
   const nextServices = {

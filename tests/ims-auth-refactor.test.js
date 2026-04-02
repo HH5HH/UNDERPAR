@@ -2563,6 +2563,7 @@ test("REST V2 DCR caches are bound to the parent software statement and legacy c
   assert.match(bindingRequirementSource, /normalizedServiceKey === "restV2" \|\| normalizedRequiredScope === normalizeScope\(REST_V2_SCOPE\)/);
   assert.match(boundCacheSource, /Number\(normalizedCache\.cacheBindingVersion \|\| 0\) >= UNDERPAR_DCR_CACHE_BINDING_VERSION/);
   assert.match(matchingBoundCacheSource, /const expectedFingerprint = buildUnderparSoftwareStatementFingerprint\(softwareStatement\);/);
+  assert.match(matchingBoundCacheSource, /if \(!expectedFingerprint\) \{\s*return false;\s*\}/);
   assert.match(matchingBoundCacheSource, /return String\(normalizedCache\.softwareStatementFingerprint \|\| ""\)\.trim\(\) === expectedFingerprint;/);
   assert.match(hydrateServiceSource, /let cacheBindingRepairRequired =/);
   assert.match(hydrateServiceSource, /const currentSoftwareStatement = resolveRegisteredApplicationSoftwareStatement\(registeredApplication\);/);
@@ -2716,7 +2717,7 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(passVaultServiceGuidsSource, /return uniquePreserveOrder\(orderedGuids\.concat\(summaryGuids\)\);/);
   assert.match(
     runtimeAppResolutionSource,
-    /const preferredMatch =[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2", candidates, normalizedProgrammerId\)[\s\S]*if \(preferredMatch\?\.guid\) \{\s*return preferredMatch;\s*\}[\s\S]*const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);/
+    /const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);[\s\S]*if \(primaryMatch\?\.guid\) \{\s*return primaryMatch;\s*\}[\s\S]*const fallbackMatch = resolveFallbackMatch\(candidates\);[\s\S]*if \(fallbackMatch\?\.guid\) \{\s*return fallbackMatch;\s*\}[\s\S]*const preferredMatch =[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2", candidates, normalizedProgrammerId\)[\s\S]*if \(preferredMatch\?\.guid\) \{\s*return preferredMatch;\s*\}/
   );
   assert.match(credentialTasksSource, /pushTask\("restV2",\s*services\?\.restV2\?\.guid \? \[services\.restV2\] : \[\]\)/);
   assert.match(credentialTasksSource, /pushTask\("esm",\s*services\?\.esm\?\.guid \? \[services\.esm\] : \[\]\)/);
@@ -2960,29 +2961,30 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(collectScopedRestV2Source, /getCurrentProgrammerApplicationsSnapshot\(normalizedProgrammerId\)/);
   assert.match(collectScopedRestV2Source, /buildPassVaultHydrationRegisteredApplications\(runtimeApplications \|\| \{\}\)/);
   assert.match(collectScopedRestV2Source, /registeredApplicationMatchesNativeRequiredScope\(application,\s*REST_V2_SCOPE\)/);
-  assert.match(collectScopedRestV2Source, /buildPassVaultHydrationRegisteredApplications\(runtimeApplications \|\| \{\}\)[\s\S]*collectRestV2AppCandidatesFromPremiumApps\(premiumApps\)/);
+  assert.match(collectScopedRestV2Source, /collectRestV2AppCandidatesFromPremiumApps\(premiumApps\)[\s\S]*buildPassVaultHydrationRegisteredApplications\(runtimeApplications \|\| \{\}\)/);
   assert.match(resolveHarvestSource, /const restV2Candidates = collectProgrammerScopedRestV2AppCandidates\(programmerId,\s*services\);/);
   assert.doesNotMatch(resolveHarvestSource, /resolveRestV2AppForServiceProvider\(/);
   assert.match(
     selectRestV2Source,
     /return candidates\[0\] \|\| null;/
   );
+  assert.match(resolveRuntimeSource, /const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);/);
   assert.match(
     resolveRuntimeSource,
-    /const preferredMatch =[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*candidates,\s*normalizedProgrammerId\)[\s\S]*selectPreferredRestV2AppForRequestor\(candidates,\s*"",\s*normalizedProgrammerId\);[\s\S]*if \(preferredMatch\?\.guid\) \{\s*return preferredMatch;\s*\}[\s\S]*const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);/
+    /const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);[\s\S]*if \(primaryMatch\?\.guid\) \{\s*return primaryMatch;\s*\}[\s\S]*const fallbackMatch = resolveFallbackMatch\(candidates\);[\s\S]*if \(fallbackMatch\?\.guid\) \{\s*return fallbackMatch;\s*\}[\s\S]*const preferredMatch =[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*candidates,\s*normalizedProgrammerId\)[\s\S]*selectPreferredRestV2AppForRequestor\(candidates,\s*"",\s*normalizedProgrammerId\);/
   );
-  assert.match(resolveRuntimeSource, /const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);/);
   assert.match(resolveRuntimeSource, /if \(primaryMatch\?\.guid\) \{\s*return primaryMatch;\s*\}/);
+  assert.match(resolveRuntimeSource, /if \(fallbackMatch\?\.guid\) \{\s*return fallbackMatch;\s*\}/);
   assert.match(resolveRuntimeSource, /if \(preferredMatch\?\.guid\) \{\s*return preferredMatch;\s*\}/);
   assert.match(resolveRuntimeSource, /const candidates = collectProgrammerScopedRestV2AppCandidates\(normalizedProgrammerId,\s*resolvedServices\);/);
-  assert.match(resolveRuntimeSource, /return primaryMatch \|\| preferredMatch \|\| null;/);
+  assert.match(resolveRuntimeSource, /return primaryMatch \|\| fallbackMatch \|\| preferredMatch \|\| null;/);
   assert.match(
     runtimeSnapshotSource,
-    /if \(normalizedServiceKey === "restV2"\) \{\s*return \(\s*selectPreferredPassVaultHydrationServiceApplication\([\s\S]*\|\|\s*primaryMatch\s*\|\|\s*credentialBackedMatch/
+    /if \(normalizedServiceKey === "restV2"\) \{\s*return \(\s*primaryMatch\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\([\s\S]*\|\|\s*credentialBackedMatch/
   );
   assert.match(
     promoteResolvedSource,
-    /const authoritativeRestV2App =[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*mergedRestV2Apps,\s*programmerId\)[\s\S]*currentServices\?\.restV2 \|\|[\s\S]*resolvedAppInfo/
+    /const authoritativeRestV2App =[\s\S]*currentServices\?\.restV2 \|\|[\s\S]*resolvedAppInfo \|\|[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*mergedRestV2Apps,\s*programmerId\)/
   );
   assert.match(promoteResolvedSource, /restV2:\s*authoritativeRestV2App,/);
   assert.doesNotMatch(promoteResolvedSource, /setRequestorScopedRestV2AuthContext\(/);

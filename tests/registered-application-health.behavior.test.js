@@ -743,7 +743,7 @@ test("runtime REST V2 app resolution follows the first programmer-scoped REST V2
   );
 });
 
-test("programmer-scoped REST V2 candidates are rebuilt from the full registered-application catalog", () => {
+test("programmer-scoped REST V2 candidates keep hydrated runtime apps ahead of catalog fallback", () => {
   const helpers = loadPopupFunctions(["collectProgrammerScopedRestV2AppCandidates"], {
     collectRestV2AppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.restV2Apps || [],
     getCurrentProgrammerApplicationsSnapshot: () => ({
@@ -761,12 +761,12 @@ test("programmer-scoped REST V2 candidates are rebuilt from the full registered-
   });
 
   const candidates = helpers.collectProgrammerScopedRestV2AppCandidates("Discovery", {
-    restV2Apps: [{ guid: "shared-app", appName: "Shared App", scopes: ["api:client:v2"] }],
+    restV2Apps: [{ guid: "animalplanet-app", appName: "Animal Planet", scopes: ["api:client:v2"] }],
   });
 
   assert.deepEqual(
     normalizeRealmObject(candidates).map((app) => app.guid),
-    ["shared-app", "animalplanet-app"]
+    ["animalplanet-app", "shared-app"]
   );
 });
 
@@ -859,7 +859,7 @@ test("pass vault hydration applications preserve console fetch order for primary
   );
 });
 
-test("runtime REST V2 app resolution resets stale programmer primaries back to the first ordered REST V2 candidate", () => {
+test("runtime REST V2 app resolution preserves the hydrated programmer primary before catalog fallbacks", () => {
   const services = {
     restV2: { guid: "shared-app", appName: "Shared App" },
     restV2Apps: [
@@ -883,7 +883,36 @@ test("runtime REST V2 app resolution resets stale programmer primaries back to t
     helpers.resolveProgrammerPremiumServiceRuntimeApp("restV2", "Rogers Media", services)
   );
 
-  assert.equal(resolved?.guid, "citytv-app");
+  assert.equal(resolved?.guid, "shared-app");
+});
+
+test("REST V2 bound-cache checks require a software statement fingerprint when binding is mandatory", () => {
+  const helpers = loadPopupFunctions(["hasMatchingSoftwareStatementBoundDcrCache"], {
+    normalizeUnderparVaultDcrCache: (value = null) => value,
+    hasSoftwareStatementBoundDcrCache: (cache = null) => Boolean(cache?.clientId && cache?.clientSecret),
+    shouldRequireSoftwareStatementBoundDcrCache: () => true,
+    buildUnderparSoftwareStatementFingerprint: (value = "") => String(value || "").trim(),
+  });
+
+  assert.equal(
+    helpers.hasMatchingSoftwareStatementBoundDcrCache(
+      { clientId: "cid", clientSecret: "sec", softwareStatementFingerprint: "fingerprint" },
+      "",
+      "restV2",
+      "api:client:v2"
+    ),
+    false
+  );
+
+  assert.equal(
+    helpers.hasMatchingSoftwareStatementBoundDcrCache(
+      { clientId: "cid", clientSecret: "sec", softwareStatementFingerprint: "fingerprint" },
+      "fingerprint",
+      "restV2",
+      "api:client:v2"
+    ),
+    true
+  );
 });
 
 test("pass vault REST V2 guid reconstruction preserves stored fetch order instead of stale primary order", () => {
