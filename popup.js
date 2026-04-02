@@ -62517,6 +62517,42 @@ async function maybeOpenBobtoolsWorkspaceForRestV2ProfileSuccess(flowId = "", op
   }
 }
 
+async function handoffRestV2LaunchTabToBobtoolsWorkspace(tabId = 0, flowId = "", options = {}) {
+  const normalizedTabId = Number(tabId || 0);
+  if (!normalizedTabId || normalizedTabId <= 0) {
+    return {
+      ok: false,
+      error: "Missing REST V2 launch tab.",
+      tabId: 0,
+      windowId: 0,
+    };
+  }
+
+  const reason = String(options?.reason || "rest-v2-live-success").trim() || "rest-v2-live-success";
+  const workspaceUrl = bobtoolsWorkspaceGetWorkspaceUrl();
+  const updatedTab = await chrome.tabs.update(normalizedTabId, { url: workspaceUrl });
+  const targetWindowId = Number(updatedTab?.windowId || 0);
+  bobtoolsWorkspaceBindWorkspaceTab(updatedTab?.windowId, normalizedTabId);
+  if (Number(state.restV2LastLaunchTabId || 0) === normalizedTabId) {
+    state.restV2LastLaunchTabId = 0;
+    state.restV2LastLaunchWindowId = 0;
+  }
+  bobtoolsWorkspaceRefreshSelection(resolveSelectedProgrammer(), targetWindowId);
+  emitRestV2DebugEvent(flowId, {
+    source: "extension",
+    phase: "bobtools-launch-tab-handoff",
+    reason,
+    tabId: normalizedTabId,
+    windowId: targetWindowId,
+  });
+  return {
+    ok: true,
+    error: "",
+    tabId: normalizedTabId,
+    windowId: targetWindowId,
+  };
+}
+
 function setRestV2LoginPanelStatusAcrossSections(message = "", type = "") {
   const sections = document.querySelectorAll(".premium-service-section.service-rest-v2");
   sections.forEach((section) => {
@@ -62728,15 +62764,17 @@ function ensureRestV2BobtoolsRedirectWatcher() {
     if (!candidateUrl || bobtoolsWorkspaceIsWorkspaceTab({ url: candidateUrl })) {
       return;
     }
+    const navigationStatus = String(changeInfo?.status || "").trim().toLowerCase();
     const redirectCandidates = [
       String(recordingContext?.redirectUrl || "").trim(),
       String(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY.restV2 || "").trim(),
       String(state.restV2PreviousTabUrl || "").trim(),
     ].filter(Boolean);
-    if (
-      redirectCandidates.length === 0 ||
-      !redirectCandidates.some((redirectUrl) => isRestV2RedirectAtPostLoginTarget(candidateUrl, redirectUrl))
-    ) {
+    const matchesRedirect =
+      redirectCandidates.length > 0 &&
+      redirectCandidates.some((redirectUrl) => isRestV2RedirectAtPostLoginTarget(candidateUrl, redirectUrl));
+    const shouldProbeCompletedNavigation = !matchesRedirect && navigationStatus === "complete";
+    if (!matchesRedirect && !shouldProbeCompletedNavigation) {
       return;
     }
     if (state.restV2BobtoolsRedirectInFlightByTabId.has(normalizedTabId)) {
@@ -62744,13 +62782,8 @@ function ensureRestV2BobtoolsRedirectWatcher() {
     }
     state.restV2BobtoolsRedirectInFlightByTabId.add(normalizedTabId);
     void (async () => {
-      const workspaceUrl = bobtoolsWorkspaceGetWorkspaceUrl();
-      const updatedTab = await chrome.tabs.update(normalizedTabId, { url: workspaceUrl });
-      const targetWindowId = Number(updatedTab?.windowId || 0);
-      bobtoolsWorkspaceBindWorkspaceTab(updatedTab?.windowId, normalizedTabId);
-      bobtoolsWorkspaceRefreshSelection(resolveSelectedProgrammer(), targetWindowId);
-
       let hydrationContext = null;
+      const activeFlowId = String(state.restV2DebugFlowId || "").trim();
       if (
         recordingContext?.programmerId &&
         recordingContext?.appInfo?.guid &&
@@ -62758,34 +62791,52 @@ function ensureRestV2BobtoolsRedirectWatcher() {
         recordingContext?.mvpd
       ) {
         try {
-          const activeFlowId = String(state.restV2DebugFlowId || "").trim();
           await hydrateRestV2PartnerSsoContextFromFlowId(recordingContext, activeFlowId);
           const postAuthProbe = await probeRestV2PostAuthProfiles(recordingContext, activeFlowId, {
-            scopePrefix: "profiles-redirect-bobtools",
+            scopePrefix: matchesRedirect ? "profiles-redirect-bobtools" : "profiles-live-success",
             maxAttempts: 1,
             delayMs: 0,
           });
           const profileCheckResult =
-            postAuthProbe?.result || buildRestV2ProfileCheckFallbackResult("Profile check unavailable after redirect intercept.");
+            postAuthProbe?.result ||
+            buildRestV2ProfileCheckFallbackResult(
+              matchesRedirect ? "Profile check unavailable after redirect intercept." : "Profile check unavailable after completed navigation."
+            );
           if (profileCheckResult?.harvestedProfile && isUsableRestV2ProfileHarvest(profileCheckResult.harvestedProfile)) {
             const storedHarvest = storeRestV2ProfileHarvest(recordingContext, profileCheckResult, activeFlowId);
             hydrationContext = buildRestV2ContextFromHarvest(storedHarvest);
           }
+          if (!matchesRedirect && !isRestV2ProfileSessionActiveResult(profileCheckResult)) {
+            return;
+          }
         } catch {
-          // Continue and open BOBTOOLS even if early profile harvest probe fails.
+          if (!matchesRedirect) {
+            return;
+          }
+          // Continue and hand off to BOBTOOLS even if the redirect-intercept probe misses.
         }
       }
+      const handoffResult = await handoffRestV2LaunchTabToBobtoolsWorkspace(normalizedTabId, activeFlowId, {
+        reason: matchesRedirect ? "redirect-intercept" : "live-profile-success",
+      });
+      if (!handoffResult?.ok) {
+        return;
+      }
+      const targetWindowId = Number(handoffResult?.windowId || 0);
       if (!hydrationContext) {
         hydrationContext = buildRestV2SelectionContextFromRecordingContext(recordingContext);
       }
       if (hydrationContext?.ok) {
         await ensureRestV2ProfilesHydratedForBobtools(hydrationContext, {
           force: true,
-          flowId: String(state.restV2DebugFlowId || "").trim(),
-          source: "redirect-intercept",
+          flowId: activeFlowId,
+          source: matchesRedirect ? "redirect-intercept" : "live-profile-success",
         });
         refreshRestV2LoginPanels();
-        maybeRefreshRestV2InteractiveDocsForContext(recordingContext, "rest-v2-redirect-intercept");
+        maybeRefreshRestV2InteractiveDocsForContext(
+          recordingContext,
+          matchesRedirect ? "rest-v2-redirect-intercept" : "rest-v2-live-profile-success"
+        );
       }
       bobtoolsWorkspaceRefreshSelection(resolveSelectedProgrammer(), targetWindowId);
     })()

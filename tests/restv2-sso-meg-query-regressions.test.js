@@ -630,16 +630,30 @@ test("REST V2 Bobtools redirect watcher checks the configured redirect, the cano
     popupSource,
     /const redirectCandidates = \[\s*String\(recordingContext\?\.redirectUrl \|\| ""\)\.trim\(\),\s*String\(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY\.restV2 \|\| ""\)\.trim\(\),\s*String\(state\.restV2PreviousTabUrl \|\| ""\)\.trim\(\),\s*\]\.filter\(Boolean\);/m
   );
+  assert.match(popupSource, /const shouldProbeCompletedNavigation = !matchesRedirect && navigationStatus === "complete";/);
 });
 
-test("REST V2 Bobtools redirect watcher swaps the tab before profile hydration begins", () => {
+test("REST V2 Bobtools redirect watcher hands the launch tab off to BOBTOOLS before profile hydration begins", () => {
   const popupSource = read("popup.js");
 
   assert.match(
     popupSource,
-    /const workspaceUrl = bobtoolsWorkspaceGetWorkspaceUrl\(\);[\s\S]*?await chrome\.tabs\.update\(normalizedTabId, \{ url: workspaceUrl \}\);[\s\S]*?await ensureRestV2ProfilesHydratedForBobtools\(hydrationContext/m
+    /await handoffRestV2LaunchTabToBobtoolsWorkspace\(normalizedTabId, activeFlowId, \{[\s\S]*?\}\);[\s\S]*?await ensureRestV2ProfilesHydratedForBobtools\(hydrationContext/m
   );
   assert.match(popupSource, /function bobtoolsWorkspaceRefreshSelection\(programmer = null, targetWindowId = 0\)/);
+});
+
+test("REST V2 live-success fallback only swaps the launch tab after a completed navigation returns an active profile", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(
+    popupSource,
+    /if \(!matchesRedirect && !isRestV2ProfileSessionActiveResult\(profileCheckResult\)\) \{\s*return;\s*\}/m
+  );
+  assert.match(
+    popupSource,
+    /reason: matchesRedirect \? "redirect-intercept" : "live-profile-success"/m
+  );
 });
 
 test("popup-close success path auto-opens BOBTOOLS in background-hydration mode", () => {
@@ -763,6 +777,58 @@ test("shared REST V2 success opener uses the resolved browsing window and backgr
   assert.equal(debugEvents[0]?.[1]?.reason, "recording-stop");
   assert.equal(debugEvents[0]?.[1]?.activate, true);
   assert.equal(debugEvents[0]?.[1]?.windowId, 314);
+});
+
+test("REST V2 launch-tab handoff reuses the launch tab for BOBTOOLS and clears login-window tracking", async () => {
+  const debugEvents = [];
+  const state = {
+    restV2LastLaunchTabId: 55,
+    restV2LastLaunchWindowId: 77,
+  };
+  let boundTab = null;
+  let refreshedWindowId = 0;
+  const { handoffRestV2LaunchTabToBobtoolsWorkspace } = loadFunctions(
+    "popup.js",
+    ["handoffRestV2LaunchTabToBobtoolsWorkspace"],
+    {
+      state,
+      chrome: {
+        tabs: {
+          update: async (tabId, updateInfo) => ({
+            id: tabId,
+            windowId: 77,
+            url: updateInfo.url,
+          }),
+        },
+      },
+      bobtoolsWorkspaceGetWorkspaceUrl: () => "chrome-extension://underpar/bobtools-workspace.html",
+      bobtoolsWorkspaceBindWorkspaceTab: (windowId, tabId) => {
+        boundTab = { windowId, tabId };
+      },
+      bobtoolsWorkspaceRefreshSelection: (_programmer, windowId) => {
+        refreshedWindowId = Number(windowId || 0);
+      },
+      resolveSelectedProgrammer: () => ({ programmerId: "MLB", programmerName: "MLB" }),
+      emitRestV2DebugEvent: (...args) => {
+        debugEvents.push(args);
+      },
+    }
+  );
+
+  const result = await handoffRestV2LaunchTabToBobtoolsWorkspace(55, "flow-55", {
+    reason: "live-profile-success",
+  });
+
+  assert.equal(result?.ok, true);
+  assert.equal(result?.tabId, 55);
+  assert.equal(result?.windowId, 77);
+  assert.deepEqual(boundTab, { windowId: 77, tabId: 55 });
+  assert.equal(refreshedWindowId, 77);
+  assert.equal(state.restV2LastLaunchTabId, 0);
+  assert.equal(state.restV2LastLaunchWindowId, 0);
+  assert.equal(debugEvents[0]?.[0], "flow-55");
+  assert.equal(debugEvents[0]?.[1]?.phase, "bobtools-launch-tab-handoff");
+  assert.equal(debugEvents[0]?.[1]?.reason, "live-profile-success");
 });
 
 test("BOBTOOLS selection context includes the current selection harvest when only a selection-scoped error harvest exists", () => {
