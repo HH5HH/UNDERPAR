@@ -2852,6 +2852,7 @@ test("REST V2 app selection stays media-company scoped and keeps the programmer 
   const loadMvpdsSource = extractFunctionSource(popupSource, "loadMvpdsFromRestV2");
   const restSelectionContextSource = extractFunctionSource(popupSource, "buildCurrentRestV2SelectionContext");
   const fetchWithPremiumAuthSource = extractFunctionSource(popupSource, "fetchWithPremiumAuth");
+  const fetchRestV2CandidatesSource = extractFunctionSource(popupSource, "fetchRestV2ConfigurationUsingCandidateApps");
 
   assert.match(collectScopedRestV2Source, /collectRestV2AppCandidatesFromPremiumApps\(premiumApps\)/);
   assert.match(collectScopedRestV2Source, /getCurrentProgrammerApplicationsSnapshot\(normalizedProgrammerId\)/);
@@ -2870,7 +2871,7 @@ test("REST V2 app selection stays media-company scoped and keeps the programmer 
   assert.match(resolveRuntimeSource, /if \(primaryMatch\?\.guid\) \{\s*return primaryMatch;\s*\}/);
   assert.match(resolveRuntimeSource, /const candidates = collectProgrammerScopedRestV2AppCandidates\(normalizedProgrammerId,\s*resolvedServices\);/);
   assert.match(resolveRuntimeSource, /return null;/);
-  assert.match(orderCandidatesSource, /return resolvedApp\?\.guid \? \[resolvedApp\] : \[\];/);
+  assert.match(orderCandidatesSource, /return mergeUniquePremiumServiceAppInfos\(resolvedApp,\s*restV2Apps\);/);
   assert.doesNotMatch(orderCandidatesSource, /getRequestorScopedRestV2AuthContext\(/);
   assert.match(
     promoteResolvedSource,
@@ -2887,13 +2888,25 @@ test("REST V2 app selection stays media-company scoped and keeps the programmer 
   assert.match(primeHydrationSource, /await ensureSelectedProgrammerApplicationsLoaded\(programmer,\s*\{/);
   assert.match(primeHydrationSource, /applicationsData:\s*resolvedApplicationsData,/);
   assert.match(loadMvpdsSource, /await ensureSelectedProgrammerApplicationsLoaded\(programmer,\s*\{/);
+  assert.match(loadMvpdsSource, /const liveApplicationsData =/);
   assert.match(loadMvpdsSource, /let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\);/);
+  assert.match(loadMvpdsSource, /const runtimeSeedIsVaultBacked =/);
   assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
+  assert.match(loadMvpdsSource, /runtimeSeedIsVaultBacked \|\|/);
   assert.match(loadMvpdsSource, /await primeProgrammerServiceHydration\(programmer,\s*premiumApps,\s*\{/);
-  assert.match(loadMvpdsSource, /const orderedCandidates = orderRestV2AppCandidatesForRequestor\(\[runtimePrimaryApp\],\s*runtimePrimaryApp,\s*requestorId\);/);
+  assert.match(loadMvpdsSource, /forceRefresh:\s*runtimeSeedIsVaultBacked,/);
+  assert.match(loadMvpdsSource, /applicationsData:\s*liveApplicationsData,/);
+  assert.match(
+    loadMvpdsSource,
+    /const orderedCandidates = orderRestV2AppCandidatesForRequestor\(\s*mergeUniquePremiumServiceAppInfos\(\s*runtimePrimaryApp,\s*collectProgrammerScopedRestV2AppCandidates\(programmer\.programmerId,\s*premiumApps\)\s*\),\s*runtimePrimaryApp,\s*requestorId\s*\);/
+  );
   assert.match(loadMvpdsSource, /const \{ map, domainRows, appInfo \} = await fetchRestV2ConfigurationUsingCandidateApps\(/);
   assert.match(loadMvpdsSource, /premiumApps = promoteResolvedRestV2ConfigurationApp\(programmer,\s*premiumApps,\s*appInfo,\s*requestorId\) \|\| premiumApps;/);
   assert.match(loadMvpdsSource, /setRequestorScopedDomainCache\(requestorId,\s*domainRows\)/);
+  assert.match(fetchRestV2CandidatesSource, /const shouldTryNextProgrammerApp =/);
+  assert.match(fetchRestV2CandidatesSource, /isServiceProviderTokenMismatchError\(normalized\.message\)/);
+  assert.match(fetchRestV2CandidatesSource, /tryingNextProgrammerApp:\s*shouldTryNextProgrammerApp/);
+  assert.match(fetchRestV2CandidatesSource, /if \(shouldTryNextProgrammerApp\) \{\s*continue;\s*\}/);
   assert.match(restSelectionContextSource, /const runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp\(/);
   assert.match(restSelectionContextSource, /const baseCandidates = collectProgrammerScopedRestV2AppCandidates\(resolvedProgrammer\.programmerId,\s*premiumApps\);/);
   assert.match(restSelectionContextSource, /restV2AppCandidates:\s*resolvedApp\?\.guid \? \[resolvedApp\] : \[\],/);

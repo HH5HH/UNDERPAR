@@ -170,7 +170,7 @@ const UNDERPAR_IBETA_HANDLER_BASE_URL = "https://hh5hh.com/ups/";
 const UNDERPAR_IBETA_HANDLER_STORE_URL = `${UNDERPAR_IBETA_HANDLER_BASE_URL}index.php?mode=store`;
 const UNDERPAR_IBETA_REQUEST_TIMEOUT_MS = 8000;
 const UNDERPAR_UPSPACE_SLACK_LINK_LABEL = "[ ^ ]";
-const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 4;
+const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 5;
 const UNDERPAR_VAULT_STATUS_PENDING = "pending";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
 const UNDERPAR_VAULT_STATUS_PARTIAL = "partial";
@@ -96440,8 +96440,7 @@ function promoteResolvedRestV2ConfigurationApp(programmer = null, services = nul
 
 function orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestorId) {
   void requestorId;
-  void restV2Apps;
-  return resolvedApp?.guid ? [resolvedApp] : [];
+  return mergeUniquePremiumServiceAppInfos(resolvedApp, restV2Apps);
 }
 
 async function fetchRestV2ConfigurationUsingCandidateApps(programmer, requestorId, orderedCandidates) {
@@ -96450,24 +96449,36 @@ async function fetchRestV2ConfigurationUsingCandidateApps(programmer, requestorI
     throw new Error("No REST V2 app candidates available.");
   }
 
-  const appInfo = candidates[0];
-  try {
-    const result = await fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId);
-    return {
-      map: result?.map instanceof Map ? result.map : new Map(),
-      domainRows: Array.isArray(result?.domainRows) ? result.domainRows : [],
-      appInfo,
-    };
-  } catch (error) {
-    const normalized = error instanceof Error ? error : new Error(String(error));
-    log("REST V2 configuration attempt failed", {
-      requestorId,
-      programmerId: programmer?.programmerId || "",
-      app: appInfo?.appName || appInfo?.guid || "unknown",
-      error: normalized.message,
-    });
-    throw normalized;
+  let lastError = null;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const appInfo = candidates[index];
+    try {
+      const result = await fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId);
+      return {
+        map: result?.map instanceof Map ? result.map : new Map(),
+        domainRows: Array.isArray(result?.domainRows) ? result.domainRows : [],
+        appInfo,
+      };
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      lastError = normalized;
+      const shouldTryNextProgrammerApp =
+        isServiceProviderTokenMismatchError(normalized.message) && index < candidates.length - 1;
+      log("REST V2 configuration attempt failed", {
+        requestorId,
+        programmerId: programmer?.programmerId || "",
+        app: appInfo?.appName || appInfo?.guid || "unknown",
+        error: normalized.message,
+        tryingNextProgrammerApp: shouldTryNextProgrammerApp,
+      });
+      if (shouldTryNextProgrammerApp) {
+        continue;
+      }
+      throw normalized;
+    }
   }
+
+  throw lastError || new Error("No REST V2 app candidates available.");
 }
 
 async function loadMvpdsFromRestV2(requestorId) {
@@ -96510,21 +96521,26 @@ async function loadMvpdsFromRestV2(requestorId) {
           }
           continue;
         }
-        await ensureSelectedProgrammerApplicationsLoaded(programmer, {
-          forceRefresh: false,
-          preferredTabId: 0,
-          requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
-        }).catch(() => null);
+        const liveApplicationsData =
+          (await ensureSelectedProgrammerApplicationsLoaded(programmer, {
+            forceRefresh: false,
+            preferredTabId: 0,
+            requestTimeoutMs: PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS,
+          }).catch(() => null)) || getCurrentProgrammerApplicationsSnapshot(programmer.programmerId) || {};
         let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
+        const runtimeSeedIsVaultBacked =
+          isPassVaultBackedValue(premiumApps) || isPassVaultBackedValue(premiumApps?.restV2);
         const requiresRuntimeHydration =
+          runtimeSeedIsVaultBacked ||
           !isProgrammerRuntimeServicesReady(programmer.programmerId, premiumApps) ||
           !runtimePrimaryApp?.guid ||
           !hasPassVaultServiceClientCredentials(programmer.programmerId, runtimePrimaryApp);
         if (requiresRuntimeHydration) {
           premiumApps =
             (await primeProgrammerServiceHydration(programmer, premiumApps, {
-              forceRefresh: false,
+              forceRefresh: runtimeSeedIsVaultBacked,
               controllerReason: "requestor-restv2-load",
+              applicationsData: liveApplicationsData,
             }).catch(() => null)) ||
             getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
             premiumApps;
@@ -96535,7 +96551,14 @@ async function loadMvpdsFromRestV2(requestorId) {
         }
 
         hasRestV2Candidate = true;
-        const orderedCandidates = orderRestV2AppCandidatesForRequestor([runtimePrimaryApp], runtimePrimaryApp, requestorId);
+        const orderedCandidates = orderRestV2AppCandidatesForRequestor(
+          mergeUniquePremiumServiceAppInfos(
+            runtimePrimaryApp,
+            collectProgrammerScopedRestV2AppCandidates(programmer.programmerId, premiumApps)
+          ),
+          runtimePrimaryApp,
+          requestorId
+        );
         const { map, domainRows, appInfo } = await fetchRestV2ConfigurationUsingCandidateApps(
           programmer,
           requestorId,
