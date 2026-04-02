@@ -48083,9 +48083,10 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
   }
 
   const directEntities = normalizeApplicationsResponse(mvpdCall?.parsed || null);
+  const proxyParentEntities = normalizeApplicationsResponse(mvpdProxyCall?.parsed || null);
   const proxiedEntityRefs = [];
   const proxiedRefSeen = new Set();
-  directEntities.forEach((entity) => {
+  [...directEntities, ...proxyParentEntities].forEach((entity) => {
     const entityData = mvpdWorkspaceGetEntityData(entity);
     const proxiedRefs =
       entityData?.proxiedMvpds && typeof entityData.proxiedMvpds === "object"

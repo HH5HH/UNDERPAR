@@ -78,6 +78,45 @@ function loadMvpdSearchHelpers() {
   return context.module.exports;
 }
 
+function loadMvpdSearchCatalogBuilder(fetchStub) {
+  const filePath = path.join(ROOT, "popup.js");
+  const source = fs.readFileSync(filePath, "utf8");
+  const script = [
+    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : []) { const text = String(value ?? '').trim(); if (text) { return text; } } return ''; }",
+    "function getActiveAdobePassEnvironmentKey() { return 'release-production'; }",
+    "function resolveAdobePassEnvironment(environmentKey = '') { return { key: String(environmentKey || '').trim(), label: 'Release Production', consoleBase: 'https://console.example.test' }; }",
+    "function buildAdobeConsoleRestApiUrl(path = '', base = '') { return `${String(base || '').replace(/\\/$/, '')}/${String(path || '').replace(/^\\//, '')}`; }",
+    "function appendAdobeConsoleConfigurationVersion(url = '', configurationVersion = 0) { return configurationVersion > 0 ? `${url}${url.includes('?') ? '&' : '?'}configurationVersion=${configurationVersion}` : url; }",
+    "function mvpdWorkspaceExtractConfigurationVersion(parsed = null, fallback = 0) { return Number(parsed?.configurationVersion || fallback || 0); }",
+    "async function mvpdWorkspaceFetchCall(action, label, urls, options, debugContext) { return globalThis.__fetchStub(action, label, urls, options, debugContext); }",
+    extractFunctionSource(source, "mvpdWorkspaceNormalizeEntityRef"),
+    extractFunctionSource(source, "mvpdWorkspaceSplitEntityRef"),
+    extractFunctionSource(source, "mvpdWorkspaceGetEntityData"),
+    extractFunctionSource(source, "extractEntityIdFromToken"),
+    extractFunctionSource(source, "normalizeApplicationsResponse"),
+    extractFunctionSource(source, "normalizeUpDevtoolsMvpdSearchCatalogKey"),
+    extractFunctionSource(source, "buildUpDevtoolsMvpdSearchRows"),
+    extractFunctionSource(source, "buildUpDevtoolsMvpdSearchCatalog"),
+    "module.exports = { buildUpDevtoolsMvpdSearchCatalog };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    Map,
+    Set,
+    Object,
+    Array,
+    String,
+    JSON,
+    Date,
+    globalThis: {
+      __fetchStub: fetchStub,
+    },
+  };
+  vm.runInNewContext(script, context, { filename: filePath });
+  return context.module.exports;
+}
+
 function normalizeVmValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -308,4 +347,86 @@ test("UP DevTools MVPD search filter matches normalized MVPD names, ids, owners,
     normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "turner adultswim cartoonnetwork")),
     [rows[0], rows[4]]
   );
+});
+
+test("UP DevTools MVPD search catalog bulk-loads proxied MVPD refs declared by proxy parents", async () => {
+  const fetchCalls = [];
+  const { buildUpDevtoolsMvpdSearchCatalog } = loadMvpdSearchCatalogBuilder(async (action, label, urls, options) => {
+    fetchCalls.push({
+      action,
+      label,
+      urls: normalizeVmValue(urls),
+      body: options?.body ? JSON.parse(options.body) : null,
+    });
+    if (action === "upDevtoolsMvpdSearchConfigurationVersion") {
+      return { ok: true, parsed: { configurationVersion: 3709 } };
+    }
+    if (action === "upDevtoolsMvpdCatalog") {
+      return {
+        ok: true,
+        parsed: {
+          entities: [],
+        },
+      };
+    }
+    if (action === "upDevtoolsMvpdProxyCatalog") {
+      return {
+        ok: true,
+        parsed: {
+          entities: [
+            {
+              key: "MvpdProxy:claroprparent",
+              entityData: {
+                id: "claroprparent",
+                displayName: "Claro Parent Proxy",
+                proxiedMvpds: {
+                  claroPuertoRico: "MvpdProxy:nrtccpr010",
+                },
+              },
+            },
+          ],
+        },
+      };
+    }
+    if (action === "upDevtoolsIntegrationConfigurationCatalog") {
+      return {
+        ok: true,
+        parsed: {
+          entities: [],
+        },
+      };
+    }
+    if (action === "upDevtoolsProxiedMvpdCatalog") {
+      return {
+        ok: true,
+        parsed: {
+          entities: [
+            {
+              key: "MvpdProxy:nrtccpr010",
+              entityData: {
+                id: "nrtccpr010",
+                displayName: "Claro Puerto Rico",
+                owner: "MvpdProxy:claroprparent",
+                serviceProviderIds: ["nbade"],
+              },
+            },
+          ],
+        },
+      };
+    }
+    throw new Error(`Unexpected action: ${action}`);
+  });
+
+  const catalog = await buildUpDevtoolsMvpdSearchCatalog("release-production");
+  const proxiedCall = fetchCalls.find((call) => call.action === "upDevtoolsProxiedMvpdCatalog");
+
+  assert(proxiedCall, "Expected proxied MVPD bulk retrieve call.");
+  assert.deepEqual(normalizeVmValue(proxiedCall.body?.entities), ["MvpdProxy:nrtccpr010"]);
+
+  const rows = normalizeVmValue(catalog.rows);
+  const claroRow = rows.find((row) => row.id === "nrtccpr010");
+  assert(claroRow, "Expected Claro Puerto Rico to be indexed in MVPD search results.");
+  assert.equal(claroRow.displayName, "Claro Puerto Rico");
+  assert.match(claroRow.searchText, /claro puerto rico/);
+  assert.match(claroRow.searchText, /nrtccpr010/);
 });
