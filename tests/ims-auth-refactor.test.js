@@ -1184,6 +1184,22 @@ test("requestor change waits for programmer refresh before loading MVPDs", () =>
   assert.ok(requestorChangeBlock, "requestor change handler should await programmer refresh before MVPD load");
 });
 
+test("requestor selector stays disabled until the selected programmer is reusable", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const selectProgrammerSource = extractFunctionSource(popupSource, "selectProgrammerForController");
+  const populateRequestorSource = extractFunctionSource(popupSource, "populateRequestorSelect");
+  const syncRequestorSource = extractFunctionSource(popupSource, "syncRequestorSelectHydrationAvailability");
+  const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+
+  assert.match(selectProgrammerSource, /syncRequestorSelectHydrationAvailability\(String\(resolvedProgrammer\?\.programmerId \|\| ""\)\.trim\(\),\s*null\);/);
+  assert.match(populateRequestorSource, /syncRequestorSelectHydrationAvailability\(/);
+  assert.match(syncRequestorSource, /const ready =[\s\S]*shouldRenderPremiumServicesUi\(normalizedProgrammerId,\s*services\);/);
+  assert.match(syncRequestorSource, /els\.requestorSelect\.disabled = !hasRequestorOptions \|\| !ready;/);
+  assert.match(refreshPanelsSource, /syncRequestorSelectHydrationAvailability\(programmerId,\s*null\);/);
+  assert.match(refreshPanelsSource, /syncRequestorSelectHydrationAvailability\(programmerId,\s*reusableServices\);/);
+  assert.match(refreshPanelsSource, /syncRequestorSelectHydrationAvailability\(programmerId,\s*renderServices\);/);
+});
+
 test("active auth and bootstrap flows no longer fall back to cookie-session activation", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const signInSource = extractFunctionSource(popupSource, "signInInteractive");
@@ -2524,10 +2540,15 @@ test("REST V2 DCR caches are bound to the parent software statement and legacy c
   assert.match(boundCacheSource, /Number\(normalizedCache\.cacheBindingVersion \|\| 0\) >= UNDERPAR_DCR_CACHE_BINDING_VERSION/);
   assert.match(hydrateServiceSource, /const cacheBindingRepairRequired =/);
   assert.match(hydrateServiceSource, /forceDetails:\s*cacheBindingRepairRequired/);
+  assert.match(hydrateServiceSource, /let authoritativeSoftwareStatement = "";/);
+  assert.match(hydrateServiceSource, /if \(cacheBindingRepairRequired && guid\) \{/);
+  assert.match(hydrateServiceSource, /Authoritative software statement unavailable for \$\{applicationLabel\}/);
   assert.match(hydrateServiceSource, /const softwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint\(softwareStatement\);/);
   assert.match(hydrateServiceSource, /nextClient\.cacheBindingVersion =[\s\S]*UNDERPAR_DCR_CACHE_BINDING_VERSION/);
   assert.match(ensureDcrSource, /let cacheBindingRepairRequired =/);
-  assert.match(ensureDcrSource, /\(forceFreshClientRegistration \|\| cacheBindingRepairRequired\) && resolvedAppInfo\?\.guid/);
+  assert.match(ensureDcrSource, /const authoritativeRepairRequired = cacheBindingRepairRequired && shouldBindCache\(\);/);
+  assert.match(ensureDcrSource, /\(forceFreshClientRegistration \|\| authoritativeRepairRequired\) && resolvedAppInfo\?\.guid/);
+  assert.match(ensureDcrSource, /Authoritative software statement unavailable for \$\{resolvedAppInfo\.appName \|\| resolvedAppInfo\.guid\}\./);
   assert.match(ensureDcrSource, /cache\.softwareStatementFingerprint = shouldBindCache\(\) \? softwareStatementFingerprint : "";/);
   assert.match(ensureDcrSource, /cache\.cacheBindingVersion = shouldBindCache\(\) \? UNDERPAR_DCR_CACHE_BINDING_VERSION : 0;/);
 });
@@ -2553,7 +2574,7 @@ test("selected premium app hydration mirrors LoginButton detail and software-sta
   assert.match(enrichSource, /fetchApplicationDetailsByGuid\(guid,\s*requestOptions\)/);
   assert.match(enrichSource, /fetchSoftwareStatementForAppGuid\(guid,\s*requestOptions\)/);
   assert.match(ensureDcrSource, /enrichRegisteredApplicationForHydration\(resolvedAppInfo,\s*\{/);
-  assert.match(ensureDcrSource, /if \(\(forceFreshClientRegistration \|\| cacheBindingRepairRequired\) && resolvedAppInfo\?\.guid\) \{/);
+  assert.match(ensureDcrSource, /if \(\(forceFreshClientRegistration \|\| authoritativeRepairRequired\) && resolvedAppInfo\?\.guid\) \{/);
   assert.match(ensureDcrSource, /const authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid\(resolvedAppInfo\.guid,\s*\{/);
 });
 
@@ -2917,6 +2938,8 @@ test("REST V2 app selection stays media-company scoped and keeps the programmer 
   assert.doesNotMatch(switchServiceSource, /setRequestorScopedRestV2AuthContext\(/);
   assert.match(primeHydrationSource, /await ensureSelectedProgrammerApplicationsLoaded\(programmer,\s*\{/);
   assert.match(primeHydrationSource, /applicationsData:\s*resolvedApplicationsData,/);
+  assert.match(loadMvpdsSource, /const activeHydrationPromise = getProgrammerServiceHydrationPromise\(programmer\.programmerId\);/);
+  assert.match(loadMvpdsSource, /if \(activeHydrationPromise\) \{\s*await activeHydrationPromise\.catch\(\(\) => null\);\s*\}/);
   assert.match(loadMvpdsSource, /const programmerReuseReadiness = getPassVaultProgrammerReuseReadiness\(programmer\.programmerId\);/);
   assert.match(loadMvpdsSource, /let premiumApps = programmerReuseReadiness\.runtimeServices \|\| getCurrentPremiumAppsSnapshot\(programmer\.programmerId\);/);
   assert.match(loadMvpdsSource, /let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\);/);

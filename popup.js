@@ -171,7 +171,7 @@ const UNDERPAR_IBETA_HANDLER_STORE_URL = `${UNDERPAR_IBETA_HANDLER_BASE_URL}inde
 const UNDERPAR_IBETA_REQUEST_TIMEOUT_MS = 8000;
 const UNDERPAR_UPSPACE_SLACK_LINK_LABEL = "[ ^ ]";
 const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 5;
-const UNDERPAR_DCR_CACHE_BINDING_VERSION = 1;
+const UNDERPAR_DCR_CACHE_BINDING_VERSION = 2;
 const UNDERPAR_VAULT_STATUS_PENDING = "pending";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
 const UNDERPAR_VAULT_STATUS_PARTIAL = "partial";
@@ -9018,13 +9018,23 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
       sharedHydratedApplicationsByGuid.set(guid, cloneJsonLikeValue(registeredApplication, null));
     }
 
+    let authoritativeSoftwareStatement = "";
+    if (cacheBindingRepairRequired && guid) {
+      authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(guid, {
+        timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+        preferAuthenticatedHeaders: true,
+        preferredTabId: 0,
+        allowTemporaryPageContextTab: true,
+      }).catch(() => "");
+    }
     const softwareStatement = firstNonEmptyString([
+      authoritativeSoftwareStatement,
       registeredApplication?.softwareStatement,
       extractSoftwareStatementFromAppData(registeredApplication?.appData || null),
       extractSoftwareStatementFromAppData(registeredApplication),
     ]);
     const softwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint(softwareStatement);
-    if (!softwareStatement) {
+    if (!softwareStatement || (cacheBindingRepairRequired && !authoritativeSoftwareStatement)) {
       return {
         ...currentRecord,
         available: true,
@@ -9033,7 +9043,10 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
         client: normalizeUnderparVaultCredentialEntry({
           ...nextClient,
           updatedAt: now,
-          error: `No software statement found on app ${applicationLabel}`,
+          error:
+            cacheBindingRepairRequired && !authoritativeSoftwareStatement
+              ? `Authoritative software statement unavailable for ${applicationLabel}`
+              : `No software statement found on app ${applicationLabel}`,
         }),
         status: "partial",
       };
@@ -11025,6 +11038,7 @@ function selectProgrammerForController(programmer = null, controllerReason = "me
     els.mediaCompanySelect.value = state.selectedProgrammerKey;
   }
   populateRequestorSelect();
+  syncRequestorSelectHydrationAvailability(String(resolvedProgrammer?.programmerId || "").trim(), null);
   esmWorkspaceBroadcastSelectedControllerState(resolvedProgrammer, null, 0, {
     controllerReason,
     esmAvailabilityResolved: false,
@@ -84143,6 +84157,7 @@ function populateRequestorSelect() {
   state.selectedMvpdId = "";
   const requestorOptions = getRequestorsForSelectedMediaCompany();
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  const selectedProgrammerId = String(resolveSelectedProgrammer()?.programmerId || "").trim();
 
   els.requestorSelect.innerHTML = "";
   const defaultOption = document.createElement("option");
@@ -84157,19 +84172,37 @@ function populateRequestorSelect() {
     els.requestorSelect.appendChild(option);
   }
 
-  els.requestorSelect.disabled = requestorOptions.length === 0;
   if (selectedRequestorId && requestorOptions.some((option) => String(option.id || "").trim() === selectedRequestorId)) {
     els.requestorSelect.value = selectedRequestorId;
   } else {
     state.selectedRequestorId = "";
     els.requestorSelect.value = "";
   }
+  syncRequestorSelectHydrationAvailability(
+    selectedProgrammerId,
+    selectedProgrammerId ? getCurrentPremiumAppsSnapshot(selectedProgrammerId) : null
+  );
 
   els.mvpdSelect.disabled = true;
   els.mvpdSelect.innerHTML = '<option value=""></option>';
   syncGlobalQuickLaunchButtons();
   refreshRestV2LoginPanels();
   refreshMvpdWorkspaceTools();
+}
+
+function syncRequestorSelectHydrationAvailability(programmerId = "", services = null) {
+  if (!els?.requestorSelect) {
+    return false;
+  }
+
+  const normalizedProgrammerId = String(programmerId || resolveSelectedProgrammer()?.programmerId || "").trim();
+  const hasRequestorOptions = Array.from(els.requestorSelect.options || []).some((option) =>
+    String(option?.value || "").trim()
+  );
+  const ready =
+    Boolean(normalizedProgrammerId) && shouldRenderPremiumServicesUi(normalizedProgrammerId, services);
+  els.requestorSelect.disabled = !hasRequestorOptions || !ready;
+  return els.requestorSelect.disabled !== true;
 }
 
 function getCmMvpdSelectionKey(programmerId = "", requestorId = "", mvpdId = "") {
@@ -84250,10 +84283,12 @@ async function refreshProgrammerPanels(options = {}) {
   }
 
   if (!programmer) {
+    syncRequestorSelectHydrationAvailability("", null);
     renderPremiumServices(null, null, { controllerReason });
     return;
   }
   const programmerId = String(programmer?.programmerId || "").trim();
+  syncRequestorSelectHydrationAvailability(programmerId, null);
   const retainedConsoleTabId = Number(options.preferredTabId || 0);
   const programmerApplicationsPromise =
     options.programmerApplicationsPromise && typeof options.programmerApplicationsPromise.then === "function"
@@ -84358,6 +84393,7 @@ async function refreshProgrammerPanels(options = {}) {
       isProgrammerHrContextHydrationReady(programmerId, reusableServices)
     );
     clearStatusUnlessCmTenantsPrecheckBlocked();
+    syncRequestorSelectHydrationAvailability(programmerId, reusableServices);
     renderPremiumServices(reusableServices, programmer, { controllerReason });
     return;
   }
@@ -84475,6 +84511,7 @@ async function refreshProgrammerPanels(options = {}) {
     clearProgrammerPremiumHydrationProgress(programmerId);
     setProgrammerWorkspaceHydrationReady(programmerId, hrContextReady);
     clearStatusUnlessCmTenantsPrecheckBlocked();
+    syncRequestorSelectHydrationAvailability(programmerId, renderServices);
     renderPremiumServices(renderServices, programmer, { controllerReason });
 
     const cmHydrationPromise = Promise.resolve().then(() => {
@@ -84542,12 +84579,15 @@ async function refreshProgrammerPanels(options = {}) {
       }
       emitPremiumServiceDecisionLogs(programmer, provisionalServices);
       if (shouldRenderPremiumServicesUi(programmerId, provisionalServices)) {
+        syncRequestorSelectHydrationAvailability(programmerId, provisionalServices);
         renderPremiumServices(provisionalServices, programmer, { controllerReason });
       } else {
+        syncRequestorSelectHydrationAvailability(programmerId, null);
         renderPremiumServicesError(error, { controllerReason });
       }
       return;
     }
+    syncRequestorSelectHydrationAvailability(programmerId, null);
     renderPremiumServicesError(error, { controllerReason });
   }
 }
@@ -87851,7 +87891,8 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
         extractSoftwareStatementFromAppData(resolvedAppInfo?.appData || null),
         extractSoftwareStatementFromAppData(resolvedAppInfo),
       ]);
-      if ((forceFreshClientRegistration || cacheBindingRepairRequired) && resolvedAppInfo?.guid) {
+      const authoritativeRepairRequired = cacheBindingRepairRequired && shouldBindCache();
+      if ((forceFreshClientRegistration || authoritativeRepairRequired) && resolvedAppInfo?.guid) {
         try {
           const authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(resolvedAppInfo.guid, {
             timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
@@ -87865,6 +87906,11 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
           }
         } catch {
           // Fall through to the current in-memory statement.
+        }
+        if (authoritativeRepairRequired) {
+          throw new Error(
+            `Authoritative software statement unavailable for ${resolvedAppInfo.appName || resolvedAppInfo.guid}.`
+          );
         }
       }
       if (currentStatement) {
@@ -96675,6 +96721,10 @@ async function loadMvpdsFromRestV2(requestorId) {
     let hasRestV2Candidate = false;
     for (const programmer of programmers) {
       try {
+        const activeHydrationPromise = getProgrammerServiceHydrationPromise(programmer.programmerId);
+        if (activeHydrationPromise) {
+          await activeHydrationPromise.catch(() => null);
+        }
         await hydrateProgrammerFromPassVault(programmer, {
           forceReload: false,
           forceOverwrite: false,
