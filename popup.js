@@ -47679,15 +47679,60 @@ function normalizeUpDevtoolsMvpdSearchCatalogKey(value = "") {
   return String(value || "").trim().toLowerCase();
 }
 
-function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = null, mvpdProxyPayload = null) {
+function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, mvpdProxyPayload = null, integrationPayload = null) {
   const directEntities = normalizeApplicationsResponse(mvpdPayload);
-  const proxiedEntities = [
-    ...normalizeApplicationsResponse(proxiedMvpdPayload),
-    ...normalizeApplicationsResponse(mvpdProxyPayload),
-  ];
+  const proxyEntities = normalizeApplicationsResponse(mvpdProxyPayload);
+  const integrationEntities = normalizeApplicationsResponse(integrationPayload);
   const directById = new Map();
   const proxyById = new Map();
   const proxyOwnerById = new Map();
+  const integrationsByOwnerId = new Map();
+  const normalizeSearchToken = (value = "") =>
+    String(value || "")
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/[^a-z0-9]+/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  const humanizeIdentifier = (value = "") =>
+    String(value || "")
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const sortText = (values = []) =>
+    (Array.isArray(values) ? values : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base", numeric: true }));
+  const mergeStringArrays = (...sources) => {
+    const values = [];
+    const seen = new Set();
+    sources.forEach((source) => {
+      (Array.isArray(source) ? source : []).forEach((value) => {
+        const normalized = String(value || "").trim();
+        const key = normalizeUpDevtoolsMvpdSearchCatalogKey(normalized);
+        if (!normalized || !key || seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+        values.push(normalized);
+      });
+    });
+    return sortText(values);
+  };
+  const buildSearchText = (values = []) =>
+    Array.from(
+      new Set(
+        (Array.isArray(values) ? values : [])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+          .flatMap((value) => {
+            const normalized = normalizeSearchToken(value);
+            return normalized && normalized !== value.toLowerCase() ? [value.toLowerCase(), normalized] : [value.toLowerCase()];
+          })
+      )
+    ).join(" ");
   const buildRecord = (entity = null) => {
     const entityData = mvpdWorkspaceGetEntityData(entity);
     if (!entityData || typeof entityData !== "object") {
@@ -47709,7 +47754,57 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = 
       data: entityData,
       entityRef: mvpdWorkspaceNormalizeEntityRef(entityRef),
       id: String(id || "").trim(),
-      displayName: firstNonEmptyString([entityData?.displayName, entityData?.name, id]),
+      displayName: firstNonEmptyString([entityData?.displayName, entityData?.name, humanizeIdentifier(id), id]),
+    };
+  };
+  const appendIntegrationRecord = (ownerId = "", integrationRecord = null) => {
+    const normalizedOwnerId = normalizeUpDevtoolsMvpdSearchCatalogKey(ownerId);
+    if (!normalizedOwnerId || !integrationRecord) {
+      return;
+    }
+    if (!integrationsByOwnerId.has(normalizedOwnerId)) {
+      integrationsByOwnerId.set(normalizedOwnerId, []);
+    }
+    integrationsByOwnerId.get(normalizedOwnerId).push(integrationRecord);
+  };
+  const summarizeIntegrations = (ownerId = "", allowedServiceProviderIds = []) => {
+    const normalizedOwnerId = normalizeUpDevtoolsMvpdSearchCatalogKey(ownerId);
+    const integrationRecords = integrationsByOwnerId.get(normalizedOwnerId) || [];
+    const allowedServiceProviderIdSet = new Set(
+      (Array.isArray(allowedServiceProviderIds) ? allowedServiceProviderIds : [])
+        .map((value) => normalizeUpDevtoolsMvpdSearchCatalogKey(value))
+        .filter(Boolean)
+    );
+    const serviceProviderIds = new Set();
+    const integrationIds = new Set();
+    let enabledIntegrationCount = 0;
+    let disabledIntegrationCount = 0;
+    integrationRecords.forEach((integrationRecord) => {
+      const normalizedServiceProviderId = normalizeUpDevtoolsMvpdSearchCatalogKey(integrationRecord?.serviceProviderId);
+      if (allowedServiceProviderIdSet.size > 0 && !allowedServiceProviderIdSet.has(normalizedServiceProviderId)) {
+        return;
+      }
+      const serviceProviderId = String(integrationRecord?.serviceProviderId || "").trim();
+      const integrationId = String(integrationRecord?.integrationId || "").trim() || serviceProviderId;
+      if (serviceProviderId) {
+        serviceProviderIds.add(serviceProviderId);
+      }
+      if (!integrationId || integrationIds.has(normalizeUpDevtoolsMvpdSearchCatalogKey(integrationId))) {
+        return;
+      }
+      integrationIds.add(normalizeUpDevtoolsMvpdSearchCatalogKey(integrationId));
+      if (integrationRecord?.enabled === false) {
+        disabledIntegrationCount += 1;
+      } else {
+        enabledIntegrationCount += 1;
+      }
+    });
+    return {
+      associatedServiceProviderIds: sortText([...serviceProviderIds]),
+      associatedServiceProviderCount: serviceProviderIds.size,
+      integrationCount: integrationIds.size,
+      enabledIntegrationCount,
+      disabledIntegrationCount,
     };
   };
 
@@ -47736,7 +47831,7 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = 
     });
   });
 
-  proxiedEntities.forEach((entity) => {
+  proxyEntities.forEach((entity) => {
     const record = buildRecord(entity);
     if (!record) {
       return;
@@ -47782,9 +47877,31 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = 
       }
     }
   });
+  integrationEntities.forEach((entity) => {
+    const integrationData = mvpdWorkspaceGetEntityData(entity);
+    if (!integrationData || typeof integrationData !== "object") {
+      return;
+    }
+    const ownerRef = firstNonEmptyString([integrationData?.owner, entity?.owner]);
+    const ownerParts = mvpdWorkspaceSplitEntityRef(ownerRef);
+    const ownerId = firstNonEmptyString([ownerParts.id, extractEntityIdFromToken(ownerRef)]);
+    const serviceProviderRef = firstNonEmptyString([integrationData?.serviceProvider, entity?.serviceProvider]);
+    const serviceProviderParts = mvpdWorkspaceSplitEntityRef(serviceProviderRef);
+    const serviceProviderId = firstNonEmptyString([serviceProviderParts.id, extractEntityIdFromToken(serviceProviderRef)]);
+    const integrationId = firstNonEmptyString([integrationData?.id, entity?.id, entity?.key, ownerId && serviceProviderId ? `${ownerId}:${serviceProviderId}` : ""]);
+    if (!ownerId || (!serviceProviderId && !integrationId)) {
+      return;
+    }
+    appendIntegrationRecord(ownerId, {
+      integrationId,
+      serviceProviderId,
+      enabled: integrationData?.enabled !== false && entity?.enabled !== false,
+    });
+  });
 
   const rows = [];
   directById.forEach((record) => {
+    const integrationSummary = summarizeIntegrations(record.id);
     rows.push({
       resultKey: `mvpd:${normalizeUpDevtoolsMvpdSearchCatalogKey(record.id)}`,
       entityType: "mvpd",
@@ -47793,22 +47910,31 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = 
       proxyOwnerId: "",
       proxyOwnerName: "",
       proxyOwnerLabel: "DIRECT MVPD",
-      searchText: [
+      associatedServiceProviderIds: integrationSummary.associatedServiceProviderIds,
+      associatedServiceProviderCount: integrationSummary.associatedServiceProviderCount,
+      integrationCount: integrationSummary.integrationCount,
+      enabledIntegrationCount: integrationSummary.enabledIntegrationCount,
+      disabledIntegrationCount: integrationSummary.disabledIntegrationCount,
+      searchText: buildSearchText([
         record.displayName,
         record.id,
+        ...integrationSummary.associatedServiceProviderIds,
         "direct mvpd",
-      ]
-        .join(" ")
-        .toLowerCase(),
+      ]),
     });
   });
   proxyById.forEach((record) => {
     const ownerRecord = proxyOwnerById.get(normalizeUpDevtoolsMvpdSearchCatalogKey(record.id)) || null;
     const proxyOwnerId = String(ownerRecord?.id || "").trim();
     const proxyOwnerName = String(ownerRecord?.displayName || "").trim();
-    const associatedServiceProviderIds = Array.isArray(record?.data?.serviceProviderIds)
+    const explicitServiceProviderIds = Array.isArray(record?.data?.serviceProviderIds)
       ? record.data.serviceProviderIds.map((value) => String(value || "").trim()).filter(Boolean)
       : [];
+    const integrationSummary = summarizeIntegrations(proxyOwnerId, explicitServiceProviderIds);
+    const associatedServiceProviderIds = mergeStringArrays(
+      explicitServiceProviderIds,
+      integrationSummary.associatedServiceProviderIds
+    );
     const proxyOwnerLabel =
       proxyOwnerName && proxyOwnerId && proxyOwnerName.toLowerCase() !== proxyOwnerId.toLowerCase()
         ? `${proxyOwnerName} (${proxyOwnerId})`
@@ -47821,7 +47947,12 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = 
       proxyOwnerId,
       proxyOwnerName,
       proxyOwnerLabel,
-      searchText: [
+      associatedServiceProviderIds,
+      associatedServiceProviderCount: associatedServiceProviderIds.length,
+      integrationCount: integrationSummary.integrationCount,
+      enabledIntegrationCount: integrationSummary.enabledIntegrationCount,
+      disabledIntegrationCount: integrationSummary.disabledIntegrationCount,
+      searchText: buildSearchText([
         record.displayName,
         record.id,
         proxyOwnerName,
@@ -47830,9 +47961,7 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = 
         ...associatedServiceProviderIds,
         "proxied mvpd",
         "proxy mvpd",
-      ]
-        .join(" ")
-        .toLowerCase(),
+      ]),
     });
   });
 
@@ -47859,12 +47988,15 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = 
     directById,
     proxyById,
     proxyOwnerById,
+    integrationsByOwnerId,
     rows,
   };
 }
 
 function filterUpDevtoolsMvpdSearchRows(rows = [], query = "") {
   const tokens = String(query || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[^a-z0-9]+/gi, " ")
     .trim()
     .toLowerCase()
     .split(/\s+/)
@@ -47897,7 +48029,7 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
     const baseUrl = buildAdobeConsoleRestApiUrl(entityPath, environment.consoleBase);
     return configurationVersion > 0 ? appendAdobeConsoleConfigurationVersion(baseUrl, configurationVersion) : baseUrl;
   };
-  const [mvpdCall, mvpdProxyCall] = await Promise.all([
+  const [mvpdCall, mvpdProxyCall, integrationCall] = await Promise.all([
     mvpdWorkspaceFetchCall(
       "upDevtoolsMvpdCatalog",
       "MVPD Catalog",
@@ -47912,6 +48044,13 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
       null,
       debugContext
     ),
+    mvpdWorkspaceFetchCall(
+      "upDevtoolsIntegrationConfigurationCatalog",
+      "Integration Configuration Catalog",
+      [buildEntityUrl("entity/IntegrationConfiguration")],
+      null,
+      debugContext
+    ),
   ]);
 
   if (!mvpdCall?.ok) {
@@ -47920,53 +48059,14 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
   if (!mvpdProxyCall?.ok) {
     throw new Error(String(mvpdProxyCall?.error || "MVPD Proxy Catalog failed."));
   }
-
-  const directEntities = normalizeApplicationsResponse(mvpdCall?.parsed || null);
-  const proxiedEntityRefs = [];
-  const proxiedRefSeen = new Set();
-  directEntities.forEach((entity) => {
-    const entityData = mvpdWorkspaceGetEntityData(entity);
-    const proxiedRefs =
-      entityData?.proxiedMvpds && typeof entityData.proxiedMvpds === "object"
-        ? Object.values(entityData.proxiedMvpds)
-        : [];
-    proxiedRefs.forEach((entityRef) => {
-      const normalizedRef = mvpdWorkspaceNormalizeEntityRef(entityRef);
-      if (!normalizedRef || proxiedRefSeen.has(normalizedRef)) {
-        return;
-      }
-      proxiedRefSeen.add(normalizedRef);
-      proxiedEntityRefs.push(normalizedRef);
-    });
-  });
-
-  let proxiedMvpdsCall = null;
-  if (proxiedEntityRefs.length > 0) {
-    proxiedMvpdsCall = await mvpdWorkspaceFetchCall(
-      "upDevtoolsProxiedMvpdCatalog",
-      "Proxied MVPD Catalog",
-      [buildAdobeConsoleRestApiUrl("entity/bulkRetrieve", environment.consoleBase)],
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entities: proxiedEntityRefs,
-          ...(configurationVersion > 0 ? { configVersion: configurationVersion } : {}),
-        }),
-      },
-      debugContext
-    );
-    if (!proxiedMvpdsCall?.ok) {
-      throw new Error(String(proxiedMvpdsCall?.error || "Proxied MVPD Catalog failed."));
-    }
+  if (!integrationCall?.ok) {
+    throw new Error(String(integrationCall?.error || "Integration Configuration Catalog failed."));
   }
 
   const builtCatalog = buildUpDevtoolsMvpdSearchRows(
     mvpdCall?.parsed || null,
-    proxiedMvpdsCall?.parsed || null,
-    mvpdProxyCall?.parsed || null
+    mvpdProxyCall?.parsed || null,
+    integrationCall?.parsed || null
   );
   const rowByKey = new Map();
   builtCatalog.rows.forEach((row) => {
@@ -47981,7 +48081,7 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
     environmentKey: String(environment?.key || "").trim(),
     environmentLabel: String(environment?.label || "").trim(),
     configurationVersion,
-    calls: [versionCall, mvpdCall, mvpdProxyCall, ...(proxiedMvpdsCall ? [proxiedMvpdsCall] : [])],
+    calls: [versionCall, mvpdCall, mvpdProxyCall, integrationCall],
     directById: builtCatalog.directById,
     proxyById: builtCatalog.proxyById,
     proxyOwnerById: builtCatalog.proxyOwnerById,

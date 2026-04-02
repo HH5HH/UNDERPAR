@@ -4820,6 +4820,28 @@ function renderMvpdSearchResults(rows = [], options = {}) {
       const displayId = String(row?.id || "").trim();
       const ownerLabel = String(row?.proxyOwnerLabel || "").trim() || "DIRECT MVPD";
       const kindLabel = row?.entityType === "mvpdproxy" ? "Proxy" : "Direct";
+      const associatedServiceProviderIds = Array.isArray(row?.associatedServiceProviderIds)
+        ? row.associatedServiceProviderIds.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
+      const associatedServiceProviderCount = Math.max(
+        associatedServiceProviderIds.length,
+        Number(row?.associatedServiceProviderCount || 0)
+      );
+      const associatedServiceProviderPreview = associatedServiceProviderIds.slice(0, 4);
+      const requestorLabel =
+        associatedServiceProviderCount > 0
+          ? `Requestors (${associatedServiceProviderCount}): ${associatedServiceProviderPreview.join(", ")}${
+              associatedServiceProviderCount > associatedServiceProviderPreview.length
+                ? ` +${associatedServiceProviderCount - associatedServiceProviderPreview.length}`
+                : ""
+            }`
+          : "";
+      const integrationCount = Math.max(0, Number(row?.integrationCount || 0));
+      const enabledIntegrationCount = Math.max(0, Number(row?.enabledIntegrationCount || 0));
+      const ownerMetaLabel =
+        integrationCount > 0
+          ? `${enabledIntegrationCount}/${integrationCount} integration${integrationCount === 1 ? "" : "s"} enabled`
+          : "";
       const isViewBusy = panelState.mvpdSearchViewBusyKey === resultKey;
       return `
         <tr>
@@ -4836,11 +4858,13 @@ function renderMvpdSearchResults(rows = [], options = {}) {
               <span class="mvpd-search-kind">${escapeHtml(kindLabel)}</span>
               <span class="mvpd-search-id">${escapeHtml(displayId)}</span>
             </div>
+            ${requestorLabel ? `<p class="mvpd-search-associated">${escapeHtml(requestorLabel)}</p>` : ""}
           </td>
           <td>
             <span class="mvpd-search-owner${row?.entityType === "mvpdproxy" ? "" : " mvpd-search-owner--direct"}">${escapeHtml(
               ownerLabel
             )}</span>
+            ${ownerMetaLabel ? `<p class="mvpd-search-owner-meta">${escapeHtml(ownerMetaLabel)}</p>` : ""}
           </td>
           <td class="mvpd-search-actions-cell">
             <button

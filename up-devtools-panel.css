@@ -1133,6 +1133,14 @@ body::before {
   align-items: center;
 }
 
+.mvpd-search-associated,
+.mvpd-search-owner-meta {
+  margin: 6px 0 0;
+  color: var(--up-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .mvpd-search-kind,
 .mvpd-search-id,
 .mvpd-search-owner {
