@@ -2520,15 +2520,17 @@ test("premium app details still retain software statements while pass-vault mapp
   assert.match(sanitizeApplicationSource, /const softwareStatement = extractSoftwareStatementFromAppData\(source\);/);
   assert.match(sanitizeApplicationSource, /if \(softwareStatement\) \{\s*sanitized\.softwareStatement = softwareStatement;\s*\}/);
   assert.match(runtimeAppInfoSource, /softwareStatement:\s*firstNonEmptyString\(\[/);
-  assert.match(ensureDcrSource, /extractSoftwareStatementFromAppData\(resolvedAppInfo\?\.appData \|\| null\)/);
+  assert.match(ensureDcrSource, /resolveRegisteredApplicationSoftwareStatement\(resolvedAppInfo\)/);
 });
 
 test("REST V2 DCR caches are bound to the parent software statement and legacy caches are repaired once", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const emptyCredentialSource = extractFunctionSource(popupSource, "createEmptyUnderparVaultCredential");
   const normalizeCacheSource = extractFunctionSource(popupSource, "normalizeUnderparVaultDcrCache");
+  const resolveStatementSource = extractFunctionSource(popupSource, "resolveRegisteredApplicationSoftwareStatement");
   const bindingRequirementSource = extractFunctionSource(popupSource, "shouldRequireSoftwareStatementBoundDcrCache");
   const boundCacheSource = extractFunctionSource(popupSource, "hasSoftwareStatementBoundDcrCache");
+  const matchingBoundCacheSource = extractFunctionSource(popupSource, "hasMatchingSoftwareStatementBoundDcrCache");
   const hydrateServiceSource = extractFunctionSource(popupSource, "hydratePassVaultServiceRecordWithContext");
   const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
 
@@ -2536,9 +2538,16 @@ test("REST V2 DCR caches are bound to the parent software statement and legacy c
   assert.match(emptyCredentialSource, /cacheBindingVersion:\s*0/);
   assert.match(normalizeCacheSource, /softwareStatementFingerprint:\s*firstNonEmptyString\(\[/);
   assert.match(normalizeCacheSource, /cacheBindingVersion:\s*Math\.max\(/);
+  assert.match(resolveStatementSource, /String\(appInfo\?\.softwareStatement \|\| ""\)\.trim\(\)/);
+  assert.match(resolveStatementSource, /extractSoftwareStatementFromAppData\(appInfo\?\.appData \|\| null\)/);
   assert.match(bindingRequirementSource, /normalizedServiceKey === "restV2" \|\| normalizedRequiredScope === normalizeScope\(REST_V2_SCOPE\)/);
   assert.match(boundCacheSource, /Number\(normalizedCache\.cacheBindingVersion \|\| 0\) >= UNDERPAR_DCR_CACHE_BINDING_VERSION/);
-  assert.match(hydrateServiceSource, /const cacheBindingRepairRequired =/);
+  assert.match(matchingBoundCacheSource, /const expectedFingerprint = buildUnderparSoftwareStatementFingerprint\(softwareStatement\);/);
+  assert.match(matchingBoundCacheSource, /return String\(normalizedCache\.softwareStatementFingerprint \|\| ""\)\.trim\(\) === expectedFingerprint;/);
+  assert.match(hydrateServiceSource, /let cacheBindingRepairRequired =/);
+  assert.match(hydrateServiceSource, /const currentSoftwareStatement = resolveRegisteredApplicationSoftwareStatement\(registeredApplication\);/);
+  assert.match(hydrateServiceSource, /const currentSoftwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint\(currentSoftwareStatement\);/);
+  assert.match(hydrateServiceSource, /String\(nextClient\.softwareStatementFingerprint \|\| ""\)\.trim\(\) !== currentSoftwareStatementFingerprint/);
   assert.match(hydrateServiceSource, /forceDetails:\s*cacheBindingRepairRequired/);
   assert.match(hydrateServiceSource, /let authoritativeSoftwareStatement = "";/);
   assert.match(hydrateServiceSource, /if \(cacheBindingRepairRequired && guid\) \{/);
@@ -2546,6 +2555,8 @@ test("REST V2 DCR caches are bound to the parent software statement and legacy c
   assert.match(hydrateServiceSource, /const softwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint\(softwareStatement\);/);
   assert.match(hydrateServiceSource, /nextClient\.cacheBindingVersion =[\s\S]*UNDERPAR_DCR_CACHE_BINDING_VERSION/);
   assert.match(ensureDcrSource, /let cacheBindingRepairRequired =/);
+  assert.match(ensureDcrSource, /const currentSoftwareStatement = resolveRegisteredApplicationSoftwareStatement\(resolvedAppInfo\);/);
+  assert.match(ensureDcrSource, /const currentSoftwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint\(currentSoftwareStatement\);/);
   assert.match(ensureDcrSource, /const authoritativeRepairRequired = cacheBindingRepairRequired && shouldBindCache\(\);/);
   assert.match(ensureDcrSource, /\(forceFreshClientRegistration \|\| authoritativeRepairRequired\) && resolvedAppInfo\?\.guid/);
   assert.match(ensureDcrSource, /Authoritative software statement unavailable for \$\{resolvedAppInfo\.appName \|\| resolvedAppInfo\.guid\}\./);

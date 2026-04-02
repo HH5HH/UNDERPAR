@@ -1269,6 +1269,14 @@ function buildUnderparSoftwareStatementFingerprint(value = "") {
   return buildUnderparTextFingerprint(normalized, "sst");
 }
 
+function resolveRegisteredApplicationSoftwareStatement(appInfo = null) {
+  return firstNonEmptyString([
+    String(appInfo?.softwareStatement || "").trim(),
+    extractSoftwareStatementFromAppData(appInfo?.appData || null),
+    extractSoftwareStatementFromAppData(appInfo),
+  ]);
+}
+
 function shouldRequireSoftwareStatementBoundDcrCache(serviceKey = "", requiredScope = "") {
   const normalizedServiceKey = String(serviceKey || "").trim();
   const normalizedRequiredScope = normalizeScope(requiredScope);
@@ -1287,6 +1295,21 @@ function hasSoftwareStatementBoundDcrCache(cache = null, serviceKey = "", requir
     Number(normalizedCache.cacheBindingVersion || 0) >= UNDERPAR_DCR_CACHE_BINDING_VERSION &&
     Boolean(String(normalizedCache.softwareStatementFingerprint || "").trim())
   );
+}
+
+function hasMatchingSoftwareStatementBoundDcrCache(cache = null, softwareStatement = "", serviceKey = "", requiredScope = "") {
+  const normalizedCache = normalizeUnderparVaultDcrCache(cache);
+  if (!hasSoftwareStatementBoundDcrCache(normalizedCache, serviceKey, requiredScope)) {
+    return false;
+  }
+  if (!shouldRequireSoftwareStatementBoundDcrCache(serviceKey, requiredScope)) {
+    return true;
+  }
+  const expectedFingerprint = buildUnderparSoftwareStatementFingerprint(softwareStatement);
+  if (!expectedFingerprint) {
+    return true;
+  }
+  return String(normalizedCache.softwareStatementFingerprint || "").trim() === expectedFingerprint;
 }
 
 function markPassVaultBackedValue(value, record = null) {
@@ -8992,10 +9015,45 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
     cachedClient ||
     sharedClient ||
     createEmptyUnderparVaultCredential();
-  const cacheBindingRepairRequired =
+  let cacheBindingRepairRequired =
     shouldRequireSoftwareStatementBoundDcrCache(normalizedDefinition.serviceKey, requiredScope) &&
     Boolean(nextClient.clientId && nextClient.clientSecret) &&
     !hasSoftwareStatementBoundDcrCache(nextClient, normalizedDefinition.serviceKey, requiredScope);
+  let authoritativeSoftwareStatement = "";
+  const currentSoftwareStatement = resolveRegisteredApplicationSoftwareStatement(registeredApplication);
+  const currentSoftwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint(currentSoftwareStatement);
+  if (
+    !cacheBindingRepairRequired &&
+    guid &&
+    Boolean(nextClient.clientId && nextClient.clientSecret) &&
+    shouldRequireSoftwareStatementBoundDcrCache(normalizedDefinition.serviceKey, requiredScope) &&
+    (!currentSoftwareStatementFingerprint ||
+      String(nextClient.softwareStatementFingerprint || "").trim() !== currentSoftwareStatementFingerprint)
+  ) {
+    authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(guid, {
+      timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+      preferAuthenticatedHeaders: true,
+      preferredTabId: 0,
+      allowTemporaryPageContextTab: true,
+    }).catch(() => "");
+    if (authoritativeSoftwareStatement) {
+      registeredApplication =
+        normalizeRegisteredApplicationRuntimeRecord({
+          ...registeredApplication,
+          softwareStatement: authoritativeSoftwareStatement,
+        }) || {
+          ...(registeredApplication && typeof registeredApplication === "object" ? registeredApplication : {}),
+          softwareStatement: authoritativeSoftwareStatement,
+        };
+      if (guid && sharedHydratedApplicationsByGuid) {
+        sharedHydratedApplicationsByGuid.set(guid, cloneJsonLikeValue(registeredApplication, null));
+      }
+    }
+    const authoritativeFingerprint = buildUnderparSoftwareStatementFingerprint(authoritativeSoftwareStatement);
+    if (authoritativeFingerprint && String(nextClient.softwareStatementFingerprint || "").trim() !== authoritativeFingerprint) {
+      cacheBindingRepairRequired = true;
+    }
+  }
 
   nextClient.serviceScope = String(requiredScope || nextClient.serviceScope || "").trim();
   if (guid && sharedHydratedApplicationsByGuid && !sharedHydratedApplicationsByGuid.has(guid)) {
@@ -9018,14 +9076,15 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
       sharedHydratedApplicationsByGuid.set(guid, cloneJsonLikeValue(registeredApplication, null));
     }
 
-    let authoritativeSoftwareStatement = "";
     if (cacheBindingRepairRequired && guid) {
-      authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(guid, {
-        timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
-        preferAuthenticatedHeaders: true,
-        preferredTabId: 0,
-        allowTemporaryPageContextTab: true,
-      }).catch(() => "");
+      if (!authoritativeSoftwareStatement) {
+        authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(guid, {
+          timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+          preferAuthenticatedHeaders: true,
+          preferredTabId: 0,
+          allowTemporaryPageContextTab: true,
+        }).catch(() => "");
+      }
     }
     const softwareStatement = firstNonEmptyString([
       authoritativeSoftwareStatement,
@@ -9376,7 +9435,12 @@ function hasPassVaultServiceClientCredentials(programmerId = "", appInfo = null,
   const requiredScope = serviceKey
     ? getPassVaultRequiredScopeForService(serviceKey, appInfo)
     : resolveRequiredPremiumServiceScope(appInfo);
-  return hasSoftwareStatementBoundDcrCache(cache, serviceKey, requiredScope);
+  return hasMatchingSoftwareStatementBoundDcrCache(
+    cache,
+    resolveRegisteredApplicationSoftwareStatement(appInfo),
+    serviceKey,
+    requiredScope
+  );
 }
 
 function hasPassVaultCredentialCoverageForServices(programmerId = "", services = null) {
@@ -87880,17 +87944,43 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
       cache = {};
       emitDcrDebugEvent("dcr-registration-forced");
     }
+    const currentSoftwareStatement = resolveRegisteredApplicationSoftwareStatement(resolvedAppInfo);
+    const currentSoftwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint(currentSoftwareStatement);
     let cacheBindingRepairRequired =
       !forceFreshClientRegistration &&
       Boolean(cache.clientId && cache.clientSecret) &&
       !hasBoundCache(cache);
+    if (
+      !cacheBindingRepairRequired &&
+      Boolean(cache.clientId && cache.clientSecret) &&
+      shouldBindCache() &&
+      (!currentSoftwareStatementFingerprint ||
+        String(cache.softwareStatementFingerprint || "").trim() !== currentSoftwareStatementFingerprint)
+    ) {
+      try {
+        const authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(resolvedAppInfo.guid, {
+          timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+          preferAuthenticatedHeaders: true,
+          preferredTabId: 0,
+          allowTemporaryPageContextTab: true,
+        });
+        const authoritativeFingerprint = buildUnderparSoftwareStatementFingerprint(authoritativeSoftwareStatement);
+        if (authoritativeSoftwareStatement) {
+          resolvedAppInfo.softwareStatement = authoritativeSoftwareStatement;
+        }
+        if (
+          authoritativeFingerprint &&
+          String(cache.softwareStatementFingerprint || "").trim() !== authoritativeFingerprint
+        ) {
+          cacheBindingRepairRequired = true;
+        }
+      } catch {
+        // Continue and let the existing cache flow decide whether repair is required.
+      }
+    }
 
     const ensureSoftwareStatement = async () => {
-      const currentStatement = firstNonEmptyString([
-        String(resolvedAppInfo?.softwareStatement || "").trim(),
-        extractSoftwareStatementFromAppData(resolvedAppInfo?.appData || null),
-        extractSoftwareStatementFromAppData(resolvedAppInfo),
-      ]);
+      const currentStatement = resolveRegisteredApplicationSoftwareStatement(resolvedAppInfo);
       const authoritativeRepairRequired = cacheBindingRepairRequired && shouldBindCache();
       if ((forceFreshClientRegistration || authoritativeRepairRequired) && resolvedAppInfo?.guid) {
         try {
