@@ -743,7 +743,7 @@ test("runtime REST V2 app resolution follows the first programmer-scoped REST V2
   );
 });
 
-test("programmer-scoped REST V2 candidates keep hydrated runtime apps ahead of catalog fallback", () => {
+test("programmer-scoped REST V2 candidates stay pinned to hydrated parent mappings before catalog fallback", () => {
   const helpers = loadPopupFunctions(["collectProgrammerScopedRestV2AppCandidates"], {
     collectRestV2AppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.restV2Apps || [],
     getCurrentProgrammerApplicationsSnapshot: () => ({
@@ -751,8 +751,9 @@ test("programmer-scoped REST V2 candidates keep hydrated runtime apps ahead of c
       "animalplanet-app": { guid: "animalplanet-app", appName: "Animal Planet", scopes: ["api:client:v2"] },
       "esm-app": { guid: "esm-app", appName: "ESM App", scopes: ["analytics:client"] },
     }),
-    buildPassVaultApplicationsSnapshotFromRegisteredApplications: (value = null) => value || {},
     getPassVaultMediaCompanyRecord: () => null,
+    buildPassVaultRuntimeServicesSnapshot: () => null,
+    buildPassVaultApplicationsSnapshotFromRegisteredApplications: (value = null) => value || {},
     getPassVaultRegisteredApplicationsByGuid: () => ({}),
     buildPassVaultHydrationRegisteredApplications: (applicationsData = {}) => Object.values(applicationsData),
     registeredApplicationMatchesNativeRequiredScope: (app = null, requiredScope = "") =>
@@ -766,7 +767,62 @@ test("programmer-scoped REST V2 candidates keep hydrated runtime apps ahead of c
 
   assert.deepEqual(
     normalizeRealmObject(candidates).map((app) => app.guid),
-    ["animalplanet-app", "shared-app"]
+    ["animalplanet-app"]
+  );
+});
+
+test("global premium-service selection no longer uses requestor or service-provider hints", () => {
+  const helpers = loadPopupFunctions(
+    [
+      "selectPreferredEsmAppForRequestor",
+      "selectPreferredResetTempPassAppForRequestor",
+      "resolveDegradationAppCandidates",
+    ],
+    {
+      appSupportsServiceProvider: () => true,
+      getDegradationAppCandidatesForProgrammer: () => [
+        { guid: "degradation-shared", appName: "Degradation Shared", index: 0, scopes: ["decisions:owner"] },
+        { guid: "degradation-requestor", appName: "Degradation Requestor", index: 1, scopes: ["decisions:owner"] },
+      ],
+      degradationAppHasRequiredScope: () => true,
+      compareDegradationAppPriority: (left = null, right = null) =>
+        Number(left?.index || 0) - Number(right?.index || 0),
+    }
+  );
+
+  assert.equal(
+    normalizeRealmObject(
+      helpers.selectPreferredEsmAppForRequestor(
+        [
+          { guid: "esm-shared", appName: "ESM Shared" },
+          { guid: "esm-requestor", appName: "ESM Requestor" },
+        ],
+        "btn-btn2go",
+        "Fox"
+      )
+    )?.guid,
+    "esm-shared"
+  );
+
+  assert.equal(
+    normalizeRealmObject(
+      helpers.selectPreferredResetTempPassAppForRequestor(
+        [
+          { guid: "temp-shared", appName: "TempPASS Shared" },
+          { guid: "temp-requestor", appName: "TempPASS Requestor" },
+        ],
+        "btn-btn2go",
+        "Fox"
+      )
+    )?.guid,
+    "temp-shared"
+  );
+
+  assert.deepEqual(
+    normalizeRealmObject(
+      helpers.resolveDegradationAppCandidates("Fox", { guid: "degradation-shared" }, { requestorId: "btn-btn2go" })
+    ).map((app) => app.guid),
+    ["degradation-shared", "degradation-requestor"]
   );
 });
 
@@ -872,7 +928,6 @@ test("runtime REST V2 app resolution preserves the hydrated programmer primary b
     getRuntimePremiumServicesSeed: () => services,
     collectProgrammerScopedRestV2AppCandidates: (_programmerId = "", premiumApps = null) =>
       Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [],
-    selectPreferredRestV2AppForRequestor: (apps = []) => apps[0] || null,
     selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) => apps[0] || null,
     collectEsmAppCandidatesFromPremiumApps: () => [],
     collectResetTempPassAppCandidatesFromPremiumApps: () => [],
@@ -1015,7 +1070,7 @@ test("successful REST V2 requestor resolution preserves the media-company primar
       });
       return merged;
     },
-    collectProgrammerScopedRestV2AppCandidates: (_programmerId = "", premiumApps = null) =>
+    collectRestV2AppCandidatesFromPremiumApps: (premiumApps = null) =>
       Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [],
     selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) =>
       apps.find((app) => String(app?.guid || "").trim() === "shared-app") || apps[0] || null,

@@ -2958,10 +2958,16 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   const fetchWithPremiumAuthSource = extractFunctionSource(popupSource, "fetchWithPremiumAuth");
 
   assert.match(collectScopedRestV2Source, /collectRestV2AppCandidatesFromPremiumApps\(premiumApps\)/);
+  assert.match(collectScopedRestV2Source, /if \(candidates\.length > 0\) \{\s*return candidates;\s*\}/);
+  assert.match(collectScopedRestV2Source, /const existingRecord = getPassVaultMediaCompanyRecord\(normalizedProgrammerId\);/);
+  assert.match(collectScopedRestV2Source, /const vaultServices = buildPassVaultRuntimeServicesSnapshot\(existingRecord\) \|\| null;/);
   assert.match(collectScopedRestV2Source, /getCurrentProgrammerApplicationsSnapshot\(normalizedProgrammerId\)/);
   assert.match(collectScopedRestV2Source, /buildPassVaultHydrationRegisteredApplications\(runtimeApplications \|\| \{\}\)/);
   assert.match(collectScopedRestV2Source, /registeredApplicationMatchesNativeRequiredScope\(application,\s*REST_V2_SCOPE\)/);
-  assert.match(collectScopedRestV2Source, /collectRestV2AppCandidatesFromPremiumApps\(premiumApps\)[\s\S]*buildPassVaultHydrationRegisteredApplications\(runtimeApplications \|\| \{\}\)/);
+  assert.match(
+    collectScopedRestV2Source,
+    /collectRestV2AppCandidatesFromPremiumApps\(premiumApps\)[\s\S]*buildPassVaultRuntimeServicesSnapshot\(existingRecord\)[\s\S]*buildPassVaultHydrationRegisteredApplications\(runtimeApplications \|\| \{\}\)/
+  );
   assert.match(resolveHarvestSource, /const restV2Candidates = collectProgrammerScopedRestV2AppCandidates\(programmerId,\s*services\);/);
   assert.doesNotMatch(resolveHarvestSource, /resolveRestV2AppForServiceProvider\(/);
   assert.match(
@@ -2971,7 +2977,7 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(resolveRuntimeSource, /const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);/);
   assert.match(
     resolveRuntimeSource,
-    /const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);[\s\S]*if \(primaryMatch\?\.guid\) \{\s*return primaryMatch;\s*\}[\s\S]*const fallbackMatch = resolveFallbackMatch\(candidates\);[\s\S]*if \(fallbackMatch\?\.guid\) \{\s*return fallbackMatch;\s*\}[\s\S]*const preferredMatch =[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*candidates,\s*normalizedProgrammerId\)[\s\S]*selectPreferredRestV2AppForRequestor\(candidates,\s*"",\s*normalizedProgrammerId\);/
+    /const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);[\s\S]*if \(primaryMatch\?\.guid\) \{\s*return primaryMatch;\s*\}[\s\S]*const fallbackMatch = resolveFallbackMatch\(candidates\);[\s\S]*if \(fallbackMatch\?\.guid\) \{\s*return fallbackMatch;\s*\}[\s\S]*const preferredMatch =[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*candidates,\s*normalizedProgrammerId\)[\s\S]*candidates\[0\][\s\S]*null;/
   );
   assert.match(resolveRuntimeSource, /if \(primaryMatch\?\.guid\) \{\s*return primaryMatch;\s*\}/);
   assert.match(resolveRuntimeSource, /if \(fallbackMatch\?\.guid\) \{\s*return fallbackMatch;\s*\}/);
@@ -2981,6 +2987,10 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(
     runtimeSnapshotSource,
     /if \(normalizedServiceKey === "restV2"\) \{\s*return \(\s*primaryMatch\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\([\s\S]*\|\|\s*credentialBackedMatch/
+  );
+  assert.match(
+    promoteResolvedSource,
+    /const mergedRestV2Apps = mergeUniquePremiumServiceAppInfos\([\s\S]*currentServices\?\.restV2 \? \[currentServices\.restV2\] : \[\],[\s\S]*collectRestV2AppCandidatesFromPremiumApps\(currentServices\),[\s\S]*resolvedAppInfo \? \[resolvedAppInfo\] : \[\][\s\S]*\);/
   );
   assert.match(
     promoteResolvedSource,
@@ -3045,6 +3055,21 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   );
 });
 
+test("non-health premium service selection no longer uses registered-application service-provider hints", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const selectEsmSource = extractFunctionSource(popupSource, "selectPreferredEsmAppForRequestor");
+  const selectResetTempPassSource = extractFunctionSource(popupSource, "selectPreferredResetTempPassAppForRequestor");
+  const resolveDegradationSource = extractFunctionSource(popupSource, "resolveDegradationAppCandidates");
+
+  assert.doesNotMatch(selectEsmSource, /appSupportsServiceProvider\(/);
+  assert.match(selectEsmSource, /return candidates\[0\] \|\| null;/);
+  assert.doesNotMatch(selectResetTempPassSource, /appSupportsServiceProvider\(/);
+  assert.match(selectResetTempPassSource, /return candidates\[0\] \|\| null;/);
+  assert.doesNotMatch(resolveDegradationSource, /appSupportsServiceProvider\(/);
+  assert.match(resolveDegradationSource, /const normalizedPreferredGuid = String\(options\?\.preferredGuid \|\| seedAppInfo\?\.guid \|\| ""\)\.trim\(\);/);
+  assert.match(resolveDegradationSource, /if \(normalizedPreferredGuid && normalizedGuid === normalizedPreferredGuid\) \{\s*score \+= 100;\s*\}/);
+});
+
 test("premium API usage provisions service clients on demand and ESM direct auth helpers no longer stay cache-only", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const fetchWithPremiumAuthSource = extractFunctionSource(popupSource, "fetchWithPremiumAuth");
@@ -3084,7 +3109,7 @@ test("degradation selection and DCR auth recovery no longer stay pinned to inval
   const clickDgrAuthSource = extractFunctionSource(popupSource, "resolveClickDgrAuthContext");
   const degradationCurlSource = extractFunctionSource(popupSource, "degradationBuildCurlCommand");
 
-  assert.match(resolveDegradationSource, /if \(normalizedPreferredGuid && normalizedGuid === normalizedPreferredGuid\) \{\s*score \+= 50;/);
+  assert.match(resolveDegradationSource, /if \(normalizedPreferredGuid && normalizedGuid === normalizedPreferredGuid\) \{\s*score \+= 100;\s*\}/);
   assert.doesNotMatch(resolveDegradationSource, /getPassVaultServiceProvisioningRank/);
   assert.match(resolveDegradationSource, /return compareDegradationAppPriority\(leftApp,\s*rightApp\);/);
   assert.match(recoverSource, /shouldAttemptAlternatePremiumServiceRecovery\(error,\s*resolvedAppInfo,\s*debugMeta\)/);

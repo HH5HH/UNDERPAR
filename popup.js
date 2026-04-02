@@ -9947,37 +9947,23 @@ function collectResetTempPassAppCandidatesFromPremiumApps(premiumApps = null, fa
 }
 
 function selectPreferredResetTempPassAppForRequestor(resetTempPassApps = [], requestorId = "", programmerId = "") {
+  void requestorId;
+  void programmerId;
   const candidates = Array.isArray(resetTempPassApps) ? resetTempPassApps.filter((item) => item?.guid) : [];
   if (candidates.length === 0) {
     return null;
   }
-  const normalizedProgrammerId = String(programmerId || "").trim();
-  if (normalizedProgrammerId) {
-    const sharedProgrammerApp =
-      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedProgrammerId, normalizedProgrammerId)) ||
-      null;
-    if (sharedProgrammerApp) {
-      return sharedProgrammerApp;
-    }
-  }
-  return pickHighestRankedPassVaultServiceCandidate(candidates, normalizedProgrammerId) || candidates[0] || null;
+  return candidates[0] || null;
 }
 
 function selectPreferredEsmAppForRequestor(esmApps = [], requestorId = "", programmerId = "") {
+  void requestorId;
+  void programmerId;
   const candidates = Array.isArray(esmApps) ? esmApps.filter((item) => item?.guid) : [];
   if (candidates.length === 0) {
     return null;
   }
-  const normalizedProgrammerId = String(programmerId || "").trim();
-  if (normalizedProgrammerId) {
-    const sharedProgrammerApp =
-      candidates.find((appInfo) => appSupportsServiceProvider(appInfo, normalizedProgrammerId, normalizedProgrammerId)) ||
-      null;
-    if (sharedProgrammerApp) {
-      return sharedProgrammerApp;
-    }
-  }
-  return pickHighestRankedPassVaultServiceCandidate(candidates, normalizedProgrammerId) || candidates[0] || null;
+  return candidates[0] || null;
 }
 
 function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId = "", services = null, fallbackAppInfo = null) {
@@ -10026,7 +10012,8 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
     }
     const preferredMatch =
       selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
-      selectPreferredRestV2AppForRequestor(candidates, "", normalizedProgrammerId);
+      candidates[0] ||
+      null;
     if (preferredMatch?.guid) {
       return preferredMatch;
     }
@@ -10043,7 +10030,11 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
     if (fallbackMatch?.guid) {
       return fallbackMatch;
     }
-    return selectPreferredEsmAppForRequestor(candidates, "", normalizedProgrammerId) || null;
+    const preferredMatch =
+      selectPreferredPassVaultHydrationServiceApplication("esm", candidates, normalizedProgrammerId) ||
+      candidates[0] ||
+      null;
+    return preferredMatch?.guid ? preferredMatch : null;
   }
 
   if (normalizedServiceKey === "resetTempPass") {
@@ -10056,7 +10047,11 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
     if (fallbackMatch?.guid) {
       return fallbackMatch;
     }
-    return selectPreferredResetTempPassAppForRequestor(candidates, "", normalizedProgrammerId) || null;
+    const preferredMatch =
+      selectPreferredPassVaultHydrationServiceApplication("resetTempPass", candidates, normalizedProgrammerId) ||
+      candidates[0] ||
+      null;
+    return preferredMatch?.guid ? preferredMatch : null;
   }
 
   return normalizedFallbackApp || null;
@@ -63506,7 +63501,6 @@ function compareDegradationAppPriority(leftApp, rightApp) {
 
 function resolveDegradationAppCandidates(programmerId = "", seedAppInfo = null, options = {}) {
   const normalizedProgrammerId = String(programmerId || "").trim();
-  const normalizedRequestorId = String(options?.requestorId || "").trim();
   const normalizedPreferredGuid = String(options?.preferredGuid || seedAppInfo?.guid || "").trim();
   const normalizedSeedGuid = String(seedAppInfo?.guid || "").trim();
   const candidates = getDegradationAppCandidatesForProgrammer(normalizedProgrammerId, seedAppInfo)
@@ -63515,14 +63509,11 @@ function resolveDegradationAppCandidates(programmerId = "", seedAppInfo = null, 
   const getCandidateAffinity = (appInfo) => {
     const normalizedGuid = String(appInfo?.guid || "").trim();
     let score = 0;
-    if (normalizedRequestorId && appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)) {
-      score += 200;
-    }
     if (normalizedPreferredGuid && normalizedGuid === normalizedPreferredGuid) {
-      score += 50;
+      score += 100;
     }
     if (normalizedSeedGuid && normalizedGuid === normalizedSeedGuid) {
-      score += 25;
+      score += 50;
     }
     return score;
   };
@@ -87315,13 +87306,24 @@ function collectProgrammerScopedRestV2AppCandidates(programmerId = "", premiumAp
     candidates.push(appInfo);
   };
 
+  collectRestV2AppCandidatesFromPremiumApps(premiumApps).forEach((appInfo) => pushCandidate(appInfo));
+  if (candidates.length > 0) {
+    return candidates;
+  }
+
+  const existingRecord = getPassVaultMediaCompanyRecord(normalizedProgrammerId);
+  const vaultServices = buildPassVaultRuntimeServicesSnapshot(existingRecord) || null;
+  collectRestV2AppCandidatesFromPremiumApps(vaultServices).forEach((appInfo) => pushCandidate(appInfo));
+  if (candidates.length > 0) {
+    return candidates;
+  }
+
   const runtimeApplications =
     getCurrentProgrammerApplicationsSnapshot(normalizedProgrammerId) ||
     buildPassVaultApplicationsSnapshotFromRegisteredApplications(
-      getPassVaultRegisteredApplicationsByGuid(getPassVaultMediaCompanyRecord(normalizedProgrammerId)) || {}
+      getPassVaultRegisteredApplicationsByGuid(existingRecord) || {}
     ) ||
     null;
-  collectRestV2AppCandidatesFromPremiumApps(premiumApps).forEach((appInfo) => pushCandidate(appInfo));
   buildPassVaultHydrationRegisteredApplications(runtimeApplications || {})
     .filter((application) => registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE))
     .forEach((application) => pushCandidate(application));
@@ -96834,8 +96836,9 @@ function promoteResolvedRestV2ConfigurationApp(programmer = null, services = nul
   }
 
   const mergedRestV2Apps = mergeUniquePremiumServiceAppInfos(
-    collectProgrammerScopedRestV2AppCandidates(programmerId, currentServices),
-    resolvedAppInfo
+    currentServices?.restV2 ? [currentServices.restV2] : [],
+    collectRestV2AppCandidatesFromPremiumApps(currentServices),
+    resolvedAppInfo ? [resolvedAppInfo] : []
   );
   const authoritativeRestV2App =
     currentServices?.restV2 ||
