@@ -2920,11 +2920,11 @@ test("REST V2 app selection stays media-company scoped and keeps the programmer 
   assert.match(fetchWithPremiumAuthSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
   assert.match(fetchWithPremiumAuthSource, /const isServiceProviderMismatch = isServiceProviderTokenMismatchError\(bodyText\);/);
   assert.match(fetchWithPremiumAuthSource, /reason:\s*isServiceProviderMismatch \? "401-refresh-service-provider-mismatch" : "401-refresh"/);
-  assert.match(fetchWithPremiumAuthSource, /if \(isServiceProviderMismatch\) \{\s*clearDcrCache\(programmerId,\s*retryAppInfo\.guid\);/);
-  assert.match(fetchWithPremiumAuthSource, /forceFreshClientRegistration:\s*true/);
+  assert.match(fetchWithPremiumAuthSource, /if \(isServiceProviderMismatch\) \{\s*clearDcrTokenCache\(programmerId,\s*retryAppInfo\.guid\);/);
   assert.match(fetchWithPremiumAuthSource, /return fetchWithPremiumAuth\(programmerId,\s*retryAppInfo,\s*url,\s*options,\s*"none",\s*debugMeta\);/);
-  assert.doesNotMatch(fetchWithPremiumAuthSource, /clearDcrTokenCache\(programmerId,\s*retryAppInfo\.guid\)/);
-  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "reprovision"\)[\s\S]*clearDcrCache\(programmerId,\s*retryAppInfo\.guid\);/);
+  assert.doesNotMatch(fetchWithPremiumAuthSource, /forceFreshClientRegistration:\s*true/);
+  assert.doesNotMatch(fetchWithPremiumAuthSource, /clearDcrCache\(programmerId,\s*retryAppInfo\.guid\)/);
+  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "reprovision"\)[\s\S]*clearDcrTokenCache\(programmerId,\s*retryAppInfo\.guid\);/);
 });
 
 test("premium API usage provisions service clients on demand and ESM direct auth helpers no longer stay cache-only", () => {
