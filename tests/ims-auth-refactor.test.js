@@ -2519,6 +2519,7 @@ test("missing DCR credentials no longer trigger full pass vault compilation from
   assert.match(chooseRuntimeCacheSource, /const directCache = normalizeUnderparVaultDcrCache\(applicationRecord\?\.dcrCache \|\| null\);/);
   assert.match(programmerRecordSource, /registeredApplicationsByGuid\[guid\]\.dcrCache = normalizeUnderparVaultDcrCache\(result\.cache\);/);
   assert.match(restoreBoundCacheSource, /const restored = resolvePassVaultBoundServiceCredentialCache\(normalizedProgrammerId,\s*appInfo,\s*serviceKey\);/);
+  assert.match(restoreBoundCacheSource, /const normalizedServiceKey = String\(serviceKey \|\| ""\)\.trim\(\);/);
   assert.match(restoreBoundCacheSource, /saveDcrCache\(normalizedProgrammerId,\s*normalizedGuid,\s*cache,\s*normalizedServiceKey\);/);
   assert.doesNotMatch(ensureDcrSource, /queuePassVaultProgrammerCompilation\(/);
   assert.doesNotMatch(ensureDcrSource, /dcr-registration-trigger-vault-compile/);

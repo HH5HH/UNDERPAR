@@ -9726,6 +9726,7 @@ function resolvePassVaultBoundServiceCredentialCache(programmerId = "", appInfo 
 
 function restorePassVaultBoundServiceCredentialCache(programmerId = "", appInfo = null, serviceKey = "") {
   const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedServiceKey = String(serviceKey || "").trim();
   const normalizedGuid = String(appInfo?.guid || "").trim();
   const restored = resolvePassVaultBoundServiceCredentialCache(normalizedProgrammerId, appInfo, serviceKey);
   const cache = normalizeUnderparVaultDcrCache(restored?.cache || null);
