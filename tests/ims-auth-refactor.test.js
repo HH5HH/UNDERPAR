@@ -2510,12 +2510,13 @@ test("missing DCR credentials no longer trigger full pass vault compilation from
 
   assert.match(chooseRuntimeCacheSource, /const normalizedServiceKey = String\(serviceKey \|\| ""\)\.trim\(\);/);
   assert.match(chooseRuntimeCacheSource, /const orderedServiceKeys = uniquePreserveOrder\(/);
-  assert.match(chooseRuntimeCacheSource, /const credential = normalizeUnderparVaultCredentialEntry\(serviceCredentials\?\.\[serviceKey\] \|\| null\);/);
+  assert.match(chooseRuntimeCacheSource, /const credential = choosePreferredPassVaultCredentialEntry\(/);
+  assert.match(chooseRuntimeCacheSource, /serviceCredentials\?\.\[serviceKey\] \|\| null,\s*applicationRecord\?\.dcrCache \|\| null/);
   assert.match(chooseRuntimeCacheSource, /if \(credential && \(credential\.clientId \|\| credential\.clientSecret \|\| credential\.accessToken\)\) \{\s*return credential;\s*\}/);
   assert.match(chooseRuntimeCacheSource, /const directCache = normalizeUnderparVaultDcrCache\(applicationRecord\?\.dcrCache \|\| null\);/);
   assert.match(programmerRecordSource, /registeredApplicationsByGuid\[guid\]\.dcrCache = normalizeUnderparVaultDcrCache\(result\.cache\);/);
   assert.match(restoreBoundCacheSource, /const restored = resolvePassVaultBoundServiceCredentialCache\(normalizedProgrammerId,\s*appInfo,\s*serviceKey\);/);
-  assert.match(restoreBoundCacheSource, /saveDcrCache\(normalizedProgrammerId,\s*normalizedGuid,\s*cache\);/);
+  assert.match(restoreBoundCacheSource, /saveDcrCache\(normalizedProgrammerId,\s*normalizedGuid,\s*cache,\s*normalizedServiceKey\);/);
   assert.doesNotMatch(ensureDcrSource, /queuePassVaultProgrammerCompilation\(/);
   assert.doesNotMatch(ensureDcrSource, /dcr-registration-trigger-vault-compile/);
   assert.match(ensureDcrSource, /UnderPAR could not auto-hydrate DCR credentials/);
@@ -3041,9 +3042,13 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(createSessionSource, /allowProvisioning:\s*false/);
   assert.match(
     fetchWithPremiumAuthSource,
-    /if \(isServiceProviderMismatch\) \{[\s\S]*if \(isRestV2ServiceRequest\) \{[\s\S]*const serviceCredentialRecovery = restorePassVaultBoundServiceCredentialCache\([\s\S]*"restV2"[\s\S]*clearDcrTokenCache\(programmerId,\s*restoredAppInfo\.guid\);[\s\S]*allowProvisioning:\s*false,[\s\S]*lockAppSelection:\s*true,[\s\S]*return fetchWithPremiumAuth\([\s\S]*"restv2-token-refresh"[\s\S]*allowProvisioning:\s*false,[\s\S]*lockAppSelection:\s*true/
+    /if \(isServiceProviderMismatch\) \{[\s\S]*if \(isRestV2ServiceRequest\) \{[\s\S]*const serviceCredentialRecovery = restorePassVaultBoundServiceCredentialCache\([\s\S]*"restV2"[\s\S]*clearDcrTokenCache\(programmerId,\s*restoredAppInfo\.guid,\s*"restV2"\);[\s\S]*allowProvisioning:\s*false,[\s\S]*lockAppSelection:\s*true,[\s\S]*return fetchWithPremiumAuth\([\s\S]*"restv2-token-refresh"[\s\S]*allowProvisioning:\s*false,[\s\S]*lockAppSelection:\s*true/
   );
-  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "restv2-token-refresh"\) \{\s*return response;\s*\}/);
+  assert.match(
+    fetchWithPremiumAuthSource,
+    /if \(response\.status === 401 && retryStage === "restv2-token-refresh"\) \{[\s\S]*if \(isServiceProviderTokenMismatchError\(bodyText\)\) \{[\s\S]*clearDcrCache\(programmerId,\s*retryAppInfo\.guid,\s*"restV2"\);[\s\S]*allowProvisioning:\s*true,[\s\S]*forceFreshClientRegistration:\s*true,[\s\S]*lockAppSelection:\s*true,[\s\S]*return fetchWithPremiumAuth\([\s\S]*"restv2-reprovision"[\s\S]*allowProvisioning:\s*true,[\s\S]*lockAppSelection:\s*true[\s\S]*\}\s*return response;\s*\}/
+  );
+  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "restv2-reprovision"\) \{\s*return response;\s*\}/);
   assert.match(
     loadMvpdsSource,
     /premiumApps =[\s\S]*promoteResolvedRestV2ConfigurationApp\(programmer,\s*premiumApps,\s*runtimePrimaryApp,\s*requestorId\) \|\| premiumApps;/
