@@ -1019,8 +1019,9 @@ test("selected media company refresh starts direct premium hydration immediately
   assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*provisionalServices,\s*\{/);
   assert.match(refreshPanelsSource, /renderOnReady:\s*false/);
   assert.match(refreshPanelsSource, /const persistedFinalRecord = await persistPassVaultProgrammerRecord\(programmer,\s*finalServices,\s*\{/);
-  assert.match(refreshPanelsSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*renderServices\);/);
-  assert.match(refreshPanelsSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*renderServices\);/);
+  assert.match(refreshPanelsSource, /const hrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*renderServices\);/);
+  assert.match(refreshPanelsSource, /const interactionReady = isProgrammerPremiumInteractionReady\(programmerId,\s*renderServices\);/);
+  assert.match(refreshPanelsSource, /if \(!interactionReady\) \{\s*throw new Error\("UnderPAR could not finish premium service hydration\."\);\s*\}/);
   assert.match(ensureApplicationsSource, /state\.programmerApplicationsLoadPromiseByProgrammerId/);
   assert.match(selectPreferredCmRuntimeServiceSource, /resolvedVisible && !currentVisible/);
   assert.match(selectPreferredCmRuntimeServiceSource, /currentRetry && !resolvedRetry/);
@@ -1201,17 +1202,24 @@ test("media company change immediately invalidates stale requestor-scoped panel 
   );
 });
 
-test("requestor selector stays disabled until the selected programmer is reusable", () => {
+test("requestor selector stays disabled until the selected programmer is VAULT-backed ready", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const selectProgrammerSource = extractFunctionSource(popupSource, "selectProgrammerForController");
   const populateRequestorSource = extractFunctionSource(popupSource, "populateRequestorSelect");
   const syncRequestorSource = extractFunctionSource(popupSource, "syncRequestorSelectHydrationAvailability");
   const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
+  const interactionReadySource = extractFunctionSource(popupSource, "isProgrammerPremiumInteractionReady");
 
   assert.match(selectProgrammerSource, /syncRequestorSelectHydrationAvailability\(String\(resolvedProgrammer\?\.programmerId \|\| ""\)\.trim\(\),\s*null\);/);
   assert.match(populateRequestorSource, /syncRequestorSelectHydrationAvailability\(/);
+  assert.match(interactionReadySource, /if \(isProgrammerWorkspaceHydrationReady\(normalizedProgrammerId\)\) \{\s*return true;\s*\}/);
+  assert.match(
+    interactionReadySource,
+    /getCurrentPremiumAppsSnapshot\(normalizedProgrammerId\) \|\| getRuntimePremiumServicesSeed\(normalizedProgrammerId\) \|\| null/
+  );
+  assert.match(interactionReadySource, /return isProgrammerHrContextHydrationReady\(normalizedProgrammerId,\s*resolvedServices\);/);
   assert.match(syncRequestorSource, /const hydrationPending =[\s\S]*getProgrammerServiceHydrationPromise\(normalizedProgrammerId\)/);
-  assert.match(syncRequestorSource, /const ready =[\s\S]*!hydrationPending[\s\S]*shouldRenderPremiumServicesUi\(normalizedProgrammerId,\s*services\);/);
+  assert.match(syncRequestorSource, /const ready =[\s\S]*!hydrationPending[\s\S]*isProgrammerPremiumInteractionReady\(normalizedProgrammerId,\s*services\);/);
   assert.match(syncRequestorSource, /els\.requestorSelect\.disabled = !hasRequestorOptions \|\| !ready;/);
   assert.match(refreshPanelsSource, /syncRequestorSelectHydrationAvailability\(programmerId,\s*null\);/);
   assert.match(refreshPanelsSource, /syncRequestorSelectHydrationAvailability\(programmerId,\s*reusableServices\);/);
@@ -2702,8 +2710,8 @@ test("premium UI renders from detected live services while runtime readiness sta
     /return isProgrammerPremiumUiReady\(normalizedProgrammerId,\s*services\);/
   );
   assert.doesNotMatch(renderReadinessSource, /isPassVaultProgrammerReadyForReuse/);
-  assert.match(refreshPanelsSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*renderServices\);/);
-  assert.match(refreshPanelsSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*renderServices\);/);
+  assert.match(refreshPanelsSource, /const hrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*renderServices\);/);
+  assert.match(refreshPanelsSource, /const interactionReady = isProgrammerPremiumInteractionReady\(programmerId,\s*renderServices\);/);
   assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*provisionalServices,\s*\{/);
   assert.match(refreshPanelsSource, /renderOnReady:\s*false/);
   assert.match(compileSource, /const hydratedServiceEntries = await hydratePassVaultServiceEntries\(serviceEntries,\s*PREMIUM_PROACTIVE_HYDRATION_SERVICE_KEYS,\s*\{/);
@@ -2829,10 +2837,11 @@ test("premium services reuse the mounted DOM when the selected service signature
   assert.match(signatureSource, /const selectedMvpdId = String\(state\.selectedMvpdId \|\| ""\)\.trim\(\);/);
   assert.match(renderSource, /const renderSignature = buildPremiumServicesRenderSignature\(programmer,\s*services\);/);
   assert.match(renderSource, /els\.premiumServicesContainer\.dataset\.renderSignature/);
-  assert.match(renderSource, /hasRenderablePremiumServiceSections\(services\)/);
+  assert.match(renderSource, /const renderEntries = getRenderablePremiumServiceEntriesForProgrammer\(programmer,\s*services\);/);
+  assert.match(renderSource, /hasRenderablePremiumServiceSections\(programmer,\s*services\)/);
   assert.match(renderSource, /refreshExistingPremiumServiceSections\(programmer,\s*services\)/);
   assert.match(hasRenderableSource, /querySelectorAll\("\.premium-service-section"\)/);
-  assert.match(hasRenderableSource, /const expectedEntries = getRenderablePremiumServiceEntries\(services\);/);
+  assert.match(hasRenderableSource, /const expectedEntries = getRenderablePremiumServiceEntriesForProgrammer\(programmer,\s*services\);/);
   assert.match(hasRenderableSource, /const actualDisabled = String\(section\?\.dataset\?\.serviceDisabled \|\| ""\)\.trim\(\) === "true";/);
   assert.match(
     hasRenderableSource,
@@ -2856,14 +2865,14 @@ test("premium and HR render reuse requires intact mounted section shells after e
 
   assert.match(prepareSwitchSource, /delete els\.premiumServicesContainer\.dataset\.renderSignature/);
   assert.match(hrVisibilitySource, /delete els\.hrServicesContainer\.dataset\.renderSignature/);
-  assert.match(renderPremiumSource, /hasRenderablePremiumServiceSections\(services\)/);
+  assert.match(renderPremiumSource, /hasRenderablePremiumServiceSections\(programmer,\s*services\)/);
   assert.match(renderHrSource, /hasRenderableHrContextSections\(programmer,\s*services\)/);
   assert.match(createHrSource, /section\.dataset\.hrSectionKey = String\(sectionKey \|\| ""\)\.trim\(\);/);
 
   const script = [
     'const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["learning", "health", "harpo"];',
     "function getHrContextSectionDisplayKeys() { return ['learning', 'health']; }",
-    "function getRenderablePremiumServiceEntries(services = null) { return Array.isArray(services?.expectedEntries) ? services.expectedEntries.slice() : []; }",
+    "function getRenderablePremiumServiceEntriesForProgrammer(programmer = null, services = null) { return Array.isArray(services?.expectedEntries) ? services.expectedEntries.slice() : []; }",
     extractFunctionSource(popupSource, "hasRenderablePremiumServiceSections"),
     extractFunctionSource(popupSource, "hasRenderableHrContextSections"),
     "module.exports = { hasRenderablePremiumServiceSections, hasRenderableHrContextSections };",
@@ -2894,7 +2903,7 @@ test("premium and HR render reuse requires intact mounted section shells after e
   const { hasRenderablePremiumServiceSections, hasRenderableHrContextSections } = context.module.exports;
 
   assert.equal(
-    hasRenderablePremiumServiceSections({
+    hasRenderablePremiumServiceSections(null, {
       expectedEntries: [
         { serviceKey: "restV2", disabled: false },
         { serviceKey: "esmWorkspace", disabled: false },
@@ -2903,7 +2912,7 @@ test("premium and HR render reuse requires intact mounted section shells after e
     true
   );
   assert.equal(
-    hasRenderablePremiumServiceSections({
+    hasRenderablePremiumServiceSections(null, {
       expectedEntries: [
         { serviceKey: "esmWorkspace", disabled: false },
         { serviceKey: "restV2", disabled: false },
@@ -2913,7 +2922,7 @@ test("premium and HR render reuse requires intact mounted section shells after e
   );
   premiumSections.pop();
   assert.equal(
-    hasRenderablePremiumServiceSections({
+    hasRenderablePremiumServiceSections(null, {
       expectedEntries: [
         { serviceKey: "restV2", disabled: false },
         { serviceKey: "esmWorkspace", disabled: false },
@@ -3112,15 +3121,25 @@ test("non-health premium service selection no longer uses registered-application
   assert.match(resolveDegradationSource, /if \(normalizedPreferredGuid && normalizedGuid === normalizedPreferredGuid\) \{\s*score \+= 100;\s*\}/);
 });
 
-test("premium API usage provisions service clients on demand and ESM direct auth helpers no longer stay cache-only", () => {
+test("sidepanel premium helpers stay VAULT-backed and do not opt into live provisioning", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const fetchWithPremiumAuthSource = extractFunctionSource(popupSource, "fetchWithPremiumAuth");
   const clickEsmAuthSource = extractFunctionSource(popupSource, "resolveClickEsmAuthContext");
   const recordingSource = extractFunctionSource(popupSource, "startEsmWorkspaceEsmRecording");
+  const clickDgrAuthSource = extractFunctionSource(popupSource, "resolveClickDgrAuthContext");
+  const degradationPrimeSource = extractFunctionSource(popupSource, "degradationPrimeAccessTokenForSelectedApp");
+  const degradationCurlSource = extractFunctionSource(popupSource, "degradationBuildCurlCommand");
+  const degradationRequestSource = extractFunctionSource(popupSource, "degradationExecuteStatusRequest");
+  const learningSource = extractFunctionSource(popupSource, "openRestV2InteractiveDocsEntry");
 
   assert.match(fetchWithPremiumAuthSource, /allowProvisioning:\s*debugMeta\?\.allowProvisioning !== false/);
-  assert.match(clickEsmAuthSource, /allowProvisioning:\s*true/);
-  assert.match(recordingSource, /allowProvisioning:\s*true/);
+  assert.match(clickEsmAuthSource, /allowProvisioning:\s*false/);
+  assert.match(recordingSource, /allowProvisioning:\s*false/);
+  assert.match(clickDgrAuthSource, /allowProvisioning:\s*false/);
+  assert.match(degradationPrimeSource, /allowProvisioning:\s*false/);
+  assert.match(degradationCurlSource, /allowProvisioning:\s*false/);
+  assert.match(degradationRequestSource, /allowProvisioning:\s*false/);
+  assert.match(learningSource, /allowProvisioning:\s*false/);
 });
 
 test("ESM recovery excludes the failed app, promotes the recovered app, and locks the retry selection", () => {
@@ -3253,6 +3272,7 @@ test("DCR register and token flows now mirror LoginButton's compact form/query c
 test("premium runtime readiness still depends on DCR-ready premium apps while UI rendering follows detected live premium services", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const runtimeReadySource = extractFunctionSource(popupSource, "isProgrammerRuntimeServicesReady");
+  const interactionReadySource = extractFunctionSource(popupSource, "isProgrammerPremiumInteractionReady");
   const renderReadySource = extractFunctionSource(popupSource, "shouldRenderPremiumServicesUi");
   const hrContextReadySource = extractFunctionSource(popupSource, "isProgrammerHrContextHydrationReady");
   const progressSource = extractFunctionSource(popupSource, "setProgrammerPremiumHydrationProgress");
@@ -3260,14 +3280,20 @@ test("premium runtime readiness still depends on DCR-ready premium apps while UI
   const loadingSource = extractFunctionSource(popupSource, "renderPremiumServicesLoading");
 
   assert.match(runtimeReadySource, /hasPassVaultCredentialCoverageForServices\(normalizedProgrammerId,\s*resolvedServices\)/);
+  assert.match(interactionReadySource, /if \(isProgrammerWorkspaceHydrationReady\(normalizedProgrammerId\)\) \{\s*return true;\s*\}/);
+  assert.match(interactionReadySource, /return isProgrammerHrContextHydrationReady\(normalizedProgrammerId,\s*resolvedServices\);/);
   assert.match(hrContextReadySource, /hasResolvedCmAvailabilityForProgrammer\(normalizedProgrammerId,\s*resolvedServices\)/);
   assert.match(
     renderReadySource,
     /return isProgrammerPremiumUiReady\(normalizedProgrammerId,\s*services\);/
   );
   assert.doesNotMatch(renderReadySource, /isPassVaultProgrammerReadyForReuse/);
-  assert.match(progressSource, /!shouldRenderPremiumServicesUi\(String\(programmerId \|\| ""\)\.trim\(\), getCurrentPremiumAppsSnapshot\(programmerId\)\)/);
+  assert.match(
+    progressSource,
+    /!isProgrammerPremiumInteractionReady\(String\(programmerId \|\| ""\)\.trim\(\), getCurrentPremiumAppsSnapshot\(programmerId\)\)/
+  );
   assert.match(primeSource, /const hrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*runtimeServices\);/);
+  assert.match(primeSource, /const interactionReady = isProgrammerPremiumInteractionReady\(programmerId,\s*runtimeServices\);/);
   assert.match(primeSource, /if \(hrContextReady\) \{\s*setProgrammerWorkspaceHydrationReady\(programmerId,\s*true\);/);
   assert.doesNotMatch(runtimeReadySource, /isCmRuntimeRenderReady/);
   assert.doesNotMatch(loadingSource, /Detected:/);
@@ -3280,18 +3306,16 @@ test("premium panel rendering waits for persisted programmer vault state and kee
   const refreshSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
   const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
 
-  assert.match(primeSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*runtimeServices\)/);
-  assert.match(primeSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*runtimeServices\)/);
   assert.match(primeSource, /const hrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*runtimeServices\)/);
-  assert.match(primeSource, /renderOnReady &&[\s\S]*uiReady &&/);
+  assert.match(primeSource, /const interactionReady = isProgrammerPremiumInteractionReady\(programmerId,\s*runtimeServices\)/);
+  assert.match(primeSource, /renderOnReady &&[\s\S]*interactionReady &&/);
   assert.match(primeSource, /if \(hrContextReady\) \{\s*setProgrammerWorkspaceHydrationReady\(programmerId,\s*true\);/);
   assert.doesNotMatch(primeSource, /finalizePassVaultProgrammerHydration\(/);
   assert.doesNotMatch(primeSource, /hydrateProgrammerFromPassVault\(/);
   assert.match(refreshSource, /const persistedFinalRecord = await persistPassVaultProgrammerRecord\(programmer,\s*finalServices,\s*\{/);
   assert.match(refreshSource, /applyPassVaultRecordToRuntime\(programmer,\s*persistedFinalRecord,\s*\{/);
-  assert.match(refreshSource, /const runtimeReady = isProgrammerRuntimeServicesReady\(programmerId,\s*renderServices\);/);
   assert.match(refreshSource, /const hrContextReady = isProgrammerHrContextHydrationReady\(programmerId,\s*renderServices\);/);
-  assert.match(refreshSource, /const uiReady = shouldRenderPremiumServicesUi\(programmerId,\s*renderServices\);/);
+  assert.match(refreshSource, /const interactionReady = isProgrammerPremiumInteractionReady\(programmerId,\s*renderServices\);/);
   assert.match(refreshSource, /setProgrammerWorkspaceHydrationReady\(programmerId,\s*hrContextReady\);/);
   assert.doesNotMatch(refreshSource, /options\.markHydrated !== false && runtimeReady/);
   assert.match(compileSource, /const hydratedServiceEntries = await hydratePassVaultServiceEntries/);

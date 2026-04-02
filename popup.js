@@ -971,7 +971,7 @@ function setProgrammerPremiumHydrationProgress(
     options?.render !== false &&
     selectedProgrammer?.programmerId &&
     String(selectedProgrammer.programmerId || "").trim() === String(programmerId || "").trim() &&
-    !shouldRenderPremiumServicesUi(String(programmerId || "").trim(), getCurrentPremiumAppsSnapshot(programmerId))
+    !isProgrammerPremiumInteractionReady(String(programmerId || "").trim(), getCurrentPremiumAppsSnapshot(programmerId))
   ) {
     renderPremiumServicesLoading(selectedProgrammer, {
       controllerReason: String(options?.controllerReason || "").trim(),
@@ -1054,6 +1054,24 @@ function isProgrammerHrContextHydrationReady(programmerId = "", services = null)
     return false;
   }
   return hasResolvedCmAvailabilityForProgrammer(normalizedProgrammerId, resolvedServices);
+}
+
+function isProgrammerPremiumInteractionReady(programmerId = "", services = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return false;
+  }
+  if (isProgrammerWorkspaceHydrationReady(normalizedProgrammerId)) {
+    return true;
+  }
+  const resolvedServices =
+    services && typeof services === "object"
+      ? services
+      : getCurrentPremiumAppsSnapshot(normalizedProgrammerId) || getRuntimePremiumServicesSeed(normalizedProgrammerId) || null;
+  if (!resolvedServices) {
+    return false;
+  }
+  return isProgrammerHrContextHydrationReady(normalizedProgrammerId, resolvedServices);
 }
 
 function shouldRenderPremiumServicesUi(programmerId = "", services = null) {
@@ -1148,13 +1166,12 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
       setCurrentPremiumAppsSnapshot(programmerId, runtimeServices);
     }
 
-    const runtimeReady = isProgrammerRuntimeServicesReady(programmerId, runtimeServices);
     const hrContextReady = isProgrammerHrContextHydrationReady(programmerId, runtimeServices);
-    const uiReady = shouldRenderPremiumServicesUi(programmerId, runtimeServices);
+    const interactionReady = isProgrammerPremiumInteractionReady(programmerId, runtimeServices);
     const selectedProgrammerId = String(resolveSelectedProgrammer()?.programmerId || "").trim();
     if (
       renderOnReady &&
-      uiReady &&
+      interactionReady &&
       selectedProgrammerId === programmerId &&
       requestToken === Number(state.premiumPanelRequestToken || 0)
     ) {
@@ -10761,7 +10778,7 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
           setCurrentPremiumAppsSnapshot(programmer.programmerId, nextServices);
         }
         if (String(resolveSelectedProgrammer()?.programmerId || "").trim() === programmerId) {
-          if (shouldRenderPremiumServicesUi(programmer.programmerId, renderServices)) {
+          if (isProgrammerPremiumInteractionReady(programmer.programmerId, renderServices)) {
             renderPremiumServices(renderServices, programmer, {
               controllerReason: "pass-vault-compilation",
             });
@@ -38698,7 +38715,7 @@ async function resolveClickEsmAuthContext(context, requestToken, options = {}) {
       appGuid: String(appInfo?.guid || ""),
       appName: String(appInfo?.appName || appInfo?.guid || ""),
       source: String(options.source || "sidepanel"),
-      allowProvisioning: true,
+      allowProvisioning: false,
     });
     appInfo = tokenResult?.appInfo || appInfo;
     accessToken = String(tokenResult?.accessToken || "");
@@ -39064,7 +39081,7 @@ async function resolveClickDgrAuthContext(context, requestToken, options = {}) {
       appGuid: String(appInfo?.guid || ""),
       appName: String(appInfo?.appName || appInfo?.guid || ""),
       source: String(options.source || "sidepanel"),
-      allowProvisioning: true,
+      allowProvisioning: false,
       lockAppSelection: true,
     }
   );
@@ -44305,7 +44322,7 @@ async function startEsmWorkspaceEsmRecording(esmWorkspaceState, requestToken) {
         requestorId: recordingContext.requestorId,
         mvpd: recordingContext.mvpd,
         service: "esm",
-        allowProvisioning: true,
+        allowProvisioning: false,
       });
       emitEsmWorkspaceDebugEvent(flowId, {
         phase: "access-token-ready",
@@ -64357,7 +64374,7 @@ async function degradationPrimeAccessTokenForSelectedApp(panelState, debugMeta =
     service: "degradation",
     requiredServiceScope: getPreferredDegradationScopeForApp(appInfo) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
     requestorId,
-    allowProvisioning: true,
+    allowProvisioning: false,
     lockAppSelection: true,
   });
   appInfo = tokenResult?.appInfo || appInfo;
@@ -66117,7 +66134,7 @@ async function degradationBuildCurlCommand(panelState, options = {}) {
       requestorId: queryValues.requestorId,
       mvpd: String(queryValues.mvpd || "").trim(),
       requiredServiceScope: getPreferredDegradationScopeForApp(selectedApp) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
-      allowProvisioning: true,
+      allowProvisioning: false,
       lockAppSelection: true,
     }
   );
@@ -66805,7 +66822,7 @@ async function degradationExecuteStatusRequest(panelState, endpointSpec, options
     {
       ...debugMeta,
       requiredServiceScope: getPreferredDegradationScopeForApp(selectedApp) || PREMIUM_SERVICE_SCOPE_BY_KEY.degradation,
-      allowProvisioning: true,
+      allowProvisioning: false,
       lockAppSelection: true,
     }
   );
@@ -68351,7 +68368,7 @@ function buildPremiumServicesRenderSignature(programmer = null, services = null)
   }
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const selectedMvpdId = String(state.selectedMvpdId || "").trim();
-  const renderEntries = getRenderablePremiumServiceEntries(services);
+  const renderEntries = getRenderablePremiumServiceEntriesForProgrammer(programmer, services);
   const serviceSegments = renderEntries.map((entry) => {
     const serviceKey = String(entry?.serviceKey || "").trim();
     const appInfo = serviceKey === "esmWorkspace" ? services?.esm : services?.[serviceKey];
@@ -68430,11 +68447,11 @@ function buildHrSectionsRenderSignature(programmer = null, services = null, opti
   ].join("|");
 }
 
-function hasRenderablePremiumServiceSections(services = null) {
+function hasRenderablePremiumServiceSections(programmer = null, services = null) {
   if (!els.premiumServicesContainer) {
     return false;
   }
-  const expectedEntries = getRenderablePremiumServiceEntries(services);
+  const expectedEntries = getRenderablePremiumServiceEntriesForProgrammer(programmer, services);
   if (expectedEntries.length === 0) {
     return false;
   }
@@ -68731,6 +68748,29 @@ function getRenderablePremiumServiceEntries(services, environment = getActiveAdo
     }
     const disabledEntry = disabledEntryByKey.get(normalizedServiceKey);
     return disabledEntry ? [disabledEntry] : [];
+  });
+}
+
+function getRenderablePremiumServiceEntriesForProgrammer(programmer = null, services = null, environment = getActiveAdobePassEnvironment()) {
+  const renderEntries = getRenderablePremiumServiceEntries(services, environment);
+  const programmerId = String(programmer?.programmerId || "").trim();
+  if (!programmerId || renderEntries.length === 0 || isProgrammerPremiumInteractionReady(programmerId, services)) {
+    return renderEntries;
+  }
+  const hydrationProgress = getProgrammerPremiumHydrationProgress(programmerId);
+  const progressLabel = String(hydrationProgress?.label || "").trim();
+  const disabledReason = progressLabel
+    ? `${progressLabel} UnderPAR is still saving VAULT-backed premium service state for this Media Company.`
+    : "UnderPAR is still saving VAULT-backed premium service state for this Media Company.";
+  return renderEntries.map((entry) => {
+    if (!entry || typeof entry !== "object" || entry.disabled === true) {
+      return entry;
+    }
+    return {
+      ...entry,
+      disabled: true,
+      reason: disabledReason,
+    };
   });
 }
 
@@ -74166,7 +74206,7 @@ async function openRestV2InteractiveDocsEntry(entryKey = "", requestedUrl = "") 
         service: "rest-v2-learning",
         scope: `rest-v2-learning-${String(entry.key || "").trim()}`,
         requiredServiceScope: REST_V2_SCOPE,
-        allowProvisioning: true,
+        allowProvisioning: false,
         lockAppSelection: true,
       });
     } catch (error) {
@@ -74496,7 +74536,7 @@ function renderPremiumServices(services, programmer = null, options = {}) {
       : '<p class="metadata-empty">Select a Media Company to load premium scoped applications.</p>';
     return;
   }
-  const renderEntries = getRenderablePremiumServiceEntries(services);
+  const renderEntries = getRenderablePremiumServiceEntriesForProgrammer(programmer, services);
   const availableKeys = renderEntries.filter((entry) => entry?.disabled !== true).map((entry) => String(entry?.serviceKey || "").trim());
   const hasCmContainer = availableKeys.includes("cm") || availableKeys.includes("cmMvpd");
   cmBroadcastSelectedControllerState(programmer, services, 0, {
@@ -74525,7 +74565,7 @@ function renderPremiumServices(services, programmer = null, options = {}) {
   if (
     renderSignature &&
     String(els.premiumServicesContainer.dataset.renderSignature || "") === renderSignature &&
-    hasRenderablePremiumServiceSections(services)
+    hasRenderablePremiumServiceSections(programmer, services)
   ) {
     refreshExistingPremiumServiceSections(programmer, services);
     refreshMvpdWorkspaceTools();
@@ -84682,7 +84722,7 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   const ready =
     Boolean(normalizedProgrammerId) &&
     !hydrationPending &&
-    shouldRenderPremiumServicesUi(normalizedProgrammerId, services);
+    isProgrammerPremiumInteractionReady(normalizedProgrammerId, services);
   els.requestorSelect.disabled = !hasRequestorOptions || !ready;
   return els.requestorSelect.disabled !== true;
 }
@@ -84861,7 +84901,7 @@ async function refreshProgrammerPanels(options = {}) {
   const provisionalUiServices =
     !forcePremiumRefresh &&
     provisionalServices &&
-    shouldRenderPremiumServicesUi(programmerId, provisionalServices)
+    isProgrammerPremiumInteractionReady(programmerId, provisionalServices)
       ? updateSelectionServicesSnapshot(provisionalServices, cachedCmService, cachedCmMvpdService)
       : null;
   const reusableServices =
@@ -84983,10 +85023,9 @@ async function refreshProgrammerPanels(options = {}) {
           buildPassVaultRuntimeServicesSnapshot(persistedFinalRecord) ||
           finalServices
         : finalServices;
-    const runtimeReady = isProgrammerRuntimeServicesReady(programmerId, renderServices);
     const hrContextReady = isProgrammerHrContextHydrationReady(programmerId, renderServices);
-    const uiReady = shouldRenderPremiumServicesUi(programmerId, renderServices);
-    if (!uiReady) {
+    const interactionReady = isProgrammerPremiumInteractionReady(programmerId, renderServices);
+    if (!interactionReady) {
       throw new Error("UnderPAR could not finish premium service hydration.");
     }
 
@@ -85060,7 +85099,7 @@ async function refreshProgrammerPanels(options = {}) {
         setStatus(message, "error");
       }
       emitPremiumServiceDecisionLogs(programmer, provisionalServices);
-      if (shouldRenderPremiumServicesUi(programmerId, provisionalServices)) {
+      if (isProgrammerPremiumInteractionReady(programmerId, provisionalServices)) {
         syncRequestorSelectHydrationAvailability(programmerId, provisionalServices);
         renderPremiumServices(provisionalServices, programmer, { controllerReason });
       } else {

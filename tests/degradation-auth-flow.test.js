@@ -187,6 +187,8 @@ function loadDegradationWorkspaceEnsureHelper() {
     "function degradationWorkspaceGetWorkspaceUrl() { return 'chrome-extension://underpar/degradation-workspace.html'; }",
     "function degradationWorkspaceUnbindWorkspaceTab() {}",
     "function degradationWorkspaceBindWorkspaceTab(windowId, tabId) { state.degradationWorkspaceWindowId = Number(windowId || 0); state.degradationWorkspaceTabId = Number(tabId || 0); if (Number(windowId || 0) > 0 && Number(tabId || 0) > 0) { state.degradationWorkspaceTabIdByWindowId.set(Number(windowId), Number(tabId)); } }",
+    "function ensureDegradationWorkspaceRuntimeListener() {}",
+    "function ensureDegradationWorkspaceTabWatcher() {}",
     "function degradationWorkspaceInvalidateReady() {}",
     "function degradationWorkspaceIsReady() { return false; }",
     "function degradationWorkspaceMarkReady() {}",
@@ -241,7 +243,7 @@ test("DEGRADATION status request honors a preselected app and locks auth selecti
   assert.equal(helpers.getRefreshCalls(), 0);
   const [fetchCall] = helpers.getFetchCalls();
   assert.equal(fetchCall.appInfo, selectedApp);
-  assert.equal(fetchCall.debugMeta.allowProvisioning, true);
+  assert.equal(fetchCall.debugMeta.allowProvisioning, false);
   assert.equal(fetchCall.debugMeta.lockAppSelection, true);
   assert.equal(fetchCall.debugMeta.requiredServiceScope, "entitlement:degradation");
   assert.equal(report.ok, true);
