@@ -12198,10 +12198,12 @@ async function applyGlobalSelectionSnapshot(snapshot = null, options = {}) {
   }
 
   if (result.requestorRestored) {
-    await refreshProgrammerPanels({
+    await refreshSelectionScopedProgrammerPanels({
       controllerReason:
         String(options?.requestorControllerReason || options?.controllerReason || "environment-switch-requestor-restore").trim() ||
         "environment-switch-requestor-restore",
+      programmer: restoredProgrammer,
+      services: getCurrentPremiumAppsSnapshot(String(restoredProgrammer?.programmerId || "").trim()) || null,
       preferredTabId,
     });
     await populateMvpdSelectForRequestor(explicitRequestorId);
@@ -12216,9 +12218,10 @@ async function applyGlobalSelectionSnapshot(snapshot = null, options = {}) {
       state.selectedMvpdId = mvpdId;
       els.mvpdSelect.value = mvpdId;
       result.mvpdRestored = true;
-      await refreshProgrammerPanels({
+      await refreshSelectionScopedProgrammerPanels({
         controllerReason: String(options?.mvpdControllerReason || "environment-switch-mvpd-restore"),
-        forcePremiumRefresh: false,
+        programmer: restoredProgrammer,
+        services: getCurrentPremiumAppsSnapshot(String(restoredProgrammer?.programmerId || "").trim()) || null,
         preferredTabId,
       });
     }
@@ -69870,8 +69873,6 @@ function buildPremiumServicesRenderSignature(programmer = null, services = null)
   if (!programmerId || !services || typeof services !== "object") {
     return "";
   }
-  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
-  const selectedMvpdId = String(state.selectedMvpdId || "").trim();
   const renderEntries = getRenderablePremiumServiceEntriesForProgrammer(programmer, services);
   const serviceSegments = renderEntries.map((entry) => {
     const serviceKey = String(entry?.serviceKey || "").trim();
@@ -69879,7 +69880,7 @@ function buildPremiumServicesRenderSignature(programmer = null, services = null)
     const appGuid = String(appInfo?.guid || "").trim();
     return `${serviceKey}:${appGuid}:${entry?.disabled === true ? "disabled" : "active"}`;
   });
-  return [programmerId, selectedRequestorId, selectedMvpdId, ...serviceSegments].join("|");
+  return [programmerId, ...serviceSegments].join("|");
 }
 
 function buildRestV2InteractiveDocsPanelSignature(programmer = null, services = null) {
@@ -69922,8 +69923,6 @@ function buildHrSectionsRenderSignature(programmer = null, services = null, opti
   if (!programmerId || !services || typeof services !== "object") {
     return "";
   }
-  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
-  const selectedMvpdId = String(state.selectedMvpdId || "").trim();
   const availableKeys = getDetectedPremiumServiceKeys(services);
   const errorText = String(options?.error || "").trim();
   const loadingFlag = options?.loading === true ? "loading" : "ready";
@@ -69939,8 +69938,6 @@ function buildHrSectionsRenderSignature(programmer = null, services = null, opti
     : "";
   return [
     programmerId,
-    selectedRequestorId,
-    selectedMvpdId,
     loadingFlag,
     errorText,
     ...availableKeys,
@@ -86231,6 +86228,36 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   return els.requestorSelect.disabled !== true;
 }
 
+async function refreshSelectionScopedProgrammerPanels(options = {}) {
+  const controllerReason = String(options?.controllerReason || "selection-change").trim() || "selection-change";
+  const programmer =
+    options?.programmer && typeof options.programmer === "object" ? options.programmer : resolveSelectedProgrammer();
+  const programmerId = String(programmer?.programmerId || "").trim();
+  const services = Object.prototype.hasOwnProperty.call(options || {}, "services")
+    ? options.services
+    : programmerId
+      ? getCurrentPremiumAppsSnapshot(programmerId) || getRuntimePremiumServicesSeed(programmerId) || null
+      : null;
+
+  if (programmerId && services && isProgrammerPremiumInteractionReady(programmerId, services)) {
+    syncRequestorSelectHydrationAvailability(programmerId, services);
+    renderPremiumServices(services, programmer, { controllerReason });
+    return true;
+  }
+
+  await refreshProgrammerPanels({
+    controllerReason,
+    forcePremiumRefresh: options?.forcePremiumRefresh === true,
+    skipCmBootstrap: options?.skipCmBootstrap === true,
+    preferredTabId: Number(options?.preferredTabId || 0),
+    programmerApplicationsPromise:
+      options?.programmerApplicationsPromise && typeof options.programmerApplicationsPromise.then === "function"
+        ? options.programmerApplicationsPromise
+        : null,
+  });
+  return true;
+}
+
 function getCmMvpdSelectionKey(programmerId = "", requestorId = "", mvpdId = "") {
   const normalizedProgrammerId = String(programmerId || "").trim();
   const normalizedRequestorId = String(requestorId || "").trim();
@@ -100508,8 +100535,14 @@ function registerEventHandlers() {
       render: false,
     });
     emitGlobalSelectorChangeLog("Requestor ID", state.selectedRequestorId, state.selectedRequestorId);
-    await refreshProgrammerPanels({
+    const selectedProgrammerBeforeMvpdLoad = resolveSelectedProgrammer();
+    const selectedServicesBeforeMvpdLoad = selectedProgrammerBeforeMvpdLoad?.programmerId
+      ? getCurrentPremiumAppsSnapshot(selectedProgrammerBeforeMvpdLoad.programmerId) || null
+      : null;
+    await refreshSelectionScopedProgrammerPanels({
       controllerReason: "requestor-change",
+      programmer: selectedProgrammerBeforeMvpdLoad,
+      services: selectedServicesBeforeMvpdLoad,
     });
     await populateMvpdSelectForRequestor(state.selectedRequestorId);
     const esmWorkspaceState = getActiveEsmWorkspaceState();
@@ -100581,7 +100614,11 @@ function registerEventHandlers() {
       mvpdId: String(state.selectedMvpdId || "").trim(),
       mvpdLabel: mvpdClearLabel,
     });
-    void refreshProgrammerPanels({ controllerReason: "mvpd-change" });
+    void refreshSelectionScopedProgrammerPanels({
+      controllerReason: "mvpd-change",
+      programmer: selectedProgrammer,
+      services: selectedServices,
+    });
     refreshRestV2LoginPanels();
     const esmWorkspaceState = getActiveEsmWorkspaceState();
     if (esmWorkspaceState) {

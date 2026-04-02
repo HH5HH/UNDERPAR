@@ -1151,8 +1151,8 @@ test("sidepanel seeds the HR context container hidden and popup runtime uses unl
     popupSource,
     /cmuUsageState\.treeHeadElement\?\.addEventListener\("click", \(event\) => \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopPropagation\(\);[\s\S]*?toggleTree\(\);[\s\S]*?\}\);/
   );
-  assert.match(buildHrSectionsRenderSignatureSource, /state\.selectedRequestorId/);
-  assert.match(buildHrSectionsRenderSignatureSource, /state\.selectedMvpdId/);
+  assert.doesNotMatch(buildHrSectionsRenderSignatureSource, /state\.selectedRequestorId/);
+  assert.doesNotMatch(buildHrSectionsRenderSignatureSource, /state\.selectedMvpdId/);
   assert.match(renderHrSectionsSource, /els\.hrServicesContainer\.dataset\.renderSignature/);
   assert.match(renderHrSectionsSource, /buildHrSectionsRenderSignature\(programmer, services, options\)/);
   assert.doesNotMatch(popupSource, /els\.premiumServicesContainer\.addEventListener\("click", \(event\) => \{/);
@@ -1423,7 +1423,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(popupSource, /buildRestV2LearningContextItemHtml/);
   assert.doesNotMatch(popupSource, /buildRestV2LearningUiStatusMeta/);
   assert.doesNotMatch(popupSource, /Click any REST V2 LEARNING deeplink to preview the exact interactive docs payload here/);
-  assert.match(popupSource, /<label[^>]+>Domains<\/label>/);
+  assert.match(popupSource, /collectRestV2LearningRequestorDomainNames\(programmer,\s*requestorId\)/);
   assert.doesNotMatch(popupSource, /AUTO \(/);
   assert.match(popupSource, /getRestV2InteractiveDocsSections/);
   assert.match(
@@ -1463,7 +1463,7 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(popupCss, /\.hr-learning-context-status-badge--active/);
   assert.match(popupCss, /\.hr-base64-hover-target/);
   assert.match(popupCss, /\.hr-context-section\.hr-context-section--harpo/);
-  assert.doesNotMatch(popupSource, /HAR &amp; Pass Observatory/);
+  assert.match(popupSource, /HAR &amp; Pass Observatory/);
   assert.doesNotMatch(popupSource, /PRE-RECORDED HAR/);
   assert.doesNotMatch(popupSource, /LIVE DOMAIN RECORDER/);
   assert.doesNotMatch(popupSource, /Legacy AccessEnabler flows stay out of scope/);
@@ -1471,8 +1471,8 @@ test("REST V2 learning card exposes every interactive doc operation across all s
   assert.doesNotMatch(popupSource, /Parsed from REST V2 \/configuration/);
   assert.doesNotMatch(popupSource, /Configured Domain/);
   assert.doesNotMatch(popupSource, /Effective domain:/);
-  assert.match(popupCss, /\.hr-harpo-domain-picker/);
-  assert.doesNotMatch(popupCss, /\.hr-harpo-domain-select\s*\{/);
+  assert.doesNotMatch(popupCss, /\.hr-harpo-domain-picker/);
+  assert.match(popupCss, /\.hr-harpo-domain-select\s*\{/);
   assert.doesNotMatch(popupCss, /\.hr-harpo-domain-copy/);
   assert.doesNotMatch(popupCss, /\.hr-harpo-domain-label/);
   assert.doesNotMatch(popupCss, /\.hr-harpo-domain-meta/);

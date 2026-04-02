@@ -963,7 +963,7 @@ test("environment restore lets the premium panel path own PassVault hydration", 
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const applySelectionSource = extractFunctionSource(popupSource, "applyGlobalSelectionSnapshot");
 
-  assert.match(applySelectionSource, /refreshProgrammerPanels\(/);
+  assert.match(applySelectionSource, /refreshSelectionScopedProgrammerPanels\(/);
   assert.doesNotMatch(applySelectionSource, /hydrateProgrammerFromPassVault\(/);
 });
 
@@ -1113,6 +1113,7 @@ test("PassVault storage changes re-seed runtime without force-overwriting active
 test("media-company selection and vault rehydrate share the same programmer hydration entrypoint", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const hydrateSelectionSource = extractFunctionSource(popupSource, "hydrateProgrammerSelection");
+  const refreshSelectionScopedSource = extractFunctionSource(popupSource, "refreshSelectionScopedProgrammerPanels");
   const selectProgrammerSource = extractFunctionSource(popupSource, "selectProgrammerForController");
   const scheduleSelectionSource = extractFunctionSource(popupSource, "scheduleMediaCompanySelectionHydration");
   const flushSelectionSource = extractFunctionSource(popupSource, "flushPendingMediaCompanySelectionHydration");
@@ -1147,7 +1148,10 @@ test("media-company selection and vault rehydrate share the same programmer hydr
   assert.match(hydrateSelectionSource, /await refreshProgrammerPanels\(\{/);
   assert.match(hydrateSelectionSource, /programmerApplicationsPromise,/);
   assert.match(applySnapshotSource, /const restoredProgrammer = await hydrateProgrammerSelection\(programmer,\s*\{/);
+  assert.match(refreshSelectionScopedSource, /renderPremiumServices\(services,\s*programmer,\s*\{\s*controllerReason\s*\}\);/);
+  assert.match(refreshSelectionScopedSource, /await refreshProgrammerPanels\(\{/);
   assert.match(applySnapshotSource, /await populateMvpdSelectForRequestor\(explicitRequestorId\);/);
+  assert.match(applySnapshotSource, /await refreshSelectionScopedProgrammerPanels\(\{/);
   assert.doesNotMatch(refreshPanelsSource, /const selectedRequestorId = String\(state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
   assert.doesNotMatch(refreshPanelsSource, /requestorId:\s*selectedRequestorId/);
   assert.doesNotMatch(premiumDetectionSource, /selectPreferredEsmAppForRequestor\(/);
@@ -1176,13 +1180,18 @@ test("post-login hydration consumes queued environment-switch selection restores
   assert.match(consumePendingSource, /mvpdControllerReason:\s*"environment-switch-mvpd-restore"/);
 });
 
-test("requestor change waits for programmer refresh before loading MVPDs", () => {
+test("requestor change reuses mounted programmer panels before loading MVPDs", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const requestorChangeBlock = popupSource.match(
-    /els\.requestorSelect\.addEventListener\("change",[\s\S]*?await refreshProgrammerPanels\(\{[\s\S]*controllerReason:\s*"requestor-change"[\s\S]*\}\);[\s\S]*?await populateMvpdSelectForRequestor\(state\.selectedRequestorId\);[\s\S]*?\}\);/
+    /els\.requestorSelect\.addEventListener\("change",[\s\S]*?await refreshSelectionScopedProgrammerPanels\(\{[\s\S]*controllerReason:\s*"requestor-change"[\s\S]*\}\);[\s\S]*?await populateMvpdSelectForRequestor\(state\.selectedRequestorId\);[\s\S]*?\}\);/
   );
 
-  assert.ok(requestorChangeBlock, "requestor change handler should await programmer refresh before MVPD load");
+  assert.ok(requestorChangeBlock, "requestor change handler should refresh mounted programmer panels before MVPD load");
+  assert.doesNotMatch(
+    String(requestorChangeBlock[0] || ""),
+    /await refreshProgrammerPanels\(\{/,
+    "requestor change should not rerun full programmer hydration when the stage is already ready"
+  );
 });
 
 test("media company change immediately invalidates stale requestor-scoped panel work before deferred hydration", () => {
@@ -2859,8 +2868,8 @@ test("premium services reuse the mounted DOM when the selected service signature
   const hasRenderableSource = extractFunctionSource(popupSource, "hasRenderablePremiumServiceSections");
   const hydrateExistingSource = extractFunctionSource(popupSource, "shouldHydrateExistingPremiumServiceSection");
 
-  assert.match(signatureSource, /const selectedRequestorId = String\(state\.selectedRequestorId \|\| ""\)\.trim\(\);/);
-  assert.match(signatureSource, /const selectedMvpdId = String\(state\.selectedMvpdId \|\| ""\)\.trim\(\);/);
+  assert.doesNotMatch(signatureSource, /state\.selectedRequestorId/);
+  assert.doesNotMatch(signatureSource, /state\.selectedMvpdId/);
   assert.match(renderSource, /const renderSignature = buildPremiumServicesRenderSignature\(programmer,\s*services\);/);
   assert.match(renderSource, /els\.premiumServicesContainer\.dataset\.renderSignature/);
   assert.match(renderSource, /const renderEntries = getRenderablePremiumServiceEntriesForProgrammer\(programmer,\s*services\);/);
