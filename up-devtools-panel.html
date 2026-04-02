@@ -92,16 +92,26 @@
               <p class="field-label mvpd-search-label">MVPDs</p>
             </div>
             <div class="mvpd-search-toolbar">
-              <input
-                id="mvpd-search-input"
-                class="mvpd-search-input"
-                type="search"
-                inputmode="search"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="Search"
-                aria-label="Search MVPDs in the active UnderPAR environment"
-              />
+              <label class="mvpd-search-field-shell" for="mvpd-search-input">
+                <span class="mvpd-search-field-icon" aria-hidden="true">
+                  <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
+                    <path
+                      d="M13.8 12.4h-.7l-.2-.2a5.2 5.2 0 1 0-.7.7l.2.2v.7L16.9 18 18 16.9l-4.2-4.5Zm-4.7 0a3.7 3.7 0 1 1 0-7.4 3.7 3.7 0 0 1 0 7.4Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </span>
+                <input
+                  id="mvpd-search-input"
+                  class="mvpd-search-input"
+                  type="search"
+                  inputmode="search"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="Search"
+                  aria-label="Search MVPDs in the active UnderPAR environment"
+                />
+              </label>
             </div>
             <div id="mvpd-search-results" class="mvpd-search-results"></div>
           </section>

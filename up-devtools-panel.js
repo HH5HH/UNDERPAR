@@ -4853,6 +4853,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
               ${isViewBusy || panelState.mvpdSearchBusy === true || panelState.environmentsLoaded !== true ? "disabled" : ""}
             >
               <span class="mvpd-search-owner">${escapeHtml(ownerLabel)}</span>
+              <span class="mvpd-search-owner-action">${isViewBusy ? "Opening workspace" : "Open owner workspace"}</span>
             </button>
           `
         : `<span class="mvpd-search-owner${row?.entityType === "mvpdproxy" ? "" : " mvpd-search-owner--direct"}">${escapeHtml(
@@ -4868,6 +4869,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
               ${isViewBusy || panelState.mvpdSearchBusy === true || panelState.environmentsLoaded !== true ? "disabled" : ""}
             >
               <span class="mvpd-search-name">${escapeHtml(displayName)}</span>
+              <span class="mvpd-search-name-action">${isViewBusy ? "Opening workspace" : "Open MVPD workspace"}</span>
             </button>
             <div class="mvpd-search-meta-row">
               <span class="mvpd-search-kind">${escapeHtml(kindLabel)}</span>
@@ -4879,14 +4881,6 @@ function renderMvpdSearchResults(rows = [], options = {}) {
             ${ownerMarkup}
             ${ownerMetaLabel ? `<p class="mvpd-search-owner-meta">${escapeHtml(ownerMetaLabel)}</p>` : ""}
           </td>
-          <td class="mvpd-search-actions-cell">
-            <button
-              type="button"
-              class="mvpd-search-view-btn"
-              data-mvpd-search-view="${escapeHtml(resultKey)}"
-              ${isViewBusy || panelState.mvpdSearchBusy === true || panelState.environmentsLoaded !== true ? "disabled" : ""}
-            >${isViewBusy ? "OPENING" : "VIEW"}</button>
-          </td>
         </tr>
       `;
     })
@@ -4895,7 +4889,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
     normalizedRows.length === 0
       ? `
         <tr class="mvpd-search-table-empty-row">
-          <td colspan="3">${escapeHtml(emptyMessage || "No MVPDs found.")}</td>
+          <td colspan="2">${escapeHtml(emptyMessage || "No MVPDs found.")}</td>
         </tr>
       `
       : "";
@@ -4907,7 +4901,6 @@ function renderMvpdSearchResults(rows = [], options = {}) {
           <tr>
             <th>MVPD NAME</th>
             <th>Proxy Owner</th>
-            <th>View</th>
           </tr>
         </thead>
         <tbody>${rowsMarkup || emptyRowMarkup}</tbody>

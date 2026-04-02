@@ -211,6 +211,8 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(devtoolsHtml, /<p class="field-label mvpd-search-label">MVPDs<\/p>/);
   assert.match(devtoolsHtml, /id="mvpd-search-input"/);
   assert.match(devtoolsHtml, /id="mvpd-search-results"/);
+  assert.match(devtoolsHtml, /class="mvpd-search-field-shell"/);
+  assert.match(devtoolsHtml, /class="mvpd-search-field-icon"/);
   assert.match(devtoolsHtml, /placeholder="Search"/);
   assert.doesNotMatch(devtoolsHtml, /Google-style admin MVPD search scoped only to the active UnderPAR ENV/);
   assert.doesNotMatch(devtoolsHtml, /id="mvpd-search-btn"/);
@@ -218,14 +220,18 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.doesNotMatch(devtoolsHtml, /id="mvpd-search-badge"/);
 
   assert.match(devtoolsCss, /\.mvpd-search-card/);
+  assert.match(devtoolsCss, /\.mvpd-search-field-shell/);
+  assert.match(devtoolsCss, /\.mvpd-search-field-icon/);
   assert.match(devtoolsCss, /\.mvpd-search-results-scroll/);
   assert.match(devtoolsCss, /\.mvpd-search-table/);
-  assert.match(devtoolsCss, /\.mvpd-search-view-btn/);
   assert.match(devtoolsCss, /\.mvpd-search-name-btn/);
+  assert.match(devtoolsCss, /\.mvpd-search-name-action/);
   assert.match(devtoolsCss, /\.mvpd-search-owner-btn/);
+  assert.match(devtoolsCss, /\.mvpd-search-owner-action/);
   assert.match(devtoolsCss, /\.mvpd-search-associated/);
   assert.match(devtoolsCss, /\.mvpd-search-owner-meta/);
   assert.match(devtoolsCss, /\.mvpd-search-table-empty-row td/);
+  assert.doesNotMatch(devtoolsCss, /\.mvpd-search-view-btn/);
 
   assert.match(devtoolsJs, /const canSearch = panelState\.environmentsLoaded && !panelState\.switchBusy;/);
   assert.match(devtoolsJs, /sendVaultActionRequest\("search-env-mvpds"/);
@@ -233,8 +239,12 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(devtoolsJs, /No MVPDs found\./);
   assert.match(devtoolsJs, /class="mvpd-search-name-btn"/);
   assert.match(devtoolsJs, /class="mvpd-search-owner-btn"/);
+  assert.match(devtoolsJs, /class="mvpd-search-name-action"/);
+  assert.match(devtoolsJs, /class="mvpd-search-owner-action"/);
+  assert.match(devtoolsJs, /class="mvpd-search-owner-btn"/);
   assert.match(devtoolsJs, /Channels \/ Requestors \(\$\{associatedServiceProviderCount\}\):/);
   assert.match(devtoolsJs, /Load the active UnderPAR environment before searching MVPDs\./);
+  assert.doesNotMatch(devtoolsJs, /<th>View<\/th>/);
   assert.doesNotMatch(devtoolsJs, /mvpd-search-results-summary/);
 
   assert.match(popupSource, /function buildUpDevtoolsMvpdSearchCatalog\(/);
