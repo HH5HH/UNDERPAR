@@ -915,7 +915,7 @@ test("pass vault hydration applications preserve console fetch order for primary
   );
 });
 
-test("runtime REST V2 app resolution preserves the hydrated programmer primary before catalog fallbacks", () => {
+test("runtime REST V2 app resolution prefers the ranked programmer app before stale primary fallbacks", () => {
   const services = {
     restV2: { guid: "shared-app", appName: "Shared App" },
     restV2Apps: [
@@ -938,7 +938,7 @@ test("runtime REST V2 app resolution preserves the hydrated programmer primary b
     helpers.resolveProgrammerPremiumServiceRuntimeApp("restV2", "Rogers Media", services)
   );
 
-  assert.equal(resolved?.guid, "shared-app");
+  assert.equal(resolved?.guid, "citytv-app");
 });
 
 test("REST V2 bound-cache checks require a software statement fingerprint when binding is mandatory", () => {
@@ -1105,6 +1105,52 @@ test("successful REST V2 requestor resolution preserves the media-company primar
   );
   assert.equal(setPremiumSnapshots.length, 1);
   assert.equal(setPremiumSnapshots[0]?.services?.restV2?.guid, "shared-app");
+});
+
+test("REST V2 hydration prefers the programmer app that covers more requestors", () => {
+  const helpers = loadPopupFunctions(
+    ["countRestV2ProgrammerRequestorCoverage", "selectPreferredPassVaultHydrationServiceApplication"],
+    {
+      state: {
+        programmers: [
+          {
+            programmerId: "Turner",
+            requestorIds: ["MML", "CNN", "TBS"],
+          },
+        ],
+      },
+      appSupportsServiceProvider: (appInfo = null, requestorId = "", programmerId = "") => {
+        const guid = String(appInfo?.guid || "").trim();
+        if (String(programmerId || "").trim() !== "Turner") {
+          return false;
+        }
+        if (guid === "shared-app") {
+          return ["MML", "CNN", "TBS"].includes(String(requestorId || "").trim());
+        }
+        if (guid === "mml-only-app") {
+          return String(requestorId || "").trim() === "MML";
+        }
+        return false;
+      },
+      hasPassVaultServiceClientCredentials: () => false,
+      firstNonEmptyString,
+    }
+  );
+
+  const selected = normalizeRealmObject(
+    helpers.selectPreferredPassVaultHydrationServiceApplication(
+      "restV2",
+      [
+        { guid: "mml-only-app", appName: "MML only", fetchOrder: 0 },
+        { guid: "shared-app", appName: "Turner shared REST V2", fetchOrder: 1 },
+      ],
+      "Turner"
+    )
+  );
+
+  assert.equal(helpers.countRestV2ProgrammerRequestorCoverage({ guid: "shared-app" }, "Turner"), 3);
+  assert.equal(helpers.countRestV2ProgrammerRequestorCoverage({ guid: "mml-only-app" }, "Turner"), 1);
+  assert.equal(selected?.guid, "shared-app");
 });
 
 test("registered application health ordering keeps the selected app ahead of requestor-specific hints", () => {

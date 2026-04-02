@@ -10338,6 +10338,12 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
 
   if (normalizedServiceKey === "restV2") {
     const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, resolvedServices);
+    const preferredMatch =
+      selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
+      null;
+    if (preferredMatch?.guid) {
+      return preferredMatch;
+    }
     const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
     if (primaryMatch?.guid) {
       return primaryMatch;
@@ -10346,14 +10352,7 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
     if (fallbackMatch?.guid) {
       return fallbackMatch;
     }
-    const preferredMatch =
-      selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
-      candidates[0] ||
-      null;
-    if (preferredMatch?.guid) {
-      return preferredMatch;
-    }
-    return primaryMatch || fallbackMatch || preferredMatch || null;
+    return candidates[0] || primaryMatch || fallbackMatch || null;
   }
 
   if (normalizedServiceKey === "esm") {
@@ -85247,14 +85246,70 @@ function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", prog
   return candidates[0] || null;
 }
 
+function countRestV2ProgrammerRequestorCoverage(appInfo = null, programmerId = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!appInfo?.guid || !normalizedProgrammerId) {
+    return 0;
+  }
+
+  const programmer =
+    Array.isArray(state?.programmers)
+      ? state.programmers.find((item) => String(item?.programmerId || "").trim() === normalizedProgrammerId) || null
+      : null;
+  const requestorIds = Array.isArray(programmer?.requestorIds) ? programmer.requestorIds : [];
+  if (requestorIds.length === 0) {
+    return 0;
+  }
+
+  let coverageCount = 0;
+  requestorIds.forEach((requestorId) => {
+    if (appSupportsServiceProvider(appInfo, requestorId, normalizedProgrammerId)) {
+      coverageCount += 1;
+    }
+  });
+  return coverageCount;
+}
+
 function selectPreferredPassVaultHydrationServiceApplication(serviceKey = "", appCandidates = [], programmerId = "") {
-  void serviceKey;
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const normalizedProgrammerId = String(programmerId || "").trim();
   const candidates = Array.isArray(appCandidates) ? appCandidates.filter((appInfo) => appInfo?.guid) : [];
-  void programmerId;
   if (candidates.length === 0) {
     return null;
   }
-  return candidates[0] || null;
+
+  const rankedCandidates = candidates
+    .map((appInfo, index) => {
+      const fetchOrder = Number(
+        appInfo?.fetchOrder ??
+          appInfo?.__underparFetchOrder ??
+          appInfo?.appData?.__underparFetchOrder
+      );
+      return {
+        appInfo,
+        index,
+        hasCredentialCoverage:
+          Boolean(normalizedProgrammerId) &&
+          hasPassVaultServiceClientCredentials(normalizedProgrammerId, appInfo, normalizedServiceKey),
+        programmerCoverage:
+          normalizedServiceKey === "restV2"
+            ? countRestV2ProgrammerRequestorCoverage(appInfo, normalizedProgrammerId)
+            : 0,
+        fetchOrder: Number.isFinite(fetchOrder) ? fetchOrder : Number.MAX_SAFE_INTEGER,
+        label: firstNonEmptyString([appInfo?.appName, appInfo?.name, appInfo?.label, appInfo?.guid]),
+      };
+    })
+    .sort((left, right) => {
+      return (
+        Number(right.hasCredentialCoverage) - Number(left.hasCredentialCoverage) ||
+        Number(right.programmerCoverage) - Number(left.programmerCoverage) ||
+        left.fetchOrder - right.fetchOrder ||
+        String(left.label || "").localeCompare(String(right.label || ""), undefined, { sensitivity: "base" }) ||
+        left.index - right.index
+      );
+    });
+
+  return rankedCandidates[0]?.appInfo || null;
 }
 
 function normalizeScope(scope) {
@@ -97415,9 +97470,9 @@ function promoteResolvedRestV2ConfigurationApp(programmer = null, services = nul
     resolvedAppInfo ? [resolvedAppInfo] : []
   );
   const authoritativeRestV2App =
-    currentServices?.restV2 ||
-    resolvedAppInfo ||
     selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
+    resolvedAppInfo ||
+    currentServices?.restV2 ||
     mergedRestV2Apps[0] ||
     null;
   const nextServices = {
