@@ -9542,12 +9542,12 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
 
     if (normalizedServiceKey === "restV2") {
       return (
+        primaryMatch ||
         selectPreferredPassVaultHydrationServiceApplication(
           normalizedServiceKey,
           candidates,
           String(record?.programmerId || "").trim()
         ) ||
-        primaryMatch ||
         credentialBackedMatch ||
         serviceKeyBackedMatch ||
         candidates[0] ||
@@ -10016,21 +10016,21 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
 
   if (normalizedServiceKey === "restV2") {
     const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, resolvedServices);
+    const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
+    if (primaryMatch?.guid) {
+      return primaryMatch;
+    }
     const preferredMatch =
       selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
       selectPreferredRestV2AppForRequestor(candidates, "", normalizedProgrammerId);
     if (preferredMatch?.guid) {
       return preferredMatch;
     }
-    const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
-    if (primaryMatch?.guid) {
-      return primaryMatch;
-    }
     const fallbackMatch = resolveFallbackMatch(candidates);
     if (fallbackMatch?.guid) {
       return fallbackMatch;
     }
-    return null;
+    return preferredMatch || null;
   }
 
   if (normalizedServiceKey === "esm") {
@@ -24458,10 +24458,16 @@ async function switchRegisteredApplicationHealthPremiumService(queryContext = nu
     const mergedRestV2Apps = nextRegisteredApplications.filter((application) =>
       registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE)
     );
+    const selectedRestV2App =
+      nextRegisteredApplications.find((application) => String(application?.guid || "").trim() === normalizedGuid) ||
+      hydratedServiceRecord?.registeredApplication ||
+      selectedApplication ||
+      null;
     nextServices.restV2Apps = mergedRestV2Apps;
     nextServices.restV2 =
-      selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
+      selectedRestV2App ||
       seedServices?.restV2 ||
+      selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
       mergedRestV2Apps[0] ||
       null;
     void requestorId;
@@ -96807,9 +96813,9 @@ function promoteResolvedRestV2ConfigurationApp(programmer = null, services = nul
     resolvedAppInfo
   );
   const authoritativeRestV2App =
-    selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
-    resolvedAppInfo ||
     currentServices?.restV2 ||
+    resolvedAppInfo ||
+    selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
     mergedRestV2Apps[0] ||
     null;
   const nextServices = {
