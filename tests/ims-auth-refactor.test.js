@@ -2501,7 +2501,10 @@ test("premium app details still retain software statements while pass-vault mapp
     /registeredApplicationMatchesNativeRequiredScope\(application,\s*normalizedDefinition\.requiredScope\)/
   );
   assert.match(resolveServiceApplicationSource, /const existingGuid = String\(existingService\?\.registeredApplication\?\.guid \|\| ""\)\.trim\(\);/);
-  assert.match(resolveServiceApplicationSource, /pickHighestRankedPassVaultServiceCandidate\(orderedCandidates,\s*programmerId,\s*\{/);
+  assert.match(
+    resolveServiceApplicationSource,
+    /selectPreferredPassVaultHydrationServiceApplication\(\s*normalizedDefinition\.serviceKey,\s*orderedCandidates,\s*programmerId\s*\)/
+  );
   assert.doesNotMatch(popupSource, /function mergeDetectedPassVaultServices\(/);
   assert.doesNotMatch(popupSource, /function resolveMissingPassVaultServiceMappings\(/);
   assert.match(sanitizeApplicationSource, /const softwareStatement = extractSoftwareStatementFromAppData\(source\);/);
@@ -2646,7 +2649,10 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(serviceEntriesSource, /status: registeredApplication \? \(client\?\.clientId && client\?\.clientSecret \? "ready" : "pending"\) : "unavailable",/);
   assert.match(serviceEntriesSource, /compactPassVaultRegisteredApplicationsMatch\(registeredApplication,\s*existingService\?\.registeredApplication\)/);
   assert.match(resolveServiceApplicationSource, /const existingMatch =/);
-  assert.match(resolveServiceApplicationSource, /pickHighestRankedPassVaultServiceCandidate\(orderedCandidates,\s*programmerId,\s*\{/);
+  assert.match(
+    resolveServiceApplicationSource,
+    /selectPreferredPassVaultHydrationServiceApplication\(\s*normalizedDefinition\.serviceKey,\s*orderedCandidates,\s*programmerId\s*\)/
+  );
   assert.match(hydrateEntriesSource, /for \(const definition of definitionsToHydrate\)/);
   assert.match(hydrateEntriesSource, /const sharedHydratedApplicationsByGuid = new Map\(\);/);
   assert.match(hydrateEntriesSource, /const sharedClientByGuid = new Map\(\);/);
@@ -2655,9 +2661,18 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(hydrateServiceRecordSource, /loadDcrCache\(programmerId,\s*guid\)/);
   assert.match(hydrateServiceRecordSource, /sharedHydratedApplicationsByGuid/);
   assert.match(hydrateServiceRecordSource, /sharedClientByGuid/);
-  assert.match(directServicesSource, /restV2:\s*hydratedServiceEntries\?\.restV2\?\.registeredApplication \|\| restV2Apps\[0\] \|\| null,/);
-  assert.match(directServicesSource, /esm:\s*hydratedServiceEntries\?\.esm\?\.registeredApplication \|\| esmApps\[0\] \|\| null,/);
-  assert.match(directServicesSource, /degradation:\s*hydratedServiceEntries\?\.degradation\?\.registeredApplication \|\| degradationApps\[0\] \|\| null,/);
+  assert.match(
+    directServicesSource,
+    /restV2:\s*hydratedServiceEntries\?\.restV2\?\.registeredApplication\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*restV2Apps,\s*programmerId\)\s*\|\|\s*null,/
+  );
+  assert.match(
+    directServicesSource,
+    /esm:\s*hydratedServiceEntries\?\.esm\?\.registeredApplication\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\("esm",\s*esmApps,\s*programmerId\)\s*\|\|\s*null,/
+  );
+  assert.match(
+    directServicesSource,
+    /degradation:\s*hydratedServiceEntries\?\.degradation\?\.registeredApplication\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\("degradation",\s*degradationApps,\s*programmerId\)\s*\|\|\s*null,/
+  );
   assert.doesNotMatch(popupSource, /function mergeDetectedPassVaultServices\(/);
   assert.doesNotMatch(popupSource, /function resolveMissingPassVaultServiceMappings\(/);
   assert.doesNotMatch(popupSource, /function hydratePassVaultServiceCredentials\(/);
@@ -2833,6 +2848,8 @@ test("REST V2 app selection stays media-company scoped and no longer blocks shar
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const selectRestV2Source = extractFunctionSource(popupSource, "selectPreferredRestV2AppForRequestor");
   const resolveRuntimeSource = extractFunctionSource(popupSource, "resolveProgrammerPremiumServiceRuntimeApp");
+  const orderCandidatesSource = extractFunctionSource(popupSource, "orderRestV2AppCandidatesForRequestor");
+  const promoteResolvedSource = extractFunctionSource(popupSource, "promoteResolvedRestV2ConfigurationApp");
   const switchServiceSource = extractFunctionSource(popupSource, "switchRegisteredApplicationHealthPremiumService");
   const loadMvpdsSource = extractFunctionSource(popupSource, "loadMvpdsFromRestV2");
   const restSelectionContextSource = extractFunctionSource(popupSource, "buildCurrentRestV2SelectionContext");
@@ -2850,14 +2867,24 @@ test("REST V2 app selection stays media-company scoped and no longer blocks shar
   assert.match(resolveRuntimeSource, /const primaryMatch = resolvePrimaryMatch\(resolvedServices\?\.restV2 \|\| null,\s*candidates\);/);
   assert.match(resolveRuntimeSource, /return primaryMatch;/);
   assert.match(resolveRuntimeSource, /return selectPreferredRestV2AppForRequestor\(candidates,\s*"",\s*normalizedProgrammerId\) \|\| null;/);
+  assert.match(orderCandidatesSource, /if \(context\.preferredAppGuid\) \{\s*pushCandidate\(byGuid\.get\(context\.preferredAppGuid\)\);\s*\}/);
+  assert.match(orderCandidatesSource, /pushCandidate\(resolvedApp\);/);
+  assert.match(
+    promoteResolvedSource,
+    /selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*mergedRestV2Apps,\s*programmerId\)/
+  );
+  assert.match(promoteResolvedSource, /restV2:\s*authoritativeRestV2App,/);
+  assert.match(promoteResolvedSource, /preferredAppGuid:\s*String\(resolvedAppInfo\.guid \|\| ""\)\.trim\(\),/);
   assert.doesNotMatch(switchServiceSource, /is not associated with RequestorId/);
   assert.match(loadMvpdsSource, /let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\);/);
   assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
   assert.match(loadMvpdsSource, /await primeProgrammerServiceHydration\(programmer,\s*premiumApps,\s*\{/);
   assert.match(loadMvpdsSource, /const orderedCandidates = orderRestV2AppCandidatesForRequestor\(restV2Apps,\s*runtimePrimaryApp,\s*requestorId\);/);
   assert.match(loadMvpdsSource, /const \{ map, domainRows, appInfo \} = await fetchRestV2ConfigurationUsingCandidateApps\(/);
+  assert.match(loadMvpdsSource, /premiumApps = promoteResolvedRestV2ConfigurationApp\(programmer,\s*premiumApps,\s*appInfo,\s*requestorId\) \|\| premiumApps;/);
   assert.match(loadMvpdsSource, /setRequestorScopedDomainCache\(requestorId,\s*domainRows\)/);
   assert.match(restSelectionContextSource, /const runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp\(/);
+  assert.match(restSelectionContextSource, /cachedAuthContext\.preferredAppGuid/);
   assert.match(fetchWithPremiumAuthSource, /ensureDcrAccessTokenWithServiceRecovery\(/);
 });
 

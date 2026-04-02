@@ -8790,9 +8790,11 @@ function resolvePassVaultHydrationServiceApplication({
     ? [existingMatch, ...matchingApplications.filter((application) => String(application?.guid || "").trim() !== existingGuid)]
     : matchingApplications.slice();
   const selectedApplication =
-    pickHighestRankedPassVaultServiceCandidate(orderedCandidates, programmerId, {
-      degradationTieBreak: normalizedDefinition.serviceKey === "degradation",
-    }) ||
+    selectPreferredPassVaultHydrationServiceApplication(
+      normalizedDefinition.serviceKey,
+      orderedCandidates,
+      programmerId
+    ) ||
     existingMatch ||
     (matchingApplications.length === 0 ? existingService?.registeredApplication || null : null);
 
@@ -9162,6 +9164,7 @@ function buildPassVaultDirectPremiumServicesSnapshot(
   hydratedServiceEntries = {},
   options = {}
 ) {
+  const programmerId = String(programmer?.programmerId || "").trim();
   const normalizedApplications = Array.isArray(registeredApplications) ? registeredApplications.filter((app) => app?.guid) : [];
   const restV2Apps = normalizedApplications.filter((application) =>
     registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE)
@@ -9180,13 +9183,25 @@ function buildPassVaultDirectPremiumServicesSnapshot(
     programmer,
     {
       restV2Apps,
-      restV2: hydratedServiceEntries?.restV2?.registeredApplication || restV2Apps[0] || null,
+      restV2:
+        hydratedServiceEntries?.restV2?.registeredApplication ||
+        selectPreferredPassVaultHydrationServiceApplication("restV2", restV2Apps, programmerId) ||
+        null,
       esmApps,
-      esm: hydratedServiceEntries?.esm?.registeredApplication || esmApps[0] || null,
+      esm:
+        hydratedServiceEntries?.esm?.registeredApplication ||
+        selectPreferredPassVaultHydrationServiceApplication("esm", esmApps, programmerId) ||
+        null,
       degradationApps,
-      degradation: hydratedServiceEntries?.degradation?.registeredApplication || degradationApps[0] || null,
+      degradation:
+        hydratedServiceEntries?.degradation?.registeredApplication ||
+        selectPreferredPassVaultHydrationServiceApplication("degradation", degradationApps, programmerId) ||
+        null,
       resetTempPassApps,
-      resetTempPass: hydratedServiceEntries?.resetTempPass?.registeredApplication || resetTempPassApps[0] || null,
+      resetTempPass:
+        hydratedServiceEntries?.resetTempPass?.registeredApplication ||
+        selectPreferredPassVaultHydrationServiceApplication("resetTempPass", resetTempPassApps, programmerId) ||
+        null,
       cm: options?.cmServiceSnapshot ?? null,
       cmMvpd: options?.cmMvpdServiceSnapshot ?? null,
       cmMvpdSelectionKey: String(options?.cmMvpdSelectionKey || "").trim(),
@@ -9324,6 +9339,28 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
         const serviceKeys = Array.isArray(applicationRecord?.serviceKeys) ? applicationRecord.serviceKeys : [];
         return serviceKeys.includes(normalizedServiceKey);
       }) || null;
+    const prioritizedCandidates = primaryMatch
+      ? [primaryMatch, ...candidates.filter((appInfo) => String(appInfo?.guid || "").trim() !== primaryGuid)]
+      : candidates;
+
+    if (
+      normalizedServiceKey === "restV2" ||
+      normalizedServiceKey === "esm" ||
+      normalizedServiceKey === "resetTempPass"
+    ) {
+      return (
+        selectPreferredPassVaultHydrationServiceApplication(
+          normalizedServiceKey,
+          prioritizedCandidates,
+          String(record?.programmerId || "").trim()
+        ) ||
+        primaryMatch ||
+        credentialBackedMatch ||
+        serviceKeyBackedMatch ||
+        candidates[0] ||
+        null
+      );
+    }
 
     if (primaryMatch && (hasCredentialEntryForService(normalizedServiceKey, primaryGuid) || !credentialBackedMatch)) {
       return primaryMatch;
@@ -27992,6 +28029,13 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
     allowAppOverride ? appInfoOverride : null
   );
   pushCandidate(allowAppOverride ? appInfoOverride : null);
+  if (
+    cachedAuthContext &&
+    cachedAuthContext.programmerId === resolvedProgrammer.programmerId &&
+    cachedAuthContext.preferredAppGuid
+  ) {
+    pushCandidate(byGuid.get(cachedAuthContext.preferredAppGuid));
+  }
   pushCandidate(runtimePrimaryApp);
 
   if (
@@ -84462,6 +84506,33 @@ function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", prog
   return pickHighestRankedPassVaultServiceCandidate(candidates, normalizedProgrammerId) || candidates[0] || null;
 }
 
+function selectPreferredPassVaultHydrationServiceApplication(serviceKey = "", appCandidates = [], programmerId = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const candidates = Array.isArray(appCandidates) ? appCandidates.filter((appInfo) => appInfo?.guid) : [];
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  if (normalizedServiceKey === "restV2") {
+    return selectPreferredRestV2AppForRequestor(candidates, "", normalizedProgrammerId) || candidates[0] || null;
+  }
+  if (normalizedServiceKey === "esm") {
+    return selectPreferredEsmAppForRequestor(candidates, "", normalizedProgrammerId) || candidates[0] || null;
+  }
+  if (normalizedServiceKey === "resetTempPass") {
+    return selectPreferredResetTempPassAppForRequestor(candidates, "", normalizedProgrammerId) || candidates[0] || null;
+  }
+
+  return (
+    pickHighestRankedPassVaultServiceCandidate(candidates, normalizedProgrammerId, {
+      degradationTieBreak: normalizedServiceKey === "degradation",
+    }) ||
+    candidates[0] ||
+    null
+  );
+}
+
 function normalizeScope(scope) {
   const normalized = String(scope || "")
     .trim()
@@ -96384,6 +96455,71 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
   };
 }
 
+function promoteResolvedRestV2ConfigurationApp(programmer = null, services = null, appInfo = null, requestorId = "") {
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : null;
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const resolvedAppInfo = appInfo && typeof appInfo === "object" ? appInfo : null;
+  if (!programmerId || !resolvedAppInfo?.guid) {
+    return services && typeof services === "object" ? services : null;
+  }
+
+  const currentServices =
+    services && typeof services === "object" && !Array.isArray(services)
+      ? services
+      : getCurrentPremiumAppsSnapshot(programmerId) || getRuntimePremiumServicesSeed(programmerId) || null;
+  if (!currentServices || typeof currentServices !== "object") {
+    return currentServices;
+  }
+
+  const mergedRestV2Apps = mergeUniquePremiumServiceAppInfos(
+    resolvedAppInfo,
+    currentServices?.restV2,
+    Array.isArray(currentServices?.restV2Apps) ? currentServices.restV2Apps : []
+  );
+  const authoritativeRestV2App =
+    selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
+    currentServices?.restV2 ||
+    resolvedAppInfo ||
+    mergedRestV2Apps[0] ||
+    null;
+  const nextServices = {
+    ...currentServices,
+    restV2: authoritativeRestV2App,
+    restV2Apps: mergedRestV2Apps,
+  };
+  const summarizedServices = applyPremiumServiceRuntimeSummary(resolvedProgrammer, nextServices, {
+    cmCatalog: state.cmTenantsCatalog,
+  });
+
+  setCurrentPremiumAppsSnapshot(programmerId, summarizedServices);
+
+  const normalizedRequestorId = String(requestorId || "").trim();
+  if (normalizedRequestorId) {
+    const existingContext = getRequestorScopedRestV2AuthContext(normalizedRequestorId) || {};
+    const existingCandidateGuids = Array.isArray(existingContext?.candidateGuids) ? existingContext.candidateGuids : [];
+    const runtimeCandidateGuids = Array.isArray(summarizedServices?.restV2Apps)
+      ? summarizedServices.restV2Apps.map((candidate) => String(candidate?.guid || "").trim()).filter(Boolean)
+      : [];
+    setRequestorScopedRestV2AuthContext(normalizedRequestorId, {
+      ...existingContext,
+      programmerId,
+      preferredAppGuid: String(resolvedAppInfo.guid || "").trim(),
+      candidateGuids: uniquePreserveOrder(
+        [String(resolvedAppInfo.guid || "").trim()].concat(existingCandidateGuids, runtimeCandidateGuids)
+      ),
+    });
+  }
+
+  void persistPassVaultProgrammerRecord(resolvedProgrammer, summarizedServices, {
+    source: "live",
+    hydrationStatus: isProgrammerRuntimeServicesReady(programmerId, summarizedServices)
+      ? UNDERPAR_VAULT_STATUS_COMPLETE
+      : UNDERPAR_VAULT_STATUS_PARTIAL,
+  }).catch(() => {});
+
+  return summarizedServices;
+}
+
 function orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestorId) {
   const candidates = Array.isArray(restV2Apps) ? restV2Apps : [];
   const byGuid = new Map(candidates.filter((item) => item?.guid).map((item) => [item.guid, item]));
@@ -96399,11 +96535,11 @@ function orderRestV2AppCandidatesForRequestor(restV2Apps, resolvedApp, requestor
     ordered.push(candidate);
   };
 
-  pushCandidate(resolvedApp);
-
   if (context.preferredAppGuid) {
     pushCandidate(byGuid.get(context.preferredAppGuid));
   }
+
+  pushCandidate(resolvedApp);
 
   if (Array.isArray(context.candidateGuids)) {
     context.candidateGuids.forEach((guid) => {
@@ -96486,44 +96622,45 @@ async function loadMvpdsFromRestV2(requestorId) {
           forceOverwrite: false,
           forceDcrRestore: true,
         }).catch(() => null);
-      let premiumApps = getCurrentPremiumAppsSnapshot(programmer.programmerId);
-      if (!premiumApps) {
-        const selectedProgrammer = resolveSelectedProgrammer();
-        if (String(selectedProgrammer?.programmerId || "").trim() === String(programmer?.programmerId || "").trim()) {
-          throw new Error(
+        let premiumApps = getCurrentPremiumAppsSnapshot(programmer.programmerId);
+        if (!premiumApps) {
+          const selectedProgrammer = resolveSelectedProgrammer();
+          if (String(selectedProgrammer?.programmerId || "").trim() === String(programmer?.programmerId || "").trim()) {
+            throw new Error(
               `Premium services for ${programmer.programmerId} are not hydrated in the UnderPAR vault yet. Re-select the media company first.`
-          );
+            );
+          }
+          continue;
         }
-        continue;
-      }
-      let restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
-      let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
-      const requiresRuntimeHydration =
-        !isProgrammerRuntimeServicesReady(programmer.programmerId, premiumApps) ||
-        !runtimePrimaryApp?.guid ||
-        !hasPassVaultServiceClientCredentials(programmer.programmerId, runtimePrimaryApp);
-      if (requiresRuntimeHydration) {
-        premiumApps =
-          (await primeProgrammerServiceHydration(programmer, premiumApps, {
-            forceRefresh: false,
-            controllerReason: "requestor-restv2-load",
-          }).catch(() => null)) ||
-          getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
-          premiumApps;
-        restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
-        runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
-      }
-      if (restV2Apps.length === 0) {
-        continue;
-      }
+        let restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+        let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
+        const requiresRuntimeHydration =
+          !isProgrammerRuntimeServicesReady(programmer.programmerId, premiumApps) ||
+          !runtimePrimaryApp?.guid ||
+          !hasPassVaultServiceClientCredentials(programmer.programmerId, runtimePrimaryApp);
+        if (requiresRuntimeHydration) {
+          premiumApps =
+            (await primeProgrammerServiceHydration(programmer, premiumApps, {
+              forceRefresh: false,
+              controllerReason: "requestor-restv2-load",
+            }).catch(() => null)) ||
+            getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
+            premiumApps;
+          restV2Apps = collectRestV2AppCandidatesFromPremiumApps(premiumApps);
+          runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
+        }
+        if (restV2Apps.length === 0) {
+          continue;
+        }
 
-      hasRestV2Candidate = true;
-      const orderedCandidates = orderRestV2AppCandidatesForRequestor(restV2Apps, runtimePrimaryApp, requestorId);
-      const { map, domainRows, appInfo } = await fetchRestV2ConfigurationUsingCandidateApps(
-        programmer,
-        requestorId,
-        orderedCandidates
-      );
+        hasRestV2Candidate = true;
+        const orderedCandidates = orderRestV2AppCandidatesForRequestor(restV2Apps, runtimePrimaryApp, requestorId);
+        const { map, domainRows, appInfo } = await fetchRestV2ConfigurationUsingCandidateApps(
+          programmer,
+          requestorId,
+          orderedCandidates
+        );
+        premiumApps = promoteResolvedRestV2ConfigurationApp(programmer, premiumApps, appInfo, requestorId) || premiumApps;
 
         setRequestorScopedMvpdCache(requestorId, map);
         setRequestorScopedDomainCache(requestorId, domainRows);

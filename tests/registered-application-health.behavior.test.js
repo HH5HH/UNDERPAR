@@ -688,7 +688,8 @@ test("pass vault service hydration reuses the existing primary app before other 
         scopes: ["api:client:v2"],
       },
     }),
-    pickHighestRankedPassVaultServiceCandidate: (apps = []) => apps[0] || null,
+    selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) =>
+      apps.find((app) => String(app?.guid || "").trim() === "shared-app") || apps[0] || null,
     buildPassVaultCompactRegisteredApplication: (app = null) => normalizeRealmObject(app),
   });
 
@@ -706,6 +707,82 @@ test("pass vault service hydration reuses the existing primary app before other 
   });
 
   assert.equal(selected?.guid, "shared-app");
+});
+
+test("successful REST V2 requestor resolution preserves the media-company primary app while caching the requestor winner", async () => {
+  const programmer = { programmerId: "Rogers Media" };
+  const services = {
+    restV2: { guid: "shared-app", appName: "Shared App" },
+    restV2Apps: [
+      { guid: "shared-app", appName: "Shared App" },
+      { guid: "citytv-app", appName: "Citytvplus V2" },
+    ],
+  };
+  const setPremiumSnapshots = [];
+  const setRequestorContexts = [];
+  const helpers = loadPopupFunctions(["promoteResolvedRestV2ConfigurationApp"], {
+    mergeUniquePremiumServiceAppInfos: (...collections) => {
+      const merged = [];
+      const seen = new Set();
+      collections.flat().forEach((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return;
+        }
+        const guid = String(entry.guid || "").trim();
+        if (!guid || seen.has(guid)) {
+          return;
+        }
+        seen.add(guid);
+        merged.push(normalizeRealmObject(entry));
+      });
+      return merged;
+    },
+    selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) =>
+      apps.find((app) => String(app?.guid || "").trim() === "shared-app") || apps[0] || null,
+    applyPremiumServiceRuntimeSummary: (_programmer = null, nextServices = null) => normalizeRealmObject(nextServices),
+    setCurrentPremiumAppsSnapshot: (programmerId, nextServices) => {
+      setPremiumSnapshots.push({
+        programmerId,
+        services: normalizeRealmObject(nextServices),
+      });
+    },
+    getRequestorScopedRestV2AuthContext: () => ({
+      candidateGuids: ["legacy-app"],
+    }),
+    setRequestorScopedRestV2AuthContext: (requestorId, nextValue) => {
+      setRequestorContexts.push({
+        requestorId,
+        value: normalizeRealmObject(nextValue),
+      });
+    },
+    uniquePreserveOrder,
+    persistPassVaultProgrammerRecord: () => Promise.resolve(),
+    isProgrammerRuntimeServicesReady: () => true,
+    UNDERPAR_VAULT_STATUS_COMPLETE: "complete",
+    UNDERPAR_VAULT_STATUS_PARTIAL: "partial",
+    state: {
+      cmTenantsCatalog: null,
+    },
+  });
+
+  const nextServices = await helpers.promoteResolvedRestV2ConfigurationApp(
+    programmer,
+    services,
+    { guid: "citytv-app", appName: "Citytvplus V2" },
+    "animalplanettv"
+  );
+
+  assert.equal(nextServices?.restV2?.guid, "shared-app");
+  assert.deepEqual(
+    (Array.isArray(nextServices?.restV2Apps) ? nextServices.restV2Apps : []).map((app) => app.guid),
+    ["citytv-app", "shared-app"]
+  );
+  assert.equal(setPremiumSnapshots.length, 1);
+  assert.equal(setPremiumSnapshots[0]?.services?.restV2?.guid, "shared-app");
+  assert.equal(setRequestorContexts.length, 1);
+  assert.equal(setRequestorContexts[0]?.requestorId, "animalplanettv");
+  assert.equal(setRequestorContexts[0]?.value?.preferredAppGuid, "citytv-app");
+  assert.deepEqual(setRequestorContexts[0]?.value?.candidateGuids, ["citytv-app", "legacy-app", "shared-app"]);
 });
 
 test("registered application health ordering keeps the selected app ahead of requestor-specific hints", () => {
