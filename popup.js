@@ -9106,7 +9106,12 @@ function resolvePassVaultHydrationServiceApplication({
       : null;
   const existingBoundMatch =
     existingMatch &&
-    Boolean(String(existingClient?.clientId || "").trim() && String(existingClient?.clientSecret || "").trim())
+    hasMatchingSoftwareStatementBoundDcrCache(
+      existingClient,
+      resolveRegisteredApplicationSoftwareStatement(existingMatch),
+      normalizedDefinition.serviceKey,
+      normalizedDefinition.requiredScope
+    )
       ? existingMatch
       : null;
   const selectedApplication =
@@ -9837,6 +9842,7 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   if (!record || typeof record !== "object") {
     return null;
   }
+  const programmerId = String(record?.programmerId || "").trim();
   const applicationsSnapshot = buildPassVaultApplicationsSnapshotFromRegisteredApplications(
     getPassVaultRegisteredApplicationsByGuid(record)
   );
@@ -9848,11 +9854,20 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
     if (!normalizedServiceKey || !normalizedGuid) {
       return false;
     }
+    const resolvedAppInfo = resolveAppInfo(normalizedGuid) || null;
+    if (programmerId && resolvedAppInfo?.guid) {
+      return hasPassVaultServiceClientCredentials(programmerId, resolvedAppInfo, normalizedServiceKey);
+    }
     const applicationRecord = getPassVaultRegisteredApplicationsByGuid(record)?.[normalizedGuid] || null;
     const credential = normalizeUnderparVaultCredentialEntry(
       applicationRecord?.serviceCredentialsByServiceKey?.[normalizedServiceKey] || null
     );
-    return Boolean(credential?.clientId && credential?.clientSecret);
+    return hasMatchingSoftwareStatementBoundDcrCache(
+      credential,
+      resolveRegisteredApplicationSoftwareStatement(resolvedAppInfo || applicationRecord),
+      normalizedServiceKey,
+      getPassVaultRequiredScopeForService(normalizedServiceKey, resolvedAppInfo || applicationRecord)
+    );
   };
   const selectPrimaryApp = (serviceKey = "", appInfos = []) => {
     const normalizedServiceKey = String(serviceKey || "").trim();

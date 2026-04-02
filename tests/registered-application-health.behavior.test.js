@@ -1022,6 +1022,8 @@ test("pass vault service hydration resets service selection from the first live 
         scopes: ["api:client:v2"],
       },
     }),
+    hasMatchingSoftwareStatementBoundDcrCache: () => false,
+    resolveRegisteredApplicationSoftwareStatement: (app = null) => String(app?.softwareStatement || "").trim(),
     selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) =>
       apps[0] || null,
     buildPassVaultCompactRegisteredApplication: (app = null) => normalizeRealmObject(app),
@@ -1041,6 +1043,101 @@ test("pass vault service hydration resets service selection from the first live 
   });
 
   assert.equal(selected?.guid, "animalplanet-app");
+});
+
+test("pass vault service hydration does not preserve stale REST V2 apps from unbound credentials", () => {
+  const helpers = loadPopupFunctions(["resolvePassVaultHydrationServiceApplication"], {
+    registeredApplicationMatchesNativeRequiredScope: (app = null, requiredScope = "") =>
+      (Array.isArray(app?.scopes) ? app.scopes : []).includes(String(requiredScope || "").trim()),
+    buildPassVaultExistingHydrationServiceRecord: () => ({
+      registeredApplication: {
+        guid: "shared-app",
+        appName: "Shared App",
+        scopes: ["api:client:v2"],
+        softwareStatement: "shared-statement",
+      },
+      client: {
+        clientId: "cid",
+        clientSecret: "sec",
+        softwareStatementFingerprint: "stale-fingerprint",
+        cacheBindingVersion: 1,
+      },
+    }),
+    hasMatchingSoftwareStatementBoundDcrCache: () => false,
+    resolveRegisteredApplicationSoftwareStatement: (app = null) => String(app?.softwareStatement || "").trim(),
+    selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) =>
+      apps[0] || null,
+    buildPassVaultCompactRegisteredApplication: (app = null) => normalizeRealmObject(app),
+  });
+
+  const selected = helpers.resolvePassVaultHydrationServiceApplication({
+    definition: {
+      serviceKey: "restV2",
+      requiredScope: "api:client:v2",
+    },
+    programmerId: "Turner",
+    registeredApplications: [
+      { guid: "turner-shared", appName: "Turner Shared", scopes: ["api:client:v2"], softwareStatement: "turner-shared" },
+      { guid: "shared-app", appName: "Shared App", scopes: ["api:client:v2"], softwareStatement: "shared-statement" },
+    ],
+    existingRecord: { services: { restV2: { primaryGuid: "shared-app" } } },
+  });
+
+  assert.equal(selected?.guid, "turner-shared");
+});
+
+test("runtime REST V2 snapshot ignores stale primary credentials that are not bound to the selected app", () => {
+  const record = {
+    programmerId: "Turner",
+    services: {
+      restV2: {
+        primaryGuid: "shared-app",
+        appGuids: ["shared-app", "turner-shared"],
+      },
+    },
+    registeredApplicationsByGuid: {
+      "shared-app": {
+        guid: "shared-app",
+        appName: "Shared App",
+        scopes: ["api:client:v2"],
+        serviceCredentialsByServiceKey: {
+          restV2: {
+            clientId: "cid",
+            clientSecret: "sec",
+          },
+        },
+      },
+      "turner-shared": {
+        guid: "turner-shared",
+        appName: "Turner Shared",
+        scopes: ["api:client:v2"],
+      },
+    },
+  };
+  const helpers = loadPopupFunctions(["buildPassVaultRuntimeServicesSnapshot"], {
+    buildPassVaultApplicationsSnapshotFromRegisteredApplications: (value = null) => value || {},
+    getPassVaultRegisteredApplicationsByGuid: (value = null) => value?.registeredApplicationsByGuid || {},
+    findPremiumServiceApplications: () => ({ restV2Apps: [] }),
+    buildPassVaultRuntimeAppInfoFromRecord: (currentRecord = null, guid = "") =>
+      currentRecord?.registeredApplicationsByGuid?.[String(guid || "").trim()] || null,
+    getPassVaultServiceAppGuidsFromRecord: (currentRecord = null, serviceKey = "") =>
+      Array.isArray(currentRecord?.services?.[String(serviceKey || "").trim()]?.appGuids)
+        ? currentRecord.services[String(serviceKey || "").trim()].appGuids
+        : [],
+    hasPassVaultServiceClientCredentials: (programmerId = "", appInfo = null, serviceKey = "") =>
+      String(programmerId || "").trim() === "Turner" &&
+      String(serviceKey || "").trim() === "restV2" &&
+      String(appInfo?.guid || "").trim() === "turner-shared",
+    selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) =>
+      apps.find((app) => String(app?.guid || "").trim() === "turner-shared") || apps[0] || null,
+    buildPassVaultRuntimeCmServiceSnapshot: () => null,
+    buildPassVaultServiceGuids: () => [],
+    uniqueSorted,
+  });
+
+  const services = normalizeRealmObject(helpers.buildPassVaultRuntimeServicesSnapshot(record));
+
+  assert.equal(services?.restV2?.guid, "turner-shared");
 });
 
 test("successful REST V2 requestor resolution preserves the media-company primary app without storing requestor app state", async () => {

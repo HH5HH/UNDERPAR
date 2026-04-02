@@ -2573,7 +2573,7 @@ test("premium app details still retain software statements while pass-vault mapp
   assert.match(resolveServiceApplicationSource, /const existingBoundMatch =/);
   assert.match(
     resolveServiceApplicationSource,
-    /Boolean\(String\(existingClient\?\.clientId \|\| ""\)\.trim\(\) && String\(existingClient\?\.clientSecret \|\| ""\)\.trim\(\)\)/
+    /hasMatchingSoftwareStatementBoundDcrCache\(\s*existingClient,\s*resolveRegisteredApplicationSoftwareStatement\(existingMatch\),\s*normalizedDefinition\.serviceKey,\s*normalizedDefinition\.requiredScope\s*\)/
   );
   assert.match(
     resolveServiceApplicationSource,
@@ -3033,6 +3033,8 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(resolveRuntimeSource, /const candidates = collectProgrammerScopedRestV2AppCandidates\(normalizedProgrammerId,\s*resolvedServices\);/);
   assert.match(resolveRuntimeSource, /return candidates\[0\] \|\| primaryMatch \|\| fallbackMatch \|\| null;/);
   assert.match(runtimeSnapshotSource, /const credentialBackedMatch =/);
+  assert.match(runtimeSnapshotSource, /const programmerId = String\(record\?\.programmerId \|\| ""\)\.trim\(\);/);
+  assert.match(runtimeSnapshotSource, /return hasPassVaultServiceClientCredentials\(programmerId,\s*resolvedAppInfo,\s*normalizedServiceKey\);/);
   assert.match(
     runtimeSnapshotSource,
     /if \(normalizedServiceKey === "restV2"\) \{\s*return \(\s*credentialBackedMatch\s*\|\|\s*\(primaryMatch && hasCredentialEntryForService\(normalizedServiceKey,\s*primaryGuid\) \? primaryMatch : null\)\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\(/
