@@ -91,24 +91,33 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
 
   assert.match(devtoolsHtml, /<p class="field-label mvpd-search-label">MVPDs<\/p>/);
   assert.match(devtoolsHtml, /id="mvpd-search-input"/);
-  assert.match(devtoolsHtml, /id="mvpd-search-btn"/);
   assert.match(devtoolsHtml, /id="mvpd-search-results"/);
+  assert.match(devtoolsHtml, /placeholder="Search"/);
+  assert.doesNotMatch(devtoolsHtml, /Google-style admin MVPD search scoped only to the active UnderPAR ENV/);
+  assert.doesNotMatch(devtoolsHtml, /id="mvpd-search-btn"/);
+  assert.doesNotMatch(devtoolsHtml, /id="mvpd-search-status"/);
+  assert.doesNotMatch(devtoolsHtml, /id="mvpd-search-badge"/);
 
   assert.match(devtoolsCss, /\.mvpd-search-card/);
   assert.match(devtoolsCss, /\.mvpd-search-results-scroll/);
   assert.match(devtoolsCss, /\.mvpd-search-table/);
   assert.match(devtoolsCss, /\.mvpd-search-view-btn/);
+  assert.match(devtoolsCss, /\.mvpd-search-name-btn/);
+  assert.match(devtoolsCss, /\.mvpd-search-table-empty-row td/);
 
   assert.match(devtoolsJs, /const canSearch = panelState\.environmentsLoaded && !panelState\.switchBusy;/);
   assert.match(devtoolsJs, /sendVaultActionRequest\("search-env-mvpds"/);
   assert.match(devtoolsJs, /sendVaultActionRequest\("open-mvpd-search-result"/);
-  assert.match(devtoolsJs, /Searching all MVPDs in \$\{activeEnvironment\.label\}\.\.\./);
-  assert.match(devtoolsJs, /Opening \$\{row\.displayName \|\| row\.id\} in MVPD Workspace\.\.\./);
+  assert.match(devtoolsJs, /No MVPDs found\./);
+  assert.match(devtoolsJs, /class="mvpd-search-name-btn"/);
   assert.match(devtoolsJs, /Load the active UnderPAR environment before searching MVPDs\./);
+  assert.doesNotMatch(devtoolsJs, /mvpd-search-results-summary/);
 
   assert.match(popupSource, /function buildUpDevtoolsMvpdSearchCatalog\(/);
   assert.match(popupSource, /buildEntityUrl\("entity\/Mvpd"\)/);
-  assert.match(popupSource, /buildEntityUrl\("entity\/MvpdProxy"\)/);
+  assert.match(popupSource, /Object\.values\(entityData\.proxiedMvpds\)/);
+  assert.match(popupSource, /upDevtoolsProxiedMvpdCatalog/);
+  assert.match(popupSource, /buildAdobeConsoleRestApiUrl\("entity\/bulkRetrieve"/);
   assert.match(popupSource, /workspaceKey:\s*"up-devtools-mvpd-search"/);
   assert.match(popupSource, /if \(action === "search-env-mvpds"\)/);
   assert.match(popupSource, /if \(action === "open-mvpd-search-result"\)/);
@@ -120,7 +129,7 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(workspaceSource, /const label = requestorId && mvpdDisplayLabel \? `\$\{requestorId\} x \$\{mvpdDisplayLabel\}` : mvpdDisplayLabel \|\| "selected MVPD";/);
 });
 
-test("UP DevTools MVPD search builds direct and proxy rows using proxied MVPD ownership", () => {
+test("UP DevTools MVPD search builds direct and proxied rows using proxied MVPD ownership", () => {
   const { buildUpDevtoolsMvpdSearchRows } = loadMvpdSearchHelpers();
   const built = buildUpDevtoolsMvpdSearchRows(
     {
@@ -151,6 +160,7 @@ test("UP DevTools MVPD search builds direct and proxy rows using proxied MVPD ow
           entityData: {
             id: "AdultSwim",
             displayName: "Adult Swim Proxy",
+            serviceProviderIds: ["adultswim", "cartoonnetwork"],
           },
         },
       ],
@@ -167,7 +177,7 @@ test("UP DevTools MVPD search builds direct and proxy rows using proxied MVPD ow
       proxyOwnerId: "Turner",
       proxyOwnerName: "Turner Direct",
       proxyOwnerLabel: "Turner Direct (Turner)",
-      searchText: "adult swim proxy adultswim turner direct turner turner direct (turner) proxy mvpd",
+      searchText: "adult swim proxy adultswim turner direct turner turner direct (turner) adultswim cartoonnetwork proxied mvpd proxy mvpd",
     },
     {
       resultKey: "mvpd:directonly",

@@ -89,13 +89,7 @@
           </section>
           <section class="context-card settings-subcard mvpd-search-card">
             <div class="mvpd-search-card-head">
-              <div class="settings-card-head-copy">
-                <p class="field-label mvpd-search-label">MVPDs</p>
-                <p class="settings-note">
-                  Google-style admin MVPD search scoped only to the active UnderPAR ENV. Search never uses Media Company or RequestorId context.
-                </p>
-              </div>
-              <span id="mvpd-search-badge" class="up-collapsible-badge">Idle</span>
+              <p class="field-label mvpd-search-label">MVPDs</p>
             </div>
             <div class="mvpd-search-toolbar">
               <input
@@ -105,17 +99,11 @@
                 inputmode="search"
                 autocomplete="off"
                 spellcheck="false"
-                placeholder="Search MVPD name, ID, or proxy owner"
+                placeholder="Search"
                 aria-label="Search MVPDs in the active UnderPAR environment"
               />
-              <button id="mvpd-search-btn" class="switch-btn mvpd-search-btn" type="button">SEARCH</button>
             </div>
-            <p id="mvpd-search-status" class="settings-note mvpd-search-status">
-              Search honors only the active UnderPAR ENV. Click SWITCH before searching if you changed the environment picker.
-            </p>
-            <div id="mvpd-search-results" class="mvpd-search-results">
-              <p class="mvpd-search-empty">Run an MVPD search against the active UnderPAR ENV to list direct and proxied MVPDs.</p>
-            </div>
+            <div id="mvpd-search-results" class="mvpd-search-results"></div>
           </section>
         </section>
 

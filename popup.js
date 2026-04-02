@@ -47679,9 +47679,12 @@ function normalizeUpDevtoolsMvpdSearchCatalogKey(value = "") {
   return String(value || "").trim().toLowerCase();
 }
 
-function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, mvpdProxyPayload = null) {
+function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, proxiedMvpdPayload = null, mvpdProxyPayload = null) {
   const directEntities = normalizeApplicationsResponse(mvpdPayload);
-  const proxyEntities = normalizeApplicationsResponse(mvpdProxyPayload);
+  const proxiedEntities = [
+    ...normalizeApplicationsResponse(proxiedMvpdPayload),
+    ...normalizeApplicationsResponse(mvpdProxyPayload),
+  ];
   const directById = new Map();
   const proxyById = new Map();
   const proxyOwnerById = new Map();
@@ -47733,7 +47736,7 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, mvpdProxyPayload = nu
     });
   });
 
-  proxyEntities.forEach((entity) => {
+  proxiedEntities.forEach((entity) => {
     const record = buildRecord(entity);
     if (!record) {
       return;
@@ -47789,6 +47792,9 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, mvpdProxyPayload = nu
     const ownerRecord = proxyOwnerById.get(normalizeUpDevtoolsMvpdSearchCatalogKey(record.id)) || null;
     const proxyOwnerId = String(ownerRecord?.id || "").trim();
     const proxyOwnerName = String(ownerRecord?.displayName || "").trim();
+    const associatedServiceProviderIds = Array.isArray(record?.data?.serviceProviderIds)
+      ? record.data.serviceProviderIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
     const proxyOwnerLabel =
       proxyOwnerName && proxyOwnerId && proxyOwnerName.toLowerCase() !== proxyOwnerId.toLowerCase()
         ? `${proxyOwnerName} (${proxyOwnerId})`
@@ -47807,6 +47813,8 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, mvpdProxyPayload = nu
         proxyOwnerName,
         proxyOwnerId,
         proxyOwnerLabel,
+        ...associatedServiceProviderIds,
+        "proxied mvpd",
         "proxy mvpd",
       ]
         .join(" ")
@@ -47833,7 +47841,7 @@ function buildUpDevtoolsMvpdSearchRows(mvpdPayload = null, mvpdProxyPayload = nu
 
   return {
     directEntities,
-    proxyEntities,
+    proxyEntities: [...proxyById.values()].map((record) => record.entity).filter(Boolean),
     directById,
     proxyById,
     proxyOwnerById,
@@ -47875,31 +47883,61 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
     const baseUrl = buildAdobeConsoleRestApiUrl(entityPath, environment.consoleBase);
     return configurationVersion > 0 ? appendAdobeConsoleConfigurationVersion(baseUrl, configurationVersion) : baseUrl;
   };
-  const [mvpdCall, mvpdProxyCall] = await Promise.all([
-    mvpdWorkspaceFetchCall(
-      "upDevtoolsMvpdCatalog",
-      "MVPD Catalog",
-      [buildEntityUrl("entity/Mvpd")],
-      null,
-      debugContext
-    ),
-    mvpdWorkspaceFetchCall(
-      "upDevtoolsMvpdProxyCatalog",
-      "MVPD Proxy Catalog",
-      [buildEntityUrl("entity/MvpdProxy")],
-      null,
-      debugContext
-    ),
-  ]);
+  const mvpdCall = await mvpdWorkspaceFetchCall(
+    "upDevtoolsMvpdCatalog",
+    "MVPD Catalog",
+    [buildEntityUrl("entity/Mvpd")],
+    null,
+    debugContext
+  );
 
   if (!mvpdCall?.ok) {
     throw new Error(String(mvpdCall?.error || "MVPD Catalog failed."));
   }
-  if (!mvpdProxyCall?.ok) {
-    throw new Error(String(mvpdProxyCall?.error || "MVPD Proxy Catalog failed."));
+
+  const directEntities = normalizeApplicationsResponse(mvpdCall?.parsed || null);
+  const proxiedEntityRefs = [];
+  const proxiedRefSeen = new Set();
+  directEntities.forEach((entity) => {
+    const entityData = mvpdWorkspaceGetEntityData(entity);
+    const proxiedRefs =
+      entityData?.proxiedMvpds && typeof entityData.proxiedMvpds === "object"
+        ? Object.values(entityData.proxiedMvpds)
+        : [];
+    proxiedRefs.forEach((entityRef) => {
+      const normalizedRef = mvpdWorkspaceNormalizeEntityRef(entityRef);
+      if (!normalizedRef || proxiedRefSeen.has(normalizedRef)) {
+        return;
+      }
+      proxiedRefSeen.add(normalizedRef);
+      proxiedEntityRefs.push(normalizedRef);
+    });
+  });
+
+  let proxiedMvpdsCall = null;
+  if (proxiedEntityRefs.length > 0) {
+    proxiedMvpdsCall = await mvpdWorkspaceFetchCall(
+      "upDevtoolsProxiedMvpdCatalog",
+      "Proxied MVPD Catalog",
+      [buildAdobeConsoleRestApiUrl("entity/bulkRetrieve", environment.consoleBase)],
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          entities: proxiedEntityRefs,
+          ...(configurationVersion > 0 ? { configVersion: configurationVersion } : {}),
+        }),
+      },
+      debugContext
+    );
+    if (!proxiedMvpdsCall?.ok) {
+      throw new Error(String(proxiedMvpdsCall?.error || "Proxied MVPD Catalog failed."));
+    }
   }
 
-  const builtCatalog = buildUpDevtoolsMvpdSearchRows(mvpdCall?.parsed || null, mvpdProxyCall?.parsed || null);
+  const builtCatalog = buildUpDevtoolsMvpdSearchRows(mvpdCall?.parsed || null, proxiedMvpdsCall?.parsed || null, null);
   const rowByKey = new Map();
   builtCatalog.rows.forEach((row) => {
     const resultKey = String(row?.resultKey || "").trim();
@@ -47913,7 +47951,7 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
     environmentKey: String(environment?.key || "").trim(),
     environmentLabel: String(environment?.label || "").trim(),
     configurationVersion,
-    calls: [versionCall, mvpdCall, mvpdProxyCall],
+    calls: [versionCall, mvpdCall, ...(proxiedMvpdsCall ? [proxiedMvpdsCall] : [])],
     directById: builtCatalog.directById,
     proxyById: builtCatalog.proxyById,
     proxyOwnerById: builtCatalog.proxyOwnerById,
