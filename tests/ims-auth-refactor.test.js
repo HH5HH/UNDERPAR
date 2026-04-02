@@ -3052,7 +3052,11 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
     fetchWithPremiumAuthSource,
     /if \(response\.status === 401 && retryStage === "restv2-token-refresh"\) \{[\s\S]*if \(isServiceProviderTokenMismatchError\(bodyText\)\) \{[\s\S]*clearDcrCache\(programmerId,\s*retryAppInfo\.guid,\s*"restV2"\);[\s\S]*allowProvisioning:\s*true,[\s\S]*forceFreshClientRegistration:\s*true,[\s\S]*lockAppSelection:\s*true,[\s\S]*return fetchWithPremiumAuth\([\s\S]*"restv2-reprovision"[\s\S]*allowProvisioning:\s*true,[\s\S]*lockAppSelection:\s*true[\s\S]*\}\s*return response;\s*\}/
   );
-  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "restv2-reprovision"\) \{\s*return response;\s*\}/);
+  assert.match(
+    fetchWithPremiumAuthSource,
+    /if \(response\.status === 401 && retryStage === "restv2-reprovision"\) \{[\s\S]*if \(isServiceProviderTokenMismatchError\(bodyText\)\) \{[\s\S]*recoverPremiumServiceSelection\(programmerId,\s*resolvedAppInfo,\s*\{[\s\S]*requiredServiceScope:\s*REST_V2_SCOPE,[\s\S]*\}\)\.catch\(\(\) => null\);[\s\S]*reason:\s*"401-restv2-alternate-parent"[\s\S]*clearDcrCache\(programmerId,\s*recoveredAppInfo\.guid,\s*"restV2"\);[\s\S]*allowProvisioning:\s*true,[\s\S]*forceFreshClientRegistration:\s*true,[\s\S]*lockAppSelection:\s*true,[\s\S]*return fetchWithPremiumAuth\([\s\S]*"restv2-alt-reprovision"[\s\S]*allowProvisioning:\s*true,[\s\S]*lockAppSelection:\s*true[\s\S]*\}\s*return response;\s*\}/
+  );
+  assert.match(fetchWithPremiumAuthSource, /if \(response\.status === 401 && retryStage === "restv2-alt-reprovision"\) \{\s*return response;\s*\}/);
   assert.match(
     loadMvpdsSource,
     /premiumApps =[\s\S]*promoteResolvedRestV2ConfigurationApp\(programmer,\s*premiumApps,\s*runtimePrimaryApp,\s*requestorId\) \|\| premiumApps;/

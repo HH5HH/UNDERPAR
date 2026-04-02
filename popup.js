@@ -89148,6 +89148,56 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
   }
 
   if (response.status === 401 && retryStage === "restv2-reprovision") {
+    const bodyText = await response.clone().text().catch(() => "");
+    if (isServiceProviderTokenMismatchError(bodyText)) {
+      const recovered = await recoverPremiumServiceSelection(programmerId, resolvedAppInfo, {
+        ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+        requiredServiceScope: REST_V2_SCOPE,
+      }).catch(() => null);
+      const recoveredAppInfo = recovered?.appInfo || null;
+      if (
+        recoveredAppInfo?.guid &&
+        String(recoveredAppInfo.guid || "").trim() !== String(resolvedAppInfo?.guid || "").trim()
+      ) {
+        emitRestV2DebugEvent(debugFlowId, {
+          source: "extension",
+          phase: "restv2-retry",
+          reason: "401-restv2-alternate-parent",
+          url: String(url || ""),
+          status: 401,
+          responsePreview: truncateDebugText(bodyText, 1200),
+          service: String(debugMeta?.service || ""),
+          requestScope: String(debugMeta?.scope || ""),
+          appGuid: String(recoveredAppInfo?.guid || ""),
+          appName: String(recoveredAppInfo?.appName || recoveredAppInfo?.guid || ""),
+          workspaceKey,
+          workspaceOrigin,
+        });
+        clearDcrCache(programmerId, recoveredAppInfo.guid, "restV2");
+        await ensureDcrAccessToken(programmerId, recoveredAppInfo, true, {
+          ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+          allowProvisioning: true,
+          forceFreshClientRegistration: true,
+          lockAppSelection: true,
+        });
+        return fetchWithPremiumAuth(
+          programmerId,
+          recoveredAppInfo,
+          url,
+          options,
+          "restv2-alt-reprovision",
+          {
+            ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+            allowProvisioning: true,
+            lockAppSelection: true,
+          }
+        );
+      }
+    }
+    return response;
+  }
+
+  if (response.status === 401 && retryStage === "restv2-alt-reprovision") {
     return response;
   }
 
