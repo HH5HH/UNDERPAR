@@ -122,8 +122,8 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(catalogSource, /buildEntityUrl\("entity\/MvpdProxy"\)/);
   assert.match(catalogSource, /buildEntityUrl\("entity\/IntegrationConfiguration"\)/);
   assert.match(popupSource, /Object\.values\(record\.data\.proxiedMvpds\)/);
-  assert.doesNotMatch(catalogSource, /upDevtoolsProxiedMvpdCatalog/);
-  assert.doesNotMatch(catalogSource, /entity\/bulkRetrieve/);
+  assert.match(catalogSource, /upDevtoolsProxiedMvpdCatalog/);
+  assert.match(catalogSource, /buildAdobeConsoleRestApiUrl\("entity\/bulkRetrieve"/);
   assert.match(popupSource, /workspaceKey:\s*"up-devtools-mvpd-search"/);
   assert.match(popupSource, /if \(action === "search-env-mvpds"\)/);
   assert.match(popupSource, /if \(action === "open-mvpd-search-result"\)/);
@@ -135,7 +135,7 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(workspaceSource, /const label = requestorId && mvpdDisplayLabel \? `\$\{requestorId\} x \$\{mvpdDisplayLabel\}` : mvpdDisplayLabel \|\| "selected MVPD";/);
 });
 
-test("UP DevTools MVPD search builds direct and proxied rows from MVPD, proxy, and integration catalogs", () => {
+test("UP DevTools MVPD search builds direct and proxied rows from MVPD, proxied MVPD, proxy, and integration catalogs", () => {
   const { buildUpDevtoolsMvpdSearchRows } = loadMvpdSearchHelpers();
   const built = buildUpDevtoolsMvpdSearchRows(
     {
@@ -147,7 +147,7 @@ test("UP DevTools MVPD search builds direct and proxied rows from MVPD, proxy, a
             displayName: "Turner Direct",
             proxiedMvpds: {
               adultSwim: "MvpdProxy:AdultSwim",
-              claroPr: "MvpdProxy:ClaroPR",
+              claroPuertoRico: "MvpdProxy:nrtccpr010",
             },
           },
         },
@@ -172,11 +172,30 @@ test("UP DevTools MVPD search builds direct and proxied rows from MVPD, proxy, a
           },
         },
         {
-          key: "MvpdProxy:claropr",
+          key: "MvpdProxy:nrtccpr010",
           entityData: {
-            id: "ClaroPR",
+            id: "nrtccpr010",
+            displayName: "Claro Puerto Rico",
             owner: "Mvpd:Turner",
             serviceProviderIds: ["adultswim", "cartoonnetwork"],
+          },
+        },
+      ],
+    },
+    {
+      entities: [
+        {
+          key: "MvpdProxy:adultswim",
+          entityData: {
+            id: "AdultSwim",
+            owner: "Mvpd:Turner",
+          },
+        },
+        {
+          key: "MvpdProxy:nrtccpr010",
+          entityData: {
+            id: "nrtccpr010",
+            owner: "Mvpd:Turner",
           },
         },
       ],
@@ -224,13 +243,13 @@ test("UP DevTools MVPD search builds direct and proxied rows from MVPD, proxy, a
   assert.equal(rowByKey["mvpdproxy:adultswim"].enabledIntegrationCount, 1);
   assert.match(rowByKey["mvpdproxy:adultswim"].searchText, /adult swim proxy/);
 
-  assert.equal(rowByKey["mvpdproxy:claropr"].displayName, "Claro PR");
-  assert.equal(rowByKey["mvpdproxy:claropr"].proxyOwnerLabel, "Turner Direct (Turner)");
-  assert.deepEqual(rowByKey["mvpdproxy:claropr"].associatedServiceProviderIds, ["adultswim", "cartoonnetwork"]);
-  assert.equal(rowByKey["mvpdproxy:claropr"].integrationCount, 2);
-  assert.equal(rowByKey["mvpdproxy:claropr"].enabledIntegrationCount, 1);
-  assert.match(rowByKey["mvpdproxy:claropr"].searchText, /claro pr/);
-  assert.match(rowByKey["mvpdproxy:claropr"].searchText, /claropr/);
+  assert.equal(rowByKey["mvpdproxy:nrtccpr010"].displayName, "Claro Puerto Rico");
+  assert.equal(rowByKey["mvpdproxy:nrtccpr010"].proxyOwnerLabel, "Turner Direct (Turner)");
+  assert.deepEqual(rowByKey["mvpdproxy:nrtccpr010"].associatedServiceProviderIds, ["adultswim", "cartoonnetwork"]);
+  assert.equal(rowByKey["mvpdproxy:nrtccpr010"].integrationCount, 2);
+  assert.equal(rowByKey["mvpdproxy:nrtccpr010"].enabledIntegrationCount, 1);
+  assert.match(rowByKey["mvpdproxy:nrtccpr010"].searchText, /claro puerto rico/);
+  assert.match(rowByKey["mvpdproxy:nrtccpr010"].searchText, /nrtccpr010/);
 
   assert.deepEqual(rowByKey["mvpd:directonly"].associatedServiceProviderIds, ["directonly"]);
   assert.equal(rowByKey["mvpd:directonly"].integrationCount, 1);
@@ -265,9 +284,9 @@ test("UP DevTools MVPD search filter matches normalized MVPD names, ids, owners,
       searchText: "direct only directonly direct mvpd",
     },
     {
-      id: "ClaroPR",
+      id: "nrtccpr010",
       entityType: "mvpdproxy",
-      searchText: "claro pr claropr turner direct turner adultswim cartoonnetwork proxied mvpd proxy mvpd",
+      searchText: "claro puerto rico nrtccpr010 turner direct turner adultswim cartoonnetwork proxied mvpd proxy mvpd",
     },
   ];
 
@@ -279,6 +298,10 @@ test("UP DevTools MVPD search filter matches normalized MVPD names, ids, owners,
   );
   assert.deepEqual(
     normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "claro pr")),
+    [rows[4]]
+  );
+  assert.deepEqual(
+    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "claro nrtccpr010")),
     [rows[4]]
   );
   assert.deepEqual(
