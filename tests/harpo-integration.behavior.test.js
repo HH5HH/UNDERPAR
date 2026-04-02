@@ -176,7 +176,7 @@ function loadHarpoCountHelper() {
     }`,
     `const UNDERPAR_HARPO_SECOND_LEVEL_TLDS = new Set(["ac.uk","co.uk","gov.uk","ltd.uk","me.uk","net.uk","org.uk","plc.uk","sch.uk","co.jp","com.au","net.au","org.au","com.br","com.mx","com.tr","co.nz","com.sg"]);`,
     `const UNDERPAR_HARPO_PASS_HOST_RE = /(^|\\.)auth(?:-staging)?\\.adobe\\.com$/i;`,
-    `const UNDERPAR_HARPO_ADOBE_SUPPORT_HOSTS = [/(^|\\.)adobedtm\\.com$/i];`,
+    `const UNDERPAR_HARPO_ADOBE_SUPPORT_HOSTS = [];`,
     extractFunctionSource(source, "getUnderparHarEventUrl"),
     extractFunctionSource(source, "mergeUnderparHarHeaders"),
     extractFunctionSource(source, "getUnderparHarHeaderValueFromObject"),
@@ -406,6 +406,71 @@ test("HARPO captured call counter drops unrelated off-scope domains", () => {
           timestampMs: 1030,
           responseHeaders: {
             "content-type": "application/json",
+          },
+        },
+      ],
+    },
+    {
+      serviceType: "harpo",
+      safeDomains: ["adobe.com", "thetennischannel.com"],
+      reproDomains: ["thetennischannel.com"],
+    }
+  );
+
+  assert.equal(count, 1);
+});
+
+test("HARPO captured call counter excludes adobe support hosts that are not in the known requestor domains", () => {
+  const countHarpoCapturedCalls = loadHarpoCountHelper();
+  const count = countHarpoCapturedCalls(
+    {
+      events: [
+        {
+          source: "web-request",
+          phase: "onBeforeRequest",
+          tabId: 55,
+          requestId: "wr-pass",
+          method: "GET",
+          url: "https://api.auth.adobe.com/api/v2/thetennischannel/configuration",
+          type: "xmlhttprequest",
+          timestampMs: 1000,
+        },
+        {
+          source: "web-request",
+          phase: "onCompleted",
+          tabId: 55,
+          requestId: "wr-pass",
+          method: "GET",
+          url: "https://api.auth.adobe.com/api/v2/thetennischannel/configuration",
+          statusCode: 200,
+          statusLine: "HTTP/1.1 200 OK",
+          timestampMs: 1010,
+          responseHeaders: {
+            "content-type": "application/json",
+          },
+        },
+        {
+          source: "web-request",
+          phase: "onBeforeRequest",
+          tabId: 55,
+          requestId: "wr-adobedtm",
+          method: "GET",
+          url: "http://assets.adobedtm.com/launch.js",
+          type: "script",
+          timestampMs: 1020,
+        },
+        {
+          source: "web-request",
+          phase: "onCompleted",
+          tabId: 55,
+          requestId: "wr-adobedtm",
+          method: "GET",
+          url: "http://assets.adobedtm.com/launch.js",
+          statusCode: 200,
+          statusLine: "HTTP/1.1 200 OK",
+          timestampMs: 1030,
+          responseHeaders: {
+            "content-type": "application/javascript",
           },
         },
       ],

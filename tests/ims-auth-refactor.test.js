@@ -2503,14 +2503,19 @@ test("CM tenant bundle loader no longer returns stale bundle data after a live f
 
 test("missing DCR credentials no longer trigger full pass vault compilation from inside token acquisition", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const restoreBoundCacheSource = extractFunctionSource(popupSource, "restorePassVaultBoundServiceCredentialCache");
   const ensureDcrSource = extractFunctionSource(popupSource, "ensureDcrAccessToken");
 
+  assert.match(restoreBoundCacheSource, /const restored = resolvePassVaultBoundServiceCredentialCache\(normalizedProgrammerId,\s*appInfo,\s*serviceKey\);/);
+  assert.match(restoreBoundCacheSource, /saveDcrCache\(normalizedProgrammerId,\s*normalizedGuid,\s*cache\);/);
   assert.doesNotMatch(ensureDcrSource, /queuePassVaultProgrammerCompilation\(/);
   assert.doesNotMatch(ensureDcrSource, /dcr-registration-trigger-vault-compile/);
   assert.match(ensureDcrSource, /UnderPAR could not auto-hydrate DCR credentials/);
   assert.match(ensureDcrSource, /const activeHydrationPromise = getProgrammerServiceHydrationPromise\(programmerId\);/);
   assert.match(ensureDcrSource, /await activeHydrationPromise\.catch\(\(\) => null\);/);
   assert.match(ensureDcrSource, /cache = normalizeUnderparVaultDcrCache\(loadDcrCache\(programmerId,\s*resolvedAppInfo\.guid\) \|\| null\) \|\| \{\};/);
+  assert.match(ensureDcrSource, /const serviceCredentialRecovery = restorePassVaultBoundServiceCredentialCache\(\s*programmerId,\s*resolvedAppInfo,\s*resolveCurrentServiceKey\(\)\s*\);/);
+  assert.match(ensureDcrSource, /cacheBindingRepairRequired = await recomputeCacheBindingRepairRequired\(cache\);/);
 });
 
 test("premium app details still retain software statements while pass-vault mapping stays scope-driven", () => {
@@ -3014,7 +3019,10 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(loadMvpdsSource, /if \(activeHydrationPromise\) \{\s*await activeHydrationPromise\.catch\(\(\) => null\);\s*\}/);
   assert.match(loadMvpdsSource, /const programmerReuseReadiness = getPassVaultProgrammerReuseReadiness\(programmer\.programmerId\);/);
   assert.match(loadMvpdsSource, /let premiumApps = programmerReuseReadiness\.runtimeServices \|\| getCurrentPremiumAppsSnapshot\(programmer\.programmerId\);/);
-  assert.match(loadMvpdsSource, /let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\);/);
+  assert.match(
+    loadMvpdsSource,
+    /let runtimePrimaryApp =[\s\S]*resolvePassVaultRuntimeBoundAppInfo\(\s*programmer\.programmerId,\s*resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\)\s*\)[\s\S]*resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\);/
+  );
   assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
   assert.match(loadMvpdsSource, /!programmerReuseReadiness\.reusable \|\|/);
   assert.match(loadMvpdsSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*runtimePrimaryApp,\s*"restV2"\);/);

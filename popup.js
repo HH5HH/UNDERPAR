@@ -9557,21 +9557,137 @@ function getPassVaultCredentialTasks(programmerId = "", services = null) {
   return tasks;
 }
 
+function resolvePassVaultRuntimeBoundAppInfo(programmerId = "", appInfo = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedAppInfo =
+    appInfo && typeof appInfo === "object" && !Array.isArray(appInfo) ? appInfo : null;
+  const guid = String(normalizedAppInfo?.guid || "").trim();
+  if (!normalizedProgrammerId || !guid) {
+    return normalizedAppInfo;
+  }
+
+  const record = getPassVaultMediaCompanyRecord(normalizedProgrammerId);
+  const recordBoundAppInfo = buildPassVaultRuntimeAppInfoFromRecord(record, guid) || null;
+  if (!recordBoundAppInfo?.guid) {
+    return normalizedAppInfo;
+  }
+
+  return (
+    normalizeRegisteredApplicationRuntimeRecord({
+      ...(normalizedAppInfo || {}),
+      ...recordBoundAppInfo,
+      appData: {
+        ...(normalizedAppInfo?.appData && typeof normalizedAppInfo.appData === "object" ? normalizedAppInfo.appData : {}),
+        ...(recordBoundAppInfo?.appData && typeof recordBoundAppInfo.appData === "object" ? recordBoundAppInfo.appData : {}),
+      },
+      scopes: uniqueSorted(
+        [
+          ...(Array.isArray(recordBoundAppInfo?.scopes) ? recordBoundAppInfo.scopes : []),
+          ...(Array.isArray(normalizedAppInfo?.scopes) ? normalizedAppInfo.scopes : []),
+        ]
+          .map((scope) => normalizeScope(scope))
+          .filter(Boolean)
+      ),
+      serviceKeys: uniqueSorted(
+        []
+          .concat(Array.isArray(recordBoundAppInfo?.serviceKeys) ? recordBoundAppInfo.serviceKeys : [])
+          .concat(Array.isArray(normalizedAppInfo?.serviceKeys) ? normalizedAppInfo.serviceKeys : [])
+      ),
+      softwareStatement: firstNonEmptyString([
+        recordBoundAppInfo?.softwareStatement,
+        normalizedAppInfo?.softwareStatement,
+        extractSoftwareStatementFromAppData(recordBoundAppInfo?.appData || null),
+        extractSoftwareStatementFromAppData(normalizedAppInfo?.appData || null),
+      ]),
+    }) || recordBoundAppInfo
+  );
+}
+
+function resolvePassVaultBoundServiceCredentialCache(programmerId = "", appInfo = null, serviceKey = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  const resolvedAppInfo = resolvePassVaultRuntimeBoundAppInfo(normalizedProgrammerId, appInfo) || appInfo;
+  const guid = String(resolvedAppInfo?.guid || "").trim();
+  if (!normalizedProgrammerId || !normalizedServiceKey || !guid) {
+    return {
+      appInfo: resolvedAppInfo,
+      cache: null,
+    };
+  }
+
+  const record = getPassVaultMediaCompanyRecord(normalizedProgrammerId);
+  const applicationRecord = getPassVaultRegisteredApplicationRecord(normalizedProgrammerId, guid) || null;
+  const credential =
+    normalizeUnderparVaultCredentialEntry(applicationRecord?.serviceCredentialsByServiceKey?.[normalizedServiceKey] || null) ||
+    normalizeUnderparVaultCredentialEntry(record?.serviceCredentialsByServiceKey?.[normalizedServiceKey] || null) ||
+    null;
+  if (!credential) {
+    return {
+      appInfo: resolvedAppInfo,
+      cache: null,
+    };
+  }
+
+  const boundCredential =
+    bindUnderparVaultCredentialEntryToApplication(credential, resolvedAppInfo, normalizedServiceKey) || credential;
+  return {
+    appInfo: resolvedAppInfo,
+    cache: normalizeUnderparVaultDcrCache(boundCredential || null),
+  };
+}
+
+function restorePassVaultBoundServiceCredentialCache(programmerId = "", appInfo = null, serviceKey = "") {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedGuid = String(appInfo?.guid || "").trim();
+  const restored = resolvePassVaultBoundServiceCredentialCache(normalizedProgrammerId, appInfo, serviceKey);
+  const cache = normalizeUnderparVaultDcrCache(restored?.cache || null);
+  if (!normalizedProgrammerId || !normalizedGuid || !cache?.clientId || !cache?.clientSecret) {
+    return {
+      appInfo: restored?.appInfo || appInfo,
+      cache: null,
+    };
+  }
+  saveDcrCache(normalizedProgrammerId, normalizedGuid, cache);
+  return {
+    appInfo: restored?.appInfo || appInfo,
+    cache,
+  };
+}
+
 function hasPassVaultServiceClientCredentials(programmerId = "", appInfo = null, serviceKey = "") {
   const normalizedProgrammerId = String(programmerId || "").trim();
-  const guid = String(appInfo?.guid || "").trim();
+  const normalizedServiceKey = String(serviceKey || resolvePremiumServiceKeyForAuth(appInfo, null) || "").trim();
+  const resolvedAppInfo = resolvePassVaultRuntimeBoundAppInfo(normalizedProgrammerId, appInfo) || appInfo;
+  const guid = String(resolvedAppInfo?.guid || "").trim();
   if (!normalizedProgrammerId || !guid) {
     return false;
   }
 
+  const requiredScope = normalizedServiceKey
+    ? getPassVaultRequiredScopeForService(normalizedServiceKey, resolvedAppInfo)
+    : resolveRequiredPremiumServiceScope(resolvedAppInfo);
+  const softwareStatement = resolveRegisteredApplicationSoftwareStatement(resolvedAppInfo);
   const cache = normalizeUnderparVaultDcrCache(loadDcrCache(normalizedProgrammerId, guid) || null);
-  const requiredScope = serviceKey
-    ? getPassVaultRequiredScopeForService(serviceKey, appInfo)
-    : resolveRequiredPremiumServiceScope(appInfo);
+  if (
+    hasMatchingSoftwareStatementBoundDcrCache(
+      cache,
+      softwareStatement,
+      normalizedServiceKey,
+      requiredScope
+    )
+  ) {
+    return true;
+  }
+
+  const serviceCredentialRecovery = resolvePassVaultBoundServiceCredentialCache(
+    normalizedProgrammerId,
+    resolvedAppInfo,
+    normalizedServiceKey
+  );
   return hasMatchingSoftwareStatementBoundDcrCache(
-    cache,
-    resolveRegisteredApplicationSoftwareStatement(appInfo),
-    serviceKey,
+    serviceCredentialRecovery?.cache || null,
+    resolveRegisteredApplicationSoftwareStatement(serviceCredentialRecovery?.appInfo || resolvedAppInfo),
+    normalizedServiceKey,
     requiredScope
   );
 }
@@ -33887,7 +34003,7 @@ const UNDERPAR_HARPO_SECOND_LEVEL_TLDS = new Set([
   "com.sg",
 ]);
 const UNDERPAR_HARPO_PASS_HOST_RE = /(^|\.)auth(?:-staging)?\.adobe\.com$/i;
-const UNDERPAR_HARPO_ADOBE_SUPPORT_HOSTS = [/(^|\.)adobedtm\.com$/i];
+const UNDERPAR_HARPO_ADOBE_SUPPORT_HOSTS = [];
 
 function getUnderparHarpoScopeHostname(input = "") {
   const raw = String(input || "").trim();
@@ -88041,7 +88157,13 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
   if (!programmerId) {
     throw new Error("Media company ID is required.");
   }
-  let resolvedAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, appInfo, debugMeta) || appInfo;
+  let resolvedAppInfo =
+    resolvePassVaultRuntimeBoundAppInfo(
+      programmerId,
+      resolveLatestPremiumServiceAppInfo(programmerId, appInfo, debugMeta) || appInfo
+    ) ||
+    resolveLatestPremiumServiceAppInfo(programmerId, appInfo, debugMeta) ||
+    appInfo;
   if (!resolvedAppInfo || !resolvedAppInfo.guid) {
     throw new Error("Registered application details are missing.");
   }
@@ -88061,7 +88183,13 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
   const hasBoundCache = (cache = null) =>
     hasSoftwareStatementBoundDcrCache(cache, resolveCurrentServiceKey(), requiredServiceScope);
   const refreshResolvedAppInfo = () => {
-    const latestAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
+    const latestAppInfo =
+      resolvePassVaultRuntimeBoundAppInfo(
+        programmerId,
+        resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo
+      ) ||
+      resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) ||
+      resolvedAppInfo;
     if (latestAppInfo?.guid) {
       resolvedAppInfo = latestAppInfo;
       requiredServiceScope = resolveRequiredPremiumServiceScope(resolvedAppInfo, debugMeta);
@@ -88211,6 +88339,21 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
           await activeHydrationPromise.catch(() => null);
           refreshResolvedAppInfo();
           cache = normalizeUnderparVaultDcrCache(loadDcrCache(programmerId, resolvedAppInfo.guid) || null) || {};
+          cacheBindingRepairRequired = await recomputeCacheBindingRepairRequired(cache);
+        }
+      }
+      if (!allowProvisioning && (!cache.clientId || !cache.clientSecret || cacheBindingRepairRequired)) {
+        const serviceCredentialRecovery = restorePassVaultBoundServiceCredentialCache(
+          programmerId,
+          resolvedAppInfo,
+          resolveCurrentServiceKey()
+        );
+        if (serviceCredentialRecovery?.appInfo?.guid) {
+          resolvedAppInfo = serviceCredentialRecovery.appInfo;
+          requiredServiceScope = resolveRequiredPremiumServiceScope(resolvedAppInfo, debugMeta);
+        }
+        if (serviceCredentialRecovery?.cache) {
+          cache = normalizeUnderparVaultDcrCache(serviceCredentialRecovery.cache) || {};
           cacheBindingRepairRequired = await recomputeCacheBindingRepairRequired(cache);
         }
       }
@@ -97052,7 +97195,12 @@ async function loadMvpdsFromRestV2(requestorId) {
           }
           continue;
         }
-        let runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
+        let runtimePrimaryApp =
+          resolvePassVaultRuntimeBoundAppInfo(
+            programmer.programmerId,
+            resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps)
+          ) ||
+          resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
         const requiresRuntimeHydration =
           !programmerReuseReadiness.reusable ||
           !runtimePrimaryApp?.guid ||
