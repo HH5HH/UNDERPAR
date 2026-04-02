@@ -88593,9 +88593,10 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
     });
     const retryAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
     if (isServiceProviderMismatch) {
-      clearDcrTokenCache(programmerId, retryAppInfo.guid);
+      clearDcrCache(programmerId, retryAppInfo.guid);
       await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
         ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+        forceFreshClientRegistration: true,
       });
       return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "none", debugMeta);
     }
@@ -88618,9 +88619,10 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
       workspaceOrigin,
     });
     const retryAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
-    clearDcrTokenCache(programmerId, retryAppInfo.guid);
+    clearDcrCache(programmerId, retryAppInfo.guid);
     await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
       ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+      forceFreshClientRegistration: true,
     });
     return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "none", debugMeta);
   }
