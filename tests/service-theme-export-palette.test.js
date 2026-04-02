@@ -22,10 +22,12 @@ test("ESM export surfaces use the orange service palette", () => {
 
   assert.match(esmWorkspaceCss, /color-scheme:\s*dark;/i);
   assert.match(esmWorkspaceCss, /--zip-accent-800:\s*199,\s*82,\s*0;/);
+  assert.match(esmWorkspaceCss, /--blondie-time-size:\s*var\(--s2-action-size\);/i);
   assert.match(esmWorkspaceCss, /--workspace-header-action-size:\s*var\(--blondie-time-size\);/i);
   assert.match(upsWorkspaceCss, /color-scheme:\s*dark;/i);
   assert.match(upsWorkspaceCss, /--underpar-gold-base:\s*#f4ac10;/i);
   assert.match(upsWorkspaceCss, /--zip-accent-1000:\s*243,\s*117,\s*0;/);
+  assert.match(upsWorkspaceCss, /--blondie-time-size:\s*var\(--s2-action-size\);/i);
   assert.match(upsWorkspaceCss, /--spectrum-gray-25-rgb:\s*11,\s*13,\s*16;/);
   assert.match(upsWorkspaceCss, /--legacy-bg:\s*var\(--spectrum-gray-25\);/);
   assert.match(upsWorkspaceCss, /--legacy-panel:\s*var\(--spectrum-gray-50\);/);
@@ -36,6 +38,10 @@ test("ESM export surfaces use the orange service palette", () => {
   assert.match(
     esmWorkspaceCss,
     /\.workspace-actions\s*>\s*\.workspace-icon-btn\s*\{[\s\S]*?width:\s*var\(--workspace-header-action-size\);[\s\S]*?height:\s*var\(--workspace-header-action-size\);/i
+  );
+  assert.match(
+    esmWorkspaceCss,
+    /\.workspace-blondie-time-btn\s*\{[\s\S]*?width:\s*var\(--blondie-time-size\);[\s\S]*?height:\s*var\(--blondie-time-size\);/i
   );
   assert.match(
     esmWorkspaceCss,

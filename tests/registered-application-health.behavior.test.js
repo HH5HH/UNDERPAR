@@ -770,6 +770,50 @@ test("programmer-scoped REST V2 candidates are rebuilt from the full registered-
   );
 });
 
+test("premium service detection stops after the first scoped match for each premium service", () => {
+  const scopeChecks = [];
+  const degradationChecks = [];
+  const helpers = loadPopupFunctions(["findFirstPremiumServiceApplications"], {
+    registeredApplicationMatchesNativeRequiredScope: (app = null, requiredScope = "") => {
+      scopeChecks.push(`${String(app?.guid || "").trim()}:${String(requiredScope || "").trim()}`);
+      return (Array.isArray(app?.scopes) ? app.scopes : []).includes(String(requiredScope || "").trim());
+    },
+    degradationAppHasRequiredScope: (app = null) => {
+      degradationChecks.push(String(app?.guid || "").trim());
+      return (Array.isArray(app?.scopes) ? app.scopes : []).includes("entitlement:degradation");
+    },
+    REST_V2_SCOPE: "api:client:v2",
+    PREMIUM_SERVICE_SCOPE_BY_KEY: {
+      esm: "analytics:client",
+    },
+    PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE: "temporary:passes:owner",
+  });
+
+  const services = normalizeRealmObject(
+    helpers.findFirstPremiumServiceApplications([
+      { guid: "rest-app", scopes: ["api:client:v2"] },
+      { guid: "esm-app", scopes: ["analytics:client"] },
+      { guid: "degradation-app", scopes: ["entitlement:degradation"] },
+      { guid: "temp-app", scopes: ["temporary:passes:owner"] },
+      { guid: "after-all", scopes: ["api:client:v2", "analytics:client", "entitlement:degradation", "temporary:passes:owner"] },
+    ])
+  );
+
+  assert.equal(services.restV2?.guid, "rest-app");
+  assert.equal(services.esm?.guid, "esm-app");
+  assert.equal(services.degradation?.guid, "degradation-app");
+  assert.equal(services.resetTempPass?.guid, "temp-app");
+  assert.deepEqual(services.restV2Apps.map((app) => app.guid), ["rest-app"]);
+  assert.deepEqual(services.esmApps.map((app) => app.guid), ["esm-app"]);
+  assert.deepEqual(services.degradationApps.map((app) => app.guid), ["degradation-app"]);
+  assert.deepEqual(services.resetTempPassApps.map((app) => app.guid), ["temp-app"]);
+  assert.equal(scopeChecks.includes("esm-app:api:client:v2"), false);
+  assert.equal(scopeChecks.includes("degradation-app:analytics:client"), false);
+  assert.equal(degradationChecks.includes("temp-app"), false);
+  assert.equal(scopeChecks.some((entry) => entry.startsWith("after-all:")), false);
+  assert.equal(degradationChecks.includes("after-all"), false);
+});
+
 test("pass vault hydration applications preserve console fetch order for primary-service selection", () => {
   const helpers = loadPopupFunctions(["buildPassVaultHydrationRegisteredApplications"], {
     normalizeRegisteredApplicationRuntimeRecord: (value = null) => normalizeRealmObject(value),

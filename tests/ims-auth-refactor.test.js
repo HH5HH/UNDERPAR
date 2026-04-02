@@ -2686,6 +2686,7 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   const hydrateEntriesSource = extractFunctionSource(popupSource, "hydratePassVaultServiceEntries");
   const hydrateServiceRecordSource = extractFunctionSource(popupSource, "hydratePassVaultServiceRecordWithContext");
   const directServicesSource = extractFunctionSource(popupSource, "buildPassVaultDirectPremiumServicesSnapshot");
+  const firstMatchSource = extractFunctionSource(popupSource, "findFirstPremiumServiceApplications");
   const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
   const statementTextSource = extractFunctionSource(popupSource, "extractSoftwareStatementFromText");
   const fetchStatementSource = extractFunctionSource(popupSource, "fetchSoftwareStatementForAppGuid");
@@ -2713,6 +2714,8 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(serviceEntriesSource, /loadDcrCache\(programmerId,\s*appGuid\)/);
   assert.match(serviceEntriesSource, /registeredApplication:\s*registeredApplication \? cloneJsonLikeValue\(registeredApplication,\s*null\) : null,/);
   assert.match(serviceEntriesSource, /status: registeredApplication \? \(client\?\.clientId && client\?\.clientSecret \? "ready" : "pending"\) : "unavailable",/);
+  assert.match(firstMatchSource, /const remainingServiceKeys = new Set\(\["restV2", "esm", "degradation", "resetTempPass"\]\)/);
+  assert.match(firstMatchSource, /if \(remainingServiceKeys\.size === 0\) \{\s*break;\s*\}/);
   assert.match(
     resolveServiceApplicationSource,
     /selectPreferredPassVaultHydrationServiceApplication\(\s*normalizedDefinition\.serviceKey,\s*matchingApplications,\s*programmerId\s*\)/
@@ -2725,6 +2728,11 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(hydrateServiceRecordSource, /loadDcrCache\(programmerId,\s*guid\)/);
   assert.match(hydrateServiceRecordSource, /sharedHydratedApplicationsByGuid/);
   assert.match(hydrateServiceRecordSource, /sharedClientByGuid/);
+  assert.match(
+    directServicesSource,
+    /const detectedPremiumServices = findFirstPremiumServiceApplications\(normalizedApplications\);/
+  );
+  assert.doesNotMatch(directServicesSource, /normalizedApplications\.filter\(/);
   assert.match(
     directServicesSource,
     /restV2:\s*hydratedServiceEntries\?\.restV2\?\.registeredApplication\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*restV2Apps,\s*programmerId\)\s*\|\|\s*null,/
@@ -3083,13 +3091,15 @@ test("activation leaves the global selectors user-owned and premium hydration st
 test("premium detection promotes TempPASS as a first-class premium workspace alongside CM tenant catalog detection", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const findPremiumAppsSource = extractFunctionSource(popupSource, "findPremiumServiceApplications");
+  const firstMatchSource = extractFunctionSource(popupSource, "findFirstPremiumServiceApplications");
   const applySummarySource = extractFunctionSource(popupSource, "applyPremiumServiceRuntimeSummary");
   const refreshPanelsSource = extractFunctionSource(popupSource, "refreshProgrammerPanels");
   const premiumDecisionSource = extractFunctionSource(popupSource, "emitPremiumServiceDecisionLogs");
 
-  assert.match(findPremiumAppsSource, /resetTempPass:\s*null/);
-  assert.match(findPremiumAppsSource, /resetTempPassApps:\s*\[\]/);
-  assert.match(findPremiumAppsSource, /PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE/);
+  assert.match(findPremiumAppsSource, /const services = findFirstPremiumServiceApplications\(candidates\);/);
+  assert.match(firstMatchSource, /resetTempPass:\s*null/);
+  assert.match(firstMatchSource, /resetTempPassApps:\s*\[\]/);
+  assert.match(firstMatchSource, /PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE/);
   assert.match(applySummarySource, /findCmTenantMatchesForProgrammer\(programmer,\s*cmCatalog\.tenants\)/);
   assert.match(applySummarySource, /PREMIUM_SERVICE_SCOPE_RULES\.forEach/);
   assert.match(applySummarySource, /syntheticSource:\s*"cm-catalog"/);

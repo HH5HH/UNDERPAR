@@ -63,8 +63,8 @@
   --vcr-stop-1100: 255, 134, 120;
   --danger-rgb: 220, 64, 84;
   --danger-strong-rgb: 229, 116, 131;
-  --blondie-time-size: 72px;
-  --blondie-time-stop-size: 26px;
+  --blondie-time-size: var(--s2-action-size);
+  --blondie-time-stop-size: calc(var(--blondie-time-size) * 0.45);
   --blondie-time-focus-ring: rgba(var(--zip-accent-900), 0.24);
   font-family: "Avenir Next", "Segoe UI Variable", "Gill Sans MT", "Trebuchet MS", sans-serif;
 }
@@ -423,7 +423,7 @@ body::after {
   content: "";
   position: absolute;
   top: -7px;
-  right: 26px;
+  right: calc((var(--blondie-time-size) / 2) - 7px);
   width: 14px;
   height: 14px;
   border-top: 1px solid rgba(167, 62, 0, 0.18);
@@ -1666,6 +1666,7 @@ body.workspace-locked .workspace-status {
 
 @media (max-width: 900px) {
   .workspace-app {
+    --blondie-time-size: 38px;
     padding: 12px;
   }
 

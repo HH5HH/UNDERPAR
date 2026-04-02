@@ -9353,18 +9353,15 @@ function buildPassVaultDirectPremiumServicesSnapshot(
 ) {
   const programmerId = String(programmer?.programmerId || "").trim();
   const normalizedApplications = Array.isArray(registeredApplications) ? registeredApplications.filter((app) => app?.guid) : [];
-  const restV2Apps = normalizedApplications.filter((application) =>
-    registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE)
-  );
-  const esmApps = normalizedApplications.filter((application) =>
-    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_SCOPE_BY_KEY.esm)
-  );
-  const degradationApps = normalizedApplications.filter((application) =>
-    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_SCOPE_BY_KEY.degradation)
-  );
-  const resetTempPassApps = normalizedApplications.filter((application) =>
-    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)
-  );
+  const detectedPremiumServices = findFirstPremiumServiceApplications(normalizedApplications);
+  const restV2Apps = Array.isArray(detectedPremiumServices?.restV2Apps) ? detectedPremiumServices.restV2Apps : [];
+  const esmApps = Array.isArray(detectedPremiumServices?.esmApps) ? detectedPremiumServices.esmApps : [];
+  const degradationApps = Array.isArray(detectedPremiumServices?.degradationApps)
+    ? detectedPremiumServices.degradationApps
+    : [];
+  const resetTempPassApps = Array.isArray(detectedPremiumServices?.resetTempPassApps)
+    ? detectedPremiumServices.resetTempPassApps
+    : [];
 
   return applyPremiumServiceRuntimeSummary(
     programmer,
@@ -87140,6 +87137,21 @@ function buildOrderedPremiumServiceCandidates(applicationsArray, applicationsDat
 }
 
 function findPremiumServiceApplications(applicationsArray, applicationsData, options = {}) {
+  void options;
+  const candidates = buildOrderedPremiumServiceCandidates(applicationsArray, applicationsData);
+  const services = findFirstPremiumServiceApplications(candidates);
+  if (services.degradationApps.length > 0) {
+    services.degradation = services.degradationApps[0] || null;
+  } else {
+    services.degradation = null;
+  }
+  services.esm = services.esmApps[0] || null;
+  services.resetTempPass = services.resetTempPassApps[0] || null;
+  services.restV2 = services.restV2Apps[0] || null;
+  return services;
+}
+
+function findFirstPremiumServiceApplications(applications = []) {
   const services = {
     degradation: null,
     degradationApps: [],
@@ -87150,33 +87162,38 @@ function findPremiumServiceApplications(applicationsArray, applicationsData, opt
     restV2: null,
     restV2Apps: [],
   };
+  const remainingServiceKeys = new Set(["restV2", "esm", "degradation", "resetTempPass"]);
+  const orderedApplications = Array.isArray(applications) ? applications.filter((appInfo) => appInfo?.guid) : [];
 
-  const candidates = buildOrderedPremiumServiceCandidates(applicationsArray, applicationsData);
+  const captureFirstMatch = (serviceKey, appInfo) => {
+    if (!remainingServiceKeys.has(serviceKey) || !appInfo?.guid) {
+      return;
+    }
+    services[serviceKey] = appInfo;
+    services[`${serviceKey}Apps`] = [appInfo];
+    remainingServiceKeys.delete(serviceKey);
+  };
 
-  for (const appInfo of candidates) {
-    if (degradationAppHasRequiredScope(appInfo)) {
-      services.degradationApps.push(appInfo);
+  for (const appInfo of orderedApplications) {
+    if (remainingServiceKeys.has("restV2") && registeredApplicationMatchesNativeRequiredScope(appInfo, REST_V2_SCOPE)) {
+      captureFirstMatch("restV2", appInfo);
     }
-    if (appInfo.scopes.includes(PREMIUM_SERVICE_SCOPE_BY_KEY.esm)) {
-      services.esmApps.push(appInfo);
+    if (remainingServiceKeys.has("esm") && registeredApplicationMatchesNativeRequiredScope(appInfo, PREMIUM_SERVICE_SCOPE_BY_KEY.esm)) {
+      captureFirstMatch("esm", appInfo);
     }
-    if (appInfo.scopes.includes(PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)) {
-      services.resetTempPassApps.push(appInfo);
+    if (remainingServiceKeys.has("degradation") && degradationAppHasRequiredScope(appInfo)) {
+      captureFirstMatch("degradation", appInfo);
     }
-    if (appInfo.scopes.includes(PREMIUM_SERVICE_SCOPE_BY_KEY.restV2)) {
-      services.restV2Apps.push(appInfo);
+    if (
+      remainingServiceKeys.has("resetTempPass") &&
+      registeredApplicationMatchesNativeRequiredScope(appInfo, PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)
+    ) {
+      captureFirstMatch("resetTempPass", appInfo);
+    }
+    if (remainingServiceKeys.size === 0) {
+      break;
     }
   }
-
-  if (services.degradationApps.length > 0) {
-    services.degradation = services.degradationApps[0] || null;
-  } else {
-    services.degradation = null;
-  }
-
-  services.esm = services.esmApps[0] || null;
-  services.resetTempPass = services.resetTempPassApps[0] || null;
-  services.restV2 = services.restV2Apps[0] || null;
 
   return services;
 }
