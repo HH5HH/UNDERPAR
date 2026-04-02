@@ -413,9 +413,10 @@ test("sidepanel MEGSPACE saved-query runner disables the native select while lau
       premiumPanelRequestToken: 31,
     },
     resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
-    esmWorkspaceOpenRequestPathInWorkspace: async (...args) => {
+    megWorkspaceOpenSavedQueryFromUi: async (...args) => {
       interactions.opened = args;
     },
+    setStatus: () => {},
     resetEsmWorkspaceMegSavedQuerySelect: (target) => {
       interactions.resetTarget = target;
     },
@@ -433,14 +434,13 @@ test("sidepanel MEGSPACE saved-query runner disables the native select while lau
   assert.equal(interactions.opened?.[0], esmWorkspaceState);
   assert.equal(interactions.opened?.[1], "/esm/v3/media-company/year/day?requestor-id=MML");
   assert.equal(interactions.opened?.[2], 19);
-  assert.equal(interactions.opened?.[3]?.requestSource, "saved-query");
-  assert.equal(interactions.opened?.[3]?.displayNodeLabel, "Daily Auth");
+  assert.equal(interactions.opened?.[3], "Daily Auth");
   assert.equal(interactions.resetTarget, selectElement);
   assert.deepEqual(pickerElement.classList.added, ["is-busy"]);
   assert.deepEqual(pickerElement.classList.removed, ["is-busy"]);
 });
 
-test("sidepanel MEGSPACE saved-query runner sends the saved URL back through the ESM workspace opener", async () => {
+test("sidepanel MEGSPACE saved-query runner sends the saved URL back through the MEGSPACE opener", async () => {
   const interactions = {
     opened: null,
     resetTarget: null,
@@ -481,9 +481,10 @@ test("sidepanel MEGSPACE saved-query runner sends the saved URL back through the
       premiumPanelRequestToken: 23,
     },
     resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
-    esmWorkspaceOpenRequestPathInWorkspace: async (...args) => {
+    megWorkspaceOpenSavedQueryFromUi: async (...args) => {
       interactions.opened = args;
     },
+    setStatus: () => {},
     resetEsmWorkspaceMegSavedQuerySelect: (target) => {
       interactions.resetTarget = target;
     },
@@ -501,24 +502,92 @@ test("sidepanel MEGSPACE saved-query runner sends the saved URL back through the
   assert.equal(interactions.opened?.[0], esmWorkspaceState);
   assert.equal(interactions.opened?.[1], "/esm/v3/media-company/year/day?requestor-id=MML");
   assert.equal(interactions.opened?.[2], 15);
-  assert.equal(interactions.opened?.[3]?.requestSource, "saved-query");
-  assert.equal(interactions.opened?.[3]?.displayNodeLabel, "Daily Auth");
+  assert.equal(interactions.opened?.[3], "Daily Auth");
   assert.equal(interactions.resetTarget, selectElement);
   assert.deepEqual(pickerElement.classList.added, ["is-busy"]);
   assert.deepEqual(pickerElement.classList.removed, ["is-busy"]);
   assert.equal(selectElement.disabled, false);
 });
 
-test("sidepanel MEGSPACE saved-query runner routes saved queries through the ESM workspace opener", () => {
+test("sidepanel MEGSPACE saved-query runner reports MEGSPACE launch failures without leaving the picker busy", async () => {
+  const interactions = {
+    statuses: [],
+    resetTarget: null,
+  };
+  const pickerElement = {
+    classList: {
+      added: [],
+      removed: [],
+      add(name) {
+        this.added.push(name);
+      },
+      remove(name) {
+        this.removed.push(name);
+      },
+    },
+  };
+  const selectElement = {
+    disabled: false,
+    setAttribute(name, value) {
+      this[name] = value;
+    },
+    removeAttribute(name) {
+      delete this[name];
+    },
+  };
+  const esmWorkspaceState = {
+    megSavedQueryPickerElement: pickerElement,
+    megSavedQuerySelectElement: selectElement,
+    megSavedQueryRecords: [{ name: "Daily Auth", url: "/esm/v3/media-company/year/day?requestor-id=MML" }],
+    megSavedQueryBusy: false,
+    programmer: {
+      programmerId: "Turner",
+    },
+    requestToken: 29,
+  };
+  const { esmWorkspaceRunMegSavedQueryRecord } = loadFunctions("popup.js", ["esmWorkspaceRunMegSavedQueryRecord"], {
+    state: {
+      premiumPanelRequestToken: 37,
+    },
+    resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
+    megWorkspaceOpenSavedQueryFromUi: async () => {
+      throw new Error("selection bridge failed");
+    },
+    setStatus: (message, level) => {
+      interactions.statuses.push({ message, level });
+    },
+    resetEsmWorkspaceMegSavedQuerySelect: (target) => {
+      interactions.resetTarget = target;
+    },
+  });
+
+  await esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, {
+    name: "Daily Auth",
+    url: "/esm/v3/media-company/year/day?requestor-id=MML",
+  });
+
+  assert.equal(esmWorkspaceState.megSavedQueryBusy, false);
+  assert.equal(selectElement.disabled, false);
+  assert.equal(selectElement["aria-busy"], undefined);
+  assert.equal(interactions.resetTarget, selectElement);
+  assert.deepEqual(interactions.statuses, [
+    {
+      message: 'Unable to open Saved Query "Daily Auth" in MEGSPACE: selection bridge failed',
+      level: "error",
+    },
+  ]);
+});
+
+test("sidepanel MEGSPACE saved-query runner routes saved queries through the MEGSPACE opener", () => {
   const popupSource = read("popup.js");
 
   assert.match(
     popupSource,
-    /await esmWorkspaceOpenRequestPathInWorkspace\(esmWorkspaceState, savedQueryUrl, requestToken, \{[\s\S]*?requestSource:\s*"saved-query",[\s\S]*?displayNodeLabel:\s*savedQueryName,[\s\S]*?\}\);/m
+    /await megWorkspaceOpenSavedQueryFromUi\(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName\);/m
   );
   assert.doesNotMatch(
     popupSource,
-    /await megWorkspaceOpenSavedQueryFromUi\(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName\);/
+    /await esmWorkspaceOpenRequestPathInWorkspace\(esmWorkspaceState, savedQueryUrl, requestToken, \{[\s\S]*?requestSource:\s*"saved-query",[\s\S]*?displayNodeLabel:\s*savedQueryName,[\s\S]*?\}\);/m
   );
 });
 

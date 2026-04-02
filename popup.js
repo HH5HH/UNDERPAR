@@ -45251,7 +45251,9 @@ async function megWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl
     );
   } catch (error) {
     const suffix = savedQueryName ? ` "${savedQueryName}"` : "";
-    setStatus(`Unable to open Saved Query${suffix} in MEGSPACE: ${error instanceof Error ? error.message : String(error)}`, "error");
+    const errorMessage =
+      error && typeof error === "object" && typeof error.message === "string" ? error.message : String(error);
+    setStatus(`Unable to open Saved Query${suffix} in MEGSPACE: ${errorMessage}`, "error");
   }
 }
 
@@ -45404,10 +45406,12 @@ async function esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record = nu
       esmWorkspaceState?.programmer?.programmerId,
       esmWorkspaceState?.requestToken || state.premiumPanelRequestToken || 0
     );
-    await esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, savedQueryUrl, requestToken, {
-      requestSource: "saved-query",
-      displayNodeLabel: savedQueryName,
-    });
+    await megWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName);
+  } catch (error) {
+    const suffix = savedQueryName ? ` "${savedQueryName}"` : "";
+    const errorMessage =
+      error && typeof error === "object" && typeof error.message === "string" ? error.message : String(error);
+    setStatus(`Unable to open Saved Query${suffix} in MEGSPACE: ${errorMessage}`, "error");
   } finally {
     const hasRecords =
       Array.isArray(esmWorkspaceState?.megSavedQueryRecords) && esmWorkspaceState.megSavedQueryRecords.length > 0;
