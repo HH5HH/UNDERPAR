@@ -859,7 +859,7 @@ test("pass vault hydration applications preserve console fetch order for primary
   );
 });
 
-test("runtime REST V2 app resolution keeps the programmer REST V2 primary ahead of ordered catalog fallbacks", () => {
+test("runtime REST V2 app resolution resets stale programmer primaries back to the first ordered REST V2 candidate", () => {
   const services = {
     restV2: { guid: "shared-app", appName: "Shared App" },
     restV2Apps: [
@@ -883,7 +883,7 @@ test("runtime REST V2 app resolution keeps the programmer REST V2 primary ahead 
     helpers.resolveProgrammerPremiumServiceRuntimeApp("restV2", "Rogers Media", services)
   );
 
-  assert.equal(resolved?.guid, "shared-app");
+  assert.equal(resolved?.guid, "citytv-app");
 });
 
 test("pass vault REST V2 guid reconstruction preserves stored fetch order instead of stale primary order", () => {

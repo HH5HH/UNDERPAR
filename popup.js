@@ -9542,12 +9542,12 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
 
     if (normalizedServiceKey === "restV2") {
       return (
-        primaryMatch ||
         selectPreferredPassVaultHydrationServiceApplication(
           normalizedServiceKey,
           candidates,
           String(record?.programmerId || "").trim()
         ) ||
+        primaryMatch ||
         credentialBackedMatch ||
         serviceKeyBackedMatch ||
         candidates[0] ||
@@ -10016,21 +10016,21 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
 
   if (normalizedServiceKey === "restV2") {
     const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, resolvedServices);
-    const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
-    if (primaryMatch?.guid) {
-      return primaryMatch;
-    }
     const preferredMatch =
       selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
       selectPreferredRestV2AppForRequestor(candidates, "", normalizedProgrammerId);
     if (preferredMatch?.guid) {
       return preferredMatch;
     }
+    const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
+    if (primaryMatch?.guid) {
+      return primaryMatch;
+    }
     const fallbackMatch = resolveFallbackMatch(candidates);
     if (fallbackMatch?.guid) {
       return fallbackMatch;
     }
-    return preferredMatch || null;
+    return primaryMatch || preferredMatch || null;
   }
 
   if (normalizedServiceKey === "esm") {
@@ -88593,6 +88593,7 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
   if (response.status === 401 && retryStage === "refresh") {
     const bodyText = await response.clone().text().catch(() => "");
     const isServiceProviderMismatch = isServiceProviderTokenMismatchError(bodyText);
+    const isRestV2ServiceRequest = resolvePremiumServiceKeyForAuth(resolvedAppInfo, debugMeta) === "restV2";
     emitRestV2DebugEvent(debugFlowId, {
       source: "extension",
       phase: "restv2-retry",
@@ -88607,6 +88608,9 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
     });
     const retryAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
     if (isServiceProviderMismatch) {
+      if (isRestV2ServiceRequest) {
+        return response;
+      }
       clearDcrCache(programmerId, retryAppInfo.guid);
       await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
         ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
@@ -88614,12 +88618,30 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
       });
       return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "none", debugMeta);
     }
+    if (isRestV2ServiceRequest) {
+      await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
+        ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+        allowProvisioning: false,
+      });
+      return fetchWithPremiumAuth(
+        programmerId,
+        retryAppInfo,
+        url,
+        options,
+        "none",
+        {
+          ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+          allowProvisioning: false,
+        }
+      );
+    }
     await ensureDcrAccessToken(programmerId, retryAppInfo, true, debugMeta);
     return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "reprovision", debugMeta);
   }
 
   if (response.status === 401 && retryStage === "reprovision") {
     const bodyText = await response.clone().text().catch(() => "");
+    const isRestV2ServiceRequest = resolvePremiumServiceKeyForAuth(resolvedAppInfo, debugMeta) === "restV2";
     emitRestV2DebugEvent(debugFlowId, {
       source: "extension",
       phase: "restv2-retry",
@@ -88632,6 +88654,9 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
       workspaceKey,
       workspaceOrigin,
     });
+    if (isRestV2ServiceRequest) {
+      return response;
+    }
     const retryAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
     clearDcrCache(programmerId, retryAppInfo.guid);
     await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
@@ -96637,7 +96662,7 @@ async function createRestV2SessionForContext(context, options = {}) {
           mvpd: context.mvpd,
           scope: "create-session",
           lockAppSelection: true,
-          allowProvisioning: true,
+          allowProvisioning: false,
         }
       );
 
@@ -96753,7 +96778,7 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
       appGuid: String(appInfo?.guid || ""),
       appName: String(appInfo?.appName || appInfo?.guid || ""),
       lockAppSelection: true,
-      allowProvisioning: true,
+      allowProvisioning: false,
     }
   );
 
@@ -96813,9 +96838,9 @@ function promoteResolvedRestV2ConfigurationApp(programmer = null, services = nul
     resolvedAppInfo
   );
   const authoritativeRestV2App =
+    selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
     currentServices?.restV2 ||
     resolvedAppInfo ||
-    selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
     mergedRestV2Apps[0] ||
     null;
   const nextServices = {
