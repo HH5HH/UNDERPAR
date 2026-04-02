@@ -678,25 +678,33 @@ test("registered application health premium service bindings follow the hydrated
   );
 });
 
-test("REST V2 requestor selection now follows the first programmer-scoped REST V2 candidate", () => {
+test("REST V2 requestor selection prefers the requestor-compatible programmer candidate", () => {
   const helpers = loadPopupFunctions(["selectPreferredRestV2AppForRequestor"], {
-    pickHighestRankedPassVaultServiceCandidate: () => {
-      throw new Error("should not rank REST V2 candidates");
-    },
+    appSupportsServiceProvider: (appInfo = null, requestorId = "", programmerId = "") =>
+      String(programmerId || "").trim() === "MLB" &&
+      String(requestorId || "").trim() === "NHLTV" &&
+      String(appInfo?.guid || "").trim() === "nhltv-app",
+    selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) => apps[0] || null,
+    resolveRestV2AppForServiceProvider: (apps = [], requestorId = "", programmerId = "") =>
+      (Array.isArray(apps) ? apps : []).find((appInfo) =>
+        String(programmerId || "").trim() === "MLB" &&
+        String(requestorId || "").trim() === "NHLTV" &&
+        String(appInfo?.guid || "").trim() === "nhltv-app"
+      ) || (Array.isArray(apps) ? apps[0] || null : null),
   });
 
   const selected = normalizeRealmObject(
     helpers.selectPreferredRestV2AppForRequestor(
       [
-        { guid: "animalplanet-app", appName: "Animal Planet Scoped" },
-        { guid: "shared-app", appName: "Discovery Shared" },
+        { guid: "shared-app", appName: "MLB Shared" },
+        { guid: "nhltv-app", appName: "NHLTV" },
       ],
-      "animalplanet",
-      "Discovery"
+      "NHLTV",
+      "MLB"
     )
   );
 
-  assert.equal(selected?.guid, "animalplanet-app");
+  assert.equal(selected?.guid, "nhltv-app");
 });
 
 test("runtime REST V2 app resolution follows the first programmer-scoped REST V2 candidate", () => {
@@ -868,6 +876,125 @@ test("premium service detection stops after the first scoped match for each prem
   assert.equal(degradationChecks.includes("temp-app"), false);
   assert.equal(scopeChecks.some((entry) => entry.startsWith("after-all:")), false);
   assert.equal(degradationChecks.includes("after-all"), false);
+});
+
+test("direct premium snapshot preserves the full REST V2 candidate set for child requestors", () => {
+  const helpers = loadPopupFunctions(["buildPassVaultDirectPremiumServicesSnapshot"], {
+    registeredApplicationMatchesNativeRequiredScope: (app = null, requiredScope = "") =>
+      (Array.isArray(app?.scopes) ? app.scopes : []).includes(String(requiredScope || "").trim()),
+    degradationAppHasRequiredScope: (app = null) =>
+      (Array.isArray(app?.scopes) ? app.scopes : []).includes("entitlement:degradation"),
+    selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = [], programmerId = "") => {
+      if (String(programmerId || "").trim() === "MLB") {
+        return (Array.isArray(apps) ? apps : []).find((app) => String(app?.guid || "").trim() === "mlb-shared") || apps[0] || null;
+      }
+      return (Array.isArray(apps) ? apps[0] || null : null);
+    },
+    applyPremiumServiceRuntimeSummary: (_programmer = null, services = null) => normalizeRealmObject(services),
+    REST_V2_SCOPE: "api:client:v2",
+    PREMIUM_SERVICE_SCOPE_BY_KEY: {
+      esm: "analytics:client",
+    },
+    PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE: "temporary:passes:owner",
+    state: {
+      cmTenantsCatalog: null,
+    },
+  });
+
+  const services = normalizeRealmObject(
+    helpers.buildPassVaultDirectPremiumServicesSnapshot(
+      { programmerId: "MLB" },
+      [
+        { guid: "mlb-shared", appName: "MLB Shared", scopes: ["api:client:v2"] },
+        { guid: "nhltv-app", appName: "NHLTV", scopes: ["api:client:v2"] },
+        { guid: "esm-app", appName: "ESM", scopes: ["analytics:client"] },
+      ],
+      {}
+    )
+  );
+
+  assert.equal(services?.restV2?.guid, "mlb-shared");
+  assert.deepEqual(
+    (Array.isArray(services?.restV2Apps) ? services.restV2Apps : []).map((app) => app.guid),
+    ["mlb-shared", "nhltv-app"]
+  );
+});
+
+test("child-requestor MVPD loading uses the requestor-compatible programmer REST V2 app", async () => {
+  let pendingPromise = null;
+  let capturedFetchAppGuid = "";
+  const programmer = {
+    programmerId: "MLB",
+    requestorIds: ["MLBTV", "NHLTV"],
+  };
+  const services = {
+    restV2: { guid: "mlb-shared", appName: "MLB Shared" },
+    restV2Apps: [
+      { guid: "mlb-shared", appName: "MLB Shared" },
+      { guid: "nhltv-app", appName: "NHLTV" },
+    ],
+  };
+  const helpers = loadPopupFunctions(["selectPreferredRestV2AppForRequestor", "loadMvpdsFromRestV2"], {
+    Map,
+    state: {
+      programmers: [programmer],
+    },
+    getRequestorScopedMvpdCache: () => null,
+    getRequestorScopedMvpdLoadPromise: () => pendingPromise,
+    setRequestorScopedMvpdLoadPromise: (_requestorId = "", promise = null) => {
+      pendingPromise = promise;
+      return promise;
+    },
+    getProgrammerCandidatesForRequestor: () => [programmer],
+    getProgrammerServiceHydrationPromise: () => null,
+    hydrateProgrammerFromPassVault: async () => null,
+    getPassVaultProgrammerReuseReadiness: () => ({
+      reusable: true,
+      runtimeServices: services,
+    }),
+    getCurrentPremiumAppsSnapshot: () => services,
+    collectProgrammerScopedRestV2AppCandidates: (_programmerId = "", premiumApps = null) =>
+      Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [],
+    appSupportsServiceProvider: (appInfo = null, requestorId = "", programmerId = "") =>
+      String(programmerId || "").trim() === "MLB" &&
+      String(requestorId || "").trim() === "NHLTV" &&
+      String(appInfo?.guid || "").trim() === "nhltv-app",
+    selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) => apps[0] || null,
+    resolveRestV2AppForServiceProvider: (apps = [], requestorId = "", programmerId = "") =>
+      (Array.isArray(apps) ? apps : []).find((appInfo) =>
+        String(programmerId || "").trim() === "MLB" &&
+        String(requestorId || "").trim() === "NHLTV" &&
+        String(appInfo?.guid || "").trim() === "nhltv-app"
+      ) || (Array.isArray(apps) ? apps[0] || null : null),
+    resolvePassVaultRuntimeBoundAppInfo: (_programmerId = "", appInfo = null) => appInfo,
+    resolveProgrammerPremiumServiceRuntimeApp: () => services.restV2,
+    hasPassVaultServiceClientCredentials: () => true,
+    fetchRestV2ConfigurationMvpds: async (_programmer = null, appInfo = null) => {
+      capturedFetchAppGuid = String(appInfo?.guid || "").trim();
+      return {
+        map: new Map([["DISH", { id: "DISH", displayName: "Dish" }]]),
+        domainRows: [],
+      };
+    },
+    promoteResolvedRestV2ConfigurationApp: () => services,
+    setRequestorScopedMvpdCache: () => null,
+    setRequestorScopedDomainCache: () => null,
+    getRequestorScopedHarpoSelectedDomain: () => "",
+    setRequestorScopedHarpoSelectedDomain: () => "",
+    log: () => {},
+    createProgrammersError: (message, code) => {
+      const error = new Error(message);
+      error.code = code;
+      return error;
+    },
+    resolveSelectedProgrammer: () => programmer,
+  });
+
+  const result = await helpers.loadMvpdsFromRestV2("NHLTV");
+
+  assert.equal(capturedFetchAppGuid, "nhltv-app");
+  assert.equal(result instanceof Map, true);
+  assert.equal(result.get("DISH")?.id, "DISH");
 });
 
 test("pass vault hydration applications preserve console fetch order for primary-service selection", () => {

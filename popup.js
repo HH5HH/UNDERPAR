@@ -9571,15 +9571,18 @@ function buildPassVaultDirectPremiumServicesSnapshot(
 ) {
   const programmerId = String(programmer?.programmerId || "").trim();
   const normalizedApplications = Array.isArray(registeredApplications) ? registeredApplications.filter((app) => app?.guid) : [];
-  const detectedPremiumServices = findFirstPremiumServiceApplications(normalizedApplications);
-  const restV2Apps = Array.isArray(detectedPremiumServices?.restV2Apps) ? detectedPremiumServices.restV2Apps : [];
-  const esmApps = Array.isArray(detectedPremiumServices?.esmApps) ? detectedPremiumServices.esmApps : [];
-  const degradationApps = Array.isArray(detectedPremiumServices?.degradationApps)
-    ? detectedPremiumServices.degradationApps
-    : [];
-  const resetTempPassApps = Array.isArray(detectedPremiumServices?.resetTempPassApps)
-    ? detectedPremiumServices.resetTempPassApps
-    : [];
+  const restV2Apps = normalizedApplications.filter((application) =>
+    registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE)
+  );
+  const esmApps = normalizedApplications.filter((application) =>
+    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_SCOPE_BY_KEY.esm)
+  );
+  const degradationApps = normalizedApplications.filter((application) =>
+    degradationAppHasRequiredScope(application)
+  );
+  const resetTempPassApps = normalizedApplications.filter((application) =>
+    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)
+  );
 
   return applyPremiumServiceRuntimeSummary(
     programmer,
@@ -28610,6 +28613,13 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
   const premiumApps = getCurrentPremiumAppsSnapshot(resolvedProgrammer.programmerId);
   const baseCandidates = collectProgrammerScopedRestV2AppCandidates(resolvedProgrammer.programmerId, premiumApps);
   const allowAppOverride = Boolean(appInfoOverride?.guid) && baseCandidates.some((item) => item?.guid === appInfoOverride.guid);
+  const requestorScopedApp =
+    resolvePassVaultRuntimeBoundAppInfo(
+      resolvedProgrammer.programmerId,
+      selectPreferredRestV2AppForRequestor(baseCandidates, requestorId, resolvedProgrammer.programmerId)
+    ) ||
+    selectPreferredRestV2AppForRequestor(baseCandidates, requestorId, resolvedProgrammer.programmerId) ||
+    null;
   const runtimePrimaryApp = resolveProgrammerPremiumServiceRuntimeApp(
     "restV2",
     resolvedProgrammer.programmerId,
@@ -28618,6 +28628,7 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
   );
   const resolvedApp =
     (allowAppOverride ? appInfoOverride : null) ||
+    requestorScopedApp ||
     runtimePrimaryApp ||
     baseCandidates[0] ||
     null;
@@ -85252,13 +85263,23 @@ function resolveRestV2AppForServiceProvider(restV2Apps, serviceProviderId, progr
 }
 
 function selectPreferredRestV2AppForRequestor(restV2Apps, requestorId = "", programmerId = "") {
-  void requestorId;
-  void programmerId;
   const candidates = Array.isArray(restV2Apps) ? restV2Apps.filter((item) => item?.guid) : [];
   if (candidates.length === 0) {
     return null;
   }
-  return candidates[0] || null;
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const requestorScopedCandidates = normalizedRequestorId
+    ? candidates.filter((appInfo) => appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId))
+    : [];
+  return (
+    selectPreferredPassVaultHydrationServiceApplication("restV2", requestorScopedCandidates, normalizedProgrammerId) ||
+    requestorScopedCandidates[0] ||
+    selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
+    resolveRestV2AppForServiceProvider(candidates, normalizedRequestorId, normalizedProgrammerId) ||
+    candidates[0] ||
+    null
+  );
 }
 
 function countRestV2ProgrammerRequestorCoverage(appInfo = null, programmerId = "") {
@@ -97557,11 +97578,14 @@ async function loadMvpdsFromRestV2(requestorId) {
           }
           continue;
         }
+        const runtimeRestV2Candidates = collectProgrammerScopedRestV2AppCandidates(programmer.programmerId, premiumApps);
         let runtimePrimaryApp =
           resolvePassVaultRuntimeBoundAppInfo(
             programmer.programmerId,
-            resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps)
+            selectPreferredRestV2AppForRequestor(runtimeRestV2Candidates, requestorId, programmer.programmerId) ||
+              resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps)
           ) ||
+          selectPreferredRestV2AppForRequestor(runtimeRestV2Candidates, requestorId, programmer.programmerId) ||
           resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
         const requiresRuntimeHydration =
           !programmerReuseReadiness.reusable ||

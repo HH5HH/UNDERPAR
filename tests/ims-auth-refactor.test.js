@@ -2798,9 +2798,20 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(hydrateServiceRecordSource, /sharedClientByGuid/);
   assert.match(
     directServicesSource,
-    /const detectedPremiumServices = findFirstPremiumServiceApplications\(normalizedApplications\);/
+    /const restV2Apps = normalizedApplications\.filter\(\(application\) =>\s*registeredApplicationMatchesNativeRequiredScope\(application,\s*REST_V2_SCOPE\)\s*\);/
   );
-  assert.doesNotMatch(directServicesSource, /normalizedApplications\.filter\(/);
+  assert.match(
+    directServicesSource,
+    /const esmApps = normalizedApplications\.filter\(\(application\) =>\s*registeredApplicationMatchesNativeRequiredScope\(application,\s*PREMIUM_SERVICE_SCOPE_BY_KEY\.esm\)\s*\);/
+  );
+  assert.match(
+    directServicesSource,
+    /const degradationApps = normalizedApplications\.filter\(\(application\) =>\s*degradationAppHasRequiredScope\(application\)\s*\);/
+  );
+  assert.match(
+    directServicesSource,
+    /const resetTempPassApps = normalizedApplications\.filter\(\(application\) =>\s*registeredApplicationMatchesNativeRequiredScope\(application,\s*PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE\)\s*\);/
+  );
   assert.match(
     directServicesSource,
     /restV2:\s*hydratedServiceEntries\?\.restV2\?\.registeredApplication\s*\|\|\s*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*restV2Apps,\s*programmerId\)\s*\|\|\s*null,/
@@ -3020,7 +3031,15 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.doesNotMatch(resolveHarvestSource, /resolveRestV2AppForServiceProvider\(/);
   assert.match(
     selectRestV2Source,
-    /return candidates\[0\] \|\| null;/
+    /const requestorScopedCandidates = normalizedRequestorId[\s\S]*appSupportsServiceProvider\(appInfo,\s*normalizedRequestorId,\s*normalizedProgrammerId\)/
+  );
+  assert.match(
+    selectRestV2Source,
+    /selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*requestorScopedCandidates,\s*normalizedProgrammerId\)/
+  );
+  assert.match(
+    selectRestV2Source,
+    /resolveRestV2AppForServiceProvider\(candidates,\s*normalizedRequestorId,\s*normalizedProgrammerId\)/
   );
   assert.match(resolveRuntimeSource, /const preferredMatch =[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2",\s*candidates,\s*normalizedProgrammerId\)/);
   assert.match(
@@ -3063,13 +3082,21 @@ test("REST V2 app selection stays media-company scoped and keeps request-time au
   assert.match(loadMvpdsSource, /let premiumApps = programmerReuseReadiness\.runtimeServices \|\| getCurrentPremiumAppsSnapshot\(programmer\.programmerId\);/);
   assert.match(
     loadMvpdsSource,
-    /let runtimePrimaryApp =[\s\S]*resolvePassVaultRuntimeBoundAppInfo\(\s*programmer\.programmerId,\s*resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\)\s*\)[\s\S]*resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\);/
+    /const runtimeRestV2Candidates = collectProgrammerScopedRestV2AppCandidates\(programmer\.programmerId,\s*premiumApps\);/
+  );
+  assert.match(
+    loadMvpdsSource,
+    /let runtimePrimaryApp =[\s\S]*resolvePassVaultRuntimeBoundAppInfo\(\s*programmer\.programmerId,\s*selectPreferredRestV2AppForRequestor\(runtimeRestV2Candidates,\s*requestorId,\s*programmer\.programmerId\)\s*\|\|[\s\S]*resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\)\s*\)[\s\S]*selectPreferredRestV2AppForRequestor\(runtimeRestV2Candidates,\s*requestorId,\s*programmer\.programmerId\)\s*\|\|[\s\S]*resolveProgrammerPremiumServiceRuntimeApp\("restV2",\s*programmer\.programmerId,\s*premiumApps\);/
   );
   assert.match(loadMvpdsSource, /const requiresRuntimeHydration =/);
   assert.match(loadMvpdsSource, /!programmerReuseReadiness\.reusable \|\|/);
   assert.match(loadMvpdsSource, /!hasPassVaultServiceClientCredentials\(programmer\.programmerId,\s*runtimePrimaryApp,\s*"restV2"\);/);
   assert.match(loadMvpdsSource, /Premium services for \$\{programmer\.programmerId\} are not hydrated in the UnderPAR vault yet\./);
   assert.match(loadMvpdsSource, /const \{ map, domainRows \} = await fetchRestV2ConfigurationMvpds\(programmer,\s*runtimePrimaryApp,\s*requestorId\);/);
+  assert.match(
+    restSelectionContextSource,
+    /const requestorScopedApp =[\s\S]*selectPreferredRestV2AppForRequestor\(baseCandidates,\s*requestorId,\s*resolvedProgrammer\.programmerId\)/
+  );
   assert.match(fetchRestV2ConfigurationSource, /allowProvisioning:\s*false/);
   assert.match(createSessionSource, /allowProvisioning:\s*false/);
   assert.match(
