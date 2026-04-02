@@ -2527,8 +2527,7 @@ test("selected premium app hydration mirrors LoginButton detail and software-sta
   assert.doesNotMatch(orderedCandidatesSource, /getDetectionScopesFromApplication\(appData\)/);
   assert.doesNotMatch(orderedCandidatesSource, /getScopesFromApplication\(appData\)/);
   assert.match(statementSource, /appData\?\.raw\?\.softwareStatement/);
-  assert.match(statementSource, /const dereference = extractJwtAndUrls\(appData\);/);
-  assert.match(statementSource, /if \(dereference\.jwt && dereference\.jwtScore > 0\) \{\s*return dereference\.jwt;\s*\}/);
+  assert.doesNotMatch(statementSource, /extractJwtAndUrls\(appData\)/);
   assert.doesNotMatch(statementSource, /const stack = \[appData\];/);
   assert.match(detailPayloadSource, /payload\.entityData/);
   assert.match(detailUrlsSource, /appendAdobeConsoleConfigurationVersion\(`\$\{ADOBE_CONSOLE_BASE\}\/rest\/api\/applications\/\$\{encodedGuid\}`\)/);
@@ -2536,6 +2535,8 @@ test("selected premium app hydration mirrors LoginButton detail and software-sta
   assert.match(enrichSource, /fetchApplicationDetailsByGuid\(guid,\s*requestOptions\)/);
   assert.match(enrichSource, /fetchSoftwareStatementForAppGuid\(guid,\s*requestOptions\)/);
   assert.match(ensureDcrSource, /enrichRegisteredApplicationForHydration\(resolvedAppInfo,\s*\{/);
+  assert.match(ensureDcrSource, /if \(forceFreshClientRegistration && resolvedAppInfo\?\.guid\) \{/);
+  assert.match(ensureDcrSource, /const authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid\(resolvedAppInfo\.guid,\s*\{/);
 });
 
 test("programmer hydration now mirrors LoginButton's direct snapshot-to-register flow", () => {
@@ -2678,6 +2679,7 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.doesNotMatch(compileSource, /await persistPassVaultProgrammerRecord\(programmer,\s*mergedServices,/);
   assert.match(compileSource, /const firstFailure =/);
   assert.match(statementTextSource, /const parsed = JSON\.parse\(normalizedText\)/);
+  assert.doesNotMatch(statementTextSource, /extractJwtAndUrls\(parsed\)/);
   assert.match(rawFetchSource, /let bulkFallback = null;/);
   assert.match(rawFetchSource, /const bulkStatement = firstNonEmptyString\(\[/);
   assert.match(rawFetchSource, /const urlCandidates = buildRegisteredApplicationDetailUrlCandidates\(guid\);/);
@@ -2685,7 +2687,7 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(fetchStatementSource, /const download = await fetchRegisteredApplicationDownloadByGuid\(guid,\s*\{/);
   assert.match(fetchStatementSource, /allowMissingFilename:\s*true/);
   assert.match(fetchStatementSource, /const downloadedStatement = extractSoftwareStatementFromText\(downloadedText\);/);
-  assert.match(fetchStatementSource, /const candidateStatement = extractSoftwareStatementFromText\(content\);/);
+  assert.doesNotMatch(fetchStatementSource, /extractJwtAndUrls\(rawPayload\.parsed\)/);
   assert.match(fetchStatementSource, /const rawTextStatement = extractSoftwareStatementFromText\(rawPayload\?\.text \|\| ""\);/);
 });
 

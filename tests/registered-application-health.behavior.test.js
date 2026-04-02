@@ -308,6 +308,76 @@ test("registered application download filenames honor the Adobe console content-
   );
 });
 
+test("software statement extraction only trusts explicit software-statement fields", () => {
+  const helpers = loadPopupFunctions(["isProbablyJwt", "extractSoftwareStatementFromAppData"], {});
+  const goodStatement = `${encodeJwtSegment({ alg: "RS256" })}.${encodeJwtSegment({
+    iss: "auth.adobe.com",
+    software: true,
+  })}.sig`;
+  const unrelatedJwt = `${encodeJwtSegment({ alg: "RS256" })}.${encodeJwtSegment({
+    iss: "auth.adobe.com",
+    token_use: "access",
+  })}.sig`;
+
+  assert.equal(
+    helpers.extractSoftwareStatementFromAppData({
+      softwareStatement: goodStatement,
+      nested: {
+        jwt: unrelatedJwt,
+      },
+    }),
+    goodStatement
+  );
+  assert.equal(
+    helpers.extractSoftwareStatementFromAppData({
+      nested: {
+        jwt: unrelatedJwt,
+      },
+      authorization: {
+        bearer: unrelatedJwt,
+      },
+    }),
+    ""
+  );
+});
+
+test("software statement text extraction ignores arbitrary JWTs embedded inside JSON", () => {
+  const helpers = loadPopupFunctions(
+    ["isProbablyJwt", "extractSoftwareStatementFromAppData", "extractSoftwareStatementFromText"],
+    {}
+  );
+  const goodStatement = `${encodeJwtSegment({ alg: "RS256" })}.${encodeJwtSegment({
+    iss: "auth.adobe.com",
+    software: true,
+  })}.sig`;
+  const unrelatedJwt = `${encodeJwtSegment({ alg: "RS256" })}.${encodeJwtSegment({
+    iss: "auth.adobe.com",
+    token_use: "access",
+  })}.sig`;
+
+  assert.equal(helpers.extractSoftwareStatementFromText(goodStatement), goodStatement);
+  assert.equal(
+    helpers.extractSoftwareStatementFromText(
+      JSON.stringify({
+        softwareStatement: goodStatement,
+        accessToken: unrelatedJwt,
+      })
+    ),
+    goodStatement
+  );
+  assert.equal(
+    helpers.extractSoftwareStatementFromText(
+      JSON.stringify({
+        accessToken: unrelatedJwt,
+        nested: {
+          jwt: unrelatedJwt,
+        },
+      })
+    ),
+    ""
+  );
+});
+
 test("registered application health records surface decoded software statements and requestor matches", () => {
   const helpers = loadPopupFunctions(["normalizeRegisteredApplicationRequestorHintToken", "buildRegisteredApplicationHealthAppRecord"], {
     normalizeRegisteredApplicationRuntimeRecord: (value) => value,

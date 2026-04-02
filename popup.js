@@ -84998,11 +84998,6 @@ function extractSoftwareStatementFromAppData(appData) {
     }
   }
 
-  const dereference = extractJwtAndUrls(appData);
-  if (dereference.jwt && dereference.jwtScore > 0) {
-    return dereference.jwt;
-  }
-
   return "";
 }
 
@@ -85263,10 +85258,7 @@ function extractSoftwareStatementFromText(text = "") {
       if (extracted) {
         return extracted;
       }
-      const dereferenced = extractJwtAndUrls(parsed);
-      if (dereferenced.jwt && dereferenced.jwtScore > 0) {
-        return dereferenced.jwt;
-      }
+      return "";
     }
   } catch {
     // Fall through to direct token extraction.
@@ -86517,38 +86509,6 @@ async function fetchSoftwareStatementForAppGuid(guid, options = {}) {
     if (extracted) {
       return extracted;
     }
-
-    const dereference = extractJwtAndUrls(rawPayload.parsed);
-    if (dereference.jwt && dereference.jwtScore > 0) {
-      return dereference.jwt;
-    }
-
-    for (const candidateUrl of dereference.urls) {
-      try {
-        const response = await fetchWithAbortTimeout(
-          candidateUrl,
-          {
-            method: "GET",
-            credentials: "include",
-            mode: "cors",
-            headers: {
-              Accept: "text/plain, application/json, */*",
-            },
-          },
-          Math.max(1000, Number(requestOptions.timeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS))
-        );
-        if (!response.ok) {
-          continue;
-        }
-        const content = await response.text();
-        const candidateStatement = extractSoftwareStatementFromText(content);
-        if (candidateStatement) {
-          return candidateStatement;
-        }
-      } catch {
-        // Ignore dereference errors and continue.
-      }
-    }
   }
 
   const rawTextStatement = extractSoftwareStatementFromText(rawPayload?.text || "");
@@ -87789,6 +87749,22 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
         extractSoftwareStatementFromAppData(resolvedAppInfo?.appData || null),
         extractSoftwareStatementFromAppData(resolvedAppInfo),
       ]);
+      if (forceFreshClientRegistration && resolvedAppInfo?.guid) {
+        try {
+          const authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(resolvedAppInfo.guid, {
+            timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+            preferAuthenticatedHeaders: true,
+            preferredTabId: 0,
+            allowTemporaryPageContextTab: true,
+          });
+          if (authoritativeSoftwareStatement) {
+            resolvedAppInfo.softwareStatement = authoritativeSoftwareStatement;
+            return authoritativeSoftwareStatement;
+          }
+        } catch {
+          // Fall through to the current in-memory statement.
+        }
+      }
       if (currentStatement) {
         resolvedAppInfo.softwareStatement = currentStatement;
         return currentStatement;
