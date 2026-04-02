@@ -17104,7 +17104,12 @@ function isServiceProviderTokenMismatchError(value) {
   }
 
   if (typeof value === "string") {
-    return value.toLowerCase().includes("invalid_access_token_service_provider");
+    const normalizedValue = value.toLowerCase();
+    return (
+      normalizedValue.includes("invalid_access_token_service_provider") ||
+      normalizedValue.includes("access token is invalid due to invalid service provider") ||
+      (normalizedValue.includes("invalid service provider") && normalizedValue.includes("access token"))
+    );
   }
 
   return false;
@@ -45397,7 +45402,10 @@ async function esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record = nu
       esmWorkspaceState?.programmer?.programmerId,
       esmWorkspaceState?.requestToken || state.premiumPanelRequestToken || 0
     );
-    await megWorkspaceOpenSavedQueryFromUi(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName);
+    await esmWorkspaceOpenRequestPathInWorkspace(esmWorkspaceState, savedQueryUrl, requestToken, {
+      requestSource: "saved-query",
+      displayNodeLabel: savedQueryName,
+    });
   } finally {
     const hasRecords =
       Array.isArray(esmWorkspaceState?.megSavedQueryRecords) && esmWorkspaceState.megSavedQueryRecords.length > 0;

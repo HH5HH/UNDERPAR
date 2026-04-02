@@ -106,6 +106,19 @@ test("saved-query name normalization collapses repeated MVPD tails in popup and 
   );
 });
 
+test("REST V2 service-provider mismatch detection accepts the plain-language invalid service provider 401", () => {
+  const { isServiceProviderTokenMismatchError } = loadFunctions("popup.js", ["isServiceProviderTokenMismatchError"], {
+    extractApiErrorCode: () => "",
+  });
+
+  assert.equal(
+    isServiceProviderTokenMismatchError(
+      "REST V2 configuration failed (401): The access token is invalid due to invalid service provider."
+    ),
+    true
+  );
+});
+
 test("REST V2 learning refresh helper rerenders only for the active RequestorId x MVPD selection", () => {
   let refreshCall = null;
   const { maybeRefreshRestV2InteractiveDocsForContext } = loadFunctions(
@@ -400,7 +413,7 @@ test("sidepanel MEGSPACE saved-query runner disables the native select while lau
       premiumPanelRequestToken: 31,
     },
     resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
-    megWorkspaceOpenSavedQueryFromUi: async (...args) => {
+    esmWorkspaceOpenRequestPathInWorkspace: async (...args) => {
       interactions.opened = args;
     },
     resetEsmWorkspaceMegSavedQuerySelect: (target) => {
@@ -416,122 +429,96 @@ test("sidepanel MEGSPACE saved-query runner disables the native select while lau
   assert.equal(esmWorkspaceState.megSavedQueryBusy, false);
   assert.equal(selectElement.disabled, false);
   assert.equal(selectElement["aria-busy"], undefined);
-  assert.deepEqual(interactions.opened, [
-    esmWorkspaceState,
-    "/esm/v3/media-company/year/day?requestor-id=MML",
-    19,
-    "Daily Auth",
-  ]);
+  assert.equal(interactions.opened?.length, 4);
+  assert.equal(interactions.opened?.[0], esmWorkspaceState);
+  assert.equal(interactions.opened?.[1], "/esm/v3/media-company/year/day?requestor-id=MML");
+  assert.equal(interactions.opened?.[2], 19);
+  assert.equal(interactions.opened?.[3]?.requestSource, "saved-query");
+  assert.equal(interactions.opened?.[3]?.displayNodeLabel, "Daily Auth");
   assert.equal(interactions.resetTarget, selectElement);
   assert.deepEqual(pickerElement.classList.added, ["is-busy"]);
   assert.deepEqual(pickerElement.classList.removed, ["is-busy"]);
 });
 
-test("sidepanel MEGSPACE saved-query launcher hands the saved URL to the MEG workspace selection-change flow", async () => {
+test("sidepanel MEGSPACE saved-query runner sends the saved URL back through the ESM workspace opener", async () => {
   const interactions = {
-    rememberedSelection: null,
-    broadcastWindowId: 0,
-    workspaceMessage: null,
-    normalizedEndpointArg: null,
-    normalizedOptionsArg: null,
+    opened: null,
+    resetTarget: null,
+  };
+  const pickerElement = {
+    classList: {
+      added: [],
+      removed: [],
+      add(name) {
+        this.added.push(name);
+      },
+      remove(name) {
+        this.removed.push(name);
+      },
+    },
+  };
+  const selectElement = {
+    disabled: false,
+    setAttribute(name, value) {
+      this[name] = value;
+    },
+    removeAttribute(name) {
+      delete this[name];
+    },
   };
   const esmWorkspaceState = {
-    controllerWindowId: 31,
+    megSavedQueryPickerElement: pickerElement,
+    megSavedQuerySelectElement: selectElement,
+    megSavedQueryRecords: [{ name: "Daily Auth", url: "/esm/v3/media-company/year/day?requestor-id=MML" }],
+    megSavedQueryBusy: false,
     programmer: {
       programmerId: "Turner",
     },
     requestToken: 15,
   };
-  const { megWorkspaceOpenSavedQueryFromUi } = loadFunctions("popup.js", ["megWorkspaceOpenSavedQueryFromUi"], {
+  const { esmWorkspaceRunMegSavedQueryRecord } = loadFunctions("popup.js", ["esmWorkspaceRunMegSavedQueryRecord"], {
     state: {
-      megWorkspaceWindowId: 0,
       premiumPanelRequestToken: 23,
     },
-    stripMegWorkspaceMediaCompanyQueryParam: (value = "") =>
-      String(value || "").replace(/[?&]media-company=[^&]+/g, "").replace(/\?$/, ""),
     resolveCurrentPremiumPanelRequestToken: (_programmerId, requestToken) => Number(requestToken || 0),
-    megWorkspaceEnsureWorkspaceTab: async () => ({
-      id: 77,
-      windowId: 45,
-    }),
-    getActiveAdobePassEnvironment: () => ({
-      esmBase: "https://mgmt.auth.adobe.com/esm/v3/media-company/",
-      mgmtBase: "https://mgmt.auth.adobe.com",
-    }),
-    ADOBE_MGMT_BASE: "https://mgmt.auth.adobe.com",
-    megWorkspaceBuildAbsoluteServiceUrl: (baseOrigin, value) => new URL(String(value || ""), String(baseOrigin || "")).toString(),
-    megWorkspaceNormalizeSelection: (endpoint = null, options = {}) => {
-      interactions.normalizedEndpointArg = endpoint;
-      interactions.normalizedOptionsArg = options;
-      return {
-        endpointUrl: String(endpoint?.url || ""),
-        endpointPath: "/esm/v3/media-company/year/day?requestor-id=MML",
-        endpointLabel: String(options.endpointLabel || ""),
-        launchToken: String(options.launchToken || ""),
-      };
+    esmWorkspaceOpenRequestPathInWorkspace: async (...args) => {
+      interactions.opened = args;
     },
-    generateRequestId: () => "launch-42",
-    megWorkspaceRememberSelection: (windowId, selection) => {
-      interactions.rememberedSelection = {
-        windowId,
-        selection,
-      };
+    resetEsmWorkspaceMegSavedQuerySelect: (target) => {
+      interactions.resetTarget = target;
     },
-    megWaitForWorkspaceReady: async () => true,
-    megWorkspaceBroadcastControllerState: (_state, windowId) => {
-      interactions.broadcastWindowId = Number(windowId || 0);
-    },
-    megWorkspaceSendWorkspaceMessage: async (event, payload = {}, options = {}) => {
-      interactions.workspaceMessage = {
-        event,
-        payload,
-        options,
-      };
-    },
-    setStatus: () => {
-      throw new Error("setStatus should not be called on the success path");
-    },
-    URL,
-    Date,
   });
 
-  await megWorkspaceOpenSavedQueryFromUi(
+  await esmWorkspaceRunMegSavedQueryRecord(
     esmWorkspaceState,
-    "/esm/v3/media-company/year/day?requestor-id=MML&media-company=Turner",
-    19,
-    "Daily Auth"
+    {
+      name: "Daily Auth",
+      url: "/esm/v3/media-company/year/day?requestor-id=MML",
+    }
   );
 
-  assert.equal(
-    interactions.normalizedEndpointArg?.url,
-    "https://mgmt.auth.adobe.com/esm/v3/media-company/year/day?requestor-id=MML"
-  );
-  assert.equal(interactions.normalizedOptionsArg?.endpointLabel, "Daily Auth");
-  assert.equal(interactions.normalizedOptionsArg?.launchToken, "launch-42");
-  assert.equal(interactions.rememberedSelection?.windowId, 45);
-  assert.equal(interactions.broadcastWindowId, 45);
-  assert.equal(interactions.workspaceMessage?.event, "selection-change");
-  assert.equal(interactions.workspaceMessage?.payload?.endpointPath, "/esm/v3/media-company/year/day?requestor-id=MML");
-  assert.equal(interactions.workspaceMessage?.payload?.endpointLabel, "Daily Auth");
-  assert.equal(interactions.workspaceMessage?.payload?.autoRun, true);
-  assert.equal(interactions.workspaceMessage?.payload?.requestToken, 19);
-  assert.equal(interactions.workspaceMessage?.options?.targetWindowId, 45);
+  assert.equal(interactions.opened?.length, 4);
+  assert.equal(interactions.opened?.[0], esmWorkspaceState);
+  assert.equal(interactions.opened?.[1], "/esm/v3/media-company/year/day?requestor-id=MML");
+  assert.equal(interactions.opened?.[2], 15);
+  assert.equal(interactions.opened?.[3]?.requestSource, "saved-query");
+  assert.equal(interactions.opened?.[3]?.displayNodeLabel, "Daily Auth");
+  assert.equal(interactions.resetTarget, selectElement);
+  assert.deepEqual(pickerElement.classList.added, ["is-busy"]);
+  assert.deepEqual(pickerElement.classList.removed, ["is-busy"]);
+  assert.equal(selectElement.disabled, false);
 });
 
-test("sidepanel MEGSPACE saved-query runner no longer routes saved queries through the ESM workspace opener", () => {
+test("sidepanel MEGSPACE saved-query runner routes saved queries through the ESM workspace opener", () => {
   const popupSource = read("popup.js");
 
   assert.match(
     popupSource,
-    /await megWorkspaceOpenSavedQueryFromUi\(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName\);/
-  );
-  assert.match(
-    popupSource,
-    /await megWorkspaceSendWorkspaceMessage\(\s*"selection-change",[\s\S]*?autoRun:\s*true,/m
+    /await esmWorkspaceOpenRequestPathInWorkspace\(esmWorkspaceState, savedQueryUrl, requestToken, \{[\s\S]*?requestSource:\s*"saved-query",[\s\S]*?displayNodeLabel:\s*savedQueryName,[\s\S]*?\}\);/m
   );
   assert.doesNotMatch(
     popupSource,
-    /await esmWorkspaceOpenRequestPathInWorkspace\(esmWorkspaceState, normalizedSavedQueryUrl, liveRequestToken, \{[\s\S]*?requestSource:\s*"saved-query"/m
+    /await megWorkspaceOpenSavedQueryFromUi\(esmWorkspaceState, savedQueryUrl, requestToken, savedQueryName\);/
   );
 });
 
