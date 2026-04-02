@@ -244,7 +244,7 @@ test("sidepanel MEGSPACE saved-query picker now uses a native select while stand
   );
   assert.match(
     popupSource,
-    /megSavedQuerySelectElement\?\.addEventListener\("change", async \(\) => \{[\s\S]*?const selectedRecord = esmWorkspaceGetSelectedMegSavedQueryRecord\(esmWorkspaceState\);[\s\S]*?await esmWorkspaceRunMegSavedQueryRecord\(esmWorkspaceState, selectedRecord\);/m
+    /megSavedQuerySelectElement\?\.addEventListener\("change", async \(\) => \{[\s\S]*?const selectedRecord = esmWorkspaceGetSelectedMegSavedQueryRecord\(esmWorkspaceState\);[\s\S]*?esmWorkspaceQueueMegSavedQueryLaunch\(esmWorkspaceState, selectedRecord\);/m
   );
   assert.match(
     megSource,
@@ -253,6 +253,93 @@ test("sidepanel MEGSPACE saved-query picker now uses a native select while stand
   assert.doesNotMatch(popupSource, /esm-workspace-meg-saved-trigger/);
   assert.doesNotMatch(popupSource, /esm-workspace-meg-saved-menu/);
   assert.doesNotMatch(popupSource, /esmWorkspaceToggleMegSavedQueryMenu|closeAllEsmWorkspaceMegSavedQueryMenus|resolveEsmWorkspaceStateFromMegSavedQueryNode/);
+});
+
+test("sidepanel MEGSPACE saved-query sync defers DOM rebuilds while the native picker is active", () => {
+  const selectElement = {
+    innerHTML: "existing",
+    selectedOptions: [],
+  };
+  const esmWorkspaceState = {
+    megSavedQueryPickerElement: {
+      hidden: false,
+      classList: {
+        remove() {},
+        toggle() {},
+      },
+    },
+    megSavedQuerySelectElement: selectElement,
+    megSavedQueryInteractionActive: true,
+    megSavedQueryDeferredSyncPending: false,
+  };
+  const { esmWorkspaceSyncMegSavedQueryUi } = loadFunctions("popup.js", ["esmWorkspaceSyncMegSavedQueryUi"], {
+    popupGetSavedEsmQueryRecords: () => [
+      {
+        storageKey: "underpar:saved-esm-query:daily-auth",
+        name: "Daily Auth",
+        url: "/esm/v3/media-company/year/day?requestor-id=MML",
+      },
+    ],
+    esmWorkspaceSyncMegSavedQuerySelectMetadata: () => {},
+    document: {
+      createElement() {
+        throw new Error("DOM rebuild should be deferred while picker interaction is active");
+      },
+    },
+  });
+
+  esmWorkspaceSyncMegSavedQueryUi(esmWorkspaceState);
+
+  assert.equal(esmWorkspaceState.megSavedQueryDeferredSyncPending, true);
+  assert.equal(selectElement.innerHTML, "existing");
+  assert.equal(esmWorkspaceState.megSavedQueryRecords?.[0]?.name, "Daily Auth");
+});
+
+test("sidepanel MEGSPACE saved-query launch waits until after the native menu closes before disabling the picker", async () => {
+  const timers = [];
+  const interactions = {
+    runs: [],
+    activeStates: [],
+  };
+  const esmWorkspaceState = {
+    megSavedQueryBusy: false,
+    megSavedQueryInteractionActive: false,
+    megSavedQueryDeferredSyncPending: false,
+  };
+  const { esmWorkspaceQueueMegSavedQueryLaunch } = loadFunctions(
+    "popup.js",
+    ["esmWorkspaceQueueMegSavedQueryLaunch"],
+    {
+      setTimeout: (callback) => {
+        timers.push(callback);
+        return timers.length;
+      },
+      esmWorkspaceSetMegSavedQueryInteractionState: (_state, active) => {
+        interactions.activeStates.push(active);
+        _state.megSavedQueryInteractionActive = active === true;
+      },
+      esmWorkspaceRunMegSavedQueryRecord: async (_state, record) => {
+        interactions.runs.push(record);
+      },
+    }
+  );
+
+  esmWorkspaceQueueMegSavedQueryLaunch(esmWorkspaceState, {
+    name: "Daily Auth",
+    url: "/esm/v3/media-company/year/day?requestor-id=MML",
+  });
+
+  assert.equal(esmWorkspaceState.megSavedQueryPendingLaunchRecord?.name, "Daily Auth");
+  assert.deepEqual(interactions.runs, []);
+  assert.equal(timers.length, 1);
+
+  await timers[0]();
+
+  assert.equal(interactions.runs.length, 1);
+  assert.equal(interactions.runs[0]?.name, "Daily Auth");
+  assert.equal(interactions.runs[0]?.url, "/esm/v3/media-company/year/day?requestor-id=MML");
+  assert.equal(esmWorkspaceState.megSavedQueryPendingLaunchRecord, null);
+  assert.equal(interactions.activeStates[0], true);
 });
 
 test("sidepanel MEGSPACE native saved-query select keeps the embedded monochrome picker styling", () => {

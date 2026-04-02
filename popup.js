@@ -11846,10 +11846,15 @@ function registerPassVaultStorageListener() {
     state.passVault = normalizeUnderparVaultPayload(vaultPayload);
     state.passVaultLoaded = true;
     rebuildPassVaultProgrammerStatusIndex(state.passVault);
-    refreshAllEsmWorkspaceMegSavedQuerySelectors();
     if (consumePendingPassVaultStorageWrite(state.passVault)) {
       return;
     }
+    if (isAnyEsmWorkspaceMegSavedQueryInteractionActive()) {
+      state.pendingPassVaultUiApplyAfterMegSavedQueryInteraction = true;
+      return;
+    }
+
+    refreshAllEsmWorkspaceMegSavedQuerySelectors();
 
     void seedCurrentProgrammersFromPassVault({
       forceReload: false,
@@ -45273,6 +45278,106 @@ function esmWorkspaceGetSelectedMegSavedQueryRecord(esmWorkspaceState) {
   };
 }
 
+function isAnyEsmWorkspaceMegSavedQueryInteractionActive() {
+  const sections = document.querySelectorAll(".premium-service-section.service-esm");
+  for (const section of sections) {
+    const esmWorkspaceState = section?.__underparEsmWorkspaceState || null;
+    if (!esmWorkspaceState?.section?.isConnected) {
+      continue;
+    }
+    if (
+      esmWorkspaceState.megSavedQueryInteractionActive === true ||
+      esmWorkspaceState.megSavedQueryBusy === true ||
+      esmWorkspaceState.megSavedQueryPendingLaunchRecord
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function flushDeferredPassVaultUiApplyAfterMegSavedQueryInteraction() {
+  if (state.pendingPassVaultUiApplyAfterMegSavedQueryInteraction !== true) {
+    return;
+  }
+  if (isAnyEsmWorkspaceMegSavedQueryInteractionActive()) {
+    return;
+  }
+  state.pendingPassVaultUiApplyAfterMegSavedQueryInteraction = false;
+  refreshAllEsmWorkspaceMegSavedQuerySelectors();
+  void seedCurrentProgrammersFromPassVault({
+    forceReload: false,
+    forceOverwrite: false,
+    forceDcrRestore: true,
+  }).then(() => {
+    const selectedProgrammer = resolveSelectedProgrammer();
+    if (!selectedProgrammer) {
+      return;
+    }
+    const cachedServices = getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId);
+    if (cachedServices) {
+      renderPremiumServices(cachedServices, selectedProgrammer, {
+        controllerReason: "vault-storage-change",
+      });
+    }
+  });
+}
+
+function esmWorkspaceSetMegSavedQueryInteractionState(esmWorkspaceState, active = true) {
+  if (!esmWorkspaceState || typeof esmWorkspaceState !== "object") {
+    return;
+  }
+  esmWorkspaceState.megSavedQueryInteractionActive = active === true;
+  if (esmWorkspaceState.megSavedQueryInteractionActive === true) {
+    return;
+  }
+  const needsDeferredSync = esmWorkspaceState.megSavedQueryDeferredSyncPending === true;
+  esmWorkspaceState.megSavedQueryDeferredSyncPending = false;
+  if (needsDeferredSync) {
+    esmWorkspaceSyncMegSavedQueryUi(esmWorkspaceState);
+  }
+  flushDeferredPassVaultUiApplyAfterMegSavedQueryInteraction();
+}
+
+function esmWorkspaceQueueMegSavedQueryLaunch(esmWorkspaceState, record = null) {
+  const normalizedUrl = String(record?.url || "").trim();
+  if (!esmWorkspaceState || !normalizedUrl) {
+    return;
+  }
+  esmWorkspaceState.megSavedQueryPendingLaunchRecord = {
+    ...record,
+    url: normalizedUrl,
+  };
+  esmWorkspaceSetMegSavedQueryInteractionState(esmWorkspaceState, true);
+  const launchSequence = Number(esmWorkspaceState.megSavedQueryLaunchSequence || 0) + 1;
+  esmWorkspaceState.megSavedQueryLaunchSequence = launchSequence;
+
+  const runQueuedLaunch = async () => {
+    if (Number(esmWorkspaceState?.megSavedQueryLaunchSequence || 0) !== launchSequence) {
+      return;
+    }
+    const pendingRecord = esmWorkspaceState?.megSavedQueryPendingLaunchRecord || null;
+    esmWorkspaceState.megSavedQueryPendingLaunchRecord = null;
+    if (!pendingRecord || esmWorkspaceState?.megSavedQueryBusy === true) {
+      esmWorkspaceSetMegSavedQueryInteractionState(esmWorkspaceState, false);
+      return;
+    }
+    try {
+      await esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, pendingRecord);
+    } finally {
+      esmWorkspaceSetMegSavedQueryInteractionState(esmWorkspaceState, false);
+    }
+  };
+
+  if (typeof setTimeout === "function") {
+    setTimeout(() => {
+      void runQueuedLaunch();
+    }, 180);
+    return;
+  }
+  void runQueuedLaunch();
+}
+
 async function esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, record = null) {
   const pickerElement = esmWorkspaceState?.megSavedQueryPickerElement || null;
   const selectElement = esmWorkspaceState?.megSavedQuerySelectElement || null;
@@ -45413,6 +45518,11 @@ function esmWorkspaceSyncMegSavedQueryUi(esmWorkspaceState) {
 
   const records = popupGetSavedEsmQueryRecords();
   esmWorkspaceState.megSavedQueryRecords = records;
+  if (esmWorkspaceState?.megSavedQueryInteractionActive === true) {
+    esmWorkspaceState.megSavedQueryDeferredSyncPending = true;
+    return;
+  }
+  esmWorkspaceState.megSavedQueryDeferredSyncPending = false;
   const selectedStorageKey = String(selectElement.selectedOptions?.[0]?.dataset?.storageKey || "").trim();
   selectElement.innerHTML = "";
 
@@ -46097,16 +46207,27 @@ function wireEsmWorkspaceInteractions(esmWorkspaceState, requestToken) {
     if (!selectedRecord) {
       return;
     }
-    const executeSavedQuerySelection = async () => {
-      await esmWorkspaceRunMegSavedQueryRecord(esmWorkspaceState, selectedRecord);
-    };
-    if (typeof setTimeout === "function") {
-      setTimeout(() => {
-        void executeSavedQuerySelection();
-      }, 0);
+    esmWorkspaceQueueMegSavedQueryLaunch(esmWorkspaceState, selectedRecord);
+  });
+
+  esmWorkspaceState.megSavedQuerySelectElement?.addEventListener("focus", () => {
+    esmWorkspaceSetMegSavedQueryInteractionState(esmWorkspaceState, true);
+  });
+
+  esmWorkspaceState.megSavedQuerySelectElement?.addEventListener("blur", () => {
+    if (esmWorkspaceState?.megSavedQueryBusy === true || esmWorkspaceState?.megSavedQueryPendingLaunchRecord) {
       return;
     }
-    await executeSavedQuerySelection();
+    if (typeof setTimeout === "function") {
+      setTimeout(() => {
+        if (esmWorkspaceState?.megSavedQueryBusy === true || esmWorkspaceState?.megSavedQueryPendingLaunchRecord) {
+          return;
+        }
+        esmWorkspaceSetMegSavedQueryInteractionState(esmWorkspaceState, false);
+      }, 180);
+      return;
+    }
+    esmWorkspaceSetMegSavedQueryInteractionState(esmWorkspaceState, false);
   });
 
   esmWorkspaceState.megToggleButton?.addEventListener("click", (event) => {
