@@ -1240,8 +1240,6 @@ test("console configuration version is sourced dynamically from the direct conso
   const consoleHeaderSource = extractFunctionSource(popupSource, "getAdobeConsoleRequestHeaders");
   const fetchConsoleSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithAuthVariants");
   const loginButtonFallbackSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithLoginButtonFallback");
-  const shellPageContextSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonWithShellPageContextVariants");
-  const pageContextFetchSource = extractFunctionSource(popupSource, "fetchAdobeConsoleJsonViaShellPageContext");
 
   assert.equal(/configurationVersion=3522/.test(popupSource), false);
   assert.match(popupSource, /function appendAdobeConsoleConfigurationVersion/);
@@ -1259,14 +1257,14 @@ test("console configuration version is sourced dynamically from the direct conso
   assert.doesNotMatch(consoleHeaderSource, /Origin:/);
   assert.doesNotMatch(consoleHeaderSource, /Referer:/);
   assert.match(loginButtonFallbackSource, /fetchAdobeConsoleJsonWithAuthVariants/);
-  assert.match(loginButtonFallbackSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
   assert.doesNotMatch(loginButtonFallbackSource, /preferShellAccessToken/);
   assert.doesNotMatch(loginButtonFallbackSource, /allowTemporaryPageContextTab/);
-  assert.doesNotMatch(shellPageContextSource, /allowTemporaryPageContextTab/);
-  assert.doesNotMatch(pageContextFetchSource, /allowTemporaryTab/);
+  assert.doesNotMatch(popupSource, /function fetchAdobeConsoleJsonWithShellPageContextVariants\(/);
+  assert.doesNotMatch(popupSource, /function fetchAdobeConsoleJsonViaShellPageContext\(/);
+  assert.doesNotMatch(popupSource, /function resolveExperienceAdobePageContextTarget\(/);
   assert.doesNotMatch(buildConsoleContextSource, /allowTemporaryPageContextTab/);
   assert.match(buildConsoleContextSource, /const preferredTabId = Number\(options\?\.preferredTabId \|\| 0\);/);
-  assert.match(buildConsoleContextSource, /const pageContextTargetRef = \{ target: null \};/);
+  assert.doesNotMatch(buildConsoleContextSource, /pageContextTargetRef/);
   assert.match(buildConsoleContextSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
   assert.match(buildConsoleContextSource, /rest\/api\/user\/extendedProfile/);
   assert.match(buildConsoleContextSource, /rest\/api\/admin\/maintenance\/status/);
@@ -2099,7 +2097,7 @@ test("experience cloud auth redirect detection accepts plain-object headers from
   );
 });
 
-test("programmer load stays on direct console requests while allowing LoginButton-style fallback targets", () => {
+test("programmer load stays on direct console requests without page-context target plumbing", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const buildConsoleContextSource = extractFunctionSource(popupSource, "buildConsoleContext");
   const fetchProgrammersSource = extractFunctionSource(popupSource, "fetchProgrammersFromApi");
@@ -2116,6 +2114,7 @@ test("programmer load stays on direct console requests while allowing LoginButto
   assert.match(fetchRegisteredApplicationsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
   assert.match(fetchApplicationDetailsSource, /fetchAdobeConsoleJsonWithLoginButtonFallback/);
   assert.match(fetchRegisteredApplicationsSource, /preferredTabId,/);
+  assert.doesNotMatch(fetchRegisteredApplicationsSource, /pageContextTargetRef/);
   assert.match(fetchApplicationsSource, /fetchProgrammerRegisteredApplications\(currentSession,\s*programmerId,\s*options\)/);
   assert.doesNotMatch(fetchProgrammersSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
   assert.doesNotMatch(fetchChannelsSource, /fetchAdobeConsoleJsonWithShellPageContextVariants/);
@@ -2126,42 +2125,16 @@ test("programmer load stays on direct console requests while allowing LoginButto
   assert.doesNotMatch(fetchApplicationsSource, /buildRegisteredApplicationBulkRetrieveRequest/);
 });
 
-test("console page-context target resolution matches LoginButton behavior", () => {
+test("legacy console and CM page-context bootstrap helpers are removed from source", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const cmBootstrapUrlSource = extractFunctionSource(popupSource, "getCmConsoleBootstrapUrl");
-  const consoleUrlSource = extractFunctionSource(popupSource, "isAdobePassConsoleAppUrl");
-  const findConsoleTabSource = extractFunctionSource(popupSource, "findExistingAdobeConsoleTab");
-  const openTemporarySource = extractFunctionSource(popupSource, "openTemporaryAdobePageContextTarget");
-  const resolveReusableSource = extractFunctionSource(popupSource, "resolveReusableAdobePageContextTab");
-  const resolveTargetSource = extractFunctionSource(popupSource, "resolveAdobeConsolePageContextTarget");
-  const resolveExperienceTargetSource = extractFunctionSource(popupSource, "resolveExperienceAdobePageContextTarget");
-  const findExperienceTargetSource = extractFunctionSource(popupSource, "findExistingExperienceCloudAdobeTab");
-
-  assert.match(cmBootstrapUrlSource, /cm-console\/cmu\/year/);
-  assert.match(cmBootstrapUrlSource, /ADOBEPASS_ORG_HANDLE/);
-  assert.match(consoleUrlSource, /ADOBE_PASS_CONSOLE_APP_SLUG/);
-  assert.doesNotMatch(consoleUrlSource, /consoleShellUrl/);
-  assert.doesNotMatch(consoleUrlSource, /consoleProgrammersUrl/);
-  assert.match(findConsoleTabSource, /isAdobePassConsoleAppUrl\(url\)/);
-  assert.match(findConsoleTabSource, /ADOBE_CONSOLE_RUNTIME_ORIGIN/);
-  assert.match(openTemporarySource, /chrome\.tabs\?\.create/);
-  assert.match(openTemporarySource, /chrome\.windows\?\.create/);
-  assert.match(openTemporarySource, /waitForTabCompletion/);
-  assert.match(resolveReusableSource, /isAdobePassConsoleAppUrl\(preferredUrl\)/);
-  assert.doesNotMatch(resolveReusableSource, /isExperienceAdobeTabUrl\(preferredUrl\)/);
-  assert.match(resolveReusableSource, /isAuthFlowUrl\(preferredUrl\)/);
-  assert.match(resolveReusableSource, /waitForTabCompletion/);
-  assert.doesNotMatch(popupSource, /function getAdobeConsolePageContextBootstrapUrl\(/);
-  assert.match(resolveTargetSource, /tab = await findExistingAdobeConsoleTab\(\);/);
-  assert.doesNotMatch(resolveTargetSource, /findExistingExperienceCloudAdobeTab\(\)/);
-  assert.doesNotMatch(resolveTargetSource, /allowTemporaryTab/);
-  assert.doesNotMatch(resolveTargetSource, /openTemporaryAdobePageContextTarget/);
-  assert.doesNotMatch(resolveTargetSource, /requestUrl/);
-  assert.match(resolveTargetSource, /temporaryTarget:\s*null/);
-  assert.match(findExperienceTargetSource, /url\.includes\("\/#\/@adobepass\/cm-console\/"\)/);
-  assert.match(findExperienceTargetSource, /isExperienceAdobeTabUrl\(url\)/);
-  assert.match(resolveExperienceTargetSource, /openTemporaryAdobePageContextTarget/);
-  assert.match(resolveExperienceTargetSource, /getCmConsoleBootstrapUrl\(\)/);
+  assert.doesNotMatch(popupSource, /function isAdobePassConsoleAppUrl\(/);
+  assert.doesNotMatch(popupSource, /function findExistingAdobeConsoleTab\(/);
+  assert.doesNotMatch(popupSource, /function openTemporaryAdobePageContextTarget\(/);
+  assert.doesNotMatch(popupSource, /function resolveReusableAdobePageContextTab\(/);
+  assert.doesNotMatch(popupSource, /function resolveAdobeConsolePageContextTarget\(/);
+  assert.doesNotMatch(popupSource, /function resolveExperienceAdobePageContextTarget\(/);
+  assert.doesNotMatch(popupSource, /function fetchAdobeConsoleJsonViaShellPageContext\(/);
+  assert.doesNotMatch(popupSource, /function fetchImsCheckTokenViaAdobePageContext\(/);
 });
 
 test("legacy CM reports-page bootstrap helpers are removed from source", () => {
@@ -2439,8 +2412,7 @@ test("CM token bootstrap can harvest JWTs from raw IMS response text when access
   const extractTokenSource = extractFunctionSource(popupSource, "extractImsAccessTokenFromPayload");
   const validateTransportSource = extractFunctionSource(popupSource, "fetchImsValidateToken");
   const checkTransportSource = extractFunctionSource(popupSource, "fetchImsCheckToken");
-  const validateSource = extractFunctionSource(popupSource, "requestCmTokenViaValidateToken");
-  const checkSource = extractFunctionSource(popupSource, "requestCmTokenViaImsCheck");
+  const resolveQualifiedSource = extractFunctionSource(popupSource, "resolveQualifiedCmConsoleAccessToken");
 
   assert.match(extractTokenSource, /extractJwtAndUrls\(payload\)/);
   assert.match(extractTokenSource, /rawJwtMatch/);
@@ -2449,8 +2421,7 @@ test("CM token bootstrap can harvest JWTs from raw IMS response text when access
   assert.match(validateTransportSource, /rawText: text/);
   assert.match(checkTransportSource, /const text = await response\.text\(\)\.catch\(\(\) => ""\);/);
   assert.match(checkTransportSource, /rawText: text/);
-  assert.match(validateSource, /normalizeCmuAccessToken\(result\.value\?\.data,\s*result\.value\?\.rawText\)/);
-  assert.match(checkSource, /normalizeCmuAccessToken\(result\.value\?\.data,\s*result\.value\?\.rawText\)/);
+  assert.match(resolveQualifiedSource, /normalizeCmuAccessToken\(result\.value\?\.data,\s*result\.value\?\.rawText\)/);
 });
 
 test("CM request path now requires cm-console-ui qualification instead of accepting the UnderPAR shell bearer", () => {
@@ -2466,7 +2437,7 @@ test("CM request path now requires cm-console-ui qualification instead of accept
   assert.doesNotMatch(requestSupportSource, /isUnderparImsClientId/);
   assert.doesNotMatch(preferredTokenSource, /state\.loginData\?\.accessToken/);
   assert.match(ensureCmSource, /resolveQualifiedCmConsoleAccessToken/);
-  assert.match(resolveQualifiedSource, /fetchImsCheckTokenViaAdobePageContext/);
+  assert.doesNotMatch(resolveQualifiedSource, /fetchImsCheckTokenViaAdobePageContext/);
   assert.match(resolveQualifiedSource, /fetchImsCheckToken\(/);
   assert.match(resolveQualifiedSource, /fetchImsValidateToken\(/);
   assert.doesNotMatch(fetchCmSource, /fetchCmJsonViaReportsPageContext/);
@@ -2719,7 +2690,12 @@ test("premium services reuse the mounted DOM when the selected service signature
   assert.match(renderSource, /hasRenderablePremiumServiceSections\(services\)/);
   assert.match(renderSource, /refreshExistingPremiumServiceSections\(programmer,\s*services\)/);
   assert.match(hasRenderableSource, /querySelectorAll\("\.premium-service-section"\)/);
-  assert.match(hasRenderableSource, /expectedKeys\.every\(\(serviceKey,\s*index\) => actualKeys\[index\] === serviceKey\)/);
+  assert.match(hasRenderableSource, /const expectedEntries = getRenderablePremiumServiceEntries\(services\);/);
+  assert.match(hasRenderableSource, /const actualDisabled = String\(section\?\.dataset\?\.serviceDisabled \|\| ""\)\.trim\(\) === "true";/);
+  assert.match(
+    hasRenderableSource,
+    /actualKey === String\(entry\?\.serviceKey \|\| ""\)\.trim\(\) && actualDisabled === \(entry\?\.disabled === true\)/
+  );
   assert.match(refreshExistingSource, /shouldHydrateExistingPremiumServiceSection\(section,\s*serviceKey\)/);
   assert.match(hydrateExistingSource, /!section\.__underparCmState && section\.__underparCmLoadPending !== true && !hasContent/);
   assert.match(hydrateExistingSource, /!section\.__underparEsmWorkspaceState && section\.__underparEsmWorkspaceLoadPending !== true && !hasContent/);
@@ -2745,14 +2721,15 @@ test("premium and HR render reuse requires intact mounted section shells after e
   const script = [
     'const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["learning", "health", "harpo"];',
     "function getHrContextSectionDisplayKeys() { return ['learning', 'health']; }",
+    "function getRenderablePremiumServiceEntries(services = null) { return Array.isArray(services?.expectedEntries) ? services.expectedEntries.slice() : []; }",
     extractFunctionSource(popupSource, "hasRenderablePremiumServiceSections"),
     extractFunctionSource(popupSource, "hasRenderableHrContextSections"),
     "module.exports = { hasRenderablePremiumServiceSections, hasRenderableHrContextSections };",
   ].join("\n\n");
 
   const premiumSections = [
-    { dataset: { serviceKey: "restV2" } },
-    { dataset: { serviceKey: "esmWorkspace" } },
+    { dataset: { serviceKey: "restV2", serviceDisabled: "false" } },
+    { dataset: { serviceKey: "esmWorkspace", serviceDisabled: "false" } },
   ];
   const hrSections = [
     { dataset: { hrSectionKey: "learning" } },
@@ -2774,10 +2751,34 @@ test("premium and HR render reuse requires intact mounted section shells after e
   vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
   const { hasRenderablePremiumServiceSections, hasRenderableHrContextSections } = context.module.exports;
 
-  assert.equal(hasRenderablePremiumServiceSections({ expectedKeys: ["restV2", "esmWorkspace"] }), true);
-  assert.equal(hasRenderablePremiumServiceSections({ expectedKeys: ["esmWorkspace", "restV2"] }), false);
+  assert.equal(
+    hasRenderablePremiumServiceSections({
+      expectedEntries: [
+        { serviceKey: "restV2", disabled: false },
+        { serviceKey: "esmWorkspace", disabled: false },
+      ],
+    }),
+    true
+  );
+  assert.equal(
+    hasRenderablePremiumServiceSections({
+      expectedEntries: [
+        { serviceKey: "esmWorkspace", disabled: false },
+        { serviceKey: "restV2", disabled: false },
+      ],
+    }),
+    false
+  );
   premiumSections.pop();
-  assert.equal(hasRenderablePremiumServiceSections({ expectedKeys: ["restV2", "esmWorkspace"] }), false);
+  assert.equal(
+    hasRenderablePremiumServiceSections({
+      expectedEntries: [
+        { serviceKey: "restV2", disabled: false },
+        { serviceKey: "esmWorkspace", disabled: false },
+      ],
+    }),
+    false
+  );
 
   assert.equal(hasRenderableHrContextSections(), true);
   hrSections[1].dataset.hrSectionKey = "learning";

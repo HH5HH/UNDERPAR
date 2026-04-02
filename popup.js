@@ -8955,12 +8955,6 @@ async function hydratePassVaultServiceRecordWithContext(serviceRecord = null, de
       (await enrichRegisteredApplicationForHydration(registeredApplication, {
         timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
         preferAuthenticatedHeaders: true,
-        preferredTabId: Number(hydrationContext?.preferredTabId || 0),
-        allowTemporaryPageContextTab: hydrationContext?.allowTemporaryPageContextTab === true,
-        pageContextTargetRef:
-          hydrationContext?.pageContextTargetRef && typeof hydrationContext.pageContextTargetRef === "object"
-            ? hydrationContext.pageContextTargetRef
-            : null,
       }).catch(() => registeredApplication)) || registeredApplication;
     if (guid && sharedHydratedApplicationsByGuid) {
       sharedHydratedApplicationsByGuid.set(guid, cloneJsonLikeValue(registeredApplication, null));
@@ -9098,28 +9092,19 @@ async function hydratePassVaultServiceEntries(entries = {}, serviceKeys = null, 
   const definitionsToHydrate = requestedServiceKeys.size > 0
     ? UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.filter((definition) => requestedServiceKeys.has(definition.serviceKey))
     : UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS;
-  const pageContextTargetRef =
-    hydrationContext?.pageContextTargetRef && typeof hydrationContext.pageContextTargetRef === "object"
-      ? hydrationContext.pageContextTargetRef
-      : { target: null };
   const sharedHydratedApplicationsByGuid = new Map();
   const sharedClientByGuid = new Map();
 
-  try {
-    for (const definition of definitionsToHydrate) {
-      nextEntries[definition.serviceKey] = await hydratePassVaultServiceRecordWithContext(
-        nextEntries[definition.serviceKey],
-        definition,
-        {
-          ...hydrationContext,
-          pageContextTargetRef,
-          sharedHydratedApplicationsByGuid,
-          sharedClientByGuid,
-        }
-      );
-    }
-  } finally {
-    await closeTemporaryAdobePageContextTarget(pageContextTargetRef?.target?.temporaryTarget || null).catch(() => null);
+  for (const definition of definitionsToHydrate) {
+    nextEntries[definition.serviceKey] = await hydratePassVaultServiceRecordWithContext(
+      nextEntries[definition.serviceKey],
+      definition,
+      {
+        ...hydrationContext,
+        sharedHydratedApplicationsByGuid,
+        sharedClientByGuid,
+      }
+    );
   }
 
   return nextEntries;
@@ -85512,11 +85497,10 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
   const hydratedAt = new Date().toISOString();
   const programmerAccess = resolveProgrammerAccessContext(currentSession);
   const preferredTabId = Number(options?.preferredTabId || 0);
-  const pageContextTargetRef = { target: null };
   let csrfToken = firstNonEmptyString([previousConsole?.csrfToken, state.consoleCsrfToken, "NO-TOKEN"]);
-  let transport = firstNonEmptyString([previousConsole?.transport]);
-  let pageContextOrigin = firstNonEmptyString([previousConsole?.pageContextOrigin]);
-  let pageContextUrl = firstNonEmptyString([previousConsole?.pageContextUrl]);
+  let transport = "";
+  let pageContextOrigin = "";
+  let pageContextUrl = "";
 
   const syncConsoleFetchMeta = (result = null) => {
     if (!result || typeof result !== "object") {
@@ -85536,7 +85520,7 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
       csrfToken = nextCsrfToken;
       state.consoleCsrfToken = nextCsrfToken;
     }
-    transport = firstNonEmptyString([result?.shell ? "page-context" : "", result?.transport, transport]);
+    transport = firstNonEmptyString([result?.transport, transport]);
     pageContextOrigin = firstNonEmptyString([result?.pageContext?.origin, pageContextOrigin]);
     pageContextUrl = firstNonEmptyString([result?.pageContext?.url, pageContextUrl]);
   };
@@ -85622,7 +85606,6 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
     timeoutMs: PROGRAMMERS_FETCH_TIMEOUT_MS,
     accessToken,
     preferredTabId,
-    pageContextTargetRef,
     headers: {
       Authorization: `bearer ${accessToken}`,
       "X-CSRF-Token": firstNonEmptyString([csrfToken, state.consoleCsrfToken, "NO-TOKEN"]),
@@ -85684,7 +85667,6 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
               fetchConsoleChannelsFromApi({
                 accessToken,
                 configurationVersion,
-                pageContextTargetRef,
                 preferredTabId,
               })
             ),
@@ -85693,7 +85675,6 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
                 accessToken,
                 configurationVersion,
                 requireEntities: false,
-                pageContextTargetRef,
                 preferredTabId,
               })
             ),
@@ -85784,8 +85765,6 @@ async function buildConsoleContext(session, reason = "post-login", options = {})
       error: resolvedError.message,
     });
     throw resolvedError;
-  } finally {
-    await closeTemporaryAdobePageContextTarget(pageContextTargetRef?.target?.temporaryTarget || null).catch(() => null);
   }
 }
 
@@ -86222,6 +86201,7 @@ async function fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel
           text,
           status: response.status,
           headers: toDebugHeadersObject(response.headers || new Headers()),
+          transport: "ims-bearer",
         };
       }
 
@@ -86239,87 +86219,12 @@ async function fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel
   throw lastError || new Error(`${contextLabel} failed.`);
 }
 
-async function fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, contextLabel, requestOptions = null) {
-  const urls = Array.isArray(urlCandidates)
-    ? [...new Set(urlCandidates.filter((item) => typeof item === "string" && item.trim()))]
-    : [];
-  if (urls.length === 0) {
-    return null;
-  }
-
-  const options = requestOptions && typeof requestOptions === "object" ? requestOptions : {};
-  const preferredTabId = Number(options.preferredTabId || 0);
-  const timeoutMs = Math.max(2000, Number(options.timeoutMs || 0) || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS);
-  const accessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([options.accessToken, getPreferredAdobeConsoleAccessTokenCandidate()])
-  );
-  const pageContextTargetRef =
-    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
-      ? options.pageContextTargetRef
-      : null;
-  const method = String(options.method || "GET")
-    .trim()
-    .toUpperCase();
-  const headers = options.headers && typeof options.headers === "object" ? { ...options.headers } : {};
-  const body =
-    Object.prototype.hasOwnProperty.call(options, "body") && options.body != null
-      ? typeof options.body === "string"
-        ? options.body
-        : JSON.stringify(options.body)
-      : undefined;
-
-  for (const url of urls) {
-    const response = await fetchAdobeConsoleJsonViaShellPageContext(url, {
-      method,
-      headers,
-      body,
-      accessToken,
-      pageContextTargetRef,
-      preferredTabId,
-      timeoutMs,
-    }).catch(() => null);
-    if (!response?.ok) {
-      continue;
-    }
-    return {
-      url: String(response.url || url),
-      parsed: response.parsed ?? {},
-      text: String(response.text || ""),
-      status: Number(response.status || 0),
-      headers: response.headers && typeof response.headers === "object" ? response.headers : {},
-      shell: response.shell && typeof response.shell === "object" ? response.shell : null,
-    };
-  }
-
-  return null;
-}
-
 async function fetchAdobeConsoleJsonWithLoginButtonFallback(urlCandidates, contextLabel, requestOptions = null) {
   const options = requestOptions && typeof requestOptions === "object" ? requestOptions : {};
-  const directResult = await fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel, {
+  return fetchAdobeConsoleJsonWithAuthVariants(urlCandidates, contextLabel, {
     ...options,
     preferAuthenticatedHeaders: options.preferAuthenticatedHeaders !== false,
-  }).catch((error) => {
-    return {
-      __underparError: error instanceof Error ? error : new Error(String(error)),
-    };
   });
-  if (directResult && typeof directResult === "object" && !directResult.__underparError) {
-    return directResult;
-  }
-
-  const pageContextResult = await fetchAdobeConsoleJsonWithShellPageContextVariants(urlCandidates, contextLabel, {
-    ...options,
-    pageContextTargetRef:
-      options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
-        ? options.pageContextTargetRef
-        : null,
-  }).catch(() => null);
-  if (pageContextResult) {
-    return pageContextResult;
-  }
-
-  throw directResult?.__underparError || new Error(`${contextLabel} failed.`);
 }
 
 function normalizeRegisteredApplicationEntityRef(value = "") {
@@ -86821,10 +86726,6 @@ async function fetchProgrammerRegisteredApplications(session, programmerId, opti
     options.configurationVersion || consoleContext?.configurationVersion || getKnownAdobeConsoleConfigurationVersion() || 0
   );
   const normalizedProgrammerId = String(programmerId || "").trim();
-  const pageContextTargetRef =
-    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
-      ? options.pageContextTargetRef
-      : null;
   const preferredTabId = Number(options.preferredTabId || 0);
   const requestTimeoutMs = Math.max(1000, Number(options.requestTimeoutMs || PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS));
 
@@ -86843,7 +86744,6 @@ async function fetchProgrammerRegisteredApplications(session, programmerId, opti
     accessToken,
     preferAuthenticatedHeaders: true,
     preferredTabId,
-    pageContextTargetRef,
   });
 
   const responseHeaders = payload?.headers && typeof payload.headers === "object" ? payload.headers : {};
@@ -86862,7 +86762,7 @@ async function fetchProgrammerRegisteredApplications(session, programmerId, opti
     applications: normalizeApplicationsResponse(payload?.parsed || payload),
     csrfToken: nextCsrfToken,
     pageContext: payload?.pageContext || null,
-    transport: firstNonEmptyString([payload?.transport, payload?.shell ? "page-context" : ""]),
+    transport: firstNonEmptyString([payload?.transport]),
     url: String(payload?.url || urlCandidates[0] || ""),
     status: Number(payload?.status || 0),
   };
@@ -89908,148 +89808,6 @@ function buildApiRequestUrl(baseUrl = "", path = "", queryParams = {}) {
   return url;
 }
 
-async function resolveExperienceAdobePageContextTarget({ preferredTabId = 0, allowTemporaryTab = true } = {}) {
-  let tab = await getTabByIdSafe(preferredTabId);
-  const preferredUrl = String(tab?.url || tab?.pendingUrl || "").trim();
-  if (!isExperienceAdobeTabUrl(preferredUrl)) {
-    tab = await findExistingExperienceCloudAdobeTab();
-  }
-
-  let temporaryTarget = null;
-  if (!tab?.id && allowTemporaryTab) {
-    temporaryTarget = await openTemporaryAdobePageContextTarget(getCmConsoleBootstrapUrl());
-    tab = temporaryTarget?.tab || null;
-  }
-
-  return {
-    tab: tab || null,
-    tabId: Number(tab?.id || 0),
-    temporaryTarget,
-  };
-}
-
-async function fetchImsCheckTokenViaAdobePageContext({
-  endpoint,
-  clientId,
-  scope,
-  userId,
-  preferredTabId = 0,
-  allowTemporaryTab = true,
-  timeoutMs = ADOBE_PAGE_CONTEXT_TIMEOUT_MS,
-}) {
-  if (!chrome.scripting?.executeScript) {
-    throw new Error("Chrome page-context scripting is unavailable. Add the scripting permission and reload the extension.");
-  }
-
-  const requestUrl = buildImsCheckTokenUrl({
-    endpoint,
-    clientId,
-    scope,
-    userId,
-  }).toString();
-  const target = await resolveExperienceAdobePageContextTarget({
-    preferredTabId,
-    allowTemporaryTab,
-  });
-  const temporaryTarget = target?.temporaryTarget || null;
-  const tabId = Number(target?.tabId || 0);
-  if (tabId <= 0) {
-    throw new Error("Unable to open an Adobe Experience Cloud page context for the CMU token bootstrap.");
-  }
-
-  try {
-    await waitForTabCompletion(tabId, timeoutMs).catch(() => null);
-    const executionResults = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      args: [
-        {
-          requestUrl,
-          timeoutMs,
-        },
-      ],
-      func: async (config) => {
-        const normalize = (value) => String(value || "").trim();
-        const parseJson = (text) => {
-          try {
-            return JSON.parse(String(text || ""));
-          } catch {
-            return null;
-          }
-        };
-
-        const controller = new AbortController();
-        const timerId = window.setTimeout(
-          () => controller.abort(),
-          Math.max(2000, Number(config?.timeoutMs || 0) || 12000)
-        );
-        try {
-          const response = await fetch(String(config?.requestUrl || ""), {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              Accept: "*/*",
-            },
-            signal: controller.signal,
-          });
-          const text = await response.text().catch(() => "");
-          return {
-            ok: Boolean(response.ok),
-            status: Number(response.status || 0),
-            statusText: normalize(response.statusText),
-            url: normalize(response.url || config?.requestUrl),
-            text,
-            parsed: parseJson(text),
-            frameUrl: normalize(globalThis.location?.href),
-            frameOrigin: normalize(globalThis.location?.origin),
-            documentReadyState: normalize(globalThis.document?.readyState),
-          };
-        } catch (error) {
-          return {
-            ok: false,
-            status: 0,
-            statusText: error instanceof Error ? error.message : String(error),
-            url: normalize(config?.requestUrl),
-            text: "",
-            parsed: null,
-            frameUrl: normalize(globalThis.location?.href),
-            frameOrigin: normalize(globalThis.location?.origin),
-            documentReadyState: normalize(globalThis.document?.readyState),
-          };
-        } finally {
-          window.clearTimeout(timerId);
-        }
-      },
-    });
-
-    const result = executionResults?.[0]?.result;
-    if (!result || typeof result !== "object") {
-      throw new Error("Adobe page context did not return a usable IMS check response.");
-    }
-
-    if (!result.ok) {
-      const message = getAdobeConsoleErrorMessage(result.parsed, result.text, result.statusText);
-      throw new Error(
-        `${new URL(requestUrl).pathname} returned ${Number(result.status || 0)}${
-          message ? `: ${message}` : ""
-        } via Adobe page context ${firstNonEmptyString([result.frameOrigin, "unknown-origin"])}.`
-      );
-    }
-
-    return {
-      data: result.parsed ?? (result.text ? String(result.text).trim() : null),
-      rawText: String(result.text || ""),
-      pageContext: {
-        url: firstNonEmptyString([result.frameUrl]),
-        origin: firstNonEmptyString([result.frameOrigin]),
-        readyState: firstNonEmptyString([result.documentReadyState]),
-      },
-    };
-  } finally {
-    await closeTemporaryAdobePageContextTarget(temporaryTarget);
-  }
-}
-
 async function fetchImsValidateToken({ endpoint, clientId, token, credentials = "include" }) {
   const normalizedEndpoint = String(endpoint || "").trim();
   const normalizedClientId = String(clientId || "").trim();
@@ -90285,45 +90043,9 @@ async function resolveQualifiedCmConsoleAccessToken(session = null, previousToke
     previousToken,
   ]).filter((value) => isProbablyJwt(value));
   const userIdCandidates = collectCmConsoleUserIdCandidates(currentSession);
-  const preferredTabId = Number(options?.preferredTabId || 0);
-  const allowTemporaryTab = options?.allowTemporaryTab !== false;
   let lastError = null;
 
   for (const userId of userIdCandidates) {
-    const pageContextResult = await settle(() =>
-      fetchImsCheckTokenViaAdobePageContext({
-        endpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
-        clientId: CM_CONSOLE_IMS_CLIENT_ID,
-        scope: CM_CONSOLE_IMS_SCOPE,
-        userId,
-        preferredTabId,
-        allowTemporaryTab,
-      })
-    );
-    if (pageContextResult.ok) {
-      const nextToken = normalizeCmuAccessToken(pageContextResult.value?.data, pageContextResult.value?.rawText);
-      if (tokenSupportsCmTenantCatalog(nextToken) && isAccessTokenFreshEnough(nextToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-        return {
-          token: nextToken,
-          source: "page-context:ims-check",
-        };
-      }
-      if (nextToken) {
-        const claims = parseJwtPayload(nextToken) || {};
-        lastError = new Error(
-          `Adobe page context minted an unsupported Adobe IMS token client_id=${firstNonEmptyString([
-            claims?.client_id,
-            claims?.clientId,
-            "unknown",
-          ])}.`
-        );
-      } else {
-        lastError = new Error("Adobe page context IMS check response did not include a cm-console-ui access token.");
-      }
-    } else {
-      lastError = pageContextResult.error;
-    }
-
     const attempts = [
       {
         credentials: "include",
@@ -90691,105 +90413,6 @@ function cmuTokenFromContext(cmContext = null) {
   return normalizeBearerTokenValue(firstNonEmptyString([cmContext?.cmuToken]));
 }
 
-async function requestCmTokenViaValidateToken(seedToken = "", options = {}) {
-  const token = normalizeBearerTokenValue(seedToken);
-  if (!token || !isProbablyJwt(token)) {
-    return null;
-  }
-
-  const requireFresh = options.requireFresh === true;
-  for (const credentials of ["include", "omit"]) {
-    const result = await settle(() =>
-      fetchImsValidateToken({
-        endpoint: CM_CONSOLE_IMS_VALIDATE_TOKEN_ENDPOINT,
-        clientId: CM_CONSOLE_IMS_CLIENT_ID,
-        token,
-        credentials,
-      })
-    );
-    if (!result.ok) {
-      continue;
-    }
-    const refreshedToken = normalizeCmuAccessToken(result.value?.data, result.value?.rawText);
-    if (!refreshedToken || !tokenSupportsCmTenantCatalog(refreshedToken)) {
-      continue;
-    }
-    if (requireFresh && !isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-      continue;
-    }
-    return buildCmConsoleBootstrapResult(refreshedToken, `validate:${credentials}`);
-  }
-
-  return null;
-}
-
-async function requestCmTokenViaImsCheck(seedToken = "", options = {}) {
-  const requireFresh = options.requireFresh === true;
-  const currentSession = state.loginData || createCmBootstrapSeedLoginData();
-  const seedTokens = dedupeCandidateStrings([
-    seedToken,
-    currentSession?.accessToken,
-  ]).filter((value) => isProbablyJwt(value));
-  const userIdCandidates = collectCmConsoleUserIdCandidates(currentSession, seedToken);
-  const preferredTabId = Number(options?.preferredTabId || 0);
-  const allowTemporaryTab = options?.allowTemporaryPageContextTab !== false;
-
-  for (const userIdCandidate of userIdCandidates) {
-    const pageContextResult = await settle(() =>
-      fetchImsCheckTokenViaAdobePageContext({
-        endpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
-        clientId: CM_CONSOLE_IMS_CLIENT_ID,
-        scope: CM_CONSOLE_IMS_SCOPE,
-        userId: userIdCandidate,
-        preferredTabId,
-        allowTemporaryTab,
-      })
-    );
-    if (pageContextResult.ok) {
-      const refreshedToken = normalizeCmuAccessToken(pageContextResult.value?.data, pageContextResult.value?.rawText);
-      if (refreshedToken && tokenSupportsCmTenantCatalog(refreshedToken)) {
-        if (!requireFresh || isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-          return buildCmConsoleBootstrapResult(refreshedToken, "page-context:ims-check");
-        }
-      }
-    }
-
-    const attempts = [
-      { credentials: "include", seedToken: "" },
-      { credentials: "omit", seedToken: "" },
-      ...seedTokens.map((candidate) => ({ credentials: "omit", seedToken: candidate })),
-    ];
-    for (const attempt of attempts) {
-      const result = await settle(() =>
-        fetchImsCheckToken({
-          endpoint: CM_CONSOLE_IMS_CHECK_TOKEN_ENDPOINT,
-          clientId: CM_CONSOLE_IMS_CLIENT_ID,
-          scope: CM_CONSOLE_IMS_SCOPE,
-          userId: userIdCandidate,
-          credentials: attempt.credentials,
-          seedToken: attempt.seedToken,
-        })
-      );
-      if (!result.ok) {
-        continue;
-      }
-      const refreshedToken = normalizeCmuAccessToken(result.value?.data, result.value?.rawText);
-      if (!refreshedToken || !tokenSupportsCmTenantCatalog(refreshedToken)) {
-        continue;
-      }
-      if (requireFresh && !isAccessTokenFreshEnough(refreshedToken, CM_IMS_FORCE_REFRESH_SKEW_MS)) {
-        continue;
-      }
-      return buildCmConsoleBootstrapResult(
-        refreshedToken,
-        `ims-check:${attempt.credentials}${attempt.seedToken ? ":seed" : ""}`
-      );
-    }
-  }
-
-  return null;
-}
-
 async function persistCmTokenBootstrapResult(result = {}, options = {}) {
   const accessToken = normalizeBearerTokenValue(result?.accessToken);
   if (!accessToken || !isProbablyJwt(accessToken)) {
@@ -90864,587 +90487,11 @@ async function persistCmTokenBootstrapResult(result = {}, options = {}) {
   return accessToken;
 }
 
-async function findExistingExperienceCloudAdobeTab() {
-  const normalizedOrigin = String(CM_CONSOLE_APP_ORIGIN || "").trim().replace(/\/+$/, "");
-  if (!normalizedOrigin) {
-    return null;
-  }
-
-  try {
-    const tabs = await chrome.tabs.query({
-      url: [`${normalizedOrigin}/*`],
-    });
-    const normalizedTabs = Array.isArray(tabs) ? tabs : [];
-    const scored = normalizedTabs
-      .filter((tab) => Number(tab?.id || 0) > 0)
-      .map((tab) => {
-        const url = String(tab?.url || tab?.pendingUrl || "").trim().toLowerCase();
-        let score = Number(tab?.lastAccessed || 0);
-        if (tab?.active === true) {
-          score += 5000;
-        }
-        if (url.includes("/#/@adobepass/cm-console/")) {
-          score += 2400;
-        }
-        if (url.includes("/#/@adobepass/")) {
-          score += 1800;
-        }
-        if (isExperienceAdobeTabUrl(url)) {
-          score += 1200;
-        }
-        return { tab, score };
-      })
-      .sort((left, right) => right.score - left.score);
-    return scored[0]?.tab || null;
-  } catch {
-    return null;
-  }
-}
-
-function isExperienceAdobeTabUrl(value = "") {
-  const normalizedUrl = String(value || "").trim().toLowerCase();
-  const normalizedOrigin = String(CM_CONSOLE_APP_ORIGIN || "").trim().toLowerCase().replace(/\/+$/, "");
-  if (!normalizedUrl || !normalizedOrigin) {
-    return false;
-  }
-  return normalizedUrl === normalizedOrigin || normalizedUrl.startsWith(`${normalizedOrigin}/`);
-}
-
-function buildAdobePassConsoleBootstrapUrl(environment = null, page = "programmers") {
-  const resolvedEnvironment = resolveAdobePassEnvironment(environment);
-  const normalizedRoute =
-    String(resolvedEnvironment?.route || resolvedEnvironment?.key || DEFAULT_ADOBEPASS_ENVIRONMENT.route || DEFAULT_ADOBEPASS_ENVIRONMENT.key)
-      .trim() || DEFAULT_ADOBEPASS_ENVIRONMENT.key;
-  const normalizedPage = String(page || "").trim() || "programmers";
-  return `${ADOBE_CONSOLE_RUNTIME_ORIGIN}/solutions/${ADOBE_PASS_CONSOLE_APP_SLUG}/${normalizedRoute}/${normalizedPage}`;
-}
-
-function isAdobePassConsoleAppUrl(value = "") {
-  const normalizedUrl = String(value || "").trim().toLowerCase();
-  if (!normalizedUrl) {
-    return false;
-  }
-  return normalizedUrl.includes(`/solutions/${ADOBE_PASS_CONSOLE_APP_SLUG.toLowerCase()}/`);
-}
-
-async function findExistingAdobeConsoleTab() {
-  const normalizedOrigin = String(ADOBE_CONSOLE_RUNTIME_ORIGIN || "").trim().replace(/\/+$/, "");
-  if (!normalizedOrigin) {
-    return null;
-  }
-
-  try {
-    const tabs = await chrome.tabs.query({
-      url: [`${normalizedOrigin}/*`],
-    });
-    const normalizedTabs = Array.isArray(tabs) ? tabs : [];
-    const scored = normalizedTabs
-      .filter((tab) => Number(tab?.id || 0) > 0)
-      .map((tab) => ({
-        tab,
-        url: String(tab?.url || tab?.pendingUrl || "").trim().toLowerCase(),
-      }))
-      .filter(({ url }) => isAdobePassConsoleAppUrl(url))
-      .map(({ tab, url }) => {
-        let score = Number(tab?.lastAccessed || 0);
-        if (tab?.active === true) {
-          score += 5000;
-        }
-        if (url.includes("/programmers")) {
-          score += 2600;
-        }
-        if (isAdobePassConsoleAppUrl(url)) {
-          score += 1800;
-        }
-        return { tab, score };
-      })
-      .sort((left, right) => right.score - left.score);
-    return scored[0]?.tab || null;
-  } catch {
-    return null;
-  }
-}
-
-async function openTemporaryAdobePageContextTarget(targetUrl = "") {
-  const normalizedUrl = String(targetUrl || "").trim();
-  if (!normalizedUrl) {
-    return null;
-  }
-
-  let temporaryTarget = null;
-  if (chrome.tabs?.create) {
-    try {
-      const createdTab = await chrome.tabs.create({
-        url: normalizedUrl,
-        active: false,
-      });
-      const tabId = Number(createdTab?.id || 0);
-      if (tabId > 0) {
-        temporaryTarget = {
-          tab: createdTab,
-          tabId,
-          windowId: Number(createdTab?.windowId || 0),
-          ownsWindow: false,
-        };
-      }
-    } catch {
-      temporaryTarget = null;
-    }
-  }
-
-  if (!temporaryTarget && chrome.windows?.create) {
-    try {
-      const createdWindow = await chrome.windows.create({
-        url: normalizedUrl,
-        type: "popup",
-        focused: false,
-        width: 480,
-        height: 640,
-      });
-      const tab =
-        Array.isArray(createdWindow?.tabs) && createdWindow.tabs.length > 0
-          ? createdWindow.tabs.find((candidate) => Number(candidate?.id || 0) > 0) || null
-          : null;
-      const tabId = Number(tab?.id || 0);
-      const windowId = Number(createdWindow?.id || 0);
-      if (tabId > 0 && windowId > 0) {
-        temporaryTarget = {
-          tab,
-          tabId,
-          windowId,
-          ownsWindow: true,
-        };
-      }
-    } catch {
-      temporaryTarget = null;
-    }
-  }
-
-  if (!temporaryTarget?.tabId) {
-    return null;
-  }
-
-  await waitForTabCompletion(
-    temporaryTarget.tabId,
-    Math.max(5000, Number(PROGRAMMERS_FETCH_TIMEOUT_MS || 0) || 5000),
-    { expectedUrl: normalizedUrl }
-  ).catch(() => null);
-  const resolvedTab = await getTabByIdSafe(temporaryTarget.tabId).catch(() => null);
-  return {
-    ...temporaryTarget,
-    tab: resolvedTab || temporaryTarget.tab,
-  };
-}
-
-async function closeTemporaryAdobePageContextTarget(target = null) {
-  const tabId = Number(target?.tabId || target?.tab?.id || 0);
-  const windowId = Number(target?.windowId || target?.tab?.windowId || 0);
-  const ownsWindow = target?.ownsWindow === true;
-
-  if (ownsWindow && windowId > 0 && chrome.windows?.remove) {
-    try {
-      await chrome.windows.remove(windowId);
-      return;
-    } catch {
-      // Fall through to tab cleanup if the temporary window is already gone.
-    }
-  }
-
-  if (tabId > 0 && chrome.tabs?.remove) {
-    try {
-      await chrome.tabs.remove(tabId);
-    } catch {
-      // Ignore cleanup failures for temporary page-context targets.
-    }
-  }
-}
-
-async function resolveReusableAdobePageContextTab(preferredTabId = 0) {
-  const preferredTab = await getTabByIdSafe(preferredTabId);
-  const preferredUrl = String(preferredTab?.url || preferredTab?.pendingUrl || "").trim();
-  if (preferredTab?.id && isAdobePassConsoleAppUrl(preferredUrl)) {
-    return preferredTab;
-  }
-
-  if (preferredTab?.id && isAuthFlowUrl(preferredUrl)) {
-    await waitForTabCompletion(
-      Number(preferredTab.id || 0),
-      Math.max(5000, Number(PROGRAMMERS_FETCH_TIMEOUT_MS || 0) || 5000)
-    ).catch(() => null);
-    const refreshedTab = await getTabByIdSafe(preferredTab.id).catch(() => null);
-    const refreshedUrl = String(refreshedTab?.url || refreshedTab?.pendingUrl || "").trim();
-    if (refreshedTab?.id && isAdobePassConsoleAppUrl(refreshedUrl)) {
-      return refreshedTab;
-    }
-  }
-
-  return null;
-}
-
-async function resolveAdobeConsolePageContextTarget(options = {}) {
-  const preferredTabId = Number(options.preferredTabId || 0);
-
-  let tab = await resolveReusableAdobePageContextTab(preferredTabId);
-  if (!tab?.id) {
-    tab = await findExistingAdobeConsoleTab();
-  }
-
-  return {
-    tab: tab || null,
-    tabId: Number(tab?.id || 0),
-    temporaryTarget: null,
-  };
-}
-
 async function sleep(ms = 0) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, Math.max(0, Number(ms || 0)));
   });
 }
-
-async function executeFetchViaAdobePageContextTarget({
-  tabId,
-  requestUrl,
-  method = "GET",
-  headers = {},
-  bodyText = "",
-  timeoutMs = ADOBE_PAGE_CONTEXT_TIMEOUT_MS,
-  requiredFrameOrigins = [],
-  requiredFrameUrlIncludes = [],
-} = {}) {
-  if (!chrome.scripting?.executeScript) {
-    throw new Error("Chrome page-context scripting is unavailable. Add the scripting permission and reload the extension.");
-  }
-
-  const normalizedTabId = Number(tabId || 0);
-  if (normalizedTabId <= 0) {
-    throw new Error("Adobe page-context fetch is missing a usable tab target.");
-  }
-
-  const normalizedRequestUrl = String(requestUrl || "").trim();
-  if (!normalizedRequestUrl) {
-    throw new Error("Adobe page-context fetch is missing a request URL.");
-  }
-
-  const normalizedMethod = String(method || "GET").trim().toUpperCase();
-  const normalizedHeaders = Object.entries(headers || {}).reduce((result, [key, value]) => {
-    const normalizedKey = String(key || "").trim();
-    const normalizedValue = String(value || "").trim();
-    if (normalizedKey && normalizedValue) {
-      result[normalizedKey] = normalizedValue;
-    }
-    return result;
-  }, {});
-  const normalizedOrigins = (Array.isArray(requiredFrameOrigins) ? requiredFrameOrigins : [])
-    .map((value) => String(value || "").trim().toLowerCase())
-    .filter(Boolean);
-  const normalizedUrlIncludes = (Array.isArray(requiredFrameUrlIncludes) ? requiredFrameUrlIncludes : [])
-    .map((value) => String(value || "").trim().toLowerCase())
-    .filter(Boolean);
-  const deadline = Date.now() + Math.max(2500, Number(timeoutMs || 0) || ADOBE_PAGE_CONTEXT_TIMEOUT_MS);
-  let lastFrameSummary = [];
-  let lastError = null;
-
-  while (Date.now() < deadline) {
-    try {
-      await waitForTabCompletion(normalizedTabId, Math.min(1200, Math.max(200, deadline - Date.now()))).catch(() => null);
-      const executionResults = await chrome.scripting.executeScript({
-        target: { tabId: normalizedTabId, allFrames: true },
-        world: "MAIN",
-        args: [
-          {
-            requestUrl: normalizedRequestUrl,
-            method: normalizedMethod,
-            headers: normalizedHeaders,
-            bodyText: String(bodyText || ""),
-            timeoutMs: Math.max(1500, deadline - Date.now()),
-            requiredFrameOrigins: normalizedOrigins,
-            requiredFrameUrlIncludes: normalizedUrlIncludes,
-          },
-        ],
-        func: async (config) => {
-          const normalize = (value) => String(value || "").trim();
-          const parseJson = (text) => {
-            try {
-              return JSON.parse(String(text || ""));
-            } catch {
-              return null;
-            }
-          };
-          const frameUrl = normalize(globalThis.location?.href);
-          const frameOrigin = normalize(globalThis.location?.origin).toLowerCase();
-          const documentReadyState = normalize(globalThis.document?.readyState);
-          const requiredOrigins = (Array.isArray(config?.requiredFrameOrigins) ? config.requiredFrameOrigins : [])
-            .map((value) => normalize(value).toLowerCase())
-            .filter(Boolean);
-          const requiredUrlIncludes = (Array.isArray(config?.requiredFrameUrlIncludes) ? config.requiredFrameUrlIncludes : [])
-            .map((value) => normalize(value).toLowerCase())
-            .filter(Boolean);
-          const matchesOrigin = requiredOrigins.length === 0 || requiredOrigins.includes(frameOrigin);
-          const frameUrlLower = frameUrl.toLowerCase();
-          const matchesUrl =
-            requiredUrlIncludes.length === 0 || requiredUrlIncludes.some((fragment) => frameUrlLower.includes(fragment));
-
-          if (!matchesOrigin || !matchesUrl) {
-            return {
-              skipped: true,
-              frameUrl,
-              frameOrigin,
-              documentReadyState,
-            };
-          }
-
-          const controller = new AbortController();
-          const timerId = window.setTimeout(
-            () => controller.abort(),
-            Math.max(1200, Number(config?.timeoutMs || 0) || 5000)
-          );
-
-          try {
-            const response = await fetch(normalize(config?.requestUrl), {
-              method: normalize(config?.method || "GET") || "GET",
-              credentials: "include",
-              headers: config?.headers && typeof config.headers === "object" ? config.headers : {},
-              ...(normalize(config?.method || "GET").toUpperCase() === "GET"
-                ? {}
-                : { body: String(config?.bodyText || "") }),
-              signal: controller.signal,
-            });
-            const text = await response.text().catch(() => "");
-            const responseHeaders = {};
-            response.headers.forEach((value, key) => {
-              const normalizedKey = normalize(key).toLowerCase();
-              if (normalizedKey) {
-                responseHeaders[normalizedKey] = normalize(value);
-              }
-            });
-            return {
-              skipped: false,
-              ok: Boolean(response.ok),
-              status: Number(response.status || 0),
-              statusText: normalize(response.statusText),
-              url: normalize(response.url || config?.requestUrl),
-              text,
-              parsed: parseJson(text),
-              responseHeaders,
-              frameUrl,
-              frameOrigin,
-              documentReadyState,
-            };
-          } catch (error) {
-            return {
-              skipped: false,
-              ok: false,
-              status: 0,
-              statusText: error instanceof Error ? error.message : String(error),
-              url: normalize(config?.requestUrl),
-              text: "",
-              parsed: null,
-              responseHeaders: {},
-              frameUrl,
-              frameOrigin,
-              documentReadyState,
-            };
-          } finally {
-            window.clearTimeout(timerId);
-          }
-        },
-      });
-
-      const results = (Array.isArray(executionResults) ? executionResults : [])
-        .map((entry) => (entry?.result && typeof entry.result === "object" ? entry.result : null))
-        .filter(Boolean);
-      const matchingResults = results.filter((result) => result?.skipped !== true);
-
-      if (matchingResults.length === 0) {
-        lastFrameSummary = results.map((result) => ({
-          frameOrigin: firstNonEmptyString([result?.frameOrigin, "unknown-origin"]),
-          frameUrl: firstNonEmptyString([result?.frameUrl, "unknown-url"]),
-        }));
-        await sleep(150);
-        continue;
-      }
-
-      const scoreResult = (result) => {
-        const frameOrigin = String(result?.frameOrigin || "").trim().toLowerCase();
-        const originIndex = normalizedOrigins.indexOf(frameOrigin);
-        return originIndex >= 0 ? normalizedOrigins.length - originIndex : 0;
-      };
-      matchingResults.sort((left, right) => scoreResult(right) - scoreResult(left));
-      const selectedResult = matchingResults[0];
-
-      if (!selectedResult?.ok) {
-        const message = getAdobeConsoleErrorMessage(selectedResult?.parsed, selectedResult?.text, selectedResult?.statusText);
-        throw new Error(
-          `${new URL(normalizedRequestUrl).pathname} returned ${Number(selectedResult?.status || 0)}${
-            message ? `: ${message}` : ""
-          } via Adobe page context ${firstNonEmptyString([selectedResult?.frameOrigin, "unknown-origin"])}.`
-        );
-      }
-
-      return {
-        data: selectedResult.parsed ?? (selectedResult.text ? String(selectedResult.text).trim() : null),
-        rawText: String(selectedResult.text || ""),
-        headers:
-          selectedResult.responseHeaders && typeof selectedResult.responseHeaders === "object"
-            ? selectedResult.responseHeaders
-            : {},
-        pageContext: {
-          url: firstNonEmptyString([selectedResult.frameUrl]),
-          origin: firstNonEmptyString([selectedResult.frameOrigin]),
-          readyState: firstNonEmptyString([selectedResult.documentReadyState]),
-        },
-      };
-    } catch (error) {
-      lastError = error;
-      break;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  const observedFrames = lastFrameSummary
-    .map((frame) => {
-      const origin = firstNonEmptyString([frame?.frameOrigin, "unknown-origin"]);
-      const url = firstNonEmptyString([frame?.frameUrl, "unknown-url"]);
-      return `${origin} | ${url}`;
-    })
-    .filter(Boolean)
-    .join(", ");
-  throw new Error(
-    observedFrames
-      ? `Adobe page context did not expose the Adobe Pass console frame. Observed: ${observedFrames}`
-      : "Adobe page context did not expose the Adobe Pass console frame."
-  );
-}
-
-async function fetchAdobeConsoleJsonViaShellPageContext(requestUrl = "", options = {}) {
-  if (!chrome.scripting?.executeScript) {
-    return null;
-  }
-
-  const normalizedUrl = String(requestUrl || "").trim();
-  if (!normalizedUrl || !normalizedUrl.startsWith(`${String(ADOBE_CONSOLE_BASE || "").trim()}/rest/api/`)) {
-    return null;
-  }
-
-  const preferredTabId = Number(options.preferredTabId || 0);
-  const timeoutMs = Math.max(2000, Number(options.timeoutMs || PROGRAMMERS_FETCH_TIMEOUT_MS));
-  const requestMethod = String(options.method || "GET")
-    .trim()
-    .toUpperCase();
-  const customHeaders = options.headers && typeof options.headers === "object" ? { ...options.headers } : {};
-  const requestBody =
-    Object.prototype.hasOwnProperty.call(options, "body") && options.body != null
-      ? typeof options.body === "string"
-        ? options.body
-        : JSON.stringify(options.body)
-      : undefined;
-  const pageContextTargetRef =
-    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
-      ? options.pageContextTargetRef
-      : null;
-  const explicitAuthorization = firstNonEmptyString([customHeaders.Authorization, customHeaders.authorization]);
-  const explicitAccessToken = normalizeBearerTokenValue(String(explicitAuthorization || "").replace(/^Bearer\s+/i, ""));
-  const accessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([explicitAccessToken, options?.accessToken, getPreferredAdobeConsoleAccessTokenCandidate()])
-  );
-  const requestHeaders = {
-    ...getAdobeConsoleRequestHeaders(accessToken),
-    ...customHeaders,
-  };
-
-  let target =
-    pageContextTargetRef?.target && typeof pageContextTargetRef.target === "object"
-      ? pageContextTargetRef.target
-      : null;
-  if (Number(target?.tabId || 0) <= 0) {
-    target = await resolveAdobeConsolePageContextTarget({
-      preferredTabId,
-    }).catch(() => null);
-    if (pageContextTargetRef && target) {
-      pageContextTargetRef.target = target;
-    }
-  }
-  const temporaryTarget = target?.temporaryTarget || null;
-  const tabId = Number(target?.tabId || 0);
-  if (tabId <= 0) {
-    return null;
-  }
-
-  try {
-    const result = await executeFetchViaAdobePageContextTarget({
-      tabId,
-      requestUrl: normalizedUrl,
-      method: requestMethod,
-      headers: requestHeaders,
-      bodyText: requestBody || "",
-      timeoutMs,
-      requiredFrameOrigins: CONSOLE_PAGE_CONTEXT_ALLOWED_ORIGINS,
-      requiredFrameUrlIncludes: [`/solutions/${ADOBE_PASS_CONSOLE_APP_SLUG}/`],
-    });
-    const responseHeaders = result?.headers && typeof result.headers === "object" ? result.headers : {};
-    const csrfToken = String(firstNonEmptyString([responseHeaders["x-csrf-token"], state.consoleCsrfToken || ""])).trim();
-    if (csrfToken) {
-      state.consoleCsrfToken = csrfToken;
-    }
-    return {
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      url: normalizedUrl,
-      text: String(result?.rawText || ""),
-      parsed: result?.data ?? null,
-      headers: responseHeaders,
-      shell: null,
-      pageContext: result?.pageContext || null,
-    };
-  } catch {
-    return null;
-  } finally {
-    if (!pageContextTargetRef) {
-      await closeTemporaryAdobePageContextTarget(temporaryTarget);
-    }
-  }
-}
-
-async function tryRefreshCmTokenFromIms(seedToken = "", options = {}) {
-  const effectiveSeedToken = normalizeBearerTokenValue(
-    firstNonEmptyString([seedToken, getPreferredPrimaryImsAccessTokenCandidate()])
-  );
-  if (!effectiveSeedToken || !isProbablyJwt(effectiveSeedToken)) {
-    return null;
-  }
-
-  if (
-    tokenSupportsCmTenantCatalog(effectiveSeedToken) &&
-    (!options.requireFresh || isAccessTokenFreshEnough(effectiveSeedToken, CM_IMS_FORCE_REFRESH_SKEW_MS))
-  ) {
-    return {
-      accessToken: effectiveSeedToken,
-      expiresAt: coercePositiveNumber(resolveAuthResponseExpiry(effectiveSeedToken, 0)?.expiresAt),
-      expiresIn: 0,
-      scope: firstNonEmptyString([parseJwtPayload(effectiveSeedToken)?.scope]),
-      imsSession: mergeImsSessionSnapshots(deriveImsSessionSnapshotFromToken(effectiveSeedToken), null),
-      source: "cm-existing",
-    };
-  }
-
-  const viaCheck = await requestCmTokenViaImsCheck(effectiveSeedToken, options);
-  if (viaCheck?.accessToken) {
-    return viaCheck;
-  }
-
-  const viaValidate = await requestCmTokenViaValidateToken(effectiveSeedToken, options);
-  if (viaValidate?.accessToken) {
-    return viaValidate;
-  }
-
-  return null;
-}
-
 async function ensureCmApiAccessToken(options = {}) {
   const forceRefresh = options.forceRefresh === true;
   const tokenFreshLeewayMs =
@@ -97731,10 +96778,6 @@ async function fetchProgrammersFromApi(options = {}) {
     ])
   );
   const requireEntities = options.requireEntities !== false;
-  const pageContextTargetRef =
-    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
-      ? options.pageContextTargetRef
-      : null;
   if (!accessToken || !isProbablyJwt(accessToken)) {
     throw createProgrammersError("Media company load requires a valid UnderPAR Adobe bearer.", "PROGRAMMERS_ACCESS_DENIED");
   }
@@ -97755,7 +96798,6 @@ async function fetchProgrammersFromApi(options = {}) {
         accessToken,
         preferAuthenticatedHeaders: true,
         preferredTabId: Number(options.preferredTabId || 0),
-        pageContextTargetRef,
       });
       const normalizedEntities = normalizeProgrammersResponse(payload?.parsed || payload);
       if (requireEntities && normalizedEntities.length === 0) {
@@ -97782,10 +96824,6 @@ async function fetchConsoleChannelsFromApi(options = {}) {
       getPreferredAdobeConsoleAccessTokenCandidate(),
     ])
   );
-  const pageContextTargetRef =
-    options.pageContextTargetRef && typeof options.pageContextTargetRef === "object"
-      ? options.pageContextTargetRef
-      : null;
   if (!accessToken || !isProbablyJwt(accessToken)) {
     throw new Error("Content provider load requires a valid UnderPAR Adobe bearer.");
   }
@@ -97799,7 +96837,6 @@ async function fetchConsoleChannelsFromApi(options = {}) {
     accessToken,
     preferAuthenticatedHeaders: true,
     preferredTabId: Number(options.preferredTabId || 0),
-    pageContextTargetRef,
   });
   return normalizeConsoleChannelsResponse(payload?.parsed || payload);
 }
