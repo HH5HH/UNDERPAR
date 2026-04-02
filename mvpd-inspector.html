@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UnderPAR MVPD Inspector</title>
+    <link rel="stylesheet" href="mvpd-inspector.css" />
+  </head>
+  <body class="spectrum spectrum--medium spectrum--dark mvpd-inspector-body">
+    <main class="mvpd-inspector-app">
+      <header class="mvpd-inspector-hero">
+        <div class="mvpd-inspector-hero-copy">
+          <p class="spectrum-Detail spectrum-Detail--sizeM mvpd-inspector-kicker">UnderPAR</p>
+          <h1 id="mvpd-inspector-title" class="spectrum-Heading spectrum-Heading--sizeL mvpd-inspector-title">
+            MVPD Inspector
+          </h1>
+          <p id="mvpd-inspector-context" class="spectrum-Body spectrum-Body--sizeS mvpd-inspector-context">
+            Waiting for an MVPD inspector deep link.
+          </p>
+        </div>
+        <div class="mvpd-inspector-actions">
+          <button
+            id="mvpd-inspector-refresh"
+            class="spectrum-Button spectrum-Button--primary mvpd-inspector-refresh"
+            type="button"
+          >
+            <span class="spectrum-Button-label">Refresh</span>
+          </button>
+        </div>
+      </header>
+
+      <p id="mvpd-inspector-status" class="mvpd-inspector-status" aria-live="polite"></p>
+
+      <section id="mvpd-inspector-overview" class="mvpd-inspector-overview" hidden></section>
+
+      <div class="mvpd-inspector-top-grid">
+        <section id="mvpd-inspector-associations" class="mvpd-inspector-panel" hidden></section>
+        <section id="mvpd-inspector-calls" class="mvpd-inspector-panel" hidden></section>
+      </div>
+
+      <section id="mvpd-inspector-sections" class="mvpd-inspector-sections"></section>
+
+      <section id="mvpd-inspector-sources" class="mvpd-inspector-panel" hidden></section>
+    </main>
+
+    <script src="mvpd-inspector.js"></script>
+  </body>
+</html>

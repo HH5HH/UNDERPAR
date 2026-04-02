@@ -4853,7 +4853,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
               ${isViewBusy || panelState.mvpdSearchBusy === true || panelState.environmentsLoaded !== true ? "disabled" : ""}
             >
               <span class="mvpd-search-owner">${escapeHtml(ownerLabel)}</span>
-              <span class="mvpd-search-owner-action">${isViewBusy ? "Opening workspace" : "Open owner workspace"}</span>
+              <span class="mvpd-search-owner-action">${isViewBusy ? "Opening inspector" : "Open owner inspector"}</span>
             </button>
           `
         : `<span class="mvpd-search-owner${row?.entityType === "mvpdproxy" ? "" : " mvpd-search-owner--direct"}">${escapeHtml(
@@ -4869,7 +4869,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
               ${isViewBusy || panelState.mvpdSearchBusy === true || panelState.environmentsLoaded !== true ? "disabled" : ""}
             >
               <span class="mvpd-search-name">${escapeHtml(displayName)}</span>
-              <span class="mvpd-search-name-action">${isViewBusy ? "Opening workspace" : "Open MVPD workspace"}</span>
+              <span class="mvpd-search-name-action">${isViewBusy ? "Opening inspector" : "Open MVPD inspector"}</span>
             </button>
             <div class="mvpd-search-meta-row">
               <span class="mvpd-search-kind">${escapeHtml(kindLabel)}</span>
@@ -5017,7 +5017,7 @@ async function handleMvpdSearchView(resultKey = "") {
     });
   } catch (error) {
     renderMvpdSearchResults([], {
-      emptyMessage: error instanceof Error ? error.message : "Unable to open MVPD Workspace.",
+      emptyMessage: error instanceof Error ? error.message : "Unable to open MVPD Inspector.",
     });
   } finally {
     panelState.mvpdSearchViewBusyKey = "";

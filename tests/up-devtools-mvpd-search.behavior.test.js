@@ -200,12 +200,14 @@ function normalizeVmValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless workspace handoff", () => {
+test("UP DevTools exposes an ENV-scoped MVPD search card and environment-only inspector handoff", () => {
   const devtoolsHtml = read("up-devtools-panel.html");
   const devtoolsCss = read("up-devtools-panel.css");
   const devtoolsJs = read("up-devtools-panel.js");
   const popupSource = read("popup.js");
-  const workspaceSource = read("mvpd-workspace.js");
+  const inspectorHtml = read("mvpd-inspector.html");
+  const inspectorCss = read("mvpd-inspector.css");
+  const inspectorJs = read("mvpd-inspector.js");
   const catalogSource = extractFunctionSource(popupSource, "buildUpDevtoolsMvpdSearchCatalog");
 
   assert.match(devtoolsHtml, /<p class="field-label mvpd-search-label">MVPDs<\/p>/);
@@ -242,6 +244,8 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(devtoolsJs, /class="mvpd-search-name-action"/);
   assert.match(devtoolsJs, /class="mvpd-search-owner-action"/);
   assert.match(devtoolsJs, /class="mvpd-search-owner-btn"/);
+  assert.match(devtoolsJs, /Open MVPD inspector/);
+  assert.match(devtoolsJs, /Open owner inspector/);
   assert.match(devtoolsJs, /Channels \/ Requestors \(\$\{associatedServiceProviderCount\}\):/);
   assert.match(devtoolsJs, /Load the active UnderPAR environment before searching MVPDs\./);
   assert.doesNotMatch(devtoolsJs, /<th>View<\/th>/);
@@ -254,18 +258,32 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and requestorless works
   assert.match(popupSource, /Object\.values\(record\.data\.proxiedMvpds\)/);
   assert.match(catalogSource, /upDevtoolsProxiedMvpdCatalog/);
   assert.match(catalogSource, /buildAdobeConsoleRestApiUrl\("entity\/bulkRetrieve"/);
-  assert.match(popupSource, /workspaceKey:\s*"up-devtools-mvpd-search"/);
+  assert.match(popupSource, /workspaceKey:\s*"mvpd-inspector"/);
   assert.match(popupSource, /if \(action === "search-env-mvpds"\)/);
   assert.match(popupSource, /if \(action === "open-mvpd-search-result"\)/);
-  assert.match(popupSource, /upDevtoolsPendingMvpdWorkspaceOpenByWindowId: new Map\(\)/);
-  assert.match(popupSource, /consumePendingUpDevtoolsMvpdWorkspaceOpen\(senderWindowId\)/);
-  assert.match(popupSource, /launchUpDevtoolsMvpdSearchResultInWorkspace\(/);
-  assert.match(popupSource, /requestorId:\s*""/);
-  assert.match(popupSource, /programmerId:\s*""/);
+  assert.match(popupSource, /const MVPD_INSPECTOR_PATH = "mvpd-inspector\.html";/);
+  assert.match(popupSource, /const MVPD_INSPECTOR_MESSAGE_TYPE = "underpar:mvpd-inspector";/);
+  assert.match(popupSource, /async function buildUpDevtoolsMvpdInspectorSnapshot\(/);
+  assert.match(popupSource, /async function openUpDevtoolsMvpdSearchResultInInspector\(/);
+  assert.match(popupSource, /action === "load-snapshot"/);
 
-  assert.match(workspaceSource, /workspace-filter-pill-value">ENV Search<\/span>/);
-  assert.match(workspaceSource, /const requestorId = String\(payload\?\.requestorId \|\| getSelectedRequestorId\(\) \|\| ""\)\.trim\(\);/);
-  assert.match(workspaceSource, /const label = requestorId && mvpdDisplayLabel \? `\$\{requestorId\} x \$\{mvpdDisplayLabel\}` : mvpdDisplayLabel \|\| "selected MVPD";/);
+  assert.match(inspectorHtml, /<title>UnderPAR MVPD Inspector<\/title>/);
+  assert.match(inspectorHtml, /class="spectrum spectrum--medium spectrum--dark mvpd-inspector-body"/);
+  assert.match(inspectorHtml, /id="mvpd-inspector-refresh"/);
+  assert.match(inspectorHtml, /id="mvpd-inspector-overview"/);
+  assert.match(inspectorHtml, /id="mvpd-inspector-sections"/);
+
+  assert.match(inspectorCss, /\.mvpd-inspector-hero/);
+  assert.match(inspectorCss, /\.mvpd-inspector-overview-card/);
+  assert.match(inspectorCss, /\.mvpd-inspector-table/);
+  assert.match(inspectorCss, /\.mvpd-inspector-section/);
+  assert.match(inspectorCss, /\.mvpd-inspector-chip/);
+
+  assert.match(inspectorJs, /const MVPD_INSPECTOR_MESSAGE_TYPE = "underpar:mvpd-inspector";/);
+  assert.match(inspectorJs, /action:\s*String\(action \|\| ""\)\.trim\(\)/);
+  assert.match(inspectorJs, /await sendInspectorAction\("load-snapshot"/);
+  assert.match(inspectorJs, /MVPD Inspector requires environmentKey and mvpdId in the URL\./);
+  assert.match(inspectorJs, /Unable to connect to UnderPAR MVPD controller\./);
 });
 
 test("UP DevTools MVPD search builds direct and proxied rows from MVPD, proxied MVPD, proxy, and integration catalogs", () => {

@@ -12623,6 +12623,8 @@ const LEGACY_CM_MESSAGE_TYPE = "mincloud:cm";
 const MVPD_WORKSPACE_PATH = "mvpd-workspace.html";
 const MVPD_WORKSPACE_MESSAGE_TYPE = "underpar:mvpd-workspace";
 const LEGACY_MVPD_WORKSPACE_MESSAGE_TYPE = "mincloud:mvpd-workspace";
+const MVPD_INSPECTOR_PATH = "mvpd-inspector.html";
+const MVPD_INSPECTOR_MESSAGE_TYPE = "underpar:mvpd-inspector";
 const REST_WORKSPACE_PATH = "rest-workspace.html";
 const REST_WORKSPACE_MESSAGE_TYPE = "underpar:rest-workspace";
 const LEGACY_REST_WORKSPACE_MESSAGE_TYPE = "mincloud:rest-workspace";
@@ -12661,6 +12663,7 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   MEG_WORKSPACE_PATH,
   CM_WORKSPACE_PATH,
   MVPD_WORKSPACE_PATH,
+  MVPD_INSPECTOR_PATH,
   REST_WORKSPACE_PATH,
   ESM_HEALTH_WORKSPACE_PATH,
   CM_HEALTH_WORKSPACE_PATH,
@@ -13869,6 +13872,7 @@ const state = {
   mvpdWorkspaceTabWatcherBound: false,
   mvpdWorkspaceSnapshotCacheBySelectionKey: new Map(),
   mvpdWorkspaceSnapshotPromiseBySelectionKey: new Map(),
+  mvpdInspectorRuntimeListenerBound: false,
   restWorkspaceTabId: 0,
   restWorkspaceWindowId: 0,
   restWorkspaceTabIdByWindowId: new Map(),
@@ -48022,6 +48026,11 @@ function buildUpDevtoolsMvpdSearchRows(
       integrationId,
       serviceProviderId,
       enabled: integrationData?.enabled !== false && entity?.enabled !== false,
+      entity,
+      data: integrationData,
+      entityRef: mvpdWorkspaceNormalizeEntityRef(firstNonEmptyString([entity?.key, integrationData?.key, integrationId])),
+      ownerRef: mvpdWorkspaceNormalizeEntityRef(ownerRef),
+      serviceProviderRef: mvpdWorkspaceNormalizeEntityRef(serviceProviderRef),
     });
   });
 
@@ -48262,6 +48271,7 @@ async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {
     directById: builtCatalog.directById,
     proxyById: builtCatalog.proxyById,
     proxyOwnerById: builtCatalog.proxyOwnerById,
+    integrationsByOwnerId: builtCatalog.integrationsByOwnerId,
     rowByKey,
     rows: builtCatalog.rows,
     fetchedAt: Date.now(),
@@ -48395,7 +48405,7 @@ function resolveUpDevtoolsMvpdSearchOwnerChain(catalog = null, row = null) {
   };
 }
 
-async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", entityType = "", mvpdId = "") {
+async function buildUpDevtoolsMvpdInspectorSnapshot(environmentKey = "", entityType = "", mvpdId = "") {
   const catalog = await ensureUpDevtoolsMvpdSearchCatalog(environmentKey, {
     forceRefresh: false,
   });
@@ -48432,8 +48442,8 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
     environmentKey: String(environment?.key || "").trim(),
     mvpdId: String(row?.id || "").trim(),
     mvpd: String(row?.id || "").trim(),
-    workspaceKey: "up-devtools-mvpd-search",
-    workspaceOrigin: "UP DevTools MVPD Search",
+    workspaceKey: "mvpd-inspector",
+    workspaceOrigin: "MVPD Inspector",
   };
   const buildEntityUrl = (entityPath = "") => {
     const baseUrl = buildAdobeConsoleRestApiUrl(entityPath, environment.consoleBase);
@@ -48718,6 +48728,50 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
   } = mvpdWorkspaceResolveResourceChipState(allEntries, [...catalog.calls, ...phaseOneCalls, ...phaseTwoCalls, ...phaseThreeCalls], {
     mvpdId: row.id,
   });
+  const integrationOwnerRecord =
+    row.entityType === "mvpdproxy"
+      ? effectiveOwnerRecord || proxyOwnerRecord || null
+      : selectedDirectRecord || selectedProxyRecord || null;
+  const integrationOwnerId = String(integrationOwnerRecord?.id || row.id || "").trim();
+  const allowedServiceProviderIds = Array.isArray(row?.associatedServiceProviderIds)
+    ? row.associatedServiceProviderIds.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  const allowedServiceProviderIdSet = new Set(
+    allowedServiceProviderIds.map((value) => normalizeUpDevtoolsMvpdSearchCatalogKey(value)).filter(Boolean)
+  );
+  const integrationRows = (catalog.integrationsByOwnerId?.get(normalizeUpDevtoolsMvpdSearchCatalogKey(integrationOwnerId)) || [])
+    .filter((integrationRecord) => {
+      if (allowedServiceProviderIdSet.size === 0) {
+        return true;
+      }
+      return allowedServiceProviderIdSet.has(
+        normalizeUpDevtoolsMvpdSearchCatalogKey(integrationRecord?.serviceProviderId)
+      );
+    })
+    .map((integrationRecord) => ({
+      integrationId: String(integrationRecord?.integrationId || "").trim(),
+      serviceProviderId: String(integrationRecord?.serviceProviderId || "").trim(),
+      enabled: integrationRecord?.enabled !== false,
+      entityData: integrationRecord?.data && typeof integrationRecord.data === "object" ? integrationRecord.data : null,
+      entityRef: String(integrationRecord?.entityRef || "").trim(),
+      ownerId: integrationOwnerId,
+      ownerLabel: firstNonEmptyString([
+        integrationOwnerRecord?.displayName,
+        integrationOwnerRecord?.id,
+        row?.proxyOwnerLabel,
+        row?.displayName,
+      ]),
+    }))
+    .sort((left, right) =>
+      String(left?.serviceProviderId || left?.integrationId || "").localeCompare(
+        String(right?.serviceProviderId || right?.integrationId || ""),
+        undefined,
+        {
+          sensitivity: "base",
+          numeric: true,
+        }
+      )
+    );
 
   pushSection(
     "mvpd-search-selection",
@@ -48759,6 +48813,55 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
       })
     );
   }
+
+  pushSection(
+    "mvpd-search-associated-requestors",
+    "Channels / Requestors",
+    integrationRows.length > 0
+      ? integrationRows.flatMap((integrationRecord) => [
+          {
+            source: "Channels / Requestors",
+            path: `${integrationRecord.serviceProviderId || integrationRecord.integrationId}.requestorId`,
+            value: integrationRecord.serviceProviderId || "N/A",
+          },
+          {
+            source: "Channels / Requestors",
+            path: `${integrationRecord.serviceProviderId || integrationRecord.integrationId}.integrationId`,
+            value: integrationRecord.integrationId || "N/A",
+          },
+          {
+            source: "Channels / Requestors",
+            path: `${integrationRecord.serviceProviderId || integrationRecord.integrationId}.enabled`,
+            value: integrationRecord.enabled ? "true" : "false",
+          },
+        ])
+      : allowedServiceProviderIds.map((serviceProviderId) => ({
+          source: "Channels / Requestors",
+          path: serviceProviderId,
+          value: serviceProviderId,
+        }))
+  );
+
+  integrationRows.forEach((integrationRecord, index) => {
+    if (!integrationRecord?.entityData) {
+      return;
+    }
+    const sectionIdSeed =
+      String(integrationRecord?.serviceProviderId || integrationRecord?.integrationId || `integration-${index + 1}`)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || `integration-${index + 1}`;
+    const sectionLabel = integrationRecord.serviceProviderId || integrationRecord.integrationId || `Integration ${index + 1}`;
+    pushSection(
+      `mvpd-search-integration-${sectionIdSeed}`,
+      `Integration Configuration | ${sectionLabel}`,
+      mvpdWorkspaceCollectFlatEntries(`Integration Configuration | ${sectionLabel}`, integrationRecord.entityData, {
+        maxEntries: 280,
+        maxDepth: 7,
+      })
+    );
+  });
 
   pushSection(
     "mvpd-search-platform-settings",
@@ -48926,6 +49029,10 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
     programmerId: "",
     programmerName: "",
     requestorId: "",
+    environmentKey: String(environment?.key || "").trim(),
+    environmentLabel: String(environment?.label || environment?.key || "").trim(),
+    entityType: normalizedType,
+    entityKindLabel: normalizedType === "mvpdproxy" ? "Proxy MVPD" : "Direct MVPD",
     mvpdId: row.id,
     mvpdLabel: row.displayName,
     requestorMvpdLabel: "",
@@ -48935,6 +49042,24 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
     configurationVersion,
     loadedTmsMapIds,
     fetchedAt: Date.now(),
+    associatedServiceProviderIds: allowedServiceProviderIds,
+    associatedServiceProviderCount: Number(row?.associatedServiceProviderCount || allowedServiceProviderIds.length || 0),
+    integrationCount: Number(row?.integrationCount || integrationRows.length || 0),
+    enabledIntegrationCount: Number(row?.enabledIntegrationCount || integrationRows.filter((entry) => entry.enabled).length || 0),
+    disabledIntegrationCount: Number(
+      row?.disabledIntegrationCount || integrationRows.filter((entry) => entry.enabled === false).length || 0
+    ),
+    proxyOwnerId: String(proxyOwnerRecord?.id || row?.proxyOwnerId || "").trim(),
+    proxyOwnerName: String(proxyOwnerRecord?.displayName || row?.proxyOwnerName || "").trim(),
+    proxyOwnerEntityType: String(proxyOwnerRecord?.entityType || row?.proxyOwnerEntityType || "").trim().toLowerCase() === "mvpdproxy"
+      ? "mvpdproxy"
+      : "mvpd",
+    effectiveOwnerId: String(effectiveOwnerRecord?.id || proxyOwnerRecord?.id || row?.proxyOwnerId || "").trim(),
+    effectiveOwnerName: firstNonEmptyString([
+      effectiveOwnerRecord?.displayName,
+      proxyOwnerRecord?.displayName,
+      row?.proxyOwnerName,
+    ]),
     proxyOwnerLabel,
     callsCompleted: completedCalls,
     callsFailed: failedCalls,
@@ -48966,9 +49091,132 @@ async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", e
     resourceIdTranslationMapId: activeTmsMapKey,
     tmsIds,
     partnerSsoPlatforms: [],
+    integrationRows,
     sections,
     sourceSamples,
   };
+}
+
+async function buildUpDevtoolsMvpdWorkspaceSearchSnapshot(environmentKey = "", entityType = "", mvpdId = "") {
+  return await buildUpDevtoolsMvpdInspectorSnapshot(environmentKey, entityType, mvpdId);
+}
+
+function mvpdInspectorGetWorkspaceUrl(environmentKey = "", entityType = "", mvpdId = "") {
+  const url = new URL(chrome.runtime.getURL(MVPD_INSPECTOR_PATH));
+  const normalizedEnvironmentKey = String(environmentKey || "").trim();
+  const normalizedEntityType = String(entityType || "").trim().toLowerCase() === "mvpdproxy" ? "mvpdproxy" : "mvpd";
+  const normalizedMvpdId = String(mvpdId || "").trim();
+  if (normalizedEnvironmentKey) {
+    url.searchParams.set("environmentKey", normalizedEnvironmentKey);
+  }
+  if (normalizedEntityType) {
+    url.searchParams.set("entityType", normalizedEntityType);
+  }
+  if (normalizedMvpdId) {
+    url.searchParams.set("mvpdId", normalizedMvpdId);
+  }
+  return url.toString();
+}
+
+function mvpdInspectorIsWorkspaceTab(tabLike) {
+  return String(tabLike?.url || "").startsWith(chrome.runtime.getURL(MVPD_INSPECTOR_PATH));
+}
+
+async function openUpDevtoolsMvpdSearchResultInInspector(environmentKey = "", entityType = "", mvpdId = "") {
+  ensureMvpdInspectorRuntimeListener();
+  const catalog = await ensureUpDevtoolsMvpdSearchCatalog(environmentKey, {
+    forceRefresh: false,
+  });
+  const row = getUpDevtoolsMvpdSearchRowFromCatalog(catalog, entityType, mvpdId);
+  if (!row) {
+    throw new Error(`MVPD ${mvpdId || "selection"} is not available in ${catalog.environmentLabel || catalog.environmentKey}.`);
+  }
+
+  const requestedWindowId = await esmWorkspaceGetCurrentWindowId();
+  const targetWindowId = Number(requestedWindowId || 0);
+  const targetUrl = mvpdInspectorGetWorkspaceUrl(catalog.environmentKey, row.entityType, row.id);
+  let inspectorTab = null;
+
+  try {
+    const candidateTabs = await chrome.tabs.query(targetWindowId > 0 ? { windowId: targetWindowId } : { currentWindow: true });
+    inspectorTab = (Array.isArray(candidateTabs) ? candidateTabs : []).find((tab) => mvpdInspectorIsWorkspaceTab(tab)) || null;
+  } catch {
+    inspectorTab = null;
+  }
+
+  if (!inspectorTab) {
+    inspectorTab = await chrome.tabs.create({
+      url: targetUrl,
+      active: true,
+      ...(targetWindowId > 0 ? { windowId: targetWindowId } : {}),
+    });
+  } else if (inspectorTab?.id) {
+    inspectorTab = await chrome.tabs.update(inspectorTab.id, {
+      url: targetUrl,
+      active: true,
+    });
+    if (Number(inspectorTab?.windowId || 0) > 0) {
+      await chrome.windows.update(Number(inspectorTab.windowId), { focused: true }).catch(() => {});
+    }
+  }
+
+  return {
+    environmentKey: catalog.environmentKey,
+    environmentLabel: catalog.environmentLabel,
+    mvpdId: row.id,
+    mvpdLabel: row.displayName,
+    entityType: row.entityType,
+    tabId: Number(inspectorTab?.id || 0),
+    windowId: Number(inspectorTab?.windowId || 0),
+    url: targetUrl,
+  };
+}
+
+function ensureMvpdInspectorRuntimeListener() {
+  if (state.mvpdInspectorRuntimeListenerBound) {
+    return;
+  }
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== MVPD_INSPECTOR_MESSAGE_TYPE || message?.channel !== "workspace-action") {
+      return false;
+    }
+
+    void (async () => {
+      const action = String(message?.action || "").trim();
+      if (action === "load-snapshot") {
+        const snapshot = await buildUpDevtoolsMvpdInspectorSnapshot(
+          String(message?.environmentKey || "").trim(),
+          String(message?.entityType || "").trim(),
+          String(message?.mvpdId || "").trim()
+        );
+        return {
+          environmentKey: snapshot.environmentKey,
+          environmentLabel: snapshot.environmentLabel,
+          entityType: snapshot.entityType,
+          mvpdId: snapshot.mvpdId,
+          mvpdLabel: snapshot.mvpdLabel,
+          snapshot,
+        };
+      }
+      throw new Error(`Unsupported MVPD inspector action: ${action || "unknown"}`);
+    })()
+      .then((result) => {
+        sendResponse({
+          ok: true,
+          ...(result && typeof result === "object" ? result : {}),
+        });
+      })
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return true;
+  });
+
+  state.mvpdInspectorRuntimeListenerBound = true;
 }
 
 async function launchUpDevtoolsMvpdSearchResultInWorkspace(environmentKey = "", entityType = "", mvpdId = "", targetWindowId = 0) {
@@ -49150,7 +49398,7 @@ function ensureUpDevtoolsVaultActionListener() {
         );
       }
       if (action === "open-mvpd-search-result") {
-        return await openUpDevtoolsMvpdSearchResultInWorkspace(
+        return await openUpDevtoolsMvpdSearchResultInInspector(
           String(message?.environmentKey || "").trim(),
           String(message?.entityType || "").trim(),
           String(message?.mvpdId || "").trim()
@@ -100744,6 +100992,7 @@ async function runUnderparDeferredStartupTasks() {
     ["MEG workspace runtime listener", () => ensureMegWorkspaceRuntimeListener()],
     ["MEG workspace tab watcher", () => ensureMegWorkspaceWorkspaceTabWatcher()],
     ["UP Devtools VAULT action listener", () => ensureUpDevtoolsVaultActionListener()],
+    ["MVPD inspector runtime listener", () => ensureMvpdInspectorRuntimeListener()],
     ["CM runtime listener", () => ensureCmRuntimeListener()],
     ["CM workspace tab watcher", () => ensureCmWorkspaceTabWatcher()],
     ["MVPD workspace runtime listener", () => ensureMvpdWorkspaceRuntimeListener()],
