@@ -1210,7 +1210,8 @@ test("requestor selector stays disabled until the selected programmer is reusabl
 
   assert.match(selectProgrammerSource, /syncRequestorSelectHydrationAvailability\(String\(resolvedProgrammer\?\.programmerId \|\| ""\)\.trim\(\),\s*null\);/);
   assert.match(populateRequestorSource, /syncRequestorSelectHydrationAvailability\(/);
-  assert.match(syncRequestorSource, /const ready =[\s\S]*shouldRenderPremiumServicesUi\(normalizedProgrammerId,\s*services\);/);
+  assert.match(syncRequestorSource, /const hydrationPending =[\s\S]*getProgrammerServiceHydrationPromise\(normalizedProgrammerId\)/);
+  assert.match(syncRequestorSource, /const ready =[\s\S]*!hydrationPending[\s\S]*shouldRenderPremiumServicesUi\(normalizedProgrammerId,\s*services\);/);
   assert.match(syncRequestorSource, /els\.requestorSelect\.disabled = !hasRequestorOptions \|\| !ready;/);
   assert.match(refreshPanelsSource, /syncRequestorSelectHydrationAvailability\(programmerId,\s*null\);/);
   assert.match(refreshPanelsSource, /syncRequestorSelectHydrationAvailability\(programmerId,\s*reusableServices\);/);
@@ -2507,6 +2508,9 @@ test("missing DCR credentials no longer trigger full pass vault compilation from
   assert.doesNotMatch(ensureDcrSource, /queuePassVaultProgrammerCompilation\(/);
   assert.doesNotMatch(ensureDcrSource, /dcr-registration-trigger-vault-compile/);
   assert.match(ensureDcrSource, /UnderPAR could not auto-hydrate DCR credentials/);
+  assert.match(ensureDcrSource, /const activeHydrationPromise = getProgrammerServiceHydrationPromise\(programmerId\);/);
+  assert.match(ensureDcrSource, /await activeHydrationPromise\.catch\(\(\) => null\);/);
+  assert.match(ensureDcrSource, /cache = normalizeUnderparVaultDcrCache\(loadDcrCache\(programmerId,\s*resolvedAppInfo\.guid\) \|\| null\) \|\| \{\};/);
 });
 
 test("premium app details still retain software statements while pass-vault mapping stays scope-driven", () => {

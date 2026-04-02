@@ -84286,8 +84286,12 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   const hasRequestorOptions = Array.from(els.requestorSelect.options || []).some((option) =>
     String(option?.value || "").trim()
   );
+  const hydrationPending =
+    Boolean(normalizedProgrammerId) && Boolean(getProgrammerServiceHydrationPromise(normalizedProgrammerId));
   const ready =
-    Boolean(normalizedProgrammerId) && shouldRenderPremiumServicesUi(normalizedProgrammerId, services);
+    Boolean(normalizedProgrammerId) &&
+    !hydrationPending &&
+    shouldRenderPremiumServicesUi(normalizedProgrammerId, services);
   els.requestorSelect.disabled = !hasRequestorOptions || !ready;
   return els.requestorSelect.disabled !== true;
 }
@@ -87985,6 +87989,44 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
       ...details,
     });
   };
+  const recomputeCacheBindingRepairRequired = async (currentCache = null) => {
+    const normalizedCache = normalizeUnderparVaultDcrCache(currentCache || null) || {};
+    let repairRequired =
+      !forceFreshClientRegistration &&
+      Boolean(normalizedCache.clientId && normalizedCache.clientSecret) &&
+      !hasBoundCache(normalizedCache);
+    const currentSoftwareStatement = resolveRegisteredApplicationSoftwareStatement(resolvedAppInfo);
+    const currentSoftwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint(currentSoftwareStatement);
+    if (
+      !repairRequired &&
+      Boolean(normalizedCache.clientId && normalizedCache.clientSecret) &&
+      shouldBindCache() &&
+      (!currentSoftwareStatementFingerprint ||
+        String(normalizedCache.softwareStatementFingerprint || "").trim() !== currentSoftwareStatementFingerprint)
+    ) {
+      try {
+        const authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(resolvedAppInfo.guid, {
+          timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+          preferAuthenticatedHeaders: true,
+          preferredTabId: 0,
+          allowTemporaryPageContextTab: true,
+        });
+        const authoritativeFingerprint = buildUnderparSoftwareStatementFingerprint(authoritativeSoftwareStatement);
+        if (authoritativeSoftwareStatement) {
+          resolvedAppInfo.softwareStatement = authoritativeSoftwareStatement;
+        }
+        if (
+          authoritativeFingerprint &&
+          String(normalizedCache.softwareStatementFingerprint || "").trim() !== authoritativeFingerprint
+        ) {
+          repairRequired = true;
+        }
+      } catch {
+        // Continue and let the existing cache flow decide whether repair is required.
+      }
+    }
+    return repairRequired;
+  };
 
   const promiseKey = getDcrCacheKey(programmerId, resolvedAppInfo.guid);
   if (!forceRefresh && state.dcrEnsureTokenPromiseByKey.has(promiseKey)) {
@@ -88000,38 +88042,7 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
     }
     const currentSoftwareStatement = resolveRegisteredApplicationSoftwareStatement(resolvedAppInfo);
     const currentSoftwareStatementFingerprint = buildUnderparSoftwareStatementFingerprint(currentSoftwareStatement);
-    let cacheBindingRepairRequired =
-      !forceFreshClientRegistration &&
-      Boolean(cache.clientId && cache.clientSecret) &&
-      !hasBoundCache(cache);
-    if (
-      !cacheBindingRepairRequired &&
-      Boolean(cache.clientId && cache.clientSecret) &&
-      shouldBindCache() &&
-      (!currentSoftwareStatementFingerprint ||
-        String(cache.softwareStatementFingerprint || "").trim() !== currentSoftwareStatementFingerprint)
-    ) {
-      try {
-        const authoritativeSoftwareStatement = await fetchSoftwareStatementForAppGuid(resolvedAppInfo.guid, {
-          timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
-          preferAuthenticatedHeaders: true,
-          preferredTabId: 0,
-          allowTemporaryPageContextTab: true,
-        });
-        const authoritativeFingerprint = buildUnderparSoftwareStatementFingerprint(authoritativeSoftwareStatement);
-        if (authoritativeSoftwareStatement) {
-          resolvedAppInfo.softwareStatement = authoritativeSoftwareStatement;
-        }
-        if (
-          authoritativeFingerprint &&
-          String(cache.softwareStatementFingerprint || "").trim() !== authoritativeFingerprint
-        ) {
-          cacheBindingRepairRequired = true;
-        }
-      } catch {
-        // Continue and let the existing cache flow decide whether repair is required.
-      }
-    }
+    let cacheBindingRepairRequired = await recomputeCacheBindingRepairRequired(cache);
 
     const ensureSoftwareStatement = async () => {
       const currentStatement = resolveRegisteredApplicationSoftwareStatement(resolvedAppInfo);
@@ -88098,6 +88109,18 @@ async function ensureDcrAccessToken(programmerId, appInfo, forceRefresh = false,
         cacheBindingRepairRequired,
       });
       if (!allowProvisioning) {
+        const activeHydrationPromise = getProgrammerServiceHydrationPromise(programmerId);
+        if (activeHydrationPromise) {
+          emitDcrDebugEvent("dcr-registration-awaiting-parent-hydration", {
+            cacheBindingRepairRequired,
+          });
+          await activeHydrationPromise.catch(() => null);
+          refreshResolvedAppInfo();
+          cache = normalizeUnderparVaultDcrCache(loadDcrCache(programmerId, resolvedAppInfo.guid) || null) || {};
+          cacheBindingRepairRequired = await recomputeCacheBindingRepairRequired(cache);
+        }
+      }
+      if (!allowProvisioning && (!cache.clientId || !cache.clientSecret || cacheBindingRepairRequired)) {
         throw new Error(
           `UnderPAR could not auto-hydrate DCR credentials for ${resolvedAppInfo.appName || resolvedAppInfo.guid} from the registered applications cache yet.`
         );
