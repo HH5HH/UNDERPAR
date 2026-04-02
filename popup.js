@@ -170,7 +170,7 @@ const UNDERPAR_IBETA_HANDLER_BASE_URL = "https://hh5hh.com/ups/";
 const UNDERPAR_IBETA_HANDLER_STORE_URL = `${UNDERPAR_IBETA_HANDLER_BASE_URL}index.php?mode=store`;
 const UNDERPAR_IBETA_REQUEST_TIMEOUT_MS = 8000;
 const UNDERPAR_UPSPACE_SLACK_LINK_LABEL = "[ ^ ]";
-const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 5;
+const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 6;
 const UNDERPAR_DCR_CACHE_BINDING_VERSION = 2;
 const UNDERPAR_VAULT_STATUS_PENDING = "pending";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
@@ -6618,10 +6618,14 @@ function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackNam
     source?.__rawEnvelope?.entityData?.serviceProvider
   );
   const softwareStatement = extractSoftwareStatementFromAppData(source);
+  const fetchOrder = Number(source?.__underparFetchOrder);
   const sanitized = {
     ...(guid ? { guid } : {}),
     ...(appName ? { name: appName } : {}),
   };
+  if (Number.isFinite(fetchOrder) && fetchOrder >= 0) {
+    sanitized.__underparFetchOrder = fetchOrder;
+  }
   if (scopes.length > 0) {
     sanitized.scopes = scopes.slice();
   }
@@ -6680,6 +6684,15 @@ function getPassVaultRegisteredApplicationCount(record = null, fallbackCount = 0
     Number(record?.registeredApplicationCount || record?.scannedRegisteredApplicationCount || 0)
   );
   return Math.max(explicitCount, Math.max(0, Number(fallbackCount || 0)), getPassVaultStoredRegisteredApplicationCount(record));
+}
+
+function getPassVaultStoredApplicationFetchOrder(applicationRecord = null) {
+  const fetchOrder = Number(
+    applicationRecord?.applicationData?.__underparFetchOrder ??
+      applicationRecord?.fetchOrder ??
+      applicationRecord?.raw?.__underparFetchOrder
+  );
+  return Number.isFinite(fetchOrder) && fetchOrder >= 0 ? fetchOrder : Number.MAX_SAFE_INTEGER;
 }
 
 function buildPassVaultRetainedApplicationGuidSet(registeredApplicationsByGuid = {}, services = null) {
@@ -6898,11 +6911,6 @@ function getPassVaultServiceAppGuidsFromRecord(record = null, serviceKey = "") {
       summaryGuids.push(...serviceSummary.appGuids);
     }
   }
-  const orderedSummaryGuids = uniquePreserveOrder(summaryGuids);
-  if (orderedSummaryGuids.length > 0) {
-    return orderedSummaryGuids;
-  }
-
   const registeredApplications =
     record?.registeredApplicationsByGuid &&
     typeof record.registeredApplicationsByGuid === "object" &&
@@ -6920,7 +6928,34 @@ function getPassVaultServiceAppGuidsFromRecord(record = null, serviceKey = "") {
     }
   });
 
-  return uniquePreserveOrder(summaryGuids);
+  const candidateGuids = new Set(
+    uniquePreserveOrder(summaryGuids)
+      .map((guid) => String(guid || "").trim())
+      .filter(Boolean)
+  );
+  if (candidateGuids.size === 0) {
+    return [];
+  }
+
+  const orderedGuids = Object.entries(registeredApplications)
+    .map(([guidKey, applicationRecord], index) => ({
+      guid: String(guidKey || applicationRecord?.guid || "").trim(),
+      fetchOrder: getPassVaultStoredApplicationFetchOrder(applicationRecord),
+      index,
+    }))
+    .filter((entry) => entry.guid && candidateGuids.has(entry.guid))
+    .sort((left, right) => {
+      if (left.fetchOrder !== right.fetchOrder) {
+        return left.fetchOrder - right.fetchOrder;
+      }
+      if (left.index !== right.index) {
+        return left.index - right.index;
+      }
+      return left.guid.localeCompare(right.guid, undefined, { sensitivity: "base" });
+    })
+    .map((entry) => entry.guid);
+
+  return uniquePreserveOrder(orderedGuids.concat(summaryGuids));
 }
 
 function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = null, environmentKey = "") {
@@ -8761,6 +8796,12 @@ function buildPassVaultCompactRegisteredApplication(application = null) {
     return null;
   }
 
+  const fetchOrder = Number(
+    application?.__underparFetchOrder ??
+      application?.appData?.__underparFetchOrder ??
+      application?.raw?.__underparFetchOrder
+  );
+
   const normalizedApplication = {
     key: firstNonEmptyString([application?.key, application?.id, application?.guid]),
     id: firstNonEmptyString([application?.id, application?.guid, application?.key]),
@@ -8787,6 +8828,7 @@ function buildPassVaultCompactRegisteredApplication(application = null) {
         : application?.raw && typeof application.raw === "object" && !Array.isArray(application.raw)
           ? cloneJsonLikeValue(application.raw, null)
           : null,
+    ...(Number.isFinite(fetchOrder) && fetchOrder >= 0 ? { __underparFetchOrder: fetchOrder } : {}),
   };
 
   return normalizedApplication.guid || normalizedApplication.id || normalizedApplication.key ? normalizedApplication : null;
@@ -9674,6 +9716,27 @@ function hasPassVaultScopedServiceSummaryMismatch(record = null) {
   return false;
 }
 
+function hasPassVaultServiceApplicationOrderCoverage(record = null, serviceKey = "") {
+  const normalizedServiceKey = String(serviceKey || "").trim();
+  if (!record || typeof record !== "object" || !normalizedServiceKey) {
+    return false;
+  }
+
+  const serviceGuids = getPassVaultServiceAppGuidsFromRecord(record, normalizedServiceKey);
+  if (serviceGuids.length === 0) {
+    return true;
+  }
+
+  const registeredApplications = getPassVaultRegisteredApplicationsByGuid(record);
+  return serviceGuids.every((guid) => {
+    const normalizedGuid = String(guid || "").trim();
+    if (!normalizedGuid) {
+      return false;
+    }
+    return getPassVaultStoredApplicationFetchOrder(registeredApplications?.[normalizedGuid] || null) !== Number.MAX_SAFE_INTEGER;
+  });
+}
+
 function getPassVaultProgrammerReuseReadiness(
   programmerId = "",
   environmentKey = getActiveAdobePassEnvironmentKey()
@@ -9691,6 +9754,7 @@ function getPassVaultProgrammerReuseReadiness(
       trustNegativeServiceSummary: false,
       registeredApplicationCoverage: false,
       scopedServiceSummaryMismatch: false,
+      applicationOrderCoverage: false,
       detectionVersion: 0,
       reusable: false,
     };
@@ -9708,12 +9772,18 @@ function getPassVaultProgrammerReuseReadiness(
   const unavailableRequiredService = hasPassVaultUnavailableRequiredService(record);
   const registeredApplicationCoverage = hasPassVaultRegisteredApplicationCoverage(record, normalizedProgrammerId);
   const scopedServiceSummaryMismatch = hasPassVaultScopedServiceSummaryMismatch(record);
+  const applicationOrderCoverage =
+    hasPassVaultServiceApplicationOrderCoverage(record, "restV2") &&
+    hasPassVaultServiceApplicationOrderCoverage(record, "esm") &&
+    hasPassVaultServiceApplicationOrderCoverage(record, "degradation") &&
+    hasPassVaultServiceApplicationOrderCoverage(record, "resetTempPass");
   const trustNegativeServiceSummary = !unavailableRequiredService || registeredApplicationCoverage;
   const reusable =
     hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE &&
     runtimeCoverage &&
     credentialCoverage &&
     cmCoverage &&
+    applicationOrderCoverage &&
     trustNegativeServiceSummary &&
     !scopedServiceSummaryMismatch;
 
@@ -9728,6 +9798,7 @@ function getPassVaultProgrammerReuseReadiness(
     trustNegativeServiceSummary,
     registeredApplicationCoverage,
     scopedServiceSummaryMismatch,
+    applicationOrderCoverage,
     detectionVersion,
     reusable,
   };
@@ -9748,6 +9819,9 @@ function shouldForceLivePassVaultProgrammerHydration(
   if (readiness.hydrationStatus !== UNDERPAR_VAULT_STATUS_COMPLETE) {
     return true;
   }
+  if (!readiness.applicationOrderCoverage) {
+    return true;
+  }
   if (readiness.unavailableRequiredService && readiness.detectionVersion < UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION) {
     return true;
   }
@@ -9764,6 +9838,7 @@ function shouldForceLivePassVaultProgrammerHydration(
     readiness.runtimeCoverage &&
     readiness.credentialCoverage &&
     readiness.cmCoverage &&
+    readiness.applicationOrderCoverage &&
     readiness.trustNegativeServiceSummary &&
     !readiness.scopedServiceSummaryMismatch
   );
@@ -9944,15 +10019,15 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
 
   if (normalizedServiceKey === "restV2") {
     const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, resolvedServices);
-    const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
-    if (primaryMatch?.guid) {
-      return primaryMatch;
-    }
     const preferredMatch =
       selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
       selectPreferredRestV2AppForRequestor(candidates, "", normalizedProgrammerId);
     if (preferredMatch?.guid) {
       return preferredMatch;
+    }
+    const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
+    if (primaryMatch?.guid) {
+      return primaryMatch;
     }
     const fallbackMatch = resolveFallbackMatch(candidates);
     if (fallbackMatch?.guid) {
@@ -87188,10 +87263,10 @@ function collectRestV2AppCandidatesFromPremiumApps(premiumApps) {
     candidates.push(appInfo);
   };
 
-  pushCandidate(premiumApps?.restV2);
   if (Array.isArray(premiumApps?.restV2Apps)) {
     premiumApps.restV2Apps.forEach((appInfo) => pushCandidate(appInfo));
   }
+  pushCandidate(premiumApps?.restV2);
 
   return candidates;
 }

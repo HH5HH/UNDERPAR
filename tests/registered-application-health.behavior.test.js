@@ -723,6 +723,7 @@ test("runtime REST V2 app resolution follows the first programmer-scoped REST V2
     collectProgrammerScopedRestV2AppCandidates: (_programmerId = "", premiumApps = null) => premiumApps?.restV2Apps || [],
     collectEsmAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.esmApps || [],
     collectResetTempPassAppCandidatesFromPremiumApps: (premiumApps = null) => premiumApps?.resetTempPassApps || [],
+    selectPreferredPassVaultHydrationServiceApplication: (_serviceKey = "", apps = []) => apps[0] || null,
     selectPreferredRestV2AppForRequestor: () => services.restV2Apps[0],
     selectPreferredEsmAppForRequestor: () => services.esmApps[1],
     selectPreferredResetTempPassAppForRequestor: () => services.resetTempPassApps[1],
@@ -814,7 +815,7 @@ test("pass vault hydration applications preserve console fetch order for primary
   );
 });
 
-test("runtime REST V2 app resolution prefers the programmer primary over catalog order", () => {
+test("runtime REST V2 app resolution follows the ordered programmer catalog over stale runtime primary", () => {
   const services = {
     restV2: { guid: "shared-app", appName: "Shared App" },
     restV2Apps: [
@@ -838,7 +839,48 @@ test("runtime REST V2 app resolution prefers the programmer primary over catalog
     helpers.resolveProgrammerPremiumServiceRuntimeApp("restV2", "Rogers Media", services)
   );
 
-  assert.equal(resolved?.guid, "shared-app");
+  assert.equal(resolved?.guid, "citytv-app");
+});
+
+test("pass vault REST V2 guid reconstruction preserves stored fetch order instead of stale primary order", () => {
+  const helpers = loadPopupFunctions(
+    ["getPassVaultStoredApplicationFetchOrder", "getPassVaultRegisteredApplicationsByGuid", "getPassVaultServiceAppGuidsFromRecord"],
+    {
+      uniquePreserveOrder,
+    }
+  );
+
+  const orderedGuids = normalizeRealmObject(
+    helpers.getPassVaultServiceAppGuidsFromRecord(
+      {
+        services: {
+          restV2: {
+            primaryGuid: "shared-app",
+            appGuids: ["shared-app", "adultswim-app"],
+          },
+        },
+        registeredApplicationsByGuid: {
+          "shared-app": {
+            guid: "shared-app",
+            applicationData: {
+              __underparFetchOrder: 9,
+            },
+            serviceKeys: ["restV2"],
+          },
+          "adultswim-app": {
+            guid: "adultswim-app",
+            applicationData: {
+              __underparFetchOrder: 1,
+            },
+            serviceKeys: ["restV2"],
+          },
+        },
+      },
+      "restV2"
+    )
+  );
+
+  assert.deepEqual(orderedGuids, ["adultswim-app", "shared-app"]);
 });
 
 test("pass vault service hydration resets service selection from the first live scoped application", () => {

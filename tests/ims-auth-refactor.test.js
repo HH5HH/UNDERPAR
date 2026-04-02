@@ -2507,6 +2507,7 @@ test("premium app details still retain software statements while pass-vault mapp
   assert.match(hydrationAppsSource, /softwareStatement:\s*firstNonEmptyString\(\[/);
   assert.match(compactApplicationSource, /softwareStatement:\s*firstNonEmptyString\(\[/);
   assert.match(compactApplicationSource, /extractSoftwareStatementFromAppData\(application\?\.appData \|\| null\)/);
+  assert.match(compactApplicationSource, /__underparFetchOrder/);
   assert.match(
     resolveServiceApplicationSource,
     /registeredApplicationMatchesNativeRequiredScope\(application,\s*normalizedDefinition\.requiredScope\)/
@@ -2518,6 +2519,8 @@ test("premium app details still retain software statements while pass-vault mapp
   assert.doesNotMatch(popupSource, /function mergeDetectedPassVaultServices\(/);
   assert.doesNotMatch(popupSource, /function resolveMissingPassVaultServiceMappings\(/);
   assert.match(sanitizeApplicationSource, /const softwareStatement = extractSoftwareStatementFromAppData\(source\);/);
+  assert.match(sanitizeApplicationSource, /const fetchOrder = Number\(source\?\.__underparFetchOrder\);/);
+  assert.match(sanitizeApplicationSource, /sanitized\.__underparFetchOrder = fetchOrder;/);
   assert.match(sanitizeApplicationSource, /if \(softwareStatement\) \{\s*sanitized\.softwareStatement = softwareStatement;\s*\}/);
   assert.match(runtimeAppInfoSource, /softwareStatement:\s*firstNonEmptyString\(\[/);
   assert.match(ensureDcrSource, /resolveRegisteredApplicationSoftwareStatement\(resolvedAppInfo\)/);
@@ -2671,6 +2674,9 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const fetchApplicationsSource = extractFunctionSource(popupSource, "fetchApplicationsForProgrammer");
   const orderedCandidatesSource = extractFunctionSource(popupSource, "buildOrderedPremiumServiceCandidates");
+  const restV2CandidateSource = extractFunctionSource(popupSource, "collectRestV2AppCandidatesFromPremiumApps");
+  const passVaultServiceGuidsSource = extractFunctionSource(popupSource, "getPassVaultServiceAppGuidsFromRecord");
+  const runtimeAppResolutionSource = extractFunctionSource(popupSource, "resolveProgrammerPremiumServiceRuntimeApp");
   const credentialTasksSource = extractFunctionSource(popupSource, "getPassVaultCredentialTasks");
   const collectCandidatesSource = extractFunctionSource(popupSource, "collectPassVaultServiceCredentialCandidates");
   const credentialCoverageSource = extractFunctionSource(popupSource, "hasPassVaultCredentialCoverageForServices");
@@ -2687,6 +2693,10 @@ test("pass vault compilation uses LoginButton-style registered-app ordering, res
   assert.match(fetchApplicationsSource, /__underparFetchOrder: index/);
   assert.match(orderedCandidatesSource, /fetchOrder:\s*Number\.isFinite\(Number\(appData\?\.__underparFetchOrder\)\)/);
   assert.match(orderedCandidatesSource, /if \(left\.fetchOrder !== right\.fetchOrder\) \{/);
+  assert.match(restV2CandidateSource, /premiumApps\.restV2Apps\.forEach\(\(appInfo\) => pushCandidate\(appInfo\)\)/);
+  assert.match(passVaultServiceGuidsSource, /getPassVaultStoredApplicationFetchOrder\(applicationRecord\)/);
+  assert.match(passVaultServiceGuidsSource, /return uniquePreserveOrder\(orderedGuids\.concat\(summaryGuids\)\);/);
+  assert.match(runtimeAppResolutionSource, /const preferredMatch =[\s\S]*selectPreferredPassVaultHydrationServiceApplication\("restV2", candidates, normalizedProgrammerId\)/);
   assert.match(credentialTasksSource, /pushTask\("restV2",\s*services\?\.restV2\?\.guid \? \[services\.restV2\] : \[\]\)/);
   assert.match(credentialTasksSource, /pushTask\("esm",\s*services\?\.esm\?\.guid \? \[services\.esm\] : \[\]\)/);
   assert.match(credentialTasksSource, /pushTask\("degradation",\s*services\?\.degradation\?\.guid \? \[services\.degradation\] : \[\]\)/);
