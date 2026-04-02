@@ -6,6 +6,7 @@ const vm = require("node:vm");
 
 const ROOT = path.resolve(__dirname, "..");
 const POPUP_PATH = path.join(ROOT, "popup.js");
+const HARPO_PATH = path.join(ROOT, "harpo.js");
 
 function extractFunctionSource(source, functionName) {
   const markers = [`async function ${functionName}(`, `function ${functionName}(`];
@@ -217,6 +218,132 @@ function loadHarpoCountHelper() {
   };
   vm.runInNewContext(script, context, { filename: POPUP_PATH });
   return context.module.exports.countHarpoCapturedCalls;
+}
+
+function loadHarpoFullCaptureBuilder() {
+  const source = fs.readFileSync(POPUP_PATH, "utf8");
+  const script = [
+    `const UNDERPAR_HAR_PHYSICAL_ASSET_RESOURCE_TYPES = new Set(["font", "image", "manifest", "media", "stylesheet"]);`,
+    `const UNDERPAR_HAR_PHYSICAL_ASSET_EXTENSIONS = new Set(["apng","avif","bmp","css","cur","eot","gif","heic","heif","ico","jpeg","jpg","m4a","m4s","mp3","mp4","ogg","otf","png","svg","tif","tiff","ts","ttf","wav","webm","webp","woff","woff2"]);`,
+    `const UNDERPAR_HAR_PHYSICAL_ASSET_MIME_PREFIXES = ["audio/", "font/", "image/", "video/"];`,
+    `const UNDERPAR_HAR_PHYSICAL_ASSET_MIME_TYPES = new Set(["application/font-sfnt","application/font-woff","application/font-woff2","text/css","application/vnd.ms-fontobject","application/x-font-opentype","application/x-font-ttf","application/x-font-woff","application/x-font-woff2"]);`,
+    `function firstNonEmptyString(values = []) {
+      for (const value of Array.isArray(values) ? values : [values]) {
+        if (value == null) continue;
+        const normalized = String(value || "").trim();
+        if (normalized) return normalized;
+      }
+      return "";
+    }`,
+    `function shouldIgnoreRedirectSiteUrl() { return false; }`,
+    `function pickFlowEventTimestampMs(event = null, fallback = 0) {
+      const direct = Number(event?.timestampMs || 0);
+      if (direct > 0) return direct;
+      const iso = Date.parse(String(event?.timestamp || "").trim());
+      return Number.isFinite(iso) && iso > 0 ? iso : Number(fallback || 0);
+    }`,
+    `function toHarHeadersArray(headersLike = {}) {
+      if (!headersLike || typeof headersLike !== "object") return [];
+      return Object.entries(headersLike).map(([name, value]) => ({ name, value: String(value ?? "") }));
+    }`,
+    `function toHarQueryStringArray(url = "") {
+      try {
+        return [...new URL(String(url || "")).searchParams.entries()].map(([name, value]) => ({ name, value }));
+      } catch {
+        return [];
+      }
+    }`,
+    `function getHarHeaderValue(headers = [], headerName = "") {
+      const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
+      const entry = (Array.isArray(headers) ? headers : []).find(
+        (item) => String(item?.name || "").trim().toLowerCase() === normalizedHeaderName
+      );
+      return String(entry?.value || "").trim();
+    }`,
+    `function truncateDebugText(value, limit = 10000) {
+      const text = typeof value === "string" ? value : String(value ?? "");
+      return text.length <= limit ? text : text.slice(0, limit);
+    }`,
+    `function uniquePreserveOrder(values = []) {
+      const items = Array.isArray(values) ? values : [values];
+      const seen = new Set();
+      const output = [];
+      for (const value of items) {
+        const normalized = String(value || "").trim();
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        output.push(normalized);
+      }
+      return output;
+    }`,
+    `const UNDERPAR_HARPO_SECOND_LEVEL_TLDS = new Set(["ac.uk","co.uk","gov.uk","ltd.uk","me.uk","net.uk","org.uk","plc.uk","sch.uk","co.jp","com.au","net.au","org.au","com.br","com.mx","com.tr","co.nz","com.sg"]);`,
+    `const UNDERPAR_HARPO_PASS_HOST_RE = /(^|\\.)auth(?:-staging)?\\.adobe\\.com$/i;`,
+    `const UNDERPAR_HARPO_ADOBE_SUPPORT_HOSTS = [];`,
+    `function formatRestV2RequestorMvpdDisplay(requestorId = "", mvpdId = "") {
+      return [String(requestorId || "").trim(), String(mvpdId || "").trim()].filter(Boolean).join(" x ");
+    }`,
+    extractFunctionSource(source, "getUnderparHarEventUrl"),
+    extractFunctionSource(source, "mergeUnderparHarHeaders"),
+    extractFunctionSource(source, "getUnderparHarHeaderValueFromObject"),
+    extractFunctionSource(source, "getUnderparHarPathExtension"),
+    extractFunctionSource(source, "isUnderparHarPhysicalAssetTraffic"),
+    extractFunctionSource(source, "serializeUnderparHarRequestBody"),
+    extractFunctionSource(source, "getUnderparHarpoScopeHostname"),
+    extractFunctionSource(source, "getUnderparHarpoScopeDomainBucket"),
+    extractFunctionSource(source, "isUnderparHarpoAdobeHost"),
+    extractFunctionSource(source, "isUnderparHarpoAdobeSupportHost"),
+    extractFunctionSource(source, "isUnderparHarpoAdobeTraffic"),
+    extractFunctionSource(source, "isUnderparHarpoPassSamlAssertionConsumerUrl"),
+    extractFunctionSource(source, "matchesUnderparHarpoScopeDomains"),
+    extractFunctionSource(source, "collectUnderparHarpoScopeDomains"),
+    extractFunctionSource(source, "collectUnderparHarpoSamlMvpdDomains"),
+    extractFunctionSource(source, "resolveUnderparHarpoMvpdDomains"),
+    extractFunctionSource(source, "shouldRetainHarpoRecordedEntry"),
+    extractFunctionSource(source, "filterHarpoScopedHarEntries"),
+    extractFunctionSource(source, "buildUnderparWebRequestHarRecords"),
+    extractFunctionSource(source, "buildUnderparTabNetworkHarRecords"),
+    extractFunctionSource(source, "mergeUnderparRecordedHarRecord"),
+    extractFunctionSource(source, "mergeUnderparRecordedHarRecords"),
+    extractFunctionSource(source, "buildWebRequestHarEntries"),
+    extractFunctionSource(source, "buildExtensionHarEntries"),
+    extractFunctionSource(source, "buildHarpoScopedCaptureResult"),
+    extractFunctionSource(source, "shouldExcludeInternalExtensionHarEntry"),
+    extractFunctionSource(source, "buildHarLogFromFlowSnapshot"),
+    "module.exports = { buildHarLogFromFlowSnapshot };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+    URL,
+    URLSearchParams,
+    Date,
+    Set,
+    Map,
+    Math,
+    chrome: {
+      runtime: {
+        getManifest() {
+          return { version: "test-version" };
+        },
+      },
+    },
+  };
+  vm.runInNewContext(script, context, { filename: POPUP_PATH });
+  return context.module.exports.buildHarLogFromFlowSnapshot;
+}
+
+function loadHarpoWorkspaceClassificationRetentionHelper() {
+  const source = fs.readFileSync(HARPO_PATH, "utf8");
+  const script = [
+    extractFunctionSource(source, "shouldRetainHarpoClassification"),
+    "module.exports = { shouldRetainHarpoClassification };",
+  ].join("\n\n");
+  const context = {
+    module: { exports: {} },
+    exports: {},
+  };
+  vm.runInNewContext(script, context, { filename: HARPO_PATH });
+  return context.module.exports.shouldRetainHarpoClassification;
 }
 
 test("HARPO workspace session record keeps UnderPAR dark defaults and safe domains", () => {
@@ -483,6 +610,87 @@ test("HARPO captured call counter excludes adobe support hosts that are not in t
   );
 
   assert.equal(count, 1);
+});
+
+test("HARPO full workspace capture keeps page-level off-scope traffic while pass scoped count stays restricted", () => {
+  const buildHarLogFromFlowSnapshot = loadHarpoFullCaptureBuilder();
+  const har = buildHarLogFromFlowSnapshot(
+    {
+      flowId: "flow-full-harpo",
+      events: [
+        {
+          source: "web-request",
+          phase: "onBeforeRequest",
+          tabId: 91,
+          requestId: "wr-pass",
+          method: "GET",
+          url: "https://api.auth.adobe.com/api/v2/globaltv/configuration",
+          type: "xmlhttprequest",
+          timestampMs: 1000,
+        },
+        {
+          source: "web-request",
+          phase: "onCompleted",
+          tabId: 91,
+          requestId: "wr-pass",
+          method: "GET",
+          url: "https://api.auth.adobe.com/api/v2/globaltv/configuration",
+          statusCode: 200,
+          statusLine: "HTTP/1.1 200 OK",
+          timestampMs: 1010,
+          responseHeaders: {
+            "content-type": "application/json",
+          },
+        },
+        {
+          source: "web-request",
+          phase: "onBeforeRequest",
+          tabId: 91,
+          requestId: "wr-page-breakdown",
+          method: "POST",
+          url: "https://global.corusappservices.com/authentication/checkauthentication",
+          type: "fetch",
+          timestampMs: 1020,
+        },
+        {
+          source: "web-request",
+          phase: "onCompleted",
+          tabId: 91,
+          requestId: "wr-page-breakdown",
+          method: "POST",
+          url: "https://global.corusappservices.com/authentication/checkauthentication",
+          statusCode: 500,
+          statusLine: "HTTP/1.1 500 Internal Server Error",
+          timestampMs: 1030,
+          responseHeaders: {
+            "content-type": "text/html",
+          },
+        },
+      ],
+    },
+    {
+      serviceType: "harpo",
+      requestorId: "globaltv",
+      requestorName: "globaltv",
+      mvpd: "Bell",
+      safeDomains: ["adobe.com", "globaltv.com"],
+      reproDomains: ["globaltv.com"],
+    }
+  );
+
+  const urls = Array.from(har.log.entries || [], (entry) => entry?.request?.url || "");
+  assert.equal(urls.length, 2);
+  assert.ok(urls.includes("https://api.auth.adobe.com/api/v2/globaltv/configuration"));
+  assert.ok(urls.includes("https://global.corusappservices.com/authentication/checkauthentication"));
+  assert.equal(har.log._underpar.context.harpoPassScopedEntryCount, 1);
+});
+
+test("HARPO workspace ALL view retains supporting page-level traffic in full mode", () => {
+  const shouldRetainHarpoClassification = loadHarpoWorkspaceClassificationRetentionHelper();
+
+  assert.equal(shouldRetainHarpoClassification({ domain: "other" }), true);
+  assert.equal(shouldRetainHarpoClassification({ domain: "pass" }), true);
+  assert.equal(shouldRetainHarpoClassification({ domain: "unknown" }), false);
 });
 
 test("HARPO captured call counter keeps SAML-inferred MVPD traffic", () => {

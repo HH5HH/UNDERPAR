@@ -2447,7 +2447,14 @@ function isSafeDomainHost(hostname) {
 
 function shouldRetainHarpoClassification(classification = null) {
   const domain = String(classification?.domain || "").trim().toLowerCase();
-  return domain === "pass" || domain === "ims" || domain === "programmer" || domain === "adobe" || domain === "mvpd";
+  return (
+    domain === "pass" ||
+    domain === "ims" ||
+    domain === "programmer" ||
+    domain === "adobe" ||
+    domain === "mvpd" ||
+    domain === "other"
+  );
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────

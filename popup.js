@@ -35239,12 +35239,11 @@ function shouldExcludeInternalExtensionHarEntry(entry = null) {
 
 function buildHarLogFromFlowSnapshot(flowSnapshot, context = null, logoutResult = null) {
   const flowEvents = Array.isArray(flowSnapshot?.events) ? flowSnapshot.events : [];
+  const isHarpoCapture = String(context?.serviceType || "").trim().toLowerCase() === "harpo";
   const harpoScopedCapture =
-    String(context?.serviceType || "").trim().toLowerCase() === "harpo"
-      ? buildHarpoScopedCaptureResult(flowEvents, context)
-      : null;
+    isHarpoCapture ? buildHarpoScopedCaptureResult(flowEvents, context) : null;
   const rawEntries = [
-    ...(harpoScopedCapture ? harpoScopedCapture.entries : buildWebRequestHarEntries(flowEvents, context)),
+    ...buildWebRequestHarEntries(flowEvents, context),
     ...buildExtensionHarEntries(flowEvents),
   ];
   const entries = rawEntries
@@ -35283,6 +35282,7 @@ function buildHarLogFromFlowSnapshot(flowSnapshot, context = null, logoutResult 
         requestorIds: Array.isArray(context.requestorIds) ? context.requestorIds.slice(0, 24) : [],
         mvpdIds: Array.isArray(context.mvpdIds) ? context.mvpdIds.slice(0, 24) : [],
         mvpdDomains: Array.isArray(harpoScopedCapture?.mvpdDomains) ? harpoScopedCapture.mvpdDomains.slice(0, 24) : [],
+        harpoPassScopedEntryCount: isHarpoCapture ? harpoScopedCapture?.entries?.length || 0 : 0,
         serviceProviderId: String(context.serviceProviderId || ""),
         appGuid: String(context?.appInfo?.guid || ""),
         appName: String(context?.appInfo?.appName || ""),
