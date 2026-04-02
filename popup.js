@@ -47808,6 +47808,19 @@ function buildUpDevtoolsMvpdSearchRows(
     });
     return sortText(values);
   };
+  const buildSearchField = (key = "", label = "", values = [], priority = 0) => {
+    const normalizedValues = mergeStringArrays(values);
+    if (!normalizedValues.length) {
+      return null;
+    }
+    return {
+      key: String(key || "").trim(),
+      label: String(label || "").trim() || "Match",
+      priority: Number(priority || 0),
+      values: normalizedValues,
+      searchText: buildSearchText(normalizedValues),
+    };
+  };
   const buildSearchText = (values = []) =>
     Array.from(
       new Set(
@@ -48037,6 +48050,11 @@ function buildUpDevtoolsMvpdSearchRows(
   const rows = [];
   directById.forEach((record) => {
     const integrationSummary = summarizeIntegrations(record.id);
+    const searchFields = [
+      buildSearchField("displayName", "MVPD name", [record.displayName], 420),
+      buildSearchField("id", "MVPD id", [record.id], 360),
+      buildSearchField("associatedServiceProviderIds", "Channel / Requestor", integrationSummary.associatedServiceProviderIds, 140),
+    ].filter(Boolean);
     rows.push({
       resultKey: `mvpd:${normalizeUpDevtoolsMvpdSearchCatalogKey(record.id)}`,
       entityType: "mvpd",
@@ -48050,12 +48068,8 @@ function buildUpDevtoolsMvpdSearchRows(
       integrationCount: integrationSummary.integrationCount,
       enabledIntegrationCount: integrationSummary.enabledIntegrationCount,
       disabledIntegrationCount: integrationSummary.disabledIntegrationCount,
-      searchText: buildSearchText([
-        record.displayName,
-        record.id,
-        ...integrationSummary.associatedServiceProviderIds,
-        "direct mvpd",
-      ]),
+      searchFields,
+      searchText: buildSearchText(searchFields.flatMap((field) => field.values)),
     });
   });
   proxyById.forEach((record) => {
@@ -48079,6 +48093,12 @@ function buildUpDevtoolsMvpdSearchRows(
       proxyOwnerName && proxyOwnerId && proxyOwnerName.toLowerCase() !== proxyOwnerId.toLowerCase()
         ? `${proxyOwnerName} (${proxyOwnerId})`
         : proxyOwnerName || proxyOwnerId || "Proxy owner unavailable";
+    const searchFields = [
+      buildSearchField("displayName", "MVPD name", [record.displayName], 420),
+      buildSearchField("id", "MVPD id", [record.id], 360),
+      buildSearchField("proxyOwner", "Proxy owner", [proxyOwnerName, proxyOwnerId, proxyOwnerLabel], 280),
+      buildSearchField("associatedServiceProviderIds", "Channel / Requestor", associatedServiceProviderIds, 140),
+    ].filter(Boolean);
     rows.push({
       resultKey: `mvpdproxy:${normalizeUpDevtoolsMvpdSearchCatalogKey(record.id)}`,
       entityType: "mvpdproxy",
@@ -48094,16 +48114,8 @@ function buildUpDevtoolsMvpdSearchRows(
       integrationCount: integrationSummary.integrationCount,
       enabledIntegrationCount: integrationSummary.enabledIntegrationCount,
       disabledIntegrationCount: integrationSummary.disabledIntegrationCount,
-      searchText: buildSearchText([
-        record.displayName,
-        record.id,
-        proxyOwnerName,
-        proxyOwnerId,
-        proxyOwnerLabel,
-        ...associatedServiceProviderIds,
-        "proxied mvpd",
-        "proxy mvpd",
-      ]),
+      searchFields,
+      searchText: buildSearchText(searchFields.flatMap((field) => field.values)),
     });
   });
 
@@ -48144,12 +48156,145 @@ function filterUpDevtoolsMvpdSearchRows(rows = [], query = "") {
     .split(/\s+/)
     .map((value) => String(value || "").trim())
     .filter(Boolean);
+  const getMatchType = (fieldText = "", token = "") => {
+    const normalizedFieldText = String(fieldText || "").trim();
+    const normalizedToken = String(token || "").trim();
+    if (!normalizedFieldText || !normalizedToken || !normalizedFieldText.includes(normalizedToken)) {
+      return "";
+    }
+    if (normalizedFieldText === normalizedToken) {
+      return "exact";
+    }
+    if (normalizedFieldText.startsWith(`${normalizedToken} `) || normalizedFieldText.startsWith(normalizedToken)) {
+      return "prefix";
+    }
+    return "contains";
+  };
+  const typeScoreByKey = Object.freeze({
+    exact: 40,
+    prefix: 24,
+    contains: 8,
+  });
+  const normalizedRows = Array.isArray(rows) ? rows : [];
   if (tokens.length === 0) {
-    return Array.isArray(rows) ? rows.slice() : [];
+    return normalizedRows.map((row) => ({
+      ...row,
+      hitReasons: [],
+      matchScore: 0,
+    }));
   }
-  return (Array.isArray(rows) ? rows : []).filter((row) =>
-    tokens.every((token) => String(row?.searchText || "").includes(token))
-  );
+  return normalizedRows
+    .map((row) => {
+      const searchFields = Array.isArray(row?.searchFields) ? row.searchFields : [];
+      if (!searchFields.length) {
+        const normalizedSearchText = String(row?.searchText || "").trim();
+        if (!tokens.every((token) => normalizedSearchText.includes(token))) {
+          return null;
+        }
+        return {
+          ...row,
+          hitReasons: [
+            {
+              key: "searchText",
+              label: "Match",
+              matchedTokens: tokens.slice(),
+              matchedValues: [String(row?.displayName || row?.id || "Matched row").trim()].filter(Boolean),
+              summary: String(row?.displayName || row?.id || "Matched row").trim() || "Matched row",
+              score: 1,
+            },
+          ],
+          matchScore: 1,
+        };
+      }
+      const reasonsByFieldKey = new Map();
+      let totalScore = 0;
+      for (const token of tokens) {
+        let bestMatch = null;
+        for (const field of searchFields) {
+          const fieldValues = Array.isArray(field?.values) ? field.values : [];
+          for (const fieldValue of fieldValues) {
+            const normalizedVariants = Array.from(
+              new Set(
+                [
+                  String(fieldValue || "").trim().toLowerCase(),
+                  String(fieldValue || "")
+                    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+                    .replace(/[^a-z0-9]+/gi, " ")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .toLowerCase(),
+                ].filter(Boolean)
+              )
+            );
+            for (const variant of normalizedVariants) {
+              const matchType = getMatchType(variant, token);
+              if (!matchType) {
+                continue;
+              }
+              const nextScore = Number(field?.priority || 0) + Number(typeScoreByKey[matchType] || 0);
+              if (!bestMatch || nextScore > bestMatch.score) {
+                bestMatch = {
+                  fieldKey: String(field?.key || "").trim() || "match",
+                  label: String(field?.label || "").trim() || "Match",
+                  score: nextScore,
+                  matchType,
+                  token,
+                  value: String(fieldValue || "").trim(),
+                };
+              }
+            }
+          }
+        }
+        if (!bestMatch) {
+          return null;
+        }
+        totalScore += bestMatch.score;
+        if (!reasonsByFieldKey.has(bestMatch.fieldKey)) {
+          reasonsByFieldKey.set(bestMatch.fieldKey, {
+            key: bestMatch.fieldKey,
+            label: bestMatch.label,
+            matchedTokens: [],
+            matchedValues: [],
+            score: 0,
+          });
+        }
+        const fieldReason = reasonsByFieldKey.get(bestMatch.fieldKey);
+        if (!fieldReason.matchedTokens.includes(bestMatch.token)) {
+          fieldReason.matchedTokens.push(bestMatch.token);
+        }
+        if (bestMatch.value && !fieldReason.matchedValues.includes(bestMatch.value)) {
+          fieldReason.matchedValues.push(bestMatch.value);
+        }
+        fieldReason.score += bestMatch.score;
+      }
+      const hitReasons = [...reasonsByFieldKey.values()]
+        .sort((left, right) => Number(right?.score || 0) - Number(left?.score || 0))
+        .map((reason) => {
+          const previewValues = reason.matchedValues.slice(0, 2);
+          const moreCount = Math.max(0, reason.matchedValues.length - previewValues.length);
+          const previewText = previewValues.join(", ");
+          return {
+            ...reason,
+            summary: `${previewText}${moreCount > 0 ? ` +${moreCount}` : ""}`.trim() || reason.label,
+          };
+        });
+      return {
+        ...row,
+        hitReasons,
+        matchScore: totalScore,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const scoreDelta = Number(right?.matchScore || 0) - Number(left?.matchScore || 0);
+      if (scoreDelta !== 0) {
+        return scoreDelta;
+      }
+      return String(left?.displayName || left?.id || "").localeCompare(String(right?.displayName || right?.id || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+    });
 }
 
 async function buildUpDevtoolsMvpdSearchCatalog(environmentKey = "") {

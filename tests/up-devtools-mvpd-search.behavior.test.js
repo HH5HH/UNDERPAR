@@ -232,6 +232,10 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and environment-only in
   assert.match(devtoolsCss, /\.mvpd-search-owner-action/);
   assert.match(devtoolsCss, /\.mvpd-search-associated/);
   assert.match(devtoolsCss, /\.mvpd-search-owner-meta/);
+  assert.match(devtoolsCss, /\.mvpd-search-hit-list/);
+  assert.match(devtoolsCss, /\.mvpd-search-hit-item/);
+  assert.match(devtoolsCss, /\.mvpd-search-hit-label/);
+  assert.match(devtoolsCss, /\.mvpd-search-hit-detail/);
   assert.match(devtoolsCss, /\.mvpd-search-table-empty-row td/);
   assert.doesNotMatch(devtoolsCss, /\.mvpd-search-view-btn/);
 
@@ -244,9 +248,12 @@ test("UP DevTools exposes an ENV-scoped MVPD search card and environment-only in
   assert.match(devtoolsJs, /class="mvpd-search-name-action"/);
   assert.match(devtoolsJs, /class="mvpd-search-owner-action"/);
   assert.match(devtoolsJs, /class="mvpd-search-owner-btn"/);
+  assert.match(devtoolsJs, /class="mvpd-search-hit-list"/);
+  assert.match(devtoolsJs, /class="mvpd-search-hit-item"/);
   assert.match(devtoolsJs, /Open MVPD inspector/);
   assert.match(devtoolsJs, /Open owner inspector/);
   assert.match(devtoolsJs, /Channels \/ Requestors \(\$\{associatedServiceProviderCount\}\):/);
+  assert.match(devtoolsJs, /<th>Hit<\/th>/);
   assert.match(devtoolsJs, /Load the active UnderPAR environment before searching MVPDs\./);
   assert.doesNotMatch(devtoolsJs, /<th>View<\/th>/);
   assert.doesNotMatch(devtoolsJs, /mvpd-search-results-summary/);
@@ -411,54 +418,90 @@ test("UP DevTools MVPD search builds direct and proxied rows from MVPD, proxied 
   assert.equal(rowByKey["mvpd:turner"].enabledIntegrationCount, 1);
 });
 
-test("UP DevTools MVPD search filter matches normalized MVPD names, ids, owners, and requestor tokens", () => {
+test("UP DevTools MVPD search filter ranks explicit hit surfaces and explains why each row matched", () => {
   const { filterUpDevtoolsMvpdSearchRows } = loadMvpdSearchHelpers();
   const rows = [
     {
       id: "AdultSwim",
       entityType: "mvpdproxy",
       searchText: "adult swim proxy adultswim turner direct turner cartoonnetwork proxy mvpd",
+      searchFields: [
+        { key: "displayName", label: "MVPD name", priority: 420, values: ["Adult Swim Proxy"] },
+        { key: "id", label: "MVPD id", priority: 360, values: ["adultswim"] },
+        { key: "proxyOwner", label: "Proxy owner", priority: 280, values: ["Turner Direct", "Turner"] },
+        { key: "associatedServiceProviderIds", label: "Channel / Requestor", priority: 140, values: ["cartoonnetwork"] },
+      ],
     },
     {
       id: "CartoonNetwork",
       entityType: "mvpdproxy",
       searchText: "cartoon network proxied cartoonnetwork turner direct turner proxy mvpd",
+      searchFields: [
+        { key: "displayName", label: "MVPD name", priority: 420, values: ["Cartoon Network"] },
+        { key: "id", label: "MVPD id", priority: 360, values: ["cartoonnetwork"] },
+        { key: "proxyOwner", label: "Proxy owner", priority: 280, values: ["Turner Direct", "Turner"] },
+      ],
     },
     {
       id: "Turner",
       entityType: "mvpd",
       searchText: "turner direct turner direct mvpd",
+      searchFields: [
+        { key: "displayName", label: "MVPD name", priority: 420, values: ["Turner Direct"] },
+        { key: "id", label: "MVPD id", priority: 360, values: ["Turner"] },
+      ],
     },
     {
       id: "DirectOnly",
       entityType: "mvpd",
       searchText: "direct only directonly direct mvpd",
+      searchFields: [
+        { key: "displayName", label: "MVPD name", priority: 420, values: ["Direct Only"] },
+        { key: "id", label: "MVPD id", priority: 360, values: ["directonly"] },
+      ],
     },
     {
       id: "nrtccpr010",
       entityType: "mvpdproxy",
       searchText: "claro puerto rico nrtccpr010 turner direct turner adultswim cartoonnetwork proxied mvpd proxy mvpd",
+      searchFields: [
+        { key: "displayName", label: "MVPD name", priority: 420, values: ["Claro Puerto Rico"] },
+        { key: "id", label: "MVPD id", priority: 360, values: ["nrtccpr010"] },
+        { key: "proxyOwner", label: "Proxy owner", priority: 280, values: ["Turner Direct", "Turner"] },
+        { key: "associatedServiceProviderIds", label: "Channel / Requestor", priority: 140, values: ["adultswim", "cartoonnetwork", "ATTSportsPT", "ATTSportsRM"] },
+      ],
+    },
+    {
+      id: "allwest",
+      entityType: "mvpdproxy",
+      searchText: "all west communications allwest proxymvpd massilon attsportspt attsportsrm",
+      searchFields: [
+        { key: "displayName", label: "MVPD name", priority: 420, values: ["All West Communications"] },
+        { key: "id", label: "MVPD id", priority: 360, values: ["allwest"] },
+        { key: "proxyOwner", label: "Proxy owner", priority: 280, values: ["PROXY MASSILON", "PROXYMVPD_MASSILON"] },
+        { key: "associatedServiceProviderIds", label: "Channel / Requestor", priority: 140, values: ["ATTSportsPT", "ATTSportsRM"] },
+      ],
     },
   ];
 
   const turnerCartoonMatches = normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "turner cartoon"));
   assert(turnerCartoonMatches.some((row) => row.id === "CartoonNetwork"));
+  assert.deepEqual(normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "directonly")).map((row) => row.id), ["DirectOnly"]);
+  assert.deepEqual(normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "claro pr")).map((row) => row.id), ["nrtccpr010"]);
   assert.deepEqual(
-    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "directonly")),
-    [rows[3]]
+    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "claro nrtccpr010")).map((row) => row.id),
+    ["nrtccpr010"]
   );
   assert.deepEqual(
-    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "claro pr")),
-    [rows[4]]
+    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "turner adultswim cartoonnetwork")).map((row) => row.id),
+    ["AdultSwim", "nrtccpr010"]
   );
-  assert.deepEqual(
-    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "claro nrtccpr010")),
-    [rows[4]]
-  );
-  assert.deepEqual(
-    normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "turner adultswim cartoonnetwork")),
-    [rows[0], rows[4]]
-  );
+  const attMatches = normalizeVmValue(filterUpDevtoolsMvpdSearchRows(rows, "att"));
+  assert.deepEqual(attMatches.map((row) => row.id), ["allwest", "nrtccpr010"]);
+  attMatches.forEach((row) => {
+    assert.equal(row.hitReasons[0].label, "Channel / Requestor");
+    assert.match(row.hitReasons[0].summary, /ATTSportsPT/);
+  });
 });
 
 test("UP DevTools MVPD search resolves proxy-parent owners and exposes an owner workspace target", () => {

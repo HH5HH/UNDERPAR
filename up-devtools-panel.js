@@ -4843,6 +4843,36 @@ function renderMvpdSearchResults(rows = [], options = {}) {
         integrationCount > 0
           ? `${enabledIntegrationCount}/${integrationCount} integration${integrationCount === 1 ? "" : "s"} enabled`
           : "";
+      const hitReasons = Array.isArray(row?.hitReasons) ? row.hitReasons : [];
+      const hitMarkup =
+        hitReasons.length > 0
+          ? `
+            <div class="mvpd-search-hit-list">
+              ${hitReasons
+                .slice(0, 2)
+                .map((reason) => {
+                  const reasonLabel = String(reason?.label || "").trim() || "Match";
+                  const matchedTokens = Array.isArray(reason?.matchedTokens)
+                    ? reason.matchedTokens.map((value) => String(value || "").trim()).filter(Boolean)
+                    : [];
+                  const tokenLabel = matchedTokens.length > 0 ? `"${matchedTokens.join('", "')}"` : "";
+                  const reasonSummary = String(reason?.summary || "").trim() || "\u2013";
+                  return `
+                    <article class="mvpd-search-hit-item">
+                      <p class="mvpd-search-hit-label">${escapeHtml(reasonLabel)}</p>
+                      <p class="mvpd-search-hit-detail">${tokenLabel ? `${escapeHtml(tokenLabel)} \u2192 ` : ""}${escapeHtml(reasonSummary)}</p>
+                    </article>
+                  `;
+                })
+                .join("")}
+              ${
+                hitReasons.length > 2
+                  ? `<p class="mvpd-search-hit-more">+${hitReasons.length - 2} more hit${hitReasons.length - 2 === 1 ? "" : "s"}</p>`
+                  : ""
+              }
+            </div>
+          `
+          : `<span class="mvpd-search-hit-empty">\u2013</span>`;
       const isViewBusy = panelState.mvpdSearchViewBusyKey === resultKey;
       const ownerMarkup = ownerResultKey
         ? `
@@ -4881,6 +4911,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
             ${ownerMarkup}
             ${ownerMetaLabel ? `<p class="mvpd-search-owner-meta">${escapeHtml(ownerMetaLabel)}</p>` : ""}
           </td>
+          <td>${hitMarkup}</td>
         </tr>
       `;
     })
@@ -4889,7 +4920,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
     normalizedRows.length === 0
       ? `
         <tr class="mvpd-search-table-empty-row">
-          <td colspan="2">${escapeHtml(emptyMessage || "No MVPDs found.")}</td>
+          <td colspan="3">${escapeHtml(emptyMessage || "No MVPDs found.")}</td>
         </tr>
       `
       : "";
@@ -4901,6 +4932,7 @@ function renderMvpdSearchResults(rows = [], options = {}) {
           <tr>
             <th>MVPD NAME</th>
             <th>Proxy Owner</th>
+            <th>Hit</th>
           </tr>
         </thead>
         <tbody>${rowsMarkup || emptyRowMarkup}</tbody>

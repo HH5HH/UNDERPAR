@@ -1139,7 +1139,15 @@ body::before {
 }
 
 .mvpd-search-table thead th:first-child {
-  width: 62%;
+  width: 46%;
+}
+
+.mvpd-search-table thead th:nth-child(2) {
+  width: 24%;
+}
+
+.mvpd-search-table thead th:nth-child(3) {
+  width: 30%;
 }
 
 .mvpd-search-table tbody td {
@@ -1264,6 +1272,44 @@ body::before {
     border-color 140ms ease,
     background 140ms ease,
     transform 140ms ease;
+}
+
+.mvpd-search-hit-list {
+  display: grid;
+  gap: 10px;
+}
+
+.mvpd-search-hit-item {
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--up-gray-300-rgb), 0.52);
+  border-radius: 10px;
+  background: rgba(var(--up-gray-25-rgb), 0.5);
+}
+
+.mvpd-search-hit-label {
+  margin: 0;
+  color: rgb(var(--up-gray-800-rgb));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.mvpd-search-hit-detail,
+.mvpd-search-hit-more,
+.mvpd-search-hit-empty {
+  margin: 6px 0 0;
+  color: var(--up-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.mvpd-search-hit-detail {
+  color: var(--up-text);
+}
+
+.mvpd-search-hit-empty {
+  display: inline-block;
 }
 
 .mvpd-search-owner-btn:hover:not(:disabled) .mvpd-search-owner,
