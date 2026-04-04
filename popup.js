@@ -18031,7 +18031,7 @@ function buildLegacyDeviceInfoPayload(requestorId) {
     userAgent: navigator.userAgent || "",
     connectionType: navigator.connection?.effectiveType || "WiFi",
     connectionSecure: window.location.protocol === "https:",
-    applicationId: requestorId || window.location.hostname || "UnderPAR",
+    applicationId: "UnderPAR",
   };
 }
 
@@ -19895,6 +19895,219 @@ function summarizeRestV2PreauthorizeRows(rows = [], requestedResourceIds = []) {
   };
 }
 
+/**
+ * Global fallback for the `authenticated_profile_missing` error.
+ *
+ * When the standard profile endpoints (`/profiles/{mvpd}`, `/profiles`) return
+ * empty results after a successful REST V2 MVPD login, this function attempts
+ * to recover the authenticated profile via the session-code endpoint:
+ *
+ *   GET /{serviceProvider}/profiles/code/{code}
+ *
+ * Reference:
+ *   https://developer.adobe.com/adobe-pass/api/rest-api-v2/interactive/#operation/getProfileForCodeUsingGET_1
+ *
+ * If a valid profile is found the caller receives a recovery object that can be
+ * used to:
+ *   1. Confirm the MVPD session is still alive.
+ *   2. Re-harvest the profile so BOBTOOLS / Can I Watch? sees it immediately.
+ *   3. Surface a clear diagnostic instead of a generic 403 wall.
+ *
+ * This fallback is environment-agnostic — it applies to all environments, not
+ * just Prequal Production.
+ *
+ * The function is intentionally defensive — it never throws.  A `null` return
+ * means recovery was not possible (no session codes, network failure, etc.).
+ */
+async function attemptRestV2SessionCodeProfileRecovery(harvest, flowId = "", scope = "session-code-profile-recovery") {
+  if (!harvest || typeof harvest !== "object") {
+    return null;
+  }
+
+  const programmerId = String(harvest.programmerId || "").trim();
+  const serviceProviderId = String(harvest.serviceProviderId || harvest.requestorId || "").trim();
+  const mvpd = String(harvest.mvpd || "").trim();
+  if (!programmerId || !serviceProviderId || !mvpd) {
+    return null;
+  }
+
+  const appInfo = resolveRestV2AppInfoForHarvest(harvest);
+  if (!appInfo?.guid) {
+    return null;
+  }
+
+  const sessionCodeCandidates = collectRestV2SessionCodeCandidates(
+    [
+      harvest.sessionCode,
+      ...(Array.isArray(harvest.sessionCodeCandidates) ? harvest.sessionCodeCandidates : []),
+      harvest.sessionUrl,
+      harvest.loginUrl,
+    ],
+    serviceProviderId
+  );
+
+  if (sessionCodeCandidates.length === 0) {
+    return null;
+  }
+
+  const resolvedFlowId = flowId || resolveRestV2DebugFlowIdForHarvest(harvest);
+
+  emitRestV2DebugEvent(resolvedFlowId, {
+    source: "extension",
+    phase: `${scope}-start`,
+    requestorId: String(harvest.requestorId || serviceProviderId || ""),
+    mvpd,
+    programmerId,
+    appGuid: String(appInfo.guid || ""),
+    appName: String(appInfo.appName || appInfo.guid || ""),
+    sessionCodeCandidateCount: sessionCodeCandidates.length,
+    environment: String(getActiveAdobePassEnvironmentKey() || ""),
+  });
+
+  for (const sessionCode of sessionCodeCandidates) {
+    const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles/code/${encodeURIComponent(sessionCode)}`;
+    const requestHeaders = buildRestV2Headers(serviceProviderId, {
+      Accept: "application/json",
+    });
+
+    try {
+      const response = await fetchWithPremiumAuth(
+        programmerId,
+        appInfo,
+        endpointUrl,
+        {
+          method: "GET",
+          mode: "cors",
+          headers: requestHeaders,
+        },
+        "refresh",
+        {
+          flowId: resolvedFlowId,
+          requestorId: String(harvest.requestorId || serviceProviderId || ""),
+          mvpd,
+          scope: `${scope}:profiles-code`,
+          service: "rest-v2-profiles",
+          endpointUrl,
+        }
+      );
+
+      const responseText = await response.text().catch(() => "");
+      const parsedPayload = parseJsonText(responseText, null);
+
+      if (!response.ok || !parsedPayload) {
+        emitRestV2DebugEvent(resolvedFlowId, {
+          source: "extension",
+          phase: `${scope}-code-miss`,
+          url: endpointUrl,
+          sessionCode,
+          status: Number(response.status || 0),
+          statusText: String(response.statusText || "").trim(),
+          responsePreview: truncateDebugText(responseText, 1200),
+        });
+        continue;
+      }
+
+      const profileRows = extractRestV2ProfileRowsFromPayload(parsedPayload || {}, {
+        mvpd,
+        requestorId: String(harvest.requestorId || serviceProviderId || "").trim(),
+      });
+      const profileCount = profileRows.length;
+
+      if (profileCount <= 0) {
+        emitRestV2DebugEvent(resolvedFlowId, {
+          source: "extension",
+          phase: `${scope}-code-empty`,
+          url: endpointUrl,
+          sessionCode,
+          status: Number(response.status || 0),
+          profileCount: 0,
+        });
+        continue;
+      }
+
+      // ---- Recovery succeeded ----
+      const checkedAt = Date.now();
+
+      emitRestV2DebugEvent(resolvedFlowId, {
+        source: "extension",
+        phase: `${scope}-recovered`,
+        url: endpointUrl,
+        sessionCode,
+        status: Number(response.status || 0),
+        profileCount,
+        profileKeys: profileRows.map((row) => String(row?.profileKey || "").trim()).filter(Boolean),
+      });
+
+      const recoveryContext = buildRestV2ContextFromHarvest(harvest);
+      const recoveryProfileCheckResult = {
+        checked: true,
+        ok: true,
+        status: Number(response.status || 200),
+        statusText: String(response.statusText || "").trim(),
+        profileCount,
+        responsePreview: truncateDebugText(responseText, 3000),
+        url: endpointUrl,
+        error: "",
+        responsePayload: parsedPayload,
+        harvestedProfile: profileRows[0] || null,
+        profileCheckEndpoint: "profiles-code",
+        profileCheckEndpointLabel: "profiles/code (recovery)",
+        profileCheckSessionCode: sessionCode,
+        attemptedEndpoints: [
+          {
+            endpointKey: "profiles-code",
+            endpointLabel: "profiles/code (recovery)",
+            url: endpointUrl,
+            ok: true,
+            checked: true,
+            status: Number(response.status || 200),
+            statusText: String(response.statusText || "").trim(),
+            profileCount,
+            error: "",
+            sessionCode,
+          },
+        ],
+      };
+
+      // Re-harvest the recovered profile so BOBTOOLS / Can I Watch? sees it.
+      if (recoveryContext) {
+        storeRestV2ProfileHarvest(recoveryContext, recoveryProfileCheckResult, resolvedFlowId);
+      }
+
+      return {
+        recovered: true,
+        checkedAt,
+        sessionCode,
+        endpointUrl,
+        profileCount,
+        profileRows,
+        profileCheckResult: recoveryProfileCheckResult,
+        context: recoveryContext,
+      };
+    } catch (recoveryError) {
+      emitRestV2DebugEvent(resolvedFlowId, {
+        source: "extension",
+        phase: `${scope}-code-error`,
+        url: endpointUrl,
+        sessionCode,
+        error: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+      });
+      // Intentionally swallowed — recovery must never throw.
+    }
+  }
+
+  emitRestV2DebugEvent(resolvedFlowId, {
+    source: "extension",
+    phase: `${scope}-exhausted`,
+    requestorId: String(harvest.requestorId || serviceProviderId || ""),
+    mvpd,
+    programmerId,
+    sessionCodeCandidateCount: sessionCodeCandidates.length,
+  });
+
+  return null;
+}
+
 async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_REST_V2_ACTION_PREAUTHORIZE) {
   const normalizedMode = normalizeBobtoolsRestV2Action(mode);
   const decisionMode =
@@ -20061,6 +20274,54 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
     if (enhancedError.ok) {
       result.enhancedError = enhancedError;
     }
+
+    // ---- authenticated_profile_missing recovery via /profiles/code/{code} ----
+    // After a successful REST V2 MVPD login the decisions endpoint may return 403
+    // authenticated_profile_missing even though the session IS valid.  Attempt to
+    // retrieve the profile through the session-code endpoint so callers can
+    // confirm the session, re-harvest the profile, and surface a clear diagnostic.
+    if (errorCode === "authenticated_profile_missing" || hasRestV2AuthenticatedProfileMissingSignal(result)) {
+      try {
+        const recovery = await attemptRestV2SessionCodeProfileRecovery(harvest, flowId, "decision-profile-recovery");
+        if (recovery?.recovered === true) {
+          result.profileRecovery = recovery;
+          result.error = [
+            result.error,
+            ` Profile recovered via /profiles/code (${recovery.profileCount} profile${recovery.profileCount !== 1 ? "s" : ""}). `,
+            "The MVPD session is valid but the decisions endpoint cannot resolve it. ",
+            "Re-run LOGIN to refresh the profile binding, or use the recovered profile data for validation.",
+          ].join("");
+
+          emitRestV2DebugEvent(flowId, {
+            source: "extension",
+            phase: `${scopeKey}-profile-recovery-attached`,
+            recoveredProfileCount: recovery.profileCount,
+            recoverySessionCode: recovery.sessionCode,
+            recoveryEndpointUrl: recovery.endpointUrl,
+          });
+        } else {
+          result.profileRecovery = null;
+          result.error = [
+            result.error,
+            " Session-code profile recovery was attempted but no profile could be retrieved.",
+            " The MVPD session may have expired or no session codes are available.",
+          ].join("");
+
+          emitRestV2DebugEvent(flowId, {
+            source: "extension",
+            phase: `${scopeKey}-profile-recovery-failed`,
+          });
+        }
+      } catch (recoveryError) {
+        result.profileRecovery = null;
+        emitRestV2DebugEvent(flowId, {
+          source: "extension",
+          phase: `${scopeKey}-profile-recovery-error`,
+          error: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+        });
+      }
+    }
+
     throw Object.assign(new Error(`${actionLabel} failed (${result.status}): ${errorMessage}`), { underparResult: result });
   }
 
@@ -21641,82 +21902,105 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
       storeRestV2ProfileHarvest(preflightContext, preflight, preflightFlowId);
     }
     if (!preflight?.ok || Number(preflight?.profileCount || 0) <= 0) {
-      const preflightPayload = preflight?.responsePayload && typeof preflight.responsePayload === "object" ? preflight.responsePayload : {};
-      const preflightCode = String(
-        firstNonEmptyString([
-          preflightPayload?.code,
-          preflightPayload?.error?.code,
-          preflightPayload?.error,
-          Number(preflight?.profileCount || 0) <= 0 ? "authenticated_profile_missing" : "",
-        ]) || "authenticated_profile_missing"
-      ).trim();
-      const preflightMessage = String(
-        firstNonEmptyString([
-          preflightPayload?.details,
-          preflightPayload?.message,
-          preflight?.error,
-          "The authenticated profile associated with this request is missing or expired.",
-        ]) || "The authenticated profile associated with this request is missing or expired."
-      ).trim();
-      const guidance = "Re-run LOGIN for this MVPD profile to refresh the session, then retry Can I watch?.";
-      const preflightResult = {
-        checkedAt: Date.now(),
-        ok: false,
-        status: Number(preflight?.status || 403),
-        statusText: String(preflight?.statusText || "").trim(),
-        programmerId,
-        appGuid: String(preflightContext?.appInfo?.guid || "").trim(),
-        appName: String(preflightContext?.appInfo?.appName || preflightContext?.appInfo?.guid || "").trim(),
-        authMode: "dcr_client_bearer",
-        endpointUrl: String(preflight?.url || "").trim(),
-        requestBody: {
-          resources: resourceIds.slice(),
-        },
-        serviceProviderId: String(selectedHarvest?.serviceProviderId || selectedHarvest?.requestorId || "").trim(),
-        requestorId: String(selectedHarvest?.requestorId || "").trim(),
-        mvpd: String(selectedHarvest?.mvpd || "").trim(),
-        harvestKey: sectionState.selectedHarvestKey,
-        harvestCapturedAt: Number(selectedHarvest?.harvestedAt || 0),
-        subject: String(selectedHarvest?.subject || "").trim(),
-        upstreamUserId: String(selectedHarvest?.upstreamUserId || "").trim(),
-        userId: String(selectedHarvest?.userId || "").trim(),
-        sessionId: String(selectedHarvest?.sessionId || "").trim(),
-        profileKey: String(selectedHarvest?.profileKey || "").trim(),
-        resourceIds: resourceIds.slice(),
-        decisionRows: resourceIds.map((resourceId) => ({
-          resourceId: String(resourceId || "").trim(),
-          decision: "Unknown",
-          authorized: null,
-          source: "",
-          serviceProvider: "",
+      // Standard profile endpoints returned empty after login — attempt
+      // recovery via GET /{serviceProvider}/profiles/code/{code}.
+      const panelRecovery = await attemptRestV2SessionCodeProfileRecovery(
+        selectedHarvest,
+        preflightFlowId,
+        "preauthorize-preflight-recovery"
+      );
+
+      if (panelRecovery?.recovered === true) {
+        // Recovery succeeded — the MVPD session IS alive.
+        setRestV2ActiveProfileWindowState(context, true, {
+          checkedAt: Number(panelRecovery.checkedAt || Date.now()),
+          profileCount: Number(panelRecovery.profileCount || 0),
+          status: Number(preflight?.status || 0),
+          statusText: String(preflight?.statusText || "").trim(),
+          error: "",
+          source: "preauthorize-preflight-recovered-via-session-code",
+        });
+        // Fall through to the actual preauthorize call below.
+      } else {
+        // Recovery failed — throw the original error.
+        const preflightPayload = preflight?.responsePayload && typeof preflight.responsePayload === "object" ? preflight.responsePayload : {};
+        const preflightCode = String(
+          firstNonEmptyString([
+            preflightPayload?.code,
+            preflightPayload?.error?.code,
+            preflightPayload?.error,
+            Number(preflight?.profileCount || 0) <= 0 ? "authenticated_profile_missing" : "",
+          ]) || "authenticated_profile_missing"
+        ).trim();
+        const preflightMessage = String(
+          firstNonEmptyString([
+            preflightPayload?.details,
+            preflightPayload?.message,
+            preflight?.error,
+            "The authenticated profile associated with this request is missing or expired.",
+          ]) || "The authenticated profile associated with this request is missing or expired."
+        ).trim();
+        const guidance = "Re-run LOGIN for this MVPD profile to refresh the session, then retry Can I watch?.";
+        const recoveryNote = " Session-code profile recovery was attempted but could not retrieve a profile.";
+        const preflightResult = {
+          checkedAt: Date.now(),
+          ok: false,
+          status: Number(preflight?.status || 403),
+          statusText: String(preflight?.statusText || "").trim(),
+          programmerId,
+          appGuid: String(preflightContext?.appInfo?.guid || "").trim(),
+          appName: String(preflightContext?.appInfo?.appName || preflightContext?.appInfo?.guid || "").trim(),
+          authMode: "dcr_client_bearer",
+          endpointUrl: String(preflight?.url || "").trim(),
+          requestBody: {
+            resources: resourceIds.slice(),
+          },
+          serviceProviderId: String(selectedHarvest?.serviceProviderId || selectedHarvest?.requestorId || "").trim(),
+          requestorId: String(selectedHarvest?.requestorId || "").trim(),
           mvpd: String(selectedHarvest?.mvpd || "").trim(),
-          errorCode: preflightCode,
-          errorDetails: preflightMessage,
-          mediaTokenPresent: false,
-          mediaTokenPreview: "",
-          mediaTokenNotBeforeMs: 0,
-          mediaTokenNotAfterMs: 0,
-          notBeforeMs: 0,
-          notAfterMs: 0,
-          raw: {},
-        })),
-        permitCount: 0,
-        denyCount: 0,
-        unknownCount: resourceIds.length,
-        allRequestedPermitted: false,
-        responsePreview: String(preflight?.responsePreview || "").trim(),
-        responsePayload: preflightPayload,
-        error: `${preflightCode}: ${preflightMessage}. ${guidance}`,
-      };
-      setRestV2ActiveProfileWindowState(context, false, {
-        checkedAt: Date.now(),
-        profileCount: Number(preflight?.profileCount || 0),
-        status: Number(preflight?.status || 0),
-        statusText: String(preflight?.statusText || "").trim(),
-        error: preflightResult.error,
-        source: "preauthorize-preflight",
-      });
-      throw Object.assign(new Error(preflightResult.error), { underparResult: preflightResult });
+          harvestKey: sectionState.selectedHarvestKey,
+          harvestCapturedAt: Number(selectedHarvest?.harvestedAt || 0),
+          subject: String(selectedHarvest?.subject || "").trim(),
+          upstreamUserId: String(selectedHarvest?.upstreamUserId || "").trim(),
+          userId: String(selectedHarvest?.userId || "").trim(),
+          sessionId: String(selectedHarvest?.sessionId || "").trim(),
+          profileKey: String(selectedHarvest?.profileKey || "").trim(),
+          resourceIds: resourceIds.slice(),
+          decisionRows: resourceIds.map((resourceId) => ({
+            resourceId: String(resourceId || "").trim(),
+            decision: "Unknown",
+            authorized: null,
+            source: "",
+            serviceProvider: "",
+            mvpd: String(selectedHarvest?.mvpd || "").trim(),
+            errorCode: preflightCode,
+            errorDetails: preflightMessage,
+            mediaTokenPresent: false,
+            mediaTokenPreview: "",
+            mediaTokenNotBeforeMs: 0,
+            mediaTokenNotAfterMs: 0,
+            notBeforeMs: 0,
+            notAfterMs: 0,
+            raw: {},
+          })),
+          permitCount: 0,
+          denyCount: 0,
+          unknownCount: resourceIds.length,
+          allRequestedPermitted: false,
+          responsePreview: String(preflight?.responsePreview || "").trim(),
+          responsePayload: preflightPayload,
+          error: `${preflightCode}: ${preflightMessage}. ${guidance}${recoveryNote}`,
+        };
+        setRestV2ActiveProfileWindowState(context, false, {
+          checkedAt: Date.now(),
+          profileCount: Number(preflight?.profileCount || 0),
+          status: Number(preflight?.status || 0),
+          statusText: String(preflight?.statusText || "").trim(),
+          error: preflightResult.error,
+          source: "preauthorize-preflight",
+        });
+        throw Object.assign(new Error(preflightResult.error), { underparResult: preflightResult });
+      }
     }
     setRestV2ActiveProfileWindowState(context, true, {
       checkedAt: Date.now(),
@@ -21759,14 +22043,29 @@ async function runRestV2EntitlementCheck(section, programmer, appInfo) {
         programmerId,
       };
       if (hasRestV2AuthenticatedProfileMissingSignal(enrichedResult)) {
-        setRestV2ActiveProfileWindowState(context, false, {
-          checkedAt: Number(enrichedResult?.checkedAt || Date.now()),
-          profileCount: 0,
-          status: Number(enrichedResult?.status || 0),
-          statusText: String(enrichedResult?.statusText || "").trim(),
-          error: String(enrichedResult?.error || "").trim(),
-          source: "preauthorize-authenticated-profile-missing",
-        });
+        const recovery = enrichedResult.profileRecovery || null;
+        if (recovery?.recovered === true) {
+          // Profile was recovered via GET /profiles/code/{code}.
+          // The MVPD session IS alive — mark the profile window active so the
+          // UI reflects a valid session even though decisions returned 403.
+          setRestV2ActiveProfileWindowState(context, true, {
+            checkedAt: Number(recovery.checkedAt || enrichedResult?.checkedAt || Date.now()),
+            profileCount: Number(recovery.profileCount || 0),
+            status: Number(enrichedResult?.status || 0),
+            statusText: String(enrichedResult?.statusText || "").trim(),
+            error: String(enrichedResult?.error || "").trim(),
+            source: "preauthorize-profile-recovered-via-session-code",
+          });
+        } else {
+          setRestV2ActiveProfileWindowState(context, false, {
+            checkedAt: Number(enrichedResult?.checkedAt || Date.now()),
+            profileCount: 0,
+            status: Number(enrichedResult?.status || 0),
+            statusText: String(enrichedResult?.statusText || "").trim(),
+            error: String(enrichedResult?.error || "").trim(),
+            source: "preauthorize-authenticated-profile-missing",
+          });
+        }
       }
       sectionState.lastEntitlementResult = enrichedResult;
       storeRestV2PreauthorizeHistoryEntry(programmerId, enrichedResult);
@@ -63960,48 +64259,80 @@ async function runRestV2BobtoolsActionForHarvest(harvest, options = {}) {
       storeRestV2ProfileHarvest(context, preflight, preflightFlowId);
     }
     if (!preflight?.ok || Number(preflight?.profileCount || 0) <= 0) {
-      const preflightPayload =
-        preflight?.responsePayload && typeof preflight.responsePayload === "object" ? preflight.responsePayload : {};
-      const preflightCode = String(
-        firstNonEmptyString([
-          preflightPayload?.code,
-          preflightPayload?.error?.code,
-          preflightPayload?.error,
-          Number(preflight?.profileCount || 0) <= 0 ? "authenticated_profile_missing" : "",
-        ]) || "authenticated_profile_missing"
-      ).trim();
-      const preflightMessage = String(
-        firstNonEmptyString([
-          preflightPayload?.details,
-          preflightPayload?.message,
-          preflight?.error,
-          "The authenticated profile associated with this request is missing or expired.",
-        ]) || "The authenticated profile associated with this request is missing or expired."
-      ).trim();
-      const result = buildRestV2BobtoolsActionErrorResult(
+      // Standard profile endpoints returned empty — attempt recovery via
+      // GET /{serviceProvider}/profiles/code/{code} before giving up.
+      const preflightRecovery = await attemptRestV2SessionCodeProfileRecovery(
         harvest,
-        apiAction,
-        `${preflightCode}: ${preflightMessage}. Re-run LOGIN for this MVPD profile to refresh the session, then retry ${actionLabel}.`,
-        {
-          resourceIds: normalizedResources,
-          status: Number(preflight?.status || 403),
-          statusText: String(preflight?.statusText || "").trim(),
-          errorCode: preflightCode,
-          errorDetails: preflightMessage,
-          endpointUrl: String(preflight?.url || "").trim(),
-          responsePayload: preflightPayload,
-          responsePreview: String(preflight?.responsePreview || "").trim(),
-        }
+        preflightFlowId,
+        `${apiAction}-preflight-recovery`
       );
-      setRestV2ActiveProfileWindowState(context, false, {
-        checkedAt: Date.now(),
-        profileCount: Number(preflight?.profileCount || 0),
-        status: Number(preflight?.status || 0),
-        statusText: String(preflight?.statusText || "").trim(),
-        error: String(result.error || "").trim(),
-        source: `${apiAction}-preflight`,
-      });
-      return result;
+
+      if (preflightRecovery?.recovered === true) {
+        // Recovery succeeded — the MVPD session IS alive.  Update profile
+        // window state and let the flow continue to the actual action.
+        setRestV2ActiveProfileWindowState(context, true, {
+          checkedAt: Number(preflightRecovery.checkedAt || Date.now()),
+          profileCount: Number(preflightRecovery.profileCount || 0),
+          status: Number(preflight?.status || 0),
+          statusText: String(preflight?.statusText || "").trim(),
+          error: "",
+          source: `${apiAction}-preflight-recovered-via-session-code`,
+        });
+
+        emitRestV2DebugEvent(preflightFlowId, {
+          source: "extension",
+          phase: `${apiAction}-preflight-recovery-success`,
+          recoveredProfileCount: preflightRecovery.profileCount,
+          recoverySessionCode: preflightRecovery.sessionCode,
+          recoveryEndpointUrl: preflightRecovery.endpointUrl,
+        });
+        // Fall through to the actual action below instead of returning early.
+      } else {
+        // Recovery failed or no session codes — return original error.
+        const preflightPayload =
+          preflight?.responsePayload && typeof preflight.responsePayload === "object" ? preflight.responsePayload : {};
+        const preflightCode = String(
+          firstNonEmptyString([
+            preflightPayload?.code,
+            preflightPayload?.error?.code,
+            preflightPayload?.error,
+            Number(preflight?.profileCount || 0) <= 0 ? "authenticated_profile_missing" : "",
+          ]) || "authenticated_profile_missing"
+        ).trim();
+        const preflightMessage = String(
+          firstNonEmptyString([
+            preflightPayload?.details,
+            preflightPayload?.message,
+            preflight?.error,
+            "The authenticated profile associated with this request is missing or expired.",
+          ]) || "The authenticated profile associated with this request is missing or expired."
+        ).trim();
+        const recoveryNote = " Session-code profile recovery was attempted but could not retrieve a profile.";
+        const result = buildRestV2BobtoolsActionErrorResult(
+          harvest,
+          apiAction,
+          `${preflightCode}: ${preflightMessage}. Re-run LOGIN for this MVPD profile to refresh the session, then retry ${actionLabel}.${recoveryNote}`,
+          {
+            resourceIds: normalizedResources,
+            status: Number(preflight?.status || 403),
+            statusText: String(preflight?.statusText || "").trim(),
+            errorCode: preflightCode,
+            errorDetails: preflightMessage,
+            endpointUrl: String(preflight?.url || "").trim(),
+            responsePayload: preflightPayload,
+            responsePreview: String(preflight?.responsePreview || "").trim(),
+          }
+        );
+        setRestV2ActiveProfileWindowState(context, false, {
+          checkedAt: Date.now(),
+          profileCount: Number(preflight?.profileCount || 0),
+          status: Number(preflight?.status || 0),
+          statusText: String(preflight?.statusText || "").trim(),
+          error: String(result.error || "").trim(),
+          source: `${apiAction}-preflight`,
+        });
+        return result;
+      }
     }
 
     setRestV2ActiveProfileWindowState(context, true, {
