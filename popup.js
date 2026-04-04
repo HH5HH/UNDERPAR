@@ -733,7 +733,20 @@ function buildRestV2RedirectCandidatesForSpBase(spBase = "") {
 }
 
 function getActiveAdobePassEnvironment() {
-  return resolveAdobePassEnvironment(state?.adobePassEnvironment || DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  const env = resolveAdobePassEnvironment(state?.adobePassEnvironment || DEFAULT_ADOBEPASS_ENVIRONMENT.key);
+  // Prequal Production: all DCR-gated calls use production SP (network spoofing routes to prequal backend)
+  if (String(env?.key || "").trim() === "prequal-production") {
+    const prodSp = "https://sp.auth.adobe.com";
+    return {
+      ...env,
+      spBase: prodSp,
+      restV2Base: `${prodSp}/api/v2`,
+      dcrRegisterUrl: `${prodSp}/o/client/register`,
+      dcrTokenUrl: `${prodSp}/o/client/token`,
+      clickEsmTokenUrl: `${prodSp}/o/client/token`,
+    };
+  }
+  return env;
 }
 
 function getActiveAdobePassEnvironmentKey() {
@@ -9133,6 +9146,7 @@ function resolvePassVaultHydrationServiceApplication({
       matchingApplications,
       programmerId
     ) ||
+    matchingApplications[0] ||
     (matchingApplications.length === 0 ? existingService?.registeredApplication || null : null);
 
   return buildPassVaultCompactRegisteredApplication(
@@ -9917,7 +9931,11 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
       : candidates;
 
     if (normalizedServiceKey === "restV2") {
+      // Prefer an "All Channels" app with credentials — it works for every requestor.
+      const allChannelsCredentialMatch =
+        candidates.find((appInfo) => isAllChannelsApp(appInfo) && hasCredentialEntryForService(normalizedServiceKey, appInfo?.guid)) || null;
       return (
+        allChannelsCredentialMatch ||
         credentialBackedMatch ||
         (primaryMatch && hasCredentialEntryForService(normalizedServiceKey, primaryGuid) ? primaryMatch : null) ||
         selectPreferredPassVaultHydrationServiceApplication(
@@ -10717,6 +10735,7 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
     const hydratedApplications = mergeHydratedServiceEntriesIntoApplicationsData(applicationsData, hydratedServiceEntries);
     const hydratedRegisteredApplications = buildPassVaultHydrationRegisteredApplications(hydratedApplications);
     const credentialResults = buildPassVaultDirectCredentialResults(hydratedServiceEntries);
+
     const mergedServices = buildPassVaultDirectPremiumServicesSnapshot(
       programmer,
       hydratedRegisteredApplications,
@@ -11254,6 +11273,22 @@ function applyAdobePassEnvironment(environment = null) {
   ADOBE_SP_BASE = String(resolved.spBase || "");
   DEGRADATION_API_BASE = String(resolved.degradationBase || `${ADOBE_MGMT_BASE}/control/v3/degradation`);
   REST_V2_BASE = String(resolved.restV2Base || `${ADOBE_SP_BASE}/api/v2`);
+
+  // Prequal Production exception: all DCR-gated service calls (REST V2, DCR register/token)
+  // must use production SP endpoints. Network spoofing on sp.auth.adobe.com routes to the
+  // prequal backend (pass-core-np-prequal-prod). Console stays on prequal endpoints.
+  if (nextEnvironmentKey === "prequal-production") {
+    const prodSp = "https://sp.auth.adobe.com";
+    ADOBE_SP_BASE = prodSp;
+    REST_V2_BASE = `${prodSp}/api/v2`;
+    // Update the stored environment object so ALL code paths use production SP
+    resolved.spBase = prodSp;
+    resolved.restV2Base = `${prodSp}/api/v2`;
+    resolved.dcrRegisterUrl = `${prodSp}/o/client/register`;
+    resolved.dcrTokenUrl = `${prodSp}/o/client/token`;
+    resolved.clickEsmTokenUrl = `${prodSp}/o/client/token`;
+    state.adobePassEnvironment = resolved;
+  }
   PROGRAMMER_ENDPOINTS = buildProgrammerEndpointsForConsoleBase(ADOBE_CONSOLE_BASE);
   REST_V2_REDIRECT_CANDIDATES = buildRestV2RedirectCandidatesForSpBase(ADOBE_SP_BASE);
   clickEsmEndpoints = [];
@@ -39959,7 +39994,10 @@ body[data-theme="dark"]{
       consoleBase: "https://console-prequal.auth.adobe.com",
       cmConsoleOrigin: "https://experience.adobe.com",
       mgmtBase: "https://mgmt-prequal.auth.adobe.com",
-      spBase: "https://sp-prequal.auth.adobe.com",
+      // Prequal Production uses network spoofing on sp.auth.adobe.com to route
+      // to the prequal backend (pass-core-np-prequal-prod).  All premium service
+      // calls (REST V2, DCR) must hit the production SP host, not sp-prequal.
+      spBase: "https://sp.auth.adobe.com",
     },
     "release-staging": {
       key: "release-staging",
@@ -40030,6 +40068,9 @@ body[data-theme="dark"]{
       cmReportsBase,
       consoleShellUrl: String(
         payload.consoleShellUrl || \`https://experience.adobe.com/#/@adobepass/pass/authentication/\${route}\`
+      ).trim(),
+      consoleProgrammersUrl: String(
+        payload.consoleProgrammersUrl || \`https://experience.adobe.com/#/@adobepass/pass/authentication/\${route}/programmers\`
       ).trim(),
       cmConsoleShellUrl: String(
         payload.cmConsoleShellUrl || \`\${cmConsoleOrigin.replace(/\\/+$/, "")}/#/@adobepass/cm-console/cmu/year\`
@@ -86548,21 +86589,47 @@ function getRequestorsForSelectedMediaCompany() {
         .filter((option) => option.id)
     : [];
 
-  if (requestorOptions.length > 0) {
-    return requestorOptions.sort((left, right) =>
-      String(firstNonEmptyString([left.label, left.id])).localeCompare(
-        String(firstNonEmptyString([right.label, right.id])),
-        undefined,
-        { sensitivity: "base" }
+  const allRequestors = requestorOptions.length > 0
+    ? requestorOptions.sort((left, right) =>
+        String(firstNonEmptyString([left.label, left.id])).localeCompare(
+          String(firstNonEmptyString([right.label, right.id])),
+          undefined,
+          { sensitivity: "base" }
+        )
       )
-    );
-  }
+    : uniqueSorted(programmer.requestorIds || []).map((requestorId) => ({
+        key: requestorId,
+        id: requestorId,
+        label: requestorId,
+      }));
 
-  return uniqueSorted(programmer.requestorIds || []).map((requestorId) => ({
-    key: requestorId,
-    id: requestorId,
-    label: requestorId,
-  }));
+  // If the programmer has an "All Channels" REST V2 app, every requestor is valid.
+  // If not, only show requestors that have a matching channel-specific REST V2 app.
+  const programmerId = String(programmer.programmerId || "").trim();
+  const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
+  if (!premiumApps) {
+    return allRequestors;
+  }
+  const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps.filter((app) => app?.guid) : [];
+  const primaryApp = premiumApps?.restV2 || null;
+  const hasAllChannelsApp =
+    (primaryApp?.guid && isAllChannelsApp(primaryApp)) ||
+    restV2Apps.some((app) => isAllChannelsApp(app));
+  if (hasAllChannelsApp) {
+    return allRequestors;
+  }
+  // No "All Channels" app — collect covered requestors from channel-specific apps
+  const coveredChannels = new Set(
+    restV2Apps
+      .map((app) => getRegisteredAppChannel(app).toLowerCase())
+      .filter(Boolean)
+  );
+  if (coveredChannels.size === 0) {
+    return allRequestors;
+  }
+  return allRequestors.filter((option) =>
+    coveredChannels.has(String(option.id || "").toLowerCase())
+  );
 }
 
 function populateRequestorSelect() {
@@ -87251,6 +87318,8 @@ function selectPreferredPassVaultHydrationServiceApplication(serviceKey = "", ap
     return null;
   }
 
+  // Prefer "All Channels" apps (serviceProvider is empty) — they work for
+  // every child requestor.  Then fall back to Console fetch order.
   const rankedCandidates = candidates
     .map((appInfo, index) => {
       const fetchOrder = Number(
@@ -87261,23 +87330,14 @@ function selectPreferredPassVaultHydrationServiceApplication(serviceKey = "", ap
       return {
         appInfo,
         index,
-        hasCredentialCoverage:
-          Boolean(normalizedProgrammerId) &&
-          hasPassVaultServiceClientCredentials(normalizedProgrammerId, appInfo, normalizedServiceKey),
-        programmerCoverage:
-          normalizedServiceKey === "restV2"
-            ? countRestV2ProgrammerRequestorCoverage(appInfo, normalizedProgrammerId)
-            : 0,
+        allChannels: isAllChannelsApp(appInfo),
         fetchOrder: Number.isFinite(fetchOrder) ? fetchOrder : Number.MAX_SAFE_INTEGER,
-        label: firstNonEmptyString([appInfo?.appName, appInfo?.name, appInfo?.label, appInfo?.guid]),
       };
     })
     .sort((left, right) => {
       return (
-        Number(right.hasCredentialCoverage) - Number(left.hasCredentialCoverage) ||
-        Number(right.programmerCoverage) - Number(left.programmerCoverage) ||
+        Number(right.allChannels) - Number(left.allChannels) ||
         left.fetchOrder - right.fetchOrder ||
-        String(left.label || "").localeCompare(String(right.label || ""), undefined, { sensitivity: "base" }) ||
         left.index - right.index
       );
     });
@@ -87997,6 +88057,44 @@ function normalizeApplicationsResponse(payload) {
   }
 
   return [];
+}
+
+// Channel indicator on registered applications.
+// Empty = "All Channels" (works for any requestor).
+// Has a value = only works for that specific requestor/channel.
+// CRITICAL: Only read from immutable Console entity data (entityData / appData).
+// Do NOT read from appInfo top-level fields — runtime promotion after /configuration
+// merges requestor context that would make All Channels apps look channel-specific.
+function getRegisteredAppChannel(appInfo) {
+  const appData =
+    appInfo?.appData && typeof appInfo.appData === "object" && !Array.isArray(appInfo.appData)
+      ? appInfo.appData
+      : null;
+  const entityData = appData?.__rawEnvelope?.entityData || appInfo?.__rawEnvelope?.entityData || null;
+  // ONLY check entityData from __rawEnvelope — the sole immutable Console source.
+  // Both appInfo top-level AND appData get runtime-tainted during promotion/merge.
+  if (!entityData) {
+    return "";
+  }
+  const hints = sanitizePassVaultHintList(
+    entityData.serviceProviders,
+    entityData.contentProviders,
+    entityData.requestors,
+    entityData.requestorIds,
+    entityData.requestor,
+    entityData.serviceProvider,
+    entityData.serviceProviderHint,
+    entityData.channel
+  );
+  const raw = String(hints[0] || "").trim();
+  if (!raw || raw.toLowerCase() === "all channels" || raw === "*") {
+    return "";
+  }
+  return raw;
+}
+
+function isAllChannelsApp(appInfo) {
+  return !getRegisteredAppChannel(appInfo);
 }
 
 function normalizeRegisteredApplicationRuntimeRecord(item = null) {
@@ -89614,7 +89712,10 @@ function findPremiumServiceApplications(applicationsArray, applicationsData, opt
   }
   services.esm = services.esmApps[0] || null;
   services.resetTempPass = services.resetTempPassApps[0] || null;
-  services.restV2 = services.restV2Apps[0] || null;
+  // restV2 already set by findFirstPremiumServiceApplications with All Channels preference
+  if (!services.restV2 && services.restV2Apps.length > 0) {
+    services.restV2 = services.restV2Apps[0];
+  }
   return services;
 }
 
@@ -89629,38 +89730,31 @@ function findFirstPremiumServiceApplications(applications = []) {
     restV2: null,
     restV2Apps: [],
   };
-  const remainingServiceKeys = new Set(["restV2", "esm", "degradation", "resetTempPass"]);
   const orderedApplications = Array.isArray(applications) ? applications.filter((appInfo) => appInfo?.guid) : [];
 
-  const captureFirstMatch = (serviceKey, appInfo) => {
-    if (!remainingServiceKeys.has(serviceKey) || !appInfo?.guid) {
-      return;
-    }
-    services[serviceKey] = appInfo;
-    services[`${serviceKey}Apps`] = [appInfo];
-    remainingServiceKeys.delete(serviceKey);
-  };
-
   for (const appInfo of orderedApplications) {
-    if (remainingServiceKeys.has("restV2") && registeredApplicationMatchesNativeRequiredScope(appInfo, REST_V2_SCOPE)) {
-      captureFirstMatch("restV2", appInfo);
+    if (registeredApplicationMatchesNativeRequiredScope(appInfo, REST_V2_SCOPE)) {
+      services.restV2Apps.push(appInfo);
     }
-    if (remainingServiceKeys.has("esm") && registeredApplicationMatchesNativeRequiredScope(appInfo, PREMIUM_SERVICE_SCOPE_BY_KEY.esm)) {
-      captureFirstMatch("esm", appInfo);
+    if (registeredApplicationMatchesNativeRequiredScope(appInfo, PREMIUM_SERVICE_SCOPE_BY_KEY.esm)) {
+      services.esmApps.push(appInfo);
     }
-    if (remainingServiceKeys.has("degradation") && degradationAppHasRequiredScope(appInfo)) {
-      captureFirstMatch("degradation", appInfo);
+    if (degradationAppHasRequiredScope(appInfo)) {
+      services.degradationApps.push(appInfo);
     }
-    if (
-      remainingServiceKeys.has("resetTempPass") &&
-      registeredApplicationMatchesNativeRequiredScope(appInfo, PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)
-    ) {
-      captureFirstMatch("resetTempPass", appInfo);
-    }
-    if (remainingServiceKeys.size === 0) {
-      break;
+    if (registeredApplicationMatchesNativeRequiredScope(appInfo, PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)) {
+      services.resetTempPassApps.push(appInfo);
     }
   }
+
+  // For REST V2, prefer "All Channels" app — its DCR client works for every requestor.
+  services.restV2 =
+    services.restV2Apps.find((app) => isAllChannelsApp(app)) ||
+    services.restV2Apps[0] ||
+    null;
+  services.esm = services.esmApps[0] || null;
+  services.degradation = services.degradationApps[0] || null;
+  services.resetTempPass = services.resetTempPassApps[0] || null;
 
   return services;
 }
@@ -90883,11 +90977,7 @@ function selectRecoveredPremiumServiceApp(programmerId = "", serviceKey = "", se
     const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, services).filter(
       (entry) => String(entry?.guid || "").trim() !== excludedGuid
     );
-    return (
-      selectPreferredRestV2AppForRequestor(candidates, normalizedRequestorId, normalizedProgrammerId) ||
-      candidates[0] ||
-      null
-    );
+    return candidates[0] || null;
   }
 
   if (normalizedServiceKey === "degradation") {
@@ -91132,40 +91222,6 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
       workspaceOrigin,
     });
     const retryAppInfo = resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) || resolvedAppInfo;
-    if (isServiceProviderMismatch) {
-      if (isRestV2ServiceRequest) {
-        const serviceCredentialRecovery = restorePassVaultBoundServiceCredentialCache(
-          programmerId,
-          retryAppInfo,
-          "restV2"
-        );
-        const restoredAppInfo = serviceCredentialRecovery?.appInfo?.guid ? serviceCredentialRecovery.appInfo : retryAppInfo;
-        clearDcrTokenCache(programmerId, restoredAppInfo.guid, "restV2");
-        await ensureDcrAccessToken(programmerId, restoredAppInfo, true, {
-          ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
-          allowProvisioning: false,
-          lockAppSelection: true,
-        });
-        return fetchWithPremiumAuth(
-          programmerId,
-          restoredAppInfo,
-          url,
-          options,
-          "restv2-token-refresh",
-          {
-            ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
-            allowProvisioning: false,
-            lockAppSelection: true,
-          }
-        );
-      }
-      clearDcrCache(programmerId, retryAppInfo.guid, resolvePremiumServiceKeyForAuth(retryAppInfo, debugMeta));
-      await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
-        ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
-        forceFreshClientRegistration: true,
-      });
-      return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "none", debugMeta);
-    }
     if (isRestV2ServiceRequest) {
       await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
         ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
@@ -91183,59 +91239,19 @@ async function fetchWithPremiumAuth(programmerId, appInfo, url, options = {}, re
         }
       );
     }
+    if (isServiceProviderMismatch) {
+      clearDcrCache(programmerId, retryAppInfo.guid, resolvePremiumServiceKeyForAuth(retryAppInfo, debugMeta));
+      await ensureDcrAccessToken(programmerId, retryAppInfo, true, {
+        ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
+        forceFreshClientRegistration: true,
+      });
+      return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "none", debugMeta);
+    }
     await ensureDcrAccessToken(programmerId, retryAppInfo, true, debugMeta);
     return fetchWithPremiumAuth(programmerId, retryAppInfo, url, options, "reprovision", debugMeta);
   }
 
   if (response.status === 401 && retryStage === "restv2-token-refresh") {
-    const bodyText = await response.clone().text().catch(() => "");
-    if (isServiceProviderTokenMismatchError(bodyText)) {
-      emitRestV2DebugEvent(debugFlowId, {
-        source: "extension",
-        phase: "restv2-retry",
-        reason: "401-restv2-programmer-hydration-repair",
-        url: String(url || ""),
-        status: 401,
-        responsePreview: truncateDebugText(bodyText, 1200),
-        service: String(debugMeta?.service || ""),
-        requestScope: String(debugMeta?.scope || ""),
-        workspaceKey,
-        workspaceOrigin,
-      });
-      const programmer =
-        state.programmers.find((item) => String(item?.programmerId || "").trim() === String(programmerId || "").trim()) || null;
-      if (!programmer) {
-        return response;
-      }
-      const seedServices = getRuntimePremiumServicesSeed(programmerId);
-      await primeProgrammerServiceHydration(programmer, seedServices, {
-        forceRefresh: true,
-        renderOnReady: false,
-        controllerReason: "restv2-programmer-hydration-repair",
-      }).catch(() => null);
-      const refreshedServices = getRuntimePremiumServicesSeed(programmerId) || seedServices || null;
-      const retryAppInfo =
-        resolvePassVaultRuntimeBoundAppInfo(
-          programmerId,
-          resolveProgrammerPremiumServiceRuntimeApp("restV2", programmerId, refreshedServices, resolvedAppInfo) ||
-            resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) ||
-            resolvedAppInfo
-        ) ||
-        resolveLatestPremiumServiceAppInfo(programmerId, resolvedAppInfo, debugMeta) ||
-        resolvedAppInfo;
-      return fetchWithPremiumAuth(
-        programmerId,
-        retryAppInfo,
-        url,
-        options,
-        "restv2-hydration-repair",
-        {
-          ...(debugMeta && typeof debugMeta === "object" ? debugMeta : {}),
-          allowProvisioning: false,
-          lockAppSelection: true,
-        }
-      );
-    }
     return response;
   }
 
@@ -99369,9 +99385,9 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
     {
       method: "GET",
       mode: "cors",
-      headers: buildRestV2Headers(requestorId, {
+      headers: {
         Accept: "application/json",
-      }),
+      },
     },
     "refresh",
     {
@@ -99515,17 +99531,23 @@ async function loadMvpdsFromRestV2(requestorId) {
           }
           continue;
         }
-        const runtimeRestV2Candidates = collectProgrammerScopedRestV2AppCandidates(programmer.programmerId, premiumApps);
-        let runtimePrimaryApp =
-          resolvePassVaultRuntimeBoundAppInfo(
-            programmer.programmerId,
-            selectPreferredRestV2AppForRequestor(runtimeRestV2Candidates, requestorId, programmer.programmerId) ||
-              resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps)
-          ) ||
-          selectPreferredRestV2AppForRequestor(runtimeRestV2Candidates, requestorId, programmer.programmerId) ||
-          resolveProgrammerPremiumServiceRuntimeApp("restV2", programmer.programmerId, premiumApps);
+        // Select the right REST V2 app for this requestor.
+        // Prefer All Channels app (no channel hint), then matching channel, then first.
+        let runtimePrimaryApp = null;
+        const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps.filter((app) => app?.guid) : [];
+        const primaryCandidate = premiumApps?.restV2 || null;
+        const allCandidates = primaryCandidate?.guid
+          ? [primaryCandidate, ...restV2Apps.filter((app) => app.guid !== primaryCandidate.guid)]
+          : restV2Apps;
+
+        runtimePrimaryApp =
+          allCandidates.find((app) => app?.guid && isAllChannelsApp(app)) ||
+          allCandidates.find((app) => app?.guid && getRegisteredAppChannel(app).toLowerCase() === requestorId.toLowerCase()) ||
+          null;
+        if (runtimePrimaryApp?.guid) {
+          runtimePrimaryApp = resolvePassVaultRuntimeBoundAppInfo(programmer.programmerId, runtimePrimaryApp) || runtimePrimaryApp;
+        }
         const requiresRuntimeHydration =
-          !programmerReuseReadiness.reusable ||
           !runtimePrimaryApp?.guid ||
           !hasPassVaultServiceClientCredentials(programmer.programmerId, runtimePrimaryApp, "restV2");
         if (requiresRuntimeHydration) {
