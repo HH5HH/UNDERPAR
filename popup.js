@@ -170,7 +170,7 @@ const UNDERPAR_IBETA_HANDLER_BASE_URL = "https://hh5hh.com/ups/";
 const UNDERPAR_IBETA_HANDLER_STORE_URL = `${UNDERPAR_IBETA_HANDLER_BASE_URL}index.php?mode=store`;
 const UNDERPAR_IBETA_REQUEST_TIMEOUT_MS = 8000;
 const UNDERPAR_UPSPACE_SLACK_LINK_LABEL = "[ ^ ]";
-const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 6;
+const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 11;
 const UNDERPAR_DCR_CACHE_BINDING_VERSION = 2;
 const UNDERPAR_VAULT_STATUS_PENDING = "pending";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
@@ -6506,11 +6506,13 @@ const PASS_VAULT_SERVICE_PROVIDER_HINT_KEYS = Object.freeze([
   "requestorids",
   "requestor",
   "serviceprovider",
+  "channel",
 ]);
 
 const PASS_VAULT_PRIMARY_REQUESTOR_HINT_KEYS = Object.freeze([
   "requestor",
   "serviceprovider",
+  "channel",
 ]);
 
 function normalizePassVaultHintKey(value = "") {
@@ -6707,18 +6709,26 @@ function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackNam
     source?.contentProviders,
     source?.requestors,
     source?.requestorIds,
+    source?.serviceProvider,
+    source?.serviceProviderHint,
+    source?.channel,
     claimServiceProviders,
     source?.__rawEnvelope?.entityData?.serviceProviders,
     source?.__rawEnvelope?.entityData?.contentProviders,
     source?.__rawEnvelope?.entityData?.requestors,
-    source?.__rawEnvelope?.entityData?.requestorIds
+    source?.__rawEnvelope?.entityData?.requestorIds,
+    source?.__rawEnvelope?.entityData?.serviceProvider,
+    source?.__rawEnvelope?.entityData?.serviceProviderHint,
+    source?.__rawEnvelope?.entityData?.channel
   );
   const requestor = sanitizePassVaultHintValue(
     source?.requestor,
     source?.serviceProvider,
+    source?.channel,
     extractPassVaultPrimaryRequestorHintFromAppData(source),
     source?.__rawEnvelope?.entityData?.requestor,
-    source?.__rawEnvelope?.entityData?.serviceProvider
+    source?.__rawEnvelope?.entityData?.serviceProvider,
+    source?.__rawEnvelope?.entityData?.channel
   );
   const softwareStatement = extractSoftwareStatementFromAppData(source);
   const fetchOrder = Number(source?.__underparFetchOrder);
@@ -9098,17 +9108,169 @@ function compactPassVaultRegisteredApplicationsMatch(left = null, right = null) 
   return Boolean(leftIdentity) && leftIdentity === rightIdentity;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// All Channels Service Coverage Scan
+//
+// Walk 100% of a Media Company's registered applications ONCE.  For every DCR
+// service scope (restV2, esm, degradation, resetTempPass) determine:
+//
+//   1. Is there an "All Channels" app with that scope?
+//      → YES: lock it in as the winner for that scope.  Every child requestor
+//             is covered — no requestor-selector filtering needed.
+//      → NO:  collect the channel-specific apps for that scope and note each
+//             one's serviceProvider hint.  Downstream, the requestor selector
+//             must only show requestors that have coverage.
+//
+// Channel detection uses the SAME comprehensive hint extraction that powers
+// the Registered Application Health Inspector — entity data, appData, AND
+// software statement JWT claims are all checked.  This avoids the fragility
+// of getRegisteredAppChannel which only checks a subset of sources.
+//
+// Returns:
+//   {
+//     winnerByServiceKey:  { restV2: <appInfo|null>, esm: …, degradation: …, resetTempPass: … },
+//     allChannelsByServiceKey: { restV2: true|false, esm: …, … },
+//     channelAppsByServiceKey: { restV2: [{ app, channel }], … },
+//     requestorFilter:     null | Array<requestorId>   (null = unfiltered)
+//   }
+// ──────────────────────────────────────────────────────────────────────────────
+function scanAllChannelsServiceCoverage(registeredApplications = []) {
+  const apps = Array.isArray(registeredApplications) ? registeredApplications.filter((a) => a?.guid) : [];
+
+  // Per-scope accumulators
+  const allChannelsWinner = {};      // serviceKey → first "All Channels" app
+  const allChannelsFound = {};       // serviceKey → boolean
+  const channelSpecificApps = {};    // serviceKey → [{ app, channel }]
+  const allScopeApps = {};           // serviceKey → [app, …]
+
+  UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.forEach((def) => {
+    allChannelsWinner[def.serviceKey] = null;
+    allChannelsFound[def.serviceKey] = false;
+    channelSpecificApps[def.serviceKey] = [];
+    allScopeApps[def.serviceKey] = [];
+  });
+
+  // Single pass over every registered application.
+  // Use buildRegisteredApplicationHealthAppRecord (null context) to extract
+  // serviceProviderHints — the same comprehensive extraction that powers the
+  // Registered Application Health Inspector.  This checks entity data, appData
+  // top-level fields, AND software statement JWT claims in one shot.
+  for (const app of apps) {
+    // Build health-style record to get authoritative serviceProviderHints.
+    const healthRecord = buildRegisteredApplicationHealthAppRecord(app, null);
+    const hints = healthRecord
+      ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
+          .map((h) => String(h || "").trim())
+          .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
+      : [];
+    const appIsAllChannels = hints.length === 0;
+    const primaryChannel = hints[0] || "";
+
+    for (const def of UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS) {
+      const scopeMatch =
+        def.serviceKey === "degradation"
+          ? degradationAppHasRequiredScope(app)
+          : registeredApplicationMatchesNativeRequiredScope(app, def.requiredScope);
+      if (!scopeMatch) {
+        continue;
+      }
+
+      allScopeApps[def.serviceKey].push(app);
+
+      if (appIsAllChannels) {
+        // First "All Channels" app per scope wins — lock it in.
+        if (!allChannelsWinner[def.serviceKey]) {
+          allChannelsWinner[def.serviceKey] = app;
+        }
+        allChannelsFound[def.serviceKey] = true;
+      } else {
+        // Channel-specific: track every hint (an app can serve multiple channels).
+        hints.forEach((channel) => {
+          channelSpecificApps[def.serviceKey].push({ app, channel });
+        });
+      }
+    }
+  }
+
+  // Build the per-scope winner: "All Channels" winner takes absolute priority.
+  // Fall back to selectPreferredPassVaultHydrationServiceApplication only when
+  // no "All Channels" app exists for a given scope (it will rank by fetch order).
+  const winnerByServiceKey = {};
+  UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.forEach((def) => {
+    winnerByServiceKey[def.serviceKey] =
+      allChannelsWinner[def.serviceKey] ||
+      selectPreferredPassVaultHydrationServiceApplication(
+        def.serviceKey,
+        allScopeApps[def.serviceKey],
+        ""
+      ) ||
+      allScopeApps[def.serviceKey][0] ||
+      null;
+  });
+
+  // Requestor filter: union all channel-specific serviceProvider hints across
+  // every scope that does NOT have an "All Channels" winner.
+  // If EVERY scope has an "All Channels" winner, requestorFilter stays null
+  // (= unfiltered, show all requestors).
+  let requestorFilter = null;
+  const hasAnyChannelOnlyScope = UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.some(
+    (def) => !allChannelsFound[def.serviceKey] && channelSpecificApps[def.serviceKey].length > 0
+  );
+  if (hasAnyChannelOnlyScope) {
+    const covered = new Set();
+    UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.forEach((def) => {
+      if (allChannelsFound[def.serviceKey]) {
+        return; // This scope is universally covered — doesn't constrain the filter.
+      }
+      channelSpecificApps[def.serviceKey].forEach(({ channel }) => {
+        if (channel) {
+          covered.add(channel);
+        }
+      });
+    });
+    if (covered.size > 0) {
+      requestorFilter = Array.from(covered);
+    }
+  }
+
+  return {
+    winnerByServiceKey,
+    allChannelsByServiceKey: { ...allChannelsFound },
+    channelAppsByServiceKey: { ...channelSpecificApps },
+    allScopeAppsByServiceKey: { ...allScopeApps },
+    requestorFilter,
+  };
+}
+
 function resolvePassVaultHydrationServiceApplication({
   definition = null,
   programmerId = "",
   registeredApplications = [],
   existingRecord = null,
+  scanResult = null,
 } = {}) {
   const normalizedDefinition = definition && typeof definition === "object" ? definition : null;
   if (!normalizedDefinition) {
     return null;
   }
 
+  // ── All Channels scan result takes absolute priority ──────────────────────
+  // If the pre-scan found an "All Channels" winner for this scope, use it
+  // unconditionally — it supersedes any stale VAULT record.
+  const serviceKey = normalizedDefinition.serviceKey;
+  if (scanResult && typeof scanResult === "object") {
+    const scanWinner = scanResult.winnerByServiceKey?.[serviceKey] || null;
+    if (scanWinner?.guid && scanResult.allChannelsByServiceKey?.[serviceKey] === true) {
+      return buildPassVaultCompactRegisteredApplication(scanWinner);
+    }
+    // Scan ran but no "All Channels" app for this scope — still prefer the
+    // scan winner (best channel-specific candidate) over a stale vault record.
+    if (scanWinner?.guid) {
+      return buildPassVaultCompactRegisteredApplication(scanWinner);
+    }
+  }
+
+  // ── Fallback: original selection logic (no scan or empty scan) ────────────
   const normalizedApplications = Array.isArray(registeredApplications) ? registeredApplications : [];
   const matchingApplications = normalizedApplications.filter((application) =>
     registeredApplicationMatchesNativeRequiredScope(application, normalizedDefinition.requiredScope)
@@ -9162,6 +9324,9 @@ function buildPassVaultServiceHydrationEntries({
   const programmerId = String(programmer?.programmerId || "").trim();
   const entries = {};
 
+  // ── Run the comprehensive All Channels scan ONCE across all apps ──────────
+  const scanResult = scanAllChannelsServiceCoverage(registeredApplications);
+
   UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.forEach((definition) => {
     const existingService = buildPassVaultExistingHydrationServiceRecord(
       programmerId,
@@ -9173,6 +9338,7 @@ function buildPassVaultServiceHydrationEntries({
       programmerId,
       registeredApplications,
       existingRecord,
+      scanResult,
     });
     const appGuid = String(registeredApplication?.guid || "").trim();
     const cachedClient =
@@ -9205,6 +9371,10 @@ function buildPassVaultServiceHydrationEntries({
       status: registeredApplication ? (client?.clientId && client?.clientSecret ? "ready" : "pending") : "unavailable",
     };
   });
+
+  // Attach the scan result so downstream consumers (buildPassVaultDirectPremiumServicesSnapshot,
+  // getRequestorsForSelectedMediaCompany) can use the requestor filter and allChannels coverage.
+  entries.__scanResult = scanResult;
 
   return entries;
 }
@@ -9597,47 +9767,64 @@ function buildPassVaultDirectPremiumServicesSnapshot(
 ) {
   const programmerId = String(programmer?.programmerId || "").trim();
   const normalizedApplications = Array.isArray(registeredApplications) ? registeredApplications.filter((app) => app?.guid) : [];
-  const restV2Apps = normalizedApplications.filter((application) =>
-    registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE)
-  );
-  const esmApps = normalizedApplications.filter((application) =>
-    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_SCOPE_BY_KEY.esm)
-  );
-  const degradationApps = normalizedApplications.filter((application) =>
-    degradationAppHasRequiredScope(application)
-  );
-  const resetTempPassApps = normalizedApplications.filter((application) =>
-    registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)
-  );
+
+  // Reuse the scan result from the hydration entries when available.
+  // This keeps the All Channels selection in sync between the two code paths.
+  const scanResult =
+    hydratedServiceEntries?.__scanResult && typeof hydratedServiceEntries.__scanResult === "object"
+      ? hydratedServiceEntries.__scanResult
+      : scanAllChannelsServiceCoverage(normalizedApplications);
+
+  const restV2Apps = scanResult.allScopeAppsByServiceKey?.restV2?.length > 0
+    ? scanResult.allScopeAppsByServiceKey.restV2
+    : normalizedApplications.filter((application) =>
+        registeredApplicationMatchesNativeRequiredScope(application, REST_V2_SCOPE)
+      );
+  const esmApps = scanResult.allScopeAppsByServiceKey?.esm?.length > 0
+    ? scanResult.allScopeAppsByServiceKey.esm
+    : normalizedApplications.filter((application) =>
+        registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_SCOPE_BY_KEY.esm)
+      );
+  const degradationApps = scanResult.allScopeAppsByServiceKey?.degradation?.length > 0
+    ? scanResult.allScopeAppsByServiceKey.degradation
+    : normalizedApplications.filter((application) =>
+        degradationAppHasRequiredScope(application)
+      );
+  const resetTempPassApps = scanResult.allScopeAppsByServiceKey?.resetTempPass?.length > 0
+    ? scanResult.allScopeAppsByServiceKey.resetTempPass
+    : normalizedApplications.filter((application) =>
+        registeredApplicationMatchesNativeRequiredScope(application, PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE)
+      );
+
+  // Per-scope winner: prefer scan winner, then hydrated entry, then legacy fallback.
+  const resolveWinner = (serviceKey, apps) =>
+    scanResult.winnerByServiceKey?.[serviceKey] ||
+    hydratedServiceEntries?.[serviceKey]?.registeredApplication ||
+    selectPreferredPassVaultHydrationServiceApplication(serviceKey, apps, programmerId) ||
+    null;
 
   return applyPremiumServiceRuntimeSummary(
     programmer,
     {
       restV2Apps,
-      restV2:
-        hydratedServiceEntries?.restV2?.registeredApplication ||
-        selectPreferredPassVaultHydrationServiceApplication("restV2", restV2Apps, programmerId) ||
-        null,
+      restV2: resolveWinner("restV2", restV2Apps),
       esmApps,
-      esm:
-        hydratedServiceEntries?.esm?.registeredApplication ||
-        selectPreferredPassVaultHydrationServiceApplication("esm", esmApps, programmerId) ||
-        null,
+      esm: resolveWinner("esm", esmApps),
       degradationApps,
-      degradation:
-        hydratedServiceEntries?.degradation?.registeredApplication ||
-        selectPreferredPassVaultHydrationServiceApplication("degradation", degradationApps, programmerId) ||
-        null,
+      degradation: resolveWinner("degradation", degradationApps),
       resetTempPassApps,
-      resetTempPass:
-        hydratedServiceEntries?.resetTempPass?.registeredApplication ||
-        selectPreferredPassVaultHydrationServiceApplication("resetTempPass", resetTempPassApps, programmerId) ||
-        null,
+      resetTempPass: resolveWinner("resetTempPass", resetTempPassApps),
       cm: options?.cmServiceSnapshot ?? null,
       cmMvpd: options?.cmMvpdServiceSnapshot ?? null,
       cmMvpdSelectionKey: String(options?.cmMvpdSelectionKey || "").trim(),
       __underparLiveHydrated: true,
       __underparLiveHydratedAt: Date.now(),
+      // ── All Channels coverage metadata ──
+      // Consumed by getRequestorsForSelectedMediaCompany and
+      // syncRequestorSelectHydrationAvailability to decide whether the
+      // requestor selector should be filtered.
+      __allChannelsCoverage: scanResult.allChannelsByServiceKey || null,
+      __requestorFilter: scanResult.requestorFilter || null,
     },
     {
       cmCatalog: state.cmTenantsCatalog,
@@ -10217,14 +10404,18 @@ function shouldForceLivePassVaultProgrammerHydration(
   if (readiness.unavailableRequiredService && readiness.detectionVersion < UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION) {
     return true;
   }
+  // ── Force re-hydration for vault records created before the All Channels
+  // scan was introduced.  Without this, stale vault records that look
+  // "reusable" (complete + has credentials for a channel-specific app like
+  // TBS_RESTv2) would skip the scan and never discover "All Channels" apps. ──
+  if (readiness.detectionVersion < UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION) {
+    return true;
+  }
   // Older VAULT rows are reusable only when they already contain the detected
   // programmer service mappings and DCR credentials UnderPAR needs to execute
   // premium-service calls immediately after selection.
   if (readiness.reusable) {
     return false;
-  }
-  if (readiness.detectionVersion < UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION) {
-    return true;
   }
   return !(
     readiness.runtimeCoverage &&
@@ -10692,6 +10883,12 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || currentServices?.cmMvpd || null
       : currentServices?.cmMvpd || null;
     const registeredApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
+
+    // ── Enrich DCR-scoped apps with detail data before the All Channels scan ──
+    // The Console list API may omit serviceProvider/channel hints.  Fetching
+    // individual app details ensures isAllChannelsApp() returns correct results
+    // for the comprehensive per-scope scan that follows.
+    await enrichRegisteredApplicationsWithDetails(registeredApplications);
 
     setProgrammerPremiumHydrationProgress(programmerId, {
       step: "detect",
@@ -24649,20 +24846,29 @@ function buildRegisteredApplicationHealthAppRecord(appInfo = null, queryContext 
     normalizedApp?.requestorIds,
     normalizedApp?.requestor,
     normalizedApp?.serviceProvider,
+    normalizedApp?.channel,
     appData?.serviceProviders,
     appData?.contentProviders,
     appData?.requestors,
     appData?.requestorIds,
     appData?.requestor,
     appData?.serviceProvider,
+    appData?.channel,
+    appData?.__rawEnvelope?.entityData?.serviceProviders,
+    appData?.__rawEnvelope?.entityData?.requestors,
+    appData?.__rawEnvelope?.entityData?.requestor,
+    appData?.__rawEnvelope?.entityData?.serviceProvider,
+    appData?.__rawEnvelope?.entityData?.channel,
     collectPassVaultServiceProviderHintsFromAppData(appData, softwareStatement),
     collectPassVaultServiceProviderHintsFromAppData(normalizedApp, softwareStatement)
   );
   const requestorHint = sanitizePassVaultHintValue(
     normalizedApp?.requestor,
     normalizedApp?.serviceProvider,
+    normalizedApp?.channel,
     appData?.requestor,
     appData?.serviceProvider,
+    appData?.channel,
     extractPassVaultPrimaryRequestorHintFromAppData(appData, softwareStatement),
     extractPassVaultPrimaryRequestorHintFromAppData(normalizedApp, softwareStatement),
     serviceProviderHints[0]
@@ -49001,7 +49207,19 @@ async function buildUpDevtoolsMvpdInspectorSnapshot(environmentKey = "", entityT
     ? tmsRootPayload.entityData.rootEntityIds
     : [];
   rootEntityIds.forEach((entityRef) => addTmsEntityRef(entityRef));
-  addTmsEntityRef(`TMSIdMap:${row.id}`);
+  // Only attempt direct TMSIdMap fetch for the selected MVPD if the root entity
+  // list confirms the mapping exists, or if the root list couldn't be loaded.
+  if (row.id) {
+    const mvpdIdLower = String(row.id).trim().toLowerCase();
+    const rootHasSelectedMvpd = rootEntityIds.some((entityId) => {
+      const split = mvpdWorkspaceSplitEntityRef(String(entityId || ""));
+      return String(split.type || "").toLowerCase() === "tmsidmap" &&
+        String(split.id || "").trim().toLowerCase() === mvpdIdLower;
+    });
+    if (rootEntityIds.length === 0 || rootHasSelectedMvpd) {
+      addTmsEntityRef(`TMSIdMap:${row.id}`);
+    }
+  }
   addTmsEntityRef("TMSIdMap:default");
 
   const tmsEntityRefs = new Set();
@@ -56899,8 +57117,22 @@ async function mvpdWorkspaceResolveSnapshot(selectionContext) {
     ? tmsRootPayload.entityData.rootEntityIds
     : [];
   rootEntityIds.forEach((entityId) => addSelectedTmsEntityRef(entityId));
+  // Only attempt direct TMSIdMap fetch for the selected MVPD if the root entity
+  // list confirms the mapping exists.  Otherwise the Console returns a 404 that
+  // clutters the browser console (e.g. TMSIdMap/Comcast_SSO → 404).
   if (context.mvpdId) {
-    tmsEntityIds.add(`TMSIdMap:${context.mvpdId}`);
+    const mvpdIdLower = String(context.mvpdId).trim().toLowerCase();
+    const rootHasSelectedMvpd = rootEntityIds.some((entityId) => {
+      const split = mvpdWorkspaceSplitEntityRef(String(entityId || ""));
+      return String(split.type || "").toLowerCase() === "tmsidmap" &&
+        String(split.id || "").trim().toLowerCase() === mvpdIdLower;
+    });
+    // If root list is empty (fetch failed or not yet loaded), try the lookup
+    // anyway — we can't know if it exists.  If root list is populated and
+    // the MVPD isn't in it, skip to avoid the guaranteed 404.
+    if (rootEntityIds.length === 0 || rootHasSelectedMvpd) {
+      tmsEntityIds.add(`TMSIdMap:${context.mvpdId}`);
+    }
   }
   tmsEntityIds.add("TMSIdMap:default");
   const tmsEntityRefs = new Set();
@@ -86949,33 +87181,68 @@ function getRequestorsForSelectedMediaCompany() {
         label: requestorId,
       }));
 
-  // If the programmer has an "All Channels" REST V2 app, every requestor is valid.
-  // If not, only show requestors that have a matching channel-specific REST V2 app.
+  // ── Use All Channels scan metadata when available ──────────────────────────
+  // The __allChannelsCoverage and __requestorFilter fields are populated by
+  // scanAllChannelsServiceCoverage during hydration.  They reflect the
+  // authoritative per-scope scan across ALL registered applications.
   const programmerId = String(programmer.programmerId || "").trim();
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
   if (!premiumApps) {
     return allRequestors;
   }
-  const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps.filter((app) => app?.guid) : [];
-  const primaryApp = premiumApps?.restV2 || null;
-  const hasAllChannelsApp =
-    (primaryApp?.guid && isAllChannelsApp(primaryApp)) ||
-    restV2Apps.some((app) => isAllChannelsApp(app));
-  if (hasAllChannelsApp) {
-    return allRequestors;
+
+  // ── On-demand scan: if scan metadata is missing (vault-reuse path, stale
+  // snapshot), run the scan RIGHT NOW against the available applications data.
+  // This is the same scan that runs during live hydration, but executed
+  // synchronously here so the requestor filter is always authoritative. ───────
+  let scanRequestorFilter = Array.isArray(premiumApps?.__requestorFilter) && premiumApps.__requestorFilter.length > 0
+    ? premiumApps.__requestorFilter
+    : null;
+  let scanAllChannelsCoverage = premiumApps?.__allChannelsCoverage || null;
+
+  if (!scanAllChannelsCoverage || typeof scanAllChannelsCoverage !== "object") {
+    // Scan metadata is missing — reconstruct from available registered applications.
+    const applicationsData =
+      getCurrentProgrammerApplicationsSnapshot(programmerId) ||
+      buildPassVaultApplicationsSnapshotFromRegisteredApplications(
+        getPassVaultRegisteredApplicationsByGuid(getPassVaultMediaCompanyRecord(programmerId)) || {}
+      ) ||
+      null;
+    if (applicationsData && typeof applicationsData === "object" && Object.keys(applicationsData).length > 0) {
+      const registeredApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
+      if (registeredApplications.length > 0) {
+        const freshScan = scanAllChannelsServiceCoverage(registeredApplications);
+        scanAllChannelsCoverage = freshScan.allChannelsByServiceKey || null;
+        scanRequestorFilter = freshScan.requestorFilter || null;
+      }
+    }
   }
-  // No "All Channels" app — collect covered requestors from channel-specific apps
-  const coveredChannels = new Set(
-    restV2Apps
-      .map((app) => getRegisteredAppChannel(app).toLowerCase())
-      .filter(Boolean)
-  );
-  if (coveredChannels.size === 0) {
-    return allRequestors;
+
+  // If scan metadata is available, check whether ALL DCR scopes have "All Channels" coverage.
+  if (scanAllChannelsCoverage && typeof scanAllChannelsCoverage === "object") {
+    const everyServiceHasAllChannels = UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.every(
+      (def) => scanAllChannelsCoverage[def.serviceKey] === true ||
+        // If a scope has no apps at all, it doesn't constrain the filter.
+        !(Array.isArray(premiumApps?.[`${def.serviceKey}Apps`]) && premiumApps[`${def.serviceKey}Apps`].length > 0)
+    );
+    if (everyServiceHasAllChannels) {
+      return allRequestors;
+    }
+    // Use the scan's requestor filter (union of channel-specific service providers across scopes).
+    if (scanRequestorFilter && scanRequestorFilter.length > 0) {
+      const filterSet = new Set(scanRequestorFilter.map((id) => String(id || "").toLowerCase()));
+      const filtered = allRequestors.filter((option) =>
+        filterSet.has(String(option.id || "").toLowerCase())
+      );
+      // Safety: never produce an empty list.
+      if (filtered.length > 0) {
+        return filtered;
+      }
+    }
   }
-  return allRequestors.filter((option) =>
-    coveredChannels.has(String(option.id || "").toLowerCase())
-  );
+
+  // ── Fallback: show all requestors if scan couldn't determine coverage ──────
+  return allRequestors;
 }
 
 function populateRequestorSelect() {
@@ -87252,6 +87519,10 @@ async function refreshProgrammerPanels(options = {}) {
       isProgrammerHrContextHydrationReady(programmerId, reusableServices)
     );
     clearStatusUnlessCmTenantsPrecheckBlocked();
+    // Re-populate requestor select — the initial populateRequestorSelect() in
+    // selectProgrammerForController ran before hydration, so it didn't have
+    // scan metadata to filter by channel-specific DCR coverage.
+    populateRequestorSelect();
     syncRequestorSelectHydrationAvailability(programmerId, reusableServices);
     renderPremiumServices(reusableServices, programmer, { controllerReason });
     return;
@@ -87369,6 +87640,9 @@ async function refreshProgrammerPanels(options = {}) {
     clearProgrammerPremiumHydrationProgress(programmerId);
     setProgrammerWorkspaceHydrationReady(programmerId, hrContextReady);
     clearStatusUnlessCmTenantsPrecheckBlocked();
+    // Re-populate requestor select with scan metadata now that hydration has
+    // determined which requestors have DCR coverage.
+    populateRequestorSelect();
     syncRequestorSelectHydrationAvailability(programmerId, renderServices);
     renderPremiumServices(renderServices, programmer, { controllerReason });
 
@@ -88408,35 +88682,87 @@ function normalizeApplicationsResponse(payload) {
 // Channel indicator on registered applications.
 // Empty = "All Channels" (works for any requestor).
 // Has a value = only works for that specific requestor/channel.
-// CRITICAL: Only read from immutable Console entity data (entityData / appData).
-// Do NOT read from appInfo top-level fields — runtime promotion after /configuration
-// merges requestor context that would make All Channels apps look channel-specific.
+// CRITICAL: Only read from immutable Console entity data (entityData / appData)
+// and the software statement JWT.  Do NOT read from appInfo top-level fields —
+// runtime promotion after /configuration merges requestor context that would
+// make All Channels apps look channel-specific.
 function getRegisteredAppChannel(appInfo) {
   const appData =
     appInfo?.appData && typeof appInfo.appData === "object" && !Array.isArray(appInfo.appData)
       ? appInfo.appData
       : null;
   const entityData = appData?.__rawEnvelope?.entityData || appInfo?.__rawEnvelope?.entityData || null;
-  // ONLY check entityData from __rawEnvelope — the sole immutable Console source.
-  // Both appInfo top-level AND appData get runtime-tainted during promotion/merge.
-  if (!entityData) {
-    return "";
+
+  // ── Source 1: entityData from __rawEnvelope (immutable Console entity data) ──
+  if (entityData) {
+    const hints = sanitizePassVaultHintList(
+      entityData.serviceProviders,
+      entityData.contentProviders,
+      entityData.requestors,
+      entityData.requestorIds,
+      entityData.requestor,
+      entityData.serviceProvider,
+      entityData.serviceProviderHint,
+      entityData.channel
+    );
+    const raw = String(hints[0] || "").trim();
+    if (raw && raw.toLowerCase() !== "all channels" && raw !== "*") {
+      return raw;
+    }
+    // If entityData has explicit hints that resolve to "All Channels", return ""
+    // immediately — we have a definitive answer from the Console entity.
+    if (raw) {
+      return "";
+    }
+    // entityData exists but has NO hint fields at all — fall through to JWT.
   }
-  const hints = sanitizePassVaultHintList(
-    entityData.serviceProviders,
-    entityData.contentProviders,
-    entityData.requestors,
-    entityData.requestorIds,
-    entityData.requestor,
-    entityData.serviceProvider,
-    entityData.serviceProviderHint,
-    entityData.channel
-  );
-  const raw = String(hints[0] || "").trim();
-  if (!raw || raw.toLowerCase() === "all channels" || raw === "*") {
-    return "";
+
+  // ── Source 2: Software statement JWT claims ──
+  // The Console list API often omits serviceProviders from entityData.
+  // The software statement JWT contains the authoritative channel assignment
+  // in its claims (e.g. serviceProvider: "TBS" or requestors: ["CNN"]).
+  const softwareStatement = firstNonEmptyString([
+    appInfo?.softwareStatement,
+    appData?.softwareStatement,
+    extractSoftwareStatementFromAppData(appData),
+    extractSoftwareStatementFromAppData(appInfo),
+  ]);
+  if (softwareStatement) {
+    const jwtHints = collectPassVaultServiceProviderHintsFromAppData(null, softwareStatement);
+    const jwtRaw = String(jwtHints[0] || "").trim();
+    if (jwtRaw && jwtRaw.toLowerCase() !== "all channels" && jwtRaw !== "*") {
+      return jwtRaw;
+    }
+    // JWT has explicit "All Channels" or claims exist with no channel hints → All Channels.
+    if (jwtHints.length > 0) {
+      return "";
+    }
   }
-  return raw;
+
+  // ── Source 3: appData top-level fields (last resort) ──
+  // These can be runtime-tainted after /configuration merge, so only check
+  // them when entityData and JWT both came up empty.
+  if (appData) {
+    const appDataHints = sanitizePassVaultHintList(
+      appData.serviceProviders,
+      appData.contentProviders,
+      appData.requestors,
+      appData.requestorIds,
+      appData.requestor,
+      appData.serviceProvider,
+      appData.serviceProviderHint,
+      appData.channel
+    );
+    const appDataRaw = String(appDataHints[0] || "").trim();
+    if (appDataRaw && appDataRaw.toLowerCase() !== "all channels" && appDataRaw !== "*") {
+      return appDataRaw;
+    }
+  }
+
+  // No channel information found from any source.
+  // This is ambiguous — the app MIGHT be channel-specific but we can't tell.
+  // Return "" to treat as "All Channels" for backwards compatibility.
+  return "";
 }
 
 function isAllChannelsApp(appInfo) {
@@ -90105,6 +90431,98 @@ function findFirstPremiumServiceApplications(applications = []) {
   return services;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Enrich registered applications with detail data from Console.
+//
+// The Console list API (GET /applications?programmer=…) may return sparse
+// entity data that omits the serviceProviders / channel field.  When that
+// happens, isAllChannelsApp() can't tell which apps are "All Channels".
+//
+// This function fetches individual application details for every DCR-scoped
+// app that is missing its serviceProvider hints.  It mutates the appInfo
+// objects in place so the downstream All Channels scan has what it needs.
+//
+// Called once during hydration, BEFORE buildPassVaultServiceHydrationEntries.
+// ──────────────────────────────────────────────────────────────────────────────
+async function enrichRegisteredApplicationsWithDetails(registeredApplications = []) {
+  const apps = Array.isArray(registeredApplications) ? registeredApplications.filter((a) => a?.guid) : [];
+  if (apps.length === 0) {
+    return;
+  }
+
+  const hasServiceProviderHints = (appInfo) => {
+    const appData = appInfo?.appData;
+    if (!appData || typeof appData !== "object") {
+      return false;
+    }
+    const fields = [
+      appData.serviceProviders,
+      appData.contentProviders,
+      appData.requestors,
+      appData.requestorIds,
+      appData.requestor,
+      appData.serviceProvider,
+      appData.serviceProviderHint,
+      appData.channel,
+      appData.__rawEnvelope?.entityData?.serviceProviders,
+      appData.__rawEnvelope?.entityData?.contentProviders,
+      appData.__rawEnvelope?.entityData?.requestors,
+      appData.__rawEnvelope?.entityData?.requestorIds,
+      appData.__rawEnvelope?.entityData?.channel,
+    ];
+    return fields.some((value) => {
+      if (typeof value === "string") {
+        return value.trim().length > 0;
+      }
+      if (Array.isArray(value)) {
+        return value.some((item) => String(item || "").trim().length > 0);
+      }
+      return false;
+    });
+  };
+
+  const isDcrScoped = (appInfo) =>
+    KNOWN_PREMIUM_SERVICE_SCOPES.some((scope) =>
+      (Array.isArray(appInfo?.scopes) ? appInfo.scopes : [])
+        .map((s) => normalizeScope(s))
+        .includes(scope)
+    );
+
+  const needsEnrichment = apps.filter((app) => isDcrScoped(app) && !hasServiceProviderHints(app));
+  if (needsEnrichment.length === 0) {
+    return;
+  }
+
+  // Fetch details in parallel with a concurrency cap to avoid hammering Console.
+  const BATCH_SIZE = 4;
+  for (let i = 0; i < needsEnrichment.length; i += BATCH_SIZE) {
+    const batch = needsEnrichment.slice(i, i + BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map(async (appInfo) => {
+        try {
+          const details = await fetchApplicationDetailsByGuid(appInfo.guid, {
+            timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+            preferAuthenticatedHeaders: true,
+            preferredTabId: 0,
+            allowTemporaryPageContextTab: true,
+          });
+          if (details && typeof details === "object") {
+            appInfo.appData = {
+              ...(appInfo.appData || {}),
+              ...details,
+            };
+            if (!appInfo.softwareStatement) {
+              appInfo.softwareStatement = extractSoftwareStatementFromAppData(details);
+            }
+          }
+        } catch {
+          // Best-effort — isAllChannelsApp will fall back to treating missing hints as "All Channels".
+        }
+      })
+    );
+  }
+}
+
 async function enrichPremiumAppsWithSoftwareStatements(premiumApps) {
   const uniqueApps = new Map();
   const pushApp = (appInfo) => {
@@ -90114,9 +90532,26 @@ async function enrichPremiumAppsWithSoftwareStatements(premiumApps) {
     uniqueApps.set(appInfo.guid, appInfo);
   };
 
+  // ── Enrich ALL DCR-scoped apps, not just the primary winners ──────────────
+  // This ensures isAllChannelsApp() has the entityData it needs for every
+  // candidate, so the "All Channels" scan produces correct results even when
+  // the Console list API returns sparse entity data.
   pushApp(premiumApps?.degradation);
   pushApp(premiumApps?.esm);
   pushApp(premiumApps?.restV2);
+  pushApp(premiumApps?.resetTempPass);
+  if (Array.isArray(premiumApps?.restV2Apps)) {
+    premiumApps.restV2Apps.forEach((app) => pushApp(app));
+  }
+  if (Array.isArray(premiumApps?.esmApps)) {
+    premiumApps.esmApps.forEach((app) => pushApp(app));
+  }
+  if (Array.isArray(premiumApps?.degradationApps)) {
+    premiumApps.degradationApps.forEach((app) => pushApp(app));
+  }
+  if (Array.isArray(premiumApps?.resetTempPassApps)) {
+    premiumApps.resetTempPassApps.forEach((app) => pushApp(app));
+  }
 
   const hasServiceProviderHints = (appInfo) => {
     const appData = appInfo?.appData;
@@ -90208,17 +90643,17 @@ function collectProgrammerScopedRestV2AppCandidates(programmerId = "", premiumAp
     candidates.push(appInfo);
   };
 
+  // ── Merge ALL sources — do NOT short-circuit after the first source ───────
+  // The vault-seeded premiumApps may only contain a stale channel-specific app
+  // (e.g. TBS_RESTv2).  The full applications data from Console contains the
+  // "All Channels" apps that should take priority.  By always merging every
+  // source, selectPreferredPassVaultHydrationServiceApplication sees ALL
+  // candidates and can properly rank "All Channels" apps first.
   collectRestV2AppCandidatesFromPremiumApps(premiumApps).forEach((appInfo) => pushCandidate(appInfo));
-  if (candidates.length > 0) {
-    return candidates;
-  }
 
   const existingRecord = getPassVaultMediaCompanyRecord(normalizedProgrammerId);
   const vaultServices = buildPassVaultRuntimeServicesSnapshot(existingRecord) || null;
   collectRestV2AppCandidatesFromPremiumApps(vaultServices).forEach((appInfo) => pushCandidate(appInfo));
-  if (candidates.length > 0) {
-    return candidates;
-  }
 
   const runtimeApplications =
     getCurrentProgrammerApplicationsSnapshot(normalizedProgrammerId) ||
