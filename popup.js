@@ -31770,15 +31770,24 @@ function getRestV2ProfileHarvestForContext(context = null) {
       }
     }
 
-    if (selectionHarvest && typeof selectionHarvest === "object") {
+    // Only return non-bucket harvests if they represent a confirmed profile.
+    // Seed harvests (profileCount=0, profileCheckOutcome="seed") must not leak
+    // into callers — they are placeholders for the login flow, not usable profiles.
+    if (isUsableRestV2ProfileHarvest(selectionHarvest)) {
       return selectionHarvest;
     }
 
     if (selectionKey && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)) {
-      return state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null;
+      const fallbackSelection = state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null;
+      if (isUsableRestV2ProfileHarvest(fallbackSelection)) {
+        return fallbackSelection;
+      }
     }
     if (programmerId && state.restV2ProfileHarvestByProgrammerId.has(programmerId)) {
-      return state.restV2ProfileHarvestByProgrammerId.get(programmerId) || null;
+      const fallbackProgrammer = state.restV2ProfileHarvestByProgrammerId.get(programmerId) || null;
+      if (isUsableRestV2ProfileHarvest(fallbackProgrammer)) {
+        return fallbackProgrammer;
+      }
     }
   }
 
@@ -31791,7 +31800,7 @@ function getRestV2ProfileHarvestForContext(context = null) {
     return latestFromBuckets;
   }
 
-  return state.restV2ProfileHarvestLast && typeof state.restV2ProfileHarvestLast === "object" ? state.restV2ProfileHarvestLast : null;
+  return isUsableRestV2ProfileHarvest(state.restV2ProfileHarvestLast) ? state.restV2ProfileHarvestLast : null;
 }
 
 function resolveRestV2PartnerSsoFlowCacheKey(context = null, flowId = "") {
@@ -63585,10 +63594,13 @@ function buildBobtoolsWorkspaceHarvestList(programmer = null, appInfoOverride = 
   const bucketHarvestList = programmerId ? getRestV2ProfileHarvestBucketForProgrammer(programmerId) : [];
   const currentSelectionContext = buildCurrentRestV2SelectionContext(resolvedProgrammer, appInfoOverride);
   const currentSelectionHarvest = currentSelectionContext?.ok ? getRestV2ProfileHarvestForContext(currentSelectionContext) : null;
-  return mergeRestV2ProfileHarvestLists(
+  const merged = mergeRestV2ProfileHarvestLists(
     currentSelectionHarvest && typeof currentSelectionHarvest === "object" ? [currentSelectionHarvest] : [],
     bucketHarvestList
   );
+  // Exclude ghost/seed harvests (profileCount=0 or profileCheckOutcome != "success")
+  // so BOBTOOLS and Can I Watch? never see unconfirmed shells.
+  return merged.filter((harvest) => isUsableRestV2ProfileHarvest(harvest));
 }
 
 function buildBobtoolsWorkspaceSelectionContext(programmer = null, appInfoOverride = null) {
@@ -63600,12 +63612,15 @@ function buildBobtoolsWorkspaceSelectionContext(programmer = null, appInfoOverri
   const selectedMvpd = String(state.selectedMvpdId || "").trim();
   let selectedHarvest = null;
   if (selectedRequestorId && selectedMvpd) {
-    selectedHarvest = findRestV2HarvestByRequestorAndMvpd(harvestList, selectedRequestorId, selectedMvpd, {
+    const candidate = findRestV2HarvestByRequestorAndMvpd(harvestList, selectedRequestorId, selectedMvpd, {
       allowSsoAlias: true,
     });
+    if (isUsableRestV2ProfileHarvest(candidate)) {
+      selectedHarvest = candidate;
+    }
   }
   if (!selectedHarvest && harvestList.length > 0) {
-    selectedHarvest = harvestList[0];
+    selectedHarvest = harvestList.find((h) => isUsableRestV2ProfileHarvest(h)) || null;
   }
   const requestorId = String(selectedHarvest?.requestorId || selectedHarvest?.serviceProviderId || selectedRequestorId || "").trim();
   const mvpd = String(selectedHarvest?.mvpd || selectedMvpd || "").trim();
