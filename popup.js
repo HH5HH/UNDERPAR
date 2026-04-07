@@ -8511,7 +8511,7 @@ function clearPassVaultProgrammerRuntimeState(programmerId = "", environmentKey 
     return;
   }
   state.applicationsByKey.delete(normalizedProgrammerId);
-  state.programmerApplicationsLoadPromiseByKey.delete(normalizedProgrammerId);
+  state.programmerApplicationsLoadPromiseByProgrammerId.delete(normalizedProgrammerId);
   state.premiumAppsByKey.delete(normalizedProgrammerId);
   state.cmServiceByProgrammerId.delete(normalizedProgrammerId);
   state.cmServiceLoadPromiseByProgrammerId.delete(normalizedProgrammerId);
@@ -8770,7 +8770,7 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.restV2ProfileHarvestBucketByProgrammerId.clear();
   state.restV2ProfileHarvestLast = null;
   state.applicationsByKey.clear();
-  state.programmerApplicationsLoadPromiseByKey.clear();
+  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByKey.clear();
   state.programmerWorkspaceHydrationReadyByKey.clear();
   state.premiumHydrationProgressByProgrammerKey.clear();
@@ -11386,7 +11386,7 @@ function clearEnvironmentAwareRegisteredAppState(reason = "environment-change") 
   clearHarpoRecordingState(reason, { stopFlow: true });
   state.restV2PrewarmedAppsByProgrammerId.clear();
   state.applicationsByKey.clear();
-  state.programmerApplicationsLoadPromiseByKey.clear();
+  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByKey.clear();
   state.dcrEnsureTokenPromiseByKey.clear();
   state.restV2ProfileHarvestBySelectionKey.clear();
@@ -13972,7 +13972,7 @@ const state = {
   restV2TraceViewerWindowId: 0,
   restV2TraceViewerTabId: 0,
   applicationsByKey: new Map(),
-  programmerApplicationsLoadPromiseByKey: new Map(),
+  programmerApplicationsLoadPromiseByProgrammerId: new Map(),
   premiumAppsByKey: new Map(),
   programmerWorkspaceHydrationReadyByKey: new Map(),
   premiumHydrationProgressByProgrammerKey: new Map(),
@@ -31502,7 +31502,7 @@ function storeRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
   const selectionKey = buildRestV2ProfileHarvestSelectionKey(context);
   const selectionHarvest =
     selectionKey && selectionKey !== "||" && state.restV2ProfileHarvestBySelectionKey instanceof Map && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
-      ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null
+      ? (state.restV2ProfileHarvestBySelectionKey instanceof Map ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) : null) || null
       : null;
   if (selectionHarvest && typeof selectionHarvest === "object") {
     mergedHarvest = mergeRestV2HarvestWithPreauthzChecks(mergedHarvest, selectionHarvest);
@@ -31816,7 +31816,7 @@ function getRestV2ProfileHarvestListForContext(context = null) {
       const selectionKey = buildRestV2ProfileHarvestSelectionKey(context);
       const selectionHarvest =
         selectionKey && state.restV2ProfileHarvestBySelectionKey instanceof Map && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
-          ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null
+          ? (state.restV2ProfileHarvestBySelectionKey instanceof Map ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) : null) || null
           : null;
       return selectionHarvest && typeof selectionHarvest === "object" ? [selectionHarvest] : [];
     }
@@ -31934,7 +31934,7 @@ function getRestV2ProfileHarvestForContext(context = null) {
     const selectionKey = buildRestV2ProfileHarvestSelectionKey(context);
     const selectionHarvest =
       selectionKey && state.restV2ProfileHarvestBySelectionKey instanceof Map && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
-        ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null
+        ? (state.restV2ProfileHarvestBySelectionKey instanceof Map ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) : null) || null
         : null;
     if (isUsableRestV2ProfileHarvest(selectionHarvest)) {
       return selectionHarvest;
@@ -63469,7 +63469,7 @@ function storeRestV2LearningContextSeed(context = null, flowId = "") {
     return null;
   }
   const existingSelectionHarvest =
-    state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
+    state.restV2ProfileHarvestBySelectionKey instanceof Map && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
       ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null
       : null;
   const mergedHarvest = mergeRestV2HarvestWithPreauthzChecks(
@@ -77121,7 +77121,7 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.pendingEnvironmentSwitchSelectionRestore = null;
   state.pendingEnvironmentSwitchSelectionRestorePromise = null;
   state.applicationsByKey.clear();
-  state.programmerApplicationsLoadPromiseByKey.clear();
+  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByKey.clear();
   state.programmerWorkspaceHydrationReadyByKey.clear();
   state.premiumHydrationProgressByProgrammerKey.clear();
@@ -100786,7 +100786,7 @@ function resetProgrammerRuntimeState() {
   clearHarpoPanelStatus();
   clearHarpoRecordingState("programmer-reset", { stopFlow: true });
   state.applicationsByKey.clear();
-  state.programmerApplicationsLoadPromiseByKey.clear();
+  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
   state.premiumAppsByKey.clear();
   state.programmerWorkspaceHydrationReadyByKey.clear();
   state.premiumHydrationProgressByProgrammerKey.clear();
