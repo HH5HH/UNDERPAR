@@ -20468,11 +20468,10 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
   const actionLabel = getBobtoolsRestV2ActionLabel(decisionMode);
   const scopeKey = decisionMode === BOBTOOLS_REST_V2_ACTION_AUTHORIZE ? "decisions-authorize" : "decisions-preauthorize";
 
-  const serviceProviderId = String(harvest?.serviceProviderId || harvest?.requestorId || "").trim();
   const selectedMvpd = String(harvest?.mvpd || "").trim();
   const endpointMvpd = String(resolveRestV2DecisionMvpd(harvest) || "").trim();
   const programmerId = String(harvest?.programmerId || "").trim();
-  if (!serviceProviderId || !selectedMvpd || !endpointMvpd) {
+  if (!selectedMvpd || !endpointMvpd) {
     throw new Error("Missing service provider or MVPD from the selected MVPD profile.");
   }
   if (!programmerId) {
@@ -20484,134 +20483,159 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
     throw new Error(`Unable to resolve REST V2 application context for ${decisionMode}.`);
   }
 
-  const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/decisions/${encodeURIComponent(
-    decisionMode
-  )}/${encodeURIComponent(endpointMvpd)}`;
-  const requestHeaders = buildRestV2Headers(serviceProviderId, {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  });
+  const harvestContext = buildRestV2ContextFromHarvest(harvest) || {
+    programmerId,
+    requestorId: String(harvest?.requestorId || harvest?.serviceProviderId || "").trim(),
+    serviceProviderId: String(harvest?.serviceProviderId || harvest?.requestorId || "").trim(),
+    mvpd: selectedMvpd,
+    appInfo,
+    loginUrl: normalizeAdobeNavigationUrl(String(harvest?.loginUrl || "").trim()),
+    sessionUrl: normalizeAdobeNavigationUrl(String(harvest?.sessionUrl || "").trim()),
+    sessionData: harvest?.sessionData && typeof harvest.sessionData === "object" ? harvest.sessionData : null,
+  };
+  const serviceProviderCandidates = buildRestV2ServiceProviderCandidatesFromContext(harvestContext);
+  if (serviceProviderCandidates.length === 0) {
+    throw new Error("Missing service provider or MVPD from the selected MVPD profile.");
+  }
+
   const requestBody = JSON.stringify({
     resources: resourceIds,
   });
 
   const flowId = resolveRestV2DebugFlowIdForHarvest(harvest);
-  emitRestV2DebugEvent(flowId, {
-    source: "extension",
-    phase: `${scopeKey}-request`,
-    method: "POST",
-    url: endpointUrl,
-    scope: scopeKey,
-    requestorId: String(harvest?.requestorId || ""),
-    mvpd: selectedMvpd,
-    decisionMvpd: endpointMvpd,
-    programmerId,
-    appGuid: String(appInfo?.guid || ""),
-    appName: String(appInfo?.appName || appInfo?.guid || ""),
-    authMode: "dcr_client_bearer",
-    body: cloneJsonLikeValue({ resources: resourceIds }, {}),
-  });
+  let lastThrownError = null;
+  for (let index = 0; index < serviceProviderCandidates.length; index += 1) {
+    const serviceProviderId = String(serviceProviderCandidates[index] || "").trim();
+    const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/decisions/${encodeURIComponent(
+      decisionMode
+    )}/${encodeURIComponent(endpointMvpd)}`;
+    const requestHeaders = buildRestV2Headers(serviceProviderId, {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    });
 
-  const response = await fetchWithPremiumAuth(
-    programmerId,
-    appInfo,
-    endpointUrl,
-    {
+    emitRestV2DebugEvent(flowId, {
+      source: "extension",
+      phase: `${scopeKey}-request`,
       method: "POST",
-      mode: "cors",
-      headers: requestHeaders,
-      body: requestBody,
-    },
-    "refresh",
-    {
-      flowId,
-      requestorId: String(harvest?.requestorId || serviceProviderId || ""),
-      mvpd: endpointMvpd,
+      url: endpointUrl,
       scope: scopeKey,
-      service: "rest-v2-entitlements",
+      requestorId: String(harvest?.requestorId || ""),
+      serviceProviderId,
+      mvpd: selectedMvpd,
+      decisionMvpd: endpointMvpd,
+      programmerId,
+      appGuid: String(appInfo?.guid || ""),
+      appName: String(appInfo?.appName || appInfo?.guid || ""),
+      authMode: "dcr_client_bearer",
+      body: cloneJsonLikeValue({ resources: resourceIds }, {}),
+    });
+
+    const response = await fetchWithPremiumAuth(
+      programmerId,
+      appInfo,
       endpointUrl,
+      {
+        method: "POST",
+        mode: "cors",
+        headers: requestHeaders,
+        body: requestBody,
+      },
+      "refresh",
+      {
+        flowId,
+        requestorId: String(harvest?.requestorId || serviceProviderId || ""),
+        serviceProviderId,
+        mvpd: endpointMvpd,
+        scope: scopeKey,
+        service: "rest-v2-entitlements",
+        endpointUrl,
+      }
+    );
+    const responseText = await response.text().catch(() => "");
+    const parsedPayload = parseJsonText(responseText, null);
+    const decisionRows = applyRestV2TopLevelErrorToDecisionRows(
+      extractRestV2PreauthorizeDecisionRows(parsedPayload, resourceIds),
+      parsedPayload
+    );
+    const decisionSummary = summarizeRestV2PreauthorizeRows(decisionRows, resourceIds);
+    const checkedAt = Date.now();
+    const checkedAtLabel = formatTimestampLabel(checkedAt);
+    const resourceIdChips = bobtoolsWorkspaceResolveMappedResourceIdChips(
+      programmerId,
+      String(harvest?.requestorId || serviceProviderId || "").trim(),
+      selectedMvpd,
+      resourceIds
+    );
+
+    const result = {
+      checkedAt,
+      checkedAtLabel,
+      ok: response.ok === true,
+      status: Number(response.status || 0),
+      statusText: String(response.statusText || "").trim(),
+      programmerId,
+      appGuid: String(appInfo?.guid || "").trim(),
+      appName: String(appInfo?.appName || appInfo?.guid || "").trim(),
+      authMode: "dcr_client_bearer",
+      endpointUrl,
+      requestBody: {
+        resources: resourceIds.slice(),
+      },
+      method: "POST",
+      apiAction: decisionMode,
+      apiActionLabel: actionLabel,
+      resultType: "decisions",
+      serviceProviderId,
+      requestorId: String(harvest?.requestorId || serviceProviderId || "").trim(),
+      mvpd: selectedMvpd,
+      decisionMvpd: endpointMvpd,
+      harvestKey: getRestV2HarvestRecordKey(harvest),
+      harvestCapturedAt: Number(harvest?.harvestedAt || 0),
+      subject: String(harvest?.subject || "").trim(),
+      upstreamUserId: String(harvest?.upstreamUserId || "").trim(),
+      userId: String(harvest?.userId || "").trim(),
+      sessionId: String(harvest?.sessionId || "").trim(),
+      profileKey: String(harvest?.profileKey || "").trim(),
+      resourceIds: resourceIds.slice(),
+      resourceIdChips,
+      decisionRows,
+      permitCount: decisionSummary.permitCount,
+      denyCount: decisionSummary.denyCount,
+      unknownCount: decisionSummary.unknownCount,
+      allRequestedPermitted: decisionSummary.allRequestedPermitted,
+      responsePreview: truncateDebugText(responseText, 3000),
+      responsePayload: parsedPayload ?? responseText,
+      error: "",
+    };
+
+    emitRestV2DebugEvent(flowId, {
+      source: "extension",
+      phase: `${scopeKey}-response`,
+      method: "POST",
+      url: endpointUrl,
+      scope: scopeKey,
+      status: result.status,
+      statusText: result.statusText,
+      requestorId: result.requestorId,
+      serviceProviderId,
+      mvpd: result.mvpd,
+      decisionMvpd: result.decisionMvpd,
+      programmerId,
+      appGuid: result.appGuid,
+      appName: result.appName,
+      authMode: result.authMode,
+      decisionRows: cloneJsonLikeValue(decisionRows, []),
+      permitCount: result.permitCount,
+      denyCount: result.denyCount,
+      unknownCount: result.unknownCount,
+      responsePreview: result.responsePreview,
+    });
+
+    if (response.ok) {
+      return result;
     }
-  );
-  const responseText = await response.text().catch(() => "");
-  const parsedPayload = parseJsonText(responseText, null);
-  const decisionRows = applyRestV2TopLevelErrorToDecisionRows(
-    extractRestV2PreauthorizeDecisionRows(parsedPayload, resourceIds),
-    parsedPayload
-  );
-  const decisionSummary = summarizeRestV2PreauthorizeRows(decisionRows, resourceIds);
-  const checkedAt = Date.now();
-  const checkedAtLabel = formatTimestampLabel(checkedAt);
-  const resourceIdChips = bobtoolsWorkspaceResolveMappedResourceIdChips(
-    programmerId,
-    String(harvest?.requestorId || serviceProviderId || "").trim(),
-    selectedMvpd,
-    resourceIds
-  );
 
-  const result = {
-    checkedAt,
-    checkedAtLabel,
-    ok: response.ok === true,
-    status: Number(response.status || 0),
-    statusText: String(response.statusText || "").trim(),
-    programmerId,
-    appGuid: String(appInfo?.guid || "").trim(),
-    appName: String(appInfo?.appName || appInfo?.guid || "").trim(),
-    authMode: "dcr_client_bearer",
-    endpointUrl,
-    requestBody: {
-      resources: resourceIds.slice(),
-    },
-    method: "POST",
-    apiAction: decisionMode,
-    apiActionLabel: actionLabel,
-    resultType: "decisions",
-    serviceProviderId,
-    requestorId: String(harvest?.requestorId || serviceProviderId || "").trim(),
-    mvpd: selectedMvpd,
-    decisionMvpd: endpointMvpd,
-    harvestKey: getRestV2HarvestRecordKey(harvest),
-    harvestCapturedAt: Number(harvest?.harvestedAt || 0),
-    subject: String(harvest?.subject || "").trim(),
-    upstreamUserId: String(harvest?.upstreamUserId || "").trim(),
-    userId: String(harvest?.userId || "").trim(),
-    sessionId: String(harvest?.sessionId || "").trim(),
-    profileKey: String(harvest?.profileKey || "").trim(),
-    resourceIds: resourceIds.slice(),
-    resourceIdChips,
-    decisionRows,
-    permitCount: decisionSummary.permitCount,
-    denyCount: decisionSummary.denyCount,
-    unknownCount: decisionSummary.unknownCount,
-    allRequestedPermitted: decisionSummary.allRequestedPermitted,
-    responsePreview: truncateDebugText(responseText, 3000),
-    responsePayload: parsedPayload ?? responseText,
-    error: "",
-  };
-
-  emitRestV2DebugEvent(flowId, {
-    source: "extension",
-    phase: `${scopeKey}-response`,
-    method: "POST",
-    url: endpointUrl,
-    scope: scopeKey,
-    status: result.status,
-    statusText: result.statusText,
-    requestorId: result.requestorId,
-    mvpd: result.mvpd,
-    decisionMvpd: result.decisionMvpd,
-    programmerId,
-    appGuid: result.appGuid,
-    appName: result.appName,
-    authMode: result.authMode,
-    decisionRows: cloneJsonLikeValue(decisionRows, []),
-    permitCount: result.permitCount,
-    denyCount: result.denyCount,
-    unknownCount: result.unknownCount,
-    responsePreview: result.responsePreview,
-  });
-
-  if (!response.ok) {
     const enhancedError = normalizeRestV2EnhancedError(parsedPayload || responseText, {
       httpStatus: result.status,
     });
@@ -20626,11 +20650,6 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
       result.enhancedError = enhancedError;
     }
 
-    // ---- authenticated_profile_missing recovery via /profiles/code/{code} ----
-    // After a successful REST V2 MVPD login the decisions endpoint may return 403
-    // authenticated_profile_missing even though the session IS valid.  Attempt to
-    // retrieve the profile through the session-code endpoint so callers can
-    // confirm the session, re-harvest the profile, and surface a clear diagnostic.
     if (errorCode === "authenticated_profile_missing" || hasRestV2AuthenticatedProfileMissingSignal(result)) {
       try {
         const recovery = await attemptRestV2SessionCodeProfileRecovery(harvest, flowId, "decision-profile-recovery");
@@ -20673,10 +20692,20 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
       }
     }
 
-    throw Object.assign(new Error(`${actionLabel} failed (${result.status}): ${errorMessage}`), { underparResult: result });
+    const invalidServiceProviderResponse =
+      Number(result.status || 0) === 400 && errorCode === "invalid_parameter_service_provider";
+    const retryableInvalidSp = invalidServiceProviderResponse && index < serviceProviderCandidates.length - 1;
+    const thrownError = Object.assign(new Error(`${actionLabel} failed (${result.status}): ${errorMessage}`), {
+      underparResult: result,
+    });
+    if (retryableInvalidSp) {
+      lastThrownError = thrownError;
+      continue;
+    }
+    throw thrownError;
   }
 
-  return result;
+  throw lastThrownError || new Error(`${actionLabel} failed.`);
 }
 
 async function fetchRestV2PreauthorizeDecisions(harvest, resourceIds) {
