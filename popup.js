@@ -8773,6 +8773,7 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.harpoSelectedDomainByRequestor.clear();
   state.harpoReproOpenByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
+  state.restV2ConfigurationServiceProviderByRequestor.clear();
   clearHarpoPanelStatus();
   clearHarpoRecordingState(controllerReason, { stopFlow: true });
   state.restV2PrewarmedAppsByProgrammerId.clear();
@@ -11528,6 +11529,28 @@ function setRequestorScopedRestV2AuthContext(requestorId = "", value = null) {
   return normalized;
 }
 
+function getRequestorScopedRestV2ConfigurationServiceProvider(requestorId = "") {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return "";
+  }
+  return String(state.restV2ConfigurationServiceProviderByRequestor.get(key) || "").trim();
+}
+
+function setRequestorScopedRestV2ConfigurationServiceProvider(requestorId = "", serviceProviderId = "") {
+  const key = getEnvironmentScopedRequestorKey(requestorId);
+  if (!key) {
+    return "";
+  }
+  const normalizedServiceProviderId = String(serviceProviderId || "").trim();
+  if (!normalizedServiceProviderId) {
+    state.restV2ConfigurationServiceProviderByRequestor.delete(key);
+    return "";
+  }
+  state.restV2ConfigurationServiceProviderByRequestor.set(key, normalizedServiceProviderId);
+  return normalizedServiceProviderId;
+}
+
 function clearEnvironmentAwareRegisteredAppState(reason = "environment-change") {
   state.mvpdCacheByRequestor.clear();
   state.mvpdLoadPromiseByRequestor.clear();
@@ -11535,6 +11558,7 @@ function clearEnvironmentAwareRegisteredAppState(reason = "environment-change") 
   state.harpoSelectedDomainByRequestor.clear();
   state.harpoReproOpenByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
+  state.restV2ConfigurationServiceProviderByRequestor.clear();
   clearHarpoPanelStatus();
   clearHarpoRecordingState(reason, { stopFlow: true });
   state.restV2PrewarmedAppsByProgrammerId.clear();
@@ -14100,6 +14124,7 @@ const state = {
   harpoStatusTone: "info",
   harpoStatusRequestorId: "",
   restV2AuthContextByRequestor: new Map(),
+  restV2ConfigurationServiceProviderByRequestor: new Map(),
   restV2PrewarmedAppsByProgrammerId: new Map(),
   restV2PreparedLoginBySelectionKey: new Map(),
   restV2PreparePromiseBySelectionKey: new Map(),
@@ -77489,6 +77514,7 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.harpoSelectedDomainByRequestor.clear();
   state.harpoReproOpenByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
+  state.restV2ConfigurationServiceProviderByRequestor.clear();
   clearHarpoPanelStatus();
   clearHarpoRecordingState("vault-reset", { stopFlow: true });
   state.restV2PrewarmedAppsByProgrammerId.clear();
@@ -88133,6 +88159,33 @@ function extractRequestorIdFromServiceProviderValue(value) {
     return "";
   }
   return String(extractEntityIdFromToken(value) || "").trim();
+}
+
+function resolveCanonicalRequestorIdForProgrammer(requestorId = "", programmerId = "") {
+  const normalizedRequestorId = normalizeEntityToken(requestorId);
+  if (!normalizedRequestorId) {
+    return "";
+  }
+
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const programmer = Array.isArray(state?.programmers)
+    ? state.programmers.find((item) => String(item?.programmerId || "").trim() === normalizedProgrammerId) || null
+    : null;
+
+  const directCandidates = Array.isArray(programmer?.requestorIds)
+    ? programmer.requestorIds
+    : [];
+  const optionCandidates = Array.isArray(programmer?.requestorOptions)
+    ? programmer.requestorOptions
+        .flatMap((option) => [option?.id, option?.key])
+        .filter(Boolean)
+    : [];
+
+  const candidates = [...directCandidates, ...optionCandidates]
+    .map((value) => String(extractEntityIdFromToken(value) || "").trim())
+    .filter(Boolean);
+  const canonical = candidates.find((candidate) => normalizeEntityToken(candidate) === normalizedRequestorId);
+  return String(canonical || requestorId || "").trim();
 }
 
 function collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId) {
@@ -100475,22 +100528,37 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   }
   const appInfo = context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null;
   const appChannelCandidate = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
-  return uniquePreserveOrder(
-    [
-      extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
-      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
-      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
-      extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
-      extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.loginUrl)),
-      extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionUrl)),
-      extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionData?.url)),
-      appChannelCandidate,
-      extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
-      extractRequestorIdFromServiceProviderValue(context?.requestorId),
-    ]
-      .map((value) => String(value || "").trim())
-      .filter(Boolean)
-  );
+  const requestorId = extractRequestorIdFromServiceProviderValue(context?.requestorId);
+  const canonicalRequestorId = resolveCanonicalRequestorIdForProgrammer(requestorId, context?.programmerId);
+  const configurationScopedServiceProvider = getRequestorScopedRestV2ConfigurationServiceProvider(requestorId);
+  const rawCandidates = [
+    configurationScopedServiceProvider,
+    canonicalRequestorId,
+    extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
+    extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
+    extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
+    extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
+    extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.loginUrl)),
+    extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionUrl)),
+    extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionData?.url)),
+    appChannelCandidate,
+    extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
+    requestorId,
+    String(context?.programmerId || "").trim(),
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  const variantCandidates = [];
+  rawCandidates.forEach((candidate) => {
+    variantCandidates.push(candidate);
+    const upper = candidate.toUpperCase();
+    if (upper && upper !== candidate) {
+      variantCandidates.push(upper);
+    }
+  });
+
+  return uniquePreserveOrder(variantCandidates);
 }
 
 async function createRestV2SessionForContext(context, options = {}) {
@@ -100714,6 +100782,7 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
   let finalPayload = null;
   let finalStatus = 0;
   let finalMessage = "";
+  let finalServiceProviderId = "";
 
   for (let index = 0; index < serviceProviderCandidates.length; index += 1) {
     const serviceProviderId = serviceProviderCandidates[index];
@@ -100765,6 +100834,7 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
     finalMessage = message;
 
     if (response.ok) {
+      finalServiceProviderId = serviceProviderId;
       break;
     }
 
@@ -100794,6 +100864,7 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
   return {
     map,
     domainRows,
+    serviceProviderId: String(finalServiceProviderId || "").trim(),
   };
 }
 
@@ -100943,7 +101014,7 @@ async function loadMvpdsFromRestV2(requestorId) {
         }
 
         hasRestV2Candidate = true;
-        const { map, domainRows } = await withPromiseTimeout(
+        const { map, domainRows, serviceProviderId } = await withPromiseTimeout(
           fetchRestV2ConfigurationMvpds(programmer, runtimePrimaryApp, requestorId),
           REST_V2_MVPD_CONFIGURATION_TIMEOUT_MS,
           `REST V2 configuration timed out for ${requestorId || programmer.programmerId}.`
@@ -100956,6 +101027,7 @@ async function loadMvpdsFromRestV2(requestorId) {
         const configuredDomainNames = Array.isArray(domainRows)
           ? domainRows.map((item) => String(item?.domainName || "").trim()).filter(Boolean)
           : [];
+        setRequestorScopedRestV2ConfigurationServiceProvider(requestorId, serviceProviderId);
         const selectedHarpoDomain = getRequestorScopedHarpoSelectedDomain(requestorId);
         if (selectedHarpoDomain && !configuredDomainNames.includes(selectedHarpoDomain)) {
           setRequestorScopedHarpoSelectedDomain(requestorId, "");
@@ -101273,6 +101345,7 @@ function resetProgrammerRuntimeState() {
   state.harpoSelectedDomainByRequestor.clear();
   state.harpoReproOpenByRequestor.clear();
   state.restV2AuthContextByRequestor.clear();
+  state.restV2ConfigurationServiceProviderByRequestor.clear();
   clearHarpoPanelStatus();
   clearHarpoRecordingState("programmer-reset", { stopFlow: true });
   state.applicationsByKey.clear();
