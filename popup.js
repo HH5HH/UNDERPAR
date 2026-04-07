@@ -101232,7 +101232,7 @@ async function signInInteractive(options = {}) {
       interactive: true,
       allowFallback: true,
       accessToken: firstNonEmptyString([loginOptions?.accessToken]),
-      prompt: normalizeUnderparImsPrompt(loginOptions?.prompt || "login", true),
+      prompt: normalizeUnderparImsPrompt(loginOptions?.prompt || "", true),
     });
     setUnderparDiagnosticMarker("auth", {
       status: "token-acquired",
@@ -101605,8 +101605,8 @@ async function onPrimarySignInClick() {
 
   state.selectedTargetOrganizationKey = "";
   await signInInteractive({
-    prompt: "login",
-    forceBrowserLogout: true,
+    prompt: "",
+    forceBrowserLogout: false,
   });
 }
 
