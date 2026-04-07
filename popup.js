@@ -100668,16 +100668,7 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
     .map((value) => String(value || "").trim())
     .filter(Boolean);
 
-  const variantCandidates = [];
-  rawCandidates.forEach((candidate) => {
-    variantCandidates.push(candidate);
-    const upper = candidate.toUpperCase();
-    if (upper && upper !== candidate) {
-      variantCandidates.push(upper);
-    }
-  });
-
-  return uniquePreserveOrder(variantCandidates);
+  return uniquePreserveOrder(rawCandidates);
 }
 
 async function createRestV2SessionForContext(context, options = {}) {
