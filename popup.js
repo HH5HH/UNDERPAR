@@ -87227,7 +87227,8 @@ function getRequestorsForSelectedMediaCompany() {
   }
 
   // Check if REST V2 apps are available for filtering.
-  // For REST V2 configuration calls, we only need DCR credentials for the "restV2" service.
+  // Each REST V2 Registered Application specifies a serviceProviderId (content provider).
+  // "All Channels" apps have null/empty serviceProviderId — in that case show all requestors.
   if (premiumApps && typeof premiumApps === "object") {
     const restV2Apps = [];
     if (premiumApps?.restV2 && typeof premiumApps.restV2 === "object") {
@@ -87237,27 +87238,57 @@ function getRequestorsForSelectedMediaCompany() {
       restV2Apps.push(...premiumApps.restV2Apps.filter((app) => app && typeof app === "object"));
     }
     if (restV2Apps.length > 0) {
-      const hasRestV2AllChannels = restV2Apps.some((app) => isAllChannelsApp(app));
-      if (hasRestV2AllChannels) {
+      const extractServiceProviderId = (appInfo) => {
+        const appData =
+          appInfo?.appData && typeof appInfo.appData === "object" ? appInfo.appData : null;
+        const entityData = appData?.__rawEnvelope?.entityData || appInfo?.__rawEnvelope?.entityData || null;
+        const hints = sanitizePassVaultHintList(
+          entityData?.serviceProviders,
+          entityData?.contentProviders,
+          entityData?.requestors,
+          entityData?.requestorIds,
+          entityData?.requestor,
+          entityData?.serviceProvider,
+          entityData?.serviceProviderHint,
+          entityData?.channel,
+          appData?.serviceProviders,
+          appData?.contentProviders,
+          appData?.requestors,
+          appData?.requestorIds,
+          appData?.requestor,
+          appData?.serviceProvider,
+          appData?.serviceProviderHint,
+          appData?.channel
+        );
+        return String(hints[0] || "").trim() || null;
+      };
+
+      const serviceProviderIds = [];
+      let hasAllChannelsApp = false;
+
+      for (const app of restV2Apps) {
+        const providerId = extractServiceProviderId(app);
+        if (providerId) {
+          serviceProviderIds.push(providerId);
+        } else {
+          hasAllChannelsApp = true;
+        }
+      }
+
+      if (hasAllChannelsApp) {
         return allRequestors;
       }
-      const restV2Filter = uniqueSorted(
-        restV2Apps
-          .map((app) => getRegisteredAppChannel(app))
-          .filter((channel) => typeof channel === "string" && String(channel || "").trim().length > 0)
-          .map((channel) => String(channel || "").trim())
-      );
-      if (restV2Filter.length > 0) {
-        const filterSet = new Set(restV2Filter.map((id) => id.toLowerCase()));
+
+      const restV2ServiceProviders = uniqueSorted(serviceProviderIds);
+      if (restV2ServiceProviders.length > 0) {
+        const filterSet = new Set(restV2ServiceProviders.map((id) => id.toLowerCase()));
         const filtered = allRequestors.filter((option) =>
           filterSet.has(String(option.id || "").toLowerCase())
         );
         if (filtered.length > 0) {
           return filtered;
         }
-        return [];
       }
-      return allRequestors;
     }
   }
 
@@ -88840,6 +88871,7 @@ function getRegisteredAppChannel(appInfo) {
 function isAllChannelsApp(appInfo) {
   return getRegisteredAppChannel(appInfo) === "";
 }
+
 
 function normalizeRegisteredApplicationRuntimeRecord(item = null) {
   const source = item && typeof item === "object" && !Array.isArray(item) ? item : null;
