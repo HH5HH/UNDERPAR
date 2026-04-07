@@ -33811,12 +33811,18 @@ function buildRestV2ProfileCheckEndpointCandidates(context = null) {
           endpointLabel: "profiles/{mvpd}",
           serviceProviderId,
         });
-      } else {
-        pushEndpoint("profiles-all", allProfilesUrl, {
-          endpointLabel: "profiles",
-          serviceProviderId,
-        });
       }
+      sessionCodeEndpoints.forEach((item) => {
+        pushEndpoint("profiles-code", item.url, {
+          endpointLabel: "profiles/code",
+          serviceProviderId,
+          sessionCode: item.sessionCode,
+        });
+      });
+      pushEndpoint("profiles-all", allProfilesUrl, {
+        endpointLabel: "profiles",
+        serviceProviderId,
+      });
     } else {
       if (mvpdProfilesUrl) {
         pushEndpoint("profiles-mvpd", mvpdProfilesUrl, {
