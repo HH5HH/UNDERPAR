@@ -31986,13 +31986,13 @@ function getRestV2ProfileHarvestForContext(context = null) {
       return selectionHarvest;
     }
 
-    if (selectionKey && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)) {
+    if (selectionKey && state.restV2ProfileHarvestBySelectionKey instanceof Map && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)) {
       const fallbackSelection = state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null;
       if (isUsableRestV2ProfileHarvest(fallbackSelection)) {
         return fallbackSelection;
       }
     }
-    if (programmerId && state.restV2ProfileHarvestByProgrammerId.has(programmerId)) {
+    if (programmerId && state.restV2ProfileHarvestByProgrammerId instanceof Map && state.restV2ProfileHarvestByProgrammerId.has(programmerId)) {
       const fallbackProgrammer = state.restV2ProfileHarvestByProgrammerId.get(programmerId) || null;
       if (isUsableRestV2ProfileHarvest(fallbackProgrammer)) {
         return fallbackProgrammer;
