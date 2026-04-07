@@ -100389,7 +100389,7 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
       appGuid: String(appInfo?.guid || ""),
       appName: String(appInfo?.appName || appInfo?.guid || ""),
       lockAppSelection: true,
-      allowProvisioning: false,
+      allowProvisioning: true,
     }
   );
 
@@ -100523,7 +100523,8 @@ async function loadMvpdsFromRestV2(requestorId) {
           continue;
         }
         // Select the right REST V2 app for this requestor.
-        // Match apps by service provider or channel hint to ensure we get one that's scoped to this requestor.
+        // For REST V2 configuration, prefer all-channels apps since configuration is shared across all requestors.
+        // This allows reusing a single DCR registration for multiple requestors.
         let runtimePrimaryApp = null;
         const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps.filter((app) => app?.guid) : [];
         const primaryCandidate = premiumApps?.restV2 || null;
@@ -100531,19 +100532,22 @@ async function loadMvpdsFromRestV2(requestorId) {
           ? [primaryCandidate, ...restV2Apps.filter((app) => app.guid !== primaryCandidate.guid)]
           : restV2Apps;
 
-        // First, try service provider matching
-        const requestorScopedApps = allCandidates.filter((app) =>
-          appSupportsServiceProvider(app, requestorId, programmer.programmerId)
-        );
-        
-        if (requestorScopedApps.length > 0) {
-          runtimePrimaryApp = requestorScopedApps[0];
+        // First, prefer all-channels apps for configuration (shared across all requestors)
+        const allChannelsApp = allCandidates.find((app) => app?.guid && isAllChannelsApp(app));
+        if (allChannelsApp?.guid) {
+          runtimePrimaryApp = allChannelsApp;
         } else {
-          // Fallback: prefer all-channels app, then any candidate
-          runtimePrimaryApp =
-            allCandidates.find((app) => app?.guid && isAllChannelsApp(app)) ||
-            allCandidates[0] ||
-            null;
+          // Fallback: try service provider matching for requestor-scoped app
+          const requestorScopedApps = allCandidates.filter((app) =>
+            appSupportsServiceProvider(app, requestorId, programmer.programmerId)
+          );
+          
+          if (requestorScopedApps.length > 0) {
+            runtimePrimaryApp = requestorScopedApps[0];
+          } else {
+            // Final fallback: use any available candidate
+            runtimePrimaryApp = allCandidates[0] || null;
+          }
         }
         
         if (runtimePrimaryApp?.guid) {
