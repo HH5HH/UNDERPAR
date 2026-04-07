@@ -97504,10 +97504,15 @@ function getRestV2ConfigurationCollection(payload = null, keyCandidates = []) {
     }
     for (const [key, value] of Object.entries(container)) {
       const normalizedKey = String(key || "").trim().toLowerCase();
-      if (!normalizedKey || !normalizedCandidates.includes(normalizedKey) || !Array.isArray(value)) {
+      if (!normalizedKey || !normalizedCandidates.includes(normalizedKey)) {
         continue;
       }
-      return value;
+      if (Array.isArray(value)) {
+        return value;
+      }
+      if (value && typeof value === "object") {
+        return Object.values(value);
+      }
     }
     return null;
   };
