@@ -1172,7 +1172,7 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
       runtimeServices = {
         ...runtimeServices,
         cmMvpd:
-          cmMvpdSelectionKey && state.cmServiceByMvpdSelectionKey.has(cmMvpdSelectionKey)
+          cmMvpdSelectionKey && state.cmServiceByMvpdSelectionKey instanceof Map && state.cmServiceByMvpdSelectionKey.has(cmMvpdSelectionKey)
             ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || runtimeServices?.cmMvpd || null
             : runtimeServices?.cmMvpd || null,
         cmMvpdSelectionKey: cmMvpdSelectionKey || String(runtimeServices?.cmMvpdSelectionKey || "").trim(),
@@ -7521,7 +7521,7 @@ function trackPendingPassVaultStorageWrite(vault = null) {
 
 function consumePendingPassVaultStorageWrite(vault = null) {
   const marker = buildPassVaultStorageWriteMarker(vault);
-  if (!marker || !state.passVaultPendingStorageWriteMarkers.has(marker)) {
+  if (!marker || !(state.passVaultPendingStorageWriteMarkers instanceof Map) || !state.passVaultPendingStorageWriteMarkers.has(marker)) {
     return false;
   }
   state.passVaultPendingStorageWriteMarkers.delete(marker);
@@ -10859,7 +10859,7 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
   }
 
   const forceRefresh = options?.forceRefresh === true;
-  if (state.passVaultCompilePromiseByProgrammerKey.has(scopedKey)) {
+  if (state.passVaultCompilePromiseByProgrammerKey instanceof Map && state.passVaultCompilePromiseByProgrammerKey.has(scopedKey)) {
     return state.passVaultCompilePromiseByProgrammerKey.get(scopedKey);
   }
 
@@ -25162,7 +25162,7 @@ async function prefetchRegisteredApplicationHealthApplications(queryContext = nu
     return null;
   }
 
-  if (state.registeredApplicationHealthWorkspaceBackgroundHydrationPromiseBySelectionKey.has(selectionKey)) {
+  if (state.registeredApplicationHealthWorkspaceBackgroundHydrationPromiseBySelectionKey instanceof Map && state.registeredApplicationHealthWorkspaceBackgroundHydrationPromiseBySelectionKey.has(selectionKey)) {
     return state.registeredApplicationHealthWorkspaceBackgroundHydrationPromiseBySelectionKey.get(selectionKey);
   }
 
@@ -31501,7 +31501,7 @@ function storeRestV2ProfileHarvest(context, profileCheckResult, flowId = "") {
   let mergedHarvest = mergeRestV2HarvestWithPreauthzChecks(harvest);
   const selectionKey = buildRestV2ProfileHarvestSelectionKey(context);
   const selectionHarvest =
-    selectionKey && selectionKey !== "||" && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
+    selectionKey && selectionKey !== "||" && state.restV2ProfileHarvestBySelectionKey instanceof Map && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
       ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null
       : null;
   if (selectionHarvest && typeof selectionHarvest === "object") {
@@ -31643,7 +31643,7 @@ function removeRestV2ProfileHarvestByRecordKey(programmer = null, harvestKey = "
     }
   }
 
-  if (state.restV2PreauthorizeHistoryByProgrammerId.has(programmerId)) {
+  if (state.restV2PreauthorizeHistoryByProgrammerId instanceof Map && state.restV2PreauthorizeHistoryByProgrammerId.has(programmerId)) {
     const history = getRestV2PreauthorizeHistoryForProgrammer(programmerId);
     const filteredHistory = history.filter((entry) => String(entry?.harvestKey || "").trim() !== normalizedHarvestKey);
     if (filteredHistory.length > 0) {
@@ -31815,7 +31815,7 @@ function getRestV2ProfileHarvestListForContext(context = null) {
       }
       const selectionKey = buildRestV2ProfileHarvestSelectionKey(context);
       const selectionHarvest =
-        selectionKey && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
+        selectionKey && state.restV2ProfileHarvestBySelectionKey instanceof Map && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
           ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null
           : null;
       return selectionHarvest && typeof selectionHarvest === "object" ? [selectionHarvest] : [];
@@ -31895,7 +31895,7 @@ function clearRestV2ProfileHarvestForContext(context = null) {
     return;
   }
   const selectionKey = buildRestV2ProfileHarvestSelectionKey(context);
-  if (selectionKey && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)) {
+  if (selectionKey && state.restV2ProfileHarvestBySelectionKey instanceof Map && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)) {
     state.restV2ProfileHarvestBySelectionKey.delete(selectionKey);
   }
   const programmerId = String(context.programmerId || "").trim();
@@ -31933,7 +31933,7 @@ function getRestV2ProfileHarvestForContext(context = null) {
   if (context && typeof context === "object") {
     const selectionKey = buildRestV2ProfileHarvestSelectionKey(context);
     const selectionHarvest =
-      selectionKey && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
+      selectionKey && state.restV2ProfileHarvestBySelectionKey instanceof Map && state.restV2ProfileHarvestBySelectionKey.has(selectionKey)
         ? state.restV2ProfileHarvestBySelectionKey.get(selectionKey) || null
         : null;
     if (isUsableRestV2ProfileHarvest(selectionHarvest)) {
@@ -36268,7 +36268,7 @@ async function maybeExportCmTenantDebugSnapshot(url = "", reason = "") {
   if (!requestUrl) {
     return;
   }
-  if (state.cmTenantDebugExportedByUrl.has(requestUrl)) {
+  if (state.cmTenantDebugExportedByUrl instanceof Set && state.cmTenantDebugExportedByUrl.has(requestUrl)) {
     return;
   }
   state.cmTenantDebugExportedByUrl.add(requestUrl);
@@ -48988,10 +48988,10 @@ async function ensureUpDevtoolsMvpdSearchCatalog(environmentKey = "", options = 
   }
 
   const forceRefresh = options?.forceRefresh === true;
-  if (!forceRefresh && state.upDevtoolsMvpdSearchCatalogByEnvironmentKey.has(normalizedEnvironmentKey)) {
+  if (!forceRefresh && state.upDevtoolsMvpdSearchCatalogByEnvironmentKey instanceof Map && state.upDevtoolsMvpdSearchCatalogByEnvironmentKey.has(normalizedEnvironmentKey)) {
     return state.upDevtoolsMvpdSearchCatalogByEnvironmentKey.get(normalizedEnvironmentKey);
   }
-  if (!forceRefresh && state.upDevtoolsMvpdSearchCatalogPromiseByEnvironmentKey.has(normalizedEnvironmentKey)) {
+  if (!forceRefresh && state.upDevtoolsMvpdSearchCatalogPromiseByEnvironmentKey instanceof Map && state.upDevtoolsMvpdSearchCatalogPromiseByEnvironmentKey.has(normalizedEnvironmentKey)) {
     return state.upDevtoolsMvpdSearchCatalogPromiseByEnvironmentKey.get(normalizedEnvironmentKey);
   }
 
