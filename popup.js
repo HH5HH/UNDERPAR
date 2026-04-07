@@ -87225,68 +87225,34 @@ function getRequestorsForSelectedMediaCompany() {
     }
   }
 
-  // Check if REST V2 Registered Applications exist for filtering Content Providers.
-  // Only show Content Providers that have REST V2 scoped Registered Applications.
-  const applicationsData =
-    getCurrentProgrammerApplicationsSnapshot(programmerId) ||
-    buildPassVaultApplicationsSnapshotFromRegisteredApplications(
-      getPassVaultRegisteredApplicationsByGuid(getPassVaultMediaCompanyRecord(programmerId)) || {}
-    ) ||
-    null;
-  if (applicationsData && typeof applicationsData === "object" && Object.keys(applicationsData).length > 0) {
-    const registeredApplications = Object.values(applicationsData).filter(app => app && typeof app === "object");
-    const restV2RegisteredApps = registeredApplications.filter(app => {
-      const entityData = app?.entityData;
-      if (!entityData || typeof entityData !== "object") return false;
-      const scopes = Array.isArray(entityData.scopes) ? entityData.scopes : [];
-      return scopes.includes("api:client:v2");
-    });
-
-    if (restV2RegisteredApps.length > 0) {
-      const serviceProviderIds = [];
-      let hasAllChannelsApp = false;
-
-      for (const app of restV2RegisteredApps) {
-        const entityData = app?.entityData;
-        if (!entityData || typeof entityData !== "object") continue;
-
-        const serviceProviders = Array.isArray(entityData.serviceProviders) ? entityData.serviceProviders : [];
-        if (serviceProviders.length === 0) {
-          // "All Channels" app - no specific service providers
-          hasAllChannelsApp = true;
-        } else {
-          // Extract service provider IDs
-          for (const spRef of serviceProviders) {
-            if (typeof spRef === "string" && spRef.startsWith("@ServiceProvider:")) {
-              const providerId = spRef.substring("@ServiceProvider:".length);
-              if (providerId) {
-                serviceProviderIds.push(providerId);
-              }
-            }
-          }
-        }
+  // Use scan results to filter requestors for REST V2
+  if (scanAllChannelsCoverage && scanAllChannelsCoverage.restV2) {
+    if (scanRequestorFilter && scanRequestorFilter.length > 0) {
+      // Filter to specific requestors
+      const filterSet = new Set(scanRequestorFilter.map(id => id.toLowerCase()));
+      const filtered = allRequestors.filter(option => filterSet.has(String(option.id || "").toLowerCase()));
+      if (filtered.length > 0) {
+        return filtered;
+      } else {
+        // If allRequestors is empty, use the scan filter directly
+        return scanRequestorFilter.map(id => ({ key: id, id, label: id }));
       }
-
-      if (hasAllChannelsApp) {
-        // If there's an "All Channels" REST V2 app, show all requestors
-        return allRequestors;
+    } else {
+      // All channels - show allRequestors, or derive from all channels if empty
+      if (allRequestors.length === 0) {
+        allRequestors = (Array.isArray(state.consoleBootstrapState.channels) ? state.consoleBootstrapState.channels : [])
+          .filter(channel => channel && typeof channel === "object" && channel.id)
+          .map(channel => ({
+            key: channel.id,
+            id: channel.id,
+            label: channel.name || channel.label || channel.id
+          }));
       }
-
-      if (serviceProviderIds.length > 0) {
-        // Filter requestors to only those with matching service provider IDs
-        const restV2ServiceProviders = uniqueSorted(serviceProviderIds);
-        const filterSet = new Set(restV2ServiceProviders.map((id) => id.toLowerCase()));
-        const filtered = allRequestors.filter((option) =>
-          filterSet.has(String(option.id || "").toLowerCase())
-        );
-        if (filtered.length > 0) {
-          return filtered;
-        }
-      }
+      return allRequestors;
     }
   }
 
-  // ── Fallback: show all requestors if apps not available ──────
+  // No REST V2 support - show allRequestors
   return allRequestors;
 }
 
