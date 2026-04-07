@@ -34497,7 +34497,7 @@ async function fetchRestV2ProfileCheckResult(context, flowId, scope = "profiles-
     }
 
     if (isRestV2InvalidServiceProviderSignal(endpointResult)) {
-      break;
+      continue;
     }
   }
 
@@ -100654,16 +100654,16 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   const canonicalRequestorId = resolveCanonicalRequestorIdForProgrammer(requestorId, context?.programmerId);
   const configurationScopedServiceProvider = getRequestorScopedRestV2ConfigurationServiceProvider(requestorId);
   const rawCandidates = [
-    configurationScopedServiceProvider,
-    canonicalRequestorId,
     extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
     extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
     extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
     extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
+    appChannelCandidate,
+    configurationScopedServiceProvider,
+    canonicalRequestorId,
     extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.loginUrl)),
     extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionUrl)),
     extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionData?.url)),
-    appChannelCandidate,
     extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
     requestorId,
     String(context?.programmerId || "").trim(),
