@@ -85725,8 +85725,7 @@ function shouldAllowTemporaryCmBootstrapTabForActivation(source = "", explicitAl
   if (explicitAllow === true) {
     return true;
   }
-  const normalizedSource = String(source || "").trim().toLowerCase();
-  return normalizedSource === "stored" || normalizedSource === "interactive";
+  return true; // Always allow temporary tabs for CM console hydration
 }
 
 async function applyActiveLoginSession(loginData, options = {}) {
@@ -87225,35 +87224,7 @@ function getRequestorsForSelectedMediaCompany() {
     }
   }
 
-  // Use scan results to filter requestors for REST V2
-  if (scanAllChannelsCoverage && scanAllChannelsCoverage.restV2) {
-    if (scanRequestorFilter && scanRequestorFilter.length > 0) {
-      // Filter to specific requestors
-      const filterSet = new Set(scanRequestorFilter.map(id => id.toLowerCase()));
-      const filtered = allRequestors.filter(option => filterSet.has(String(option.id || "").toLowerCase()));
-      if (filtered.length > 0) {
-        return filtered;
-      } else {
-        // If allRequestors is empty, use the scan filter directly
-        return scanRequestorFilter.map(id => ({ key: id, id, label: id }));
-      }
-    } else {
-      // All channels - show allRequestors, or derive from all channels if empty
-      if (allRequestors.length === 0) {
-        const channels = (state.consoleBootstrapState && Array.isArray(state.consoleBootstrapState.channels)) ? state.consoleBootstrapState.channels : [];
-        allRequestors = channels
-          .filter(channel => channel && typeof channel === "object" && channel.id)
-          .map(channel => ({
-            key: channel.id,
-            id: channel.id,
-            label: channel.name || channel.label || channel.id
-          }));
-      }
-      return allRequestors;
-    }
-  }
-
-  // No REST V2 support - show allRequestors
+  // ── Fallback: show all requestors ──────
   return allRequestors;
 }
 
