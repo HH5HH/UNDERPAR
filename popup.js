@@ -85726,7 +85726,7 @@ function shouldAllowTemporaryCmBootstrapTabForActivation(source = "", explicitAl
     return true;
   }
   const normalizedSource = String(source || "").trim().toLowerCase();
-  return normalizedSource === "stored";
+  return normalizedSource === "stored" || normalizedSource === "interactive";
 }
 
 async function applyActiveLoginSession(loginData, options = {}) {
