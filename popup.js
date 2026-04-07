@@ -9393,14 +9393,17 @@ function buildPassVaultServiceHydrationEntries({
   // 
   // Strategy:
   // - All Channels apps (empty serviceProvider): Register + cache access token NOW
-  // - Requestor-scoped apps (populated serviceProvider): Register only, token on-demand later
+  // - Requestor-scoped apps (populated serviceProvider): keep existing on-demand behavior
   if (
     Array.isArray(scanResult?.allScopeApps?.restV2) &&
     scanResult.allScopeApps.restV2.length > 0 &&
     programmerId
   ) {
     const restV2Definition = UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.find((def) => def.serviceKey === "restV2") || null;
-    if (restV2Definition) {
+    const hasAllChannelsRestV2 = scanResult.allScopeApps.restV2.some((appInfo) =>
+      String(appInfo?.guid || "").trim() && getRegisteredAppChannel(appInfo) === ""
+    );
+    if (restV2Definition && hasAllChannelsRestV2) {
       // Process each REST V2 app to ensure All Channels ones are fully provisioned
       for (const appInfo of scanResult.allScopeApps.restV2) {
         const appGuid = String(appInfo?.guid || "").trim();
@@ -9413,23 +9416,7 @@ function buildPassVaultServiceHydrationEntries({
         const isAllChannels = appChannel === "";
         
         if (!isAllChannels) {
-          // Requestor-scoped apps: ensure registration/credentials are cached, but skip token for now
-          // Token will be requested on-demand when user selects that specific content provider
-          const cachedClient = normalizeUnderparVaultCredentialEntry(
-            loadDcrCache(programmerId, appGuid, "restV2") || null
-          ) || null;
-          if (!cachedClient?.clientId || !cachedClient?.clientSecret) {
-            // Trigger registration to cache credentials only (setAllChannelsTokenNeeded = false)
-            void ensureDcrAccessToken(programmerId, appInfo, false, {
-              scope: "restV2",
-              service: "restV2",
-              flowId: "",
-              allowProvisioning: true,
-            }).catch(() => {
-              // Best effort — registration errors don't block hydration
-              // The app will be retried if/when user selects its requestor
-            });
-          }
+          // Preserve non-All-Channels behavior: requestor-scoped apps remain on-demand.
           continue;
         }
         
