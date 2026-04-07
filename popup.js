@@ -9807,7 +9807,12 @@ function buildPassVaultDirectPremiumServicesSnapshot(
   // If there are "All Channels" REST V2 apps, allow all requestors (set to null)
   // If only channel-specific REST V2 apps exist, filter to only those requestors
   let restV2RequestorIds = null;
-  const hasAllChannelsRestV2 = scanResult.allChannelsByServiceKey?.restV2 === true;
+  const hasAllChannelsRestV2 =
+    scanResult.allChannelsByServiceKey?.restV2 === true ||
+    (Array.isArray(restV2Apps) &&
+      restV2Apps.some((app) =>
+        isAllChannelsServiceProviderValue(firstNonEmptyString([app?.appData?.serviceProvider, app?.serviceProvider]))
+      ));
 
   if (!hasAllChannelsRestV2) {
     // Extract requestor IDs directly from registered apps' ServiceProvider field values
@@ -9819,8 +9824,8 @@ function buildPassVaultDirectPremiumServicesSnapshot(
             if (!serviceProviderValue) {
               return null;
             }
-            const requestorId = extractEntityIdFromToken(serviceProviderValue);
-            if (!requestorId || requestorId.toLowerCase() === "all channels" || requestorId === "*") {
+            const requestorId = extractRequestorIdFromServiceProviderValue(serviceProviderValue);
+            if (!requestorId) {
               return null;
             }
             return requestorId;
@@ -10209,11 +10214,7 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   let restV2RequestorIds = null;
   const hasAllChannelsRestV2 = Array.isArray(restV2Apps) && restV2Apps.some((appInfo) => {
     const serviceProviderValue = String(appInfo?.appData?.serviceProvider || appInfo?.serviceProvider || "").trim();
-    if (!serviceProviderValue) {
-      return true; // No service provider means "All Channels"
-    }
-    const requestorId = extractEntityIdFromToken(serviceProviderValue);
-    return !requestorId || requestorId.toLowerCase() === "all channels" || requestorId === "*";
+    return isAllChannelsServiceProviderValue(serviceProviderValue);
   });
 
   if (!hasAllChannelsRestV2) {
@@ -10226,8 +10227,8 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
             if (!serviceProviderValue) {
               return null;
             }
-            const requestorId = extractEntityIdFromToken(serviceProviderValue);
-            if (!requestorId || requestorId.toLowerCase() === "all channels" || requestorId === "*") {
+            const requestorId = extractRequestorIdFromServiceProviderValue(serviceProviderValue);
+            if (!requestorId) {
               return null;
             }
             return requestorId;
@@ -87865,11 +87866,57 @@ function normalizeEntityToken(value) {
 
 function extractEntityIdFromToken(value) {
   const text = String(value || "").trim();
-  const prefixed = text.match(/^@[^:]+:(.+)$/);
+  if (!text) {
+    return "";
+  }
+  if (text.includes("://")) {
+    return text;
+  }
+  const prefixed = text.match(/^@?[A-Za-z][A-Za-z0-9_-]*\s*:(.*)$/);
   if (prefixed) {
     return String(prefixed[1] || "").trim();
   }
   return text;
+}
+
+function isAllChannelsServiceProviderValue(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return true;
+  }
+
+  const normalizedRawValue = normalizeEntityToken(rawValue);
+  if (
+    normalizedRawValue === "*" ||
+    normalizedRawValue === "all channels" ||
+    normalizedRawValue === "@serviceprovider" ||
+    normalizedRawValue === "@requestor" ||
+    normalizedRawValue === "serviceprovider" ||
+    normalizedRawValue === "requestor" ||
+    /^@?[a-z][a-z0-9_-]*\s*:\s*$/i.test(rawValue)
+  ) {
+    return true;
+  }
+
+  const extractedValue = String(extractEntityIdFromToken(rawValue) || "").trim();
+  const normalizedExtractedValue = normalizeEntityToken(extractedValue);
+  return (
+    !normalizedExtractedValue ||
+    normalizedExtractedValue === "*" ||
+    normalizedExtractedValue === "all channels" ||
+    normalizedExtractedValue === "null" ||
+    normalizedExtractedValue === "undefined" ||
+    normalizedExtractedValue === "n/a" ||
+    normalizedExtractedValue === "na" ||
+    normalizedExtractedValue === "none"
+  );
+}
+
+function extractRequestorIdFromServiceProviderValue(value) {
+  if (isAllChannelsServiceProviderValue(value)) {
+    return "";
+  }
+  return String(extractEntityIdFromToken(value) || "").trim();
 }
 
 function collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId) {
@@ -88828,7 +88875,7 @@ function getRegisteredAppChannel(appInfo) {
       entityData.channel
     );
     const raw = String(hints[0] || "").trim();
-    if (raw && raw.toLowerCase() !== "all channels" && raw !== "*") {
+    if (raw && !isAllChannelsServiceProviderValue(raw)) {
       return raw;
     }
     // If entityData has explicit hints that resolve to "All Channels", return ""
@@ -88864,7 +88911,7 @@ function getRegisteredAppChannel(appInfo) {
   if (softwareStatement) {
     const jwtHints = collectPassVaultServiceProviderHintsFromAppData(null, softwareStatement);
     const jwtRaw = String(jwtHints[0] || "").trim();
-    if (jwtRaw && jwtRaw.toLowerCase() !== "all channels" && jwtRaw !== "*") {
+    if (jwtRaw && !isAllChannelsServiceProviderValue(jwtRaw)) {
       return jwtRaw;
     }
     // JWT has explicit "All Channels" or claims exist with no channel hints → All Channels.
@@ -88888,7 +88935,7 @@ function getRegisteredAppChannel(appInfo) {
       appData.channel
     );
     const appDataRaw = String(appDataHints[0] || "").trim();
-    if (appDataRaw && appDataRaw.toLowerCase() !== "all channels" && appDataRaw !== "*") {
+    if (appDataRaw && !isAllChannelsServiceProviderValue(appDataRaw)) {
       return appDataRaw;
     }
     if (hasExplicitBlankHint(
@@ -100313,12 +100360,14 @@ async function createRestV2SessionForContext(context, options = {}) {
 
 async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
   const rawServiceProviderId = String(
-    extractEntityIdFromToken(appInfo?.appData?.serviceProvider) ||
-    extractEntityIdFromToken(appInfo?.serviceProvider) ||
-    extractEntityIdFromToken(appInfo?.serviceProviderId) ||
-    extractEntityIdFromToken(appInfo?.requestorId) ||
-    extractEntityIdFromToken(requestorId) ||
-    ""
+    firstNonEmptyString([
+      extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
+      extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
+      extractRequestorIdFromServiceProviderValue(requestorId),
+      "",
+    ])
   ).trim();
   // Note: Do NOT normalize to lowercase - service provider IDs may be case-sensitive
   const serviceProviderId = rawServiceProviderId;
