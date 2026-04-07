@@ -87218,19 +87218,23 @@ function getRequestorsForSelectedMediaCompany() {
     }
   }
 
-  // If scan metadata is available, check whether ALL DCR scopes have "All Channels" coverage.
+  // If scan metadata is available, check whether the REST V2 service has "All Channels" coverage.
+  // For REST V2 configuration calls, we only need DCR credentials for the "restv2" service.
   if (scanAllChannelsCoverage && typeof scanAllChannelsCoverage === "object") {
-    const everyServiceHasAllChannels = UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.every(
-      (def) => scanAllChannelsCoverage[def.serviceKey] === true ||
-        // If a scope has no apps at all, it doesn't constrain the filter.
-        !(Array.isArray(premiumApps?.[`${def.serviceKey}Apps`]) && premiumApps[`${def.serviceKey}Apps`].length > 0)
-    );
-    if (everyServiceHasAllChannels) {
+    if (scanAllChannelsCoverage["restv2"] === true) {
       return allRequestors;
     }
-    // Use the scan's requestor filter (union of channel-specific service providers across scopes).
-    if (scanRequestorFilter && scanRequestorFilter.length > 0) {
-      const filterSet = new Set(scanRequestorFilter.map((id) => String(id || "").toLowerCase()));
+    // Else, filter to requestors covered by channel-specific "restv2" apps.
+    const restv2ChannelSpecificApps = Array.isArray(premiumApps?.restv2Apps)
+      ? premiumApps.restv2Apps.filter((app) =>
+          app.serviceProviderHint && typeof app.serviceProviderHint === "string" && app.serviceProviderHint.trim()
+        )
+      : [];
+    if (restv2ChannelSpecificApps.length > 0) {
+      const restv2Filter = uniqueSorted(
+        restv2ChannelSpecificApps.map((app) => app.serviceProviderHint.trim())
+      );
+      const filterSet = new Set(restv2Filter.map((id) => String(id || "").toLowerCase()));
       const filtered = allRequestors.filter((option) =>
         filterSet.has(String(option.id || "").toLowerCase())
       );
