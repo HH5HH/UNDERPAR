@@ -87249,7 +87249,7 @@ function getRequestorsForSelectedMediaCompany() {
         }
         return [];
       }
-      return [];
+      return allRequestors;
     }
   }
 
