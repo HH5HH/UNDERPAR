@@ -87227,44 +87227,7 @@ function getRequestorsForSelectedMediaCompany() {
     }
   }
 
-  // ── Filter requestors to only those with REST V2 app support ──────────────
-  // Check which REST V2 apps are available and which requestors they support.
-  const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps.filter((app) => app?.guid) : [];
-  const primaryRestV2App = premiumApps?.restV2 || null;
-  
-  if (restV2Apps.length > 0 || primaryRestV2App?.guid) {
-    // We have REST V2 apps - filter to only supported requestors
-    const allRestV2Apps = primaryRestV2App?.guid
-      ? [primaryRestV2App, ...restV2Apps.filter((app) => app.guid !== primaryRestV2App.guid)]
-      : restV2Apps;
-    
-    const supportedRequestors = [];
-    const seen = new Set();
-    
-    for (const requestor of allRequestors) {
-      const requestorId = String(requestor.id || "").trim();
-      if (!requestorId || seen.has(requestorId.toLowerCase())) {
-        continue;
-      }
-      
-      // Check if this requestor has a matching REST V2 app
-      const hasRestV2Support = allRestV2Apps.some((app) => 
-        appSupportsServiceProvider(app, requestorId, programmerId)
-      ) || 
-      // Also include "All Channels" apps that serve any requestor
-      allRestV2Apps.some((app) => isAllChannelsApp(app));
-      
-      if (hasRestV2Support) {
-        seen.add(requestorId.toLowerCase());
-        supportedRequestors.push(requestor);
-      }
-    }
-    
-    // Return supported requestors, or all if none matched (fallback for incomplete data)
-    return supportedRequestors.length > 0 ? supportedRequestors : allRequestors;
-  }
-
-  // ── No REST V2 apps available - show all requestors ──────
+  // ── Fallback: show all requestors ──────
   return allRequestors;
 }
 
