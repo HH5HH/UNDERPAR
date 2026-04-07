@@ -9803,6 +9803,26 @@ function buildPassVaultDirectPremiumServicesSnapshot(
     selectPreferredPassVaultHydrationServiceApplication(serviceKey, apps, programmerId) ||
     null;
 
+  // Extract requestor IDs from REST V2 registered applications
+  // buildRegisteredApplicationHealthAppRecord extracts service provider hints (requestor IDs)
+  // from the software statement and entity data, which is the authoritative source.
+  const restV2RequestorIds = Array.isArray(restV2Apps)
+    ? restV2Apps
+        .map((app) => {
+          const healthRecord = buildRegisteredApplicationHealthAppRecord(app, null);
+          const hints = healthRecord
+            ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
+                .map((h) => String(h || "").trim())
+                .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
+            : [];
+          return hints;
+        })
+        .flat()
+        .filter(Boolean)
+    : [];
+  const uniqueRestV2RequestorIds =
+    restV2RequestorIds.length > 0 ? Array.from(new Set(restV2RequestorIds)).sort() : [];
+
   return applyPremiumServiceRuntimeSummary(
     programmer,
     {
@@ -9825,6 +9845,11 @@ function buildPassVaultDirectPremiumServicesSnapshot(
       // requestor selector should be filtered.
       __allChannelsCoverage: scanResult.allChannelsByServiceKey || null,
       __requestorFilter: scanResult.requestorFilter || null,
+      // ── REST V2 requestor filtering ──
+      // __restV2RequestorIds contains all requestor IDs that have REST V2 DCR-scoped
+      // registered applications. Used to filter the requestor dropdown to only show
+      // valid providers that can make REST V2 configuration requests.
+      __restV2RequestorIds: uniqueRestV2RequestorIds.length > 0 ? uniqueRestV2RequestorIds : null,
     },
     {
       cmCatalog: state.cmTenantsCatalog,
@@ -10177,6 +10202,24 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   const esmApp = selectPrimaryApp("esm", esmApps);
   const cmServiceSnapshot = buildPassVaultRuntimeCmServiceSnapshot(record);
 
+  // Extract requestor IDs from REST V2 apps for filtering the requestor dropdown
+  const restV2RequestorIds = Array.isArray(restV2Apps)
+    ? restV2Apps
+        .map((appInfo) => {
+          const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
+          const hints = healthRecord
+            ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
+                .map((h) => String(h || "").trim())
+                .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
+            : [];
+          return hints;
+        })
+        .flat()
+        .filter(Boolean)
+    : [];
+  const uniqueRestV2RequestorIds =
+    restV2RequestorIds.length > 0 ? Array.from(new Set(restV2RequestorIds)).sort() : [];
+
   return {
     restV2: selectPrimaryApp("restV2", restV2Apps),
     restV2Apps,
@@ -10189,6 +10232,8 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
     cm: cmServiceSnapshot,
     cmMvpd: null,
     cmMvpdSelectionKey: "",
+    // REST V2 requestor filtering (for vault-backed services)
+    __restV2RequestorIds: uniqueRestV2RequestorIds.length > 0 ? uniqueRestV2RequestorIds : null,
   };
 }
 
@@ -87194,41 +87239,21 @@ function getRequestorsForSelectedMediaCompany() {
     allRequestors = deriveProgrammerRequestorOptionsFromChannels(programmer, state.consoleBootstrapState.channels || []);
   }
 
-  // ── Use All Channels scan metadata when available ──────────────────────────
-  // The __allChannelsCoverage and __requestorFilter fields are populated by
-  // scanAllChannelsServiceCoverage during hydration.  They reflect the
-  // authoritative per-scope scan across ALL registered applications.
+  // ── REST V2 requestor filtering ──────────────────────────
+  // During ENVxMediaCompany hydration, we identify all Registered Applications
+  // with REST V2 DCR scope and extract their requestor IDs. These IDs are stored
+  // in __restV2RequestorIds in the premium apps snapshot. Filter the dropdown to
+  // show ONLY requestors that have REST V2 support, preventing 401 errors from
+  // invalid service provider selections.
   const programmerId = String(programmer.programmerId || "").trim();
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
-  if (!premiumApps) {
-    return allRequestors;
-  }
+  const restV2RequestorIds = premiumApps?.__restV2RequestorIds;
 
-  // ── On-demand scan: if scan metadata is missing (vault-reuse path, stale
-  // snapshot), run the scan RIGHT NOW against the available applications data.
-  // This is the same scan that runs during live hydration, but executed
-  // synchronously here so the requestor filter is always authoritative. ───────
-  let scanRequestorFilter = Array.isArray(premiumApps?.__requestorFilter) && premiumApps.__requestorFilter.length > 0
-    ? premiumApps.__requestorFilter
-    : null;
-  let scanAllChannelsCoverage = premiumApps?.__allChannelsCoverage || null;
-
-  if (!scanAllChannelsCoverage || typeof scanAllChannelsCoverage !== "object") {
-    // Scan metadata is missing — reconstruct from available registered applications.
-    const applicationsData =
-      getCurrentProgrammerApplicationsSnapshot(programmerId) ||
-      buildPassVaultApplicationsSnapshotFromRegisteredApplications(
-        getPassVaultRegisteredApplicationsByGuid(getPassVaultMediaCompanyRecord(programmerId)) || {}
-      ) ||
-      null;
-    if (applicationsData && typeof applicationsData === "object" && Object.keys(applicationsData).length > 0) {
-      const registeredApplications = buildPassVaultHydrationRegisteredApplications(applicationsData);
-      if (registeredApplications.length > 0) {
-        const freshScan = scanAllChannelsServiceCoverage(registeredApplications);
-        scanAllChannelsCoverage = freshScan.allChannelsByServiceKey || null;
-        scanRequestorFilter = freshScan.requestorFilter || null;
-      }
-    }
+  if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
+    // Filter to only show requestors with REST V2 support
+    return allRequestors.filter((option) =>
+      restV2RequestorIds.includes(String(option.id || "").trim())
+    );
   }
 
   // ── Fallback: show all requestors ──────
