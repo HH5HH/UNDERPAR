@@ -29106,6 +29106,7 @@ function setRestV2PreparedLoginEntry(context, payload) {
     selectionKey,
     preparedAt: Date.now(),
     loginUrl: String(payload?.loginUrl || "").trim(),
+    serviceProviderId: String(payload?.serviceProviderId || context?.serviceProviderId || context?.requestorId || "").trim(),
     appInfo: payload?.appInfo || context?.appInfo || null,
     sessionData: payload?.sessionData && typeof payload.sessionData === "object" ? cloneJsonLikeValue(payload.sessionData, null) : null,
     sessionRequestHeaders:
@@ -29424,6 +29425,7 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
       const {
         loginUrl,
         appInfo: selectedAppInfo,
+        serviceProviderId: selectedServiceProviderId,
         sessionData,
         payload,
         sessionResponseHeaders,
@@ -29440,6 +29442,7 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
       storeRestV2AuthContextForRequestor(context, resolvedAppInfo);
       const entry = setRestV2PreparedLoginEntry(context, {
         loginUrl,
+        serviceProviderId: selectedServiceProviderId,
         appInfo: resolvedAppInfo,
         sessionData,
         sessionResponseHeaders,
@@ -30137,7 +30140,9 @@ function toRestV2RecordingContext(context, appInfoOverride = null, options = {})
   if (!context?.ok) {
     return null;
   }
-  const serviceProviderId = String(context.serviceProviderId || context.requestorId || "").trim();
+  const serviceProviderId = String(
+    firstNonEmptyString([options?.serviceProviderId, context.serviceProviderId, context.requestorId]) || ""
+  ).trim();
   const redirectUrl = normalizeAdobeNavigationUrl(firstNonEmptyString([options?.redirectUrl, context?.redirectUrl]));
   const domainName = String(firstNonEmptyString([options?.domainName, context?.domainName]) || "").trim();
   const sessionUrl = normalizeAdobeNavigationUrl(firstNonEmptyString([options?.sessionUrl]));
@@ -30442,6 +30447,18 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
     }
 
     const selectedAppInfo = preparedEntry.appInfo || context.appInfo;
+    const resolvedServiceProviderId = String(
+      firstNonEmptyString([
+        preparedEntry?.serviceProviderId,
+        extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(preparedEntry?.loginUrl)),
+        extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(preparedEntry?.sessionData?.url)),
+        context?.serviceProviderId,
+        context?.requestorId,
+      ]) || ""
+    ).trim();
+    if (resolvedServiceProviderId) {
+      context.serviceProviderId = resolvedServiceProviderId;
+    }
     const configuredRedirectUrl = normalizeAdobeNavigationUrl(
       firstNonEmptyString([
         preparedEntry?.payload?.redirectUrl,
@@ -30459,6 +30476,7 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
     );
     storeRestV2AuthContextForRequestor(context, selectedAppInfo);
     state.restV2RecordingContext = toRestV2RecordingContext(context, selectedAppInfo, {
+      serviceProviderId: resolvedServiceProviderId,
       redirectUrl: configuredRedirectUrl,
       domainName: String(
         firstNonEmptyString([
@@ -100779,6 +100797,7 @@ async function createRestV2SessionForContext(context, options = {}) {
             });
             return {
               loginUrl,
+              serviceProviderId,
               sessionData,
               payload: payloadCandidate,
               appInfo: appCandidate,
