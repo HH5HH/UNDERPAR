@@ -100482,57 +100482,68 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
     return uniqueSorted([...directCandidates, ...matchedCandidates].filter(Boolean));
   };
 
-  const canonicalRequestorCandidates = resolveCanonicalRequestorCandidates();
-  const rawServiceProviderId = String(
-    firstNonEmptyString([
-      extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
-      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
-      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
-      extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
-      ...canonicalRequestorCandidates,
-      extractRequestorIdFromServiceProviderValue(requestorId),
-      "",
-    ])
-  ).trim();
-  // Note: Do NOT normalize to lowercase - service provider IDs may be case-sensitive
-  const serviceProviderId = rawServiceProviderId;
-  if (!serviceProviderId) {
+  const getServiceProviderCandidates = () => {
+    const canonicalRequestorCandidates = resolveCanonicalRequestorCandidates();
+    const channelCandidate = String(getRegisteredAppChannel(appInfo) || "").trim();
+    return uniqueSorted(
+      [
+        extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
+        extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
+        extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
+        extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
+        channelCandidate,
+        ...canonicalRequestorCandidates,
+        extractRequestorIdFromServiceProviderValue(requestorId),
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    );
+  };
+
+  const serviceProviderCandidates = getServiceProviderCandidates();
+  if (serviceProviderCandidates.length === 0) {
     throw new Error("Unable to determine service provider ID for REST V2 configuration");
   }
 
-  const response = await fetchWithPremiumAuth(
-    programmer.programmerId,
-    appInfo,
-    `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/configuration`,
-    {
-      method: "GET",
-      mode: "cors",
-      headers: {
-        Accept: "application/json",
+  let finalResponse = null;
+  let finalPayload = null;
+  let finalStatus = 0;
+  let finalMessage = "";
+
+  for (let index = 0; index < serviceProviderCandidates.length; index += 1) {
+    const serviceProviderId = serviceProviderCandidates[index];
+    const response = await fetchWithPremiumAuth(
+      programmer.programmerId,
+      appInfo,
+      `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/configuration`,
+      {
+        method: "GET",
+        mode: "cors",
+        headers: {
+          Accept: "application/json",
+        },
       },
-    },
-    "refresh",
-    {
-      requestorId,
-      service: "rest-v2-configuration",
-      scope: "configuration",
-      requiredServiceScope: REST_V2_SCOPE,
-      appGuid: String(appInfo?.guid || ""),
-      appName: String(appInfo?.appName || appInfo?.guid || ""),
-      lockAppSelection: true,
-      allowProvisioning: true,
+      "refresh",
+      {
+        requestorId,
+        service: "rest-v2-configuration",
+        scope: "configuration",
+        requiredServiceScope: REST_V2_SCOPE,
+        appGuid: String(appInfo?.guid || ""),
+        appName: String(appInfo?.appName || appInfo?.guid || ""),
+        lockAppSelection: true,
+        allowProvisioning: true,
+      }
+    );
+
+    const text = await response.text().catch(() => "");
+    let payload = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      payload = null;
     }
-  );
 
-  const text = await response.text().catch(() => "");
-  let payload = null;
-  try {
-    payload = text ? JSON.parse(text) : null;
-  } catch {
-    payload = null;
-  }
-
-  if (!response.ok) {
     const message =
       firstNonEmptyString([
         payload?.error?.code,
@@ -100542,11 +100553,33 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
         normalizeHttpErrorMessage(text),
         response.statusText,
       ]) || response.statusText;
-    throw new Error(`REST V2 configuration failed (${response.status}): ${message}`);
+
+    finalResponse = response;
+    finalPayload = payload;
+    finalStatus = Number(response.status || 0);
+    finalMessage = message;
+
+    if (response.ok) {
+      break;
+    }
+
+    const invalidServiceProviderResponse =
+      Number(response.status || 0) === 400 &&
+      /service provider parameter value is missing or invalid/i.test(String(message || ""));
+    const hasRemainingCandidates = index < serviceProviderCandidates.length - 1;
+    if (invalidServiceProviderResponse && hasRemainingCandidates) {
+      continue;
+    }
+
+    break;
   }
 
-  const mvpds = normalizeRestV2MvpdCollection(payload || {});
-  const domainRows = normalizeRestV2DomainCollection(payload || {});
+  if (!finalResponse?.ok) {
+    throw new Error(`REST V2 configuration failed (${finalStatus}): ${finalMessage}`);
+  }
+
+  const mvpds = normalizeRestV2MvpdCollection(finalPayload || {});
+  const domainRows = normalizeRestV2DomainCollection(finalPayload || {});
   const map = new Map();
   for (const item of mvpds) {
     if (!map.has(item.id)) {
