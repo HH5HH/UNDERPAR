@@ -29377,6 +29377,58 @@ function isCurrentRestV2SelectionKey(selectionKey) {
   return getRestV2SelectionKey(currentContext) === selectionKey;
 }
 
+async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
+  if (!context || typeof context !== "object") {
+    return context;
+  }
+
+  const nextContext = {
+    ...context,
+  };
+  let resolvedAppInfo =
+    nextContext.appInfo && typeof nextContext.appInfo === "object" ? nextContext.appInfo : null;
+  const appGuid = String(resolvedAppInfo?.guid || nextContext?.appGuid || "").trim();
+
+  if (appGuid && resolvedAppInfo) {
+    try {
+      const hydratedAppInfo = await enrichRegisteredApplicationForHydration(resolvedAppInfo, {
+        timeoutMs: PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS,
+        preferAuthenticatedHeaders: true,
+        preferredTabId: 0,
+        allowTemporaryPageContextTab: true,
+      });
+      if (hydratedAppInfo && typeof hydratedAppInfo === "object") {
+        resolvedAppInfo = hydratedAppInfo;
+      }
+    } catch {
+      // Continue with existing app context when hydration is unavailable.
+    }
+  }
+
+  if (resolvedAppInfo && typeof resolvedAppInfo === "object") {
+    nextContext.appInfo = resolvedAppInfo;
+  }
+
+  const requestorId = String(nextContext.requestorId || nextContext.serviceProviderId || "").trim();
+  const authoritativeServiceProviderId = String(
+    firstNonEmptyString([
+      extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(resolvedAppInfo)),
+      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.appData?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProviderId),
+      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.requestorId),
+      getRequestorScopedRestV2ConfigurationServiceProvider(requestorId),
+      nextContext.serviceProviderId,
+      requestorId,
+    ]) || ""
+  ).trim();
+  if (authoritativeServiceProviderId) {
+    nextContext.serviceProviderId = authoritativeServiceProviderId;
+  }
+
+  return nextContext;
+}
+
 async function ensurePreparedRestV2LoginForContext(section, context, options = {}) {
   const force = options.force === true;
   const debugFlowId = String(options.debugFlowId || "").trim();
@@ -29422,6 +29474,7 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
 
   const workPromise = (async () => {
     try {
+      const preparedContext = await hydrateRestV2ContextAppInfoAndServiceProvider(context);
       const {
         loginUrl,
         appInfo: selectedAppInfo,
@@ -29431,16 +29484,16 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
         sessionResponseHeaders,
         partnerFrameworkStatus,
         sessionPartner,
-      } = await createRestV2SessionForContext(context, {
+      } = await createRestV2SessionForContext(preparedContext, {
         debugFlowId,
       });
       if (!loginUrl) {
         throw new Error("REST V2 session response did not include a login URL.");
       }
 
-      const resolvedAppInfo = selectedAppInfo || context.appInfo;
-      storeRestV2AuthContextForRequestor(context, resolvedAppInfo);
-      const entry = setRestV2PreparedLoginEntry(context, {
+      const resolvedAppInfo = selectedAppInfo || preparedContext.appInfo;
+      storeRestV2AuthContextForRequestor(preparedContext, resolvedAppInfo);
+      const entry = setRestV2PreparedLoginEntry(preparedContext, {
         loginUrl,
         serviceProviderId: selectedServiceProviderId,
         appInfo: resolvedAppInfo,
@@ -29456,7 +29509,7 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
 
       state.restV2PrepareErrorBySelectionKey.delete(selectionKey);
       if (section && isCurrentRestV2SelectionKey(selectionKey)) {
-        const appName = resolvedAppInfo?.appName || resolvedAppInfo?.guid || context.appInfo?.appName || "REST V2 App";
+        const appName = resolvedAppInfo?.appName || resolvedAppInfo?.guid || preparedContext.appInfo?.appName || "REST V2 App";
         setRestV2LoginPanelStatus(
           section,
           `Ready to test ${requestorMvpdLabel} with "${appName}".`,
@@ -37205,10 +37258,12 @@ async function stopRestV2MvpdRecording(section, programmer, appInfo) {
     }
 
     const fallbackContextCandidate = buildCurrentRestV2SelectionContext(programmer, appInfo);
-    const recordingContext =
+    let recordingContext =
       (state.restV2RecordingContext && typeof state.restV2RecordingContext === "object"
         ? state.restV2RecordingContext
         : null) || (fallbackContextCandidate.ok ? toRestV2RecordingContext(fallbackContextCandidate) : null);
+
+    recordingContext = await hydrateRestV2ContextAppInfoAndServiceProvider(recordingContext);
 
     emitRestV2DebugEvent(activeFlowId, {
       source: "extension",
@@ -65638,7 +65693,7 @@ async function handleRestV2LoginPopupClosed(tabId = 0) {
   }
 
   const flowId = String(state.restV2DebugFlowId || "").trim();
-  const recordingContext =
+  let recordingContext =
     state.restV2RecordingContext && typeof state.restV2RecordingContext === "object" ? state.restV2RecordingContext : null;
   const wasRecording = state.restV2RecordingActive === true;
   const previousLaunchWindowId = Number(state.restV2LastLaunchWindowId || 0);
@@ -65659,6 +65714,8 @@ async function handleRestV2LoginPopupClosed(tabId = 0) {
     refreshRestV2LoginPanels();
     return;
   }
+
+  recordingContext = await hydrateRestV2ContextAppInfoAndServiceProvider(recordingContext);
 
   const selectionContext = buildRestV2SelectionContextFromRecordingContextSafe(recordingContext);
   if (!selectionContext?.ok) {
