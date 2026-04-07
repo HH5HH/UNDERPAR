@@ -87221,20 +87221,20 @@ function getRequestorsForSelectedMediaCompany() {
   // If scan metadata is available, check whether the REST V2 service has "All Channels" coverage.
   // For REST V2 configuration calls, we only need DCR credentials for the "restv2" service.
   if (scanAllChannelsCoverage && typeof scanAllChannelsCoverage === "object") {
-    if (scanAllChannelsCoverage["restv2"] === true) {
+    if (scanAllChannelsCoverage["restV2"] === true) {
       return allRequestors;
     }
     // Else, filter to requestors covered by channel-specific "restv2" apps.
-    const restv2ChannelSpecificApps = Array.isArray(premiumApps?.restv2Apps)
-      ? premiumApps.restv2Apps.filter((app) =>
+    const restV2ChannelSpecificApps = Array.isArray(premiumApps?.restV2Apps)
+      ? premiumApps.restV2Apps.filter((app) =>
           app.serviceProviderHint && typeof app.serviceProviderHint === "string" && app.serviceProviderHint.trim()
         )
       : [];
     if (restv2ChannelSpecificApps.length > 0) {
-      const restv2Filter = uniqueSorted(
-        restv2ChannelSpecificApps.map((app) => app.serviceProviderHint.trim())
+      const restV2Filter = uniqueSorted(
+        restV2ChannelSpecificApps.map((app) => app.serviceProviderHint.trim())
       );
-      const filterSet = new Set(restv2Filter.map((id) => String(id || "").toLowerCase()));
+      const filterSet = new Set(restV2Filter.map((id) => String(id || "").toLowerCase()));
       const filtered = allRequestors.filter((option) =>
         filterSet.has(String(option.id || "").toLowerCase())
       );
