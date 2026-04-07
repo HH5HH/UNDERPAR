@@ -87238,15 +87238,11 @@ function getRequestorsForSelectedMediaCompany() {
         return scanRequestorFilter.map(id => ({ key: id, id, label: id }));
       }
     } else {
-      // All channels - show allRequestors, or derive from channels matching the programmer if empty
+      // All channels - show allRequestors, or derive from all channels if empty
       if (allRequestors.length === 0) {
-        const normalizedProgrammerId = String(programmer.programmerId || "").trim();
-        allRequestors = (Array.isArray(state.consoleBootstrapState.channels) ? state.consoleBootstrapState.channels : [])
-          .filter(channel => {
-            if (!channel || typeof channel !== "object") return false;
-            const channelProgrammerId = normalizeOrganizationIdentifier(channel?.programmerId);
-            return normalizedProgrammerId && channelProgrammerId && channelProgrammerId === normalizedProgrammerId;
-          })
+        const channels = (state.consoleBootstrapState && Array.isArray(state.consoleBootstrapState.channels)) ? state.consoleBootstrapState.channels : [];
+        allRequestors = channels
+          .filter(channel => channel && typeof channel === "object" && channel.id)
           .map(channel => ({
             key: channel.id,
             id: channel.id,
