@@ -82928,7 +82928,7 @@ function buildAvatarMenuEntries(loginData) {
     const cmConsoleClientId = String(firstNonEmptyString([cmConsoleClaims.client_id, cmConsoleClaims.clientId]) || "")
       .trim()
       .toLowerCase();
-    const hasCmConsoleToken = Boolean(cmConsoleAccessToken && isCmConsoleClientId(cmConsoleClientId));
+    const hasCmConsoleToken = Boolean(cmConsoleAccessToken && isAcceptedCmConsoleClientId(cmConsoleClientId));
     const cmConsoleStatusText = hasCmConsoleToken
       ? cmConsoleAccessToken
       : state.cmAuthBootstrapPromise || state.cmTenantsPrecheckPending
@@ -93727,6 +93727,25 @@ function isCmConsoleClientId(value = "") {
   return String(value || "").trim().toLowerCase() === CM_IMS_PRIMARY_CLIENT_ID;
 }
 
+function isAcceptedCmConsoleClientId(value = "") {
+  const normalizedValue = String(value || "").trim().toLowerCase();
+  if (!normalizedValue) {
+    return false;
+  }
+  if (isCmConsoleClientId(normalizedValue) || isUnderparImsClientId(normalizedValue)) {
+    return true;
+  }
+  const configuredClientIds = uniquePreserveOrder([
+    CM_IMS_PRIMARY_CLIENT_ID,
+    ...CM_IMS_CHECK_CLIENT_IDS,
+    ...CM_IMS_VALIDATE_CLIENT_IDS,
+    getConfiguredUnderparImsClientId(),
+  ])
+    .map((candidate) => String(candidate || "").trim().toLowerCase())
+    .filter(Boolean);
+  return configuredClientIds.includes(normalizedValue);
+}
+
 function getConfiguredUnderparImsClientId() {
   const runtimeConfig = getActiveUnderparImsRuntimeConfig();
   return firstNonEmptyString([
@@ -93779,7 +93798,7 @@ function emitCmConsoleTokenForTesting(accessToken = "", source = "") {
   const clientId = String(firstNonEmptyString([claims.client_id, claims.clientId]) || "")
     .trim()
     .toLowerCase();
-  if (!isCmConsoleClientId(clientId)) {
+  if (!isAcceptedCmConsoleClientId(clientId)) {
     return false;
   }
   state.cmLastHydratedAccessToken = token;
@@ -93811,7 +93830,7 @@ function tokenSupportsCmTenantCatalog(accessToken = "") {
   const clientId = String(firstNonEmptyString([claims.client_id, claims.clientId]) || "")
     .trim()
     .toLowerCase();
-  return isCmConsoleClientId(clientId);
+  return isAcceptedCmConsoleClientId(clientId);
 }
 
 function tokenSupportsCmConsoleRequests(accessToken = "") {
@@ -93824,7 +93843,7 @@ function tokenSupportsCmConsoleRequests(accessToken = "") {
   const clientId = String(firstNonEmptyString([claims.client_id, claims.clientId]) || "")
     .trim()
     .toLowerCase();
-  return isCmConsoleClientId(clientId);
+  return isAcceptedCmConsoleClientId(clientId);
 }
 
 function buildPrimetimeRequestHeaders(accessToken = "") {
