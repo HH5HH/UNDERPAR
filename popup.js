@@ -102334,12 +102334,16 @@ function registerEventHandlers() {
     const selectedServicesBeforeMvpdLoad = selectedProgrammerBeforeMvpdLoad?.programmerId
       ? getCurrentPremiumAppsSnapshot(selectedProgrammerBeforeMvpdLoad.programmerId) || null
       : null;
-    await refreshSelectionScopedProgrammerPanels({
+    const requestorPanelRefreshPromise = refreshSelectionScopedProgrammerPanels({
       controllerReason: "requestor-change",
       programmer: selectedProgrammerBeforeMvpdLoad,
       services: selectedServicesBeforeMvpdLoad,
+    }).catch((error) => {
+      setStatus(error instanceof Error ? error.message : String(error), "error");
+      return false;
     });
     await populateMvpdSelectForRequestor(state.selectedRequestorId);
+    await settlePromiseWithin(requestorPanelRefreshPromise, 1500, false);
     const esmWorkspaceState = getActiveEsmWorkspaceState();
     if (esmWorkspaceState) {
       esmWorkspaceBroadcastControllerState(esmWorkspaceState);
