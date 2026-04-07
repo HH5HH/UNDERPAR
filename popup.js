@@ -87273,7 +87273,23 @@ function getRequestorsForSelectedMediaCompany() {
   }
 
   // ── Fallback: show all requestors ──────
-  return allRequestors;
+  if (allRequestors.length > 0) {
+    return allRequestors;
+  }
+
+  // If no programmer-specific requestors and REST V2 allows all, show all channels
+  if (restV2RequestorIds === null) {
+    return (Array.isArray(state.consoleBootstrapState.channels) ? state.consoleBootstrapState.channels : [])
+      .map((channel) => ({
+        key: String(channel?.id || "").trim(),
+        id: String(channel?.id || "").trim(),
+        label: String(channel?.displayName || channel?.name || channel?.id || "").trim(),
+      }))
+      .filter((option) => option.id)
+      .sort((left, right) => String(left.label).localeCompare(String(right.label), undefined, { sensitivity: "base" }));
+  }
+
+  return [];
 }
 
 function populateRequestorSelect() {
