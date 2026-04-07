@@ -20314,6 +20314,21 @@ async function attemptRestV2SessionCodeProfileRecovery(harvest, flowId = "", sco
     return null;
   }
 
+  const recoverySelectionContext =
+    buildRestV2ContextFromHarvest(harvest) || {
+      programmerId,
+      requestorId: String(harvest.requestorId || serviceProviderId || "").trim(),
+      serviceProviderId,
+      mvpd,
+      appInfo,
+      loginUrl: normalizeAdobeNavigationUrl(String(harvest.loginUrl || "").trim()),
+      sessionUrl: normalizeAdobeNavigationUrl(String(harvest.sessionUrl || "").trim()),
+      sessionData: harvest?.sessionData && typeof harvest.sessionData === "object" ? harvest.sessionData : null,
+    };
+  const serviceProviderCandidates = buildRestV2ServiceProviderCandidatesFromContext(recoverySelectionContext);
+  const resolvedServiceProviderCandidates =
+    serviceProviderCandidates.length > 0 ? serviceProviderCandidates : [serviceProviderId];
+
   const sessionCodeCandidates = collectRestV2SessionCodeCandidates(
     [
       harvest.sessionCode,
@@ -20338,139 +20353,152 @@ async function attemptRestV2SessionCodeProfileRecovery(harvest, flowId = "", sco
     programmerId,
     appGuid: String(appInfo.guid || ""),
     appName: String(appInfo.appName || appInfo.guid || ""),
+    serviceProviderCandidateCount: resolvedServiceProviderCandidates.length,
     sessionCodeCandidateCount: sessionCodeCandidates.length,
     environment: String(getActiveAdobePassEnvironmentKey() || ""),
   });
 
-  for (const sessionCode of sessionCodeCandidates) {
-    const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles/code/${encodeURIComponent(sessionCode)}`;
-    const requestHeaders = buildRestV2Headers(serviceProviderId, {
+  for (const candidateServiceProviderId of resolvedServiceProviderCandidates) {
+    for (const sessionCode of sessionCodeCandidates) {
+      const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(candidateServiceProviderId)}/profiles/code/${encodeURIComponent(sessionCode)}`;
+      const requestHeaders = buildRestV2Headers(candidateServiceProviderId, {
       Accept: "application/json",
-    });
+      });
 
-    try {
-      const response = await fetchWithPremiumAuth(
-        programmerId,
-        appInfo,
-        endpointUrl,
-        {
-          method: "GET",
-          mode: "cors",
-          headers: requestHeaders,
-        },
-        "refresh",
-        {
-          flowId: resolvedFlowId,
-          requestorId: String(harvest.requestorId || serviceProviderId || ""),
-          mvpd,
-          scope: `${scope}:profiles-code`,
-          service: "rest-v2-profiles",
+      try {
+        const response = await fetchWithPremiumAuth(
+          programmerId,
+          appInfo,
           endpointUrl,
-        }
-      );
-
-      const responseText = await response.text().catch(() => "");
-      const parsedPayload = parseJsonText(responseText, null);
-
-      if (!response.ok || !parsedPayload) {
-        emitRestV2DebugEvent(resolvedFlowId, {
-          source: "extension",
-          phase: `${scope}-code-miss`,
-          url: endpointUrl,
-          sessionCode,
-          status: Number(response.status || 0),
-          statusText: String(response.statusText || "").trim(),
-          responsePreview: truncateDebugText(responseText, 1200),
-        });
-        continue;
-      }
-
-      const profileRows = extractRestV2ProfileRowsFromPayload(parsedPayload || {}, {
-        mvpd,
-        requestorId: String(harvest.requestorId || serviceProviderId || "").trim(),
-      });
-      const profileCount = profileRows.length;
-
-      if (profileCount <= 0) {
-        emitRestV2DebugEvent(resolvedFlowId, {
-          source: "extension",
-          phase: `${scope}-code-empty`,
-          url: endpointUrl,
-          sessionCode,
-          status: Number(response.status || 0),
-          profileCount: 0,
-        });
-        continue;
-      }
-
-      // ---- Recovery succeeded ----
-      const checkedAt = Date.now();
-
-      emitRestV2DebugEvent(resolvedFlowId, {
-        source: "extension",
-        phase: `${scope}-recovered`,
-        url: endpointUrl,
-        sessionCode,
-        status: Number(response.status || 0),
-        profileCount,
-        profileKeys: profileRows.map((row) => String(row?.profileKey || "").trim()).filter(Boolean),
-      });
-
-      const recoveryContext = buildRestV2ContextFromHarvest(harvest);
-      const recoveryProfileCheckResult = {
-        checked: true,
-        ok: true,
-        status: Number(response.status || 200),
-        statusText: String(response.statusText || "").trim(),
-        profileCount,
-        responsePreview: truncateDebugText(responseText, 3000),
-        url: endpointUrl,
-        error: "",
-        responsePayload: parsedPayload,
-        harvestedProfile: profileRows[0] || null,
-        profileCheckEndpoint: "profiles-code",
-        profileCheckEndpointLabel: "profiles/code (recovery)",
-        profileCheckSessionCode: sessionCode,
-        attemptedEndpoints: [
           {
-            endpointKey: "profiles-code",
-            endpointLabel: "profiles/code (recovery)",
-            url: endpointUrl,
-            ok: true,
-            checked: true,
-            status: Number(response.status || 200),
-            statusText: String(response.statusText || "").trim(),
-            profileCount,
-            error: "",
-            sessionCode,
+            method: "GET",
+            mode: "cors",
+            headers: requestHeaders,
           },
-        ],
-      };
+          "refresh",
+          {
+            flowId: resolvedFlowId,
+            requestorId: String(harvest.requestorId || candidateServiceProviderId || ""),
+            serviceProviderId: candidateServiceProviderId,
+            mvpd,
+            scope: `${scope}:profiles-code`,
+            service: "rest-v2-profiles",
+            endpointUrl,
+          }
+        );
 
-      // Re-harvest the recovered profile so BOBTOOLS / Can I Watch? sees it.
-      if (recoveryContext) {
-        storeRestV2ProfileHarvest(recoveryContext, recoveryProfileCheckResult, resolvedFlowId);
+        const responseText = await response.text().catch(() => "");
+        const parsedPayload = parseJsonText(responseText, null);
+
+        if (!response.ok || !parsedPayload) {
+          emitRestV2DebugEvent(resolvedFlowId, {
+            source: "extension",
+            phase: `${scope}-code-miss`,
+            url: endpointUrl,
+            serviceProviderId: candidateServiceProviderId,
+            sessionCode,
+            status: Number(response.status || 0),
+            statusText: String(response.statusText || "").trim(),
+            responsePreview: truncateDebugText(responseText, 1200),
+          });
+          continue;
+        }
+
+        const profileRows = extractRestV2ProfileRowsFromPayload(parsedPayload || {}, {
+          mvpd,
+          requestorId: String(harvest.requestorId || candidateServiceProviderId || "").trim(),
+        });
+        const profileCount = profileRows.length;
+
+        if (profileCount <= 0) {
+          emitRestV2DebugEvent(resolvedFlowId, {
+            source: "extension",
+            phase: `${scope}-code-empty`,
+            url: endpointUrl,
+            serviceProviderId: candidateServiceProviderId,
+            sessionCode,
+            status: Number(response.status || 0),
+            profileCount: 0,
+          });
+          continue;
+        }
+
+        // ---- Recovery succeeded ----
+        const checkedAt = Date.now();
+
+        emitRestV2DebugEvent(resolvedFlowId, {
+          source: "extension",
+          phase: `${scope}-recovered`,
+          url: endpointUrl,
+          serviceProviderId: candidateServiceProviderId,
+          sessionCode,
+          status: Number(response.status || 0),
+          profileCount,
+          profileKeys: profileRows.map((row) => String(row?.profileKey || "").trim()).filter(Boolean),
+        });
+
+        const recoveryContext = buildRestV2ContextFromHarvest({
+          ...harvest,
+          serviceProviderId: candidateServiceProviderId,
+          requestorId: String(harvest.requestorId || candidateServiceProviderId || "").trim(),
+        });
+        const recoveryProfileCheckResult = {
+          checked: true,
+          ok: true,
+          status: Number(response.status || 200),
+          statusText: String(response.statusText || "").trim(),
+          profileCount,
+          responsePreview: truncateDebugText(responseText, 3000),
+          url: endpointUrl,
+          error: "",
+          responsePayload: parsedPayload,
+          harvestedProfile: profileRows[0] || null,
+          profileCheckEndpoint: "profiles-code",
+          profileCheckEndpointLabel: "profiles/code (recovery)",
+          profileCheckSessionCode: sessionCode,
+          attemptedEndpoints: [
+            {
+              endpointKey: "profiles-code",
+              endpointLabel: "profiles/code (recovery)",
+              url: endpointUrl,
+              ok: true,
+              checked: true,
+              status: Number(response.status || 200),
+              statusText: String(response.statusText || "").trim(),
+              profileCount,
+              error: "",
+              sessionCode,
+            },
+          ],
+        };
+
+        // Re-harvest the recovered profile so BOBTOOLS / Can I Watch? sees it.
+        if (recoveryContext) {
+          storeRestV2ProfileHarvest(recoveryContext, recoveryProfileCheckResult, resolvedFlowId);
+        }
+
+        return {
+          recovered: true,
+          checkedAt,
+          serviceProviderId: candidateServiceProviderId,
+          sessionCode,
+          endpointUrl,
+          profileCount,
+          profileRows,
+          profileCheckResult: recoveryProfileCheckResult,
+          context: recoveryContext,
+        };
+      } catch (recoveryError) {
+        emitRestV2DebugEvent(resolvedFlowId, {
+          source: "extension",
+          phase: `${scope}-code-error`,
+          url: endpointUrl,
+          serviceProviderId: candidateServiceProviderId,
+          sessionCode,
+          error: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+        });
+        // Intentionally swallowed — recovery must never throw.
       }
-
-      return {
-        recovered: true,
-        checkedAt,
-        sessionCode,
-        endpointUrl,
-        profileCount,
-        profileRows,
-        profileCheckResult: recoveryProfileCheckResult,
-        context: recoveryContext,
-      };
-    } catch (recoveryError) {
-      emitRestV2DebugEvent(resolvedFlowId, {
-        source: "extension",
-        phase: `${scope}-code-error`,
-        url: endpointUrl,
-        sessionCode,
-        error: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
-      });
-      // Intentionally swallowed — recovery must never throw.
     }
   }
 
@@ -20480,6 +20508,7 @@ async function attemptRestV2SessionCodeProfileRecovery(harvest, flowId = "", sco
     requestorId: String(harvest.requestorId || serviceProviderId || ""),
     mvpd,
     programmerId,
+    serviceProviderCandidateCount: resolvedServiceProviderCandidates.length,
     sessionCodeCandidateCount: sessionCodeCandidates.length,
   });
 
