@@ -859,7 +859,8 @@ function getCurrentProgrammerApplicationsSnapshot(programmerId = "") {
   if (!normalizedProgrammerId) {
     return null;
   }
-  const snapshot = state.applicationsByProgrammerId.get(normalizedProgrammerId) || null;
+  const key = `${state.selectedEnvironmentKey || 'default'}|${normalizedProgrammerId}`;
+  const snapshot = state.applicationsByKey.get(key) || null;
   return isEnvironmentAwareValueCurrent(snapshot) ? snapshot : null;
 }
 
@@ -868,10 +869,11 @@ function setCurrentProgrammerApplicationsSnapshot(programmerId = "", application
   if (!normalizedProgrammerId) {
     return null;
   }
+  const key = `${state.selectedEnvironmentKey || 'default'}|${normalizedProgrammerId}`;
   const snapshot =
     applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
   stampEnvironmentAwareValue(snapshot);
-  state.applicationsByProgrammerId.set(normalizedProgrammerId, snapshot);
+  state.applicationsByKey.set(key, snapshot);
   return snapshot;
 }
 
@@ -880,7 +882,8 @@ function getCurrentPremiumAppsSnapshot(programmerId = "") {
   if (!normalizedProgrammerId) {
     return null;
   }
-  const snapshot = state.premiumAppsByProgrammerId.get(normalizedProgrammerId) || null;
+  const key = `${state.selectedEnvironmentKey || 'default'}|${normalizedProgrammerId}`;
+  const snapshot = state.premiumAppsByKey.get(key) || null;
   return isEnvironmentAwareValueCurrent(snapshot) ? snapshot : null;
 }
 
@@ -889,9 +892,10 @@ function setCurrentPremiumAppsSnapshot(programmerId = "", premiumApps = {}) {
   if (!normalizedProgrammerId) {
     return null;
   }
+  const key = `${state.selectedEnvironmentKey || 'default'}|${normalizedProgrammerId}`;
   const snapshot = premiumApps && typeof premiumApps === "object" && !Array.isArray(premiumApps) ? premiumApps : {};
   stampEnvironmentAwareValue(snapshot);
-  state.premiumAppsByProgrammerId.set(normalizedProgrammerId, snapshot);
+  state.premiumAppsByKey.set(key, snapshot);
   return snapshot;
 }
 
@@ -8510,9 +8514,9 @@ function clearPassVaultProgrammerRuntimeState(programmerId = "", environmentKey 
   if (!normalizedProgrammerId) {
     return;
   }
-  state.applicationsByProgrammerId.delete(normalizedProgrammerId);
-  state.programmerApplicationsLoadPromiseByProgrammerId.delete(normalizedProgrammerId);
-  state.premiumAppsByProgrammerId.delete(normalizedProgrammerId);
+  state.applicationsByKey.delete(scopedKey);
+  state.programmerApplicationsLoadPromiseByKey.delete(scopedKey);
+  state.premiumAppsByKey.delete(scopedKey);
   state.cmServiceByProgrammerId.delete(normalizedProgrammerId);
   state.cmServiceLoadPromiseByProgrammerId.delete(normalizedProgrammerId);
   state.cmHydrationPromiseByProgrammerId.delete(normalizedProgrammerId);
@@ -8769,9 +8773,9 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
   state.restV2ProfileHarvestByProgrammerId.clear();
   state.restV2ProfileHarvestBucketByProgrammerId.clear();
   state.restV2ProfileHarvestLast = null;
-  state.applicationsByProgrammerId.clear();
-  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
-  state.premiumAppsByProgrammerId.clear();
+  state.applicationsByKey.clear();
+  state.programmerApplicationsLoadPromiseByKey.clear();
+  state.premiumAppsByKey.clear();
   state.programmerWorkspaceHydrationReadyByKey.clear();
   state.premiumHydrationProgressByProgrammerKey.clear();
   state.cmServiceByProgrammerId.clear();
@@ -11385,9 +11389,9 @@ function clearEnvironmentAwareRegisteredAppState(reason = "environment-change") 
   clearHarpoPanelStatus();
   clearHarpoRecordingState(reason, { stopFlow: true });
   state.restV2PrewarmedAppsByProgrammerId.clear();
-  state.applicationsByProgrammerId.clear();
-  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
-  state.premiumAppsByProgrammerId.clear();
+  state.applicationsByKey.clear();
+  state.programmerApplicationsLoadPromiseByKey.clear();
+  state.premiumAppsByKey.clear();
   state.dcrEnsureTokenPromiseByKey.clear();
   state.restV2ProfileHarvestBySelectionKey.clear();
   state.restV2ProfileHarvestByProgrammerId.clear();
@@ -13971,9 +13975,9 @@ const state = {
   restV2Stopping: false,
   restV2TraceViewerWindowId: 0,
   restV2TraceViewerTabId: 0,
-  applicationsByProgrammerId: new Map(),
-  programmerApplicationsLoadPromiseByProgrammerId: new Map(),
-  premiumAppsByProgrammerId: new Map(),
+  applicationsByKey: new Map(),
+  programmerApplicationsLoadPromiseByKey: new Map(),
+  premiumAppsByKey: new Map(),
   programmerWorkspaceHydrationReadyByKey: new Map(),
   premiumHydrationProgressByProgrammerKey: new Map(),
   cmServiceByProgrammerId: new Map(),
@@ -70625,7 +70629,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo, options = 
   const disabled = options?.disabled === true;
   const disabledReason = String(options?.disabledReason || "").trim();
   const servicesForProgrammer =
-    programmer?.programmerId && state.premiumAppsByProgrammerId.has(programmer.programmerId)
+    programmer?.programmerId && state.premiumAppsByKey.has(`${state.selectedEnvironmentKey || 'default'}|${programmer.programmerId}`)
       ? getCurrentPremiumAppsSnapshot(programmer.programmerId)
       : null;
   const serviceScopedAppByKey = {
@@ -77117,9 +77121,9 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.selectedProgrammerKey = "";
   state.pendingEnvironmentSwitchSelectionRestore = null;
   state.pendingEnvironmentSwitchSelectionRestorePromise = null;
-  state.applicationsByProgrammerId.clear();
-  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
-  state.premiumAppsByProgrammerId.clear();
+  state.applicationsByKey.clear();
+  state.programmerApplicationsLoadPromiseByKey.clear();
+  state.premiumAppsByKey.clear();
   state.programmerWorkspaceHydrationReadyByKey.clear();
   state.premiumHydrationProgressByProgrammerKey.clear();
   state.cmServiceByProgrammerId.clear();
@@ -84252,8 +84256,8 @@ function getAvatarMenuActiveCmSummaryState() {
     });
   };
 
-  if (state.premiumAppsByProgrammerId instanceof Map) {
-    state.premiumAppsByProgrammerId.forEach((services) => appendFromService(services?.cm || null));
+  if (state.premiumAppsByKey instanceof Map) {
+    state.premiumAppsByKey.forEach((services) => appendFromService(services?.cm || null));
   }
   if (state.cmServiceByProgrammerId instanceof Map) {
     state.cmServiceByProgrammerId.forEach((service) => appendFromService(service));
@@ -87180,6 +87184,10 @@ function getRequestorsForSelectedMediaCompany() {
         id: requestorId,
         label: requestorId,
       }));
+
+  if (allRequestors.length === 0) {
+    allRequestors = deriveProgrammerRequestorOptionsFromChannels(programmer, state.consoleBootstrapState.channels || []);
+  }
 
   // ── Use All Channels scan metadata when available ──────────────────────────
   // The __allChannelsCoverage and __requestorFilter fields are populated by
@@ -93230,12 +93238,12 @@ function getCmTenantScopeForProgrammer(programmer = null) {
       ? state.cmServiceByProgrammerId.get(programmerId)
       : null;
   const selectedServiceByProgrammerId =
-    programmerId && state.premiumAppsByProgrammerId instanceof Map
+    programmerId && state.premiumAppsByKey instanceof Map
       ? getCurrentPremiumAppsSnapshot(programmerId)?.cm
       : null;
   const selectedProgrammer = resolveSelectedProgrammer();
   const selectedProgrammerService =
-    !programmerId && selectedProgrammer?.programmerId && state.premiumAppsByProgrammerId instanceof Map
+    !programmerId && selectedProgrammer?.programmerId && state.premiumAppsByKey instanceof Map
       ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId)?.cm
       : null;
   return resolveCmUsageTenantScopeValue(
@@ -100746,9 +100754,9 @@ function resetProgrammerRuntimeState() {
   state.restV2AuthContextByRequestor.clear();
   clearHarpoPanelStatus();
   clearHarpoRecordingState("programmer-reset", { stopFlow: true });
-  state.applicationsByProgrammerId.clear();
-  state.programmerApplicationsLoadPromiseByProgrammerId.clear();
-  state.premiumAppsByProgrammerId.clear();
+  state.applicationsByKey.clear();
+  state.programmerApplicationsLoadPromiseByKey.clear();
+  state.premiumAppsByKey.clear();
   state.programmerWorkspaceHydrationReadyByKey.clear();
   state.premiumHydrationProgressByProgrammerKey.clear();
   state.restV2ProfileHarvestBySelectionKey.clear();
