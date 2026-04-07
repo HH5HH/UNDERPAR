@@ -86563,8 +86563,7 @@ function deriveProgrammerRequestorOptionsFromChannels(programmerData = null, cha
       : [];
   const referencedRequestorIds = new Set(
     rawServiceProviders
-      .map((reference) => computeEntityReferenceId(reference))
-      .map((value) => String(value || "").trim())
+      .map((reference) => normalizeEntityToken(extractEntityIdFromToken(String(reference || ""))))
       .filter(Boolean)
   );
   const requestors = [];
@@ -86603,7 +86602,7 @@ function deriveProgrammerRequestorOptionsFromChannels(programmerData = null, cha
 
   (Array.isArray(channels) ? channels : []).forEach((channel) => {
     const channelProgrammerId = normalizeOrganizationIdentifier(channel?.programmerId);
-    const channelId = String(channel?.id || "").trim();
+    const channelId = normalizeEntityToken(String(channel?.id || "").trim());
     const matchesProgrammer =
       normalizedProgrammerId && channelProgrammerId && channelProgrammerId === normalizedProgrammerId;
     const matchesReference = channelId && referencedRequestorIds.has(channelId);
@@ -86639,13 +86638,12 @@ function deriveProgrammerRequestorOptionsFromChannels(programmerData = null, cha
 }
 
 function extractContentProviderId(reference) {
-  const text = String(reference || "");
-  const match = text.match(/^@ContentProvider:(.+)$/);
-  if (match) {
-    return match[1];
+  const text = String(reference || "").trim();
+  if (!text) {
+    return null;
   }
-
-  return text.trim() || null;
+  const id = extractEntityIdFromToken(text);
+  return String(id || "").trim() || null;
 }
 
 function mapProgrammerEntity(entity, index) {
@@ -86677,10 +86675,12 @@ function mapProgrammerEntity(entity, index) {
         );
   const requestorIds =
     requestorOptions.length > 0
-      ? uniqueSorted(requestorOptions.map((item) => String(item?.id || item?.key || "").trim()).filter(Boolean))
+      ? uniqueSorted(requestorOptions.map((item) => normalizeEntityToken(extractEntityIdFromToken(String(item?.id || item?.key || "")))).filter(Boolean))
       : Array.isArray(data.contentProviders)
         ? data.contentProviders.map((item) => extractContentProviderId(item)).filter(Boolean)
-        : [];
+        : Array.isArray(data.serviceProviders)
+          ? data.serviceProviders.map((item) => extractContentProviderId(item)).filter(Boolean)
+          : [];
   const applications = Array.isArray(data.applications) ? data.applications : [];
 
   return {
@@ -87226,18 +87226,23 @@ function getRequestorsForSelectedMediaCompany() {
     return [];
   }
 
+  const normalizeRequestorId = (value) => normalizeEntityToken(extractEntityIdFromToken(String(value || "")));
   const requestorOptions = Array.isArray(programmer.requestorOptions)
     ? programmer.requestorOptions
         .filter((option) => option && typeof option === "object")
-        .map((option) => ({
-          key: String(firstNonEmptyString([option.key, option.id]) || "").trim(),
-          id: String(firstNonEmptyString([option.id, option.key]) || "").trim(),
-          label: firstNonEmptyString([option.label, option.name, option.id, option.key]),
-        }))
+        .map((option) => {
+          const id = normalizeRequestorId(firstNonEmptyString([option.id, option.key]));
+          const key = normalizeRequestorId(firstNonEmptyString([option.key, option.id]));
+          return {
+            key,
+            id,
+            label: firstNonEmptyString([option.label, option.name, option.id, option.key]),
+          };
+        })
         .filter((option) => option.id)
     : [];
 
-  const allRequestors = requestorOptions.length > 0
+  let allRequestors = requestorOptions.length > 0
     ? requestorOptions.sort((left, right) =>
         String(firstNonEmptyString([left.label, left.id])).localeCompare(
           String(firstNonEmptyString([right.label, right.id])),
@@ -87264,12 +87269,18 @@ function getRequestorsForSelectedMediaCompany() {
   const programmerId = String(programmer.programmerId || "").trim();
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
   const restV2RequestorIds = premiumApps?.__restV2RequestorIds;
+  const normalizedRestV2RequestorIds = Array.isArray(restV2RequestorIds)
+    ? restV2RequestorIds
+        .map((value) => normalizeEntityToken(extractEntityIdFromToken(String(value || ""))))
+        .filter(Boolean)
+    : [];
 
-  if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
+  if (normalizedRestV2RequestorIds.length > 0) {
     // Filter to only show requestors with REST V2 support
-    return allRequestors.filter((option) =>
-      restV2RequestorIds.includes(String(option.id || "").trim())
-    );
+    return allRequestors.filter((option) => {
+      const optionId = normalizeEntityToken(extractEntityIdFromToken(String(option.id || option.key || "")));
+      return normalizedRestV2RequestorIds.includes(optionId);
+    });
   }
 
   // ── Fallback: show all requestors ──────
@@ -87335,15 +87346,23 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   }
 
   const normalizedProgrammerId = String(programmerId || resolveSelectedProgrammer()?.programmerId || "").trim();
+  const resolvedServices =
+    services && typeof services === "object"
+      ? services
+      : normalizedProgrammerId
+        ? getCurrentPremiumAppsSnapshot(normalizedProgrammerId) || getRuntimePremiumServicesSeed(normalizedProgrammerId) || null
+        : null;
   const hasRequestorOptions = Array.from(els.requestorSelect.options || []).some((option) =>
     String(option?.value || "").trim()
   );
   const hydrationPending =
     Boolean(normalizedProgrammerId) && Boolean(getProgrammerServiceHydrationPromise(normalizedProgrammerId));
+  const runtimeReady =
+    Boolean(normalizedProgrammerId) && Boolean(resolvedServices) && isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices);
   const ready =
     Boolean(normalizedProgrammerId) &&
     !hydrationPending &&
-    isProgrammerPremiumInteractionReady(normalizedProgrammerId, services);
+    (runtimeReady || isProgrammerPremiumInteractionReady(normalizedProgrammerId, resolvedServices));
   els.requestorSelect.disabled = !hasRequestorOptions || !ready;
   return els.requestorSelect.disabled !== true;
 }
