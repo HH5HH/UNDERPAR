@@ -100308,10 +100308,15 @@ async function createRestV2SessionForContext(context, options = {}) {
 }
 
 async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
+  const serviceProviderId = String(appInfo?.serviceProviderId || appInfo?.requestorId || requestorId || "").trim();
+  if (!serviceProviderId) {
+    throw new Error("Unable to determine service provider ID for REST V2 configuration");
+  }
+
   const response = await fetchWithPremiumAuth(
     programmer.programmerId,
     appInfo,
-    `${REST_V2_BASE}/${encodeURIComponent(requestorId)}/configuration`,
+    `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/configuration`,
     {
       method: "GET",
       mode: "cors",
