@@ -20530,6 +20530,20 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
   });
 
   const flowId = resolveRestV2DebugFlowIdForHarvest(harvest);
+  const likelySsoContext = isRestV2LikelyPartnerSsoContext(harvestContext);
+  const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2ExactPartnerFrameworkStatusForContext(harvestContext)
+  );
+  const deviceIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Device-Identifier");
+  const deviceInfo = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "X-Device-Info");
+  const adobeSubjectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "Adobe-Subject-Token");
+  const adServiceToken = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AD-Service-Token");
+  const tempPassIdentity = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Temppass-Identity");
+  const visitorIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Visitor-Identifier");
+  const rokuConnectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(
+    harvestContext,
+    "X-Roku-Reserved-Roku-Connect-Token"
+  );
   let lastThrownError = null;
   for (let index = 0; index < serviceProviderCandidates.length; index += 1) {
     const serviceProviderId = String(serviceProviderCandidates[index] || "").trim();
@@ -20539,6 +20553,18 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
     const requestHeaders = buildRestV2Headers(serviceProviderId, {
       Accept: "application/json",
       "Content-Type": "application/json",
+      ...(deviceIdentifier ? { "AP-Device-Identifier": deviceIdentifier } : {}),
+      ...(deviceInfo ? { "X-Device-Info": deviceInfo } : {}),
+      ...(adobeSubjectToken ? { "Adobe-Subject-Token": adobeSubjectToken } : {}),
+      ...(adServiceToken ? { "AD-Service-Token": adServiceToken } : {}),
+      ...(tempPassIdentity ? { "AP-Temppass-Identity": tempPassIdentity } : {}),
+      ...(visitorIdentifier ? { "AP-Visitor-Identifier": visitorIdentifier } : {}),
+      ...(rokuConnectToken ? { "X-Roku-Reserved-Roku-Connect-Token": rokuConnectToken } : {}),
+      ...(likelySsoContext && partnerFrameworkStatus
+        ? {
+            "AP-Partner-Framework-Status": partnerFrameworkStatus,
+          }
+        : {}),
     });
 
     emitRestV2DebugEvent(flowId, {
