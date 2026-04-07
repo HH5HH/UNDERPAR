@@ -87222,25 +87222,26 @@ function getRequestorsForSelectedMediaCompany() {
   // For REST V2 configuration calls, we only need DCR credentials for the "restV2" service.
   if (premiumApps && typeof premiumApps === "object") {
     const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
-    const hasRestV2AllChannels = restV2Apps.some(app => !app.serviceProviderHint || !app.serviceProviderHint.trim());
-    if (hasRestV2AllChannels) {
-      return allRequestors;
-    }
-    // Else, filter to requestors covered by channel-specific "restv2" apps.
-    const restV2ChannelSpecificApps = restV2Apps.filter((app) =>
-        app.serviceProviderHint && typeof app.serviceProviderHint === "string" && app.serviceProviderHint.trim()
-      );
-    if (restV2ChannelSpecificApps.length > 0) {
+    if (restV2Apps.length > 0) {
+      const hasRestV2AllChannels = restV2Apps.some((app) => isAllChannelsApp(app));
+      if (hasRestV2AllChannels) {
+        return allRequestors;
+      }
       const restV2Filter = uniqueSorted(
-        restV2ChannelSpecificApps.map((app) => app.serviceProviderHint.trim())
+        restV2Apps
+          .map((app) => getRegisteredAppChannel(app))
+          .map((channel) => String(channel || "").trim())
+          .filter(Boolean)
       );
-      const filterSet = new Set(restV2Filter.map((id) => String(id || "").toLowerCase()));
-      const filtered = allRequestors.filter((option) =>
-        filterSet.has(String(option.id || "").toLowerCase())
-      );
-      // Safety: never produce an empty list.
-      if (filtered.length > 0) {
-        return filtered;
+      if (restV2Filter.length > 0) {
+        const filterSet = new Set(restV2Filter.map((id) => id.toLowerCase()));
+        const filtered = allRequestors.filter((option) =>
+          filterSet.has(String(option.id || "").toLowerCase())
+        );
+        // Safety: never produce an empty list.
+        if (filtered.length > 0) {
+          return filtered;
+        }
       }
     }
   }
