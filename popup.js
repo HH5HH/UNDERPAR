@@ -18296,17 +18296,20 @@ function getPremiumCollapseKey(programmerId, serviceKey) {
 
 function getPremiumSectionCollapsed(programmerId, serviceKey) {
   const key = getPremiumCollapseKey(programmerId, serviceKey);
-  if (state.premiumSectionCollapsedByKey.has(key)) {
+  if (state.premiumSectionCollapsedByKey instanceof Map && state.premiumSectionCollapsedByKey.has(key)) {
     return Boolean(state.premiumSectionCollapsedByKey.get(key));
   }
   const globalKey = getPremiumCollapseKey("__global__", serviceKey);
-  if (state.premiumSectionCollapsedByKey.has(globalKey)) {
+  if (state.premiumSectionCollapsedByKey instanceof Map && state.premiumSectionCollapsedByKey.has(globalKey)) {
     return Boolean(state.premiumSectionCollapsedByKey.get(globalKey));
   }
   return true;
 }
 
 function setPremiumSectionCollapsed(programmerId, serviceKey, isCollapsed) {
+  if (!(state.premiumSectionCollapsedByKey instanceof Map)) {
+    return;
+  }
   const collapsed = Boolean(isCollapsed);
   state.premiumSectionCollapsedByKey.set(getPremiumCollapseKey(programmerId, serviceKey), collapsed);
   state.premiumSectionCollapsedByKey.set(getPremiumCollapseKey("__global__", serviceKey), collapsed);
@@ -18343,11 +18346,11 @@ function getLearningInspectorCollapseKey(type = "") {
 function getLearningInspectorCollapsed(programmerId, type = "") {
   const scopedKey = getLearningInspectorCollapseKey(type);
   const programmerScopedKey = getPremiumCollapseKey(programmerId, scopedKey);
-  if (state.premiumSectionCollapsedByKey.has(programmerScopedKey)) {
+  if (state.premiumSectionCollapsedByKey instanceof Map && state.premiumSectionCollapsedByKey.has(programmerScopedKey)) {
     return Boolean(state.premiumSectionCollapsedByKey.get(programmerScopedKey));
   }
   const globalScopedKey = getPremiumCollapseKey("__global__", scopedKey);
-  if (state.premiumSectionCollapsedByKey.has(globalScopedKey)) {
+  if (state.premiumSectionCollapsedByKey instanceof Map && state.premiumSectionCollapsedByKey.has(globalScopedKey)) {
     return Boolean(state.premiumSectionCollapsedByKey.get(globalScopedKey));
   }
   return true;
@@ -18364,11 +18367,11 @@ function getRestV2InteractiveDocsSectionCollapseKey(sectionKey = "") {
 function getRestV2InteractiveDocsSectionCollapsed(programmerId, sectionKey) {
   const scopedKey = getRestV2InteractiveDocsSectionCollapseKey(sectionKey);
   const programmerScopedKey = getPremiumCollapseKey(programmerId, scopedKey);
-  if (state.premiumSectionCollapsedByKey.has(programmerScopedKey)) {
+  if (state.premiumSectionCollapsedByKey instanceof Map && state.premiumSectionCollapsedByKey.has(programmerScopedKey)) {
     return Boolean(state.premiumSectionCollapsedByKey.get(programmerScopedKey));
   }
   const globalScopedKey = getPremiumCollapseKey("__global__", scopedKey);
-  if (state.premiumSectionCollapsedByKey.has(globalScopedKey)) {
+  if (state.premiumSectionCollapsedByKey instanceof Map && state.premiumSectionCollapsedByKey.has(globalScopedKey)) {
     return Boolean(state.premiumSectionCollapsedByKey.get(globalScopedKey));
   }
   return true;
