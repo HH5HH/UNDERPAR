@@ -70625,7 +70625,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo, options = 
   const disabled = options?.disabled === true;
   const disabledReason = String(options?.disabledReason || "").trim();
   const servicesForProgrammer =
-    programmer?.programmerId && state.premiumAppsByKey.has(programmer.programmerId)
+    programmer?.programmerId && state.premiumAppsByKey instanceof Map && state.premiumAppsByKey.has(programmer.programmerId)
       ? getCurrentPremiumAppsSnapshot(programmer.programmerId)
       : null;
   const serviceScopedAppByKey = {
