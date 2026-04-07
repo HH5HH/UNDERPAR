@@ -9810,19 +9810,21 @@ function buildPassVaultDirectPremiumServicesSnapshot(
   const hasAllChannelsRestV2 = scanResult.allChannelsByServiceKey?.restV2 === true;
 
   if (!hasAllChannelsRestV2) {
-    // No "All Channels" REST V2 apps, so extract requestor IDs from channel-specific apps
+    // Extract requestor IDs directly from registered apps' ServiceProvider field values
+    // Each app's serviceProvider field contains values like "@ServiceProvider:requestorId"
     restV2RequestorIds = Array.isArray(restV2Apps)
       ? restV2Apps
           .map((app) => {
-            const healthRecord = buildRegisteredApplicationHealthAppRecord(app, null);
-            const hints = healthRecord
-              ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
-                  .map((h) => computeEntityReferenceId(String(h || "").trim()))
-                  .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
-              : [];
-            return hints;
+            const serviceProviderValue = String(app?.appData?.serviceProvider || app?.serviceProvider || "").trim();
+            if (!serviceProviderValue) {
+              return null;
+            }
+            const requestorId = extractEntityIdFromToken(serviceProviderValue);
+            if (!requestorId || requestorId.toLowerCase() === "all channels" || requestorId === "*") {
+              return null;
+            }
+            return requestorId;
           })
-          .flat()
           .filter(Boolean)
       : [];
     restV2RequestorIds = restV2RequestorIds.length > 0 ? Array.from(new Set(restV2RequestorIds)).sort() : null;
@@ -10206,29 +10208,30 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   // Extract requestor IDs from REST V2 apps for filtering the requestor dropdown
   let restV2RequestorIds = null;
   const hasAllChannelsRestV2 = Array.isArray(restV2Apps) && restV2Apps.some((appInfo) => {
-    const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
-    const hints = healthRecord
-      ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
-          .map((h) => computeEntityReferenceId(String(h || "").trim()))
-          .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
-      : [];
-    return hints.length === 0; // Empty hints means "All Channels"
+    const serviceProviderValue = String(appInfo?.appData?.serviceProvider || appInfo?.serviceProvider || "").trim();
+    if (!serviceProviderValue) {
+      return true; // No service provider means "All Channels"
+    }
+    const requestorId = extractEntityIdFromToken(serviceProviderValue);
+    return !requestorId || requestorId.toLowerCase() === "all channels" || requestorId === "*";
   });
 
   if (!hasAllChannelsRestV2) {
-    // No "All Channels" REST V2 apps, so extract requestor IDs from channel-specific apps
+    // Extract requestor IDs directly from registered apps' ServiceProvider field values
+    // Each app's serviceProvider field contains values like "@ServiceProvider:requestorId"
     const extractedIds = Array.isArray(restV2Apps)
       ? restV2Apps
           .map((appInfo) => {
-            const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
-            const hints = healthRecord
-              ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
-                  .map((h) => computeEntityReferenceId(String(h || "").trim()))
-                  .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
-              : [];
-            return hints;
+            const serviceProviderValue = String(appInfo?.appData?.serviceProvider || appInfo?.serviceProvider || "").trim();
+            if (!serviceProviderValue) {
+              return null;
+            }
+            const requestorId = extractEntityIdFromToken(serviceProviderValue);
+            if (!requestorId || requestorId.toLowerCase() === "all channels" || requestorId === "*") {
+              return null;
+            }
+            return requestorId;
           })
-          .flat()
           .filter(Boolean)
       : [];
     restV2RequestorIds = extractedIds.length > 0 ? Array.from(new Set(extractedIds)).sort() : null;
@@ -87271,24 +87274,25 @@ function getRequestorsForSelectedMediaCompany() {
 
   // ── REST V2 requestor filtering ──────────────────────────
   // During ENVxMediaCompany hydration, we identify all Registered Applications
-  // with REST V2 DCR scope and extract their requestor IDs. These IDs are stored
-  // in __restV2RequestorIds in the premium apps snapshot. Filter the dropdown to
-  // show ONLY requestors that have REST V2 support, preventing 401 errors from
-  // invalid service provider selections.
+  // with REST V2 DCR scope and extract their ServiceProvider field values directly.
+  // These requestor IDs are stored in __restV2RequestorIds in the premium apps snapshot.
+  // Filter the dropdown to show ONLY requestors that have REST V2 registered applications.
   const programmerId = String(programmer.programmerId || "").trim();
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
   const restV2RequestorIds = premiumApps?.__restV2RequestorIds;
-  const normalizedRestV2RequestorIds = Array.isArray(restV2RequestorIds)
-    ? restV2RequestorIds
-        .map((value) => normalizeEntityToken(extractEntityIdFromToken(String(value || ""))))
-        .filter(Boolean)
-    : [];
 
-  if (normalizedRestV2RequestorIds.length > 0) {
+  if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
+    // Build a set of normalized requestor IDs for efficient lookup
+    const restV2RequestorIdSet = new Set(
+      restV2RequestorIds
+        .map((value) => normalizeEntityToken(String(value || "").trim()))
+        .filter(Boolean)
+    );
+
     // Filter to only show requestors with REST V2 support
     const filteredRequestors = allRequestors.filter((option) => {
-      const optionId = normalizeEntityToken(extractEntityIdFromToken(String(option.id || option.key || "")));
-      return normalizedRestV2RequestorIds.includes(optionId);
+      const optionId = normalizeEntityToken(String(option.id || option.key || "").trim());
+      return restV2RequestorIdSet.has(optionId);
     });
 
     // Some programmers do not expose requestorOptions/contentProviders in their
@@ -87298,9 +87302,9 @@ function getRequestorsForSelectedMediaCompany() {
       return filteredRequestors;
     }
 
-    return normalizedRestV2RequestorIds.map((requestorId) => ({
-      key: requestorId,
-      id: requestorId,
+    return restV2RequestorIds.map((requestorId) => ({
+      key: String(requestorId || "").trim(),
+      id: String(requestorId || "").trim(),
       label: requestorId,
     }));
   }
