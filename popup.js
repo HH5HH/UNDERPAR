@@ -87221,7 +87221,13 @@ function getRequestorsForSelectedMediaCompany() {
   // Check if REST V2 apps are available for filtering.
   // For REST V2 configuration calls, we only need DCR credentials for the "restV2" service.
   if (premiumApps && typeof premiumApps === "object") {
-    const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
+    const restV2Apps = [];
+    if (premiumApps?.restV2 && typeof premiumApps.restV2 === "object") {
+      restV2Apps.push(premiumApps.restV2);
+    }
+    if (Array.isArray(premiumApps?.restV2Apps)) {
+      restV2Apps.push(...premiumApps.restV2Apps.filter((app) => app && typeof app === "object"));
+    }
     if (restV2Apps.length > 0) {
       const hasRestV2AllChannels = restV2Apps.some((app) => isAllChannelsApp(app));
       if (hasRestV2AllChannels) {
