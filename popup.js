@@ -172,9 +172,8 @@ const UNDERPAR_IBETA_REQUEST_TIMEOUT_MS = 8000;
 const UNDERPAR_UPSPACE_SLACK_LINK_LABEL = "[ ^ ]";
 const UNDERPAR_PASS_VAULT_PREMIUM_DETECTION_VERSION = 11;
 const UNDERPAR_DCR_CACHE_BINDING_VERSION = 2;
-const UNDERPAR_VAULT_STATUS_PENDING = "pending";
+const UNDERPAR_VAULT_STATUS_OUT = "out";
 const UNDERPAR_VAULT_STATUS_COMPLETE = "complete";
-const UNDERPAR_VAULT_STATUS_PARTIAL = "partial";
 const UNDERPAR_VAULT_DCR_COMPILE_CONCURRENCY = 2;
 const PREMIUM_SERVICE_DISPLAY_ORDER = ["restV2", "esmWorkspace", "degradation", "resetTempPass", "cm", "cmMvpd"];
 const PREMIUM_SERVICE_SCOPE_BY_KEY = {
@@ -1085,6 +1084,14 @@ function isProgrammerPremiumInteractionReady(programmerId = "", services = null)
   if (!resolvedServices) {
     return false;
   }
+
+  // CM precheck/CM token acquisition is non-blocking for premium interaction.
+  // Unlock requestor + premium service controls once runtime premium services
+  // are ready, even if CM context is still pending.
+  if (isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices)) {
+    return true;
+  }
+
   return isProgrammerHrContextHydrationReady(normalizedProgrammerId, resolvedServices);
 }
 
@@ -1209,14 +1216,11 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
 
 function normalizeUnderparVaultStatus(value = "") {
   const normalized = String(value || "").trim().toLowerCase();
-  if (
-    normalized === UNDERPAR_VAULT_STATUS_COMPLETE ||
-    normalized === UNDERPAR_VAULT_STATUS_PARTIAL ||
-    normalized === UNDERPAR_VAULT_STATUS_PENDING
-  ) {
+  if (normalized === UNDERPAR_VAULT_STATUS_COMPLETE || normalized === UNDERPAR_VAULT_STATUS_OUT) {
     return normalized;
   }
-  return normalized ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_PENDING;
+  // Legacy statuses (pending/partial) now map to OUT.
+  return UNDERPAR_VAULT_STATUS_OUT;
 }
 
 function createEmptyUnderparVaultCredential() {
@@ -7240,7 +7244,7 @@ function normalizeUnderparPassVaultProgrammerRecord(programmerId = "", record = 
   );
   const normalizedHydrationStatus = normalizeUnderparVaultStatus(record?.hydrationStatus);
   const derivedHydrationStatus =
-    normalizedHydrationStatus === UNDERPAR_VAULT_STATUS_PENDING &&
+    normalizedHydrationStatus !== UNDERPAR_VAULT_STATUS_COMPLETE &&
     passVaultProgrammerRecordHasHydrationResults({
       registeredApplicationsByGuid,
       services: derivedServices,
@@ -8473,6 +8477,17 @@ async function persistPassVaultProgrammerRecord(programmer, services = null, opt
     const environmentKey = getActiveAdobePassEnvironmentKey();
     const environment = getActiveAdobePassEnvironment();
     const existingRecord = getPassVaultMediaCompanyRecordFromVault(vault, programmerId, environmentKey);
+    const existingHydrationStatus = normalizeUnderparVaultStatus(existingRecord?.hydrationStatus);
+    const hasCredentialResults =
+      Array.isArray(options?.serviceCredentialResults) && options.serviceCredentialResults.length > 0;
+    const allowPostHydrationPersist = options?.forcePersist === true || hasCredentialResults;
+
+    // Binary VAULT model: after a media company is IN (hydration complete),
+    // skip structural rewrites unless we are persisting credential/token updates.
+    if (existingHydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE && !allowPostHydrationPersist) {
+      return cloneJsonLikeValue(existingRecord, null);
+    }
+
     const nextRecord = buildPassVaultProgrammerRecord(programmer, services, {
       ...options,
       existingRecord,
@@ -8625,7 +8640,7 @@ async function waitForPassVaultProgrammerHydrationResult(
     if (currentRecord) {
       lastRecord = currentRecord;
       const hydrationStatus = normalizeUnderparVaultStatus(currentRecord?.hydrationStatus);
-      if (hydrationStatus !== UNDERPAR_VAULT_STATUS_PENDING && passVaultProgrammerRecordHasHydrationResults(currentRecord)) {
+      if (hydrationStatus === UNDERPAR_VAULT_STATUS_COMPLETE && passVaultProgrammerRecordHasHydrationResults(currentRecord)) {
         return cloneJsonLikeValue(currentRecord, null);
       }
     }
@@ -10388,7 +10403,7 @@ function getPassVaultProgrammerReuseReadiness(
   if (!normalizedProgrammerId) {
     return {
       record: null,
-      hydrationStatus: UNDERPAR_VAULT_STATUS_PENDING,
+      hydrationStatus: UNDERPAR_VAULT_STATUS_OUT,
       runtimeServices: null,
       runtimeCoverage: false,
       credentialCoverage: false,
@@ -11031,7 +11046,7 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       blockingCredentialResults.find((result) => !passVaultCredentialResultHasClientCredentials(result)) || null;
     const credentialWarningCount = credentialResults.filter((result) => String(result?.error || "").trim()).length;
     const warningCount = credentialWarningCount;
-    const hydrationStatus = failedCount > 0 ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_COMPLETE;
+    const hydrationStatus = failedCount > 0 ? UNDERPAR_VAULT_STATUS_OUT : UNDERPAR_VAULT_STATUS_COMPLETE;
     const persistedRecord = await persistPassVaultProgrammerRecord(programmer, mergedServices, {
       source: "live",
       hydrationStatus,
@@ -11142,7 +11157,7 @@ async function finalizePassVaultProgrammerHydration(programmer, services = null)
   const currentRecord = getPassVaultMediaCompanyRecord(programmerId);
   const currentStatus = normalizeUnderparVaultStatus(currentRecord?.hydrationStatus);
   const hydrationStatus =
-    currentStatus === UNDERPAR_VAULT_STATUS_PARTIAL ? UNDERPAR_VAULT_STATUS_PARTIAL : UNDERPAR_VAULT_STATUS_COMPLETE;
+    currentStatus === UNDERPAR_VAULT_STATUS_COMPLETE ? UNDERPAR_VAULT_STATUS_COMPLETE : UNDERPAR_VAULT_STATUS_OUT;
 
   const nextRecord = await persistPassVaultProgrammerRecord(programmer, services, {
     source: "live",
@@ -71332,26 +71347,7 @@ function getRenderablePremiumServiceEntries(services, environment = getActiveAdo
 }
 
 function getRenderablePremiumServiceEntriesForProgrammer(programmer = null, services = null, environment = getActiveAdobePassEnvironment()) {
-  const renderEntries = getRenderablePremiumServiceEntries(services, environment);
-  const programmerId = String(programmer?.programmerId || "").trim();
-  if (!programmerId || renderEntries.length === 0 || isProgrammerPremiumInteractionReady(programmerId, services)) {
-    return renderEntries;
-  }
-  const hydrationProgress = getProgrammerPremiumHydrationProgress(programmerId);
-  const progressLabel = String(hydrationProgress?.label || "").trim();
-  const disabledReason = progressLabel
-    ? `${progressLabel} UnderPAR is still saving VAULT-backed premium service state for this Media Company.`
-    : "UnderPAR is still saving VAULT-backed premium service state for this Media Company.";
-  return renderEntries.map((entry) => {
-    if (!entry || typeof entry !== "object" || entry.disabled === true) {
-      return entry;
-    }
-    return {
-      ...entry,
-      disabled: true,
-      reason: disabledReason,
-    };
-  });
+  return getRenderablePremiumServiceEntries(services, environment);
 }
 
 function getDetectedPremiumServiceLabels(services) {
@@ -86882,11 +86878,9 @@ function applyMediaCompanyOptionHydrationState(options = {}) {
 
     option.style.color = "rgba(42, 56, 77, 0.62)";
     option.style.fontWeight = "500";
-    option.dataset.vaultHydration = hydrationStatus || UNDERPAR_VAULT_STATUS_PENDING;
+    option.dataset.vaultHydration = hydrationStatus || UNDERPAR_VAULT_STATUS_OUT;
     option.title = [
-      hydrationStatus === UNDERPAR_VAULT_STATUS_PARTIAL
-        ? "UnderPAR has a partial vault record for this Media Company. A refresh may still be required for full credential coverage."
-        : "UnderPAR has not fully hydrated this Media Company yet. First selection compiles and persists the vault record.",
+      "UnderPAR vault is not hydrated for this Media Company yet. First selection compiles and persists the vault record.",
       cmTitle,
     ]
       .filter(Boolean)
@@ -87555,7 +87549,7 @@ async function refreshProgrammerPanels(options = {}) {
   const computePersistedHydrationStatus = (services = null) => {
     return isProgrammerRuntimeServicesReady(programmerId, services)
       ? UNDERPAR_VAULT_STATUS_COMPLETE
-      : UNDERPAR_VAULT_STATUS_PARTIAL;
+      : UNDERPAR_VAULT_STATUS_OUT;
   };
   const selectionStillCurrent = () =>
     requestToken === state.premiumPanelRequestToken &&
@@ -100477,7 +100471,7 @@ function promoteResolvedRestV2ConfigurationApp(programmer = null, services = nul
     source: "live",
     hydrationStatus: isProgrammerRuntimeServicesReady(programmerId, summarizedServices)
       ? UNDERPAR_VAULT_STATUS_COMPLETE
-      : UNDERPAR_VAULT_STATUS_PARTIAL,
+      : UNDERPAR_VAULT_STATUS_OUT,
   }).catch(() => {});
 
   return summarizedServices;
