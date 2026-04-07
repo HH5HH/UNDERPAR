@@ -630,7 +630,7 @@ const PREMIUM_AUTO_REFRESH_COOLDOWN_MS = 90 * 1000;
 const PREMIUM_AUTO_REFRESH_TOKEN_LEEWAY_MS = 2 * 60 * 1000;
 const PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS = 2500;
 const PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS = 8000;
-const REST_V2_MVPD_HYDRATION_WAIT_TIMEOUT_MS = 12000;
+const REST_V2_MVPD_HYDRATION_WAIT_TIMEOUT_MS = 750;
 const REST_V2_MVPD_CONFIGURATION_TIMEOUT_MS = 15000;
 const UP_DEVTOOLS_MVPD_WORKSPACE_PENDING_TTL_MS = 10 * 1000;
 const DEGRADATION_CHEAT_SHEET_FAST_AUTH_TIMEOUT_MS = 1200;
@@ -100893,7 +100893,10 @@ async function loadMvpdsFromRestV2(requestorId) {
           forceDcrRestore: true,
         }).catch(() => null);
         const programmerReuseReadiness = getPassVaultProgrammerReuseReadiness(programmer.programmerId);
-        let premiumApps = programmerReuseReadiness.runtimeServices || getCurrentPremiumAppsSnapshot(programmer.programmerId);
+        let premiumApps =
+          programmerReuseReadiness.runtimeServices ||
+          getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
+          getRuntimePremiumServicesSeed(programmer.programmerId);
         if (!premiumApps) {
           const selectedProgrammer = resolveSelectedProgrammer();
           if (String(selectedProgrammer?.programmerId || "").trim() === String(programmer?.programmerId || "").trim()) {
