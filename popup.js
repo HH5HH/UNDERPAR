@@ -100476,7 +100476,7 @@ async function loadMvpdsFromRestV2(requestorId) {
           continue;
         }
         // Select the right REST V2 app for this requestor.
-        // Prefer All Channels app (no channel hint), then matching channel, then first.
+        // Use service provider matching to find the correct app for REST V2 configuration.
         let runtimePrimaryApp = null;
         const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps.filter((app) => app?.guid) : [];
         const primaryCandidate = premiumApps?.restV2 || null;
@@ -100484,11 +100484,7 @@ async function loadMvpdsFromRestV2(requestorId) {
           ? [primaryCandidate, ...restV2Apps.filter((app) => app.guid !== primaryCandidate.guid)]
           : restV2Apps;
 
-        runtimePrimaryApp =
-          allCandidates.find((app) => app?.guid && isAllChannelsApp(app)) ||
-          allCandidates.find((app) => app?.guid && getRegisteredAppChannel(app).toLowerCase() === requestorId.toLowerCase()) ||
-          allCandidates[0] ||
-          null;
+        runtimePrimaryApp = selectPreferredRestV2AppForRequestor(allCandidates, requestorId, programmer.programmerId);
         if (runtimePrimaryApp?.guid) {
           runtimePrimaryApp = resolvePassVaultRuntimeBoundAppInfo(programmer.programmerId, runtimePrimaryApp) || runtimePrimaryApp;
         }
