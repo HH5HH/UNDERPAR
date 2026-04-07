@@ -87230,7 +87230,7 @@ function getRequestorsForSelectedMediaCompany() {
           app.serviceProviderHint && typeof app.serviceProviderHint === "string" && app.serviceProviderHint.trim()
         )
       : [];
-    if (restv2ChannelSpecificApps.length > 0) {
+    if (restV2ChannelSpecificApps.length > 0) {
       const restV2Filter = uniqueSorted(
         restV2ChannelSpecificApps.map((app) => app.serviceProviderHint.trim())
       );
