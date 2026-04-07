@@ -86970,19 +86970,26 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
           }).catch(() => "")
         );
       }
+      // If CMU token still unavailable, fallback to primary access token for catalog operations
+      // (Reports will gracefully degrade without CMU token, but catalog operations work with primary token)
       if (!hydratedToken || !tokenSupportsCmConsoleRequests(hydratedToken)) {
-        emitCmDebugEvent({
-          phase: "cm-tenant-precheck-token-missing",
-          reason: String(reason || ""),
-          tenantCount: Number(catalog?.tenants?.length || 0),
-          sourceUrl: String(catalog?.sourceUrl || ""),
-        });
-        throw new Error(
-          firstNonEmptyString([
-            cmContext?.errors?.cmuToken,
-            "CM token hydrate failed: UnderPAR could not auto-hydrate a cm-console-ui bearer for CMU usage.",
-          ])
-        );
+        const primaryAccessToken = normalizeBearerTokenValue(currentSession?.accessToken || "");
+        if (primaryAccessToken) {
+          hydratedToken = primaryAccessToken;
+        } else {
+          emitCmDebugEvent({
+            phase: "cm-tenant-precheck-token-missing",
+            reason: String(reason || ""),
+            tenantCount: Number(catalog?.tenants?.length || 0),
+            sourceUrl: String(catalog?.sourceUrl || ""),
+          });
+          throw new Error(
+            firstNonEmptyString([
+              cmContext?.errors?.cmuToken,
+              "CM token hydrate failed: UnderPAR could not auto-hydrate a cm-console-ui bearer for CMU usage.",
+            ])
+          );
+        }
       }
       await persistResolvedCmGlobalAuthState(hydratedToken, `tenant-precheck:${reason}`).catch(() => null);
       state.cmTenantsPrecheckComplete = true;
@@ -94187,7 +94194,7 @@ async function buildCmContext(session, reason = "post-login", options = {}) {
       ? cmuToken
         ? ""
         : "CMU token bootstrap returned an empty token."
-      : ""; // Suppress CMU token errors - not blocking for CM tenant catalog operations
+      : serializeError(cmuTokenResult.error);
   const cmuTokenClaims = cmuToken ? parseJwtPayload(cmuToken) || {} : {};
   const cmuTokenClientId = firstNonEmptyString([cmuTokenClaims?.client_id, cmuTokenClaims?.clientId, CM_CONSOLE_IMS_CLIENT_ID]);
   const cmuTokenScope = firstNonEmptyString([cmuTokenClaims?.scope, CM_CONSOLE_IMS_SCOPE]);
