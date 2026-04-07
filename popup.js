@@ -100329,6 +100329,29 @@ async function createRestV2SessionForContext(context, options = {}) {
 
   const appCandidates = context.appInfo?.guid ? [context.appInfo] : [];
 
+  const getServiceProviderCandidates = () => {
+    const appInfo = context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null;
+    const appChannelCandidate = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
+    return uniquePreserveOrder(
+      [
+        extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
+        extractRequestorIdFromServiceProviderValue(context?.requestorId),
+        extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
+        extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
+        extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
+        extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
+        appChannelCandidate,
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    );
+  };
+
+  const serviceProviderCandidates = getServiceProviderCandidates();
+  if (serviceProviderCandidates.length === 0) {
+    throw new Error("Create session failed: unable to determine a service provider candidate.");
+  }
+
   const payloadCandidates = buildRestV2SessionCreatePayloadCandidates(context.mvpd);
   if (payloadCandidates.length === 0) {
     throw new Error("Create session failed: no payload candidates available.");
@@ -100337,132 +100360,141 @@ async function createRestV2SessionForContext(context, options = {}) {
   let lastErrorText = "";
   let lastStatus = 0;
   for (const appCandidate of appCandidates) {
-    for (const payloadCandidate of payloadCandidates) {
-      log("REST V2 create-session attempt", {
-        serviceProvider: context.serviceProviderId,
-        appGuid: appCandidate.guid,
-        domainName: payloadCandidate.domainName || "<none>",
-        redirectUrl: payloadCandidate.redirectUrl || "<none>",
-      });
-      emitRestV2DebugEvent(debugFlowId, {
-        source: "extension",
-        phase: "create-session-attempt",
-        serviceProviderId: context.serviceProviderId,
-        requestorId: context.requestorId,
-        mvpd: context.mvpd,
-        appGuid: appCandidate.guid,
-        appName: appCandidate.appName || appCandidate.guid,
-        domainName: payloadCandidate.domainName || "",
-        redirectUrl: payloadCandidate.redirectUrl || "",
-      });
-
-      const requestHeaders = buildRestV2Headers(context.serviceProviderId, {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
-      });
-      const response = await fetchWithPremiumAuth(
-        context.programmerId,
-        appCandidate,
-        `${REST_V2_BASE}/${encodeURIComponent(context.serviceProviderId)}/sessions`,
-        {
-          method: "POST",
-          mode: "cors",
-          headers: requestHeaders,
-          body: payloadCandidate.body,
-        },
-        "refresh",
-        {
-          flowId: debugFlowId,
+    for (const serviceProviderId of serviceProviderCandidates) {
+      for (const payloadCandidate of payloadCandidates) {
+        log("REST V2 create-session attempt", {
+          serviceProvider: serviceProviderId,
+          appGuid: appCandidate.guid,
+          domainName: payloadCandidate.domainName || "<none>",
+          redirectUrl: payloadCandidate.redirectUrl || "<none>",
+        });
+        emitRestV2DebugEvent(debugFlowId, {
+          source: "extension",
+          phase: "create-session-attempt",
+          serviceProviderId,
           requestorId: context.requestorId,
           mvpd: context.mvpd,
-          scope: "create-session",
-          lockAppSelection: true,
-          allowProvisioning: true,
-        }
-      );
+          appGuid: appCandidate.guid,
+          appName: appCandidate.appName || appCandidate.guid,
+          domainName: payloadCandidate.domainName || "",
+          redirectUrl: payloadCandidate.redirectUrl || "",
+        });
 
-      const text = await response.text().catch(() => "");
-      const parsed = parseJsonText(text, null);
-      const responseHeaders = toDebugHeadersObject(response.headers || new Headers());
-      if (response.ok) {
-        const sessionData = parsed && typeof parsed === "object" ? parsed : {};
-        const capturedAuthHeaders = mergeRestV2CapturedAuthHeaders(
-          context?.capturedAuthHeaders,
-          { requestHeaders, responseHeaders, sessionData }
-        );
-        const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromSessionData(sessionData, responseHeaders);
-        const sessionPartner = resolveRestV2SessionPartnerFromSessionData(sessionData, partnerFrameworkStatus);
-        if (partnerFrameworkStatus && !String(sessionData?.partnerFrameworkStatus || "").trim()) {
-          sessionData.partnerFrameworkStatus = partnerFrameworkStatus;
-        }
-        if (sessionPartner && !String(sessionData?.partner || "").trim()) {
-          sessionData.partner = sessionPartner;
-        }
-        const locationHeader = response.headers?.get("Location") || "";
-        if (!sessionData.url && locationHeader) {
-          sessionData.url = locationHeader;
-        }
-        const loginUrl = resolveMvpdLoginNavigationUrl(sessionData, context.serviceProviderId);
-        if (loginUrl) {
-          emitRestV2DebugEvent(debugFlowId, {
-            source: "extension",
-            phase: "create-session-success",
-            serviceProviderId: context.serviceProviderId,
+        const requestHeaders = buildRestV2Headers(serviceProviderId, {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        });
+        const response = await fetchWithPremiumAuth(
+          context.programmerId,
+          appCandidate,
+          `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/sessions`,
+          {
+            method: "POST",
+            mode: "cors",
+            headers: requestHeaders,
+            body: payloadCandidate.body,
+          },
+          "refresh",
+          {
+            flowId: debugFlowId,
             requestorId: context.requestorId,
             mvpd: context.mvpd,
-            appGuid: appCandidate.guid,
-            appName: appCandidate.appName || appCandidate.guid,
-            status: response.status,
-            loginUrl,
-            sessionPartner: String(sessionPartner || "").trim(),
-            partnerFrameworkStatusPresent: Boolean(partnerFrameworkStatus),
-            responsePreview: truncateDebugText(text, 2000),
-          });
-          return {
-            loginUrl,
-            sessionData,
-            payload: payloadCandidate,
-            appInfo: appCandidate,
-            sessionRequestHeaders: requestHeaders,
-            sessionResponseHeaders: responseHeaders,
-            capturedAuthHeaders: capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? capturedAuthHeaders : null,
-            partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
-            sessionPartner: String(sessionPartner || "").trim(),
-          };
-        }
-        lastStatus = response.status;
-        lastErrorText = "REST V2 session response did not include a login URL/code.";
-        continue;
-      }
+            scope: "create-session",
+            lockAppSelection: true,
+            allowProvisioning: true,
+          }
+        );
 
-      lastStatus = response.status;
-      const enhancedError = normalizeRestV2EnhancedError(parsed || text, {
-        httpStatus: response.status,
-      });
-      const message = enhancedError.displayMessage || response.statusText;
-      lastErrorText = `Create session payload failed (${response.status}): ${message}`;
-      log("REST V2 create-session failed", {
-        status: response.status,
-        message,
-        enhancedErrorCode: String(enhancedError.code || "").trim(),
-        enhancedErrorAction: String(enhancedError.action || "").trim(),
-        enhancedErrorHelpUrl: String(enhancedError.helpUrl || "").trim(),
-        enhancedErrorTrace: String(enhancedError.trace || "").trim(),
-        serviceProvider: context.serviceProviderId,
-        appGuid: appCandidate.guid,
-      });
-      emitRestV2DebugEvent(debugFlowId, {
-        source: "extension",
-        phase: "create-session-failed-attempt",
-        serviceProviderId: context.serviceProviderId,
-        requestorId: context.requestorId,
-        mvpd: context.mvpd,
-        appGuid: appCandidate.guid,
-        appName: appCandidate.appName || appCandidate.guid,
-        status: response.status,
-        error: message,
-        responsePreview: truncateDebugText(text, 2000),
-      });
+        const text = await response.text().catch(() => "");
+        const parsed = parseJsonText(text, null);
+        const responseHeaders = toDebugHeadersObject(response.headers || new Headers());
+        if (response.ok) {
+          const sessionData = parsed && typeof parsed === "object" ? parsed : {};
+          const capturedAuthHeaders = mergeRestV2CapturedAuthHeaders(
+            context?.capturedAuthHeaders,
+            { requestHeaders, responseHeaders, sessionData }
+          );
+          const partnerFrameworkStatus = resolveRestV2PartnerFrameworkStatusFromSessionData(sessionData, responseHeaders);
+          const sessionPartner = resolveRestV2SessionPartnerFromSessionData(sessionData, partnerFrameworkStatus);
+          if (partnerFrameworkStatus && !String(sessionData?.partnerFrameworkStatus || "").trim()) {
+            sessionData.partnerFrameworkStatus = partnerFrameworkStatus;
+          }
+          if (sessionPartner && !String(sessionData?.partner || "").trim()) {
+            sessionData.partner = sessionPartner;
+          }
+          const locationHeader = response.headers?.get("Location") || "";
+          if (!sessionData.url && locationHeader) {
+            sessionData.url = locationHeader;
+          }
+          const loginUrl = resolveMvpdLoginNavigationUrl(sessionData, serviceProviderId);
+          if (loginUrl) {
+            emitRestV2DebugEvent(debugFlowId, {
+              source: "extension",
+              phase: "create-session-success",
+              serviceProviderId,
+              requestorId: context.requestorId,
+              mvpd: context.mvpd,
+              appGuid: appCandidate.guid,
+              appName: appCandidate.appName || appCandidate.guid,
+              status: response.status,
+              loginUrl,
+              sessionPartner: String(sessionPartner || "").trim(),
+              partnerFrameworkStatusPresent: Boolean(partnerFrameworkStatus),
+              responsePreview: truncateDebugText(text, 2000),
+            });
+            return {
+              loginUrl,
+              sessionData,
+              payload: payloadCandidate,
+              appInfo: appCandidate,
+              sessionRequestHeaders: requestHeaders,
+              sessionResponseHeaders: responseHeaders,
+              capturedAuthHeaders: capturedAuthHeaders && typeof capturedAuthHeaders === "object" ? capturedAuthHeaders : null,
+              partnerFrameworkStatus: String(partnerFrameworkStatus || "").trim(),
+              sessionPartner: String(sessionPartner || "").trim(),
+            };
+          }
+          lastStatus = response.status;
+          lastErrorText = "REST V2 session response did not include a login URL/code.";
+          continue;
+        }
+
+        lastStatus = response.status;
+        const enhancedError = normalizeRestV2EnhancedError(parsed || text, {
+          httpStatus: response.status,
+        });
+        const message = enhancedError.displayMessage || response.statusText;
+        lastErrorText = `Create session payload failed (${response.status}): ${message}`;
+        log("REST V2 create-session failed", {
+          status: response.status,
+          message,
+          enhancedErrorCode: String(enhancedError.code || "").trim(),
+          enhancedErrorAction: String(enhancedError.action || "").trim(),
+          enhancedErrorHelpUrl: String(enhancedError.helpUrl || "").trim(),
+          enhancedErrorTrace: String(enhancedError.trace || "").trim(),
+          serviceProvider: serviceProviderId,
+          appGuid: appCandidate.guid,
+        });
+        emitRestV2DebugEvent(debugFlowId, {
+          source: "extension",
+          phase: "create-session-failed-attempt",
+          serviceProviderId,
+          requestorId: context.requestorId,
+          mvpd: context.mvpd,
+          appGuid: appCandidate.guid,
+          appName: appCandidate.appName || appCandidate.guid,
+          status: response.status,
+          error: message,
+          responsePreview: truncateDebugText(text, 2000),
+        });
+
+        const invalidServiceProviderResponse =
+          Number(response.status || 0) === 400 &&
+          /service provider parameter value is missing or invalid/i.test(String(message || ""));
+        if (invalidServiceProviderResponse) {
+          continue;
+        }
+      }
     }
   }
 
