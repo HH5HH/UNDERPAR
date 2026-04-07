@@ -87338,7 +87338,17 @@ function getRequestorsForSelectedMediaCompany() {
   // Filter the dropdown to show ONLY requestors that have REST V2 registered applications.
   const programmerId = String(programmer.programmerId || "").trim();
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
-  const restV2RequestorIds = premiumApps?.__restV2RequestorIds;
+  const normalizedRestV2RequestorIds = Array.isArray(premiumApps?.__restV2RequestorIds)
+    ? premiumApps.__restV2RequestorIds
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    : premiumApps?.__restV2RequestorIds === null
+      ? null
+      : null;
+  const restV2RequestorIds =
+    Array.isArray(normalizedRestV2RequestorIds) && normalizedRestV2RequestorIds.length > 0
+      ? normalizedRestV2RequestorIds
+      : null;
 
   if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
     // Build a set of normalized requestor IDs for efficient lookup
@@ -87442,7 +87452,17 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   );
   const hydrationPending =
     Boolean(normalizedProgrammerId) && Boolean(getProgrammerServiceHydrationPromise(normalizedProgrammerId));
-  const restV2RequestorIds = resolvedServices?.__restV2RequestorIds;
+  const normalizedRestV2RequestorIds = Array.isArray(resolvedServices?.__restV2RequestorIds)
+    ? resolvedServices.__restV2RequestorIds
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    : resolvedServices?.__restV2RequestorIds === null
+      ? null
+      : null;
+  const restV2RequestorIds =
+    Array.isArray(normalizedRestV2RequestorIds) && normalizedRestV2RequestorIds.length > 0
+      ? normalizedRestV2RequestorIds
+      : null;
   const restV2SelectionReady =
     restV2RequestorIds === null || (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0);
   const runtimeReady =
