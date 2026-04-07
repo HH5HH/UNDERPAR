@@ -100614,7 +100614,7 @@ function promoteResolvedRestV2ConfigurationApp(programmer = null, services = nul
     resolvedAppInfo ? [resolvedAppInfo] : []
   );
   const authoritativeRestV2App =
-    selectPreferredPassVaultHydrationServiceApplication("restV2", mergedRestV2Apps, programmerId) ||
+    selectPreferredRestV2AppForRequestor(mergedRestV2Apps, requestorId, programmerId) ||
     resolvedAppInfo ||
     currentServices?.restV2 ||
     mergedRestV2Apps[0] ||
@@ -100687,8 +100687,7 @@ async function loadMvpdsFromRestV2(requestorId) {
           continue;
         }
         // Select the right REST V2 app for this requestor.
-        // For REST V2 configuration, prefer all-channels apps since configuration is shared across all requestors.
-        // This allows reusing a single DCR registration for multiple requestors.
+        // Requestor-scoped app must remain authoritative when present.
         let runtimePrimaryApp = null;
         const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps.filter((app) => app?.guid) : [];
         const primaryCandidate = premiumApps?.restV2 || null;
@@ -100696,23 +100695,11 @@ async function loadMvpdsFromRestV2(requestorId) {
           ? [primaryCandidate, ...restV2Apps.filter((app) => app.guid !== primaryCandidate.guid)]
           : restV2Apps;
 
-        // First, prefer all-channels apps for configuration (shared across all requestors)
-        const allChannelsApp = allCandidates.find((app) => app?.guid && isAllChannelsApp(app));
-        if (allChannelsApp?.guid) {
-          runtimePrimaryApp = allChannelsApp;
-        } else {
-          // Fallback: try service provider matching for requestor-scoped app
-          const requestorScopedApps = allCandidates.filter((app) =>
-            appSupportsServiceProvider(app, requestorId, programmer.programmerId)
-          );
-          
-          if (requestorScopedApps.length > 0) {
-            runtimePrimaryApp = requestorScopedApps[0];
-          } else {
-            // Final fallback: use any available candidate
-            runtimePrimaryApp = allCandidates[0] || null;
-          }
-        }
+        runtimePrimaryApp =
+          selectPreferredRestV2AppForRequestor(allCandidates, requestorId, programmer.programmerId) ||
+          allCandidates.find((app) => app?.guid && isAllChannelsApp(app)) ||
+          allCandidates[0] ||
+          null;
         
         if (runtimePrimaryApp?.guid) {
           runtimePrimaryApp = resolvePassVaultRuntimeBoundAppInfo(programmer.programmerId, runtimePrimaryApp) || runtimePrimaryApp;
