@@ -87218,9 +87218,9 @@ function getRequestorsForSelectedMediaCompany() {
     }
   }
 
-  // If scan metadata is available, check whether the REST V2 service has "All Channels" coverage.
-  // For REST V2 configuration calls, we only need DCR credentials for the "restv2" service.
-  if (scanAllChannelsCoverage && typeof scanAllChannelsCoverage === "object") {
+  // Check if REST V2 apps are available for filtering.
+  // For REST V2 configuration calls, we only need DCR credentials for the "restV2" service.
+  if (premiumApps && typeof premiumApps === "object") {
     const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
     const hasRestV2AllChannels = restV2Apps.some(app => !app.serviceProviderHint || !app.serviceProviderHint.trim());
     if (hasRestV2AllChannels) {
@@ -87245,7 +87245,7 @@ function getRequestorsForSelectedMediaCompany() {
     }
   }
 
-  // ── Fallback: show all requestors if scan couldn't determine coverage ──────
+  // ── Fallback: show all requestors if apps not available ──────
   return allRequestors;
 }
 
