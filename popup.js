@@ -629,7 +629,7 @@ const PREMIUM_AUTO_REFRESH_INTERVAL_MS = 60 * 1000;
 const PREMIUM_AUTO_REFRESH_COOLDOWN_MS = 90 * 1000;
 const PREMIUM_AUTO_REFRESH_TOKEN_LEEWAY_MS = 2 * 60 * 1000;
 const PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS = 2500;
-const PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS = 2500;
+const PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS = 8000;
 const UP_DEVTOOLS_MVPD_WORKSPACE_PENDING_TTL_MS = 10 * 1000;
 const DEGRADATION_CHEAT_SHEET_FAST_AUTH_TIMEOUT_MS = 1200;
 const DEGRADATION_CHEAT_SHEET_FAST_HARVEST_TIMEOUT_MS = 1200;
@@ -34604,42 +34604,70 @@ async function executeRestV2LogoutFlow(context, flowId, options = {}) {
     REST_V2_REDIRECT_CANDIDATES[0],
     String(PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY.restV2 || "").trim(),
   ]);
-  const logoutEndpoint = `${REST_V2_BASE}/${encodeURIComponent(context.serviceProviderId)}/logout/${encodeURIComponent(
-    context.mvpd
-  )}${redirectUrl ? `?redirectUrl=${encodeURIComponent(redirectUrl)}` : ""}`;
-
-  emitRestV2DebugEvent(flowId, {
-    source: "extension",
-    phase: "logout-request",
-    url: logoutEndpoint,
-    requestorId: context.requestorId,
-    mvpd: context.mvpd,
-  });
+  const serviceProviderCandidates = buildRestV2ServiceProviderCandidatesFromContext(context);
+  if (serviceProviderCandidates.length === 0) {
+    return result;
+  }
 
   try {
-    const response = await fetchWithPremiumAuth(
-      context.programmerId,
-      context.appInfo,
-      logoutEndpoint,
-      {
-        method: "GET",
-        mode: "cors",
-        credentials: "include",
-        headers: buildRestV2Headers(context.serviceProviderId, {
-          Accept: "application/json",
-        }),
-      },
-      "refresh",
-      {
-        flowId,
-        requestorId: context.requestorId,
-        mvpd: context.mvpd,
-        scope: "logout",
-      }
-    );
+    let response = null;
+    let responseText = "";
+    let parsed = null;
+    let logoutEndpoint = "";
+    let resolvedServiceProviderId = "";
 
-    const responseText = await response.text().catch(() => "");
-    const parsed = parseJsonText(responseText, {});
+    for (let index = 0; index < serviceProviderCandidates.length; index += 1) {
+      resolvedServiceProviderId = String(serviceProviderCandidates[index] || "").trim();
+      logoutEndpoint = `${REST_V2_BASE}/${encodeURIComponent(resolvedServiceProviderId)}/logout/${encodeURIComponent(
+        context.mvpd
+      )}${redirectUrl ? `?redirectUrl=${encodeURIComponent(redirectUrl)}` : ""}`;
+
+      emitRestV2DebugEvent(flowId, {
+        source: "extension",
+        phase: "logout-request",
+        url: logoutEndpoint,
+        requestorId: context.requestorId,
+        serviceProviderId: resolvedServiceProviderId,
+        mvpd: context.mvpd,
+      });
+
+      response = await fetchWithPremiumAuth(
+        context.programmerId,
+        context.appInfo,
+        logoutEndpoint,
+        {
+          method: "GET",
+          mode: "cors",
+          credentials: "include",
+          headers: buildRestV2Headers(resolvedServiceProviderId, {
+            Accept: "application/json",
+          }),
+        },
+        "refresh",
+        {
+          flowId,
+          requestorId: context.requestorId,
+          serviceProviderId: resolvedServiceProviderId,
+          mvpd: context.mvpd,
+          scope: "logout",
+        }
+      );
+
+      responseText = await response.text().catch(() => "");
+      parsed = parseJsonText(responseText, {});
+      const enhancedError = normalizeRestV2EnhancedError(parsed || responseText, {
+        httpStatus: Number(response?.status || 0),
+      });
+      const invalidServiceProviderResponse =
+        Number(response?.status || 0) === 400 && String(enhancedError.code || "").trim() === "invalid_parameter_service_provider";
+      if (response?.ok || !invalidServiceProviderResponse || index >= serviceProviderCandidates.length - 1) {
+        break;
+      }
+    }
+
+    if (!response) {
+      return result;
+    }
     const locationHeader = response.headers?.get("Location") || "";
     const resolvedAction = resolveRestV2LogoutAction(parsed, context.mvpd, locationHeader);
     if (resolvedAction) {
@@ -34653,6 +34681,7 @@ async function executeRestV2LogoutFlow(context, flowId, options = {}) {
       phase: "logout-response",
       status: Number(response.status || 0),
       statusText: String(response.statusText || ""),
+      serviceProviderId: resolvedServiceProviderId,
       actionName: result.actionName,
       actionType: result.actionType,
       logoutUrl: result.logoutUrl,
@@ -100400,8 +100429,6 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   const appChannelCandidate = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
   return uniquePreserveOrder(
     [
-      extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
-      extractRequestorIdFromServiceProviderValue(context?.requestorId),
       extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
       extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
       extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
@@ -100410,6 +100437,8 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
       extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionUrl)),
       extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionData?.url)),
       appChannelCandidate,
+      extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
+      extractRequestorIdFromServiceProviderValue(context?.requestorId),
     ]
       .map((value) => String(value || "").trim())
       .filter(Boolean)
