@@ -9814,11 +9814,13 @@ function buildPassVaultDirectPremiumServicesSnapshot(
     restV2RequestorIds = Array.isArray(restV2Apps)
       ? restV2Apps
           .map((app) => {
-            // Extract service provider references directly from appData and app properties
-            const serviceProviderCandidates = collectRestV2ServiceProviderCandidatesFromApp(app, programmerId);
-            return serviceProviderCandidates
-              .map((sp) => extractEntityIdFromToken(String(sp || "").trim()))
-              .filter((sp) => sp && sp.toLowerCase() !== "all channels" && sp !== "*");
+            const healthRecord = buildRegisteredApplicationHealthAppRecord(app, null);
+            const hints = healthRecord
+              ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
+                  .map((h) => computeEntityReferenceId(String(h || "").trim()))
+                  .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
+              : [];
+            return hints;
           })
           .flat()
           .filter(Boolean)
@@ -10204,12 +10206,13 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   // Extract requestor IDs from REST V2 apps for filtering the requestor dropdown
   let restV2RequestorIds = null;
   const hasAllChannelsRestV2 = Array.isArray(restV2Apps) && restV2Apps.some((appInfo) => {
-    // An app is "All Channels" if it has no service provider restrictions
-    const serviceProviderCandidates = collectRestV2ServiceProviderCandidatesFromApp(appInfo, "");
-    const filtered = serviceProviderCandidates
-      .map((sp) => extractEntityIdFromToken(String(sp || "").trim()))
-      .filter((sp) => sp && sp.toLowerCase() !== "all channels" && sp !== "*");
-    return filtered.length === 0; // Empty means "All Channels"
+    const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
+    const hints = healthRecord
+      ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
+          .map((h) => computeEntityReferenceId(String(h || "").trim()))
+          .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
+      : [];
+    return hints.length === 0; // Empty hints means "All Channels"
   });
 
   if (!hasAllChannelsRestV2) {
@@ -10217,11 +10220,13 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
     const extractedIds = Array.isArray(restV2Apps)
       ? restV2Apps
           .map((appInfo) => {
-            // Extract service provider references directly from appData and app properties
-            const serviceProviderCandidates = collectRestV2ServiceProviderCandidatesFromApp(appInfo, "");
-            return serviceProviderCandidates
-              .map((sp) => extractEntityIdFromToken(String(sp || "").trim()))
-              .filter((sp) => sp && sp.toLowerCase() !== "all channels" && sp !== "*");
+            const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
+            const hints = healthRecord
+              ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
+                  .map((h) => computeEntityReferenceId(String(h || "").trim()))
+                  .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
+              : [];
+            return hints;
           })
           .flat()
           .filter(Boolean)
