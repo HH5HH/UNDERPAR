@@ -100358,7 +100358,7 @@ async function createRestV2SessionForContext(context, options = {}) {
           mvpd: context.mvpd,
           scope: "create-session",
           lockAppSelection: true,
-          allowProvisioning: false,
+          allowProvisioning: true,
         }
       );
 
