@@ -86512,7 +86512,7 @@ function deriveProgrammerRequestorOptionsFromChannels(programmerData = null, cha
       return;
     }
 
-    const id = String(firstNonEmptyString([option.id, option.key]) || "").trim();
+    const id = String(firstNonEmptyString([option.id, option.key, option.name, option.label]) || "").trim();
     const key = String(firstNonEmptyString([option.key, id]) || "").trim();
     if (!id || !key) {
       return;
