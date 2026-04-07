@@ -29496,10 +29496,13 @@ function buildCurrentRestV2SelectionContext(programmer, appInfoOverride = null) 
     return { ok: false, reason: "Select a Media Company first." };
   }
 
-  const requestorId = String(state.selectedRequestorId || "").trim();
-  if (!requestorId) {
+  const selectedRequestorId = String(state.selectedRequestorId || "").trim();
+  if (!selectedRequestorId) {
     return { ok: false, reason: "Select a Content Provider first." };
   }
+  const requestorId =
+    resolveCanonicalRequestorIdForProgrammer(selectedRequestorId, resolvedProgrammer.programmerId) ||
+    selectedRequestorId;
 
   const mvpd = String(state.selectedMvpdId || els.mvpdSelect?.value || "").trim();
   if (!mvpd) {
