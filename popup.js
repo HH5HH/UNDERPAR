@@ -859,8 +859,7 @@ function getCurrentProgrammerApplicationsSnapshot(programmerId = "") {
   if (!normalizedProgrammerId) {
     return null;
   }
-  const key = `${state.selectedEnvironmentKey || 'default'}|${normalizedProgrammerId}`;
-  const snapshot = state.applicationsByKey.get(key) || null;
+  const snapshot = state.applicationsByKey.get(normalizedProgrammerId) || null;
   return isEnvironmentAwareValueCurrent(snapshot) ? snapshot : null;
 }
 
@@ -869,11 +868,10 @@ function setCurrentProgrammerApplicationsSnapshot(programmerId = "", application
   if (!normalizedProgrammerId) {
     return null;
   }
-  const key = `${state.selectedEnvironmentKey || 'default'}|${normalizedProgrammerId}`;
   const snapshot =
     applicationsData && typeof applicationsData === "object" && !Array.isArray(applicationsData) ? applicationsData : {};
   stampEnvironmentAwareValue(snapshot);
-  state.applicationsByKey.set(key, snapshot);
+  state.applicationsByKey.set(normalizedProgrammerId, snapshot);
   return snapshot;
 }
 
@@ -882,8 +880,7 @@ function getCurrentPremiumAppsSnapshot(programmerId = "") {
   if (!normalizedProgrammerId) {
     return null;
   }
-  const key = `${state.selectedEnvironmentKey || 'default'}|${normalizedProgrammerId}`;
-  const snapshot = state.premiumAppsByKey.get(key) || null;
+  const snapshot = state.premiumAppsByKey.get(normalizedProgrammerId) || null;
   return isEnvironmentAwareValueCurrent(snapshot) ? snapshot : null;
 }
 
@@ -892,10 +889,9 @@ function setCurrentPremiumAppsSnapshot(programmerId = "", premiumApps = {}) {
   if (!normalizedProgrammerId) {
     return null;
   }
-  const key = `${state.selectedEnvironmentKey || 'default'}|${normalizedProgrammerId}`;
   const snapshot = premiumApps && typeof premiumApps === "object" && !Array.isArray(premiumApps) ? premiumApps : {};
   stampEnvironmentAwareValue(snapshot);
-  state.premiumAppsByKey.set(key, snapshot);
+  state.premiumAppsByKey.set(normalizedProgrammerId, snapshot);
   return snapshot;
 }
 
@@ -8514,9 +8510,9 @@ function clearPassVaultProgrammerRuntimeState(programmerId = "", environmentKey 
   if (!normalizedProgrammerId) {
     return;
   }
-  state.applicationsByKey.delete(scopedKey);
-  state.programmerApplicationsLoadPromiseByKey.delete(scopedKey);
-  state.premiumAppsByKey.delete(scopedKey);
+  state.applicationsByKey.delete(normalizedProgrammerId);
+  state.programmerApplicationsLoadPromiseByKey.delete(normalizedProgrammerId);
+  state.premiumAppsByKey.delete(normalizedProgrammerId);
   state.cmServiceByProgrammerId.delete(normalizedProgrammerId);
   state.cmServiceLoadPromiseByProgrammerId.delete(normalizedProgrammerId);
   state.cmHydrationPromiseByProgrammerId.delete(normalizedProgrammerId);
@@ -70629,7 +70625,7 @@ function createPremiumServiceSection(programmer, serviceKey, appInfo, options = 
   const disabled = options?.disabled === true;
   const disabledReason = String(options?.disabledReason || "").trim();
   const servicesForProgrammer =
-    programmer?.programmerId && state.premiumAppsByKey.has(`${state.selectedEnvironmentKey || 'default'}|${programmer.programmerId}`)
+    programmer?.programmerId && state.premiumAppsByKey.has(programmer.programmerId)
       ? getCurrentPremiumAppsSnapshot(programmer.programmerId)
       : null;
   const serviceScopedAppByKey = {
