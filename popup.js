@@ -33680,9 +33680,9 @@ function buildRestV2ProfileCheckEndpointCandidates(context = null) {
   if (!context || typeof context !== "object") {
     return [];
   }
-  const serviceProviderId = String(context.serviceProviderId || context.requestorId || "").trim();
+  const serviceProviderCandidates = buildRestV2ServiceProviderCandidatesFromContext(context);
   const mvpd = String(context.mvpd || "").trim();
-  if (!serviceProviderId) {
+  if (serviceProviderCandidates.length === 0) {
     return [];
   }
 
@@ -33698,55 +33698,63 @@ function buildRestV2ProfileCheckEndpointCandidates(context = null) {
       endpointKey: String(endpointKey || "").trim(),
       endpointLabel: String(metadata.endpointLabel || endpointKey || "").trim(),
       url: normalizedUrl,
+      serviceProviderId: String(metadata.serviceProviderId || "").trim(),
       sessionCode: String(metadata.sessionCode || "").trim(),
     });
   };
 
-  const mvpdProfilesUrl = mvpd
-    ? `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles/${encodeURIComponent(mvpd)}`
-    : "";
-  const allProfilesUrl = `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles`;
-  const sessionCodeCandidates = collectRestV2SessionCodeCandidates(
-    [
-      context.sessionCode,
-      ...(Array.isArray(context.sessionCodeCandidates) ? context.sessionCodeCandidates : []),
-      context.sessionUrl,
-      context.loginUrl,
-    ],
-    serviceProviderId
-  );
-  const sessionCodeEndpoints = sessionCodeCandidates.map((sessionCode) => ({
-    sessionCode,
-    url: `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles/code/${encodeURIComponent(sessionCode)}`,
-  }));
-
   const likelySsoContext = isRestV2LikelyPartnerSsoContext(context);
-  if (likelySsoContext) {
-    if (mvpdProfilesUrl) {
-      pushEndpoint("profiles-mvpd", mvpdProfilesUrl, {
-        endpointLabel: "profiles/{mvpd}",
-      });
+  serviceProviderCandidates.forEach((serviceProviderId) => {
+    const mvpdProfilesUrl = mvpd
+      ? `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles/${encodeURIComponent(mvpd)}`
+      : "";
+    const allProfilesUrl = `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles`;
+    const sessionCodeCandidates = collectRestV2SessionCodeCandidates(
+      [
+        context.sessionCode,
+        ...(Array.isArray(context.sessionCodeCandidates) ? context.sessionCodeCandidates : []),
+        context.sessionUrl,
+        context.loginUrl,
+      ],
+      serviceProviderId
+    );
+    const sessionCodeEndpoints = sessionCodeCandidates.map((sessionCode) => ({
+      sessionCode,
+      url: `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/profiles/code/${encodeURIComponent(sessionCode)}`,
+    }));
+
+    if (likelySsoContext) {
+      if (mvpdProfilesUrl) {
+        pushEndpoint("profiles-mvpd", mvpdProfilesUrl, {
+          endpointLabel: "profiles/{mvpd}",
+          serviceProviderId,
+        });
+      } else {
+        pushEndpoint("profiles-all", allProfilesUrl, {
+          endpointLabel: "profiles",
+          serviceProviderId,
+        });
+      }
     } else {
+      if (mvpdProfilesUrl) {
+        pushEndpoint("profiles-mvpd", mvpdProfilesUrl, {
+          endpointLabel: "profiles/{mvpd}",
+          serviceProviderId,
+        });
+      }
+      sessionCodeEndpoints.forEach((item) => {
+        pushEndpoint("profiles-code", item.url, {
+          endpointLabel: "profiles/code",
+          serviceProviderId,
+          sessionCode: item.sessionCode,
+        });
+      });
       pushEndpoint("profiles-all", allProfilesUrl, {
         endpointLabel: "profiles",
+        serviceProviderId,
       });
     }
-  } else {
-    if (mvpdProfilesUrl) {
-      pushEndpoint("profiles-mvpd", mvpdProfilesUrl, {
-        endpointLabel: "profiles/{mvpd}",
-      });
-    }
-    sessionCodeEndpoints.forEach((item) => {
-      pushEndpoint("profiles-code", item.url, {
-        endpointLabel: "profiles/code",
-        sessionCode: item.sessionCode,
-      });
-    });
-    pushEndpoint("profiles-all", allProfilesUrl, {
-      endpointLabel: "profiles",
-    });
-  }
+  });
 
   return endpoints;
 }
@@ -33864,7 +33872,10 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
   const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
     resolveRestV2ExactPartnerFrameworkStatusForContext(context)
   );
-  const requestHeaders = buildRestV2Headers(context.serviceProviderId, {
+  const endpointServiceProviderId = String(
+    endpoint?.serviceProviderId || context?.serviceProviderId || context?.requestorId || ""
+  ).trim();
+  const requestHeaders = buildRestV2Headers(endpointServiceProviderId, {
     Accept: "application/json",
   });
   if (likelySsoContext && partnerFrameworkStatus && String(endpoint?.endpointKey || "").trim() === "profiles-mvpd") {
@@ -33879,6 +33890,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
     mvpd: context.mvpd,
     profileCheckEndpoint: endpoint.endpointKey,
     profileCheckEndpointLabel: endpoint.endpointLabel,
+    serviceProviderId: endpointServiceProviderId,
     profileCheckSessionCode: endpoint.sessionCode || "",
     partnerFrameworkStatusPresent: Boolean(likelySsoContext && partnerFrameworkStatus),
   });
@@ -33899,6 +33911,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
         requestorId: context.requestorId,
         mvpd: context.mvpd,
         scope: endpointScope,
+        serviceProviderId: endpointServiceProviderId,
       }
     );
 
@@ -34163,6 +34176,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
       payload: cloneJsonLikeValue(effectivePayload, {}),
       profileCheckEndpoint: endpoint.endpointKey,
       profileCheckEndpointLabel: endpoint.endpointLabel,
+      serviceProviderId: endpointServiceProviderId,
       profileCheckSessionCode: endpoint.sessionCode || "",
       profileHarvest: harvestedProfile ? cloneJsonLikeValue(harvestedProfile, {}) : null,
     });
@@ -34208,6 +34222,7 @@ async function fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope 
       error: reason,
       profileCheckEndpoint: endpoint.endpointKey,
       profileCheckEndpointLabel: endpoint.endpointLabel,
+      serviceProviderId: endpointServiceProviderId,
       profileCheckSessionCode: endpoint.sessionCode || "",
       profileHarvest: harvestedProfile ? cloneJsonLikeValue(harvestedProfile, {}) : null,
     });
@@ -100321,6 +100336,27 @@ function buildRestV2SessionCreatePayloadCandidates(mvpd) {
   return payloads;
 }
 
+function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
+  if (!context || typeof context !== "object") {
+    return [];
+  }
+  const appInfo = context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null;
+  const appChannelCandidate = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
+  return uniquePreserveOrder(
+    [
+      extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
+      extractRequestorIdFromServiceProviderValue(context?.requestorId),
+      extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
+      extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
+      appChannelCandidate,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+}
+
 async function createRestV2SessionForContext(context, options = {}) {
   if (!context?.programmerId || !context?.appInfo?.guid || !context?.serviceProviderId || !context?.mvpd) {
     throw new Error("Create session failed: missing media company, app, requestor, or MVPD.");
@@ -100329,25 +100365,7 @@ async function createRestV2SessionForContext(context, options = {}) {
 
   const appCandidates = context.appInfo?.guid ? [context.appInfo] : [];
 
-  const getServiceProviderCandidates = () => {
-    const appInfo = context?.appInfo && typeof context.appInfo === "object" ? context.appInfo : null;
-    const appChannelCandidate = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
-    return uniquePreserveOrder(
-      [
-        extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
-        extractRequestorIdFromServiceProviderValue(context?.requestorId),
-        extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
-        extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
-        extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
-        extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
-        appChannelCandidate,
-      ]
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
-    );
-  };
-
-  const serviceProviderCandidates = getServiceProviderCandidates();
+  const serviceProviderCandidates = buildRestV2ServiceProviderCandidatesFromContext(context);
   if (serviceProviderCandidates.length === 0) {
     throw new Error("Create session failed: unable to determine a service provider candidate.");
   }
