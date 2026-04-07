@@ -87018,7 +87018,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
       // If CMU token still unavailable, fallback to primary access token for catalog operations
       // (Reports will gracefully degrade without CMU token, but catalog operations work with primary token)
       if (!hydratedToken || !tokenSupportsCmConsoleRequests(hydratedToken)) {
-        const primaryAccessToken = normalizeBearerTokenValue(currentSession?.accessToken || "");
+        const primaryAccessToken = normalizeBearerTokenValue(state.loginData?.accessToken || "");
         if (primaryAccessToken) {
           hydratedToken = primaryAccessToken;
         } else {
