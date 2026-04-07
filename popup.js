@@ -20515,8 +20515,14 @@ async function attemptRestV2SessionCodeProfileRecovery(harvest, flowId = "", sco
   return null;
 }
 
-async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_REST_V2_ACTION_PREAUTHORIZE) {
+async function fetchRestV2DecisionCheck(
+  harvest,
+  resourceIds,
+  mode = BOBTOOLS_REST_V2_ACTION_PREAUTHORIZE,
+  options = {}
+) {
   const normalizedMode = normalizeBobtoolsRestV2Action(mode);
+  const allowProfileRecoveryRetry = options?.allowProfileRecoveryRetry !== false;
   const decisionMode =
     normalizedMode === BOBTOOLS_REST_V2_ACTION_AUTHORIZE
       ? BOBTOOLS_REST_V2_ACTION_AUTHORIZE
@@ -20740,8 +20746,7 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
           result.error = [
             result.error,
             ` Profile recovered via /profiles/code (${recovery.profileCount} profile${recovery.profileCount !== 1 ? "s" : ""}). `,
-            "The MVPD session is valid but the decisions endpoint cannot resolve it. ",
-            "Re-run LOGIN to refresh the profile binding, or use the recovered profile data for validation.",
+            "Retrying decision check against recovered session context.",
           ].join("");
 
           emitRestV2DebugEvent(flowId, {
@@ -20751,6 +20756,59 @@ async function fetchRestV2DecisionCheck(harvest, resourceIds, mode = BOBTOOLS_RE
             recoverySessionCode: recovery.sessionCode,
             recoveryEndpointUrl: recovery.endpointUrl,
           });
+
+          const recoveryContext = recovery?.context && typeof recovery.context === "object" ? recovery.context : null;
+          if (allowProfileRecoveryRetry && recoveryContext) {
+            const retryHarvest = {
+              ...(harvest && typeof harvest === "object" ? harvest : {}),
+              programmerId: firstNonEmptyString([recoveryContext?.programmerId, harvest?.programmerId]),
+              requestorId: firstNonEmptyString([
+                recoveryContext?.requestorId,
+                recoveryContext?.serviceProviderId,
+                harvest?.requestorId,
+                harvest?.serviceProviderId,
+              ]),
+              serviceProviderId: firstNonEmptyString([
+                recoveryContext?.serviceProviderId,
+                recoveryContext?.requestorId,
+                harvest?.serviceProviderId,
+                harvest?.requestorId,
+              ]),
+              mvpd: firstNonEmptyString([recoveryContext?.mvpd, harvest?.mvpd]),
+              appGuid: firstNonEmptyString([recoveryContext?.appInfo?.guid, harvest?.appGuid]),
+              appName: firstNonEmptyString([recoveryContext?.appInfo?.appName, harvest?.appName]),
+              loginUrl: firstNonEmptyString([recoveryContext?.loginUrl, harvest?.loginUrl]),
+              sessionUrl: firstNonEmptyString([recoveryContext?.sessionUrl, harvest?.sessionUrl]),
+              sessionData:
+                recoveryContext?.sessionData && typeof recoveryContext.sessionData === "object"
+                  ? { ...recoveryContext.sessionData }
+                  : harvest?.sessionData,
+            };
+
+            emitRestV2DebugEvent(flowId, {
+              source: "extension",
+              phase: `${scopeKey}-profile-recovery-retry-start`,
+              recoveryServiceProviderId: String(recovery.serviceProviderId || ""),
+              retryRequestorId: String(retryHarvest.requestorId || ""),
+              retryServiceProviderId: String(retryHarvest.serviceProviderId || ""),
+              retryAppGuid: String(retryHarvest.appGuid || ""),
+            });
+
+            try {
+              const retryResult = await fetchRestV2DecisionCheck(retryHarvest, resourceIds, decisionMode, {
+                allowProfileRecoveryRetry: false,
+              });
+              retryResult.profileRecovery = recovery;
+              retryResult.profileRecoveryRetried = true;
+              return retryResult;
+            } catch (retryError) {
+              emitRestV2DebugEvent(flowId, {
+                source: "extension",
+                phase: `${scopeKey}-profile-recovery-retry-failed`,
+                error: retryError instanceof Error ? retryError.message : String(retryError),
+              });
+            }
+          }
         } else {
           result.profileRecovery = null;
           result.error = [

@@ -533,17 +533,19 @@ function renderQuickResourcePicker(profile = null) {
 
   els.quickResourceCardBody.innerHTML = `<div class="bobtools-resource-chip-cloud">${chipOptions
     .map((chip) => {
-      const normalized = String(chip?.label || "").trim();
-      const active = selectedKeys.has(normalized.toLowerCase());
-      const hoverLines = [active ? `Remove ${normalized}` : `Add ${normalized}`];
-      if (chip?.rawValue && chip.rawValue !== normalized) {
-        hoverLines.push(`Adobe TMSID: ${chip.rawValue}`);
+      const label = String(chip?.label || "").trim();
+      const rawValue = String(chip?.rawValue || "").trim();
+      const canonicalResourceId = firstNonEmptyString([rawValue, label]);
+      const active = selectedKeys.has(label.toLowerCase()) || (rawValue && selectedKeys.has(rawValue.toLowerCase()));
+      const hoverLines = [active ? `Remove ${label}` : `Add ${label}`];
+      if (rawValue && rawValue !== label) {
+        hoverLines.push(`Adobe TMSID: ${rawValue}`);
       }
       return `<button type="button" class="bobtools-resource-chip${active ? " is-active" : ""}" data-resource-id="${escapeHtml(
-        normalized
+        canonicalResourceId
       )}" aria-pressed="${active ? "true" : "false"}"${chipsDisabled ? " disabled" : ""} title="${escapeHtml(
         hoverLines.join("\n")
-      )}">${escapeHtml(normalized)}</button>`;
+      )}">${escapeHtml(label)}</button>`;
     })
     .join("")}</div>`;
   els.quickResourceCardBody.dataset.renderSignature = signature;
@@ -573,11 +575,20 @@ function toggleQuickResourceInInput(resourceId = "") {
   if (!profile || !normalized) {
     return { changed: false, active: false, value: "" };
   }
+
+  const chip = resolveResourceIdChip(normalized, profile);
+  const targetValue = firstNonEmptyString([chip?.rawValue, chip?.label, normalized]);
+  const aliasKeys = new Set(
+    [targetValue, chip?.rawValue, chip?.label, normalized]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+
   const currentValues = parseResourceInputValue(els.resourceInput?.value || "");
-  const active = currentValues.some((item) => item.toLowerCase() === normalized.toLowerCase());
+  const active = currentValues.some((item) => aliasKeys.has(String(item || "").trim().toLowerCase()));
   const nextValues = active
-    ? currentValues.filter((item) => item.toLowerCase() !== normalized.toLowerCase())
-    : [...currentValues, normalized];
+    ? currentValues.filter((item) => !aliasKeys.has(String(item || "").trim().toLowerCase()))
+    : [...currentValues, targetValue];
   const commit = writeResourceInputValue(profile, nextValues);
   return {
     changed: commit.changed,
@@ -2389,8 +2400,18 @@ async function runSelectedActionFromForm() {
 
   const harvestKey = String(profile?.key || "").trim();
   const resourceInput = String(els.resourceInput.value || "").trim();
-  state.resourceInputByHarvestKey.set(harvestKey, resourceInput);
-  if (actionRequiresResources(action) && !resourceInput) {
+  const canonicalResourceIds = normalizeResourceIdList(
+    parseResourceInputValue(resourceInput).map((value) => {
+      const chip = resolveResourceIdChip(value, profile);
+      return firstNonEmptyString([chip?.rawValue, chip?.label, value]);
+    })
+  );
+  const canonicalResourceInput = canonicalResourceIds.join(", ");
+  state.resourceInputByHarvestKey.set(harvestKey, canonicalResourceInput);
+  if (els.resourceInput.value !== canonicalResourceInput) {
+    els.resourceInput.value = canonicalResourceInput;
+  }
+  if (actionRequiresResources(action) && canonicalResourceIds.length === 0) {
     setStatus(`${actionLabel} requires at least one resourceId.`, "error");
     return;
   }
@@ -2401,7 +2422,7 @@ async function runSelectedActionFromForm() {
   const response = await sendWorkspaceAction("run-can-i-watch", {
     programmerId: String(state.programmerId || "").trim(),
     harvestKey,
-    resourceInput,
+    resourceInput: canonicalResourceInput,
   });
   state.running = false;
 
