@@ -9160,7 +9160,7 @@ function scanAllChannelsServiceCoverage(registeredApplications = []) {
     const healthRecord = buildRegisteredApplicationHealthAppRecord(app, null);
     const hints = healthRecord
       ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
-          .map((h) => String(h || "").trim())
+          .map((h) => computeEntityReferenceId(String(h || "").trim()))
           .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
       : [];
     const appIsAllChannels = hints.length === 0;
@@ -9817,7 +9817,7 @@ function buildPassVaultDirectPremiumServicesSnapshot(
             const healthRecord = buildRegisteredApplicationHealthAppRecord(app, null);
             const hints = healthRecord
               ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
-                  .map((h) => String(h || "").trim())
+                  .map((h) => computeEntityReferenceId(String(h || "").trim()))
                   .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
               : [];
             return hints;
@@ -10209,7 +10209,7 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
     const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
     const hints = healthRecord
       ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
-          .map((h) => String(h || "").trim())
+          .map((h) => computeEntityReferenceId(String(h || "").trim()))
           .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
       : [];
     return hints.length === 0; // Empty hints means "All Channels"
@@ -10223,7 +10223,7 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
             const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
             const hints = healthRecord
               ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
-                  .map((h) => String(h || "").trim())
+                  .map((h) => computeEntityReferenceId(String(h || "").trim()))
                   .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
               : [];
             return hints;
