@@ -100316,7 +100316,8 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
     extractEntityIdFromToken(requestorId) ||
     ""
   ).trim();
-  const serviceProviderId = normalizeEntityToken(rawServiceProviderId);
+  // Note: Do NOT normalize to lowercase - service provider IDs may be case-sensitive
+  const serviceProviderId = rawServiceProviderId;
   if (!serviceProviderId) {
     throw new Error("Unable to determine service provider ID for REST V2 configuration");
   }
