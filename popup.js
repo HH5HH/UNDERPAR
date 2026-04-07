@@ -87236,19 +87236,20 @@ function getRequestorsForSelectedMediaCompany() {
       const restV2Filter = uniqueSorted(
         restV2Apps
           .map((app) => getRegisteredAppChannel(app))
+          .filter((channel) => typeof channel === "string" && String(channel || "").trim().length > 0)
           .map((channel) => String(channel || "").trim())
-          .filter(Boolean)
       );
       if (restV2Filter.length > 0) {
         const filterSet = new Set(restV2Filter.map((id) => id.toLowerCase()));
         const filtered = allRequestors.filter((option) =>
           filterSet.has(String(option.id || "").toLowerCase())
         );
-        // Safety: never produce an empty list.
         if (filtered.length > 0) {
           return filtered;
         }
+        return [];
       }
+      return [];
     }
   }
 
@@ -88704,6 +88705,34 @@ function getRegisteredAppChannel(appInfo) {
       : null;
   const entityData = appData?.__rawEnvelope?.entityData || appInfo?.__rawEnvelope?.entityData || null;
 
+  const hasExplicitBlankHint = (...values) => {
+    for (const value of values) {
+      if (value == null) {
+        continue;
+      }
+      if (Array.isArray(value)) {
+        if (value.length === 0 || value.some((entry) => String(entry || "").trim().length === 0)) {
+          return true;
+        }
+        continue;
+      }
+      if (typeof value === "object") {
+        if (
+          String(value.value || "").trim().length === 0 ||
+          String(value.id || "").trim().length === 0 ||
+          String(value.key || "").trim().length === 0
+        ) {
+          return true;
+        }
+        continue;
+      }
+      if (typeof value === "string" && String(value).trim().length === 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   // ── Source 1: entityData from __rawEnvelope (immutable Console entity data) ──
   if (entityData) {
     const hints = sanitizePassVaultHintList(
@@ -88723,6 +88752,18 @@ function getRegisteredAppChannel(appInfo) {
     // If entityData has explicit hints that resolve to "All Channels", return ""
     // immediately — we have a definitive answer from the Console entity.
     if (raw) {
+      return "";
+    }
+    if (hasExplicitBlankHint(
+      entityData.serviceProviders,
+      entityData.contentProviders,
+      entityData.requestors,
+      entityData.requestorIds,
+      entityData.requestor,
+      entityData.serviceProvider,
+      entityData.serviceProviderHint,
+      entityData.channel
+    )) {
       return "";
     }
     // entityData exists but has NO hint fields at all — fall through to JWT.
@@ -88768,16 +88809,28 @@ function getRegisteredAppChannel(appInfo) {
     if (appDataRaw && appDataRaw.toLowerCase() !== "all channels" && appDataRaw !== "*") {
       return appDataRaw;
     }
+    if (hasExplicitBlankHint(
+      appData.serviceProviders,
+      appData.contentProviders,
+      appData.requestors,
+      appData.requestorIds,
+      appData.requestor,
+      appData.serviceProvider,
+      appData.serviceProviderHint,
+      appData.channel
+    )) {
+      return "";
+    }
   }
 
   // No channel information found from any source.
-  // This is ambiguous — the app MIGHT be channel-specific but we can't tell.
-  // Return "" to treat as "All Channels" for backwards compatibility.
-  return "";
+  // This is ambiguous — the app MIGHT be channel-specific, so do not
+  // assume it is an All Channels registered application.
+  return null;
 }
 
 function isAllChannelsApp(appInfo) {
-  return !getRegisteredAppChannel(appInfo);
+  return getRegisteredAppChannel(appInfo) === "";
 }
 
 function normalizeRegisteredApplicationRuntimeRecord(item = null) {
