@@ -78482,7 +78482,16 @@ function normalizeUnderparImsPrompt(promptValue = "", interactive = true) {
   }
 
   const normalizedPrompt = String(promptValue || "").trim().toLowerCase();
-  return normalizedPrompt === "login" ? "login" : "";
+  if (normalizedPrompt === "login") {
+    return "login";
+  }
+  if (normalizedPrompt === "none") {
+    return "none";
+  }
+  if (normalizedPrompt === "select_account") {
+    return "select_account";
+  }
+  return "";
 }
 
 async function runUnderparPkceLogin(options = {}) {
@@ -101363,7 +101372,7 @@ async function refreshSessionManual() {
         authData = await startLogin({
           interactive: true,
           allowFallback: true,
-          prompt: "login",
+          prompt: "",
         });
         usedInteractiveLogin = true;
       }
