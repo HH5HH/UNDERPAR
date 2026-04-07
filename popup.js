@@ -87277,10 +87277,23 @@ function getRequestorsForSelectedMediaCompany() {
 
   if (normalizedRestV2RequestorIds.length > 0) {
     // Filter to only show requestors with REST V2 support
-    return allRequestors.filter((option) => {
+    const filteredRequestors = allRequestors.filter((option) => {
       const optionId = normalizeEntityToken(extractEntityIdFromToken(String(option.id || option.key || "")));
       return normalizedRestV2RequestorIds.includes(optionId);
     });
+
+    // Some programmers do not expose requestorOptions/contentProviders in their
+    // programmer record. When REST V2 apps provide valid requestor IDs, build the
+    // dropdown directly from those IDs so single-provider companies stay selectable.
+    if (filteredRequestors.length > 0) {
+      return filteredRequestors;
+    }
+
+    return normalizedRestV2RequestorIds.map((requestorId) => ({
+      key: requestorId,
+      id: requestorId,
+      label: requestorId,
+    }));
   }
 
   // ── Fallback: show all requestors ──────
@@ -87357,12 +87370,14 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   );
   const hydrationPending =
     Boolean(normalizedProgrammerId) && Boolean(getProgrammerServiceHydrationPromise(normalizedProgrammerId));
+  const restV2RequestorIds = resolvedServices?.__restV2RequestorIds;
+  const restV2SelectionReady =
+    restV2RequestorIds === null || (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0);
   const runtimeReady =
     Boolean(normalizedProgrammerId) && Boolean(resolvedServices) && isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices);
   const ready =
     Boolean(normalizedProgrammerId) &&
-    !hydrationPending &&
-    (runtimeReady || isProgrammerPremiumInteractionReady(normalizedProgrammerId, resolvedServices));
+    (restV2SelectionReady || (!hydrationPending && (runtimeReady || isProgrammerPremiumInteractionReady(normalizedProgrammerId, resolvedServices))));
   els.requestorSelect.disabled = !hasRequestorOptions || !ready;
   return els.requestorSelect.disabled !== true;
 }
