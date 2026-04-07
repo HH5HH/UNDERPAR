@@ -87227,7 +87227,12 @@ function getRequestorsForSelectedMediaCompany() {
 
   // Check if REST V2 Registered Applications exist for filtering Content Providers.
   // Only show Content Providers that have REST V2 scoped Registered Applications.
-  const applicationsData = getCurrentProgrammerApplicationsSnapshot(programmerId);
+  const applicationsData =
+    getCurrentProgrammerApplicationsSnapshot(programmerId) ||
+    buildPassVaultApplicationsSnapshotFromRegisteredApplications(
+      getPassVaultRegisteredApplicationsByGuid(getPassVaultMediaCompanyRecord(programmerId)) || {}
+    ) ||
+    null;
   if (applicationsData && typeof applicationsData === "object" && Object.keys(applicationsData).length > 0) {
     const registeredApplications = Object.values(applicationsData).filter(app => app && typeof app === "object");
     const restV2RegisteredApps = registeredApplications.filter(app => {
