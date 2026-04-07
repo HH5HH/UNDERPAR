@@ -9804,24 +9804,30 @@ function buildPassVaultDirectPremiumServicesSnapshot(
     null;
 
   // Extract requestor IDs from REST V2 registered applications
-  // buildRegisteredApplicationHealthAppRecord extracts service provider hints (requestor IDs)
-  // from the software statement and entity data, which is the authoritative source.
-  const restV2RequestorIds = Array.isArray(restV2Apps)
-    ? restV2Apps
-        .map((app) => {
-          const healthRecord = buildRegisteredApplicationHealthAppRecord(app, null);
-          const hints = healthRecord
-            ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
-                .map((h) => String(h || "").trim())
-                .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
-            : [];
-          return hints;
-        })
-        .flat()
-        .filter(Boolean)
-    : [];
-  const uniqueRestV2RequestorIds =
-    restV2RequestorIds.length > 0 ? Array.from(new Set(restV2RequestorIds)).sort() : [];
+  // If there are "All Channels" REST V2 apps, allow all requestors (set to null)
+  // If only channel-specific REST V2 apps exist, filter to only those requestors
+  let restV2RequestorIds = null;
+  const hasAllChannelsRestV2 = scanResult.allChannelsByServiceKey?.restV2 === true;
+
+  if (!hasAllChannelsRestV2) {
+    // No "All Channels" REST V2 apps, so extract requestor IDs from channel-specific apps
+    restV2RequestorIds = Array.isArray(restV2Apps)
+      ? restV2Apps
+          .map((app) => {
+            const healthRecord = buildRegisteredApplicationHealthAppRecord(app, null);
+            const hints = healthRecord
+              ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
+                  .map((h) => String(h || "").trim())
+                  .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
+              : [];
+            return hints;
+          })
+          .flat()
+          .filter(Boolean)
+      : [];
+    restV2RequestorIds = restV2RequestorIds.length > 0 ? Array.from(new Set(restV2RequestorIds)).sort() : null;
+  }
+  // If hasAllChannelsRestV2 is true, restV2RequestorIds remains null (show all requestors)
 
   return applyPremiumServiceRuntimeSummary(
     programmer,
@@ -9839,17 +9845,12 @@ function buildPassVaultDirectPremiumServicesSnapshot(
       cmMvpdSelectionKey: String(options?.cmMvpdSelectionKey || "").trim(),
       __underparLiveHydrated: true,
       __underparLiveHydratedAt: Date.now(),
-      // ── All Channels coverage metadata ──
-      // Consumed by getRequestorsForSelectedMediaCompany and
-      // syncRequestorSelectHydrationAvailability to decide whether the
-      // requestor selector should be filtered.
-      __allChannelsCoverage: scanResult.allChannelsByServiceKey || null,
-      __requestorFilter: scanResult.requestorFilter || null,
       // ── REST V2 requestor filtering ──
       // __restV2RequestorIds contains all requestor IDs that have REST V2 DCR-scoped
       // registered applications. Used to filter the requestor dropdown to only show
       // valid providers that can make REST V2 configuration requests.
-      __restV2RequestorIds: uniqueRestV2RequestorIds.length > 0 ? uniqueRestV2RequestorIds : null,
+      // If null, show all requestors (due to "All Channels" REST V2 apps).
+      __restV2RequestorIds: restV2RequestorIds,
     },
     {
       cmCatalog: state.cmTenantsCatalog,
@@ -10203,22 +10204,36 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   const cmServiceSnapshot = buildPassVaultRuntimeCmServiceSnapshot(record);
 
   // Extract requestor IDs from REST V2 apps for filtering the requestor dropdown
-  const restV2RequestorIds = Array.isArray(restV2Apps)
-    ? restV2Apps
-        .map((appInfo) => {
-          const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
-          const hints = healthRecord
-            ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
-                .map((h) => String(h || "").trim())
-                .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
-            : [];
-          return hints;
-        })
-        .flat()
-        .filter(Boolean)
-    : [];
-  const uniqueRestV2RequestorIds =
-    restV2RequestorIds.length > 0 ? Array.from(new Set(restV2RequestorIds)).sort() : [];
+  let restV2RequestorIds = null;
+  const hasAllChannelsRestV2 = Array.isArray(restV2Apps) && restV2Apps.some((appInfo) => {
+    const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
+    const hints = healthRecord
+      ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
+          .map((h) => String(h || "").trim())
+          .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
+      : [];
+    return hints.length === 0; // Empty hints means "All Channels"
+  });
+
+  if (!hasAllChannelsRestV2) {
+    // No "All Channels" REST V2 apps, so extract requestor IDs from channel-specific apps
+    const extractedIds = Array.isArray(restV2Apps)
+      ? restV2Apps
+          .map((appInfo) => {
+            const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
+            const hints = healthRecord
+              ? (Array.isArray(healthRecord.serviceProviderHints) ? healthRecord.serviceProviderHints : [])
+                  .map((h) => String(h || "").trim())
+                  .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
+              : [];
+            return hints;
+          })
+          .flat()
+          .filter(Boolean)
+      : [];
+    restV2RequestorIds = extractedIds.length > 0 ? Array.from(new Set(extractedIds)).sort() : null;
+  }
+  // If hasAllChannelsRestV2 is true, restV2RequestorIds remains null (show all requestors)
 
   return {
     restV2: selectPrimaryApp("restV2", restV2Apps),
@@ -10233,7 +10248,7 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
     cmMvpd: null,
     cmMvpdSelectionKey: "",
     // REST V2 requestor filtering (for vault-backed services)
-    __restV2RequestorIds: uniqueRestV2RequestorIds.length > 0 ? uniqueRestV2RequestorIds : null,
+    __restV2RequestorIds: restV2RequestorIds,
   };
 }
 
