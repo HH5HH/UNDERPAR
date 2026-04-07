@@ -87310,17 +87310,19 @@ function getRequestorsForSelectedMediaCompany() {
     return [];
   }
 
-  const normalizeRequestorId = (value) => normalizeEntityToken(extractEntityIdFromToken(String(value || "")));
+  const extractRequestorId = (value) => String(extractEntityIdFromToken(String(value || "")) || "").trim();
+  const normalizeRequestorId = (value) => normalizeEntityToken(extractRequestorId(value));
   const requestorOptions = Array.isArray(programmer.requestorOptions)
     ? programmer.requestorOptions
         .filter((option) => option && typeof option === "object")
         .map((option) => {
-          const id = normalizeRequestorId(firstNonEmptyString([option.id, option.key]));
-          const key = normalizeRequestorId(firstNonEmptyString([option.key, option.id]));
+          const id = extractRequestorId(firstNonEmptyString([option.id, option.key]));
+          const key = extractRequestorId(firstNonEmptyString([option.key, option.id]));
           return {
             key,
             id,
             label: firstNonEmptyString([option.label, option.name, option.id, option.key]),
+            normalizedId: normalizeRequestorId(id || key),
           };
         })
         .filter((option) => option.id)
@@ -87363,7 +87365,7 @@ function getRequestorsForSelectedMediaCompany() {
 
     // Filter to only show requestors with REST V2 support
     const filteredRequestors = allRequestors.filter((option) => {
-      const optionId = normalizeEntityToken(String(option.id || option.key || "").trim());
+      const optionId = String(option.normalizedId || normalizeEntityToken(String(option.id || option.key || "").trim()));
       return restV2RequestorIdSet.has(optionId);
     });
 
