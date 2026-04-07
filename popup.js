@@ -86152,9 +86152,6 @@ async function activateSession(sessionData, source = "unknown", options = {}) {
     persist: true,
     scheduleRefresh: true,
   });
-  // Queue CM console auto-hydration right after IMS login/activation
-  queueCmConsoleAutoHydration(`activation:${normalizedSource}`);
-  
   state.cmLastHydratedAccessToken = normalizeBearerTokenValue(
     firstNonEmptyString([resolvedLoginData?.cmConsoleAccessToken || ""])
   );
