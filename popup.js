@@ -9387,6 +9387,83 @@ function buildPassVaultServiceHydrationEntries({
     };
   });
 
+  // ── Ensure ALL All Channels REST V2 apps have cached DCR credentials + tokens ────────
+  // The primary selection (entries.restV2) handles the main winner, but Turner may have
+  // multiple All Channels REST V2 apps. We need to ensure EACH one can be used by any requestor.
+  // 
+  // Strategy:
+  // - All Channels apps (empty serviceProvider): Register + cache access token NOW
+  // - Requestor-scoped apps (populated serviceProvider): Register only, token on-demand later
+  if (
+    Array.isArray(scanResult?.allScopeApps?.restV2) &&
+    scanResult.allScopeApps.restV2.length > 0 &&
+    programmerId
+  ) {
+    const restV2Definition = UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS.find((def) => def.serviceKey === "restV2") || null;
+    if (restV2Definition) {
+      // Process each REST V2 app to ensure All Channels ones are fully provisioned
+      for (const appInfo of scanResult.allScopeApps.restV2) {
+        const appGuid = String(appInfo?.guid || "").trim();
+        if (!appGuid) {
+          continue;
+        }
+        
+        // Classify: All Channels vs requestor-scoped
+        const appChannel = getRegisteredAppChannel(appInfo);
+        const isAllChannels = appChannel === "";
+        
+        if (!isAllChannels) {
+          // Requestor-scoped apps: ensure registration/credentials are cached, but skip token for now
+          // Token will be requested on-demand when user selects that specific content provider
+          const cachedClient = normalizeUnderparVaultCredentialEntry(
+            loadDcrCache(programmerId, appGuid, "restV2") || null
+          ) || null;
+          if (!cachedClient?.clientId || !cachedClient?.clientSecret) {
+            // Trigger registration to cache credentials only (setAllChannelsTokenNeeded = false)
+            void ensureDcrAccessToken(programmerId, appInfo, false, {
+              scope: "restV2",
+              service: "restV2",
+              flowId: "",
+              allowProvisioning: true,
+            }).catch(() => {
+              // Best effort — registration errors don't block hydration
+              // The app will be retried if/when user selects its requestor
+            });
+          }
+          continue;
+        }
+        
+        // All Channels apps: ensure full provisioning (credentials + access token)
+        const cachedClient = normalizeUnderparVaultCredentialEntry(
+          loadDcrCache(programmerId, appGuid, "restV2") || null
+        ) || null;
+        
+        if (!cachedClient?.clientId || !cachedClient?.clientSecret) {
+          // No cached DCR credentials → need to register
+          void ensureDcrAccessToken(programmerId, appInfo, false, {
+            scope: "restV2",
+            service: "restV2",
+            flowId: "",
+            allowProvisioning: true,
+          }).catch(() => {
+            // Allow registration failures during hydration to be recoverable
+          });
+        } else if (!cachedClient?.accessToken || serviceClientNeedsPassVaultRefresh(cachedClient, restV2Definition.requiredScope, "restV2")) {
+          // Credentials exist but token is missing/expired → request fresh token
+          void ensureDcrAccessToken(programmerId, appInfo, true, {
+            scope: "restV2",
+            service: "restV2",
+            flowId: "",
+            allowProvisioning: true,
+          }).catch(() => {
+            // Token refresh failures don't block hydration
+          });
+        }
+        // else: credentials and valid token already cached → nothing to do
+      }
+    }
+  }
+
   // Attach the scan result so downstream consumers (buildPassVaultDirectPremiumServicesSnapshot,
   // getRequestorsForSelectedMediaCompany) can use the requestor filter and allChannels coverage.
   entries.__scanResult = scanResult;
