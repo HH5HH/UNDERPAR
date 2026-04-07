@@ -9900,10 +9900,14 @@ function buildPassVaultDirectPremiumServicesSnapshot(
       ? restV2Apps
           .map((app) => {
             const serviceProviderValue = String(app?.appData?.serviceProvider || app?.serviceProvider || "").trim();
-            if (!serviceProviderValue) {
-              return null;
-            }
-            const requestorId = extractRequestorIdFromServiceProviderValue(serviceProviderValue);
+            const requestorIdFromServiceProvider = serviceProviderValue
+              ? extractRequestorIdFromServiceProviderValue(serviceProviderValue)
+              : "";
+            const requestorIdFromChannel = String(getRegisteredAppChannel(app) || "").trim();
+            const requestorId = firstNonEmptyString([
+              requestorIdFromServiceProvider,
+              requestorIdFromChannel,
+            ]);
             if (!requestorId) {
               return null;
             }
@@ -10303,10 +10307,14 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
       ? restV2Apps
           .map((appInfo) => {
             const serviceProviderValue = String(appInfo?.appData?.serviceProvider || appInfo?.serviceProvider || "").trim();
-            if (!serviceProviderValue) {
-              return null;
-            }
-            const requestorId = extractRequestorIdFromServiceProviderValue(serviceProviderValue);
+            const requestorIdFromServiceProvider = serviceProviderValue
+              ? extractRequestorIdFromServiceProviderValue(serviceProviderValue)
+              : "";
+            const requestorIdFromChannel = String(getRegisteredAppChannel(appInfo) || "").trim();
+            const requestorId = firstNonEmptyString([
+              requestorIdFromServiceProvider,
+              requestorIdFromChannel,
+            ]);
             if (!requestorId) {
               return null;
             }
@@ -87345,10 +87353,19 @@ function getRequestorsForSelectedMediaCompany() {
     : premiumApps?.__restV2RequestorIds === null
       ? null
       : null;
-  const restV2RequestorIds =
+  let restV2RequestorIds =
     Array.isArray(normalizedRestV2RequestorIds) && normalizedRestV2RequestorIds.length > 0
       ? normalizedRestV2RequestorIds
       : null;
+
+  // Fallback: if runtime filtering IDs are missing, derive requestors from REST V2 app channels.
+  if (!Array.isArray(restV2RequestorIds) || restV2RequestorIds.length === 0) {
+    const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
+    const derivedIds = restV2Apps
+      .map((appInfo) => String(getRegisteredAppChannel(appInfo) || "").trim())
+      .filter((value) => Boolean(value));
+    restV2RequestorIds = derivedIds.length > 0 ? Array.from(new Set(derivedIds)).sort() : null;
+  }
 
   if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
     // Build a set of normalized requestor IDs for efficient lookup
