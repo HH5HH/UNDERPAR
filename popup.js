@@ -30693,6 +30693,32 @@ function isRestV2NoActiveProfileSignal(profileCheckResult = null) {
   return false;
 }
 
+function isRestV2InvalidServiceProviderSignal(profileCheckResult = null) {
+  if (!profileCheckResult || typeof profileCheckResult !== "object") {
+    return false;
+  }
+  const status = Number(profileCheckResult.status || 0);
+  if (status !== 400) {
+    return false;
+  }
+  const combinedText = [
+    String(profileCheckResult.error || "").trim(),
+    String(profileCheckResult.responsePayload?.code || "").trim(),
+    String(profileCheckResult.responsePayload?.error || "").trim(),
+    String(profileCheckResult.responsePayload?.message || "").trim(),
+    String(profileCheckResult.responsePayload?.description || "").trim(),
+    String(profileCheckResult.statusText || "").trim(),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    combinedText.includes("invalid_parameter_service_provider") ||
+    combinedText.includes("service provider parameter value is missing or invalid")
+  );
+}
+
 function normalizeRestV2LogoutCandidate(candidate, fallbackMvpd = "") {
   if (typeof candidate === "string") {
     const normalizedUrl = String(candidate || "").trim();
@@ -34320,6 +34346,10 @@ async function fetchRestV2ProfileCheckResult(context, flowId, scope = "profiles-
     if (isRestV2ProfileSessionActiveResult(endpointResult)) {
       break;
     }
+
+    if (isRestV2InvalidServiceProviderSignal(endpointResult)) {
+      break;
+    }
   }
 
   if (!bestResult) {
@@ -34452,6 +34482,7 @@ async function probeRestV2PostAuthProfiles(context, flowId, options = {}) {
     lastCheck = await fetchRestV2ProfileCheckResult(context, flowId, `${scopePrefix}-${attempt}`);
     const hasActiveProfile = isRestV2ProfileSessionActiveResult(lastCheck);
     const noActiveProfileSignal = isRestV2NoActiveProfileSignal(lastCheck);
+    const invalidServiceProviderSignal = isRestV2InvalidServiceProviderSignal(lastCheck);
 
     emitRestV2DebugEvent(flowId, {
       source: "extension",
@@ -34460,6 +34491,7 @@ async function probeRestV2PostAuthProfiles(context, flowId, options = {}) {
       maxAttempts,
       hasActiveProfile,
       noActiveProfileSignal,
+      invalidServiceProviderSignal,
       profileCount: Number(lastCheck?.profileCount || 0),
       status: Number(lastCheck?.status || 0),
       statusText: String(lastCheck?.statusText || "").trim(),
@@ -34486,6 +34518,10 @@ async function probeRestV2PostAuthProfiles(context, flowId, options = {}) {
         maxAttempts,
         result: lastCheck,
       };
+    }
+
+    if (invalidServiceProviderSignal) {
+      break;
     }
 
     if (attempt < maxAttempts && delayMs > 0) {
@@ -34520,6 +34556,7 @@ async function verifyPostLogoutProfilesCleared(context, flowId) {
     const profileCount = Number(lastCheck?.profileCount || 0);
     const checkOk = lastCheck?.checked === true && lastCheck?.ok === true;
     const noActiveProfileSignal = isRestV2NoActiveProfileSignal(lastCheck);
+    const invalidServiceProviderSignal = isRestV2InvalidServiceProviderSignal(lastCheck);
     emitRestV2DebugEvent(flowId, {
       source: "extension",
       phase: "post-logout-profiles-check-result",
@@ -34527,6 +34564,7 @@ async function verifyPostLogoutProfilesCleared(context, flowId) {
       maxAttempts,
       ok: checkOk,
       noActiveProfileSignal,
+      invalidServiceProviderSignal,
       profileCount,
       status: Number(lastCheck?.status || 0),
       statusText: String(lastCheck?.statusText || ""),
@@ -34558,6 +34596,14 @@ async function verifyPostLogoutProfilesCleared(context, flowId) {
           source: "post-logout-profiles-check",
         }
       );
+      return {
+        ok: true,
+        attempts: attempt,
+        profileCount: 0,
+      };
+    }
+
+    if (invalidServiceProviderSignal) {
       return {
         ok: true,
         attempts: attempt,
