@@ -100308,7 +100308,15 @@ async function createRestV2SessionForContext(context, options = {}) {
 }
 
 async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
-  const serviceProviderId = String(appInfo?.serviceProviderId || appInfo?.requestorId || requestorId || "").trim();
+  const rawServiceProviderId = String(
+    extractEntityIdFromToken(appInfo?.appData?.serviceProvider) ||
+    extractEntityIdFromToken(appInfo?.serviceProvider) ||
+    extractEntityIdFromToken(appInfo?.serviceProviderId) ||
+    extractEntityIdFromToken(appInfo?.requestorId) ||
+    extractEntityIdFromToken(requestorId) ||
+    ""
+  ).trim();
+  const serviceProviderId = normalizeEntityToken(rawServiceProviderId);
   if (!serviceProviderId) {
     throw new Error("Unable to determine service provider ID for REST V2 configuration");
   }
