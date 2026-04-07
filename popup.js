@@ -94177,7 +94177,7 @@ async function buildCmContext(session, reason = "post-login", options = {}) {
   );
 
   if (!cmuTokenResult.ok) {
-    log(`CMU token fetch failed: ${serializeError(cmuTokenResult.error)}`);
+    log(`CMU token fetch skipped (non-blocking): ${serializeError(cmuTokenResult.error)}`);
   }
 
   const cmuToken = cmuTokenResult.ok ? normalizeBearerTokenValue(cmuTokenResult.value?.token) : "";
@@ -94187,7 +94187,7 @@ async function buildCmContext(session, reason = "post-login", options = {}) {
       ? cmuToken
         ? ""
         : "CMU token bootstrap returned an empty token."
-      : serializeError(cmuTokenResult.error);
+      : ""; // Suppress CMU token errors - not blocking for CM tenant catalog operations
   const cmuTokenClaims = cmuToken ? parseJwtPayload(cmuToken) || {} : {};
   const cmuTokenClientId = firstNonEmptyString([cmuTokenClaims?.client_id, cmuTokenClaims?.clientId, CM_CONSOLE_IMS_CLIENT_ID]);
   const cmuTokenScope = firstNonEmptyString([cmuTokenClaims?.scope, CM_CONSOLE_IMS_SCOPE]);
