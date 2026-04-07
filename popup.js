@@ -92113,7 +92113,9 @@ function getProgrammerCandidatesForRequestor(requestorId) {
     return scoped;
   }
 
-  return state.programmers.filter((item) => Array.isArray(item.requestorIds) && item.requestorIds.includes(requestorId));
+  // For single content providers, if no programmer has the requestorId in requestorIds,
+  // fall back to using the selected programmer
+  return selectedProgrammer ? [selectedProgrammer] : [];
 }
 
 function normalizeCmMatchText(value) {
