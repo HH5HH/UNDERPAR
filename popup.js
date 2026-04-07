@@ -9903,7 +9903,7 @@ function buildPassVaultDirectPremiumServicesSnapshot(
             const requestorIdFromServiceProvider = serviceProviderValue
               ? extractRequestorIdFromServiceProviderValue(serviceProviderValue)
               : "";
-            const requestorIdFromChannel = String(getRegisteredAppChannel(app) || "").trim();
+            const requestorIdFromChannel = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(app));
             const requestorId = firstNonEmptyString([
               requestorIdFromServiceProvider,
               requestorIdFromChannel,
@@ -10310,7 +10310,7 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
             const requestorIdFromServiceProvider = serviceProviderValue
               ? extractRequestorIdFromServiceProviderValue(serviceProviderValue)
               : "";
-            const requestorIdFromChannel = String(getRegisteredAppChannel(appInfo) || "").trim();
+            const requestorIdFromChannel = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
             const requestorId = firstNonEmptyString([
               requestorIdFromServiceProvider,
               requestorIdFromChannel,
@@ -87362,7 +87362,7 @@ function getRequestorsForSelectedMediaCompany() {
   if (!Array.isArray(restV2RequestorIds) || restV2RequestorIds.length === 0) {
     const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
     const derivedIds = restV2Apps
-      .map((appInfo) => String(getRegisteredAppChannel(appInfo) || "").trim())
+      .map((appInfo) => extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo)))
       .filter((value) => Boolean(value));
     restV2RequestorIds = derivedIds.length > 0 ? Array.from(new Set(derivedIds)).sort() : null;
   }
@@ -100456,7 +100456,7 @@ async function createRestV2SessionForContext(context, options = {}) {
 async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
   const resolveCanonicalRequestorCandidates = () => {
     const normalizedSelectedRequestor = normalizeEntityToken(String(requestorId || "").trim());
-    const directCandidates = [String(requestorId || "").trim()];
+    const directCandidates = [extractRequestorIdFromServiceProviderValue(requestorId)];
     const optionCandidates = Array.isArray(programmer?.requestorOptions)
       ? programmer.requestorOptions
           .filter((option) => option && typeof option === "object")
@@ -100484,7 +100484,7 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
 
   const getServiceProviderCandidates = () => {
     const canonicalRequestorCandidates = resolveCanonicalRequestorCandidates();
-    const channelCandidate = String(getRegisteredAppChannel(appInfo) || "").trim();
+    const channelCandidate = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
     return uniqueSorted(
       [
         extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
