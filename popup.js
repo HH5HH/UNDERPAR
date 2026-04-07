@@ -100336,6 +100336,33 @@ function buildRestV2SessionCreatePayloadCandidates(mvpd) {
   return payloads;
 }
 
+function extractRestV2ServiceProviderIdFromUrl(value = "") {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  let path = text;
+  try {
+    const parsed = new URL(text);
+    path = String(parsed.pathname || "").trim();
+  } catch {
+    path = text;
+  }
+
+  const authenticateMatch = path.match(/\/(?:api\/v2\/)?authenticate\/([^/?#]+)/i);
+  if (authenticateMatch?.[1]) {
+    return String(authenticateMatch[1] || "").trim();
+  }
+
+  const apiMatch = path.match(/\/api\/v2\/([^/?#]+)/i);
+  if (apiMatch?.[1]) {
+    return String(apiMatch[1] || "").trim();
+  }
+
+  return "";
+}
+
 function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   if (!context || typeof context !== "object") {
     return [];
@@ -100350,6 +100377,9 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
       extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
       extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
       extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
+      extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.loginUrl)),
+      extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionUrl)),
+      extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionData?.url)),
       appChannelCandidate,
     ]
       .map((value) => String(value || "").trim())
