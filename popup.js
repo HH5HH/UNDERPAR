@@ -86760,6 +86760,7 @@ function stageMediaCompanySelectionTransition(programmer = null, controllerReaso
   state.premiumPanelRequestToken = Number(state.premiumPanelRequestToken || 0) + 1;
   setStatus("", "info");
   const selectedProgrammer = selectProgrammerForController(programmer, controllerReason);
+  resetCmTenantsPrecheckState();
   syncMediaCompanySelectAvailability();
   return selectedProgrammer;
 }
