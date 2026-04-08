@@ -29531,18 +29531,36 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
   const canonicalRequestorId = String(
     resolveCanonicalRequestorIdForProgrammer(requestorId, nextContext?.programmerId) || requestorId
   ).trim();
+  const normalizedCanonicalRequestorId = normalizeEntityToken(canonicalRequestorId || requestorId);
+  const scopedServiceProviderCandidates = [
+    storedAuthContext?.serviceProviderId,
+    extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(resolvedAppInfo)),
+    extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.appData?.serviceProvider),
+    extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProvider),
+    extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProviderId),
+    extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.requestorId),
+    getRequestorScopedRestV2ConfigurationServiceProvider(requestorId),
+    canonicalRequestorId,
+    nextContext.serviceProviderId,
+    requestorId,
+  ];
+  const authoritativeServiceProviderIdFromScope = scopedServiceProviderCandidates
+    .map((value) => String(firstNonEmptyString([extractRequestorIdFromServiceProviderValue(value), value]) || "").trim())
+    .find((value) => {
+      const normalizedValue = normalizeEntityToken(value);
+      if (!normalizedValue) {
+        return false;
+      }
+      if (!normalizedCanonicalRequestorId) {
+        return true;
+      }
+      return normalizedValue === normalizedCanonicalRequestorId;
+    });
   const authoritativeServiceProviderId = String(
     firstNonEmptyString([
-      storedAuthContext?.serviceProviderId,
-      getRequestorScopedRestV2ConfigurationServiceProvider(requestorId),
+      authoritativeServiceProviderIdFromScope,
       canonicalRequestorId,
       requestorId,
-      nextContext.serviceProviderId,
-      extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(resolvedAppInfo)),
-      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.appData?.serviceProvider),
-      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProvider),
-      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProviderId),
-      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.requestorId),
     ]) || ""
   ).trim();
   if (authoritativeServiceProviderId) {
@@ -100900,17 +100918,18 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   const appChannelCandidate = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
   const requestorId = extractRequestorIdFromServiceProviderValue(context?.requestorId);
   const canonicalRequestorId = resolveCanonicalRequestorIdForProgrammer(requestorId, context?.programmerId);
+  const normalizedCanonicalRequestorId = normalizeEntityToken(canonicalRequestorId || requestorId);
   const configurationScopedServiceProvider = getRequestorScopedRestV2ConfigurationServiceProvider(requestorId);
   const rawCandidates = [
-    requestorId,
-    canonicalRequestorId,
-    configurationScopedServiceProvider,
-    extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
     extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
     extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
     extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
     extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
     appChannelCandidate,
+    configurationScopedServiceProvider,
+    canonicalRequestorId,
+    extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
+    requestorId,
     extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.loginUrl)),
     extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionUrl)),
     extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionData?.url)),
@@ -100918,20 +100937,6 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
 
   const candidates = [];
   const seen = new Set();
-  const pushCandidate = (value) => {
-    const normalized = String(value || "").trim();
-    if (!normalized) {
-      return;
-    }
-    if (!normalizeEntityToken(normalized)) {
-      return;
-    }
-    if (seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    candidates.push(normalized);
-  };
   rawCandidates.forEach((value) => {
     const extracted = extractRequestorIdFromServiceProviderValue(value);
     const normalizedValue = String(extracted || value || "").trim();
@@ -100941,17 +100946,24 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
     const canonicalValue = String(
       resolveCanonicalRequestorIdForProgrammer(normalizedValue, context?.programmerId) || normalizedValue
     ).trim();
-    uniquePreserveOrder([
-      canonicalValue,
-      normalizedValue,
-      String(canonicalValue || "").trim().toUpperCase(),
-      String(canonicalValue || "").trim().toLowerCase(),
-      String(normalizedValue || "").trim().toUpperCase(),
-      String(normalizedValue || "").trim().toLowerCase(),
-    ]).forEach((candidateValue) => {
-      pushCandidate(candidateValue);
-    });
+    const chosenValue = String(firstNonEmptyString([canonicalValue, normalizedValue]) || "").trim();
+    const dedupeKey = normalizeEntityToken(chosenValue);
+    if (normalizedCanonicalRequestorId && dedupeKey !== normalizedCanonicalRequestorId) {
+      return;
+    }
+    if (!dedupeKey || seen.has(dedupeKey)) {
+      return;
+    }
+    seen.add(dedupeKey);
+    candidates.push(chosenValue);
   });
+
+  if (candidates.length === 0) {
+    const fallbackCanonical = String(firstNonEmptyString([canonicalRequestorId, requestorId]) || "").trim();
+    if (fallbackCanonical) {
+      candidates.push(fallbackCanonical);
+    }
+  }
 
   return candidates;
 }
