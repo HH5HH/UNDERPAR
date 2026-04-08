@@ -880,8 +880,8 @@ function renderProfileList() {
       const capturedAt = firstNonEmptyString([profile?.capturedAtLabel, formatDateTime(profile?.capturedAt)]);
       const summary = firstNonEmptyString([profile?.lastCheckSummary, "No REST V2 checks yet"]);
       return `
-        <li class="bobtools-profile-item${active ? " is-active" : ""}" data-profile-key="${escapeHtml(key)}">
-          <div class="bobtools-profile-row">
+        <li class="bobtools-profile-item${active ? " is-active" : ""}" data-profile-key="${escapeHtml(key)}" data-select-key="${escapeHtml(key)}">
+          <div class="bobtools-profile-row" data-select-key="${escapeHtml(key)}">
             <button type="button" class="bobtools-profile-select" data-select-key="${escapeHtml(key)}" aria-label="Select ${escapeHtml(title)}">
               <p class="bobtools-profile-title">${escapeHtml(title)}</p>
               <p class="bobtools-profile-meta">${escapeHtml(subtitle)} | ${escapeHtml(capturedAt)}</p>
@@ -2605,13 +2605,18 @@ function registerEventHandlers() {
       }
       const deleteBtn = target.closest("[data-delete-key]");
       if (deleteBtn) {
+        event.preventDefault();
+        event.stopPropagation();
         const key = String(deleteBtn.getAttribute("data-delete-key") || "").trim();
         void deleteProfile(key);
         return;
       }
-      const selectBtn = target.closest("[data-select-key]");
+      const selectBtn = target.closest("[data-select-key], [data-profile-key]");
       if (selectBtn) {
-        const key = String(selectBtn.getAttribute("data-select-key") || "").trim();
+        event.preventDefault();
+        const key = String(
+          selectBtn.getAttribute("data-select-key") || selectBtn.getAttribute("data-profile-key") || ""
+        ).trim();
         selectProfile(key);
       }
     });
