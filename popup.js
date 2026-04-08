@@ -29565,6 +29565,11 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
   ).trim();
   if (authoritativeServiceProviderId) {
     nextContext.serviceProviderId = authoritativeServiceProviderId;
+    const normalizedAuthoritativeServiceProviderId = normalizeEntityToken(authoritativeServiceProviderId);
+    const normalizedRequestorId = normalizeEntityToken(nextContext.requestorId || requestorId);
+    if (!normalizedRequestorId || normalizedRequestorId === normalizedAuthoritativeServiceProviderId) {
+      nextContext.requestorId = authoritativeServiceProviderId;
+    }
   }
 
   return nextContext;
@@ -34692,14 +34697,23 @@ async function fetchRestV2ProfileCheckResult(context, flowId, scope = "profiles-
     attemptedEndpoints: [],
   };
 
-  if (!context?.programmerId || !context?.appInfo?.guid || !context?.serviceProviderId) {
+  const resolvedContext = await (async () => {
+    try {
+      const hydrated = await hydrateRestV2ContextAppInfoAndServiceProvider(context);
+      return hydrated && typeof hydrated === "object" ? hydrated : context;
+    } catch {
+      return context;
+    }
+  })();
+
+  if (!resolvedContext?.programmerId || !resolvedContext?.appInfo?.guid || !resolvedContext?.serviceProviderId) {
     return {
       ...emptyResult,
       error: "Missing REST V2 profile-check context.",
     };
   }
 
-  const endpointCandidates = buildRestV2ProfileCheckEndpointCandidates(context);
+  const endpointCandidates = buildRestV2ProfileCheckEndpointCandidates(resolvedContext);
   if (endpointCandidates.length === 0) {
     return {
       ...emptyResult,
@@ -34711,7 +34725,7 @@ async function fetchRestV2ProfileCheckResult(context, flowId, scope = "profiles-
   const attemptedEndpoints = [];
 
   for (const endpoint of endpointCandidates) {
-    const endpointResult = await fetchRestV2ProfileCheckResultFromEndpoint(context, flowId, scope, endpoint);
+    const endpointResult = await fetchRestV2ProfileCheckResultFromEndpoint(resolvedContext, flowId, scope, endpoint);
     const endpointAttempts = Array.isArray(endpointResult?.attemptedEndpoints) ? endpointResult.attemptedEndpoints : [];
     if (endpointAttempts.length > 0) {
       attemptedEndpoints.push(...endpointAttempts);
@@ -34722,7 +34736,7 @@ async function fetchRestV2ProfileCheckResult(context, flowId, scope = "profiles-
       }
     }
 
-    if (shouldPreferRestV2ProfileCheckResult(endpointResult, bestResult, context)) {
+    if (shouldPreferRestV2ProfileCheckResult(endpointResult, bestResult, resolvedContext)) {
       bestResult = endpointResult;
     }
 
