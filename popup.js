@@ -59228,10 +59228,40 @@ function syncGlobalMediaCompanyConsoleLauncher(programmer = null) {
   button.setAttribute("aria-label", hoverText);
 }
 
+function resolveStableSelectedMvpdIdFromPicker() {
+  const pickerValue = String(els.mvpdSelect?.value || "").trim();
+  if (pickerValue) {
+    return pickerValue;
+  }
+
+  const previousSelectedMvpdId = String(state.selectedMvpdId || "").trim();
+  if (!previousSelectedMvpdId) {
+    return "";
+  }
+
+  const pickerOptions = Array.from(els.mvpdSelect?.options || []);
+  const selectableOptionValues = pickerOptions
+    .map((option) => String(option?.value || "").trim())
+    .filter(Boolean);
+  if (selectableOptionValues.length === 0) {
+    return previousSelectedMvpdId;
+  }
+
+  return selectableOptionValues.includes(previousSelectedMvpdId) ? previousSelectedMvpdId : "";
+}
+
 function syncGlobalMvpdWorkspaceLauncher(programmer = null, services = null) {
   const button = els.mvpdWorkspaceLaunchBtn;
   const row = els.mvpdSelect?.closest(".mvpd-select-row") || null;
-  const selectedMvpdId = String(els.mvpdSelect?.value || "").trim();
+  const selectedMvpdId = resolveStableSelectedMvpdIdFromPicker();
+  if (!String(els.mvpdSelect?.value || "").trim() && selectedMvpdId) {
+    const hasMatchingOption = Array.from(els.mvpdSelect?.options || []).some(
+      (option) => String(option?.value || "").trim() === selectedMvpdId
+    );
+    if (hasMatchingOption && els.mvpdSelect) {
+      els.mvpdSelect.value = selectedMvpdId;
+    }
+  }
   const selectedOptionLabel = String(els.mvpdSelect?.selectedOptions?.[0]?.textContent || "").trim();
   if (!button) {
     return;

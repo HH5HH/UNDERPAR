@@ -213,6 +213,124 @@ test("BOBTOOLS profile delete runs full REST V2 logout flow instead of skipping 
   assert.doesNotMatch(deleteProfileSource, /skipUserAgentAction\s*:\s*true/);
 });
 
+test("MVPD launcher sync preserves selected MVPD when picker is transiently empty", () => {
+  const makeButton = () => {
+    const classes = new Set();
+    return {
+      parentElement: null,
+      style: {},
+      disabled: false,
+      tabIndex: 0,
+      title: "",
+      attributes: {},
+      classList: {
+        toggle(name, force) {
+          if (force) {
+            classes.add(name);
+            return true;
+          }
+          classes.delete(name);
+          return false;
+        },
+      },
+      setAttribute(name, value) {
+        this.attributes[name] = value;
+      },
+    };
+  };
+
+  const row = {
+    appendChild(node) {
+      node.parentElement = this;
+    },
+  };
+  const button = makeButton();
+  const els = {
+    mvpdWorkspaceLaunchBtn: button,
+    mvpdSelect: {
+      value: "",
+      options: [],
+      selectedOptions: [],
+      closest: () => row,
+    },
+  };
+  const state = {
+    selectedMvpdId: "Comcast_SSO",
+  };
+
+  const { syncGlobalMvpdWorkspaceLauncher } = loadFunctions(
+    "popup.js",
+    ["resolveStableSelectedMvpdIdFromPicker", "syncGlobalMvpdWorkspaceLauncher"],
+    { els, state }
+  );
+
+  syncGlobalMvpdWorkspaceLauncher();
+
+  assert.equal(state.selectedMvpdId, "Comcast_SSO");
+  assert.equal(button.disabled, false);
+  assert.equal(button.style.display, "inline-flex");
+  assert.equal(button.attributes["aria-hidden"], "false");
+});
+
+test("MVPD launcher sync clears stale MVPD when picker options no longer include it", () => {
+  const makeButton = () => {
+    const classes = new Set();
+    return {
+      parentElement: null,
+      style: {},
+      disabled: false,
+      tabIndex: 0,
+      title: "",
+      attributes: {},
+      classList: {
+        toggle(name, force) {
+          if (force) {
+            classes.add(name);
+            return true;
+          }
+          classes.delete(name);
+          return false;
+        },
+      },
+      setAttribute(name, value) {
+        this.attributes[name] = value;
+      },
+    };
+  };
+
+  const row = {
+    appendChild(node) {
+      node.parentElement = this;
+    },
+  };
+  const button = makeButton();
+  const els = {
+    mvpdWorkspaceLaunchBtn: button,
+    mvpdSelect: {
+      value: "",
+      options: [{ value: "Verizon" }],
+      selectedOptions: [],
+      closest: () => row,
+    },
+  };
+  const state = {
+    selectedMvpdId: "Comcast_SSO",
+  };
+
+  const { syncGlobalMvpdWorkspaceLauncher } = loadFunctions(
+    "popup.js",
+    ["resolveStableSelectedMvpdIdFromPicker", "syncGlobalMvpdWorkspaceLauncher"],
+    { els, state }
+  );
+
+  syncGlobalMvpdWorkspaceLauncher();
+
+  assert.equal(state.selectedMvpdId, "");
+  assert.equal(button.disabled, true);
+  assert.equal(button.style.display, "none");
+  assert.equal(button.attributes["aria-hidden"], "true");
+});
+
 test("MEG workspace saved-query reset clears the picker after the native menu closes", () => {
   const timers = [];
   const savedQueryPicker = {
