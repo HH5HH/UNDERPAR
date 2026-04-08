@@ -485,16 +485,15 @@ test("openUnderparGetLatestFlow ignores stale cached SHA when latest metadata re
   const helpers = loadGetLatestHelpers(seed);
   const response = await helpers.openUnderparGetLatestFlow();
 
-  assert.equal(response.ok, true);
+  assert.equal(response.ok, false);
   assert.equal(String(response.latestCommitSha || ""), "");
   assert.notEqual(String(response.checkError || ""), "");
-  assert.equal(seed.calls.downloadsDownload.length, 1);
-  const downloadUrl = String(seed.calls.downloadsDownload[0]?.url || "");
+  assert.equal(seed.calls.downloadsDownload.length, 0);
+  assert.equal(seed.calls.tabsCreate.length, 0);
   assert.equal(String(response.latestSource || ""), "local-runtime");
   assert.equal(String(response.latestVersion || ""), "1.12.53");
-  assert.equal(downloadUrl.startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
-  assert.doesNotMatch(downloadUrl, new RegExp(`/${staleSha}/underpar_distro\\.zip`));
-  assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.12.53.zip");
+  assert.match(String(response.error || ""), /could not verify a newer GitHub package/i);
+  assert.match(String(response.error || ""), /Skipped bundled UnderPAR v1\.12\.53/i);
 });
 
 test("openUnderparGetLatestFlow avoids stale local-runtime fallback when bundled distro metadata lags behind the loaded build", async () => {
@@ -529,7 +528,7 @@ test("openUnderparGetLatestFlow avoids stale local-runtime fallback when bundled
   assert.equal(String(seed.calls.downloadsDownload[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip"), false);
 });
 
-test("openUnderparGetLatestFlow falls back to the bundled runtime package when GitHub lookup fails and local metadata is unavailable", async () => {
+test("openUnderparGetLatestFlow blocks stale bundled fallback when GitHub lookup fails and bundled metadata is not newer", async () => {
   const seed = createSeed({
     currentVersion: "1.17.4",
     responseByUrl: {
@@ -543,14 +542,15 @@ test("openUnderparGetLatestFlow falls back to the bundled runtime package when G
   const helpers = loadGetLatestHelpers(seed);
   const response = await helpers.openUnderparGetLatestFlow();
 
-  assert.equal(response.ok, true);
+  assert.equal(response.ok, false);
   assert.equal(String(response.latestSource || ""), "local-runtime");
   assert.equal(String(response.latestVersion || ""), "1.17.4");
-  assert.equal(String(response.downloadSource || ""), "local-runtime");
-  assert.equal(response.downloadStarted, true);
-  assert.equal(seed.calls.downloadsDownload.length, 1);
-  assert.equal(String(seed.calls.downloadsDownload[0]?.url || "").startsWith("chrome-extension://underpar/underpar_distro.zip?cacheBust="), true);
-  assert.equal(String(seed.calls.downloadsDownload[0]?.filename || ""), "UnderPAR-v1.17.4.zip");
+  assert.equal(response.downloadStarted, false);
+  assert.equal(response.downloadTabOpened, false);
+  assert.equal(seed.calls.downloadsDownload.length, 0);
+  assert.equal(seed.calls.tabsCreate.length, 0);
+  assert.match(String(response.error || ""), /could not verify a newer GitHub package/i);
+  assert.match(String(response.error || ""), /Skipped bundled UnderPAR v1\.17\.4/i);
 });
 
 test("openUnderparGetLatestFlow keeps the remote package target when remote download fails and the bundled runtime is older", async () => {

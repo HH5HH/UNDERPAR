@@ -2568,6 +2568,16 @@ async function openUnderparGetLatestFlow() {
     noNewerPackage: false,
     infoMessage: "",
   };
+  const remoteLookupUnverified = Boolean(String(result.checkError || "").trim());
+  const localFallbackIsCurrentOrOlder =
+    Boolean(localDownloadVersion) && compareVersions(localDownloadVersion, currentVersion) <= 0;
+  if (remoteLookupUnverified && preferLocalPackage && localFallbackIsCurrentOrOlder) {
+    result.ok = false;
+    result.error =
+      `Get Latest could not verify a newer GitHub package (${result.checkError}). ` +
+      `Skipped bundled UnderPAR v${localDownloadVersion || currentVersion || "local"} to avoid stale reinstall.`;
+    return result;
+  }
   if (noNewerPublishedPackage) {
     result.ok = true;
     result.noNewerPackage = true;
