@@ -29175,9 +29175,72 @@ function clearRestV2PreparedLoginState() {
   state.restV2DebugFlowId = "";
 }
 
-function storeRestV2AuthContextForRequestor(context, selectedAppInfo) {
-  void context;
-  void selectedAppInfo;
+function storeRestV2AuthContextForRequestor(context, selectedAppInfo, options = {}) {
+  const requestorId = String(context?.requestorId || context?.serviceProviderId || "").trim();
+  if (!requestorId) {
+    return null;
+  }
+
+  const appInfo =
+    selectedAppInfo && typeof selectedAppInfo === "object"
+      ? cloneJsonLikeValue(selectedAppInfo, null)
+      : context?.appInfo && typeof context.appInfo === "object"
+        ? cloneJsonLikeValue(context.appInfo, null)
+        : null;
+  const normalized = {
+    programmerId: String(context?.programmerId || "").trim(),
+    programmerName: String(context?.programmerName || "").trim(),
+    requestorId,
+    serviceProviderId: String(
+      firstNonEmptyString([options?.serviceProviderId, context?.serviceProviderId, context?.requestorId]) || ""
+    ).trim(),
+    mvpd: String(firstNonEmptyString([options?.mvpd, context?.mvpd]) || "").trim(),
+    appInfo,
+    loginUrl: normalizeAdobeNavigationUrl(firstNonEmptyString([options?.loginUrl, context?.loginUrl])),
+    sessionUrl: normalizeAdobeNavigationUrl(
+      firstNonEmptyString([options?.sessionUrl, options?.sessionData?.url, context?.sessionUrl, context?.sessionData?.url])
+    ),
+    sessionData:
+      options?.sessionData && typeof options.sessionData === "object"
+        ? cloneJsonLikeValue(options.sessionData, null)
+        : context?.sessionData && typeof context.sessionData === "object"
+          ? cloneJsonLikeValue(context.sessionData, null)
+          : null,
+    sessionRequestHeaders:
+      options?.sessionRequestHeaders && typeof options.sessionRequestHeaders === "object"
+        ? cloneJsonLikeValue(options.sessionRequestHeaders, null)
+        : context?.sessionRequestHeaders && typeof context.sessionRequestHeaders === "object"
+          ? cloneJsonLikeValue(context.sessionRequestHeaders, null)
+          : null,
+    sessionResponseHeaders:
+      options?.sessionResponseHeaders && typeof options.sessionResponseHeaders === "object"
+        ? cloneJsonLikeValue(options.sessionResponseHeaders, null)
+        : context?.sessionResponseHeaders && typeof context.sessionResponseHeaders === "object"
+          ? cloneJsonLikeValue(context.sessionResponseHeaders, null)
+          : null,
+    partnerFrameworkStatus: String(
+      firstNonEmptyString([options?.partnerFrameworkStatus, context?.partnerFrameworkStatus]) || ""
+    ).trim(),
+    sessionPartner: String(firstNonEmptyString([options?.sessionPartner, context?.sessionPartner]) || "").trim(),
+    capturedAuthHeaders:
+      typeof mergeRestV2CapturedAuthHeaders === "function"
+        ? mergeRestV2CapturedAuthHeaders(
+            context,
+            options?.capturedAuthHeaders && typeof options.capturedAuthHeaders === "object"
+              ? options.capturedAuthHeaders
+              : null,
+            options?.sessionData && typeof options.sessionData === "object" ? { sessionData: options.sessionData } : null,
+            options?.sessionRequestHeaders && typeof options.sessionRequestHeaders === "object"
+              ? { sessionRequestHeaders: options.sessionRequestHeaders }
+              : null,
+            options?.sessionResponseHeaders && typeof options.sessionResponseHeaders === "object"
+              ? { sessionResponseHeaders: options.sessionResponseHeaders }
+              : null
+          )
+        : null,
+    storedAt: Date.now(),
+  };
+  return setRequestorScopedRestV2AuthContext(requestorId, normalized);
 }
 
 async function closeExistingRestV2LaunchTarget() {
@@ -29385,8 +29448,14 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
   const nextContext = {
     ...context,
   };
+  const requestorId = String(nextContext.requestorId || nextContext.serviceProviderId || "").trim();
+  const storedAuthContext = getRequestorScopedRestV2AuthContext(requestorId);
   let resolvedAppInfo =
-    nextContext.appInfo && typeof nextContext.appInfo === "object" ? nextContext.appInfo : null;
+    nextContext.appInfo && typeof nextContext.appInfo === "object"
+      ? nextContext.appInfo
+      : storedAuthContext?.appInfo && typeof storedAuthContext.appInfo === "object"
+        ? storedAuthContext.appInfo
+        : null;
   const appGuid = String(resolvedAppInfo?.guid || nextContext?.appGuid || "").trim();
 
   if (appGuid && resolvedAppInfo) {
@@ -29409,9 +29478,37 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
     nextContext.appInfo = resolvedAppInfo;
   }
 
-  const requestorId = String(nextContext.requestorId || nextContext.serviceProviderId || "").trim();
+  if (!nextContext.loginUrl && storedAuthContext?.loginUrl) {
+    nextContext.loginUrl = String(storedAuthContext.loginUrl || "").trim();
+  }
+  if (!nextContext.sessionUrl && storedAuthContext?.sessionUrl) {
+    nextContext.sessionUrl = String(storedAuthContext.sessionUrl || "").trim();
+  }
+  if ((!nextContext.sessionData || typeof nextContext.sessionData !== "object") && storedAuthContext?.sessionData) {
+    nextContext.sessionData = cloneJsonLikeValue(storedAuthContext.sessionData, null);
+  }
+  if (
+    (!nextContext.sessionRequestHeaders || typeof nextContext.sessionRequestHeaders !== "object") &&
+    storedAuthContext?.sessionRequestHeaders
+  ) {
+    nextContext.sessionRequestHeaders = cloneJsonLikeValue(storedAuthContext.sessionRequestHeaders, null);
+  }
+  if (
+    (!nextContext.sessionResponseHeaders || typeof nextContext.sessionResponseHeaders !== "object") &&
+    storedAuthContext?.sessionResponseHeaders
+  ) {
+    nextContext.sessionResponseHeaders = cloneJsonLikeValue(storedAuthContext.sessionResponseHeaders, null);
+  }
+  if (!nextContext.partnerFrameworkStatus && storedAuthContext?.partnerFrameworkStatus) {
+    nextContext.partnerFrameworkStatus = String(storedAuthContext.partnerFrameworkStatus || "").trim();
+  }
+  if (!nextContext.sessionPartner && storedAuthContext?.sessionPartner) {
+    nextContext.sessionPartner = String(storedAuthContext.sessionPartner || "").trim();
+  }
+
   const authoritativeServiceProviderId = String(
     firstNonEmptyString([
+      storedAuthContext?.serviceProviderId,
       extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(resolvedAppInfo)),
       extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.appData?.serviceProvider),
       extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProvider),
@@ -29481,7 +29578,9 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
         serviceProviderId: selectedServiceProviderId,
         sessionData,
         payload,
+        sessionRequestHeaders,
         sessionResponseHeaders,
+        capturedAuthHeaders,
         partnerFrameworkStatus,
         sessionPartner,
       } = await createRestV2SessionForContext(preparedContext, {
@@ -29492,13 +29591,24 @@ async function ensurePreparedRestV2LoginForContext(section, context, options = {
       }
 
       const resolvedAppInfo = selectedAppInfo || preparedContext.appInfo;
-      storeRestV2AuthContextForRequestor(preparedContext, resolvedAppInfo);
+      storeRestV2AuthContextForRequestor(preparedContext, resolvedAppInfo, {
+        serviceProviderId: selectedServiceProviderId,
+        loginUrl,
+        sessionData,
+        sessionRequestHeaders,
+        sessionResponseHeaders,
+        partnerFrameworkStatus,
+        sessionPartner,
+        capturedAuthHeaders,
+      });
       const entry = setRestV2PreparedLoginEntry(preparedContext, {
         loginUrl,
         serviceProviderId: selectedServiceProviderId,
         appInfo: resolvedAppInfo,
         sessionData,
+        sessionRequestHeaders,
         sessionResponseHeaders,
+        capturedAuthHeaders,
         partnerFrameworkStatus,
         sessionPartner,
         payload,
@@ -30527,7 +30637,16 @@ async function launchRestV2MvpdLogin(section, programmer, appInfo) {
       ],
       context.serviceProviderId
     );
-    storeRestV2AuthContextForRequestor(context, selectedAppInfo);
+    storeRestV2AuthContextForRequestor(context, selectedAppInfo, {
+      serviceProviderId: resolvedServiceProviderId,
+      loginUrl: preparedEntry?.loginUrl,
+      sessionData: preparedEntry?.sessionData,
+      sessionRequestHeaders: preparedEntry?.sessionRequestHeaders,
+      sessionResponseHeaders: preparedEntry?.sessionResponseHeaders,
+      partnerFrameworkStatus: preparedEntry?.partnerFrameworkStatus,
+      sessionPartner: preparedEntry?.sessionPartner,
+      capturedAuthHeaders: preparedEntry?.capturedAuthHeaders,
+    });
     state.restV2RecordingContext = toRestV2RecordingContext(context, selectedAppInfo, {
       serviceProviderId: resolvedServiceProviderId,
       redirectUrl: configuredRedirectUrl,
