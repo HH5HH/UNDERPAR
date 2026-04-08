@@ -66124,6 +66124,19 @@ function ensureRestV2BobtoolsRedirectWatcher() {
     void (async () => {
       let hydrationContext = null;
       const activeFlowId = String(state.restV2DebugFlowId || "").trim();
+      let handoffResult = null;
+      let targetWindowId = 0;
+
+      if (matchesRedirect) {
+        handoffResult = await handoffRestV2LaunchTabToBobtoolsWorkspace(normalizedTabId, activeFlowId, {
+          reason: "redirect-intercept",
+        });
+        if (!handoffResult?.ok) {
+          return;
+        }
+        targetWindowId = Number(handoffResult?.windowId || 0);
+      }
+
       if (
         recordingContext?.programmerId &&
         recordingContext?.appInfo?.guid &&
@@ -66156,13 +66169,16 @@ function ensureRestV2BobtoolsRedirectWatcher() {
           // Continue and hand off to BOBTOOLS even if the redirect-intercept probe misses.
         }
       }
-      const handoffResult = await handoffRestV2LaunchTabToBobtoolsWorkspace(normalizedTabId, activeFlowId, {
-        reason: matchesRedirect ? "redirect-intercept" : "live-profile-success",
-      });
-      if (!handoffResult?.ok) {
-        return;
+      if (!handoffResult) {
+        handoffResult = await handoffRestV2LaunchTabToBobtoolsWorkspace(normalizedTabId, activeFlowId, {
+          reason: "live-profile-success",
+        });
+        if (!handoffResult?.ok) {
+          return;
+        }
+        targetWindowId = Number(handoffResult?.windowId || 0);
       }
-      const targetWindowId = Number(handoffResult?.windowId || 0);
+
       if (!hydrationContext) {
         hydrationContext = buildRestV2SelectionContextFromRecordingContext(recordingContext);
       }

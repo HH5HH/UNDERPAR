@@ -205,6 +205,14 @@ test("saved-query pickers no longer force the placeholder option into a disabled
   assert.doesNotMatch(megSource, /defaultOption\.disabled\s*=\s*true;/);
 });
 
+test("BOBTOOLS profile delete runs full REST V2 logout flow instead of skipping user-agent logout action", () => {
+  const popupSource = read("popup.js");
+  const deleteProfileSource = extractFunctionSource(popupSource, "deleteRestV2ProfileHarvestWithLogout");
+
+  assert.match(deleteProfileSource, /executeRestV2LogoutFlow\(context, flowId\)/);
+  assert.doesNotMatch(deleteProfileSource, /skipUserAgentAction\s*:\s*true/);
+});
+
 test("MEG workspace saved-query reset clears the picker after the native menu closes", () => {
   const timers = [];
   const savedQueryPicker = {
@@ -643,6 +651,15 @@ test("REST V2 Bobtools redirect watcher hands the launch tab off to BOBTOOLS bef
   assert.match(popupSource, /function bobtoolsWorkspaceRefreshSelection\(programmer = null, targetWindowId = 0\)/);
 });
 
+test("REST V2 redirect-intercept hands off to BOBTOOLS before running the post-auth profile probe", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(
+    popupSource,
+    /if \(matchesRedirect\) \{[\s\S]*?handoffRestV2LaunchTabToBobtoolsWorkspace\(normalizedTabId, activeFlowId, \{[\s\S]*?reason: "redirect-intercept"[\s\S]*?\}\);[\s\S]*?\}[\s\S]*?const postAuthProbe = await probeRestV2PostAuthProfiles\(/m
+  );
+});
+
 test("REST V2 live-success fallback only swaps the launch tab after a completed navigation returns an active profile", () => {
   const popupSource = read("popup.js");
 
@@ -652,7 +669,7 @@ test("REST V2 live-success fallback only swaps the launch tab after a completed 
   );
   assert.match(
     popupSource,
-    /reason: matchesRedirect \? "redirect-intercept" : "live-profile-success"/m
+    /if \(!handoffResult\) \{[\s\S]*?handoffRestV2LaunchTabToBobtoolsWorkspace\(normalizedTabId, activeFlowId, \{[\s\S]*?reason: "live-profile-success"[\s\S]*?\}\);/m
   );
 });
 
@@ -859,6 +876,7 @@ test("BOBTOOLS selection context includes the current selection harvest when onl
       }),
       getRestV2ProfileHarvestForContext: () => currentSelectionHarvest,
       mergeRestV2ProfileHarvestLists: (...lists) => lists.flat().filter(Boolean),
+      isUsableRestV2ProfileHarvest: (harvest) => Boolean(harvest && typeof harvest === "object"),
       findRestV2HarvestByRequestorAndMvpd: (list, requestorId, mvpd) =>
         list.find((item) => item.requestorId === requestorId && item.mvpd === mvpd) || null,
       getRestV2MvpdPickerLabel: () => "Xfinity (Comcast_SSO)",
