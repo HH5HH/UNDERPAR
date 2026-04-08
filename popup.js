@@ -29531,15 +29531,24 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
   const canonicalRequestorId = String(
     resolveCanonicalRequestorIdForProgrammer(requestorId, nextContext?.programmerId) || requestorId
   ).trim();
-  const authoritativeRequestorId = String(firstNonEmptyString([canonicalRequestorId, requestorId]) || "").trim();
+  const appServiceProviderCandidates = collectRestV2ServiceProviderCandidatesFromApp(resolvedAppInfo, nextContext?.programmerId);
+  const appScopedRequestorId = String(
+    firstNonEmptyString([
+      appServiceProviderCandidates[0],
+      extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(resolvedAppInfo)),
+      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.appData?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProviderId),
+      extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.requestorId),
+    ]) || ""
+  ).trim();
+  const authoritativeRequestorId = String(
+    firstNonEmptyString([appScopedRequestorId, canonicalRequestorId, requestorId]) || ""
+  ).trim();
   const normalizedCanonicalRequestorId = normalizeEntityToken(canonicalRequestorId || requestorId);
   const scopedServiceProviderCandidates = [
     storedAuthContext?.serviceProviderId,
-    extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(resolvedAppInfo)),
-    extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.appData?.serviceProvider),
-    extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProvider),
-    extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProviderId),
-    extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.requestorId),
+    appScopedRequestorId,
     getRequestorScopedRestV2ConfigurationServiceProvider(requestorId),
     canonicalRequestorId,
     nextContext.serviceProviderId,
@@ -72004,11 +72013,7 @@ function getHrContextSummary(programmer = null) {
 
 function shouldRevealHrContextSections(programmer = null, services = null) {
   const programmerId = String(programmer?.programmerId || "").trim();
-  return (
-    Boolean(programmerId) &&
-    getDetectedPremiumServiceKeys(services).length > 0 &&
-    isProgrammerHrContextHydrationReady(programmerId, services)
-  );
+  return Boolean(programmerId) && isProgrammerHrContextHydrationReady(programmerId, services);
 }
 
 function collectHarpoProgrammerDomainNames(programmer = null, services = null) {
@@ -100933,7 +100938,20 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   const appChannelCandidate = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
   const requestorId = extractRequestorIdFromServiceProviderValue(context?.requestorId);
   const canonicalRequestorId = resolveCanonicalRequestorIdForProgrammer(requestorId, context?.programmerId);
-  const authoritativeRequestorId = String(firstNonEmptyString([canonicalRequestorId, requestorId]) || "").trim();
+  const appServiceProviderCandidates = collectRestV2ServiceProviderCandidatesFromApp(appInfo, context?.programmerId);
+  const appScopedRequestorId = String(
+    firstNonEmptyString([
+      appServiceProviderCandidates[0],
+      extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
+      extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
+      extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
+      appChannelCandidate,
+    ]) || ""
+  ).trim();
+  const authoritativeRequestorId = String(
+    firstNonEmptyString([appScopedRequestorId, canonicalRequestorId, requestorId]) || ""
+  ).trim();
   const normalizedCanonicalRequestorId = normalizeEntityToken(canonicalRequestorId || requestorId);
   const configurationScopedServiceProvider = getRequestorScopedRestV2ConfigurationServiceProvider(requestorId);
   const rawCandidates = [
