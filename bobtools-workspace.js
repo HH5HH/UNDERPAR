@@ -2240,6 +2240,10 @@ function selectProfile(harvestKey = "") {
   state.selectedHarvestKey = key;
   void ensureProfileQuickResources(match);
   render();
+  void sendWorkspaceAction("select-profile", {
+    programmerId: String(state.programmerId || "").trim(),
+    harvestKey: key,
+  });
 }
 
 async function sendWorkspaceAction(action, payload = {}) {

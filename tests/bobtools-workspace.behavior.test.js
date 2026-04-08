@@ -11,6 +11,7 @@ function read(relativePath) {
 
 test("BOBTOOLS profile rows expose row-level selection hooks and isolate delete clicks", () => {
   const source = read("bobtools-workspace.js");
+  const popupSource = read("popup.js");
 
   assert.match(
     source,
@@ -22,4 +23,7 @@ test("BOBTOOLS profile rows expose row-level selection hooks and isolate delete 
   );
   assert.match(source, /const selectBtn = target\.closest\("\[data-select-key\], \[data-profile-key\]"\);/);
   assert.match(source, /event\.stopPropagation\(\);[\s\S]*?void deleteProfile\(key\);/m);
+  assert.match(source, /void sendWorkspaceAction\("select-profile", \{[\s\S]*?harvestKey: key,[\s\S]*?\}\);/m);
+  assert.match(popupSource, /bobtoolsWorkspaceSelectedHarvestKeyByWindowId: new Map\(\),/);
+  assert.match(popupSource, /if \(action === "select-profile"\) \{[\s\S]*?setBobtoolsWorkspaceSelectedHarvestKey\(senderWindowId, harvestKey\);/m);
 });

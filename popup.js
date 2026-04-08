@@ -14357,6 +14357,7 @@ const state = {
   bobtoolsWorkspaceTabId: 0,
   bobtoolsWorkspaceWindowId: 0,
   bobtoolsWorkspaceTabIdByWindowId: new Map(),
+  bobtoolsWorkspaceSelectedHarvestKeyByWindowId: new Map(),
   bobtoolsWorkspaceRuntimeListenerBound: false,
   bobtoolsWorkspaceTabWatcherBound: false,
   bobtoolsWorkspaceLastResultByHarvestKey: new Map(),
@@ -64615,6 +64616,7 @@ function bobtoolsWorkspaceUnbindWorkspaceTab(tabId) {
     for (const [windowId, mappedTabId] of state.bobtoolsWorkspaceTabIdByWindowId.entries()) {
       if (Number(mappedTabId || 0) === normalizedTabId) {
         state.bobtoolsWorkspaceTabIdByWindowId.delete(windowId);
+        state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.delete(windowId);
       }
     }
   }
@@ -64637,6 +64639,31 @@ function bobtoolsWorkspaceGetBoundWorkspaceTabId(windowId) {
 
 function bobtoolsWorkspaceHasOpenTab() {
   return Number(state.bobtoolsWorkspaceTabId || 0) > 0 || state.bobtoolsWorkspaceTabIdByWindowId.size > 0;
+}
+
+function getBobtoolsWorkspaceSelectedHarvestKey(targetWindowId = 0) {
+  const normalizedWindowId = Number(targetWindowId || 0);
+  if (normalizedWindowId > 0) {
+    return String(state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.get(normalizedWindowId) || "").trim();
+  }
+  const activeWindowId = Number(state.bobtoolsWorkspaceWindowId || 0);
+  if (activeWindowId > 0) {
+    return String(state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.get(activeWindowId) || "").trim();
+  }
+  return "";
+}
+
+function setBobtoolsWorkspaceSelectedHarvestKey(targetWindowId = 0, harvestKey = "") {
+  const normalizedWindowId = Number(targetWindowId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  const normalizedHarvestKey = String(harvestKey || "").trim();
+  if (normalizedHarvestKey) {
+    state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.set(normalizedWindowId, normalizedHarvestKey);
+  } else {
+    state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.delete(normalizedWindowId);
+  }
 }
 
 function buildBobtoolsWorkspaceResultSummary(result = null) {
@@ -64807,6 +64834,7 @@ function bobtoolsWorkspaceResolveQuickResourceOptions(programmerId = "", request
 
 function buildBobtoolsWorkspaceProfilesPayload(programmer = null, options = {}) {
   const selectionContext = buildBobtoolsWorkspaceSelectionContext(programmer);
+  const targetWindowId = Number(options?.targetWindowId || 0);
   const profiles = selectionContext.harvestList.map((harvest, index) => {
     const requestorId = String(harvest?.requestorId || harvest?.serviceProviderId || "").trim();
     const mvpd = String(harvest?.mvpd || "").trim();
@@ -64847,28 +64875,42 @@ function buildBobtoolsWorkspaceProfilesPayload(programmer = null, options = {}) 
   });
   const selectedHarvestKey = firstNonEmptyString([
     options?.selectedHarvestKey,
+    getBobtoolsWorkspaceSelectedHarvestKey(targetWindowId),
     selectionContext.selectedHarvestKey,
     profiles[0]?.key,
   ]);
+  const normalizedSelectedHarvestKey = String(selectedHarvestKey || "").trim().toLowerCase();
+  const selectedProfile =
+    profiles.find((profile) => String(profile?.key || "").trim() === selectedHarvestKey) ||
+    profiles.find((profile) => String(profile?.key || "").trim().toLowerCase() === normalizedSelectedHarvestKey) ||
+    profiles[0] ||
+    null;
+  const resolvedSelectedHarvestKey = String(selectedProfile?.key || profiles[0]?.key || "").trim();
+  if (targetWindowId > 0) {
+    setBobtoolsWorkspaceSelectedHarvestKey(targetWindowId, resolvedSelectedHarvestKey);
+  }
   return {
     programmerId: selectionContext.programmerId,
     programmerName: selectionContext.programmerName,
     userLabel: selectionContext.userLabel,
-    requestorId: selectionContext.requestorId,
-    mvpd: selectionContext.mvpd,
-    mvpdLabel: selectionContext.mvpdLabel,
-    selectedHarvestKey,
+    requestorId: String(selectedProfile?.requestorId || selectionContext.requestorId || "").trim(),
+    mvpd: String(selectedProfile?.mvpd || selectionContext.mvpd || "").trim(),
+    mvpdLabel: String(selectedProfile?.mvpdLabel || selectionContext.mvpdLabel || "").trim(),
+    selectedHarvestKey: resolvedSelectedHarvestKey,
     profileCount: profiles.length,
     profiles,
     updatedAt: Date.now(),
   };
 }
 
-function bobtoolsWorkspaceGetSelectedControllerStatePayload(programmer = null, selectionContext = null) {
+function bobtoolsWorkspaceGetSelectedControllerStatePayload(programmer = null, selectionContext = null, targetWindowId = 0) {
   const context =
     selectionContext && typeof selectionContext === "object"
       ? selectionContext
       : buildBobtoolsWorkspaceSelectionContext(programmer);
+  const profilesPayload = buildBobtoolsWorkspaceProfilesPayload(programmer, {
+    targetWindowId,
+  });
   return {
     controllerOnline: true,
     adobePassEnvironment: {
@@ -64878,10 +64920,10 @@ function bobtoolsWorkspaceGetSelectedControllerStatePayload(programmer = null, s
     programmerId: String(context.programmerId || "").trim(),
     programmerName: String(context.programmerName || "").trim(),
     userLabel: String(context.userLabel || "").trim(),
-    requestorId: String(context.requestorId || "").trim(),
-    mvpd: String(context.mvpd || "").trim(),
-    mvpdLabel: String(context.mvpdLabel || "").trim(),
-    selectedHarvestKey: String(context.selectedHarvestKey || "").trim(),
+    requestorId: String(profilesPayload.requestorId || context.requestorId || "").trim(),
+    mvpd: String(profilesPayload.mvpd || context.mvpd || "").trim(),
+    mvpdLabel: String(profilesPayload.mvpdLabel || context.mvpdLabel || "").trim(),
+    selectedHarvestKey: String(profilesPayload.selectedHarvestKey || context.selectedHarvestKey || "").trim(),
     workspaceIconUrl: chrome.runtime.getURL(BOBTOOLS_WORKSPACE_ICON_PATH),
     updatedAt: Date.now(),
   };
@@ -64909,7 +64951,7 @@ function bobtoolsWorkspaceBroadcastControllerState(programmer = null, selectionC
   const resolvedWindowId = Number(targetWindowId || 0) || Number(state.bobtoolsWorkspaceWindowId || 0);
   void bobtoolsWorkspaceSendWorkspaceMessage(
     "controller-state",
-    bobtoolsWorkspaceGetSelectedControllerStatePayload(programmer, selectionContext),
+    bobtoolsWorkspaceGetSelectedControllerStatePayload(programmer, selectionContext, resolvedWindowId),
     {
       targetWindowId: resolvedWindowId,
     }
@@ -64919,6 +64961,7 @@ function bobtoolsWorkspaceBroadcastControllerState(programmer = null, selectionC
 function bobtoolsWorkspaceBroadcastProfiles(programmer = null, options = {}) {
   const targetWindowId = Number(options.targetWindowId || 0) || Number(state.bobtoolsWorkspaceWindowId || 0);
   const payload = buildBobtoolsWorkspaceProfilesPayload(programmer, {
+    targetWindowId,
     selectedHarvestKey: String(options.selectedHarvestKey || "").trim(),
   });
   void bobtoolsWorkspaceSendWorkspaceMessage("profiles-update", payload, { targetWindowId });
@@ -65564,6 +65607,27 @@ async function handleBobtoolsWorkspaceAction(message, sender = null) {
     };
   }
 
+  if (action === "select-profile") {
+    const harvestKey = String(message?.harvestKey || "").trim();
+    if (!harvestKey) {
+      return { ok: false, error: "Missing profile key." };
+    }
+    if (senderWindowId > 0) {
+      setBobtoolsWorkspaceSelectedHarvestKey(senderWindowId, harvestKey);
+    }
+    const selectedProgrammer = resolveSelectedProgrammer();
+    const selectionContext = buildBobtoolsWorkspaceSelectionContext(selectedProgrammer);
+    bobtoolsWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
+    bobtoolsWorkspaceBroadcastProfiles(selectedProgrammer, {
+      targetWindowId: senderWindowId,
+      selectedHarvestKey: harvestKey,
+    });
+    return {
+      ok: true,
+      selectedHarvestKey: harvestKey,
+    };
+  }
+
   if (action === "run-can-i-watch") {
     const requestedHarvestKey = String(message?.harvestKey || "").trim();
     const apiAction = BOBTOOLS_REST_V2_ACTION_PREAUTHORIZE;
@@ -65650,6 +65714,9 @@ async function handleBobtoolsWorkspaceAction(message, sender = null) {
     });
     if (!deleteResult?.ok) {
       return { ok: false, error: String(deleteResult?.error || "Unable to remove the selected MVPD profile.") };
+    }
+    if (senderWindowId > 0 && getBobtoolsWorkspaceSelectedHarvestKey(senderWindowId) === harvestKey) {
+      setBobtoolsWorkspaceSelectedHarvestKey(senderWindowId, "");
     }
     state.bobtoolsWorkspaceLastResultByHarvestKey.delete(harvestKey);
     bobtoolsWorkspaceBroadcastProfiles(selectedProgrammer, { targetWindowId: senderWindowId });
