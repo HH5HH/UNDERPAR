@@ -98410,7 +98410,7 @@ function getRestV2ConfigurationCollection(payload = null, keyCandidates = []) {
   };
 
   const requestorPayload = Object.entries(payload).find(
-    ([key, value]) => String(key || "").trim().toLowerCase() === "requestor" && value && typeof value === "object"
+    ([key, value]) => /^requestor$/i.test(String(key || "").trim()) && value && typeof value === "object"
   )?.[1] || null;
   return findCollection(requestorPayload) || findCollection(payload) || [];
 }

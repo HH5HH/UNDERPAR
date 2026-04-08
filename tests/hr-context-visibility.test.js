@@ -93,7 +93,7 @@ function loadHrContextSectionDisplayHelpers(seed = {}) {
     "const state = globalThis.__seed.state || {};",
     "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : [values]) { const normalized = String(value || '').trim(); if (normalized) { return normalized; } } return ''; }",
     "function uniquePreserveOrder(values = []) { const seen = new Set(); const output = []; (Array.isArray(values) ? values : [values]).forEach((value) => { const normalized = String(value || '').trim(); if (!normalized || seen.has(normalized)) { return; } seen.add(normalized); output.push(normalized); }); return output; }",
-    "function normalizeEntityToken(value = '') { return String(value || '').trim().toLowerCase().replace(/^@serviceprovider:/, ''); }",
+    "function normalizeEntityToken(value = '') { return String(value || '').trim().replace(/^@serviceprovider:/i, ''); }",
     "function extractEntityIdFromToken(value = '') { const normalized = String(value || '').trim(); return normalized.replace(/^@ServiceProvider:/i, ''); }",
     "function collectRestV2LearningRequestorCandidates() { return Array.isArray(globalThis.__seed.requestorCandidates) ? globalThis.__seed.requestorCandidates : []; }",
     "function collectRestV2LearningRequestorDomainNames(programmer = null, requestorId = '') { if (typeof globalThis.__seed.collectDomains === 'function') { return globalThis.__seed.collectDomains(programmer, requestorId); } return []; }",
@@ -1043,7 +1043,7 @@ test("HR context adds HARPO only for REST V2 media companies with configured dom
       },
       requestorCandidates: ["turner", "cnn"],
       collectDomains(programmer, requestorId) {
-        const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
+        const normalizedRequestorId = String(requestorId || "").trim();
         if (normalizedRequestorId === "turner") {
           return ["turner.example.test", "turner-alt.example.test"];
         }
@@ -1949,7 +1949,7 @@ test("REST V2 learning prefers parsed configuration domains and honors HARPO dom
         },
       },
       getRequestorScopedDomainCache(requestorId) {
-        return String(requestorId || "").trim().toLowerCase() === "turner"
+        return String(requestorId || "").trim() === "turner"
           ? [
               { domainName: "config-primary.example.test" },
               { domainName: "adobe.com" },
@@ -1958,7 +1958,7 @@ test("REST V2 learning prefers parsed configuration domains and honors HARPO dom
           : null;
       },
       getRequestorScopedHarpoSelectedDomain(requestorId) {
-        return String(requestorId || "").trim().toLowerCase() === "turner"
+        return String(requestorId || "").trim() === "turner"
           ? "config-alt.example.test"
           : "";
       },
