@@ -19460,8 +19460,7 @@ function storeRestV2ProfilePreauthzCheckEntry(programmerId, harvestKey, result =
     if (!harvest || typeof harvest !== "object") {
       return false;
     }
-    const sameRequestor =
-      String(harvest?.requestorId || "").trim().toLowerCase() === String(checkEntry?.requestorId || "").trim().toLowerCase();
+    const sameRequestor = String(harvest?.requestorId || "").trim() === String(checkEntry?.requestorId || "").trim();
     const sameMvpd = String(harvest?.mvpd || "").trim().toLowerCase() === String(checkEntry?.mvpd || "").trim().toLowerCase();
     if (!sameRequestor || !sameMvpd) {
       return false;
@@ -25152,9 +25151,7 @@ function normalizeRegisteredApplicationRequestorHintToken(value = "") {
   if (!normalized) {
     return "";
   }
-  return String(extractEntityIdFromToken(normalized) || normalized)
-    .trim()
-    .toLowerCase();
+  return String(extractEntityIdFromToken(normalized) || normalized).trim();
 }
 
 function buildRegisteredApplicationHealthAppRecord(appInfo = null, queryContext = null, options = {}) {
@@ -25228,7 +25225,7 @@ function buildRegisteredApplicationHealthAppRecord(appInfo = null, queryContext 
   const selectedRequestorMatch =
     Boolean(selectedRequestorId) &&
     [requestorHint, ...serviceProviderHints].some(
-      (value) => normalizeRegisteredApplicationRequestorHintToken(value) === selectedRequestorId.toLowerCase()
+      (value) => normalizeRegisteredApplicationRequestorHintToken(value) === selectedRequestorId
     );
   const hydrationError = firstNonEmptyString([
     options?.hydrationErrorsByGuid?.[guid],
@@ -30202,7 +30199,7 @@ function maybeRefreshRestV2InteractiveDocsForContext(context = null, controllerR
   if (!programmerId || !selectedProgrammerId || programmerId !== selectedProgrammerId) {
     return false;
   }
-  if (requestorId && selectedRequestorId && requestorId.toLowerCase() !== selectedRequestorId.toLowerCase()) {
+  if (requestorId && selectedRequestorId && requestorId !== selectedRequestorId) {
     return false;
   }
   if (
@@ -30230,9 +30227,9 @@ async function maybeAutoStopRestV2RecordingForSelectionChange(nextSelection = {}
     return false;
   }
 
-  const currentRequestorId = String(recordingContext.requestorId || recordingContext.serviceProviderId || "").trim().toLowerCase();
+  const currentRequestorId = String(recordingContext.requestorId || recordingContext.serviceProviderId || "").trim();
   const currentMvpd = String(recordingContext.mvpd || "").trim().toLowerCase();
-  const nextRequestorId = String(nextSelection.requestorId || "").trim().toLowerCase();
+  const nextRequestorId = String(nextSelection.requestorId || "").trim();
   const nextMvpd = String(nextSelection.mvpdId || "").trim().toLowerCase();
   const selectionChanged = currentRequestorId !== nextRequestorId || currentMvpd !== nextMvpd;
   if (!selectionChanged) {
@@ -30261,8 +30258,8 @@ async function maybeAutoStopHarpoRecordingForSelectionChange(nextSelection = {},
     return false;
   }
 
-  const currentRequestorId = String(recordingContext.requestorId || recordingContext.serviceProviderId || "").trim().toLowerCase();
-  const nextRequestorId = String(nextSelection.requestorId || "").trim().toLowerCase();
+  const currentRequestorId = String(recordingContext.requestorId || recordingContext.serviceProviderId || "").trim();
+  const nextRequestorId = String(nextSelection.requestorId || "").trim();
   if (currentRequestorId === nextRequestorId) {
     return false;
   }
@@ -31433,7 +31430,7 @@ function buildRestV2LogoutAcceptedFallbackAction(parsed = {}, result = null) {
 
 function buildRestV2ProfileHarvestSelectionKey(context = null) {
   const programmerId = String(context?.programmerId || "").trim().toLowerCase();
-  const requestorId = String(context?.requestorId || "").trim().toLowerCase();
+  const requestorId = String(context?.requestorId || "").trim();
   const mvpd = String(context?.mvpd || "").trim().toLowerCase();
   return [programmerId, requestorId, mvpd].join("|");
 }
@@ -32501,12 +32498,12 @@ function clearRestV2ProfileHarvestForContext(context = null) {
     return;
   }
 
-  const normalizedRequestorId = String(context.requestorId || "").trim().toLowerCase();
+  const normalizedRequestorId = String(context.requestorId || "").trim();
   const normalizedMvpd = String(context.mvpd || "").trim().toLowerCase();
   const existingBucket = getRestV2ProfileHarvestBucketForProgrammer(programmerId);
   if (existingBucket.length > 0) {
     const filteredBucket = existingBucket.filter((harvest) => {
-      const harvestRequestorId = String(harvest?.requestorId || "").trim().toLowerCase();
+      const harvestRequestorId = String(harvest?.requestorId || "").trim();
       const harvestMvpd = String(harvest?.mvpd || "").trim().toLowerCase();
       const matchesRequestor = normalizedRequestorId ? harvestRequestorId === normalizedRequestorId : true;
       const matchesMvpd = normalizedMvpd ? harvestMvpd === normalizedMvpd : true;
@@ -32542,10 +32539,10 @@ function getRestV2ProfileHarvestForContext(context = null) {
     if (programmerId) {
       const bucket = getRestV2ProfileHarvestBucketForProgrammer(programmerId);
       if (bucket.length > 0) {
-        const normalizedRequestorId = String(context.requestorId || "").trim().toLowerCase();
+        const normalizedRequestorId = String(context.requestorId || "").trim();
         const normalizedMvpd = String(context.mvpd || "").trim().toLowerCase();
         const strictMatch = bucket.find((harvest) => {
-          const harvestRequestorId = String(harvest?.requestorId || "").trim().toLowerCase();
+          const harvestRequestorId = String(harvest?.requestorId || "").trim();
           const harvestMvpd = String(harvest?.mvpd || "").trim().toLowerCase();
           const requestorMatch = normalizedRequestorId ? harvestRequestorId === normalizedRequestorId : true;
           const mvpdMatch = normalizedMvpd ? harvestMvpd === normalizedMvpd : true;
@@ -32566,7 +32563,7 @@ function getRestV2ProfileHarvestForContext(context = null) {
 
         if (normalizedRequestorId) {
           const requestorMatch = bucket.find(
-            (harvest) => String(harvest?.requestorId || "").trim().toLowerCase() === normalizedRequestorId
+            (harvest) => String(harvest?.requestorId || "").trim() === normalizedRequestorId
           );
           if (requestorMatch) {
             return requestorMatch;
@@ -32616,7 +32613,7 @@ function resolveRestV2PartnerSsoFlowCacheKey(context = null, flowId = "") {
     return `flow:${normalizedFlowId}`;
   }
   const programmerId = String(context?.programmerId || "").trim().toLowerCase();
-  const requestorId = String(context?.requestorId || "").trim().toLowerCase();
+  const requestorId = String(context?.requestorId || "").trim();
   const mvpd = String(context?.mvpd || "").trim().toLowerCase();
   const sessionCode = String(context?.sessionCode || "").trim().toLowerCase();
   return `context:${programmerId}|${requestorId}|${mvpd}|${sessionCode}`;
@@ -52269,7 +52266,7 @@ function cmBuildRestV2ProfileCorrelationRecords(context = null) {
       mvpdLabel: String(
         firstNonEmptyString([
           source.requestorId &&
-          String(profileHarvest.requestorId || "").trim().toLowerCase() === String(source.requestorId || "").trim().toLowerCase()
+          String(profileHarvest.requestorId || "").trim() === String(source.requestorId || "").trim()
             ? source.mvpdLabel
             : "",
           profileHarvest?.mvpdName,
@@ -52296,7 +52293,7 @@ function cmBuildRestV2ProfileCorrelationRecords(context = null) {
           name: String(profileHarvest.mvpdName || "").trim(),
         }
       : String(source.mvpd || "").trim() &&
-          String(payload.requestorId || "").trim().toLowerCase() === String(source.requestorId || "").trim().toLowerCase()
+          String(payload.requestorId || "").trim() === String(source.requestorId || "").trim()
         ? source.mvpdMeta
         : null;
     return {
@@ -56128,7 +56125,7 @@ function mvpdWorkspaceFindIntegrationEntity(payload = null, context = null, inte
     }
   }
 
-  const normalizedRequestor = String(context?.requestorId || "").trim().toLowerCase();
+  const normalizedRequestor = String(context?.requestorId || "").trim();
   const normalizedMvpd = String(context?.mvpdId || "").trim().toLowerCase();
   const guessedId = normalizedRequestor && normalizedMvpd ? `${normalizedRequestor}_${normalizedMvpd}` : "";
   let fallback = null;
@@ -56139,14 +56136,16 @@ function mvpdWorkspaceFindIntegrationEntity(payload = null, context = null, inte
       return entity;
     }
     const owner = mvpdWorkspaceNormalizeEntityRef(entityData?.owner).toLowerCase();
-    const serviceProvider = mvpdWorkspaceNormalizeEntityRef(entityData?.serviceProvider).toLowerCase();
+    const serviceProvider = mvpdWorkspaceNormalizeEntityRef(entityData?.serviceProvider);
+    const serviceProviderRef = mvpdWorkspaceSplitEntityRef(serviceProvider);
     const ownerMatch = normalizedMvpd ? owner.endsWith(`:${normalizedMvpd}`) : false;
     const serviceMatch = normalizedRequestor ? serviceProvider.endsWith(`:${normalizedRequestor}`) : true;
     if (ownerMatch && serviceMatch) {
       if (
         serviceProviderEntity &&
         serviceProvider &&
-        serviceProvider === `serviceprovider:${normalizedRequestor}`
+        String(serviceProviderRef?.type || "").trim().toLowerCase() === "serviceprovider" &&
+        String(serviceProviderRef?.id || "").trim() === normalizedRequestor
       ) {
         return entity;
       }
@@ -64361,7 +64360,7 @@ function collectRestV2SsoHydrationContextsForBobtools(context = null) {
     const sessionCode = firstNonEmptyString([String(candidate.sessionCode || "").trim(), sessionCodeCandidates[0]]);
     const key = [
       candidateProgrammerId.toLowerCase(),
-      String(candidate.requestorId || "").trim().toLowerCase(),
+      String(candidate.requestorId || "").trim(),
       String(candidateMvpd || "").trim().toLowerCase(),
       String(candidate.sessionPartner || "").trim().toLowerCase(),
       String(candidate.sessionAction || "").trim().toLowerCase(),
@@ -72791,7 +72790,7 @@ function resolveRestV2LearningRecordingContext(programmerId = "", requestorId = 
     return null;
   }
   const normalizedProgrammerId = String(programmerId || "").trim().toLowerCase();
-  const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
+  const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedMvpd = String(mvpd || "").trim();
   if (
     normalizedProgrammerId &&
@@ -72801,7 +72800,7 @@ function resolveRestV2LearningRecordingContext(programmerId = "", requestorId = 
   }
   if (
     normalizedRequestorId &&
-    String(recordingContext.requestorId || recordingContext.serviceProviderId || "").trim().toLowerCase() !== normalizedRequestorId
+    String(recordingContext.requestorId || recordingContext.serviceProviderId || "").trim() !== normalizedRequestorId
   ) {
     return null;
   }
@@ -73047,11 +73046,11 @@ async function enrichRestV2LearningResourcesFromConsoleContext(context = null, o
 
 function findRestV2PreauthorizeHistoryEntriesForLearning(programmerId = "", requestorId = "", mvpd = "") {
   const history = getRestV2PreauthorizeHistoryForProgrammer(programmerId);
-  const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
+  const normalizedRequestorId = String(requestorId || "").trim();
   const normalizedMvpd = String(mvpd || "").trim().toLowerCase();
   if (normalizedRequestorId || normalizedMvpd) {
     const exactMatches = history.filter((entry) => {
-      const entryRequestorId = String(entry?.requestorId || entry?.serviceProviderId || "").trim().toLowerCase();
+      const entryRequestorId = String(entry?.requestorId || entry?.serviceProviderId || "").trim();
       const entryMvpd = String(entry?.mvpd || "").trim().toLowerCase();
       const requestorMatch = normalizedRequestorId ? entryRequestorId === normalizedRequestorId : true;
       const mvpdMatch = normalizedMvpd ? entryMvpd === normalizedMvpd : true;
@@ -75913,7 +75912,7 @@ function buildHarpoStatusItemHtml(programmer = null, services = null) {
   const panelContext = buildHarpoPanelContext(programmer, services);
   const inlineStatus = buildHarpoInlineStatus(panelContext);
   const selectId = `hr-harpo-domain-select-${
-    panelContext.requestorId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "requestor"
+    panelContext.requestorId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "requestor"
   }`;
   const uploadDisabled = panelContext.recordingActive || panelContext.recordingStarting || panelContext.recordingStopping;
   const reproDisabled =
@@ -92971,12 +92970,12 @@ function getProgrammerCandidatesForRequestor(requestorId) {
     return [];
   }
 
-  const normalizedRequestorId = String(requestorId || "").trim().toLowerCase();
+  const normalizedRequestorId = String(requestorId || "").trim();
   const selectedProgrammer = resolveSelectedProgrammer();
   const requestorIdMatches = (item) =>
     Array.isArray(item.requestorIds) &&
     item.requestorIds
-      .map((value) => String(value || "").trim().toLowerCase())
+      .map((value) => String(value || "").trim())
       .includes(normalizedRequestorId);
 
   if (selectedProgrammer && requestorIdMatches(selectedProgrammer)) {
@@ -100715,7 +100714,7 @@ function extractRestV2SessionCodeFromValue(value, serviceProviderId = "") {
   if (!raw) {
     return "";
   }
-  const normalizedServiceProviderId = String(serviceProviderId || "").trim().toLowerCase();
+  const normalizedServiceProviderId = String(serviceProviderId || "").trim();
   const candidates = [];
   const pushCandidate = (candidate) => {
     const normalized = String(candidate || "").trim();
@@ -100742,7 +100741,7 @@ function extractRestV2SessionCodeFromValue(value, serviceProviderId = "") {
         pushCandidate(pathSegments[index + 1]);
       }
       if (segment === "authenticate") {
-        const serviceProviderSegment = String(pathSegments[index + 1] || "").trim().toLowerCase();
+        const serviceProviderSegment = String(pathSegments[index + 1] || "").trim();
         const codeSegment = String(pathSegments[index + 2] || "").trim();
         if (
           serviceProviderSegment &&

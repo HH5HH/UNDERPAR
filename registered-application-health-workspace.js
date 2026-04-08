@@ -768,7 +768,7 @@ function setApplicationHydrationState(guid = "", active = false) {
 }
 
 function appMatchesSelectedRequestor(app = null) {
-  const selectedRequestorId = String(state.requestorId || "").trim().toLowerCase();
+  const selectedRequestorId = String(state.requestorId || "").trim();
   if (!selectedRequestorId) {
     return false;
   }
@@ -779,7 +779,7 @@ function appMatchesSelectedRequestor(app = null) {
       return false;
     }
     const tokenMatch = normalizedValue.match(/^@[^:]+:(.+)$/i);
-    const comparableValue = String(tokenMatch ? tokenMatch[1] : normalizedValue).trim().toLowerCase();
+    const comparableValue = String(tokenMatch ? tokenMatch[1] : normalizedValue).trim();
     return comparableValue === selectedRequestorId;
   });
 }
@@ -807,7 +807,7 @@ function getDecoratedApplications() {
 }
 
 function filterApplicationsForSelectedRequestor(applications = []) {
-  const selectedRequestorId = String(state.requestorId || "").trim().toLowerCase();
+  const selectedRequestorId = String(state.requestorId || "").trim();
   const entries = Array.isArray(applications) ? applications.slice() : [];
   if (!selectedRequestorId) {
     return entries;
@@ -827,7 +827,7 @@ function filterApplicationsForSelectedRequestor(applications = []) {
         return false;
       }
       const tokenMatch = normalizedValue.match(/^@[^:]+:(.+)$/i);
-      const comparableValue = String(tokenMatch ? tokenMatch[1] : normalizedValue).trim().toLowerCase();
+      const comparableValue = String(tokenMatch ? tokenMatch[1] : normalizedValue).trim();
       return comparableValue === selectedRequestorId;
     });
   });
@@ -842,12 +842,12 @@ function buildRequestorSummary(app = {}) {
 }
 
 function buildApplicationSummaryMeta(app = {}) {
-  const summary = String(buildRequestorSummary(app) || "").trim().toLowerCase();
+  const summary = String(buildRequestorSummary(app) || "").trim();
   const candidate = String(firstNonEmptyString([app.serviceProviderSummary]) || "").trim();
   if (!candidate) {
     return "";
   }
-  return String(candidate || "").trim().toLowerCase() === summary ? "" : candidate;
+  return String(candidate || "").trim() === summary ? "" : candidate;
 }
 
 function renderApplicationSummaryFacts(app = {}) {
