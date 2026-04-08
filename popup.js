@@ -34700,6 +34700,34 @@ async function probeRestV2PostAuthProfiles(context, flowId, options = {}) {
     }
 
     lastCheck = await fetchRestV2ProfileCheckResult(context, flowId, `${scopePrefix}-${attempt}`);
+    const recoverySeedHarvest = buildRestV2ProfilesHydrationSeedHarvest(context, {
+      preferExisting: false,
+    });
+    if (!isRestV2ProfileSessionActiveResult(lastCheck) && recoverySeedHarvest) {
+      const recovery = await attemptRestV2SessionCodeProfileRecovery(
+        recoverySeedHarvest,
+        flowId,
+        `${scopePrefix}-${attempt}-session-code-recovery`
+      );
+      if (recovery?.recovered === true && recovery?.profileCheckResult) {
+        lastCheck = {
+          ...recovery.profileCheckResult,
+          harvestedProfile:
+            recovery.profileCheckResult?.harvestedProfile ||
+            (Array.isArray(recovery.profileRows) && recovery.profileRows.length > 0 ? recovery.profileRows[0] : null),
+        };
+        emitRestV2DebugEvent(flowId, {
+          source: "extension",
+          phase: `${scopePrefix}-session-code-recovery-success`,
+          attempt,
+          maxAttempts,
+          profileCount: Number(recovery.profileCount || 0),
+          serviceProviderId: String(recovery.serviceProviderId || "").trim(),
+          sessionCode: String(recovery.sessionCode || "").trim(),
+          endpointUrl: String(recovery.endpointUrl || "").trim(),
+        });
+      }
+    }
     const hasActiveProfile = isRestV2ProfileSessionActiveResult(lastCheck);
     const noActiveProfileSignal = isRestV2NoActiveProfileSignal(lastCheck);
     const invalidServiceProviderSignal = isRestV2InvalidServiceProviderSignal(lastCheck);
