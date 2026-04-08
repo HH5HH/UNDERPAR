@@ -29528,17 +29528,21 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
     nextContext.sessionPartner = String(storedAuthContext.sessionPartner || "").trim();
   }
 
+  const canonicalRequestorId = String(
+    resolveCanonicalRequestorIdForProgrammer(requestorId, nextContext?.programmerId) || requestorId
+  ).trim();
   const authoritativeServiceProviderId = String(
     firstNonEmptyString([
       storedAuthContext?.serviceProviderId,
+      getRequestorScopedRestV2ConfigurationServiceProvider(requestorId),
+      canonicalRequestorId,
+      requestorId,
+      nextContext.serviceProviderId,
       extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(resolvedAppInfo)),
       extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.appData?.serviceProvider),
       extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProvider),
       extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.serviceProviderId),
       extractRequestorIdFromServiceProviderValue(resolvedAppInfo?.requestorId),
-      getRequestorScopedRestV2ConfigurationServiceProvider(requestorId),
-      nextContext.serviceProviderId,
-      requestorId,
     ]) || ""
   ).trim();
   if (authoritativeServiceProviderId) {
@@ -100898,19 +100902,18 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   const canonicalRequestorId = resolveCanonicalRequestorIdForProgrammer(requestorId, context?.programmerId);
   const configurationScopedServiceProvider = getRequestorScopedRestV2ConfigurationServiceProvider(requestorId);
   const rawCandidates = [
+    requestorId,
+    canonicalRequestorId,
+    configurationScopedServiceProvider,
+    extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
     extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
     extractRequestorIdFromServiceProviderValue(appInfo?.serviceProvider),
     extractRequestorIdFromServiceProviderValue(appInfo?.serviceProviderId),
     extractRequestorIdFromServiceProviderValue(appInfo?.requestorId),
     appChannelCandidate,
-    configurationScopedServiceProvider,
-    canonicalRequestorId,
     extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.loginUrl)),
     extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionUrl)),
     extractRequestorIdFromServiceProviderValue(extractRestV2ServiceProviderIdFromUrl(context?.sessionData?.url)),
-    extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
-    requestorId,
-    String(context?.programmerId || "").trim(),
   ];
 
   const candidates = [];
