@@ -535,7 +535,7 @@ function renderQuickResourcePicker(profile = null) {
     .map((chip) => {
       const label = String(chip?.label || "").trim();
       const rawValue = String(chip?.rawValue || "").trim();
-      const canonicalResourceId = firstNonEmptyString([rawValue, label]);
+      const canonicalResourceId = firstNonEmptyString([label, rawValue]);
       const active = selectedKeys.has(label.toLowerCase()) || (rawValue && selectedKeys.has(rawValue.toLowerCase()));
       const hoverLines = [active ? `Remove ${label}` : `Add ${label}`];
       if (rawValue && rawValue !== label) {
@@ -577,7 +577,7 @@ function toggleQuickResourceInInput(resourceId = "") {
   }
 
   const chip = resolveResourceIdChip(normalized, profile);
-  const targetValue = firstNonEmptyString([chip?.rawValue, chip?.label, normalized]);
+  const targetValue = firstNonEmptyString([chip?.label, chip?.rawValue, normalized]);
   const aliasKeys = new Set(
     [targetValue, chip?.rawValue, chip?.label, normalized]
       .map((value) => String(value || "").trim().toLowerCase())
@@ -2407,7 +2407,7 @@ async function runSelectedActionFromForm() {
   const canonicalResourceIds = normalizeResourceIdList(
     parseResourceInputValue(resourceInput).map((value) => {
       const chip = resolveResourceIdChip(value, profile);
-      return firstNonEmptyString([chip?.rawValue, chip?.label, value]);
+      return firstNonEmptyString([chip?.label, chip?.rawValue, value]);
     })
   );
   const canonicalResourceInput = canonicalResourceIds.join(", ");
