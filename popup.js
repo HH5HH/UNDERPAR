@@ -32283,9 +32283,7 @@ async function deleteRestV2ProfileHarvestWithLogout(programmer = null, harvestKe
   });
   const flowId = String(options?.flowId || "").trim() || resolveRestV2DebugFlowIdForHarvest(harvest);
   const warnings = [];
-  const logoutResult = await executeRestV2LogoutFlow(context, flowId, {
-    skipUserAgentAction: true,
-  });
+  const logoutResult = await executeRestV2LogoutFlow(context, flowId);
   if (logoutResult?.attempted !== true) {
     const reason = firstNonEmptyString([
       String(logoutResult?.error || "").trim(),
