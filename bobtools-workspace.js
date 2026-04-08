@@ -893,6 +893,36 @@ function renderProfileList() {
       `;
     })
     .join("");
+
+  els.profileList.querySelectorAll(".bobtools-profile-delete").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = String(button.getAttribute("data-delete-key") || "").trim();
+      void deleteProfile(key);
+    });
+  });
+
+  els.profileList.querySelectorAll(".bobtools-profile-select").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = String(button.getAttribute("data-select-key") || "").trim();
+      selectProfile(key);
+    });
+  });
+
+  els.profileList.querySelectorAll(".bobtools-profile-item").forEach((item) => {
+    item.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(".bobtools-profile-delete")) {
+        return;
+      }
+      event.preventDefault();
+      const key = String(item.getAttribute("data-profile-key") || item.getAttribute("data-select-key") || "").trim();
+      selectProfile(key);
+    });
+  });
 }
 
 function buildDecisionReason(row = null) {
