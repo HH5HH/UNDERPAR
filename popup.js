@@ -100918,6 +100918,20 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
 
   const candidates = [];
   const seen = new Set();
+  const pushCandidate = (value) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return;
+    }
+    if (!normalizeEntityToken(normalized)) {
+      return;
+    }
+    if (seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    candidates.push(normalized);
+  };
   rawCandidates.forEach((value) => {
     const extracted = extractRequestorIdFromServiceProviderValue(value);
     const normalizedValue = String(extracted || value || "").trim();
@@ -100927,12 +100941,16 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
     const canonicalValue = String(
       resolveCanonicalRequestorIdForProgrammer(normalizedValue, context?.programmerId) || normalizedValue
     ).trim();
-    const key = normalizeEntityToken(canonicalValue);
-    if (!key || seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    candidates.push(canonicalValue);
+    uniquePreserveOrder([
+      canonicalValue,
+      normalizedValue,
+      String(canonicalValue || "").trim().toUpperCase(),
+      String(canonicalValue || "").trim().toLowerCase(),
+      String(normalizedValue || "").trim().toUpperCase(),
+      String(normalizedValue || "").trim().toLowerCase(),
+    ]).forEach((candidateValue) => {
+      pushCandidate(candidateValue);
+    });
   });
 
   return candidates;
