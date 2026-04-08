@@ -29531,6 +29531,7 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
   const canonicalRequestorId = String(
     resolveCanonicalRequestorIdForProgrammer(requestorId, nextContext?.programmerId) || requestorId
   ).trim();
+  const authoritativeRequestorId = String(firstNonEmptyString([canonicalRequestorId, requestorId]) || "").trim();
   const normalizedCanonicalRequestorId = normalizeEntityToken(canonicalRequestorId || requestorId);
   const scopedServiceProviderCandidates = [
     storedAuthContext?.serviceProviderId,
@@ -29544,7 +29545,11 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
     nextContext.serviceProviderId,
     requestorId,
   ];
-  const authoritativeServiceProviderIdFromScope = scopedServiceProviderCandidates
+  const scopedServiceProviderValues = scopedServiceProviderCandidates
+    .map((value) => String(firstNonEmptyString([extractRequestorIdFromServiceProviderValue(value), value]) || "").trim());
+  const authoritativeServiceProviderIdFromScope =
+    (authoritativeRequestorId ? scopedServiceProviderValues.find((value) => value === authoritativeRequestorId) : "") ||
+    scopedServiceProviderValues
     .map((value) => String(firstNonEmptyString([extractRequestorIdFromServiceProviderValue(value), value]) || "").trim())
     .find((value) => {
       const normalizedValue = normalizeEntityToken(value);
@@ -29559,17 +29564,13 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
   const authoritativeServiceProviderId = String(
     firstNonEmptyString([
       authoritativeServiceProviderIdFromScope,
-      canonicalRequestorId,
+      authoritativeRequestorId,
       requestorId,
     ]) || ""
   ).trim();
   if (authoritativeServiceProviderId) {
     nextContext.serviceProviderId = authoritativeServiceProviderId;
-    const normalizedAuthoritativeServiceProviderId = normalizeEntityToken(authoritativeServiceProviderId);
-    const normalizedRequestorId = normalizeEntityToken(nextContext.requestorId || requestorId);
-    if (!normalizedRequestorId || normalizedRequestorId === normalizedAuthoritativeServiceProviderId) {
-      nextContext.requestorId = authoritativeServiceProviderId;
-    }
+    nextContext.requestorId = authoritativeRequestorId || authoritativeServiceProviderId;
   }
 
   return nextContext;
@@ -100932,6 +100933,7 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   const appChannelCandidate = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
   const requestorId = extractRequestorIdFromServiceProviderValue(context?.requestorId);
   const canonicalRequestorId = resolveCanonicalRequestorIdForProgrammer(requestorId, context?.programmerId);
+  const authoritativeRequestorId = String(firstNonEmptyString([canonicalRequestorId, requestorId]) || "").trim();
   const normalizedCanonicalRequestorId = normalizeEntityToken(canonicalRequestorId || requestorId);
   const configurationScopedServiceProvider = getRequestorScopedRestV2ConfigurationServiceProvider(requestorId);
   const rawCandidates = [
@@ -100961,6 +100963,9 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
       resolveCanonicalRequestorIdForProgrammer(normalizedValue, context?.programmerId) || normalizedValue
     ).trim();
     const chosenValue = String(firstNonEmptyString([canonicalValue, normalizedValue]) || "").trim();
+    if (authoritativeRequestorId && chosenValue !== authoritativeRequestorId) {
+      return;
+    }
     const dedupeKey = normalizeEntityToken(chosenValue);
     if (normalizedCanonicalRequestorId && dedupeKey !== normalizedCanonicalRequestorId) {
       return;
@@ -100973,7 +100978,7 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   });
 
   if (candidates.length === 0) {
-    const fallbackCanonical = String(firstNonEmptyString([canonicalRequestorId, requestorId]) || "").trim();
+    const fallbackCanonical = authoritativeRequestorId;
     if (fallbackCanonical) {
       candidates.push(fallbackCanonical);
     }
