@@ -88085,7 +88085,7 @@ function getRequestorsForSelectedMediaCompany() {
 }
 
 function populateRequestorSelect() {
-  state.selectedMvpdId = "";
+  const previousRequestorId = String(state.selectedRequestorId || "").trim();
   const requestorOptions = getRequestorsForSelectedMediaCompany();
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const selectedProgrammerId = String(resolveSelectedProgrammer()?.programmerId || "").trim();
@@ -88114,8 +88114,13 @@ function populateRequestorSelect() {
     selectedProgrammerId ? getCurrentPremiumAppsSnapshot(selectedProgrammerId) : null
   );
 
-  els.mvpdSelect.disabled = true;
-  els.mvpdSelect.innerHTML = '<option value=""></option>';
+  const activeRequestorId = String(state.selectedRequestorId || "").trim();
+  const requestorSelectionRetained = Boolean(activeRequestorId) && activeRequestorId === previousRequestorId;
+  if (!requestorSelectionRetained) {
+    state.selectedMvpdId = "";
+    els.mvpdSelect.disabled = true;
+    els.mvpdSelect.innerHTML = '<option value=""></option>';
+  }
   syncGlobalQuickLaunchButtons();
   refreshRestV2LoginPanels();
   refreshMvpdWorkspaceTools();

@@ -331,6 +331,59 @@ test("MVPD launcher sync clears stale MVPD when picker options no longer include
   assert.equal(button.attributes["aria-hidden"], "true");
 });
 
+test("requestor repopulation keeps selected MVPD when requestor selection is retained", () => {
+  const requestorSelect = {
+    options: [],
+    value: "",
+    innerHTML: "",
+    appendChild(option) {
+      this.options.push(option);
+    },
+  };
+  const mvpdSelect = {
+    disabled: false,
+    innerHTML: '<option value="Dish">DISH</option>',
+    options: [{ value: "Dish" }],
+  };
+  const els = {
+    requestorSelect,
+    mvpdSelect,
+  };
+  const state = {
+    selectedRequestorId: "NBADE",
+    selectedMvpdId: "Dish",
+  };
+  const document = {
+    createElement() {
+      return {
+        value: "",
+        textContent: "",
+      };
+    },
+  };
+
+  const { populateRequestorSelect } = loadFunctions("popup.js", ["populateRequestorSelect"], {
+    state,
+    els,
+    document,
+    getRequestorsForSelectedMediaCompany: () => [{ id: "NBADE", key: "NBADE", label: "NBADE" }],
+    resolveSelectedProgrammer: () => ({ programmerId: "NBA" }),
+    getCurrentPremiumAppsSnapshot: () => ({}),
+    syncRequestorSelectHydrationAvailability: () => true,
+    syncGlobalQuickLaunchButtons: () => {},
+    refreshRestV2LoginPanels: () => {},
+    refreshMvpdWorkspaceTools: () => {},
+    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+  });
+
+  populateRequestorSelect();
+
+  assert.equal(state.selectedRequestorId, "NBADE");
+  assert.equal(state.selectedMvpdId, "Dish");
+  assert.equal(mvpdSelect.disabled, false);
+  assert.match(String(mvpdSelect.innerHTML || ""), /Dish|DISH/);
+});
+
 test("MEG workspace saved-query reset clears the picker after the native menu closes", () => {
   const timers = [];
   const savedQueryPicker = {
