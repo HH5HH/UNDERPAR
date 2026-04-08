@@ -29542,7 +29542,7 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
   const authoritativeRequestorId = String(
     firstNonEmptyString([appScopedRequestorId, canonicalRequestorId, requestorId]) || ""
   ).trim();
-  const normalizedCanonicalRequestorId = normalizeEntityToken(canonicalRequestorId || requestorId);
+  const normalizedCanonicalRequestorId = String(canonicalRequestorId || requestorId || "").trim();
   const scopedServiceProviderCandidates = [
     storedAuthContext?.serviceProviderId,
     appScopedRequestorId,
@@ -29558,7 +29558,7 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
     scopedServiceProviderValues
     .map((value) => String(firstNonEmptyString([extractRequestorIdFromServiceProviderValue(value), value]) || "").trim())
     .find((value) => {
-      const normalizedValue = normalizeEntityToken(value);
+      const normalizedValue = String(value || "").trim();
       if (!normalizedValue) {
         return false;
       }
@@ -72177,10 +72177,10 @@ function resolveHarpoRequestorLabel(programmer = null, requestorId = "") {
     return "";
   }
   const requestorOptions = Array.isArray(programmer?.requestorOptions) ? programmer.requestorOptions : [];
-  const normalizedRequestorToken = normalizeEntityToken(normalizedRequestorId);
+  const normalizedRequestorToken = normalizedRequestorId;
   const match = requestorOptions.find((option) => {
     const optionId = extractEntityIdFromToken(firstNonEmptyString([option?.id, option?.key]));
-    return normalizeEntityToken(optionId) === normalizedRequestorToken;
+    return String(optionId || "").trim() === normalizedRequestorToken;
   });
   return String(firstNonEmptyString([match?.label, match?.name, match?.id, match?.key, normalizedRequestorId]) || "").trim();
 }
@@ -72885,7 +72885,7 @@ function collectRequestorScopedConfiguredDomainNames(requestorId = "") {
 
 function collectRestV2LearningRequestorDomainNames(programmer = null, requestorId = "") {
   const resolvedRequestorId = String(extractEntityIdFromToken(requestorId) || "").trim();
-  const normalizedRequestorId = normalizeEntityToken(resolvedRequestorId);
+  const normalizedRequestorId = resolvedRequestorId;
   if (!normalizedRequestorId) {
     return [];
   }
@@ -72930,7 +72930,7 @@ function collectRestV2LearningRequestorDomainNames(programmer = null, requestorI
       candidate?.raw?.id,
       candidate?.entityData?.id,
     ]
-      .map((value) => normalizeEntityToken(extractEntityIdFromToken(value)))
+      .map((value) => String(extractEntityIdFromToken(value) || "").trim())
       .filter(Boolean);
     return candidateIds.includes(normalizedRequestorId);
   };
@@ -87198,7 +87198,7 @@ function deriveProgrammerRequestorOptionsFromChannels(programmerData = null, cha
       : [];
   const referencedRequestorIds = new Set(
     rawServiceProviders
-      .map((reference) => normalizeEntityToken(extractEntityIdFromToken(String(reference || ""))))
+      .map((reference) => String(extractEntityIdFromToken(String(reference || "")) || "").trim())
       .filter(Boolean)
   );
   const requestors = [];
@@ -87237,7 +87237,7 @@ function deriveProgrammerRequestorOptionsFromChannels(programmerData = null, cha
 
   (Array.isArray(channels) ? channels : []).forEach((channel) => {
     const channelProgrammerId = normalizeOrganizationIdentifier(channel?.programmerId);
-    const channelId = normalizeEntityToken(String(channel?.id || "").trim());
+    const channelId = String(channel?.id || "").trim();
     const matchesProgrammer =
       normalizedProgrammerId && channelProgrammerId && channelProgrammerId === normalizedProgrammerId;
     const matchesReference = channelId && referencedRequestorIds.has(channelId);
@@ -87310,7 +87310,11 @@ function mapProgrammerEntity(entity, index) {
         );
   const requestorIds =
     requestorOptions.length > 0
-      ? uniqueSorted(requestorOptions.map((item) => normalizeEntityToken(extractEntityIdFromToken(String(item?.id || item?.key || "")))).filter(Boolean))
+      ? uniqueSorted(
+          requestorOptions
+            .map((item) => String(extractEntityIdFromToken(String(item?.id || item?.key || "")) || "").trim())
+            .filter(Boolean)
+        )
       : Array.isArray(data.contentProviders)
         ? data.contentProviders.map((item) => extractContentProviderId(item)).filter(Boolean)
         : Array.isArray(data.serviceProviders)
@@ -87859,7 +87863,7 @@ function getRequestorsForSelectedMediaCompany() {
     return [];
   }
 
-  const normalizeRequestorId = (value) => normalizeEntityToken(extractEntityIdFromToken(String(value || "")));
+  const normalizeRequestorId = (value) => String(extractEntityIdFromToken(String(value || "")) || "").trim();
   const requestorOptions = Array.isArray(programmer.requestorOptions)
     ? programmer.requestorOptions
         .filter((option) => option && typeof option === "object")
@@ -87925,13 +87929,13 @@ function getRequestorsForSelectedMediaCompany() {
     // Build a set of normalized requestor IDs for efficient lookup
     const restV2RequestorIdSet = new Set(
       restV2RequestorIds
-        .map((value) => normalizeEntityToken(String(value || "").trim()))
+        .map((value) => String(value || "").trim())
         .filter(Boolean)
     );
 
     // Filter to only show requestors with REST V2 support
     const filteredRequestors = allRequestors.filter((option) => {
-      const optionId = normalizeEntityToken(String(option.id || option.key || "").trim());
+      const optionId = String(option.id || option.key || "").trim();
       return restV2RequestorIdSet.has(optionId);
     });
 
@@ -88569,7 +88573,7 @@ function extractRequestorIdFromServiceProviderValue(value) {
 }
 
 function resolveCanonicalRequestorIdForProgrammer(requestorId = "", programmerId = "") {
-  const normalizedRequestorId = normalizeEntityToken(requestorId);
+  const normalizedRequestorId = String(requestorId || "").trim();
   if (!normalizedRequestorId) {
     return "";
   }
@@ -88591,7 +88595,7 @@ function resolveCanonicalRequestorIdForProgrammer(requestorId = "", programmerId
   const candidates = [...directCandidates, ...optionCandidates]
     .map((value) => String(extractEntityIdFromToken(value) || "").trim())
     .filter(Boolean);
-  const canonical = candidates.find((candidate) => normalizeEntityToken(candidate) === normalizedRequestorId);
+  const canonical = candidates.find((candidate) => String(candidate || "").trim() === normalizedRequestorId);
   return String(canonical || requestorId || "").trim();
 }
 
@@ -88626,7 +88630,7 @@ function collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId) {
       return;
     }
 
-    const key = normalizeEntityToken(id);
+    const key = String(id || "").trim();
     if (!key || seen.has(key)) {
       return;
     }
@@ -88679,13 +88683,13 @@ function collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId) {
 }
 
 function appSupportsServiceProvider(appInfo, serviceProviderId, programmerId) {
-  const normalizedTarget = normalizeEntityToken(serviceProviderId);
+  const normalizedTarget = String(serviceProviderId || "").trim();
   if (!normalizedTarget) {
     return false;
   }
 
   const candidates = collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId);
-  return candidates.some((candidate) => normalizeEntityToken(candidate) === normalizedTarget);
+  return candidates.some((candidate) => String(candidate || "").trim() === normalizedTarget);
 }
 
 function resolveRestV2AppForServiceProvider(restV2Apps, serviceProviderId, programmerId) {
@@ -100951,7 +100955,7 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
   const authoritativeRequestorId = String(
     firstNonEmptyString([appScopedRequestorId, canonicalRequestorId, requestorId]) || ""
   ).trim();
-  const normalizedCanonicalRequestorId = normalizeEntityToken(canonicalRequestorId || requestorId);
+  const normalizedCanonicalRequestorId = String(canonicalRequestorId || requestorId || "").trim();
   const configurationScopedServiceProvider = getRequestorScopedRestV2ConfigurationServiceProvider(requestorId);
   const rawCandidates = [
     extractRequestorIdFromServiceProviderValue(appInfo?.appData?.serviceProvider),
@@ -100983,7 +100987,7 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
     if (authoritativeRequestorId && chosenValue !== authoritativeRequestorId) {
       return;
     }
-    const dedupeKey = normalizeEntityToken(chosenValue);
+    const dedupeKey = String(chosenValue || "").trim();
     if (normalizedCanonicalRequestorId && dedupeKey !== normalizedCanonicalRequestorId) {
       return;
     }
@@ -101172,7 +101176,7 @@ async function createRestV2SessionForContext(context, options = {}) {
 
 async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
   const resolveCanonicalRequestorCandidates = () => {
-    const normalizedSelectedRequestor = normalizeEntityToken(String(requestorId || "").trim());
+    const normalizedSelectedRequestor = String(requestorId || "").trim();
     const directCandidates = [extractRequestorIdFromServiceProviderValue(requestorId)];
     const optionCandidates = Array.isArray(programmer?.requestorOptions)
       ? programmer.requestorOptions
@@ -101193,7 +101197,7 @@ async function fetchRestV2ConfigurationMvpds(programmer, appInfo, requestorId) {
       : [];
 
     const matchedCandidates = [...optionCandidates, ...idCandidates].filter((candidate) =>
-      normalizeEntityToken(candidate) === normalizedSelectedRequestor
+      String(candidate || "").trim() === normalizedSelectedRequestor
     );
 
     return uniqueSorted([...directCandidates, ...matchedCandidates].filter(Boolean));
