@@ -19997,8 +19997,30 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     return null;
   }
   const programmerId = String(harvest.programmerId || "").trim();
-  const requestorId = String(harvest.requestorId || harvest.serviceProviderId || "").trim();
-  const serviceProviderId = String(harvest.serviceProviderId || harvest.requestorId || "").trim();
+  const rawRequestorId = String(harvest.requestorId || harvest.serviceProviderId || "").trim();
+  const rawServiceProviderId = String(harvest.serviceProviderId || harvest.requestorId || "").trim();
+  const canonicalRequestorId = String(
+    resolveCanonicalRequestorIdForProgrammer(rawRequestorId, programmerId) || rawRequestorId
+  ).trim();
+  const canonicalServiceProviderId = String(
+    resolveCanonicalRequestorIdForProgrammer(rawServiceProviderId, programmerId) || rawServiceProviderId
+  ).trim();
+  const requestorId = String(
+    firstNonEmptyString([
+      canonicalRequestorId,
+      canonicalServiceProviderId,
+      rawRequestorId,
+      rawServiceProviderId,
+    ]) || ""
+  ).trim();
+  const serviceProviderId = String(
+    firstNonEmptyString([
+      canonicalServiceProviderId,
+      canonicalRequestorId,
+      rawServiceProviderId,
+      rawRequestorId,
+    ]) || ""
+  ).trim();
   const mvpd = String(harvest.mvpd || "").trim();
   const sessionUrl = normalizeAdobeNavigationUrl(String(harvest.sessionUrl || "").trim());
   const loginUrl = normalizeAdobeNavigationUrl(String(harvest.loginUrl || "").trim());
@@ -100889,11 +100911,28 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
     extractRequestorIdFromServiceProviderValue(context?.serviceProviderId),
     requestorId,
     String(context?.programmerId || "").trim(),
-  ]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
+  ];
 
-  return uniquePreserveOrder(rawCandidates);
+  const candidates = [];
+  const seen = new Set();
+  rawCandidates.forEach((value) => {
+    const extracted = extractRequestorIdFromServiceProviderValue(value);
+    const normalizedValue = String(extracted || value || "").trim();
+    if (!normalizedValue) {
+      return;
+    }
+    const canonicalValue = String(
+      resolveCanonicalRequestorIdForProgrammer(normalizedValue, context?.programmerId) || normalizedValue
+    ).trim();
+    const key = normalizeEntityToken(canonicalValue);
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    candidates.push(canonicalValue);
+  });
+
+  return candidates;
 }
 
 async function createRestV2SessionForContext(context, options = {}) {

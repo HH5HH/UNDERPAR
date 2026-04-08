@@ -2366,8 +2366,12 @@ function applyProfiles(payload = {}) {
   }
 
   const preferredKey = firstNonEmptyString([payload?.selectedHarvestKey, state.selectedHarvestKey, profiles[0]?.key]);
-  const hasPreferred = profiles.some((profile) => String(profile?.key || "").trim() === preferredKey);
-  state.selectedHarvestKey = hasPreferred ? preferredKey : String(profiles[0]?.key || "").trim();
+  const normalizedPreferredKey = String(preferredKey || "").trim().toLowerCase();
+  const preferredProfile =
+    profiles.find((profile) => String(profile?.key || "").trim() === preferredKey) ||
+    profiles.find((profile) => String(profile?.key || "").trim().toLowerCase() === normalizedPreferredKey) ||
+    null;
+  state.selectedHarvestKey = String(preferredProfile?.key || profiles[0]?.key || "").trim();
 }
 
 function applyCanIWatchResult(payload = {}) {
