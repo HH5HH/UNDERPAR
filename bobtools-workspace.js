@@ -883,9 +883,9 @@ function renderProfileList() {
         <li class="bobtools-profile-item${active ? " is-active" : ""}" data-profile-key="${escapeHtml(key)}" data-select-key="${escapeHtml(key)}">
           <div class="bobtools-profile-row" data-select-key="${escapeHtml(key)}">
             <button type="button" class="bobtools-profile-select" data-select-key="${escapeHtml(key)}" aria-label="Select ${escapeHtml(title)}">
-              <p class="bobtools-profile-title">${escapeHtml(title)}</p>
-              <p class="bobtools-profile-meta">${escapeHtml(subtitle)} | ${escapeHtml(capturedAt)}</p>
-              <p class="bobtools-profile-check">${escapeHtml(summary)}</p>
+              <span class="bobtools-profile-title">${escapeHtml(title)}</span>
+              <span class="bobtools-profile-meta">${escapeHtml(subtitle)} | ${escapeHtml(capturedAt)}</span>
+              <span class="bobtools-profile-check">${escapeHtml(summary)}</span>
             </button>
             <button type="button" class="bobtools-profile-delete" data-delete-key="${escapeHtml(key)}" aria-label="Delete profile" title="Delete profile">×</button>
           </div>

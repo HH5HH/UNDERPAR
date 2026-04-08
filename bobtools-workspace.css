@@ -295,6 +295,7 @@ body {
 }
 
 .bobtools-profile-title {
+  display: block;
   margin: 0;
   color: #26384d;
   font-size: 13px;
@@ -310,6 +311,7 @@ body {
 
 .bobtools-profile-meta,
 .bobtools-profile-check {
+  display: block;
   margin: 3px 0 0;
   color: #485873;
   font-size: 11px;

@@ -21,6 +21,8 @@ test("BOBTOOLS profile rows expose row-level selection hooks and isolate delete 
     source,
     /<div class="bobtools-profile-row" data-select-key="\$\{escapeHtml\(key\)\}">/
   );
+  assert.doesNotMatch(source, /<button[^>]*class="bobtools-profile-select"[\s\S]*?<p class="bobtools-profile-title">/m);
+  assert.match(source, /<button type="button" class="bobtools-profile-select"[\s\S]*?<span class="bobtools-profile-title">/m);
   assert.match(source, /const selectBtn = target\.closest\("\[data-select-key\], \[data-profile-key\]"\);/);
   assert.match(source, /event\.stopPropagation\(\);[\s\S]*?void deleteProfile\(key\);/m);
   assert.match(source, /void sendWorkspaceAction\("select-profile", \{[\s\S]*?harvestKey: key,[\s\S]*?\}\);/m);
