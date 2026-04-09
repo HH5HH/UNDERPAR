@@ -89825,21 +89825,19 @@ function getRegisteredAppChannel(appInfo) {
   // The Console API does NOT put scopes inside entityData; they land on the
   // normalized app record (.scopes) after construction.  Check all three scope
   // sources in priority order to ensure vault-backed and compact app records both hit.
-  if (entityData) {
-    const normalizedScopes =
-      Array.isArray(appInfo?.scopes) && appInfo.scopes.length > 0
-        ? appInfo.scopes
-        : Array.isArray(appData?.scopes) && appData.scopes.length > 0
-          ? appData.scopes
-          : Array.isArray(entityData.scopes) && entityData.scopes.length > 0
-            ? entityData.scopes
-            : [];
-    if (normalizedScopes.length > 0) {
-      return "";
-    }
+  const normalizedScopes =
+    Array.isArray(appInfo?.scopes) && appInfo.scopes.length > 0
+      ? appInfo.scopes
+      : Array.isArray(appData?.scopes) && appData.scopes.length > 0
+        ? appData.scopes
+        : entityData && Array.isArray(entityData.scopes) && entityData.scopes.length > 0
+          ? entityData.scopes
+          : [];
+  if (normalizedScopes.length > 0) {
+    return "";
   }
 
-  // ── Source 3: appData top-level fields (last resort) ──
+  // ── Source 4: appData top-level fields (last resort) ──
   // These can be runtime-tainted after /configuration merge, so only check
   // them when entityData and JWT both came up empty.
   if (appData) {
