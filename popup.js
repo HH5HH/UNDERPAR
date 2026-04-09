@@ -7630,6 +7630,47 @@ async function clearLegacyUnderparVaultChromeStorageKeys() {
     .catch(() => {});
 }
 
+function hasMeaningfulUnderparVaultPayload(vault = null) {
+  if (!vault || typeof vault !== "object") {
+    return false;
+  }
+
+  if (getUnderparVaultImsRuntimeConfig(vault)?.clientId) {
+    return true;
+  }
+
+  if (Object.keys(getUnderparVaultSavedQueries(vault)).length > 0) {
+    return true;
+  }
+
+  if (Object.keys(getUnderparVaultCmImsByEnvironment(vault)).length > 0) {
+    return true;
+  }
+
+  if (getUnderparVaultSlacktivationRecord(vault)) {
+    return true;
+  }
+
+  const environments =
+    vault?.pass?.environments && typeof vault.pass.environments === "object" && !Array.isArray(vault.pass.environments)
+      ? vault.pass.environments
+      : {};
+  return Object.keys(environments).length > 0;
+}
+
+async function readLegacyUnderparVaultPayloadFromChromeStorage() {
+  if (!chrome?.storage?.local?.get) {
+    return null;
+  }
+  try {
+    const payload = await chrome.storage.local.get([UNDERPAR_VAULT_STORAGE_KEY]);
+    const legacyVault = payload?.[UNDERPAR_VAULT_STORAGE_KEY];
+    return legacyVault && typeof legacyVault === "object" ? legacyVault : null;
+  } catch {
+    return null;
+  }
+}
+
 function getPassVaultMediaCompanyRecord(programmerId = "", environmentKey = getActiveAdobePassEnvironmentKey()) {
   return getPassVaultMediaCompanyRecordFromVault(state.passVault, programmerId, environmentKey);
 }
@@ -7716,18 +7757,38 @@ async function ensurePassVaultLoaded(options = {}) {
 
   const loadPromise = (async () => {
     const legacySavedQueries = readLegacySavedEsmQueryEntriesFromLocalStorage();
-    let loadedPersistedVault = !canUseUnderparVaultIndexedDb();
-    const persistedPayload = canUseUnderparVaultIndexedDb()
+    const canUseIndexedDb = canUseUnderparVaultIndexedDb();
+    let loadedPersistedVault = !canUseIndexedDb;
+    let indexedDbReadSucceeded = !canUseIndexedDb;
+    let usedLegacyChromeStorageFallback = false;
+    const persistedPayload = canUseIndexedDb
       ? await underparVaultStore
           .readAggregatePayload()
           .then((payload) => {
             loadedPersistedVault = true;
+            indexedDbReadSucceeded = true;
             return payload;
           })
-          .catch(() => createEmptyUnderparVaultPayload())
+          .catch(() => {
+            indexedDbReadSucceeded = false;
+            return null;
+          })
       : createEmptyUnderparVaultPayload();
-    const normalizedVault = normalizeUnderparVaultPayload(persistedPayload);
+    let normalizedVault = normalizeUnderparVaultPayload(persistedPayload || createEmptyUnderparVaultPayload());
     let shouldPersist = false;
+
+    if (!hasMeaningfulUnderparVaultPayload(normalizedVault)) {
+      const legacyChromeStorageVault = await readLegacyUnderparVaultPayloadFromChromeStorage();
+      if (legacyChromeStorageVault) {
+        const normalizedLegacyVault = normalizeUnderparVaultPayload(legacyChromeStorageVault);
+        if (hasMeaningfulUnderparVaultPayload(normalizedLegacyVault)) {
+          normalizedVault = normalizedLegacyVault;
+          loadedPersistedVault = true;
+          usedLegacyChromeStorageFallback = true;
+          shouldPersist = canUseIndexedDb;
+        }
+      }
+    }
 
     if (Object.keys(legacySavedQueries).length > 0) {
       setUnderparVaultSavedQueries(normalizedVault, {
@@ -7739,12 +7800,12 @@ async function ensurePassVaultLoaded(options = {}) {
     }
 
     state.passVault = normalizedVault;
-    state.passVaultLoaded = loadedPersistedVault;
+    state.passVaultLoaded = loadedPersistedVault || hasMeaningfulUnderparVaultPayload(normalizedVault);
     rebuildPassVaultProgrammerStatusIndex(normalizedVault);
     try {
       if (shouldPersist) {
         await persistPassVaultPayloadToStorage(normalizedVault, { silent: true });
-      } else {
+      } else if (indexedDbReadSucceeded || usedLegacyChromeStorageFallback || !canUseIndexedDb) {
         await clearLegacyUnderparVaultChromeStorageKeys();
       }
     } catch (_error) {
