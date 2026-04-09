@@ -2547,6 +2547,7 @@ async function deleteProfile(harvestKey = "") {
   if (!normalized) {
     return;
   }
+  setStatus("Removing selected MVPD profile...");
   state.running = true;
   syncButtons();
   const response = await sendWorkspaceAction("delete-profile", {
@@ -2626,6 +2627,27 @@ function handleWorkspaceEvent(eventName, payload = {}) {
   }
 }
 
+function resolveEventElementTarget(event) {
+  if (!event) {
+    return null;
+  }
+  const directTarget = event.target;
+  if (directTarget instanceof Element) {
+    return directTarget;
+  }
+  if (typeof event.composedPath === "function") {
+    const path = event.composedPath();
+    const matched = Array.isArray(path) ? path.find((entry) => entry instanceof Element) : null;
+    if (matched instanceof Element) {
+      return matched;
+    }
+  }
+  if (directTarget && directTarget.parentElement instanceof Element) {
+    return directTarget.parentElement;
+  }
+  return null;
+}
+
 function registerEventHandlers() {
   window.addEventListener("beforeunload", () => {
     releaseSplunkDownloadUrl();
@@ -2633,8 +2655,8 @@ function registerEventHandlers() {
   });
 
   if (els.profileList) {
-    els.profileList.addEventListener("click", (event) => {
-      const target = event.target instanceof Element ? event.target : null;
+    const handleProfileListPointerAction = (event) => {
+      const target = resolveEventElementTarget(event);
       if (!target) {
         return;
       }
@@ -2654,7 +2676,9 @@ function registerEventHandlers() {
         ).trim();
         selectProfile(key);
       }
-    });
+    };
+    els.profileList.addEventListener("click", handleProfileListPointerAction);
+    els.profileList.addEventListener("pointerup", handleProfileListPointerAction);
   }
 
   if (els.form) {
