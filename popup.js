@@ -94340,28 +94340,21 @@ function collectCmProgrammerIdDerivedAliases(values = []) {
 }
 
 function collectCmProgrammerIdCandidates(programmer = null) {
-  const sourceEntity = programmer?.source?.entityData && typeof programmer.source.entityData === "object" ? programmer.source.entityData : {};
   const sourceKeyRaw = String(programmer?.source?.key || "").trim();
   const sourceKeyMatch = sourceKeyRaw.match(/^Programmer:(.+)$/i);
   const sourceKeyId = sourceKeyMatch ? String(sourceKeyMatch[1] || "").trim() : extractEntityIdFromToken(sourceKeyRaw);
   const baseCandidates = [
     programmer?.programmerId,
-    sourceEntity?.id,
-    sourceEntity?.programmerId,
-    sourceEntity?.["programmer-id"],
     sourceKeyId,
   ];
   return uniqueSorted([...collectCmEntityIdCandidates(baseCandidates), ...collectCmProgrammerIdDerivedAliases(baseCandidates)]);
 }
 
 function collectCmProgrammerNameCandidates(programmer = null) {
-  const sourceEntity = programmer?.source?.entityData && typeof programmer.source.entityData === "object" ? programmer.source.entityData : {};
   return collectCmEntityNameCandidates([
     programmer?.mediaCompanyName,
     programmer?.programmerName,
-    sourceEntity?.displayName,
-    sourceEntity?.["display-name"],
-    sourceEntity?.name,
+    programmer?.label,
   ]);
 }
 
