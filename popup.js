@@ -89793,24 +89793,7 @@ function getRegisteredAppChannel(appInfo) {
       return "";
     }
     // entityData exists but has NO hint fields at all.
-    // For DCR-scoped apps the absence of any channel restriction IS the All Channels
-    // signal — channel-specific apps always declare their channel in entityData.
-    // The Console API does NOT put scopes inside entityData; they land on the
-    // normalized app record (.scopes) after construction.  Check all three scope
-    // sources in priority order to ensure vault-backed and compact app records both hit.
-    const normalizedScopes =
-      Array.isArray(appInfo?.scopes) && appInfo.scopes.length > 0
-        ? appInfo.scopes
-        : Array.isArray(appData?.scopes) && appData.scopes.length > 0
-          ? appData.scopes
-          : Array.isArray(entityData.scopes) && entityData.scopes.length > 0
-            ? entityData.scopes
-            : [];
-    if (normalizedScopes.length > 0) {
-      return "";
-    }
-    // No scope information found — this may be an incomplete entity record.
-    // Fall through to the JWT to look for explicit channel claims.
+    // Mark this so we can check the scope fallback AFTER checking JWT.
   }
 
   // ── Source 2: Software statement JWT claims ──
@@ -89831,6 +89814,27 @@ function getRegisteredAppChannel(appInfo) {
     }
     // JWT has explicit "All Channels" or claims exist with no channel hints → All Channels.
     if (jwtHints.length > 0) {
+      return "";
+    }
+  }
+
+  // ── Source 3: Scope-based All Channels fallback ──
+  // entityData has no channel hints, JWT has no channel claims.
+  // For DCR-scoped apps, the absence of any channel restriction IS the All Channels
+  // signal — channel-specific apps always declare their channel somewhere (entityData or JWT).
+  // The Console API does NOT put scopes inside entityData; they land on the
+  // normalized app record (.scopes) after construction.  Check all three scope
+  // sources in priority order to ensure vault-backed and compact app records both hit.
+  if (entityData) {
+    const normalizedScopes =
+      Array.isArray(appInfo?.scopes) && appInfo.scopes.length > 0
+        ? appInfo.scopes
+        : Array.isArray(appData?.scopes) && appData.scopes.length > 0
+          ? appData.scopes
+          : Array.isArray(entityData.scopes) && entityData.scopes.length > 0
+            ? entityData.scopes
+            : [];
+    if (normalizedScopes.length > 0) {
       return "";
     }
   }
