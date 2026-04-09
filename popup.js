@@ -2695,7 +2695,10 @@ async function importUnderparImsRuntimeConfigFromZipKeyText(zipKeyText = "", opt
 
     setUnderparVaultImsRuntimeConfig(vault, nextRuntimeConfig);
     vault.updatedAt = Date.now();
-    await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false });
+    await persistPassVaultPayloadToStorage(vault, { 
+      silent: options?.silent !== false,
+      allowDuringManualSignOut: true 
+    });
 
     if (previousClientId && previousClientId !== nextClientId) {
       await clearLoginData().catch(() => {});
@@ -72201,7 +72204,20 @@ function getRawDetectedPremiumServiceKeys(services) {
       return Boolean(String(services?.esm?.guid || "").trim());
     }
     if (serviceKey === "cm" || serviceKey === "cmMvpd") {
-      return shouldShowCmService(services?.[serviceKey]);
+      // CM should be shown if it has matched tenants.
+      // The matched tenants may be from actual CM service or synthetic detection
+      // from programmer matching the CM catalog (handled by applyPremiumServiceRuntimeSummary)
+      const cmService = services?.[serviceKey];
+      if (shouldShowCmService(cmService)) {
+        return true;
+      }
+      // Additionally, check if CM service object exists but lacks matchedTenants
+      // This handles cases where CM was detected but matched tenants array is being built
+      if (cmService && typeof cmService === "object" && 
+          (cmService.synthetic === true || String(cmService.sourceUrl || "").trim())) {
+        return true;
+      }
+      return false;
     }
     return Boolean(services?.[serviceKey]);
   });
