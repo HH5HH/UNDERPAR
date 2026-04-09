@@ -824,6 +824,13 @@ test("strict REST V2 requestor resolver honors persisted all-channels map metada
     }),
     null
   );
+
+  assert.equal(
+    resolveStrictRestV2RequestorIdsForProgrammer("Viacom", {
+      __restV2RequestorIds: null,
+    }),
+    null
+  );
 });
 
 test("ENVx hydration persists all-channels coverage metadata for premium services", () => {

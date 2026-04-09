@@ -89948,6 +89948,18 @@ function resolveStrictRestV2RequestorIdsForProgrammer(programmerId = "", premium
     return null;
   }
 
+  // Persisted runtime snapshots encode "show all requestors" as an explicit
+  // null __restV2RequestorIds. Honor that contract here instead of falling
+  // through to [] (which disables the requestor menu).
+  if (
+    premiumApps &&
+    typeof premiumApps === "object" &&
+    Object.prototype.hasOwnProperty.call(premiumApps, "__restV2RequestorIds") &&
+    premiumApps.__restV2RequestorIds === null
+  ) {
+    return null;
+  }
+
   const persistedRequestorIds = Array.isArray(premiumApps?.__restV2RequestorIds)
     ? premiumApps.__restV2RequestorIds
         .map((value) => String(value || "").trim())
