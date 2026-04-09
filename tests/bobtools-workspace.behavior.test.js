@@ -31,6 +31,8 @@ test("BOBTOOLS profile rows expose row-level selection hooks and isolate delete 
   assert.match(source, /els\.profileList\.querySelectorAll\("\.bobtools-profile-select"\)\.forEach\(\(button\) => \{/);
   assert.match(source, /els\.profileList\.querySelectorAll\("\.bobtools-profile-item"\)\.forEach\(\(item\) => \{/);
   assert.match(popupSource, /bobtoolsWorkspaceSelectedHarvestKeyByWindowId: new Map\(\),/);
+  assert.match(popupSource, /bobtoolsWorkspaceSelectedHarvestKey: "",/);
   assert.match(popupSource, /const messageWindowId = Number\(message\?\.windowId \|\| 0\);[\s\S]*?const senderWindowId = Number\(sender\?\.tab\?\.windowId \|\| messageWindowId \|\| 0\);/m);
   assert.match(popupSource, /if \(action === "select-profile"\) \{[\s\S]*?setBobtoolsWorkspaceSelectedHarvestKey\(senderWindowId, harvestKey\);/m);
+  assert.match(popupSource, /function setBobtoolsWorkspaceSelectedHarvestKey\(targetWindowId = 0, harvestKey = ""\) \{[\s\S]*?state\.bobtoolsWorkspaceSelectedHarvestKey = normalizedHarvestKey;/m);
 });

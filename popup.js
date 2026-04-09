@@ -14358,6 +14358,7 @@ const state = {
   bobtoolsWorkspaceWindowId: 0,
   bobtoolsWorkspaceTabIdByWindowId: new Map(),
   bobtoolsWorkspaceSelectedHarvestKeyByWindowId: new Map(),
+  bobtoolsWorkspaceSelectedHarvestKey: "",
   bobtoolsWorkspaceRuntimeListenerBound: false,
   bobtoolsWorkspaceTabWatcherBound: false,
   bobtoolsWorkspaceLastResultByHarvestKey: new Map(),
@@ -64686,7 +64687,14 @@ function bobtoolsWorkspaceHasOpenTab() {
 function getBobtoolsWorkspaceSelectedHarvestKey(targetWindowId = 0) {
   const normalizedWindowId = Number(targetWindowId || 0);
   if (normalizedWindowId > 0) {
-    return String(state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.get(normalizedWindowId) || "").trim();
+    const scopedSelectionKey = String(state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.get(normalizedWindowId) || "").trim();
+    if (scopedSelectionKey) {
+      return scopedSelectionKey;
+    }
+  }
+  const globalSelectionKey = String(state.bobtoolsWorkspaceSelectedHarvestKey || "").trim();
+  if (globalSelectionKey) {
+    return globalSelectionKey;
   }
   const activeWindowId = Number(state.bobtoolsWorkspaceWindowId || 0);
   if (activeWindowId > 0) {
@@ -64697,14 +64705,14 @@ function getBobtoolsWorkspaceSelectedHarvestKey(targetWindowId = 0) {
 
 function setBobtoolsWorkspaceSelectedHarvestKey(targetWindowId = 0, harvestKey = "") {
   const normalizedWindowId = Number(targetWindowId || 0);
-  if (normalizedWindowId <= 0) {
-    return;
-  }
   const normalizedHarvestKey = String(harvestKey || "").trim();
-  if (normalizedHarvestKey) {
-    state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.set(normalizedWindowId, normalizedHarvestKey);
-  } else {
-    state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.delete(normalizedWindowId);
+  state.bobtoolsWorkspaceSelectedHarvestKey = normalizedHarvestKey;
+  if (normalizedWindowId > 0) {
+    if (normalizedHarvestKey) {
+      state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.set(normalizedWindowId, normalizedHarvestKey);
+    } else {
+      state.bobtoolsWorkspaceSelectedHarvestKeyByWindowId.delete(normalizedWindowId);
+    }
   }
 }
 
@@ -65673,9 +65681,7 @@ async function handleBobtoolsWorkspaceAction(message, sender = null) {
     if (!harvestKey) {
       return { ok: false, error: "Missing profile key." };
     }
-    if (senderWindowId > 0) {
-      setBobtoolsWorkspaceSelectedHarvestKey(senderWindowId, harvestKey);
-    }
+    setBobtoolsWorkspaceSelectedHarvestKey(senderWindowId, harvestKey);
     const selectedProgrammer = resolveSelectedProgrammer();
     const selectionContext = buildBobtoolsWorkspaceSelectionContext(selectedProgrammer);
     bobtoolsWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
@@ -65776,7 +65782,7 @@ async function handleBobtoolsWorkspaceAction(message, sender = null) {
     if (!deleteResult?.ok) {
       return { ok: false, error: String(deleteResult?.error || "Unable to remove the selected MVPD profile.") };
     }
-    if (senderWindowId > 0 && getBobtoolsWorkspaceSelectedHarvestKey(senderWindowId) === harvestKey) {
+    if (getBobtoolsWorkspaceSelectedHarvestKey(senderWindowId) === harvestKey) {
       setBobtoolsWorkspaceSelectedHarvestKey(senderWindowId, "");
     }
     state.bobtoolsWorkspaceLastResultByHarvestKey.delete(harvestKey);
