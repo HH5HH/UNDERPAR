@@ -1175,15 +1175,24 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
       null;
     if (runtimeServices && typeof runtimeServices === "object") {
       const cmMvpdSelectionKey = buildCurrentCmMvpdSelectionKey(programmer);
-      runtimeServices = {
+      const mergedServices = {
         ...runtimeServices,
+        cm:
+          state.cmServiceByProgrammerId instanceof Map && state.cmServiceByProgrammerId.has(programmerId)
+            ? state.cmServiceByProgrammerId.get(programmerId) || runtimeServices?.cm || null
+            : runtimeServices?.cm || null,
         cmMvpd:
           cmMvpdSelectionKey && state.cmServiceByMvpdSelectionKey instanceof Map && state.cmServiceByMvpdSelectionKey.has(cmMvpdSelectionKey)
             ? state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || runtimeServices?.cmMvpd || null
             : runtimeServices?.cmMvpd || null,
         cmMvpdSelectionKey: cmMvpdSelectionKey || String(runtimeServices?.cmMvpdSelectionKey || "").trim(),
       };
-      setCurrentPremiumAppsSnapshot(programmerId, runtimeServices);
+      // Re-apply premium service runtime summary to properly detect CM
+      const summarizedServices = applyPremiumServiceRuntimeSummary(programmer, mergedServices, {
+        cmCatalog: state.cmTenantsCatalog,
+      });
+      setCurrentPremiumAppsSnapshot(programmerId, summarizedServices);
+      runtimeServices = summarizedServices;
     }
 
     const hrContextReady = isProgrammerHrContextHydrationReady(programmerId, runtimeServices);
