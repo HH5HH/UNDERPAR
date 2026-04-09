@@ -68,6 +68,8 @@ test("popup VAULT persistence uses IndexedDB and does not persist CM tenant bund
   assert.doesNotMatch(programmerRecordSource, /cmTenantBundlesByTenantKey/);
   assert.doesNotMatch(cmGlobalSource, /tokenFingerprint/);
   assert.doesNotMatch(cmGlobalSource, /imsSession/);
+  assert.match(persistSource, /state\.manualSignOutHold === true/);
+  assert.match(persistSource, /createEmptyUnderparVaultPayload\(\)/);
 });
 
 test("CM tenant catalog persistence keeps only lightweight tenant metadata", () => {

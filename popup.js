@@ -8084,7 +8084,11 @@ function buildPassVaultApplicationRecord(programmerId = "", guid = "", appData =
 }
 
 async function persistPassVaultPayloadToStorage(vault = null, options = {}) {
-  const persistableVault = normalizeUnderparVaultPayload(vault || createEmptyUnderparVaultPayload());
+  const forceEmptyVaultDuringManualSignOutHold =
+    state.manualSignOutHold === true && options?.allowDuringManualSignOut !== true;
+  const persistableVault = normalizeUnderparVaultPayload(
+    forceEmptyVaultDuringManualSignOutHold ? createEmptyUnderparVaultPayload() : vault || createEmptyUnderparVaultPayload()
+  );
   state.passVault = persistableVault;
   state.passVaultLoaded = true;
   rebuildPassVaultProgrammerStatusIndex(persistableVault);
@@ -9253,7 +9257,7 @@ function scanAllChannelsServiceCoverage(registeredApplications = []) {
       : [];
     const resolvedAppChannel = getRegisteredAppChannel(app);
     const explicitChannel = extractRequestorIdFromServiceProviderValue(resolvedAppChannel);
-    const appIsAllChannels = resolvedAppChannel === "";
+    const appIsAllChannels = isAllChannelsApp(app);
     const channelHints = hints.length > 0 ? hints : explicitChannel ? [explicitChannel] : [];
 
     for (const def of UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS) {
@@ -89821,6 +89825,44 @@ function getRegisteredAppChannel(appInfo) {
 }
 
 function isAllChannelsApp(appInfo) {
+  const hasExplicitEmptyHintArray = (value) => Array.isArray(value) && value.length === 0;
+  const hasExplicitEmptyHints = (source = null) => {
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      return false;
+    }
+    return (
+      hasExplicitEmptyHintArray(source?.serviceProviders) ||
+      hasExplicitEmptyHintArray(source?.contentProviders) ||
+      hasExplicitEmptyHintArray(source?.requestors) ||
+      hasExplicitEmptyHintArray(source?.requestorIds)
+    );
+  };
+
+  if (hasExplicitEmptyHints(appInfo)) {
+    return true;
+  }
+
+  const appDataSource =
+    appInfo?.appData && typeof appInfo.appData === "object" && !Array.isArray(appInfo.appData)
+      ? appInfo.appData
+      : null;
+  const rawSource =
+    appInfo?.raw && typeof appInfo.raw === "object" && !Array.isArray(appInfo.raw)
+      ? appInfo.raw
+      : null;
+  const envelopeEntity =
+    appInfo?.__rawEnvelope?.entityData && typeof appInfo.__rawEnvelope.entityData === "object" && !Array.isArray(appInfo.__rawEnvelope.entityData)
+      ? appInfo.__rawEnvelope.entityData
+      : appDataSource?.__rawEnvelope?.entityData && typeof appDataSource.__rawEnvelope.entityData === "object" && !Array.isArray(appDataSource.__rawEnvelope.entityData)
+        ? appDataSource.__rawEnvelope.entityData
+        : rawSource?.__rawEnvelope?.entityData && typeof rawSource.__rawEnvelope.entityData === "object" && !Array.isArray(rawSource.__rawEnvelope.entityData)
+          ? rawSource.__rawEnvelope.entityData
+          : null;
+
+  if (hasExplicitEmptyHints(envelopeEntity) || hasExplicitEmptyHints(appDataSource) || hasExplicitEmptyHints(rawSource)) {
+    return true;
+  }
+
   return getRegisteredAppChannel(appInfo) === "";
 }
 

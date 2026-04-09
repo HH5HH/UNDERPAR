@@ -694,6 +694,17 @@ test("strict REST V2 requestor resolver returns wildcard for All Channels apps",
   assert.equal(resolveStrictRestV2RequestorIdsForProgrammer("AETN", { restV2Apps: [] }), null);
 });
 
+test("All Channels classifier treats explicit empty service provider arrays as wildcard coverage", () => {
+  const { isAllChannelsApp } = loadFunctions("popup.js", ["isAllChannelsApp"], {
+    getRegisteredAppChannel: () => null,
+  });
+
+  assert.equal(isAllChannelsApp({ serviceProviders: [] }), true);
+  assert.equal(isAllChannelsApp({ appData: { serviceProviders: [] } }), true);
+  assert.equal(isAllChannelsApp({ __rawEnvelope: { entityData: { serviceProviders: [] } } }), true);
+  assert.equal(isAllChannelsApp({ serviceProviders: ["@ServiceProvider:HISTORY"] }), false);
+});
+
 test("ENVx hydration persists all-channels coverage metadata for premium services", () => {
   const { buildPassVaultDirectPremiumServicesSnapshot } = loadFunctions(
     "popup.js",
