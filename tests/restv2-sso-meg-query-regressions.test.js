@@ -119,6 +119,12 @@ test("REST V2 service-provider mismatch detection accepts the plain-language inv
   );
 });
 
+test("All Channels scan does not infer universal coverage from missing service-provider hints", () => {
+  const popupSource = read("popup.js");
+  assert.match(popupSource, /const resolvedAppChannel = getRegisteredAppChannel\(app\);/);
+  assert.doesNotMatch(popupSource, /const appIsAllChannels = hints\.length === 0;/);
+});
+
 test("REST V2 learning refresh helper rerenders only for the active RequestorId x MVPD selection", () => {
   let refreshCall = null;
   const { maybeRefreshRestV2InteractiveDocsForContext } = loadFunctions(
@@ -437,6 +443,69 @@ test("requestor repopulation preserves requestor and MVPD during transient hydra
   assert.equal(state.selectedMvpdId, "Dish");
   assert.equal(mvpdSelect.disabled, false);
   assert.match(String(mvpdSelect.innerHTML || ""), /Dish|DISH/);
+});
+
+test("requestor filtering treats explicit empty REST V2 requestor coverage as no valid requestors", () => {
+  const { getRequestorsForSelectedMediaCompany } = loadFunctions("popup.js", ["getRequestorsForSelectedMediaCompany"], {
+    state: {
+      consoleBootstrapState: {
+        channels: [],
+      },
+    },
+    resolveSelectedProgrammer: () => ({
+      programmerId: "Rogers Media",
+      requestorIds: ["animalplanettv", "foodnetworktv"],
+      requestorOptions: [],
+    }),
+    getCurrentPremiumAppsSnapshot: () => ({
+      __restV2RequestorIds: [],
+      restV2Apps: [],
+    }),
+    extractEntityIdFromToken: (value = "") => String(value || "").trim(),
+    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+    uniqueSorted: (values = []) =>
+      Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
+    deriveProgrammerRequestorOptionsFromChannels: () => [],
+    extractRequestorIdFromServiceProviderValue: (value = "") => String(value || "").trim(),
+    getRegisteredAppChannel: () => "",
+  });
+
+  const options = getRequestorsForSelectedMediaCompany();
+  assert.equal(Array.isArray(options), true);
+  assert.equal(options.length, 0);
+});
+
+test("requestor filtering fallback no longer widens to global channel list", () => {
+  const { getRequestorsForSelectedMediaCompany } = loadFunctions("popup.js", ["getRequestorsForSelectedMediaCompany"], {
+    state: {
+      consoleBootstrapState: {
+        channels: [
+          { id: "animalplanettv", name: "Animal Planet", programmerId: "Rogers Media" },
+          { id: "global-other", name: "Other", programmerId: "Different Co" },
+        ],
+      },
+    },
+    resolveSelectedProgrammer: () => ({
+      programmerId: "Rogers Media",
+      requestorIds: [],
+      requestorOptions: [],
+    }),
+    getCurrentPremiumAppsSnapshot: () => ({
+      __restV2RequestorIds: null,
+      restV2Apps: [],
+    }),
+    extractEntityIdFromToken: (value = "") => String(value || "").trim(),
+    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+    uniqueSorted: (values = []) =>
+      Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
+    deriveProgrammerRequestorOptionsFromChannels: () => [],
+    extractRequestorIdFromServiceProviderValue: (value = "") => String(value || "").trim(),
+    getRegisteredAppChannel: () => "",
+  });
+
+  const options = getRequestorsForSelectedMediaCompany();
+  assert.equal(Array.isArray(options), true);
+  assert.equal(options.length, 0);
 });
 
 test("MEG workspace saved-query reset clears the picker after the native menu closes", () => {

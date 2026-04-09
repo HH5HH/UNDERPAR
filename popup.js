@@ -9181,8 +9181,10 @@ function scanAllChannelsServiceCoverage(registeredApplications = []) {
           .map((h) => computeEntityReferenceId(String(h || "").trim()))
           .filter((h) => h && h.toLowerCase() !== "all channels" && h !== "*")
       : [];
-    const appIsAllChannels = hints.length === 0;
-    const primaryChannel = hints[0] || "";
+    const resolvedAppChannel = getRegisteredAppChannel(app);
+    const explicitChannel = extractRequestorIdFromServiceProviderValue(resolvedAppChannel);
+    const appIsAllChannels = resolvedAppChannel === "";
+    const channelHints = hints.length > 0 ? hints : explicitChannel ? [explicitChannel] : [];
 
     for (const def of UNDERPAR_VAULT_DCR_SERVICE_DEFINITIONS) {
       const scopeMatch =
@@ -9203,7 +9205,7 @@ function scanAllChannelsServiceCoverage(registeredApplications = []) {
         allChannelsFound[def.serviceKey] = true;
       } else {
         // Channel-specific: track every hint (an app can serve multiple channels).
-        hints.forEach((channel) => {
+        channelHints.forEach((channel) => {
           channelSpecificApps[def.serviceKey].push({ app, channel });
         });
       }
@@ -9889,12 +9891,7 @@ function buildPassVaultDirectPremiumServicesSnapshot(
   // If there are "All Channels" REST V2 apps, allow all requestors (set to null)
   // If only channel-specific REST V2 apps exist, filter to only those requestors
   let restV2RequestorIds = null;
-  const hasAllChannelsRestV2 =
-    scanResult.allChannelsByServiceKey?.restV2 === true ||
-    (Array.isArray(restV2Apps) &&
-      restV2Apps.some((app) =>
-        isAllChannelsServiceProviderValue(firstNonEmptyString([app?.appData?.serviceProvider, app?.serviceProvider]))
-      ));
+  const hasAllChannelsRestV2 = scanResult.allChannelsByServiceKey?.restV2 === true;
 
   if (!hasAllChannelsRestV2) {
     // Extract requestor IDs directly from registered apps' ServiceProvider field values
@@ -9918,7 +9915,9 @@ function buildPassVaultDirectPremiumServicesSnapshot(
           })
           .filter(Boolean)
       : [];
-    restV2RequestorIds = restV2RequestorIds.length > 0 ? Array.from(new Set(restV2RequestorIds)).sort() : null;
+    restV2RequestorIds = Array.from(new Set(restV2RequestorIds)).sort((left, right) =>
+      String(left).localeCompare(String(right), undefined, { sensitivity: "base" })
+    );
   }
   // If hasAllChannelsRestV2 is true, restV2RequestorIds remains null (show all requestors)
 
@@ -10298,10 +10297,7 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
 
   // Extract requestor IDs from REST V2 apps for filtering the requestor dropdown
   let restV2RequestorIds = null;
-  const hasAllChannelsRestV2 = Array.isArray(restV2Apps) && restV2Apps.some((appInfo) => {
-    const serviceProviderValue = String(appInfo?.appData?.serviceProvider || appInfo?.serviceProvider || "").trim();
-    return isAllChannelsServiceProviderValue(serviceProviderValue);
-  });
+  const hasAllChannelsRestV2 = Array.isArray(restV2Apps) && restV2Apps.some((appInfo) => isAllChannelsApp(appInfo));
 
   if (!hasAllChannelsRestV2) {
     // Extract requestor IDs directly from registered apps' ServiceProvider field values
@@ -10325,7 +10321,9 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
           })
           .filter(Boolean)
       : [];
-    restV2RequestorIds = extractedIds.length > 0 ? Array.from(new Set(extractedIds)).sort() : null;
+    restV2RequestorIds = Array.from(new Set(extractedIds)).sort((left, right) =>
+      String(left).localeCompare(String(right), undefined, { sensitivity: "base" })
+    );
   }
   // If hasAllChannelsRestV2 is true, restV2RequestorIds remains null (show all requestors)
 
@@ -88052,25 +88050,31 @@ function getRequestorsForSelectedMediaCompany() {
   // Filter the dropdown to show ONLY requestors that have REST V2 registered applications.
   const programmerId = String(programmer.programmerId || "").trim();
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
+  const hasExplicitRestV2RequestorFilter =
+    Boolean(premiumApps) && Object.prototype.hasOwnProperty.call(premiumApps, "__restV2RequestorIds");
   const normalizedRestV2RequestorIds = Array.isArray(premiumApps?.__restV2RequestorIds)
-    ? premiumApps.__restV2RequestorIds
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
+    ? Array.from(
+        new Set(
+          premiumApps.__restV2RequestorIds
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+        )
+      ).sort((left, right) => String(left).localeCompare(String(right), undefined, { sensitivity: "base" }))
     : premiumApps?.__restV2RequestorIds === null
       ? null
-      : null;
-  let restV2RequestorIds =
-    Array.isArray(normalizedRestV2RequestorIds) && normalizedRestV2RequestorIds.length > 0
-      ? normalizedRestV2RequestorIds
-      : null;
+      : [];
+  let restV2RequestorIds = hasExplicitRestV2RequestorFilter ? normalizedRestV2RequestorIds : null;
 
   // Fallback: if runtime filtering IDs are missing, derive requestors from REST V2 app channels.
-  if (!Array.isArray(restV2RequestorIds) || restV2RequestorIds.length === 0) {
+  if (!hasExplicitRestV2RequestorFilter && (!Array.isArray(restV2RequestorIds) || restV2RequestorIds.length === 0)) {
     const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
     const derivedIds = restV2Apps
       .map((appInfo) => extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo)))
       .filter((value) => Boolean(value));
-    restV2RequestorIds = derivedIds.length > 0 ? Array.from(new Set(derivedIds)).sort() : null;
+    restV2RequestorIds =
+      derivedIds.length > 0
+        ? Array.from(new Set(derivedIds)).sort((left, right) => String(left).localeCompare(String(right), undefined, { sensitivity: "base" }))
+        : null;
   }
 
   if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
@@ -88101,21 +88105,22 @@ function getRequestorsForSelectedMediaCompany() {
     }));
   }
 
+  if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length === 0) {
+    return [];
+  }
+
   // ── Fallback: show all requestors ──────
   if (allRequestors.length > 0) {
     return allRequestors;
   }
 
-  // If no programmer-specific requestors and REST V2 allows all, show all channels
+  // If no programmer-specific requestors and REST V2 allows all, only show
+  // channels that belong to the selected media company.
   if (restV2RequestorIds === null) {
-    return (Array.isArray(state.consoleBootstrapState.channels) ? state.consoleBootstrapState.channels : [])
-      .map((channel) => ({
-        key: String(channel?.id || "").trim(),
-        id: String(channel?.id || "").trim(),
-        label: String(channel?.displayName || channel?.name || channel?.id || "").trim(),
-      }))
-      .filter((option) => option.id)
-      .sort((left, right) => String(left.label).localeCompare(String(right.label), undefined, { sensitivity: "base" }));
+    return deriveProgrammerRequestorOptionsFromChannels(
+      programmer,
+      Array.isArray(state.consoleBootstrapState.channels) ? state.consoleBootstrapState.channels : []
+    );
   }
 
   return [];
@@ -88191,17 +88196,16 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   );
   const hydrationPending =
     Boolean(normalizedProgrammerId) && Boolean(getProgrammerServiceHydrationPromise(normalizedProgrammerId));
+  const hasExplicitRestV2RequestorFilter =
+    Boolean(resolvedServices) && Object.prototype.hasOwnProperty.call(resolvedServices, "__restV2RequestorIds");
   const normalizedRestV2RequestorIds = Array.isArray(resolvedServices?.__restV2RequestorIds)
     ? resolvedServices.__restV2RequestorIds
         .map((value) => String(value || "").trim())
         .filter(Boolean)
     : resolvedServices?.__restV2RequestorIds === null
       ? null
-      : null;
-  const restV2RequestorIds =
-    Array.isArray(normalizedRestV2RequestorIds) && normalizedRestV2RequestorIds.length > 0
-      ? normalizedRestV2RequestorIds
-      : null;
+      : [];
+  const restV2RequestorIds = hasExplicitRestV2RequestorFilter ? normalizedRestV2RequestorIds : null;
   const restV2SelectionReady =
     restV2RequestorIds === null || (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0);
   const runtimeReady =
