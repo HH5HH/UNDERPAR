@@ -88561,6 +88561,13 @@ async function refreshProgrammerPanels(options = {}) {
       cachedCmService,
       cachedCmMvpdService
     );
+
+    // First-pass hydration already has enough REST V2 coverage metadata to
+    // populate requestors. Apply it immediately so first selection lights up
+    // without waiting for deep credential hydration completion.
+    populateRequestorSelect();
+    syncRequestorSelectHydrationAvailability(programmerId, provisionalServices);
+
     if (!selectionStillCurrent()) {
       return;
     }
