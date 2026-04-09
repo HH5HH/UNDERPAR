@@ -122,21 +122,25 @@ test("REST V2 service-provider mismatch detection accepts the plain-language inv
 test("HR context hydration readiness does not block HEALTH/LEARNING when CM is not in detected services", () => {
   const { isProgrammerHrContextHydrationReady } = loadFunctions("popup.js", ["isProgrammerHrContextHydrationReady"], {
     isProgrammerRuntimeServicesReady: () => true,
-    getDetectedPremiumServiceKeys: () => ["esmWorkspace", "degradation"],
-    hasResolvedCmAvailabilityForProgrammer: () => false,
   });
 
   assert.equal(isProgrammerHrContextHydrationReady("ABC", { esm: { guid: "esm-guid" }, degradation: true }), true);
 });
 
-test("HR context hydration readiness still requires CM availability when CM service is detected", () => {
+test("HR context hydration readiness stays true while CM precheck is still pending", () => {
   const { isProgrammerHrContextHydrationReady } = loadFunctions("popup.js", ["isProgrammerHrContextHydrationReady"], {
     isProgrammerRuntimeServicesReady: () => true,
-    getDetectedPremiumServiceKeys: () => ["cm"],
-    hasResolvedCmAvailabilityForProgrammer: () => false,
   });
 
-  assert.equal(isProgrammerHrContextHydrationReady("ABC", { cm: {} }), false);
+  assert.equal(isProgrammerHrContextHydrationReady("ABC", { cm: {} }), true);
+});
+
+test("HR context hydration readiness remains blocked until runtime services are ready", () => {
+  const { isProgrammerHrContextHydrationReady } = loadFunctions("popup.js", ["isProgrammerHrContextHydrationReady"], {
+    isProgrammerRuntimeServicesReady: () => false,
+  });
+
+  assert.equal(isProgrammerHrContextHydrationReady("ABC", { restV2: { guid: "rest-guid" } }), false);
 });
 
 test("All Channels scan does not infer universal coverage from missing service-provider hints", () => {

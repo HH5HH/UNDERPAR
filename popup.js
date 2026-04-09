@@ -1065,15 +1065,7 @@ function isProgrammerHrContextHydrationReady(programmerId = "", services = null)
   if (!normalizedProgrammerId || !resolvedServices) {
     return false;
   }
-  if (!isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices)) {
-    return false;
-  }
-  const detectedServiceKeys = getDetectedPremiumServiceKeys(resolvedServices);
-  const requiresCmResolution = detectedServiceKeys.includes("cm") || detectedServiceKeys.includes("cmMvpd");
-  if (!requiresCmResolution) {
-    return true;
-  }
-  return hasResolvedCmAvailabilityForProgrammer(normalizedProgrammerId, resolvedServices);
+  return isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices);
 }
 
 function isProgrammerPremiumInteractionReady(programmerId = "", services = null) {
