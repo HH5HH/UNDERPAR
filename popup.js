@@ -64573,19 +64573,31 @@ function buildBobtoolsWorkspaceHarvestList(programmer = null, appInfoOverride = 
   return merged.filter((harvest) => isUsableRestV2ProfileHarvest(harvest));
 }
 
-function buildBobtoolsWorkspaceSelectionContext(programmer = null, appInfoOverride = null) {
+function buildBobtoolsWorkspaceSelectionContext(programmer = null, appInfoOverride = null, options = {}) {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
   const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
   const programmerName = String(resolvedProgrammer?.programmerName || "").trim();
   const harvestList = buildBobtoolsWorkspaceHarvestList(resolvedProgrammer, appInfoOverride);
+  const targetWindowId = Number(options?.targetWindowId || 0);
+  const preferredHarvestKey = firstNonEmptyString([
+    options?.preferredHarvestKey,
+    getBobtoolsWorkspaceSelectedHarvestKey(targetWindowId),
+  ]);
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const selectedMvpd = String(state.selectedMvpdId || "").trim();
   let selectedHarvest = null;
+  if (preferredHarvestKey) {
+    const normalizedPreferredHarvestKey = String(preferredHarvestKey || "").trim().toLowerCase();
+    selectedHarvest =
+      harvestList.find((harvest) => getRestV2HarvestRecordKey(harvest) === preferredHarvestKey) ||
+      harvestList.find((harvest) => String(getRestV2HarvestRecordKey(harvest) || "").trim().toLowerCase() === normalizedPreferredHarvestKey) ||
+      null;
+  }
   if (selectedRequestorId && selectedMvpd) {
     const candidate = findRestV2HarvestByRequestorAndMvpd(harvestList, selectedRequestorId, selectedMvpd, {
       allowSsoAlias: true,
     });
-    if (isUsableRestV2ProfileHarvest(candidate)) {
+    if (!selectedHarvest && isUsableRestV2ProfileHarvest(candidate)) {
       selectedHarvest = candidate;
     }
   }
@@ -64863,8 +64875,11 @@ function bobtoolsWorkspaceResolveQuickResourceOptions(programmerId = "", request
 }
 
 function buildBobtoolsWorkspaceProfilesPayload(programmer = null, options = {}) {
-  const selectionContext = buildBobtoolsWorkspaceSelectionContext(programmer);
   const targetWindowId = Number(options?.targetWindowId || 0);
+  const selectionContext = buildBobtoolsWorkspaceSelectionContext(programmer, null, {
+    targetWindowId,
+    preferredHarvestKey: String(options?.selectedHarvestKey || "").trim(),
+  });
   const profiles = selectionContext.harvestList.map((harvest, index) => {
     const requestorId = String(harvest?.requestorId || harvest?.serviceProviderId || "").trim();
     const mvpd = String(harvest?.mvpd || "").trim();
@@ -64937,7 +64952,9 @@ function bobtoolsWorkspaceGetSelectedControllerStatePayload(programmer = null, s
   const context =
     selectionContext && typeof selectionContext === "object"
       ? selectionContext
-      : buildBobtoolsWorkspaceSelectionContext(programmer);
+      : buildBobtoolsWorkspaceSelectionContext(programmer, null, {
+          targetWindowId,
+        });
   const profilesPayload = buildBobtoolsWorkspaceProfilesPayload(programmer, {
     targetWindowId,
   });
@@ -64999,11 +65016,17 @@ function bobtoolsWorkspaceBroadcastProfiles(programmer = null, options = {}) {
 
 function bobtoolsWorkspaceRefreshSelection(programmer = null, targetWindowId = 0) {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
-  const selectionContext = buildBobtoolsWorkspaceSelectionContext(resolvedProgrammer);
+  const selectionContext = buildBobtoolsWorkspaceSelectionContext(resolvedProgrammer, null, {
+    targetWindowId,
+  });
+  const selectedHarvestKey = firstNonEmptyString([
+    getBobtoolsWorkspaceSelectedHarvestKey(targetWindowId),
+    selectionContext.selectedHarvestKey,
+  ]);
   bobtoolsWorkspaceBroadcastControllerState(resolvedProgrammer, selectionContext, targetWindowId);
   bobtoolsWorkspaceBroadcastProfiles(resolvedProgrammer, {
     targetWindowId,
-    selectedHarvestKey: selectionContext.selectedHarvestKey,
+    selectedHarvestKey,
   });
   return selectionContext;
 }
@@ -65490,10 +65513,17 @@ function refreshBobtoolsWorkspaceTools() {
     return;
   }
   const selectedProgrammer = resolveSelectedProgrammer();
-  const selectionContext = buildBobtoolsWorkspaceSelectionContext(selectedProgrammer);
-  bobtoolsWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext);
+  const targetWindowId = Number(state.bobtoolsWorkspaceWindowId || 0);
+  const selectionContext = buildBobtoolsWorkspaceSelectionContext(selectedProgrammer, null, {
+    targetWindowId,
+  });
+  const selectedHarvestKey = firstNonEmptyString([
+    getBobtoolsWorkspaceSelectedHarvestKey(targetWindowId),
+    selectionContext.selectedHarvestKey,
+  ]);
+  bobtoolsWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, targetWindowId);
   bobtoolsWorkspaceBroadcastProfiles(selectedProgrammer, {
-    selectedHarvestKey: selectionContext.selectedHarvestKey,
+    selectedHarvestKey,
   });
 }
 

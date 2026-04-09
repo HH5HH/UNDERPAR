@@ -1107,6 +1107,8 @@ test("BOBTOOLS selection context includes the current selection harvest when onl
         list.find((item) => item.requestorId === requestorId && item.mvpd === mvpd) || null,
       getRestV2MvpdPickerLabel: () => "Xfinity (Comcast_SSO)",
       getRestV2HarvestRecordKey: () => "harvest-1",
+      getBobtoolsWorkspaceSelectedHarvestKey: () => "",
+      firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
       getUnderparActiveUserLabel: () => "UnderPAR user",
     }
   );
@@ -1118,6 +1120,19 @@ test("BOBTOOLS selection context includes the current selection harvest when onl
   assert.equal(selectionContext.requestorId, "MML");
   assert.equal(selectionContext.mvpd, "Comcast_SSO");
   assert.equal(selectionContext.selectedHarvestKey, "harvest-1");
+});
+
+test("BOBTOOLS refresh paths preserve explicit per-window profile selection instead of forcing global requestor/MVPD fallback", () => {
+  const popupSource = read("popup.js");
+
+  assert.match(
+    popupSource,
+    /const selectedHarvestKey = firstNonEmptyString\(\[[\s\S]*?getBobtoolsWorkspaceSelectedHarvestKey\(targetWindowId\),[\s\S]*?selectionContext\.selectedHarvestKey,[\s\S]*?\]\);/m
+  );
+  assert.match(
+    popupSource,
+    /function buildBobtoolsWorkspaceSelectionContext\(programmer = null, appInfoOverride = null, options = \{\}\)[\s\S]*?const preferredHarvestKey = firstNonEmptyString\(\[[\s\S]*?getBobtoolsWorkspaceSelectedHarvestKey\(targetWindowId\),[\s\S]*?\]\);/m
+  );
 });
 
 test("REST V2 BOBTOOLS launcher unlocks from the current selection harvest even when the programmer bucket is empty", () => {
