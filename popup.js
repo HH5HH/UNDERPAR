@@ -89792,7 +89792,15 @@ function getRegisteredAppChannel(appInfo) {
     )) {
       return "";
     }
-    // entityData exists but has NO hint fields at all — fall through to JWT.
+    // entityData exists but has NO hint fields at all.
+    // For Console-sourced entity data that carries DCR scopes, the absence of
+    // any channel restriction is the definitive "All Channels" signal — channel-
+    // specific apps always declare their channel in entityData.  Only fall
+    // through to the JWT when entityData has no scope info and might be empty.
+    if (Array.isArray(entityData.scopes) && entityData.scopes.length > 0) {
+      return "";
+    }
+    // entityData has no scopes — fall through to JWT for additional context.
   }
 
   // ── Source 2: Software statement JWT claims ──

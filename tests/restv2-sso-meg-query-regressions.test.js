@@ -705,6 +705,64 @@ test("All Channels classifier treats explicit empty service provider arrays as w
   assert.equal(isAllChannelsApp({ serviceProviders: ["@ServiceProvider:HISTORY"] }), false);
 });
 
+test("getRegisteredAppChannel treats Console entityData with scopes but no channel hints as All Channels", () => {
+  const {
+    getRegisteredAppChannel,
+    isAllChannelsApp,
+  } = loadFunctions("popup.js", ["getRegisteredAppChannel", "isAllChannelsApp"], {
+    sanitizePassVaultHintList: (...args) => args.flat().filter((v) => typeof v === "string" && v.trim()),
+    isAllChannelsServiceProviderValue: (v) => !String(v || "").trim(),
+    extractRequestorIdFromServiceProviderValue: (v) => (String(v || "").trim() ? String(v || "").trim() : ""),
+    firstNonEmptyString: (values = []) => values.find((v) => String(v || "").trim()) || "",
+    collectPassVaultServiceProviderHintsFromAppData: () => [],
+    extractSoftwareStatementFromAppData: () => "",
+    normalizeEntityToken: (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]/g, ""),
+    extractEntityIdFromToken: (v) => String(v || "").replace(/^@[^:]+:/, "").trim(),
+  });
+
+  // App from Console list API: entityData present with scopes, no serviceProviders field.
+  const allChannelsFromConsole = {
+    appData: {
+      __rawEnvelope: {
+        entityData: {
+          name: "AETN_API_V2_DCR",
+          scopes: ["api:client:v2"],
+          // no serviceProviders — this is the real Console response shape for All Channels
+        },
+      },
+    },
+  };
+  assert.equal(getRegisteredAppChannel(allChannelsFromConsole), "");
+  assert.equal(isAllChannelsApp(allChannelsFromConsole), true);
+
+  // Channel-specific app: entityData present with serviceProviders hint.
+  const channelSpecific = {
+    appData: {
+      __rawEnvelope: {
+        entityData: {
+          name: "TBS_API_V2_DCR",
+          scopes: ["api:client:v2"],
+          serviceProviders: ["@ServiceProvider:TBS"],
+        },
+      },
+    },
+  };
+  assert.notEqual(getRegisteredAppChannel(channelSpecific), "");
+  assert.equal(isAllChannelsApp(channelSpecific), false);
+
+  // entityData with no scopes — should NOT be treated as All Channels (fall through).
+  const noScopes = {
+    appData: {
+      __rawEnvelope: {
+        entityData: {
+          name: "MYSTERY_APP",
+        },
+      },
+    },
+  };
+  assert.notEqual(getRegisteredAppChannel(noScopes), "");
+});
+
 test("sanitized app data preserves explicit empty service provider arrays", () => {
   const { sanitizePassVaultApplicationData } = loadFunctions("popup.js", ["sanitizePassVaultApplicationData"], {
     firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
