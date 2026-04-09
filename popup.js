@@ -9894,30 +9894,10 @@ function buildPassVaultDirectPremiumServicesSnapshot(
   const hasAllChannelsRestV2 = scanResult.allChannelsByServiceKey?.restV2 === true;
 
   if (!hasAllChannelsRestV2) {
-    // Extract requestor IDs directly from registered apps' ServiceProvider field values
-    // Each app's serviceProvider field contains values like "@ServiceProvider:requestorId"
-    restV2RequestorIds = Array.isArray(restV2Apps)
-      ? restV2Apps
-          .map((app) => {
-            const serviceProviderValue = String(app?.appData?.serviceProvider || app?.serviceProvider || "").trim();
-            const requestorIdFromServiceProvider = serviceProviderValue
-              ? extractRequestorIdFromServiceProviderValue(serviceProviderValue)
-              : "";
-            const requestorIdFromChannel = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(app));
-            const requestorId = firstNonEmptyString([
-              requestorIdFromServiceProvider,
-              requestorIdFromChannel,
-            ]);
-            if (!requestorId) {
-              return null;
-            }
-            return requestorId;
-          })
-          .filter(Boolean)
-      : [];
-    restV2RequestorIds = Array.from(new Set(restV2RequestorIds)).sort((left, right) =>
-      String(left).localeCompare(String(right), undefined, { sensitivity: "base" })
-    );
+    restV2RequestorIds = collectRestV2RequestorIdsFromApps(restV2Apps, programmerId);
+    if (!Array.isArray(restV2RequestorIds) || restV2RequestorIds.length === 0) {
+      restV2RequestorIds = null;
+    }
   }
   // If hasAllChannelsRestV2 is true, restV2RequestorIds remains null (show all requestors)
 
@@ -10300,30 +10280,10 @@ function buildPassVaultRuntimeServicesSnapshot(record = null) {
   const hasAllChannelsRestV2 = Array.isArray(restV2Apps) && restV2Apps.some((appInfo) => isAllChannelsApp(appInfo));
 
   if (!hasAllChannelsRestV2) {
-    // Extract requestor IDs directly from registered apps' ServiceProvider field values
-    // Each app's serviceProvider field contains values like "@ServiceProvider:requestorId"
-    const extractedIds = Array.isArray(restV2Apps)
-      ? restV2Apps
-          .map((appInfo) => {
-            const serviceProviderValue = String(appInfo?.appData?.serviceProvider || appInfo?.serviceProvider || "").trim();
-            const requestorIdFromServiceProvider = serviceProviderValue
-              ? extractRequestorIdFromServiceProviderValue(serviceProviderValue)
-              : "";
-            const requestorIdFromChannel = extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo));
-            const requestorId = firstNonEmptyString([
-              requestorIdFromServiceProvider,
-              requestorIdFromChannel,
-            ]);
-            if (!requestorId) {
-              return null;
-            }
-            return requestorId;
-          })
-          .filter(Boolean)
-      : [];
-    restV2RequestorIds = Array.from(new Set(extractedIds)).sort((left, right) =>
-      String(left).localeCompare(String(right), undefined, { sensitivity: "base" })
-    );
+    restV2RequestorIds = collectRestV2RequestorIdsFromApps(restV2Apps, "");
+    if (!Array.isArray(restV2RequestorIds) || restV2RequestorIds.length === 0) {
+      restV2RequestorIds = null;
+    }
   }
   // If hasAllChannelsRestV2 is true, restV2RequestorIds remains null (show all requestors)
 
@@ -88052,6 +88012,11 @@ function getRequestorsForSelectedMediaCompany() {
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
   const hasExplicitRestV2RequestorFilter =
     Boolean(premiumApps) && Object.prototype.hasOwnProperty.call(premiumApps, "__restV2RequestorIds");
+  const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
+  const hasAllChannelsRestV2 = restV2Apps.some((appInfo) => isAllChannelsApp(appInfo));
+  const derivedRestV2RequestorIds = hasAllChannelsRestV2
+    ? null
+    : collectRestV2RequestorIdsFromApps(restV2Apps, programmerId);
   const normalizedRestV2RequestorIds = Array.isArray(premiumApps?.__restV2RequestorIds)
     ? Array.from(
         new Set(
@@ -88063,18 +88028,17 @@ function getRequestorsForSelectedMediaCompany() {
     : premiumApps?.__restV2RequestorIds === null
       ? null
       : [];
-  let restV2RequestorIds = hasExplicitRestV2RequestorFilter ? normalizedRestV2RequestorIds : null;
-
-  // Fallback: if runtime filtering IDs are missing, derive requestors from REST V2 app channels.
-  if (!hasExplicitRestV2RequestorFilter && (!Array.isArray(restV2RequestorIds) || restV2RequestorIds.length === 0)) {
-    const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
-    const derivedIds = restV2Apps
-      .map((appInfo) => extractRequestorIdFromServiceProviderValue(getRegisteredAppChannel(appInfo)))
-      .filter((value) => Boolean(value));
-    restV2RequestorIds =
-      derivedIds.length > 0
-        ? Array.from(new Set(derivedIds)).sort((left, right) => String(left).localeCompare(String(right), undefined, { sensitivity: "base" }))
-        : null;
+  let restV2RequestorIds = null;
+  if (hasExplicitRestV2RequestorFilter) {
+    if (Array.isArray(normalizedRestV2RequestorIds) && normalizedRestV2RequestorIds.length > 0) {
+      restV2RequestorIds = normalizedRestV2RequestorIds;
+    } else if (normalizedRestV2RequestorIds === null) {
+      restV2RequestorIds = null;
+    } else {
+      restV2RequestorIds = Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0 ? derivedRestV2RequestorIds : null;
+    }
+  } else {
+    restV2RequestorIds = Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0 ? derivedRestV2RequestorIds : null;
   }
 
   if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
@@ -88103,10 +88067,6 @@ function getRequestorsForSelectedMediaCompany() {
       id: String(requestorId || "").trim(),
       label: requestorId,
     }));
-  }
-
-  if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length === 0) {
-    return [];
   }
 
   // ── Fallback: show all requestors ──────
@@ -88142,6 +88102,20 @@ function isRequestorEligibleForSelectedProgrammer(requestorId = "", programmer =
         : null;
   const hasExplicitRestV2RequestorFilter =
     Boolean(resolvedServices) && Object.prototype.hasOwnProperty.call(resolvedServices, "__restV2RequestorIds");
+  const restV2Apps = Array.isArray(resolvedServices?.restV2Apps) ? resolvedServices.restV2Apps : [];
+  const hasAllChannelsRestV2 = restV2Apps.some((appInfo) => isAllChannelsApp(appInfo));
+  if (hasAllChannelsRestV2) {
+    return true;
+  }
+
+  const derivedRestV2RequestorIds = collectRestV2RequestorIdsFromApps(
+    restV2Apps,
+    String(resolvedProgrammer?.programmerId || "").trim()
+  );
+  if (Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0) {
+    return derivedRestV2RequestorIds.includes(normalizedRequestorId);
+  }
+
   if (hasExplicitRestV2RequestorFilter) {
     const explicitIds = Array.isArray(resolvedServices?.__restV2RequestorIds)
       ? Array.from(
@@ -88155,34 +88129,12 @@ function isRequestorEligibleForSelectedProgrammer(requestorId = "", programmer =
         ? null
         : [];
     if (Array.isArray(explicitIds)) {
-      return explicitIds.includes(normalizedRequestorId);
+      if (explicitIds.length > 0) {
+        return explicitIds.includes(normalizedRequestorId);
+      }
+      return true;
     }
-  }
-
-  const knownProgrammerIds = uniqueSorted(
-    [
-      ...(Array.isArray(resolvedProgrammer?.requestorIds) ? resolvedProgrammer.requestorIds : []),
-      ...(Array.isArray(resolvedProgrammer?.requestorOptions)
-        ? resolvedProgrammer.requestorOptions
-            .flatMap((option) => [option?.id, option?.key])
-            .filter(Boolean)
-        : []),
-    ]
-      .map((value) => String(extractEntityIdFromToken(String(value || "")) || "").trim())
-      .filter(Boolean)
-  );
-  if (knownProgrammerIds.length > 0) {
-    return knownProgrammerIds.includes(normalizedRequestorId);
-  }
-
-  const selectableRequestors = getRequestorsForSelectedMediaCompany();
-  const selectableIds = uniqueSorted(
-    (Array.isArray(selectableRequestors) ? selectableRequestors : [])
-      .map((option) => String(extractEntityIdFromToken(String(option?.id || option?.key || "")) || "").trim())
-      .filter(Boolean)
-  );
-  if (selectableIds.length > 0) {
-    return selectableIds.includes(normalizedRequestorId);
+    return true;
   }
 
   return true;
@@ -88260,6 +88212,13 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
     Boolean(normalizedProgrammerId) && Boolean(getProgrammerServiceHydrationPromise(normalizedProgrammerId));
   const hasExplicitRestV2RequestorFilter =
     Boolean(resolvedServices) && Object.prototype.hasOwnProperty.call(resolvedServices, "__restV2RequestorIds");
+  const resolvedProgrammer = resolveSelectedProgrammer();
+  const resolvedProgrammerId = String(resolvedProgrammer?.programmerId || normalizedProgrammerId || "").trim();
+  const restV2Apps = Array.isArray(resolvedServices?.restV2Apps) ? resolvedServices.restV2Apps : [];
+  const hasAllChannelsRestV2 = restV2Apps.some((appInfo) => isAllChannelsApp(appInfo));
+  const derivedRestV2RequestorIds = hasAllChannelsRestV2
+    ? null
+    : collectRestV2RequestorIdsFromApps(restV2Apps, resolvedProgrammerId);
   const normalizedRestV2RequestorIds = Array.isArray(resolvedServices?.__restV2RequestorIds)
     ? resolvedServices.__restV2RequestorIds
         .map((value) => String(value || "").trim())
@@ -88267,7 +88226,18 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
     : resolvedServices?.__restV2RequestorIds === null
       ? null
       : [];
-  const restV2RequestorIds = hasExplicitRestV2RequestorFilter ? normalizedRestV2RequestorIds : null;
+  let restV2RequestorIds = null;
+  if (hasExplicitRestV2RequestorFilter) {
+    if (Array.isArray(normalizedRestV2RequestorIds) && normalizedRestV2RequestorIds.length > 0) {
+      restV2RequestorIds = normalizedRestV2RequestorIds;
+    } else if (normalizedRestV2RequestorIds === null) {
+      restV2RequestorIds = null;
+    } else {
+      restV2RequestorIds = Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0 ? derivedRestV2RequestorIds : null;
+    }
+  } else {
+    restV2RequestorIds = Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0 ? derivedRestV2RequestorIds : null;
+  }
   const restV2SelectionReady =
     restV2RequestorIds === null || (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0);
   const runtimeReady =
@@ -89870,6 +89840,41 @@ function getRegisteredAppChannel(appInfo) {
 
 function isAllChannelsApp(appInfo) {
   return getRegisteredAppChannel(appInfo) === "";
+}
+
+function collectRestV2RequestorIdsFromApps(restV2Apps = [], programmerId = "") {
+  const apps = Array.isArray(restV2Apps) ? restV2Apps.filter((appInfo) => appInfo && typeof appInfo === "object") : [];
+  if (apps.length === 0) {
+    return [];
+  }
+
+  const normalizedProgrammerId = normalizeEntityToken(
+    String(extractEntityIdFromToken(String(programmerId || "")) || programmerId || "").trim()
+  );
+  const ids = new Set();
+  const pushCandidate = (value) => {
+    const requestorId = String(extractRequestorIdFromServiceProviderValue(value) || "").trim();
+    if (!requestorId) {
+      return;
+    }
+    if (normalizedProgrammerId && normalizeEntityToken(requestorId) === normalizedProgrammerId) {
+      return;
+    }
+    ids.add(requestorId);
+  };
+
+  apps.forEach((appInfo) => {
+    pushCandidate(getRegisteredAppChannel(appInfo));
+    collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId).forEach((candidate) => {
+      pushCandidate(candidate);
+    });
+    const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
+    (Array.isArray(healthRecord?.serviceProviderHints) ? healthRecord.serviceProviderHints : []).forEach((hint) => {
+      pushCandidate(hint);
+    });
+  });
+
+  return Array.from(ids).sort((left, right) => String(left).localeCompare(String(right), undefined, { sensitivity: "base" }));
 }
 
 
@@ -101779,12 +101784,6 @@ async function populateMvpdSelectForRequestor(requestorId) {
     selectedProgrammerServices
   );
   if (!requestorEligible) {
-    if (String(state.selectedRequestorId || "").trim() === String(expectedRequestorId || "").trim()) {
-      state.selectedRequestorId = "";
-    }
-    if (els.requestorSelect) {
-      els.requestorSelect.value = "";
-    }
     els.mvpdSelect.disabled = true;
     els.mvpdSelect.innerHTML = '<option value=""></option>';
     state.selectedMvpdId = "";

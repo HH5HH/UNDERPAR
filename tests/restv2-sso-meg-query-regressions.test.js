@@ -445,7 +445,7 @@ test("requestor repopulation preserves requestor and MVPD during transient hydra
   assert.match(String(mvpdSelect.innerHTML || ""), /Dish|DISH/);
 });
 
-test("requestor filtering treats explicit empty REST V2 requestor coverage as no valid requestors", () => {
+test("requestor filtering uses derived REST V2 requestor IDs when explicit coverage is temporarily empty", () => {
   const { getRequestorsForSelectedMediaCompany } = loadFunctions("popup.js", ["getRequestorsForSelectedMediaCompany"], {
     state: {
       consoleBootstrapState: {
@@ -459,7 +459,7 @@ test("requestor filtering treats explicit empty REST V2 requestor coverage as no
     }),
     getCurrentPremiumAppsSnapshot: () => ({
       __restV2RequestorIds: [],
-      restV2Apps: [],
+      restV2Apps: [{ guid: "rogers-restv2" }],
     }),
     extractEntityIdFromToken: (value = "") => String(value || "").trim(),
     firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
@@ -468,11 +468,14 @@ test("requestor filtering treats explicit empty REST V2 requestor coverage as no
     deriveProgrammerRequestorOptionsFromChannels: () => [],
     extractRequestorIdFromServiceProviderValue: (value = "") => String(value || "").trim(),
     getRegisteredAppChannel: () => "",
+    isAllChannelsApp: () => false,
+    collectRestV2RequestorIdsFromApps: () => ["cityvideolive"],
   });
 
   const options = getRequestorsForSelectedMediaCompany();
   assert.equal(Array.isArray(options), true);
-  assert.equal(options.length, 0);
+  assert.equal(options.length, 1);
+  assert.equal(String(options[0]?.id || ""), "cityvideolive");
 });
 
 test("requestor filtering fallback no longer widens to global channel list", () => {
@@ -501,6 +504,8 @@ test("requestor filtering fallback no longer widens to global channel list", () 
     deriveProgrammerRequestorOptionsFromChannels: () => [],
     extractRequestorIdFromServiceProviderValue: (value = "") => String(value || "").trim(),
     getRegisteredAppChannel: () => "",
+    isAllChannelsApp: () => false,
+    collectRestV2RequestorIdsFromApps: () => [],
   });
 
   const options = getRequestorsForSelectedMediaCompany();
@@ -516,9 +521,8 @@ test("requestor eligibility rejects IDs outside explicit REST V2 requestor cover
       resolveSelectedProgrammer: () => ({ programmerId: "Rogers Media", requestorIds: ["cityvideolive"] }),
       getCurrentPremiumAppsSnapshot: () => ({ __restV2RequestorIds: ["cityvideolive"] }),
       extractEntityIdFromToken: (value = "") => String(value || "").trim(),
-      uniqueSorted: (values = []) =>
-        Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
-      getRequestorsForSelectedMediaCompany: () => [{ id: "cityvideolive", key: "cityvideolive", label: "cityvideolive" }],
+      isAllChannelsApp: () => false,
+      collectRestV2RequestorIdsFromApps: () => ["cityvideolive"],
     }
   );
 
@@ -567,9 +571,9 @@ test("MVPD config loader skips stale requestor IDs during hydration", async () =
   await populateMvpdSelectForRequestor("animalplanettv");
 
   assert.equal(loadCalls, 0);
-  assert.equal(state.selectedRequestorId, "");
+  assert.equal(state.selectedRequestorId, "animalplanettv");
   assert.equal(state.selectedMvpdId, "");
-  assert.equal(String(els.requestorSelect.value || ""), "");
+  assert.equal(String(els.requestorSelect.value || ""), "animalplanettv");
   assert.equal(els.mvpdSelect.disabled, true);
   assert.match(statusMessage, /Select a Content Provider first\./);
   assert.equal(statusType, "info");
