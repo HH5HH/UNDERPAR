@@ -507,6 +507,38 @@ test("requestor filtering keeps all requestors visible during first-selection hy
   );
 });
 
+test("requestor filtering keeps options during hydration even with seeded premium services object", () => {
+  const { getRequestorsForSelectedMediaCompany } = loadFunctions("popup.js", ["getRequestorsForSelectedMediaCompany"], {
+    state: {
+      consoleBootstrapState: {
+        channels: [],
+      },
+    },
+    resolveSelectedProgrammer: () => ({
+      programmerId: "C-SPAN",
+      requestorIds: ["CSPAN", "CSPAN2"],
+      requestorOptions: [],
+    }),
+    getCurrentPremiumAppsSnapshot: () => null,
+    getRuntimePremiumServicesSeed: () => ({}),
+    getProgrammerServiceHydrationPromise: () => Promise.resolve(),
+    extractEntityIdFromToken: (value = "") => String(value || "").trim(),
+    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+    uniqueSorted: (values = []) =>
+      Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
+    deriveProgrammerRequestorOptionsFromChannels: () => [],
+    resolveStrictRestV2RequestorIdsForProgrammer: () => [],
+  });
+
+  const options = getRequestorsForSelectedMediaCompany();
+  assert.equal(Array.isArray(options), true);
+  assert.equal(options.length, 2);
+  assert.deepEqual(
+    options.map((option) => String(option?.id || "")),
+    ["CSPAN", "CSPAN2"]
+  );
+});
+
 test("strict REST V2 requestor extraction supports compact app shapes without appData", () => {
   const { collectRestV2RequestorIdsFromApps } = loadFunctions("popup.js", ["collectRestV2RequestorIdsFromApps"], {
     extractEntityIdFromToken: (value = "") => {

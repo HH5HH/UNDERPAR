@@ -88175,6 +88175,13 @@ function getRequestorsForSelectedMediaCompany() {
     }));
   }
 
+  // During first-selection hydration we can temporarily see an empty strict
+  // resolver result before service metadata is finalized. Keep the menu
+  // populated instead of collapsing to disabled and forcing a second selection.
+  if (hydrationPending) {
+    return allRequestors;
+  }
+
   return [];
 }
 
@@ -88278,7 +88285,7 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   const restV2SelectionReady =
     restV2RequestorIds === null ||
     (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) ||
-    (hydrationPending && !resolvedServices);
+    (hydrationPending && (!resolvedServices || hasRequestorOptions));
   const runtimeReady =
     Boolean(normalizedProgrammerId) && Boolean(resolvedServices) && isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices);
   const ready =
