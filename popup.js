@@ -10835,29 +10835,77 @@ function collectResetTempPassAppCandidatesFromPremiumApps(premiumApps = null, fa
   return candidates;
 }
 
+function collectRequestorScopedPremiumServiceAppCandidates(candidates = [], requestorId = "", programmerId = "") {
+  const normalizedCandidates = Array.isArray(candidates) ? candidates.filter((item) => item?.guid) : [];
+  if (normalizedCandidates.length === 0) {
+    return [];
+  }
+
+  const normalizedRequestorId = String(requestorId || "").trim();
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedRequestorId) {
+    return normalizedCandidates;
+  }
+
+  const requestorScoped = normalizedCandidates.filter((appInfo) =>
+    appSupportsServiceProvider(appInfo, normalizedRequestorId, normalizedProgrammerId)
+  );
+  if (requestorScoped.length > 0) {
+    return requestorScoped;
+  }
+
+  const allChannels = normalizedCandidates.filter((appInfo) => isAllChannelsApp(appInfo));
+  if (allChannels.length > 0) {
+    return allChannels;
+  }
+
+  return normalizedCandidates;
+}
+
 function selectPreferredResetTempPassAppForRequestor(resetTempPassApps = [], requestorId = "", programmerId = "") {
-  void requestorId;
-  void programmerId;
-  const candidates = Array.isArray(resetTempPassApps) ? resetTempPassApps.filter((item) => item?.guid) : [];
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const candidates = collectRequestorScopedPremiumServiceAppCandidates(
+    resetTempPassApps,
+    requestorId,
+    normalizedProgrammerId
+  );
   if (candidates.length === 0) {
     return null;
   }
-  return candidates[0] || null;
+  return (
+    selectPreferredPassVaultHydrationServiceApplication("resetTempPass", candidates, normalizedProgrammerId) ||
+    candidates[0] ||
+    null
+  );
 }
 
 function selectPreferredEsmAppForRequestor(esmApps = [], requestorId = "", programmerId = "") {
-  void requestorId;
-  void programmerId;
-  const candidates = Array.isArray(esmApps) ? esmApps.filter((item) => item?.guid) : [];
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  const candidates = collectRequestorScopedPremiumServiceAppCandidates(
+    esmApps,
+    requestorId,
+    normalizedProgrammerId
+  );
   if (candidates.length === 0) {
     return null;
   }
-  return candidates[0] || null;
+  return (
+    selectPreferredPassVaultHydrationServiceApplication("esm", candidates, normalizedProgrammerId) ||
+    candidates[0] ||
+    null
+  );
 }
 
-function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId = "", services = null, fallbackAppInfo = null) {
+function resolveProgrammerPremiumServiceRuntimeApp(
+  serviceKey = "",
+  programmerId = "",
+  services = null,
+  fallbackAppInfo = null,
+  options = {}
+) {
   const normalizedServiceKey = String(serviceKey || "").trim();
   const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedRequestorId = String(options?.requestorId || state.selectedRequestorId || "").trim();
   const resolvedServices =
     services && typeof services === "object" && !Array.isArray(services)
       ? services
@@ -10891,53 +10939,71 @@ function resolveProgrammerPremiumServiceRuntimeApp(serviceKey = "", programmerId
 
   if (normalizedServiceKey === "restV2") {
     const candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, resolvedServices);
+    const scopedCandidates = collectRequestorScopedPremiumServiceAppCandidates(
+      candidates,
+      normalizedRequestorId,
+      normalizedProgrammerId
+    );
     const preferredMatch =
-      selectPreferredPassVaultHydrationServiceApplication("restV2", candidates, normalizedProgrammerId) ||
+      selectPreferredRestV2AppForRequestor(scopedCandidates, normalizedRequestorId, normalizedProgrammerId) ||
+      selectPreferredPassVaultHydrationServiceApplication("restV2", scopedCandidates, normalizedProgrammerId) ||
       null;
     if (preferredMatch?.guid) {
       return preferredMatch;
     }
-    const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, candidates);
+    const primaryMatch = resolvePrimaryMatch(resolvedServices?.restV2 || null, scopedCandidates);
     if (primaryMatch?.guid) {
       return primaryMatch;
     }
-    const fallbackMatch = resolveFallbackMatch(candidates);
+    const fallbackMatch = resolveFallbackMatch(scopedCandidates);
     if (fallbackMatch?.guid) {
       return fallbackMatch;
     }
-    return candidates[0] || primaryMatch || fallbackMatch || null;
+    return scopedCandidates[0] || primaryMatch || fallbackMatch || null;
   }
 
   if (normalizedServiceKey === "esm") {
     const candidates = collectEsmAppCandidatesFromPremiumApps(resolvedServices, normalizedFallbackApp);
-    const primaryMatch = resolvePrimaryMatch(resolvedServices?.esm || null, candidates);
+    const scopedCandidates = collectRequestorScopedPremiumServiceAppCandidates(
+      candidates,
+      normalizedRequestorId,
+      normalizedProgrammerId
+    );
+    const primaryMatch = resolvePrimaryMatch(resolvedServices?.esm || null, scopedCandidates);
     if (primaryMatch?.guid) {
       return primaryMatch;
     }
-    const fallbackMatch = resolveFallbackMatch(candidates);
+    const fallbackMatch = resolveFallbackMatch(scopedCandidates);
     if (fallbackMatch?.guid) {
       return fallbackMatch;
     }
     const preferredMatch =
-      selectPreferredPassVaultHydrationServiceApplication("esm", candidates, normalizedProgrammerId) ||
-      candidates[0] ||
+      selectPreferredEsmAppForRequestor(scopedCandidates, normalizedRequestorId, normalizedProgrammerId) ||
+      selectPreferredPassVaultHydrationServiceApplication("esm", scopedCandidates, normalizedProgrammerId) ||
+      scopedCandidates[0] ||
       null;
     return preferredMatch?.guid ? preferredMatch : null;
   }
 
   if (normalizedServiceKey === "resetTempPass") {
     const candidates = collectResetTempPassAppCandidatesFromPremiumApps(resolvedServices, normalizedFallbackApp);
-    const primaryMatch = resolvePrimaryMatch(resolvedServices?.resetTempPass || null, candidates);
+    const scopedCandidates = collectRequestorScopedPremiumServiceAppCandidates(
+      candidates,
+      normalizedRequestorId,
+      normalizedProgrammerId
+    );
+    const primaryMatch = resolvePrimaryMatch(resolvedServices?.resetTempPass || null, scopedCandidates);
     if (primaryMatch?.guid) {
       return primaryMatch;
     }
-    const fallbackMatch = resolveFallbackMatch(candidates);
+    const fallbackMatch = resolveFallbackMatch(scopedCandidates);
     if (fallbackMatch?.guid) {
       return fallbackMatch;
     }
     const preferredMatch =
-      selectPreferredPassVaultHydrationServiceApplication("resetTempPass", candidates, normalizedProgrammerId) ||
-      candidates[0] ||
+      selectPreferredResetTempPassAppForRequestor(scopedCandidates, normalizedRequestorId, normalizedProgrammerId) ||
+      selectPreferredPassVaultHydrationServiceApplication("resetTempPass", scopedCandidates, normalizedProgrammerId) ||
+      scopedCandidates[0] ||
       null;
     return preferredMatch?.guid ? preferredMatch : null;
   }
@@ -10965,16 +11031,26 @@ function resolveLatestPremiumServiceAppInfo(programmerId = "", fallbackAppInfo =
   }
 
   if (serviceKey === "esm") {
-    return resolveProgrammerPremiumServiceRuntimeApp("esm", normalizedProgrammerId, services, fallbackAppInfo) || fallbackAppInfo;
+    return (
+      resolveProgrammerPremiumServiceRuntimeApp("esm", normalizedProgrammerId, services, fallbackAppInfo, {
+        requestorId: String(debugMeta?.requestorId || "").trim(),
+      }) || fallbackAppInfo
+    );
   }
 
   if (serviceKey === "restV2") {
-    return resolveProgrammerPremiumServiceRuntimeApp("restV2", normalizedProgrammerId, services, fallbackAppInfo) || fallbackAppInfo;
+    return (
+      resolveProgrammerPremiumServiceRuntimeApp("restV2", normalizedProgrammerId, services, fallbackAppInfo, {
+        requestorId: String(debugMeta?.requestorId || "").trim(),
+      }) || fallbackAppInfo
+    );
   }
 
   if (serviceKey === "resetTempPass") {
     return (
-      resolveProgrammerPremiumServiceRuntimeApp("resetTempPass", normalizedProgrammerId, services, fallbackAppInfo) ||
+      resolveProgrammerPremiumServiceRuntimeApp("resetTempPass", normalizedProgrammerId, services, fallbackAppInfo, {
+        requestorId: String(debugMeta?.requestorId || "").trim(),
+      }) ||
       fallbackAppInfo
     );
   }
@@ -21281,7 +21357,11 @@ function resolveTempPassRestV2AppInfo(programmerId = "", requestorId = "", servi
   if (!premiumApps) {
     return null;
   }
-  return resolveProgrammerPremiumServiceRuntimeApp("restV2", normalizedProgrammerId, premiumApps) || null;
+  return (
+    resolveProgrammerPremiumServiceRuntimeApp("restV2", normalizedProgrammerId, premiumApps, null, {
+      requestorId: String(requestorId || "").trim(),
+    }) || null
+  );
 }
 
 function resolveTempPassResetAppInfo(programmerId = "", requestorId = "", services = null) {
@@ -21295,7 +21375,11 @@ function resolveTempPassResetAppInfo(programmerId = "", requestorId = "", servic
   if (!premiumApps) {
     return null;
   }
-  return resolveProgrammerPremiumServiceRuntimeApp("resetTempPass", normalizedProgrammerId, premiumApps) || null;
+  return (
+    resolveProgrammerPremiumServiceRuntimeApp("resetTempPass", normalizedProgrammerId, premiumApps, null, {
+      requestorId: String(requestorId || "").trim(),
+    }) || null
+  );
 }
 
 function buildTempPassDebugMeta(payload = {}, options = {}) {
@@ -25108,17 +25192,17 @@ function buildRegisteredApplicationHealthPremiumServiceBindings(programmer = nul
       let currentApp = null;
       if (serviceKey === "restV2") {
         currentApp =
-          resolveProgrammerPremiumServiceRuntimeApp("restV2", programmerId, runtimeServices) ||
+          resolveProgrammerPremiumServiceRuntimeApp("restV2", programmerId, runtimeServices, null, { requestorId }) ||
           candidates[0] ||
           null;
       } else if (serviceKey === "esm") {
         currentApp =
-          resolveProgrammerPremiumServiceRuntimeApp("esm", programmerId, runtimeServices) ||
+          resolveProgrammerPremiumServiceRuntimeApp("esm", programmerId, runtimeServices, null, { requestorId }) ||
           candidates[0] ||
           null;
       } else if (serviceKey === "resetTempPass") {
         currentApp =
-          resolveProgrammerPremiumServiceRuntimeApp("resetTempPass", programmerId, runtimeServices) ||
+          resolveProgrammerPremiumServiceRuntimeApp("resetTempPass", programmerId, runtimeServices, null, { requestorId }) ||
           candidates[0] ||
           null;
       } else if (serviceKey === "degradation") {
@@ -29708,7 +29792,9 @@ async function hydrateRestV2ContextAppInfoAndServiceProvider(context = null) {
     ]) || ""
   ).trim();
   const authoritativeRequestorId = String(
-    firstNonEmptyString([appScopedRequestorId, canonicalRequestorId, requestorId]) || ""
+    // "All Channels" apps can carry programmer-level serviceProvider hints.
+    // Keep the selected requestor authoritative for session creation.
+    firstNonEmptyString([canonicalRequestorId, requestorId, appScopedRequestorId]) || ""
   ).trim();
   const normalizedCanonicalRequestorId = String(canonicalRequestorId || requestorId || "").trim();
   const scopedServiceProviderCandidates = [
@@ -67453,10 +67539,16 @@ function compareDegradationAppPriority(leftApp, rightApp) {
 
 function resolveDegradationAppCandidates(programmerId = "", seedAppInfo = null, options = {}) {
   const normalizedProgrammerId = String(programmerId || "").trim();
+  const normalizedRequestorId = String(options?.requestorId || state.selectedRequestorId || "").trim();
   const normalizedPreferredGuid = String(options?.preferredGuid || seedAppInfo?.guid || "").trim();
   const normalizedSeedGuid = String(seedAppInfo?.guid || "").trim();
-  const candidates = getDegradationAppCandidatesForProgrammer(normalizedProgrammerId, seedAppInfo)
-    .filter((appInfo) => degradationAppHasRequiredScope(appInfo));
+  const candidates = collectRequestorScopedPremiumServiceAppCandidates(
+    getDegradationAppCandidatesForProgrammer(normalizedProgrammerId, seedAppInfo).filter((appInfo) =>
+      degradationAppHasRequiredScope(appInfo)
+    ),
+    normalizedRequestorId,
+    normalizedProgrammerId
+  );
 
   const getCandidateAffinity = (appInfo) => {
     const normalizedGuid = String(appInfo?.guid || "").trim();
@@ -88041,6 +88133,9 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
         sourceUrl: String(catalog?.sourceUrl || ""),
         tokenClientId: String(parseJwtPayload(hydratedToken)?.client_id || ""),
       });
+      prefetchCmConsoleBootstrapSummaryInBackground(`precheck:${normalizedReason}`, {
+        forceRefresh,
+      });
       return catalog;
     } catch (error) {
       const resolvedError = error instanceof Error ? error : new Error(String(error));
@@ -90878,6 +90973,9 @@ function applyHydratedSessionContextsToState(loginData = null, options = {}) {
       ].filter(Boolean),
     });
     void persistCmTenantsCatalog(catalog).catch(() => false);
+    prefetchCmConsoleBootstrapSummaryInBackground(`post-login-context:${normalizedReason}`, {
+      forceRefresh: options?.forceRefresh === true,
+    });
   }
 
   const cmToken = normalizeBearerTokenValue(
@@ -95698,14 +95796,25 @@ function buildCmTenantsCatalogFromContext(cmContext = null, fallbackCatalog = nu
   if (tenants.length === 0) {
     return null;
   }
+  const fallbackApplicationCount = Math.max(0, Number(fallbackCatalog?.applicationCount || 0));
+  const fallbackPolicyCount = Math.max(0, Number(fallbackCatalog?.policyCount || 0));
+  const fallbackSummaryVerified = fallbackCatalog?.summaryVerified === true;
+  const fallbackSummaryReady =
+    fallbackSummaryVerified &&
+    (fallbackCatalog?.summaryReady === true ||
+      fallbackApplicationCount > 0 ||
+      fallbackPolicyCount > 0);
 
   return {
     tenants,
     sourceUrl: String(cmContext?.tenantsSourceUrl || ""),
     tenantCount: tenants.length,
-    applicationCount: Math.max(0, Number(fallbackCatalog?.applicationCount || 0)),
-    policyCount: Math.max(0, Number(fallbackCatalog?.policyCount || 0)),
-    summaryReady: cmContext?.reportsStatus === "ready",
+    applicationCount: fallbackApplicationCount,
+    policyCount: fallbackPolicyCount,
+    // CM context bootstrap only discovers tenant scope; keep summary "ready"
+    // reserved for verified /maitai application+policy aggregation.
+    summaryReady: fallbackSummaryReady,
+    summaryVerified: fallbackSummaryVerified,
     fetchedAt: Date.now(),
   };
 }
@@ -96025,6 +96134,8 @@ function normalizeCmTenantsCatalogPayload(payload = null) {
   const explicitTenantCount = Math.max(0, Number(payload.tenantCount || payload?.summary?.tenantCount || 0));
   const applicationCount = Math.max(0, Number(payload.applicationCount || payload?.summary?.applicationCount || 0));
   const policyCount = Math.max(0, Number(payload.policyCount || payload?.summary?.policyCount || 0));
+  const hasSummaryCounts = applicationCount > 0 || policyCount > 0;
+  const summaryVerified = payload.summaryVerified === true;
   const tenantsInput = Array.isArray(payload.tenants) ? payload.tenants : [];
   const tenants = [];
   const seen = new Set();
@@ -96064,10 +96175,8 @@ function normalizeCmTenantsCatalogPayload(payload = null) {
     tenantCount: Math.max(explicitTenantCount, tenants.length),
     applicationCount,
     policyCount,
-    summaryReady:
-      payload.summaryReady === true ||
-      payload.bootstrapSummaryReady === true ||
-      (applicationCount > 0 || policyCount > 0),
+    summaryReady: hasSummaryCounts || (summaryVerified && (payload.summaryReady === true || payload.bootstrapSummaryReady === true)),
+    summaryVerified,
     fetchedAt: fetchedAt > 0 ? fetchedAt : Date.now(),
     persistedAt: Number(payload.persistedAt || 0) || Date.now(),
   };
@@ -96092,6 +96201,7 @@ function buildCmTenantsCatalogPersistPayload(catalog = null) {
     applicationCount: Math.max(0, Number(normalizedCatalog.applicationCount || 0)),
     policyCount: Math.max(0, Number(normalizedCatalog.policyCount || 0)),
     summaryReady: normalizedCatalog.summaryReady === true,
+    summaryVerified: normalizedCatalog.summaryVerified === true,
     fetchedAt: Number(normalizedCatalog.fetchedAt || Date.now()),
     persistedAt: Date.now(),
   };
@@ -96107,6 +96217,7 @@ function buildCmConsoleBootstrapSummaryFromCatalog(catalog = null) {
     applicationCount: Math.max(0, Number(normalizedCatalog.applicationCount || 0)),
     policyCount: Math.max(0, Number(normalizedCatalog.policyCount || 0)),
     summaryReady: normalizedCatalog.summaryReady === true,
+    summaryVerified: normalizedCatalog.summaryVerified === true,
     sourceUrl: String(normalizedCatalog.sourceUrl || ""),
     fetchedAt: Number(normalizedCatalog.fetchedAt || 0),
   };
@@ -96323,12 +96434,22 @@ function prefetchCmConsoleBootstrapSummaryInBackground(reason = "background", op
 
 async function ensureCmConsoleBootstrapSummary(options = {}) {
   const forceRefresh = options?.forceRefresh === true;
+  const canReuseSummary = (summary = null) => {
+    if (!summary || typeof summary !== "object") {
+      return false;
+    }
+    const tenantCount = Math.max(0, Number(summary.tenantCount || 0));
+    if (tenantCount === 0) {
+      return summary.summaryReady === true;
+    }
+    return summary.summaryReady === true && summary.summaryVerified === true;
+  };
   const catalogSummary = buildCmConsoleBootstrapSummaryFromCatalog(state.cmTenantsCatalog);
   const cachedSummary =
     state.cmConsoleBootstrapSummary && typeof state.cmConsoleBootstrapSummary === "object"
       ? state.cmConsoleBootstrapSummary
       : catalogSummary;
-  if (!forceRefresh && cachedSummary?.summaryReady === true) {
+  if (!forceRefresh && canReuseSummary(cachedSummary)) {
     const fetchedAt = Number(cachedSummary.fetchedAt || 0);
     if (fetchedAt > 0 && Date.now() - fetchedAt <= CM_BOOTSTRAP_CACHE_MAX_AGE_MS) {
       state.cmConsoleBootstrapSummary = cachedSummary;
@@ -96345,7 +96466,7 @@ async function ensureCmConsoleBootstrapSummary(options = {}) {
     const tenants = Array.isArray(catalog?.tenants) ? catalog.tenants : [];
     if (!forceRefresh) {
       const persistedSummary = buildCmConsoleBootstrapSummaryFromCatalog(catalog);
-      if (persistedSummary?.summaryReady === true) {
+      if (canReuseSummary(persistedSummary)) {
         state.cmConsoleBootstrapSummary = persistedSummary;
         return persistedSummary;
       }
@@ -96356,6 +96477,7 @@ async function ensureCmConsoleBootstrapSummary(options = {}) {
         applicationCount: 0,
         policyCount: 0,
         summaryReady: true,
+        summaryVerified: true,
         sourceUrl: String(catalog?.sourceUrl || ""),
         fetchedAt: Date.now(),
       };
@@ -96404,6 +96526,7 @@ async function ensureCmConsoleBootstrapSummary(options = {}) {
       applicationCount,
       policyCount,
       summaryReady: errors.length === 0,
+      summaryVerified: true,
       sourceUrl: String(catalog?.sourceUrl || ""),
       fetchedAt: Date.now(),
       errors: errors.slice(0, 8),
@@ -96414,6 +96537,7 @@ async function ensureCmConsoleBootstrapSummary(options = {}) {
       applicationCount,
       policyCount,
       summaryReady: summary.summaryReady === true,
+      summaryVerified: true,
       fetchedAt: Number(catalog?.fetchedAt || Date.now()),
     };
     state.cmTenantsCatalog = nextCatalog;
@@ -97400,6 +97524,7 @@ async function ensureCmTenantsCatalog(options = {}) {
         applicationCount: Math.max(0, Number(cachedCatalog?.applicationCount || 0)),
         policyCount: Math.max(0, Number(cachedCatalog?.policyCount || 0)),
         summaryReady: cachedCatalog?.summaryReady === true,
+        summaryVerified: cachedCatalog?.summaryVerified === true,
         fetchedAt: Date.now(),
       };
       state.cmTenantsCatalog = catalog;
@@ -101535,7 +101660,9 @@ function buildRestV2ServiceProviderCandidatesFromContext(context = null) {
     ]) || ""
   ).trim();
   const authoritativeRequestorId = String(
-    firstNonEmptyString([appScopedRequestorId, canonicalRequestorId, requestorId]) || ""
+    // Selection context must drive REST V2 service-provider id.
+    // App-scoped hints are only fallback for contexts without a requestor.
+    firstNonEmptyString([canonicalRequestorId, requestorId, appScopedRequestorId]) || ""
   ).trim();
   const normalizedCanonicalRequestorId = String(canonicalRequestorId || requestorId || "").trim();
   const configurationScopedServiceProvider = getRequestorScopedRestV2ConfigurationServiceProvider(requestorId);
