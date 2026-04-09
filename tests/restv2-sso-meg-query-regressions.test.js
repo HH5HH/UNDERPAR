@@ -475,6 +475,38 @@ test("requestor filtering uses derived REST V2 requestor IDs when explicit cover
   assert.equal(String(options[0]?.id || ""), "cityvideolive");
 });
 
+test("requestor filtering keeps all requestors visible during first-selection hydration", () => {
+  const { getRequestorsForSelectedMediaCompany } = loadFunctions("popup.js", ["getRequestorsForSelectedMediaCompany"], {
+    state: {
+      consoleBootstrapState: {
+        channels: [],
+      },
+    },
+    resolveSelectedProgrammer: () => ({
+      programmerId: "SportsnetNow",
+      requestorIds: ["SportsnetNowCA", "SportsnetNowUS"],
+      requestorOptions: [],
+    }),
+    getCurrentPremiumAppsSnapshot: () => null,
+    getRuntimePremiumServicesSeed: () => null,
+    getProgrammerServiceHydrationPromise: () => Promise.resolve(),
+    extractEntityIdFromToken: (value = "") => String(value || "").trim(),
+    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+    uniqueSorted: (values = []) =>
+      Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
+    deriveProgrammerRequestorOptionsFromChannels: () => [],
+    resolveStrictRestV2RequestorIdsForProgrammer: () => [],
+  });
+
+  const options = getRequestorsForSelectedMediaCompany();
+  assert.equal(Array.isArray(options), true);
+  assert.equal(options.length, 2);
+  assert.deepEqual(
+    options.map((option) => String(option?.id || "")),
+    ["SportsnetNowCA", "SportsnetNowUS"]
+  );
+});
+
 test("strict REST V2 requestor extraction supports compact app shapes without appData", () => {
   const { collectRestV2RequestorIdsFromApps } = loadFunctions("popup.js", ["collectRestV2RequestorIdsFromApps"], {
     extractEntityIdFromToken: (value = "") => {

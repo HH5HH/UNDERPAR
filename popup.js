@@ -88120,7 +88120,22 @@ function getRequestorsForSelectedMediaCompany() {
   // These requestor IDs are stored in __restV2RequestorIds in the premium apps snapshot.
   // Filter the dropdown to show ONLY requestors that have REST V2 registered applications.
   const programmerId = String(programmer.programmerId || "").trim();
-  const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
+  const premiumApps = programmerId
+    ? getCurrentPremiumAppsSnapshot(programmerId) || getRuntimePremiumServicesSeed(programmerId) || null
+    : null;
+  const hydrationPending =
+    Boolean(programmerId) &&
+    typeof getProgrammerServiceHydrationPromise === "function" &&
+    Boolean(getProgrammerServiceHydrationPromise(programmerId));
+
+  // First selection race guard:
+  // while hydration is still building premium app metadata, do NOT collapse
+  // the requestor list to zero. Keep all requestors visible and let the
+  // hydrated re-populate pass apply strict filtering when data is ready.
+  if (!premiumApps && hydrationPending) {
+    return allRequestors;
+  }
+
   const restV2RequestorIds = resolveStrictRestV2RequestorIdsForProgrammer(programmerId, premiumApps);
 
   // null means wildcard coverage from an "All Channels" REST V2 app.
@@ -88147,6 +88162,10 @@ function getRequestorsForSelectedMediaCompany() {
     // dropdown directly from those IDs so single-provider companies stay selectable.
     if (filteredRequestors.length > 0) {
       return filteredRequestors;
+    }
+
+    if (hydrationPending) {
+      return allRequestors;
     }
 
     return restV2RequestorIds.map((requestorId) => ({
@@ -88256,7 +88275,10 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   const resolvedProgrammer = resolveSelectedProgrammer();
   const resolvedProgrammerId = String(resolvedProgrammer?.programmerId || normalizedProgrammerId || "").trim();
   const restV2RequestorIds = resolveStrictRestV2RequestorIdsForProgrammer(resolvedProgrammerId, resolvedServices);
-  const restV2SelectionReady = restV2RequestorIds === null || (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0);
+  const restV2SelectionReady =
+    restV2RequestorIds === null ||
+    (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) ||
+    (hydrationPending && !resolvedServices);
   const runtimeReady =
     Boolean(normalizedProgrammerId) && Boolean(resolvedServices) && isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices);
   const ready =
