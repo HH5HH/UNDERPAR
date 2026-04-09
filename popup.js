@@ -88742,7 +88742,7 @@ async function refreshProgrammerPanels(options = {}) {
     const renderServices =
       persistedFinalRecord &&
       applyPassVaultRecordToRuntime(programmer, persistedFinalRecord, {
-        forceOverwrite: true,
+        forceOverwrite: false,
         forceDcrRestore: true,
       })
         ? getCurrentPremiumAppsSnapshot(programmerId) ||
@@ -88802,7 +88802,7 @@ async function refreshProgrammerPanels(options = {}) {
       if (
         nextRecord &&
         applyPassVaultRecordToRuntime(programmer, nextRecord, {
-          forceOverwrite: true,
+          forceOverwrite: false,
           forceDcrRestore: true,
         })
       ) {
