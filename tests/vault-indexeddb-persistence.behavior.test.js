@@ -84,6 +84,8 @@ test("devtools, saved-query bridge, and background use the shared IndexedDB vaul
   const bridgeSource = read("saved-query-bridge.js");
   const backgroundSource = read("background.js");
   const storeSource = read("underpar-vault-store.js");
+  const popupSource = read("popup.js");
+  const purgeSource = extractFunctionSource(popupSource, "purgePassVaultFromDevtools");
 
   assert.match(panelSource, /underparVaultStore\.readAggregatePayload\(\)/);
   assert.match(panelSource, /underparVaultStore\.writeAggregatePayload\(normalizedVault\)/);
@@ -100,4 +102,7 @@ test("devtools, saved-query bridge, and background use the shared IndexedDB vaul
   assert.match(storeSource, /function sanitizeProgrammerCmServiceSummary\(/);
   assert.doesNotMatch(storeSource, /tokenFingerprint/);
   assert.doesNotMatch(storeSource, /imsSession/);
+  assert.match(purgeSource, /underparVaultStore\.writeAggregatePayload\(createEmptyUnderparVaultPayload\(\)\)/);
+  assert.match(purgeSource, /underparVaultStore\.readAggregatePayload\(\)/);
+  assert.doesNotMatch(purgeSource, /underparVaultStore\.clear\(\)\.catch\(\(\) => false\)/);
 });

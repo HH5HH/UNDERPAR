@@ -8844,8 +8844,39 @@ async function purgePassVaultFromDevtools() {
     purgeAvatarCaches();
     purgeDcrCaches();
     purgeLegacySavedEsmQueryEntriesFromLocalStorage();
+    let indexedDbPurged = false;
     if (canUseUnderparVaultIndexedDb()) {
-      await underparVaultStore.clear().catch(() => false);
+      if (typeof underparVaultStore?.clear === "function") {
+        try {
+          await underparVaultStore.clear();
+          indexedDbPurged = true;
+        } catch {
+          indexedDbPurged = false;
+        }
+      }
+      if (!indexedDbPurged && typeof underparVaultStore?.writeAggregatePayload === "function") {
+        // Fallback for blocked/failed clear() paths: overwrite with an explicit empty vault.
+        await underparVaultStore.writeAggregatePayload(createEmptyUnderparVaultPayload());
+        indexedDbPurged = true;
+      }
+      if (
+        indexedDbPurged &&
+        typeof underparVaultStore?.readAggregatePayload === "function"
+      ) {
+        const persistedVault = normalizeUnderparVaultPayload(await underparVaultStore.readAggregatePayload());
+        const persistedEnvironments = persistedVault?.pass?.environments;
+        const hasPersistedPassRecords =
+          persistedEnvironments &&
+          typeof persistedEnvironments === "object" &&
+          !Array.isArray(persistedEnvironments) &&
+          Object.keys(persistedEnvironments).length > 0;
+        if (hasPersistedPassRecords) {
+          throw new Error("UnderPAR VAULT purge verification failed. Persisted PASS records remain.");
+        }
+      }
+      if (!indexedDbPurged) {
+        throw new Error("UnderPAR VAULT purge failed. IndexedDB storage could not be cleared.");
+      }
     }
     if (chrome?.storage?.local?.remove) {
       await chrome.storage.local.remove([
