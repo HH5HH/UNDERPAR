@@ -89764,7 +89764,67 @@ function collectRestV2RequestorIdsFromApps(restV2Apps = [], programmerId = "") {
     ids.add(requestorId);
   };
 
+  const pushServiceProviderValues = (value) => {
+    if (value == null) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry) => pushServiceProviderValues(entry));
+      return;
+    }
+    if (typeof value === "object") {
+      pushServiceProviderValues(value?.value);
+      pushServiceProviderValues(value?.id);
+      pushServiceProviderValues(value?.key);
+      return;
+    }
+    pushCandidate(value);
+  };
+
   apps.forEach((appInfo) => {
+    const appDataSource =
+      appInfo?.appData && typeof appInfo.appData === "object" && !Array.isArray(appInfo.appData)
+        ? appInfo.appData
+        : null;
+    const rawSource =
+      appInfo?.raw && typeof appInfo.raw === "object" && !Array.isArray(appInfo.raw)
+        ? appInfo.raw
+        : null;
+    const envelopeEntity =
+      appInfo?.__rawEnvelope?.entityData && typeof appInfo.__rawEnvelope.entityData === "object" && !Array.isArray(appInfo.__rawEnvelope.entityData)
+        ? appInfo.__rawEnvelope.entityData
+        : appDataSource?.__rawEnvelope?.entityData && typeof appDataSource.__rawEnvelope.entityData === "object" && !Array.isArray(appDataSource.__rawEnvelope.entityData)
+          ? appDataSource.__rawEnvelope.entityData
+          : rawSource?.__rawEnvelope?.entityData && typeof rawSource.__rawEnvelope.entityData === "object" && !Array.isArray(rawSource.__rawEnvelope.entityData)
+            ? rawSource.__rawEnvelope.entityData
+            : null;
+
+    pushServiceProviderValues(envelopeEntity?.serviceProviders);
+    pushServiceProviderValues(envelopeEntity?.serviceProvider);
+    pushServiceProviderValues(envelopeEntity?.requestors);
+    pushServiceProviderValues(envelopeEntity?.requestorIds);
+    pushServiceProviderValues(envelopeEntity?.requestor);
+
+    pushServiceProviderValues(appDataSource?.serviceProviders);
+    pushServiceProviderValues(appDataSource?.serviceProvider);
+    pushServiceProviderValues(appDataSource?.requestors);
+    pushServiceProviderValues(appDataSource?.requestorIds);
+    pushServiceProviderValues(appDataSource?.requestor);
+
+    pushServiceProviderValues(rawSource?.serviceProviders);
+    pushServiceProviderValues(rawSource?.serviceProvider);
+    pushServiceProviderValues(rawSource?.requestors);
+    pushServiceProviderValues(rawSource?.requestorIds);
+    pushServiceProviderValues(rawSource?.requestor);
+
+    // Compact runtime shapes can hold immutable entity fields directly on appInfo.
+    pushServiceProviderValues(appInfo?.serviceProviders);
+    pushServiceProviderValues(appInfo?.serviceProvider);
+    pushServiceProviderValues(appInfo?.requestors);
+    pushServiceProviderValues(appInfo?.requestorIds);
+    pushServiceProviderValues(appInfo?.requestor);
+
+    // Keep existing normalized channel extraction as a final source.
     pushCandidate(getRegisteredAppChannel(appInfo));
   });
 

@@ -478,6 +478,47 @@ test("requestor filtering uses derived REST V2 requestor IDs when explicit cover
   assert.equal(String(options[0]?.id || ""), "cityvideolive");
 });
 
+test("strict REST V2 requestor extraction supports compact app shapes without appData", () => {
+  const { collectRestV2RequestorIdsFromApps } = loadFunctions("popup.js", ["collectRestV2RequestorIdsFromApps"], {
+    extractEntityIdFromToken: (value = "") => {
+      const text = String(value || "").trim();
+      const match = text.match(/^@?[A-Za-z][A-Za-z0-9_-]*\s*:(.*)$/);
+      return String(match?.[1] || text).trim();
+    },
+    extractRequestorIdFromServiceProviderValue: (value = "") => {
+      const text = String(value || "").trim();
+      if (!text) {
+        return "";
+      }
+      const match = text.match(/^@?[A-Za-z][A-Za-z0-9_-]*\s*:(.*)$/);
+      return String(match?.[1] || text).trim();
+    },
+    normalizeEntityToken: (value = "") => String(value || "").trim().toLowerCase(),
+    getRegisteredAppChannel: () => null,
+  });
+
+  const ids = collectRestV2RequestorIdsFromApps(
+    [
+      {
+        guid: "dc47cbac-5b06-40a8-86bb-2d2901f37589",
+        serviceProviders: ["@ServiceProvider:REF30"],
+      },
+      {
+        guid: "9bd95093-1a49-4c87-a8a0-3b091ff7e9d9",
+        raw: {
+          serviceProviders: ["@ServiceProvider:TestDistributors"],
+        },
+      },
+    ],
+    "Adobe"
+  );
+
+  assert.equal(Array.isArray(ids), true);
+  assert.equal(ids.length, 2);
+  assert.equal(ids.includes("REF30"), true);
+  assert.equal(ids.includes("TestDistributors"), true);
+});
+
 test("requestor filtering fallback no longer widens to global channel list", () => {
   const { getRequestorsForSelectedMediaCompany } = loadFunctions("popup.js", ["getRequestorsForSelectedMediaCompany"], {
     state: {
