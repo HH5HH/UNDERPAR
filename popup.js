@@ -8408,7 +8408,7 @@ async function persistPassVaultCmGlobalState(value = null, options = {}) {
       String(environment?.label || vault.pass.environments[environmentKey].label || environmentKey).trim() || environmentKey;
     vault.updatedAt = Date.now();
 
-    await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false });
+    await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false, allowDuringManualSignOut: true });
     return nextRecord;
   });
 }
@@ -8421,7 +8421,7 @@ async function persistPassVaultSlacktivationState(value = null, options = {}) {
     );
     setUnderparVaultSlacktivationRecord(vault, nextRecord);
     vault.updatedAt = Date.now();
-    await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false });
+    await persistPassVaultPayloadToStorage(vault, { silent: options?.silent !== false, allowDuringManualSignOut: true });
     return getUnderparVaultSlacktivationRecord(vault);
   });
 }
@@ -8604,7 +8604,7 @@ async function persistPassVaultProgrammerRecord(programmer, services = null, opt
     vault.pass.environments[environmentKey].mediaCompanies[programmerId] = nextRecord;
     vault.updatedAt = Date.now();
 
-    await persistPassVaultPayloadToStorage(vault, { silent: true });
+    await persistPassVaultPayloadToStorage(vault, { silent: true, allowDuringManualSignOut: true });
     applyMediaCompanyOptionHydrationState();
     return nextRecord;
   });
