@@ -88209,7 +88209,8 @@ function isRequestorEligibleForSelectedProgrammer(requestorId = "", programmer =
   return Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.includes(normalizedRequestorId);
 }
 
-function populateRequestorSelect() {
+function populateRequestorSelect(options = {}) {
+  const suppressDependentRefresh = options?.suppressDependentRefresh === true;
   const previousRequestorId = String(state.selectedRequestorId || "").trim();
   const previousMvpdId = String(state.selectedMvpdId || "").trim();
   const requestorOptions = getRequestorsForSelectedMediaCompany();
@@ -88257,9 +88258,11 @@ function populateRequestorSelect() {
       els.mvpdSelect.innerHTML = '<option value=""></option>';
     }
   }
-  syncGlobalQuickLaunchButtons();
-  refreshRestV2LoginPanels();
-  refreshMvpdWorkspaceTools();
+  if (!suppressDependentRefresh) {
+    syncGlobalQuickLaunchButtons();
+    refreshRestV2LoginPanels();
+    refreshMvpdWorkspaceTools();
+  }
 }
 
 function syncRequestorSelectHydrationAvailability(programmerId = "", services = null) {
@@ -88565,7 +88568,7 @@ async function refreshProgrammerPanels(options = {}) {
     // First-pass hydration already has enough REST V2 coverage metadata to
     // populate requestors. Apply it immediately so first selection lights up
     // without waiting for deep credential hydration completion.
-    populateRequestorSelect();
+    populateRequestorSelect({ suppressDependentRefresh: true });
     syncRequestorSelectHydrationAvailability(programmerId, provisionalServices);
 
     if (!selectionStillCurrent()) {
