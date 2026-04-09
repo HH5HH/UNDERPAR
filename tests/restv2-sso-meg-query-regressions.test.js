@@ -508,6 +508,73 @@ test("requestor filtering fallback no longer widens to global channel list", () 
   assert.equal(options.length, 0);
 });
 
+test("requestor eligibility rejects IDs outside explicit REST V2 requestor coverage", () => {
+  const { isRequestorEligibleForSelectedProgrammer } = loadFunctions(
+    "popup.js",
+    ["isRequestorEligibleForSelectedProgrammer"],
+    {
+      resolveSelectedProgrammer: () => ({ programmerId: "Rogers Media", requestorIds: ["cityvideolive"] }),
+      getCurrentPremiumAppsSnapshot: () => ({ __restV2RequestorIds: ["cityvideolive"] }),
+      extractEntityIdFromToken: (value = "") => String(value || "").trim(),
+      uniqueSorted: (values = []) =>
+        Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
+      getRequestorsForSelectedMediaCompany: () => [{ id: "cityvideolive", key: "cityvideolive", label: "cityvideolive" }],
+    }
+  );
+
+  assert.equal(isRequestorEligibleForSelectedProgrammer("animalplanettv"), false);
+  assert.equal(isRequestorEligibleForSelectedProgrammer("cityvideolive"), true);
+});
+
+test("MVPD config loader skips stale requestor IDs during hydration", async () => {
+  const state = {
+    selectedRequestorId: "animalplanettv",
+    selectedMvpdId: "Comcast_SSO",
+  };
+  const els = {
+    requestorSelect: {
+      value: "animalplanettv",
+    },
+    mvpdSelect: {
+      innerHTML: "",
+      disabled: false,
+      value: "",
+    },
+  };
+  let loadCalls = 0;
+  let statusMessage = "";
+  let statusType = "";
+  const { populateMvpdSelectForRequestor } = loadFunctions("popup.js", ["populateMvpdSelectForRequestor"], {
+    state,
+    els,
+    resolveSelectedProgrammer: () => ({ programmerId: "Rogers Media" }),
+    getCurrentPremiumAppsSnapshot: () => ({ __restV2RequestorIds: ["cityvideolive"] }),
+    isRequestorEligibleForSelectedProgrammer: () => false,
+    loadMvpdsFromRestV2: async () => {
+      loadCalls += 1;
+      return new Map();
+    },
+    syncGlobalQuickLaunchButtons: () => {},
+    refreshRestV2LoginPanels: () => {},
+    refreshMvpdWorkspaceTools: () => {},
+    refreshRestV2LearningUi: () => {},
+    setStatus: (message = "", type = "info") => {
+      statusMessage = String(message || "");
+      statusType = String(type || "");
+    },
+  });
+
+  await populateMvpdSelectForRequestor("animalplanettv");
+
+  assert.equal(loadCalls, 0);
+  assert.equal(state.selectedRequestorId, "");
+  assert.equal(state.selectedMvpdId, "");
+  assert.equal(String(els.requestorSelect.value || ""), "");
+  assert.equal(els.mvpdSelect.disabled, true);
+  assert.match(statusMessage, /Select a Content Provider first\./);
+  assert.equal(statusType, "info");
+});
+
 test("MEG workspace saved-query reset clears the picker after the native menu closes", () => {
   const timers = [];
   const savedQueryPicker = {

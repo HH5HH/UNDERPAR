@@ -1,6 +1,6 @@
 {
-  "version": "1.26.53",
-  "version_name": "1.26.53",
+  "version": "1.26.55",
+  "version_name": "1.26.55",
   "package_path": "underpar_distro.zip",
   "archive_root": "underpar_distro",
   "archive_manifest_path": "underpar_distro/manifest.json"

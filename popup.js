@@ -88126,6 +88126,68 @@ function getRequestorsForSelectedMediaCompany() {
   return [];
 }
 
+function isRequestorEligibleForSelectedProgrammer(requestorId = "", programmer = null, services = null) {
+  const normalizedRequestorId = String(extractEntityIdFromToken(String(requestorId || "")) || "").trim();
+  if (!normalizedRequestorId) {
+    return false;
+  }
+
+  const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : resolveSelectedProgrammer();
+  const programmerId = String(resolvedProgrammer?.programmerId || "").trim();
+  const resolvedServices =
+    services && typeof services === "object" && !Array.isArray(services)
+      ? services
+      : programmerId
+        ? getCurrentPremiumAppsSnapshot(programmerId) || null
+        : null;
+  const hasExplicitRestV2RequestorFilter =
+    Boolean(resolvedServices) && Object.prototype.hasOwnProperty.call(resolvedServices, "__restV2RequestorIds");
+  if (hasExplicitRestV2RequestorFilter) {
+    const explicitIds = Array.isArray(resolvedServices?.__restV2RequestorIds)
+      ? Array.from(
+          new Set(
+            resolvedServices.__restV2RequestorIds
+              .map((value) => String(extractEntityIdFromToken(String(value || "")) || "").trim())
+              .filter(Boolean)
+          )
+        )
+      : resolvedServices?.__restV2RequestorIds === null
+        ? null
+        : [];
+    if (Array.isArray(explicitIds)) {
+      return explicitIds.includes(normalizedRequestorId);
+    }
+  }
+
+  const knownProgrammerIds = uniqueSorted(
+    [
+      ...(Array.isArray(resolvedProgrammer?.requestorIds) ? resolvedProgrammer.requestorIds : []),
+      ...(Array.isArray(resolvedProgrammer?.requestorOptions)
+        ? resolvedProgrammer.requestorOptions
+            .flatMap((option) => [option?.id, option?.key])
+            .filter(Boolean)
+        : []),
+    ]
+      .map((value) => String(extractEntityIdFromToken(String(value || "")) || "").trim())
+      .filter(Boolean)
+  );
+  if (knownProgrammerIds.length > 0) {
+    return knownProgrammerIds.includes(normalizedRequestorId);
+  }
+
+  const selectableRequestors = getRequestorsForSelectedMediaCompany();
+  const selectableIds = uniqueSorted(
+    (Array.isArray(selectableRequestors) ? selectableRequestors : [])
+      .map((option) => String(extractEntityIdFromToken(String(option?.id || option?.key || "")) || "").trim())
+      .filter(Boolean)
+  );
+  if (selectableIds.length > 0) {
+    return selectableIds.includes(normalizedRequestorId);
+  }
+
+  return true;
+}
+
 function populateRequestorSelect() {
   const previousRequestorId = String(state.selectedRequestorId || "").trim();
   const previousMvpdId = String(state.selectedMvpdId || "").trim();
@@ -101704,6 +101766,35 @@ async function populateMvpdSelectForRequestor(requestorId) {
       onlyIfWorkspaceOpen: true,
       surfaceMissingSelectionError: false,
     });
+    return;
+  }
+
+  const selectedProgrammer = resolveSelectedProgrammer();
+  const selectedProgrammerServices = selectedProgrammer?.programmerId
+    ? getCurrentPremiumAppsSnapshot(selectedProgrammer.programmerId) || null
+    : null;
+  const requestorEligible = isRequestorEligibleForSelectedProgrammer(
+    expectedRequestorId,
+    selectedProgrammer,
+    selectedProgrammerServices
+  );
+  if (!requestorEligible) {
+    if (String(state.selectedRequestorId || "").trim() === String(expectedRequestorId || "").trim()) {
+      state.selectedRequestorId = "";
+    }
+    if (els.requestorSelect) {
+      els.requestorSelect.value = "";
+    }
+    els.mvpdSelect.disabled = true;
+    els.mvpdSelect.innerHTML = '<option value=""></option>';
+    state.selectedMvpdId = "";
+    syncGlobalQuickLaunchButtons();
+    refreshRestV2LoginPanels();
+    refreshMvpdWorkspaceTools({ controllerReason: "requestor-invalid" });
+    refreshRestV2LearningUi(selectedProgrammer, {
+      controllerReason: "requestor-invalid",
+    });
+    setStatus("Select a Content Provider first.", "info");
     return;
   }
 
