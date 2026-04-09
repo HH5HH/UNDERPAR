@@ -76069,6 +76069,8 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
     getCurrentPremiumAppsSnapshot(String(selectionContext?.programmerId || "").trim()) ||
     getRuntimePremiumServicesSeed(String(selectionContext?.programmerId || "").trim()) ||
     null;
+  const hasDetectedPremiumServices = getDetectedPremiumServiceKeys(services).length > 0;
+  const showSplunkAction = !selectionContext?.programmerId || hasDetectedPremiumServices;
   const adobePassWorkflowActive =
     state.sessionReady === true && Boolean(state.loginData) && shouldHydrateAdobePassWorkflowForSession(state.loginData);
   const registeredApplicationReady = Boolean(selectionContext?.programmerId && adobePassWorkflowActive);
@@ -76084,6 +76086,8 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
       ? `HEALTH actions. ${adobePassOrgRequiredLabel}. Switch to the Adobe Pass org profile to unlock Registered Application Health, ESM HEALTH, CM HEALTH, and HEALTH SPLUNK.`
       : !premiumContext?.hydrationReady
         ? `HEALTH actions. Preparing HEALTH workspaces for ${selectionContext.programmerName || selectionContext.programmerId}.`
+        : !hasDetectedPremiumServices
+          ? `HEALTH actions for ${selectionContext.programmerName || selectionContext.programmerId} in ${selectionContext.environmentLabel}. No premium scoped applications were detected, so Registered Application Health stays available.`
         : healthReady
           ? `HEALTH actions for ${selectionContext.requestorId} in ${selectionContext.environmentLabel}.`
           : esmVisible || cmVisible
@@ -76111,6 +76115,29 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
             aria-label="${escapeHtml(`Open CM HEALTH dashboard for ${selectionContext.programmerName || selectionContext.programmerId}`)}"
           >CM</button>`
     : "";
+  const splunkButtonHtml = showSplunkAction
+    ? `
+          <button
+            type="button"
+            class="hr-health-action-btn hr-health-action-btn--accent"
+            data-health-action="splunk"
+            title="${escapeHtml(
+              !premiumContext?.hydrationReady
+                ? "UnderPAR is still hydrating the HEALTH Splunk context"
+                : healthReady
+                ? `Open HEALTH Splunk workspace for ${selectionContext.requestorId}`
+                : "Select a RequestorId to unlock HEALTH SPLUNK"
+            )}"
+            aria-label="${escapeHtml(
+              !premiumContext?.hydrationReady
+                ? "UnderPAR is still hydrating the HEALTH Splunk context"
+                : healthReady
+                ? `Open HEALTH Splunk workspace for ${selectionContext.requestorId}`
+                : "Select a RequestorId to unlock HEALTH SPLUNK"
+            )}"
+            ${healthReady ? "" : "disabled"}
+          >SPLUNK</button>`
+    : "";
 
   return `
     <article class="metadata-item hr-health-status-value">
@@ -76135,26 +76162,7 @@ function buildHrContextHealthStatusItemHtml(programmer = null) {
             )}"
             ${registeredApplicationReady ? "" : "disabled"}
           >REG APPS</button>
-          <button
-            type="button"
-            class="hr-health-action-btn hr-health-action-btn--accent"
-            data-health-action="splunk"
-            title="${escapeHtml(
-              !premiumContext?.hydrationReady
-                ? "UnderPAR is still hydrating the HEALTH Splunk context"
-                : healthReady
-                ? `Open HEALTH Splunk workspace for ${selectionContext.requestorId}`
-                : "Select a RequestorId to unlock HEALTH SPLUNK"
-            )}"
-            aria-label="${escapeHtml(
-              !premiumContext?.hydrationReady
-                ? "UnderPAR is still hydrating the HEALTH Splunk context"
-                : healthReady
-                ? `Open HEALTH Splunk workspace for ${selectionContext.requestorId}`
-                : "Select a RequestorId to unlock HEALTH SPLUNK"
-            )}"
-            ${healthReady ? "" : "disabled"}
-          >SPLUNK</button>
+          ${splunkButtonHtml}
         </div>
       </div>
     </article>

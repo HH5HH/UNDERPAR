@@ -143,6 +143,34 @@ test("HR context hydration readiness remains blocked until runtime services are 
   assert.equal(isProgrammerHrContextHydrationReady("ABC", { restV2: { guid: "rest-guid" } }), false);
 });
 
+test("HEALTH status hides SPLUNK when the selected media company has no premium scoped applications", () => {
+  const { buildHrContextHealthStatusItemHtml } = loadFunctions("popup.js", ["buildHrContextHealthStatusItemHtml"], {
+    getHrContextSummary: () => ({ hasProgrammerContext: true }),
+    healthWorkspaceGetSelectionContext: () => ({
+      programmerId: "WWE",
+      programmerName: "WWE",
+      requestorId: "WWE",
+      environmentLabel: "Release Production",
+    }),
+    getHealthWorkspacePremiumContextSnapshot: () => ({ services: {}, hydrationReady: true, esmAvailable: false }),
+    getCurrentPremiumAppsSnapshot: () => null,
+    getRuntimePremiumServicesSeed: () => null,
+    getDetectedPremiumServiceKeys: () => [],
+    shouldHydrateAdobePassWorkflowForSession: () => true,
+    shouldShowCmService: () => false,
+    escapeHtml: (value = "") => String(value || ""),
+    state: {
+      sessionReady: true,
+      loginData: { ok: true },
+    },
+  });
+
+  const html = buildHrContextHealthStatusItemHtml({ programmerId: "WWE", programmerName: "WWE" });
+
+  assert.match(html, />REG APPS<\/button>/);
+  assert.doesNotMatch(html, />SPLUNK<\/button>/);
+});
+
 test("All Channels scan does not infer universal coverage from missing service-provider hints", () => {
   const popupSource = read("popup.js");
   assert.match(popupSource, /const resolvedAppChannel = getRegisteredAppChannel\(app\);/);
