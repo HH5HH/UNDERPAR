@@ -88010,8 +88010,7 @@ function getRequestorsForSelectedMediaCompany() {
   // Filter the dropdown to show ONLY requestors that have REST V2 registered applications.
   const programmerId = String(programmer.programmerId || "").trim();
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
-  const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
-  const restV2RequestorIds = collectRestV2RequestorIdsFromApps(restV2Apps, programmerId);
+  const restV2RequestorIds = resolveStrictRestV2RequestorIdsForProgrammer(programmerId, premiumApps);
 
   if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
     // Build a set of normalized requestor IDs for efficient lookup
@@ -88058,10 +88057,9 @@ function isRequestorEligibleForSelectedProgrammer(requestorId = "", programmer =
       : programmerId
         ? getCurrentPremiumAppsSnapshot(programmerId) || null
         : null;
-  const restV2Apps = Array.isArray(resolvedServices?.restV2Apps) ? resolvedServices.restV2Apps : [];
-  const derivedRestV2RequestorIds = collectRestV2RequestorIdsFromApps(
-    restV2Apps,
-    String(resolvedProgrammer?.programmerId || "").trim()
+  const derivedRestV2RequestorIds = resolveStrictRestV2RequestorIdsForProgrammer(
+    String(resolvedProgrammer?.programmerId || "").trim(),
+    resolvedServices
   );
   return Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.includes(normalizedRequestorId);
 }
@@ -88138,8 +88136,7 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
     Boolean(normalizedProgrammerId) && Boolean(getProgrammerServiceHydrationPromise(normalizedProgrammerId));
   const resolvedProgrammer = resolveSelectedProgrammer();
   const resolvedProgrammerId = String(resolvedProgrammer?.programmerId || normalizedProgrammerId || "").trim();
-  const restV2Apps = Array.isArray(resolvedServices?.restV2Apps) ? resolvedServices.restV2Apps : [];
-  const restV2RequestorIds = collectRestV2RequestorIdsFromApps(restV2Apps, resolvedProgrammerId);
+  const restV2RequestorIds = resolveStrictRestV2RequestorIdsForProgrammer(resolvedProgrammerId, resolvedServices);
   const restV2SelectionReady = Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0;
   const runtimeReady =
     Boolean(normalizedProgrammerId) && Boolean(resolvedServices) && isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices);
@@ -89741,6 +89738,16 @@ function getRegisteredAppChannel(appInfo) {
 
 function isAllChannelsApp(appInfo) {
   return getRegisteredAppChannel(appInfo) === "";
+}
+
+function resolveStrictRestV2RequestorIdsForProgrammer(programmerId = "", premiumApps = null) {
+  const normalizedProgrammerId = String(programmerId || "").trim();
+  if (!normalizedProgrammerId) {
+    return [];
+  }
+
+  const restV2Candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, premiumApps);
+  return collectRestV2RequestorIdsFromApps(restV2Candidates, normalizedProgrammerId);
 }
 
 function collectRestV2RequestorIdsFromApps(restV2Apps = [], programmerId = "") {

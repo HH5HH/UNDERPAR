@@ -466,10 +466,7 @@ test("requestor filtering uses derived REST V2 requestor IDs when explicit cover
     uniqueSorted: (values = []) =>
       Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
     deriveProgrammerRequestorOptionsFromChannels: () => [],
-    extractRequestorIdFromServiceProviderValue: (value = "") => String(value || "").trim(),
-    getRegisteredAppChannel: () => "",
-    isAllChannelsApp: () => false,
-    collectRestV2RequestorIdsFromApps: () => ["cityvideolive"],
+    resolveStrictRestV2RequestorIdsForProgrammer: () => ["cityvideolive"],
   });
 
   const options = getRequestorsForSelectedMediaCompany();
@@ -543,10 +540,7 @@ test("requestor filtering fallback no longer widens to global channel list", () 
     uniqueSorted: (values = []) =>
       Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
     deriveProgrammerRequestorOptionsFromChannels: () => [],
-    extractRequestorIdFromServiceProviderValue: (value = "") => String(value || "").trim(),
-    getRegisteredAppChannel: () => "",
-    isAllChannelsApp: () => false,
-    collectRestV2RequestorIdsFromApps: () => [],
+    resolveStrictRestV2RequestorIdsForProgrammer: () => [],
   });
 
   const options = getRequestorsForSelectedMediaCompany();
@@ -562,13 +556,75 @@ test("requestor eligibility rejects IDs outside explicit REST V2 requestor cover
       resolveSelectedProgrammer: () => ({ programmerId: "Rogers Media", requestorIds: ["cityvideolive"] }),
       getCurrentPremiumAppsSnapshot: () => ({ __restV2RequestorIds: ["cityvideolive"] }),
       extractEntityIdFromToken: (value = "") => String(value || "").trim(),
-      isAllChannelsApp: () => false,
-      collectRestV2RequestorIdsFromApps: () => ["cityvideolive"],
+      resolveStrictRestV2RequestorIdsForProgrammer: () => ["cityvideolive"],
     }
   );
 
   assert.equal(isRequestorEligibleForSelectedProgrammer("animalplanettv"), false);
   assert.equal(isRequestorEligibleForSelectedProgrammer("cityvideolive"), true);
+});
+
+test("requestor filtering uses programmer-scoped REST V2 candidates when premium app list is empty", () => {
+  const { getRequestorsForSelectedMediaCompany, resolveStrictRestV2RequestorIdsForProgrammer } = loadFunctions(
+    "popup.js",
+    ["resolveStrictRestV2RequestorIdsForProgrammer", "getRequestorsForSelectedMediaCompany"],
+    {
+      state: {
+        consoleBootstrapState: {
+          channels: [],
+        },
+      },
+      resolveSelectedProgrammer: () => ({
+        programmerId: "Adobe",
+        requestorIds: ["REF30", "TestDistributors", "Other"],
+        requestorOptions: [],
+      }),
+      getCurrentPremiumAppsSnapshot: () => ({
+        restV2Apps: [],
+      }),
+      collectProgrammerScopedRestV2AppCandidates: (programmerId = "", premiumApps = null) => {
+        assert.equal(programmerId, "Adobe");
+        assert.equal(Array.isArray(premiumApps?.restV2Apps), true);
+        assert.equal((premiumApps?.restV2Apps || []).length, 0);
+        return [
+          { guid: "restv2-ref30", serviceProviders: ["@ServiceProvider:REF30"] },
+          { guid: "restv2-test", serviceProviders: ["@ServiceProvider:TestDistributors"] },
+        ];
+      },
+      collectRestV2RequestorIdsFromApps: (apps = []) => {
+        const ids = [];
+        apps.forEach((appInfo) => {
+          (Array.isArray(appInfo?.serviceProviders) ? appInfo.serviceProviders : []).forEach((entry) => {
+            const text = String(entry || "").trim();
+            const match = text.match(/^@?[A-Za-z][A-Za-z0-9_-]*\s*:(.*)$/);
+            const id = String(match?.[1] || text).trim();
+            if (id) {
+              ids.push(id);
+            }
+          });
+        });
+        return ids;
+      },
+      extractEntityIdFromToken: (value = "") => String(value || "").trim(),
+      firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+      uniqueSorted: (values = []) =>
+        Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
+      deriveProgrammerRequestorOptionsFromChannels: () => [],
+    }
+  );
+
+  assert.deepEqual(resolveStrictRestV2RequestorIdsForProgrammer("Adobe", { restV2Apps: [] }), [
+    "REF30",
+    "TestDistributors",
+  ]);
+
+  const options = getRequestorsForSelectedMediaCompany();
+  assert.equal(Array.isArray(options), true);
+  assert.equal(options.length, 2);
+  assert.deepEqual(
+    options.map((option) => String(option?.id || "")),
+    ["REF30", "TestDistributors"]
+  );
 });
 
 test("MVPD config loader skips stale requestor IDs during hydration", async () => {
