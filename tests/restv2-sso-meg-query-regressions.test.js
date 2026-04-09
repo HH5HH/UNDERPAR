@@ -564,6 +564,56 @@ test("requestor eligibility rejects IDs outside explicit REST V2 requestor cover
   assert.equal(isRequestorEligibleForSelectedProgrammer("cityvideolive"), true);
 });
 
+test("requestor filtering treats All Channels REST V2 coverage as wildcard", () => {
+  const { getRequestorsForSelectedMediaCompany } = loadFunctions("popup.js", ["getRequestorsForSelectedMediaCompany"], {
+    state: {
+      consoleBootstrapState: {
+        channels: [],
+      },
+    },
+    resolveSelectedProgrammer: () => ({
+      programmerId: "AETN",
+      requestorIds: ["AETN", "HISTORY", "FYI"],
+      requestorOptions: [],
+    }),
+    getCurrentPremiumAppsSnapshot: () => ({
+      __restV2AllChannels: true,
+      __restV2RequestorIds: null,
+      restV2Apps: [{ guid: "aetn-restv2-all" }],
+    }),
+    resolveStrictRestV2RequestorIdsForProgrammer: () => null,
+    extractEntityIdFromToken: (value = "") => String(value || "").trim(),
+    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+    uniqueSorted: (values = []) =>
+      Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))),
+    deriveProgrammerRequestorOptionsFromChannels: () => [],
+  });
+
+  const options = getRequestorsForSelectedMediaCompany();
+  assert.equal(Array.isArray(options), true);
+  assert.equal(options.length, 3);
+  assert.deepEqual(
+    options.map((option) => String(option?.id || "")),
+    ["AETN", "HISTORY", "FYI"]
+  );
+});
+
+test("requestor eligibility allows any selected requestor when REST V2 coverage is All Channels", () => {
+  const { isRequestorEligibleForSelectedProgrammer } = loadFunctions(
+    "popup.js",
+    ["isRequestorEligibleForSelectedProgrammer"],
+    {
+      resolveSelectedProgrammer: () => ({ programmerId: "AETN", requestorIds: ["HISTORY"] }),
+      getCurrentPremiumAppsSnapshot: () => ({ __restV2AllChannels: true, __restV2RequestorIds: null }),
+      extractEntityIdFromToken: (value = "") => String(value || "").trim(),
+      resolveStrictRestV2RequestorIdsForProgrammer: () => null,
+    }
+  );
+
+  assert.equal(isRequestorEligibleForSelectedProgrammer("HISTORY"), true);
+  assert.equal(isRequestorEligibleForSelectedProgrammer("FYI"), true);
+});
+
 test("requestor filtering uses programmer-scoped REST V2 candidates when premium app list is empty", () => {
   const { getRequestorsForSelectedMediaCompany, resolveStrictRestV2RequestorIdsForProgrammer } = loadFunctions(
     "popup.js",
@@ -605,6 +655,7 @@ test("requestor filtering uses programmer-scoped REST V2 candidates when premium
         });
         return ids;
       },
+      isAllChannelsApp: () => false,
       extractEntityIdFromToken: (value = "") => String(value || "").trim(),
       firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
       uniqueSorted: (values = []) =>
@@ -625,6 +676,66 @@ test("requestor filtering uses programmer-scoped REST V2 candidates when premium
     options.map((option) => String(option?.id || "")),
     ["REF30", "TestDistributors"]
   );
+});
+
+test("strict REST V2 requestor resolver returns wildcard for All Channels apps", () => {
+  const { resolveStrictRestV2RequestorIdsForProgrammer } = loadFunctions(
+    "popup.js",
+    ["resolveStrictRestV2RequestorIdsForProgrammer"],
+    {
+      collectProgrammerScopedRestV2AppCandidates: () => [
+        { guid: "aetn-restv2-all", serviceProviders: [] },
+      ],
+      isAllChannelsApp: () => true,
+      collectRestV2RequestorIdsFromApps: () => ["HISTORY"],
+    }
+  );
+
+  assert.equal(resolveStrictRestV2RequestorIdsForProgrammer("AETN", { restV2Apps: [] }), null);
+});
+
+test("ENVx hydration persists all-channels coverage metadata for premium services", () => {
+  const { buildPassVaultDirectPremiumServicesSnapshot } = loadFunctions(
+    "popup.js",
+    ["buildPassVaultDirectPremiumServicesSnapshot"],
+    {
+      REST_V2_SCOPE: "api:client:v2",
+      PREMIUM_SERVICE_SCOPE_BY_KEY: { esm: "api:client:esm" },
+      PREMIUM_SERVICE_RESET_TEMPPASS_SCOPE: "api:client:resetTempPass",
+      registeredApplicationMatchesNativeRequiredScope: () => false,
+      degradationAppHasRequiredScope: () => false,
+      selectPreferredPassVaultHydrationServiceApplication: () => null,
+      collectRestV2RequestorIdsFromApps: () => [],
+      applyPremiumServiceRuntimeSummary: (_programmer, services = {}) => services,
+      state: { cmTenantsCatalog: [] },
+      scanAllChannelsServiceCoverage: () => ({
+        winnerByServiceKey: {},
+        allChannelsByServiceKey: {
+          restV2: true,
+          esm: false,
+          degradation: false,
+          resetTempPass: false,
+        },
+        allScopeAppsByServiceKey: {
+          restV2: [{ guid: "aetn-restv2-all", serviceProviders: [] }],
+          esm: [],
+          degradation: [],
+          resetTempPass: [],
+        },
+      }),
+    }
+  );
+
+  const services = buildPassVaultDirectPremiumServicesSnapshot(
+    { programmerId: "AETN" },
+    [],
+    {},
+    {}
+  );
+
+  assert.equal(services.__restV2AllChannels, true);
+  assert.equal(services.__restV2RequestorIds, null);
+  assert.equal(services.__allChannelsByServiceKey?.restV2, true);
 });
 
 test("MVPD config loader skips stale requestor IDs during hydration", async () => {

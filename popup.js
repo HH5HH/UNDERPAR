@@ -9892,6 +9892,10 @@ function buildPassVaultDirectPremiumServicesSnapshot(
   // If only channel-specific REST V2 apps exist, filter to only those requestors
   let restV2RequestorIds = null;
   const hasAllChannelsRestV2 = scanResult.allChannelsByServiceKey?.restV2 === true;
+  const allChannelsByServiceKey =
+    scanResult.allChannelsByServiceKey && typeof scanResult.allChannelsByServiceKey === "object"
+      ? { ...scanResult.allChannelsByServiceKey }
+      : {};
 
   if (!hasAllChannelsRestV2) {
     restV2RequestorIds = collectRestV2RequestorIdsFromApps(restV2Apps, programmerId);
@@ -9917,6 +9921,8 @@ function buildPassVaultDirectPremiumServicesSnapshot(
       cmMvpdSelectionKey: String(options?.cmMvpdSelectionKey || "").trim(),
       __underparLiveHydrated: true,
       __underparLiveHydratedAt: Date.now(),
+      __allChannelsByServiceKey: allChannelsByServiceKey,
+      __restV2AllChannels: hasAllChannelsRestV2 === true,
       // ── REST V2 requestor filtering ──
       // __restV2RequestorIds contains all requestor IDs that have REST V2 DCR-scoped
       // registered applications. Used to filter the requestor dropdown to only show
@@ -88012,6 +88018,11 @@ function getRequestorsForSelectedMediaCompany() {
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
   const restV2RequestorIds = resolveStrictRestV2RequestorIdsForProgrammer(programmerId, premiumApps);
 
+  // null means wildcard coverage from an "All Channels" REST V2 app.
+  if (restV2RequestorIds === null) {
+    return allRequestors;
+  }
+
   if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
     // Build a set of normalized requestor IDs for efficient lookup
     const restV2RequestorIdSet = new Set(
@@ -88061,6 +88072,9 @@ function isRequestorEligibleForSelectedProgrammer(requestorId = "", programmer =
     String(resolvedProgrammer?.programmerId || "").trim(),
     resolvedServices
   );
+  if (derivedRestV2RequestorIds === null) {
+    return true;
+  }
   return Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.includes(normalizedRequestorId);
 }
 
@@ -88137,7 +88151,7 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   const resolvedProgrammer = resolveSelectedProgrammer();
   const resolvedProgrammerId = String(resolvedProgrammer?.programmerId || normalizedProgrammerId || "").trim();
   const restV2RequestorIds = resolveStrictRestV2RequestorIdsForProgrammer(resolvedProgrammerId, resolvedServices);
-  const restV2SelectionReady = Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0;
+  const restV2SelectionReady = restV2RequestorIds === null || (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0);
   const runtimeReady =
     Boolean(normalizedProgrammerId) && Boolean(resolvedServices) && isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices);
   const ready =
@@ -89747,7 +89761,29 @@ function resolveStrictRestV2RequestorIdsForProgrammer(programmerId = "", premium
   }
 
   const restV2Candidates = collectProgrammerScopedRestV2AppCandidates(normalizedProgrammerId, premiumApps);
-  return collectRestV2RequestorIdsFromApps(restV2Candidates, normalizedProgrammerId);
+  if (restV2Candidates.some((appInfo) => isAllChannelsApp(appInfo))) {
+    return null;
+  }
+
+  const restV2RequestorIds = collectRestV2RequestorIdsFromApps(restV2Candidates, normalizedProgrammerId);
+  if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
+    return restV2RequestorIds;
+  }
+
+  if (premiumApps?.__restV2AllChannels === true) {
+    return null;
+  }
+
+  const persistedRequestorIds = Array.isArray(premiumApps?.__restV2RequestorIds)
+    ? premiumApps.__restV2RequestorIds
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    : [];
+  if (persistedRequestorIds.length > 0) {
+    return persistedRequestorIds;
+  }
+
+  return [];
 }
 
 function collectRestV2RequestorIdsFromApps(restV2Apps = [], programmerId = "") {
