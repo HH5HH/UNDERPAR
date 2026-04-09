@@ -738,19 +738,19 @@ test("getRegisteredAppChannel treats Console entityData with scopes but no chann
   assert.equal(getRegisteredAppChannel(allChannelsFromConsole), "");
   assert.equal(isAllChannelsApp(allChannelsFromConsole), true);
 
-  // Also matches when scopes are on appData instead of appInfo top-level.
+  // Also vault-backed app with scopes but NO entityData at all: ambiguous, return null
+  // (don't assume All Channels; the app might be channel-specific with JWT not yet decoded).
   const allChannelsVaultBacked = {
     appData: {
+      name: "AETN_API_V2_DCR",
+      id: "97d55249-6e0c-4feb-a112-1d10bb9f4506",
       scopes: ["urn:adobe:adobepass:api:client:v2"],
-      __rawEnvelope: {
-        entityData: {
-          name: "AETN_API_V2_DCR",
-          id: "97d55249-6e0c-4feb-a112-1d10bb9f4506",
-        },
-      },
+      // NO __rawEnvelope.entityData — this is pure vault-backed
     },
   };
-  assert.equal(getRegisteredAppChannel(allChannelsVaultBacked), "");
+  // No entityData at all → can't use scope fallback → return null.
+  // This is correct: the app might be channel-specific (AETV) with JWT not yet decoded.
+  assert.equal(getRegisteredAppChannel(allChannelsVaultBacked), null);
 
   // Channel-specific app: entityData present with serviceProviders hint.
   const channelSpecific = {

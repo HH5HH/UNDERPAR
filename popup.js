@@ -89823,18 +89823,25 @@ function getRegisteredAppChannel(appInfo) {
   // For DCR-scoped apps, the absence of any channel restriction IS the All Channels
   // signal — channel-specific apps always declare their channel somewhere (entityData or JWT).
   // The Console API does NOT put scopes inside entityData; they land on the
-  // normalized app record (.scopes) after construction.  Check all three scope
-  // sources in priority order to ensure vault-backed and compact app records both hit.
-  const normalizedScopes =
-    Array.isArray(appInfo?.scopes) && appInfo.scopes.length > 0
-      ? appInfo.scopes
-      : Array.isArray(appData?.scopes) && appData.scopes.length > 0
-        ? appData.scopes
-        : entityData && Array.isArray(entityData.scopes) && entityData.scopes.length > 0
-          ? entityData.scopes
-          : [];
-  if (normalizedScopes.length > 0) {
-    return "";
+  // normalized app record (.scopes) after construction.
+  // 
+  // CRITICAL: Only apply this fallback when entityData is explicitly present.
+  // Vault-backed apps without entityData are ambiguous — they might have a JWT
+  // that hasn't been decoded yet. If we can't see the JWT (source 2 was empty),
+  // we shouldn't assume the absence of entityData hints means All Channels;
+  // it might just mean the app hasn't been enriched yet.
+  if (entityData) {
+    const normalizedScopes =
+      Array.isArray(appInfo?.scopes) && appInfo.scopes.length > 0
+        ? appInfo.scopes
+        : Array.isArray(appData?.scopes) && appData.scopes.length > 0
+          ? appData.scopes
+          : Array.isArray(entityData.scopes) && entityData.scopes.length > 0
+            ? entityData.scopes
+            : [];
+    if (normalizedScopes.length > 0) {
+      return "";
+    }
   }
 
   // ── Source 4: appData top-level fields (last resort) ──
