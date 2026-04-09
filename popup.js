@@ -88010,36 +88010,8 @@ function getRequestorsForSelectedMediaCompany() {
   // Filter the dropdown to show ONLY requestors that have REST V2 registered applications.
   const programmerId = String(programmer.programmerId || "").trim();
   const premiumApps = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) : null;
-  const hasExplicitRestV2RequestorFilter =
-    Boolean(premiumApps) && Object.prototype.hasOwnProperty.call(premiumApps, "__restV2RequestorIds");
   const restV2Apps = Array.isArray(premiumApps?.restV2Apps) ? premiumApps.restV2Apps : [];
-  const hasAllChannelsRestV2 = restV2Apps.some((appInfo) => isAllChannelsApp(appInfo));
-  const derivedRestV2RequestorIds = hasAllChannelsRestV2
-    ? null
-    : collectRestV2RequestorIdsFromApps(restV2Apps, programmerId);
-  const normalizedRestV2RequestorIds = Array.isArray(premiumApps?.__restV2RequestorIds)
-    ? Array.from(
-        new Set(
-          premiumApps.__restV2RequestorIds
-            .map((value) => String(value || "").trim())
-            .filter(Boolean)
-        )
-      ).sort((left, right) => String(left).localeCompare(String(right), undefined, { sensitivity: "base" }))
-    : premiumApps?.__restV2RequestorIds === null
-      ? null
-      : [];
-  let restV2RequestorIds = null;
-  if (hasExplicitRestV2RequestorFilter) {
-    if (Array.isArray(normalizedRestV2RequestorIds) && normalizedRestV2RequestorIds.length > 0) {
-      restV2RequestorIds = normalizedRestV2RequestorIds;
-    } else if (normalizedRestV2RequestorIds === null) {
-      restV2RequestorIds = null;
-    } else {
-      restV2RequestorIds = Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0 ? derivedRestV2RequestorIds : null;
-    }
-  } else {
-    restV2RequestorIds = Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0 ? derivedRestV2RequestorIds : null;
-  }
+  const restV2RequestorIds = collectRestV2RequestorIdsFromApps(restV2Apps, programmerId);
 
   if (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0) {
     // Build a set of normalized requestor IDs for efficient lookup
@@ -88069,20 +88041,6 @@ function getRequestorsForSelectedMediaCompany() {
     }));
   }
 
-  // ── Fallback: show all requestors ──────
-  if (allRequestors.length > 0) {
-    return allRequestors;
-  }
-
-  // If no programmer-specific requestors and REST V2 allows all, only show
-  // channels that belong to the selected media company.
-  if (restV2RequestorIds === null) {
-    return deriveProgrammerRequestorOptionsFromChannels(
-      programmer,
-      Array.isArray(state.consoleBootstrapState.channels) ? state.consoleBootstrapState.channels : []
-    );
-  }
-
   return [];
 }
 
@@ -88100,44 +88058,12 @@ function isRequestorEligibleForSelectedProgrammer(requestorId = "", programmer =
       : programmerId
         ? getCurrentPremiumAppsSnapshot(programmerId) || null
         : null;
-  const hasExplicitRestV2RequestorFilter =
-    Boolean(resolvedServices) && Object.prototype.hasOwnProperty.call(resolvedServices, "__restV2RequestorIds");
   const restV2Apps = Array.isArray(resolvedServices?.restV2Apps) ? resolvedServices.restV2Apps : [];
-  const hasAllChannelsRestV2 = restV2Apps.some((appInfo) => isAllChannelsApp(appInfo));
-  if (hasAllChannelsRestV2) {
-    return true;
-  }
-
   const derivedRestV2RequestorIds = collectRestV2RequestorIdsFromApps(
     restV2Apps,
     String(resolvedProgrammer?.programmerId || "").trim()
   );
-  if (Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0) {
-    return derivedRestV2RequestorIds.includes(normalizedRequestorId);
-  }
-
-  if (hasExplicitRestV2RequestorFilter) {
-    const explicitIds = Array.isArray(resolvedServices?.__restV2RequestorIds)
-      ? Array.from(
-          new Set(
-            resolvedServices.__restV2RequestorIds
-              .map((value) => String(extractEntityIdFromToken(String(value || "")) || "").trim())
-              .filter(Boolean)
-          )
-        )
-      : resolvedServices?.__restV2RequestorIds === null
-        ? null
-        : [];
-    if (Array.isArray(explicitIds)) {
-      if (explicitIds.length > 0) {
-        return explicitIds.includes(normalizedRequestorId);
-      }
-      return true;
-    }
-    return true;
-  }
-
-  return true;
+  return Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.includes(normalizedRequestorId);
 }
 
 function populateRequestorSelect() {
@@ -88210,36 +88136,11 @@ function syncRequestorSelectHydrationAvailability(programmerId = "", services = 
   );
   const hydrationPending =
     Boolean(normalizedProgrammerId) && Boolean(getProgrammerServiceHydrationPromise(normalizedProgrammerId));
-  const hasExplicitRestV2RequestorFilter =
-    Boolean(resolvedServices) && Object.prototype.hasOwnProperty.call(resolvedServices, "__restV2RequestorIds");
   const resolvedProgrammer = resolveSelectedProgrammer();
   const resolvedProgrammerId = String(resolvedProgrammer?.programmerId || normalizedProgrammerId || "").trim();
   const restV2Apps = Array.isArray(resolvedServices?.restV2Apps) ? resolvedServices.restV2Apps : [];
-  const hasAllChannelsRestV2 = restV2Apps.some((appInfo) => isAllChannelsApp(appInfo));
-  const derivedRestV2RequestorIds = hasAllChannelsRestV2
-    ? null
-    : collectRestV2RequestorIdsFromApps(restV2Apps, resolvedProgrammerId);
-  const normalizedRestV2RequestorIds = Array.isArray(resolvedServices?.__restV2RequestorIds)
-    ? resolvedServices.__restV2RequestorIds
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
-    : resolvedServices?.__restV2RequestorIds === null
-      ? null
-      : [];
-  let restV2RequestorIds = null;
-  if (hasExplicitRestV2RequestorFilter) {
-    if (Array.isArray(normalizedRestV2RequestorIds) && normalizedRestV2RequestorIds.length > 0) {
-      restV2RequestorIds = normalizedRestV2RequestorIds;
-    } else if (normalizedRestV2RequestorIds === null) {
-      restV2RequestorIds = null;
-    } else {
-      restV2RequestorIds = Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0 ? derivedRestV2RequestorIds : null;
-    }
-  } else {
-    restV2RequestorIds = Array.isArray(derivedRestV2RequestorIds) && derivedRestV2RequestorIds.length > 0 ? derivedRestV2RequestorIds : null;
-  }
-  const restV2SelectionReady =
-    restV2RequestorIds === null || (Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0);
+  const restV2RequestorIds = collectRestV2RequestorIdsFromApps(restV2Apps, resolvedProgrammerId);
+  const restV2SelectionReady = Array.isArray(restV2RequestorIds) && restV2RequestorIds.length > 0;
   const runtimeReady =
     Boolean(normalizedProgrammerId) && Boolean(resolvedServices) && isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices);
   const ready =
@@ -89865,13 +89766,6 @@ function collectRestV2RequestorIdsFromApps(restV2Apps = [], programmerId = "") {
 
   apps.forEach((appInfo) => {
     pushCandidate(getRegisteredAppChannel(appInfo));
-    collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId).forEach((candidate) => {
-      pushCandidate(candidate);
-    });
-    const healthRecord = buildRegisteredApplicationHealthAppRecord(appInfo, null);
-    (Array.isArray(healthRecord?.serviceProviderHints) ? healthRecord.serviceProviderHints : []).forEach((hint) => {
-      pushCandidate(hint);
-    });
   });
 
   return Array.from(ids).sort((left, right) => String(left).localeCompare(String(right), undefined, { sensitivity: "base" }));
