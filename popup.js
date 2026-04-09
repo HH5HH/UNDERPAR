@@ -16516,22 +16516,39 @@ function programmerMatchesCmTenantCatalog(selectedProgrammer = null, cmCatalog =
 
 function applyPremiumServiceRuntimeSummary(programmer = null, services = null, options = {}) {
   const currentServices = services && typeof services === "object" ? { ...services } : {};
-  const cmCatalog = options?.cmCatalog && typeof options.cmCatalog === "object" ? options.cmCatalog : state.cmTenantsCatalog;
+  const cmCatalog =
+    (options?.cmCatalog && typeof options.cmCatalog === "object"
+      ? options.cmCatalog
+      : state.cmTenantsCatalog && typeof state.cmTenantsCatalog === "object"
+        ? state.cmTenantsCatalog
+        : getPassVaultCmTenantsCatalogFromVault(state.passVault)) || null;
+  const currentCmService = currentServices?.cm && typeof currentServices.cm === "object" ? { ...currentServices.cm } : null;
+  const currentCmMatchedTenants = sanitizePassVaultMatchedTenants(currentCmService?.matchedTenants || []);
+  const revalidatedCurrentCmMatchedTenants =
+    programmer && Array.isArray(cmCatalog?.tenants)
+      ? findCmTenantMatchesForProgrammer(programmer, cmCatalog.tenants)
+      : currentCmMatchedTenants;
+  const normalizedCurrentCmService = currentCmService
+    ? {
+        ...currentCmService,
+        matchedTenants: revalidatedCurrentCmMatchedTenants,
+      }
+    : null;
   const matchedCatalogTenants =
     programmer && Array.isArray(cmCatalog?.tenants) ? findCmTenantMatchesForProgrammer(programmer, cmCatalog.tenants) : [];
   const syntheticCmService =
-    !shouldShowCmService(currentServices?.cm) && matchedCatalogTenants.length > 0
+    !shouldShowCmService(normalizedCurrentCmService) && matchedCatalogTenants.length > 0
       ? {
-          ...(currentServices?.cm && typeof currentServices.cm === "object" ? currentServices.cm : {}),
+          ...(normalizedCurrentCmService || {}),
           serviceType: "cm",
           matchedTenants: matchedCatalogTenants,
-          sourceUrl: String(cmCatalog?.sourceUrl || currentServices?.cm?.sourceUrl || "").trim(),
-          fetchedAt: Number(currentServices?.cm?.fetchedAt || 0) || Date.now(),
+          sourceUrl: String(cmCatalog?.sourceUrl || normalizedCurrentCmService?.sourceUrl || "").trim(),
+          fetchedAt: Number(normalizedCurrentCmService?.fetchedAt || 0) || Date.now(),
           synthetic: true,
           syntheticSource: "cm-catalog",
         }
       : null;
-  const resolvedCmService = shouldShowCmService(currentServices?.cm) ? currentServices.cm : syntheticCmService;
+  const resolvedCmService = shouldShowCmService(normalizedCurrentCmService) ? normalizedCurrentCmService : syntheticCmService;
   const items = [];
   const labels = [];
 
