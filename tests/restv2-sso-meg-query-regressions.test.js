@@ -720,14 +720,17 @@ test("getRegisteredAppChannel treats Console entityData with scopes but no chann
     extractEntityIdFromToken: (v) => String(v || "").replace(/^@[^:]+:/, "").trim(),
   });
 
-  // App from Console list API: entityData present with scopes, no serviceProviders field.
+  // Real Console shape: scopes are on appInfo.scopes (normalized after record construction),
+  // entityData only has id/name — NO scopes field, NO serviceProviders field.
   const allChannelsFromConsole = {
+    scopes: ["urn:adobe:adobepass:api:client:v2"],
     appData: {
       __rawEnvelope: {
         entityData: {
           name: "AETN_API_V2_DCR",
-          scopes: ["api:client:v2"],
-          // no serviceProviders — this is the real Console response shape for All Channels
+          id: "97d55249-6e0c-4feb-a112-1d10bb9f4506",
+          // no serviceProviders — All Channels apps omit this field
+          // no scopes — Console puts scopes at item level, not entityData
         },
       },
     },
@@ -735,13 +738,27 @@ test("getRegisteredAppChannel treats Console entityData with scopes but no chann
   assert.equal(getRegisteredAppChannel(allChannelsFromConsole), "");
   assert.equal(isAllChannelsApp(allChannelsFromConsole), true);
 
+  // Also matches when scopes are on appData instead of appInfo top-level.
+  const allChannelsVaultBacked = {
+    appData: {
+      scopes: ["urn:adobe:adobepass:api:client:v2"],
+      __rawEnvelope: {
+        entityData: {
+          name: "AETN_API_V2_DCR",
+          id: "97d55249-6e0c-4feb-a112-1d10bb9f4506",
+        },
+      },
+    },
+  };
+  assert.equal(getRegisteredAppChannel(allChannelsVaultBacked), "");
+
   // Channel-specific app: entityData present with serviceProviders hint.
   const channelSpecific = {
+    scopes: ["urn:adobe:adobepass:api:client:v2"],
     appData: {
       __rawEnvelope: {
         entityData: {
           name: "TBS_API_V2_DCR",
-          scopes: ["api:client:v2"],
           serviceProviders: ["@ServiceProvider:TBS"],
         },
       },
@@ -750,7 +767,7 @@ test("getRegisteredAppChannel treats Console entityData with scopes but no chann
   assert.notEqual(getRegisteredAppChannel(channelSpecific), "");
   assert.equal(isAllChannelsApp(channelSpecific), false);
 
-  // entityData with no scopes — should NOT be treated as All Channels (fall through).
+  // App with no scopes at all — should NOT be treated as All Channels (fall through).
   const noScopes = {
     appData: {
       __rawEnvelope: {
@@ -760,6 +777,7 @@ test("getRegisteredAppChannel treats Console entityData with scopes but no chann
       },
     },
   };
+  // No scopes → falls through to JWT → no JWT → no appData hints → null (not "")
   assert.notEqual(getRegisteredAppChannel(noScopes), "");
 });
 
