@@ -88086,9 +88086,14 @@ function getRequestorsForSelectedMediaCompany() {
 
 function populateRequestorSelect() {
   const previousRequestorId = String(state.selectedRequestorId || "").trim();
+  const previousMvpdId = String(state.selectedMvpdId || "").trim();
   const requestorOptions = getRequestorsForSelectedMediaCompany();
   const selectedRequestorId = String(state.selectedRequestorId || "").trim();
   const selectedProgrammerId = String(resolveSelectedProgrammer()?.programmerId || "").trim();
+  const requestorHydrationPending =
+    Boolean(selectedProgrammerId) && Boolean(getProgrammerServiceHydrationPromise(selectedProgrammerId));
+  const preserveTransientSelection =
+    Boolean(previousRequestorId) && requestorOptions.length === 0 && requestorHydrationPending;
 
   els.requestorSelect.innerHTML = "";
   const defaultOption = document.createElement("option");
@@ -88105,6 +88110,9 @@ function populateRequestorSelect() {
 
   if (selectedRequestorId && requestorOptions.some((option) => String(option.id || "").trim() === selectedRequestorId)) {
     els.requestorSelect.value = selectedRequestorId;
+  } else if (preserveTransientSelection) {
+    state.selectedRequestorId = previousRequestorId;
+    els.requestorSelect.value = "";
   } else {
     state.selectedRequestorId = "";
     els.requestorSelect.value = "";
@@ -88116,10 +88124,13 @@ function populateRequestorSelect() {
 
   const activeRequestorId = String(state.selectedRequestorId || "").trim();
   const requestorSelectionRetained = Boolean(activeRequestorId) && activeRequestorId === previousRequestorId;
+  const retainMvpdDuringTransientSelection = preserveTransientSelection && Boolean(previousMvpdId);
   if (!requestorSelectionRetained) {
-    state.selectedMvpdId = "";
-    els.mvpdSelect.disabled = true;
-    els.mvpdSelect.innerHTML = '<option value=""></option>';
+    if (!retainMvpdDuringTransientSelection) {
+      state.selectedMvpdId = "";
+      els.mvpdSelect.disabled = true;
+      els.mvpdSelect.innerHTML = '<option value=""></option>';
+    }
   }
   syncGlobalQuickLaunchButtons();
   refreshRestV2LoginPanels();

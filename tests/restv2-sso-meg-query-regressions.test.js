@@ -369,6 +369,61 @@ test("requestor repopulation keeps selected MVPD when requestor selection is ret
     getRequestorsForSelectedMediaCompany: () => [{ id: "NBADE", key: "NBADE", label: "NBADE" }],
     resolveSelectedProgrammer: () => ({ programmerId: "NBA" }),
     getCurrentPremiumAppsSnapshot: () => ({}),
+    getProgrammerServiceHydrationPromise: () => null,
+    syncRequestorSelectHydrationAvailability: () => true,
+    syncGlobalQuickLaunchButtons: () => {},
+    refreshRestV2LoginPanels: () => {},
+    refreshMvpdWorkspaceTools: () => {},
+    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+  });
+
+  populateRequestorSelect();
+
+  assert.equal(state.selectedRequestorId, "NBADE");
+  assert.equal(state.selectedMvpdId, "Dish");
+  assert.equal(mvpdSelect.disabled, false);
+  assert.match(String(mvpdSelect.innerHTML || ""), /Dish|DISH/);
+});
+
+test("requestor repopulation preserves requestor and MVPD during transient hydration gaps", () => {
+  const requestorSelect = {
+    options: [],
+    value: "",
+    innerHTML: "",
+    appendChild(option) {
+      this.options.push(option);
+    },
+  };
+  const mvpdSelect = {
+    disabled: false,
+    innerHTML: '<option value="Dish">DISH</option>',
+    options: [{ value: "Dish" }],
+  };
+  const els = {
+    requestorSelect,
+    mvpdSelect,
+  };
+  const state = {
+    selectedRequestorId: "NBADE",
+    selectedMvpdId: "Dish",
+  };
+  const document = {
+    createElement() {
+      return {
+        value: "",
+        textContent: "",
+      };
+    },
+  };
+
+  const { populateRequestorSelect } = loadFunctions("popup.js", ["populateRequestorSelect"], {
+    state,
+    els,
+    document,
+    getRequestorsForSelectedMediaCompany: () => [],
+    resolveSelectedProgrammer: () => ({ programmerId: "NBA" }),
+    getCurrentPremiumAppsSnapshot: () => ({}),
+    getProgrammerServiceHydrationPromise: () => Promise.resolve(),
     syncRequestorSelectHydrationAvailability: () => true,
     syncGlobalQuickLaunchButtons: () => {},
     refreshRestV2LoginPanels: () => {},
