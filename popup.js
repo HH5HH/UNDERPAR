@@ -1068,6 +1068,11 @@ function isProgrammerHrContextHydrationReady(programmerId = "", services = null)
   if (!isProgrammerRuntimeServicesReady(normalizedProgrammerId, resolvedServices)) {
     return false;
   }
+  const detectedServiceKeys = getDetectedPremiumServiceKeys(resolvedServices);
+  const requiresCmResolution = detectedServiceKeys.includes("cm") || detectedServiceKeys.includes("cmMvpd");
+  if (!requiresCmResolution) {
+    return true;
+  }
   return hasResolvedCmAvailabilityForProgrammer(normalizedProgrammerId, resolvedServices);
 }
 

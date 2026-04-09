@@ -119,6 +119,26 @@ test("REST V2 service-provider mismatch detection accepts the plain-language inv
   );
 });
 
+test("HR context hydration readiness does not block HEALTH/LEARNING when CM is not in detected services", () => {
+  const { isProgrammerHrContextHydrationReady } = loadFunctions("popup.js", ["isProgrammerHrContextHydrationReady"], {
+    isProgrammerRuntimeServicesReady: () => true,
+    getDetectedPremiumServiceKeys: () => ["esmWorkspace", "degradation"],
+    hasResolvedCmAvailabilityForProgrammer: () => false,
+  });
+
+  assert.equal(isProgrammerHrContextHydrationReady("ABC", { esm: { guid: "esm-guid" }, degradation: true }), true);
+});
+
+test("HR context hydration readiness still requires CM availability when CM service is detected", () => {
+  const { isProgrammerHrContextHydrationReady } = loadFunctions("popup.js", ["isProgrammerHrContextHydrationReady"], {
+    isProgrammerRuntimeServicesReady: () => true,
+    getDetectedPremiumServiceKeys: () => ["cm"],
+    hasResolvedCmAvailabilityForProgrammer: () => false,
+  });
+
+  assert.equal(isProgrammerHrContextHydrationReady("ABC", { cm: {} }), false);
+});
+
 test("All Channels scan does not infer universal coverage from missing service-provider hints", () => {
   const popupSource = read("popup.js");
   assert.match(popupSource, /const resolvedAppChannel = getRegisteredAppChannel\(app\);/);
