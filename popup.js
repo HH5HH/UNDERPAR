@@ -8838,12 +8838,14 @@ async function purgePassVaultFromDevtools() {
   setStatus("Purging UnderPAR vault, DCR caches, and saved-query state...", "info");
   state.sessionMonitorSuppressed = true;
   cancelPendingBootstrapSession();
+  const purgeWarnings = [];
   try {
     await persistManualSignOutHold(true, "vault-purge");
     await clearDebugFlowStorageFromChromeStorage();
     purgeAvatarCaches();
     purgeDcrCaches();
     purgeLegacySavedEsmQueryEntriesFromLocalStorage();
+    await Promise.resolve(state.passVaultPersistPromise || Promise.resolve()).catch(() => null);
     let indexedDbPurged = false;
     if (canUseUnderparVaultIndexedDb()) {
       if (typeof underparVaultStore?.clear === "function") {
@@ -8856,26 +8858,34 @@ async function purgePassVaultFromDevtools() {
       }
       if (!indexedDbPurged && typeof underparVaultStore?.writeAggregatePayload === "function") {
         // Fallback for blocked/failed clear() paths: overwrite with an explicit empty vault.
-        await underparVaultStore.writeAggregatePayload(createEmptyUnderparVaultPayload());
-        indexedDbPurged = true;
+        try {
+          await underparVaultStore.writeAggregatePayload(createEmptyUnderparVaultPayload());
+          indexedDbPurged = true;
+        } catch {
+          indexedDbPurged = false;
+        }
       }
       if (
         indexedDbPurged &&
         typeof underparVaultStore?.readAggregatePayload === "function"
       ) {
-        const persistedVault = normalizeUnderparVaultPayload(await underparVaultStore.readAggregatePayload());
-        const persistedEnvironments = persistedVault?.pass?.environments;
-        const hasPersistedPassRecords =
-          persistedEnvironments &&
-          typeof persistedEnvironments === "object" &&
-          !Array.isArray(persistedEnvironments) &&
-          Object.keys(persistedEnvironments).length > 0;
-        if (hasPersistedPassRecords) {
-          throw new Error("UnderPAR VAULT purge verification failed. Persisted PASS records remain.");
+        try {
+          const persistedVault = normalizeUnderparVaultPayload(await underparVaultStore.readAggregatePayload());
+          const persistedEnvironments = persistedVault?.pass?.environments;
+          const hasPersistedPassRecords =
+            persistedEnvironments &&
+            typeof persistedEnvironments === "object" &&
+            !Array.isArray(persistedEnvironments) &&
+            Object.keys(persistedEnvironments).length > 0;
+          if (hasPersistedPassRecords) {
+            purgeWarnings.push("Persisted PASS records remained after pre-reset purge verification.");
+          }
+        } catch {
+          purgeWarnings.push("Pre-reset purge verification was unavailable.");
         }
       }
       if (!indexedDbPurged) {
-        throw new Error("UnderPAR VAULT purge failed. IndexedDB storage could not be cleared.");
+        purgeWarnings.push("IndexedDB clear fallback was unavailable before reset.");
       }
     }
     if (chrome?.storage?.local?.remove) {
@@ -8885,17 +8895,46 @@ async function purgePassVaultFromDevtools() {
         LEGACY_CM_TENANTS_CATALOG_STORAGE_KEY,
       ]);
     }
-    const message = "UnderPAR vault purged. Click Sign In when ready.";
+    await Promise.resolve(state.passVaultPersistPromise || Promise.resolve()).catch(() => null);
     await resetToSignedOutState({
       closeWorkspaceReason: "up-devtools-vault-purge",
       preservePassVault: false,
-      statusMessage: message,
+      statusMessage: "UnderPAR vault purged. Click Sign In when ready.",
       statusType: "success",
     });
+
+    // Final post-reset hardening pass: force persisted vault to empty after all runtime resets settle.
+    await Promise.resolve(state.passVaultPersistPromise || Promise.resolve()).catch(() => null);
+    if (canUseUnderparVaultIndexedDb() && typeof underparVaultStore?.writeAggregatePayload === "function") {
+      try {
+        const emptyVault = createEmptyUnderparVaultPayload();
+        await underparVaultStore.writeAggregatePayload(emptyVault);
+        if (typeof underparVaultStore?.readAggregatePayload === "function") {
+          const persistedVault = normalizeUnderparVaultPayload(await underparVaultStore.readAggregatePayload());
+          const persistedEnvironments = persistedVault?.pass?.environments;
+          const hasPersistedPassRecords =
+            persistedEnvironments &&
+            typeof persistedEnvironments === "object" &&
+            !Array.isArray(persistedEnvironments) &&
+            Object.keys(persistedEnvironments).length > 0;
+          if (hasPersistedPassRecords) {
+            purgeWarnings.push("Persisted PASS records remained after post-reset hardening.");
+          }
+        }
+      } catch {
+        purgeWarnings.push("Post-reset hardening write to IndexedDB failed.");
+      }
+    }
+
+    const message = purgeWarnings.length > 0
+      ? `UnderPAR vault purged with warnings: ${purgeWarnings.join(" ")}`
+      : "UnderPAR vault purged. Click Sign In when ready.";
+    setStatus(message, purgeWarnings.length > 0 ? "error" : "success");
     return {
       purged: true,
       vaultPayload: cloneJsonLikeValue(state.passVault, null),
       message,
+      warnings: purgeWarnings.slice(),
     };
   } finally {
     setBusy(false);
