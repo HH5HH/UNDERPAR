@@ -16571,7 +16571,7 @@ function applyPremiumServiceRuntimeSummary(programmer = null, services = null, o
     });
   });
 
-  const hasCmDetection = shouldShowCmService(resolvedCmService) || programmerMatchesCmTenantCatalog(programmer, cmCatalog);
+  const hasCmDetection = shouldShowCmService(resolvedCmService) || matchedCatalogTenants.length > 0;
   if (hasCmDetection) {
     labels.push(PREMIUM_SERVICE_CONCURRENCY_LABEL);
     items.push({
