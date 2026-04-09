@@ -705,6 +705,51 @@ test("All Channels classifier treats explicit empty service provider arrays as w
   assert.equal(isAllChannelsApp({ serviceProviders: ["@ServiceProvider:HISTORY"] }), false);
 });
 
+test("sanitized app data preserves explicit empty service provider arrays", () => {
+  const { sanitizePassVaultApplicationData } = loadFunctions("popup.js", ["sanitizePassVaultApplicationData"], {
+    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
+    getDetectionScopesFromApplication: () => [],
+    collectPassVaultServiceProviderHintsFromAppData: () => [],
+    sanitizePassVaultHintList: () => [],
+    sanitizePassVaultHintValue: () => "",
+    extractPassVaultPrimaryRequestorHintFromAppData: () => "",
+    extractSoftwareStatementFromAppData: () => "",
+  });
+
+  const sanitized = sanitizePassVaultApplicationData(
+    {
+      name: "AETN_API_V2_DCR",
+      serviceProviders: [],
+    },
+    "97d55249-6e0c-4feb-a112-1d10bb9f4506",
+    "fallback"
+  );
+
+  assert.equal(Array.isArray(sanitized?.serviceProviders), true);
+  assert.equal((sanitized?.serviceProviders || []).length, 0);
+});
+
+test("strict REST V2 requestor resolver honors persisted all-channels map metadata", () => {
+  const { resolveStrictRestV2RequestorIdsForProgrammer } = loadFunctions(
+    "popup.js",
+    ["resolveStrictRestV2RequestorIdsForProgrammer"],
+    {
+      collectProgrammerScopedRestV2AppCandidates: () => [],
+      isAllChannelsApp: () => false,
+      collectRestV2RequestorIdsFromApps: () => [],
+    }
+  );
+
+  assert.equal(
+    resolveStrictRestV2RequestorIdsForProgrammer("AETN", {
+      __allChannelsByServiceKey: {
+        restV2: true,
+      },
+    }),
+    null
+  );
+});
+
 test("ENVx hydration persists all-channels coverage metadata for premium services", () => {
   const { buildPassVaultDirectPremiumServicesSnapshot } = loadFunctions(
     "popup.js",

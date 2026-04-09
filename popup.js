@@ -6702,6 +6702,15 @@ function buildPassVaultStoredCmTenantBundlesByTenantKey(cmService = null, existi
 
 function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackName = "") {
   const source = appData && typeof appData === "object" && !Array.isArray(appData) ? appData : {};
+  const hasExplicitEmptyHintArray = (value) => Array.isArray(value) && value.length === 0;
+  const hasExplicitEmptyHints = (...values) => {
+    for (const value of values) {
+      if (hasExplicitEmptyHintArray(value)) {
+        return true;
+      }
+    }
+    return false;
+  };
   const appName = firstNonEmptyString([
     String(source?.name || "").trim(),
     String(source?.displayName || "").trim(),
@@ -6750,6 +6759,21 @@ function sanitizePassVaultApplicationData(appData = null, guid = "", fallbackNam
   }
   if (serviceProviders.length > 0) {
     sanitized.serviceProviders = serviceProviders.slice();
+  } else if (
+    hasExplicitEmptyHints(
+      source?.serviceProviders,
+      source?.contentProviders,
+      source?.requestors,
+      source?.requestorIds,
+      source?.__rawEnvelope?.entityData?.serviceProviders,
+      source?.__rawEnvelope?.entityData?.contentProviders,
+      source?.__rawEnvelope?.entityData?.requestors,
+      source?.__rawEnvelope?.entityData?.requestorIds
+    )
+  ) {
+    // Preserve explicit empty array hints so downstream logic can classify
+    // this app as an All Channels wildcard.
+    sanitized.serviceProviders = [];
   }
   if (requestor) {
     sanitized.requestor = requestor;
@@ -8840,6 +8864,9 @@ function resetPassVaultRuntimeStatePreservingProgrammers(controllerReason = "up-
 async function purgePassVaultFromDevtools() {
   setBusy(true, "Purging UnderPAR vault...");
   setStatus("Purging UnderPAR vault, DCR caches, and saved-query state...", "info");
+  appendDebugLogEntry("app", "UnderPAR VAULT purge requested", {
+    phase: "start",
+  });
   state.sessionMonitorSuppressed = true;
   cancelPendingBootstrapSession();
   const purgeWarnings = [];
@@ -8934,6 +8961,10 @@ async function purgePassVaultFromDevtools() {
       ? `UnderPAR vault purged with warnings: ${purgeWarnings.join(" ")}`
       : "UnderPAR vault purged. Click Sign In when ready.";
     setStatus(message, purgeWarnings.length > 0 ? "error" : "success");
+    appendDebugLogEntry("app", "UnderPAR VAULT purge completed", {
+      phase: "complete",
+      warnings: purgeWarnings.slice(),
+    });
     return {
       purged: true,
       vaultPayload: cloneJsonLikeValue(state.passVault, null),
@@ -89883,6 +89914,10 @@ function resolveStrictRestV2RequestorIdsForProgrammer(programmerId = "", premium
   }
 
   if (premiumApps?.__restV2AllChannels === true) {
+    return null;
+  }
+
+  if (premiumApps?.__allChannelsByServiceKey?.restV2 === true) {
     return null;
   }
 
