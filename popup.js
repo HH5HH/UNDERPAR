@@ -1174,6 +1174,16 @@ async function primeProgrammerServiceHydration(programmer, services = null, opti
       seedServices ||
       null;
     if (runtimeServices && typeof runtimeServices === "object") {
+      // Wait for CM hydration to complete so state.cmServiceByProgrammerId is populated
+      const cmHydrationPromise = state.cmHydrationPromiseByProgrammerId instanceof Map
+        ? state.cmHydrationPromiseByProgrammerId.get(programmerId)
+        : null;
+      if (cmHydrationPromise) {
+        await cmHydrationPromise.catch(() => {
+          // CM hydration errors are already logged; continue with available data
+        });
+      }
+      
       const cmMvpdSelectionKey = buildCurrentCmMvpdSelectionKey(programmer);
       const mergedServices = {
         ...runtimeServices,
