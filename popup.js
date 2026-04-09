@@ -65580,7 +65580,8 @@ async function bobtoolsWorkspaceOpenFromRestV2(programmer = null, options = {}) 
 
 async function handleBobtoolsWorkspaceAction(message, sender = null) {
   const action = String(message?.action || "").trim().toLowerCase();
-  const senderWindowId = Number(sender?.tab?.windowId || 0);
+  const messageWindowId = Number(message?.windowId || 0);
+  const senderWindowId = Number(sender?.tab?.windowId || messageWindowId || 0);
   const senderTabId = Number(sender?.tab?.id || 0);
   const mappedSenderTabId = senderWindowId > 0 ? Number(state.bobtoolsWorkspaceTabIdByWindowId.get(senderWindowId) || 0) : 0;
   if (senderWindowId > 0 && senderTabId > 0 && mappedSenderTabId > 0 && senderTabId !== mappedSenderTabId) {

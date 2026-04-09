@@ -2281,6 +2281,7 @@ async function sendWorkspaceAction(action, payload = {}) {
     return await chrome.runtime.sendMessage({
       type: BOBTOOLS_WORKSPACE_MESSAGE_TYPE,
       channel: "workspace-action",
+      windowId: Number(state.windowId || 0),
       action,
       ...payload,
     });
