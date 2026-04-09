@@ -72287,7 +72287,17 @@ function getHrContextSummary(programmer = null) {
 
 function shouldRevealHrContextSections(programmer = null, services = null) {
   const programmerId = String(programmer?.programmerId || "").trim();
-  return Boolean(programmerId) && isProgrammerHrContextHydrationReady(programmerId, services);
+  if (!programmerId) {
+    return false;
+  }
+  const detectedServiceKeys = getDetectedPremiumServiceKeys(services);
+  if (detectedServiceKeys.length === 0) {
+    return false;
+  }
+  if (isProgrammerHrContextHydrationReady(programmerId, services)) {
+    return true;
+  }
+  return isProgrammerWorkspaceHydrationReady(programmerId);
 }
 
 function collectHarpoProgrammerDomainNames(programmer = null, services = null) {
@@ -88634,8 +88644,11 @@ async function refreshProgrammerPanels(options = {}) {
     // First-pass hydration already has enough REST V2 coverage metadata to
     // populate requestors. Apply it immediately so first selection lights up
     // without waiting for deep credential hydration completion.
+    const provisionalHrContextReady = getDetectedPremiumServiceKeys(provisionalServices).length > 0;
+    setProgrammerWorkspaceHydrationReady(programmerId, provisionalHrContextReady);
     populateRequestorSelect({ suppressDependentRefresh: true });
     syncRequestorSelectHydrationAvailability(programmerId, provisionalServices);
+    renderHrSections(provisionalServices, programmer, { loading: true });
 
     if (!selectionStillCurrent()) {
       return;

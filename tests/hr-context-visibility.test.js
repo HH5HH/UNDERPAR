@@ -1035,6 +1035,22 @@ test("HR context reveals only when the selected media company has detected premi
   assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, []), false);
 });
 
+test("HR context reveals on first-pass workspace hydration when premium services are detected before credential hydration completes", () => {
+  const state = {
+    programmerWorkspaceHydrationReadyByKey: new Map([["production|fox", true]]),
+    cmServiceByProgrammerId: new Map(),
+  };
+  const { shouldRevealHrContextSections } = loadHrVisibilityHelpers({
+    state,
+    environmentKey: "production",
+    hasCredentialCoverage: false,
+  });
+
+  assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, { restV2: { guid: "rest-guid" } }), true);
+  assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, { esm: { guid: "esm-guid" } }), true);
+  assert.equal(shouldRevealHrContextSections({ programmerId: "fox" }, {}), false);
+});
+
 test("HR context adds HARPO only for REST V2 media companies with configured domains", () => {
   const { collectHarpoProgrammerDomainNames, shouldShowHarpoHrSection, getHrContextSectionDisplayKeys } =
     loadHrContextSectionDisplayHelpers({
