@@ -94349,11 +94349,6 @@ function collectCmProgrammerIdCandidates(programmer = null) {
     sourceEntity?.id,
     sourceEntity?.programmerId,
     sourceEntity?.["programmer-id"],
-    sourceEntity?.["media-company"],
-    sourceEntity?.media_company,
-    sourceEntity?.mediaCompany,
-    sourceEntity?.mediaCompanyId,
-    sourceEntity?.["media-company-id"],
     sourceKeyId,
   ];
   return uniqueSorted([...collectCmEntityIdCandidates(baseCandidates), ...collectCmProgrammerIdDerivedAliases(baseCandidates)]);
@@ -94367,11 +94362,6 @@ function collectCmProgrammerNameCandidates(programmer = null) {
     sourceEntity?.displayName,
     sourceEntity?.["display-name"],
     sourceEntity?.name,
-    sourceEntity?.mediaCompanyName,
-    sourceEntity?.["media-company-name"],
-    sourceEntity?.["media-company"],
-    sourceEntity?.media_company,
-    sourceEntity?.mediaCompany,
   ]);
 }
 
@@ -97583,6 +97573,22 @@ async function ensureCmServiceForProgrammer(programmer, options = {}) {
   }
 }
 
+function hasResolvedCmResourcePayload(resource = null) {
+  if (!resource || typeof resource !== "object") {
+    return false;
+  }
+  if (String(resource.error || "").trim()) {
+    return true;
+  }
+  if (String(resource.url || "").trim() || String(resource.lastModified || "").trim()) {
+    return true;
+  }
+  if (resource.payload != null) {
+    return true;
+  }
+  return false;
+}
+
 function hasCachedCmTenantBundleCoverage(cmService = null) {
   const matchedTenants = Array.isArray(cmService?.matchedTenants) ? cmService.matchedTenants : [];
   if (matchedTenants.length === 0) {
@@ -97590,7 +97596,13 @@ function hasCachedCmTenantBundleCoverage(cmService = null) {
   }
   return matchedTenants.every((tenant) => {
     const tenantCacheKey = cmGetTenantCacheKey(tenant);
-    return Boolean(tenantCacheKey && state.cmTenantBundleByTenantKey.get(tenantCacheKey)?.bundle);
+    const bundle = tenantCacheKey ? state.cmTenantBundleByTenantKey.get(tenantCacheKey)?.bundle : null;
+    if (!bundle || typeof bundle !== "object") {
+      return false;
+    }
+    // Require at least one resolved CM resource so synthetic/placeholder bundles
+    // don't block tenant refetch for the selected media company.
+    return hasResolvedCmResourcePayload(bundle.applications) || hasResolvedCmResourcePayload(bundle.policies);
   });
 }
 
