@@ -72223,20 +72223,9 @@ function getRawDetectedPremiumServiceKeys(services) {
       return Boolean(String(services?.esm?.guid || "").trim());
     }
     if (serviceKey === "cm" || serviceKey === "cmMvpd") {
-      // CM should be shown if it has matched tenants.
-      // The matched tenants may be from actual CM service or synthetic detection
-      // from programmer matching the CM catalog (handled by applyPremiumServiceRuntimeSummary)
       const cmService = services?.[serviceKey];
-      if (shouldShowCmService(cmService)) {
-        return true;
-      }
-      // Additionally, check if CM service object exists but lacks matchedTenants
-      // This handles cases where CM was detected but matched tenants array is being built
-      if (cmService && typeof cmService === "object" && 
-          (cmService.synthetic === true || String(cmService.sourceUrl || "").trim())) {
-        return true;
-      }
-      return false;
+      // CM visibility must be strictly tenant-match based (real or synthetic match).
+      return shouldShowCmService(cmService);
     }
     return Boolean(services?.[serviceKey]);
   });
