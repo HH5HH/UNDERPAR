@@ -79,6 +79,7 @@ test("REST V2 decision recovery retry can suppress optional auth headers while k
       __sso: true,
       partnerFrameworkStatus: "partner-status-json",
       headers: {
+        "AP-Session-Identifier": "session-123",
         "AP-Device-Identifier": "device-123",
         "X-Device-Info": "device-info-123",
         "Adobe-Subject-Token": "subject-token-123",
@@ -96,6 +97,7 @@ test("REST V2 decision recovery retry can suppress optional auth headers while k
   assert.equal(decisionRequest.suppressOptionalAuthHeaders, true);
   assert.equal(decisionRequest.requestHeaders.Accept, "application/json");
   assert.equal(decisionRequest.requestHeaders["Content-Type"], "application/json");
+  assert.equal(decisionRequest.requestHeaders["AP-Session-Identifier"], "session-123");
   assert.equal(decisionRequest.requestHeaders["AP-Device-Identifier"], "device-123");
   assert.equal(decisionRequest.requestHeaders["X-Device-Info"], "device-info-123");
   assert.equal(decisionRequest.requestHeaders["AP-Partner-Framework-Status"], "partner-status-json");
@@ -109,12 +111,41 @@ test("REST V2 decision recovery retry can suppress optional auth headers while k
   );
 });
 
+test("REST V2 session identifier header aliases resolve to the sessionId context property", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const aliasesSource = extractFunctionSource(popupSource, "getRestV2InteractiveDocsHeaderAliasCandidates");
+  const propertySource = extractFunctionSource(popupSource, "getRestV2InteractiveDocsContextPropertyForHeader");
+  const sandbox = {
+    module: { exports: {} },
+    exports: {},
+  };
+
+  vm.runInNewContext(
+    `${aliasesSource}\n${propertySource}\nmodule.exports = { getRestV2InteractiveDocsHeaderAliasCandidates, getRestV2InteractiveDocsContextPropertyForHeader };`,
+    sandbox
+  );
+  const {
+    getRestV2InteractiveDocsHeaderAliasCandidates,
+    getRestV2InteractiveDocsContextPropertyForHeader,
+  } = sandbox.module.exports;
+
+  const aliases = getRestV2InteractiveDocsHeaderAliasCandidates("AP-Session-Identifier");
+  assert(aliases.includes("AP-Session-Identifier"));
+  assert(aliases.includes("sessionId"));
+  assert(aliases.includes("session_identifier"));
+  assert.equal(getRestV2InteractiveDocsContextPropertyForHeader("AP-Session-Identifier"), "sessionId");
+});
+
 test("REST V2 decision recovery retry preserves recovered profile identity and forces sanitized retry", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const decisionSource = extractFunctionSource(popupSource, "fetchRestV2DecisionCheck");
+  const helperSource = extractFunctionSource(popupSource, "buildRestV2DecisionRequestHeaders");
+  const contextSource = extractFunctionSource(popupSource, "buildRestV2ContextFromHarvest");
 
   assert.match(decisionSource, /suppressOptionalAuthHeaders:\s*true/);
   assert.match(decisionSource, /sessionId:\s*firstNonEmptyString\(\[recoveredProfile\?\.sessionId,\s*harvest\?\.sessionId\]\)/);
   assert.match(decisionSource, /profileKey:\s*firstNonEmptyString\(\[recoveredProfile\?\.profileKey,\s*harvest\?\.profileKey\]\)/);
+  assert.match(helperSource, /const sessionIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext\([\s\S]*?"AP-Session-Identifier"/);
   assert.match(decisionSource, /Retrying decision check against recovered session context with required REST V2 headers\./);
+  assert.match(contextSource, /sessionId:\s*String\(firstNonEmptyString\(\[harvest\.sessionId\]\) \|\| ""\)\.trim\(\)/);
 });

@@ -20369,6 +20369,7 @@ function buildRestV2ContextFromHarvest(harvest = null) {
     mvpdPartnerProviderId: String(harvestMvpdPartnerProviderId || "").trim(),
     sessionCode,
     sessionCodeCandidates,
+    sessionId: String(firstNonEmptyString([harvest.sessionId]) || "").trim(),
     sessionAction: String(harvest.sessionAction || "").trim(),
     sessionPartner: String(harvest.sessionPartner || "").trim(),
     partner: String(firstNonEmptyString([harvest.partner, harvest.sessionPartner]) || "").trim(),
@@ -20648,6 +20649,7 @@ async function attemptRestV2SessionCodeProfileRecovery(harvest, flowId = "", sco
       appInfo,
       loginUrl: normalizeAdobeNavigationUrl(String(harvest.loginUrl || "").trim()),
       sessionUrl: normalizeAdobeNavigationUrl(String(harvest.sessionUrl || "").trim()),
+      sessionId: String(harvest.sessionId || "").trim(),
       sessionData: harvest?.sessionData && typeof harvest.sessionData === "object" ? harvest.sessionData : null,
     };
   const serviceProviderCandidates = buildRestV2ServiceProviderCandidatesFromContext(recoverySelectionContext);
@@ -20846,6 +20848,10 @@ function buildRestV2DecisionRequestHeaders(serviceProviderId = "", harvestContex
     resolveRestV2ExactPartnerFrameworkStatusForContext(harvestContext)
   );
   const suppressOptionalAuthHeaders = options?.suppressOptionalAuthHeaders === true;
+  const sessionIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(
+    harvestContext,
+    "AP-Session-Identifier"
+  );
   const deviceIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Device-Identifier");
   const deviceInfo = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "X-Device-Info");
   const adobeSubjectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "Adobe-Subject-Token");
@@ -20863,6 +20869,7 @@ function buildRestV2DecisionRequestHeaders(serviceProviderId = "", harvestContex
     requestHeaders: buildRestV2Headers(serviceProviderId, {
       Accept: "application/json",
       "Content-Type": "application/json",
+      ...(sessionIdentifier ? { "AP-Session-Identifier": sessionIdentifier } : {}),
       ...(deviceIdentifier ? { "AP-Device-Identifier": deviceIdentifier } : {}),
       ...(deviceInfo ? { "X-Device-Info": deviceInfo } : {}),
       ...(!suppressOptionalAuthHeaders && adobeSubjectToken ? { "Adobe-Subject-Token": adobeSubjectToken } : {}),
@@ -20920,6 +20927,7 @@ async function fetchRestV2DecisionCheck(
     appInfo,
     loginUrl: normalizeAdobeNavigationUrl(String(harvest?.loginUrl || "").trim()),
     sessionUrl: normalizeAdobeNavigationUrl(String(harvest?.sessionUrl || "").trim()),
+    sessionId: String(harvest?.sessionId || "").trim(),
     sessionData: harvest?.sessionData && typeof harvest.sessionData === "object" ? harvest.sessionData : null,
   };
   const serviceProviderCandidates = buildRestV2ServiceProviderCandidatesFromContext(harvestContext);
@@ -99711,6 +99719,18 @@ function getRestV2InteractiveDocsHeaderAliasCandidates(headerName = "") {
   if (!normalizedHeaderName) {
     return [];
   }
+  if (normalizedHeaderName === "ap-session-identifier") {
+    return [
+      "AP-Session-Identifier",
+      "ap-session-identifier",
+      "sessionIdentifier",
+      "session_identifier",
+      "sessionId",
+      "session_id",
+      "sessionID",
+      "sessionid",
+    ];
+  }
   if (normalizedHeaderName === "adobe-subject-token") {
     return [
       "Adobe-Subject-Token",
@@ -99909,6 +99929,9 @@ function normalizeRestV2InteractiveDocsHeaderCandidate(headerName = "", value = 
 
 function getRestV2InteractiveDocsContextPropertyForHeader(headerName = "") {
   const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
+  if (normalizedHeaderName === "ap-session-identifier") {
+    return "sessionId";
+  }
   if (normalizedHeaderName === "adobe-subject-token") {
     return "adobeSubjectToken";
   }
@@ -99939,6 +99962,7 @@ function getRestV2InteractiveDocsContextPropertyForHeader(headerName = "") {
 function isRestV2ExactCapturedHeaderName(headerName = "") {
   const normalizedHeaderName = String(headerName || "").trim().toLowerCase();
   return (
+    normalizedHeaderName === "ap-session-identifier" ||
     normalizedHeaderName === "adobe-subject-token" ||
     normalizedHeaderName === "ad-service-token" ||
     normalizedHeaderName === "ap-device-identifier" ||
@@ -99964,6 +99988,9 @@ function resolveRestV2StructuredHeaderValueFromContext(context = null, headerNam
       return getRestV2InteractiveDocsContextPropertyForHeader(targetHeaderName);
     }
     const normalizedTargetHeaderName = String(targetHeaderName || "").trim().toLowerCase();
+    if (normalizedTargetHeaderName === "ap-session-identifier") {
+      return "sessionId";
+    }
     if (normalizedTargetHeaderName === "adobe-subject-token") {
       return "adobeSubjectToken";
     }
@@ -100103,7 +100130,7 @@ function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, head
   const isExactCapturedHeader =
     typeof isRestV2ExactCapturedHeaderName === "function"
       ? isRestV2ExactCapturedHeaderName(normalizedHeaderName)
-      : /^(?:adobe-subject-token|ad-service-token|ap-temppass-identity|ap-temp-pass-identity|ap-visitor-identifier|ap-partner-framework-status)$/i.test(
+      : /^(?:ap-session-identifier|adobe-subject-token|ad-service-token|ap-temppass-identity|ap-temp-pass-identity|ap-visitor-identifier|ap-partner-framework-status)$/i.test(
           normalizedHeaderName
         );
   const structuredResolver = (sourceContext = null, targetHeaderName = "") => {
@@ -100118,6 +100145,9 @@ function resolveRestV2InteractiveDocsHeaderValueFromContext(context = null, head
         return getRestV2InteractiveDocsContextPropertyForHeader(resolvedHeaderName);
       }
       const normalizedResolvedHeaderName = String(resolvedHeaderName || "").trim().toLowerCase();
+      if (normalizedResolvedHeaderName === "ap-session-identifier") {
+        return "sessionId";
+      }
       if (normalizedResolvedHeaderName === "adobe-subject-token") {
         return "adobeSubjectToken";
       }
