@@ -91784,7 +91784,7 @@ async function fetchApplicationsForProgrammer(programmerId, options = {}) {
   const forceRefresh = options.forceRefresh === true;
 
   if (forceRefresh) {
-    state.applicationsByProgrammerId.delete(programmerId);
+    state.applicationsByKey.delete(String(programmerId || "").trim());
   }
 
   const cachedApplications = getCurrentProgrammerApplicationsSnapshot(programmerId);
@@ -97639,7 +97639,11 @@ async function fetchCmTenantCatalogWithAuth(url = "", options = {}) {
 async function ensureCmTenantsCatalog(options = {}) {
   const forceRefresh = options?.forceRefresh === true;
   const preferredAccessToken = normalizeBearerTokenValue(
-    firstNonEmptyString([options?.accessToken, getPreferredPrimaryImsAccessTokenCandidate()])
+    firstNonEmptyString([
+      options?.accessToken,
+      getPreferredPrimaryImsAccessTokenCandidate(),
+      state.loginData?.accessToken,
+    ])
   );
   if (forceRefresh) {
     state.cmTenantsCatalogRuntimeFresh = false;
