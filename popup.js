@@ -29,6 +29,7 @@ const IMS_DEFAULT_LOGOUT_ENDPOINT = `${IMS_ISSUER_URL}/ims/logout`;
 const IMS_DEFAULT_REVOCATION_ENDPOINT = `${IMS_ISSUER_URL}/ims/revoke`;
 const IMS_BASE_URL = IMS_ISSUER_URL;
 const IMS_PROFILE_URL = "https://ims-na1.adobelogin.com/ims/profile/v1";
+const IMS_PROFILE_CACHE_WINDOW_MS = 30 * 1000;
 const IMS_ORGS_URL = "https://ims-na1.adobelogin.com/ims/organizations/v5";
 const UNIFIED_SHELL_GRAPHQL_URL = "https://exc-unifiedcontent.experience.adobe.net/api/gql/app/shell/graphql?appId=shell";
 const UNIFIED_SHELL_API_KEY = "exc_app";
@@ -14329,6 +14330,10 @@ const state = {
   avatarFailureLogged: false,
   avatarDataUrlPrefetchKeys: new Set(),
   avatarMemoryCache: new Map(),
+  imsSessionProfileCacheKey: "",
+  imsSessionProfileCachedAt: 0,
+  imsSessionProfileCachePayload: null,
+  imsSessionProfilePromise: null,
   mvpdLogoCacheByUrl: new Map(),
   mvpdLogoResolvePromiseByUrl: new Map(),
   loginData: null,
@@ -79999,70 +80004,104 @@ async function fetchImsSessionProfile(accessToken = "") {
     return null;
   }
 
-  const imsBase = IMS_BASE_URL;
-  const clientIdCandidates = getUnderparImsClientIdCandidates(normalizedAccessToken);
-  const endpoints = [
-    ...clientIdCandidates.map((clientId) => `${IMS_PROFILE_URL}?client_id=${encodeURIComponent(clientId)}`),
-    IMS_PROFILE_URL,
-    ...clientIdCandidates.map((clientId) => `${imsBase}/ims/userinfo/v2?client_id=${encodeURIComponent(clientId)}`),
-  ];
-
-  const variants = [];
-  const dedupeKeys = new Set();
-  const pushVariant = (clientId, credentials, includeToken) => {
-    const headers = buildImsProfileHeaders(includeToken ? normalizedAccessToken : "", clientId);
-    const key = `${clientId}|${credentials}|${includeToken ? "token" : "notoken"}`;
-    if (dedupeKeys.has(key)) {
-      return;
-    }
-    dedupeKeys.add(key);
-    variants.push({ credentials, headers });
-  };
-
-  for (const clientId of clientIdCandidates) {
-    pushVariant(clientId, "omit", true);
-    pushVariant(clientId, "include", true);
+  const profileCacheKey =
+    firstNonEmptyString([buildUnderparTokenFingerprint(normalizedAccessToken), normalizedAccessToken.slice(0, 48)]) ||
+    "anonymous";
+  const cachedProfilePayload =
+    state.imsSessionProfileCacheKey === profileCacheKey && state.imsSessionProfileCachePayload && typeof state.imsSessionProfileCachePayload === "object"
+      ? state.imsSessionProfileCachePayload
+      : null;
+  const cachedProfileAgeMs = Date.now() - Number(state.imsSessionProfileCachedAt || 0);
+  if (cachedProfilePayload && cachedProfileAgeMs >= 0 && cachedProfileAgeMs <= IMS_PROFILE_CACHE_WINDOW_MS) {
+    return cachedProfilePayload;
+  }
+  if (state.imsSessionProfilePromise && state.imsSessionProfileCacheKey === profileCacheKey) {
+    const pendingPayload = await state.imsSessionProfilePromise.catch(() => null);
+    return pendingPayload && typeof pendingPayload === "object" ? pendingPayload : null;
   }
 
-  pushVariant("", "omit", true);
-  pushVariant("", "include", true);
+  const loadPromise = (async () => {
+    const imsBase = IMS_BASE_URL;
+    const clientIdCandidates = getUnderparImsClientIdCandidates(normalizedAccessToken);
+    const endpoints = [
+      ...clientIdCandidates.map((clientId) => `${IMS_PROFILE_URL}?client_id=${encodeURIComponent(clientId)}`),
+      IMS_PROFILE_URL,
+      ...clientIdCandidates.map((clientId) => `${imsBase}/ims/userinfo/v2?client_id=${encodeURIComponent(clientId)}`),
+    ];
 
-  let bestPayload = null;
-  let bestPayloadScore = Number.NEGATIVE_INFINITY;
-  for (const endpoint of endpoints) {
-    for (const variant of variants) {
-      try {
-        const response = await relayImsFetch(endpoint, {
-          method: "GET",
-          credentials: variant.credentials,
-          headers: variant.headers,
-        });
-        if (!response.ok) {
-          continue;
-        }
+    const variants = [];
+    const dedupeKeys = new Set();
+    const pushVariant = (clientId, credentials, includeToken) => {
+      const headers = buildImsProfileHeaders(includeToken ? normalizedAccessToken : "", clientId);
+      const key = `${clientId}|${credentials}|${includeToken ? "token" : "notoken"}`;
+      if (dedupeKeys.has(key)) {
+        return;
+      }
+      dedupeKeys.add(key);
+      variants.push({ credentials, headers });
+    };
 
-        const text = await response.text().catch(() => "");
-        const parsed = parseJsonText(text, null);
-        if (!parsed || typeof parsed !== "object") {
-          continue;
-        }
+    for (const clientId of clientIdCandidates) {
+      pushVariant(clientId, "omit", true);
+      pushVariant(clientId, "include", true);
+    }
 
-        const normalizedPayload = normalizeProfileAvatarFields(parsed);
-        const payloadScore = scoreProfileAvatarPayload(normalizedPayload);
-        if (payloadScore > bestPayloadScore) {
-          bestPayload = normalizedPayload;
-          bestPayloadScore = payloadScore;
+    pushVariant("", "omit", true);
+    pushVariant("", "include", true);
+
+    let bestPayload = null;
+    let bestPayloadScore = Number.NEGATIVE_INFINITY;
+    for (const endpoint of endpoints) {
+      for (const variant of variants) {
+        try {
+          const response = await relayImsFetch(endpoint, {
+            method: "GET",
+            credentials: variant.credentials,
+            headers: variant.headers,
+          });
+          if (!response.ok) {
+            continue;
+          }
+
+          const text = await response.text().catch(() => "");
+          const parsed = parseJsonText(text, null);
+          if (!parsed || typeof parsed !== "object") {
+            continue;
+          }
+
+          const normalizedPayload = normalizeProfileAvatarFields(parsed);
+          const payloadScore = scoreProfileAvatarPayload(normalizedPayload);
+          if (payloadScore > bestPayloadScore) {
+            bestPayload = normalizedPayload;
+            bestPayloadScore = payloadScore;
+          }
+          if (payloadScore >= 320) {
+            return normalizedPayload;
+          }
+        } catch {
+          // Continue to next endpoint/variant.
         }
-        if (payloadScore >= 320) {
-          return normalizedPayload;
-        }
-      } catch {
-        // Continue to next endpoint/variant.
       }
     }
-  }
 
-  return bestPayload;
+    return bestPayload;
+  })();
+
+  state.imsSessionProfileCacheKey = profileCacheKey;
+  state.imsSessionProfilePromise = loadPromise;
+  try {
+    const resolvedPayload = await loadPromise;
+    if (resolvedPayload && typeof resolvedPayload === "object") {
+      state.imsSessionProfileCachePayload = resolvedPayload;
+      state.imsSessionProfileCachedAt = Date.now();
+      return resolvedPayload;
+    }
+    return null;
+  } finally {
+    if (state.imsSessionProfilePromise === loadPromise) {
+      state.imsSessionProfilePromise = null;
+    }
+  }
 }
 
 async function fetchOrganizations(accessToken) {
@@ -85651,13 +85690,18 @@ function renderAvatarMenu() {
   const principalId = getLoginPrincipalId(state.loginData) || "No principal available";
   const activeOrganization = getLoginActiveOrganization(state.loginData);
   const adobePassWorkflowActive = shouldHydrateAdobePassWorkflowForSession(state.loginData);
+  const avatarMenuUrl = getSafeAvatarRenderUrl(state.loginData);
+  const hasResolvedImsAvatar =
+    Boolean(avatarMenuUrl) &&
+    avatarMenuUrl !== FALLBACK_AVATAR &&
+    (avatarMenuUrl.startsWith("data:image/") || avatarMenuUrl.startsWith("blob:") || /^https:\/\//i.test(avatarMenuUrl));
 
-  els.avatarMenuImage.style.backgroundImage = "";
+  els.avatarMenuImage.style.backgroundImage = hasResolvedImsAvatar ? `url("${avatarMenuUrl.replace(/"/g, '\\"')}")` : "";
   els.avatarMenuImage.classList.remove("avatar-loading");
   els.avatarMenuImage.classList.add("avatar-ready");
   els.avatarMenuImage.setAttribute("role", "img");
   els.avatarMenuImage.setAttribute("aria-hidden", "false");
-  els.avatarMenuImage.setAttribute("aria-label", "UnderPAR account badge");
+  els.avatarMenuImage.setAttribute("aria-label", hasResolvedImsAvatar ? "Adobe IMS profile image" : "UnderPAR account badge");
   els.avatarMenuName.textContent = name;
   els.avatarMenuName.href = buildExperienceOrgUrl(activeOrganization);
   els.avatarMenuName.title = buildExperienceOrgTitle(activeOrganization);
