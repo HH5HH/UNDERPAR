@@ -20780,6 +20780,47 @@ async function attemptRestV2SessionCodeProfileRecovery(harvest, flowId = "", sco
   return null;
 }
 
+function buildRestV2DecisionRequestHeaders(serviceProviderId = "", harvestContext = null, options = {}) {
+  const likelySsoContext = isRestV2LikelyPartnerSsoContext(harvestContext);
+  const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
+    resolveRestV2ExactPartnerFrameworkStatusForContext(harvestContext)
+  );
+  const suppressOptionalAuthHeaders = options?.suppressOptionalAuthHeaders === true;
+  const deviceIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Device-Identifier");
+  const deviceInfo = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "X-Device-Info");
+  const adobeSubjectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "Adobe-Subject-Token");
+  const adServiceToken = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AD-Service-Token");
+  const tempPassIdentity = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Temppass-Identity");
+  const visitorIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Visitor-Identifier");
+  const rokuConnectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(
+    harvestContext,
+    "X-Roku-Reserved-Roku-Connect-Token"
+  );
+  return {
+    likelySsoContext,
+    partnerFrameworkStatus,
+    suppressOptionalAuthHeaders,
+    requestHeaders: buildRestV2Headers(serviceProviderId, {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(deviceIdentifier ? { "AP-Device-Identifier": deviceIdentifier } : {}),
+      ...(deviceInfo ? { "X-Device-Info": deviceInfo } : {}),
+      ...(!suppressOptionalAuthHeaders && adobeSubjectToken ? { "Adobe-Subject-Token": adobeSubjectToken } : {}),
+      ...(!suppressOptionalAuthHeaders && adServiceToken ? { "AD-Service-Token": adServiceToken } : {}),
+      ...(!suppressOptionalAuthHeaders && tempPassIdentity ? { "AP-Temppass-Identity": tempPassIdentity } : {}),
+      ...(!suppressOptionalAuthHeaders && visitorIdentifier ? { "AP-Visitor-Identifier": visitorIdentifier } : {}),
+      ...(!suppressOptionalAuthHeaders && rokuConnectToken
+        ? { "X-Roku-Reserved-Roku-Connect-Token": rokuConnectToken }
+        : {}),
+      ...(likelySsoContext && partnerFrameworkStatus
+        ? {
+            "AP-Partner-Framework-Status": partnerFrameworkStatus,
+          }
+        : {}),
+    }),
+  };
+}
+
 async function fetchRestV2DecisionCheck(
   harvest,
   resourceIds,
@@ -20788,6 +20829,7 @@ async function fetchRestV2DecisionCheck(
 ) {
   const normalizedMode = normalizeBobtoolsRestV2Action(mode);
   const allowProfileRecoveryRetry = options?.allowProfileRecoveryRetry !== false;
+  const suppressOptionalAuthHeaders = options?.suppressOptionalAuthHeaders === true;
   const decisionMode =
     normalizedMode === BOBTOOLS_REST_V2_ACTION_AUTHORIZE
       ? BOBTOOLS_REST_V2_ACTION_AUTHORIZE
@@ -20830,42 +20872,16 @@ async function fetchRestV2DecisionCheck(
   });
 
   const flowId = resolveRestV2DebugFlowIdForHarvest(harvest);
-  const likelySsoContext = isRestV2LikelyPartnerSsoContext(harvestContext);
-  const partnerFrameworkStatus = normalizeRestV2PartnerFrameworkStatusForRequest(
-    resolveRestV2ExactPartnerFrameworkStatusForContext(harvestContext)
-  );
-  const deviceIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Device-Identifier");
-  const deviceInfo = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "X-Device-Info");
-  const adobeSubjectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "Adobe-Subject-Token");
-  const adServiceToken = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AD-Service-Token");
-  const tempPassIdentity = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Temppass-Identity");
-  const visitorIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext(harvestContext, "AP-Visitor-Identifier");
-  const rokuConnectToken = resolveRestV2InteractiveDocsHeaderValueFromContext(
-    harvestContext,
-    "X-Roku-Reserved-Roku-Connect-Token"
-  );
   let lastThrownError = null;
   for (let index = 0; index < serviceProviderCandidates.length; index += 1) {
     const serviceProviderId = String(serviceProviderCandidates[index] || "").trim();
     const endpointUrl = `${REST_V2_BASE}/${encodeURIComponent(serviceProviderId)}/decisions/${encodeURIComponent(
       decisionMode
     )}/${encodeURIComponent(endpointMvpd)}`;
-    const requestHeaders = buildRestV2Headers(serviceProviderId, {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(deviceIdentifier ? { "AP-Device-Identifier": deviceIdentifier } : {}),
-      ...(deviceInfo ? { "X-Device-Info": deviceInfo } : {}),
-      ...(adobeSubjectToken ? { "Adobe-Subject-Token": adobeSubjectToken } : {}),
-      ...(adServiceToken ? { "AD-Service-Token": adServiceToken } : {}),
-      ...(tempPassIdentity ? { "AP-Temppass-Identity": tempPassIdentity } : {}),
-      ...(visitorIdentifier ? { "AP-Visitor-Identifier": visitorIdentifier } : {}),
-      ...(rokuConnectToken ? { "X-Roku-Reserved-Roku-Connect-Token": rokuConnectToken } : {}),
-      ...(likelySsoContext && partnerFrameworkStatus
-        ? {
-            "AP-Partner-Framework-Status": partnerFrameworkStatus,
-          }
-        : {}),
+    const decisionRequest = buildRestV2DecisionRequestHeaders(serviceProviderId, harvestContext, {
+      suppressOptionalAuthHeaders,
     });
+    const requestHeaders = decisionRequest.requestHeaders;
 
     emitRestV2DebugEvent(flowId, {
       source: "extension",
@@ -20881,6 +20897,7 @@ async function fetchRestV2DecisionCheck(
       appGuid: String(appInfo?.guid || ""),
       appName: String(appInfo?.appName || appInfo?.guid || ""),
       authMode: "dcr_client_bearer",
+      suppressOptionalAuthHeaders,
       body: cloneJsonLikeValue({ resources: resourceIds }, {}),
     });
 
@@ -21011,7 +21028,7 @@ async function fetchRestV2DecisionCheck(
           result.error = [
             result.error,
             ` Profile recovered via /profiles/code (${recovery.profileCount} profile${recovery.profileCount !== 1 ? "s" : ""}). `,
-            "Retrying decision check against recovered session context.",
+            "Retrying decision check against recovered session context with required REST V2 headers.",
           ].join("");
 
           emitRestV2DebugEvent(flowId, {
@@ -21024,6 +21041,12 @@ async function fetchRestV2DecisionCheck(
 
           const recoveryContext = recovery?.context && typeof recovery.context === "object" ? recovery.context : null;
           if (allowProfileRecoveryRetry && recoveryContext) {
+            const recoveredProfile =
+              (Array.isArray(recovery?.profileRows) ? recovery.profileRows[0] : null) ||
+              (recovery?.profileCheckResult?.harvestedProfile && typeof recovery.profileCheckResult.harvestedProfile === "object"
+                ? recovery.profileCheckResult.harvestedProfile
+                : null) ||
+              null;
             const retryHarvest = {
               ...(harvest && typeof harvest === "object" ? harvest : {}),
               programmerId: firstNonEmptyString([recoveryContext?.programmerId, harvest?.programmerId]),
@@ -21048,6 +21071,11 @@ async function fetchRestV2DecisionCheck(
                 recoveryContext?.sessionData && typeof recoveryContext.sessionData === "object"
                   ? { ...recoveryContext.sessionData }
                   : harvest?.sessionData,
+              subject: firstNonEmptyString([recoveredProfile?.subject, harvest?.subject]),
+              upstreamUserId: firstNonEmptyString([recoveredProfile?.upstreamUserId, harvest?.upstreamUserId]),
+              userId: firstNonEmptyString([recoveredProfile?.userId, harvest?.userId]),
+              sessionId: firstNonEmptyString([recoveredProfile?.sessionId, harvest?.sessionId]),
+              profileKey: firstNonEmptyString([recoveredProfile?.profileKey, harvest?.profileKey]),
             };
 
             emitRestV2DebugEvent(flowId, {
@@ -21057,11 +21085,14 @@ async function fetchRestV2DecisionCheck(
               retryRequestorId: String(retryHarvest.requestorId || ""),
               retryServiceProviderId: String(retryHarvest.serviceProviderId || ""),
               retryAppGuid: String(retryHarvest.appGuid || ""),
+              retrySessionId: String(retryHarvest.sessionId || ""),
+              suppressOptionalAuthHeaders: true,
             });
 
             try {
               const retryResult = await fetchRestV2DecisionCheck(retryHarvest, resourceIds, decisionMode, {
                 allowProfileRecoveryRetry: false,
+                suppressOptionalAuthHeaders: true,
               });
               retryResult.profileRecovery = recovery;
               retryResult.profileRecoveryRetried = true;
