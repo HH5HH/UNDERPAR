@@ -88898,6 +88898,39 @@ async function refreshProgrammerPanels(options = {}) {
           forceRefresh: forcePremiumRefresh,
           allowTemporaryPageContextTab: false,
         }).catch(() => null);
+    const cmSelectionReadyPromise = skipCmBootstrap
+      ? Promise.resolve(null)
+      : Promise.resolve(cmSelectionBootstrapPromise).catch(() => null);
+    const cmServicePromise = skipCmBootstrap
+      ? Promise.resolve(cachedCmService)
+      : cmSelectionReadyPromise.then(() =>
+          ensureCmServiceForProgrammer(programmer, {
+            forceRefresh: forcePremiumRefresh,
+          }).catch(() => state.cmServiceByProgrammerId.get(programmerId) || cachedCmService)
+        );
+    const cmMvpdServicePromise =
+      skipCmBootstrap || !cmMvpdSelectionKey
+        ? Promise.resolve(cachedCmMvpdService)
+        : cmSelectionReadyPromise.then(() =>
+            ensureCmServiceForSelectedMvpd(programmer, {
+              forceRefresh: forcePremiumRefresh,
+            }).catch(() => state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || cachedCmMvpdService)
+          );
+    const cmHydrationKickoffPromise = skipCmBootstrap
+      ? Promise.resolve(null)
+      : cmServicePromise.then((kickoffCmService) => {
+          const selectedKickoffCmService = selectPreferredCmRuntimeService(
+            getCurrentPremiumAppsSnapshot(programmerId)?.cm || cachedCmService,
+            kickoffCmService
+          );
+          if (!shouldShowCmService(selectedKickoffCmService)) {
+            return null;
+          }
+          return ensureCmHydratedForProgrammer(programmer, getCurrentPremiumAppsSnapshot(programmerId) || null, {
+            forceRefresh: false,
+            reason: "panel-selection",
+          }).catch(() => null);
+        });
     const applicationsData = await programmerApplicationsPromise;
     if (!selectionStillCurrent()) {
       return;
@@ -88952,24 +88985,6 @@ async function refreshProgrammerPanels(options = {}) {
       return;
     }
 
-    const cmSelectionReadyPromise = skipCmBootstrap
-      ? Promise.resolve(null)
-      : Promise.resolve(cmSelectionBootstrapPromise).catch(() => null);
-    const cmServicePromise = skipCmBootstrap
-      ? Promise.resolve(cachedCmService)
-      : cmSelectionReadyPromise.then(() =>
-          ensureCmServiceForProgrammer(programmer, {
-            forceRefresh: forcePremiumRefresh,
-          }).catch(() => state.cmServiceByProgrammerId.get(programmerId) || cachedCmService)
-        );
-    const cmMvpdServicePromise =
-      skipCmBootstrap || !cmMvpdSelectionKey
-        ? Promise.resolve(cachedCmMvpdService)
-        : cmSelectionReadyPromise.then(() =>
-            ensureCmServiceForSelectedMvpd(programmer, {
-              forceRefresh: forcePremiumRefresh,
-            }).catch(() => state.cmServiceByMvpdSelectionKey.get(cmMvpdSelectionKey) || cachedCmMvpdService)
-          );
     const initialCmResults = await Promise.allSettled([cmServicePromise, cmMvpdServicePromise]);
     if (!selectionStillCurrent()) {
       return;
@@ -89013,7 +89028,10 @@ async function refreshProgrammerPanels(options = {}) {
     syncRequestorSelectHydrationAvailability(programmerId, renderServices);
     renderPremiumServices(renderServices, programmer, { controllerReason });
 
-    const cmHydrationPromise = Promise.resolve().then(() => {
+    const cmHydrationPromise = Promise.resolve(cmHydrationKickoffPromise).then((existingCmHydration) => {
+      if (existingCmHydration) {
+        return existingCmHydration;
+      }
       if (skipCmBootstrap || !shouldShowCmService(resolvedCmService)) {
         return null;
       }
@@ -89021,7 +89039,7 @@ async function refreshProgrammerPanels(options = {}) {
         programmer,
         mergeSelectionServices(renderServices, resolvedCmService, resolvedCmMvpdService),
         {
-          forceRefresh: forcePremiumRefresh,
+          forceRefresh: false,
           reason: "panel-selection",
         }
       ).catch(() => null);

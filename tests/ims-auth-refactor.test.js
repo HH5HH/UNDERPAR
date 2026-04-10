@@ -1000,10 +1000,6 @@ test("selected media company refresh starts direct premium hydration immediately
       refreshPanelsSource.indexOf("let resolvedServices = await premiumHydrationPromise;")
   );
   assert.doesNotMatch(refreshPanelsSource, /await cmSelectionBootstrapPromise;/);
-  assert.ok(
-    refreshPanelsSource.indexOf("let resolvedServices = await premiumHydrationPromise;") <
-      refreshPanelsSource.indexOf("const cmSelectionReadyPromise = skipCmBootstrap")
-  );
   assert.doesNotMatch(refreshPanelsSource, /hydrateProgrammerFromPassVault\(/);
   assert.match(refreshPanelsSource, /buildPassVaultRuntimeServicesSnapshot\(vaultRecord\)/);
   assert.match(refreshPanelsSource, /allowTemporaryPageContextTab:\s*false/);
@@ -1011,10 +1007,14 @@ test("selected media company refresh starts direct premium hydration immediately
   assert.match(refreshPanelsSource, /const cmServicePromise = skipCmBootstrap/);
   assert.match(refreshPanelsSource, /const cmMvpdServicePromise =/);
   assert.match(refreshPanelsSource, /const initialCmResults = await Promise\.allSettled\(\[cmServicePromise,\s*cmMvpdServicePromise\]\);/);
-  assert.match(refreshPanelsSource, /const cmHydrationPromise = Promise\.resolve\(\)\.then\(\(\) => \{/);
+  assert.match(refreshPanelsSource, /const cmHydrationPromise = Promise\.resolve\(cmHydrationKickoffPromise\)\.then\(/);
   assert.match(refreshPanelsSource, /const registeredApplications = buildPassVaultHydrationRegisteredApplications\(applicationsData\);/);
   assert.match(refreshPanelsSource, /buildPassVaultServiceHydrationEntries\(\{/);
   assert.match(refreshPanelsSource, /renderPremiumServicesLoading\(programmer,\s*\{\s*controllerReason\s*\}\);/);
+  assert.match(refreshPanelsSource, /const cmSelectionReadyPromise = skipCmBootstrap/);
+  assert.match(refreshPanelsSource, /const cmServicePromise = skipCmBootstrap/);
+  assert.match(refreshPanelsSource, /const cmMvpdServicePromise =/);
+  assert.match(refreshPanelsSource, /const cmHydrationKickoffPromise = skipCmBootstrap/);
   assert.match(refreshPanelsSource, /let resolvedServices = await premiumHydrationPromise;/);
   assert.match(refreshPanelsSource, /primeProgrammerServiceHydration\(programmer,\s*provisionalServices,\s*\{/);
   assert.match(refreshPanelsSource, /renderOnReady:\s*false/);
@@ -1025,6 +1025,16 @@ test("selected media company refresh starts direct premium hydration immediately
   assert.match(ensureApplicationsSource, /state\.programmerApplicationsLoadPromiseByProgrammerId/);
   assert.match(selectPreferredCmRuntimeServiceSource, /resolvedVisible && !currentVisible/);
   assert.match(selectPreferredCmRuntimeServiceSource, /currentRetry && !resolvedRetry/);
+  assert.ok(
+    refreshPanelsSource.indexOf("const cmSelectionReadyPromise = skipCmBootstrap") <
+      refreshPanelsSource.indexOf("const applicationsData = await programmerApplicationsPromise;")
+  );
+  assert.ok(
+    refreshPanelsSource.indexOf("const cmHydrationKickoffPromise = skipCmBootstrap") <
+      refreshPanelsSource.indexOf("let resolvedServices = await premiumHydrationPromise;")
+  );
+  assert.match(refreshPanelsSource, /const cmHydrationPromise = Promise\.resolve\(cmHydrationKickoffPromise\)\.then\(/);
+  assert.doesNotMatch(refreshPanelsSource, /forceRefresh:\s*forcePremiumRefresh,\s*\n\s*reason:\s*"panel-selection"/);
 });
 
 test("programmer application hydration uses direct applications queries and normalizes results without vault-first fallbacks", () => {
