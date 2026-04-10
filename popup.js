@@ -94524,12 +94524,27 @@ function collectCmProgrammerIdDerivedAliases(values = []) {
 }
 
 function collectCmProgrammerIdCandidates(programmer = null) {
+  const programmerId = String(programmer?.programmerId || "").trim();
+  const premiumSnapshot = programmerId ? getCurrentPremiumAppsSnapshot(programmerId) || null : null;
+  const restV2Service = premiumSnapshot?.restV2 && typeof premiumSnapshot.restV2 === "object" ? premiumSnapshot.restV2 : null;
+  const restV2Apps = Array.isArray(premiumSnapshot?.restV2Apps) ? premiumSnapshot.restV2Apps : [];
   const sourceKeyRaw = String(programmer?.source?.key || "").trim();
   const sourceKeyMatch = sourceKeyRaw.match(/^Programmer:(.+)$/i);
   const sourceKeyId = sourceKeyMatch ? String(sourceKeyMatch[1] || "").trim() : extractEntityIdFromToken(sourceKeyRaw);
+  const selectedRequestorId = programmerId
+    ? resolveCanonicalRequestorIdForProgrammer(String(state.selectedRequestorId || "").trim(), programmerId)
+    : "";
+  const restV2AppRequestorCandidates = restV2Apps.flatMap((appInfo) =>
+    collectRestV2ServiceProviderCandidatesFromApp(appInfo, programmerId)
+  );
   const baseCandidates = [
     programmer?.programmerId,
     sourceKeyId,
+    selectedRequestorId,
+    restV2Service?.requestorId,
+    restV2Service?.serviceProviderId,
+    restV2Service?.serviceProvider,
+    ...restV2AppRequestorCandidates,
   ];
   return uniqueSorted([...collectCmEntityIdCandidates(baseCandidates), ...collectCmProgrammerIdDerivedAliases(baseCandidates)]);
 }
