@@ -98360,12 +98360,61 @@ async function fetchCmTenantResource(kind, tenant, profileHarvest = null, tenant
         },
       });
       const payload = response.parsed;
-      const rows =
+      let rows =
         kindValue === "tenant"
           ? payload && typeof payload === "object"
             ? [payload]
             : []
           : normalizeCmResourceListFromPayload(kindValue, payload, tenant, response.url);
+      if (rows.length === 0 && Array.isArray(payload) && payload.length > 0 && (kindValue === "applications" || kindValue === "policies")) {
+        // Defensive fallback: keep CM cards usable when API shape drifts but still returns object arrays.
+        rows = payload
+          .map((item, index) => {
+            const normalized = normalizeCmEntityRecord(kindValue, item, index, tenant, response.url);
+            if (normalized) {
+              return normalized;
+            }
+            if (!item || typeof item !== "object") {
+              return null;
+            }
+            const itemPayload = item.payload && typeof item.payload === "object" ? item.payload : null;
+            const fallbackEntityId = firstNonEmptyString([
+              item?.id,
+              item?.consoleId,
+              itemPayload?.id,
+              itemPayload?.applicationId,
+              itemPayload?.policyId,
+              `${kindValue}-${index + 1}`,
+            ]);
+            const fallbackName = firstNonEmptyString([
+              item?.name,
+              item?.displayName,
+              itemPayload?.name,
+              fallbackEntityId,
+            ]);
+            const fallbackLinks = uniqueSorted(
+              collectCmUrlsFromValue(item)
+                .concat(itemPayload ? collectCmUrlsFromValue(itemPayload) : [])
+                .concat([response.url])
+                .map((value) => normalizeCmUrl(value))
+                .filter(Boolean)
+            );
+            return {
+              kind: kindValue,
+              entityId: String(fallbackEntityId || `${kindValue}-${index + 1}`),
+              name: String(fallbackName || fallbackEntityId || `${kindValue}-${index + 1}`),
+              policyId: String(firstNonEmptyString([item?.policyId, itemPayload?.policyId]) || ""),
+              applicationId: String(firstNonEmptyString([item?.applicationId, itemPayload?.applicationId, itemPayload?.id]) || ""),
+              tenantId: String(tenant?.tenantId || ""),
+              tenantName: String(tenant?.tenantName || ""),
+              aliases: collectCmNameCandidates(item, [fallbackEntityId, fallbackName]),
+              links: fallbackLinks,
+              raw: itemPayload || item,
+              sourceUrl: String(response.url || ""),
+            };
+          })
+          .filter(Boolean);
+      }
       return {
         kind: kindValue,
         url: response.url,
