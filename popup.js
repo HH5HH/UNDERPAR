@@ -88143,7 +88143,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
         syncCmConsoleBootstrapSummaryFromCatalog(catalog, {
           errors: [cmContext?.errors?.reports, cmContext?.errors?.tenants, cmContext?.errors?.cmuToken].filter(Boolean),
         });
-        await persistCmTenantsCatalog(catalog).catch(() => false);
+        void persistCmTenantsCatalog(catalog).catch(() => false);
       }
 
       let hydratedToken = normalizeBearerTokenValue(cmuTokenFromContext(cmContext));
@@ -88178,7 +88178,7 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
           );
         }
       }
-      await persistResolvedCmGlobalAuthState(hydratedToken, `tenant-precheck:${reason}`).catch(() => null);
+      void persistResolvedCmGlobalAuthState(hydratedToken, `tenant-precheck:${reason}`).catch(() => null);
       state.cmTenantsPrecheckComplete = true;
       state.cmConsoleBootstrapQualified = true;
       state.cmTenantsPrecheckLastError = "";
