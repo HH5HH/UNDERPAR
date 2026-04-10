@@ -12183,6 +12183,16 @@ function getFirstSelectableOptionValue(selectElement = null) {
 
 function selectProgrammerForController(programmer = null, controllerReason = "media-company-change") {
   const resolvedProgrammer = programmer && typeof programmer === "object" ? programmer : null;
+  if (!resolvedProgrammer?.programmerId) {
+    state.cmTenantsPrecheckPending = false;
+    state.cmTenantsPrecheckComplete = false;
+    state.cmTenantsPrecheckLastError = "";
+    setUnderparDiagnosticMarker("cm_precheck", {
+      status: "skipped",
+      reason: String(controllerReason || "media-company-change"),
+      phase: "no-selection",
+    });
+  }
   if (resolvedProgrammer?.programmerId) {
     setProgrammerWorkspaceHydrationReady(resolvedProgrammer.programmerId, false);
   }
@@ -12222,7 +12232,7 @@ function selectProgrammerForController(programmer = null, controllerReason = "me
 
 async function hydrateProgrammerSelection(programmer = null, options = {}) {
   const controllerReason = String(options?.controllerReason || "media-company-change").trim() || "media-company-change";
-  const forcePremiumRefresh = options.forcePremiumRefresh === true;
+  const forcePremiumRefresh = options.forcePremiumRefresh === true || controllerReason === "media-company-change";
   const skipCmBootstrap = options.skipCmBootstrap === true;
   const selectedProgrammer = selectProgrammerForController(programmer, controllerReason);
   const retainedConsoleTabId = Number(options?.preferredTabId || 0);
@@ -104075,6 +104085,7 @@ async function init() {
   if (ENABLE_IMS_AVATAR_RENDERING !== true) {
     purgeAvatarCaches();
   }
+  ensureUpDevtoolsVaultActionListener();
   registerCoreInteractionHandlers();
   syncGlobalNetworkActivityIndicator();
   renderBuildInfo();
