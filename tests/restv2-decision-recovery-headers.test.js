@@ -142,10 +142,51 @@ test("REST V2 decision recovery retry preserves recovered profile identity and f
   const helperSource = extractFunctionSource(popupSource, "buildRestV2DecisionRequestHeaders");
   const contextSource = extractFunctionSource(popupSource, "buildRestV2ContextFromHarvest");
 
-  assert.match(decisionSource, /suppressOptionalAuthHeaders:\s*true/);
+  assert.match(decisionSource, /suppressOptionalAuthHeaders:\s*false/);
   assert.match(decisionSource, /sessionId:\s*firstNonEmptyString\(\[recoveredProfile\?\.sessionId,\s*harvest\?\.sessionId\]\)/);
   assert.match(decisionSource, /profileKey:\s*firstNonEmptyString\(\[recoveredProfile\?\.profileKey,\s*harvest\?\.profileKey\]\)/);
   assert.match(helperSource, /const sessionIdentifier = resolveRestV2InteractiveDocsHeaderValueFromContext\([\s\S]*?"AP-Session-Identifier"/);
-  assert.match(decisionSource, /Retrying decision check against recovered session context with required REST V2 headers\./);
+  assert.match(decisionSource, /Retrying decision check against recovered session context with the original REST V2 headers plus the recovered session identifier\./);
   assert.match(contextSource, /sessionId:\s*String\(firstNonEmptyString\(\[harvest\.sessionId\]\) \|\| ""\)\.trim\(\)/);
+});
+
+test("REST V2 decision requests keep optional auth headers when suppression is disabled", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const helperSource = extractFunctionSource(popupSource, "buildRestV2DecisionRequestHeaders");
+  const sandbox = {
+    module: { exports: {} },
+    exports: {},
+    buildRestV2Headers: (_serviceProviderId, extraHeaders = {}) => ({
+      "AP-Device-Identifier": "device-from-builder",
+      "X-Device-Info": "info-from-builder",
+      ...extraHeaders,
+    }),
+    isRestV2LikelyPartnerSsoContext: () => false,
+    normalizeRestV2PartnerFrameworkStatusForRequest: (value) => String(value || "").trim(),
+    resolveRestV2ExactPartnerFrameworkStatusForContext: (context) => String(context?.partnerFrameworkStatus || "").trim(),
+    resolveRestV2InteractiveDocsHeaderValueFromContext: (context, headerName) =>
+      context?.headers && typeof context.headers === "object" ? String(context.headers[headerName] || "").trim() : "",
+  };
+
+  vm.runInNewContext(`${helperSource}\nmodule.exports = { buildRestV2DecisionRequestHeaders };`, sandbox);
+  const { buildRestV2DecisionRequestHeaders } = sandbox.module.exports;
+
+  const decisionRequest = buildRestV2DecisionRequestHeaders("MLB_NETWORK", {
+    headers: {
+      "AP-Session-Identifier": "session-123",
+      "AP-Device-Identifier": "device-123",
+      "X-Device-Info": "device-info-123",
+      "Adobe-Subject-Token": "subject-token-123",
+      "AD-Service-Token": "service-token-123",
+      "AP-Temppass-Identity": "temp-pass-123",
+      "AP-Visitor-Identifier": "visitor-123",
+    },
+  });
+
+  assert.equal(decisionRequest.suppressOptionalAuthHeaders, false);
+  assert.equal(decisionRequest.requestHeaders["AP-Session-Identifier"], "session-123");
+  assert.equal(decisionRequest.requestHeaders["Adobe-Subject-Token"], "subject-token-123");
+  assert.equal(decisionRequest.requestHeaders["AD-Service-Token"], "service-token-123");
+  assert.equal(decisionRequest.requestHeaders["AP-Temppass-Identity"], "temp-pass-123");
+  assert.equal(decisionRequest.requestHeaders["AP-Visitor-Identifier"], "visitor-123");
 });

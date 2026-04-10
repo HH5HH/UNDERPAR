@@ -21096,7 +21096,7 @@ async function fetchRestV2DecisionCheck(
           result.error = [
             result.error,
             ` Profile recovered via /profiles/code (${recovery.profileCount} profile${recovery.profileCount !== 1 ? "s" : ""}). `,
-            "Retrying decision check against recovered session context with required REST V2 headers.",
+            "Retrying decision check against recovered session context with the original REST V2 headers plus the recovered session identifier.",
           ].join("");
 
           emitRestV2DebugEvent(flowId, {
@@ -21154,13 +21154,13 @@ async function fetchRestV2DecisionCheck(
               retryServiceProviderId: String(retryHarvest.serviceProviderId || ""),
               retryAppGuid: String(retryHarvest.appGuid || ""),
               retrySessionId: String(retryHarvest.sessionId || ""),
-              suppressOptionalAuthHeaders: true,
+              suppressOptionalAuthHeaders: false,
             });
 
             try {
               const retryResult = await fetchRestV2DecisionCheck(retryHarvest, resourceIds, decisionMode, {
                 allowProfileRecoveryRetry: false,
-                suppressOptionalAuthHeaders: true,
+                suppressOptionalAuthHeaders: false,
               });
               retryResult.profileRecovery = recovery;
               retryResult.profileRecoveryRetried = true;
