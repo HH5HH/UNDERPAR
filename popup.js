@@ -6609,8 +6609,24 @@ function extractPassVaultPrimaryRequestorHintFromAppData(appData = null, softwar
 function sanitizePassVaultMatchedTenants(value = []) {
   return (Array.isArray(value) ? value : [])
     .map((entry) => {
-      const consoleId = firstNonEmptyString([entry?.consoleId, entry?.id, entry?.tenantId, entry?.orgId]);
-      const tenantId = firstNonEmptyString([entry?.tenantId, entry?.orgId, entry?.id, entry?.consoleId]);
+      const consoleId = firstNonEmptyString([
+        entry?.consoleId,
+        entry?.consoleOwnerId,
+        entry?.ownerId,
+        entry?.orgId,
+        entry?.org_id,
+        entry?.id,
+        entry?.tenantId,
+      ]);
+      const tenantId = firstNonEmptyString([
+        entry?.tenantId,
+        entry?.orgId,
+        entry?.org_id,
+        entry?.ownerId,
+        entry?.consoleOwnerId,
+        entry?.id,
+        entry?.consoleId,
+      ]);
       const tenantName = firstNonEmptyString([entry?.tenantName, entry?.displayName, entry?.name, entry?.label]);
       const sourceUrl = firstNonEmptyString([entry?.sourceUrl]);
       if (!consoleId && !tenantId && !tenantName) {
@@ -94019,11 +94035,33 @@ function normalizeCmTenantRecord(item, index = 0, sourceUrl = "") {
   }
   const links = uniqueSorted(collectCmUrlsFromValue(item).concat(sourceUrl ? [sourceUrl] : []));
   const tenantIdFromLink = firstNonEmptyString(links.map((url) => extractCmTenantIdFromUrl(url)));
-  const consoleId = firstNonEmptyString([item.consoleId, payload?.consoleId, payload?.console_id]);
+  const consoleId = firstNonEmptyString([
+    item.consoleId,
+    payload?.consoleId,
+    payload?.console_id,
+    item.consoleOwnerId,
+    payload?.consoleOwnerId,
+    payload?.console_owner_id,
+    item.ownerId,
+    payload?.ownerId,
+    item.orgId,
+    item.org_id,
+    payload?.orgId,
+    payload?.org_id,
+  ]);
   const tenantId = firstNonEmptyString([
     consoleId,
     item.tenantId,
     item.tenant_id,
+    item.consoleOwnerId,
+    payload?.consoleOwnerId,
+    payload?.console_owner_id,
+    item.ownerId,
+    payload?.ownerId,
+    item.orgId,
+    item.org_id,
+    payload?.orgId,
+    payload?.org_id,
     item.id,
     item.uuid,
     item.slug,
@@ -94556,6 +94594,15 @@ function collectCmTenantConsoleIdKeys(tenant) {
     tenant?.raw?.consoleId,
     tenant?.raw?.payload?.consoleId,
     tenant?.raw?.payload?.console_id,
+    tenant?.raw?.consoleOwnerId,
+    tenant?.raw?.payload?.consoleOwnerId,
+    tenant?.raw?.payload?.console_owner_id,
+    tenant?.raw?.ownerId,
+    tenant?.raw?.payload?.ownerId,
+    tenant?.raw?.orgId,
+    tenant?.raw?.org_id,
+    tenant?.raw?.payload?.orgId,
+    tenant?.raw?.payload?.org_id,
     tenant?.tenantId,
   ]);
   const normalized = normalizeCmConsoleKey(consoleId);
@@ -94578,6 +94625,15 @@ function collectCmTenantIdKeys(tenant) {
     tenant?.raw?.consoleId,
     tenant?.raw?.payload?.consoleId,
     tenant?.raw?.payload?.console_id,
+    tenant?.raw?.consoleOwnerId,
+    tenant?.raw?.payload?.consoleOwnerId,
+    tenant?.raw?.payload?.console_owner_id,
+    tenant?.raw?.ownerId,
+    tenant?.raw?.payload?.ownerId,
+    tenant?.raw?.orgId,
+    tenant?.raw?.org_id,
+    tenant?.raw?.payload?.orgId,
+    tenant?.raw?.payload?.org_id,
     tenant?.tenantId,
   ]);
 }
