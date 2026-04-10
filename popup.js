@@ -85690,18 +85690,13 @@ function renderAvatarMenu() {
   const principalId = getLoginPrincipalId(state.loginData) || "No principal available";
   const activeOrganization = getLoginActiveOrganization(state.loginData);
   const adobePassWorkflowActive = shouldHydrateAdobePassWorkflowForSession(state.loginData);
-  const avatarMenuUrl = getSafeAvatarRenderUrl(state.loginData);
-  const hasResolvedImsAvatar =
-    Boolean(avatarMenuUrl) &&
-    avatarMenuUrl !== FALLBACK_AVATAR &&
-    (avatarMenuUrl.startsWith("data:image/") || avatarMenuUrl.startsWith("blob:") || /^https:\/\//i.test(avatarMenuUrl));
-
-  els.avatarMenuImage.style.backgroundImage = hasResolvedImsAvatar ? `url("${avatarMenuUrl.replace(/"/g, '\\"')}")` : "";
+  els.avatarMenuImage.hidden = true;
+  els.avatarMenuImage.style.backgroundImage = "";
   els.avatarMenuImage.classList.remove("avatar-loading");
   els.avatarMenuImage.classList.add("avatar-ready");
   els.avatarMenuImage.setAttribute("role", "img");
-  els.avatarMenuImage.setAttribute("aria-hidden", "false");
-  els.avatarMenuImage.setAttribute("aria-label", hasResolvedImsAvatar ? "Adobe IMS profile image" : "UnderPAR account badge");
+  els.avatarMenuImage.setAttribute("aria-hidden", "true");
+  els.avatarMenuImage.setAttribute("aria-label", "");
   els.avatarMenuName.textContent = name;
   els.avatarMenuName.href = buildExperienceOrgUrl(activeOrganization);
   els.avatarMenuName.title = buildExperienceOrgTitle(activeOrganization);
@@ -94867,7 +94862,33 @@ function findCmTenantMatchesForProgrammer(programmer, tenants) {
     }
     return false;
   });
-  return finalizeCmTenantMatches(consoleMatches, "console");
+  if (consoleMatches.length > 0) {
+    return finalizeCmTenantMatches(consoleMatches, "console");
+  }
+
+  const fuzzyConsoleMatches = (Array.isArray(tenants) ? tenants : []).filter((tenant) => {
+    const tenantConsoleKeys = collectCmTenantConsoleKeys(tenant);
+    if (tenantConsoleKeys.length === 0) {
+      return false;
+    }
+    for (const rawProgrammerKey of programmerConsoleKeys) {
+      const programmerKey = normalizeCmConsoleKey(rawProgrammerKey);
+      if (!programmerKey || programmerKey.length < 3) {
+        continue;
+      }
+      for (const rawTenantKey of tenantConsoleKeys) {
+        const tenantKey = normalizeCmConsoleKey(rawTenantKey);
+        if (!tenantKey || tenantKey.length < 3) {
+          continue;
+        }
+        if (tenantKey.startsWith(programmerKey) || programmerKey.startsWith(tenantKey)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+  return finalizeCmTenantMatches(fuzzyConsoleMatches, "console-fuzzy");
 }
 
 function findCmTenantMatchesForMvpd(mvpdId = "", mvpdName = "", tenants = [], options = {}) {

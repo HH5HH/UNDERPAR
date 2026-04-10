@@ -115,3 +115,34 @@ test("findCmTenantMatchesForProgrammer uses console-key fallback for Fox -> FoxS
   assert.equal(matches[0].tenantId, "FoxSports");
   assert.equal(matches[0].matchPass, "console");
 });
+
+test("findCmTenantMatchesForProgrammer uses fuzzy console-key fallback for Fox -> FoxSportsEast", () => {
+  const helpers = loadMatcherHelpers();
+  const tenants = [
+    {
+      tenantId: "FoxSportsEast",
+      tenantName: "Bally East",
+      aliases: ["BALLYEAST"],
+      raw: {
+        consoleId: "FoxSportsEast",
+        payload: {
+          name: "Bally East",
+          ownerId: "FoxSportsEast",
+        },
+      },
+    },
+  ];
+
+  const matches = helpers.findCmTenantMatchesForProgrammer(
+    {
+      programmerId: "Fox",
+      programmerName: "Fox",
+      mediaCompanyName: "Fox",
+    },
+    tenants
+  );
+
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].tenantId, "FoxSportsEast");
+  assert.equal(matches[0].matchPass, "console-fuzzy");
+});
