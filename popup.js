@@ -632,6 +632,7 @@ const PREMIUM_AUTO_REFRESH_TOKEN_LEEWAY_MS = 2 * 60 * 1000;
 const PREMIUM_APPLICATIONS_FETCH_TIMEOUT_MS = 2500;
 const PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS = 8000;
 const REST_V2_MVPD_HYDRATION_WAIT_TIMEOUT_MS = 750;
+const HEALTH_WORKSPACE_PREMIUM_HYDRATION_WAIT_TIMEOUT_MS = 750;
 const REST_V2_MVPD_CONFIGURATION_TIMEOUT_MS = 15000;
 const UP_DEVTOOLS_MVPD_WORKSPACE_PENDING_TTL_MS = 10 * 1000;
 const DEGRADATION_CHEAT_SHEET_FAST_AUTH_TIMEOUT_MS = 1200;
@@ -28015,23 +28016,42 @@ async function ensureHealthWorkspacePremiumContext(programmerId = "", options = 
     };
   }
 
+  const controllerReason = String(options?.controllerReason || "health-workspace").trim() || "health-workspace";
   let snapshot = getHealthWorkspacePremiumContextSnapshot(normalizedProgrammerId);
   const hydrationPromise = getProgrammerServiceHydrationPromise(normalizedProgrammerId);
+  let shouldPrimeHydration = !hydrationPromise;
   if (hydrationPromise) {
-    const hydratedServices = await hydrationPromise.catch(() => snapshot.services || null);
-    snapshot = getHealthWorkspacePremiumContextSnapshot(normalizedProgrammerId);
-    if (!snapshot.services && hydratedServices && typeof hydratedServices === "object") {
-      snapshot.services = hydratedServices;
-      snapshot.esmAvailable = hasEsmScopedApp(hydratedServices);
-      snapshot.hydrationReady = isProgrammerHrContextHydrationReady(normalizedProgrammerId, hydratedServices);
+    try {
+      const hydratedServices = await withPromiseTimeout(
+        hydrationPromise.catch(() => snapshot.services || null),
+        HEALTH_WORKSPACE_PREMIUM_HYDRATION_WAIT_TIMEOUT_MS,
+        `Timed out waiting for hydration for ${normalizedProgrammerId}.`
+      );
+      snapshot = getHealthWorkspacePremiumContextSnapshot(normalizedProgrammerId);
+      if ((!snapshot.services || !snapshot.hydrationReady) && hydratedServices && typeof hydratedServices === "object") {
+        snapshot.services = hydratedServices;
+        snapshot.esmAvailable = hasEsmScopedApp(hydratedServices);
+        snapshot.hydrationReady = isProgrammerHrContextHydrationReady(normalizedProgrammerId, hydratedServices);
+      }
+    } catch (hydrationWaitError) {
+      shouldPrimeHydration = true;
+      if (getProgrammerServiceHydrationPromise(normalizedProgrammerId) === hydrationPromise) {
+        setProgrammerServiceHydrationPromise(normalizedProgrammerId, null);
+      }
+      log("HEALTH workspace bypassed stale hydration promise.", {
+        programmerId: normalizedProgrammerId,
+        controllerReason,
+        reason: hydrationWaitError instanceof Error ? hydrationWaitError.message : String(hydrationWaitError),
+      });
     }
-  } else if (!snapshot.services || !snapshot.hydrationReady || (options?.forceRefresh === true && programmer)) {
+  }
+  if (shouldPrimeHydration || !snapshot.services || !snapshot.hydrationReady || (options?.forceRefresh === true && programmer)) {
     const hydratedServices = await primeProgrammerServiceHydration(
       programmer,
       snapshot.services || getRuntimePremiumServicesSeed(normalizedProgrammerId) || null,
       {
         forceRefresh: options?.forceRefresh === true,
-        controllerReason: String(options?.controllerReason || "health-workspace").trim() || "health-workspace",
+        controllerReason,
         requestToken: Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0)),
         renderOnReady: false,
       }
