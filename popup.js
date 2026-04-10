@@ -97846,12 +97846,12 @@ function hasResolvedCmResourcePayload(resource = null) {
     return false;
   }
   if (String(resource.error || "").trim()) {
-    return true;
-  }
-  if (String(resource.url || "").trim() || String(resource.lastModified || "").trim()) {
-    return true;
+    return false;
   }
   if (resource.payload != null) {
+    return true;
+  }
+  if (Array.isArray(resource.rows) && resource.rows.length > 0) {
     return true;
   }
   return false;
