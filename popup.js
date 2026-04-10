@@ -88105,17 +88105,33 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
     syncMediaCompanySelectAvailability();
 
     try {
-      const cmContext = await buildCmContext(state.loginData, normalizedReason, {
-        preferredTabId: preferredCmBootstrapTabId,
-        allowTemporaryTab: effectiveAllowTemporaryPageContextTab,
-      });
+      const precheckTimeoutMs = Math.max(4000, Number(PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS || 0));
+      const cmContext = await settlePromiseWithin(
+        buildCmContext(state.loginData, normalizedReason, {
+          preferredTabId: preferredCmBootstrapTabId,
+          allowTemporaryTab: effectiveAllowTemporaryPageContextTab,
+        }),
+        precheckTimeoutMs,
+        null
+      );
+      if (!cmContext || typeof cmContext !== "object") {
+        throw new Error(`CM precheck timed out while hydrating context (${precheckTimeoutMs}ms).`);
+      }
+      const contextCatalog = buildCmTenantsCatalogFromContext(cmContext, state.cmTenantsCatalog);
       const catalog =
-        buildCmTenantsCatalogFromContext(cmContext, state.cmTenantsCatalog) ||
-        (await ensureCmTenantsCatalog({
-          forceRefresh,
-          allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
-          preferredCmBootstrapTabId,
-        }));
+        contextCatalog ||
+        (await settlePromiseWithin(
+          ensureCmTenantsCatalog({
+            forceRefresh,
+            allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
+            preferredCmBootstrapTabId,
+          }),
+          precheckTimeoutMs,
+          null
+        ));
+      if (!catalog || typeof catalog !== "object") {
+        throw new Error(`CM precheck timed out while loading tenant catalog (${precheckTimeoutMs}ms).`);
+      }
       if (!hasCmTenantsCatalogEntries(catalog)) {
         throw new Error("CM tenants load failed: tenant catalog returned no tenants.");
       }
@@ -95640,10 +95656,11 @@ async function resolveQualifiedCmConsoleAccessToken(session = null, previousToke
   throw lastError || new Error("UnderPAR could not auto-hydrate a cm-console-ui bearer from the current Adobe IMS session.");
 }
 
-async function fetchPrimetimeJson({ baseUrl, path, accessToken, queryParams = {} }) {
+async function fetchPrimetimeJson({ baseUrl, path, accessToken, queryParams = {}, timeoutMs = PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS }) {
   const normalizedBaseUrl = String(baseUrl || "").trim();
   const normalizedPath = String(path || "").trim();
   const bearerToken = String(accessToken || "").trim();
+  const requestTimeoutMs = Math.max(1000, Number(timeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS));
   if (!normalizedBaseUrl || !normalizedPath || !bearerToken) {
     throw new Error("CM request is missing required context.");
   }
@@ -95652,12 +95669,16 @@ async function fetchPrimetimeJson({ baseUrl, path, accessToken, queryParams = {}
 
   let response;
   try {
-    response = await fetch(url.toString(), {
-      method: "GET",
-      mode: "cors",
-      credentials: "include",
-      headers: buildPrimetimeRequestHeaders(bearerToken),
-    });
+    response = await fetchWithAbortTimeout(
+      url.toString(),
+      {
+        method: "GET",
+        mode: "cors",
+        credentials: "include",
+        headers: buildPrimetimeRequestHeaders(bearerToken),
+      },
+      requestTimeoutMs
+    );
   } catch (error) {
     throw new Error(`Unable to reach ${url.pathname}: ${serializeError(error)}`);
   }
@@ -95675,10 +95696,11 @@ async function fetchPrimetimeJson({ baseUrl, path, accessToken, queryParams = {}
   };
 }
 
-async function fetchCmuReportJson({ baseUrl, path, accessToken, queryParams = {} }) {
+async function fetchCmuReportJson({ baseUrl, path, accessToken, queryParams = {}, timeoutMs = PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS }) {
   const normalizedBaseUrl = String(baseUrl || "").trim();
   const normalizedPath = String(path || "").trim();
   const bearerToken = normalizeBearerTokenValue(accessToken);
+  const requestTimeoutMs = Math.max(1000, Number(timeoutMs || PREMIUM_APPLICATION_DETAIL_TIMEOUT_MS));
   if (!normalizedBaseUrl || !normalizedPath || !bearerToken) {
     throw new Error("CMU report request is missing required context.");
   }
@@ -95687,14 +95709,18 @@ async function fetchCmuReportJson({ baseUrl, path, accessToken, queryParams = {}
 
   let response;
   try {
-    response = await fetch(url.toString(), {
-      method: "GET",
-      mode: "cors",
-      credentials: "include",
-      referrer: CM_REPORTS_APP_REFERER,
-      referrerPolicy: "strict-origin-when-cross-origin",
-      headers: buildCmuReportRequestHeaders(bearerToken),
-    });
+    response = await fetchWithAbortTimeout(
+      url.toString(),
+      {
+        method: "GET",
+        mode: "cors",
+        credentials: "include",
+        referrer: CM_REPORTS_APP_REFERER,
+        referrerPolicy: "strict-origin-when-cross-origin",
+        headers: buildCmuReportRequestHeaders(bearerToken),
+      },
+      requestTimeoutMs
+    );
   } catch (error) {
     throw new Error(`Unable to reach ${url.pathname}: ${serializeError(error)}`);
   }
