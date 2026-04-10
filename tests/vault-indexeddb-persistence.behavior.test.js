@@ -81,6 +81,18 @@ test("CM tenant catalog persistence keeps only lightweight tenant metadata", () 
   assert.doesNotMatch(persistSource, /raw:/);
 });
 
+test("manual sign-out hold writes preserve ZIP.KEY globals while dropping PASS vault payloads", () => {
+  const popupSource = read("popup.js");
+  const helperSource = extractFunctionSource(popupSource, "buildManualSignOutHoldVaultPayload");
+  const persistSource = extractFunctionSource(popupSource, "persistPassVaultPayloadToStorage");
+
+  assert.match(helperSource, /setUnderparVaultSavedQueries\(preserved, getUnderparVaultSavedQueries\(source\)\);/);
+  assert.match(helperSource, /setUnderparVaultImsRuntimeConfig\(preserved, getUnderparVaultImsRuntimeConfigInput\(source\)\);/);
+  assert.match(helperSource, /setUnderparVaultSlacktivationRecord\(preserved, getUnderparVaultSlacktivationInput\(source\)\);/);
+  assert.doesNotMatch(helperSource, /cmImsByEnvironment/);
+  assert.match(persistSource, /buildManualSignOutHoldVaultPayload\(vault \|\| state\.passVault \|\| null\)/);
+});
+
 test("devtools, saved-query bridge, and background use the shared IndexedDB vault store", () => {
   const panelSource = read("up-devtools-panel.js");
   const bridgeSource = read("saved-query-bridge.js");

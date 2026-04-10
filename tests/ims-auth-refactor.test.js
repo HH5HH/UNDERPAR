@@ -4487,6 +4487,20 @@ test("logged-out workflow reset preserves imported ZIP.KEY IMS config unless the
   assert.match(purgeSource, /preservePassVault: false,/);
 });
 
+test("manual sign-out suppresses late CM programmer hydration follow-up work", () => {
+  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
+  const compileSource = extractFunctionSource(popupSource, "queuePassVaultProgrammerCompilation");
+  const ensureSource = extractFunctionSource(popupSource, "ensureCmHydratedForProgrammer");
+
+  assert.match(compileSource, /const canQueueCmHydration =[\s\S]*state\.manualSignOutHold !== true/);
+  assert.match(compileSource, /state\.sessionReady === true/);
+  assert.match(compileSource, /if \(canQueueCmHydration\) \{/);
+  assert.match(compileSource, /state\.manualSignOutHold === true\s*\|\|\s*state\.sessionReady !== true\s*\|\|\s*state\.restricted === true/);
+  assert.match(ensureSource, /const hasActiveImsSession =[\s\S]*state\.manualSignOutHold !== true/);
+  assert.match(ensureSource, /state\.sessionReady === true/);
+  assert.match(ensureSource, /error: "Adobe IMS session is unavailable\."/);
+});
+
 test("build label renders immediately from the manifest version with a placeholder fallback", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const popupHtml = fs.readFileSync(path.join(ROOT, "popup.html"), "utf8");

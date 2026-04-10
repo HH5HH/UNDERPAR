@@ -8204,11 +8204,24 @@ function buildPassVaultApplicationRecord(programmerId = "", guid = "", appData =
   };
 }
 
+function buildManualSignOutHoldVaultPayload(vault = null) {
+  const source = normalizeUnderparVaultPayload(vault || state.passVault || createEmptyUnderparVaultPayload());
+  const preserved = createEmptyUnderparVaultPayload();
+  setUnderparVaultSavedQueries(preserved, getUnderparVaultSavedQueries(source));
+  setUnderparVaultImsRuntimeConfig(preserved, getUnderparVaultImsRuntimeConfigInput(source));
+  setUnderparVaultSlacktivationRecord(preserved, getUnderparVaultSlacktivationInput(source));
+  preserved.updatedAt = Date.now();
+  return preserved;
+}
+
 async function persistPassVaultPayloadToStorage(vault = null, options = {}) {
   const forceEmptyVaultDuringManualSignOutHold =
     state.manualSignOutHold === true && options?.allowDuringManualSignOut !== true;
+  const manualSignOutHoldVault = forceEmptyVaultDuringManualSignOutHold
+    ? buildManualSignOutHoldVaultPayload(vault || state.passVault || null)
+    : null;
   const persistableVault = normalizeUnderparVaultPayload(
-    forceEmptyVaultDuringManualSignOutHold ? createEmptyUnderparVaultPayload() : vault || createEmptyUnderparVaultPayload()
+    manualSignOutHoldVault || vault || createEmptyUnderparVaultPayload()
   );
   state.passVault = persistableVault;
   state.passVaultLoaded = true;
@@ -11396,49 +11409,65 @@ async function queuePassVaultProgrammerCompilation(programmer, services = null, 
       });
     }
     applyMediaCompanyOptionHydrationState();
-    void ensureCmHydratedForProgrammer(programmer, persistedServices, {
-      forceRefresh,
-      reason: "pass-vault-compilation",
-    })
-      .then(async (cmHydration) => {
-        const nextServices =
-          cmHydration?.services && typeof cmHydration.services === "object"
-            ? cmHydration.services
-            : mergeProgrammerPremiumServicesWithCm(
-                programmer.programmerId,
-                persistedServices,
-                cmHydration?.cmService ?? persistedServices?.cm ?? null
-              );
-        let renderServices = nextServices;
-        const nextRecord = await persistPassVaultProgrammerRecord(programmer, nextServices, {
-          source: "live",
-          hydrationStatus,
-          serviceCredentialResults: credentialResults,
-        }).catch(() => null);
-        if (
-          nextRecord &&
-          applyPassVaultRecordToRuntime(programmer, nextRecord, {
-            forceOverwrite: true,
-            forceDcrRestore: true,
-          })
-        ) {
-          renderServices =
-            getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
-            buildPassVaultRuntimeServicesSnapshot(nextRecord) ||
-            nextServices;
-        } else {
-          setCurrentPremiumAppsSnapshot(programmer.programmerId, nextServices);
-        }
-        if (String(resolveSelectedProgrammer()?.programmerId || "").trim() === programmerId) {
-          if (isProgrammerPremiumInteractionReady(programmer.programmerId, renderServices)) {
-            renderPremiumServices(renderServices, programmer, {
-              controllerReason: "pass-vault-compilation",
-            });
-          }
-          emitPremiumServiceDecisionLogs(programmer, renderServices);
-        }
+    const canQueueCmHydration =
+      state.manualSignOutHold !== true &&
+      state.sessionReady === true &&
+      state.restricted !== true &&
+      Boolean(normalizeBearerTokenValue(state.loginData?.accessToken || ""));
+    if (canQueueCmHydration) {
+      void ensureCmHydratedForProgrammer(programmer, persistedServices, {
+        forceRefresh,
+        reason: "pass-vault-compilation",
       })
-      .catch(() => {});
+        .then(async (cmHydration) => {
+          if (
+            state.manualSignOutHold === true ||
+            state.sessionReady !== true ||
+            state.restricted === true ||
+            !normalizeBearerTokenValue(state.loginData?.accessToken || "")
+          ) {
+            return;
+          }
+
+          const nextServices =
+            cmHydration?.services && typeof cmHydration.services === "object"
+              ? cmHydration.services
+              : mergeProgrammerPremiumServicesWithCm(
+                  programmer.programmerId,
+                  persistedServices,
+                  cmHydration?.cmService ?? persistedServices?.cm ?? null
+                );
+          let renderServices = nextServices;
+          const nextRecord = await persistPassVaultProgrammerRecord(programmer, nextServices, {
+            source: "live",
+            hydrationStatus,
+            serviceCredentialResults: credentialResults,
+          }).catch(() => null);
+          if (
+            nextRecord &&
+            applyPassVaultRecordToRuntime(programmer, nextRecord, {
+              forceOverwrite: true,
+              forceDcrRestore: true,
+            })
+          ) {
+            renderServices =
+              getCurrentPremiumAppsSnapshot(programmer.programmerId) ||
+              buildPassVaultRuntimeServicesSnapshot(nextRecord) ||
+              nextServices;
+          } else {
+            setCurrentPremiumAppsSnapshot(programmer.programmerId, nextServices);
+          }
+          if (String(resolveSelectedProgrammer()?.programmerId || "").trim() === programmerId) {
+            if (isProgrammerPremiumInteractionReady(programmer.programmerId, renderServices)) {
+              renderPremiumServices(renderServices, programmer, {
+                controllerReason: "pass-vault-compilation",
+              });
+            }
+            emitPremiumServiceDecisionLogs(programmer, renderServices);
+          }
+        })
+        .catch(() => {});
+    }
 
     return {
       services: persistedServices,
@@ -98004,6 +98033,29 @@ async function ensureCmHydratedForProgrammer(programmer, services = null, option
   }
 
   const forceRefresh = options?.forceRefresh === true;
+  const hasActiveImsSession =
+    state.manualSignOutHold !== true &&
+    state.sessionReady === true &&
+    state.restricted !== true &&
+    Boolean(normalizeBearerTokenValue(state.loginData?.accessToken || ""));
+  if (!hasActiveImsSession) {
+    const currentCmService =
+      services?.cm && typeof services.cm === "object"
+        ? services.cm
+        : state.cmServiceByProgrammerId.get(programmerId) || null;
+    const mergedServices = mergeProgrammerPremiumServicesWithCm(programmerId, services, currentCmService);
+    return {
+      ok: false,
+      skipped: true,
+      requiresHydration: false,
+      cmService: currentCmService,
+      services: mergedServices,
+      accessToken: "",
+      bundleCount: 0,
+      bundleErrors: [],
+      error: "Adobe IMS session is unavailable.",
+    };
+  }
   if (!forceRefresh && state.cmHydrationPromiseByProgrammerId.has(programmerId)) {
     return state.cmHydrationPromiseByProgrammerId.get(programmerId);
   }
