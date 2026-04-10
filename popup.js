@@ -96626,73 +96626,33 @@ async function ensureCmConsoleBootstrapSummary(options = {}) {
         return persistedSummary;
       }
     }
-    if (tenants.length === 0) {
-      const emptySummary = {
-        tenantCount: 0,
-        applicationCount: 0,
-        policyCount: 0,
-        summaryReady: true,
-        summaryVerified: true,
-        sourceUrl: String(catalog?.sourceUrl || ""),
-        fetchedAt: Date.now(),
-      };
-      state.cmConsoleBootstrapSummary = emptySummary;
-      return emptySummary;
-    }
-
-    let applicationCount = 0;
-    let policyCount = 0;
-    const errors = [];
-    const concurrency = Math.max(1, Number(CM_BOOTSTRAP_PARALLELISM) || 1);
-
-    for (let index = 0; index < tenants.length; index += concurrency) {
-      const batch = tenants.slice(index, index + concurrency);
-      const results = await Promise.all(
-        batch.map(async (tenant) => {
-          const [applicationsResult, policiesResult] = await Promise.all([
-            fetchCmTenantResource("applications", tenant),
-            fetchCmTenantResource("policies", tenant),
-          ]);
-          return {
-            tenantId: String(tenant?.tenantId || ""),
-            applicationsResult,
-            policiesResult,
-          };
-        })
-      );
-
-      results.forEach((result) => {
-        applicationCount += countCmConsoleSummaryRows("applications", result?.applicationsResult?.payload);
-        policyCount += countCmConsoleSummaryRows("policies", result?.policiesResult?.payload);
-
-        if (String(result?.applicationsResult?.error || "").trim()) {
-          errors.push(
-            `${String(result?.tenantId || "tenant")}: applications: ${String(result?.applicationsResult?.error || "").trim()}`
-          );
-        }
-        if (String(result?.policiesResult?.error || "").trim()) {
-          errors.push(`${String(result?.tenantId || "tenant")}: policies: ${String(result?.policiesResult?.error || "").trim()}`);
-        }
-      });
-    }
+    const catalogApplicationCount = Math.max(0, Number(catalog?.applicationCount || 0));
+    const catalogPolicyCount = Math.max(0, Number(catalog?.policyCount || 0));
+    const existingSummaryErrors = Array.isArray(state.cmConsoleBootstrapSummary?.errors)
+      ? state.cmConsoleBootstrapSummary.errors
+      : [];
+    const errors = existingSummaryErrors.map((value) => String(value || "").trim()).filter(Boolean).slice(0, 8);
+    const hasCounts = catalogApplicationCount > 0 || catalogPolicyCount > 0;
+    const summaryVerified = hasCounts ? catalog?.summaryVerified === true : false;
+    const summaryReady = hasCounts ? (catalog?.summaryReady === true || summaryVerified) : false;
 
     const summary = {
       tenantCount: tenants.length,
-      applicationCount,
-      policyCount,
-      summaryReady: errors.length === 0,
-      summaryVerified: true,
+      applicationCount: catalogApplicationCount,
+      policyCount: catalogPolicyCount,
+      summaryReady,
+      summaryVerified,
       sourceUrl: String(catalog?.sourceUrl || ""),
       fetchedAt: Date.now(),
-      errors: errors.slice(0, 8),
+      errors,
     };
     const nextCatalog = {
       ...catalog,
       tenantCount: tenants.length,
-      applicationCount,
-      policyCount,
-      summaryReady: summary.summaryReady === true,
-      summaryVerified: true,
+      applicationCount: catalogApplicationCount,
+      policyCount: catalogPolicyCount,
+      summaryReady,
+      summaryVerified,
       fetchedAt: Number(catalog?.fetchedAt || Date.now()),
     };
     state.cmTenantsCatalog = nextCatalog;
