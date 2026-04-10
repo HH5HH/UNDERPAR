@@ -88864,7 +88864,9 @@ async function refreshProgrammerPanels(options = {}) {
       ? updateSelectionServicesSnapshot(provisionalServices, cachedCmService, cachedCmMvpdService)
       : null;
   const reusableServices =
-    provisionalUiServices && !shouldForceLivePassVaultProgrammerHydration(programmerId)
+    provisionalUiServices &&
+    !shouldForceLivePassVaultProgrammerHydration(programmerId) &&
+    isCmRuntimeRenderReady(provisionalUiServices?.cm)
       ? provisionalUiServices
       : null;
   if (reusableServices) {

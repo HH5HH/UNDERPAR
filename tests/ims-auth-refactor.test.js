@@ -3408,6 +3408,7 @@ test("available TempPASS credentials participate in programmer reuse readiness a
   assert.match(forceHydrationSource, /readiness\.runtimeCoverage &&[\s\S]*readiness\.credentialCoverage &&[\s\S]*readiness\.cmCoverage/);
   assert.match(premiumUiSource, /return isProgrammerPremiumUiReady\(normalizedProgrammerId,\s*services\);/);
   assert.doesNotMatch(premiumUiSource, /isPassVaultProgrammerReadyForReuse/);
+  assert.match(refreshSource, /const reusableServices =\s*[\s\S]*isCmRuntimeRenderReady\(provisionalUiServices\?\.cm\)/);
   assert.match(refreshSource, /if \(reusableServices\) \{[\s\S]*clearStatusUnlessCmTenantsPrecheckBlocked\(\);[\s\S]*renderPremiumServices\(reusableServices,/);
   assert.match(
     refreshSource,
