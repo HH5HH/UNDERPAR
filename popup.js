@@ -258,9 +258,9 @@ const PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY = {
     "https://experienceleague.adobe.com/en/docs/pass/authentication/integration-guide-programmers/features-premium/esm/entitlement-service-monitoring-api",
   resetTempPass:
     "https://experienceleague.adobe.com/en/docs/pass/authentication/integration-guide-programmers/features-premium/temporary-access/temp-pass-feature",
-  restV2: "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/",
+  restV2: "https://developer.adobe.com/adobe-pass/api/rest-api-v2/interactive/",
 };
-const DCR_API_DOCUMENTATION_URL = "https://developer.adobe.com/adobe-pass/api/dcr_api/interactive/";
+const DCR_API_DOCUMENTATION_URL = "https://developer.adobe.com/adobe-pass/api/dcr-api/interactive/";
 const HR_CONTEXT_SECTION_DISPLAY_ORDER = ["health", "learning", "harpo"];
 const HR_CONTEXT_SECTION_TITLE_BY_KEY = {
   health: "HEALTH",
@@ -31336,6 +31336,7 @@ async function closeRestV2LoginAndReturn(section, options = {}) {
 async function waitForTabCompletion(tabId, timeoutMs = REST_V2_LOGOUT_NAVIGATION_TIMEOUT_MS, options = {}) {
   const normalizedTabId = Number(tabId || 0);
   const expectedUrl = String(options?.expectedUrl || "").trim();
+  const normalizedExpectedUrl = normalizeAdobeNavigationUrl(expectedUrl);
   if (!Number.isFinite(normalizedTabId) || normalizedTabId <= 0) {
     return { ok: false, reason: "invalid-tab" };
   }
@@ -31346,18 +31347,21 @@ async function waitForTabCompletion(tabId, timeoutMs = REST_V2_LOGOUT_NAVIGATION
     let sawNavigationSignal = false;
 
     const matchesExpectedUrl = (candidateUrl) => {
-      if (!expectedUrl) {
+      if (!normalizedExpectedUrl) {
         return true;
       }
-      const normalizedCandidateUrl = String(candidateUrl || "").trim();
+      const normalizedCandidateUrl = normalizeAdobeNavigationUrl(candidateUrl);
       if (!normalizedCandidateUrl) {
         return false;
       }
-      if (normalizedCandidateUrl === expectedUrl || normalizedCandidateUrl.startsWith(expectedUrl)) {
+      if (
+        normalizedCandidateUrl === normalizedExpectedUrl ||
+        normalizedCandidateUrl.startsWith(normalizedExpectedUrl)
+      ) {
         return true;
       }
       try {
-        const expectedParsed = new URL(expectedUrl);
+        const expectedParsed = new URL(normalizedExpectedUrl);
         const candidateParsed = new URL(normalizedCandidateUrl);
         return candidateParsed.origin === expectedParsed.origin && candidateParsed.pathname === expectedParsed.pathname;
       } catch {
@@ -31387,7 +31391,7 @@ async function waitForTabCompletion(tabId, timeoutMs = REST_V2_LOGOUT_NAVIGATION
       }
       if (changeInfo.status === "complete") {
         const resolvedUrl = String(tab?.url || changeInfo.url || "");
-        if (expectedUrl && !sawNavigationSignal && !matchesExpectedUrl(resolvedUrl)) {
+        if (normalizedExpectedUrl && !sawNavigationSignal && !matchesExpectedUrl(resolvedUrl)) {
           return;
         }
         done({
@@ -31417,7 +31421,7 @@ async function waitForTabCompletion(tabId, timeoutMs = REST_V2_LOGOUT_NAVIGATION
         if (matchesExpectedUrl(tabUrl)) {
           sawNavigationSignal = true;
         }
-        if (tab?.status === "complete" && (!expectedUrl || matchesExpectedUrl(tabUrl))) {
+        if (tab?.status === "complete" && (!normalizedExpectedUrl || matchesExpectedUrl(tabUrl))) {
           done({
             ok: true,
             status: "already-complete",
@@ -66478,7 +66482,7 @@ function ensureBobtoolsWorkspaceTabWatcher() {
 }
 
 function isRestV2RedirectAtPostLoginTarget(url = "", redirectUrl = "") {
-  const candidate = String(url || "").trim();
+  const candidate = normalizeAdobeNavigationUrl(url);
   const configuredRedirect = normalizeAdobeNavigationUrl(redirectUrl);
   if (!candidate || !configuredRedirect) {
     return false;
@@ -77068,7 +77072,9 @@ function buildHrContextSectionBodyHtml(sectionKey, programmer = null, services =
 
 async function openPremiumServiceDocumentation(serviceKey = "", requestedUrl = "") {
   const normalizedServiceKey = String(serviceKey || "").trim();
-  const documentationUrl = String(requestedUrl || PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY[normalizedServiceKey] || "").trim();
+  const documentationUrl = normalizeAdobeNavigationUrl(
+    String(requestedUrl || PREMIUM_SERVICE_DOCUMENTATION_URL_BY_KEY[normalizedServiceKey] || "").trim()
+  );
   const serviceLabel = PREMIUM_SERVICE_TITLE_BY_KEY[normalizedServiceKey] || normalizedServiceKey || "service";
 
   if (!documentationUrl) {
@@ -99772,6 +99778,36 @@ function formatMvpdPickerLabel(mvpdId = "", metadata = null) {
   return `${displayName} (${normalizedMvpdId})`;
 }
 
+function normalizeAdobeInteractiveDocsPath(pathname = "") {
+  const rawPathname = String(pathname || "").trim();
+  if (!rawPathname) {
+    return "";
+  }
+
+  const canonicalize = (legacyPrefix, canonicalPrefix) => {
+    if (rawPathname === legacyPrefix || rawPathname.startsWith(`${legacyPrefix}/`)) {
+      return `${canonicalPrefix}${rawPathname.slice(legacyPrefix.length)}`;
+    }
+    if (rawPathname === canonicalPrefix || rawPathname.startsWith(`${canonicalPrefix}/`)) {
+      return `${canonicalPrefix}${rawPathname.slice(canonicalPrefix.length)}`;
+    }
+    return null;
+  };
+
+  const canonicalPathname =
+    canonicalize("/adobe-pass/api/rest_api_v2/interactive", "/adobe-pass/api/rest-api-v2/interactive") ||
+    canonicalize("/adobe-pass/api/dcr_api/interactive", "/adobe-pass/api/dcr-api/interactive");
+
+  if (!canonicalPathname) {
+    return rawPathname;
+  }
+
+  return canonicalPathname === "/adobe-pass/api/rest-api-v2/interactive" ||
+    canonicalPathname === "/adobe-pass/api/dcr-api/interactive"
+    ? `${canonicalPathname}/`
+    : canonicalPathname;
+}
+
 function normalizeAdobeNavigationUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -99783,6 +99819,9 @@ function normalizeAdobeNavigationUrl(value) {
     const isLocal = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
     if (isLocal && (parsed.pathname.startsWith("/api/v2/") || parsed.pathname.startsWith("/authenticate/"))) {
       return `${ADOBE_SP_BASE}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    if (String(parsed.hostname || "").trim().toLowerCase() === "developer.adobe.com") {
+      parsed.pathname = normalizeAdobeInteractiveDocsPath(parsed.pathname);
     }
     return parsed.toString();
   } catch {

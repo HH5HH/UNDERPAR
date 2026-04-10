@@ -1,4 +1,4 @@
-const HARPO_REST_V2_INTERACTIVE_BASE_URL = "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/";
+const HARPO_REST_V2_INTERACTIVE_BASE_URL = "https://developer.adobe.com/adobe-pass/api/rest-api-v2/interactive/";
 const HARPO_DCR_INTERACTIVE_BASE_URL = "https://developer.adobe.com/adobe-pass/api/dcr-api/interactive/";
 
 const HARPO_DCR_INTERACTIVE_DOC_ENTRIES = Object.freeze([

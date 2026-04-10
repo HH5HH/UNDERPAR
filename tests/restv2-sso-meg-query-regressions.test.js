@@ -1430,7 +1430,7 @@ test("sidepanel MEGSPACE saved-query runner routes saved queries through the ESM
 test("REST V2 post-login redirect matcher ignores trailing-slash drift on the landing page", () => {
   const { normalizeAdobeNavigationUrl, isRestV2RedirectAtPostLoginTarget } = loadFunctions(
     "popup.js",
-    ["normalizeAdobeNavigationUrl", "isRestV2RedirectAtPostLoginTarget"],
+    ["normalizeAdobeInteractiveDocsPath", "normalizeAdobeNavigationUrl", "isRestV2RedirectAtPostLoginTarget"],
     {
       ADOBE_SP_BASE: "https://sp.auth.adobe.com",
       URL,
@@ -1439,7 +1439,7 @@ test("REST V2 post-login redirect matcher ignores trailing-slash drift on the la
 
   assert.equal(
     isRestV2RedirectAtPostLoginTarget(
-      "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive/",
+      "https://developer.adobe.com/adobe-pass/api/rest-api-v2/interactive/",
       "https://developer.adobe.com/adobe-pass/api/rest_api_v2/interactive"
     ),
     true

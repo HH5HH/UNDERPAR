@@ -709,6 +709,7 @@ function loadRestV2HarvestContextBuilder(seed = {}) {
     "function normalizeAdobeNavigationUrl(value = '') { return String(value || '').trim(); }",
     "function collectRestV2SessionCodeCandidates(values = []) { return (Array.isArray(values) ? values : [values]).map((value) => String(value || '').trim()).filter(Boolean); }",
     "function cloneJsonLikeValue(value, fallback = null) { if (value == null) { return fallback; } try { return JSON.parse(JSON.stringify(value)); } catch { return fallback; } }",
+    "function resolveCanonicalRequestorIdForProgrammer(requestorId = '') { return String(requestorId || '').trim(); }",
     "function getRequestorScopedMvpdCache(requestorId = '') { return typeof globalThis.__seed.getRequestorScopedMvpdCache === 'function' ? globalThis.__seed.getRequestorScopedMvpdCache(requestorId) : null; }",
     "function resolveRestV2AppInfoForHarvest(harvest = null) { return typeof globalThis.__seed.resolveAppInfo === 'function' ? globalThis.__seed.resolveAppInfo(harvest) : { guid: String(harvest?.appGuid || ''), appName: String(harvest?.appName || harvest?.appGuid || '') }; }",
     extractFunctionSource(source, "buildRestV2ContextFromHarvest"),
@@ -1194,7 +1195,7 @@ test("detected service pills are wired to documentation urls for the learning fl
     popupSource,
     /https:\/\/experienceleague\.adobe\.com\/en\/docs\/pass\/authentication\/integration-guide-programmers\/features-premium\/temporary-access\/temp-pass-feature/
   );
-  assert.match(popupSource, /https:\/\/developer\.adobe\.com\/adobe-pass\/api\/rest_api_v2\/interactive\//);
+  assert.match(popupSource, /https:\/\/developer\.adobe\.com\/adobe-pass\/api\/(?:rest_api_v2|rest-api-v2)\/interactive\//);
   assert.match(popupSource, /https:\/\/streams-stage\.adobeprimetime\.com\/swagger-ui\/index\.html/);
   assert.match(popupSource, /data-service-doc-key/);
   assert.match(popupSource, /data-service-doc-url/);
