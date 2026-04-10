@@ -94797,11 +94797,33 @@ function isCmDirectTenantMatch(programmer, tenant) {
 }
 
 function findCmTenantMatchesForProgrammer(programmer, tenants) {
-  return findCmTenantMatchesByTwoPass(
+  const twoPassMatches = findCmTenantMatchesByTwoPass(
     tenants,
     collectCmProgrammerIdCandidates(programmer),
     collectCmProgrammerNameCandidates(programmer)
   );
+  if (twoPassMatches.length > 0) {
+    return twoPassMatches;
+  }
+
+  const programmerConsoleKeys = new Set(collectCmProgrammerConsoleKeys(programmer));
+  if (programmerConsoleKeys.size === 0) {
+    return [];
+  }
+
+  const consoleMatches = (Array.isArray(tenants) ? tenants : []).filter((tenant) => {
+    const tenantConsoleKeys = new Set(collectCmTenantConsoleKeys(tenant));
+    if (tenantConsoleKeys.size === 0) {
+      return false;
+    }
+    for (const key of tenantConsoleKeys) {
+      if (programmerConsoleKeys.has(normalizeCmConsoleKey(key))) {
+        return true;
+      }
+    }
+    return false;
+  });
+  return finalizeCmTenantMatches(consoleMatches, "console");
 }
 
 function findCmTenantMatchesForMvpd(mvpdId = "", mvpdName = "", tenants = [], options = {}) {
