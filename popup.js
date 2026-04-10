@@ -88148,13 +88148,18 @@ async function ensureCmTenantsPrecheckForActiveSession(reason = "session", optio
 
       let hydratedToken = normalizeBearerTokenValue(cmuTokenFromContext(cmContext));
       if (!hydratedToken || !tokenSupportsCmConsoleRequests(hydratedToken)) {
-        hydratedToken = normalizeBearerTokenValue(
-          await ensureCmApiAccessToken({
+        const ensuredCmToken = await settlePromiseWithin(
+          ensureCmApiAccessToken({
             forceRefresh,
             freshLeewayMs: 45 * 1000,
             allowTemporaryPageContextTab: effectiveAllowTemporaryPageContextTab,
             preferredCmBootstrapTabId,
-          }).catch(() => "")
+          }).catch(() => ""),
+          precheckTimeoutMs,
+          ""
+        );
+        hydratedToken = normalizeBearerTokenValue(
+          ensuredCmToken
         );
       }
       // If CMU token still unavailable, fallback to primary access token for catalog operations
