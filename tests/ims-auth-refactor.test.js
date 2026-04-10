@@ -1821,6 +1821,7 @@ test("esm health rebinds to the live controller context and resets to controller
   assert.match(runSource, /workspaceContextKey,/);
 
   assert.match(esmHealthWorkspaceSource, /function doesWorkspaceEventMatchCurrentContext\(payload = \{\}\)/);
+  assert.match(esmHealthWorkspaceSource, /function hasLiveControllerContext\(\)/);
   assert.match(applyControllerSource, /const runtimeContextChanged =/);
   assert.match(applyControllerSource, /const readinessActivated = !previousEsmHealthReady && payload\?\.esmHealthReady === true;/);
   assert.match(applyControllerSource, /const shouldAutoRefreshForControllerUpdate =/);
@@ -1829,7 +1830,8 @@ test("esm health rebinds to the live controller context and resets to controller
   assert.doesNotMatch(applyControllerSource, /preservedDates/);
   assert.match(applyControllerSource, /state\.loading = false;/);
   assert.match(applyControllerSource, /if \(shouldAutoRefreshForControllerUpdate\) \{\s*void runDashboard\("Refreshing ESM HEALTH dashboard for the selected UnderPAR context\.\.\."\);/);
-  assert.match(handleWorkspaceEventSource, /if \(\(event === "report-start" \|\| event === "report-result"\) && !doesWorkspaceEventMatchCurrentContext\(payload\)\) \{/);
+  assert.match(handleWorkspaceEventSource, /const shouldEnforceContextMatch = \(event === "report-start" \|\| event === "report-result"\) && hasLiveControllerContext\(\);/);
+  assert.match(handleWorkspaceEventSource, /if \(shouldEnforceContextMatch && !doesWorkspaceEventMatchCurrentContext\(payload\)\) \{/);
   assert.match(handleWorkspaceEventSource, /void runDashboard\("Refreshing ESM HEALTH dashboard for the selected UnderPAR context\.\.\."\);/);
   assert.match(rerunSource, /await runDashboard\("Refreshing ESM HEALTH dashboard\.\.\."\);/);
   assert.match(healthWorkspaceSource, /SPLUNK HEALTH Dashboard \|/);

@@ -919,6 +919,16 @@ function doesWorkspaceEventMatchCurrentContext(payload = {}) {
   return true;
 }
 
+function hasLiveControllerContext() {
+  return Boolean(
+    String(state.workspaceContextKey || "").trim() ||
+      String(state.selectionKey || "").trim() ||
+      String(state.programmerId || "").trim() ||
+      String(state.environmentKey || "").trim() ||
+      Math.max(0, Number(state.premiumPanelRequestToken || 0)) > 0
+  );
+}
+
 function syncQueryFromReport(payload = {}) {
   const queryContext = payload?.queryContext && typeof payload.queryContext === "object" ? payload.queryContext : null;
   if (!queryContext) {
@@ -1899,7 +1909,8 @@ function handleWorkspaceEvent(eventName, payload = {}) {
   if (!event) {
     return;
   }
-  if ((event === "report-start" || event === "report-result") && !doesWorkspaceEventMatchCurrentContext(payload)) {
+  const shouldEnforceContextMatch = (event === "report-start" || event === "report-result") && hasLiveControllerContext();
+  if (shouldEnforceContextMatch && !doesWorkspaceEventMatchCurrentContext(payload)) {
     return;
   }
   if (event === "controller-state") {

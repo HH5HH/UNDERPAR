@@ -14579,6 +14579,8 @@ const state = {
   esmHealthWorkspaceTabId: 0,
   esmHealthWorkspaceWindowId: 0,
   esmHealthWorkspaceTabIdByWindowId: new Map(),
+  esmHealthWorkspaceReadyByWindowId: new Map(),
+  esmHealthWorkspaceReadyWaitersByWindowId: new Map(),
   esmHealthWorkspaceRuntimeListenerBound: false,
   esmHealthWorkspaceTabWatcherBound: false,
   esmHealthWorkspaceLastSelectionKey: "",
@@ -14605,6 +14607,8 @@ const state = {
   healthWorkspaceTabId: 0,
   healthWorkspaceWindowId: 0,
   healthWorkspaceTabIdByWindowId: new Map(),
+  healthWorkspaceReadyByWindowId: new Map(),
+  healthWorkspaceReadyWaitersByWindowId: new Map(),
   healthWorkspaceRuntimeListenerBound: false,
   healthWorkspaceTabWatcherBound: false,
   healthWorkspaceLastSelectionKey: "",
@@ -24954,13 +24958,15 @@ async function runHealthSplunkDashboardForSelection(rawQueryContext = null, opti
   const activateWorkspace = options.activateWorkspace !== false;
   const forceLoginOnAuthFailure = options.forceLoginOnAuthFailure !== false;
   let targetWindowId = Number(options.targetWindowId || 0);
+  let workspaceTab = null;
 
   if (openWorkspace) {
-    const workspaceTab = await healthWorkspaceEnsureWorkspaceTab({
+    workspaceTab = await healthWorkspaceEnsureWorkspaceTab({
       activate: activateWorkspace,
       windowId: targetWindowId || undefined,
     });
     targetWindowId = Number(workspaceTab?.windowId || targetWindowId || state.healthWorkspaceWindowId || 0);
+    await healthWorkspaceWaitForReady(targetWindowId, Number(workspaceTab?.id || 0), 6000).catch(() => false);
   }
 
   healthWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), queryContext, targetWindowId);
@@ -28668,13 +28674,15 @@ async function runEsmHealthDashboardForSelection(rawQueryContext = null, options
   const premiumPanelRequestToken = Math.max(0, Number(options?.requestToken || state.premiumPanelRequestToken || 0));
   const workspaceContextKey = buildEsmHealthWorkspaceControllerContextKey(queryContext, premiumPanelRequestToken);
   let targetWindowId = Number(options.targetWindowId || 0);
+  let workspaceTab = null;
 
   if (openWorkspace) {
-    const workspaceTab = await esmHealthWorkspaceEnsureWorkspaceTab({
+    workspaceTab = await esmHealthWorkspaceEnsureWorkspaceTab({
       activate: activateWorkspace,
       windowId: targetWindowId || undefined,
     });
     targetWindowId = Number(workspaceTab?.windowId || targetWindowId || state.esmHealthWorkspaceWindowId || 0);
+    await esmHealthWorkspaceWaitForReady(targetWindowId, Number(workspaceTab?.id || 0), 6000).catch(() => false);
   }
 
   esmHealthWorkspaceBroadcastControllerState(resolveSelectedProgrammer(), esmHealthWorkspaceGetSelectionContext(resolveSelectedProgrammer()), targetWindowId);
@@ -62020,6 +62028,102 @@ function esmHealthWorkspaceIsWorkspaceTab(tabLike) {
   return String(tabLike?.url || "").startsWith(esmHealthWorkspaceGetWorkspaceUrl());
 }
 
+function esmHealthWorkspaceMarkReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  state.esmHealthWorkspaceReadyByWindowId.set(normalizedWindowId, {
+    tabId: normalizedTabId,
+    readyAt: Date.now(),
+  });
+  const waiters = state.esmHealthWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+  if (Array.isArray(waiters) && waiters.length > 0) {
+    state.esmHealthWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+    waiters.forEach((waiter) => {
+      try {
+        if (waiter?.timerId) {
+          clearTimeout(waiter.timerId);
+        }
+      } catch {
+        // Ignore cleanup failures.
+      }
+      try {
+        waiter?.resolve?.(true);
+      } catch {
+        // Ignore waiter resolution failures.
+      }
+    });
+  }
+}
+
+function esmHealthWorkspaceInvalidateReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  const existingReady = state.esmHealthWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!existingReady) {
+    return;
+  }
+  if (!normalizedTabId || Number(existingReady?.tabId || 0) <= 0 || Number(existingReady?.tabId || 0) === normalizedTabId) {
+    state.esmHealthWorkspaceReadyByWindowId.delete(normalizedWindowId);
+  }
+}
+
+function esmHealthWorkspaceIsReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  const readyInfo = state.esmHealthWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!readyInfo) {
+    return false;
+  }
+  if (normalizedTabId > 0 && Number(readyInfo?.tabId || 0) > 0 && Number(readyInfo.tabId) !== normalizedTabId) {
+    return false;
+  }
+  return true;
+}
+
+async function esmHealthWorkspaceWaitForReady(windowId, tabId = 0, timeoutMs = 6000) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  if (esmHealthWorkspaceIsReady(normalizedWindowId, normalizedTabId)) {
+    return true;
+  }
+  return new Promise((resolve) => {
+    const waiter = {
+      resolve,
+      timerId: setTimeout(() => {
+        const waiters = state.esmHealthWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+        if (Array.isArray(waiters)) {
+          state.esmHealthWorkspaceReadyWaitersByWindowId.set(
+            normalizedWindowId,
+            waiters.filter((entry) => entry !== waiter)
+          );
+          if ((state.esmHealthWorkspaceReadyWaitersByWindowId.get(normalizedWindowId) || []).length === 0) {
+            state.esmHealthWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+          }
+        }
+        resolve(false);
+      }, Math.max(500, Number(timeoutMs || 0) || 6000)),
+    };
+    const existingWaiters = state.esmHealthWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+    if (Array.isArray(existingWaiters)) {
+      existingWaiters.push(waiter);
+    } else {
+      state.esmHealthWorkspaceReadyWaitersByWindowId.set(normalizedWindowId, [waiter]);
+    }
+  });
+}
+
 function esmHealthWorkspaceBindWorkspaceTab(windowId, tabId) {
   const normalizedWindowId = Number(windowId || 0);
   const normalizedTabId = Number(tabId || 0);
@@ -62039,11 +62143,13 @@ function esmHealthWorkspaceUnbindWorkspaceTab(tabId) {
   if (normalizedTabId > 0) {
     for (const [windowId, mappedTabId] of state.esmHealthWorkspaceTabIdByWindowId.entries()) {
       if (Number(mappedTabId || 0) === normalizedTabId) {
+        esmHealthWorkspaceInvalidateReady(windowId, normalizedTabId);
         state.esmHealthWorkspaceTabIdByWindowId.delete(windowId);
       }
     }
   }
   if (!normalizedTabId || Number(state.esmHealthWorkspaceTabId || 0) === normalizedTabId) {
+    esmHealthWorkspaceInvalidateReady(state.esmHealthWorkspaceWindowId, normalizedTabId);
     state.esmHealthWorkspaceTabId = 0;
     state.esmHealthWorkspaceWindowId = 0;
   }
@@ -62097,6 +62203,8 @@ async function esmHealthWorkspaceEnsureWorkspaceTab(options = {}) {
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
   const useWindowFilter = targetWindowId > 0;
   let workspaceTab = null;
+  let createdWorkspaceTab = false;
+  let reusedReadyCandidate = false;
 
   const boundTabId = esmHealthWorkspaceGetBoundWorkspaceTabId(targetWindowId);
   if (boundTabId > 0) {
@@ -62104,6 +62212,7 @@ async function esmHealthWorkspaceEnsureWorkspaceTab(options = {}) {
       const existing = await chrome.tabs.get(boundTabId);
       if (esmHealthWorkspaceIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
         workspaceTab = existing;
+        reusedReadyCandidate = String(existing?.status || "").trim().toLowerCase() === "complete";
       }
     } catch {
       esmHealthWorkspaceUnbindWorkspaceTab(boundTabId);
@@ -62115,6 +62224,7 @@ async function esmHealthWorkspaceEnsureWorkspaceTab(options = {}) {
     try {
       const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
       workspaceTab = allTabs.find((tab) => esmHealthWorkspaceIsWorkspaceTab(tab)) || null;
+      reusedReadyCandidate = String(workspaceTab?.status || "").trim().toLowerCase() === "complete";
     } catch {
       workspaceTab = null;
     }
@@ -62126,6 +62236,7 @@ async function esmHealthWorkspaceEnsureWorkspaceTab(options = {}) {
       active: shouldActivate,
       ...(useWindowFilter ? { windowId: targetWindowId } : {}),
     });
+    createdWorkspaceTab = Boolean(workspaceTab?.id);
   } else if (shouldActivate && workspaceTab.id) {
     try {
       workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
@@ -62138,6 +62249,11 @@ async function esmHealthWorkspaceEnsureWorkspaceTab(options = {}) {
   }
 
   esmHealthWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  if (createdWorkspaceTab) {
+    esmHealthWorkspaceInvalidateReady(workspaceTab?.windowId, workspaceTab?.id);
+  } else if (reusedReadyCandidate || esmHealthWorkspaceIsReady(workspaceTab?.windowId, workspaceTab?.id)) {
+    esmHealthWorkspaceMarkReady(workspaceTab?.windowId, workspaceTab?.id);
+  }
   return workspaceTab;
 }
 
@@ -62254,6 +62370,7 @@ async function handleEsmHealthWorkspaceAction(message, sender = null) {
     if (senderWindowId > 0) {
       esmHealthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
     }
+    esmHealthWorkspaceMarkReady(senderWindowId || Number(state.esmHealthWorkspaceWindowId || 0), senderTabId);
     esmHealthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
     const latestReport = esmHealthWorkspaceGetLatestReport(selectionContext.controllerSelectionKey);
     if (latestReport) {
@@ -62870,6 +62987,102 @@ function healthWorkspaceIsWorkspaceTab(tabLike) {
   return String(tabLike?.url || "").startsWith(healthWorkspaceGetWorkspaceUrl());
 }
 
+function healthWorkspaceMarkReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  state.healthWorkspaceReadyByWindowId.set(normalizedWindowId, {
+    tabId: normalizedTabId,
+    readyAt: Date.now(),
+  });
+  const waiters = state.healthWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+  if (Array.isArray(waiters) && waiters.length > 0) {
+    state.healthWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+    waiters.forEach((waiter) => {
+      try {
+        if (waiter?.timerId) {
+          clearTimeout(waiter.timerId);
+        }
+      } catch {
+        // Ignore cleanup failures.
+      }
+      try {
+        waiter?.resolve?.(true);
+      } catch {
+        // Ignore waiter resolution failures.
+      }
+    });
+  }
+}
+
+function healthWorkspaceInvalidateReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return;
+  }
+  const existingReady = state.healthWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!existingReady) {
+    return;
+  }
+  if (!normalizedTabId || Number(existingReady?.tabId || 0) <= 0 || Number(existingReady?.tabId || 0) === normalizedTabId) {
+    state.healthWorkspaceReadyByWindowId.delete(normalizedWindowId);
+  }
+}
+
+function healthWorkspaceIsReady(windowId, tabId = 0) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  const readyInfo = state.healthWorkspaceReadyByWindowId.get(normalizedWindowId);
+  if (!readyInfo) {
+    return false;
+  }
+  if (normalizedTabId > 0 && Number(readyInfo?.tabId || 0) > 0 && Number(readyInfo.tabId) !== normalizedTabId) {
+    return false;
+  }
+  return true;
+}
+
+async function healthWorkspaceWaitForReady(windowId, tabId = 0, timeoutMs = 6000) {
+  const normalizedWindowId = Number(windowId || 0);
+  const normalizedTabId = Number(tabId || 0);
+  if (normalizedWindowId <= 0) {
+    return false;
+  }
+  if (healthWorkspaceIsReady(normalizedWindowId, normalizedTabId)) {
+    return true;
+  }
+  return new Promise((resolve) => {
+    const waiter = {
+      resolve,
+      timerId: setTimeout(() => {
+        const waiters = state.healthWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+        if (Array.isArray(waiters)) {
+          state.healthWorkspaceReadyWaitersByWindowId.set(
+            normalizedWindowId,
+            waiters.filter((entry) => entry !== waiter)
+          );
+          if ((state.healthWorkspaceReadyWaitersByWindowId.get(normalizedWindowId) || []).length === 0) {
+            state.healthWorkspaceReadyWaitersByWindowId.delete(normalizedWindowId);
+          }
+        }
+        resolve(false);
+      }, Math.max(500, Number(timeoutMs || 0) || 6000)),
+    };
+    const existingWaiters = state.healthWorkspaceReadyWaitersByWindowId.get(normalizedWindowId);
+    if (Array.isArray(existingWaiters)) {
+      existingWaiters.push(waiter);
+    } else {
+      state.healthWorkspaceReadyWaitersByWindowId.set(normalizedWindowId, [waiter]);
+    }
+  });
+}
+
 function healthWorkspaceBindWorkspaceTab(windowId, tabId) {
   const normalizedWindowId = Number(windowId || 0);
   const normalizedTabId = Number(tabId || 0);
@@ -62889,11 +63102,13 @@ function healthWorkspaceUnbindWorkspaceTab(tabId) {
   if (normalizedTabId > 0) {
     for (const [windowId, mappedTabId] of state.healthWorkspaceTabIdByWindowId.entries()) {
       if (Number(mappedTabId || 0) === normalizedTabId) {
+        healthWorkspaceInvalidateReady(windowId, normalizedTabId);
         state.healthWorkspaceTabIdByWindowId.delete(windowId);
       }
     }
   }
   if (!normalizedTabId || Number(state.healthWorkspaceTabId || 0) === normalizedTabId) {
+    healthWorkspaceInvalidateReady(state.healthWorkspaceWindowId, normalizedTabId);
     state.healthWorkspaceTabId = 0;
     state.healthWorkspaceWindowId = 0;
   }
@@ -62947,6 +63162,8 @@ async function healthWorkspaceEnsureWorkspaceTab(options = {}) {
   const targetWindowId = requestedWindowId > 0 ? requestedWindowId : await esmWorkspaceGetCurrentWindowId();
   const useWindowFilter = targetWindowId > 0;
   let workspaceTab = null;
+  let createdWorkspaceTab = false;
+  let reusedReadyCandidate = false;
 
   const boundTabId = healthWorkspaceGetBoundWorkspaceTabId(targetWindowId);
   if (boundTabId > 0) {
@@ -62954,6 +63171,7 @@ async function healthWorkspaceEnsureWorkspaceTab(options = {}) {
       const existing = await chrome.tabs.get(boundTabId);
       if (healthWorkspaceIsWorkspaceTab(existing) && (!useWindowFilter || Number(existing.windowId || 0) === targetWindowId)) {
         workspaceTab = existing;
+        reusedReadyCandidate = String(existing?.status || "").trim().toLowerCase() === "complete";
       }
     } catch {
       healthWorkspaceUnbindWorkspaceTab(boundTabId);
@@ -62965,6 +63183,7 @@ async function healthWorkspaceEnsureWorkspaceTab(options = {}) {
     try {
       const allTabs = await chrome.tabs.query(useWindowFilter ? { windowId: targetWindowId } : { currentWindow: true });
       workspaceTab = allTabs.find((tab) => healthWorkspaceIsWorkspaceTab(tab)) || null;
+      reusedReadyCandidate = String(workspaceTab?.status || "").trim().toLowerCase() === "complete";
     } catch {
       workspaceTab = null;
     }
@@ -62976,6 +63195,7 @@ async function healthWorkspaceEnsureWorkspaceTab(options = {}) {
       active: shouldActivate,
       ...(useWindowFilter ? { windowId: targetWindowId } : {}),
     });
+    createdWorkspaceTab = Boolean(workspaceTab?.id);
   } else if (shouldActivate && workspaceTab.id) {
     try {
       workspaceTab = await chrome.tabs.update(workspaceTab.id, { active: true });
@@ -62988,6 +63208,11 @@ async function healthWorkspaceEnsureWorkspaceTab(options = {}) {
   }
 
   healthWorkspaceBindWorkspaceTab(workspaceTab?.windowId, workspaceTab?.id);
+  if (createdWorkspaceTab) {
+    healthWorkspaceInvalidateReady(workspaceTab?.windowId, workspaceTab?.id);
+  } else if (reusedReadyCandidate || healthWorkspaceIsReady(workspaceTab?.windowId, workspaceTab?.id)) {
+    healthWorkspaceMarkReady(workspaceTab?.windowId, workspaceTab?.id);
+  }
   return workspaceTab;
 }
 
@@ -63081,6 +63306,7 @@ async function handleHealthWorkspaceAction(message, sender = null) {
     if (senderWindowId > 0) {
       healthWorkspaceBindWorkspaceTab(senderWindowId, senderTabId);
     }
+    healthWorkspaceMarkReady(senderWindowId || Number(state.healthWorkspaceWindowId || 0), senderTabId);
     healthWorkspaceBroadcastControllerState(selectedProgrammer, selectionContext, senderWindowId);
     const latestReport = healthWorkspaceGetLatestReport(selectionContext.selectionKey);
     if (latestReport) {
@@ -78389,6 +78615,8 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.esmHealthWorkspaceTabId = 0;
   state.esmHealthWorkspaceWindowId = 0;
   state.esmHealthWorkspaceTabIdByWindowId.clear();
+  state.esmHealthWorkspaceReadyByWindowId.clear();
+  state.esmHealthWorkspaceReadyWaitersByWindowId.clear();
   state.esmHealthWorkspaceLastSelectionKey = "";
   state.esmHealthWorkspaceLastReportBySelectionKey.clear();
   state.esmHealthWorkspaceLastQueryContextBySelectionKey.clear();
@@ -78407,6 +78635,8 @@ function resetWorkflowForLoggedOut(options = {}) {
   state.healthWorkspaceTabId = 0;
   state.healthWorkspaceWindowId = 0;
   state.healthWorkspaceTabIdByWindowId.clear();
+  state.healthWorkspaceReadyByWindowId.clear();
+  state.healthWorkspaceReadyWaitersByWindowId.clear();
   state.healthWorkspaceLastSelectionKey = "";
   state.healthWorkspaceLastReportBySelectionKey.clear();
   state.healthWorkspaceLastQueryContextBySelectionKey.clear();
